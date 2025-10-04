@@ -69,23 +69,22 @@ const Chat = () => {
     }
   };
 
-  const saveMessage = async (role: "user" | "assistant", content: string) => {
-    try {
-      const { data: { user } } = await supabase.auth.getUser();
+  // Сохранение в фоне без блокировки UI
+  const saveMessage = (role: "user" | "assistant", content: string) => {
+    supabase.auth.getUser().then(({ data: { user } }) => {
       if (!user) return;
 
-      const { error } = await supabase
+      supabase
         .from('chat_messages')
         .insert({
           user_id: user.id,
           role,
           content
+        })
+        .then(({ error }) => {
+          if (error) console.error('Error saving message:', error);
         });
-
-      if (error) throw error;
-    } catch (error) {
-      console.error('Error saving message:', error);
-    }
+    });
   };
 
 
@@ -169,9 +168,9 @@ const Chat = () => {
       }
     }
     
-    // Сохраняем ответ ассистента после завершения стриминга
+    // Сохраняем ответ ассистента в фоне
     if (assistantContent) {
-      await saveMessage("assistant", assistantContent);
+      saveMessage("assistant", assistantContent);
     }
   };
 
@@ -183,7 +182,8 @@ const Chat = () => {
     setMessages(newMessages);
     setIsLoading(true);
 
-    await saveMessage("user", userMessage.content);
+    // Сохраняем в фоне без ожидания
+    saveMessage("user", userMessage.content);
 
     try {
       const recentMessages = newMessages.slice(-10);
@@ -214,12 +214,14 @@ const Chat = () => {
 
     const userMessage: Message = { role: "user", content: trimmedInput };
     const newMessages = [...messages, userMessage];
+    
+    // Мгновенное обновление UI
     setMessages(newMessages);
     setInput("");
     setIsLoading(true);
 
-    // Сохраняем сообщение пользователя
-    await saveMessage("user", userMessage.content);
+    // Сохраняем в фоне без блокировки
+    saveMessage("user", userMessage.content);
 
     try {
       // Отправляем только последние 10 сообщений для контекста
