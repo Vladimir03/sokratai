@@ -173,6 +173,36 @@ export type Database = {
           },
         ]
       }
+      user_stats: {
+        Row: {
+          created_at: string | null
+          current_streak: number
+          id: string
+          last_activity: string | null
+          level: number
+          total_xp: number
+          user_id: string
+        }
+        Insert: {
+          created_at?: string | null
+          current_streak?: number
+          id?: string
+          last_activity?: string | null
+          level?: number
+          total_xp?: number
+          user_id: string
+        }
+        Update: {
+          created_at?: string | null
+          current_streak?: number
+          id?: string
+          last_activity?: string | null
+          level?: number
+          total_xp?: number
+          user_id?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       problems_public: {
@@ -208,6 +238,10 @@ export type Database = {
           is_correct: boolean
           solution: string
         }[]
+      }
+      update_user_stats_on_solve: {
+        Args: { p_is_correct: boolean; p_user_id: string }
+        Returns: undefined
       }
     }
     Enums: {

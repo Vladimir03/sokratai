@@ -107,6 +107,12 @@ const Problems = () => {
         is_correct: isCorrect
       });
 
+      // Update user stats (XP, streak, level)
+      await supabase.rpc('update_user_stats_on_solve', {
+        p_user_id: user.id,
+        p_is_correct: isCorrect
+      });
+
       setCheckResults(prev => ({
         ...prev,
         [problemId]: {
@@ -116,7 +122,7 @@ const Problems = () => {
       }));
 
       if (isCorrect) {
-        toast.success("Правильно! +1 решённая задача");
+        toast.success("Правильно! +10 XP");
       } else {
         toast.error("Неправильно. Посмотрите решение ниже");
       }

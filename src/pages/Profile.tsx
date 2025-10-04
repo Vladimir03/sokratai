@@ -9,13 +9,17 @@ import { User, Zap, Target, Trophy, Edit } from "lucide-react";
 
 interface Profile {
   username: string;
-  xp: number;
+}
+
+interface UserStats {
+  total_xp: number;
   level: number;
-  streak: number;
+  current_streak: number;
 }
 
 const Profile = () => {
   const [profile, setProfile] = useState<Profile | null>(null);
+  const [stats, setStats] = useState<UserStats | null>(null);
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState(false);
   const [newUsername, setNewUsername] = useState("");
@@ -29,15 +33,30 @@ const Profile = () => {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
 
-      const { data, error } = await supabase
+      // Fetch profile
+      const { data: profileData, error: profileError } = await supabase
         .from("profiles")
-        .select("*")
+        .select("username")
         .eq("id", user.id)
         .single();
 
-      if (error) throw error;
-      setProfile(data);
-      setNewUsername(data.username);
+      if (profileError) throw profileError;
+
+      // Fetch user stats
+      const { data: statsData, error: statsError } = await supabase
+        .from("user_stats")
+        .select("total_xp, level, current_streak")
+        .eq("user_id", user.id)
+        .single();
+
+      if (statsError && statsError.code !== 'PGRST116') {
+        // PGRST116 means no rows found, which is ok for new users
+        throw statsError;
+      }
+
+      setProfile(profileData);
+      setStats(statsData || { total_xp: 0, level: 1, current_streak: 0 });
+      setNewUsername(profileData.username);
     } catch (error: any) {
       toast.error(error.message);
     } finally {
@@ -126,8 +145,8 @@ const Profile = () => {
                   </div>
                 </div>
                 <div className="text-right">
-                  <div className="text-4xl font-bold">Ур. {profile?.level}</div>
-                  <div className="text-sm opacity-90">{profile?.xp} XP</div>
+                  <div className="text-4xl font-bold">Ур. {stats?.level}</div>
+                  <div className="text-sm opacity-90">{stats?.total_xp} XP</div>
                 </div>
               </div>
             </CardHeader>
@@ -143,14 +162,14 @@ const Profile = () => {
                 <Zap className="w-4 h-4 text-accent" />
               </CardHeader>
               <CardContent>
-                <div className="text-3xl font-bold">{profile?.xp || 0}</div>
+                <div className="text-3xl font-bold">{stats?.total_xp || 0}</div>
                 <div className="text-xs text-muted-foreground mt-1">
-                  До следующего уровня: {1000 - (profile?.xp || 0)} XP
+                  До следующего уровня: {((stats?.level || 1) * 100) - (stats?.total_xp || 0)} XP
                 </div>
                 <div className="w-full bg-muted rounded-full h-2 mt-2">
                   <div
                     className="bg-accent h-2 rounded-full transition-all duration-500"
-                    style={{ width: `${((profile?.xp || 0) / 1000) * 100}%` }}
+                    style={{ width: `${((stats?.total_xp || 0) % 100)}%` }}
                   />
                 </div>
               </CardContent>
@@ -164,9 +183,11 @@ const Profile = () => {
                 <Target className="w-4 h-4 text-primary" />
               </CardHeader>
               <CardContent>
-                <div className="text-3xl font-bold">{profile?.streak || 0} дней</div>
+                <div className="text-3xl font-bold flex items-center gap-2">
+                  🔥 {stats?.current_streak || 0} дней
+                </div>
                 <div className="text-xs text-muted-foreground mt-1">
-                  {profile?.streak ? "Продолжайте в том же духе!" : "Начните новую серию"}
+                  {stats?.current_streak ? "Продолжайте в том же духе!" : "Начните новую серию"}
                 </div>
               </CardContent>
             </Card>
@@ -179,9 +200,11 @@ const Profile = () => {
                 <Trophy className="w-4 h-4 text-accent" />
               </CardHeader>
               <CardContent>
-                <div className="text-3xl font-bold">{profile?.level || 1}</div>
+                <div className="text-3xl font-bold flex items-center gap-2">
+                  ⭐ {stats?.level || 1}
+                </div>
                 <div className="text-xs text-muted-foreground mt-1">
-                  {profile?.level === 1 ? "Новичок" : profile?.level && profile.level < 5 ? "Ученик" : "Мастер"}
+                  {stats?.level === 1 ? "Новичок" : stats?.level && stats.level < 5 ? "Ученик" : "Мастер"}
                 </div>
               </CardContent>
             </Card>
