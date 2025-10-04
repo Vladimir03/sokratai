@@ -3,7 +3,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import AuthGuard from "@/components/AuthGuard";
-import { TrendingUp, CheckCircle, Target, Award } from "lucide-react";
+import { TrendingUp, CheckCircle, Target, Award, BarChart3 } from "lucide-react";
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 
 interface Stats {
   totalSolved: number;
@@ -78,7 +79,7 @@ const Progress = () => {
         ) : (
           <div className="space-y-6">
             {/* Main Stats */}
-            <div className="grid md:grid-cols-3 gap-6">
+            <div className="grid md:grid-cols-4 gap-6">
               <Card className="bg-gradient-card shadow-elegant">
                 <CardHeader className="flex flex-row items-center justify-between pb-2">
                   <CardTitle className="text-sm font-medium text-muted-foreground">
@@ -88,6 +89,18 @@ const Progress = () => {
                 </CardHeader>
                 <CardContent>
                   <div className="text-3xl font-bold">{stats.totalSolved}</div>
+                </CardContent>
+              </Card>
+
+              <Card className="bg-gradient-card shadow-elegant">
+                <CardHeader className="flex flex-row items-center justify-between pb-2">
+                  <CardTitle className="text-sm font-medium text-muted-foreground">
+                    Процент правильных
+                  </CardTitle>
+                  <TrendingUp className="w-4 h-4 text-accent" />
+                </CardHeader>
+                <CardContent>
+                  <div className="text-3xl font-bold">{stats.accuracy}%</div>
                 </CardContent>
               </Card>
 
@@ -106,22 +119,56 @@ const Progress = () => {
               <Card className="bg-gradient-card shadow-elegant">
                 <CardHeader className="flex flex-row items-center justify-between pb-2">
                   <CardTitle className="text-sm font-medium text-muted-foreground">
-                    Точность
+                    Прогноз балла ЕГЭ
                   </CardTitle>
-                  <TrendingUp className="w-4 h-4 text-accent" />
+                  <Award className="w-4 h-4 text-accent" />
                 </CardHeader>
                 <CardContent>
-                  <div className="text-3xl font-bold">{stats.accuracy}%</div>
+                  <div className="text-3xl font-bold">
+                    {stats.totalSolved > 0 
+                      ? Math.round((stats.correctCount / stats.totalSolved) * 100 * 0.6)
+                      : 0}
+                  </div>
                 </CardContent>
               </Card>
             </div>
+
+            {/* Bar Chart */}
+            <Card className="shadow-elegant">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <BarChart3 className="w-5 h-5 text-primary" />
+                  Решённые задачи по темам
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                {Object.keys(stats.categoriesStats).length === 0 ? (
+                  <p className="text-center text-muted-foreground py-8">
+                    Решите первую задачу, чтобы увидеть график
+                  </p>
+                ) : (
+                  <ResponsiveContainer width="100%" height={300}>
+                    <BarChart data={Object.entries(stats.categoriesStats).map(([topic, data]) => ({
+                      topic,
+                      solved: data.solved
+                    }))}>
+                      <CartesianGrid strokeDasharray="3 3" />
+                      <XAxis dataKey="topic" />
+                      <YAxis />
+                      <Tooltip />
+                      <Bar dataKey="solved" fill="hsl(var(--primary))" />
+                    </BarChart>
+                  </ResponsiveContainer>
+                )}
+              </CardContent>
+            </Card>
 
             {/* Categories Stats */}
             <Card className="shadow-elegant">
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
                   <Award className="w-5 h-5 text-primary" />
-                  Прогресс по темам
+                  Детальная статистика по темам
                 </CardTitle>
               </CardHeader>
               <CardContent>
