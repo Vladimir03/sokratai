@@ -98,29 +98,17 @@ export type Database = {
         Row: {
           created_at: string | null
           id: string
-          last_activity: string | null
-          level: number | null
-          streak: number | null
           username: string
-          xp: number | null
         }
         Insert: {
           created_at?: string | null
           id: string
-          last_activity?: string | null
-          level?: number | null
-          streak?: number | null
           username: string
-          xp?: number | null
         }
         Update: {
           created_at?: string | null
           id?: string
-          last_activity?: string | null
-          level?: number | null
-          streak?: number | null
           username?: string
-          xp?: number | null
         }
         Relationships: []
       }
