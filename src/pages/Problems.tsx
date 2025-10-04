@@ -2,13 +2,14 @@ import { useState, useEffect } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import AuthGuard from "@/components/AuthGuard";
-import { CheckCircle2, Circle } from "lucide-react";
+import { CheckCircle2, Circle, X, Check } from "lucide-react";
 import 'katex/dist/katex.min.css';
-import { InlineMath } from 'react-katex';
+import { InlineMath, BlockMath } from 'react-katex';
 
 interface Problem {
   id: string;
@@ -19,11 +20,19 @@ interface Problem {
   isSolved?: boolean;
 }
 
+interface CheckResult {
+  status: 'correct' | 'incorrect' | null;
+  solution?: string;
+}
+
 const Problems = () => {
   const [problems, setProblems] = useState<Problem[]>([]);
   const [loading, setLoading] = useState(true);
   const [topicFilter, setTopicFilter] = useState<string>("all");
   const [levelFilter, setLevelFilter] = useState<string>("all");
+  const [userAnswers, setUserAnswers] = useState<Record<string, string>>({});
+  const [checkResults, setCheckResults] = useState<Record<string, CheckResult>>({});
+  const [checking, setChecking] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
     fetchProblems();
@@ -65,6 +74,57 @@ const Problems = () => {
       toast.error(error.message);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleCheckAnswer = async (problemId: string) => {
+    const answer = userAnswers[problemId]?.trim();
+    if (!answer) {
+      toast.error("Введите ответ");
+      return;
+    }
+
+    setChecking(prev => ({ ...prev, [problemId]: true }));
+
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error("Пользователь не авторизован");
+
+      const { data, error } = await supabase.rpc('check_problem_answer', {
+        problem_id_input: problemId,
+        user_answer_input: answer
+      });
+
+      if (error) throw error;
+
+      const isCorrect = data[0]?.is_correct || false;
+      const solution = data[0]?.solution;
+
+      await supabase.from('user_solutions').insert({
+        user_id: user.id,
+        problem_id: problemId,
+        user_answer: answer,
+        is_correct: isCorrect
+      });
+
+      setCheckResults(prev => ({
+        ...prev,
+        [problemId]: {
+          status: isCorrect ? 'correct' : 'incorrect',
+          solution: solution
+        }
+      }));
+
+      if (isCorrect) {
+        toast.success("Правильно! +1 решённая задача");
+        await fetchProblems();
+      } else {
+        toast.error("Неправильно. Посмотрите решение ниже");
+      }
+    } catch (error: any) {
+      toast.error(error.message);
+    } finally {
+      setChecking(prev => ({ ...prev, [problemId]: false }));
     }
   };
 
@@ -172,9 +232,50 @@ const Problems = () => {
                     </Badge>
                   </div>
                   
-                  <Button className="w-full">
-                    Решить
-                  </Button>
+                  {!problem.isSolved && !checkResults[problem.id] && (
+                    <>
+                      <Input
+                        placeholder="Введите ответ"
+                        value={userAnswers[problem.id] || ""}
+                        onChange={(e) => setUserAnswers(prev => ({
+                          ...prev,
+                          [problem.id]: e.target.value
+                        }))}
+                        disabled={checking[problem.id]}
+                      />
+                      <Button 
+                        className="w-full"
+                        onClick={() => handleCheckAnswer(problem.id)}
+                        disabled={checking[problem.id]}
+                      >
+                        {checking[problem.id] ? "Проверка..." : "Проверить"}
+                      </Button>
+                    </>
+                  )}
+
+                  {checkResults[problem.id]?.status === 'correct' && (
+                    <div className="flex items-center gap-2 p-3 bg-green-500/10 border border-green-500/20 rounded-md">
+                      <Check className="w-5 h-5 text-green-600" />
+                      <span className="text-green-600 font-medium">Правильно! +1 решённая задача</span>
+                    </div>
+                  )}
+
+                  {checkResults[problem.id]?.status === 'incorrect' && (
+                    <div className="space-y-3">
+                      <div className="flex items-center gap-2 p-3 bg-red-500/10 border border-red-500/20 rounded-md">
+                        <X className="w-5 h-5 text-red-600" />
+                        <span className="text-red-600 font-medium">Неправильно</span>
+                      </div>
+                      {checkResults[problem.id]?.solution && (
+                        <div className="p-4 bg-muted rounded-md">
+                          <h4 className="font-semibold mb-2">Решение:</h4>
+                          <div className="text-sm">
+                            {parseLatex(checkResults[problem.id].solution || "")}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </CardContent>
               </Card>
             ))}
