@@ -7,7 +7,7 @@ import { toast } from "sonner";
 import AuthGuard from "@/components/AuthGuard";
 import { supabase } from "@/integrations/supabase/client";
 import ChatMessage from "@/components/ChatMessage";
-import { useVirtualizer } from "@tanstack/react-virtual";
+import { saveChatToCache, loadChatFromCache } from "@/utils/chatCache";
 import 'katex/dist/katex.min.css';
 
 const MAX_MESSAGE_LENGTH = 2000;
@@ -16,6 +16,9 @@ interface Message {
   role: "user" | "assistant";
   content: string;
   id?: string;
+  tempId?: string;
+  status?: "sending" | "sent" | "error";
+  error?: string;
 }
 
 const Chat = () => {
@@ -49,6 +52,18 @@ const Chat = () => {
   }, []);
 
   const loadChatHistory = useCallback(async () => {
+    // Сначала загружаем из кэша для мгновенного отображения
+    const cachedMessages = loadChatFromCache();
+    if (cachedMessages.length > 0) {
+      setMessages(cachedMessages.map(msg => ({
+        role: msg.role,
+        content: msg.content,
+        id: msg.id,
+        tempId: msg.tempId,
+        status: msg.status === "sent" ? undefined : msg.status
+      })));
+    }
+
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
@@ -58,7 +73,7 @@ const Chat = () => {
         .select('*')
         .eq('user_id', user.id)
         .order('created_at', { ascending: true })
-        .limit(20);
+        .limit(50);
 
       if (error) throw error;
 
@@ -66,35 +81,83 @@ const Chat = () => {
         const loadedMessages: Message[] = data.map(msg => ({
           role: msg.role as "user" | "assistant",
           content: msg.content,
-          id: msg.id
+          id: msg.id,
+          status: "sent"
         }));
         setMessages(loadedMessages);
+        saveChatToCache(loadedMessages.map(msg => ({
+          ...msg,
+          timestamp: Date.now()
+        })));
       }
     } catch (error) {
       console.error('Error loading chat history:', error);
-      toast.error("Не удалось загрузить историю чата");
+      if (cachedMessages.length === 0) {
+        toast.error("Не удалось загрузить историю чата");
+      }
     } finally {
       setLoadingHistory(false);
     }
   }, []);
 
-  // Сохранение в фоне без блокировки UI
-  const saveMessage = useCallback((role: "user" | "assistant", content: string) => {
-    supabase.auth.getUser().then(({ data: { user } }) => {
-      if (!user) return;
+  // Сохранение с обновлением статуса
+  const saveMessage = useCallback(async (
+    role: "user" | "assistant", 
+    content: string,
+    tempId?: string
+  ): Promise<string | null> => {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return null;
 
-      supabase
+      const { data, error } = await supabase
         .from('chat_messages')
         .insert({
           user_id: user.id,
           role,
           content
         })
-        .then(({ error }) => {
-          if (error) console.error('Error saving message:', error);
-        });
-    });
-  }, []);
+        .select()
+        .single();
+
+      if (error) throw error;
+
+      // Обновляем статус на "sent" и заменяем tempId на реальный ID
+      if (tempId && data) {
+        setMessages(prev => prev.map(msg => 
+          msg.tempId === tempId 
+            ? { ...msg, id: data.id, status: "sent" as const, tempId: undefined }
+            : msg
+        ));
+        
+        // Обновляем кэш
+        const updatedMessages = messages.map(msg => 
+          msg.tempId === tempId 
+            ? { ...msg, id: data.id, status: "sent" as const, tempId: undefined }
+            : msg
+        );
+        saveChatToCache(updatedMessages.map(msg => ({
+          ...msg,
+          timestamp: Date.now()
+        })));
+      }
+
+      return data?.id || null;
+    } catch (error) {
+      console.error('Error saving message:', error);
+      
+      // Обновляем статус на "error"
+      if (tempId) {
+        setMessages(prev => prev.map(msg => 
+          msg.tempId === tempId 
+            ? { ...msg, status: "error" as const, error: "Не удалось отправить" }
+            : msg
+        ));
+      }
+      
+      return null;
+    }
+  }, [messages]);
 
 
   const streamChat = useCallback(async (userMessages: Message[]) => {
@@ -183,16 +246,50 @@ const Chat = () => {
     }
   }, [saveMessage]);
 
+  const retryMessage = useCallback(async (tempId: string) => {
+    const msgToRetry = messages.find(m => m.tempId === tempId);
+    if (!msgToRetry) return;
+
+    // Обновляем статус на "sending"
+    setMessages(prev => prev.map(msg => 
+      msg.tempId === tempId 
+        ? { ...msg, status: "sending" as const, error: undefined }
+        : msg
+    ));
+
+    // Пытаемся сохранить снова
+    await saveMessage(msgToRetry.role, msgToRetry.content, tempId);
+  }, [messages, saveMessage]);
+
   const sendQuickMessage = useCallback(async (text: string) => {
     if (isLoading) return;
 
-    const userMessage: Message = { role: "user", content: text };
+    const tempId = `temp_${Date.now()}_${Math.random()}`;
+    const userMessage: Message = { 
+      role: "user", 
+      content: text,
+      tempId,
+      status: "sending"
+    };
+    
+    // Optimistic update
     setMessages(prev => [...prev, userMessage]);
+    
+    // Сохраняем в кэш
+    const updatedMessages = [...messages, userMessage];
+    saveChatToCache(updatedMessages.map(msg => ({
+      ...msg,
+      timestamp: Date.now()
+    })));
+
     setIsLoading(true);
-    saveMessage("user", text);
+
+    // Сохраняем в БД в фоне
+    saveMessage("user", text, tempId);
 
     try {
-      const recentMessages = [...messages, userMessage].slice(-10);
+      // Начинаем стриминг сразу, не дожидаясь сохранения
+      const recentMessages = updatedMessages.slice(-10);
       await streamChat(recentMessages);
     } catch (error) {
       console.error("Chat error:", error);
@@ -218,14 +315,33 @@ const Chat = () => {
     
     if (isLoading) return;
 
-    const userMessage: Message = { role: "user", content: trimmedInput };
+    const tempId = `temp_${Date.now()}_${Math.random()}`;
+    const userMessage: Message = { 
+      role: "user", 
+      content: trimmedInput,
+      tempId,
+      status: "sending"
+    };
+    
+    // Optimistic update
     setMessages(prev => [...prev, userMessage]);
     setInput("");
+    
+    // Сохраняем в кэш
+    const updatedMessages = [...messages, userMessage];
+    saveChatToCache(updatedMessages.map(msg => ({
+      ...msg,
+      timestamp: Date.now()
+    })));
+
     setIsLoading(true);
-    saveMessage("user", trimmedInput);
+
+    // Сохраняем в БД в фоне
+    saveMessage("user", trimmedInput, tempId);
 
     try {
-      const recentMessages = [...messages, userMessage].slice(-10);
+      // Начинаем стриминг сразу, не дожидаясь сохранения
+      const recentMessages = updatedMessages.slice(-10);
       await streamChat(recentMessages);
     } catch (error) {
       console.error("Chat error:", error);
@@ -255,10 +371,11 @@ const Chat = () => {
 
             {messages.map((message, index) => (
               <ChatMessage
-                key={message.id || index}
+                key={message.id || message.tempId || index}
                 message={message}
                 isLoading={isLoading}
                 onQuickMessage={sendQuickMessage}
+                onRetry={message.status === "error" && message.tempId ? () => retryMessage(message.tempId!) : undefined}
               />
             ))}
 

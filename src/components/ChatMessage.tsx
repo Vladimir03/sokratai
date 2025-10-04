@@ -8,12 +8,16 @@ interface Message {
   role: "user" | "assistant";
   content: string;
   id?: string;
+  tempId?: string;
+  status?: "sending" | "sent" | "error";
+  error?: string;
 }
 
 interface ChatMessageProps {
   message: Message;
   isLoading: boolean;
   onQuickMessage: (text: string) => void;
+  onRetry?: () => void;
 }
 
 const markdownComponents = {
@@ -25,14 +29,31 @@ const markdownComponents = {
   h3: ({ node, ...props }: any) => <h3 className="font-bold text-lg mt-4 mb-2" {...props} />,
 };
 
-const ChatMessage = memo(({ message, isLoading, onQuickMessage }: ChatMessageProps) => {
+const ChatMessage = memo(({ message, isLoading, onQuickMessage, onRetry }: ChatMessageProps) => {
+  const getStatusIcon = () => {
+    if (message.role !== "user") return null;
+    
+    switch (message.status) {
+      case "sending":
+        return <span className="text-xs opacity-60 ml-2">⏳</span>;
+      case "sent":
+        return <span className="text-xs opacity-60 ml-2">✓</span>;
+      case "error":
+        return <span className="text-xs text-red-400 ml-2">❌</span>;
+      default:
+        return null;
+    }
+  };
+
   return (
     <div className={`flex ${message.role === "user" ? "justify-end" : "justify-start"}`}>
       <div className={`max-w-[80%] ${message.role === "user" ? "" : "space-y-3"}`}>
         <div
           className={`p-4 rounded-2xl ${
             message.role === "user"
-              ? "bg-primary text-primary-foreground"
+              ? message.status === "error" 
+                ? "bg-destructive/20 text-foreground border border-destructive/40"
+                : "bg-primary text-primary-foreground"
               : "bg-muted"
           }`}
         >
@@ -45,7 +66,19 @@ const ChatMessage = memo(({ message, isLoading, onQuickMessage }: ChatMessagePro
               {message.content}
             </ReactMarkdown>
           </div>
+          <div className="flex items-center justify-end mt-1">
+            {getStatusIcon()}
+          </div>
         </div>
+        
+        {message.status === "error" && onRetry && (
+          <button
+            onClick={onRetry}
+            className="text-xs px-3 py-1.5 bg-destructive/10 hover:bg-destructive/20 text-destructive rounded-full border border-destructive/40 transition-colors"
+          >
+            🔄 Повторить отправку
+          </button>
+        )}
         
         {message.role === "assistant" && !isLoading && (
           <div className="flex gap-2 flex-wrap px-1">
