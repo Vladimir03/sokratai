@@ -257,7 +257,9 @@ const Chat = () => {
     await saveMessage("user", userMessage.content);
 
     try {
-      await streamChat(newMessages);
+      // Отправляем только последние 10 сообщений для контекста
+      const recentMessages = newMessages.slice(-10);
+      await streamChat(recentMessages);
     } catch (error) {
       console.error("Chat error:", error);
       toast.error("Ошибка при отправке сообщения");
