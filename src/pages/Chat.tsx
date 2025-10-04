@@ -9,7 +9,7 @@ import { supabase } from "@/integrations/supabase/client";
 import ChatMessage from "@/components/ChatMessage";
 import { saveChatToSessionCache, loadChatFromSessionCache } from "@/utils/chatCache";
 import { messageBatcher } from "@/utils/messageBatcher";
-import 'katex/dist/katex.min.css';
+// KaTeX CSS теперь загружается динамически в ChatMessage
 
 const MAX_MESSAGE_LENGTH = 2000;
 

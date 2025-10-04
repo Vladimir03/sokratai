@@ -1,8 +1,10 @@
-import { memo } from "react";
-import ReactMarkdown from 'react-markdown';
+import { memo, lazy, Suspense, useEffect, useState } from "react";
 import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
+
+// Динамическая загрузка только ReactMarkdown компонента
+const ReactMarkdown = lazy(() => import('react-markdown'));
 
 interface Message {
   role: "user" | "assistant";
@@ -30,6 +32,18 @@ const markdownComponents = {
 };
 
 const ChatMessage = memo(({ message, isLoading, onQuickMessage, onRetry }: ChatMessageProps) => {
+  const [katexLoaded, setKatexLoaded] = useState(false);
+  const hasMath = message.content.includes('$');
+
+  // Загружаем KaTeX CSS только если есть математика
+  useEffect(() => {
+    if (hasMath && !katexLoaded) {
+      import('katex/dist/katex.min.css').then(() => {
+        setKatexLoaded(true);
+      });
+    }
+  }, [hasMath, katexLoaded]);
+
   const getStatusIcon = () => {
     if (message.role !== "user") return null;
     
@@ -58,13 +72,15 @@ const ChatMessage = memo(({ message, isLoading, onQuickMessage, onRetry }: ChatM
           }`}
         >
           <div className="prose prose-sm dark:prose-invert max-w-none">
-            <ReactMarkdown
-              remarkPlugins={[remarkGfm, remarkMath]}
-              rehypePlugins={[rehypeKatex]}
-              components={markdownComponents}
-            >
-              {message.content}
-            </ReactMarkdown>
+            <Suspense fallback={<div className="animate-pulse">{message.content}</div>}>
+              <ReactMarkdown
+                remarkPlugins={[remarkGfm, remarkMath]}
+                rehypePlugins={[rehypeKatex]}
+                components={markdownComponents}
+              >
+                {message.content}
+              </ReactMarkdown>
+            </Suspense>
           </div>
           <div className="flex items-center justify-end mt-1">
             {getStatusIcon()}
