@@ -4,9 +4,21 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     
+    <!-- Critical inline CSS for above-the-fold content -->
+    <style>
+      body{margin:0;font-family:system-ui,-apple-system,sans-serif}
+      #root{min-height:100vh}
+      .hero-section{background:linear-gradient(135deg,hsl(237,66%,45%),hsl(270,70%,50%));padding:5rem 1rem;text-align:center;color:#fff}
+      .hero-title{font-size:clamp(2rem,5vw,4rem);font-weight:700;margin:1rem 0;animation:fadeIn .5s}
+      @keyframes fadeIn{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}
+      .skeleton{background:linear-gradient(90deg,#f0f0f0 25%,#e0e0e0 50%,#f0f0f0 75%);background-size:200% 100%;animation:loading 1.5s infinite}
+      @keyframes loading{0%{background-position:200% 0}100%{background-position:-200% 0}}
+    </style>
+    
     <!-- Resource hints for faster loading -->
     <link rel="dns-prefetch" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link rel="preconnect" href="https://vrsseotrfmsxpbciyqzc.supabase.co">
     
     <title>ИИ-репетитор по математике ЕГЭ - Подготовка 24/7</title>
     <meta name="description" content="Готовься к ЕГЭ по математике с ИИ-репетитором. Мгновенные решения задач, пошаговые объяснения, отслеживание прогресса. Начни бесплатно!" />

@@ -2,11 +2,12 @@ import { useState, useRef, useEffect, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card } from "@/components/ui/card";
-import { Send, Mic, MessageSquare, Loader2 } from "lucide-react";
+import { Send, Mic, MessageSquare } from "lucide-react";
 import { toast } from "sonner";
 import AuthGuard from "@/components/AuthGuard";
 import { supabase } from "@/integrations/supabase/client";
 import ChatMessage from "@/components/ChatMessage";
+import ChatSkeleton from "@/components/ChatSkeleton";
 import ConnectionIndicator from "@/components/ConnectionIndicator";
 import { saveChatToSessionCache, loadChatFromSessionCache } from "@/utils/chatCache";
 import { messageBatcher } from "@/utils/messageBatcher";
@@ -414,9 +415,7 @@ const Chat = () => {
           {/* Messages */}
           <div ref={parentRef} className="flex-1 overflow-y-auto p-4 space-y-4">
             {loadingHistory ? (
-              <div className="flex justify-center items-center py-12">
-                <Loader2 className="w-8 h-8 animate-spin text-primary" />
-              </div>
+              <ChatSkeleton />
             ) : messages.length === 0 ? (
               <div className="text-center text-muted-foreground py-12">
                 <MessageSquare className="w-16 h-16 mx-auto mb-4 text-primary/50" />

@@ -41,11 +41,39 @@ export default defineConfig(({ mode }) => ({
         return deps;
       }
     },
-    // Optimize chunk size for better loading
+    // Optimize chunk size for better loading with code splitting
     rollupOptions: {
       output: {
-        manualChunks: undefined
+        manualChunks: {
+          // Vendor chunks
+          'react-vendor': ['react', 'react-dom', 'react-router-dom'],
+          'ui-components': [
+            '@radix-ui/react-dialog',
+            '@radix-ui/react-dropdown-menu',
+            '@radix-ui/react-slot',
+            '@radix-ui/react-toast'
+          ],
+          // Supabase separate chunk
+          'supabase': ['@supabase/supabase-js'],
+          // Math/LaTeX libraries
+          'math-rendering': ['katex', 'react-katex', 'react-markdown'],
+        },
+        // Optimize chunk names
+        chunkFileNames: 'assets/[name]-[hash].js',
+        entryFileNames: 'assets/[name]-[hash].js',
+        assetFileNames: 'assets/[name]-[hash].[ext]'
       }
-    }
+    },
+    // Optimize minification
+    minify: 'terser',
+    terserOptions: {
+      compress: {
+        drop_console: true,
+        drop_debugger: true,
+        pure_funcs: ['console.log']
+      }
+    },
+    // Set chunk size warning limit
+    chunkSizeWarningLimit: 600
   }
 }));
