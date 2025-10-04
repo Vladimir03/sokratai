@@ -2,21 +2,24 @@ import { useState, useRef, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card } from "@/components/ui/card";
-import { Send, Mic, MessageSquare } from "lucide-react";
+import { Send, Mic, MessageSquare, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import AuthGuard from "@/components/AuthGuard";
+import { supabase } from "@/integrations/supabase/client";
 import 'katex/dist/katex.min.css';
 import { InlineMath, BlockMath } from 'react-katex';
 
 interface Message {
   role: "user" | "assistant";
   content: string;
+  id?: string;
 }
 
 const Chat = () => {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+  const [loadingHistory, setLoadingHistory] = useState(true);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const scrollToBottom = () => {
@@ -26,6 +29,59 @@ const Chat = () => {
   useEffect(() => {
     scrollToBottom();
   }, [messages]);
+
+  useEffect(() => {
+    loadChatHistory();
+  }, []);
+
+  const loadChatHistory = async () => {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+
+      const { data, error } = await supabase
+        .from('chat_messages')
+        .select('*')
+        .eq('user_id', user.id)
+        .order('created_at', { ascending: true })
+        .limit(20);
+
+      if (error) throw error;
+
+      if (data) {
+        const loadedMessages: Message[] = data.map(msg => ({
+          role: msg.role as "user" | "assistant",
+          content: msg.content,
+          id: msg.id
+        }));
+        setMessages(loadedMessages);
+      }
+    } catch (error) {
+      console.error('Error loading chat history:', error);
+      toast.error("Не удалось загрузить историю чата");
+    } finally {
+      setLoadingHistory(false);
+    }
+  };
+
+  const saveMessage = async (role: "user" | "assistant", content: string) => {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+
+      const { error } = await supabase
+        .from('chat_messages')
+        .insert({
+          user_id: user.id,
+          role,
+          content
+        });
+
+      if (error) throw error;
+    } catch (error) {
+      console.error('Error saving message:', error);
+    }
+  };
 
   const parseLatex = (text: string) => {
     const parts = [];
@@ -160,6 +216,11 @@ const Chat = () => {
         }
       }
     }
+    
+    // Сохраняем ответ ассистента после завершения стриминга
+    if (assistantContent) {
+      await saveMessage("assistant", assistantContent);
+    }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -171,6 +232,9 @@ const Chat = () => {
     setMessages(newMessages);
     setInput("");
     setIsLoading(true);
+
+    // Сохраняем сообщение пользователя
+    await saveMessage("user", userMessage.content);
 
     try {
       await streamChat(newMessages);
@@ -188,13 +252,17 @@ const Chat = () => {
         <Card className="flex-1 flex flex-col overflow-hidden shadow-elegant">
           {/* Messages */}
           <div className="flex-1 overflow-y-auto p-4 space-y-4">
-            {messages.length === 0 && (
+            {loadingHistory ? (
+              <div className="flex justify-center items-center py-12">
+                <Loader2 className="w-8 h-8 animate-spin text-primary" />
+              </div>
+            ) : messages.length === 0 ? (
               <div className="text-center text-muted-foreground py-12">
                 <MessageSquare className="w-16 h-16 mx-auto mb-4 text-primary/50" />
                 <h3 className="text-xl font-semibold mb-2">Начните диалог с ИИ-репетитором</h3>
                 <p>Задайте любой вопрос по математике и получите детальное объяснение</p>
               </div>
-            )}
+            ) : null}
 
             {messages.map((message, index) => (
               <div
