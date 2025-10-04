@@ -336,7 +336,6 @@ const Chat = () => {
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 placeholder="Напишите ваш вопрос..."
-                disabled={isLoading}
                 className="flex-1"
               />
               <Button type="button" variant="outline" size="icon" disabled={isLoading}>
