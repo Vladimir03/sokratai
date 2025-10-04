@@ -12,19 +12,19 @@ import { InlineMath } from 'react-katex';
 
 interface Problem {
   id: string;
-  title: string;
-  description: string;
-  category: string;
-  difficulty: string;
-  problem_number: number;
+  question: string;
+  topic: string;
+  level: string;
+  answer: string;
+  solution: string;
   isSolved?: boolean;
 }
 
 const Problems = () => {
   const [problems, setProblems] = useState<Problem[]>([]);
   const [loading, setLoading] = useState(true);
-  const [categoryFilter, setCategoryFilter] = useState<string>("all");
-  const [difficultyFilter, setDifficultyFilter] = useState<string>("all");
+  const [topicFilter, setTopicFilter] = useState<string>("all");
+  const [levelFilter, setLevelFilter] = useState<string>("all");
 
   useEffect(() => {
     fetchProblems();
@@ -35,7 +35,7 @@ const Problems = () => {
       const { data: problemsData, error: problemsError } = await supabase
         .from("problems")
         .select("*")
-        .order("problem_number");
+        .order("created_at");
 
       if (problemsError) throw problemsError;
 
@@ -91,8 +91,8 @@ const Problems = () => {
   };
 
   const filteredProblems = problems.filter(p => {
-    if (categoryFilter !== "all" && p.category !== categoryFilter) return false;
-    if (difficultyFilter !== "all" && p.difficulty !== difficultyFilter) return false;
+    if (topicFilter !== "all" && p.topic !== topicFilter) return false;
+    if (levelFilter !== "all" && p.level !== levelFilter) return false;
     return true;
   });
 
@@ -118,19 +118,19 @@ const Problems = () => {
 
         {/* Filters */}
         <div className="flex flex-wrap gap-4 mb-6">
-          <Select value={categoryFilter} onValueChange={setCategoryFilter}>
+          <Select value={topicFilter} onValueChange={setTopicFilter}>
             <SelectTrigger className="w-[200px]">
-              <SelectValue placeholder="Категория" />
+              <SelectValue placeholder="Тема" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="all">Все категории</SelectItem>
+              <SelectItem value="all">Все темы</SelectItem>
               <SelectItem value="Алгебра">Алгебра</SelectItem>
               <SelectItem value="Геометрия">Геометрия</SelectItem>
               <SelectItem value="Тригонометрия">Тригонометрия</SelectItem>
             </SelectContent>
           </Select>
 
-          <Select value={difficultyFilter} onValueChange={setDifficultyFilter}>
+          <Select value={levelFilter} onValueChange={setLevelFilter}>
             <SelectTrigger className="w-[200px]">
               <SelectValue placeholder="Сложность" />
             </SelectTrigger>
@@ -154,27 +154,22 @@ const Problems = () => {
               <Card key={problem.id} className="hover:shadow-elegant transition-all duration-300">
                 <CardHeader>
                   <div className="flex items-start justify-between mb-2">
-                    <Badge variant="outline" className="text-xs">
-                      № {problem.problem_number}
-                    </Badge>
+                    <Badge variant="secondary">{problem.topic}</Badge>
                     {problem.isSolved ? (
                       <CheckCircle2 className="w-5 h-5 text-green-600" />
                     ) : (
                       <Circle className="w-5 h-5 text-muted-foreground" />
                     )}
                   </div>
-                  <CardTitle className="text-xl">{problem.title}</CardTitle>
+                  <CardTitle className="text-lg">{parseLatex(problem.question)}</CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-4">
-                  <div className="text-sm">{parseLatex(problem.description)}</div>
-                  
                   <div className="flex gap-2 flex-wrap">
-                    <Badge variant="secondary">{problem.category}</Badge>
                     <Badge 
                       variant="outline" 
-                      className={difficultyColors[problem.difficulty as keyof typeof difficultyColors]}
+                      className={difficultyColors[problem.level as keyof typeof difficultyColors]}
                     >
-                      {difficultyLabels[problem.difficulty as keyof typeof difficultyLabels]}
+                      {difficultyLabels[problem.level as keyof typeof difficultyLabels]}
                     </Badge>
                   </div>
                   

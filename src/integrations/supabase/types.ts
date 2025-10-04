@@ -49,36 +49,30 @@ export type Database = {
       problems: {
         Row: {
           answer: string | null
-          category: string
           created_at: string | null
-          description: string
-          difficulty: string
-          explanation: string | null
           id: string
-          problem_number: number
-          title: string
+          level: string
+          question: string
+          solution: string | null
+          topic: string
         }
         Insert: {
           answer?: string | null
-          category: string
           created_at?: string | null
-          description: string
-          difficulty: string
-          explanation?: string | null
           id?: string
-          problem_number: number
-          title: string
+          level: string
+          question: string
+          solution?: string | null
+          topic: string
         }
         Update: {
           answer?: string | null
-          category?: string
           created_at?: string | null
-          description?: string
-          difficulty?: string
-          explanation?: string | null
           id?: string
-          problem_number?: number
-          title?: string
+          level?: string
+          question?: string
+          solution?: string | null
+          topic?: string
         }
         Relationships: []
       }
