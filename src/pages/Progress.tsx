@@ -47,12 +47,12 @@ const Progress = () => {
       const categoriesStats: Record<string, { solved: number; correct: number }> = {};
       
       solutions?.forEach(sol => {
-        const category = (sol.problems as any)?.category || "Прочее";
-        if (!categoriesStats[category]) {
-          categoriesStats[category] = { solved: 0, correct: 0 };
+        const topic = (sol.problems as any)?.topic || "Прочее";
+        if (!categoriesStats[topic]) {
+          categoriesStats[topic] = { solved: 0, correct: 0 };
         }
-        categoriesStats[category].solved += 1;
-        if (sol.is_correct) categoriesStats[category].correct += 1;
+        categoriesStats[topic].solved += 1;
+        if (sol.is_correct) categoriesStats[topic].correct += 1;
       });
 
       setStats({ totalSolved, correctCount, accuracy, categoriesStats });

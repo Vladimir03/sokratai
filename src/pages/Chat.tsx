@@ -9,6 +9,8 @@ import { supabase } from "@/integrations/supabase/client";
 import 'katex/dist/katex.min.css';
 import { InlineMath, BlockMath } from 'react-katex';
 
+const MAX_MESSAGE_LENGTH = 2000;
+
 interface Message {
   role: "user" | "assistant";
   content: string;
@@ -225,9 +227,21 @@ const Chat = () => {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!input.trim() || isLoading) return;
+    const trimmedInput = input.trim();
+    
+    if (!trimmedInput) {
+      toast.error("Сообщение не может быть пустым");
+      return;
+    }
+    
+    if (trimmedInput.length > MAX_MESSAGE_LENGTH) {
+      toast.error(`Максимальная длина: ${MAX_MESSAGE_LENGTH} символов`);
+      return;
+    }
+    
+    if (isLoading) return;
 
-    const userMessage: Message = { role: "user", content: input };
+    const userMessage: Message = { role: "user", content: trimmedInput };
     const newMessages = [...messages, userMessage];
     setMessages(newMessages);
     setInput("");

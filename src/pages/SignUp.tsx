@@ -32,11 +32,21 @@ const SignUp = () => {
     setLoading(true);
 
     try {
+      const validation = signupSchema.safeParse({ email, password, username });
+      if (!validation.success) {
+        toast.error(validation.error.errors[0].message);
+        setLoading(false);
+        return;
+      }
+
       const { error } = await supabase.auth.signUp({
-        email,
-        password,
+        email: validation.data.email,
+        password: validation.data.password,
         options: {
-          data: { username },
+          data: {
+            username: validation.data.username,
+          },
+          emailRedirectTo: `${window.location.origin}/`,
         },
       });
 
