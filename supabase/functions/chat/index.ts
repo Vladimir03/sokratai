@@ -89,19 +89,21 @@ serve(async (req) => {
       );
     }
 
-    for (const msg of messages) {
-      if (!msg.content || typeof msg.content !== 'string') {
-        return new Response(
-          JSON.stringify({ error: "Некорректное содержимое сообщения" }),
-          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-        );
-      }
-      if (msg.content.length > MAX_MESSAGE_LENGTH) {
-        return new Response(
-          JSON.stringify({ error: `Сообщение слишком длинное (макс. ${MAX_MESSAGE_LENGTH} символов)` }),
-          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-        );
-      }
+    // Validate only the last user message (new message)
+    const lastMessage = messages[messages.length - 1];
+    if (!lastMessage || !lastMessage.content || typeof lastMessage.content !== 'string') {
+      return new Response(
+        JSON.stringify({ error: "Некорректное содержимое сообщения" }),
+        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+    
+    // Only validate length for user messages, assistant responses can be longer
+    if (lastMessage.role === 'user' && lastMessage.content.length > MAX_MESSAGE_LENGTH) {
+      return new Response(
+        JSON.stringify({ error: `Сообщение слишком длинное (макс. ${MAX_MESSAGE_LENGTH} символов)` }),
+        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
     }
 
     const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
