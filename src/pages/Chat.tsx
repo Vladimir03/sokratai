@@ -7,8 +7,11 @@ import { toast } from "sonner";
 import AuthGuard from "@/components/AuthGuard";
 import { supabase } from "@/integrations/supabase/client";
 import ChatMessage from "@/components/ChatMessage";
+import ConnectionIndicator from "@/components/ConnectionIndicator";
 import { saveChatToSessionCache, loadChatFromSessionCache } from "@/utils/chatCache";
 import { messageBatcher } from "@/utils/messageBatcher";
+import { debounce } from "@/utils/debounce";
+import { useNetworkStatus } from "@/hooks/useNetworkStatus";
 // KaTeX CSS теперь загружается динамически в ChatMessage
 
 const MAX_MESSAGE_LENGTH = 2000;
@@ -29,6 +32,16 @@ const Chat = () => {
   const [loadingHistory, setLoadingHistory] = useState(true);
   const parentRef = useRef<HTMLDivElement>(null);
   const scrollTimeoutRef = useRef<NodeJS.Timeout>();
+  const networkStatus = useNetworkStatus();
+
+  // Показываем уведомление при плохом соединении
+  useEffect(() => {
+    if (networkStatus.quality === 'offline') {
+      toast.error("Нет подключения к интернету. Работаем в офлайн-режиме.");
+    } else if (networkStatus.quality === 'poor') {
+      toast.warning("Слабое соединение. Возможны задержки.");
+    }
+  }, [networkStatus.quality]);
 
   // Debounced scroll to bottom
   const scrollToBottom = useCallback(() => {
@@ -250,6 +263,12 @@ const Chat = () => {
   }, [messages, saveMessageToBatch]);
 
   const sendQuickMessage = useCallback(async (text: string) => {
+    // Блокируем отправку при offline
+    if (networkStatus.quality === 'offline') {
+      toast.error("Нет подключения к интернету");
+      return;
+    }
+
     if (isLoading) return;
 
     const tempId = `temp_${Date.now()}_${Math.random()}`;
@@ -277,7 +296,13 @@ const Chat = () => {
     } finally {
       setIsLoading(false);
     }
-  }, [isLoading, messages, saveMessageToBatch, streamChat]);
+  }, [isLoading, messages, saveMessageToBatch, streamChat, networkStatus.quality]);
+
+  // Debounced версия для quick messages
+  const debouncedSendQuickMessage = useCallback(
+    debounce(sendQuickMessage, 500),
+    [sendQuickMessage]
+  );
 
   const handleSubmit = useCallback(async (e: React.FormEvent) => {
     e.preventDefault();
@@ -290,6 +315,12 @@ const Chat = () => {
     
     if (trimmedInput.length > MAX_MESSAGE_LENGTH) {
       toast.error(`Максимальная длина: ${MAX_MESSAGE_LENGTH} символов`);
+      return;
+    }
+
+    // Блокируем отправку при offline
+    if (networkStatus.quality === 'offline') {
+      toast.error("Нет подключения к интернету");
       return;
     }
     
@@ -321,12 +352,18 @@ const Chat = () => {
     } finally {
       setIsLoading(false);
     }
-  }, [input, isLoading, messages, saveMessageToBatch, streamChat]);
+  }, [input, isLoading, messages, saveMessageToBatch, streamChat, networkStatus.quality]);
 
   return (
     <AuthGuard>
       <div className="fixed inset-0 flex items-center justify-center p-4">
         <Card className="w-full max-w-5xl h-[calc(100vh-2rem)] flex flex-col overflow-hidden shadow-elegant">
+          {/* Header with connection indicator */}
+          <div className="p-3 border-b flex justify-between items-center">
+            <h2 className="text-sm font-medium">ИИ-репетитор</h2>
+            <ConnectionIndicator />
+          </div>
+
           {/* Messages */}
           <div ref={parentRef} className="flex-1 overflow-y-auto p-4 space-y-4">
             {loadingHistory ? (
@@ -346,7 +383,7 @@ const Chat = () => {
                 key={message.id || message.tempId || index}
                 message={message}
                 isLoading={isLoading}
-                onQuickMessage={sendQuickMessage}
+                onQuickMessage={debouncedSendQuickMessage}
                 onRetry={message.status === "error" && message.tempId ? () => retryMessage(message.tempId!) : undefined}
               />
             ))}
