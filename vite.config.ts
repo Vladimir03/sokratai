@@ -33,4 +33,19 @@ export default defineConfig(({ mode }) => ({
       "@": path.resolve(__dirname, "./src"),
     },
   },
+  build: {
+    // Enable modulePreload for better resource loading
+    modulePreload: {
+      polyfill: true,
+      resolveDependencies: (filename, deps) => {
+        return deps;
+      }
+    },
+    // Optimize chunk size for better loading
+    rollupOptions: {
+      output: {
+        manualChunks: undefined
+      }
+    }
+  }
 }));
