@@ -64,15 +64,8 @@ export default defineConfig(({ mode }) => ({
         assetFileNames: 'assets/[name]-[hash].[ext]'
       }
     },
-    // Optimize minification
-    minify: 'terser',
-    terserOptions: {
-      compress: {
-        drop_console: true,
-        drop_debugger: true,
-        pure_funcs: ['console.log']
-      }
-    },
+    // Use default esbuild minifier (faster than terser)
+    minify: 'esbuild',
     // Set chunk size warning limit
     chunkSizeWarningLimit: 600
   }
