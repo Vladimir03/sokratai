@@ -6,9 +6,11 @@ import { Send, Mic, MessageSquare, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import AuthGuard from "@/components/AuthGuard";
 import { supabase } from "@/integrations/supabase/client";
-import 'katex/dist/katex.min.css';
-import { InlineMath, BlockMath } from 'react-katex';
 import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
+import remarkMath from 'remark-math';
+import rehypeKatex from 'rehype-katex';
+import 'katex/dist/katex.min.css';
 
 const MAX_MESSAGE_LENGTH = 2000;
 
@@ -86,91 +88,6 @@ const Chat = () => {
     }
   };
 
-  const renderMessageContent = (content: string) => {
-    // Extract LaTeX formulas first
-    const parts: Array<{ type: 'text' | 'display' | 'inline'; content: string; index: number }> = [];
-    let lastIndex = 0;
-    
-    const displayRegex = /\$\$(.*?)\$\$/g;
-    const inlineRegex = /\$(.*?)\$/g;
-    
-    let match;
-    const allMatches: { index: number; length: number; type: 'display' | 'inline'; content: string }[] = [];
-    
-    while ((match = displayRegex.exec(content)) !== null) {
-      allMatches.push({ 
-        index: match.index, 
-        length: match[0].length, 
-        type: 'display', 
-        content: match[1] 
-      });
-    }
-    
-    while ((match = inlineRegex.exec(content)) !== null) {
-      if (!allMatches.some(m => m.index <= match.index && match.index < m.index + m.length)) {
-        allMatches.push({ 
-          index: match.index, 
-          length: match[0].length, 
-          type: 'inline', 
-          content: match[1] 
-        });
-      }
-    }
-    
-    allMatches.sort((a, b) => a.index - b.index);
-    
-    // Split content into text and math parts
-    allMatches.forEach((m) => {
-      if (m.index > lastIndex) {
-        parts.push({ type: 'text', content: content.slice(lastIndex, m.index), index: lastIndex });
-      }
-      parts.push({ type: m.type, content: m.content, index: m.index });
-      lastIndex = m.index + m.length;
-    });
-    
-    if (lastIndex < content.length) {
-      parts.push({ type: 'text', content: content.slice(lastIndex), index: lastIndex });
-    }
-    
-    if (parts.length === 0) {
-      parts.push({ type: 'text', content, index: 0 });
-    }
-    
-    return (
-      <>
-        {parts.map((part, i) => {
-          if (part.type === 'display') {
-            return (
-              <div key={`math-${i}`} className="my-2">
-                <BlockMath math={part.content} />
-              </div>
-            );
-          } else if (part.type === 'inline') {
-            return <InlineMath key={`math-${i}`} math={part.content} />;
-          } else {
-            return (
-              <div key={`text-${i}`} className="prose prose-sm dark:prose-invert max-w-none">
-                <ReactMarkdown
-                  components={{
-                    strong: ({ node, ...props }) => <strong className="font-semibold text-primary" {...props} />,
-                    p: ({ node, ...props }) => <p className="mb-2 last:mb-0" {...props} />,
-                    ul: ({ node, ...props }) => <ul className="list-disc ml-4 mb-2 space-y-1" {...props} />,
-                    ol: ({ node, ...props }) => <ol className="list-decimal ml-4 mb-2 space-y-1" {...props} />,
-                    li: ({ node, ...props }) => <li className="mb-1" {...props} />,
-                    h3: ({ node, ...props }) => <h3 className="text-base font-semibold mt-3 mb-2" {...props} />,
-                    h4: ({ node, ...props }) => <h4 className="text-sm font-semibold mt-2 mb-1" {...props} />,
-                    code: ({ node, ...props }) => <code className="bg-muted px-1 py-0.5 rounded text-sm" {...props} />,
-                  }}
-                >
-                  {part.content}
-                </ReactMarkdown>
-              </div>
-            );
-          }
-        })}
-      </>
-    );
-  };
 
   const streamChat = async (userMessages: Message[]) => {
     const CHAT_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/chat`;
@@ -325,7 +242,22 @@ const Chat = () => {
                       : "bg-muted"
                   }`}
                 >
-                  {renderMessageContent(message.content)}
+                  <div className="prose prose-sm dark:prose-invert max-w-none">
+                    <ReactMarkdown
+                      remarkPlugins={[remarkGfm, remarkMath]}
+                      rehypePlugins={[rehypeKatex]}
+                      components={{
+                        p: ({ node, ...props }) => <p className="mb-3 leading-relaxed last:mb-0" {...props} />,
+                        strong: ({ node, ...props }) => <strong className="font-bold text-primary" {...props} />,
+                        ul: ({ node, ...props }) => <ul className="list-disc ml-4 mb-3 space-y-1" {...props} />,
+                        ol: ({ node, ...props }) => <ol className="list-decimal ml-4 mb-3 space-y-2" {...props} />,
+                        li: ({ node, ...props }) => <li className="ml-2" {...props} />,
+                        h3: ({ node, ...props }) => <h3 className="font-bold text-lg mt-4 mb-2" {...props} />,
+                      }}
+                    >
+                      {message.content}
+                    </ReactMarkdown>
+                  </div>
                 </div>
               </div>
             ))}
