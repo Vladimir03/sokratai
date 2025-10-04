@@ -12,6 +12,7 @@ import { saveChatToSessionCache, loadChatFromSessionCache } from "@/utils/chatCa
 import { messageBatcher } from "@/utils/messageBatcher";
 import { debounce } from "@/utils/debounce";
 import { useNetworkStatus } from "@/hooks/useNetworkStatus";
+import { PerformanceMonitor } from "@/utils/performanceMetrics";
 // KaTeX CSS теперь загружается динамически в ChatMessage
 
 const MAX_MESSAGE_LENGTH = 2000;
@@ -119,6 +120,11 @@ const Chat = () => {
   useEffect(() => {
     loadChatHistory();
     
+    // Логируем статистику при монтировании
+    setTimeout(() => {
+      PerformanceMonitor.logSessionStats();
+    }, 1000);
+    
     // Flush pending messages при размонтировании
     return () => {
       messageBatcher.forceFlush();
@@ -169,81 +175,122 @@ const Chat = () => {
       toast.error("Требуется авторизация");
       throw new Error("No session");
     }
-    
-    const resp = await fetch(CHAT_URL, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${session.access_token}`,
-      },
-      body: JSON.stringify({ messages: userMessages }),
+
+    // Начинаем замер производительности
+    PerformanceMonitor.startRequest(() => {
+      toast.warning("Запрос занимает больше обычного...", {
+        duration: 3000,
+      });
     });
-
-    if (!resp.ok) {
-      if (resp.status === 429) {
-        toast.error("Превышен лимит запросов. Попробуйте позже.");
-        throw new Error("Rate limit exceeded");
-      }
-      if (resp.status === 402) {
-        toast.error("Требуется пополнение баланса.");
-        throw new Error("Payment required");
-      }
-      throw new Error("Failed to start stream");
-    }
-
-    if (!resp.body) throw new Error("No response body");
-
-    const reader = resp.body.getReader();
-    const decoder = new TextDecoder();
-    let textBuffer = "";
-    let streamDone = false;
-    let assistantContent = "";
-
-    while (!streamDone) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      textBuffer += decoder.decode(value, { stream: true });
-
-      let newlineIndex: number;
-      while ((newlineIndex = textBuffer.indexOf("\n")) !== -1) {
-        let line = textBuffer.slice(0, newlineIndex);
-        textBuffer = textBuffer.slice(newlineIndex + 1);
-
-        if (line.endsWith("\r")) line = line.slice(0, -1);
-        if (line.startsWith(":") || line.trim() === "") continue;
-        if (!line.startsWith("data: ")) continue;
-
-        const jsonStr = line.slice(6).trim();
-        if (jsonStr === "[DONE]") {
-          streamDone = true;
-          break;
-        }
-
-        try {
-          const parsed = JSON.parse(jsonStr);
-          const content = parsed.choices?.[0]?.delta?.content as string | undefined;
-          if (content) {
-            assistantContent += content;
-            setMessages((prev) => {
-              const last = prev[prev.length - 1];
-              if (last?.role === "assistant") {
-                return prev.map((m, i) =>
-                  i === prev.length - 1 ? { ...m, content: assistantContent } : m
-                );
-              }
-              return [...prev, { role: "assistant", content: assistantContent }];
-            });
-          }
-        } catch {
-          textBuffer = line + "\n" + textBuffer;
-          break;
-        }
-      }
-    }
     
-    // Сохраняем ответ ассистента в батч
-    if (assistantContent) {
-      saveMessageToBatch("assistant", assistantContent);
+    try {
+      const resp = await fetch(CHAT_URL, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify({ messages: userMessages }),
+      });
+
+      if (!resp.ok) {
+        const errorMessage = `HTTP ${resp.status}: ${resp.statusText}`;
+        console.error('🔴 Network error:', {
+          status: resp.status,
+          statusText: resp.statusText,
+          url: CHAT_URL,
+        });
+
+        if (resp.status === 429) {
+          toast.error("Превышен лимит запросов. Попробуйте позже.");
+          PerformanceMonitor.endRequest(false, "Rate limit exceeded");
+          throw new Error("Rate limit exceeded");
+        }
+        if (resp.status === 402) {
+          toast.error("Требуется пополнение баланса.");
+          PerformanceMonitor.endRequest(false, "Payment required");
+          throw new Error("Payment required");
+        }
+        
+        PerformanceMonitor.endRequest(false, errorMessage);
+        throw new Error("Failed to start stream");
+      }
+
+      if (!resp.body) {
+        PerformanceMonitor.endRequest(false, "No response body");
+        throw new Error("No response body");
+      }
+
+      const reader = resp.body.getReader();
+      const decoder = new TextDecoder();
+      let textBuffer = "";
+      let streamDone = false;
+      let assistantContent = "";
+      let firstTokenReceived = false;
+
+      while (!streamDone) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        textBuffer += decoder.decode(value, { stream: true });
+
+        let newlineIndex: number;
+        while ((newlineIndex = textBuffer.indexOf("\n")) !== -1) {
+          let line = textBuffer.slice(0, newlineIndex);
+          textBuffer = textBuffer.slice(newlineIndex + 1);
+
+          if (line.endsWith("\r")) line = line.slice(0, -1);
+          if (line.startsWith(":") || line.trim() === "") continue;
+          if (!line.startsWith("data: ")) continue;
+
+          const jsonStr = line.slice(6).trim();
+          if (jsonStr === "[DONE]") {
+            streamDone = true;
+            break;
+          }
+
+          try {
+            const parsed = JSON.parse(jsonStr);
+            const content = parsed.choices?.[0]?.delta?.content as string | undefined;
+            if (content) {
+              // Фиксируем первый токен
+              if (!firstTokenReceived) {
+                PerformanceMonitor.recordFirstToken();
+                firstTokenReceived = true;
+              }
+
+              assistantContent += content;
+              setMessages((prev) => {
+                const last = prev[prev.length - 1];
+                if (last?.role === "assistant") {
+                  return prev.map((m, i) =>
+                    i === prev.length - 1 ? { ...m, content: assistantContent } : m
+                  );
+                }
+                return [...prev, { role: "assistant", content: assistantContent }];
+              });
+            }
+          } catch {
+            textBuffer = line + "\n" + textBuffer;
+            break;
+          }
+        }
+      }
+      
+      // Сохраняем ответ ассистента в батч
+      if (assistantContent) {
+        saveMessageToBatch("assistant", assistantContent);
+      }
+
+      // Завершаем замер успешно
+      PerformanceMonitor.endRequest(true);
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      console.error('🔴 Stream error:', {
+        error: errorMessage,
+        timestamp: new Date().toISOString(),
+      });
+      PerformanceMonitor.endRequest(false, errorMessage);
+      throw error;
     }
   }, [saveMessageToBatch]);
 
