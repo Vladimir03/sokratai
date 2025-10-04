@@ -7,6 +7,7 @@ import { toast } from "sonner";
 import AuthGuard from "@/components/AuthGuard";
 import { supabase } from "@/integrations/supabase/client";
 import ChatMessage from "@/components/ChatMessage";
+import { useVirtualizer } from "@tanstack/react-virtual";
 import 'katex/dist/katex.min.css';
 
 const MAX_MESSAGE_LENGTH = 2000;
@@ -22,10 +23,19 @@ const Chat = () => {
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [loadingHistory, setLoadingHistory] = useState(true);
-  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const parentRef = useRef<HTMLDivElement>(null);
+  const scrollTimeoutRef = useRef<NodeJS.Timeout>();
 
+  // Debounced scroll to bottom
   const scrollToBottom = useCallback(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    if (scrollTimeoutRef.current) {
+      clearTimeout(scrollTimeoutRef.current);
+    }
+    scrollTimeoutRef.current = setTimeout(() => {
+      if (parentRef.current) {
+        parentRef.current.scrollTop = parentRef.current.scrollHeight;
+      }
+    }, 100);
   }, []);
 
   useEffect(() => {
@@ -177,15 +187,12 @@ const Chat = () => {
     if (isLoading) return;
 
     const userMessage: Message = { role: "user", content: text };
-    const newMessages = [...messages, userMessage];
-    setMessages(newMessages);
+    setMessages(prev => [...prev, userMessage]);
     setIsLoading(true);
-
-    // Сохраняем в фоне без ожидания
-    saveMessage("user", userMessage.content);
+    saveMessage("user", text);
 
     try {
-      const recentMessages = newMessages.slice(-10);
+      const recentMessages = [...messages, userMessage].slice(-10);
       await streamChat(recentMessages);
     } catch (error) {
       console.error("Chat error:", error);
@@ -212,19 +219,13 @@ const Chat = () => {
     if (isLoading) return;
 
     const userMessage: Message = { role: "user", content: trimmedInput };
-    const newMessages = [...messages, userMessage];
-    
-    // Мгновенное обновление UI
-    setMessages(newMessages);
+    setMessages(prev => [...prev, userMessage]);
     setInput("");
     setIsLoading(true);
-
-    // Сохраняем в фоне без блокировки
-    saveMessage("user", userMessage.content);
+    saveMessage("user", trimmedInput);
 
     try {
-      // Отправляем только последние 10 сообщений для контекста
-      const recentMessages = newMessages.slice(-10);
+      const recentMessages = [...messages, userMessage].slice(-10);
       await streamChat(recentMessages);
     } catch (error) {
       console.error("Chat error:", error);
@@ -239,7 +240,7 @@ const Chat = () => {
       <div className="fixed inset-0 flex items-center justify-center p-4">
         <Card className="w-full max-w-5xl h-[calc(100vh-2rem)] flex flex-col overflow-hidden shadow-elegant">
           {/* Messages */}
-          <div className="flex-1 overflow-y-auto p-4 space-y-4">
+          <div ref={parentRef} className="flex-1 overflow-y-auto p-4 space-y-4">
             {loadingHistory ? (
               <div className="flex justify-center items-center py-12">
                 <Loader2 className="w-8 h-8 animate-spin text-primary" />
@@ -272,7 +273,6 @@ const Chat = () => {
                 </div>
               </div>
             )}
-            <div ref={messagesEndRef} />
           </div>
 
           {/* Input */}
