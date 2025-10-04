@@ -3,8 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import AuthGuard from "@/components/AuthGuard";
-import { TrendingUp, CheckCircle, Target, Award, BarChart3 } from "lucide-react";
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
+import { TrendingUp, CheckCircle, Target, Award } from "lucide-react";
 
 interface Stats {
   totalSolved: number;
@@ -140,36 +139,6 @@ const Progress = () => {
                 </CardContent>
               </Card>
             </div>
-
-            {/* Bar Chart */}
-            <Card className="shadow-elegant">
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <BarChart3 className="w-5 h-5 text-primary" />
-                  Решённые задачи по темам
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                {Object.keys(stats.categoriesStats).length === 0 ? (
-                  <p className="text-center text-muted-foreground py-8">
-                    Решите первую задачу, чтобы увидеть график
-                  </p>
-                ) : (
-                  <ResponsiveContainer width="100%" height={300}>
-                    <BarChart data={Object.entries(stats.categoriesStats).map(([topic, data]) => ({
-                      topic,
-                      solved: data.solved
-                    }))}>
-                      <CartesianGrid strokeDasharray="3 3" />
-                      <XAxis dataKey="topic" />
-                      <YAxis />
-                      <Tooltip />
-                      <Bar dataKey="solved" fill="hsl(var(--primary))" />
-                    </BarChart>
-                  </ResponsiveContainer>
-                )}
-              </CardContent>
-            </Card>
 
             {/* Categories Stats */}
             <Card className="shadow-elegant">
