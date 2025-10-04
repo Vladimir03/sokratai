@@ -117,10 +117,12 @@ const Problems = () => {
 
       if (isCorrect) {
         toast.success("Правильно! +1 решённая задача");
-        await fetchProblems();
       } else {
         toast.error("Неправильно. Посмотрите решение ниже");
       }
+      
+      // Refresh problems list to show updated solved status
+      await fetchProblems();
     } catch (error: any) {
       toast.error(error.message);
     } finally {

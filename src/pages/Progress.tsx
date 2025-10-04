@@ -31,24 +31,32 @@ const Progress = () => {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
 
-      const { data: solutions, error } = await supabase
+      // Get user solutions
+      const { data: solutions, error: solutionsError } = await supabase
         .from("user_solutions")
-        .select(`
-          *,
-          problems (topic)
-        `)
+        .select("*")
         .eq("user_id", user.id);
 
-      if (error) throw error;
+      if (solutionsError) throw solutionsError;
+
+      // Get problems data from public view
+      const { data: problems, error: problemsError } = await supabase
+        .from("problems_public")
+        .select("id, topic");
+
+      if (problemsError) throw problemsError;
 
       const totalSolved = solutions?.length || 0;
       const correctCount = solutions?.filter(s => s.is_correct).length || 0;
       const accuracy = totalSolved > 0 ? Math.round((correctCount / totalSolved) * 100) : 0;
 
+      // Create a map of problem_id to topic
+      const problemTopicMap = new Map(problems?.map(p => [p.id, p.topic]) || []);
+
       const categoriesStats: Record<string, { solved: number; correct: number }> = {};
       
       solutions?.forEach(sol => {
-        const topic = (sol.problems as any)?.topic || "Прочее";
+        const topic = problemTopicMap.get(sol.problem_id) || "Прочее";
         if (!categoriesStats[topic]) {
           categoriesStats[topic] = { solved: 0, correct: 0 };
         }
