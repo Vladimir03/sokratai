@@ -5,6 +5,20 @@ import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
+import { z } from "zod";
+
+const signupSchema = z.object({
+  email: z.string().trim().email({ message: "Неверный формат email" }).max(255),
+  password: z.string()
+    .min(8, { message: "Минимум 8 символов" })
+    .regex(/[A-Z]/, { message: "Должна быть заглавная буква" })
+    .regex(/[0-9]/, { message: "Должна быть цифра" }),
+  username: z.string()
+    .trim()
+    .min(3, { message: "Минимум 3 символа" })
+    .max(30, { message: "Максимум 30 символов" })
+    .regex(/^[a-zA-Zа-яА-Я0-9_-]+$/, { message: "Только буквы, цифры, _ и -" }),
+});
 
 const SignUp = () => {
   const navigate = useNavigate();

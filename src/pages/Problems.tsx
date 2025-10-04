@@ -15,8 +15,7 @@ interface Problem {
   question: string;
   topic: string;
   level: string;
-  answer: string;
-  solution: string;
+  created_at: string;
   isSolved?: boolean;
 }
 
@@ -33,7 +32,7 @@ const Problems = () => {
   const fetchProblems = async () => {
     try {
       const { data: problemsData, error: problemsError } = await supabase
-        .from("problems")
+        .from("problems_public")
         .select("*")
         .order("created_at");
 

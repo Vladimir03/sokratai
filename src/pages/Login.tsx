@@ -5,6 +5,12 @@ import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
+import { z } from "zod";
+
+const loginSchema = z.object({
+  email: z.string().trim().email({ message: "Неверный формат email" }).max(255),
+  password: z.string().min(6, { message: "Минимум 6 символов" }),
+});
 
 const Login = () => {
   const navigate = useNavigate();
@@ -17,9 +23,16 @@ const Login = () => {
     setLoading(true);
 
     try {
+      const validation = loginSchema.safeParse({ email, password });
+      if (!validation.success) {
+        toast.error(validation.error.errors[0].message);
+        setLoading(false);
+        return;
+      }
+
       const { error } = await supabase.auth.signInWithPassword({
-        email,
-        password,
+        email: validation.data.email,
+        password: validation.data.password,
       });
 
       if (error) throw error;

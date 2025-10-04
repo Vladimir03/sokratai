@@ -34,7 +34,7 @@ const Progress = () => {
         .from("user_solutions")
         .select(`
           *,
-          problems (category)
+          problems (topic)
         `)
         .eq("user_id", user.id);
 

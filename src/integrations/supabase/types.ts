@@ -140,6 +140,13 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
+            foreignKeyName: "user_solutions_problem_id_fkey"
+            columns: ["problem_id"]
+            isOneToOne: false
+            referencedRelation: "problems_public"
+            referencedColumns: ["id"]
+          },
+          {
             foreignKeyName: "user_solutions_user_id_fkey"
             columns: ["user_id"]
             isOneToOne: false
@@ -150,10 +157,40 @@ export type Database = {
       }
     }
     Views: {
-      [_ in never]: never
+      problems_public: {
+        Row: {
+          created_at: string | null
+          id: string | null
+          level: string | null
+          question: string | null
+          topic: string | null
+        }
+        Insert: {
+          created_at?: string | null
+          id?: string | null
+          level?: string | null
+          question?: string | null
+          topic?: string | null
+        }
+        Update: {
+          created_at?: string | null
+          id?: string | null
+          level?: string | null
+          question?: string | null
+          topic?: string | null
+        }
+        Relationships: []
+      }
     }
     Functions: {
-      [_ in never]: never
+      check_problem_answer: {
+        Args: { problem_id_input: string; user_answer_input: string }
+        Returns: {
+          correct_answer: string
+          is_correct: boolean
+          solution: string
+        }[]
+      }
     }
     Enums: {
       [_ in never]: never
