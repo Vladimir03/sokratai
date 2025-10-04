@@ -3,12 +3,14 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import AuthGuard from "@/components/AuthGuard";
 import { CheckCircle2, Circle } from "lucide-react";
 import 'katex/dist/katex.min.css';
-import { InlineMath } from 'react-katex';
+import { InlineMath, BlockMath } from 'react-katex';
 
 interface Problem {
   id: string;
@@ -24,6 +26,11 @@ const Problems = () => {
   const [loading, setLoading] = useState(true);
   const [topicFilter, setTopicFilter] = useState<string>("all");
   const [levelFilter, setLevelFilter] = useState<string>("all");
+  const [selectedProblem, setSelectedProblem] = useState<Problem | null>(null);
+  const [userAnswer, setUserAnswer] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [showSolution, setShowSolution] = useState(false);
+  const [solution, setSolution] = useState("");
 
   useEffect(() => {
     fetchProblems();
@@ -65,6 +72,53 @@ const Problems = () => {
       toast.error(error.message);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleSubmitAnswer = async () => {
+    if (!selectedProblem || !userAnswer.trim()) {
+      toast.error("Введите ответ");
+      return;
+    }
+
+    setSubmitting(true);
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+
+      const { data, error } = await supabase
+        .rpc('check_problem_answer', {
+          problem_id_input: selectedProblem.id,
+          user_answer_input: userAnswer.trim()
+        });
+
+      if (error) throw error;
+
+      const result = data[0];
+      
+      // Save to user_solutions
+      await supabase.from('user_solutions').insert({
+        user_id: user.id,
+        problem_id: selectedProblem.id,
+        user_answer: userAnswer.trim(),
+        is_correct: result.is_correct
+      });
+
+      if (result.is_correct) {
+        toast.success("Правильно! 🎉");
+        setSelectedProblem(null);
+        setUserAnswer("");
+        setShowSolution(false);
+        fetchProblems(); // Refresh to show solved status
+      } else {
+        toast.error("Неправильно. Попробуйте ещё раз.");
+        setSolution(result.solution);
+        setShowSolution(true);
+      }
+    } catch (error: any) {
+      toast.error(error.message);
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -172,7 +226,15 @@ const Problems = () => {
                     </Badge>
                   </div>
                   
-                  <Button className="w-full">
+                  <Button 
+                    className="w-full"
+                    onClick={() => {
+                      setSelectedProblem(problem);
+                      setUserAnswer("");
+                      setShowSolution(false);
+                      setSolution("");
+                    }}
+                  >
                     Решить
                   </Button>
                 </CardContent>
@@ -180,6 +242,72 @@ const Problems = () => {
             ))}
           </div>
         )}
+
+        {/* Answer Submission Dialog */}
+        <Dialog open={!!selectedProblem} onOpenChange={(open) => !open && setSelectedProblem(null)}>
+          <DialogContent className="max-w-2xl">
+            <DialogHeader>
+              <DialogTitle>Решение задачи</DialogTitle>
+              <DialogDescription>
+                Введите ваш ответ ниже
+              </DialogDescription>
+            </DialogHeader>
+            
+            <div className="space-y-4">
+              <div className="p-4 bg-muted rounded-lg">
+                <p className="text-sm font-medium mb-2">Задача:</p>
+                <div className="text-base">
+                  {selectedProblem && parseLatex(selectedProblem.question)}
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Ваш ответ:</label>
+                <Input
+                  value={userAnswer}
+                  onChange={(e) => setUserAnswer(e.target.value)}
+                  placeholder="Введите ответ..."
+                  disabled={submitting}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && !e.shiftKey) {
+                      e.preventDefault();
+                      handleSubmitAnswer();
+                    }
+                  }}
+                />
+              </div>
+
+              {showSolution && solution && (
+                <div className="p-4 bg-destructive/10 border border-destructive/20 rounded-lg">
+                  <p className="text-sm font-medium mb-2 text-destructive">Решение:</p>
+                  <div className="text-sm whitespace-pre-wrap">
+                    {parseLatex(solution)}
+                  </div>
+                </div>
+              )}
+
+              <div className="flex gap-2 justify-end">
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    setSelectedProblem(null);
+                    setUserAnswer("");
+                    setShowSolution(false);
+                  }}
+                  disabled={submitting}
+                >
+                  Закрыть
+                </Button>
+                <Button
+                  onClick={handleSubmitAnswer}
+                  disabled={submitting || !userAnswer.trim()}
+                >
+                  {submitting ? "Проверка..." : "Проверить"}
+                </Button>
+              </div>
+            </div>
+          </DialogContent>
+        </Dialog>
       </div>
     </AuthGuard>
   );
