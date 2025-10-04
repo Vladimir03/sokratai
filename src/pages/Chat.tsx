@@ -270,8 +270,8 @@ const Chat = () => {
 
   return (
     <AuthGuard>
-      <div className="container mx-auto px-4 py-6 h-[calc(100vh-8rem)] md:h-[calc(100vh-5rem)] flex flex-col">
-        <Card className="flex-1 flex flex-col overflow-hidden shadow-elegant">
+      <div className="fixed inset-0 flex items-center justify-center p-4">
+        <Card className="w-full max-w-5xl h-[calc(100vh-2rem)] flex flex-col overflow-hidden shadow-elegant">
           {/* Messages */}
           <div className="flex-1 overflow-y-auto p-4 space-y-4">
             {loadingHistory ? (
