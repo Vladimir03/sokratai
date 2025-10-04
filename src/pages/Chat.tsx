@@ -7,7 +7,8 @@ import { toast } from "sonner";
 import AuthGuard from "@/components/AuthGuard";
 import { supabase } from "@/integrations/supabase/client";
 import ChatMessage from "@/components/ChatMessage";
-import { saveChatToCache, loadChatFromCache } from "@/utils/chatCache";
+import { saveChatToSessionCache, loadChatFromSessionCache } from "@/utils/chatCache";
+import { messageBatcher } from "@/utils/messageBatcher";
 import 'katex/dist/katex.min.css';
 
 const MAX_MESSAGE_LENGTH = 2000;
@@ -47,27 +48,31 @@ const Chat = () => {
     }
   }, [messages.length, scrollToBottom]);
 
-  useEffect(() => {
-    loadChatHistory();
-  }, []);
-
   const loadChatHistory = useCallback(async () => {
-    // Сначала загружаем из кэша для мгновенного отображения
-    const cachedMessages = loadChatFromCache();
-    if (cachedMessages.length > 0) {
-      setMessages(cachedMessages.map(msg => ({
-        role: msg.role,
-        content: msg.content,
-        id: msg.id,
-        tempId: msg.tempId,
-        status: msg.status === "sent" ? undefined : msg.status
-      })));
-    }
-
     try {
       const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return;
+      if (!user) {
+        setLoadingHistory(false);
+        return;
+      }
 
+      // Пробуем загрузить из sessionStorage кэша
+      const cachedMessages = loadChatFromSessionCache(user.id);
+      if (cachedMessages && cachedMessages.length > 0) {
+        console.log("Loading from session cache");
+        setMessages(cachedMessages.map(msg => ({
+          role: msg.role,
+          content: msg.content,
+          id: msg.id,
+          tempId: msg.tempId,
+          status: msg.status === "sent" ? undefined : msg.status
+        })));
+        setLoadingHistory(false);
+        return; // Работаем только с кэшем, не делаем запрос
+      }
+
+      // Только если кэш пустой или истек, делаем запрос
+      console.log("Loading from database");
       const { data, error } = await supabase
         .from('chat_messages')
         .select('*')
@@ -85,77 +90,60 @@ const Chat = () => {
           status: "sent"
         }));
         setMessages(loadedMessages);
-        saveChatToCache(loadedMessages.map(msg => ({
+        saveChatToSessionCache(loadedMessages.map(msg => ({
           ...msg,
           timestamp: Date.now()
-        })));
+        })), user.id);
       }
     } catch (error) {
       console.error('Error loading chat history:', error);
-      if (cachedMessages.length === 0) {
-        toast.error("Не удалось загрузить историю чата");
-      }
+      toast.error("Не удалось загрузить историю чата");
     } finally {
       setLoadingHistory(false);
     }
   }, []);
 
-  // Сохранение с обновлением статуса
-  const saveMessage = useCallback(async (
+  useEffect(() => {
+    loadChatHistory();
+    
+    // Flush pending messages при размонтировании
+    return () => {
+      messageBatcher.forceFlush();
+    };
+  }, [loadChatHistory]);
+
+  // Сохранение с батчингом
+  const saveMessageToBatch = useCallback((
     role: "user" | "assistant", 
     content: string,
     tempId?: string
-  ): Promise<string | null> => {
-    try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return null;
-
-      const { data, error } = await supabase
-        .from('chat_messages')
-        .insert({
-          user_id: user.id,
-          role,
-          content
-        })
-        .select()
-        .single();
-
-      if (error) throw error;
-
-      // Обновляем статус на "sent" и заменяем tempId на реальный ID
-      if (tempId && data) {
+  ) => {
+    // Добавляем в батч вместо немедленного сохранения
+    messageBatcher.addMessage({ role, content, tempId });
+    
+    // Обновляем статус на "sent" сразу (оптимистично)
+    if (tempId) {
+      setTimeout(() => {
         setMessages(prev => prev.map(msg => 
           msg.tempId === tempId 
-            ? { ...msg, id: data.id, status: "sent" as const, tempId: undefined }
+            ? { ...msg, status: "sent" as const }
             : msg
         ));
-        
-        // Обновляем кэш
-        const updatedMessages = messages.map(msg => 
-          msg.tempId === tempId 
-            ? { ...msg, id: data.id, status: "sent" as const, tempId: undefined }
-            : msg
-        );
-        saveChatToCache(updatedMessages.map(msg => ({
-          ...msg,
-          timestamp: Date.now()
-        })));
-      }
+      }, 100);
+    }
+  }, []);
 
-      return data?.id || null;
-    } catch (error) {
-      console.error('Error saving message:', error);
-      
-      // Обновляем статус на "error"
-      if (tempId) {
-        setMessages(prev => prev.map(msg => 
-          msg.tempId === tempId 
-            ? { ...msg, status: "error" as const, error: "Не удалось отправить" }
-            : msg
-        ));
-      }
-      
-      return null;
+  // Обновляем кэш при изменении сообщений
+  useEffect(() => {
+    if (messages.length > 0) {
+      supabase.auth.getUser().then(({ data: { user } }) => {
+        if (user) {
+          saveChatToSessionCache(messages.map(msg => ({
+            ...msg,
+            timestamp: Date.now()
+          })), user.id);
+        }
+      });
     }
   }, [messages]);
 
@@ -240,11 +228,11 @@ const Chat = () => {
       }
     }
     
-    // Сохраняем ответ ассистента в фоне
+    // Сохраняем ответ ассистента в батч
     if (assistantContent) {
-      saveMessage("assistant", assistantContent);
+      saveMessageToBatch("assistant", assistantContent);
     }
-  }, [saveMessage]);
+  }, [saveMessageToBatch]);
 
   const retryMessage = useCallback(async (tempId: string) => {
     const msgToRetry = messages.find(m => m.tempId === tempId);
@@ -257,9 +245,9 @@ const Chat = () => {
         : msg
     ));
 
-    // Пытаемся сохранить снова
-    await saveMessage(msgToRetry.role, msgToRetry.content, tempId);
-  }, [messages, saveMessage]);
+    // Пытаемся сохранить снова через батчер
+    saveMessageToBatch(msgToRetry.role, msgToRetry.content, tempId);
+  }, [messages, saveMessageToBatch]);
 
   const sendQuickMessage = useCallback(async (text: string) => {
     if (isLoading) return;
@@ -274,22 +262,14 @@ const Chat = () => {
     
     // Optimistic update
     setMessages(prev => [...prev, userMessage]);
-    
-    // Сохраняем в кэш
-    const updatedMessages = [...messages, userMessage];
-    saveChatToCache(updatedMessages.map(msg => ({
-      ...msg,
-      timestamp: Date.now()
-    })));
-
     setIsLoading(true);
 
-    // Сохраняем в БД в фоне
-    saveMessage("user", text, tempId);
+    // Сохраняем в батч (не блокируем UI)
+    saveMessageToBatch("user", text, tempId);
 
     try {
-      // Начинаем стриминг сразу, не дожидаясь сохранения
-      const recentMessages = updatedMessages.slice(-10);
+      // Начинаем стриминг сразу
+      const recentMessages = [...messages, userMessage].slice(-10);
       await streamChat(recentMessages);
     } catch (error) {
       console.error("Chat error:", error);
@@ -297,7 +277,7 @@ const Chat = () => {
     } finally {
       setIsLoading(false);
     }
-  }, [isLoading, messages, saveMessage, streamChat]);
+  }, [isLoading, messages, saveMessageToBatch, streamChat]);
 
   const handleSubmit = useCallback(async (e: React.FormEvent) => {
     e.preventDefault();
@@ -326,22 +306,14 @@ const Chat = () => {
     // Optimistic update
     setMessages(prev => [...prev, userMessage]);
     setInput("");
-    
-    // Сохраняем в кэш
-    const updatedMessages = [...messages, userMessage];
-    saveChatToCache(updatedMessages.map(msg => ({
-      ...msg,
-      timestamp: Date.now()
-    })));
-
     setIsLoading(true);
 
-    // Сохраняем в БД в фоне
-    saveMessage("user", trimmedInput, tempId);
+    // Сохраняем в батч (не блокируем UI)
+    saveMessageToBatch("user", trimmedInput, tempId);
 
     try {
-      // Начинаем стриминг сразу, не дожидаясь сохранения
-      const recentMessages = updatedMessages.slice(-10);
+      // Начинаем стриминг сразу
+      const recentMessages = [...messages, userMessage].slice(-10);
       await streamChat(recentMessages);
     } catch (error) {
       console.error("Chat error:", error);
@@ -349,7 +321,7 @@ const Chat = () => {
     } finally {
       setIsLoading(false);
     }
-  }, [input, isLoading, messages, saveMessage, streamChat]);
+  }, [input, isLoading, messages, saveMessageToBatch, streamChat]);
 
   return (
     <AuthGuard>
