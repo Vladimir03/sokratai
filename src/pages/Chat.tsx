@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card } from "@/components/ui/card";
@@ -6,10 +6,7 @@ import { Send, Mic, MessageSquare, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import AuthGuard from "@/components/AuthGuard";
 import { supabase } from "@/integrations/supabase/client";
-import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
-import remarkMath from 'remark-math';
-import rehypeKatex from 'rehype-katex';
+import ChatMessage from "@/components/ChatMessage";
 import 'katex/dist/katex.min.css';
 
 const MAX_MESSAGE_LENGTH = 2000;
@@ -27,19 +24,21 @@ const Chat = () => {
   const [loadingHistory, setLoadingHistory] = useState(true);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  const scrollToBottom = () => {
+  const scrollToBottom = useCallback(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  };
+  }, []);
 
   useEffect(() => {
-    scrollToBottom();
-  }, [messages]);
+    if (messages.length > 0) {
+      scrollToBottom();
+    }
+  }, [messages.length, scrollToBottom]);
 
   useEffect(() => {
     loadChatHistory();
   }, []);
 
-  const loadChatHistory = async () => {
+  const loadChatHistory = useCallback(async () => {
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
@@ -67,10 +66,10 @@ const Chat = () => {
     } finally {
       setLoadingHistory(false);
     }
-  };
+  }, []);
 
   // Сохранение в фоне без блокировки UI
-  const saveMessage = (role: "user" | "assistant", content: string) => {
+  const saveMessage = useCallback((role: "user" | "assistant", content: string) => {
     supabase.auth.getUser().then(({ data: { user } }) => {
       if (!user) return;
 
@@ -85,10 +84,10 @@ const Chat = () => {
           if (error) console.error('Error saving message:', error);
         });
     });
-  };
+  }, []);
 
 
-  const streamChat = async (userMessages: Message[]) => {
+  const streamChat = useCallback(async (userMessages: Message[]) => {
     const CHAT_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/chat`;
     
     const { data: { session } } = await supabase.auth.getSession();
@@ -172,9 +171,9 @@ const Chat = () => {
     if (assistantContent) {
       saveMessage("assistant", assistantContent);
     }
-  };
+  }, [saveMessage]);
 
-  const sendQuickMessage = async (text: string) => {
+  const sendQuickMessage = useCallback(async (text: string) => {
     if (isLoading) return;
 
     const userMessage: Message = { role: "user", content: text };
@@ -194,9 +193,9 @@ const Chat = () => {
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [isLoading, messages, saveMessage, streamChat]);
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleSubmit = useCallback(async (e: React.FormEvent) => {
     e.preventDefault();
     const trimmedInput = input.trim();
     
@@ -233,7 +232,7 @@ const Chat = () => {
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [input, isLoading, messages, saveMessage, streamChat]);
 
   return (
     <AuthGuard>
@@ -254,65 +253,12 @@ const Chat = () => {
             ) : null}
 
             {messages.map((message, index) => (
-              <div
-                key={index}
-                className={`flex ${message.role === "user" ? "justify-end" : "justify-start"}`}
-              >
-                <div className={`max-w-[80%] ${message.role === "user" ? "" : "space-y-3"}`}>
-                  <div
-                    className={`p-4 rounded-2xl ${
-                      message.role === "user"
-                        ? "bg-primary text-primary-foreground"
-                        : "bg-muted"
-                    }`}
-                  >
-                    <div className="prose prose-sm dark:prose-invert max-w-none">
-                      <ReactMarkdown
-                        remarkPlugins={[remarkGfm, remarkMath]}
-                        rehypePlugins={[rehypeKatex]}
-                        components={{
-                          p: ({ node, ...props }) => <p className="mb-3 leading-relaxed last:mb-0" {...props} />,
-                          strong: ({ node, ...props }) => <strong className="font-bold text-primary" {...props} />,
-                          ul: ({ node, ...props }) => <ul className="list-disc ml-4 mb-3 space-y-1" {...props} />,
-                          ol: ({ node, ...props }) => <ol className="list-decimal ml-4 mb-3 space-y-2" {...props} />,
-                          li: ({ node, ...props }) => <li className="ml-2" {...props} />,
-                          h3: ({ node, ...props }) => <h3 className="font-bold text-lg mt-4 mb-2" {...props} />,
-                        }}
-                      >
-                        {message.content}
-                      </ReactMarkdown>
-                    </div>
-                  </div>
-                  
-                  {message.role === "assistant" && !isLoading && (
-                    <div className="flex gap-2 flex-wrap px-1">
-                      <button 
-                        onClick={() => sendQuickMessage("Покажи полное решение с объяснением каждого шага")}
-                        className="text-xs px-3 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 rounded-full border border-blue-200 transition-colors dark:bg-blue-950 dark:hover:bg-blue-900 dark:text-blue-300 dark:border-blue-800"
-                        disabled={isLoading}
-                      >
-                        📋 Полное решение
-                      </button>
-                      
-                      <button 
-                        onClick={() => sendQuickMessage("Дай мне похожую задачу для практики")}
-                        className="text-xs px-3 py-1.5 bg-green-50 hover:bg-green-100 text-green-700 rounded-full border border-green-200 transition-colors dark:bg-green-950 dark:hover:bg-green-900 dark:text-green-300 dark:border-green-800"
-                        disabled={isLoading}
-                      >
-                        ✍️ Похожая задача
-                      </button>
-                      
-                      <button 
-                        onClick={() => sendQuickMessage("Объясни этот момент подробнее")}
-                        className="text-xs px-3 py-1.5 bg-purple-50 hover:bg-purple-100 text-purple-700 rounded-full border border-purple-200 transition-colors dark:bg-purple-950 dark:hover:bg-purple-900 dark:text-purple-300 dark:border-purple-800"
-                        disabled={isLoading}
-                      >
-                        🔍 Подробнее
-                      </button>
-                    </div>
-                  )}
-                </div>
-              </div>
+              <ChatMessage
+                key={message.id || index}
+                message={message}
+                isLoading={isLoading}
+                onQuickMessage={sendQuickMessage}
+              />
             ))}
 
             {isLoading && (
