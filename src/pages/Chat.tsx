@@ -218,11 +218,7 @@ const Chat = () => {
     const userQuery = lastUserMessage?.content || '';
 
     // Начинаем замер производительности
-    PerformanceMonitor.startRequest(() => {
-      toast.warning("Запрос занимает больше обычного...", {
-        duration: 3000,
-      });
-    }, userQuery);
+    PerformanceMonitor.startRequest(undefined, userQuery);
 
     // Таймаут для отмены через 30 секунд
     abortControllerRef.current = new AbortController();
