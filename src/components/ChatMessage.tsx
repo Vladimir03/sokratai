@@ -107,19 +107,19 @@ const ChatMessage = memo(({ message, isLoading, onQuickMessage, onRetry }: ChatM
             </button>
             
             <button 
+              onClick={() => onQuickMessage("Объясни этот момент подробнее")}
+              className="text-xs px-3 py-1.5 bg-purple-50 hover:bg-purple-100 text-purple-700 rounded-full border border-purple-200 transition-colors dark:bg-purple-950 dark:hover:bg-purple-900 dark:text-purple-300 dark:border-purple-800"
+              disabled={isLoading}
+            >
+              🔍 Объясни подробнее
+            </button>
+            
+            <button 
               onClick={() => onQuickMessage("Дай мне похожую задачу для практики")}
               className="text-xs px-3 py-1.5 bg-green-50 hover:bg-green-100 text-green-700 rounded-full border border-green-200 transition-colors dark:bg-green-950 dark:hover:bg-green-900 dark:text-green-300 dark:border-green-800"
               disabled={isLoading}
             >
               ✍️ Похожая задача
-            </button>
-            
-            <button 
-              onClick={() => onQuickMessage("Объясни этот момент подробнее")}
-              className="text-xs px-3 py-1.5 bg-purple-50 hover:bg-purple-100 text-purple-700 rounded-full border border-purple-200 transition-colors dark:bg-purple-950 dark:hover:bg-purple-900 dark:text-purple-300 dark:border-purple-800"
-              disabled={isLoading}
-            >
-              🔍 Подробнее
             </button>
           </div>
         )}
