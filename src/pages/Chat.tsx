@@ -32,8 +32,12 @@ const Chat = () => {
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [loadingHistory, setLoadingHistory] = useState(true);
+  const [loadingStartTime, setLoadingStartTime] = useState<number | null>(null);
+  const [loadingMessage, setLoadingMessage] = useState("ИИ думает...");
+  const [showCancelButton, setShowCancelButton] = useState(false);
   const parentRef = useRef<HTMLDivElement>(null);
   const scrollTimeoutRef = useRef<NodeJS.Timeout>();
+  const abortControllerRef = useRef<AbortController | null>(null);
   const networkStatus = useNetworkStatus();
 
   // Показываем уведомление при плохом соединении
@@ -168,6 +172,29 @@ const Chat = () => {
     }
   }, [messages]);
 
+  // Динамические сообщения загрузки на основе времени
+  useEffect(() => {
+    if (!isLoading || !loadingStartTime) {
+      return;
+    }
+
+    const interval = setInterval(() => {
+      const elapsed = Date.now() - loadingStartTime;
+      
+      if (elapsed > 15000) {
+        setShowCancelButton(true);
+      }
+      
+      if (elapsed > 10000) {
+        setLoadingMessage("Почти готово...");
+      } else if (elapsed > 5000) {
+        setLoadingMessage("ИИ решает сложную задачу...");
+      }
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, [isLoading, loadingStartTime]);
+
 
   const streamChat = useCallback(async (userMessages: Message[]) => {
     const CHAT_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/chat`;
@@ -177,6 +204,11 @@ const Chat = () => {
       toast.error("Требуется авторизация");
       throw new Error("No session");
     }
+
+    // Инициализация состояния загрузки
+    setLoadingStartTime(Date.now());
+    setLoadingMessage("ИИ думает...");
+    setShowCancelButton(false);
 
     // Получаем последнее сообщение пользователя для метрик
     const lastUserMessage = userMessages
@@ -197,10 +229,10 @@ const Chat = () => {
       toast.info("ИИ думает над ответом...", { duration: 2000 });
     }, 3000);
 
-    // Таймаут для отмены через 10 секунд
-    const abortController = new AbortController();
+    // Таймаут для отмены через 30 секунд (увеличили чтобы дать больше времени)
+    abortControllerRef.current = new AbortController();
     const cancelTimer = setTimeout(() => {
-      abortController.abort();
+      abortControllerRef.current?.abort();
       toast.error("Запрос занял слишком много времени. Попробуйте снова.", {
         duration: 5000,
         action: {
@@ -208,7 +240,7 @@ const Chat = () => {
           onClick: () => window.location.reload()
         }
       });
-    }, 10000);
+    }, 30000);
     
     try {
       const resp = await fetch(CHAT_URL, {
@@ -218,7 +250,7 @@ const Chat = () => {
           Authorization: `Bearer ${session.access_token}`,
         },
         body: JSON.stringify({ messages: userMessages }),
-        signal: abortController.signal,
+        signal: abortControllerRef.current?.signal,
       });
 
       // Отменяем таймеры при успешном ответе
@@ -340,10 +372,16 @@ const Chat = () => {
       // Завершаем замер успешно
       clearTimeout(thinkingTimer);
       clearTimeout(cancelTimer);
+      setLoadingStartTime(null);
+      setShowCancelButton(false);
+      abortControllerRef.current = null;
       PerformanceMonitor.endRequest(true);
     } catch (error) {
       clearTimeout(thinkingTimer);
       clearTimeout(cancelTimer);
+      setLoadingStartTime(null);
+      setShowCancelButton(false);
+      abortControllerRef.current = null;
       
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
       
@@ -376,6 +414,21 @@ const Chat = () => {
     // Пытаемся сохранить снова через батчер
     saveMessageToBatch(msgToRetry.role, msgToRetry.content, tempId);
   }, [messages, saveMessageToBatch]);
+
+  const cancelRequest = useCallback(() => {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      setIsLoading(false);
+      setLoadingStartTime(null);
+      setShowCancelButton(false);
+      abortControllerRef.current = null;
+      
+      // Убираем пустой placeholder ответа
+      setMessages(prev => prev.filter(m => m.content !== ""));
+      
+      toast.info("Запрос отменен. Вы можете отправить новое сообщение.");
+    }
+  }, []);
 
   const sendQuickMessage = useCallback(async (text: string) => {
     // Блокируем отправку при offline
@@ -504,6 +557,28 @@ const Chat = () => {
                 onRetry={message.status === "error" && message.tempId ? () => retryMessage(message.tempId!) : undefined}
               />
             ))}
+
+            {/* Прогресс-бар загрузки */}
+            {isLoading && (
+              <div className="flex justify-start">
+                <div className="flex flex-col gap-2 max-w-[80%]">
+                  <div className="flex items-center gap-2 px-4 py-3 rounded-lg bg-secondary/50 border border-border/50">
+                    <div className="h-4 w-4 rounded-full border-2 border-primary border-t-transparent animate-spin" />
+                    <span className="text-sm text-foreground font-medium">{loadingMessage}</span>
+                  </div>
+                  {showCancelButton && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={cancelRequest}
+                      className="w-fit self-start"
+                    >
+                      Отменить запрос
+                    </Button>
+                  )}
+                </div>
+              </div>
+            )}
 
             {isLoading && (
               <div className="flex justify-start">
