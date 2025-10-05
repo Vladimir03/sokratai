@@ -170,6 +170,33 @@ serve(async (req) => {
       );
     }
 
+    // Transform messages to support multimodal (text + images)
+    const transformedMessages = messages.map((msg: any) => {
+      // If message has an image, use multimodal format
+      if (msg.image_url) {
+        return {
+          role: msg.role,
+          content: [
+            {
+              type: "text",
+              text: msg.content
+            },
+            {
+              type: "image_url",
+              image_url: {
+                url: msg.image_url
+              }
+            }
+          ]
+        };
+      }
+      // Otherwise, keep as simple text message
+      return {
+        role: msg.role,
+        content: msg.content
+      };
+    });
+
     const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
     
     if (!LOVABLE_API_KEY) {
@@ -177,7 +204,7 @@ serve(async (req) => {
       throw new Error("LOVABLE_API_KEY is not configured");
     }
 
-    console.log("Calling AI gateway with messages:", messages.length);
+    console.log("Calling AI gateway with messages:", transformedMessages.length);
 
     const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
       method: "POST",
@@ -186,13 +213,13 @@ serve(async (req) => {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model: "google/gemini-2.5-flash",
+        model: "google/gemini-2.5-pro",
         messages: [
           { 
             role: "system", 
             content: SYSTEM_PROMPT
           },
-          ...messages,
+          ...transformedMessages,
         ],
         stream: true,
       }),

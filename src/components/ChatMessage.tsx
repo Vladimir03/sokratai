@@ -13,6 +13,7 @@ interface Message {
   tempId?: string;
   status?: "sending" | "sent" | "error";
   error?: string;
+  image_url?: string;
 }
 
 interface ChatMessageProps {
@@ -72,6 +73,18 @@ const ChatMessage = memo(({ message, isLoading, onQuickMessage, onRetry }: ChatM
               : "bg-muted"
           }`}
         >
+          {/* Отображение изображения */}
+          {message.image_url && (
+            <div className="mb-3">
+              <img 
+                src={message.image_url} 
+                alt="Загруженное изображение"
+                className="max-w-sm rounded-lg border border-border/20 cursor-pointer hover:opacity-90 transition-opacity"
+                onClick={() => window.open(message.image_url, '_blank')}
+              />
+            </div>
+          )}
+          
           <div className="prose prose-sm dark:prose-invert max-w-none">
             <Suspense fallback={<div className="animate-pulse">{message.content}</div>}>
               <ReactMarkdown

@@ -25,6 +25,7 @@ interface Message {
   tempId?: string;
   status?: "sending" | "sent" | "error";
   error?: string;
+  image_url?: string;
 }
 
 const Chat = () => {
@@ -35,10 +36,13 @@ const Chat = () => {
   const [loadingStartTime, setLoadingStartTime] = useState<number | null>(null);
   const [loadingMessage, setLoadingMessage] = useState("ИИ думает...");
   const [showCancelButton, setShowCancelButton] = useState(false);
+  const [isUploading, setIsUploading] = useState(false);
+  const [selectedImage, setSelectedImage] = useState<string | null>(null);
   const parentRef = useRef<HTMLDivElement>(null);
   const scrollTimeoutRef = useRef<NodeJS.Timeout>();
   const abortControllerRef = useRef<AbortController | null>(null);
   const networkStatus = useNetworkStatus();
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Показываем уведомление при плохом соединении
   useEffect(() => {
@@ -101,7 +105,8 @@ const Chat = () => {
           role: msg.role as "user" | "assistant",
           content: msg.content,
           id: msg.id,
-          status: "sent"
+          status: "sent",
+          image_url: msg.image_url
         }));
         setMessages(loadedMessages);
         saveChatToSessionCache(loadedMessages.map(msg => ({
@@ -135,13 +140,14 @@ const Chat = () => {
   const saveMessageToBatch = useCallback((
     role: "user" | "assistant", 
     content: string,
-    tempId?: string
+    tempId?: string,
+    image_url?: string
   ) => {
     // Начинаем замер DB save
     PerformanceMonitor.startDbSave();
     
     // Добавляем в батч вместо немедленного сохранения
-    messageBatcher.addMessage({ role, content, tempId });
+    messageBatcher.addMessage({ role, content, tempId, image_url });
     
     // Завершаем замер DB save (батчинг асинхронный, но мы замеряем добавление в очередь)
     setTimeout(() => {
@@ -397,6 +403,65 @@ const Chat = () => {
     }
   }, [saveMessageToBatch]);
 
+  const handleImageUpload = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    // Проверка размера (макс 5MB)
+    if (file.size > 5 * 1024 * 1024) {
+      toast.error('Файл слишком большой. Максимум 5MB');
+      return;
+    }
+
+    // Проверка типа
+    const validTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
+    if (!validTypes.includes(file.type)) {
+      toast.error('Поддерживаются только JPG, PNG и WebP');
+      return;
+    }
+
+    setIsUploading(true);
+
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        toast.error('Требуется авторизация');
+        return;
+      }
+
+      // Загрузка в Supabase Storage
+      const fileExt = file.name.split('.').pop();
+      const fileName = `${Date.now()}.${fileExt}`;
+      const filePath = `${user.id}/${fileName}`;
+
+      const { error: uploadError } = await supabase.storage
+        .from('chat-images')
+        .upload(filePath, file);
+
+      if (uploadError) throw uploadError;
+
+      // Получение публичного URL
+      const { data: { publicUrl } } = supabase.storage
+        .from('chat-images')
+        .getPublicUrl(filePath);
+
+      setSelectedImage(publicUrl);
+      toast.success('Изображение загружено! Добавьте вопрос и отправьте.');
+    } catch (error) {
+      console.error('Ошибка загрузки:', error);
+      toast.error('Не удалось загрузить изображение');
+    } finally {
+      setIsUploading(false);
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
+    }
+  }, []);
+
+  const removeSelectedImage = useCallback(() => {
+    setSelectedImage(null);
+  }, []);
+
   const retryMessage = useCallback(async (tempId: string) => {
     const msgToRetry = messages.find(m => m.tempId === tempId);
     if (!msgToRetry) return;
@@ -409,7 +474,7 @@ const Chat = () => {
     ));
 
     // Пытаемся сохранить снова через батчер
-    saveMessageToBatch(msgToRetry.role, msgToRetry.content, tempId);
+    saveMessageToBatch(msgToRetry.role, msgToRetry.content, tempId, msgToRetry.image_url);
   }, [messages, saveMessageToBatch]);
 
   const cancelRequest = useCallback(() => {
@@ -472,8 +537,8 @@ const Chat = () => {
     e.preventDefault();
     const trimmedInput = input.trim();
     
-    if (!trimmedInput) {
-      toast.error("Сообщение не может быть пустым");
+    if (!trimmedInput && !selectedImage) {
+      toast.error("Сообщение или изображение обязательны");
       return;
     }
     
@@ -493,9 +558,10 @@ const Chat = () => {
     const tempId = `temp_${Date.now()}_${Math.random()}`;
     const userMessage: Message = { 
       role: "user", 
-      content: trimmedInput,
+      content: trimmedInput || "Помоги с этой задачей",
       tempId,
-      status: "sending"
+      status: "sending",
+      image_url: selectedImage || undefined
     };
     
     // Мгновенный optimistic update
@@ -507,7 +573,10 @@ const Chat = () => {
     setIsLoading(true);
 
     // Сохраняем в батч полностью в фоне (не блокируем)
-    saveMessageToBatch("user", trimmedInput, tempId);
+    saveMessageToBatch("user", trimmedInput || "Помоги с этой задачей", tempId, selectedImage || undefined);
+
+    // Очищаем выбранное изображение
+    setSelectedImage(null);
 
     try {
       // Начинаем стриминг немедленно без задержек
@@ -521,7 +590,7 @@ const Chat = () => {
     } finally {
       setIsLoading(false);
     }
-  }, [input, isLoading, messages, saveMessageToBatch, streamChat, networkStatus.quality]);
+  }, [input, isLoading, messages, saveMessageToBatch, streamChat, networkStatus.quality, selectedImage]);
 
   return (
     <AuthGuard>
@@ -581,17 +650,71 @@ const Chat = () => {
 
           {/* Input */}
           <form onSubmit={handleSubmit} className="p-4 border-t">
-            <div className="flex gap-2">
+            {/* Превью загруженного изображения */}
+            {selectedImage && (
+              <div className="mb-3 relative inline-block">
+                <img 
+                  src={selectedImage} 
+                  alt="Загруженное изображение" 
+                  className="max-w-xs max-h-32 rounded-lg border border-border"
+                />
+                <button
+                  type="button"
+                  onClick={removeSelectedImage}
+                  className="absolute -top-2 -right-2 bg-destructive text-destructive-foreground rounded-full p-1 hover:bg-destructive/90 transition-colors"
+                  title="Удалить изображение"
+                >
+                  ✕
+                </button>
+              </div>
+            )}
+            
+            {/* Индикатор загрузки */}
+            {isUploading && (
+              <div className="mb-3 flex items-center gap-2 text-sm text-muted-foreground">
+                <div className="animate-spin">⏳</div>
+                Загрузка изображения...
+              </div>
+            )}
+            
+            <div className="flex gap-2 items-end">
+              <input
+                type="file"
+                ref={fileInputRef}
+                accept="image/jpeg,image/jpg,image/png,image/webp"
+                className="hidden"
+                onChange={handleImageUpload}
+                disabled={isUploading || isLoading}
+              />
+              
+              <Button
+                type="button"
+                variant="outline"
+                size="icon"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={isUploading || isLoading}
+                title="Прикрепить изображение"
+              >
+                📎
+              </Button>
+              
               <Input
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
-                placeholder="Напишите ваш вопрос..."
+                placeholder={selectedImage ? "Добавьте вопрос (опционально)" : "Напишите ваш вопрос..."}
                 className="flex-1"
+                disabled={isLoading}
               />
+              
               <Button type="button" variant="outline" size="icon" disabled={isLoading}>
                 <Mic className="w-4 h-4" />
               </Button>
-              <Button type="submit" size="icon" disabled={isLoading || !input.trim()}>
+              
+              <Button 
+                type="submit" 
+                size="icon" 
+                disabled={isLoading || isUploading || (!input.trim() && !selectedImage)}
+              >
                 <Send className="w-4 h-4" />
               </Button>
             </div>

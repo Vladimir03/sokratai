@@ -5,6 +5,7 @@ interface PendingMessage {
   role: "user" | "assistant";
   content: string;
   tempId?: string;
+  image_url?: string;
 }
 
 class MessageBatcher {
@@ -50,6 +51,7 @@ class MessageBatcher {
               user_id: user.id,
               role: msg.role,
               content: msg.content,
+              image_url: msg.image_url || null,
             }))
           );
 
