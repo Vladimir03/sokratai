@@ -57,7 +57,7 @@ const DevPanel = () => {
     };
   }).reverse();
 
-  const errorCount = recentRequests.filter(r => !r.success).length;
+  const errorCount = stats?.errors || 0;
 
   return (
     <div className="fixed bottom-4 right-4 z-50 w-96 max-h-[80vh] overflow-hidden">
