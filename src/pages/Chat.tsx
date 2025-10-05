@@ -45,16 +45,11 @@ const Chat = () => {
     }
   }, [networkStatus.quality]);
 
-  // Debounced scroll to bottom
+  // Мгновенный scroll to bottom
   const scrollToBottom = useCallback(() => {
-    if (scrollTimeoutRef.current) {
-      clearTimeout(scrollTimeoutRef.current);
+    if (parentRef.current) {
+      parentRef.current.scrollTop = parentRef.current.scrollHeight;
     }
-    scrollTimeoutRef.current = setTimeout(() => {
-      if (parentRef.current) {
-        parentRef.current.scrollTop = parentRef.current.scrollHeight;
-      }
-    }, 100);
   }, []);
 
   useEffect(() => {
@@ -141,15 +136,13 @@ const Chat = () => {
     // Добавляем в батч вместо немедленного сохранения
     messageBatcher.addMessage({ role, content, tempId });
     
-    // Обновляем статус на "sent" сразу (оптимистично)
+    // Обновляем статус на "sent" мгновенно (оптимистично)
     if (tempId) {
-      setTimeout(() => {
-        setMessages(prev => prev.map(msg => 
-          msg.tempId === tempId 
-            ? { ...msg, status: "sent" as const }
-            : msg
-        ));
-      }, 100);
+      setMessages(prev => prev.map(msg => 
+        msg.tempId === tempId 
+          ? { ...msg, status: "sent" as const }
+          : msg
+      ));
     }
   }, []);
 
@@ -190,6 +183,24 @@ const Chat = () => {
         duration: 3000,
       });
     }, userQuery);
+
+    // Таймер "ИИ думает..." через 3 секунды
+    const thinkingTimer = setTimeout(() => {
+      toast.info("ИИ думает над ответом...", { duration: 2000 });
+    }, 3000);
+
+    // Таймаут для отмены через 10 секунд
+    const abortController = new AbortController();
+    const cancelTimer = setTimeout(() => {
+      abortController.abort();
+      toast.error("Запрос занял слишком много времени. Попробуйте снова.", {
+        duration: 5000,
+        action: {
+          label: "Повторить",
+          onClick: () => window.location.reload()
+        }
+      });
+    }, 10000);
     
     try {
       const resp = await fetch(CHAT_URL, {
@@ -199,7 +210,12 @@ const Chat = () => {
           Authorization: `Bearer ${session.access_token}`,
         },
         body: JSON.stringify({ messages: userMessages }),
+        signal: abortController.signal,
       });
+
+      // Отменяем таймеры при успешном ответе
+      clearTimeout(thinkingTimer);
+      clearTimeout(cancelTimer);
 
       if (!resp.ok) {
         const errorMessage = `HTTP ${resp.status}: ${resp.statusText}`;
@@ -235,6 +251,26 @@ const Chat = () => {
       let streamDone = false;
       let assistantContent = "";
       let firstTokenReceived = false;
+      let updateScheduled = false;
+
+      // Debounced update для уменьшения re-renders
+      const scheduleUpdate = () => {
+        if (!updateScheduled) {
+          updateScheduled = true;
+          setTimeout(() => {
+            setMessages((prev) => {
+              const last = prev[prev.length - 1];
+              if (last?.role === "assistant") {
+                return prev.map((m, i) =>
+                  i === prev.length - 1 ? { ...m, content: assistantContent } : m
+                );
+              }
+              return [...prev, { role: "assistant", content: assistantContent }];
+            });
+            updateScheduled = false;
+          }, 50);
+        }
+      };
 
       while (!streamDone) {
         const { done, value } = await reader.read();
@@ -264,18 +300,11 @@ const Chat = () => {
               if (!firstTokenReceived) {
                 PerformanceMonitor.recordFirstToken();
                 firstTokenReceived = true;
+                clearTimeout(thinkingTimer);
               }
 
               assistantContent += content;
-              setMessages((prev) => {
-                const last = prev[prev.length - 1];
-                if (last?.role === "assistant") {
-                  return prev.map((m, i) =>
-                    i === prev.length - 1 ? { ...m, content: assistantContent } : m
-                  );
-                }
-                return [...prev, { role: "assistant", content: assistantContent }];
-              });
+              scheduleUpdate();
             }
           } catch {
             textBuffer = line + "\n" + textBuffer;
@@ -283,6 +312,17 @@ const Chat = () => {
           }
         }
       }
+
+      // Финальное обновление
+      setMessages((prev) => {
+        const last = prev[prev.length - 1];
+        if (last?.role === "assistant") {
+          return prev.map((m, i) =>
+            i === prev.length - 1 ? { ...m, content: assistantContent } : m
+          );
+        }
+        return [...prev, { role: "assistant", content: assistantContent }];
+      });
       
       // Сохраняем ответ ассистента в батч
       if (assistantContent) {
@@ -290,9 +330,21 @@ const Chat = () => {
       }
 
       // Завершаем замер успешно
+      clearTimeout(thinkingTimer);
+      clearTimeout(cancelTimer);
       PerformanceMonitor.endRequest(true);
     } catch (error) {
+      clearTimeout(thinkingTimer);
+      clearTimeout(cancelTimer);
+      
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      
+      // Проверяем, был ли запрос отменен
+      if (errorMessage.includes('abort')) {
+        console.warn('Request aborted due to timeout');
+        return; // Не пробрасываем ошибку, тост уже показан
+      }
+      
       console.error('🔴 Stream error:', {
         error: errorMessage,
         timestamp: new Date().toISOString(),
@@ -334,30 +386,29 @@ const Chat = () => {
       status: "sending"
     };
     
-    // Optimistic update
+    // Мгновенный optimistic update
     setMessages(prev => [...prev, userMessage]);
+    
+    // Мгновенно показываем placeholder для ответа
+    setMessages(prev => [...prev, { role: "assistant", content: "" }]);
     setIsLoading(true);
 
-    // Сохраняем в батч (не блокируем UI)
+    // Сохраняем в батч полностью в фоне (не блокируем)
     saveMessageToBatch("user", text, tempId);
 
     try {
-      // Начинаем стриминг сразу
+      // Начинаем стриминг немедленно
       const recentMessages = [...messages, userMessage].slice(-10);
       await streamChat(recentMessages);
     } catch (error) {
       console.error("Chat error:", error);
+      // Убираем placeholder при ошибке
+      setMessages(prev => prev.filter(m => m.content !== ""));
       toast.error("Ошибка при отправке сообщения");
     } finally {
       setIsLoading(false);
     }
   }, [isLoading, messages, saveMessageToBatch, streamChat, networkStatus.quality]);
-
-  // Debounced версия для quick messages
-  const debouncedSendQuickMessage = useCallback(
-    debounce(sendQuickMessage, 500),
-    [sendQuickMessage]
-  );
 
   const handleSubmit = useCallback(async (e: React.FormEvent) => {
     e.preventDefault();
@@ -389,20 +440,25 @@ const Chat = () => {
       status: "sending"
     };
     
-    // Optimistic update
+    // Мгновенный optimistic update
     setMessages(prev => [...prev, userMessage]);
     setInput("");
+    
+    // Мгновенно показываем placeholder для ответа
+    setMessages(prev => [...prev, { role: "assistant", content: "" }]);
     setIsLoading(true);
 
-    // Сохраняем в батч (не блокируем UI)
+    // Сохраняем в батч полностью в фоне (не блокируем)
     saveMessageToBatch("user", trimmedInput, tempId);
 
     try {
-      // Начинаем стриминг сразу
+      // Начинаем стриминг немедленно без задержек
       const recentMessages = [...messages, userMessage].slice(-10);
       await streamChat(recentMessages);
     } catch (error) {
       console.error("Chat error:", error);
+      // Убираем placeholder при ошибке
+      setMessages(prev => prev.filter(m => m.content !== ""));
       toast.error("Ошибка при отправке сообщения");
     } finally {
       setIsLoading(false);
@@ -436,7 +492,7 @@ const Chat = () => {
                 key={message.id || message.tempId || index}
                 message={message}
                 isLoading={isLoading}
-                onQuickMessage={debouncedSendQuickMessage}
+                onQuickMessage={sendQuickMessage}
                 onRetry={message.status === "error" && message.tempId ? () => retryMessage(message.tempId!) : undefined}
               />
             ))}
