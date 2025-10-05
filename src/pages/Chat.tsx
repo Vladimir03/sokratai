@@ -224,12 +224,7 @@ const Chat = () => {
       });
     }, userQuery);
 
-    // Таймер "ИИ думает..." через 3 секунды
-    const thinkingTimer = setTimeout(() => {
-      toast.info("ИИ думает над ответом...", { duration: 2000 });
-    }, 3000);
-
-    // Таймаут для отмены через 30 секунд (увеличили чтобы дать больше времени)
+    // Таймаут для отмены через 30 секунд
     abortControllerRef.current = new AbortController();
     const cancelTimer = setTimeout(() => {
       abortControllerRef.current?.abort();
@@ -253,8 +248,7 @@ const Chat = () => {
         signal: abortControllerRef.current?.signal,
       });
 
-      // Отменяем таймеры при успешном ответе
-      clearTimeout(thinkingTimer);
+      // Отменяем таймер при успешном ответе
       clearTimeout(cancelTimer);
 
       if (!resp.ok) {
@@ -340,7 +334,6 @@ const Chat = () => {
               if (!firstTokenReceived) {
                 PerformanceMonitor.recordFirstToken();
                 firstTokenReceived = true;
-                clearTimeout(thinkingTimer);
               }
 
               assistantContent += content;
@@ -370,14 +363,12 @@ const Chat = () => {
       }
 
       // Завершаем замер успешно
-      clearTimeout(thinkingTimer);
       clearTimeout(cancelTimer);
       setLoadingStartTime(null);
       setShowCancelButton(false);
       abortControllerRef.current = null;
       PerformanceMonitor.endRequest(true);
     } catch (error) {
-      clearTimeout(thinkingTimer);
       clearTimeout(cancelTimer);
       setLoadingStartTime(null);
       setShowCancelButton(false);
@@ -580,17 +571,6 @@ const Chat = () => {
               </div>
             )}
 
-            {isLoading && (
-              <div className="flex justify-start">
-                <div className="bg-muted p-4 rounded-2xl">
-                  <div className="flex space-x-2">
-                    <div className="w-2 h-2 bg-primary rounded-full animate-bounce" />
-                    <div className="w-2 h-2 bg-primary rounded-full animate-bounce" style={{ animationDelay: "0.2s" }} />
-                    <div className="w-2 h-2 bg-primary rounded-full animate-bounce" style={{ animationDelay: "0.4s" }} />
-                  </div>
-                </div>
-              </div>
-            )}
           </div>
 
           {/* Input */}
