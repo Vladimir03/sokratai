@@ -49,10 +49,13 @@ const DevPanel = () => {
 
   if (!isDebugMode) return null;
 
-  const chartData = recentRequests.map((req, index) => ({
-    name: `#${recentRequests.length - index}`,
-    time: (req.totalTime / 1000).toFixed(2),
-  })).reverse();
+  const chartData = recentRequests.map((req, index) => {
+    const totalTime = req.endTime ? (req.endTime - req.startTime) / 1000 : 0;
+    return {
+      name: `#${recentRequests.length - index}`,
+      time: totalTime.toFixed(2),
+    };
+  }).reverse();
 
   const errorCount = recentRequests.filter(r => !r.success).length;
 
@@ -171,44 +174,73 @@ const DevPanel = () => {
               </Card>
             )}
 
-            {/* Recent Requests */}
+            {/* Recent Requests with Breakdown */}
             <Card className="p-3 bg-secondary/50 border-border">
               <h3 className="text-xs font-medium text-foreground mb-2">
                 ⚡ Последние запросы
               </h3>
-              <div className="space-y-1 max-h-48 overflow-y-auto">
+              <div className="space-y-2 max-h-96 overflow-y-auto">
                 {recentRequests.length === 0 ? (
                   <p className="text-xs text-muted-foreground text-center py-2">
                     Нет данных
                   </p>
                 ) : (
-                  recentRequests.slice(0, 5).map((req, index) => (
-                    <div
-                      key={index}
-                      className="flex items-center justify-between p-2 bg-background rounded border border-border"
-                    >
-                      <div className="flex items-center gap-2 flex-1 min-w-0">
-                        <span className={`text-sm ${req.success ? 'text-green-500' : 'text-destructive'}`}>
-                          {req.success ? '✓' : '✗'}
-                        </span>
-                        <div className="flex-1 min-w-0">
-                          <p className="text-xs text-foreground truncate">
-                            {req.query || 'N/A'}
-                          </p>
-                          {req.error && (
-                            <p className="text-[10px] text-destructive truncate">
-                              {req.error}
+                  recentRequests.slice(0, 5).map((req, index) => {
+                    const breakdown = req.breakdown;
+                    const totalTime = req.endTime ? (req.endTime - req.startTime) / 1000 : 0;
+                    
+                    return (
+                      <div
+                        key={index}
+                        className="p-2 bg-background rounded border border-border"
+                      >
+                        <div className="flex items-center justify-between mb-1">
+                          <div className="flex items-center gap-2 flex-1 min-w-0">
+                            <span className={`text-sm ${req.success ? 'text-green-500' : 'text-destructive'}`}>
+                              {req.success ? '✓' : '✗'}
+                            </span>
+                            <p className="text-xs text-foreground truncate flex-1">
+                              {req.query || 'N/A'}
                             </p>
-                          )}
+                          </div>
+                          <span className="text-xs font-medium text-foreground ml-2">
+                            {totalTime.toFixed(2)}s
+                          </span>
                         </div>
+                        
+                        {breakdown && (
+                          <div className="pl-6 space-y-0.5 mt-1 border-l-2 border-primary/30">
+                            <div className="text-[10px] text-muted-foreground flex justify-between">
+                              <span>→ First token:</span>
+                              <span className="font-medium">{(breakdown.ttft / 1000).toFixed(2)}s</span>
+                            </div>
+                            <div className="text-[10px] text-muted-foreground flex justify-between">
+                              <span>→ Streaming:</span>
+                              <span className="font-medium">{(breakdown.streamingTime / 1000).toFixed(2)}s</span>
+                            </div>
+                            <div className="text-[10px] text-muted-foreground flex justify-between">
+                              <span>→ DB save:</span>
+                              <span className="font-medium">{(breakdown.dbSaveTime / 1000).toFixed(2)}s</span>
+                            </div>
+                            <div className={`text-[10px] font-semibold mt-1 ${
+                              breakdown.bottleneck === 'api' ? 'text-orange-500' :
+                              breakdown.bottleneck === 'streaming' ? 'text-yellow-500' :
+                              breakdown.bottleneck === 'database' ? 'text-red-500' :
+                              'text-green-500'
+                            }`}>
+                              ⚠️ {breakdown.bottleneck.toUpperCase()}: {breakdown.bottleneckDescription}
+                            </div>
+                          </div>
+                        )}
+                        
+                        {req.error && (
+                          <p className="text-[10px] text-destructive truncate mt-1 pl-6">
+                            {req.error}
+                          </p>
+                        )}
                       </div>
-                      <div className="text-right ml-2">
-                        <p className="text-xs font-medium text-foreground">
-                          {(req.totalTime / 1000).toFixed(2)}s
-                        </p>
-                      </div>
-                    </div>
-                  ))
+                    );
+                  })
                 )}
               </div>
             </Card>

@@ -1,25 +1,41 @@
 interface RequestMetrics {
   timestamp: number;
-  timeToFirstToken: number;
-  totalTime: number;
+  startTime: number;
+  firstTokenTime?: number;
+  endTime?: number;
+  dbSaveStart?: number;
+  dbSaveEnd?: number;
   success: boolean;
   error?: string;
   query?: string;
 }
 
+interface DetailedBreakdown {
+  ttft: number; // Time to first token
+  streamingTime: number; // First token → Complete
+  dbSaveTime: number; // DB save duration
+  totalTime: number; // Complete request time
+  bottleneck: 'api' | 'streaming' | 'database' | 'none';
+  bottleneckDescription: string;
+}
+
 const METRICS_KEY = 'chat_performance_metrics';
 
 export class PerformanceMonitor {
-  private static requestStart: number | null = null;
+  private static currentRequest: RequestMetrics | null = null;
   private static timeoutId: NodeJS.Timeout | null = null;
   private static onSlowRequest: (() => void) | null = null;
-
-  private static currentQuery: string | null = null;
+  private static allMetrics: RequestMetrics[] = [];
 
   static startRequest(onSlowRequest?: () => void, query?: string) {
-    this.requestStart = Date.now();
+    this.currentRequest = {
+      timestamp: Date.now(),
+      startTime: Date.now(),
+      success: false,
+      query,
+    };
+    
     this.onSlowRequest = onSlowRequest || null;
-    this.currentQuery = query || null;
     
     // Устанавливаем таймер для медленных запросов (5 секунд)
     this.timeoutId = setTimeout(() => {
@@ -28,13 +44,16 @@ export class PerformanceMonitor {
       }
       console.warn('⚠️ Slow request detected (>5s)');
     }, 5000);
+
+    console.log('🚀 Request started');
   }
 
   static recordFirstToken() {
-    if (!this.requestStart) return;
+    if (!this.currentRequest) return;
     
-    const timeToFirstToken = Date.now() - this.requestStart;
-    console.log(`⚡ Time to first token: ${timeToFirstToken}ms`);
+    this.currentRequest.firstTokenTime = Date.now();
+    const ttft = this.currentRequest.firstTokenTime - this.currentRequest.startTime;
+    console.log(`⚡ TTFT: ${ttft}ms`);
     
     // Очищаем таймер медленного запроса
     if (this.timeoutId) {
@@ -42,30 +61,38 @@ export class PerformanceMonitor {
       this.timeoutId = null;
     }
 
-    return timeToFirstToken;
+    return ttft;
+  }
+
+  static startDbSave() {
+    if (!this.currentRequest) return;
+    this.currentRequest.dbSaveStart = Date.now();
+    console.log('💾 DB save started');
+  }
+
+  static endDbSave() {
+    if (!this.currentRequest || !this.currentRequest.dbSaveStart) return;
+    
+    this.currentRequest.dbSaveEnd = Date.now();
+    const dbTime = this.currentRequest.dbSaveEnd - this.currentRequest.dbSaveStart;
+    console.log(`💾 DB save completed: ${dbTime}ms`);
+    
+    return dbTime;
   }
 
   static endRequest(success: boolean, error?: string) {
-    if (!this.requestStart) return;
+    if (!this.currentRequest) return;
     
-    const totalTime = Date.now() - this.requestStart;
-    const timeToFirstToken = this.recordFirstToken() || 0;
+    this.currentRequest.endTime = Date.now();
+    this.currentRequest.success = success;
+    this.currentRequest.error = error;
 
-    const metrics: RequestMetrics = {
-      timestamp: Date.now(),
-      timeToFirstToken,
-      totalTime,
-      success,
-      error,
-      query: this.currentQuery || undefined,
-    };
-
-    this.currentQuery = null;
-
-    this.saveMetrics(metrics);
-    this.logMetrics(metrics);
+    const totalTime = this.currentRequest.endTime - this.currentRequest.startTime;
+    console.log(`${success ? '✅' : '❌'} Request ${success ? 'completed' : 'failed'}: ${totalTime}ms`);
     
-    this.requestStart = null;
+    this.saveMetrics(this.currentRequest);
+    
+    this.currentRequest = null;
     if (this.timeoutId) {
       clearTimeout(this.timeoutId);
       this.timeoutId = null;
@@ -75,35 +102,46 @@ export class PerformanceMonitor {
   private static saveMetrics(metrics: RequestMetrics) {
     try {
       const stored = sessionStorage.getItem(METRICS_KEY);
-      const allMetrics: RequestMetrics[] = stored ? JSON.parse(stored) : [];
+      this.allMetrics = stored ? JSON.parse(stored) : [];
       
       // Храним только последние 50 запросов
-      allMetrics.push(metrics);
-      if (allMetrics.length > 50) {
-        allMetrics.shift();
+      this.allMetrics.push(metrics);
+      if (this.allMetrics.length > 50) {
+        this.allMetrics.shift();
       }
 
-      sessionStorage.setItem(METRICS_KEY, JSON.stringify(allMetrics));
+      sessionStorage.setItem(METRICS_KEY, JSON.stringify(this.allMetrics));
     } catch (error) {
       console.error('Error saving metrics:', error);
     }
   }
 
-  private static logMetrics(metrics: RequestMetrics) {
-    const { timeToFirstToken, totalTime, success, error } = metrics;
-    
-    if (!success) {
-      console.error('❌ Request failed:', {
-        timeToFirstToken: `${timeToFirstToken}ms`,
-        totalTime: `${totalTime}ms`,
-        error,
-      });
-    } else {
-      console.log('✅ Request completed:', {
-        timeToFirstToken: `${timeToFirstToken}ms`,
-        totalTime: `${totalTime}ms`,
-      });
+  static calculateBreakdown(metric: RequestMetrics): DetailedBreakdown | null {
+    if (!metric.firstTokenTime || !metric.endTime) return null;
+
+    const ttft = metric.firstTokenTime - metric.startTime;
+    const streamingTime = metric.endTime - metric.firstTokenTime;
+    const dbSaveTime = metric.dbSaveEnd && metric.dbSaveStart 
+      ? metric.dbSaveEnd - metric.dbSaveStart 
+      : 0;
+    const totalTime = metric.endTime - metric.startTime;
+
+    // Определяем bottleneck
+    let bottleneck: DetailedBreakdown['bottleneck'] = 'none';
+    let bottleneckDescription = 'All systems operational';
+
+    if (ttft > 3000) {
+      bottleneck = 'api';
+      bottleneckDescription = 'API/Prompt taking too long';
+    } else if (streamingTime > 3000) {
+      bottleneck = 'streaming';
+      bottleneckDescription = 'Streaming is slow';
+    } else if (dbSaveTime > 1000) {
+      bottleneck = 'database';
+      bottleneckDescription = 'Database save is slow';
     }
+
+    return { ttft, streamingTime, dbSaveTime, totalTime, bottleneck, bottleneckDescription };
   }
 
   static getSessionStats() {
@@ -112,16 +150,17 @@ export class PerformanceMonitor {
       if (!stored) return null;
 
       const metrics: RequestMetrics[] = JSON.parse(stored);
-      const successfulRequests = metrics.filter(m => m.success);
+      const successfulRequests = metrics.filter(m => m.success && m.endTime);
       
       if (successfulRequests.length === 0) return null;
 
-      const avgTimeToFirstToken = 
-        successfulRequests.reduce((sum, m) => sum + m.timeToFirstToken, 0) / 
+      const avgTotalTime = 
+        successfulRequests.reduce((sum, m) => sum + (m.endTime! - m.startTime), 0) / 
         successfulRequests.length;
 
-      const avgTotalTime = 
-        successfulRequests.reduce((sum, m) => sum + m.totalTime, 0) / 
+      const avgTTFT = successfulRequests
+        .filter(m => m.firstTokenTime)
+        .reduce((sum, m) => sum + (m.firstTokenTime! - m.startTime), 0) / 
         successfulRequests.length;
 
       const failureRate = 
@@ -130,9 +169,10 @@ export class PerformanceMonitor {
       return {
         totalRequests: metrics.length,
         successfulRequests: successfulRequests.length,
-        avgTimeToFirstToken: Math.round(avgTimeToFirstToken),
         avgTotalTime: Math.round(avgTotalTime),
+        avgTTFT: Math.round(avgTTFT),
         failureRate: failureRate.toFixed(1),
+        errors: metrics.length - successfulRequests.length,
       };
     } catch (error) {
       console.error('Error getting session stats:', error);
@@ -150,7 +190,7 @@ export class PerformanceMonitor {
     console.group('📊 Session Performance Stats');
     console.log(`Total requests: ${stats.totalRequests}`);
     console.log(`Successful: ${stats.successfulRequests}`);
-    console.log(`Average time to first token: ${stats.avgTimeToFirstToken}ms`);
+    console.log(`Average TTFT: ${stats.avgTTFT}ms`);
     console.log(`Average total time: ${stats.avgTotalTime}ms`);
     console.log(`Failure rate: ${stats.failureRate}%`);
     console.groupEnd();
@@ -158,16 +198,20 @@ export class PerformanceMonitor {
 
   static clearMetrics() {
     sessionStorage.removeItem(METRICS_KEY);
+    this.allMetrics = [];
     console.log('✨ Performance metrics cleared');
   }
 
-  static getRecentRequests(limit: number = 10): RequestMetrics[] {
+  static getRecentRequests(limit: number = 10): (RequestMetrics & { breakdown?: DetailedBreakdown | null })[] {
     try {
       const stored = sessionStorage.getItem(METRICS_KEY);
       if (!stored) return [];
 
       const metrics: RequestMetrics[] = JSON.parse(stored);
-      return metrics.slice(-limit).reverse();
+      return metrics.slice(-limit).reverse().map(m => ({
+        ...m,
+        breakdown: this.calculateBreakdown(m)
+      }));
     } catch (error) {
       console.error('Error getting recent requests:', error);
       return [];
@@ -190,33 +234,35 @@ export class PerformanceMonitor {
       return '=== PERFORMANCE REPORT ===\nNo data available yet';
     }
 
-    const slowestRequest = recentRequests.reduce((slowest, req) => 
-      req.totalTime > (slowest?.totalTime || 0) ? req : slowest
-    , recentRequests[0]);
+    const slowestRequest = recentRequests.reduce((slowest, req) => {
+      const currentTime = req.endTime ? req.endTime - req.startTime : 0;
+      const slowestTime = slowest.endTime ? slowest.endTime - slowest.startTime : 0;
+      return currentTime > slowestTime ? req : slowest;
+    }, recentRequests[0]);
 
-    const errorCount = recentRequests.filter(r => !r.success).length;
     const connectionType = this.getConnectionType();
 
     let report = '=== PERFORMANCE REPORT ===\n';
     report += `Avg Response: ${(stats.avgTotalTime / 1000).toFixed(1)}s\n`;
+    report += `Avg TTFT: ${(stats.avgTTFT / 1000).toFixed(1)}s\n`;
     report += `Requests: ${stats.totalRequests}\n`;
-    report += `Errors: ${errorCount}\n`;
+    report += `Errors: ${stats.errors}\n`;
     report += `Connection: ${connectionType}\n`;
     
-    if (slowestRequest) {
+    if (slowestRequest && slowestRequest.breakdown) {
+      const b = slowestRequest.breakdown;
       const query = slowestRequest.query 
         ? `"${slowestRequest.query.substring(0, 30)}${slowestRequest.query.length > 30 ? '...' : ''}"`
         : 'N/A';
-      report += `Slowest: ${(slowestRequest.totalTime / 1000).toFixed(1)}s (Query: ${query})\n`;
+      
+      report += `\nSlowest: ${(b.totalTime / 1000).toFixed(1)}s (Query: ${query})\n`;
+      report += `\n=== BREAKDOWN (Slowest Request) ===\n`;
+      report += `Request sent → First token: ${(b.ttft / 1000).toFixed(1)}s\n`;
+      report += `First token → Complete: ${(b.streamingTime / 1000).toFixed(1)}s\n`;
+      report += `DB save: ${(b.dbSaveTime / 1000).toFixed(1)}s\n`;
+      report += `TOTAL: ${(b.totalTime / 1000).toFixed(1)}s\n`;
+      report += `BOTTLENECK: ${b.bottleneck.toUpperCase()} - ${b.bottleneckDescription}`;
     }
-
-    report += '\n=== RECENT REQUESTS ===\n';
-    recentRequests.forEach((req, index) => {
-      const status = req.success ? '✓' : '✗';
-      const time = (req.totalTime / 1000).toFixed(2);
-      const query = req.query?.substring(0, 40) || 'N/A';
-      report += `${index + 1}. ${status} ${time}s - ${query}\n`;
-    });
 
     return report;
   }

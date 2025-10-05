@@ -133,8 +133,16 @@ const Chat = () => {
     content: string,
     tempId?: string
   ) => {
+    // Начинаем замер DB save
+    PerformanceMonitor.startDbSave();
+    
     // Добавляем в батч вместо немедленного сохранения
     messageBatcher.addMessage({ role, content, tempId });
+    
+    // Завершаем замер DB save (батчинг асинхронный, но мы замеряем добавление в очередь)
+    setTimeout(() => {
+      PerformanceMonitor.endDbSave();
+    }, 10);
     
     // Обновляем статус на "sent" мгновенно (оптимистично)
     if (tempId) {
