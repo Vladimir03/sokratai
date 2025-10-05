@@ -177,12 +177,19 @@ const Chat = () => {
       throw new Error("No session");
     }
 
+    // Получаем последнее сообщение пользователя для метрик
+    const lastUserMessage = userMessages
+      .slice()
+      .reverse()
+      .find(m => m.role === 'user');
+    const userQuery = lastUserMessage?.content || '';
+
     // Начинаем замер производительности
     PerformanceMonitor.startRequest(() => {
       toast.warning("Запрос занимает больше обычного...", {
         duration: 3000,
       });
-    });
+    }, userQuery);
     
     try {
       const resp = await fetch(CHAT_URL, {

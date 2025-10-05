@@ -5,6 +5,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { lazy, Suspense } from "react";
 import Index from "./pages/Index";
+import DevPanel from "./components/DevPanel";
 
 // Lazy load all pages for optimal code splitting
 const Login = lazy(() => import("./pages/Login"));
@@ -33,6 +34,7 @@ const App = () => (
     <TooltipProvider>
       <Toaster />
       <Sonner />
+      <DevPanel />
       <BrowserRouter>
         <Routes>
           <Route path="/" element={<Index />} />

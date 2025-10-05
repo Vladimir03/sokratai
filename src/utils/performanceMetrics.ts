@@ -4,6 +4,7 @@ interface RequestMetrics {
   totalTime: number;
   success: boolean;
   error?: string;
+  query?: string;
 }
 
 const METRICS_KEY = 'chat_performance_metrics';
@@ -13,9 +14,12 @@ export class PerformanceMonitor {
   private static timeoutId: NodeJS.Timeout | null = null;
   private static onSlowRequest: (() => void) | null = null;
 
-  static startRequest(onSlowRequest?: () => void) {
+  private static currentQuery: string | null = null;
+
+  static startRequest(onSlowRequest?: () => void, query?: string) {
     this.requestStart = Date.now();
     this.onSlowRequest = onSlowRequest || null;
+    this.currentQuery = query || null;
     
     // Устанавливаем таймер для медленных запросов (5 секунд)
     this.timeoutId = setTimeout(() => {
@@ -53,7 +57,10 @@ export class PerformanceMonitor {
       totalTime,
       success,
       error,
+      query: this.currentQuery || undefined,
     };
+
+    this.currentQuery = null;
 
     this.saveMetrics(metrics);
     this.logMetrics(metrics);
@@ -152,6 +159,66 @@ export class PerformanceMonitor {
   static clearMetrics() {
     sessionStorage.removeItem(METRICS_KEY);
     console.log('✨ Performance metrics cleared');
+  }
+
+  static getRecentRequests(limit: number = 10): RequestMetrics[] {
+    try {
+      const stored = sessionStorage.getItem(METRICS_KEY);
+      if (!stored) return [];
+
+      const metrics: RequestMetrics[] = JSON.parse(stored);
+      return metrics.slice(-limit).reverse();
+    } catch (error) {
+      console.error('Error getting recent requests:', error);
+      return [];
+    }
+  }
+
+  static getConnectionType(): string {
+    if ('connection' in navigator) {
+      const connection = (navigator as any).connection;
+      return connection?.effectiveType || 'unknown';
+    }
+    return 'unknown';
+  }
+
+  static generateReport(): string {
+    const stats = this.getSessionStats();
+    const recentRequests = this.getRecentRequests(10);
+    
+    if (!stats) {
+      return '=== PERFORMANCE REPORT ===\nNo data available yet';
+    }
+
+    const slowestRequest = recentRequests.reduce((slowest, req) => 
+      req.totalTime > (slowest?.totalTime || 0) ? req : slowest
+    , recentRequests[0]);
+
+    const errorCount = recentRequests.filter(r => !r.success).length;
+    const connectionType = this.getConnectionType();
+
+    let report = '=== PERFORMANCE REPORT ===\n';
+    report += `Avg Response: ${(stats.avgTotalTime / 1000).toFixed(1)}s\n`;
+    report += `Requests: ${stats.totalRequests}\n`;
+    report += `Errors: ${errorCount}\n`;
+    report += `Connection: ${connectionType}\n`;
+    
+    if (slowestRequest) {
+      const query = slowestRequest.query 
+        ? `"${slowestRequest.query.substring(0, 30)}${slowestRequest.query.length > 30 ? '...' : ''}"`
+        : 'N/A';
+      report += `Slowest: ${(slowestRequest.totalTime / 1000).toFixed(1)}s (Query: ${query})\n`;
+    }
+
+    report += '\n=== RECENT REQUESTS ===\n';
+    recentRequests.forEach((req, index) => {
+      const status = req.success ? '✓' : '✗';
+      const time = (req.totalTime / 1000).toFixed(2);
+      const query = req.query?.substring(0, 40) || 'N/A';
+      report += `${index + 1}. ${status} ${time}s - ${query}\n`;
+    });
+
+    return report;
   }
 }
 
