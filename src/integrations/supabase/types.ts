@@ -36,21 +36,27 @@ export type Database = {
         Row: {
           content: string
           created_at: string | null
+          extracted_text: string | null
           id: string
+          image_url: string | null
           role: string
           user_id: string
         }
         Insert: {
           content: string
           created_at?: string | null
+          extracted_text?: string | null
           id?: string
+          image_url?: string | null
           role: string
           user_id: string
         }
         Update: {
           content?: string
           created_at?: string | null
+          extracted_text?: string | null
           id?: string
+          image_url?: string | null
           role?: string
           user_id?: string
         }
