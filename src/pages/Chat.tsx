@@ -403,10 +403,7 @@ const Chat = () => {
     }
   }, [saveMessageToBatch]);
 
-  const handleImageUpload = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
+  const handleImageUpload = useCallback(async (file: File) => {
     // Проверка размера (макс 5MB)
     if (file.size > 5 * 1024 * 1024) {
       toast.error('Файл слишком большой. Максимум 5MB');
@@ -414,9 +411,9 @@ const Chat = () => {
     }
 
     // Проверка типа
-    const validTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
+    const validTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp', 'image/gif'];
     if (!validTypes.includes(file.type)) {
-      toast.error('Поддерживаются только JPG, PNG и WebP');
+      toast.error('Поддерживаются только JPG, PNG, WebP и GIF');
       return;
     }
 
@@ -430,7 +427,7 @@ const Chat = () => {
       }
 
       // Загрузка в Supabase Storage
-      const fileExt = file.name.split('.').pop();
+      const fileExt = file.name.split('.').pop() || file.type.split('/')[1];
       const fileName = `${Date.now()}.${fileExt}`;
       const filePath = `${user.id}/${fileName}`;
 
@@ -446,17 +443,53 @@ const Chat = () => {
         .getPublicUrl(filePath);
 
       setSelectedImage(publicUrl);
-      toast.success('Изображение загружено! Добавьте вопрос и отправьте.');
+      toast.success('✅ Изображение загружено! Добавьте вопрос и отправьте.');
     } catch (error) {
       console.error('Ошибка загрузки:', error);
-      toast.error('Не удалось загрузить изображение');
+      toast.error('❌ Не удалось загрузить изображение');
     } finally {
       setIsUploading(false);
-      if (fileInputRef.current) {
-        fileInputRef.current.value = '';
-      }
     }
   }, []);
+
+  const handleFileSelect = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    
+    await handleImageUpload(file);
+    
+    // Сброс input
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
+  }, [handleImageUpload]);
+
+  const handlePaste = useCallback(async (e: React.ClipboardEvent<HTMLInputElement>) => {
+    const items = e.clipboardData?.items;
+    if (!items) return;
+
+    // Ищем изображение в clipboard
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i];
+      
+      // Проверяем, что это изображение
+      if (item.type.startsWith('image/')) {
+        e.preventDefault(); // Предотвращаем обычную вставку текста
+        
+        // Получаем файл из clipboard
+        const file = item.getAsFile();
+        if (!file) continue;
+        
+        // Показываем уведомление
+        toast.info('📸 Скриншот обнаружен! Загружаю...');
+        
+        // Обрабатываем как обычную загрузку
+        await handleImageUpload(file);
+        
+        break; // Берём только первое изображение
+      }
+    }
+  }, [handleImageUpload]);
 
   const removeSelectedImage = useCallback(() => {
     setSelectedImage(null);
@@ -681,9 +714,9 @@ const Chat = () => {
               <input
                 type="file"
                 ref={fileInputRef}
-                accept="image/jpeg,image/jpg,image/png,image/webp"
+                accept="image/jpeg,image/jpg,image/png,image/webp,image/gif"
                 className="hidden"
-                onChange={handleImageUpload}
+                onChange={handleFileSelect}
                 disabled={isUploading || isLoading}
               />
               
@@ -701,7 +734,8 @@ const Chat = () => {
               <Input
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
-                placeholder={selectedImage ? "Добавьте вопрос (опционально)" : "Напишите ваш вопрос..."}
+                onPaste={handlePaste}
+                placeholder={selectedImage ? "Добавьте вопрос (опционально)" : "Напишите вопрос или вставьте скриншот (Ctrl+V) 📸"}
                 className="flex-1"
                 disabled={isLoading}
               />
