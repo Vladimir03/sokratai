@@ -1,4 +1,4 @@
-import { memo, lazy, Suspense, useEffect, useState } from "react";
+import { memo, lazy, Suspense, useEffect, useState, useMemo } from "react";
 import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
@@ -22,18 +22,19 @@ interface ChatMessageProps {
   onRetry?: () => void;
 }
 
-const markdownComponents = {
-  p: ({ node, ...props }: any) => <p className="mb-3 leading-relaxed last:mb-0" {...props} />,
-  strong: ({ node, ...props }: any) => <strong className="font-bold text-primary" {...props} />,
-  ul: ({ node, ...props }: any) => <ul className="list-disc ml-4 mb-3 space-y-1" {...props} />,
-  ol: ({ node, ...props }: any) => <ol className="list-decimal ml-4 mb-3 space-y-2" {...props} />,
-  li: ({ node, ...props }: any) => <li className="ml-2" {...props} />,
-  h3: ({ node, ...props }: any) => <h3 className="font-bold text-lg mt-4 mb-2" {...props} />,
-};
-
 const ChatMessage = memo(({ message, isLoading, onQuickMessage, onRetry }: ChatMessageProps) => {
   const [katexLoaded, setKatexLoaded] = useState(false);
   const hasMath = message.content.includes('$');
+
+  // Мемоизируем markdown компоненты для избежания пересоздания
+  const markdownComponents = useMemo(() => ({
+    p: ({ node, ...props }: any) => <p className="mb-3 leading-relaxed last:mb-0" {...props} />,
+    strong: ({ node, ...props }: any) => <strong className="font-bold text-primary" {...props} />,
+    ul: ({ node, ...props }: any) => <ul className="list-disc ml-4 mb-3 space-y-1" {...props} />,
+    ol: ({ node, ...props }: any) => <ol className="list-decimal ml-4 mb-3 space-y-2" {...props} />,
+    li: ({ node, ...props }: any) => <li className="ml-2" {...props} />,
+    h3: ({ node, ...props }: any) => <h3 className="font-bold text-lg mt-4 mb-2" {...props} />,
+  }), []);
 
   // Загружаем KaTeX CSS только если есть математика
   useEffect(() => {

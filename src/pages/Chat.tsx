@@ -281,25 +281,24 @@ const Chat = () => {
       let streamDone = false;
       let assistantContent = "";
       let firstTokenReceived = false;
-      let updateScheduled = false;
+      let contentBuffer = "";
+      let lastUpdateTime = Date.now();
 
-      // Debounced update для уменьшения re-renders
-      const scheduleUpdate = () => {
-        if (!updateScheduled) {
-          updateScheduled = true;
-          setTimeout(() => {
-            setMessages((prev) => {
-              const last = prev[prev.length - 1];
-              if (last?.role === "assistant") {
-                return prev.map((m, i) =>
-                  i === prev.length - 1 ? { ...m, content: assistantContent } : m
-                );
-              }
-              return [...prev, { role: "assistant", content: assistantContent }];
-            });
-            updateScheduled = false;
-          }, 50);
-        }
+      // Batched update - накапливаем токены и обновляем раз в 100ms
+      const flushUpdate = () => {
+        const currentContent = assistantContent + contentBuffer;
+        setMessages((prev) => {
+          const last = prev[prev.length - 1];
+          if (last?.role === "assistant") {
+            return prev.map((m, i) =>
+              i === prev.length - 1 ? { ...m, content: currentContent } : m
+            );
+          }
+          return [...prev, { role: "assistant", content: currentContent }];
+        });
+        assistantContent = currentContent;
+        contentBuffer = "";
+        lastUpdateTime = Date.now();
       };
 
       while (!streamDone) {
@@ -332,8 +331,14 @@ const Chat = () => {
                 firstTokenReceived = true;
               }
 
-              assistantContent += content;
-              scheduleUpdate();
+              // Накапливаем токены в буфер
+              contentBuffer += content;
+              
+              // Обновляем UI раз в 100ms
+              const now = Date.now();
+              if (now - lastUpdateTime > 100) {
+                flushUpdate();
+              }
             }
           } catch {
             textBuffer = line + "\n" + textBuffer;
@@ -342,16 +347,21 @@ const Chat = () => {
         }
       }
 
-      // Финальное обновление
-      setMessages((prev) => {
-        const last = prev[prev.length - 1];
-        if (last?.role === "assistant") {
-          return prev.map((m, i) =>
-            i === prev.length - 1 ? { ...m, content: assistantContent } : m
-          );
-        }
-        return [...prev, { role: "assistant", content: assistantContent }];
-      });
+      // Финальное обновление - флашим оставшиеся токены
+      if (contentBuffer) {
+        flushUpdate();
+      } else {
+        // Если буфер пустой, просто обновляем финальный контент
+        setMessages((prev) => {
+          const last = prev[prev.length - 1];
+          if (last?.role === "assistant") {
+            return prev.map((m, i) =>
+              i === prev.length - 1 ? { ...m, content: assistantContent } : m
+            );
+          }
+          return [...prev, { role: "assistant", content: assistantContent }];
+        });
+      }
       
       // Сохраняем ответ ассистента в батч
       if (assistantContent) {
