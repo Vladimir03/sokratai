@@ -14,7 +14,7 @@ const DevPanel = () => {
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.ctrlKey && e.shiftKey && e.key === 'D') {
+      if (e.altKey && e.shiftKey && e.key === 'D') {
         e.preventDefault();
         setIsOpen(prev => !prev);
       }
@@ -75,7 +75,7 @@ const DevPanel = () => {
               Панель разработчика
             </h2>
             <span className="text-xs text-muted-foreground">
-              (Ctrl+Shift+D для закрытия)
+              (Alt+Shift+D для закрытия)
             </span>
           </div>
           <div className="flex items-center gap-2">
