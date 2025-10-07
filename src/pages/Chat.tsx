@@ -2,7 +2,7 @@ import { useState, useRef, useEffect, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card } from "@/components/ui/card";
-import { Send, Mic, MessageSquare } from "lucide-react";
+import { Send, Mic, MessageSquare, Square } from "lucide-react";
 import { toast } from "sonner";
 import AuthGuard from "@/components/AuthGuard";
 import { supabase } from "@/integrations/supabase/client";
@@ -497,25 +497,36 @@ const Chat = () => {
     setSelectedImage(null);
   }, []);
 
+  const stopRecording = useCallback(() => {
+    if (recognitionRef.current) {
+      recognitionRef.current.stop();
+      setIsRecording(false);
+      
+      // Вибрация при остановке
+      if (navigator.vibrate) {
+        navigator.vibrate(50);
+      }
+    }
+  }, []);
+
   const handleVoiceInput = useCallback(() => {
     // Проверка поддержки Web Speech API
     const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
     
     if (!SpeechRecognition) {
-      toast.error("Голосовой ввод не поддерживается в вашем браузере");
+      toast.error("Голосовой ввод не поддерживается в вашем браузере", { duration: 3000 });
       return;
     }
 
     // Если уже идёт запись, останавливаем
     if (isRecording && recognitionRef.current) {
-      recognitionRef.current.stop();
-      setIsRecording(false);
+      stopRecording();
       return;
     }
 
     // Останавливаем запись при начале печати
     if (input.length > 0) {
-      toast.info("Очистите поле ввода перед голосовым вводом");
+      toast.info("Очистите поле ввода перед голосовым вводом", { duration: 2000 });
       return;
     }
 
@@ -528,7 +539,11 @@ const Chat = () => {
 
     recognition.onstart = () => {
       setIsRecording(true);
-      toast.info("🎤 Говорите...", { duration: 60000 });
+      
+      // Вибрация при старте
+      if (navigator.vibrate) {
+        navigator.vibrate(50);
+      }
     };
 
     recognition.onresult = (event: any) => {
@@ -537,13 +552,19 @@ const Chat = () => {
       // Проверка длины
       if (transcript.length > MAX_MESSAGE_LENGTH) {
         setInput(transcript.slice(0, MAX_MESSAGE_LENGTH));
-        toast.warning(`Текст обрезан до ${MAX_MESSAGE_LENGTH} символов`);
+        toast.warning(`Текст обрезан до ${MAX_MESSAGE_LENGTH} символов`, { duration: 3000 });
       } else {
         setInput(transcript);
       }
       
       setIsRecording(false);
-      toast.success("✅ Текст распознан!");
+      toast.success("✅ Текст распознан!", { duration: 2000 });
+      
+      // Фокус на input после распознавания
+      setTimeout(() => {
+        const inputElement = document.querySelector('input[type="text"]') as HTMLInputElement;
+        inputElement?.focus();
+      }, 100);
     };
 
     recognition.onerror = (event: any) => {
@@ -551,13 +572,13 @@ const Chat = () => {
       setIsRecording(false);
       
       if (event.error === 'no-speech') {
-        toast.error("Не удалось распознать речь. Попробуйте ещё раз.");
+        toast.error("Не удалось распознать речь. Попробуйте ещё раз.", { duration: 3000 });
       } else if (event.error === 'not-allowed') {
-        toast.error("Разрешите доступ к микрофону в настройках браузера");
+        toast.error("Разрешите доступ к микрофону в настройках браузера", { duration: 4000 });
       } else if (event.error === 'aborted') {
         // Пользователь прервал запись, не показываем ошибку
       } else {
-        toast.error("Ошибка распознавания речи");
+        toast.error("Ошибка распознавания речи", { duration: 3000 });
       }
     };
 
@@ -571,10 +592,10 @@ const Chat = () => {
       recognitionRef.current = recognition;
     } catch (error) {
       console.error('Failed to start recognition:', error);
-      toast.error("Не удалось запустить распознавание речи");
+      toast.error("Не удалось запустить распознавание речи", { duration: 3000 });
       setIsRecording(false);
     }
-  }, [isRecording, input]);
+  }, [isRecording, input, stopRecording]);
 
   // Останавливаем запись при размонтировании
   useEffect(() => {
@@ -584,6 +605,13 @@ const Chat = () => {
       }
     };
   }, []);
+
+  // Останавливаем запись при начале печати
+  useEffect(() => {
+    if (isRecording && input.length > 0 && recognitionRef.current) {
+      stopRecording();
+    }
+  }, [input, isRecording, stopRecording]);
 
   const retryMessage = useCallback(async (tempId: string) => {
     const msgToRetry = messages.find(m => m.tempId === tempId);
@@ -772,7 +800,27 @@ const Chat = () => {
           </div>
 
           {/* Input */}
-          <form onSubmit={handleSubmit} className="p-4 border-t">
+          <form onSubmit={handleSubmit} className="p-4 border-t relative">
+            {/* Индикатор записи */}
+            {isRecording && (
+              <div className="absolute bottom-full left-0 right-0 mb-2 mx-4 p-3 bg-destructive text-destructive-foreground rounded-lg shadow-lg animate-pulse flex items-center justify-between gap-3">
+                <div className="flex items-center gap-2">
+                  <div className="w-3 h-3 bg-white rounded-full animate-ping" />
+                  <span className="font-medium text-sm md:text-base">🎤 Идёт запись... Говорите чётко</span>
+                </div>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={stopRecording}
+                  className="text-destructive-foreground hover:bg-destructive/80 shrink-0"
+                >
+                  <Square className="w-4 h-4 mr-1" />
+                  Остановить
+                </Button>
+              </div>
+            )}
+            
             {/* Превью загруженного изображения */}
             {selectedImage && (
               <div className="mb-3 relative inline-block">
@@ -832,14 +880,18 @@ const Chat = () => {
               
               <Button 
                 type="button" 
-                variant="outline" 
+                variant={isRecording ? "destructive" : "outline"}
                 size="icon" 
                 disabled={isLoading || isUploading}
                 onClick={handleVoiceInput}
-                className={isRecording ? "bg-destructive text-destructive-foreground hover:bg-destructive/90 animate-pulse" : ""}
-                title={isRecording ? "Идёт запись... (нажмите ещё раз чтобы остановить)" : "Голосовой ввод"}
+                className={isRecording ? "animate-pulse" : ""}
+                title={isRecording ? "Нажмите чтобы остановить запись" : "Голосовой ввод"}
               >
-                <Mic className={`w-4 h-4 ${isRecording ? "animate-pulse" : ""}`} />
+                {isRecording ? (
+                  <Square className="w-4 h-4" />
+                ) : (
+                  <Mic className="w-4 h-4" />
+                )}
               </Button>
               
               <Button 
