@@ -6,6 +6,7 @@ interface PendingMessage {
   content: string;
   tempId?: string;
   image_url?: string;
+  input_method?: "text" | "voice" | "button";
 }
 
 class MessageBatcher {
@@ -52,6 +53,7 @@ class MessageBatcher {
               role: msg.role,
               content: msg.content,
               image_url: msg.image_url || null,
+              input_method: msg.input_method || 'text',
             }))
           );
 

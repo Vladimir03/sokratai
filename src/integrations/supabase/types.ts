@@ -39,6 +39,7 @@ export type Database = {
           extracted_text: string | null
           id: string
           image_url: string | null
+          input_method: string | null
           role: string
           user_id: string
         }
@@ -48,6 +49,7 @@ export type Database = {
           extracted_text?: string | null
           id?: string
           image_url?: string | null
+          input_method?: string | null
           role: string
           user_id: string
         }
@@ -57,6 +59,7 @@ export type Database = {
           extracted_text?: string | null
           id?: string
           image_url?: string | null
+          input_method?: string | null
           role?: string
           user_id?: string
         }

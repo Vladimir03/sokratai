@@ -26,6 +26,7 @@ interface Message {
   status?: "sending" | "sent" | "error";
   error?: string;
   image_url?: string;
+  input_method?: "text" | "voice" | "button";
 }
 
 const Chat = () => {
@@ -108,7 +109,8 @@ const Chat = () => {
           content: msg.content,
           id: msg.id,
           status: "sent",
-          image_url: msg.image_url
+          image_url: msg.image_url,
+          input_method: msg.input_method as "text" | "voice" | "button" | undefined
         }));
         setMessages(loadedMessages);
         saveChatToSessionCache(loadedMessages.map(msg => ({
@@ -143,13 +145,14 @@ const Chat = () => {
     role: "user" | "assistant", 
     content: string,
     tempId?: string,
-    image_url?: string
+    image_url?: string,
+    input_method?: "text" | "voice" | "button"
   ) => {
     // Начинаем замер DB save
     PerformanceMonitor.startDbSave();
     
     // Добавляем в батч вместо немедленного сохранения
-    messageBatcher.addMessage({ role, content, tempId, image_url });
+    messageBatcher.addMessage({ role, content, tempId, image_url, input_method });
     
     // Завершаем замер DB save (батчинг асинхронный, но мы замеряем добавление в очередь)
     setTimeout(() => {
@@ -550,13 +553,13 @@ const Chat = () => {
       const transcript = event.results[0][0].transcript;
       
       // Проверка длины
+      let finalTranscript = transcript;
       if (transcript.length > MAX_MESSAGE_LENGTH) {
-        setInput(transcript.slice(0, MAX_MESSAGE_LENGTH));
+        finalTranscript = transcript.slice(0, MAX_MESSAGE_LENGTH);
         toast.warning(`Текст обрезан до ${MAX_MESSAGE_LENGTH} символов`, { duration: 3000 });
-      } else {
-        setInput(transcript);
       }
       
+      setInput(finalTranscript);
       setIsRecording(false);
       toast.success("✅ Текст распознан!", { duration: 2000 });
       
@@ -657,7 +660,8 @@ const Chat = () => {
       role: "user", 
       content: text,
       tempId,
-      status: "sending"
+      status: "sending",
+      input_method: "button"
     };
     
     // Мгновенный optimistic update
@@ -668,7 +672,7 @@ const Chat = () => {
     setIsLoading(true);
 
     // Сохраняем в батч полностью в фоне (не блокируем)
-    saveMessageToBatch("user", text, tempId);
+    saveMessageToBatch("user", text, tempId, undefined, "button");
 
     try {
       // Начинаем стриминг немедленно
@@ -712,7 +716,8 @@ const Chat = () => {
       content: trimmedInput || "Помоги с этой задачей",
       tempId,
       status: "sending",
-      image_url: selectedImage || undefined
+      image_url: selectedImage || undefined,
+      input_method: "text"
     };
     
     // Мгновенный optimistic update
@@ -724,7 +729,7 @@ const Chat = () => {
     setIsLoading(true);
 
     // Сохраняем в батч полностью в фоне (не блокируем)
-    saveMessageToBatch("user", trimmedInput || "Помоги с этой задачей", tempId, selectedImage || undefined);
+    saveMessageToBatch("user", trimmedInput || "Помоги с этой задачей", tempId, selectedImage || undefined, "text");
 
     // Очищаем выбранное изображение
     setSelectedImage(null);

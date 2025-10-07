@@ -14,6 +14,7 @@ interface Message {
   status?: "sending" | "sent" | "error";
   error?: string;
   image_url?: string;
+  input_method?: "text" | "voice" | "button";
 }
 
 interface ChatMessageProps {
@@ -64,6 +65,26 @@ const ChatMessage = memo(({ message, isLoading, onQuickMessage, onRetry }: ChatM
   return (
     <div className={`flex ${message.role === "user" ? "justify-end" : "justify-start"}`}>
       <div className={`max-w-[80%] ${message.role === "user" ? "" : "space-y-3"}`}>
+        {/* Индикатор метода ввода для пользовательских сообщений */}
+        {message.role === "user" && message.input_method && (
+          <div className="flex items-center gap-1.5 mb-1 text-xs opacity-60">
+            {message.input_method === "voice" && (
+              <>
+                <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
+                  <path d="M10 3a3 3 0 00-3 3v4a3 3 0 006 0V6a3 3 0 00-3-3zM5 10a1 1 0 011 1v1a4 4 0 008 0v-1a1 1 0 112 0v1a6 6 0 01-11.999.002L4 12a1 1 0 011-1z"/>
+                </svg>
+                <span>Голосовой ввод</span>
+              </>
+            )}
+            {message.input_method === "button" && (
+              <>
+                <span>⚡</span>
+                <span>Быстрая кнопка</span>
+              </>
+            )}
+          </div>
+        )}
+        
         <div
           className={`p-4 rounded-2xl ${
             message.role === "user"
