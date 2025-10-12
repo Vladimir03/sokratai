@@ -11,6 +11,10 @@ import DevPanel from "./components/DevPanel";
 const Login = lazy(() => import("./pages/Login"));
 const SignUp = lazy(() => import("./pages/SignUp"));
 const Chat = lazy(() => import("./pages/Chat"));
+const Homework = lazy(() => import("./pages/Homework"));
+const HomeworkAdd = lazy(() => import("./pages/HomeworkAdd"));
+const HomeworkTaskList = lazy(() => import("./pages/HomeworkTaskList"));
+const HomeworkTaskDetail = lazy(() => import("./pages/HomeworkTaskDetail"));
 const Problems = lazy(() => import("./pages/Problems"));
 const Progress = lazy(() => import("./pages/Progress"));
 const Profile = lazy(() => import("./pages/Profile"));
@@ -59,6 +63,38 @@ const App = () => (
             element={
               <Suspense fallback={<PageLoader />}>
                 <Chat />
+              </Suspense>
+            } 
+          />
+          <Route 
+            path="/homework" 
+            element={
+              <Suspense fallback={<PageLoader />}>
+                <Homework />
+              </Suspense>
+            } 
+          />
+          <Route 
+            path="/homework/add" 
+            element={
+              <Suspense fallback={<PageLoader />}>
+                <HomeworkAdd />
+              </Suspense>
+            } 
+          />
+          <Route 
+            path="/homework/:id" 
+            element={
+              <Suspense fallback={<PageLoader />}>
+                <HomeworkTaskList />
+              </Suspense>
+            } 
+          />
+          <Route 
+            path="/homework/:homeworkId/task/:taskId" 
+            element={
+              <Suspense fallback={<PageLoader />}>
+                <HomeworkTaskDetail />
               </Suspense>
             } 
           />

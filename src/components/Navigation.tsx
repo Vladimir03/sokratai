@@ -9,11 +9,12 @@ const Navigation = () => {
   const navigate = useNavigate();
 
   const navItems = [
-    { path: "/", icon: Home, label: "Главная" },
-    { path: "/chat", icon: MessageSquare, label: "Чат" },
-    { path: "/problems", icon: BookOpen, label: "Задачи" },
-    { path: "/progress", icon: TrendingUp, label: "Прогресс" },
-    { path: "/profile", icon: User, label: "Профиль" },
+    { path: "/", icon: Home, label: "Главная", emoji: "🏠" },
+    { path: "/homework", icon: BookOpen, label: "Домашка", emoji: "🎒" },
+    { path: "/chat", icon: MessageSquare, label: "Чат", emoji: "💬" },
+    { path: "/problems", icon: BookOpen, label: "Задачи", emoji: "📚" },
+    { path: "/progress", icon: TrendingUp, label: "Прогресс", emoji: "📈" },
+    { path: "/profile", icon: User, label: "Профиль", emoji: "👤" },
   ];
 
   const handleLogout = async () => {
@@ -22,7 +23,10 @@ const Navigation = () => {
     navigate("/login");
   };
 
-  const isActive = (path: string) => location.pathname === path;
+  const isActive = (path: string) => {
+    if (path === "/") return location.pathname === "/";
+    return location.pathname.startsWith(path);
+  };
 
   return (
     <nav className="fixed top-0 left-0 right-0 z-50 bg-card/80 backdrop-blur-md border-b border-border">
