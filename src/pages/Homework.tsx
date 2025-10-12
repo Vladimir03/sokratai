@@ -60,6 +60,80 @@ const Homework = () => {
     );
   };
 
+  const groupedHomework = {
+    urgent: homeworkSets?.filter((hw) => hw.priority === "urgent") || [],
+    important: homeworkSets?.filter((hw) => hw.priority === "important") || [],
+    later: homeworkSets?.filter((hw) => hw.priority === "later") || [],
+  };
+
+  const renderHomeworkCard = (homework: HomeworkSetWithTasks) => {
+    const priorityConfig = PRIORITY_CONFIG[homework.priority];
+    const taskCount = homework.homework_tasks?.length || 0;
+    const needsConditions = hasTasksWithoutConditions(
+      homework.homework_tasks || []
+    );
+    const subjectEmoji = getSubjectEmoji(homework.subject);
+
+    return (
+      <Card
+        key={homework.id}
+        className="hover:shadow-elegant transition-all cursor-pointer group"
+        onClick={() => navigate(`/homework/${homework.id}`)}
+      >
+        <CardHeader className="pb-4">
+          <div className="flex items-start justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <span className="text-2xl">{subjectEmoji}</span>
+              <CardTitle className="text-xl">
+                {homework.subject}
+              </CardTitle>
+            </div>
+            <Badge variant="secondary">
+              {priorityConfig.emoji} {priorityConfig.label}
+            </Badge>
+          </div>
+          <p className="text-muted-foreground mt-2">
+            {homework.topic}
+          </p>
+          
+          <div className="flex items-center gap-3 text-sm text-muted-foreground mt-3">
+            {taskCount > 0 && (
+              <span>
+                {taskCount} {pluralizeTasks(taskCount)}
+              </span>
+            )}
+            {homework.deadline && (
+              <>
+                {taskCount > 0 && <span>•</span>}
+                <span>{formatDeadline(homework.deadline)}</span>
+              </>
+            )}
+          </div>
+        </CardHeader>
+
+        <CardContent className="pt-0 space-y-3">
+          {needsConditions && taskCount > 0 && (
+            <div className="flex items-center gap-2 text-sm text-amber-600 dark:text-amber-500">
+              <AlertTriangle className="w-4 h-4" />
+              <span>Задачи нужны условия</span>
+            </div>
+          )}
+          
+          <Button
+            className="w-full group-hover:bg-primary/90 transition-colors"
+            onClick={(e) => {
+              e.stopPropagation();
+              navigate(`/homework/${homework.id}`);
+            }}
+          >
+            Начать
+            <ArrowRight className="w-4 h-4 ml-2" />
+          </Button>
+        </CardContent>
+      </Card>
+    );
+  };
+
   return (
     <AuthGuard>
       <div className="min-h-screen bg-background">
@@ -86,97 +160,74 @@ const Homework = () => {
             </div>
 
             {/* Homework List */}
-            <div className="grid gap-4">
-              {isLoading ? (
-                <div className="text-center py-12 text-muted-foreground">
-                  Загрузка...
-                </div>
-              ) : homeworkSets?.length === 0 ? (
-                <Card>
-                  <CardContent className="flex flex-col items-center justify-center py-12 text-center">
-                    <BookOpen className="w-16 h-16 text-muted-foreground mb-4" />
-                    <h3 className="text-xl font-semibold mb-2">
-                      Нет домашних заданий
-                    </h3>
-                    <p className="text-muted-foreground mb-6">
-                      Добавьте первое домашнее задание
-                    </p>
-                    <Button onClick={() => navigate("/homework/add")}>
-                      <Plus className="w-4 h-4 mr-2" />
-                      Добавить задание
-                    </Button>
-                  </CardContent>
-                </Card>
-              ) : (
-                homeworkSets?.map((homework) => {
-                  const priorityConfig = PRIORITY_CONFIG[homework.priority];
-                  const taskCount = homework.homework_tasks?.length || 0;
-                  const needsConditions = hasTasksWithoutConditions(
-                    homework.homework_tasks || []
-                  );
-                  const subjectEmoji = getSubjectEmoji(homework.subject);
+            {isLoading ? (
+              <div className="text-center py-12 text-muted-foreground">
+                Загрузка...
+              </div>
+            ) : homeworkSets?.length === 0 ? (
+              <Card>
+                <CardContent className="flex flex-col items-center justify-center py-12 text-center">
+                  <BookOpen className="w-16 h-16 text-muted-foreground mb-4" />
+                  <h3 className="text-xl font-semibold mb-2">
+                    Нет домашних заданий
+                  </h3>
+                  <p className="text-muted-foreground mb-6">
+                    Добавьте первое домашнее задание
+                  </p>
+                  <Button onClick={() => navigate("/homework/add")}>
+                    <Plus className="w-4 h-4 mr-2" />
+                    Добавить задание
+                  </Button>
+                </CardContent>
+              </Card>
+            ) : (
+              <div className="space-y-8">
+                {/* Urgent Section */}
+                {groupedHomework.urgent.length > 0 && (
+                  <div className="space-y-4">
+                    <div className="flex items-center gap-3">
+                      <h2 className="text-xl font-bold text-red-600 dark:text-red-500">
+                        🔴 СРОЧНО
+                      </h2>
+                      <div className="flex-1 h-px bg-red-600/20 dark:bg-red-500/20" />
+                    </div>
+                    <div className="grid gap-4">
+                      {groupedHomework.urgent.map(renderHomeworkCard)}
+                    </div>
+                  </div>
+                )}
 
-                  return (
-                    <Card
-                      key={homework.id}
-                      className="hover:shadow-elegant transition-all cursor-pointer group"
-                      onClick={() => navigate(`/homework/${homework.id}`)}
-                    >
-                      <CardHeader className="pb-4">
-                        <div className="flex items-start justify-between gap-2">
-                          <div className="flex items-center gap-2">
-                            <span className="text-2xl">{subjectEmoji}</span>
-                            <CardTitle className="text-xl">
-                              {homework.subject}
-                            </CardTitle>
-                          </div>
-                          <Badge variant="secondary">
-                            {priorityConfig.emoji} {priorityConfig.label}
-                          </Badge>
-                        </div>
-                        <p className="text-muted-foreground mt-2">
-                          {homework.topic}
-                        </p>
-                        
-                        <div className="flex items-center gap-3 text-sm text-muted-foreground mt-3">
-                          {taskCount > 0 && (
-                            <span>
-                              {taskCount} {pluralizeTasks(taskCount)}
-                            </span>
-                          )}
-                          {homework.deadline && (
-                            <>
-                              {taskCount > 0 && <span>•</span>}
-                              <span>{formatDeadline(homework.deadline)}</span>
-                            </>
-                          )}
-                        </div>
-                      </CardHeader>
+                {/* Important Section */}
+                {groupedHomework.important.length > 0 && (
+                  <div className="space-y-4">
+                    <div className="flex items-center gap-3">
+                      <h2 className="text-xl font-bold text-yellow-600 dark:text-yellow-500">
+                        🟡 ВАЖНО
+                      </h2>
+                      <div className="flex-1 h-px bg-yellow-600/20 dark:bg-yellow-500/20" />
+                    </div>
+                    <div className="grid gap-4">
+                      {groupedHomework.important.map(renderHomeworkCard)}
+                    </div>
+                  </div>
+                )}
 
-                      <CardContent className="pt-0 space-y-3">
-                        {needsConditions && taskCount > 0 && (
-                          <div className="flex items-center gap-2 text-sm text-amber-600 dark:text-amber-500">
-                            <AlertTriangle className="w-4 h-4" />
-                            <span>Задачи нужны условия</span>
-                          </div>
-                        )}
-                        
-                        <Button
-                          className="w-full group-hover:bg-primary/90 transition-colors"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            navigate(`/homework/${homework.id}`);
-                          }}
-                        >
-                          Начать
-                          <ArrowRight className="w-4 h-4 ml-2" />
-                        </Button>
-                      </CardContent>
-                    </Card>
-                  );
-                })
-              )}
-            </div>
+                {/* Later Section */}
+                {groupedHomework.later.length > 0 && (
+                  <div className="space-y-4">
+                    <div className="flex items-center gap-3">
+                      <h2 className="text-xl font-bold text-green-600 dark:text-green-500">
+                        🟢 ПОЗЖЕ
+                      </h2>
+                      <div className="flex-1 h-px bg-green-600/20 dark:bg-green-500/20" />
+                    </div>
+                    <div className="grid gap-4">
+                      {groupedHomework.later.map(renderHomeworkCard)}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         </main>
       </div>
