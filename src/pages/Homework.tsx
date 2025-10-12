@@ -1,5 +1,5 @@
 import { useNavigate } from "react-router-dom";
-import { Plus, Calendar, BookOpen } from "lucide-react";
+import { Plus, BookOpen, AlertTriangle, ArrowRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -7,9 +7,13 @@ import Navigation from "@/components/Navigation";
 import AuthGuard from "@/components/AuthGuard";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
-import { HomeworkSet, PRIORITY_CONFIG } from "@/types/homework";
-import { format } from "date-fns";
+import { HomeworkSet, PRIORITY_CONFIG, SUBJECTS, HomeworkTask } from "@/types/homework";
+import { format, isToday, isTomorrow } from "date-fns";
 import { ru } from "date-fns/locale";
+
+type HomeworkSetWithTasks = HomeworkSet & {
+  homework_tasks: HomeworkTask[];
+};
 
 const Homework = () => {
   const navigate = useNavigate();
@@ -19,13 +23,42 @@ const Homework = () => {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("homework_sets")
-        .select("*")
+        .select(`
+          *,
+          homework_tasks (*)
+        `)
         .order("created_at", { ascending: false });
 
       if (error) throw error;
-      return data as HomeworkSet[];
+      return data as HomeworkSetWithTasks[];
     },
   });
+
+  const getSubjectEmoji = (subject: string) => {
+    const subjectItem = SUBJECTS.find(
+      (s) => s.name.toLowerCase() === subject.toLowerCase()
+    );
+    return subjectItem?.emoji || "📝";
+  };
+
+  const formatDeadline = (deadline: string) => {
+    const date = new Date(deadline);
+    if (isToday(date)) return "Сегодня";
+    if (isTomorrow(date)) return "Завтра";
+    return format(date, "d MMMM", { locale: ru });
+  };
+
+  const pluralizeTasks = (count: number) => {
+    if (count === 1) return "задача";
+    if (count >= 2 && count <= 4) return "задачи";
+    return "задач";
+  };
+
+  const hasTasksWithoutConditions = (tasks: HomeworkTask[]) => {
+    return tasks.some(
+      (task) => !task.condition_text && !task.condition_photo_url
+    );
+  };
 
   return (
     <AuthGuard>
@@ -77,42 +110,68 @@ const Homework = () => {
               ) : (
                 homeworkSets?.map((homework) => {
                   const priorityConfig = PRIORITY_CONFIG[homework.priority];
+                  const taskCount = homework.homework_tasks?.length || 0;
+                  const needsConditions = hasTasksWithoutConditions(
+                    homework.homework_tasks || []
+                  );
+                  const subjectEmoji = getSubjectEmoji(homework.subject);
+
                   return (
                     <Card
                       key={homework.id}
-                      className="hover:shadow-elegant transition-all cursor-pointer"
+                      className="hover:shadow-elegant transition-all cursor-pointer group"
                       onClick={() => navigate(`/homework/${homework.id}`)}
                     >
-                      <CardHeader>
-                        <div className="flex items-start justify-between">
-                          <div className="flex-1">
-                            <div className="flex items-center gap-2 mb-2">
-                              <CardTitle className="text-xl">
-                                {homework.subject}
-                              </CardTitle>
-                              <Badge variant="secondary">
-                                {priorityConfig.emoji} {priorityConfig.label}
-                              </Badge>
-                            </div>
-                            <p className="text-muted-foreground">
-                              {homework.topic}
-                            </p>
+                      <CardHeader className="pb-4">
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="flex items-center gap-2">
+                            <span className="text-2xl">{subjectEmoji}</span>
+                            <CardTitle className="text-xl">
+                              {homework.subject}
+                            </CardTitle>
                           </div>
+                          <Badge variant="secondary">
+                            {priorityConfig.emoji} {priorityConfig.label}
+                          </Badge>
+                        </div>
+                        <p className="text-muted-foreground mt-2">
+                          {homework.topic}
+                        </p>
+                        
+                        <div className="flex items-center gap-3 text-sm text-muted-foreground mt-3">
+                          {taskCount > 0 && (
+                            <span>
+                              {taskCount} {pluralizeTasks(taskCount)}
+                            </span>
+                          )}
+                          {homework.deadline && (
+                            <>
+                              {taskCount > 0 && <span>•</span>}
+                              <span>{formatDeadline(homework.deadline)}</span>
+                            </>
+                          )}
                         </div>
                       </CardHeader>
-                      {homework.deadline && (
-                        <CardContent>
-                          <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                            <Calendar className="w-4 h-4" />
-                            <span>
-                              Сдать до:{" "}
-                              {format(new Date(homework.deadline), "d MMMM yyyy", {
-                                locale: ru,
-                              })}
-                            </span>
+
+                      <CardContent className="pt-0 space-y-3">
+                        {needsConditions && taskCount > 0 && (
+                          <div className="flex items-center gap-2 text-sm text-amber-600 dark:text-amber-500">
+                            <AlertTriangle className="w-4 h-4" />
+                            <span>Задачи нужны условия</span>
                           </div>
-                        </CardContent>
-                      )}
+                        )}
+                        
+                        <Button
+                          className="w-full group-hover:bg-primary/90 transition-colors"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            navigate(`/homework/${homework.id}`);
+                          }}
+                        >
+                          Начать
+                          <ArrowRight className="w-4 h-4 ml-2" />
+                        </Button>
+                      </CardContent>
                     </Card>
                   );
                 })
