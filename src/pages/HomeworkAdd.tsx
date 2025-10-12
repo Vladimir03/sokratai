@@ -46,16 +46,19 @@ const HomeworkAdd = () => {
       if (error) throw error;
 
       // Create tasks if task numbers were provided
-      if (formData.taskNumbers.trim()) {
-        const taskNumbers = formData.taskNumbers
-          .split(",")
-          .map((num) => num.trim())
-          .filter((num) => num);
+      const taskNumbers = formData.taskNumbers
+        .split(",")
+        .map((num) => num.trim())
+        .filter((num) => num);
 
+      if (taskNumbers.length > 0) {
         const tasksToInsert = taskNumbers.map((taskNumber) => ({
           homework_set_id: data.id,
           task_number: taskNumber,
           status: "not_started" as const,
+          condition_text: null,
+          condition_photo_url: null,
+          ai_analysis: null,
         }));
 
         const { error: tasksError } = await supabase
@@ -65,10 +68,15 @@ const HomeworkAdd = () => {
         if (tasksError) {
           console.error("Error creating tasks:", tasksError);
           toast.error("Задание создано, но не удалось создать задачи");
+          navigate(`/homework/${data.id}`);
+          return;
         }
+
+        toast.success(`Домашка создана! Добавлено задач: ${taskNumbers.length}`);
+      } else {
+        toast.success("Домашнее задание добавлено");
       }
 
-      toast.success("Домашнее задание добавлено");
       navigate(`/homework/${data.id}`);
     } catch (error) {
       console.error("Error creating homework:", error);
