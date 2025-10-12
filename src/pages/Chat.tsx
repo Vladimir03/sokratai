@@ -750,8 +750,8 @@ const Chat = () => {
 
   return (
     <AuthGuard>
-      <div className="fixed inset-0 flex items-center justify-center p-4 md:pb-4 pb-[calc(4rem+env(safe-area-inset-bottom))]">
-        <Card className="w-full max-w-5xl md:h-[calc(100vh-2rem)] h-[calc(100vh-2rem-4rem-env(safe-area-inset-bottom))] flex flex-col overflow-hidden shadow-elegant">
+      <div className="container mx-auto p-4 h-[calc(100vh-5rem)]">
+        <Card className="w-full h-full flex flex-col overflow-hidden shadow-elegant">
           {/* Header with connection indicator */}
           <div className="p-3 border-b flex justify-between items-center">
             <h2 className="text-sm font-medium">ИИ-репетитор</h2>
