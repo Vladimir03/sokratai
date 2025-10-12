@@ -144,7 +144,7 @@ serve(async (req) => {
     }
 
     // Validate request body
-    const { messages } = await req.json();
+    const { messages, systemPrompt } = await req.json();
     
     if (!Array.isArray(messages) || messages.length === 0) {
       return new Response(
@@ -206,6 +206,9 @@ serve(async (req) => {
 
     console.log("Calling AI gateway with messages:", transformedMessages.length);
 
+    // Use provided systemPrompt if available, otherwise use default
+    const effectiveSystemPrompt = systemPrompt || SYSTEM_PROMPT;
+
     const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
       method: "POST",
       headers: {
@@ -217,7 +220,7 @@ serve(async (req) => {
         messages: [
           { 
             role: "system", 
-            content: SYSTEM_PROMPT
+            content: effectiveSystemPrompt
           },
           ...transformedMessages,
         ],

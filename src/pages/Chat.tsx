@@ -1,11 +1,13 @@
 import { useState, useRef, useEffect, useCallback } from "react";
+import { useSearchParams, useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card } from "@/components/ui/card";
-import { Send, Mic, MessageSquare, Square } from "lucide-react";
+import { Send, Mic, MessageSquare, Square, ArrowLeft } from "lucide-react";
 import { toast } from "sonner";
 import AuthGuard from "@/components/AuthGuard";
 import { supabase } from "@/integrations/supabase/client";
+import { useQuery } from "@tanstack/react-query";
 import ChatMessage from "@/components/ChatMessage";
 import ChatSkeleton from "@/components/ChatSkeleton";
 import ConnectionIndicator from "@/components/ConnectionIndicator";
@@ -30,6 +32,10 @@ interface Message {
 }
 
 const Chat = () => {
+  const [searchParams] = useSearchParams();
+  const navigate = useNavigate();
+  const taskId = searchParams.get('taskId');
+  
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
@@ -46,6 +52,27 @@ const Chat = () => {
   const recognitionRef = useRef<any>(null);
   const networkStatus = useNetworkStatus();
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Fetch homework task if taskId exists
+  const { data: task } = useQuery({
+    queryKey: ['homework-task-context', taskId],
+    queryFn: async () => {
+      if (!taskId) return null;
+      
+      const { data, error } = await supabase
+        .from('homework_tasks')
+        .select(`
+          *,
+          homework_sets(*)
+        `)
+        .eq('id', taskId)
+        .single();
+      
+      if (error) throw error;
+      return data;
+    },
+    enabled: !!taskId
+  });
 
   // Показываем уведомление при плохом соединении
   useEffect(() => {
@@ -183,6 +210,26 @@ const Chat = () => {
     }
   }, [messages]);
 
+  // Auto-start conversation when taskId is present and chat is empty
+  useEffect(() => {
+    if (task && messages.length === 0 && !loadingHistory) {
+      const aiAnalysis = task.ai_analysis as any;
+      const firstMessage: Message = {
+        role: 'assistant',
+        content: `Привет! Вижу, ты работаешь над задачей ${task.task_number} из темы "${task.homework_sets?.topic}".
+
+${task.condition_text ? `Условие: ${task.condition_text}` : 'Фото условия загружено.'}
+
+${aiAnalysis?.type ? `Это ${aiAnalysis.type}.` : ''}
+
+С чего начнём? Какие у тебя есть идеи по решению?`
+      };
+      
+      setMessages([firstMessage]);
+      saveMessageToBatch('assistant', firstMessage.content);
+    }
+  }, [task, messages.length, loadingHistory, saveMessageToBatch]);
+
   // Динамические сообщения загрузки на основе времени
   useEffect(() => {
     if (!isLoading || !loadingStartTime) {
@@ -221,6 +268,32 @@ const Chat = () => {
     setLoadingMessage("ИИ думает...");
     setShowCancelButton(false);
 
+    // Build system prompt with task context if available
+    let systemPrompt = "Ты опытный репетитор по математике для подготовки к ЕГЭ.";
+    
+    if (task) {
+      const aiAnalysis = task.ai_analysis as any;
+      systemPrompt += `
+
+КОНТЕКСТ ДОМАШНЕЙ ЗАДАЧИ:
+Предмет: ${task.homework_sets?.subject}
+Тема: ${task.homework_sets?.topic}
+Номер задачи: ${task.task_number}
+
+Условие задачи:
+${task.condition_text || '[Фото условия доступно пользователю]'}
+
+AI Анализ:
+Тип: ${aiAnalysis?.type || 'не определен'}
+План решения: ${aiAnalysis?.solution_steps?.join(', ') || 'не указан'}
+
+---
+
+Пользователь работает над этой конкретной задачей из домашнего задания.
+Помоги ему решить её, используя Сократовский метод - не давай готовый ответ, 
+а задавай наводящие вопросы и направляй к решению.`;
+    }
+
     // Получаем последнее сообщение пользователя для метрик
     const lastUserMessage = userMessages
       .slice()
@@ -251,7 +324,10 @@ const Chat = () => {
           "Content-Type": "application/json",
           Authorization: `Bearer ${session.access_token}`,
         },
-        body: JSON.stringify({ messages: userMessages }),
+        body: JSON.stringify({ 
+          messages: userMessages,
+          systemPrompt 
+        }),
         signal: abortControllerRef.current?.signal,
       });
 
@@ -406,7 +482,7 @@ const Chat = () => {
       PerformanceMonitor.endRequest(false, errorMessage);
       throw error;
     }
-  }, [saveMessageToBatch]);
+  }, [saveMessageToBatch, task]);
 
   const handleImageUpload = useCallback(async (file: File) => {
     // Проверка размера (макс 5MB)
@@ -754,9 +830,41 @@ const Chat = () => {
         <Card className="w-full h-full flex flex-col overflow-hidden shadow-elegant">
           {/* Header with connection indicator */}
           <div className="p-3 border-b flex justify-between items-center">
-            <h2 className="text-sm font-medium">ИИ-репетитор</h2>
+            <div className="flex items-center gap-2">
+              {task && (
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => navigate(`/homework/${task.homework_set_id}/task/${task.id}`)}
+                  title="Вернуться к задаче"
+                >
+                  <ArrowLeft className="w-4 h-4" />
+                </Button>
+              )}
+              <h2 className="text-sm font-medium">
+                {task ? `💬 Чат • Задача ${task.task_number}` : 'ИИ-репетитор'}
+              </h2>
+            </div>
             <ConnectionIndicator />
           </div>
+
+          {/* Task Context Banner */}
+          {task && (
+            <div className="bg-blue-50 dark:bg-blue-950/30 border-b border-blue-200 dark:border-blue-900 p-4">
+              <div className="flex items-center gap-2 text-blue-900 dark:text-blue-100 font-medium mb-2">
+                📌 Контекст: {task.homework_sets?.subject}, {task.homework_sets?.topic}, Задача {task.task_number}
+              </div>
+              
+              <details className="text-sm text-blue-800 dark:text-blue-200">
+                <summary className="cursor-pointer hover:underline">
+                  Показать условие
+                </summary>
+                <div className="mt-2 p-2 bg-white dark:bg-gray-900 rounded">
+                  {task.condition_text || (task.condition_photo_url ? 'Фото условия загружено' : 'Условие не указано')}
+                </div>
+              </details>
+            </div>
+          )}
 
           {/* Messages */}
           <div ref={parentRef} className="flex-1 overflow-y-auto p-4 space-y-4">
