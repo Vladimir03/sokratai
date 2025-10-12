@@ -73,6 +73,121 @@ export type Database = {
           },
         ]
       }
+      homework_chat_messages: {
+        Row: {
+          content: string
+          created_at: string
+          homework_task_id: string
+          id: string
+          role: string
+          user_id: string
+        }
+        Insert: {
+          content: string
+          created_at?: string
+          homework_task_id: string
+          id?: string
+          role: string
+          user_id: string
+        }
+        Update: {
+          content?: string
+          created_at?: string
+          homework_task_id?: string
+          id?: string
+          role?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "homework_chat_messages_homework_task_id_fkey"
+            columns: ["homework_task_id"]
+            isOneToOne: false
+            referencedRelation: "homework_tasks"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      homework_sets: {
+        Row: {
+          created_at: string
+          deadline: string | null
+          id: string
+          photo_url: string | null
+          priority: string
+          subject: string
+          topic: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          deadline?: string | null
+          id?: string
+          photo_url?: string | null
+          priority?: string
+          subject: string
+          topic: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          deadline?: string | null
+          id?: string
+          photo_url?: string | null
+          priority?: string
+          subject?: string
+          topic?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      homework_tasks: {
+        Row: {
+          ai_analysis: Json | null
+          condition_photo_url: string | null
+          condition_text: string | null
+          created_at: string
+          homework_set_id: string
+          id: string
+          status: string
+          task_number: string
+          updated_at: string
+        }
+        Insert: {
+          ai_analysis?: Json | null
+          condition_photo_url?: string | null
+          condition_text?: string | null
+          created_at?: string
+          homework_set_id: string
+          id?: string
+          status?: string
+          task_number: string
+          updated_at?: string
+        }
+        Update: {
+          ai_analysis?: Json | null
+          condition_photo_url?: string | null
+          condition_text?: string | null
+          created_at?: string
+          homework_set_id?: string
+          id?: string
+          status?: string
+          task_number?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "homework_tasks_homework_set_id_fkey"
+            columns: ["homework_set_id"]
+            isOneToOne: false
+            referencedRelation: "homework_sets"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       problems: {
         Row: {
           answer: string | null
