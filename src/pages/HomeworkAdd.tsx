@@ -20,6 +20,7 @@ const HomeworkAdd = () => {
     topic: "",
     deadline: "",
     priority: "later" as Priority,
+    taskNumbers: "",
   });
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -43,6 +44,29 @@ const HomeworkAdd = () => {
         .single();
 
       if (error) throw error;
+
+      // Create tasks if task numbers were provided
+      if (formData.taskNumbers.trim()) {
+        const taskNumbers = formData.taskNumbers
+          .split(",")
+          .map((num) => num.trim())
+          .filter((num) => num);
+
+        const tasksToInsert = taskNumbers.map((taskNumber) => ({
+          homework_set_id: data.id,
+          task_number: taskNumber,
+          status: "not_started" as const,
+        }));
+
+        const { error: tasksError } = await supabase
+          .from("homework_tasks")
+          .insert(tasksToInsert);
+
+        if (tasksError) {
+          console.error("Error creating tasks:", tasksError);
+          toast.error("Задание создано, но не удалось создать задачи");
+        }
+      }
 
       toast.success("Домашнее задание добавлено");
       navigate(`/homework/${data.id}`);
@@ -118,6 +142,21 @@ const HomeworkAdd = () => {
                       }
                       required
                     />
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="taskNumbers">Номера задач (необязательно)</Label>
+                    <Input
+                      id="taskNumbers"
+                      placeholder="5, 7, 10"
+                      value={formData.taskNumbers}
+                      onChange={(e) =>
+                        setFormData({ ...formData, taskNumbers: e.target.value })
+                      }
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      Введите номера через запятую (например: 5, 7, 10)
+                    </p>
                   </div>
 
                   <div className="space-y-2">
