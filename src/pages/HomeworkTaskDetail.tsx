@@ -1,34 +1,68 @@
 import { useNavigate, useParams } from "react-router-dom";
-import { ArrowLeft, MessageSquare } from "lucide-react";
+import { ArrowLeft, MessageSquare, Camera, Type, AlertCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Textarea } from "@/components/ui/textarea";
 import Navigation from "@/components/Navigation";
 import AuthGuard from "@/components/AuthGuard";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
-import { HomeworkTask, TaskStatus } from "@/types/homework";
+import { HomeworkTask, TaskStatus, SUBJECTS } from "@/types/homework";
 import { toast } from "sonner";
+import { useState } from "react";
 
 const HomeworkTaskDetail = () => {
   const { homeworkId, taskId } = useParams();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const [conditionText, setConditionText] = useState("");
+  const [isUploading, setIsUploading] = useState(false);
 
   const { data: task } = useQuery({
     queryKey: ["homework-task", taskId],
     queryFn: async () => {
       const { data, error } = await supabase
         .from("homework_tasks")
-        .select("*")
+        .select("*, homework_sets(*)")
         .eq("id", taskId)
         .single();
 
       if (error) throw error;
-      return data as HomeworkTask;
+      return data as HomeworkTask & { homework_sets: any };
     },
   });
+
+  // Mock AI analysis generator
+  const generateMockAnalysis = (text: string) => {
+    const keywords = text.toLowerCase();
+    let type = "общая задача";
+    
+    if (keywords.includes("уравнение") || keywords.includes("x") || keywords.includes("=")) {
+      type = "линейное уравнение";
+    } else if (keywords.includes("треугольник") || keywords.includes("угол")) {
+      type = "геометрическая задача";
+    } else if (keywords.includes("скорость") || keywords.includes("время")) {
+      type = "задача на движение";
+    }
+
+    return {
+      difficulty: "средняя",
+      type,
+      hints: [
+        "Прочитай условие внимательно",
+        "Определи, что дано и что нужно найти",
+        "Примени соответствующую формулу"
+      ],
+      solution_steps: [
+        "Запиши данные из условия",
+        "Выбери подходящий метод решения",
+        "Выполни вычисления",
+        "Проверь ответ"
+      ]
+    };
+  };
 
   const updateStatusMutation = useMutation({
     mutationFn: async (newStatus: TaskStatus) => {
@@ -48,6 +82,79 @@ const HomeworkTaskDetail = () => {
     },
   });
 
+  const handlePhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setIsUploading(true);
+    try {
+      const fileExt = file.name.split(".").pop();
+      const fileName = `${crypto.randomUUID()}.${fileExt}`;
+      const filePath = `${taskId}/${fileName}`;
+
+      const { error: uploadError } = await supabase.storage
+        .from("chat-images")
+        .upload(filePath, file);
+
+      if (uploadError) throw uploadError;
+
+      const { data: { publicUrl } } = supabase.storage
+        .from("chat-images")
+        .getPublicUrl(filePath);
+
+      const mockAnalysis = generateMockAnalysis("uploaded image");
+
+      const { error: updateError } = await supabase
+        .from("homework_tasks")
+        .update({
+          condition_photo_url: publicUrl,
+          ai_analysis: mockAnalysis,
+        })
+        .eq("id", taskId);
+
+      if (updateError) throw updateError;
+
+      queryClient.invalidateQueries({ queryKey: ["homework-task", taskId] });
+      toast.success("Условие загружено!");
+    } catch (error) {
+      console.error("Upload error:", error);
+      toast.error("Ошибка при загрузке фото");
+    } finally {
+      setIsUploading(false);
+    }
+  };
+
+  const handleTextSubmit = async () => {
+    if (!conditionText.trim()) {
+      toast.error("Введите условие задачи");
+      return;
+    }
+
+    setIsUploading(true);
+    try {
+      const mockAnalysis = generateMockAnalysis(conditionText);
+
+      const { error } = await supabase
+        .from("homework_tasks")
+        .update({
+          condition_text: conditionText,
+          ai_analysis: mockAnalysis,
+        })
+        .eq("id", taskId);
+
+      if (error) throw error;
+
+      queryClient.invalidateQueries({ queryKey: ["homework-task", taskId] });
+      toast.success("Условие сохранено!");
+      setConditionText("");
+    } catch (error) {
+      console.error("Save error:", error);
+      toast.error("Ошибка при сохранении");
+    } finally {
+      setIsUploading(false);
+    }
+  };
+
   const getStatusBadge = (status: string) => {
     const statusConfig = {
       not_started: { label: "Не начато", variant: "secondary" as const },
@@ -60,6 +167,8 @@ const HomeworkTaskDetail = () => {
   if (!task) return null;
 
   const statusBadge = getStatusBadge(task.status);
+  const hasCondition = task.condition_text || task.condition_photo_url;
+  const subjectEmoji = SUBJECTS.find(s => s.id === task.homework_sets?.subject)?.emoji || "📚";
 
   return (
     <AuthGuard>
@@ -80,95 +189,178 @@ const HomeworkTaskDetail = () => {
                 <h1 className="text-3xl font-bold bg-gradient-hero bg-clip-text text-transparent">
                   Задача {task.task_number}
                 </h1>
+                <p className="text-muted-foreground mt-1">
+                  {subjectEmoji} {task.homework_sets?.subject}, {task.homework_sets?.topic}
+                </p>
               </div>
             </div>
 
-            {/* Task Details */}
-            <Card>
-              <CardHeader>
-                <div className="flex items-center justify-between">
-                  <CardTitle>Детали задачи</CardTitle>
-                  <Badge variant={statusBadge.variant}>
-                    {statusBadge.label}
-                  </Badge>
-                </div>
-              </CardHeader>
-              <CardContent className="space-y-6">
-                {task.condition_text && (
-                  <div>
-                    <h3 className="font-semibold mb-2">Условие:</h3>
-                    <p className="text-muted-foreground whitespace-pre-wrap">
-                      {task.condition_text}
-                    </p>
-                  </div>
-                )}
-
-                {task.condition_photo_url && (
-                  <div>
-                    <h3 className="font-semibold mb-2">Фото условия:</h3>
-                    <img
-                      src={task.condition_photo_url}
-                      alt="Условие задачи"
-                      className="rounded-lg max-w-full"
+            {!hasCondition ? (
+              /* STATE 1: NO CONDITION - Upload Interface */
+              <div className="space-y-6">
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="flex items-center gap-2">
+                      <Camera className="w-5 h-5" />
+                      Загрузи условие задачи
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    {/* Photo Upload Option */}
+                    <label htmlFor="photo-upload" className="block">
+                      <Card className="cursor-pointer hover:shadow-lg transition-shadow border-2 hover:border-primary">
+                        <CardContent className="flex items-center gap-4 p-6">
+                          <Camera className="w-8 h-8 text-primary" />
+                          <div className="flex-1">
+                            <h3 className="font-semibold">📷 Сфотографировать</h3>
+                            <p className="text-sm text-muted-foreground">
+                              Загрузи фото условия задачи
+                            </p>
+                          </div>
+                        </CardContent>
+                      </Card>
+                    </label>
+                    <input
+                      id="photo-upload"
+                      type="file"
+                      accept="image/*"
+                      capture="environment"
+                      className="hidden"
+                      onChange={handlePhotoUpload}
+                      disabled={isUploading}
                     />
-                  </div>
+
+                    {/* Text Input Option */}
+                    <Card className="border-2">
+                      <CardContent className="p-6 space-y-4">
+                        <div className="flex items-center gap-4">
+                          <Type className="w-8 h-8 text-primary" />
+                          <div className="flex-1">
+                            <h3 className="font-semibold">⌨️ Написать текстом</h3>
+                            <p className="text-sm text-muted-foreground">
+                              Введи условие вручную
+                            </p>
+                          </div>
+                        </div>
+                        <Textarea
+                          placeholder="Введи условие задачи..."
+                          value={conditionText}
+                          onChange={(e) => setConditionText(e.target.value)}
+                          className="min-h-[120px]"
+                          disabled={isUploading}
+                        />
+                        <Button
+                          onClick={handleTextSubmit}
+                          disabled={isUploading || !conditionText.trim()}
+                          className="w-full"
+                        >
+                          {isUploading ? "Сохранение..." : "Сохранить условие"}
+                        </Button>
+                      </CardContent>
+                    </Card>
+
+                    {/* Info Alert */}
+                    <div className="flex items-start gap-2 p-4 bg-muted rounded-lg">
+                      <AlertCircle className="w-5 h-5 text-muted-foreground flex-shrink-0 mt-0.5" />
+                      <p className="text-sm text-muted-foreground">
+                        💡 Без условия ИИ не сможет помочь с конкретной задачей
+                      </p>
+                    </div>
+                  </CardContent>
+                </Card>
+              </div>
+            ) : (
+              /* STATE 2: CONDITION EXISTS - Show condition + AI analysis */
+              <div className="space-y-6">
+                <Card>
+                  <CardHeader>
+                    <div className="flex items-center justify-between">
+                      <CardTitle className="text-green-600 flex items-center gap-2">
+                        ✅ Условие обработано!
+                      </CardTitle>
+                      <Badge variant={statusBadge.variant}>
+                        {statusBadge.label}
+                      </Badge>
+                    </div>
+                  </CardHeader>
+                  <CardContent className="space-y-6">
+                    {/* Show condition */}
+                    {task.condition_photo_url && (
+                      <div>
+                        <h3 className="font-semibold mb-2">Фото условия:</h3>
+                        <img
+                          src={task.condition_photo_url}
+                          alt="Условие задачи"
+                          className="rounded-lg max-w-full"
+                        />
+                      </div>
+                    )}
+                    
+                    {task.condition_text && (
+                      <div>
+                        <h3 className="font-semibold mb-2">Условие:</h3>
+                        <p className="text-muted-foreground whitespace-pre-wrap">
+                          {task.condition_text}
+                        </p>
+                      </div>
+                    )}
+
+                    <div className="border-t pt-4">
+                      <h3 className="font-semibold mb-2">Статус выполнения:</h3>
+                      <Select
+                        value={task.status}
+                        onValueChange={(value) => updateStatusMutation.mutate(value as TaskStatus)}
+                      >
+                        <SelectTrigger className="w-full">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="not_started">Не начато</SelectItem>
+                          <SelectItem value="in_progress">В процессе</SelectItem>
+                          <SelectItem value="completed">Выполнено</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </CardContent>
+                </Card>
+
+                {/* AI Analysis */}
+                {task.ai_analysis && (
+                  <Card>
+                    <CardHeader>
+                      <CardTitle>🤖 Первичный анализ</CardTitle>
+                    </CardHeader>
+                    <CardContent className="space-y-4">
+                      <div>
+                        <h3 className="font-semibold mb-1">Тип задачи:</h3>
+                        <p className="text-muted-foreground">
+                          {task.ai_analysis.type}
+                        </p>
+                      </div>
+                      {task.ai_analysis.solution_steps && task.ai_analysis.solution_steps.length > 0 && (
+                        <div>
+                          <h3 className="font-semibold mb-2">💡 План решения:</h3>
+                          <ol className="list-decimal list-inside space-y-1 text-muted-foreground">
+                            {task.ai_analysis.solution_steps.map((step, idx) => (
+                              <li key={idx}>{step}</li>
+                            ))}
+                          </ol>
+                        </div>
+                      )}
+                    </CardContent>
+                  </Card>
                 )}
 
-                <div>
-                  <h3 className="font-semibold mb-2">Статус выполнения:</h3>
-                  <Select
-                    value={task.status}
-                    onValueChange={(value) => updateStatusMutation.mutate(value as TaskStatus)}
-                  >
-                    <SelectTrigger className="w-full">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="not_started">Не начато</SelectItem>
-                      <SelectItem value="in_progress">В процессе</SelectItem>
-                      <SelectItem value="completed">Выполнено</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                <Button className="w-full gap-2">
+                {/* Chat Button */}
+                <Button
+                  className="w-full gap-2"
+                  size="lg"
+                  onClick={() => navigate(`/chat?taskId=${taskId}`)}
+                >
                   <MessageSquare className="w-4 h-4" />
-                  Обсудить с ИИ-репетитором
+                  💬 Обсудить с ИИ-репетитором
                 </Button>
-              </CardContent>
-            </Card>
-
-            {/* AI Analysis */}
-            {task.ai_analysis && (
-              <Card>
-                <CardHeader>
-                  <CardTitle>Анализ задачи</CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  <div>
-                    <h3 className="font-semibold mb-1">Сложность:</h3>
-                    <p className="text-muted-foreground">
-                      {task.ai_analysis.difficulty}
-                    </p>
-                  </div>
-                  <div>
-                    <h3 className="font-semibold mb-1">Тип задачи:</h3>
-                    <p className="text-muted-foreground">
-                      {task.ai_analysis.type}
-                    </p>
-                  </div>
-                  {task.ai_analysis.hints && task.ai_analysis.hints.length > 0 && (
-                    <div>
-                      <h3 className="font-semibold mb-2">Подсказки:</h3>
-                      <ul className="list-disc list-inside space-y-1 text-muted-foreground">
-                        {task.ai_analysis.hints.map((hint, idx) => (
-                          <li key={idx}>{hint}</li>
-                        ))}
-                      </ul>
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
+              </div>
             )}
           </div>
         </main>
