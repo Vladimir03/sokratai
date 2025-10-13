@@ -104,6 +104,33 @@ const Chat = () => {
         return;
       }
 
+      // If taskId exists, load task-specific messages from homework_chat_messages
+      if (taskId) {
+        console.log("Loading task-specific chat history");
+        const { data, error } = await supabase
+          .from('homework_chat_messages')
+          .select('*')
+          .eq('homework_task_id', taskId)
+          .order('created_at', { ascending: true });
+
+        if (error) throw error;
+
+        if (data && data.length > 0) {
+          const loadedMessages: Message[] = data.map(msg => ({
+            role: msg.role as "user" | "assistant",
+            content: msg.content,
+            id: msg.id,
+            status: "sent"
+          }));
+          setMessages(loadedMessages);
+        }
+        // If no messages exist for this task, leave messages empty
+        // so the auto-start effect can trigger
+        setLoadingHistory(false);
+        return;
+      }
+
+      // For general chat (no taskId), load from chat_messages
       // Пробуем загрузить из sessionStorage кэша
       const cachedMessages = loadChatFromSessionCache(user.id);
       if (cachedMessages && cachedMessages.length > 0) {
@@ -151,7 +178,7 @@ const Chat = () => {
     } finally {
       setLoadingHistory(false);
     }
-  }, []);
+  }, [taskId]);
 
   useEffect(() => {
     loadChatHistory();
@@ -168,7 +195,7 @@ const Chat = () => {
   }, [loadChatHistory]);
 
   // Сохранение с батчингом
-  const saveMessageToBatch = useCallback((
+  const saveMessageToBatch = useCallback(async (
     role: "user" | "assistant", 
     content: string,
     tempId?: string,
@@ -178,7 +205,29 @@ const Chat = () => {
     // Начинаем замер DB save
     PerformanceMonitor.startDbSave();
     
-    // Добавляем в батч вместо немедленного сохранения
+    // If taskId exists, save to homework_chat_messages instead
+    if (taskId) {
+      try {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) return;
+
+        await supabase
+          .from('homework_chat_messages')
+          .insert({
+            user_id: user.id,
+            homework_task_id: taskId,
+            role,
+            content
+          });
+        
+        PerformanceMonitor.endDbSave();
+      } catch (error) {
+        console.error('Error saving homework chat message:', error);
+      }
+      return;
+    }
+    
+    // For general chat, добавляем в батч
     messageBatcher.addMessage({ role, content, tempId, image_url, input_method });
     
     // Завершаем замер DB save (батчинг асинхронный, но мы замеряем добавление в очередь)
@@ -194,7 +243,7 @@ const Chat = () => {
           : msg
       ));
     }
-  }, []);
+  }, [taskId]);
 
   // Обновляем кэш при изменении сообщений
   useEffect(() => {
@@ -212,22 +261,33 @@ const Chat = () => {
 
   // Auto-start conversation when taskId is present and chat is empty
   useEffect(() => {
-    if (task && messages.length === 0 && !loadingHistory) {
-      const aiAnalysis = task.ai_analysis as any;
-      const firstMessage: Message = {
-        role: 'assistant',
-        content: `Привет! Вижу, ты работаешь над задачей ${task.task_number} из темы "${task.homework_sets?.topic}".
+    // Only run if we have task context, chat is empty, and history loading is complete
+    if (!task || messages.length > 0 || loadingHistory) return;
+    
+    const aiAnalysis = task.ai_analysis as any;
+    const subject = task.homework_sets?.subject || 'предмету';
+    const topic = task.homework_sets?.topic || '';
+    const taskNumber = task.task_number;
+    const condition = task.condition_text || 'Фото условия загружено';
+    const taskType = aiAnalysis?.type || '';
+    
+    // Generate contextual welcome message
+    const firstMessage: Message = {
+      role: 'assistant',
+      content: `Привет! Вижу, ты работаешь над задачей ${taskNumber} из темы "${topic}" по ${subject}.
 
-${task.condition_text ? `Условие: ${task.condition_text}` : 'Фото условия загружено.'}
+Условие: ${condition}
 
-${aiAnalysis?.type ? `Это ${aiAnalysis.type}.` : ''}
+${taskType ? `Это ${taskType}.` : ''}
 
 С чего начнём? Какие у тебя есть идеи по решению?`
-      };
-      
-      setMessages([firstMessage]);
-      saveMessageToBatch('assistant', firstMessage.content);
-    }
+    };
+    
+    // Add to messages immediately (this will display in UI)
+    setMessages([firstMessage]);
+    
+    // Save to database via batch (async, won't block UI)
+    saveMessageToBatch('assistant', firstMessage.content);
   }, [task, messages.length, loadingHistory, saveMessageToBatch]);
 
   // Динамические сообщения загрузки на основе времени
