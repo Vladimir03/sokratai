@@ -500,12 +500,9 @@ ${taskType ? `Это ${taskType}.` : ''}
 
   return (
     <AuthGuard>
-      <div className="h-screen overflow-hidden flex flex-col bg-background">
-        <div className="flex-shrink-0">
-          <Navigation />
-        </div>
-        
-        <div className="flex flex-1 overflow-hidden relative">
+      <Navigation />
+      <div className="fixed inset-0 pt-16 pb-16 md:pb-0 overflow-hidden bg-background">
+        <div className="flex h-full overflow-hidden relative">
           {/* Mobile overlay */}
           {isMobile && isSidebarOpen && (
             <div
