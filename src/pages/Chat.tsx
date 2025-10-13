@@ -1,1085 +1,458 @@
-import { useState, useRef, useEffect, useCallback } from "react";
-import { useSearchParams, useNavigate } from "react-router-dom";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Card } from "@/components/ui/card";
-import { Send, Mic, MessageSquare, Square, ArrowLeft } from "lucide-react";
-import { toast } from "sonner";
-import AuthGuard from "@/components/AuthGuard";
+import { useState, useRef, useEffect } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
-import { useQuery } from "@tanstack/react-query";
 import ChatMessage from "@/components/ChatMessage";
+import { Button } from "@/components/ui/button";
+import { Textarea } from "@/components/ui/textarea";
+import { Send } from "lucide-react";
+import { useToast } from "@/hooks/use-toast";
 import ChatSkeleton from "@/components/ChatSkeleton";
+import { useSearchParams, useNavigate } from "react-router-dom";
 import ConnectionIndicator from "@/components/ConnectionIndicator";
-import { saveChatToSessionCache, loadChatFromSessionCache } from "@/utils/chatCache";
-import { messageBatcher } from "@/utils/messageBatcher";
-import { debounce } from "@/utils/debounce";
-import { useNetworkStatus } from "@/hooks/useNetworkStatus";
-import { PerformanceMonitor } from "@/utils/performanceMetrics";
-// KaTeX CSS теперь загружается динамически в ChatMessage
+import { ChatSidebar } from "@/components/ChatSidebar";
+import { TaskContextBanner } from "@/components/TaskContextBanner";
 
-const MAX_MESSAGE_LENGTH = 2000;
+const SYSTEM_PROMPT = "Ты опытный репетитор по математике для подготовки к ЕГЭ. Используй Сократовский метод - задавай наводящие вопросы вместо прямых ответов.";
 
 interface Message {
   role: "user" | "assistant";
   content: string;
-  id?: string;
-  tempId?: string;
-  status?: "sending" | "sent" | "error";
-  error?: string;
   image_url?: string;
-  input_method?: "text" | "voice" | "button";
 }
 
-const Chat = () => {
-  const [searchParams] = useSearchParams();
-  const navigate = useNavigate();
-  const taskId = searchParams.get('taskId');
-  
+export default function Chat() {
+  const [message, setMessage] = useState("");
   const [messages, setMessages] = useState<Message[]>([]);
-  const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [loadingHistory, setLoadingHistory] = useState(true);
-  const [loadingStartTime, setLoadingStartTime] = useState<number | null>(null);
-  const [loadingMessage, setLoadingMessage] = useState("ИИ думает...");
-  const [showCancelButton, setShowCancelButton] = useState(false);
-  const [isUploading, setIsUploading] = useState(false);
-  const [selectedImage, setSelectedImage] = useState<string | null>(null);
-  const [isRecording, setIsRecording] = useState(false);
-  const parentRef = useRef<HTMLDivElement>(null);
-  const scrollTimeoutRef = useRef<NodeJS.Timeout>();
-  const abortControllerRef = useRef<AbortController | null>(null);
-  const recognitionRef = useRef<any>(null);
-  const networkStatus = useNetworkStatus();
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const { toast } = useToast();
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const queryClient = useQueryClient();
+  const [searchParams] = useSearchParams();
+  const navigate = useNavigate();
+  const chatIdFromUrl = searchParams.get('id');
 
-  // Fetch homework task if taskId exists
-  const { data: task } = useQuery({
-    queryKey: ['homework-task-context', taskId],
+  const { data: user } = useQuery({
+    queryKey: ['user'],
     queryFn: async () => {
-      if (!taskId) return null;
-      
+      const { data: { user } } = await supabase.auth.getUser();
+      return user;
+    }
+  });
+
+  // Ensure general chat exists
+  const { data: generalChat } = useQuery({
+    queryKey: ['general-chat', user?.id],
+    queryFn: async () => {
+      if (!user?.id) return null;
+
+      const { data: existingChat } = await supabase
+        .from('chats')
+        .select('id')
+        .eq('user_id', user.id)
+        .eq('chat_type', 'general')
+        .maybeSingle();
+
+      if (existingChat) return existingChat;
+
+      const { data: newChat, error } = await supabase
+        .from('chats')
+        .insert({
+          user_id: user.id,
+          chat_type: 'general',
+          title: 'Общий чат',
+          icon: '📚'
+        })
+        .select()
+        .single();
+
+      if (error) throw error;
+      return newChat;
+    },
+    enabled: !!user?.id
+  });
+
+  const currentChatId = chatIdFromUrl || generalChat?.id;
+
+  // Fetch current chat details
+  const { data: currentChat } = useQuery({
+    queryKey: ['chat', currentChatId],
+    queryFn: async () => {
+      if (!currentChatId) return null;
+
       const { data, error } = await supabase
-        .from('homework_tasks')
+        .from('chats')
         .select(`
           *,
-          homework_sets(*)
+          homework_task:homework_tasks(
+            *,
+            homework_set:homework_sets(*)
+          )
         `)
-        .eq('id', taskId)
+        .eq('id', currentChatId)
         .single();
-      
+
       if (error) throw error;
       return data;
     },
-    enabled: !!taskId
+    enabled: !!currentChatId
   });
 
-  // Показываем уведомление при плохом соединении
   useEffect(() => {
-    if (networkStatus.quality === 'offline') {
-      toast.error("Нет подключения к интернету. Работаем в офлайн-режиме.");
-    } else if (networkStatus.quality === 'poor') {
-      toast.warning("Слабое соединение. Возможны задержки.");
+    if (user?.id && currentChatId) {
+      loadChatHistory();
     }
-  }, [networkStatus.quality]);
+  }, [user?.id, currentChatId]);
 
-  // Мгновенный scroll to bottom
-  const scrollToBottom = useCallback(() => {
-    if (parentRef.current) {
-      parentRef.current.scrollTop = parentRef.current.scrollHeight;
-    }
-  }, []);
-
-  useEffect(() => {
-    if (messages.length > 0) {
-      scrollToBottom();
-    }
-  }, [messages.length, scrollToBottom]);
-
-  const loadChatHistory = useCallback(async () => {
+  const loadChatHistory = async () => {
+    if (!user?.id || !currentChatId) return;
+    
+    setLoadingHistory(true);
     try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) {
-        setLoadingHistory(false);
-        return;
-      }
-
-      // If taskId exists, load task-specific messages from homework_chat_messages
-      if (taskId) {
-        console.log("Loading task-specific chat history");
-        const { data, error } = await supabase
-          .from('homework_chat_messages')
-          .select('*')
-          .eq('homework_task_id', taskId)
-          .order('created_at', { ascending: true });
-
-        if (error) throw error;
-
-        if (data && data.length > 0) {
-          const loadedMessages: Message[] = data.map(msg => ({
-            role: msg.role as "user" | "assistant",
-            content: msg.content,
-            id: msg.id,
-            status: "sent"
-          }));
-          setMessages(loadedMessages);
-        }
-        // If no messages exist for this task, leave messages empty
-        // so the auto-start effect can trigger
-        setLoadingHistory(false);
-        return;
-      }
-
-      // For general chat (no taskId), load from chat_messages
-      // Пробуем загрузить из sessionStorage кэша
-      const cachedMessages = loadChatFromSessionCache(user.id);
-      if (cachedMessages && cachedMessages.length > 0) {
-        console.log("Loading from session cache");
-        setMessages(cachedMessages.map(msg => ({
-          role: msg.role,
-          content: msg.content,
-          id: msg.id,
-          tempId: msg.tempId,
-          status: msg.status === "sent" ? undefined : msg.status
-        })));
-        setLoadingHistory(false);
-        return; // Работаем только с кэшем, не делаем запрос
-      }
-
-      // Только если кэш пустой или истек, делаем запрос
-      console.log("Loading from database");
       const { data, error } = await supabase
         .from('chat_messages')
         .select('*')
-        .eq('user_id', user.id)
-        .order('created_at', { ascending: true })
-        .limit(50);
+        .eq('chat_id', currentChatId)
+        .order('created_at', { ascending: true });
 
       if (error) throw error;
-
-      if (data) {
-        const loadedMessages: Message[] = data.map(msg => ({
+      
+      if (data && data.length > 0) {
+        setMessages(data.map(msg => ({
           role: msg.role as "user" | "assistant",
           content: msg.content,
-          id: msg.id,
-          status: "sent",
-          image_url: msg.image_url,
-          input_method: msg.input_method as "text" | "voice" | "button" | undefined
-        }));
-        setMessages(loadedMessages);
-        saveChatToSessionCache(loadedMessages.map(msg => ({
-          ...msg,
-          timestamp: Date.now()
-        })), user.id);
+          image_url: msg.image_url
+        })));
+      } else {
+        setMessages([]);
       }
     } catch (error) {
       console.error('Error loading chat history:', error);
-      toast.error("Не удалось загрузить историю чата");
     } finally {
       setLoadingHistory(false);
     }
-  }, [taskId]);
+  };
 
-  useEffect(() => {
-    loadChatHistory();
-    
-    // Логируем статистику при монтировании
-    setTimeout(() => {
-      PerformanceMonitor.logSessionStats();
-    }, 1000);
-    
-    // Flush pending messages при размонтировании
-    return () => {
-      messageBatcher.forceFlush();
-    };
-  }, [loadChatHistory]);
+  const saveMessageToBatch = async (msg: Message) => {
+    if (!user?.id || !currentChatId) return;
 
-  // Сохранение с батчингом
-  const saveMessageToBatch = useCallback(async (
-    role: "user" | "assistant", 
-    content: string,
-    tempId?: string,
-    image_url?: string,
-    input_method?: "text" | "voice" | "button"
-  ) => {
-    // Начинаем замер DB save
-    PerformanceMonitor.startDbSave();
-    
-    // If taskId exists, save to homework_chat_messages instead
-    if (taskId) {
-      try {
-        const { data: { user } } = await supabase.auth.getUser();
-        if (!user) return;
-
-        await supabase
-          .from('homework_chat_messages')
-          .insert({
-            user_id: user.id,
-            homework_task_id: taskId,
-            role,
-            content
-          });
-        
-        PerformanceMonitor.endDbSave();
-      } catch (error) {
-        console.error('Error saving homework chat message:', error);
-      }
-      return;
-    }
-    
-    // For general chat, добавляем в батч
-    messageBatcher.addMessage({ role, content, tempId, image_url, input_method });
-    
-    // Завершаем замер DB save (батчинг асинхронный, но мы замеряем добавление в очередь)
-    setTimeout(() => {
-      PerformanceMonitor.endDbSave();
-    }, 10);
-    
-    // Обновляем статус на "sent" мгновенно (оптимистично)
-    if (tempId) {
-      setMessages(prev => prev.map(msg => 
-        msg.tempId === tempId 
-          ? { ...msg, status: "sent" as const }
-          : msg
-      ));
-    }
-  }, [taskId]);
-
-  // Обновляем кэш при изменении сообщений
-  useEffect(() => {
-    if (messages.length > 0) {
-      supabase.auth.getUser().then(({ data: { user } }) => {
-        if (user) {
-          saveChatToSessionCache(messages.map(msg => ({
-            ...msg,
-            timestamp: Date.now()
-          })), user.id);
-        }
+    try {
+      await supabase.from('chat_messages').insert({
+        chat_id: currentChatId,
+        user_id: user.id,
+        role: msg.role,
+        content: msg.content,
+        image_url: msg.image_url
       });
+
+      // Update chat's last_message_at
+      await supabase
+        .from('chats')
+        .update({
+          last_message_at: new Date().toISOString(),
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', currentChatId);
+    } catch (error) {
+      console.error('Error saving message:', error);
     }
+  };
+
+  const scrollToBottom = () => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  };
+
+  useEffect(() => {
+    scrollToBottom();
   }, [messages]);
 
-  // Auto-start conversation when taskId is present and chat is empty
-  useEffect(() => {
-    // Only run if we have task context, chat is empty, and history loading is complete
-    if (!task || messages.length > 0 || loadingHistory) return;
-    
-    const aiAnalysis = task.ai_analysis as any;
-    const subject = task.homework_sets?.subject || 'предмету';
-    const topic = task.homework_sets?.topic || '';
-    const taskNumber = task.task_number;
-    const condition = task.condition_text || 'Фото условия загружено';
-    const taskType = aiAnalysis?.type || '';
-    
-    // Generate contextual welcome message
-    const firstMessage: Message = {
-      role: 'assistant',
-      content: `Привет! Вижу, ты работаешь над задачей ${taskNumber} из темы "${topic}" по ${subject}.
-
-Условие: ${condition}
-
-${taskType ? `Это ${taskType}.` : ''}
-
-С чего начнём? Какие у тебя есть идеи по решению?`
-    };
-    
-    // Add to messages immediately (this will display in UI)
-    setMessages([firstMessage]);
-    
-    // Save to database via batch (async, won't block UI)
-    saveMessageToBatch('assistant', firstMessage.content);
-  }, [task, messages.length, loadingHistory, saveMessageToBatch]);
-
-  // Динамические сообщения загрузки на основе времени
-  useEffect(() => {
-    if (!isLoading || !loadingStartTime) {
-      return;
-    }
-
-    const interval = setInterval(() => {
-      const elapsed = Date.now() - loadingStartTime;
-      
-      if (elapsed > 15000) {
-        setShowCancelButton(true);
-      }
-      
-      if (elapsed > 10000) {
-        setLoadingMessage("Почти готово...");
-      } else if (elapsed > 5000) {
-        setLoadingMessage("ИИ решает сложную задачу...");
-      }
-    }, 1000);
-
-    return () => clearInterval(interval);
-  }, [isLoading, loadingStartTime]);
-
-
-  const streamChat = useCallback(async (userMessages: Message[]) => {
+  async function streamChat({
+    messages,
+    systemPrompt,
+    onDelta,
+    onDone,
+  }: {
+    messages: Message[];
+    systemPrompt: string;
+    onDelta: (deltaText: string) => void;
+    onDone: () => void;
+  }) {
     const CHAT_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/chat`;
-    
+
     const { data: { session } } = await supabase.auth.getSession();
     if (!session) {
-      toast.error("Требуется авторизация");
+      toast({
+        title: "Ошибка",
+        description: "Требуется авторизация",
+        variant: "destructive",
+      });
       throw new Error("No session");
     }
 
-    // Инициализация состояния загрузки
-    setLoadingStartTime(Date.now());
-    setLoadingMessage("ИИ думает...");
-    setShowCancelButton(false);
+    const resp = await fetch(CHAT_URL, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${session.access_token}`,
+      },
+      body: JSON.stringify({ messages, systemPrompt }),
+    });
 
-    // Build system prompt with task context if available
-    let systemPrompt = "Ты опытный репетитор по математике для подготовки к ЕГЭ.";
-    
-    if (task) {
-      const aiAnalysis = task.ai_analysis as any;
-      systemPrompt += `
+    if (!resp.ok || !resp.body) {
+      if (resp.status === 429) {
+        toast({
+          title: "Ошибка",
+          description: "Превышен лимит запросов. Попробуйте позже.",
+          variant: "destructive",
+        });
+      } else if (resp.status === 402) {
+        toast({
+          title: "Ошибка",
+          description: "Требуется пополнение баланса.",
+          variant: "destructive",
+        });
+      }
+      throw new Error("Failed to start stream");
+    }
+
+    const reader = resp.body.getReader();
+    const decoder = new TextDecoder();
+    let textBuffer = "";
+    let streamDone = false;
+
+    while (!streamDone) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      textBuffer += decoder.decode(value, { stream: true });
+
+      let newlineIndex: number;
+      while ((newlineIndex = textBuffer.indexOf("\n")) !== -1) {
+        let line = textBuffer.slice(0, newlineIndex);
+        textBuffer = textBuffer.slice(newlineIndex + 1);
+
+        if (line.endsWith("\r")) line = line.slice(0, -1);
+        if (line.startsWith(":") || line.trim() === "") continue;
+        if (!line.startsWith("data: ")) continue;
+
+        const jsonStr = line.slice(6).trim();
+        if (jsonStr === "[DONE]") {
+          streamDone = true;
+          break;
+        }
+
+        try {
+          const parsed = JSON.parse(jsonStr);
+          const content = parsed.choices?.[0]?.delta?.content as string | undefined;
+          if (content) onDelta(content);
+        } catch {
+          textBuffer = line + "\n" + textBuffer;
+          break;
+        }
+      }
+    }
+
+    if (textBuffer.trim()) {
+      for (let raw of textBuffer.split("\n")) {
+        if (!raw) continue;
+        if (raw.endsWith("\r")) raw = raw.slice(0, -1);
+        if (raw.startsWith(":") || raw.trim() === "") continue;
+        if (!raw.startsWith("data: ")) continue;
+        const jsonStr = raw.slice(6).trim();
+        if (jsonStr === "[DONE]") continue;
+        try {
+          const parsed = JSON.parse(jsonStr);
+          const content = parsed.choices?.[0]?.delta?.content as string | undefined;
+          if (content) onDelta(content);
+        } catch {}
+      }
+    }
+
+    onDone();
+  }
+
+  const handleSend = async () => {
+    if (!message.trim() || isLoading) return;
+
+    const userMessage: Message = { role: "user", content: message.trim() };
+    const userMessages = [...messages, userMessage];
+    setMessages(userMessages);
+    setMessage("");
+    setIsLoading(true);
+
+    await saveMessageToBatch(userMessage);
+
+    let assistantSoFar = "";
+    const upsertAssistant = (nextChunk: string) => {
+      assistantSoFar += nextChunk;
+      setMessages(prev => {
+        const last = prev[prev.length - 1];
+        if (last?.role === "assistant") {
+          return prev.map((m, i) => (i === prev.length - 1 ? { ...m, content: assistantSoFar } : m));
+        }
+        return [...prev, { role: "assistant", content: assistantSoFar }];
+      });
+    };
+
+    try {
+      let systemPrompt = SYSTEM_PROMPT;
+      
+      if (currentChat?.chat_type === 'homework_task' && currentChat.homework_task) {
+        const task = currentChat.homework_task;
+        systemPrompt += `
 
 КОНТЕКСТ ДОМАШНЕЙ ЗАДАЧИ:
-Предмет: ${task.homework_sets?.subject}
-Тема: ${task.homework_sets?.topic}
+Предмет: ${task.homework_set?.subject}
+Тема: ${task.homework_set?.topic}
 Номер задачи: ${task.task_number}
 
 Условие задачи:
 ${task.condition_text || '[Фото условия доступно пользователю]'}
 
 AI Анализ:
-Тип: ${aiAnalysis?.type || 'не определен'}
-План решения: ${aiAnalysis?.solution_steps?.join(', ') || 'не указан'}
+Тип: ${(task.ai_analysis as any)?.type || 'не определен'}
+План решения: ${(task.ai_analysis as any)?.solution_steps?.join(', ') || 'не определен'}
 
 ---
 
 Пользователь работает над этой конкретной задачей из домашнего задания.
 Помоги ему решить её, используя Сократовский метод - не давай готовый ответ, 
 а задавай наводящие вопросы и направляй к решению.`;
-    }
+      }
 
-    // Получаем последнее сообщение пользователя для метрик
-    const lastUserMessage = userMessages
-      .slice()
-      .reverse()
-      .find(m => m.role === 'user');
-    const userQuery = lastUserMessage?.content || '';
-
-    // Начинаем замер производительности
-    PerformanceMonitor.startRequest(undefined, userQuery);
-
-    // Таймаут для отмены через 30 секунд
-    abortControllerRef.current = new AbortController();
-    const cancelTimer = setTimeout(() => {
-      abortControllerRef.current?.abort();
-      toast.error("Запрос занял слишком много времени. Попробуйте снова.", {
-        duration: 5000,
-        action: {
-          label: "Повторить",
-          onClick: () => window.location.reload()
-        }
-      });
-    }, 30000);
-    
-    try {
-      const resp = await fetch(CHAT_URL, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${session.access_token}`,
+      await streamChat({
+        messages: userMessages,
+        systemPrompt,
+        onDelta: (chunk) => upsertAssistant(chunk),
+        onDone: () => {
+          setIsLoading(false);
+          queryClient.invalidateQueries({ queryKey: ['chat-messages'] });
         },
-        body: JSON.stringify({ 
-          messages: userMessages,
-          systemPrompt 
-        }),
-        signal: abortControllerRef.current?.signal,
       });
 
-      // Отменяем таймер при успешном ответе
-      clearTimeout(cancelTimer);
-
-      if (!resp.ok) {
-        const errorMessage = `HTTP ${resp.status}: ${resp.statusText}`;
-        console.error('🔴 Network error:', {
-          status: resp.status,
-          statusText: resp.statusText,
-          url: CHAT_URL,
-        });
-
-        if (resp.status === 429) {
-          toast.error("Превышен лимит запросов. Попробуйте позже.");
-          PerformanceMonitor.endRequest(false, "Rate limit exceeded");
-          throw new Error("Rate limit exceeded");
-        }
-        if (resp.status === 402) {
-          toast.error("Требуется пополнение баланса.");
-          PerformanceMonitor.endRequest(false, "Payment required");
-          throw new Error("Payment required");
-        }
-        
-        PerformanceMonitor.endRequest(false, errorMessage);
-        throw new Error("Failed to start stream");
-      }
-
-      if (!resp.body) {
-        PerformanceMonitor.endRequest(false, "No response body");
-        throw new Error("No response body");
-      }
-
-      const reader = resp.body.getReader();
-      const decoder = new TextDecoder();
-      let textBuffer = "";
-      let streamDone = false;
-      let assistantContent = "";
-      let firstTokenReceived = false;
-      let contentBuffer = "";
-      let lastUpdateTime = Date.now();
-
-      // Batched update - накапливаем токены и обновляем раз в 100ms
-      const flushUpdate = () => {
-        const currentContent = assistantContent + contentBuffer;
-        setMessages((prev) => {
-          const last = prev[prev.length - 1];
-          if (last?.role === "assistant") {
-            return prev.map((m, i) =>
-              i === prev.length - 1 ? { ...m, content: currentContent } : m
-            );
-          }
-          return [...prev, { role: "assistant", content: currentContent }];
-        });
-        assistantContent = currentContent;
-        contentBuffer = "";
-        lastUpdateTime = Date.now();
-      };
-
-      while (!streamDone) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        textBuffer += decoder.decode(value, { stream: true });
-
-        let newlineIndex: number;
-        while ((newlineIndex = textBuffer.indexOf("\n")) !== -1) {
-          let line = textBuffer.slice(0, newlineIndex);
-          textBuffer = textBuffer.slice(newlineIndex + 1);
-
-          if (line.endsWith("\r")) line = line.slice(0, -1);
-          if (line.startsWith(":") || line.trim() === "") continue;
-          if (!line.startsWith("data: ")) continue;
-
-          const jsonStr = line.slice(6).trim();
-          if (jsonStr === "[DONE]") {
-            streamDone = true;
-            break;
-          }
-
-          try {
-            const parsed = JSON.parse(jsonStr);
-            const content = parsed.choices?.[0]?.delta?.content as string | undefined;
-            if (content) {
-              // Фиксируем первый токен
-              if (!firstTokenReceived) {
-                PerformanceMonitor.recordFirstToken();
-                firstTokenReceived = true;
-              }
-
-              // Накапливаем токены в буфер
-              contentBuffer += content;
-              
-              // Обновляем UI раз в 100ms
-              const now = Date.now();
-              if (now - lastUpdateTime > 100) {
-                flushUpdate();
-              }
-            }
-          } catch {
-            textBuffer = line + "\n" + textBuffer;
-            break;
-          }
-        }
-      }
-
-      // Финальное обновление - флашим оставшиеся токены
-      if (contentBuffer) {
-        flushUpdate();
-      } else {
-        // Если буфер пустой, просто обновляем финальный контент
-        setMessages((prev) => {
-          const last = prev[prev.length - 1];
-          if (last?.role === "assistant") {
-            return prev.map((m, i) =>
-              i === prev.length - 1 ? { ...m, content: assistantContent } : m
-            );
-          }
-          return [...prev, { role: "assistant", content: assistantContent }];
-        });
-      }
-      
-      // Сохраняем ответ ассистента в батч
-      if (assistantContent) {
-        saveMessageToBatch("assistant", assistantContent);
-      }
-
-      // Завершаем замер успешно
-      clearTimeout(cancelTimer);
-      setLoadingStartTime(null);
-      setShowCancelButton(false);
-      abortControllerRef.current = null;
-      PerformanceMonitor.endRequest(true);
+      const finalAssistantMsg: Message = { role: "assistant", content: assistantSoFar };
+      await saveMessageToBatch(finalAssistantMsg);
     } catch (error) {
-      clearTimeout(cancelTimer);
-      setLoadingStartTime(null);
-      setShowCancelButton(false);
-      abortControllerRef.current = null;
-      
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-      
-      // Проверяем, был ли запрос отменен
-      if (errorMessage.includes('abort')) {
-        console.warn('Request aborted due to timeout');
-        return; // Не пробрасываем ошибку, тост уже показан
-      }
-      
-      console.error('🔴 Stream error:', {
-        error: errorMessage,
-        timestamp: new Date().toISOString(),
+      console.error(error);
+      setIsLoading(false);
+      toast({
+        title: "Ошибка",
+        description: "Не удалось отправить сообщение",
+        variant: "destructive",
       });
-      PerformanceMonitor.endRequest(false, errorMessage);
-      throw error;
     }
-  }, [saveMessageToBatch, task]);
+  };
 
-  const handleImageUpload = useCallback(async (file: File) => {
-    // Проверка размера (макс 5MB)
-    if (file.size > 5 * 1024 * 1024) {
-      toast.error('Файл слишком большой. Максимум 5MB');
-      return;
-    }
-
-    // Проверка типа
-    const validTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp', 'image/gif'];
-    if (!validTypes.includes(file.type)) {
-      toast.error('Поддерживаются только JPG, PNG, WebP и GIF');
-      return;
-    }
-
-    setIsUploading(true);
-
-    try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) {
-        toast.error('Требуется авторизация');
-        return;
-      }
-
-      // Загрузка в Supabase Storage
-      const fileExt = file.name.split('.').pop() || file.type.split('/')[1];
-      const fileName = `${Date.now()}.${fileExt}`;
-      const filePath = `${user.id}/${fileName}`;
-
-      const { error: uploadError } = await supabase.storage
-        .from('chat-images')
-        .upload(filePath, file);
-
-      if (uploadError) throw uploadError;
-
-      // Получение публичного URL
-      const { data: { publicUrl } } = supabase.storage
-        .from('chat-images')
-        .getPublicUrl(filePath);
-
-      setSelectedImage(publicUrl);
-      toast.success('✅ Изображение загружено! Добавьте вопрос и отправьте.');
-    } catch (error) {
-      console.error('Ошибка загрузки:', error);
-      toast.error('❌ Не удалось загрузить изображение');
-    } finally {
-      setIsUploading(false);
-    }
-  }, []);
-
-  const handleFileSelect = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    
-    await handleImageUpload(file);
-    
-    // Сброс input
-    if (fileInputRef.current) {
-      fileInputRef.current.value = '';
-    }
-  }, [handleImageUpload]);
-
-  const handlePaste = useCallback(async (e: React.ClipboardEvent<HTMLInputElement>) => {
-    const items = e.clipboardData?.items;
-    if (!items) return;
-
-    // Ищем изображение в clipboard
-    for (let i = 0; i < items.length; i++) {
-      const item = items[i];
-      
-      // Проверяем, что это изображение
-      if (item.type.startsWith('image/')) {
-        e.preventDefault(); // Предотвращаем обычную вставку текста
-        
-        // Получаем файл из clipboard
-        const file = item.getAsFile();
-        if (!file) continue;
-        
-        // Показываем уведомление
-        toast.info('📸 Скриншот обнаружен! Загружаю...');
-        
-        // Обрабатываем как обычную загрузку
-        await handleImageUpload(file);
-        
-        break; // Берём только первое изображение
-      }
-    }
-  }, [handleImageUpload]);
-
-  const removeSelectedImage = useCallback(() => {
-    setSelectedImage(null);
-  }, []);
-
-  const stopRecording = useCallback(() => {
-    if (recognitionRef.current) {
-      recognitionRef.current.stop();
-      setIsRecording(false);
-      
-      // Вибрация при остановке
-      if (navigator.vibrate) {
-        navigator.vibrate(50);
-      }
-    }
-  }, []);
-
-  const handleVoiceInput = useCallback(() => {
-    // Проверка поддержки Web Speech API
-    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    
-    if (!SpeechRecognition) {
-      toast.error("Голосовой ввод не поддерживается в вашем браузере", { duration: 3000 });
-      return;
-    }
-
-    // Если уже идёт запись, останавливаем
-    if (isRecording && recognitionRef.current) {
-      stopRecording();
-      return;
-    }
-
-    // Останавливаем запись при начале печати
-    if (input.length > 0) {
-      toast.info("Очистите поле ввода перед голосовым вводом", { duration: 2000 });
-      return;
-    }
-
-    // Создаём новый экземпляр распознавания
-    const recognition = new SpeechRecognition();
-    recognition.lang = 'ru-RU';
-    recognition.continuous = false;
-    recognition.interimResults = false;
-    recognition.maxAlternatives = 1;
-
-    recognition.onstart = () => {
-      setIsRecording(true);
-      
-      // Вибрация при старте
-      if (navigator.vibrate) {
-        navigator.vibrate(50);
-      }
-    };
-
-    recognition.onresult = (event: any) => {
-      const transcript = event.results[0][0].transcript;
-      
-      // Проверка длины
-      let finalTranscript = transcript;
-      if (transcript.length > MAX_MESSAGE_LENGTH) {
-        finalTranscript = transcript.slice(0, MAX_MESSAGE_LENGTH);
-        toast.warning(`Текст обрезан до ${MAX_MESSAGE_LENGTH} символов`, { duration: 3000 });
-      }
-      
-      setInput(finalTranscript);
-      setIsRecording(false);
-      toast.success("✅ Текст распознан!", { duration: 2000 });
-      
-      // Фокус на input после распознавания
-      setTimeout(() => {
-        const inputElement = document.querySelector('input[type="text"]') as HTMLInputElement;
-        inputElement?.focus();
-      }, 100);
-    };
-
-    recognition.onerror = (event: any) => {
-      console.error('Speech recognition error:', event.error);
-      setIsRecording(false);
-      
-      if (event.error === 'no-speech') {
-        toast.error("Не удалось распознать речь. Попробуйте ещё раз.", { duration: 3000 });
-      } else if (event.error === 'not-allowed') {
-        toast.error("Разрешите доступ к микрофону в настройках браузера", { duration: 4000 });
-      } else if (event.error === 'aborted') {
-        // Пользователь прервал запись, не показываем ошибку
-      } else {
-        toast.error("Ошибка распознавания речи", { duration: 3000 });
-      }
-    };
-
-    recognition.onend = () => {
-      setIsRecording(false);
-      recognitionRef.current = null;
-    };
-
-    try {
-      recognition.start();
-      recognitionRef.current = recognition;
-    } catch (error) {
-      console.error('Failed to start recognition:', error);
-      toast.error("Не удалось запустить распознавание речи", { duration: 3000 });
-      setIsRecording(false);
-    }
-  }, [isRecording, input, stopRecording]);
-
-  // Останавливаем запись при размонтировании
+  // Auto-start conversation with task context
   useEffect(() => {
-    return () => {
-      if (recognitionRef.current) {
-        recognitionRef.current.stop();
-      }
+    if (!currentChat?.homework_task || messages.length > 0 || loadingHistory) return;
+
+    const generateWelcomeMessage = (task: any) => {
+      const subject = task.homework_set?.subject || 'предмету';
+      const topic = task.homework_set?.topic || '';
+      const taskNumber = task.task_number;
+      const condition = task.condition_text || 'условие доступно выше';
+      const taskType = task.ai_analysis?.type || '';
+
+      return `Привет! Вижу, ты работаешь над задачей ${taskNumber} из темы "${topic}" по ${subject}.
+
+Условие: ${condition}
+
+${taskType ? `Это ${taskType}.` : ''}
+
+С чего начнём? Какие у тебя есть идеи по решению?`;
     };
-  }, []);
 
-  // Останавливаем запись при начале печати
-  useEffect(() => {
-    if (isRecording && input.length > 0 && recognitionRef.current) {
-      stopRecording();
-    }
-  }, [input, isRecording, stopRecording]);
-
-  const retryMessage = useCallback(async (tempId: string) => {
-    const msgToRetry = messages.find(m => m.tempId === tempId);
-    if (!msgToRetry) return;
-
-    // Обновляем статус на "sending"
-    setMessages(prev => prev.map(msg => 
-      msg.tempId === tempId 
-        ? { ...msg, status: "sending" as const, error: undefined }
-        : msg
-    ));
-
-    // Пытаемся сохранить снова через батчер
-    saveMessageToBatch(msgToRetry.role, msgToRetry.content, tempId, msgToRetry.image_url);
-  }, [messages, saveMessageToBatch]);
-
-  const cancelRequest = useCallback(() => {
-    if (abortControllerRef.current) {
-      abortControllerRef.current.abort();
-      setIsLoading(false);
-      setLoadingStartTime(null);
-      setShowCancelButton(false);
-      abortControllerRef.current = null;
-      
-      // Убираем пустой placeholder ответа
-      setMessages(prev => prev.filter(m => m.content !== ""));
-      
-      toast.info("Запрос отменен. Вы можете отправить новое сообщение.");
-    }
-  }, []);
-
-  const sendQuickMessage = useCallback(async (text: string) => {
-    // Блокируем отправку при offline
-    if (networkStatus.quality === 'offline') {
-      toast.error("Нет подключения к интернету");
-      return;
-    }
-
-    if (isLoading) return;
-
-    const tempId = `temp_${Date.now()}_${Math.random()}`;
-    const userMessage: Message = { 
-      role: "user", 
-      content: text,
-      tempId,
-      status: "sending",
-      input_method: "button"
+    const firstMessage: Message = {
+      role: 'assistant',
+      content: generateWelcomeMessage(currentChat.homework_task)
     };
-    
-    // Мгновенный optimistic update
-    setMessages(prev => [...prev, userMessage]);
-    
-    // Мгновенно показываем placeholder для ответа
-    setMessages(prev => [...prev, { role: "assistant", content: "" }]);
-    setIsLoading(true);
 
-    // Сохраняем в батч полностью в фоне (не блокируем)
-    saveMessageToBatch("user", text, tempId, undefined, "button");
+    setMessages([firstMessage]);
+    saveMessageToBatch(firstMessage);
+  }, [currentChat?.homework_task, messages.length, loadingHistory]);
 
-    try {
-      // Начинаем стриминг немедленно
-      const recentMessages = [...messages, userMessage].slice(-10);
-      await streamChat(recentMessages);
-    } catch (error) {
-      console.error("Chat error:", error);
-      // Убираем placeholder при ошибке
-      setMessages(prev => prev.filter(m => m.content !== ""));
-      toast.error("Ошибка при отправке сообщения");
-    } finally {
-      setIsLoading(false);
-    }
-  }, [isLoading, messages, saveMessageToBatch, streamChat, networkStatus.quality]);
+  const handleChatSelect = (chatId: string) => {
+    navigate(`/chat?id=${chatId}`);
+  };
 
-  const handleSubmit = useCallback(async (e: React.FormEvent) => {
-    e.preventDefault();
-    const trimmedInput = input.trim();
-    
-    if (!trimmedInput && !selectedImage) {
-      toast.error("Сообщение или изображение обязательны");
-      return;
-    }
-    
-    if (trimmedInput.length > MAX_MESSAGE_LENGTH) {
-      toast.error(`Максимальная длина: ${MAX_MESSAGE_LENGTH} символов`);
-      return;
-    }
-
-    // Блокируем отправку при offline
-    if (networkStatus.quality === 'offline') {
-      toast.error("Нет подключения к интернету");
-      return;
-    }
-    
-    if (isLoading) return;
-
-    const tempId = `temp_${Date.now()}_${Math.random()}`;
-    const userMessage: Message = { 
-      role: "user", 
-      content: trimmedInput || "Помоги с этой задачей",
-      tempId,
-      status: "sending",
-      image_url: selectedImage || undefined,
-      input_method: "text"
-    };
-    
-    // Мгновенный optimistic update
-    setMessages(prev => [...prev, userMessage]);
-    setInput("");
-    
-    // Мгновенно показываем placeholder для ответа
-    setMessages(prev => [...prev, { role: "assistant", content: "" }]);
-    setIsLoading(true);
-
-    // Сохраняем в батч полностью в фоне (не блокируем)
-    saveMessageToBatch("user", trimmedInput || "Помоги с этой задачей", tempId, selectedImage || undefined, "text");
-
-    // Очищаем выбранное изображение
-    setSelectedImage(null);
-
-    try {
-      // Начинаем стриминг немедленно без задержек
-      const recentMessages = [...messages, userMessage].slice(-10);
-      await streamChat(recentMessages);
-    } catch (error) {
-      console.error("Chat error:", error);
-      // Убираем placeholder при ошибке
-      setMessages(prev => prev.filter(m => m.content !== ""));
-      toast.error("Ошибка при отправке сообщения");
-    } finally {
-      setIsLoading(false);
-    }
-  }, [input, isLoading, messages, saveMessageToBatch, streamChat, networkStatus.quality, selectedImage]);
+  if (!currentChatId) {
+    return (
+      <div className="flex items-center justify-center h-screen">
+        <ChatSkeleton />
+      </div>
+    );
+  }
 
   return (
-    <AuthGuard>
-      <div className="container mx-auto p-4 h-[calc(100vh-5rem)]">
-        <Card className="w-full h-full flex flex-col overflow-hidden shadow-elegant">
-          {/* Header with connection indicator */}
-          <div className="p-3 border-b flex justify-between items-center">
-            <div className="flex items-center gap-2">
-              {task && (
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  onClick={() => navigate(`/homework/${task.homework_set_id}/task/${task.id}`)}
-                  title="Вернуться к задаче"
-                >
-                  <ArrowLeft className="w-4 h-4" />
-                </Button>
-              )}
-              <h2 className="text-sm font-medium">
-                {task ? `💬 Чат • Задача ${task.task_number}` : 'ИИ-репетитор'}
-              </h2>
-            </div>
-            <ConnectionIndicator />
-          </div>
+    <div className="flex h-screen overflow-hidden bg-background">
+      <ChatSidebar
+        currentChatId={currentChatId}
+        onChatSelect={handleChatSelect}
+      />
 
-          {/* Task Context Banner */}
-          {task && (
-            <div className="bg-blue-50 dark:bg-blue-950/30 border-b border-blue-200 dark:border-blue-900 p-4">
-              <div className="flex items-center gap-2 text-blue-900 dark:text-blue-100 font-medium mb-2">
-                📌 Контекст: {task.homework_sets?.subject}, {task.homework_sets?.topic}, Задача {task.task_number}
-              </div>
-              
-              <details className="text-sm text-blue-800 dark:text-blue-200">
-                <summary className="cursor-pointer hover:underline">
-                  Показать условие
-                </summary>
-                <div className="mt-2 p-2 bg-white dark:bg-gray-900 rounded">
-                  {task.condition_text || (task.condition_photo_url ? 'Фото условия загружено' : 'Условие не указано')}
-                </div>
-              </details>
-            </div>
-          )}
+      <div className="flex-1 flex flex-col overflow-hidden">
+        <div className="border-b p-4 flex items-center justify-between">
+          <h1 className="text-xl font-semibold flex items-center gap-2">
+            <span>{currentChat?.icon || '💬'}</span>
+            <span>{currentChat?.title || 'Чат'}</span>
+          </h1>
+          <ConnectionIndicator />
+        </div>
 
-          {/* Messages */}
-          <div ref={parentRef} className="flex-1 overflow-y-auto p-4 space-y-4">
-            {loadingHistory ? (
-              <ChatSkeleton />
-            ) : messages.length === 0 ? (
-              <div className="text-center text-muted-foreground py-12">
-                <MessageSquare className="w-16 h-16 mx-auto mb-4 text-primary/50" />
-                <h3 className="text-xl font-semibold mb-2">Начните диалог с ИИ-репетитором</h3>
-                <p>Задайте любой вопрос по математике и получите детальное объяснение</p>
-              </div>
-            ) : null}
+        {currentChat?.chat_type === 'homework_task' && currentChat.homework_task && (
+          <TaskContextBanner task={currentChat.homework_task} />
+        )}
 
-            {messages.map((message, index) => (
-              <ChatMessage
-                key={message.id || message.tempId || index}
-                message={message}
-                isLoading={isLoading}
-                onQuickMessage={sendQuickMessage}
-                onRetry={message.status === "error" && message.tempId ? () => retryMessage(message.tempId!) : undefined}
-              />
-            ))}
-
-            {/* Прогресс-бар загрузки */}
-            {isLoading && (
-              <div className="flex justify-start">
-                <div className="flex flex-col gap-2 max-w-[80%]">
-                  <div className="flex items-center gap-2 px-4 py-3 rounded-lg bg-secondary/50 border border-border/50">
-                    <div className="h-4 w-4 rounded-full border-2 border-primary border-t-transparent animate-spin" />
-                    <span className="text-sm text-foreground font-medium">{loadingMessage}</span>
+        <div className="flex-1 overflow-y-auto pb-32 px-4">
+          {loadingHistory ? (
+            <ChatSkeleton />
+          ) : (
+            <>
+              {messages.map((msg, index) => (
+                <ChatMessage key={index} message={msg} isLoading={false} onQuickMessage={() => {}} />
+              ))}
+              {isLoading && (
+                <div className="flex justify-start mb-4">
+                  <div className="bg-secondary text-secondary-foreground rounded-lg p-4 max-w-[80%]">
+                    <div className="flex items-center gap-2">
+                      <div className="animate-bounce">●</div>
+                      <div className="animate-bounce delay-100">●</div>
+                      <div className="animate-bounce delay-200">●</div>
+                    </div>
                   </div>
-                  {showCancelButton && (
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={cancelRequest}
-                      className="w-fit self-start"
-                    >
-                      Отменить запрос
-                    </Button>
-                  )}
                 </div>
-              </div>
-            )}
+              )}
+              <div ref={messagesEndRef} />
+            </>
+          )}
+        </div>
 
+        <div className="border-t p-4 bg-background">
+          <div className="flex gap-2 max-w-4xl mx-auto">
+            <Textarea
+              value={message}
+              onChange={(e) => setMessage(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault();
+                  handleSend();
+                }
+              }}
+              placeholder="Напиши свой вопрос..."
+              className="min-h-[60px] resize-none"
+              disabled={isLoading}
+            />
+            <Button
+              onClick={handleSend}
+              disabled={!message.trim() || isLoading}
+              size="icon"
+              className="h-[60px] w-[60px]"
+            >
+              <Send className="h-5 w-5" />
+            </Button>
           </div>
-
-          {/* Input */}
-          <form onSubmit={handleSubmit} className="p-4 border-t relative">
-            {/* Индикатор записи */}
-            {isRecording && (
-              <div className="absolute bottom-full left-0 right-0 mb-2 mx-4 p-3 bg-destructive text-destructive-foreground rounded-lg shadow-lg animate-pulse flex items-center justify-between gap-3">
-                <div className="flex items-center gap-2">
-                  <div className="w-3 h-3 bg-white rounded-full animate-ping" />
-                  <span className="font-medium text-sm md:text-base">🎤 Идёт запись... Говорите чётко</span>
-                </div>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  onClick={stopRecording}
-                  className="text-destructive-foreground hover:bg-destructive/80 shrink-0"
-                >
-                  <Square className="w-4 h-4 mr-1" />
-                  Остановить
-                </Button>
-              </div>
-            )}
-            
-            {/* Превью загруженного изображения */}
-            {selectedImage && (
-              <div className="mb-3 relative inline-block">
-                <img 
-                  src={selectedImage} 
-                  alt="Загруженное изображение" 
-                  className="max-w-xs max-h-32 rounded-lg border border-border"
-                />
-                <button
-                  type="button"
-                  onClick={removeSelectedImage}
-                  className="absolute -top-2 -right-2 bg-destructive text-destructive-foreground rounded-full p-1 hover:bg-destructive/90 transition-colors"
-                  title="Удалить изображение"
-                >
-                  ✕
-                </button>
-              </div>
-            )}
-            
-            {/* Индикатор загрузки */}
-            {isUploading && (
-              <div className="mb-3 flex items-center gap-2 text-sm text-muted-foreground">
-                <div className="animate-spin">⏳</div>
-                Загрузка изображения...
-              </div>
-            )}
-            
-            <div className="flex gap-2 items-end">
-              <input
-                type="file"
-                ref={fileInputRef}
-                accept="image/jpeg,image/jpg,image/png,image/webp,image/gif"
-                className="hidden"
-                onChange={handleFileSelect}
-                disabled={isUploading || isLoading}
-              />
-              
-              <Button
-                type="button"
-                variant="outline"
-                size="icon"
-                onClick={() => fileInputRef.current?.click()}
-                disabled={isUploading || isLoading}
-                title="Прикрепить изображение"
-              >
-                📎
-              </Button>
-              
-              <Input
-                value={input}
-                onChange={(e) => setInput(e.target.value)}
-                onPaste={handlePaste}
-                placeholder={selectedImage ? "Добавьте вопрос (опционально)" : "Напишите вопрос или вставьте скриншот (Ctrl+V) 📸"}
-                className="flex-1"
-                disabled={isLoading}
-              />
-              
-              <Button 
-                type="button" 
-                variant={isRecording ? "destructive" : "outline"}
-                size="icon" 
-                disabled={isLoading || isUploading}
-                onClick={handleVoiceInput}
-                className={isRecording ? "animate-pulse" : ""}
-                title={isRecording ? "Нажмите чтобы остановить запись" : "Голосовой ввод"}
-              >
-                {isRecording ? (
-                  <Square className="w-4 h-4" />
-                ) : (
-                  <Mic className="w-4 h-4" />
-                )}
-              </Button>
-              
-              <Button 
-                type="submit" 
-                size="icon" 
-                disabled={isLoading || isUploading || (!input.trim() && !selectedImage)}
-              >
-                <Send className="w-4 h-4" />
-              </Button>
-            </div>
-          </form>
-        </Card>
+        </div>
       </div>
-    </AuthGuard>
+    </div>
   );
-};
-
-export default Chat;
+}

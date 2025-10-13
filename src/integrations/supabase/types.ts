@@ -34,6 +34,7 @@ export type Database = {
       }
       chat_messages: {
         Row: {
+          chat_id: string | null
           content: string
           created_at: string | null
           extracted_text: string | null
@@ -44,6 +45,7 @@ export type Database = {
           user_id: string
         }
         Insert: {
+          chat_id?: string | null
           content: string
           created_at?: string | null
           extracted_text?: string | null
@@ -54,6 +56,7 @@ export type Database = {
           user_id: string
         }
         Update: {
+          chat_id?: string | null
           content?: string
           created_at?: string | null
           extracted_text?: string | null
@@ -65,10 +68,64 @@ export type Database = {
         }
         Relationships: [
           {
+            foreignKeyName: "chat_messages_chat_id_fkey"
+            columns: ["chat_id"]
+            isOneToOne: false
+            referencedRelation: "chats"
+            referencedColumns: ["id"]
+          },
+          {
             foreignKeyName: "chat_messages_user_id_fkey"
             columns: ["user_id"]
             isOneToOne: false
             referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      chats: {
+        Row: {
+          chat_type: string
+          created_at: string
+          homework_task_id: string | null
+          icon: string | null
+          id: string
+          is_archived: boolean
+          last_message_at: string | null
+          title: string | null
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          chat_type: string
+          created_at?: string
+          homework_task_id?: string | null
+          icon?: string | null
+          id?: string
+          is_archived?: boolean
+          last_message_at?: string | null
+          title?: string | null
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          chat_type?: string
+          created_at?: string
+          homework_task_id?: string | null
+          icon?: string | null
+          id?: string
+          is_archived?: boolean
+          last_message_at?: string | null
+          title?: string | null
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "chats_homework_task_id_fkey"
+            columns: ["homework_task_id"]
+            isOneToOne: false
+            referencedRelation: "homework_tasks"
             referencedColumns: ["id"]
           },
         ]

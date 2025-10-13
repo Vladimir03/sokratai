@@ -355,7 +355,55 @@ const HomeworkTaskDetail = () => {
                 <Button
                   className="w-full gap-2"
                   size="lg"
-                  onClick={() => navigate(`/chat?taskId=${taskId}`)}
+                  onClick={async () => {
+                    if (!taskId || !task) return;
+
+                    const { data: { user } } = await supabase.auth.getUser();
+                    if (!user) return;
+
+                    // Check if chat already exists for this task
+                    const { data: existingChat } = await supabase
+                      .from('chats')
+                      .select('id')
+                      .eq('homework_task_id', taskId)
+                      .eq('user_id', user.id)
+                      .maybeSingle();
+
+                    let chatId = existingChat?.id;
+
+                    // If not, create it
+                    if (!chatId) {
+                      const subjectIcons: Record<string, string> = {
+                        'Математика': '📐',
+                        'Алгебра': '📐',
+                        'Геометрия': '📐',
+                        'Физика': '⚗️',
+                        'Химия': '🧪',
+                        'Биология': '🧬'
+                      };
+
+                      const { data: newChat, error } = await supabase
+                        .from('chats')
+                        .insert({
+                          user_id: user.id,
+                          chat_type: 'homework_task',
+                          homework_task_id: taskId,
+                          title: `Задача ${task.task_number}`,
+                          icon: subjectIcons[task.homework_sets.subject] || '📚'
+                        })
+                        .select()
+                        .single();
+
+                      if (error) {
+                        toast.error("Не удалось создать чат");
+                        return;
+                      }
+
+                      chatId = newChat.id;
+                    }
+
+                    navigate(`/chat?id=${chatId}`);
+                  }}
                 >
                   <MessageSquare className="w-4 h-4" />
                   💬 Обсудить с ИИ-репетитором
