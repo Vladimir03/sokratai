@@ -1,13 +1,15 @@
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
-import { Plus } from "lucide-react";
+import { Plus, X } from "lucide-react";
 import { useState } from "react";
 import { CreateChatDialog } from "./CreateChatDialog";
 
 interface ChatSidebarProps {
   currentChatId?: string;
   onChatSelect: (chatId: string) => void;
+  onClose?: () => void;
+  isMobile?: boolean;
 }
 
 interface Chat {
@@ -26,7 +28,7 @@ interface Chat {
   message_count?: Array<{ count: number }>;
 }
 
-export function ChatSidebar({ currentChatId, onChatSelect }: ChatSidebarProps) {
+export function ChatSidebar({ currentChatId, onChatSelect, onClose, isMobile }: ChatSidebarProps) {
   const [showCreateDialog, setShowCreateDialog] = useState(false);
 
   const { data: user } = useQuery({
@@ -104,9 +106,19 @@ export function ChatSidebar({ currentChatId, onChatSelect }: ChatSidebarProps) {
 
   return (
     <>
-      <div className="w-64 border-r flex flex-col h-full bg-background">
-        <div className="p-4 border-b">
+      <div className="w-full flex flex-col h-full bg-background">
+        <div className="p-4 border-b flex items-center justify-between">
           <h2 className="font-semibold text-lg">Чаты</h2>
+          {isMobile && onClose && (
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={onClose}
+              className="h-8 w-8"
+            >
+              <X className="h-5 w-5" />
+            </Button>
+          )}
         </div>
 
         <div className="flex-1 overflow-y-auto">

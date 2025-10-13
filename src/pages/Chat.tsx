@@ -4,7 +4,7 @@ import { supabase } from "@/integrations/supabase/client";
 import ChatMessage from "@/components/ChatMessage";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { Send, Image as ImageIcon, X } from "lucide-react";
+import { Send, Image as ImageIcon, X, Menu } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import ChatSkeleton from "@/components/ChatSkeleton";
 import { useSearchParams, useNavigate } from "react-router-dom";
@@ -13,6 +13,7 @@ import { ChatSidebar } from "@/components/ChatSidebar";
 import { TaskContextBanner } from "@/components/TaskContextBanner";
 import Navigation from "@/components/Navigation";
 import AuthGuard from "@/components/AuthGuard";
+import { useIsMobile } from "@/hooks/use-mobile";
 
 const SYSTEM_PROMPT = "Ты опытный репетитор по математике для подготовки к ЕГЭ. Используй Сократовский метод - задавай наводящие вопросы вместо прямых ответов.";
 
@@ -29,6 +30,7 @@ export default function Chat() {
   const [loadingHistory, setLoadingHistory] = useState(true);
   const [uploadedFile, setUploadedFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const { toast } = useToast();
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const queryClient = useQueryClient();
@@ -36,6 +38,7 @@ export default function Chat() {
   const navigate = useNavigate();
   const chatIdFromUrl = searchParams.get('id');
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const isMobile = useIsMobile();
 
   const { data: user } = useQuery({
     queryKey: ['user'],
@@ -468,7 +471,19 @@ ${taskType ? `Это ${taskType}.` : ''}
 
   const handleChatSelect = (chatId: string) => {
     navigate(`/chat?id=${chatId}`);
+    if (isMobile) {
+      setIsSidebarOpen(false);
+    }
   };
+
+  // Auto-open sidebar on desktop
+  useEffect(() => {
+    if (!isMobile) {
+      setIsSidebarOpen(true);
+    } else {
+      setIsSidebarOpen(false);
+    }
+  }, [isMobile]);
 
   if (!currentChatId) {
     return (
@@ -488,17 +503,47 @@ ${taskType ? `Это ${taskType}.` : ''}
       <div className="min-h-screen bg-background">
         <Navigation />
         
-        <div className="flex pt-16 h-screen overflow-hidden">
-          <ChatSidebar
-            currentChatId={currentChatId}
-            onChatSelect={handleChatSelect}
-          />
+        <div className="flex pt-16 h-screen overflow-hidden relative">
+          {/* Mobile overlay */}
+          {isMobile && isSidebarOpen && (
+            <div
+              className="fixed inset-0 bg-black/50 z-40 mt-16"
+              onClick={() => setIsSidebarOpen(false)}
+            />
+          )}
 
-          <div className="flex-1 flex flex-col overflow-hidden">
-            <div className="border-b p-4 flex items-center justify-between">
-              <h1 className="text-xl font-semibold flex items-center gap-2">
+          {/* Sidebar */}
+          <div className={`
+            ${isMobile 
+              ? 'fixed inset-y-16 left-0 z-50 w-80 transform transition-transform duration-300'
+              : 'relative w-64'
+            }
+            ${isMobile && !isSidebarOpen ? '-translate-x-full' : 'translate-x-0'}
+            bg-background border-r
+          `}>
+            <ChatSidebar
+              currentChatId={currentChatId}
+              onChatSelect={handleChatSelect}
+              onClose={() => setIsSidebarOpen(false)}
+              isMobile={isMobile}
+            />
+          </div>
+
+          <div className="flex-1 flex flex-col overflow-hidden min-w-0">
+            <div className="border-b p-3 md:p-4 flex items-center gap-2 md:gap-3">
+              {isMobile && (
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => setIsSidebarOpen(true)}
+                  className="shrink-0"
+                >
+                  <Menu className="h-5 w-5" />
+                </Button>
+              )}
+              <h1 className="text-lg md:text-xl font-semibold flex items-center gap-2 flex-1 truncate">
                 <span>{currentChat?.icon || '💬'}</span>
-                <span>{currentChat?.title || 'Чат'}</span>
+                <span className="truncate">{currentChat?.title || 'Чат'}</span>
               </h1>
               <ConnectionIndicator />
             </div>
@@ -531,15 +576,15 @@ ${taskType ? `Это ${taskType}.` : ''}
               )}
             </div>
 
-            <div className="border-t p-4 bg-background mb-16 md:mb-0">
-              <div className="max-w-4xl mx-auto space-y-3">
+            <div className="border-t p-3 md:p-4 bg-background mb-16 md:mb-0">
+              <div className="max-w-4xl mx-auto space-y-2 md:space-y-3">
                 {/* Preview uploaded file */}
                 {previewUrl && (
-                  <div className="relative inline-block">
+                  <div className="relative inline-block w-full md:w-auto">
                     <img
                       src={previewUrl}
                       alt="Preview"
-                      className="max-h-32 rounded-lg border border-border"
+                      className="max-h-32 w-full md:w-auto object-contain rounded-lg border border-border"
                     />
                     <button
                       onClick={removeUploadedFile}
@@ -552,7 +597,7 @@ ${taskType ? `Это ${taskType}.` : ''}
                 )}
 
                 {/* Input area */}
-                <div className="flex items-end gap-2">
+                <div className="flex items-end gap-1 md:gap-2">
                   {/* File upload button */}
                   <input
                     ref={fileInputRef}
@@ -565,12 +610,12 @@ ${taskType ? `Это ${taskType}.` : ''}
                   <Button
                     variant="outline"
                     size="icon"
-                    className="h-[60px] w-[60px] shrink-0"
+                    className="h-12 w-12 md:h-[60px] md:w-[60px] shrink-0"
                     onClick={() => fileInputRef.current?.click()}
                     disabled={isLoading}
                     title="Загрузить фото"
                   >
-                    <ImageIcon className="h-5 w-5" />
+                    <ImageIcon className="h-4 w-4 md:h-5 md:w-5" />
                   </Button>
 
                   {/* Text input */}
@@ -584,8 +629,8 @@ ${taskType ? `Это ${taskType}.` : ''}
                         handleSend();
                       }
                     }}
-                    placeholder="Напиши свой вопрос или вставь скриншот (Ctrl+V)..."
-                    className="min-h-[60px] resize-none"
+                    placeholder={isMobile ? "Напиши вопрос..." : "Напиши свой вопрос или вставь скриншот (Ctrl+V)..."}
+                    className="min-h-[48px] md:min-h-[60px] resize-none text-sm md:text-base"
                     disabled={isLoading}
                   />
 
@@ -594,9 +639,9 @@ ${taskType ? `Это ${taskType}.` : ''}
                     onClick={handleSend}
                     disabled={(!message.trim() && !uploadedFile) || isLoading}
                     size="icon"
-                    className="h-[60px] w-[60px] shrink-0"
+                    className="h-12 w-12 md:h-[60px] md:w-[60px] shrink-0"
                   >
-                    <Send className="h-5 w-5" />
+                    <Send className="h-4 w-4 md:h-5 md:w-5" />
                   </Button>
                 </div>
               </div>
