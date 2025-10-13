@@ -500,10 +500,12 @@ ${taskType ? `Это ${taskType}.` : ''}
 
   return (
     <AuthGuard>
-      <div className="min-h-screen bg-background">
-        <Navigation />
+      <div className="h-screen overflow-hidden flex flex-col bg-background">
+        <div className="flex-shrink-0">
+          <Navigation />
+        </div>
         
-        <div className="flex pt-16 h-screen overflow-hidden relative">
+        <div className="flex flex-1 overflow-hidden relative">
           {/* Mobile overlay */}
           {isMobile && isSidebarOpen && (
             <div
@@ -515,11 +517,11 @@ ${taskType ? `Это ${taskType}.` : ''}
           {/* Sidebar */}
           <div className={`
             ${isMobile 
-              ? 'fixed inset-y-16 left-0 z-50 w-80 transform transition-transform duration-300'
+              ? 'fixed inset-y-0 left-0 z-50 w-80 transform transition-transform duration-300'
               : 'relative w-64'
             }
             ${isMobile && !isSidebarOpen ? '-translate-x-full' : 'translate-x-0'}
-            bg-background border-r
+            bg-background border-r overflow-y-auto
           `}>
             <ChatSidebar
               currentChatId={currentChatId}
@@ -530,7 +532,7 @@ ${taskType ? `Это ${taskType}.` : ''}
           </div>
 
           <div className="flex-1 flex flex-col overflow-hidden min-w-0">
-            <div className="border-b p-3 md:p-4 flex items-center gap-2 md:gap-3">
+            <div className="flex-shrink-0 border-b p-3 md:p-4 flex items-center gap-2 md:gap-3">
               {isMobile && (
                 <Button
                   variant="ghost"
@@ -549,10 +551,12 @@ ${taskType ? `Это ${taskType}.` : ''}
             </div>
 
             {currentChat?.chat_type === 'homework_task' && currentChat.homework_task && (
-              <TaskContextBanner task={currentChat.homework_task} />
+              <div className="flex-shrink-0">
+                <TaskContextBanner task={currentChat.homework_task} />
+              </div>
             )}
 
-            <div className="flex-1 overflow-y-auto pb-32 md:pb-8 px-4">
+            <div className="flex-1 overflow-y-auto overflow-x-hidden px-4">
               {loadingHistory ? (
                 <ChatSkeleton />
               ) : (
@@ -576,7 +580,7 @@ ${taskType ? `Это ${taskType}.` : ''}
               )}
             </div>
 
-            <div className="border-t p-3 md:p-4 bg-background mb-16 md:mb-0">
+            <div className="flex-shrink-0 border-t p-3 md:p-4 bg-background">
               <div className="max-w-4xl mx-auto space-y-2 md:space-y-3">
                 {/* Preview uploaded file */}
                 {previewUrl && (
