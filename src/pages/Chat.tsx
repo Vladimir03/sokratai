@@ -392,10 +392,10 @@ ${taskType ? `Это ${taskType}.` : ''}
 
   return (
     <AuthGuard>
-      <div className="min-h-screen bg-background flex flex-col">
+      <div className="min-h-screen bg-background">
         <Navigation />
         
-        <div className="flex flex-1 overflow-hidden pt-16">
+        <div className="flex pt-16 h-screen overflow-hidden">
           <ChatSidebar
             currentChatId={currentChatId}
             onChatSelect={handleChatSelect}
