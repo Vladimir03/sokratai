@@ -4,7 +4,7 @@ import { supabase } from "@/integrations/supabase/client";
 import ChatMessage from "@/components/ChatMessage";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { Send } from "lucide-react";
+import { Send, Image as ImageIcon, X } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import ChatSkeleton from "@/components/ChatSkeleton";
 import { useSearchParams, useNavigate } from "react-router-dom";
@@ -27,12 +27,15 @@ export default function Chat() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [loadingHistory, setLoadingHistory] = useState(true);
+  const [uploadedFile, setUploadedFile] = useState<File | null>(null);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const { toast } = useToast();
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const queryClient = useQueryClient();
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const chatIdFromUrl = searchParams.get('id');
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const { data: user } = useQuery({
     queryKey: ['user'],
@@ -132,6 +135,64 @@ export default function Chat() {
       console.error('Error loading chat history:', error);
     } finally {
       setLoadingHistory(false);
+    }
+  };
+
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (!file.type.startsWith('image/')) {
+      toast({
+        title: "Ошибка",
+        description: "Можно загружать только изображения",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    if (file.size > 10 * 1024 * 1024) {
+      toast({
+        title: "Ошибка",
+        description: "Файл слишком большой (макс. 10MB)",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setUploadedFile(file);
+    setPreviewUrl(URL.createObjectURL(file));
+  };
+
+  const handlePaste = (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    const items = e.clipboardData?.items;
+    if (!items) return;
+
+    for (const item of items) {
+      if (item.type.startsWith('image/')) {
+        const file = item.getAsFile();
+        if (file) {
+          setUploadedFile(file);
+          setPreviewUrl(URL.createObjectURL(file));
+          e.preventDefault();
+          toast({
+            title: "Скриншот вставлен",
+            description: "Изображение готово к отправке",
+          });
+          break;
+        }
+      }
+    }
+  };
+
+  const removeUploadedFile = () => {
+    if (previewUrl) {
+      URL.revokeObjectURL(previewUrl);
+    }
+    setUploadedFile(null);
+    setPreviewUrl(null);
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
     }
   };
 
@@ -273,12 +334,44 @@ export default function Chat() {
   }
 
   const handleSend = async () => {
-    if (!message.trim() || isLoading) return;
+    if ((!message.trim() && !uploadedFile) || isLoading) return;
 
-    const userMessage: Message = { role: "user", content: message.trim() };
+    let imageUrl: string | undefined = undefined;
+
+    // Upload image if exists
+    if (uploadedFile && user?.id) {
+      const fileName = `${user.id}/${Date.now()}-${uploadedFile.name}`;
+      
+      const { data, error } = await supabase.storage
+        .from('chat-images')
+        .upload(fileName, uploadedFile);
+
+      if (error) {
+        toast({
+          title: "Ошибка",
+          description: "Не удалось загрузить изображение",
+          variant: "destructive",
+        });
+        console.error('Upload error:', error);
+        return;
+      }
+
+      const { data: { publicUrl } } = supabase.storage
+        .from('chat-images')
+        .getPublicUrl(fileName);
+
+      imageUrl = publicUrl;
+    }
+
+    const userMessage: Message = { 
+      role: "user", 
+      content: message.trim() || '[Изображение]',
+      image_url: imageUrl
+    };
     const userMessages = [...messages, userMessage];
     setMessages(userMessages);
     setMessage("");
+    removeUploadedFile();
     setIsLoading(true);
 
     await saveMessageToBatch(userMessage);
@@ -439,28 +532,73 @@ ${taskType ? `Это ${taskType}.` : ''}
             </div>
 
             <div className="border-t p-4 bg-background mb-16 md:mb-0">
-              <div className="flex gap-2 max-w-4xl mx-auto">
-                <Textarea
-                  value={message}
-                  onChange={(e) => setMessage(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" && !e.shiftKey) {
-                      e.preventDefault();
-                      handleSend();
-                    }
-                  }}
-                  placeholder="Напиши свой вопрос..."
-                  className="min-h-[60px] resize-none"
-                  disabled={isLoading}
-                />
-                <Button
-                  onClick={handleSend}
-                  disabled={!message.trim() || isLoading}
-                  size="icon"
-                  className="h-[60px] w-[60px]"
-                >
-                  <Send className="h-5 w-5" />
-                </Button>
+              <div className="max-w-4xl mx-auto space-y-3">
+                {/* Preview uploaded file */}
+                {previewUrl && (
+                  <div className="relative inline-block">
+                    <img
+                      src={previewUrl}
+                      alt="Preview"
+                      className="max-h-32 rounded-lg border border-border"
+                    />
+                    <button
+                      onClick={removeUploadedFile}
+                      className="absolute -top-2 -right-2 bg-destructive text-destructive-foreground rounded-full w-6 h-6 flex items-center justify-center hover:bg-destructive/90 transition-colors"
+                      title="Удалить"
+                    >
+                      <X className="h-4 w-4" />
+                    </button>
+                  </div>
+                )}
+
+                {/* Input area */}
+                <div className="flex items-end gap-2">
+                  {/* File upload button */}
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    id="file-upload"
+                    accept="image/*"
+                    onChange={handleFileUpload}
+                    className="hidden"
+                  />
+                  <Button
+                    variant="outline"
+                    size="icon"
+                    className="h-[60px] w-[60px] shrink-0"
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={isLoading}
+                    title="Загрузить фото"
+                  >
+                    <ImageIcon className="h-5 w-5" />
+                  </Button>
+
+                  {/* Text input */}
+                  <Textarea
+                    value={message}
+                    onChange={(e) => setMessage(e.target.value)}
+                    onPaste={handlePaste}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" && !e.shiftKey) {
+                        e.preventDefault();
+                        handleSend();
+                      }
+                    }}
+                    placeholder="Напиши свой вопрос или вставь скриншот (Ctrl+V)..."
+                    className="min-h-[60px] resize-none"
+                    disabled={isLoading}
+                  />
+
+                  {/* Send button */}
+                  <Button
+                    onClick={handleSend}
+                    disabled={(!message.trim() && !uploadedFile) || isLoading}
+                    size="icon"
+                    className="h-[60px] w-[60px] shrink-0"
+                  >
+                    <Send className="h-5 w-5" />
+                  </Button>
+                </div>
               </div>
             </div>
           </div>
