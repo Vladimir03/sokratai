@@ -11,6 +11,8 @@ import { useSearchParams, useNavigate } from "react-router-dom";
 import ConnectionIndicator from "@/components/ConnectionIndicator";
 import { ChatSidebar } from "@/components/ChatSidebar";
 import { TaskContextBanner } from "@/components/TaskContextBanner";
+import Navigation from "@/components/Navigation";
+import AuthGuard from "@/components/AuthGuard";
 
 const SYSTEM_PROMPT = "Ты опытный репетитор по математике для подготовки к ЕГЭ. Используй Сократовский метод - задавай наводящие вопросы вместо прямых ответов.";
 
@@ -377,82 +379,93 @@ ${taskType ? `Это ${taskType}.` : ''}
 
   if (!currentChatId) {
     return (
-      <div className="flex items-center justify-center h-screen">
-        <ChatSkeleton />
-      </div>
+      <AuthGuard>
+        <div className="min-h-screen bg-background">
+          <Navigation />
+          <div className="flex items-center justify-center h-[calc(100vh-4rem)]">
+            <ChatSkeleton />
+          </div>
+        </div>
+      </AuthGuard>
     );
   }
 
   return (
-    <div className="flex h-screen overflow-hidden bg-background">
-      <ChatSidebar
-        currentChatId={currentChatId}
-        onChatSelect={handleChatSelect}
-      />
+    <AuthGuard>
+      <div className="min-h-screen bg-background flex flex-col">
+        <Navigation />
+        
+        <div className="flex flex-1 overflow-hidden pt-16">
+          <ChatSidebar
+            currentChatId={currentChatId}
+            onChatSelect={handleChatSelect}
+          />
 
-      <div className="flex-1 flex flex-col overflow-hidden">
-        <div className="border-b p-4 flex items-center justify-between">
-          <h1 className="text-xl font-semibold flex items-center gap-2">
-            <span>{currentChat?.icon || '💬'}</span>
-            <span>{currentChat?.title || 'Чат'}</span>
-          </h1>
-          <ConnectionIndicator />
-        </div>
+          <div className="flex-1 flex flex-col overflow-hidden">
+            <div className="border-b p-4 flex items-center justify-between">
+              <h1 className="text-xl font-semibold flex items-center gap-2">
+                <span>{currentChat?.icon || '💬'}</span>
+                <span>{currentChat?.title || 'Чат'}</span>
+              </h1>
+              <ConnectionIndicator />
+            </div>
 
-        {currentChat?.chat_type === 'homework_task' && currentChat.homework_task && (
-          <TaskContextBanner task={currentChat.homework_task} />
-        )}
+            {currentChat?.chat_type === 'homework_task' && currentChat.homework_task && (
+              <TaskContextBanner task={currentChat.homework_task} />
+            )}
 
-        <div className="flex-1 overflow-y-auto pb-32 px-4">
-          {loadingHistory ? (
-            <ChatSkeleton />
-          ) : (
-            <>
-              {messages.map((msg, index) => (
-                <ChatMessage key={index} message={msg} isLoading={false} onQuickMessage={() => {}} />
-              ))}
-              {isLoading && (
-                <div className="flex justify-start mb-4">
-                  <div className="bg-secondary text-secondary-foreground rounded-lg p-4 max-w-[80%]">
-                    <div className="flex items-center gap-2">
-                      <div className="animate-bounce">●</div>
-                      <div className="animate-bounce delay-100">●</div>
-                      <div className="animate-bounce delay-200">●</div>
+            <div className="flex-1 overflow-y-auto pb-32 md:pb-8 px-4">
+              {loadingHistory ? (
+                <ChatSkeleton />
+              ) : (
+                <>
+                  {messages.map((msg, index) => (
+                    <ChatMessage key={index} message={msg} isLoading={false} onQuickMessage={() => {}} />
+                  ))}
+                  {isLoading && (
+                    <div className="flex justify-start mb-4">
+                      <div className="bg-secondary text-secondary-foreground rounded-lg p-4 max-w-[80%]">
+                        <div className="flex items-center gap-2">
+                          <div className="animate-bounce">●</div>
+                          <div className="animate-bounce delay-100">●</div>
+                          <div className="animate-bounce delay-200">●</div>
+                        </div>
+                      </div>
                     </div>
-                  </div>
-                </div>
+                  )}
+                  <div ref={messagesEndRef} />
+                </>
               )}
-              <div ref={messagesEndRef} />
-            </>
-          )}
-        </div>
+            </div>
 
-        <div className="border-t p-4 bg-background">
-          <div className="flex gap-2 max-w-4xl mx-auto">
-            <Textarea
-              value={message}
-              onChange={(e) => setMessage(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && !e.shiftKey) {
-                  e.preventDefault();
-                  handleSend();
-                }
-              }}
-              placeholder="Напиши свой вопрос..."
-              className="min-h-[60px] resize-none"
-              disabled={isLoading}
-            />
-            <Button
-              onClick={handleSend}
-              disabled={!message.trim() || isLoading}
-              size="icon"
-              className="h-[60px] w-[60px]"
-            >
-              <Send className="h-5 w-5" />
-            </Button>
+            <div className="border-t p-4 bg-background mb-16 md:mb-0">
+              <div className="flex gap-2 max-w-4xl mx-auto">
+                <Textarea
+                  value={message}
+                  onChange={(e) => setMessage(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && !e.shiftKey) {
+                      e.preventDefault();
+                      handleSend();
+                    }
+                  }}
+                  placeholder="Напиши свой вопрос..."
+                  className="min-h-[60px] resize-none"
+                  disabled={isLoading}
+                />
+                <Button
+                  onClick={handleSend}
+                  disabled={!message.trim() || isLoading}
+                  size="icon"
+                  className="h-[60px] w-[60px]"
+                >
+                  <Send className="h-5 w-5" />
+                </Button>
+              </div>
+            </div>
           </div>
         </div>
       </div>
-    </div>
+    </AuthGuard>
   );
 }
