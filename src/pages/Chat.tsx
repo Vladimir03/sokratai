@@ -7,6 +7,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Send, Image as ImageIcon, X, Menu } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import ChatSkeleton from "@/components/ChatSkeleton";
+import LoadingIndicator from "@/components/LoadingIndicator";
 import { useSearchParams, useNavigate } from "react-router-dom";
 import ConnectionIndicator from "@/components/ConnectionIndicator";
 import { ChatSidebar } from "@/components/ChatSidebar";
@@ -561,17 +562,7 @@ ${taskType ? `Это ${taskType}.` : ''}
                   {messages.map((msg, index) => (
                     <ChatMessage key={index} message={msg} isLoading={false} onQuickMessage={() => {}} />
                   ))}
-                  {isLoading && (
-                    <div className="flex justify-start mb-4">
-                      <div className="bg-secondary text-secondary-foreground rounded-lg p-4 max-w-[80%]">
-                        <div className="flex items-center gap-2">
-                          <div className="animate-bounce">●</div>
-                          <div className="animate-bounce delay-100">●</div>
-                          <div className="animate-bounce delay-200">●</div>
-                        </div>
-                      </div>
-                    </div>
-                  )}
+                  {isLoading && <LoadingIndicator />}
                   <div ref={messagesEndRef} />
                 </>
               )}
