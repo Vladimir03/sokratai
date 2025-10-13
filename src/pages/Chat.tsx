@@ -107,40 +107,45 @@ export default function Chat() {
     enabled: !!currentChatId
   });
 
+  // Load chat history whenever chat changes
   useEffect(() => {
-    if (user?.id && currentChatId) {
-      loadChatHistory();
+    if (!user?.id || !currentChatId) {
+      setMessages([]);
+      setLoadingHistory(false);
+      return;
     }
-  }, [user?.id, currentChatId]);
-
-  const loadChatHistory = async () => {
-    if (!user?.id || !currentChatId) return;
     
     setLoadingHistory(true);
-    try {
-      const { data, error } = await supabase
-        .from('chat_messages')
-        .select('*')
-        .eq('chat_id', currentChatId)
-        .order('created_at', { ascending: true });
+    
+    const loadHistory = async () => {
+      try {
+        const { data, error } = await supabase
+          .from('chat_messages')
+          .select('*')
+          .eq('chat_id', currentChatId)
+          .order('created_at', { ascending: true });
 
-      if (error) throw error;
-      
-      if (data && data.length > 0) {
-        setMessages(data.map(msg => ({
-          role: msg.role as "user" | "assistant",
-          content: msg.content,
-          image_url: msg.image_url
-        })));
-      } else {
+        if (error) throw error;
+        
+        if (data && data.length > 0) {
+          setMessages(data.map(msg => ({
+            role: msg.role as "user" | "assistant",
+            content: msg.content,
+            image_url: msg.image_url || undefined
+          })));
+        } else {
+          setMessages([]);
+        }
+      } catch (error) {
+        console.error('Error loading chat history:', error);
         setMessages([]);
+      } finally {
+        setLoadingHistory(false);
       }
-    } catch (error) {
-      console.error('Error loading chat history:', error);
-    } finally {
-      setLoadingHistory(false);
-    }
-  };
+    };
+
+    loadHistory();
+  }, [user?.id, currentChatId]);
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
