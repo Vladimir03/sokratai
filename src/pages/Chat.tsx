@@ -307,30 +307,94 @@ AI Анализ:
         taskContext
       );
 
-      // Format messages for OpenRouter
-      const apiMessages = [
-        systemPrompt,
-        ...messages.map(msg => ({
-          role: msg.role as 'user' | 'assistant',
-          content: msg.content
-        })),
-        {
-          role: 'user' as const,
-          content: userMessage.content
+      // Format messages for edge function
+      const apiMessages = messages.map(msg => ({
+        role: msg.role,
+        content: msg.content,
+        image_url: msg.image_url
+      }));
+
+      // Add user message
+      apiMessages.push({
+        role: 'user',
+        content: userMessage.content,
+        image_url: imageUrl || undefined
+      });
+
+      // Call edge function with streaming
+      const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/chat`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
+        },
+        body: JSON.stringify({
+          messages: apiMessages,
+          systemPrompt: systemPrompt.content
+        })
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Ошибка вызова API');
+      }
+
+      if (!response.body) throw new Error('No response body');
+
+      // Stream response
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let assistantContent = '';
+      let textBuffer = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        textBuffer += decoder.decode(value, { stream: true });
+
+        let newlineIndex: number;
+        while ((newlineIndex = textBuffer.indexOf('\n')) !== -1) {
+          let line = textBuffer.slice(0, newlineIndex);
+          textBuffer = textBuffer.slice(newlineIndex + 1);
+
+          if (line.endsWith('\r')) line = line.slice(0, -1);
+          if (line.startsWith(':') || line.trim() === '') continue;
+          if (!line.startsWith('data: ')) continue;
+
+          const jsonStr = line.slice(6).trim();
+          if (jsonStr === '[DONE]') break;
+
+          try {
+            const parsed = JSON.parse(jsonStr);
+            const content = parsed.choices?.[0]?.delta?.content;
+            if (content) {
+              assistantContent += content;
+              // Update last message or create new one
+              setMessages(prev => {
+                const last = prev[prev.length - 1];
+                if (last?.role === 'assistant') {
+                  return [...prev.slice(0, -1), { ...last, content: assistantContent }];
+                }
+                return [...prev, { role: 'assistant', content: assistantContent }];
+              });
+            }
+          } catch (e) {
+            // Incomplete JSON, put it back
+            textBuffer = line + '\n' + textBuffer;
+            break;
+          }
         }
-      ];
+      }
 
-      // Call OpenRouter API
-      const aiResponse = await sendToOpenRouter(apiMessages, imageUrl);
-
-      // Add AI response to messages
-      const assistantMessage: Message = {
-        role: "assistant",
-        content: aiResponse
-      };
-      
-      setMessages(prev => [...prev, assistantMessage]);
-      await saveMessageToBatch(assistantMessage);
+      // Save final assistant message
+      if (assistantContent) {
+        const assistantMessage: Message = {
+          role: "assistant",
+          content: assistantContent
+        };
+        await saveMessageToBatch(assistantMessage);
+      }
       
       setIsLoading(false);
       queryClient.invalidateQueries({ queryKey: ['chat-messages'] });

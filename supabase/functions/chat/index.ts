@@ -215,12 +215,11 @@ serve(async (req) => {
         Authorization: `Bearer ${AGENTROUTER_API_KEY}`,
         "Content-Type": "application/json",
         "HTTP-Referer": Deno.env.get('SUPABASE_URL') ?? '',
-        "X-Title": "ЕГЭ Репетитор"
+        "X-Title": "EGE Repetitor"
       },
       body: JSON.stringify({
-        model: "claude-sonnet-4-5-20250929",
+        model: "claude-sonnet-4-5",
         models: [
-          "claude-sonnet-4-5-20250929",
           "claude-sonnet-4-5",
           "claude-3-5-sonnet-20241022"
         ],
