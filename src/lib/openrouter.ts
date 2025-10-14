@@ -1,11 +1,10 @@
 import { toast } from "sonner";
 
 const AGENTROUTER_API_URL = 'https://agentrouter.org/v1/chat/completions';
-const MODEL = 'claude-sonnet-4-5-20250929';
+const MODEL = 'claude-sonnet-4-5';
 
 // Fallback models in case primary fails
 const FALLBACK_MODELS = [
-  'claude-sonnet-4-5-20250929',
   'claude-sonnet-4-5',
   'claude-3-5-sonnet-20241022'
 ];
@@ -81,7 +80,17 @@ export async function sendToOpenRouter(
 
     if (!response.ok) {
       const errorData = await response.json();
-      throw new Error(errorData.error?.message || 'AgentRouter API error');
+      const errorMessage = errorData.message || errorData.error?.message || 'AgentRouter API error';
+      console.error('AgentRouter API error details:', {
+        status: response.status,
+        errorData
+      });
+      
+      if (response.status === 401) {
+        throw new Error('API ключ недействителен. Проверьте AGENTROUTER_API_KEY.');
+      }
+      
+      throw new Error(errorMessage);
     }
 
     const data: OpenRouterResponse = await response.json();
