@@ -15,7 +15,7 @@ import { TaskContextBanner } from "@/components/TaskContextBanner";
 import Navigation from "@/components/Navigation";
 import AuthGuard from "@/components/AuthGuard";
 import { useIsMobile } from "@/hooks/use-mobile";
-import { sendToOpenRouter, buildSystemPrompt } from "@/lib/openrouter";
+import { buildSystemPrompt } from "@/lib/openrouter";
 
 interface Message {
   role: "user" | "assistant";
