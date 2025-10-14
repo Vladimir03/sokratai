@@ -68,7 +68,7 @@ export async function sendToOpenRouter(
         'Authorization': `Bearer ${apiKey}`,
         'Content-Type': 'application/json',
         'HTTP-Referer': window.location.origin,
-        'X-Title': 'ЕГЭ Репетитор'
+        'X-Title': 'EGE Repetitor'
       },
       body: JSON.stringify({
         model: MODEL,
