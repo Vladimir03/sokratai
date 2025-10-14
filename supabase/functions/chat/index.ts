@@ -204,6 +204,9 @@ serve(async (req) => {
       throw new Error("AGENTROUTER_API_KEY is not configured");
     }
 
+    // Log first 10 chars of key for debugging (never log full key!)
+    console.log("Using API key starting with:", AGENTROUTER_API_KEY.substring(0, 10));
+    console.log("Key length:", AGENTROUTER_API_KEY.length);
     console.log("Calling AgentRouter API with messages:", transformedMessages.length);
 
     // Use provided systemPrompt if available, otherwise use default
