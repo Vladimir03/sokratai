@@ -1,13 +1,13 @@
 import { toast } from "sonner";
 
-const OPENROUTER_API_URL = 'https://openrouter.ai/api/v1/chat/completions';
-const MODEL = 'google/gemini-2.0-flash-exp:free';
+const AGENTROUTER_API_URL = 'https://agentrouter.org/v1/chat/completions';
+const MODEL = 'claude-sonnet-4-5-20250929';
 
 // Fallback models in case primary fails
 const FALLBACK_MODELS = [
-  'google/gemini-2.0-flash-exp:free',
-  'google/gemini-flash-1.5-8b-exp:free',
-  'meta-llama/llama-3.2-3b-instruct:free'
+  'claude-sonnet-4-5-20250929',
+  'claude-sonnet-4-5',
+  'claude-3-5-sonnet-20241022'
 ];
 
 interface Message {
@@ -40,11 +40,11 @@ export async function sendToOpenRouter(
   messages: Message[],
   photoUrl?: string | null
 ): Promise<string> {
-  const apiKey = import.meta.env.VITE_OPENROUTER_API_KEY;
+  const apiKey = import.meta.env.VITE_AGENTROUTER_API_KEY;
   
   if (!apiKey) {
-    toast.error('OpenRouter API ключ не настроен');
-    throw new Error('OpenRouter API key missing');
+    toast.error('AgentRouter API ключ не настроен');
+    throw new Error('AgentRouter API key missing');
   }
 
   // Format messages for multimodal if photo exists
@@ -62,7 +62,7 @@ export async function sendToOpenRouter(
   });
 
   try {
-    const response = await fetch(OPENROUTER_API_URL, {
+    const response = await fetch(AGENTROUTER_API_URL, {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${apiKey}`,
@@ -81,7 +81,7 @@ export async function sendToOpenRouter(
 
     if (!response.ok) {
       const errorData = await response.json();
-      throw new Error(errorData.error?.message || 'OpenRouter API error');
+      throw new Error(errorData.error?.message || 'AgentRouter API error');
     }
 
     const data: OpenRouterResponse = await response.json();
@@ -96,13 +96,13 @@ export async function sendToOpenRouter(
 
     return data.choices[0].message.content;
   } catch (error) {
-    console.error('OpenRouter API error:', error);
+    console.error('AgentRouter API error:', error);
     
     if (error instanceof Error) {
       if (error.message.includes('rate limit')) {
         toast.error('Достигнут лимит запросов. Попробуйте позже.');
       } else if (error.message.includes('insufficient')) {
-        toast.error('Недостаточно средств на OpenRouter.');
+        toast.error('Недостаточно средств на AgentRouter.');
       } else {
         toast.error(`Ошибка AI: ${error.message}`);
       }
