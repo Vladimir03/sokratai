@@ -146,28 +146,30 @@ serve(async (req) => {
     // Validate request body
     const { messages, systemPrompt } = await req.json();
     
-    if (!Array.isArray(messages) || messages.length === 0) {
+    if (!Array.isArray(messages)) {
       return new Response(
         JSON.stringify({ error: "Некорректный формат сообщений" }),
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 
-    // Validate only the last user message (new message)
-    const lastMessage = messages[messages.length - 1];
-    if (!lastMessage || !lastMessage.content || typeof lastMessage.content !== 'string') {
-      return new Response(
-        JSON.stringify({ error: "Некорректное содержимое сообщения" }),
-        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
-    }
-    
-    // Only validate length for user messages, assistant responses can be longer
-    if (lastMessage.role === 'user' && lastMessage.content.length > MAX_MESSAGE_LENGTH) {
-      return new Response(
-        JSON.stringify({ error: `Сообщение слишком длинное (макс. ${MAX_MESSAGE_LENGTH} символов)` }),
-        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
+    // Validate only if there are messages
+    if (messages.length > 0) {
+      const lastMessage = messages[messages.length - 1];
+      if (!lastMessage || !lastMessage.content || typeof lastMessage.content !== 'string') {
+        return new Response(
+          JSON.stringify({ error: "Некорректное содержимое сообщения" }),
+          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+      
+      // Only validate length for user messages, assistant responses can be longer
+      if (lastMessage.role === 'user' && lastMessage.content.length > MAX_MESSAGE_LENGTH) {
+        return new Response(
+          JSON.stringify({ error: `Сообщение слишком длинное (макс. ${MAX_MESSAGE_LENGTH} символов)` }),
+          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
     }
 
     // Transform messages to support multimodal (text + images)
