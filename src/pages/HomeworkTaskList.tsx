@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { ArrowLeft, Plus, AlertTriangle, Calendar } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -5,6 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import Navigation from "@/components/Navigation";
 import AuthGuard from "@/components/AuthGuard";
+import AddTaskDialog from "@/components/AddTaskDialog";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { HomeworkSet, HomeworkTask, PRIORITY_CONFIG } from "@/types/homework";
@@ -14,6 +16,7 @@ import { ru } from "date-fns/locale";
 const HomeworkTaskList = () => {
   const { id } = useParams();
   const navigate = useNavigate();
+  const [isAddTaskOpen, setIsAddTaskOpen] = useState(false);
 
   const { data: homework } = useQuery({
     queryKey: ["homework-set", id],
@@ -105,11 +108,20 @@ const HomeworkTaskList = () => {
             <div className="space-y-4">
               <div className="flex items-center justify-between">
                 <h2 className="text-xl font-semibold">Задачи:</h2>
-                {totalCount > 0 && (
-                  <Badge variant="outline" className="text-sm">
-                    Прогресс: {completedCount}/{totalCount}
-                  </Badge>
-                )}
+                <div className="flex items-center gap-2">
+                  {totalCount > 0 && (
+                    <Badge variant="outline" className="text-sm">
+                      Прогресс: {completedCount}/{totalCount}
+                    </Badge>
+                  )}
+                  <Button 
+                    onClick={() => setIsAddTaskOpen(true)}
+                    size="sm"
+                  >
+                    <Plus className="w-4 h-4 mr-2" />
+                    Добавить задачу
+                  </Button>
+                </div>
               </div>
 
               <div className="grid gap-4">
@@ -126,7 +138,7 @@ const HomeworkTaskList = () => {
                       <p className="text-muted-foreground mb-6">
                         Добавьте первую задачу к этому домашнему заданию
                       </p>
-                      <Button>
+                      <Button onClick={() => setIsAddTaskOpen(true)}>
                         <Plus className="w-4 h-4 mr-2" />
                         Добавить задачу
                       </Button>
@@ -184,6 +196,12 @@ const HomeworkTaskList = () => {
             </div>
           </div>
         </main>
+        
+        <AddTaskDialog 
+          open={isAddTaskOpen}
+          onOpenChange={setIsAddTaskOpen}
+          homeworkSetId={id!}
+        />
       </div>
     </AuthGuard>
   );
