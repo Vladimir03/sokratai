@@ -635,7 +635,7 @@ AI Анализ:
                 )}
 
                 {/* Input area */}
-                <div className="flex items-end gap-1 md:gap-2">
+                <div className="flex items-center gap-1 md:gap-2">
                   {/* File upload button */}
                   <input
                     ref={fileInputRef}
@@ -668,7 +668,7 @@ AI Анализ:
                       }
                     }}
                     placeholder={isMobile ? "Напиши вопрос..." : "Напиши свой вопрос или вставь скриншот (Ctrl+V)..."}
-                    className="min-h-[48px] md:min-h-[60px] resize-none text-sm md:text-base"
+                    className="h-12 md:h-[60px] max-h-12 md:max-h-[60px] resize-none text-sm md:text-base"
                     disabled={isLoading}
                   />
 
