@@ -49,7 +49,7 @@ export function TaskContextBanner({ task }: TaskContextBannerProps) {
         </div>
 
         {isExpanded && (
-          <div className="mt-3 p-3 bg-white dark:bg-gray-900 rounded-lg text-sm">
+          <div className="mt-3 p-3 bg-white dark:bg-gray-900 rounded-lg text-sm max-h-[400px] overflow-y-auto">
             {task.condition_text ? (
               <div className="whitespace-pre-wrap text-gray-800 dark:text-gray-200">
                 {task.condition_text}
