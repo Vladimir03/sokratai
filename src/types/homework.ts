@@ -41,13 +41,11 @@ export interface HomeworkChatMessage {
 }
 
 export const SUBJECTS = [
-  { id: 'math', name: 'Математика', emoji: '📐' },
   { id: 'geometry', name: 'Геометрия', emoji: '📐' },
   { id: 'algebra', name: 'Алгебра', emoji: '📈' },
-  { id: 'physics', name: 'Физика', emoji: '⚗️' },
+  { id: 'physics', name: 'Физика', emoji: '⚛️' },
   { id: 'chemistry', name: 'Химия', emoji: '🧪' },
-  { id: 'russian', name: 'Русский', emoji: '📖' },
-  { id: 'literature', name: 'Литература', emoji: '📚' },
+  { id: 'informatics', name: 'Информатика', emoji: '💻' },
   { id: 'other', name: 'Другое', emoji: '📝' }
 ];
 
