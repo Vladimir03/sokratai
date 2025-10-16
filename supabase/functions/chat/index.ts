@@ -197,35 +197,26 @@ serve(async (req) => {
       };
     });
 
-    const AGENTROUTER_API_KEY = Deno.env.get("AGENTROUTER_API_KEY");
+    const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
     
-    if (!AGENTROUTER_API_KEY) {
-      console.error("AGENTROUTER_API_KEY not configured");
-      throw new Error("AGENTROUTER_API_KEY is not configured");
+    if (!LOVABLE_API_KEY) {
+      console.error("LOVABLE_API_KEY not configured");
+      throw new Error("LOVABLE_API_KEY is not configured");
     }
 
-    // Log first 10 chars of key for debugging (never log full key!)
-    console.log("Using API key starting with:", AGENTROUTER_API_KEY.substring(0, 10));
-    console.log("Key length:", AGENTROUTER_API_KEY.length);
-    console.log("Calling AgentRouter API with messages:", transformedMessages.length);
+    console.log("Calling AI gateway with messages:", transformedMessages.length);
 
     // Use provided systemPrompt if available, otherwise use default
     const effectiveSystemPrompt = systemPrompt || SYSTEM_PROMPT;
 
-    const response = await fetch("https://agentrouter.org/v1/chat/completions", {
+    const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${AGENTROUTER_API_KEY}`,
+        Authorization: `Bearer ${LOVABLE_API_KEY}`,
         "Content-Type": "application/json",
-        "HTTP-Referer": Deno.env.get('SUPABASE_URL') ?? '',
-        "X-Title": "EGE Repetitor"
       },
       body: JSON.stringify({
-        model: "claude-sonnet-4-5",
-        models: [
-          "claude-sonnet-4-5",
-          "claude-3-5-sonnet-20241022"
-        ],
+        model: "google/gemini-2.5-pro",
         messages: [
           { 
             role: "system", 
@@ -234,29 +225,27 @@ serve(async (req) => {
           ...transformedMessages,
         ],
         stream: true,
-        temperature: 0.7,
-        max_tokens: 4000,
       }),
     });
 
     if (!response.ok) {
       const errorText = await response.text();
-      console.error("AgentRouter API error:", response.status, errorText);
+      console.error("AI gateway error:", response.status, errorText);
       
       if (response.status === 429) {
         return new Response(
-          JSON.stringify({ error: "Достигнут лимит запросов. Попробуйте позже." }), 
+          JSON.stringify({ error: "Превышен лимит запросов. Попробуйте позже." }), 
           { status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" } }
         );
       }
       if (response.status === 402) {
         return new Response(
-          JSON.stringify({ error: "Недостаточно средств на AgentRouter." }), 
+          JSON.stringify({ error: "Требуется пополнение баланса." }), 
           { status: 402, headers: { ...corsHeaders, "Content-Type": "application/json" } }
         );
       }
       
-      throw new Error(`AgentRouter API error: ${response.status}`);
+      throw new Error(`AI gateway error: ${response.status}`);
     }
 
     return new Response(response.body, {

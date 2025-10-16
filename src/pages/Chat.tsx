@@ -15,7 +15,8 @@ import { TaskContextBanner } from "@/components/TaskContextBanner";
 import Navigation from "@/components/Navigation";
 import AuthGuard from "@/components/AuthGuard";
 import { useIsMobile } from "@/hooks/use-mobile";
-import { buildSystemPrompt } from "@/lib/openrouter";
+
+const SYSTEM_PROMPT = "Ты опытный репетитор по математике для подготовки к ЕГЭ. Используй Сократовский метод - задавай наводящие вопросы вместо прямых ответов.";
 
 interface Message {
   role: "user" | "assistant";
@@ -237,6 +238,110 @@ export default function Chat() {
     scrollToBottom();
   }, [messages]);
 
+  async function streamChat({
+    messages,
+    systemPrompt,
+    onDelta,
+    onDone,
+  }: {
+    messages: Message[];
+    systemPrompt: string;
+    onDelta: (deltaText: string) => void;
+    onDone: () => void;
+  }) {
+    const CHAT_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/chat`;
+
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) {
+      toast({
+        title: "Ошибка",
+        description: "Требуется авторизация",
+        variant: "destructive",
+      });
+      throw new Error("No session");
+    }
+
+    const resp = await fetch(CHAT_URL, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${session.access_token}`,
+      },
+      body: JSON.stringify({ messages, systemPrompt }),
+    });
+
+    if (!resp.ok || !resp.body) {
+      if (resp.status === 429) {
+        toast({
+          title: "Ошибка",
+          description: "Превышен лимит запросов. Попробуйте позже.",
+          variant: "destructive",
+        });
+      } else if (resp.status === 402) {
+        toast({
+          title: "Ошибка",
+          description: "Требуется пополнение баланса.",
+          variant: "destructive",
+        });
+      }
+      throw new Error("Failed to start stream");
+    }
+
+    const reader = resp.body.getReader();
+    const decoder = new TextDecoder();
+    let textBuffer = "";
+    let streamDone = false;
+
+    while (!streamDone) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      textBuffer += decoder.decode(value, { stream: true });
+
+      let newlineIndex: number;
+      while ((newlineIndex = textBuffer.indexOf("\n")) !== -1) {
+        let line = textBuffer.slice(0, newlineIndex);
+        textBuffer = textBuffer.slice(newlineIndex + 1);
+
+        if (line.endsWith("\r")) line = line.slice(0, -1);
+        if (line.startsWith(":") || line.trim() === "") continue;
+        if (!line.startsWith("data: ")) continue;
+
+        const jsonStr = line.slice(6).trim();
+        if (jsonStr === "[DONE]") {
+          streamDone = true;
+          break;
+        }
+
+        try {
+          const parsed = JSON.parse(jsonStr);
+          const content = parsed.choices?.[0]?.delta?.content as string | undefined;
+          if (content) onDelta(content);
+        } catch {
+          textBuffer = line + "\n" + textBuffer;
+          break;
+        }
+      }
+    }
+
+    if (textBuffer.trim()) {
+      for (let raw of textBuffer.split("\n")) {
+        if (!raw) continue;
+        if (raw.endsWith("\r")) raw = raw.slice(0, -1);
+        if (raw.startsWith(":") || raw.trim() === "") continue;
+        if (!raw.startsWith("data: ")) continue;
+        const jsonStr = raw.slice(6).trim();
+        if (jsonStr === "[DONE]") continue;
+        try {
+          const parsed = JSON.parse(jsonStr);
+          const content = parsed.choices?.[0]?.delta?.content as string | undefined;
+          if (content) onDelta(content);
+        } catch {}
+      }
+    }
+
+    onDone();
+  }
+
   const handleSend = async () => {
     if ((!message.trim() && !uploadedFile) || isLoading) return;
 
@@ -272,20 +377,35 @@ export default function Chat() {
       content: message.trim() || '[Изображение]',
       image_url: imageUrl
     };
-    
-    setMessages(prev => [...prev, userMessage]);
+    const userMessages = [...messages, userMessage];
+    setMessages(userMessages);
     setMessage("");
     removeUploadedFile();
     setIsLoading(true);
 
     await saveMessageToBatch(userMessage);
 
+    let assistantSoFar = "";
+    const upsertAssistant = (nextChunk: string) => {
+      assistantSoFar += nextChunk;
+      setMessages(prev => {
+        const last = prev[prev.length - 1];
+        if (last?.role === "assistant") {
+          return prev.map((m, i) => (i === prev.length - 1 ? { ...m, content: assistantSoFar } : m));
+        }
+        return [...prev, { role: "assistant", content: assistantSoFar }];
+      });
+    };
+
     try {
-      // Build context for task if needed
-      let taskContext = '';
+      let systemPrompt = SYSTEM_PROMPT;
+      
       if (currentChat?.chat_type === 'homework_task' && currentChat.homework_task) {
         const task = currentChat.homework_task;
-        taskContext = `Предмет: ${task.homework_set?.subject}
+        systemPrompt += `
+
+КОНТЕКСТ ДОМАШНЕЙ ЗАДАЧИ:
+Предмет: ${task.homework_set?.subject}
 Тема: ${task.homework_set?.topic}
 Номер задачи: ${task.task_number}
 
@@ -296,108 +416,25 @@ AI Анализ:
 Тип: ${(task.ai_analysis as any)?.type || 'не определен'}
 План решения: ${(task.ai_analysis as any)?.solution_steps?.join(', ') || 'не определен'}
 
+---
+
 Пользователь работает над этой конкретной задачей из домашнего задания.
 Помоги ему решить её, используя Сократовский метод - не давай готовый ответ, 
 а задавай наводящие вопросы и направляй к решению.`;
       }
 
-      // Build system prompt
-      const systemPrompt = buildSystemPrompt(
-        (currentChat?.chat_type as 'general' | 'homework_task') || 'general',
-        taskContext
-      );
-
-      // Format messages for edge function
-      const apiMessages = messages.map(msg => ({
-        role: msg.role,
-        content: msg.content,
-        image_url: msg.image_url
-      }));
-
-      // Add user message
-      apiMessages.push({
-        role: 'user',
-        content: userMessage.content,
-        image_url: imageUrl || undefined
-      });
-
-      // Call edge function with streaming
-      const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/chat`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
+      await streamChat({
+        messages: userMessages,
+        systemPrompt,
+        onDelta: (chunk) => upsertAssistant(chunk),
+        onDone: () => {
+          setIsLoading(false);
+          queryClient.invalidateQueries({ queryKey: ['chat-messages'] });
         },
-        body: JSON.stringify({
-          messages: apiMessages,
-          systemPrompt: systemPrompt.content
-        })
       });
 
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || 'Ошибка вызова API');
-      }
-
-      if (!response.body) throw new Error('No response body');
-
-      // Stream response
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      let assistantContent = '';
-      let textBuffer = '';
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        textBuffer += decoder.decode(value, { stream: true });
-
-        let newlineIndex: number;
-        while ((newlineIndex = textBuffer.indexOf('\n')) !== -1) {
-          let line = textBuffer.slice(0, newlineIndex);
-          textBuffer = textBuffer.slice(newlineIndex + 1);
-
-          if (line.endsWith('\r')) line = line.slice(0, -1);
-          if (line.startsWith(':') || line.trim() === '') continue;
-          if (!line.startsWith('data: ')) continue;
-
-          const jsonStr = line.slice(6).trim();
-          if (jsonStr === '[DONE]') break;
-
-          try {
-            const parsed = JSON.parse(jsonStr);
-            const content = parsed.choices?.[0]?.delta?.content;
-            if (content) {
-              assistantContent += content;
-              // Update last message or create new one
-              setMessages(prev => {
-                const last = prev[prev.length - 1];
-                if (last?.role === 'assistant') {
-                  return [...prev.slice(0, -1), { ...last, content: assistantContent }];
-                }
-                return [...prev, { role: 'assistant', content: assistantContent }];
-              });
-            }
-          } catch (e) {
-            // Incomplete JSON, put it back
-            textBuffer = line + '\n' + textBuffer;
-            break;
-          }
-        }
-      }
-
-      // Save final assistant message
-      if (assistantContent) {
-        const assistantMessage: Message = {
-          role: "assistant",
-          content: assistantContent
-        };
-        await saveMessageToBatch(assistantMessage);
-      }
-      
-      setIsLoading(false);
-      queryClient.invalidateQueries({ queryKey: ['chat-messages'] });
+      const finalAssistantMsg: Message = { role: "assistant", content: assistantSoFar };
+      await saveMessageToBatch(finalAssistantMsg);
     } catch (error) {
       console.error(error);
       setIsLoading(false);
