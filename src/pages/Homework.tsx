@@ -60,6 +60,12 @@ const Homework = () => {
     );
   };
 
+  const countTasksWithoutConditions = (tasks: HomeworkTask[]) => {
+    return tasks.filter(
+      (task) => !task.condition_text && !task.condition_photo_url
+    ).length;
+  };
+
   const groupedHomework = {
     urgent: homeworkSets?.filter((hw) => hw.priority === "urgent") || [],
     important: homeworkSets?.filter((hw) => hw.priority === "important") || [],
@@ -70,6 +76,9 @@ const Homework = () => {
     const priorityConfig = PRIORITY_CONFIG[homework.priority];
     const taskCount = homework.homework_tasks?.length || 0;
     const needsConditions = hasTasksWithoutConditions(
+      homework.homework_tasks || []
+    );
+    const tasksWithoutConditionsCount = countTasksWithoutConditions(
       homework.homework_tasks || []
     );
     const subjectEmoji = getSubjectEmoji(homework.subject);
@@ -115,7 +124,11 @@ const Homework = () => {
           {needsConditions && taskCount > 0 && (
             <div className="flex items-center gap-2 text-sm text-amber-600 dark:text-amber-500">
               <AlertTriangle className="w-4 h-4" />
-              <span>Задачи нужны условия</span>
+              <span>
+                {tasksWithoutConditionsCount === 1 
+                  ? "Задаче нужны условия" 
+                  : "Задачам нужны условия"}
+              </span>
             </div>
           )}
           
