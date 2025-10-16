@@ -2,3 +2,6 @@ project_id = "vrsseotrfmsxpbciyqzc"
 
 [functions.chat]
 verify_jwt = true
+
+[functions.analyze-homework-task]
+verify_jwt = true

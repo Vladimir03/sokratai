@@ -34,34 +34,34 @@ const HomeworkTaskDetail = () => {
     },
   });
 
-  // Mock AI analysis generator
-  const generateMockAnalysis = (text: string) => {
-    const keywords = text.toLowerCase();
-    let type = "общая задача";
-    
-    if (keywords.includes("уравнение") || keywords.includes("x") || keywords.includes("=")) {
-      type = "линейное уравнение";
-    } else if (keywords.includes("треугольник") || keywords.includes("угол")) {
-      type = "геометрическая задача";
-    } else if (keywords.includes("скорость") || keywords.includes("время")) {
-      type = "задача на движение";
-    }
+  // AI analysis generator
+  const generateAIAnalysis = async (conditionText?: string, conditionPhotoUrl?: string) => {
+    try {
+      const { data, error } = await supabase.functions.invoke('analyze-homework-task', {
+        body: {
+          conditionText,
+          conditionPhotoUrl,
+          subject: task?.homework_sets?.subject,
+          topic: task?.homework_sets?.topic
+        }
+      });
 
-    return {
-      difficulty: "средняя",
-      type,
-      hints: [
-        "Прочитай условие внимательно",
-        "Определи, что дано и что нужно найти",
-        "Примени соответствующую формулу"
-      ],
-      solution_steps: [
-        "Запиши данные из условия",
-        "Выбери подходящий метод решения",
-        "Выполни вычисления",
-        "Проверь ответ"
-      ]
-    };
+      if (error) throw error;
+      return data.analysis;
+    } catch (error) {
+      console.error("AI analysis error:", error);
+      toast.error("Ошибка AI анализа, используем базовый анализ");
+      // Fallback to basic analysis
+      return {
+        type: "задача",
+        solution_steps: [
+          "Запиши данные из условия",
+          "Выбери подходящий метод решения",
+          "Выполни вычисления",
+          "Проверь ответ"
+        ]
+      };
+    }
   };
 
   const updateStatusMutation = useMutation({
@@ -102,13 +102,14 @@ const HomeworkTaskDetail = () => {
         .from("chat-images")
         .getPublicUrl(filePath);
 
-      const mockAnalysis = generateMockAnalysis("uploaded image");
+      toast.info("Анализирую задачу с помощью AI...");
+      const aiAnalysis = await generateAIAnalysis(undefined, publicUrl);
 
       const { error: updateError } = await supabase
         .from("homework_tasks")
         .update({
           condition_photo_url: publicUrl,
-          ai_analysis: mockAnalysis,
+          ai_analysis: aiAnalysis,
         })
         .eq("id", taskId);
 
@@ -132,13 +133,14 @@ const HomeworkTaskDetail = () => {
 
     setIsUploading(true);
     try {
-      const mockAnalysis = generateMockAnalysis(conditionText);
+      toast.info("Анализирую задачу с помощью AI...");
+      const aiAnalysis = await generateAIAnalysis(conditionText, undefined);
 
       const { error } = await supabase
         .from("homework_tasks")
         .update({
           condition_text: conditionText,
-          ai_analysis: mockAnalysis,
+          ai_analysis: aiAnalysis,
         })
         .eq("id", taskId);
 
