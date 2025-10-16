@@ -668,7 +668,7 @@ AI Анализ:
                       }
                     }}
                     placeholder={isMobile ? "Напиши вопрос..." : "Напиши свой вопрос или вставь скриншот (Ctrl+V)..."}
-                    className="h-12 md:h-[60px] max-h-12 md:max-h-[60px] resize-none text-sm md:text-base"
+                    className="!h-12 md:!h-[60px] !min-h-[48px] md:!min-h-[60px] !max-h-12 md:!max-h-[60px] resize-none text-sm md:text-base py-3"
                     disabled={isLoading}
                   />
 
