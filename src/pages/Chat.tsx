@@ -454,34 +454,67 @@ AI Анализ:
     }
   };
 
-  // Auto-start conversation with task context
+  // Auto-start conversation with task context using AI
   useEffect(() => {
-    if (!currentChat?.homework_task || messages.length > 0 || loadingHistory) return;
+    if (!currentChat?.homework_task || messages.length > 0 || loadingHistory || isLoading) return;
 
-    const generateWelcomeMessage = (task: any) => {
-      const subject = task.homework_set?.subject || 'предмету';
-      const topic = task.homework_set?.topic || '';
-      const taskNumber = task.task_number;
-      const condition = task.condition_text || 'условие доступно выше';
-      const taskType = task.ai_analysis?.type || '';
+    const generateAIWelcomeMessage = async () => {
+      const task = currentChat.homework_task;
+      setIsLoading(true);
 
-      return `Привет! Вижу, ты работаешь над задачей ${taskNumber} из темы "${topic}" по ${subject}.
+      // Build system prompt with task context
+      let systemPrompt = SYSTEM_PROMPT;
+      systemPrompt += `
 
-Условие: ${condition}
+КОНТЕКСТ ДОМАШНЕЙ ЗАДАЧИ:
+Предмет: ${task.homework_set?.subject}
+Тема: ${task.homework_set?.topic}
+Номер задачи: ${task.task_number}
 
-${taskType ? `Это ${taskType}.` : ''}
+Условие задачи:
+${task.condition_text || '[Фото условия доступно пользователю]'}
 
-С чего начнём? Какие у тебя есть идеи по решению?`;
+AI Анализ:
+Тип: ${(task.ai_analysis as any)?.type || 'не определен'}
+План решения: ${(task.ai_analysis as any)?.solution_steps?.join(', ') || 'не определен'}
+
+---
+
+Это ПЕРВОЕ сообщение ученику. Поприветствуй его, кратко опиши задачу и задай первый наводящий вопрос, чтобы начать диалог.`;
+
+      let assistantSoFar = "";
+      const upsertAssistant = (nextChunk: string) => {
+        assistantSoFar += nextChunk;
+        setMessages([{ role: "assistant", content: assistantSoFar }]);
+      };
+
+      try {
+        await streamChat({
+          messages: [],
+          systemPrompt,
+          onDelta: (chunk) => upsertAssistant(chunk),
+          onDone: () => {
+            setIsLoading(false);
+          },
+        });
+
+        const finalAssistantMsg: Message = { role: "assistant", content: assistantSoFar };
+        await saveMessageToBatch(finalAssistantMsg);
+      } catch (error) {
+        console.error('Error generating welcome message:', error);
+        setIsLoading(false);
+        // Fallback to simple welcome message
+        const fallbackMessage: Message = {
+          role: 'assistant',
+          content: `Привет! Вижу, ты работаешь над задачей ${task.task_number} из темы "${task.homework_set?.topic}". С чего начнём?`
+        };
+        setMessages([fallbackMessage]);
+        await saveMessageToBatch(fallbackMessage);
+      }
     };
 
-    const firstMessage: Message = {
-      role: 'assistant',
-      content: generateWelcomeMessage(currentChat.homework_task)
-    };
-
-    setMessages([firstMessage]);
-    saveMessageToBatch(firstMessage);
-  }, [currentChat?.homework_task, messages.length, loadingHistory]);
+    generateAIWelcomeMessage();
+  }, [currentChat?.homework_task, messages.length, loadingHistory, isLoading]);
 
   const handleChatSelect = (chatId: string) => {
     navigate(`/chat?id=${chatId}`);
