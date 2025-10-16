@@ -342,6 +342,14 @@ export default function Chat() {
     onDone();
   }
 
+  const handleQuickMessage = (quickText: string) => {
+    setMessage(quickText);
+    // Небольшая задержка чтобы состояние обновилось
+    setTimeout(() => {
+      handleSend();
+    }, 50);
+  };
+
   const handleSend = async () => {
     if ((!message.trim() && !uploadedFile) || isLoading) return;
 
@@ -565,7 +573,7 @@ ${taskType ? `Это ${taskType}.` : ''}
               ) : (
                 <>
                   {messages.map((msg, index) => (
-                    <ChatMessage key={index} message={msg} isLoading={false} onQuickMessage={() => {}} />
+                    <ChatMessage key={index} message={msg} isLoading={false} onQuickMessage={handleQuickMessage} />
                   ))}
                   {isLoading && <LoadingIndicator />}
                   <div ref={messagesEndRef} />
