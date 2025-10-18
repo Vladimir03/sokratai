@@ -293,6 +293,39 @@ export type Database = {
         }
         Relationships: []
       }
+      token_usage_logs: {
+        Row: {
+          chat_id: string | null
+          completion_tokens: number | null
+          created_at: string
+          id: string
+          model: string
+          prompt_tokens: number | null
+          total_tokens: number | null
+          user_id: string
+        }
+        Insert: {
+          chat_id?: string | null
+          completion_tokens?: number | null
+          created_at?: string
+          id?: string
+          model: string
+          prompt_tokens?: number | null
+          total_tokens?: number | null
+          user_id: string
+        }
+        Update: {
+          chat_id?: string | null
+          completion_tokens?: number | null
+          created_at?: string
+          id?: string
+          model?: string
+          prompt_tokens?: number | null
+          total_tokens?: number | null
+          user_id?: string
+        }
+        Relationships: []
+      }
       user_solutions: {
         Row: {
           id: string

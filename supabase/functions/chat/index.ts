@@ -210,7 +210,72 @@ serve(async (req) => {
       throw new Error(`AI gateway error: ${response.status}`);
     }
 
-    return new Response(response.body, {
+    // Create a transform stream to capture token usage
+    const { readable, writable } = new TransformStream();
+    const reader = response.body!.getReader();
+    const writer = writable.getWriter();
+    const decoder = new TextDecoder();
+    
+    let usageData: any = null;
+    
+    // Process stream and capture usage
+    (async () => {
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          
+          // Try to extract usage information from the chunk
+          const chunk = decoder.decode(value, { stream: true });
+          const lines = chunk.split('\n');
+          
+          for (const line of lines) {
+            if (line.startsWith('data: ') && !line.includes('[DONE]')) {
+              try {
+                const jsonStr = line.slice(6).trim();
+                const parsed = JSON.parse(jsonStr);
+                if (parsed.usage) {
+                  usageData = parsed.usage;
+                }
+              } catch {
+                // Ignore parsing errors
+              }
+            }
+          }
+          
+          await writer.write(value);
+        }
+        
+        // Log and store usage after stream completes
+        if (usageData) {
+          console.log('Tokens used:', {
+            prompt: usageData.prompt_tokens,
+            completion: usageData.completion_tokens,
+            total: usageData.total_tokens
+          });
+          
+          // Store in database using service role
+          const adminSupabase = createClient(
+            Deno.env.get('SUPABASE_URL') ?? '',
+            Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
+          );
+          
+          await adminSupabase.from('token_usage_logs').insert({
+            user_id: user.id,
+            model: 'google/gemini-2.5-pro',
+            prompt_tokens: usageData.prompt_tokens,
+            completion_tokens: usageData.completion_tokens,
+            total_tokens: usageData.total_tokens
+          });
+        }
+      } catch (e) {
+        console.error('Error processing stream:', e);
+      } finally {
+        await writer.close();
+      }
+    })();
+
+    return new Response(readable, {
       headers: { ...corsHeaders, "Content-Type": "text/event-stream" },
     });
   } catch (e) {
