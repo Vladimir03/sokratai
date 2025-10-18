@@ -32,6 +32,7 @@ export default function Chat() {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const { toast } = useToast();
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const messagesContainerRef = useRef<HTMLDivElement>(null);
   const queryClient = useQueryClient();
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
@@ -228,12 +229,18 @@ export default function Chat() {
     }
   };
 
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  const scrollToBottom = (smooth = true) => {
+    if (messagesContainerRef.current) {
+      messagesContainerRef.current.scrollTop = messagesContainerRef.current.scrollHeight;
+    }
   };
 
+  // Auto-scroll when messages change
   useEffect(() => {
-    scrollToBottom();
+    // Use requestAnimationFrame to ensure DOM has updated
+    requestAnimationFrame(() => {
+      scrollToBottom();
+    });
   }, [messages]);
 
   async function streamChat({
@@ -387,9 +394,6 @@ export default function Chat() {
     removeUploadedFile();
     setIsLoading(true);
 
-    // Scroll to bottom immediately after adding user message
-    setTimeout(() => scrollToBottom(), 100);
-
     await saveMessageToBatch(userMessage);
 
     let assistantSoFar = "";
@@ -411,8 +415,6 @@ export default function Chat() {
         onDone: () => {
           setIsLoading(false);
           queryClient.invalidateQueries({ queryKey: ['chat-messages'] });
-          // Scroll to bottom after response is complete
-          setTimeout(() => scrollToBottom(), 100);
         },
       });
 
@@ -554,7 +556,7 @@ export default function Chat() {
               </div>
             )}
 
-            <div className="flex-1 overflow-y-auto overflow-x-hidden px-4">
+            <div ref={messagesContainerRef} className="flex-1 overflow-y-auto overflow-x-hidden px-4">
               {loadingHistory ? (
                 <ChatSkeleton />
               ) : (
