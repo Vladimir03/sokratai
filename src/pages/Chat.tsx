@@ -387,6 +387,9 @@ export default function Chat() {
     removeUploadedFile();
     setIsLoading(true);
 
+    // Scroll to bottom immediately after adding user message
+    setTimeout(() => scrollToBottom(), 100);
+
     await saveMessageToBatch(userMessage);
 
     let assistantSoFar = "";
@@ -408,6 +411,8 @@ export default function Chat() {
         onDone: () => {
           setIsLoading(false);
           queryClient.invalidateQueries({ queryKey: ['chat-messages'] });
+          // Scroll to bottom after response is complete
+          setTimeout(() => scrollToBottom(), 100);
         },
       });
 
