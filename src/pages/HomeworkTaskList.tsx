@@ -1,22 +1,35 @@
 import { useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { ArrowLeft, Plus, AlertTriangle, Calendar } from "lucide-react";
+import { ArrowLeft, Plus, AlertTriangle, Calendar, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import Navigation from "@/components/Navigation";
 import AuthGuard from "@/components/AuthGuard";
 import AddTaskDialog from "@/components/AddTaskDialog";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { HomeworkSet, HomeworkTask, PRIORITY_CONFIG } from "@/types/homework";
 import { format } from "date-fns";
 import { ru } from "date-fns/locale";
+import { toast } from "sonner";
 
 const HomeworkTaskList = () => {
   const { id } = useParams();
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const [isAddTaskOpen, setIsAddTaskOpen] = useState(false);
+  const [taskToDelete, setTaskToDelete] = useState<string | null>(null);
 
   const { data: homework } = useQuery({
     queryKey: ["homework-set", id],
@@ -43,6 +56,26 @@ const HomeworkTaskList = () => {
 
       if (error) throw error;
       return data as HomeworkTask[];
+    },
+  });
+
+  const deleteTaskMutation = useMutation({
+    mutationFn: async (taskId: string) => {
+      const { error } = await supabase
+        .from("homework_tasks")
+        .delete()
+        .eq("id", taskId);
+      
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["homework-tasks", id] });
+      toast.success("Задача успешно удалена");
+      setTaskToDelete(null);
+    },
+    onError: (error) => {
+      console.error("Error deleting task:", error);
+      toast.error("Не удалось удалить задачу");
     },
   });
 
@@ -180,12 +213,22 @@ const HomeworkTaskList = () => {
                               )}
                             </div>
                             
-                            <Button
-                              onClick={() => navigate(`/homework/${id}/task/${task.id}`)}
-                              variant="default"
-                            >
-                              Начать решать →
-                            </Button>
+                            <div className="flex items-center gap-2">
+                              <Button
+                                onClick={() => setTaskToDelete(task.id)}
+                                variant="ghost"
+                                size="icon"
+                                className="text-destructive hover:text-destructive hover:bg-destructive/10"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </Button>
+                              <Button
+                                onClick={() => navigate(`/homework/${id}/task/${task.id}`)}
+                                variant="default"
+                              >
+                                Начать решать →
+                              </Button>
+                            </div>
                           </div>
                         </CardContent>
                       </Card>
@@ -202,6 +245,26 @@ const HomeworkTaskList = () => {
           onOpenChange={setIsAddTaskOpen}
           homeworkSetId={id!}
         />
+
+        <AlertDialog open={!!taskToDelete} onOpenChange={() => setTaskToDelete(null)}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Удалить задачу?</AlertDialogTitle>
+              <AlertDialogDescription>
+                Это действие нельзя отменить. Задача и все связанные с ней данные будут удалены навсегда.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Отмена</AlertDialogCancel>
+              <AlertDialogAction
+                onClick={() => taskToDelete && deleteTaskMutation.mutate(taskToDelete)}
+                className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              >
+                Удалить
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
       </div>
     </AuthGuard>
   );
