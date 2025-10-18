@@ -89,7 +89,7 @@ const ChatMessage = memo(({ message, isLoading, onQuickMessage, onRetry }: ChatM
         </Dialog>
       )}
       
-      <div className={`flex ${message.role === "user" ? "justify-end" : "justify-start"}`}>
+      <div className={`flex mb-6 ${message.role === "user" ? "justify-end" : "justify-start"}`}>
         <div className={`max-w-[80%] ${message.role === "user" ? "" : "space-y-3"}`}>
           {/* Индикатор метода ввода для пользовательских сообщений */}
           {message.role === "user" && message.input_method && (
