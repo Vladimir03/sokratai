@@ -134,7 +134,7 @@ serve(async (req) => {
     }
 
     // Validate request body
-    const { messages, systemPrompt } = await req.json();
+    const { messages, systemPrompt, taskContext } = await req.json();
 
     if (!Array.isArray(messages)) {
       return new Response(JSON.stringify({ error: "Некорректный формат сообщений" }), {
@@ -199,7 +199,12 @@ serve(async (req) => {
     console.log("Calling AI gateway with messages:", transformedMessages.length);
 
     // Use provided systemPrompt if available, otherwise use default
-    const effectiveSystemPrompt = systemPrompt || SYSTEM_PROMPT;
+    let effectiveSystemPrompt = systemPrompt || SYSTEM_PROMPT;
+    
+    // Add task context to system prompt if provided
+    if (taskContext) {
+      effectiveSystemPrompt = `${effectiveSystemPrompt}\n\n📋 КОНТЕКСТ ЗАДАЧИ:\n${taskContext}\n\nИспользуй ИМЕННО эту задачу в своих ответах. НЕ придумывай другие задачи!`;
+    }
 
     const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
       method: "POST",

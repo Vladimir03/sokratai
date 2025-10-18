@@ -247,10 +247,12 @@ export default function Chat() {
     messages,
     onDelta,
     onDone,
+    taskContext,
   }: {
     messages: Message[];
     onDelta: (deltaText: string) => void;
     onDone: () => void;
+    taskContext?: string;
   }) {
     const CHAT_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/chat`;
 
@@ -270,7 +272,7 @@ export default function Chat() {
         "Content-Type": "application/json",
         Authorization: `Bearer ${session.access_token}`,
       },
-      body: JSON.stringify({ messages }),
+      body: JSON.stringify({ messages, taskContext }),
     });
 
     if (!resp.ok || !resp.body) {
@@ -409,6 +411,10 @@ export default function Chat() {
     };
 
     try {
+      const taskContext = currentChat?.homework_task 
+        ? `Задача №${currentChat.homework_task.task_number}. Тема: ${currentChat.homework_task.homework_set?.topic}. Условие: ${currentChat.homework_task.condition_text}`
+        : undefined;
+
       await streamChat({
         messages: userMessages,
         onDelta: (chunk) => upsertAssistant(chunk),
@@ -416,6 +422,7 @@ export default function Chat() {
           setIsLoading(false);
           queryClient.invalidateQueries({ queryKey: ['chat-messages'] });
         },
+        taskContext,
       });
 
       const finalAssistantMsg: Message = { role: "assistant", content: assistantSoFar };
@@ -446,12 +453,18 @@ export default function Chat() {
       };
 
       try {
+        const taskContext = `Задача №${task.task_number}. Тема: ${task.homework_set?.topic}. Условие: ${task.condition_text}`;
+        
         await streamChat({
-          messages: [],
+          messages: [{
+            role: "user",
+            content: "Привет! Помоги мне разобраться с этой задачей"
+          }],
           onDelta: (chunk) => upsertAssistant(chunk),
           onDone: () => {
             setIsLoading(false);
           },
+          taskContext,
         });
 
         const finalAssistantMsg: Message = { role: "assistant", content: assistantSoFar };
