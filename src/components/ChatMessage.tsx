@@ -160,19 +160,19 @@ const ChatMessage = memo(({ message, isLoading, onQuickMessage, onRetry }: ChatM
           {message.role === "assistant" && !isLoading && (
             <div className="flex gap-2 flex-wrap px-1">
               <button 
-                onClick={() => onQuickMessage("Покажи полное решение с объяснением каждого шага")}
-                className="text-xs px-3 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 rounded-full border border-blue-200 transition-colors dark:bg-blue-950 dark:hover:bg-blue-900 dark:text-blue-300 dark:border-blue-800"
-                disabled={isLoading}
-              >
-                📋 Полное решение
-              </button>
-              
-              <button 
                 onClick={() => onQuickMessage("Объясни этот момент подробнее")}
                 className="text-xs px-3 py-1.5 bg-purple-50 hover:bg-purple-100 text-purple-700 rounded-full border border-purple-200 transition-colors dark:bg-purple-950 dark:hover:bg-purple-900 dark:text-purple-300 dark:border-purple-800"
                 disabled={isLoading}
               >
                 🔍 Объясни подробнее
+              </button>
+              
+              <button 
+                onClick={() => onQuickMessage("Покажи полное решение с объяснением каждого шага")}
+                className="text-xs px-3 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 rounded-full border border-blue-200 transition-colors dark:bg-blue-950 dark:hover:bg-blue-900 dark:text-blue-300 dark:border-blue-800"
+                disabled={isLoading}
+              >
+                📋 Полное решение
               </button>
               
               <button 
