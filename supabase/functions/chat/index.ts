@@ -178,7 +178,7 @@ serve(async (req) => {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model: "google/gemini-2.5-pro",
+        model: "google/gemini-2.5-flash",
         messages: [
           { 
             role: "system", 
@@ -262,7 +262,7 @@ serve(async (req) => {
           
           await adminSupabase.from('token_usage_logs').insert({
             user_id: user.id,
-            model: 'google/gemini-2.5-pro',
+            model: 'google/gemini-2.5-flash',
             prompt_tokens: usageData.prompt_tokens,
             completion_tokens: usageData.completion_tokens,
             total_tokens: usageData.total_tokens
