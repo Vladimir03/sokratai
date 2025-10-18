@@ -16,8 +16,6 @@ import Navigation from "@/components/Navigation";
 import AuthGuard from "@/components/AuthGuard";
 import { useIsMobile } from "@/hooks/use-mobile";
 
-const SYSTEM_PROMPT = "Ты опытный репетитор по математике для подготовки к ЕГЭ. Используй Сократовский метод - задавай наводящие вопросы вместо прямых ответов.";
-
 interface Message {
   role: "user" | "assistant";
   content: string;
@@ -240,12 +238,10 @@ export default function Chat() {
 
   async function streamChat({
     messages,
-    systemPrompt,
     onDelta,
     onDone,
   }: {
     messages: Message[];
-    systemPrompt: string;
     onDelta: (deltaText: string) => void;
     onDone: () => void;
   }) {
@@ -267,7 +263,7 @@ export default function Chat() {
         "Content-Type": "application/json",
         Authorization: `Bearer ${session.access_token}`,
       },
-      body: JSON.stringify({ messages, systemPrompt }),
+      body: JSON.stringify({ messages }),
     });
 
     if (!resp.ok || !resp.body) {
@@ -406,34 +402,8 @@ export default function Chat() {
     };
 
     try {
-      let systemPrompt = SYSTEM_PROMPT;
-      
-      if (currentChat?.chat_type === 'homework_task' && currentChat.homework_task) {
-        const task = currentChat.homework_task;
-        systemPrompt += `
-
-КОНТЕКСТ ДОМАШНЕЙ ЗАДАЧИ:
-Предмет: ${task.homework_set?.subject}
-Тема: ${task.homework_set?.topic}
-Номер задачи: ${task.task_number}
-
-Условие задачи:
-${task.condition_text || '[Фото условия доступно пользователю]'}
-
-AI Анализ:
-Тип: ${(task.ai_analysis as any)?.type || 'не определен'}
-План решения: ${(task.ai_analysis as any)?.solution_steps?.join(', ') || 'не определен'}
-
----
-
-Пользователь работает над этой конкретной задачей из домашнего задания.
-Помоги ему решить её, используя Сократовский метод - не давай готовый ответ, 
-а задавай наводящие вопросы и направляй к решению.`;
-      }
-
       await streamChat({
         messages: userMessages,
-        systemPrompt,
         onDelta: (chunk) => upsertAssistant(chunk),
         onDone: () => {
           setIsLoading(false);
@@ -462,26 +432,6 @@ AI Анализ:
       const task = currentChat.homework_task;
       setIsLoading(true);
 
-      // Build system prompt with task context
-      let systemPrompt = SYSTEM_PROMPT;
-      systemPrompt += `
-
-КОНТЕКСТ ДОМАШНЕЙ ЗАДАЧИ:
-Предмет: ${task.homework_set?.subject}
-Тема: ${task.homework_set?.topic}
-Номер задачи: ${task.task_number}
-
-Условие задачи:
-${task.condition_text || '[Фото условия доступно пользователю]'}
-
-AI Анализ:
-Тип: ${(task.ai_analysis as any)?.type || 'не определен'}
-План решения: ${(task.ai_analysis as any)?.solution_steps?.join(', ') || 'не определен'}
-
----
-
-Это ПЕРВОЕ сообщение ученику. Поприветствуй его, кратко опиши задачу и задай первый наводящий вопрос, чтобы начать диалог.`;
-
       let assistantSoFar = "";
       const upsertAssistant = (nextChunk: string) => {
         assistantSoFar += nextChunk;
@@ -491,7 +441,6 @@ AI Анализ:
       try {
         await streamChat({
           messages: [],
-          systemPrompt,
           onDelta: (chunk) => upsertAssistant(chunk),
           onDone: () => {
             setIsLoading(false);
