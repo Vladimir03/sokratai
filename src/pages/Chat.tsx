@@ -517,7 +517,7 @@ export default function Chat() {
   return (
     <AuthGuard>
       <Navigation />
-      <div className="fixed inset-0 pt-16 pb-16 md:pb-0 overflow-hidden bg-background">
+      <div className="fixed inset-0 pt-16 overflow-hidden bg-background">
         <div className="flex h-full overflow-hidden relative">
           {/* Mobile overlay */}
           {isMobile && isSidebarOpen && (
@@ -583,7 +583,7 @@ export default function Chat() {
               )}
             </div>
 
-            <div className="flex-shrink-0 border-t p-3 md:p-4 bg-background">
+            <div className="flex-shrink-0 border-t p-2 md:p-4 bg-background">
               <div className="max-w-4xl mx-auto space-y-2 md:space-y-3">
                 {/* Preview uploaded file */}
                 {previewUrl && (
