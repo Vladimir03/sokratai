@@ -1,6 +1,6 @@
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
-import { Home, MessageSquare, BookOpen, TrendingUp, User, LogOut } from "lucide-react";
+import { Home, MessageSquare, BookOpen, TrendingUp, User, LogOut, Backpack, ListTodo } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 
@@ -10,9 +10,9 @@ const Navigation = () => {
 
   const navItems = [
     { path: "/", icon: Home, label: "Главная", emoji: "🏠" },
-    { path: "/homework", icon: BookOpen, label: "Домашка", emoji: "🎒" },
+    { path: "/homework", icon: Backpack, label: "Домашка", emoji: "🎒" },
     { path: "/chat", icon: MessageSquare, label: "Чат", emoji: "💬" },
-    { path: "/problems", icon: BookOpen, label: "Задачи", emoji: "📚" },
+    { path: "/problems", icon: ListTodo, label: "Задачи", emoji: "📚" },
     { path: "/progress", icon: TrendingUp, label: "Прогресс", emoji: "📈" },
     { path: "/profile", icon: User, label: "Профиль", emoji: "👤" },
   ];
