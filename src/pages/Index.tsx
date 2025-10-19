@@ -65,7 +65,7 @@ const Index = () => {
             <span className="text-accent font-semibold">🚀 Новое поколение подготовки к ЕГЭ</span>
           </div>
           <h1 
-            className="text-5xl md:text-7xl font-bold text-primary-foreground mb-6 animate-fade-in"
+            className="text-5xl md:text-7xl font-bold text-primary-foreground mb-6"
             {...({ fetchpriority: "high" } as any)}
           >
             Твой личный ИИ-репетитор<br />по математике 24/7
