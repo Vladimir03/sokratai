@@ -534,7 +534,7 @@ export default function Chat() {
           {/* Sidebar */}
           <div className={`
             ${isMobile 
-              ? 'fixed inset-y-0 left-0 z-50 w-80 transform transition-transform duration-300'
+              ? 'fixed top-16 bottom-0 left-0 z-50 w-80 transform transition-transform duration-300'
               : 'relative w-64'
             }
             ${isMobile && !isSidebarOpen ? '-translate-x-full' : 'translate-x-0'}
