@@ -545,7 +545,7 @@ export default function Chat() {
           </div>
 
           <div className="flex-1 flex flex-col overflow-hidden min-w-0">
-            <div className="flex-shrink-0 border-b p-3 md:p-4 flex items-center gap-2 md:gap-3">
+            <div className="flex-shrink-0 border-b p-2 md:p-3 flex items-center gap-2 md:gap-3">
               {isMobile && (
                 <Button
                   variant="ghost"

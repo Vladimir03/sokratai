@@ -45,7 +45,7 @@ export function TaskContextBanner({ task }: TaskContextBannerProps) {
       )}
       
       <div className="bg-blue-50 dark:bg-blue-950 border-b border-blue-200 dark:border-blue-800">
-        <div className="p-4">
+        <div className="p-2 md:p-3">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2 text-blue-900 dark:text-blue-100 font-medium">
               <span>📌</span>
@@ -74,7 +74,7 @@ export function TaskContextBanner({ task }: TaskContextBannerProps) {
           </div>
 
           {isExpanded && (
-            <div className="mt-3 p-3 bg-white dark:bg-gray-900 rounded-lg text-sm max-h-[400px] overflow-y-auto">
+            <div className="mt-2 p-2 md:p-3 bg-white dark:bg-gray-900 rounded-lg text-sm max-h-[400px] overflow-y-auto">
               {task.condition_text ? (
                 <div className="whitespace-pre-wrap text-gray-800 dark:text-gray-200">
                   {task.condition_text}
@@ -95,7 +95,7 @@ export function TaskContextBanner({ task }: TaskContextBannerProps) {
               )}
 
               {task.ai_analysis && (
-                <div className="mt-3 pt-3 border-t border-gray-200 dark:border-gray-700">
+                <div className="mt-2 pt-2 border-t border-gray-200 dark:border-gray-700">
                   <div className="text-gray-600 dark:text-gray-300 font-medium mb-1">
                     🤖 ИИ Анализ:
                   </div>
