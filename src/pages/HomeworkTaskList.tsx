@@ -95,7 +95,7 @@ const HomeworkTaskList = () => {
     <AuthGuard>
       <div className="min-h-screen bg-background">
         <Navigation />
-        <main className="container mx-auto px-4 pt-20 pb-24 md:pb-8">
+        <main className="container mx-auto px-4 pt-8 pb-8">
           <div className="max-w-5xl mx-auto space-y-6">
             {/* Header */}
             <Card>
