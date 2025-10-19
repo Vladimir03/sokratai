@@ -97,7 +97,7 @@ export function TaskContextBanner({ task }: TaskContextBannerProps) {
               {task.ai_analysis && (
                 <div className="mt-3 pt-3 border-t border-gray-200 dark:border-gray-700">
                   <div className="text-gray-600 dark:text-gray-300 font-medium mb-1">
-                    🤖 AI Анализ:
+                    🤖 ИИ Анализ:
                   </div>
                   {task.ai_analysis.type && (
                     <div className="text-gray-700 dark:text-gray-300">
@@ -109,11 +109,11 @@ export function TaskContextBanner({ task }: TaskContextBannerProps) {
                       <div className="text-gray-600 dark:text-gray-300 text-xs mb-1">
                         План решения:
                       </div>
-                      <ul className="list-disc list-inside text-gray-700 dark:text-gray-300 text-xs space-y-1">
+                      <ol className="list-decimal list-inside text-gray-700 dark:text-gray-300 text-xs space-y-1">
                         {task.ai_analysis.solution_steps.map((step: string, i: number) => (
                           <li key={i}>{step}</li>
                         ))}
-                      </ul>
+                      </ol>
                     </div>
                   )}
                 </div>
