@@ -43,6 +43,10 @@ export default defineConfig(({ mode }) => ({
     },
     // Optimize chunk size for better loading with code splitting
     rollupOptions: {
+      treeshake: {
+        preset: 'recommended',
+        moduleSideEffects: false
+      },
       output: {
         manualChunks: {
           // Vendor chunks
@@ -55,7 +59,7 @@ export default defineConfig(({ mode }) => ({
           ],
           // Supabase separate chunk
           'supabase': ['@supabase/supabase-js'],
-          // Math/LaTeX libraries
+          // Math/LaTeX libraries - only loaded when needed
           'math-rendering': ['katex', 'react-katex', 'react-markdown'],
         },
         // Optimize chunk names
