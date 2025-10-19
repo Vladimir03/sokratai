@@ -1,5 +1,6 @@
 import "https://deno.land/x/xhr@0.1.0/mod.ts";
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import { gzip } from "https://deno.land/x/compress@v0.4.5/gzip/mod.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -25,7 +26,14 @@ const ANALYSIS_SYSTEM_PROMPT = `Ты экспертный репетитор Е�
 - Никакого дополнительного текста, ТОЛЬКО JSON`;
 
 serve(async (req) => {
-  if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
+  if (req.method === "OPTIONS") {
+    return new Response(null, { 
+      headers: {
+        ...corsHeaders,
+        'Accept-Encoding': 'gzip, br',
+      }
+    });
+  }
 
   try {
     const authHeader = req.headers.get('Authorization');
@@ -125,10 +133,35 @@ serve(async (req) => {
       throw new Error("Invalid analysis structure from AI");
     }
 
-    return new Response(
-      JSON.stringify({ analysis }), 
-      { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-    );
+    // Compress response if client supports gzip
+    const acceptEncoding = req.headers.get('accept-encoding') || '';
+    const responseData = JSON.stringify({ analysis });
+    
+    if (acceptEncoding.includes('gzip')) {
+      console.log("Compressing response with gzip");
+      const encoder = new TextEncoder();
+      const data = encoder.encode(responseData);
+      const compressed = gzip(data);
+      
+      return new Response(new Uint8Array(compressed), {
+        status: 200,
+        headers: { 
+          ...corsHeaders, 
+          'Content-Type': 'application/json',
+          'Content-Encoding': 'gzip',
+          'Vary': 'Accept-Encoding',
+        },
+      });
+    }
+
+    return new Response(responseData, {
+      status: 200,
+      headers: { 
+        ...corsHeaders, 
+        'Content-Type': 'application/json',
+        'Vary': 'Accept-Encoding',
+      },
+    });
   } catch (e) {
     console.error("Analysis error:", e);
     return new Response(

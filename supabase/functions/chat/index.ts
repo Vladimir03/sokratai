@@ -65,7 +65,14 @@ const SYSTEM_PROMPT = `Ты опытный репетитор ЕГЭ по мат
 но при явной просьбе переключайся на РЕЖИМ 2 (полное решение). 🎣`;
 
 serve(async (req) => {
-  if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
+  if (req.method === "OPTIONS") {
+    return new Response(null, { 
+      headers: {
+        ...corsHeaders,
+        'Accept-Encoding': 'gzip, br',
+      }
+    });
+  }
 
   try {
     // Get user from JWT
@@ -312,7 +319,13 @@ serve(async (req) => {
     })();
 
     return new Response(readable, {
-      headers: { ...corsHeaders, "Content-Type": "text/event-stream" },
+      headers: { 
+        ...corsHeaders, 
+        "Content-Type": "text/event-stream",
+        "Cache-Control": "no-cache",
+        "Connection": "keep-alive",
+        "Vary": "Accept-Encoding", // Signal compression support for platform-level compression
+      },
     });
   } catch (e) {
     console.error("Chat error:", e);
