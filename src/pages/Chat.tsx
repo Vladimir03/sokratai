@@ -248,11 +248,13 @@ export default function Chat() {
     onDelta,
     onDone,
     taskContext,
+    chatId,
   }: {
     messages: Message[];
     onDelta: (deltaText: string) => void;
     onDone: () => void;
     taskContext?: string;
+    chatId?: string;
   }) {
     const CHAT_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/chat`;
 
@@ -272,7 +274,7 @@ export default function Chat() {
         "Content-Type": "application/json",
         Authorization: `Bearer ${session.access_token}`,
       },
-      body: JSON.stringify({ messages, taskContext }),
+      body: JSON.stringify({ messages, taskContext, chatId }),
     });
 
     if (!resp.ok || !resp.body) {
@@ -423,6 +425,7 @@ export default function Chat() {
           queryClient.invalidateQueries({ queryKey: ['chat-messages'] });
         },
         taskContext,
+        chatId: currentChatId,
       });
 
       const finalAssistantMsg: Message = { role: "assistant", content: assistantSoFar };
@@ -465,6 +468,7 @@ export default function Chat() {
             setIsLoading(false);
           },
           taskContext,
+          chatId: currentChatId,
         });
 
         const finalAssistantMsg: Message = { role: "assistant", content: assistantSoFar };

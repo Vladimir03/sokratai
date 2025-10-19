@@ -134,7 +134,7 @@ serve(async (req) => {
     }
 
     // Validate request body
-    const { messages, systemPrompt, taskContext } = await req.json();
+    const { messages, systemPrompt, taskContext, chatId } = await req.json();
 
     if (!Array.isArray(messages)) {
       return new Response(JSON.stringify({ error: "Некорректный формат сообщений" }), {
@@ -297,6 +297,7 @@ serve(async (req) => {
 
           await adminSupabase.from("token_usage_logs").insert({
             user_id: user.id,
+            chat_id: chatId || null,
             model: "google/gemini-2.5-flash",
             prompt_tokens: usageData.prompt_tokens,
             completion_tokens: usageData.completion_tokens,
