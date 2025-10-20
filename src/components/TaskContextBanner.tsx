@@ -2,7 +2,6 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { ChevronDown, ChevronUp, X } from "lucide-react";
-import { ResponsiveImage } from "@/components/ResponsiveImage";
 
 interface TaskContextBannerProps {
   task: {
@@ -35,12 +34,10 @@ export function TaskContextBanner({ task }: TaskContextBannerProps) {
               <X className="h-6 w-6" />
             </button>
             <div className="w-full h-full flex items-center justify-center p-4">
-              <ResponsiveImage
+              <img 
                 src={task.condition_photo_url} 
                 alt="Условие задачи (увеличенное)"
                 className="max-w-full max-h-[90vh] object-contain"
-                priority
-                sizes="95vw"
               />
             </div>
           </DialogContent>
@@ -84,12 +81,11 @@ export function TaskContextBanner({ task }: TaskContextBannerProps) {
                 </div>
               ) : task.condition_photo_url ? (
                 <div>
-                  <ResponsiveImage
+                  <img 
                     src={task.condition_photo_url} 
                     alt="Условие задачи" 
                     className="max-w-full h-auto rounded cursor-pointer hover:opacity-90 transition-opacity"
                     onClick={() => setImageModalOpen(true)}
-                    sizes="(max-width: 768px) 100vw, 600px"
                   />
                 </div>
               ) : (

@@ -12,8 +12,6 @@ import { supabase } from "@/integrations/supabase/client";
 import { HomeworkTask, TaskStatus, SUBJECTS } from "@/types/homework";
 import { toast } from "sonner";
 import { useState } from "react";
-import { ResponsiveImage } from "@/components/ResponsiveImage";
-import { optimizeImage } from "@/utils/imageOptimization";
 
 const HomeworkTaskDetail = () => {
   const { homeworkId, taskId } = useParams();
@@ -90,20 +88,13 @@ const HomeworkTaskDetail = () => {
 
     setIsUploading(true);
     try {
-      // Optimize image before upload
-      toast.info("Оптимизирую изображение...");
-      const optimizedBlob = await optimizeImage(file);
-      
-      const fileName = `${crypto.randomUUID()}.webp`;
+      const fileExt = file.name.split(".").pop();
+      const fileName = `${crypto.randomUUID()}.${fileExt}`;
       const filePath = `${taskId}/${fileName}`;
 
       const { error: uploadError } = await supabase.storage
         .from("chat-images")
-        .upload(filePath, optimizedBlob, {
-          contentType: 'image/webp',
-          cacheControl: '31536000', // 1 year cache
-          upsert: false
-        });
+        .upload(filePath, file);
 
       if (uploadError) throw uploadError;
 
@@ -299,11 +290,10 @@ const HomeworkTaskDetail = () => {
                     {task.condition_photo_url && (
                       <div>
                         <h3 className="font-semibold mb-2">Фото условия:</h3>
-                        <ResponsiveImage
+                        <img
                           src={task.condition_photo_url}
                           alt="Условие задачи"
                           className="rounded-lg max-w-full"
-                          sizes="(max-width: 768px) 100vw, 800px"
                         />
                       </div>
                     )}
