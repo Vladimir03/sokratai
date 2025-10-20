@@ -1,15 +1,9 @@
-const CACHE_NAME = 'math-tutor-cache-v3';
+const CACHE_NAME = 'math-tutor-cache-v2';
 const STATIC_ASSETS = [
   '/',
   '/index.html',
   '/manifest.json',
 ];
-
-// Aggressive caching for all static assets with hashes
-const CACHE_STRATEGIES = {
-  CACHE_FIRST: 'cache-first',  // For hashed assets (JS, CSS with hashes)
-  NETWORK_FIRST: 'network-first', // For HTML and API calls
-};
 
 // Cache duration for different asset types (in milliseconds)
 const CACHE_DURATION = {
@@ -47,13 +41,7 @@ self.addEventListener('activate', (event) => {
 
 // Check if asset should be cached long-term (has hash in filename)
 function isHashedAsset(url) {
-  return (/\.(js|css)$/.test(url) && /[a-f0-9]{8,}/.test(url)) || 
-         url.includes('/assets/');
-}
-
-// Check if it's a static asset that should be cached
-function isStaticAsset(url) {
-  return /\.(js|css|woff|woff2|ttf|eot|svg|png|jpg|jpeg|gif|webp|ico)$/.test(url);
+  return /\.(js|css)$/.test(url) && /[a-f0-9]{8,}/.test(url);
 }
 
 // Fetch event - serve from cache when offline
@@ -69,8 +57,8 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // Use cache-first strategy for all static assets (JS, CSS, fonts, images)
-  if (isStaticAsset(event.request.url) || isHashedAsset(event.request.url)) {
+  // Use cache-first strategy for hashed assets
+  if (isHashedAsset(event.request.url)) {
     event.respondWith(
       caches.match(event.request).then((cachedResponse) => {
         if (cachedResponse) {
