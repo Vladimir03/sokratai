@@ -66,12 +66,7 @@ const SYSTEM_PROMPT = `Ты опытный репетитор ЕГЭ по мат
 
 serve(async (req) => {
   if (req.method === "OPTIONS") {
-    return new Response(null, { 
-      headers: {
-        ...corsHeaders,
-        'Accept-Encoding': 'gzip, br',
-      }
-    });
+    return new Response(null, { headers: corsHeaders });
   }
 
   try {
@@ -324,7 +319,6 @@ serve(async (req) => {
         "Content-Type": "text/event-stream",
         "Cache-Control": "no-cache",
         "Connection": "keep-alive",
-        "Vary": "Accept-Encoding", // Signal compression support for platform-level compression
       },
     });
   } catch (e) {
