@@ -1,4 +1,4 @@
-const CACHE_NAME = 'math-tutor-cache-v4';
+const CACHE_NAME = 'math-tutor-cache-v3';
 const STATIC_ASSETS = [
   '/',
   '/index.html',
@@ -63,10 +63,9 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // Skip API requests and Supabase (let them fail naturally)
+  // Skip API requests (let them fail naturally)
   if (event.request.url.includes('/functions/') || 
-      event.request.url.includes('supabase.co') ||
-      event.request.url.includes('lovableproject.com')) {
+      event.request.url.includes('supabase.co')) {
     return;
   }
 

@@ -3,7 +3,6 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import AuthGuard from "@/components/AuthGuard";
-import Navigation from "@/components/Navigation";
 import { TrendingUp, CheckCircle, Target, Award } from "lucide-react";
 
 interface Stats {
@@ -74,7 +73,6 @@ const Progress = () => {
 
   return (
     <AuthGuard>
-      <Navigation />
       <div className="container mx-auto px-4 py-6">
         <div className="mb-8">
           <h1 className="text-4xl font-bold mb-2">Ваш прогресс</h1>

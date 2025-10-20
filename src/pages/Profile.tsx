@@ -5,7 +5,6 @@ import { Input } from "@/components/ui/input";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import AuthGuard from "@/components/AuthGuard";
-import Navigation from "@/components/Navigation";
 import { User, Zap, Target, Trophy, Edit } from "lucide-react";
 
 interface Profile {
@@ -88,7 +87,6 @@ const Profile = () => {
   if (loading) {
     return (
       <AuthGuard>
-        <Navigation />
         <div className="container mx-auto px-4 py-6">
           <div className="text-center py-12">
             <div className="w-16 h-16 border-4 border-primary border-t-transparent rounded-full animate-spin mx-auto" />
@@ -100,7 +98,6 @@ const Profile = () => {
 
   return (
     <AuthGuard>
-      <Navigation />
       <div className="container mx-auto px-4 py-6 max-w-4xl">
         <div className="mb-8">
           <h1 className="text-4xl font-bold mb-2">Профиль</h1>
