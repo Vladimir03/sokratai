@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { MessageSquare, BookOpen, TrendingUp, Zap, Target, Trophy } from "lucide-react";
+import { supabase } from "@/integrations/supabase/client";
 
 // Lazy load below-the-fold sections
 const FeaturesSection = lazy(() => import("@/components/sections/FeaturesSection"));
@@ -14,11 +15,8 @@ const Index = () => {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
 
   useEffect(() => {
-    // Динамический импорт Supabase для уменьшения начального bundle
-    import("@/integrations/supabase/client").then(({ supabase }) => {
-      supabase.auth.getSession().then(({ data: { session } }) => {
-        setIsAuthenticated(!!session);
-      });
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setIsAuthenticated(!!session);
     });
   }, []);
 
