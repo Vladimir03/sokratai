@@ -7,6 +7,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import AuthGuard from "@/components/AuthGuard";
+import Navigation from "@/components/Navigation";
 import { CheckCircle2, Circle, X, Check } from "lucide-react";
 import 'katex/dist/katex.min.css';
 import { InlineMath, BlockMath } from 'react-katex';
@@ -177,6 +178,7 @@ const Problems = () => {
 
   return (
     <AuthGuard>
+      <Navigation />
       <div className="container mx-auto px-4 py-6">
         <div className="mb-8">
           <h1 className="text-4xl font-bold mb-2">Каталог задач</h1>
