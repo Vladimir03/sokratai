@@ -137,7 +137,7 @@ export function ChatSidebar({ currentChatId, onChatSelect, onClose, isMobile }: 
           {taskChats.length > 0 && (
             <>
               <div className="px-4 py-2 text-sm text-muted-foreground font-medium mt-4">
-                ЗАДАЧИ
+                ДОМАШКА
               </div>
               {taskChats.map(chat => (
                 <ChatItem key={chat.id} chat={chat} />
