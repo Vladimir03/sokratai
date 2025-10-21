@@ -163,31 +163,61 @@ serve(async (req) => {
     }
 
     // Transform messages to support multimodal (text + images)
-    const transformedMessages = messages.map((msg: any) => {
-      // If message has an image, use multimodal format
-      if (msg.image_url) {
+    const transformedMessages = await Promise.all(
+      messages.map(async (msg: any) => {
+        // If message has an image, fetch it and convert to base64
+        if (msg.image_url) {
+          try {
+            const imageResponse = await fetch(msg.image_url);
+            if (!imageResponse.ok) {
+              console.error("Failed to fetch image:", msg.image_url);
+              // Skip image if fetch fails
+              return {
+                role: msg.role,
+                content: msg.content,
+              };
+            }
+            
+            const imageBuffer = await imageResponse.arrayBuffer();
+            const base64Image = btoa(
+              new Uint8Array(imageBuffer).reduce((data, byte) => data + String.fromCharCode(byte), "")
+            );
+            
+            // Determine image type from URL or content-type
+            const contentType = imageResponse.headers.get("content-type") || "image/jpeg";
+            const imageType = contentType.split("/")[1] || "jpeg";
+            
+            return {
+              role: msg.role,
+              content: [
+                {
+                  type: "text",
+                  text: msg.content,
+                },
+                {
+                  type: "image_url",
+                  image_url: {
+                    url: `data:${contentType};base64,${base64Image}`,
+                  },
+                },
+              ],
+            };
+          } catch (error) {
+            console.error("Error processing image:", error);
+            // Skip image if processing fails
+            return {
+              role: msg.role,
+              content: msg.content,
+            };
+          }
+        }
+        // Otherwise, keep as simple text message
         return {
           role: msg.role,
-          content: [
-            {
-              type: "text",
-              text: msg.content,
-            },
-            {
-              type: "image_url",
-              image_url: {
-                url: msg.image_url,
-              },
-            },
-          ],
+          content: msg.content,
         };
-      }
-      // Otherwise, keep as simple text message
-      return {
-        role: msg.role,
-        content: msg.content,
-      };
-    });
+      })
+    );
 
     const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
 
