@@ -521,8 +521,8 @@ export default function Chat() {
   return (
     <AuthGuard>
       <Navigation />
-      <div className="fixed inset-0 pt-16 overflow-hidden bg-background">
-        <div className="flex h-full overflow-hidden relative">
+      <div className="h-screen pt-16 overflow-hidden bg-background flex flex-col">
+        <div className="flex flex-1 overflow-hidden relative min-h-0">
           {/* Mobile overlay */}
           {isMobile && isSidebarOpen && (
             <div
@@ -573,7 +573,11 @@ export default function Chat() {
               </div>
             )}
 
-            <div ref={messagesContainerRef} className="flex-1 overflow-y-auto overflow-x-hidden px-4">
+            <div 
+              ref={messagesContainerRef} 
+              className="flex-1 overflow-y-auto overflow-x-hidden px-4"
+              style={{ WebkitOverflowScrolling: 'touch' }}
+            >
               {loadingHistory ? (
                 <ChatSkeleton />
               ) : (
@@ -587,7 +591,7 @@ export default function Chat() {
               )}
             </div>
 
-            <div className="flex-shrink-0 border-t p-2 md:p-4 bg-background">
+            <div className="flex-shrink-0 border-t p-2 md:p-4 bg-background" style={{ paddingBottom: 'max(0.5rem, env(safe-area-inset-bottom))' }}>
               <div className="max-w-4xl mx-auto space-y-2 md:space-y-3">
                 {/* Preview uploaded file */}
                 {previewUrl && (
@@ -643,6 +647,7 @@ export default function Chat() {
                     placeholder={isMobile ? "Напиши вопрос..." : "Напиши свой вопрос или вставь скриншот (Ctrl+V)..."}
                     className="!h-12 md:!h-[60px] !min-h-[48px] md:!min-h-[60px] !max-h-12 md:!max-h-[60px] resize-none text-sm md:text-base py-3"
                     disabled={isLoading}
+                    style={{ fontSize: isMobile ? '16px' : undefined }}
                   />
 
                   {/* Send button */}
