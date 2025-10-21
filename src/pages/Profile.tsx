@@ -6,6 +6,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import AuthGuard from "@/components/AuthGuard";
 import { User, Zap, Target, Trophy, Edit } from "lucide-react";
+import { z } from "zod";
 
 interface Profile {
   username: string;
@@ -69,15 +70,49 @@ const Profile = () => {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
 
+      // Validate username
+      const usernameSchema = z.string()
+        .trim()
+        .min(3, { message: "Минимум 3 символа" })
+        .max(30, { message: "Максимум 30 символов" })
+        .regex(/^[a-zA-Zа-яА-Я0-9_-]+$/, { 
+          message: "Только буквы, цифры, _ и -" 
+        });
+
+      const validationResult = usernameSchema.safeParse(newUsername);
+      
+      if (!validationResult.success) {
+        toast.error(validationResult.error.errors[0].message);
+        return;
+      }
+
+      const validatedUsername = validationResult.data;
+
+      // Check for duplicate usernames
+      const { data: existing, error: checkError } = await supabase
+        .from('profiles')
+        .select('id')
+        .eq('username', validatedUsername)
+        .neq('id', user.id)
+        .maybeSingle();
+
+      if (checkError) throw checkError;
+
+      if (existing) {
+        toast.error('Это имя уже занято');
+        return;
+      }
+
+      // Update username
       const { error } = await supabase
         .from("profiles")
-        .update({ username: newUsername })
+        .update({ username: validatedUsername })
         .eq("id", user.id);
 
       if (error) throw error;
 
       toast.success("Имя обновлено!");
-      setProfile(prev => prev ? { ...prev, username: newUsername } : null);
+      setProfile(prev => prev ? { ...prev, username: validatedUsername } : null);
       setEditing(false);
     } catch (error: any) {
       toast.error(error.message);
