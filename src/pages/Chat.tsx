@@ -505,6 +505,14 @@ export default function Chat() {
     }
   }, [isMobile]);
 
+  // Fix body overflow for chat page only
+  useEffect(() => {
+    document.body.classList.add('chat-page-fixed');
+    return () => {
+      document.body.classList.remove('chat-page-fixed');
+    };
+  }, []);
+
   if (!currentChatId) {
     return (
       <AuthGuard>
