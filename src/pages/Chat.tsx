@@ -535,7 +535,7 @@ export default function Chat() {
           {/* Mobile overlay */}
           {isMobile && isSidebarOpen && (
             <div
-              className="fixed inset-0 bg-black/50 z-40 mt-16"
+              className="fixed inset-0 bg-black/50 z-40 top-[110px] md:top-[104px]"
               onClick={() => setIsSidebarOpen(false)}
             />
           )}
@@ -543,7 +543,7 @@ export default function Chat() {
           {/* Sidebar */}
           <div className={`
             ${isMobile 
-              ? 'fixed inset-y-0 left-0 z-50 w-80 transform transition-transform duration-300'
+              ? 'fixed top-[110px] bottom-0 left-0 z-50 w-80 transform transition-transform duration-300'
               : 'relative w-64'
             }
             ${isMobile && !isSidebarOpen ? '-translate-x-full' : 'translate-x-0'}
