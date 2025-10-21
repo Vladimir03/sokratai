@@ -1,10 +1,9 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import ChatMessage from "@/components/ChatMessage";
 import { Button } from "@/components/ui/button";
-import { Textarea } from "@/components/ui/textarea";
-import { Send, Image as ImageIcon, X, Menu } from "lucide-react";
+import { Menu } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import ChatSkeleton from "@/components/ChatSkeleton";
 import LoadingIndicator from "@/components/LoadingIndicator";
@@ -15,6 +14,7 @@ import { TaskContextBanner } from "@/components/TaskContextBanner";
 import Navigation from "@/components/Navigation";
 import AuthGuard from "@/components/AuthGuard";
 import { useIsMobile } from "@/hooks/use-mobile";
+import ChatInput from "@/components/ChatInput";
 
 interface Message {
   role: "user" | "assistant";
@@ -37,7 +37,6 @@ export default function Chat() {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const chatIdFromUrl = searchParams.get('id');
-  const fileInputRef = useRef<HTMLInputElement>(null);
   const isMobile = useIsMobile();
 
   const { data: user } = useQuery({
@@ -146,7 +145,7 @@ export default function Chat() {
     loadHistory();
   }, [user?.id, currentChatId]);
 
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileUpload = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
@@ -170,9 +169,9 @@ export default function Chat() {
 
     setUploadedFile(file);
     setPreviewUrl(URL.createObjectURL(file));
-  };
+  }, [toast]);
 
-  const handlePaste = (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+  const handlePaste = useCallback((e: React.ClipboardEvent<HTMLTextAreaElement>) => {
     const items = e.clipboardData?.items;
     if (!items) return;
 
@@ -191,18 +190,15 @@ export default function Chat() {
         }
       }
     }
-  };
+  }, [toast]);
 
-  const removeUploadedFile = () => {
+  const removeUploadedFile = useCallback(() => {
     if (previewUrl) {
       URL.revokeObjectURL(previewUrl);
     }
     setUploadedFile(null);
     setPreviewUrl(null);
-    if (fileInputRef.current) {
-      fileInputRef.current.value = '';
-    }
-  };
+  }, [previewUrl]);
 
   const saveMessageToBatch = async (msg: Message) => {
     if (!user?.id || !currentChatId) return;
@@ -602,77 +598,18 @@ export default function Chat() {
               )}
             </div>
 
-            <div className="flex-shrink-0 border-t p-2 md:p-4 bg-background" style={{ paddingBottom: 'max(0.5rem, env(safe-area-inset-bottom))' }}>
-              <div className="max-w-4xl mx-auto space-y-2 md:space-y-3">
-                {/* Preview uploaded file */}
-                {previewUrl && (
-                  <div className="relative inline-block w-full md:w-auto">
-                    <img
-                      src={previewUrl}
-                      alt="Preview"
-                      className="max-h-32 w-full md:w-auto object-contain rounded-lg border border-border"
-                    />
-                    <button
-                      onClick={removeUploadedFile}
-                      className="absolute -top-2 -right-2 bg-destructive text-destructive-foreground rounded-full w-6 h-6 flex items-center justify-center hover:bg-destructive/90 transition-colors"
-                      title="Удалить"
-                    >
-                      <X className="h-4 w-4" />
-                    </button>
-                  </div>
-                )}
-
-                {/* Input area */}
-                <div className="flex items-center gap-1 md:gap-2">
-                  {/* File upload button */}
-                  <input
-                    ref={fileInputRef}
-                    type="file"
-                    id="file-upload"
-                    accept="image/*"
-                    onChange={handleFileUpload}
-                    className="hidden"
-                  />
-                  <Button
-                    variant="outline"
-                    size="icon"
-                    className="h-12 w-12 md:h-[60px] md:w-[60px] shrink-0"
-                    onClick={() => fileInputRef.current?.click()}
-                    disabled={isLoading}
-                    title="Загрузить фото"
-                  >
-                    <ImageIcon className="h-4 w-4 md:h-5 md:w-5" />
-                  </Button>
-
-                  {/* Text input */}
-                  <Textarea
-                    value={message}
-                    onChange={(e) => setMessage(e.target.value)}
-                    onPaste={handlePaste}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter" && !e.shiftKey) {
-                        e.preventDefault();
-                        handleSend();
-                      }
-                    }}
-                    placeholder={isMobile ? "Напиши вопрос..." : "Напиши свой вопрос или вставь скриншот (Ctrl+V)..."}
-                    className="!h-12 md:!h-[60px] !min-h-[48px] md:!min-h-[60px] !max-h-12 md:!max-h-[60px] resize-none text-sm md:text-base py-3"
-                    disabled={isLoading}
-                    style={{ fontSize: isMobile ? '16px' : undefined }}
-                  />
-
-                  {/* Send button */}
-                  <Button
-                    onClick={handleSend}
-                    disabled={(!message.trim() && !uploadedFile) || isLoading}
-                    size="icon"
-                    className="h-12 w-12 md:h-[60px] md:w-[60px] shrink-0"
-                  >
-                    <Send className="h-4 w-4 md:h-5 md:w-5" />
-                  </Button>
-                </div>
-              </div>
-            </div>
+            <ChatInput
+              message={message}
+              setMessage={setMessage}
+              uploadedFile={uploadedFile}
+              previewUrl={previewUrl}
+              isLoading={isLoading}
+              isMobile={isMobile}
+              onSend={handleSend}
+              onFileUpload={handleFileUpload}
+              onPaste={handlePaste}
+              onRemoveFile={removeUploadedFile}
+            />
           </div>
         </div>
       </div>
