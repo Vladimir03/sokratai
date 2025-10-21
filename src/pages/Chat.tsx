@@ -379,14 +379,17 @@ export default function Chat() {
       content: message.trim() || '[Изображение]',
       image_url: imageUrl
     };
-    const userMessages = [...messages, userMessage];
-    setMessages(userMessages);
+    
+    // Используем функциональное обновление состояния
+    setMessages(prev => [...prev, userMessage]);
     removeUploadedFile();
     setIsLoading(true);
 
+    // Сохраняем сообщение пользователя
     await saveMessageToBatch(userMessage);
 
     let assistantSoFar = "";
+    
     const upsertAssistant = (nextChunk: string) => {
       assistantSoFar += nextChunk;
       setMessages(prev => {
@@ -403,8 +406,11 @@ export default function Chat() {
         ? `Задача №${currentChat.homework_task.task_number}. Тема: ${currentChat.homework_task.homework_set?.topic}. Условие: ${currentChat.homework_task.condition_text}`
         : undefined;
 
+      // Получаем актуальные сообщения для отправки
+      const messagesToSend = [...messages, userMessage];
+
       await streamChat({
-        messages: userMessages,
+        messages: messagesToSend,
         onDelta: (chunk) => upsertAssistant(chunk),
         onDone: () => {
           setIsLoading(false);
@@ -414,8 +420,11 @@ export default function Chat() {
         chatId: currentChatId,
       });
 
-      const finalAssistantMsg: Message = { role: "assistant", content: assistantSoFar };
-      await saveMessageToBatch(finalAssistantMsg);
+      // Сохраняем только если есть контент от ассистента
+      if (assistantSoFar.trim()) {
+        const finalAssistantMsg: Message = { role: "assistant", content: assistantSoFar };
+        await saveMessageToBatch(finalAssistantMsg);
+      }
     } catch (error) {
       console.error(error);
       setIsLoading(false);

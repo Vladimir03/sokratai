@@ -10,12 +10,18 @@ interface PendingMessage {
 }
 
 class MessageBatcher {
-  private pendingMessages: PendingMessage[] = [];
+  private pendingMessages: Map<string, PendingMessage> = new Map();
   private batchTimeout: NodeJS.Timeout | null = null;
-  private readonly BATCH_DELAY = 2000; // 2 секунды для накопления
+  private readonly BATCH_DELAY = 100; // 100мс для быстрой отправки
 
   addMessage(message: PendingMessage) {
-    this.pendingMessages.push(message);
+    // Используем tempId как ключ для предотвращения дубликатов
+    const key = message.tempId || `${message.role}-${Date.now()}-${Math.random()}`;
+    
+    // Проверяем, нет ли уже такого сообщения
+    if (!this.pendingMessages.has(key)) {
+      this.pendingMessages.set(key, message);
+    }
     
     // Сбрасываем предыдущий таймер
     if (this.batchTimeout) {
@@ -29,10 +35,10 @@ class MessageBatcher {
   }
 
   async flush(): Promise<void> {
-    if (this.pendingMessages.length === 0) return;
+    if (this.pendingMessages.size === 0) return;
 
-    const messagesToSave = [...this.pendingMessages];
-    this.pendingMessages = [];
+    const messagesToSave = Array.from(this.pendingMessages.values());
+    this.pendingMessages.clear();
 
     if (this.batchTimeout) {
       clearTimeout(this.batchTimeout);
@@ -43,28 +49,25 @@ class MessageBatcher {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
 
-      // Сохраняем все сообщения одним запросом с retry
-      await retryWithBackoff(async () => {
-        const { error } = await supabase
-          .from('chat_messages')
-          .insert(
-            messagesToSave.map(msg => ({
-              user_id: user.id,
-              role: msg.role,
-              content: msg.content,
-              image_url: msg.image_url || null,
-              input_method: msg.input_method || 'text',
-            }))
-          );
+      // Сохраняем все сообщения одним запросом
+      const { error } = await supabase
+        .from('chat_messages')
+        .insert(
+          messagesToSave.map(msg => ({
+            user_id: user.id,
+            role: msg.role,
+            content: msg.content,
+            image_url: msg.image_url || null,
+            input_method: msg.input_method || 'text',
+          }))
+        );
 
-        if (error) throw error;
-      });
+      if (error) throw error;
 
       console.log(`Batched ${messagesToSave.length} messages successfully`);
     } catch (error) {
       console.error("Error saving batched messages:", error);
-      // Возвращаем сообщения обратно в очередь при ошибке
-      this.pendingMessages.unshift(...messagesToSave);
+      // НЕ возвращаем сообщения обратно - они останутся в UI
     }
   }
 
