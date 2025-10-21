@@ -521,7 +521,7 @@ export default function Chat() {
   return (
     <AuthGuard>
       <Navigation />
-      <div className="h-screen pt-[110px] md:pt-[104px] overflow-hidden bg-background flex flex-col">
+      <div className="fixed inset-0 top-[110px] md:top-[104px] bg-background flex flex-col">
         <div className="flex flex-1 overflow-hidden relative min-h-0">
           {/* Mobile overlay */}
           {isMobile && isSidebarOpen && (
@@ -576,7 +576,10 @@ export default function Chat() {
             <div 
               ref={messagesContainerRef} 
               className="flex-1 overflow-y-auto overflow-x-hidden px-4"
-              style={{ WebkitOverflowScrolling: 'touch' }}
+              style={{ 
+                WebkitOverflowScrolling: 'touch',
+                overscrollBehavior: 'contain'
+              }}
             >
               {loadingHistory ? (
                 <ChatSkeleton />
