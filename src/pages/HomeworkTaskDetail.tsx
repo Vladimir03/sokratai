@@ -176,7 +176,7 @@ const HomeworkTaskDetail = () => {
     <AuthGuard>
       <div className="min-h-screen bg-background">
         <Navigation />
-        <main className="container mx-auto px-4 pt-20 pb-24 md:pb-8">
+        <main className="container mx-auto px-4 pt-[120px] md:pt-20 pb-8">
           <div className="max-w-4xl mx-auto space-y-6">
             {/* Header */}
             <div className="flex items-center gap-4">
