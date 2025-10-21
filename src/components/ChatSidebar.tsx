@@ -4,6 +4,8 @@ import { Button } from "@/components/ui/button";
 import { Plus, X } from "lucide-react";
 import { useState } from "react";
 import { CreateChatDialog } from "./CreateChatDialog";
+import { CustomChatItem } from "./CustomChatItem";
+import { useNavigate } from "react-router-dom";
 
 interface ChatSidebarProps {
   currentChatId?: string;
@@ -30,6 +32,7 @@ interface Chat {
 
 export function ChatSidebar({ currentChatId, onChatSelect, onClose, isMobile }: ChatSidebarProps) {
   const [showCreateDialog, setShowCreateDialog] = useState(false);
+  const navigate = useNavigate();
 
   const { data: user } = useQuery({
     queryKey: ['user'],
@@ -104,6 +107,13 @@ export function ChatSidebar({ currentChatId, onChatSelect, onClose, isMobile }: 
     );
   };
 
+  const handleChatDeleted = () => {
+    // Navigate to general chat if current chat was deleted
+    if (generalChat) {
+      navigate(`/chat?id=${generalChat.id}`);
+    }
+  };
+
   return (
     <>
       <div className="w-full flex flex-col h-full bg-background">
@@ -141,7 +151,13 @@ export function ChatSidebar({ currentChatId, onChatSelect, onClose, isMobile }: 
                 МОИ ЧАТЫ
               </div>
               {customChats.map(chat => (
-                <ChatItem key={chat.id} chat={chat} />
+                <CustomChatItem 
+                  key={chat.id} 
+                  chat={chat}
+                  isActive={currentChatId === chat.id}
+                  onSelect={onChatSelect}
+                  onDeleted={handleChatDeleted}
+                />
               ))}
             </>
           )}
