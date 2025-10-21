@@ -1,24 +1,20 @@
-import { memo, useRef } from "react";
+import { memo, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Send, Image as ImageIcon, X } from "lucide-react";
 
 interface ChatInputProps {
-  message: string;
-  setMessage: (message: string) => void;
   uploadedFile: File | null;
   previewUrl: string | null;
   isLoading: boolean;
   isMobile: boolean;
-  onSend: () => void;
+  onSend: (message: string) => void;
   onFileUpload: (e: React.ChangeEvent<HTMLInputElement>) => void;
   onPaste: (e: React.ClipboardEvent<HTMLTextAreaElement>) => void;
   onRemoveFile: () => void;
 }
 
 const ChatInput = memo(({
-  message,
-  setMessage,
   uploadedFile,
   previewUrl,
   isLoading,
@@ -29,6 +25,7 @@ const ChatInput = memo(({
   onRemoveFile,
 }: ChatInputProps) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [message, setMessage] = useState("");
 
   return (
     <div className="flex-shrink-0 border-t p-2 md:p-4 bg-background" style={{ paddingBottom: 'max(0.5rem, env(safe-area-inset-bottom))' }}>
@@ -81,7 +78,10 @@ const ChatInput = memo(({
             onKeyDown={(e) => {
               if (e.key === "Enter" && !e.shiftKey) {
                 e.preventDefault();
-                onSend();
+                if (message.trim() || uploadedFile) {
+                  onSend(message);
+                  setMessage("");
+                }
               }
             }}
             placeholder={isMobile ? "Напиши вопрос..." : "Напиши свой вопрос или вставь скриншот (Ctrl+V)..."}
@@ -92,7 +92,12 @@ const ChatInput = memo(({
 
           {/* Send button */}
           <Button
-            onClick={onSend}
+            onClick={() => {
+              if (message.trim() || uploadedFile) {
+                onSend(message);
+                setMessage("");
+              }
+            }}
             disabled={(!message.trim() && !uploadedFile) || isLoading}
             size="icon"
             className="h-12 w-12 md:h-[60px] md:w-[60px] shrink-0"

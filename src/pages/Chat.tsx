@@ -23,7 +23,6 @@ interface Message {
 }
 
 export default function Chat() {
-  const [message, setMessage] = useState("");
   const [messages, setMessages] = useState<Message[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [loadingHistory, setLoadingHistory] = useState(true);
@@ -345,15 +344,7 @@ export default function Chat() {
     onDone();
   }
 
-  const handleQuickMessage = (quickText: string) => {
-    setMessage(quickText);
-    // Небольшая задержка чтобы состояние обновилось
-    setTimeout(() => {
-      handleSend();
-    }, 50);
-  };
-
-  const handleSend = async () => {
+  const handleSend = useCallback(async (message: string) => {
     if ((!message.trim() && !uploadedFile) || isLoading) return;
 
     let imageUrl: string | undefined = undefined;
@@ -390,7 +381,6 @@ export default function Chat() {
     };
     const userMessages = [...messages, userMessage];
     setMessages(userMessages);
-    setMessage("");
     removeUploadedFile();
     setIsLoading(true);
 
@@ -435,7 +425,11 @@ export default function Chat() {
         variant: "destructive",
       });
     }
-  };
+  }, [messages, uploadedFile, isLoading, user?.id, removeUploadedFile, currentChat, currentChatId, queryClient, toast]);
+
+  const handleQuickMessage = useCallback((quickText: string) => {
+    handleSend(quickText);
+  }, [handleSend]);
 
   // Auto-start conversation with task context using AI
   useEffect(() => {
@@ -599,8 +593,6 @@ export default function Chat() {
             </div>
 
             <ChatInput
-              message={message}
-              setMessage={setMessage}
               uploadedFile={uploadedFile}
               previewUrl={previewUrl}
               isLoading={isLoading}
