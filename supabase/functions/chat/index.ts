@@ -248,10 +248,16 @@ serve(async (req) => {
           {
             role: "system",
             content: effectiveSystemPrompt,
+            // Помечаем системный промпт как кэшируемый (если gateway поддерживает)
+            cache_control: { type: "ephemeral" }
           },
           ...transformedMessages,
         ],
         stream: true,
+        // Дополнительные параметры для оптимизации кэширования
+        metadata: {
+          enable_prompt_caching: true
+        }
       }),
     });
 
