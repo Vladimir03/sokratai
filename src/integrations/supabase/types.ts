@@ -14,6 +14,42 @@ export type Database = {
   }
   public: {
     Tables: {
+      answer_attempts: {
+        Row: {
+          attempt_time: string
+          problem_id: string
+          user_id: string
+          was_correct: boolean
+        }
+        Insert: {
+          attempt_time?: string
+          problem_id: string
+          user_id: string
+          was_correct?: boolean
+        }
+        Update: {
+          attempt_time?: string
+          problem_id?: string
+          user_id?: string
+          was_correct?: boolean
+        }
+        Relationships: [
+          {
+            foreignKeyName: "answer_attempts_problem_id_fkey"
+            columns: ["problem_id"]
+            isOneToOne: false
+            referencedRelation: "problems"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "answer_attempts_problem_id_fkey"
+            columns: ["problem_id"]
+            isOneToOne: false
+            referencedRelation: "problems_public"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       api_rate_limits: {
         Row: {
           request_count: number
