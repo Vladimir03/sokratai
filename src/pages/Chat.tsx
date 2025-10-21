@@ -402,12 +402,14 @@ export default function Chat() {
     };
 
     try {
-      const taskContext = currentChat?.homework_task 
+      // Отправляем taskContext только в первом сообщении
+      const taskContext = (currentChat?.homework_task && messages.length === 0)
         ? `Задача №${currentChat.homework_task.task_number}. Тема: ${currentChat.homework_task.homework_set?.topic}. Условие: ${currentChat.homework_task.condition_text}`
         : undefined;
 
-      // Получаем актуальные сообщения для отправки
-      const messagesToSend = [...messages, userMessage];
+      // Отправляем только последние 15 сообщений
+      const allMessages = [...messages, userMessage];
+      const messagesToSend = allMessages.slice(-15);
 
       await streamChat({
         messages: messagesToSend,
