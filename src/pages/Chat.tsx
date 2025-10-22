@@ -32,6 +32,7 @@ export default function Chat() {
   const { toast } = useToast();
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
+  const isSendingRef = useRef(false); // Защита от дублирования отправки (iOS fix)
   const queryClient = useQueryClient();
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
@@ -346,6 +347,14 @@ export default function Chat() {
 
   const handleSend = useCallback(async (message: string) => {
     if ((!message.trim() && !uploadedFile) || isLoading) return;
+    
+    // Защита от множественных вызовов (iOS Safari bug)
+    if (isSendingRef.current) {
+      console.log('Already sending, ignoring duplicate call');
+      return;
+    }
+    
+    isSendingRef.current = true;
 
     let imageUrl: string | undefined = undefined;
 
@@ -358,6 +367,7 @@ export default function Chat() {
         .upload(fileName, uploadedFile);
 
       if (error) {
+        isSendingRef.current = false; // Reset on error
         toast({
           title: "Ошибка",
           description: "Не удалось загрузить изображение",
@@ -435,6 +445,9 @@ export default function Chat() {
         description: "Не удалось отправить сообщение",
         variant: "destructive",
       });
+    } finally {
+      // Всегда сбрасываем флаг отправки
+      isSendingRef.current = false;
     }
   }, [messages, uploadedFile, isLoading, user?.id, removeUploadedFile, currentChat, currentChatId, queryClient, toast]);
 
