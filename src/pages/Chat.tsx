@@ -351,6 +351,14 @@ export default function Chat() {
     // Защита от множественных вызовов (iOS Safari bug)
     if (isSendingRef.current) {
       console.log('Already sending, ignoring duplicate call');
+      
+      toast({
+        title: "Подождите",
+        description: "Сообщение уже отправляется...",
+        duration: 1500,
+        variant: "default"
+      });
+      
       return;
     }
     
