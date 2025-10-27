@@ -225,20 +225,19 @@ export default function Chat() {
     }
   };
 
-  const scrollToUserMessage = () => {
-    // Scroll to show user's message at the top after sending
+  const scrollToBottom = (smooth = true) => {
     if (messagesContainerRef.current) {
-      const container = messagesContainerRef.current;
-      const messages = container.querySelectorAll('[data-message]');
-      const lastUserMessage = Array.from(messages).reverse().find(
-        (msg) => msg.getAttribute('data-role') === 'user'
-      );
-      
-      if (lastUserMessage) {
-        lastUserMessage.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      }
+      messagesContainerRef.current.scrollTop = messagesContainerRef.current.scrollHeight;
     }
   };
+
+  // Auto-scroll when messages change
+  useEffect(() => {
+    // Use requestAnimationFrame to ensure DOM has updated
+    requestAnimationFrame(() => {
+      scrollToBottom();
+    });
+  }, [messages]);
 
   async function streamChat({
     messages,
@@ -406,9 +405,6 @@ export default function Chat() {
 
     // Сохраняем сообщение пользователя
     await saveMessageToBatch(userMessage);
-
-    // Scroll to user's message after it's added to DOM
-    setTimeout(() => scrollToUserMessage(), 100);
 
     let assistantSoFar = "";
     
@@ -621,9 +617,7 @@ export default function Chat() {
                 ) : (
                   <>
                     {messages.map((msg, index) => (
-                      <div key={index} data-message data-role={msg.role}>
-                        <ChatMessage message={msg} isLoading={false} onQuickMessage={handleQuickMessage} />
-                      </div>
+                      <ChatMessage key={index} message={msg} isLoading={false} onQuickMessage={handleQuickMessage} />
                     ))}
                     {isLoading && <LoadingIndicator />}
                     <div ref={messagesEndRef} />
