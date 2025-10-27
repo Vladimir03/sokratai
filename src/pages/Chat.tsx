@@ -15,6 +15,7 @@ import Navigation from "@/components/Navigation";
 import AuthGuard from "@/components/AuthGuard";
 import { useIsMobile } from "@/hooks/use-mobile";
 import ChatInput from "@/components/ChatInput";
+import { debounce } from "@/utils/debounce";
 
 interface Message {
   role: "user" | "assistant";
@@ -408,7 +409,7 @@ export default function Chat() {
 
     let assistantSoFar = "";
     
-    const upsertAssistant = (nextChunk: string) => {
+    const upsertAssistantImmediate = (nextChunk: string) => {
       assistantSoFar += nextChunk;
       setMessages(prev => {
         const last = prev[prev.length - 1];
@@ -418,6 +419,10 @@ export default function Chat() {
         return [...prev, { role: "assistant", content: assistantSoFar }];
       });
     };
+
+    // Debounced version to reduce re-renders from 50-100/sec to ~20/sec
+    // This allows KaTeX to render LaTeX formulas properly
+    const debouncedUpsertAssistant = debounce(upsertAssistantImmediate, 50);
 
     try {
       // Отправляем taskContext только в первом сообщении
@@ -431,8 +436,10 @@ export default function Chat() {
 
       await streamChat({
         messages: messagesToSend,
-        onDelta: (chunk) => upsertAssistant(chunk),
+        onDelta: (chunk) => debouncedUpsertAssistant(chunk),
         onDone: () => {
+          // Force final update to ensure last chunk is rendered
+          debouncedUpsertAssistant.flush();
           setIsLoading(false);
           queryClient.invalidateQueries({ queryKey: ['chat-messages'] });
         },
