@@ -550,90 +550,91 @@ export default function Chat() {
 
   return (
     <AuthGuard>
-      <Navigation />
-      <div className="fixed inset-0 top-[110px] md:top-[104px] bg-background flex flex-col">
-        <div className="flex flex-1 overflow-hidden relative min-h-0">
-          {/* Mobile overlay */}
-          {isMobile && isSidebarOpen && (
-            <div
-              className="fixed inset-0 bg-black/50 z-40 top-[110px] md:top-[104px]"
-              onClick={() => setIsSidebarOpen(false)}
-            />
-          )}
+      <div className="min-h-screen bg-background">
+        <Navigation />
+        
+        <div className="pt-[110px] md:pt-[104px] h-screen flex flex-col">
+          <div className="flex flex-1 overflow-hidden relative min-h-0">
+            {/* Mobile overlay */}
+            {isMobile && isSidebarOpen && (
+              <div
+                className="fixed inset-0 bg-black/50 z-40"
+                onClick={() => setIsSidebarOpen(false)}
+              />
+            )}
 
-          {/* Sidebar */}
-          <div className={`
-            ${isMobile 
-              ? 'fixed top-[110px] bottom-0 left-0 z-50 w-80 transform transition-transform duration-300'
-              : 'relative w-64'
-            }
-            ${isMobile && !isSidebarOpen ? '-translate-x-full' : 'translate-x-0'}
-            bg-background border-r overflow-y-auto
-          `}>
-            <ChatSidebar
-              currentChatId={currentChatId}
-              onChatSelect={handleChatSelect}
-              onClose={() => setIsSidebarOpen(false)}
-              isMobile={isMobile}
-            />
-          </div>
+            {/* Sidebar */}
+            <div className={`
+              ${isMobile 
+                ? 'fixed top-[110px] bottom-0 left-0 z-50 w-80 transform transition-transform duration-300'
+                : 'relative w-64'
+              }
+              ${isMobile && !isSidebarOpen ? '-translate-x-full' : 'translate-x-0'}
+              bg-background border-r overflow-y-auto
+            `}>
+              <ChatSidebar
+                currentChatId={currentChatId}
+                onChatSelect={handleChatSelect}
+                onClose={() => setIsSidebarOpen(false)}
+                isMobile={isMobile}
+              />
+            </div>
 
-          <div className="flex-1 flex flex-col overflow-hidden min-w-0">
-            <div className="flex-shrink-0 border-b p-2 md:p-3 flex items-center gap-2 md:gap-3">
-              {isMobile && (
+            <div className="flex-1 flex flex-col overflow-hidden min-w-0">
+              <div className="flex-shrink-0 border-b p-2 md:p-3 flex items-center gap-2 md:gap-3 bg-background">
                 <Button
                   variant="ghost"
                   size="icon"
-                  onClick={() => setIsSidebarOpen(true)}
+                  onClick={() => setIsSidebarOpen(!isSidebarOpen)}
                   className="shrink-0"
                 >
                   <Menu className="h-5 w-5" />
                 </Button>
-              )}
-              <h1 className="text-lg md:text-xl font-semibold flex items-center gap-2 flex-1 truncate">
-                <span>{currentChat?.icon || '💬'}</span>
-                <span className="truncate">{currentChat?.title || 'Чат'}</span>
-              </h1>
-              <ConnectionIndicator />
-            </div>
-
-            {currentChat?.chat_type === 'homework_task' && currentChat.homework_task && (
-              <div className="flex-shrink-0">
-                <TaskContextBanner task={currentChat.homework_task} />
+                <h1 className="text-lg md:text-xl font-semibold flex items-center gap-2 flex-1 truncate">
+                  <span>{currentChat?.icon || '💬'}</span>
+                  <span className="truncate">{currentChat?.title || 'Чат'}</span>
+                </h1>
+                <ConnectionIndicator />
               </div>
-            )}
 
-            <div 
-              ref={messagesContainerRef} 
-              className="flex-1 overflow-y-auto overflow-x-hidden px-4"
-              style={{ 
-                WebkitOverflowScrolling: 'touch',
-                overscrollBehavior: 'contain'
-              }}
-            >
-              {loadingHistory ? (
-                <ChatSkeleton />
-              ) : (
-                <>
-                  {messages.map((msg, index) => (
-                    <ChatMessage key={index} message={msg} isLoading={false} onQuickMessage={handleQuickMessage} />
-                  ))}
-                  {isLoading && <LoadingIndicator />}
-                  <div ref={messagesEndRef} />
-                </>
+              {currentChat?.chat_type === 'homework_task' && currentChat.homework_task && (
+                <div className="flex-shrink-0">
+                  <TaskContextBanner task={currentChat.homework_task} />
+                </div>
               )}
-            </div>
 
-            <ChatInput
-              uploadedFile={uploadedFile}
-              previewUrl={previewUrl}
-              isLoading={isLoading}
-              isMobile={isMobile}
-              onSend={handleSend}
-              onFileUpload={handleFileUpload}
-              onPaste={handlePaste}
-              onRemoveFile={removeUploadedFile}
-            />
+              <div 
+                ref={messagesContainerRef} 
+                className="flex-1 overflow-y-auto overflow-x-hidden px-4"
+                style={{ 
+                  WebkitOverflowScrolling: 'touch',
+                  overscrollBehavior: 'contain'
+                }}
+              >
+                {loadingHistory ? (
+                  <ChatSkeleton />
+                ) : (
+                  <>
+                    {messages.map((msg, index) => (
+                      <ChatMessage key={index} message={msg} isLoading={false} onQuickMessage={handleQuickMessage} />
+                    ))}
+                    {isLoading && <LoadingIndicator />}
+                    <div ref={messagesEndRef} />
+                  </>
+                )}
+              </div>
+
+              <ChatInput
+                uploadedFile={uploadedFile}
+                previewUrl={previewUrl}
+                isLoading={isLoading}
+                isMobile={isMobile}
+                onSend={handleSend}
+                onFileUpload={handleFileUpload}
+                onPaste={handlePaste}
+                onRemoveFile={removeUploadedFile}
+              />
+            </div>
           </div>
         </div>
       </div>
