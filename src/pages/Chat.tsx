@@ -20,6 +20,8 @@ interface Message {
   role: "user" | "assistant";
   content: string;
   image_url?: string;
+  id?: string;
+  feedback?: 'like' | 'dislike' | null;
 }
 
 export default function Chat() {
@@ -119,7 +121,10 @@ export default function Chat() {
       try {
         const { data, error } = await supabase
           .from('chat_messages')
-          .select('*')
+          .select(`
+            *,
+            feedback:message_feedback(feedback_type)
+          `)
           .eq('chat_id', currentChatId)
           .order('created_at', { ascending: true });
 
@@ -129,7 +134,9 @@ export default function Chat() {
           setMessages(data.map(msg => ({
             role: msg.role as "user" | "assistant",
             content: msg.content,
-            image_url: msg.image_url || undefined
+            image_url: msg.image_url || undefined,
+            id: msg.id,
+            feedback: (msg.feedback as any)?.[0]?.feedback_type || null
           })));
         } else {
           setMessages([]);
@@ -463,6 +470,44 @@ export default function Chat() {
     handleSend(quickText);
   }, [handleSend]);
 
+  const handleMessageFeedback = useCallback(async (messageId: string, feedbackType: 'like' | 'dislike' | null) => {
+    if (!user?.id) return;
+
+    try {
+      if (!feedbackType) {
+        // Удалить фидбек
+        await supabase
+          .from('message_feedback')
+          .delete()
+          .eq('message_id', messageId)
+          .eq('user_id', user.id);
+      } else {
+        // Upsert фидбек
+        await supabase
+          .from('message_feedback')
+          .upsert({
+            message_id: messageId,
+            user_id: user.id,
+            feedback_type: feedbackType
+          }, {
+            onConflict: 'message_id,user_id'
+          });
+      }
+      
+      // Обновить локальный state
+      setMessages(prev => prev.map(msg => 
+        msg.id === messageId ? { ...msg, feedback: feedbackType } : msg
+      ));
+    } catch (error) {
+      console.error('Error saving feedback:', error);
+      toast({
+        title: "Ошибка",
+        description: "Не удалось сохранить отзыв",
+        variant: "destructive",
+      });
+    }
+  }, [user?.id, toast]);
+
   // Auto-start conversation with task context using AI
   useEffect(() => {
     if (!currentChat?.homework_task || messages.length > 0 || loadingHistory || isLoading) return;
@@ -617,7 +662,13 @@ export default function Chat() {
                 ) : (
                   <>
                     {messages.map((msg, index) => (
-                      <ChatMessage key={index} message={msg} isLoading={false} onQuickMessage={handleQuickMessage} />
+                      <ChatMessage 
+                        key={index} 
+                        message={msg} 
+                        isLoading={false} 
+                        onQuickMessage={handleQuickMessage}
+                        onFeedback={handleMessageFeedback}
+                      />
                     ))}
                     {isLoading && <LoadingIndicator />}
                     <div ref={messagesEndRef} />

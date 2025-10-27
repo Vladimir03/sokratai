@@ -3,7 +3,13 @@ import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
 import { Dialog, DialogContent } from "@/components/ui/dialog";
-import { X } from "lucide-react";
+import { X, Copy, ThumbsUp, ThumbsDown, Check } from "lucide-react";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 
 // Динамическая загрузка только ReactMarkdown компонента
 const ReactMarkdown = lazy(() => import('react-markdown'));
@@ -17,6 +23,7 @@ interface Message {
   error?: string;
   image_url?: string;
   input_method?: "text" | "voice" | "button";
+  feedback?: 'like' | 'dislike' | null;
 }
 
 interface ChatMessageProps {
@@ -24,12 +31,31 @@ interface ChatMessageProps {
   isLoading: boolean;
   onQuickMessage: (text: string) => void;
   onRetry?: () => void;
+  onFeedback?: (messageId: string, feedbackType: 'like' | 'dislike' | null) => void;
 }
 
-const ChatMessage = memo(({ message, isLoading, onQuickMessage, onRetry }: ChatMessageProps) => {
+const ChatMessage = memo(({ message, isLoading, onQuickMessage, onRetry, onFeedback }: ChatMessageProps) => {
   const [katexLoaded, setKatexLoaded] = useState(false);
   const [imageModalOpen, setImageModalOpen] = useState(false);
+  const [currentFeedback, setCurrentFeedback] = useState<'like' | 'dislike' | null>(
+    message.feedback || null
+  );
+  const [isCopied, setIsCopied] = useState(false);
   const hasMath = message.content.includes('$');
+
+  const handleCopy = async () => {
+    await navigator.clipboard.writeText(message.content);
+    setIsCopied(true);
+    setTimeout(() => setIsCopied(false), 2000);
+  };
+
+  const handleFeedback = async (type: 'like' | 'dislike') => {
+    const newFeedback = currentFeedback === type ? null : type;
+    setCurrentFeedback(newFeedback);
+    if (onFeedback && message.id) {
+      onFeedback(message.id, newFeedback);
+    }
+  };
 
   // Мемоизируем markdown компоненты для избежания пересоздания
   const markdownComponents = useMemo(() => ({
@@ -178,7 +204,7 @@ const ChatMessage = memo(({ message, isLoading, onQuickMessage, onRetry }: ChatM
           )}
           
           {message.role === "assistant" && !isLoading && (
-            <div className="flex gap-2 flex-wrap px-1">
+            <div className="flex gap-2 items-center flex-wrap px-1 mt-2">
               <button 
                 onClick={() => onQuickMessage("Составь план решения этой задачи")}
                 className="text-xs px-3 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 rounded-full border border-blue-200 transition-colors dark:bg-blue-950 dark:hover:bg-blue-900 dark:text-blue-300 dark:border-blue-800"
@@ -202,6 +228,83 @@ const ChatMessage = memo(({ message, isLoading, onQuickMessage, onRetry }: ChatM
               >
                 ✍️ Похожая задача
               </button>
+
+              {/* Разделитель */}
+              <div className="h-6 w-px bg-border mx-1" />
+
+              {/* Действия с сообщением */}
+              <TooltipProvider delayDuration={200}>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      onClick={handleCopy}
+                      className="p-2 rounded-md hover:bg-accent transition-colors"
+                      aria-label="Копировать"
+                    >
+                      {isCopied ? (
+                        <Check size={16} className="text-green-600 dark:text-green-400" />
+                      ) : (
+                        <Copy size={16} className="text-muted-foreground" />
+                      )}
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    {isCopied ? "Скопировано!" : "Копировать"}
+                  </TooltipContent>
+                </Tooltip>
+
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      onClick={() => handleFeedback('like')}
+                      className={`p-2 rounded-md hover:bg-accent transition-colors ${
+                        currentFeedback === 'like' 
+                          ? 'bg-green-100 dark:bg-green-950' 
+                          : ''
+                      }`}
+                      aria-label="Хороший ответ"
+                    >
+                      <ThumbsUp 
+                        size={16} 
+                        className={
+                          currentFeedback === 'like'
+                            ? 'text-green-600 dark:text-green-400 fill-current'
+                            : 'text-muted-foreground'
+                        }
+                      />
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    {currentFeedback === 'like' ? "Спасибо за отзыв!" : "Хороший ответ"}
+                  </TooltipContent>
+                </Tooltip>
+
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      onClick={() => handleFeedback('dislike')}
+                      className={`p-2 rounded-md hover:bg-accent transition-colors ${
+                        currentFeedback === 'dislike' 
+                          ? 'bg-red-100 dark:bg-red-950' 
+                          : ''
+                      }`}
+                      aria-label="Плохой ответ"
+                    >
+                      <ThumbsDown 
+                        size={16} 
+                        className={
+                          currentFeedback === 'dislike'
+                            ? 'text-red-600 dark:text-red-400 fill-current'
+                            : 'text-muted-foreground'
+                        }
+                      />
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    {currentFeedback === 'dislike' ? "Спасибо за отзыв!" : "Плохой ответ"}
+                  </TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
             </div>
           )}
         </div>
