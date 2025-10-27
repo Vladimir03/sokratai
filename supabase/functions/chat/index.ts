@@ -11,6 +11,50 @@ const MAX_MESSAGE_LENGTH = 2000;
 const RATE_LIMIT_REQUESTS = 50;
 const RATE_LIMIT_WINDOW_HOURS = 1;
 
+// SECURITY: Allowed domains for image fetching to prevent SSRF attacks
+const ALLOWED_IMAGE_DOMAINS = [
+  `${Deno.env.get("SUPABASE_URL")}/storage/v1/object/public/chat-images/`,
+];
+
+/**
+ * Validates image URL to prevent Server-Side Request Forgery (SSRF) attacks
+ * Only allows HTTPS URLs from whitelisted Supabase storage domains
+ * Blocks private IPs, localhost, and metadata endpoints
+ */
+function isValidImageUrl(url: string): boolean {
+  try {
+    const parsed = new URL(url);
+    
+    // Only HTTPS allowed
+    if (parsed.protocol !== "https:") {
+      console.warn("[SECURITY] Blocked non-HTTPS URL:", url);
+      return false;
+    }
+    
+    // Block private IPs and localhost to prevent internal network access
+    const blockedPatterns = [
+      "127.", "10.", "172.16.", "192.168.", "169.254.",
+      "localhost", "[::1]", "0.0.0.0", "::1",
+    ];
+    
+    const hostname = parsed.hostname.toLowerCase();
+    if (blockedPatterns.some((pattern) => hostname.includes(pattern))) {
+      console.warn("[SECURITY] Blocked private/internal IP:", hostname);
+      return false;
+    }
+    
+    // Only allow whitelisted Supabase storage domains
+    const isAllowed = ALLOWED_IMAGE_DOMAINS.some((domain) => url.startsWith(domain));
+    if (!isAllowed) {
+      console.warn("[SECURITY] Blocked unauthorized domain:", hostname);
+    }
+    return isAllowed;
+  } catch (error) {
+    console.error("[SECURITY] Invalid URL format:", url, error);
+    return false;
+  }
+}
+
 const SYSTEM_PROMPT = `Ты опытный репетитор ЕГЭ по математике, физике, информатике. 
 Твоя цель — помочь школьнику ПОНЯТЬ через диалог. Но если тебя просят явно показать решение, то следуй инструкции ниже.
 
@@ -168,6 +212,12 @@ serve(async (req) => {
         // If message has an image, fetch it and convert to base64
         if (msg.image_url) {
           try {
+            // SECURITY: Validate image URL to prevent SSRF attacks
+            if (!isValidImageUrl(msg.image_url)) {
+              console.error('[SECURITY] Rejected invalid image URL:', msg.image_url);
+              throw new Error('Invalid or unauthorized image URL. Only images uploaded through the app are allowed.');
+            }
+            
             const imageResponse = await fetch(msg.image_url);
             if (!imageResponse.ok) {
               console.error("Failed to fetch image:", msg.image_url);
