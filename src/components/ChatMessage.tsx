@@ -41,6 +41,26 @@ const ChatMessage = memo(({ message, isLoading, onQuickMessage, onRetry }: ChatM
     h3: ({ node, ...props }: any) => <h3 className="font-bold text-lg mt-4 mb-2" {...props} />,
   }), []);
 
+  // Preprocessing LaTeX for proper rendering
+  const preprocessLatex = (text: string) => {
+    // Convert LaTeX display mode \[...\] to $$...$$
+    text = text.replace(/\\\[/g, '$$');
+    text = text.replace(/\\\]/g, '$$');
+    
+    // Convert LaTeX inline mode \(...\) to $...$
+    text = text.replace(/\\\(/g, '$');
+    text = text.replace(/\\\)/g, '$');
+    
+    // Fix \textfrac to \frac
+    text = text.replace(/\\textfrac/g, '\\frac');
+    
+    return text;
+  };
+
+  const displayContent = message.role === 'assistant' 
+    ? preprocessLatex(message.content)
+    : message.content;
+
   // Загружаем KaTeX CSS только если есть математика
   useEffect(() => {
     if (hasMath && !katexLoaded) {
@@ -133,13 +153,13 @@ const ChatMessage = memo(({ message, isLoading, onQuickMessage, onRetry }: ChatM
             )}
             
             <div className="prose prose-sm dark:prose-invert max-w-none">
-              <Suspense fallback={<div className="animate-pulse">{message.content}</div>}>
+              <Suspense fallback={<div className="animate-pulse">{displayContent}</div>}>
                 <ReactMarkdown
                   remarkPlugins={[remarkGfm, remarkMath]}
                   rehypePlugins={[rehypeKatex]}
                   components={markdownComponents}
                 >
-                  {message.content}
+                  {displayContent}
                 </ReactMarkdown>
               </Suspense>
             </div>
