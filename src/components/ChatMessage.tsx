@@ -125,6 +125,7 @@ const ChatMessage = memo(({ message, isLoading, onQuickMessage, onRetry }: ChatM
             <div className="prose prose-sm dark:prose-invert max-w-none">
               <Suspense fallback={<div className="animate-pulse">{message.content}</div>}>
                 <ReactMarkdown
+                  key={`${message.id || message.tempId || 'msg'}-${message.content.length}`}
                   remarkPlugins={[remarkGfm, remarkMath]}
                   rehypePlugins={[rehypeKatex]}
                   components={markdownComponents}
