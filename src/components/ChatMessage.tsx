@@ -1,8 +1,7 @@
-import { memo, lazy, Suspense, useState, useMemo } from "react";
+import { memo, lazy, Suspense, useEffect, useState, useMemo } from "react";
 import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
-import 'katex/dist/katex.min.css';
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { X } from "lucide-react";
 
@@ -28,7 +27,9 @@ interface ChatMessageProps {
 }
 
 const ChatMessage = memo(({ message, isLoading, onQuickMessage, onRetry }: ChatMessageProps) => {
+  const [katexLoaded, setKatexLoaded] = useState(false);
   const [imageModalOpen, setImageModalOpen] = useState(false);
+  const hasMath = message.content.includes('$');
 
   // Мемоизируем markdown компоненты для избежания пересоздания
   const markdownComponents = useMemo(() => ({
@@ -39,6 +40,15 @@ const ChatMessage = memo(({ message, isLoading, onQuickMessage, onRetry }: ChatM
     li: ({ node, ...props }: any) => <li className="ml-2" {...props} />,
     h3: ({ node, ...props }: any) => <h3 className="font-bold text-lg mt-4 mb-2" {...props} />,
   }), []);
+
+  // Загружаем KaTeX CSS только если есть математика
+  useEffect(() => {
+    if (hasMath && !katexLoaded) {
+      import('katex/dist/katex.min.css').then(() => {
+        setKatexLoaded(true);
+      });
+    }
+  }, [hasMath, katexLoaded]);
 
   const getStatusIcon = () => {
     if (message.role !== "user") return null;
@@ -125,7 +135,6 @@ const ChatMessage = memo(({ message, isLoading, onQuickMessage, onRetry }: ChatM
             <div className="prose prose-sm dark:prose-invert max-w-none">
               <Suspense fallback={<div className="animate-pulse">{message.content}</div>}>
                 <ReactMarkdown
-                  key={`${message.id || message.tempId || 'msg'}-${message.content.length}`}
                   remarkPlugins={[remarkGfm, remarkMath]}
                   rehypePlugins={[rehypeKatex]}
                   components={markdownComponents}
