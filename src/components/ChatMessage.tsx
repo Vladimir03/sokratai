@@ -32,9 +32,10 @@ interface ChatMessageProps {
   onQuickMessage: (text: string) => void;
   onRetry?: () => void;
   onFeedback?: (messageId: string, feedbackType: 'like' | 'dislike' | null) => void;
+  onInteraction?: (messageId: string, interactionType: 'copy' | 'view' | 'share') => void;
 }
 
-const ChatMessage = memo(({ message, isLoading, onQuickMessage, onRetry, onFeedback }: ChatMessageProps) => {
+const ChatMessage = memo(({ message, isLoading, onQuickMessage, onRetry, onFeedback, onInteraction }: ChatMessageProps) => {
   const [katexLoaded, setKatexLoaded] = useState(false);
   const [imageModalOpen, setImageModalOpen] = useState(false);
   const [currentFeedback, setCurrentFeedback] = useState<'like' | 'dislike' | null>(
@@ -47,6 +48,11 @@ const ChatMessage = memo(({ message, isLoading, onQuickMessage, onRetry, onFeedb
     await navigator.clipboard.writeText(message.content);
     setIsCopied(true);
     setTimeout(() => setIsCopied(false), 2000);
+    
+    // Логируем взаимодействие
+    if (onInteraction && message.id) {
+      onInteraction(message.id, 'copy');
+    }
   };
 
   const handleFeedback = async (type: 'like' | 'dislike') => {

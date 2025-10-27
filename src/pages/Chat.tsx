@@ -499,14 +499,51 @@ export default function Chat() {
         msg.id === messageId ? { ...msg, feedback: feedbackType } : msg
       ));
     } catch (error) {
-      console.error('Error saving feedback:', error);
-      toast({
-        title: "Ошибка",
-        description: "Не удалось сохранить отзыв",
-        variant: "destructive",
-      });
+      console.error('Error updating feedback:', error);
     }
-  }, [user?.id, toast]);
+  }, [user?.id]);
+
+  const handleMessageInteraction = useCallback(async (
+    messageId: string,
+    interactionType: 'copy' | 'view' | 'share'
+  ) => {
+    if (!user?.id) return;
+
+    try {
+      // Проверяем, существует ли запись
+      const { data: existing } = await supabase
+        .from('message_interactions')
+        .select('id, interaction_count')
+        .eq('message_id', messageId)
+        .eq('user_id', user.id)
+        .eq('interaction_type', interactionType)
+        .maybeSingle();
+
+      if (existing) {
+        // Если запись есть - увеличиваем счётчик
+        await supabase
+          .from('message_interactions')
+          .update({ 
+            interaction_count: existing.interaction_count + 1,
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', existing.id);
+      } else {
+        // Если записи нет - создаём новую
+        await supabase
+          .from('message_interactions')
+          .insert({
+            message_id: messageId,
+            user_id: user.id,
+            interaction_type: interactionType,
+            interaction_count: 1
+          });
+      }
+    } catch (error) {
+      console.error('Error logging interaction:', error);
+      // Не показываем ошибку пользователю - это фоновое логирование
+    }
+  }, [user?.id]);
 
   // Auto-start conversation with task context using AI
   useEffect(() => {
@@ -668,6 +705,7 @@ export default function Chat() {
                         isLoading={false} 
                         onQuickMessage={handleQuickMessage}
                         onFeedback={handleMessageFeedback}
+                        onInteraction={handleMessageInteraction}
                       />
                     ))}
                     {isLoading && <LoadingIndicator />}

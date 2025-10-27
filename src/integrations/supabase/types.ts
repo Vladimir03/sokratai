@@ -316,6 +316,36 @@ export type Database = {
           },
         ]
       }
+      message_interactions: {
+        Row: {
+          created_at: string
+          id: string
+          interaction_count: number
+          interaction_type: string
+          message_id: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          interaction_count?: number
+          interaction_type: string
+          message_id: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          interaction_count?: number
+          interaction_type?: string
+          message_id?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       problems: {
         Row: {
           answer: string | null
