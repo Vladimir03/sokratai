@@ -553,7 +553,7 @@ export default function Chat() {
       <div className="min-h-screen bg-background">
         <Navigation />
         
-        <div className="pt-[110px] md:pt-[104px] h-screen flex flex-col">
+        <div className="h-[calc(100vh-110px)] md:h-[calc(100vh-104px)] flex flex-col">
           <div className="flex flex-1 overflow-hidden relative min-h-0">
             {/* Mobile overlay */}
             {isMobile && isSidebarOpen && (
