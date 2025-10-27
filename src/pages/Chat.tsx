@@ -22,6 +22,7 @@ interface Message {
   image_url?: string;
   id?: string;
   feedback?: 'like' | 'dislike' | null;
+  input_method?: 'text' | 'voice' | 'button';
 }
 
 export default function Chat() {
@@ -216,7 +217,8 @@ export default function Chat() {
         user_id: user.id,
         role: msg.role,
         content: msg.content,
-        image_url: msg.image_url
+        image_url: msg.image_url,
+        input_method: msg.input_method || 'text'
       });
 
       // Update chat's last_message_at
@@ -352,7 +354,7 @@ export default function Chat() {
     onDone();
   }
 
-  const handleSend = useCallback(async (message: string) => {
+  const handleSend = useCallback(async (message: string, inputMethod: 'text' | 'voice' | 'button' = 'text') => {
     if ((!message.trim() && !uploadedFile) || isLoading) return;
     
     // Защита от множественных вызовов (iOS Safari bug)
@@ -402,7 +404,8 @@ export default function Chat() {
     const userMessage: Message = { 
       role: "user", 
       content: message.trim() || '[Изображение]',
-      image_url: imageUrl
+      image_url: imageUrl,
+      input_method: inputMethod
     };
     
     // Используем функциональное обновление состояния
@@ -467,7 +470,7 @@ export default function Chat() {
   }, [messages, uploadedFile, isLoading, user?.id, removeUploadedFile, currentChat, currentChatId, queryClient, toast]);
 
   const handleQuickMessage = useCallback((quickText: string) => {
-    handleSend(quickText);
+    handleSend(quickText, 'button');
   }, [handleSend]);
 
   const handleMessageFeedback = useCallback(async (messageId: string, feedbackType: 'like' | 'dislike' | null) => {

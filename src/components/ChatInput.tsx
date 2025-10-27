@@ -8,7 +8,7 @@ interface ChatInputProps {
   previewUrl: string | null;
   isLoading: boolean;
   isMobile: boolean;
-  onSend: (message: string) => void;
+  onSend: (message: string, inputMethod?: 'text' | 'voice' | 'button') => void;
   onFileUpload: (e: React.ChangeEvent<HTMLInputElement>) => void;
   onPaste: (e: React.ClipboardEvent<HTMLTextAreaElement>) => void;
   onRemoveFile: () => void;
@@ -79,7 +79,7 @@ const ChatInput = memo(({
               if (e.key === "Enter" && !e.shiftKey) {
                 e.preventDefault();
                 if (message.trim() || uploadedFile) {
-                  onSend(message);
+                  onSend(message, 'text');
                   setMessage("");
                 }
               }
@@ -94,7 +94,7 @@ const ChatInput = memo(({
           <Button
             onClick={() => {
               if (message.trim() || uploadedFile) {
-                onSend(message);
+                onSend(message, 'text');
                 setMessage("");
               }
             }}
