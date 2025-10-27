@@ -208,18 +208,20 @@ export default function Chat() {
     setPreviewUrl(null);
   }, [previewUrl]);
 
-  const saveMessageToBatch = async (msg: Message) => {
-    if (!user?.id || !currentChatId) return;
+  const saveMessageToBatch = async (msg: Message): Promise<string | null> => {
+    if (!user?.id || !currentChatId) return null;
 
     try {
-      await supabase.from('chat_messages').insert({
+      const { data, error } = await supabase.from('chat_messages').insert({
         chat_id: currentChatId,
         user_id: user.id,
         role: msg.role,
         content: msg.content,
         image_url: msg.image_url,
         input_method: msg.input_method || 'text'
-      });
+      }).select('id').single();
+
+      if (error) throw error;
 
       // Update chat's last_message_at
       await supabase
@@ -229,8 +231,11 @@ export default function Chat() {
           updated_at: new Date().toISOString()
         })
         .eq('id', currentChatId);
+
+      return data?.id || null;
     } catch (error) {
       console.error('Error saving message:', error);
+      return null;
     }
   };
 
@@ -413,8 +418,15 @@ export default function Chat() {
     removeUploadedFile();
     setIsLoading(true);
 
-    // Сохраняем сообщение пользователя
-    await saveMessageToBatch(userMessage);
+    // Сохраняем сообщение пользователя и получаем id из БД
+    const userMessageId = await saveMessageToBatch(userMessage);
+    
+    // Обновляем локальное сообщение с id из БД
+    if (userMessageId) {
+      setMessages(prev => prev.map((m, i) => 
+        i === prev.length - 1 ? { ...m, id: userMessageId } : m
+      ));
+    }
 
     let assistantSoFar = "";
     
@@ -453,7 +465,14 @@ export default function Chat() {
       // Сохраняем только если есть контент от ассистента
       if (assistantSoFar.trim()) {
         const finalAssistantMsg: Message = { role: "assistant", content: assistantSoFar };
-        await saveMessageToBatch(finalAssistantMsg);
+        const assistantMessageId = await saveMessageToBatch(finalAssistantMsg);
+        
+        // Обновляем локальное сообщение ассистента с id из БД
+        if (assistantMessageId) {
+          setMessages(prev => prev.map((m, i) => 
+            (i === prev.length - 1 && m.role === 'assistant') ? { ...m, id: assistantMessageId } : m
+          ));
+        }
       }
     } catch (error) {
       console.error(error);
