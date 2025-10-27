@@ -587,7 +587,7 @@ export default function Chat() {
                   variant="ghost"
                   size="icon"
                   onClick={() => setIsSidebarOpen(!isSidebarOpen)}
-                  className="shrink-0"
+                  className="shrink-0 md:hidden"
                 >
                   <Menu className="h-5 w-5" />
                 </Button>
