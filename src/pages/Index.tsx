@@ -4,7 +4,6 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { MessageSquare, BookOpen, TrendingUp, Zap, Target, Trophy } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
-import pumpkinIcon from "@/assets/pumpkin.png";
 
 // Lazy load below-the-fold sections
 const FeaturesSection = lazy(() => import("@/components/sections/FeaturesSection"));
@@ -63,7 +62,7 @@ const Index = () => {
       <section className="relative overflow-hidden bg-gradient-hero py-20 px-4">
         <div className="container mx-auto text-center relative z-10">
           <div className="inline-block mb-4 px-4 py-2 bg-accent/20 rounded-full">
-            <span className="text-accent font-semibold">🎃 Хэллоуин-марафон подготовки к ЕГЭ 🚀</span>
+            <span className="text-accent font-semibold">🚀 Новое поколение подготовки к ЕГЭ</span>
           </div>
           <h1 
             className="text-5xl md:text-7xl font-bold text-primary-foreground mb-6"
@@ -86,8 +85,6 @@ const Index = () => {
         {/* Decorative elements */}
         <div className="absolute top-20 left-10 w-20 h-20 bg-accent/20 rounded-full blur-xl animate-pulse" />
         <div className="absolute bottom-20 right-10 w-32 h-32 bg-primary-glow/20 rounded-full blur-2xl animate-pulse" />
-        <img src={pumpkinIcon} alt="Halloween pumpkin" className="absolute top-10 right-20 w-16 h-16 animate-bounce opacity-80" />
-        <img src={pumpkinIcon} alt="Halloween pumpkin" className="absolute bottom-10 left-20 w-14 h-14 animate-pulse opacity-70" />
       </section>
 
       {/* Lazy load below-the-fold sections */}
