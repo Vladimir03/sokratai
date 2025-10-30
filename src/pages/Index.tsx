@@ -62,7 +62,7 @@ const Index = () => {
       <section className="relative overflow-hidden bg-gradient-hero py-20 px-4">
         <div className="container mx-auto text-center relative z-10">
           <div className="inline-block mb-4 px-4 py-2 bg-accent/20 rounded-full">
-            <span className="text-accent font-semibold">🚀 Новое поколение подготовки к ЕГЭ</span>
+            <span className="text-accent font-semibold">🎃 Хэллоуин-марафон подготовки к ЕГЭ 🚀</span>
           </div>
           <h1 
             className="text-5xl md:text-7xl font-bold text-primary-foreground mb-6"
@@ -85,6 +85,8 @@ const Index = () => {
         {/* Decorative elements */}
         <div className="absolute top-20 left-10 w-20 h-20 bg-accent/20 rounded-full blur-xl animate-pulse" />
         <div className="absolute bottom-20 right-10 w-32 h-32 bg-primary-glow/20 rounded-full blur-2xl animate-pulse" />
+        <div className="absolute top-10 right-20 text-6xl animate-bounce opacity-80">🎃</div>
+        <div className="absolute bottom-10 left-20 text-5xl animate-pulse opacity-70">🎃</div>
       </section>
 
       {/* Lazy load below-the-fold sections */}

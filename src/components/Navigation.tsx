@@ -39,6 +39,7 @@ const Navigation = () => {
           <span className="font-bold text-lg bg-gradient-hero bg-clip-text text-transparent">
             ЕГЭ Репетитор
           </span>
+          <span className="text-2xl animate-bounce">🎃</span>
         </Link>
 
         <div className="flex items-center gap-2">
