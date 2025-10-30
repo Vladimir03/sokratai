@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { MessageSquare, BookOpen, TrendingUp, Zap, Target, Trophy } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
+import pumpkinIcon from "@/assets/pumpkin.png";
 
 // Lazy load below-the-fold sections
 const FeaturesSection = lazy(() => import("@/components/sections/FeaturesSection"));
@@ -85,8 +86,8 @@ const Index = () => {
         {/* Decorative elements */}
         <div className="absolute top-20 left-10 w-20 h-20 bg-accent/20 rounded-full blur-xl animate-pulse" />
         <div className="absolute bottom-20 right-10 w-32 h-32 bg-primary-glow/20 rounded-full blur-2xl animate-pulse" />
-        <div className="absolute top-10 right-20 text-6xl animate-bounce opacity-80">🎃</div>
-        <div className="absolute bottom-10 left-20 text-5xl animate-pulse opacity-70">🎃</div>
+        <img src={pumpkinIcon} alt="Halloween pumpkin" className="absolute top-10 right-20 w-16 h-16 animate-bounce opacity-80" />
+        <img src={pumpkinIcon} alt="Halloween pumpkin" className="absolute bottom-10 left-20 w-14 h-14 animate-pulse opacity-70" />
       </section>
 
       {/* Lazy load below-the-fold sections */}

@@ -3,6 +3,7 @@ import { Button } from "@/components/ui/button";
 import { Home, MessageSquare, BookOpen, TrendingUp, User, LogOut, Backpack, ListTodo } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
+import pumpkinIcon from "@/assets/pumpkin.png";
 
 const Navigation = () => {
   const location = useLocation();
@@ -39,7 +40,7 @@ const Navigation = () => {
           <span className="font-bold text-lg bg-gradient-hero bg-clip-text text-transparent">
             ЕГЭ Репетитор
           </span>
-          <span className="text-2xl animate-bounce">🎃</span>
+          <img src={pumpkinIcon} alt="Halloween pumpkin" className="w-7 h-7 animate-bounce" />
         </Link>
 
         <div className="flex items-center gap-2">
