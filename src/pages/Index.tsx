@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { MessageSquare, BookOpen, TrendingUp, Zap, Target, Trophy } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
+import SokratLogo from "@/components/SokratLogo";
 
 // Lazy load below-the-fold sections
 const FeaturesSection = lazy(() => import("@/components/sections/FeaturesSection"));
@@ -59,32 +60,49 @@ const Index = () => {
   return (
     <div className="min-h-screen">
       {/* Hero Section */}
-      <section className="relative overflow-hidden bg-gradient-hero py-20 px-4">
-        <div className="container mx-auto text-center relative z-10">
-          <div className="inline-block mb-4 px-4 py-2 bg-accent/20 rounded-full">
-            <span className="text-accent font-semibold">🚀 Новое поколение подготовки к ЕГЭ</span>
+      <section className="relative overflow-hidden bg-gradient-hero py-16 px-4 md:py-24">
+        <div className="container mx-auto relative z-10">
+          <div className="flex flex-col items-start max-w-4xl">
+            {/* Logo and brand */}
+            <div className="flex items-center gap-4 mb-8">
+              <SokratLogo className="w-16 h-16 md:w-20 md:h-20" />
+              <div className="flex flex-col">
+                <h2 className="text-3xl md:text-4xl font-bold text-primary-foreground">
+                  Сократ
+                </h2>
+                <p className="text-primary-foreground/80 text-sm md:text-base italic">
+                  ИИ-помощник, который учит думать
+                </p>
+              </div>
+            </div>
+
+            {/* Main headline */}
+            <h1 
+              className="text-4xl md:text-6xl font-bold text-primary-foreground mb-6 leading-tight"
+              {...({ fetchpriority: "high" } as any)}
+            >
+              Застрял на задаче? Задай вопрос, без стыда.
+            </h1>
+            
+            {/* Subheadline */}
+            <p className="text-lg md:text-xl text-primary-foreground/90 mb-8 max-w-2xl">
+              Не даем готовые ответы. Помогаем понять через наводящие вопросы.
+            </p>
+
+            {/* CTA Button */}
+            <Button 
+              size="lg" 
+              className="bg-accent hover:bg-accent/90 text-accent-foreground shadow-glow text-base md:text-lg px-8 py-6 rounded-2xl font-semibold transition-all hover:scale-105"
+              onClick={() => navigate(isAuthenticated ? "/chat" : "/signup")}
+            >
+              🚀 Попробовать бесплатно 7 дней
+            </Button>
           </div>
-          <h1 
-            className="text-5xl md:text-7xl font-bold text-primary-foreground mb-6"
-            {...({ fetchpriority: "high" } as any)}
-          >
-            Твой личный ИИ-репетитор<br />по математике 24/7
-          </h1>
-          <p className="text-xl text-primary-foreground/90 mb-8 max-w-2xl mx-auto">
-            Готовься к ЕГЭ с искусственным интеллектом: мгновенные решения, понятные объяснения, отслеживание прогресса
-          </p>
-          <Button 
-            size="lg" 
-            className="bg-accent hover:bg-accent/90 text-accent-foreground shadow-glow animate-scale-in text-lg px-8 py-6"
-            onClick={() => navigate(isAuthenticated ? "/chat" : "/signup")}
-          >
-            {isAuthenticated ? "Начать обучение" : "Начать бесплатно"}
-          </Button>
         </div>
         
-        {/* Decorative elements */}
-        <div className="absolute top-20 left-10 w-20 h-20 bg-accent/20 rounded-full blur-xl animate-pulse" />
-        <div className="absolute bottom-20 right-10 w-32 h-32 bg-primary-glow/20 rounded-full blur-2xl animate-pulse" />
+        {/* Subtle decorative gradient overlays */}
+        <div className="absolute top-0 right-0 w-96 h-96 bg-accent/10 rounded-full blur-3xl opacity-30" />
+        <div className="absolute bottom-0 left-0 w-96 h-96 bg-primary-glow/10 rounded-full blur-3xl opacity-20" />
       </section>
 
       {/* Lazy load below-the-fold sections */}
