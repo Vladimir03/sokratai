@@ -94,8 +94,17 @@ const Index = () => {
             </h1>
             
             {/* Subheadline */}
-            <p className="text-lg md:text-xl text-primary-foreground/90 mb-8 max-w-2xl">
+            <p className="text-lg md:text-xl text-primary-foreground/90 mb-4 max-w-2xl">
               Не даем готовые ответы. Помогаем понять через наводящие вопросы.
+            </p>
+
+            {/* Additional description */}
+            <p className="text-base md:text-lg text-primary-foreground/80 mb-8 max-w-2xl">
+              ИИ-помощник по математике, физике, информатике, который учит тебя думать и понимать самостоятельно.
+              <br />
+              <span className="text-sm md:text-base">
+                Для тех, кто готовится к ОГЭ/ЕГЭ и хочет понимать математику, физику, информатику, а не просто списывать.
+              </span>
             </p>
 
             {/* CTA Button */}
