@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { MessageSquare, BookOpen, TrendingUp, Zap, Target, Trophy } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
-import SokratLogo from "@/components/SokratLogo";
+import sokratLogo from "@/assets/sokrat-logo.png";
 
 // Lazy load below-the-fold sections
 const FeaturesSection = lazy(() => import("@/components/sections/FeaturesSection"));
@@ -65,7 +65,7 @@ const Index = () => {
           <div className="flex flex-col items-start max-w-4xl">
             {/* Logo and brand */}
             <div className="flex items-center gap-4 mb-8">
-              <SokratLogo className="w-16 h-16 md:w-20 md:h-20" />
+              <img src={sokratLogo} alt="Сократ логотип" className="w-16 h-16 md:w-20 md:h-20" />
               <div className="flex flex-col">
                 <h2 className="text-3xl md:text-4xl font-bold text-primary-foreground">
                   Сократ
