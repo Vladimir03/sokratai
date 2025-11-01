@@ -4,7 +4,6 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { MessageSquare, BookOpen, TrendingUp, Zap, Target, Trophy } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
-import sokratLogo from "@/assets/sokrat-logo.png";
 
 // Lazy load below-the-fold sections
 const FeaturesSection = lazy(() => import("@/components/sections/FeaturesSection"));
@@ -64,8 +63,18 @@ const Index = () => {
         <div className="container mx-auto relative z-10">
           <div className="flex flex-col items-start max-w-4xl">
             {/* Logo and brand */}
-            <div className="flex items-center gap-4 mb-8">
-              <img src={sokratLogo} alt="Сократ логотип" className="w-16 h-16 md:w-20 md:h-20" />
+            <div className="flex items-center gap-6 mb-8">
+              <svg className="w-20 h-20 md:w-24 md:h-24 flex-shrink-0" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+                {/* First bubble (question) */}
+                <path d="M 15 25 Q 15 15 25 15 L 45 15 Q 55 15 55 25 L 55 40 Q 55 50 45 50 L 30 50 L 20 60 L 20 50 Q 15 50 15 40 Z" 
+                      fill="#10b981" opacity="0.9"/>
+                <text x="35" y="37" fontFamily="Manrope, sans-serif" fontSize="20" fontWeight="bold" fill="white" textAnchor="middle">?</text>
+                
+                {/* Second bubble (understanding/lightbulb) */}
+                <path d="M 45 55 Q 45 45 55 45 L 75 45 Q 85 45 85 55 L 85 70 Q 85 80 75 80 L 60 80 L 80 90 L 60 90 Q 45 90 45 80 Z" 
+                      fill="white" opacity="0.95"/>
+                <text x="65" y="67" fontFamily="Manrope, sans-serif" fontSize="20" fontWeight="bold" fill="#2d3561" textAnchor="middle">💡</text>
+              </svg>
               <div className="flex flex-col">
                 <h2 className="text-3xl md:text-4xl font-bold text-primary-foreground">
                   Сократ
