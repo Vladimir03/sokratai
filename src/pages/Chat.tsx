@@ -129,18 +129,26 @@ export default function Chat() {
           .eq('chat_id', currentChatId)
           .order('created_at', { ascending: true });
 
-        if (error) throw error;
+        if (error) {
+          console.error('Error loading chat history:', error);
+          setMessages([]);
+          setLoadingHistory(false);
+          return;
+        }
         
         if (data && data.length > 0) {
-          setMessages(data.map(msg => ({
+          const loadedMessages = data.map(msg => ({
             role: msg.role as "user" | "assistant",
             content: msg.content,
             image_url: msg.image_url || undefined,
             id: msg.id,
             feedback: (msg.feedback as any)?.[0]?.feedback_type || null
-          })));
+          }));
+          setMessages(loadedMessages);
+          console.log(`Loaded ${loadedMessages.length} messages for chat ${currentChatId}`);
         } else {
           setMessages([]);
+          console.log(`No messages found for chat ${currentChatId}`);
         }
       } catch (error) {
         console.error('Error loading chat history:', error);
