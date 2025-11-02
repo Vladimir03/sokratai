@@ -95,7 +95,7 @@ const Pricing = ({ onNavigate }: PricingProps) => {
             </div>
 
             {/* Tier 2: 699₽ - Popular */}
-            <div className="bg-gradient-to-br from-primary to-primary-variant rounded-2xl p-8 md:p-10 shadow-2xl text-white flex-shrink-0 w-[320px] md:w-[400px] relative">
+            <div className="bg-primary rounded-2xl p-8 md:p-10 shadow-2xl text-white flex-shrink-0 w-[320px] md:w-[400px] relative">
               {/* Popular Badge */}
               <div className="absolute -top-4 left-1/2 -translate-x-1/2 bg-accent text-accent-foreground px-6 py-2 rounded-full font-bold text-sm uppercase tracking-wide shadow-lg">
                 Популярно
@@ -115,8 +115,8 @@ const Pricing = ({ onNavigate }: PricingProps) => {
               </p>
               
               <ul className="space-y-3 mb-8">
-                <li className="border-2 border-white/20 bg-white/10 rounded-lg p-4 font-semibold text-lg">
-                  ✓ 30 сообщений в день
+                <li className="border-2 border-accent bg-accent/10 rounded-lg p-4 font-semibold text-lg">
+                  <span className="text-accent">✓</span> 30 сообщений в день
                 </li>
               </ul>
               
@@ -152,7 +152,7 @@ const Pricing = ({ onNavigate }: PricingProps) => {
               
               <ul className="space-y-3 mb-6">
                 <li className="border-2 border-accent/30 bg-accent/5 rounded-lg p-4 font-semibold text-lg text-foreground">
-                  ✓ 1 час занятия с Репетитором
+                  <span className="text-accent">✓</span> 1 час занятия с Репетитором
                 </li>
               </ul>
               
