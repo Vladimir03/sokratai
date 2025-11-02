@@ -3,6 +3,7 @@ import { Button } from "@/components/ui/button";
 import { Home, MessageSquare, BookOpen, TrendingUp, User, LogOut, Backpack, ListTodo } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
+import SokratLogo from "@/components/SokratLogo";
 
 const Navigation = () => {
   const location = useLocation();
@@ -33,11 +34,9 @@ const Navigation = () => {
       {/* Top Header */}
       <div className="container mx-auto px-4 h-14 flex items-center justify-between border-b md:border-b-0 border-border/50">
         <Link to="/" className="flex items-center gap-2 group">
-          <div className="w-7 h-7 rounded-lg bg-gradient-hero flex items-center justify-center shadow-glow transition-transform duration-300 group-hover:scale-110">
-            <span className="text-primary-foreground font-bold text-base">М</span>
-          </div>
+          <SokratLogo className="w-8 h-8 transition-transform duration-300 group-hover:scale-110" />
           <span className="font-bold text-lg bg-gradient-hero bg-clip-text text-transparent">
-            ЕГЭ Репетитор
+            Сократ
           </span>
         </Link>
 
