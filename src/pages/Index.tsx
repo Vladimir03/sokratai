@@ -64,7 +64,7 @@ const Index = () => {
 
             {/* Main headline */}
             <h1 
-              className="text-4xl md:text-6xl font-bold text-primary-foreground mb-6 leading-tight"
+              className="text-3xl md:text-5xl font-bold text-primary-foreground mb-6 leading-tight"
               {...({ fetchpriority: "high" } as any)}
             >
               🎯 ИИ-помощник по математике, физике и информатике, который учит тебя думать и понимать самостоятельно
