@@ -1,4 +1,5 @@
 import { Card, CardContent } from "@/components/ui/card";
+import { useScrollAnimation } from "@/hooks/useScrollAnimation";
 
 const ValueProposition = () => {
   const values = [
@@ -32,18 +33,24 @@ const ValueProposition = () => {
         </p>
 
         <div className="grid md:grid-cols-3 gap-8">
-          {values.map((value, index) => (
-            <Card 
-              key={index} 
-              className="group hover:shadow-elegant transition-all duration-300 hover:-translate-y-2 hover:border-accent"
-            >
-              <CardContent className="pt-6">
-                <div className="text-5xl mb-4">{value.icon}</div>
-                <h3 className="text-xl font-bold mb-2 text-primary-variant">{value.title}</h3>
-                <p className="text-muted-foreground">{value.description}</p>
-              </CardContent>
-            </Card>
-          ))}
+          {values.map((value, index) => {
+            const ValueCard = () => {
+              const ref = useScrollAnimation();
+              return (
+                <Card 
+                  ref={ref}
+                  className="fade-base group hover:shadow-elegant transition-all duration-300 hover:-translate-y-2 hover:border-accent"
+                >
+                  <CardContent className="pt-6">
+                    <div className="text-5xl mb-4">{value.icon}</div>
+                    <h3 className="text-xl font-bold mb-2 text-primary-variant">{value.title}</h3>
+                    <p className="text-muted-foreground">{value.description}</p>
+                  </CardContent>
+                </Card>
+              );
+            };
+            return <ValueCard key={index} />;
+          })}
         </div>
       </div>
     </section>

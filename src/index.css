@@ -7,6 +7,18 @@ All colors MUST be HSL.
 */
 
 @layer base {
+  /* Scroll animation keyframes */
+  @keyframes fadeInUp {
+    from {
+      opacity: 0;
+      transform: translateY(30px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
   :root {
     --background: 0 0% 100%;
     --foreground: 220 15% 11%;
@@ -174,5 +186,15 @@ All colors MUST be HSL.
   }
   .scrollbar-thin::-webkit-scrollbar-thumb:hover {
     background: hsl(var(--accent-dark));
+  }
+
+  /* Scroll animation classes */
+  .fade-base {
+    opacity: 0;
+    transform: translateY(30px);
+  }
+
+  .animate-fade-in-up {
+    animation: fadeInUp 0.6s ease-out forwards;
   }
 }
