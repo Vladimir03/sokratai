@@ -16,7 +16,7 @@ const ForParents = ({ onNavigate }: ForParentsProps) => {
         <div className="max-w-4xl mx-auto">
           <Card className="mb-8">
             <CardContent className="pt-6">
-              <h3 className="text-2xl font-bold mb-6 text-primary-variant">Почему стоит попробовать:</h3>
+              <h3 className="text-2xl font-bold mb-6 text-primary">Почему стоит попробовать:</h3>
               <ul className="space-y-4 text-lg">
                 <li className="flex items-start">
                   <span className="text-accent mr-3 text-2xl">✅</span>
