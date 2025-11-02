@@ -6,7 +6,7 @@ const AhaMoments = () => {
     return (
       <div ref={ref} className="fade-base bg-background rounded-2xl p-8 md:p-10 shadow-2xl">
         <h3 className="text-2xl font-bold mb-4 text-accent">
-          🎯 Способ 1: Получи наводку и реши сам
+          🎯 Способ 1: Получи подсказку и реши сам
         </h3>
         <p className="mb-6 text-lg text-foreground">
           Застрял на задаче по алгебре? Не беги к одноклассникам. Просто спроси у ИИ:
@@ -18,7 +18,7 @@ const AhaMoments = () => {
           </li>
           <li className="flex items-start gap-2">
             <span className="text-accent flex-shrink-0">✅</span>
-            <span>Получи <strong>наводящий вопрос</strong> вместо готового ответа</span>
+            <span>Получи <strong>вопрос-подсказку</strong> вместо готового ответа</span>
           </li>
           <li className="flex items-start gap-2">
             <span className="text-accent flex-shrink-0">✅</span>

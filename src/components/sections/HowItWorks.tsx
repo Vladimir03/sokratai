@@ -55,7 +55,7 @@ const HowItWorks = () => {
               <div className="p-4 bg-accent/10 rounded-lg">
                 <strong className="text-foreground">Сократ:</strong>
                 <p className="mt-2 text-foreground">
-                  Задает наводящие вопросы → ты понял сам → на контрольной решаешь уверенно! ✅
+                  Задает вопросы-подсказки → ты понял сам → на контрольной решаешь уверенно! ✅
                 </p>
               </div>
             </div>
