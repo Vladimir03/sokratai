@@ -65,6 +65,7 @@ export default function Chat() {
 
       if (existingChat) return existingChat;
 
+      // Create new general chat
       const { data: newChat, error } = await supabase
         .from('chats')
         .insert({
@@ -77,6 +78,17 @@ export default function Chat() {
         .single();
 
       if (error) throw error;
+
+      // Add welcome message to the new chat
+      if (newChat) {
+        await supabase.from('chat_messages').insert({
+          chat_id: newChat.id,
+          user_id: user.id,
+          role: 'assistant',
+          content: 'Привет! 👋 Я Сократ — твой ИИ-помощник по математике, физике и информатике.\n\nЯ не просто даю готовые ответы. Я задаю наводящие вопросы, чтобы ты сам понял, как решать задачи. Это помогает тебе учиться, а не просто списывать.\n\n📚 Что я умею:\n• Объясняю сложные темы простым языком\n• Помогаю разобраться с домашкой\n• Показываю разные способы решения задач\n• Генерирую похожие задачи для практики\n\n💡 Задай мне любой вопрос по математике, физике или информатике, и я помогу тебе разобраться!'
+        });
+      }
+
       return newChat;
     },
     enabled: !!user?.id
@@ -111,11 +123,13 @@ export default function Chat() {
   // Load chat history whenever chat changes
   useEffect(() => {
     if (!user?.id || !currentChatId) {
+      console.log('Skipping history load: no user or chatId', { userId: user?.id, currentChatId });
       setMessages([]);
       setLoadingHistory(false);
       return;
     }
     
+    console.log('Loading history for chat:', currentChatId);
     setLoadingHistory(true);
     
     const loadHistory = async () => {
@@ -136,6 +150,8 @@ export default function Chat() {
           return;
         }
         
+        console.log('Raw data from database:', data);
+        
         if (data && data.length > 0) {
           const loadedMessages = data.map(msg => ({
             role: msg.role as "user" | "assistant",
@@ -145,16 +161,17 @@ export default function Chat() {
             feedback: (msg.feedback as any)?.[0]?.feedback_type || null
           }));
           setMessages(loadedMessages);
-          console.log(`Loaded ${loadedMessages.length} messages for chat ${currentChatId}`);
+          console.log(`✅ Loaded ${loadedMessages.length} messages for chat ${currentChatId}`);
         } else {
           setMessages([]);
-          console.log(`No messages found for chat ${currentChatId}`);
+          console.log(`⚠️ No messages found for chat ${currentChatId}`);
         }
       } catch (error) {
-        console.error('Error loading chat history:', error);
+        console.error('❌ Error loading chat history:', error);
         setMessages([]);
       } finally {
         setLoadingHistory(false);
+        console.log('History loading complete. loadingHistory set to false');
       }
     };
 
