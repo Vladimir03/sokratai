@@ -63,6 +63,9 @@ const Index = () => {
             <a href="#faq" className="px-4 py-3 text-sm font-medium whitespace-nowrap hover:text-primary transition-colors">
               FAQ
             </a>
+            <a href="#for-parents" className="px-4 py-3 text-sm font-medium whitespace-nowrap hover:text-primary transition-colors">
+              Для родителей
+            </a>
           </div>
         </div>
       </nav>
@@ -169,9 +172,11 @@ const Index = () => {
         </Suspense>
       </div>
       
-      <Suspense fallback={<div className="py-20 animate-pulse" style={{ height: "500px" }} />}>
-        <ForParents onNavigate={handleNavigate} />
-      </Suspense>
+      <div id="for-parents">
+        <Suspense fallback={<div className="py-20 animate-pulse" style={{ height: "500px" }} />}>
+          <ForParents onNavigate={handleNavigate} />
+        </Suspense>
+      </div>
       
       <Suspense fallback={<div className="py-20 bg-muted animate-pulse" style={{ height: "300px" }} />}>
         <Footer />
