@@ -1,6 +1,6 @@
 const AhaMoments = () => {
   return (
-    <section className="py-20 px-4 bg-gradient-accent relative overflow-hidden">
+    <section className="py-20 px-4 bg-accent relative overflow-hidden">
       <div className="container mx-auto relative z-10">
         <h2 className="text-3xl md:text-4xl font-bold text-center mb-12 text-white">
           ✨ Испытай радость от понимания
@@ -16,21 +16,21 @@ const AhaMoments = () => {
               Застрял на задаче по алгебре? Не беги к одноклассникам. Просто спроси у ИИ:
             </p>
             <ul className="space-y-3 mb-8 text-foreground">
-              <li className="flex items-start">
-                <span className="text-accent mr-2">✅</span>
-                Отправь задачу
+              <li className="flex items-start gap-2">
+                <span className="text-accent flex-shrink-0">✅</span>
+                <span>Отправь задачу</span>
               </li>
-              <li className="flex items-start">
-                <span className="text-accent mr-2">✅</span>
-                Получи <strong>наводящий вопрос</strong> вместо готового ответа
+              <li className="flex items-start gap-2">
+                <span className="text-accent flex-shrink-0">✅</span>
+                <span>Получи <strong>наводящий вопрос</strong> вместо готового ответа</span>
               </li>
-              <li className="flex items-start">
-                <span className="text-accent mr-2">✅</span>
-                Подумай еще раз
+              <li className="flex items-start gap-2">
+                <span className="text-accent flex-shrink-0">✅</span>
+                <span>Подумай еще раз</span>
               </li>
-              <li className="flex items-start">
-                <span className="text-accent mr-2">✅</span>
-                <strong>Решил сам!</strong> Вот оно — чувство "я смог!"
+              <li className="flex items-start gap-2">
+                <span className="text-accent flex-shrink-0">✅</span>
+                <span><strong>Решил сам!</strong> Вот оно — чувство "я смог!"</span>
               </li>
             </ul>
             <blockquote className="border-l-4 border-accent bg-muted/30 p-6 rounded-r-xl italic">
@@ -51,17 +51,17 @@ const AhaMoments = () => {
               Учитель объяснил одним способом, но ты не понял?
             </p>
             <ul className="space-y-3 mb-8 text-foreground">
-              <li className="flex items-start">
-                <span className="text-accent mr-2">✅</span>
-                Попроси показать <strong>2-3 разных способа</strong> решения той же задачи
+              <li className="flex items-start gap-2">
+                <span className="text-accent flex-shrink-0">✅</span>
+                <span>Попроси показать <strong>2-3 разных способа</strong> решения той же задачи</span>
               </li>
-              <li className="flex items-start">
-                <span className="text-accent mr-2">✅</span>
-                Выбери тот, который кажется логичным <strong>для твоего мышления</strong>
+              <li className="flex items-start gap-2">
+                <span className="text-accent flex-shrink-0">✅</span>
+                <span>Выбери тот, который кажется логичным <strong>для твоего мышления</strong></span>
               </li>
-              <li className="flex items-start">
-                <span className="text-accent mr-2">✅</span>
-                Решай дальше понятным тебе алгоритмом
+              <li className="flex items-start gap-2">
+                <span className="text-accent flex-shrink-0">✅</span>
+                <span>Решай дальше понятным тебе алгоритмом</span>
               </li>
             </ul>
             <blockquote className="border-l-4 border-accent bg-muted/30 p-6 rounded-r-xl italic">

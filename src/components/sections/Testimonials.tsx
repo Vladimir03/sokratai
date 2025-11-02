@@ -38,7 +38,7 @@ const Testimonials = () => {
               <p className="text-foreground mb-4 text-lg">
                 "{testimonial.text}"
               </p>
-              <div className="font-bold text-primary-variant not-italic">{testimonial.author}</div>
+              <div className="font-bold not-italic" style={{ color: "hsl(231, 36%, 29%)" }}>{testimonial.author}</div>
               <div className="text-amber-500 mt-2">{testimonial.rating}</div>
             </div>
           ))}
