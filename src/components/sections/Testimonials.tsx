@@ -47,25 +47,27 @@ const Testimonials = () => {
           💬 Что говорят пользователи
         </h2>
 
-        <div className="space-y-6 max-w-4xl mx-auto">
-          {testimonials.map((testimonial, index) => {
-            const TestimonialCard = () => {
-              const ref = useScrollAnimation();
-              return (
-                <div 
-                  ref={ref}
-                  className="fade-base bg-background border-l-4 border-accent p-6 md:p-8 rounded-lg shadow-elegant italic"
-                >
-                  <p className="text-foreground mb-4 text-lg">
-                    {testimonial.text}
-                  </p>
-                  <div className="font-bold not-italic" style={{ color: "hsl(231, 36%, 29%)" }}>{testimonial.author}</div>
-                  <div className="text-amber-500 mt-2">{testimonial.rating}</div>
-                </div>
-              );
-            };
-            return <TestimonialCard key={index} />;
-          })}
+        <div className="overflow-x-auto pb-4 -mx-4 px-4">
+          <div className="flex gap-6 w-max">
+            {testimonials.map((testimonial, index) => {
+              const TestimonialCard = () => {
+                const ref = useScrollAnimation();
+                return (
+                  <div 
+                    ref={ref}
+                    className="fade-base bg-background border-l-4 border-accent p-6 md:p-8 rounded-lg shadow-elegant italic w-[350px] md:w-[400px] flex-shrink-0"
+                  >
+                    <p className="text-foreground mb-4 text-lg">
+                      {testimonial.text}
+                    </p>
+                    <div className="font-bold not-italic" style={{ color: "hsl(231, 36%, 29%)" }}>{testimonial.author}</div>
+                    <div className="text-amber-500 mt-2">{testimonial.rating}</div>
+                  </div>
+                );
+              };
+              return <TestimonialCard key={index} />;
+            })}
+          </div>
         </div>
       </div>
     </section>
