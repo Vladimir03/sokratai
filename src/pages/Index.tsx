@@ -1,14 +1,21 @@
 import { useEffect, useState, lazy, Suspense } from "react";
 import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
-import { MessageSquare, BookOpen, TrendingUp, Zap, Target, Trophy } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 
-// Lazy load below-the-fold sections
-const FeaturesSection = lazy(() => import("@/components/sections/FeaturesSection"));
-const BenefitsSection = lazy(() => import("@/components/sections/BenefitsSection"));
-const CTASection = lazy(() => import("@/components/sections/CTASection"));
+// Lazy load sections
+const SpecialOffer = lazy(() => import("@/components/sections/SpecialOffer"));
+const ValueProposition = lazy(() => import("@/components/sections/ValueProposition"));
+const AhaMoments = lazy(() => import("@/components/sections/AhaMoments"));
+const Problems = lazy(() => import("@/components/sections/Problems"));
+const HowItWorks = lazy(() => import("@/components/sections/HowItWorks"));
+const Results = lazy(() => import("@/components/sections/Results"));
+const Testimonials = lazy(() => import("@/components/sections/Testimonials"));
+const Comparison = lazy(() => import("@/components/sections/Comparison"));
+const Pricing = lazy(() => import("@/components/sections/Pricing"));
+const FAQ = lazy(() => import("@/components/sections/FAQ"));
+const ForParents = lazy(() => import("@/components/sections/ForParents"));
+const Footer = lazy(() => import("@/components/sections/Footer"));
 
 const Index = () => {
   const navigate = useNavigate();
@@ -20,44 +27,17 @@ const Index = () => {
     });
   }, []);
 
-  const features = [
-    {
-      icon: MessageSquare,
-      title: "ИИ-репетитор 24/7",
-      description: "Получайте мгновенные объяснения любых задач с пошаговыми решениями",
-    },
-    {
-      icon: BookOpen,
-      title: "1000+ задач",
-      description: "Практикуйтесь на реальных задачах ЕГЭ с детальными разборами",
-    },
-    {
-      icon: TrendingUp,
-      title: "Отслеживание прогресса",
-      description: "Следите за своими успехами и видьте рост навыков в реальном времени",
-    },
-  ];
-
-  const benefits = [
-    {
-      icon: Zap,
-      title: "Быстрые ответы",
-      description: "Получайте решения за секунды",
-    },
-    {
-      icon: Target,
-      title: "Персонализация",
-      description: "Адаптивное обучение под ваш уровень",
-    },
-    {
-      icon: Trophy,
-      title: "Геймификация",
-      description: "Зарабатывайте XP и значки",
-    },
-  ];
+  const handleNavigate = () => {
+    navigate(isAuthenticated ? "/chat" : "/signup");
+  };
 
   return (
     <div className="min-h-screen">
+      {/* Special Offer Banner */}
+      <Suspense fallback={<div className="h-16 bg-muted animate-pulse" />}>
+        <SpecialOffer />
+      </Suspense>
+
       {/* Hero Section */}
       <section className="relative overflow-hidden bg-gradient-hero py-16 px-4 md:py-24">
         <div className="container mx-auto relative z-10">
@@ -111,7 +91,7 @@ const Index = () => {
             <Button 
               size="lg" 
               className="bg-accent hover:bg-accent/90 text-accent-foreground shadow-glow text-base md:text-lg px-8 py-6 rounded-2xl font-semibold transition-all hover:scale-105"
-              onClick={() => navigate(isAuthenticated ? "/chat" : "/signup")}
+              onClick={handleNavigate}
             >
               🚀 Попробовать бесплатно 7 дней
             </Button>
@@ -123,17 +103,49 @@ const Index = () => {
         <div className="absolute bottom-0 left-0 w-96 h-96 bg-primary-glow/10 rounded-full blur-3xl opacity-20" />
       </section>
 
-      {/* Lazy load below-the-fold sections */}
-      <Suspense fallback={<div className="py-20 skeleton" style={{ height: "400px" }} />}>
-        <FeaturesSection features={features} />
+      {/* Lazy load all sections */}
+      <Suspense fallback={<div className="py-20 bg-muted animate-pulse" style={{ height: "400px" }} />}>
+        <ValueProposition />
       </Suspense>
       
-      <Suspense fallback={<div className="py-20 skeleton" style={{ height: "300px" }} />}>
-        <BenefitsSection benefits={benefits} />
+      <Suspense fallback={<div className="py-20 animate-pulse" style={{ height: "500px" }} />}>
+        <AhaMoments />
       </Suspense>
       
-      <Suspense fallback={<div className="py-20 skeleton" style={{ height: "250px" }} />}>
-        <CTASection isAuthenticated={isAuthenticated} onNavigate={() => navigate(isAuthenticated ? "/chat" : "/signup")} />
+      <Suspense fallback={<div className="py-20 bg-muted animate-pulse" style={{ height: "400px" }} />}>
+        <Problems />
+      </Suspense>
+      
+      <Suspense fallback={<div className="py-20 animate-pulse" style={{ height: "500px" }} />}>
+        <HowItWorks />
+      </Suspense>
+      
+      <Suspense fallback={<div className="py-20 bg-muted animate-pulse" style={{ height: "400px" }} />}>
+        <Results />
+      </Suspense>
+      
+      <Suspense fallback={<div className="py-20 animate-pulse" style={{ height: "500px" }} />}>
+        <Testimonials />
+      </Suspense>
+      
+      <Suspense fallback={<div className="py-20 bg-muted animate-pulse" style={{ height: "600px" }} />}>
+        <Comparison />
+      </Suspense>
+      
+      <Suspense fallback={<div className="py-20 animate-pulse" style={{ height: "700px" }} />}>
+        <Pricing onNavigate={handleNavigate} />
+      </Suspense>
+      
+      <Suspense fallback={<div className="py-20 bg-muted animate-pulse" style={{ height: "400px" }} />}>
+        <FAQ />
+      </Suspense>
+      
+      <Suspense fallback={<div className="py-20 animate-pulse" style={{ height: "500px" }} />}>
+        <ForParents onNavigate={handleNavigate} />
+      </Suspense>
+      
+      <Suspense fallback={<div className="py-20 bg-muted animate-pulse" style={{ height: "300px" }} />}>
+        <Footer />
       </Suspense>
     </div>
   );
