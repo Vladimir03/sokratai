@@ -38,8 +38,37 @@ const Index = () => {
         <SpecialOffer />
       </Suspense>
 
+      {/* Navigation Tabs */}
+      <nav className="sticky top-0 z-50 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 border-b">
+        <div className="container mx-auto">
+          <div className="flex overflow-x-auto scrollbar-hide">
+            <a href="#hero" className="px-4 py-3 text-sm font-medium whitespace-nowrap hover:text-primary transition-colors">
+              Главная
+            </a>
+            <a href="#benefits" className="px-4 py-3 text-sm font-medium whitespace-nowrap hover:text-primary transition-colors">
+              Преимущества
+            </a>
+            <a href="#how-it-works" className="px-4 py-3 text-sm font-medium whitespace-nowrap hover:text-primary transition-colors">
+              Как работает
+            </a>
+            <a href="#results" className="px-4 py-3 text-sm font-medium whitespace-nowrap hover:text-primary transition-colors">
+              Результаты
+            </a>
+            <a href="#testimonials" className="px-4 py-3 text-sm font-medium whitespace-nowrap hover:text-primary transition-colors">
+              Отзывы
+            </a>
+            <a href="#pricing" className="px-4 py-3 text-sm font-medium whitespace-nowrap hover:text-primary transition-colors">
+              Цены
+            </a>
+            <a href="#faq" className="px-4 py-3 text-sm font-medium whitespace-nowrap hover:text-primary transition-colors">
+              FAQ
+            </a>
+          </div>
+        </div>
+      </nav>
+
       {/* Hero Section */}
-      <section className="relative overflow-hidden bg-gradient-hero py-16 px-4 md:py-24">
+      <section id="hero" className="relative overflow-hidden bg-gradient-hero py-16 px-4 md:py-24">
         <div className="container mx-auto relative z-10">
           <div className="flex flex-col items-start max-w-4xl">
             {/* Logo and brand */}
@@ -92,41 +121,53 @@ const Index = () => {
       </section>
 
       {/* Lazy load all sections */}
-      <Suspense fallback={<div className="py-20 bg-muted animate-pulse" style={{ height: "400px" }} />}>
-        <ValueProposition />
-      </Suspense>
+      <div id="benefits">
+        <Suspense fallback={<div className="py-20 bg-muted animate-pulse" style={{ height: "400px" }} />}>
+          <ValueProposition />
+        </Suspense>
+        
+        <Suspense fallback={<div className="py-20 animate-pulse" style={{ height: "500px" }} />}>
+          <AhaMoments />
+        </Suspense>
+        
+        <Suspense fallback={<div className="py-20 bg-muted animate-pulse" style={{ height: "400px" }} />}>
+          <Problems />
+        </Suspense>
+      </div>
       
-      <Suspense fallback={<div className="py-20 animate-pulse" style={{ height: "500px" }} />}>
-        <AhaMoments />
-      </Suspense>
+      <div id="how-it-works">
+        <Suspense fallback={<div className="py-20 animate-pulse" style={{ height: "500px" }} />}>
+          <HowItWorks />
+        </Suspense>
+      </div>
       
-      <Suspense fallback={<div className="py-20 bg-muted animate-pulse" style={{ height: "400px" }} />}>
-        <Problems />
-      </Suspense>
+      <div id="results">
+        <Suspense fallback={<div className="py-20 bg-muted animate-pulse" style={{ height: "400px" }} />}>
+          <Results />
+        </Suspense>
+      </div>
       
-      <Suspense fallback={<div className="py-20 animate-pulse" style={{ height: "500px" }} />}>
-        <HowItWorks />
-      </Suspense>
-      
-      <Suspense fallback={<div className="py-20 bg-muted animate-pulse" style={{ height: "400px" }} />}>
-        <Results />
-      </Suspense>
-      
-      <Suspense fallback={<div className="py-20 animate-pulse" style={{ height: "500px" }} />}>
-        <Testimonials />
-      </Suspense>
+      <div id="testimonials">
+        <Suspense fallback={<div className="py-20 animate-pulse" style={{ height: "500px" }} />}>
+          <Testimonials />
+        </Suspense>
+      </div>
       
       <Suspense fallback={<div className="py-20 bg-muted animate-pulse" style={{ height: "600px" }} />}>
         <Comparison />
       </Suspense>
       
-      <Suspense fallback={<div className="py-20 animate-pulse" style={{ height: "700px" }} />}>
-        <Pricing onNavigate={handleNavigate} />
-      </Suspense>
+      <div id="pricing">
+        <Suspense fallback={<div className="py-20 animate-pulse" style={{ height: "700px" }} />}>
+          <Pricing onNavigate={handleNavigate} />
+        </Suspense>
+      </div>
       
-      <Suspense fallback={<div className="py-20 bg-muted animate-pulse" style={{ height: "400px" }} />}>
-        <FAQ />
-      </Suspense>
+      <div id="faq">
+        <Suspense fallback={<div className="py-20 bg-muted animate-pulse" style={{ height: "400px" }} />}>
+          <FAQ />
+        </Suspense>
+      </div>
       
       <Suspense fallback={<div className="py-20 animate-pulse" style={{ height: "500px" }} />}>
         <ForParents onNavigate={handleNavigate} />
