@@ -56,16 +56,21 @@ export default function Chat() {
     queryFn: async () => {
       if (!user?.id) return null;
 
-      const { data: existingChat } = await supabase
+      // Try to find existing general chat
+      const { data: existingChats } = await supabase
         .from('chats')
         .select('id')
         .eq('user_id', user.id)
         .eq('chat_type', 'general')
-        .maybeSingle();
+        .limit(1);
 
-      if (existingChat) return existingChat;
+      if (existingChats && existingChats.length > 0) {
+        console.log('Found existing general chat:', existingChats[0].id);
+        return existingChats[0];
+      }
 
-      // Create new general chat
+      // No general chat found - create new one for new user
+      console.log('Creating new general chat for new user');
       const { data: newChat, error } = await supabase
         .from('chats')
         .insert({
@@ -79,7 +84,7 @@ export default function Chat() {
 
       if (error) throw error;
 
-      // Add welcome message to the new chat
+      // Add welcome message only for truly new users
       if (newChat) {
         await supabase.from('chat_messages').insert({
           chat_id: newChat.id,
@@ -87,6 +92,7 @@ export default function Chat() {
           role: 'assistant',
           content: 'Привет! 👋 Я Сократ — твой ИИ-помощник по математике, физике и информатике.\n\nЯ не просто даю готовые ответы. Я задаю наводящие вопросы, чтобы ты сам понял, как решать задачи. Это помогает тебе учиться, а не просто списывать.\n\n📚 Что я умею:\n• Объясняю сложные темы простым языком\n• Помогаю разобраться с домашкой\n• Показываю разные способы решения задач\n• Генерирую похожие задачи для практики\n\n💡 Задай мне любой вопрос по математике, физике или информатике, и я помогу тебе разобраться!'
         });
+        console.log('Welcome message added for new user');
       }
 
       return newChat;
