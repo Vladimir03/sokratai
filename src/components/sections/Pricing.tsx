@@ -28,21 +28,21 @@ const Pricing = ({ onNavigate }: PricingProps) => {
 
         {/* Pricing Wrapper with Scroll */}
         <div className="relative my-10">
-          {/* Navigation Arrows - Hidden on mobile */}
+          {/* Navigation Arrows - Now visible on mobile too */}
           <button
             onClick={() => scroll('left')}
-            className="hidden md:flex absolute left-0 top-1/2 -translate-y-1/2 -translate-x-6 z-10 w-12 h-12 items-center justify-center rounded-full bg-background border-2 border-accent text-accent hover:bg-accent hover:text-accent-foreground transition-all shadow-lg"
+            className="flex absolute left-0 md:left-0 top-1/2 -translate-y-1/2 -translate-x-3 md:-translate-x-6 z-10 w-10 h-10 md:w-12 md:h-12 items-center justify-center rounded-full bg-background border-2 border-accent text-accent hover:bg-accent hover:text-accent-foreground transition-all shadow-lg"
             aria-label="Предыдущий тариф"
           >
-            <ChevronLeft className="w-6 h-6" />
+            <ChevronLeft className="w-5 h-5 md:w-6 md:h-6" />
           </button>
           
           <button
             onClick={() => scroll('right')}
-            className="hidden md:flex absolute right-0 top-1/2 -translate-y-1/2 translate-x-6 z-10 w-12 h-12 items-center justify-center rounded-full bg-background border-2 border-accent text-accent hover:bg-accent hover:text-accent-foreground transition-all shadow-lg"
+            className="flex absolute right-0 md:right-0 top-1/2 -translate-y-1/2 translate-x-3 md:translate-x-6 z-10 w-10 h-10 md:w-12 md:h-12 items-center justify-center rounded-full bg-background border-2 border-accent text-accent hover:bg-accent hover:text-accent-foreground transition-all shadow-lg"
             aria-label="Следующий тариф"
           >
-            <ChevronRight className="w-6 h-6" />
+            <ChevronRight className="w-5 h-5 md:w-6 md:h-6" />
           </button>
 
           {/* Scrollable Container */}
