@@ -26,7 +26,7 @@ const Footer = () => {
             🌐 <a href="https://sokratai.ru" className="text-accent hover:text-accent/80 transition-colors">sokratai.ru</a>
           </p>
           <p className="text-lg">
-            📱 <a href="https://t.me/sokrat_ai" className="text-accent hover:text-accent/80 transition-colors">@sokrat_ai</a>
+            📱 <a href="https://t.me/sokrat_ai" className="text-accent hover:text-accent/80 transition-colors">Telegram: @sokrat_ai</a>
           </p>
         </div>
 
