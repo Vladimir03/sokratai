@@ -68,7 +68,7 @@ const ForParents = ({ onNavigate }: ForParentsProps) => {
             </p>
             <Button 
               size="lg"
-              className="bg-accent hover:bg-accent/90 text-accent-foreground text-lg px-12 py-6"
+              className="bg-accent hover:bg-accent/90 text-accent-foreground text-base md:text-lg px-8 md:px-12 py-6 whitespace-normal leading-snug h-auto"
               onClick={onNavigate}
             >
               Начать бесплатный пробный период
