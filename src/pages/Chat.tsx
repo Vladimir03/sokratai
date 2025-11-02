@@ -50,28 +50,37 @@ export default function Chat() {
     }
   });
 
-  // Ensure general chat exists
+  // Ensure general chat exists - always use the FIRST created general chat
   const { data: generalChat, isLoading: isLoadingGeneralChat } = useQuery({
     queryKey: ['general-chat', user?.id],
     queryFn: async () => {
       if (!user?.id) return null;
 
-      // Try to find existing general chat using maybeSingle for better reliability
-      const { data: existingChat } = await supabase
+      // Find the FIRST created general chat (oldest one) to avoid duplicates
+      const { data: existingChat, error } = await supabase
         .from('chats')
         .select('id')
         .eq('user_id', user.id)
         .eq('chat_type', 'general')
-        .maybeSingle();
+        .order('created_at', { ascending: true })
+        .limit(1)
+        .single();
 
-      if (existingChat) {
-        console.log('Found existing general chat:', existingChat.id);
+      // If chat exists, use it
+      if (existingChat && !error) {
+        console.log('✅ Found existing general chat:', existingChat.id);
         return existingChat;
       }
 
-      // No general chat found - create new one for new user
-      console.log('Creating new general chat for new user');
-      const { data: newChat, error } = await supabase
+      // Only create new chat if genuinely doesn't exist (PGRST116 = no rows)
+      if (error && error.code !== 'PGRST116') {
+        console.error('Error finding general chat:', error);
+        throw error;
+      }
+
+      // No general chat found - create new one for truly new user
+      console.log('📝 Creating new general chat for new user');
+      const { data: newChat, error: insertError } = await supabase
         .from('chats')
         .insert({
           user_id: user.id,
@@ -82,7 +91,7 @@ export default function Chat() {
         .select()
         .single();
 
-      if (error) throw error;
+      if (insertError) throw insertError;
 
       // Add welcome message only for truly new users
       if (newChat) {
@@ -92,12 +101,13 @@ export default function Chat() {
           role: 'assistant',
           content: 'Привет! 👋 Я Сократ — твой ИИ-помощник по математике, физике и информатике.\n\nЯ не просто даю готовые ответы. Я задаю наводящие вопросы, чтобы ты сам понял, как решать задачи. Это помогает тебе учиться, а не просто списывать.\n\n📚 Что я умею:\n• Объясняю сложные темы простым языком\n• Помогаю разобраться с домашкой\n• Показываю разные способы решения задач\n• Генерирую похожие задачи для практики\n\n💡 Задай мне любой вопрос по математике, физике или информатике, и я помогу тебе разобраться!'
         });
-        console.log('Welcome message added for new user');
+        console.log('✅ Welcome message added for new user');
       }
 
       return newChat;
     },
-    enabled: !!user?.id
+    enabled: !!user?.id,
+    staleTime: 5 * 60 * 1000, // Cache for 5 minutes to prevent duplicate queries
   });
 
   const currentChatId = chatIdFromUrl || generalChat?.id;
