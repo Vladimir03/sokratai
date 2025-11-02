@@ -59,9 +59,6 @@ const Index = () => {
                 <h2 className="text-3xl md:text-4xl font-bold text-primary-foreground">
                   Сократ
                 </h2>
-                <p className="text-primary-foreground/80 text-sm md:text-base italic">
-                  ИИ-помощник, который учит думать
-                </p>
               </div>
             </div>
 
@@ -70,21 +67,12 @@ const Index = () => {
               className="text-4xl md:text-6xl font-bold text-primary-foreground mb-6 leading-tight"
               {...({ fetchpriority: "high" } as any)}
             >
-              Застрял на задаче? Задай вопрос, без стыда.
+              🎯 ИИ-помощник по математике, физике и информатике, который учит тебя думать и понимать самостоятельно
             </h1>
             
             {/* Subheadline */}
-            <p className="text-lg md:text-xl text-primary-foreground/90 mb-4 max-w-2xl">
-              Не даем готовые ответы. Помогаем понять через наводящие вопросы.
-            </p>
-
-            {/* Additional description */}
-            <p className="text-base md:text-lg text-primary-foreground/80 mb-8 max-w-2xl">
-              ИИ-помощник по математике, физике, информатике, который учит тебя думать и понимать самостоятельно.
-              <br />
-              <span className="text-sm md:text-base">
-                Для тех, кто готовится к ОГЭ/ЕГЭ и хочет понимать математику, физику, информатику, а не просто списывать.
-              </span>
+            <p className="text-lg md:text-xl text-primary-foreground/90 mb-8 max-w-2xl">
+              Для тех, кто готовится к ОГЭ/ЕГЭ и хочет понимать математику, физику и информатику, а не просто списывать
             </p>
 
             {/* CTA Button */}
@@ -93,7 +81,7 @@ const Index = () => {
               className="bg-accent hover:bg-accent/90 text-accent-foreground shadow-glow text-base md:text-lg px-8 py-6 rounded-2xl font-semibold transition-all hover:scale-105"
               onClick={handleNavigate}
             >
-              🚀 Попробовать бесплатно 7 дней
+              🚀 Попробовать бесплатно
             </Button>
           </div>
         </div>
