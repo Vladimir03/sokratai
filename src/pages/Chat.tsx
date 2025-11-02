@@ -51,22 +51,22 @@ export default function Chat() {
   });
 
   // Ensure general chat exists
-  const { data: generalChat } = useQuery({
+  const { data: generalChat, isLoading: isLoadingGeneralChat } = useQuery({
     queryKey: ['general-chat', user?.id],
     queryFn: async () => {
       if (!user?.id) return null;
 
-      // Try to find existing general chat
-      const { data: existingChats } = await supabase
+      // Try to find existing general chat using maybeSingle for better reliability
+      const { data: existingChat } = await supabase
         .from('chats')
         .select('id')
         .eq('user_id', user.id)
         .eq('chat_type', 'general')
-        .limit(1);
+        .maybeSingle();
 
-      if (existingChats && existingChats.length > 0) {
-        console.log('Found existing general chat:', existingChats[0].id);
-        return existingChats[0];
+      if (existingChat) {
+        console.log('Found existing general chat:', existingChat.id);
+        return existingChat;
       }
 
       // No general chat found - create new one for new user
@@ -101,6 +101,14 @@ export default function Chat() {
   });
 
   const currentChatId = chatIdFromUrl || generalChat?.id;
+
+  // Redirect to general chat if no chat ID in URL and general chat is loaded
+  useEffect(() => {
+    if (!chatIdFromUrl && generalChat?.id && currentChatId !== generalChat.id) {
+      console.log('Redirecting to general chat:', generalChat.id);
+      navigate(`/chat?id=${generalChat.id}`, { replace: true });
+    }
+  }, [chatIdFromUrl, generalChat?.id, currentChatId, navigate]);
 
   // Fetch current chat details
   const { data: currentChat } = useQuery({
