@@ -144,6 +144,8 @@ export default function Chat() {
     enabled: !!currentChatId
   });
 
+  const chatType = currentChat?.chat_type;
+
   // Load chat history whenever chat changes
   useEffect(() => {
     if (!user?.id || !currentChatId) {
@@ -187,8 +189,43 @@ export default function Chat() {
           setMessages(loadedMessages);
           console.log(`✅ Loaded ${loadedMessages.length} messages for chat ${currentChatId}`);
         } else {
-          setMessages([]);
-          console.log(`⚠️ No messages found for chat ${currentChatId}`);
+          // If general chat is empty, add welcome message
+          if (chatType === 'general') {
+            console.log('📝 Adding welcome message to empty general chat');
+            const { error: insertError } = await supabase.from('chat_messages').insert({
+              chat_id: currentChatId,
+              user_id: user.id,
+              role: 'assistant',
+              content: 'Привет! 👋 Я Сократ — твой ИИ-помощник по математике, физике и информатике.\n\nЯ не просто даю готовые ответы. Я задаю наводящие вопросы, чтобы ты сам понял, как решать задачи. Это помогает тебе учиться, а не просто списывать.\n\n📚 Что я умею:\n• Объясняю сложные темы простым языком\n• Помогаю разобраться с домашкой\n• Показываю разные способы решения задач\n• Генерирую похожие задачи для практики\n\n💡 Задай мне любой вопрос по математике, физике или информатике, и я помогу тебе разобраться!'
+            });
+            
+            if (!insertError) {
+              // Reload messages after adding welcome message
+              const { data: updatedData } = await supabase
+                .from('chat_messages')
+                .select(`
+                  *,
+                  feedback:message_feedback(feedback_type)
+                `)
+                .eq('chat_id', currentChatId)
+                .order('created_at', { ascending: true });
+              
+              if (updatedData) {
+                const updatedMessages = updatedData.map(msg => ({
+                  role: msg.role as "user" | "assistant",
+                  content: msg.content,
+                  image_url: msg.image_url || undefined,
+                  id: msg.id,
+                  feedback: (msg.feedback as any)?.[0]?.feedback_type || null
+                }));
+                setMessages(updatedMessages);
+                console.log('✅ Welcome message added and loaded');
+              }
+            }
+          } else {
+            setMessages([]);
+            console.log(`⚠️ No messages found for chat ${currentChatId}`);
+          }
         }
       } catch (error) {
         console.error('❌ Error loading chat history:', error);
@@ -200,7 +237,7 @@ export default function Chat() {
     };
 
     loadHistory();
-  }, [user?.id, currentChatId]);
+  }, [user?.id, currentChatId, chatType]);
 
   const handleFileUpload = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
