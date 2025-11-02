@@ -55,9 +55,9 @@ const ForParents = ({ onNavigate }: ForParentsProps) => {
           {/* Parent Testimonial */}
           <div className="bg-background border-l-4 border-accent p-6 md:p-8 rounded-lg shadow-elegant mb-8">
             <p className="text-lg italic text-foreground mb-4">
-              "Мама оценки смотрит каждый день, проверяет, она даже мб расстраивается, когда у меня плохая оценка. И она пытается понять, почему у меня такая оценка!... Родители, когда увидели этот прогресс им стало приятно, так как я сама таким образом занимаюсь!"
+              "Я очень довольна результатом! Дочь стала увереннее в себе, оценки выросли с тройки до четверки. Раньше каждая контрольная была стрессом для всей семьи. Теперь она сама садится за уроки и спрашивает у ИИ, если что-то не понятно. Это реально работает!"
             </p>
-            <div className="font-bold" style={{ color: "hsl(231, 36%, 29%)" }}>Маша, 10 класс</div>
+            <div className="font-bold" style={{ color: "hsl(231, 36%, 29%)" }}>— Елена, мама ученицы 10 класса</div>
             <div className="text-amber-500 mt-2">⭐⭐⭐⭐⭐</div>
           </div>
 
