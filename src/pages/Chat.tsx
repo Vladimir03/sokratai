@@ -16,6 +16,7 @@ import AuthGuard from "@/components/AuthGuard";
 import { useIsMobile } from "@/hooks/use-mobile";
 import ChatInput from "@/components/ChatInput";
 import Onboarding from "@/components/Onboarding";
+import DevPanel from "@/components/DevPanel";
 import { subjectNames } from "@/data/onboardingTasks";
 
 interface Message {
@@ -834,6 +835,13 @@ export default function Chat() {
     <AuthGuard>
       <div className="min-h-screen bg-background">
         <Navigation />
+        
+        {user?.id && (
+          <DevPanel 
+            userId={user.id} 
+            onReset={() => window.location.reload()} 
+          />
+        )}
         
         {/* Chat container with proper offset for fixed navigation */}
         <div className="fixed inset-0 top-[110px] md:top-[104px] flex flex-col">
