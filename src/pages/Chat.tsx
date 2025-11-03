@@ -938,7 +938,7 @@ export default function Chat() {
                 {showUploadHint && (
                   <div className="absolute bottom-20 left-4 animate-bounce z-50">
                     <div className="bg-accent text-accent-foreground px-3 py-2 rounded-lg text-sm shadow-lg">
-                      👆 Нажми сюда, чтобы загрузить фото!
+                      👇 Нажми сюда, чтобы загрузить фото!
                     </div>
                   </div>
                 )}
