@@ -346,6 +346,60 @@ export type Database = {
         }
         Relationships: []
       }
+      onboarding_analytics: {
+        Row: {
+          completed_at: string | null
+          created_at: string | null
+          demo_answer_attempted: boolean | null
+          demo_hints_used: number | null
+          goal: string | null
+          grade: number | null
+          id: string
+          started_at: string | null
+          step1_duration_ms: number | null
+          step2_duration_ms: number | null
+          step3_duration_ms: number | null
+          step4_duration_ms: number | null
+          step5_duration_ms: number | null
+          subject: string | null
+          user_id: string
+        }
+        Insert: {
+          completed_at?: string | null
+          created_at?: string | null
+          demo_answer_attempted?: boolean | null
+          demo_hints_used?: number | null
+          goal?: string | null
+          grade?: number | null
+          id?: string
+          started_at?: string | null
+          step1_duration_ms?: number | null
+          step2_duration_ms?: number | null
+          step3_duration_ms?: number | null
+          step4_duration_ms?: number | null
+          step5_duration_ms?: number | null
+          subject?: string | null
+          user_id: string
+        }
+        Update: {
+          completed_at?: string | null
+          created_at?: string | null
+          demo_answer_attempted?: boolean | null
+          demo_hints_used?: number | null
+          goal?: string | null
+          grade?: number | null
+          id?: string
+          started_at?: string | null
+          step1_duration_ms?: number | null
+          step2_duration_ms?: number | null
+          step3_duration_ms?: number | null
+          step4_duration_ms?: number | null
+          step5_duration_ms?: number | null
+          subject?: string | null
+          user_id?: string
+        }
+        Relationships: []
+      }
       problems: {
         Row: {
           answer: string | null
@@ -553,6 +607,10 @@ export type Database = {
           is_correct: boolean
           solution: string
         }[]
+      }
+      increment_demo_hints: {
+        Args: { analytics_id: string }
+        Returns: undefined
       }
       update_user_stats_on_solve: {
         Args: { p_is_correct: boolean; p_user_id: string }

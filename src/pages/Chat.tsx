@@ -15,6 +15,8 @@ import Navigation from "@/components/Navigation";
 import AuthGuard from "@/components/AuthGuard";
 import { useIsMobile } from "@/hooks/use-mobile";
 import ChatInput from "@/components/ChatInput";
+import Onboarding from "@/components/Onboarding";
+import { subjectNames } from "@/data/onboardingTasks";
 
 interface Message {
   role: "user" | "assistant";
@@ -32,6 +34,8 @@ export default function Chat() {
   const [uploadedFile, setUploadedFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const [showOnboarding, setShowOnboarding] = useState(false);
+  const [showUploadHint, setShowUploadHint] = useState(false);
   const { toast } = useToast();
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
@@ -119,6 +123,82 @@ export default function Chat() {
       navigate(`/chat?id=${generalChat.id}`, { replace: true });
     }
   }, [chatIdFromUrl, generalChat?.id, currentChatId, navigate]);
+
+  // Check onboarding status
+  useEffect(() => {
+    if (!user?.id || !generalChat?.id) return;
+
+    const checkOnboarding = async () => {
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('onboarding_completed')
+        .eq('id', user.id)
+        .single();
+
+      if (!profile?.onboarding_completed) {
+        setShowOnboarding(true);
+      }
+    };
+
+    checkOnboarding();
+  }, [user?.id, generalChat?.id]);
+
+  // Handle onboarding completion
+  const handleOnboardingComplete = async (
+    grade: number,
+    subject: string,
+    goal: string,
+    quickMessage?: string
+  ) => {
+    if (!user?.id || !generalChat?.id) return;
+
+    // Update profile
+    await supabase
+      .from('profiles')
+      .update({
+        grade,
+        difficult_subject: subject,
+        learning_goal: goal,
+        onboarding_completed: true
+      })
+      .eq('id', user.id);
+
+    setShowOnboarding(false);
+
+    // Add welcome message to general chat
+    const subjectName = subjectNames[subject] || 'учёбе';
+    
+    const welcomeContent = quickMessage 
+      ? quickMessage
+      : `Отлично! Теперь ты можешь задать мне любой вопрос по ${subjectName}. Я всегда готов помочь! 🚀`;
+
+    await supabase.from('chat_messages').insert({
+      chat_id: generalChat.id,
+      user_id: user.id,
+      role: quickMessage ? 'user' : 'assistant',
+      content: welcomeContent
+    });
+
+    // If there's a quick message, also send it to AI for response
+    if (quickMessage) {
+      // Reload messages to include the user's question
+      queryClient.invalidateQueries({ queryKey: ['chat', generalChat.id] });
+      
+      // Trigger AI response
+      setTimeout(() => {
+        handleSend(quickMessage, 'button');
+      }, 100);
+    }
+
+    // Show hint for upload button
+    setTimeout(() => {
+      setShowUploadHint(true);
+      setTimeout(() => setShowUploadHint(false), 5000);
+    }, 500);
+
+    // Reload messages
+    queryClient.invalidateQueries({ queryKey: ['chat', generalChat.id] });
+  };
 
   // Fetch current chat details
   const { data: currentChat } = useQuery({
@@ -725,6 +805,18 @@ export default function Chat() {
     };
   }, []);
 
+  // Show onboarding if needed
+  if (showOnboarding && user?.id) {
+    return (
+      <AuthGuard>
+        <Onboarding
+          userId={user.id}
+          onComplete={handleOnboardingComplete}
+        />
+      </AuthGuard>
+    );
+  }
+
   if (!currentChatId) {
     return (
       <AuthGuard>
@@ -822,16 +914,27 @@ export default function Chat() {
                 )}
               </div>
 
-              <ChatInput
-                uploadedFile={uploadedFile}
-                previewUrl={previewUrl}
-                isLoading={isLoading}
-                isMobile={isMobile}
-                onSend={handleSend}
-                onFileUpload={handleFileUpload}
-                onPaste={handlePaste}
-                onRemoveFile={removeUploadedFile}
-              />
+              <div className="relative">
+                <ChatInput
+                  uploadedFile={uploadedFile}
+                  previewUrl={previewUrl}
+                  isLoading={isLoading}
+                  isMobile={isMobile}
+                  onSend={handleSend}
+                  onFileUpload={handleFileUpload}
+                  onPaste={handlePaste}
+                  onRemoveFile={removeUploadedFile}
+                />
+                
+                {/* Upload hint */}
+                {showUploadHint && (
+                  <div className="absolute bottom-20 left-4 animate-bounce z-50">
+                    <div className="bg-accent text-accent-foreground px-3 py-2 rounded-lg text-sm shadow-lg">
+                      👆 Нажми сюда, чтобы загрузить фото!
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
           </div>
         </div>
