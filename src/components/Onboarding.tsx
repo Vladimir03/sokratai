@@ -72,8 +72,18 @@ export default function Onboarding({ userId, onComplete }: OnboardingProps) {
   const selectGoal = (selectedGoal: string) => {
     setGoal(selectedGoal);
     analytics.saveStepDuration(3, { goal: selectedGoal });
-    analytics.moveToStep(4);
-    setStep(4);
+    
+    // Check if demo task exists
+    const taskExists = grade && subject && getDemoTask(subject, grade);
+    
+    if (taskExists) {
+      analytics.moveToStep(4);
+      setStep(4);
+    } else {
+      // Skip demo, go straight to step 5
+      analytics.moveToStep(5);
+      setStep(5);
+    }
   };
 
   const handleCustomGoal = () => {
@@ -252,7 +262,8 @@ export default function Onboarding({ userId, onComplete }: OnboardingProps) {
                 className="h-14 text-base"
                 onClick={() => selectGoal('Школьная программа')}
               >
-                📚 Школьная программа
+                <span className="md:hidden">📚 Школа</span>
+                <span className="hidden md:inline">📚 Школьная программа</span>
               </Button>
               <Button
                 className="h-14 text-base"
