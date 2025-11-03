@@ -379,17 +379,29 @@ export type Database = {
       profiles: {
         Row: {
           created_at: string | null
+          difficult_subject: string | null
+          grade: number | null
           id: string
+          learning_goal: string | null
+          onboarding_completed: boolean | null
           username: string
         }
         Insert: {
           created_at?: string | null
+          difficult_subject?: string | null
+          grade?: number | null
           id: string
+          learning_goal?: string | null
+          onboarding_completed?: boolean | null
           username: string
         }
         Update: {
           created_at?: string | null
+          difficult_subject?: string | null
+          grade?: number | null
           id?: string
+          learning_goal?: string | null
+          onboarding_completed?: boolean | null
           username?: string
         }
         Relationships: []
