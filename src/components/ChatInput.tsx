@@ -25,7 +25,22 @@ const ChatInput = memo(({
   onRemoveFile,
 }: ChatInputProps) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
   const [message, setMessage] = useState("");
+
+  const adjustTextareaHeight = () => {
+    const textarea = textareaRef.current;
+    if (textarea) {
+      textarea.style.height = 'auto';
+      const newHeight = Math.min(textarea.scrollHeight, isMobile ? 120 : 150);
+      textarea.style.height = `${newHeight}px`;
+    }
+  };
+
+  const handleMessageChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    setMessage(e.target.value);
+    adjustTextareaHeight();
+  };
 
   return (
     <div className="flex-shrink-0 border-t p-2 md:p-4 bg-background" style={{ paddingBottom: 'max(0.5rem, env(safe-area-inset-bottom))' }}>
@@ -72,8 +87,9 @@ const ChatInput = memo(({
 
           {/* Text input */}
           <Textarea
+            ref={textareaRef}
             value={message}
-            onChange={(e) => setMessage(e.target.value)}
+            onChange={handleMessageChange}
             onPaste={onPaste}
             onKeyDown={(e) => {
               if (e.key === "Enter" && !e.shiftKey) {
@@ -81,13 +97,21 @@ const ChatInput = memo(({
                 if (message.trim() || uploadedFile) {
                   onSend(message, 'text');
                   setMessage("");
+                  setTimeout(() => {
+                    if (textareaRef.current) {
+                      textareaRef.current.style.height = 'auto';
+                    }
+                  }, 0);
                 }
               }
             }}
             placeholder={isMobile ? "Напиши вопрос..." : "Напиши свой вопрос или вставь скриншот (Ctrl+V)..."}
-            className="!h-12 md:!h-[60px] !min-h-[48px] md:!min-h-[60px] !max-h-12 md:!max-h-[60px] resize-none text-sm md:text-base py-3"
+            className="!min-h-[48px] md:!min-h-[60px] resize-none text-sm md:text-base py-3 overflow-y-auto"
             disabled={isLoading}
-            style={{ fontSize: isMobile ? '16px' : undefined }}
+            style={{ 
+              fontSize: isMobile ? '16px' : undefined,
+              height: '48px'
+            }}
           />
 
           {/* Send button */}
