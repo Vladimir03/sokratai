@@ -45,11 +45,14 @@ export default function Onboarding({ userId, onComplete }: OnboardingProps) {
   useEffect(() => {
     if (step === 4 && answered && scrollContainerRef.current) {
       setTimeout(() => {
-        scrollContainerRef.current?.scrollTo({
-          top: scrollContainerRef.current.scrollHeight,
-          behavior: 'smooth'
-        });
-      }, 300);
+        const container = scrollContainerRef.current;
+        if (container) {
+          container.scrollTo({
+            top: container.scrollHeight + 100, // +100px buffer to ensure button is visible
+            behavior: 'smooth'
+          });
+        }
+      }, 600); // Increased delay to allow animation to complete
     }
   }, [answered, step]);
 
