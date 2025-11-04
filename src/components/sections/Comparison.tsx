@@ -1,4 +1,19 @@
+import { useRef } from "react";
+import { ChevronLeft, ChevronRight } from "lucide-react";
+
 const Comparison = () => {
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
+
+  const scroll = (direction: 'left' | 'right') => {
+    if (scrollContainerRef.current) {
+      const scrollAmount = 300;
+      scrollContainerRef.current.scrollBy({
+        left: direction === 'left' ? -scrollAmount : scrollAmount,
+        behavior: 'smooth'
+      });
+    }
+  };
+
   return (
     <section className="py-20 px-4 bg-background">
       <div className="container mx-auto">
@@ -6,8 +21,31 @@ const Comparison = () => {
           🥊 Почему мы лучше других решений
         </h2>
 
-        {/* Comparison Table */}
-        <div className="overflow-x-auto mb-12">
+        {/* Comparison Table with Scroll Navigation */}
+        <div className="relative mb-12">
+          {/* Navigation Arrows */}
+          <button
+            onClick={() => scroll('left')}
+            className="flex absolute left-0 top-1/2 -translate-y-1/2 -translate-x-3 md:-translate-x-6 z-10 w-10 h-10 md:w-12 md:h-12 items-center justify-center rounded-full bg-background border-2 border-accent text-accent hover:bg-accent hover:text-accent-foreground transition-all shadow-lg"
+            aria-label="Прокрутить влево"
+          >
+            <ChevronLeft className="w-5 h-5 md:w-6 md:h-6" />
+          </button>
+          
+          <button
+            onClick={() => scroll('right')}
+            className="flex absolute right-0 top-1/2 -translate-y-1/2 translate-x-3 md:translate-x-6 z-10 w-10 h-10 md:w-12 md:h-12 items-center justify-center rounded-full bg-background border-2 border-accent text-accent hover:bg-accent hover:text-accent-foreground transition-all shadow-lg"
+            aria-label="Прокрутить вправо"
+          >
+            <ChevronRight className="w-5 h-5 md:w-6 md:h-6" />
+          </button>
+
+          {/* Scrollable Container */}
+          <div
+            ref={scrollContainerRef}
+            className="overflow-x-auto scroll-smooth scrollbar-thin scrollbar-thumb-accent scrollbar-track-muted"
+            style={{ scrollbarWidth: 'thin' }}
+          >
           <table className="w-full bg-background rounded-xl shadow-elegant overflow-hidden">
             <thead>
               <tr>
@@ -56,6 +94,7 @@ const Comparison = () => {
               </tr>
             </tbody>
           </table>
+          </div>
         </div>
 
         {/* Important Note */}
