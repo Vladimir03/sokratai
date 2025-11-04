@@ -185,15 +185,15 @@ export default function Onboarding({ userId, onComplete }: OnboardingProps) {
                   className={cn(
                     "h-1.5 rounded-full transition-all duration-300",
                     num === step 
-                      ? "flex-1 bg-primary" 
+                      ? "flex-1 bg-accent" 
                       : num < step 
-                      ? "w-1.5 bg-primary/50" 
+                      ? "w-1.5 bg-accent/50" 
                       : "w-1.5 bg-muted"
                   )}
                 />
               ))}
             </div>
-            <p className="text-[11px] text-center text-muted-foreground mt-2 font-medium">
+            <p className="text-[11px] text-center text-primary mt-2 font-medium">
               Шаг {step} из 5
             </p>
           </div>
