@@ -96,21 +96,29 @@ const ChatInput = memo(({
             onChange={handleMessageChange}
             onPaste={onPaste}
             onKeyDown={(e) => {
-              if (e.key === "Enter" && !e.shiftKey) {
-                e.preventDefault();
-                if (message.trim() || uploadedFile) {
-                  onSend(message, 'text');
-                  setMessage("");
-                  setTimeout(() => {
-                    if (textareaRef.current) {
-                      textareaRef.current.style.height = 'auto';
-                      textareaRef.current.style.height = isMobile ? '40px' : '44px';
-                    }
-                  }, 0);
+              // On mobile, Enter creates new line (like Telegram)
+              // On desktop, Enter sends (Shift+Enter for new line)
+              if (e.key === "Enter") {
+                if (isMobile) {
+                  // On mobile, allow Enter to create new line
+                  return;
+                } else if (!e.shiftKey) {
+                  // On desktop, Enter without Shift sends message
+                  e.preventDefault();
+                  if (message.trim() || uploadedFile) {
+                    onSend(message, 'text');
+                    setMessage("");
+                    setTimeout(() => {
+                      if (textareaRef.current) {
+                        textareaRef.current.style.height = 'auto';
+                        textareaRef.current.style.height = isMobile ? '40px' : '44px';
+                      }
+                    }, 0);
+                  }
                 }
               }
             }}
-            placeholder={isMobile ? "Напиши вопрос..." : "Напиши свой вопрос или вставь скриншот (Ctrl+V)..."}
+            placeholder={isMobile ? "Сообщение..." : "Напиши свой вопрос или вставь скриншот (Ctrl+V)..."}
             className="!min-h-0 resize-none text-sm md:text-base py-2.5 md:py-3 overflow-y-auto transition-all duration-150 leading-6"
             disabled={isLoading}
             rows={1}
