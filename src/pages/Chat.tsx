@@ -810,10 +810,15 @@ export default function Chat() {
   if (showOnboarding && user?.id) {
     return (
       <AuthGuard>
-        <Onboarding
-          userId={user.id}
-          onComplete={handleOnboardingComplete}
-        />
+        <div className="min-h-screen bg-background">
+          <Navigation />
+          <div className="pt-[110px] md:pt-[104px]">
+            <Onboarding
+              userId={user.id}
+              onComplete={handleOnboardingComplete}
+            />
+          </div>
+        </div>
       </AuthGuard>
     );
   }
