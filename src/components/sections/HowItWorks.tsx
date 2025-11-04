@@ -27,7 +27,7 @@ const HowItWorks = () => {
               {/* Sokrat message */}
               <div className="flex gap-3 items-start">
                 <div className="flex-shrink-0 w-8 h-8 rounded-full bg-accent/20 flex items-center justify-center text-xs font-semibold text-accent">
-                  AI
+                  Сократ
                 </div>
                 <div className="flex-1 bg-accent/5 rounded-lg p-3 text-sm md:text-base border border-accent/20">
                   Хороший вопрос! Квадратное уравнение можно решить разными способами.
@@ -48,7 +48,7 @@ const HowItWorks = () => {
               {/* Sokrat message */}
               <div className="flex gap-3 items-start">
                 <div className="flex-shrink-0 w-8 h-8 rounded-full bg-accent/20 flex items-center justify-center text-xs font-semibold text-accent">
-                  AI
+                  Сократ
                 </div>
                 <div className="flex-1 bg-accent/5 rounded-lg p-3 text-sm md:text-base border border-accent/20">
                   Отлично! Дискриминант находится по формуле D = b² - 4ac.
@@ -69,7 +69,7 @@ const HowItWorks = () => {
               {/* Sokrat message */}
               <div className="flex gap-3 items-start">
                 <div className="flex-shrink-0 w-8 h-8 rounded-full bg-accent/20 flex items-center justify-center text-xs font-semibold text-accent">
-                  AI
+                  Сократ
                 </div>
                 <div className="flex-1 bg-accent/5 rounded-lg p-3 text-sm md:text-base border border-accent/20">
                   Правильно! Теперь подставь эти значения в формулу дискриминанта. Что получится?
@@ -89,7 +89,7 @@ const HowItWorks = () => {
               {/* Sokrat message */}
               <div className="flex gap-3 items-start">
                 <div className="flex-shrink-0 w-8 h-8 rounded-full bg-accent/20 flex items-center justify-center text-xs font-semibold text-accent">
-                  AI
+                  Сократ
                 </div>
                 <div className="flex-1 bg-accent/5 rounded-lg p-3 text-sm md:text-base border border-accent/20">
                   ОТЛИЧНО! 🎉 Ты все правильно посчитал! Теперь можешь найти корни по формуле
