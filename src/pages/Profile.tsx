@@ -7,6 +7,7 @@ import { toast } from "sonner";
 import AuthGuard from "@/components/AuthGuard";
 import { User, Zap, Target, Trophy, Edit } from "lucide-react";
 import { z } from "zod";
+import { PageContent } from "@/components/PageContent";
 
 interface Profile {
   username: string;
@@ -133,7 +134,8 @@ const Profile = () => {
 
   return (
     <AuthGuard>
-      <div className="container mx-auto px-4 pt-20 pb-6 max-w-4xl">
+      <PageContent>
+        <div className="container mx-auto px-4 pb-6 max-w-4xl">
         <div className="mb-8">
           <h1 className="text-4xl font-bold mb-2">Профиль</h1>
           <p className="text-muted-foreground">Управление аккаунтом</p>
@@ -280,6 +282,7 @@ const Profile = () => {
           </Card>
         </div>
       </div>
+      </PageContent>
     </AuthGuard>
   );
 };

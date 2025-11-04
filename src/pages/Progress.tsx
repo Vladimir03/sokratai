@@ -4,6 +4,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import AuthGuard from "@/components/AuthGuard";
 import { TrendingUp, CheckCircle, Target, Award } from "lucide-react";
+import { PageContent } from "@/components/PageContent";
 
 interface Stats {
   totalSolved: number;
@@ -73,7 +74,8 @@ const Progress = () => {
 
   return (
     <AuthGuard>
-      <div className="container mx-auto px-4 pt-20 pb-6">
+      <PageContent>
+        <div className="container mx-auto px-4 pb-6">
         <div className="mb-8">
           <h1 className="text-4xl font-bold mb-2">Ваш прогресс</h1>
           <p className="text-muted-foreground">Отслеживайте свои достижения</p>
@@ -215,6 +217,7 @@ const Progress = () => {
           </div>
         )}
       </div>
+      </PageContent>
     </AuthGuard>
   );
 };

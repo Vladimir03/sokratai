@@ -199,7 +199,7 @@ export default function Onboarding({ userId, onComplete }: OnboardingProps) {
       </div>
       
       <div ref={scrollContainerRef} className="flex-1 overflow-y-auto px-4 pb-20">
-        <div className="w-full max-w-2xl mx-auto space-y-6 pt-6">
+        <div className="w-full max-w-2xl mx-auto space-y-6">
 
         {/* STEP 1: Grade selection */}
         {step === 1 && (

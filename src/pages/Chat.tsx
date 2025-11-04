@@ -18,6 +18,7 @@ import ChatInput from "@/components/ChatInput";
 import Onboarding from "@/components/Onboarding";
 import DevPanel from "@/components/DevPanel";
 import { subjectNames } from "@/data/onboardingTasks";
+import { PageContent } from "@/components/PageContent";
 
 interface Message {
   role: "user" | "assistant";
@@ -812,12 +813,12 @@ export default function Chat() {
       <AuthGuard>
         <div className="min-h-screen bg-background">
           <Navigation />
-          <div className="pt-[110px] md:pt-[104px]">
+          <PageContent>
             <Onboarding
               userId={user.id}
               onComplete={handleOnboardingComplete}
             />
-          </div>
+          </PageContent>
         </div>
       </AuthGuard>
     );

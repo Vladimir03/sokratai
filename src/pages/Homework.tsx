@@ -5,6 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import Navigation from "@/components/Navigation";
 import AuthGuard from "@/components/AuthGuard";
+import { PageContent } from "@/components/PageContent";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { HomeworkSet, PRIORITY_CONFIG, SUBJECTS, HomeworkTask } from "@/types/homework";
@@ -151,7 +152,8 @@ const Homework = () => {
     <AuthGuard>
       <div className="min-h-screen bg-background">
         <Navigation />
-        <main className="container mx-auto px-4 pt-20 pb-8">
+        <PageContent>
+          <main className="container mx-auto px-4 pb-8">
           <div className="max-w-5xl mx-auto space-y-6">
             {/* Header */}
             <div className="flex items-center justify-between">
@@ -243,6 +245,7 @@ const Homework = () => {
             )}
           </div>
         </main>
+        </PageContent>
       </div>
     </AuthGuard>
   );
