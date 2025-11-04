@@ -32,6 +32,7 @@ export default function Onboarding({ userId, onComplete }: OnboardingProps) {
   const { toast } = useToast();
   const [analytics] = useState(() => new OnboardingAnalytics());
   const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const continueButtonRef = useRef<HTMLButtonElement>(null);
 
   // Initialize analytics
   useEffect(() => {
@@ -40,6 +41,21 @@ export default function Onboarding({ userId, onComplete }: OnboardingProps) {
 
   // Get demo task based on selected grade and subject
   const demoTask = grade && subject ? getDemoTask(subject, grade) : null;
+
+  // Auto-scroll when answer is submitted on step 4
+  useEffect(() => {
+    if (step === 4 && answered && continueButtonRef.current) {
+      requestAnimationFrame(() => {
+        setTimeout(() => {
+          continueButtonRef.current?.scrollIntoView({ 
+            behavior: 'smooth', 
+            block: 'end',
+            inline: 'nearest' 
+          });
+        }, 400);
+      });
+    }
+  }, [answered, step]);
 
   // ============= HANDLERS =============
 
@@ -131,33 +147,24 @@ export default function Onboarding({ userId, onComplete }: OnboardingProps) {
   // ============= RENDER =============
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-background p-4">
-      <div className="bg-background w-full sm:max-w-md sm:rounded-lg flex flex-col max-h-[90vh] sm:max-h-[80vh] sm:border sm:shadow-lg">
-        {/* Progress indicator - fixed top */}
-        <div className="shrink-0 p-4 border-b">
-          <div className="flex justify-center gap-2">
-            {[1, 2, 3, 4, 5].map((s) => (
-              <div
-                key={s}
-                className={cn(
-                  "h-2 rounded-full transition-all duration-300",
-                  s === step ? "w-8 bg-accent" : "w-2 bg-muted"
-                )}
-              />
-            ))}
-          </div>
+    <div className="min-h-screen flex flex-col bg-background">
+      <div className="w-full flex-shrink-0 pt-8 pb-4">
+        {/* Progress indicator */}
+        <div className="flex justify-center gap-2">
+          {[1, 2, 3, 4, 5].map((s) => (
+            <div
+              key={s}
+              className={cn(
+                "h-2 rounded-full transition-all duration-300",
+                s === step ? "w-8 bg-accent" : "w-2 bg-muted"
+              )}
+            />
+          ))}
         </div>
-        
-        {/* Scrollable content */}
-        <div
-          ref={scrollContainerRef}
-          className="flex-1 overflow-y-auto min-h-0 px-4"
-          style={{ 
-            WebkitOverflowScrolling: 'touch',
-            paddingBottom: '2rem'
-          }}
-        >
-          <div className="w-full max-w-2xl mx-auto space-y-6 py-6">
+      </div>
+      
+      <div ref={scrollContainerRef} className="flex-1 overflow-y-auto px-4 pb-8">
+        <div className="w-full max-w-2xl mx-auto space-y-6">
 
         {/* STEP 1: Grade selection */}
         {step === 1 && (
@@ -386,6 +393,13 @@ export default function Onboarding({ userId, onComplete }: OnboardingProps) {
                   <p className="text-sm text-muted-foreground">
                     Правильный ответ: {demoTask.answer}
                   </p>
+                <Button
+                  ref={continueButtonRef}
+                  onClick={moveToFinalStep}
+                  className="w-full"
+                >
+                  Продолжить →
+                </Button>
                 </div>
               )}
             </div>
@@ -452,21 +466,7 @@ export default function Onboarding({ userId, onComplete }: OnboardingProps) {
             </Button>
           </div>
         )}
-        </div>
       </div>
-
-      {/* Sticky footer with continue button - always visible on step 4 after answer */}
-      {step === 4 && answered && (
-        <div className="shrink-0 p-4 pt-3 border-t bg-background/95 backdrop-blur-sm">
-          <Button
-            onClick={moveToFinalStep}
-            className="w-full shadow-lg"
-            size="lg"
-          >
-            Продолжить →
-          </Button>
-        </div>
-      )}
       </div>
     </div>
   );
