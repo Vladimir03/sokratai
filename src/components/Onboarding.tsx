@@ -80,6 +80,18 @@ export default function Onboarding({ userId, onComplete }: OnboardingProps) {
     }
   }, [answered, step]);
 
+  // Auto-scroll to top on every step change
+  useEffect(() => {
+    if (scrollContainerRef.current) {
+      requestAnimationFrame(() => {
+        scrollContainerRef.current?.scrollTo({
+          top: 0,
+          behavior: step === 1 ? 'auto' : 'smooth'
+        });
+      });
+    }
+  }, [step]);
+
   // ============= HANDLERS =============
 
   const selectGrade = (selectedGrade: number) => {
