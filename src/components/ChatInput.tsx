@@ -116,7 +116,7 @@ const ChatInput = memo(({
                 }
               }
             }}
-            placeholder={isMobile ? "Сообщение..." : "Напиши свой вопрос или вставь скриншот (Ctrl+V)..."}
+            placeholder={isMobile ? "Напиши вопрос..." : "Напиши свой вопрос или вставь скриншот (Ctrl+V)..."}
             rows={1}
             className="flex-1 resize-none overflow-y-auto !min-h-[40px] md:!min-h-[44px] text-sm md:text-base py-2.5 transition-[height] duration-150 leading-6"
             disabled={isLoading}
