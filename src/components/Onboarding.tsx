@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
@@ -31,6 +31,7 @@ export default function Onboarding({ userId, onComplete }: OnboardingProps) {
   
   const { toast } = useToast();
   const [analytics] = useState(() => new OnboardingAnalytics());
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
 
   // Initialize analytics
   useEffect(() => {
@@ -42,13 +43,13 @@ export default function Onboarding({ userId, onComplete }: OnboardingProps) {
 
   // Auto-scroll when answer is submitted on step 4
   useEffect(() => {
-    if (step === 4 && answered) {
+    if (step === 4 && answered && scrollContainerRef.current) {
       setTimeout(() => {
-        window.scrollTo({
-          top: document.documentElement.scrollHeight,
+        scrollContainerRef.current?.scrollTo({
+          top: scrollContainerRef.current.scrollHeight,
           behavior: 'smooth'
         });
-      }, 100);
+      }, 300);
     }
   }, [answered, step]);
 
@@ -158,7 +159,7 @@ export default function Onboarding({ userId, onComplete }: OnboardingProps) {
         </div>
       </div>
       
-      <div className="flex-1 overflow-y-auto px-4 pb-8">
+      <div ref={scrollContainerRef} className="flex-1 overflow-y-auto px-4 pb-8">
         <div className="w-full max-w-2xl mx-auto space-y-6">
 
         {/* STEP 1: Grade selection */}
