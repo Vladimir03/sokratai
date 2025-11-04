@@ -40,15 +40,6 @@ export default function Onboarding({ userId, onComplete }: OnboardingProps) {
   // Get demo task based on selected grade and subject
   const demoTask = grade && subject ? getDemoTask(subject, grade) : null;
 
-  // Auto-scroll to bottom on step 4 if content doesn't fit
-  useEffect(() => {
-    if (step === 4) {
-      setTimeout(() => {
-        window.scrollTo({ top: document.documentElement.scrollHeight, behavior: 'smooth' });
-      }, 100);
-    }
-  }, [step]);
-
   // ============= HANDLERS =============
 
   const selectGrade = (selectedGrade: number) => {
@@ -139,7 +130,7 @@ export default function Onboarding({ userId, onComplete }: OnboardingProps) {
   // ============= RENDER =============
 
   return (
-    <div className="min-h-screen flex flex-col items-center justify-start bg-background p-4 py-8">
+    <div className="h-screen flex flex-col items-center justify-center bg-background p-4">
       <div className="w-full max-w-2xl space-y-6">
         {/* Progress indicator */}
         <div className="flex justify-center gap-2 mb-8">
