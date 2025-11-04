@@ -813,12 +813,10 @@ export default function Chat() {
       <AuthGuard>
         <div className="min-h-screen bg-background">
           <Navigation />
-          <PageContent>
-            <Onboarding
-              userId={user.id}
-              onComplete={handleOnboardingComplete}
-            />
-          </PageContent>
+          <Onboarding
+            userId={user.id}
+            onComplete={handleOnboardingComplete}
+          />
         </div>
       </AuthGuard>
     );
