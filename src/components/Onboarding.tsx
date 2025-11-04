@@ -130,10 +130,10 @@ export default function Onboarding({ userId, onComplete }: OnboardingProps) {
   // ============= RENDER =============
 
   return (
-    <div className="min-h-screen flex flex-col items-center justify-start bg-background p-4 py-8">
-      <div className="w-full max-w-2xl space-y-6">
+    <div className="min-h-screen flex flex-col bg-background">
+      <div className="w-full flex-shrink-0 pt-8 pb-4">
         {/* Progress indicator */}
-        <div className="flex justify-center gap-2 mb-8">
+        <div className="flex justify-center gap-2">
           {[1, 2, 3, 4, 5].map((s) => (
             <div
               key={s}
@@ -144,6 +144,10 @@ export default function Onboarding({ userId, onComplete }: OnboardingProps) {
             />
           ))}
         </div>
+      </div>
+      
+      <div className="flex-1 overflow-y-auto px-4 pb-8">
+        <div className="w-full max-w-2xl mx-auto space-y-6">
 
         {/* STEP 1: Grade selection */}
         {step === 1 && (
@@ -444,6 +448,7 @@ export default function Onboarding({ userId, onComplete }: OnboardingProps) {
             </Button>
           </div>
         )}
+      </div>
       </div>
     </div>
   );
