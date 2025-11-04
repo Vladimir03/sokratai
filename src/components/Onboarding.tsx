@@ -32,6 +32,7 @@ export default function Onboarding({ userId, onComplete }: OnboardingProps) {
   const { toast } = useToast();
   const [analytics] = useState(() => new OnboardingAnalytics());
   const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const continueButtonRef = useRef<HTMLButtonElement>(null);
 
   // Initialize analytics
   useEffect(() => {
@@ -43,16 +44,16 @@ export default function Onboarding({ userId, onComplete }: OnboardingProps) {
 
   // Auto-scroll when answer is submitted on step 4
   useEffect(() => {
-    if (step === 4 && answered && scrollContainerRef.current) {
-      setTimeout(() => {
-        const container = scrollContainerRef.current;
-        if (container) {
-          container.scrollTo({
-            top: container.scrollHeight + 100, // +100px buffer to ensure button is visible
-            behavior: 'smooth'
+    if (step === 4 && answered && continueButtonRef.current) {
+      requestAnimationFrame(() => {
+        setTimeout(() => {
+          continueButtonRef.current?.scrollIntoView({ 
+            behavior: 'smooth', 
+            block: 'end',
+            inline: 'nearest' 
           });
-        }
-      }, 600); // Increased delay to allow animation to complete
+        }, 400);
+      });
     }
   }, [answered, step]);
 
@@ -392,12 +393,13 @@ export default function Onboarding({ userId, onComplete }: OnboardingProps) {
                   <p className="text-sm text-muted-foreground">
                     Правильный ответ: {demoTask.answer}
                   </p>
-                  <Button
-                    onClick={moveToFinalStep}
-                    className="w-full"
-                  >
-                    Продолжить →
-                  </Button>
+                <Button
+                  ref={continueButtonRef}
+                  onClick={moveToFinalStep}
+                  className="w-full"
+                >
+                  Продолжить →
+                </Button>
                 </div>
               )}
             </div>
