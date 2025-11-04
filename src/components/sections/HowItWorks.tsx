@@ -11,34 +11,91 @@ const HowItWorks = () => {
         </h3>
 
         <div className="max-w-4xl mx-auto">
-          {/* Code Example */}
-          <div className="bg-background border-2 border-accent rounded-xl p-6 md:p-8 font-mono text-sm md:text-base leading-relaxed shadow-2xl mb-8">
-            <div className="text-primary mb-3">
-              <strong>Ты:</strong> Не понимаю, как решать квадратные уравнения. Помоги с x² - 5x + 6 = 0
-            </div>
-            <div className="text-accent mb-3">
-              <strong>Сократ:</strong> Хороший вопрос! Квадратное уравнение можно решить разными способами.
-              Какой метод ты уже знаешь? Формулу дискриминанта или разложение на множители?
-            </div>
-            <div className="text-primary mb-3">
-              <strong>Ты:</strong> Слышал про дискриминант, но не помню формулу
-            </div>
-            <div className="text-accent mb-3">
-              <strong>Сократ:</strong> Отлично! Дискриминант находится по формуле D = b² - 4ac.
-              В твоем уравнении x² - 5x + 6 = 0, какие коэффициенты a, b и c?
-            </div>
-            <div className="text-primary mb-3">
-              <strong>Ты:</strong> a = 1, b = -5, c = 6?
-            </div>
-            <div className="text-accent mb-3">
-              <strong>Сократ:</strong> Правильно! Теперь подставь эти значения в формулу дискриминанта. Что получится?
-            </div>
-            <div className="text-primary mb-3">
-              <strong>Ты:</strong> D = (-5)² - 4×1×6 = 25 - 24 = 1
-            </div>
-            <div className="text-accent">
-              <strong>Сократ:</strong> ОТЛИЧНО! 🎉 Ты все правильно посчитал! Теперь можешь найти корни по формуле
-              x = (-b ± √D) / 2a. Попробуй сам!
+          {/* Chat Dialog */}
+          <div className="bg-background border-2 border-accent rounded-xl p-6 md:p-8 shadow-2xl mb-8">
+            <div className="space-y-4">
+              {/* User message */}
+              <div className="flex gap-3 items-start">
+                <div className="flex-shrink-0 w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center text-xs font-semibold text-primary">
+                  Ты
+                </div>
+                <div className="flex-1 bg-muted/50 rounded-lg p-3 text-sm md:text-base">
+                  Не понимаю, как решать квадратные уравнения. Помоги с x² - 5x + 6 = 0
+                </div>
+              </div>
+
+              {/* Sokrat message */}
+              <div className="flex gap-3 items-start">
+                <div className="flex-shrink-0 w-8 h-8 rounded-full bg-accent/20 flex items-center justify-center text-xs font-semibold text-accent">
+                  AI
+                </div>
+                <div className="flex-1 bg-accent/5 rounded-lg p-3 text-sm md:text-base border border-accent/20">
+                  Хороший вопрос! Квадратное уравнение можно решить разными способами.
+                  Какой метод ты уже знаешь? Формулу дискриминанта или разложение на множители?
+                </div>
+              </div>
+
+              {/* User message */}
+              <div className="flex gap-3 items-start">
+                <div className="flex-shrink-0 w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center text-xs font-semibold text-primary">
+                  Ты
+                </div>
+                <div className="flex-1 bg-muted/50 rounded-lg p-3 text-sm md:text-base">
+                  Слышал про дискриминант, но не помню формулу
+                </div>
+              </div>
+
+              {/* Sokrat message */}
+              <div className="flex gap-3 items-start">
+                <div className="flex-shrink-0 w-8 h-8 rounded-full bg-accent/20 flex items-center justify-center text-xs font-semibold text-accent">
+                  AI
+                </div>
+                <div className="flex-1 bg-accent/5 rounded-lg p-3 text-sm md:text-base border border-accent/20">
+                  Отлично! Дискриминант находится по формуле D = b² - 4ac.
+                  В твоем уравнении x² - 5x + 6 = 0, какие коэффициенты a, b и c?
+                </div>
+              </div>
+
+              {/* User message */}
+              <div className="flex gap-3 items-start">
+                <div className="flex-shrink-0 w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center text-xs font-semibold text-primary">
+                  Ты
+                </div>
+                <div className="flex-1 bg-muted/50 rounded-lg p-3 text-sm md:text-base">
+                  a = 1, b = -5, c = 6?
+                </div>
+              </div>
+
+              {/* Sokrat message */}
+              <div className="flex gap-3 items-start">
+                <div className="flex-shrink-0 w-8 h-8 rounded-full bg-accent/20 flex items-center justify-center text-xs font-semibold text-accent">
+                  AI
+                </div>
+                <div className="flex-1 bg-accent/5 rounded-lg p-3 text-sm md:text-base border border-accent/20">
+                  Правильно! Теперь подставь эти значения в формулу дискриминанта. Что получится?
+                </div>
+              </div>
+
+              {/* User message */}
+              <div className="flex gap-3 items-start">
+                <div className="flex-shrink-0 w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center text-xs font-semibold text-primary">
+                  Ты
+                </div>
+                <div className="flex-1 bg-muted/50 rounded-lg p-3 text-sm md:text-base">
+                  D = (-5)² - 4×1×6 = 25 - 24 = 1
+                </div>
+              </div>
+
+              {/* Sokrat message */}
+              <div className="flex gap-3 items-start">
+                <div className="flex-shrink-0 w-8 h-8 rounded-full bg-accent/20 flex items-center justify-center text-xs font-semibold text-accent">
+                  AI
+                </div>
+                <div className="flex-1 bg-accent/5 rounded-lg p-3 text-sm md:text-base border border-accent/20">
+                  ОТЛИЧНО! 🎉 Ты все правильно посчитал! Теперь можешь найти корни по формуле
+                  x = (-b ± √D) / 2a. Попробуй сам!
+                </div>
+              </div>
             </div>
           </div>
 
