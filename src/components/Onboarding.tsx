@@ -139,7 +139,7 @@ export default function Onboarding({ userId, onComplete }: OnboardingProps) {
   // ============= RENDER =============
 
   return (
-    <div className="h-screen flex flex-col items-center justify-center bg-background p-4">
+    <div className="min-h-screen flex flex-col items-center justify-start bg-background p-4 py-8">
       <div className="w-full max-w-2xl space-y-6">
         {/* Progress indicator */}
         <div className="flex justify-center gap-2 mb-8">
