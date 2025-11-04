@@ -44,15 +44,19 @@ export default function Onboarding({ userId, onComplete }: OnboardingProps) {
 
   // Auto-scroll when answer is submitted on step 4
   useEffect(() => {
-    if (step === 4 && answered && continueButtonRef.current) {
+    if (step === 4 && answered && continueButtonRef.current && scrollContainerRef.current) {
       requestAnimationFrame(() => {
-        setTimeout(() => {
-          continueButtonRef.current?.scrollIntoView({ 
-            behavior: 'smooth', 
-            block: 'end',
-            inline: 'nearest' 
-          });
-        }, 400);
+        requestAnimationFrame(() => {
+          setTimeout(() => {
+            if (continueButtonRef.current) {
+              continueButtonRef.current.scrollIntoView({ 
+                behavior: 'smooth', 
+                block: 'center', // Кнопка по центру экрана!
+                inline: 'nearest' 
+              });
+            }
+          }, 500);
+        });
       });
     }
   }, [answered, step]);
@@ -163,7 +167,13 @@ export default function Onboarding({ userId, onComplete }: OnboardingProps) {
         </div>
       </div>
       
-      <div ref={scrollContainerRef} className="flex-1 overflow-y-auto px-4 pb-20">
+      <div
+        ref={scrollContainerRef}
+        className="flex-1 overflow-y-auto px-4 pb-24 sm:pb-32"
+        style={{ 
+          paddingBottom: 'max(6rem, env(safe-area-inset-bottom) + 4rem)' 
+        }}
+      >
         <div className="w-full max-w-2xl mx-auto space-y-6">
 
         {/* STEP 1: Grade selection */}
@@ -396,7 +406,7 @@ export default function Onboarding({ userId, onComplete }: OnboardingProps) {
                 <Button
                   ref={continueButtonRef}
                   onClick={moveToFinalStep}
-                  className="w-full"
+                  className="w-full mt-6 mb-8"
                 >
                   Продолжить →
                 </Button>
