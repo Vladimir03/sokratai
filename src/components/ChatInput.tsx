@@ -32,7 +32,11 @@ const ChatInput = memo(({
     const textarea = textareaRef.current;
     if (textarea) {
       textarea.style.height = 'auto';
-      const newHeight = Math.min(textarea.scrollHeight, isMobile ? 120 : 150);
+      // Calculate the line height and max lines (Telegram-style)
+      const lineHeight = 24; // Base line height
+      const maxLines = isMobile ? 4 : 5;
+      const maxHeight = lineHeight * maxLines;
+      const newHeight = Math.min(textarea.scrollHeight, maxHeight);
       textarea.style.height = `${newHeight}px`;
     }
   };
@@ -77,7 +81,7 @@ const ChatInput = memo(({
           <Button
             variant="outline"
             size="icon"
-            className="h-12 w-12 md:h-[60px] md:w-[60px] shrink-0"
+            className="h-10 w-10 md:h-11 md:w-11 shrink-0"
             onClick={() => fileInputRef.current?.click()}
             disabled={isLoading}
             title="Загрузить фото"
@@ -100,17 +104,20 @@ const ChatInput = memo(({
                   setTimeout(() => {
                     if (textareaRef.current) {
                       textareaRef.current.style.height = 'auto';
+                      textareaRef.current.style.height = isMobile ? '40px' : '44px';
                     }
                   }, 0);
                 }
               }
             }}
             placeholder={isMobile ? "Напиши вопрос..." : "Напиши свой вопрос или вставь скриншот (Ctrl+V)..."}
-            className="!min-h-[48px] md:!min-h-[60px] resize-none text-sm md:text-base py-3 overflow-y-auto"
+            className="!min-h-0 resize-none text-sm md:text-base py-2.5 md:py-3 overflow-y-auto transition-all duration-150 leading-6"
             disabled={isLoading}
+            rows={1}
             style={{ 
               fontSize: isMobile ? '16px' : undefined,
-              height: '48px'
+              height: isMobile ? '40px' : '44px',
+              maxHeight: isMobile ? '96px' : '120px'
             }}
           />
 
@@ -120,11 +127,17 @@ const ChatInput = memo(({
               if (message.trim() || uploadedFile) {
                 onSend(message, 'text');
                 setMessage("");
+                setTimeout(() => {
+                  if (textareaRef.current) {
+                    textareaRef.current.style.height = 'auto';
+                    textareaRef.current.style.height = isMobile ? '40px' : '44px';
+                  }
+                }, 0);
               }
             }}
             disabled={(!message.trim() && !uploadedFile) || isLoading}
             size="icon"
-            className="h-12 w-12 md:h-[60px] md:w-[60px] shrink-0"
+            className="h-10 w-10 md:h-11 md:w-11 shrink-0"
           >
             <Send className="h-4 w-4 md:h-5 md:w-5" />
           </Button>
