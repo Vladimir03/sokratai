@@ -40,6 +40,18 @@ export default function Onboarding({ userId, onComplete }: OnboardingProps) {
   // Get demo task based on selected grade and subject
   const demoTask = grade && subject ? getDemoTask(subject, grade) : null;
 
+  // Auto-scroll when answer is submitted on step 4
+  useEffect(() => {
+    if (step === 4 && answered) {
+      setTimeout(() => {
+        window.scrollTo({
+          top: document.documentElement.scrollHeight,
+          behavior: 'smooth'
+        });
+      }, 100);
+    }
+  }, [answered, step]);
+
   // ============= HANDLERS =============
 
   const selectGrade = (selectedGrade: number) => {
