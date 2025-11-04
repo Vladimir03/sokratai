@@ -32,6 +32,8 @@ export default function Onboarding({ userId, onComplete }: OnboardingProps) {
   const { toast } = useToast();
   const [analytics] = useState(() => new OnboardingAnalytics());
   const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const hint2Ref = useRef<HTMLDivElement>(null);
+  const answerInputRef = useRef<HTMLDivElement>(null);
   const continueButtonRef = useRef<HTMLButtonElement>(null);
 
   // Initialize analytics
@@ -42,18 +44,39 @@ export default function Onboarding({ userId, onComplete }: OnboardingProps) {
   // Get demo task based on selected grade and subject
   const demoTask = grade && subject ? getDemoTask(subject, grade) : null;
 
+  // Universal scroll function
+  const scrollToElement = (ref: React.RefObject<HTMLElement>, delay = 400) => {
+    if (!ref.current) return;
+    
+    requestAnimationFrame(() => {
+      setTimeout(() => {
+        ref.current?.scrollIntoView({ 
+          behavior: 'smooth', 
+          block: 'center',
+          inline: 'nearest' 
+        });
+      }, delay);
+    });
+  };
+
+  // Auto-scroll when hint 2 is shown
+  useEffect(() => {
+    if (step === 4 && showHint2 && hint2Ref.current) {
+      scrollToElement(hint2Ref);
+    }
+  }, [showHint2, step]);
+
+  // Auto-scroll when answer input appears
+  useEffect(() => {
+    if (step === 4 && showAnswerInput && answerInputRef.current) {
+      scrollToElement(answerInputRef);
+    }
+  }, [showAnswerInput, step]);
+
   // Auto-scroll when answer is submitted on step 4
   useEffect(() => {
     if (step === 4 && answered && continueButtonRef.current) {
-      requestAnimationFrame(() => {
-        setTimeout(() => {
-          continueButtonRef.current?.scrollIntoView({ 
-            behavior: 'smooth', 
-            block: 'end',
-            inline: 'nearest' 
-          });
-        }, 400);
-      });
+      scrollToElement(continueButtonRef, 500);
     }
   }, [answered, step]);
 
@@ -163,7 +186,7 @@ export default function Onboarding({ userId, onComplete }: OnboardingProps) {
         </div>
       </div>
       
-      <div ref={scrollContainerRef} className="flex-1 overflow-y-auto px-4 pb-8">
+      <div ref={scrollContainerRef} className="flex-1 overflow-y-auto px-4 pb-20">
         <div className="w-full max-w-2xl mx-auto space-y-6">
 
         {/* STEP 1: Grade selection */}
@@ -342,7 +365,7 @@ export default function Onboarding({ userId, onComplete }: OnboardingProps) {
 
               {/* Hint 2 */}
               {showHint2 && (
-                <div className="bg-background rounded-lg p-4 animate-fade-in">
+                <div ref={hint2Ref} className="bg-background rounded-lg p-4 animate-fade-in">
                   <p className="text-sm">💡 {demoTask.hint2}</p>
                 </div>
               )}
@@ -368,7 +391,7 @@ export default function Onboarding({ userId, onComplete }: OnboardingProps) {
 
               {/* Answer input */}
               {showAnswerInput && !answered && (
-                <div className="flex gap-2 animate-fade-in">
+                <div ref={answerInputRef} className="flex gap-2 animate-fade-in">
                   <Input
                     placeholder="Твой ответ..."
                     value={userAnswer}
