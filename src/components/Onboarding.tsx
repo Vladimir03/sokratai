@@ -80,7 +80,19 @@ export default function Onboarding({ userId, onComplete }: OnboardingProps) {
     }
   }, [answered, step]);
 
-  // Removed auto-scroll - user controls scroll like in Telegram
+  // Auto-scroll to top when entering step 5 (final step)
+  useEffect(() => {
+    if (step === 5 && scrollContainerRef.current) {
+      requestAnimationFrame(() => {
+        setTimeout(() => {
+          scrollContainerRef.current?.scrollTo({
+            top: 0,
+            behavior: 'smooth'
+          });
+        }, 100);
+      });
+    }
+  }, [step]);
 
   // ============= HANDLERS =============
 
