@@ -31,10 +31,14 @@ const Footer = () => {
         </div>
 
         {/* Brand Story */}
-        <p className="text-sm italic opacity-75 max-w-3xl mx-auto mb-6">
+        <p className="text-sm italic opacity-75 max-w-3xl mx-auto mb-2">
           Мы верим, что каждый может понять математику, физику и информатику, если задавать правильные вопросы. 
           Наш ИИ использует сократовский метод: через вопросы-подсказки ты сам приходишь к ответу, 
           а значит — по-настоящему понимаешь материал. Не списывание, а настоящее обучение!
+        </p>
+        
+        <p className="text-sm italic opacity-75 max-w-3xl mx-auto mb-6">
+          "Хорошие учителя дают новые знания, а великие – учат мыслить по-новому" (с)
         </p>
 
         <div className="border-t border-white/20 pt-6">

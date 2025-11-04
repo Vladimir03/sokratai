@@ -64,7 +64,7 @@ const ForParents = ({ onNavigate }: ForParentsProps) => {
           {/* CTA */}
           <div className="text-center">
             <p className="text-xl mb-6 text-foreground">
-              <strong>Попробуйте 7 дней бесплатно</strong> и увидьте разницу сами
+              <strong>Попробуйте 7 дней бесплатно</strong> и увидите разницу сами
             </p>
             <Button 
               size="lg"

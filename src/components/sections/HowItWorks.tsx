@@ -12,31 +12,31 @@ const HowItWorks = () => {
 
         <div className="max-w-4xl mx-auto">
           {/* Code Example */}
-          <div className="bg-slate-900 text-white rounded-xl p-6 md:p-8 font-mono text-sm md:text-base leading-relaxed shadow-2xl mb-8">
-            <div className="text-accent mb-3">
+          <div className="bg-background border-2 border-accent rounded-xl p-6 md:p-8 font-mono text-sm md:text-base leading-relaxed shadow-2xl mb-8">
+            <div className="text-primary mb-3">
               <strong>Ты:</strong> Не понимаю, как решать квадратные уравнения. Помоги с x² - 5x + 6 = 0
             </div>
-            <div className="text-blue-400 mb-3">
+            <div className="text-accent mb-3">
               <strong>Сократ:</strong> Хороший вопрос! Квадратное уравнение можно решить разными способами.
               Какой метод ты уже знаешь? Формулу дискриминанта или разложение на множители?
             </div>
-            <div className="text-accent mb-3">
+            <div className="text-primary mb-3">
               <strong>Ты:</strong> Слышал про дискриминант, но не помню формулу
             </div>
-            <div className="text-blue-400 mb-3">
+            <div className="text-accent mb-3">
               <strong>Сократ:</strong> Отлично! Дискриминант находится по формуле D = b² - 4ac.
               В твоем уравнении x² - 5x + 6 = 0, какие коэффициенты a, b и c?
             </div>
-            <div className="text-accent mb-3">
+            <div className="text-primary mb-3">
               <strong>Ты:</strong> a = 1, b = -5, c = 6?
             </div>
-            <div className="text-blue-400 mb-3">
+            <div className="text-accent mb-3">
               <strong>Сократ:</strong> Правильно! Теперь подставь эти значения в формулу дискриминанта. Что получится?
             </div>
-            <div className="text-accent mb-3">
+            <div className="text-primary mb-3">
               <strong>Ты:</strong> D = (-5)² - 4×1×6 = 25 - 24 = 1
             </div>
-            <div className="text-blue-400">
+            <div className="text-accent">
               <strong>Сократ:</strong> ОТЛИЧНО! 🎉 Ты все правильно посчитал! Теперь можешь найти корни по формуле
               x = (-b ± √D) / 2a. Попробуй сам!
             </div>

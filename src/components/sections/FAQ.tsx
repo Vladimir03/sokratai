@@ -1,24 +1,31 @@
+import {
+  Accordion,
+  AccordionContent,
+  AccordionItem,
+  AccordionTrigger,
+} from "@/components/ui/accordion";
+
 const FAQ = () => {
   const faqs = [
     {
-      question: "Q: Это заменит репетитора?",
-      answer: "A: Нет, это дополнение к репетитору. Идеально: репетитор раз в неделю + Сократ каждый день."
+      question: "Это заменит репетитора?",
+      answer: "Нет, это дополнение к репетитору. Идеально: репетитор раз в неделю + Сократ каждый день."
     },
     {
-      question: "Q: Подходит ли для подготовки к ОГЭ/ЕГЭ?",
-      answer: "A: Да! Мы адаптированы под школьную программу и экзамены. Показываем способы решения, которые принимают на ОГЭ/ЕГЭ."
+      question: "Подходит ли для подготовки к ОГЭ/ЕГЭ?",
+      answer: "Да! Мы адаптированы под школьную программу и экзамены. Показываем способы решения, которые принимают на ОГЭ/ЕГЭ."
     },
     {
-      question: "Q: Можно использовать на телефоне?",
-      answer: "A: Да! Работает на компьютере, планшете и телефоне. Особенно удобно в школе перед контрольными."
+      question: "Можно использовать на телефоне?",
+      answer: "Да! Работает на компьютере, планшете и телефоне. Особенно удобно в школе перед контрольными."
     },
     {
-      question: "Q: А если у меня пробелы с 5-6 класса?",
-      answer: "A: ИИ диагностирует пробелы и помогает их закрыть перед изучением новых тем."
+      question: "А если у меня пробелы с 5-6 класса?",
+      answer: "ИИ диагностирует пробелы и помогает их закрыть перед изучением новых тем."
     },
     {
-      question: "Q: Сколько стоит после пробного периода?",
-      answer: "A: Есть тарифы 399₽/месяц, 699₽/месяц и 1399₽/месяц - это дополнительно одно занятие с репетитором."
+      question: "Сколько стоит после пробного периода?",
+      answer: "Есть тарифы 399₽/месяц, 699₽/месяц и 1399₽/месяц - это дополнительно одно занятие с репетитором."
     }
   ];
 
@@ -29,17 +36,18 @@ const FAQ = () => {
           ❓ Часто задаваемые вопросы
         </h2>
 
-        <div className="space-y-4 max-w-4xl mx-auto">
+        <Accordion type="single" collapsible className="max-w-4xl mx-auto">
           {faqs.map((faq, index) => (
-            <div 
-              key={index}
-              className="bg-background border border-border rounded-xl p-6 transition-all duration-300 hover:shadow-elegant hover:border-accent"
-            >
-              <div className="font-bold text-lg mb-3 text-primary">{faq.question}</div>
-              <div className="text-muted-foreground leading-relaxed">{faq.answer}</div>
-            </div>
+            <AccordionItem key={index} value={`item-${index}`}>
+              <AccordionTrigger className="text-left font-bold text-lg text-primary hover:text-primary-variant">
+                {faq.question}
+              </AccordionTrigger>
+              <AccordionContent className="text-muted-foreground leading-relaxed">
+                {faq.answer}
+              </AccordionContent>
+            </AccordionItem>
           ))}
-        </div>
+        </Accordion>
       </div>
     </section>
   );

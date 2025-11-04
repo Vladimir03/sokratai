@@ -23,7 +23,7 @@ const Pricing = ({ onNavigate }: PricingProps) => {
     <section className="py-20 px-4 bg-muted/30" id="pricing">
       <div className="container mx-auto">
         <h2 className="text-3xl md:text-4xl font-bold text-center mb-12 text-primary">
-          💎 Начни понимать математику, физику и информатику уже сегодня
+          💎 Начни понимать математику, физику или информатику уже сегодня
         </h2>
 
         {/* Pricing Wrapper with Scroll */}
