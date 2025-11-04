@@ -80,17 +80,7 @@ export default function Onboarding({ userId, onComplete }: OnboardingProps) {
     }
   }, [answered, step]);
 
-  // Auto-scroll to top on every step change
-  useEffect(() => {
-    if (scrollContainerRef.current) {
-      requestAnimationFrame(() => {
-        scrollContainerRef.current?.scrollTo({
-          top: 0,
-          behavior: step === 1 ? 'auto' : 'smooth'
-        });
-      });
-    }
-  }, [step]);
+  // Removed auto-scroll - user controls scroll like in Telegram
 
   // ============= HANDLERS =============
 
@@ -182,28 +172,50 @@ export default function Onboarding({ userId, onComplete }: OnboardingProps) {
   // ============= RENDER =============
 
   return (
-    <div className="min-h-screen flex flex-col bg-background pt-[110px] md:pt-[104px]">
-      <div className="w-full flex-shrink-0 pt-8 pb-4">
-        {/* Progress indicator */}
-        <div className="flex justify-center gap-2">
-          {[1, 2, 3, 4, 5].map((s) => (
-            <div
-              key={s}
-              className={cn(
-                "h-2 rounded-full transition-all duration-300",
-                s === step ? "w-8 bg-accent" : "w-2 bg-muted"
-              )}
-            />
-          ))}
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/50">
+      <div className="relative bg-background w-full h-full sm:h-auto sm:max-w-md sm:rounded-lg flex flex-col sm:max-h-[85vh] overflow-hidden">
+        
+        {/* Compact sticky progress */}
+        <div className="shrink-0 sticky top-0 z-10 bg-background/95 backdrop-blur-sm border-b">
+          <div className="px-4 py-3">
+            <div className="flex items-center justify-center gap-2 max-w-[200px] mx-auto">
+              {[1, 2, 3, 4, 5].map((num) => (
+                <div
+                  key={num}
+                  className={cn(
+                    "h-1.5 rounded-full transition-all duration-300",
+                    num === step 
+                      ? "flex-1 bg-primary" 
+                      : num < step 
+                      ? "w-1.5 bg-primary/50" 
+                      : "w-1.5 bg-muted"
+                  )}
+                />
+              ))}
+            </div>
+            <p className="text-[11px] text-center text-muted-foreground mt-2 font-medium">
+              Шаг {step} из 5
+            </p>
+          </div>
         </div>
-      </div>
-      
-      <div ref={scrollContainerRef} className="flex-1 overflow-y-auto px-4 pb-20 pt-16">
-        <div className="w-full max-w-2xl mx-auto space-y-6">
+
+        {/* Scrollable content */}
+        <div
+          ref={scrollContainerRef}
+          className="flex-1 overflow-y-auto min-h-0 px-4"
+          style={{
+            paddingTop: 'max(1rem, env(safe-area-inset-top))',
+            paddingBottom: 'max(5rem, env(safe-area-inset-bottom) + 4rem)',
+            WebkitOverflowScrolling: 'touch',
+            scrollPaddingTop: '1rem',
+            scrollPaddingBottom: '5rem'
+          }}
+        >
+          <div className="w-full max-w-2xl mx-auto space-y-4">
 
         {/* STEP 1: Grade selection */}
         {step === 1 && (
-          <div className="space-y-6 animate-fade-in">
+          <div className="space-y-4 animate-fade-in">
             <div className="text-center space-y-2">
               <h2 className="text-2xl md:text-3xl font-bold">
                 Привет! 👋 Я Сократ — твой ИИ-помощник.
@@ -266,7 +278,7 @@ export default function Onboarding({ userId, onComplete }: OnboardingProps) {
 
         {/* STEP 2: Subject selection */}
         {step === 2 && (
-          <div className="space-y-6 animate-fade-in">
+          <div className="space-y-4 animate-fade-in">
             <p className="text-center text-xl">
               Какой предмет тебе даётся сложнее всего?
             </p>
@@ -296,7 +308,7 @@ export default function Onboarding({ userId, onComplete }: OnboardingProps) {
 
         {/* STEP 3: Goal selection */}
         {step === 3 && (
-          <div className="space-y-6 animate-fade-in">
+          <div className="space-y-4 animate-fade-in">
             <p className="text-center text-xl">
               Для чего готовишься?
             </p>
@@ -443,7 +455,7 @@ export default function Onboarding({ userId, onComplete }: OnboardingProps) {
 
         {/* STEP 5: Call to action */}
         {step === 5 && (
-          <div className="space-y-6 animate-fade-in text-center">
+          <div className="space-y-4 animate-fade-in text-center">
             <div className="space-y-3">
               <h2 className="text-2xl md:text-3xl font-bold">
                 Теперь твоя очередь! 🚀
@@ -501,7 +513,12 @@ export default function Onboarding({ userId, onComplete }: OnboardingProps) {
             </Button>
           </div>
         )}
-      </div>
+        </div>
+        </div>
+
+        {/* Scroll fade indicators */}
+        <div className="absolute top-[52px] left-0 right-0 h-8 bg-gradient-to-b from-background via-background/80 to-transparent pointer-events-none z-[5]" />
+        <div className="absolute bottom-0 left-0 right-0 h-16 bg-gradient-to-t from-background via-background/80 to-transparent pointer-events-none z-[5]" />
       </div>
     </div>
   );
