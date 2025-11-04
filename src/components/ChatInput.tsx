@@ -37,6 +37,34 @@ const ChatInput = memo(({
     element.style.height = `${Math.min(element.scrollHeight, maxHeight)}px`;
   };
 
+  // iOS Safari fix - handle textarea focus
+  const handleTextareaClick = () => {
+    if (textareaRef.current) {
+      textareaRef.current.focus();
+      // iOS requires a delay for reliable focus
+      setTimeout(() => {
+        textareaRef.current?.focus();
+      }, 100);
+    }
+  };
+
+  // Handle iOS keyboard appearance
+  useEffect(() => {
+    const handleResize = () => {
+      if (document.activeElement === textareaRef.current) {
+        setTimeout(() => {
+          textareaRef.current?.scrollIntoView({ 
+            behavior: 'smooth', 
+            block: 'center' 
+          });
+        }, 300);
+      }
+    };
+
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
   useEffect(() => {
     if (textareaRef.current) {
       adjustTextareaHeight(textareaRef.current);
@@ -94,6 +122,8 @@ const ChatInput = memo(({
               setMessage(e.target.value);
               adjustTextareaHeight(e.target);
             }}
+            onClick={handleTextareaClick}
+            onTouchStart={handleTextareaClick}
             onPaste={(e) => {
               onPaste(e);
               setTimeout(() => {

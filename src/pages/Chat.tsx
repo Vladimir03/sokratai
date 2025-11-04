@@ -784,6 +784,14 @@ export default function Chat() {
   }, [currentChat?.homework_task, messages.length, loadingHistory, isLoading]);
 
   const handleChatSelect = (chatId: string) => {
+    // iOS fix - cleanup before navigation
+    if (document.activeElement instanceof HTMLElement) {
+      document.activeElement.blur();
+    }
+    document.body.style.overflow = '';
+    document.body.style.position = '';
+    document.body.style.pointerEvents = '';
+    
     navigate(`/chat?id=${chatId}`);
     if (isMobile) {
       setIsSidebarOpen(false);
@@ -799,12 +807,37 @@ export default function Chat() {
     }
   }, [isMobile]);
 
-  // Fix body overflow for chat page only
+  // iOS Safari fix - prevent scroll freeze
   useEffect(() => {
-    document.body.classList.add('chat-page-fixed');
-    return () => {
-      document.body.classList.remove('chat-page-fixed');
-    };
+    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
+    
+    if (isIOS) {
+      const preventScrollFreeze = () => {
+        document.body.style.overflow = '';
+        document.body.style.position = '';
+        document.body.style.pointerEvents = '';
+      };
+      
+      // Initial cleanup
+      preventScrollFreeze();
+      
+      // Handle navigation events
+      window.addEventListener('popstate', preventScrollFreeze);
+      
+      // Handle visibility changes
+      const handleVisibilityChange = () => {
+        if (document.visibilityState === 'visible') {
+          preventScrollFreeze();
+        }
+      };
+      document.addEventListener('visibilitychange', handleVisibilityChange);
+      
+      return () => {
+        window.removeEventListener('popstate', preventScrollFreeze);
+        document.removeEventListener('visibilitychange', handleVisibilityChange);
+        preventScrollFreeze();
+      };
+    }
   }, []);
 
   // Show onboarding if needed
@@ -903,7 +936,9 @@ export default function Chat() {
                 className="flex-1 overflow-y-auto overflow-x-hidden px-4"
                 style={{ 
                   WebkitOverflowScrolling: 'touch',
-                  overscrollBehavior: 'contain'
+                  overscrollBehavior: 'contain',
+                  transform: 'translateZ(0)',
+                  willChange: 'scroll-position'
                 }}
               >
                 {loadingHistory ? (

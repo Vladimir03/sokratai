@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import {
   Dialog,
@@ -23,6 +23,16 @@ export function CreateChatDialog({ open, onClose, onChatCreated }: CreateChatDia
   const [icon, setIcon] = useState("💬");
   const [isCreating, setIsCreating] = useState(false);
   const { toast } = useToast();
+
+  // iOS fix - cleanup when dialog closes
+  useEffect(() => {
+    if (!open) {
+      // Restore body styles when dialog closes
+      document.body.style.overflow = '';
+      document.body.style.position = '';
+      document.body.style.pointerEvents = '';
+    }
+  }, [open]);
 
   const handleCreate = async () => {
     if (!title.trim()) {
