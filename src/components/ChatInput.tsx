@@ -37,17 +37,6 @@ const ChatInput = memo(({
     element.style.height = `${Math.min(element.scrollHeight, maxHeight)}px`;
   };
 
-  // iOS Safari fix - handle textarea focus
-  const handleTextareaClick = () => {
-    if (textareaRef.current) {
-      textareaRef.current.focus();
-      // iOS requires a delay for reliable focus
-      setTimeout(() => {
-        textareaRef.current?.focus();
-      }, 100);
-    }
-  };
-
   // Handle iOS keyboard appearance
   useEffect(() => {
     const handleResize = () => {
@@ -122,8 +111,6 @@ const ChatInput = memo(({
               setMessage(e.target.value);
               adjustTextareaHeight(e.target);
             }}
-            onClick={handleTextareaClick}
-            onTouchStart={handleTextareaClick}
             onPaste={(e) => {
               onPaste(e);
               setTimeout(() => {
