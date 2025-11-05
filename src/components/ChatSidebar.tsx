@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
-import { Plus, X } from "lucide-react";
+import { Plus, X, Loader2 } from "lucide-react";
 import { useState } from "react";
 import { CreateChatDialog } from "./CreateChatDialog";
 import { CustomChatItem } from "./CustomChatItem";
@@ -32,6 +32,7 @@ interface Chat {
 
 export function ChatSidebar({ currentChatId, onChatSelect, onClose, isMobile }: ChatSidebarProps) {
   const [showCreateDialog, setShowCreateDialog] = useState(false);
+  const [optimisticChats, setOptimisticChats] = useState<Array<{id: string, title: string, icon: string}>>([]);
   const navigate = useNavigate();
 
   const { data: user } = useQuery({
@@ -70,6 +71,10 @@ export function ChatSidebar({ currentChatId, onChatSelect, onClose, isMobile }: 
   const generalChat = chats.find(c => c.chat_type === 'general');
   const taskChats = chats.filter(c => c.chat_type === 'homework_task');
   const customChats = chats.filter(c => c.chat_type === 'custom');
+  
+  // Merge optimistic chats with real chats (remove optimistic ones that are now real)
+  const realChatIds = new Set(chats.map(c => c.id));
+  const pendingOptimisticChats = optimisticChats.filter(oc => !realChatIds.has(oc.id));
 
   const getDefaultTitle = (chat: Chat) => {
     if (chat.chat_type === 'general') return 'Общий чат';
@@ -114,6 +119,39 @@ export function ChatSidebar({ currentChatId, onChatSelect, onClose, isMobile }: 
     }
   };
 
+  const handleChatCreated = (chatIdOrTempId: string) => {
+    // Check if it's a temp ID (optimistic)
+    if (chatIdOrTempId.startsWith('temp-')) {
+      // Extract title and icon from the current form state
+      const tempChat = {
+        id: chatIdOrTempId,
+        title: '', // Will be set by CreateChatDialog
+        icon: '💬'
+      };
+      setOptimisticChats(prev => [...prev, tempChat]);
+    } else {
+      // Real chat created - remove all optimistic chats and navigate
+      setOptimisticChats([]);
+      onChatSelect(chatIdOrTempId);
+    }
+  };
+
+  const OptimisticChatItem = ({ chat }: { chat: {id: string, title: string, icon: string} }) => {
+    return (
+      <div className="w-full px-4 py-3 bg-accent/50 border-l-4 border-primary/50 animate-pulse">
+        <div className="flex items-center gap-2">
+          <span className="text-xl opacity-70">{chat.icon}</span>
+          <div className="flex-1 min-w-0 flex items-center gap-2">
+            <div className="font-medium truncate opacity-70">
+              Создаю чат...
+            </div>
+            <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   return (
     <>
       <div className="w-full flex flex-col h-full bg-background">
@@ -145,11 +183,14 @@ export function ChatSidebar({ currentChatId, onChatSelect, onClose, isMobile }: 
             </>
           )}
 
-          {customChats.length > 0 && (
+          {(customChats.length > 0 || pendingOptimisticChats.length > 0) && (
             <>
               <div className="px-4 py-2 text-sm text-muted-foreground font-medium mt-4">
                 МОИ ЧАТЫ
               </div>
+              {pendingOptimisticChats.map(chat => (
+                <OptimisticChatItem key={chat.id} chat={chat} />
+              ))}
               {customChats.map(chat => (
                 <CustomChatItem 
                   key={chat.id} 
@@ -178,7 +219,7 @@ export function ChatSidebar({ currentChatId, onChatSelect, onClose, isMobile }: 
       <CreateChatDialog
         open={showCreateDialog}
         onClose={() => setShowCreateDialog(false)}
-        onChatCreated={onChatSelect}
+        onChatCreated={handleChatCreated}
       />
     </>
   );

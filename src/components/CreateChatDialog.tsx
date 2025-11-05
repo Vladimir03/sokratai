@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import { useQueryClient } from "@tanstack/react-query";
 import {
   Dialog,
   DialogContent,
@@ -23,6 +24,7 @@ export function CreateChatDialog({ open, onClose, onChatCreated }: CreateChatDia
   const [icon, setIcon] = useState("💬");
   const [isCreating, setIsCreating] = useState(false);
   const { toast } = useToast();
+  const queryClient = useQueryClient();
 
   // iOS fix - cleanup when dialog closes
   useEffect(() => {
@@ -44,36 +46,52 @@ export function CreateChatDialog({ open, onClose, onChatCreated }: CreateChatDia
       return;
     }
 
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+
+    // Create optimistic chat
+    const tempId = `temp-${Date.now()}`;
+    const optimisticTitle = title.trim();
+    const optimisticIcon = icon || '💬';
+    
+    // Immediately close modal and show optimistic chat
+    setTitle("");
+    setIcon("💬");
+    onClose();
+    onChatCreated(tempId);
+
     setIsCreating(true);
 
     try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) throw new Error("Пользователь не авторизован");
-
       const { data: newChat, error } = await supabase
         .from('chats')
         .insert({
           user_id: user.id,
           chat_type: 'custom',
-          title: title.trim(),
-          icon: icon || '💬'
+          title: optimisticTitle,
+          icon: optimisticIcon
         })
         .select()
         .single();
 
       if (error) throw error;
 
+      // Invalidate cache to show real chat
+      await queryClient.invalidateQueries({ queryKey: ['chats', user.id] });
+
       toast({
-        title: "Успех",
-        description: "Чат создан",
+        title: "Чат создан ✓",
+        duration: 2000,
       });
 
-      setTitle("");
-      setIcon("💬");
-      onClose();
+      // Navigate to real chat
       onChatCreated(newChat.id);
     } catch (error) {
       console.error('Error creating chat:', error);
+      
+      // Invalidate to remove optimistic chat
+      await queryClient.invalidateQueries({ queryKey: ['chats', user.id] });
+      
       toast({
         title: "Ошибка",
         description: "Не удалось создать чат",

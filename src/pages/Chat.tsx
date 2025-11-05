@@ -784,6 +784,11 @@ export default function Chat() {
   }, [currentChat?.homework_task, messages.length, loadingHistory, isLoading]);
 
   const handleChatSelect = (chatId: string) => {
+    // Don't navigate to temp chats
+    if (chatId.startsWith('temp-')) {
+      return;
+    }
+    
     // iOS fix - cleanup before navigation
     if (document.activeElement instanceof HTMLElement) {
       document.activeElement.blur();
