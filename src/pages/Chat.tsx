@@ -167,29 +167,46 @@ export default function Chat() {
 
     setShowOnboarding(false);
 
-    // Add welcome message to general chat
-    const subjectName = subjectNames[subject] || 'учёбе';
-    
-    const welcomeContent = quickMessage 
-      ? quickMessage
-      : `Отлично! Теперь ты можешь задать мне любой вопрос по ${subjectName}. Я всегда готов помочь! 🚀`;
+    // Add welcome message from assistant
+    const welcomeMessage = `Привет! 👋 Я Сократ — твой ИИ-помощник по математике, физике и информатике.
+
+Я не просто даю готовые ответы. Я задаю наводящие вопросы, чтобы ты сам понял(а), как решать задачи. Это помогает тебе учиться, а не просто списывать.
+
+📚 Что я умею:
+• Объясняю сложные темы простым языком
+• Помогаю разобраться с домашкой
+• Показываю план решения задач с помощью кнопки "План решения"
+• Даю подробные объяснения с помощью кнопки "Объясни подробнее"
+• Генерирую похожие задачи для практики
+
+💡 ${quickMessage ? `Хочешь, чтобы я помог тебе разобраться с твоим вопросом "${quickMessage}"?` : 'Задай мне любой вопрос по математике, физике или информатике, и я помогу тебе разобраться!'}`;
 
     await supabase.from('chat_messages').insert({
       chat_id: generalChat.id,
       user_id: user.id,
-      role: quickMessage ? 'user' : 'assistant',
-      content: welcomeContent
+      role: 'assistant',
+      content: welcomeMessage
     });
 
-    // If there's a quick message, also send it to AI for response
+    // If there's a quick message from button click, add it as user message
     if (quickMessage) {
-      // Reload messages to include the user's question
+      await supabase.from('chat_messages').insert({
+        chat_id: generalChat.id,
+        user_id: user.id,
+        role: 'user',
+        content: quickMessage
+      });
+
+      // Reload messages to include both the welcome and user's question
       queryClient.invalidateQueries({ queryKey: ['chat', generalChat.id] });
       
       // Trigger AI response
       setTimeout(() => {
         handleSend(quickMessage, 'button');
       }, 100);
+    } else {
+      // Just reload messages to show welcome message
+      queryClient.invalidateQueries({ queryKey: ['chat', generalChat.id] });
     }
 
     // Show hint for upload button
