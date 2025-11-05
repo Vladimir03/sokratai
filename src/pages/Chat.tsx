@@ -188,25 +188,15 @@ export default function Chat() {
       content: welcomeMessage
     });
 
-    // If there's a quick message from button click, add it as user message
-    if (quickMessage) {
-      await supabase.from('chat_messages').insert({
-        chat_id: generalChat.id,
-        user_id: user.id,
-        role: 'user',
-        content: quickMessage
-      });
+    // Reload messages to show welcome message
+    await queryClient.invalidateQueries({ queryKey: ['chat', generalChat.id] });
 
-      // Reload messages to include both the welcome and user's question
-      queryClient.invalidateQueries({ queryKey: ['chat', generalChat.id] });
-      
-      // Trigger AI response
+    // If there's a quick message from button click, send it to AI
+    if (quickMessage) {
+      // Wait a bit for the query invalidation to complete
       setTimeout(() => {
         handleSend(quickMessage, 'button');
-      }, 100);
-    } else {
-      // Just reload messages to show welcome message
-      queryClient.invalidateQueries({ queryKey: ['chat', generalChat.id] });
+      }, 300);
     }
 
     // Show hint for upload button
@@ -214,9 +204,6 @@ export default function Chat() {
       setShowUploadHint(true);
       setTimeout(() => setShowUploadHint(false), 5000);
     }, 500);
-
-    // Reload messages
-    queryClient.invalidateQueries({ queryKey: ['chat', generalChat.id] });
   };
 
   // Fetch current chat details
