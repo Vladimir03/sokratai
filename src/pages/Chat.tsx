@@ -191,14 +191,6 @@ export default function Chat() {
     // Reload messages to show welcome message
     await queryClient.invalidateQueries({ queryKey: ['chat', generalChat.id] });
 
-    // If there's a quick message from button click, send it to AI
-    if (quickMessage) {
-      // Wait a bit for the query invalidation to complete
-      setTimeout(() => {
-        handleSend(quickMessage, 'button');
-      }, 300);
-    }
-
     // Show hint for upload button
     setTimeout(() => {
       setShowUploadHint(true);
