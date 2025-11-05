@@ -12,8 +12,9 @@ const RATE_LIMIT_REQUESTS = 50;
 const RATE_LIMIT_WINDOW_HOURS = 1;
 
 // SECURITY: Allowed domains for image fetching to prevent SSRF attacks
+// Updated to support signed URLs (now that bucket is private)
 const ALLOWED_IMAGE_DOMAINS = [
-  `${Deno.env.get("SUPABASE_URL")}/storage/v1/object/public/chat-images/`,
+  `${Deno.env.get("SUPABASE_URL")}/storage/v1/object/sign/chat-images/`,
 ];
 
 /**

@@ -98,17 +98,20 @@ const HomeworkTaskDetail = () => {
 
       if (uploadError) throw uploadError;
 
-      const { data: { publicUrl } } = supabase.storage
+      // Use signed URL instead of public URL for security
+      const { data: signedData, error: urlError } = await supabase.storage
         .from("chat-images")
-        .getPublicUrl(filePath);
+        .createSignedUrl(filePath, 3600); // 1 hour expiration
+
+      if (urlError || !signedData) throw new Error("Failed to create signed URL");
 
       toast.info("Анализирую задачу с помощью AI...");
-      const aiAnalysis = await generateAIAnalysis(undefined, publicUrl);
+      const aiAnalysis = await generateAIAnalysis(undefined, signedData.signedUrl);
 
       const { error: updateError } = await supabase
         .from("homework_tasks")
         .update({
-          condition_photo_url: publicUrl,
+          condition_photo_url: signedData.signedUrl,
           ai_analysis: aiAnalysis,
         })
         .eq("id", taskId);

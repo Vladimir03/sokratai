@@ -563,11 +563,23 @@ export default function Chat() {
         return;
       }
 
-      const { data: { publicUrl } } = supabase.storage
+      // Use signed URL instead of public URL for security
+      const { data: signedData, error: urlError } = await supabase.storage
         .from('chat-images')
-        .getPublicUrl(fileName);
+        .createSignedUrl(fileName, 3600); // 1 hour expiration
 
-      imageUrl = publicUrl;
+      if (urlError || !signedData) {
+        isSendingRef.current = false;
+        toast({
+          title: "Ошибка",
+          description: "Не удалось создать ссылку на файл",
+          variant: "destructive",
+        });
+        console.error('Signed URL error:', urlError);
+        return;
+      }
+
+      imageUrl = signedData.signedUrl;
     }
 
     const userMessage: Message = { 
