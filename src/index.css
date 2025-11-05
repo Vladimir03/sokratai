@@ -202,4 +202,43 @@ All colors MUST be HSL.
   .animate-fade-in {
     animation: fade-in 0.3s ease-out;
   }
+
+  /* KaTeX formula styles - prevent cutting off and ensure proper display */
+  .katex-display {
+    overflow-x: auto;
+    overflow-y: hidden;
+    padding: 0.5rem 0;
+    margin: 0.5rem 0;
+  }
+
+  .katex {
+    font-size: 1.1em;
+    line-height: 1.6;
+  }
+
+  .katex-html {
+    overflow-x: auto;
+    overflow-y: hidden;
+    white-space: nowrap;
+    padding: 0.25rem 0;
+  }
+
+  /* Ensure prose doesn't break math */
+  .prose .katex,
+  .prose .katex-display {
+    max-width: 100%;
+  }
+
+  /* Mobile-specific KaTeX adjustments */
+  @media (max-width: 640px) {
+    .katex {
+      font-size: 1em;
+    }
+    
+    .katex-display {
+      overflow-x: auto;
+      -webkit-overflow-scrolling: touch;
+      padding-right: 1rem;
+    }
+  }
 }
