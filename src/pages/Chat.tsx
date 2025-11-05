@@ -165,8 +165,6 @@ export default function Chat() {
       })
       .eq('id', user.id);
 
-    setShowOnboarding(false);
-
     // Add welcome message from assistant
     const welcomeMessage = `Привет! 👋 Я Сократ — твой ИИ-помощник по математике, физике и информатике.
 
@@ -181,15 +179,25 @@ export default function Chat() {
 
 💡 ${quickMessage ? `Хочешь, чтобы я помог тебе разобраться с твоим вопросом "${quickMessage}"?` : 'Задай мне любой вопрос по математике, физике или информатике, и я помогу тебе разобраться!'}`;
 
-    await supabase.from('chat_messages').insert({
+    // Insert message into database
+    const { data: insertedMessage } = await supabase.from('chat_messages').insert({
       chat_id: generalChat.id,
       user_id: user.id,
       role: 'assistant',
       content: welcomeMessage
-    });
+    }).select().single();
 
-    // Reload messages to show welcome message
-    await queryClient.invalidateQueries({ queryKey: ['chat', generalChat.id] });
+    // Add message to local state immediately for instant display
+    if (insertedMessage) {
+      setMessages([{
+        id: insertedMessage.id,
+        role: 'assistant',
+        content: welcomeMessage
+      }]);
+    }
+
+    // Close onboarding after message is ready
+    setShowOnboarding(false);
 
     // Show hint for upload button
     setTimeout(() => {
