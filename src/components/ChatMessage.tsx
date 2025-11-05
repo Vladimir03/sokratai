@@ -65,17 +65,25 @@ const ChatMessage = memo(({ message, isLoading, onQuickMessage, onRetry, onFeedb
 
   // Мемоизируем markdown компоненты для избежания пересоздания
   const markdownComponents = useMemo(() => ({
-    p: ({ node, ...props }: any) => <p className="mb-3 leading-relaxed last:mb-0 break-words" {...props} />,
-    strong: ({ node, ...props }: any) => <strong className="font-bold text-primary" {...props} />,
+    p: ({ node, ...props }: any) => (
+      <p className={`mb-3 leading-relaxed last:mb-0 break-words ${message.role === "user" ? "text-primary-foreground" : ""}`} {...props} />
+    ),
+    strong: ({ node, ...props }: any) => (
+      <strong className={`font-bold ${message.role === "user" ? "text-primary-foreground" : "text-primary"}`} {...props} />
+    ),
     ul: ({ node, ...props }: any) => <ul className="list-disc ml-4 mb-3 space-y-1" {...props} />,
     ol: ({ node, ...props }: any) => <ol className="list-decimal ml-4 mb-3 space-y-2" {...props} />,
-    li: ({ node, ...props }: any) => <li className="ml-2 break-words" {...props} />,
-    h3: ({ node, ...props }: any) => <h3 className="font-bold text-lg mt-4 mb-2 break-words" {...props} />,
+    li: ({ node, ...props }: any) => (
+      <li className={`ml-2 break-words ${message.role === "user" ? "text-primary-foreground" : ""}`} {...props} />
+    ),
+    h3: ({ node, ...props }: any) => (
+      <h3 className={`font-bold text-lg mt-4 mb-2 break-words ${message.role === "user" ? "text-primary-foreground" : ""}`} {...props} />
+    ),
     code: ({ node, inline, ...props }: any) => 
       inline 
-        ? <code className="px-1.5 py-0.5 bg-muted rounded text-sm break-words" {...props} />
-        : <code className="block p-2 bg-muted rounded overflow-x-auto" {...props} />,
-  }), []);
+        ? <code className={`px-1.5 py-0.5 rounded text-sm break-words ${message.role === "user" ? "bg-primary-foreground/20 text-primary-foreground" : "bg-muted"}`} {...props} />
+        : <code className={`block p-2 rounded overflow-x-auto ${message.role === "user" ? "bg-primary-foreground/20 text-primary-foreground" : "bg-muted"}`} {...props} />,
+  }), [message.role]);
 
   // Preprocessing LaTeX for proper rendering
   const preprocessLatex = (text: string) => {
@@ -188,7 +196,9 @@ const ChatMessage = memo(({ message, isLoading, onQuickMessage, onRetry, onFeedb
               </div>
             )}
             
-            <div className="prose prose-sm dark:prose-invert w-full overflow-wrap-anywhere">
+            <div className={`prose prose-sm dark:prose-invert w-full overflow-wrap-anywhere ${
+              message.role === "user" ? "prose-headings:text-primary-foreground prose-p:text-primary-foreground prose-li:text-primary-foreground prose-strong:text-primary-foreground" : ""
+            }`}>
               <Suspense fallback={<div className="animate-pulse">{displayContent}</div>}>
                 <ReactMarkdown
                   remarkPlugins={[remarkGfm, remarkMath]}
