@@ -297,19 +297,19 @@ export default function Onboarding({ userId, onComplete }: OnboardingProps) {
 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
               <Button
-                className="h-20 text-lg"
+                className="h-20 md:h-24 text-lg md:px-6 md:whitespace-normal md:leading-tight"
                 onClick={() => selectSubject('math')}
               >
                 📐 Математика
               </Button>
               <Button
-                className="h-20 text-lg"
+                className="h-20 md:h-24 text-lg md:px-6 md:whitespace-normal md:leading-tight"
                 onClick={() => selectSubject('physics')}
               >
                 ⚛️ Физика
               </Button>
               <Button
-                className="h-20 text-lg"
+                className="h-20 md:h-24 text-lg md:px-6 md:whitespace-normal md:leading-tight"
                 onClick={() => selectSubject('cs')}
               >
                 💻 Информатика
@@ -327,33 +327,33 @@ export default function Onboarding({ userId, onComplete }: OnboardingProps) {
 
             <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
               <Button
-                className="h-14 text-base"
+                className="h-14 md:h-16 text-base md:px-4"
                 onClick={() => selectGoal('ЕГЭ')}
               >
                 🎯 ЕГЭ
               </Button>
               <Button
-                className="h-14 text-base"
+                className="h-14 md:h-16 text-base md:px-4"
                 onClick={() => selectGoal('ОГЭ')}
               >
                 📝 ОГЭ
               </Button>
               <Button
-                className="h-14 text-base"
+                className="h-14 md:h-16 text-base md:px-4 md:whitespace-normal md:leading-tight"
                 onClick={() => selectGoal('Школьная программа')}
               >
                 <span className="md:hidden">📚 Школа</span>
                 <span className="hidden md:inline">📚 Школьная программа</span>
               </Button>
               <Button
-                className="h-14 text-base"
+                className="h-14 md:h-16 text-base md:px-4"
                 onClick={() => selectGoal('Олимпиада')}
               >
                 🏆 Олимпиада
               </Button>
               <Button
                 variant="outline"
-                className="h-14 text-base md:col-span-2"
+                className="h-14 md:h-16 text-base md:col-span-2 md:px-4"
                 onClick={() => setShowCustomGoal(true)}
               >
                 Другое
@@ -487,28 +487,28 @@ export default function Onboarding({ userId, onComplete }: OnboardingProps) {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-2 max-w-2xl mx-auto">
               <Button
                 variant="outline"
-                className="h-14 text-sm"
+                className="h-14 md:h-auto md:min-h-[56px] md:py-3 text-sm md:px-4 md:whitespace-normal md:leading-snug"
                 onClick={() => completeOnboarding("Как решать системы уравнений?")}
               >
                 Как решать системы уравнений?
               </Button>
               <Button
                 variant="outline"
-                className="h-14 text-sm"
+                className="h-14 md:h-auto md:min-h-[56px] md:py-3 text-sm md:px-4 md:whitespace-normal md:leading-snug"
                 onClick={() => completeOnboarding("Объясни закон Ома")}
               >
                 Объясни закон Ома
               </Button>
               <Button
                 variant="outline"
-                className="h-14 text-sm"
+                className="h-14 md:h-auto md:min-h-[56px] md:py-3 text-sm md:px-4 md:whitespace-normal md:leading-snug"
                 onClick={() => completeOnboarding("Что такое циклы в Python?")}
               >
                 Что такое циклы в Python?
               </Button>
               <Button
                 variant="outline"
-                className="h-14 text-sm md:col-span-2"
+                className="h-14 md:h-auto md:min-h-[56px] md:py-3 text-sm md:col-span-2 md:px-4 md:whitespace-normal md:leading-snug"
                 onClick={() => completeOnboarding()}
               >
                 📷 Помоги с задачей из учебника
