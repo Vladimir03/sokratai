@@ -1088,19 +1088,33 @@ export default function Chat() {
     }
   }, [isMobile, isSidebarOpen]);
 
-  // Scroll listener для кнопки "scroll to bottom"
+  // Scroll listener для кнопки "scroll to bottom" - Telegram style
   useEffect(() => {
     const container = messagesContainerRef.current;
     if (!container) return;
     
+    let timeoutId: NodeJS.Timeout;
+    
     const handleScroll = () => {
-      const { scrollTop, scrollHeight, clientHeight } = container;
-      const isNearBottom = scrollHeight - scrollTop - clientHeight < 200;
-      setShowScrollButton(!isNearBottom && messages.length > 5);
+      // Debounce для оптимизации
+      clearTimeout(timeoutId);
+      timeoutId = setTimeout(() => {
+        const { scrollTop, scrollHeight, clientHeight } = container;
+        const distanceFromBottom = scrollHeight - scrollTop - clientHeight;
+        const isNearBottom = distanceFromBottom < 150;
+        
+        // Показать кнопку только если:
+        // 1. Пользователь прокрутил вверх (не у самого низа)
+        // 2. Есть сообщения для прокрутки
+        setShowScrollButton(!isNearBottom && messages.length > 3);
+      }, 50);
     };
     
-    container.addEventListener('scroll', handleScroll);
-    return () => container.removeEventListener('scroll', handleScroll);
+    container.addEventListener('scroll', handleScroll, { passive: true });
+    return () => {
+      container.removeEventListener('scroll', handleScroll);
+      clearTimeout(timeoutId);
+    };
   }, [messages.length]);
 
   // Автофокус на textarea после загрузки чата
@@ -1283,14 +1297,14 @@ export default function Chat() {
                   </>
                 )}
                 
-                {/* Scroll to bottom button */}
+                {/* Scroll to bottom button - Telegram style */}
                 {showScrollButton && (
                   <button
                     onClick={() => scrollToBottom(true)}
-                    className="fixed bottom-24 right-4 md:right-8 z-50 bg-primary text-primary-foreground rounded-full p-3 shadow-lg hover:shadow-xl transition-all hover:scale-110"
+                    className="fixed bottom-24 right-4 md:right-8 z-50 bg-primary text-primary-foreground rounded-full p-3 md:p-3.5 shadow-lg hover:shadow-xl transition-all duration-200 hover:scale-110 animate-fade-in"
                     title="Прокрутить вниз"
                   >
-                    <ArrowDown className="h-5 w-5" />
+                    <ArrowDown className="h-5 w-5 md:h-6 md:w-6" />
                   </button>
                 )}
               </div>
