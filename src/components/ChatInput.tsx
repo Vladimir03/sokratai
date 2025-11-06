@@ -77,21 +77,23 @@ const ChatInput = memo(({
   return (
     <div className="flex-shrink-0 border-t p-2 md:p-4 bg-background" style={{ paddingBottom: 'max(0.5rem, env(safe-area-inset-bottom))' }}>
       <div className="max-w-4xl mx-auto space-y-2 md:space-y-3">
-        {/* Preview uploaded file */}
+        {/* Preview uploaded file - Telegram style */}
         {previewUrl && (
-          <div className="relative inline-block w-full md:w-auto">
-            <img
-              src={previewUrl}
-              alt="Preview"
-              className="max-h-32 w-full md:w-auto object-contain rounded-lg border border-border"
-            />
-            <button
-              onClick={onRemoveFile}
-              className="absolute -top-2 -right-2 bg-destructive text-destructive-foreground rounded-full w-6 h-6 flex items-center justify-center hover:bg-destructive/90 transition-colors"
-              title="Удалить"
-            >
-              <X className="h-4 w-4" />
-            </button>
+          <div className="relative w-full">
+            <div className="relative rounded-xl overflow-hidden border border-border shadow-lg bg-muted/50">
+              <img
+                src={previewUrl}
+                alt="Preview"
+                className="w-full max-h-[50vh] md:max-h-96 object-contain"
+              />
+              <button
+                onClick={onRemoveFile}
+                className="absolute top-3 right-3 bg-destructive/90 hover:bg-destructive text-destructive-foreground rounded-full w-8 h-8 md:w-9 md:h-9 flex items-center justify-center transition-all hover:scale-110 shadow-md"
+                title="Удалить"
+              >
+                <X className="h-5 w-5 md:h-6 md:w-6" />
+              </button>
+            </div>
           </div>
         )}
 
