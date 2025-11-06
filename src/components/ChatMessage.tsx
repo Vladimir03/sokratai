@@ -186,11 +186,11 @@ const ChatMessage = memo(({ message, isLoading, onQuickMessage, onRetry, onFeedb
           >
             {/* Отображение изображения */}
             {message.image_url && (
-              <div className="inline-block mb-3">
+              <div className="mb-3 max-w-full">
                 <img 
                   src={message.image_url} 
                   alt="Загруженное изображение"
-                  className="w-auto max-w-[240px] sm:max-w-[320px] md:max-w-[400px] max-h-[300px] sm:max-h-[400px] object-cover rounded-xl shadow-md border border-border/10 cursor-pointer hover:shadow-lg hover:opacity-95 transition-all duration-200"
+                  className="max-w-full max-h-[280px] sm:max-h-[320px] object-contain rounded-xl shadow-md border border-border/10 cursor-pointer hover:shadow-lg hover:scale-[1.02] transition-all duration-200"
                   onClick={() => setImageModalOpen(true)}
                 />
               </div>
