@@ -2,7 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Plus, X, Loader2 } from "lucide-react";
-import { useState } from "react";
+import { useState, useRef } from "react";
 import { CreateChatDialog } from "./CreateChatDialog";
 import { CustomChatItem } from "./CustomChatItem";
 import { useNavigate } from "react-router-dom";
@@ -86,10 +86,19 @@ export function ChatSidebar({ currentChatId, onChatSelect, onClose, isMobile }: 
 
   const ChatItem = ({ chat }: { chat: Chat }) => {
     const isActive = currentChatId === chat.id;
+    const lastClickRef = useRef<number>(0);
 
     return (
       <button
-        onClick={() => onChatSelect(chat.id)}
+        onClick={() => {
+          const now = Date.now();
+          if (now - lastClickRef.current < 300) {
+            console.log('⚠️ Click ignored (debounce)');
+            return;
+          }
+          lastClickRef.current = now;
+          onChatSelect(chat.id);
+        }}
         className={`
           w-full px-4 py-3 text-left hover:bg-accent transition-colors
           ${isActive ? 'bg-accent border-l-4 border-primary' : ''}
@@ -122,10 +131,9 @@ export function ChatSidebar({ currentChatId, onChatSelect, onClose, isMobile }: 
   const handleChatCreated = (chatIdOrTempId: string) => {
     // Check if it's a temp ID (optimistic)
     if (chatIdOrTempId.startsWith('temp-')) {
-      // Extract title and icon from the current form state
       const tempChat = {
         id: chatIdOrTempId,
-        title: '', // Will be set by CreateChatDialog
+        title: '',
         icon: '💬'
       };
       setOptimisticChats(prev => [...prev, tempChat]);
@@ -133,6 +141,12 @@ export function ChatSidebar({ currentChatId, onChatSelect, onClose, isMobile }: 
       // Real chat created - remove all optimistic chats and navigate
       setOptimisticChats([]);
       onChatSelect(chatIdOrTempId);
+      
+      // Закрыть сайдбар на мобильных
+      if (isMobile && onClose) {
+        onClose();
+        console.log('📱 Sidebar closed after chat creation (mobile)');
+      }
     }
   };
 
@@ -162,9 +176,10 @@ export function ChatSidebar({ currentChatId, onChatSelect, onClose, isMobile }: 
               variant="ghost"
               size="icon"
               onClick={onClose}
-              className="h-8 w-8"
+              className="h-11 w-11"
+              title="Закрыть"
             >
-              <X className="h-5 w-5" />
+              <X className="h-6 w-6" />
             </Button>
           )}
         </div>

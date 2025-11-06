@@ -3,7 +3,8 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import ChatMessage from "@/components/ChatMessage";
 import { Button } from "@/components/ui/button";
-import { Menu } from "lucide-react";
+import { Menu, ArrowDown } from "lucide-react";
+import { useVirtualizer } from '@tanstack/react-virtual';
 import { useToast } from "@/hooks/use-toast";
 import ChatSkeleton from "@/components/ChatSkeleton";
 import LoadingIndicator from "@/components/LoadingIndicator";
@@ -39,17 +40,34 @@ export default function Chat() {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [showOnboarding, setShowOnboarding] = useState(false);
   const [showUploadHint, setShowUploadHint] = useState(false);
+  const [isTransitioning, setIsTransitioning] = useState(false);
+  const [showScrollButton, setShowScrollButton] = useState(false);
+  const [touchStart, setTouchStart] = useState<number | null>(null);
+  const [touchEnd, setTouchEnd] = useState<number | null>(null);
   const { toast } = useToast();
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const isSendingRef = useRef(false); // Защита от дублирования отправки (iOS fix)
   const abortControllerRef = useRef<AbortController | null>(null); // Защита от race conditions
   const previousChatIdRef = useRef<string | null>(null); // Отслеживание предыдущего чата
+  const scrollPositionsRef = useRef<Map<string, number>>(new Map()); // Сохранение scroll позиций
+  const draftsRef = useRef<Map<string, string>>(new Map()); // Сохранение черновиков
+  const blobUrlsRef = useRef<Set<string>>(new Set()); // Отслеживание blob URLs для cleanup
+  const lastClickRef = useRef<number>(0); // Debounce для кликов
   const queryClient = useQueryClient();
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const chatIdFromUrl = searchParams.get('id');
   const isMobile = useIsMobile();
+
+  // Виртуализация для длинных чатов
+  const rowVirtualizer = useVirtualizer({
+    count: messages.length,
+    getScrollElement: () => messagesContainerRef.current,
+    estimateSize: () => 200,
+    overscan: 5,
+    enabled: messages.length > 50,
+  });
 
   const { data: user } = useQuery({
     queryKey: ['user'],
@@ -239,10 +257,19 @@ export default function Chat() {
   // Load chat history whenever chat changes
   useEffect(() => {
     if (!user?.id || !currentChatId) {
-      console.log('Skipping history load: no user or chatId', { userId: user?.id, currentChatId });
+    console.log('Skipping history load: no user or chatId', { userId: user?.id, currentChatId });
       setMessages([]);
       setLoadingHistory(false);
       return;
+    }
+    
+    // Сохранить scroll position и сообщения предыдущего чата
+    if (previousChatIdRef.current && messagesContainerRef.current) {
+      const currentScroll = messagesContainerRef.current.scrollTop;
+      if (currentScroll > 0) {
+        scrollPositionsRef.current.set(previousChatIdRef.current, currentScroll);
+        console.log(`💾 Saved scroll position ${currentScroll} for chat ${previousChatIdRef.current}`);
+      }
     }
     
     // Сохранить сообщения предыдущего чата в кеш
@@ -263,6 +290,7 @@ export default function Chat() {
     previousChatIdRef.current = currentChatId;
     
     console.log('Loading history for chat:', currentChatId);
+    setIsTransitioning(true);
     setLoadingHistory(true);
     
     const loadHistory = async () => {
@@ -363,6 +391,20 @@ export default function Chat() {
       } finally {
         if (!abortController.signal.aborted) {
           setLoadingHistory(false);
+          // Восстановить scroll position для нового чата
+          if (messagesContainerRef.current) {
+            const savedScroll = scrollPositionsRef.current.get(currentChatId);
+            if (savedScroll !== undefined && savedScroll > 0) {
+              requestAnimationFrame(() => {
+                if (messagesContainerRef.current) {
+                  messagesContainerRef.current.scrollTop = savedScroll;
+                  console.log(`⚡ Restored scroll position ${savedScroll} for chat ${currentChatId}`);
+                }
+              });
+            }
+          }
+          // Плавное появление сообщений
+          setTimeout(() => setIsTransitioning(false), 150);
           console.log('History loading complete. loadingHistory set to false');
         }
       }
@@ -401,7 +443,9 @@ export default function Chat() {
     }
 
     setUploadedFile(file);
-    setPreviewUrl(URL.createObjectURL(file));
+    const newPreviewUrl = URL.createObjectURL(file);
+    blobUrlsRef.current.add(newPreviewUrl);
+    setPreviewUrl(newPreviewUrl);
   }, [toast]);
 
   const handlePaste = useCallback((e: React.ClipboardEvent<HTMLTextAreaElement>) => {
@@ -413,7 +457,9 @@ export default function Chat() {
         const file = item.getAsFile();
         if (file) {
           setUploadedFile(file);
-          setPreviewUrl(URL.createObjectURL(file));
+          const newPreviewUrl = URL.createObjectURL(file);
+          blobUrlsRef.current.add(newPreviewUrl);
+          setPreviewUrl(newPreviewUrl);
           e.preventDefault();
           toast({
             title: "Скриншот вставлен",
@@ -428,10 +474,20 @@ export default function Chat() {
   const removeUploadedFile = useCallback(() => {
     if (previewUrl) {
       URL.revokeObjectURL(previewUrl);
+      blobUrlsRef.current.delete(previewUrl);
     }
     setUploadedFile(null);
     setPreviewUrl(null);
   }, [previewUrl]);
+
+  // Cleanup blob URLs при unmount
+  useEffect(() => {
+    return () => {
+      blobUrlsRef.current.forEach(url => URL.revokeObjectURL(url));
+      blobUrlsRef.current.clear();
+      console.log('🧹 Cleaned up all blob URLs');
+    };
+  }, []);
 
   const saveMessageToBatch = async (msg: Message): Promise<string | null> => {
     if (!user?.id || !currentChatId) {
@@ -903,6 +959,14 @@ export default function Chat() {
   }, [currentChat?.homework_task, messages.length, loadingHistory, isLoading]);
 
   const handleChatSelect = (chatId: string) => {
+    // Debounce protection
+    const now = Date.now();
+    if (now - lastClickRef.current < 300) {
+      console.log('⚠️ Chat select ignored (debounce)');
+      return;
+    }
+    lastClickRef.current = now;
+    
     // Don't navigate to temp chats
     if (chatId.startsWith('temp-')) {
       return;
@@ -964,6 +1028,93 @@ export default function Chat() {
     }
   }, []);
 
+  // Handler для изменения draft
+  const handleDraftChange = useCallback((chatId: string, text: string) => {
+    draftsRef.current.set(chatId, text);
+  }, []);
+
+  // Получить текущий draft
+  const currentDraft = currentChatId ? (draftsRef.current.get(currentChatId) || '') : '';
+
+  // Touch handlers для swipe gesture (закрытие сайдбара)
+  const handleTouchStart = useCallback((e: React.TouchEvent) => {
+    setTouchEnd(null);
+    setTouchStart(e.targetTouches[0].clientX);
+  }, []);
+
+  const handleTouchMove = useCallback((e: React.TouchEvent) => {
+    setTouchEnd(e.targetTouches[0].clientX);
+  }, []);
+
+  const handleTouchEnd = useCallback(() => {
+    if (!touchStart || !touchEnd) return;
+    const distance = touchStart - touchEnd;
+    const isLeftSwipe = distance > 50;
+    
+    if (isLeftSwipe && isMobile && isSidebarOpen) {
+      setIsSidebarOpen(false);
+      console.log('👈 Sidebar closed by swipe');
+    }
+    
+    setTouchStart(null);
+    setTouchEnd(null);
+  }, [touchStart, touchEnd, isMobile, isSidebarOpen]);
+
+  // Блокировка body scroll при открытом sidebar на мобильных
+  useEffect(() => {
+    if (isMobile && isSidebarOpen) {
+      const scrollY = window.scrollY;
+      
+      document.body.style.overflow = 'hidden';
+      document.body.style.position = 'fixed';
+      document.body.style.width = '100%';
+      document.body.style.top = `-${scrollY}px`;
+      
+      console.log('🔒 Body scroll locked (sidebar open)');
+      
+      return () => {
+        const scrollYToRestore = document.body.style.top;
+        document.body.style.overflow = '';
+        document.body.style.position = '';
+        document.body.style.width = '';
+        document.body.style.top = '';
+        
+        if (scrollYToRestore) {
+          window.scrollTo(0, parseInt(scrollYToRestore || '0') * -1);
+        }
+        
+        console.log('🔓 Body scroll restored');
+      };
+    }
+  }, [isMobile, isSidebarOpen]);
+
+  // Scroll listener для кнопки "scroll to bottom"
+  useEffect(() => {
+    const container = messagesContainerRef.current;
+    if (!container) return;
+    
+    const handleScroll = () => {
+      const { scrollTop, scrollHeight, clientHeight } = container;
+      const isNearBottom = scrollHeight - scrollTop - clientHeight < 200;
+      setShowScrollButton(!isNearBottom && messages.length > 5);
+    };
+    
+    container.addEventListener('scroll', handleScroll);
+    return () => container.removeEventListener('scroll', handleScroll);
+  }, [messages.length]);
+
+  // Автофокус на textarea после загрузки чата
+  useEffect(() => {
+    if (!loadingHistory && !isLoading && currentChatId) {
+      const textareaElement = document.querySelector('textarea');
+      if (textareaElement && !showOnboarding) {
+        requestAnimationFrame(() => {
+          textareaElement.focus();
+        });
+      }
+    }
+  }, [loadingHistory, isLoading, currentChatId, showOnboarding]);
+
   // Show onboarding if needed
   if (showOnboarding && user?.id) {
     return (
@@ -1016,7 +1167,11 @@ export default function Chat() {
             )}
 
             {/* Sidebar */}
-            <div className={`
+            <div 
+              onTouchStart={handleTouchStart}
+              onTouchMove={handleTouchMove}
+              onTouchEnd={handleTouchEnd}
+              className={`
               ${isMobile 
                 ? 'fixed top-[110px] bottom-0 left-0 z-50 w-80 transform transition-transform duration-300'
                 : 'relative w-64'
@@ -1057,7 +1212,11 @@ export default function Chat() {
 
               <div 
                 ref={messagesContainerRef} 
-                className="flex-1 overflow-y-auto overflow-x-hidden px-4"
+                className={`
+                  flex-1 overflow-y-auto overflow-x-hidden px-4
+                  transition-opacity duration-150
+                  ${isTransitioning ? 'opacity-0' : 'opacity-100'}
+                `}
                 style={{ 
                   WebkitOverflowScrolling: 'touch',
                   overscrollBehavior: 'contain',
@@ -1069,19 +1228,70 @@ export default function Chat() {
                   <ChatSkeleton />
                 ) : (
                   <>
-                    {messages.map((msg, index) => (
-                      <ChatMessage 
-                        key={index} 
-                        message={msg} 
-                        isLoading={false} 
-                        onQuickMessage={handleQuickMessage}
-                        onFeedback={handleMessageFeedback}
-                        onInteraction={handleMessageInteraction}
-                      />
-                    ))}
+                    {messages.length > 50 ? (
+                      // Виртуализированный рендер для больших чатов
+                      <div
+                        style={{
+                          height: `${rowVirtualizer.getTotalSize()}px`,
+                          width: '100%',
+                          position: 'relative',
+                        }}
+                      >
+                        {rowVirtualizer.getVirtualItems().map((virtualRow) => {
+                          const msg = messages[virtualRow.index];
+                          const prevMsg = virtualRow.index > 0 ? messages[virtualRow.index - 1] : null;
+                          return (
+                            <div
+                              key={virtualRow.index}
+                              data-index={virtualRow.index}
+                              ref={rowVirtualizer.measureElement}
+                              style={{
+                                position: 'absolute',
+                                top: 0,
+                                left: 0,
+                                width: '100%',
+                                transform: `translateY(${virtualRow.start}px)`,
+                              }}
+                            >
+                              <ChatMessage
+                                key={msg.id || virtualRow.index}
+                                message={msg}
+                                isLoading={false}
+                                onQuickMessage={handleQuickMessage}
+                                onFeedback={handleMessageFeedback}
+                                onInteraction={handleMessageInteraction}
+                              />
+                            </div>
+                          );
+                        })}
+                      </div>
+                    ) : (
+                      // Обычный рендер для маленьких чатов
+                      messages.map((msg, index) => (
+                        <ChatMessage 
+                          key={msg.id || index} 
+                          message={msg} 
+                          isLoading={false} 
+                          onQuickMessage={handleQuickMessage}
+                          onFeedback={handleMessageFeedback}
+                          onInteraction={handleMessageInteraction}
+                        />
+                      ))
+                    )}
                     {isLoading && <LoadingIndicator />}
                     <div ref={messagesEndRef} />
                   </>
+                )}
+                
+                {/* Scroll to bottom button */}
+                {showScrollButton && (
+                  <button
+                    onClick={() => scrollToBottom(true)}
+                    className="fixed bottom-24 right-4 md:right-8 z-50 bg-primary text-primary-foreground rounded-full p-3 shadow-lg hover:shadow-xl transition-all hover:scale-110"
+                    title="Прокрутить вниз"
+                  >
+                    <ArrowDown className="h-5 w-5" />
+                  </button>
                 )}
               </div>
 
@@ -1095,6 +1305,8 @@ export default function Chat() {
                   onFileUpload={handleFileUpload}
                   onPaste={handlePaste}
                   onRemoveFile={removeUploadedFile}
+                  value={currentDraft}
+                  onValueChange={(value) => currentChatId && handleDraftChange(currentChatId, value)}
                 />
                 
                 {/* Upload hint */}

@@ -1,7 +1,7 @@
-import { memo, useRef, useState, useEffect } from "react";
+import { memo, useRef, useState, useEffect, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { Send, Image as ImageIcon, X } from "lucide-react";
+import { Send, Image as ImageIcon, X, Loader2 } from "lucide-react";
 import { useIsMobile } from "@/hooks/use-mobile";
 
 interface ChatInputProps {
@@ -13,6 +13,8 @@ interface ChatInputProps {
   onFileUpload: (e: React.ChangeEvent<HTMLInputElement>) => void;
   onPaste: (e: React.ClipboardEvent<HTMLTextAreaElement>) => void;
   onRemoveFile: () => void;
+  value?: string;
+  onValueChange?: (value: string) => void;
 }
 
 const ChatInput = memo(({
@@ -24,18 +26,30 @@ const ChatInput = memo(({
   onFileUpload,
   onPaste,
   onRemoveFile,
+  value,
+  onValueChange,
 }: ChatInputProps) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const [message, setMessage] = useState("");
   const isMobileDevice = useIsMobile();
 
-  const adjustTextareaHeight = (element: HTMLTextAreaElement | null) => {
+  const adjustTextareaHeight = useCallback((element: HTMLTextAreaElement | null) => {
     if (!element) return;
     element.style.height = 'auto';
-    const maxHeight = isMobileDevice ? 96 : 120; // 4 lines mobile, 5 lines desktop
+    const maxHeight = isMobileDevice ? 96 : 120;
     element.style.height = `${Math.min(element.scrollHeight, maxHeight)}px`;
-  };
+  }, [isMobileDevice]);
+
+  // Синхронизировать с внешним value
+  useEffect(() => {
+    if (value !== undefined && value !== message) {
+      setMessage(value);
+      if (textareaRef.current) {
+        adjustTextareaHeight(textareaRef.current);
+      }
+    }
+  }, [value, adjustTextareaHeight]);
 
   // Handle iOS keyboard appearance
   useEffect(() => {
@@ -108,8 +122,10 @@ const ChatInput = memo(({
             ref={textareaRef}
             value={message}
             onChange={(e) => {
-              setMessage(e.target.value);
+              const newValue = e.target.value;
+              setMessage(newValue);
               adjustTextareaHeight(e.target);
+              onValueChange?.(newValue);
             }}
             onPaste={(e) => {
               onPaste(e);
@@ -127,6 +143,7 @@ const ChatInput = memo(({
                 if (message.trim() || uploadedFile) {
                   onSend(message, 'text');
                   setMessage("");
+                  onValueChange?.("");
                   if (textareaRef.current) {
                     textareaRef.current.style.height = '40px';
                   }
@@ -150,6 +167,7 @@ const ChatInput = memo(({
               if (message.trim() || uploadedFile) {
                 onSend(message, 'text');
                 setMessage("");
+                onValueChange?.("");
                 if (textareaRef.current) {
                   textareaRef.current.style.height = '40px';
                 }
@@ -158,8 +176,13 @@ const ChatInput = memo(({
             disabled={(!message.trim() && !uploadedFile) || isLoading}
             size="icon"
             className="h-10 w-10 md:h-11 md:w-11 shrink-0"
+            title={isLoading ? "Отправка..." : "Отправить"}
           >
-            <Send className="h-4 w-4 md:h-5 md:w-5" />
+            {isLoading ? (
+              <Loader2 className="h-4 w-4 md:h-5 md:w-5 animate-spin" />
+            ) : (
+              <Send className="h-4 w-4 md:h-5 md:w-5" />
+            )}
           </Button>
         </div>
       </div>
