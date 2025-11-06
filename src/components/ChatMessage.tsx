@@ -66,7 +66,7 @@ const ChatMessage = memo(({ message, isLoading, onQuickMessage, onRetry, onFeedb
   // Мемоизируем markdown компоненты для избежания пересоздания
   const markdownComponents = useMemo(() => ({
     p: ({ node, ...props }: any) => (
-      <p className={`mb-3 leading-relaxed last:mb-0 break-words ${message.role === "user" ? "text-primary-foreground" : ""}`} {...props} />
+      <p className={`mb-3 leading-relaxed last:mb-0 break-words whitespace-pre-wrap ${message.role === "user" ? "text-primary-foreground" : ""}`} {...props} />
     ),
     strong: ({ node, ...props }: any) => (
       <strong className={`font-bold ${message.role === "user" ? "text-primary-foreground" : "text-primary"}`} {...props} />
@@ -186,7 +186,7 @@ const ChatMessage = memo(({ message, isLoading, onQuickMessage, onRetry, onFeedb
           >
             {/* Отображение изображения */}
             {message.image_url && (
-              <div className="mb-3 max-w-full">
+              <div className="mb-3 max-w-full flex justify-center">
                 <img 
                   src={message.image_url} 
                   alt="Загруженное изображение"
