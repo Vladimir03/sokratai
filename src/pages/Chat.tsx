@@ -19,6 +19,7 @@ import Onboarding from "@/components/Onboarding";
 import DevPanel from "@/components/DevPanel";
 import { subjectNames } from "@/data/onboardingTasks";
 import { PageContent } from "@/components/PageContent";
+import { saveChatToSessionCache, loadChatFromSessionCache, clearChatCache } from "@/utils/chatCache";
 
 interface Message {
   role: "user" | "assistant";
@@ -42,6 +43,8 @@ export default function Chat() {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const isSendingRef = useRef(false); // Защита от дублирования отправки (iOS fix)
+  const abortControllerRef = useRef<AbortController | null>(null); // Защита от race conditions
+  const previousChatIdRef = useRef<string | null>(null); // Отслеживание предыдущего чата
   const queryClient = useQueryClient();
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
@@ -242,11 +245,36 @@ export default function Chat() {
       return;
     }
     
+    // Сохранить сообщения предыдущего чата в кеш
+    if (previousChatIdRef.current && previousChatIdRef.current !== currentChatId && messages.length > 0) {
+      console.log(`💾 Saving ${messages.length} messages for previous chat ${previousChatIdRef.current}`);
+      saveChatToSessionCache(previousChatIdRef.current, messages, user.id);
+    }
+    
+    // Отменить предыдущую загрузку если она в процессе
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      console.log('⚠️ Aborted previous history load');
+    }
+    
+    // Создать новый AbortController для этой загрузки
+    const abortController = new AbortController();
+    abortControllerRef.current = abortController;
+    previousChatIdRef.current = currentChatId;
+    
     console.log('Loading history for chat:', currentChatId);
     setLoadingHistory(true);
     
     const loadHistory = async () => {
       try {
+        // Сначала попробовать загрузить из кеша для быстрого отображения
+        const cachedMessages = loadChatFromSessionCache(currentChatId, user.id);
+        if (cachedMessages && cachedMessages.length > 0) {
+          setMessages(cachedMessages);
+          console.log(`⚡ Quick load from cache: ${cachedMessages.length} messages`);
+        }
+        
+        // Затем загрузить актуальные данные из БД
         const { data, error } = await supabase
           .from('chat_messages')
           .select(`
@@ -256,9 +284,17 @@ export default function Chat() {
           .eq('chat_id', currentChatId)
           .order('created_at', { ascending: true });
 
+        // Проверить, не была ли отменена загрузка
+        if (abortController.signal.aborted) {
+          console.log('⚠️ History load aborted, ignoring results');
+          return;
+        }
+
         if (error) {
           console.error('Error loading chat history:', error);
-          setMessages([]);
+          if (!cachedMessages) {
+            setMessages([]);
+          }
           setLoadingHistory(false);
           return;
         }
@@ -274,6 +310,8 @@ export default function Chat() {
             feedback: (msg.feedback as any)?.[0]?.feedback_type || null
           }));
           setMessages(loadedMessages);
+          // Обновить кеш с актуальными данными
+          saveChatToSessionCache(currentChatId, loadedMessages, user.id);
           console.log(`✅ Loaded ${loadedMessages.length} messages for chat ${currentChatId}`);
         } else {
           // If general chat is empty, add welcome message
@@ -306,6 +344,7 @@ export default function Chat() {
                   feedback: (msg.feedback as any)?.[0]?.feedback_type || null
                 }));
                 setMessages(updatedMessages);
+                saveChatToSessionCache(currentChatId, updatedMessages, user.id);
                 console.log('✅ Welcome message added and loaded');
               }
             }
@@ -315,15 +354,28 @@ export default function Chat() {
           }
         }
       } catch (error) {
+        if (abortController.signal.aborted) {
+          console.log('⚠️ History load aborted due to error');
+          return;
+        }
         console.error('❌ Error loading chat history:', error);
         setMessages([]);
       } finally {
-        setLoadingHistory(false);
-        console.log('History loading complete. loadingHistory set to false');
+        if (!abortController.signal.aborted) {
+          setLoadingHistory(false);
+          console.log('History loading complete. loadingHistory set to false');
+        }
       }
     };
 
     loadHistory();
+    
+    // Cleanup function
+    return () => {
+      if (abortController === abortControllerRef.current) {
+        abortControllerRef.current = null;
+      }
+    };
   }, [user?.id, currentChatId, chatType]);
 
   const handleFileUpload = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
@@ -382,7 +434,13 @@ export default function Chat() {
   }, [previewUrl]);
 
   const saveMessageToBatch = async (msg: Message): Promise<string | null> => {
-    if (!user?.id || !currentChatId) return null;
+    if (!user?.id || !currentChatId) {
+      console.error('❌ Cannot save message: missing user or chatId', { 
+        userId: user?.id, 
+        currentChatId 
+      });
+      throw new Error('Чат ещё не загружен. Попробуйте снова через секунду.');
+    }
 
     try {
       const { data, error } = await supabase.from('chat_messages').insert({
@@ -407,8 +465,8 @@ export default function Chat() {
 
       return data?.id || null;
     } catch (error) {
-      console.error('Error saving message:', error);
-      return null;
+      console.error('❌ Error saving message:', error);
+      throw error;
     }
   };
 
@@ -535,6 +593,17 @@ export default function Chat() {
   const handleSend = useCallback(async (message: string, inputMethod: 'text' | 'voice' | 'button' = 'text') => {
     if ((!message.trim() && !uploadedFile) || isLoading) return;
     
+    // Проверка что чат загружен
+    if (!currentChatId || loadingHistory) {
+      toast({
+        title: "Подождите",
+        description: "Чат ещё загружается...",
+        duration: 2000,
+        variant: "default"
+      });
+      return;
+    }
+    
     // Защита от множественных вызовов (iOS Safari bug)
     if (isSendingRef.current) {
       console.log('Already sending, ignoring duplicate call');
@@ -599,18 +668,44 @@ export default function Chat() {
     };
     
     // Используем функциональное обновление состояния
-    setMessages(prev => [...prev, userMessage]);
+    setMessages(prev => {
+      const newMessages = [...prev, userMessage];
+      // Сохраняем в кеш сразу
+      if (user?.id && currentChatId) {
+        saveChatToSessionCache(currentChatId, newMessages, user.id);
+      }
+      return newMessages;
+    });
     removeUploadedFile();
     setIsLoading(true);
 
-    // Сохраняем сообщение пользователя и получаем id из БД
-    const userMessageId = await saveMessageToBatch(userMessage);
-    
-    // Обновляем локальное сообщение с id из БД
-    if (userMessageId) {
-      setMessages(prev => prev.map((m, i) => 
-        i === prev.length - 1 ? { ...m, id: userMessageId } : m
-      ));
+    try {
+      // Сохраняем сообщение пользователя и получаем id из БД
+      const userMessageId = await saveMessageToBatch(userMessage);
+      
+      // Обновляем локальное сообщение с id из БД
+      if (userMessageId) {
+        setMessages(prev => {
+          const updated = prev.map((m, i) => 
+            i === prev.length - 1 ? { ...m, id: userMessageId } : m
+          );
+          // Обновляем кеш
+          if (user?.id && currentChatId) {
+            saveChatToSessionCache(currentChatId, updated, user.id);
+          }
+          return updated;
+        });
+      }
+    } catch (error) {
+      console.error('Failed to save user message:', error);
+      isSendingRef.current = false;
+      setIsLoading(false);
+      toast({
+        title: "Ошибка",
+        description: error instanceof Error ? error.message : "Не удалось отправить сообщение",
+        variant: "destructive",
+      });
+      return;
     }
 
     let assistantSoFar = "";
@@ -654,9 +749,16 @@ export default function Chat() {
         
         // Обновляем локальное сообщение ассистента с id из БД
         if (assistantMessageId) {
-          setMessages(prev => prev.map((m, i) => 
-            (i === prev.length - 1 && m.role === 'assistant') ? { ...m, id: assistantMessageId } : m
-          ));
+          setMessages(prev => {
+            const updated = prev.map((m, i) => 
+              (i === prev.length - 1 && m.role === 'assistant') ? { ...m, id: assistantMessageId } : m
+            );
+            // Обновляем кеш с полным диалогом
+            if (user?.id && currentChatId) {
+              saveChatToSessionCache(currentChatId, updated, user.id);
+            }
+            return updated;
+          });
         }
       }
     } catch (error) {
@@ -664,14 +766,14 @@ export default function Chat() {
       setIsLoading(false);
       toast({
         title: "Ошибка",
-        description: "Не удалось отправить сообщение",
+        description: error instanceof Error ? error.message : "Не удалось отправить сообщение",
         variant: "destructive",
       });
     } finally {
       // Всегда сбрасываем флаг отправки
       isSendingRef.current = false;
     }
-  }, [messages, uploadedFile, isLoading, user?.id, removeUploadedFile, currentChat, currentChatId, queryClient, toast]);
+  }, [messages, uploadedFile, isLoading, loadingHistory, user?.id, removeUploadedFile, currentChat, currentChatId, queryClient, toast]);
 
   const handleQuickMessage = useCallback((quickText: string) => {
     handleSend(quickText, 'button');

@@ -2,9 +2,9 @@ interface CachedMessage {
   role: "user" | "assistant";
   content: string;
   id?: string;
-  tempId?: string;
-  status?: "sending" | "sent" | "error";
-  timestamp: number;
+  image_url?: string;
+  feedback?: 'like' | 'dislike' | null;
+  input_method?: 'text' | 'voice' | 'button';
 }
 
 interface CacheData {
@@ -13,12 +13,14 @@ interface CacheData {
   userId: string;
 }
 
-const SESSION_CACHE_KEY = "chat_messages_session";
-const LOCAL_CACHE_KEY = "chat_messages_cache";
 const MAX_CACHED_MESSAGES = 50;
 const CACHE_TTL = 30 * 60 * 1000; // 30 минут
 
-export const saveChatToSessionCache = (messages: CachedMessage[], userId: string) => {
+const getCacheKey = (chatId: string, storage: 'session' | 'local') => {
+  return `chat_${chatId}_${storage}`;
+};
+
+export const saveChatToSessionCache = (chatId: string, messages: CachedMessage[], userId: string) => {
   try {
     const recentMessages = messages.slice(-MAX_CACHED_MESSAGES);
     const cacheData: CacheData = {
@@ -26,23 +28,24 @@ export const saveChatToSessionCache = (messages: CachedMessage[], userId: string
       timestamp: Date.now(),
       userId,
     };
-    sessionStorage.setItem(SESSION_CACHE_KEY, JSON.stringify(cacheData));
+    sessionStorage.setItem(getCacheKey(chatId, 'session'), JSON.stringify(cacheData));
     // Дублируем в localStorage как fallback
-    localStorage.setItem(LOCAL_CACHE_KEY, JSON.stringify(cacheData));
+    localStorage.setItem(getCacheKey(chatId, 'local'), JSON.stringify(cacheData));
+    console.log(`💾 Saved ${messages.length} messages to cache for chat ${chatId}`);
   } catch (error) {
     console.error("Error saving to cache:", error);
   }
 };
 
-export const loadChatFromSessionCache = (userId: string): CachedMessage[] | null => {
+export const loadChatFromSessionCache = (chatId: string, userId: string): CachedMessage[] | null => {
   try {
     // Сначала пробуем sessionStorage
-    let cached = sessionStorage.getItem(SESSION_CACHE_KEY);
+    let cached = sessionStorage.getItem(getCacheKey(chatId, 'session'));
     let storage = "session";
     
     // Если нет, пробуем localStorage
     if (!cached) {
-      cached = localStorage.getItem(LOCAL_CACHE_KEY);
+      cached = localStorage.getItem(getCacheKey(chatId, 'local'));
       storage = "local";
     }
     
@@ -55,11 +58,11 @@ export const loadChatFromSessionCache = (userId: string): CachedMessage[] | null
       
       if (isExpired || isWrongUser) {
         console.log(`Cache expired or wrong user in ${storage}Storage, clearing...`);
-        clearChatCache();
+        clearChatCache(chatId);
         return null;
       }
       
-      console.log(`Loaded ${cacheData.messages.length} messages from ${storage}Storage`);
+      console.log(`📂 Loaded ${cacheData.messages.length} messages from ${storage}Storage for chat ${chatId}`);
       return cacheData.messages;
     }
   } catch (error) {
@@ -68,10 +71,33 @@ export const loadChatFromSessionCache = (userId: string): CachedMessage[] | null
   return null;
 };
 
-export const clearChatCache = () => {
+export const clearChatCache = (chatId?: string) => {
   try {
-    sessionStorage.removeItem(SESSION_CACHE_KEY);
-    localStorage.removeItem(LOCAL_CACHE_KEY);
+    if (chatId) {
+      sessionStorage.removeItem(getCacheKey(chatId, 'session'));
+      localStorage.removeItem(getCacheKey(chatId, 'local'));
+      console.log(`🗑️ Cleared cache for chat ${chatId}`);
+    } else {
+      // Очистить весь кеш чатов
+      const keysToRemove: string[] = [];
+      for (let i = 0; i < sessionStorage.length; i++) {
+        const key = sessionStorage.key(i);
+        if (key?.startsWith('chat_')) {
+          keysToRemove.push(key);
+        }
+      }
+      keysToRemove.forEach(key => sessionStorage.removeItem(key));
+      
+      const localKeysToRemove: string[] = [];
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (key?.startsWith('chat_')) {
+          localKeysToRemove.push(key);
+        }
+      }
+      localKeysToRemove.forEach(key => localStorage.removeItem(key));
+      console.log(`🗑️ Cleared all chat caches`);
+    }
   } catch (error) {
     console.error("Error clearing cache:", error);
   }
