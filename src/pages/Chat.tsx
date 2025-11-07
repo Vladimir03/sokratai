@@ -54,6 +54,7 @@ export default function Chat() {
   const draftsRef = useRef<Map<string, string>>(new Map()); // Сохранение черновиков
   const blobUrlsRef = useRef<Set<string>>(new Set()); // Отслеживание blob URLs для cleanup
   const lastClickRef = useRef<number>(0); // Debounce для кликов
+  const wasAtBottomRef = useRef(true); // Отслеживание позиции скролла для автоскролла
   const queryClient = useQueryClient();
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
@@ -532,12 +533,14 @@ export default function Chat() {
     }
   };
 
-  // Auto-scroll when messages change
+  // Auto-scroll when messages change - ONLY if user was already at bottom
   useEffect(() => {
-    // Use requestAnimationFrame to ensure DOM has updated
-    requestAnimationFrame(() => {
-      scrollToBottom();
-    });
+    // Only auto-scroll if user was at the bottom before new messages arrived
+    if (wasAtBottomRef.current) {
+      requestAnimationFrame(() => {
+        scrollToBottom();
+      });
+    }
   }, [messages]);
 
   async function streamChat({
@@ -1102,6 +1105,9 @@ export default function Chat() {
         const { scrollTop, scrollHeight, clientHeight } = container;
         const distanceFromBottom = scrollHeight - scrollTop - clientHeight;
         const isNearBottom = distanceFromBottom < 300;
+        
+        // Сохраняем состояние "внизу ли пользователь" для автоскролла
+        wasAtBottomRef.current = isNearBottom;
         
         // Показать кнопку только если:
         // 1. Пользователь прокрутил вверх (не у самого низа)
