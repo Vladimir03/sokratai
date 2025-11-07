@@ -3,7 +3,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import ChatMessage from "@/components/ChatMessage";
 import { Button } from "@/components/ui/button";
-import { Menu, ArrowDown } from "lucide-react";
+import { Menu, ChevronDown } from "lucide-react";
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { useToast } from "@/hooks/use-toast";
 import ChatSkeleton from "@/components/ChatSkeleton";
@@ -1101,7 +1101,7 @@ export default function Chat() {
       timeoutId = setTimeout(() => {
         const { scrollTop, scrollHeight, clientHeight } = container;
         const distanceFromBottom = scrollHeight - scrollTop - clientHeight;
-        const isNearBottom = distanceFromBottom < 150;
+        const isNearBottom = distanceFromBottom < 300;
         
         // Показать кнопку только если:
         // 1. Пользователь прокрутил вверх (не у самого низа)
@@ -1201,7 +1201,7 @@ export default function Chat() {
               />
             </div>
 
-            <div className="flex-1 flex flex-col overflow-hidden min-w-0">
+            <div className="relative flex-1 flex flex-col overflow-hidden min-w-0">
               <div className="flex-shrink-0 border-b p-2 md:p-3 flex items-center gap-2 md:gap-3 bg-background">
                 <Button
                   variant="ghost"
@@ -1299,13 +1299,26 @@ export default function Chat() {
                 
                 {/* Scroll to bottom button - Telegram style */}
                 {showScrollButton && (
-                  <button
-                    onClick={() => scrollToBottom(true)}
-                    className="fixed bottom-24 right-4 md:right-8 z-50 bg-primary text-primary-foreground rounded-full p-3 md:p-3.5 shadow-lg hover:shadow-xl transition-all duration-200 hover:scale-110 animate-fade-in"
-                    title="Прокрутить вниз"
-                  >
-                    <ArrowDown className="h-5 w-5 md:h-6 md:w-6" />
-                  </button>
+                  <div className="absolute bottom-20 md:bottom-24 right-4 md:right-6 z-10 animate-fade-in">
+                    <button
+                      onClick={() => scrollToBottom(true)}
+                      className="
+                        flex items-center justify-center
+                        w-10 h-10 md:w-12 md:h-12
+                        bg-white
+                        border border-gray-300
+                        rounded-full
+                        shadow-lg
+                        hover:bg-gray-50
+                        active:scale-95
+                        transition-all
+                        duration-200
+                      "
+                      aria-label="Прокрутить вниз"
+                    >
+                      <ChevronDown className="w-5 h-5 md:w-6 md:h-6 text-gray-600" />
+                    </button>
+                  </div>
                 )}
               </div>
 
