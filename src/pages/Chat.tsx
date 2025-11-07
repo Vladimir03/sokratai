@@ -333,7 +333,7 @@ export default function Chat() {
         
         if (data && data.length > 0) {
           // Generate fresh signed URLs for images
-          const loadedMessages = await Promise.all(data.map(async (msg) => {
+          const loadedMessages = await Promise.all(data.map(async (msg: any) => {
             let imageUrl = undefined;
             
             if (msg.image_path) {
@@ -382,7 +382,7 @@ export default function Chat() {
                 .order('created_at', { ascending: true });
               
               if (updatedData) {
-                const updatedMessages = await Promise.all(updatedData.map(async (msg) => {
+                const updatedMessages = await Promise.all(updatedData.map(async (msg: any) => {
                   let imageUrl = undefined;
                   
                   if (msg.image_path) {

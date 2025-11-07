@@ -22,6 +22,7 @@ interface Message {
   status?: "sending" | "sent" | "error";
   error?: string;
   image_url?: string;
+  image_path?: string; // Storage path for persistent images
   input_method?: "text" | "voice" | "button";
   feedback?: 'like' | 'dislike' | null;
 }
