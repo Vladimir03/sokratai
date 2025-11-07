@@ -26,6 +26,7 @@ interface Message {
   role: "user" | "assistant";
   content: string;
   image_url?: string;
+  image_path?: string; // File path in storage (persistent)
   id?: string;
   feedback?: 'like' | 'dislike' | null;
   input_method?: 'text' | 'voice' | 'button';
@@ -331,12 +332,28 @@ export default function Chat() {
         console.log('Raw data from database:', data);
         
         if (data && data.length > 0) {
-          const loadedMessages = data.map(msg => ({
-            role: msg.role as "user" | "assistant",
-            content: msg.content,
-            image_url: msg.image_url || undefined,
-            id: msg.id,
-            feedback: (msg.feedback as any)?.[0]?.feedback_type || null
+          // Generate fresh signed URLs for images
+          const loadedMessages = await Promise.all(data.map(async (msg) => {
+            let imageUrl = undefined;
+            
+            if (msg.image_path) {
+              const { data: signedData } = await supabase.storage
+                .from('chat-images')
+                .createSignedUrl(msg.image_path, 86400); // 24 hours
+              
+              if (signedData) {
+                imageUrl = signedData.signedUrl;
+              }
+            }
+            
+            return {
+              role: msg.role as "user" | "assistant",
+              content: msg.content,
+              image_url: imageUrl,
+              image_path: msg.image_path || undefined,
+              id: msg.id,
+              feedback: (msg.feedback as any)?.[0]?.feedback_type || null
+            };
           }));
           setMessages(loadedMessages);
           // Обновить кеш с актуальными данными
@@ -365,12 +382,27 @@ export default function Chat() {
                 .order('created_at', { ascending: true });
               
               if (updatedData) {
-                const updatedMessages = updatedData.map(msg => ({
-                  role: msg.role as "user" | "assistant",
-                  content: msg.content,
-                  image_url: msg.image_url || undefined,
-                  id: msg.id,
-                  feedback: (msg.feedback as any)?.[0]?.feedback_type || null
+                const updatedMessages = await Promise.all(updatedData.map(async (msg) => {
+                  let imageUrl = undefined;
+                  
+                  if (msg.image_path) {
+                    const { data: signedData } = await supabase.storage
+                      .from('chat-images')
+                      .createSignedUrl(msg.image_path, 86400);
+                    
+                    if (signedData) {
+                      imageUrl = signedData.signedUrl;
+                    }
+                  }
+                  
+                  return {
+                    role: msg.role as "user" | "assistant",
+                    content: msg.content,
+                    image_url: imageUrl,
+                    image_path: msg.image_path || undefined,
+                    id: msg.id,
+                    feedback: (msg.feedback as any)?.[0]?.feedback_type || null
+                  };
                 }));
                 setMessages(updatedMessages);
                 saveChatToSessionCache(currentChatId, updatedMessages, user.id);
@@ -505,7 +537,7 @@ export default function Chat() {
         user_id: user.id,
         role: msg.role,
         content: msg.content,
-        image_url: msg.image_url,
+        image_path: msg.image_path, // Save file path instead of URL
         input_method: msg.input_method || 'text'
       }).select('id').single();
 
@@ -680,6 +712,7 @@ export default function Chat() {
     isSendingRef.current = true;
 
     let imageUrl: string | undefined = undefined;
+    let imageFileName: string | undefined = undefined;
 
     // Upload image if exists
     if (uploadedFile && user?.id) {
@@ -700,10 +733,12 @@ export default function Chat() {
         return;
       }
 
-      // Use signed URL instead of public URL for security
+      // Save fileName for database, generate signed URL for display
+      imageFileName = fileName;
+      
       const { data: signedData, error: urlError } = await supabase.storage
         .from('chat-images')
-        .createSignedUrl(fileName, 3600); // 1 hour expiration
+        .createSignedUrl(fileName, 86400); // 24 hours
 
       if (urlError || !signedData) {
         isSendingRef.current = false;
@@ -723,6 +758,7 @@ export default function Chat() {
       role: "user", 
       content: message.trim() || '[Изображение]',
       image_url: imageUrl,
+      image_path: imageFileName, // Save file path for database
       input_method: inputMethod
     };
     
