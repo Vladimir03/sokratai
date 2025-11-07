@@ -336,7 +336,9 @@ export default function Chat() {
           const loadedMessages = await Promise.all(data.map(async (msg: any) => {
             let imageUrl = undefined;
             
+            // Priority: generate fresh URL from image_path, fallback to old image_url for backwards compatibility
             if (msg.image_path) {
+              // New messages with file path - generate fresh signed URL
               const { data: signedData } = await supabase.storage
                 .from('chat-images')
                 .createSignedUrl(msg.image_path, 86400); // 24 hours
@@ -344,6 +346,9 @@ export default function Chat() {
               if (signedData) {
                 imageUrl = signedData.signedUrl;
               }
+            } else if (msg.image_url) {
+              // Old messages with only URL - use as is (backwards compatibility)
+              imageUrl = msg.image_url;
             }
             
             return {
@@ -385,6 +390,7 @@ export default function Chat() {
                 const updatedMessages = await Promise.all(updatedData.map(async (msg: any) => {
                   let imageUrl = undefined;
                   
+                  // Priority: generate fresh URL from image_path, fallback to old image_url
                   if (msg.image_path) {
                     const { data: signedData } = await supabase.storage
                       .from('chat-images')
@@ -393,6 +399,9 @@ export default function Chat() {
                     if (signedData) {
                       imageUrl = signedData.signedUrl;
                     }
+                  } else if (msg.image_url) {
+                    // Backwards compatibility for old messages
+                    imageUrl = msg.image_url;
                   }
                   
                   return {
