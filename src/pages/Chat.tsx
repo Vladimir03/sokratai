@@ -1296,31 +1296,31 @@ export default function Chat() {
                     <div ref={messagesEndRef} />
                   </>
                 )}
-                
-                {/* Scroll to bottom button - Telegram style */}
-                {showScrollButton && (
-                  <button
-                    onClick={() => scrollToBottom(true)}
-                    className="
-                      fixed bottom-20 md:bottom-24 right-4 md:right-6 z-50
-                      flex items-center justify-center
-                      w-10 h-10 md:w-12 md:h-12
-                      bg-white
-                      border border-gray-300
-                      rounded-full
-                      shadow-lg
-                      hover:bg-gray-50
-                      active:scale-95
-                      transition-all
-                      duration-200
-                      animate-fade-in
-                    "
-                    aria-label="Прокрутить вниз"
-                  >
-                    <ChevronDown className="w-5 h-5 md:w-6 md:h-6 text-gray-600" />
-                  </button>
-                )}
               </div>
+
+              {/* Scroll to bottom button - Telegram style - OUTSIDE scroll container */}
+              {showScrollButton && (
+                <button
+                  onClick={() => scrollToBottom(true)}
+                  className="
+                    fixed bottom-20 md:bottom-24 right-4 md:right-6 z-50
+                    flex items-center justify-center
+                    w-10 h-10 md:w-12 md:h-12
+                    bg-white
+                    border border-gray-300
+                    rounded-full
+                    shadow-lg
+                    hover:bg-gray-50
+                    active:scale-95
+                    transition-all
+                    duration-200
+                    animate-fade-in
+                  "
+                  aria-label="Прокрутить вниз"
+                >
+                  <ChevronDown className="w-5 h-5 md:w-6 md:h-6 text-gray-600" />
+                </button>
+              )}
 
               <div className="relative">
                 <ChatInput
