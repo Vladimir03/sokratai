@@ -336,19 +336,42 @@ export default function Chat() {
           const loadedMessages = await Promise.all(data.map(async (msg: any) => {
             let imageUrl = undefined;
             
-            // Priority: generate fresh URL from image_path, fallback to old image_url for backwards compatibility
+            // Priority: generate fresh URL from image_path
             if (msg.image_path) {
               // New messages with file path - generate fresh signed URL
               const { data: signedData } = await supabase.storage
                 .from('chat-images')
                 .createSignedUrl(msg.image_path, 86400); // 24 hours
-              
+
               if (signedData) {
                 imageUrl = signedData.signedUrl;
               }
             } else if (msg.image_url) {
-              // Old messages with only URL - use as is (backwards compatibility)
-              imageUrl = msg.image_url;
+              // Old messages: extract path from expired URL and generate fresh signed URL
+              try {
+                // Extract path from signed URLs: .../sign/chat-images/USER_ID/FILE.jpg?token=...
+                const signMatch = msg.image_url.match(/\/sign\/chat-images\/(.+?)\?/);
+                // Extract path from public URLs: .../public/chat-images/USER_ID/FILE.jpg
+                const publicMatch = msg.image_url.match(/\/public\/chat-images\/(.+)$/);
+                
+                const extractedPath = signMatch?.[1] || publicMatch?.[1];
+                
+                if (extractedPath) {
+                  // Generate fresh signed URL for old messages
+                  const { data: signedData } = await supabase.storage
+                    .from('chat-images')
+                    .createSignedUrl(extractedPath, 86400); // 24 hours
+                  
+                  if (signedData) {
+                    imageUrl = signedData.signedUrl;
+                  }
+                } else if (msg.image_url.includes('/public/')) {
+                  // Public URLs don't expire - use as is
+                  imageUrl = msg.image_url;
+                }
+              } catch (error) {
+                console.error('Failed to extract path from old image URL:', error);
+              }
             }
             
             return {
@@ -390,7 +413,7 @@ export default function Chat() {
                 const updatedMessages = await Promise.all(updatedData.map(async (msg: any) => {
                   let imageUrl = undefined;
                   
-                  // Priority: generate fresh URL from image_path, fallback to old image_url
+                  // Priority: generate fresh URL from image_path
                   if (msg.image_path) {
                     const { data: signedData } = await supabase.storage
                       .from('chat-images')
@@ -400,8 +423,31 @@ export default function Chat() {
                       imageUrl = signedData.signedUrl;
                     }
                   } else if (msg.image_url) {
-                    // Backwards compatibility for old messages
-                    imageUrl = msg.image_url;
+                    // Old messages: extract path from expired URL and generate fresh signed URL
+                    try {
+                      // Extract path from signed URLs: .../sign/chat-images/USER_ID/FILE.jpg?token=...
+                      const signMatch = msg.image_url.match(/\/sign\/chat-images\/(.+?)\?/);
+                      // Extract path from public URLs: .../public/chat-images/USER_ID/FILE.jpg
+                      const publicMatch = msg.image_url.match(/\/public\/chat-images\/(.+)$/);
+                      
+                      const extractedPath = signMatch?.[1] || publicMatch?.[1];
+                      
+                      if (extractedPath) {
+                        // Generate fresh signed URL for old messages
+                        const { data: signedData } = await supabase.storage
+                          .from('chat-images')
+                          .createSignedUrl(extractedPath, 86400); // 24 hours
+                        
+                        if (signedData) {
+                          imageUrl = signedData.signedUrl;
+                        }
+                      } else if (msg.image_url.includes('/public/')) {
+                        // Public URLs don't expire - use as is
+                        imageUrl = msg.image_url;
+                      }
+                    } catch (error) {
+                      console.error('Failed to extract path from old image URL:', error);
+                    }
                   }
                   
                   return {
