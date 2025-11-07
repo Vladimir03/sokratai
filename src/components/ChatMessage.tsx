@@ -255,78 +255,58 @@ const ChatMessage = memo(({ message, isLoading, onQuickMessage, onRetry, onFeedb
 
               {/* Действия с сообщением - группируем вместе для переноса */}
               <div className="flex gap-2 items-center">
-                <TooltipProvider delayDuration={200}>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <button
-                        onClick={handleCopy}
-                        className="p-2 rounded-md hover:bg-accent transition-colors"
-                        aria-label="Копировать"
-                      >
-                        {isCopied ? (
-                          <Check size={16} className="text-green-600 dark:text-green-400" />
-                        ) : (
-                          <Copy size={16} className="text-muted-foreground" />
-                        )}
-                      </button>
-                    </TooltipTrigger>
-                    <TooltipContent>
-                      {isCopied ? "Скопировано!" : "Копировать"}
-                    </TooltipContent>
-                  </Tooltip>
+                <button
+                  onClick={handleCopy}
+                  className="flex flex-col items-center gap-1 p-2 rounded-md hover:bg-accent transition-colors group"
+                  aria-label="Копировать"
+                >
+                  <span className="text-xs text-muted-foreground group-hover:text-foreground transition-colors">
+                    {isCopied ? "Скопировано" : "Копировать"}
+                  </span>
+                  {isCopied ? (
+                    <Check size={20} className="text-green-600 dark:text-green-400" />
+                  ) : (
+                    <Copy size={20} className="text-muted-foreground group-hover:text-foreground transition-colors" />
+                  )}
+                </button>
 
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <button
-                        onClick={() => handleFeedback('like')}
-                        className={`p-2 rounded-md hover:bg-accent transition-colors ${
-                          currentFeedback === 'like' 
-                            ? 'bg-green-100 dark:bg-green-950' 
-                            : ''
-                        }`}
-                        aria-label="Хороший ответ"
-                      >
-                        <ThumbsUp 
-                          size={16} 
-                          className={
-                            currentFeedback === 'like'
-                              ? 'text-green-600 dark:text-green-400 fill-current'
-                              : 'text-muted-foreground'
-                          }
-                        />
-                      </button>
-                    </TooltipTrigger>
-                    <TooltipContent>
-                      {currentFeedback === 'like' ? "Спасибо за отзыв!" : "Хороший ответ"}
-                    </TooltipContent>
-                  </Tooltip>
+                <button
+                  onClick={() => handleFeedback('like')}
+                  className={`flex items-center justify-center w-10 h-10 rounded-full hover:bg-accent transition-colors ${
+                    currentFeedback === 'like' 
+                      ? 'bg-green-100 dark:bg-green-950' 
+                      : ''
+                  }`}
+                  aria-label="Хороший ответ"
+                >
+                  <ThumbsUp 
+                    size={20} 
+                    className={
+                      currentFeedback === 'like'
+                        ? 'text-green-600 dark:text-green-400 fill-current'
+                        : 'text-muted-foreground'
+                    }
+                  />
+                </button>
 
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <button
-                        onClick={() => handleFeedback('dislike')}
-                        className={`p-2 rounded-md hover:bg-accent transition-colors ${
-                          currentFeedback === 'dislike' 
-                            ? 'bg-red-100 dark:bg-red-950' 
-                            : ''
-                        }`}
-                        aria-label="Плохой ответ"
-                      >
-                        <ThumbsDown 
-                          size={16} 
-                          className={
-                            currentFeedback === 'dislike'
-                              ? 'text-red-600 dark:text-red-400 fill-current'
-                              : 'text-muted-foreground'
-                          }
-                        />
-                      </button>
-                    </TooltipTrigger>
-                    <TooltipContent>
-                      {currentFeedback === 'dislike' ? "Спасибо за отзыв!" : "Плохой ответ"}
-                    </TooltipContent>
-                  </Tooltip>
-                </TooltipProvider>
+                <button
+                  onClick={() => handleFeedback('dislike')}
+                  className={`flex items-center justify-center w-10 h-10 rounded-full hover:bg-accent transition-colors ${
+                    currentFeedback === 'dislike' 
+                      ? 'bg-red-100 dark:bg-red-950' 
+                      : ''
+                  }`}
+                  aria-label="Плохой ответ"
+                >
+                  <ThumbsDown 
+                    size={20} 
+                    className={
+                      currentFeedback === 'dislike'
+                        ? 'text-red-600 dark:text-red-400 fill-current'
+                        : 'text-muted-foreground'
+                    }
+                  />
+                </button>
               </div>
             </div>
           )}
