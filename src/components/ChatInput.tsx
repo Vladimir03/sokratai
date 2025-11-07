@@ -5,6 +5,7 @@ import { Send, Image as ImageIcon, X, Loader2 } from "lucide-react";
 import { useIsMobile } from "@/hooks/use-mobile";
 
 interface ChatInputProps {
+  fileInputRef?: React.RefObject<HTMLInputElement>;
   uploadedFile: File | null;
   previewUrl: string | null;
   isLoading: boolean;
@@ -18,6 +19,7 @@ interface ChatInputProps {
 }
 
 const ChatInput = memo(({
+  fileInputRef,
   uploadedFile,
   previewUrl,
   isLoading,
@@ -29,7 +31,6 @@ const ChatInput = memo(({
   value,
   onValueChange,
 }: ChatInputProps) => {
-  const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const [message, setMessage] = useState("");
   const isMobileDevice = useIsMobile();

@@ -48,6 +48,7 @@ export default function Chat() {
   const { toast } = useToast();
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const isSendingRef = useRef(false); // Защита от дублирования отправки (iOS fix)
   const abortControllerRef = useRef<AbortController | null>(null); // Защита от race conditions
   const previousChatIdRef = useRef<string | null>(null); // Отслеживание предыдущего чата
@@ -566,6 +567,11 @@ export default function Chat() {
     }
     setUploadedFile(null);
     setPreviewUrl(null);
+    
+    // Reset input value to allow re-uploading the same file
+    if (fileInputRef.current) {
+      fileInputRef.current.value = "";
+    }
   }, [previewUrl]);
 
   // Cleanup blob URLs при unmount
@@ -1421,6 +1427,7 @@ export default function Chat() {
 
               <div className="relative">
                 <ChatInput
+                  fileInputRef={fileInputRef}
                   uploadedFile={uploadedFile}
                   previewUrl={previewUrl}
                   isLoading={isLoading}
