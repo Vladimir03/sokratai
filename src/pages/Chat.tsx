@@ -636,110 +636,200 @@ export default function Chat() {
     }
   }, [messages]);
 
-  async function streamChat({
+  // Retry механизм с экспоненциальным backoff для отправки сообщений
+  async function streamChatWithRetry({
     messages,
     onDelta,
     onDone,
     taskContext,
     chatId,
+    retries = 3,
   }: {
     messages: Message[];
     onDelta: (deltaText: string) => void;
     onDone: () => void;
     taskContext?: string;
     chatId?: string;
+    retries?: number;
   }) {
     const CHAT_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/chat`;
 
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session) {
-      toast({
-        title: "Ошибка",
-        description: "Требуется авторизация",
-        variant: "destructive",
-      });
-      throw new Error("No session");
-    }
+    for (let attempt = 0; attempt < retries; attempt++) {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => {
+        console.warn(`⏱️ Request timeout after 30s (attempt ${attempt + 1}/${retries})`);
+        controller.abort();
+      }, 30000); // 30 секунд таймаут
 
-    const resp = await fetch(CHAT_URL, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${session.access_token}`,
-      },
-      body: JSON.stringify({ messages, taskContext, chatId }),
-    });
-
-    if (!resp.ok || !resp.body) {
-      if (resp.status === 429) {
-        toast({
-          title: "Ошибка",
-          description: "Превышен лимит запросов. Попробуйте позже.",
-          variant: "destructive",
-        });
-      } else if (resp.status === 402) {
-        toast({
-          title: "Ошибка",
-          description: "Требуется пополнение баланса.",
-          variant: "destructive",
-        });
-      }
-      throw new Error("Failed to start stream");
-    }
-
-    const reader = resp.body.getReader();
-    const decoder = new TextDecoder();
-    let textBuffer = "";
-    let streamDone = false;
-
-    while (!streamDone) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      textBuffer += decoder.decode(value, { stream: true });
-
-      let newlineIndex: number;
-      while ((newlineIndex = textBuffer.indexOf("\n")) !== -1) {
-        let line = textBuffer.slice(0, newlineIndex);
-        textBuffer = textBuffer.slice(newlineIndex + 1);
-
-        if (line.endsWith("\r")) line = line.slice(0, -1);
-        if (line.startsWith(":") || line.trim() === "") continue;
-        if (!line.startsWith("data: ")) continue;
-
-        const jsonStr = line.slice(6).trim();
-        if (jsonStr === "[DONE]") {
-          streamDone = true;
-          break;
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!session) {
+          clearTimeout(timeoutId);
+          toast({
+            title: "Ошибка",
+            description: "Требуется авторизация",
+            variant: "destructive",
+          });
+          throw new Error("No session");
         }
 
-        try {
-          const parsed = JSON.parse(jsonStr);
-          const content = parsed.choices?.[0]?.delta?.content as string | undefined;
-          if (content) onDelta(content);
-        } catch {
-          textBuffer = line + "\n" + textBuffer;
-          break;
+        console.log(`📤 Sending message (attempt ${attempt + 1}/${retries})`);
+
+        const resp = await fetch(CHAT_URL, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${session.access_token}`,
+          },
+          body: JSON.stringify({ messages, taskContext, chatId }),
+          signal: controller.signal,
+        });
+
+        clearTimeout(timeoutId);
+
+        // Проверка статуса
+        if (!resp.ok) {
+          // Не retry для лимита запросов и баланса
+          if (resp.status === 429) {
+            toast({
+              title: "Ошибка",
+              description: "Превышен лимит запросов. Попробуйте позже.",
+              variant: "destructive",
+            });
+            throw new Error("Rate limit exceeded");
+          } else if (resp.status === 402) {
+            toast({
+              title: "Ошибка",
+              description: "Требуется пополнение баланса.",
+              variant: "destructive",
+            });
+            throw new Error("Payment required");
+          }
+
+          // Retry на 5xx ошибках сервера
+          if (resp.status >= 500 && attempt < retries - 1) {
+            const delay = Math.pow(2, attempt) * 1000;
+            console.warn(`⚠️ Server error ${resp.status}, retrying in ${delay}ms...`);
+            toast({
+              title: "Проблема на сервере",
+              description: `Повторяю попытку (${attempt + 1}/${retries})...`,
+              duration: 2000,
+            });
+            await new Promise(resolve => setTimeout(resolve, delay));
+            continue;
+          }
+
+          throw new Error(`HTTP ${resp.status}`);
         }
+
+        if (!resp.body) {
+          throw new Error("No response body");
+        }
+
+        // Успешный ответ - читаем stream
+        const reader = resp.body.getReader();
+        const decoder = new TextDecoder();
+        let textBuffer = "";
+        let streamDone = false;
+
+        while (!streamDone) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          textBuffer += decoder.decode(value, { stream: true });
+
+          let newlineIndex: number;
+          while ((newlineIndex = textBuffer.indexOf("\n")) !== -1) {
+            let line = textBuffer.slice(0, newlineIndex);
+            textBuffer = textBuffer.slice(newlineIndex + 1);
+
+            if (line.endsWith("\r")) line = line.slice(0, -1);
+            if (line.startsWith(":") || line.trim() === "") continue;
+            if (!line.startsWith("data: ")) continue;
+
+            const jsonStr = line.slice(6).trim();
+            if (jsonStr === "[DONE]") {
+              streamDone = true;
+              break;
+            }
+
+            try {
+              const parsed = JSON.parse(jsonStr);
+              const content = parsed.choices?.[0]?.delta?.content as string | undefined;
+              if (content) onDelta(content);
+            } catch {
+              textBuffer = line + "\n" + textBuffer;
+              break;
+            }
+          }
+        }
+
+        if (textBuffer.trim()) {
+          for (let raw of textBuffer.split("\n")) {
+            if (!raw) continue;
+            if (raw.endsWith("\r")) raw = raw.slice(0, -1);
+            if (raw.startsWith(":") || raw.trim() === "") continue;
+            if (!raw.startsWith("data: ")) continue;
+            const jsonStr = raw.slice(6).trim();
+            if (jsonStr === "[DONE]") continue;
+            try {
+              const parsed = JSON.parse(jsonStr);
+              const content = parsed.choices?.[0]?.delta?.content as string | undefined;
+              if (content) onDelta(content);
+            } catch {}
+          }
+        }
+
+        console.log(`✅ Message sent successfully (attempt ${attempt + 1})`);
+        onDone();
+        return; // Успех - выходим из retry loop
+
+      } catch (error: any) {
+        clearTimeout(timeoutId);
+
+        // Обработка AbortError (таймаут)
+        if (error.name === 'AbortError') {
+          if (attempt < retries - 1) {
+            const delay = Math.pow(2, attempt) * 1000;
+            console.warn(`⏱️ Request timeout, retrying in ${delay}ms...`);
+            toast({
+              title: "Запрос занял слишком много времени",
+              description: `Повторяю попытку (${attempt + 1}/${retries})...`,
+              duration: 2000,
+            });
+            await new Promise(resolve => setTimeout(resolve, delay));
+            continue;
+          }
+          console.error('❌ All retry attempts failed due to timeout');
+          throw new Error("Превышен лимит времени ожидания. Попробуйте позже.");
+        }
+
+        // Обработка сетевых ошибок
+        if (error.message.includes('fetch') || error.message.includes('network')) {
+          if (attempt < retries - 1) {
+            const delay = Math.pow(2, attempt) * 1000;
+            console.warn(`🌐 Network error, retrying in ${delay}ms...`);
+            toast({
+              title: "Проблема с интернетом",
+              description: `Повторяю попытку (${attempt + 1}/${retries})...`,
+              duration: 2000,
+            });
+            await new Promise(resolve => setTimeout(resolve, delay));
+            continue;
+          }
+        }
+
+        // Последняя попытка провалилась
+        if (attempt === retries - 1) {
+          console.error('❌ All retry attempts failed:', error);
+          throw error;
+        }
+
+        // Retry для других ошибок
+        const delay = Math.pow(2, attempt) * 1000;
+        console.warn(`⚠️ Error on attempt ${attempt + 1}, retrying in ${delay}ms:`, error.message);
+        await new Promise(resolve => setTimeout(resolve, delay));
       }
     }
-
-    if (textBuffer.trim()) {
-      for (let raw of textBuffer.split("\n")) {
-        if (!raw) continue;
-        if (raw.endsWith("\r")) raw = raw.slice(0, -1);
-        if (raw.startsWith(":") || raw.trim() === "") continue;
-        if (!raw.startsWith("data: ")) continue;
-        const jsonStr = raw.slice(6).trim();
-        if (jsonStr === "[DONE]") continue;
-        try {
-          const parsed = JSON.parse(jsonStr);
-          const content = parsed.choices?.[0]?.delta?.content as string | undefined;
-          if (content) onDelta(content);
-        } catch {}
-      }
-    }
-
-    onDone();
   }
 
   const handleSend = useCallback(async (message: string, inputMethod: 'text' | 'voice' | 'button' = 'text') => {
@@ -758,7 +848,7 @@ export default function Chat() {
     
     // Защита от множественных вызовов (iOS Safari bug)
     if (isSendingRef.current) {
-      console.log('Already sending, ignoring duplicate call');
+      console.log('⚠️ Already sending, ignoring duplicate call');
       
       toast({
         title: "Подождите",
@@ -771,6 +861,20 @@ export default function Chat() {
     }
     
     isSendingRef.current = true;
+    console.log('🔒 Send flag set to true');
+
+    // Таймаут для автоматического сброса флага отправки (защита от зависания)
+    const sendTimeoutId = setTimeout(() => {
+      if (isSendingRef.current) {
+        console.warn('⏱️ Send timeout - resetting flag after 30 seconds');
+        isSendingRef.current = false;
+        toast({
+          title: "Таймаут отправки",
+          description: "Попробуйте отправить сообщение снова",
+          variant: "destructive",
+        });
+      }
+    }, 30000); // 30 секунд
 
     let imageUrl: string | undefined = undefined;
     let imageFileName: string | undefined = undefined;
@@ -887,7 +991,7 @@ export default function Chat() {
       const allMessages = [...messages, userMessage];
       const messagesToSend = allMessages.slice(-15);
 
-      await streamChat({
+      await streamChatWithRetry({
         messages: messagesToSend,
         onDelta: (chunk) => upsertAssistant(chunk),
         onDone: () => {
@@ -896,6 +1000,7 @@ export default function Chat() {
         },
         taskContext,
         chatId: currentChatId,
+        retries: 3,
       });
 
       // Сохраняем только если есть контент от ассистента
@@ -918,16 +1023,38 @@ export default function Chat() {
         }
       }
     } catch (error) {
-      console.error(error);
+      console.error('❌ Send error:', error);
       setIsLoading(false);
+      
+      // Улучшенные сообщения об ошибках
+      let errorTitle = "Ошибка отправки";
+      let errorDescription = "Не удалось отправить сообщение";
+      
+      if (error instanceof Error) {
+        if (error.message.includes('timeout') || error.message.includes('времени')) {
+          errorTitle = "Превышено время ожидания";
+          errorDescription = "Сервер не ответил вовремя. Проверьте интернет-соединение.";
+        } else if (error.message.includes('network') || error.message.includes('fetch')) {
+          errorTitle = "Проблема с сетью";
+          errorDescription = "Проверьте интернет-соединение и попробуйте снова.";
+        } else if (error.message.includes('Rate limit')) {
+          errorTitle = "Превышен лимит запросов";
+          errorDescription = "Подождите немного и попробуйте снова.";
+        } else {
+          errorDescription = error.message;
+        }
+      }
+      
       toast({
-        title: "Ошибка",
-        description: error instanceof Error ? error.message : "Не удалось отправить сообщение",
+        title: errorTitle,
+        description: errorDescription,
         variant: "destructive",
       });
     } finally {
-      // Всегда сбрасываем флаг отправки
+      // Очистить таймаут и всегда сбросить флаг отправки
+      clearTimeout(sendTimeoutId);
       isSendingRef.current = false;
+      console.log('🔓 Send flag reset to false');
     }
   }, [messages, uploadedFile, isLoading, loadingHistory, user?.id, removeUploadedFile, currentChat, currentChatId, queryClient, toast]);
 
@@ -1027,7 +1154,7 @@ export default function Chat() {
       try {
         const taskContext = `Задача №${task.task_number}. Тема: ${task.homework_set?.topic}. Условие: ${task.condition_text}`;
         
-        await streamChat({
+        await streamChatWithRetry({
           messages: [{
             role: "user",
             content: "Привет! Помоги мне разобраться с этой задачей"
@@ -1038,6 +1165,7 @@ export default function Chat() {
           },
           taskContext,
           chatId: currentChatId,
+          retries: 3,
         });
 
         const finalAssistantMsg: Message = { role: "assistant", content: assistantSoFar };
