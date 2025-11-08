@@ -3,7 +3,7 @@ import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
 import { Dialog, DialogContent } from "@/components/ui/dialog";
-import { X, Copy, ThumbsUp, ThumbsDown, Check } from "lucide-react";
+import { X, Copy, ThumbsUp, ThumbsDown, Check, Clock, CheckCheck, AlertCircle, Brain, RotateCw } from "lucide-react";
 import {
   Tooltip,
   TooltipContent,
@@ -14,12 +14,14 @@ import {
 // Динамическая загрузка только ReactMarkdown компонента
 const ReactMarkdown = lazy(() => import('react-markdown'));
 
+type MessageStatus = 'sending' | 'sent' | 'ai_thinking' | 'delivered' | 'failed';
+
 interface Message {
   role: "user" | "assistant";
   content: string;
   id?: string;
   tempId?: string;
-  status?: "sending" | "sent" | "error";
+  status?: MessageStatus;
   error?: string;
   image_url?: string;
   image_path?: string; // Storage path for persistent images
@@ -115,18 +117,26 @@ const ChatMessage = memo(({ message, isLoading, onQuickMessage, onRetry, onFeedb
     }
   }, [hasMath, katexLoaded]);
 
-  const getStatusIcon = () => {
-    if (message.role !== "user") return null;
+  // Компонент для отображения статуса сообщения
+  const MessageStatusIcon = ({ status }: { status?: MessageStatus }) => {
+    if (!status || status === 'delivered') return null;
     
-    switch (message.status) {
-      case "sending":
-        return <span className="text-xs opacity-60 ml-2">⏳</span>;
-      case "sent":
-        return <span className="text-xs opacity-60 ml-2">✓</span>;
-      case "error":
-        return <span className="text-xs text-red-400 ml-2">❌</span>;
+    switch (status) {
+      case 'sending':
+        return <Clock className="w-4 h-4 text-gray-400 animate-spin" />;
+      case 'sent':
+        return <Check className="w-4 h-4 text-gray-400" />;
+      case 'ai_thinking':
+        return (
+          <div className="flex items-center gap-1">
+            <Check className="w-4 h-4 text-green-500" />
+            <Brain className="w-4 h-4 text-green-500 animate-pulse" />
+          </div>
+        );
+      case 'failed':
+        return <AlertCircle className="w-4 h-4 text-red-500 cursor-pointer" />;
       default:
-        return null;
+        return <CheckCheck className="w-4 h-4 text-green-500" />;
     }
   };
 
@@ -179,7 +189,7 @@ const ChatMessage = memo(({ message, isLoading, onQuickMessage, onRetry, onFeedb
           <div
             className={`p-4 rounded-2xl ${
               message.role === "user"
-                ? message.status === "error" 
+                ? message.status === "failed" 
                   ? "bg-destructive/20 text-foreground border border-destructive/40"
                   : "bg-primary text-primary-foreground"
                 : "bg-muted"
@@ -210,18 +220,39 @@ const ChatMessage = memo(({ message, isLoading, onQuickMessage, onRetry, onFeedb
                 </ReactMarkdown>
               </Suspense>
             </div>
-            <div className="flex items-center justify-end mt-1">
-              {getStatusIcon()}
-            </div>
+            {message.role === "user" && (
+              <div className="flex items-center justify-end mt-1">
+                <MessageStatusIcon status={message.status} />
+              </div>
+            )}
           </div>
           
-          {message.status === "error" && onRetry && (
-            <button
-              onClick={onRetry}
-              className="text-xs px-3 py-1.5 bg-destructive/10 hover:bg-destructive/20 text-destructive rounded-full border border-destructive/40 transition-colors"
-            >
-              🔄 Повторить отправку
-            </button>
+          {/* Индикатор "ИИ думает" */}
+          {message.status === 'ai_thinking' && (
+            <div className="flex items-center gap-2 mt-2 text-sm text-gray-500">
+              <Brain className="w-4 h-4 animate-pulse" />
+              <span>Сократ думает над ответом</span>
+              <div className="flex gap-1">
+                <span className="animate-bounce" style={{ animationDelay: '0ms' }}>.</span>
+                <span className="animate-bounce" style={{ animationDelay: '150ms' }}>.</span>
+                <span className="animate-bounce" style={{ animationDelay: '300ms' }}>.</span>
+              </div>
+            </div>
+          )}
+          
+          {/* Кнопка повторить для failed сообщений */}
+          {message.status === "failed" && onRetry && (
+            <div className="mt-2 p-2 bg-red-50 border border-red-200 rounded-lg flex items-center gap-2">
+              <AlertCircle className="w-4 h-4 text-red-500 shrink-0" />
+              <span className="text-xs text-red-700 flex-1">Не удалось отправить. Проверьте интернет.</span>
+              <button
+                onClick={onRetry}
+                className="text-xs px-3 py-1.5 bg-red-100 hover:bg-red-200 text-red-700 rounded-full border border-red-300 transition-colors flex items-center gap-1"
+              >
+                <RotateCw className="w-3 h-3" />
+                Повторить
+              </button>
+            </div>
           )}
           
           {message.role === "assistant" && !isLoading && (

@@ -22,6 +22,8 @@ import { subjectNames } from "@/data/onboardingTasks";
 import { PageContent } from "@/components/PageContent";
 import { saveChatToSessionCache, loadChatFromSessionCache, clearChatCache } from "@/utils/chatCache";
 
+type MessageStatus = 'sending' | 'sent' | 'ai_thinking' | 'delivered' | 'failed';
+
 interface Message {
   role: "user" | "assistant";
   content: string;
@@ -30,6 +32,7 @@ interface Message {
   id?: string;
   feedback?: 'like' | 'dislike' | null;
   input_method?: 'text' | 'voice' | 'button';
+  status?: MessageStatus;
 }
 
 export default function Chat() {
@@ -832,6 +835,12 @@ export default function Chat() {
     }
   }
 
+  const updateMessageStatus = useCallback((messageId: string, status: MessageStatus) => {
+    setMessages(prev => prev.map(msg => 
+      msg.id === messageId ? { ...msg, status } : msg
+    ));
+  }, []);
+
   const handleSend = useCallback(async (message: string, inputMethod: 'text' | 'voice' | 'button' = 'text') => {
     if ((!message.trim() && !uploadedFile) || isLoading) return;
     
@@ -919,18 +928,20 @@ export default function Chat() {
       imageUrl = signedData.signedUrl;
     }
 
-    const userMessage: Message = { 
+    // Оптимистичный UI - сразу показываем сообщение
+    const optimisticMessageId = `temp-${Date.now()}`;
+    const optimisticMessage: Message = { 
       role: "user", 
       content: message.trim() || '[Изображение]',
       image_url: imageUrl,
-      image_path: imageFileName, // Save file path for database
-      input_method: inputMethod
+      image_path: imageFileName,
+      input_method: inputMethod,
+      status: 'sending',
+      id: optimisticMessageId
     };
     
-    // Используем функциональное обновление состояния
     setMessages(prev => {
-      const newMessages = [...prev, userMessage];
-      // Сохраняем в кеш сразу
+      const newMessages = [...prev, optimisticMessage];
       if (user?.id && currentChatId) {
         saveChatToSessionCache(currentChatId, newMessages, user.id);
       }
@@ -941,15 +952,21 @@ export default function Chat() {
 
     try {
       // Сохраняем сообщение пользователя и получаем id из БД
-      const userMessageId = await saveMessageToBatch(userMessage);
+      const userMessageToSave = {
+        role: "user" as const,
+        content: message.trim() || '[Изображение]',
+        image_url: imageUrl,
+        image_path: imageFileName,
+        input_method: inputMethod
+      };
+      const userMessageId = await saveMessageToBatch(userMessageToSave);
       
-      // Обновляем локальное сообщение с id из БД
+      // Обновляем id и статус на 'sent'
       if (userMessageId) {
         setMessages(prev => {
-          const updated = prev.map((m, i) => 
-            i === prev.length - 1 ? { ...m, id: userMessageId } : m
+          const updated = prev.map(m => 
+            m.id === optimisticMessageId ? { ...m, id: userMessageId, status: 'sent' as MessageStatus } : m
           );
-          // Обновляем кеш
           if (user?.id && currentChatId) {
             saveChatToSessionCache(currentChatId, updated, user.id);
           }
@@ -958,6 +975,8 @@ export default function Chat() {
       }
     } catch (error) {
       console.error('Failed to save user message:', error);
+      // Обновляем статус на 'failed'
+      updateMessageStatus(optimisticMessageId, 'failed');
       isSendingRef.current = false;
       setIsLoading(false);
       toast({
@@ -967,6 +986,12 @@ export default function Chat() {
       });
       return;
     }
+
+    // Обновляем статус на 'ai_thinking' когда начинается генерация
+    const savedUserMessageId = messages.length > 0 
+      ? messages[messages.length - 1]?.id || optimisticMessageId
+      : optimisticMessageId;
+    updateMessageStatus(savedUserMessageId, 'ai_thinking');
 
     let assistantSoFar = "";
     
@@ -987,14 +1012,21 @@ export default function Chat() {
         ? `Задача №${currentChat.homework_task.task_number}. Тема: ${currentChat.homework_task.homework_set?.topic}. Условие: ${currentChat.homework_task.condition_text}`
         : undefined;
 
-      // Отправляем только последние 15 сообщений
-      const allMessages = [...messages, userMessage];
-      const messagesToSend = allMessages.slice(-15);
+      // Отправляем только последние 15 сообщений (без optimistic message со статусом)
+      const messagesToSend = messages.slice(-15).map(({ status, ...msg }) => msg);
 
       await streamChatWithRetry({
-        messages: messagesToSend,
+        messages: [...messagesToSend, {
+          role: "user" as const,
+          content: message.trim() || '[Изображение]',
+          image_url: imageUrl,
+          image_path: imageFileName,
+          input_method: inputMethod
+        }],
         onDelta: (chunk) => upsertAssistant(chunk),
         onDone: () => {
+          // Обновляем статус на 'delivered' когда все готово
+          updateMessageStatus(savedUserMessageId, 'delivered');
           setIsLoading(false);
           queryClient.invalidateQueries({ queryKey: ['chat-messages'] });
         },
@@ -1024,6 +1056,8 @@ export default function Chat() {
       }
     } catch (error) {
       console.error('❌ Send error:', error);
+      // Обновляем статус на 'failed' при ошибке
+      updateMessageStatus(savedUserMessageId, 'failed');
       setIsLoading(false);
       
       // Улучшенные сообщения об ошибках
@@ -1056,7 +1090,14 @@ export default function Chat() {
       isSendingRef.current = false;
       console.log('🔓 Send flag reset to false');
     }
-  }, [messages, uploadedFile, isLoading, loadingHistory, user?.id, removeUploadedFile, currentChat, currentChatId, queryClient, toast]);
+  }, [messages, uploadedFile, isLoading, loadingHistory, user?.id, removeUploadedFile, currentChat, currentChatId, queryClient, toast, updateMessageStatus]);
+
+  const handleRetryMessage = useCallback((messageContent: string, inputMethod: 'text' | 'voice' | 'button' = 'text') => {
+    // Удалить failed сообщение
+    setMessages(prev => prev.filter(msg => msg.status !== 'failed'));
+    // Отправить заново
+    handleSend(messageContent, inputMethod);
+  }, [handleSend]);
 
   const handleQuickMessage = useCallback((quickText: string) => {
     handleSend(quickText, 'button');
@@ -1498,14 +1539,15 @@ export default function Chat() {
                                 transform: `translateY(${virtualRow.start}px)`,
                               }}
                             >
-                              <ChatMessage
-                                key={msg.id || virtualRow.index}
-                                message={msg}
-                                isLoading={false}
-                                onQuickMessage={handleQuickMessage}
-                                onFeedback={handleMessageFeedback}
-                                onInteraction={handleMessageInteraction}
-                              />
+                      <ChatMessage
+                        key={msg.id || virtualRow.index}
+                        message={msg}
+                        isLoading={false}
+                        onQuickMessage={handleQuickMessage}
+                        onFeedback={handleMessageFeedback}
+                        onInteraction={handleMessageInteraction}
+                        onRetry={() => msg.content && handleRetryMessage(msg.content, msg.input_method)}
+                      />
                             </div>
                           );
                         })}
@@ -1513,14 +1555,15 @@ export default function Chat() {
                     ) : (
                       // Обычный рендер для маленьких чатов
                       messages.map((msg, index) => (
-                        <ChatMessage 
-                          key={msg.id || index} 
-                          message={msg} 
-                          isLoading={false} 
-                          onQuickMessage={handleQuickMessage}
-                          onFeedback={handleMessageFeedback}
-                          onInteraction={handleMessageInteraction}
-                        />
+                      <ChatMessage 
+                        key={msg.id || index} 
+                        message={msg} 
+                        isLoading={false} 
+                        onQuickMessage={handleQuickMessage}
+                        onFeedback={handleMessageFeedback}
+                        onInteraction={handleMessageInteraction}
+                        onRetry={() => msg.content && handleRetryMessage(msg.content, msg.input_method)}
+                      />
                       ))
                     )}
                     {isLoading && <LoadingIndicator />}
