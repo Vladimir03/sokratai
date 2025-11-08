@@ -1,9 +1,11 @@
+import SokratLogo from "@/components/SokratLogo";
+
 const HowItWorks = () => {
   return (
     <section className="py-20 px-4 bg-muted/30">
       <div className="container mx-auto">
-        <h2 className="text-3xl md:text-4xl font-bold text-center mb-8 text-primary">
-          🛠️ Как это работает
+        <h2 className="text-3xl md:text-4xl font-bold text-center mb-8 text-primary flex items-center justify-center gap-3">
+          <SokratLogo className="w-10 h-10 md:w-12 md:h-12" /> Как это работает
         </h2>
         
         <h3 className="text-2xl font-bold text-center text-primary-variant mb-12">
