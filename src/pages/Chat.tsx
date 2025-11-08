@@ -885,61 +885,17 @@ export default function Chat() {
       }
     }, 30000); // 30 секунд
 
-    let imageUrl: string | undefined = undefined;
-    let imageFileName: string | undefined = undefined;
-
-    // Upload image if exists
-    if (uploadedFile && user?.id) {
-      const fileName = `${user.id}/${Date.now()}-${uploadedFile.name}`;
-      
-      const { data, error } = await supabase.storage
-        .from('chat-images')
-        .upload(fileName, uploadedFile);
-
-      if (error) {
-        isSendingRef.current = false; // Reset on error
-        toast({
-          title: "Ошибка",
-          description: "Не удалось загрузить изображение",
-          variant: "destructive",
-        });
-        console.error('Upload error:', error);
-        return;
-      }
-
-      // Save fileName for database, generate signed URL for display
-      imageFileName = fileName;
-      
-      const { data: signedData, error: urlError } = await supabase.storage
-        .from('chat-images')
-        .createSignedUrl(fileName, 86400); // 24 hours
-
-      if (urlError || !signedData) {
-        isSendingRef.current = false;
-        toast({
-          title: "Ошибка",
-          description: "Не удалось создать ссылку на файл",
-          variant: "destructive",
-        });
-        console.error('Signed URL error:', urlError);
-        return;
-      }
-
-      imageUrl = signedData.signedUrl;
-    }
-
-    // Оптимистичный UI - сразу показываем сообщение
+    // Создаем optimistic message СРАЗУ после проверок (ДО загрузки изображения)
     const optimisticMessageId = `temp-${Date.now()}`;
-    const optimisticMessage: Message = { 
-      role: "user", 
+    const optimisticMessage: Message = {
+      id: optimisticMessageId,
+      role: 'user',
       content: message.trim() || '[Изображение]',
-      image_url: imageUrl,
-      image_path: imageFileName,
-      input_method: inputMethod,
       status: 'sending',
-      id: optimisticMessageId
+      input_method: inputMethod,
     };
-    
+
+    // Добавляем в UI сразу (оптимистичный UI)
     setMessages(prev => {
       const newMessages = [...prev, optimisticMessage];
       if (user?.id && currentChatId) {
@@ -947,73 +903,100 @@ export default function Chat() {
       }
       return newMessages;
     });
-    removeUploadedFile();
-    setIsLoading(true);
+
+    console.log('📝 Optimistic message added:', optimisticMessageId);
 
     try {
-      // Сохраняем сообщение пользователя и получаем id из БД
-      const userMessageToSave = {
-        role: "user" as const,
+      // Загрузка изображения (если есть)
+      let imageUrl: string | undefined;
+      let imageFileName: string | undefined;
+      
+      if (uploadedFile && user?.id) {
+        const fileName = `${user.id}/${Date.now()}-${uploadedFile.name}`;
+        
+        const { data, error } = await supabase.storage
+          .from('chat-images')
+          .upload(fileName, uploadedFile);
+
+        if (error) {
+          console.error('Upload error:', error);
+          throw new Error("Не удалось загрузить изображение");
+        }
+
+        // Save fileName for database, generate signed URL for display
+        imageFileName = fileName;
+        
+        const { data: signedData, error: urlError } = await supabase.storage
+          .from('chat-images')
+          .createSignedUrl(fileName, 86400); // 24 hours
+
+        if (urlError || !signedData) {
+          console.error('Signed URL error:', urlError);
+          throw new Error("Не удалось создать ссылку на файл");
+        }
+
+        imageUrl = signedData.signedUrl;
+        
+        // Обновляем optimistic message с изображением
+        setMessages(prev => prev.map(msg => 
+          msg.id === optimisticMessageId 
+            ? { ...msg, content: message.trim() || '[Изображение]', image_url: imageUrl, image_path: imageFileName }
+            : msg
+        ));
+      }
+
+      removeUploadedFile();
+      setIsLoading(true);
+
+      // Сохраняем сообщение в БД
+      const userMessageId = await saveMessageToBatch({
+        role: 'user',
         content: message.trim() || '[Изображение]',
         image_url: imageUrl,
         image_path: imageFileName,
-        input_method: inputMethod
-      };
-      const userMessageId = await saveMessageToBatch(userMessageToSave);
-      
-      // Обновляем id и статус на 'sent'
+        input_method: inputMethod,
+      });
+
+      // Обновляем optimistic message с реальным ID и статусом 'sent'
       if (userMessageId) {
         setMessages(prev => {
-          const updated = prev.map(m => 
-            m.id === optimisticMessageId ? { ...m, id: userMessageId, status: 'sent' as MessageStatus } : m
+          const updated = prev.map(msg => 
+            msg.id === optimisticMessageId 
+              ? { ...msg, id: userMessageId, status: 'sent' as MessageStatus }
+              : msg
           );
           if (user?.id && currentChatId) {
             saveChatToSessionCache(currentChatId, updated, user.id);
           }
           return updated;
         });
+        console.log('✅ Message saved with ID:', userMessageId);
       }
-    } catch (error) {
-      console.error('Failed to save user message:', error);
-      // Обновляем статус на 'failed'
-      updateMessageStatus(optimisticMessageId, 'failed');
-      isSendingRef.current = false;
-      setIsLoading(false);
-      toast({
-        title: "Ошибка",
-        description: error instanceof Error ? error.message : "Не удалось отправить сообщение",
-        variant: "destructive",
-      });
-      return;
-    }
 
-    // Обновляем статус на 'ai_thinking' когда начинается генерация
-    const savedUserMessageId = messages.length > 0 
-      ? messages[messages.length - 1]?.id || optimisticMessageId
-      : optimisticMessageId;
-    updateMessageStatus(savedUserMessageId, 'ai_thinking');
+      // Обновляем статус на 'ai_thinking'
+      const finalMessageId = userMessageId || optimisticMessageId;
+      updateMessageStatus(finalMessageId, 'ai_thinking');
 
-    let assistantSoFar = "";
-    
-    const upsertAssistant = (nextChunk: string) => {
-      assistantSoFar += nextChunk;
-      setMessages(prev => {
-        const last = prev[prev.length - 1];
-        if (last?.role === "assistant") {
-          return prev.map((m, i) => (i === prev.length - 1 ? { ...m, content: assistantSoFar } : m));
-        }
-        return [...prev, { role: "assistant", content: assistantSoFar }];
-      });
-    };
+      let assistantSoFar = "";
+      
+      const upsertAssistant = (nextChunk: string) => {
+        assistantSoFar += nextChunk;
+        setMessages(prev => {
+          const last = prev[prev.length - 1];
+          if (last?.role === "assistant") {
+            return prev.map((m, i) => (i === prev.length - 1 ? { ...m, content: assistantSoFar } : m));
+          }
+          return [...prev, { role: "assistant", content: assistantSoFar }];
+        });
+      };
 
-    try {
       // Отправляем taskContext только в первом сообщении
       const taskContext = (currentChat?.homework_task && messages.length === 0)
         ? `Задача №${currentChat.homework_task.task_number}. Тема: ${currentChat.homework_task.homework_set?.topic}. Условие: ${currentChat.homework_task.condition_text}`
         : undefined;
 
-      // Отправляем только последние 15 сообщений (без optimistic message со статусом)
-      const messagesToSend = messages.slice(-15).map(({ status, ...msg }) => msg);
+      // Отправляем только последние 15 сообщений
+      const messagesToSend = messages.slice(-15);
 
       await streamChatWithRetry({
         messages: [...messagesToSend, {
@@ -1026,7 +1009,7 @@ export default function Chat() {
         onDelta: (chunk) => upsertAssistant(chunk),
         onDone: () => {
           // Обновляем статус на 'delivered' когда все готово
-          updateMessageStatus(savedUserMessageId, 'delivered');
+          updateMessageStatus(finalMessageId, 'delivered');
           setIsLoading(false);
           queryClient.invalidateQueries({ queryKey: ['chat-messages'] });
         },
@@ -1055,37 +1038,22 @@ export default function Chat() {
         }
       }
     } catch (error) {
-      console.error('❌ Send error:', error);
-      // Обновляем статус на 'failed' при ошибке
-      updateMessageStatus(savedUserMessageId, 'failed');
+      console.error('❌ Error sending message:', error);
+      
+      // КРИТИЧНО: Обновляем статус на 'failed' чтобы показать кнопку повтора
+      updateMessageStatus(optimisticMessageId, 'failed');
+      
+      isSendingRef.current = false;
       setIsLoading(false);
       
-      // Улучшенные сообщения об ошибках
-      let errorTitle = "Ошибка отправки";
-      let errorDescription = "Не удалось отправить сообщение";
-      
-      if (error instanceof Error) {
-        if (error.message.includes('timeout') || error.message.includes('времени')) {
-          errorTitle = "Превышено время ожидания";
-          errorDescription = "Сервер не ответил вовремя. Проверьте интернет-соединение.";
-        } else if (error.message.includes('network') || error.message.includes('fetch')) {
-          errorTitle = "Проблема с сетью";
-          errorDescription = "Проверьте интернет-соединение и попробуйте снова.";
-        } else if (error.message.includes('Rate limit')) {
-          errorTitle = "Превышен лимит запросов";
-          errorDescription = "Подождите немного и попробуйте снова.";
-        } else {
-          errorDescription = error.message;
-        }
-      }
-      
       toast({
-        title: errorTitle,
-        description: errorDescription,
+        title: "Ошибка",
+        description: error instanceof Error ? error.message : "Не удалось отправить сообщение",
         variant: "destructive",
       });
+      
+      return; // Выходим из функции
     } finally {
-      // Очистить таймаут и всегда сбросить флаг отправки
       clearTimeout(sendTimeoutId);
       isSendingRef.current = false;
       console.log('🔓 Send flag reset to false');
@@ -1546,7 +1514,7 @@ export default function Chat() {
                         onQuickMessage={handleQuickMessage}
                         onFeedback={handleMessageFeedback}
                         onInteraction={handleMessageInteraction}
-                        onRetry={() => msg.content && handleRetryMessage(msg.content, msg.input_method)}
+                        onRetry={msg.status === 'failed' ? () => handleRetryMessage(msg.content || '[Изображение]', msg.input_method) : undefined}
                       />
                             </div>
                           );
@@ -1562,7 +1530,7 @@ export default function Chat() {
                         onQuickMessage={handleQuickMessage}
                         onFeedback={handleMessageFeedback}
                         onInteraction={handleMessageInteraction}
-                        onRetry={() => msg.content && handleRetryMessage(msg.content, msg.input_method)}
+                        onRetry={msg.status === 'failed' ? () => handleRetryMessage(msg.content || '[Изображение]', msg.input_method) : undefined}
                       />
                       ))
                     )}
