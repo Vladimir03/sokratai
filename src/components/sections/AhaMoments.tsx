@@ -31,7 +31,7 @@ const AhaMoments = () => {
         </ul>
         <blockquote className="border-l-4 border-accent bg-muted/30 p-6 rounded-r-xl italic">
           <p className="text-foreground mb-4">
-            "Испытываю радость от общения с Сократом, потому что я поняла как решать задачу сама. Есть наводка, и с помощью нее я не просто списываю,
+            "Испытываю радость от общения с Сократом, потому что я поняла, как решать задачу сама. Есть наводка, и с помощью нее я не просто списываю,
             <strong> меня заставляют думать</strong>"
           </p>
           <footer className="font-bold text-primary-variant">— Маша, 10 класс</footer>
@@ -66,8 +66,8 @@ const AhaMoments = () => {
         </ul>
         <blockquote className="border-l-4 border-accent bg-muted/30 p-6 rounded-r-xl italic">
           <p className="text-foreground mb-4">
-            "Он показывает <strong>несколько способов</strong>... можно <strong>выбрать более простой способ</strong>...
-            это супер удобно... это такой толчок для понимания"
+            "Сократ показывает <strong>несколько способов</strong>, можно <strong>выбрать более простой способ</strong> -- 
+            это супер удобно, это такой толчок для понимания"
           </p>
           <footer className="font-bold text-primary-variant">— Максим, 11 класс ЕГЭ Математика</footer>
         </blockquote>
