@@ -31,7 +31,7 @@ const AhaMoments = () => {
         </ul>
         <blockquote className="border-l-4 border-accent bg-muted/30 p-6 rounded-r-xl italic">
           <p className="text-foreground mb-4">
-            "Радость, потому что я поняла как решать задачу сама. Есть наводка, и с помощью нее я не просто списываю,
+            "Испытываю радость от общения с Сократом, потому что я поняла как решать задачу сама. Есть наводка, и с помощью нее я не просто списываю,
             <strong> меня заставляют думать</strong>"
           </p>
           <footer className="font-bold text-primary-variant">— Маша, 10 класс</footer>
