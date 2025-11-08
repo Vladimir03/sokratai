@@ -1,4 +1,5 @@
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import { useRef } from "react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 
@@ -52,7 +53,8 @@ const Pricing = ({ onNavigate }: PricingProps) => {
             style={{ scrollbarWidth: 'thin' }}
           >
             {/* Tier 1: FREE */}
-            <div className="bg-background rounded-2xl p-8 md:p-10 shadow-2xl border-2 border-border flex-shrink-0 w-[320px] md:w-[400px]">
+            <div className="bg-background rounded-2xl p-8 md:p-10 shadow-2xl border-2 border-border flex-shrink-0 w-[320px] md:w-[400px] relative">
+              <Badge className="absolute -top-3 left-8 bg-muted text-muted-foreground font-bold">FREE</Badge>
               <h3 className="text-2xl font-bold mb-2 text-primary">🎁 Попробуй бесплатно</h3>
               <p className="text-lg mb-6 text-muted-foreground">Без карты. Без обязательств.</p>
               
@@ -95,6 +97,8 @@ const Pricing = ({ onNavigate }: PricingProps) => {
                 Популярно
               </div>
               
+              <Badge className="absolute -top-3 left-8 bg-background text-foreground font-bold">PREMIUM</Badge>
+              
               <h3 className="text-2xl font-bold mb-2">🚀 Безлимитное обучение</h3>
               <p className="text-lg mb-6 opacity-90">7 дней бесплатно. Без карты. Без обязательств.</p>
               
@@ -111,8 +115,11 @@ const Pricing = ({ onNavigate }: PricingProps) => {
               </p>
               
               <ul className="space-y-3 mb-8">
+                <li className="flex items-start p-3 rounded-lg border-2 border-accent bg-accent/10">
+                  <span className="text-accent mr-2 font-bold text-xl">✓</span>
+                  <span className="font-bold">НЕОГРАНИЧЕННОЕ количество сообщений</span>
+                </li>
                 {[
-                  "НЕОГРАНИЧЕННОЕ количество сообщений",
                   "Генерация похожих задач для практики",
                   "Диагностика проблем из прошлых классов",
                   "Детальный прогресс по кодификатору ЕГЭ"
@@ -138,7 +145,8 @@ const Pricing = ({ onNavigate }: PricingProps) => {
             </div>
 
             {/* Tier 3: PRO - 1399₽ */}
-            <div className="bg-background rounded-2xl p-8 md:p-10 shadow-2xl border-2 border-border flex-shrink-0 w-[320px] md:w-[400px]">
+            <div className="bg-background rounded-2xl p-8 md:p-10 shadow-2xl border-2 border-border flex-shrink-0 w-[320px] md:w-[400px] relative">
+              <Badge className="absolute -top-3 left-8 bg-primary text-primary-foreground font-bold">PRO</Badge>
               <h3 className="text-2xl font-bold mb-2 text-primary">💎 ИИ-помощник Сократ + Репетитор</h3>
               <p className="text-lg mb-6 text-muted-foreground">Максимальный результат на ЕГЭ!</p>
               
