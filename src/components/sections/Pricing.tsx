@@ -134,7 +134,7 @@ const Pricing = ({ onNavigate }: PricingProps) => {
                 className="w-full bg-accent hover:bg-accent/90 text-accent-foreground text-lg py-6"
                 onClick={onNavigate}
               >
-                ✍️ Попробовать бесплатно
+                🚀 Попробовать бесплатно
               </Button>
 
               <p className="mt-5 text-sm opacity-90 text-center">Отмена в любой момент. Никаких скрытых платежей.</p>
@@ -177,7 +177,7 @@ const Pricing = ({ onNavigate }: PricingProps) => {
                 className="w-full bg-accent hover:bg-accent/90 text-accent-foreground text-lg py-6"
                 onClick={onNavigate}
               >
-                Связаться с нами
+                ✍️ Связаться с нами
               </Button>
             </div>
           </div>
