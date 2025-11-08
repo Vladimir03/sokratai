@@ -51,17 +51,17 @@ const Pricing = ({ onNavigate }: PricingProps) => {
             className="flex gap-8 overflow-x-auto scroll-smooth py-5 px-2 scrollbar-thin scrollbar-thumb-accent scrollbar-track-muted"
             style={{ scrollbarWidth: 'thin' }}
           >
-            {/* Tier 1: 399₽ */}
+            {/* Tier 1: FREE */}
             <div className="bg-background rounded-2xl p-8 md:p-10 shadow-2xl border-2 border-border flex-shrink-0 w-[320px] md:w-[400px]">
-              <h3 className="text-2xl font-bold mb-2 text-primary">7 дней бесплатно</h3>
+              <h3 className="text-2xl font-bold mb-2 text-primary">🎁 Попробуй бесплатно</h3>
               <p className="text-lg mb-6 text-muted-foreground">Без карты. Без обязательств.</p>
               
               <div className="text-5xl md:text-6xl font-bold my-6 text-primary">
-                399₽<span className="text-xl md:text-2xl opacity-80 font-semibold">/месяц</span>
+                0₽<span className="text-xl md:text-2xl opacity-80 font-semibold">/месяц</span>
               </div>
               
               <p className="mb-8 text-lg text-muted-foreground">
-                Это всего <strong>13₽ в день</strong> — меньше чем кофе!
+                Отлично для знакомства с Сократом!
               </p>
               
               <ul className="space-y-3 mb-8 text-foreground">
@@ -69,8 +69,6 @@ const Pricing = ({ onNavigate }: PricingProps) => {
                   "10 сообщений в день",
                   "Вопросы-подсказки вместо готовых ответов",
                   "Несколько способов решения задач",
-                  "Генерация похожих задач для практики",
-                  "Диагностика пробелов из прошлых классов",
                   "Работа на компьютере и телефоне",
                   "Мультичаты по предметам (математика, физика, информатика)"
                 ].map((feature, idx) => (
@@ -86,12 +84,8 @@ const Pricing = ({ onNavigate }: PricingProps) => {
                 className="w-full bg-accent hover:bg-accent/90 text-accent-foreground text-lg py-6"
                 onClick={onNavigate}
               >
-                🚀 Попробовать бесплатно
+                Начать бесплатно
               </Button>
-              
-              <p className="mt-5 text-sm text-muted-foreground text-center">
-                Отмена в любой момент. Никаких скрытых платежей.
-              </p>
             </div>
 
             {/* Tier 2: 699₽ - Popular */}
@@ -101,23 +95,33 @@ const Pricing = ({ onNavigate }: PricingProps) => {
                 Популярно
               </div>
               
-              <h3 className="text-2xl font-bold mb-2">7 дней бесплатно</h3>
-              <p className="text-lg mb-6 opacity-90">Без карты. Без обязательств.</p>
+              <h3 className="text-2xl font-bold mb-2">🚀 Безлимитное обучение</h3>
+              <p className="text-lg mb-6 opacity-90">7 дней бесплатно. Без карты. Без обязательств.</p>
               
               <div className="text-5xl md:text-6xl font-bold my-6">
                 699₽<span className="text-xl md:text-2xl opacity-80 font-semibold">/месяц</span>
               </div>
               
-              <p className="mb-6 text-lg leading-relaxed">
-                Это всего <strong>23₽ в день</strong> — меньше чем обед!
-                <br /><br />
-                Те же функции, как и за 399₽/месяц <strong className="text-xl">ПЛЮС:</strong>
+              <p className="mb-6 text-lg">
+                Это всего <strong>23₽ в день</strong> — дешевле кофе!
+              </p>
+              
+              <p className="mb-4 text-lg leading-relaxed">
+                Все из FREE, <strong className="text-xl">ПЛЮС:</strong>
               </p>
               
               <ul className="space-y-3 mb-8">
-                <li className="border-2 border-accent bg-accent/10 rounded-lg p-4 font-semibold text-lg">
-                  <span className="text-accent">✓</span> 30 сообщений в день
-                </li>
+                {[
+                  "НЕОГРАНИЧЕННОЕ количество сообщений",
+                  "Генерация похожих задач для практики",
+                  "Диагностика проблем из прошлых классов",
+                  "Детальный прогресс по кодификатору ЕГЭ"
+                ].map((feature, idx) => (
+                  <li key={idx} className="flex items-start">
+                    <span className="text-accent mr-2 font-bold text-xl">✓</span>
+                    {feature}
+                  </li>
+                ))}
               </ul>
               
               <Button 
@@ -125,7 +129,7 @@ const Pricing = ({ onNavigate }: PricingProps) => {
                 className="w-full bg-accent hover:bg-accent/90 text-accent-foreground text-lg py-6"
                 onClick={onNavigate}
               >
-                🚀 Попробовать бесплатно
+                ✍️ Попробовать бесплатно
               </Button>
               
               <p className="mt-5 text-sm opacity-90 text-center">
@@ -133,10 +137,10 @@ const Pricing = ({ onNavigate }: PricingProps) => {
               </p>
             </div>
 
-            {/* Tier 3: 1399₽ */}
+            {/* Tier 3: PRO - 1399₽ */}
             <div className="bg-background rounded-2xl p-8 md:p-10 shadow-2xl border-2 border-border flex-shrink-0 w-[320px] md:w-[400px]">
-              <h3 className="text-2xl font-bold mb-2 text-primary">ИИ-помощник Сократ + Репетитор</h3>
-              <p className="text-lg mb-6 text-muted-foreground">Лучший старт в обучении!</p>
+              <h3 className="text-2xl font-bold mb-2 text-primary">💎 ИИ-помощник Сократ + Репетитор</h3>
+              <p className="text-lg mb-6 text-muted-foreground">Максимальный результат на ЕГЭ!</p>
               
               <div className="text-5xl md:text-6xl font-bold my-6 text-primary">
                 1399₽<span className="text-xl md:text-2xl opacity-80 font-semibold">/месяц</span>
@@ -146,18 +150,24 @@ const Pricing = ({ onNavigate }: PricingProps) => {
                 Это <strong>47₽ в день</strong> — цена качественного образования!
               </p>
               
-              <p className="mb-6 text-lg leading-relaxed text-foreground">
-                Те же функции, как и за 699₽/месяц <strong className="text-xl">ПЛЮС:</strong>
+              <p className="mb-4 text-lg leading-relaxed text-foreground">
+                Все из Популярного, <strong className="text-xl">ПЛЮС:</strong>
               </p>
               
-              <ul className="space-y-3 mb-6">
-                <li className="border-2 border-accent/30 bg-accent/5 rounded-lg p-4 font-semibold text-lg text-foreground">
-                  <span className="text-accent">✓</span> 1 час занятия с Репетитором
-                </li>
+              <ul className="space-y-3 mb-6 text-foreground">
+                {[
+                  "1 час занятия с Репетитором",
+                  "Настройка ИИ-помощника под твои цели"
+                ].map((feature, idx) => (
+                  <li key={idx} className="flex items-start">
+                    <span className="text-accent mr-2 font-bold text-xl">✓</span>
+                    {feature}
+                  </li>
+                ))}
               </ul>
               
               <p className="mb-8 text-base leading-relaxed text-muted-foreground italic">
-                💡 Репетитор проведет занятие, а также поможет с настройкой ИИ-помощника под твои цели в учебе. 
+                ⚡ Репетитор проведет занятие, а также поможет с настройкой ИИ-помощника под твои цели в учебе. 
                 Можно договориться на последующие занятия, если все понравится!
               </p>
               
@@ -166,12 +176,8 @@ const Pricing = ({ onNavigate }: PricingProps) => {
                 className="w-full bg-accent hover:bg-accent/90 text-accent-foreground text-lg py-6"
                 onClick={onNavigate}
               >
-                🚀 Попробовать бесплатно
+                Связаться с нами
               </Button>
-              
-              <p className="mt-5 text-sm text-muted-foreground text-center">
-                Отмена в любой момент. Никаких скрытых платежей.
-              </p>
             </div>
           </div>
         </div>
@@ -188,7 +194,7 @@ const Pricing = ({ onNavigate }: PricingProps) => {
                 <span className="line-through">Netflix: 500₽/мес</span> → развлечение
               </p>
               <p className="text-accent font-bold text-2xl mt-4">
-                Сократ: от 399₽/мес → твое образование и будущее! 🎓
+                Сократ: от 0₽/мес → твое образование и будущее! 🎓
               </p>
             </div>
           </div>
