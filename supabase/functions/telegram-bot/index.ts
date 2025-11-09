@@ -409,6 +409,74 @@ async function getOrCreateTelegramChat(userId: string) {
   return newChat.id;
 }
 
+async function parseSSEStream(response: Response): Promise<string> {
+  const reader = response.body?.getReader();
+  const decoder = new TextDecoder();
+  
+  if (!reader) throw new Error('No response body');
+  
+  let fullContent = '';
+  let buffer = '';
+  
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    
+    buffer += decoder.decode(value, { stream: true });
+    
+    // Обработка построчно
+    let newlineIndex: number;
+    while ((newlineIndex = buffer.indexOf('\n')) !== -1) {
+      let line = buffer.slice(0, newlineIndex);
+      buffer = buffer.slice(newlineIndex + 1);
+      
+      // Убираем \r если есть
+      if (line.endsWith('\r')) line = line.slice(0, -1);
+      
+      // Пропускаем комментарии и пустые строки
+      if (line.startsWith(':') || line.trim() === '') continue;
+      
+      // Обрабатываем data: строки
+      if (line.startsWith('data: ')) {
+        const jsonStr = line.slice(6).trim();
+        if (jsonStr === '[DONE]') break;
+        
+        try {
+          const parsed = JSON.parse(jsonStr);
+          const content = parsed.choices?.[0]?.delta?.content;
+          if (content) {
+            fullContent += content;
+          }
+        } catch (e) {
+          // Игнорируем ошибки парсинга
+          continue;
+        }
+      }
+    }
+  }
+  
+  return fullContent;
+}
+
+async function sendTypingLoop(telegramUserId: number, stopSignal: { stop: boolean }) {
+  while (!stopSignal.stop) {
+    await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendChatAction`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ chat_id: telegramUserId, action: 'typing' }),
+    });
+    await new Promise(resolve => setTimeout(resolve, 5000));
+  }
+}
+
+function formatForTelegram(text: string): string {
+  // Заменить LaTeX на текстовый формат для лучшего отображения
+  text = text.replace(/\$\$(.*?)\$\$/g, '📐 $1');
+  text = text.replace(/\$(.*?)\$/g, '$1');
+  
+  return text;
+}
+
 function splitLongMessage(text: string, maxLength: number = 4000): string[] {
   if (text.length <= maxLength) {
     return [text];
@@ -451,13 +519,6 @@ async function handleTextMessage(telegramUserId: number, userId: string, text: s
   console.log('Handling text message:', { telegramUserId, text });
 
   try {
-    // Send typing indicator
-    await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendChatAction`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ chat_id: telegramUserId, action: 'typing' }),
-    });
-
     // Get or create chat
     const chatId = await getOrCreateTelegramChat(userId);
 
@@ -477,6 +538,10 @@ async function handleTextMessage(telegramUserId: number, userId: string, text: s
       .eq('chat_id', chatId)
       .order('created_at', { ascending: true });
 
+    // Start typing loop
+    const stopTyping = { stop: false };
+    const typingPromise = sendTypingLoop(telegramUserId, stopTyping);
+
     // Call AI chat function with service role authorization
     const chatResponse = await fetch(`${SUPABASE_URL}/functions/v1/chat`, {
       method: 'POST',
@@ -491,15 +556,40 @@ async function handleTextMessage(telegramUserId: number, userId: string, text: s
       }),
     });
 
+    // Stop typing
+    stopTyping.stop = true;
+    await typingPromise;
+
+    // Handle rate limit error
+    if (chatResponse.status === 429) {
+      await sendTelegramMessage(
+        telegramUserId, 
+        '⏳ Слишком много запросов. Подожди немного и попробуй снова.'
+      );
+      return;
+    }
+
+    // Handle payment required error
+    if (chatResponse.status === 402) {
+      await sendTelegramMessage(
+        telegramUserId, 
+        '💳 Закончились средства на балансе. Пожалуйста, пополни баланс в личном кабинете.'
+      );
+      return;
+    }
+
     if (!chatResponse.ok) {
       console.error('AI response error:', chatResponse.status, await chatResponse.text());
       await sendTelegramMessage(telegramUserId, '❌ Произошла ошибка. Попробуй ещё раз.');
       return;
     }
 
-    const aiContent = await chatResponse.text();
+    // Parse SSE stream
+    const aiContent = await parseSSEStream(chatResponse);
 
-    // Save AI response
+    // Format and save AI response
+    const formattedContent = formatForTelegram(aiContent);
+    
     await supabase.from('chat_messages').insert({
       chat_id: chatId,
       user_id: userId,
@@ -508,7 +598,7 @@ async function handleTextMessage(telegramUserId: number, userId: string, text: s
     });
 
     // Split and send response if too long
-    const messageParts = splitLongMessage(aiContent);
+    const messageParts = splitLongMessage(formattedContent);
     for (const part of messageParts) {
       await sendTelegramMessage(telegramUserId, part);
     }
@@ -522,13 +612,6 @@ async function handlePhotoMessage(telegramUserId: number, userId: string, photo:
   console.log('Handling photo message:', { telegramUserId, photoId: photo.file_id });
 
   try {
-    // Send typing indicator
-    await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendChatAction`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ chat_id: telegramUserId, action: 'typing' }),
-    });
-
     // Get file info from Telegram
     const fileResponse = await fetch(
       `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/getFile?file_id=${photo.file_id}`
@@ -587,6 +670,10 @@ async function handlePhotoMessage(telegramUserId: number, userId: string, photo:
       .eq('chat_id', chatId)
       .order('created_at', { ascending: true });
 
+    // Start typing loop
+    const stopTyping = { stop: false };
+    const typingPromise = sendTypingLoop(telegramUserId, stopTyping);
+
     // Call AI chat function with service role authorization
     const chatResponse = await fetch(`${SUPABASE_URL}/functions/v1/chat`, {
       method: 'POST',
@@ -601,15 +688,40 @@ async function handlePhotoMessage(telegramUserId: number, userId: string, photo:
       }),
     });
 
+    // Stop typing
+    stopTyping.stop = true;
+    await typingPromise;
+
+    // Handle rate limit error
+    if (chatResponse.status === 429) {
+      await sendTelegramMessage(
+        telegramUserId, 
+        '⏳ Слишком много запросов. Подожди немного и попробуй снова.'
+      );
+      return;
+    }
+
+    // Handle payment required error
+    if (chatResponse.status === 402) {
+      await sendTelegramMessage(
+        telegramUserId, 
+        '💳 Закончились средства на балансе. Пожалуйста, пополни баланс в личном кабинете.'
+      );
+      return;
+    }
+
     if (!chatResponse.ok) {
       console.error('AI response error:', chatResponse.status, await chatResponse.text());
       await sendTelegramMessage(telegramUserId, '❌ Произошла ошибка. Попробуй ещё раз.');
       return;
     }
 
-    const aiContent = await chatResponse.text();
+    // Parse SSE stream
+    const aiContent = await parseSSEStream(chatResponse);
 
-    // Save AI response
+    // Format and save AI response
+    const formattedContent = formatForTelegram(aiContent);
+    
     await supabase.from('chat_messages').insert({
       chat_id: chatId,
       user_id: userId,
@@ -618,7 +730,7 @@ async function handlePhotoMessage(telegramUserId: number, userId: string, photo:
     });
 
     // Split and send response if too long
-    const messageParts = splitLongMessage(aiContent);
+    const messageParts = splitLongMessage(formattedContent);
     for (const part of messageParts) {
       await sendTelegramMessage(telegramUserId, part);
     }
