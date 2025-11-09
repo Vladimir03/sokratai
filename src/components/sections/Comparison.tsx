@@ -62,7 +62,7 @@ const Comparison = () => {
                   <td className="p-4 md:p-5 font-bold">Цена/месяц</td>
                   <td className="p-4 md:p-5">5,000-20,000₽</td>
                   <td className="p-4 md:p-5">Бесплатно / 2000₽</td>
-                  <td className="p-4 md:p-5 font-bold">399₽ 🔥</td>
+                  <td className="p-4 md:p-5 font-bold">699₽ 🔥</td>
                 </tr>
                 <tr className="border-b border-border hover:bg-muted/20 transition-colors">
                   <td className="p-4 md:p-5 font-bold">Доступность</td>
