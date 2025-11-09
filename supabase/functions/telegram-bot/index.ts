@@ -18,6 +18,7 @@ interface OnboardingData {
   subject?: string;
   goal?: string;
   utm_source?: string;
+  onboarding_message_id?: number;
 }
 
 const welcomeMessages: Record<string, string> = {
@@ -109,6 +110,33 @@ async function sendTelegramMessage(
     const error = await response.text();
     console.error('Telegram API error:', error);
     throw new Error('Failed to send message');
+  }
+
+  return response.json();
+}
+
+async function editTelegramMessage(
+  chatId: number,
+  messageId: number,
+  text: string,
+  extraParams?: Record<string, any>
+) {
+  const response = await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/editMessageText`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      chat_id: chatId,
+      message_id: messageId,
+      text,
+      parse_mode: 'HTML',
+      ...extraParams,
+    }),
+  });
+
+  if (!response.ok) {
+    const error = await response.text();
+    console.error('Telegram API error:', error);
+    throw new Error('Failed to edit message');
   }
 
   return response.json();
@@ -227,7 +255,7 @@ async function handleStart(telegramUserId: number, telegramUsername: string | un
 }
 
 async function startOnboarding(telegramUserId: number, userId: string, utmSource: string) {
-  await sendTelegramMessage(telegramUserId, 'В каком ты классе?', {
+  const result = await sendTelegramMessage(telegramUserId, '📊 Шаг 1 из 3\n\nВ каком ты классе?', {
     reply_markup: {
       inline_keyboard: [
         [
@@ -239,43 +267,50 @@ async function startOnboarding(telegramUserId: number, userId: string, utmSource
     },
   });
 
-  await updateOnboardingState(telegramUserId, userId, 'waiting_grade', { utm_source: utmSource });
+  await updateOnboardingState(telegramUserId, userId, 'waiting_grade', { 
+    utm_source: utmSource,
+    onboarding_message_id: result.result.message_id 
+  });
 }
 
-async function handleGradeSelection(telegramUserId: number, userId: string, grade: number) {
-  await sendTelegramMessage(telegramUserId, 'Какой предмет тебе даётся сложнее всего?', {
-    reply_markup: {
-      inline_keyboard: [
-        [{ text: '📐 Математика', callback_data: 'subject_math' }],
-        [{ text: '⚛️ Физика', callback_data: 'subject_physics' }],
-        [{ text: '💻 Информатика', callback_data: 'subject_cs' }],
-      ],
-    },
-  });
+async function handleGradeSelection(telegramUserId: number, userId: string, grade: number, messageId?: number) {
+  if (messageId) {
+    await editTelegramMessage(telegramUserId, messageId, '📊 Шаг 2 из 3\n\nКакой предмет тебе даётся сложнее всего?', {
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: '📐 Математика', callback_data: 'subject_math' }],
+          [{ text: '⚛️ Физика', callback_data: 'subject_physics' }],
+          [{ text: '💻 Информатика', callback_data: 'subject_cs' }],
+        ],
+      },
+    });
+  }
 
   await updateOnboardingState(telegramUserId, userId, 'waiting_subject', { grade });
 }
 
-async function handleSubjectSelection(telegramUserId: number, userId: string, subject: string) {
-  await sendTelegramMessage(telegramUserId, 'Для чего готовишься?', {
-    reply_markup: {
-      inline_keyboard: [
-        [
-          { text: '🎯 ЕГЭ', callback_data: 'goal_ege' },
-          { text: '📝 ОГЭ', callback_data: 'goal_oge' },
+async function handleSubjectSelection(telegramUserId: number, userId: string, subject: string, messageId?: number) {
+  if (messageId) {
+    await editTelegramMessage(telegramUserId, messageId, '📊 Шаг 3 из 3\n\nДля чего готовишься?', {
+      reply_markup: {
+        inline_keyboard: [
+          [
+            { text: '🎯 ЕГЭ', callback_data: 'goal_ege' },
+            { text: '📝 ОГЭ', callback_data: 'goal_oge' },
+          ],
+          [
+            { text: '📚 Школьная программа', callback_data: 'goal_school' },
+            { text: '🏆 Олимпиада', callback_data: 'goal_olympiad' },
+          ],
         ],
-        [
-          { text: '📚 Школьная программа', callback_data: 'goal_school' },
-          { text: '🏆 Олимпиада', callback_data: 'goal_olympiad' },
-        ],
-      ],
-    },
-  });
+      },
+    });
+  }
 
   await updateOnboardingState(telegramUserId, userId, 'waiting_goal', { subject });
 }
 
-async function completeOnboarding(telegramUserId: number, userId: string, goal: string) {
+async function completeOnboarding(telegramUserId: number, userId: string, goal: string, messageId?: number) {
   const session = await getOnboardingSession(telegramUserId);
   const data = session?.onboarding_data as OnboardingData;
 
@@ -305,19 +340,35 @@ async function completeOnboarding(telegramUserId: number, userId: string, goal: 
     .limit(1);
 
   const gradeText = data.grade ? `${data.grade} классе` : '';
-  const subjectText = data.subject || 'предмету';
+  const subjectMap: Record<string, string> = {
+    'math': 'математике',
+    'physics': 'физике',
+    'cs': 'информатике'
+  };
+  const subjectText = data.subject ? subjectMap[data.subject] || data.subject : 'выбранному предмету';
+  const goalMap: Record<string, string> = {
+    'ege': 'ЕГЭ',
+    'oge': 'ОГЭ',
+    'school': 'школьной программе',
+    'olympiad': 'олимпиаде'
+  };
+  const goalText = goalMap[goal] || goal;
   
-  await sendTelegramMessage(
-    telegramUserId,
-    `🎉 Отлично! Теперь я знаю, что ты в ${gradeText}, готовишься к ${goal} по предмету ${subjectText}!
+  if (messageId) {
+    await editTelegramMessage(
+      telegramUserId,
+      messageId,
+      `✅ Готово!\n\n🎉 Отлично! Теперь я знаю, что ты в ${gradeText}, готовишься к ${goalText} по ${subjectText}!
     
 Теперь можешь:
 • Отправить мне задачу текстом
 • Загрузить фото задачи
 • Задать любой вопрос по предмету
 
-Я помогу тебе разобраться! 🚀`
-  );
+Я помогу тебе разобраться! 🚀`,
+      { reply_markup: { inline_keyboard: [] } }
+    );
+  }
 
   await updateOnboardingState(telegramUserId, userId, 'completed');
 }
@@ -325,6 +376,7 @@ async function completeOnboarding(telegramUserId: number, userId: string, goal: 
 async function handleCallbackQuery(callbackQuery: any) {
   const telegramUserId = callbackQuery.from.id;
   const data = callbackQuery.data;
+  const messageId = callbackQuery.message?.message_id;
 
   const session = await getOnboardingSession(telegramUserId);
   if (!session) {
@@ -334,16 +386,17 @@ async function handleCallbackQuery(callbackQuery: any) {
 
   const state = session.onboarding_state as OnboardingState;
   const userId = session.user_id;
+  const onboardingData = session.onboarding_data as OnboardingData;
 
   if (state === 'waiting_grade' && data.startsWith('grade_')) {
     const grade = parseInt(data.replace('grade_', ''));
-    await handleGradeSelection(telegramUserId, userId, grade);
+    await handleGradeSelection(telegramUserId, userId, grade, messageId);
   } else if (state === 'waiting_subject' && data.startsWith('subject_')) {
     const subject = data.replace('subject_', '');
-    await handleSubjectSelection(telegramUserId, userId, subject);
+    await handleSubjectSelection(telegramUserId, userId, subject, messageId);
   } else if (state === 'waiting_goal' && data.startsWith('goal_')) {
     const goal = data.replace('goal_', '');
-    await completeOnboarding(telegramUserId, userId, goal);
+    await completeOnboarding(telegramUserId, userId, goal, messageId);
   }
 
   // Answer callback query to remove loading state
