@@ -9,9 +9,7 @@ const ForParents = ({ onNavigate }: ForParentsProps) => {
   return (
     <section className="py-20 px-4 bg-muted/30">
       <div className="container mx-auto">
-        <h2 className="text-3xl md:text-4xl font-bold text-center mb-12 text-primary">
-          🎓 Для родителей
-        </h2>
+        <h2 className="text-3xl md:text-4xl font-bold text-center mb-12 text-primary">🎓 Для родителей</h2>
 
         <div className="max-w-4xl mx-auto">
           <Card className="mb-8">
@@ -33,7 +31,7 @@ const ForParents = ({ onNavigate }: ForParentsProps) => {
                 <li className="flex items-start">
                   <span className="text-accent mr-3 text-2xl">✅</span>
                   <span>
-                    <strong>Доступная цена:</strong> 399₽/мес вместо 5,000-20,000₽ за репетитора
+                    <strong>Доступная цена:</strong> 699₽/мес вместо 5,000-20,000₽ за репетитора
                   </span>
                 </li>
                 <li className="flex items-start">
@@ -55,9 +53,13 @@ const ForParents = ({ onNavigate }: ForParentsProps) => {
           {/* Parent Testimonial */}
           <div className="bg-background border-l-4 border-accent p-6 md:p-8 rounded-lg shadow-elegant mb-8">
             <p className="text-lg italic text-foreground mb-4">
-              "Я очень довольна результатом! Дочь стала увереннее в себе, оценки выросли с тройки до четверки. Раньше каждая контрольная была стрессом для всей семьи. Теперь она сама садится за уроки и спрашивает у ИИ, если что-то не понятно. Это реально работает!"
+              "Я очень довольна результатом! Дочь стала увереннее в себе, оценки выросли с тройки до четверки. Раньше
+              каждая контрольная была стрессом для всей семьи. Теперь она сама садится за уроки и спрашивает у ИИ, если
+              что-то не понятно. Это реально работает!"
             </p>
-            <div className="font-bold" style={{ color: "hsl(231, 36%, 29%)" }}>— Елена, мама ученицы 10 класса</div>
+            <div className="font-bold" style={{ color: "hsl(231, 36%, 29%)" }}>
+              — Елена, мама ученицы 10 класса
+            </div>
             <div className="text-amber-500 mt-2">⭐⭐⭐⭐⭐</div>
           </div>
 
@@ -66,7 +68,7 @@ const ForParents = ({ onNavigate }: ForParentsProps) => {
             <p className="text-xl mb-6 text-foreground">
               <strong>Попробуйте 7 дней бесплатно</strong> и увидите разницу сами
             </p>
-            <Button 
+            <Button
               size="lg"
               className="bg-accent hover:bg-accent/90 text-accent-foreground text-base md:text-lg px-8 md:px-12 py-6 whitespace-normal leading-snug h-auto"
               onClick={onNavigate}
