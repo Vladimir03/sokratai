@@ -21,6 +21,23 @@ interface OnboardingData {
 }
 
 const welcomeMessages: Record<string, string> = {
+  default: `🎓 Привет! Я Сократ - твой умный помощник по учёбе!
+
+Помогаю разбираться с:
+📐 Математикой
+⚛️ Физикой  
+💻 Информатикой
+
+Что я умею:
+✅ Объясняю решения простым языком
+✅ Разбираю задачи по шагам
+✅ Отвечаю на вопросы 24/7
+✅ Помогаю готовиться к экзаменам
+
+Попробуй бесплатно 7 дней! 🚀
+
+Отправь мне задачу текстом или фото - и начнём!`,
+
   header_try: `🎓 Привет! Я Сократ - твой ИИ-помощник по математике, физике и информатике!
 
 Давай покажу, как я помогаю решать задачи. Отправь мне:
@@ -202,7 +219,7 @@ async function handleStart(telegramUserId: number, telegramUsername: string | un
   });
 
   // Send personalized welcome message
-  const message = welcomeMessages[utmSource] || welcomeMessages.header_try;
+  const message = welcomeMessages[utmSource] || welcomeMessages.default;
   await sendTelegramMessage(telegramUserId, message);
 
   // Start onboarding
