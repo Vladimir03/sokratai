@@ -477,21 +477,27 @@ async function handleTextMessage(telegramUserId: number, userId: string, text: s
       .eq('chat_id', chatId)
       .order('created_at', { ascending: true });
 
-    // Call AI chat function
-    const { data: aiResponse, error: aiError } = await supabase.functions.invoke('chat', {
-      body: {
+    // Call AI chat function with service role authorization
+    const chatResponse = await fetch(`${SUPABASE_URL}/functions/v1/chat`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
+      },
+      body: JSON.stringify({
         messages: history || [],
         chatId: chatId,
-      },
+        userId: userId,
+      }),
     });
 
-    if (aiError) {
-      console.error('AI error:', aiError);
+    if (!chatResponse.ok) {
+      console.error('AI response error:', chatResponse.status, await chatResponse.text());
       await sendTelegramMessage(telegramUserId, '❌ Произошла ошибка. Попробуй ещё раз.');
       return;
     }
 
-    const aiContent = aiResponse?.content || aiResponse?.message || 'Извини, не смог обработать твой запрос.';
+    const aiContent = await chatResponse.text();
 
     // Save AI response
     await supabase.from('chat_messages').insert({
@@ -581,21 +587,27 @@ async function handlePhotoMessage(telegramUserId: number, userId: string, photo:
       .eq('chat_id', chatId)
       .order('created_at', { ascending: true });
 
-    // Call AI chat function
-    const { data: aiResponse, error: aiError } = await supabase.functions.invoke('chat', {
-      body: {
+    // Call AI chat function with service role authorization
+    const chatResponse = await fetch(`${SUPABASE_URL}/functions/v1/chat`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
+      },
+      body: JSON.stringify({
         messages: history || [],
         chatId: chatId,
-      },
+        userId: userId,
+      }),
     });
 
-    if (aiError) {
-      console.error('AI error:', aiError);
+    if (!chatResponse.ok) {
+      console.error('AI response error:', chatResponse.status, await chatResponse.text());
       await sendTelegramMessage(telegramUserId, '❌ Произошла ошибка. Попробуй ещё раз.');
       return;
     }
 
-    const aiContent = aiResponse?.content || aiResponse?.message || 'Извини, не смог обработать изображение.';
+    const aiContent = await chatResponse.text();
 
     // Save AI response
     await supabase.from('chat_messages').insert({
