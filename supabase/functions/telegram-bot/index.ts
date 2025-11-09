@@ -557,12 +557,15 @@ async function handleTextMessage(telegramUserId: number, userId: string, text: s
       input_method: 'text',
     });
 
-    // Get chat history
-    const { data: history } = await supabase
-      .from('chat_messages')
-      .select('role, content, image_url')
-      .eq('chat_id', chatId)
-      .order('created_at', { ascending: true });
+  // Get chat history - limit to last 20 messages (10 pairs)
+  const { data: historyReversed } = await supabase
+    .from('chat_messages')
+    .select('role, content, image_url')
+    .eq('chat_id', chatId)
+    .order('created_at', { ascending: false })
+    .limit(20);
+  
+  const history = historyReversed?.reverse() || [];
 
     // Start typing loop
     const stopTyping = { stop: false };
@@ -700,12 +703,15 @@ async function handlePhotoMessage(telegramUserId: number, userId: string, photo:
       input_method: 'photo',
     });
 
-    // Get chat history
-    const { data: history } = await supabase
-      .from('chat_messages')
-      .select('role, content, image_url')
-      .eq('chat_id', chatId)
-      .order('created_at', { ascending: true });
+  // Get chat history - limit to last 20 messages (10 pairs)
+  const { data: historyReversed } = await supabase
+    .from('chat_messages')
+    .select('role, content, image_url')
+    .eq('chat_id', chatId)
+    .order('created_at', { ascending: false })
+    .limit(20);
+  
+  const history = historyReversed?.reverse() || [];
 
     // Start typing loop
     const stopTyping = { stop: false };
