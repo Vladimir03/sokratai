@@ -376,6 +376,246 @@ async function completeOnboarding(telegramUserId: number, userId: string, goal: 
   await updateOnboardingState(telegramUserId, userId, 'completed');
 }
 
+async function getOrCreateTelegramChat(userId: string) {
+  // Get existing general chat for this user
+  const { data: existingChat } = await supabase
+    .from('chats')
+    .select('id')
+    .eq('user_id', userId)
+    .eq('chat_type', 'general')
+    .maybeSingle();
+
+  if (existingChat) {
+    return existingChat.id;
+  }
+
+  // Create new general chat
+  const { data: newChat, error } = await supabase
+    .from('chats')
+    .insert({
+      user_id: userId,
+      chat_type: 'general',
+      title: 'Telegram чат',
+      icon: '💬',
+    })
+    .select()
+    .single();
+
+  if (error) {
+    console.error('Error creating chat:', error);
+    throw new Error('Failed to create chat');
+  }
+
+  return newChat.id;
+}
+
+function splitLongMessage(text: string, maxLength: number = 4000): string[] {
+  if (text.length <= maxLength) {
+    return [text];
+  }
+
+  const parts: string[] = [];
+  let currentPart = '';
+  const lines = text.split('\n');
+
+  for (const line of lines) {
+    if ((currentPart + line + '\n').length > maxLength) {
+      if (currentPart) {
+        parts.push(currentPart.trim());
+        currentPart = '';
+      }
+      
+      // If single line is too long, split it
+      if (line.length > maxLength) {
+        let remaining = line;
+        while (remaining.length > 0) {
+          parts.push(remaining.substring(0, maxLength));
+          remaining = remaining.substring(maxLength);
+        }
+      } else {
+        currentPart = line + '\n';
+      }
+    } else {
+      currentPart += line + '\n';
+    }
+  }
+
+  if (currentPart.trim()) {
+    parts.push(currentPart.trim());
+  }
+
+  return parts;
+}
+
+async function handleTextMessage(telegramUserId: number, userId: string, text: string) {
+  console.log('Handling text message:', { telegramUserId, text });
+
+  try {
+    // Send typing indicator
+    await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendChatAction`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ chat_id: telegramUserId, action: 'typing' }),
+    });
+
+    // Get or create chat
+    const chatId = await getOrCreateTelegramChat(userId);
+
+    // Save user message
+    await supabase.from('chat_messages').insert({
+      chat_id: chatId,
+      user_id: userId,
+      role: 'user',
+      content: text,
+      input_method: 'text',
+    });
+
+    // Get chat history
+    const { data: history } = await supabase
+      .from('chat_messages')
+      .select('role, content, image_url')
+      .eq('chat_id', chatId)
+      .order('created_at', { ascending: true });
+
+    // Call AI chat function
+    const { data: aiResponse, error: aiError } = await supabase.functions.invoke('chat', {
+      body: {
+        messages: history || [],
+        chatId: chatId,
+      },
+    });
+
+    if (aiError) {
+      console.error('AI error:', aiError);
+      await sendTelegramMessage(telegramUserId, '❌ Произошла ошибка. Попробуй ещё раз.');
+      return;
+    }
+
+    const aiContent = aiResponse?.content || aiResponse?.message || 'Извини, не смог обработать твой запрос.';
+
+    // Save AI response
+    await supabase.from('chat_messages').insert({
+      chat_id: chatId,
+      user_id: userId,
+      role: 'assistant',
+      content: aiContent,
+    });
+
+    // Split and send response if too long
+    const messageParts = splitLongMessage(aiContent);
+    for (const part of messageParts) {
+      await sendTelegramMessage(telegramUserId, part);
+    }
+  } catch (error) {
+    console.error('Error handling text message:', error);
+    await sendTelegramMessage(telegramUserId, '❌ Произошла ошибка. Попробуй ещё раз.');
+  }
+}
+
+async function handlePhotoMessage(telegramUserId: number, userId: string, photo: any, caption?: string) {
+  console.log('Handling photo message:', { telegramUserId, photoId: photo.file_id });
+
+  try {
+    // Send typing indicator
+    await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendChatAction`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ chat_id: telegramUserId, action: 'typing' }),
+    });
+
+    // Get file info from Telegram
+    const fileResponse = await fetch(
+      `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/getFile?file_id=${photo.file_id}`
+    );
+    const fileData = await fileResponse.json();
+
+    if (!fileData.ok) {
+      throw new Error('Failed to get file from Telegram');
+    }
+
+    const filePath = fileData.result.file_path;
+
+    // Download image from Telegram
+    const imageResponse = await fetch(
+      `https://api.telegram.org/file/bot${TELEGRAM_BOT_TOKEN}/${filePath}`
+    );
+    const imageBlob = await imageResponse.blob();
+
+    // Upload to Supabase Storage
+    const fileName = `${userId}/${Date.now()}.jpg`;
+    const { data: uploadData, error: uploadError } = await supabase.storage
+      .from('chat-images')
+      .upload(fileName, imageBlob, {
+        contentType: 'image/jpeg',
+        upsert: false,
+      });
+
+    if (uploadError) {
+      console.error('Upload error:', uploadError);
+      throw new Error('Failed to upload image');
+    }
+
+    // Create signed URL for AI
+    const { data: signedData } = await supabase.storage
+      .from('chat-images')
+      .createSignedUrl(fileName, 86400); // 24 hours
+
+    // Get or create chat
+    const chatId = await getOrCreateTelegramChat(userId);
+
+    // Save user message with image
+    await supabase.from('chat_messages').insert({
+      chat_id: chatId,
+      user_id: userId,
+      role: 'user',
+      content: caption || 'Помоги решить эту задачу',
+      image_url: signedData?.signedUrl,
+      image_path: fileName,
+      input_method: 'photo',
+    });
+
+    // Get chat history
+    const { data: history } = await supabase
+      .from('chat_messages')
+      .select('role, content, image_url')
+      .eq('chat_id', chatId)
+      .order('created_at', { ascending: true });
+
+    // Call AI chat function
+    const { data: aiResponse, error: aiError } = await supabase.functions.invoke('chat', {
+      body: {
+        messages: history || [],
+        chatId: chatId,
+      },
+    });
+
+    if (aiError) {
+      console.error('AI error:', aiError);
+      await sendTelegramMessage(telegramUserId, '❌ Произошла ошибка. Попробуй ещё раз.');
+      return;
+    }
+
+    const aiContent = aiResponse?.content || aiResponse?.message || 'Извини, не смог обработать изображение.';
+
+    // Save AI response
+    await supabase.from('chat_messages').insert({
+      chat_id: chatId,
+      user_id: userId,
+      role: 'assistant',
+      content: aiContent,
+    });
+
+    // Split and send response if too long
+    const messageParts = splitLongMessage(aiContent);
+    for (const part of messageParts) {
+      await sendTelegramMessage(telegramUserId, part);
+    }
+  } catch (error) {
+    console.error('Error handling photo message:', error);
+    await sendTelegramMessage(telegramUserId, '❌ Произошла ошибка при обработке фото. Попробуй ещё раз.');
+  }
+}
+
 async function handleCallbackQuery(callbackQuery: any) {
   const telegramUserId = callbackQuery.from.id;
   const data = callbackQuery.data;
@@ -427,11 +667,46 @@ Deno.serve(async (req) => {
       const utmSource = parts[1] || 'header_try';
 
       await handleStart(telegramUserId, telegramUsername, utmSource);
+      return new Response(JSON.stringify({ ok: true }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
     }
 
     // Handle callback queries (button presses)
     if (update.callback_query) {
       await handleCallbackQuery(update.callback_query);
+      return new Response(JSON.stringify({ ok: true }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+
+    // Handle text messages (after onboarding)
+    if (update.message?.text && !update.message.text.startsWith('/')) {
+      const telegramUserId = update.message.from.id;
+      const session = await getOnboardingSession(telegramUserId);
+
+      if (session && session.onboarding_state === 'completed') {
+        await handleTextMessage(telegramUserId, session.user_id, update.message.text);
+      }
+      
+      return new Response(JSON.stringify({ ok: true }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+
+    // Handle photo messages (after onboarding)
+    if (update.message?.photo) {
+      const telegramUserId = update.message.from.id;
+      const session = await getOnboardingSession(telegramUserId);
+
+      if (session && session.onboarding_state === 'completed') {
+        const photo = update.message.photo[update.message.photo.length - 1]; // Get largest photo
+        await handlePhotoMessage(telegramUserId, session.user_id, photo, update.message.caption);
+      }
+      
+      return new Response(JSON.stringify({ ok: true }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
     }
 
     return new Response(JSON.stringify({ ok: true }), {
