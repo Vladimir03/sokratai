@@ -358,6 +358,7 @@ export type Database = {
           goal: string | null
           grade: number | null
           id: string
+          source: string | null
           started_at: string | null
           step1_duration_ms: number | null
           step2_duration_ms: number | null
@@ -365,7 +366,9 @@ export type Database = {
           step4_duration_ms: number | null
           step5_duration_ms: number | null
           subject: string | null
+          telegram_user_id: number | null
           user_id: string
+          utm_source: string | null
         }
         Insert: {
           completed_at?: string | null
@@ -375,6 +378,7 @@ export type Database = {
           goal?: string | null
           grade?: number | null
           id?: string
+          source?: string | null
           started_at?: string | null
           step1_duration_ms?: number | null
           step2_duration_ms?: number | null
@@ -382,7 +386,9 @@ export type Database = {
           step4_duration_ms?: number | null
           step5_duration_ms?: number | null
           subject?: string | null
+          telegram_user_id?: number | null
           user_id: string
+          utm_source?: string | null
         }
         Update: {
           completed_at?: string | null
@@ -392,6 +398,7 @@ export type Database = {
           goal?: string | null
           grade?: number | null
           id?: string
+          source?: string | null
           started_at?: string | null
           step1_duration_ms?: number | null
           step2_duration_ms?: number | null
@@ -399,7 +406,9 @@ export type Database = {
           step4_duration_ms?: number | null
           step5_duration_ms?: number | null
           subject?: string | null
+          telegram_user_id?: number | null
           user_id?: string
+          utm_source?: string | null
         }
         Relationships: []
       }
@@ -441,6 +450,9 @@ export type Database = {
           id: string
           learning_goal: string | null
           onboarding_completed: boolean | null
+          registration_source: string | null
+          telegram_user_id: number | null
+          telegram_username: string | null
           username: string
         }
         Insert: {
@@ -450,6 +462,9 @@ export type Database = {
           id: string
           learning_goal?: string | null
           onboarding_completed?: boolean | null
+          registration_source?: string | null
+          telegram_user_id?: number | null
+          telegram_username?: string | null
           username: string
         }
         Update: {
@@ -459,7 +474,37 @@ export type Database = {
           id?: string
           learning_goal?: string | null
           onboarding_completed?: boolean | null
+          registration_source?: string | null
+          telegram_user_id?: number | null
+          telegram_username?: string | null
           username?: string
+        }
+        Relationships: []
+      }
+      telegram_sessions: {
+        Row: {
+          created_at: string | null
+          onboarding_data: Json | null
+          onboarding_state: string | null
+          telegram_user_id: number
+          updated_at: string | null
+          user_id: string | null
+        }
+        Insert: {
+          created_at?: string | null
+          onboarding_data?: Json | null
+          onboarding_state?: string | null
+          telegram_user_id: number
+          updated_at?: string | null
+          user_id?: string | null
+        }
+        Update: {
+          created_at?: string | null
+          onboarding_data?: Json | null
+          onboarding_state?: string | null
+          telegram_user_id?: number
+          updated_at?: string | null
+          user_id?: string | null
         }
         Relationships: []
       }

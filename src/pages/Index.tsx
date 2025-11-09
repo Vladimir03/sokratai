@@ -1,7 +1,6 @@
-import { useEffect, useState, lazy, Suspense } from "react";
-import { useNavigate } from "react-router-dom";
+import { lazy, Suspense } from "react";
 import { Button } from "@/components/ui/button";
-import { supabase } from "@/integrations/supabase/client";
+import { telegramLinks } from "@/utils/telegramLinks";
 
 // Lazy load sections
 const SpecialOffer = lazy(() => import("@/components/sections/SpecialOffer"));
@@ -19,19 +18,6 @@ const ForParents = lazy(() => import("@/components/sections/ForParents"));
 const Footer = lazy(() => import("@/components/sections/Footer"));
 
 const Index = () => {
-  const navigate = useNavigate();
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
-
-  useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setIsAuthenticated(!!session);
-    });
-  }, []);
-
-  const handleNavigate = () => {
-    navigate(isAuthenticated ? "/chat" : "/signup");
-  };
-
   return (
     <div className="min-h-screen">
       {/* Special Offer Banner */}
@@ -109,13 +95,18 @@ const Index = () => {
             </p>
 
             {/* CTA Button */}
-            <Button 
-              size="lg" 
-              className="bg-accent hover:bg-accent/90 text-accent-foreground shadow-glow text-base md:text-lg px-8 py-6 rounded-2xl font-semibold transition-all hover:scale-105"
-              onClick={handleNavigate}
+            <a 
+              href={telegramLinks.headerTry}
+              target="_blank"
+              rel="noopener noreferrer"
             >
-              🚀 Попробовать бесплатно
-            </Button>
+              <Button 
+                size="lg" 
+                className="bg-accent hover:bg-accent/90 text-accent-foreground shadow-glow text-base md:text-lg px-8 py-6 rounded-2xl font-semibold transition-all hover:scale-105"
+              >
+                🚀 Попробовать бесплатно в Telegram
+              </Button>
+            </a>
           </div>
         </div>
         
@@ -167,7 +158,7 @@ const Index = () => {
       
       <div id="pricing">
         <Suspense fallback={<div className="py-20 animate-pulse" style={{ height: "700px" }} />}>
-          <Pricing onNavigate={handleNavigate} />
+          <Pricing />
         </Suspense>
       </div>
       
@@ -179,7 +170,7 @@ const Index = () => {
       
       <div id="for-parents">
         <Suspense fallback={<div className="py-20 animate-pulse" style={{ height: "500px" }} />}>
-          <ForParents onNavigate={handleNavigate} />
+          <ForParents />
         </Suspense>
       </div>
       

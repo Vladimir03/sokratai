@@ -16,9 +16,7 @@ import Navigation from "@/components/Navigation";
 import AuthGuard from "@/components/AuthGuard";
 import { useIsMobile } from "@/hooks/use-mobile";
 import ChatInput from "@/components/ChatInput";
-import Onboarding from "@/components/Onboarding";
 import DevPanel from "@/components/DevPanel";
-import { subjectNames } from "@/data/onboardingTasks";
 import { PageContent } from "@/components/PageContent";
 import { saveChatToSessionCache, loadChatFromSessionCache, clearChatCache } from "@/utils/chatCache";
 
@@ -42,7 +40,6 @@ export default function Chat() {
   const [uploadedFile, setUploadedFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
-  const [showOnboarding, setShowOnboarding] = useState(false);
   const [showUploadHint, setShowUploadHint] = useState(false);
   const [isTransitioning, setIsTransitioning] = useState(false);
   const [showScrollButton, setShowScrollButton] = useState(false);
@@ -152,87 +149,6 @@ export default function Chat() {
       navigate(`/chat?id=${generalChat.id}`, { replace: true });
     }
   }, [chatIdFromUrl, generalChat?.id, currentChatId, navigate]);
-
-  // Check onboarding status
-  useEffect(() => {
-    if (!user?.id || !generalChat?.id) return;
-
-    const checkOnboarding = async () => {
-      const { data: profile } = await supabase
-        .from('profiles')
-        .select('onboarding_completed')
-        .eq('id', user.id)
-        .single();
-
-      if (!profile?.onboarding_completed) {
-        setShowOnboarding(true);
-      }
-    };
-
-    checkOnboarding();
-  }, [user?.id, generalChat?.id]);
-
-  // Handle onboarding completion
-  const handleOnboardingComplete = async (
-    grade: number,
-    subject: string,
-    goal: string,
-    quickMessage?: string
-  ) => {
-    if (!user?.id || !generalChat?.id) return;
-
-    // Update profile
-    await supabase
-      .from('profiles')
-      .update({
-        grade,
-        difficult_subject: subject,
-        learning_goal: goal,
-        onboarding_completed: true
-      })
-      .eq('id', user.id);
-
-    // Add welcome message from assistant
-    const welcomeMessage = `Привет! 👋 Я Сократ — твой ИИ-помощник по математике, физике и информатике.
-
-Я не просто даю готовые ответы. Я задаю наводящие вопросы, чтобы ты сам понял(а), как решать задачи. Это помогает тебе учиться, а не просто списывать.
-
-📚 Что я умею:
-
-1. Объясняю сложные темы простым языком
-2. Помогаю разобраться с домашкой
-3. Показываю план решения задач с помощью кнопки "План решения"
-4. Даю подробные объяснения с помощью кнопки "Объясни подробнее"
-5. Генерирую похожие задачи для практики
-
-💡 ${quickMessage ? `Хочешь, чтобы я помог тебе разобраться с твоим вопросом "${quickMessage}"?` : 'Задай мне любой вопрос по математике, физике или информатике, и я помогу тебе разобраться!'}`;
-
-    // Insert message into database
-    const { data: insertedMessage } = await supabase.from('chat_messages').insert({
-      chat_id: generalChat.id,
-      user_id: user.id,
-      role: 'assistant',
-      content: welcomeMessage
-    }).select().single();
-
-    // Add message to local state immediately for instant display
-    if (insertedMessage) {
-      setMessages([{
-        id: insertedMessage.id,
-        role: 'assistant',
-        content: welcomeMessage
-      }]);
-    }
-
-    // Close onboarding after message is ready
-    setShowOnboarding(false);
-
-    // Show hint for upload button
-    setTimeout(() => {
-      setShowUploadHint(true);
-      setTimeout(() => setShowUploadHint(false), 5000);
-    }, 500);
-  };
 
   // Fetch current chat details
   const { data: currentChat } = useQuery({
@@ -1361,28 +1277,13 @@ export default function Chat() {
   useEffect(() => {
     if (!loadingHistory && !isLoading && currentChatId) {
       const textareaElement = document.querySelector('textarea');
-      if (textareaElement && !showOnboarding) {
+      if (textareaElement) {
         requestAnimationFrame(() => {
           textareaElement.focus();
         });
       }
     }
-  }, [loadingHistory, isLoading, currentChatId, showOnboarding]);
-
-  // Show onboarding if needed
-  if (showOnboarding && user?.id) {
-    return (
-      <AuthGuard>
-        <div className="min-h-screen bg-background">
-          <Navigation />
-          <Onboarding
-            userId={user.id}
-            onComplete={handleOnboardingComplete}
-          />
-        </div>
-      </AuthGuard>
-    );
-  }
+  }, [loadingHistory, isLoading, currentChatId]);
 
   if (!currentChatId) {
     return (

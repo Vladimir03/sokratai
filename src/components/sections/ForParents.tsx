@@ -1,11 +1,8 @@
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { telegramLinks } from "@/utils/telegramLinks";
 
-interface ForParentsProps {
-  onNavigate: () => void;
-}
-
-const ForParents = ({ onNavigate }: ForParentsProps) => {
+const ForParents = () => {
   return (
     <section className="py-20 px-4 bg-muted/30">
       <div className="container mx-auto">
@@ -68,13 +65,18 @@ const ForParents = ({ onNavigate }: ForParentsProps) => {
             <p className="text-xl mb-6 text-foreground">
               <strong>Попробуйте 7 дней бесплатно</strong> и увидите разницу сами
             </p>
-            <Button
-              size="lg"
-              className="bg-accent hover:bg-accent/90 text-accent-foreground text-base md:text-lg px-8 md:px-12 py-6 whitespace-normal leading-snug h-auto"
-              onClick={onNavigate}
+            <a 
+              href={telegramLinks.parentTrial}
+              target="_blank"
+              rel="noopener noreferrer"
             >
-              Начать бесплатный пробный период
-            </Button>
+              <Button
+                size="lg"
+                className="bg-accent hover:bg-accent/90 text-accent-foreground text-base md:text-lg px-8 md:px-12 py-6 whitespace-normal leading-snug h-auto"
+              >
+                👨‍👩‍👧 Начать в Telegram
+              </Button>
+            </a>
           </div>
         </div>
       </div>

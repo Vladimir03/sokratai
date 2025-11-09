@@ -2,12 +2,9 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { useRef } from "react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
+import { telegramLinks } from "@/utils/telegramLinks";
 
-interface PricingProps {
-  onNavigate: () => void;
-}
-
-const Pricing = ({ onNavigate }: PricingProps) => {
+const Pricing = () => {
   const scrollContainerRef = useRef<HTMLDivElement>(null);
 
   const scroll = (direction: "left" | "right") => {
@@ -29,7 +26,7 @@ const Pricing = ({ onNavigate }: PricingProps) => {
 
         {/* Pricing Wrapper with Scroll */}
         <div className="relative my-10">
-          {/* Navigation Arrows - Now visible on mobile too */}
+          {/* Navigation Arrows */}
           <button
             onClick={() => scroll("left")}
             className="flex absolute left-0 md:left-0 top-1/2 -translate-y-1/2 -translate-x-3 md:-translate-x-6 z-10 w-10 h-10 md:w-12 md:h-12 items-center justify-center rounded-full bg-background border-2 border-accent text-accent hover:bg-accent hover:text-accent-foreground transition-all shadow-lg"
@@ -79,13 +76,19 @@ const Pricing = ({ onNavigate }: PricingProps) => {
                 ))}
               </ul>
 
-              <Button
-                size="lg"
-                className="w-full bg-accent hover:bg-accent/90 text-accent-foreground text-lg py-6"
-                onClick={onNavigate}
+              <a 
+                href={telegramLinks.planFree}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="block w-full"
               >
-                🎁 Начать бесплатно
-              </Button>
+                <Button
+                  size="lg"
+                  className="w-full bg-accent hover:bg-accent/90 text-accent-foreground text-lg py-6"
+                >
+                  🎁 Начать бесплатно в Telegram
+                </Button>
+              </a>
             </div>
 
             {/* Tier 2: 699₽ - Popular */}
@@ -129,13 +132,19 @@ const Pricing = ({ onNavigate }: PricingProps) => {
                 ))}
               </ul>
 
-              <Button
-                size="lg"
-                className="w-full bg-accent hover:bg-accent/90 text-accent-foreground text-lg py-6"
-                onClick={onNavigate}
+              <a 
+                href={telegramLinks.planPremium}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="block w-full"
               >
-                🚀 Попробовать бесплатно
-              </Button>
+                <Button
+                  size="lg"
+                  className="w-full bg-accent hover:bg-accent/90 text-accent-foreground text-lg py-6"
+                >
+                  🚀 Попробовать бесплатно в Telegram
+                </Button>
+              </a>
 
               <p className="mt-5 text-sm opacity-90 text-center">Отмена в любой момент. Никаких скрытых платежей.</p>
             </div>
@@ -172,13 +181,19 @@ const Pricing = ({ onNavigate }: PricingProps) => {
                 договориться на последующие занятия, если все понравится!
               </p>
 
-              <Button
-                size="lg"
-                className="w-full bg-accent hover:bg-accent/90 text-accent-foreground text-lg py-6"
-                onClick={onNavigate}
+              <a 
+                href={telegramLinks.planPro}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="block w-full"
               >
-                ✍️ Связаться с нами
-              </Button>
+                <Button
+                  size="lg"
+                  className="w-full bg-accent hover:bg-accent/90 text-accent-foreground text-lg py-6"
+                >
+                  ✍️ Связаться в Telegram
+                </Button>
+              </a>
             </div>
           </div>
         </div>
