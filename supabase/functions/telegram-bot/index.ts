@@ -355,11 +355,7 @@ async function completeOnboarding(telegramUserId: number, userId: string, goal: 
   };
   const goalText = goalMap[goal] || goal;
   
-  if (messageId) {
-    await editTelegramMessage(
-      telegramUserId,
-      messageId,
-      `✅ Готово!
+  const welcomeMessage = `✅ Готово!
 
 🎉 Отлично! Теперь я знаю, что ты в ${gradeText}, готовишься к ${goalText} по ${subjectText}!
 
@@ -368,9 +364,31 @@ async function completeOnboarding(telegramUserId: number, userId: string, goal: 
 ✏️ Напиши задачу текстом  
 ❓ Задай вопрос по предмету
 
-Я помогу тебе разобраться! 🚀`,
+Я помогу тебе разобраться! 🚀`;
+  
+  if (messageId) {
+    await editTelegramMessage(
+      telegramUserId,
+      messageId,
+      welcomeMessage,
       { reply_markup: { inline_keyboard: [] } }
     );
+  }
+
+  // Save welcome message to chat history for AI context
+  try {
+    const chatId = await getOrCreateTelegramChat(userId);
+    await supabase
+      .from('chat_messages')
+      .insert({
+        chat_id: chatId,
+        user_id: userId,
+        role: 'assistant',
+        content: welcomeMessage,
+        input_method: 'system'
+      });
+  } catch (error) {
+    console.error('Error saving onboarding completion message:', error);
   }
 
   await updateOnboardingState(telegramUserId, userId, 'completed');
