@@ -31,7 +31,7 @@ const ForParents = ({ onNavigate }: ForParentsProps) => {
                 <li className="flex items-start">
                   <span className="text-accent mr-3 text-2xl">✅</span>
                   <span>
-                    <strong>Доступная цена:</strong> 699₽/мес вместо 5,000-20,000₽ за репетитора
+                    <strong>Доступная цена:</strong> 699₽/мес вместо 5,000-20,000₽/мес за репетитора
                   </span>
                 </li>
                 <li className="flex items-start">
