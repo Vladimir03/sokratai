@@ -515,6 +515,32 @@ function splitLongMessage(text: string, maxLength: number = 4000): string[] {
   return parts;
 }
 
+// Create quick action inline keyboard
+function createQuickActionsKeyboard() {
+  return {
+    inline_keyboard: [
+      [
+        {
+          text: "📋 План решения",
+          callback_data: "quick_action:plan"
+        }
+      ],
+      [
+        {
+          text: "🔍 Объясни подробнее",
+          callback_data: "quick_action:explain"
+        }
+      ],
+      [
+        {
+          text: "✍️ Похожая задача",
+          callback_data: "quick_action:similar"
+        }
+      ]
+    ]
+  };
+}
+
 async function handleTextMessage(telegramUserId: number, userId: string, text: string) {
   console.log('Handling text message:', { telegramUserId, text });
 
@@ -599,8 +625,19 @@ async function handleTextMessage(telegramUserId: number, userId: string, text: s
 
     // Split and send response if too long
     const messageParts = splitLongMessage(formattedContent);
-    for (const part of messageParts) {
-      await sendTelegramMessage(telegramUserId, part);
+    for (let i = 0; i < messageParts.length; i++) {
+      if (i > 0) {
+        // Small delay between parts
+        await new Promise(resolve => setTimeout(resolve, 1000));
+      }
+      
+      // Add inline keyboard only to the last message part
+      const isLastPart = i === messageParts.length - 1;
+      await sendTelegramMessage(
+        telegramUserId, 
+        messageParts[i],
+        isLastPart ? { reply_markup: createQuickActionsKeyboard() } : undefined
+      );
     }
   } catch (error) {
     console.error('Error handling text message:', error);
@@ -731,8 +768,17 @@ async function handlePhotoMessage(telegramUserId: number, userId: string, photo:
 
     // Split and send response if too long
     const messageParts = splitLongMessage(formattedContent);
-    for (const part of messageParts) {
-      await sendTelegramMessage(telegramUserId, part);
+    for (let i = 0; i < messageParts.length; i++) {
+      if (i > 0) {
+        await new Promise(resolve => setTimeout(resolve, 1000));
+      }
+      // Add inline keyboard only to the last message part
+      const isLastPart = i === messageParts.length - 1;
+      await sendTelegramMessage(
+        telegramUserId, 
+        messageParts[i],
+        isLastPart ? { reply_markup: createQuickActionsKeyboard() } : undefined
+      );
     }
   } catch (error) {
     console.error('Error handling photo message:', error);
@@ -745,6 +791,54 @@ async function handleCallbackQuery(callbackQuery: any) {
   const data = callbackQuery.data;
   const messageId = callbackQuery.message?.message_id;
 
+  console.log('Handling callback query:', { telegramUserId, data });
+  
+  // Answer callback query to remove loading state
+  await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/answerCallbackQuery`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ 
+      callback_query_id: callbackQuery.id,
+      text: "Обрабатываю..." 
+    }),
+  });
+
+  // Handle quick action buttons
+  if (data.startsWith('quick_action:')) {
+    const session = await getOnboardingSession(telegramUserId);
+    
+    if (!session?.user_id) {
+      await sendTelegramMessage(telegramUserId, '❌ Сессия не найдена. Нажми /start');
+      return;
+    }
+    
+    const userId = session.user_id;
+    
+    // Determine prompt text based on button
+    let promptText = '';
+    switch (data) {
+      case 'quick_action:plan':
+        promptText = 'Составь план решения этой задачи';
+        break;
+      case 'quick_action:explain':
+        promptText = 'Объясни этот момент подробнее';
+        break;
+      case 'quick_action:similar':
+        promptText = 'Дай мне похожую задачу для практики';
+        break;
+      default:
+        return;
+    }
+    
+    // Show user what they "sent"
+    await sendTelegramMessage(telegramUserId, `⚡ ${promptText}`);
+    
+    // Process as text message with button input method
+    await handleTextMessage(telegramUserId, userId, promptText);
+    return;
+  }
+
+  // Handle onboarding buttons
   const session = await getOnboardingSession(telegramUserId);
   if (!session) {
     console.error('No session found for user:', telegramUserId);
@@ -765,13 +859,6 @@ async function handleCallbackQuery(callbackQuery: any) {
     const goal = data.replace('goal_', '');
     await completeOnboarding(telegramUserId, userId, goal, messageId);
   }
-
-  // Answer callback query to remove loading state
-  await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/answerCallbackQuery`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ callback_query_id: callbackQuery.id }),
-  });
 }
 
 Deno.serve(async (req) => {
