@@ -76,17 +76,9 @@ const Pricing = () => {
                 ))}
               </ul>
 
-              <a 
-                href={telegramLinks.planFree}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="block w-full"
-              >
-                <Button
-                  size="lg"
-                  className="w-full bg-accent hover:bg-accent/90 text-accent-foreground text-lg py-6"
-                >
-                  🎁 Начать бесплатно в Telegram
+              <a href={telegramLinks.planFree} target="_blank" rel="noopener noreferrer" className="block w-full">
+                <Button size="lg" className="w-full bg-accent hover:bg-accent/90 text-accent-foreground text-lg py-6">
+                  🎁 Начать бесплатно
                 </Button>
               </a>
             </div>
@@ -132,17 +124,9 @@ const Pricing = () => {
                 ))}
               </ul>
 
-              <a 
-                href={telegramLinks.planPremium}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="block w-full"
-              >
-                <Button
-                  size="lg"
-                  className="w-full bg-accent hover:bg-accent/90 text-accent-foreground text-lg py-6"
-                >
-                  🚀 Попробовать бесплатно в Telegram
+              <a href={telegramLinks.planPremium} target="_blank" rel="noopener noreferrer" className="block w-full">
+                <Button size="lg" className="w-full bg-accent hover:bg-accent/90 text-accent-foreground text-lg py-6">
+                  🚀 Попробовать бесплатно
                 </Button>
               </a>
 
@@ -181,16 +165,8 @@ const Pricing = () => {
                 договориться на последующие занятия, если все понравится!
               </p>
 
-              <a 
-                href={telegramLinks.planPro}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="block w-full"
-              >
-                <Button
-                  size="lg"
-                  className="w-full bg-accent hover:bg-accent/90 text-accent-foreground text-lg py-6"
-                >
+              <a href={telegramLinks.planPro} target="_blank" rel="noopener noreferrer" className="block w-full">
+                <Button size="lg" className="w-full bg-accent hover:bg-accent/90 text-accent-foreground text-lg py-6">
                   ✍️ Связаться в Telegram
                 </Button>
               </a>
