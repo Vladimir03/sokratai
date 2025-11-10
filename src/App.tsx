@@ -18,6 +18,8 @@ const HomeworkTaskDetail = lazy(() => import("./pages/HomeworkTaskDetail"));
 const Problems = lazy(() => import("./pages/Problems"));
 const Progress = lazy(() => import("./pages/Progress"));
 const Profile = lazy(() => import("./pages/Profile"));
+const MiniApp = lazy(() => import("./pages/MiniApp"));
+const MiniAppSolution = lazy(() => import("./pages/MiniAppSolution"));
 const NotFound = lazy(() => import("./pages/NotFound"));
 
 // Simple loading fallback
@@ -118,6 +120,22 @@ const App = () => (
             element={
               <Suspense fallback={<PageLoader />}>
                 <Profile />
+              </Suspense>
+            } 
+          />
+          <Route 
+            path="/miniapp" 
+            element={
+              <Suspense fallback={<PageLoader />}>
+                <MiniApp />
+              </Suspense>
+            } 
+          />
+          <Route 
+            path="/miniapp/solution/:id" 
+            element={
+              <Suspense fallback={<PageLoader />}>
+                <MiniAppSolution />
               </Suspense>
             } 
           />
