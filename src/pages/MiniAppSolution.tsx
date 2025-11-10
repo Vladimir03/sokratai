@@ -3,6 +3,7 @@ import { useParams } from 'react-router-dom';
 import { MiniAppLayout } from '@/components/miniapp/MiniAppLayout';
 import { SolutionView } from '@/components/miniapp/SolutionView';
 import { BackButton } from '@/components/miniapp/BackButton';
+import { supabase } from '@/integrations/supabase/client';
 import type { Solution } from '@/types/solution';
 
 /**
@@ -62,33 +63,46 @@ export default function MiniAppSolution() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    // In production, fetch solution from Supabase by ID
-    // For now, use example data
     const fetchSolution = async () => {
       try {
         setLoading(true);
-        
+
         if (id === 'example') {
-          // Use example solution
+          // Use example solution for testing
           await new Promise(resolve => setTimeout(resolve, 500)); // Simulate loading
           setSolution(EXAMPLE_SOLUTION);
         } else {
-          // TODO: Fetch from Supabase
-          // const { data, error } = await supabase
-          //   .from('solutions')
-          //   .select('*')
-          //   .eq('id', id)
-          //   .single();
-          // 
-          // if (error) throw error;
-          // setSolution(data);
-          
-          // For now, use example
-          setSolution(EXAMPLE_SOLUTION);
+          // Fetch from Supabase
+          const { data, error } = await supabase
+            .from('solutions')
+            .select('*')
+            .eq('id', id)
+            .single();
+
+          if (error) {
+            console.error('Supabase error:', error);
+            throw new Error('Решение не найдено');
+          }
+
+          if (!data) {
+            throw new Error('Решение не найдено');
+          }
+
+          // Transform database structure to Solution type
+          const solutionData = data.solution_data as any;
+          const transformedSolution: Solution = {
+            id: data.id,
+            problem: data.problem_text,
+            steps: solutionData.solution_steps || [],
+            finalAnswer: solutionData.final_answer || '',
+            createdAt: data.created_at,
+          };
+
+          setSolution(transformedSolution);
         }
       } catch (err) {
         console.error('Error fetching solution:', err);
-        setError('Не удалось загрузить решение');
+        setError(err instanceof Error ? err.message : 'Не удалось загрузить решение');
       } finally {
         setLoading(false);
       }

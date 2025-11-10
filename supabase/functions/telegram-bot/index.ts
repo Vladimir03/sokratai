@@ -697,6 +697,94 @@ function createQuickActionsKeyboard() {
   };
 }
 
+/**
+ * Parses AI response into structured solution steps
+ * Attempts to extract numbered steps, formulas, and final answer
+ */
+function parseSolutionSteps(aiResponse: string): any[] {
+  const steps: any[] = [];
+
+  // Try to find numbered steps (1., 2., etc. or 1), 2), etc. or **1.**, etc.)
+  const stepRegex = /(?:^|\n)(?:\*\*)?(\d+)[.):\s](?:\*\*)?\s*([^\n]+)/g;
+  let match;
+  let stepNumber = 1;
+
+  while ((match = stepRegex.exec(aiResponse)) !== null) {
+    const title = match[2].trim();
+
+    // Try to extract content after this step title
+    const startPos = match.index + match[0].length;
+    const nextMatch = stepRegex.exec(aiResponse);
+    const endPos = nextMatch ? nextMatch.index : aiResponse.length;
+    stepRegex.lastIndex = nextMatch ? nextMatch.index : aiResponse.length;
+
+    const content = aiResponse.substring(startPos, endPos).trim();
+
+    steps.push({
+      number: stepNumber++,
+      title: title,
+      content: content.substring(0, 500), // Limit content length
+      formula: null // We could extract LaTeX formulas here in the future
+    });
+  }
+
+  // If no steps found, create a single step with the full response
+  if (steps.length === 0) {
+    steps.push({
+      number: 1,
+      title: "Решение",
+      content: aiResponse.substring(0, 1000), // Limit to first 1000 chars
+      formula: null
+    });
+  }
+
+  return steps;
+}
+
+/**
+ * Saves solution to database and returns solution ID
+ */
+async function saveSolution(
+  telegramChatId: number,
+  telegramUserId: number,
+  userId: string,
+  problemText: string,
+  aiResponse: string
+): Promise<string | null> {
+  try {
+    const solutionSteps = parseSolutionSteps(aiResponse);
+
+    const solutionData = {
+      problem: problemText,
+      solution_steps: solutionSteps,
+      final_answer: null, // Could extract this from AI response in future
+      raw_response: aiResponse
+    };
+
+    const { data: solution, error } = await supabase
+      .from('solutions')
+      .insert({
+        telegram_chat_id: telegramChatId,
+        telegram_user_id: telegramUserId,
+        user_id: userId,
+        problem_text: problemText,
+        solution_data: solutionData
+      })
+      .select('id')
+      .single();
+
+    if (error) {
+      console.error('Failed to save solution:', error);
+      return null;
+    }
+
+    return solution?.id || null;
+  } catch (error) {
+    console.error('Error saving solution:', error);
+    return null;
+  }
+}
+
 async function handleTextMessage(telegramUserId: number, userId: string, text: string) {
   console.log('Handling text message:', { telegramUserId, text });
 
@@ -772,9 +860,18 @@ async function handleTextMessage(telegramUserId: number, userId: string, text: s
     // Parse SSE stream
     const aiContent = await parseSSEStream(chatResponse);
 
+    // Save solution to database
+    const solutionId = await saveSolution(
+      telegramUserId,
+      telegramUserId,
+      userId,
+      text,
+      aiContent
+    );
+
     // Format and save AI response
     const formattedContent = formatForTelegram(aiContent);
-    
+
     await supabase.from('chat_messages').insert({
       chat_id: chatId,
       user_id: userId,
@@ -789,13 +886,22 @@ async function handleTextMessage(telegramUserId: number, userId: string, text: s
         // Small delay between parts
         await new Promise(resolve => setTimeout(resolve, 1000));
       }
-      
+
       // Add inline keyboard only to the last message part
       const isLastPart = i === messageParts.length - 1;
       await sendTelegramMessage(
-        telegramUserId, 
+        telegramUserId,
         messageParts[i],
         isLastPart ? { reply_markup: createQuickActionsKeyboard() } : undefined
+      );
+    }
+
+    // Send Mini App button if solution was saved
+    if (solutionId) {
+      await sendTelegramMessage(
+        telegramUserId,
+        '📱 Открой полное решение с формулами:',
+        { reply_markup: generateMiniAppButton(solutionId) }
       );
     }
   } catch (error) {
@@ -918,9 +1024,19 @@ async function handlePhotoMessage(telegramUserId: number, userId: string, photo:
     // Parse SSE stream
     const aiContent = await parseSSEStream(chatResponse);
 
+    // Save solution to database
+    const problemText = caption || 'Задача из фото';
+    const solutionId = await saveSolution(
+      telegramUserId,
+      telegramUserId,
+      userId,
+      problemText,
+      aiContent
+    );
+
     // Format and save AI response
     const formattedContent = formatForTelegram(aiContent);
-    
+
     await supabase.from('chat_messages').insert({
       chat_id: chatId,
       user_id: userId,
@@ -937,9 +1053,18 @@ async function handlePhotoMessage(telegramUserId: number, userId: string, photo:
       // Add inline keyboard only to the last message part
       const isLastPart = i === messageParts.length - 1;
       await sendTelegramMessage(
-        telegramUserId, 
+        telegramUserId,
         messageParts[i],
         isLastPart ? { reply_markup: createQuickActionsKeyboard() } : undefined
+      );
+    }
+
+    // Send Mini App button if solution was saved
+    if (solutionId) {
+      await sendTelegramMessage(
+        telegramUserId,
+        '📱 Открой полное решение с формулами:',
+        { reply_markup: generateMiniAppButton(solutionId) }
       );
     }
   } catch (error) {
