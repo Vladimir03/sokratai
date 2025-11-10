@@ -493,12 +493,31 @@ async function sendTypingLoop(telegramUserId: number, stopSignal: { stop: boolea
 const LATEX_TO_UNICODE: Record<string, string> = {
   // Square roots
   '\\sqrt': '√',
-  
-  // Superscripts
+
+  // Superscripts (common)
   '^2': '²',
   '^3': '³',
   '^4': '⁴',
-  
+  '^0': '⁰',
+  '^1': '¹',
+  '^5': '⁵',
+  '^6': '⁶',
+  '^7': '⁷',
+  '^8': '⁸',
+  '^9': '⁹',
+
+  // Subscripts (common)
+  '_0': '₀',
+  '_1': '₁',
+  '_2': '₂',
+  '_3': '₃',
+  '_4': '₄',
+  '_5': '₅',
+  '_6': '₆',
+  '_7': '₇',
+  '_8': '₈',
+  '_9': '₉',
+
   // Math operators
   '\\pm': '±',
   '\\mp': '∓',
@@ -507,52 +526,146 @@ const LATEX_TO_UNICODE: Record<string, string> = {
   '\\cdot': '·',
   '\\approx': '≈',
   '\\neq': '≠',
+  '\\ne': '≠',
   '\\leq': '≤',
+  '\\le': '≤',
   '\\geq': '≥',
+  '\\ge': '≥',
   '\\infty': '∞',
-  
+  '\\to': '→',
+  '\\rightarrow': '→',
+  '\\leftarrow': '←',
+  '\\Rightarrow': '⇒',
+  '\\Leftarrow': '⇐',
+  '\\Leftrightarrow': '⇔',
+  '\\in': '∈',
+  '\\notin': '∉',
+  '\\subset': '⊂',
+  '\\supset': '⊃',
+  '\\cup': '∪',
+  '\\cap': '∩',
+  '\\forall': '∀',
+  '\\exists': '∃',
+  '\\emptyset': '∅',
+  '\\nabla': '∇',
+  '\\partial': '∂',
+  '\\int': '∫',
+  '\\sum': '∑',
+  '\\prod': '∏',
+
   // Greek letters (lowercase)
   '\\alpha': 'α',
   '\\beta': 'β',
   '\\gamma': 'γ',
   '\\delta': 'δ',
   '\\epsilon': 'ε',
+  '\\varepsilon': 'ε',
+  '\\zeta': 'ζ',
+  '\\eta': 'η',
   '\\theta': 'θ',
+  '\\vartheta': 'θ',
+  '\\iota': 'ι',
+  '\\kappa': 'κ',
   '\\lambda': 'λ',
   '\\mu': 'μ',
+  '\\nu': 'ν',
+  '\\xi': 'ξ',
   '\\pi': 'π',
+  '\\rho': 'ρ',
   '\\sigma': 'σ',
+  '\\tau': 'τ',
+  '\\upsilon': 'υ',
   '\\phi': 'φ',
+  '\\varphi': 'φ',
+  '\\chi': 'χ',
+  '\\psi': 'ψ',
   '\\omega': 'ω',
-  
+
   // Greek letters (uppercase)
+  '\\Gamma': 'Γ',
   '\\Delta': 'Δ',
   '\\Theta': 'Θ',
   '\\Lambda': 'Λ',
+  '\\Xi': 'Ξ',
+  '\\Pi': 'Π',
   '\\Sigma': 'Σ',
+  '\\Upsilon': 'Υ',
   '\\Phi': 'Φ',
+  '\\Psi': 'Ψ',
   '\\Omega': 'Ω',
-  
-  // Fractions (common)
+
+  // Fractions (common Unicode fractions)
   '\\frac{1}{2}': '½',
   '\\frac{1}{3}': '⅓',
   '\\frac{2}{3}': '⅔',
   '\\frac{1}{4}': '¼',
   '\\frac{3}{4}': '¾',
+  '\\frac{1}{5}': '⅕',
+  '\\frac{2}{5}': '⅖',
+  '\\frac{3}{5}': '⅗',
+  '\\frac{4}{5}': '⅘',
+  '\\frac{1}{6}': '⅙',
+  '\\frac{5}{6}': '⅚',
+  '\\frac{1}{8}': '⅛',
+  '\\frac{3}{8}': '⅜',
+  '\\frac{5}{8}': '⅝',
+  '\\frac{7}{8}': '⅞',
 };
+
+/**
+ * Preprocesses LaTeX: removes delimiters and converts fractions
+ */
+function preprocessLatex(text: string): string {
+  let result = text;
+
+  // Remove display math delimiters $$ ... $$ (non-greedy)
+  result = result.replace(/\$\$(.+?)\$\$/gs, '$1');
+
+  // Remove inline math delimiters $ ... $ (non-greedy)
+  result = result.replace(/\$([^$]+?)\$/g, '$1');
+
+  // Convert \frac{numerator}{denominator} to (numerator)/(denominator)
+  // Handle nested fractions by repeating the replacement
+  for (let i = 0; i < 3; i++) {
+    result = result.replace(/\\frac\{([^{}]+)\}\{([^{}]+)\}/g, '($1)/($2)');
+  }
+
+  // Convert simple fractions without extra parentheses for single chars/numbers
+  result = result.replace(/\(([a-zA-Z0-9]+)\)\/\(([a-zA-Z0-9]+)\)/g, (match, num, den) => {
+    // Only simplify if both are single characters
+    if (num.length === 1 && den.length === 1) {
+      return `${num}/${den}`;
+    }
+    return match;
+  });
+
+  // Convert \sqrt{x} to √(x) for complex expressions, √x for simple
+  result = result.replace(/\\sqrt\{([^{}]+)\}/g, (_, content) => {
+    return content.length === 1 ? `√${content}` : `√(${content})`;
+  });
+
+  // Remove curly braces used for grouping (e.g., {x} -> x)
+  // But be careful not to remove structural braces
+  result = result.replace(/\{([^{}]+)\}/g, '$1');
+
+  // Clean up double spaces
+  result = result.replace(/\s+/g, ' ');
+
+  return result;
+}
 
 /**
  * Converts LaTeX formulas to Unicode symbols
  */
 function convertLatexToUnicode(text: string): string {
   let result = text;
-  
+
   // Replace LaTeX commands with Unicode symbols
   for (const [latex, unicode] of Object.entries(LATEX_TO_UNICODE)) {
     const escapedLatex = latex.replace(/[\\^{}]/g, '\\$&');
     result = result.replace(new RegExp(escapedLatex, 'g'), unicode);
   }
-  
+
   return result;
 }
 
@@ -584,12 +697,15 @@ function convertMarkdownToTelegramHTML(text: string): string {
  * Converts LaTeX and markdown to Telegram-friendly HTML format
  */
 function formatForTelegram(text: string): string {
-  // Step 1: Convert LaTeX to Unicode
-  let result = convertLatexToUnicode(text);
-  
-  // Step 2: Convert markdown to Telegram HTML
+  // Step 1: Preprocess LaTeX (remove $ delimiters, convert fractions)
+  let result = preprocessLatex(text);
+
+  // Step 2: Convert LaTeX commands to Unicode symbols
+  result = convertLatexToUnicode(result);
+
+  // Step 3: Convert markdown to Telegram HTML
   result = convertMarkdownToTelegramHTML(result);
-  
+
   return result;
 }
 
