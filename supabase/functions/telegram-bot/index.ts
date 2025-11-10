@@ -487,12 +487,150 @@ async function sendTypingLoop(telegramUserId: number, stopSignal: { stop: boolea
   }
 }
 
-function formatForTelegram(text: string): string {
-  // Заменить LaTeX на текстовый формат для лучшего отображения
-  text = text.replace(/\$\$(.*?)\$\$/g, '📐 $1');
-  text = text.replace(/\$(.*?)\$/g, '$1');
+// ============= TELEGRAM FORMATTING UTILITIES =============
+
+// LaTeX to Unicode symbol mappings
+const LATEX_TO_UNICODE: Record<string, string> = {
+  // Square roots
+  '\\sqrt': '√',
   
-  return text;
+  // Superscripts
+  '^2': '²',
+  '^3': '³',
+  '^4': '⁴',
+  
+  // Math operators
+  '\\pm': '±',
+  '\\mp': '∓',
+  '\\times': '×',
+  '\\div': '÷',
+  '\\cdot': '·',
+  '\\approx': '≈',
+  '\\neq': '≠',
+  '\\leq': '≤',
+  '\\geq': '≥',
+  '\\infty': '∞',
+  
+  // Greek letters (lowercase)
+  '\\alpha': 'α',
+  '\\beta': 'β',
+  '\\gamma': 'γ',
+  '\\delta': 'δ',
+  '\\epsilon': 'ε',
+  '\\theta': 'θ',
+  '\\lambda': 'λ',
+  '\\mu': 'μ',
+  '\\pi': 'π',
+  '\\sigma': 'σ',
+  '\\phi': 'φ',
+  '\\omega': 'ω',
+  
+  // Greek letters (uppercase)
+  '\\Delta': 'Δ',
+  '\\Theta': 'Θ',
+  '\\Lambda': 'Λ',
+  '\\Sigma': 'Σ',
+  '\\Phi': 'Φ',
+  '\\Omega': 'Ω',
+  
+  // Fractions (common)
+  '\\frac{1}{2}': '½',
+  '\\frac{1}{3}': '⅓',
+  '\\frac{2}{3}': '⅔',
+  '\\frac{1}{4}': '¼',
+  '\\frac{3}{4}': '¾',
+};
+
+/**
+ * Converts LaTeX formulas to Unicode symbols
+ */
+function convertLatexToUnicode(text: string): string {
+  let result = text;
+  
+  // Replace LaTeX commands with Unicode symbols
+  for (const [latex, unicode] of Object.entries(LATEX_TO_UNICODE)) {
+    const escapedLatex = latex.replace(/[\\^{}]/g, '\\$&');
+    result = result.replace(new RegExp(escapedLatex, 'g'), unicode);
+  }
+  
+  return result;
+}
+
+/**
+ * Converts markdown to Telegram HTML format
+ */
+function convertMarkdownToTelegramHTML(text: string): string {
+  let result = text;
+  
+  // Bold: **text** or __text__ → <b>text</b>
+  result = result.replace(/\*\*(.+?)\*\*/g, '<b>$1</b>');
+  result = result.replace(/__(.+?)__/g, '<b>$1</b>');
+  
+  // Italic: *text* or _text_ → <i>text</i> (but avoid conflicts with bold)
+  result = result.replace(/(?<!\*)\*([^*]+?)\*(?!\*)/g, '<i>$1</i>');
+  result = result.replace(/(?<!_)_([^_]+?)_(?!_)/g, '<i>$1</i>');
+  
+  // Code: `text` → <code>text</code>
+  result = result.replace(/`(.+?)`/g, '<code>$1</code>');
+  
+  // Strikethrough: ~~text~~ → <s>text</s>
+  result = result.replace(/~~(.+?)~~/g, '<s>$1</s>');
+  
+  return result;
+}
+
+/**
+ * Main formatter function
+ * Converts LaTeX and markdown to Telegram-friendly HTML format
+ */
+function formatForTelegram(text: string): string {
+  // Step 1: Convert LaTeX to Unicode
+  let result = convertLatexToUnicode(text);
+  
+  // Step 2: Convert markdown to Telegram HTML
+  result = convertMarkdownToTelegramHTML(result);
+  
+  return result;
+}
+
+/**
+ * Generates Telegram inline keyboard JSON for Mini App button
+ */
+function generateMiniAppButton(solutionId: string): any {
+  const WEBAPP_URL = Deno.env.get('VITE_WEBAPP_URL') || 'https://sokratai.lovable.app';
+  
+  return {
+    inline_keyboard: [[{
+      text: "📱 Открыть полное решение",
+      web_app: {
+        url: `${WEBAPP_URL}/miniapp/solution/${solutionId}`
+      }
+    }]]
+  };
+}
+
+/**
+ * Formats solution for Telegram message
+ * Returns shortened version with button to open full solution
+ */
+function formatSolutionPreview(
+  problem: string,
+  answer: string,
+  solutionId: string
+): { text: string; replyMarkup: any } {
+  const text = formatForTelegram(`
+📝 **Задача:**
+${problem}
+
+✅ **Ответ:** ${answer}
+
+👇 Нажми кнопку ниже, чтобы увидеть подробное решение с формулами!
+  `.trim());
+  
+  return {
+    text,
+    replyMarkup: generateMiniAppButton(solutionId)
+  };
 }
 
 function splitLongMessage(text: string, maxLength: number = 4000): string[] {
