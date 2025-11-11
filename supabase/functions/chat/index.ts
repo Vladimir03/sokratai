@@ -309,8 +309,16 @@ async function processAIRequest(userId: string, messages: any[], systemPrompt?: 
   // Validate only if there are messages
   if (messages.length > 0) {
     const lastMessage = messages[messages.length - 1];
-    if (!lastMessage || !lastMessage.content) {
-      return new Response(JSON.stringify({ error: "Некорректное содержимое сообщения" }), {
+    if (!lastMessage) {
+      console.error('Last message is null or undefined');
+      return new Response(JSON.stringify({ error: "Последнее сообщение отсутствует" }), {
+        status: 400,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+    if (!lastMessage.content || (typeof lastMessage.content === 'string' && lastMessage.content.trim() === '')) {
+      console.error('Last message has empty content:', lastMessage);
+      return new Response(JSON.stringify({ error: "Содержимое последнего сообщения пустое" }), {
         status: 400,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
