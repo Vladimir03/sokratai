@@ -309,15 +309,18 @@ async function processAIRequest(userId: string, messages: any[], systemPrompt?: 
   // Validate only if there are messages
   if (messages.length > 0) {
     const lastMessage = messages[messages.length - 1];
-    if (!lastMessage || !lastMessage.content || typeof lastMessage.content !== "string") {
+    if (!lastMessage || !lastMessage.content) {
       return new Response(JSON.stringify({ error: "Некорректное содержимое сообщения" }), {
         status: 400,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
-    // Only validate length for user messages, assistant responses can be longer
-    if (lastMessage.role === "user" && lastMessage.content.length > MAX_MESSAGE_LENGTH) {
+    // Only validate length for user text messages (string content), assistant responses can be longer
+    // Content can also be an object with image_url which will be transformed to multimodal format
+    if (lastMessage.role === "user" && 
+        typeof lastMessage.content === "string" && 
+        lastMessage.content.length > MAX_MESSAGE_LENGTH) {
       return new Response(
         JSON.stringify({ error: `Сообщение слишком длинное (макс. ${MAX_MESSAGE_LENGTH} символов)` }),
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } },
