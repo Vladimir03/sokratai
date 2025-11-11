@@ -1031,24 +1031,36 @@ async function handlePhotoMessage(telegramUserId: number, userId: string, photo:
 
   try {
     // Get file info from Telegram
+    console.log('Step 1: Getting file info from Telegram...');
     const fileResponse = await fetch(
       `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/getFile?file_id=${photo.file_id}`
     );
     const fileData = await fileResponse.json();
 
     if (!fileData.ok) {
-      throw new Error('Failed to get file from Telegram');
+      console.error('Telegram getFile failed:', fileData);
+      throw new Error(`Failed to get file from Telegram: ${JSON.stringify(fileData)}`);
     }
 
     const filePath = fileData.result.file_path;
+    console.log('Step 2: File path obtained:', filePath);
 
     // Download image from Telegram
+    console.log('Step 3: Downloading image from Telegram...');
     const imageResponse = await fetch(
       `https://api.telegram.org/file/bot${TELEGRAM_BOT_TOKEN}/${filePath}`
     );
+
+    if (!imageResponse.ok) {
+      console.error('Failed to download image:', imageResponse.status);
+      throw new Error(`Failed to download image: ${imageResponse.status}`);
+    }
+
     const imageBlob = await imageResponse.blob();
+    console.log('Step 4: Image downloaded, size:', imageBlob.size);
 
     // Upload to Supabase Storage
+    console.log('Step 5: Uploading to Supabase Storage...');
     const fileName = `${userId}/${Date.now()}.jpg`;
     const { data: uploadData, error: uploadError } = await supabase.storage
       .from('chat-images')
@@ -1059,43 +1071,61 @@ async function handlePhotoMessage(telegramUserId: number, userId: string, photo:
 
     if (uploadError) {
       console.error('Upload error:', uploadError);
-      throw new Error('Failed to upload image');
+      throw new Error(`Failed to upload image: ${uploadError.message}`);
     }
+    console.log('Step 6: Upload successful:', fileName);
 
     // Create signed URL for AI
-    const { data: signedData } = await supabase.storage
+    console.log('Step 7: Creating signed URL...');
+    const { data: signedData, error: signError } = await supabase.storage
       .from('chat-images')
       .createSignedUrl(fileName, 86400); // 24 hours
 
+    if (signError || !signedData) {
+      console.error('Failed to create signed URL:', signError);
+      throw new Error(`Failed to create signed URL: ${signError?.message}`);
+    }
+    console.log('Step 8: Signed URL created');
+
     // Get or create chat
+    console.log('Step 9: Getting or creating chat...');
     const chatId = await getOrCreateTelegramChat(userId);
+    console.log('Step 10: Chat ID:', chatId);
 
     // Save user message with image
+    console.log('Step 11: Saving message to database...');
     await supabase.from('chat_messages').insert({
       chat_id: chatId,
       user_id: userId,
       role: 'user',
       content: caption || 'Помоги решить эту задачу',
-      image_url: signedData?.signedUrl,
+      image_url: signedData.signedUrl,
       image_path: fileName,
       input_method: 'photo',
     });
 
   // Get chat history - limit to last 20 messages (10 pairs)
-  const { data: historyReversed } = await supabase
+  console.log('Step 12: Getting chat history...');
+  const { data: historyReversed, error: historyError } = await supabase
     .from('chat_messages')
     .select('role, content, image_url')
     .eq('chat_id', chatId)
     .order('created_at', { ascending: false })
     .limit(20);
-  
+
+  if (historyError) {
+    console.error('Failed to get chat history:', historyError);
+  }
+
   const history = historyReversed?.reverse() || [];
+  console.log('Step 13: Chat history loaded, messages:', history.length);
 
     // Start typing loop
     const stopTyping = { stop: false };
     const typingPromise = sendTypingLoop(telegramUserId, stopTyping);
 
     // Call AI chat function with service role authorization
+    console.log('Step 14: Calling AI chat function...');
     const chatResponse = await fetch(`${SUPABASE_URL}/functions/v1/chat`, {
       method: 'POST',
       headers: {
@@ -1113,10 +1143,12 @@ async function handlePhotoMessage(telegramUserId: number, userId: string, photo:
     stopTyping.stop = true;
     await typingPromise;
 
+    console.log('Step 15: AI response status:', chatResponse.status);
+
     // Handle rate limit error
     if (chatResponse.status === 429) {
       await sendTelegramMessage(
-        telegramUserId, 
+        telegramUserId,
         '⏳ Слишком много запросов. Подожди немного и попробуй снова.'
       );
       return;
@@ -1125,22 +1157,26 @@ async function handlePhotoMessage(telegramUserId: number, userId: string, photo:
     // Handle payment required error
     if (chatResponse.status === 402) {
       await sendTelegramMessage(
-        telegramUserId, 
+        telegramUserId,
         '💳 Закончились средства на балансе. Пожалуйста, пополни баланс в личном кабинете.'
       );
       return;
     }
 
     if (!chatResponse.ok) {
-      console.error('AI response error:', chatResponse.status, await chatResponse.text());
-      await sendTelegramMessage(telegramUserId, '❌ Произошла ошибка. Попробуй ещё раз.');
+      const errorText = await chatResponse.text();
+      console.error('AI response error:', chatResponse.status, errorText);
+      await sendTelegramMessage(telegramUserId, `❌ Ошибка AI: ${errorText.substring(0, 100)}`);
       return;
     }
 
     // Parse SSE stream
+    console.log('Step 16: Parsing AI response...');
     const aiContent = await parseSSEStream(chatResponse);
+    console.log('Step 17: AI response parsed, length:', aiContent.length);
 
     // Save solution to database
+    console.log('Step 18: Saving solution to database...');
     const problemText = caption || 'Задача из фото';
     const solutionId = await saveSolution(
       telegramUserId,
@@ -1149,10 +1185,13 @@ async function handlePhotoMessage(telegramUserId: number, userId: string, photo:
       problemText,
       aiContent
     );
+    console.log('Step 19: Solution saved, ID:', solutionId);
 
     // Format and save AI response
+    console.log('Step 20: Formatting content for Telegram...');
     const formattedContent = formatForTelegram(aiContent);
 
+    console.log('Step 21: Saving AI response to database...');
     await supabase.from('chat_messages').insert({
       chat_id: chatId,
       user_id: userId,
@@ -1161,7 +1200,10 @@ async function handlePhotoMessage(telegramUserId: number, userId: string, photo:
     });
 
     // Split and send response if too long
+    console.log('Step 22: Splitting and sending messages...');
     const messageParts = splitLongMessage(formattedContent);
+    console.log('Message parts:', messageParts.length);
+
     for (let i = 0; i < messageParts.length; i++) {
       if (i > 0) {
         await new Promise(resolve => setTimeout(resolve, 1000));
@@ -1177,15 +1219,23 @@ async function handlePhotoMessage(telegramUserId: number, userId: string, photo:
 
     // Send Mini App button if solution was saved
     if (solutionId) {
+      console.log('Step 23: Sending Mini App button...');
       await sendTelegramMessage(
         telegramUserId,
         '📱 Открой полное решение с формулами:',
         { reply_markup: generateMiniAppButton(solutionId) }
       );
     }
+
+    console.log('Photo message handled successfully!');
   } catch (error) {
-    console.error('Error handling photo message:', error);
-    await sendTelegramMessage(telegramUserId, '❌ Произошла ошибка при обработке фото. Попробуй ещё раз.');
+    console.error('❌ Error handling photo message:', error);
+    console.error('Error stack:', error instanceof Error ? error.stack : 'No stack trace');
+    const errorMsg = error instanceof Error ? error.message : String(error);
+    await sendTelegramMessage(
+      telegramUserId,
+      `❌ Ошибка при обработке фото: ${errorMsg.substring(0, 200)}`
+    );
   }
 }
 
