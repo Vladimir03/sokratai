@@ -481,6 +481,39 @@ export type Database = {
         }
         Relationships: []
       }
+      solutions: {
+        Row: {
+          created_at: string
+          id: string
+          problem_text: string
+          solution_data: Json
+          telegram_chat_id: number | null
+          telegram_user_id: number | null
+          updated_at: string
+          user_id: string | null
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          problem_text: string
+          solution_data: Json
+          telegram_chat_id?: number | null
+          telegram_user_id?: number | null
+          updated_at?: string
+          user_id?: string | null
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          problem_text?: string
+          solution_data?: Json
+          telegram_chat_id?: number | null
+          telegram_user_id?: number | null
+          updated_at?: string
+          user_id?: string | null
+        }
+        Relationships: []
+      }
       telegram_sessions: {
         Row: {
           created_at: string | null
