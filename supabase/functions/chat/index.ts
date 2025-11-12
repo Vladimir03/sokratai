@@ -309,7 +309,16 @@ async function processAIRequest(userId: string, messages: any[], systemPrompt?: 
   // Validate only if there are messages
   if (messages.length > 0) {
     const lastMessage = messages[messages.length - 1];
-    if (!lastMessage || !lastMessage.content) {
+    if (!lastMessage) {
+      return new Response(JSON.stringify({ error: "Некорректное содержимое сообщения" }), {
+        status: 400,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+    
+    // For multimodal messages (with images), content can be empty or minimal
+    // For text-only messages, content must be present
+    if (!lastMessage.image_url && (!lastMessage.content || lastMessage.content.trim() === '')) {
       return new Response(JSON.stringify({ error: "Некорректное содержимое сообщения" }), {
         status: 400,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
