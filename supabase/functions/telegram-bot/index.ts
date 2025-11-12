@@ -933,17 +933,21 @@ async function handleTextMessage(telegramUserId: number, userId: string, text: s
     const typingPromise = sendTypingLoop(telegramUserId, stopTyping);
 
     // Call AI chat function with service role authorization
+    const chatRequestBody = {
+      messages: history || [],
+      chatId: chatId,
+      userId: userId,
+    };
+
+    console.log('Request body to chat function:', JSON.stringify(chatRequestBody, null, 2));
+
     const chatResponse = await fetch(`${SUPABASE_URL}/functions/v1/chat`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
       },
-      body: JSON.stringify({
-        messages: history || [],
-        chatId: chatId,
-        userId: userId,
-      }),
+      body: JSON.stringify(chatRequestBody),
     });
 
     // Stop typing
@@ -1129,17 +1133,31 @@ async function handlePhotoMessage(telegramUserId: number, userId: string, photo:
 
     // Call AI chat function with service role authorization
     console.log('Step 14: Calling AI chat function...');
+
+    const chatRequestBody = {
+      messages: history || [],
+      chatId: chatId,
+      userId: userId,
+    };
+
+    console.log('Step 14.1: Request body to chat function:', JSON.stringify(chatRequestBody, null, 2));
+    console.log('Step 14.2: Messages structure:');
+    chatRequestBody.messages.forEach((msg: any, idx: number) => {
+      console.log(`  Message ${idx + 1}:`, {
+        role: msg.role,
+        contentLength: msg.content?.length || 0,
+        hasImageUrl: !!msg.image_url,
+        imageUrlPreview: msg.image_url ? msg.image_url.substring(0, 80) + '...' : null
+      });
+    });
+
     const chatResponse = await fetch(`${SUPABASE_URL}/functions/v1/chat`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
       },
-      body: JSON.stringify({
-        messages: history || [],
-        chatId: chatId,
-        userId: userId,
-      }),
+      body: JSON.stringify(chatRequestBody),
     });
 
     // Stop typing

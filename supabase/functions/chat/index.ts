@@ -299,7 +299,14 @@ async function processAIRequest(userId: string, messages: any[], systemPrompt?: 
     "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
   };
 
+  console.log('=== processAIRequest started ===');
+  console.log('userId:', userId);
+  console.log('chatId:', chatId);
+  console.log('messages count:', messages?.length);
+  console.log('messages received:', JSON.stringify(messages, null, 2));
+
   if (!Array.isArray(messages)) {
+    console.error('Messages is not an array:', typeof messages);
     return new Response(JSON.stringify({ error: "Некорректный формат сообщений" }), {
       status: 400,
       headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -309,6 +316,8 @@ async function processAIRequest(userId: string, messages: any[], systemPrompt?: 
   // Validate only if there are messages
   if (messages.length > 0) {
     const lastMessage = messages[messages.length - 1];
+    console.log('Last message validation:', JSON.stringify(lastMessage, null, 2));
+
     if (!lastMessage) {
       console.error('Last message is null or undefined');
       return new Response(JSON.stringify({ error: "Последнее сообщение отсутствует" }), {
@@ -316,8 +325,12 @@ async function processAIRequest(userId: string, messages: any[], systemPrompt?: 
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
+
+    console.log('Last message content type:', typeof lastMessage.content);
+    console.log('Last message content value:', lastMessage.content);
+
     if (!lastMessage.content || (typeof lastMessage.content === 'string' && lastMessage.content.trim() === '')) {
-      console.error('Last message has empty content:', lastMessage);
+      console.error('❌ Last message has empty content:', JSON.stringify(lastMessage, null, 2));
       return new Response(JSON.stringify({ error: "Содержимое последнего сообщения пустое" }), {
         status: 400,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -337,37 +350,50 @@ async function processAIRequest(userId: string, messages: any[], systemPrompt?: 
   }
 
   // Transform messages to support multimodal (text + images)
+  console.log('Starting message transformation...');
   const transformedMessages = await Promise.all(
-    messages.map(async (msg: any) => {
+    messages.map(async (msg: any, index: number) => {
+      console.log(`Transforming message ${index + 1}/${messages.length}:`, { role: msg.role, hasImage: !!msg.image_url });
+
       // If message has an image, fetch it and convert to base64
       if (msg.image_url) {
         try {
+          console.log(`Message ${index + 1} has image URL:`, msg.image_url.substring(0, 100) + '...');
+
           // SECURITY: Validate image URL to prevent SSRF attacks
           if (!isValidImageUrl(msg.image_url)) {
             console.error('[SECURITY] Rejected invalid image URL:', msg.image_url);
             throw new Error('Invalid or unauthorized image URL. Only images uploaded through the app are allowed.');
           }
-          
+
+          console.log(`Fetching image for message ${index + 1}...`);
           const imageResponse = await fetch(msg.image_url);
           if (!imageResponse.ok) {
-            console.error("Failed to fetch image:", msg.image_url);
+            console.error("Failed to fetch image:", msg.image_url, 'Status:', imageResponse.status);
             // Skip image if fetch fails
             return {
               role: msg.role,
               content: msg.content,
             };
           }
-          
+
+          console.log(`Image fetched successfully for message ${index + 1}, converting to base64...`);
           const imageBuffer = await imageResponse.arrayBuffer();
+          console.log(`Image buffer size: ${imageBuffer.byteLength} bytes`);
+
           const base64Image = btoa(
             new Uint8Array(imageBuffer).reduce((data, byte) => data + String.fromCharCode(byte), "")
           );
-          
+
+          console.log(`Base64 conversion complete, length: ${base64Image.length}`);
+
           // Determine image type from URL or content-type
           const contentType = imageResponse.headers.get("content-type") || "image/jpeg";
           const imageType = contentType.split("/")[1] || "jpeg";
-          
-          return {
+
+          console.log(`Image ${index + 1} content type: ${contentType}`);
+
+          const multimodalMessage = {
             role: msg.role,
             content: [
               {
@@ -382,8 +408,11 @@ async function processAIRequest(userId: string, messages: any[], systemPrompt?: 
               },
             ],
           };
+
+          console.log(`Message ${index + 1} transformed to multimodal format`);
+          return multimodalMessage;
         } catch (error) {
-          console.error("Error processing image:", error);
+          console.error(`Error processing image for message ${index + 1}:`, error);
           // Skip image if processing fails
           return {
             role: msg.role,
@@ -392,12 +421,20 @@ async function processAIRequest(userId: string, messages: any[], systemPrompt?: 
         }
       }
       // Otherwise, keep as simple text message
+      console.log(`Message ${index + 1} kept as text-only`);
       return {
         role: msg.role,
         content: msg.content,
       };
     })
   );
+
+  console.log('Message transformation complete. Transformed messages count:', transformedMessages.length);
+  console.log('Transformed messages structure:', JSON.stringify(transformedMessages.map(m => ({
+    role: m.role,
+    contentType: Array.isArray(m.content) ? 'multimodal' : 'text',
+    contentLength: Array.isArray(m.content) ? m.content.length : (typeof m.content === 'string' ? m.content.length : 'unknown')
+  })), null, 2));
 
   const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
 
@@ -410,36 +447,66 @@ async function processAIRequest(userId: string, messages: any[], systemPrompt?: 
 
   // Use provided systemPrompt if available, otherwise use default
   let effectiveSystemPrompt = systemPrompt || SYSTEM_PROMPT;
-  
+
   // Add task context to system prompt if provided
   if (taskContext) {
     effectiveSystemPrompt = `${effectiveSystemPrompt}\n\n📋 КОНТЕКСТ ЗАДАЧИ:\n${taskContext}\n\nИспользуй ИМЕННО эту задачу в своих ответах. НЕ придумывай другие задачи!`;
   }
 
+  const requestBody = {
+    model: "google/gemini-2.5-flash",
+    messages: [
+      {
+        role: "system",
+        content: effectiveSystemPrompt,
+        // Помечаем системный промпт как кэшируемый (если gateway поддерживает)
+        cache_control: { type: "ephemeral" }
+      },
+      ...transformedMessages,
+    ],
+    stream: true,
+    // Дополнительные параметры для оптимизации кэширования
+    metadata: {
+      enable_prompt_caching: true
+    }
+  };
+
+  console.log('=== Request to Gemini API ===');
+  console.log('Model:', requestBody.model);
+  console.log('System prompt length:', effectiveSystemPrompt.length);
+  console.log('User messages count:', transformedMessages.length);
+  console.log('Full request body (excluding base64 images):');
+
+  const sanitizedBody = {
+    ...requestBody,
+    messages: requestBody.messages.map(m => {
+      if (Array.isArray(m.content)) {
+        return {
+          ...m,
+          content: m.content.map(item => {
+            if (item.type === 'image_url') {
+              return { type: 'image_url', image_url: { url: '[BASE64_IMAGE_DATA]' } };
+            }
+            return item;
+          })
+        };
+      }
+      return m;
+    })
+  };
+  console.log(JSON.stringify(sanitizedBody, null, 2));
+
+  console.log('Sending request to Gemini...');
   const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
     method: "POST",
     headers: {
       Authorization: `Bearer ${LOVABLE_API_KEY}`,
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({
-      model: "google/gemini-2.5-flash",
-      messages: [
-        {
-          role: "system",
-          content: effectiveSystemPrompt,
-          // Помечаем системный промпт как кэшируемый (если gateway поддерживает)
-          cache_control: { type: "ephemeral" }
-        },
-        ...transformedMessages,
-      ],
-      stream: true,
-      // Дополнительные параметры для оптимизации кэширования
-      metadata: {
-        enable_prompt_caching: true
-      }
-    }),
+    body: JSON.stringify(requestBody),
   });
+
+  console.log('Gemini API response status:', response.status, response.statusText);
 
   if (!response.ok) {
     const errorText = await response.text();
