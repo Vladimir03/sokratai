@@ -24,31 +24,45 @@ const ALLOWED_IMAGE_DOMAINS = [
  */
 function isValidImageUrl(url: string): boolean {
   try {
+    console.log('[SECURITY] Validating image URL:', url.substring(0, 100) + '...');
+
     const parsed = new URL(url);
-    
+
     // Only HTTPS allowed
     if (parsed.protocol !== "https:") {
       console.warn("[SECURITY] Blocked non-HTTPS URL:", url);
       return false;
     }
-    
+
     // Block private IPs and localhost to prevent internal network access
     const blockedPatterns = [
       "127.", "10.", "172.16.", "192.168.", "169.254.",
       "localhost", "[::1]", "0.0.0.0", "::1",
     ];
-    
+
     const hostname = parsed.hostname.toLowerCase();
     if (blockedPatterns.some((pattern) => hostname.includes(pattern))) {
       console.warn("[SECURITY] Blocked private/internal IP:", hostname);
       return false;
     }
-    
+
     // Only allow whitelisted Supabase storage domains
-    const isAllowed = ALLOWED_IMAGE_DOMAINS.some((domain) => url.startsWith(domain));
+    console.log('[SECURITY] Checking against allowed domains:', ALLOWED_IMAGE_DOMAINS);
+    console.log('[SECURITY] URL to check:', url.substring(0, 150));
+
+    const isAllowed = ALLOWED_IMAGE_DOMAINS.some((domain) => {
+      const matches = url.startsWith(domain);
+      console.log(`[SECURITY] Checking domain "${domain}": ${matches}`);
+      return matches;
+    });
+
     if (!isAllowed) {
       console.warn("[SECURITY] Blocked unauthorized domain:", hostname);
+      console.warn("[SECURITY] Full URL:", url);
+    } else {
+      console.log('[SECURITY] ✅ URL validation passed');
     }
+
     return isAllowed;
   } catch (error) {
     console.error("[SECURITY] Invalid URL format:", url, error);
@@ -328,14 +342,21 @@ async function processAIRequest(userId: string, messages: any[], systemPrompt?: 
 
     console.log('Last message content type:', typeof lastMessage.content);
     console.log('Last message content value:', lastMessage.content);
+    console.log('Last message has image_url:', !!lastMessage.image_url);
 
-    if (!lastMessage.content || (typeof lastMessage.content === 'string' && lastMessage.content.trim() === '')) {
-      console.error('❌ Last message has empty content:', JSON.stringify(lastMessage, null, 2));
-      return new Response(JSON.stringify({ error: "Содержимое последнего сообщения пустое" }), {
+    // Check if message has content OR image
+    const hasContent = lastMessage.content && (typeof lastMessage.content === 'string' && lastMessage.content.trim() !== '');
+    const hasImage = !!lastMessage.image_url;
+
+    if (!hasContent && !hasImage) {
+      console.error('❌ Last message has neither content nor image:', JSON.stringify(lastMessage, null, 2));
+      return new Response(JSON.stringify({ error: "Сообщение должно содержать текст или изображение" }), {
         status: 400,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
+
+    console.log('✅ Message validation passed:', { hasContent, hasImage });
 
     // Only validate length for user text messages (string content), assistant responses can be longer
     // Content can also be an object with image_url which will be transformed to multimodal format
