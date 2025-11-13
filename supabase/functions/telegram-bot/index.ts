@@ -925,8 +925,10 @@ async function handleTextMessage(telegramUserId: number, userId: string, text: s
     .order('created_at', { ascending: false })
     .limit(20);
 
-  // Filter out messages with empty content and reverse to chronological order
-  const history = (historyReversed?.reverse() || []).filter(msg => msg.content && msg.content.trim() !== '');
+  // Filter out messages with neither content nor image, then reverse to chronological order
+  const history = (historyReversed?.reverse() || []).filter(msg =>
+    (msg.content && msg.content.trim() !== '') || msg.image_url
+  );
 
     // Start typing loop
     const stopTyping = { stop: false };
@@ -1122,8 +1124,10 @@ async function handlePhotoMessage(telegramUserId: number, userId: string, photo:
     console.error('Failed to get chat history:', historyError);
   }
 
-  // Filter out messages with empty content and reverse to chronological order
-  const history = (historyReversed?.reverse() || []).filter(msg => msg.content && msg.content.trim() !== '');
+  // Filter out messages with neither content nor image, then reverse to chronological order
+  const history = (historyReversed?.reverse() || []).filter(msg =>
+    (msg.content && msg.content.trim() !== '') || msg.image_url
+  );
   console.log('Step 13: Chat history loaded, messages:', history.length);
   console.log('Step 13.1: Messages to send to AI:', JSON.stringify(history, null, 2));
 
