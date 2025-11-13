@@ -924,25 +924,32 @@ async function handleTextMessage(telegramUserId: number, userId: string, text: s
     .eq('chat_id', chatId)
     .order('created_at', { ascending: false })
     .limit(20);
-  
-  const history = historyReversed?.reverse() || [];
+
+  // Filter out messages with neither content nor image, then reverse to chronological order
+  const history = (historyReversed?.reverse() || []).filter(msg =>
+    (msg.content && msg.content.trim() !== '') || msg.image_url
+  );
 
     // Start typing loop
     const stopTyping = { stop: false };
     const typingPromise = sendTypingLoop(telegramUserId, stopTyping);
 
     // Call AI chat function with service role authorization
+    const chatRequestBody = {
+      messages: history || [],
+      chatId: chatId,
+      userId: userId,
+    };
+
+    console.log('Request body to chat function:', JSON.stringify(chatRequestBody, null, 2));
+
     const chatResponse = await fetch(`${SUPABASE_URL}/functions/v1/chat`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
       },
-      body: JSON.stringify({
-        messages: history || [],
-        chatId: chatId,
-        userId: userId,
-      }),
+      body: JSON.stringify(chatRequestBody),
     });
 
     // Stop typing
@@ -1117,8 +1124,12 @@ async function handlePhotoMessage(telegramUserId: number, userId: string, photo:
     console.error('Failed to get chat history:', historyError);
   }
 
-  const history = historyReversed?.reverse() || [];
+  // Filter out messages with neither content nor image, then reverse to chronological order
+  const history = (historyReversed?.reverse() || []).filter(msg =>
+    (msg.content && msg.content.trim() !== '') || msg.image_url
+  );
   console.log('Step 13: Chat history loaded, messages:', history.length);
+  console.log('Step 13.1: Messages to send to AI:', JSON.stringify(history, null, 2));
 
     // Start typing loop
     const stopTyping = { stop: false };
@@ -1126,17 +1137,31 @@ async function handlePhotoMessage(telegramUserId: number, userId: string, photo:
 
     // Call AI chat function with service role authorization
     console.log('Step 14: Calling AI chat function...');
+
+    const chatRequestBody = {
+      messages: history || [],
+      chatId: chatId,
+      userId: userId,
+    };
+
+    console.log('Step 14.1: Request body to chat function:', JSON.stringify(chatRequestBody, null, 2));
+    console.log('Step 14.2: Messages structure:');
+    chatRequestBody.messages.forEach((msg: any, idx: number) => {
+      console.log(`  Message ${idx + 1}:`, {
+        role: msg.role,
+        contentLength: msg.content?.length || 0,
+        hasImageUrl: !!msg.image_url,
+        imageUrlPreview: msg.image_url ? msg.image_url.substring(0, 80) + '...' : null
+      });
+    });
+
     const chatResponse = await fetch(`${SUPABASE_URL}/functions/v1/chat`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
       },
-      body: JSON.stringify({
-        messages: history || [],
-        chatId: chatId,
-        userId: userId,
-      }),
+      body: JSON.stringify(chatRequestBody),
     });
 
     // Stop typing
