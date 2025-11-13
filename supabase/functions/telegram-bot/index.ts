@@ -96,6 +96,14 @@ async function sendTelegramMessage(
   text: string,
   extraParams?: Record<string, any>
 ) {
+  // Debug logging to see what text is being sent
+  console.log('=== SENDING MESSAGE ===');
+  console.log('Text length:', text.length);
+  console.log('Text preview (first 200 chars):', text.substring(0, 200));
+  console.log('Text preview (chars 500-600):', text.substring(500, 600));
+  console.log('Full text:', text);
+  console.log('======================');
+
   const response = await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -110,6 +118,7 @@ async function sendTelegramMessage(
   if (!response.ok) {
     const error = await response.text();
     console.error('Telegram API error:', error);
+    console.error('Failed message text:', text);
     throw new Error('Failed to send message');
   }
 
@@ -122,6 +131,15 @@ async function editTelegramMessage(
   text: string,
   extraParams?: Record<string, any>
 ) {
+  // Debug logging to see what text is being edited
+  console.log('=== EDITING MESSAGE ===');
+  console.log('Message ID:', messageId);
+  console.log('Text length:', text.length);
+  console.log('Text preview (first 200 chars):', text.substring(0, 200));
+  console.log('Text preview (chars 500-600):', text.substring(500, 600));
+  console.log('Full text:', text);
+  console.log('======================');
+
   const response = await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/editMessageText`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
