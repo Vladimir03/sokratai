@@ -204,23 +204,6 @@ async function getOnboardingSession(telegramUserId: number) {
   return data;
 }
 
-async function getUserIdFromTelegram(telegramUserId: number): Promise<string | null> {
-  // Try to get user_id from telegram_sessions first
-  const session = await getOnboardingSession(telegramUserId);
-  if (session?.user_id) {
-    return session.user_id;
-  }
-
-  // If not in session, get from profiles table
-  const { data: profile } = await supabase
-    .from('profiles')
-    .select('id')
-    .eq('telegram_user_id', telegramUserId)
-    .maybeSingle();
-
-  return profile?.id || null;
-}
-
 async function updateOnboardingState(
   telegramUserId: number,
   userId: string,
@@ -687,35 +670,25 @@ function convertLatexToUnicode(text: string): string {
 }
 
 /**
- * Escapes HTML special characters to prevent parsing errors
- */
-function escapeHtml(text: string): string {
-  return text
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;');
-}
-
-/**
  * Converts markdown to Telegram HTML format
  */
 function convertMarkdownToTelegramHTML(text: string): string {
   let result = text;
-
+  
   // Bold: **text** or __text__ → <b>text</b>
   result = result.replace(/\*\*(.+?)\*\*/g, '<b>$1</b>');
   result = result.replace(/__(.+?)__/g, '<b>$1</b>');
-
+  
   // Italic: *text* or _text_ → <i>text</i> (but avoid conflicts with bold)
   result = result.replace(/(?<!\*)\*([^*]+?)\*(?!\*)/g, '<i>$1</i>');
   result = result.replace(/(?<!_)_([^_]+?)_(?!_)/g, '<i>$1</i>');
-
+  
   // Code: `text` → <code>text</code>
   result = result.replace(/`(.+?)`/g, '<code>$1</code>');
-
+  
   // Strikethrough: ~~text~~ → <s>text</s>
   result = result.replace(/~~(.+?)~~/g, '<s>$1</s>');
-
+  
   return result;
 }
 
@@ -730,10 +703,7 @@ function formatForTelegram(text: string): string {
   // Step 2: Convert LaTeX commands to Unicode symbols
   result = convertLatexToUnicode(result);
 
-  // Step 3: Escape HTML special characters (< > &) to prevent parsing errors
-  result = escapeHtml(result);
-
-  // Step 4: Convert markdown to Telegram HTML
+  // Step 3: Convert markdown to Telegram HTML
   result = convertMarkdownToTelegramHTML(result);
 
   return result;
@@ -844,155 +814,42 @@ function createQuickActionsKeyboard() {
 }
 
 /**
- * Extracts LaTeX formulas from text
- * Returns array of formulas without delimiters
- */
-function extractLatexFormulas(text: string): string[] {
-  if (!text || typeof text !== 'string') {
-    return [];
-  }
-
-  const formulas: string[] = [];
-
-  try {
-    // Extract display math $$...$$
-    const displayMatches = text.matchAll(/\$\$(.+?)\$\$/gs);
-    for (const match of displayMatches) {
-      formulas.push(match[1].trim());
-    }
-
-    // Extract inline math $...$ (avoid already extracted display math)
-    let tempText = text.replace(/\$\$(.+?)\$\$/gs, ''); // Remove display math first
-    const inlineMatches = tempText.matchAll(/\$([^$\n]+?)\$/g);
-    for (const match of inlineMatches) {
-      const formula = match[1].trim();
-      // Only add if it's substantial (not just a variable)
-      if (formula.length > 2 || /[\\{}^_]/.test(formula)) {
-        formulas.push(formula);
-      }
-    }
-  } catch (error) {
-    console.error('Error extracting LaTeX formulas:', error);
-  }
-
-  return formulas;
-}
-
-/**
- * Extracts final answer from AI response
- * Looks for common patterns like "Ответ:", "Итого:", etc.
- */
-function extractFinalAnswer(aiResponse: string): string | null {
-  if (!aiResponse || typeof aiResponse !== 'string') {
-    return null;
-  }
-
-  try {
-    // Common answer patterns in Russian
-    const answerPatterns = [
-      /(?:Ответ|Итоговый ответ|Финальный ответ|Результат):\s*(.+?)(?:\n\n|\n$|$)/is,
-      /(?:Таким образом|Следовательно|Получаем),?\s*(.+?)(?:\n\n|\n$|$)/is,
-    ];
-
-    for (const pattern of answerPatterns) {
-      const match = aiResponse.match(pattern);
-      if (match && match[1]) {
-        const answer = match[1].trim();
-        // Extract LaTeX from answer if present
-        const formulas = extractLatexFormulas(answer);
-        return formulas.length > 0 ? formulas[0] : answer;
-      }
-    }
-
-    // Try to find the last substantial formula as the answer
-    const allFormulas = extractLatexFormulas(aiResponse);
-    if (allFormulas.length > 0) {
-      // Return the last formula (usually the final answer)
-      return allFormulas[allFormulas.length - 1];
-    }
-  } catch (error) {
-    console.error('Error extracting final answer:', error);
-  }
-
-  return null;
-}
-
-/**
  * Parses AI response into structured solution steps
  * Attempts to extract numbered steps, formulas, and final answer
  */
 function parseSolutionSteps(aiResponse: string): any[] {
-  if (!aiResponse || typeof aiResponse !== 'string') {
-    return [{
-      number: 1,
-      title: "Решение",
-      content: "Ответ недоступен",
-      formula: null
-    }];
-  }
-
   const steps: any[] = [];
 
-  try {
-    // Try to find numbered steps (1., 2., etc. or 1), 2), etc. or **1.**, etc.)
-    const stepRegex = /(?:^|\n)(?:\*\*)?(\d+)[.):\s](?:\*\*)?\s*([^\n]+)/g;
-    let match;
-    let stepNumber = 1;
+  // Try to find numbered steps (1., 2., etc. or 1), 2), etc. or **1.**, etc.)
+  const stepRegex = /(?:^|\n)(?:\*\*)?(\d+)[.):\s](?:\*\*)?\s*([^\n]+)/g;
+  let match;
+  let stepNumber = 1;
 
-    while ((match = stepRegex.exec(aiResponse)) !== null) {
-      const title = match[2].trim();
+  while ((match = stepRegex.exec(aiResponse)) !== null) {
+    const title = match[2].trim();
 
-      // Try to extract content after this step title
-      const startPos = match.index + match[0].length;
-      const nextMatch = stepRegex.exec(aiResponse);
-      const endPos = nextMatch ? nextMatch.index : aiResponse.length;
-      stepRegex.lastIndex = nextMatch ? nextMatch.index : aiResponse.length;
+    // Try to extract content after this step title
+    const startPos = match.index + match[0].length;
+    const nextMatch = stepRegex.exec(aiResponse);
+    const endPos = nextMatch ? nextMatch.index : aiResponse.length;
+    stepRegex.lastIndex = nextMatch ? nextMatch.index : aiResponse.length;
 
-      const content = aiResponse.substring(startPos, endPos).trim();
+    const content = aiResponse.substring(startPos, endPos).trim();
 
-      // Extract LaTeX formulas from this step's content
-      const formulas = extractLatexFormulas(content);
+    steps.push({
+      number: stepNumber++,
+      title: title,
+      content: content.substring(0, 500), // Limit content length
+      formula: null // We could extract LaTeX formulas here in the future
+    });
+  }
 
-      // Remove formulas from content text to avoid duplication in Mini App
-      let cleanContent = content;
-      formulas.forEach(formula => {
-        cleanContent = cleanContent.replace(`$$${formula}$$`, '');
-        cleanContent = cleanContent.replace(`$${formula}$`, '');
-      });
-      cleanContent = cleanContent.trim();
-
-      steps.push({
-        number: stepNumber++,
-        title: title,
-        content: cleanContent.substring(0, 500), // Limit content length
-        formula: formulas.length > 0 ? formulas[0] : null // Use first formula for display
-      });
-    }
-
-    // If no steps found, create a single step with the full response
-    if (steps.length === 0) {
-      const formulas = extractLatexFormulas(aiResponse);
-      let cleanContent = aiResponse;
-
-      // Remove formulas from content to avoid duplication
-      formulas.forEach(formula => {
-        cleanContent = cleanContent.replace(`$$${formula}$$`, '');
-        cleanContent = cleanContent.replace(`$${formula}$`, '');
-      });
-
-      steps.push({
-        number: 1,
-        title: "Решение",
-        content: cleanContent.trim().substring(0, 1000), // Limit to first 1000 chars
-        formula: formulas.length > 0 ? formulas[0] : null
-      });
-    }
-  } catch (error) {
-    console.error('Error parsing solution steps:', error);
+  // If no steps found, create a single step with the full response
+  if (steps.length === 0) {
     steps.push({
       number: 1,
       title: "Решение",
-      content: aiResponse?.substring(0, 1000) || "Ответ недоступен",
+      content: aiResponse.substring(0, 1000), // Limit to first 1000 chars
       formula: null
     });
   }
@@ -1011,27 +868,12 @@ async function saveSolution(
   aiResponse: string
 ): Promise<string | null> {
   try {
-    console.log('Saving solution:', {
-      telegramChatId,
-      telegramUserId,
-      userId,
-      problemTextLength: problemText?.length,
-      aiResponseLength: aiResponse?.length
-    });
-
     const solutionSteps = parseSolutionSteps(aiResponse);
-    const finalAnswer = extractFinalAnswer(aiResponse);
-
-    console.log('Parsed solution:', {
-      stepsCount: solutionSteps.length,
-      hasFormulas: solutionSteps.filter(s => s.formula).length,
-      finalAnswer: finalAnswer?.substring(0, 50)
-    });
 
     const solutionData = {
       problem: problemText,
       solution_steps: solutionSteps,
-      final_answer: finalAnswer,
+      final_answer: null, // Could extract this from AI response in future
       raw_response: aiResponse
     };
 
@@ -1048,28 +890,19 @@ async function saveSolution(
       .single();
 
     if (error) {
-      console.error('Failed to save solution:', {
-        error: error.message,
-        code: error.code,
-        details: error.details
-      });
+      console.error('Failed to save solution:', error);
       return null;
     }
 
-    console.log('Solution saved successfully:', solution?.id);
     return solution?.id || null;
   } catch (error) {
-    console.error('Error saving solution:', {
-      error: error instanceof Error ? error.message : error,
-      stack: error instanceof Error ? error.stack : undefined
-    });
+    console.error('Error saving solution:', error);
     return null;
   }
 }
 
 async function handleTextMessage(telegramUserId: number, userId: string, text: string) {
-  console.log('=== handleTextMessage v2.0 WITH MINI APP FALLBACK ===');
-  console.log('handleTextMessage:', { telegramUserId, userId, text });
+  console.log('Handling text message:', { telegramUserId, text });
 
   try {
     // Get or create chat
@@ -1084,18 +917,18 @@ async function handleTextMessage(telegramUserId: number, userId: string, text: s
       input_method: 'text',
     });
 
-    // Get chat history - limit to last 20 messages (10 pairs)
-    const { data: historyReversed } = await supabase
-      .from('chat_messages')
-      .select('role, content, image_url')
-      .eq('chat_id', chatId)
-      .order('created_at', { ascending: false })
-      .limit(20);
+  // Get chat history - limit to last 20 messages (10 pairs)
+  const { data: historyReversed } = await supabase
+    .from('chat_messages')
+    .select('role, content, image_url')
+    .eq('chat_id', chatId)
+    .order('created_at', { ascending: false })
+    .limit(20);
 
-    // Filter out messages with neither content nor image, then reverse to chronological order
-    const history = (historyReversed?.reverse() || []).filter(msg =>
-      (msg.content && msg.content.trim() !== '') || msg.image_url
-    );
+  // Filter out messages with neither content nor image, then reverse to chronological order
+  const history = (historyReversed?.reverse() || []).filter(msg =>
+    (msg.content && msg.content.trim() !== '') || msg.image_url
+  );
 
     // Start typing loop
     const stopTyping = { stop: false };
@@ -1126,7 +959,7 @@ async function handleTextMessage(telegramUserId: number, userId: string, text: s
     // Handle rate limit error
     if (chatResponse.status === 429) {
       await sendTelegramMessage(
-        telegramUserId,
+        telegramUserId, 
         '⏳ Слишком много запросов. Подожди немного и попробуй снова.'
       );
       return;
@@ -1135,38 +968,14 @@ async function handleTextMessage(telegramUserId: number, userId: string, text: s
     // Handle payment required error
     if (chatResponse.status === 402) {
       await sendTelegramMessage(
-        telegramUserId,
+        telegramUserId, 
         '💳 Закончились средства на балансе. Пожалуйста, пополни баланс в личном кабинете.'
       );
       return;
     }
 
     if (!chatResponse.ok) {
-      const errorText = await chatResponse.text();
-      console.error('AI response error:', {
-        status: chatResponse.status,
-        statusText: chatResponse.statusText,
-        error: errorText
-      });
-
-      // Check if it's an AI gateway 503 error (service temporarily unavailable)
-      if (chatResponse.status === 500 && errorText.includes('AI gateway error: 503')) {
-        await sendTelegramMessage(
-          telegramUserId,
-          '⚠️ AI сервис временно недоступен. Попробуй через минуту.'
-        );
-        return;
-      }
-
-      // Check if it's a 504 Gateway Timeout
-      if (chatResponse.status === 504) {
-        await sendTelegramMessage(
-          telegramUserId,
-          '⏱️ AI не успел ответить вовремя. Попробуй упростить вопрос или повтори позже.'
-        );
-        return;
-      }
-
+      console.error('AI response error:', chatResponse.status, await chatResponse.text());
       await sendTelegramMessage(telegramUserId, '❌ Произошла ошибка. Попробуй ещё раз.');
       return;
     }
@@ -1182,7 +991,6 @@ async function handleTextMessage(telegramUserId: number, userId: string, text: s
       text,
       aiContent
     );
-    console.log('Solution saved with ID:', solutionId);
 
     // Format and save AI response
     const formattedContent = formatForTelegram(aiContent);
@@ -1196,52 +1004,31 @@ async function handleTextMessage(telegramUserId: number, userId: string, text: s
 
     // Split and send response if too long
     const messageParts = splitLongMessage(formattedContent);
-
-    try {
-      for (let i = 0; i < messageParts.length; i++) {
-        if (i > 0) {
-          // Small delay between parts
-          await new Promise(resolve => setTimeout(resolve, 1000));
-        }
-
-        // Add inline keyboard only to the last message part
-        const isLastPart = i === messageParts.length - 1;
-        await sendTelegramMessage(
-          telegramUserId,
-          messageParts[i],
-          isLastPart ? { reply_markup: createQuickActionsKeyboard() } : undefined
-        );
+    for (let i = 0; i < messageParts.length; i++) {
+      if (i > 0) {
+        // Small delay between parts
+        await new Promise(resolve => setTimeout(resolve, 1000));
       }
 
-      // Send Mini App button if solution was saved
-      if (solutionId) {
-        await sendTelegramMessage(
-          telegramUserId,
-          '📱 Открой полное решение с формулами:',
-          { reply_markup: generateMiniAppButton(solutionId) }
-        );
-      }
-    } catch (sendError) {
-      // If message sending fails (e.g., HTML parsing error), send fallback with Mini App
-      console.log('=== MINI APP FALLBACK ACTIVATED ===');
-      console.log('Error sending formatted message, falling back to Mini App');
-      console.error('Send error:', sendError);
+      // Add inline keyboard only to the last message part
+      const isLastPart = i === messageParts.length - 1;
+      await sendTelegramMessage(
+        telegramUserId,
+        messageParts[i],
+        isLastPart ? { reply_markup: createQuickActionsKeyboard() } : undefined
+      );
+    }
 
-      if (solutionId) {
-        console.log('Sending Mini App fallback with solution ID:', solutionId);
-        await sendTelegramMessage(
-          telegramUserId,
-          '✅ Решение готово!\n\n📱 Открой полное решение с формулами в приложении:',
-          { reply_markup: generateMiniAppButton(solutionId) }
-        );
-        console.log('Mini App fallback sent successfully');
-      } else {
-        console.log('No solution ID, re-throwing error');
-        throw sendError; // Re-throw if we don't have a solution to show
-      }
+    // Send Mini App button if solution was saved
+    if (solutionId) {
+      await sendTelegramMessage(
+        telegramUserId,
+        '📱 Открой полное решение с формулами:',
+        { reply_markup: generateMiniAppButton(solutionId) }
+      );
     }
   } catch (error) {
-    console.error('Error in handleTextMessage:', error);
+    console.error('Error handling text message:', error);
     await sendTelegramMessage(telegramUserId, '❌ Произошла ошибка. Попробуй ещё раз.');
   }
 }
@@ -1467,13 +1254,13 @@ async function handlePhotoMessage(telegramUserId: number, userId: string, photo:
 
     console.log('Photo message handled successfully!');
   } catch (error) {
-    console.error('Error handling photo message:', {
-      error: error instanceof Error ? error.message : error,
-      stack: error instanceof Error ? error.stack : undefined,
+    console.error('❌ Error handling photo message:', error);
+    console.error('Error stack:', error instanceof Error ? error.stack : 'No stack trace');
+    const errorMsg = error instanceof Error ? error.message : String(error);
+    await sendTelegramMessage(
       telegramUserId,
-      photoId: photo?.file_id
-    });
-    await sendTelegramMessage(telegramUserId, '❌ Произошла ошибка при обработке фото. Попробуй ещё раз.');
+      `❌ Ошибка при обработке фото: ${errorMsg.substring(0, 200)}`
+    );
   }
 }
 
@@ -1496,43 +1283,36 @@ async function handleCallbackQuery(callbackQuery: any) {
 
   // Handle quick action buttons
   if (data.startsWith('quick_action:')) {
-    console.log('Handling quick action:', data);
-
-    try {
-      const userId = await getUserIdFromTelegram(telegramUserId);
-
-      if (!userId) {
-        console.error('User not found for telegram_user_id:', telegramUserId);
-        await sendTelegramMessage(telegramUserId, '❌ Пользователь не найден. Пожалуйста, нажми /start для регистрации.');
-        return;
-      }
-
-      // Determine prompt text based on button
-      let promptText = '';
-      switch (data) {
-        case 'quick_action:plan':
-          promptText = 'Составь план решения этой задачи';
-          break;
-        case 'quick_action:explain':
-          promptText = 'Объясни этот момент подробнее';
-          break;
-        case 'quick_action:similar':
-          promptText = 'Дай мне похожую задачу для практики';
-          break;
-        default:
-          console.log('Unknown quick action:', data);
-          return;
-      }
-
-      // Show user what they "sent"
-      await sendTelegramMessage(telegramUserId, `⚡ ${promptText}`);
-
-      // Process as text message with button input method
-      await handleTextMessage(telegramUserId, userId, promptText);
-    } catch (error) {
-      console.error('Error handling quick action:', error);
-      await sendTelegramMessage(telegramUserId, '❌ Произошла ошибка. Попробуй ещё раз.');
+    const session = await getOnboardingSession(telegramUserId);
+    
+    if (!session?.user_id) {
+      await sendTelegramMessage(telegramUserId, '❌ Сессия не найдена. Нажми /start');
+      return;
     }
+    
+    const userId = session.user_id;
+    
+    // Determine prompt text based on button
+    let promptText = '';
+    switch (data) {
+      case 'quick_action:plan':
+        promptText = 'Составь план решения этой задачи';
+        break;
+      case 'quick_action:explain':
+        promptText = 'Объясни этот момент подробнее';
+        break;
+      case 'quick_action:similar':
+        promptText = 'Дай мне похожую задачу для практики';
+        break;
+      default:
+        return;
+    }
+    
+    // Show user what they "sent"
+    await sendTelegramMessage(telegramUserId, `⚡ ${promptText}`);
+    
+    // Process as text message with button input method
+    await handleTextMessage(telegramUserId, userId, promptText);
     return;
   }
 
@@ -1592,29 +1372,12 @@ Deno.serve(async (req) => {
     // Handle text messages (after onboarding)
     if (update.message?.text && !update.message.text.startsWith('/')) {
       const telegramUserId = update.message.from.id;
-
-      // Get user_id reliably (from session or profiles table)
-      const userId = await getUserIdFromTelegram(telegramUserId);
-
-      if (!userId) {
-        console.log('User not found for text message, requesting /start');
-        await sendTelegramMessage(telegramUserId, '👋 Привет! Для начала работы нажми /start');
-        return new Response(JSON.stringify({ ok: true }), {
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        });
-      }
-
-      // Check if user completed onboarding
       const session = await getOnboardingSession(telegramUserId);
-      if (session && session.onboarding_state !== 'completed') {
-        console.log('User has not completed onboarding yet');
-        return new Response(JSON.stringify({ ok: true }), {
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        });
+
+      if (session && session.onboarding_state === 'completed') {
+        await handleTextMessage(telegramUserId, session.user_id, update.message.text);
       }
-
-      await handleTextMessage(telegramUserId, userId, update.message.text);
-
+      
       return new Response(JSON.stringify({ ok: true }), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
@@ -1623,30 +1386,13 @@ Deno.serve(async (req) => {
     // Handle photo messages (after onboarding)
     if (update.message?.photo) {
       const telegramUserId = update.message.from.id;
-
-      // Get user_id reliably (from session or profiles table)
-      const userId = await getUserIdFromTelegram(telegramUserId);
-
-      if (!userId) {
-        console.log('User not found for photo message, requesting /start');
-        await sendTelegramMessage(telegramUserId, '👋 Привет! Для начала работы нажми /start');
-        return new Response(JSON.stringify({ ok: true }), {
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        });
-      }
-
-      // Check if user completed onboarding
       const session = await getOnboardingSession(telegramUserId);
-      if (session && session.onboarding_state !== 'completed') {
-        console.log('User has not completed onboarding yet');
-        return new Response(JSON.stringify({ ok: true }), {
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        });
+
+      if (session && session.onboarding_state === 'completed') {
+        const photo = update.message.photo[update.message.photo.length - 1]; // Get largest photo
+        await handlePhotoMessage(telegramUserId, session.user_id, photo, update.message.caption);
       }
-
-      const photo = update.message.photo[update.message.photo.length - 1]; // Get largest photo
-      await handlePhotoMessage(telegramUserId, userId, photo, update.message.caption);
-
+      
       return new Response(JSON.stringify({ ok: true }), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
