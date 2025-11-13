@@ -83,21 +83,40 @@ serve(async (req) => {
 
     // Prepare message content
     let userContent: any;
-    
+
     if (conditionPhotoUrl) {
       // Multimodal: image + text
+      // First, fetch the image and convert to base64 for Gemini
+      console.log('Fetching image for homework analysis:', conditionPhotoUrl.substring(0, 100) + '...');
+
+      const imageResponse = await fetch(conditionPhotoUrl);
+      if (!imageResponse.ok) {
+        console.error("Failed to fetch image:", conditionPhotoUrl, 'Status:', imageResponse.status);
+        throw new Error(`Failed to fetch image: ${imageResponse.status}`);
+      }
+
+      console.log('Converting image to base64...');
+      const imageBuffer = await imageResponse.arrayBuffer();
+      const base64Image = btoa(
+        new Uint8Array(imageBuffer).reduce((data, byte) => data + String.fromCharCode(byte), "")
+      );
+
+      const contentType = imageResponse.headers.get("content-type") || "image/jpeg";
+      console.log('Image content type:', contentType, 'Base64 length:', base64Image.length);
+
+      // Use Gemini format for images (not OpenAI format)
       userContent = [
         {
           type: "text",
           text: `Предмет: ${subject || 'не указан'}\nТема: ${topic || 'не указана'}\n\nПроанализируй задачу на изображении.`
         },
         {
-          type: "image_url",
-          image_url: {
-            url: conditionPhotoUrl
-          }
+          type: "image",
+          image: `data:${contentType};base64,${base64Image}`
         }
       ];
+
+      console.log('Image prepared in Gemini-compatible format');
     } else {
       // Text only
       userContent = `Предмет: ${subject || 'не указан'}\nТема: ${topic || 'не указана'}\n\nУсловие задачи:\n${conditionText}`;
