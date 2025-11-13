@@ -13,9 +13,13 @@ const RATE_LIMIT_WINDOW_HOURS = 1;
 
 // SECURITY: Allowed domains for image fetching to prevent SSRF attacks
 // Updated to support signed URLs (now that bucket is private)
+const SUPABASE_URL = Deno.env.get("SUPABASE_URL");
+console.log('🔧 SUPABASE_URL from env:', SUPABASE_URL);
+
 const ALLOWED_IMAGE_DOMAINS = [
-  `${Deno.env.get("SUPABASE_URL")}/storage/v1/object/sign/chat-images/`,
+  `${SUPABASE_URL}/storage/v1/object/sign/chat-images/`,
 ];
+console.log('🔧 ALLOWED_IMAGE_DOMAINS:', ALLOWED_IMAGE_DOMAINS);
 
 /**
  * Validates image URL to prevent Server-Side Request Forgery (SSRF) attacks
@@ -459,6 +463,18 @@ async function processAIRequest(userId: string, messages: any[], systemPrompt?: 
     contentType: Array.isArray(m.content) ? 'multimodal' : 'text',
     contentLength: Array.isArray(m.content) ? m.content.length : (typeof m.content === 'string' ? m.content.length : 'unknown')
   })), null, 2));
+
+  // CRITICAL DEBUG: Log which messages have images
+  transformedMessages.forEach((msg, idx) => {
+    if (Array.isArray(msg.content)) {
+      const hasImage = msg.content.some(item => item.type === 'image');
+      console.log(`📸 Message ${idx + 1} has multimodal content with image: ${hasImage}`);
+      if (hasImage) {
+        const imageItem = msg.content.find(item => item.type === 'image');
+        console.log(`📸 Image data starts with: ${imageItem?.image?.substring(0, 50)}...`);
+      }
+    }
+  });
 
   const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
 
