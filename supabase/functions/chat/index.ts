@@ -483,16 +483,10 @@ async function processAIRequest(userId: string, messages: any[], systemPrompt?: 
       {
         role: "system",
         content: effectiveSystemPrompt,
-        // Помечаем системный промпт как кэшируемый (если gateway поддерживает)
-        cache_control: { type: "ephemeral" }
       },
       ...transformedMessages,
     ],
     stream: true,
-    // Дополнительные параметры для оптимизации кэширования
-    metadata: {
-      enable_prompt_caching: true
-    }
   };
 
   console.log('=== Request to Gemini API ===');
