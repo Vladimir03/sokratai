@@ -687,25 +687,35 @@ function convertLatexToUnicode(text: string): string {
 }
 
 /**
+ * Escapes HTML special characters to prevent parsing errors
+ */
+function escapeHtml(text: string): string {
+  return text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
+
+/**
  * Converts markdown to Telegram HTML format
  */
 function convertMarkdownToTelegramHTML(text: string): string {
   let result = text;
-  
+
   // Bold: **text** or __text__ → <b>text</b>
   result = result.replace(/\*\*(.+?)\*\*/g, '<b>$1</b>');
   result = result.replace(/__(.+?)__/g, '<b>$1</b>');
-  
+
   // Italic: *text* or _text_ → <i>text</i> (but avoid conflicts with bold)
   result = result.replace(/(?<!\*)\*([^*]+?)\*(?!\*)/g, '<i>$1</i>');
   result = result.replace(/(?<!_)_([^_]+?)_(?!_)/g, '<i>$1</i>');
-  
+
   // Code: `text` → <code>text</code>
   result = result.replace(/`(.+?)`/g, '<code>$1</code>');
-  
+
   // Strikethrough: ~~text~~ → <s>text</s>
   result = result.replace(/~~(.+?)~~/g, '<s>$1</s>');
-  
+
   return result;
 }
 
@@ -720,7 +730,10 @@ function formatForTelegram(text: string): string {
   // Step 2: Convert LaTeX commands to Unicode symbols
   result = convertLatexToUnicode(result);
 
-  // Step 3: Convert markdown to Telegram HTML
+  // Step 3: Escape HTML special characters (< > &) to prevent parsing errors
+  result = escapeHtml(result);
+
+  // Step 4: Convert markdown to Telegram HTML
   result = convertMarkdownToTelegramHTML(result);
 
   return result;
