@@ -1,4 +1,5 @@
 import { lazy, Suspense } from "react";
+import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { telegramLinks } from "@/utils/telegramLinks";
 
@@ -148,14 +149,14 @@ const Index = () => {
             </p>
 
             {/* CTA Button */}
-            <a href={telegramLinks.headerTry} target="_blank" rel="noopener noreferrer">
+            <Link to="/chat">
               <Button
                 size="lg"
                 className="bg-accent hover:bg-accent/90 text-accent-foreground shadow-glow text-base md:text-lg px-8 py-6 rounded-2xl font-semibold transition-all hover:scale-105"
               >
                 🚀 Попробовать бесплатно
               </Button>
-            </a>
+            </Link>
           </div>
         </div>
 
