@@ -1535,12 +1535,29 @@ Deno.serve(async (req) => {
     // Handle text messages (after onboarding)
     if (update.message?.text && !update.message.text.startsWith('/')) {
       const telegramUserId = update.message.from.id;
-      const session = await getOnboardingSession(telegramUserId);
 
-      if (session && session.onboarding_state === 'completed') {
-        await handleTextMessage(telegramUserId, session.user_id, update.message.text);
+      // Get user_id reliably (from session or profiles table)
+      const userId = await getUserIdFromTelegram(telegramUserId);
+
+      if (!userId) {
+        console.log('User not found for text message, requesting /start');
+        await sendTelegramMessage(telegramUserId, '👋 Привет! Для начала работы нажми /start');
+        return new Response(JSON.stringify({ ok: true }), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
       }
-      
+
+      // Check if user completed onboarding
+      const session = await getOnboardingSession(telegramUserId);
+      if (session && session.onboarding_state !== 'completed') {
+        console.log('User has not completed onboarding yet');
+        return new Response(JSON.stringify({ ok: true }), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
+
+      await handleTextMessage(telegramUserId, userId, update.message.text);
+
       return new Response(JSON.stringify({ ok: true }), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
@@ -1549,13 +1566,30 @@ Deno.serve(async (req) => {
     // Handle photo messages (after onboarding)
     if (update.message?.photo) {
       const telegramUserId = update.message.from.id;
-      const session = await getOnboardingSession(telegramUserId);
 
-      if (session && session.onboarding_state === 'completed') {
-        const photo = update.message.photo[update.message.photo.length - 1]; // Get largest photo
-        await handlePhotoMessage(telegramUserId, session.user_id, photo, update.message.caption);
+      // Get user_id reliably (from session or profiles table)
+      const userId = await getUserIdFromTelegram(telegramUserId);
+
+      if (!userId) {
+        console.log('User not found for photo message, requesting /start');
+        await sendTelegramMessage(telegramUserId, '👋 Привет! Для начала работы нажми /start');
+        return new Response(JSON.stringify({ ok: true }), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
       }
-      
+
+      // Check if user completed onboarding
+      const session = await getOnboardingSession(telegramUserId);
+      if (session && session.onboarding_state !== 'completed') {
+        console.log('User has not completed onboarding yet');
+        return new Response(JSON.stringify({ ok: true }), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
+
+      const photo = update.message.photo[update.message.photo.length - 1]; // Get largest photo
+      await handlePhotoMessage(telegramUserId, userId, photo, update.message.caption);
+
       return new Response(JSON.stringify({ ok: true }), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
