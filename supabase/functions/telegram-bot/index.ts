@@ -1147,6 +1147,25 @@ async function handleTextMessage(telegramUserId: number, userId: string, text: s
         statusText: chatResponse.statusText,
         error: errorText
       });
+
+      // Check if it's an AI gateway 503 error (service temporarily unavailable)
+      if (chatResponse.status === 500 && errorText.includes('AI gateway error: 503')) {
+        await sendTelegramMessage(
+          telegramUserId,
+          '⚠️ AI сервис временно недоступен. Попробуй через минуту.'
+        );
+        return;
+      }
+
+      // Check if it's a 504 Gateway Timeout
+      if (chatResponse.status === 504) {
+        await sendTelegramMessage(
+          telegramUserId,
+          '⏱️ AI не успел ответить вовремя. Попробуй упростить вопрос или повтори позже.'
+        );
+        return;
+      }
+
       await sendTelegramMessage(telegramUserId, '❌ Произошла ошибка. Попробуй ещё раз.');
       return;
     }
