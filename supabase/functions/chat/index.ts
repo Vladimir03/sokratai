@@ -419,7 +419,7 @@ async function processAIRequest(userId: string, messages: any[], systemPrompt?: 
             content: [
               {
                 type: "text",
-                text: msg.content,
+                text: msg.content || "",
               },
               {
                 type: "image_url",
