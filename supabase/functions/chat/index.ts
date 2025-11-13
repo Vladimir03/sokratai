@@ -11,73 +11,31 @@ const MAX_MESSAGE_LENGTH = 2000;
 const RATE_LIMIT_REQUESTS = 50;
 const RATE_LIMIT_WINDOW_HOURS = 1;
 
-// SECURITY: Allowed domains for image fetching to prevent SSRF attacks
-// Updated to support signed URLs (now that bucket is private)
-const SUPABASE_URL = Deno.env.get("SUPABASE_URL");
-console.log('🔧 SUPABASE_URL from env:', SUPABASE_URL);
-
-// Support both signed URLs and public URLs for chat-images bucket
-const ALLOWED_IMAGE_PATTERNS = [
-  `/storage/v1/object/sign/chat-images/`,
-  `/storage/v1/object/public/chat-images/`,
-];
-console.log('🔧 ALLOWED_IMAGE_PATTERNS:', ALLOWED_IMAGE_PATTERNS);
-
 /**
- * Validates image URL to prevent Server-Side Request Forgery (SSRF) attacks
- * Only allows HTTPS URLs from whitelisted Supabase storage domains
- * Blocks private IPs, localhost, and metadata endpoints
+ * SIMPLIFIED: Basic URL validation
  */
 function isValidImageUrl(url: string): boolean {
-  try {
-    console.log('[SECURITY] Validating image URL:', url.substring(0, 100) + '...');
+  console.log('🔍 SIMPLE validation for URL:', url.substring(0, 100) + '...');
 
+  try {
     const parsed = new URL(url);
 
-    // Only HTTPS allowed
+    // Must be HTTPS
     if (parsed.protocol !== "https:") {
-      console.warn("[SECURITY] Blocked non-HTTPS URL:", url);
+      console.error('❌ Not HTTPS');
       return false;
     }
 
-    // Block private IPs and localhost to prevent internal network access
-    const blockedPatterns = [
-      "127.", "10.", "172.16.", "192.168.", "169.254.",
-      "localhost", "[::1]", "0.0.0.0", "::1",
-    ];
-
-    const hostname = parsed.hostname.toLowerCase();
-    if (blockedPatterns.some((pattern) => hostname.includes(pattern))) {
-      console.warn("[SECURITY] Blocked private/internal IP:", hostname);
+    // Must contain 'supabase' and 'chat-images' (basic check)
+    if (!url.includes('supabase') || !url.includes('chat-images')) {
+      console.error('❌ Not from Supabase storage');
       return false;
     }
 
-    // Only allow whitelisted Supabase storage domains
-    console.log('[SECURITY] Checking against allowed patterns:', ALLOWED_IMAGE_PATTERNS);
-    console.log('[SECURITY] URL to check:', url.substring(0, 150));
-
-    // Check if URL contains SUPABASE_URL and one of the allowed patterns
-    const isSameOrigin = url.includes(SUPABASE_URL || '');
-    const hasAllowedPattern = ALLOWED_IMAGE_PATTERNS.some((pattern) => {
-      const matches = url.includes(pattern);
-      console.log(`[SECURITY] Checking pattern "${pattern}": ${matches}`);
-      return matches;
-    });
-
-    const isAllowed = isSameOrigin && hasAllowedPattern;
-
-    if (!isAllowed) {
-      console.warn("[SECURITY] Blocked unauthorized URL");
-      console.warn("[SECURITY] Same origin?:", isSameOrigin);
-      console.warn("[SECURITY] Has allowed pattern?:", hasAllowedPattern);
-      console.warn("[SECURITY] Full URL:", url);
-    } else {
-      console.log('[SECURITY] ✅ URL validation passed');
-    }
-
-    return isAllowed;
+    console.log('✅ SIMPLE validation passed');
+    return true;
   } catch (error) {
-    console.error("[SECURITY] Invalid URL format:", url, error);
+    console.error('❌ Invalid URL:', error);
     return false;
   }
 }
@@ -99,14 +57,14 @@ const SYSTEM_PROMPT = `Ты опытный репетитор ЕГЭ по мат
 Веди диалог через наводящие вопросы. НЕ давай готовое решение сразу.
 
 СТРУКТУРА:
-1. Признай задачу  
+1. Признай задачу
 2. Дай условие с LaTeX
 3. Задай ОДИН наводящий вопрос (или максимум ДВА связанных)
 4. Веди диалог, помогая ученику самому прийти к решению
 
 ПОМОЩЬ (если просят):
 **Анализ:** [метод решения до 5-6 предложений]
-**Формула:** $...$  
+**Формула:** $...$
 **Подсказки:** 1) [намёк] 2) [намёк]
 **Попробуй:** [ОДИН вопрос для применения]
 
@@ -199,7 +157,7 @@ $$[промежуточные вычисления]$$
 ✅ Используй **жирный** для важного
 ✅ Нумерованные списки для шагов
 ✅ Эмодзи: ✅ ❌ 💡 🎯 ⚠️ 🗺️ 1️⃣ 2️⃣ 3️⃣
-✅ LaTeX: $\sin(x)$, $$\frac{a}{b}$$
+✅ LaTeX: $\\sin(x)$, $$\\frac{a}{b}$$
 ✅ Пустые строки между блоками
 
 === ЛОГИКА ВЫБОРА РЕЖИМА ===
@@ -225,24 +183,24 @@ serve(async (req) => {
 
     // Check if this is a service role request (from telegram-bot or other internal function)
     const isServiceRole = authHeader.includes(Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "");
-    
+
     let userId: string;
-    
+
     if (isServiceRole) {
       // For service role, expect userId in the request body
       const body = await req.json();
       userId = body.userId;
-      
+
       if (!userId) {
         return new Response(JSON.stringify({ error: "userId required for service role requests" }), {
           status: 400,
           headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
       }
-      
+
       // Continue with the existing body data
       const { messages, systemPrompt, taskContext, chatId } = body;
-      
+
       // Skip rate limiting for internal service role calls
       // Continue to AI processing...
       return await processAIRequest(userId, messages, systemPrompt, taskContext, chatId, req);
@@ -256,7 +214,7 @@ serve(async (req) => {
         data: { user },
         error: userError,
       } = await supabase.auth.getUser();
-      
+
       if (userError || !user) {
         return new Response(JSON.stringify({ error: "Неверный токен" }), {
           status: 401,
@@ -309,7 +267,7 @@ serve(async (req) => {
 
       // Validate request body
       const { messages, systemPrompt, taskContext, chatId } = await req.json();
-      
+
       return await processAIRequest(userId, messages, systemPrompt, taskContext, chatId, req);
     }
   } catch (error) {
@@ -327,139 +285,103 @@ async function processAIRequest(userId: string, messages: any[], systemPrompt?: 
     "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
   };
 
-  console.log('=== processAIRequest started ===');
-  console.log('userId:', userId);
-  console.log('chatId:', chatId);
-  console.log('messages count:', messages?.length);
-  console.log('messages received:', JSON.stringify(messages, null, 2));
+  console.log('\n\n========================================');
+  console.log('🚀 SIMPLIFIED processAIRequest started');
+  console.log('========================================');
+  console.log('User ID:', userId);
+  console.log('Chat ID:', chatId);
+  console.log('Messages count:', messages?.length);
 
   if (!Array.isArray(messages)) {
-    console.error('Messages is not an array:', typeof messages);
+    console.error('❌ Messages is not an array');
     return new Response(JSON.stringify({ error: "Некорректный формат сообщений" }), {
       status: 400,
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   }
 
-  // Validate only if there are messages
-  if (messages.length > 0) {
-    const lastMessage = messages[messages.length - 1];
-    console.log('Last message validation:', JSON.stringify(lastMessage, null, 2));
+  // SIMPLIFIED: Transform messages to support images
+  console.log('\n📋 Starting SIMPLIFIED message transformation...');
 
-    if (!lastMessage) {
-      console.error('Last message is null or undefined');
-      return new Response(JSON.stringify({ error: "Последнее сообщение отсутствует" }), {
-        status: 400,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-
-    console.log('Last message content type:', typeof lastMessage.content);
-    console.log('Last message content value:', lastMessage.content);
-    console.log('Last message has image_url:', !!lastMessage.image_url);
-
-    // Check if message has content OR image
-    const hasContent = lastMessage.content && (typeof lastMessage.content === 'string' && lastMessage.content.trim() !== '');
-    const hasImage = !!lastMessage.image_url;
-
-    if (!hasContent && !hasImage) {
-      console.error('❌ Last message has neither content nor image:', JSON.stringify(lastMessage, null, 2));
-      return new Response(JSON.stringify({ error: "Сообщение должно содержать текст или изображение" }), {
-        status: 400,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-
-    console.log('✅ Message validation passed:', { hasContent, hasImage });
-
-    // Only validate length for user text messages (string content), assistant responses can be longer
-    // Content can also be an object with image_url which will be transformed to multimodal format
-    if (lastMessage.role === "user" && 
-        typeof lastMessage.content === "string" && 
-        lastMessage.content.length > MAX_MESSAGE_LENGTH) {
-      return new Response(
-        JSON.stringify({ error: `Сообщение слишком длинное (макс. ${MAX_MESSAGE_LENGTH} символов)` }),
-        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } },
-      );
-    }
-  }
-
-  // Transform messages to support multimodal (text + images)
-  console.log('Starting message transformation...');
   const transformedMessages = await Promise.all(
     messages.map(async (msg: any, index: number) => {
-      console.log(`Transforming message ${index + 1}/${messages.length}:`, { role: msg.role, hasImage: !!msg.image_url });
+      console.log(`\n--- Message ${index + 1}/${messages.length} ---`);
+      console.log('Role:', msg.role);
+      console.log('Content:', typeof msg.content === 'string' ? msg.content.substring(0, 50) + '...' : msg.content);
+      console.log('Has image_url?:', !!msg.image_url);
 
-      // If message has an image, fetch it and convert to base64
+      // If message has an image, process it
       if (msg.image_url) {
+        console.log('🖼️  IMAGE DETECTED!');
+        console.log('Image URL:', msg.image_url);
+
         try {
-          console.log(`Message ${index + 1} has image URL:`, msg.image_url.substring(0, 100) + '...');
-
-          // SECURITY: Validate image URL to prevent SSRF attacks
+          // Step 1: Validate
           if (!isValidImageUrl(msg.image_url)) {
-            console.error('[SECURITY] Rejected invalid image URL:', msg.image_url);
-            throw new Error('Invalid or unauthorized image URL. Only images uploaded through the app are allowed.');
+            console.error('❌ Validation failed - skipping image');
+            return { role: msg.role, content: msg.content || '[Image unavailable]' };
           }
 
-          console.log(`Fetching image for message ${index + 1}...`);
+          // Step 2: Fetch
+          console.log('📥 Fetching image...');
           const imageResponse = await fetch(msg.image_url);
+          console.log('Response:', imageResponse.status, imageResponse.statusText);
+
           if (!imageResponse.ok) {
-            console.error("Failed to fetch image:", msg.image_url, 'Status:', imageResponse.status);
-            // Skip image if fetch fails
-            return {
-              role: msg.role,
-              content: msg.content,
-            };
+            console.error('❌ Fetch failed');
+            return { role: msg.role, content: msg.content || '[Image unavailable]' };
           }
 
-          console.log(`Image fetched successfully for message ${index + 1}, converting to base64...`);
+          // Step 3: Convert to base64
+          console.log('🔄 Converting to base64...');
           const imageBuffer = await imageResponse.arrayBuffer();
-          console.log(`Image buffer size: ${imageBuffer.byteLength} bytes`);
+          console.log('Buffer size:', imageBuffer.byteLength, 'bytes');
 
           const base64Image = btoa(
             new Uint8Array(imageBuffer).reduce((data, byte) => data + String.fromCharCode(byte), "")
           );
+          console.log('✅ Base64 length:', base64Image.length, 'chars');
 
-          console.log(`Base64 conversion complete, length: ${base64Image.length}`);
-
-          // Determine image type from URL or content-type
+          // Step 4: Get content type
           const contentType = imageResponse.headers.get("content-type") || "image/jpeg";
-          const imageType = contentType.split("/")[1] || "jpeg";
+          console.log('Content-Type:', contentType);
 
-          console.log(`Image ${index + 1} content type: ${contentType}`);
+          // Step 5: Create multimodal message (OpenAI format)
+          const dataUrl = `data:${contentType};base64,${base64Image}`;
+          console.log('Data URL prefix:', dataUrl.substring(0, 50) + '...');
 
-          // Use OpenAI format for images (Lovable gateway uses OpenAI-compatible API)
           const multimodalMessage = {
             role: msg.role,
             content: [
               {
                 type: "text",
-                text: msg.content || "",
+                text: msg.content || "Что изображено на картинке?",
               },
               {
                 type: "image_url",
                 image_url: {
-                  url: `data:${contentType};base64,${base64Image}`,
+                  url: dataUrl,
                 },
               },
             ],
           };
 
-          console.log(`Image ${index + 1} format: OpenAI-compatible (type: "image_url", size: ${base64Image.length} chars)`);
+          console.log('✅ Multimodal message created');
+          console.log('Structure:', {
+            role: multimodalMessage.role,
+            contentItems: multimodalMessage.content.length,
+            types: multimodalMessage.content.map(c => c.type)
+          });
 
-          console.log(`Message ${index + 1} transformed to multimodal format`);
           return multimodalMessage;
         } catch (error) {
-          console.error(`Error processing image for message ${index + 1}:`, error);
-          // Skip image if processing fails
-          return {
-            role: msg.role,
-            content: msg.content,
-          };
+          console.error('❌ ERROR:', error);
+          return { role: msg.role, content: msg.content || '[Error]' };
         }
       }
-      // Otherwise, keep as simple text message
-      console.log(`Message ${index + 1} kept as text-only`);
+
+      // No image - text only
+      console.log('💬 Text-only message');
       return {
         role: msg.role,
         content: msg.content,
@@ -467,21 +389,23 @@ async function processAIRequest(userId: string, messages: any[], systemPrompt?: 
     })
   );
 
-  console.log('Message transformation complete. Transformed messages count:', transformedMessages.length);
-  console.log('Transformed messages structure:', JSON.stringify(transformedMessages.map(m => ({
-    role: m.role,
-    contentType: Array.isArray(m.content) ? 'multimodal' : 'text',
-    contentLength: Array.isArray(m.content) ? m.content.length : (typeof m.content === 'string' ? m.content.length : 'unknown')
-  })), null, 2));
+  console.log('\n✅ Transformation complete!');
+  console.log('Total messages:', transformedMessages.length);
 
-  // CRITICAL DEBUG: Log which messages have images
+  // Log what we're sending
   transformedMessages.forEach((msg, idx) => {
-    if (Array.isArray(msg.content)) {
-      const hasImage = msg.content.some(item => item.type === 'image');
-      console.log(`📸 Message ${idx + 1} has multimodal content with image: ${hasImage}`);
-      if (hasImage) {
-        const imageItem = msg.content.find(item => item.type === 'image');
-        console.log(`📸 Image data starts with: ${imageItem?.image?.substring(0, 50)}...`);
+    const isMultimodal = Array.isArray(msg.content);
+    console.log(`\nMessage ${idx + 1}:`);
+    console.log('  Role:', msg.role);
+    console.log('  Type:', isMultimodal ? 'MULTIMODAL' : 'TEXT');
+
+    if (isMultimodal) {
+      const hasImageUrl = msg.content.some((item: any) => item.type === 'image_url');
+      console.log('  Has image_url:', hasImageUrl);
+      if (hasImageUrl) {
+        const imageItem = msg.content.find((item: any) => item.type === 'image_url');
+        const url = imageItem?.image_url?.url || '';
+        console.log('  Image URL starts with:', url.substring(0, 50) + '...');
       }
     }
   });
@@ -489,11 +413,9 @@ async function processAIRequest(userId: string, messages: any[], systemPrompt?: 
   const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
 
   if (!LOVABLE_API_KEY) {
-    console.error("LOVABLE_API_KEY not configured");
+    console.error("❌ LOVABLE_API_KEY not configured");
     throw new Error("LOVABLE_API_KEY is not configured");
   }
-
-  console.log("Calling AI gateway with messages:", transformedMessages.length);
 
   // Use provided systemPrompt if available, otherwise use default
   let effectiveSystemPrompt = systemPrompt || SYSTEM_PROMPT;
@@ -515,32 +437,10 @@ async function processAIRequest(userId: string, messages: any[], systemPrompt?: 
     stream: true,
   };
 
-  console.log('=== Request to Gemini API ===');
+  console.log('\n📤 Sending to Lovable gateway...');
   console.log('Model:', requestBody.model);
-  console.log('System prompt length:', effectiveSystemPrompt.length);
-  console.log('User messages count:', transformedMessages.length);
-  console.log('Full request body (excluding base64 images):');
+  console.log('Messages:', requestBody.messages.length);
 
-  const sanitizedBody = {
-    ...requestBody,
-    messages: requestBody.messages.map(m => {
-      if (Array.isArray(m.content)) {
-        return {
-          ...m,
-          content: m.content.map(item => {
-            if (item.type === 'image_url') {
-              return { type: 'image_url', image_url: { url: '[BASE64_IMAGE_DATA]' } };
-            }
-            return item;
-          })
-        };
-      }
-      return m;
-    })
-  };
-  console.log(JSON.stringify(sanitizedBody, null, 2));
-
-  console.log('Sending request to Gemini...');
   const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
     method: "POST",
     headers: {
@@ -550,11 +450,11 @@ async function processAIRequest(userId: string, messages: any[], systemPrompt?: 
     body: JSON.stringify(requestBody),
   });
 
-  console.log('Gemini API response status:', response.status, response.statusText);
+  console.log('📥 Response status:', response.status, response.statusText);
 
   if (!response.ok) {
     const errorText = await response.text();
-    console.error("AI gateway error:", response.status, errorText);
+    console.error("❌ Gateway error:", response.status, errorText);
 
     if (response.status === 429) {
       return new Response(JSON.stringify({ error: "Превышен лимит запросов. Попробуйте позже." }), {
@@ -571,6 +471,8 @@ async function processAIRequest(userId: string, messages: any[], systemPrompt?: 
 
     throw new Error(`AI gateway error: ${response.status}`);
   }
+
+  console.log('✅ Streaming response...\n');
 
   // Create a transform stream to capture token usage
   const { readable, writable } = new TransformStream();
