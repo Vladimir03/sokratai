@@ -1068,6 +1068,7 @@ async function saveSolution(
 }
 
 async function handleTextMessage(telegramUserId: number, userId: string, text: string) {
+  console.log('=== handleTextMessage v2.0 WITH MINI APP FALLBACK ===');
   console.log('handleTextMessage:', { telegramUserId, userId, text });
 
   try {
@@ -1222,16 +1223,20 @@ async function handleTextMessage(telegramUserId: number, userId: string, text: s
       }
     } catch (sendError) {
       // If message sending fails (e.g., HTML parsing error), send fallback with Mini App
+      console.log('=== MINI APP FALLBACK ACTIVATED ===');
       console.log('Error sending formatted message, falling back to Mini App');
       console.error('Send error:', sendError);
 
       if (solutionId) {
+        console.log('Sending Mini App fallback with solution ID:', solutionId);
         await sendTelegramMessage(
           telegramUserId,
           '✅ Решение готово!\n\n📱 Открой полное решение с формулами в приложении:',
           { reply_markup: generateMiniAppButton(solutionId) }
         );
+        console.log('Mini App fallback sent successfully');
       } else {
+        console.log('No solution ID, re-throwing error');
         throw sendError; // Re-throw if we don't have a solution to show
       }
     }
