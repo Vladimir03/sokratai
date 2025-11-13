@@ -106,19 +106,21 @@ serve(async (req) => {
       const contentType = imageResponse.headers.get("content-type") || "image/jpeg";
       console.log('Image content type:', contentType, 'Base64 length:', base64Image.length);
 
-      // Use Gemini format for images (not OpenAI format)
+      // Use OpenAI format for images (Lovable gateway uses OpenAI-compatible API)
       userContent = [
         {
           type: "text",
           text: `Предмет: ${subject || 'не указан'}\nТема: ${topic || 'не указана'}\n\nПроанализируй задачу на изображении.`
         },
         {
-          type: "image",
-          image: `data:${contentType};base64,${base64Image}`
+          type: "image_url",
+          image_url: {
+            url: `data:${contentType};base64,${base64Image}`
+          }
         }
       ];
 
-      console.log('Image prepared in Gemini-compatible format');
+      console.log('Image prepared in OpenAI-compatible format');
     } else {
       // Text only
       userContent = `Предмет: ${subject || 'не указан'}\nТема: ${topic || 'не указана'}\n\nУсловие задачи:\n${conditionText}`;
