@@ -204,6 +204,23 @@ async function getOnboardingSession(telegramUserId: number) {
   return data;
 }
 
+async function getUserIdFromTelegram(telegramUserId: number): Promise<string | null> {
+  // Try to get user_id from telegram_sessions first
+  const session = await getOnboardingSession(telegramUserId);
+  if (session?.user_id) {
+    return session.user_id;
+  }
+
+  // If not in session, get from profiles table
+  const { data: profile } = await supabase
+    .from('profiles')
+    .select('id')
+    .eq('telegram_user_id', telegramUserId)
+    .maybeSingle();
+
+  return profile?.id || null;
+}
+
 async function updateOnboardingState(
   telegramUserId: number,
   userId: string,
@@ -946,8 +963,22 @@ async function saveSolution(
   aiResponse: string
 ): Promise<string | null> {
   try {
+    console.log('Saving solution:', {
+      telegramChatId,
+      telegramUserId,
+      userId,
+      problemTextLength: problemText?.length,
+      aiResponseLength: aiResponse?.length
+    });
+
     const solutionSteps = parseSolutionSteps(aiResponse);
     const finalAnswer = extractFinalAnswer(aiResponse);
+
+    console.log('Parsed solution:', {
+      stepsCount: solutionSteps.length,
+      hasFormulas: solutionSteps.filter(s => s.formula).length,
+      finalAnswer: finalAnswer?.substring(0, 50)
+    });
 
     const solutionData = {
       problem: problemText,
@@ -969,13 +1000,21 @@ async function saveSolution(
       .single();
 
     if (error) {
-      console.error('Failed to save solution:', error);
+      console.error('Failed to save solution:', {
+        error: error.message,
+        code: error.code,
+        details: error.details
+      });
       return null;
     }
 
+    console.log('Solution saved successfully:', solution?.id);
     return solution?.id || null;
   } catch (error) {
-    console.error('Error saving solution:', error);
+    console.error('Error saving solution:', {
+      error: error instanceof Error ? error.message : error,
+      stack: error instanceof Error ? error.stack : undefined
+    });
     return null;
   }
 }
@@ -1107,7 +1146,12 @@ async function handleTextMessage(telegramUserId: number, userId: string, text: s
       );
     }
   } catch (error) {
-    console.error('Error handling text message:', error);
+    console.error('Error handling text message:', {
+      error: error instanceof Error ? error.message : error,
+      stack: error instanceof Error ? error.stack : undefined,
+      telegramUserId,
+      textLength: text?.length
+    });
     await sendTelegramMessage(telegramUserId, '❌ Произошла ошибка. Попробуй ещё раз.');
   }
 }
@@ -1333,13 +1377,13 @@ async function handlePhotoMessage(telegramUserId: number, userId: string, photo:
 
     console.log('Photo message handled successfully!');
   } catch (error) {
-    console.error('❌ Error handling photo message:', error);
-    console.error('Error stack:', error instanceof Error ? error.stack : 'No stack trace');
-    const errorMsg = error instanceof Error ? error.message : String(error);
-    await sendTelegramMessage(
+    console.error('Error handling photo message:', {
+      error: error instanceof Error ? error.message : error,
+      stack: error instanceof Error ? error.stack : undefined,
       telegramUserId,
-      `❌ Ошибка при обработке фото: ${errorMsg.substring(0, 200)}`
-    );
+      photoId: photo?.file_id
+    });
+    await sendTelegramMessage(telegramUserId, '❌ Произошла ошибка при обработке фото. Попробуй ещё раз.');
   }
 }
 
@@ -1362,36 +1406,41 @@ async function handleCallbackQuery(callbackQuery: any) {
 
   // Handle quick action buttons
   if (data.startsWith('quick_action:')) {
-    const session = await getOnboardingSession(telegramUserId);
-    
-    if (!session?.user_id) {
-      await sendTelegramMessage(telegramUserId, '❌ Сессия не найдена. Нажми /start');
-      return;
-    }
-    
-    const userId = session.user_id;
-    
-    // Determine prompt text based on button
-    let promptText = '';
-    switch (data) {
-      case 'quick_action:plan':
-        promptText = 'Составь план решения этой задачи';
-        break;
-      case 'quick_action:explain':
-        promptText = 'Объясни этот момент подробнее';
-        break;
-      case 'quick_action:similar':
-        promptText = 'Дай мне похожую задачу для практики';
-        break;
-      default:
+    try {
+      const userId = await getUserIdFromTelegram(telegramUserId);
+
+      if (!userId) {
+        console.error('User not found for telegram_user_id:', telegramUserId);
+        await sendTelegramMessage(telegramUserId, '❌ Пользователь не найден. Пожалуйста, нажми /start для регистрации.');
         return;
+      }
+
+      // Determine prompt text based on button
+      let promptText = '';
+      switch (data) {
+        case 'quick_action:plan':
+          promptText = 'Составь план решения этой задачи';
+          break;
+        case 'quick_action:explain':
+          promptText = 'Объясни этот момент подробнее';
+          break;
+        case 'quick_action:similar':
+          promptText = 'Дай мне похожую задачу для практики';
+          break;
+        default:
+          console.log('Unknown quick action:', data);
+          return;
+      }
+
+      // Show user what they "sent"
+      await sendTelegramMessage(telegramUserId, `⚡ ${promptText}`);
+
+      // Process as text message with button input method
+      await handleTextMessage(telegramUserId, userId, promptText);
+    } catch (error) {
+      console.error('Error handling quick action:', error);
+      await sendTelegramMessage(telegramUserId, '❌ Произошла ошибка. Попробуй ещё раз.');
     }
-    
-    // Show user what they "sent"
-    await sendTelegramMessage(telegramUserId, `⚡ ${promptText}`);
-    
-    // Process as text message with button input method
-    await handleTextMessage(telegramUserId, userId, promptText);
     return;
   }
 
