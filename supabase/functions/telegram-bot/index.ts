@@ -835,23 +835,31 @@ function createQuickActionsKeyboard() {
  * Returns array of formulas without delimiters
  */
 function extractLatexFormulas(text: string): string[] {
-  const formulas: string[] = [];
-
-  // Extract display math $$...$$
-  const displayMatches = text.matchAll(/\$\$(.+?)\$\$/gs);
-  for (const match of displayMatches) {
-    formulas.push(match[1].trim());
+  if (!text || typeof text !== 'string') {
+    return [];
   }
 
-  // Extract inline math $...$ (avoid already extracted display math)
-  let tempText = text.replace(/\$\$(.+?)\$\$/gs, ''); // Remove display math first
-  const inlineMatches = tempText.matchAll(/\$([^$\n]+?)\$/g);
-  for (const match of inlineMatches) {
-    const formula = match[1].trim();
-    // Only add if it's substantial (not just a variable)
-    if (formula.length > 2 || /[\\{}^_]/.test(formula)) {
-      formulas.push(formula);
+  const formulas: string[] = [];
+
+  try {
+    // Extract display math $$...$$
+    const displayMatches = text.matchAll(/\$\$(.+?)\$\$/gs);
+    for (const match of displayMatches) {
+      formulas.push(match[1].trim());
     }
+
+    // Extract inline math $...$ (avoid already extracted display math)
+    let tempText = text.replace(/\$\$(.+?)\$\$/gs, ''); // Remove display math first
+    const inlineMatches = tempText.matchAll(/\$([^$\n]+?)\$/g);
+    for (const match of inlineMatches) {
+      const formula = match[1].trim();
+      // Only add if it's substantial (not just a variable)
+      if (formula.length > 2 || /[\\{}^_]/.test(formula)) {
+        formulas.push(formula);
+      }
+    }
+  } catch (error) {
+    console.error('Error extracting LaTeX formulas:', error);
   }
 
   return formulas;
@@ -862,27 +870,35 @@ function extractLatexFormulas(text: string): string[] {
  * Looks for common patterns like "Ответ:", "Итого:", etc.
  */
 function extractFinalAnswer(aiResponse: string): string | null {
-  // Common answer patterns in Russian
-  const answerPatterns = [
-    /(?:Ответ|Итоговый ответ|Финальный ответ|Результат):\s*(.+?)(?:\n\n|\n$|$)/is,
-    /(?:Таким образом|Следовательно|Получаем),?\s*(.+?)(?:\n\n|\n$|$)/is,
-  ];
-
-  for (const pattern of answerPatterns) {
-    const match = aiResponse.match(pattern);
-    if (match && match[1]) {
-      const answer = match[1].trim();
-      // Extract LaTeX from answer if present
-      const formulas = extractLatexFormulas(answer);
-      return formulas.length > 0 ? formulas[0] : answer;
-    }
+  if (!aiResponse || typeof aiResponse !== 'string') {
+    return null;
   }
 
-  // Try to find the last substantial formula as the answer
-  const allFormulas = extractLatexFormulas(aiResponse);
-  if (allFormulas.length > 0) {
-    // Return the last formula (usually the final answer)
-    return allFormulas[allFormulas.length - 1];
+  try {
+    // Common answer patterns in Russian
+    const answerPatterns = [
+      /(?:Ответ|Итоговый ответ|Финальный ответ|Результат):\s*(.+?)(?:\n\n|\n$|$)/is,
+      /(?:Таким образом|Следовательно|Получаем),?\s*(.+?)(?:\n\n|\n$|$)/is,
+    ];
+
+    for (const pattern of answerPatterns) {
+      const match = aiResponse.match(pattern);
+      if (match && match[1]) {
+        const answer = match[1].trim();
+        // Extract LaTeX from answer if present
+        const formulas = extractLatexFormulas(answer);
+        return formulas.length > 0 ? formulas[0] : answer;
+      }
+    }
+
+    // Try to find the last substantial formula as the answer
+    const allFormulas = extractLatexFormulas(aiResponse);
+    if (allFormulas.length > 0) {
+      // Return the last formula (usually the final answer)
+      return allFormulas[allFormulas.length - 1];
+    }
+  } catch (error) {
+    console.error('Error extracting final answer:', error);
   }
 
   return null;
@@ -893,59 +909,78 @@ function extractFinalAnswer(aiResponse: string): string | null {
  * Attempts to extract numbered steps, formulas, and final answer
  */
 function parseSolutionSteps(aiResponse: string): any[] {
-  const steps: any[] = [];
-
-  // Try to find numbered steps (1., 2., etc. or 1), 2), etc. or **1.**, etc.)
-  const stepRegex = /(?:^|\n)(?:\*\*)?(\d+)[.):\s](?:\*\*)?\s*([^\n]+)/g;
-  let match;
-  let stepNumber = 1;
-
-  while ((match = stepRegex.exec(aiResponse)) !== null) {
-    const title = match[2].trim();
-
-    // Try to extract content after this step title
-    const startPos = match.index + match[0].length;
-    const nextMatch = stepRegex.exec(aiResponse);
-    const endPos = nextMatch ? nextMatch.index : aiResponse.length;
-    stepRegex.lastIndex = nextMatch ? nextMatch.index : aiResponse.length;
-
-    const content = aiResponse.substring(startPos, endPos).trim();
-
-    // Extract LaTeX formulas from this step's content
-    const formulas = extractLatexFormulas(content);
-
-    // Remove formulas from content text to avoid duplication in Mini App
-    let cleanContent = content;
-    formulas.forEach(formula => {
-      cleanContent = cleanContent.replace(`$$${formula}$$`, '');
-      cleanContent = cleanContent.replace(`$${formula}$`, '');
-    });
-    cleanContent = cleanContent.trim();
-
-    steps.push({
-      number: stepNumber++,
-      title: title,
-      content: cleanContent.substring(0, 500), // Limit content length
-      formula: formulas.length > 0 ? formulas[0] : null // Use first formula for display
-    });
+  if (!aiResponse || typeof aiResponse !== 'string') {
+    return [{
+      number: 1,
+      title: "Решение",
+      content: "Ответ недоступен",
+      formula: null
+    }];
   }
 
-  // If no steps found, create a single step with the full response
-  if (steps.length === 0) {
-    const formulas = extractLatexFormulas(aiResponse);
-    let cleanContent = aiResponse;
+  const steps: any[] = [];
 
-    // Remove formulas from content to avoid duplication
-    formulas.forEach(formula => {
-      cleanContent = cleanContent.replace(`$$${formula}$$`, '');
-      cleanContent = cleanContent.replace(`$${formula}$`, '');
-    });
+  try {
+    // Try to find numbered steps (1., 2., etc. or 1), 2), etc. or **1.**, etc.)
+    const stepRegex = /(?:^|\n)(?:\*\*)?(\d+)[.):\s](?:\*\*)?\s*([^\n]+)/g;
+    let match;
+    let stepNumber = 1;
 
+    while ((match = stepRegex.exec(aiResponse)) !== null) {
+      const title = match[2].trim();
+
+      // Try to extract content after this step title
+      const startPos = match.index + match[0].length;
+      const nextMatch = stepRegex.exec(aiResponse);
+      const endPos = nextMatch ? nextMatch.index : aiResponse.length;
+      stepRegex.lastIndex = nextMatch ? nextMatch.index : aiResponse.length;
+
+      const content = aiResponse.substring(startPos, endPos).trim();
+
+      // Extract LaTeX formulas from this step's content
+      const formulas = extractLatexFormulas(content);
+
+      // Remove formulas from content text to avoid duplication in Mini App
+      let cleanContent = content;
+      formulas.forEach(formula => {
+        cleanContent = cleanContent.replace(`$$${formula}$$`, '');
+        cleanContent = cleanContent.replace(`$${formula}$`, '');
+      });
+      cleanContent = cleanContent.trim();
+
+      steps.push({
+        number: stepNumber++,
+        title: title,
+        content: cleanContent.substring(0, 500), // Limit content length
+        formula: formulas.length > 0 ? formulas[0] : null // Use first formula for display
+      });
+    }
+
+    // If no steps found, create a single step with the full response
+    if (steps.length === 0) {
+      const formulas = extractLatexFormulas(aiResponse);
+      let cleanContent = aiResponse;
+
+      // Remove formulas from content to avoid duplication
+      formulas.forEach(formula => {
+        cleanContent = cleanContent.replace(`$$${formula}$$`, '');
+        cleanContent = cleanContent.replace(`$${formula}$`, '');
+      });
+
+      steps.push({
+        number: 1,
+        title: "Решение",
+        content: cleanContent.trim().substring(0, 1000), // Limit to first 1000 chars
+        formula: formulas.length > 0 ? formulas[0] : null
+      });
+    }
+  } catch (error) {
+    console.error('Error parsing solution steps:', error);
     steps.push({
       number: 1,
       title: "Решение",
-      content: cleanContent.trim().substring(0, 1000), // Limit to first 1000 chars
-      formula: formulas.length > 0 ? formulas[0] : null
+      content: aiResponse?.substring(0, 1000) || "Ответ недоступен",
+      formula: null
     });
   }
 
