@@ -420,7 +420,7 @@ async function processAIRequest(userId: string, messages: any[], systemPrompt?: 
 
           console.log(`Image ${index + 1} content type: ${contentType}`);
 
-          // Use Gemini format for images (not OpenAI format)
+          // Use OpenAI format for images (Lovable gateway uses OpenAI-compatible API)
           const multimodalMessage = {
             role: msg.role,
             content: [
@@ -429,13 +429,15 @@ async function processAIRequest(userId: string, messages: any[], systemPrompt?: 
                 text: msg.content || "",
               },
               {
-                type: "image",
-                image: `data:${contentType};base64,${base64Image}`,
+                type: "image_url",
+                image_url: {
+                  url: `data:${contentType};base64,${base64Image}`,
+                },
               },
             ],
           };
-          
-          console.log(`Image ${index + 1} format: Gemini-compatible (type: "image", size: ${base64Image.length} chars)`);
+
+          console.log(`Image ${index + 1} format: OpenAI-compatible (type: "image_url", size: ${base64Image.length} chars)`);
 
           console.log(`Message ${index + 1} transformed to multimodal format`);
           return multimodalMessage;
@@ -518,8 +520,8 @@ async function processAIRequest(userId: string, messages: any[], systemPrompt?: 
         return {
           ...m,
           content: m.content.map(item => {
-            if (item.type === 'image') {
-              return { type: 'image', image: '[BASE64_IMAGE_DATA]' };
+            if (item.type === 'image_url') {
+              return { type: 'image_url', image_url: { url: '[BASE64_IMAGE_DATA]' } };
             }
             return item;
           })
