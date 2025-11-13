@@ -16,10 +16,12 @@ const RATE_LIMIT_WINDOW_HOURS = 1;
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL");
 console.log('🔧 SUPABASE_URL from env:', SUPABASE_URL);
 
-const ALLOWED_IMAGE_DOMAINS = [
-  `${SUPABASE_URL}/storage/v1/object/sign/chat-images/`,
+// Support both signed URLs and public URLs for chat-images bucket
+const ALLOWED_IMAGE_PATTERNS = [
+  `/storage/v1/object/sign/chat-images/`,
+  `/storage/v1/object/public/chat-images/`,
 ];
-console.log('🔧 ALLOWED_IMAGE_DOMAINS:', ALLOWED_IMAGE_DOMAINS);
+console.log('🔧 ALLOWED_IMAGE_PATTERNS:', ALLOWED_IMAGE_PATTERNS);
 
 /**
  * Validates image URL to prevent Server-Side Request Forgery (SSRF) attacks
@@ -51,17 +53,23 @@ function isValidImageUrl(url: string): boolean {
     }
 
     // Only allow whitelisted Supabase storage domains
-    console.log('[SECURITY] Checking against allowed domains:', ALLOWED_IMAGE_DOMAINS);
+    console.log('[SECURITY] Checking against allowed patterns:', ALLOWED_IMAGE_PATTERNS);
     console.log('[SECURITY] URL to check:', url.substring(0, 150));
 
-    const isAllowed = ALLOWED_IMAGE_DOMAINS.some((domain) => {
-      const matches = url.startsWith(domain);
-      console.log(`[SECURITY] Checking domain "${domain}": ${matches}`);
+    // Check if URL contains SUPABASE_URL and one of the allowed patterns
+    const isSameOrigin = url.includes(SUPABASE_URL || '');
+    const hasAllowedPattern = ALLOWED_IMAGE_PATTERNS.some((pattern) => {
+      const matches = url.includes(pattern);
+      console.log(`[SECURITY] Checking pattern "${pattern}": ${matches}`);
       return matches;
     });
 
+    const isAllowed = isSameOrigin && hasAllowedPattern;
+
     if (!isAllowed) {
-      console.warn("[SECURITY] Blocked unauthorized domain:", hostname);
+      console.warn("[SECURITY] Blocked unauthorized URL");
+      console.warn("[SECURITY] Same origin?:", isSameOrigin);
+      console.warn("[SECURITY] Has allowed pattern?:", hasAllowedPattern);
       console.warn("[SECURITY] Full URL:", url);
     } else {
       console.log('[SECURITY] ✅ URL validation passed');

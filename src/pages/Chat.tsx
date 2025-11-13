@@ -914,14 +914,31 @@ export default function Chat() {
       // Отправляем только последние 15 сообщений
       const messagesToSend = messages.slice(-15);
 
+      console.log('📋 Messages to send:', messagesToSend.length);
+      console.log('📋 Messages with images:', messagesToSend.filter(m => m.image_url).length);
+      messagesToSend.forEach((msg, idx) => {
+        if (msg.image_url) {
+          console.log(`📸 Message ${idx + 1} has image_url:`, msg.image_url.substring(0, 100));
+        }
+      });
+
+      const newMessage = {
+        role: "user" as const,
+        content: message.trim() || '[Изображение]',
+        image_url: imageUrl,
+        image_path: imageFileName,
+        input_method: inputMethod
+      };
+
+      console.log('📤 New message being sent:', {
+        hasContent: !!newMessage.content,
+        hasImageUrl: !!newMessage.image_url,
+        hasImagePath: !!newMessage.image_path,
+        imageUrlPreview: newMessage.image_url?.substring(0, 100)
+      });
+
       await streamChatWithRetry({
-        messages: [...messagesToSend, {
-          role: "user" as const,
-          content: message.trim() || '[Изображение]',
-          image_url: imageUrl,
-          image_path: imageFileName,
-          input_method: inputMethod
-        }],
+        messages: [...messagesToSend, newMessage],
         onDelta: (chunk) => upsertAssistant(chunk),
         onDone: () => {
           // Обновляем статус на 'delivered' когда все готово
