@@ -96,14 +96,6 @@ async function sendTelegramMessage(
   text: string,
   extraParams?: Record<string, any>
 ) {
-  // Debug logging to see what text is being sent
-  console.log('=== SENDING MESSAGE ===');
-  console.log('Text length:', text.length);
-  console.log('Text preview (first 200 chars):', text.substring(0, 200));
-  console.log('Text preview (chars 500-600):', text.substring(500, 600));
-  console.log('Full text:', text);
-  console.log('======================');
-
   const response = await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -118,7 +110,6 @@ async function sendTelegramMessage(
   if (!response.ok) {
     const error = await response.text();
     console.error('Telegram API error:', error);
-    console.error('Failed message text:', text);
     throw new Error('Failed to send message');
   }
 
@@ -131,15 +122,6 @@ async function editTelegramMessage(
   text: string,
   extraParams?: Record<string, any>
 ) {
-  // Debug logging to see what text is being edited
-  console.log('=== EDITING MESSAGE ===');
-  console.log('Message ID:', messageId);
-  console.log('Text length:', text.length);
-  console.log('Text preview (first 200 chars):', text.substring(0, 200));
-  console.log('Text preview (chars 500-600):', text.substring(500, 600));
-  console.log('Full text:', text);
-  console.log('======================');
-
   const response = await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/editMessageText`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -1086,16 +1068,12 @@ async function saveSolution(
 }
 
 async function handleTextMessage(telegramUserId: number, userId: string, text: string) {
-  console.log('=== START handleTextMessage ===');
-  console.log('Step 1: Received message:', { telegramUserId, userId, text });
+  console.log('handleTextMessage:', { telegramUserId, userId, text });
 
   try {
-    console.log('Step 2: Getting or creating chat...');
     // Get or create chat
     const chatId = await getOrCreateTelegramChat(userId);
-    console.log('Step 3: Chat ID obtained:', chatId);
 
-    console.log('Step 4: Saving user message...');
     // Save user message
     await supabase.from('chat_messages').insert({
       chat_id: chatId,
@@ -1104,29 +1082,24 @@ async function handleTextMessage(telegramUserId: number, userId: string, text: s
       content: text,
       input_method: 'text',
     });
-    console.log('Step 5: User message saved');
 
-  console.log('Step 6: Getting chat history...');
-  // Get chat history - limit to last 20 messages (10 pairs)
-  const { data: historyReversed } = await supabase
-    .from('chat_messages')
-    .select('role, content, image_url')
-    .eq('chat_id', chatId)
-    .order('created_at', { ascending: false })
-    .limit(20);
+    // Get chat history - limit to last 20 messages (10 pairs)
+    const { data: historyReversed } = await supabase
+      .from('chat_messages')
+      .select('role, content, image_url')
+      .eq('chat_id', chatId)
+      .order('created_at', { ascending: false })
+      .limit(20);
 
-  // Filter out messages with neither content nor image, then reverse to chronological order
-  const history = (historyReversed?.reverse() || []).filter(msg =>
-    (msg.content && msg.content.trim() !== '') || msg.image_url
-  );
-  console.log('Step 7: Chat history retrieved, messages count:', history?.length);
+    // Filter out messages with neither content nor image, then reverse to chronological order
+    const history = (historyReversed?.reverse() || []).filter(msg =>
+      (msg.content && msg.content.trim() !== '') || msg.image_url
+    );
 
-    console.log('Step 8: Starting typing indicator...');
     // Start typing loop
     const stopTyping = { stop: false };
     const typingPromise = sendTypingLoop(telegramUserId, stopTyping);
 
-    console.log('Step 9: Preparing AI chat request...');
     // Call AI chat function with service role authorization
     const chatRequestBody = {
       messages: history || [],
@@ -1134,8 +1107,7 @@ async function handleTextMessage(telegramUserId: number, userId: string, text: s
       userId: userId,
     };
 
-    console.log('Step 10: Calling AI chat function...');
-    console.log('Request body:', JSON.stringify(chatRequestBody, null, 2));
+    console.log('Request body to chat function:', JSON.stringify(chatRequestBody, null, 2));
 
     const chatResponse = await fetch(`${SUPABASE_URL}/functions/v1/chat`, {
       method: 'POST',
@@ -1145,16 +1117,13 @@ async function handleTextMessage(telegramUserId: number, userId: string, text: s
       },
       body: JSON.stringify(chatRequestBody),
     });
-    console.log('Step 11: AI response received, status:', chatResponse.status);
 
     // Stop typing
     stopTyping.stop = true;
     await typingPromise;
-    console.log('Step 12: Typing indicator stopped');
 
     // Handle rate limit error
     if (chatResponse.status === 429) {
-      console.log('Step 13: Rate limit error');
       await sendTelegramMessage(
         telegramUserId,
         '⏳ Слишком много запросов. Подожди немного и попробуй снова.'
@@ -1164,7 +1133,6 @@ async function handleTextMessage(telegramUserId: number, userId: string, text: s
 
     // Handle payment required error
     if (chatResponse.status === 402) {
-      console.log('Step 13: Payment required error');
       await sendTelegramMessage(
         telegramUserId,
         '💳 Закончились средства на балансе. Пожалуйста, пополни баланс в личном кабинете.'
@@ -1174,7 +1142,7 @@ async function handleTextMessage(telegramUserId: number, userId: string, text: s
 
     if (!chatResponse.ok) {
       const errorText = await chatResponse.text();
-      console.error('Step 13: AI response error:', {
+      console.error('AI response error:', {
         status: chatResponse.status,
         statusText: chatResponse.statusText,
         error: errorText
@@ -1183,12 +1151,9 @@ async function handleTextMessage(telegramUserId: number, userId: string, text: s
       return;
     }
 
-    console.log('Step 13: Parsing AI response stream...');
     // Parse SSE stream
     const aiContent = await parseSSEStream(chatResponse);
-    console.log('Step 14: AI content parsed, length:', aiContent?.length);
 
-    console.log('Step 15: Saving solution to database...');
     // Save solution to database
     const solutionId = await saveSolution(
       telegramUserId,
@@ -1197,65 +1162,62 @@ async function handleTextMessage(telegramUserId: number, userId: string, text: s
       text,
       aiContent
     );
-    console.log('Step 16: Solution saved, ID:', solutionId);
+    console.log('Solution saved with ID:', solutionId);
 
-    console.log('Step 17: Formatting content for Telegram...');
     // Format and save AI response
     const formattedContent = formatForTelegram(aiContent);
-    console.log('Step 18: Content formatted, length:', formattedContent?.length);
 
-    console.log('Step 19: Saving AI message to chat history...');
     await supabase.from('chat_messages').insert({
       chat_id: chatId,
       user_id: userId,
       role: 'assistant',
       content: aiContent,
     });
-    console.log('Step 20: AI message saved');
 
-    console.log('Step 21: Splitting and sending message parts...');
     // Split and send response if too long
     const messageParts = splitLongMessage(formattedContent);
-    console.log('Step 22: Message split into', messageParts.length, 'parts');
 
-    for (let i = 0; i < messageParts.length; i++) {
-      if (i > 0) {
-        // Small delay between parts
-        await new Promise(resolve => setTimeout(resolve, 1000));
+    try {
+      for (let i = 0; i < messageParts.length; i++) {
+        if (i > 0) {
+          // Small delay between parts
+          await new Promise(resolve => setTimeout(resolve, 1000));
+        }
+
+        // Add inline keyboard only to the last message part
+        const isLastPart = i === messageParts.length - 1;
+        await sendTelegramMessage(
+          telegramUserId,
+          messageParts[i],
+          isLastPart ? { reply_markup: createQuickActionsKeyboard() } : undefined
+        );
       }
 
-      console.log(`Step 23.${i + 1}: Sending message part ${i + 1}/${messageParts.length}`);
-      // Add inline keyboard only to the last message part
-      const isLastPart = i === messageParts.length - 1;
-      await sendTelegramMessage(
-        telegramUserId,
-        messageParts[i],
-        isLastPart ? { reply_markup: createQuickActionsKeyboard() } : undefined
-      );
-    }
-    console.log('Step 24: All message parts sent');
+      // Send Mini App button if solution was saved
+      if (solutionId) {
+        await sendTelegramMessage(
+          telegramUserId,
+          '📱 Открой полное решение с формулами:',
+          { reply_markup: generateMiniAppButton(solutionId) }
+        );
+      }
+    } catch (sendError) {
+      // If message sending fails (e.g., HTML parsing error), send fallback with Mini App
+      console.log('Error sending formatted message, falling back to Mini App');
+      console.error('Send error:', sendError);
 
-    // Send Mini App button if solution was saved
-    if (solutionId) {
-      console.log('Step 25: Sending Mini App button...');
-      await sendTelegramMessage(
-        telegramUserId,
-        '📱 Открой полное решение с формулами:',
-        { reply_markup: generateMiniAppButton(solutionId) }
-      );
-      console.log('Step 26: Mini App button sent');
+      if (solutionId) {
+        await sendTelegramMessage(
+          telegramUserId,
+          '✅ Решение готово!\n\n📱 Открой полное решение с формулами в приложении:',
+          { reply_markup: generateMiniAppButton(solutionId) }
+        );
+      } else {
+        throw sendError; // Re-throw if we don't have a solution to show
+      }
     }
-
-    console.log('=== END handleTextMessage SUCCESS ===');
   } catch (error) {
-    console.error('=== ERROR in handleTextMessage ===');
-    console.error('Error details:', {
-      error: error instanceof Error ? error.message : error,
-      stack: error instanceof Error ? error.stack : undefined,
-      telegramUserId,
-      textLength: text?.length,
-      text: text
-    });
+    console.error('Error in handleTextMessage:', error);
     await sendTelegramMessage(telegramUserId, '❌ Произошла ошибка. Попробуй ещё раз.');
   }
 }
@@ -1510,61 +1472,41 @@ async function handleCallbackQuery(callbackQuery: any) {
 
   // Handle quick action buttons
   if (data.startsWith('quick_action:')) {
-    console.log('=== QUICK ACTION HANDLER START ===');
-    console.log('Quick action data:', data);
+    console.log('Handling quick action:', data);
 
     try {
-      console.log('QA Step 1: Getting userId for telegram_user_id:', telegramUserId);
       const userId = await getUserIdFromTelegram(telegramUserId);
-      console.log('QA Step 2: UserId obtained:', userId);
 
       if (!userId) {
-        console.error('QA ERROR: User not found for telegram_user_id:', telegramUserId);
+        console.error('User not found for telegram_user_id:', telegramUserId);
         await sendTelegramMessage(telegramUserId, '❌ Пользователь не найден. Пожалуйста, нажми /start для регистрации.');
         return;
       }
 
-      console.log('QA Step 3: Determining prompt text for action:', data);
       // Determine prompt text based on button
       let promptText = '';
       switch (data) {
         case 'quick_action:plan':
           promptText = 'Составь план решения этой задачи';
-          console.log('QA Step 4: Action = plan');
           break;
         case 'quick_action:explain':
           promptText = 'Объясни этот момент подробнее';
-          console.log('QA Step 4: Action = explain');
           break;
         case 'quick_action:similar':
           promptText = 'Дай мне похожую задачу для практики';
-          console.log('QA Step 4: Action = similar');
           break;
         default:
-          console.log('QA ERROR: Unknown quick action:', data);
+          console.log('Unknown quick action:', data);
           return;
       }
 
-      console.log('QA Step 5: Prompt text determined:', promptText);
-      console.log('QA Step 6: Sending confirmation message to user...');
-
       // Show user what they "sent"
       await sendTelegramMessage(telegramUserId, `⚡ ${promptText}`);
-      console.log('QA Step 7: Confirmation message sent');
 
-      console.log('QA Step 8: Calling handleTextMessage...');
       // Process as text message with button input method
       await handleTextMessage(telegramUserId, userId, promptText);
-      console.log('QA Step 9: handleTextMessage completed');
-      console.log('=== QUICK ACTION HANDLER END SUCCESS ===');
     } catch (error) {
-      console.error('=== QUICK ACTION HANDLER ERROR ===');
-      console.error('Error handling quick action:', {
-        error: error instanceof Error ? error.message : error,
-        stack: error instanceof Error ? error.stack : undefined,
-        data: data,
-        telegramUserId: telegramUserId
-      });
+      console.error('Error handling quick action:', error);
       await sendTelegramMessage(telegramUserId, '❌ Произошла ошибка. Попробуй ещё раз.');
     }
     return;
