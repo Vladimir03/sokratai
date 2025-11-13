@@ -814,6 +814,64 @@ function createQuickActionsKeyboard() {
 }
 
 /**
+ * Extracts LaTeX formulas from text
+ * Returns array of formulas without delimiters
+ */
+function extractLatexFormulas(text: string): string[] {
+  const formulas: string[] = [];
+
+  // Extract display math $$...$$
+  const displayMatches = text.matchAll(/\$\$(.+?)\$\$/gs);
+  for (const match of displayMatches) {
+    formulas.push(match[1].trim());
+  }
+
+  // Extract inline math $...$ (avoid already extracted display math)
+  let tempText = text.replace(/\$\$(.+?)\$\$/gs, ''); // Remove display math first
+  const inlineMatches = tempText.matchAll(/\$([^$\n]+?)\$/g);
+  for (const match of inlineMatches) {
+    const formula = match[1].trim();
+    // Only add if it's substantial (not just a variable)
+    if (formula.length > 2 || /[\\{}^_]/.test(formula)) {
+      formulas.push(formula);
+    }
+  }
+
+  return formulas;
+}
+
+/**
+ * Extracts final answer from AI response
+ * Looks for common patterns like "Ответ:", "Итого:", etc.
+ */
+function extractFinalAnswer(aiResponse: string): string | null {
+  // Common answer patterns in Russian
+  const answerPatterns = [
+    /(?:Ответ|Итоговый ответ|Финальный ответ|Результат):\s*(.+?)(?:\n\n|\n$|$)/is,
+    /(?:Таким образом|Следовательно|Получаем),?\s*(.+?)(?:\n\n|\n$|$)/is,
+  ];
+
+  for (const pattern of answerPatterns) {
+    const match = aiResponse.match(pattern);
+    if (match && match[1]) {
+      const answer = match[1].trim();
+      // Extract LaTeX from answer if present
+      const formulas = extractLatexFormulas(answer);
+      return formulas.length > 0 ? formulas[0] : answer;
+    }
+  }
+
+  // Try to find the last substantial formula as the answer
+  const allFormulas = extractLatexFormulas(aiResponse);
+  if (allFormulas.length > 0) {
+    // Return the last formula (usually the final answer)
+    return allFormulas[allFormulas.length - 1];
+  }
+
+  return null;
+}
+
+/**
  * Parses AI response into structured solution steps
  * Attempts to extract numbered steps, formulas, and final answer
  */
@@ -836,21 +894,41 @@ function parseSolutionSteps(aiResponse: string): any[] {
 
     const content = aiResponse.substring(startPos, endPos).trim();
 
+    // Extract LaTeX formulas from this step's content
+    const formulas = extractLatexFormulas(content);
+
+    // Remove formulas from content text to avoid duplication in Mini App
+    let cleanContent = content;
+    formulas.forEach(formula => {
+      cleanContent = cleanContent.replace(`$$${formula}$$`, '');
+      cleanContent = cleanContent.replace(`$${formula}$`, '');
+    });
+    cleanContent = cleanContent.trim();
+
     steps.push({
       number: stepNumber++,
       title: title,
-      content: content.substring(0, 500), // Limit content length
-      formula: null // We could extract LaTeX formulas here in the future
+      content: cleanContent.substring(0, 500), // Limit content length
+      formula: formulas.length > 0 ? formulas[0] : null // Use first formula for display
     });
   }
 
   // If no steps found, create a single step with the full response
   if (steps.length === 0) {
+    const formulas = extractLatexFormulas(aiResponse);
+    let cleanContent = aiResponse;
+
+    // Remove formulas from content to avoid duplication
+    formulas.forEach(formula => {
+      cleanContent = cleanContent.replace(`$$${formula}$$`, '');
+      cleanContent = cleanContent.replace(`$${formula}$`, '');
+    });
+
     steps.push({
       number: 1,
       title: "Решение",
-      content: aiResponse.substring(0, 1000), // Limit to first 1000 chars
-      formula: null
+      content: cleanContent.trim().substring(0, 1000), // Limit to first 1000 chars
+      formula: formulas.length > 0 ? formulas[0] : null
     });
   }
 
@@ -869,11 +947,12 @@ async function saveSolution(
 ): Promise<string | null> {
   try {
     const solutionSteps = parseSolutionSteps(aiResponse);
+    const finalAnswer = extractFinalAnswer(aiResponse);
 
     const solutionData = {
       problem: problemText,
       solution_steps: solutionSteps,
-      final_answer: null, // Could extract this from AI response in future
+      final_answer: finalAnswer,
       raw_response: aiResponse
     };
 
