@@ -3,17 +3,38 @@ import { motion } from "framer-motion";
 
 import { cn } from "@/lib/utils";
 
-const Card = React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivElement>>(({ className, ...props }, ref) => (
-  <motion.div
-    ref={ref}
-    className={cn("rounded-lg border bg-card text-card-foreground shadow-sm transition-all duration-200 hover:shadow-elegant", className)}
-    initial={{ opacity: 0, y: 20 }}
-    animate={{ opacity: 1, y: 0 }}
-    transition={{ duration: 0.3, ease: "easeOut" }}
-    whileHover={{ y: -4, transition: { duration: 0.2 } }}
-    {...props}
-  />
-));
+interface CardProps extends React.HTMLAttributes<HTMLDivElement> {
+  animate?: boolean;
+}
+
+const Card = React.forwardRef<HTMLDivElement, CardProps>(({ className, animate = true, ...props }, ref) => {
+  // Если animate=false, используем обычный div без анимаций
+  if (!animate) {
+    return (
+      <div
+        ref={ref}
+        className={cn("rounded-lg border bg-card text-card-foreground shadow-sm transition-all duration-200 hover:shadow-elegant", className)}
+        {...props}
+      />
+    );
+  }
+  
+  // Исключаем drag events для совместимости с Framer Motion
+  const { onDrag, onDragStart, onDragEnd, ...motionProps } = props as any;
+  
+  // С анимациями
+  return (
+    <motion.div
+      ref={ref}
+      className={cn("rounded-lg border bg-card text-card-foreground shadow-sm transition-all duration-200 hover:shadow-elegant", className)}
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.3, ease: "easeOut" }}
+      whileHover={{ y: -4, transition: { duration: 0.2 } }}
+      {...motionProps}
+    />
+  );
+});
 Card.displayName = "Card";
 
 const CardHeader = React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivElement>>(

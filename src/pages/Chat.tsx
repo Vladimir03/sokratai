@@ -19,6 +19,7 @@ import ChatInput from "@/components/ChatInput";
 import DevPanel from "@/components/DevPanel";
 import { PageContent } from "@/components/PageContent";
 import { saveChatToSessionCache, loadChatFromSessionCache, clearChatCache } from "@/utils/chatCache";
+import { motion, AnimatePresence } from "framer-motion";
 
 type MessageStatus = 'sending' | 'sent' | 'ai_thinking' | 'delivered' | 'failed';
 
@@ -1442,28 +1443,39 @@ export default function Chat() {
               </div>
 
               {/* Scroll to bottom button - Telegram style - OUTSIDE scroll container */}
-              {showScrollButton && (
-                <button
-                  onClick={() => scrollToBottom(true)}
-                  className="
-                    fixed bottom-20 md:bottom-24 right-4 md:right-6 z-50
-                    flex items-center justify-center
-                    w-10 h-10 md:w-12 md:h-12
-                    bg-white
-                    border border-gray-300
-                    rounded-full
-                    shadow-lg
-                    hover:bg-gray-50
-                    active:scale-95
-                    transition-all
-                    duration-200
-                    animate-fade-in
-                  "
-                  aria-label="Прокрутить вниз"
-                >
-                  <ChevronDown className="w-5 h-5 md:w-6 md:h-6 text-gray-600" />
-                </button>
-              )}
+              <AnimatePresence>
+                {showScrollButton && (
+                  <motion.button
+                    onClick={() => scrollToBottom(true)}
+                    className="
+                      fixed bottom-20 md:bottom-24 right-4 md:right-6 z-50
+                      flex items-center justify-center
+                      w-10 h-10 md:w-12 md:h-12
+                      bg-white
+                      border border-gray-300
+                      rounded-full
+                      shadow-lg
+                      hover:bg-gray-50
+                      active:scale-95
+                      will-change-transform
+                    "
+                    aria-label="Прокрутить вниз"
+                    initial={{ opacity: 0, scale: 0.8, y: 10 }}
+                    animate={{ opacity: 1, scale: 1, y: 0 }}
+                    exit={{ opacity: 0, scale: 0.8, y: 10 }}
+                    transition={{ 
+                      type: "spring", 
+                      stiffness: 500, 
+                      damping: 30,
+                      duration: 0.2
+                    }}
+                    whileHover={{ scale: 1.1 }}
+                    whileTap={{ scale: 0.9 }}
+                  >
+                    <ChevronDown className="w-5 h-5 md:w-6 md:h-6 text-gray-600" />
+                  </motion.button>
+                )}
+              </AnimatePresence>
 
               <div className="relative">
                 <ChatInput
