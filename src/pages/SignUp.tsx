@@ -46,14 +46,14 @@ const SignUp = () => {
           data: {
             username: validation.data.username,
           },
-          emailRedirectTo: `${window.location.origin}/`,
+          emailRedirectTo: `${window.location.origin}/chat`,
         },
       });
 
       if (error) throw error;
 
       toast.success("Регистрация успешна! Входим в систему...");
-      navigate("/");
+      navigate("/chat");
     } catch (error: any) {
       toast.error(error.message || "Ошибка регистрации");
     } finally {

@@ -38,7 +38,7 @@ const Login = () => {
       if (error) throw error;
 
       toast.success("Успешный вход!");
-      navigate("/");
+      navigate("/chat");
     } catch (error: any) {
       toast.error(error.message || "Ошибка входа");
     } finally {
