@@ -14,7 +14,7 @@ import { ChatSidebar } from "@/components/ChatSidebar";
 import { TaskContextBanner } from "@/components/TaskContextBanner";
 import Navigation from "@/components/Navigation";
 import AuthGuard from "@/components/AuthGuard";
-import { useIsMobile } from "@/hooks/use-mobile";
+import { useIsMobile, useDeviceType, isAndroid } from "@/hooks/use-mobile";
 import ChatInput from "@/components/ChatInput";
 import DevPanel from "@/components/DevPanel";
 import { PageContent } from "@/components/PageContent";
@@ -44,8 +44,8 @@ export default function Chat() {
   const [showUploadHint, setShowUploadHint] = useState(false);
   const [isTransitioning, setIsTransitioning] = useState(false);
   const [showScrollButton, setShowScrollButton] = useState(false);
-  const [touchStart, setTouchStart] = useState<number | null>(null);
-  const [touchEnd, setTouchEnd] = useState<number | null>(null);
+  const [touchStart, setTouchStart] = useState<{x: number, y: number} | null>(null);
+  const [touchEnd, setTouchEnd] = useState<{x: number, y: number} | null>(null);
   const { toast } = useToast();
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
@@ -63,6 +63,7 @@ export default function Chat() {
   const navigate = useNavigate();
   const chatIdFromUrl = searchParams.get('id');
   const isMobile = useIsMobile();
+  const deviceType = useDeviceType();
 
   // Виртуализация для длинных чатов
   const rowVirtualizer = useVirtualizer({
@@ -1193,19 +1194,31 @@ export default function Chat() {
   // Touch handlers для swipe gesture (закрытие сайдбара)
   const handleTouchStart = useCallback((e: React.TouchEvent) => {
     setTouchEnd(null);
-    setTouchStart(e.targetTouches[0].clientX);
+    setTouchStart({
+      x: e.targetTouches[0].clientX,
+      y: e.targetTouches[0].clientY
+    });
   }, []);
 
   const handleTouchMove = useCallback((e: React.TouchEvent) => {
-    setTouchEnd(e.targetTouches[0].clientX);
+    setTouchEnd({
+      x: e.targetTouches[0].clientX,
+      y: e.targetTouches[0].clientY
+    });
   }, []);
 
   const handleTouchEnd = useCallback(() => {
     if (!touchStart || !touchEnd) return;
-    const distance = touchStart - touchEnd;
-    const isLeftSwipe = distance > 50;
     
-    if (isLeftSwipe && isMobile && isSidebarOpen) {
+    const horizontalDistance = touchStart.x - touchEnd.x;
+    const verticalDistance = Math.abs(touchStart.y - touchEnd.y);
+    
+    // Increased threshold from 50px to 75px for more intentional swipe
+    const isLeftSwipe = horizontalDistance > 75;
+    // Only close if horizontal swipe is dominant (not vertical scroll)
+    const isHorizontalSwipe = Math.abs(horizontalDistance) > verticalDistance * 2;
+    
+    if (isLeftSwipe && isHorizontalSwipe && isMobile && isSidebarOpen) {
       setIsSidebarOpen(false);
       console.log('👈 Sidebar closed by swipe');
     }
@@ -1376,8 +1389,13 @@ export default function Chat() {
                 style={{ 
                   WebkitOverflowScrolling: 'touch',
                   overscrollBehavior: 'contain',
-                  transform: 'translateZ(0)',
-                  willChange: 'scroll-position'
+                  overscrollBehaviorY: 'contain',
+                  // Use smooth scroll only on desktop for better mobile performance
+                  scrollBehavior: isMobile ? 'auto' : 'smooth',
+                  // Avoid transform on Android to prevent flicker, use it only on iOS
+                  ...(deviceType === 'ios' ? { WebkitTransform: 'translate3d(0,0,0)' } : {}),
+                  // Remove willChange on Android as it causes GPU layer issues
+                  ...(deviceType !== 'android' ? { willChange: 'scroll-position' } : {})
                 }}
               >
                 {loadingHistory ? (
@@ -1406,7 +1424,8 @@ export default function Chat() {
                                 top: 0,
                                 left: 0,
                                 width: '100%',
-                                transform: `translateY(${virtualRow.start}px)`,
+                                // Use translate3d for better GPU acceleration and smoother scrolling
+                                transform: `translate3d(0, ${virtualRow.start}px, 0)`,
                               }}
                             >
                       <ChatMessage

@@ -222,8 +222,18 @@ export function ChatSidebar({ currentChatId, onChatSelect, onClose, isMobile }: 
         <div className="p-4 border-t">
           <Button
             onClick={() => setShowCreateDialog(true)}
+            onTouchEnd={(e) => {
+              // iOS fix: prevent 300ms delay and ensure immediate response
+              e.preventDefault();
+              setShowCreateDialog(true);
+            }}
             variant="outline"
             className="w-full"
+            style={{ 
+              touchAction: 'manipulation',
+              userSelect: 'none',
+              WebkitTapHighlightColor: 'transparent'
+            }}
           >
             <Plus className="mr-2 h-4 w-4" />
             Новый чат

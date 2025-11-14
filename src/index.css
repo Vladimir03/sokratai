@@ -145,6 +145,14 @@ All colors MUST be HSL.
     -webkit-tap-highlight-color: transparent;
   }
 
+  /* Prevent 300ms delay on touch devices */
+  button,
+  a,
+  [role="button"] {
+    touch-action: manipulation;
+    user-select: none;
+  }
+
   /* Support for iOS safe areas */
   @supports (padding: max(0px)) {
     body {
@@ -244,6 +252,40 @@ All colors MUST be HSL.
       overflow-x: auto;
       -webkit-overflow-scrolling: touch;
       padding-right: 1rem;
+    }
+
+    /* Improve mobile scroll performance */
+    body {
+      overscroll-behavior-y: contain;
+      -webkit-overflow-scrolling: touch;
+    }
+
+    /* Optimize scroll containers on mobile */
+    .overflow-y-auto,
+    .overflow-auto {
+      overscroll-behavior-y: contain;
+      -webkit-overflow-scrolling: touch;
+    }
+
+    /* Use auto scroll behavior on mobile for better performance */
+    html {
+      scroll-behavior: auto;
+    }
+
+    /* Fix viewport height on iOS when keyboard appears */
+    body {
+      /* Use viewport height that accounts for browser UI */
+      min-height: 100vh;
+      min-height: -webkit-fill-available;
+    }
+
+    /* Prevent layout shift when keyboard opens */
+    @supports (-webkit-touch-callout: none) {
+      /* iOS-specific */
+      textarea,
+      input {
+        font-size: 16px; /* Prevent zoom on focus */
+      }
     }
   }
 }
