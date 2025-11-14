@@ -1,8 +1,14 @@
 import { memo, useRef, useState, useEffect, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { Send, Image as ImageIcon, X, Loader2 } from "lucide-react";
+import { Send, Image as ImageIcon, X, Loader2, Camera, ImagePlus } from "lucide-react";
 import { useIsMobile } from "@/hooks/use-mobile";
+import {
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+} from "@/components/ui/sheet";
 
 interface ChatInputProps {
   fileInputRef?: React.RefObject<HTMLInputElement>;
@@ -32,7 +38,10 @@ const ChatInput = memo(({
   onValueChange,
 }: ChatInputProps) => {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const galleryInputRef = useRef<HTMLInputElement>(null);
+  const cameraInputRef = useRef<HTMLInputElement>(null);
   const [message, setMessage] = useState("");
+  const [isSheetOpen, setIsSheetOpen] = useState(false);
   const isMobileDevice = useIsMobile();
 
   const adjustTextareaHeight = useCallback((element: HTMLTextAreaElement | null) => {
@@ -54,19 +63,47 @@ const ChatInput = memo(({
 
   // Handle iOS keyboard appearance
   useEffect(() => {
+    let isKeyboardOpen = false;
+    let initialHeight = window.innerHeight;
+
     const handleResize = () => {
-      if (document.activeElement === textareaRef.current) {
+      const currentHeight = window.innerHeight;
+      const heightDifference = initialHeight - currentHeight;
+      
+      // Keyboard is opening if height decreased by more than 150px
+      const keyboardOpening = heightDifference > 150;
+      
+      if (keyboardOpening && document.activeElement === textareaRef.current) {
+        isKeyboardOpen = true;
+        // Only scroll into view if the user just focused the input
+        // Use a shorter delay for better UX
         setTimeout(() => {
-          textareaRef.current?.scrollIntoView({ 
-            behavior: 'smooth', 
-            block: 'center' 
-          });
-        }, 300);
+          if (textareaRef.current && document.activeElement === textareaRef.current) {
+            textareaRef.current.scrollIntoView({ 
+              behavior: 'smooth', 
+              block: 'end' 
+            });
+          }
+        }, 100);
+      } else if (currentHeight > initialHeight - 50) {
+        // Keyboard is closing
+        isKeyboardOpen = false;
+        initialHeight = currentHeight;
       }
     };
 
+    const handleFocus = () => {
+      // Update initial height when input is focused
+      initialHeight = window.innerHeight;
+    };
+
     window.addEventListener('resize', handleResize);
-    return () => window.removeEventListener('resize', handleResize);
+    textareaRef.current?.addEventListener('focus', handleFocus);
+    
+    return () => {
+      window.removeEventListener('resize', handleResize);
+      textareaRef.current?.removeEventListener('focus', handleFocus);
+    };
   }, []);
 
   useEffect(() => {
@@ -74,6 +111,15 @@ const ChatInput = memo(({
       adjustTextareaHeight(textareaRef.current);
     }
   }, [message, isMobileDevice]);
+
+  // Wrapper to handle file upload and reset input values
+  const handleFileUploadWrapper = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    onFileUpload(e);
+    // Reset input values to allow re-selecting the same file
+    if (e.target) {
+      e.target.value = "";
+    }
+  }, [onFileUpload]);
 
   return (
     <div className="flex-shrink-0 border-t p-2 md:p-4 bg-background" style={{ paddingBottom: 'max(0.5rem, env(safe-area-inset-bottom))' }}>
@@ -100,25 +146,95 @@ const ChatInput = memo(({
 
         {/* Input area */}
         <div className="flex items-end gap-1 md:gap-2">
-          {/* File upload button */}
+          {/* File upload inputs */}
+          {/* Backward compatibility input */}
           <input
             ref={fileInputRef}
             type="file"
             id="file-upload"
             accept="image/*"
-            onChange={onFileUpload}
+            onChange={handleFileUploadWrapper}
             className="hidden"
           />
+          {/* Gallery input */}
+          <input
+            ref={galleryInputRef}
+            type="file"
+            id="gallery-upload"
+            accept="image/*"
+            onChange={handleFileUploadWrapper}
+            className="hidden"
+          />
+          {/* Camera input */}
+          <input
+            ref={cameraInputRef}
+            type="file"
+            id="camera-upload"
+            accept="image/*"
+            capture="environment"
+            onChange={handleFileUploadWrapper}
+            className="hidden"
+          />
+          
+          {/* Image upload button - opens sheet */}
           <Button
             variant="outline"
             size="icon"
             className="h-10 w-10 md:h-11 md:w-11 shrink-0"
-            onClick={() => fileInputRef.current?.click()}
+            onClick={() => setIsSheetOpen(true)}
             disabled={isLoading}
             title="Загрузить фото"
           >
             <ImageIcon className="h-4 w-4 md:h-5 md:w-5" />
           </Button>
+
+          {/* Selection Sheet */}
+          <Sheet open={isSheetOpen} onOpenChange={setIsSheetOpen}>
+            <SheetContent side="bottom" className="rounded-t-3xl pb-8">
+              <SheetHeader>
+                <SheetTitle className="text-center">Выберите источник</SheetTitle>
+              </SheetHeader>
+              <div className="mt-6 space-y-3">
+                {/* Camera option */}
+                <button
+                  onClick={() => {
+                    cameraInputRef.current?.click();
+                    setIsSheetOpen(false);
+                  }}
+                  className="w-full flex items-center gap-4 p-4 rounded-xl hover:bg-muted transition-colors text-left"
+                >
+                  <div className="flex-shrink-0 w-12 h-12 rounded-full bg-primary/10 flex items-center justify-center">
+                    <Camera className="h-6 w-6 text-primary" />
+                  </div>
+                  <div className="flex-1">
+                    <div className="font-semibold">Сфотографировать</div>
+                    <div className="text-sm text-muted-foreground">
+                      Сделать фото с камеры
+                    </div>
+                  </div>
+                </button>
+
+                {/* Gallery option */}
+                <button
+                  onClick={() => {
+                    galleryInputRef.current?.click();
+                    setIsSheetOpen(false);
+                  }}
+                  className="w-full flex items-center gap-4 p-4 rounded-xl hover:bg-muted transition-colors text-left"
+                >
+                  <div className="flex-shrink-0 w-12 h-12 rounded-full bg-primary/10 flex items-center justify-center">
+                    <ImagePlus className="h-6 w-6 text-primary" />
+                  </div>
+                  <div className="flex-1">
+                    <div className="font-semibold">Выбрать из галереи</div>
+                    <div className="text-sm text-muted-foreground">
+                      Выбрать фото из галереи
+                    </div>
+                  </div>
+                </button>
+              </div>
+            </SheetContent>
+          </Sheet>
 
           {/* Text input */}
           <Textarea

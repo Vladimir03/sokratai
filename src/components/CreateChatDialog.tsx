@@ -26,13 +26,22 @@ export function CreateChatDialog({ open, onClose, onChatCreated }: CreateChatDia
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
-  // iOS fix - cleanup when dialog closes
+  // iOS fix - cleanup when dialog closes and ensure immediate opening
   useEffect(() => {
     if (!open) {
       // Restore body styles when dialog closes
       document.body.style.overflow = '';
       document.body.style.position = '';
       document.body.style.pointerEvents = '';
+    } else {
+      // Ensure dialog opens immediately on iOS
+      // Force a reflow to ensure the dialog is rendered
+      requestAnimationFrame(() => {
+        const titleInput = document.getElementById('title');
+        if (titleInput) {
+          titleInput.focus();
+        }
+      });
     }
   }, [open]);
 
