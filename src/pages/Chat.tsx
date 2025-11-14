@@ -20,6 +20,7 @@ import DevPanel from "@/components/DevPanel";
 import { PageContent } from "@/components/PageContent";
 import { saveChatToSessionCache, loadChatFromSessionCache, clearChatCache } from "@/utils/chatCache";
 import { motion, AnimatePresence } from "framer-motion";
+import { haptics } from "@/utils/haptics";
 
 type MessageStatus = 'sending' | 'sent' | 'ai_thinking' | 'delivered' | 'failed';
 
@@ -461,6 +462,7 @@ export default function Chat() {
     if (!file) return;
 
     if (!file.type.startsWith('image/')) {
+      haptics.warning();
       toast({
         title: "Ошибка",
         description: "Можно загружать только изображения",
@@ -470,6 +472,7 @@ export default function Chat() {
     }
 
     if (file.size > 10 * 1024 * 1024) {
+      haptics.warning();
       toast({
         title: "Ошибка",
         description: "Файл слишком большой (макс. 10MB)",
@@ -482,6 +485,9 @@ export default function Chat() {
     const newPreviewUrl = URL.createObjectURL(file);
     blobUrlsRef.current.add(newPreviewUrl);
     setPreviewUrl(newPreviewUrl);
+    
+    // Haptic feedback при успешной загрузке файла
+    haptics.success();
   }, [toast]);
 
   const handlePaste = useCallback((e: React.ClipboardEvent<HTMLTextAreaElement>) => {
@@ -799,6 +805,9 @@ export default function Chat() {
       return;
     }
     
+    // Haptic feedback при отправке сообщения
+    haptics.impact();
+    
     // Защита от множественных вызовов (iOS Safari bug)
     if (isSendingRef.current) {
       console.log('⚠️ Already sending, ignoring duplicate call');
@@ -990,6 +999,9 @@ export default function Chat() {
       isSendingRef.current = false;
       setIsLoading(false);
       
+      // Haptic feedback при ошибке
+      haptics.error();
+      
       toast({
         title: "Ошибка",
         description: error instanceof Error ? error.message : "Не удалось отправить сообщение",
@@ -1005,6 +1017,8 @@ export default function Chat() {
   }, [messages, uploadedFile, isLoading, loadingHistory, user?.id, removeUploadedFile, currentChat, currentChatId, queryClient, toast, updateMessageStatus]);
 
   const handleRetryMessage = useCallback((messageContent: string, inputMethod: 'text' | 'voice' | 'button' = 'text') => {
+    // Haptic feedback при повторной попытке
+    haptics.button();
     // Удалить failed сообщение
     setMessages(prev => prev.filter(msg => msg.status !== 'failed'));
     // Отправить заново
@@ -1496,7 +1510,10 @@ export default function Chat() {
               <AnimatePresence>
                 {showScrollButton && (
                   <motion.button
-                    onClick={() => scrollToBottom(true)}
+                    onClick={() => {
+                      haptics.tap();
+                      scrollToBottom(true);
+                    }}
                     className="
                       fixed bottom-20 md:bottom-24 right-4 md:right-6 z-50
                       flex items-center justify-center
