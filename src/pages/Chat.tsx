@@ -65,11 +65,37 @@ export default function Chat() {
   const isMobile = useIsMobile();
   const deviceType = useDeviceType();
 
+  // Функция для оценки размера сообщения на основе его контента
+  const estimateMessageSize = useCallback((index: number) => {
+    const msg = messages[index];
+    if (!msg) return 200; // Default fallback
+    
+    let estimatedHeight = 80; // Base height (padding, margins)
+    
+    // Estimate based on content length
+    const contentLength = msg.content?.length || 0;
+    const estimatedLines = Math.ceil(contentLength / 80); // ~80 chars per line
+    estimatedHeight += estimatedLines * 24; // ~24px per line
+    
+    // Add extra height for images
+    if (msg.image_url) {
+      estimatedHeight += 300; // Image height + margins
+    }
+    
+    // Assistant messages tend to be longer
+    if (msg.role === 'assistant') {
+      estimatedHeight += 40; // Extra for action buttons
+    }
+    
+    // Clamp between reasonable bounds
+    return Math.min(Math.max(estimatedHeight, 100), 800);
+  }, [messages]);
+
   // Виртуализация для длинных чатов
   const rowVirtualizer = useVirtualizer({
     count: messages.length,
     getScrollElement: () => messagesContainerRef.current,
-    estimateSize: () => 200,
+    estimateSize: estimateMessageSize,
     overscan: 5,
     enabled: messages.length > 50,
   });
@@ -1383,7 +1409,6 @@ export default function Chat() {
                 ref={messagesContainerRef} 
                 className={`
                   flex-1 overflow-y-auto overflow-x-hidden px-4
-                  transition-opacity duration-150
                   ${isTransitioning ? 'opacity-0' : 'opacity-100'}
                 `}
                 style={{ 
@@ -1392,6 +1417,8 @@ export default function Chat() {
                   overscrollBehaviorY: 'contain',
                   // Use smooth scroll only on desktop for better mobile performance
                   scrollBehavior: isMobile ? 'auto' : 'smooth',
+                  // Apply opacity transition only during chat transitions, not during scroll
+                  transition: isTransitioning ? 'opacity 150ms ease-in-out' : 'none',
                   // Avoid transform on Android to prevent flicker, use it only on iOS
                   ...(deviceType === 'ios' ? { WebkitTransform: 'translate3d(0,0,0)' } : {}),
                   // Remove willChange on Android as it causes GPU layer issues
@@ -1405,6 +1432,7 @@ export default function Chat() {
                     {messages.length > 50 ? (
                       // Виртуализированный рендер для больших чатов
                       <div
+                        className="virtualized-container"
                         style={{
                           height: `${rowVirtualizer.getTotalSize()}px`,
                           width: '100%',
@@ -1419,13 +1447,16 @@ export default function Chat() {
                               key={virtualRow.index}
                               data-index={virtualRow.index}
                               ref={rowVirtualizer.measureElement}
+                              className="virtualized-item"
                               style={{
                                 position: 'absolute',
                                 top: 0,
                                 left: 0,
                                 width: '100%',
-                                // Use translate3d for better GPU acceleration and smoother scrolling
+                                // Use translate3d for GPU acceleration
                                 transform: `translate3d(0, ${virtualRow.start}px, 0)`,
+                                // Prevent subpixel rendering issues
+                                WebkitFontSmoothing: 'subpixel-antialiased',
                               }}
                             >
                       <ChatMessage

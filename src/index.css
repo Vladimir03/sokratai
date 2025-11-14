@@ -153,6 +153,26 @@ All colors MUST be HSL.
     user-select: none;
   }
 
+  /* Disable transitions inside virtualized containers to prevent flicker */
+  .virtualized-container * {
+    transition: none !important;
+    animation: none !important;
+  }
+
+  /* Re-enable only specific safe transitions for hover states */
+  .virtualized-container button:hover,
+  .virtualized-container a:hover {
+    transition: background-color 0.1s ease !important;
+  }
+
+  /* CSS containment for virtualized items to isolate layout/paint */
+  .virtualized-item {
+    contain: layout style paint;
+    content-visibility: auto;
+    backface-visibility: hidden;
+    -webkit-backface-visibility: hidden;
+  }
+
   /* Support for iOS safe areas */
   @supports (padding: max(0px)) {
     body {
