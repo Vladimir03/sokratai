@@ -761,6 +761,8 @@ function addBlockSpacing(text: string): string {
   
   // Add spacing after bold headings if not already present
   result = result.replace(/(\*\*[^*]+\*\*)\n([^\n])/g, '$1\n\n$2');
+  // If bold block starts right after a sentence with colon, move it to new paragraph
+  result = result.replace(/(:)\s*(\*\*[^*]+\*\*)/g, '$1\n\n$2');
   
   // Add spacing between list items and regular text
   // Match lines starting with emoji list markers
