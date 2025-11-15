@@ -975,43 +975,157 @@ function createQuickActionsKeyboard() {
 }
 
 /**
+ * Extracts LaTeX formulas from text
+ * Returns object with display formulas and text without them
+ */
+function extractLatexFormulas(text: string): { formulas: string[], textWithoutFormulas: string } {
+  const formulas: string[] = [];
+  let textWithoutFormulas = text;
+
+  // Extract display mode formulas $$...$$
+  const displayMatches = text.match(/\$\$(.+?)\$\$/gs);
+  if (displayMatches) {
+    for (const match of displayMatches) {
+      const formula = match.replace(/\$\$/g, '').trim();
+      if (formula) {
+        formulas.push(formula);
+        // Remove from text
+        textWithoutFormulas = textWithoutFormulas.replace(match, '');
+      }
+    }
+  }
+
+  // Extract inline formulas $...$ (but be careful with single $ signs)
+  const inlineMatches = text.match(/\$([^$\n]+?)\$/g);
+  if (inlineMatches) {
+    for (const match of inlineMatches) {
+      const formula = match.replace(/\$/g, '').trim();
+      // Only consider it a formula if it contains LaTeX commands or math symbols
+      if (formula && (formula.includes('\\') || formula.match(/[a-z]_|[a-z]\^|\^[0-9]/))) {
+        formulas.push(formula);
+      }
+    }
+  }
+
+  return { formulas, textWithoutFormulas: textWithoutFormulas.trim() };
+}
+
+/**
+ * Extracts final answer from AI response
+ */
+function extractFinalAnswer(aiResponse: string): string | null {
+  // Look for answer patterns
+  const patterns = [
+    /\*\*Ответ:\*\*\s*(.+?)(?:\n\n|\n(?=[А-ЯA-Z])|$)/s,
+    /Ответ:\s*(.+?)(?:\n\n|\n(?=[А-ЯA-Z])|$)/s,
+    /\*\*Итог:\*\*\s*(.+?)(?:\n\n|\n(?=[А-ЯA-Z])|$)/s,
+    /\*\*Итоговый ответ:\*\*\s*(.+?)(?:\n\n|\n(?=[А-ЯA-Z])|$)/s,
+    /\*\*Финальный ответ:\*\*\s*(.+?)(?:\n\n|\n(?=[А-ЯA-Z])|$)/s,
+  ];
+
+  for (const pattern of patterns) {
+    const match = aiResponse.match(pattern);
+    if (match && match[1]) {
+      return match[1].trim();
+    }
+  }
+
+  return null;
+}
+
+/**
  * Parses AI response into structured solution steps
- * Attempts to extract numbered steps, formulas, and final answer
+ * Extracts steps, content, formulas, and methods from raw AI response
  */
 function parseSolutionSteps(aiResponse: string): any[] {
   const steps: any[] = [];
-
-  // Try to find numbered steps (1., 2., etc. or 1), 2), etc. or **1.**, etc.)
-  const stepRegex = /(?:^|\n)(?:\*\*)?(\d+)[.):\s](?:\*\*)?\s*([^\n]+)/g;
+  
+  // Split text into potential sections using various heading patterns
+  // Patterns: ### Heading, **Heading:**, 1. Heading, **Шаг N:**
+  const sectionRegex = /(?:^|\n)((?:###\s+(.+)|(?:\*\*)?(?:Шаг\s+)?(\d+)[.):\s]+(?:\*\*)?\s*(.+?)(?:\*\*)?:|(?:\*\*)([^*]+?)(?:\*\*):))/gm;
+  
+  const sections: Array<{start: number, title: string, number?: number}> = [];
   let match;
-  let stepNumber = 1;
-
-  while ((match = stepRegex.exec(aiResponse)) !== null) {
-    const title = match[2].trim();
-
-    // Try to extract content after this step title
-    const startPos = match.index + match[0].length;
-    const nextMatch = stepRegex.exec(aiResponse);
-    const endPos = nextMatch ? nextMatch.index : aiResponse.length;
-    stepRegex.lastIndex = nextMatch ? nextMatch.index : aiResponse.length;
-
-    const content = aiResponse.substring(startPos, endPos).trim();
-
-    steps.push({
-      number: stepNumber++,
-      title: title,
-      content: content.substring(0, 500), // Limit content length
-      formula: null // We could extract LaTeX formulas here in the future
+  
+  while ((match = sectionRegex.exec(aiResponse)) !== null) {
+    const title = match[2] || match[4] || match[5] || '';
+    const number = match[3] ? parseInt(match[3]) : undefined;
+    sections.push({
+      start: match.index,
+      title: title.trim(),
+      number
     });
   }
 
-  // If no steps found, create a single step with the full response
+  // If we found sections, extract content for each
+  if (sections.length > 0) {
+    for (let i = 0; i < sections.length; i++) {
+      const section = sections[i];
+      const nextSection = sections[i + 1];
+      const endPos = nextSection ? nextSection.start : aiResponse.length;
+      
+      // Extract content between this section and the next
+      const fullContent = aiResponse.substring(section.start, endPos);
+      
+      // Remove the heading line itself
+      const contentLines = fullContent.split('\n').slice(1).join('\n').trim();
+      
+      // Extract formulas from content
+      const { formulas, textWithoutFormulas } = extractLatexFormulas(contentLines);
+      
+      // Extract method hints (lines starting with 💡, Метод:, etc)
+      const methodMatch = contentLines.match(/(?:💡\s*)?(?:\*\*)?Метод:(?:\*\*)?\s*(.+?)(?:\n|$)/);
+      const method = methodMatch ? methodMatch[1].trim() : null;
+      
+      // Get the main formula (usually the first display formula)
+      const mainFormula = formulas.length > 0 ? formulas[0] : null;
+      
+      // Clean content: remove method line if present
+      let cleanContent = textWithoutFormulas;
+      if (methodMatch) {
+        cleanContent = cleanContent.replace(methodMatch[0], '').trim();
+      }
+      
+      steps.push({
+        number: section.number || (i + 1),
+        title: section.title || `Шаг ${i + 1}`,
+        content: cleanContent.substring(0, 800), // Reasonable limit
+        formula: mainFormula,
+        method: method
+      });
+    }
+  }
+
+  // Fallback: if no structured sections found, try simple numbered list
   if (steps.length === 0) {
+    const simpleStepRegex = /(?:^|\n)(\d+)[.)]\s+(.+?)(?=\n\d+[.)]|\n\n|$)/gs;
+    let stepMatch;
+    let stepNum = 1;
+    
+    while ((stepMatch = simpleStepRegex.exec(aiResponse)) !== null) {
+      const content = stepMatch[2].trim();
+      const { formulas } = extractLatexFormulas(content);
+      
+      steps.push({
+        number: stepNum++,
+        title: content.substring(0, 60).trim() + (content.length > 60 ? '...' : ''),
+        content: content.substring(0, 800),
+        formula: formulas.length > 0 ? formulas[0] : null,
+        method: null
+      });
+    }
+  }
+
+  // Ultimate fallback: create a single step with full response
+  if (steps.length === 0) {
+    const { formulas } = extractLatexFormulas(aiResponse);
+    
     steps.push({
       number: 1,
       title: "Решение",
-      content: aiResponse.substring(0, 1000), // Limit to first 1000 chars
-      formula: null
+      content: aiResponse.substring(0, 1000),
+      formula: formulas.length > 0 ? formulas[0] : null,
+      method: null
     });
   }
 
@@ -1020,6 +1134,7 @@ function parseSolutionSteps(aiResponse: string): any[] {
 
 /**
  * Saves solution to database and returns solution ID
+ * Parses AI response BEFORE formatting for Telegram
  */
 async function saveSolution(
   telegramChatId: number,
@@ -1029,14 +1144,19 @@ async function saveSolution(
   aiResponse: string
 ): Promise<string | null> {
   try {
+    // Parse the RAW AI response before any Telegram formatting
     const solutionSteps = parseSolutionSteps(aiResponse);
+    const finalAnswer = extractFinalAnswer(aiResponse);
 
     const solutionData = {
       problem: problemText,
       solution_steps: solutionSteps,
-      final_answer: null, // Could extract this from AI response in future
+      final_answer: finalAnswer,
       raw_response: aiResponse
     };
+
+    console.log('Saving solution with', solutionSteps.length, 'steps');
+    console.log('Final answer:', finalAnswer);
 
     const { data: solution, error } = await supabase
       .from('solutions')
@@ -1055,6 +1175,7 @@ async function saveSolution(
       return null;
     }
 
+    console.log('Solution saved successfully with ID:', solution?.id);
     return solution?.id || null;
   } catch (error) {
     console.error('Error saving solution:', error);
