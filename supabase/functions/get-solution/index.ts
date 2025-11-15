@@ -17,9 +17,8 @@ serve(async (req) => {
   }
 
   try {
-    // Get solution ID from query parameters
-    const url = new URL(req.url);
-    const solutionId = url.searchParams.get('id');
+    // Get solution ID from request body
+    const { id: solutionId } = await req.json();
 
     if (!solutionId) {
       throw new Error('Solution ID is required');
