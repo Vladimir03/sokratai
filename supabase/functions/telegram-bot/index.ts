@@ -1014,13 +1014,15 @@ function extractLatexFormulas(text: string): { formulas: string[], textWithoutFo
  * Extracts final answer from AI response
  */
 function extractFinalAnswer(aiResponse: string): string | null {
-  // Look for answer patterns
+  // Look for answer patterns - including formats without bold markers
   const patterns = [
     /\*\*Ответ:\*\*\s*(.+?)(?:\n\n|\n(?=[А-ЯA-Z])|$)/s,
     /Ответ:\s*(.+?)(?:\n\n|\n(?=[А-ЯA-Z])|$)/s,
     /\*\*Итог:\*\*\s*(.+?)(?:\n\n|\n(?=[А-ЯA-Z])|$)/s,
     /\*\*Итоговый ответ:\*\*\s*(.+?)(?:\n\n|\n(?=[А-ЯA-Z])|$)/s,
     /\*\*Финальный ответ:\*\*\s*(.+?)(?:\n\n|\n(?=[А-ЯA-Z])|$)/s,
+    /Итак[,:]?\s*(.+?)(?:\n\n|\n(?=[А-ЯA-Z])|$)/is,
+    /Значит,?\s+(.+?)(?:\n\n|\n(?=[А-ЯA-Z])|$)/is,
   ];
 
   for (const pattern of patterns) {
@@ -1041,15 +1043,15 @@ function parseSolutionSteps(aiResponse: string): any[] {
   const steps: any[] = [];
   
   // Split text into potential sections using various heading patterns
-  // Patterns: ### Heading, **Heading:**, 1. Heading, **Шаг N:**
-  const sectionRegex = /(?:^|\n)((?:###\s+(.+)|(?:\*\*)?(?:Шаг\s+)?(\d+)[.):\s]+(?:\*\*)?\s*(.+?)(?:\*\*)?:|(?:\*\*)([^*]+?)(?:\*\*):))/gm;
+  // Patterns: ### Heading, **Heading:**, 1. Heading, **Шаг N:**, **Шаг 1: Title**
+  const sectionRegex = /(?:^|\n)(?:#{1,3}\s+(.+)|(?:\*\*)?(?:Шаг\s+)?(\d+)[.):\s]+\s*(.+?)(?:\*\*)?|(?:\*\*)(.+?)(?:\*\*):)/gm;
   
   const sections: Array<{start: number, title: string, number?: number}> = [];
   let match;
   
   while ((match = sectionRegex.exec(aiResponse)) !== null) {
-    const title = match[2] || match[4] || match[5] || '';
-    const number = match[3] ? parseInt(match[3]) : undefined;
+    const title = match[1] || match[3] || match[4] || '';
+    const number = match[2] ? parseInt(match[2]) : undefined;
     sections.push({
       start: match.index,
       title: title.trim(),

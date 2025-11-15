@@ -31,10 +31,10 @@ serve(async (req) => {
       throw new Error('Invalid solution ID format');
     }
 
-    // Create Supabase client (using anon key for public access)
+    // Create Supabase client with service role key to bypass RLS
     const supabaseClient = createClient(
       Deno.env.get('SUPABASE_URL') ?? '',
-      Deno.env.get('SUPABASE_ANON_KEY') ?? ''
+      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
     );
 
     // Fetch solution from database
