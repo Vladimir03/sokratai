@@ -72,30 +72,30 @@ export default function MiniAppSolution() {
           await new Promise(resolve => setTimeout(resolve, 500)); // Simulate loading
           setSolution(EXAMPLE_SOLUTION);
         } else {
-          // Fetch from Supabase
-          const { data, error } = await supabase
-            .from('solutions')
-            .select('*')
-            .eq('id', id)
-            .single();
+          // Fetch from edge function (bypasses RLS)
+          const { data, error } = await supabase.functions.invoke('get-solution', {
+            body: { id }
+          });
 
           if (error) {
-            console.error('Supabase error:', error);
+            console.error('Edge function error:', error);
             throw new Error('Решение не найдено');
           }
 
-          if (!data) {
+          if (!data?.success || !data?.data) {
             throw new Error('Решение не найдено');
           }
 
+          const dbData = data.data;
+          
           // Transform database structure to Solution type
-          const solutionData = data.solution_data as any;
+          const solutionData = dbData.solution_data as any;
           const transformedSolution: Solution = {
-            id: data.id,
-            problem: data.problem_text,
+            id: dbData.id,
+            problem: dbData.problem_text,
             steps: solutionData.solution_steps || [],
             finalAnswer: solutionData.final_answer || '',
-            createdAt: data.created_at,
+            createdAt: dbData.created_at,
           };
 
           setSolution(transformedSolution);
