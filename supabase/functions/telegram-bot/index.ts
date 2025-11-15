@@ -613,10 +613,38 @@ const LATEX_TO_UNICODE: Record<string, string> = {
 };
 
 /**
- * Preprocesses LaTeX: removes delimiters and converts fractions
+ * Preprocesses LaTeX: removes delimiters, converts fractions, detects complex formulas
  */
 function preprocessLatex(text: string): string {
   let result = text;
+  let hasComplexFormula = false;
+
+  // First, detect complex formulas before processing
+  // Check display math $$ ... $$
+  const displayMathMatches = text.match(/\$\$(.+?)\$\$/gs);
+  if (displayMathMatches) {
+    for (const match of displayMathMatches) {
+      const formula = match.replace(/\$\$/g, '');
+      if (isComplexFormula(formula)) {
+        hasComplexFormula = true;
+        break;
+      }
+    }
+  }
+
+  // Check inline math $ ... $
+  if (!hasComplexFormula) {
+    const inlineMathMatches = text.match(/\$([^$]+?)\$/g);
+    if (inlineMathMatches) {
+      for (const match of inlineMathMatches) {
+        const formula = match.replace(/\$/g, '');
+        if (isComplexFormula(formula)) {
+          hasComplexFormula = true;
+          break;
+        }
+      }
+    }
+  }
 
   // Remove display math delimiters $$ ... $$ (non-greedy)
   result = result.replace(/\$\$(.+?)\$\$/gs, '$1');
@@ -651,6 +679,11 @@ function preprocessLatex(text: string): string {
   // Clean up double spaces
   result = result.replace(/\s+/g, ' ');
 
+  // Add hint about Mini App if complex formulas detected
+  if (hasComplexFormula) {
+    result += '\n\n📱 <i>Для красивого отображения формул открой Mini App ниже</i>';
+  }
+
   return result;
 }
 
@@ -670,10 +703,120 @@ function convertLatexToUnicode(text: string): string {
 }
 
 /**
+ * Converts markdown headings to bold text with spacing
+ */
+function convertMarkdownHeadings(text: string): string {
+  let result = text;
+  
+  // Convert ### Heading, ## Heading, # Heading to bold with newlines
+  // Process from most specific (###) to least specific (#) to avoid conflicts
+  result = result.replace(/^### (.+)$/gm, '\n**$1**\n');
+  result = result.replace(/^## (.+)$/gm, '\n**$1**\n');
+  result = result.replace(/^# (.+)$/gm, '\n**$1**\n');
+  
+  return result;
+}
+
+/**
+ * Converts markdown lists to emoji markers
+ */
+function convertMarkdownLists(text: string): string {
+  let result = text;
+  
+  // Emoji numbers for ordered lists (1-10)
+  const numberEmojis = ['1️⃣', '2️⃣', '3️⃣', '4️⃣', '5️⃣', '6️⃣', '7️⃣', '8️⃣', '9️⃣', '🔟'];
+  
+  // Convert numbered lists (1. , 2. , etc.)
+  // First pass: detect numbered lists and convert to emoji
+  result = result.replace(/^(\d+)\.\s+(.+)$/gm, (match, num, text) => {
+    const number = parseInt(num);
+    if (number >= 1 && number <= 10) {
+      return `${numberEmojis[number - 1]} ${text}`;
+    } else {
+      // For numbers > 10, use simple format
+      return `${num}. ${text}`;
+    }
+  });
+  
+  // Convert bulleted lists (- or * at start of line)
+  result = result.replace(/^[-*]\s+(.+)$/gm, '📌 $1');
+  
+  // Handle special emoji-based lists from AI (like 1️⃣, 2️⃣, etc that are already there)
+  // These should already be fine, no conversion needed
+  
+  return result;
+}
+
+/**
+ * Adds spacing between blocks (paragraphs, lists, formulas)
+ */
+function addBlockSpacing(text: string): string {
+  let result = text;
+  
+  // Add spacing after bold headings if not already present
+  result = result.replace(/(\*\*[^*]+\*\*)\n([^\n])/g, '$1\n\n$2');
+  
+  // Add spacing between list items and regular text
+  // Match lines starting with emoji list markers
+  result = result.replace(/(^[📌1️⃣2️⃣3️⃣4️⃣5️⃣6️⃣7️⃣8️⃣9️⃣🔟].+)$/gm, (match, p1, offset, string) => {
+    // Check if next line exists and doesn't start with a list marker
+    const nextLineMatch = string.slice(offset + match.length).match(/^\n([^\n])/);
+    if (nextLineMatch && !nextLineMatch[1].match(/[📌1️⃣2️⃣3️⃣4️⃣5️⃣6️⃣7️⃣8️⃣9️⃣🔟]/)) {
+      return match + '\n';
+    }
+    return match;
+  });
+  
+  // Add spacing before list items
+  result = result.replace(/([^\n])\n([📌1️⃣2️⃣3️⃣4️⃣5️⃣6️⃣7️⃣8️⃣9️⃣🔟])/g, '$1\n\n$2');
+  
+  // Ensure spacing after special emoji markers
+  result = result.replace(/(^[✅❌💡🎯⚠️🗺️].+)$/gm, (match, p1, offset, string) => {
+    const nextLineMatch = string.slice(offset + match.length).match(/^\n([^\n])/);
+    if (nextLineMatch && !nextLineMatch[1].match(/[✅❌💡🎯⚠️🗺️📌1️⃣2️⃣3️⃣4️⃣5️⃣6️⃣7️⃣8️⃣9️⃣🔟]/)) {
+      return match + '\n';
+    }
+    return match;
+  });
+  
+  // Clean up excessive newlines (more than 2 in a row → keep 2)
+  result = result.replace(/\n{3,}/g, '\n\n');
+  
+  return result;
+}
+
+/**
+ * Detects if a LaTeX formula is complex
+ */
+function isComplexFormula(formula: string): boolean {
+  // Consider complex if:
+  // 1. Length > 50 characters
+  if (formula.length > 50) return true;
+  
+  // 2. Contains nested fractions (multiple \frac)
+  const fracMatches = formula.match(/\\frac/g);
+  if (fracMatches && fracMatches.length > 1) return true;
+  
+  // 3. Contains matrices, integrals, summations
+  if (formula.match(/\\begin\{(matrix|pmatrix|bmatrix|array)\}|\\int|\\sum|\\prod|\\lim/)) {
+    return true;
+  }
+  
+  // 4. Contains complex nested structures
+  const openBraces = (formula.match(/\{/g) || []).length;
+  if (openBraces > 3) return true;
+  
+  return false;
+}
+
+/**
  * Converts markdown to Telegram HTML format
  */
 function convertMarkdownToTelegramHTML(text: string): string {
   let result = text;
+  
+  // Code blocks: ```code``` → <pre>code</pre>
+  result = result.replace(/```([^`]+)```/g, '<pre>$1</pre>');
   
   // Bold: **text** or __text__ → <b>text</b>
   result = result.replace(/\*\*(.+?)\*\*/g, '<b>$1</b>');
@@ -683,7 +826,7 @@ function convertMarkdownToTelegramHTML(text: string): string {
   result = result.replace(/(?<!\*)\*([^*]+?)\*(?!\*)/g, '<i>$1</i>');
   result = result.replace(/(?<!_)_([^_]+?)_(?!_)/g, '<i>$1</i>');
   
-  // Code: `text` → <code>text</code>
+  // Inline code: `text` → <code>text</code>
   result = result.replace(/`(.+?)`/g, '<code>$1</code>');
   
   // Strikethrough: ~~text~~ → <s>text</s>
@@ -695,15 +838,25 @@ function convertMarkdownToTelegramHTML(text: string): string {
 /**
  * Main formatter function
  * Converts LaTeX and markdown to Telegram-friendly HTML format
+ * Order matters: process structure first, then formatting
  */
 function formatForTelegram(text: string): string {
-  // Step 1: Preprocess LaTeX (remove $ delimiters, convert fractions)
-  let result = preprocessLatex(text);
+  // Step 1: Convert markdown headings to bold with spacing (before other processing)
+  let result = convertMarkdownHeadings(text);
 
-  // Step 2: Convert LaTeX commands to Unicode symbols
+  // Step 2: Convert markdown lists to emoji markers (before HTML conversion)
+  result = convertMarkdownLists(result);
+
+  // Step 3: Preprocess LaTeX (remove $ delimiters, convert fractions, detect complex formulas)
+  result = preprocessLatex(result);
+
+  // Step 4: Convert LaTeX commands to Unicode symbols
   result = convertLatexToUnicode(result);
 
-  // Step 3: Convert markdown to Telegram HTML
+  // Step 5: Add spacing between blocks (after structure is clear, before HTML)
+  result = addBlockSpacing(result);
+
+  // Step 6: Convert markdown to Telegram HTML (last step, preserves HTML tags)
   result = convertMarkdownToTelegramHTML(result);
 
   return result;
