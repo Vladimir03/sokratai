@@ -676,12 +676,18 @@ function preprocessLatex(text: string): string {
   // But be careful not to remove structural braces
   result = result.replace(/\{([^{}]+)\}/g, '$1');
 
-  // Clean up double spaces
-  result = result.replace(/\s+/g, ' ');
+  // Normalize spaces but preserve newlines
+  result = result.replace(/[ \t]+/g, ' ');
+  // Collapse 3+ consecutive newlines to 2 to keep readable spacing
+  result = result.replace(/\n{3,}/g, '\n\n');
 
   // Add hint about Mini App if complex formulas detected
   if (hasComplexFormula) {
-    result += '\n\n📱 <i>Для красивого отображения формул открой Mini App ниже</i>';
+    // Ensure there's an empty line before the hint
+    if (!result.endsWith('\n\n')) {
+      result += '\n\n';
+    }
+    result += '📱 <i>Для красивого отображения формул открой Mini App ниже</i>';
   }
 
   return result;
