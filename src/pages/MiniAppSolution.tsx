@@ -64,6 +64,9 @@ export default function MiniAppSolution() {
 
   useEffect(() => {
     const fetchSolution = async () => {
+      console.log('MiniAppSolution: Starting fetch for ID:', id);
+      console.log('MiniAppSolution: Current URL:', window.location.href);
+      
       try {
         setLoading(true);
 
@@ -72,10 +75,14 @@ export default function MiniAppSolution() {
           await new Promise(resolve => setTimeout(resolve, 500)); // Simulate loading
           setSolution(EXAMPLE_SOLUTION);
         } else {
+          console.log('MiniAppSolution: Calling edge function with ID:', id);
+          
           // Fetch from edge function (bypasses RLS)
           const { data, error } = await supabase.functions.invoke('get-solution', {
             body: { id }
           });
+
+          console.log('MiniAppSolution: Edge function response:', { data, error });
 
           if (error) {
             console.error('Edge function error:', error);
