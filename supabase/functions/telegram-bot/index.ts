@@ -816,10 +816,10 @@ function cleanMarkdownFormatting(text: string): string {
 
   // MOST AGGRESSIVE: Remove ANY line that contains ONLY ** (with optional spaces/tabs)
   // This catches cases like: "**План решения:\n\n**\n\n1️⃣"
-  result = result.replace(/^[ \t]*\*\*[ \t]*$/gm, '');
+  result = result.replace(/^[ \t]*\*\*[ \t]*$/gm, "");
 
   // Remove excessive empty lines that may result from above cleanup
-  result = result.replace(/\n{3,}/g, '\n\n');
+  result = result.replace(/\n{3,}/g, "\n\n");
 
   // Fix: Remove lines that contain ONLY ** (standalone markers)
   // This happens when AI generates: **Header:**\n\n**\n
