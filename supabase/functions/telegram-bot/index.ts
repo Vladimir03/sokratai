@@ -1045,10 +1045,11 @@ function extractFinalAnswer(aiResponse: string): string | null {
  */
 function parseSolutionSteps(aiResponse: string): any[] {
   const steps: any[] = [];
-  
+
   // Split text into potential sections using various heading patterns
   // Patterns: ### Heading, **Heading:**, 1. Heading, **Шаг N:**, **Шаг 1: Title**
-  const sectionRegex = /(?:^|\n)(?:#{1,3}\s+(.+)|(?:\*\*)?(?:Шаг\s+)?(\d+)[.):\s]+\s*(.+?)(?:\*\*)?|(?:\*\*)(.+?)(?:\*\*):)/gm;
+  // FIXED: Changed .+? to [^*\n]+ (greedy) to properly capture full title text
+  const sectionRegex = /(?:^|\n)(?:#{1,3}\s+(.+)|(?:\*\*)?(?:Шаг\s+)?(\d+)[.):\s]+\s*([^*\n]+)(?:\*\*)?|(?:\*\*)([^*]+)(?:\*\*):)/gm;
   
   const sections: Array<{start: number, title: string, number?: number}> = [];
   let match;
