@@ -1122,19 +1122,73 @@ function parseSolutionSteps(aiResponse: string): any[] {
     }
   }
 
+  // Fallback: split text into logical blocks by paragraphs
+  if (steps.length === 0) {
+    // Split by double newlines (paragraph breaks)
+    const paragraphs = aiResponse.split(/\n\s*\n/).filter(p => p.trim().length > 0);
+    
+    // If we have multiple paragraphs, create steps from them
+    if (paragraphs.length > 1) {
+      let stepNum = 1;
+      
+      for (const para of paragraphs) {
+        const trimmed = para.trim();
+        if (trimmed.length < 20) continue; // Skip very short paragraphs (might be headers)
+        
+        // Extract formulas
+        const { formulas, textWithoutFormulas } = extractLatexFormulas(trimmed);
+        
+        // Extract title from first line if it's short and ends with colon
+        let title = null;
+        let content = trimmed;
+        const firstLineMatch = trimmed.match(/^(.{1,80}):\s*\n/);
+        if (firstLineMatch) {
+          title = firstLineMatch[1].trim();
+          content = trimmed.substring(firstLineMatch[0].length).trim();
+        } else {
+          // Use first sentence or first 60 chars as title
+          const firstSentence = trimmed.match(/^([^.!?]{1,80})/);
+          if (firstSentence && firstSentence[1].length > 20) {
+            title = firstSentence[1].trim() + (trimmed.length > firstSentence[1].length ? '...' : '');
+            content = trimmed;
+          } else {
+            title = `Шаг ${stepNum}`;
+          }
+        }
+        
+        steps.push({
+          number: stepNum++,
+          title: title || `Шаг ${stepNum}`,
+          content: textWithoutFormulas.substring(0, 800),
+          formula: formulas.length > 0 ? formulas[0] : null,
+          method: null
+        });
+      }
+    }
+  }
+
   // Ultimate fallback: create a single step with full response
   if (steps.length === 0) {
     const { formulas } = extractLatexFormulas(aiResponse);
     
+    // Try to extract a title from first line
+    let title = "Решение";
+    const firstLineMatch = aiResponse.match(/^(.{1,80}):/);
+    if (firstLineMatch) {
+      title = firstLineMatch[1].trim();
+    }
+    
     steps.push({
       number: 1,
-      title: "Решение",
+      title: title,
       content: aiResponse.substring(0, 1000),
       formula: formulas.length > 0 ? formulas[0] : null,
       method: null
     });
   }
 
+  console.log(`Parsed ${steps.length} steps from AI response`);
+  
   return steps;
 }
 
@@ -1150,9 +1204,17 @@ async function saveSolution(
   aiResponse: string
 ): Promise<string | null> {
   try {
+    console.log('💾 saveSolution: Starting to parse AI response');
+    console.log('💾 saveSolution: Response length:', aiResponse.length);
+    console.log('💾 saveSolution: First 200 chars:', aiResponse.substring(0, 200));
+    
     // Parse the RAW AI response before any Telegram formatting
     const solutionSteps = parseSolutionSteps(aiResponse);
     const finalAnswer = extractFinalAnswer(aiResponse);
+
+    console.log('💾 saveSolution: Parsed steps:', solutionSteps.length);
+    console.log('💾 saveSolution: Step titles:', solutionSteps.map(s => s.title));
+    console.log('💾 saveSolution: Final answer:', finalAnswer || 'null');
 
     const solutionData = {
       problem: problemText,
@@ -1161,8 +1223,7 @@ async function saveSolution(
       raw_response: aiResponse
     };
 
-    console.log('Saving solution with', solutionSteps.length, 'steps');
-    console.log('Final answer:', finalAnswer);
+    console.log('💾 saveSolution: Saving to database...');
 
     const { data: solution, error } = await supabase
       .from('solutions')
@@ -1177,14 +1238,14 @@ async function saveSolution(
       .single();
 
     if (error) {
-      console.error('Failed to save solution:', error);
+      console.error('❌ saveSolution: Failed to save solution:', error);
       return null;
     }
 
-    console.log('Solution saved successfully with ID:', solution?.id);
+    console.log('✅ saveSolution: Solution saved successfully with ID:', solution?.id);
     return solution?.id || null;
   } catch (error) {
-    console.error('Error saving solution:', error);
+    console.error('❌ saveSolution: Error:', error);
     return null;
   }
 }
