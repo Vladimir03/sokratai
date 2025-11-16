@@ -816,14 +816,14 @@ function cleanMarkdownFormatting(text: string): string {
 
   // Fix: Remove lines that contain ONLY ** (standalone markers)
   // This happens when AI generates: **Header:**\n\n**\n
-  result = result.replace(/\n\s*\*\*\s*\n/g, '\n');
+  result = result.replace(/\n\s*\*\*\s*\n/g, "\n");
 
   // Fix: Remove ** at the start of a line after empty line
-  result = result.replace(/\n\n\*\*\s*$/gm, '\n\n');
+  result = result.replace(/\n\n\*\*\s*$/gm, "\n\n");
 
   // Fix: **text:**\n\n** → **text:**
   // Remove ** that appear alone after headers ending with :
-  result = result.replace(/(\*\*[^*]+:)\s*\n+\s*\*\*\s*\n/g, '$1\n\n');
+  result = result.replace(/(\*\*[^*]+:)\s*\n+\s*\*\*\s*\n/g, "$1\n\n");
 
   // Fix: **text\n\n** → **text**
   // Remove newlines between opening ** and closing **
