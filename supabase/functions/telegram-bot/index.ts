@@ -637,14 +637,14 @@ function preprocessLatex(text: string): string {
   result = result.replace(/\$([^$]+?)\$/g, "$1");
 
   // НОВОЕ: Try to fix malformed \frac without braces
-  // Более простой и надежный подход: находим \frac НЕ за которым следует {
-  // Паттерн: \frac-b ± √D2a или любой другой без скобок
+  // Паттерн: \frac-b ± √D2a → преобразуем в читаемый вид
   result = result.replace(
-    /\\frac\s*(-?[a-zA-Z0-9√±∓+\-\s]+?)([a-zA-Z0-9]+)/g,
-    (match, numerator, denominator) => {
+    /\\frac([^{}\s]+)\s*([\+\-±∓]\s*[^{}\s]+)?\s*([a-zA-Z0-9]+)/g,
+    (match, num, op, den) => {
       console.log('⚠️ Found malformed fraction:', match);
-      console.log('   Numerator:', numerator.trim(), 'Denominator:', denominator);
-      return `(${numerator.trim()}) / (${denominator})`;
+      const numerator = num + (op || '');
+      const denominator = den;
+      return `(${numerator}) / (${denominator})`;
     }
   );
 
@@ -755,15 +755,16 @@ function convertMarkdownLists(text: string): string {
 function addBlockSpacing(text: string): string {
   let result = text;
 
-  // КРИТИЧНО: Add spacing before bold headings with colon (most general case first!)
-  // Обрабатывает ЛЮБЫЕ случаи типа: "текст.**План решения:" → "текст.\n\n**План решения:"
-  result = result.replace(/([^\n])(\*\*[^*]+:\*\*)/g, "$1\n\n$2");
-
   // Add spacing after bold headings if not already present
   result = result.replace(/(\*\*[^*]+\*\*)\n([^\n])/g, "$1\n\n$2");
   
-  // If bold block starts right after a colon with space, move it to new paragraph
-  result = result.replace(/([^\n]):\s+(\*\*[^*]+\*\*)/g, "$1:\n\n$2");
+  // УЛУЧШЕНО: If bold block starts right after ANY character with colon, move it to new paragraph
+  // Убираем требование пробела после двоеточия
+  result = result.replace(/([^\n]):(\*\*[^*]+\*\*)/g, "$1:\n\n$2");
+  
+  // НОВОЕ: Add spacing before bold headings that end with colon
+  // Это обработает случай когда перед "**План решения:**" нет переноса
+  result = result.replace(/([^\n])(\*\*[^*\n]+:\*\*)/g, "$1\n\n$2");
 
   // Add spacing between list items and regular text
   // Match lines starting with emoji list markers
@@ -956,14 +957,6 @@ function formatForTelegram(text: string): string {
 
   // Step 3: Preprocess LaTeX (remove $ delimiters, convert fractions, detect complex formulas)
   result = preprocessLatex(result);
-
-  // DEBUG: Check for remaining LaTeX issues
-  console.log("\n🔤 AFTER preprocessLatex (search for 'frac'):");
-  const fracIndex = result.indexOf('frac');
-  if (fracIndex !== -1) {
-    console.log('⚠️ Still contains "frac" at position', fracIndex);
-    console.log('Context:', result.substring(Math.max(0, fracIndex - 30), fracIndex + 70));
-  }
 
   // Step 4: Convert LaTeX commands to Unicode symbols
   result = convertLatexToUnicode(result);
