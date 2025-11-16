@@ -636,10 +636,22 @@ function preprocessLatex(text: string): string {
   // Remove inline math delimiters $ ... $ (non-greedy)
   result = result.replace(/\$([^$]+?)\$/g, "$1");
 
+  // НОВОЕ: Try to fix malformed \frac without braces
+  // Паттерн: \frac-b ± √D2a → преобразуем в читаемый вид
+  result = result.replace(
+    /\\frac([^{}\s]+)\s*([\+\-±∓]\s*[^{}\s]+)?\s*([a-zA-Z0-9]+)/g,
+    (match, num, op, den) => {
+      console.log('⚠️ Found malformed fraction:', match);
+      const numerator = num + (op || '');
+      const denominator = den;
+      return `(${numerator}) / (${denominator})`;
+    }
+  );
+
   // Convert \frac{numerator}{denominator} to (numerator)/(denominator)
   // Handle nested fractions by repeating the replacement
   for (let i = 0; i < 3; i++) {
-    result = result.replace(/\\frac\{([^{}]+)\}\{([^{}]+)\}/g, "($1)/($2)");
+    result = result.replace(/\\frac\{([^{}]+)\}\{([^{}]+)\}/g, "($1) / ($2)");
   }
 
   // Convert simple fractions without extra parentheses for single chars/numbers
@@ -745,8 +757,14 @@ function addBlockSpacing(text: string): string {
 
   // Add spacing after bold headings if not already present
   result = result.replace(/(\*\*[^*]+\*\*)\n([^\n])/g, "$1\n\n$2");
-  // If bold block starts right after a sentence with colon, move it to new paragraph
-  result = result.replace(/(:)\s*(\*\*[^*]+\*\*)/g, "$1\n\n$2");
+  
+  // УЛУЧШЕНО: If bold block starts right after ANY character with colon, move it to new paragraph
+  // Убираем требование пробела после двоеточия
+  result = result.replace(/([^\n]):(\*\*[^*]+\*\*)/g, "$1:\n\n$2");
+  
+  // НОВОЕ: Add spacing before bold headings that end with colon
+  // Это обработает случай когда перед "**План решения:**" нет переноса
+  result = result.replace(/([^\n])(\*\*[^*\n]+:\*\*)/g, "$1\n\n$2");
 
   // Add spacing between list items and regular text
   // Match lines starting with emoji list markers
@@ -759,7 +777,7 @@ function addBlockSpacing(text: string): string {
     return match;
   });
 
-  // Add spacing before list items
+  // Add spacing before list items (если перед ними нет переноса)
   result = result.replace(/([^\n])\n([📌1️⃣2️⃣3️⃣4️⃣5️⃣6️⃣7️⃣8️⃣9️⃣🔟])/g, "$1\n\n$2");
 
   // Ensure spacing after special emoji markers
@@ -945,6 +963,10 @@ function formatForTelegram(text: string): string {
 
   // Step 5: Add spacing between blocks (after structure is clear, before HTML)
   result = addBlockSpacing(result);
+
+  // DEBUG: Log after block spacing
+  console.log("\n📐 AFTER addBlockSpacing (first 300 chars):");
+  console.log(result.substring(0, 300).replace(/\n/g, "\\n"));
 
   // Step 5.5: Clean up markdown formatting issues (newlines around markers)
   result = cleanMarkdownFormatting(result);
