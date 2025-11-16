@@ -814,6 +814,13 @@ function escapeHtml(text: string): string {
 function cleanMarkdownFormatting(text: string): string {
   let result = text;
 
+  // MOST AGGRESSIVE: Remove ANY line that contains ONLY ** (with optional spaces/tabs)
+  // This catches cases like: "**План решения:\n\n**\n\n1️⃣"
+  result = result.replace(/^[ \t]*\*\*[ \t]*$/gm, '');
+
+  // Remove excessive empty lines that may result from above cleanup
+  result = result.replace(/\n{3,}/g, '\n\n');
+
   // Fix: Remove lines that contain ONLY ** (standalone markers)
   // This happens when AI generates: **Header:**\n\n**\n
   result = result.replace(/\n\s*\*\*\s*\n/g, "\n");
