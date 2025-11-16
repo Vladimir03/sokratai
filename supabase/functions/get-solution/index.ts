@@ -11,6 +11,10 @@ const corsHeaders = {
  * Used by the Telegram Mini App to load solution details
  */
 serve(async (req) => {
+  console.log('get-solution: Request received');
+  console.log('get-solution: Method:', req.method);
+  console.log('get-solution: URL:', req.url);
+  
   // Handle CORS preflight requests
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders });
@@ -18,15 +22,22 @@ serve(async (req) => {
 
   try {
     // Get solution ID from request body
-    const { id: solutionId } = await req.json();
+    const body = await req.json();
+    console.log('get-solution: Request body:', body);
+    
+    const { id: solutionId } = body;
 
     if (!solutionId) {
+      console.error('get-solution: No solution ID provided');
       throw new Error('Solution ID is required');
     }
+
+    console.log('get-solution: Looking for solution with ID:', solutionId);
 
     // Validate UUID format
     const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
     if (!uuidRegex.test(solutionId)) {
+      console.error('get-solution: Invalid UUID format:', solutionId);
       throw new Error('Invalid solution ID format');
     }
 
@@ -36,6 +47,8 @@ serve(async (req) => {
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
     );
 
+    console.log('get-solution: Querying database...');
+
     // Fetch solution from database
     const { data, error } = await supabaseClient
       .from('solutions')
@@ -43,14 +56,19 @@ serve(async (req) => {
       .eq('id', solutionId)
       .single();
 
+    console.log('get-solution: Database response:', { data: !!data, error });
+
     if (error) {
-      console.error('Database error:', error);
+      console.error('get-solution: Database error:', error);
       throw new Error('Solution not found');
     }
 
     if (!data) {
+      console.error('get-solution: No data returned from database');
       throw new Error('Solution not found');
     }
+
+    console.log('get-solution: Successfully found solution, returning data');
 
     // Return solution data
     return new Response(
