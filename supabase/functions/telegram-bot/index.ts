@@ -875,12 +875,16 @@ function formatForTelegram(text: string): string {
  */
 function generateMiniAppButton(solutionId: string): any {
   const WEBAPP_URL = Deno.env.get('VITE_WEBAPP_URL') || 'https://sokratai.lovable.app';
+  const miniAppUrl = `${WEBAPP_URL}/miniapp/solution/${solutionId}`;
+  
+  console.log('🔗 Mini App button URL:', miniAppUrl);
+  console.log('📱 Solution ID:', solutionId);
   
   return {
     inline_keyboard: [[{
       text: "📱 Открыть полное решение",
       web_app: {
-        url: `${WEBAPP_URL}/miniapp/solution/${solutionId}`
+        url: miniAppUrl
       }
     }]]
   };
