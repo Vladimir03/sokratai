@@ -75,37 +75,68 @@ export default function MiniAppSolution() {
           await new Promise(resolve => setTimeout(resolve, 500)); // Simulate loading
           setSolution(EXAMPLE_SOLUTION);
         } else {
-          console.log('MiniAppSolution: Calling edge function with ID:', id);
+          console.log('🔍 MiniAppSolution: Calling edge function get-solution with ID:', id);
+          console.log('🔍 MiniAppSolution: Supabase URL:', supabase.supabaseUrl);
           
-          // Fetch from edge function (bypasses RLS)
-          const { data, error } = await supabase.functions.invoke('get-solution', {
-            body: { id }
-          });
+          try {
+            // Fetch from edge function (bypasses RLS)
+            const { data, error } = await supabase.functions.invoke('get-solution', {
+              body: { id }
+            });
 
-          console.log('MiniAppSolution: Edge function response:', { data, error });
+            console.log('🔍 MiniAppSolution: Edge function response received');
+            console.log('🔍 MiniAppSolution: Has data:', !!data);
+            console.log('🔍 MiniAppSolution: Has error:', !!error);
+            console.log('🔍 MiniAppSolution: Data success:', data?.success);
+            console.log('🔍 MiniAppSolution: Error details:', error);
+            console.log('🔍 MiniAppSolution: Response data:', data);
 
-          if (error) {
-            console.error('Edge function error:', error);
-            throw new Error('Решение не найдено');
-          }
+            if (error) {
+              console.error('❌ MiniAppSolution: Edge function error:', error);
+              throw new Error(`Ошибка при загрузке: ${error.message || 'Решение не найдено'}`);
+            }
 
-          if (!data?.success || !data?.data) {
-            throw new Error('Решение не найдено');
-          }
+            if (!data?.success || !data?.data) {
+              console.error('❌ MiniAppSolution: Invalid response structure:', { data });
+              throw new Error('Решение не найдено (неверная структура ответа)');
+            }
 
           const dbData = data.data;
           
+          console.log('✅ MiniAppSolution: Got solution data from DB');
+          console.log('✅ MiniAppSolution: Solution ID:', dbData.id);
+          console.log('✅ MiniAppSolution: Problem text:', dbData.problem_text?.substring(0, 50));
+          console.log('✅ MiniAppSolution: Solution data keys:', Object.keys(dbData.solution_data || {}));
+          console.log('✅ MiniAppSolution: Steps count:', dbData.solution_data?.solution_steps?.length || 0);
+          
           // Transform database structure to Solution type
           const solutionData = dbData.solution_data as any;
+          
+          if (!solutionData) {
+            console.error('❌ MiniAppSolution: solution_data is null or undefined');
+            throw new Error('Некорректные данные решения');
+          }
+          
           const transformedSolution: Solution = {
             id: dbData.id,
-            problem: dbData.problem_text,
+            problem: dbData.problem_text || 'Задача не указана',
             steps: solutionData.solution_steps || [],
             finalAnswer: solutionData.final_answer || '',
             createdAt: dbData.created_at,
           };
 
+          console.log('✅ MiniAppSolution: Transformed solution:', {
+            id: transformedSolution.id,
+            problemLength: transformedSolution.problem.length,
+            stepsCount: transformedSolution.steps.length,
+            hasFinalAnswer: !!transformedSolution.finalAnswer
+          });
+
           setSolution(transformedSolution);
+          } catch (fetchError) {
+            console.error('❌ MiniAppSolution: Error in fetch block:', fetchError);
+            throw fetchError;
+          }
         }
       } catch (err) {
         console.error('Error fetching solution:', err);
