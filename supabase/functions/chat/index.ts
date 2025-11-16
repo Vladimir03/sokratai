@@ -338,67 +338,45 @@ async function processAIRequest(userId: string, messages: any[], systemPrompt?: 
   }
 
   // Transform messages to support multimodal (text + images)
-  const transformedMessages = await Promise.all(
-    messages.map(async (msg: any) => {
-      // If message has an image, fetch it and convert to base64
-      if (msg.image_url) {
-        try {
-          // SECURITY: Validate image URL to prevent SSRF attacks
-          if (!isValidImageUrl(msg.image_url)) {
-            console.error('[SECURITY] Rejected invalid image URL:', msg.image_url);
-            throw new Error('Invalid or unauthorized image URL. Only images uploaded through the app are allowed.');
-          }
-          
-          const imageResponse = await fetch(msg.image_url);
-          if (!imageResponse.ok) {
-            console.error("Failed to fetch image:", msg.image_url);
-            // Skip image if fetch fails
-            return {
-              role: msg.role,
-              content: msg.content,
-            };
-          }
-          
-          const imageBuffer = await imageResponse.arrayBuffer();
-          const base64Image = btoa(
-            new Uint8Array(imageBuffer).reduce((data, byte) => data + String.fromCharCode(byte), "")
-          );
-          
-          // Determine image type from URL or content-type
-          const contentType = imageResponse.headers.get("content-type") || "image/jpeg";
-          const imageType = contentType.split("/")[1] || "jpeg";
-          
-          return {
-            role: msg.role,
-            content: [
-              {
-                type: "text",
-                text: msg.content || "",
-              },
-              {
-                type: "image_url",
-                image_url: {
-                  url: `data:${contentType};base64,${base64Image}`,
-                },
-              },
-            ],
-          };
-        } catch (error) {
-          console.error("Error processing image:", error);
-          // Skip image if processing fails
-          return {
-            role: msg.role,
-            content: msg.content,
-          };
-        }
+  const transformedMessages = messages.map((msg: any) => {
+    // If message has an image, pass URL directly to AI gateway
+    // AI gateway will handle fetching and processing the image
+    if (msg.image_url) {
+      console.log("📷 Processing message with image:", msg.image_url.substring(0, 100) + "...");
+      
+      // SECURITY: Validate image URL to prevent SSRF attacks
+      if (!isValidImageUrl(msg.image_url)) {
+        console.error('[SECURITY] Rejected invalid image URL:', msg.image_url);
+        // Return text-only message if image URL is invalid
+        return {
+          role: msg.role,
+          content: msg.content || "Image was rejected due to security policy",
+        };
       }
-      // Otherwise, keep as simple text message
+      
       return {
         role: msg.role,
-        content: msg.content,
+        content: [
+          {
+            type: "text",
+            text: msg.content || "Помоги решить эту задачу",
+          },
+          {
+            type: "image_url",
+            image_url: {
+              url: msg.image_url,
+            },
+          },
+        ],
       };
-    })
-  );
+    }
+    
+    // Otherwise, keep as simple text message
+    return {
+      role: msg.role,
+      content: msg.content,
+    };
+  });
 
   const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
 
