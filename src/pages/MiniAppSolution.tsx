@@ -76,8 +76,7 @@ export default function MiniAppSolution() {
           setSolution(EXAMPLE_SOLUTION);
         } else {
           console.log('🔍 MiniAppSolution: Calling edge function get-solution with ID:', id);
-          console.log('🔍 MiniAppSolution: Supabase URL:', supabase.supabaseUrl);
-          
+
           try {
             // Fetch from edge function (bypasses RLS)
             const { data, error } = await supabase.functions.invoke('get-solution', {
