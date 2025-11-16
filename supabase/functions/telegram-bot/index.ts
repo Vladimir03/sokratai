@@ -815,11 +815,12 @@ function cleanMarkdownFormatting(text: string): string {
   let result = text;
 
   // DEBUG: Log BEFORE cleanup
-  console.log('\n🧹 BEFORE cleanMarkdownFormatting:');
+  console.error('');
+  console.error('🧹 BEFORE cleanMarkdownFormatting:');
   if (text.includes('**План решения:')) {
     const planIndex = text.indexOf('**План решения:');
-    console.log('Found "**План решения:" - next 150 chars:');
-    console.log(text.substring(planIndex, planIndex + 150).replace(/\n/g, '\\n').replace(/\t/g, '\\t'));
+    console.error('Found "**План решения:" - next 150 chars:');
+    console.error(text.substring(planIndex, planIndex + 150).replace(/\n/g, '\\n').replace(/\t/g, '\\t'));
   }
 
   // MOST AGGRESSIVE: Remove ANY line that contains ONLY ** (with optional spaces/tabs)
@@ -830,11 +831,12 @@ function cleanMarkdownFormatting(text: string): string {
   result = result.replace(/\n{3,}/g, "\n\n");
 
   // DEBUG: Log AFTER first cleanup
-  console.log('\n🧹 AFTER removing standalone **:');
+  console.error('');
+  console.error('🧹 AFTER removing standalone **:');
   if (result.includes('**План решения:')) {
     const planIndex = result.indexOf('**План решения:');
-    console.log('Found "**План решения:" - next 150 chars:');
-    console.log(result.substring(planIndex, planIndex + 150).replace(/\n/g, '\\n').replace(/\t/g, '\\t'));
+    console.error('Found "**План решения:" - next 150 chars:');
+    console.error(result.substring(planIndex, planIndex + 150).replace(/\n/g, '\\n').replace(/\t/g, '\\t'));
   }
 
   // Fix: Remove lines that contain ONLY ** (standalone markers)
@@ -1392,19 +1394,21 @@ async function handleTextMessage(telegramUserId: number, userId: string, text: s
     // Parse SSE stream
     const aiContent = await parseSSEStream(chatResponse);
 
-    // DEBUG: Log raw AI response
-    console.log('🤖 RAW AI RESPONSE (first 500 chars):');
-    console.log(aiContent.substring(0, 500));
-    console.log('\n📊 Checking for problematic patterns:');
+    // DEBUG: Log raw AI response (using console.error for visibility)
+    console.error('==================== DEBUG START ====================');
+    console.error('🤖 RAW AI RESPONSE (first 500 chars):');
+    console.error(aiContent.substring(0, 500));
+    console.error('');
+    console.error('📊 Checking for problematic patterns:');
     if (aiContent.includes('**План решения:')) {
       const planIndex = aiContent.indexOf('**План решения:');
-      console.log('Found "**План решения:" at position', planIndex);
-      console.log('Next 100 chars:', aiContent.substring(planIndex, planIndex + 100).replace(/\n/g, '\\n'));
+      console.error('Found "**План решения:" at position', planIndex);
+      console.error('Next 100 chars:', aiContent.substring(planIndex, planIndex + 100).replace(/\n/g, '\\n'));
     }
     if (aiContent.includes('**Метод:')) {
       const methodIndex = aiContent.indexOf('**Метод:');
-      console.log('Found "**Метод:" at position', methodIndex);
-      console.log('Next 100 chars:', aiContent.substring(methodIndex, methodIndex + 100).replace(/\n/g, '\\n'));
+      console.error('Found "**Метод:" at position', methodIndex);
+      console.error('Next 100 chars:', aiContent.substring(methodIndex, methodIndex + 100).replace(/\n/g, '\\n'));
     }
 
     // Save solution to database
@@ -1414,8 +1418,10 @@ async function handleTextMessage(telegramUserId: number, userId: string, text: s
     const formattedContent = formatForTelegram(aiContent);
 
     // DEBUG: Log formatted result
-    console.log('\n📝 FORMATTED RESULT (first 500 chars):');
-    console.log(formattedContent.substring(0, 500));
+    console.error('');
+    console.error('📝 FORMATTED RESULT (first 500 chars):');
+    console.error(formattedContent.substring(0, 500));
+    console.error('==================== DEBUG END ====================');
 
     await supabase.from('chat_messages').insert({
       chat_id: chatId,
