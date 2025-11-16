@@ -1,17 +1,17 @@
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const corsHeaders = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
-const TELEGRAM_BOT_TOKEN = Deno.env.get('TELEGRAM_BOT_TOKEN');
-const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
-const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+const TELEGRAM_BOT_TOKEN = Deno.env.get("TELEGRAM_BOT_TOKEN");
+const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
+const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
-type OnboardingState = 'welcome' | 'waiting_grade' | 'waiting_subject' | 'waiting_goal' | 'completed';
+type OnboardingState = "welcome" | "waiting_grade" | "waiting_subject" | "waiting_goal" | "completed";
 
 interface OnboardingData {
   grade?: number;
@@ -91,55 +91,46 @@ const welcomeMessages: Record<string, string> = {
 Давайте настроим помощника под вашего ребенка. Ответьте на 3 вопроса 👇`,
 };
 
-async function sendTelegramMessage(
-  chatId: number,
-  text: string,
-  extraParams?: Record<string, any>
-) {
+async function sendTelegramMessage(chatId: number, text: string, extraParams?: Record<string, any>) {
   const response = await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       chat_id: chatId,
       text,
-      parse_mode: 'HTML',
+      parse_mode: "HTML",
       ...extraParams,
     }),
   });
 
   if (!response.ok) {
     const error = await response.text();
-    console.error('❌ Telegram API error:', error);
-    console.error('📝 Message preview (first 200 chars):', text.substring(0, 200));
-    console.error('📊 Message length:', text.length);
-    throw new Error('Failed to send message');
+    console.error("❌ Telegram API error:", error);
+    console.error("📝 Message preview (first 200 chars):", text.substring(0, 200));
+    console.error("📊 Message length:", text.length);
+    throw new Error("Failed to send message");
   }
 
   return response.json();
 }
 
-async function editTelegramMessage(
-  chatId: number,
-  messageId: number,
-  text: string,
-  extraParams?: Record<string, any>
-) {
+async function editTelegramMessage(chatId: number, messageId: number, text: string, extraParams?: Record<string, any>) {
   const response = await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/editMessageText`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       chat_id: chatId,
       message_id: messageId,
       text,
-      parse_mode: 'HTML',
+      parse_mode: "HTML",
       ...extraParams,
     }),
   });
 
   if (!response.ok) {
     const error = await response.text();
-    console.error('Telegram API error:', error);
-    throw new Error('Failed to edit message');
+    console.error("Telegram API error:", error);
+    throw new Error("Failed to edit message");
   }
 
   return response.json();
@@ -148,9 +139,9 @@ async function editTelegramMessage(
 async function getOrCreateProfile(telegramUserId: number, telegramUsername?: string) {
   // Check if profile exists
   const { data: existingProfile } = await supabase
-    .from('profiles')
-    .select('*')
-    .eq('telegram_user_id', telegramUserId)
+    .from("profiles")
+    .select("*")
+    .eq("telegram_user_id", telegramUserId)
     .maybeSingle();
 
   if (existingProfile) {
@@ -172,25 +163,25 @@ async function getOrCreateProfile(telegramUserId: number, telegramUsername?: str
   });
 
   if (authError || !authData.user) {
-    console.error('Error creating user:', authError);
-    throw new Error('Failed to create user');
+    console.error("Error creating user:", authError);
+    throw new Error("Failed to create user");
   }
 
   // Update profile with telegram data
   const { data: profile, error: profileError } = await supabase
-    .from('profiles')
+    .from("profiles")
     .update({
       telegram_user_id: telegramUserId,
       telegram_username: telegramUsername,
-      registration_source: 'telegram',
+      registration_source: "telegram",
     })
-    .eq('id', authData.user.id)
+    .eq("id", authData.user.id)
     .select()
     .single();
 
   if (profileError) {
-    console.error('Error updating profile:', profileError);
-    throw new Error('Failed to update profile');
+    console.error("Error updating profile:", profileError);
+    throw new Error("Failed to update profile");
   }
 
   return profile;
@@ -198,9 +189,9 @@ async function getOrCreateProfile(telegramUserId: number, telegramUsername?: str
 
 async function getOnboardingSession(telegramUserId: number) {
   const { data } = await supabase
-    .from('telegram_sessions')
-    .select('*')
-    .eq('telegram_user_id', telegramUserId)
+    .from("telegram_sessions")
+    .select("*")
+    .eq("telegram_user_id", telegramUserId)
     .maybeSingle();
 
   return data;
@@ -210,40 +201,38 @@ async function updateOnboardingState(
   telegramUserId: number,
   userId: string,
   state: OnboardingState,
-  data?: Partial<OnboardingData>
+  data?: Partial<OnboardingData>,
 ) {
   const session = await getOnboardingSession(telegramUserId);
 
   if (session) {
     await supabase
-      .from('telegram_sessions')
+      .from("telegram_sessions")
       .update({
         onboarding_state: state,
         onboarding_data: data ? { ...session.onboarding_data, ...data } : session.onboarding_data,
       })
-      .eq('telegram_user_id', telegramUserId);
+      .eq("telegram_user_id", telegramUserId);
   } else {
-    await supabase
-      .from('telegram_sessions')
-      .insert({
-        telegram_user_id: telegramUserId,
-        user_id: userId,
-        onboarding_state: state,
-        onboarding_data: data || {},
-      });
+    await supabase.from("telegram_sessions").insert({
+      telegram_user_id: telegramUserId,
+      user_id: userId,
+      onboarding_state: state,
+      onboarding_data: data || {},
+    });
   }
 }
 
 async function handleStart(telegramUserId: number, telegramUsername: string | undefined, utmSource: string) {
-  console.log('handleStart:', { telegramUserId, utmSource });
+  console.log("handleStart:", { telegramUserId, utmSource });
 
   // Get or create profile
   const profile = await getOrCreateProfile(telegramUserId, telegramUsername);
 
   // Record analytics
-  await supabase.from('onboarding_analytics').insert({
+  await supabase.from("onboarding_analytics").insert({
     user_id: profile.id,
-    source: 'telegram',
+    source: "telegram",
     utm_source: utmSource,
     telegram_user_id: telegramUserId,
     started_at: new Date().toISOString(),
@@ -258,59 +247,59 @@ async function handleStart(telegramUserId: number, telegramUsername: string | un
 }
 
 async function startOnboarding(telegramUserId: number, userId: string, utmSource: string) {
-  const result = await sendTelegramMessage(telegramUserId, '📊 Шаг 1 из 3\n\nВ каком ты классе?', {
+  const result = await sendTelegramMessage(telegramUserId, "📊 Шаг 1 из 3\n\nВ каком ты классе?", {
     reply_markup: {
       inline_keyboard: [
         [
-          { text: '9 класс', callback_data: 'grade_9' },
-          { text: '10 класс', callback_data: 'grade_10' },
-          { text: '11 класс', callback_data: 'grade_11' },
+          { text: "9 класс", callback_data: "grade_9" },
+          { text: "10 класс", callback_data: "grade_10" },
+          { text: "11 класс", callback_data: "grade_11" },
         ],
       ],
     },
   });
 
-  await updateOnboardingState(telegramUserId, userId, 'waiting_grade', { 
+  await updateOnboardingState(telegramUserId, userId, "waiting_grade", {
     utm_source: utmSource,
-    onboarding_message_id: result.result.message_id 
+    onboarding_message_id: result.result.message_id,
   });
 }
 
 async function handleGradeSelection(telegramUserId: number, userId: string, grade: number, messageId?: number) {
   if (messageId) {
-    await editTelegramMessage(telegramUserId, messageId, '📊 Шаг 2 из 3\n\nКакой предмет тебе даётся сложнее всего?', {
+    await editTelegramMessage(telegramUserId, messageId, "📊 Шаг 2 из 3\n\nКакой предмет тебе даётся сложнее всего?", {
       reply_markup: {
         inline_keyboard: [
-          [{ text: '📐 Математика', callback_data: 'subject_math' }],
-          [{ text: '⚛️ Физика', callback_data: 'subject_physics' }],
-          [{ text: '💻 Информатика', callback_data: 'subject_cs' }],
+          [{ text: "📐 Математика", callback_data: "subject_math" }],
+          [{ text: "⚛️ Физика", callback_data: "subject_physics" }],
+          [{ text: "💻 Информатика", callback_data: "subject_cs" }],
         ],
       },
     });
   }
 
-  await updateOnboardingState(telegramUserId, userId, 'waiting_subject', { grade });
+  await updateOnboardingState(telegramUserId, userId, "waiting_subject", { grade });
 }
 
 async function handleSubjectSelection(telegramUserId: number, userId: string, subject: string, messageId?: number) {
   if (messageId) {
-    await editTelegramMessage(telegramUserId, messageId, '📊 Шаг 3 из 3\n\nДля чего готовишься?', {
+    await editTelegramMessage(telegramUserId, messageId, "📊 Шаг 3 из 3\n\nДля чего готовишься?", {
       reply_markup: {
         inline_keyboard: [
           [
-            { text: '🎯 ЕГЭ', callback_data: 'goal_ege' },
-            { text: '📝 ОГЭ', callback_data: 'goal_oge' },
+            { text: "🎯 ЕГЭ", callback_data: "goal_ege" },
+            { text: "📝 ОГЭ", callback_data: "goal_oge" },
           ],
           [
-            { text: '📚 Школьная программа', callback_data: 'goal_school' },
-            { text: '🏆 Олимпиада', callback_data: 'goal_olympiad' },
+            { text: "📚 Школьная программа", callback_data: "goal_school" },
+            { text: "🏆 Олимпиада", callback_data: "goal_olympiad" },
           ],
         ],
       },
     });
   }
 
-  await updateOnboardingState(telegramUserId, userId, 'waiting_goal', { subject });
+  await updateOnboardingState(telegramUserId, userId, "waiting_goal", { subject });
 }
 
 async function completeOnboarding(telegramUserId: number, userId: string, goal: string, messageId?: number) {
@@ -319,44 +308,44 @@ async function completeOnboarding(telegramUserId: number, userId: string, goal: 
 
   // Update profile
   await supabase
-    .from('profiles')
+    .from("profiles")
     .update({
       grade: data.grade,
       difficult_subject: data.subject,
       learning_goal: goal,
       onboarding_completed: true,
     })
-    .eq('telegram_user_id', telegramUserId);
+    .eq("telegram_user_id", telegramUserId);
 
   // Complete analytics
   await supabase
-    .from('onboarding_analytics')
+    .from("onboarding_analytics")
     .update({
       completed_at: new Date().toISOString(),
       grade: data.grade,
       subject: data.subject,
       goal: goal,
     })
-    .eq('telegram_user_id', telegramUserId)
-    .is('completed_at', null)
-    .order('started_at', { ascending: false })
+    .eq("telegram_user_id", telegramUserId)
+    .is("completed_at", null)
+    .order("started_at", { ascending: false })
     .limit(1);
 
-  const gradeText = data.grade ? `${data.grade} классе` : '';
+  const gradeText = data.grade ? `${data.grade} классе` : "";
   const subjectMap: Record<string, string> = {
-    'math': 'математике',
-    'physics': 'физике',
-    'cs': 'информатике'
+    math: "математике",
+    physics: "физике",
+    cs: "информатике",
   };
-  const subjectText = data.subject ? subjectMap[data.subject] || data.subject : 'выбранному предмету';
+  const subjectText = data.subject ? subjectMap[data.subject] || data.subject : "выбранному предмету";
   const goalMap: Record<string, string> = {
-    'ege': 'ЕГЭ',
-    'oge': 'ОГЭ',
-    'school': 'школьной программе',
-    'olympiad': 'олимпиаде'
+    ege: "ЕГЭ",
+    oge: "ОГЭ",
+    school: "школьной программе",
+    olympiad: "олимпиаде",
   };
   const goalText = goalMap[goal] || goal;
-  
+
   const welcomeMessage = `✅ Готово!
 
 🎉 Отлично! Теперь я знаю, что ты в ${gradeText}, готовишься к ${goalText} по ${subjectText}!
@@ -367,42 +356,35 @@ async function completeOnboarding(telegramUserId: number, userId: string, goal: 
 ❓ Задай вопрос по предмету
 
 Я помогу тебе разобраться! 🚀`;
-  
+
   if (messageId) {
-    await editTelegramMessage(
-      telegramUserId,
-      messageId,
-      welcomeMessage,
-      { reply_markup: { inline_keyboard: [] } }
-    );
+    await editTelegramMessage(telegramUserId, messageId, welcomeMessage, { reply_markup: { inline_keyboard: [] } });
   }
 
   // Save welcome message to chat history for AI context
   try {
     const chatId = await getOrCreateTelegramChat(userId);
-    await supabase
-      .from('chat_messages')
-      .insert({
-        chat_id: chatId,
-        user_id: userId,
-        role: 'assistant',
-        content: welcomeMessage,
-        input_method: 'system'
-      });
+    await supabase.from("chat_messages").insert({
+      chat_id: chatId,
+      user_id: userId,
+      role: "assistant",
+      content: welcomeMessage,
+      input_method: "system",
+    });
   } catch (error) {
-    console.error('Error saving onboarding completion message:', error);
+    console.error("Error saving onboarding completion message:", error);
   }
 
-  await updateOnboardingState(telegramUserId, userId, 'completed');
+  await updateOnboardingState(telegramUserId, userId, "completed");
 }
 
 async function getOrCreateTelegramChat(userId: string) {
   // Get existing general chat for this user
   const { data: existingChat } = await supabase
-    .from('chats')
-    .select('id')
-    .eq('user_id', userId)
-    .eq('chat_type', 'general')
+    .from("chats")
+    .select("id")
+    .eq("user_id", userId)
+    .eq("chat_type", "general")
     .maybeSingle();
 
   if (existingChat) {
@@ -411,19 +393,19 @@ async function getOrCreateTelegramChat(userId: string) {
 
   // Create new general chat
   const { data: newChat, error } = await supabase
-    .from('chats')
+    .from("chats")
     .insert({
       user_id: userId,
-      chat_type: 'general',
-      title: 'Telegram чат',
-      icon: '💬',
+      chat_type: "general",
+      title: "Telegram чат",
+      icon: "💬",
     })
     .select()
     .single();
 
   if (error) {
-    console.error('Error creating chat:', error);
-    throw new Error('Failed to create chat');
+    console.error("Error creating chat:", error);
+    throw new Error("Failed to create chat");
   }
 
   return newChat.id;
@@ -432,35 +414,35 @@ async function getOrCreateTelegramChat(userId: string) {
 async function parseSSEStream(response: Response): Promise<string> {
   const reader = response.body?.getReader();
   const decoder = new TextDecoder();
-  
-  if (!reader) throw new Error('No response body');
-  
-  let fullContent = '';
-  let buffer = '';
-  
+
+  if (!reader) throw new Error("No response body");
+
+  let fullContent = "";
+  let buffer = "";
+
   while (true) {
     const { done, value } = await reader.read();
     if (done) break;
-    
+
     buffer += decoder.decode(value, { stream: true });
-    
+
     // Обработка построчно
     let newlineIndex: number;
-    while ((newlineIndex = buffer.indexOf('\n')) !== -1) {
+    while ((newlineIndex = buffer.indexOf("\n")) !== -1) {
       let line = buffer.slice(0, newlineIndex);
       buffer = buffer.slice(newlineIndex + 1);
-      
+
       // Убираем \r если есть
-      if (line.endsWith('\r')) line = line.slice(0, -1);
-      
+      if (line.endsWith("\r")) line = line.slice(0, -1);
+
       // Пропускаем комментарии и пустые строки
-      if (line.startsWith(':') || line.trim() === '') continue;
-      
+      if (line.startsWith(":") || line.trim() === "") continue;
+
       // Обрабатываем data: строки
-      if (line.startsWith('data: ')) {
+      if (line.startsWith("data: ")) {
         const jsonStr = line.slice(6).trim();
-        if (jsonStr === '[DONE]') break;
-        
+        if (jsonStr === "[DONE]") break;
+
         try {
           const parsed = JSON.parse(jsonStr);
           const content = parsed.choices?.[0]?.delta?.content;
@@ -474,18 +456,18 @@ async function parseSSEStream(response: Response): Promise<string> {
       }
     }
   }
-  
+
   return fullContent;
 }
 
 async function sendTypingLoop(telegramUserId: number, stopSignal: { stop: boolean }) {
   while (!stopSignal.stop) {
     await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendChatAction`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ chat_id: telegramUserId, action: 'typing' }),
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ chat_id: telegramUserId, action: "typing" }),
     });
-    await new Promise(resolve => setTimeout(resolve, 5000));
+    await new Promise((resolve) => setTimeout(resolve, 5000));
   }
 }
 
@@ -494,124 +476,124 @@ async function sendTypingLoop(telegramUserId: number, stopSignal: { stop: boolea
 // LaTeX to Unicode symbol mappings
 const LATEX_TO_UNICODE: Record<string, string> = {
   // Square roots
-  '\\sqrt': '√',
+  "\\sqrt": "√",
 
   // Superscripts (common)
-  '^2': '²',
-  '^3': '³',
-  '^4': '⁴',
-  '^0': '⁰',
-  '^1': '¹',
-  '^5': '⁵',
-  '^6': '⁶',
-  '^7': '⁷',
-  '^8': '⁸',
-  '^9': '⁹',
+  "^2": "²",
+  "^3": "³",
+  "^4": "⁴",
+  "^0": "⁰",
+  "^1": "¹",
+  "^5": "⁵",
+  "^6": "⁶",
+  "^7": "⁷",
+  "^8": "⁸",
+  "^9": "⁹",
 
   // Subscripts (common)
-  '_0': '₀',
-  '_1': '₁',
-  '_2': '₂',
-  '_3': '₃',
-  '_4': '₄',
-  '_5': '₅',
-  '_6': '₆',
-  '_7': '₇',
-  '_8': '₈',
-  '_9': '₉',
+  _0: "₀",
+  _1: "₁",
+  _2: "₂",
+  _3: "₃",
+  _4: "₄",
+  _5: "₅",
+  _6: "₆",
+  _7: "₇",
+  _8: "₈",
+  _9: "₉",
 
   // Math operators
-  '\\pm': '±',
-  '\\mp': '∓',
-  '\\times': '×',
-  '\\div': '÷',
-  '\\cdot': '·',
-  '\\approx': '≈',
-  '\\neq': '≠',
-  '\\ne': '≠',
-  '\\leq': '≤',
-  '\\le': '≤',
-  '\\geq': '≥',
-  '\\ge': '≥',
-  '\\infty': '∞',
-  '\\to': '→',
-  '\\rightarrow': '→',
-  '\\leftarrow': '←',
-  '\\Rightarrow': '⇒',
-  '\\Leftarrow': '⇐',
-  '\\Leftrightarrow': '⇔',
-  '\\in': '∈',
-  '\\notin': '∉',
-  '\\subset': '⊂',
-  '\\supset': '⊃',
-  '\\cup': '∪',
-  '\\cap': '∩',
-  '\\forall': '∀',
-  '\\exists': '∃',
-  '\\emptyset': '∅',
-  '\\nabla': '∇',
-  '\\partial': '∂',
-  '\\int': '∫',
-  '\\sum': '∑',
-  '\\prod': '∏',
+  "\\pm": "±",
+  "\\mp": "∓",
+  "\\times": "×",
+  "\\div": "÷",
+  "\\cdot": "·",
+  "\\approx": "≈",
+  "\\neq": "≠",
+  "\\ne": "≠",
+  "\\leq": "≤",
+  "\\le": "≤",
+  "\\geq": "≥",
+  "\\ge": "≥",
+  "\\infty": "∞",
+  "\\to": "→",
+  "\\rightarrow": "→",
+  "\\leftarrow": "←",
+  "\\Rightarrow": "⇒",
+  "\\Leftarrow": "⇐",
+  "\\Leftrightarrow": "⇔",
+  "\\in": "∈",
+  "\\notin": "∉",
+  "\\subset": "⊂",
+  "\\supset": "⊃",
+  "\\cup": "∪",
+  "\\cap": "∩",
+  "\\forall": "∀",
+  "\\exists": "∃",
+  "\\emptyset": "∅",
+  "\\nabla": "∇",
+  "\\partial": "∂",
+  "\\int": "∫",
+  "\\sum": "∑",
+  "\\prod": "∏",
 
   // Greek letters (lowercase)
-  '\\alpha': 'α',
-  '\\beta': 'β',
-  '\\gamma': 'γ',
-  '\\delta': 'δ',
-  '\\epsilon': 'ε',
-  '\\varepsilon': 'ε',
-  '\\zeta': 'ζ',
-  '\\eta': 'η',
-  '\\theta': 'θ',
-  '\\vartheta': 'θ',
-  '\\iota': 'ι',
-  '\\kappa': 'κ',
-  '\\lambda': 'λ',
-  '\\mu': 'μ',
-  '\\nu': 'ν',
-  '\\xi': 'ξ',
-  '\\pi': 'π',
-  '\\rho': 'ρ',
-  '\\sigma': 'σ',
-  '\\tau': 'τ',
-  '\\upsilon': 'υ',
-  '\\phi': 'φ',
-  '\\varphi': 'φ',
-  '\\chi': 'χ',
-  '\\psi': 'ψ',
-  '\\omega': 'ω',
+  "\\alpha": "α",
+  "\\beta": "β",
+  "\\gamma": "γ",
+  "\\delta": "δ",
+  "\\epsilon": "ε",
+  "\\varepsilon": "ε",
+  "\\zeta": "ζ",
+  "\\eta": "η",
+  "\\theta": "θ",
+  "\\vartheta": "θ",
+  "\\iota": "ι",
+  "\\kappa": "κ",
+  "\\lambda": "λ",
+  "\\mu": "μ",
+  "\\nu": "ν",
+  "\\xi": "ξ",
+  "\\pi": "π",
+  "\\rho": "ρ",
+  "\\sigma": "σ",
+  "\\tau": "τ",
+  "\\upsilon": "υ",
+  "\\phi": "φ",
+  "\\varphi": "φ",
+  "\\chi": "χ",
+  "\\psi": "ψ",
+  "\\omega": "ω",
 
   // Greek letters (uppercase)
-  '\\Gamma': 'Γ',
-  '\\Delta': 'Δ',
-  '\\Theta': 'Θ',
-  '\\Lambda': 'Λ',
-  '\\Xi': 'Ξ',
-  '\\Pi': 'Π',
-  '\\Sigma': 'Σ',
-  '\\Upsilon': 'Υ',
-  '\\Phi': 'Φ',
-  '\\Psi': 'Ψ',
-  '\\Omega': 'Ω',
+  "\\Gamma": "Γ",
+  "\\Delta": "Δ",
+  "\\Theta": "Θ",
+  "\\Lambda": "Λ",
+  "\\Xi": "Ξ",
+  "\\Pi": "Π",
+  "\\Sigma": "Σ",
+  "\\Upsilon": "Υ",
+  "\\Phi": "Φ",
+  "\\Psi": "Ψ",
+  "\\Omega": "Ω",
 
   // Fractions (common Unicode fractions)
-  '\\frac{1}{2}': '½',
-  '\\frac{1}{3}': '⅓',
-  '\\frac{2}{3}': '⅔',
-  '\\frac{1}{4}': '¼',
-  '\\frac{3}{4}': '¾',
-  '\\frac{1}{5}': '⅕',
-  '\\frac{2}{5}': '⅖',
-  '\\frac{3}{5}': '⅗',
-  '\\frac{4}{5}': '⅘',
-  '\\frac{1}{6}': '⅙',
-  '\\frac{5}{6}': '⅚',
-  '\\frac{1}{8}': '⅛',
-  '\\frac{3}{8}': '⅜',
-  '\\frac{5}{8}': '⅝',
-  '\\frac{7}{8}': '⅞',
+  "\\frac{1}{2}": "½",
+  "\\frac{1}{3}": "⅓",
+  "\\frac{2}{3}": "⅔",
+  "\\frac{1}{4}": "¼",
+  "\\frac{3}{4}": "¾",
+  "\\frac{1}{5}": "⅕",
+  "\\frac{2}{5}": "⅖",
+  "\\frac{3}{5}": "⅗",
+  "\\frac{4}{5}": "⅘",
+  "\\frac{1}{6}": "⅙",
+  "\\frac{5}{6}": "⅚",
+  "\\frac{1}{8}": "⅛",
+  "\\frac{3}{8}": "⅜",
+  "\\frac{5}{8}": "⅝",
+  "\\frac{7}{8}": "⅞",
 };
 
 /**
@@ -626,7 +608,7 @@ function preprocessLatex(text: string): string {
   const displayMathMatches = text.match(/\$\$(.+?)\$\$/gs);
   if (displayMathMatches) {
     for (const match of displayMathMatches) {
-      const formula = match.replace(/\$\$/g, '');
+      const formula = match.replace(/\$\$/g, "");
       if (isComplexFormula(formula)) {
         hasComplexFormula = true;
         break;
@@ -639,7 +621,7 @@ function preprocessLatex(text: string): string {
     const inlineMathMatches = text.match(/\$([^$]+?)\$/g);
     if (inlineMathMatches) {
       for (const match of inlineMathMatches) {
-        const formula = match.replace(/\$/g, '');
+        const formula = match.replace(/\$/g, "");
         if (isComplexFormula(formula)) {
           hasComplexFormula = true;
           break;
@@ -649,15 +631,15 @@ function preprocessLatex(text: string): string {
   }
 
   // Remove display math delimiters $$ ... $$ (non-greedy)
-  result = result.replace(/\$\$(.+?)\$\$/gs, '$1');
+  result = result.replace(/\$\$(.+?)\$\$/gs, "$1");
 
   // Remove inline math delimiters $ ... $ (non-greedy)
-  result = result.replace(/\$([^$]+?)\$/g, '$1');
+  result = result.replace(/\$([^$]+?)\$/g, "$1");
 
   // Convert \frac{numerator}{denominator} to (numerator)/(denominator)
   // Handle nested fractions by repeating the replacement
   for (let i = 0; i < 3; i++) {
-    result = result.replace(/\\frac\{([^{}]+)\}\{([^{}]+)\}/g, '($1)/($2)');
+    result = result.replace(/\\frac\{([^{}]+)\}\{([^{}]+)\}/g, "($1)/($2)");
   }
 
   // Convert simple fractions without extra parentheses for single chars/numbers
@@ -676,20 +658,20 @@ function preprocessLatex(text: string): string {
 
   // Remove curly braces used for grouping (e.g., {x} -> x)
   // But be careful not to remove structural braces
-  result = result.replace(/\{([^{}]+)\}/g, '$1');
+  result = result.replace(/\{([^{}]+)\}/g, "$1");
 
   // Normalize spaces but preserve newlines
-  result = result.replace(/[ \t]+/g, ' ');
+  result = result.replace(/[ \t]+/g, " ");
   // Collapse 3+ consecutive newlines to 2 to keep readable spacing
-  result = result.replace(/\n{3,}/g, '\n\n');
+  result = result.replace(/\n{3,}/g, "\n\n");
 
   // Add hint about Mini App if complex formulas detected
   if (hasComplexFormula) {
     // Ensure there's an empty line before the hint
-    if (!result.endsWith('\n\n')) {
-      result += '\n\n';
+    if (!result.endsWith("\n\n")) {
+      result += "\n\n";
     }
-    result += '📱 <i>Для красивого отображения формул открой Mini App ниже</i>';
+    result += "📱 <i>Для красивого отображения формул открой Mini App ниже</i>";
   }
 
   return result;
@@ -703,8 +685,8 @@ function convertLatexToUnicode(text: string): string {
 
   // Replace LaTeX commands with Unicode symbols
   for (const [latex, unicode] of Object.entries(LATEX_TO_UNICODE)) {
-    const escapedLatex = latex.replace(/[\\^{}]/g, '\\$&');
-    result = result.replace(new RegExp(escapedLatex, 'g'), unicode);
+    const escapedLatex = latex.replace(/[\\^{}]/g, "\\$&");
+    result = result.replace(new RegExp(escapedLatex, "g"), unicode);
   }
 
   return result;
@@ -715,13 +697,13 @@ function convertLatexToUnicode(text: string): string {
  */
 function convertMarkdownHeadings(text: string): string {
   let result = text;
-  
+
   // Convert ### Heading, ## Heading, # Heading to bold with newlines
   // Process from most specific (###) to least specific (#) to avoid conflicts
-  result = result.replace(/^### (.+)$/gm, '\n**$1**\n');
-  result = result.replace(/^## (.+)$/gm, '\n**$1**\n');
-  result = result.replace(/^# (.+)$/gm, '\n**$1**\n');
-  
+  result = result.replace(/^### (.+)$/gm, "\n**$1**\n");
+  result = result.replace(/^## (.+)$/gm, "\n**$1**\n");
+  result = result.replace(/^# (.+)$/gm, "\n**$1**\n");
+
   return result;
 }
 
@@ -730,10 +712,10 @@ function convertMarkdownHeadings(text: string): string {
  */
 function convertMarkdownLists(text: string): string {
   let result = text;
-  
+
   // Emoji numbers for ordered lists (1-10)
-  const numberEmojis = ['1️⃣', '2️⃣', '3️⃣', '4️⃣', '5️⃣', '6️⃣', '7️⃣', '8️⃣', '9️⃣', '🔟'];
-  
+  const numberEmojis = ["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣", "🔟"];
+
   // Convert numbered lists (1. , 2. , etc.)
   // First pass: detect numbered lists and convert to emoji
   result = result.replace(/^(\d+)\.\s+(.+)$/gm, (match, num, text) => {
@@ -745,13 +727,13 @@ function convertMarkdownLists(text: string): string {
       return `${num}. ${text}`;
     }
   });
-  
+
   // Convert bulleted lists (- or * at start of line)
-  result = result.replace(/^[-*]\s+(.+)$/gm, '📌 $1');
-  
+  result = result.replace(/^[-*]\s+(.+)$/gm, "📌 $1");
+
   // Handle special emoji-based lists from AI (like 1️⃣, 2️⃣, etc that are already there)
   // These should already be fine, no conversion needed
-  
+
   return result;
 }
 
@@ -760,38 +742,38 @@ function convertMarkdownLists(text: string): string {
  */
 function addBlockSpacing(text: string): string {
   let result = text;
-  
+
   // Add spacing after bold headings if not already present
-  result = result.replace(/(\*\*[^*]+\*\*)\n([^\n])/g, '$1\n\n$2');
+  result = result.replace(/(\*\*[^*]+\*\*)\n([^\n])/g, "$1\n\n$2");
   // If bold block starts right after a sentence with colon, move it to new paragraph
-  result = result.replace(/(:)\s*(\*\*[^*]+\*\*)/g, '$1\n\n$2');
-  
+  result = result.replace(/(:)\s*(\*\*[^*]+\*\*)/g, "$1\n\n$2");
+
   // Add spacing between list items and regular text
   // Match lines starting with emoji list markers
   result = result.replace(/(^[📌1️⃣2️⃣3️⃣4️⃣5️⃣6️⃣7️⃣8️⃣9️⃣🔟].+)$/gm, (match, p1, offset, string) => {
     // Check if next line exists and doesn't start with a list marker
     const nextLineMatch = string.slice(offset + match.length).match(/^\n([^\n])/);
     if (nextLineMatch && !nextLineMatch[1].match(/[📌1️⃣2️⃣3️⃣4️⃣5️⃣6️⃣7️⃣8️⃣9️⃣🔟]/)) {
-      return match + '\n';
+      return match + "\n";
     }
     return match;
   });
-  
+
   // Add spacing before list items
-  result = result.replace(/([^\n])\n([📌1️⃣2️⃣3️⃣4️⃣5️⃣6️⃣7️⃣8️⃣9️⃣🔟])/g, '$1\n\n$2');
-  
+  result = result.replace(/([^\n])\n([📌1️⃣2️⃣3️⃣4️⃣5️⃣6️⃣7️⃣8️⃣9️⃣🔟])/g, "$1\n\n$2");
+
   // Ensure spacing after special emoji markers
   result = result.replace(/(^[✅❌💡🎯⚠️🗺️].+)$/gm, (match, p1, offset, string) => {
     const nextLineMatch = string.slice(offset + match.length).match(/^\n([^\n])/);
     if (nextLineMatch && !nextLineMatch[1].match(/[✅❌💡🎯⚠️🗺️📌1️⃣2️⃣3️⃣4️⃣5️⃣6️⃣7️⃣8️⃣9️⃣🔟]/)) {
-      return match + '\n';
+      return match + "\n";
     }
     return match;
   });
-  
+
   // Clean up excessive newlines (more than 2 in a row → keep 2)
-  result = result.replace(/\n{3,}/g, '\n\n');
-  
+  result = result.replace(/\n{3,}/g, "\n\n");
+
   return result;
 }
 
@@ -802,20 +784,20 @@ function isComplexFormula(formula: string): boolean {
   // Consider complex if:
   // 1. Length > 50 characters
   if (formula.length > 50) return true;
-  
+
   // 2. Contains nested fractions (multiple \frac)
   const fracMatches = formula.match(/\\frac/g);
   if (fracMatches && fracMatches.length > 1) return true;
-  
+
   // 3. Contains matrices, integrals, summations
   if (formula.match(/\\begin\{(matrix|pmatrix|bmatrix|array)\}|\\int|\\sum|\\prod|\\lim/)) {
     return true;
   }
-  
+
   // 4. Contains complex nested structures
   const openBraces = (formula.match(/\{/g) || []).length;
   if (openBraces > 3) return true;
-  
+
   return false;
 }
 
@@ -823,10 +805,7 @@ function isComplexFormula(formula: string): boolean {
  * Escapes HTML special characters to prevent Telegram API parsing errors
  */
 function escapeHtml(text: string): string {
-  return text
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;');
+  return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
 /**
@@ -845,10 +824,10 @@ function cleanMarkdownFormatting(text: string): string {
 
   // MOST AGGRESSIVE: Remove ANY line that contains ONLY ** (with optional spaces/tabs)
   // This catches cases like: "**План решения:\n\n**\n\n1️⃣"
-  result = result.replace(/^[ \t]*\*\*[ \t]*$/gm, '');
+  result = result.replace(/^[ \t]*\*\*[ \t]*$/gm, "");
 
   // Remove excessive empty lines that may result from above cleanup
-  result = result.replace(/\n{3,}/g, '\n\n');
+  result = result.replace(/\n{3,}/g, "\n\n");
 
   // DEBUG: Log AFTER first cleanup
   console.log('\n🧹 AFTER removing standalone **:');
@@ -860,31 +839,31 @@ function cleanMarkdownFormatting(text: string): string {
 
   // Fix: Remove lines that contain ONLY ** (standalone markers)
   // This happens when AI generates: **Header:**\n\n**\n
-  result = result.replace(/\n\s*\*\*\s*\n/g, '\n');
+  result = result.replace(/\n\s*\*\*\s*\n/g, "\n");
 
   // Fix: Remove ** at the start of a line after empty line
-  result = result.replace(/\n\n\*\*\s*$/gm, '\n\n');
+  result = result.replace(/\n\n\*\*\s*$/gm, "\n\n");
 
   // Fix: **text:**\n\n** → **text:**
   // Remove ** that appear alone after headers ending with :
-  result = result.replace(/(\*\*[^*]+:)\s*\n+\s*\*\*\s*\n/g, '$1\n\n');
+  result = result.replace(/(\*\*[^*]+:)\s*\n+\s*\*\*\s*\n/g, "$1\n\n");
 
   // Fix: **text\n\n** → **text**
   // Remove newlines between opening ** and closing **
-  result = result.replace(/\*\*([^\n*]+)\n+\*\*/g, '**$1**');
+  result = result.replace(/\*\*([^\n*]+)\n+\*\*/g, "**$1**");
 
   // Fix: **\n\ntext** → **text**
   // Remove newlines after opening **
-  result = result.replace(/\*\*\n+([^\n*]+)/g, '**$1');
+  result = result.replace(/\*\*\n+([^\n*]+)/g, "**$1");
 
   // Fix: text\n\n** → text**
   // Remove newlines before closing **
-  result = result.replace(/([^\n*]+)\n+\*\*/g, '$1**');
+  result = result.replace(/([^\n*]+)\n+\*\*/g, "$1**");
 
   // Same for underscores __text__
-  result = result.replace(/__([^\n_]+)\n+__/g, '__$1__');
-  result = result.replace(/__\n+([^\n_]+)/g, '__$1');
-  result = result.replace(/([^\n_]+)\n+__/g, '$1__');
+  result = result.replace(/__([^\n_]+)\n+__/g, "__$1__");
+  result = result.replace(/__\n+([^\n_]+)/g, "__$1");
+  result = result.replace(/([^\n_]+)\n+__/g, "$1__");
 
   return result;
 }
@@ -897,21 +876,21 @@ function convertMarkdownToTelegramHTML(text: string): string {
   let result = text;
 
   // Code blocks: ```code``` → <pre>code</pre>
-  result = result.replace(/```([^`]+)```/g, '<pre>$1</pre>');
+  result = result.replace(/```([^`]+)```/g, "<pre>$1</pre>");
 
   // Bold: **text** or __text__ → <b>text</b>
-  result = result.replace(/\*\*(.+?)\*\*/g, '<b>$1</b>');
-  result = result.replace(/__(.+?)__/g, '<b>$1</b>');
+  result = result.replace(/\*\*(.+?)\*\*/g, "<b>$1</b>");
+  result = result.replace(/__(.+?)__/g, "<b>$1</b>");
 
   // Italic: *text* or _text_ → <i>text</i> (but avoid conflicts with bold)
-  result = result.replace(/(?<!\*)\*([^*]+?)\*(?!\*)/g, '<i>$1</i>');
-  result = result.replace(/(?<!_)_([^_]+?)_(?!_)/g, '<i>$1</i>');
+  result = result.replace(/(?<!\*)\*([^*]+?)\*(?!\*)/g, "<i>$1</i>");
+  result = result.replace(/(?<!_)_([^_]+?)_(?!_)/g, "<i>$1</i>");
 
   // Inline code: `text` → <code>text</code>
-  result = result.replace(/`(.+?)`/g, '<code>$1</code>');
+  result = result.replace(/`(.+?)`/g, "<code>$1</code>");
 
   // Strikethrough: ~~text~~ → <s>text</s>
-  result = result.replace(/~~(.+?)~~/g, '<s>$1</s>');
+  result = result.replace(/~~(.+?)~~/g, "<s>$1</s>");
 
   return result;
 }
@@ -954,19 +933,23 @@ function formatForTelegram(text: string): string {
  * Generates Telegram inline keyboard JSON for Mini App button
  */
 function generateMiniAppButton(solutionId: string): any {
-  const WEBAPP_URL = Deno.env.get('VITE_WEBAPP_URL') || 'https://sokratai.lovable.app';
+  const WEBAPP_URL = Deno.env.get("VITE_WEBAPP_URL") || "https://sokratai.lovable.app";
   const miniAppUrl = `${WEBAPP_URL}/miniapp/solution/${solutionId}`;
-  
-  console.log('🔗 Mini App button URL:', miniAppUrl);
-  console.log('📱 Solution ID:', solutionId);
-  
+
+  console.log("🔗 Mini App button URL:", miniAppUrl);
+  console.log("📱 Solution ID:", solutionId);
+
   return {
-    inline_keyboard: [[{
-      text: "📱 Открыть полное решение",
-      web_app: {
-        url: miniAppUrl
-      }
-    }]]
+    inline_keyboard: [
+      [
+        {
+          text: "📱 Открыть полное решение",
+          web_app: {
+            url: miniAppUrl,
+          },
+        },
+      ],
+    ],
   };
 }
 
@@ -977,20 +960,22 @@ function generateMiniAppButton(solutionId: string): any {
 function formatSolutionPreview(
   problem: string,
   answer: string,
-  solutionId: string
+  solutionId: string,
 ): { text: string; replyMarkup: any } {
-  const text = formatForTelegram(`
+  const text = formatForTelegram(
+    `
 📝 **Задача:**
 ${problem}
 
 ✅ **Ответ:** ${answer}
 
 👇 Нажми кнопку ниже, чтобы увидеть подробное решение с формулами!
-  `.trim());
-  
+  `.trim(),
+  );
+
   return {
     text,
-    replyMarkup: generateMiniAppButton(solutionId)
+    replyMarkup: generateMiniAppButton(solutionId),
   };
 }
 
@@ -1000,16 +985,16 @@ function splitLongMessage(text: string, maxLength: number = 4000): string[] {
   }
 
   const parts: string[] = [];
-  let currentPart = '';
-  const lines = text.split('\n');
+  let currentPart = "";
+  const lines = text.split("\n");
 
   for (const line of lines) {
-    if ((currentPart + line + '\n').length > maxLength) {
+    if ((currentPart + line + "\n").length > maxLength) {
       if (currentPart) {
         parts.push(currentPart.trim());
-        currentPart = '';
+        currentPart = "";
       }
-      
+
       // If single line is too long, split it
       if (line.length > maxLength) {
         let remaining = line;
@@ -1018,10 +1003,10 @@ function splitLongMessage(text: string, maxLength: number = 4000): string[] {
           remaining = remaining.substring(maxLength);
         }
       } else {
-        currentPart = line + '\n';
+        currentPart = line + "\n";
       }
     } else {
-      currentPart += line + '\n';
+      currentPart += line + "\n";
     }
   }
 
@@ -1039,22 +1024,22 @@ function createQuickActionsKeyboard() {
       [
         {
           text: "📋 План решения",
-          callback_data: "quick_action:plan"
-        }
+          callback_data: "quick_action:plan",
+        },
       ],
       [
         {
           text: "🔍 Объясни подробнее",
-          callback_data: "quick_action:explain"
-        }
+          callback_data: "quick_action:explain",
+        },
       ],
       [
         {
           text: "✍️ Похожая задача",
-          callback_data: "quick_action:similar"
-        }
-      ]
-    ]
+          callback_data: "quick_action:similar",
+        },
+      ],
+    ],
   };
 }
 
@@ -1062,7 +1047,7 @@ function createQuickActionsKeyboard() {
  * Extracts LaTeX formulas from text
  * Returns object with display formulas and text without them
  */
-function extractLatexFormulas(text: string): { formulas: string[], textWithoutFormulas: string } {
+function extractLatexFormulas(text: string): { formulas: string[]; textWithoutFormulas: string } {
   const formulas: string[] = [];
   let textWithoutFormulas = text;
 
@@ -1070,11 +1055,11 @@ function extractLatexFormulas(text: string): { formulas: string[], textWithoutFo
   const displayMatches = text.match(/\$\$(.+?)\$\$/gs);
   if (displayMatches) {
     for (const match of displayMatches) {
-      const formula = match.replace(/\$\$/g, '').trim();
+      const formula = match.replace(/\$\$/g, "").trim();
       if (formula) {
         formulas.push(formula);
         // Remove from text
-        textWithoutFormulas = textWithoutFormulas.replace(match, '');
+        textWithoutFormulas = textWithoutFormulas.replace(match, "");
       }
     }
   }
@@ -1083,9 +1068,9 @@ function extractLatexFormulas(text: string): { formulas: string[], textWithoutFo
   const inlineMatches = text.match(/\$([^$\n]+?)\$/g);
   if (inlineMatches) {
     for (const match of inlineMatches) {
-      const formula = match.replace(/\$/g, '').trim();
+      const formula = match.replace(/\$/g, "").trim();
       // Only consider it a formula if it contains LaTeX commands or math symbols
-      if (formula && (formula.includes('\\') || formula.match(/[a-z]_|[a-z]\^|\^[0-9]/))) {
+      if (formula && (formula.includes("\\") || formula.match(/[a-z]_|[a-z]\^|\^[0-9]/))) {
         formulas.push(formula);
       }
     }
@@ -1129,18 +1114,19 @@ function parseSolutionSteps(aiResponse: string): any[] {
   // Split text into potential sections using various heading patterns
   // Patterns: ### Heading, **Heading:**, 1. Heading, **Шаг N:**, **Шаг 1: Title**
   // FIXED: Changed .+? to [^*\n]+ (greedy) to properly capture full title text
-  const sectionRegex = /(?:^|\n)(?:#{1,3}\s+(.+)|(?:\*\*)?(?:Шаг\s+)?(\d+)[.):\s]+\s*([^*\n]+)(?:\*\*)?|(?:\*\*)([^*]+)(?:\*\*):)/gm;
-  
-  const sections: Array<{start: number, title: string, number?: number}> = [];
+  const sectionRegex =
+    /(?:^|\n)(?:#{1,3}\s+(.+)|(?:\*\*)?(?:Шаг\s+)?(\d+)[.):\s]+\s*([^*\n]+)(?:\*\*)?|(?:\*\*)([^*]+)(?:\*\*):)/gm;
+
+  const sections: Array<{ start: number; title: string; number?: number }> = [];
   let match;
-  
+
   while ((match = sectionRegex.exec(aiResponse)) !== null) {
-    const title = match[1] || match[3] || match[4] || '';
+    const title = match[1] || match[3] || match[4] || "";
     const number = match[2] ? parseInt(match[2]) : undefined;
     sections.push({
       start: match.index,
       title: title.trim(),
-      number
+      number,
     });
   }
 
@@ -1150,35 +1136,35 @@ function parseSolutionSteps(aiResponse: string): any[] {
       const section = sections[i];
       const nextSection = sections[i + 1];
       const endPos = nextSection ? nextSection.start : aiResponse.length;
-      
+
       // Extract content between this section and the next
       const fullContent = aiResponse.substring(section.start, endPos);
-      
+
       // Remove the heading line itself
-      const contentLines = fullContent.split('\n').slice(1).join('\n').trim();
-      
+      const contentLines = fullContent.split("\n").slice(1).join("\n").trim();
+
       // Extract formulas from content
       const { formulas, textWithoutFormulas } = extractLatexFormulas(contentLines);
-      
+
       // Extract method hints (lines starting with 💡, Метод:, etc)
       const methodMatch = contentLines.match(/(?:💡\s*)?(?:\*\*)?Метод:(?:\*\*)?\s*(.+?)(?:\n|$)/);
       const method = methodMatch ? methodMatch[1].trim() : null;
-      
+
       // Get the main formula (usually the first display formula)
       const mainFormula = formulas.length > 0 ? formulas[0] : null;
-      
+
       // Clean content: remove method line if present
       let cleanContent = textWithoutFormulas;
       if (methodMatch) {
-        cleanContent = cleanContent.replace(methodMatch[0], '').trim();
+        cleanContent = cleanContent.replace(methodMatch[0], "").trim();
       }
-      
+
       steps.push({
-        number: section.number || (i + 1),
+        number: section.number || i + 1,
         title: section.title || `Шаг ${i + 1}`,
         content: cleanContent.substring(0, 800), // Reasonable limit
         formula: mainFormula,
-        method: method
+        method: method,
       });
     }
   }
@@ -1188,17 +1174,17 @@ function parseSolutionSteps(aiResponse: string): any[] {
     const simpleStepRegex = /(?:^|\n)(\d+)[.)]\s+(.+?)(?=\n\d+[.)]|\n\n|$)/gs;
     let stepMatch;
     let stepNum = 1;
-    
+
     while ((stepMatch = simpleStepRegex.exec(aiResponse)) !== null) {
       const content = stepMatch[2].trim();
       const { formulas } = extractLatexFormulas(content);
-      
+
       steps.push({
         number: stepNum++,
-        title: content.substring(0, 60).trim() + (content.length > 60 ? '...' : ''),
+        title: content.substring(0, 60).trim() + (content.length > 60 ? "..." : ""),
         content: content.substring(0, 800),
         formula: formulas.length > 0 ? formulas[0] : null,
-        method: null
+        method: null,
       });
     }
   }
@@ -1206,19 +1192,19 @@ function parseSolutionSteps(aiResponse: string): any[] {
   // Fallback: split text into logical blocks by paragraphs
   if (steps.length === 0) {
     // Split by double newlines (paragraph breaks)
-    const paragraphs = aiResponse.split(/\n\s*\n/).filter(p => p.trim().length > 0);
-    
+    const paragraphs = aiResponse.split(/\n\s*\n/).filter((p) => p.trim().length > 0);
+
     // If we have multiple paragraphs, create steps from them
     if (paragraphs.length > 1) {
       let stepNum = 1;
-      
+
       for (const para of paragraphs) {
         const trimmed = para.trim();
         if (trimmed.length < 20) continue; // Skip very short paragraphs (might be headers)
-        
+
         // Extract formulas
         const { formulas, textWithoutFormulas } = extractLatexFormulas(trimmed);
-        
+
         // Extract title from first line if it's short and ends with colon
         let title = null;
         let content = trimmed;
@@ -1230,19 +1216,19 @@ function parseSolutionSteps(aiResponse: string): any[] {
           // Use first sentence or first 60 chars as title
           const firstSentence = trimmed.match(/^([^.!?]{1,80})/);
           if (firstSentence && firstSentence[1].length > 20) {
-            title = firstSentence[1].trim() + (trimmed.length > firstSentence[1].length ? '...' : '');
+            title = firstSentence[1].trim() + (trimmed.length > firstSentence[1].length ? "..." : "");
             content = trimmed;
           } else {
             title = `Шаг ${stepNum}`;
           }
         }
-        
+
         steps.push({
           number: stepNum++,
           title: title || `Шаг ${stepNum}`,
           content: textWithoutFormulas.substring(0, 800),
           formula: formulas.length > 0 ? formulas[0] : null,
-          method: null
+          method: null,
         });
       }
     }
@@ -1251,26 +1237,26 @@ function parseSolutionSteps(aiResponse: string): any[] {
   // Ultimate fallback: create a single step with full response
   if (steps.length === 0) {
     const { formulas } = extractLatexFormulas(aiResponse);
-    
+
     // Try to extract a title from first line
     let title = "Решение";
     const firstLineMatch = aiResponse.match(/^(.{1,80}):/);
     if (firstLineMatch) {
       title = firstLineMatch[1].trim();
     }
-    
+
     steps.push({
       number: 1,
       title: title,
       content: aiResponse.substring(0, 1000),
       formula: formulas.length > 0 ? formulas[0] : null,
-      method: null
+      method: null,
     });
   }
 
   console.log(`📊 Parsed ${steps.length} steps from AI response`);
   if (steps.length > 0) {
-    console.log('📋 Step titles:', steps.map(s => `${s.number}. ${s.title}`).join(' | '));
+    console.log("📋 Step titles:", steps.map((s) => `${s.number}. ${s.title}`).join(" | "));
   }
 
   return steps;
@@ -1285,80 +1271,80 @@ async function saveSolution(
   telegramUserId: number,
   userId: string,
   problemText: string,
-  aiResponse: string
+  aiResponse: string,
 ): Promise<string | null> {
   try {
-    console.log('💾 Saving solution...');
-    console.log('📏 AI response length:', aiResponse.length, 'chars');
-    console.log('📝 Preview:', aiResponse.substring(0, 150) + '...');
+    console.log("💾 Saving solution...");
+    console.log("📏 AI response length:", aiResponse.length, "chars");
+    console.log("📝 Preview:", aiResponse.substring(0, 150) + "...");
 
     // Parse the RAW AI response before any Telegram formatting
     const solutionSteps = parseSolutionSteps(aiResponse);
     const finalAnswer = extractFinalAnswer(aiResponse);
 
     console.log(`✅ Parsing complete: ${solutionSteps.length} steps found`);
-    console.log('📋 Titles:', solutionSteps.map((s, i) => `${i + 1}:"${s.title}"`).join(', '));
-    console.log('🎯 Final answer:', finalAnswer ? `"${finalAnswer.substring(0, 50)}..."` : 'NOT FOUND');
+    console.log("📋 Titles:", solutionSteps.map((s, i) => `${i + 1}:"${s.title}"`).join(", "));
+    console.log("🎯 Final answer:", finalAnswer ? `"${finalAnswer.substring(0, 50)}..."` : "NOT FOUND");
 
     const solutionData = {
       problem: problemText,
       solution_steps: solutionSteps,
       final_answer: finalAnswer,
-      raw_response: aiResponse
+      raw_response: aiResponse,
     };
 
-    console.log('💾 Inserting into database...');
+    console.log("💾 Inserting into database...");
 
     const { data: solution, error } = await supabase
-      .from('solutions')
+      .from("solutions")
       .insert({
         telegram_chat_id: telegramChatId,
         telegram_user_id: telegramUserId,
         user_id: userId,
         problem_text: problemText,
-        solution_data: solutionData
+        solution_data: solutionData,
       })
-      .select('id')
+      .select("id")
       .single();
 
     if (error) {
-      console.error('❌ DB insert failed:', error.message);
+      console.error("❌ DB insert failed:", error.message);
       return null;
     }
 
-    console.log('✅ Solution saved! ID:', solution?.id);
+    console.log("✅ Solution saved! ID:", solution?.id);
     return solution?.id || null;
   } catch (error) {
-    console.error('❌ saveSolution error:', error instanceof Error ? error.message : error);
+    console.error("❌ saveSolution error:", error instanceof Error ? error.message : error);
     return null;
   }
 }
 
 async function handleTextMessage(telegramUserId: number, userId: string, text: string) {
-  console.log('Handling text message:', { telegramUserId, text });
+  console.log("Handling text message:", { telegramUserId, text });
 
   try {
     // Get or create chat
     const chatId = await getOrCreateTelegramChat(userId);
 
     // Save user message
-    await supabase.from('chat_messages').insert({
+    await supabase.from("chat_messages").insert({
       chat_id: chatId,
       user_id: userId,
-      role: 'user',
+      role: "user",
       content: text,
-      input_method: 'text',
+      input_method: "text",
     });
 
-  // Get chat history - limit to last 20 messages (10 pairs)
-  const { data: historyReversed } = await supabase
-    .from('chat_messages')
-    .select('role, content, image_url')
-    .eq('chat_id', chatId)
-    .order('created_at', { ascending: false })
-    .limit(20);
-  
-  const history = historyReversed?.reverse() || [];
+    // Get chat history - limit to last 20 messages (10 pairs)
+    const { data: historyReversed } = await supabase
+      .from("chat_messages")
+      .select("role, content, image_url")
+      .eq("chat_id", chatId)
+      .order("created_at", { ascending: false })
+      .limit(20);
+
+    const history = historyReversed?.reverse() || [];
 
     // Start typing loop
     const stopTyping = { stop: false };
@@ -1366,10 +1352,10 @@ async function handleTextMessage(telegramUserId: number, userId: string, text: s
 
     // Call AI chat function with service role authorization
     const chatResponse = await fetch(`${SUPABASE_URL}/functions/v1/chat`, {
-      method: 'POST',
+      method: "POST",
       headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
       },
       body: JSON.stringify({
         messages: history || [],
@@ -1384,25 +1370,22 @@ async function handleTextMessage(telegramUserId: number, userId: string, text: s
 
     // Handle rate limit error
     if (chatResponse.status === 429) {
-      await sendTelegramMessage(
-        telegramUserId, 
-        '⏳ Слишком много запросов. Подожди немного и попробуй снова.'
-      );
+      await sendTelegramMessage(telegramUserId, "⏳ Слишком много запросов. Подожди немного и попробуй снова.");
       return;
     }
 
     // Handle payment required error
     if (chatResponse.status === 402) {
       await sendTelegramMessage(
-        telegramUserId, 
-        '💳 Закончились средства на балансе. Пожалуйста, пополни баланс в личном кабинете.'
+        telegramUserId,
+        "💳 Закончились средства на балансе. Пожалуйста, пополни баланс в личном кабинете.",
       );
       return;
     }
 
     if (!chatResponse.ok) {
-      console.error('AI response error:', chatResponse.status, await chatResponse.text());
-      await sendTelegramMessage(telegramUserId, '❌ Произошла ошибка. Попробуй ещё раз.');
+      console.error("AI response error:", chatResponse.status, await chatResponse.text());
+      await sendTelegramMessage(telegramUserId, "❌ Произошла ошибка. Попробуй ещё раз.");
       return;
     }
 
@@ -1425,13 +1408,7 @@ async function handleTextMessage(telegramUserId: number, userId: string, text: s
     }
 
     // Save solution to database
-    const solutionId = await saveSolution(
-      telegramUserId,
-      telegramUserId,
-      userId,
-      text,
-      aiContent
-    );
+    const solutionId = await saveSolution(telegramUserId, telegramUserId, userId, text, aiContent);
 
     // Format and save AI response
     const formattedContent = formatForTelegram(aiContent);
@@ -1443,7 +1420,7 @@ async function handleTextMessage(telegramUserId: number, userId: string, text: s
     await supabase.from('chat_messages').insert({
       chat_id: chatId,
       user_id: userId,
-      role: 'assistant',
+      role: "assistant",
       content: aiContent,
     });
 
@@ -1452,7 +1429,7 @@ async function handleTextMessage(telegramUserId: number, userId: string, text: s
     for (let i = 0; i < messageParts.length; i++) {
       if (i > 0) {
         // Small delay between parts
-        await new Promise(resolve => setTimeout(resolve, 1000));
+        await new Promise((resolve) => setTimeout(resolve, 1000));
       }
 
       // Add inline keyboard only to the last message part
@@ -1460,129 +1437,125 @@ async function handleTextMessage(telegramUserId: number, userId: string, text: s
       await sendTelegramMessage(
         telegramUserId,
         messageParts[i],
-        isLastPart ? { reply_markup: createQuickActionsKeyboard() } : undefined
+        isLastPart ? { reply_markup: createQuickActionsKeyboard() } : undefined,
       );
     }
 
     // Send Mini App button if solution was saved
     if (solutionId) {
-      await sendTelegramMessage(
-        telegramUserId,
-        '📱 Открой полное решение с формулами:',
-        { reply_markup: generateMiniAppButton(solutionId) }
-      );
+      await sendTelegramMessage(telegramUserId, "📱 Открой полное решение с формулами:", {
+        reply_markup: generateMiniAppButton(solutionId),
+      });
     }
   } catch (error) {
-    console.error('Error handling text message:', error);
-    await sendTelegramMessage(telegramUserId, '❌ Произошла ошибка. Попробуй ещё раз.');
+    console.error("Error handling text message:", error);
+    await sendTelegramMessage(telegramUserId, "❌ Произошла ошибка. Попробуй ещё раз.");
   }
 }
 
 async function handlePhotoMessage(telegramUserId: number, userId: string, photo: any, caption?: string) {
-  console.log('Handling photo message:', { telegramUserId, photoId: photo.file_id });
+  console.log("Handling photo message:", { telegramUserId, photoId: photo.file_id });
 
   try {
     // Get file info from Telegram
-    console.log('Step 1: Getting file info from Telegram...');
+    console.log("Step 1: Getting file info from Telegram...");
     const fileResponse = await fetch(
-      `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/getFile?file_id=${photo.file_id}`
+      `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/getFile?file_id=${photo.file_id}`,
     );
     const fileData = await fileResponse.json();
 
     if (!fileData.ok) {
-      console.error('Telegram getFile failed:', fileData);
+      console.error("Telegram getFile failed:", fileData);
       throw new Error(`Failed to get file from Telegram: ${JSON.stringify(fileData)}`);
     }
 
     const filePath = fileData.result.file_path;
-    console.log('Step 2: File path obtained:', filePath);
+    console.log("Step 2: File path obtained:", filePath);
 
     // Download image from Telegram
-    console.log('Step 3: Downloading image from Telegram...');
-    const imageResponse = await fetch(
-      `https://api.telegram.org/file/bot${TELEGRAM_BOT_TOKEN}/${filePath}`
-    );
+    console.log("Step 3: Downloading image from Telegram...");
+    const imageResponse = await fetch(`https://api.telegram.org/file/bot${TELEGRAM_BOT_TOKEN}/${filePath}`);
 
     if (!imageResponse.ok) {
-      console.error('Failed to download image:', imageResponse.status);
+      console.error("Failed to download image:", imageResponse.status);
       throw new Error(`Failed to download image: ${imageResponse.status}`);
     }
 
     const imageBlob = await imageResponse.blob();
-    console.log('Step 4: Image downloaded, size:', imageBlob.size);
+    console.log("Step 4: Image downloaded, size:", imageBlob.size);
 
     // Upload to Supabase Storage
-    console.log('Step 5: Uploading to Supabase Storage...');
+    console.log("Step 5: Uploading to Supabase Storage...");
     const fileName = `${userId}/${Date.now()}.jpg`;
     const { data: uploadData, error: uploadError } = await supabase.storage
-      .from('chat-images')
+      .from("chat-images")
       .upload(fileName, imageBlob, {
-        contentType: 'image/jpeg',
+        contentType: "image/jpeg",
         upsert: false,
       });
 
     if (uploadError) {
-      console.error('Upload error:', uploadError);
+      console.error("Upload error:", uploadError);
       throw new Error(`Failed to upload image: ${uploadError.message}`);
     }
-    console.log('Step 6: Upload successful:', fileName);
+    console.log("Step 6: Upload successful:", fileName);
 
     // Create signed URL for AI
-    console.log('Step 7: Creating signed URL...');
+    console.log("Step 7: Creating signed URL...");
     const { data: signedData, error: signError } = await supabase.storage
-      .from('chat-images')
+      .from("chat-images")
       .createSignedUrl(fileName, 86400); // 24 hours
 
     if (signError || !signedData) {
-      console.error('Failed to create signed URL:', signError);
+      console.error("Failed to create signed URL:", signError);
       throw new Error(`Failed to create signed URL: ${signError?.message}`);
     }
-    console.log('Step 8: Signed URL created');
+    console.log("Step 8: Signed URL created");
 
     // Get or create chat
-    console.log('Step 9: Getting or creating chat...');
+    console.log("Step 9: Getting or creating chat...");
     const chatId = await getOrCreateTelegramChat(userId);
-    console.log('Step 10: Chat ID:', chatId);
+    console.log("Step 10: Chat ID:", chatId);
 
     // Save user message with image
-    console.log('Step 11: Saving message to database...');
-    await supabase.from('chat_messages').insert({
+    console.log("Step 11: Saving message to database...");
+    await supabase.from("chat_messages").insert({
       chat_id: chatId,
       user_id: userId,
-      role: 'user',
-      content: caption || 'Помоги решить эту задачу',
+      role: "user",
+      content: caption || "Помоги решить эту задачу",
       image_url: signedData.signedUrl,
       image_path: fileName,
-      input_method: 'photo',
+      input_method: "photo",
     });
 
-  // Get chat history - limit to last 20 messages (10 pairs)
-  console.log('Step 12: Getting chat history...');
-  const { data: historyReversed, error: historyError } = await supabase
-    .from('chat_messages')
-    .select('role, content, image_url')
-    .eq('chat_id', chatId)
-    .order('created_at', { ascending: false })
-    .limit(20);
+    // Get chat history - limit to last 20 messages (10 pairs)
+    console.log("Step 12: Getting chat history...");
+    const { data: historyReversed, error: historyError } = await supabase
+      .from("chat_messages")
+      .select("role, content, image_url")
+      .eq("chat_id", chatId)
+      .order("created_at", { ascending: false })
+      .limit(20);
 
-  if (historyError) {
-    console.error('Failed to get chat history:', historyError);
-  }
+    if (historyError) {
+      console.error("Failed to get chat history:", historyError);
+    }
 
-  const history = historyReversed?.reverse() || [];
-  console.log('Step 13: Chat history loaded, messages:', history.length);
+    const history = historyReversed?.reverse() || [];
+    console.log("Step 13: Chat history loaded, messages:", history.length);
 
     // Start typing loop
     const stopTyping = { stop: false };
     const typingPromise = sendTypingLoop(telegramUserId, stopTyping);
 
     // Call AI chat function with service role authorization
-    console.log('Step 14: Calling AI chat function...');
+    console.log("Step 14: Calling AI chat function...");
     const chatResponse = await fetch(`${SUPABASE_URL}/functions/v1/chat`, {
-      method: 'POST',
+      method: "POST",
       headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
       },
       body: JSON.stringify({
         messages: history || [],
@@ -1595,14 +1568,11 @@ async function handlePhotoMessage(telegramUserId: number, userId: string, photo:
     stopTyping.stop = true;
     await typingPromise;
 
-    console.log('Step 15: AI response status:', chatResponse.status);
+    console.log("Step 15: AI response status:", chatResponse.status);
 
     // Handle rate limit error
     if (chatResponse.status === 429) {
-      await sendTelegramMessage(
-        telegramUserId,
-        '⏳ Слишком много запросов. Подожди немного и попробуй снова.'
-      );
+      await sendTelegramMessage(telegramUserId, "⏳ Слишком много запросов. Подожди немного и попробуй снова.");
       return;
     }
 
@@ -1610,84 +1580,73 @@ async function handlePhotoMessage(telegramUserId: number, userId: string, photo:
     if (chatResponse.status === 402) {
       await sendTelegramMessage(
         telegramUserId,
-        '💳 Закончились средства на балансе. Пожалуйста, пополни баланс в личном кабинете.'
+        "💳 Закончились средства на балансе. Пожалуйста, пополни баланс в личном кабинете.",
       );
       return;
     }
 
     if (!chatResponse.ok) {
       const errorText = await chatResponse.text();
-      console.error('AI response error:', chatResponse.status, errorText);
+      console.error("AI response error:", chatResponse.status, errorText);
       await sendTelegramMessage(telegramUserId, `❌ Ошибка AI: ${errorText.substring(0, 100)}`);
       return;
     }
 
     // Parse SSE stream
-    console.log('Step 16: Parsing AI response...');
+    console.log("Step 16: Parsing AI response...");
     const aiContent = await parseSSEStream(chatResponse);
-    console.log('Step 17: AI response parsed, length:', aiContent.length);
+    console.log("Step 17: AI response parsed, length:", aiContent.length);
 
     // Save solution to database
-    console.log('Step 18: Saving solution to database...');
-    const problemText = caption || 'Задача из фото';
-    const solutionId = await saveSolution(
-      telegramUserId,
-      telegramUserId,
-      userId,
-      problemText,
-      aiContent
-    );
-    console.log('Step 19: Solution saved, ID:', solutionId);
+    console.log("Step 18: Saving solution to database...");
+    const problemText = caption || "Задача из фото";
+    const solutionId = await saveSolution(telegramUserId, telegramUserId, userId, problemText, aiContent);
+    console.log("Step 19: Solution saved, ID:", solutionId);
 
     // Format and save AI response
-    console.log('Step 20: Formatting content for Telegram...');
+    console.log("Step 20: Formatting content for Telegram...");
     const formattedContent = formatForTelegram(aiContent);
 
-    console.log('Step 21: Saving AI response to database...');
-    await supabase.from('chat_messages').insert({
+    console.log("Step 21: Saving AI response to database...");
+    await supabase.from("chat_messages").insert({
       chat_id: chatId,
       user_id: userId,
-      role: 'assistant',
+      role: "assistant",
       content: aiContent,
     });
 
     // Split and send response if too long
-    console.log('Step 22: Splitting and sending messages...');
+    console.log("Step 22: Splitting and sending messages...");
     const messageParts = splitLongMessage(formattedContent);
-    console.log('Message parts:', messageParts.length);
+    console.log("Message parts:", messageParts.length);
 
     for (let i = 0; i < messageParts.length; i++) {
       if (i > 0) {
-        await new Promise(resolve => setTimeout(resolve, 1000));
+        await new Promise((resolve) => setTimeout(resolve, 1000));
       }
       // Add inline keyboard only to the last message part
       const isLastPart = i === messageParts.length - 1;
       await sendTelegramMessage(
         telegramUserId,
         messageParts[i],
-        isLastPart ? { reply_markup: createQuickActionsKeyboard() } : undefined
+        isLastPart ? { reply_markup: createQuickActionsKeyboard() } : undefined,
       );
     }
 
     // Send Mini App button if solution was saved
     if (solutionId) {
-      console.log('Step 23: Sending Mini App button...');
-      await sendTelegramMessage(
-        telegramUserId,
-        '📱 Открой полное решение с формулами:',
-        { reply_markup: generateMiniAppButton(solutionId) }
-      );
+      console.log("Step 23: Sending Mini App button...");
+      await sendTelegramMessage(telegramUserId, "📱 Открой полное решение с формулами:", {
+        reply_markup: generateMiniAppButton(solutionId),
+      });
     }
 
-    console.log('Photo message handled successfully!');
+    console.log("Photo message handled successfully!");
   } catch (error) {
-    console.error('❌ Error handling photo message:', error);
-    console.error('Error stack:', error instanceof Error ? error.stack : 'No stack trace');
+    console.error("❌ Error handling photo message:", error);
+    console.error("Error stack:", error instanceof Error ? error.stack : "No stack trace");
     const errorMsg = error instanceof Error ? error.message : String(error);
-    await sendTelegramMessage(
-      telegramUserId,
-      `❌ Ошибка при обработке фото: ${errorMsg.substring(0, 200)}`
-    );
+    await sendTelegramMessage(telegramUserId, `❌ Ошибка при обработке фото: ${errorMsg.substring(0, 200)}`);
   }
 }
 
@@ -1696,48 +1655,48 @@ async function handleCallbackQuery(callbackQuery: any) {
   const data = callbackQuery.data;
   const messageId = callbackQuery.message?.message_id;
 
-  console.log('Handling callback query:', { telegramUserId, data });
-  
+  console.log("Handling callback query:", { telegramUserId, data });
+
   // Answer callback query to remove loading state
   await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/answerCallbackQuery`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ 
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
       callback_query_id: callbackQuery.id,
-      text: "Обрабатываю..." 
+      text: "Обрабатываю...",
     }),
   });
 
   // Handle quick action buttons
-  if (data.startsWith('quick_action:')) {
+  if (data.startsWith("quick_action:")) {
     const session = await getOnboardingSession(telegramUserId);
-    
+
     if (!session?.user_id) {
-      await sendTelegramMessage(telegramUserId, '❌ Сессия не найдена. Нажми /start');
+      await sendTelegramMessage(telegramUserId, "❌ Сессия не найдена. Нажми /start");
       return;
     }
-    
+
     const userId = session.user_id;
-    
+
     // Determine prompt text based on button
-    let promptText = '';
+    let promptText = "";
     switch (data) {
-      case 'quick_action:plan':
-        promptText = 'Составь план решения этой задачи';
+      case "quick_action:plan":
+        promptText = "Составь план решения этой задачи";
         break;
-      case 'quick_action:explain':
-        promptText = 'Объясни этот момент подробнее';
+      case "quick_action:explain":
+        promptText = "Объясни этот момент подробнее";
         break;
-      case 'quick_action:similar':
-        promptText = 'Дай мне похожую задачу для практики';
+      case "quick_action:similar":
+        promptText = "Дай мне похожую задачу для практики";
         break;
       default:
         return;
     }
-    
+
     // Show user what they "sent"
     await sendTelegramMessage(telegramUserId, `⚡ ${promptText}`);
-    
+
     // Process as text message with button input method
     await handleTextMessage(telegramUserId, userId, promptText);
     return;
@@ -1746,7 +1705,7 @@ async function handleCallbackQuery(callbackQuery: any) {
   // Handle onboarding buttons
   const session = await getOnboardingSession(telegramUserId);
   if (!session) {
-    console.error('No session found for user:', telegramUserId);
+    console.error("No session found for user:", telegramUserId);
     return;
   }
 
@@ -1754,37 +1713,37 @@ async function handleCallbackQuery(callbackQuery: any) {
   const userId = session.user_id;
   const onboardingData = session.onboarding_data as OnboardingData;
 
-  if (state === 'waiting_grade' && data.startsWith('grade_')) {
-    const grade = parseInt(data.replace('grade_', ''));
+  if (state === "waiting_grade" && data.startsWith("grade_")) {
+    const grade = parseInt(data.replace("grade_", ""));
     await handleGradeSelection(telegramUserId, userId, grade, messageId);
-  } else if (state === 'waiting_subject' && data.startsWith('subject_')) {
-    const subject = data.replace('subject_', '');
+  } else if (state === "waiting_subject" && data.startsWith("subject_")) {
+    const subject = data.replace("subject_", "");
     await handleSubjectSelection(telegramUserId, userId, subject, messageId);
-  } else if (state === 'waiting_goal' && data.startsWith('goal_')) {
-    const goal = data.replace('goal_', '');
+  } else if (state === "waiting_goal" && data.startsWith("goal_")) {
+    const goal = data.replace("goal_", "");
     await completeOnboarding(telegramUserId, userId, goal, messageId);
   }
 }
 
 Deno.serve(async (req) => {
-  if (req.method === 'OPTIONS') {
+  if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
   }
 
   try {
     const update = await req.json();
-    console.log('Received update:', JSON.stringify(update, null, 2));
+    console.log("Received update:", JSON.stringify(update, null, 2));
 
     // Handle /start command
-    if (update.message?.text?.startsWith('/start')) {
+    if (update.message?.text?.startsWith("/start")) {
       const telegramUserId = update.message.from.id;
       const telegramUsername = update.message.from.username;
-      const parts = update.message.text.split(' ');
-      const utmSource = parts[1] || 'header_try';
+      const parts = update.message.text.split(" ");
+      const utmSource = parts[1] || "header_try";
 
       await handleStart(telegramUserId, telegramUsername, utmSource);
       return new Response(JSON.stringify({ ok: true }), {
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
@@ -1792,21 +1751,21 @@ Deno.serve(async (req) => {
     if (update.callback_query) {
       await handleCallbackQuery(update.callback_query);
       return new Response(JSON.stringify({ ok: true }), {
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
     // Handle text messages (after onboarding)
-    if (update.message?.text && !update.message.text.startsWith('/')) {
+    if (update.message?.text && !update.message.text.startsWith("/")) {
       const telegramUserId = update.message.from.id;
       const session = await getOnboardingSession(telegramUserId);
 
-      if (session && session.onboarding_state === 'completed') {
+      if (session && session.onboarding_state === "completed") {
         await handleTextMessage(telegramUserId, session.user_id, update.message.text);
       }
-      
+
       return new Response(JSON.stringify({ ok: true }), {
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
@@ -1815,25 +1774,25 @@ Deno.serve(async (req) => {
       const telegramUserId = update.message.from.id;
       const session = await getOnboardingSession(telegramUserId);
 
-      if (session && session.onboarding_state === 'completed') {
+      if (session && session.onboarding_state === "completed") {
         const photo = update.message.photo[update.message.photo.length - 1]; // Get largest photo
         await handlePhotoMessage(telegramUserId, session.user_id, photo, update.message.caption);
       }
-      
+
       return new Response(JSON.stringify({ ok: true }), {
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
     return new Response(JSON.stringify({ ok: true }), {
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   } catch (error) {
-    console.error('Error processing update:', error);
-    const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
+    console.error("Error processing update:", error);
+    const errorMessage = error instanceof Error ? error.message : "Unknown error occurred";
     return new Response(JSON.stringify({ error: errorMessage }), {
       status: 500,
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   }
 });
