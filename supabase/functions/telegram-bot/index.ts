@@ -603,6 +603,15 @@ function preprocessLatex(text: string): string {
   let result = text;
   let hasComplexFormula = false;
 
+  // DEBUG: Log if we have \frac patterns
+  if (result.includes('\\frac')) {
+    console.log('\n🔍 LATEX INPUT contains \\frac patterns');
+    const fracMatches = result.match(/\\frac[^\s]*/g);
+    if (fracMatches) {
+      console.log('Found \\frac patterns:', fracMatches);
+    }
+  }
+
   // First, detect complex formulas before processing
   // Check display math $$ ... $$
   const displayMathMatches = text.match(/\$\$(.+?)\$\$/gs);
@@ -636,15 +645,32 @@ function preprocessLatex(text: string): string {
   // Remove inline math delimiters $ ... $ (non-greedy)
   result = result.replace(/\$([^$]+?)\$/g, "$1");
 
-  // НОВОЕ: Try to fix malformed \frac without braces
-  // Паттерн: \frac-b ± √D2a → преобразуем в читаемый вид
+  // Special case 1: Quadratic formula with discriminant
+  // Pattern: \frac-b ± √D2a → (-b ± √D)/2a
   result = result.replace(
-    /\\frac([^{}\s]+)\s*([\+\-±∓]\s*[^{}\s]+)?\s*([a-zA-Z0-9]+)/g,
-    (match, num, op, den) => {
-      console.log('⚠️ Found malformed fraction:', match);
-      const numerator = num + (op || '');
-      const denominator = den;
+    /\\frac(-?[a-z])\s*([\+\-±∓])\s*√([A-Z])(\d+[a-z])/gi,
+    (match, var1, op, radical, coef) => {
+      console.log('✅ Fixed quadratic formula fraction:', match);
+      return `(${var1} ${op} √${radical})/${coef}`;
+    }
+  );
+
+  // Special case 2: General malformed fractions
+  // Try to split at the last sequence of digits+letter
+  result = result.replace(
+    /\\frac([^{}\s]+?)(\d+[a-z]+)(?=\s|[.,;:]|$)/gi,
+    (match, numerator, denominator) => {
+      console.log('⚠️ Fixed general malformed fraction:', match);
       return `(${numerator})/${denominator}`;
+    }
+  );
+
+  // Last resort: if we still have \frac without braces, remove \frac prefix
+  result = result.replace(
+    /\\frac([^{\s][^\s]*)/g,
+    (match, rest) => {
+      console.log('⚠️ Fallback: Could not parse fraction properly:', match);
+      return rest;
     }
   );
 
