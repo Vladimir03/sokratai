@@ -816,20 +816,20 @@ function cleanMarkdownFormatting(text: string): string {
 
   // Fix: **text\n\n** → **text**
   // Remove newlines between opening ** and closing **
-  result = result.replace(/\*\*([^\n*]+)\n+\*\*/g, '**$1**');
+  result = result.replace(/\*\*([^\n*]+)\n+\*\*/g, "**$1**");
 
   // Fix: **\n\ntext** → **text**
   // Remove newlines after opening **
-  result = result.replace(/\*\*\n+([^\n*]+)/g, '**$1');
+  result = result.replace(/\*\*\n+([^\n*]+)/g, "**$1");
 
   // Fix: text\n\n** → text**
   // Remove newlines before closing **
-  result = result.replace(/([^\n*]+)\n+\*\*/g, '$1**');
+  result = result.replace(/([^\n*]+)\n+\*\*/g, "$1**");
 
   // Same for underscores __text__
-  result = result.replace(/__([^\n_]+)\n+__/g, '__$1__');
-  result = result.replace(/__\n+([^\n_]+)/g, '__$1');
-  result = result.replace(/([^\n_]+)\n+__/g, '$1__');
+  result = result.replace(/__([^\n_]+)\n+__/g, "__$1__");
+  result = result.replace(/__\n+([^\n_]+)/g, "__$1");
+  result = result.replace(/([^\n_]+)\n+__/g, "$1__");
 
   return result;
 }
