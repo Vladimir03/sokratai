@@ -644,24 +644,15 @@ function preprocessLatex(text: string): string {
       console.log('⚠️ Found malformed fraction:', match);
       const numerator = num + (op || '');
       const denominator = den;
-      return `(${numerator}) / (${denominator})`;
+      return `(${numerator})/${denominator}`;
     }
   );
 
   // Convert \frac{numerator}{denominator} to (numerator)/(denominator)
   // Handle nested fractions by repeating the replacement
   for (let i = 0; i < 3; i++) {
-    result = result.replace(/\\frac\{([^{}]+)\}\{([^{}]+)\}/g, "($1) / ($2)");
+    result = result.replace(/\\frac\{([^{}]+)\}\{([^{}]+)\}/g, "($1)/($2)");
   }
-
-  // Convert simple fractions without extra parentheses for single chars/numbers
-  result = result.replace(/\(([a-zA-Z0-9]+)\)\/\(([a-zA-Z0-9]+)\)/g, (match, num, den) => {
-    // Only simplify if both are single characters
-    if (num.length === 1 && den.length === 1) {
-      return `${num}/${den}`;
-    }
-    return match;
-  });
 
   // Convert \sqrt{x} to √(x) for complex expressions, √x for simple
   result = result.replace(/\\sqrt\{([^{}]+)\}/g, (_, content) => {
