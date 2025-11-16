@@ -645,18 +645,34 @@ function preprocessLatex(text: string): string {
   // Remove inline math delimiters $ ... $ (non-greedy)
   result = result.replace(/\$([^$]+?)\$/g, "$1");
 
+  // STEP 1: Convert \sqrt{x} FIRST to remove nested braces
+  // This allows \frac regex to work properly
+  result = result.replace(/\\sqrt\{([^{}]+)\}/g, (match, content) => {
+    console.log('🔢 Converting sqrt:', match);
+    return content.length === 1 ? `√${content}` : `√(${content})`;
+  });
+
+  // STEP 2: Convert proper \frac{numerator}{denominator} to (numerator)/(denominator)
+  // Now works because nested braces from \sqrt are gone
+  for (let i = 0; i < 3; i++) {
+    result = result.replace(/\\frac\{([^{}]+)\}\{([^{}]+)\}/g, (match, num, den) => {
+      console.log('✅ Converting proper fraction:', match);
+      return `(${num})/(${den})`;
+    });
+  }
+
+  // STEP 3: Handle malformed fractions (if AI generated without braces)
   // Special case 1: Quadratic formula with discriminant
   // Pattern: \frac-b ± √D2a → (-b ± √D)/2a
   result = result.replace(
     /\\frac(-?[a-z])\s*([\+\-±∓])\s*√([A-Z])(\d+[a-z])/gi,
     (match, var1, op, radical, coef) => {
-      console.log('✅ Fixed quadratic formula fraction:', match);
+      console.log('✅ Fixed malformed quadratic fraction:', match);
       return `(${var1} ${op} √${radical})/${coef}`;
     }
   );
 
   // Special case 2: General malformed fractions
-  // Try to split at the last sequence of digits+letter
   result = result.replace(
     /\\frac([^{}\s]+?)(\d+[a-z]+)(?=\s|[.,;:]|$)/gi,
     (match, numerator, denominator) => {
@@ -665,28 +681,16 @@ function preprocessLatex(text: string): string {
     }
   );
 
-  // Last resort: if we still have \frac without braces, remove \frac prefix
+  // Last resort fallback: remove \frac prefix
   result = result.replace(
     /\\frac([^{\s][^\s]*)/g,
     (match, rest) => {
-      console.log('⚠️ Fallback: Could not parse fraction properly:', match);
+      console.log('⚠️ Fallback: Removing \\frac prefix:', match);
       return rest;
     }
   );
 
-  // Convert \frac{numerator}{denominator} to (numerator)/(denominator)
-  // Handle nested fractions by repeating the replacement
-  for (let i = 0; i < 3; i++) {
-    result = result.replace(/\\frac\{([^{}]+)\}\{([^{}]+)\}/g, "($1)/($2)");
-  }
-
-  // Convert \sqrt{x} to √(x) for complex expressions, √x for simple
-  result = result.replace(/\\sqrt\{([^{}]+)\}/g, (_, content) => {
-    return content.length === 1 ? `√${content}` : `√(${content})`;
-  });
-
-  // Remove curly braces used for grouping (e.g., {x} -> x)
-  // But be careful not to remove structural braces
+  // STEP 4: Remove remaining curly braces (now safe to do)
   result = result.replace(/\{([^{}]+)\}/g, "$1");
 
   // Normalize spaces but preserve newlines
