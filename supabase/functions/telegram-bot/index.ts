@@ -854,9 +854,16 @@ function cleanMarkdownFormatting(text: string): string {
   // Fix: Remove ** at the start of a line after empty line
   result = result.replace(/\n\n\*\*\s*$/gm, "\n\n");
 
-  // Fix: **text:**\n\n** → **text:**
-  // Remove ** that appear alone after headers ending with :
-  result = result.replace(/(\*\*[^*]+:)\s*\n+\s*\*\*\s*\n/g, "$1\n\n");
+  // Fix: **text:** followed by newlines and closing ** (more flexible)
+  // Matches: **План решения:\n\n**\n OR **Метод:\n\n** (at end of line/file)
+  result = result.replace(/(\*\*[^*\n]+:)\s*\n+\s*\*\*\s*(?=\n|$)/gm, "$1\n\n");
+  
+  // Fix: **text:** followed by closing ** at end of line (no trailing newline)
+  result = result.replace(/(\*\*[^*\n]+:)\s*\n+\s*\*\*\s*$/gm, "$1");
+  
+  // Fix: **text (without colon)** with newlines inside
+  // Matches: **План решения\n\n**
+  result = result.replace(/(\*\*[^*\n]+)\s*\n+\s*\*\*(?=\s|$)/gm, "$1**");
 
   // Fix: **text\n\n** → **text**
   // Remove newlines between opening ** and closing **
@@ -874,6 +881,19 @@ function cleanMarkdownFormatting(text: string): string {
   result = result.replace(/__([^\n_]+)\n+__/g, "__$1__");
   result = result.replace(/__\n+([^\n_]+)/g, "__$1");
   result = result.replace(/([^\n_]+)\n+__/g, "$1__");
+
+  // DEBUG: Log AFTER all cleanup
+  console.log("\n✅ AFTER all markdown cleanup:");
+  if (result.includes("План решения")) {
+    const planIndex = result.indexOf("План решения");
+    console.log('Found "План решения" - next 150 chars:');
+    console.log(
+      result
+        .substring(planIndex, planIndex + 150)
+        .replace(/\n/g, "\\n")
+        .replace(/\t/g, "\\t")
+    );
+  }
 
   return result;
 }
