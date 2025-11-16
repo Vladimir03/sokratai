@@ -809,6 +809,32 @@ function escapeHtml(text: string): string {
 }
 
 /**
+ * Cleans up markdown formatting issues (newlines around markers)
+ */
+function cleanMarkdownFormatting(text: string): string {
+  let result = text;
+
+  // Fix: **text\n\n** → **text**
+  // Remove newlines between opening ** and closing **
+  result = result.replace(/\*\*([^\n*]+)\n+\*\*/g, '**$1**');
+
+  // Fix: **\n\ntext** → **text**
+  // Remove newlines after opening **
+  result = result.replace(/\*\*\n+([^\n*]+)/g, '**$1');
+
+  // Fix: text\n\n** → text**
+  // Remove newlines before closing **
+  result = result.replace(/([^\n*]+)\n+\*\*/g, '$1**');
+
+  // Same for underscores __text__
+  result = result.replace(/__([^\n_]+)\n+__/g, '__$1__');
+  result = result.replace(/__\n+([^\n_]+)/g, '__$1');
+  result = result.replace(/([^\n_]+)\n+__/g, '$1__');
+
+  return result;
+}
+
+/**
  * Converts markdown to Telegram HTML format
  * NOTE: Text should already have HTML entities escaped before calling this
  */
@@ -856,7 +882,10 @@ function formatForTelegram(text: string): string {
   // Step 5: Add spacing between blocks (after structure is clear, before HTML)
   result = addBlockSpacing(result);
 
-  // Step 5.5: Escape HTML entities to prevent Telegram API parsing errors
+  // Step 5.5: Clean up markdown formatting issues (newlines around markers)
+  result = cleanMarkdownFormatting(result);
+
+  // Step 5.6: Escape HTML entities to prevent Telegram API parsing errors
   // This must be done BEFORE markdown-to-HTML conversion
   result = escapeHtml(result);
 
