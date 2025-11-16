@@ -109,7 +109,9 @@ async function sendTelegramMessage(
 
   if (!response.ok) {
     const error = await response.text();
-    console.error('Telegram API error:', error);
+    console.error('❌ Telegram API error:', error);
+    console.error('📝 Message preview (first 200 chars):', text.substring(0, 200));
+    console.error('📊 Message length:', text.length);
     throw new Error('Failed to send message');
   }
 
@@ -818,28 +820,39 @@ function isComplexFormula(formula: string): boolean {
 }
 
 /**
+ * Escapes HTML special characters to prevent Telegram API parsing errors
+ */
+function escapeHtml(text: string): string {
+  return text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
+
+/**
  * Converts markdown to Telegram HTML format
+ * NOTE: Text should already have HTML entities escaped before calling this
  */
 function convertMarkdownToTelegramHTML(text: string): string {
   let result = text;
-  
+
   // Code blocks: ```code``` → <pre>code</pre>
   result = result.replace(/```([^`]+)```/g, '<pre>$1</pre>');
-  
+
   // Bold: **text** or __text__ → <b>text</b>
   result = result.replace(/\*\*(.+?)\*\*/g, '<b>$1</b>');
   result = result.replace(/__(.+?)__/g, '<b>$1</b>');
-  
+
   // Italic: *text* or _text_ → <i>text</i> (but avoid conflicts with bold)
   result = result.replace(/(?<!\*)\*([^*]+?)\*(?!\*)/g, '<i>$1</i>');
   result = result.replace(/(?<!_)_([^_]+?)_(?!_)/g, '<i>$1</i>');
-  
+
   // Inline code: `text` → <code>text</code>
   result = result.replace(/`(.+?)`/g, '<code>$1</code>');
-  
+
   // Strikethrough: ~~text~~ → <s>text</s>
   result = result.replace(/~~(.+?)~~/g, '<s>$1</s>');
-  
+
   return result;
 }
 
@@ -863,6 +876,10 @@ function formatForTelegram(text: string): string {
 
   // Step 5: Add spacing between blocks (after structure is clear, before HTML)
   result = addBlockSpacing(result);
+
+  // Step 5.5: Escape HTML entities to prevent Telegram API parsing errors
+  // This must be done BEFORE markdown-to-HTML conversion
+  result = escapeHtml(result);
 
   // Step 6: Convert markdown to Telegram HTML (last step, preserves HTML tags)
   result = convertMarkdownToTelegramHTML(result);
@@ -1188,8 +1205,11 @@ function parseSolutionSteps(aiResponse: string): any[] {
     });
   }
 
-  console.log(`Parsed ${steps.length} steps from AI response`);
-  
+  console.log(`📊 Parsed ${steps.length} steps from AI response`);
+  if (steps.length > 0) {
+    console.log('📋 Step titles:', steps.map(s => `${s.number}. ${s.title}`).join(' | '));
+  }
+
   return steps;
 }
 
@@ -1205,17 +1225,17 @@ async function saveSolution(
   aiResponse: string
 ): Promise<string | null> {
   try {
-    console.log('💾 saveSolution: Starting to parse AI response');
-    console.log('💾 saveSolution: Response length:', aiResponse.length);
-    console.log('💾 saveSolution: First 200 chars:', aiResponse.substring(0, 200));
-    
+    console.log('💾 Saving solution...');
+    console.log('📏 AI response length:', aiResponse.length, 'chars');
+    console.log('📝 Preview:', aiResponse.substring(0, 150) + '...');
+
     // Parse the RAW AI response before any Telegram formatting
     const solutionSteps = parseSolutionSteps(aiResponse);
     const finalAnswer = extractFinalAnswer(aiResponse);
 
-    console.log('💾 saveSolution: Parsed steps:', solutionSteps.length);
-    console.log('💾 saveSolution: Step titles:', solutionSteps.map(s => s.title));
-    console.log('💾 saveSolution: Final answer:', finalAnswer || 'null');
+    console.log(`✅ Parsing complete: ${solutionSteps.length} steps found`);
+    console.log('📋 Titles:', solutionSteps.map((s, i) => `${i + 1}:"${s.title}"`).join(', '));
+    console.log('🎯 Final answer:', finalAnswer ? `"${finalAnswer.substring(0, 50)}..."` : 'NOT FOUND');
 
     const solutionData = {
       problem: problemText,
@@ -1224,7 +1244,7 @@ async function saveSolution(
       raw_response: aiResponse
     };
 
-    console.log('💾 saveSolution: Saving to database...');
+    console.log('💾 Inserting into database...');
 
     const { data: solution, error } = await supabase
       .from('solutions')
@@ -1239,14 +1259,14 @@ async function saveSolution(
       .single();
 
     if (error) {
-      console.error('❌ saveSolution: Failed to save solution:', error);
+      console.error('❌ DB insert failed:', error.message);
       return null;
     }
 
-    console.log('✅ saveSolution: Solution saved successfully with ID:', solution?.id);
+    console.log('✅ Solution saved! ID:', solution?.id);
     return solution?.id || null;
   } catch (error) {
-    console.error('❌ saveSolution: Error:', error);
+    console.error('❌ saveSolution error:', error instanceof Error ? error.message : error);
     return null;
   }
 }
