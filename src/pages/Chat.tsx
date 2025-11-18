@@ -64,6 +64,12 @@ export default function Chat() {
   const lastClickRef = useRef<number>(0); // Debounce для кликов
   const wasAtBottomRef = useRef(true); // Отслеживание позиции скролла для автоскролла
   const topSentinelRef = useRef<HTMLDivElement>(null); // Для определения скролла к началу чата
+  
+  // Refs для предотвращения пересоздания loadMoreMessages
+  const hasMoreMessagesRef = useRef(hasMoreMessages);
+  const isLoadingMoreRef = useRef(isLoadingMore);
+  const oldestTimestampRef = useRef<string | null>(oldestMessageTimestamp);
+  
   const queryClient = useQueryClient();
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
@@ -480,13 +486,24 @@ export default function Chat() {
   }, [user?.id, currentChatId, chatType]);
 
   // Load more messages when scrolling to top
+  // Синхронизация refs с state для стабильности loadMoreMessages
+  useEffect(() => {
+    hasMoreMessagesRef.current = hasMoreMessages;
+    isLoadingMoreRef.current = isLoadingMore;
+    oldestTimestampRef.current = oldestMessageTimestamp;
+  }, [hasMoreMessages, isLoadingMore, oldestMessageTimestamp]);
+
   const loadMoreMessages = useCallback(async () => {
-    if (!user?.id || !currentChatId || !oldestMessageTimestamp || isLoadingMore || !hasMoreMessages) {
+    // Используем refs для проверки условий
+    if (!user?.id || !currentChatId || !oldestTimestampRef.current || 
+        isLoadingMoreRef.current || !hasMoreMessagesRef.current) {
       return;
     }
 
+    const loadId = Date.now();
+    console.log(`📜 [${loadId}] Loading more messages before:`, oldestTimestampRef.current);
+    
     setIsLoadingMore(true);
-    console.log('📜 Loading more messages before:', oldestMessageTimestamp);
 
     try {
       const { data, error } = await supabase
@@ -496,16 +513,17 @@ export default function Chat() {
           feedback:message_feedback(feedback_type)
         `)
         .eq('chat_id', currentChatId)
-        .lt('created_at', oldestMessageTimestamp)
+        .lt('created_at', oldestTimestampRef.current)
         .order('created_at', { ascending: false })
         .limit(MESSAGES_PER_PAGE);
 
       if (error) throw error;
 
       if (data && data.length > 0) {
-        // Save current scroll position
+        // Сохранить ОБЕ scroll метрики
         const scrollContainer = messagesContainerRef.current;
         const oldScrollHeight = scrollContainer?.scrollHeight || 0;
+        const oldScrollTop = scrollContainer?.scrollTop || 0;
 
         // Generate signed URLs for images
         const newMessages = await Promise.all(data.map(async (msg: any) => {
@@ -555,91 +573,92 @@ export default function Chat() {
         const reversedNew = newMessages.reverse();
         setMessages(prev => [...reversedNew, ...prev]);
         
-        // Update oldest timestamp
-        setOldestMessageTimestamp(data[data.length - 1].created_at);
+        // Обновить ref напрямую для следующего вызова
+        const newTimestamp = data[data.length - 1].created_at;
+        oldestTimestampRef.current = newTimestamp;
+        setOldestMessageTimestamp(newTimestamp);
         
-        console.log(`✅ Loaded ${newMessages.length} more messages`);
+        console.log(`✅ [${loadId}] Loaded ${newMessages.length} messages (batch of ${MESSAGES_PER_PAGE})`);
 
-        // Restore scroll position (messages added from top)
+        // Правильно восстановить scroll position
         requestAnimationFrame(() => {
           if (scrollContainer) {
             const newScrollHeight = scrollContainer.scrollHeight;
             const scrollDiff = newScrollHeight - oldScrollHeight;
-            scrollContainer.scrollTop = scrollDiff;
-            console.log(`📍 Adjusted scroll by ${scrollDiff}px`);
+            // ИСПРАВЛЕНО: добавить к старой позиции, а не заменить
+            scrollContainer.scrollTop = oldScrollTop + scrollDiff;
+            console.log(`📍 [${loadId}] Scroll restored: ${oldScrollTop} + ${scrollDiff} = ${oldScrollTop + scrollDiff}px`);
           }
         });
       }
 
       // If less than page size, we've reached the beginning
       if (!data || data.length < MESSAGES_PER_PAGE) {
+        hasMoreMessagesRef.current = false;
         setHasMoreMessages(false);
-        console.log('📌 Reached beginning of chat history');
+        console.log(`📌 [${loadId}] Reached beginning of chat history`);
       }
     } catch (error) {
       console.error('Error loading more messages:', error);
     } finally {
       setIsLoadingMore(false);
     }
-  }, [user?.id, currentChatId, oldestMessageTimestamp, isLoadingMore, hasMoreMessages, MESSAGES_PER_PAGE]);
+  }, [user?.id, currentChatId, MESSAGES_PER_PAGE]); // Только стабильные зависимости!
 
   // IntersectionObserver for infinite scroll
   useEffect(() => {
-    if (!topSentinelRef.current || !hasMoreMessages) {
-      console.log('⚠️ Sentinel observer not created:', { 
-        hasSentinel: !!topSentinelRef.current, 
-        hasMore: hasMoreMessages 
-      });
-      return;
-    }
+    if (!topSentinelRef.current) return;
 
     const observer = new IntersectionObserver(
       (entries) => {
         const [entry] = entries;
-        console.log('👁️ Sentinel intersection:', { 
-          isIntersecting: entry.isIntersecting,
-          isLoadingMore,
-          hasMoreMessages,
-          intersectionRatio: entry.intersectionRatio
-        });
-        if (entry.isIntersecting && !isLoadingMore) {
-          console.log('👀 Top sentinel visible, loading more messages...');
+        // Используем refs для проверки условий
+        if (entry.isIntersecting && 
+            hasMoreMessagesRef.current && 
+            !isLoadingMoreRef.current) {
+          console.log('👀 Sentinel visible, loading batch...');
           loadMoreMessages();
         }
       },
       {
         root: messagesContainerRef.current,
-        rootMargin: '200px', // Increased for better mobile detection
+        rootMargin: '200px',
         threshold: 0,
       }
     );
 
     observer.observe(topSentinelRef.current);
-    console.log('✅ Sentinel observer created and observing');
-
-    return () => {
-      console.log('🔌 Sentinel observer disconnected');
-      observer.disconnect();
-    };
-  }, [hasMoreMessages, isLoadingMore, loadMoreMessages]);
+    return () => observer.disconnect();
+  }, [loadMoreMessages]); // Только стабильная зависимость!
   
   // Fallback: Manual check on scroll for mobile devices
   useEffect(() => {
     const container = messagesContainerRef.current;
-    if (!container || !hasMoreMessages || isLoadingMore) return;
+    if (!container) return;
+    
+    let scrollTimeout: NodeJS.Timeout;
     
     const handleScroll = () => {
-      const { scrollTop } = container;
-      // If scrolled near top (within 200px), trigger load
-      if (scrollTop < 200 && hasMoreMessages && !isLoadingMore) {
-        console.log('🔄 Manual scroll trigger: near top, loading more...');
-        loadMoreMessages();
-      }
+      // Debounce для предотвращения множественных вызовов
+      clearTimeout(scrollTimeout);
+      scrollTimeout = setTimeout(() => {
+        const { scrollTop } = container;
+        // Используем refs для проверки условий
+        if (scrollTop < 200 && 
+            hasMoreMessagesRef.current && 
+            !isLoadingMoreRef.current) {
+          console.log('🔄 Manual trigger near top (debounced)');
+          loadMoreMessages();
+        }
+      }, 100); // 100ms debounce
     };
     
     container.addEventListener('scroll', handleScroll, { passive: true });
-    return () => container.removeEventListener('scroll', handleScroll);
-  }, [hasMoreMessages, isLoadingMore, loadMoreMessages]);
+    return () => {
+      clearTimeout(scrollTimeout);
+      container.removeEventListener('scroll', handleScroll);
+    };
+  }, [loadMoreMessages]); // Только стабильная зависимость!
 
   const handleFileUpload = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
