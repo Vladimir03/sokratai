@@ -352,6 +352,9 @@ export default function Chat() {
           setHasMoreMessages(hasMore);
           setOldestMessageTimestamp(data[data.length - 1].created_at);
           
+          // Initialize wasAtBottomRef to true for auto-scroll on first load
+          wasAtBottomRef.current = true;
+          
           // Обновить кеш с актуальными данными
           saveChatToSessionCache(currentChatId, reversedMessages, user.id, hasMore, data[data.length - 1].created_at);
           console.log(`✅ Loaded ${reversedMessages.length} messages for chat ${currentChatId}, hasMore: ${hasMore}`);
@@ -735,6 +738,15 @@ export default function Chat() {
       });
     }
   }, [messages]);
+  
+  // Initial scroll to bottom when chat loads
+  useEffect(() => {
+    if (!loadingHistory && messages.length > 0) {
+      requestAnimationFrame(() => {
+        scrollToBottom(false);
+      });
+    }
+  }, [loadingHistory]);
 
   // Retry механизм с экспоненциальным backoff для отправки сообщений
   async function streamChatWithRetry({
