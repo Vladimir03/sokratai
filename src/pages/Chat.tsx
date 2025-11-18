@@ -585,11 +585,23 @@ export default function Chat() {
 
   // IntersectionObserver for infinite scroll
   useEffect(() => {
-    if (!topSentinelRef.current || !hasMoreMessages) return;
+    if (!topSentinelRef.current || !hasMoreMessages) {
+      console.log('⚠️ Sentinel observer not created:', { 
+        hasSentinel: !!topSentinelRef.current, 
+        hasMore: hasMoreMessages 
+      });
+      return;
+    }
 
     const observer = new IntersectionObserver(
       (entries) => {
         const [entry] = entries;
+        console.log('👁️ Sentinel intersection:', { 
+          isIntersecting: entry.isIntersecting,
+          isLoadingMore,
+          hasMoreMessages,
+          intersectionRatio: entry.intersectionRatio
+        });
         if (entry.isIntersecting && !isLoadingMore) {
           console.log('👀 Top sentinel visible, loading more messages...');
           loadMoreMessages();
@@ -597,14 +609,36 @@ export default function Chat() {
       },
       {
         root: messagesContainerRef.current,
-        rootMargin: '100px',
-        threshold: 0.1,
+        rootMargin: '200px', // Increased for better mobile detection
+        threshold: 0,
       }
     );
 
     observer.observe(topSentinelRef.current);
+    console.log('✅ Sentinel observer created and observing');
 
-    return () => observer.disconnect();
+    return () => {
+      console.log('🔌 Sentinel observer disconnected');
+      observer.disconnect();
+    };
+  }, [hasMoreMessages, isLoadingMore, loadMoreMessages]);
+  
+  // Fallback: Manual check on scroll for mobile devices
+  useEffect(() => {
+    const container = messagesContainerRef.current;
+    if (!container || !hasMoreMessages || isLoadingMore) return;
+    
+    const handleScroll = () => {
+      const { scrollTop } = container;
+      // If scrolled near top (within 200px), trigger load
+      if (scrollTop < 200 && hasMoreMessages && !isLoadingMore) {
+        console.log('🔄 Manual scroll trigger: near top, loading more...');
+        loadMoreMessages();
+      }
+    };
+    
+    container.addEventListener('scroll', handleScroll, { passive: true });
+    return () => container.removeEventListener('scroll', handleScroll);
   }, [hasMoreMessages, isLoadingMore, loadMoreMessages]);
 
   const handleFileUpload = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
