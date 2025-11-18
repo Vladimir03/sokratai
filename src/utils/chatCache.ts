@@ -11,6 +11,8 @@ interface CacheData {
   messages: CachedMessage[];
   timestamp: number;
   userId: string;
+  hasMoreMessages?: boolean;
+  oldestMessageTimestamp?: string | null;
 }
 
 const MAX_CACHED_MESSAGES = 50;
@@ -20,13 +22,21 @@ const getCacheKey = (chatId: string, storage: 'session' | 'local') => {
   return `chat_${chatId}_${storage}`;
 };
 
-export const saveChatToSessionCache = (chatId: string, messages: CachedMessage[], userId: string) => {
+export const saveChatToSessionCache = (
+  chatId: string, 
+  messages: CachedMessage[], 
+  userId: string,
+  hasMoreMessages?: boolean,
+  oldestMessageTimestamp?: string | null
+) => {
   try {
     const recentMessages = messages.slice(-MAX_CACHED_MESSAGES);
     const cacheData: CacheData = {
       messages: recentMessages,
       timestamp: Date.now(),
       userId,
+      hasMoreMessages,
+      oldestMessageTimestamp,
     };
     sessionStorage.setItem(getCacheKey(chatId, 'session'), JSON.stringify(cacheData));
     // Дублируем в localStorage как fallback
@@ -37,7 +47,7 @@ export const saveChatToSessionCache = (chatId: string, messages: CachedMessage[]
   }
 };
 
-export const loadChatFromSessionCache = (chatId: string, userId: string): CachedMessage[] | null => {
+export const loadChatFromSessionCache = (chatId: string, userId: string): { messages: CachedMessage[], hasMoreMessages?: boolean, oldestMessageTimestamp?: string | null } | null => {
   try {
     // Сначала пробуем sessionStorage
     let cached = sessionStorage.getItem(getCacheKey(chatId, 'session'));
@@ -63,7 +73,11 @@ export const loadChatFromSessionCache = (chatId: string, userId: string): Cached
       }
       
       console.log(`📂 Loaded ${cacheData.messages.length} messages from ${storage}Storage for chat ${chatId}`);
-      return cacheData.messages;
+      return {
+        messages: cacheData.messages,
+        hasMoreMessages: cacheData.hasMoreMessages,
+        oldestMessageTimestamp: cacheData.oldestMessageTimestamp,
+      };
     }
   } catch (error) {
     console.error("Error loading from cache:", error);

@@ -47,6 +47,10 @@ export default function Chat() {
   const [showScrollButton, setShowScrollButton] = useState(false);
   const [touchStart, setTouchStart] = useState<{x: number, y: number} | null>(null);
   const [touchEnd, setTouchEnd] = useState<{x: number, y: number} | null>(null);
+  const [hasMoreMessages, setHasMoreMessages] = useState(true);
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
+  const [oldestMessageTimestamp, setOldestMessageTimestamp] = useState<string | null>(null);
+  const MESSAGES_PER_PAGE = 15;
   const { toast } = useToast();
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
@@ -59,6 +63,7 @@ export default function Chat() {
   const blobUrlsRef = useRef<Set<string>>(new Set()); // Отслеживание blob URLs для cleanup
   const lastClickRef = useRef<number>(0); // Debounce для кликов
   const wasAtBottomRef = useRef(true); // Отслеживание позиции скролла для автоскролла
+  const topSentinelRef = useRef<HTMLDivElement>(null); // Для определения скролла к началу чата
   const queryClient = useQueryClient();
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
@@ -226,7 +231,7 @@ export default function Chat() {
     // Сохранить сообщения предыдущего чата в кеш
     if (previousChatIdRef.current && previousChatIdRef.current !== currentChatId && messages.length > 0) {
       console.log(`💾 Saving ${messages.length} messages for previous chat ${previousChatIdRef.current}`);
-      saveChatToSessionCache(previousChatIdRef.current, messages, user.id);
+      saveChatToSessionCache(previousChatIdRef.current, messages, user.id, hasMoreMessages, oldestMessageTimestamp);
     }
     
     // Отменить предыдущую загрузку если она в процессе
@@ -243,17 +248,21 @@ export default function Chat() {
     console.log('Loading history for chat:', currentChatId);
     setIsTransitioning(true);
     setLoadingHistory(true);
+    setHasMoreMessages(true);
+    setOldestMessageTimestamp(null);
     
     const loadHistory = async () => {
       try {
         // Сначала попробовать загрузить из кеша для быстрого отображения
-        const cachedMessages = loadChatFromSessionCache(currentChatId, user.id);
-        if (cachedMessages && cachedMessages.length > 0) {
-          setMessages(cachedMessages);
-          console.log(`⚡ Quick load from cache: ${cachedMessages.length} messages`);
+        const cachedData = loadChatFromSessionCache(currentChatId, user.id);
+        if (cachedData && cachedData.messages.length > 0) {
+          setMessages(cachedData.messages);
+          setHasMoreMessages(cachedData.hasMoreMessages ?? true);
+          setOldestMessageTimestamp(cachedData.oldestMessageTimestamp ?? null);
+          console.log(`⚡ Quick load from cache: ${cachedData.messages.length} messages`);
         }
         
-        // Затем загрузить актуальные данные из БД
+        // Затем загрузить только последние N сообщений из БД
         const { data, error } = await supabase
           .from('chat_messages')
           .select(`
@@ -261,7 +270,8 @@ export default function Chat() {
             feedback:message_feedback(feedback_type)
           `)
           .eq('chat_id', currentChatId)
-          .order('created_at', { ascending: true });
+          .order('created_at', { ascending: false })
+          .limit(MESSAGES_PER_PAGE);
 
         // Проверить, не была ли отменена загрузка
         if (abortController.signal.aborted) {
@@ -271,7 +281,7 @@ export default function Chat() {
 
         if (error) {
           console.error('Error loading chat history:', error);
-          if (!cachedMessages) {
+          if (!cachedData) {
             setMessages([]);
           }
           setLoadingHistory(false);
@@ -332,10 +342,19 @@ export default function Chat() {
               feedback: (msg.feedback as any)?.[0]?.feedback_type || null
             };
           }));
-          setMessages(loadedMessages);
+          
+          // Reverse array to display oldest to newest
+          const reversedMessages = loadedMessages.reverse();
+          setMessages(reversedMessages);
+          
+          // Set pagination state
+          const hasMore = data.length === MESSAGES_PER_PAGE;
+          setHasMoreMessages(hasMore);
+          setOldestMessageTimestamp(data[data.length - 1].created_at);
+          
           // Обновить кеш с актуальными данными
-          saveChatToSessionCache(currentChatId, loadedMessages, user.id);
-          console.log(`✅ Loaded ${loadedMessages.length} messages for chat ${currentChatId}`);
+          saveChatToSessionCache(currentChatId, reversedMessages, user.id, hasMore, data[data.length - 1].created_at);
+          console.log(`✅ Loaded ${reversedMessages.length} messages for chat ${currentChatId}, hasMore: ${hasMore}`);
         } else {
           // If general chat is empty, add welcome message
           if (chatType === 'general') {
@@ -407,9 +426,9 @@ export default function Chat() {
                     id: msg.id,
                     feedback: (msg.feedback as any)?.[0]?.feedback_type || null
                   };
-                }));
+                  }));
                 setMessages(updatedMessages);
-                saveChatToSessionCache(currentChatId, updatedMessages, user.id);
+                saveChatToSessionCache(currentChatId, updatedMessages, user.id, false, null);
                 console.log('✅ Welcome message added and loaded');
               }
             }
@@ -456,6 +475,134 @@ export default function Chat() {
       }
     };
   }, [user?.id, currentChatId, chatType]);
+
+  // Load more messages when scrolling to top
+  const loadMoreMessages = useCallback(async () => {
+    if (!user?.id || !currentChatId || !oldestMessageTimestamp || isLoadingMore || !hasMoreMessages) {
+      return;
+    }
+
+    setIsLoadingMore(true);
+    console.log('📜 Loading more messages before:', oldestMessageTimestamp);
+
+    try {
+      const { data, error } = await supabase
+        .from('chat_messages')
+        .select(`
+          *,
+          feedback:message_feedback(feedback_type)
+        `)
+        .eq('chat_id', currentChatId)
+        .lt('created_at', oldestMessageTimestamp)
+        .order('created_at', { ascending: false })
+        .limit(MESSAGES_PER_PAGE);
+
+      if (error) throw error;
+
+      if (data && data.length > 0) {
+        // Save current scroll position
+        const scrollContainer = messagesContainerRef.current;
+        const oldScrollHeight = scrollContainer?.scrollHeight || 0;
+
+        // Generate signed URLs for images
+        const newMessages = await Promise.all(data.map(async (msg: any) => {
+          let imageUrl = undefined;
+          
+          if (msg.image_path) {
+            const { data: signedData } = await supabase.storage
+              .from('chat-images')
+              .createSignedUrl(msg.image_path, 86400);
+
+            if (signedData) {
+              imageUrl = signedData.signedUrl;
+            }
+          } else if (msg.image_url) {
+            try {
+              const signMatch = msg.image_url.match(/\/sign\/chat-images\/(.+?)\?/);
+              const publicMatch = msg.image_url.match(/\/public\/chat-images\/(.+)$/);
+              const extractedPath = signMatch?.[1] || publicMatch?.[1];
+              
+              if (extractedPath) {
+                const { data: signedData } = await supabase.storage
+                  .from('chat-images')
+                  .createSignedUrl(extractedPath, 86400);
+                
+                if (signedData) {
+                  imageUrl = signedData.signedUrl;
+                }
+              } else if (msg.image_url.includes('/public/')) {
+                imageUrl = msg.image_url;
+              }
+            } catch (error) {
+              console.error('Failed to extract path from old image URL:', error);
+            }
+          }
+          
+          return {
+            role: msg.role as "user" | "assistant",
+            content: msg.content,
+            image_url: imageUrl,
+            image_path: msg.image_path || undefined,
+            id: msg.id,
+            feedback: (msg.feedback as any)?.[0]?.feedback_type || null
+          };
+        }));
+
+        // Reverse and prepend to existing messages
+        const reversedNew = newMessages.reverse();
+        setMessages(prev => [...reversedNew, ...prev]);
+        
+        // Update oldest timestamp
+        setOldestMessageTimestamp(data[data.length - 1].created_at);
+        
+        console.log(`✅ Loaded ${newMessages.length} more messages`);
+
+        // Restore scroll position (messages added from top)
+        requestAnimationFrame(() => {
+          if (scrollContainer) {
+            const newScrollHeight = scrollContainer.scrollHeight;
+            const scrollDiff = newScrollHeight - oldScrollHeight;
+            scrollContainer.scrollTop = scrollDiff;
+            console.log(`📍 Adjusted scroll by ${scrollDiff}px`);
+          }
+        });
+      }
+
+      // If less than page size, we've reached the beginning
+      if (!data || data.length < MESSAGES_PER_PAGE) {
+        setHasMoreMessages(false);
+        console.log('📌 Reached beginning of chat history');
+      }
+    } catch (error) {
+      console.error('Error loading more messages:', error);
+    } finally {
+      setIsLoadingMore(false);
+    }
+  }, [user?.id, currentChatId, oldestMessageTimestamp, isLoadingMore, hasMoreMessages, MESSAGES_PER_PAGE]);
+
+  // IntersectionObserver for infinite scroll
+  useEffect(() => {
+    if (!topSentinelRef.current || !hasMoreMessages) return;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const [entry] = entries;
+        if (entry.isIntersecting && !isLoadingMore) {
+          console.log('👀 Top sentinel visible, loading more messages...');
+          loadMoreMessages();
+        }
+      },
+      {
+        root: messagesContainerRef.current,
+        rootMargin: '100px',
+        threshold: 0.1,
+      }
+    );
+
+    observer.observe(topSentinelRef.current);
+
+    return () => observer.disconnect();
+  }, [hasMoreMessages, isLoadingMore, loadMoreMessages]);
 
   const handleFileUpload = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -852,7 +999,7 @@ export default function Chat() {
     setMessages(prev => {
       const newMessages = [...prev, optimisticMessage];
       if (user?.id && currentChatId) {
-        saveChatToSessionCache(currentChatId, newMessages, user.id);
+        saveChatToSessionCache(currentChatId, newMessages, user.id, hasMoreMessages, oldestMessageTimestamp);
       }
       return newMessages;
     });
@@ -919,7 +1066,7 @@ export default function Chat() {
               : msg
           );
           if (user?.id && currentChatId) {
-            saveChatToSessionCache(currentChatId, updated, user.id);
+            saveChatToSessionCache(currentChatId, updated, user.id, hasMoreMessages, oldestMessageTimestamp);
           }
           return updated;
         });
@@ -984,7 +1131,7 @@ export default function Chat() {
             );
             // Обновляем кеш с полным диалогом
             if (user?.id && currentChatId) {
-              saveChatToSessionCache(currentChatId, updated, user.id);
+              saveChatToSessionCache(currentChatId, updated, user.id, hasMoreMessages, oldestMessageTimestamp);
             }
             return updated;
           });
@@ -1443,6 +1590,28 @@ export default function Chat() {
                   <ChatSkeleton />
                 ) : (
                   <>
+                    {/* Sentinel for infinite scroll */}
+                    <div ref={topSentinelRef} className="h-4" />
+                    
+                    {/* Loading indicator for older messages */}
+                    {isLoadingMore && (
+                      <div className="flex justify-center py-4">
+                        <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                          <div className="w-4 h-4 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+                          Загрузка сообщений...
+                        </div>
+                      </div>
+                    )}
+                    
+                    {/* Beginning of chat indicator */}
+                    {!hasMoreMessages && messages.length > 0 && (
+                      <div className="flex justify-center py-6">
+                        <div className="text-sm text-muted-foreground">
+                          📌 Начало переписки
+                        </div>
+                      </div>
+                    )}
+                    
                     {messages.length > 50 ? (
                       // Виртуализированный рендер для больших чатов
                       <div
