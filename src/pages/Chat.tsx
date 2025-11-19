@@ -796,10 +796,17 @@ export default function Chat() {
   useEffect(() => {
     if (!loadingHistory && messages.length > 0) {
       requestAnimationFrame(() => {
-        scrollToBottom(false);
+        // Check if scroll position was restored
+        const hasRestoredScroll = scrollPositionsRef.current.has(currentChatId);
+        
+        // Only scroll to bottom if no saved position
+        if (!hasRestoredScroll) {
+          scrollToBottom(false);
+          console.log('⬇️ Auto-scrolled to bottom on chat open');
+        }
       });
     }
-  }, [loadingHistory]);
+  }, [loadingHistory, currentChatId]);
 
   // Retry механизм с экспоненциальным backoff для отправки сообщений
   async function streamChatWithRetry({
@@ -1386,6 +1393,10 @@ export default function Chat() {
     document.body.style.overflow = '';
     document.body.style.position = '';
     document.body.style.pointerEvents = '';
+    
+    // Clear saved scroll position to ensure scroll to bottom
+    scrollPositionsRef.current.delete(chatId);
+    console.log(`🗑️ Cleared saved scroll for chat ${chatId} - will scroll to bottom`);
     
     navigate(`/chat?id=${chatId}`);
     if (isMobile) {
