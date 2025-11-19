@@ -1409,15 +1409,37 @@ async function handleTextMessage(telegramUserId: number, userId: string, text: s
       input_method: "text",
     });
 
+    // Функция для обновления signed URL для старых изображений
+    async function refreshImageUrls(messages: any[]) {
+      return await Promise.all(
+        messages.map(async (msg) => {
+          // Если есть image_path, создаём новый signed URL
+          if (msg.image_path) {
+            const { data: signedData, error } = await supabase.storage
+              .from("chat-images")
+              .createSignedUrl(msg.image_path, 3600); // 1 hour для истории
+            
+            if (!error && signedData) {
+              return { ...msg, image_url: signedData.signedUrl };
+            }
+          }
+          return msg;
+        })
+      );
+    }
+
     // Get chat history - limit to last 20 messages (10 pairs)
     const { data: historyReversed } = await supabase
       .from("chat_messages")
-      .select("role, content, image_url")
+      .select("role, content, image_url, image_path")
       .eq("chat_id", chatId)
       .order("created_at", { ascending: false })
       .limit(20);
 
-    const history = historyReversed?.reverse() || [];
+    let history = historyReversed?.reverse() || [];
+    
+    // Обновить signed URLs для всех изображений в истории
+    history = await refreshImageUrls(history);
 
     // Start typing loop
     const stopTyping = { stop: false };
@@ -1585,6 +1607,25 @@ async function handlePhotoMessage(telegramUserId: number, userId: string, photo:
     }
     console.log("Step 8: Signed URL created");
 
+    // Функция для обновления signed URL для старых изображений
+    async function refreshImageUrls(messages: any[]) {
+      return await Promise.all(
+        messages.map(async (msg) => {
+          // Если есть image_path, создаём новый signed URL
+          if (msg.image_path) {
+            const { data: signedData, error } = await supabase.storage
+              .from("chat-images")
+              .createSignedUrl(msg.image_path, 3600); // 1 hour для истории
+            
+            if (!error && signedData) {
+              return { ...msg, image_url: signedData.signedUrl };
+            }
+          }
+          return msg;
+        })
+      );
+    }
+
     // Get or create chat
     console.log("Step 9: Getting or creating chat...");
     const chatId = await getOrCreateTelegramChat(userId);
@@ -1606,7 +1647,7 @@ async function handlePhotoMessage(telegramUserId: number, userId: string, photo:
     console.log("Step 12: Getting chat history...");
     const { data: historyReversed, error: historyError } = await supabase
       .from("chat_messages")
-      .select("role, content, image_url")
+      .select("role, content, image_url, image_path")
       .eq("chat_id", chatId)
       .order("created_at", { ascending: false })
       .limit(20);
@@ -1615,8 +1656,13 @@ async function handlePhotoMessage(telegramUserId: number, userId: string, photo:
       console.error("Failed to get chat history:", historyError);
     }
 
-    const history = historyReversed?.reverse() || [];
+    let history = historyReversed?.reverse() || [];
     console.log("Step 13: Chat history loaded, messages:", history.length);
+
+    // Обновить signed URLs для всех изображений в истории
+    console.log("Step 13.5: Refreshing image URLs...");
+    history = await refreshImageUrls(history);
+    console.log("Step 13.5: Image URLs refreshed");
 
     // Start typing loop
     const stopTyping = { stop: false };
