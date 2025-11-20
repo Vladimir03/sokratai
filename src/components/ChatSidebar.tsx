@@ -6,6 +6,7 @@ import { useState, useRef } from "react";
 import { CreateChatDialog } from "./CreateChatDialog";
 import { CustomChatItem } from "./CustomChatItem";
 import { useNavigate } from "react-router-dom";
+import { isIOS } from "@/hooks/use-mobile";
 
 interface ChatSidebarProps {
   currentChatId?: string;
@@ -88,21 +89,28 @@ export function ChatSidebar({ currentChatId, onChatSelect, onClose, isMobile }: 
     const isActive = currentChatId === chat.id;
     const lastClickRef = useRef<number>(0);
 
+    const handleInteraction = (e: React.TouchEvent | React.MouseEvent) => {
+      e.preventDefault();
+      const now = Date.now();
+      if (now - lastClickRef.current < 300) {
+        console.log('⚠️ Click ignored (debounce)');
+        return;
+      }
+      lastClickRef.current = now;
+      onChatSelect(chat.id);
+    };
+
     return (
       <button
-        onClick={() => {
-          const now = Date.now();
-          if (now - lastClickRef.current < 300) {
-            console.log('⚠️ Click ignored (debounce)');
-            return;
-          }
-          lastClickRef.current = now;
-          onChatSelect(chat.id);
-        }}
+        {...(isIOS() 
+          ? { onTouchEnd: handleInteraction as React.TouchEventHandler }
+          : { onClick: handleInteraction as React.MouseEventHandler }
+        )}
         className={`
-          w-full px-4 py-3 text-left hover:bg-accent transition-colors
+          w-full px-4 py-3 text-left [@media(hover:hover)]:hover:bg-accent transition-colors
           ${isActive ? 'bg-accent border-l-4 border-primary' : ''}
         `}
+        style={{ touchAction: 'manipulation' }}
       >
         <div className="flex items-center gap-2">
           <span className="text-xl">{chat.icon || '💬'}</span>
