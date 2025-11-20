@@ -297,60 +297,18 @@ export default function Chat() {
         console.log('Raw data from database:', data);
         
         if (data && data.length > 0) {
-          // Generate fresh signed URLs for images
-          const loadedMessages = await Promise.all(data.map(async (msg: any) => {
-            let imageUrl = undefined;
-            
-            // Priority: generate fresh URL from image_path
-            if (msg.image_path) {
-              // New messages with file path - generate fresh signed URL
-              const { data: signedData } = await supabase.storage
-                .from('chat-images')
-                .createSignedUrl(msg.image_path, 86400); // 24 hours
-
-              if (signedData) {
-                imageUrl = signedData.signedUrl;
-              }
-            } else if (msg.image_url) {
-              // Old messages: extract path from expired URL and generate fresh signed URL
-              try {
-                // Extract path from signed URLs: .../sign/chat-images/USER_ID/FILE.jpg?token=...
-                const signMatch = msg.image_url.match(/\/sign\/chat-images\/(.+?)\?/);
-                // Extract path from public URLs: .../public/chat-images/USER_ID/FILE.jpg
-                const publicMatch = msg.image_url.match(/\/public\/chat-images\/(.+)$/);
-                
-                const extractedPath = signMatch?.[1] || publicMatch?.[1];
-                
-                if (extractedPath) {
-                  // Generate fresh signed URL for old messages
-                  const { data: signedData } = await supabase.storage
-                    .from('chat-images')
-                    .createSignedUrl(extractedPath, 86400); // 24 hours
-                  
-                  if (signedData) {
-                    imageUrl = signedData.signedUrl;
-                  }
-                } else if (msg.image_url.includes('/public/')) {
-                  // Public URLs don't expire - use as is
-                  imageUrl = msg.image_url;
-                }
-              } catch (error) {
-                console.error('Failed to extract path from old image URL:', error);
-              }
-            }
-            
-            return {
-              role: msg.role as "user" | "assistant",
-              content: msg.content,
-              image_url: imageUrl,
-              image_path: msg.image_path || undefined,
-              id: msg.id,
-              feedback: (msg.feedback as any)?.[0]?.feedback_type || null
-            };
+          // Шаг 1: Быстро показываем сообщения с существующими URL из БД
+          const initialMessages = data.map((msg: any) => ({
+            role: msg.role as "user" | "assistant",
+            content: msg.content,
+            image_url: msg.image_url || undefined, // Используем существующий URL
+            image_path: msg.image_path || undefined,
+            id: msg.id,
+            feedback: (msg.feedback as any)?.[0]?.feedback_type || null
           }));
           
           // Reverse array to display oldest to newest
-          const reversedMessages = loadedMessages.reverse();
+          const reversedMessages = initialMessages.reverse();
           setMessages(reversedMessages);
           
           // Set pagination state
@@ -361,9 +319,66 @@ export default function Chat() {
           // Initialize wasAtBottomRef to true for auto-scroll on first load
           wasAtBottomRef.current = true;
           
+          console.log(`✅ Loaded ${reversedMessages.length} messages for chat ${currentChatId} (initial render)`);
+          
+          // Шаг 2: В фоне обновляем signed URLs для изображений
+          const messagesWithImages = data.filter((msg: any) => msg.image_path || msg.image_url);
+          
+          if (messagesWithImages.length > 0) {
+            console.log(`🔄 Updating signed URLs for ${messagesWithImages.length} images in background...`);
+            
+            // Обновляем URLs по одному, чтобы избежать блокировки
+            Promise.all(messagesWithImages.map(async (msg: any) => {
+              let freshImageUrl = undefined;
+              
+              if (msg.image_path) {
+                const { data: signedData } = await supabase.storage
+                  .from('chat-images')
+                  .createSignedUrl(msg.image_path, 86400);
+                
+                if (signedData) {
+                  freshImageUrl = signedData.signedUrl;
+                }
+              } else if (msg.image_url && !msg.image_url.includes('/public/')) {
+                try {
+                  const signMatch = msg.image_url.match(/\/sign\/chat-images\/(.+?)\?/);
+                  const publicMatch = msg.image_url.match(/\/public\/chat-images\/(.+)$/);
+                  const extractedPath = signMatch?.[1] || publicMatch?.[1];
+                  
+                  if (extractedPath) {
+                    const { data: signedData } = await supabase.storage
+                      .from('chat-images')
+                      .createSignedUrl(extractedPath, 86400);
+                    
+                    if (signedData) {
+                      freshImageUrl = signedData.signedUrl;
+                    }
+                  }
+                } catch (error) {
+                  console.error('Failed to refresh signed URL:', error);
+                }
+              }
+              
+              return { id: msg.id, freshImageUrl };
+            })).then((results) => {
+              // Обновляем messages с новыми URLs
+              setMessages(prevMessages => 
+                prevMessages.map(prevMsg => {
+                  const updated = results.find(r => r.id === prevMsg.id);
+                  if (updated?.freshImageUrl) {
+                    return { ...prevMsg, image_url: updated.freshImageUrl };
+                  }
+                  return prevMsg;
+                })
+              );
+              console.log('✅ All signed URLs updated');
+            }).catch(error => {
+              console.error('Error updating signed URLs:', error);
+            });
+          }
+          
           // Обновить кеш с актуальными данными
           saveChatToSessionCache(currentChatId, reversedMessages, user.id, hasMore, data[data.length - 1].created_at);
-          console.log(`✅ Loaded ${reversedMessages.length} messages for chat ${currentChatId}, hasMore: ${hasMore}`);
         } else {
           // If general chat is empty, add welcome message
           if (chatType === 'general') {
