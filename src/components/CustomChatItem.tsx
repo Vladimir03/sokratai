@@ -1,8 +1,7 @@
-import { useState, useRef } from "react";
+import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Pencil, Trash2, Check, X } from "lucide-react";
-import { isIOS } from "@/hooks/use-mobile";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -36,7 +35,6 @@ export function CustomChatItem({ chat, isActive, onSelect, onDeleted }: CustomCh
   const [editedTitle, setEditedTitle] = useState(chat.title || "Новый чат");
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
-  const lastClickRef = useRef<number>(0);
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
@@ -117,7 +115,7 @@ export function CustomChatItem({ chat, isActive, onSelect, onDeleted }: CustomCh
     <>
       <div
         className={`
-          group relative w-full px-4 py-3 [@media(hover:hover)]:hover:bg-accent transition-colors
+          group relative w-full px-4 py-3 hover:bg-accent transition-colors
           ${isActive ? 'bg-accent border-l-4 border-primary' : ''}
         `}
       >
@@ -154,27 +152,8 @@ export function CustomChatItem({ chat, isActive, onSelect, onDeleted }: CustomCh
         ) : (
           <div className="flex items-center gap-2">
             <button
-              {...(isIOS() 
-                ? { 
-                    onTouchEnd: (e: React.TouchEvent) => {
-                      e.preventDefault();
-                      const now = Date.now();
-                      if (now - lastClickRef.current < 300) return;
-                      lastClickRef.current = now;
-                      onSelect(chat.id);
-                    }
-                  }
-                : { 
-                    onClick: () => {
-                      const now = Date.now();
-                      if (now - lastClickRef.current < 300) return;
-                      lastClickRef.current = now;
-                      onSelect(chat.id);
-                    }
-                  }
-              )}
+              onClick={() => onSelect(chat.id)}
               className="flex-1 flex items-center gap-2 min-w-0 text-left"
-              style={{ touchAction: 'manipulation' }}
             >
               <span className="text-xl">{chat.icon || '💬'}</span>
               <div className="flex-1 min-w-0">
