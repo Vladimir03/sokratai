@@ -966,74 +966,95 @@ function convertMarkdownToTelegramHTML(text: string): string {
 
 /**
  * Fixes unbalanced HTML tags to prevent Telegram parsing errors
+ * Uses a more robust algorithm with proper validation
  */
 function fixHtmlTags(text: string): string {
   const allowedTags = ['b', 'i', 'u', 's', 'code', 'pre', 'a'];
-  const stack: string[] = [];
-  let result = '';
-  let i = 0;
+  const stack: Array<{tag: string, pos: number}> = [];
+  const tokens: Array<{type: 'text' | 'tag', content: string, isClosing?: boolean, tagName?: string}> = [];
   
+  // Step 1: Tokenize the HTML
+  let i = 0;
   while (i < text.length) {
-    // Find next tag
     const tagStart = text.indexOf('<', i);
     
     if (tagStart === -1) {
-      // No more tags, append rest of text
-      result += text.substring(i);
+      // No more tags, rest is text
+      if (i < text.length) {
+        tokens.push({type: 'text', content: text.substring(i)});
+      }
       break;
     }
     
-    // Append text before tag
-    result += text.substring(i, tagStart);
+    // Add text before tag
+    if (tagStart > i) {
+      tokens.push({type: 'text', content: text.substring(i, tagStart)});
+    }
     
     // Find tag end
     const tagEnd = text.indexOf('>', tagStart);
     if (tagEnd === -1) {
-      // Malformed tag, escape it
-      result += '&lt;';
-      i = tagStart + 1;
-      continue;
+      // Malformed tag, treat as text
+      tokens.push({type: 'text', content: text.substring(tagStart)});
+      break;
     }
     
     const fullTag = text.substring(tagStart, tagEnd + 1);
-    const tagContent = text.substring(tagStart + 1, tagEnd);
+    const tagContent = text.substring(tagStart + 1, tagEnd).trim();
     
-    // Check if it's a closing tag
+    // Parse tag
     const isClosing = tagContent.startsWith('/');
-    const tagName = isClosing ? tagContent.substring(1).trim() : tagContent.split(' ')[0].trim();
+    const tagName = isClosing ? tagContent.substring(1).trim() : tagContent.split(/\s/)[0].trim();
     
-    // Validate tag
-    if (!allowedTags.includes(tagName)) {
-      // Invalid tag, escape it
-      result += fullTag.replace(/</g, '&lt;').replace(/>/g, '&gt;');
-      i = tagEnd + 1;
-      continue;
-    }
-    
-    if (isClosing) {
-      // Closing tag
-      if (stack.length > 0 && stack[stack.length - 1] === tagName) {
-        // Matching opening tag exists
-        stack.pop();
-        result += fullTag;
-      } else {
-        // No matching opening tag, skip this closing tag
-        console.log(`⚠️ Skipping unmatched closing tag: ${fullTag}`);
-      }
+    // Only process allowed tags
+    if (allowedTags.includes(tagName)) {
+      tokens.push({type: 'tag', content: fullTag, isClosing, tagName});
     } else {
-      // Opening tag
-      stack.push(tagName);
-      result += fullTag;
+      // Escape invalid tags
+      tokens.push({type: 'text', content: fullTag.replace(/</g, '&lt;').replace(/>/g, '&gt;')});
     }
     
     i = tagEnd + 1;
   }
   
-  // Close any remaining open tags
+  // Step 2: Build result with proper tag balancing
+  let result = '';
+  for (let j = 0; j < tokens.length; j++) {
+    const token = tokens[j];
+    
+    if (token.type === 'text') {
+      result += token.content;
+    } else if (token.type === 'tag') {
+      if (token.isClosing) {
+        // Check if we have a matching opening tag
+        const lastIndex = stack.findIndex(item => item.tag === token.tagName);
+        if (lastIndex !== -1) {
+          // Close all tags from this one to the top of stack
+          const tagsToClose = stack.splice(lastIndex);
+          // Add the closing tag for the matched one
+          result += token.content;
+          // Re-open any tags that were closed prematurely (in reverse order, excluding the one we just closed)
+          for (let k = tagsToClose.length - 2; k >= 0; k--) {
+            result += `<${tagsToClose[k].tag}>`;
+            stack.push(tagsToClose[k]);
+          }
+        } else {
+          // No matching opening tag, skip it
+          console.log(`⚠️ Skipping unmatched closing tag: ${token.content}`);
+        }
+      } else {
+        // Opening tag
+        result += token.content;
+        stack.push({tag: token.tagName!, pos: result.length});
+      }
+    }
+  }
+  
+  // Step 3: Close any remaining open tags
   while (stack.length > 0) {
-    const unclosedTag = stack.pop();
-    console.log(`⚠️ Auto-closing unclosed tag: <${unclosedTag}>`);
-    result += `</${unclosedTag}>`;
+    const unclosed = stack.pop();
+    console.log(`⚠️ Auto-closing unclosed tag: <${unclosed!.tag}>`);
+    result += `</${unclosed!.tag}>`;
   }
   
   return result;
@@ -1076,6 +1097,25 @@ function formatForTelegram(text: string): string {
 
   // Step 7: Fix any unbalanced HTML tags (prevent Telegram parsing errors)
   result = fixHtmlTags(result);
+  
+  // Step 8: Log final HTML for debugging
+  console.log('🔍 Final HTML length:', result.length);
+  if (result.includes('<i>')) {
+    const iCount = (result.match(/<i>/g) || []).length;
+    const iCloseCount = (result.match(/<\/i>/g) || []).length;
+    console.log(`🔍 <i> tags: ${iCount} opening, ${iCloseCount} closing`);
+    if (iCount !== iCloseCount) {
+      console.error(`❌ Unbalanced <i> tags detected! Opening: ${iCount}, Closing: ${iCloseCount}`);
+    }
+  }
+  if (result.includes('<b>')) {
+    const bCount = (result.match(/<b>/g) || []).length;
+    const bCloseCount = (result.match(/<\/b>/g) || []).length;
+    console.log(`🔍 <b> tags: ${bCount} opening, ${bCloseCount} closing`);
+    if (bCount !== bCloseCount) {
+      console.error(`❌ Unbalanced <b> tags detected! Opening: ${bCount}, Closing: ${bCloseCount}`);
+    }
+  }
 
   return result;
 }
