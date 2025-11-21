@@ -965,6 +965,81 @@ function convertMarkdownToTelegramHTML(text: string): string {
 }
 
 /**
+ * Fixes unbalanced HTML tags to prevent Telegram parsing errors
+ */
+function fixHtmlTags(text: string): string {
+  const allowedTags = ['b', 'i', 'u', 's', 'code', 'pre', 'a'];
+  const stack: string[] = [];
+  let result = '';
+  let i = 0;
+  
+  while (i < text.length) {
+    // Find next tag
+    const tagStart = text.indexOf('<', i);
+    
+    if (tagStart === -1) {
+      // No more tags, append rest of text
+      result += text.substring(i);
+      break;
+    }
+    
+    // Append text before tag
+    result += text.substring(i, tagStart);
+    
+    // Find tag end
+    const tagEnd = text.indexOf('>', tagStart);
+    if (tagEnd === -1) {
+      // Malformed tag, escape it
+      result += '&lt;';
+      i = tagStart + 1;
+      continue;
+    }
+    
+    const fullTag = text.substring(tagStart, tagEnd + 1);
+    const tagContent = text.substring(tagStart + 1, tagEnd);
+    
+    // Check if it's a closing tag
+    const isClosing = tagContent.startsWith('/');
+    const tagName = isClosing ? tagContent.substring(1).trim() : tagContent.split(' ')[0].trim();
+    
+    // Validate tag
+    if (!allowedTags.includes(tagName)) {
+      // Invalid tag, escape it
+      result += fullTag.replace(/</g, '&lt;').replace(/>/g, '&gt;');
+      i = tagEnd + 1;
+      continue;
+    }
+    
+    if (isClosing) {
+      // Closing tag
+      if (stack.length > 0 && stack[stack.length - 1] === tagName) {
+        // Matching opening tag exists
+        stack.pop();
+        result += fullTag;
+      } else {
+        // No matching opening tag, skip this closing tag
+        console.log(`⚠️ Skipping unmatched closing tag: ${fullTag}`);
+      }
+    } else {
+      // Opening tag
+      stack.push(tagName);
+      result += fullTag;
+    }
+    
+    i = tagEnd + 1;
+  }
+  
+  // Close any remaining open tags
+  while (stack.length > 0) {
+    const unclosedTag = stack.pop();
+    console.log(`⚠️ Auto-closing unclosed tag: <${unclosedTag}>`);
+    result += `</${unclosedTag}>`;
+  }
+  
+  return result;
+}
+
+/**
  * Main formatter function
  * Converts LaTeX and markdown to Telegram-friendly HTML format
  * Order matters: process structure first, then formatting
@@ -998,6 +1073,9 @@ function formatForTelegram(text: string): string {
 
   // Step 6: Convert markdown to Telegram HTML (last step, preserves HTML tags)
   result = convertMarkdownToTelegramHTML(result);
+
+  // Step 7: Fix any unbalanced HTML tags (prevent Telegram parsing errors)
+  result = fixHtmlTags(result);
 
   return result;
 }
