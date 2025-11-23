@@ -1,8 +1,9 @@
 import { useState } from 'react';
 import { StepCard } from './StepCard';
 import { MathBlock } from './MathBlock';
+import { RichContent } from './RichContent';
 import type { Solution } from '@/types/solution';
-import { ChevronLeft, ChevronRight } from 'lucide-react';
+import { ChevronLeft, ChevronRight, CheckCircle2 } from 'lucide-react';
 
 interface SolutionViewProps {
   solution: Solution;
@@ -23,23 +24,34 @@ export function SolutionView({ solution }: SolutionViewProps) {
   };
 
   return (
-    <div className="max-w-2xl mx-auto">
+    <div className="max-w-2xl mx-auto pb-8">
       {/* Problem statement */}
       <div
-        className="rounded-2xl shadow-sm p-6 mb-6"
+        className="rounded-2xl shadow-elegant p-6 mb-6 animate-fade-in"
         style={{
           backgroundColor: 'var(--tg-theme-bg-color, hsl(var(--card)))',
+          borderWidth: '1px',
+          borderStyle: 'solid',
           borderColor: 'var(--tg-theme-hint-color, hsl(var(--border)))',
         }}
       >
-        <h2 className="text-xl font-bold mb-3" style={{ color: 'var(--tg-theme-text-color, hsl(var(--foreground)))' }}>
-          📝 Задача
-        </h2>
-        <p className="text-base leading-relaxed" style={{ color: 'var(--tg-theme-text-color, hsl(var(--foreground)))' }}>
+        <div className="flex items-center gap-2 mb-3">
+          <span className="text-2xl">📝</span>
+          <h2 className="text-xl font-bold" style={{ color: 'var(--tg-theme-text-color, hsl(var(--foreground)))' }}>
+            Задача
+          </h2>
+        </div>
+        <RichContent className="text-base leading-relaxed">
           {solution.problem}
-        </p>
+        </RichContent>
         {solution.subject && (
-          <div className="mt-3 inline-block px-3 py-1 rounded-full text-sm bg-primary/10">
+          <div 
+            className="mt-4 inline-block px-4 py-2 rounded-full text-sm font-medium"
+            style={{
+              backgroundColor: 'var(--tg-theme-button-color, hsl(var(--primary)))',
+              color: 'var(--tg-theme-button-text-color, hsl(var(--primary-foreground)))',
+            }}
+          >
             {solution.subject}
           </div>
         )}
@@ -47,20 +59,30 @@ export function SolutionView({ solution }: SolutionViewProps) {
 
       {/* Progress indicator */}
       <div className="mb-6">
-        <div className="flex justify-between items-center mb-2">
-          <span className="text-sm" style={{ color: 'var(--tg-theme-hint-color, hsl(var(--muted-foreground)))' }}>
+        <div className="flex justify-between items-center mb-3">
+          <span className="text-sm font-medium" style={{ color: 'var(--tg-theme-hint-color, hsl(var(--muted-foreground)))' }}>
             Шаг {currentStep + 1} из {solution.steps.length}
           </span>
-          <span className="text-sm font-medium" style={{ color: 'var(--tg-theme-text-color, hsl(var(--foreground)))' }}>
+          <span 
+            className="text-sm font-bold"
+            style={{ 
+              color: 'var(--tg-theme-button-color, hsl(var(--primary)))',
+            }}
+          >
             {Math.round(((currentStep + 1) / solution.steps.length) * 100)}%
           </span>
         </div>
-        <div className="w-full h-2 bg-secondary/20 rounded-full overflow-hidden">
+        <div 
+          className="w-full h-3 rounded-full overflow-hidden"
+          style={{
+            backgroundColor: 'var(--tg-theme-secondary-bg-color, hsl(var(--secondary)))',
+          }}
+        >
           <div
-            className="h-full transition-all duration-300"
+            className="h-full transition-all duration-500 ease-out rounded-full shadow-glow"
             style={{
               width: `${((currentStep + 1) / solution.steps.length) * 100}%`,
-              backgroundColor: 'var(--tg-theme-button-color, hsl(var(--primary)))',
+              background: 'var(--gradient-accent)',
             }}
           />
         </div>
@@ -102,22 +124,37 @@ export function SolutionView({ solution }: SolutionViewProps) {
       {/* Final answer (visible when on last step) */}
       {currentStep === solution.steps.length - 1 && (
         <div
-          className="rounded-2xl shadow-lg p-6 border-2"
+          className="rounded-2xl shadow-glow p-6 border-2 animate-fade-in"
           style={{
             backgroundColor: 'var(--tg-theme-bg-color, hsl(var(--card)))',
-            borderColor: 'var(--tg-theme-button-color, hsl(var(--primary)))',
+            borderColor: 'var(--tg-theme-button-color, hsl(var(--accent)))',
+            background: 'linear-gradient(135deg, var(--tg-theme-bg-color, hsl(var(--card))) 0%, var(--tg-theme-secondary-bg-color, hsl(var(--secondary))) 100%)',
           }}
         >
-          <h3 className="text-lg font-bold mb-3" style={{ color: 'var(--tg-theme-text-color, hsl(var(--foreground)))' }}>
-            ✅ Итоговый ответ
-          </h3>
-          <MathBlock>{solution.finalAnswer}</MathBlock>
+          <div className="flex items-center gap-3 mb-4">
+            <CheckCircle2 
+              className="w-7 h-7" 
+              style={{ color: 'var(--tg-theme-button-color, hsl(var(--accent)))' }}
+            />
+            <h3 className="text-xl font-bold" style={{ color: 'var(--tg-theme-text-color, hsl(var(--foreground)))' }}>
+              Итоговый ответ
+            </h3>
+          </div>
+          <div 
+            className="p-4 rounded-xl"
+            style={{
+              backgroundColor: 'var(--tg-theme-secondary-bg-color, hsl(var(--secondary)))',
+            }}
+          >
+            <MathBlock>{solution.finalAnswer}</MathBlock>
+          </div>
         </div>
       )}
 
       {/* All steps preview (collapsed) */}
-      <div className="mt-8">
-        <h3 className="text-lg font-bold mb-4" style={{ color: 'var(--tg-theme-text-color, hsl(var(--foreground)))' }}>
+      <div className="mt-10">
+        <h3 className="text-lg font-bold mb-5 flex items-center gap-2" style={{ color: 'var(--tg-theme-text-color, hsl(var(--foreground)))' }}>
+          <span>🗂️</span>
           Все шаги решения
         </h3>
         <div className="space-y-3">
@@ -125,8 +162,8 @@ export function SolutionView({ solution }: SolutionViewProps) {
             <button
               key={step.number}
               onClick={() => setCurrentStep(index)}
-              className={`w-full text-left p-4 rounded-xl transition-all ${
-                index === currentStep ? 'shadow-md' : 'hover:shadow-sm'
+              className={`w-full text-left p-4 rounded-xl transition-all duration-300 ${
+                index === currentStep ? 'shadow-glow scale-[1.02]' : 'hover:shadow-md'
               }`}
               style={{
                 backgroundColor: index === currentStep
@@ -141,7 +178,7 @@ export function SolutionView({ solution }: SolutionViewProps) {
             >
               <div className="flex items-center gap-3">
                 <div
-                  className="w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0"
+                  className="w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0 shadow-sm transition-all duration-300"
                   style={{
                     backgroundColor: index <= currentStep
                       ? 'var(--tg-theme-button-color, hsl(var(--primary)))'
@@ -153,12 +190,12 @@ export function SolutionView({ solution }: SolutionViewProps) {
                 >
                   {index < currentStep ? '✓' : step.number}
                 </div>
-                <span
-                  className="text-sm font-medium"
-                  style={{ color: 'var(--tg-theme-text-color, hsl(var(--foreground)))' }}
+                <RichContent 
+                  inline 
+                  className="text-sm font-medium flex-1"
                 >
                   {step.title}
-                </span>
+                </RichContent>
               </div>
             </button>
           ))}

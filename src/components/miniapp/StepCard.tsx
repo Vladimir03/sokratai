@@ -1,5 +1,5 @@
-import { Math } from './Math';
 import { MathBlock } from './MathBlock';
+import { RichContent } from './RichContent';
 import type { SolutionStep } from '@/types/solution';
 
 interface StepCardProps {
@@ -8,25 +8,30 @@ interface StepCardProps {
 }
 
 /**
- * Individual solution step card component
+ * Individual solution step card component with rich markdown and LaTeX rendering
  */
 export function StepCard({ step, isActive = false }: StepCardProps) {
   return (
     <div
       className={`
-        rounded-2xl shadow-sm p-6 mb-4 transition-all duration-300
-        ${isActive ? 'bg-primary/5 border-2 border-primary' : 'bg-card border border-border'}
+        rounded-2xl shadow-elegant p-6 mb-6 transition-all duration-300 animate-fade-in
+        ${isActive ? 'shadow-glow' : ''}
       `}
       style={{
         backgroundColor: isActive 
           ? 'var(--tg-theme-secondary-bg-color, hsl(var(--card)))'
           : 'var(--tg-theme-bg-color, hsl(var(--card)))',
+        borderWidth: isActive ? '2px' : '1px',
+        borderStyle: 'solid',
+        borderColor: isActive 
+          ? 'var(--tg-theme-button-color, hsl(var(--primary)))'
+          : 'var(--tg-theme-hint-color, hsl(var(--border)))',
       }}
     >
-      {/* Step number */}
-      <div className="flex items-center gap-3 mb-4">
+      {/* Step number and title */}
+      <div className="flex items-center gap-3 mb-5">
         <div
-          className="w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold"
+          className="w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold shadow-md"
           style={{
             backgroundColor: 'var(--tg-theme-button-color, hsl(var(--primary)))',
             color: 'var(--tg-theme-button-text-color, hsl(var(--primary-foreground)))',
@@ -34,30 +39,50 @@ export function StepCard({ step, isActive = false }: StepCardProps) {
         >
           {step.number}
         </div>
-        <h3 className="text-lg font-bold" style={{ color: 'var(--tg-theme-text-color, hsl(var(--foreground)))' }}>
-          {step.title}
+        <h3 className="text-lg font-bold flex-1">
+          <RichContent inline style={{ color: 'var(--tg-theme-text-color, hsl(var(--foreground)))' }}>
+            {step.title}
+          </RichContent>
         </h3>
       </div>
 
-      {/* Content */}
-      <div className="mb-4 text-base leading-relaxed" style={{ color: 'var(--tg-theme-text-color, hsl(var(--foreground)))' }}>
+      {/* Content with rich markdown/LaTeX rendering */}
+      <RichContent className="mb-5 text-base">
         {step.content}
-      </div>
+      </RichContent>
 
       {/* Formula (display mode) */}
       {step.formula && (
-        <MathBlock>{step.formula}</MathBlock>
+        <div className="mb-5">
+          <div className="flex items-center gap-2 mb-2">
+            <span className="text-xl">📐</span>
+            <span className="text-sm font-medium" style={{ color: 'var(--tg-theme-hint-color, hsl(var(--muted-foreground)))' }}>
+              Формула:
+            </span>
+          </div>
+          <MathBlock>{step.formula}</MathBlock>
+        </div>
       )}
 
       {/* Method description */}
       {step.method && (
-        <div className="mt-4 p-3 bg-accent/20 rounded-lg">
-          <p className="text-sm font-medium mb-1" style={{ color: 'var(--tg-theme-hint-color, hsl(var(--muted-foreground)))' }}>
-            💡 Метод:
-          </p>
-          <p className="text-sm" style={{ color: 'var(--tg-theme-text-color, hsl(var(--foreground)))' }}>
+        <div 
+          className="mt-5 p-4 rounded-xl shadow-sm"
+          style={{
+            backgroundColor: 'var(--tg-theme-secondary-bg-color, hsl(var(--secondary)))',
+            borderLeft: '4px solid',
+            borderLeftColor: 'var(--tg-theme-button-color, hsl(var(--accent)))',
+          }}
+        >
+          <div className="flex items-center gap-2 mb-2">
+            <span className="text-xl">💡</span>
+            <p className="text-sm font-bold" style={{ color: 'var(--tg-theme-text-color, hsl(var(--foreground)))' }}>
+              Метод:
+            </p>
+          </div>
+          <RichContent className="text-sm">
             {step.method}
-          </p>
+          </RichContent>
         </div>
       )}
     </div>
