@@ -107,23 +107,22 @@ export function RichContent({ children, className = '', inline = false, style }:
 
   // For inline rendering (like in titles)
   if (inline) {
-    // Check if there's inline math
-    const hasMath = /\$[^\$\n]+?\$/.test(processedContent);
-    if (hasMath) {
-      const parts = processedContent.split(/(\$[^\$\n]+?\$)/g);
-      return (
-        <span className={className} style={style}>
-          {parts.map((part, idx) => {
-            if (part.startsWith('$') && part.endsWith('$')) {
-              const math = part.slice(1, -1);
-              return <Math key={idx} inline>{math}</Math>;
-            }
-            return <span key={idx}>{part}</span>;
-          })}
-        </span>
-      );
-    }
-    return <span className={className} style={style}>{processedContent}</span>;
+    return (
+      <span className={className} style={style}>
+        <Suspense fallback={<span>{children}</span>}>
+          <ReactMarkdown
+            remarkPlugins={[remarkGfm, remarkMath]}
+            rehypePlugins={[rehypeKatex]}
+            components={{
+              ...markdownComponents,
+              p: ({ children }: any) => <>{children}</>, // No <p> wrapper for inline
+            }}
+          >
+            {processedContent}
+          </ReactMarkdown>
+        </Suspense>
+      </span>
+    );
   }
 
   // For block rendering
