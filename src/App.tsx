@@ -10,6 +10,8 @@ import Index from "./pages/Index";
 // Lazy load all pages for optimal code splitting
 const Login = lazy(() => import("./pages/Login"));
 const SignUp = lazy(() => import("./pages/SignUp"));
+const ForgotPassword = lazy(() => import("./pages/ForgotPassword"));
+const ResetPassword = lazy(() => import("./pages/ResetPassword"));
 const Chat = lazy(() => import("./pages/Chat"));
 const Homework = lazy(() => import("./pages/Homework"));
 const HomeworkAdd = lazy(() => import("./pages/HomeworkAdd"));
@@ -60,7 +62,23 @@ const App = () => (
             } 
           />
           <Route 
-            path="/chat" 
+            path="/forgot-password" 
+            element={
+              <Suspense fallback={<PageLoader />}>
+                <ForgotPassword />
+              </Suspense>
+            } 
+          />
+          <Route 
+            path="/reset-password" 
+            element={
+              <Suspense fallback={<PageLoader />}>
+                <ResetPassword />
+              </Suspense>
+            } 
+          />
+          <Route 
+            path="/chat"
             element={
               <Suspense fallback={<PageLoader />}>
                 <Chat />
