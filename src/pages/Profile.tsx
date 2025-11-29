@@ -29,6 +29,7 @@ const Profile = () => {
   const [stats, setStats] = useState<UserStats | null>(null);
   const [loading, setLoading] = useState(true);
   const [linkingTelegram, setLinkingTelegram] = useState(false);
+  const [linkToken, setLinkToken] = useState<string | null>(null);
   const pollingRef = useRef<NodeJS.Timeout | null>(null);
   const [editing, setEditing] = useState(false);
   const [newUsername, setNewUsername] = useState("");
@@ -92,6 +93,7 @@ const Profile = () => {
       if (response.error) throw response.error;
 
       const { token } = response.data;
+      setLinkToken(token);
       
       // Open Telegram bot with link token
       const botUrl = `https://t.me/${BOT_NAME}?start=link_${token}`;
@@ -161,6 +163,20 @@ const Profile = () => {
       pollingRef.current = null;
     }
     setLinkingTelegram(false);
+    setLinkToken(null);
+  };
+
+  const handleCopyCommand = async () => {
+    if (linkToken) {
+      await navigator.clipboard.writeText(`/start link_${linkToken}`);
+      toast.success("Команда скопирована!");
+    }
+  };
+
+  const handleOpenTelegram = () => {
+    if (linkToken) {
+      window.open(`https://t.me/${BOT_NAME}?start=link_${linkToken}`, "_blank");
+    }
   };
 
   const handleUpdateUsername = async () => {
@@ -310,16 +326,42 @@ const Profile = () => {
                   </div>
                 </div>
               ) : linkingTelegram ? (
-                <div className="p-4 bg-blue-500/10 border border-blue-500/30 rounded-lg">
-                  <div className="flex items-center gap-3 mb-3">
+                <div className="p-4 bg-blue-500/10 border border-blue-500/30 rounded-lg space-y-3">
+                  <div className="flex items-center gap-3">
                     <Loader2 className="w-5 h-5 text-blue-500 animate-spin" />
                     <div className="font-medium text-blue-700 dark:text-blue-400">
                       Ожидание подтверждения...
                     </div>
                   </div>
-                  <p className="text-sm text-muted-foreground mb-3">
+                  <p className="text-sm text-muted-foreground">
                     Откройте Telegram и подтвердите связку в боте @{BOT_NAME}
                   </p>
+                  
+                  {/* iOS-friendly instructions */}
+                  {linkToken && (
+                    <div className="p-3 bg-amber-500/10 border border-amber-500/30 rounded-lg">
+                      <p className="text-sm text-amber-700 dark:text-amber-400 mb-2">
+                        📱 Если бот не отвечает, скопируйте команду и отправьте вручную:
+                      </p>
+                      <div className="flex gap-2 items-center">
+                        <code className="flex-1 bg-muted p-2 rounded text-xs font-mono overflow-x-auto">
+                          /start link_{linkToken}
+                        </code>
+                        <Button size="sm" variant="secondary" onClick={handleCopyCommand}>
+                          Копировать
+                        </Button>
+                      </div>
+                      <Button 
+                        variant="link" 
+                        size="sm" 
+                        onClick={handleOpenTelegram}
+                        className="mt-2 p-0 h-auto text-blue-600"
+                      >
+                        Открыть Telegram →
+                      </Button>
+                    </div>
+                  )}
+                  
                   <Button variant="outline" size="sm" onClick={handleCancelLink}>
                     Отменить
                   </Button>
