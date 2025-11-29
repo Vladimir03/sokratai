@@ -6,6 +6,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { z } from "zod";
+import TelegramLoginButton from "@/components/TelegramLoginButton";
 
 const signupSchema = z.object({
   email: z.string().trim().email({ message: "Неверный формат email" }).max(255),
@@ -70,7 +71,28 @@ const SignUp = () => {
             Создайте аккаунт, чтобы начать подготовку к ЕГЭ
           </CardDescription>
         </CardHeader>
-        <CardContent>
+        <CardContent className="space-y-6">
+          {/* Telegram Login - Primary */}
+          <div className="flex flex-col items-center">
+            <p className="text-sm text-muted-foreground mb-3">
+              Быстрая регистрация через Telegram
+            </p>
+            <TelegramLoginButton />
+          </div>
+
+          {/* Divider */}
+          <div className="relative">
+            <div className="absolute inset-0 flex items-center">
+              <span className="w-full border-t border-border" />
+            </div>
+            <div className="relative flex justify-center text-xs uppercase">
+              <span className="bg-card px-2 text-muted-foreground">
+                или по email
+              </span>
+            </div>
+          </div>
+
+          {/* Email/Password Signup */}
           <form onSubmit={handleSignUp} className="space-y-4">
             <div className="space-y-2">
               <Input
@@ -95,20 +117,21 @@ const SignUp = () => {
             <div className="space-y-2">
               <Input
                 type="password"
-                placeholder="Пароль (минимум 6 символов)"
+                placeholder="Пароль (минимум 8 символов)"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 required
-                minLength={6}
+                minLength={8}
                 disabled={loading}
               />
             </div>
             <Button 
               type="submit" 
               className="w-full" 
+              variant="outline"
               disabled={loading}
             >
-              {loading ? "Регистрация..." : "Зарегистрироваться"}
+              {loading ? "Регистрация..." : "Зарегистрироваться по email"}
             </Button>
             <p className="text-center text-sm text-muted-foreground">
               Уже есть аккаунт?{" "}

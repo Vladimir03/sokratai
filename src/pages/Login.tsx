@@ -6,6 +6,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { z } from "zod";
+import TelegramLoginButton from "@/components/TelegramLoginButton";
 
 const loginSchema = z.object({
   email: z.string().trim().email({ message: "Неверный формат email" }).max(255),
@@ -55,7 +56,28 @@ const Login = () => {
             Войдите в свой аккаунт, чтобы продолжить обучение
           </CardDescription>
         </CardHeader>
-        <CardContent>
+        <CardContent className="space-y-6">
+          {/* Telegram Login - Primary */}
+          <div className="flex flex-col items-center">
+            <p className="text-sm text-muted-foreground mb-3">
+              Рекомендуем — не нужен пароль
+            </p>
+            <TelegramLoginButton />
+          </div>
+
+          {/* Divider */}
+          <div className="relative">
+            <div className="absolute inset-0 flex items-center">
+              <span className="w-full border-t border-border" />
+            </div>
+            <div className="relative flex justify-center text-xs uppercase">
+              <span className="bg-card px-2 text-muted-foreground">
+                или по email
+              </span>
+            </div>
+          </div>
+
+          {/* Email/Password Login */}
           <form onSubmit={handleLogin} className="space-y-4">
             <div className="space-y-2">
               <Input
@@ -80,9 +102,10 @@ const Login = () => {
             <Button 
               type="submit" 
               className="w-full" 
+              variant="outline"
               disabled={loading}
             >
-              {loading ? "Вход..." : "Войти"}
+              {loading ? "Вход..." : "Войти по email"}
             </Button>
             <p className="text-center text-sm text-muted-foreground">
               Нет аккаунта?{" "}

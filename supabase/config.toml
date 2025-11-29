@@ -11,3 +11,12 @@ verify_jwt = false
 
 [functions.setup-telegram-webhook]
 verify_jwt = false
+
+[functions.telegram-auth]
+verify_jwt = false
+
+[functions.get-solution]
+verify_jwt = false
+
+[functions.check-solutions]
+verify_jwt = false
