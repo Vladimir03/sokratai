@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import Navigation from "./Navigation";
+import OnboardingModal from "./OnboardingModal";
 
 interface AuthGuardProps {
   children: React.ReactNode;
@@ -10,12 +11,29 @@ interface AuthGuardProps {
 const AuthGuard = ({ children }: AuthGuardProps) => {
   const navigate = useNavigate();
   const [loading, setLoading] = useState(true);
+  const [showOnboarding, setShowOnboarding] = useState(false);
+  const [userId, setUserId] = useState<string | null>(null);
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
+    supabase.auth.getSession().then(async ({ data: { session } }) => {
       if (!session) {
         navigate("/login");
+        return;
       }
+
+      setUserId(session.user.id);
+
+      // Check onboarding status
+      const { data: profile } = await supabase
+        .from("profiles")
+        .select("onboarding_completed")
+        .eq("id", session.user.id)
+        .single();
+
+      if (profile && !profile.onboarding_completed) {
+        setShowOnboarding(true);
+      }
+
       setLoading(false);
     });
 
@@ -41,6 +59,11 @@ const AuthGuard = ({ children }: AuthGuardProps) => {
 
   return (
     <>
+      <OnboardingModal
+        open={showOnboarding}
+        userId={userId}
+        onComplete={() => setShowOnboarding(false)}
+      />
       <Navigation />
       <div className="pt-16 pb-20 md:pb-4">
         {children}
