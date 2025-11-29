@@ -170,8 +170,7 @@ const Index = () => {
               <Link to="/chat">
                 <Button
                   size="lg"
-                  variant="outline"
-                  className="border-2 border-primary-foreground/30 text-primary-foreground hover:bg-primary-foreground/10 text-base md:text-lg px-8 py-6 rounded-2xl font-semibold transition-all hover:scale-105 w-full sm:w-auto"
+                  className="bg-white/10 backdrop-blur-sm border-2 border-white/30 text-white hover:bg-white/20 text-base md:text-lg px-8 py-6 rounded-2xl font-semibold transition-all hover:scale-105 w-full sm:w-auto"
                 >
                   <Globe className="w-5 h-5 mr-2" />
                   Открыть в браузере
