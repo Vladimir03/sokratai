@@ -1,9 +1,10 @@
-import { useState, useRef, useCallback } from "react";
+import { useState, useRef, useCallback, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
-import { Send, Loader2, CheckCircle } from "lucide-react";
+import { Send, Loader2, CheckCircle, RefreshCw, ExternalLink } from "lucide-react";
 import { toast } from "sonner";
+import { isIOS } from "@/hooks/use-mobile";
 
 interface TelegramLoginButtonProps {
   botName?: string;
@@ -17,6 +18,8 @@ const TelegramLoginButton = ({
   const navigate = useNavigate();
   const [loading, setLoading] = useState(false);
   const [status, setStatus] = useState<"idle" | "waiting" | "success">("idle");
+  const [currentToken, setCurrentToken] = useState<string | null>(null);
+  const [checking, setChecking] = useState(false);
   const pollingRef = useRef<number | null>(null);
 
   const stopPolling = useCallback(() => {
@@ -26,7 +29,8 @@ const TelegramLoginButton = ({
     }
   }, []);
 
-  const checkToken = useCallback(async (token: string): Promise<boolean> => {
+  const checkToken = useCallback(async (token: string, manual = false): Promise<boolean> => {
+    if (manual) setChecking(true);
     try {
       const response = await fetch(
         `https://vrsseotrfmsxpbciyqzc.supabase.co/functions/v1/telegram-login-token?token=${token}`,
@@ -37,7 +41,6 @@ const TelegramLoginButton = ({
       console.log("Token check response:", data);
 
       if (data.status === "verified" && data.session) {
-        // Set session in Supabase
         await supabase.auth.setSession({
           access_token: data.session.access_token,
           refresh_token: data.session.refresh_token,
@@ -46,7 +49,6 @@ const TelegramLoginButton = ({
         setStatus("success");
         toast.success("Успешный вход через Telegram!");
         
-        // Navigate after short delay
         setTimeout(() => {
           navigate("/chat");
         }, 500);
@@ -58,19 +60,40 @@ const TelegramLoginButton = ({
         toast.error("Время авторизации истекло. Попробуйте снова.");
         setLoading(false);
         setStatus("idle");
-        return true; // Stop polling
+        setCurrentToken(null);
+        return true;
       }
 
-      return false; // Continue polling
+      if (manual) {
+        toast.info("Ожидаем подтверждение в Telegram...");
+      }
+
+      return false;
     } catch (error) {
       console.error("Error checking token:", error);
+      if (manual) toast.error("Ошибка проверки. Попробуйте ещё раз.");
       return false;
+    } finally {
+      if (manual) setChecking(false);
     }
   }, [navigate]);
 
+  // Resume polling when page becomes visible (for iOS Safari)
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible' && status === 'waiting' && currentToken) {
+        console.log("Page visible, checking token...");
+        checkToken(currentToken);
+      }
+    };
+    
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+  }, [status, currentToken, checkToken]);
+
   const startPolling = useCallback((token: string) => {
     let attempts = 0;
-    const maxAttempts = 150; // 5 minutes at 2 second intervals
+    const maxAttempts = 150;
 
     pollingRef.current = window.setInterval(async () => {
       attempts++;
@@ -79,6 +102,7 @@ const TelegramLoginButton = ({
         stopPolling();
         setLoading(false);
         setStatus("idle");
+        setCurrentToken(null);
         toast.error("Время ожидания истекло. Попробуйте снова.");
         return;
       }
@@ -90,12 +114,20 @@ const TelegramLoginButton = ({
     }, 2000);
   }, [checkToken, stopPolling]);
 
+  const openTelegram = useCallback((token: string) => {
+    const url = `https://t.me/${botName}?start=login_${token}`;
+    if (isIOS()) {
+      window.location.href = url;
+    } else {
+      window.open(url, "_blank");
+    }
+  }, [botName]);
+
   const handleTelegramLogin = async () => {
     setLoading(true);
     setStatus("waiting");
 
     try {
-      // Create login token
       const response = await fetch(
         "https://vrsseotrfmsxpbciyqzc.supabase.co/functions/v1/telegram-login-token?action=create",
         { method: "POST" }
@@ -107,11 +139,9 @@ const TelegramLoginButton = ({
 
       const { token } = await response.json();
       console.log("Created login token:", token);
+      setCurrentToken(token);
 
-      // Open Telegram bot with login token
-      window.open(`https://t.me/${botName}?start=login_${token}`, "_blank");
-
-      // Start polling for verification
+      openTelegram(token);
       startPolling(token);
 
     } catch (error: any) {
@@ -126,6 +156,7 @@ const TelegramLoginButton = ({
     stopPolling();
     setLoading(false);
     setStatus("idle");
+    setCurrentToken(null);
   };
 
   if (status === "success") {
@@ -144,17 +175,47 @@ const TelegramLoginButton = ({
           <Loader2 className="w-5 h-5 mr-2 animate-spin" />
           Ожидание подтверждения...
         </Button>
-        <p className="text-sm text-muted-foreground text-center">
-          Подтвердите вход в Telegram и вернитесь сюда
-        </p>
-        <Button 
-          variant="ghost" 
-          size="sm" 
-          onClick={handleCancel}
-          className="text-muted-foreground"
-        >
-          Отменить
-        </Button>
+        
+        <div className="text-sm text-muted-foreground text-center space-y-1">
+          <p>1. Нажмите «Старт» в Telegram боте</p>
+          <p>2. Вернитесь сюда</p>
+        </div>
+        
+        <div className="flex flex-col gap-2 w-full max-w-xs">
+          <Button 
+            variant="outline" 
+            size="sm" 
+            onClick={() => currentToken && checkToken(currentToken, true)}
+            disabled={checking}
+            className="w-full"
+          >
+            {checking ? (
+              <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+            ) : (
+              <RefreshCw className="w-4 h-4 mr-2" />
+            )}
+            Проверить статус
+          </Button>
+          
+          <Button 
+            variant="ghost" 
+            size="sm" 
+            onClick={() => currentToken && openTelegram(currentToken)}
+            className="w-full text-muted-foreground"
+          >
+            <ExternalLink className="w-4 h-4 mr-2" />
+            Открыть Telegram снова
+          </Button>
+          
+          <Button 
+            variant="ghost" 
+            size="sm" 
+            onClick={handleCancel}
+            className="w-full text-muted-foreground"
+          >
+            Отменить
+          </Button>
+        </div>
       </div>
     );
   }
