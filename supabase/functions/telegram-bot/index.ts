@@ -229,7 +229,23 @@ async function handleStart(telegramUserId: number, telegramUsername: string | un
   // Get or create profile
   const profile = await getOrCreateProfile(telegramUserId, telegramUsername);
 
-  // Record analytics
+  // Check if user already completed onboarding - send welcome back message instead
+  if (profile.onboarding_completed) {
+    console.log("User already completed onboarding, sending welcome back message");
+    
+    const welcomeBackMessage = `👋 С возвращением!
+
+📸 Отправь фото задачи из учебника
+✏️ Напиши задачу текстом  
+❓ Задай вопрос по предмету
+
+Я помогу тебе разобраться! 🚀`;
+
+    await sendTelegramMessage(telegramUserId, welcomeBackMessage);
+    return;
+  }
+
+  // Record analytics for NEW users only
   await supabase.from("onboarding_analytics").insert({
     user_id: profile.id,
     source: "telegram",
