@@ -5,12 +5,15 @@ import { Input } from "@/components/ui/input";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import AuthGuard from "@/components/AuthGuard";
-import { User, Zap, Target, Trophy, Edit } from "lucide-react";
+import { User, Zap, Target, Trophy, Edit, Send, CheckCircle } from "lucide-react";
 import { z } from "zod";
 import { PageContent } from "@/components/PageContent";
 
 interface Profile {
   username: string;
+  telegram_user_id: number | null;
+  telegram_username: string | null;
+  registration_source: string | null;
 }
 
 interface UserStats {
@@ -38,7 +41,7 @@ const Profile = () => {
       // Fetch profile
       const { data: profileData, error: profileError } = await supabase
         .from("profiles")
-        .select("username")
+        .select("username, telegram_user_id, telegram_username, registration_source")
         .eq("id", user.id)
         .single();
 
@@ -187,6 +190,52 @@ const Profile = () => {
                 </div>
               </div>
             </CardHeader>
+          </Card>
+
+          {/* Telegram Connection Status */}
+          <Card className="shadow-elegant">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Send className="w-5 h-5 text-[#0088cc]" />
+                Telegram
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              {profile?.telegram_user_id ? (
+                <div className="flex items-center gap-3 p-4 bg-green-500/10 border border-green-500/30 rounded-lg">
+                  <CheckCircle className="w-6 h-6 text-green-500" />
+                  <div>
+                    <div className="font-medium text-green-700 dark:text-green-400">
+                      Аккаунт связан с Telegram
+                    </div>
+                    {profile.telegram_username && (
+                      <div className="text-sm text-muted-foreground">
+                        @{profile.telegram_username}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ) : (
+                <div className="p-4 bg-muted/50 rounded-lg">
+                  <div className="text-muted-foreground mb-2">
+                    Telegram не подключён
+                  </div>
+                  <p className="text-sm text-muted-foreground">
+                    Чтобы связать аккаунт, выйдите и войдите через Telegram на странице входа
+                  </p>
+                </div>
+              )}
+              {profile?.registration_source && (
+                <div className="mt-3 text-xs text-muted-foreground">
+                  Источник регистрации: {
+                    profile.registration_source === 'telegram_web' ? 'Telegram (веб)' :
+                    profile.registration_source === 'telegram' ? 'Telegram бот' :
+                    profile.registration_source === 'web' ? 'Веб' :
+                    profile.registration_source
+                  }
+                </div>
+              )}
+            </CardContent>
           </Card>
 
           {/* Stats Grid */}
