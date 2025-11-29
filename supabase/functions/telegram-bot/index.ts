@@ -250,67 +250,90 @@ async function handleWebLogin(telegramUserId: number, telegramUsername: string |
 
     // Get or create profile
     const profile = await getOrCreateProfile(telegramUserId, telegramUsername);
+    console.log("Profile for web login:", { profileId: profile.id, registrationSource: profile.registration_source });
 
-    // Generate Supabase session for the user
-    const generatedEmail = `tg_${telegramUserId}@telegram.user`;
-    const generatedPassword = `tg_${telegramUserId}_${profile.id}`;
-
-    // Try to sign in or create user
     let session = null;
-    
-    // First try to sign in
-    const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
-      email: generatedEmail,
-      password: generatedPassword,
-    });
 
-    if (signInData?.session) {
-      session = signInData.session;
+    // Check if this is a web user by looking at their auth.users email
+    const { data: authUserData, error: authUserError } = await supabase.auth.admin.getUserById(profile.id);
+    
+    const userEmail = authUserData?.user?.email;
+    const isWebUser = userEmail && !userEmail.includes('@telegram.user') && !userEmail.includes('@temp.sokratai.ru');
+    
+    console.log("Auth user check:", { userEmail, isWebUser, error: authUserError?.message });
+
+    if (isWebUser && userEmail) {
+      // This is a web user with real email - generate session using admin API
+      console.log("Web user detected, generating session for:", userEmail);
+      
+      const { data: linkData, error: linkError } = await supabase.auth.admin.generateLink({
+        type: "magiclink",
+        email: userEmail,
+      });
+      
+      console.log("Generate link result:", { 
+        hasHashedToken: !!linkData?.properties?.hashed_token, 
+        error: linkError?.message 
+      });
+      
+      if (linkData?.properties?.hashed_token) {
+        // Verify the OTP to get the session
+        const { data: verifyData, error: verifyError } = await supabase.auth.verifyOtp({
+          token_hash: linkData.properties.hashed_token,
+          type: "magiclink",
+        });
+        
+        console.log("Verify OTP result:", { 
+          hasSession: !!verifyData?.session, 
+          error: verifyError?.message 
+        });
+        
+        if (verifyData?.session) {
+          session = verifyData.session;
+        }
+      }
     } else {
-      // Try to sign up
-      const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
+      // Telegram-only user - use password-based flow
+      const generatedEmail = `tg_${telegramUserId}@telegram.user`;
+      const generatedPassword = `tg_${telegramUserId}_${profile.id}`;
+      
+      console.log("Telegram user, trying password flow for:", generatedEmail);
+
+      // Try to sign in
+      const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
         email: generatedEmail,
         password: generatedPassword,
-        options: {
-          data: {
-            telegram_user_id: telegramUserId,
-            telegram_username: telegramUsername,
-          },
-        },
       });
 
-      if (signUpData?.session) {
-        session = signUpData.session;
-      } else if (signUpError) {
-        console.error("Sign up error:", signUpError);
-      }
-    }
-
-    if (!session) {
-      // Fallback: generate magic link session
-      console.log("Could not create session via password, trying admin API");
-      
-      // Get the auth user ID from profiles
-      const { data: authUser } = await supabase
-        .from("profiles")
-        .select("id")
-        .eq("telegram_user_id", telegramUserId)
-        .single();
-
-      if (authUser) {
-        // Use admin API to create session
-        const { data: adminSession, error: adminError } = await supabase.auth.admin.generateLink({
-          type: "magiclink",
+      if (signInData?.session) {
+        session = signInData.session;
+        console.log("Sign in successful");
+      } else {
+        console.log("Sign in failed:", signInError?.message);
+        
+        // Try to sign up
+        const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
           email: generatedEmail,
+          password: generatedPassword,
+          options: {
+            data: {
+              telegram_user_id: telegramUserId,
+              telegram_username: telegramUsername,
+            },
+          },
         });
 
-        if (adminError) {
-          console.error("Admin generate link error:", adminError);
+        if (signUpData?.session) {
+          session = signUpData.session;
+          console.log("Sign up successful");
+        } else if (signUpError) {
+          console.error("Sign up error:", signUpError);
         }
       }
     }
 
     if (!session) {
+      console.error("Failed to create session for user");
       await sendTelegramMessage(telegramUserId, "❌ Не удалось создать сессию. Попробуйте войти через email на сайте.");
       return;
     }
