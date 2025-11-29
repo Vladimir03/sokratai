@@ -342,6 +342,94 @@ async function handleWebLogin(telegramUserId: number, telegramUsername: string |
   }
 }
 
+async function handleLinkAccount(telegramUserId: number, telegramUsername: string | undefined, token: string) {
+  console.log("handleLinkAccount:", { telegramUserId, token });
+
+  try {
+    // Find the token
+    const { data: tokenData, error: tokenError } = await supabase
+      .from("telegram_login_tokens")
+      .select("*")
+      .eq("token", token)
+      .eq("status", "pending")
+      .eq("action_type", "link")
+      .single();
+
+    if (tokenError || !tokenData) {
+      console.log("Link token not found or already used");
+      await sendTelegramMessage(telegramUserId, "❌ Ссылка для связки недействительна или устарела. Попробуйте снова в профиле.");
+      return;
+    }
+
+    // Check if expired
+    if (new Date(tokenData.expires_at) < new Date()) {
+      console.log("Link token expired");
+      await sendTelegramMessage(telegramUserId, "❌ Время для связки истекло. Попробуйте снова в профиле.");
+      return;
+    }
+
+    // Get user_id from token (this is the existing web user)
+    const userId = tokenData.user_id;
+    if (!userId) {
+      console.log("No user_id in link token");
+      await sendTelegramMessage(telegramUserId, "❌ Ошибка: пользователь не найден. Попробуйте снова.");
+      return;
+    }
+
+    // Check if this Telegram account is already linked to another user
+    const { data: existingProfile } = await supabase
+      .from("profiles")
+      .select("id")
+      .eq("telegram_user_id", telegramUserId)
+      .single();
+
+    if (existingProfile && existingProfile.id !== userId) {
+      console.log("Telegram already linked to another account");
+      await sendTelegramMessage(telegramUserId, "❌ Этот Telegram уже связан с другим аккаунтом Сократа.");
+      return;
+    }
+
+    // Update the existing profile with Telegram data
+    const { error: updateError } = await supabase
+      .from("profiles")
+      .update({
+        telegram_user_id: telegramUserId,
+        telegram_username: telegramUsername,
+      })
+      .eq("id", userId);
+
+    if (updateError) {
+      console.error("Error updating profile:", updateError);
+      await sendTelegramMessage(telegramUserId, "❌ Ошибка при связке аккаунтов. Попробуйте снова.");
+      return;
+    }
+
+    // Update token status
+    await supabase
+      .from("telegram_login_tokens")
+      .update({
+        telegram_user_id: telegramUserId,
+        status: "verified",
+        verified_at: new Date().toISOString(),
+      })
+      .eq("id", tokenData.id);
+
+    console.log("Account linked successfully");
+
+    await sendTelegramMessage(telegramUserId, `✅ Аккаунты успешно связаны!
+
+Теперь ты можешь:
+📱 Отправлять задачи через Telegram
+💻 Продолжать работу на сайте
+
+Все данные синхронизированы! 🎉`);
+
+  } catch (error) {
+    console.error("Link account error:", error);
+    await sendTelegramMessage(telegramUserId, "❌ Произошла ошибка. Попробуйте снова.");
+  }
+}
+
 async function handleStart(telegramUserId: number, telegramUsername: string | undefined, utmSource: string) {
   console.log("handleStart:", { telegramUserId, utmSource });
 
@@ -349,6 +437,13 @@ async function handleStart(telegramUserId: number, telegramUsername: string | un
   if (utmSource.startsWith("login_")) {
     const token = utmSource.replace("login_", "");
     await handleWebLogin(telegramUserId, telegramUsername, token);
+    return;
+  }
+
+  // Check if this is an account link request
+  if (utmSource.startsWith("link_")) {
+    const token = utmSource.replace("link_", "");
+    await handleLinkAccount(telegramUserId, telegramUsername, token);
     return;
   }
 

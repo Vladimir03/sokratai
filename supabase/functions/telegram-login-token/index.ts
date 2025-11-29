@@ -30,9 +30,20 @@ Deno.serve(async (req) => {
     const url = new URL(req.url);
     const action = url.searchParams.get("action");
 
-    // POST: Create a new login token
+    // POST: Create a new login/link token
     if (req.method === "POST" || action === "create") {
-      console.log("Creating new login token");
+      let actionType = "login";
+      let userId = null;
+
+      // Try to parse body for action type and user_id
+      try {
+        const body = await req.json();
+        actionType = body.action || "login";
+        userId = body.user_id || null;
+        console.log("Creating token with action:", actionType, "user_id:", userId);
+      } catch {
+        console.log("No body or invalid JSON, defaulting to login action");
+      }
       
       const token = generateToken();
       
@@ -41,6 +52,8 @@ Deno.serve(async (req) => {
         .insert({
           token,
           status: "pending",
+          action_type: actionType,
+          user_id: userId, // Store user_id for link actions
           expires_at: new Date(Date.now() + 5 * 60 * 1000).toISOString(), // 5 minutes
         })
         .select()
@@ -51,10 +64,10 @@ Deno.serve(async (req) => {
         throw error;
       }
 
-      console.log("Token created:", token);
+      console.log("Token created:", token, "action:", actionType);
       
       return new Response(
-        JSON.stringify({ token: data.token }),
+        JSON.stringify({ token: data.token, action_type: actionType }),
         { headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
@@ -95,9 +108,9 @@ Deno.serve(async (req) => {
         );
       }
 
-      // If verified, return session
-      if (data.status === "verified" && data.session_data) {
-        console.log("Token verified, returning session");
+      // If verified, return session (for login) or success (for link)
+      if (data.status === "verified") {
+        console.log("Token verified, action_type:", data.action_type);
         
         // Mark as used
         await supabase
@@ -105,9 +118,23 @@ Deno.serve(async (req) => {
           .update({ status: "used" })
           .eq("id", data.id);
 
+        // For link action, just return success
+        if (data.action_type === "link") {
+          return new Response(
+            JSON.stringify({ 
+              status: "verified", 
+              action_type: "link",
+              telegram_user_id: data.telegram_user_id,
+            }),
+            { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+          );
+        }
+
+        // For login action, return session
         return new Response(
           JSON.stringify({ 
             status: "verified", 
+            action_type: "login",
             session: data.session_data,
             user_id: data.user_id
           }),
@@ -117,7 +144,7 @@ Deno.serve(async (req) => {
 
       // Still pending
       return new Response(
-        JSON.stringify({ status: data.status }),
+        JSON.stringify({ status: data.status, action_type: data.action_type }),
         { headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }

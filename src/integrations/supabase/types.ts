@@ -516,6 +516,7 @@ export type Database = {
       }
       telegram_login_tokens: {
         Row: {
+          action_type: string | null
           created_at: string | null
           expires_at: string | null
           id: string
@@ -527,6 +528,7 @@ export type Database = {
           verified_at: string | null
         }
         Insert: {
+          action_type?: string | null
           created_at?: string | null
           expires_at?: string | null
           id?: string
@@ -538,6 +540,7 @@ export type Database = {
           verified_at?: string | null
         }
         Update: {
+          action_type?: string | null
           created_at?: string | null
           expires_at?: string | null
           id?: string

@@ -1,11 +1,11 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import AuthGuard from "@/components/AuthGuard";
-import { User, Zap, Target, Trophy, Edit, Send, CheckCircle } from "lucide-react";
+import { User, Zap, Target, Trophy, Edit, Send, CheckCircle, Loader2 } from "lucide-react";
 import { z } from "zod";
 import { PageContent } from "@/components/PageContent";
 
@@ -22,15 +22,24 @@ interface UserStats {
   current_streak: number;
 }
 
+const BOT_NAME = "SokratAI_bot";
+
 const Profile = () => {
   const [profile, setProfile] = useState<Profile | null>(null);
   const [stats, setStats] = useState<UserStats | null>(null);
   const [loading, setLoading] = useState(true);
+  const [linkingTelegram, setLinkingTelegram] = useState(false);
+  const pollingRef = useRef<NodeJS.Timeout | null>(null);
   const [editing, setEditing] = useState(false);
   const [newUsername, setNewUsername] = useState("");
 
   useEffect(() => {
     fetchProfile();
+    return () => {
+      if (pollingRef.current) {
+        clearInterval(pollingRef.current);
+      }
+    };
   }, []);
 
   const fetchProfile = async () => {
@@ -55,7 +64,6 @@ const Profile = () => {
         .single();
 
       if (statsError && statsError.code !== 'PGRST116') {
-        // PGRST116 means no rows found, which is ok for new users
         throw statsError;
       }
 
@@ -67,6 +75,92 @@ const Profile = () => {
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleLinkTelegram = async () => {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+
+      setLinkingTelegram(true);
+
+      // Create link token with user_id
+      const response = await supabase.functions.invoke("telegram-login-token", {
+        body: { action: "link", user_id: user.id },
+      });
+
+      if (response.error) throw response.error;
+
+      const { token } = response.data;
+      
+      // Open Telegram bot with link token
+      const botUrl = `https://t.me/${BOT_NAME}?start=link_${token}`;
+      window.open(botUrl, "_blank");
+
+      // Start polling
+      let attempts = 0;
+      const maxAttempts = 60; // 5 minutes
+
+      pollingRef.current = setInterval(async () => {
+        attempts++;
+        
+        if (attempts >= maxAttempts) {
+          clearInterval(pollingRef.current!);
+          pollingRef.current = null;
+          setLinkingTelegram(false);
+          toast.error("Время ожидания истекло. Попробуйте снова.");
+          return;
+        }
+
+        try {
+          const checkResponse = await supabase.functions.invoke("telegram-login-token", {
+            method: "GET",
+            body: null,
+          });
+          
+          // Use fetch directly for GET request with query params
+          const projectId = import.meta.env.VITE_SUPABASE_PROJECT_ID || "vrsseotrfmsxpbciyqzc";
+          const checkUrl = `https://${projectId}.supabase.co/functions/v1/telegram-login-token?token=${token}`;
+          
+          const res = await fetch(checkUrl, {
+            headers: {
+              "apikey": import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
+            },
+          });
+
+          const data = await res.json();
+
+          if (data.status === "verified") {
+            clearInterval(pollingRef.current!);
+            pollingRef.current = null;
+            setLinkingTelegram(false);
+            
+            // Refresh profile to get updated Telegram data
+            await fetchProfile();
+            toast.success("Telegram успешно связан!");
+          } else if (data.status === "expired") {
+            clearInterval(pollingRef.current!);
+            pollingRef.current = null;
+            setLinkingTelegram(false);
+            toast.error("Время ожидания истекло. Попробуйте снова.");
+          }
+        } catch (pollError) {
+          console.error("Polling error:", pollError);
+        }
+      }, 5000);
+
+    } catch (error: any) {
+      setLinkingTelegram(false);
+      toast.error(error.message || "Ошибка при создании ссылки");
+    }
+  };
+
+  const handleCancelLink = () => {
+    if (pollingRef.current) {
+      clearInterval(pollingRef.current);
+      pollingRef.current = null;
+    }
+    setLinkingTelegram(false);
   };
 
   const handleUpdateUsername = async () => {
@@ -215,14 +309,33 @@ const Profile = () => {
                     )}
                   </div>
                 </div>
+              ) : linkingTelegram ? (
+                <div className="p-4 bg-blue-500/10 border border-blue-500/30 rounded-lg">
+                  <div className="flex items-center gap-3 mb-3">
+                    <Loader2 className="w-5 h-5 text-blue-500 animate-spin" />
+                    <div className="font-medium text-blue-700 dark:text-blue-400">
+                      Ожидание подтверждения...
+                    </div>
+                  </div>
+                  <p className="text-sm text-muted-foreground mb-3">
+                    Откройте Telegram и подтвердите связку в боте @{BOT_NAME}
+                  </p>
+                  <Button variant="outline" size="sm" onClick={handleCancelLink}>
+                    Отменить
+                  </Button>
+                </div>
               ) : (
                 <div className="p-4 bg-muted/50 rounded-lg">
-                  <div className="text-muted-foreground mb-2">
+                  <div className="text-muted-foreground mb-3">
                     Telegram не подключён
                   </div>
-                  <p className="text-sm text-muted-foreground">
-                    Чтобы связать аккаунт, выйдите и войдите через Telegram на странице входа
+                  <p className="text-sm text-muted-foreground mb-4">
+                    Свяжите аккаунт, чтобы отправлять задачи через Telegram
                   </p>
+                  <Button onClick={handleLinkTelegram} className="bg-[#0088cc] hover:bg-[#006699]">
+                    <Send className="w-4 h-4 mr-2" />
+                    Связать Telegram
+                  </Button>
                 </div>
               )}
               {profile?.registration_source && (
