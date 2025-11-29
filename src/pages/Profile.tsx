@@ -22,7 +22,7 @@ interface UserStats {
   current_streak: number;
 }
 
-const BOT_NAME = "SokratAI_bot";
+const BOT_NAME = "sokratai_ru_bot";
 
 const Profile = () => {
   const [profile, setProfile] = useState<Profile | null>(null);
