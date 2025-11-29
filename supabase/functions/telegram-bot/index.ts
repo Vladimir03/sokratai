@@ -407,9 +407,109 @@ async function handleLinkAccount(telegramUserId: number, telegramUsername: strin
       .single();
 
     if (existingProfile && existingProfile.id !== userId) {
-      console.log("Telegram already linked to another account");
-      await sendTelegramMessage(telegramUserId, "❌ Этот Telegram уже связан с другим аккаунтом Сократа.");
-      return;
+      // Automatic profile merge instead of rejection
+      console.log("Starting automatic profile merge", { 
+        fromProfile: existingProfile.id, 
+        toProfile: userId 
+      });
+      
+      const oldUserId = existingProfile.id;
+      const newUserId = userId;
+      
+      await sendTelegramMessage(telegramUserId, "🔄 Обнаружен существующий аккаунт. Объединяю данные...");
+      
+      // 1. Transfer all data from old profile to new one
+      const tablesToMigrate = [
+        'chats',
+        'chat_messages', 
+        'solutions',
+        'homework_sets',
+        'user_solutions',
+        'token_usage_logs',
+        'answer_attempts',
+        'onboarding_analytics',
+        'message_feedback',
+        'message_interactions'
+      ];
+      
+      for (const table of tablesToMigrate) {
+        const { error } = await supabase
+          .from(table)
+          .update({ user_id: newUserId })
+          .eq('user_id', oldUserId);
+        
+        if (error) {
+          console.error(`Error migrating ${table}:`, error);
+        } else {
+          console.log(`Migrated ${table} successfully`);
+        }
+      }
+      
+      // 2. Merge user_stats (XP and streak)
+      const { data: oldStats } = await supabase
+        .from('user_stats')
+        .select('*')
+        .eq('user_id', oldUserId)
+        .single();
+        
+      const { data: newStats } = await supabase
+        .from('user_stats')
+        .select('*')
+        .eq('user_id', newUserId)
+        .single();
+      
+      if (oldStats) {
+        if (newStats) {
+          // Merge: sum XP, take max streak
+          await supabase
+            .from('user_stats')
+            .update({
+              total_xp: (newStats.total_xp || 0) + (oldStats.total_xp || 0),
+              current_streak: Math.max(newStats.current_streak || 0, oldStats.current_streak || 0),
+              level: Math.max(newStats.level || 1, oldStats.level || 1)
+            })
+            .eq('user_id', newUserId);
+          
+          // Delete old stats entry
+          await supabase
+            .from('user_stats')
+            .delete()
+            .eq('user_id', oldUserId);
+        } else {
+          // Just transfer stats
+          await supabase
+            .from('user_stats')
+            .update({ user_id: newUserId })
+            .eq('user_id', oldUserId);
+        }
+      }
+      
+      // 3. Update telegram_sessions to point to new user
+      await supabase
+        .from('telegram_sessions')
+        .update({ user_id: newUserId })
+        .eq('telegram_user_id', telegramUserId);
+      
+      // 4. Delete old profile
+      const { error: deleteProfileError } = await supabase
+        .from('profiles')
+        .delete()
+        .eq('id', oldUserId);
+      
+      if (deleteProfileError) {
+        console.error("Error deleting old profile:", deleteProfileError);
+      }
+      
+      // 5. Delete old auth user
+      const { error: deleteAuthError } = await supabase.auth.admin.deleteUser(oldUserId);
+      
+      if (deleteAuthError) {
+        console.error("Error deleting old auth user:", deleteAuthError);
+      }
+      
+      console.log("Profile merge completed successfully");
+      
+      // Continue with linking telegram_user_id to new profile (code below handles this)
     }
 
     // Update the existing profile with Telegram data
@@ -439,13 +539,29 @@ async function handleLinkAccount(telegramUserId: number, telegramUsername: strin
 
     console.log("Account linked successfully");
 
-    await sendTelegramMessage(telegramUserId, `✅ Аккаунты успешно связаны!
+    const successMessage = existingProfile && existingProfile.id !== userId
+      ? `✅ Аккаунты успешно объединены!
+
+📊 Мы автоматически перенесли все твои данные:
+• Чаты и сообщения
+• Решения задач
+• Домашние задания
+• Статистику и XP
 
 Теперь ты можешь:
 📱 Отправлять задачи через Telegram
 💻 Продолжать работу на сайте
 
-Все данные синхронизированы! 🎉`);
+Все данные синхронизированы! 🎉`
+      : `✅ Аккаунты успешно связаны!
+
+Теперь ты можешь:
+📱 Отправлять задачи через Telegram
+💻 Продолжать работу на сайте
+
+Все данные синхронизированы! 🎉`;
+
+    await sendTelegramMessage(telegramUserId, successMessage);
 
   } catch (error) {
     console.error("Link account error:", error);
