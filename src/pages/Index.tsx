@@ -2,6 +2,7 @@ import { lazy, Suspense } from "react";
 import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { telegramLinks } from "@/utils/telegramLinks";
+import { Send, Globe } from "lucide-react";
 
 // Lazy load sections
 const SpecialOffer = lazy(() => import("@/components/sections/SpecialOffer"));
@@ -148,15 +149,42 @@ const Index = () => {
               списывать
             </p>
 
-            {/* CTA Button */}
-            <Link to="/chat">
-              <Button
-                size="lg"
-                className="bg-accent hover:bg-accent/90 text-accent-foreground shadow-glow text-base md:text-lg px-8 py-6 rounded-2xl font-semibold transition-all hover:scale-105"
+            {/* CTA Buttons - Platform Choice */}
+            <div className="flex flex-col sm:flex-row gap-4 mb-4">
+              {/* Primary - Telegram */}
+              <a 
+                href={telegramLinks.headerTry} 
+                target="_blank" 
+                rel="noopener noreferrer"
               >
-                🚀 Попробовать бесплатно
-              </Button>
-            </Link>
+                <Button
+                  size="lg"
+                  className="bg-[#0088cc] hover:bg-[#0077b5] text-white shadow-glow text-base md:text-lg px-8 py-6 rounded-2xl font-semibold transition-all hover:scale-105 w-full sm:w-auto"
+                >
+                  <Send className="w-5 h-5 mr-2" />
+                  Открыть в Telegram
+                </Button>
+              </a>
+              
+              {/* Secondary - Web */}
+              <Link to="/chat">
+                <Button
+                  size="lg"
+                  variant="outline"
+                  className="border-2 border-primary-foreground/30 text-primary-foreground hover:bg-primary-foreground/10 text-base md:text-lg px-8 py-6 rounded-2xl font-semibold transition-all hover:scale-105 w-full sm:w-auto"
+                >
+                  <Globe className="w-5 h-5 mr-2" />
+                  Открыть в браузере
+                </Button>
+              </Link>
+            </div>
+            
+            {/* Platform hints */}
+            <p className="text-sm text-primary-foreground/70 flex flex-wrap gap-x-3 gap-y-1">
+              <span>📱 Telegram — удобнее на телефоне</span>
+              <span className="hidden sm:inline">•</span>
+              <span>🖥️ Веб — для больших экранов</span>
+            </p>
           </div>
         </div>
 
