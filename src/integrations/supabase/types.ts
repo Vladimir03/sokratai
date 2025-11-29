@@ -514,6 +514,42 @@ export type Database = {
         }
         Relationships: []
       }
+      telegram_login_tokens: {
+        Row: {
+          created_at: string | null
+          expires_at: string | null
+          id: string
+          session_data: Json | null
+          status: string | null
+          telegram_user_id: number | null
+          token: string
+          user_id: string | null
+          verified_at: string | null
+        }
+        Insert: {
+          created_at?: string | null
+          expires_at?: string | null
+          id?: string
+          session_data?: Json | null
+          status?: string | null
+          telegram_user_id?: number | null
+          token: string
+          user_id?: string | null
+          verified_at?: string | null
+        }
+        Update: {
+          created_at?: string | null
+          expires_at?: string | null
+          id?: string
+          session_data?: Json | null
+          status?: string | null
+          telegram_user_id?: number | null
+          token?: string
+          user_id?: string | null
+          verified_at?: string | null
+        }
+        Relationships: []
+      }
       telegram_sessions: {
         Row: {
           created_at: string | null

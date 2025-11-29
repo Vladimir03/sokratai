@@ -223,8 +223,134 @@ async function updateOnboardingState(
   }
 }
 
+async function handleWebLogin(telegramUserId: number, telegramUsername: string | undefined, token: string) {
+  console.log("handleWebLogin:", { telegramUserId, token });
+
+  try {
+    // Find the token
+    const { data: tokenData, error: tokenError } = await supabase
+      .from("telegram_login_tokens")
+      .select("*")
+      .eq("token", token)
+      .eq("status", "pending")
+      .single();
+
+    if (tokenError || !tokenData) {
+      console.log("Token not found or already used");
+      await sendTelegramMessage(telegramUserId, "❌ Ссылка для входа недействительна или устарела. Попробуйте снова на сайте.");
+      return;
+    }
+
+    // Check if expired
+    if (new Date(tokenData.expires_at) < new Date()) {
+      console.log("Token expired");
+      await sendTelegramMessage(telegramUserId, "❌ Время для входа истекло. Попробуйте снова на сайте.");
+      return;
+    }
+
+    // Get or create profile
+    const profile = await getOrCreateProfile(telegramUserId, telegramUsername);
+
+    // Generate Supabase session for the user
+    const generatedEmail = `tg_${telegramUserId}@telegram.user`;
+    const generatedPassword = `tg_${telegramUserId}_${profile.id}`;
+
+    // Try to sign in or create user
+    let session = null;
+    
+    // First try to sign in
+    const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
+      email: generatedEmail,
+      password: generatedPassword,
+    });
+
+    if (signInData?.session) {
+      session = signInData.session;
+    } else {
+      // Try to sign up
+      const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
+        email: generatedEmail,
+        password: generatedPassword,
+        options: {
+          data: {
+            telegram_user_id: telegramUserId,
+            telegram_username: telegramUsername,
+          },
+        },
+      });
+
+      if (signUpData?.session) {
+        session = signUpData.session;
+      } else if (signUpError) {
+        console.error("Sign up error:", signUpError);
+      }
+    }
+
+    if (!session) {
+      // Fallback: generate magic link session
+      console.log("Could not create session via password, trying admin API");
+      
+      // Get the auth user ID from profiles
+      const { data: authUser } = await supabase
+        .from("profiles")
+        .select("id")
+        .eq("telegram_user_id", telegramUserId)
+        .single();
+
+      if (authUser) {
+        // Use admin API to create session
+        const { data: adminSession, error: adminError } = await supabase.auth.admin.generateLink({
+          type: "magiclink",
+          email: generatedEmail,
+        });
+
+        if (adminError) {
+          console.error("Admin generate link error:", adminError);
+        }
+      }
+    }
+
+    if (!session) {
+      await sendTelegramMessage(telegramUserId, "❌ Не удалось создать сессию. Попробуйте войти через email на сайте.");
+      return;
+    }
+
+    // Update token with session data
+    await supabase
+      .from("telegram_login_tokens")
+      .update({
+        telegram_user_id: telegramUserId,
+        user_id: profile.id,
+        status: "verified",
+        verified_at: new Date().toISOString(),
+        session_data: {
+          access_token: session.access_token,
+          refresh_token: session.refresh_token,
+        },
+      })
+      .eq("id", tokenData.id);
+
+    console.log("Token verified successfully");
+
+    await sendTelegramMessage(telegramUserId, `✅ Авторизация подтверждена!
+
+Вернитесь в браузер — вход произойдёт автоматически.`);
+
+  } catch (error) {
+    console.error("Web login error:", error);
+    await sendTelegramMessage(telegramUserId, "❌ Произошла ошибка. Попробуйте снова.");
+  }
+}
+
 async function handleStart(telegramUserId: number, telegramUsername: string | undefined, utmSource: string) {
   console.log("handleStart:", { telegramUserId, utmSource });
+
+  // Check if this is a web login request
+  if (utmSource.startsWith("login_")) {
+    const token = utmSource.replace("login_", "");
+    await handleWebLogin(telegramUserId, telegramUsername, token);
+    return;
+  }
 
   // Get or create profile
   const profile = await getOrCreateProfile(telegramUserId, telegramUsername);

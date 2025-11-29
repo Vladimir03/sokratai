@@ -20,3 +20,6 @@ verify_jwt = false
 
 [functions.check-solutions]
 verify_jwt = false
+
+[functions.telegram-login-token]
+verify_jwt = false
