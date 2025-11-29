@@ -98,8 +98,13 @@ const Login = () => {
                 required
                 disabled={loading}
               />
+              <div className="text-right">
+                <Link to="/forgot-password" className="text-sm text-muted-foreground hover:text-primary">
+                  Забыли пароль?
+                </Link>
+              </div>
             </div>
-            <Button 
+            <Button
               type="submit" 
               className="w-full" 
               variant="outline"
