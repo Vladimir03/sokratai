@@ -21,6 +21,8 @@ import { PageContent } from "@/components/PageContent";
 import { saveChatToSessionCache, loadChatFromSessionCache, clearChatCache } from "@/utils/chatCache";
 import { motion, AnimatePresence } from "framer-motion";
 import { haptics } from "@/utils/haptics";
+import { useSubscription } from "@/hooks/useSubscription";
+import { SubscriptionBanner, MessageLimitWarning } from "@/components/SubscriptionBanner";
 
 type MessageStatus = 'sending' | 'sent' | 'ai_thinking' | 'delivered' | 'failed';
 
@@ -119,6 +121,9 @@ export default function Chat() {
       return user;
     }
   });
+
+  // Subscription and message limits
+  const subscription = useSubscription(user?.id);
 
   // Ensure general chat exists - always use the FIRST created general chat
   const { data: generalChat, isLoading: isLoadingGeneralChat } = useQuery({
@@ -863,6 +868,15 @@ export default function Chat() {
         if (!resp.ok) {
           // Не retry для лимита запросов и баланса
           if (resp.status === 429) {
+            // Check if it's a daily limit error
+            try {
+              const errorData = await resp.json();
+              if (errorData.error === 'limit_reached') {
+                throw new Error("LIMIT_REACHED");
+              }
+            } catch (e) {
+              if (e instanceof Error && e.message === 'LIMIT_REACHED') throw e;
+            }
             toast({
               title: "Ошибка",
               description: "Превышен лимит запросов. Попробуйте позже.",
@@ -1012,6 +1026,16 @@ export default function Chat() {
 
   const handleSend = useCallback(async (message: string, inputMethod: 'text' | 'voice' | 'button' = 'text') => {
     if ((!message.trim() && !uploadedFile) || isLoading) return;
+    
+    // Check subscription limit
+    if (subscription.limitReached) {
+      toast({
+        title: "Лимит исчерпан",
+        description: "Вы использовали все сообщения на сегодня. Оформите подписку для безлимитного доступа!",
+        variant: "destructive",
+      });
+      return;
+    }
     
     // Проверка что чат загружен
     if (!currentChatId || loadingHistory) {
@@ -1190,6 +1214,11 @@ export default function Chat() {
         retries: 3,
       });
 
+      // Increment message counter for free users
+      if (!subscription.isPremium) {
+        subscription.incrementMessageCount();
+      }
+
       // Сохраняем только если есть контент от ассистента
       if (assistantSoFar.trim()) {
         const finalAssistantMsg: Message = { role: "assistant", content: assistantSoFar };
@@ -1212,6 +1241,12 @@ export default function Chat() {
     } catch (error) {
       console.error('❌ Error sending message:', error);
       
+      // Handle daily limit reached
+      if (error instanceof Error && error.message === 'LIMIT_REACHED') {
+        subscription.setLimitReached(true);
+        subscription.refresh();
+      }
+      
       // КРИТИЧНО: Обновляем статус на 'failed' чтобы показать кнопку повтора
       updateMessageStatus(optimisticMessageId, 'failed');
       
@@ -1223,7 +1258,9 @@ export default function Chat() {
       
       toast({
         title: "Ошибка",
-        description: error instanceof Error ? error.message : "Не удалось отправить сообщение",
+        description: error instanceof Error && error.message === 'LIMIT_REACHED' 
+          ? "Лимит сообщений на сегодня исчерпан" 
+          : error instanceof Error ? error.message : "Не удалось отправить сообщение",
         variant: "destructive",
       });
       
@@ -1233,7 +1270,7 @@ export default function Chat() {
       isSendingRef.current = false;
       console.log('🔓 Send flag reset to false');
     }
-  }, [messages, uploadedFile, isLoading, loadingHistory, user?.id, removeUploadedFile, currentChat, currentChatId, queryClient, toast, updateMessageStatus]);
+  }, [messages, uploadedFile, isLoading, loadingHistory, user?.id, removeUploadedFile, currentChat, currentChatId, queryClient, toast, updateMessageStatus, subscription]);
 
   const handleRetryMessage = useCallback((messageContent: string, inputMethod: 'text' | 'voice' | 'button' = 'text') => {
     // Haptic feedback при повторной попытке
@@ -1633,6 +1670,15 @@ export default function Chat() {
                   <span>{currentChat?.icon || '💬'}</span>
                   <span className="truncate">{currentChat?.title || 'Чат'}</span>
                 </h1>
+                {/* Message counter for free users */}
+                {!subscription.isPremium && !subscription.isLoading && (
+                  <SubscriptionBanner 
+                    messagesUsed={subscription.messagesUsed}
+                    dailyLimit={subscription.dailyLimit}
+                    isPremium={subscription.isPremium}
+                    limitReached={subscription.limitReached}
+                  />
+                )}
                 <ConnectionIndicator />
               </div>
 
@@ -1789,12 +1835,23 @@ export default function Chat() {
                 )}
               </AnimatePresence>
 
+              {/* Full subscription banner when limit is reached */}
+              {subscription.limitReached && (
+                <SubscriptionBanner 
+                  messagesUsed={subscription.messagesUsed}
+                  dailyLimit={subscription.dailyLimit}
+                  isPremium={subscription.isPremium}
+                  limitReached={subscription.limitReached}
+                  showFull={true}
+                />
+              )}
+
               <div className="relative">
                 <ChatInput
                   fileInputRef={fileInputRef}
                   uploadedFile={uploadedFile}
                   previewUrl={previewUrl}
-                  isLoading={isLoading}
+                  isLoading={isLoading || subscription.limitReached}
                   isMobile={isMobile}
                   onSend={handleSend}
                   onFileUpload={handleFileUpload}

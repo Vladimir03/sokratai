@@ -169,6 +169,32 @@ export type Database = {
           },
         ]
       }
+      daily_message_limits: {
+        Row: {
+          last_reset_date: string
+          messages_today: number
+          user_id: string
+        }
+        Insert: {
+          last_reset_date?: string
+          messages_today?: number
+          user_id: string
+        }
+        Update: {
+          last_reset_date?: string
+          messages_today?: number
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "daily_message_limits_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: true
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       homework_chat_messages: {
         Row: {
           content: string
@@ -450,7 +476,10 @@ export type Database = {
           id: string
           learning_goal: string | null
           onboarding_completed: boolean | null
+          promo_code: string | null
           registration_source: string | null
+          subscription_expires_at: string | null
+          subscription_tier: string
           telegram_user_id: number | null
           telegram_username: string | null
           username: string
@@ -462,7 +491,10 @@ export type Database = {
           id: string
           learning_goal?: string | null
           onboarding_completed?: boolean | null
+          promo_code?: string | null
           registration_source?: string | null
+          subscription_expires_at?: string | null
+          subscription_tier?: string
           telegram_user_id?: number | null
           telegram_username?: string | null
           username: string
@@ -474,7 +506,10 @@ export type Database = {
           id?: string
           learning_goal?: string | null
           onboarding_completed?: boolean | null
+          promo_code?: string | null
           registration_source?: string | null
+          subscription_expires_at?: string | null
+          subscription_tier?: string
           telegram_user_id?: number | null
           telegram_username?: string | null
           username?: string
