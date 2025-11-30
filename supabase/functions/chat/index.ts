@@ -8,31 +8,25 @@ const corsHeaders = {
 };
 
 const MAX_MESSAGE_LENGTH = 2000;
-const RATE_LIMIT_REQUESTS = 50;
-const RATE_LIMIT_WINDOW_HOURS = 1;
+const FREE_DAILY_LIMIT = 10; // Daily message limit for free users
 
 // SECURITY: Allowed domains for image fetching to prevent SSRF attacks
-// Updated to support signed URLs (now that bucket is private)
 const ALLOWED_IMAGE_DOMAINS = [
   `${Deno.env.get("SUPABASE_URL")}/storage/v1/object/sign/chat-images/`,
 ];
 
 /**
  * Validates image URL to prevent Server-Side Request Forgery (SSRF) attacks
- * Only allows HTTPS URLs from whitelisted Supabase storage domains
- * Blocks private IPs, localhost, and metadata endpoints
  */
 function isValidImageUrl(url: string): boolean {
   try {
     const parsed = new URL(url);
     
-    // Only HTTPS allowed
     if (parsed.protocol !== "https:") {
       console.warn("[SECURITY] Blocked non-HTTPS URL:", url);
       return false;
     }
     
-    // Block private IPs and localhost to prevent internal network access
     const blockedPatterns = [
       "127.", "10.", "172.16.", "192.168.", "169.254.",
       "localhost", "[::1]", "0.0.0.0", "::1",
@@ -44,7 +38,6 @@ function isValidImageUrl(url: string): boolean {
       return false;
     }
     
-    // Only allow whitelisted Supabase storage domains
     const isAllowed = ALLOWED_IMAGE_DOMAINS.some((domain) => url.startsWith(domain));
     if (!isAllowed) {
       console.warn("[SECURITY] Blocked unauthorized domain:", hostname);
@@ -169,10 +162,10 @@ $$[промежуточные вычисления]$$
 === ФОРМАТИРОВАНИЕ (КРИТИЧНО!) ===
 
 📝 **ОБЯЗАТЕЛЬНЫЕ ПРАВИЛА LaTeX:**
-✅ Дроби ТОЛЬКО с фигурными скобками: \frac{числитель}{знаменатель}
-❌ НИКОГДА не пиши: \frac-b без скобок
-✅ Правильно: \frac{-b ± √D}{2a}
-✅ Корни: \sqrt{выражение} или просто √ для символа
+✅ Дроби ТОЛЬКО с фигурными скобками: \\frac{числитель}{знаменатель}
+❌ НИКОГДА не пиши: \\frac-b без скобок
+✅ Правильно: \\frac{-b ± √D}{2a}
+✅ Корни: \\sqrt{выражение} или просто √ для символа
 
 📝 **ОБЯЗАТЕЛЬНЫЕ ПРАВИЛА структуры:**
 ✅ Перед заголовками типа "**План решения:**" ВСЕГДА добавляй пустую строку
@@ -193,7 +186,7 @@ $$[промежуточные вычисления]$$
 ✅ Используй **жирный** для важного
 ✅ Нумерованные списки для шагов
 ✅ Эмодзи: ✅ ❌ 💡 🎯 ⚠️ 🗺️ 1️⃣ 2️⃣ 3️⃣
-✅ LaTeX: $\sin(x)$, $$\frac{a}{b}$$
+✅ LaTeX: $\\sin(x)$, $$\\frac{a}{b}$$
 ✅ Пустые строки между блоками
 
 === ЛОГИКА ВЫБОРА РЕЖИМА ===
@@ -204,11 +197,83 @@ $$[промежуточные вычисления]$$
 
 🚨 ПОМНИ: МАКСИМУМ 2 ВОПРОСА ЗА РАЗ!`;
 
+/**
+ * Check user subscription and daily message limits
+ * Returns: { allowed: boolean, isPremium: boolean, messagesUsed: number, limit: number }
+ */
+async function checkSubscriptionAndLimits(userId: string, adminSupabase: any) {
+  // Get user's subscription status
+  const { data: profile, error: profileError } = await adminSupabase
+    .from('profiles')
+    .select('subscription_tier, subscription_expires_at')
+    .eq('id', userId)
+    .single();
+
+  if (profileError) {
+    console.error('Error fetching profile:', profileError);
+    // Default to free tier if profile fetch fails
+    return { allowed: true, isPremium: false, messagesUsed: 0, limit: FREE_DAILY_LIMIT };
+  }
+
+  // Check if user is premium
+  const isPremium = profile?.subscription_tier === 'premium' && 
+    (!profile?.subscription_expires_at || new Date(profile.subscription_expires_at) > new Date());
+
+  // Premium users have no limits
+  if (isPremium) {
+    console.log('✅ Premium user - no message limits');
+    return { allowed: true, isPremium: true, messagesUsed: 0, limit: -1 };
+  }
+
+  // For free users, check daily message limit
+  const today = new Date().toISOString().split('T')[0];
+  
+  const { data: limitData, error: limitError } = await adminSupabase
+    .from('daily_message_limits')
+    .select('*')
+    .eq('user_id', userId)
+    .maybeSingle();
+
+  if (limitError) {
+    console.error('Error fetching daily limits:', limitError);
+  }
+
+  // If no record or new day, reset counter
+  if (!limitData || limitData.last_reset_date !== today) {
+    console.log('📅 New day or first message - resetting counter');
+    await adminSupabase.from('daily_message_limits').upsert({
+      user_id: userId,
+      messages_today: 1,
+      last_reset_date: today
+    });
+    return { allowed: true, isPremium: false, messagesUsed: 1, limit: FREE_DAILY_LIMIT };
+  }
+
+  // Check if limit reached
+  if (limitData.messages_today >= FREE_DAILY_LIMIT) {
+    console.log(`❌ Daily limit reached: ${limitData.messages_today}/${FREE_DAILY_LIMIT}`);
+    return { 
+      allowed: false, 
+      isPremium: false, 
+      messagesUsed: limitData.messages_today, 
+      limit: FREE_DAILY_LIMIT 
+    };
+  }
+
+  // Increment counter
+  const newCount = limitData.messages_today + 1;
+  await adminSupabase.from('daily_message_limits').update({
+    messages_today: newCount
+  }).eq('user_id', userId);
+
+  console.log(`📊 Message count: ${newCount}/${FREE_DAILY_LIMIT}`);
+  return { allowed: true, isPremium: false, messagesUsed: newCount, limit: FREE_DAILY_LIMIT };
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
   try {
-    // Get user from JWT
     const authHeader = req.headers.get("Authorization");
     if (!authHeader) {
       return new Response(JSON.stringify({ error: "Требуется авторизация" }), {
@@ -217,13 +282,17 @@ serve(async (req) => {
       });
     }
 
-    // Check if this is a service role request (from telegram-bot or other internal function)
     const isServiceRole = authHeader.includes(Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "");
+    
+    // Create admin client for subscription checks
+    const adminSupabase = createClient(
+      Deno.env.get("SUPABASE_URL") ?? "",
+      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "",
+    );
     
     let userId: string;
     
     if (isServiceRole) {
-      // For service role, expect userId in the request body
       const body = await req.json();
       userId = body.userId;
       
@@ -234,14 +303,11 @@ serve(async (req) => {
         });
       }
       
-      // Continue with the existing body data
       const { messages, systemPrompt, taskContext, chatId } = body;
       
-      // Skip rate limiting for internal service role calls
-      // Continue to AI processing...
+      // Skip rate limiting for internal service role calls (telegram bot)
       return await processAIRequest(userId, messages, systemPrompt, taskContext, chatId, req);
     } else {
-      // Regular user JWT flow
       const supabase = createClient(Deno.env.get("SUPABASE_URL") ?? "", Deno.env.get("SUPABASE_ANON_KEY") ?? "", {
         global: { headers: { Authorization: authHeader } },
       });
@@ -260,48 +326,22 @@ serve(async (req) => {
 
       userId = user.id;
 
-      // Check rate limit for regular users
-      const { data: rateLimitData } = await supabase
-        .from("api_rate_limits")
-        .select("*")
-        .eq("user_id", userId)
-        .maybeSingle();
-
-      const now = new Date();
-      if (rateLimitData) {
-        const windowStart = new Date(rateLimitData.window_start);
-        const hoursDiff = (now.getTime() - windowStart.getTime()) / (1000 * 60 * 60);
-
-        if (hoursDiff < RATE_LIMIT_WINDOW_HOURS && rateLimitData.request_count >= RATE_LIMIT_REQUESTS) {
-          const resetMinutes = Math.ceil(RATE_LIMIT_WINDOW_HOURS * 60 - hoursDiff * 60);
-          return new Response(
-            JSON.stringify({
-              error: `Превышен лимит запросов (${RATE_LIMIT_REQUESTS}/${RATE_LIMIT_WINDOW_HOURS}ч). Попробуйте через ${resetMinutes} мин.`,
-            }),
-            { status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" } },
-          );
-        }
-
-        // Reset or increment counter
-        if (hoursDiff >= RATE_LIMIT_WINDOW_HOURS) {
-          await supabase
-            .from("api_rate_limits")
-            .update({ request_count: 1, window_start: now.toISOString() })
-            .eq("user_id", userId);
-        } else {
-          await supabase
-            .from("api_rate_limits")
-            .update({ request_count: rateLimitData.request_count + 1 })
-            .eq("user_id", userId);
-        }
-      } else {
-        // First request - create entry
-        await supabase
-          .from("api_rate_limits")
-          .insert({ user_id: userId, request_count: 1, window_start: now.toISOString() });
+      // Check subscription and daily limits
+      const { allowed, isPremium, messagesUsed, limit } = await checkSubscriptionAndLimits(userId, adminSupabase);
+      
+      if (!allowed) {
+        return new Response(
+          JSON.stringify({
+            error: "limit_reached",
+            message: `Вы достигли дневного лимита в ${limit} сообщений. Оформите подписку для безлимитного доступа!`,
+            messages_used: messagesUsed,
+            limit: limit,
+            isPremium: false
+          }),
+          { status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+        );
       }
 
-      // Validate request body
       const { messages, systemPrompt, taskContext, chatId } = await req.json();
       
       return await processAIRequest(userId, messages, systemPrompt, taskContext, chatId, req);
@@ -328,7 +368,6 @@ async function processAIRequest(userId: string, messages: any[], systemPrompt?: 
     });
   }
 
-  // Validate only if there are messages
   if (messages.length > 0) {
     const lastMessage = messages[messages.length - 1];
     if (!lastMessage) {
@@ -338,8 +377,6 @@ async function processAIRequest(userId: string, messages: any[], systemPrompt?: 
       });
     }
     
-    // For multimodal messages (with images), content can be empty or minimal
-    // For text-only messages, content must be present
     if (!lastMessage.image_url && (!lastMessage.content || lastMessage.content.trim() === '')) {
       return new Response(JSON.stringify({ error: "Некорректное содержимое сообщения" }), {
         status: 400,
@@ -347,8 +384,6 @@ async function processAIRequest(userId: string, messages: any[], systemPrompt?: 
       });
     }
 
-    // Only validate length for user text messages (string content), assistant responses can be longer
-    // Content can also be an object with image_url which will be transformed to multimodal format
     if (lastMessage.role === "user" && 
         typeof lastMessage.content === "string" && 
         lastMessage.content.length > MAX_MESSAGE_LENGTH) {
@@ -359,17 +394,12 @@ async function processAIRequest(userId: string, messages: any[], systemPrompt?: 
     }
   }
 
-  // Transform messages to support multimodal (text + images)
   const transformedMessages = messages.map((msg: any) => {
-    // If message has an image, pass URL directly to AI gateway
-    // AI gateway will handle fetching and processing the image
     if (msg.image_url) {
       console.log("📷 Processing message with image:", msg.image_url.substring(0, 100) + "...");
       
-      // SECURITY: Validate image URL to prevent SSRF attacks
       if (!isValidImageUrl(msg.image_url)) {
         console.error('[SECURITY] Rejected invalid image URL:', msg.image_url);
-        // Return text-only message if image URL is invalid
         return {
           role: msg.role,
           content: msg.content || "Image was rejected due to security policy",
@@ -393,7 +423,6 @@ async function processAIRequest(userId: string, messages: any[], systemPrompt?: 
       };
     }
     
-    // Otherwise, keep as simple text message
     return {
       role: msg.role,
       content: msg.content,
@@ -409,10 +438,8 @@ async function processAIRequest(userId: string, messages: any[], systemPrompt?: 
 
   console.log("Calling AI gateway with messages:", transformedMessages.length);
 
-  // Use provided systemPrompt if available, otherwise use default
   let effectiveSystemPrompt = systemPrompt || SYSTEM_PROMPT;
   
-  // Add task context to system prompt if provided
   if (taskContext) {
     effectiveSystemPrompt = `${effectiveSystemPrompt}\n\n📋 КОНТЕКСТ ЗАДАЧИ:\n${taskContext}\n\nИспользуй ИМЕННО эту задачу в своих ответах. НЕ придумывай другие задачи!`;
   }
@@ -446,6 +473,7 @@ async function processAIRequest(userId: string, messages: any[], systemPrompt?: 
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
+
     if (response.status === 402) {
       return new Response(JSON.stringify({ error: "Требуется пополнение баланса." }), {
         status: 402,
@@ -456,7 +484,6 @@ async function processAIRequest(userId: string, messages: any[], systemPrompt?: 
     throw new Error(`AI gateway error: ${response.status}`);
   }
 
-  // Create a transform stream to capture token usage
   const { readable, writable } = new TransformStream();
   const reader = response.body!.getReader();
   const writer = writable.getWriter();
@@ -464,14 +491,12 @@ async function processAIRequest(userId: string, messages: any[], systemPrompt?: 
 
   let usageData: any = null;
 
-  // Process stream and capture usage
   (async () => {
     try {
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
 
-        // Try to extract usage information from the chunk
         const chunk = decoder.decode(value, { stream: true });
         const lines = chunk.split("\n");
 
@@ -492,7 +517,6 @@ async function processAIRequest(userId: string, messages: any[], systemPrompt?: 
         await writer.write(value);
       }
 
-      // Log and store usage after stream completes
       if (usageData) {
         console.log("Tokens used:", {
           prompt: usageData.prompt_tokens,
@@ -500,7 +524,6 @@ async function processAIRequest(userId: string, messages: any[], systemPrompt?: 
           total: usageData.total_tokens,
         });
 
-        // Store in database using service role
         const adminSupabase = createClient(
           Deno.env.get("SUPABASE_URL") ?? "",
           Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "",
