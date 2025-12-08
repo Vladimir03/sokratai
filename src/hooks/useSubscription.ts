@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '@/integrations/supabase/client';
+import { useRef } from 'react';
 
 const FREE_DAILY_LIMIT = 10;
 
@@ -29,6 +30,7 @@ export function useSubscription(userId: string | undefined) {
     isLoading: true,
     limitReached: false
   });
+  const fetchRef = useRef<() => void>(() => {});
 
   const fetchSubscriptionStatus = useCallback(async () => {
     if (!userId) {
@@ -109,9 +111,35 @@ export function useSubscription(userId: string | undefined) {
     }
   }, [userId]);
 
+  // Keep a stable ref to the latest fetch function to avoid recreating intervals
+  useEffect(() => {
+    fetchRef.current = fetchSubscriptionStatus;
+  }, [fetchSubscriptionStatus]);
+
   useEffect(() => {
     fetchSubscriptionStatus();
   }, [fetchSubscriptionStatus]);
+
+  // Periodic refresh to sync cross-surface (e.g., Telegram) usage
+  useEffect(() => {
+    if (!userId) return;
+
+    const interval = setInterval(() => {
+      fetchRef.current();
+    }, 30000); // 30s soft poll
+
+    const onVisibility = () => {
+      if (document.visibilityState === 'visible') {
+        fetchRef.current();
+      }
+    };
+    document.addEventListener('visibilitychange', onVisibility);
+
+    return () => {
+      clearInterval(interval);
+      document.removeEventListener('visibilitychange', onVisibility);
+    };
+  }, [userId]);
 
   const incrementMessageCount = useCallback(() => {
     setState(prev => {
