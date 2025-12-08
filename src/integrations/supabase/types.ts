@@ -482,6 +482,7 @@ export type Database = {
           subscription_tier: string
           telegram_user_id: number | null
           telegram_username: string | null
+          trial_ends_at: string | null
           username: string
         }
         Insert: {
@@ -497,6 +498,7 @@ export type Database = {
           subscription_tier?: string
           telegram_user_id?: number | null
           telegram_username?: string | null
+          trial_ends_at?: string | null
           username: string
         }
         Update: {
@@ -512,6 +514,7 @@ export type Database = {
           subscription_tier?: string
           telegram_user_id?: number | null
           telegram_username?: string | null
+          trial_ends_at?: string | null
           username?: string
         }
         Relationships: []
