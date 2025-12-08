@@ -22,7 +22,7 @@ import { saveChatToSessionCache, loadChatFromSessionCache, clearChatCache } from
 import { motion, AnimatePresence } from "framer-motion";
 import { haptics } from "@/utils/haptics";
 import { useSubscription } from "@/hooks/useSubscription";
-import { SubscriptionBanner, MessageLimitWarning } from "@/components/SubscriptionBanner";
+import { SubscriptionBanner, MessageLimitWarning, TrialExpiryReminder } from "@/components/SubscriptionBanner";
 
 type MessageStatus = 'sending' | 'sent' | 'ai_thinking' | 'delivered' | 'failed';
 
@@ -52,6 +52,7 @@ export default function Chat() {
   const [hasMoreMessages, setHasMoreMessages] = useState(true);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [oldestMessageTimestamp, setOldestMessageTimestamp] = useState<string | null>(null);
+  const [trialReminderDismissed, setTrialReminderDismissed] = useState(false);
   const MESSAGES_PER_PAGE = 15;
   const { toast } = useToast();
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -1688,6 +1689,14 @@ export default function Chat() {
                 <div className="flex-shrink-0">
                   <TaskContextBanner task={currentChat.homework_task} />
                 </div>
+              )}
+
+              {/* Trial expiry reminder */}
+              {subscription.isTrialActive && subscription.trialDaysLeft <= 2 && !trialReminderDismissed && (
+                <TrialExpiryReminder 
+                  trialDaysLeft={subscription.trialDaysLeft}
+                  onDismiss={() => setTrialReminderDismissed(true)}
+                />
               )}
 
               <div 

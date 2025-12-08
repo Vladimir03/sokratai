@@ -169,3 +169,70 @@ export function MessageLimitWarning({ remaining }: { remaining: number }) {
     </motion.div>
   );
 }
+
+// Trial expiry reminder component
+export function TrialExpiryReminder({ 
+  trialDaysLeft, 
+  onDismiss 
+}: { 
+  trialDaysLeft: number; 
+  onDismiss: () => void;
+}) {
+  if (trialDaysLeft > 2 || trialDaysLeft < 0) return null;
+
+  const isLastDay = trialDaysLeft <= 1;
+  
+  return (
+    <AnimatePresence>
+      <motion.div
+        initial={{ opacity: 0, y: -20 }}
+        animate={{ opacity: 1, y: 0 }}
+        exit={{ opacity: 0, y: -20 }}
+        className={`mx-4 mb-3 p-4 rounded-xl border ${
+          isLastDay 
+            ? 'bg-gradient-to-r from-red-500/10 to-orange-500/10 border-red-500/30' 
+            : 'bg-gradient-to-r from-amber-500/10 to-yellow-500/10 border-amber-500/30'
+        }`}
+      >
+        <div className="flex items-start justify-between gap-3">
+          <div className="flex items-start gap-3">
+            <span className="text-2xl">{isLastDay ? '⏰' : '⚠️'}</span>
+            <div>
+              <p className="font-semibold text-foreground">
+                {isLastDay 
+                  ? 'Триал заканчивается сегодня!' 
+                  : `До окончания триала: ${trialDaysLeft} ${trialDaysLeft === 1 ? 'день' : 'дня'}`
+                }
+              </p>
+              <p className="text-sm text-muted-foreground mt-1">
+                {isLastDay
+                  ? 'Оформи подписку, чтобы продолжить пользоваться Сократом без ограничений'
+                  : 'Не забудь оформить подписку, чтобы сохранить безлимитный доступ'
+                }
+              </p>
+            </div>
+          </div>
+          <button 
+            onClick={onDismiss} 
+            className="p-1 hover:bg-foreground/5 rounded transition-colors"
+          >
+            <X className="w-4 h-4 text-muted-foreground" />
+          </button>
+        </div>
+        
+        <Button 
+          onClick={() => window.open(`https://t.me/${TELEGRAM_CONTACT}`, '_blank')}
+          className={`w-full mt-3 ${
+            isLastDay 
+              ? 'bg-gradient-to-r from-red-500 to-orange-500 hover:from-red-600 hover:to-orange-600' 
+              : 'bg-gradient-to-r from-amber-500 to-yellow-500 hover:from-amber-600 hover:to-yellow-600'
+          } text-white font-medium`}
+          size="lg"
+        >
+          <Crown className="w-4 h-4 mr-2" />
+          Оформить подписку — 699₽/мес
+        </Button>
+      </motion.div>
+    </AnimatePresence>
+  );
+}
