@@ -1,7 +1,7 @@
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
-import { MessageCircle, Crown, ExternalLink, X } from "lucide-react";
+import { MessageCircle, Crown, ExternalLink, X, Gift } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useState } from "react";
 
@@ -11,6 +11,8 @@ interface SubscriptionBannerProps {
   isPremium: boolean;
   limitReached: boolean;
   showFull?: boolean;
+  isTrialActive?: boolean;
+  trialDaysLeft?: number;
 }
 
 const TELEGRAM_CONTACT = "Analyst_Vladimir";
@@ -20,22 +22,41 @@ export function SubscriptionBanner({
   dailyLimit, 
   isPremium, 
   limitReached,
-  showFull = false 
+  showFull = false,
+  isTrialActive = false,
+  trialDaysLeft = 0
 }: SubscriptionBannerProps) {
   const [dismissed, setDismissed] = useState(false);
   
   // Don't show for premium users
   if (isPremium) return null;
-  
-  const progressPercent = Math.min((messagesUsed / dailyLimit) * 100, 100);
-  const remaining = Math.max(dailyLimit - messagesUsed, 0);
-  const isWarning = remaining <= 3 && remaining > 0;
 
   const handleOpenTelegram = () => {
     window.open(`https://t.me/${TELEGRAM_CONTACT}`, '_blank');
   };
 
-  // Compact counter for chat header
+  // Trial badge for chat header
+  if (isTrialActive && !showFull && !limitReached) {
+    const isTrialEnding = trialDaysLeft <= 2;
+    return (
+      <div className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium ${
+        isTrialEnding 
+          ? 'bg-amber-500/10 text-amber-600 border border-amber-500/20' 
+          : 'bg-gradient-to-r from-purple-500/10 to-pink-500/10 text-purple-600 border border-purple-500/20'
+      }`}>
+        <Gift className="w-3.5 h-3.5" />
+        <span>
+          {isTrialEnding ? '⏰' : '🎁'} Триал: {trialDaysLeft} {trialDaysLeft === 1 ? 'день' : trialDaysLeft <= 4 ? 'дня' : 'дней'}
+        </span>
+      </div>
+    );
+  }
+  
+  const progressPercent = Math.min((messagesUsed / dailyLimit) * 100, 100);
+  const remaining = Math.max(dailyLimit - messagesUsed, 0);
+  const isWarning = remaining <= 3 && remaining > 0;
+
+  // Compact counter for chat header (only for non-trial users)
   if (!showFull && !limitReached) {
     return (
       <div className={`flex items-center gap-2 text-sm ${isWarning ? 'text-amber-500' : 'text-muted-foreground'}`}>

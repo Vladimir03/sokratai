@@ -1670,13 +1670,15 @@ export default function Chat() {
                   <span>{currentChat?.icon || '💬'}</span>
                   <span className="truncate">{currentChat?.title || 'Чат'}</span>
                 </h1>
-                {/* Message counter for free users */}
+                {/* Message counter / Trial badge for non-premium users */}
                 {!subscription.isPremium && !subscription.isLoading && (
                   <SubscriptionBanner 
                     messagesUsed={subscription.messagesUsed}
                     dailyLimit={subscription.dailyLimit}
                     isPremium={subscription.isPremium}
                     limitReached={subscription.limitReached}
+                    isTrialActive={subscription.isTrialActive}
+                    trialDaysLeft={subscription.trialDaysLeft}
                   />
                 )}
                 <ConnectionIndicator />
@@ -1843,6 +1845,8 @@ export default function Chat() {
                   isPremium={subscription.isPremium}
                   limitReached={subscription.limitReached}
                   showFull={true}
+                  isTrialActive={subscription.isTrialActive}
+                  trialDaysLeft={subscription.trialDaysLeft}
                 />
               )}
 
