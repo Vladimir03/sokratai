@@ -10,6 +10,72 @@ const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+const PREMIUM_CONTACT_URL = "https://t.me/Analyst_Vladimir";
+const WEB_PRICING_URL = "https://sokratai.ru/#pricing";
+
+const pluralizeDays = (days: number) => {
+  const mod10 = days % 10;
+  const mod100 = days % 100;
+  if (mod10 === 1 && mod100 !== 11) return "день";
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return "дня";
+  return "дней";
+};
+
+const premiumKeyboard = {
+  inline_keyboard: [
+    [{ text: "Оформить Premium — 699₽/мес", url: PREMIUM_CONTACT_URL }],
+    [{ text: "Открыть веб-версию", url: WEB_PRICING_URL }],
+  ],
+};
+
+async function getSubscriptionStatus(userId: string) {
+  const { data, error } = await supabase
+    .rpc("get_subscription_status", { p_user_id: userId })
+    .single();
+
+  if (error) {
+    console.error("Failed to fetch subscription status:", error);
+    return null;
+  }
+
+  return data;
+}
+
+async function sendStatusSnippet(telegramUserId: number, status: any) {
+  if (!status) return;
+
+  if (status.is_trial_active) {
+    const daysText = pluralizeDays(status.trial_days_left ?? 0);
+    await sendTelegramMessage(
+      telegramUserId,
+      `🎁 Триал активен: осталось ${status.trial_days_left} ${daysText}. Подключи Premium за 699₽/мес, чтобы безлимит не закончился.`,
+      { reply_markup: premiumKeyboard },
+    );
+    return;
+  }
+
+  if (!status.is_premium && !status.is_trial_active && status.limit_reached) {
+    await sendTelegramMessage(
+      telegramUserId,
+      `⏳ Достигнут дневной лимит ${status.daily_limit} сообщений. Оформи Premium за 699₽/мес, чтобы получить безлимит и приоритетные ответы.`,
+      { reply_markup: premiumKeyboard },
+    );
+  }
+}
+
+async function maybeSendTrialReminder(telegramUserId: number, userId: string) {
+  const status = await getSubscriptionStatus(userId);
+  if (!status) return;
+
+  if (status.is_trial_active && status.trial_days_left <= 2) {
+    const daysText = pluralizeDays(status.trial_days_left);
+    await sendTelegramMessage(
+      telegramUserId,
+      `⏰ Триал заканчивается через ${status.trial_days_left} ${daysText}. Подключи Premium за 699₽/мес, чтобы сохранить безлимит и приоритетные ответы.`,
+      { reply_markup: premiumKeyboard },
+    );
+  }
+}
 
 type OnboardingState = "welcome" | "waiting_grade" | "waiting_subject" | "waiting_goal" | "completed";
 
@@ -1894,6 +1960,13 @@ async function handleTextMessage(telegramUserId: number, userId: string, text: s
     // Get or create chat
     const chatId = await getOrCreateTelegramChat(userId);
 
+    // Check subscription/limits before processing
+    const status = await getSubscriptionStatus(userId);
+    if (status && !status.is_premium && !status.is_trial_active && status.limit_reached) {
+      await sendStatusSnippet(telegramUserId, status);
+      return;
+    }
+
     // Save user message
     await supabase.from("chat_messages").insert({
       chat_id: chatId,
@@ -1959,7 +2032,13 @@ async function handleTextMessage(telegramUserId: number, userId: string, text: s
 
     // Handle rate limit error
     if (chatResponse.status === 429) {
-      await sendTelegramMessage(telegramUserId, "⏳ Слишком много запросов. Подожди немного и попробуй снова.");
+      const errorBody = await chatResponse.json().catch(() => null);
+      const limit = errorBody?.limit ?? 10;
+      await sendTelegramMessage(
+        telegramUserId,
+        `⏳ Достигнут дневной лимит ${limit} сообщений. Оформи Premium за 699₽/мес, чтобы получить безлимит и приоритетные ответы.`,
+        { reply_markup: premiumKeyboard },
+      );
       return;
     }
 
@@ -2036,6 +2115,9 @@ async function handleTextMessage(telegramUserId: number, userId: string, text: s
         reply_markup: generateMiniAppButton(solutionId),
       });
     }
+
+    // Post-response UX nudges
+    await maybeSendTrialReminder(telegramUserId, userId);
   } catch (error) {
     console.error("Error handling text message:", error);
     await sendTelegramMessage(telegramUserId, "❌ Произошла ошибка. Попробуй ещё раз.");

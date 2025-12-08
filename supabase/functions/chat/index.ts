@@ -203,83 +203,86 @@ $$[промежуточные вычисления]$$
  * Returns: { allowed: boolean, isPremium: boolean, isTrialActive: boolean, trialEndsAt: string | null, messagesUsed: number, limit: number }
  */
 async function checkSubscriptionAndLimits(userId: string, adminSupabase: any) {
-  // Get user's subscription and trial status
-  const { data: profile, error: profileError } = await adminSupabase
-    .from('profiles')
-    .select('subscription_tier, subscription_expires_at, trial_ends_at')
-    .eq('id', userId)
-    .single();
+  try {
+    const { data: status, error } = await adminSupabase
+      .rpc('get_subscription_status', { p_user_id: userId })
+      .single();
 
-  if (profileError) {
-    console.error('Error fetching profile:', profileError);
-    // Default to free tier if profile fetch fails
-    return { allowed: true, isPremium: false, isTrialActive: false, trialEndsAt: null, messagesUsed: 0, limit: FREE_DAILY_LIMIT };
-  }
+    if (error || !status) {
+      throw error || new Error('No subscription status returned');
+    }
 
-  // Check if user is premium (highest priority)
-  const isPremium = profile?.subscription_tier === 'premium' && 
-    (!profile?.subscription_expires_at || new Date(profile.subscription_expires_at) > new Date());
+    const isPremium = Boolean(status.is_premium);
+    const isTrialActive = Boolean(status.is_trial_active);
+    const trialEndsAt = status.trial_ends_at || null;
+    const dailyLimit = status.daily_limit ?? FREE_DAILY_LIMIT;
+    const messagesUsed = status.messages_used ?? 0;
+    const limitReached = Boolean(status.limit_reached);
 
-  if (isPremium) {
-    console.log('✅ Premium user - no message limits');
-    return { allowed: true, isPremium: true, isTrialActive: false, trialEndsAt: null, messagesUsed: 0, limit: -1 };
-  }
+    if (isPremium) {
+      console.log('✅ Premium user - no message limits');
+      return { allowed: true, isPremium: true, isTrialActive: false, trialEndsAt: null, messagesUsed: 0, limit: -1 };
+    }
 
-  // Check if trial is active (second priority)
-  const isTrialActive = profile?.trial_ends_at && new Date(profile.trial_ends_at) > new Date();
-  
-  if (isTrialActive) {
-    const trialEndsAt = profile.trial_ends_at;
-    const daysLeft = Math.ceil((new Date(trialEndsAt).getTime() - Date.now()) / (1000 * 60 * 60 * 24));
-    console.log(`🎁 Trial active - ${daysLeft} days left, no message limits`);
-    return { allowed: true, isPremium: false, isTrialActive: true, trialEndsAt, messagesUsed: 0, limit: -1 };
-  }
+    if (isTrialActive) {
+      const daysLeft = status.trial_days_left ?? 0;
+      console.log(`🎁 Trial active - ${daysLeft} days left, no message limits`);
+      return { allowed: true, isPremium: false, isTrialActive: true, trialEndsAt, messagesUsed: 0, limit: -1 };
+    }
 
-  // For free users without trial, check daily message limit
-  const today = new Date().toISOString().split('T')[0];
-  
-  const { data: limitData, error: limitError } = await adminSupabase
-    .from('daily_message_limits')
-    .select('*')
-    .eq('user_id', userId)
-    .maybeSingle();
+    // Free users: enforce daily limit
+    if (limitReached) {
+      console.log(`❌ Daily limit reached: ${messagesUsed}/${dailyLimit}`);
+      return { 
+        allowed: false, 
+        isPremium: false, 
+        isTrialActive: false,
+        trialEndsAt,
+        messagesUsed, 
+        limit: dailyLimit 
+      };
+    }
 
-  if (limitError) {
-    console.error('Error fetching daily limits:', limitError);
-  }
-
-  // If no record or new day, reset counter
-  if (!limitData || limitData.last_reset_date !== today) {
-    console.log('📅 New day or first message - resetting counter');
+    // Increment counter atomically for current day
+    const today = new Date().toISOString().split('T')[0];
     await adminSupabase.from('daily_message_limits').upsert({
       user_id: userId,
-      messages_today: 1,
+      messages_today: messagesUsed + 1,
       last_reset_date: today
-    });
-    return { allowed: true, isPremium: false, isTrialActive: false, trialEndsAt: profile?.trial_ends_at || null, messagesUsed: 1, limit: FREE_DAILY_LIMIT };
+    }, { onConflict: 'user_id' });
+
+    console.log(`📊 Message count: ${messagesUsed + 1}/${dailyLimit}`);
+    return { allowed: true, isPremium: false, isTrialActive: false, trialEndsAt, messagesUsed: messagesUsed + 1, limit: dailyLimit };
+  } catch (err) {
+    console.error('Error checking subscription via RPC, falling back:', err);
+
+    // Fallback to basic free logic to avoid blocking users
+    const { data: profile, error: profileError } = await adminSupabase
+      .from('profiles')
+      .select('subscription_tier, subscription_expires_at, trial_ends_at')
+      .eq('id', userId)
+      .single();
+
+    if (profileError) {
+      console.error('Fallback profile fetch failed:', profileError);
+      return { allowed: true, isPremium: false, isTrialActive: false, trialEndsAt: null, messagesUsed: 0, limit: FREE_DAILY_LIMIT };
+    }
+
+    const isPremiumFallback = profile?.subscription_tier === 'premium' && 
+      (!profile?.subscription_expires_at || new Date(profile.subscription_expires_at) > new Date());
+
+    if (isPremiumFallback) {
+      return { allowed: true, isPremium: true, isTrialActive: false, trialEndsAt: null, messagesUsed: 0, limit: -1 };
+    }
+
+    const isTrialActiveFallback = profile?.trial_ends_at && new Date(profile.trial_ends_at) > new Date();
+    if (isTrialActiveFallback) {
+      return { allowed: true, isPremium: false, isTrialActive: true, trialEndsAt: profile.trial_ends_at, messagesUsed: 0, limit: -1 };
+    }
+
+    // Minimal free-user enforcement
+    return { allowed: true, isPremium: false, isTrialActive: false, trialEndsAt: profile?.trial_ends_at || null, messagesUsed: 0, limit: FREE_DAILY_LIMIT };
   }
-
-  // Check if limit reached
-  if (limitData.messages_today >= FREE_DAILY_LIMIT) {
-    console.log(`❌ Daily limit reached: ${limitData.messages_today}/${FREE_DAILY_LIMIT}`);
-    return { 
-      allowed: false, 
-      isPremium: false, 
-      isTrialActive: false,
-      trialEndsAt: profile?.trial_ends_at || null,
-      messagesUsed: limitData.messages_today, 
-      limit: FREE_DAILY_LIMIT 
-    };
-  }
-
-  // Increment counter
-  const newCount = limitData.messages_today + 1;
-  await adminSupabase.from('daily_message_limits').update({
-    messages_today: newCount
-  }).eq('user_id', userId);
-
-  console.log(`📊 Message count: ${newCount}/${FREE_DAILY_LIMIT}`);
-  return { allowed: true, isPremium: false, isTrialActive: false, trialEndsAt: profile?.trial_ends_at || null, messagesUsed: newCount, limit: FREE_DAILY_LIMIT };
 }
 
 serve(async (req) => {
@@ -316,8 +319,23 @@ serve(async (req) => {
       }
       
       const { messages, systemPrompt, taskContext, chatId } = body;
+
+      // Apply the same limits for Telegram/service callers
+      const { allowed, isPremium, isTrialActive, trialEndsAt, messagesUsed, limit } = await checkSubscriptionAndLimits(userId, adminSupabase);
       
-      // Skip rate limiting for internal service role calls (telegram bot)
+      if (!allowed) {
+        return new Response(
+          JSON.stringify({
+            error: "limit_reached",
+            message: `Вы достигли дневного лимита в ${limit} сообщений. Оформите подписку для безлимитного доступа!`,
+            messages_used: messagesUsed,
+            limit,
+            isPremium
+          }),
+          { status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+        );
+      }
+
       return await processAIRequest(userId, messages, systemPrompt, taskContext, chatId, req);
     } else {
       const supabase = createClient(Deno.env.get("SUPABASE_URL") ?? "", Deno.env.get("SUPABASE_ANON_KEY") ?? "", {

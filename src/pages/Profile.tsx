@@ -5,9 +5,10 @@ import { Input } from "@/components/ui/input";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import AuthGuard from "@/components/AuthGuard";
-import { User, Zap, Target, Trophy, Edit, Send, CheckCircle, Loader2 } from "lucide-react";
+import { User, Zap, Target, Trophy, Edit, Send, CheckCircle, Loader2, Crown, Gift } from "lucide-react";
 import { z } from "zod";
 import { PageContent } from "@/components/PageContent";
+import { useSubscription } from "@/hooks/useSubscription";
 
 interface Profile {
   username: string;
@@ -23,6 +24,13 @@ interface UserStats {
 }
 
 const BOT_NAME = "sokratai_ru_bot";
+const pluralizeDays = (days: number) => {
+  const mod10 = days % 10;
+  const mod100 = days % 100;
+  if (mod10 === 1 && mod100 !== 11) return 'день';
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return 'дня';
+  return 'дней';
+};
 
 const Profile = () => {
   const [profile, setProfile] = useState<Profile | null>(null);
@@ -33,6 +41,8 @@ const Profile = () => {
   const pollingRef = useRef<NodeJS.Timeout | null>(null);
   const [editing, setEditing] = useState(false);
   const [newUsername, setNewUsername] = useState("");
+  const [userId, setUserId] = useState<string | undefined>(undefined);
+  const subscription = useSubscription(userId);
 
   useEffect(() => {
     fetchProfile();
@@ -47,6 +57,7 @@ const Profile = () => {
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
+      setUserId(user.id);
 
       // Fetch profile
       const { data: profileData, error: profileError } = await supabase
@@ -300,6 +311,58 @@ const Profile = () => {
                 </div>
               </div>
             </CardHeader>
+          </Card>
+
+          {/* Subscription status */}
+          <Card className="shadow-elegant border border-muted">
+            <CardHeader className="flex flex-row items-center justify-between pb-2">
+              <CardTitle className="flex items-center gap-2 text-lg">
+                <Crown className="w-5 h-5 text-amber-500" />
+                Подписка
+              </CardTitle>
+              {subscription.isTrialActive && (
+                <div className="flex items-center gap-1 px-2 py-1 rounded-full bg-amber-100 text-amber-700 text-xs font-semibold">
+                  <Gift className="w-4 h-4" />
+                  Триал
+                </div>
+              )}
+              {subscription.isPremium && (
+                <div className="px-2 py-1 rounded-full bg-emerald-100 text-emerald-700 text-xs font-semibold">
+                  Premium
+                </div>
+              )}
+            </CardHeader>
+            <CardContent className="space-y-3">
+              {subscription.isLoading ? (
+                <div className="h-16 w-full rounded-lg bg-muted animate-pulse" />
+              ) : (
+                <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+                  <div className="space-y-1">
+                    <div className="text-sm text-muted-foreground">
+                      {subscription.isPremium
+                        ? "Безлимитные сообщения и доступ ко всем функциям."
+                        : subscription.isTrialActive
+                          ? `Бесплатный триал: осталось ${subscription.trialDaysLeft} ${pluralizeDays(subscription.trialDaysLeft)}.`
+                          : `Бесплатный тариф: ${subscription.dailyLimit} сообщений в день.`}
+                    </div>
+                    {!subscription.isPremium && (
+                      <div className="text-xs text-muted-foreground">
+                        Premium — 699₽/мес. Подключите, чтобы сохранить безлимит после триала.
+                      </div>
+                    )}
+                  </div>
+                  {!subscription.isPremium && (
+                    <Button 
+                      size="sm" 
+                      className="bg-emerald-600 hover:bg-emerald-700 text-white"
+                      onClick={() => window.open('https://t.me/Analyst_Vladimir', '_blank')}
+                    >
+                      Оформить Premium
+                    </Button>
+                  )}
+                </div>
+              )}
+            </CardContent>
           </Card>
 
           {/* Telegram Connection Status */}

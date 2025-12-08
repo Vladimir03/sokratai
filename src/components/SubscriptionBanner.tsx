@@ -17,6 +17,14 @@ interface SubscriptionBannerProps {
 
 const TELEGRAM_CONTACT = "Analyst_Vladimir";
 
+const pluralizeDays = (days: number) => {
+  const mod10 = days % 10;
+  const mod100 = days % 100;
+  if (mod10 === 1 && mod100 !== 11) return 'день';
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return 'дня';
+  return 'дней';
+};
+
 export function SubscriptionBanner({ 
   messagesUsed, 
   dailyLimit, 
@@ -46,7 +54,7 @@ export function SubscriptionBanner({
       }`}>
         <Gift className="w-3.5 h-3.5" />
         <span>
-          {isTrialEnding ? '⏰' : '🎁'} Триал: {trialDaysLeft} {trialDaysLeft === 1 ? 'день' : trialDaysLeft <= 4 ? 'дня' : 'дней'}
+          {isTrialEnding ? '⏰' : '🎁'} Триал: {trialDaysLeft} {pluralizeDays(trialDaysLeft)}
         </span>
       </div>
     );
@@ -71,6 +79,8 @@ export function SubscriptionBanner({
   if (limitReached || showFull) {
     if (dismissed && !limitReached) return null;
     
+    const trialHighlight = isTrialActive && !limitReached;
+
     return (
       <AnimatePresence>
         <motion.div
@@ -79,7 +89,11 @@ export function SubscriptionBanner({
           exit={{ opacity: 0, y: 20 }}
           className="p-4"
         >
-          <Card className="relative overflow-hidden border-0 bg-gradient-to-br from-purple-600 via-pink-500 to-orange-400 text-white p-6">
+          <Card className={`relative overflow-hidden border-0 p-6 text-white ${
+            trialHighlight
+              ? 'bg-gradient-to-br from-emerald-600 via-teal-500 to-blue-500'
+              : 'bg-gradient-to-br from-purple-600 via-pink-500 to-orange-400'
+          }`}>
             {!limitReached && (
               <button 
                 onClick={() => setDismissed(true)}
@@ -96,13 +110,21 @@ export function SubscriptionBanner({
               
               <div className="flex-1">
                 <h3 className="text-xl font-bold mb-2">
-                  {limitReached 
-                    ? "🚀 Лимит исчерпан!" 
-                    : "🎓 Разблокируй полный доступ!"
+                  {trialHighlight
+                    ? `🎁 Триал активен — осталось ${trialDaysLeft} ${pluralizeDays(trialDaysLeft)}`
+                    : limitReached 
+                      ? "🚀 Дневной лимит израсходован" 
+                      : "🎓 Разблокируй полный доступ!"
                   }
                 </h3>
                 
-                {limitReached && (
+                {trialHighlight ? (
+                  <p className="text-white/90 mb-3">
+                    В триале безлимитные сообщения. {trialDaysLeft === 0
+                      ? 'Триал заканчивается сегодня — подключи подписку, чтобы не потерять доступ.'
+                      : 'Подключи подписку заранее, чтобы доступ не прерывался после окончания триала.'}
+                  </p>
+                ) : limitReached && (
                   <p className="text-white/90 mb-3">
                     Ты использовал все {dailyLimit} сообщений на сегодня. 
                     Приходи завтра или оформи подписку!
@@ -136,7 +158,7 @@ export function SubscriptionBanner({
             </div>
             
             {/* Progress bar at bottom */}
-            {!limitReached && (
+            {!limitReached && !trialHighlight && (
               <div className="mt-4">
                 <div className="flex justify-between text-xs text-white/70 mb-1">
                   <span>Использовано сегодня</span>
@@ -201,7 +223,7 @@ export function TrialExpiryReminder({
               <p className="font-semibold text-foreground">
                 {isLastDay 
                   ? 'Триал заканчивается сегодня!' 
-                  : `До окончания триала: ${trialDaysLeft} ${trialDaysLeft === 1 ? 'день' : 'дня'}`
+                  : `До окончания триала: ${trialDaysLeft} ${pluralizeDays(trialDaysLeft)}`
                 }
               </p>
               <p className="text-sm text-muted-foreground mt-1">

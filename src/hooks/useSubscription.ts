@@ -36,29 +36,34 @@ export function useSubscription(userId: string | undefined) {
       return;
     }
 
+    // show loading while refreshing for a new userId
+    setState(prev => ({ ...prev, isLoading: true }));
+
     try {
-      // Fetch profile with subscription and trial info
-      const { data: profile, error: profileError } = await supabase
-        .from('profiles')
-        .select('subscription_tier, subscription_expires_at, trial_ends_at')
-        .eq('id', userId)
+      // Single source of truth from Postgres
+      const { data: status, error } = await supabase
+        .rpc('get_subscription_status', { p_user_id: userId })
         .single();
 
-      if (profileError) {
-        console.error('Error fetching subscription:', profileError);
+      if (error || !status) {
+        console.error('Error fetching subscription:', error);
         setState(prev => ({ ...prev, isLoading: false }));
         return;
       }
 
-      // Check premium status (highest priority)
-      const isPremium = profile?.subscription_tier === 'premium' && 
-        (!profile?.subscription_expires_at || new Date(profile.subscription_expires_at) > new Date());
+      const isPremium = Boolean(status.is_premium);
+      const isTrialActive = Boolean(status.is_trial_active);
+      const trialEndsAt = status.trial_ends_at as string | null;
+      const trialDaysLeft = status.trial_days_left || 0;
+      const dailyLimit = status.daily_limit ?? FREE_DAILY_LIMIT;
+      const messagesUsed = status.messages_used ?? 0;
+      const limitReached = Boolean(status.limit_reached);
 
       if (isPremium) {
         setState({
           isPremium: true,
           subscriptionTier: 'premium',
-          subscriptionExpiresAt: profile?.subscription_expires_at,
+          subscriptionExpiresAt: status.subscription_expires_at as string | null,
           isTrialActive: false,
           trialEndsAt: null,
           trialDaysLeft: 0,
@@ -69,13 +74,6 @@ export function useSubscription(userId: string | undefined) {
         });
         return;
       }
-
-      // Check trial status (second priority)
-      const trialEndsAt = profile?.trial_ends_at;
-      const isTrialActive = trialEndsAt && new Date(trialEndsAt) > new Date();
-      const trialDaysLeft = isTrialActive 
-        ? Math.ceil((new Date(trialEndsAt).getTime() - Date.now()) / (1000 * 60 * 60 * 24))
-        : 0;
 
       if (isTrialActive) {
         setState({
@@ -93,18 +91,6 @@ export function useSubscription(userId: string | undefined) {
         return;
       }
 
-      // For free users without trial, fetch daily message count
-      const today = new Date().toISOString().split('T')[0];
-      const { data: limitData } = await supabase
-        .from('daily_message_limits')
-        .select('*')
-        .eq('user_id', userId)
-        .maybeSingle();
-
-      const messagesUsed = (limitData?.last_reset_date === today) 
-        ? limitData.messages_today 
-        : 0;
-
       setState({
         isPremium: false,
         subscriptionTier: 'free',
@@ -113,9 +99,9 @@ export function useSubscription(userId: string | undefined) {
         trialEndsAt: trialEndsAt || null,
         trialDaysLeft: 0,
         messagesUsed,
-        dailyLimit: FREE_DAILY_LIMIT,
+        dailyLimit,
         isLoading: false,
-        limitReached: messagesUsed >= FREE_DAILY_LIMIT
+        limitReached
       });
     } catch (error) {
       console.error('Error in useSubscription:', error);

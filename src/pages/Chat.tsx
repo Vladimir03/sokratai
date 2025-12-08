@@ -37,6 +37,14 @@ interface Message {
   status?: MessageStatus;
 }
 
+const pluralizeDays = (days: number) => {
+  const mod10 = days % 10;
+  const mod100 = days % 100;
+  if (mod10 === 1 && mod100 !== 11) return 'день';
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return 'дня';
+  return 'дней';
+};
+
 export default function Chat() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -1857,6 +1865,31 @@ export default function Chat() {
                   isTrialActive={subscription.isTrialActive}
                   trialDaysLeft={subscription.trialDaysLeft}
                 />
+              )}
+
+              {/* Trial status bar near input */}
+              {subscription.isTrialActive && !subscription.limitReached && (
+                <div className="px-4 pb-3">
+                  <div className="rounded-xl border bg-gradient-to-r from-emerald-50 via-cyan-50 to-blue-50 text-foreground shadow-sm">
+                    <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 px-4 py-3">
+                      <div className="space-y-1">
+                        <p className="text-sm font-semibold text-emerald-700">
+                          🎁 Бесплатный 7-дневный триал
+                        </p>
+                        <p className="text-sm text-muted-foreground">
+                          Осталось {subscription.trialDaysLeft} {pluralizeDays(subscription.trialDaysLeft)}. Подключи Premium за 699₽/мес, чтобы сохранить безлимит после триала.
+                        </p>
+                      </div>
+                      <Button 
+                        size="sm" 
+                        className="bg-emerald-600 hover:bg-emerald-700 text-white"
+                        onClick={() => window.open('https://t.me/Analyst_Vladimir', '_blank')}
+                      >
+                        Оформить Premium
+                      </Button>
+                    </div>
+                  </div>
+                </div>
               )}
 
               <div className="relative">
