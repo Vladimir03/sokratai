@@ -42,9 +42,9 @@ export function useSubscription(userId: string | undefined) {
     setState(prev => ({ ...prev, isLoading: true }));
 
     try {
-      // Single source of truth from Postgres
+      // Single source of truth from Postgres - use type assertion since types are auto-generated
       const { data: status, error } = await supabase
-        .rpc('get_subscription_status', { p_user_id: userId })
+        .rpc('get_subscription_status' as any, { p_user_id: userId })
         .single();
 
       if (error || !status) {
@@ -53,19 +53,31 @@ export function useSubscription(userId: string | undefined) {
         return;
       }
 
-      const isPremium = Boolean(status.is_premium);
-      const isTrialActive = Boolean(status.is_trial_active);
-      const trialEndsAt = status.trial_ends_at as string | null;
-      const trialDaysLeft = status.trial_days_left || 0;
-      const dailyLimit = status.daily_limit ?? FREE_DAILY_LIMIT;
-      const messagesUsed = status.messages_used ?? 0;
-      const limitReached = Boolean(status.limit_reached);
+      // Type assertion for the response
+      const typedStatus = status as {
+        is_premium: boolean;
+        subscription_expires_at: string | null;
+        is_trial_active: boolean;
+        trial_ends_at: string | null;
+        trial_days_left: number;
+        daily_limit: number;
+        messages_used: number;
+        limit_reached: boolean;
+      };
+
+      const isPremium = Boolean(typedStatus.is_premium);
+      const isTrialActive = Boolean(typedStatus.is_trial_active);
+      const trialEndsAt = typedStatus.trial_ends_at;
+      const trialDaysLeft = typedStatus.trial_days_left || 0;
+      const dailyLimit = typedStatus.daily_limit ?? FREE_DAILY_LIMIT;
+      const messagesUsed = typedStatus.messages_used ?? 0;
+      const limitReached = Boolean(typedStatus.limit_reached);
 
       if (isPremium) {
         setState({
           isPremium: true,
           subscriptionTier: 'premium',
-          subscriptionExpiresAt: status.subscription_expires_at as string | null,
+          subscriptionExpiresAt: typedStatus.subscription_expires_at,
           isTrialActive: false,
           trialEndsAt: null,
           trialDaysLeft: 0,
