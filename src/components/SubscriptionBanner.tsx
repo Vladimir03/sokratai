@@ -87,9 +87,9 @@ export function SubscriptionBanner({
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           exit={{ opacity: 0, y: 20 }}
-          className="p-4"
+          className="p-2 sm:p-4"
         >
-          <Card className={`relative overflow-hidden border-0 p-4 sm:p-6 text-white ${
+          <Card className={`relative overflow-hidden border-0 p-3 sm:p-6 text-white ${
             trialHighlight
               ? 'bg-gradient-to-br from-emerald-600 via-teal-500 to-blue-500'
               : 'bg-gradient-to-br from-purple-600 via-pink-500 to-orange-400'
@@ -97,74 +97,72 @@ export function SubscriptionBanner({
             {!limitReached && (
               <button 
                 onClick={() => setDismissed(true)}
-                className="absolute top-3 right-3 p-1 hover:bg-white/20 rounded-full transition-colors"
+                className="absolute top-2 right-2 sm:top-3 sm:right-3 p-1 hover:bg-white/20 rounded-full transition-colors"
               >
                 <X className="w-4 h-4" />
               </button>
             )}
             
-            <div className="flex flex-col sm:flex-row items-start gap-3 sm:gap-4">
-              <div className="p-2 sm:p-3 bg-white/20 rounded-full shrink-0">
-                <Crown className="w-6 h-6 sm:w-8 sm:h-8" />
-              </div>
-              
-              <div className="flex-1 min-w-0">
-                <h3 className="text-base sm:text-xl font-bold mb-2 break-words">
+            <div className="flex flex-col gap-3">
+              <div className="flex items-center gap-2 sm:gap-3">
+                <div className="p-1.5 sm:p-2 bg-white/20 rounded-full shrink-0">
+                  <Crown className="w-5 h-5 sm:w-6 sm:h-6" />
+                </div>
+                <h3 className="text-sm sm:text-lg font-bold leading-tight">
                   {trialHighlight
-                    ? `🎁 Триал активен — осталось ${trialDaysLeft} ${pluralizeDays(trialDaysLeft)}`
+                    ? `🎁 Триал: ${trialDaysLeft} ${pluralizeDays(trialDaysLeft)}`
                     : limitReached 
-                      ? "🚀 Дневной лимит израсходован" 
-                      : "🎓 Разблокируй полный доступ!"
+                      ? "🚀 Лимит исчерпан" 
+                      : "🎓 Полный доступ"
                   }
                 </h3>
-                
-                {trialHighlight ? (
-                  <p className="text-sm sm:text-base text-white/90 mb-3 break-words">
-                    В триале безлимитные сообщения. {trialDaysLeft === 0
-                      ? 'Триал заканчивается сегодня — подключи подписку, чтобы не потерять доступ.'
-                      : 'Подключи подписку заранее, чтобы доступ не прерывался после окончания триала.'}
-                  </p>
-                ) : limitReached && (
-                  <p className="text-sm sm:text-base text-white/90 mb-3 break-words">
-                    Ты использовал все {dailyLimit} сообщений на сегодня. 
-                    Приходи завтра или оформи подписку!
-                  </p>
-                )}
-                
-                <div className="space-y-3">
-                  <div className="bg-white/10 rounded-lg p-2 sm:p-3">
-                    <p className="font-semibold text-base sm:text-lg">✨ Премиум — 699₽/месяц</p>
-                    <ul className="text-sm text-white/90 mt-2 space-y-1">
-                      <li>• Неограниченное количество сообщений</li>
-                      <li>• Приоритетная поддержка</li>
-                      <li>• Доступ к новым функциям первым</li>
-                    </ul>
-                  </div>
-                  
-                  <Button 
-                    onClick={handleOpenTelegram}
-                    className="w-full bg-white text-purple-600 hover:bg-white/90 font-bold"
-                    size="lg"
-                  >
-                    <ExternalLink className="w-4 h-4 mr-2" />
-                    Написать @{TELEGRAM_CONTACT}
-                  </Button>
-                  
-                  <p className="text-xs text-white/70 text-center">
-                    💬 Напиши "СОКРАТ" в Telegram для быстрой активации
-                  </p>
+              </div>
+              
+              {trialHighlight ? (
+                <p className="text-xs sm:text-sm text-white/90 leading-snug">
+                  Безлимитные сообщения. {trialDaysLeft === 0
+                    ? 'Заканчивается сегодня!'
+                    : 'Подключи подписку заранее.'}
+                </p>
+              ) : limitReached && (
+                <p className="text-xs sm:text-sm text-white/90 leading-snug">
+                  Использовано {dailyLimit} сообщений. Приходи завтра или оформи подписку!
+                </p>
+              )}
+              
+              <div className="space-y-2 sm:space-y-3">
+                <div className="bg-white/10 rounded-lg p-2 sm:p-3">
+                  <p className="font-semibold text-sm sm:text-base">✨ Премиум — 699₽/мес</p>
+                  <ul className="text-xs sm:text-sm text-white/90 mt-1.5 space-y-0.5">
+                    <li>• Безлимитные сообщения</li>
+                    <li>• Приоритетная поддержка</li>
+                    <li>• Ранний доступ к функциям</li>
+                  </ul>
                 </div>
+                
+                <Button 
+                  onClick={handleOpenTelegram}
+                  className="w-full bg-white text-purple-600 hover:bg-white/90 font-bold text-sm sm:text-base py-2 sm:py-2.5"
+                  size="default"
+                >
+                  <ExternalLink className="w-3.5 h-3.5 sm:w-4 sm:h-4 mr-1.5 sm:mr-2" />
+                  Написать @{TELEGRAM_CONTACT}
+                </Button>
+                
+                <p className="text-[10px] sm:text-xs text-white/70 text-center">
+                  💬 Напиши "СОКРАТ" для активации
+                </p>
               </div>
             </div>
             
             {/* Progress bar at bottom */}
             {!limitReached && !trialHighlight && (
-              <div className="mt-4">
-                <div className="flex justify-between text-xs text-white/70 mb-1">
-                  <span>Использовано сегодня</span>
+              <div className="mt-3 sm:mt-4">
+                <div className="flex justify-between text-[10px] sm:text-xs text-white/70 mb-1">
+                  <span>Использовано</span>
                   <span>{messagesUsed}/{dailyLimit}</span>
                 </div>
-                <Progress value={progressPercent} className="h-2 bg-white/20" />
+                <Progress value={progressPercent} className="h-1.5 sm:h-2 bg-white/20" />
               </div>
             )}
           </Card>
