@@ -522,15 +522,18 @@ export default function Chat() {
   }, [hasMoreMessages, isLoadingMore, oldestMessageTimestamp, messages.length, loadingHistory]);
 
   const loadMoreMessages = useCallback(async () => {
-    // Используем refs для проверки условий
-    if (!user?.id || !currentChatId || !oldestTimestampRef.current || 
-        isLoadingMoreRef.current || !hasMoreMessagesRef.current) {
+    const oldestTimestamp = oldestTimestampRef.current;
+
+    // Guard against parallel loads or missing state
+    if (!user?.id || !currentChatId || !oldestTimestamp || isLoadingMoreRef.current || !hasMoreMessagesRef.current) {
       return;
     }
 
     const loadId = Date.now();
-    console.log(`📜 [${loadId}] Loading more messages before:`, oldestTimestampRef.current);
-    
+    console.log(`📜 [${loadId}] Loading more messages before:`, oldestTimestamp);
+
+    // Single-flight lock before async work
+    isLoadingMoreRef.current = true;
     setIsLoadingMore(true);
 
     try {
@@ -541,7 +544,7 @@ export default function Chat() {
           feedback:message_feedback(feedback_type)
         `)
         .eq('chat_id', currentChatId)
-        .lt('created_at', oldestTimestampRef.current)
+        .lt('created_at', oldestTimestamp)
         .order('created_at', { ascending: false })
         .limit(MESSAGES_PER_PAGE);
 
@@ -629,49 +632,12 @@ export default function Chat() {
     } catch (error) {
       console.error('Error loading more messages:', error);
     } finally {
+      isLoadingMoreRef.current = false;
       setIsLoadingMore(false);
     }
   }, [user?.id, currentChatId, MESSAGES_PER_PAGE]); // Только стабильные зависимости!
 
-  // IntersectionObserver for infinite scroll
-  useEffect(() => {
-    // Ждём пока загрузка завершится и refs будут доступны
-    if (loadingHistory || !topSentinelRef.current || !messagesContainerRef.current) {
-      console.log('⏳ Waiting for refs/loading to complete before setting up observer');
-      return;
-    }
-
-    console.log('👁️ Setting up IntersectionObserver');
-
-    const observer = new IntersectionObserver(
-      (entries) => {
-        const [entry] = entries;
-        console.log('👀 Sentinel intersection:', { 
-          isIntersecting: entry.isIntersecting, 
-          hasMore: hasMoreMessagesRef.current, 
-          isLoading: isLoadingMoreRef.current 
-        });
-        
-        // Используем refs для проверки условий
-        if (entry.isIntersecting && 
-            hasMoreMessagesRef.current && 
-            !isLoadingMoreRef.current) {
-          console.log('👀 Sentinel visible, loading batch...');
-          loadMoreMessages();
-        }
-      },
-      {
-        root: messagesContainerRef.current,
-        rootMargin: '300px', // Увеличен для раннего триггера
-        threshold: 0,
-      }
-    );
-
-    observer.observe(topSentinelRef.current);
-    return () => observer.disconnect();
-  }, [loadMoreMessages, loadingHistory]); // Добавлен loadingHistory
-  
-  // Fallback: Manual check on scroll for mobile devices
+  // Single scroll listener to trigger history load near top (Telegram-like)
   useEffect(() => {
     const container = messagesContainerRef.current;
     if (!container || loadingHistory) return;
@@ -693,7 +659,7 @@ export default function Chat() {
         if ((scrollTop < 300 || scrollPercentage < 0.2) && 
             hasMoreMessagesRef.current && 
             !isLoadingMoreRef.current) {
-          console.log('🔄 Manual trigger near top (debounced)', { scrollTop, scrollPercentage });
+          console.log('🔄 Scroll trigger near top (debounced)', { scrollTop, scrollPercentage });
           loadMoreMessages();
         }
       }, 50); // Уменьшен debounce до 50ms для быстрого отклика
