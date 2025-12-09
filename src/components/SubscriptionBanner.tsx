@@ -89,7 +89,7 @@ export function SubscriptionBanner({
           exit={{ opacity: 0, y: 20 }}
           className="p-4"
         >
-          <Card className={`relative overflow-hidden border-0 p-6 text-white ${
+          <Card className={`relative overflow-hidden border-0 p-4 sm:p-6 text-white ${
             trialHighlight
               ? 'bg-gradient-to-br from-emerald-600 via-teal-500 to-blue-500'
               : 'bg-gradient-to-br from-purple-600 via-pink-500 to-orange-400'
@@ -103,13 +103,13 @@ export function SubscriptionBanner({
               </button>
             )}
             
-            <div className="flex items-start gap-4">
-              <div className="p-3 bg-white/20 rounded-full">
-                <Crown className="w-8 h-8" />
+            <div className="flex flex-col sm:flex-row items-start gap-3 sm:gap-4">
+              <div className="p-2 sm:p-3 bg-white/20 rounded-full shrink-0">
+                <Crown className="w-6 h-6 sm:w-8 sm:h-8" />
               </div>
               
-              <div className="flex-1">
-                <h3 className="text-xl font-bold mb-2">
+              <div className="flex-1 min-w-0">
+                <h3 className="text-base sm:text-xl font-bold mb-2 break-words">
                   {trialHighlight
                     ? `🎁 Триал активен — осталось ${trialDaysLeft} ${pluralizeDays(trialDaysLeft)}`
                     : limitReached 
@@ -119,21 +119,21 @@ export function SubscriptionBanner({
                 </h3>
                 
                 {trialHighlight ? (
-                  <p className="text-white/90 mb-3">
+                  <p className="text-sm sm:text-base text-white/90 mb-3 break-words">
                     В триале безлимитные сообщения. {trialDaysLeft === 0
                       ? 'Триал заканчивается сегодня — подключи подписку, чтобы не потерять доступ.'
                       : 'Подключи подписку заранее, чтобы доступ не прерывался после окончания триала.'}
                   </p>
                 ) : limitReached && (
-                  <p className="text-white/90 mb-3">
+                  <p className="text-sm sm:text-base text-white/90 mb-3 break-words">
                     Ты использовал все {dailyLimit} сообщений на сегодня. 
                     Приходи завтра или оформи подписку!
                   </p>
                 )}
                 
                 <div className="space-y-3">
-                  <div className="bg-white/10 rounded-lg p-3">
-                    <p className="font-semibold text-lg">✨ Премиум — 699₽/месяц</p>
+                  <div className="bg-white/10 rounded-lg p-2 sm:p-3">
+                    <p className="font-semibold text-base sm:text-lg">✨ Премиум — 699₽/месяц</p>
                     <ul className="text-sm text-white/90 mt-2 space-y-1">
                       <li>• Неограниченное количество сообщений</li>
                       <li>• Приоритетная поддержка</li>
