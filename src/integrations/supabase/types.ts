@@ -766,6 +766,19 @@ export type Database = {
           solution: string
         }[]
       }
+      get_subscription_status: {
+        Args: { p_user_id: string }
+        Returns: {
+          daily_limit: number
+          is_premium: boolean
+          is_trial_active: boolean
+          limit_reached: boolean
+          messages_used: number
+          subscription_expires_at: string
+          trial_days_left: number
+          trial_ends_at: string
+        }[]
+      }
       increment_demo_hints: {
         Args: { analytics_id: string }
         Returns: undefined

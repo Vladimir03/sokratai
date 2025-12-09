@@ -28,7 +28,18 @@ const premiumKeyboard = {
   ],
 };
 
-async function getSubscriptionStatus(userId: string) {
+interface SubscriptionStatus {
+  is_premium: boolean;
+  subscription_expires_at: string | null;
+  is_trial_active: boolean;
+  trial_ends_at: string | null;
+  trial_days_left: number;
+  daily_limit: number;
+  messages_used: number;
+  limit_reached: boolean;
+}
+
+async function getSubscriptionStatus(userId: string): Promise<SubscriptionStatus | null> {
   const { data, error } = await supabase
     .rpc("get_subscription_status", { p_user_id: userId })
     .single();
@@ -38,7 +49,7 @@ async function getSubscriptionStatus(userId: string) {
     return null;
   }
 
-  return data;
+  return data as SubscriptionStatus;
 }
 
 async function sendStatusSnippet(telegramUserId: number, status: any) {
