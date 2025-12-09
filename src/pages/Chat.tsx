@@ -75,6 +75,7 @@ export default function Chat() {
   const lastClickRef = useRef<number>(0); // Debounce для кликов
   const wasAtBottomRef = useRef(true); // Отслеживание позиции скролла для автоскролла
   const topSentinelRef = useRef<HTMLDivElement>(null); // Для определения скролла к началу чата
+  const lastLoadTriggerScrollRef = useRef<number | null>(null); // Для hysteresis триггера загрузки истории
   
   // Refs для предотвращения пересоздания loadMoreMessages
   const hasMoreMessagesRef = useRef(hasMoreMessages);
@@ -617,8 +618,12 @@ export default function Chat() {
             const newScrollHeight = scrollContainer.scrollHeight;
             const scrollDiff = newScrollHeight - oldScrollHeight;
             // ИСПРАВЛЕНО: добавить к старой позиции, а не заменить
-            scrollContainer.scrollTop = oldScrollTop + scrollDiff;
-            console.log(`📍 [${loadId}] Scroll restored: ${oldScrollTop} + ${scrollDiff} = ${oldScrollTop + scrollDiff}px`);
+            const restored = oldScrollTop + scrollDiff;
+            // Telegram-like hysteresis: keep user out of trigger zone after prepend
+            const anchored = Math.max(restored, 360);
+            scrollContainer.scrollTop = anchored;
+            lastLoadTriggerScrollRef.current = anchored;
+            console.log(`📍 [${loadId}] Scroll restored: ${oldScrollTop} + ${scrollDiff} = ${restored}px, anchored to ${anchored}px`);
           }
         });
       }
@@ -637,7 +642,7 @@ export default function Chat() {
     }
   }, [user?.id, currentChatId, MESSAGES_PER_PAGE]); // Только стабильные зависимости!
 
-  // Single scroll listener to trigger history load near top (Telegram-like)
+  // Single scroll listener to trigger history load near top (Telegram-like) с hysteresis
   useEffect(() => {
     const container = messagesContainerRef.current;
     if (!container || loadingHistory) return;
@@ -654,12 +659,22 @@ export default function Chat() {
         const scrollPercentage = scrollHeight > clientHeight 
           ? scrollTop / (scrollHeight - clientHeight) 
           : 1;
+
+        // Hysteresis: требуем дополнительный подъём вверх от последнего триггера
+        const lastTrigger = lastLoadTriggerScrollRef.current;
+        const movedFurtherUp = lastTrigger === null || scrollTop < lastTrigger - 60;
+        // Сброс hysteresis когда пользователь опустился достаточно вниз
+        if (scrollTop > 800 && lastLoadTriggerScrollRef.current !== null) {
+          lastLoadTriggerScrollRef.current = null;
+        }
         
         // Используем refs для проверки условий
         if ((scrollTop < 300 || scrollPercentage < 0.2) && 
             hasMoreMessagesRef.current && 
-            !isLoadingMoreRef.current) {
-          console.log('🔄 Scroll trigger near top (debounced)', { scrollTop, scrollPercentage });
+            !isLoadingMoreRef.current &&
+            movedFurtherUp) {
+          console.log('🔄 Scroll trigger near top (debounced)', { scrollTop, scrollPercentage, movedFurtherUp });
+          lastLoadTriggerScrollRef.current = scrollTop;
           loadMoreMessages();
         }
       }, 50); // Уменьшен debounce до 50ms для быстрого отклика
