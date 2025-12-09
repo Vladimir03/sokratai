@@ -1692,8 +1692,8 @@ export default function Chat() {
                   <span>{currentChat?.icon || '💬'}</span>
                   <span className="truncate">{currentChat?.title || 'Чат'}</span>
                 </h1>
-                {/* Message counter / Trial badge for non-premium users */}
-                {!subscription.isPremium && !subscription.isLoading && (
+                {/* Message counter / Trial badge for non-premium users - hide when limit reached to avoid duplicate with bottom banner */}
+                {!subscription.isPremium && !subscription.isLoading && !subscription.limitReached && (
                   <SubscriptionBanner 
                     messagesUsed={subscription.messagesUsed}
                     dailyLimit={subscription.dailyLimit}
