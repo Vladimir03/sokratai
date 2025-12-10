@@ -832,19 +832,28 @@ async function completeOnboarding(telegramUserId: number, userId: string, goal: 
 }
 
 async function getOrCreateTelegramChat(userId: string) {
-  // Get existing general chat for this user
-  const { data: existingChat } = await supabase
+  // Get existing Telegram chat for this user (oldest one to avoid duplicates)
+  const { data: existingChat, error: selectError } = await supabase
     .from("chats")
     .select("id")
     .eq("user_id", userId)
     .eq("chat_type", "general")
+    .eq("title", "Telegram чат")
+    .order("created_at", { ascending: true })
+    .limit(1)
     .maybeSingle();
 
+  if (selectError) {
+    console.error("Error finding existing chat:", selectError);
+  }
+
   if (existingChat) {
+    console.log(`Found existing Telegram chat: ${existingChat.id} for user: ${userId}`);
     return existingChat.id;
   }
 
-  // Create new general chat
+  // Create new Telegram chat
+  console.log(`Creating new Telegram chat for user: ${userId}`);
   const { data: newChat, error } = await supabase
     .from("chats")
     .insert({
@@ -861,6 +870,7 @@ async function getOrCreateTelegramChat(userId: string) {
     throw new Error("Failed to create chat");
   }
 
+  console.log(`Created new Telegram chat: ${newChat.id}`);
   return newChat.id;
 }
 
