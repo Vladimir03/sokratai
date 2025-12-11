@@ -45,30 +45,6 @@ const pluralizeDays = (days: number) => {
   return 'дней';
 };
 
-// #region agent log
-const emitDebugLog = (payload: {
-  hypothesisId: string;
-  location: string;
-  message: string;
-  data?: Record<string, unknown>;
-  runId?: string;
-}) => {
-  fetch('http://127.0.0.1:7242/ingest/5a352d39-cd0b-48d9-ba61-990189298ff9', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      sessionId: 'debug-session',
-      runId: payload.runId || 'run1',
-      hypothesisId: payload.hypothesisId,
-      location: payload.location,
-      message: payload.message,
-      data: payload.data,
-      timestamp: Date.now(),
-    }),
-  }).catch(() => {});
-};
-// #endregion
-
 export default function Chat() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -150,28 +126,6 @@ export default function Chat() {
   });
 
   const virtualizationEnabled = messages.length > 50;
-  const messagesLengthRef = useRef(messages.length);
-  const virtualizationEnabledRef = useRef(virtualizationEnabled);
-
-  // #region agent log
-  const prevVirtualizationRef = useRef<boolean>(virtualizationEnabled);
-  useEffect(() => {
-    messagesLengthRef.current = messages.length;
-    virtualizationEnabledRef.current = virtualizationEnabled;
-    if (prevVirtualizationRef.current !== virtualizationEnabled) {
-      emitDebugLog({
-        hypothesisId: 'H6',
-        location: 'Chat.tsx:virtualization:toggle',
-        message: 'Virtualization toggled',
-        data: {
-          enabled: virtualizationEnabled,
-          messagesCount: messages.length,
-        },
-      });
-      prevVirtualizationRef.current = virtualizationEnabled;
-    }
-  }, [virtualizationEnabled, messages.length]);
-  // #endregion
 
   const { data: user } = useQuery({
     queryKey: ['user'],
@@ -576,35 +530,8 @@ export default function Chat() {
 
     // Guard against parallel loads or missing state
     if (!user?.id || !currentChatId || !oldestTimestamp || isLoadingMoreRef.current || !hasMoreMessagesRef.current) {
-      emitDebugLog({
-        hypothesisId: 'H4',
-        location: 'Chat.tsx:loadMore:guard',
-        message: 'Load more skipped due to guard',
-        data: {
-          hasUser: !!user?.id,
-          hasChat: !!currentChatId,
-          hasOldestTimestamp: !!oldestTimestamp,
-          isLoadingMore: isLoadingMoreRef.current,
-          hasMoreMessages: hasMoreMessagesRef.current,
-          scrollTop: messagesContainerRef.current?.scrollTop ?? null,
-        },
-      });
       return;
     }
-
-    emitDebugLog({
-      hypothesisId: 'H2',
-      location: 'Chat.tsx:loadMore:start',
-      message: 'Load more started',
-      data: {
-        oldestTimestamp,
-        hasMoreMessages: hasMoreMessagesRef.current,
-        isLoadingMore: isLoadingMoreRef.current,
-        messagesCount: messagesLengthRef.current,
-        virtualizationEnabled: virtualizationEnabledRef.current,
-        virtualTotalSize: rowVirtualizer.getTotalSize(),
-      },
-    });
 
     const loadId = Date.now();
     console.log(`📜 [${loadId}] Loading more messages before:`, oldestTimestamp);
@@ -686,18 +613,6 @@ export default function Chat() {
         oldestTimestampRef.current = newTimestamp;
         setOldestMessageTimestamp(newTimestamp);
         
-        emitDebugLog({
-          hypothesisId: 'H3',
-          location: 'Chat.tsx:loadMore:data',
-          message: 'Loaded batch of messages',
-          data: {
-            loadId,
-            batchSize: data.length,
-            newOldestTimestamp: newTimestamp,
-            hasMoreAfterBatch: data.length === MESSAGES_PER_PAGE,
-          },
-        });
-
         console.log(`✅ [${loadId}] Loaded ${newMessages.length} messages (batch of ${MESSAGES_PER_PAGE})`);
 
         // Правильно восстановить scroll position
@@ -706,59 +621,23 @@ export default function Chat() {
             const attemptRestore = (pass: number) => {
               const measuredHeight = scrollContainer.scrollHeight;
               const virtualSize = rowVirtualizer.getTotalSize();
-              const bestHeight = Math.max(measuredHeight, virtualSize, oldScrollHeight);
-              const scrollDiff = Math.max(bestHeight - oldScrollHeight, 0);
+            const bestHeight = Math.max(measuredHeight, virtualSize, oldScrollHeight);
+            const scrollDiff = Math.max(bestHeight - oldScrollHeight, 0);
 
-              const needMoreData =
-                (bestHeight <= oldScrollHeight) ||
-                (virtualizationEnabledRef.current && virtualSize === 0);
+            const needMoreData =
+              bestHeight <= oldScrollHeight ||
+              (messages.length > 50 && virtualSize === 0);
 
               if (needMoreData && pass < 4) {
-                emitDebugLog({
-                  hypothesisId: 'H5',
-                  location: 'Chat.tsx:loadMore:restoreScroll',
-                  message: 'Scroll restore postponed awaiting stable heights',
-                  data: {
-                    loadId,
-                    pass,
-                    oldScrollTop,
-                    oldScrollHeight,
-                    measuredHeight,
-                    virtualSize,
-                    bestHeight,
-                    scrollDiff,
-                    virtualizationEnabled: virtualizationEnabledRef.current,
-                    messagesCount: messagesLengthRef.current,
-                  },
-                });
                 requestAnimationFrame(() => attemptRestore(pass + 1));
                 return;
               }
 
-              const restored = oldScrollTop + scrollDiff;
-              const anchored = Math.max(restored, 0);
-              scrollContainer.scrollTop = anchored;
-              lastLoadTriggerScrollRef.current = anchored;
-              emitDebugLog({
-                hypothesisId: 'H1',
-                location: 'Chat.tsx:loadMore:restoreScroll',
-                message: 'Scroll restored after prepend',
-                data: {
-                  loadId,
-                  pass,
-                  oldScrollTop,
-                  oldScrollHeight,
-                  measuredHeight,
-                  virtualSize,
-                  bestHeight,
-                  scrollDiff,
-                  restored,
-                  anchored,
-                  virtualizationEnabled: virtualizationEnabledRef.current,
-                  messagesCount: messagesLengthRef.current,
-                },
-              });
-              console.log(`📍 [${loadId}] Scroll restored (pass ${pass}): bestHeight ${bestHeight}, diff ${scrollDiff}, anchored ${anchored}`);
+            const restored = oldScrollTop + scrollDiff;
+            const anchored = Math.max(restored, 0);
+            scrollContainer.scrollTop = anchored;
+            lastLoadTriggerScrollRef.current = anchored;
+            console.log(`📍 [${loadId}] Scroll restored (pass ${pass}): bestHeight ${bestHeight}, diff ${scrollDiff}, anchored ${anchored}`);
             };
 
             attemptRestore(1);
@@ -770,16 +649,6 @@ export default function Chat() {
       if (!data || data.length < MESSAGES_PER_PAGE) {
         hasMoreMessagesRef.current = false;
         setHasMoreMessages(false);
-        emitDebugLog({
-          hypothesisId: 'H3',
-          location: 'Chat.tsx:loadMore:end',
-          message: 'Reached beginning of chat history',
-          data: {
-            loadId,
-            batchSize: data?.length || 0,
-            newOldestTimestamp: data?.[data.length - 1]?.created_at,
-          },
-        });
         console.log(`📌 [${loadId}] Reached beginning of chat history`);
       }
     } catch (error) {
@@ -822,22 +691,6 @@ export default function Chat() {
             !isLoadingMoreRef.current &&
             movedFurtherUp) {
           console.log('🔄 Scroll trigger near top (debounced)', { scrollTop, scrollPercentage, movedFurtherUp });
-          emitDebugLog({
-            hypothesisId: 'H1',
-            location: 'Chat.tsx:scrollHandler:trigger',
-            message: 'Scroll trigger fired',
-            data: {
-              scrollTop,
-              scrollHeight,
-              clientHeight,
-              scrollPercentage,
-              movedFurtherUp,
-              lastTrigger: lastLoadTriggerScrollRef.current,
-              hasMoreMessages: hasMoreMessagesRef.current,
-              isLoadingMore: isLoadingMoreRef.current,
-              oldestTimestamp: oldestTimestampRef.current,
-            },
-          });
           lastLoadTriggerScrollRef.current = scrollTop;
           loadMoreMessages();
         }
