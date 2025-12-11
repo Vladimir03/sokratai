@@ -1644,50 +1644,56 @@ export default function Chat() {
     const container = messagesContainerRef.current;
     if (!container || messages.length === 0) return;
     
+    let isCurrentlyShowing = false;
+    
+    const findFirstVisibleDate = (): string | null => {
+      const messageElements = container.querySelectorAll('[data-message-index]');
+      const containerRect = container.getBoundingClientRect();
+      
+      for (const element of messageElements) {
+        const rect = element.getBoundingClientRect();
+        // Check if element is visible in container viewport
+        if (rect.top >= containerRect.top - 50 && rect.top <= containerRect.top + 100) {
+          const messageIndex = parseInt(element.getAttribute('data-message-index') || '0', 10);
+          const message = messages[messageIndex];
+          if (message?.created_at) {
+            return message.created_at;
+          }
+        }
+      }
+      return null;
+    };
+    
     const handleScrollForFloatingDate = () => {
       const { scrollTop } = container;
-      const isScrollingUp = scrollTop < lastScrollTopRef.current;
+      const isScrollingUp = scrollTop < lastScrollTopRef.current - 5; // Add threshold to prevent jitter
+      const isScrollingDown = scrollTop > lastScrollTopRef.current + 5;
       lastScrollTopRef.current = scrollTop;
       
-      // Only show floating date when scrolling UP and not at the very top
-      if (isScrollingUp && scrollTop > 50) {
-        // Find the first visible message by checking element positions
-        const messageElements = container.querySelectorAll('[data-message-index]');
-        let firstVisibleDate: string | null = null;
-        
-        for (const element of messageElements) {
-          const rect = element.getBoundingClientRect();
-          const containerRect = container.getBoundingClientRect();
-          
-          // Check if element top is visible in container
-          if (rect.top >= containerRect.top && rect.top <= containerRect.bottom) {
-            const messageIndex = parseInt(element.getAttribute('data-message-index') || '0', 10);
-            const message = messages[messageIndex];
-            if (message?.created_at) {
-              firstVisibleDate = message.created_at;
-              break;
-            }
-          }
-        }
+      // Clear existing hide timeout on any scroll
+      if (floatingDateTimeoutRef.current) {
+        clearTimeout(floatingDateTimeoutRef.current);
+      }
+      
+      // Show floating date when scrolling UP and not at the very top
+      if (isScrollingUp && scrollTop > 100) {
+        const firstVisibleDate = findFirstVisibleDate();
         
         if (firstVisibleDate) {
+          // Only update date, avoid re-render if already showing
           setFloatingDate(firstVisibleDate);
-          setShowFloatingDate(true);
-          
-          // Clear existing timeout
-          if (floatingDateTimeoutRef.current) {
-            clearTimeout(floatingDateTimeoutRef.current);
+          if (!isCurrentlyShowing) {
+            isCurrentlyShowing = true;
+            setShowFloatingDate(true);
           }
-          
-          // Hide after 1.5 seconds of no scroll
-          floatingDateTimeoutRef.current = setTimeout(() => {
-            setShowFloatingDate(false);
-          }, 1500);
         }
-      } else if (!isScrollingUp) {
-        // Hide when scrolling down
-        setShowFloatingDate(false);
       }
+      
+      // Always set timeout to hide after inactivity (2.5 seconds)
+      floatingDateTimeoutRef.current = setTimeout(() => {
+        isCurrentlyShowing = false;
+        setShowFloatingDate(false);
+      }, 2500);
     };
     
     container.addEventListener('scroll', handleScrollForFloatingDate, { passive: true });
@@ -1831,21 +1837,19 @@ export default function Chat() {
                 }}
               >
                 {/* Floating date on scroll up - Telegram style - inside scroll container */}
-                <AnimatePresence>
-                  {showFloatingDate && floatingDate && (
-                    <motion.div
-                      className="sticky top-2 left-0 right-0 z-40 pointer-events-none flex justify-center"
-                      initial={{ opacity: 0, y: -10 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      exit={{ opacity: 0, y: -10 }}
-                      transition={{ duration: 0.15 }}
-                    >
-                      <div className="px-3 py-1.5 rounded-full bg-black/60 text-white text-xs font-medium backdrop-blur-sm shadow-lg">
-                        {formatDateLabel(floatingDate)}
-                      </div>
-                    </motion.div>
-                  )}
-                </AnimatePresence>
+                {floatingDate && (
+                  <div 
+                    className={`
+                      sticky top-2 left-0 right-0 z-40 pointer-events-none flex justify-center
+                      transition-all duration-300 ease-out
+                      ${showFloatingDate ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-2'}
+                    `}
+                  >
+                    <div className="px-3 py-1.5 rounded-full bg-black/60 text-white text-xs font-medium backdrop-blur-sm shadow-lg">
+                      {formatDateLabel(floatingDate)}
+                    </div>
+                  </div>
+                )}
                 
                 {loadingHistory ? (
                   <ChatSkeleton />
