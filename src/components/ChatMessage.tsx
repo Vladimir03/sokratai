@@ -275,15 +275,6 @@ const ChatMessage = memo(({ message, isLoading, onQuickMessage, onRetry, onFeedb
             </div>
           )}
           
-          {/* Time display for assistant messages */}
-          {message.role === "assistant" && message.created_at && (
-            <div className="px-1 mt-1">
-              <span className="text-[11px] text-muted-foreground">
-                {formatMessageTime(message.created_at)}
-              </span>
-            </div>
-          )}
-          
           {message.role === "assistant" && !isLoading && (
             <div className="flex gap-2 items-center flex-wrap px-1 mt-2">
               <button 
