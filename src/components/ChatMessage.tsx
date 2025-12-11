@@ -232,16 +232,19 @@ const ChatMessage = memo(({ message, isLoading, onQuickMessage, onRetry, onFeedb
                 </ReactMarkdown>
               </Suspense>
             </div>
-            {message.role === "user" && (
-              <div className="flex items-center justify-end gap-1.5 mt-1">
-                {message.created_at && (
-                  <span className="text-[11px] text-primary-foreground/70">
-                    {formatMessageTime(message.created_at)}
-                  </span>
-                )}
-                <MessageStatusIcon status={message.status} />
-              </div>
-            )}
+            {/* Time and status - inside bubble, bottom right - Telegram style */}
+            <div className="flex items-center justify-end gap-1.5 mt-2">
+              {message.created_at && (
+                <span className={`text-[11px] ${
+                  message.role === "user" 
+                    ? "text-primary-foreground/70" 
+                    : "text-muted-foreground"
+                }`}>
+                  {formatMessageTime(message.created_at)}
+                </span>
+              )}
+              {message.role === "user" && <MessageStatusIcon status={message.status} />}
+            </div>
           </div>
           
           {/* Индикатор "ИИ думает" */}
