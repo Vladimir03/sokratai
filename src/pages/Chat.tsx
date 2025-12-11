@@ -23,6 +23,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { haptics } from "@/utils/haptics";
 import { useSubscription } from "@/hooks/useSubscription";
 import { SubscriptionBanner, MessageLimitWarning, TrialExpiryReminder } from "@/components/SubscriptionBanner";
+import DateSeparator, { formatDateLabel, isDifferentDay } from "@/components/DateSeparator";
 
 type MessageStatus = 'sending' | 'sent' | 'ai_thinking' | 'delivered' | 'failed';
 
@@ -35,6 +36,7 @@ interface Message {
   feedback?: 'like' | 'dislike' | null;
   input_method?: 'text' | 'voice' | 'button';
   status?: MessageStatus;
+  created_at?: string; // ISO timestamp for message time display
 }
 
 const pluralizeDays = (days: number) => {
@@ -61,6 +63,10 @@ export default function Chat() {
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [oldestMessageTimestamp, setOldestMessageTimestamp] = useState<string | null>(null);
   const [trialReminderDismissed, setTrialReminderDismissed] = useState(false);
+  const [floatingDate, setFloatingDate] = useState<string | null>(null);
+  const [showFloatingDate, setShowFloatingDate] = useState(false);
+  const lastScrollTopRef = useRef(0);
+  const floatingDateTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const MESSAGES_PER_PAGE = 15;
   const { toast } = useToast();
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -313,6 +319,7 @@ export default function Chat() {
         }
         
         console.log('Raw data from database:', data);
+        console.log('First message created_at:', data?.[0]?.created_at);
         
         if (data && data.length > 0) {
           // Generate fresh signed URLs for images
@@ -363,7 +370,8 @@ export default function Chat() {
               image_url: imageUrl,
               image_path: msg.image_path || undefined,
               id: msg.id,
-              feedback: (msg.feedback as any)?.[0]?.feedback_type || null
+              feedback: (msg.feedback as any)?.[0]?.feedback_type || null,
+              created_at: msg.created_at
             };
           }));
           
@@ -454,9 +462,10 @@ export default function Chat() {
                     image_url: imageUrl,
                     image_path: msg.image_path || undefined,
                     id: msg.id,
-                    feedback: (msg.feedback as any)?.[0]?.feedback_type || null
+                    feedback: (msg.feedback as any)?.[0]?.feedback_type || null,
+                    created_at: msg.created_at
                   };
-                  }));
+                  })); 
                 setMessages(updatedMessages);
                 saveChatToSessionCache(currentChatId, updatedMessages, user.id, false, null);
                 console.log('✅ Welcome message added and loaded');
@@ -600,7 +609,8 @@ export default function Chat() {
             image_url: imageUrl,
             image_path: msg.image_path || undefined,
             id: msg.id,
-            feedback: (msg.feedback as any)?.[0]?.feedback_type || null
+            feedback: (msg.feedback as any)?.[0]?.feedback_type || null,
+            created_at: msg.created_at
           };
         }));
 
@@ -783,7 +793,7 @@ export default function Chat() {
     };
   }, []);
 
-  const saveMessageToBatch = async (msg: Message): Promise<string | null> => {
+  const saveMessageToBatch = async (msg: Message): Promise<{ id: string; created_at: string } | null> => {
     if (!user?.id || !currentChatId) {
       console.error('❌ Cannot save message: missing user or chatId', { 
         userId: user?.id, 
@@ -800,7 +810,7 @@ export default function Chat() {
         content: msg.content,
         image_path: msg.image_path, // Save file path instead of URL
         input_method: msg.input_method || 'text'
-      }).select('id').single();
+      }).select('id, created_at').single();
 
       if (error) throw error;
 
@@ -813,7 +823,7 @@ export default function Chat() {
         })
         .eq('id', currentChatId);
 
-      return data?.id || null;
+      return data ? { id: data.id, created_at: data.created_at } : null;
     } catch (error) {
       console.error('❌ Error saving message:', error);
       throw error;
@@ -1128,6 +1138,7 @@ export default function Chat() {
       content: message.trim() || '[Изображение]',
       status: 'sending',
       input_method: inputMethod,
+      created_at: new Date().toISOString(),
     };
 
     // Добавляем в UI сразу (оптимистичный UI)
@@ -1184,7 +1195,7 @@ export default function Chat() {
       setIsLoading(true);
 
       // Сохраняем сообщение в БД
-      const userMessageId = await saveMessageToBatch({
+      const savedMessage = await saveMessageToBatch({
         role: 'user',
         content: message.trim() || '[Изображение]',
         image_url: imageUrl,
@@ -1192,12 +1203,12 @@ export default function Chat() {
         input_method: inputMethod,
       });
 
-      // Обновляем optimistic message с реальным ID и статусом 'sent'
-      if (userMessageId) {
+      // Обновляем optimistic message с реальным ID, статусом 'sent' и created_at
+      if (savedMessage) {
         setMessages(prev => {
           const updated = prev.map(msg => 
             msg.id === optimisticMessageId 
-              ? { ...msg, id: userMessageId, status: 'sent' as MessageStatus }
+              ? { ...msg, id: savedMessage.id, status: 'sent' as MessageStatus, created_at: savedMessage.created_at }
               : msg
           );
           if (user?.id && currentChatId) {
@@ -1205,11 +1216,11 @@ export default function Chat() {
           }
           return updated;
         });
-        console.log('✅ Message saved with ID:', userMessageId);
+        console.log('✅ Message saved with ID:', savedMessage.id, 'created_at:', savedMessage.created_at);
       }
 
       // Обновляем статус на 'ai_thinking'
-      const finalMessageId = userMessageId || optimisticMessageId;
+      const finalMessageId = savedMessage?.id || optimisticMessageId;
       updateMessageStatus(finalMessageId, 'ai_thinking');
 
       let assistantSoFar = "";
@@ -1221,7 +1232,7 @@ export default function Chat() {
           if (last?.role === "assistant") {
             return prev.map((m, i) => (i === prev.length - 1 ? { ...m, content: assistantSoFar } : m));
           }
-          return [...prev, { role: "assistant", content: assistantSoFar }];
+          return [...prev, { role: "assistant", content: assistantSoFar, created_at: new Date().toISOString() }];
         });
       };
 
@@ -1260,14 +1271,16 @@ export default function Chat() {
 
       // Сохраняем только если есть контент от ассистента
       if (assistantSoFar.trim()) {
-        const finalAssistantMsg: Message = { role: "assistant", content: assistantSoFar };
-        const assistantMessageId = await saveMessageToBatch(finalAssistantMsg);
+        const finalAssistantMsg: Message = { role: "assistant", content: assistantSoFar, created_at: new Date().toISOString() };
+        const savedAssistantMsg = await saveMessageToBatch(finalAssistantMsg);
         
-        // Обновляем локальное сообщение ассистента с id из БД
-        if (assistantMessageId) {
+        // Обновляем локальное сообщение ассистента с id и created_at из БД
+        if (savedAssistantMsg) {
           setMessages(prev => {
             const updated = prev.map((m, i) => 
-              (i === prev.length - 1 && m.role === 'assistant') ? { ...m, id: assistantMessageId } : m
+              (i === prev.length - 1 && m.role === 'assistant') 
+                ? { ...m, id: savedAssistantMsg.id, created_at: savedAssistantMsg.created_at } 
+                : m
             );
             // Обновляем кеш с полным диалогом
             if (user?.id && currentChatId) {
@@ -1626,6 +1639,66 @@ export default function Chat() {
     };
   }, [messages.length]);
 
+  // Floating date on scroll up - Telegram style
+  useEffect(() => {
+    const container = messagesContainerRef.current;
+    if (!container || messages.length === 0) return;
+    
+    const handleScrollForFloatingDate = () => {
+      const { scrollTop } = container;
+      const isScrollingUp = scrollTop < lastScrollTopRef.current;
+      lastScrollTopRef.current = scrollTop;
+      
+      // Only show floating date when scrolling UP and not at the very top
+      if (isScrollingUp && scrollTop > 50) {
+        // Find the first visible message by checking element positions
+        const messageElements = container.querySelectorAll('[data-message-index]');
+        let firstVisibleDate: string | null = null;
+        
+        for (const element of messageElements) {
+          const rect = element.getBoundingClientRect();
+          const containerRect = container.getBoundingClientRect();
+          
+          // Check if element top is visible in container
+          if (rect.top >= containerRect.top && rect.top <= containerRect.bottom) {
+            const messageIndex = parseInt(element.getAttribute('data-message-index') || '0', 10);
+            const message = messages[messageIndex];
+            if (message?.created_at) {
+              firstVisibleDate = message.created_at;
+              break;
+            }
+          }
+        }
+        
+        if (firstVisibleDate) {
+          setFloatingDate(firstVisibleDate);
+          setShowFloatingDate(true);
+          
+          // Clear existing timeout
+          if (floatingDateTimeoutRef.current) {
+            clearTimeout(floatingDateTimeoutRef.current);
+          }
+          
+          // Hide after 1.5 seconds of no scroll
+          floatingDateTimeoutRef.current = setTimeout(() => {
+            setShowFloatingDate(false);
+          }, 1500);
+        }
+      } else if (!isScrollingUp) {
+        // Hide when scrolling down
+        setShowFloatingDate(false);
+      }
+    };
+    
+    container.addEventListener('scroll', handleScrollForFloatingDate, { passive: true });
+    return () => {
+      container.removeEventListener('scroll', handleScrollForFloatingDate);
+      if (floatingDateTimeoutRef.current) {
+        clearTimeout(floatingDateTimeoutRef.current);
+      }
+    };
+  }, [messages]);
+
   // Автофокус на textarea после загрузки чата
   useEffect(() => {
     if (!loadingHistory && !isLoading && currentChatId) {
@@ -1757,6 +1830,23 @@ export default function Chat() {
                   ...(deviceType !== 'android' ? { willChange: 'scroll-position' } : {})
                 }}
               >
+                {/* Floating date on scroll up - Telegram style - inside scroll container */}
+                <AnimatePresence>
+                  {showFloatingDate && floatingDate && (
+                    <motion.div
+                      className="sticky top-2 left-0 right-0 z-40 pointer-events-none flex justify-center"
+                      initial={{ opacity: 0, y: -10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: -10 }}
+                      transition={{ duration: 0.15 }}
+                    >
+                      <div className="px-3 py-1.5 rounded-full bg-black/60 text-white text-xs font-medium backdrop-blur-sm shadow-lg">
+                        {formatDateLabel(floatingDate)}
+                      </div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+                
                 {loadingHistory ? (
                   <ChatSkeleton />
                 ) : (
@@ -1810,10 +1900,12 @@ export default function Chat() {
                         {rowVirtualizer.getVirtualItems().map((virtualRow) => {
                           const msg = messages[virtualRow.index];
                           const prevMsg = virtualRow.index > 0 ? messages[virtualRow.index - 1] : null;
+                          const showDateSeparator = virtualRow.index === 0 || isDifferentDay(prevMsg?.created_at, msg.created_at);
                           return (
                             <div
                               key={virtualRow.index}
                               data-index={virtualRow.index}
+                              data-message-index={virtualRow.index}
                               ref={rowVirtualizer.measureElement}
                               className="virtualized-item"
                               style={{
@@ -1827,32 +1919,45 @@ export default function Chat() {
                                 WebkitFontSmoothing: 'subpixel-antialiased',
                               }}
                             >
-                      <ChatMessage
-                        key={msg.id || virtualRow.index}
-                        message={msg}
-                        isLoading={false}
-                        onQuickMessage={handleQuickMessage}
-                        onFeedback={handleMessageFeedback}
-                        onInteraction={handleMessageInteraction}
-                        onRetry={msg.status === 'failed' ? () => handleRetryMessage(msg.content || '[Изображение]', msg.input_method) : undefined}
-                      />
+                              {showDateSeparator && msg.created_at && (
+                                <DateSeparator date={msg.created_at} />
+                              )}
+                              <ChatMessage
+                                key={msg.id || virtualRow.index}
+                                message={msg}
+                                isLoading={false}
+                                onQuickMessage={handleQuickMessage}
+                                onFeedback={handleMessageFeedback}
+                                onInteraction={handleMessageInteraction}
+                                onRetry={msg.status === 'failed' ? () => handleRetryMessage(msg.content || '[Изображение]', msg.input_method) : undefined}
+                              />
                             </div>
                           );
                         })}
                       </div>
                     ) : (
                       // Обычный рендер для маленьких чатов
-                      messages.map((msg, index) => (
-                      <ChatMessage 
-                        key={msg.id || index} 
-                        message={msg} 
-                        isLoading={false} 
-                        onQuickMessage={handleQuickMessage}
-                        onFeedback={handleMessageFeedback}
-                        onInteraction={handleMessageInteraction}
-                        onRetry={msg.status === 'failed' ? () => handleRetryMessage(msg.content || '[Изображение]', msg.input_method) : undefined}
-                      />
-                      ))
+                      messages.map((msg, index) => {
+                        const prevMsg = index > 0 ? messages[index - 1] : null;
+                        // Показываем разделитель для первого сообщения или если день изменился
+                        const showDateSeparator = (index === 0 && msg.created_at) || isDifferentDay(prevMsg?.created_at, msg.created_at);
+                        
+                        return (
+                          <div key={msg.id || index} data-message-index={index}>
+                            {showDateSeparator && msg.created_at && (
+                              <DateSeparator date={msg.created_at} />
+                            )}
+                            <ChatMessage 
+                              message={msg} 
+                              isLoading={false} 
+                              onQuickMessage={handleQuickMessage}
+                              onFeedback={handleMessageFeedback}
+                              onInteraction={handleMessageInteraction}
+                              onRetry={msg.status === 'failed' ? () => handleRetryMessage(msg.content || '[Изображение]', msg.input_method) : undefined}
+                            />
+                          </div>
+                        );
+                      })
                     )}
                     {isLoading && <LoadingIndicator />}
                     <div ref={messagesEndRef} />

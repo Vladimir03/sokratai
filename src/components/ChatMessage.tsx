@@ -11,6 +11,17 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 
+// Format time to HH:mm in local timezone
+const formatMessageTime = (isoString?: string): string => {
+  if (!isoString) return '';
+  const date = new Date(isoString);
+  return date.toLocaleTimeString('ru-RU', { 
+    hour: '2-digit', 
+    minute: '2-digit',
+    hour12: false 
+  });
+};
+
 // Динамическая загрузка только ReactMarkdown компонента
 const ReactMarkdown = lazy(() => import('react-markdown'));
 
@@ -27,6 +38,7 @@ interface Message {
   image_path?: string; // Storage path for persistent images
   input_method?: "text" | "voice" | "button";
   feedback?: 'like' | 'dislike' | null;
+  created_at?: string; // ISO timestamp for message time display
 }
 
 interface ChatMessageProps {
@@ -221,7 +233,12 @@ const ChatMessage = memo(({ message, isLoading, onQuickMessage, onRetry, onFeedb
               </Suspense>
             </div>
             {message.role === "user" && (
-              <div className="flex items-center justify-end mt-1">
+              <div className="flex items-center justify-end gap-1.5 mt-1">
+                {message.created_at && (
+                  <span className="text-[11px] text-primary-foreground/70">
+                    {formatMessageTime(message.created_at)}
+                  </span>
+                )}
                 <MessageStatusIcon status={message.status} />
               </div>
             )}
@@ -252,6 +269,15 @@ const ChatMessage = memo(({ message, isLoading, onQuickMessage, onRetry, onFeedb
                 <RotateCw className="w-3 h-3" />
                 Повторить
               </button>
+            </div>
+          )}
+          
+          {/* Time display for assistant messages */}
+          {message.role === "assistant" && message.created_at && (
+            <div className="px-1 mt-1">
+              <span className="text-[11px] text-muted-foreground">
+                {formatMessageTime(message.created_at)}
+              </span>
             </div>
           )}
           
