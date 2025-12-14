@@ -11,6 +11,12 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 
 interface ChatInputProps {
   fileInputRef?: React.RefObject<HTMLInputElement>;
@@ -326,22 +332,30 @@ const ChatInput = memo(({
 
           {/* Voice input button */}
           {isVoiceSupported && (
-            <Button
-              variant={isRecording ? "destructive" : "outline"}
-              size="icon"
-              className={`h-10 w-10 md:h-11 md:w-11 shrink-0 transition-all ${
-                isRecording ? 'animate-pulse' : ''
-              }`}
-              onClick={handleVoiceButton}
-              disabled={isLoading}
-              title={isRecording ? "Остановить запись" : "Голосовой ввод"}
-            >
-              {isRecording ? (
-                <MicOff className="h-4 w-4 md:h-5 md:w-5" />
-              ) : (
-                <Mic className="h-4 w-4 md:h-5 md:w-5" />
-              )}
-            </Button>
+            <TooltipProvider>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant={isRecording ? "destructive" : "outline"}
+                    size="icon"
+                    className={`h-10 w-10 md:h-11 md:w-11 shrink-0 transition-all ${
+                      isRecording ? 'animate-pulse' : ''
+                    }`}
+                    onClick={handleVoiceButton}
+                    disabled={isLoading}
+                  >
+                    {isRecording ? (
+                      <MicOff className="h-4 w-4 md:h-5 md:w-5" />
+                    ) : (
+                      <Mic className="h-4 w-4 md:h-5 md:w-5" />
+                    )}
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent side="top">
+                  {isRecording ? "Остановить запись" : "Голосовой ввод"}
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
           )}
 
           {/* Send button */}
