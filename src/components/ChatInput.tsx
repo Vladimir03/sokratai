@@ -359,31 +359,39 @@ const ChatInput = memo(({
           )}
 
           {/* Send button */}
-          <Button
-            onClick={() => {
-              if (message.trim() || uploadedFile) {
-                onSend(message, isRecording ? 'voice' : 'text');
-                setMessage("");
-                onValueChange?.("");
-                if (textareaRef.current) {
-                  textareaRef.current.style.height = '40px';
-                }
-                if (isRecording) {
-                  cancelRecording();
-                }
-              }
-            }}
-            disabled={(!message.trim() && !uploadedFile) || isLoading}
-            size="icon"
-            className="h-10 w-10 md:h-11 md:w-11 shrink-0"
-            title={isLoading ? "Отправка..." : "Отправить"}
-          >
-            {isLoading ? (
-              <Loader2 className="h-4 w-4 md:h-5 md:w-5 animate-spin" />
-            ) : (
-              <Send className="h-4 w-4 md:h-5 md:w-5" />
-            )}
-          </Button>
+          <TooltipProvider>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  onClick={() => {
+                    if (message.trim() || uploadedFile) {
+                      onSend(message, isRecording ? 'voice' : 'text');
+                      setMessage("");
+                      onValueChange?.("");
+                      if (textareaRef.current) {
+                        textareaRef.current.style.height = '40px';
+                      }
+                      if (isRecording) {
+                        cancelRecording();
+                      }
+                    }
+                  }}
+                  disabled={(!message.trim() && !uploadedFile) || isLoading}
+                  size="icon"
+                  className="h-10 w-10 md:h-11 md:w-11 shrink-0"
+                >
+                  {isLoading ? (
+                    <Loader2 className="h-4 w-4 md:h-5 md:w-5 animate-spin" />
+                  ) : (
+                    <Send className="h-4 w-4 md:h-5 md:w-5" />
+                  )}
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="top">
+                {isLoading ? "Отправка..." : "Отправить"}
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
         </div>
       </div>
     </div>
