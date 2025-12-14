@@ -1,8 +1,10 @@
 import { memo, useRef, useState, useEffect, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { Send, Image as ImageIcon, X, Loader2, Camera, ImagePlus } from "lucide-react";
+import { Send, Image as ImageIcon, X, Loader2, Camera, ImagePlus, Mic, MicOff } from "lucide-react";
 import { useIsMobile } from "@/hooks/use-mobile";
+import { useVoiceInput } from "@/hooks/useVoiceInput";
+import { haptics } from "@/utils/haptics";
 import {
   Sheet,
   SheetContent,
@@ -43,6 +45,39 @@ const ChatInput = memo(({
   const [message, setMessage] = useState("");
   const [isSheetOpen, setIsSheetOpen] = useState(false);
   const isMobileDevice = useIsMobile();
+  
+  const {
+    isRecording,
+    isSupported: isVoiceSupported,
+    transcript,
+    interimTranscript,
+    startRecording,
+    stopRecording,
+    cancelRecording,
+    clearTranscript,
+  } = useVoiceInput();
+
+  // Apply voice transcript to message
+  useEffect(() => {
+    if (transcript) {
+      setMessage(prev => {
+        const newMessage = prev ? `${prev} ${transcript}` : transcript;
+        onValueChange?.(newMessage);
+        return newMessage;
+      });
+      clearTranscript();
+    }
+  }, [transcript, onValueChange, clearTranscript]);
+
+  const handleVoiceButton = useCallback(() => {
+    if (isRecording) {
+      stopRecording();
+      haptics.success();
+    } else {
+      startRecording();
+      haptics.tap();
+    }
+  }, [isRecording, startRecording, stopRecording]);
 
   const adjustTextareaHeight = useCallback((element: HTMLTextAreaElement | null) => {
     if (!element) return;
@@ -145,7 +180,7 @@ const ChatInput = memo(({
         )}
 
         {/* Input area */}
-        <div className="flex items-end gap-1 md:gap-2">
+        <div className="relative flex items-end gap-1 md:gap-2">
           {/* File upload inputs */}
           {/* Backward compatibility input */}
           <input
@@ -236,6 +271,15 @@ const ChatInput = memo(({
             </SheetContent>
           </Sheet>
 
+          {/* Voice recording indicator */}
+          {isRecording && interimTranscript && (
+            <div className="absolute -top-8 left-0 right-0 text-center">
+              <span className="text-xs text-muted-foreground bg-background/80 px-2 py-1 rounded-md">
+                {interimTranscript}...
+              </span>
+            </div>
+          )}
+
           {/* Text input */}
           <Textarea
             ref={textareaRef}
@@ -280,15 +324,38 @@ const ChatInput = memo(({
             }}
           />
 
+          {/* Voice input button */}
+          {isVoiceSupported && (
+            <Button
+              variant={isRecording ? "destructive" : "outline"}
+              size="icon"
+              className={`h-10 w-10 md:h-11 md:w-11 shrink-0 transition-all ${
+                isRecording ? 'animate-pulse' : ''
+              }`}
+              onClick={handleVoiceButton}
+              disabled={isLoading}
+              title={isRecording ? "Остановить запись" : "Голосовой ввод"}
+            >
+              {isRecording ? (
+                <MicOff className="h-4 w-4 md:h-5 md:w-5" />
+              ) : (
+                <Mic className="h-4 w-4 md:h-5 md:w-5" />
+              )}
+            </Button>
+          )}
+
           {/* Send button */}
           <Button
             onClick={() => {
               if (message.trim() || uploadedFile) {
-                onSend(message, 'text');
+                onSend(message, isRecording ? 'voice' : 'text');
                 setMessage("");
                 onValueChange?.("");
                 if (textareaRef.current) {
                   textareaRef.current.style.height = '40px';
+                }
+                if (isRecording) {
+                  cancelRecording();
                 }
               }
             }}
