@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from "react";
+import { useNavigate } from "react-router-dom";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -33,6 +34,7 @@ const pluralizeDays = (days: number) => {
 };
 
 const Profile = () => {
+  const navigate = useNavigate();
   const [profile, setProfile] = useState<Profile | null>(null);
   const [stats, setStats] = useState<UserStats | null>(null);
   const [loading, setLoading] = useState(true);
@@ -355,7 +357,7 @@ const Profile = () => {
                     <Button 
                       size="sm" 
                       className="bg-emerald-600 hover:bg-emerald-700 text-white"
-                      onClick={() => window.open('https://t.me/Analyst_Vladimir', '_blank')}
+                      onClick={() => navigate("/pay")}
                     >
                       Оформить Premium
                     </Button>

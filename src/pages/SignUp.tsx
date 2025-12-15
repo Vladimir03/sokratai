@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useNavigate, Link } from "react-router-dom";
+import { useNavigate, Link, useSearchParams } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -23,10 +23,14 @@ const signupSchema = z.object({
 
 const SignUp = () => {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [username, setUsername] = useState("");
   const [loading, setLoading] = useState(false);
+
+  const nextParam = searchParams.get("next");
+  const nextPath = nextParam && nextParam.startsWith("/") && !nextParam.startsWith("//") ? nextParam : "/chat";
 
   const handleSignUp = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -47,14 +51,14 @@ const SignUp = () => {
           data: {
             username: validation.data.username,
           },
-          emailRedirectTo: `${window.location.origin}/chat`,
+          emailRedirectTo: `${window.location.origin}${nextPath}`,
         },
       });
 
       if (error) throw error;
 
       toast.success("Регистрация успешна! Входим в систему...");
-      navigate("/chat");
+      navigate(nextPath);
     } catch (error: any) {
       toast.error(error.message || "Ошибка регистрации");
     } finally {

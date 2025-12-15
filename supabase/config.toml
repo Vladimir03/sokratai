@@ -24,8 +24,8 @@ verify_jwt = false
 [functions.telegram-login-token]
 verify_jwt = false
 
-[functions.telegram-broadcast]
-verify_jwt = false
+[functions.yookassa-create-payment]
+verify_jwt = true
 
-[functions.telegram-scheduled-reminder]
+[functions.yookassa-webhook]
 verify_jwt = false

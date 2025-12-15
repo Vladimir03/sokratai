@@ -2,6 +2,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { useRef } from "react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
+import { Link } from "react-router-dom";
 import { telegramLinks } from "@/utils/telegramLinks";
 
 const Pricing = () => {
@@ -127,11 +128,11 @@ const Pricing = () => {
                 ))}
               </ul>
 
-              <a href={telegramLinks.planPremium} target="_blank" rel="noopener noreferrer" className="block w-full">
+              <Link to="/pay" className="block w-full">
                 <Button size="lg" className="w-full bg-accent hover:bg-accent/90 text-accent-foreground text-lg py-6">
-                  🚀 Попробовать бесплатно
+                  🚀 Оформить Premium
                 </Button>
-              </a>
+              </Link>
 
               <p className="mt-5 text-sm opacity-90 text-center">Отмена в любой момент. Никаких скрытых платежей.</p>
             </div>

@@ -2036,7 +2036,7 @@ export default function Chat() {
                       <Button 
                         size="sm" 
                         className="bg-emerald-600 hover:bg-emerald-700 text-white"
-                        onClick={() => window.open('https://t.me/Analyst_Vladimir', '_blank')}
+                        onClick={() => (window.location.href = "/pay")}
                       >
                         Оформить Premium
                       </Button>

@@ -15,8 +15,6 @@ interface SubscriptionBannerProps {
   trialDaysLeft?: number;
 }
 
-const TELEGRAM_CONTACT = "Analyst_Vladimir";
-
 const pluralizeDays = (days: number) => {
   const mod10 = days % 10;
   const mod100 = days % 100;
@@ -39,8 +37,8 @@ export function SubscriptionBanner({
   // Don't show for premium users
   if (isPremium) return null;
 
-  const handleOpenTelegram = () => {
-    window.open(`https://t.me/${TELEGRAM_CONTACT}`, '_blank');
+  const handleGoToPay = () => {
+    window.location.href = "/pay";
   };
 
   // Trial badge for chat header
@@ -141,16 +139,16 @@ export function SubscriptionBanner({
                 </div>
                 
                 <Button 
-                  onClick={handleOpenTelegram}
+                  onClick={handleGoToPay}
                   className="w-full bg-white text-purple-600 hover:bg-white/90 font-bold text-sm sm:text-base py-2 sm:py-2.5"
                   size="default"
                 >
                   <ExternalLink className="w-3.5 h-3.5 sm:w-4 sm:h-4 mr-1.5 sm:mr-2" />
-                  Написать @{TELEGRAM_CONTACT}
+                  Оформить Premium
                 </Button>
                 
                 <p className="text-[10px] sm:text-xs text-white/70 text-center">
-                  💬 Напиши "СОКРАТ" для активации
+                  Оплата и активация происходят автоматически.
                 </p>
               </div>
             </div>
@@ -241,7 +239,7 @@ export function TrialExpiryReminder({
         </div>
         
         <Button 
-          onClick={() => window.open(`https://t.me/${TELEGRAM_CONTACT}`, '_blank')}
+          onClick={() => (window.location.href = "/pay")}
           className={`w-full mt-3 ${
             isLastDay 
               ? 'bg-gradient-to-r from-red-500 to-orange-500 hover:from-red-600 hover:to-orange-600' 

@@ -1,5 +1,5 @@
 import { useState, useRef, useCallback, useEffect } from "react";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Send, Loader2, CheckCircle, RefreshCw, ExternalLink } from "lucide-react";
@@ -16,11 +16,15 @@ const TelegramLoginButton = ({
   className
 }: TelegramLoginButtonProps) => {
   const navigate = useNavigate();
+  const location = useLocation();
   const [loading, setLoading] = useState(false);
   const [status, setStatus] = useState<"idle" | "waiting" | "success">("idle");
   const [currentToken, setCurrentToken] = useState<string | null>(null);
   const [checking, setChecking] = useState(false);
   const pollingRef = useRef<number | null>(null);
+
+  const nextParam = new URLSearchParams(location.search).get("next");
+  const nextPath = nextParam && nextParam.startsWith("/") && !nextParam.startsWith("//") ? nextParam : "/chat";
 
   const stopPolling = useCallback(() => {
     if (pollingRef.current) {
@@ -50,7 +54,7 @@ const TelegramLoginButton = ({
         toast.success("Успешный вход через Telegram!");
         
         setTimeout(() => {
-          navigate("/chat");
+          navigate(nextPath);
         }, 500);
         
         return true;

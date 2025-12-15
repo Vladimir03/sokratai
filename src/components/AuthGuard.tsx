@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import Navigation from "./Navigation";
 import OnboardingModal from "./OnboardingModal";
@@ -10,6 +10,7 @@ interface AuthGuardProps {
 
 const AuthGuard = ({ children }: AuthGuardProps) => {
   const navigate = useNavigate();
+  const location = useLocation();
   const [loading, setLoading] = useState(true);
   const [showOnboarding, setShowOnboarding] = useState(false);
   const [userId, setUserId] = useState<string | null>(null);
@@ -17,7 +18,8 @@ const AuthGuard = ({ children }: AuthGuardProps) => {
   useEffect(() => {
     supabase.auth.getSession().then(async ({ data: { session } }) => {
       if (!session) {
-        navigate("/login");
+        const next = `${location.pathname}${location.search}`;
+        navigate(`/login?next=${encodeURIComponent(next)}`);
         return;
       }
 
@@ -39,12 +41,13 @@ const AuthGuard = ({ children }: AuthGuardProps) => {
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       if (!session) {
-        navigate("/login");
+        const next = `${location.pathname}${location.search}`;
+        navigate(`/login?next=${encodeURIComponent(next)}`);
       }
     });
 
     return () => subscription.unsubscribe();
-  }, [navigate]);
+  }, [navigate, location.pathname, location.search]);
 
   if (loading) {
     return (
