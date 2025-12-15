@@ -68,6 +68,36 @@ export type Database = {
         }
         Relationships: []
       }
+      broadcast_logs: {
+        Row: {
+          broadcast_type: string
+          error_message: string | null
+          id: string
+          message_preview: string | null
+          sent_at: string | null
+          success: boolean | null
+          telegram_user_id: number
+        }
+        Insert: {
+          broadcast_type: string
+          error_message?: string | null
+          id?: string
+          message_preview?: string | null
+          sent_at?: string | null
+          success?: boolean | null
+          telegram_user_id: number
+        }
+        Update: {
+          broadcast_type?: string
+          error_message?: string | null
+          id?: string
+          message_preview?: string | null
+          sent_at?: string | null
+          success?: boolean | null
+          telegram_user_id?: number
+        }
+        Relationships: []
+      }
       chat_messages: {
         Row: {
           chat_id: string | null
