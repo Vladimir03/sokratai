@@ -168,7 +168,7 @@ Deno.serve(async (req) => {
           await supabase.from("broadcast_logs").insert({
             telegram_user_id: user.telegram_user_id,
             broadcast_type: "manual",
-            message_preview: broadcastMessage.substring(0, 100),
+            message_preview: broadcastMessage.substring(0, 500),
             success: true
           });
         } else {
@@ -179,7 +179,7 @@ Deno.serve(async (req) => {
           await supabase.from("broadcast_logs").insert({
             telegram_user_id: user.telegram_user_id,
             broadcast_type: "manual",
-            message_preview: broadcastMessage.substring(0, 100),
+            message_preview: broadcastMessage.substring(0, 500),
             success: false,
             error_message: errorMsg
           });
