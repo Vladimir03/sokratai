@@ -49,19 +49,24 @@ serve(async (req) => {
     }
 
     const url = new URL(req.url);
-    const daysParam = url.searchParams.get("days") || "7";
-    const days = parseInt(daysParam, 10);
-
-    // Get analytics data
+    const startDateParam = url.searchParams.get("startDate");
+    const endDateParam = url.searchParams.get("endDate");
+    
     const now = new Date();
-    const startDate = new Date(now.getTime() - days * 24 * 60 * 60 * 1000);
+    const endDate = endDateParam ? new Date(endDateParam + "T23:59:59.999Z") : now;
+    const startDate = startDateParam 
+      ? new Date(startDateParam + "T00:00:00.000Z") 
+      : new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+    
     const startDateStr = startDate.toISOString();
+    const endDateStr = endDate.toISOString();
 
     // 1. Registration stats by day
     const { data: registrations } = await supabaseAdmin
       .from("profiles")
       .select("created_at")
-      .gte("created_at", startDateStr);
+      .gte("created_at", startDateStr)
+      .lte("created_at", endDateStr);
 
     const registrationsByDay: Record<string, number> = {};
     registrations?.forEach((r) => {
@@ -73,7 +78,8 @@ serve(async (req) => {
     const { data: messages } = await supabaseAdmin
       .from("chat_messages")
       .select("created_at, user_id")
-      .gte("created_at", startDateStr);
+      .gte("created_at", startDateStr)
+      .lte("created_at", endDateStr);
 
     const messagesByDay: Record<string, number> = {};
     const uniqueUsersByDay: Record<string, Set<string>> = {};
@@ -99,6 +105,7 @@ serve(async (req) => {
         .from("profiles")
         .select("id, created_at")
         .gte("created_at", startDateStr)
+        .lte("created_at", endDateStr)
         .order("created_at", { ascending: true });
 
       if (!cohortUsers || cohortUsers.length === 0) {
@@ -186,18 +193,21 @@ serve(async (req) => {
     const { count: totalRegistered } = await supabaseAdmin
       .from("profiles")
       .select("id", { count: "exact", head: true })
-      .gte("created_at", startDateStr);
+      .gte("created_at", startDateStr)
+      .lte("created_at", endDateStr);
 
     const { count: completedOnboarding } = await supabaseAdmin
       .from("profiles")
       .select("id", { count: "exact", head: true })
       .gte("created_at", startDateStr)
+      .lte("created_at", endDateStr)
       .eq("onboarding_completed", true);
 
     const { data: usersWithMessages } = await supabaseAdmin
       .from("profiles")
       .select("id")
-      .gte("created_at", startDateStr);
+      .gte("created_at", startDateStr)
+      .lte("created_at", endDateStr);
 
     let sentFirstMessage = 0;
     if (usersWithMessages) {
@@ -219,18 +229,20 @@ serve(async (req) => {
     const { count: totalMessages } = await supabaseAdmin
       .from("chat_messages")
       .select("id", { count: "exact", head: true })
-      .gte("created_at", startDateStr);
+      .gte("created_at", startDateStr)
+      .lte("created_at", endDateStr);
 
     const { count: activeUsersToday } = await supabaseAdmin
       .from("chat_messages")
       .select("user_id", { count: "exact", head: true })
       .gte("created_at", new Date(now.toISOString().split("T")[0]).toISOString());
 
-    // Prepare chart data
+    // Prepare chart data - iterate through all days in the range
     const chartDays: string[] = [];
-    for (let i = days - 1; i >= 0; i--) {
-      const d = new Date(now.getTime() - i * 24 * 60 * 60 * 1000);
-      chartDays.push(d.toISOString().split("T")[0]);
+    const currentDate = new Date(startDate);
+    while (currentDate <= endDate) {
+      chartDays.push(currentDate.toISOString().split("T")[0]);
+      currentDate.setDate(currentDate.getDate() + 1);
     }
 
     const registrationsChart = chartDays.map(day => ({
