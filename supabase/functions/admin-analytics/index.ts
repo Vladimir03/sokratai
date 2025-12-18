@@ -92,57 +92,95 @@ serve(async (req) => {
       dauByDay[day] = users.size;
     });
 
-    // 3. Retention calculation
-    const calculateRetention = async (retentionDays: number) => {
-      const cohortDate = new Date(now.getTime() - (days + retentionDays) * 24 * 60 * 60 * 1000);
-      const cohortEndDate = new Date(now.getTime() - retentionDays * 24 * 60 * 60 * 1000);
-      
-      // Get users registered in the cohort period
+    // 3. Cohort retention calculation
+    const calculateCohortRetention = async () => {
+      // Get all users registered in the selected period
       const { data: cohortUsers } = await supabaseAdmin
         .from("profiles")
         .select("id, created_at")
-        .gte("created_at", cohortDate.toISOString())
-        .lt("created_at", cohortEndDate.toISOString());
+        .gte("created_at", startDateStr)
+        .order("created_at", { ascending: true });
 
-      if (!cohortUsers || cohortUsers.length === 0) return { rate: 0, cohortSize: 0, retained: 0 };
-
-      const userIds = cohortUsers.map(u => u.id);
-      
-      // Check how many returned after retentionDays
-      const retentionResults: { date: string; rate: number; cohortSize: number; retained: number }[] = [];
-      
-      for (const user of cohortUsers) {
-        const userRegDate = new Date(user.created_at);
-        const returnDate = new Date(userRegDate.getTime() + retentionDays * 24 * 60 * 60 * 1000);
-        const returnDateEnd = new Date(returnDate.getTime() + 24 * 60 * 60 * 1000);
-        
-        const { count } = await supabaseAdmin
-          .from("chat_messages")
-          .select("id", { count: "exact", head: true })
-          .eq("user_id", user.id)
-          .gte("created_at", returnDate.toISOString())
-          .lt("created_at", returnDateEnd.toISOString());
-        
-        if (count && count > 0) {
-          retentionResults.push({ date: user.created_at.split("T")[0], rate: 1, cohortSize: 1, retained: 1 });
-        } else {
-          retentionResults.push({ date: user.created_at.split("T")[0], rate: 0, cohortSize: 1, retained: 0 });
-        }
+      if (!cohortUsers || cohortUsers.length === 0) {
+        return [];
       }
 
-      const totalRetained = retentionResults.filter(r => r.rate === 1).length;
-      return {
-        rate: Math.round((totalRetained / cohortUsers.length) * 100),
-        cohortSize: cohortUsers.length,
-        retained: totalRetained,
-      };
+      // Group users by registration date
+      const usersByDate: Record<string, string[]> = {};
+      cohortUsers.forEach((user) => {
+        const regDate = user.created_at?.split("T")[0];
+        if (regDate) {
+          if (!usersByDate[regDate]) usersByDate[regDate] = [];
+          usersByDate[regDate].push(user.id);
+        }
+      });
+
+      // Get all messages for these users
+      const userIds = cohortUsers.map(u => u.id);
+      const { data: allMessages } = await supabaseAdmin
+        .from("chat_messages")
+        .select("user_id, created_at")
+        .in("user_id", userIds);
+
+      // Index messages by user
+      const messagesByUser: Record<string, string[]> = {};
+      allMessages?.forEach((m) => {
+        if (!messagesByUser[m.user_id]) messagesByUser[m.user_id] = [];
+        messagesByUser[m.user_id].push(m.created_at);
+      });
+
+      // Calculate retention for each cohort date
+      const cohortRetention: Array<{
+        date: string;
+        cohortSize: number;
+        d1: { retained: number; rate: number };
+        d3: { retained: number; rate: number };
+        d7: { retained: number; rate: number };
+      }> = [];
+
+      const today = new Date(now.toISOString().split("T")[0]);
+
+      for (const [regDate, users] of Object.entries(usersByDate)) {
+        const cohortDate = new Date(regDate);
+        const cohortSize = users.length;
+
+        const calcRetention = (retentionDay: number) => {
+          const targetDate = new Date(cohortDate.getTime() + retentionDay * 24 * 60 * 60 * 1000);
+          
+          // Check if enough time has passed for this retention metric
+          if (targetDate > today) {
+            return { retained: -1, rate: -1 }; // Not yet available
+          }
+
+          let retained = 0;
+          for (const userId of users) {
+            const userMessages = messagesByUser[userId] || [];
+            const hasActivity = userMessages.some((msgDate) => {
+              const msgDay = msgDate.split("T")[0];
+              return msgDay === targetDate.toISOString().split("T")[0];
+            });
+            if (hasActivity) retained++;
+          }
+
+          return {
+            retained,
+            rate: cohortSize > 0 ? Math.round((retained / cohortSize) * 100) : 0,
+          };
+        };
+
+        cohortRetention.push({
+          date: regDate,
+          cohortSize,
+          d1: calcRetention(1),
+          d3: calcRetention(3),
+          d7: calcRetention(7),
+        });
+      }
+
+      return cohortRetention;
     };
 
-    const [retention1, retention3, retention7] = await Promise.all([
-      calculateRetention(1),
-      calculateRetention(3),
-      calculateRetention(7),
-    ]);
+    const cohortRetention = await calculateCohortRetention();
 
     // 4. Conversion funnel
     const { count: totalRegistered } = await supabaseAdmin
@@ -220,11 +258,7 @@ serve(async (req) => {
       registrations: registrationsChart,
       messages: messagesChart,
       dau: dauChart,
-      retention: {
-        day1: retention1,
-        day3: retention3,
-        day7: retention7,
-      },
+      cohortRetention,
       funnel: {
         registered: totalRegistered || 0,
         completedOnboarding: completedOnboarding || 0,

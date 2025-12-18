@@ -11,6 +11,14 @@ import { AdminFunnelChart } from "@/components/admin/AdminFunnelChart";
 import { AdminLineChart } from "@/components/admin/AdminLineChart";
 import { ArrowLeft, RefreshCw, Shield } from "lucide-react";
 
+interface CohortRetentionData {
+  date: string;
+  cohortSize: number;
+  d1: { retained: number; rate: number };
+  d3: { retained: number; rate: number };
+  d7: { retained: number; rate: number };
+}
+
 interface AnalyticsData {
   summary: {
     totalUsers: number;
@@ -21,11 +29,7 @@ interface AnalyticsData {
   registrations: { date: string; value: number }[];
   messages: { date: string; value: number }[];
   dau: { date: string; value: number }[];
-  retention: {
-    day1: { rate: number; cohortSize: number; retained: number };
-    day3: { rate: number; cohortSize: number; retained: number };
-    day7: { rate: number; cohortSize: number; retained: number };
-  };
+  cohortRetention: CohortRetentionData[];
   funnel: {
     registered: number;
     completedOnboarding: number;
@@ -195,7 +199,7 @@ const Admin = () => {
                 data={analytics.dau}
                 color="#3b82f6"
               />
-              <AdminRetentionCards retention={analytics.retention} />
+              <AdminRetentionCards cohortRetention={analytics.cohortRetention} />
             </div>
 
             {/* Funnel */}
