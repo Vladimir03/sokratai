@@ -3,7 +3,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import ChatMessage from "@/components/ChatMessage";
 import { Button } from "@/components/ui/button";
-import { Menu, ChevronDown } from "lucide-react";
+import { Menu, ChevronDown, X } from "lucide-react";
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { useToast } from "@/hooks/use-toast";
 import ChatSkeleton from "@/components/ChatSkeleton";
@@ -63,6 +63,7 @@ export default function Chat() {
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [oldestMessageTimestamp, setOldestMessageTimestamp] = useState<string | null>(null);
   const [trialReminderDismissed, setTrialReminderDismissed] = useState(false);
+  const [trialBannerDismissed, setTrialBannerDismissed] = useState(false);
   const [floatingDate, setFloatingDate] = useState<string | null>(null);
   const [showFloatingDate, setShowFloatingDate] = useState(false);
   const lastScrollTopRef = useRef(0);
@@ -2021,10 +2022,17 @@ export default function Chat() {
               )}
 
               {/* Trial status bar near input */}
-              {subscription.isTrialActive && !subscription.limitReached && (
+              {subscription.isTrialActive && !subscription.limitReached && !trialBannerDismissed && (
                 <div className="px-4 pb-3">
-                  <div className="rounded-xl border bg-gradient-to-r from-emerald-50 via-cyan-50 to-blue-50 text-foreground shadow-sm">
-                    <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 px-4 py-3">
+                  <div className="rounded-xl border bg-gradient-to-r from-emerald-50 via-cyan-50 to-blue-50 text-foreground shadow-sm relative">
+                    <button
+                      onClick={() => setTrialBannerDismissed(true)}
+                      className="absolute top-2 right-2 p-1 hover:bg-black/10 rounded-full transition-colors"
+                      aria-label="Закрыть"
+                    >
+                      <X className="w-4 h-4 text-gray-500" />
+                    </button>
+                    <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 px-4 py-3 pr-10">
                       <div className="space-y-1">
                         <p className="text-sm font-semibold text-emerald-700">
                           🎁 Бесплатный 7-дневный триал
