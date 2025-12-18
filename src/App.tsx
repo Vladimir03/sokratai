@@ -22,6 +22,7 @@ const Progress = lazy(() => import("./pages/Progress"));
 const Profile = lazy(() => import("./pages/Profile"));
 const MiniApp = lazy(() => import("./pages/MiniApp"));
 const MiniAppSolution = lazy(() => import("./pages/MiniAppSolution"));
+const Admin = lazy(() => import("./pages/Admin"));
 const NotFound = lazy(() => import("./pages/NotFound"));
 
 // Simple loading fallback
@@ -154,6 +155,14 @@ const App = () => (
             element={
               <Suspense fallback={<PageLoader />}>
                 <MiniAppSolution />
+              </Suspense>
+            } 
+          />
+          <Route 
+            path="/admin" 
+            element={
+              <Suspense fallback={<PageLoader />}>
+                <Admin />
               </Suspense>
             } 
           />
