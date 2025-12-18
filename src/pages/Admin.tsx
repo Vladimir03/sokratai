@@ -1,15 +1,19 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
+import { format, subDays } from "date-fns";
+import { ru } from "date-fns/locale";
 import { supabase } from "@/integrations/supabase/client";
 import { useAdminAccess } from "@/hooks/useAdminAccess";
 import { Button } from "@/components/ui/button";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Calendar } from "@/components/ui/calendar";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Skeleton } from "@/components/ui/skeleton";
 import { AdminSummaryCards } from "@/components/admin/AdminSummaryCards";
 import { AdminRetentionCards } from "@/components/admin/AdminRetentionCards";
 import { AdminFunnelChart } from "@/components/admin/AdminFunnelChart";
 import { AdminLineChart } from "@/components/admin/AdminLineChart";
-import { ArrowLeft, RefreshCw, Shield } from "lucide-react";
+import { ArrowLeft, RefreshCw, Shield, CalendarIcon } from "lucide-react";
+import { cn } from "@/lib/utils";
 
 interface CohortRetentionData {
   date: string;
@@ -43,7 +47,10 @@ const Admin = () => {
   const [analytics, setAnalytics] = useState<AnalyticsData | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [period, setPeriod] = useState("7");
+  const [dateRange, setDateRange] = useState<{ from: Date; to: Date }>({
+    from: subDays(new Date(), 7),
+    to: new Date(),
+  });
 
   const fetchAnalytics = async () => {
     setIsLoading(true);
@@ -56,7 +63,9 @@ const Admin = () => {
         return;
       }
 
-      const functionUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/admin-analytics?days=${period}`;
+      const startDate = dateRange.from.toISOString().split("T")[0];
+      const endDate = dateRange.to.toISOString().split("T")[0];
+      const functionUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/admin-analytics?startDate=${startDate}&endDate=${endDate}`;
       
       const response = await fetch(functionUrl, {
         method: "GET",
@@ -90,7 +99,7 @@ const Admin = () => {
     if (!isCheckingAdmin && isAdmin) {
       fetchAnalytics();
     }
-  }, [isCheckingAdmin, isAdmin, period]);
+  }, [isCheckingAdmin, isAdmin, dateRange]);
 
   if (isCheckingAdmin) {
     return (
@@ -137,17 +146,49 @@ const Admin = () => {
             </div>
           </div>
           <div className="flex items-center gap-3">
-            <Select value={period} onValueChange={setPeriod}>
-              <SelectTrigger className="w-40">
-                <SelectValue placeholder="Период" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="7">7 дней</SelectItem>
-                <SelectItem value="14">14 дней</SelectItem>
-                <SelectItem value="30">30 дней</SelectItem>
-                <SelectItem value="90">90 дней</SelectItem>
-              </SelectContent>
-            </Select>
+            <Popover>
+              <PopoverTrigger asChild>
+                <Button
+                  variant="outline"
+                  className={cn(
+                    "w-[280px] justify-start text-left font-normal",
+                    !dateRange && "text-muted-foreground"
+                  )}
+                >
+                  <CalendarIcon className="mr-2 h-4 w-4" />
+                  {dateRange?.from ? (
+                    dateRange.to ? (
+                      <>
+                        {format(dateRange.from, "d MMM", { locale: ru })} –{" "}
+                        {format(dateRange.to, "d MMM yyyy", { locale: ru })}
+                      </>
+                    ) : (
+                      format(dateRange.from, "d MMM yyyy", { locale: ru })
+                    )
+                  ) : (
+                    <span>Выберите период</span>
+                  )}
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-auto p-0" align="end">
+                <Calendar
+                  mode="range"
+                  defaultMonth={dateRange?.from}
+                  selected={{ from: dateRange.from, to: dateRange.to }}
+                  onSelect={(range) => {
+                    if (range?.from && range?.to) {
+                      setDateRange({ from: range.from, to: range.to });
+                    } else if (range?.from) {
+                      setDateRange({ from: range.from, to: range.from });
+                    }
+                  }}
+                  numberOfMonths={2}
+                  disabled={(date) => date > new Date()}
+                  className={cn("p-3 pointer-events-auto")}
+                  locale={ru}
+                />
+              </PopoverContent>
+            </Popover>
             <Button variant="outline" onClick={fetchAnalytics} disabled={isLoading}>
               <RefreshCw className={`w-4 h-4 mr-2 ${isLoading ? "animate-spin" : ""}`} />
               Обновить
