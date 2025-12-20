@@ -1,3 +1,5 @@
+import { Link } from "react-router-dom";
+
 const Footer = () => {
   return (
     <footer className="bg-slate-900 text-white py-16 px-4">
@@ -60,6 +62,12 @@ const Footer = () => {
               Telegram: @sokratai_ru_bot
             </a>
           </p>
+          <p className="text-lg">
+            📧{" "}
+            <a href="mailto:sokratai@yandex.ru" className="text-accent hover:text-accent/80 transition-colors">
+              sokratai@yandex.ru
+            </a>
+          </p>
         </div>
 
         {/* Brand Story */}
@@ -72,6 +80,21 @@ const Footer = () => {
         <p className="text-sm italic opacity-75 max-w-3xl mx-auto mb-6">
           "Хорошие учителя дают новые знания, а великие – учат мыслить по-новому" (с)
         </p>
+
+        {/* Legal Links */}
+        <div className="flex flex-wrap justify-center gap-4 mb-6 text-sm">
+          <Link to="/requisites" className="text-accent hover:text-accent/80 transition-colors">
+            Реквизиты
+          </Link>
+          <span className="opacity-40">|</span>
+          <Link to="/offer" className="text-accent hover:text-accent/80 transition-colors">
+            Публичная оферта
+          </Link>
+          <span className="opacity-40">|</span>
+          <Link to="/privacy-policy" className="text-accent hover:text-accent/80 transition-colors">
+            Политика конфиденциальности
+          </Link>
+        </div>
 
         <div className="border-t border-white/20 pt-6">
           <p className="text-sm opacity-60">© 2025 Сократ. Все права защищены.</p>

@@ -23,6 +23,9 @@ const Profile = lazy(() => import("./pages/Profile"));
 const MiniApp = lazy(() => import("./pages/MiniApp"));
 const MiniAppSolution = lazy(() => import("./pages/MiniAppSolution"));
 const Admin = lazy(() => import("./pages/Admin"));
+const Requisites = lazy(() => import("./pages/Requisites"));
+const Offer = lazy(() => import("./pages/Offer"));
+const PrivacyPolicy = lazy(() => import("./pages/PrivacyPolicy"));
 const NotFound = lazy(() => import("./pages/NotFound"));
 
 // Simple loading fallback
@@ -163,6 +166,30 @@ const App = () => (
             element={
               <Suspense fallback={<PageLoader />}>
                 <Admin />
+              </Suspense>
+            } 
+          />
+          <Route 
+            path="/requisites" 
+            element={
+              <Suspense fallback={<PageLoader />}>
+                <Requisites />
+              </Suspense>
+            } 
+          />
+          <Route 
+            path="/offer" 
+            element={
+              <Suspense fallback={<PageLoader />}>
+                <Offer />
+              </Suspense>
+            } 
+          />
+          <Route 
+            path="/privacy-policy" 
+            element={
+              <Suspense fallback={<PageLoader />}>
+                <PrivacyPolicy />
               </Suspense>
             } 
           />
