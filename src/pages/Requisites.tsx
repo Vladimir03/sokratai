@@ -57,7 +57,7 @@ const Requisites = () => {
 
         <div className="mt-8 text-center">
           <Link to="/">
-            <Button variant="outline" className="border-slate-600 text-white hover:bg-slate-700">
+            <Button variant="outline" className="border-slate-600 bg-slate-800 text-white hover:bg-slate-700">
               Вернуться на главную
             </Button>
           </Link>
