@@ -4,8 +4,15 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { lazy, Suspense } from "react";
+import { useYandexMetrika } from "@/hooks/useYandexMetrika";
 
 import Index from "./pages/Index";
+
+// Компонент для отслеживания аналитики (должен быть внутри BrowserRouter)
+const AnalyticsTracker = () => {
+  useYandexMetrika();
+  return null;
+};
 
 // Lazy load all pages for optimal code splitting
 const Login = lazy(() => import("./pages/Login"));
@@ -47,6 +54,7 @@ const App = () => (
       <Toaster />
       <Sonner />
       <BrowserRouter>
+        <AnalyticsTracker />
         <Routes>
           <Route path="/" element={<Index />} />
           <Route 
