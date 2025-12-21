@@ -8,11 +8,13 @@ import { Button } from "@/components/ui/button";
 import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { AdminSummaryCards } from "@/components/admin/AdminSummaryCards";
 import { AdminRetentionCards } from "@/components/admin/AdminRetentionCards";
 import { AdminFunnelChart } from "@/components/admin/AdminFunnelChart";
 import { AdminLineChart } from "@/components/admin/AdminLineChart";
-import { ArrowLeft, RefreshCw, Shield, CalendarIcon } from "lucide-react";
+import { AdminCRM } from "@/components/admin/AdminCRM";
+import { ArrowLeft, RefreshCw, Shield, CalendarIcon, BarChart3, MessageSquare } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 interface CohortRetentionData {
@@ -196,57 +198,77 @@ const Admin = () => {
           </div>
         </div>
 
-        {error && (
-          <div className="bg-destructive/10 text-destructive rounded-lg p-4 mb-6">
-            {error}
-          </div>
-        )}
+        {/* Tabs */}
+        <Tabs defaultValue="analytics" className="space-y-6">
+          <TabsList>
+            <TabsTrigger value="analytics" className="flex items-center gap-2">
+              <BarChart3 className="w-4 h-4" />
+              Аналитика
+            </TabsTrigger>
+            <TabsTrigger value="crm" className="flex items-center gap-2">
+              <MessageSquare className="w-4 h-4" />
+              CRM
+            </TabsTrigger>
+          </TabsList>
 
-        {isLoading ? (
-          <div className="space-y-6">
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-              {[...Array(4)].map((_, i) => (
-                <Skeleton key={i} className="h-32" />
-              ))}
-            </div>
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              <Skeleton className="h-80" />
-              <Skeleton className="h-80" />
-            </div>
-          </div>
-        ) : analytics ? (
-          <div className="space-y-6">
-            {/* Summary Cards */}
-            <AdminSummaryCards data={analytics.summary} />
+          <TabsContent value="analytics">
+            {error && (
+              <div className="bg-destructive/10 text-destructive rounded-lg p-4 mb-6">
+                {error}
+              </div>
+            )}
 
-            {/* Charts Row 1 */}
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              <AdminLineChart
-                title="Регистрации"
-                data={analytics.registrations}
-                color="#22c55e"
-              />
-              <AdminLineChart
-                title="Сообщения"
-                data={analytics.messages}
-                color="#8b5cf6"
-              />
-            </div>
+            {isLoading ? (
+              <div className="space-y-6">
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                  {[...Array(4)].map((_, i) => (
+                    <Skeleton key={i} className="h-32" />
+                  ))}
+                </div>
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                  <Skeleton className="h-80" />
+                  <Skeleton className="h-80" />
+                </div>
+              </div>
+            ) : analytics ? (
+              <div className="space-y-6">
+                {/* Summary Cards */}
+                <AdminSummaryCards data={analytics.summary} />
 
-            {/* Charts Row 2 */}
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              <AdminLineChart
-                title="DAU (активные пользователи)"
-                data={analytics.dau}
-                color="#3b82f6"
-              />
-              <AdminRetentionCards cohortRetention={analytics.cohortRetention} />
-            </div>
+                {/* Charts Row 1 */}
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                  <AdminLineChart
+                    title="Регистрации"
+                    data={analytics.registrations}
+                    color="#22c55e"
+                  />
+                  <AdminLineChart
+                    title="Сообщения"
+                    data={analytics.messages}
+                    color="#8b5cf6"
+                  />
+                </div>
 
-            {/* Funnel */}
-            <AdminFunnelChart funnel={analytics.funnel} />
-          </div>
-        ) : null}
+                {/* Charts Row 2 */}
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                  <AdminLineChart
+                    title="DAU (активные пользователи)"
+                    data={analytics.dau}
+                    color="#3b82f6"
+                  />
+                  <AdminRetentionCards cohortRetention={analytics.cohortRetention} />
+                </div>
+
+                {/* Funnel */}
+                <AdminFunnelChart funnel={analytics.funnel} />
+              </div>
+            ) : null}
+          </TabsContent>
+
+          <TabsContent value="crm">
+            <AdminCRM />
+          </TabsContent>
+        </Tabs>
       </div>
     </div>
   );
