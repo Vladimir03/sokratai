@@ -6,12 +6,15 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Badge } from "@/components/ui/badge";
 import { AdminChatView } from "./AdminChatView";
-import { Search, MessageSquare, User } from "lucide-react";
+import { Search, MessageSquare, User, Globe, Bot } from "lucide-react";
 
 interface ChatWithUser {
   id: string;
   title: string | null;
+  chat_type: string;
   last_message_at: string | null;
   updated_at: string;
   created_at: string;
@@ -40,7 +43,7 @@ export const AdminCRM = () => {
       // Получаем все чаты
       const { data: chatsData, error: chatsError } = await supabase
         .from("chats")
-        .select("id, title, last_message_at, created_at, updated_at, user_id")
+        .select("id, title, chat_type, last_message_at, created_at, updated_at, user_id")
         .order("updated_at", { ascending: false });
 
       if (chatsError) throw chatsError;
@@ -113,6 +116,11 @@ export const AdminCRM = () => {
     return username.includes(query) || telegramUsername.includes(query);
   });
 
+  const getChatPlatform = (chat: ChatWithUser) => {
+    if (chat.title === "Telegram чат") return "telegram";
+    return "web";
+  };
+
   const getUserDisplayName = (chat: ChatWithUser) => {
     if (chat.user?.telegram_username) {
       return `@${chat.user.telegram_username}`;
@@ -127,10 +135,64 @@ export const AdminCRM = () => {
         chatId={selectedChatId}
         userName={selectedChat ? getUserDisplayName(selectedChat) : ""}
         userGrade={selectedChat?.user?.grade || null}
+        platform={selectedChat ? getChatPlatform(selectedChat) : undefined}
         onBack={() => setSelectedChatId(null)}
       />
     );
   }
+
+  const webChats = filteredChats.filter(chat => getChatPlatform(chat) === "web");
+  const telegramChats = filteredChats.filter(chat => getChatPlatform(chat) === "telegram");
+
+  const ChatList = ({ chatsToDisplay }: { chatsToDisplay: ChatWithUser[] }) => (
+    <ScrollArea className="h-[600px]">
+      <div className="space-y-1">
+        {chatsToDisplay.map((chat) => (
+          <div
+            key={chat.id}
+            onClick={() => setSelectedChatId(chat.id)}
+            className="flex items-center justify-between p-3 rounded-lg hover:bg-muted/50 cursor-pointer transition-colors border border-transparent hover:border-border"
+          >
+            <div className="flex items-center gap-3">
+              <div className="relative">
+                <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center">
+                  <User className="w-5 h-5 text-primary" />
+                </div>
+                <div className="absolute -bottom-1 -right-1 bg-background rounded-full p-0.5 border border-border">
+                  {getChatPlatform(chat) === "telegram" ? (
+                    <Bot className="w-3 h-3 text-[#0088cc]" />
+                  ) : (
+                    <Globe className="w-3 h-3 text-emerald-500" />
+                  )}
+                </div>
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <div className="font-medium">{getUserDisplayName(chat)}</div>
+                  <Badge variant="outline" className="text-[10px] h-4 px-1 uppercase">
+                    {getChatPlatform(chat)}
+                  </Badge>
+                </div>
+                <div className="text-sm text-muted-foreground">
+                  {chat.user?.grade ? `${chat.user.grade} класс` : "Класс не указан"}
+                </div>
+              </div>
+            </div>
+            <div className="text-right">
+              <div className="text-sm font-medium">
+                {chat.message_count} сообщ.
+              </div>
+              <div className="text-xs text-muted-foreground">
+                {format(new Date(chat.last_message_at || chat.updated_at || chat.created_at), "d MMM, HH:mm", {
+                  locale: ru,
+                })}
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+    </ScrollArea>
+  );
 
   return (
     <Card>
@@ -164,39 +226,33 @@ export const AdminCRM = () => {
             <p>Чаты не найдены</p>
           </div>
         ) : (
-          <ScrollArea className="h-[600px]">
-            <div className="space-y-1">
-              {filteredChats.map((chat) => (
-                <div
-                  key={chat.id}
-                  onClick={() => setSelectedChatId(chat.id)}
-                  className="flex items-center justify-between p-3 rounded-lg hover:bg-muted/50 cursor-pointer transition-colors border border-transparent hover:border-border"
-                >
-                  <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center">
-                      <User className="w-5 h-5 text-primary" />
-                    </div>
-                    <div>
-                      <div className="font-medium">{getUserDisplayName(chat)}</div>
-                      <div className="text-sm text-muted-foreground">
-                        {chat.user?.grade ? `${chat.user.grade} класс` : "Класс не указан"}
-                      </div>
-                    </div>
-                  </div>
-                  <div className="text-right">
-                    <div className="text-sm font-medium">
-                      {chat.message_count} сообщ.
-                    </div>
-                    <div className="text-xs text-muted-foreground">
-                      {format(new Date(chat.last_message_at || chat.updated_at || chat.created_at), "d MMM, HH:mm", {
-                        locale: ru,
-                      })}
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </ScrollArea>
+          <Tabs defaultValue="all" className="w-full">
+            <TabsList className="grid w-full grid-cols-3 mb-4">
+              <TabsTrigger value="all">Все ({filteredChats.length})</TabsTrigger>
+              <TabsTrigger value="web">Веб ({webChats.length})</TabsTrigger>
+              <TabsTrigger value="telegram">Telegram ({telegramChats.length})</TabsTrigger>
+            </TabsList>
+            
+            <TabsContent value="all">
+              <ChatList chatsToDisplay={filteredChats} />
+            </TabsContent>
+            
+            <TabsContent value="web">
+              {webChats.length === 0 ? (
+                <div className="text-center py-8 text-muted-foreground">Веб-чаты не найдены</div>
+              ) : (
+                <ChatList chatsToDisplay={webChats} />
+              )}
+            </TabsContent>
+            
+            <TabsContent value="telegram">
+              {telegramChats.length === 0 ? (
+                <div className="text-center py-8 text-muted-foreground">Telegram-чаты не найдены</div>
+              ) : (
+                <ChatList chatsToDisplay={telegramChats} />
+              )}
+            </TabsContent>
+          </Tabs>
         )}
 
         <div className="mt-4 text-sm text-muted-foreground text-center">

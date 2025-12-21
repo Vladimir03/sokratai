@@ -6,7 +6,8 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Skeleton } from "@/components/ui/skeleton";
-import { ArrowLeft, User, Bot, Image as ImageIcon } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
+import { ArrowLeft, User, Bot, Image as ImageIcon, Globe } from "lucide-react";
 
 interface Message {
   id: string;
@@ -22,6 +23,7 @@ interface AdminChatViewProps {
   chatId: string;
   userName: string;
   userGrade: number | null;
+  platform?: "web" | "telegram";
   onBack: () => void;
 }
 
@@ -29,6 +31,7 @@ export const AdminChatView = ({
   chatId,
   userName,
   userGrade,
+  platform,
   onBack,
 }: AdminChatViewProps) => {
   const [messages, setMessages] = useState<Message[]>([]);
@@ -77,8 +80,20 @@ export const AdminChatView = ({
           <Button variant="ghost" size="icon" onClick={onBack}>
             <ArrowLeft className="w-5 h-5" />
           </Button>
-          <div>
-            <CardTitle className="text-lg">{userName}</CardTitle>
+          <div className="flex-1">
+            <div className="flex items-center gap-2">
+              <CardTitle className="text-lg">{userName}</CardTitle>
+              {platform && (
+                <Badge variant="outline" className="text-[10px] h-4 px-1 uppercase flex items-center gap-1">
+                  {platform === "telegram" ? (
+                    <Bot className="w-3 h-3 text-[#0088cc]" />
+                  ) : (
+                    <Globe className="w-3 h-3 text-emerald-500" />
+                  )}
+                  {platform}
+                </Badge>
+              )}
+            </div>
             <p className="text-sm text-muted-foreground">
               {userGrade ? `${userGrade} класс` : "Класс не указан"} •{" "}
               {messages.length} сообщений
