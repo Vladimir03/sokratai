@@ -14,6 +14,8 @@ interface Message {
   content: string;
   created_at: string;
   image_url: string | null;
+  image_path: string | null;
+  signedImageUrl?: string | null;
 }
 
 interface AdminChatViewProps {
@@ -41,12 +43,26 @@ export const AdminChatView = ({
     try {
       const { data, error } = await supabase
         .from("chat_messages")
-        .select("id, role, content, created_at, image_url")
+        .select("id, role, content, created_at, image_url, image_path")
         .eq("chat_id", chatId)
         .order("created_at", { ascending: true });
 
       if (error) throw error;
-      setMessages(data || []);
+
+      // Generate fresh signed URLs for images
+      const messagesWithSignedUrls = await Promise.all(
+        (data || []).map(async (msg) => {
+          if (msg.image_path) {
+            const { data: signedData } = await supabase.storage
+              .from("chat-images")
+              .createSignedUrl(msg.image_path, 3600); // 1 hour
+            return { ...msg, signedImageUrl: signedData?.signedUrl || null };
+          }
+          return { ...msg, signedImageUrl: null };
+        })
+      );
+
+      setMessages(messagesWithSignedUrls);
     } catch (err) {
       console.error("Error fetching messages:", err);
     } finally {
@@ -103,16 +119,16 @@ export const AdminChatView = ({
                         : "bg-muted"
                     }`}
                   >
-                    {message.image_url && (
+                    {(message.signedImageUrl || message.image_url) && (
                       <div className="mb-2">
                         <a
-                          href={message.image_url}
+                          href={message.signedImageUrl || message.image_url || "#"}
                           target="_blank"
                           rel="noopener noreferrer"
                           className="block"
                         >
                           <img
-                            src={message.image_url}
+                            src={message.signedImageUrl || message.image_url || ""}
                             alt="Прикреплённое изображение"
                             className="max-w-full max-h-48 rounded-md object-contain"
                             onError={(e) => {

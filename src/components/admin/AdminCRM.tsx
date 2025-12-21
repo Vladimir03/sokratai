@@ -13,6 +13,7 @@ interface ChatWithUser {
   id: string;
   title: string | null;
   last_message_at: string | null;
+  updated_at: string;
   created_at: string;
   user_id: string;
   message_count: number;
@@ -39,8 +40,8 @@ export const AdminCRM = () => {
       // Получаем все чаты
       const { data: chatsData, error: chatsError } = await supabase
         .from("chats")
-        .select("id, title, last_message_at, created_at, user_id")
-        .order("last_message_at", { ascending: false, nullsFirst: false });
+        .select("id, title, last_message_at, created_at, updated_at, user_id")
+        .order("updated_at", { ascending: false });
 
       if (chatsError) throw chatsError;
 
@@ -187,11 +188,9 @@ export const AdminCRM = () => {
                       {chat.message_count} сообщ.
                     </div>
                     <div className="text-xs text-muted-foreground">
-                      {chat.last_message_at
-                        ? format(new Date(chat.last_message_at), "d MMM, HH:mm", {
-                            locale: ru,
-                          })
-                        : "—"}
+                      {format(new Date(chat.last_message_at || chat.updated_at || chat.created_at), "d MMM, HH:mm", {
+                        locale: ru,
+                      })}
                     </div>
                   </div>
                 </div>
