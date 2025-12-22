@@ -1,7 +1,7 @@
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
-import { MessageCircle, Crown, ExternalLink, X, Gift } from "lucide-react";
+import { MessageCircle, Crown, CreditCard, X, Gift } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useState } from "react";
 
@@ -13,9 +13,8 @@ interface SubscriptionBannerProps {
   showFull?: boolean;
   isTrialActive?: boolean;
   trialDaysLeft?: number;
+  onOpenPayment?: () => void;
 }
-
-const TELEGRAM_CONTACT = "Analyst_Vladimir";
 
 const pluralizeDays = (days: number) => {
   const mod10 = days % 10;
@@ -32,15 +31,18 @@ export function SubscriptionBanner({
   limitReached,
   showFull = false,
   isTrialActive = false,
-  trialDaysLeft = 0
+  trialDaysLeft = 0,
+  onOpenPayment
 }: SubscriptionBannerProps) {
   const [dismissed, setDismissed] = useState(false);
   
   // Don't show for premium users
   if (isPremium) return null;
 
-  const handleOpenTelegram = () => {
-    window.open(`https://t.me/${TELEGRAM_CONTACT}`, '_blank');
+  const handleOpenPayment = () => {
+    if (onOpenPayment) {
+      onOpenPayment();
+    }
   };
 
   // Trial badge for chat header
@@ -141,17 +143,13 @@ export function SubscriptionBanner({
                 </div>
                 
                 <Button 
-                  onClick={handleOpenTelegram}
+                  onClick={handleOpenPayment}
                   className="w-full bg-white text-purple-600 hover:bg-white/90 font-bold text-sm sm:text-base py-2 sm:py-2.5"
                   size="default"
                 >
-                  <ExternalLink className="w-3.5 h-3.5 sm:w-4 sm:h-4 mr-1.5 sm:mr-2" />
-                  Написать @{TELEGRAM_CONTACT}
+                  <CreditCard className="w-3.5 h-3.5 sm:w-4 sm:h-4 mr-1.5 sm:mr-2" />
+                  Оформить Premium — 699₽/мес
                 </Button>
-                
-                <p className="text-[10px] sm:text-xs text-white/70 text-center">
-                  💬 Напиши "СОКРАТ" для активации
-                </p>
               </div>
             </div>
             
@@ -193,14 +191,22 @@ export function MessageLimitWarning({ remaining }: { remaining: number }) {
 // Trial expiry reminder component
 export function TrialExpiryReminder({ 
   trialDaysLeft, 
-  onDismiss 
+  onDismiss,
+  onOpenPayment
 }: { 
   trialDaysLeft: number; 
   onDismiss: () => void;
+  onOpenPayment?: () => void;
 }) {
   if (trialDaysLeft > 2 || trialDaysLeft < 0) return null;
 
   const isLastDay = trialDaysLeft <= 1;
+  
+  const handleOpenPayment = () => {
+    if (onOpenPayment) {
+      onOpenPayment();
+    }
+  };
   
   return (
     <AnimatePresence>
@@ -241,7 +247,7 @@ export function TrialExpiryReminder({
         </div>
         
         <Button 
-          onClick={() => window.open(`https://t.me/${TELEGRAM_CONTACT}`, '_blank')}
+          onClick={handleOpenPayment}
           className={`w-full mt-3 ${
             isLastDay 
               ? 'bg-gradient-to-r from-red-500 to-orange-500 hover:from-red-600 hover:to-orange-600' 

@@ -10,7 +10,7 @@ const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
-const PREMIUM_CONTACT_URL = "https://t.me/Analyst_Vladimir";
+const WEB_PAYMENT_URL = "https://sokratai.ru/profile?openPayment=true";
 const WEB_PRICING_URL = "https://sokratai.ru/#pricing";
 
 const pluralizeDays = (days: number) => {
@@ -23,8 +23,8 @@ const pluralizeDays = (days: number) => {
 
 const premiumKeyboard = {
   inline_keyboard: [
-    [{ text: "Оформить Premium — 699₽/мес", url: PREMIUM_CONTACT_URL }],
-    [{ text: "Открыть веб-версию", url: WEB_PRICING_URL }],
+    [{ text: "💳 Оформить Premium — 699₽/мес", url: WEB_PAYMENT_URL }],
+    [{ text: "📱 Открыть веб-версию", url: WEB_PRICING_URL }],
   ],
 };
 

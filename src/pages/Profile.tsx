@@ -5,10 +5,12 @@ import { Input } from "@/components/ui/input";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import AuthGuard from "@/components/AuthGuard";
-import { User, Zap, Target, Trophy, Edit, Send, CheckCircle, Loader2, Crown, Gift } from "lucide-react";
+import { User, Zap, Target, Trophy, Edit, Send, CheckCircle, Loader2, Crown, Gift, CreditCard } from "lucide-react";
 import { z } from "zod";
 import { PageContent } from "@/components/PageContent";
 import { useSubscription } from "@/hooks/useSubscription";
+import { PaymentModal } from "@/components/PaymentModal";
+import { useSearchParams } from "react-router-dom";
 
 interface Profile {
   username: string;
@@ -43,6 +45,24 @@ const Profile = () => {
   const [newUsername, setNewUsername] = useState("");
   const [userId, setUserId] = useState<string | undefined>(undefined);
   const subscription = useSubscription(userId);
+  const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
+  const [searchParams] = useSearchParams();
+
+  // Check for payment success or openPayment from URL params
+  useEffect(() => {
+    if (searchParams.get('payment') === 'success') {
+      toast.success("Оплата прошла успешно! Подписка активирована.");
+      subscription.refresh();
+      // Clean up URL
+      window.history.replaceState({}, '', '/profile');
+    }
+    // Auto-open payment modal when coming from Telegram
+    if (searchParams.get('openPayment') === 'true') {
+      setIsPaymentModalOpen(true);
+      // Clean up URL
+      window.history.replaceState({}, '', '/profile');
+    }
+  }, [searchParams]);
 
   useEffect(() => {
     fetchProfile();
@@ -355,8 +375,9 @@ const Profile = () => {
                     <Button 
                       size="sm" 
                       className="bg-emerald-600 hover:bg-emerald-700 text-white"
-                      onClick={() => window.open('https://t.me/Analyst_Vladimir', '_blank')}
+                      onClick={() => setIsPaymentModalOpen(true)}
                     >
+                      <CreditCard className="w-4 h-4 mr-2" />
                       Оформить Premium
                     </Button>
                   )}
@@ -550,6 +571,16 @@ const Profile = () => {
         </div>
       </div>
       </PageContent>
+      
+      {/* Payment Modal */}
+      <PaymentModal 
+        isOpen={isPaymentModalOpen}
+        onClose={() => setIsPaymentModalOpen(false)}
+        onSuccess={() => {
+          subscription.refresh();
+          toast.success("Подписка Premium активирована!");
+        }}
+      />
     </AuthGuard>
   );
 };

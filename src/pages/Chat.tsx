@@ -3,7 +3,8 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import ChatMessage from "@/components/ChatMessage";
 import { Button } from "@/components/ui/button";
-import { Menu, ChevronDown, X } from "lucide-react";
+import { Menu, ChevronDown, X, CreditCard } from "lucide-react";
+import { PaymentModal } from "@/components/PaymentModal";
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { useToast } from "@/hooks/use-toast";
 import ChatSkeleton from "@/components/ChatSkeleton";
@@ -64,6 +65,7 @@ export default function Chat() {
   const [oldestMessageTimestamp, setOldestMessageTimestamp] = useState<string | null>(null);
   const [trialReminderDismissed, setTrialReminderDismissed] = useState(false);
   const [trialBannerDismissed, setTrialBannerDismissed] = useState(false);
+  const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
   const [floatingDate, setFloatingDate] = useState<string | null>(null);
   const [showFloatingDate, setShowFloatingDate] = useState(false);
   const lastScrollTopRef = useRef(0);
@@ -1798,6 +1800,7 @@ export default function Chat() {
                     limitReached={subscription.limitReached}
                     isTrialActive={subscription.isTrialActive}
                     trialDaysLeft={subscription.trialDaysLeft}
+                    onOpenPayment={() => setIsPaymentModalOpen(true)}
                   />
                 )}
                 <ConnectionIndicator />
@@ -1814,6 +1817,7 @@ export default function Chat() {
                 <TrialExpiryReminder 
                   trialDaysLeft={subscription.trialDaysLeft}
                   onDismiss={() => setTrialReminderDismissed(true)}
+                  onOpenPayment={() => setIsPaymentModalOpen(true)}
                 />
               )}
 
@@ -2018,6 +2022,7 @@ export default function Chat() {
                   showFull={true}
                   isTrialActive={subscription.isTrialActive}
                   trialDaysLeft={subscription.trialDaysLeft}
+                  onOpenPayment={() => setIsPaymentModalOpen(true)}
                 />
               )}
 
@@ -2044,8 +2049,9 @@ export default function Chat() {
                       <Button 
                         size="sm" 
                         className="bg-emerald-600 hover:bg-emerald-700 text-white"
-                        onClick={() => window.open('https://t.me/Analyst_Vladimir', '_blank')}
+                        onClick={() => setIsPaymentModalOpen(true)}
                       >
+                        <CreditCard className="w-4 h-4 mr-2" />
                         Оформить Premium
                       </Button>
                     </div>
@@ -2081,6 +2087,15 @@ export default function Chat() {
           </div>
         </div>
       </div>
+      
+      {/* Payment Modal */}
+      <PaymentModal 
+        isOpen={isPaymentModalOpen}
+        onClose={() => setIsPaymentModalOpen(false)}
+        onSuccess={() => {
+          subscription.refresh();
+        }}
+      />
     </AuthGuard>
   );
 }
