@@ -25,6 +25,7 @@ const SUBSCRIPTION_DAYS = 30;
 
 interface CreatePaymentRequest {
   return_url?: string;
+  confirmation_type?: "embedded" | "redirect";
 }
 
 interface YooKassaPayment {
@@ -110,6 +111,7 @@ Deno.serve(async (req) => {
     // Parse request body
     const body: CreatePaymentRequest = await req.json().catch(() => ({}));
     const returnUrl = body.return_url || "https://sokratai.ru/profile?payment=success";
+    const confirmationType: "embedded" | "redirect" = body.confirmation_type === "redirect" ? "redirect" : "embedded";
 
     // Generate idempotency key for this payment attempt
     const idempotencyKey = crypto.randomUUID();
@@ -121,7 +123,7 @@ Deno.serve(async (req) => {
         currency: "RUB",
       },
       confirmation: {
-        type: "embedded", // For widget integration
+        type: confirmationType, // embedded = widget in DOM, redirect = open in new tab (better for webviews/3DS)
         return_url: returnUrl,
       },
       capture: true,
@@ -203,7 +205,9 @@ Deno.serve(async (req) => {
     return new Response(
       JSON.stringify({
         payment_id: payment.id,
+        confirmation_type: payment.confirmation.type,
         confirmation_token: payment.confirmation.confirmation_token,
+        confirmation_url: payment.confirmation.confirmation_url,
         status: payment.status,
       }),
       { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }

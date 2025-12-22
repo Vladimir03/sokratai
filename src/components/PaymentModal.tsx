@@ -41,6 +41,7 @@ export function PaymentModal({ isOpen, onClose, onSuccess }: PaymentModalProps) 
   const [errorDetails, setErrorDetails] = useState<ErrorDetails | null>(null);
   const [showTechDetails, setShowTechDetails] = useState(false);
   const [confirmationToken, setConfirmationToken] = useState<string | null>(null);
+  const [redirectUrl, setRedirectUrl] = useState<string | null>(null);
   const widgetRef = useRef<{ destroy: () => void } | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -69,6 +70,7 @@ export function PaymentModal({ isOpen, onClose, onSuccess }: PaymentModalProps) 
       setErrorDetails(null);
       setShowTechDetails(false);
       setConfirmationToken(null);
+      setRedirectUrl(null);
       return;
     }
 
@@ -94,6 +96,7 @@ export function PaymentModal({ isOpen, onClose, onSuccess }: PaymentModalProps) 
     setErrorDetails(null);
     setShowTechDetails(false);
     setConfirmationToken(null);
+    setRedirectUrl(null);
 
     try {
       // Get current session
@@ -105,11 +108,30 @@ export function PaymentModal({ isOpen, onClose, onSuccess }: PaymentModalProps) 
       }
 
       // Create payment via Edge Function
+      const ua = typeof navigator !== "undefined" ? navigator.userAgent : "";
+      const isInAppBrowser =
+        /Telegram/i.test(ua) ||
+        /Instagram/i.test(ua) ||
+        /FBAN|FBAV/i.test(ua) ||
+        /Line/i.test(ua);
+
+      const preferredConfirmationType = isInAppBrowser ? "redirect" : "embedded";
+
       const { data, error } = await supabase.functions.invoke("yookassa-create-payment", {
         body: {
           return_url: `${window.location.origin}/profile?payment=success`,
+          confirmation_type: preferredConfirmationType,
         },
       });
+
+      // Redirect flow: no token, but has confirmation_url
+      if (!error && data?.confirmation_url && preferredConfirmationType === "redirect") {
+        setRedirectUrl(data.confirmation_url);
+        setStatus("widget");
+        // Try to open immediately (user gesture is present from clicking "Оформить")
+        window.open(data.confirmation_url, "_blank", "noopener,noreferrer");
+        return;
+      }
 
       if (error || !data?.confirmation_token) {
         console.error("Payment creation error:", error, data);
@@ -308,6 +330,30 @@ export function PaymentModal({ isOpen, onClose, onSuccess }: PaymentModalProps) 
                   Попробовать снова
                 </Button>
               </div>
+
+              <Button
+                variant="secondary"
+                onClick={async () => {
+                  try {
+                    const { data, error } = await supabase.functions.invoke("yookassa-create-payment", {
+                      body: {
+                        return_url: `${window.location.origin}/profile?payment=success`,
+                        confirmation_type: "redirect",
+                      },
+                    });
+                    if (error || !data?.confirmation_url) {
+                      toast.error("Не удалось открыть оплату в новом окне");
+                      return;
+                    }
+                    setRedirectUrl(data.confirmation_url);
+                    window.open(data.confirmation_url, "_blank", "noopener,noreferrer");
+                  } catch {
+                    toast.error("Не удалось открыть оплату в новом окне");
+                  }
+                }}
+              >
+                Открыть оплату в новом окне
+              </Button>
             </div>
           )}
 
@@ -337,6 +383,21 @@ export function PaymentModal({ isOpen, onClose, onSuccess }: PaymentModalProps) 
               <li>🎓 Доступ ко всем функциям</li>
               <li>💬 Приоритетная поддержка</li>
             </ul>
+
+            {redirectUrl && (
+              <div className="mt-3 text-sm">
+                <p className="text-muted-foreground">
+                  Оплата открывается в новой вкладке (так 3‑D Secure работает стабильнее во встроенных браузерах).
+                  Если вкладка не открылась — нажмите кнопку:
+                </p>
+                <Button
+                  className="mt-2 w-full"
+                  onClick={() => window.open(redirectUrl, "_blank", "noopener,noreferrer")}
+                >
+                  Открыть оплату
+                </Button>
+              </div>
+            )}
           </div>
         )}
       </DialogContent>
