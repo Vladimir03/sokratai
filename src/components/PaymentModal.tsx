@@ -45,6 +45,32 @@ export function PaymentModal({ isOpen, onClose, onSuccess }: PaymentModalProps) 
   const widgetRef = useRef<{ destroy: () => void } | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
+  const openUrlInNewTab = (url: string) => {
+    // Try to open a new tab; if blocked, user can use the fallback button we show.
+    try {
+      window.open(url, "_blank", "noopener,noreferrer");
+    } catch {
+      // ignore
+    }
+  };
+
+  const createRedirectPaymentAndOpen = async () => {
+    const { data, error } = await supabase.functions.invoke("yookassa-create-payment", {
+      body: {
+        return_url: `${window.location.origin}/profile?payment=success`,
+        confirmation_type: "redirect",
+      },
+    });
+
+    if (error || !data?.confirmation_url) {
+      toast.error("Не удалось открыть оплату в новом окне");
+      return;
+    }
+
+    setRedirectUrl(data.confirmation_url);
+    openUrlInNewTab(data.confirmation_url);
+  };
+
   // Load YooKassa widget script
   useEffect(() => {
     if (!isOpen) return;
@@ -115,21 +141,32 @@ export function PaymentModal({ isOpen, onClose, onSuccess }: PaymentModalProps) 
         /FBAN|FBAV/i.test(ua) ||
         /Line/i.test(ua);
 
+      // Lovable preview and many in-app environments run inside an iframe.
+      // Embedded 3DS is often non-interactive in nested iframes, so prefer redirect.
+      const isInIframe = (() => {
+        try {
+          return window.top !== window.self;
+        } catch {
+          return true; // cross-origin access => definitely embedded
+        }
+      })();
+
       const preferredConfirmationType = isInAppBrowser ? "redirect" : "embedded";
+      const confirmationType = (isInIframe || isInAppBrowser) ? "redirect" : preferredConfirmationType;
 
       const { data, error } = await supabase.functions.invoke("yookassa-create-payment", {
         body: {
           return_url: `${window.location.origin}/profile?payment=success`,
-          confirmation_type: preferredConfirmationType,
+          confirmation_type: confirmationType,
         },
       });
 
       // Redirect flow: no token, but has confirmation_url
-      if (!error && data?.confirmation_url && preferredConfirmationType === "redirect") {
+      if (!error && data?.confirmation_url && confirmationType === "redirect") {
         setRedirectUrl(data.confirmation_url);
         setStatus("widget");
         // Try to open immediately (user gesture is present from clicking "Оформить")
-        window.open(data.confirmation_url, "_blank", "noopener,noreferrer");
+        openUrlInNewTab(data.confirmation_url);
         return;
       }
 
@@ -335,18 +372,7 @@ export function PaymentModal({ isOpen, onClose, onSuccess }: PaymentModalProps) 
                 variant="secondary"
                 onClick={async () => {
                   try {
-                    const { data, error } = await supabase.functions.invoke("yookassa-create-payment", {
-                      body: {
-                        return_url: `${window.location.origin}/profile?payment=success`,
-                        confirmation_type: "redirect",
-                      },
-                    });
-                    if (error || !data?.confirmation_url) {
-                      toast.error("Не удалось открыть оплату в новом окне");
-                      return;
-                    }
-                    setRedirectUrl(data.confirmation_url);
-                    window.open(data.confirmation_url, "_blank", "noopener,noreferrer");
+                    await createRedirectPaymentAndOpen();
                   } catch {
                     toast.error("Не удалось открыть оплату в новом окне");
                   }
@@ -392,12 +418,31 @@ export function PaymentModal({ isOpen, onClose, onSuccess }: PaymentModalProps) 
                 </p>
                 <Button
                   className="mt-2 w-full"
-                  onClick={() => window.open(redirectUrl, "_blank", "noopener,noreferrer")}
+                  onClick={() => openUrlInNewTab(redirectUrl)}
                 >
                   Открыть оплату
                 </Button>
               </div>
             )}
+          </div>
+        )}
+
+        {/* Manual fallback even when embedded widget is shown (3DS can be non-clickable in some envs) */}
+        {status === "widget" && !redirectUrl && (
+          <div className="mt-3">
+            <Button
+              variant="outline"
+              className="w-full"
+              onClick={async () => {
+                try {
+                  await createRedirectPaymentAndOpen();
+                } catch {
+                  toast.error("Не удалось открыть оплату в новом окне");
+                }
+              }}
+            >
+              Если кнопки не нажимаются — открыть оплату в новом окне
+            </Button>
           </div>
         )}
       </DialogContent>
