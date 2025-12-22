@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { supabase } from "@/lib/supabaseClient";
+import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { Loader2, Crown, CheckCircle, XCircle } from "lucide-react";
 
@@ -98,9 +98,19 @@ export function PaymentModal({ isOpen, onClose, onSuccess }: PaymentModalProps) 
         },
       });
 
-      if (error || !data?.confirmation_token) {
-        console.error("Payment creation error:", error, data);
-        setErrorMessage(data?.error || "Не удалось создать платёж");
+      console.log("Payment response:", { data, error });
+
+      if (error) {
+        console.error("Payment creation error:", error);
+        const errorMsg = error.message || "Не удалось создать платёж";
+        setErrorMessage(errorMsg);
+        setStatus("error");
+        return;
+      }
+
+      if (!data?.confirmation_token) {
+        console.error("No confirmation token in response:", data);
+        setErrorMessage(data?.error || data?.details || "Не удалось создать платёж");
         setStatus("error");
         return;
       }
