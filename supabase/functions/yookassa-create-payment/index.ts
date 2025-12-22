@@ -5,10 +5,14 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
-const YOOKASSA_SHOP_ID = Deno.env.get("YOOKASSA_SHOP_ID");
-const YOOKASSA_SECRET_KEY = Deno.env.get("YOOKASSA_SECRET_KEY");
+// Get and validate credentials
+const YOOKASSA_SHOP_ID = (Deno.env.get("YOOKASSA_SHOP_ID") || "").trim();
+const YOOKASSA_SECRET_KEY = (Deno.env.get("YOOKASSA_SECRET_KEY") || "").trim();
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+
+// Validate ShopID format (must be digits only)
+const isValidShopId = (id: string): boolean => /^\d+$/.test(id);
 
 // Webhook URL for payment notifications
 const getWebhookUrl = () => {
@@ -33,6 +37,14 @@ interface YooKassaPayment {
   };
 }
 
+interface YooKassaError {
+  type: string;
+  id: string;
+  code: string;
+  description: string;
+  parameter?: string;
+}
+
 Deno.serve(async (req) => {
   // Handle CORS preflight
   if (req.method === "OPTIONS") {
@@ -40,15 +52,33 @@ Deno.serve(async (req) => {
   }
 
   try {
-    // Validate YooKassa credentials
+    // Validate YooKassa credentials with detailed diagnostics
+    console.log("Checking YooKassa credentials...");
+    console.log(`YOOKASSA_SHOP_ID length: ${YOOKASSA_SHOP_ID.length}, valid format: ${isValidShopId(YOOKASSA_SHOP_ID)}`);
+    console.log(`YOOKASSA_SECRET_KEY length: ${YOOKASSA_SECRET_KEY.length}`);
+    
     if (!YOOKASSA_SHOP_ID || !YOOKASSA_SECRET_KEY) {
-      console.error("Missing YooKassa credentials:", { 
-        hasShopId: !!YOOKASSA_SHOP_ID, 
-        hasSecretKey: !!YOOKASSA_SECRET_KEY 
-      });
+      console.error("Missing YooKassa credentials");
       return new Response(
-        JSON.stringify({ error: "Payment system not configured" }),
+        JSON.stringify({ 
+          error: "Платёжная система не настроена",
+          error_code: "CREDENTIALS_MISSING",
+          details: "YOOKASSA_SHOP_ID или YOOKASSA_SECRET_KEY не установлены"
+        }),
         { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    // Validate ShopID format
+    if (!isValidShopId(YOOKASSA_SHOP_ID)) {
+      console.error(`Invalid ShopID format: "${YOOKASSA_SHOP_ID}" (should contain only digits)`);
+      return new Response(
+        JSON.stringify({ 
+          error: "Неверный формат ShopID",
+          error_code: "INVALID_SHOP_ID_FORMAT",
+          details: `ShopID должен содержать только цифры. Текущее значение имеет длину ${YOOKASSA_SHOP_ID.length} и содержит недопустимые символы.`
+        }),
+        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 
@@ -56,7 +86,7 @@ Deno.serve(async (req) => {
     const authHeader = req.headers.get("Authorization");
     if (!authHeader) {
       return new Response(
-        JSON.stringify({ error: "Authorization required" }),
+        JSON.stringify({ error: "Требуется авторизация", error_code: "AUTH_REQUIRED" }),
         { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
@@ -70,7 +100,7 @@ Deno.serve(async (req) => {
     if (authError || !user) {
       console.error("Auth error:", authError);
       return new Response(
-        JSON.stringify({ error: "Invalid token" }),
+        JSON.stringify({ error: "Неверный токен", error_code: "INVALID_TOKEN" }),
         { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
@@ -103,7 +133,7 @@ Deno.serve(async (req) => {
       notification_url: getWebhookUrl(),
     };
 
-    console.log("Sending payment request to YooKassa:", JSON.stringify(paymentData, null, 2));
+    console.log("Sending payment request to YooKassa...");
 
     const yooKassaResponse = await fetch("https://api.yookassa.ru/v3/payments", {
       method: "POST",
@@ -117,16 +147,24 @@ Deno.serve(async (req) => {
 
     const responseText = await yooKassaResponse.text();
     console.log("YooKassa response status:", yooKassaResponse.status);
-    console.log("YooKassa response body:", responseText);
 
     if (!yooKassaResponse.ok) {
       console.error("YooKassa API error:", yooKassaResponse.status, responseText);
       
-      // Parse error for better message
-      let errorMessage = "Payment creation failed";
+      // Parse error for detailed message
+      let errorMessage = "Ошибка создания платежа";
+      let errorCode = "YOOKASSA_ERROR";
+      let errorDetails = responseText;
+      
       try {
-        const errorJson = JSON.parse(responseText);
-        if (errorJson.description) {
+        const errorJson: YooKassaError = JSON.parse(responseText);
+        errorCode = errorJson.code || errorCode;
+        
+        // Translate common errors
+        if (errorJson.code === "invalid_credentials") {
+          errorMessage = "Неверные учётные данные ЮKassa";
+          errorDetails = `Ошибка авторизации: ${errorJson.description}. Проверьте ShopID и секретный ключ.`;
+        } else if (errorJson.description) {
           errorMessage = errorJson.description;
         }
       } catch {}
@@ -134,8 +172,9 @@ Deno.serve(async (req) => {
       return new Response(
         JSON.stringify({ 
           error: errorMessage, 
-          details: responseText,
-          status: yooKassaResponse.status 
+          error_code: errorCode,
+          details: errorDetails,
+          http_status: yooKassaResponse.status 
         }),
         { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
@@ -172,9 +211,12 @@ Deno.serve(async (req) => {
   } catch (error) {
     console.error("Error creating payment:", error);
     return new Response(
-      JSON.stringify({ error: "Internal server error", details: String(error) }),
+      JSON.stringify({ 
+        error: "Внутренняя ошибка сервера", 
+        error_code: "INTERNAL_ERROR",
+        details: String(error) 
+      }),
       { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
   }
 });
-

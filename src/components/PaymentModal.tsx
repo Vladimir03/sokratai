@@ -3,12 +3,19 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } f
 import { Button } from "@/components/ui/button";
 import { supabase } from "@/lib/supabaseClient";
 import { toast } from "sonner";
-import { Loader2, Crown, CheckCircle, XCircle } from "lucide-react";
+import { Loader2, Crown, CheckCircle, XCircle, ChevronDown, ChevronUp } from "lucide-react";
 
 interface PaymentModalProps {
   isOpen: boolean;
   onClose: () => void;
   onSuccess?: () => void;
+}
+
+interface ErrorDetails {
+  message: string;
+  code?: string;
+  details?: string;
+  httpStatus?: number;
 }
 
 declare global {
@@ -31,7 +38,8 @@ type PaymentStatus = "idle" | "loading" | "widget" | "success" | "error";
 
 export function PaymentModal({ isOpen, onClose, onSuccess }: PaymentModalProps) {
   const [status, setStatus] = useState<PaymentStatus>("idle");
-  const [errorMessage, setErrorMessage] = useState<string>("");
+  const [errorDetails, setErrorDetails] = useState<ErrorDetails | null>(null);
+  const [showTechDetails, setShowTechDetails] = useState(false);
   const [confirmationToken, setConfirmationToken] = useState<string | null>(null);
   const widgetRef = useRef<{ destroy: () => void } | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -58,7 +66,8 @@ export function PaymentModal({ isOpen, onClose, onSuccess }: PaymentModalProps) 
   useEffect(() => {
     if (!isOpen) {
       setStatus("idle");
-      setErrorMessage("");
+      setErrorDetails(null);
+      setShowTechDetails(false);
       setConfirmationToken(null);
       return;
     }
@@ -82,14 +91,15 @@ export function PaymentModal({ isOpen, onClose, onSuccess }: PaymentModalProps) 
 
   const initializePayment = async () => {
     setStatus("loading");
-    setErrorMessage("");
+    setErrorDetails(null);
+    setShowTechDetails(false);
     setConfirmationToken(null);
 
     try {
       // Get current session
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) {
-        setErrorMessage("Необходимо войти в аккаунт");
+        setErrorDetails({ message: "Необходимо войти в аккаунт", code: "AUTH_REQUIRED" });
         setStatus("error");
         return;
       }
@@ -103,7 +113,12 @@ export function PaymentModal({ isOpen, onClose, onSuccess }: PaymentModalProps) 
 
       if (error || !data?.confirmation_token) {
         console.error("Payment creation error:", error, data);
-        setErrorMessage(data?.error || "Не удалось создать платёж");
+        setErrorDetails({
+          message: data?.error || "Не удалось создать платёж",
+          code: data?.error_code,
+          details: data?.details,
+          httpStatus: data?.http_status,
+        });
         setStatus("error");
         return;
       }
@@ -113,7 +128,10 @@ export function PaymentModal({ isOpen, onClose, onSuccess }: PaymentModalProps) 
       setStatus("widget");
     } catch (error) {
       console.error("Payment initialization error:", error);
-      setErrorMessage("Произошла ошибка при инициализации платежа");
+      setErrorDetails({ 
+        message: "Произошла ошибка при инициализации платежа",
+        details: String(error)
+      });
       setStatus("error");
     }
   };
@@ -154,7 +172,10 @@ export function PaymentModal({ isOpen, onClose, onSuccess }: PaymentModalProps) 
         return_url: `${window.location.origin}/profile?payment=success`,
         error_callback: (error) => {
           console.error("YooKassa widget error:", error);
-          setErrorMessage("Ошибка при оплате: " + (error.error || "Неизвестная ошибка"));
+          setErrorDetails({ 
+            message: "Ошибка при оплате",
+            details: error.error || "Неизвестная ошибка"
+          });
           setStatus("error");
         },
       });
@@ -162,7 +183,7 @@ export function PaymentModal({ isOpen, onClose, onSuccess }: PaymentModalProps) 
       widgetRef.current = checkout.render("yookassa-widget-container");
     } catch (error) {
       console.error("Widget render error:", error);
-      setErrorMessage("Не удалось загрузить форму оплаты");
+      setErrorDetails({ message: "Не удалось загрузить форму оплаты", details: String(error) });
       setStatus("error");
     }
   };
@@ -183,7 +204,7 @@ export function PaymentModal({ isOpen, onClose, onSuccess }: PaymentModalProps) 
           if (cancelled) return;
           const el = document.getElementById("yookassa-widget-container");
           if (!el) {
-            setErrorMessage("Контейнер для виджета не найден");
+            setErrorDetails({ message: "Контейнер для виджета не найден" });
             setStatus("error");
             return;
           }
@@ -191,7 +212,7 @@ export function PaymentModal({ isOpen, onClose, onSuccess }: PaymentModalProps) 
         });
       } catch (e) {
         console.error("YooKassa widget load error:", e);
-        setErrorMessage("Не удалось загрузить виджет оплаты");
+        setErrorDetails({ message: "Не удалось загрузить виджет оплаты", details: String(e) });
         setStatus("error");
       }
     })();
@@ -246,12 +267,39 @@ export function PaymentModal({ isOpen, onClose, onSuccess }: PaymentModalProps) 
             </div>
           )}
 
-          {status === "error" && (
+          {status === "error" && errorDetails && (
             <div className="flex flex-col items-center justify-center py-8 gap-4">
               <div className="p-3 bg-red-500/10 rounded-full">
                 <XCircle className="w-10 h-10 text-red-500" />
               </div>
-              <p className="text-center text-muted-foreground">{errorMessage}</p>
+              <p className="text-center text-muted-foreground">{errorDetails.message}</p>
+              
+              {/* Technical details collapsible */}
+              {(errorDetails.code || errorDetails.details || errorDetails.httpStatus) && (
+                <div className="w-full">
+                  <button
+                    onClick={() => setShowTechDetails(!showTechDetails)}
+                    className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground mx-auto"
+                  >
+                    {showTechDetails ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+                    Технические детали
+                  </button>
+                  {showTechDetails && (
+                    <div className="mt-2 p-3 bg-muted rounded-md text-xs font-mono space-y-1 max-h-[150px] overflow-y-auto">
+                      {errorDetails.httpStatus && (
+                        <div><span className="text-muted-foreground">HTTP:</span> {errorDetails.httpStatus}</div>
+                      )}
+                      {errorDetails.code && (
+                        <div><span className="text-muted-foreground">Код:</span> {errorDetails.code}</div>
+                      )}
+                      {errorDetails.details && (
+                        <div className="break-words"><span className="text-muted-foreground">Детали:</span> {errorDetails.details}</div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+
               <div className="flex gap-2">
                 <Button variant="outline" onClick={handleClose}>
                   Закрыть
