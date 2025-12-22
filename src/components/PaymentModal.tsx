@@ -32,6 +32,7 @@ type PaymentStatus = "idle" | "loading" | "widget" | "success" | "error";
 export function PaymentModal({ isOpen, onClose, onSuccess }: PaymentModalProps) {
   const [status, setStatus] = useState<PaymentStatus>("idle");
   const [errorMessage, setErrorMessage] = useState<string>("");
+  const [confirmationToken, setConfirmationToken] = useState<string | null>(null);
   const widgetRef = useRef<{ destroy: () => void } | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -58,6 +59,7 @@ export function PaymentModal({ isOpen, onClose, onSuccess }: PaymentModalProps) 
     if (!isOpen) {
       setStatus("idle");
       setErrorMessage("");
+      setConfirmationToken(null);
       return;
     }
 
@@ -81,6 +83,7 @@ export function PaymentModal({ isOpen, onClose, onSuccess }: PaymentModalProps) 
   const initializePayment = async () => {
     setStatus("loading");
     setErrorMessage("");
+    setConfirmationToken(null);
 
     try {
       // Get current session
@@ -105,9 +108,9 @@ export function PaymentModal({ isOpen, onClose, onSuccess }: PaymentModalProps) 
         return;
       }
 
-      // Wait for script to load and render widget
-      await waitForYooKassaWidget();
-      renderWidget(data.confirmation_token);
+      // Store token, then render widget after container is in DOM
+      setConfirmationToken(data.confirmation_token);
+      setStatus("widget");
     } catch (error) {
       console.error("Payment initialization error:", error);
       setErrorMessage("Произошла ошибка при инициализации платежа");
@@ -135,13 +138,7 @@ export function PaymentModal({ isOpen, onClose, onSuccess }: PaymentModalProps) 
     });
   };
 
-  const renderWidget = (confirmationToken: string) => {
-    if (!containerRef.current) {
-      setErrorMessage("Контейнер для виджета не найден");
-      setStatus("error");
-      return;
-    }
-
+  const renderWidget = (token: string) => {
     try {
       // Destroy existing widget if any
       if (widgetRef.current) {
@@ -153,7 +150,7 @@ export function PaymentModal({ isOpen, onClose, onSuccess }: PaymentModalProps) 
       }
 
       const checkout = new window.YooMoneyCheckoutWidget({
-        confirmation_token: confirmationToken,
+        confirmation_token: token,
         return_url: `${window.location.origin}/profile?payment=success`,
         error_callback: (error) => {
           console.error("YooKassa widget error:", error);
@@ -163,13 +160,46 @@ export function PaymentModal({ isOpen, onClose, onSuccess }: PaymentModalProps) 
       });
 
       widgetRef.current = checkout.render("yookassa-widget-container");
-      setStatus("widget");
     } catch (error) {
       console.error("Widget render error:", error);
       setErrorMessage("Не удалось загрузить форму оплаты");
       setStatus("error");
     }
   };
+
+  // When we have a token and are in widget mode, render the widget AFTER the container is mounted
+  useEffect(() => {
+    if (!isOpen) return;
+    if (status !== "widget") return;
+    if (!confirmationToken) return;
+
+    let cancelled = false;
+
+    (async () => {
+      try {
+        await waitForYooKassaWidget();
+        // Ensure DOM is committed
+        requestAnimationFrame(() => {
+          if (cancelled) return;
+          const el = document.getElementById("yookassa-widget-container");
+          if (!el) {
+            setErrorMessage("Контейнер для виджета не найден");
+            setStatus("error");
+            return;
+          }
+          renderWidget(confirmationToken);
+        });
+      } catch (e) {
+        console.error("YooKassa widget load error:", e);
+        setErrorMessage("Не удалось загрузить виджет оплаты");
+        setStatus("error");
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isOpen, status, confirmationToken]);
 
   const handleClose = () => {
     // Destroy widget before closing
@@ -202,6 +232,13 @@ export function PaymentModal({ isOpen, onClose, onSuccess }: PaymentModalProps) 
         </DialogHeader>
 
         <div className="mt-4">
+          {/* Keep container in DOM so widget can always mount */}
+          <div
+            id="yookassa-widget-container"
+            ref={containerRef}
+            className={`min-h-[300px] ${status === "widget" ? "" : "hidden"}`}
+          />
+
           {status === "loading" && (
             <div className="flex flex-col items-center justify-center py-12 gap-4">
               <Loader2 className="w-10 h-10 animate-spin text-primary" />
@@ -239,14 +276,6 @@ export function PaymentModal({ isOpen, onClose, onSuccess }: PaymentModalProps) 
                 Отлично!
               </Button>
             </div>
-          )}
-
-          {(status === "idle" || status === "widget") && (
-            <div 
-              id="yookassa-widget-container" 
-              ref={containerRef}
-              className="min-h-[300px]"
-            />
           )}
         </div>
 
