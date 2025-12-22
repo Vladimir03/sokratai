@@ -881,7 +881,9 @@ export default function Chat() {
     chatId?: string;
     retries?: number;
   }) {
-    const CHAT_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/chat`;
+    // Use safe base URL with fallback
+    const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || "https://vrsseotrfmsxpbciyqzc.supabase.co";
+    const CHAT_URL = `${supabaseUrl}/functions/v1/chat`;
 
     for (let attempt = 0; attempt < retries; attempt++) {
       const controller = new AbortController();

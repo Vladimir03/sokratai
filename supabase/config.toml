@@ -29,3 +29,9 @@ verify_jwt = false
 
 [functions.telegram-scheduled-reminder]
 verify_jwt = false
+
+[functions.yookassa-create-payment]
+verify_jwt = true
+
+[functions.yookassa-webhook]
+verify_jwt = false
