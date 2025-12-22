@@ -18,7 +18,7 @@ import Navigation from "@/components/Navigation";
 import AuthGuard from "@/components/AuthGuard";
 import AddTaskDialog from "@/components/AddTaskDialog";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { supabase } from "@/integrations/supabase/client";
+import { supabase } from "@/lib/supabaseClient";
 import { HomeworkSet, HomeworkTask, PRIORITY_CONFIG } from "@/types/homework";
 import { format } from "date-fns";
 import { ru } from "date-fns/locale";

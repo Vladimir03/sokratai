@@ -8,7 +8,7 @@ import { Textarea } from "@/components/ui/textarea";
 import Navigation from "@/components/Navigation";
 import AuthGuard from "@/components/AuthGuard";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { supabase } from "@/integrations/supabase/client";
+import { supabase } from "@/lib/supabaseClient";
 import { HomeworkTask, TaskStatus, SUBJECTS } from "@/types/homework";
 import { toast } from "sonner";
 import { useState } from "react";
