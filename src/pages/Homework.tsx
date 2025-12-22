@@ -7,7 +7,7 @@ import Navigation from "@/components/Navigation";
 import AuthGuard from "@/components/AuthGuard";
 import { PageContent } from "@/components/PageContent";
 import { useQuery } from "@tanstack/react-query";
-import { supabase } from "@/integrations/supabase/client";
+import { supabase } from "@/lib/supabaseClient";
 import { HomeworkSet, PRIORITY_CONFIG, SUBJECTS, HomeworkTask } from "@/types/homework";
 import { format, isToday, isTomorrow } from "date-fns";
 import { ru } from "date-fns/locale";

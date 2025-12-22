@@ -1,4 +1,4 @@
-import { supabase } from "@/integrations/supabase/client";
+import { supabase } from "@/lib/supabaseClient";
 import { retryWithBackoff } from "./retryWithBackoff";
 
 interface PendingMessage {
