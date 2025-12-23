@@ -31,9 +31,9 @@ const BOT_NAME = "sokratai_ru_bot";
 const pluralizeDays = (days: number) => {
   const mod10 = days % 10;
   const mod100 = days % 100;
-  if (mod10 === 1 && mod100 !== 11) return 'день';
-  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return 'дня';
-  return 'дней';
+  if (mod10 === 1 && mod100 !== 11) return "день";
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return "дня";
+  return "дней";
 };
 
 const Profile = () => {
@@ -55,63 +55,38 @@ const Profile = () => {
 
   // Check for payment success or openPayment from URL params
   useEffect(() => {
-    if (searchParams.get('payment') === 'success') {
+    if (searchParams.get("payment") === "success") {
       setShowPaymentSuccess(true);
       toast.success("Оплата прошла успешно! Проверяем активацию Premium…");
       subscription.refresh();
       // Clean up URL
-      window.history.replaceState({}, '', '/profile');
+      window.history.replaceState({}, "", "/profile");
     }
     // Auto-open payment modal when coming from Telegram
-    if (searchParams.get('openPayment') === 'true') {
+    if (searchParams.get("openPayment") === "true") {
       setIsPaymentModalOpen(true);
       // Clean up URL
-      window.history.replaceState({}, '', '/profile');
+      window.history.replaceState({}, "", "/profile");
     }
   }, [searchParams]);
 
   // When success dialog is opened, poll subscription until premium is confirmed (webhook can take a few seconds)
   useEffect(() => {
     if (!showPaymentSuccess) return;
-    if (!userId) return;
 
     let cancelled = false;
     setIsPremiumConfirmed(false);
 
-    // Immediate check (no waiting)
-    (async () => {
-      try {
-        const { data } = await supabase.rpc("get_subscription_status" as any, { p_user_id: userId });
-        const row = Array.isArray(data) ? data[0] : data;
-        const rpcIsPremium = Boolean((row as any)?.is_premium);
-        if (!cancelled && rpcIsPremium) {
-          await subscription.refresh();
-          setIsPremiumConfirmed(true);
-          toast.success("Premium активирован!");
-        }
-      } catch (e) {
-        // ignore
-      }
-    })();
-
     const startedAt = Date.now();
     const interval = setInterval(async () => {
       if (cancelled) return;
-      try {
-        const { data } = await supabase.rpc("get_subscription_status" as any, { p_user_id: userId });
-        const row = Array.isArray(data) ? data[0] : data;
-        const rpcIsPremium = Boolean((row as any)?.is_premium);
-
-        if (rpcIsPremium) {
-          // sync UI state
-          await subscription.refresh();
+      await subscription.refresh();
+      const isPremiumNow = Boolean(subscription.isPremium);
+      if (isPremiumNow) {
         setIsPremiumConfirmed(true);
         toast.success("Premium активирован!");
         clearInterval(interval);
         return;
-      }
-      } catch (e) {
-        // ignore
       }
       // Stop polling after 45s
       if (Date.now() - startedAt > 45000) {
@@ -123,7 +98,8 @@ const Profile = () => {
       cancelled = true;
       clearInterval(interval);
     };
-  }, [showPaymentSuccess, userId]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showPaymentSuccess]);
 
   useEffect(() => {
     fetchProfile();
@@ -136,7 +112,9 @@ const Profile = () => {
 
   const fetchProfile = async () => {
     try {
-      const { data: { user } } = await supabase.auth.getUser();
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
       if (!user) return;
       setUserId(user.id);
 
@@ -156,7 +134,7 @@ const Profile = () => {
         .eq("user_id", user.id)
         .single();
 
-      if (statsError && statsError.code !== 'PGRST116') {
+      if (statsError && statsError.code !== "PGRST116") {
         throw statsError;
       }
 
@@ -172,7 +150,9 @@ const Profile = () => {
 
   const handleLinkTelegram = async () => {
     try {
-      const { data: { user } } = await supabase.auth.getUser();
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
       if (!user) return;
 
       setLinkingTelegram(true);
@@ -186,7 +166,7 @@ const Profile = () => {
 
       const { token } = response.data;
       setLinkToken(token);
-      
+
       // Open Telegram bot with link token
       const botUrl = `https://t.me/${BOT_NAME}?start=link_${token}`;
       window.open(botUrl, "_blank");
@@ -197,7 +177,7 @@ const Profile = () => {
 
       pollingRef.current = setInterval(async () => {
         attempts++;
-        
+
         if (attempts >= maxAttempts) {
           clearInterval(pollingRef.current!);
           pollingRef.current = null;
@@ -211,14 +191,14 @@ const Profile = () => {
             method: "GET",
             body: null,
           });
-          
+
           // Use fetch directly for GET request with query params
           const projectId = import.meta.env.VITE_SUPABASE_PROJECT_ID || "vrsseotrfmsxpbciyqzc";
           const checkUrl = `https://${projectId}.supabase.co/functions/v1/telegram-login-token?token=${token}`;
-          
+
           const res = await fetch(checkUrl, {
             headers: {
-              "apikey": import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
+              apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
             },
           });
 
@@ -228,7 +208,7 @@ const Profile = () => {
             clearInterval(pollingRef.current!);
             pollingRef.current = null;
             setLinkingTelegram(false);
-            
+
             // Refresh profile to get updated Telegram data
             await fetchProfile();
             toast.success("Telegram успешно связан!");
@@ -242,7 +222,6 @@ const Profile = () => {
           console.error("Polling error:", pollError);
         }
       }, 5000);
-
     } catch (error: any) {
       setLinkingTelegram(false);
       toast.error(error.message || "Ошибка при создании ссылки");
@@ -273,20 +252,23 @@ const Profile = () => {
 
   const handleUpdateUsername = async () => {
     try {
-      const { data: { user } } = await supabase.auth.getUser();
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
       if (!user) return;
 
       // Validate username
-      const usernameSchema = z.string()
+      const usernameSchema = z
+        .string()
         .trim()
         .min(3, { message: "Минимум 3 символа" })
         .max(30, { message: "Максимум 30 символов" })
-        .regex(/^[a-zA-Zа-яА-Я0-9_-]+$/, { 
-          message: "Только буквы, цифры, _ и -" 
+        .regex(/^[a-zA-Zа-яА-Я0-9_-]+$/, {
+          message: "Только буквы, цифры, _ и -",
         });
 
       const validationResult = usernameSchema.safeParse(newUsername);
-      
+
       if (!validationResult.success) {
         toast.error(validationResult.error.errors[0].message);
         return;
@@ -296,29 +278,26 @@ const Profile = () => {
 
       // Check for duplicate usernames
       const { data: existing, error: checkError } = await supabase
-        .from('profiles')
-        .select('id')
-        .eq('username', validatedUsername)
-        .neq('id', user.id)
+        .from("profiles")
+        .select("id")
+        .eq("username", validatedUsername)
+        .neq("id", user.id)
         .maybeSingle();
 
       if (checkError) throw checkError;
 
       if (existing) {
-        toast.error('Это имя уже занято');
+        toast.error("Это имя уже занято");
         return;
       }
 
       // Update username
-      const { error } = await supabase
-        .from("profiles")
-        .update({ username: validatedUsername })
-        .eq("id", user.id);
+      const { error } = await supabase.from("profiles").update({ username: validatedUsername }).eq("id", user.id);
 
       if (error) throw error;
 
       toast.success("Имя обновлено!");
-      setProfile(prev => prev ? { ...prev, username: validatedUsername } : null);
+      setProfile((prev) => (prev ? { ...prev, username: validatedUsername } : null));
       setEditing(false);
     } catch (error: any) {
       toast.error(error.message);
@@ -341,101 +320,100 @@ const Profile = () => {
     <AuthGuard>
       <PageContent>
         <div className="container mx-auto px-4 pb-6 max-w-4xl">
-        <div className="mb-8">
-          <h1 className="text-4xl font-bold mb-2">Профиль</h1>
-          <p className="text-muted-foreground">Управление аккаунтом</p>
-        </div>
+          <div className="mb-8">
+            <h1 className="text-4xl font-bold mb-2">Профиль</h1>
+            <p className="text-muted-foreground">Управление аккаунтом</p>
+          </div>
 
-        <div className="space-y-6">
-          {/* Main Profile Card */}
-          <Card className="bg-gradient-hero text-primary-foreground shadow-glow">
-            <CardHeader>
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-4">
-                  <div className="w-20 h-20 rounded-full bg-accent flex items-center justify-center">
-                    <User className="w-10 h-10 text-accent-foreground" />
+          <div className="space-y-6">
+            {/* Main Profile Card */}
+            <Card className="bg-gradient-hero text-primary-foreground shadow-glow">
+              <CardHeader>
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-4">
+                    <div className="w-20 h-20 rounded-full bg-accent flex items-center justify-center">
+                      <User className="w-10 h-10 text-accent-foreground" />
+                    </div>
+                    <div>
+                      {editing ? (
+                        <div className="flex gap-2 items-center">
+                          <Input
+                            value={newUsername}
+                            onChange={(e) => setNewUsername(e.target.value)}
+                            className="bg-background text-foreground"
+                          />
+                          <Button onClick={handleUpdateUsername} variant="secondary" size="sm">
+                            Сохранить
+                          </Button>
+                          <Button onClick={() => setEditing(false)} variant="outline" size="sm">
+                            Отмена
+                          </Button>
+                        </div>
+                      ) : (
+                        <>
+                          <CardTitle className="text-2xl">{profile?.username}</CardTitle>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => setEditing(true)}
+                            className="text-primary-foreground hover:text-accent"
+                          >
+                            <Edit className="w-4 h-4 mr-2" />
+                            Изменить имя
+                          </Button>
+                        </>
+                      )}
+                    </div>
                   </div>
-                  <div>
-                    {editing ? (
-                      <div className="flex gap-2 items-center">
-                        <Input
-                          value={newUsername}
-                          onChange={(e) => setNewUsername(e.target.value)}
-                          className="bg-background text-foreground"
-                        />
-                        <Button onClick={handleUpdateUsername} variant="secondary" size="sm">
-                          Сохранить
-                        </Button>
-                        <Button onClick={() => setEditing(false)} variant="outline" size="sm">
-                          Отмена
-                        </Button>
+                  <div className="text-right">
+                    <div className="text-4xl font-bold">Ур. {stats?.level}</div>
+                    <div className="text-sm opacity-90">{stats?.total_xp} XP</div>
+                  </div>
+                </div>
+              </CardHeader>
+            </Card>
+
+            {/* Subscription status */}
+            <Card className="shadow-elegant border border-muted">
+              <CardHeader className="flex flex-row items-center justify-between pb-2">
+                <CardTitle className="flex items-center gap-2 text-lg">
+                  <Crown className="w-5 h-5 text-amber-500" />
+                  Подписка
+                </CardTitle>
+                {subscription.isTrialActive && (
+                  <div className="flex items-center gap-1 px-2 py-1 rounded-full bg-amber-100 text-amber-700 text-xs font-semibold">
+                    <Gift className="w-4 h-4" />
+                    Триал
+                  </div>
+                )}
+                {subscription.isPremium && (
+                  <div className="px-2 py-1 rounded-full bg-emerald-100 text-emerald-700 text-xs font-semibold">
+                    Premium
+                  </div>
+                )}
+              </CardHeader>
+              <CardContent className="space-y-3">
+                {subscription.isLoading ? (
+                  <div className="h-16 w-full rounded-lg bg-muted animate-pulse" />
+                ) : (
+                  <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+                    <div className="space-y-1">
+                      <div className="text-sm text-muted-foreground">
+                        {subscription.isPremium
+                          ? "Безлимитные сообщения и доступ ко всем функциям."
+                          : subscription.isTrialActive
+                            ? `Бесплатный триал: осталось ${subscription.trialDaysLeft} ${pluralizeDays(subscription.trialDaysLeft)}.`
+                            : `Бесплатный тариф: ${subscription.dailyLimit} сообщений в день.`}
                       </div>
-                    ) : (
-                      <>
-                        <CardTitle className="text-2xl">{profile?.username}</CardTitle>
-                        <Button 
-                          variant="ghost" 
-                          size="sm" 
-                          onClick={() => setEditing(true)}
-                          className="text-primary-foreground hover:text-accent"
-                        >
-                          <Edit className="w-4 h-4 mr-2" />
-                          Изменить имя
-                        </Button>
-                      </>
-                    )}
-                  </div>
-                </div>
-                <div className="text-right">
-                  <div className="text-4xl font-bold">Ур. {stats?.level}</div>
-                  <div className="text-sm opacity-90">{stats?.total_xp} XP</div>
-                </div>
-              </div>
-            </CardHeader>
-          </Card>
-
-          {/* Subscription status */}
-          <Card className="shadow-elegant border border-muted">
-            <CardHeader className="flex flex-row items-center justify-between pb-2">
-              <CardTitle className="flex items-center gap-2 text-lg">
-                <Crown className="w-5 h-5 text-amber-500" />
-                Подписка
-              </CardTitle>
-              {subscription.isTrialActive && (
-                <div className="flex items-center gap-1 px-2 py-1 rounded-full bg-amber-100 text-amber-700 text-xs font-semibold">
-                  <Gift className="w-4 h-4" />
-                  Триал
-                </div>
-              )}
-              {subscription.isPremium && (
-                <div className="px-2 py-1 rounded-full bg-emerald-100 text-emerald-700 text-xs font-semibold">
-                  Premium
-                </div>
-              )}
-            </CardHeader>
-            <CardContent className="space-y-3">
-              {subscription.isLoading ? (
-                <div className="h-16 w-full rounded-lg bg-muted animate-pulse" />
-              ) : (
-                <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
-                  <div className="space-y-1">
-                    <div className="text-sm text-muted-foreground">
-                      {subscription.isPremium
-                        ? "Безлимитные сообщения и доступ ко всем функциям."
-                        : subscription.isTrialActive
-                          ? `Бесплатный триал: осталось ${subscription.trialDaysLeft} ${pluralizeDays(subscription.trialDaysLeft)}.`
-                          : `Бесплатный тариф: ${subscription.dailyLimit} сообщений в день.`}
+                      {!subscription.isPremium && (
+                        <div className="text-xs text-muted-foreground">
+                          Premium — 699₽/мес. Подключите, чтобы сохранить безлимит после триала.
+                        </div>
+                      )}
                     </div>
                     {!subscription.isPremium && (
-                      <div className="text-xs text-muted-foreground">
-                        Premium — 699₽/мес. Подключите, чтобы сохранить безлимит после триала.
-                      </div>
-                    )}
-                  </div>
-                  <div className="flex gap-2">
-                    {!subscription.isPremium && (
-                      <Button 
-                        size="sm" 
+                      <Button
+                        size="sm"
                         className="bg-emerald-600 hover:bg-emerald-700 text-white"
                         onClick={() => setIsPaymentModalOpen(true)}
                       >
@@ -443,223 +421,183 @@ const Profile = () => {
                         Оформить Premium
                       </Button>
                     )}
-                    {/* Dev button: Reset to free for VladimirKam only */}
-                    {profile?.username === 'VladimirKam' && subscription.isPremium && (
-                      <Button 
-                        size="sm" 
-                        variant="outline"
-                        className="border-red-300 text-red-600 hover:bg-red-50"
-                        onClick={async () => {
-                          if (!userId) return;
-                          const { error } = await supabase
-                            .from('profiles')
-                            .update({ subscription_tier: 'free', subscription_expires_at: null })
-                            .eq('id', userId);
-                          if (error) {
-                            toast.error('Ошибка сброса подписки');
-                          } else {
-                            toast.success('Подписка сброшена на Free');
-                            subscription.refresh();
-                          }
-                        }}
-                      >
-                        Сбросить на Free (dev)
-                      </Button>
-                    )}
                   </div>
-                </div>
-              )}
-            </CardContent>
-          </Card>
+                )}
+              </CardContent>
+            </Card>
 
-          {/* Telegram Connection Status */}
-          <Card className="shadow-elegant">
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Send className="w-5 h-5 text-[#0088cc]" />
-                Telegram
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              {profile?.telegram_user_id ? (
-                <div className="flex items-center gap-3 p-4 bg-green-500/10 border border-green-500/30 rounded-lg">
-                  <CheckCircle className="w-6 h-6 text-green-500" />
-                  <div>
-                    <div className="font-medium text-green-700 dark:text-green-400">
-                      Аккаунт связан с Telegram
-                    </div>
-                    {profile.telegram_username && (
-                      <div className="text-sm text-muted-foreground">
-                        @{profile.telegram_username}
-                      </div>
-                    )}
-                  </div>
-                </div>
-              ) : linkingTelegram ? (
-                <div className="p-4 bg-blue-500/10 border border-blue-500/30 rounded-lg space-y-3">
-                  <div className="flex items-center gap-3">
-                    <Loader2 className="w-5 h-5 text-blue-500 animate-spin" />
-                    <div className="font-medium text-blue-700 dark:text-blue-400">
-                      Ожидание подтверждения...
+            {/* Telegram Connection Status */}
+            <Card className="shadow-elegant">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Send className="w-5 h-5 text-[#0088cc]" />
+                  Telegram
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                {profile?.telegram_user_id ? (
+                  <div className="flex items-center gap-3 p-4 bg-green-500/10 border border-green-500/30 rounded-lg">
+                    <CheckCircle className="w-6 h-6 text-green-500" />
+                    <div>
+                      <div className="font-medium text-green-700 dark:text-green-400">Аккаунт связан с Telegram</div>
+                      {profile.telegram_username && (
+                        <div className="text-sm text-muted-foreground">@{profile.telegram_username}</div>
+                      )}
                     </div>
                   </div>
-                  <p className="text-sm text-muted-foreground">
-                    Откройте Telegram и подтвердите связку в боте @{BOT_NAME}
-                  </p>
-                  
-                  {/* iOS-friendly instructions */}
-                  {linkToken && (
-                    <div className="p-3 bg-amber-500/10 border border-amber-500/30 rounded-lg">
-                      <p className="text-sm text-amber-700 dark:text-amber-400 mb-2">
-                        📱 Если бот не отвечает, скопируйте команду и отправьте вручную:
-                      </p>
-                      <div className="flex gap-2 items-center">
-                        <code className="flex-1 bg-muted p-2 rounded text-xs font-mono overflow-x-auto">
-                          /start link_{linkToken}
-                        </code>
-                        <Button size="sm" variant="secondary" onClick={handleCopyCommand}>
-                          Копировать
+                ) : linkingTelegram ? (
+                  <div className="p-4 bg-blue-500/10 border border-blue-500/30 rounded-lg space-y-3">
+                    <div className="flex items-center gap-3">
+                      <Loader2 className="w-5 h-5 text-blue-500 animate-spin" />
+                      <div className="font-medium text-blue-700 dark:text-blue-400">Ожидание подтверждения...</div>
+                    </div>
+                    <p className="text-sm text-muted-foreground">
+                      Откройте Telegram и подтвердите связку в боте @{BOT_NAME}
+                    </p>
+
+                    {/* iOS-friendly instructions */}
+                    {linkToken && (
+                      <div className="p-3 bg-amber-500/10 border border-amber-500/30 rounded-lg">
+                        <p className="text-sm text-amber-700 dark:text-amber-400 mb-2">
+                          📱 Если бот не отвечает, скопируйте команду и отправьте вручную:
+                        </p>
+                        <div className="flex gap-2 items-center">
+                          <code className="flex-1 bg-muted p-2 rounded text-xs font-mono overflow-x-auto">
+                            /start link_{linkToken}
+                          </code>
+                          <Button size="sm" variant="secondary" onClick={handleCopyCommand}>
+                            Копировать
+                          </Button>
+                        </div>
+                        <Button
+                          variant="link"
+                          size="sm"
+                          onClick={handleOpenTelegram}
+                          className="mt-2 p-0 h-auto text-blue-600"
+                        >
+                          Открыть Telegram →
                         </Button>
                       </div>
-                      <Button 
-                        variant="link" 
-                        size="sm" 
-                        onClick={handleOpenTelegram}
-                        className="mt-2 p-0 h-auto text-blue-600"
-                      >
-                        Открыть Telegram →
-                      </Button>
-                    </div>
-                  )}
-                  
-                  <Button variant="outline" size="sm" onClick={handleCancelLink}>
-                    Отменить
-                  </Button>
-                </div>
-              ) : (
-                <div className="p-4 bg-muted/50 rounded-lg">
-                  <div className="text-muted-foreground mb-3">
-                    Telegram не подключён
+                    )}
+
+                    <Button variant="outline" size="sm" onClick={handleCancelLink}>
+                      Отменить
+                    </Button>
                   </div>
-                  <p className="text-sm text-muted-foreground mb-4">
-                    Свяжите аккаунт, чтобы отправлять задачи через Telegram
-                  </p>
-                  <Button onClick={handleLinkTelegram} className="bg-[#0088cc] hover:bg-[#006699]">
-                    <Send className="w-4 h-4 mr-2" />
-                    Связать Telegram
-                  </Button>
-                </div>
-              )}
-              {profile?.registration_source && (
-                <div className="mt-3 text-xs text-muted-foreground">
-                  Источник регистрации: {
-                    profile.registration_source === 'telegram_web' ? 'Telegram (веб)' :
-                    profile.registration_source === 'telegram' ? 'Telegram бот' :
-                    profile.registration_source === 'web' ? 'Веб' :
-                    profile.registration_source
-                  }
-                </div>
-              )}
-            </CardContent>
-          </Card>
-
-          {/* Stats Grid */}
-          <div className="grid md:grid-cols-3 gap-6">
-            <Card className="shadow-elegant">
-              <CardHeader className="flex flex-row items-center justify-between pb-2">
-                <CardTitle className="text-sm font-medium text-muted-foreground">
-                  Опыт (XP)
-                </CardTitle>
-                <Zap className="w-4 h-4 text-accent" />
-              </CardHeader>
-              <CardContent>
-                <div className="text-3xl font-bold">{stats?.total_xp || 0}</div>
-                <div className="text-xs text-muted-foreground mt-1">
-                  До следующего уровня: {((stats?.level || 1) * 100) - (stats?.total_xp || 0)} XP
-                </div>
-                <div className="w-full bg-muted rounded-full h-2 mt-2">
-                  <div
-                    className="bg-accent h-2 rounded-full transition-all duration-500"
-                    style={{ width: `${((stats?.total_xp || 0) % 100)}%` }}
-                  />
-                </div>
+                ) : (
+                  <div className="p-4 bg-muted/50 rounded-lg">
+                    <div className="text-muted-foreground mb-3">Telegram не подключён</div>
+                    <p className="text-sm text-muted-foreground mb-4">
+                      Свяжите аккаунт, чтобы отправлять задачи через Telegram
+                    </p>
+                    <Button onClick={handleLinkTelegram} className="bg-[#0088cc] hover:bg-[#006699]">
+                      <Send className="w-4 h-4 mr-2" />
+                      Связать Telegram
+                    </Button>
+                  </div>
+                )}
+                {profile?.registration_source && (
+                  <div className="mt-3 text-xs text-muted-foreground">
+                    Источник регистрации:{" "}
+                    {profile.registration_source === "telegram_web"
+                      ? "Telegram (веб)"
+                      : profile.registration_source === "telegram"
+                        ? "Telegram бот"
+                        : profile.registration_source === "web"
+                          ? "Веб"
+                          : profile.registration_source}
+                  </div>
+                )}
               </CardContent>
             </Card>
 
-            <Card className="shadow-elegant">
-              <CardHeader className="flex flex-row items-center justify-between pb-2">
-                <CardTitle className="text-sm font-medium text-muted-foreground">
-                  Текущая серия
-                </CardTitle>
-                <Target className="w-4 h-4 text-primary" />
-              </CardHeader>
-              <CardContent>
-                <div className="text-3xl font-bold flex items-center gap-2">
-                  🔥 {stats?.current_streak || 0} дней
-                </div>
-                <div className="text-xs text-muted-foreground mt-1">
-                  {stats?.current_streak ? "Продолжайте в том же духе!" : "Начните новую серию"}
-                </div>
-              </CardContent>
-            </Card>
+            {/* Stats Grid */}
+            <div className="grid md:grid-cols-3 gap-6">
+              <Card className="shadow-elegant">
+                <CardHeader className="flex flex-row items-center justify-between pb-2">
+                  <CardTitle className="text-sm font-medium text-muted-foreground">Опыт (XP)</CardTitle>
+                  <Zap className="w-4 h-4 text-accent" />
+                </CardHeader>
+                <CardContent>
+                  <div className="text-3xl font-bold">{stats?.total_xp || 0}</div>
+                  <div className="text-xs text-muted-foreground mt-1">
+                    До следующего уровня: {(stats?.level || 1) * 100 - (stats?.total_xp || 0)} XP
+                  </div>
+                  <div className="w-full bg-muted rounded-full h-2 mt-2">
+                    <div
+                      className="bg-accent h-2 rounded-full transition-all duration-500"
+                      style={{ width: `${(stats?.total_xp || 0) % 100}%` }}
+                    />
+                  </div>
+                </CardContent>
+              </Card>
 
+              <Card className="shadow-elegant">
+                <CardHeader className="flex flex-row items-center justify-between pb-2">
+                  <CardTitle className="text-sm font-medium text-muted-foreground">Текущая серия</CardTitle>
+                  <Target className="w-4 h-4 text-primary" />
+                </CardHeader>
+                <CardContent>
+                  <div className="text-3xl font-bold flex items-center gap-2">🔥 {stats?.current_streak || 0} дней</div>
+                  <div className="text-xs text-muted-foreground mt-1">
+                    {stats?.current_streak ? "Продолжайте в том же духе!" : "Начните новую серию"}
+                  </div>
+                </CardContent>
+              </Card>
+
+              <Card className="shadow-elegant">
+                <CardHeader className="flex flex-row items-center justify-between pb-2">
+                  <CardTitle className="text-sm font-medium text-muted-foreground">Уровень</CardTitle>
+                  <Trophy className="w-4 h-4 text-accent" />
+                </CardHeader>
+                <CardContent>
+                  <div className="text-3xl font-bold flex items-center gap-2">⭐ {stats?.level || 1}</div>
+                  <div className="text-xs text-muted-foreground mt-1">
+                    {stats?.level === 1 ? "Новичок" : stats?.level && stats.level < 5 ? "Ученик" : "Мастер"}
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
+
+            {/* Badges */}
             <Card className="shadow-elegant">
-              <CardHeader className="flex flex-row items-center justify-between pb-2">
-                <CardTitle className="text-sm font-medium text-muted-foreground">
-                  Уровень
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Trophy className="w-5 h-5 text-accent" />
+                  Значки
                 </CardTitle>
-                <Trophy className="w-4 h-4 text-accent" />
               </CardHeader>
               <CardContent>
-                <div className="text-3xl font-bold flex items-center gap-2">
-                  ⭐ {stats?.level || 1}
-                </div>
-                <div className="text-xs text-muted-foreground mt-1">
-                  {stats?.level === 1 ? "Новичок" : stats?.level && stats.level < 5 ? "Ученик" : "Мастер"}
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                  <div className="text-center p-4 bg-gradient-card rounded-lg border-2 border-accent">
+                    <div className="text-4xl mb-2">🎯</div>
+                    <div className="text-sm font-medium">Новичок</div>
+                    <div className="text-xs text-muted-foreground">Зарегистрирован</div>
+                  </div>
+                  <div className="text-center p-4 bg-muted/50 rounded-lg opacity-50">
+                    <div className="text-4xl mb-2">📚</div>
+                    <div className="text-sm font-medium">Студент</div>
+                    <div className="text-xs text-muted-foreground">5 уровень</div>
+                  </div>
+                  <div className="text-center p-4 bg-muted/50 rounded-lg opacity-50">
+                    <div className="text-4xl mb-2">🎓</div>
+                    <div className="text-sm font-medium">Выпускник</div>
+                    <div className="text-xs text-muted-foreground">10 уровень</div>
+                  </div>
+                  <div className="text-center p-4 bg-muted/50 rounded-lg opacity-50">
+                    <div className="text-4xl mb-2">👑</div>
+                    <div className="text-sm font-medium">Мастер</div>
+                    <div className="text-xs text-muted-foreground">20 уровень</div>
+                  </div>
                 </div>
               </CardContent>
             </Card>
           </div>
-
-          {/* Badges */}
-          <Card className="shadow-elegant">
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Trophy className="w-5 h-5 text-accent" />
-                Значки
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                <div className="text-center p-4 bg-gradient-card rounded-lg border-2 border-accent">
-                  <div className="text-4xl mb-2">🎯</div>
-                  <div className="text-sm font-medium">Новичок</div>
-                  <div className="text-xs text-muted-foreground">Зарегистрирован</div>
-                </div>
-                <div className="text-center p-4 bg-muted/50 rounded-lg opacity-50">
-                  <div className="text-4xl mb-2">📚</div>
-                  <div className="text-sm font-medium">Студент</div>
-                  <div className="text-xs text-muted-foreground">5 уровень</div>
-                </div>
-                <div className="text-center p-4 bg-muted/50 rounded-lg opacity-50">
-                  <div className="text-4xl mb-2">🎓</div>
-                  <div className="text-sm font-medium">Выпускник</div>
-                  <div className="text-xs text-muted-foreground">10 уровень</div>
-                </div>
-                <div className="text-center p-4 bg-muted/50 rounded-lg opacity-50">
-                  <div className="text-4xl mb-2">👑</div>
-                  <div className="text-sm font-medium">Мастер</div>
-                  <div className="text-xs text-muted-foreground">20 уровень</div>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
         </div>
-      </div>
       </PageContent>
-      
+
       {/* Payment Modal */}
-      <PaymentModal 
+      <PaymentModal
         isOpen={isPaymentModalOpen}
         onClose={() => setIsPaymentModalOpen(false)}
         onSuccess={() => {
@@ -675,9 +613,7 @@ const Profile = () => {
       <Dialog open={showPaymentSuccess} onOpenChange={(open) => setShowPaymentSuccess(open)}>
         <DialogContent className="sm:max-w-[520px]">
           <DialogHeader>
-            <DialogTitle>
-              {isPremiumConfirmed ? "🎉 Premium подключён!" : "Оплата принята"}
-            </DialogTitle>
+            <DialogTitle>{isPremiumConfirmed ? "🎉 Premium подключён!" : "Оплата принята"}</DialogTitle>
             <DialogDescription>
               {isPremiumConfirmed
                 ? "Теперь у вас безлимитные сообщения и доступ ко всем функциям."
@@ -690,15 +626,13 @@ const Profile = () => {
               <div className="rounded-lg border bg-gradient-to-r from-emerald-50 via-cyan-50 to-blue-50 p-4">
                 <div className="font-semibold">✨ Готово!</div>
                 <div className="text-sm text-muted-foreground mt-1">
-                  Спасибо за поддержку — приятной учёбы со Сократом.
+                  Спасибо за поддержку — приятной учёбы с Сократом.
                 </div>
               </div>
             ) : (
               <div className="flex items-center gap-3 rounded-lg border p-4">
                 <Loader2 className="w-5 h-5 animate-spin text-primary" />
-                <div className="text-sm text-muted-foreground">
-                  Проверяем активацию Premium…
-                </div>
+                <div className="text-sm text-muted-foreground">Проверяем активацию Premium…</div>
               </div>
             )}
           </div>
@@ -724,9 +658,7 @@ const Profile = () => {
                 Перейти в чат
               </Button>
             )}
-            <Button onClick={() => setShowPaymentSuccess(false)}>
-              {isPremiumConfirmed ? "Круто!" : "Ок"}
-            </Button>
+            <Button onClick={() => setShowPaymentSuccess(false)}>{isPremiumConfirmed ? "Круто!" : "Ок"}</Button>
           </div>
         </DialogContent>
       </Dialog>
