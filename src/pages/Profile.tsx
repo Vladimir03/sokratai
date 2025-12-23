@@ -52,7 +52,6 @@ const Profile = () => {
   const [showPaymentSuccess, setShowPaymentSuccess] = useState(false);
   const [isPremiumConfirmed, setIsPremiumConfirmed] = useState(false);
   const [searchParams] = useSearchParams();
-  const lastPaymentDebugRef = useRef<{ id?: string; status?: string; hasWebhookData?: boolean } | null>(null);
 
   // #region agent log helpers
   const dbg = (hypothesisId: string, location: string, message: string, data: Record<string, unknown>) => {
@@ -97,17 +96,9 @@ const Profile = () => {
     const startedAt = Date.now();
     const interval = setInterval(async () => {
       if (cancelled) return;
-      try {
-        const { data } = await supabase.rpc("get_subscription_status" as any, { p_user_id: userId });
-        const row = Array.isArray(data) ? data[0] : data;
-        const rpcIsPremium = Boolean((row as any)?.is_premium);
-        // #region agent log
-        dbg("H5","Profile.tsx:pollPremium","poll_tick",{rpcIsPremium});
-        // #endregion
-
-        if (rpcIsPremium) {
-          // sync UI state
-          await subscription.refresh();
+      await subscription.refresh();
+      const isPremiumNow = Boolean(subscription.isPremium);
+      if (isPremiumNow) {
         setIsPremiumConfirmed(true);
         toast.success("Premium активирован!");
         clearInterval(interval);
@@ -115,11 +106,6 @@ const Profile = () => {
         dbg("H5","Profile.tsx:pollPremium","premium_confirmed",{});
         // #endregion
         return;
-      }
-      } catch (e) {
-        // #region agent log
-        dbg("H5","Profile.tsx:pollPremium","poll_error",{details:String(e)});
-        // #endregion
       }
       // Stop polling after 45s
       if (Date.now() - startedAt > 45000) {
@@ -136,72 +122,6 @@ const Profile = () => {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [showPaymentSuccess]);
-
-  // Extra debug: inspect latest payment row + subscription rpc when success flow is active
-  useEffect(() => {
-    if (!showPaymentSuccess) return;
-    if (!userId) return;
-
-    let cancelled = false;
-    const startedAt = Date.now();
-
-    const inspect = async (phase: "start" | "tick" | "timeout") => {
-      try {
-        const [{ data: payRows }, { data: rpcRows }] = await Promise.all([
-          supabase
-            .from("payments")
-            .select("id,status,webhook_data,created_at")
-            .eq("user_id", userId)
-            .order("created_at", { ascending: false })
-            .limit(1),
-          supabase.rpc("get_subscription_status" as any, { p_user_id: userId }),
-        ]);
-
-        const pay = Array.isArray(payRows) ? payRows[0] : undefined;
-        const rpc = Array.isArray(rpcRows) ? rpcRows[0] : rpcRows;
-
-        lastPaymentDebugRef.current = pay
-          ? { id: pay.id, status: pay.status, hasWebhookData: Boolean(pay.webhook_data) }
-          : null;
-
-        // #region agent log
-        dbg("H5","Profile.tsx:paymentInspect",`inspect_${phase}`,{
-          hasPayment: Boolean(pay),
-          paymentId: pay?.id,
-          paymentStatus: pay?.status,
-          paymentHasWebhookData: Boolean(pay?.webhook_data),
-          rpcIsPremium: Boolean((rpc as any)?.is_premium),
-          rpcExpiresAt: (rpc as any)?.subscription_expires_at || null,
-        });
-        // #endregion
-      } catch (e) {
-        // #region agent log
-        dbg("H5","Profile.tsx:paymentInspect","inspect_error",{details:String(e)});
-        // #endregion
-      }
-    };
-
-    inspect("start");
-
-    const interval = setInterval(() => {
-      if (cancelled) return;
-      // log at most every ~10s
-      const elapsed = Date.now() - startedAt;
-      if (elapsed < 11000 || elapsed > 45000) return;
-      inspect("tick");
-    }, 2500);
-
-    const timeout = setTimeout(() => {
-      if (cancelled) return;
-      inspect("timeout");
-    }, 46000);
-
-    return () => {
-      cancelled = true;
-      clearInterval(interval);
-      clearTimeout(timeout);
-    };
-  }, [showPaymentSuccess, userId]);
 
   useEffect(() => {
     fetchProfile();

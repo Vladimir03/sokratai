@@ -214,15 +214,6 @@ export function PaymentModal({ isOpen, onClose, onSuccess }: PaymentModalProps) 
         },
       });
 
-      // #region agent log
-      dbg("H4","PaymentModal.tsx:initializePayment","create_payment_response",{
-        confirmationType,
-        hasPaymentId: Boolean((data as any)?.payment_id),
-        hasToken: Boolean((data as any)?.confirmation_token),
-        hasUrl: Boolean((data as any)?.confirmation_url),
-      });
-      // #endregion
-
       // Redirect flow: no token, but has confirmation_url
       if (!error && data?.confirmation_url && confirmationType === "redirect") {
         setRedirectUrl(data.confirmation_url);
