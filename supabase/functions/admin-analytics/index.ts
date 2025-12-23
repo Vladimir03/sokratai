@@ -249,6 +249,116 @@ serve(async (req) => {
       .select("user_id", { count: "exact", head: true })
       .gte("created_at", new Date(now.toISOString().split("T")[0]).toISOString());
 
+    // 6. User segments analytics
+    const calculateSegments = async () => {
+      const nowDate = new Date();
+      
+      // Get all profiles with subscription info
+      const { data: allProfiles } = await supabaseAdmin
+        .from("profiles")
+        .select("id, subscription_tier, subscription_expires_at, trial_ends_at");
+
+      if (!allProfiles) {
+        return {
+          premium: { count: 0, avgMessagesPerDay: 0, highlyActive: 0 },
+          trial: { count: 0, avgMessagesPerDay: 0, highlyActive: 0 },
+          free: { count: 0, avgMessagesPerDay: 0, highlyActive: 0 },
+        };
+      }
+
+      // Categorize users into segments
+      const segments: { premium: string[]; trial: string[]; free: string[] } = {
+        premium: [],
+        trial: [],
+        free: [],
+      };
+
+      allProfiles.forEach((profile) => {
+        const isPremium = 
+          profile.subscription_tier === "premium" && 
+          profile.subscription_expires_at && 
+          new Date(profile.subscription_expires_at) > nowDate;
+        
+        const isTrial = 
+          !isPremium && 
+          profile.trial_ends_at && 
+          new Date(profile.trial_ends_at) > nowDate;
+
+        if (isPremium) {
+          segments.premium.push(profile.id);
+        } else if (isTrial) {
+          segments.trial.push(profile.id);
+        } else {
+          segments.free.push(profile.id);
+        }
+      });
+
+      // Get messages from last 7 days for daily averages
+      const sevenDaysAgo = new Date(nowDate.getTime() - 7 * 24 * 60 * 60 * 1000).toISOString();
+      
+      const { data: recentMessages } = await supabaseAdmin
+        .from("chat_messages")
+        .select("user_id, created_at")
+        .eq("role", "user")
+        .gte("created_at", sevenDaysAgo);
+
+      // Count messages per user per day
+      const userDailyMessages: Record<string, Record<string, number>> = {};
+      
+      recentMessages?.forEach((m) => {
+        const userId = m.user_id;
+        const day = m.created_at?.split("T")[0];
+        if (userId && day) {
+          if (!userDailyMessages[userId]) userDailyMessages[userId] = {};
+          userDailyMessages[userId][day] = (userDailyMessages[userId][day] || 0) + 1;
+        }
+      });
+
+      // Calculate metrics for each segment
+      const calculateSegmentMetrics = (userIds: string[]) => {
+        if (userIds.length === 0) {
+          return { count: 0, avgMessagesPerDay: 0, highlyActive: 0 };
+        }
+
+        let totalDailyMessages = 0;
+        let totalDays = 0;
+        let highlyActive = 0;
+
+        userIds.forEach((userId) => {
+          const dailyData = userDailyMessages[userId] || {};
+          const days = Object.keys(dailyData);
+          
+          if (days.length > 0) {
+            const totalMsgs = Object.values(dailyData).reduce((a, b) => a + b, 0);
+            const avgPerDay = totalMsgs / days.length;
+            
+            totalDailyMessages += totalMsgs;
+            totalDays += days.length;
+            
+            // Check if user has 8+ messages on any day
+            const hasHighActivity = Object.values(dailyData).some((count) => count >= 8);
+            if (hasHighActivity) highlyActive++;
+          }
+        });
+
+        const avgMessagesPerDay = totalDays > 0 ? totalDailyMessages / totalDays : 0;
+
+        return {
+          count: userIds.length,
+          avgMessagesPerDay: Math.round(avgMessagesPerDay * 10) / 10,
+          highlyActive,
+        };
+      };
+
+      return {
+        premium: calculateSegmentMetrics(segments.premium),
+        trial: calculateSegmentMetrics(segments.trial),
+        free: calculateSegmentMetrics(segments.free),
+      };
+    };
+
+    const segmentsData = await calculateSegments();
+
     // Prepare chart data - iterate through all days in the range
     const chartDays: string[] = [];
     const currentDate = new Date(startDate);
@@ -288,6 +398,7 @@ serve(async (req) => {
         completedOnboarding: completedOnboarding || 0,
         sentFirstMessage,
       },
+      segments: segmentsData,
     };
 
     return new Response(JSON.stringify(analytics), {
