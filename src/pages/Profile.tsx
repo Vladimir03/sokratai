@@ -52,14 +52,6 @@ const Profile = () => {
   const [showPaymentSuccess, setShowPaymentSuccess] = useState(false);
   const [isPremiumConfirmed, setIsPremiumConfirmed] = useState(false);
   const [searchParams] = useSearchParams();
-  const lastPaymentDebugRef = useRef<{ id?: string; status?: string; hasWebhookData?: boolean } | null>(null);
-
-  // #region agent log helpers
-  const dbg = (hypothesisId: string, location: string, message: string, data: Record<string, unknown>) => {
-    // Use no-cors + text/plain to avoid CORS preflight from HTTPS preview environments.
-    fetch('http://127.0.0.1:7242/ingest/5a352d39-cd0b-48d9-ba61-990189298ff9',{method:'POST',mode:'no-cors',headers:{'Content-Type':'text/plain'},body:JSON.stringify({sessionId:'debug-session',runId:'run3',hypothesisId,location,message,data,timestamp:Date.now()})}).catch(()=>{});
-  };
-  // #endregion
 
   // Check for payment success or openPayment from URL params
   useEffect(() => {
@@ -69,18 +61,12 @@ const Profile = () => {
       subscription.refresh();
       // Clean up URL
       window.history.replaceState({}, '', '/profile');
-      // #region agent log
-      dbg("H4","Profile.tsx:useEffect(payment)","payment_success_param",{origin:window.location.origin});
-      // #endregion
     }
     // Auto-open payment modal when coming from Telegram
     if (searchParams.get('openPayment') === 'true') {
       setIsPaymentModalOpen(true);
       // Clean up URL
       window.history.replaceState({}, '', '/profile');
-      // #region agent log
-      dbg("H4","Profile.tsx:useEffect(openPayment)","open_payment_param",{});
-      // #endregion
     }
   }, [searchParams]);
 
@@ -91,9 +77,6 @@ const Profile = () => {
 
     let cancelled = false;
     setIsPremiumConfirmed(false);
-    // #region agent log
-    dbg("H5","Profile.tsx:pollPremium","poll_start",{userId});
-    // #endregion
 
     // Immediate check (no waiting)
     (async () => {
@@ -101,21 +84,13 @@ const Profile = () => {
         const { data } = await supabase.rpc("get_subscription_status" as any, { p_user_id: userId });
         const row = Array.isArray(data) ? data[0] : data;
         const rpcIsPremium = Boolean((row as any)?.is_premium);
-        // #region agent log
-        dbg("H5","Profile.tsx:pollPremium","poll_immediate",{userId,rpcIsPremium});
-        // #endregion
         if (!cancelled && rpcIsPremium) {
           await subscription.refresh();
           setIsPremiumConfirmed(true);
           toast.success("Premium активирован!");
-          // #region agent log
-          dbg("H5","Profile.tsx:pollPremium","premium_confirmed",{userId,via:"immediate"});
-          // #endregion
         }
       } catch (e) {
-        // #region agent log
-        dbg("H5","Profile.tsx:pollPremium","poll_immediate_error",{userId,details:String(e)});
-        // #endregion
+        // ignore
       }
     })();
 
@@ -126,9 +101,6 @@ const Profile = () => {
         const { data } = await supabase.rpc("get_subscription_status" as any, { p_user_id: userId });
         const row = Array.isArray(data) ? data[0] : data;
         const rpcIsPremium = Boolean((row as any)?.is_premium);
-        // #region agent log
-        dbg("H5","Profile.tsx:pollPremium","poll_tick",{userId,rpcIsPremium});
-        // #endregion
 
         if (rpcIsPremium) {
           // sync UI state
@@ -136,94 +108,20 @@ const Profile = () => {
         setIsPremiumConfirmed(true);
         toast.success("Premium активирован!");
         clearInterval(interval);
-        // #region agent log
-          dbg("H5","Profile.tsx:pollPremium","premium_confirmed",{userId,via:"interval"});
-        // #endregion
         return;
       }
       } catch (e) {
-        // #region agent log
-        dbg("H5","Profile.tsx:pollPremium","poll_error",{userId,details:String(e)});
-        // #endregion
+        // ignore
       }
       // Stop polling after 45s
       if (Date.now() - startedAt > 45000) {
         clearInterval(interval);
-        // #region agent log
-        dbg("H5","Profile.tsx:pollPremium","poll_timeout",{userId});
-        // #endregion
       }
     }, 2500);
 
     return () => {
       cancelled = true;
       clearInterval(interval);
-    };
-  }, [showPaymentSuccess, userId]);
-
-  // Extra debug: inspect latest payment row + subscription rpc when success flow is active
-  useEffect(() => {
-    if (!showPaymentSuccess) return;
-    if (!userId) return;
-
-    let cancelled = false;
-    const startedAt = Date.now();
-
-    const inspect = async (phase: "start" | "tick" | "timeout") => {
-      try {
-        const [{ data: payRows }, { data: rpcRows }] = await Promise.all([
-          supabase
-            .from("payments")
-            .select("id,status,webhook_data,created_at")
-            .eq("user_id", userId)
-            .order("created_at", { ascending: false })
-            .limit(1),
-          supabase.rpc("get_subscription_status" as any, { p_user_id: userId }),
-        ]);
-
-        const pay = Array.isArray(payRows) ? payRows[0] : undefined;
-        const rpc = Array.isArray(rpcRows) ? rpcRows[0] : rpcRows;
-
-        lastPaymentDebugRef.current = pay
-          ? { id: pay.id, status: pay.status, hasWebhookData: Boolean(pay.webhook_data) }
-          : null;
-
-        // #region agent log
-        dbg("H5","Profile.tsx:paymentInspect",`inspect_${phase}`,{
-          hasPayment: Boolean(pay),
-          paymentId: pay?.id,
-          paymentStatus: pay?.status,
-          paymentHasWebhookData: Boolean(pay?.webhook_data),
-          rpcIsPremium: Boolean((rpc as any)?.is_premium),
-          rpcExpiresAt: (rpc as any)?.subscription_expires_at || null,
-        });
-        // #endregion
-      } catch (e) {
-        // #region agent log
-        dbg("H5","Profile.tsx:paymentInspect","inspect_error",{details:String(e)});
-        // #endregion
-      }
-    };
-
-    inspect("start");
-
-    const interval = setInterval(() => {
-      if (cancelled) return;
-      // log at most every ~10s
-      const elapsed = Date.now() - startedAt;
-      if (elapsed < 11000 || elapsed > 45000) return;
-      inspect("tick");
-    }, 2500);
-
-    const timeout = setTimeout(() => {
-      if (cancelled) return;
-      inspect("timeout");
-    }, 46000);
-
-    return () => {
-      cancelled = true;
-      clearInterval(interval);
-      clearTimeout(timeout);
     };
   }, [showPaymentSuccess, userId]);
 

@@ -48,41 +48,6 @@ export function PaymentModal({ isOpen, onClose, onSuccess }: PaymentModalProps) 
   const [userId, setUserId] = useState<string | null>(null);
   const widgetRef = useRef<{ destroy: () => void } | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
-  const debugLastUiEventAtRef = useRef<number>(0);
-
-  // #region agent log helpers
-  const dbg = (hypothesisId: string, location: string, message: string, data: Record<string, unknown>) => {
-    // Use no-cors + text/plain to avoid CORS preflight from HTTPS preview environments.
-    fetch('http://127.0.0.1:7242/ingest/5a352d39-cd0b-48d9-ba61-990189298ff9',{method:'POST',mode:'no-cors',headers:{'Content-Type':'text/plain'},body:JSON.stringify({sessionId:'debug-session',runId:'run3',hypothesisId,location,message,data,timestamp:Date.now()})}).catch(()=>{});
-  };
-
-  const scanIframes = (reason: string) => {
-    const modalEl = document.querySelector('[data-payment-modal="true"]');
-    const iframes = Array.from(document.querySelectorAll("iframe"));
-    const inside = modalEl ? iframes.filter((f) => modalEl.contains(f)) : [];
-    const outside = modalEl ? iframes.filter((f) => !modalEl.contains(f)) : iframes;
-    const toHost = (src: string) => {
-      try {
-        return new URL(src, window.location.href).host;
-      } catch {
-        return null;
-      }
-    };
-    const sampleOutsideHosts = outside
-      .map((f) => toHost(f.getAttribute("src") || ""))
-      .filter(Boolean)
-      .slice(0, 4);
-
-    let bodyPointerEvents: string | null = null;
-    try {
-      bodyPointerEvents = getComputedStyle(document.body).pointerEvents;
-    } catch {}
-
-    // #region agent log
-    dbg("H1","PaymentModal.tsx:scanIframes","iframe_scan",{reason,total:iframes.length,insideModal:inside.length,outsideModal:outside.length,bodyPointerEvents,sampleOutsideHosts});
-    // #endregion
-  };
-  // #endregion
 
   const openUrlInNewTab = (url: string) => {
     // Try to open a new tab; if blocked, user can use the fallback button we show.
@@ -94,9 +59,6 @@ export function PaymentModal({ isOpen, onClose, onSuccess }: PaymentModalProps) 
   };
 
   const createRedirectPaymentAndOpen = async () => {
-    // #region agent log
-    dbg("H4","PaymentModal.tsx:createRedirectPaymentAndOpen","request_redirect_payment",{status,hasUserId:Boolean(userId)});
-    // #endregion
     const { data, error } = await supabase.functions.invoke("yookassa-create-payment", {
       body: {
         return_url: `${window.location.origin}/profile?payment=success`,
@@ -111,9 +73,6 @@ export function PaymentModal({ isOpen, onClose, onSuccess }: PaymentModalProps) 
 
     setRedirectUrl(data.confirmation_url);
     openUrlInNewTab(data.confirmation_url);
-    // #region agent log
-    dbg("H4","PaymentModal.tsx:createRedirectPaymentAndOpen","redirect_url_opened",{hasRedirectUrl:true});
-    // #endregion
   };
 
   // Load YooKassa widget script
@@ -203,10 +162,6 @@ export function PaymentModal({ isOpen, onClose, onSuccess }: PaymentModalProps) 
       const preferredConfirmationType = isInAppBrowser ? "redirect" : "embedded";
       const confirmationType = (isInIframe || isInAppBrowser) ? "redirect" : preferredConfirmationType;
 
-      // #region agent log
-      dbg("H1","PaymentModal.tsx:initializePayment","env_detected",{isInAppBrowser,isInIframe,confirmationType,origin:window.location.origin});
-      // #endregion
-
       const { data, error } = await supabase.functions.invoke("yookassa-create-payment", {
         body: {
           return_url: `${window.location.origin}/profile?payment=success`,
@@ -214,24 +169,12 @@ export function PaymentModal({ isOpen, onClose, onSuccess }: PaymentModalProps) 
         },
       });
 
-      // #region agent log
-      dbg("H4","PaymentModal.tsx:initializePayment","create_payment_response",{
-        confirmationType,
-        hasPaymentId: Boolean((data as any)?.payment_id),
-        hasToken: Boolean((data as any)?.confirmation_token),
-        hasUrl: Boolean((data as any)?.confirmation_url),
-      });
-      // #endregion
-
       // Redirect flow: no token, but has confirmation_url
       if (!error && data?.confirmation_url && confirmationType === "redirect") {
         setRedirectUrl(data.confirmation_url);
         setStatus("widget");
         // Try to open immediately (user gesture is present from clicking "Оформить")
         openUrlInNewTab(data.confirmation_url);
-        // #region agent log
-        dbg("H4","PaymentModal.tsx:initializePayment","redirect_flow",{hasConfirmationUrl:true});
-        // #endregion
         return;
       }
 
@@ -244,18 +187,12 @@ export function PaymentModal({ isOpen, onClose, onSuccess }: PaymentModalProps) 
           httpStatus: data?.http_status,
         });
         setStatus("error");
-        // #region agent log
-        dbg("H3","PaymentModal.tsx:initializePayment","create_payment_failed",{hasError:Boolean(error),hasToken:Boolean(data?.confirmation_token),errorCode:data?.error_code,httpStatus:data?.http_status});
-        // #endregion
         return;
       }
 
       // Store token, then render widget after container is in DOM
       setConfirmationToken(data.confirmation_token);
       setStatus("widget");
-      // #region agent log
-      dbg("H2","PaymentModal.tsx:initializePayment","embedded_token_received",{});
-      // #endregion
     } catch (error) {
       console.error("Payment initialization error:", error);
       setErrorDetails({ 
@@ -263,9 +200,6 @@ export function PaymentModal({ isOpen, onClose, onSuccess }: PaymentModalProps) 
         details: String(error)
       });
       setStatus("error");
-      // #region agent log
-      dbg("H3","PaymentModal.tsx:initializePayment","exception",{details:String(error)});
-      // #endregion
     }
   };
 
@@ -314,16 +248,10 @@ export function PaymentModal({ isOpen, onClose, onSuccess }: PaymentModalProps) 
       });
 
       widgetRef.current = checkout.render("yookassa-widget-container");
-      // #region agent log
-      dbg("H1","PaymentModal.tsx:renderWidget","widget_rendered",{activeElement:(document.activeElement && (document.activeElement as HTMLElement).tagName) || null});
-      // #endregion
     } catch (error) {
       console.error("Widget render error:", error);
       setErrorDetails({ message: "Не удалось загрузить форму оплаты", details: String(error) });
       setStatus("error");
-      // #region agent log
-      dbg("H2","PaymentModal.tsx:renderWidget","widget_render_error",{details:String(error)});
-      // #endregion
     }
   };
 
@@ -398,9 +326,6 @@ export function PaymentModal({ isOpen, onClose, onSuccess }: PaymentModalProps) 
             setStatus("success");
             toast.success("🎉 Premium подключён!");
             onSuccess?.();
-            // #region agent log
-            dbg("H5","PaymentModal.tsx:pollPremium","premium_confirmed",{});
-            // #endregion
           }
         }
       } catch {
@@ -424,34 +349,6 @@ export function PaymentModal({ isOpen, onClose, onSuccess }: PaymentModalProps) 
       clearInterval(interval);
     };
   }, [isOpen, status, userId, onSuccess]);
-
-  // Capture a small amount of UI evidence about "unclickable overlay" while widget is shown (throttled).
-  useEffect(() => {
-    if (!isOpen) return;
-    if (status !== "widget") return;
-
-    const onPointerDownCapture = (e: PointerEvent) => {
-      const now = Date.now();
-      if (now - debugLastUiEventAtRef.current < 1200) return; // throttle
-      debugLastUiEventAtRef.current = now;
-
-      const target = e.target as HTMLElement | null;
-      const tag = target?.tagName || null;
-      const id = target?.id || null;
-      const cls = target?.className ? String(target.className).slice(0, 120) : null;
-      const active = document.activeElement ? (document.activeElement as HTMLElement).tagName : null;
-      const isInIframe = (() => { try { return window.top !== window.self; } catch { return true; } })();
-      dbg("H1","PaymentModal.tsx:UI","pointerdown_capture",{tag,id,cls,active,isInIframe,x:e.clientX,y:e.clientY});
-      scanIframes("pointerdown");
-    };
-
-    document.addEventListener("pointerdown", onPointerDownCapture, true);
-    // one-time scan shortly after widget becomes visible
-    scanIframes("widget_mount");
-    return () => {
-      document.removeEventListener("pointerdown", onPointerDownCapture, true);
-    };
-  }, [isOpen, status]);
 
   return (
     <Dialog open={isOpen} modal={false} onOpenChange={(open) => !open && handleClose()}>
