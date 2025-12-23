@@ -52,14 +52,6 @@ const Profile = () => {
   const [showPaymentSuccess, setShowPaymentSuccess] = useState(false);
   const [isPremiumConfirmed, setIsPremiumConfirmed] = useState(false);
   const [searchParams] = useSearchParams();
-  const lastPaymentDebugRef = useRef<{ id?: string; status?: string; hasWebhookData?: boolean } | null>(null);
-
-  // #region agent log helpers
-  const dbg = (hypothesisId: string, location: string, message: string, data: Record<string, unknown>) => {
-    // Use no-cors + text/plain to avoid CORS preflight from HTTPS preview environments.
-    fetch('http://127.0.0.1:7242/ingest/5a352d39-cd0b-48d9-ba61-990189298ff9',{method:'POST',mode:'no-cors',headers:{'Content-Type':'text/plain'},body:JSON.stringify({sessionId:'debug-session',runId:'run3',hypothesisId,location,message,data,timestamp:Date.now()})}).catch(()=>{});
-  };
-  // #endregion
 
   // Check for payment success or openPayment from URL params
   useEffect(() => {
@@ -69,30 +61,22 @@ const Profile = () => {
       subscription.refresh();
       // Clean up URL
       window.history.replaceState({}, '', '/profile');
-      // #region agent log
-      dbg("H4","Profile.tsx:useEffect(payment)","payment_success_param",{origin:window.location.origin});
-      // #endregion
     }
     // Auto-open payment modal when coming from Telegram
     if (searchParams.get('openPayment') === 'true') {
       setIsPaymentModalOpen(true);
       // Clean up URL
       window.history.replaceState({}, '', '/profile');
-      // #region agent log
-      dbg("H4","Profile.tsx:useEffect(openPayment)","open_payment_param",{});
-      // #endregion
     }
   }, [searchParams]);
 
   // When success dialog is opened, poll subscription until premium is confirmed (webhook can take a few seconds)
   useEffect(() => {
     if (!showPaymentSuccess) return;
+    if (!userId) return;
 
     let cancelled = false;
     setIsPremiumConfirmed(false);
-    // #region agent log
-    dbg("H5","Profile.tsx:pollPremium","poll_start",{});
-    // #endregion
 
     const startedAt = Date.now();
     const interval = setInterval(async () => {
@@ -101,9 +85,6 @@ const Profile = () => {
         const { data } = await supabase.rpc("get_subscription_status" as any, { p_user_id: userId });
         const row = Array.isArray(data) ? data[0] : data;
         const rpcIsPremium = Boolean((row as any)?.is_premium);
-        // #region agent log
-        dbg("H5","Profile.tsx:pollPremium","poll_tick",{rpcIsPremium});
-        // #endregion
 
         if (rpcIsPremium) {
           // sync UI state
@@ -111,95 +92,20 @@ const Profile = () => {
         setIsPremiumConfirmed(true);
         toast.success("Premium активирован!");
         clearInterval(interval);
-        // #region agent log
-        dbg("H5","Profile.tsx:pollPremium","premium_confirmed",{});
-        // #endregion
         return;
       }
       } catch (e) {
-        // #region agent log
-        dbg("H5","Profile.tsx:pollPremium","poll_error",{details:String(e)});
-        // #endregion
+        // ignore polling errors
       }
       // Stop polling after 45s
       if (Date.now() - startedAt > 45000) {
         clearInterval(interval);
-        // #region agent log
-        dbg("H5","Profile.tsx:pollPremium","poll_timeout",{});
-        // #endregion
       }
     }, 2500);
 
     return () => {
       cancelled = true;
       clearInterval(interval);
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [showPaymentSuccess]);
-
-  // Extra debug: inspect latest payment row + subscription rpc when success flow is active
-  useEffect(() => {
-    if (!showPaymentSuccess) return;
-    if (!userId) return;
-
-    let cancelled = false;
-    const startedAt = Date.now();
-
-    const inspect = async (phase: "start" | "tick" | "timeout") => {
-      try {
-        const [{ data: payRows }, { data: rpcRows }] = await Promise.all([
-          supabase
-            .from("payments")
-            .select("id,status,webhook_data,created_at")
-            .eq("user_id", userId)
-            .order("created_at", { ascending: false })
-            .limit(1),
-          supabase.rpc("get_subscription_status" as any, { p_user_id: userId }),
-        ]);
-
-        const pay = Array.isArray(payRows) ? payRows[0] : undefined;
-        const rpc = Array.isArray(rpcRows) ? rpcRows[0] : rpcRows;
-
-        lastPaymentDebugRef.current = pay
-          ? { id: pay.id, status: pay.status, hasWebhookData: Boolean(pay.webhook_data) }
-          : null;
-
-        // #region agent log
-        dbg("H5","Profile.tsx:paymentInspect",`inspect_${phase}`,{
-          hasPayment: Boolean(pay),
-          paymentId: pay?.id,
-          paymentStatus: pay?.status,
-          paymentHasWebhookData: Boolean(pay?.webhook_data),
-          rpcIsPremium: Boolean((rpc as any)?.is_premium),
-          rpcExpiresAt: (rpc as any)?.subscription_expires_at || null,
-        });
-        // #endregion
-      } catch (e) {
-        // #region agent log
-        dbg("H5","Profile.tsx:paymentInspect","inspect_error",{details:String(e)});
-        // #endregion
-      }
-    };
-
-    inspect("start");
-
-    const interval = setInterval(() => {
-      if (cancelled) return;
-      // log at most every ~10s
-      const elapsed = Date.now() - startedAt;
-      if (elapsed < 11000 || elapsed > 45000) return;
-      inspect("tick");
-    }, 2500);
-
-    const timeout = setTimeout(() => {
-      if (cancelled) return;
-      inspect("timeout");
-    }, 46000);
-
-    return () => {
-      cancelled = true;
-      clearInterval(interval);
-      clearTimeout(timeout);
     };
   }, [showPaymentSuccess, userId]);
 
@@ -510,41 +416,16 @@ const Profile = () => {
                       </div>
                     )}
                   </div>
-                  <div className="flex gap-2">
-                    {!subscription.isPremium && (
-                      <Button 
-                        size="sm" 
-                        className="bg-emerald-600 hover:bg-emerald-700 text-white"
-                        onClick={() => setIsPaymentModalOpen(true)}
-                      >
-                        <CreditCard className="w-4 h-4 mr-2" />
-                        Оформить Premium
-                      </Button>
-                    )}
-                    {/* Dev button: Reset to free for VladimirKam only */}
-                    {profile?.username === 'VladimirKam' && subscription.isPremium && (
-                      <Button 
-                        size="sm" 
-                        variant="outline"
-                        className="border-red-300 text-red-600 hover:bg-red-50"
-                        onClick={async () => {
-                          if (!userId) return;
-                          const { error } = await supabase
-                            .from('profiles')
-                            .update({ subscription_tier: 'free', subscription_expires_at: null })
-                            .eq('id', userId);
-                          if (error) {
-                            toast.error('Ошибка сброса подписки');
-                          } else {
-                            toast.success('Подписка сброшена на Free');
-                            subscription.refresh();
-                          }
-                        }}
-                      >
-                        Сбросить на Free (dev)
-                      </Button>
-                    )}
-                  </div>
+                  {!subscription.isPremium && (
+                    <Button 
+                      size="sm" 
+                      className="bg-emerald-600 hover:bg-emerald-700 text-white"
+                      onClick={() => setIsPaymentModalOpen(true)}
+                    >
+                      <CreditCard className="w-4 h-4 mr-2" />
+                      Оформить Premium
+                    </Button>
+                  )}
                 </div>
               )}
             </CardContent>
@@ -748,15 +629,15 @@ const Profile = () => {
         }}
       />
 
-      {/* Success celebration */}
+      {/* Success celebration - mobile optimized */}
       <ConfettiBurst active={showPaymentSuccess && isPremiumConfirmed} />
       <Dialog open={showPaymentSuccess} onOpenChange={(open) => setShowPaymentSuccess(open)}>
-        <DialogContent className="sm:max-w-[520px]">
+        <DialogContent className="sm:max-w-[480px] w-[calc(100vw-2rem)] max-h-[85svh] max-h-[85dvh] overflow-y-auto p-4 sm:p-6">
           <DialogHeader>
-            <DialogTitle>
+            <DialogTitle className="text-base sm:text-lg">
               {isPremiumConfirmed ? "🎉 Premium подключён!" : "Оплата принята"}
             </DialogTitle>
-            <DialogDescription>
+            <DialogDescription className="text-sm">
               {isPremiumConfirmed
                 ? "Теперь у вас безлимитные сообщения и доступ ко всем функциям."
                 : "Обычно активация занимает несколько секунд. Мы обновляем статус автоматически."}
@@ -765,14 +646,14 @@ const Profile = () => {
 
           <div className="mt-2">
             {isPremiumConfirmed ? (
-              <div className="rounded-lg border bg-gradient-to-r from-emerald-50 via-cyan-50 to-blue-50 p-4">
-                <div className="font-semibold">✨ Готово!</div>
-                <div className="text-sm text-muted-foreground mt-1">
+              <div className="rounded-lg border bg-gradient-to-r from-emerald-50 via-cyan-50 to-blue-50 p-3 sm:p-4">
+                <div className="font-semibold text-sm sm:text-base">✨ Готово!</div>
+                <div className="text-xs sm:text-sm text-muted-foreground mt-1">
                   Спасибо за поддержку — приятной учёбы со Сократом.
                 </div>
               </div>
             ) : (
-              <div className="flex items-center gap-3 rounded-lg border p-4">
+              <div className="flex items-center gap-3 rounded-lg border p-3 sm:p-4">
                 <Loader2 className="w-5 h-5 animate-spin text-primary" />
                 <div className="text-sm text-muted-foreground">
                   Проверяем активацию Premium…
@@ -781,9 +662,11 @@ const Profile = () => {
             )}
           </div>
 
-          <div className="flex gap-2 justify-end">
+          <div className="flex flex-col sm:flex-row gap-2 sm:justify-end mt-2">
             <Button
               variant="outline"
+              size="sm"
+              className="w-full sm:w-auto"
               onClick={() => {
                 subscription.refresh();
                 if (subscription.isPremium) setIsPremiumConfirmed(true);
@@ -794,6 +677,8 @@ const Profile = () => {
             {isPremiumConfirmed && (
               <Button
                 variant="secondary"
+                size="sm"
+                className="w-full sm:w-auto"
                 onClick={() => {
                   setShowPaymentSuccess(false);
                   navigate("/chat");
@@ -802,7 +687,11 @@ const Profile = () => {
                 Перейти в чат
               </Button>
             )}
-            <Button onClick={() => setShowPaymentSuccess(false)}>
+            <Button 
+              size="sm"
+              className="w-full sm:w-auto"
+              onClick={() => setShowPaymentSuccess(false)}
+            >
               {isPremiumConfirmed ? "Круто!" : "Ок"}
             </Button>
           </div>
