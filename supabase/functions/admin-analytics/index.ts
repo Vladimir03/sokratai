@@ -359,6 +359,86 @@ serve(async (req) => {
 
     const segmentsData = await calculateSegments();
 
+    // 7. Top 10 active users for the period
+    const calculateTopUsers = async () => {
+      const nowDate = new Date();
+      const daysDiff = Math.max(1, Math.ceil((endDate.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24)));
+
+      // Get user message counts for the period
+      const { data: userMessages } = await supabaseAdmin
+        .from("chat_messages")
+        .select("user_id")
+        .eq("role", "user")
+        .gte("created_at", startDateStr)
+        .lte("created_at", endDateStr);
+
+      if (!userMessages || userMessages.length === 0) {
+        return [];
+      }
+
+      // Count messages per user
+      const messageCounts: Record<string, number> = {};
+      userMessages.forEach((m) => {
+        messageCounts[m.user_id] = (messageCounts[m.user_id] || 0) + 1;
+      });
+
+      // Sort and get top 10 user IDs
+      const sortedUsers = Object.entries(messageCounts)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 10);
+
+      const topUserIds = sortedUsers.map(([id]) => id);
+
+      if (topUserIds.length === 0) {
+        return [];
+      }
+
+      // Get profile info for top users
+      const { data: profiles } = await supabaseAdmin
+        .from("profiles")
+        .select("id, username, telegram_username, subscription_tier, subscription_expires_at, trial_ends_at")
+        .in("id", topUserIds);
+
+      if (!profiles) {
+        return [];
+      }
+
+      // Create a map for quick profile lookup
+      const profileMap = new Map(profiles.map((p) => [p.id, p]));
+
+      // Build top users array with segment info
+      return sortedUsers.map(([userId, messageCount]) => {
+        const profile = profileMap.get(userId);
+        if (!profile) {
+          return null;
+        }
+
+        // Determine segment
+        const isPremium = 
+          profile.subscription_tier === "premium" && 
+          profile.subscription_expires_at && 
+          new Date(profile.subscription_expires_at) > nowDate;
+        
+        const isTrial = 
+          !isPremium && 
+          profile.trial_ends_at && 
+          new Date(profile.trial_ends_at) > nowDate;
+
+        const segment = isPremium ? "premium" : isTrial ? "trial" : "free";
+
+        return {
+          id: profile.id,
+          username: profile.username || "Unknown",
+          telegramUsername: profile.telegram_username || null,
+          segment,
+          messageCount,
+          avgPerDay: Math.round((messageCount / daysDiff) * 10) / 10,
+        };
+      }).filter(Boolean);
+    };
+
+    const topUsersData = await calculateTopUsers();
+
     // Prepare chart data - iterate through all days in the range
     const chartDays: string[] = [];
     const currentDate = new Date(startDate);
@@ -399,6 +479,7 @@ serve(async (req) => {
         sentFirstMessage,
       },
       segments: segmentsData,
+      topUsers: topUsersData,
     };
 
     return new Response(JSON.stringify(analytics), {
