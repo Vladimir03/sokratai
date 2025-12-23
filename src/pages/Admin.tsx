@@ -68,12 +68,8 @@ const Admin = () => {
       const startDate = dateRange.from.toISOString().split("T")[0];
       const endDate = dateRange.to.toISOString().split("T")[0];
       
-      // Use supabase.functions.invoke instead of raw fetch to avoid undefined URL issues
+      // Use POST method - GET with body is not allowed by browsers
       const { data, error: invokeError } = await supabase.functions.invoke("admin-analytics", {
-        method: "GET",
-        headers: {
-          Authorization: `Bearer ${session.access_token}`,
-        },
         body: { startDate, endDate },
       });
 
