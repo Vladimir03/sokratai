@@ -5,6 +5,7 @@ import { supabase } from "@/lib/supabaseClient";
 import { toast } from "sonner";
 import { Loader2, Crown, CheckCircle, XCircle, ChevronDown, ChevronUp } from "lucide-react";
 import { ConfettiBurst } from "@/components/ConfettiBurst";
+import { useNavigate } from "react-router-dom";
 
 interface PaymentModalProps {
   isOpen: boolean;
@@ -38,6 +39,7 @@ declare global {
 type PaymentStatus = "idle" | "loading" | "widget" | "success" | "error";
 
 export function PaymentModal({ isOpen, onClose, onSuccess }: PaymentModalProps) {
+  const navigate = useNavigate();
   const [status, setStatus] = useState<PaymentStatus>("idle");
   const [errorDetails, setErrorDetails] = useState<ErrorDetails | null>(null);
   const [showTechDetails, setShowTechDetails] = useState(false);
@@ -441,9 +443,21 @@ export function PaymentModal({ isOpen, onClose, onSuccess }: PaymentModalProps) 
               <p className="text-center text-muted-foreground">
                 Готово — безлимитные сообщения уже доступны.
               </p>
-              <Button onClick={() => { onSuccess?.(); handleClose(); }}>
-                Круто!
-              </Button>
+              <div className="flex gap-2">
+                <Button
+                  variant="secondary"
+                  onClick={() => {
+                    onSuccess?.();
+                    handleClose();
+                    navigate("/chat");
+                  }}
+                >
+                  Перейти в чат
+                </Button>
+                <Button onClick={() => { onSuccess?.(); handleClose(); }}>
+                  Круто!
+                </Button>
+              </div>
             </div>
           )}
         </div>

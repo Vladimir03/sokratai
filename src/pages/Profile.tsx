@@ -10,7 +10,7 @@ import { z } from "zod";
 import { PageContent } from "@/components/PageContent";
 import { useSubscription } from "@/hooks/useSubscription";
 import { PaymentModal } from "@/components/PaymentModal";
-import { useSearchParams } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { ConfettiBurst } from "@/components/ConfettiBurst";
 
@@ -37,6 +37,7 @@ const pluralizeDays = (days: number) => {
 };
 
 const Profile = () => {
+  const navigate = useNavigate();
   const [profile, setProfile] = useState<Profile | null>(null);
   const [stats, setStats] = useState<UserStats | null>(null);
   const [loading, setLoading] = useState(true);
@@ -663,6 +664,17 @@ const Profile = () => {
             >
               Обновить статус
             </Button>
+            {isPremiumConfirmed && (
+              <Button
+                variant="secondary"
+                onClick={() => {
+                  setShowPaymentSuccess(false);
+                  navigate("/chat");
+                }}
+              >
+                Перейти в чат
+              </Button>
+            )}
             <Button onClick={() => setShowPaymentSuccess(false)}>
               {isPremiumConfirmed ? "Круто!" : "Ок"}
             </Button>
