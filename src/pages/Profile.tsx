@@ -401,32 +401,58 @@ const Profile = () => {
               {subscription.isLoading ? (
                 <div className="h-16 w-full rounded-lg bg-muted animate-pulse" />
               ) : (
-                <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
-                  <div className="space-y-1">
-                    <div className="text-sm text-muted-foreground">
-                      {subscription.isPremium
-                        ? "Безлимитные сообщения и доступ ко всем функциям."
-                        : subscription.isTrialActive
-                          ? `Бесплатный триал: осталось ${subscription.trialDaysLeft} ${pluralizeDays(subscription.trialDaysLeft)}.`
-                          : `Бесплатный тариф: ${subscription.dailyLimit} сообщений в день.`}
+                <>
+                  <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+                    <div className="space-y-1">
+                      <div className="text-sm text-muted-foreground">
+                        {subscription.isPremium
+                          ? "Безлимитные сообщения и доступ ко всем функциям."
+                          : subscription.isTrialActive
+                            ? `Бесплатный триал: осталось ${subscription.trialDaysLeft} ${pluralizeDays(subscription.trialDaysLeft)}.`
+                            : `Бесплатный тариф: ${subscription.dailyLimit} сообщений в день.`}
+                      </div>
+                      {!subscription.isPremium && (
+                        <div className="text-xs text-muted-foreground">
+                          Premium — 699₽/мес. Подключите, чтобы сохранить безлимит после триала.
+                        </div>
+                      )}
                     </div>
                     {!subscription.isPremium && (
-                      <div className="text-xs text-muted-foreground">
-                        Premium — 699₽/мес. Подключите, чтобы сохранить безлимит после триала.
-                      </div>
+                      <Button 
+                        size="sm" 
+                        className="bg-emerald-600 hover:bg-emerald-700 text-white"
+                        onClick={() => setIsPaymentModalOpen(true)}
+                      >
+                        <CreditCard className="w-4 h-4 mr-2" />
+                        Оформить Premium
+                      </Button>
                     )}
                   </div>
-                  {!subscription.isPremium && (
-                    <Button 
-                      size="sm" 
-                      className="bg-emerald-600 hover:bg-emerald-700 text-white"
-                      onClick={() => setIsPaymentModalOpen(true)}
-                    >
-                      <CreditCard className="w-4 h-4 mr-2" />
-                      Оформить Premium
-                    </Button>
+                  
+                  {/* Test button for VladimirKam to reset subscription */}
+                  {profile?.username === "VladimirKam" && subscription.isPremium && (
+                    <div className="pt-3 border-t border-muted">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="w-full text-xs text-muted-foreground"
+                        onClick={async () => {
+                          try {
+                            const { error } = await supabase.functions.invoke("reset-subscription-test");
+                            if (error) throw error;
+                            toast.success("Подписка сброшена на Free");
+                            await subscription.refresh();
+                            await fetchProfile();
+                          } catch (error: any) {
+                            toast.error(error.message || "Ошибка сброса подписки");
+                          }
+                        }}
+                      >
+                        🔧 Сбросить на Free (тест)
+                      </Button>
+                    </div>
                   )}
-                </div>
+                </>
               )}
             </CardContent>
           </Card>
