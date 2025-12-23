@@ -48,9 +48,21 @@ serve(async (req) => {
       });
     }
 
+    // Support both query params and request body
     const url = new URL(req.url);
-    const startDateParam = url.searchParams.get("startDate");
-    const endDateParam = url.searchParams.get("endDate");
+    let startDateParam = url.searchParams.get("startDate");
+    let endDateParam = url.searchParams.get("endDate");
+    
+    // Also check request body if no query params
+    if (!startDateParam && !endDateParam) {
+      try {
+        const body = await req.json();
+        startDateParam = body.startDate || null;
+        endDateParam = body.endDate || null;
+      } catch {
+        // No body or invalid JSON, use defaults
+      }
+    }
     
     const now = new Date();
     const endDate = endDateParam ? new Date(endDateParam + "T23:59:59.999Z") : now;
