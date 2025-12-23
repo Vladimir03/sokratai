@@ -14,6 +14,7 @@ import { AdminRetentionCards } from "@/components/admin/AdminRetentionCards";
 import { AdminFunnelChart } from "@/components/admin/AdminFunnelChart";
 import { AdminLineChart } from "@/components/admin/AdminLineChart";
 import { AdminCRM } from "@/components/admin/AdminCRM";
+import { AdminSegmentsChart, SegmentsData } from "@/components/admin/AdminSegmentsChart";
 import { ArrowLeft, RefreshCw, Shield, CalendarIcon, BarChart3, MessageSquare } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -41,6 +42,7 @@ interface AnalyticsData {
     completedOnboarding: number;
     sentFirstMessage: number;
   };
+  segments: SegmentsData;
 }
 
 const Admin = () => {
@@ -228,6 +230,11 @@ const Admin = () => {
               <div className="space-y-6">
                 {/* Summary Cards */}
                 <AdminSummaryCards data={analytics.summary} />
+
+                {/* Segments */}
+                {analytics.segments && (
+                  <AdminSegmentsChart segments={analytics.segments} />
+                )}
 
                 {/* Charts Row 1 */}
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
