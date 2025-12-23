@@ -87,12 +87,37 @@ const Profile = () => {
   // When success dialog is opened, poll subscription until premium is confirmed (webhook can take a few seconds)
   useEffect(() => {
     if (!showPaymentSuccess) return;
+    if (!userId) return;
 
     let cancelled = false;
     setIsPremiumConfirmed(false);
     // #region agent log
-    dbg("H5","Profile.tsx:pollPremium","poll_start",{});
+    dbg("H5","Profile.tsx:pollPremium","poll_start",{userId});
     // #endregion
+
+    // Immediate check (no waiting)
+    (async () => {
+      try {
+        const { data } = await supabase.rpc("get_subscription_status" as any, { p_user_id: userId });
+        const row = Array.isArray(data) ? data[0] : data;
+        const rpcIsPremium = Boolean((row as any)?.is_premium);
+        // #region agent log
+        dbg("H5","Profile.tsx:pollPremium","poll_immediate",{userId,rpcIsPremium});
+        // #endregion
+        if (!cancelled && rpcIsPremium) {
+          await subscription.refresh();
+          setIsPremiumConfirmed(true);
+          toast.success("Premium активирован!");
+          // #region agent log
+          dbg("H5","Profile.tsx:pollPremium","premium_confirmed",{userId,via:"immediate"});
+          // #endregion
+        }
+      } catch (e) {
+        // #region agent log
+        dbg("H5","Profile.tsx:pollPremium","poll_immediate_error",{userId,details:String(e)});
+        // #endregion
+      }
+    })();
 
     const startedAt = Date.now();
     const interval = setInterval(async () => {
@@ -102,7 +127,7 @@ const Profile = () => {
         const row = Array.isArray(data) ? data[0] : data;
         const rpcIsPremium = Boolean((row as any)?.is_premium);
         // #region agent log
-        dbg("H5","Profile.tsx:pollPremium","poll_tick",{rpcIsPremium});
+        dbg("H5","Profile.tsx:pollPremium","poll_tick",{userId,rpcIsPremium});
         // #endregion
 
         if (rpcIsPremium) {
@@ -112,20 +137,20 @@ const Profile = () => {
         toast.success("Premium активирован!");
         clearInterval(interval);
         // #region agent log
-        dbg("H5","Profile.tsx:pollPremium","premium_confirmed",{});
+          dbg("H5","Profile.tsx:pollPremium","premium_confirmed",{userId,via:"interval"});
         // #endregion
         return;
       }
       } catch (e) {
         // #region agent log
-        dbg("H5","Profile.tsx:pollPremium","poll_error",{details:String(e)});
+        dbg("H5","Profile.tsx:pollPremium","poll_error",{userId,details:String(e)});
         // #endregion
       }
       // Stop polling after 45s
       if (Date.now() - startedAt > 45000) {
         clearInterval(interval);
         // #region agent log
-        dbg("H5","Profile.tsx:pollPremium","poll_timeout",{});
+        dbg("H5","Profile.tsx:pollPremium","poll_timeout",{userId});
         // #endregion
       }
     }, 2500);
@@ -134,8 +159,7 @@ const Profile = () => {
       cancelled = true;
       clearInterval(interval);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [showPaymentSuccess]);
+  }, [showPaymentSuccess, userId]);
 
   // Extra debug: inspect latest payment row + subscription rpc when success flow is active
   useEffect(() => {
