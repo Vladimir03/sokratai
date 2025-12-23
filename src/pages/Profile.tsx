@@ -53,6 +53,12 @@ const Profile = () => {
   const [isPremiumConfirmed, setIsPremiumConfirmed] = useState(false);
   const [searchParams] = useSearchParams();
 
+  // #region agent log helpers
+  const dbg = (hypothesisId: string, location: string, message: string, data: Record<string, unknown>) => {
+    fetch('http://127.0.0.1:7242/ingest/5a352d39-cd0b-48d9-ba61-990189298ff9',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:'debug-session',runId:'run1',hypothesisId,location,message,data,timestamp:Date.now()})}).catch(()=>{});
+  };
+  // #endregion
+
   // Check for payment success or openPayment from URL params
   useEffect(() => {
     if (searchParams.get('payment') === 'success') {
@@ -61,12 +67,18 @@ const Profile = () => {
       subscription.refresh();
       // Clean up URL
       window.history.replaceState({}, '', '/profile');
+      // #region agent log
+      dbg("H4","Profile.tsx:useEffect(payment)","payment_success_param",{origin:window.location.origin});
+      // #endregion
     }
     // Auto-open payment modal when coming from Telegram
     if (searchParams.get('openPayment') === 'true') {
       setIsPaymentModalOpen(true);
       // Clean up URL
       window.history.replaceState({}, '', '/profile');
+      // #region agent log
+      dbg("H4","Profile.tsx:useEffect(openPayment)","open_payment_param",{});
+      // #endregion
     }
   }, [searchParams]);
 
@@ -76,6 +88,9 @@ const Profile = () => {
 
     let cancelled = false;
     setIsPremiumConfirmed(false);
+    // #region agent log
+    dbg("H5","Profile.tsx:pollPremium","poll_start",{});
+    // #endregion
 
     const startedAt = Date.now();
     const interval = setInterval(async () => {
@@ -86,11 +101,17 @@ const Profile = () => {
         setIsPremiumConfirmed(true);
         toast.success("Premium активирован!");
         clearInterval(interval);
+        // #region agent log
+        dbg("H5","Profile.tsx:pollPremium","premium_confirmed",{});
+        // #endregion
         return;
       }
       // Stop polling after 45s
       if (Date.now() - startedAt > 45000) {
         clearInterval(interval);
+        // #region agent log
+        dbg("H5","Profile.tsx:pollPremium","poll_timeout",{});
+        // #endregion
       }
     }, 2500);
 
