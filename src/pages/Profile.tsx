@@ -439,12 +439,12 @@ const Profile = () => {
                         onClick={async () => {
                           try {
                             console.log("Resetting subscription for test...");
-                            const { data, error } = await supabase.functions.invoke("reset-subscription-test");
+                            const { data, error } = await supabase.rpc("reset_subscription_for_test" as any);
                             console.log("Reset response:", { data, error });
                             
                             if (error) {
                               console.error("Reset error:", error);
-                              throw new Error(error.message || "Edge Function error");
+                              throw new Error(error.message || "RPC error");
                             }
                             
                             if (data?.error) {
