@@ -52,35 +52,7 @@ export function PaymentModal({ isOpen, onClose, onSuccess }: PaymentModalProps) 
 
   // #region agent log helpers
   const dbg = (hypothesisId: string, location: string, message: string, data: Record<string, unknown>) => {
-    // Use no-cors + text/plain to avoid CORS preflight from HTTPS preview environments.
-    fetch('http://127.0.0.1:7242/ingest/5a352d39-cd0b-48d9-ba61-990189298ff9',{method:'POST',mode:'no-cors',headers:{'Content-Type':'text/plain'},body:JSON.stringify({sessionId:'debug-session',runId:'run3',hypothesisId,location,message,data,timestamp:Date.now()})}).catch(()=>{});
-  };
-
-  const scanIframes = (reason: string) => {
-    const modalEl = document.querySelector('[data-payment-modal="true"]');
-    const iframes = Array.from(document.querySelectorAll("iframe"));
-    const inside = modalEl ? iframes.filter((f) => modalEl.contains(f)) : [];
-    const outside = modalEl ? iframes.filter((f) => !modalEl.contains(f)) : iframes;
-    const toHost = (src: string) => {
-      try {
-        return new URL(src, window.location.href).host;
-      } catch {
-        return null;
-      }
-    };
-    const sampleOutsideHosts = outside
-      .map((f) => toHost(f.getAttribute("src") || ""))
-      .filter(Boolean)
-      .slice(0, 4);
-
-    let bodyPointerEvents: string | null = null;
-    try {
-      bodyPointerEvents = getComputedStyle(document.body).pointerEvents;
-    } catch {}
-
-    // #region agent log
-    dbg("H1","PaymentModal.tsx:scanIframes","iframe_scan",{reason,total:iframes.length,insideModal:inside.length,outsideModal:outside.length,bodyPointerEvents,sampleOutsideHosts});
-    // #endregion
+    fetch('http://127.0.0.1:7242/ingest/5a352d39-cd0b-48d9-ba61-990189298ff9',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:'debug-session',runId:'run1',hypothesisId,location,message,data,timestamp:Date.now()})}).catch(()=>{});
   };
   // #endregion
 
@@ -433,19 +405,16 @@ export function PaymentModal({ isOpen, onClose, onSuccess }: PaymentModalProps) 
       const active = document.activeElement ? (document.activeElement as HTMLElement).tagName : null;
       const isInIframe = (() => { try { return window.top !== window.self; } catch { return true; } })();
       dbg("H1","PaymentModal.tsx:UI","pointerdown_capture",{tag,id,cls,active,isInIframe,x:e.clientX,y:e.clientY});
-      scanIframes("pointerdown");
     };
 
     document.addEventListener("pointerdown", onPointerDownCapture, true);
-    // one-time scan shortly after widget becomes visible
-    scanIframes("widget_mount");
     return () => {
       document.removeEventListener("pointerdown", onPointerDownCapture, true);
     };
   }, [isOpen, status]);
 
   return (
-    <Dialog open={isOpen} modal={false} onOpenChange={(open) => !open && handleClose()}>
+    <Dialog open={isOpen} onOpenChange={(open) => !open && handleClose()}>
       <DialogContent className="sm:max-w-[500px] max-h-[90vh] overflow-y-auto" data-payment-modal="true">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
