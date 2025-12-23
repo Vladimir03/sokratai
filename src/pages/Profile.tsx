@@ -438,12 +438,24 @@ const Profile = () => {
                         className="w-full text-xs text-muted-foreground"
                         onClick={async () => {
                           try {
-                            const { error } = await supabase.functions.invoke("reset-subscription-test");
-                            if (error) throw error;
+                            console.log("Resetting subscription for test...");
+                            const { data, error } = await supabase.functions.invoke("reset-subscription-test");
+                            console.log("Reset response:", { data, error });
+                            
+                            if (error) {
+                              console.error("Reset error:", error);
+                              throw new Error(error.message || "Edge Function error");
+                            }
+                            
+                            if (data?.error) {
+                              throw new Error(data.error);
+                            }
+                            
                             toast.success("Подписка сброшена на Free");
                             await subscription.refresh();
                             await fetchProfile();
                           } catch (error: any) {
+                            console.error("Reset subscription error:", error);
                             toast.error(error.message || "Ошибка сброса подписки");
                           }
                         }}
