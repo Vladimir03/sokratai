@@ -55,7 +55,8 @@ const Profile = () => {
 
   // #region agent log helpers
   const dbg = (hypothesisId: string, location: string, message: string, data: Record<string, unknown>) => {
-    fetch('http://127.0.0.1:7242/ingest/5a352d39-cd0b-48d9-ba61-990189298ff9',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:'debug-session',runId:'run1',hypothesisId,location,message,data,timestamp:Date.now()})}).catch(()=>{});
+    // Use no-cors + text/plain to avoid CORS preflight from HTTPS preview environments.
+    fetch('http://127.0.0.1:7242/ingest/5a352d39-cd0b-48d9-ba61-990189298ff9',{method:'POST',mode:'no-cors',headers:{'Content-Type':'text/plain'},body:JSON.stringify({sessionId:'debug-session',runId:'run2',hypothesisId,location,message,data,timestamp:Date.now()})}).catch(()=>{});
   };
   // #endregion
 
