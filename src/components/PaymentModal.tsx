@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { supabase } from "@/lib/supabaseClient";
 import { toast } from "sonner";
 import { Loader2, Crown, CheckCircle, XCircle, ChevronDown, ChevronUp } from "lucide-react";
+import { ConfettiBurst } from "@/components/ConfettiBurst";
 
 interface PaymentModalProps {
   isOpen: boolean;
@@ -42,6 +43,7 @@ export function PaymentModal({ isOpen, onClose, onSuccess }: PaymentModalProps) 
   const [showTechDetails, setShowTechDetails] = useState(false);
   const [confirmationToken, setConfirmationToken] = useState<string | null>(null);
   const [redirectUrl, setRedirectUrl] = useState<string | null>(null);
+  const [userId, setUserId] = useState<string | null>(null);
   const widgetRef = useRef<{ destroy: () => void } | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -132,6 +134,7 @@ export function PaymentModal({ isOpen, onClose, onSuccess }: PaymentModalProps) 
         setStatus("error");
         return;
       }
+      setUserId(session.user.id);
 
       // Create payment via Edge Function
       const ua = typeof navigator !== "undefined" ? navigator.userAgent : "";
@@ -298,6 +301,50 @@ export function PaymentModal({ isOpen, onClose, onSuccess }: PaymentModalProps) 
     initializePayment();
   };
 
+  // Poll subscription status while payment is in progress; show success + confetti when premium becomes active.
+  useEffect(() => {
+    if (!isOpen) return;
+    if (status !== "widget") return;
+    if (!userId) return;
+
+    let cancelled = false;
+    const startedAt = Date.now();
+
+    const poll = async () => {
+      try {
+        const { data, error } = await supabase.rpc("get_subscription_status" as any, { p_user_id: userId });
+        if (cancelled) return;
+        if (!error && data) {
+          const row = Array.isArray(data) ? data[0] : data;
+          const isPremium = Boolean(row?.is_premium);
+          if (isPremium) {
+            setStatus("success");
+            toast.success("🎉 Premium подключён!");
+            onSuccess?.();
+          }
+        }
+      } catch {
+        // ignore polling errors
+      }
+    };
+
+    const interval = setInterval(() => {
+      if (cancelled) return;
+      poll();
+      if (Date.now() - startedAt > 60000) {
+        clearInterval(interval);
+      }
+    }, 2500);
+
+    // Immediate check
+    poll();
+
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [isOpen, status, userId, onSuccess]);
+
   return (
     <Dialog open={isOpen} onOpenChange={(open) => !open && handleClose()}>
       <DialogContent className="sm:max-w-[500px] max-h-[90vh] overflow-y-auto">
@@ -310,6 +357,8 @@ export function PaymentModal({ isOpen, onClose, onSuccess }: PaymentModalProps) 
             Безлимитные сообщения и доступ ко всем функциям — 699₽/месяц
           </DialogDescription>
         </DialogHeader>
+
+        <ConfettiBurst active={status === "success"} />
 
         <div className="mt-4">
           {/* Keep container in DOM so widget can always mount */}
@@ -388,12 +437,12 @@ export function PaymentModal({ isOpen, onClose, onSuccess }: PaymentModalProps) 
               <div className="p-3 bg-green-500/10 rounded-full">
                 <CheckCircle className="w-10 h-10 text-green-500" />
               </div>
-              <h3 className="text-lg font-semibold">Оплата прошла успешно!</h3>
+              <h3 className="text-lg font-semibold">🎉 Premium подключён!</h3>
               <p className="text-center text-muted-foreground">
-                Подписка Premium активирована. Наслаждайтесь безлимитным доступом!
+                Готово — безлимитные сообщения уже доступны.
               </p>
               <Button onClick={() => { onSuccess?.(); handleClose(); }}>
-                Отлично!
+                Круто!
               </Button>
             </div>
           )}

@@ -11,6 +11,8 @@ import { PageContent } from "@/components/PageContent";
 import { useSubscription } from "@/hooks/useSubscription";
 import { PaymentModal } from "@/components/PaymentModal";
 import { useSearchParams } from "react-router-dom";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
+import { ConfettiBurst } from "@/components/ConfettiBurst";
 
 interface Profile {
   username: string;
@@ -46,12 +48,15 @@ const Profile = () => {
   const [userId, setUserId] = useState<string | undefined>(undefined);
   const subscription = useSubscription(userId);
   const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
+  const [showPaymentSuccess, setShowPaymentSuccess] = useState(false);
+  const [isPremiumConfirmed, setIsPremiumConfirmed] = useState(false);
   const [searchParams] = useSearchParams();
 
   // Check for payment success or openPayment from URL params
   useEffect(() => {
     if (searchParams.get('payment') === 'success') {
-      toast.success("Оплата прошла успешно! Подписка активирована.");
+      setShowPaymentSuccess(true);
+      toast.success("Оплата прошла успешно! Проверяем активацию Premium…");
       subscription.refresh();
       // Clean up URL
       window.history.replaceState({}, '', '/profile');
@@ -63,6 +68,37 @@ const Profile = () => {
       window.history.replaceState({}, '', '/profile');
     }
   }, [searchParams]);
+
+  // When success dialog is opened, poll subscription until premium is confirmed (webhook can take a few seconds)
+  useEffect(() => {
+    if (!showPaymentSuccess) return;
+
+    let cancelled = false;
+    setIsPremiumConfirmed(false);
+
+    const startedAt = Date.now();
+    const interval = setInterval(async () => {
+      if (cancelled) return;
+      await subscription.refresh();
+      const isPremiumNow = Boolean(subscription.isPremium);
+      if (isPremiumNow) {
+        setIsPremiumConfirmed(true);
+        toast.success("Premium активирован!");
+        clearInterval(interval);
+        return;
+      }
+      // Stop polling after 45s
+      if (Date.now() - startedAt > 45000) {
+        clearInterval(interval);
+      }
+    }, 2500);
+
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showPaymentSuccess]);
 
   useEffect(() => {
     fetchProfile();
@@ -578,9 +614,61 @@ const Profile = () => {
         onClose={() => setIsPaymentModalOpen(false)}
         onSuccess={() => {
           subscription.refresh();
-          toast.success("Подписка Premium активирована!");
+          setShowPaymentSuccess(true);
+          setIsPremiumConfirmed(true);
+          toast.success("Premium активирован!");
         }}
       />
+
+      {/* Success celebration */}
+      <ConfettiBurst active={showPaymentSuccess && isPremiumConfirmed} />
+      <Dialog open={showPaymentSuccess} onOpenChange={(open) => setShowPaymentSuccess(open)}>
+        <DialogContent className="sm:max-w-[520px]">
+          <DialogHeader>
+            <DialogTitle>
+              {isPremiumConfirmed ? "🎉 Premium подключён!" : "Оплата принята"}
+            </DialogTitle>
+            <DialogDescription>
+              {isPremiumConfirmed
+                ? "Теперь у вас безлимитные сообщения и доступ ко всем функциям."
+                : "Обычно активация занимает несколько секунд. Мы обновляем статус автоматически."}
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="mt-2">
+            {isPremiumConfirmed ? (
+              <div className="rounded-lg border bg-gradient-to-r from-emerald-50 via-cyan-50 to-blue-50 p-4">
+                <div className="font-semibold">✨ Готово!</div>
+                <div className="text-sm text-muted-foreground mt-1">
+                  Спасибо за поддержку — приятной учёбы со Сократом.
+                </div>
+              </div>
+            ) : (
+              <div className="flex items-center gap-3 rounded-lg border p-4">
+                <Loader2 className="w-5 h-5 animate-spin text-primary" />
+                <div className="text-sm text-muted-foreground">
+                  Проверяем активацию Premium…
+                </div>
+              </div>
+            )}
+          </div>
+
+          <div className="flex gap-2 justify-end">
+            <Button
+              variant="outline"
+              onClick={() => {
+                subscription.refresh();
+                if (subscription.isPremium) setIsPremiumConfirmed(true);
+              }}
+            >
+              Обновить статус
+            </Button>
+            <Button onClick={() => setShowPaymentSuccess(false)}>
+              {isPremiumConfirmed ? "Круто!" : "Ок"}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </AuthGuard>
   );
 };
