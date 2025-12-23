@@ -16,6 +16,7 @@ interface ChatWithUser {
   title: string | null;
   chat_type: string;
   last_message_at: string | null;
+  actual_last_message: string; // Реальная дата последнего сообщения
   updated_at: string;
   created_at: string;
   user_id: string;
@@ -43,8 +44,7 @@ export const AdminCRM = () => {
       // Получаем все чаты
       const { data: chatsData, error: chatsError } = await supabase
         .from("chats")
-        .select("id, title, chat_type, last_message_at, created_at, updated_at, user_id")
-        .order("updated_at", { ascending: false });
+        .select("id, title, chat_type, last_message_at, created_at, updated_at, user_id");
 
       if (chatsError) throw chatsError;
 
@@ -53,21 +53,31 @@ export const AdminCRM = () => {
         return;
       }
 
-      // Получаем количество сообщений от пользователей для каждого чата
       const chatIds = chatsData.map((c) => c.id);
-      const { data: messagesCount, error: messagesError } = await supabase
+
+      // Получаем все сообщения с датами для подсчёта и определения последнего сообщения
+      const { data: allMessages, error: messagesError } = await supabase
         .from("chat_messages")
-        .select("chat_id")
+        .select("chat_id, created_at, role")
         .in("chat_id", chatIds)
-        .eq("role", "user");
+        .order("created_at", { ascending: false });
 
       if (messagesError) throw messagesError;
 
-      // Считаем сообщения по чатам
+      // Считаем сообщения и находим последнее сообщение для каждого чата
       const countMap: Record<string, number> = {};
-      messagesCount?.forEach((m) => {
+      const lastMessageMap: Record<string, string> = {};
+
+      allMessages?.forEach((m) => {
         if (m.chat_id) {
-          countMap[m.chat_id] = (countMap[m.chat_id] || 0) + 1;
+          // Считаем только пользовательские сообщения
+          if (m.role === "user") {
+            countMap[m.chat_id] = (countMap[m.chat_id] || 0) + 1;
+          }
+          // Запоминаем дату последнего сообщения (любого)
+          if (!lastMessageMap[m.chat_id] && m.created_at) {
+            lastMessageMap[m.chat_id] = m.created_at;
+          }
         }
       });
 
@@ -97,8 +107,14 @@ export const AdminCRM = () => {
       const result: ChatWithUser[] = chatsWithMessages.map((chat) => ({
         ...chat,
         message_count: countMap[chat.id] || 0,
+        actual_last_message: lastMessageMap[chat.id] || chat.updated_at,
         user: profilesMap[chat.user_id] || null,
       }));
+
+      // Сортируем по реальной дате последнего сообщения
+      result.sort((a, b) => 
+        new Date(b.actual_last_message).getTime() - new Date(a.actual_last_message).getTime()
+      );
 
       setChats(result);
     } catch (err) {
@@ -183,7 +199,7 @@ export const AdminCRM = () => {
                 {chat.message_count} сообщ.
               </div>
               <div className="text-xs text-muted-foreground">
-                {format(new Date(chat.last_message_at || chat.updated_at || chat.created_at), "d MMM, HH:mm", {
+                {format(new Date(chat.actual_last_message), "d MMM, HH:mm", {
                   locale: ru,
                 })}
               </div>
