@@ -35,6 +35,3 @@ verify_jwt = true
 
 [functions.yookassa-webhook]
 verify_jwt = false
-
-[functions.reset-subscription-test]
-verify_jwt = true
