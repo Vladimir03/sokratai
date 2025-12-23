@@ -97,9 +97,17 @@ const Profile = () => {
     const startedAt = Date.now();
     const interval = setInterval(async () => {
       if (cancelled) return;
-      await subscription.refresh();
-      const isPremiumNow = Boolean(subscription.isPremium);
-      if (isPremiumNow) {
+      try {
+        const { data } = await supabase.rpc("get_subscription_status" as any, { p_user_id: userId });
+        const row = Array.isArray(data) ? data[0] : data;
+        const rpcIsPremium = Boolean((row as any)?.is_premium);
+        // #region agent log
+        dbg("H5","Profile.tsx:pollPremium","poll_tick",{rpcIsPremium});
+        // #endregion
+
+        if (rpcIsPremium) {
+          // sync UI state
+          await subscription.refresh();
         setIsPremiumConfirmed(true);
         toast.success("Premium активирован!");
         clearInterval(interval);
@@ -107,6 +115,11 @@ const Profile = () => {
         dbg("H5","Profile.tsx:pollPremium","premium_confirmed",{});
         // #endregion
         return;
+      }
+      } catch (e) {
+        // #region agent log
+        dbg("H5","Profile.tsx:pollPremium","poll_error",{details:String(e)});
+        // #endregion
       }
       // Stop polling after 45s
       if (Date.now() - startedAt > 45000) {
