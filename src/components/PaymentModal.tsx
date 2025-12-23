@@ -445,7 +445,7 @@ export function PaymentModal({ isOpen, onClose, onSuccess }: PaymentModalProps) 
   }, [isOpen, status]);
 
   return (
-    <Dialog open={isOpen} onOpenChange={(open) => !open && handleClose()}>
+    <Dialog open={isOpen} modal={false} onOpenChange={(open) => !open && handleClose()}>
       <DialogContent className="sm:max-w-[500px] max-h-[90vh] overflow-y-auto" data-payment-modal="true">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
