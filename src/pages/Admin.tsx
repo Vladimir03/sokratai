@@ -15,6 +15,7 @@ import { AdminFunnelChart } from "@/components/admin/AdminFunnelChart";
 import { AdminLineChart } from "@/components/admin/AdminLineChart";
 import { AdminCRM } from "@/components/admin/AdminCRM";
 import { AdminSegmentsChart, SegmentsData } from "@/components/admin/AdminSegmentsChart";
+import { AdminTopUsers, TopUser } from "@/components/admin/AdminTopUsers";
 import { ArrowLeft, RefreshCw, Shield, CalendarIcon, BarChart3, MessageSquare } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -43,6 +44,7 @@ interface AnalyticsData {
     sentFirstMessage: number;
   };
   segments: SegmentsData;
+  topUsers: TopUser[];
 }
 
 const Admin = () => {
@@ -234,6 +236,11 @@ const Admin = () => {
                 {/* Segments */}
                 {analytics.segments && (
                   <AdminSegmentsChart segments={analytics.segments} />
+                )}
+
+                {/* Top Users */}
+                {analytics.topUsers && (
+                  <AdminTopUsers topUsers={analytics.topUsers} />
                 )}
 
                 {/* Charts Row 1 */}
