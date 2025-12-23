@@ -55,7 +55,8 @@ const Profile = () => {
 
   // #region agent log helpers
   const dbg = (hypothesisId: string, location: string, message: string, data: Record<string, unknown>) => {
-    fetch('http://127.0.0.1:7242/ingest/5a352d39-cd0b-48d9-ba61-990189298ff9',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:'debug-session',runId:'run1',hypothesisId,location,message,data,timestamp:Date.now()})}).catch(()=>{});
+    // Use no-cors + text/plain to avoid CORS preflight from HTTPS preview environments.
+    fetch('http://127.0.0.1:7242/ingest/5a352d39-cd0b-48d9-ba61-990189298ff9',{method:'POST',mode:'no-cors',headers:{'Content-Type':'text/plain'},body:JSON.stringify({sessionId:'debug-session',runId:'run2',hypothesisId,location,message,data,timestamp:Date.now()})}).catch(()=>{});
   };
   // #endregion
 
@@ -429,16 +430,41 @@ const Profile = () => {
                       </div>
                     )}
                   </div>
-                  {!subscription.isPremium && (
-                    <Button 
-                      size="sm" 
-                      className="bg-emerald-600 hover:bg-emerald-700 text-white"
-                      onClick={() => setIsPaymentModalOpen(true)}
-                    >
-                      <CreditCard className="w-4 h-4 mr-2" />
-                      Оформить Premium
-                    </Button>
-                  )}
+                  <div className="flex gap-2">
+                    {!subscription.isPremium && (
+                      <Button 
+                        size="sm" 
+                        className="bg-emerald-600 hover:bg-emerald-700 text-white"
+                        onClick={() => setIsPaymentModalOpen(true)}
+                      >
+                        <CreditCard className="w-4 h-4 mr-2" />
+                        Оформить Premium
+                      </Button>
+                    )}
+                    {/* Dev button: Reset to free for VladimirKam only */}
+                    {profile?.username === 'VladimirKam' && subscription.isPremium && (
+                      <Button 
+                        size="sm" 
+                        variant="outline"
+                        className="border-red-300 text-red-600 hover:bg-red-50"
+                        onClick={async () => {
+                          if (!userId) return;
+                          const { error } = await supabase
+                            .from('profiles')
+                            .update({ subscription_tier: 'free', subscription_expires_at: null })
+                            .eq('id', userId);
+                          if (error) {
+                            toast.error('Ошибка сброса подписки');
+                          } else {
+                            toast.success('Подписка сброшена на Free');
+                            subscription.refresh();
+                          }
+                        }}
+                      >
+                        Сбросить на Free (dev)
+                      </Button>
+                    )}
+                  </div>
                 </div>
               )}
             </CardContent>
