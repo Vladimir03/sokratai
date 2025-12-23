@@ -78,8 +78,14 @@ const Admin = () => {
       });
 
       if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || "Ошибка сервера");
+        const contentType = response.headers.get("content-type");
+        if (contentType && contentType.includes("application/json")) {
+          const errorData = await response.json();
+          throw new Error(errorData.error || `Ошибка сервера (${response.status})`);
+        } else {
+          console.error("Non-JSON error response:", response.status, response.statusText);
+          throw new Error(`Ошибка сервера (${response.status})`);
+        }
       }
 
       const data = await response.json();
