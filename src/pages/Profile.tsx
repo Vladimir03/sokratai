@@ -430,16 +430,41 @@ const Profile = () => {
                       </div>
                     )}
                   </div>
-                  {!subscription.isPremium && (
-                    <Button 
-                      size="sm" 
-                      className="bg-emerald-600 hover:bg-emerald-700 text-white"
-                      onClick={() => setIsPaymentModalOpen(true)}
-                    >
-                      <CreditCard className="w-4 h-4 mr-2" />
-                      Оформить Premium
-                    </Button>
-                  )}
+                  <div className="flex gap-2">
+                    {!subscription.isPremium && (
+                      <Button 
+                        size="sm" 
+                        className="bg-emerald-600 hover:bg-emerald-700 text-white"
+                        onClick={() => setIsPaymentModalOpen(true)}
+                      >
+                        <CreditCard className="w-4 h-4 mr-2" />
+                        Оформить Premium
+                      </Button>
+                    )}
+                    {/* Dev button: Reset to free for VladimirKam only */}
+                    {profile?.username === 'VladimirKam' && subscription.isPremium && (
+                      <Button 
+                        size="sm" 
+                        variant="outline"
+                        className="border-red-300 text-red-600 hover:bg-red-50"
+                        onClick={async () => {
+                          if (!userId) return;
+                          const { error } = await supabase
+                            .from('profiles')
+                            .update({ subscription_tier: 'free', subscription_expires_at: null })
+                            .eq('id', userId);
+                          if (error) {
+                            toast.error('Ошибка сброса подписки');
+                          } else {
+                            toast.success('Подписка сброшена на Free');
+                            subscription.refresh();
+                          }
+                        }}
+                      >
+                        Сбросить на Free (dev)
+                      </Button>
+                    )}
+                  </div>
                 </div>
               )}
             </CardContent>
