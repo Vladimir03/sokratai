@@ -67,30 +67,22 @@ const Admin = () => {
 
       const startDate = dateRange.from.toISOString().split("T")[0];
       const endDate = dateRange.to.toISOString().split("T")[0];
-      const functionUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/admin-analytics?startDate=${startDate}&endDate=${endDate}`;
       
-      const response = await fetch(functionUrl, {
+      // Use supabase.functions.invoke instead of raw fetch to avoid undefined URL issues
+      const { data, error: invokeError } = await supabase.functions.invoke("admin-analytics", {
         method: "GET",
         headers: {
           Authorization: `Bearer ${session.access_token}`,
-          "Content-Type": "application/json",
         },
+        body: { startDate, endDate },
       });
 
-      if (!response.ok) {
-        const contentType = response.headers.get("content-type");
-        if (contentType && contentType.includes("application/json")) {
-          const errorData = await response.json();
-          throw new Error(errorData.error || `Ошибка сервера (${response.status})`);
-        } else {
-          console.error("Non-JSON error response:", response.status, response.statusText);
-          throw new Error(`Ошибка сервера (${response.status})`);
-        }
+      if (invokeError) {
+        console.error("Edge function error:", invokeError);
+        throw new Error(invokeError.message || "Ошибка загрузки аналитики");
       }
-
-      const data = await response.json();
       
-      if (data.error) {
+      if (data?.error) {
         throw new Error(data.error);
       }
 
