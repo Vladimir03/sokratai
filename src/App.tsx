@@ -30,6 +30,7 @@ const Profile = lazy(() => import("./pages/Profile"));
 const MiniApp = lazy(() => import("./pages/MiniApp"));
 const MiniAppSolution = lazy(() => import("./pages/MiniAppSolution"));
 const Admin = lazy(() => import("./pages/Admin"));
+const RetentionAnalysis = lazy(() => import("./pages/RetentionAnalysis"));
 const Requisites = lazy(() => import("./pages/Requisites"));
 const Offer = lazy(() => import("./pages/Offer"));
 const PrivacyPolicy = lazy(() => import("./pages/PrivacyPolicy"));
@@ -174,6 +175,14 @@ const App = () => (
             element={
               <Suspense fallback={<PageLoader />}>
                 <Admin />
+              </Suspense>
+            } 
+          />
+          <Route 
+            path="/retention-analysis" 
+            element={
+              <Suspense fallback={<PageLoader />}>
+                <RetentionAnalysis />
               </Suspense>
             } 
           />
