@@ -1671,26 +1671,24 @@ function splitLongMessage(text: string, maxLength: number = 4000): string[] {
   return parts;
 }
 
-// Create quick action inline keyboard
+// Create quick action inline keyboard for help depth control
 function createQuickActionsKeyboard() {
   return {
     inline_keyboard: [
       [
         {
-          text: "📋 План решения",
-          callback_data: "quick_action:plan",
+          text: "✅ Покажи решение",
+          callback_data: "help_depth:solution",
+        },
+        {
+          text: "💡 Дай подсказку",
+          callback_data: "help_depth:hint",
         },
       ],
       [
         {
-          text: "🔍 Объясни подробнее",
-          callback_data: "quick_action:explain",
-        },
-      ],
-      [
-        {
-          text: "✍️ Похожая задача",
-          callback_data: "quick_action:similar",
+          text: "📖 Объясни подробнее",
+          callback_data: "help_depth:explain",
         },
       ],
     ],
@@ -2383,8 +2381,8 @@ async function handleCallbackQuery(callbackQuery: any) {
     }),
   });
 
-  // Handle quick action buttons
-  if (data.startsWith("quick_action:")) {
+  // Handle help depth control buttons
+  if (data.startsWith("help_depth:")) {
     const session = await getOnboardingSession(telegramUserId);
 
     if (!session?.user_id) {
@@ -2393,27 +2391,33 @@ async function handleCallbackQuery(callbackQuery: any) {
     }
 
     const userId = session.user_id;
+    const helpLevel = data.replace("help_depth:", "");
 
-    // Determine prompt text based on button
+    // Determine prompt text based on help depth level
     let promptText = "";
-    switch (data) {
-      case "quick_action:plan":
-        promptText = "Составь план решения этой задачи";
+    let responsePrefix = "";
+    
+    switch (helpLevel) {
+      case "solution":
+        promptText = "Покажи полное решение этой задачи с ответом. Не задавай вопросов, просто реши.";
+        responsePrefix = "✅ Показываю решение...";
         break;
-      case "quick_action:explain":
-        promptText = "Объясни этот момент подробнее";
+      case "hint":
+        promptText = "Дай мне только подсказку для следующего шага. Не решай полностью, только намекни на направление.";
+        responsePrefix = "💡 Подсказка...";
         break;
-      case "quick_action:similar":
-        promptText = "Дай мне похожую задачу для практики";
+      case "explain":
+        promptText = "Объясни подробнее последний шаг или концепцию. Разбери детально с примерами.";
+        responsePrefix = "📖 Объясняю подробнее...";
         break;
       default:
         return;
     }
 
-    // Show user what they "sent"
-    await sendTelegramMessage(telegramUserId, `⚡ ${promptText}`);
+    // Show user what action is being taken
+    await sendTelegramMessage(telegramUserId, responsePrefix);
 
-    // Process as text message with button input method
+    // Process as text message
     await handleTextMessage(telegramUserId, userId, promptText);
     return;
   }
