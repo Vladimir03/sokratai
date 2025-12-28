@@ -127,6 +127,12 @@ export const usePractice = (egeNumber: EGENumber | null) => {
       queryClient.invalidateQueries({ queryKey: ['userProgress'] });
       queryClient.invalidateQueries({ queryKey: ['todayStats'] });
 
+      // Вызываем функцию обновления стрейка
+      supabase.rpc('check_and_update_streak', { p_user_id: user.id })
+        .then(({ data }) => {
+          if (data) queryClient.invalidateQueries({ queryKey: ['todayStats'] });
+        });
+
       return {
         is_correct: isCorrect,
         correct_answer: currentProblem.correct_answer,
