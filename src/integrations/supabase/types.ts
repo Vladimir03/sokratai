@@ -243,6 +243,75 @@ export type Database = {
           },
         ]
       }
+      ege_problems: {
+        Row: {
+          answer_tolerance: number | null
+          answer_type: string
+          condition_image_url: string | null
+          condition_text: string
+          correct_answer: string
+          created_at: string | null
+          difficulty: number | null
+          ege_number: number
+          hints: Json | null
+          id: string
+          is_active: boolean | null
+          solution_text: string | null
+          solution_video_url: string | null
+          source_id: string | null
+          subtopic: string | null
+          tags: string[] | null
+          topic: string
+          updated_at: string | null
+          variant_source: string | null
+          year: number | null
+        }
+        Insert: {
+          answer_tolerance?: number | null
+          answer_type: string
+          condition_image_url?: string | null
+          condition_text: string
+          correct_answer: string
+          created_at?: string | null
+          difficulty?: number | null
+          ege_number: number
+          hints?: Json | null
+          id?: string
+          is_active?: boolean | null
+          solution_text?: string | null
+          solution_video_url?: string | null
+          source_id?: string | null
+          subtopic?: string | null
+          tags?: string[] | null
+          topic: string
+          updated_at?: string | null
+          variant_source?: string | null
+          year?: number | null
+        }
+        Update: {
+          answer_tolerance?: number | null
+          answer_type?: string
+          condition_image_url?: string | null
+          condition_text?: string
+          correct_answer?: string
+          created_at?: string | null
+          difficulty?: number | null
+          ege_number?: number
+          hints?: Json | null
+          id?: string
+          is_active?: boolean | null
+          solution_text?: string | null
+          solution_video_url?: string | null
+          source_id?: string | null
+          subtopic?: string | null
+          tags?: string[] | null
+          topic?: string
+          updated_at?: string | null
+          variant_source?: string | null
+          year?: number | null
+        }
+        Relationships: []
+      }
       homework_chat_messages: {
         Row: {
           content: string
@@ -486,6 +555,53 @@ export type Database = {
         }
         Relationships: []
       }
+      practice_attempts: {
+        Row: {
+          asked_ai: boolean | null
+          created_at: string | null
+          hints_used: number | null
+          id: string
+          is_correct: boolean
+          problem_id: string
+          started_at: string
+          submitted_at: string
+          user_answer: string
+          user_id: string
+        }
+        Insert: {
+          asked_ai?: boolean | null
+          created_at?: string | null
+          hints_used?: number | null
+          id?: string
+          is_correct: boolean
+          problem_id: string
+          started_at?: string
+          submitted_at?: string
+          user_answer: string
+          user_id: string
+        }
+        Update: {
+          asked_ai?: boolean | null
+          created_at?: string | null
+          hints_used?: number | null
+          id?: string
+          is_correct?: boolean
+          problem_id?: string
+          started_at?: string
+          submitted_at?: string
+          user_answer?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "practice_attempts_problem_id_fkey"
+            columns: ["problem_id"]
+            isOneToOne: false
+            referencedRelation: "ege_problems"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       problems: {
         Row: {
           answer: string | null
@@ -695,6 +811,42 @@ export type Database = {
           model?: string
           prompt_tokens?: number | null
           total_tokens?: number | null
+          user_id?: string
+        }
+        Relationships: []
+      }
+      user_ege_progress: {
+        Row: {
+          correct_attempts: number | null
+          created_at: string | null
+          current_difficulty: number | null
+          ege_number: number
+          id: string
+          last_practiced_at: string | null
+          total_attempts: number | null
+          updated_at: string | null
+          user_id: string
+        }
+        Insert: {
+          correct_attempts?: number | null
+          created_at?: string | null
+          current_difficulty?: number | null
+          ege_number: number
+          id?: string
+          last_practiced_at?: string | null
+          total_attempts?: number | null
+          updated_at?: string | null
+          user_id: string
+        }
+        Update: {
+          correct_attempts?: number | null
+          created_at?: string | null
+          current_difficulty?: number | null
+          ege_number?: number
+          id?: string
+          last_practiced_at?: string | null
+          total_attempts?: number | null
+          updated_at?: string | null
           user_id?: string
         }
         Relationships: []
