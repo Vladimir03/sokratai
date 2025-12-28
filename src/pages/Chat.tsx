@@ -234,9 +234,10 @@ export default function Chat() {
   useEffect(() => {
     if (!chatIdFromUrl && generalChat?.id && currentChatId !== generalChat.id) {
       console.log('Redirecting to general chat:', generalChat.id);
-      navigate(`/chat?id=${generalChat.id}`, { replace: true });
+      // КРИТИЧНО: Передаем location.state дальше, чтобы не потерять контекст из тренажёра
+      navigate(`/chat?id=${generalChat.id}`, { replace: true, state: location.state });
     }
-  }, [chatIdFromUrl, generalChat?.id, currentChatId, navigate]);
+  }, [chatIdFromUrl, generalChat?.id, currentChatId, navigate, location.state]);
 
   // Fetch current chat details
   const { data: currentChat } = useQuery({
