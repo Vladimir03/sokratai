@@ -106,7 +106,18 @@ export default function Chat() {
     problemContext?: { ege_number: number; topic: string; condition: string };
   } | null;
   const initialMessageFromPractice = practiceState?.initialMessage;
-  const [practiceMessageSent, setPracticeMessageSent] = useState(false);
+  const practiceMessageSentRef = useRef(false);
+  const pendingPracticeMessageRef = useRef<string | null>(null);
+  
+  // Сохраняем сообщение из Practice для отправки после загрузки чата
+  useEffect(() => {
+    if (initialMessageFromPractice && !practiceMessageSentRef.current) {
+      console.log('📚 Practice message received, queuing for send...');
+      pendingPracticeMessageRef.current = initialMessageFromPractice;
+      // Очищаем state из location чтобы не отправлять повторно
+      window.history.replaceState({}, document.title);
+    }
+  }, [initialMessageFromPractice]);
 
   // Функция для оценки размера сообщения на основе его контента
   const estimateMessageSize = useCallback((index: number) => {
@@ -1734,26 +1745,25 @@ export default function Chat() {
 
   // Автоматическая отправка сообщения из Practice ("Спроси Сократа")
   useEffect(() => {
+    const pendingMessage = pendingPracticeMessageRef.current;
+    
     if (
-      initialMessageFromPractice && 
-      !practiceMessageSent && 
+      pendingMessage && 
+      !practiceMessageSentRef.current && 
       !loadingHistory && 
       !isLoading && 
       currentChatId &&
-      user?.id
+      user?.id &&
+      messages.length > 0 // Ждём загрузки истории чата
     ) {
-      console.log('📚 Sending practice context message:', initialMessageFromPractice.slice(0, 100) + '...');
-      setPracticeMessageSent(true);
+      console.log('📚 Sending practice context message now:', pendingMessage.slice(0, 100) + '...');
+      practiceMessageSentRef.current = true;
+      pendingPracticeMessageRef.current = null;
       
-      // Очищаем state из location чтобы не отправлять повторно при обновлении
-      window.history.replaceState({}, document.title);
-      
-      // Небольшая задержка для стабильности UI
-      setTimeout(() => {
-        handleSend(initialMessageFromPractice, 'button');
-      }, 300);
+      // Отправляем сообщение
+      handleSend(pendingMessage, 'button');
     }
-  }, [initialMessageFromPractice, practiceMessageSent, loadingHistory, isLoading, currentChatId, user?.id, handleSend]);
+  }, [loadingHistory, isLoading, currentChatId, user?.id, messages.length, handleSend]);
 
   if (!currentChatId) {
     return (
