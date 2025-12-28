@@ -117,6 +117,16 @@ export const usePractice = (egeNumber: EGENumber | null) => {
         console.error('Error saving attempt:', attemptError);
       }
 
+      // Проверяем и обновляем стрейк
+      const { data: newStreak, error: streakError } = await supabase
+        .rpc('check_and_update_streak', { p_user_id: user.id });
+
+      if (streakError) {
+        console.error('Error checking streak:', streakError);
+      } else {
+        console.log('Streak checked:', newStreak);
+      }
+
       // Обновляем локальную статистику сессии
       setSessionStats(prev => ({
         attempted: prev.attempted + 1,
@@ -267,15 +277,15 @@ export const useTodayStats = () => {
       const correctToday = attempts?.filter(a => a.is_correct).length || 0;
       const xpToday = correctToday * 10 + (problemsSolved - correctToday) * 2;
 
-      // Получаем streak из user_stats
-      const { data: userStats } = await supabase
-        .from('user_stats')
+      // Получаем streak из profiles (обновляется функцией check_and_update_streak)
+      const { data: profile } = await supabase
+        .from('profiles')
         .select('current_streak')
-        .eq('user_id', user.id)
+        .eq('id', user.id)
         .maybeSingle();
 
       return {
-        current_streak: userStats?.current_streak || 0,
+        current_streak: profile?.current_streak || 0,
         problems_solved_today: problemsSolved,
         correct_today: correctToday,
         daily_goal_problems: 10,

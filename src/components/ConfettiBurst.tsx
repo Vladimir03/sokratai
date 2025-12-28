@@ -4,6 +4,7 @@ type ConfettiBurstProps = {
   active: boolean;
   durationMs?: number;
   particleCount?: number;
+  onComplete?: () => void;
 };
 
 type Particle = {
@@ -32,6 +33,7 @@ export function ConfettiBurst({
   active,
   durationMs = 1400,
   particleCount = 140,
+  onComplete,
 }: ConfettiBurstProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const rafRef = useRef<number | null>(null);
@@ -116,6 +118,7 @@ export function ConfettiBurst({
         rafRef.current = requestAnimationFrame(tick);
       } else {
         ctx.clearRect(0, 0, window.innerWidth, window.innerHeight);
+        onComplete?.();
       }
     };
 
