@@ -1,6 +1,6 @@
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
-import { Home, MessageSquare, BookOpen, TrendingUp, User, LogOut, Backpack, ListTodo } from "lucide-react";
+import { Home, MessageSquare, BookOpen, TrendingUp, User, LogOut, Backpack, ListTodo, Target } from "lucide-react";
 import { supabase } from "@/lib/supabaseClient";
 import { toast } from "sonner";
 
@@ -12,6 +12,7 @@ const Navigation = () => {
     { path: "/", icon: Home, label: "Главная", emoji: "🏠" },
     { path: "/homework", icon: Backpack, label: "Домашка", emoji: "🎒" },
     { path: "/chat", icon: MessageSquare, label: "Чат", emoji: "💬" },
+    { path: "/practice", icon: Target, label: "Тренажёр", emoji: "🎯" },
     { path: "/problems", icon: ListTodo, label: "Задачи", emoji: "📚" },
     { path: "/progress", icon: TrendingUp, label: "Прогресс", emoji: "📈" },
     { path: "/profile", icon: User, label: "Профиль", emoji: "👤" },

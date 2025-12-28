@@ -35,6 +35,7 @@ const Requisites = lazy(() => import("./pages/Requisites"));
 const Offer = lazy(() => import("./pages/Offer"));
 const PrivacyPolicy = lazy(() => import("./pages/PrivacyPolicy"));
 const NotFound = lazy(() => import("./pages/NotFound"));
+const Practice = lazy(() => import("./pages/Practice"));
 
 // Simple loading fallback
 const PageLoader = () => (
@@ -127,6 +128,14 @@ const App = () => (
             element={
               <Suspense fallback={<PageLoader />}>
                 <HomeworkTaskDetail />
+              </Suspense>
+            } 
+          />
+          <Route 
+            path="/practice" 
+            element={
+              <Suspense fallback={<PageLoader />}>
+                <Practice />
               </Suspense>
             } 
           />
