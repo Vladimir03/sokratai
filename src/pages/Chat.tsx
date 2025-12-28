@@ -9,7 +9,7 @@ import { useVirtualizer } from '@tanstack/react-virtual';
 import { useToast } from "@/hooks/use-toast";
 import ChatSkeleton from "@/components/ChatSkeleton";
 import LoadingIndicator from "@/components/LoadingIndicator";
-import { useSearchParams, useNavigate } from "react-router-dom";
+import { useSearchParams, useNavigate, useLocation } from "react-router-dom";
 import ConnectionIndicator from "@/components/ConnectionIndicator";
 import { ChatSidebar } from "@/components/ChatSidebar";
 import { TaskContextBanner } from "@/components/TaskContextBanner";
@@ -94,9 +94,19 @@ export default function Chat() {
   const queryClient = useQueryClient();
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
+  const location = useLocation();
   const chatIdFromUrl = searchParams.get('id');
   const isMobile = useIsMobile();
   const deviceType = useDeviceType();
+  
+  // Обработка контекста из Practice (кнопка "Спроси Сократа")
+  const practiceState = location.state as { 
+    initialMessage?: string; 
+    chatType?: string;
+    problemContext?: { ege_number: number; topic: string; condition: string };
+  } | null;
+  const initialMessageFromPractice = practiceState?.initialMessage;
+  const [practiceMessageSent, setPracticeMessageSent] = useState(false);
 
   // Функция для оценки размера сообщения на основе его контента
   const estimateMessageSize = useCallback((index: number) => {
@@ -1721,6 +1731,29 @@ export default function Chat() {
       }
     }
   }, [loadingHistory, isLoading, currentChatId]);
+
+  // Автоматическая отправка сообщения из Practice ("Спроси Сократа")
+  useEffect(() => {
+    if (
+      initialMessageFromPractice && 
+      !practiceMessageSent && 
+      !loadingHistory && 
+      !isLoading && 
+      currentChatId &&
+      user?.id
+    ) {
+      console.log('📚 Sending practice context message:', initialMessageFromPractice.slice(0, 100) + '...');
+      setPracticeMessageSent(true);
+      
+      // Очищаем state из location чтобы не отправлять повторно при обновлении
+      window.history.replaceState({}, document.title);
+      
+      // Небольшая задержка для стабильности UI
+      setTimeout(() => {
+        handleSend(initialMessageFromPractice, 'button');
+      }, 300);
+    }
+  }, [initialMessageFromPractice, practiceMessageSent, loadingHistory, isLoading, currentChatId, user?.id, handleSend]);
 
   if (!currentChatId) {
     return (

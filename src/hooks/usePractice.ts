@@ -156,6 +156,7 @@ export const usePractice = (egeNumber: EGENumber | null) => {
 };
 
 // Хук для получения прогресса пользователя
+// Вычисляет статистику напрямую из practice_attempts
 export const useUserProgress = () => {
   const { data: user } = useCurrentUser();
 
@@ -164,26 +165,61 @@ export const useUserProgress = () => {
     queryFn: async () => {
       if (!user) return {};
 
-      const { data, error } = await supabase
-        .from('user_ege_progress')
-        .select('*')
+      // Получаем все попытки пользователя с информацией о задаче
+      const { data: attempts, error } = await supabase
+        .from('practice_attempts')
+        .select(`
+          is_correct,
+          created_at,
+          problem:ege_problems(ege_number)
+        `)
         .eq('user_id', user.id);
 
       if (error) throw error;
 
-      // Преобразуем в объект для быстрого доступа
+      // Группируем по номеру ЕГЭ и вычисляем статистику
       const progressMap: Record<number, UserEgeProgress> = {};
-      data?.forEach(item => {
-        progressMap[item.ege_number] = {
-          ege_number: item.ege_number as EGENumber,
-          total_attempts: item.total_attempts,
-          correct_attempts: item.correct_attempts,
-          accuracy: item.total_attempts > 0 
-            ? Math.round((item.correct_attempts / item.total_attempts) * 100) 
-            : 0,
-          current_difficulty: item.current_difficulty as 1 | 2 | 3,
-          last_practiced_at: item.last_practiced_at,
-        };
+      
+      attempts?.forEach((attempt: any) => {
+        const egeNumber = attempt.problem?.ege_number;
+        if (!egeNumber) return;
+
+        if (!progressMap[egeNumber]) {
+          progressMap[egeNumber] = {
+            ege_number: egeNumber as EGENumber,
+            total_attempts: 0,
+            correct_attempts: 0,
+            accuracy: 0,
+            current_difficulty: 1,
+            last_practiced_at: attempt.created_at,
+          };
+        }
+
+        progressMap[egeNumber].total_attempts += 1;
+        if (attempt.is_correct) {
+          progressMap[egeNumber].correct_attempts += 1;
+        }
+        
+        // Обновляем last_practiced_at если эта попытка новее
+        if (attempt.created_at > progressMap[egeNumber].last_practiced_at) {
+          progressMap[egeNumber].last_practiced_at = attempt.created_at;
+        }
+      });
+
+      // Вычисляем accuracy и current_difficulty
+      Object.values(progressMap).forEach(progress => {
+        progress.accuracy = progress.total_attempts > 0
+          ? Math.round((progress.correct_attempts / progress.total_attempts) * 100)
+          : 0;
+        
+        // Адаптивная сложность на основе accuracy
+        if (progress.accuracy >= 80 && progress.total_attempts >= 5) {
+          progress.current_difficulty = 3;
+        } else if (progress.accuracy >= 50 && progress.total_attempts >= 3) {
+          progress.current_difficulty = 2;
+        } else {
+          progress.current_difficulty = 1;
+        }
       });
 
       return progressMap;
