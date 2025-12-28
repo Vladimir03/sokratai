@@ -8,7 +8,6 @@ import { Send, Globe } from "lucide-react";
 const SpecialOffer = lazy(() => import("@/components/sections/SpecialOffer"));
 const ValueProposition = lazy(() => import("@/components/sections/ValueProposition"));
 const AhaMoments = lazy(() => import("@/components/sections/AhaMoments"));
-const Problems = lazy(() => import("@/components/sections/Problems"));
 const Empathy = lazy(() => import("@/components/sections/Empathy"));
 const HowItWorks = lazy(() => import("@/components/sections/HowItWorks"));
 const Results = lazy(() => import("@/components/sections/Results"));
@@ -200,10 +199,6 @@ const Index = () => {
 
         <Suspense fallback={<div className="py-20 animate-pulse" style={{ height: "500px" }} />}>
           <AhaMoments />
-        </Suspense>
-
-        <Suspense fallback={<div className="py-20 bg-muted animate-pulse" style={{ height: "400px" }} />}>
-          <Problems />
         </Suspense>
 
         <Suspense fallback={<div className="py-20 animate-pulse" style={{ height: "300px" }} />}>

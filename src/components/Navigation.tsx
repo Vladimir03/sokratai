@@ -1,6 +1,6 @@
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
-import { Home, MessageSquare, BookOpen, TrendingUp, User, LogOut, Backpack, ListTodo, Target } from "lucide-react";
+import { Home, MessageSquare, BookOpen, TrendingUp, User, LogOut, Backpack, Target } from "lucide-react";
 import { supabase } from "@/lib/supabaseClient";
 import { toast } from "sonner";
 

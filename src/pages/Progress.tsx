@@ -1,9 +1,6 @@
-import { useState, useEffect } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { supabase } from "@/lib/supabaseClient";
-import { toast } from "sonner";
 import AuthGuard from "@/components/AuthGuard";
-import { TrendingUp, CheckCircle, Target, Award, Flame } from "lucide-react";
+import { TrendingUp, Target, Award, Flame } from "lucide-react";
 import { PageContent } from "@/components/PageContent";
 import { useUserProgress, useTodayStats } from "@/hooks/usePractice";
 import { EGE_NUMBERS } from "@/types/practice";
@@ -11,49 +8,11 @@ import { EGE_NUMBERS } from "@/types/practice";
 const Progress = () => {
   const { data: userProgress = {}, isLoading: isLoadingPractice } = useUserProgress();
   const { data: todayStats, isLoading: isLoadingStats } = useTodayStats();
-  const [loading, setLoading] = useState(true);
-  const [legacyStats, setStats] = useState({
-    totalSolved: 0,
-    correctCount: 0,
-    accuracy: 0,
-  });
-
-  useEffect(() => {
-    const fetchLegacyStats = async () => {
-      try {
-        const { data: { user } } = await supabase.auth.getUser();
-        if (!user) return;
-
-        const { data: solutions, error: solutionsError } = await supabase
-          .from("user_solutions")
-          .select("*")
-          .eq("user_id", user.id);
-
-        if (!solutionsError && solutions) {
-          const totalSolved = solutions.length;
-          const correctCount = solutions.filter(s => s.is_correct).length;
-          const accuracy = totalSolved > 0 ? Math.round((correctCount / totalSolved) * 100) : 0;
-          setStats({ totalSolved, correctCount, accuracy });
-        }
-      } catch (error) {
-        console.error("Error fetching legacy stats:", error);
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    fetchLegacyStats();
-  }, []);
 
   // Агрегированные данные из тренажёра
   const practiceArray = Object.values(userProgress);
-  const practiceTotal = practiceArray.reduce((acc, curr) => acc + curr.total_attempts, 0);
-  const practiceCorrect = practiceArray.reduce((acc, curr) => acc + curr.correct_attempts, 0);
-  const practiceAccuracy = practiceTotal > 0 ? Math.round((practiceCorrect / practiceTotal) * 100) : 0;
-
-  // Общие данные (старые + новые)
-  const totalSolved = practiceTotal + legacyStats.totalSolved;
-  const totalCorrect = practiceCorrect + legacyStats.correctCount;
+  const totalSolved = practiceArray.reduce((acc, curr) => acc + curr.total_attempts, 0);
+  const totalCorrect = practiceArray.reduce((acc, curr) => acc + curr.correct_attempts, 0);
   const totalAccuracy = totalSolved > 0 ? Math.round((totalCorrect / totalSolved) * 100) : 0;
 
   return (
@@ -65,7 +24,7 @@ const Progress = () => {
             <p className="text-muted-foreground">Отслеживайте свои достижения в тренажёре</p>
           </div>
 
-          {(loading || isLoadingPractice || isLoadingStats) ? (
+          {(isLoadingPractice || isLoadingStats) ? (
             <div className="text-center py-12">
               <div className="w-16 h-16 border-4 border-primary border-t-transparent rounded-full animate-spin mx-auto" />
             </div>
