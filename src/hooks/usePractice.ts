@@ -175,6 +175,7 @@ export const usePractice = (egeNumber: EGENumber | null) => {
 // Вычисляет статистику напрямую из practice_attempts
 export const useUserProgress = () => {
   const { data: user } = useCurrentUser();
+  const { data: problemCounts = {} } = useProblemCounts();
 
   return useQuery({
     queryKey: ['userProgress', user?.id],
@@ -185,6 +186,7 @@ export const useUserProgress = () => {
       const { data: attempts, error } = await supabase
         .from('practice_attempts')
         .select(`
+          problem_id,
           is_correct,
           created_at,
           problem:ege_problems(ege_number)
@@ -198,6 +200,7 @@ export const useUserProgress = () => {
       
       attempts?.forEach((attempt: any) => {
         const egeNumber = attempt.problem?.ege_number;
+        const problemId = attempt.problem_id;
         if (!egeNumber) return;
 
         if (!progressMap[egeNumber]) {
@@ -208,12 +211,20 @@ export const useUserProgress = () => {
             accuracy: 0,
             current_difficulty: 1,
             last_practiced_at: attempt.created_at,
+            problem_statuses: {}
           };
         }
 
         progressMap[egeNumber].total_attempts += 1;
+        
+        // Статус задачи: если хоть раз решена верно - зеленая (correct)
+        // Если была решена неверно и верных попыток пока нет - красная (incorrect)
+        const currentStatus = progressMap[egeNumber].problem_statuses[problemId];
         if (attempt.is_correct) {
+          progressMap[egeNumber].problem_statuses[problemId] = 'correct';
           progressMap[egeNumber].correct_attempts += 1;
+        } else if (currentStatus !== 'correct') {
+          progressMap[egeNumber].problem_statuses[problemId] = 'incorrect';
         }
         
         // Обновляем last_practiced_at если эта попытка новее
@@ -222,16 +233,22 @@ export const useUserProgress = () => {
         }
       });
 
-      // Вычисляем accuracy и current_difficulty
+      // Вычисляем процент завершения и current_difficulty
       Object.values(progressMap).forEach(progress => {
-        progress.accuracy = progress.total_attempts > 0
-          ? Math.round((progress.correct_attempts / progress.total_attempts) * 100)
-          : 0;
+        const totalProblemsInNumber = problemCounts[progress.ege_number] || 10;
+        const uniqueSolvedOrAttempted = Object.keys(progress.problem_statuses).length;
         
-        // Адаптивная сложность на основе accuracy
-        if (progress.accuracy >= 80 && progress.total_attempts >= 5) {
+        // Процент - это отношение кол-ва "тронутых" задач к общему кол-ву задач в этом номере
+        progress.accuracy = Math.round((uniqueSolvedOrAttempted / totalProblemsInNumber) * 100);
+        
+        // Адаптивная сложность на основе точности решенных задач (не "тронутых")
+        const accuracyRate = progress.total_attempts > 0 
+          ? (progress.correct_attempts / progress.total_attempts) * 100 
+          : 0;
+
+        if (accuracyRate >= 80 && progress.total_attempts >= 5) {
           progress.current_difficulty = 3;
-        } else if (progress.accuracy >= 50 && progress.total_attempts >= 3) {
+        } else if (accuracyRate >= 50 && progress.total_attempts >= 3) {
           progress.current_difficulty = 2;
         } else {
           progress.current_difficulty = 1;
@@ -240,7 +257,7 @@ export const useUserProgress = () => {
 
       return progressMap;
     },
-    enabled: !!user,
+    enabled: !!user && !!Object.keys(problemCounts).length,
   });
 };
 

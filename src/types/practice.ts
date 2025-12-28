@@ -41,6 +41,7 @@ export interface UserEgeProgress {
   accuracy: number;
   current_difficulty: 1 | 2 | 3;
   last_practiced_at: string;
+  problem_statuses: Record<string, 'correct' | 'incorrect'>;
 }
 
 export interface PracticeSession {

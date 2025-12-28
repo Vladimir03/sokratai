@@ -4,4 +4,5 @@ export { ResultCard } from './ResultCard';
 export { HintsDisplay } from './HintsDisplay';
 export { EgeNumberGrid } from './EgeNumberGrid';
 export { TodayStatsCard } from './TodayStatsCard';
+export { GoalReachedModal } from './GoalReachedModal';
 

@@ -33,11 +33,17 @@ export const EgeNumberGrid = ({
         {Object.entries(EGE_NUMBERS).map(([num, data]) => {
           const egeNum = parseInt(num) as EGENumber;
           const progress = userProgress[egeNum];
-          const count = problemCounts[egeNum] || 0;
+          const count = problemCounts[egeNum] || 10;
           const isEnabled = enabledNumbers.includes(egeNum);
-          const isMastered = progress && progress.accuracy >= 80 && progress.total_attempts >= 5;
+          const isMastered = progress && progress.accuracy >= 100;
           const isRecommended = recommendedNumber === egeNum;
           const accuracy = progress?.accuracy || 0;
+          
+          // Статусы для точек (путь Duolingo)
+          const problemStatuses = Object.values(progress?.problem_statuses || {});
+          const steps = Array.from({ length: count }).map((_, i) => {
+            return problemStatuses[i] || 'none';
+          });
 
           return (
             <button
@@ -45,13 +51,13 @@ export const EgeNumberGrid = ({
               onClick={() => isEnabled && onSelect(egeNum)}
               disabled={!isEnabled}
               className={`
-                relative flex flex-col items-center justify-center p-4 rounded-xl border-2 
+                relative flex flex-col items-center justify-center p-4 rounded-2xl border-2 
                 transition-all duration-200 
                 ${isEnabled 
-                  ? 'hover:scale-105 hover:shadow-lg cursor-pointer' 
+                  ? 'hover:scale-105 hover:shadow-xl cursor-pointer' 
                   : 'opacity-50 cursor-not-allowed'}
                 ${isRecommended 
-                  ? 'border-yellow-400 bg-yellow-50 dark:bg-yellow-950/30 ring-2 ring-yellow-400/50' 
+                  ? 'border-yellow-400 bg-yellow-50 dark:bg-yellow-950/30 ring-2 ring-yellow-400/50 shadow-lg shadow-yellow-200/50' 
                   : isMastered 
                     ? 'border-green-400 bg-green-50 dark:bg-green-950/30' 
                     : 'border-border bg-card hover:border-primary/50'}
@@ -59,39 +65,44 @@ export const EgeNumberGrid = ({
             >
               {/* Иконки статуса */}
               {isMastered && (
-                <CheckCircle2 className="absolute top-1 right-1 w-4 h-4 text-green-500" />
+                <CheckCircle2 className="absolute top-2 right-2 w-5 h-5 text-green-500" />
               )}
               {isRecommended && (
-                <Star className="absolute top-1 left-1 w-4 h-4 text-yellow-500 fill-yellow-500" />
+                <Star className="absolute top-2 left-2 w-5 h-5 text-yellow-500 fill-yellow-500 animate-pulse" />
               )}
               {!isEnabled && (
-                <Lock className="absolute top-1 right-1 w-4 h-4 text-muted-foreground" />
+                <Lock className="absolute top-2 right-2 w-4 h-4 text-muted-foreground" />
               )}
 
-              {/* Номер */}
-              <span className="text-2xl font-bold mb-1">{egeNum}</span>
-              
-              {/* Название (сокращённо) */}
-              <span className="text-[10px] text-muted-foreground text-center leading-tight mb-2 line-clamp-1">
+              {/* Номер и Название */}
+              <span className="text-3xl font-black mb-1">{egeNum}</span>
+              <span className="text-[11px] text-muted-foreground text-center font-medium leading-tight mb-3 line-clamp-1">
                 {data.name}
               </span>
 
-              {/* Прогресс бар */}
-              <Progress 
-                value={accuracy} 
-                className="h-1.5 w-full"
-              />
+              {/* Путь в стиле Duolingo (точки) */}
+              <div className="flex flex-wrap justify-center gap-1.5 mb-3 max-w-[100px] bg-slate-50 dark:bg-slate-900/50 p-2 rounded-xl border border-dashed border-slate-200 dark:border-slate-700">
+                {steps.map((status, i) => (
+                  <div 
+                    key={i}
+                    className={`w-3 h-3 rounded-full border shadow-sm transition-all duration-500 hover:scale-125 ${
+                      status === 'correct' ? 'bg-green-500 border-green-600 shadow-green-200' :
+                      status === 'incorrect' ? 'bg-red-500 border-red-600 shadow-red-200' :
+                      'bg-slate-200 border-slate-300 dark:bg-slate-700 dark:border-slate-600'
+                    }`}
+                    title={status === 'correct' ? 'Решено верно' : status === 'incorrect' ? 'Ошибка' : 'Еще не решено'}
+                  />
+                ))}
+              </div>
               
-              {/* Статистика */}
-              <div className="flex items-center gap-1 mt-1">
-                <span className="text-xs font-medium">
+              {/* Процент прогресса */}
+              <div className="flex flex-col items-center">
+                <span className={`text-sm font-bold ${accuracy >= 100 ? 'text-green-600' : 'text-primary'}`}>
                   {accuracy}%
                 </span>
-                {count > 0 && (
-                  <span className="text-[10px] text-muted-foreground">
-                    ({count})
-                  </span>
-                )}
+                <span className="text-[9px] text-muted-foreground uppercase font-bold tracking-tighter">
+                  пройдено
+                </span>
               </div>
             </button>
           );

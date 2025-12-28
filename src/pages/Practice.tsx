@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import AuthGuard from '@/components/AuthGuard';
 import { PageContent } from '@/components/PageContent';
@@ -10,13 +10,15 @@ import {
   ResultCard, 
   HintsDisplay, 
   EgeNumberGrid,
-  TodayStatsCard 
+  TodayStatsCard,
+  GoalReachedModal 
 } from '@/components/practice';
 import { usePractice, useUserProgress, useTodayStats, useProblemCounts } from '@/hooks/usePractice';
 import type { EGENumber, CheckAnswerResult } from '@/types/practice';
 import { EGE_NUMBERS } from '@/types/practice';
 
 const Practice = () => {
+  console.log('🎯 Practice page rendered');
   const navigate = useNavigate();
   const [selectedEgeNumber, setSelectedEgeNumber] = useState<EGENumber | null>(null);
   const [showResult, setShowResult] = useState(false);
@@ -24,11 +26,25 @@ const Practice = () => {
   const [userAnswer, setUserAnswer] = useState('');
   const [hintsUsedCount, setHintsUsedCount] = useState(0);
   const [askedAiForProblem, setAskedAiForProblem] = useState(false);
+  const [showGoalCelebration, setShowGoalCelebration] = useState(false);
+  const [celebrationShownToday, setCelebrationShownToday] = useState(false);
 
   const { currentProblem, isLoading, sessionStats, loadNextProblem, submitAnswer } = usePractice(selectedEgeNumber);
   const { data: userProgress = {}, isLoading: isLoadingProgress } = useUserProgress();
   const { data: todayStats, isLoading: isLoadingStats } = useTodayStats();
   const { data: problemCounts = {} } = useProblemCounts();
+
+  // Следим за достижением цели
+  useEffect(() => {
+    if (
+      todayStats && 
+      todayStats.problems_solved_today >= todayStats.daily_goal_problems && 
+      !celebrationShownToday
+    ) {
+      setShowGoalCelebration(true);
+      setCelebrationShownToday(true);
+    }
+  }, [todayStats, celebrationShownToday]);
 
   // Определяем рекомендуемый номер (самый слабый из доступных)
   const recommendedNumber = useMemo((): EGENumber | undefined => {
@@ -241,6 +257,18 @@ ${currentProblem.condition_text}
             </div>
           )}
         </div>
+
+        {todayStats && (
+          <GoalReachedModal 
+            isOpen={showGoalCelebration} 
+            onClose={() => setShowGoalCelebration(false)}
+            stats={{
+              streak: todayStats.current_streak,
+              solved: todayStats.problems_solved_today,
+              xp: todayStats.xp_today
+            }}
+          />
+        )}
       </PageContent>
     </AuthGuard>
   );
