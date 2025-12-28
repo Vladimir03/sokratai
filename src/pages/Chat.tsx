@@ -111,11 +111,10 @@ export default function Chat() {
   
   // Сохраняем сообщение из Practice для отправки после загрузки чата
   useEffect(() => {
-    if (initialMessageFromPractice && !practiceMessageSentRef.current) {
+    if (initialMessageFromPractice && !practiceMessageSentRef.current && !pendingPracticeMessageRef.current) {
       console.log('📚 Practice message received, queuing for send...');
       pendingPracticeMessageRef.current = initialMessageFromPractice;
-      // Очищаем state из location чтобы не отправлять повторно
-      window.history.replaceState({}, document.title);
+      // НЕ очищаем state здесь - это делается после отправки в эффекте ниже
     }
   }, [initialMessageFromPractice]);
 
@@ -1774,6 +1773,8 @@ export default function Chat() {
         pendingPracticeMessageRef.current = null;
         if (messageToSend) {
           handleSend(messageToSend, 'button');
+          // Очищаем state из location после отправки
+          window.history.replaceState({}, document.title);
         }
       }, 500);
     }
