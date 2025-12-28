@@ -225,15 +225,15 @@ export const useTodayStats = () => {
       const correctToday = attempts?.filter(a => a.is_correct).length || 0;
       const xpToday = correctToday * 10 + (problemsSolved - correctToday) * 2;
 
-      // Получаем streak (упрощённо - смотрим на профиль)
-      const { data: profile } = await supabase
-        .from('profiles')
+      // Получаем streak из user_stats
+      const { data: userStats } = await supabase
+        .from('user_stats')
         .select('current_streak')
-        .eq('id', user.id)
-        .single();
+        .eq('user_id', user.id)
+        .maybeSingle();
 
       return {
-        current_streak: profile?.current_streak || 0,
+        current_streak: userStats?.current_streak || 0,
         problems_solved_today: problemsSolved,
         correct_today: correctToday,
         daily_goal_problems: 10,
