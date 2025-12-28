@@ -1747,23 +1747,36 @@ export default function Chat() {
   useEffect(() => {
     const pendingMessage = pendingPracticeMessageRef.current;
     
+    console.log('📚 Practice effect check:', {
+      pendingMessage: !!pendingMessage,
+      sent: practiceMessageSentRef.current,
+      loadingHistory,
+      isLoading,
+      currentChatId,
+      userId: user?.id,
+    });
+    
     if (
       pendingMessage && 
       !practiceMessageSentRef.current && 
       !loadingHistory && 
       !isLoading && 
       currentChatId &&
-      user?.id &&
-      messages.length > 0 // Ждём загрузки истории чата
+      user?.id
     ) {
-      console.log('📚 Sending practice context message now:', pendingMessage.slice(0, 100) + '...');
+      console.log('📚 Sending practice context message NOW:', pendingMessage.slice(0, 100) + '...');
       practiceMessageSentRef.current = true;
-      pendingPracticeMessageRef.current = null;
       
-      // Отправляем сообщение
-      handleSend(pendingMessage, 'button');
+      // Небольшая задержка для стабильности UI
+      setTimeout(() => {
+        const messageToSend = pendingPracticeMessageRef.current;
+        pendingPracticeMessageRef.current = null;
+        if (messageToSend) {
+          handleSend(messageToSend, 'button');
+        }
+      }, 500);
     }
-  }, [loadingHistory, isLoading, currentChatId, user?.id, messages.length, handleSend]);
+  }, [loadingHistory, isLoading, currentChatId, user?.id, handleSend]);
 
   if (!currentChatId) {
     return (
