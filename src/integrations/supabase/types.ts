@@ -635,9 +635,11 @@ export type Database = {
       profiles: {
         Row: {
           created_at: string | null
+          current_streak: number | null
           difficult_subject: string | null
           grade: number | null
           id: string
+          last_streak_update: string | null
           learning_goal: string | null
           onboarding_completed: boolean | null
           promo_code: string | null
@@ -651,9 +653,11 @@ export type Database = {
         }
         Insert: {
           created_at?: string | null
+          current_streak?: number | null
           difficult_subject?: string | null
           grade?: number | null
           id: string
+          last_streak_update?: string | null
           learning_goal?: string | null
           onboarding_completed?: boolean | null
           promo_code?: string | null
@@ -667,9 +671,11 @@ export type Database = {
         }
         Update: {
           created_at?: string | null
+          current_streak?: number | null
           difficult_subject?: string | null
           grade?: number | null
           id?: string
+          last_streak_update?: string | null
           learning_goal?: string | null
           onboarding_completed?: boolean | null
           promo_code?: string | null
@@ -979,6 +985,7 @@ export type Database = {
       }
     }
     Functions: {
+      check_and_update_streak: { Args: { p_user_id: string }; Returns: number }
       check_problem_answer: {
         Args: { problem_id_input: string; user_answer_input: string }
         Returns: {
