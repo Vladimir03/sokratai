@@ -13,7 +13,6 @@ const Navigation = () => {
     { path: "/homework", icon: Backpack, label: "Домашка", emoji: "🎒" },
     { path: "/chat", icon: MessageSquare, label: "Чат", emoji: "💬" },
     { path: "/practice", icon: Target, label: "Тренажёр", emoji: "🎯" },
-    { path: "/problems", icon: ListTodo, label: "Задачи", emoji: "📚" },
     { path: "/progress", icon: TrendingUp, label: "Прогресс", emoji: "📈" },
     { path: "/profile", icon: User, label: "Профиль", emoji: "👤" },
   ];

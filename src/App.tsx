@@ -24,7 +24,6 @@ const Homework = lazy(() => import("./pages/Homework"));
 const HomeworkAdd = lazy(() => import("./pages/HomeworkAdd"));
 const HomeworkTaskList = lazy(() => import("./pages/HomeworkTaskList"));
 const HomeworkTaskDetail = lazy(() => import("./pages/HomeworkTaskDetail"));
-const Problems = lazy(() => import("./pages/Problems"));
 const Progress = lazy(() => import("./pages/Progress"));
 const Profile = lazy(() => import("./pages/Profile"));
 const MiniApp = lazy(() => import("./pages/MiniApp"));
@@ -136,14 +135,6 @@ const App = () => (
             element={
               <Suspense fallback={<PageLoader />}>
                 <Practice />
-              </Suspense>
-            } 
-          />
-          <Route 
-            path="/problems" 
-            element={
-              <Suspense fallback={<PageLoader />}>
-                <Problems />
               </Suspense>
             } 
           />
