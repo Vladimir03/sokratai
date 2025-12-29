@@ -243,6 +243,114 @@ export type Database = {
           },
         ]
       }
+      diagnostic_answers: {
+        Row: {
+          created_at: string | null
+          ege_number: number
+          id: string
+          is_correct: boolean
+          problem_id: string
+          question_order: number
+          session_id: string
+          time_spent_seconds: number | null
+          user_answer: string
+        }
+        Insert: {
+          created_at?: string | null
+          ege_number: number
+          id?: string
+          is_correct: boolean
+          problem_id: string
+          question_order: number
+          session_id: string
+          time_spent_seconds?: number | null
+          user_answer: string
+        }
+        Update: {
+          created_at?: string | null
+          ege_number?: number
+          id?: string
+          is_correct?: boolean
+          problem_id?: string
+          question_order?: number
+          session_id?: string
+          time_spent_seconds?: number | null
+          user_answer?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "diagnostic_answers_problem_id_fkey"
+            columns: ["problem_id"]
+            isOneToOne: false
+            referencedRelation: "ege_problems"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "diagnostic_answers_session_id_fkey"
+            columns: ["session_id"]
+            isOneToOne: false
+            referencedRelation: "diagnostic_sessions"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      diagnostic_sessions: {
+        Row: {
+          completed_at: string | null
+          created_at: string | null
+          current_question: number | null
+          id: string
+          predicted_primary_score: number | null
+          predicted_test_score: number | null
+          recommended_start_topic: number | null
+          started_at: string | null
+          status: string
+          strong_topics: number[] | null
+          time_spent_seconds: number | null
+          topic_scores: Json | null
+          total_questions: number | null
+          updated_at: string | null
+          user_id: string
+          weak_topics: number[] | null
+        }
+        Insert: {
+          completed_at?: string | null
+          created_at?: string | null
+          current_question?: number | null
+          id?: string
+          predicted_primary_score?: number | null
+          predicted_test_score?: number | null
+          recommended_start_topic?: number | null
+          started_at?: string | null
+          status?: string
+          strong_topics?: number[] | null
+          time_spent_seconds?: number | null
+          topic_scores?: Json | null
+          total_questions?: number | null
+          updated_at?: string | null
+          user_id: string
+          weak_topics?: number[] | null
+        }
+        Update: {
+          completed_at?: string | null
+          created_at?: string | null
+          current_question?: number | null
+          id?: string
+          predicted_primary_score?: number | null
+          predicted_test_score?: number | null
+          recommended_start_topic?: number | null
+          started_at?: string | null
+          status?: string
+          strong_topics?: number[] | null
+          time_spent_seconds?: number | null
+          topic_scores?: Json | null
+          total_questions?: number | null
+          updated_at?: string | null
+          user_id?: string
+          weak_topics?: number[] | null
+        }
+        Relationships: []
+      }
       ege_problems: {
         Row: {
           answer_tolerance: number | null
@@ -256,6 +364,7 @@ export type Database = {
           hints: Json | null
           id: string
           is_active: boolean | null
+          is_diagnostic: boolean | null
           solution_text: string | null
           solution_video_url: string | null
           source_id: string | null
@@ -278,6 +387,7 @@ export type Database = {
           hints?: Json | null
           id?: string
           is_active?: boolean | null
+          is_diagnostic?: boolean | null
           solution_text?: string | null
           solution_video_url?: string | null
           source_id?: string | null
@@ -300,6 +410,7 @@ export type Database = {
           hints?: Json | null
           id?: string
           is_active?: boolean | null
+          is_diagnostic?: boolean | null
           solution_text?: string | null
           solution_video_url?: string | null
           source_id?: string | null
@@ -636,9 +747,12 @@ export type Database = {
         Row: {
           created_at: string | null
           current_streak: number | null
+          diagnostic_completed: boolean | null
           difficult_subject: string | null
           grade: number | null
           id: string
+          last_diagnostic_at: string | null
+          last_diagnostic_score: number | null
           last_streak_update: string | null
           learning_goal: string | null
           onboarding_completed: boolean | null
@@ -654,9 +768,12 @@ export type Database = {
         Insert: {
           created_at?: string | null
           current_streak?: number | null
+          diagnostic_completed?: boolean | null
           difficult_subject?: string | null
           grade?: number | null
           id: string
+          last_diagnostic_at?: string | null
+          last_diagnostic_score?: number | null
           last_streak_update?: string | null
           learning_goal?: string | null
           onboarding_completed?: boolean | null
@@ -672,9 +789,12 @@ export type Database = {
         Update: {
           created_at?: string | null
           current_streak?: number | null
+          diagnostic_completed?: boolean | null
           difficult_subject?: string | null
           grade?: number | null
           id?: string
+          last_diagnostic_at?: string | null
+          last_diagnostic_score?: number | null
           last_streak_update?: string | null
           learning_goal?: string | null
           onboarding_completed?: boolean | null
@@ -992,6 +1112,20 @@ export type Database = {
           correct_answer: string
           is_correct: boolean
           solution: string
+        }[]
+      }
+      get_diagnostic_problems: {
+        Args: { p_total_questions?: number }
+        Returns: {
+          answer_type: string
+          condition_image_url: string
+          condition_text: string
+          correct_answer: string
+          difficulty: number
+          ege_number: number
+          id: string
+          subtopic: string
+          topic: string
         }[]
       }
       get_subscription_status: {
