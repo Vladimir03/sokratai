@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, Fragment } from 'react';
 import { useNavigate } from 'react-router-dom';
 import AuthGuard from '@/components/AuthGuard';
 import { PageContent } from '@/components/PageContent';
@@ -12,6 +12,8 @@ import { toast } from 'sonner';
 import { useDiagnosticSession, useDiagnosticProblems } from '@/hooks/useDiagnostic';
 import type { EGENumber } from '@/types/practice';
 import { EGE_NUMBERS } from '@/types/practice';
+import 'katex/dist/katex.min.css';
+import { InlineMath, BlockMath } from 'react-katex';
 
 interface DiagnosticProblem {
   id: string;
@@ -24,6 +26,28 @@ interface DiagnosticProblem {
   subtopic: string | null;
   difficulty: number;
 }
+
+// Функция для парсинга LaTeX в тексте
+const parseLatex = (text: string) => {
+  if (!text) return null;
+  
+  // Разбиваем текст на части: обычный текст и LaTeX
+  const parts = text.split(/(\$\$[\s\S]*?\$\$|\$[^$]+\$)/g);
+  
+  return parts.map((part, index) => {
+    if (part.startsWith('$$') && part.endsWith('$$')) {
+      // Block math
+      const latex = part.slice(2, -2).trim();
+      return <BlockMath key={index} math={latex} />;
+    } else if (part.startsWith('$') && part.endsWith('$')) {
+      // Inline math
+      const latex = part.slice(1, -1);
+      return <InlineMath key={index} math={latex} />;
+    } else {
+      return <Fragment key={index}>{part}</Fragment>;
+    }
+  });
+};
 
 const Diagnostic = () => {
   const navigate = useNavigate();
@@ -340,7 +364,9 @@ const Diagnostic = () => {
                 </div>
               </CardHeader>
               <CardContent>
-                <p className="text-lg whitespace-pre-wrap">{currentProblem.condition_text}</p>
+                <div className="text-lg leading-relaxed">
+                  {parseLatex(currentProblem.condition_text)}
+                </div>
                 
                 {currentProblem.condition_image_url && (
                   <img 
