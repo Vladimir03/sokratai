@@ -3,7 +3,7 @@ import { useParams } from 'react-router-dom';
 import { MiniAppLayout } from '@/components/miniapp/MiniAppLayout';
 import { SolutionView } from '@/components/miniapp/SolutionView';
 import { BackButton } from '@/components/miniapp/BackButton';
-import { supabase } from '@/integrations/supabase/client';
+import { supabase } from '@/lib/supabaseClient';
 import type { Solution } from '@/types/solution';
 
 /**
