@@ -26,6 +26,7 @@ type DiagnosticView = 'loading' | 'intro' | 'question' | 'result';
 const Diagnostic = () => {
   const navigate = useNavigate();
   const [view, setView] = useState<DiagnosticView>('loading');
+  const [showResultsManually, setShowResultsManually] = useState(false);
 
   // Хуки данных
   const { data: canTakeData, isLoading: isLoadingCanTake } = useCanTakeDiagnostic();
@@ -64,16 +65,15 @@ const Diagnostic = () => {
       return;
     }
 
-    // 3. Если в хуке пусто, но в БД есть завершенная диагностика - показываем результаты
-    // НО только если мы не в процессе старта новой сессии
-    if (lastResultSession && !session && !isLoading) {
+    // 3. Если пользователь вручную нажал "Посмотреть результаты"
+    if (showResultsManually && lastResultSession) {
       setView('result');
       return;
     }
 
-    // 4. Во всех остальных случаях (или по дефолту) - интро
+    // 4. По умолчанию ВСЕГДА показываем интро, даже если есть старый результат
     setView('intro');
-  }, [isLoadingCanTake, isLoadingExisting, isLoadingLast, result, session, currentProblem, lastResultSession, isLoading]);
+  }, [isLoadingCanTake, isLoadingExisting, isLoadingLast, result, session, currentProblem, lastResultSession, isLoading, showResultsManually]);
 
   if (view === 'loading') {
     return (
@@ -114,7 +114,9 @@ const Diagnostic = () => {
             <DiagnosticIntro
               onStart={startDiagnostic}
               onContinue={() => existingSession && continueSession(existingSession)}
+              onViewResults={() => setShowResultsManually(true)}
               hasExistingSession={!!existingSession}
+              hasLastResult={!!lastResultSession}
               remainingQuestions={existingSession ? (existingSession.total_questions - existingSession.current_question + 1) : 0}
               isLoading={isLoading}
               canRetake={canTakeData?.canTake}

@@ -6,7 +6,9 @@ import { DIAGNOSTIC_TOTAL_QUESTIONS, DIAGNOSTIC_COOLDOWN_DAYS } from '@/types/di
 interface DiagnosticIntroProps {
   onStart: () => void;
   onContinue?: () => void;
+  onViewResults?: () => void;
   hasExistingSession?: boolean;
+  hasLastResult?: boolean;
   remainingQuestions?: number;
   isLoading?: boolean;
   canRetake?: boolean;
@@ -16,7 +18,9 @@ interface DiagnosticIntroProps {
 export function DiagnosticIntro({
   onStart,
   onContinue,
+  onViewResults,
   hasExistingSession = false,
+  hasLastResult = false,
   remainingQuestions = 0,
   isLoading = false,
   canRetake = true,
@@ -132,6 +136,16 @@ export function DiagnosticIntro({
                   Можно пересдавать раз в {DIAGNOSTIC_COOLDOWN_DAYS} дней
                 </p>
               </div>
+            )}
+
+            {hasLastResult && onViewResults && !hasExistingSession && (
+              <Button
+                onClick={onViewResults}
+                variant="ghost"
+                className="w-full text-primary hover:text-primary hover:bg-primary/5"
+              >
+                Посмотреть прошлый результат
+              </Button>
             )}
           </div>
 
