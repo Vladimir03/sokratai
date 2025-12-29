@@ -1,3 +1,7 @@
+/**
+ * DIAGNOSTIC PAGE - VERSION 2.1 (Modular)
+ * If Lovable shows a different UI, please sync with GitHub main branch.
+ */
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import AuthGuard from '@/components/AuthGuard';
@@ -41,46 +45,52 @@ const Diagnostic = () => {
 
   // Логика переключения экранов
   useEffect(() => {
+    // Ждем загрузки всех начальных данных
     if (isLoadingCanTake || isLoadingExisting || isLoadingLast) {
-      setView('loading');
       return;
     }
 
-    // Если есть результат из хука (только что завершили)
+    // 1. Если только что завершили (есть свежий результат в стейте хука)
     if (result) {
       setView('result');
       return;
     }
 
-    // Если есть активная сессия в хуке (в процессе)
+    // 2. Если в хуке уже активна сессия (после нажатия "Начать" или "Продолжить")
     if (session && currentProblem) {
       setView('question');
       return;
     }
 
-    // Если в БД есть завершенная диагностика, а в хуке ничего нет - показываем результаты
-    if (lastResultSession && !session) {
+    // 3. Если в хуке пусто, но в БД есть завершенная диагностика - показываем результаты
+    // НО только если мы не в процессе старта новой сессии
+    if (lastResultSession && !session && !isLoading) {
       setView('result');
       return;
     }
 
-    // По умолчанию - интро
+    // 4. Во всех остальных случаях (или по дефолту) - интро
     setView('intro');
-  }, [isLoadingCanTake, isLoadingExisting, isLoadingLast, result, session, currentProblem, lastResultSession]);
+  }, [isLoadingCanTake, isLoadingExisting, isLoadingLast, result, session, currentProblem, lastResultSession, isLoading]);
 
-  if (view === 'loading') {
+  if (view === 'loading' || (isLoading && view === 'loading')) {
     return (
       <AuthGuard>
         <PageContent>
           <div className="flex items-center justify-center py-20">
-            <Loader2 className="w-8 h-8 animate-spin text-primary" />
+            <div className="flex flex-col items-center gap-4">
+              <Loader2 className="w-8 h-8 animate-spin text-primary" />
+              <p className="text-sm text-muted-foreground text-center animate-pulse">
+                Загрузка диагностики...
+              </p>
+            </div>
           </div>
         </PageContent>
       </AuthGuard>
     );
   }
 
-  // Преобразуем данные из БД в формат DiagnosticResult для отображения, если нужно
+  // Данные для отображения результата
   const displayResult = result || (lastResultSession ? {
     primaryScore: lastResultSession.predicted_primary_score || 0,
     testScore: lastResultSession.predicted_test_score || 0,
@@ -91,15 +101,13 @@ const Diagnostic = () => {
     weakTopics: [],
     strongTopics: [],
     recommendedTopic: null,
-    // При просмотре старых результатов breakdown может быть не заполнен, 
-    // если мы не храним его в session object (но он есть в diagnostic_answers)
     answersBreakdown: [] 
   } : null);
 
   return (
     <AuthGuard>
       <PageContent>
-        <div className="container mx-auto px-4 pb-6">
+        <div className="container mx-auto px-4 pb-6 max-w-4xl">
           {view === 'intro' && (
             <DiagnosticIntro
               onStart={startDiagnostic}
@@ -113,29 +121,41 @@ const Diagnostic = () => {
           )}
 
           {view === 'question' && currentProblem && (
-            <DiagnosticQuestion
-              problem={currentProblem}
-              questionNumber={currentIndex + 1}
-              totalQuestions={totalQuestions}
-              onSubmit={submitAnswer}
-              onBack={() => navigate('/practice')}
-              isSubmitting={isLoading}
-            />
+            <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
+              <DiagnosticQuestion
+                problem={currentProblem}
+                questionNumber={currentIndex + 1}
+                totalQuestions={totalQuestions}
+                onSubmit={submitAnswer}
+                onBack={() => navigate('/practice')}
+                isSubmitting={isLoading}
+              />
+            </div>
           )}
 
           {view === 'result' && displayResult && (
-            <DiagnosticResult
-              result={displayResult as any}
-              onStartPractice={(num) => navigate('/practice', { state: { selectedNumber: num } })}
-              onRetake={startDiagnostic}
-              canRetake={canTakeData?.canTake}
-              daysUntilRetake={canTakeData?.daysUntilRetake}
-            />
+            <div className="animate-in fade-in zoom-in-95 duration-500">
+              <DiagnosticResult
+                result={displayResult as any}
+                onStartPractice={(num) => navigate('/practice', { state: { selectedNumber: num } })}
+                onRetake={startDiagnostic}
+                canRetake={canTakeData?.canTake}
+                daysUntilRetake={canTakeData?.daysUntilRetake}
+              />
+            </div>
           )}
 
           {error && (
-            <div className="mt-4 p-4 bg-destructive/10 border border-destructive/20 rounded-lg text-center">
-              <p className="text-destructive text-sm">{error}</p>
+            <div className="mt-6 p-4 bg-destructive/10 border border-destructive/20 rounded-xl text-center">
+              <p className="text-destructive font-medium">{error}</p>
+              <Button 
+                variant="outline" 
+                size="sm" 
+                className="mt-3" 
+                onClick={() => window.location.reload()}
+              >
+                Обновить страницу
+              </Button>
             </div>
           )}
         </div>
@@ -145,3 +165,4 @@ const Diagnostic = () => {
 };
 
 export default Diagnostic;
+
