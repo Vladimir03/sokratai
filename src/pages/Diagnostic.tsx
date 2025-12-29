@@ -6,12 +6,13 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Progress } from '@/components/ui/progress';
 import { Input } from '@/components/ui/input';
-import { ArrowLeft, ArrowRight, Clock, Target, CheckCircle2, XCircle, Loader2, Trophy } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Clock, Target, CheckCircle2, XCircle, Loader2, Trophy, AlertCircle } from 'lucide-react';
 import { supabase } from '@/lib/supabaseClient';
 import { toast } from 'sonner';
 import { useDiagnosticSession, useDiagnosticProblems } from '@/hooks/useDiagnostic';
 import type { EGENumber } from '@/types/practice';
 import { EGE_NUMBERS } from '@/types/practice';
+import { cn } from '@/lib/utils';
 import 'katex/dist/katex.min.css';
 import { InlineMath, BlockMath } from 'react-katex';
 
@@ -177,8 +178,27 @@ const Diagnostic = () => {
     const correctAnswers = Object.values(results).filter(Boolean).length;
     const primaryScore = correctAnswers;
     
-    // Приблизительный перевод в тестовые баллы (упрощённая формула)
-    const testScore = Math.round(primaryScore * 8.3);
+    // Перевод в тестовые баллы по шкале 2025 года (Математика профиль, Часть 1)
+    const convertPrimaryToTest = (primary: number): number => {
+      const scale: Record<number, number> = {
+        0: 0,
+        1: 5,
+        2: 11,
+        3: 18,
+        4: 25,
+        5: 34,
+        6: 40,
+        7: 46,
+        8: 52,
+        9: 58,
+        10: 64,
+        11: 70,
+        12: 72,
+      };
+      return scale[primary] || 0;
+    };
+
+    const testScore = convertPrimaryToTest(primaryScore);
 
     // Определяем слабые темы (менее 50% правильных)
     const weak: number[] = [];
@@ -278,16 +298,22 @@ const Diagnostic = () => {
 
                 {weakTopics.length > 0 && (
                   <div>
-                    <h3 className="font-semibold mb-3">📚 Рекомендуем подтянуть:</h3>
+                    <h3 className="font-semibold mb-3 text-red-500 flex items-center gap-2">
+                      <AlertCircle className="w-5 h-5" />
+                      Нужно подтянуть:
+                    </h3>
                     <div className="space-y-2">
                       {weakTopics.slice(0, 3).map(num => (
                         <Button
                           key={num}
                           variant="outline"
-                          className="w-full justify-between"
+                          className="w-full justify-between border-red-100 hover:bg-red-50"
                           onClick={() => handleStartPractice(num as EGENumber)}
                         >
-                          <span>№{num}: {EGE_NUMBERS[num as EGENumber]?.name || 'Задание'}</span>
+                          <span className="flex items-center gap-2">
+                            <span className="font-bold">№{num}</span>
+                            <span className="text-muted-foreground truncate">{EGE_NUMBERS[num as EGENumber]?.name || 'Задание'}</span>
+                          </span>
                           <ArrowRight className="w-4 h-4" />
                         </Button>
                       ))}
@@ -295,7 +321,54 @@ const Diagnostic = () => {
                   </div>
                 )}
 
-                <div className="flex gap-3">
+                <div>
+                  <h3 className="font-semibold mb-3 flex items-center gap-2">
+                    <CheckCircle2 className="w-5 h-5 text-green-500" />
+                    Детальный разбор:
+                  </h3>
+                  <div className="space-y-3">
+                    {problems.map((problem, index) => (
+                      <div 
+                        key={problem.id} 
+                        className={cn(
+                          "p-3 rounded-lg border flex items-start gap-3 transition-colors",
+                          results[index] ? "bg-green-50 border-green-100" : "bg-red-50 border-red-100"
+                        )}
+                      >
+                        <div className="mt-0.5">
+                          {results[index] ? (
+                            <CheckCircle2 className="w-5 h-5 text-green-600" />
+                          ) : (
+                            <XCircle className="w-5 h-5 text-red-600" />
+                          )}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex justify-between items-center mb-1">
+                            <span className="font-bold text-sm">№{problem.ege_number}</span>
+                            <span className="text-xs text-muted-foreground">{problem.topic}</span>
+                          </div>
+                          <div className="text-sm text-muted-foreground mb-2 line-clamp-2 italic">
+                            {problem.condition_text.replace(/\$|\$\$/g, '')}
+                          </div>
+                          <div className="grid grid-cols-2 gap-2 text-xs">
+                            <div>
+                              <span className="text-muted-foreground">Твой ответ:</span>{" "}
+                              <span className={results[index] ? "text-green-700 font-medium" : "text-red-700 font-medium"}>
+                                {answers[index] || "—"}
+                              </span>
+                            </div>
+                            <div>
+                              <span className="text-muted-foreground">Верно:</span>{" "}
+                              <span className="text-green-700 font-medium">{problem.correct_answer}</span>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="flex gap-3 pt-4">
                   <Button 
                     variant="outline" 
                     className="flex-1"
