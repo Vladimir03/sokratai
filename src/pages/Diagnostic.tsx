@@ -141,7 +141,7 @@ const Diagnostic = () => {
             <div className="animate-in fade-in zoom-in-95 duration-500">
               <DiagnosticResult
                 result={displayResult as any}
-                onStartPractice={(num) => navigate('/practice', { state: { selectedNumber: num } })}
+                onStartPractice={(num) => navigate(num ? `/practice?task=${num}` : '/practice')}
                 onRetake={startDiagnostic}
                 canRetake={canTakeData?.canTake}
                 daysUntilRetake={canTakeData?.daysUntilRetake}

@@ -97,6 +97,35 @@ export function DiagnosticResult({
         </CardContent>
       </Card>
 
+      {/* Recommendation block */}
+      {result.recommendedTopic && (
+        <Card className="border-2 border-amber-200 dark:border-amber-800 bg-gradient-to-r from-amber-50 to-yellow-50 dark:from-amber-950/30 dark:to-yellow-950/30 overflow-hidden">
+          <CardContent className="pt-6">
+            <div className="flex items-start gap-3">
+              <div className="p-2 bg-amber-100 dark:bg-amber-900/50 rounded-lg shrink-0">
+                <Sparkles className="w-5 h-5 text-amber-600 dark:text-amber-400" />
+              </div>
+              <div className="flex-1">
+                <h3 className="font-semibold text-amber-900 dark:text-amber-100 mb-1">Рекомендация</h3>
+                <p className="text-sm text-amber-800 dark:text-amber-200">
+                  Начни с задания <strong>№{result.recommendedTopic.ege_number}</strong> «{result.recommendedTopic.topic_name}». 
+                  Это даст максимальный прирост балла.
+                </p>
+              </div>
+            </div>
+            
+            <Button 
+              onClick={() => onStartPractice(result.recommendedTopic!.ege_number)}
+              className="w-full mt-4 gap-2"
+              size="lg"
+            >
+              Начать тренировку №{result.recommendedTopic.ege_number}
+              <ArrowRight className="w-4 h-4" />
+            </Button>
+          </CardContent>
+        </Card>
+      )}
+
       {/* Detailed breakdown */}
       <Card>
         <CardHeader className="pb-3">

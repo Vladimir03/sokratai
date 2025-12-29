@@ -282,16 +282,40 @@ export const useDiagnostic = () => {
           }).eq('id', user.id);
         }
 
+        // Вычисляем рекомендуемую тему (первая неправильно решённая по ege_number)
+        const wrongProblems = problems
+          .map((p, i) => ({ problem: p, isCorrect: newResults[i] }))
+          .filter(pr => !pr.isCorrect)
+          .sort((a, b) => a.problem.ege_number - b.problem.ege_number);
+
+        const recommendedTopic = wrongProblems.length > 0 
+          ? {
+              ege_number: wrongProblems[0].problem.ege_number,
+              topic_name: wrongProblems[0].problem.topic,
+              correct: 0,
+              total: 1,
+              score: 0,
+              recommendation: 'weak' as const
+            }
+          : null;
+
         setResult({
           primaryScore: correctCount,
           testScore,
           totalQuestions: problems.length,
           correctAnswers: correctCount,
           timeSpentMinutes: 15,
-          topicScores: [], // Заполнить если нужно
-          weakTopics: [],
+          topicScores: [],
+          weakTopics: wrongProblems.map(wr => ({
+            ege_number: wr.problem.ege_number,
+            topic_name: wr.problem.topic,
+            correct: 0,
+            total: 1,
+            score: 0,
+            recommendation: 'weak' as const
+          })),
           strongTopics: [],
-          recommendedTopic: null,
+          recommendedTopic,
           answersBreakdown: problems.map((p, i) => ({
             problem: p,
             userAnswer: newAnswers[i],
