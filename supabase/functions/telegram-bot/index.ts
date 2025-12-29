@@ -1586,63 +1586,88 @@ function formatForTelegram(text: string): string {
 /**
  * Enhanced formatter for button responses (solution/hint/explain)
  * Creates a clear, structured layout optimized for students learning math
+ * Processes RAW AI output BEFORE base formatting
  */
 function formatForTelegramStructured(text: string): string {
   let result = text;
 
-  // Step 1: Apply base formatting
+  // === STEP 1: Pre-process raw text to add structure BEFORE base formatting ===
+
+  // Add newlines BEFORE step markers (Шаг 1:, Шаг 2:, etc.)
+  // This handles cases like "...текст.Шаг 2:" or "...текст.**Шаг 2:**"
+  result = result.replace(/([^\n])(\*{0,2}Шаг\s*\d+[:.:])/g, "$1\n\n$2");
+
+  // Add newlines BEFORE "Ответ:" or "**Ответ:**"
+  result = result.replace(/([^\n])(\*{0,2}Ответ\*{0,2}[:.:])/g, "$1\n\n$2");
+
+  // Add newlines BEFORE "Решение:" at the start
+  result = result.replace(/^(\*{0,2}Решение\*{0,2}[:.:])/gm, "\n$1");
+
+  // Add newline AFTER "Решение:" if followed immediately by text
+  result = result.replace(/(\*{0,2}Решение\*{0,2}[:.:])([^\n\s*])/g, "$1\n$2");
+
+  // Add newline AFTER step headers if followed immediately by text
+  result = result.replace(/(\*{0,2}Шаг\s*\d+[:.:]?\s*[^*\n]*\*{0,2})([^\n])/g, "$1\n$2");
+
+  // === STEP 2: Apply base Telegram formatting ===
   result = formatForTelegram(result);
 
-  // Step 2: Enhance structure for better readability
+  // === STEP 3: Enhance step numbers with emojis ===
+  const stepEmojis = ["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣", "🔟"];
 
-  // Add visual separators between major sections (before bold headers with colons)
-  // Match patterns like "**Шаг 1:**" or "**Ответ:**"
-  result = result.replace(/\n(<b>[^<]+:<\/b>)/g, "\n━━━━━━━━━━━━━━━━\n$1");
-
-  // But remove separator if it's at the very beginning
-  if (result.startsWith("━━")) {
-    result = result.replace(/^━━━━━━━━━━━━━━━━\n/, "");
-  }
-
-  // Step 3: Enhance step numbers for better visibility
-  // Convert "Шаг 1:" style headers to more prominent format
-  result = result.replace(/<b>Шаг (\d+)[:.]\s*([^<]*)<\/b>/g, (match, num, title) => {
-    const stepEmojis = ["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣", "🔟"];
-    const emoji = parseInt(num) <= 10 ? stepEmojis[parseInt(num) - 1] : `${num}.`;
+  // Convert "<b>Шаг N:</b>" or "<b>Шаг N. Title</b>" to emoji format
+  result = result.replace(/<b>Шаг\s*(\d+)[:.]\s*([^<]*)<\/b>/gi, (match, num, title) => {
+    const n = parseInt(num);
+    const emoji = n <= 10 ? stepEmojis[n - 1] : `<b>${n}.</b>`;
     const titlePart = title.trim() ? ` <b>${title.trim()}</b>` : "";
-    return `${emoji}${titlePart}`;
+    return `\n━━━━━━━━━━━━━━━━\n${emoji}${titlePart}`;
   });
 
-  // Step 4: Highlight the final answer prominently
-  // Look for "Ответ:" pattern and make it stand out
+  // Also handle plain "Шаг N:" without bold
+  result = result.replace(/(?<![<\w])Шаг\s*(\d+)[:.]\s*/gi, (match, num) => {
+    const n = parseInt(num);
+    const emoji = n <= 10 ? stepEmojis[n - 1] : `<b>${n}.</b>`;
+    return `\n━━━━━━━━━━━━━━━━\n${emoji} `;
+  });
+
+  // === STEP 4: Highlight final answer ===
   result = result.replace(
-    /<b>Ответ:<\/b>/g,
+    /<b>Ответ[:.]*<\/b>/gi,
     "\n━━━━━━━━━━━━━━━━\n🎯 <b>ОТВЕТ:</b>"
   );
 
-  // Also handle "**Ответ**" without colon
+  // Plain "Ответ:" without bold
   result = result.replace(
-    /<b>Ответ<\/b>/g,
-    "\n━━━━━━━━━━━━━━━━\n🎯 <b>ОТВЕТ:</b>"
+    /(?<![<\w])Ответ[:.]\s*/gi,
+    "\n━━━━━━━━━━━━━━━━\n🎯 <b>ОТВЕТ:</b> "
   );
 
-  // Step 5: Enhance key mathematical terms
-  // Add emphasis to important math keywords
-  result = result.replace(/\b(Дано|Найти|Решение|Проверка):/g, "📝 <b>$1:</b>");
+  // === STEP 5: Enhance key sections ===
+  result = result.replace(/<b>(Дано|Найти|Решение|Проверка)[:.]*<\/b>/gi, "📝 <b>$1:</b>");
+  result = result.replace(/(?<![<\w])(Дано|Найти|Проверка)[:.]\s*/gi, "\n📝 <b>$1:</b> ");
 
-  // Step 6: Clean up excessive separators
+  // === STEP 6: Clean up formatting ===
+
+  // Remove separator at very beginning
+  result = result.replace(/^[\n\s]*━━/, "━━");
+  if (result.startsWith("━━")) {
+    result = result.replace(/^━━━━━━━━━━━━━━━━\n*/, "");
+  }
+
   // Remove duplicate separators
-  result = result.replace(/(━━━━━━━━━━━━━━━━\n){2,}/g, "━━━━━━━━━━━━━━━━\n");
+  result = result.replace(/(━━━━━━━━━━━━━━━━[\n\s]*){2,}/g, "━━━━━━━━━━━━━━━━\n\n");
 
   // Remove separator at the very end
-  result = result.replace(/━━━━━━━━━━━━━━━━\n*$/, "");
+  result = result.replace(/[\n\s]*━━━━━━━━━━━━━━━━[\n\s]*$/, "");
 
-  // Step 7: Ensure proper spacing
-  // Add breathing room between paragraphs
+  // Clean up excessive newlines (more than 2)
   result = result.replace(/\n{3,}/g, "\n\n");
 
-  // Ensure there's space after separators
+  // Ensure space after separators
   result = result.replace(/━━━━━━━━━━━━━━━━\n([^\n])/g, "━━━━━━━━━━━━━━━━\n\n$1");
+
+  // Remove leading newlines
+  result = result.replace(/^\n+/, "");
 
   return result.trim();
 }
@@ -2723,21 +2748,21 @@ async function handleCallbackQuery(callbackQuery: any) {
       }),
     });
 
-    // Edit original message: show loading state with response header
-    if (messageId) {
-      try {
-        await editTelegramMessage(
-          telegramUserId,
-          messageId,
-          `${responseHeader}\n\n⏳ <i>Генерирую ответ...</i>`
-        );
-      } catch (e) {
-        console.error("Failed to edit message for loading state:", e);
-      }
+    // Send NEW message with loading state (don't edit original - keep its buttons)
+    let loadingMessageId: number | undefined;
+    try {
+      const loadingResponse = await sendTelegramMessage(
+        telegramUserId,
+        `${responseHeader}\n\n⏳ <i>Генерирую ответ...</i>`
+      );
+      loadingMessageId = loadingResponse?.result?.message_id;
+      console.log("Loading message sent, ID:", loadingMessageId);
+    } catch (e) {
+      console.error("Failed to send loading message:", e);
     }
 
-    // Process the button action with message editing
-    await handleButtonAction(telegramUserId, userId, promptText, messageId, responseHeader);
+    // Process the button action - edit the LOADING message (not original)
+    await handleButtonAction(telegramUserId, userId, promptText, loadingMessageId, responseHeader);
     return;
   }
 
