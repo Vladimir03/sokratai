@@ -1,5 +1,5 @@
 import { useState, useMemo, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import AuthGuard from '@/components/AuthGuard';
 import { PageContent } from '@/components/PageContent';
 import { Button } from '@/components/ui/button';
@@ -13,14 +13,21 @@ import {
   TodayStatsCard,
   GoalReachedModal 
 } from '@/components/practice';
+import { DiagnosticBanner } from '@/components/diagnostic';
 import { usePractice, useUserProgress, useTodayStats, useProblemCounts } from '@/hooks/usePractice';
+import { useLastDiagnosticResult } from '@/hooks/useDiagnostic';
 import type { EGENumber, CheckAnswerResult } from '@/types/practice';
 import { EGE_NUMBERS } from '@/types/practice';
 
 const Practice = () => {
   console.log('🎯 Practice page rendered');
   const navigate = useNavigate();
-  const [selectedEgeNumber, setSelectedEgeNumber] = useState<EGENumber | null>(null);
+  const location = useLocation();
+  
+  // Получаем выбранный номер из навигации (например, из диагностики)
+  const initialNumber = (location.state as { selectedNumber?: number } | null)?.selectedNumber as EGENumber | undefined;
+  
+  const [selectedEgeNumber, setSelectedEgeNumber] = useState<EGENumber | null>(initialNumber || null);
   const [showResult, setShowResult] = useState(false);
   const [checkResult, setCheckResult] = useState<CheckAnswerResult | null>(null);
   const [userAnswer, setUserAnswer] = useState('');
@@ -33,6 +40,14 @@ const Practice = () => {
   const { data: userProgress = {}, isLoading: isLoadingProgress } = useUserProgress();
   const { data: todayStats, isLoading: isLoadingStats } = useTodayStats();
   const { data: problemCounts = {} } = useProblemCounts();
+  const { data: lastDiagnostic } = useLastDiagnosticResult();
+
+  // Очищаем state после использования
+  useEffect(() => {
+    if (initialNumber && location.state) {
+      window.history.replaceState({}, document.title);
+    }
+  }, [initialNumber, location.state]);
 
   // Следим за достижением цели
   useEffect(() => {
@@ -171,14 +186,23 @@ ${currentProblem.condition_text}
 
           {/* Выбор номера ЕГЭ или практика */}
           {!selectedEgeNumber ? (
-            // Сетка выбора номера
-            <EgeNumberGrid
+            <>
+              {/* Баннер диагностики для тех, кто не прошёл */}
+              <DiagnosticBanner
+                onNavigate={() => navigate('/diagnostic')}
+                lastScore={lastDiagnostic?.predicted_test_score}
+                hasCompletedDiagnostic={!!lastDiagnostic}
+              />
+              
+              {/* Сетка выбора номера */}
+              <EgeNumberGrid
               userProgress={userProgress}
               problemCounts={problemCounts}
               onSelect={handleSelectEgeNumber}
               recommendedNumber={recommendedNumber}
               enabledNumbers={[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]}
             />
+            </>
           ) : (
             // Режим практики
             <div className="space-y-4">
