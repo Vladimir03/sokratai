@@ -6,6 +6,7 @@ import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import AuthGuard from '@/components/AuthGuard';
 import { PageContent } from '@/components/PageContent';
+import { Button } from '@/components/ui/button';
 import { Loader2 } from 'lucide-react';
 import {
   DiagnosticIntro,
@@ -19,7 +20,8 @@ import {
   useLastDiagnosticResult,
 } from '@/hooks/useDiagnostic';
 
-type DiagnosticView = 'intro' | 'question' | 'result' | 'loading';
+// Состояния экрана диагностики
+type DiagnosticView = 'loading' | 'intro' | 'question' | 'result';
 
 const Diagnostic = () => {
   const navigate = useNavigate();
@@ -73,7 +75,7 @@ const Diagnostic = () => {
     setView('intro');
   }, [isLoadingCanTake, isLoadingExisting, isLoadingLast, result, session, currentProblem, lastResultSession, isLoading]);
 
-  if (view === 'loading' || (isLoading && view === 'loading')) {
+  if (view === 'loading') {
     return (
       <AuthGuard>
         <PageContent>
