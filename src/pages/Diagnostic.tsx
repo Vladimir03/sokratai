@@ -1,272 +1,78 @@
-import { useState, useEffect, Fragment } from 'react';
+import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import AuthGuard from '@/components/AuthGuard';
 import { PageContent } from '@/components/PageContent';
-import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Progress } from '@/components/ui/progress';
-import { Input } from '@/components/ui/input';
-import { ArrowLeft, ArrowRight, Clock, Target, CheckCircle2, XCircle, Loader2, Trophy, AlertCircle } from 'lucide-react';
-import { supabase } from '@/lib/supabaseClient';
-import { toast } from 'sonner';
-import { useDiagnosticSession, useDiagnosticProblems } from '@/hooks/useDiagnostic';
-import type { EGENumber } from '@/types/practice';
-import { EGE_NUMBERS } from '@/types/practice';
-import { cn } from '@/lib/utils';
-import 'katex/dist/katex.min.css';
-import { InlineMath, BlockMath } from 'react-katex';
+import { Loader2 } from 'lucide-react';
+import {
+  DiagnosticIntro,
+  DiagnosticQuestion,
+  DiagnosticResult,
+} from '@/components/diagnostic';
+import {
+  useDiagnostic,
+  useCanTakeDiagnostic,
+  useExistingSession,
+  useLastDiagnosticResult,
+} from '@/hooks/useDiagnostic';
 
-interface DiagnosticProblem {
-  id: string;
-  ege_number: number;
-  condition_text: string;
-  condition_image_url: string | null;
-  answer_type: string;
-  correct_answer: string;
-  topic: string;
-  subtopic: string | null;
-  difficulty: number;
-}
-
-// Функция для парсинга LaTeX в тексте
-const parseLatex = (text: string) => {
-  if (!text) return null;
-  
-  // Разбиваем текст на части: обычный текст и LaTeX
-  const parts = text.split(/(\$\$[\s\S]*?\$\$|\$[^$]+\$)/g);
-  
-  return parts.map((part, index) => {
-    if (part.startsWith('$$') && part.endsWith('$$')) {
-      // Block math
-      const latex = part.slice(2, -2).trim();
-      return <BlockMath key={index} math={latex} />;
-    } else if (part.startsWith('$') && part.endsWith('$')) {
-      // Inline math
-      const latex = part.slice(1, -1);
-      return <InlineMath key={index} math={latex} />;
-    } else {
-      return <Fragment key={index}>{part}</Fragment>;
-    }
-  });
-};
+type DiagnosticView = 'intro' | 'question' | 'result' | 'loading';
 
 const Diagnostic = () => {
   const navigate = useNavigate();
-  const [sessionId, setSessionId] = useState<string | null>(null);
-  const [currentIndex, setCurrentIndex] = useState(0);
-  const [answers, setAnswers] = useState<Record<number, string>>({});
-  const [results, setResults] = useState<Record<number, boolean>>({});
-  const [userAnswer, setUserAnswer] = useState('');
-  const [startTime, setStartTime] = useState<number>(Date.now());
-  const [questionStartTime, setQuestionStartTime] = useState<number>(Date.now());
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [isComplete, setIsComplete] = useState(false);
-  const [finalScore, setFinalScore] = useState<{ primary: number; test: number } | null>(null);
-  const [weakTopics, setWeakTopics] = useState<number[]>([]);
+  const [view, setView] = useState<DiagnosticView>('loading');
 
-  const { data: problems = [], isLoading: isLoadingProblems } = useDiagnosticProblems();
-  const { mutateAsync: createSession } = useDiagnosticSession();
+  // Хуки данных
+  const { data: canTakeData, isLoading: isLoadingCanTake } = useCanTakeDiagnostic();
+  const { data: existingSession, isLoading: isLoadingExisting } = useExistingSession();
+  const { data: lastResultSession, isLoading: isLoadingLast } = useLastDiagnosticResult();
 
-  // Создаём сессию при загрузке
+  const {
+    session,
+    currentProblem,
+    currentIndex,
+    totalQuestions,
+    isLoading,
+    error,
+    result,
+    startDiagnostic,
+    continueSession,
+    submitAnswer,
+  } = useDiagnostic();
+
+  // Логика переключения экранов
   useEffect(() => {
-    const initSession = async () => {
-      try {
-        const { data: { user } } = await supabase.auth.getUser();
-        if (!user) return;
-
-        const { data, error } = await supabase
-          .from('diagnostic_sessions')
-          .insert({
-            user_id: user.id,
-            total_questions: 12,
-          })
-          .select('id')
-          .single();
-
-        if (error) throw error;
-        setSessionId(data.id);
-        setStartTime(Date.now());
-        setQuestionStartTime(Date.now());
-      } catch (error) {
-        console.error('Error creating diagnostic session:', error);
-        toast.error('Ошибка создания сессии');
-      }
-    };
-
-    initSession();
-  }, []);
-
-  const currentProblem = problems[currentIndex] as DiagnosticProblem | undefined;
-  const progressPercent = problems.length > 0 ? ((currentIndex + 1) / problems.length) * 100 : 0;
-
-  // Проверка ответа
-  const checkAnswer = (userAns: string, correctAns: string, answerType: string): boolean => {
-    const normalizeAnswer = (ans: string) => ans.trim().toLowerCase().replace(/,/g, '.').replace(/\s+/g, '');
-    const userNormalized = normalizeAnswer(userAns);
-    const correctNormalized = normalizeAnswer(correctAns);
-    
-    if (answerType === 'integer' || answerType === 'decimal') {
-      const userNum = parseFloat(userNormalized);
-      const correctNum = parseFloat(correctNormalized);
-      return Math.abs(userNum - correctNum) < 0.01;
+    if (isLoadingCanTake || isLoadingExisting || isLoadingLast) {
+      setView('loading');
+      return;
     }
-    
-    return userNormalized === correctNormalized;
-  };
 
-  // Обработчик ответа
-  const handleSubmitAnswer = async () => {
-    if (!currentProblem || !sessionId || !userAnswer.trim()) return;
-
-    setIsSubmitting(true);
-    const timeSpent = Math.round((Date.now() - questionStartTime) / 1000);
-    const isCorrect = checkAnswer(userAnswer, currentProblem.correct_answer, currentProblem.answer_type);
-
-    try {
-      // Сохраняем ответ
-      await supabase.from('diagnostic_answers').insert({
-        session_id: sessionId,
-        problem_id: currentProblem.id,
-        ege_number: currentProblem.ege_number,
-        user_answer: userAnswer,
-        is_correct: isCorrect,
-        time_spent_seconds: timeSpent,
-        question_order: currentIndex + 1,
-      });
-
-      setAnswers(prev => ({ ...prev, [currentIndex]: userAnswer }));
-      setResults(prev => ({ ...prev, [currentIndex]: isCorrect }));
-
-      // Переход к следующему вопросу или завершение
-      if (currentIndex < problems.length - 1) {
-        setCurrentIndex(prev => prev + 1);
-        setUserAnswer('');
-        setQuestionStartTime(Date.now());
-      } else {
-        // Завершаем диагностику
-        await completeDiagnostic();
-      }
-    } catch (error) {
-      console.error('Error saving answer:', error);
-      toast.error('Ошибка сохранения ответа');
-    } finally {
-      setIsSubmitting(false);
+    // Если есть результат из хука (только что завершили)
+    if (result) {
+      setView('result');
+      return;
     }
-  };
 
-  // Завершение диагностики
-  const completeDiagnostic = async () => {
-    if (!sessionId) return;
-
-    const totalTimeSpent = Math.round((Date.now() - startTime) / 1000);
-    
-    // Подсчёт результатов по номерам
-    const topicResults: Record<number, { correct: number; total: number }> = {};
-    
-    problems.forEach((problem, index) => {
-      const p = problem as DiagnosticProblem;
-      if (!topicResults[p.ege_number]) {
-        topicResults[p.ege_number] = { correct: 0, total: 0 };
-      }
-      topicResults[p.ege_number].total++;
-      if (results[index]) {
-        topicResults[p.ege_number].correct++;
-      }
-    });
-
-    // Подсчёт первичного балла (за каждый правильный ответ 1-12 — по 1 баллу)
-    const correctAnswers = Object.values(results).filter(Boolean).length;
-    const primaryScore = correctAnswers;
-    
-    // Перевод в тестовые баллы по шкале 2025 года (Математика профиль, Часть 1)
-    const convertPrimaryToTest = (primary: number): number => {
-      const scale: Record<number, number> = {
-        0: 0,
-        1: 5,
-        2: 11,
-        3: 18,
-        4: 25,
-        5: 34,
-        6: 40,
-        7: 46,
-        8: 52,
-        9: 58,
-        10: 64,
-        11: 70,
-        12: 72,
-      };
-      return scale[primary] || 0;
-    };
-
-    const testScore = convertPrimaryToTest(primaryScore);
-
-    // Определяем слабые темы (менее 50% правильных)
-    const weak: number[] = [];
-    const strong: number[] = [];
-    
-    Object.entries(topicResults).forEach(([numStr, data]) => {
-      const num = parseInt(numStr);
-      const accuracy = data.total > 0 ? data.correct / data.total : 0;
-      if (accuracy < 0.5) {
-        weak.push(num);
-      } else if (accuracy >= 0.8) {
-        strong.push(num);
-      }
-    });
-
-    try {
-      // Обновляем сессию
-      await supabase
-        .from('diagnostic_sessions')
-        .update({
-          status: 'completed',
-          predicted_primary_score: primaryScore,
-          predicted_test_score: testScore,
-          topic_scores: topicResults,
-          weak_topics: weak,
-          strong_topics: strong,
-          recommended_start_topic: weak[0] || 1,
-          completed_at: new Date().toISOString(),
-          time_spent_seconds: totalTimeSpent,
-        })
-        .eq('id', sessionId);
-
-      // Обновляем профиль
-      const { data: { user } } = await supabase.auth.getUser();
-      if (user) {
-        await supabase
-          .from('profiles')
-          .update({
-            diagnostic_completed: true,
-            last_diagnostic_at: new Date().toISOString(),
-            last_diagnostic_score: testScore,
-          })
-          .eq('id', user.id);
-      }
-
-      setFinalScore({ primary: primaryScore, test: testScore });
-      setWeakTopics(weak);
-      setIsComplete(true);
-    } catch (error) {
-      console.error('Error completing diagnostic:', error);
-      toast.error('Ошибка завершения диагностики');
+    // Если есть активная сессия в хуке (в процессе)
+    if (session && currentProblem) {
+      setView('question');
+      return;
     }
-  };
 
-  // Начать практику по слабой теме
-  const handleStartPractice = (egeNumber?: number) => {
-    if (egeNumber) {
-      navigate('/practice', { state: { selectedNumber: egeNumber } });
-    } else {
-      navigate('/practice');
+    // Если в БД есть завершенная диагностика, а в хуке ничего нет - показываем результаты
+    if (lastResultSession && !session) {
+      setView('result');
+      return;
     }
-  };
 
-  if (isLoadingProblems) {
+    // По умолчанию - интро
+    setView('intro');
+  }, [isLoadingCanTake, isLoadingExisting, isLoadingLast, result, session, currentProblem, lastResultSession]);
+
+  if (view === 'loading') {
     return (
       <AuthGuard>
         <PageContent>
-          <div className="flex items-center justify-center min-h-[60vh]">
+          <div className="flex items-center justify-center py-20">
             <Loader2 className="w-8 h-8 animate-spin text-primary" />
           </div>
         </PageContent>
@@ -274,220 +80,64 @@ const Diagnostic = () => {
     );
   }
 
-  if (isComplete && finalScore) {
-    return (
-      <AuthGuard>
-        <PageContent>
-          <div className="container mx-auto px-4 py-6 max-w-2xl">
-            <Card className="border-2 border-primary/20">
-              <CardHeader className="text-center">
-                <Trophy className="w-16 h-16 mx-auto text-yellow-500 mb-4" />
-                <CardTitle className="text-2xl">Диагностика завершена!</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-6">
-                <div className="grid grid-cols-2 gap-4 text-center">
-                  <div className="p-4 bg-muted rounded-lg">
-                    <div className="text-3xl font-bold text-primary">{finalScore.primary}/12</div>
-                    <div className="text-sm text-muted-foreground">Первичный балл</div>
-                  </div>
-                  <div className="p-4 bg-muted rounded-lg">
-                    <div className="text-3xl font-bold text-primary">~{finalScore.test}</div>
-                    <div className="text-sm text-muted-foreground">Тестовый балл</div>
-                  </div>
-                </div>
-
-                {weakTopics.length > 0 && (
-                  <div>
-                    <h3 className="font-semibold mb-3 text-red-500 flex items-center gap-2">
-                      <AlertCircle className="w-5 h-5" />
-                      Нужно подтянуть:
-                    </h3>
-                    <div className="space-y-2">
-                      {weakTopics.slice(0, 3).map(num => (
-                        <Button
-                          key={num}
-                          variant="outline"
-                          className="w-full justify-between border-red-100 hover:bg-red-50"
-                          onClick={() => handleStartPractice(num as EGENumber)}
-                        >
-                          <span className="flex items-center gap-2">
-                            <span className="font-bold">№{num}</span>
-                            <span className="text-muted-foreground truncate">{EGE_NUMBERS[num as EGENumber]?.name || 'Задание'}</span>
-                          </span>
-                          <ArrowRight className="w-4 h-4" />
-                        </Button>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                <div>
-                  <h3 className="font-semibold mb-3 flex items-center gap-2">
-                    <CheckCircle2 className="w-5 h-5 text-green-500" />
-                    Детальный разбор:
-                  </h3>
-                  <div className="space-y-3">
-                    {problems.map((problem, index) => (
-                      <div 
-                        key={problem.id} 
-                        className={cn(
-                          "p-3 rounded-lg border flex items-start gap-3 transition-colors",
-                          results[index] ? "bg-green-50 border-green-100" : "bg-red-50 border-red-100"
-                        )}
-                      >
-                        <div className="mt-0.5">
-                          {results[index] ? (
-                            <CheckCircle2 className="w-5 h-5 text-green-600" />
-                          ) : (
-                            <XCircle className="w-5 h-5 text-red-600" />
-                          )}
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <div className="flex justify-between items-center mb-1">
-                            <span className="font-bold text-sm">№{problem.ege_number}</span>
-                            <span className="text-xs text-muted-foreground">{problem.topic}</span>
-                          </div>
-                          <div className="text-sm text-muted-foreground mb-2 line-clamp-2 italic">
-                            {problem.condition_text.replace(/\$|\$\$/g, '')}
-                          </div>
-                          <div className="grid grid-cols-2 gap-2 text-xs">
-                            <div>
-                              <span className="text-muted-foreground">Твой ответ:</span>{" "}
-                              <span className={results[index] ? "text-green-700 font-medium" : "text-red-700 font-medium"}>
-                                {answers[index] || "—"}
-                              </span>
-                            </div>
-                            <div>
-                              <span className="text-muted-foreground">Верно:</span>{" "}
-                              <span className="text-green-700 font-medium">{problem.correct_answer}</span>
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-
-                <div className="flex gap-3 pt-4">
-                  <Button 
-                    variant="outline" 
-                    className="flex-1"
-                    onClick={() => navigate('/practice')}
-                  >
-                    К тренажёру
-                  </Button>
-                  <Button 
-                    className="flex-1"
-                    onClick={() => handleStartPractice(weakTopics[0] as EGENumber)}
-                  >
-                    Начать практику
-                  </Button>
-                </div>
-              </CardContent>
-            </Card>
-          </div>
-        </PageContent>
-      </AuthGuard>
-    );
-  }
+  // Преобразуем данные из БД в формат DiagnosticResult для отображения, если нужно
+  const displayResult = result || (lastResultSession ? {
+    primaryScore: lastResultSession.predicted_primary_score || 0,
+    testScore: lastResultSession.predicted_test_score || 0,
+    totalQuestions: lastResultSession.total_questions || 12,
+    correctAnswers: lastResultSession.predicted_primary_score || 0,
+    timeSpentMinutes: Math.round((lastResultSession.time_spent_seconds || 900) / 60),
+    topicScores: [],
+    weakTopics: [],
+    strongTopics: [],
+    recommendedTopic: null,
+    // При просмотре старых результатов breakdown может быть не заполнен, 
+    // если мы не храним его в session object (но он есть в diagnostic_answers)
+    answersBreakdown: [] 
+  } : null);
 
   return (
     <AuthGuard>
       <PageContent>
-        <div className="container mx-auto px-4 py-6 max-w-2xl">
-          {/* Заголовок */}
-          <div className="flex items-center gap-3 mb-6">
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={() => navigate('/practice')}
-            >
-              <ArrowLeft className="w-5 h-5" />
-            </Button>
-            <div className="flex-1">
-              <h1 className="text-xl font-bold">Диагностика уровня</h1>
-              <p className="text-sm text-muted-foreground">
-                Вопрос {currentIndex + 1} из {problems.length}
-              </p>
-            </div>
-            <div className="flex items-center gap-2 text-sm text-muted-foreground">
-              <Clock className="w-4 h-4" />
-              <span>~15 мин</span>
-            </div>
-          </div>
-
-          {/* Прогресс */}
-          <Progress value={progressPercent} className="mb-6" />
-
-          {/* Задача */}
-          {currentProblem && (
-            <Card className="mb-6">
-              <CardHeader className="pb-3">
-                <div className="flex items-center justify-between">
-                  <span className="text-sm font-medium text-muted-foreground">
-                    №{currentProblem.ege_number}: {currentProblem.topic}
-                  </span>
-                  {results[currentIndex] !== undefined && (
-                    results[currentIndex] ? (
-                      <CheckCircle2 className="w-5 h-5 text-green-500" />
-                    ) : (
-                      <XCircle className="w-5 h-5 text-red-500" />
-                    )
-                  )}
-                </div>
-              </CardHeader>
-              <CardContent>
-                <div className="text-lg leading-relaxed">
-                  {parseLatex(currentProblem.condition_text)}
-                </div>
-                
-                {currentProblem.condition_image_url && (
-                  <img 
-                    src={currentProblem.condition_image_url} 
-                    alt="Условие задачи"
-                    className="mt-4 max-w-full rounded-lg"
-                  />
-                )}
-              </CardContent>
-            </Card>
+        <div className="container mx-auto px-4 pb-6">
+          {view === 'intro' && (
+            <DiagnosticIntro
+              onStart={startDiagnostic}
+              onContinue={() => existingSession && continueSession(existingSession)}
+              hasExistingSession={!!existingSession}
+              remainingQuestions={existingSession ? (existingSession.total_questions - existingSession.current_question + 1) : 0}
+              isLoading={isLoading}
+              canRetake={canTakeData?.canTake}
+              daysUntilRetake={canTakeData?.daysUntilRetake}
+            />
           )}
 
-          {/* Ввод ответа */}
-          <div className="space-y-4">
-            <div>
-              <label className="text-sm font-medium mb-2 block">Ваш ответ:</label>
-              <Input
-                type="text"
-                value={userAnswer}
-                onChange={(e) => setUserAnswer(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && handleSubmitAnswer()}
-                placeholder="Введите ответ..."
-                className="text-lg"
-                autoFocus
-              />
-            </div>
+          {view === 'question' && currentProblem && (
+            <DiagnosticQuestion
+              problem={currentProblem}
+              questionNumber={currentIndex + 1}
+              totalQuestions={totalQuestions}
+              onSubmit={submitAnswer}
+              onBack={() => navigate('/practice')}
+              isSubmitting={isLoading}
+            />
+          )}
 
-            <Button
-              className="w-full"
-              size="lg"
-              onClick={handleSubmitAnswer}
-              disabled={!userAnswer.trim() || isSubmitting}
-            >
-              {isSubmitting ? (
-                <Loader2 className="w-5 h-5 animate-spin mr-2" />
-              ) : currentIndex < problems.length - 1 ? (
-                <>
-                  Далее
-                  <ArrowRight className="w-5 h-5 ml-2" />
-                </>
-              ) : (
-                <>
-                  <Target className="w-5 h-5 mr-2" />
-                  Завершить диагностику
-                </>
-              )}
-            </Button>
-          </div>
+          {view === 'result' && displayResult && (
+            <DiagnosticResult
+              result={displayResult as any}
+              onStartPractice={(num) => navigate('/practice', { state: { selectedNumber: num } })}
+              onRetake={startDiagnostic}
+              canRetake={canTakeData?.canTake}
+              daysUntilRetake={canTakeData?.daysUntilRetake}
+            />
+          )}
+
+          {error && (
+            <div className="mt-4 p-4 bg-destructive/10 border border-destructive/20 rounded-lg text-center">
+              <p className="text-destructive text-sm">{error}</p>
+            </div>
+          )}
         </div>
       </PageContent>
     </AuthGuard>
