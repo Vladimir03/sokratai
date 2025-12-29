@@ -1,5 +1,5 @@
 import { useState, useMemo, useEffect } from 'react';
-import { useNavigate, useLocation } from 'react-router-dom';
+import { useNavigate, useLocation, useSearchParams } from 'react-router-dom';
 import AuthGuard from '@/components/AuthGuard';
 import { PageContent } from '@/components/PageContent';
 import { Button } from '@/components/ui/button';
@@ -23,9 +23,13 @@ const Practice = () => {
   console.log('🎯 Practice page rendered');
   const navigate = useNavigate();
   const location = useLocation();
+  const [searchParams] = useSearchParams();
   
-  // Получаем выбранный номер из навигации (например, из диагностики)
-  const initialNumber = (location.state as { selectedNumber?: number } | null)?.selectedNumber as EGENumber | undefined;
+  // Получаем выбранный номер из query param (?task=7) или state
+  const taskFromQuery = searchParams.get('task');
+  const initialNumber = taskFromQuery 
+    ? (parseInt(taskFromQuery, 10) as EGENumber) 
+    : (location.state as { selectedNumber?: number } | null)?.selectedNumber as EGENumber | undefined;
   
   const [selectedEgeNumber, setSelectedEgeNumber] = useState<EGENumber | null>(initialNumber || null);
   const [showResult, setShowResult] = useState(false);
