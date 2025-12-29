@@ -335,9 +335,11 @@ export const useLastDiagnosticResult = () => {
   const { data: user } = useCurrentUser();
   return useQuery({
     queryKey: ['lastDiagnosticResult', user?.id],
-    queryFn: async () => {
+    queryFn: async (): Promise<DiagnosticResult | null> => {
       if (!user) return null;
-      const { data } = await supabase
+      
+      // 1. Получаем последнюю завершённую сессию
+      const { data: session } = await supabase
         .from('diagnostic_sessions')
         .select('*')
         .eq('user_id', user.id)
@@ -345,7 +347,59 @@ export const useLastDiagnosticResult = () => {
         .order('completed_at', { ascending: false })
         .limit(1)
         .maybeSingle();
-      return data;
+      
+      if (!session) return null;
+
+      // 2. Загружаем ответы с данными задач
+      const { data: answers } = await supabase
+        .from('diagnostic_answers')
+        .select('*, problem:ege_problems(*)')
+        .eq('session_id', session.id)
+        .order('question_order');
+
+      // 3. Формируем answersBreakdown
+      const answersBreakdown = (answers || []).map(ans => ({
+        problem: ans.problem as EgeProblem,
+        userAnswer: ans.user_answer,
+        isCorrect: ans.is_correct
+      }));
+
+      // 4. Вычисляем рекомендуемую тему (первая неверная по ege_number)
+      const wrongAnswers = answersBreakdown
+        .filter(a => !a.isCorrect)
+        .sort((a, b) => a.problem.ege_number - b.problem.ege_number);
+
+      const recommendedTopic = wrongAnswers.length > 0 
+        ? {
+            ege_number: wrongAnswers[0].problem.ege_number,
+            topic_name: wrongAnswers[0].problem.topic,
+            correct: 0,
+            total: 1,
+            score: 0,
+            recommendation: 'weak' as const
+          }
+        : null;
+
+      // 5. Возвращаем полный DiagnosticResult
+      return {
+        primaryScore: session.predicted_primary_score || 0,
+        testScore: session.predicted_test_score || 0,
+        totalQuestions: session.total_questions || 12,
+        correctAnswers: session.predicted_primary_score || 0,
+        timeSpentMinutes: Math.round((session.time_spent_seconds || 900) / 60),
+        topicScores: [],
+        weakTopics: wrongAnswers.map(wa => ({
+          ege_number: wa.problem.ege_number,
+          topic_name: wa.problem.topic,
+          correct: 0,
+          total: 1,
+          score: 0,
+          recommendation: 'weak' as const
+        })),
+        strongTopics: [],
+        recommendedTopic,
+        answersBreakdown
+      };
     },
     enabled: !!user,
   });
