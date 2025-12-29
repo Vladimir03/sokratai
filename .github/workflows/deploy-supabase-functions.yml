@@ -1,0 +1,39 @@
+name: Deploy Supabase Edge Functions
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'supabase/functions/**'
+  workflow_dispatch:  # Позволяет запускать вручную
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Supabase CLI
+        uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      - name: Deploy Edge Functions
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+        run: |
+          supabase link --project-ref ${{ secrets.SUPABASE_PROJECT_ID }}
+
+          # Deploy all functions
+          supabase functions deploy telegram-bot --no-verify-jwt
+          supabase functions deploy chat --no-verify-jwt
+          supabase functions deploy setup-telegram-webhook --no-verify-jwt
+          supabase functions deploy telegram-auth --no-verify-jwt
+          supabase functions deploy telegram-login-token --no-verify-jwt
+          supabase functions deploy telegram-broadcast --no-verify-jwt
+          supabase functions deploy telegram-scheduled-reminder --no-verify-jwt
+
+          echo "✅ All functions deployed successfully!"
