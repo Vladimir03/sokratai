@@ -194,7 +194,7 @@ ${currentProblem.condition_text}
               {/* Баннер диагностики для тех, кто не прошёл */}
               <DiagnosticBanner
                 onNavigate={() => navigate('/diagnostic')}
-                lastScore={lastDiagnostic?.predicted_test_score}
+                lastScore={lastDiagnostic?.testScore}
                 hasCompletedDiagnostic={!!lastDiagnostic}
               />
               

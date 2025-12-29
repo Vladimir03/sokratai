@@ -92,19 +92,8 @@ const Diagnostic = () => {
     );
   }
 
-  // Данные для отображения результата
-  const displayResult = result || (lastResultSession ? {
-    primaryScore: lastResultSession.predicted_primary_score || 0,
-    testScore: lastResultSession.predicted_test_score || 0,
-    totalQuestions: lastResultSession.total_questions || 12,
-    correctAnswers: lastResultSession.predicted_primary_score || 0,
-    timeSpentMinutes: Math.round((lastResultSession.time_spent_seconds || 900) / 60),
-    topicScores: [],
-    weakTopics: [],
-    strongTopics: [],
-    recommendedTopic: null,
-    answersBreakdown: [] 
-  } : null);
+  // Данные для отображения результата (lastResultSession уже содержит полную структуру)
+  const displayResult = result || lastResultSession || null;
 
   return (
     <AuthGuard>
