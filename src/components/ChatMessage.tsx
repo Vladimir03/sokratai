@@ -278,27 +278,27 @@ const ChatMessage = memo(({ message, isLoading, onQuickMessage, onRetry, onFeedb
           {message.role === "assistant" && !isLoading && (
             <div className="flex gap-2 items-center flex-wrap px-1 mt-2">
               <button 
-                onClick={() => onQuickMessage("Составь план решения этой задачи")}
+                onClick={() => onQuickMessage("Покажи решение")}
                 className="text-xs px-3 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 rounded-full border border-blue-200 transition-colors dark:bg-blue-950 dark:hover:bg-blue-900 dark:text-blue-300 dark:border-blue-800"
                 disabled={isLoading}
               >
-                📋 План решения
+                📝 Покажи решение
               </button>
               
               <button 
-                onClick={() => onQuickMessage("Объясни этот момент подробнее")}
+                onClick={() => onQuickMessage("Дай подсказку")}
+                className="text-xs px-3 py-1.5 bg-amber-50 hover:bg-amber-100 text-amber-700 rounded-full border border-amber-200 transition-colors dark:bg-amber-950 dark:hover:bg-amber-900 dark:text-amber-300 dark:border-amber-800"
+                disabled={isLoading}
+              >
+                💡 Дай подсказку
+              </button>
+              
+              <button 
+                onClick={() => onQuickMessage("Объясни подробнее")}
                 className="text-xs px-3 py-1.5 bg-purple-50 hover:bg-purple-100 text-purple-700 rounded-full border border-purple-200 transition-colors dark:bg-purple-950 dark:hover:bg-purple-900 dark:text-purple-300 dark:border-purple-800"
                 disabled={isLoading}
               >
                 🔍 Объясни подробнее
-              </button>
-              
-              <button 
-                onClick={() => onQuickMessage("Дай мне похожую задачу для практики")}
-                className="text-xs px-3 py-1.5 bg-green-50 hover:bg-green-100 text-green-700 rounded-full border border-green-200 transition-colors dark:bg-green-950 dark:hover:bg-green-900 dark:text-green-300 dark:border-green-800"
-                disabled={isLoading}
-              >
-                ✍️ Похожая задача
               </button>
 
               {/* Разделитель */}
