@@ -1584,6 +1584,70 @@ function formatForTelegram(text: string): string {
 }
 
 /**
+ * Enhanced formatter for button responses (solution/hint/explain)
+ * Creates a clear, structured layout optimized for students learning math
+ */
+function formatForTelegramStructured(text: string): string {
+  let result = text;
+
+  // Step 1: Apply base formatting
+  result = formatForTelegram(result);
+
+  // Step 2: Enhance structure for better readability
+
+  // Add visual separators between major sections (before bold headers with colons)
+  // Match patterns like "**Шаг 1:**" or "**Ответ:**"
+  result = result.replace(/\n(<b>[^<]+:<\/b>)/g, "\n━━━━━━━━━━━━━━━━\n$1");
+
+  // But remove separator if it's at the very beginning
+  if (result.startsWith("━━")) {
+    result = result.replace(/^━━━━━━━━━━━━━━━━\n/, "");
+  }
+
+  // Step 3: Enhance step numbers for better visibility
+  // Convert "Шаг 1:" style headers to more prominent format
+  result = result.replace(/<b>Шаг (\d+)[:.]\s*([^<]*)<\/b>/g, (match, num, title) => {
+    const stepEmojis = ["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣", "🔟"];
+    const emoji = parseInt(num) <= 10 ? stepEmojis[parseInt(num) - 1] : `${num}.`;
+    const titlePart = title.trim() ? ` <b>${title.trim()}</b>` : "";
+    return `${emoji}${titlePart}`;
+  });
+
+  // Step 4: Highlight the final answer prominently
+  // Look for "Ответ:" pattern and make it stand out
+  result = result.replace(
+    /<b>Ответ:<\/b>/g,
+    "\n━━━━━━━━━━━━━━━━\n🎯 <b>ОТВЕТ:</b>"
+  );
+
+  // Also handle "**Ответ**" without colon
+  result = result.replace(
+    /<b>Ответ<\/b>/g,
+    "\n━━━━━━━━━━━━━━━━\n🎯 <b>ОТВЕТ:</b>"
+  );
+
+  // Step 5: Enhance key mathematical terms
+  // Add emphasis to important math keywords
+  result = result.replace(/\b(Дано|Найти|Решение|Проверка):/g, "📝 <b>$1:</b>");
+
+  // Step 6: Clean up excessive separators
+  // Remove duplicate separators
+  result = result.replace(/(━━━━━━━━━━━━━━━━\n){2,}/g, "━━━━━━━━━━━━━━━━\n");
+
+  // Remove separator at the very end
+  result = result.replace(/━━━━━━━━━━━━━━━━\n*$/, "");
+
+  // Step 7: Ensure proper spacing
+  // Add breathing room between paragraphs
+  result = result.replace(/\n{3,}/g, "\n\n");
+
+  // Ensure there's space after separators
+  result = result.replace(/━━━━━━━━━━━━━━━━\n([^\n])/g, "━━━━━━━━━━━━━━━━\n\n$1");
+
+  return result.trim();
+}
+
+/**
  * Generates Telegram inline keyboard JSON for Mini App button
  */
 function generateMiniAppButton(solutionId: string): any {
@@ -2364,14 +2428,320 @@ async function handlePhotoMessage(telegramUserId: number, userId: string, photo:
   }
 }
 
+/**
+ * Handles button actions (solution/hint/explain) by editing the original message
+ * Instead of sending new messages, this function edits the message where buttons were clicked
+ */
+async function handleButtonAction(
+  telegramUserId: number,
+  userId: string,
+  promptText: string,
+  originalMessageId: number | undefined,
+  responseHeader: string
+) {
+  console.log("Handling button action:", { telegramUserId, promptText, originalMessageId });
+
+  try {
+    // Get or create chat
+    const chatId = await getOrCreateTelegramChat(userId);
+
+    // Check subscription/limits before processing
+    const status = await getSubscriptionStatus(userId);
+    if (status && !status.is_premium && !status.is_trial_active && status.limit_reached) {
+      if (originalMessageId) {
+        await editTelegramMessage(
+          telegramUserId,
+          originalMessageId,
+          `${responseHeader}\n\n⏳ Достигнут дневной лимит. Оформи Premium для безлимита.`
+        );
+      }
+      await sendStatusSnippet(telegramUserId, status);
+      return;
+    }
+
+    // Save user message (button action)
+    await supabase.from("chat_messages").insert({
+      chat_id: chatId,
+      user_id: userId,
+      role: "user",
+      content: promptText,
+      input_method: "button",
+    });
+
+    // Функция для обновления signed URL для старых изображений
+    async function refreshImageUrls(messages: any[]) {
+      return await Promise.all(
+        messages.map(async (msg) => {
+          if (msg.image_path) {
+            const { data: signedData, error } = await supabase.storage
+              .from("chat-images")
+              .createSignedUrl(msg.image_path, 3600);
+
+            if (!error && signedData) {
+              return { ...msg, image_url: signedData.signedUrl };
+            }
+          }
+          return msg;
+        })
+      );
+    }
+
+    // Get chat history - limit to last 20 messages
+    const { data: historyReversed } = await supabase
+      .from("chat_messages")
+      .select("role, content, image_url, image_path")
+      .eq("chat_id", chatId)
+      .order("created_at", { ascending: false })
+      .limit(20);
+
+    let history = historyReversed?.reverse() || [];
+    history = await refreshImageUrls(history);
+
+    // Start typing loop
+    const stopTyping = { stop: false };
+    const typingPromise = sendTypingLoop(telegramUserId, stopTyping);
+
+    // Call AI chat function
+    const chatResponse = await fetch(`${SUPABASE_URL}/functions/v1/chat`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
+      },
+      body: JSON.stringify({
+        messages: history || [],
+        chatId: chatId,
+        userId: userId,
+      }),
+    });
+
+    // Stop typing
+    stopTyping.stop = true;
+    await typingPromise;
+
+    // Handle errors
+    if (chatResponse.status === 429) {
+      const errorBody = await chatResponse.json().catch(() => null);
+      const limit = errorBody?.limit ?? 10;
+      if (originalMessageId) {
+        await editTelegramMessage(
+          telegramUserId,
+          originalMessageId,
+          `${responseHeader}\n\n⏳ Достигнут дневной лимит ${limit} сообщений.`
+        );
+      }
+      await sendTelegramMessage(
+        telegramUserId,
+        `Оформи Premium за 699₽/мес, чтобы получить безлимит.`,
+        { reply_markup: premiumKeyboard }
+      );
+      return;
+    }
+
+    if (chatResponse.status === 402) {
+      if (originalMessageId) {
+        await editTelegramMessage(
+          telegramUserId,
+          originalMessageId,
+          `${responseHeader}\n\n💳 Закончились средства на балансе.`
+        );
+      }
+      return;
+    }
+
+    if (!chatResponse.ok) {
+      console.error("AI response error:", chatResponse.status, await chatResponse.text());
+      if (originalMessageId) {
+        await editTelegramMessage(
+          telegramUserId,
+          originalMessageId,
+          `${responseHeader}\n\n❌ Произошла ошибка. Попробуй ещё раз.`
+        );
+      }
+      return;
+    }
+
+    // Parse SSE stream
+    const aiContent = await parseSSEStream(chatResponse);
+
+    // Save AI response
+    await supabase.from("chat_messages").insert({
+      chat_id: chatId,
+      user_id: userId,
+      role: "assistant",
+      content: aiContent,
+    });
+
+    // Format for Telegram with improved structure
+    const formattedContent = formatForTelegramStructured(aiContent);
+
+    // Build final message with header
+    const fullMessage = `${responseHeader}\n\n${formattedContent}`;
+
+    // Split if too long (Telegram limit is ~4096 chars)
+    const messageParts = splitLongMessage(fullMessage, 4000);
+
+    // Edit the original message with the first part
+    if (originalMessageId && messageParts.length > 0) {
+      try {
+        if (messageParts.length === 1) {
+          // Single part: edit the message with response and include buttons
+          await editTelegramMessage(
+            telegramUserId,
+            originalMessageId,
+            messageParts[0],
+            { reply_markup: createQuickActionsKeyboard() }
+          );
+        } else {
+          // Multiple parts: edit with first part (no buttons)
+          await editTelegramMessage(
+            telegramUserId,
+            originalMessageId,
+            messageParts[0]
+          );
+
+          // Send remaining parts as new messages
+          for (let i = 1; i < messageParts.length; i++) {
+            await new Promise((resolve) => setTimeout(resolve, 500));
+            const isLastPart = i === messageParts.length - 1;
+            await sendTelegramMessage(
+              telegramUserId,
+              messageParts[i],
+              isLastPart ? { reply_markup: createQuickActionsKeyboard() } : undefined
+            );
+          }
+        }
+      } catch (e) {
+        console.error("Failed to edit message with response:", e);
+        // Fallback: send as new message
+        for (let i = 0; i < messageParts.length; i++) {
+          await new Promise((resolve) => setTimeout(resolve, 500));
+          const isLastPart = i === messageParts.length - 1;
+          await sendTelegramMessage(
+            telegramUserId,
+            messageParts[i],
+            isLastPart ? { reply_markup: createQuickActionsKeyboard() } : undefined
+          );
+        }
+      }
+    } else {
+      // No original message to edit, send as new
+      for (let i = 0; i < messageParts.length; i++) {
+        if (i > 0) {
+          await new Promise((resolve) => setTimeout(resolve, 500));
+        }
+        const isLastPart = i === messageParts.length - 1;
+        await sendTelegramMessage(
+          telegramUserId,
+          messageParts[i],
+          isLastPart ? { reply_markup: createQuickActionsKeyboard() } : undefined
+        );
+      }
+    }
+
+    // Post-response UX nudges
+    await maybeSendTrialReminder(telegramUserId, userId);
+  } catch (error) {
+    console.error("Error handling button action:", error);
+    if (originalMessageId) {
+      try {
+        await editTelegramMessage(
+          telegramUserId,
+          originalMessageId,
+          `${responseHeader}\n\n❌ Произошла ошибка. Попробуй ещё раз.`
+        );
+      } catch (e) {
+        await sendTelegramMessage(telegramUserId, "❌ Произошла ошибка. Попробуй ещё раз.");
+      }
+    } else {
+      await sendTelegramMessage(telegramUserId, "❌ Произошла ошибка. Попробуй ещё раз.");
+    }
+  }
+}
+
 async function handleCallbackQuery(callbackQuery: any) {
   const telegramUserId = callbackQuery.from.id;
   const data = callbackQuery.data;
   const messageId = callbackQuery.message?.message_id;
 
-  console.log("Handling callback query:", { telegramUserId, data });
+  console.log("Handling callback query:", { telegramUserId, data, messageId });
 
-  // Answer callback query to remove loading state
+  // Handle help depth control buttons
+  if (data.startsWith("help_depth:")) {
+    const session = await getOnboardingSession(telegramUserId);
+
+    if (!session?.user_id) {
+      // Answer callback query with error
+      await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/answerCallbackQuery`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          callback_query_id: callbackQuery.id,
+          text: "❌ Сессия не найдена",
+          show_alert: true,
+        }),
+      });
+      await sendTelegramMessage(telegramUserId, "❌ Сессия не найдена. Нажми /start");
+      return;
+    }
+
+    const userId = session.user_id;
+    const helpLevel = data.replace("help_depth:", "");
+
+    // Determine prompt text and response header based on help depth level
+    let promptText = "";
+    let responseHeader = "";
+    let buttonText = "";
+
+    switch (helpLevel) {
+      case "solution":
+        promptText = "Покажи полное решение этой задачи с ответом. Не задавай вопросов, просто реши.";
+        responseHeader = "✅ <b>Решение:</b>";
+        buttonText = "✅ Показываю решение...";
+        break;
+      case "hint":
+        promptText = "Дай мне только подсказку для следующего шага. Не решай полностью, только намекни на направление.";
+        responseHeader = "💡 <b>Подсказка:</b>";
+        buttonText = "💡 Готовлю подсказку...";
+        break;
+      case "explain":
+        promptText = "Объясни подробнее последний шаг или концепцию. Разбери детально с примерами.";
+        responseHeader = "📖 <b>Подробное объяснение:</b>";
+        buttonText = "📖 Готовлю объяснение...";
+        break;
+      default:
+        return;
+    }
+
+    // Answer callback query immediately
+    await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/answerCallbackQuery`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        callback_query_id: callbackQuery.id,
+        text: buttonText,
+      }),
+    });
+
+    // Edit original message: show loading state with response header
+    if (messageId) {
+      try {
+        await editTelegramMessage(
+          telegramUserId,
+          messageId,
+          `${responseHeader}\n\n⏳ <i>Генерирую ответ...</i>`
+        );
+      } catch (e) {
+        console.error("Failed to edit message for loading state:", e);
+      }
+    }
+
+    // Process the button action with message editing
+    await handleButtonAction(telegramUserId, userId, promptText, messageId, responseHeader);
+    return;
+  }
+
+  // Answer callback query for onboarding buttons
   await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/answerCallbackQuery`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -2380,47 +2750,6 @@ async function handleCallbackQuery(callbackQuery: any) {
       text: "Обрабатываю...",
     }),
   });
-
-  // Handle help depth control buttons
-  if (data.startsWith("help_depth:")) {
-    const session = await getOnboardingSession(telegramUserId);
-
-    if (!session?.user_id) {
-      await sendTelegramMessage(telegramUserId, "❌ Сессия не найдена. Нажми /start");
-      return;
-    }
-
-    const userId = session.user_id;
-    const helpLevel = data.replace("help_depth:", "");
-
-    // Determine prompt text based on help depth level
-    let promptText = "";
-    let responsePrefix = "";
-    
-    switch (helpLevel) {
-      case "solution":
-        promptText = "Покажи полное решение этой задачи с ответом. Не задавай вопросов, просто реши.";
-        responsePrefix = "✅ Показываю решение...";
-        break;
-      case "hint":
-        promptText = "Дай мне только подсказку для следующего шага. Не решай полностью, только намекни на направление.";
-        responsePrefix = "💡 Подсказка...";
-        break;
-      case "explain":
-        promptText = "Объясни подробнее последний шаг или концепцию. Разбери детально с примерами.";
-        responsePrefix = "📖 Объясняю подробнее...";
-        break;
-      default:
-        return;
-    }
-
-    // Show user what action is being taken
-    await sendTelegramMessage(telegramUserId, responsePrefix);
-
-    // Process as text message
-    await handleTextMessage(telegramUserId, userId, promptText);
-    return;
-  }
 
   // Handle onboarding buttons
   const session = await getOnboardingSession(telegramUserId);
