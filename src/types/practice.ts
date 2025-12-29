@@ -74,7 +74,7 @@ export const EGE_NUMBERS: Record<EGENumber, { name: string; topic: string; maxPo
   9: { name: 'Текстовые задачи', topic: 'word_problems', maxPoints: 1, part: 1 },
   10: { name: 'Функции', topic: 'functions', maxPoints: 1, part: 1 },
   11: { name: 'Прикладные задачи', topic: 'applied', maxPoints: 1, part: 1 },
-  12: { name: 'Уравнения (часть 2)', topic: 'equations', maxPoints: 2, part: 2 },
+  12: { name: 'Наиб./наим. значение', topic: 'optimization', maxPoints: 1, part: 1 },
   13: { name: 'Стереометрия (часть 2)', topic: 'stereometry', maxPoints: 3, part: 2 },
   14: { name: 'Неравенства', topic: 'inequalities', maxPoints: 2, part: 2 },
   15: { name: 'Финансовая математика', topic: 'finance', maxPoints: 2, part: 2 },

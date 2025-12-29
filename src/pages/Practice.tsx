@@ -48,7 +48,7 @@ const Practice = () => {
 
   // Определяем рекомендуемый номер (самый слабый из доступных)
   const recommendedNumber = useMemo((): EGENumber | undefined => {
-    const enabledNumbers: EGENumber[] = [1, 2, 3, 4, 5, 6];
+    const enabledNumbers: EGENumber[] = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
     
     // Находим номер с минимальной точностью
     let minAccuracy = 101;
@@ -177,7 +177,7 @@ ${currentProblem.condition_text}
               problemCounts={problemCounts}
               onSelect={handleSelectEgeNumber}
               recommendedNumber={recommendedNumber}
-              enabledNumbers={[1, 2, 3, 4, 5, 6]}
+              enabledNumbers={[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]}
             />
           ) : (
             // Режим практики

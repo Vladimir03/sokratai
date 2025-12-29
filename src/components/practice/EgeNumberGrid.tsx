@@ -17,7 +17,7 @@ export const EgeNumberGrid = ({
   problemCounts,
   onSelect,
   recommendedNumber,
-  enabledNumbers = [1, 2, 3, 4, 5, 6], // По умолчанию только 1-6 для MVP
+  enabledNumbers = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12], // Первая часть ЕГЭ
 }: EgeNumberGridProps) => {
 
   return (
