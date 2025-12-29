@@ -7,7 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Progress } from '@/components/ui/progress';
 import { Input } from '@/components/ui/input';
 import { ArrowLeft, ArrowRight, Clock, Target, CheckCircle2, XCircle, Loader2, Trophy } from 'lucide-react';
-import { supabase } from '@/integrations/supabase/client';
+import { supabase } from '@/lib/supabaseClient';
 import { toast } from 'sonner';
 import { useDiagnosticSession, useDiagnosticProblems } from '@/hooks/useDiagnostic';
 import type { EGENumber } from '@/types/practice';
