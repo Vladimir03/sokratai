@@ -1054,6 +1054,156 @@ async function updateDiagnosticState(
     .eq("telegram_user_id", telegramUserId);
 }
 
+// Базовый URL сайта для статических ресурсов
+const SITE_BASE_URL = "https://sokratai.ru";
+
+// Получение публичного URL для изображения
+// Обрабатывает: статические пути сайта (/images/...), Supabase Storage URL, внешние URL
+async function getImageUrl(imageUrl: string | null): Promise<string | null> {
+  if (!imageUrl) {
+    console.log('📸 getImageUrl: no image URL provided');
+    return null;
+  }
+  
+  console.log(`📸 getImageUrl: processing URL: "${imageUrl}"`);
+  
+  // НОВОЕ: Если это относительный путь сайта (начинается с /)
+  // Например: /images/problems/task-8-derivative.png
+  if (imageUrl.startsWith('/')) {
+    const fullUrl = `${SITE_BASE_URL}${imageUrl}`;
+    console.log(`📸 getImageUrl: static site path detected, full URL: ${fullUrl}`);
+    return fullUrl;
+  }
+  
+  // Если это уже полный публичный URL (например, внешний хостинг)
+  if (imageUrl.startsWith('http://') || imageUrl.startsWith('https://')) {
+    console.log('📸 getImageUrl: detected full URL');
+    
+    // Проверяем, является ли это URL из Supabase Storage
+    if (imageUrl.includes('/storage/v1/object/public/')) {
+      // Это публичный URL из Storage - используем как есть
+      console.log('📸 getImageUrl: public Supabase Storage URL, returning as-is');
+      return imageUrl;
+    }
+    if (imageUrl.includes('/storage/v1/object/sign/')) {
+      // Это signed URL - используем как есть (может быть expired)
+      console.log('📸 getImageUrl: signed URL detected, returning as-is');
+      return imageUrl;
+    }
+    if (imageUrl.includes('/storage/v1/object/')) {
+      // Это приватный URL - нужен signed URL
+      // Извлекаем путь файла
+      const match = imageUrl.match(/\/storage\/v1\/object\/[^/]+\/([^?]+)/);
+      if (match) {
+        const bucketAndPath = match[1];
+        const [bucket, ...pathParts] = bucketAndPath.split('/');
+        const path = pathParts.join('/');
+        
+        console.log(`📸 getImageUrl: extracting from private URL - bucket=${bucket}, path=${path}`);
+        
+        const { data, error } = await supabase.storage
+          .from(bucket)
+          .createSignedUrl(path, 3600); // 1 час
+        
+        if (!error && data) {
+          console.log('📸 getImageUrl: created signed URL successfully');
+          return data.signedUrl;
+        }
+        console.error('📸 getImageUrl: failed to create signed URL:', error);
+      }
+    }
+    // Внешний URL (не Supabase) - возвращаем как есть
+    console.log('📸 getImageUrl: external URL, returning as-is');
+    return imageUrl;
+  }
+  
+  // Если это относительный путь в Storage
+  console.log('📸 getImageUrl: detected relative path');
+  
+  // Попробуем разные варианты бакетов
+  const possibleBuckets = ['problem-images', 'ege-problems', 'images', 'public'];
+  
+  const parts = imageUrl.split('/');
+  let bucket = 'problem-images'; // По умолчанию для задач
+  let path = imageUrl;
+  
+  // Если первая часть похожа на имя бакета
+  if (parts.length > 1 && !parts[0].includes('.')) {
+    bucket = parts[0];
+    path = parts.slice(1).join('/');
+  }
+  
+  console.log(`📸 getImageUrl: trying bucket="${bucket}", path="${path}"`);
+  
+  // Пробуем получить публичный URL
+  const { data: publicData } = supabase.storage.from(bucket).getPublicUrl(path);
+  
+  if (publicData?.publicUrl) {
+    console.log(`📸 getImageUrl: got public URL: ${publicData.publicUrl}`);
+    return publicData.publicUrl;
+  }
+  
+  // Если не получилось, создаём signed URL
+  console.log(`📸 getImageUrl: trying to create signed URL for bucket="${bucket}", path="${path}"`);
+  const { data, error } = await supabase.storage
+    .from(bucket)
+    .createSignedUrl(path, 3600);
+  
+  if (!error && data) {
+    console.log(`📸 getImageUrl: created signed URL: ${data.signedUrl.substring(0, 80)}...`);
+    return data.signedUrl;
+  }
+  
+  // Пробуем альтернативные бакеты
+  for (const altBucket of possibleBuckets) {
+    if (altBucket === bucket) continue;
+    
+    console.log(`📸 getImageUrl: trying alternative bucket="${altBucket}"`);
+    const { data: altPublic } = supabase.storage.from(altBucket).getPublicUrl(imageUrl);
+    if (altPublic?.publicUrl) {
+      console.log(`📸 getImageUrl: found in bucket "${altBucket}": ${altPublic.publicUrl}`);
+      return altPublic.publicUrl;
+    }
+  }
+  
+  console.error('📸 getImageUrl: FAILED to get image URL for:', imageUrl, 'Error:', error);
+  return null;
+}
+
+// Проверяет, требует ли задача изображение на основе текста условия
+function taskRequiresImage(conditionText: string): boolean {
+  const text = conditionText?.toLowerCase() || '';
+  return text.includes("на рисунке") ||
+         text.includes("изображён") ||
+         text.includes("изображен") ||
+         text.includes("показан") ||
+         text.includes("на графике") ||
+         text.includes("на чертеже") ||
+         text.includes("на схеме") ||
+         text.includes("см. рис");
+}
+
+// Проверяем, является ли URL изображения валидным (не внешний проблемный)
+function isValidImageUrl(url: string | null): boolean {
+  if (!url) return false;
+  
+  // Проверяем, что это не проблемный внешний домен
+  const problematicDomains = [
+    'math-ege.sdamgia.ru',
+    'sdamgia.ru',
+    'ege.sdamgia.ru'
+  ];
+  
+  for (const domain of problematicDomains) {
+    if (url.includes(domain)) {
+      console.log(`⚠️ Skipping problematic image domain: ${domain}`);
+      return false;
+    }
+  }
+  
+  return true;
+}
+
 // Получение случайной задачи по номеру ЕГЭ
 async function getRandomProblem(egeNumber: number): Promise<EgeProblem | null> {
   const { data: problems, error } = await supabase
@@ -1061,25 +1211,38 @@ async function getRandomProblem(egeNumber: number): Promise<EgeProblem | null> {
     .select("*")
     .eq("ege_number", egeNumber)
     .eq("is_active", true)
-    .limit(20);
+    .limit(30);
 
   if (error || !problems || problems.length === 0) {
     console.error("Error fetching problems:", error);
     return null;
   }
 
-  // Фильтруем задачи, где текст ссылается на рисунок, но картинки нет
+  // Фильтруем задачи:
+  // 1. Если текст ссылается на рисунок, должна быть валидная картинка
+  // 2. Приоритет задачам без необходимости изображения
   const validProblems = problems.filter((p: any) => {
-    const needsImage =
-      p.condition_text?.toLowerCase().includes("на рисунке") ||
-      p.condition_text?.toLowerCase().includes("изображён") ||
-      p.condition_text?.toLowerCase().includes("показан");
-    const hasImage = !!p.condition_image_url;
-    return !needsImage || hasImage;
+    const needsImage = taskRequiresImage(p.condition_text);
+    const hasValidImage = isValidImageUrl(p.condition_image_url);
+    
+    // Пропускаем задачи, где нужно изображение, но его нет или оно проблемное
+    if (needsImage && !hasValidImage) {
+      console.log(`⚠️ Skipping problem ${p.id}: needs image but no valid URL`);
+      return false;
+    }
+    
+    return true;
   });
 
+  console.log(`📝 Found ${problems.length} problems for EGE ${egeNumber}, ${validProblems.length} valid`);
+
   if (validProblems.length === 0) {
-    return problems[Math.floor(Math.random() * problems.length)] as EgeProblem;
+    // Если нет валидных, берём любую но очищаем ссылку на изображение
+    const problem = problems[Math.floor(Math.random() * problems.length)] as EgeProblem;
+    if (taskRequiresImage(problem.condition_text)) {
+      problem.condition_image_url = null;
+    }
+    return problem;
   }
 
   return validProblems[Math.floor(Math.random() * validProblems.length)] as EgeProblem;
@@ -1116,9 +1279,23 @@ async function getDiagnosticProblems(): Promise<EgeProblem[]> {
     return [];
   }
 
+  // Фильтруем задачи с проблемными изображениями
+  const validProblems = allProblems.filter((p: any) => {
+    const needsImage = taskRequiresImage(p.condition_text);
+    const hasValidImage = isValidImageUrl(p.condition_image_url);
+    
+    if (needsImage && !hasValidImage) {
+      console.log(`⚠️ Skipping diagnostic problem ${p.id} (ege ${p.ege_number}): needs image but no valid URL`);
+      return false;
+    }
+    return true;
+  });
+
+  console.log(`🎯 Diagnostic: ${allProblems.length} total, ${validProblems.length} valid`);
+
   // Группируем по номеру ЕГЭ и выбираем по 1 случайной задаче
   const problemsByNumber: Record<number, EgeProblem[]> = {};
-  allProblems.forEach((p: any) => {
+  validProblems.forEach((p: any) => {
     if (!problemsByNumber[p.ege_number]) {
       problemsByNumber[p.ege_number] = [];
     }
@@ -1130,6 +1307,18 @@ async function getDiagnosticProblems(): Promise<EgeProblem[]> {
     const list = problemsByNumber[i] || [];
     if (list.length > 0) {
       selected.push(list[Math.floor(Math.random() * list.length)]);
+    } else {
+      // Если нет валидных задач для этого номера, берём из невалидных без изображения
+      const fallbackList = allProblems.filter((p: any) => p.ege_number === i);
+      if (fallbackList.length > 0) {
+        const problem = fallbackList[Math.floor(Math.random() * fallbackList.length)] as EgeProblem;
+        // Очищаем проблемный URL
+        if (taskRequiresImage(problem.condition_text) && !isValidImageUrl(problem.condition_image_url)) {
+          problem.condition_image_url = null;
+        }
+        selected.push(problem);
+        console.log(`⚠️ Using fallback problem for ege ${i} (image cleared)`);
+      }
     }
   }
 
@@ -1255,12 +1444,16 @@ async function sendPracticeProblem(
     ],
   };
 
+  // Получаем URL картинки (с signed URL если нужно)
+  const imageUrl = await getImageUrl(problem.condition_image_url);
+  console.log(`📸 Image URL for problem: original=${problem.condition_image_url}, resolved=${imageUrl}`);
+
   // Если есть картинка — отправляем фото
-  if (problem.condition_image_url) {
+  if (imageUrl) {
     try {
       await sendTelegramPhoto(
         telegramUserId,
-        problem.condition_image_url,
+        imageUrl,
         `${header}\n\n${conditionFormatted}${footer}`,
         { reply_markup: cancelKeyboard }
       );
@@ -1492,12 +1685,16 @@ async function sendDiagnosticQuestion(
     ],
   };
 
+  // Получаем URL картинки (с signed URL если нужно)
+  const imageUrl = await getImageUrl(problem.condition_image_url);
+  console.log(`📸 Diagnostic image: original=${problem.condition_image_url}, resolved=${imageUrl}`);
+
   // Если есть картинка — отправляем фото
-  if (problem.condition_image_url) {
+  if (imageUrl) {
     try {
       await sendTelegramPhoto(
         telegramUserId,
-        problem.condition_image_url,
+        imageUrl,
         `${header}\n\n${conditionFormatted}${footer}`,
         { reply_markup: keyboard }
       );
@@ -1825,7 +2022,7 @@ const LATEX_TO_UNICODE: Record<string, string> = {
   "^8": "⁸",
   "^9": "⁹",
 
-  // Subscripts (common)
+  // Subscripts (numbers)
   _0: "₀",
   _1: "₁",
   _2: "₂",
@@ -1836,6 +2033,25 @@ const LATEX_TO_UNICODE: Record<string, string> = {
   _7: "₇",
   _8: "₈",
   _9: "₉",
+
+  // Subscripts (letters for log bases)
+  _a: "ₐ",
+  _e: "ₑ",
+  _o: "ₒ",
+  _x: "ₓ",
+  _h: "ₕ",
+  _k: "ₖ",
+  _l: "ₗ",
+  _m: "ₘ",
+  _n: "ₙ",
+  _p: "ₚ",
+  _s: "ₛ",
+  _t: "ₜ",
+
+  // Logarithms
+  "\\log": "log",
+  "\\ln": "ln",
+  "\\lg": "lg",
 
   // Math operators
   "\\pm": "±",
@@ -1979,6 +2195,56 @@ function preprocessLatex(text: string): string {
 
   // Remove inline math delimiters $ ... $ (non-greedy)
   result = result.replace(/\$([^$]+?)\$/g, "$1");
+
+  // STEP 0: Convert logarithms with bases
+  // \log_a x → logₐ x, \log_{10} x → log₁₀ x, \log_2 x → log₂ x
+  const subscriptMap: Record<string, string> = {
+    '0': '₀', '1': '₁', '2': '₂', '3': '₃', '4': '₄',
+    '5': '₅', '6': '₆', '7': '₇', '8': '₈', '9': '₉',
+    'a': 'ₐ', 'e': 'ₑ', 'i': 'ᵢ', 'o': 'ₒ', 'u': 'ᵤ',
+    'x': 'ₓ', 'n': 'ₙ', 'm': 'ₘ', 'k': 'ₖ', 'p': 'ₚ',
+    'r': 'ᵣ', 's': 'ₛ', 't': 'ₜ', 'j': 'ⱼ', 'h': 'ₕ',
+    'b': 'ᵦ', 'c': 'c', 'd': 'd', 'f': 'f', 'g': 'g',
+  };
+  
+  // Debug: check for log patterns
+  if (result.includes('log')) {
+    console.log('📊 LOG PATTERN FOUND in text:', result.substring(0, 150));
+  }
+  
+  // \log_{base} → log with subscript base
+  result = result.replace(/\\log_\{([^{}]+)\}/g, (match, base) => {
+    console.log(`📊 Converting \\log_{${base}} to subscript`);
+    const subscriptBase = base.split('').map((c: string) => subscriptMap[c.toLowerCase()] || c).join('');
+    return `log${subscriptBase}`;
+  });
+  
+  // \log_X (single char base) → log with subscript
+  result = result.replace(/\\log_([a-zA-Z0-9])/g, (match, base) => {
+    console.log(`📊 Converting \\log_${base} to subscript`);
+    const subscriptBase = subscriptMap[base.toLowerCase()] || base;
+    return `log${subscriptBase}`;
+  });
+  
+  // \ln → ln (natural log)
+  result = result.replace(/\\ln\b/g, 'ln');
+  
+  // \lg → lg (common log base 10)  
+  result = result.replace(/\\lg\b/g, 'lg');
+  
+  // Plain \log → log
+  result = result.replace(/\\log\b/g, 'log');
+  
+  // Also handle cases without backslash: log_a → logₐ (but not inside words)
+  result = result.replace(/\blog_\{([^{}]+)\}/g, (match, base) => {
+    const subscriptBase = base.split('').map((c: string) => subscriptMap[c.toLowerCase()] || c).join('');
+    return `log${subscriptBase}`;
+  });
+  
+  result = result.replace(/\blog_([a-zA-Z0-9])(?![a-zA-Z])/g, (match, base) => {
+    const subscriptBase = subscriptMap[base.toLowerCase()] || base;
+    return `log${subscriptBase}`;
+  });
 
   // STEP 1: Convert \sqrt{x} FIRST to remove nested braces
   // This allows \frac regex to work properly
