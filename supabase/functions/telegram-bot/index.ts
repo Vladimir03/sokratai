@@ -98,6 +98,105 @@ interface OnboardingData {
   onboarding_message_id?: number;
 }
 
+// ============= PRACTICE & DIAGNOSTIC TYPES =============
+
+type BotMode = "chat" | "practice" | "diagnostic";
+
+interface PracticeState {
+  ege_number: number;
+  current_problem_id: string;
+  started_at: string;
+}
+
+interface DiagnosticProblemRef {
+  id: string;
+  ege_number: number;
+}
+
+interface DiagnosticAnswerRecord {
+  answer: string;
+  is_correct: boolean;
+}
+
+interface DiagnosticState {
+  session_id: string;
+  problems: DiagnosticProblemRef[];
+  current_index: number;
+  answers: Record<number, DiagnosticAnswerRecord>;
+}
+
+interface EgeProblem {
+  id: string;
+  ege_number: number;
+  condition_text: string;
+  condition_image_url: string | null;
+  correct_answer: string;
+  answer_type: string;
+  answer_tolerance: number;
+  solution_text: string | null;
+  hints: string[];
+  topic: string;
+  subtopic: string | null;
+  difficulty: number;
+}
+
+// Метаданные номеров ЕГЭ
+const EGE_NUMBER_NAMES: Record<number, string> = {
+  1: "Планиметрия",
+  2: "Векторы",
+  3: "Стереометрия",
+  4: "Теория вероятностей",
+  5: "Теория вероятностей (сложная)",
+  6: "Уравнения",
+  7: "Выражения",
+  8: "Функция",
+  9: "Текстовые задачи",
+  10: "Прикладные задачи",
+  11: "График функции",
+  12: "Наибольшее/наименьшее",
+};
+
+// Шкала перевода первичных баллов в тестовые (2025)
+function primaryToTestScore(primary: number): number {
+  const scale: Record<number, number> = {
+    0: 0, 1: 5, 2: 11, 3: 18, 4: 25, 5: 34, 6: 40,
+    7: 46, 8: 52, 9: 58, 10: 64, 11: 70, 12: 72,
+  };
+  return scale[primary] ?? 0;
+}
+
+// Нормализация ответа для сравнения
+function normalizeAnswer(answer: string): string {
+  return answer
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, "")
+    .replace(/,/g, ".")
+    .replace(/−/g, "-")
+    .replace(/–/g, "-");
+}
+
+// Проверка правильности ответа
+function checkAnswer(
+  userAnswer: string,
+  correctAnswer: string,
+  answerType: string,
+  tolerance: number = 0
+): boolean {
+  const normalizedUser = normalizeAnswer(userAnswer);
+  const normalizedCorrect = normalizeAnswer(correctAnswer);
+
+  if (answerType === "integer") {
+    return parseInt(normalizedUser) === parseInt(normalizedCorrect);
+  } else if (answerType === "decimal") {
+    const userNum = parseFloat(normalizedUser);
+    const correctNum = parseFloat(normalizedCorrect);
+    return Math.abs(userNum - correctNum) <= (tolerance || 0.001);
+  } else {
+    return normalizedUser === normalizedCorrect;
+  }
+}
+
 const welcomeMessages: Record<string, string> = {
   default: `🎓 Привет! Я Сократ - твой умный помощник по учёбе!
 
@@ -872,6 +971,779 @@ async function getOrCreateTelegramChat(userId: string) {
 
   console.log(`Created new Telegram chat: ${newChat.id}`);
   return newChat.id;
+}
+
+// ============= PRACTICE & DIAGNOSTIC HELPER FUNCTIONS =============
+
+// Отправка фото с условием задачи
+async function sendTelegramPhoto(
+  chatId: number,
+  photoUrl: string,
+  caption: string,
+  extraParams?: Record<string, any>
+) {
+  const response = await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendPhoto`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      chat_id: chatId,
+      photo: photoUrl,
+      caption,
+      parse_mode: "HTML",
+      ...extraParams,
+    }),
+  });
+
+  if (!response.ok) {
+    const error = await response.text();
+    console.error("❌ Telegram sendPhoto error:", error);
+    throw new Error("Failed to send photo");
+  }
+
+  return response.json();
+}
+
+// Получение состояния практики/диагностики из сессии
+async function getSessionState(telegramUserId: number): Promise<{
+  practice_state: PracticeState | null;
+  diagnostic_state: DiagnosticState | null;
+  current_mode: BotMode;
+  user_id: string | null;
+  onboarding_state: string | null;
+}> {
+  const { data } = await supabase
+    .from("telegram_sessions")
+    .select("practice_state, diagnostic_state, current_mode, user_id, onboarding_state")
+    .eq("telegram_user_id", telegramUserId)
+    .maybeSingle();
+
+  return {
+    practice_state: data?.practice_state as PracticeState | null,
+    diagnostic_state: data?.diagnostic_state as DiagnosticState | null,
+    current_mode: (data?.current_mode as BotMode) || "chat",
+    user_id: data?.user_id || null,
+    onboarding_state: data?.onboarding_state || null,
+  };
+}
+
+// Обновление состояния практики
+async function updatePracticeState(
+  telegramUserId: number,
+  practiceState: PracticeState | null
+) {
+  await supabase
+    .from("telegram_sessions")
+    .update({
+      practice_state: practiceState,
+      current_mode: practiceState ? "practice" : "chat",
+    })
+    .eq("telegram_user_id", telegramUserId);
+}
+
+// Обновление состояния диагностики
+async function updateDiagnosticState(
+  telegramUserId: number,
+  diagnosticState: DiagnosticState | null
+) {
+  await supabase
+    .from("telegram_sessions")
+    .update({
+      diagnostic_state: diagnosticState,
+      current_mode: diagnosticState ? "diagnostic" : "chat",
+    })
+    .eq("telegram_user_id", telegramUserId);
+}
+
+// Получение случайной задачи по номеру ЕГЭ
+async function getRandomProblem(egeNumber: number): Promise<EgeProblem | null> {
+  const { data: problems, error } = await supabase
+    .from("ege_problems")
+    .select("*")
+    .eq("ege_number", egeNumber)
+    .eq("is_active", true)
+    .limit(20);
+
+  if (error || !problems || problems.length === 0) {
+    console.error("Error fetching problems:", error);
+    return null;
+  }
+
+  // Фильтруем задачи, где текст ссылается на рисунок, но картинки нет
+  const validProblems = problems.filter((p: any) => {
+    const needsImage =
+      p.condition_text?.toLowerCase().includes("на рисунке") ||
+      p.condition_text?.toLowerCase().includes("изображён") ||
+      p.condition_text?.toLowerCase().includes("показан");
+    const hasImage = !!p.condition_image_url;
+    return !needsImage || hasImage;
+  });
+
+  if (validProblems.length === 0) {
+    return problems[Math.floor(Math.random() * problems.length)] as EgeProblem;
+  }
+
+  return validProblems[Math.floor(Math.random() * validProblems.length)] as EgeProblem;
+}
+
+// Получение задачи по ID
+async function getProblemById(problemId: string): Promise<EgeProblem | null> {
+  const { data, error } = await supabase
+    .from("ege_problems")
+    .select("*")
+    .eq("id", problemId)
+    .single();
+
+  if (error) {
+    console.error("Error fetching problem:", error);
+    return null;
+  }
+
+  return data as EgeProblem;
+}
+
+// Получение задач для диагностики (по 1 на каждый номер 1-12)
+async function getDiagnosticProblems(): Promise<EgeProblem[]> {
+  const { data: allProblems, error } = await supabase
+    .from("ege_problems")
+    .select("*")
+    .eq("is_active", true)
+    .eq("is_diagnostic", true)
+    .gte("ege_number", 1)
+    .lte("ege_number", 12);
+
+  if (error || !allProblems) {
+    console.error("Error fetching diagnostic problems:", error);
+    return [];
+  }
+
+  // Группируем по номеру ЕГЭ и выбираем по 1 случайной задаче
+  const problemsByNumber: Record<number, EgeProblem[]> = {};
+  allProblems.forEach((p: any) => {
+    if (!problemsByNumber[p.ege_number]) {
+      problemsByNumber[p.ege_number] = [];
+    }
+    problemsByNumber[p.ege_number].push(p as EgeProblem);
+  });
+
+  const selected: EgeProblem[] = [];
+  for (let i = 1; i <= 12; i++) {
+    const list = problemsByNumber[i] || [];
+    if (list.length > 0) {
+      selected.push(list[Math.floor(Math.random() * list.length)]);
+    }
+  }
+
+  return selected;
+}
+
+// Создание сетки кнопок выбора номера ЕГЭ
+function createEgeNumberKeyboard() {
+  return {
+    inline_keyboard: [
+      [
+        { text: "1", callback_data: "practice_ege:1" },
+        { text: "2", callback_data: "practice_ege:2" },
+        { text: "3", callback_data: "practice_ege:3" },
+        { text: "4", callback_data: "practice_ege:4" },
+        { text: "5", callback_data: "practice_ege:5" },
+        { text: "6", callback_data: "practice_ege:6" },
+      ],
+      [
+        { text: "7", callback_data: "practice_ege:7" },
+        { text: "8", callback_data: "practice_ege:8" },
+        { text: "9", callback_data: "practice_ege:9" },
+        { text: "10", callback_data: "practice_ege:10" },
+        { text: "11", callback_data: "practice_ege:11" },
+        { text: "12", callback_data: "practice_ege:12" },
+      ],
+    ],
+  };
+}
+
+// Создание клавиатуры главного меню
+function createMainMenuKeyboard() {
+  return {
+    inline_keyboard: [
+      [
+        { text: "📝 Тренажёр", callback_data: "practice_start" },
+        { text: "🎯 Диагностика", callback_data: "diagnostic_start" },
+      ],
+      [
+        { text: "💬 Спросить Сократа", callback_data: "chat_mode" },
+      ],
+    ],
+  };
+}
+
+// Запись попытки в practice_attempts
+async function savePracticeAttempt(
+  userId: string,
+  problemId: string,
+  userAnswer: string,
+  isCorrect: boolean,
+  startedAt: string
+) {
+  const { error } = await supabase.from("practice_attempts").insert({
+    user_id: userId,
+    problem_id: problemId,
+    user_answer: userAnswer,
+    is_correct: isCorrect,
+    started_at: startedAt,
+    submitted_at: new Date().toISOString(),
+    hints_used: 0,
+    asked_ai: false,
+  });
+
+  if (error) {
+    console.error("Error saving practice attempt:", error);
+  }
+
+  // Обновляем streak
+  await supabase.rpc("check_and_update_streak", { p_user_id: userId });
+}
+
+// ============= PRACTICE HANDLERS =============
+
+// Показ меню выбора номера ЕГЭ
+async function handlePracticeStart(telegramUserId: number) {
+  await sendTelegramMessage(
+    telegramUserId,
+    `📝 <b>Тренажёр ЕГЭ по математике</b>
+
+Выбери номер задания:`,
+    { reply_markup: createEgeNumberKeyboard() }
+  );
+}
+
+// Отправка задачи пользователю
+async function sendPracticeProblem(
+  telegramUserId: number,
+  userId: string,
+  egeNumber: number
+) {
+  console.log(`📝 sendPracticeProblem: user=${telegramUserId}, ege=${egeNumber}`);
+
+  // Получаем случайную задачу
+  const problem = await getRandomProblem(egeNumber);
+
+  if (!problem) {
+    await sendTelegramMessage(
+      telegramUserId,
+      `😔 Нет задач для номера ${egeNumber}. Попробуй другой номер.`,
+      { reply_markup: createEgeNumberKeyboard() }
+    );
+    return;
+  }
+
+  // Сохраняем состояние
+  const practiceState: PracticeState = {
+    ege_number: egeNumber,
+    current_problem_id: problem.id,
+    started_at: new Date().toISOString(),
+  };
+  await updatePracticeState(telegramUserId, practiceState);
+
+  // Форматируем условие
+  const topicName = EGE_NUMBER_NAMES[egeNumber] || "Задача";
+  const conditionFormatted = formatForTelegram(problem.condition_text);
+  const header = `📐 <b>Задание №${egeNumber}</b> • ${topicName}\n${"─".repeat(20)}`;
+  const footer = `\n\n✏️ <i>Введи ответ:</i>`;
+
+  const cancelKeyboard = {
+    inline_keyboard: [
+      [{ text: "❌ Отмена", callback_data: "practice_cancel" }],
+    ],
+  };
+
+  // Если есть картинка — отправляем фото
+  if (problem.condition_image_url) {
+    try {
+      await sendTelegramPhoto(
+        telegramUserId,
+        problem.condition_image_url,
+        `${header}\n\n${conditionFormatted}${footer}`,
+        { reply_markup: cancelKeyboard }
+      );
+    } catch (e) {
+      // Если не удалось отправить фото, отправляем текст
+      console.error("Failed to send photo, sending text instead:", e);
+      await sendTelegramMessage(
+        telegramUserId,
+        `${header}\n\n${conditionFormatted}\n\n🖼️ <i>(Не удалось загрузить изображение)</i>${footer}`,
+        { reply_markup: cancelKeyboard }
+      );
+    }
+  } else {
+    await sendTelegramMessage(
+      telegramUserId,
+      `${header}\n\n${conditionFormatted}${footer}`,
+      { reply_markup: cancelKeyboard }
+    );
+  }
+}
+
+// Проверка ответа в тренажёре
+async function handlePracticeAnswer(
+  telegramUserId: number,
+  userId: string,
+  userAnswer: string
+): Promise<boolean> {
+  console.log(`📝 handlePracticeAnswer: user=${telegramUserId}, answer="${userAnswer}"`);
+
+  // Получаем состояние
+  const state = await getSessionState(telegramUserId);
+  if (!state.practice_state) {
+    console.log("No practice state found");
+    return false;
+  }
+
+  const practiceState = state.practice_state;
+
+  // Получаем задачу
+  const problem = await getProblemById(practiceState.current_problem_id);
+  if (!problem) {
+    console.error("Problem not found:", practiceState.current_problem_id);
+    await updatePracticeState(telegramUserId, null);
+    return false;
+  }
+
+  // Проверяем ответ
+  const isCorrect = checkAnswer(
+    userAnswer,
+    problem.correct_answer,
+    problem.answer_type,
+    problem.answer_tolerance
+  );
+
+  // Записываем попытку
+  await savePracticeAttempt(
+    userId,
+    problem.id,
+    userAnswer,
+    isCorrect,
+    practiceState.started_at
+  );
+
+  // Очищаем состояние
+  await updatePracticeState(telegramUserId, null);
+
+  // Формируем клавиатуру результата
+  const resultKeyboard = {
+    inline_keyboard: [
+      [
+        { text: "➡️ След. задача", callback_data: `practice_ege:${practiceState.ege_number}` },
+        { text: "📖 Решение", callback_data: `practice_solution:${problem.id}` },
+      ],
+      [
+        { text: "🔢 Другой номер", callback_data: "practice_start" },
+        { text: "🏠 Меню", callback_data: "main_menu" },
+      ],
+    ],
+  };
+
+  // Отправляем результат
+  if (isCorrect) {
+    await sendTelegramMessage(
+      telegramUserId,
+      `✅ <b>Верно!</b> 🎉\n\nТак держать! +10 XP`,
+      { reply_markup: resultKeyboard }
+    );
+  } else {
+    await sendTelegramMessage(
+      telegramUserId,
+      `❌ <b>Неверно</b>\n\n🎯 Правильный ответ: <code>${problem.correct_answer}</code>`,
+      { reply_markup: resultKeyboard }
+    );
+  }
+
+  return true;
+}
+
+// Показ решения задачи
+async function handlePracticeSolution(
+  telegramUserId: number,
+  problemId: string
+) {
+  const problem = await getProblemById(problemId);
+  if (!problem) {
+    await sendTelegramMessage(telegramUserId, "❌ Задача не найдена");
+    return;
+  }
+
+  const topicName = EGE_NUMBER_NAMES[problem.ege_number] || "Задача";
+  
+  let solutionText = problem.solution_text || "Решение пока не добавлено";
+  
+  // Форматируем решение
+  const formatted = formatForTelegram(solutionText);
+  
+  const keyboard = {
+    inline_keyboard: [
+      [
+        { text: "➡️ Другая задача", callback_data: `practice_ege:${problem.ege_number}` },
+        { text: "🔢 Выбор номера", callback_data: "practice_start" },
+      ],
+    ],
+  };
+
+  await sendTelegramMessage(
+    telegramUserId,
+    `📖 <b>Решение задания №${problem.ege_number}</b> • ${topicName}\n${"─".repeat(20)}\n\n${formatted}`,
+    { reply_markup: keyboard }
+  );
+}
+
+// ============= DIAGNOSTIC HANDLERS =============
+
+// Показ интро диагностики
+async function handleDiagnosticIntro(telegramUserId: number) {
+  const keyboard = {
+    inline_keyboard: [
+      [{ text: "▶️ Начать тест", callback_data: "diagnostic_begin" }],
+      [{ text: "🏠 Назад в меню", callback_data: "main_menu" }],
+    ],
+  };
+
+  await sendTelegramMessage(
+    telegramUserId,
+    `🎯 <b>Диагностика уровня</b>
+
+📊 12 задач • ~15 минут • Бесплатно
+
+Узнай свой примерный балл ЕГЭ и получи персональные рекомендации!
+
+<b>Как это работает:</b>
+• По 1 задаче на каждый номер (1-12)
+• Без ограничения времени
+• Ответы не показываются сразу
+• В конце — твой прогноз балла
+
+<i>Готов? Нажми "Начать тест" 👇</i>`,
+    { reply_markup: keyboard }
+  );
+}
+
+// Старт диагностики
+async function handleDiagnosticStart(telegramUserId: number, userId: string) {
+  console.log(`🎯 handleDiagnosticStart: user=${telegramUserId}`);
+
+  // Создаём сессию в БД
+  const { data: newSession, error: sessionError } = await supabase
+    .from("diagnostic_sessions")
+    .insert({
+      user_id: userId,
+      total_questions: 12,
+      status: "in_progress",
+    })
+    .select()
+    .single();
+
+  if (sessionError || !newSession) {
+    console.error("Error creating diagnostic session:", sessionError);
+    await sendTelegramMessage(telegramUserId, "❌ Ошибка при создании сессии. Попробуй позже.");
+    return;
+  }
+
+  // Получаем задачи для диагностики
+  const problems = await getDiagnosticProblems();
+
+  if (problems.length === 0) {
+    await sendTelegramMessage(telegramUserId, "❌ Нет задач для диагностики. Обратись к поддержке.");
+    return;
+  }
+
+  // Сохраняем состояние
+  const diagnosticState: DiagnosticState = {
+    session_id: newSession.id,
+    problems: problems.map((p) => ({ id: p.id, ege_number: p.ege_number })),
+    current_index: 0,
+    answers: {},
+  };
+  await updateDiagnosticState(telegramUserId, diagnosticState);
+
+  // Отправляем первый вопрос
+  await sendDiagnosticQuestion(telegramUserId, diagnosticState, problems[0]);
+}
+
+// Отправка вопроса диагностики
+async function sendDiagnosticQuestion(
+  telegramUserId: number,
+  state: DiagnosticState,
+  problem: EgeProblem
+) {
+  const current = state.current_index + 1;
+  const total = state.problems.length;
+  
+  // Прогресс-бар
+  const filled = Math.floor((current / total) * 10);
+  const empty = 10 - filled;
+  const progress = "█".repeat(filled) + "░".repeat(empty);
+  
+  const topicName = EGE_NUMBER_NAMES[problem.ege_number] || "Задача";
+  const conditionFormatted = formatForTelegram(problem.condition_text);
+  
+  const header = `📊 <b>Вопрос ${current}/${total}</b> • №${problem.ege_number} ${topicName}\n${progress}`;
+  const footer = `\n\n✏️ <i>Введи ответ:</i>`;
+
+  const keyboard = {
+    inline_keyboard: [
+      [{ text: "⏭️ Пропустить", callback_data: "diagnostic_skip" }],
+      [{ text: "❌ Прервать тест", callback_data: "diagnostic_cancel" }],
+    ],
+  };
+
+  // Если есть картинка — отправляем фото
+  if (problem.condition_image_url) {
+    try {
+      await sendTelegramPhoto(
+        telegramUserId,
+        problem.condition_image_url,
+        `${header}\n\n${conditionFormatted}${footer}`,
+        { reply_markup: keyboard }
+      );
+    } catch (e) {
+      console.error("Failed to send diagnostic photo:", e);
+      await sendTelegramMessage(
+        telegramUserId,
+        `${header}\n\n${conditionFormatted}\n\n🖼️ <i>(Не удалось загрузить изображение)</i>${footer}`,
+        { reply_markup: keyboard }
+      );
+    }
+  } else {
+    await sendTelegramMessage(
+      telegramUserId,
+      `${header}\n\n${conditionFormatted}${footer}`,
+      { reply_markup: keyboard }
+    );
+  }
+}
+
+// Обработка ответа в диагностике
+async function handleDiagnosticAnswer(
+  telegramUserId: number,
+  userId: string,
+  userAnswer: string,
+  isSkip: boolean = false
+): Promise<boolean> {
+  console.log(`🎯 handleDiagnosticAnswer: user=${telegramUserId}, answer="${userAnswer}", skip=${isSkip}`);
+
+  // Получаем состояние
+  const sessionState = await getSessionState(telegramUserId);
+  if (!sessionState.diagnostic_state) {
+    console.log("No diagnostic state found");
+    return false;
+  }
+
+  const state = sessionState.diagnostic_state;
+  const currentProblemRef = state.problems[state.current_index];
+
+  // Получаем задачу для проверки
+  const problem = await getProblemById(currentProblemRef.id);
+  if (!problem) {
+    console.error("Diagnostic problem not found:", currentProblemRef.id);
+    return false;
+  }
+
+  // Проверяем ответ
+  const isCorrect = isSkip
+    ? false
+    : checkAnswer(userAnswer, problem.correct_answer, problem.answer_type, problem.answer_tolerance);
+
+  // Записываем ответ в БД
+  await supabase.from("diagnostic_answers").insert({
+    session_id: state.session_id,
+    problem_id: problem.id,
+    ege_number: problem.ege_number,
+    user_answer: isSkip ? "" : userAnswer,
+    is_correct: isCorrect,
+    question_order: state.current_index + 1,
+  });
+
+  // Обновляем состояние
+  state.answers[state.current_index] = {
+    answer: isSkip ? "" : userAnswer,
+    is_correct: isCorrect,
+  };
+
+  if (state.current_index < state.problems.length - 1) {
+    // Переходим к следующему вопросу
+    state.current_index++;
+    await updateDiagnosticState(telegramUserId, state);
+
+    // Обновляем прогресс в сессии
+    await supabase
+      .from("diagnostic_sessions")
+      .update({ current_question: state.current_index + 1 })
+      .eq("id", state.session_id);
+
+    // Получаем следующую задачу
+    const nextProblem = await getProblemById(state.problems[state.current_index].id);
+    if (nextProblem) {
+      await sendDiagnosticQuestion(telegramUserId, state, nextProblem);
+    }
+  } else {
+    // Завершаем диагностику
+    await completeDiagnostic(telegramUserId, userId, state);
+  }
+
+  return true;
+}
+
+// Завершение диагностики и показ результата
+async function completeDiagnostic(
+  telegramUserId: number,
+  userId: string,
+  state: DiagnosticState
+) {
+  console.log(`🎯 completeDiagnostic: user=${telegramUserId}`);
+
+  // Подсчитываем результат
+  const correctCount = Object.values(state.answers).filter((a) => a.is_correct).length;
+  const testScore = primaryToTestScore(correctCount);
+
+  // Находим слабые и сильные темы
+  const weakTopics: number[] = [];
+  const strongTopics: number[] = [];
+  
+  state.problems.forEach((p, i) => {
+    if (state.answers[i]?.is_correct) {
+      strongTopics.push(p.ege_number);
+    } else {
+      weakTopics.push(p.ege_number);
+    }
+  });
+
+  // Рекомендуемая тема — первая неправильно решённая по номеру
+  const recommendedTopic = weakTopics.length > 0 ? Math.min(...weakTopics) : null;
+
+  // Обновляем сессию в БД
+  await supabase
+    .from("diagnostic_sessions")
+    .update({
+      status: "completed",
+      predicted_primary_score: correctCount,
+      predicted_test_score: testScore,
+      completed_at: new Date().toISOString(),
+      weak_topics: weakTopics,
+      strong_topics: strongTopics,
+      recommended_start_topic: recommendedTopic,
+    })
+    .eq("id", state.session_id);
+
+  // Обновляем профиль
+  await supabase
+    .from("profiles")
+    .update({
+      diagnostic_completed: true,
+      last_diagnostic_at: new Date().toISOString(),
+      last_diagnostic_score: testScore,
+    })
+    .eq("id", userId);
+
+  // Очищаем состояние
+  await updateDiagnosticState(telegramUserId, null);
+
+  // Формируем текст результата
+  const total = state.problems.length;
+  const percentage = Math.round((correctCount / total) * 100);
+
+  // Эмодзи для уровня
+  let levelEmoji = "🌟";
+  let levelText = "Отличный результат!";
+  if (testScore < 40) {
+    levelEmoji = "💪";
+    levelText = "Есть куда расти!";
+  } else if (testScore < 60) {
+    levelEmoji = "👍";
+    levelText = "Хорошее начало!";
+  } else if (testScore < 75) {
+    levelEmoji = "🔥";
+    levelText = "Отличный уровень!";
+  }
+
+  // Формируем список слабых тем
+  let weakTopicsText = "";
+  if (weakTopics.length > 0) {
+    const weakTopicsList = weakTopics
+      .sort((a, b) => a - b)
+      .slice(0, 5)
+      .map((n) => `• №${n} — ${EGE_NUMBER_NAMES[n] || "Задача"}`)
+      .join("\n");
+    weakTopicsText = `\n\n📈 <b>Нужно подтянуть:</b>\n${weakTopicsList}`;
+  }
+
+  // Формируем список сильных тем
+  let strongTopicsText = "";
+  if (strongTopics.length > 0) {
+    const strongTopicsList = strongTopics
+      .sort((a, b) => a - b)
+      .slice(0, 3)
+      .map((n) => `• №${n} — ${EGE_NUMBER_NAMES[n] || "Задача"}`)
+      .join("\n");
+    strongTopicsText = `\n\n💪 <b>Сильные темы:</b>\n${strongTopicsList}`;
+  }
+
+  // Рекомендация
+  const recommendationText = recommendedTopic
+    ? `\n\n💡 <b>Рекомендация:</b>\nНачни тренировку с задания <b>№${recommendedTopic}</b> — это даст максимальный прирост балла!`
+    : "\n\n💡 Отличный результат! Продолжай тренироваться для закрепления!";
+
+  // Клавиатура
+  const keyboard = recommendedTopic
+    ? {
+        inline_keyboard: [
+          [
+            {
+              text: `📝 Начать тренировку №${recommendedTopic}`,
+              callback_data: `practice_ege:${recommendedTopic}`,
+            },
+          ],
+          [
+            { text: "📝 Тренажёр", callback_data: "practice_start" },
+            { text: "🏠 Меню", callback_data: "main_menu" },
+          ],
+        ],
+      }
+    : {
+        inline_keyboard: [
+          [
+            { text: "📝 Тренажёр", callback_data: "practice_start" },
+            { text: "🏠 Меню", callback_data: "main_menu" },
+          ],
+        ],
+      };
+
+  await sendTelegramMessage(
+    telegramUserId,
+    `🎯 <b>Результат диагностики</b>
+
+${levelEmoji} ${levelText}
+
+📊 <b>Прогноз:</b> ${testScore} баллов ЕГЭ
+✅ <b>Верно:</b> ${correctCount}/${total} (${percentage}%)${strongTopicsText}${weakTopicsText}${recommendationText}`,
+    { reply_markup: keyboard }
+  );
+}
+
+// Отмена диагностики
+async function handleDiagnosticCancel(telegramUserId: number) {
+  const state = await getSessionState(telegramUserId);
+  
+  if (state.diagnostic_state) {
+    // Помечаем сессию как abandoned
+    await supabase
+      .from("diagnostic_sessions")
+      .update({ status: "abandoned" })
+      .eq("id", state.diagnostic_state.session_id);
+  }
+
+  await updateDiagnosticState(telegramUserId, null);
+
+  await sendTelegramMessage(
+    telegramUserId,
+    `❌ Диагностика прервана.\n\nМожешь начать заново в любое время!`,
+    { reply_markup: createMainMenuKeyboard() }
+  );
 }
 
 async function parseSSEStream(response: Response): Promise<string> {
@@ -2766,7 +3638,7 @@ async function handleCallbackQuery(callbackQuery: any) {
     return;
   }
 
-  // Answer callback query for onboarding buttons
+  // Answer callback query immediately (default response)
   await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/answerCallbackQuery`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -2776,26 +3648,131 @@ async function handleCallbackQuery(callbackQuery: any) {
     }),
   });
 
-  // Handle onboarding buttons
+  // Get session for all handlers
   const session = await getOnboardingSession(telegramUserId);
+  const userId = session?.user_id;
+
+  // ============= PRACTICE CALLBACKS =============
+  
+  // Main menu
+  if (data === "main_menu") {
+    await sendTelegramMessage(
+      telegramUserId,
+      `🎓 <b>Сократ</b> — твой AI-репетитор по математике\n\nВыбери, что хочешь делать:`,
+      { reply_markup: createMainMenuKeyboard() }
+    );
+    return;
+  }
+
+  // Practice start (выбор номера)
+  if (data === "practice_start") {
+    await handlePracticeStart(telegramUserId);
+    return;
+  }
+
+  // Practice: выбор конкретного номера ЕГЭ
+  if (data.startsWith("practice_ege:")) {
+    if (!userId) {
+      await sendTelegramMessage(telegramUserId, "❌ Сессия не найдена. Нажми /start");
+      return;
+    }
+    const egeNumber = parseInt(data.replace("practice_ege:", ""));
+    await sendPracticeProblem(telegramUserId, userId, egeNumber);
+    return;
+  }
+
+  // Practice: отмена
+  if (data === "practice_cancel") {
+    await updatePracticeState(telegramUserId, null);
+    await sendTelegramMessage(
+      telegramUserId,
+      `❌ Задача отменена.\n\nВыбери другой номер или вернись в меню:`,
+      { reply_markup: createEgeNumberKeyboard() }
+    );
+    return;
+  }
+
+  // Practice: показ решения
+  if (data.startsWith("practice_solution:")) {
+    const problemId = data.replace("practice_solution:", "");
+    await handlePracticeSolution(telegramUserId, problemId);
+    return;
+  }
+
+  // ============= DIAGNOSTIC CALLBACKS =============
+
+  // Diagnostic intro (start screen)
+  if (data === "diagnostic_start") {
+    await handleDiagnosticIntro(telegramUserId);
+    return;
+  }
+
+  // Diagnostic begin (actually start the test)
+  if (data === "diagnostic_begin") {
+    if (!userId) {
+      await sendTelegramMessage(telegramUserId, "❌ Сессия не найдена. Нажми /start");
+      return;
+    }
+    await handleDiagnosticStart(telegramUserId, userId);
+    return;
+  }
+
+  // Diagnostic skip question
+  if (data === "diagnostic_skip") {
+    if (!userId) {
+      await sendTelegramMessage(telegramUserId, "❌ Сессия не найдена. Нажми /start");
+      return;
+    }
+    await handleDiagnosticAnswer(telegramUserId, userId, "", true);
+    return;
+  }
+
+  // Diagnostic cancel
+  if (data === "diagnostic_cancel") {
+    await handleDiagnosticCancel(telegramUserId);
+    return;
+  }
+
+  // ============= CHAT MODE CALLBACK =============
+  
+  if (data === "chat_mode") {
+    // Очищаем состояния practice/diagnostic если есть
+    await updatePracticeState(telegramUserId, null);
+    await updateDiagnosticState(telegramUserId, null);
+    
+    await sendTelegramMessage(
+      telegramUserId,
+      `💬 <b>Режим чата с Сократом</b>
+
+Отправь мне:
+📸 Фото задачи из учебника
+✏️ Текст задачи или вопроса
+
+Я помогу тебе разобраться! 🚀`,
+      { reply_markup: { inline_keyboard: [[{ text: "🏠 Меню", callback_data: "main_menu" }]] } }
+    );
+    return;
+  }
+
+  // ============= ONBOARDING CALLBACKS =============
+
   if (!session) {
     console.error("No session found for user:", telegramUserId);
     return;
   }
 
   const state = session.onboarding_state as OnboardingState;
-  const userId = session.user_id;
   const onboardingData = session.onboarding_data as OnboardingData;
 
   if (state === "waiting_grade" && data.startsWith("grade_")) {
     const grade = parseInt(data.replace("grade_", ""));
-    await handleGradeSelection(telegramUserId, userId, grade, messageId);
+    await handleGradeSelection(telegramUserId, userId!, grade, messageId);
   } else if (state === "waiting_subject" && data.startsWith("subject_")) {
     const subject = data.replace("subject_", "");
-    await handleSubjectSelection(telegramUserId, userId, subject, messageId);
+    await handleSubjectSelection(telegramUserId, userId!, subject, messageId);
   } else if (state === "waiting_goal" && data.startsWith("goal_")) {
     const goal = data.replace("goal_", "");
-    await completeOnboarding(telegramUserId, userId, goal, messageId);
+    await completeOnboarding(telegramUserId, userId!, goal, messageId);
   }
 }
 
@@ -2821,6 +3798,87 @@ Deno.serve(async (req) => {
       });
     }
 
+    // Handle /practice command
+    if (update.message?.text === "/practice" || update.message?.text === "/train") {
+      const telegramUserId = update.message.from.id;
+      const session = await getOnboardingSession(telegramUserId);
+      
+      if (session && session.onboarding_state === "completed") {
+        await handlePracticeStart(telegramUserId);
+      } else {
+        await sendTelegramMessage(telegramUserId, "❌ Сначала пройди регистрацию. Нажми /start");
+      }
+      
+      return new Response(JSON.stringify({ ok: true }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    // Handle /diagnostic command
+    if (update.message?.text === "/diagnostic" || update.message?.text === "/test") {
+      const telegramUserId = update.message.from.id;
+      const session = await getOnboardingSession(telegramUserId);
+      
+      if (session && session.onboarding_state === "completed") {
+        await handleDiagnosticIntro(telegramUserId);
+      } else {
+        await sendTelegramMessage(telegramUserId, "❌ Сначала пройди регистрацию. Нажми /start");
+      }
+      
+      return new Response(JSON.stringify({ ok: true }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    // Handle /menu command
+    if (update.message?.text === "/menu") {
+      const telegramUserId = update.message.from.id;
+      const session = await getOnboardingSession(telegramUserId);
+      
+      if (session && session.onboarding_state === "completed") {
+        await sendTelegramMessage(
+          telegramUserId,
+          `🎓 <b>Сократ</b> — твой AI-репетитор по математике\n\nВыбери, что хочешь делать:`,
+          { reply_markup: createMainMenuKeyboard() }
+        );
+      } else {
+        await sendTelegramMessage(telegramUserId, "❌ Сначала пройди регистрацию. Нажми /start");
+      }
+      
+      return new Response(JSON.stringify({ ok: true }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    // Handle /help command
+    if (update.message?.text === "/help") {
+      const telegramUserId = update.message.from.id;
+      
+      await sendTelegramMessage(
+        telegramUserId,
+        `🎓 <b>Сократ — AI-репетитор по математике ЕГЭ</b>
+
+<b>Доступные команды:</b>
+/start — начать работу
+/menu — главное меню
+/practice — тренажёр ЕГЭ
+/diagnostic — диагностика уровня
+/help — эта справка
+
+<b>Что я умею:</b>
+📝 Тренажёр — решай задачи 1-12 части ЕГЭ
+🎯 Диагностика — узнай свой уровень
+💬 AI-чат — задай любой вопрос
+📸 Фото задачи — отправь фото, я помогу решить
+
+Просто напиши или отправь фото! 🚀`
+      );
+      
+      return new Response(JSON.stringify({ ok: true }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
     // Handle callback queries (button presses)
     if (update.callback_query) {
       await handleCallbackQuery(update.callback_query);
@@ -2835,7 +3893,33 @@ Deno.serve(async (req) => {
       const session = await getOnboardingSession(telegramUserId);
 
       if (session && session.onboarding_state === "completed") {
-        await handleTextMessage(telegramUserId, session.user_id, update.message.text);
+        const text = update.message.text;
+        
+        // Check if user is in practice mode
+        const sessionState = await getSessionState(telegramUserId);
+        
+        if (sessionState.practice_state) {
+          // User is answering a practice question
+          const handled = await handlePracticeAnswer(telegramUserId, session.user_id, text);
+          if (handled) {
+            return new Response(JSON.stringify({ ok: true }), {
+              headers: { ...corsHeaders, "Content-Type": "application/json" },
+            });
+          }
+        }
+        
+        if (sessionState.diagnostic_state) {
+          // User is answering a diagnostic question
+          const handled = await handleDiagnosticAnswer(telegramUserId, session.user_id, text, false);
+          if (handled) {
+            return new Response(JSON.stringify({ ok: true }), {
+              headers: { ...corsHeaders, "Content-Type": "application/json" },
+            });
+          }
+        }
+        
+        // Default: AI chat mode
+        await handleTextMessage(telegramUserId, session.user_id, text);
       }
 
       return new Response(JSON.stringify({ ok: true }), {
@@ -2849,6 +3933,17 @@ Deno.serve(async (req) => {
       const session = await getOnboardingSession(telegramUserId);
 
       if (session && session.onboarding_state === "completed") {
+        // If in practice/diagnostic mode, cancel it first
+        const sessionState = await getSessionState(telegramUserId);
+        if (sessionState.practice_state || sessionState.diagnostic_state) {
+          await updatePracticeState(telegramUserId, null);
+          await updateDiagnosticState(telegramUserId, null);
+          await sendTelegramMessage(
+            telegramUserId,
+            "📸 Вижу фото! Переключаюсь в режим AI-помощника..."
+          );
+        }
+        
         const photo = update.message.photo[update.message.photo.length - 1]; // Get largest photo
         await handlePhotoMessage(telegramUserId, session.user_id, photo, update.message.caption);
       }
