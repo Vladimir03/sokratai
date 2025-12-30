@@ -51,7 +51,7 @@ export interface DiagnosticSession {
 }
 
 const DIAGNOSTIC_TOTAL_QUESTIONS = 12;
-const DIAGNOSTIC_COOLDOWN_DAYS = 14;
+const DIAGNOSTIC_COOLDOWN_DAYS = 0;
 
 // Шкала 2025 года (Профиль, Часть 1)
 export function primaryToTestScore(primary: number): number {
