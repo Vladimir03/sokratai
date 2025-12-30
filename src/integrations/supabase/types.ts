@@ -884,24 +884,33 @@ export type Database = {
       telegram_sessions: {
         Row: {
           created_at: string | null
+          current_mode: string | null
+          diagnostic_state: Json | null
           onboarding_data: Json | null
           onboarding_state: string | null
+          practice_state: Json | null
           telegram_user_id: number
           updated_at: string | null
           user_id: string | null
         }
         Insert: {
           created_at?: string | null
+          current_mode?: string | null
+          diagnostic_state?: Json | null
           onboarding_data?: Json | null
           onboarding_state?: string | null
+          practice_state?: Json | null
           telegram_user_id: number
           updated_at?: string | null
           user_id?: string | null
         }
         Update: {
           created_at?: string | null
+          current_mode?: string | null
+          diagnostic_state?: Json | null
           onboarding_data?: Json | null
           onboarding_state?: string | null
+          practice_state?: Json | null
           telegram_user_id?: number
           updated_at?: string | null
           user_id?: string | null
