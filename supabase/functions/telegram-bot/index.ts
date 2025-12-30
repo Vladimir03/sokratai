@@ -1187,6 +1187,9 @@ function taskRequiresImage(conditionText: string): boolean {
 function isValidImageUrl(url: string | null): boolean {
   if (!url) return false;
   
+  // Относительные пути сайта считаем валидными
+  if (url.startsWith('/')) return true;
+  
   // Проверяем, что это не проблемный внешний домен
   const problematicDomains = [
     'math-ege.sdamgia.ru',
@@ -1317,11 +1320,14 @@ async function getDiagnosticProblems(): Promise<EgeProblem[]> {
           problem.condition_image_url = null;
         }
         selected.push(problem);
-        console.log(`⚠️ Using fallback problem for ege ${i} (image cleared)`);
+        console.log(`⚠️ Using fallback problem for ege ${i}`);
+      } else {
+        console.log(`❌ NO PROBLEMS FOUND FOR EGE ${i} in diagnostic pool`);
       }
     }
   }
 
+  console.log(`✅ Selected ${selected.length} problems for diagnostic test: ${selected.map(p => p.ege_number).join(', ')}`);
   return selected;
 }
 
