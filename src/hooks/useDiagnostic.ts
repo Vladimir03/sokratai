@@ -130,6 +130,7 @@ export const useDiagnosticProblems = () => {
         .from('ege_problems')
         .select('*')
         .eq('is_active', true)
+        .eq('is_diagnostic', true) // Только задачи с подготовленными картинками
         .gte('ege_number', 1)
         .lte('ege_number', 12);
       if (error) throw error;

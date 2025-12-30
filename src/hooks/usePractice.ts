@@ -40,9 +40,23 @@ export const usePractice = (egeNumber: EGENumber | null) => {
       if (error) throw error;
 
       if (data && data.length > 0) {
-        // Выбираем случайную задачу из доступных
-        const randomIndex = Math.floor(Math.random() * data.length);
-        const problem = data[randomIndex];
+        // Фильтруем задачи, где текст ссылается на рисунок, но картинки нет
+        const validProblems = data.filter(p => {
+          const needsImage = p.condition_text?.toLowerCase().includes('на рисунке') ||
+                             p.condition_text?.toLowerCase().includes('изображён') ||
+                             p.condition_text?.toLowerCase().includes('показан');
+          const hasImage = !!p.condition_image_url;
+          return !needsImage || hasImage;
+        });
+        
+        if (validProblems.length === 0) {
+          setCurrentProblem(null);
+          return;
+        }
+        
+        // Выбираем случайную задачу из валидных
+        const randomIndex = Math.floor(Math.random() * validProblems.length);
+        const problem = validProblems[randomIndex];
         
         // Преобразуем hints из JSONB в массив строк
         const hints = Array.isArray(problem.hints) 
