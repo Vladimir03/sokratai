@@ -102,6 +102,6 @@ export function primaryToTestScore(primary: number): number {
 }
 
 // Константы
-export const DIAGNOSTIC_TOTAL_QUESTIONS = 15;
-export const DIAGNOSTIC_COOLDOWN_DAYS = 14;
+export const DIAGNOSTIC_TOTAL_QUESTIONS = 12;
+export const DIAGNOSTIC_COOLDOWN_DAYS = 0;
 
