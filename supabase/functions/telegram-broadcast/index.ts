@@ -21,9 +21,15 @@ const DEFAULT_MESSAGE = `👋 Привет! Ты записался, но так
 Скинь мне свою задачу — текстом или фото 📸
 Математика, физика, информатика — решу всё! 💪`;
 
+interface BroadcastButton {
+  text: string;
+  callback_data: string;
+}
+
 interface BroadcastRequest {
-  segment: "all" | "stuck_onboarding" | "no_messages";
+  segment: "all" | "stuck_onboarding" | "no_messages" | "math_ege";
   message?: string;
+  buttons?: BroadcastButton[];
   dry_run?: boolean; // If true, just return users without sending
 }
 
@@ -52,7 +58,7 @@ Deno.serve(async (req) => {
       );
     }
 
-    const { segment, message, dry_run }: BroadcastRequest = await req.json();
+    const { segment, message, buttons, dry_run }: BroadcastRequest = await req.json();
     const broadcastMessage = message || DEFAULT_MESSAGE;
 
     // Initialize Supabase
@@ -118,6 +124,29 @@ Deno.serve(async (req) => {
       }
     }
 
+    if (segment === "math_ege") {
+      // Users who completed onboarding with math as subject (preparing for EGE)
+      const { data: mathUsers, error: mathError } = await supabase
+        .from("telegram_sessions")
+        .select("telegram_user_id, onboarding_state, onboarding_data")
+        .eq("onboarding_state", "completed");
+
+      if (mathError) {
+        console.error("Error fetching math_ege users:", mathError);
+      } else if (mathUsers) {
+        for (const user of mathUsers) {
+          const onboardingData = user.onboarding_data as { subject?: string; grade?: number } | null;
+          if (onboardingData?.subject === "math") {
+            users.push({
+              telegram_user_id: user.telegram_user_id,
+              onboarding_state: user.onboarding_state
+            });
+          }
+        }
+      }
+      console.log(`Found ${users.length} math_ege users`);
+    }
+
     // Remove duplicates
     const uniqueUsers = Array.from(
       new Map(users.map(u => [u.telegram_user_id, u])).values()
@@ -147,16 +176,28 @@ Deno.serve(async (req) => {
 
     for (const user of uniqueUsers) {
       try {
+        // Build message body with optional inline keyboard
+        const messageBody: Record<string, any> = {
+          chat_id: user.telegram_user_id,
+          text: broadcastMessage,
+          parse_mode: "HTML"
+        };
+
+        if (buttons && buttons.length > 0) {
+          messageBody.reply_markup = {
+            inline_keyboard: [buttons.map(b => ({
+              text: b.text,
+              callback_data: b.callback_data
+            }))]
+          };
+        }
+
         const response = await fetch(
           `https://api.telegram.org/bot${telegramToken}/sendMessage`,
           {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              chat_id: user.telegram_user_id,
-              text: broadcastMessage,
-              parse_mode: "HTML"
-            })
+            body: JSON.stringify(messageBody)
           }
         );
 
