@@ -290,6 +290,32 @@ async function sendTelegramMessage(chatId: number, text: string, extraParams?: R
   return response.json();
 }
 
+async function setMyCommands() {
+  const commands = [
+    { command: "start", description: "Начать работу" },
+    { command: "menu", description: "Главное меню" },
+    { command: "practice", description: "Тренажёр ЕГЭ" },
+    { command: "diagnostic", description: "Диагностика уровня" },
+    { command: "status", description: "Статус подписки" },
+    { command: "help", description: "Справка" }
+  ];
+
+  const response = await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/setMyCommands`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ commands }),
+  });
+
+  if (!response.ok) {
+    const error = await response.text();
+    console.error("Failed to set bot commands:", error);
+    return false;
+  }
+
+  console.log("✅ Bot commands set successfully");
+  return true;
+}
+
 async function editTelegramMessage(chatId: number, messageId: number, text: string, extraParams?: Record<string, any>) {
   const response = await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/editMessageText`, {
     method: "POST",
@@ -4054,6 +4080,15 @@ Deno.serve(async (req) => {
   }
 
   try {
+    // Handle special action to set bot menu commands
+    const url = new URL(req.url);
+    if (url.searchParams.get("action") === "set_commands") {
+      const success = await setMyCommands();
+      return new Response(JSON.stringify({ ok: success }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
     const update = await req.json();
     console.log("Received update:", JSON.stringify(update, null, 2));
 
