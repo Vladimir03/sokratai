@@ -290,6 +290,140 @@ async function sendTelegramMessage(chatId: number, text: string, extraParams?: R
   return response.json();
 }
 
+// ID группы для просмотра статистики
+const ADMIN_STATS_CHAT_ID = -1002667014790;
+
+// Функция получения статистики воронки 11-классников
+async function getFunnelStats(): Promise<string> {
+  try {
+    // Шаг 1: Всего 11-классников зашли в бота
+    const { data: step1 } = await supabase
+      .from('telegram_sessions')
+      .select('telegram_user_id')
+      .not('onboarding_data->grade', 'is', null);
+    
+    const all11thGraders = step1?.filter(s => {
+      const data = s as any;
+      return data.onboarding_data?.grade === 11 || data.onboarding_data?.grade === '11';
+    }) || [];
+    const total11 = all11thGraders.length;
+
+    // Шаг 2: Прошли онбординг
+    const { data: step2 } = await supabase
+      .from('telegram_sessions')
+      .select('telegram_user_id, user_id, onboarding_data')
+      .eq('onboarding_state', 'completed');
+    
+    const onboarded11 = step2?.filter(s => {
+      const data = s as any;
+      return data.onboarding_data?.grade === 11 || data.onboarding_data?.grade === '11';
+    }) || [];
+    const completedOnboarding = onboarded11.length;
+    const pct2 = total11 > 0 ? ((completedOnboarding / total11) * 100).toFixed(0) : '0';
+
+    // Шаг 3: Выбрали математику
+    const mathUsers = onboarded11.filter(s => {
+      const data = s as any;
+      return data.onboarding_data?.subject === 'math';
+    });
+    const mathSelected = mathUsers.length;
+    const pct3 = completedOnboarding > 0 ? ((mathSelected / completedOnboarding) * 100).toFixed(0) : '0';
+    
+    // Получаем user_id тех кто выбрал математику
+    const mathUserIds = mathUsers.map(u => (u as any).user_id).filter(Boolean);
+
+    // Шаг 4: Отправили хотя бы 1 сообщение
+    let sentMessage = 0;
+    if (mathUserIds.length > 0) {
+      const { data: messagesData } = await supabase
+        .from('chat_messages')
+        .select('user_id')
+        .eq('role', 'user')
+        .in('user_id', mathUserIds);
+      
+      const uniqueMessageUsers = new Set(messagesData?.map(m => m.user_id) || []);
+      sentMessage = uniqueMessageUsers.size;
+    }
+    const pct4 = mathSelected > 0 ? ((sentMessage / mathSelected) * 100).toFixed(0) : '0';
+
+    // Шаг 5: Рассылка отправлена (уникальным пользователям)
+    const { data: broadcastSentData } = await supabase
+      .from('broadcast_logs')
+      .select('telegram_user_id')
+      .in('broadcast_type', ['math-ege-morning', 'math-ege-evening']);
+    
+    const uniqueBroadcastSent = new Set(broadcastSentData?.map(b => b.telegram_user_id) || []);
+    const broadcastSent = uniqueBroadcastSent.size;
+    const pct5 = mathSelected > 0 ? ((broadcastSent / mathSelected) * 100).toFixed(0) : '0';
+
+    // Шаг 6: Рассылка доставлена (success=true)
+    const { data: broadcastReceivedData } = await supabase
+      .from('broadcast_logs')
+      .select('telegram_user_id')
+      .in('broadcast_type', ['math-ege-morning', 'math-ege-evening'])
+      .eq('success', true);
+    
+    const uniqueBroadcastReceived = new Set(broadcastReceivedData?.map(b => b.telegram_user_id) || []);
+    const broadcastReceived = uniqueBroadcastReceived.size;
+    const pct6 = broadcastSent > 0 ? ((broadcastReceived / broadcastSent) * 100).toFixed(0) : '0';
+
+    // Шаг 7: Начали тренажёр/диагностику
+    // Смотрим practice_attempts + diagnostic_sessions
+    let startedFeature = 0;
+    if (mathUserIds.length > 0) {
+      const { data: practiceData } = await supabase
+        .from('practice_attempts')
+        .select('user_id')
+        .in('user_id', mathUserIds);
+      
+      const { data: diagData } = await supabase
+        .from('diagnostic_sessions')
+        .select('user_id')
+        .in('user_id', mathUserIds);
+      
+      const featureUsers = new Set([
+        ...(practiceData?.map(p => p.user_id) || []),
+        ...(diagData?.map(d => d.user_id) || [])
+      ]);
+      startedFeature = featureUsers.size;
+    }
+    const pct7 = broadcastReceived > 0 ? ((startedFeature / broadcastReceived) * 100).toFixed(0) : '0';
+
+    // Шаг 8: Диагностика - начали и завершили
+    let startedDiag = 0;
+    let completedDiag = 0;
+    if (mathUserIds.length > 0) {
+      const { data: diagSessions } = await supabase
+        .from('diagnostic_sessions')
+        .select('user_id, status')
+        .in('user_id', mathUserIds);
+      
+      startedDiag = new Set(diagSessions?.map(d => d.user_id) || []).size;
+      completedDiag = new Set(diagSessions?.filter(d => d.status === 'completed').map(d => d.user_id) || []).size;
+    }
+
+    const now = new Date();
+    const moscowTime = new Date(now.getTime() + 3 * 60 * 60 * 1000);
+    const timeStr = moscowTime.toISOString().slice(0, 16).replace('T', ' ');
+
+    return `📊 <b>Воронка 11-классников</b>
+
+1️⃣ Зашли в бота: <b>${total11}</b>
+2️⃣ Прошли онбординг: <b>${completedOnboarding}</b> (${pct2}%)
+3️⃣ Выбрали математику: <b>${mathSelected}</b> (${pct3}%)
+4️⃣ Написали сообщение: <b>${sentMessage}</b> (${pct4}%)
+5️⃣ Рассылка отправлена: <b>${broadcastSent}</b> (${pct5}%)
+6️⃣ Рассылка доставлена: <b>${broadcastReceived}</b> (${pct6}%)
+7️⃣ Начали тренажёр/диагностику: <b>${startedFeature}</b> (${pct7}%)
+8️⃣ Диагностика: начали <b>${startedDiag}</b> / завершили <b>${completedDiag}</b>
+
+📅 Обновлено: ${timeStr} МСК`;
+  } catch (error) {
+    console.error('Error getting funnel stats:', error);
+    return '❌ Ошибка получения статистики';
+  }
+}
+
 async function setMyCommands() {
   const commands = [
     { command: "start", description: "Начать работу" },
@@ -4180,6 +4314,34 @@ Deno.serve(async (req) => {
 
 Просто напиши или отправь фото! 🚀`
       );
+      
+      return new Response(JSON.stringify({ ok: true }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    // Handle /stats command (admin group only)
+    if (update.message?.text === "/stats" || update.message?.text?.startsWith("/stats@")) {
+      const chatId = update.message.chat.id;
+      const telegramUserId = update.message.from.id;
+      
+      console.log("Stats command received from chat:", chatId);
+      
+      // Only respond in the admin stats group
+      if (chatId === ADMIN_STATS_CHAT_ID) {
+        const stats = await getFunnelStats();
+        await sendTelegramMessage(chatId, stats);
+      }
+      
+      return new Response(JSON.stringify({ ok: true }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    // Handle /chatid command (debug helper)
+    if (update.message?.text === "/chatid") {
+      const chatId = update.message.chat.id;
+      await sendTelegramMessage(chatId, `Chat ID: <code>${chatId}</code>`);
       
       return new Response(JSON.stringify({ ok: true }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
