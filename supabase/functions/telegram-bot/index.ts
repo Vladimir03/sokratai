@@ -346,24 +346,34 @@ async function getFunnelStats(): Promise<string> {
     }
     const pct4 = mathSelected > 0 ? ((sentMessage / mathSelected) * 100).toFixed(0) : '0';
 
-    // Шаг 5: Рассылка отправлена (уникальным пользователям)
+    // Получаем telegram_user_id для 11-классников с математикой
+    const mathTelegramIds = mathUsers.map(u => (u as any).telegram_user_id).filter(Boolean);
+
+    // Шаг 5: Рассылка отправлена (только 11-классникам с математикой)
     const { data: broadcastSentData } = await supabase
       .from('broadcast_logs')
       .select('telegram_user_id')
       .in('broadcast_type', ['scheduled_morning', 'scheduled_evening']);
     
-    const uniqueBroadcastSent = new Set(broadcastSentData?.map(b => b.telegram_user_id) || []);
+    // Фильтруем только 11-классников с математикой
+    const broadcastSentToMath11 = broadcastSentData?.filter(b => 
+      mathTelegramIds.includes(b.telegram_user_id)
+    ) || [];
+    const uniqueBroadcastSent = new Set(broadcastSentToMath11.map(b => b.telegram_user_id));
     const broadcastSent = uniqueBroadcastSent.size;
     const pct5 = mathSelected > 0 ? ((broadcastSent / mathSelected) * 100).toFixed(0) : '0';
 
-    // Шаг 6: Рассылка доставлена (success=true)
+    // Шаг 6: Рассылка доставлена (success=true, только 11-классникам)
     const { data: broadcastReceivedData } = await supabase
       .from('broadcast_logs')
       .select('telegram_user_id')
       .in('broadcast_type', ['scheduled_morning', 'scheduled_evening'])
       .eq('success', true);
     
-    const uniqueBroadcastReceived = new Set(broadcastReceivedData?.map(b => b.telegram_user_id) || []);
+    const broadcastReceivedToMath11 = broadcastReceivedData?.filter(b => 
+      mathTelegramIds.includes(b.telegram_user_id)
+    ) || [];
+    const uniqueBroadcastReceived = new Set(broadcastReceivedToMath11.map(b => b.telegram_user_id));
     const broadcastReceived = uniqueBroadcastReceived.size;
     const pct6 = broadcastSent > 0 ? ((broadcastReceived / broadcastSent) * 100).toFixed(0) : '0';
 
@@ -402,6 +412,64 @@ async function getFunnelStats(): Promise<string> {
       completedDiag = new Set(diagSessions?.filter(d => d.status === 'completed').map(d => d.user_id) || []).size;
     }
 
+    // === АНАЛИТИКА ===
+    
+    // Среднее сообщений на активного пользователя
+    let avgMessages = 0;
+    if (sentMessage > 0) {
+      const { data: msgCount } = await supabase
+        .from('chat_messages')
+        .select('id')
+        .eq('role', 'user')
+        .in('user_id', mathUserIds);
+      avgMessages = Math.round((msgCount?.length || 0) / sentMessage);
+    }
+
+    // Тренажёр: количество попыток и точность
+    let practiceAttempts = 0;
+    let practiceAccuracy = 0;
+    if (mathUserIds.length > 0) {
+      const { data: attempts } = await supabase
+        .from('practice_attempts')
+        .select('is_correct')
+        .in('user_id', mathUserIds);
+      
+      practiceAttempts = attempts?.length || 0;
+      const correct = attempts?.filter(a => a.is_correct).length || 0;
+      practiceAccuracy = practiceAttempts > 0 ? Math.round(correct * 100 / practiceAttempts) : 0;
+    }
+
+    // Retention D1: пользователи, которые вернулись на следующий день
+    let retentionD1 = 0;
+    if (mathUserIds.length > 0) {
+      const { data: userFirstMessages } = await supabase
+        .from('chat_messages')
+        .select('user_id, created_at')
+        .eq('role', 'user')
+        .in('user_id', mathUserIds)
+        .order('created_at', { ascending: true });
+      
+      // Группируем по user_id и находим первую дату
+      const firstDateByUser: Record<string, string> = {};
+      userFirstMessages?.forEach(m => {
+        if (!firstDateByUser[m.user_id]) {
+          firstDateByUser[m.user_id] = m.created_at?.slice(0, 10) || '';
+        }
+      });
+      
+      // Проверяем, есть ли сообщения на следующий день или позже
+      const returnedUsers = new Set<string>();
+      userFirstMessages?.forEach(m => {
+        const firstDate = firstDateByUser[m.user_id];
+        const msgDate = m.created_at?.slice(0, 10) || '';
+        if (firstDate && msgDate > firstDate) {
+          returnedUsers.add(m.user_id);
+        }
+      });
+      retentionD1 = returnedUsers.size;
+    }
+    const pctRetention = sentMessage > 0 ? Math.round(retentionD1 * 100 / sentMessage) : 0;
+
     const now = new Date();
     const moscowTime = new Date(now.getTime() + 3 * 60 * 60 * 1000);
     const timeStr = moscowTime.toISOString().slice(0, 16).replace('T', ' ');
@@ -414,8 +482,13 @@ async function getFunnelStats(): Promise<string> {
 4️⃣ Написали сообщение: <b>${sentMessage}</b> (${pct4}%)
 5️⃣ Рассылка отправлена: <b>${broadcastSent}</b> (${pct5}%)
 6️⃣ Рассылка доставлена: <b>${broadcastReceived}</b> (${pct6}%)
-7️⃣ Начали тренажёр/диагностику: <b>${startedFeature}</b> (${pct7}%)
+7️⃣ Начали тренажёр: <b>${startedFeature}</b> (${pct7}%)
 8️⃣ Диагностика: начали <b>${startedDiag}</b> / завершили <b>${completedDiag}</b>
+
+📈 <b>Аналитика</b>
+🔄 Retention: <b>${retentionD1}</b> вернулись (${pctRetention}%)
+💬 Сообщений на юзера: <b>${avgMessages}</b>
+✏️ Тренажёр: <b>${practiceAttempts}</b> задач, точность <b>${practiceAccuracy}%</b>
 
 📅 Обновлено: ${timeStr} МСК`;
   } catch (error) {
