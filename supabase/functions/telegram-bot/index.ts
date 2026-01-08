@@ -350,7 +350,7 @@ async function getFunnelStats(): Promise<string> {
     const { data: broadcastSentData } = await supabase
       .from('broadcast_logs')
       .select('telegram_user_id')
-      .in('broadcast_type', ['math-ege-morning', 'math-ege-evening']);
+      .in('broadcast_type', ['scheduled_morning', 'scheduled_evening']);
     
     const uniqueBroadcastSent = new Set(broadcastSentData?.map(b => b.telegram_user_id) || []);
     const broadcastSent = uniqueBroadcastSent.size;
@@ -360,7 +360,7 @@ async function getFunnelStats(): Promise<string> {
     const { data: broadcastReceivedData } = await supabase
       .from('broadcast_logs')
       .select('telegram_user_id')
-      .in('broadcast_type', ['math-ege-morning', 'math-ege-evening'])
+      .in('broadcast_type', ['scheduled_morning', 'scheduled_evening'])
       .eq('success', true);
     
     const uniqueBroadcastReceived = new Set(broadcastReceivedData?.map(b => b.telegram_user_id) || []);
