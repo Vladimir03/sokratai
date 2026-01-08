@@ -299,12 +299,12 @@ async function getFunnelStats(): Promise<string> {
     // Шаг 1: Всего 11-классников зашли в бота
     const { data: step1 } = await supabase
       .from('telegram_sessions')
-      .select('telegram_user_id')
-      .not('onboarding_data->grade', 'is', null);
+      .select('telegram_user_id, onboarding_data');
     
     const all11thGraders = step1?.filter(s => {
       const data = s as any;
-      return data.onboarding_data?.grade === 11 || data.onboarding_data?.grade === '11';
+      const grade = data.onboarding_data?.grade;
+      return grade === 11 || grade === '11' || String(grade) === '11';
     }) || [];
     const total11 = all11thGraders.length;
 
@@ -406,7 +406,7 @@ async function getFunnelStats(): Promise<string> {
     const moscowTime = new Date(now.getTime() + 3 * 60 * 60 * 1000);
     const timeStr = moscowTime.toISOString().slice(0, 16).replace('T', ' ');
 
-    return `📊 <b>Воронка 11-классников</b>
+    return `📊 <b>Воронка 11-класс тг бот</b>
 
 1️⃣ Зашли в бота: <b>${total11}</b>
 2️⃣ Прошли онбординг: <b>${completedOnboarding}</b> (${pct2}%)
