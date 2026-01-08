@@ -291,7 +291,7 @@ async function sendTelegramMessage(chatId: number, text: string, extraParams?: R
 }
 
 // ID группы для просмотра статистики
-const ADMIN_STATS_CHAT_ID = -1002667014790;
+const ADMIN_STATS_CHAT_ID = -5270269461;
 
 // Функция получения статистики воронки 11-классников
 async function getFunnelStats(): Promise<string> {
