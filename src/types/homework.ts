@@ -40,13 +40,28 @@ export interface HomeworkChatMessage {
   created_at: string;
 }
 
+// Предметы сгруппированы по типу: технические (приоритет), гуманитарные, естественные
 export const SUBJECTS = [
-  { id: 'geometry', name: 'Геометрия', emoji: '📐' },
-  { id: 'algebra', name: 'Алгебра', emoji: '📈' },
-  { id: 'physics', name: 'Физика', emoji: '⚛️' },
-  { id: 'chemistry', name: 'Химия', emoji: '🧪' },
-  { id: 'informatics', name: 'Информатика', emoji: '💻' },
-  { id: 'other', name: 'Другое', emoji: '📝' }
+  // 🔬 Технические (приоритет)
+  { id: 'algebra', name: 'Алгебра', emoji: '📈', category: 'technical' },
+  { id: 'geometry', name: 'Геометрия', emoji: '📐', category: 'technical' },
+  { id: 'physics', name: 'Физика', emoji: '⚛️', category: 'technical' },
+  { id: 'informatics', name: 'Информатика', emoji: '💻', category: 'technical' },
+
+  // 📚 Гуманитарные
+  { id: 'russian', name: 'Русский язык', emoji: '📖', category: 'humanities' },
+  { id: 'literature', name: 'Литература', emoji: '📗', category: 'humanities' },
+  { id: 'history', name: 'История', emoji: '📜', category: 'humanities' },
+  { id: 'social', name: 'Обществознание', emoji: '⚖️', category: 'humanities' },
+  { id: 'english', name: 'Английский язык', emoji: '🇬🇧', category: 'humanities' },
+
+  // 🧬 Естественные
+  { id: 'chemistry', name: 'Химия', emoji: '🧪', category: 'natural' },
+  { id: 'biology', name: 'Биология', emoji: '🧬', category: 'natural' },
+  { id: 'geography', name: 'География', emoji: '🌍', category: 'natural' },
+
+  // Другое
+  { id: 'other', name: 'Другое', emoji: '📝', category: 'other' }
 ];
 
 export const PRIORITY_CONFIG = {
