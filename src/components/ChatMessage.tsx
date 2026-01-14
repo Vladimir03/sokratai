@@ -1,4 +1,4 @@
-import { memo, lazy, Suspense, useEffect, useState, useMemo } from "react";
+import { memo, lazy, Suspense, useEffect, useState, useMemo, useCallback } from "react";
 import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
@@ -10,6 +10,8 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import GraphRenderer from "@/components/GraphRenderer";
+import { extractPythonCode } from "@/utils/pyodide";
 
 // Format time to HH:mm in local timezone
 const formatMessageTime = (isoString?: string): string => {
@@ -78,6 +80,12 @@ const ChatMessage = memo(({ message, isLoading, onQuickMessage, onRetry, onFeedb
     }
   };
 
+  // Проверяем, является ли код Python-кодом для графиков
+  const isPythonGraphCode = useCallback((code: string): boolean => {
+    return (code.includes('plt.') || code.includes('matplotlib')) &&
+           (code.includes('np.') || code.includes('numpy') || code.includes('linspace'));
+  }, []);
+
   // Мемоизируем markdown компоненты для избежания пересоздания
   const markdownComponents = useMemo(() => ({
     p: ({ node, ...props }: any) => (
@@ -94,11 +102,54 @@ const ChatMessage = memo(({ message, isLoading, onQuickMessage, onRetry, onFeedb
     h3: ({ node, ...props }: any) => (
       <h3 className={`font-bold text-lg mt-4 mb-2 break-words ${message.role === "user" ? "text-primary-foreground" : ""}`} {...props} />
     ),
-    code: ({ node, inline, ...props }: any) => 
-      inline 
-        ? <code className={`px-1.5 py-0.5 rounded text-sm break-words ${message.role === "user" ? "bg-primary-foreground/20 text-primary-foreground" : "bg-muted"}`} {...props} />
-        : <code className={`block p-2 rounded overflow-x-auto ${message.role === "user" ? "bg-primary-foreground/20 text-primary-foreground" : "bg-muted"}`} {...props} />,
-  }), [message.role]);
+    // Кастомный рендер для блоков кода
+    pre: ({ node, children, ...props }: any) => {
+      // Извлекаем код из children
+      const codeElement = children?.props;
+      const codeContent = codeElement?.children || '';
+      const className = codeElement?.className || '';
+      const isLanguagePython = className.includes('language-python');
+
+      // Если это Python код для графика - рендерим GraphRenderer
+      if (isLanguagePython && isPythonGraphCode(codeContent) && message.role === 'assistant') {
+        return <GraphRenderer code={codeContent} autoExecute={true} />;
+      }
+
+      // Иначе - обычный блок кода
+      return (
+        <pre className={`p-3 rounded-lg overflow-x-auto my-3 ${
+          message.role === "user"
+            ? "bg-primary-foreground/20 text-primary-foreground"
+            : "bg-muted"
+        }`} {...props}>
+          {children}
+        </pre>
+      );
+    },
+    code: ({ node, inline, className, children, ...props }: any) => {
+      if (inline) {
+        return (
+          <code
+            className={`px-1.5 py-0.5 rounded text-sm break-words ${
+              message.role === "user"
+                ? "bg-primary-foreground/20 text-primary-foreground"
+                : "bg-muted"
+            }`}
+            {...props}
+          >
+            {children}
+          </code>
+        );
+      }
+
+      // Для блочного кода просто возвращаем code, pre обработает остальное
+      return (
+        <code className={`text-sm ${className || ''}`} {...props}>
+          {children}
+        </code>
+      );
+    },
+  }), [message.role, isPythonGraphCode]);
 
   // Preprocessing LaTeX for proper rendering
   const preprocessLatex = (text: string) => {
@@ -293,12 +344,20 @@ const ChatMessage = memo(({ message, isLoading, onQuickMessage, onRetry, onFeedb
                 💡 Дай подсказку
               </button>
               
-              <button 
+              <button
                 onClick={() => onQuickMessage("Объясни подробнее")}
                 className="text-xs px-3 py-1.5 bg-purple-50 hover:bg-purple-100 text-purple-700 rounded-full border border-purple-200 transition-colors dark:bg-purple-950 dark:hover:bg-purple-900 dark:text-purple-300 dark:border-purple-800"
                 disabled={isLoading}
               >
                 🔍 Объясни подробнее
+              </button>
+
+              <button
+                onClick={() => onQuickMessage("Построй график")}
+                className="text-xs px-3 py-1.5 bg-green-50 hover:bg-green-100 text-green-700 rounded-full border border-green-200 transition-colors dark:bg-green-950 dark:hover:bg-green-900 dark:text-green-300 dark:border-green-800"
+                disabled={isLoading}
+              >
+                📊 Построй график
               </button>
 
               {/* Разделитель */}
