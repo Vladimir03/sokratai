@@ -20,6 +20,7 @@ import ChatInput from "@/components/ChatInput";
 import DevPanel from "@/components/DevPanel";
 import { PageContent } from "@/components/PageContent";
 import { saveChatToSessionCache, loadChatFromSessionCache, clearChatCache } from "@/utils/chatCache";
+import { preloadPyodide } from "@/utils/pyodide";
 import { motion, AnimatePresence } from "framer-motion";
 import { haptics } from "@/utils/haptics";
 import { useSubscription } from "@/hooks/useSubscription";
@@ -117,6 +118,15 @@ export default function Chat() {
       // НЕ очищаем state здесь - это делается после отправки в эффекте ниже
     }
   }, [initialMessageFromPractice]);
+
+  // Предзагрузка Pyodide для быстрого рендеринга графиков
+  useEffect(() => {
+    // Загружаем Pyodide в фоне через 3 секунды после открытия чата
+    const timer = setTimeout(() => {
+      preloadPyodide();
+    }, 3000);
+    return () => clearTimeout(timer);
+  }, []);
 
   // Функция для оценки размера сообщения на основе его контента
   const estimateMessageSize = useCallback((index: number) => {
