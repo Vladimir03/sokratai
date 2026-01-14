@@ -596,7 +596,7 @@ async function processAIRequest(userId: string, messages: any[], systemPrompt?: 
     requestBody.route = "fallback";
     requestBody.models = [
       "google/gemini-3-flash-preview",
-      "google/gemini-2.5-flash-preview",
+      "google/gemini-2.5-flash",
       "google/gemini-2.0-flash-001"
     ];
   }
