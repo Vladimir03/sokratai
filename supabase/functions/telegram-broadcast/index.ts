@@ -23,13 +23,14 @@ const DEFAULT_MESSAGE = `👋 Привет! Ты записался, но так
 
 interface BroadcastButton {
   text: string;
-  callback_data: string;
+  callback_data?: string;
+  url?: string;  // Для URL-кнопок
 }
 
 interface BroadcastRequest {
-  segment: "all" | "stuck_onboarding" | "no_messages" | "math_ege";
+  segment: "all" | "all_active" | "stuck_onboarding" | "no_messages" | "math_ege";
   message?: string;
-  buttons?: BroadcastButton[];
+  buttons?: BroadcastButton[][];  // Двумерный массив для нескольких рядов кнопок
   dry_run?: boolean; // If true, just return users without sending
 }
 
@@ -147,6 +148,21 @@ Deno.serve(async (req) => {
       console.log(`Found ${users.length} math_ege users`);
     }
 
+    if (segment === "all_active") {
+      // ВСЕ пользователи, которые завершили onboarding (активные пользователи)
+      const { data: activeUsers, error: activeError } = await supabase
+        .from("telegram_sessions")
+        .select("telegram_user_id, onboarding_state")
+        .eq("onboarding_state", "completed");
+
+      if (activeError) {
+        console.error("Error fetching all_active users:", activeError);
+      } else if (activeUsers) {
+        users = [...users, ...(activeUsers || [])];
+      }
+      console.log(`Found ${users.length} all_active users`);
+    }
+
     // Remove duplicates
     const uniqueUsers = Array.from(
       new Map(users.map(u => [u.telegram_user_id, u])).values()
@@ -184,11 +200,19 @@ Deno.serve(async (req) => {
         };
 
         if (buttons && buttons.length > 0) {
+          // Поддержка двумерного массива кнопок с URL и callback_data
           messageBody.reply_markup = {
-            inline_keyboard: [buttons.map(b => ({
-              text: b.text,
-              callback_data: b.callback_data
-            }))]
+            inline_keyboard: buttons.map(row =>
+              row.map(b => {
+                const button: Record<string, string> = { text: b.text };
+                if (b.url) {
+                  button.url = b.url;
+                } else if (b.callback_data) {
+                  button.callback_data = b.callback_data;
+                }
+                return button;
+              })
+            )
           };
         }
 
