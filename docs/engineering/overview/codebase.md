@@ -1907,7 +1907,7 @@ This is a **React + TypeScript + Vite** project with **Supabase** backend, focus
 - Review type definitions
 - Look at the database schema
 - Check console for errors
-- Review this CLAUDE.md guide
+- Review this guide
 
 ---
 

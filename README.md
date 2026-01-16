@@ -4,6 +4,10 @@
 
 **URL**: https://lovable.dev/projects/5fbe4a32-1baf-47b0-8f47-83e3060cf929
 
+## Docs
+
+Project documentation and internal notes live in [`docs/`](./docs/README.md).
+
 ## How can I edit this code?
 
 There are several ways of editing your application.
