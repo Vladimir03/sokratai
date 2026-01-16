@@ -12,6 +12,11 @@ const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 const WEB_PAYMENT_URL = "https://sokratai.ru/profile?openPayment=true";
 const WEB_PRICING_URL = "https://sokratai.ru/#pricing";
+const WEBAPP_FALLBACK_URL = "https://sokratai.lovable.app";
+
+function getWebAppBaseUrl(): string {
+  return Deno.env.get("VITE_WEBAPP_URL") || WEBAPP_FALLBACK_URL;
+}
 
 const pluralizeDays = (days: number) => {
   const mod10 = days % 10;
@@ -50,6 +55,36 @@ async function getSubscriptionStatus(userId: string): Promise<SubscriptionStatus
   }
 
   return data as SubscriptionStatus;
+}
+
+function formatDate(value: string | null): string {
+  if (!value) return "—";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "—";
+  return date.toLocaleDateString("ru-RU");
+}
+
+function formatSubscriptionStatus(status: SubscriptionStatus): string {
+  const lines: string[] = [];
+  if (status.is_premium) {
+    lines.push("🌟 <b>Premium активен</b>");
+    lines.push(`Действует до: <b>${formatDate(status.subscription_expires_at)}</b>`);
+  } else if (status.is_trial_active) {
+    lines.push("🎁 <b>Триал активен</b>");
+    lines.push(`Осталось: <b>${status.trial_days_left ?? 0}</b> ${pluralizeDays(status.trial_days_left ?? 0)}`);
+    lines.push(`До: <b>${formatDate(status.trial_ends_at)}</b>`);
+  } else {
+    lines.push("🆓 <b>Бесплатный доступ</b>");
+  }
+
+  lines.push("");
+  lines.push(`Сообщения сегодня: <b>${status.messages_used}</b> / ${status.daily_limit}`);
+
+  if (status.limit_reached) {
+    lines.push("⏳ <b>Дневной лимит исчерпан</b>");
+  }
+
+  return lines.join("\n");
 }
 
 async function sendStatusSnippet(telegramUserId: number, status: any) {
@@ -1598,6 +1633,11 @@ function createMainMenuKeyboard() {
       ],
       [
         { text: "💬 Спросить Сократа", callback_data: "chat_mode" },
+        { text: "📊 Статус", callback_data: "subscription_status" },
+      ],
+      [
+        { text: "📱 Mini App", web_app: { url: `${getWebAppBaseUrl()}/miniapp` } },
+        { text: "💳 Premium", url: WEB_PAYMENT_URL },
       ],
     ],
   };
@@ -3053,8 +3093,7 @@ function formatForTelegramStructured(text: string): string {
  * Generates Telegram inline keyboard JSON for Mini App button
  */
 function generateMiniAppButton(solutionId: string): any {
-  const WEBAPP_URL = Deno.env.get("VITE_WEBAPP_URL") || "https://sokratai.lovable.app";
-  const miniAppUrl = `${WEBAPP_URL}/miniapp/solution/${solutionId}`;
+  const miniAppUrl = `${getWebAppBaseUrl()}/miniapp/solution/${solutionId}`;
 
   console.log("🔗 Mini App button URL:", miniAppUrl);
   console.log("📱 Solution ID:", solutionId);
@@ -4169,6 +4208,27 @@ async function handleCallbackQuery(callbackQuery: any) {
     return;
   }
 
+  // Subscription status
+  if (data === "subscription_status") {
+    if (!userId) {
+      await sendTelegramMessage(telegramUserId, "❌ Сессия не найдена. Нажми /start");
+      return;
+    }
+
+    const status = await getSubscriptionStatus(userId);
+    if (!status) {
+      await sendTelegramMessage(telegramUserId, "❌ Не удалось получить статус подписки. Попробуй позже.");
+      return;
+    }
+
+    await sendTelegramMessage(
+      telegramUserId,
+      formatSubscriptionStatus(status),
+      !status.is_premium ? { reply_markup: premiumKeyboard } : undefined,
+    );
+    return;
+  }
+
   // Practice start (выбор номера)
   if (data === "practice_start") {
     await handlePracticeStart(telegramUserId);
@@ -4397,6 +4457,31 @@ Deno.serve(async (req) => {
       });
     }
 
+    // Handle /status command
+    if (update.message?.text === "/status") {
+      const telegramUserId = update.message.from.id;
+      const session = await getOnboardingSession(telegramUserId);
+
+      if (session && session.onboarding_state === "completed") {
+        const status = await getSubscriptionStatus(session.user_id);
+        if (!status) {
+          await sendTelegramMessage(telegramUserId, "❌ Не удалось получить статус подписки. Попробуй позже.");
+        } else {
+          await sendTelegramMessage(
+            telegramUserId,
+            formatSubscriptionStatus(status),
+            !status.is_premium ? { reply_markup: premiumKeyboard } : undefined,
+          );
+        }
+      } else {
+        await sendTelegramMessage(telegramUserId, "❌ Сначала пройди регистрацию. Нажми /start");
+      }
+
+      return new Response(JSON.stringify({ ok: true }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
     // Handle /help command
     if (update.message?.text === "/help") {
       const telegramUserId = update.message.from.id;
@@ -4410,6 +4495,7 @@ Deno.serve(async (req) => {
 /menu — главное меню
 /practice — тренажёр ЕГЭ
 /diagnostic — диагностика уровня
+/status — статус подписки
 /help — эта справка
 
 <b>Что я умею:</b>
