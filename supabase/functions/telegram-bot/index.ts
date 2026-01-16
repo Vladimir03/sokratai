@@ -558,6 +558,26 @@ async function setMyCommands() {
   return true;
 }
 
+async function setChatMenuButton(chatId?: number) {
+  const response = await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/setChatMenuButton`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      chat_id: chatId,
+      menu_button: { type: "commands" },
+    }),
+  });
+
+  if (!response.ok) {
+    const error = await response.text();
+    console.error("Failed to set chat menu button:", error);
+    return false;
+  }
+
+  console.log("✅ Chat menu button set successfully", chatId ? `for chat ${chatId}` : "(global)");
+  return true;
+}
+
 async function editTelegramMessage(chatId: number, messageId: number, text: string, extraParams?: Record<string, any>) {
   const response = await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/editMessageText`, {
     method: "POST",
@@ -2733,6 +2753,16 @@ function escapeHtml(text: string): string {
 function cleanMarkdownFormatting(text: string): string {
   let result = text;
 
+  // Auto-close bold markers for section headers like "**Решение:" / "**Ответ:" / "**Шаг 1:"
+  result = result.replace(
+    /^\s*\*\*([^*\n]+?:)\s*$/gm,
+    "**$1**"
+  );
+  result = result.replace(
+    /^\s*\*\*([^*\n]+?:)([^*\n]*)$/gm,
+    "**$1**$2"
+  );
+
   // DEBUG: Log BEFORE cleanup
   console.log("\n🧹 BEFORE cleanMarkdownFormatting:");
   if (text.includes("**План решения:")) {
@@ -3037,51 +3067,36 @@ function formatForTelegramStructured(text: string): string {
     const n = parseInt(num);
     const emoji = n <= 10 ? stepEmojis[n - 1] : `<b>${n}.</b>`;
     const titlePart = title.trim() ? ` <b>${title.trim()}</b>` : "";
-    return `\n━━━━━━━━━━━━━━━━\n${emoji}${titlePart}`;
+    return `\n\n${emoji}${titlePart}\n`;
   });
 
   // Also handle plain "Шаг N:" without bold
   result = result.replace(/(?<![<\w])Шаг\s*(\d+)[:.]\s*/gi, (match, num) => {
     const n = parseInt(num);
     const emoji = n <= 10 ? stepEmojis[n - 1] : `<b>${n}.</b>`;
-    return `\n━━━━━━━━━━━━━━━━\n${emoji} `;
+    return `\n\n${emoji} `;
   });
 
   // === STEP 4: Highlight final answer ===
   result = result.replace(
     /<b>Ответ[:.]*<\/b>/gi,
-    "\n━━━━━━━━━━━━━━━━\n🎯 <b>ОТВЕТ:</b>"
+    "\n\n🎯 <b>Ответ:</b>"
   );
 
   // Plain "Ответ:" without bold
   result = result.replace(
     /(?<![<\w])Ответ[:.]\s*/gi,
-    "\n━━━━━━━━━━━━━━━━\n🎯 <b>ОТВЕТ:</b> "
+    "\n\n🎯 <b>Ответ:</b> "
   );
 
   // === STEP 5: Enhance key sections ===
-  result = result.replace(/<b>(Дано|Найти|Решение|Проверка)[:.]*<\/b>/gi, "📝 <b>$1:</b>");
-  result = result.replace(/(?<![<\w])(Дано|Найти|Проверка)[:.]\s*/gi, "\n📝 <b>$1:</b> ");
+  result = result.replace(/<b>(Дано|Найти|Решение|Проверка)[:.]*<\/b>/gi, "\n\n📝 <b>$1:</b>");
+  result = result.replace(/(?<![<\w])(Дано|Найти|Проверка)[:.]\s*/gi, "\n\n📝 <b>$1:</b> ");
 
   // === STEP 6: Clean up formatting ===
 
-  // Remove separator at very beginning
-  result = result.replace(/^[\n\s]*━━/, "━━");
-  if (result.startsWith("━━")) {
-    result = result.replace(/^━━━━━━━━━━━━━━━━\n*/, "");
-  }
-
-  // Remove duplicate separators
-  result = result.replace(/(━━━━━━━━━━━━━━━━[\n\s]*){2,}/g, "━━━━━━━━━━━━━━━━\n\n");
-
-  // Remove separator at the very end
-  result = result.replace(/[\n\s]*━━━━━━━━━━━━━━━━[\n\s]*$/, "");
-
   // Clean up excessive newlines (more than 2)
   result = result.replace(/\n{3,}/g, "\n\n");
-
-  // Ensure space after separators
-  result = result.replace(/━━━━━━━━━━━━━━━━\n([^\n])/g, "━━━━━━━━━━━━━━━━\n\n$1");
 
   // Remove leading newlines
   result = result.replace(/^\n+/, "");
@@ -3603,7 +3618,7 @@ async function handleTextMessage(telegramUserId: number, userId: string, text: s
     const solutionId = await saveSolution(telegramUserId, telegramUserId, userId, text, aiContent);
 
     // Format and save AI response
-    const formattedContent = formatForTelegram(aiContent);
+    const formattedContent = formatForTelegramStructured(aiContent);
 
     // DEBUG: Log formatted result
     console.log("\n📝 FORMATTED RESULT (first 500 chars):");
@@ -3824,7 +3839,7 @@ async function handlePhotoMessage(telegramUserId: number, userId: string, photo:
 
     // Format and save AI response
     console.log("Step 20: Formatting content for Telegram...");
-    const formattedContent = formatForTelegram(aiContent);
+    const formattedContent = formatForTelegramStructured(aiContent);
 
     console.log("Step 21: Saving AI response to database...");
     await supabase.from("chat_messages").insert({
@@ -4384,7 +4399,8 @@ Deno.serve(async (req) => {
     const url = new URL(req.url);
     if (url.searchParams.get("action") === "set_commands") {
       const success = await setMyCommands();
-      return new Response(JSON.stringify({ ok: success }), {
+      const menuSuccess = await setChatMenuButton();
+      return new Response(JSON.stringify({ ok: success && menuSuccess }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
@@ -4399,6 +4415,7 @@ Deno.serve(async (req) => {
       const parts = update.message.text.split(" ");
       const utmSource = parts[1] || "header_try";
 
+      await setChatMenuButton(telegramUserId);
       await handleStart(telegramUserId, telegramUsername, utmSource);
       return new Response(JSON.stringify({ ok: true }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
