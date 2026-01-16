@@ -77,7 +77,7 @@ src/index.css                     ✅
 
 ## 📚 Документация
 
-Подробная документация доступна в файле `UI_IMPROVEMENTS.md`
+Подробная документация доступна в файле [`ui-improvements.md`](./ui-improvements.md)
 
 ---
 
