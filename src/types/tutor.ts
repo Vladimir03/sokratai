@@ -23,6 +23,8 @@ export interface TutorStudent {
   subject: string | null;
   notes: string | null;
   status: 'active' | 'paused' | 'completed';
+  paid_until: string | null;
+  last_activity_at: string | null;
   created_at: string;
   updated_at: string;
 }

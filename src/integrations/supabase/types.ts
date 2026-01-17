@@ -959,7 +959,9 @@ export type Database = {
           current_score: number | null
           exam_type: string | null
           id: string
+          last_activity_at: string | null
           notes: string | null
+          paid_until: string | null
           start_score: number | null
           status: string | null
           student_id: string
@@ -973,7 +975,9 @@ export type Database = {
           current_score?: number | null
           exam_type?: string | null
           id?: string
+          last_activity_at?: string | null
           notes?: string | null
+          paid_until?: string | null
           start_score?: number | null
           status?: string | null
           student_id: string
@@ -987,7 +991,9 @@ export type Database = {
           current_score?: number | null
           exam_type?: string | null
           id?: string
+          last_activity_at?: string | null
           notes?: string | null
+          paid_until?: string | null
           start_score?: number | null
           status?: string | null
           student_id?: string
