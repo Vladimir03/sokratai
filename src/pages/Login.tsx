@@ -31,12 +31,23 @@ const Login = () => {
         return;
       }
 
-      const { error } = await supabase.auth.signInWithPassword({
+      const { data, error } = await supabase.auth.signInWithPassword({
         email: validation.data.email,
         password: validation.data.password,
       });
 
       if (error) throw error;
+
+      // Check if user is a tutor and redirect accordingly
+      if (data.user) {
+        const { data: isTutor } = await supabase.rpc("is_tutor", { _user_id: data.user.id });
+        
+        if (isTutor) {
+          toast.success("Успешный вход!");
+          navigate("/tutor/dashboard");
+          return;
+        }
+      }
 
       toast.success("Успешный вход!");
       navigate("/chat");

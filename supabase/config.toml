@@ -38,3 +38,12 @@ verify_jwt = true
 
 [functions.yookassa-webhook]
 verify_jwt = false
+
+[functions.assign-tutor-role]
+verify_jwt = false
+
+[functions.admin-analytics]
+verify_jwt = false
+
+[functions.telegram-webapp-recent-solutions]
+verify_jwt = false

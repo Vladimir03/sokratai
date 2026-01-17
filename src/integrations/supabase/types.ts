@@ -1163,6 +1163,7 @@ export type Database = {
       }
       is_admin: { Args: { _user_id: string }; Returns: boolean }
       is_admin_email: { Args: { _user_id: string }; Returns: boolean }
+      is_tutor: { Args: { _user_id: string }; Returns: boolean }
       update_user_stats_on_solve: {
         Args: { p_is_correct: boolean; p_user_id: string }
         Returns: undefined
