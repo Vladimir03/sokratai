@@ -18,9 +18,10 @@ function bufferToHex(buffer: ArrayBuffer): string {
 }
 
 async function hmacSha256(key: ArrayBuffer | Uint8Array, data: string): Promise<ArrayBuffer> {
+  const keyBuffer = key instanceof ArrayBuffer ? key : new Uint8Array(key).buffer;
   const cryptoKey = await crypto.subtle.importKey(
     "raw",
-    key,
+    keyBuffer,
     { name: "HMAC", hash: "SHA-256" },
     false,
     ["sign"],
@@ -61,6 +62,10 @@ async function verifyInitData(initData: string, botToken: string): Promise<{
   try {
     user = JSON.parse(userRaw);
   } catch {
+    return null;
+  }
+
+  if (!user || typeof user.id !== "number") {
     return null;
   }
 
