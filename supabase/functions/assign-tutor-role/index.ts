@@ -118,6 +118,27 @@ Deno.serve(async (req) => {
 
     console.log("Tutor role assigned successfully:", user.id);
 
+    // Create tutor profile
+    const tutorName = authUser.user.user_metadata?.username || 
+                      authUser.user.email?.split('@')[0] || 
+                      'Репетитор';
+    const bookingLink = `tutor-${user.id.substring(0, 8)}`;
+
+    const { error: tutorError } = await supabaseAdmin
+      .from("tutors")
+      .insert({
+        user_id: user.id,
+        name: tutorName,
+        booking_link: bookingLink,
+      });
+
+    if (tutorError) {
+      console.error("Error creating tutor profile:", tutorError);
+      // Don't fail - role is already assigned, profile can be created later
+    } else {
+      console.log("Tutor profile created:", user.id);
+    }
+
     return new Response(
       JSON.stringify({ success: true }),
       { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
