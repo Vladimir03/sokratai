@@ -802,6 +802,39 @@ async function handleWebLogin(telegramUserId: number, telegramUsername: string |
       return;
     }
 
+    // Check if this is a new user and intended_role is 'tutor'
+    if (tokenData.intended_role === 'tutor') {
+      // Check if user was created within the last 5 minutes (new user via Telegram)
+      const profileCreatedAt = new Date(profile.created_at);
+      const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000);
+      const isNewUser = profileCreatedAt > fiveMinutesAgo;
+      
+      console.log("Tutor role check:", { isNewUser, profileCreatedAt, intended_role: tokenData.intended_role });
+      
+      if (isNewUser) {
+        // Check if user already has tutor role
+        const { data: existingRole } = await supabase
+          .from("user_roles")
+          .select("id")
+          .eq("user_id", profile.id)
+          .eq("role", "tutor")
+          .maybeSingle();
+        
+        if (!existingRole) {
+          // Assign tutor role
+          const { error: roleError } = await supabase
+            .from("user_roles")
+            .insert({ user_id: profile.id, role: "tutor" });
+          
+          if (roleError) {
+            console.error("Failed to assign tutor role:", roleError);
+          } else {
+            console.log("Tutor role assigned to new user:", profile.id);
+          }
+        }
+      }
+    }
+
     // Update token with session data
     await supabase
       .from("telegram_login_tokens")

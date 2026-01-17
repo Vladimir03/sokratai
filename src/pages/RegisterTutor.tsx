@@ -7,6 +7,7 @@ import { supabase } from "@/lib/supabaseClient";
 import { toast } from "sonner";
 import { z } from "zod";
 import { GraduationCap } from "lucide-react";
+import TutorTelegramLoginButton from "@/components/TutorTelegramLoginButton";
 
 const registerSchema = z.object({
   name: z.string()
@@ -96,6 +97,24 @@ const RegisterTutor = () => {
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">
+          <div className="flex flex-col items-center">
+            <p className="text-sm text-muted-foreground mb-3">
+              Быстрая регистрация через Telegram
+            </p>
+            <TutorTelegramLoginButton className="w-full" />
+          </div>
+
+          <div className="relative">
+            <div className="absolute inset-0 flex items-center">
+              <span className="w-full border-t border-border" />
+            </div>
+            <div className="relative flex justify-center text-xs uppercase">
+              <span className="bg-card px-2 text-muted-foreground">
+                или по email
+              </span>
+            </div>
+          </div>
+
           <form onSubmit={handleRegister} className="space-y-4">
             <div className="space-y-2">
               <Input
