@@ -953,6 +953,108 @@ export type Database = {
         }
         Relationships: []
       }
+      tutor_students: {
+        Row: {
+          created_at: string | null
+          current_score: number | null
+          exam_type: string | null
+          id: string
+          notes: string | null
+          start_score: number | null
+          status: string | null
+          student_id: string
+          subject: string | null
+          target_score: number | null
+          tutor_id: string
+          updated_at: string | null
+        }
+        Insert: {
+          created_at?: string | null
+          current_score?: number | null
+          exam_type?: string | null
+          id?: string
+          notes?: string | null
+          start_score?: number | null
+          status?: string | null
+          student_id: string
+          subject?: string | null
+          target_score?: number | null
+          tutor_id: string
+          updated_at?: string | null
+        }
+        Update: {
+          created_at?: string | null
+          current_score?: number | null
+          exam_type?: string | null
+          id?: string
+          notes?: string | null
+          start_score?: number | null
+          status?: string | null
+          student_id?: string
+          subject?: string | null
+          target_score?: number | null
+          tutor_id?: string
+          updated_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "tutor_students_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "tutor_students_tutor_id_fkey"
+            columns: ["tutor_id"]
+            isOneToOne: false
+            referencedRelation: "tutors"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      tutors: {
+        Row: {
+          avatar_url: string | null
+          bio: string | null
+          booking_link: string | null
+          created_at: string | null
+          id: string
+          name: string
+          subjects: string[] | null
+          telegram_id: string | null
+          telegram_username: string | null
+          updated_at: string | null
+          user_id: string
+        }
+        Insert: {
+          avatar_url?: string | null
+          bio?: string | null
+          booking_link?: string | null
+          created_at?: string | null
+          id?: string
+          name: string
+          subjects?: string[] | null
+          telegram_id?: string | null
+          telegram_username?: string | null
+          updated_at?: string | null
+          user_id: string
+        }
+        Update: {
+          avatar_url?: string | null
+          bio?: string | null
+          booking_link?: string | null
+          created_at?: string | null
+          id?: string
+          name?: string
+          subjects?: string[] | null
+          telegram_id?: string | null
+          telegram_username?: string | null
+          updated_at?: string | null
+          user_id?: string
+        }
+        Relationships: []
+      }
       user_ege_progress: {
         Row: {
           correct_attempts: number | null
