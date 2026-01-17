@@ -848,6 +848,7 @@ export type Database = {
           created_at: string | null
           expires_at: string | null
           id: string
+          intended_role: string | null
           session_data: Json | null
           status: string | null
           telegram_user_id: number | null
@@ -860,6 +861,7 @@ export type Database = {
           created_at?: string | null
           expires_at?: string | null
           id?: string
+          intended_role?: string | null
           session_data?: Json | null
           status?: string | null
           telegram_user_id?: number | null
@@ -872,6 +874,7 @@ export type Database = {
           created_at?: string | null
           expires_at?: string | null
           id?: string
+          intended_role?: string | null
           session_data?: Json | null
           status?: string | null
           telegram_user_id?: number | null

@@ -6,15 +6,15 @@ import { Send, Loader2, CheckCircle, RefreshCw, ExternalLink } from "lucide-reac
 import { toast } from "sonner";
 import { isIOS } from "@/hooks/use-mobile";
 
-interface TelegramLoginButtonProps {
+interface TutorTelegramLoginButtonProps {
   botName?: string;
   className?: string;
 }
 
-const TelegramLoginButton = ({ 
+const TutorTelegramLoginButton = ({ 
   botName = "sokratai_ru_bot",
   className
-}: TelegramLoginButtonProps) => {
+}: TutorTelegramLoginButtonProps) => {
   const navigate = useNavigate();
   const [loading, setLoading] = useState(false);
   const [status, setStatus] = useState<"idle" | "waiting" | "success">("idle");
@@ -49,23 +49,9 @@ const TelegramLoginButton = ({
         setStatus("success");
         toast.success("Успешный вход через Telegram!");
         
-        // Check if user is a tutor and redirect accordingly
-        setTimeout(async () => {
-          try {
-            const { data: { user } } = await supabase.auth.getUser();
-            if (user) {
-              const { data: isTutor } = await supabase.rpc("is_tutor", { _user_id: user.id });
-              if (isTutor) {
-                navigate("/tutor/dashboard");
-              } else {
-                navigate("/chat");
-              }
-            } else {
-              navigate("/chat");
-            }
-          } catch {
-            navigate("/chat");
-          }
+        // Always redirect to tutor dashboard for tutor registration
+        setTimeout(() => {
+          navigate("/tutor/dashboard");
         }, 500);
         
         return true;
@@ -145,7 +131,11 @@ const TelegramLoginButton = ({
     try {
       const response = await fetch(
         "https://vrsseotrfmsxpbciyqzc.supabase.co/functions/v1/telegram-login-token?action=create",
-        { method: "POST" }
+        { 
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ intended_role: "tutor" })
+        }
       );
       
       if (!response.ok) {
@@ -153,7 +143,7 @@ const TelegramLoginButton = ({
       }
 
       const { token } = await response.json();
-      console.log("Created login token:", token);
+      console.log("Created login token for tutor:", token);
       setCurrentToken(token);
 
       openTelegram(token);
@@ -248,4 +238,4 @@ const TelegramLoginButton = ({
   );
 };
 
-export default TelegramLoginButton;
+export default TutorTelegramLoginButton;

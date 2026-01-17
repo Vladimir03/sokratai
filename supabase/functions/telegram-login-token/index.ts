@@ -34,13 +34,15 @@ Deno.serve(async (req) => {
     if (req.method === "POST" || action === "create") {
       let actionType = "login";
       let userId = null;
+      let intendedRole = null;
 
-      // Try to parse body for action type and user_id
+      // Try to parse body for action type, user_id, and intended_role
       try {
         const body = await req.json();
         actionType = body.action || "login";
         userId = body.user_id || null;
-        console.log("Creating token with action:", actionType, "user_id:", userId);
+        intendedRole = body.intended_role || null;
+        console.log("Creating token with action:", actionType, "user_id:", userId, "intended_role:", intendedRole);
       } catch {
         console.log("No body or invalid JSON, defaulting to login action");
       }
@@ -54,6 +56,7 @@ Deno.serve(async (req) => {
           status: "pending",
           action_type: actionType,
           user_id: userId, // Store user_id for link actions
+          intended_role: intendedRole, // Store intended role for tutor registration
           expires_at: new Date(Date.now() + 5 * 60 * 1000).toISOString(), // 5 minutes
         })
         .select()
@@ -64,10 +67,10 @@ Deno.serve(async (req) => {
         throw error;
       }
 
-      console.log("Token created:", token, "action:", actionType);
+      console.log("Token created:", token, "action:", actionType, "intended_role:", intendedRole);
       
       return new Response(
-        JSON.stringify({ token: data.token, action_type: actionType }),
+        JSON.stringify({ token: data.token, action_type: actionType, intended_role: intendedRole }),
         { headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
@@ -130,13 +133,14 @@ Deno.serve(async (req) => {
           );
         }
 
-        // For login action, return session
+        // For login action, return session with intended_role
         return new Response(
           JSON.stringify({ 
             status: "verified", 
             action_type: "login",
             session: data.session_data,
-            user_id: data.user_id
+            user_id: data.user_id,
+            intended_role: data.intended_role,
           }),
           { headers: { ...corsHeaders, "Content-Type": "application/json" } }
         );
