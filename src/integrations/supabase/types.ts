@@ -666,6 +666,51 @@ export type Database = {
         }
         Relationships: []
       }
+      payments: {
+        Row: {
+          amount: number
+          created_at: string
+          currency: string
+          id: string
+          idempotency_key: string | null
+          status: string
+          subscription_activated_at: string | null
+          subscription_days: number
+          subscription_expires_at: string | null
+          updated_at: string
+          user_id: string
+          webhook_data: Json | null
+        }
+        Insert: {
+          amount: number
+          created_at?: string
+          currency?: string
+          id: string
+          idempotency_key?: string | null
+          status?: string
+          subscription_activated_at?: string | null
+          subscription_days?: number
+          subscription_expires_at?: string | null
+          updated_at?: string
+          user_id: string
+          webhook_data?: Json | null
+        }
+        Update: {
+          amount?: number
+          created_at?: string
+          currency?: string
+          id?: string
+          idempotency_key?: string | null
+          status?: string
+          subscription_activated_at?: string | null
+          subscription_days?: number
+          subscription_expires_at?: string | null
+          updated_at?: string
+          user_id?: string
+          webhook_data?: Json | null
+        }
+        Relationships: []
+      }
       practice_attempts: {
         Row: {
           asked_ai: boolean | null
