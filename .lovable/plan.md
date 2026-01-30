@@ -1,99 +1,104 @@
 
+## План: Добавление раздела платежей в админ-панель
 
-## План: Создание таблицы payments и исправление подписки
+### Обзор
+Добавить новую вкладку "Платежи" в админ-панель `/admin` для просмотра истории всех платежей YooKassa с информацией о пользователях.
 
-### Часть 1: Миграция базы данных
+---
 
-Создать таблицу `payments` для хранения истории платежей YooKassa:
+### Часть 1: Создание компонента AdminPayments
+
+Создать новый файл `src/components/admin/AdminPayments.tsx`:
+
+**Функциональность:**
+- Таблица с историей всех платежей
+- Поиск по имени пользователя / Telegram username
+- Отображение: пользователь, сумма, статус, дата, срок подписки
+- Сортировка по дате (новые сверху)
+- Цветовая индикация статуса платежа (succeeded = зелёный, pending = жёлтый, canceled = красный)
+
+**Структура таблицы:**
+| Дата | Пользователь | Сумма | Статус | Подписка до |
+|------|--------------|-------|--------|-------------|
+| 29.01.2026 | @maksimkak1 | 699₽ | ✅ | 28.02.2026 |
+
+**Данные:**
+- Запрос к таблице `payments` с join на `profiles` для получения информации о пользователе
+- Пагинация для больших объёмов данных (опционально)
+
+---
+
+### Часть 2: RLS политика для админов
+
+Добавить политику в таблицу `payments`, чтобы админы могли видеть все платежи:
 
 ```sql
--- Таблица платежей
-CREATE TABLE IF NOT EXISTS public.payments (
-  id TEXT PRIMARY KEY,                    -- ID платежа от YooKassa
-  user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
-  amount DECIMAL(10, 2) NOT NULL,
-  currency TEXT NOT NULL DEFAULT 'RUB',
-  status TEXT NOT NULL DEFAULT 'pending', -- pending, succeeded, canceled
-  subscription_days INTEGER NOT NULL DEFAULT 30,
-  idempotency_key TEXT,
-  webhook_data JSONB,                     -- Полные данные от webhook
-  subscription_activated_at TIMESTAMPTZ,
-  subscription_expires_at TIMESTAMPTZ,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-
--- Индексы
-CREATE INDEX idx_payments_user_id ON public.payments(user_id);
-CREATE INDEX idx_payments_status ON public.payments(status);
-
--- RLS
-ALTER TABLE public.payments ENABLE ROW LEVEL SECURITY;
-
--- Пользователи видят свои платежи
-CREATE POLICY "Users can view their own payments"
+CREATE POLICY "Admins can view all payments"
   ON public.payments FOR SELECT
-  USING (auth.uid() = user_id);
-
--- Service role для webhook
-CREATE POLICY "Service role can manage all payments"
-  ON public.payments FOR ALL
-  USING (true);
-
--- Триггер updated_at
-CREATE TRIGGER update_payments_updated_at
-  BEFORE UPDATE ON public.payments
-  FOR EACH ROW
-  EXECUTE FUNCTION handle_updated_at();
+  USING (has_role(auth.uid(), 'admin') OR is_admin_email(auth.uid()));
 ```
 
 ---
 
-### Часть 2: Обновление данных
+### Часть 3: Интеграция в Admin.tsx
 
-Исправить дату подписки для пользователя **Максончик**:
+Добавить новую вкладку в существующий компонент `Admin.tsx`:
 
-```sql
-UPDATE public.profiles
-SET subscription_expires_at = '2026-02-28 23:59:59+00'  -- 29.02.2026 нет, февраль 2026 имеет 28 дней
-WHERE id = '3195b69e-4e36-4cab-a661-05846e160449';
+```text
+Tabs:
+├── Аналитика (BarChart3)
+├── CRM (MessageSquare)  
+└── Платежи (CreditCard) ← НОВОЕ
 ```
-
-> **Примечание:** 2026 год не високосный, поэтому максимальная дата февраля — **28.02.2026**.
 
 ---
 
-### Часть 3: Ручная вставка платежа
+### Технические детали
 
-Добавить запись о вчерашнем платеже для истории:
+**Файлы для создания:**
+- `src/components/admin/AdminPayments.tsx` — основной компонент
 
-```sql
-INSERT INTO public.payments (
-  id, user_id, amount, currency, status, 
-  subscription_days, subscription_activated_at, 
-  subscription_expires_at, created_at
-) VALUES (
-  'manual_20260129_maksimkak1',           -- Ручной ID
-  '3195b69e-4e36-4cab-a661-05846e160449', -- user_id Максончика
-  699.00,                                  -- Стоимость Premium
-  'RUB',
-  'succeeded',
-  30,
-  '2026-01-29 20:41:00+00',               -- Время активации (вчера 20:41 UTC)
-  '2026-02-28 23:59:59+00',               -- Истекает 28.02.2026
-  '2026-01-29 20:41:00+00'                -- Время платежа
-);
+**Файлы для изменения:**
+- `src/pages/Admin.tsx` — добавить импорт и вкладку
+
+**Используемые компоненты:**
+- Card, CardHeader, CardContent, CardTitle (shadcn/ui)
+- Table, TableHeader, TableBody, TableRow, TableCell (shadcn/ui)
+- Badge для статусов
+- Input для поиска
+- ScrollArea для прокрутки
+- Skeleton для загрузки
+
+**База данных:**
+- Миграция для добавления RLS политики для админов
+
+---
+
+### Примерный вид интерфейса
+
+```text
+┌──────────────────────────────────────────────────────────┐
+│  💳 История платежей                                      │
+├──────────────────────────────────────────────────────────┤
+│  🔍 [Поиск по имени пользователя...]                     │
+├──────────────────────────────────────────────────────────┤
+│  Дата        │ Пользователь    │ Сумма  │ Статус │ До    │
+│──────────────│─────────────────│────────│────────│───────│
+│  29.01.2026  │ @maksimkak1     │ 699₽   │ ✅     │ 28.02 │
+│  ...         │ ...             │ ...    │ ...    │ ...   │
+└──────────────────────────────────────────────────────────┘
+│  Всего платежей: 1 | Общая сумма: 699₽                   │
+└──────────────────────────────────────────────────────────┘
 ```
 
 ---
 
 ### Итоговый результат
 
-| Действие | Статус |
-|----------|--------|
-| Таблица `payments` создана | ✅ |
-| Максончик: expires_at = 28.02.2026 | ✅ |
-| Платёж записан в историю | ✅ |
-
-После применения миграции все будущие платежи через YooKassa webhook будут автоматически сохраняться в таблице `payments`.
-
+| Действие | Описание |
+|----------|----------|
+| Новый компонент | AdminPayments.tsx для отображения истории платежей |
+| RLS политика | Админы смогут видеть все платежи |
+| Новая вкладка | "Платежи" в админ-панели |
+| Поиск | По имени пользователя и Telegram username |
+| Статистика | Общее количество и сумма платежей |
