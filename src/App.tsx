@@ -39,6 +39,7 @@ const Diagnostic = lazy(() => import("./pages/Diagnostic"));
 const RegisterTutor = lazy(() => import("./pages/RegisterTutor"));
 const TutorDashboard = lazy(() => import("./pages/tutor/TutorDashboard"));
 const TutorStudents = lazy(() => import("./pages/tutor/TutorStudents"));
+const TutorStudentProfile = lazy(() => import("./pages/tutor/TutorStudentProfile"));
 
 // Simple loading fallback
 const PageLoader = () => (
@@ -243,6 +244,14 @@ const App = () => (
             element={
               <Suspense fallback={<PageLoader />}>
                 <TutorStudents />
+              </Suspense>
+            } 
+          />
+          <Route 
+            path="/tutor/students/:tutorStudentId" 
+            element={
+              <Suspense fallback={<PageLoader />}>
+                <TutorStudentProfile />
               </Suspense>
             } 
           />

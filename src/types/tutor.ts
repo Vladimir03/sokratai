@@ -25,6 +25,8 @@ export interface TutorStudent {
   status: 'active' | 'paused' | 'completed';
   paid_until: string | null;
   last_activity_at: string | null;
+  parent_contact: string | null;
+  last_lesson_at: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -55,6 +57,58 @@ export interface UpdateTutorStudentInput {
   current_score?: number;
   notes?: string;
   status?: 'active' | 'paused' | 'completed';
+  parent_contact?: string;
+  last_lesson_at?: string;
+}
+
+// =============================================
+// Пробники (Mock Exams)
+// =============================================
+export interface MockExam {
+  id: string;
+  tutor_student_id: string;
+  date: string;
+  score: number;
+  max_score: number | null;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CreateMockExamInput {
+  tutor_student_id: string;
+  date: string;
+  score: number;
+  max_score?: number;
+  notes?: string;
+}
+
+export interface UpdateMockExamInput {
+  date?: string;
+  score?: number;
+  max_score?: number;
+  notes?: string;
+}
+
+// =============================================
+// Чаты ученика (для репетитора)
+// =============================================
+export interface StudentChat {
+  id: string;
+  user_id: string;
+  chat_type: string;
+  title: string | null;
+  last_message_at: string | null;
+  created_at: string;
+}
+
+export interface StudentChatMessage {
+  id: string;
+  chat_id: string;
+  user_id: string;
+  role: 'user' | 'assistant';
+  content: string;
+  created_at: string;
 }
 
 // Для обновления профиля репетитора

@@ -1,7 +1,6 @@
 import { useState, useMemo, useCallback, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { 
   Pagination, 
   PaginationContent, 
@@ -10,6 +9,7 @@ import {
   PaginationNext, 
   PaginationPrevious 
 } from '@/components/ui/pagination';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { UserPlus } from 'lucide-react';
 import TutorGuard from '@/components/TutorGuard';
 import { TutorLayout } from '@/components/tutor/TutorLayout';
@@ -51,8 +51,6 @@ function TutorStudentsContent() {
     subject: null,
   });
   const [page, setPage] = useState(1);
-  const [selectedStudentId, setSelectedStudentId] = useState<string | null>(null);
-  const [isModalOpen, setIsModalOpen] = useState(false);
 
   // Reset page when filters change
   useEffect(() => {
@@ -152,13 +150,7 @@ function TutorStudentsContent() {
   }, []);
 
   const handleOpenStudent = useCallback((id: string) => {
-    setSelectedStudentId(id);
-    setIsModalOpen(true);
-  }, []);
-
-  const handleAddStudent = useCallback(() => {
-    // TODO: Navigate to add student page or open modal
-    navigate('/tutor/students/add');
+    navigate(`/tutor/students/${id}`);
   }, [navigate]);
 
   // Render pagination
@@ -221,10 +213,19 @@ function TutorStudentsContent() {
         {/* Header */}
         <div className="flex items-center justify-between gap-4 flex-wrap">
           <h1 className="text-2xl font-bold">👥 Мои ученики</h1>
-          <Button onClick={handleAddStudent}>
-            <UserPlus className="h-4 w-4 mr-2" />
-            Добавить ученика
-          </Button>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <span>
+                <Button disabled>
+                  <UserPlus className="h-4 w-4 mr-2" />
+                  Добавить ученика
+                </Button>
+              </span>
+            </TooltipTrigger>
+            <TooltipContent>
+              <p>Добавление учеников через инвайт-ссылку — скоро</p>
+            </TooltipContent>
+          </Tooltip>
         </div>
 
         {/* Loading state */}
@@ -235,7 +236,7 @@ function TutorStudentsContent() {
 
         {/* Empty state */}
         {!loading && !error && students.length === 0 && (
-          <StudentsEmpty onAddStudent={handleAddStudent} />
+          <StudentsEmpty />
         )}
 
         {/* Content */}
@@ -277,21 +278,6 @@ function TutorStudentsContent() {
             {renderPagination()}
           </>
         )}
-
-        {/* Student detail modal (placeholder) */}
-        <Dialog open={isModalOpen} onOpenChange={setIsModalOpen}>
-          <DialogContent>
-            <DialogHeader>
-              <DialogTitle>Детали ученика</DialogTitle>
-            </DialogHeader>
-            <p className="text-muted-foreground">
-              ID: {selectedStudentId}
-            </p>
-            <p className="text-sm text-muted-foreground">
-              Полная карточка ученика будет реализована в следующем PRD
-            </p>
-          </DialogContent>
-        </Dialog>
       </div>
     </TutorLayout>
   );
