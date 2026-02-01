@@ -998,6 +998,47 @@ export type Database = {
         }
         Relationships: []
       }
+      tutor_student_mock_exams: {
+        Row: {
+          created_at: string | null
+          date: string
+          id: string
+          max_score: number | null
+          notes: string | null
+          score: number
+          tutor_student_id: string
+          updated_at: string | null
+        }
+        Insert: {
+          created_at?: string | null
+          date: string
+          id?: string
+          max_score?: number | null
+          notes?: string | null
+          score: number
+          tutor_student_id: string
+          updated_at?: string | null
+        }
+        Update: {
+          created_at?: string | null
+          date?: string
+          id?: string
+          max_score?: number | null
+          notes?: string | null
+          score?: number
+          tutor_student_id?: string
+          updated_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "tutor_student_mock_exams_tutor_student_id_fkey"
+            columns: ["tutor_student_id"]
+            isOneToOne: false
+            referencedRelation: "tutor_students"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       tutor_students: {
         Row: {
           created_at: string | null
@@ -1005,8 +1046,10 @@ export type Database = {
           exam_type: string | null
           id: string
           last_activity_at: string | null
+          last_lesson_at: string | null
           notes: string | null
           paid_until: string | null
+          parent_contact: string | null
           start_score: number | null
           status: string | null
           student_id: string
@@ -1021,8 +1064,10 @@ export type Database = {
           exam_type?: string | null
           id?: string
           last_activity_at?: string | null
+          last_lesson_at?: string | null
           notes?: string | null
           paid_until?: string | null
+          parent_contact?: string | null
           start_score?: number | null
           status?: string | null
           student_id: string
@@ -1037,8 +1082,10 @@ export type Database = {
           exam_type?: string | null
           id?: string
           last_activity_at?: string | null
+          last_lesson_at?: string | null
           notes?: string | null
           paid_until?: string | null
+          parent_contact?: string | null
           start_score?: number | null
           status?: string | null
           student_id?: string
@@ -1320,6 +1367,11 @@ export type Database = {
       is_admin: { Args: { _user_id: string }; Returns: boolean }
       is_admin_email: { Args: { _user_id: string }; Returns: boolean }
       is_tutor: { Args: { _user_id: string }; Returns: boolean }
+      is_tutor_of_student: { Args: { _student_id: string }; Returns: boolean }
+      owns_tutor_student: {
+        Args: { _tutor_student_id: string }
+        Returns: boolean
+      }
       update_user_stats_on_solve: {
         Args: { p_is_correct: boolean; p_user_id: string }
         Returns: undefined
