@@ -998,6 +998,50 @@ export type Database = {
         }
         Relationships: []
       }
+      tutor_payments: {
+        Row: {
+          amount: number
+          created_at: string | null
+          due_date: string | null
+          id: string
+          paid_at: string | null
+          period: string | null
+          status: string
+          tutor_student_id: string
+          updated_at: string | null
+        }
+        Insert: {
+          amount: number
+          created_at?: string | null
+          due_date?: string | null
+          id?: string
+          paid_at?: string | null
+          period?: string | null
+          status?: string
+          tutor_student_id: string
+          updated_at?: string | null
+        }
+        Update: {
+          amount?: number
+          created_at?: string | null
+          due_date?: string | null
+          id?: string
+          paid_at?: string | null
+          period?: string | null
+          status?: string
+          tutor_student_id?: string
+          updated_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "tutor_payments_tutor_student_id_fkey"
+            columns: ["tutor_student_id"]
+            isOneToOne: false
+            referencedRelation: "tutor_students"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       tutor_student_mock_exams: {
         Row: {
           created_at: string | null
