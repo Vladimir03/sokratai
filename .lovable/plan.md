@@ -1,69 +1,85 @@
 
 
-## План: Добавление тестовых данных для репетитора
+## План: Создание таблицы tutor_payments
 
 ### Проблема
-Страница `/tutor/students` открывается, но показывает пустой список учеников. Причина:
-- Таблица `tutors` **пустая** — нет записи репетитора для текущего пользователя
-- Таблица `tutor_students` **пустая** — нет связей репетитор-ученик
+Ошибка возникает потому что таблица `tutor_payments` **не существует** в базе данных. Код в файлах `src/lib/tutors.ts` и `src/types/tutor.ts` ссылается на эту таблицу, но миграция для её создания не была выполнена.
 
-Функция `is_tutor()` возвращает `true` (роль есть в `user_roles`), но профиль репетитора в таблице `tutors` не создан.
+TypeScript показывает ошибки типа:
+```
+Argument of type '"tutor_payments"' is not assignable to parameter of type '"problems_public"'
+```
 
-### Текущий пользователь
-- **ID:** `420b1476-6988-4f00-b435-09400420d145`
-- **Email:** kamchatkinvova@gmail.com
-- **Username:** Владимир_реп
+Это означает, что таблица не найдена в автогенерируемых типах Supabase.
 
 ### Решение
-Выполнить миграцию для создания:
-1. Записи репетитора в таблице `tutors`
-2. Тестовой связи с учеником для демонстрации функционала
+Создать таблицу `tutor_payments` через миграцию базы данных.
 
 ### SQL-миграция
 
 ```sql
--- Создать профиль репетитора
-INSERT INTO public.tutors (user_id, name, subjects)
-VALUES (
-  '420b1476-6988-4f00-b435-09400420d145',
-  'Владимир',
-  ARRAY['Математика']
-)
-ON CONFLICT (user_id) DO NOTHING;
+-- Создать таблицу для учёта оплат репетитору
+CREATE TABLE public.tutor_payments (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  tutor_student_id UUID NOT NULL REFERENCES public.tutor_students(id) ON DELETE CASCADE,
+  amount NUMERIC NOT NULL,
+  period TEXT,
+  status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'paid', 'overdue')),
+  due_date DATE,
+  paid_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
 
--- Добавить тестового ученика (Lera)
-INSERT INTO public.tutor_students (
-  tutor_id,
-  student_id,
-  exam_type,
-  subject,
-  start_score,
-  current_score,
-  target_score,
-  status,
-  notes
-)
-SELECT 
-  t.id,
-  '86970564-1357-4d78-9f98-7d438dec4946',
-  'ege',
-  'Математика',
-  45,
-  62,
-  85,
-  'active',
-  'Тестовый ученик для проверки функционала'
-FROM public.tutors t
-WHERE t.user_id = '420b1476-6988-4f00-b435-09400420d145';
+-- Включить RLS
+ALTER TABLE public.tutor_payments ENABLE ROW LEVEL SECURITY;
+
+-- RLS-политики (только репетитор-владелец может управлять оплатами своих учеников)
+CREATE POLICY "Tutors can view own student payments"
+  ON public.tutor_payments FOR SELECT
+  USING (owns_tutor_student(tutor_student_id));
+
+CREATE POLICY "Tutors can insert payments for own students"
+  ON public.tutor_payments FOR INSERT
+  WITH CHECK (owns_tutor_student(tutor_student_id));
+
+CREATE POLICY "Tutors can update own student payments"
+  ON public.tutor_payments FOR UPDATE
+  USING (owns_tutor_student(tutor_student_id));
+
+CREATE POLICY "Tutors can delete own student payments"
+  ON public.tutor_payments FOR DELETE
+  USING (owns_tutor_student(tutor_student_id));
+
+-- Триггер для обновления updated_at
+CREATE TRIGGER update_tutor_payments_updated_at
+  BEFORE UPDATE ON public.tutor_payments
+  FOR EACH ROW
+  EXECUTE FUNCTION public.handle_updated_at();
 ```
 
-### Результат после миграции
-| Что заработает | Описание |
-|----------------|----------|
-| Список учеников | Карточка ученика "Lera" появится на странице |
-| Клик по карточке | Откроется профиль ученика с 4 вкладками |
-| Вкладка "Обзор" | Прогресс: 45 → 62 → 85 |
-| Вкладка "Заметки" | Редактирование заметок |
-| Вкладка "Пробники" | Добавление/удаление результатов |
-| Вкладка "AI-диалоги" | Просмотр чатов ученика |
+### Структура таблицы
+
+| Колонка | Тип | Описание |
+|---------|-----|----------|
+| id | UUID | Первичный ключ |
+| tutor_student_id | UUID | Связь с учеником репетитора |
+| amount | NUMERIC | Сумма оплаты |
+| period | TEXT | Период (например "февраль 2026") |
+| status | TEXT | Статус: pending, paid, overdue |
+| due_date | DATE | Срок оплаты |
+| paid_at | TIMESTAMPTZ | Дата фактической оплаты |
+| created_at | TIMESTAMPTZ | Дата создания записи |
+| updated_at | TIMESTAMPTZ | Дата обновления |
+
+### Безопасность
+- RLS включён
+- Используется существующая функция `owns_tutor_student()` для проверки владельца
+- Только репетитор может видеть и управлять оплатами своих учеников
+
+### Результат
+После выполнения миграции:
+- Ошибки сборки исчезнут
+- Страница `/tutor/payments` заработает
+- Можно будет добавлять, редактировать и удалять записи об оплатах
 
