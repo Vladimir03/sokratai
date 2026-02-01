@@ -5,6 +5,7 @@ export interface Tutor {
   telegram_id: string | null;
   telegram_username: string | null;
   booking_link: string | null;
+  invite_code: string | null;
   avatar_url: string | null;
   subjects: string[];
   bio: string | null;
@@ -37,6 +38,7 @@ export interface TutorStudentWithProfile extends TutorStudent {
     id: string;
     username: string;
     telegram_username: string | null;
+    telegram_user_id: number | null;
     grade: number | null;
   };
 }

@@ -2,7 +2,8 @@ import { Card } from '@/components/ui/card';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Progress } from '@/components/ui/progress';
 import { Badge } from '@/components/ui/badge';
-import { CheckCircle, AlertCircle, Clock } from 'lucide-react';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { CheckCircle, AlertCircle, Clock, Bot } from 'lucide-react';
 import type { TutorStudentWithProfile } from '@/types/tutor';
 import { 
   formatRelativeTime, 
@@ -26,6 +27,7 @@ export function StudentCard({ student, onClick }: StudentCardProps) {
   const grade = student.profiles?.grade;
   const examType = formatExamType(student.exam_type);
   const subject = student.subject;
+  const isAiConnected = Boolean(student.profiles?.telegram_user_id);
 
   // Build subtitle parts
   const subtitleParts = [
@@ -73,6 +75,23 @@ export function StudentCard({ student, onClick }: StudentCardProps) {
 
           {/* Status row */}
           <div className="flex items-center gap-3 flex-wrap text-sm">
+            {/* AI connected status */}
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <div className="flex items-center gap-1">
+                  <Bot className={`h-4 w-4 ${isAiConnected ? 'text-primary' : 'text-muted-foreground/50'}`} />
+                  <span className={isAiConnected ? 'text-primary' : 'text-muted-foreground/50'}>
+                    {isAiConnected ? 'AI' : 'Не подключен'}
+                  </span>
+                </div>
+              </TooltipTrigger>
+              <TooltipContent>
+                {isAiConnected 
+                  ? 'Ученик подключен к AI-помощнику в Telegram' 
+                  : 'Ученик ещё не подключился к AI-помощнику'}
+              </TooltipContent>
+            </Tooltip>
+            
             {/* Payment status */}
             <div className="flex items-center gap-1">
               {paymentStatus.isPaid ? (

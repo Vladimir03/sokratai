@@ -4,6 +4,20 @@ export const getTelegramLink = (utmSource: string): string => {
   return `https://t.me/${TELEGRAM_BOT_USERNAME}?start=${utmSource}`;
 };
 
+/**
+ * Генерирует ссылку для приглашения ученика от репетитора
+ */
+export const getTutorInviteTelegramLink = (inviteCode: string): string => {
+  return `https://t.me/${TELEGRAM_BOT_USERNAME}?start=tutor_${inviteCode}`;
+};
+
+/**
+ * Генерирует веб-ссылку для приглашения (страница с инструкцией)
+ */
+export const getTutorInviteWebLink = (inviteCode: string): string => {
+  return `${window.location.origin}/invite/${inviteCode}`;
+};
+
 export const telegramLinks = {
   headerTry: getTelegramLink('header_try'),
   planFree: getTelegramLink('plan_free'),

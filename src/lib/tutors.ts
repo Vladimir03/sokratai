@@ -93,6 +93,7 @@ export async function getTutorStudents(): Promise<TutorStudentWithProfile[]> {
         id,
         username,
         telegram_username,
+        telegram_user_id,
         grade
       )
     `)
@@ -121,6 +122,7 @@ export async function getTutorStudent(
         id,
         username,
         telegram_username,
+        telegram_user_id,
         grade
       )
     `)

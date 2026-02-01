@@ -1,5 +1,6 @@
 import { useState, useMemo, useCallback, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
+import QRCode from 'react-qr-code';
 import { Button } from '@/components/ui/button';
 import { 
   Pagination, 
@@ -9,8 +10,9 @@ import {
   PaginationNext, 
   PaginationPrevious 
 } from '@/components/ui/pagination';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
-import { UserPlus } from 'lucide-react';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
+import { UserPlus, Copy, ExternalLink, Check } from 'lucide-react';
+import { toast } from 'sonner';
 import TutorGuard from '@/components/TutorGuard';
 import { TutorLayout } from '@/components/tutor/TutorLayout';
 import { StudentCard } from '@/components/tutor/StudentCard';
@@ -26,8 +28,9 @@ import {
   StudentsEmptyFilters, 
   StudentsError 
 } from '@/components/tutor/StudentsStates';
-import { useTutorStudents } from '@/hooks/useTutor';
+import { useTutorStudents, useTutor } from '@/hooks/useTutor';
 import { calculateProgress, getPaymentStatus } from '@/lib/formatters';
+import { getTutorInviteWebLink, getTutorInviteTelegramLink } from '@/utils/telegramLinks';
 import type { TutorStudentWithProfile } from '@/types/tutor';
 
 const PAGE_SIZE = 10;
@@ -40,6 +43,7 @@ type StudentWithExtras = TutorStudentWithProfile & {
 
 function TutorStudentsContent() {
   const navigate = useNavigate();
+  const { tutor } = useTutor();
   const { students, loading, error, refetch } = useTutorStudents();
   
   // State
@@ -51,6 +55,31 @@ function TutorStudentsContent() {
     subject: null,
   });
   const [page, setPage] = useState(1);
+  const [inviteModalOpen, setInviteModalOpen] = useState(false);
+  const [copiedLink, setCopiedLink] = useState(false);
+  
+  // Invite URLs
+  const inviteCode = tutor?.invite_code;
+  const inviteWebLink = inviteCode ? getTutorInviteWebLink(inviteCode) : '';
+  const inviteTelegramLink = inviteCode ? getTutorInviteTelegramLink(inviteCode) : '';
+  
+  const handleCopyLink = async () => {
+    if (!inviteWebLink) return;
+    try {
+      await navigator.clipboard.writeText(inviteWebLink);
+      setCopiedLink(true);
+      toast.success('Ссылка скопирована');
+      setTimeout(() => setCopiedLink(false), 2000);
+    } catch {
+      toast.error('Не удалось скопировать');
+    }
+  };
+  
+  const handleOpenTelegram = () => {
+    if (inviteTelegramLink) {
+      window.open(inviteTelegramLink, '_blank');
+    }
+  };
 
   // Reset page when filters change
   useEffect(() => {
@@ -213,20 +242,77 @@ function TutorStudentsContent() {
         {/* Header */}
         <div className="flex items-center justify-between gap-4 flex-wrap">
           <h1 className="text-2xl font-bold">👥 Мои ученики</h1>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <span>
-                <Button disabled>
-                  <UserPlus className="h-4 w-4 mr-2" />
-                  Добавить ученика
-                </Button>
-              </span>
-            </TooltipTrigger>
-            <TooltipContent>
-              <p>Добавление учеников через инвайт-ссылку — скоро</p>
-            </TooltipContent>
-          </Tooltip>
+          <Button onClick={() => setInviteModalOpen(true)}>
+            <UserPlus className="h-4 w-4 mr-2" />
+            Добавить ученика
+          </Button>
         </div>
+        
+        {/* Invite Modal */}
+        <Dialog open={inviteModalOpen} onOpenChange={setInviteModalOpen}>
+          <DialogContent className="max-w-md">
+            <DialogHeader>
+              <DialogTitle>Пригласить ученика</DialogTitle>
+              <DialogDescription>
+                Отправьте эту ссылку ученику. После перехода он автоматически подключится к вашему кабинету и получит доступ к AI-помощнику.
+              </DialogDescription>
+            </DialogHeader>
+            
+            <div className="space-y-6 py-4">
+              {/* QR Code */}
+              {inviteWebLink && (
+                <div className="flex justify-center">
+                  <div className="bg-white p-3 rounded-lg shadow-sm">
+                    <QRCode value={inviteWebLink} size={160} level="M" />
+                  </div>
+                </div>
+              )}
+              
+              {/* Link display */}
+              <div className="bg-muted p-3 rounded-md text-sm font-mono break-all text-center">
+                {inviteWebLink || 'Загрузка...'}
+              </div>
+              
+              {/* Actions */}
+              <div className="flex flex-col sm:flex-row gap-2">
+                <Button 
+                  onClick={handleCopyLink} 
+                  variant="outline" 
+                  className="flex-1"
+                  disabled={!inviteCode}
+                >
+                  {copiedLink ? (
+                    <>
+                      <Check className="h-4 w-4 mr-2" />
+                      Скопировано
+                    </>
+                  ) : (
+                    <>
+                      <Copy className="h-4 w-4 mr-2" />
+                      Скопировать ссылку
+                    </>
+                  )}
+                </Button>
+                
+                <Button 
+                  onClick={handleOpenTelegram}
+                  className="flex-1"
+                  disabled={!inviteCode}
+                >
+                  <ExternalLink className="h-4 w-4 mr-2" />
+                  Открыть Telegram
+                </Button>
+              </div>
+              
+              {/* Instructions */}
+              <div className="text-xs text-muted-foreground space-y-1">
+                <p>1. Ученик открывает ссылку или сканирует QR-код</p>
+                <p>2. Переходит в Telegram и нажимает «Начать»</p>
+                <p>3. Автоматически появляется в вашем списке учеников</p>
+              </div>
+            </div>
+          </DialogContent>
+        </Dialog>
 
         {/* Loading state */}
         {loading && <StudentsSkeleton />}

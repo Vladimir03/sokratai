@@ -41,6 +41,7 @@ const TutorDashboard = lazy(() => import("./pages/tutor/TutorDashboard"));
 const TutorStudents = lazy(() => import("./pages/tutor/TutorStudents"));
 const TutorStudentProfile = lazy(() => import("./pages/tutor/TutorStudentProfile"));
 const TutorPayments = lazy(() => import("./pages/tutor/TutorPayments"));
+const InviteToTelegram = lazy(() => import("./pages/InviteToTelegram"));
 
 // Simple loading fallback
 const PageLoader = () => (
@@ -261,6 +262,14 @@ const App = () => (
             element={
               <Suspense fallback={<PageLoader />}>
                 <TutorPayments />
+              </Suspense>
+            } 
+          />
+          <Route 
+            path="/invite/:inviteCode" 
+            element={
+              <Suspense fallback={<PageLoader />}>
+                <InviteToTelegram />
               </Suspense>
             } 
           />

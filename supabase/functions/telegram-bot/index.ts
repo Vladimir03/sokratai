@@ -1066,6 +1066,96 @@ async function handleLinkAccount(telegramUserId: number, telegramUsername: strin
   }
 }
 
+async function handleTutorInvite(telegramUserId: number, telegramUsername: string | undefined, inviteCode: string) {
+  console.log("handleTutorInvite:", { telegramUserId, inviteCode });
+
+  try {
+    // 1. Find tutor by invite_code
+    const { data: tutor, error: tutorError } = await supabase
+      .from("tutors")
+      .select("id, name, user_id")
+      .eq("invite_code", inviteCode)
+      .single();
+
+    if (tutorError || !tutor) {
+      console.log("Tutor not found for invite code:", inviteCode);
+      await sendTelegramMessage(
+        telegramUserId,
+        "❌ Ссылка недействительна или устарела. Попросите репетитора прислать новую ссылку."
+      );
+      return;
+    }
+
+    // 2. Get or create student profile
+    const profile = await getOrCreateProfile(telegramUserId, telegramUsername);
+
+    // 3. Check if this student is already linked to this tutor
+    const { data: existingLink } = await supabase
+      .from("tutor_students")
+      .select("id")
+      .eq("tutor_id", tutor.id)
+      .eq("student_id", profile.id)
+      .maybeSingle();
+
+    if (existingLink) {
+      console.log("Student already linked to tutor:", { studentId: profile.id, tutorId: tutor.id });
+      await sendTelegramMessage(
+        telegramUserId,
+        `✅ Вы уже подключены к репетитору ${tutor.name}!\n\n📸 Отправляйте фото задач\n✏️ Пишите вопросы\n\nЯ помогу разобраться! 🚀`
+      );
+      return;
+    }
+
+    // 4. Create tutor_students link
+    const { error: insertError } = await supabase
+      .from("tutor_students")
+      .insert({
+        tutor_id: tutor.id,
+        student_id: profile.id,
+        status: "active",
+      });
+
+    if (insertError) {
+      console.error("Error creating tutor_students link:", insertError);
+      await sendTelegramMessage(
+        telegramUserId,
+        "❌ Произошла ошибка. Попробуйте ещё раз или обратитесь к репетитору."
+      );
+      return;
+    }
+
+    console.log("Successfully linked student to tutor:", { studentId: profile.id, tutorId: tutor.id });
+
+    // 5. Send success message
+    const successMessage = `🎉 Вас добавил репетитор ${tutor.name}!
+
+Теперь вы можете:
+📸 Отправлять фото задач из учебника
+✏️ Писать задачи текстом
+❓ Задавать любые вопросы по предмету
+
+Я — AI-помощник Сократ. Помогу разобраться с любой задачей! 🚀`;
+
+    await sendTelegramMessage(telegramUserId, successMessage);
+
+    // 6. Continue with onboarding if not completed
+    if (!profile.onboarding_completed) {
+      await supabase.from("onboarding_analytics").insert({
+        user_id: profile.id,
+        source: "telegram",
+        utm_source: `tutor_${inviteCode}`,
+        telegram_user_id: telegramUserId,
+        started_at: new Date().toISOString(),
+      });
+      await startOnboarding(telegramUserId, profile.id, `tutor_${inviteCode}`);
+    }
+
+  } catch (error) {
+    console.error("handleTutorInvite error:", error);
+    await sendTelegramMessage(telegramUserId, "❌ Произошла ошибка. Попробуйте снова.");
+  }
+}
+
 async function handleStart(telegramUserId: number, telegramUsername: string | undefined, utmSource: string) {
   console.log("handleStart:", { telegramUserId, utmSource });
 
@@ -1080,6 +1170,13 @@ async function handleStart(telegramUserId: number, telegramUsername: string | un
   if (utmSource.startsWith("link_")) {
     const token = utmSource.replace("link_", "");
     await handleLinkAccount(telegramUserId, telegramUsername, token);
+    return;
+  }
+
+  // Check if this is a tutor invite request
+  if (utmSource.startsWith("tutor_")) {
+    const inviteCode = utmSource.replace("tutor_", "");
+    await handleTutorInvite(telegramUserId, telegramUsername, inviteCode);
     return;
   }
 
