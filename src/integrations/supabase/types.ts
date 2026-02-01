@@ -1162,6 +1162,7 @@ export type Database = {
           booking_link: string | null
           created_at: string | null
           id: string
+          invite_code: string | null
           name: string
           subjects: string[] | null
           telegram_id: string | null
@@ -1175,6 +1176,7 @@ export type Database = {
           booking_link?: string | null
           created_at?: string | null
           id?: string
+          invite_code?: string | null
           name: string
           subjects?: string[] | null
           telegram_id?: string | null
@@ -1188,6 +1190,7 @@ export type Database = {
           booking_link?: string | null
           created_at?: string | null
           id?: string
+          invite_code?: string | null
           name?: string
           subjects?: string[] | null
           telegram_id?: string | null
@@ -1370,6 +1373,7 @@ export type Database = {
           solution: string
         }[]
       }
+      generate_invite_code: { Args: never; Returns: string }
       get_diagnostic_problems: {
         Args: { p_total_questions?: number }
         Returns: {
