@@ -10,7 +10,11 @@ import type {
   CreateMockExamInput,
   UpdateMockExamInput,
   StudentChat,
-  StudentChatMessage
+  StudentChatMessage,
+  TutorPayment,
+  TutorPaymentWithStudent,
+  CreateTutorPaymentInput,
+  UpdateTutorPaymentInput
 } from '@/types/tutor';
 
 /**
@@ -328,4 +332,111 @@ export async function getStudentChatMessages(
   
   // Возвращаем в хронологическом порядке
   return (data as StudentChatMessage[]).reverse();
+}
+
+// =============================================
+// Оплаты (Tutor Payments A3)
+// =============================================
+
+/**
+ * Получить все оплаты репетитора (через tutor_students)
+ */
+export async function getTutorPayments(): Promise<TutorPaymentWithStudent[]> {
+  const tutor = await getCurrentTutor();
+  if (!tutor) return [];
+
+  const { data, error } = await supabase
+    .from('tutor_payments')
+    .select(`
+      *,
+      tutor_students!inner (
+        id,
+        student_id,
+        parent_contact,
+        tutor_id,
+        profiles (
+          id,
+          username,
+          telegram_username
+        )
+      )
+    `)
+    .eq('tutor_students.tutor_id', tutor.id)
+    .order('created_at', { ascending: false });
+  
+  if (error) {
+    console.error('Error fetching tutor payments:', error);
+    return [];
+  }
+  
+  return data as TutorPaymentWithStudent[];
+}
+
+/**
+ * Создать запись об оплате
+ */
+export async function createTutorPayment(
+  input: CreateTutorPaymentInput
+): Promise<TutorPayment | null> {
+  const { data, error } = await supabase
+    .from('tutor_payments')
+    .insert(input)
+    .select()
+    .single();
+  
+  if (error) {
+    console.error('Error creating tutor payment:', error);
+    return null;
+  }
+  
+  return data as TutorPayment;
+}
+
+/**
+ * Обновить запись об оплате
+ */
+export async function updateTutorPayment(
+  id: string,
+  input: UpdateTutorPaymentInput
+): Promise<TutorPayment | null> {
+  const { data, error } = await supabase
+    .from('tutor_payments')
+    .update(input)
+    .eq('id', id)
+    .select()
+    .single();
+  
+  if (error) {
+    console.error('Error updating tutor payment:', error);
+    return null;
+  }
+  
+  return data as TutorPayment;
+}
+
+/**
+ * Отметить оплату как оплаченную
+ */
+export async function markPaymentAsPaid(id: string): Promise<TutorPayment | null> {
+  return updateTutorPayment(id, {
+    status: 'paid',
+    paid_at: new Date().toISOString()
+  });
+}
+
+/**
+ * Удалить запись об оплате
+ */
+export async function deleteTutorPayment(id: string): Promise<boolean> {
+  const { error } = await supabase
+    .from('tutor_payments')
+    .delete()
+    .eq('id', id);
+  
+  if (error) {
+    console.error('Error deleting tutor payment:', error);
+    return false;
+  }
+  
+  return true;
 }

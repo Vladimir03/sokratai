@@ -2,7 +2,7 @@ import { ReactNode } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
-import { LayoutDashboard, Users, LogOut } from 'lucide-react';
+import { LayoutDashboard, Users, CreditCard, LogOut } from 'lucide-react';
 import { supabase } from '@/lib/supabaseClient';
 import { toast } from 'sonner';
 import { useNavigate } from 'react-router-dom';
@@ -14,6 +14,7 @@ interface TutorLayoutProps {
 const navItems = [
   { href: '/tutor/dashboard', label: 'Дашборд', icon: LayoutDashboard },
   { href: '/tutor/students', label: 'Ученики', icon: Users },
+  { href: '/tutor/payments', label: 'Оплаты', icon: CreditCard },
 ];
 
 export function TutorLayout({ children }: TutorLayoutProps) {

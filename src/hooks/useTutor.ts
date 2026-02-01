@@ -5,14 +5,16 @@ import {
   getTutorStudent,
   getMockExams,
   getStudentChats,
-  getStudentChatMessages
+  getStudentChatMessages,
+  getTutorPayments
 } from '@/lib/tutors';
 import type { 
   Tutor, 
   TutorStudentWithProfile, 
   MockExam,
   StudentChat,
-  StudentChatMessage
+  StudentChatMessage,
+  TutorPaymentWithStudent
 } from '@/types/tutor';
 
 export function useTutor() {
@@ -221,4 +223,33 @@ export function useStudentChatMessages(chatId: string | undefined) {
   }, [messages, hasMore, fetchMessages]);
 
   return { messages, loading, hasMore, error, loadMore, refetch: () => fetchMessages() };
+}
+
+/**
+ * Хук для получения всех оплат репетитора
+ */
+export function useTutorPayments() {
+  const [payments, setPayments] = useState<TutorPaymentWithStudent[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const fetchPayments = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const data = await getTutorPayments();
+      setPayments(data);
+    } catch (err) {
+      console.error('Error in useTutorPayments:', err);
+      setError('Не удалось загрузить оплаты');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchPayments();
+  }, [fetchPayments]);
+
+  return { payments, loading, error, refetch: fetchPayments };
 }

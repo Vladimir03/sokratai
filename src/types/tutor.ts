@@ -119,3 +119,50 @@ export interface UpdateTutorInput {
   subjects?: string[];
   bio?: string;
 }
+
+// =============================================
+// Оплаты (Tutor Payments A3)
+// =============================================
+export type PaymentStatus = 'pending' | 'paid' | 'overdue';
+
+export interface TutorPayment {
+  id: string;
+  tutor_student_id: string;
+  amount: number;
+  period: string | null;
+  status: PaymentStatus;
+  due_date: string | null;
+  paid_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+// С данными об ученике (через tutor_students + profiles)
+export interface TutorPaymentWithStudent extends TutorPayment {
+  tutor_students: {
+    id: string;
+    student_id: string;
+    parent_contact: string | null;
+    profiles: {
+      id: string;
+      username: string;
+      telegram_username: string | null;
+    };
+  };
+}
+
+export interface CreateTutorPaymentInput {
+  tutor_student_id: string;
+  amount: number;
+  period?: string;
+  status?: PaymentStatus;
+  due_date?: string;
+}
+
+export interface UpdateTutorPaymentInput {
+  amount?: number;
+  period?: string;
+  status?: PaymentStatus;
+  due_date?: string;
+  paid_at?: string;
+}
