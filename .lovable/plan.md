@@ -1,85 +1,89 @@
 
 
-## План: Создание таблицы tutor_payments
+## План: Добавление колонки invite_code в таблицу tutors
 
 ### Проблема
-Ошибка возникает потому что таблица `tutor_payments` **не существует** в базе данных. Код в файлах `src/lib/tutors.ts` и `src/types/tutor.ts` ссылается на эту таблицу, но миграция для её создания не была выполнена.
-
-TypeScript показывает ошибки типа:
+Ошибки сборки:
 ```
-Argument of type '"tutor_payments"' is not assignable to parameter of type '"problems_public"'
+src/pages/InviteToTelegram.tsx(34,51): error TS2589: Type instantiation is excessively deep and possibly infinite.
+src/pages/InviteToTelegram.tsx(46,18): error TS2345: Argument of type 'SelectQueryError<"column 'invite_code' does not exist on 'tutors'.">' is not assignable...
 ```
 
-Это означает, что таблица не найдена в автогенерируемых типах Supabase.
+**Причина**: Миграция `20260201140000_tutor_invite_code_c21.sql` существует в коде, но **не была применена** к базе данных. Колонка `invite_code` отсутствует в таблице `tutors`.
+
+### Текущее состояние таблицы tutors
+| Колонка | Есть в БД |
+|---------|-----------|
+| id, user_id, name | ✅ |
+| telegram_id, telegram_username | ✅ |
+| booking_link, avatar_url | ✅ |
+| subjects, bio | ✅ |
+| **invite_code** | ❌ **Отсутствует** |
 
 ### Решение
-Создать таблицу `tutor_payments` через миграцию базы данных.
-
-### SQL-миграция
+Выполнить миграцию для добавления колонки `invite_code`:
 
 ```sql
--- Создать таблицу для учёта оплат репетитору
-CREATE TABLE public.tutor_payments (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  tutor_student_id UUID NOT NULL REFERENCES public.tutor_students(id) ON DELETE CASCADE,
-  amount NUMERIC NOT NULL,
-  period TEXT,
-  status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'paid', 'overdue')),
-  due_date DATE,
-  paid_at TIMESTAMPTZ,
-  created_at TIMESTAMPTZ DEFAULT now(),
-  updated_at TIMESTAMPTZ DEFAULT now()
-);
+-- 1. Добавить колонку invite_code
+ALTER TABLE public.tutors
+ADD COLUMN IF NOT EXISTS invite_code TEXT UNIQUE;
 
--- Включить RLS
-ALTER TABLE public.tutor_payments ENABLE ROW LEVEL SECURITY;
+-- 2. Создать функцию для генерации случайного кода
+CREATE OR REPLACE FUNCTION public.generate_invite_code()
+RETURNS TEXT AS $$
+DECLARE
+  chars TEXT := 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  result TEXT := '';
+  i INTEGER;
+BEGIN
+  FOR i IN 1..8 LOOP
+    result := result || substr(chars, floor(random() * length(chars) + 1)::integer, 1);
+  END LOOP;
+  RETURN result;
+END;
+$$ LANGUAGE plpgsql VOLATILE;
 
--- RLS-политики (только репетитор-владелец может управлять оплатами своих учеников)
-CREATE POLICY "Tutors can view own student payments"
-  ON public.tutor_payments FOR SELECT
-  USING (owns_tutor_student(tutor_student_id));
+-- 3. Backfill: заполнить invite_code для существующих репетиторов
+DO $$
+DECLARE
+  tutor_record RECORD;
+  new_code TEXT;
+  code_exists BOOLEAN;
+BEGIN
+  FOR tutor_record IN SELECT id FROM public.tutors WHERE invite_code IS NULL LOOP
+    LOOP
+      new_code := public.generate_invite_code();
+      SELECT EXISTS(SELECT 1 FROM public.tutors WHERE invite_code = new_code) INTO code_exists;
+      EXIT WHEN NOT code_exists;
+    END LOOP;
+    
+    UPDATE public.tutors SET invite_code = new_code WHERE id = tutor_record.id;
+  END LOOP;
+END $$;
 
-CREATE POLICY "Tutors can insert payments for own students"
-  ON public.tutor_payments FOR INSERT
-  WITH CHECK (owns_tutor_student(tutor_student_id));
+-- 4. Установить default для новых записей
+ALTER TABLE public.tutors
+ALTER COLUMN invite_code SET DEFAULT public.generate_invite_code();
 
-CREATE POLICY "Tutors can update own student payments"
-  ON public.tutor_payments FOR UPDATE
-  USING (owns_tutor_student(tutor_student_id));
+-- 5. Индекс для быстрого поиска
+CREATE INDEX IF NOT EXISTS idx_tutors_invite_code ON public.tutors(invite_code);
 
-CREATE POLICY "Tutors can delete own student payments"
-  ON public.tutor_payments FOR DELETE
-  USING (owns_tutor_student(tutor_student_id));
-
--- Триггер для обновления updated_at
-CREATE TRIGGER update_tutor_payments_updated_at
-  BEFORE UPDATE ON public.tutor_payments
-  FOR EACH ROW
-  EXECUTE FUNCTION public.handle_updated_at();
+-- 6. RLS-политика для публичного доступа
+CREATE POLICY "Anyone can view tutor by invite_code"
+  ON public.tutors FOR SELECT
+  USING (invite_code IS NOT NULL);
 ```
 
-### Структура таблицы
-
-| Колонка | Тип | Описание |
-|---------|-----|----------|
-| id | UUID | Первичный ключ |
-| tutor_student_id | UUID | Связь с учеником репетитора |
-| amount | NUMERIC | Сумма оплаты |
-| period | TEXT | Период (например "февраль 2026") |
-| status | TEXT | Статус: pending, paid, overdue |
-| due_date | DATE | Срок оплаты |
-| paid_at | TIMESTAMPTZ | Дата фактической оплаты |
-| created_at | TIMESTAMPTZ | Дата создания записи |
-| updated_at | TIMESTAMPTZ | Дата обновления |
+### Что произойдет после миграции
+| Компонент | Результат |
+|-----------|-----------|
+| `InviteToTelegram.tsx` | Ошибки сборки исчезнут |
+| `TutorStudents.tsx` | Модалка "Добавить ученика" заработает |
+| Telegram-бот | Сможет обрабатывать `/start tutor_<code>` |
+| QR-код | Будет генерироваться корректно |
 
 ### Безопасность
-- RLS включён
-- Используется существующая функция `owns_tutor_student()` для проверки владельца
-- Только репетитор может видеть и управлять оплатами своих учеников
-
-### Результат
-После выполнения миграции:
-- Ошибки сборки исчезнут
-- Страница `/tutor/payments` заработает
-- Можно будет добавлять, редактировать и удалять записи об оплатах
+- `invite_code` уникален для каждого репетитора
+- Публичный доступ только на чтение (для страницы приглашения)
+- Код 8 символов из безопасного алфавита (без 0/O/I/1)
 
