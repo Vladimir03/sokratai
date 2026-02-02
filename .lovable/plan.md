@@ -1,68 +1,62 @@
 
 
-## План: Добавление RLS-политики для публичного доступа по invite_code
+## План: Переключение с OpenRouter на Lovable AI Gateway
 
-### Диагностика
+### Текущая логика (строки 536-602)
 
-При открытии страницы `/invite/JPYRPYCN` показывается белый экран, потому что:
-
-1. Компонент `InviteToTelegram.tsx` делает запрос:
-   ```typescript
-   await supabase
-     .from('tutors')
-     .select('id, name, invite_code')
-     .eq('invite_code', inviteCode)
-     .single();
-   ```
-
-2. Страницу открывает **неавторизованный пользователь** (ученик)
-
-3. Текущие RLS-политики для таблицы `tutors`:
-   | Политика | Условие | Подходит? |
-   |----------|---------|-----------|
-   | `Tutors can view own profile` | `auth.uid() = user_id` | Нет (нет авторизации) |
-   | `Anyone can view tutor by booking_link` | `booking_link IS NOT NULL` | Нет (фильтр по `invite_code`) |
-
-4. **Политика `"Anyone can view tutor by invite_code"` отсутствует!**
-
-5. Результат: запрос возвращает пустой результат или ошибку → компонент показывает состояние ошибки, но из-за бага с обработкой — белый экран
-
-### Причина бага
-
-Миграция `20260201191014_6ce712ef-ae9e-4907-9256-978fea7e47c9.sql` была применена, но она **не содержала создание RLS-политики**.
-
-Сравнение миграций:
-
-| Файл | RLS-политика |
-|------|-------------|
-| `20260201140000_tutor_invite_code_c21.sql` (исходный) | Содержит (строки 56-58) |
-| `20260201191014_6ce712ef-ae9e-4907-9256-978fea7e47c9.sql` (применённый) | **Отсутствует** |
-
-### Решение
-
-Добавить RLS-политику для публичного чтения репетиторов по `invite_code`:
-
-```sql
-CREATE POLICY "Anyone can view tutor by invite_code"
-  ON public.tutors FOR SELECT
-  USING (invite_code IS NOT NULL);
+```typescript
+// Приоритет: OpenRouter API Key, затем Lovable Gateway
+const OPENROUTER_API_KEY = Deno.env.get("OPENROUTER_API_KEY");
+const useOpenRouter = Boolean(OPENROUTER_API_KEY);
+const apiUrl = useOpenRouter
+  ? "https://openrouter.ai/api/v1/chat/completions"
+  : "https://ai.gateway.lovable.dev/v1/chat/completions";
+const modelId = useOpenRouter
+  ? "google/gemini-3-flash-preview"
+  : "google/gemini-2.5-flash";
 ```
 
-### Как это работает
+### Что будет изменено
 
-- Политика разрешает SELECT-запросы к таблице `tutors` для записей, где `invite_code IS NOT NULL`
-- Неавторизованные пользователи смогут получить данные репетитора по коду приглашения
-- Это не создаёт уязвимости: политика только на чтение, и требуется знание кода
+| Аспект | Было | Станет |
+|--------|------|--------|
+| Провайдер | OpenRouter (если ключ есть) | Только Lovable AI Gateway |
+| Модель | `gemini-2.5-flash` (fallback) | `gemini-3-flash-preview` |
+| API URL | Условный выбор | Всегда `ai.gateway.lovable.dev` |
+| API Key | `OPENROUTER_API_KEY` или `LOVABLE_API_KEY` | Только `LOVABLE_API_KEY` |
 
-### Результат после применения
+### Изменения в файле
 
-| Что | До | После |
-|-----|-----|-------|
-| Страница `/invite/JPYRPYCN` | Белый экран | Карточка с QR-кодом и инструкцией |
-| Запрос к `tutors` | Пустой результат | Данные репетитора |
-| Безопасность | N/A | Только SELECT, только по коду |
+**Файл:** `supabase/functions/chat/index.ts`
 
-### Дополнительно
+**Строки 536-602** будут упрощены:
 
-Также стоит проверить обработку ошибок в `InviteToTelegram.tsx` — белый экран может быть связан с необработанным exception при пустом ответе от API.
+```typescript
+// ЗАКОММЕНТИРОВАНО: OpenRouter логика
+// const OPENROUTER_API_KEY = Deno.env.get("OPENROUTER_API_KEY");
+// const useOpenRouter = Boolean(OPENROUTER_API_KEY);
+
+// Используем Lovable AI Gateway напрямую
+const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
+const apiUrl = "https://ai.gateway.lovable.dev/v1/chat/completions";
+const modelId = "google/gemini-3-flash-preview";
+
+if (!LOVABLE_API_KEY) {
+  console.error("LOVABLE_API_KEY is not configured");
+  throw new Error("LOVABLE_API_KEY is not configured");
+}
+
+console.log(`🤖 Using Lovable Gateway (Gemini 3 Flash Preview)`);
+```
+
+**Также будут закомментированы:**
+- Дополнительные заголовки для OpenRouter (строки 570-574)
+- Параметры `reasoning`, `route`, `models` (строки 589-602)
+
+### Результат
+
+- Все запросы идут через Lovable AI Gateway
+- Используется модель `google/gemini-3-flash-preview` (самая новая)
+- Код упрощается — нет условной логики
+- Не требуется `OPENROUTER_API_KEY`
 
