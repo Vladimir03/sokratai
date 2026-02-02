@@ -1,53 +1,52 @@
 
-## План: Исправление невидимой карточки ошибки и диагностика причины
 
-### Диагностика
+## План: Исправление ошибки "supabaseUrl is required" на странице приглашения
 
-При открытии `https://sokratai.ru/invite/JPYRPYCN` происходит следующее:
+### Причина бага
 
-1. **ErrorBoundary срабатывает** — ловит какую-то ошибку
-2. **Карточка ошибки не видна** — потому что компонент `Card` использует Framer Motion анимацию с `initial={{ opacity: 0 }}`, но анимация не проигрывается после ошибки
-
-### Две проблемы
-
-| Проблема | Причина | Решение |
-|----------|---------|---------|
-| Карточка ошибки невидима | `Card` использует Framer Motion, который не работает после ошибки | Добавить `animate={false}` в ErrorBoundary |
-| ErrorBoundary срабатывает | Неизвестная ошибка на странице | Добавить логирование ошибки в консоль + показать в dev режиме |
-
-### Изменения
-
-**Файл: `src/components/ErrorBoundary.tsx`**
-
-1. Передать `animate={false}` в компонент `Card`, чтобы отключить Framer Motion анимации:
-```typescript
-<Card className="max-w-md w-full" animate={false}>
+На скриншоте чётко видна ошибка:
+```
+Error: supabaseUrl is required.
+at InviteToTelegram-CqzWpYdo.js:1:636
 ```
 
-2. Улучшить логирование ошибки для диагностики:
+**Проблема:** Файл `src/pages/InviteToTelegram.tsx` (строка 9) импортирует Supabase клиент из `@/integrations/supabase/client` — этот файл автоматически генерируется и **не имеет fallback значений** для переменных окружения.
+
+**Результат:** Когда `VITE_SUPABASE_URL` не определена (что происходит на production-домене), Supabase клиент падает при инициализации, и вся страница не работает.
+
+### Решение
+
+Заменить импорт на `@/lib/supabaseClient`, который уже содержит fallback значения:
+
 ```typescript
-componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
-  console.error('ErrorBoundary caught an error:', error.message);
-  console.error('Error stack:', error.stack);
-  console.error('Component stack:', errorInfo.componentStack);
-}
+// Было (строка 9)
+import { supabase } from '@/integrations/supabase/client';
+
+// Станет
+import { supabase } from '@/lib/supabaseClient';
 ```
 
-3. Показывать сообщение об ошибке не только в development, но и на продакшене (временно для отладки) или хотя бы логировать в консоль.
+### Почему это работает
+
+Файл `src/lib/supabaseClient.ts` содержит:
+```typescript
+const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || 
+  'https://vrsseotrfmsxpbciyqzc.supabase.co';
+const SUPABASE_PUBLISHABLE_KEY = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY || 
+  'eyJhbGciOiJIUzI1NiI...';
+```
+
+Это гарантирует работу даже когда переменные окружения недоступны.
+
+### Файл для изменения
+
+| Файл | Изменение |
+|------|-----------|
+| `src/pages/InviteToTelegram.tsx` | Строка 9: заменить `@/integrations/supabase/client` → `@/lib/supabaseClient` |
 
 ### Результат после исправления
 
-| Что | Было | Станет |
-|-----|------|--------|
-| Карточка ошибки | Невидима (`opacity: 0`) | Видна (без анимации) |
-| Диагностика | Непонятно какая ошибка | Видно в консоли браузера |
+- Страница `https://sokratai.ru/invite/JPYRPYCN` будет загружаться корректно
+- Школьники смогут переходить по ссылке приглашения и видеть QR-код
+- Никаких "белых экранов" или ошибок инициализации Supabase
 
-### Следующий шаг
-
-После применения этого исправления:
-1. Опубликовать проект
-2. Открыть `https://sokratai.ru/invite/JPYRPYCN` и посмотреть консоль браузера (F12 → Console)
-3. Узнать какая именно ошибка происходит
-4. Исправить корневую причину
-
-Это позволит увидеть карточку ошибки И узнать что именно ломается на странице приглашения.
