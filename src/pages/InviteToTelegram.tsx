@@ -6,7 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Skeleton } from '@/components/ui/skeleton';
 import { Copy, ExternalLink, MessageCircle, Check, ArrowLeft } from 'lucide-react';
 import { toast } from 'sonner';
-import { supabase } from '@/integrations/supabase/client';
+import { supabase } from '@/lib/supabaseClient';
 import { getTutorInviteTelegramLink } from '@/utils/telegramLinks';
 
 interface TutorInfo {
