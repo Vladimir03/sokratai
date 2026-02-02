@@ -1,0 +1,16 @@
+{
+  "name": "Сократ — ИИ-репетитор по математике",
+  "short_name": "Сократ",
+  "description": "Персональный ИИ-репетитор для подготовки к ЕГЭ по математике",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#8B5CF6",
+  "icons": [
+    {
+      "src": "/favicon.ico",
+      "sizes": "64x64",
+      "type": "image/x-icon"
+    }
+  ]
+}
