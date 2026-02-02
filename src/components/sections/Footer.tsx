@@ -86,7 +86,7 @@ const Footer = () => {
           <p className="text-sm text-white/60 mb-3">Вы репетитор?</p>
           <div className="flex justify-center gap-4">
             <Link 
-              to="/login" 
+              to="/register-tutor" 
               className="text-accent hover:text-accent/80 transition-colors font-medium"
             >
               Войти
