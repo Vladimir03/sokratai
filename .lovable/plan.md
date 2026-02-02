@@ -1,49 +1,68 @@
 
 
-## План: Исправление генерации пригласительных ссылок
+## План: Добавление RLS-политики для публичного доступа по invite_code
 
-### Проблема
-Функция `getTutorInviteWebLink()` в файле `src/utils/telegramLinks.ts` использует `window.location.origin`:
+### Диагностика
 
-```typescript
-export const getTutorInviteWebLink = (inviteCode: string): string => {
-  return `${window.location.origin}/invite/${inviteCode}`;
-};
-```
+При открытии страницы `/invite/JPYRPYCN` показывается белый экран, потому что:
 
-В среде разработки Lovable это возвращает:
-```
-https://5fbe4a32-1baf-47b0-8f47-83e3060cf929.lovableproject.com
-```
+1. Компонент `InviteToTelegram.tsx` делает запрос:
+   ```typescript
+   await supabase
+     .from('tutors')
+     .select('id, name, invite_code')
+     .eq('invite_code', inviteCode)
+     .single();
+   ```
 
-Вместо опубликованного домена:
-```
-https://sokratai.ru
-```
+2. Страницу открывает **неавторизованный пользователь** (ученик)
 
-Ученик переходит по ссылке и попадает в редактор Lovable (видит "Access Denied"), вместо страницы приложения Сократ.
+3. Текущие RLS-политики для таблицы `tutors`:
+   | Политика | Условие | Подходит? |
+   |----------|---------|-----------|
+   | `Tutors can view own profile` | `auth.uid() = user_id` | Нет (нет авторизации) |
+   | `Anyone can view tutor by booking_link` | `booking_link IS NOT NULL` | Нет (фильтр по `invite_code`) |
+
+4. **Политика `"Anyone can view tutor by invite_code"` отсутствует!**
+
+5. Результат: запрос возвращает пустой результат или ошибку → компонент показывает состояние ошибки, но из-за бага с обработкой — белый экран
+
+### Причина бага
+
+Миграция `20260201191014_6ce712ef-ae9e-4907-9256-978fea7e47c9.sql` была применена, но она **не содержала создание RLS-политики**.
+
+Сравнение миграций:
+
+| Файл | RLS-политика |
+|------|-------------|
+| `20260201140000_tutor_invite_code_c21.sql` (исходный) | Содержит (строки 56-58) |
+| `20260201191014_6ce712ef-ae9e-4907-9256-978fea7e47c9.sql` (применённый) | **Отсутствует** |
 
 ### Решение
-Захардкодить production URL для пригласительных ссылок:
 
-```typescript
-// Продакшн URL приложения
-const PRODUCTION_URL = 'https://sokratai.ru';
+Добавить RLS-политику для публичного чтения репетиторов по `invite_code`:
 
-export const getTutorInviteWebLink = (inviteCode: string): string => {
-  return `${PRODUCTION_URL}/invite/${inviteCode}`;
-};
+```sql
+CREATE POLICY "Anyone can view tutor by invite_code"
+  ON public.tutors FOR SELECT
+  USING (invite_code IS NOT NULL);
 ```
 
-### Файлы для изменения
+### Как это работает
 
-| Файл | Изменение |
-|------|-----------|
-| `src/utils/telegramLinks.ts` | Заменить `window.location.origin` на константу `PRODUCTION_URL` |
+- Политика разрешает SELECT-запросы к таблице `tutors` для записей, где `invite_code IS NOT NULL`
+- Неавторизованные пользователи смогут получить данные репетитора по коду приглашения
+- Это не создаёт уязвимости: политика только на чтение, и требуется знание кода
 
-### Результат
-После изменения:
-- Ссылка будет: `https://sokratai.ru/invite/JPYRPYCN`
-- Ученик увидит красивую страницу с инструкцией и QR-кодом
-- Сможет перейти в Telegram и подключиться к репетитору
+### Результат после применения
+
+| Что | До | После |
+|-----|-----|-------|
+| Страница `/invite/JPYRPYCN` | Белый экран | Карточка с QR-кодом и инструкцией |
+| Запрос к `tutors` | Пустой результат | Данные репетитора |
+| Безопасность | N/A | Только SELECT, только по коду |
+
+### Дополнительно
+
+Также стоит проверить обработку ошибок в `InviteToTelegram.tsx` — белый экран может быть связан с необработанным exception при пустом ответе от API.
 
