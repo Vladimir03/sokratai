@@ -998,6 +998,117 @@ export type Database = {
         }
         Relationships: []
       }
+      tutor_lesson_reminder_logs: {
+        Row: {
+          error_message: string | null
+          id: string
+          lesson_id: string
+          remind_before_minutes: number
+          sent_at: string | null
+          sent_to: string
+          success: boolean
+          telegram_user_id: number | null
+        }
+        Insert: {
+          error_message?: string | null
+          id?: string
+          lesson_id: string
+          remind_before_minutes: number
+          sent_at?: string | null
+          sent_to: string
+          success?: boolean
+          telegram_user_id?: number | null
+        }
+        Update: {
+          error_message?: string | null
+          id?: string
+          lesson_id?: string
+          remind_before_minutes?: number
+          sent_at?: string | null
+          sent_to?: string
+          success?: boolean
+          telegram_user_id?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "tutor_lesson_reminder_logs_lesson_id_fkey"
+            columns: ["lesson_id"]
+            isOneToOne: false
+            referencedRelation: "tutor_lessons"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      tutor_lessons: {
+        Row: {
+          cancelled_at: string | null
+          cancelled_by: string | null
+          created_at: string | null
+          duration_min: number
+          id: string
+          notes: string | null
+          source: string
+          start_at: string
+          status: string
+          student_id: string | null
+          tutor_id: string
+          tutor_student_id: string | null
+          updated_at: string | null
+        }
+        Insert: {
+          cancelled_at?: string | null
+          cancelled_by?: string | null
+          created_at?: string | null
+          duration_min?: number
+          id?: string
+          notes?: string | null
+          source?: string
+          start_at: string
+          status?: string
+          student_id?: string | null
+          tutor_id: string
+          tutor_student_id?: string | null
+          updated_at?: string | null
+        }
+        Update: {
+          cancelled_at?: string | null
+          cancelled_by?: string | null
+          created_at?: string | null
+          duration_min?: number
+          id?: string
+          notes?: string | null
+          source?: string
+          start_at?: string
+          status?: string
+          student_id?: string | null
+          tutor_id?: string
+          tutor_student_id?: string | null
+          updated_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "tutor_lessons_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "tutor_lessons_tutor_id_fkey"
+            columns: ["tutor_id"]
+            isOneToOne: false
+            referencedRelation: "tutors"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "tutor_lessons_tutor_student_id_fkey"
+            columns: ["tutor_student_id"]
+            isOneToOne: false
+            referencedRelation: "tutor_students"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       tutor_payments: {
         Row: {
           amount: number
@@ -1038,6 +1149,47 @@ export type Database = {
             columns: ["tutor_student_id"]
             isOneToOne: false
             referencedRelation: "tutor_students"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      tutor_reminder_settings: {
+        Row: {
+          created_at: string | null
+          enabled: boolean
+          id: string
+          remind_before_minutes: number[]
+          template_student: string | null
+          template_tutor: string | null
+          tutor_id: string
+          updated_at: string | null
+        }
+        Insert: {
+          created_at?: string | null
+          enabled?: boolean
+          id?: string
+          remind_before_minutes?: number[]
+          template_student?: string | null
+          template_tutor?: string | null
+          tutor_id: string
+          updated_at?: string | null
+        }
+        Update: {
+          created_at?: string | null
+          enabled?: boolean
+          id?: string
+          remind_before_minutes?: number[]
+          template_student?: string | null
+          template_tutor?: string | null
+          tutor_id?: string
+          updated_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "tutor_reminder_settings_tutor_id_fkey"
+            columns: ["tutor_id"]
+            isOneToOne: true
+            referencedRelation: "tutors"
             referencedColumns: ["id"]
           },
         ]
@@ -1148,6 +1300,47 @@ export type Database = {
           },
           {
             foreignKeyName: "tutor_students_tutor_id_fkey"
+            columns: ["tutor_id"]
+            isOneToOne: false
+            referencedRelation: "tutors"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      tutor_weekly_slots: {
+        Row: {
+          created_at: string | null
+          day_of_week: number
+          duration_min: number
+          id: string
+          is_available: boolean
+          start_time: string
+          tutor_id: string
+          updated_at: string | null
+        }
+        Insert: {
+          created_at?: string | null
+          day_of_week: number
+          duration_min?: number
+          id?: string
+          is_available?: boolean
+          start_time: string
+          tutor_id: string
+          updated_at?: string | null
+        }
+        Update: {
+          created_at?: string | null
+          day_of_week?: number
+          duration_min?: number
+          id?: string
+          is_available?: boolean
+          start_time?: string
+          tutor_id?: string
+          updated_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "tutor_weekly_slots_tutor_id_fkey"
             columns: ["tutor_id"]
             isOneToOne: false
             referencedRelation: "tutors"
@@ -1364,6 +1557,15 @@ export type Database = {
       }
     }
     Functions: {
+      book_lesson_slot: {
+        Args: {
+          _booking_link: string
+          _duration_min?: number
+          _slot_date: string
+          _start_time: string
+        }
+        Returns: string
+      }
       check_and_update_streak: { Args: { p_user_id: string }; Returns: number }
       check_problem_answer: {
         Args: { problem_id_input: string; user_answer_input: string }
@@ -1374,6 +1576,15 @@ export type Database = {
         }[]
       }
       generate_invite_code: { Args: never; Returns: string }
+      get_available_booking_slots: {
+        Args: { _booking_link: string; _days_ahead?: number }
+        Returns: {
+          duration_min: number
+          is_booked: boolean
+          slot_date: string
+          start_time: string
+        }[]
+      }
       get_diagnostic_problems: {
         Args: { p_total_questions?: number }
         Returns: {
@@ -1416,6 +1627,7 @@ export type Database = {
       is_admin_email: { Args: { _user_id: string }; Returns: boolean }
       is_tutor: { Args: { _user_id: string }; Returns: boolean }
       is_tutor_of_student: { Args: { _student_id: string }; Returns: boolean }
+      owns_tutor: { Args: { _tutor_id: string }; Returns: boolean }
       owns_tutor_student: {
         Args: { _tutor_student_id: string }
         Returns: boolean
