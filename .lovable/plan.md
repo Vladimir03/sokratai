@@ -1,96 +1,124 @@
 
-# План: Исправление ссылок для репетиторов на /register-tutor
+
+# План: Редирект авторизованных пользователей из страниц входа в продукт
 
 ## Проблема
 
-При выборе "Я репетитор" в dropdown-меню открывается страница `/login` (для учеников), хотя должна открываться `/register-tutor`.
+Когда пользователь уже авторизован и заходит на страницу `/login`, `/signup` или `/register-tutor`:
+- Он видит форму входа/регистрации вместо автоматического перехода в продукт
+- Это плохой UX — пользователь не понимает, что уже авторизован
 
-## Места для исправления
+## Решение
 
-| Файл | Строка | Текущее | Исправить на |
-|------|--------|---------|--------------|
-| `src/pages/Index.tsx` | 107 | `/login` | `/register-tutor` |
-| `src/pages/Index.tsx` | 221 | `/login` | `/register-tutor` |
-| `src/components/sections/Footer.tsx` | 89 | `/login` | `/register-tutor` |
+Добавить в каждую страницу проверку сессии при загрузке:
+- Если сессия есть → редирект в продукт (с учётом роли)
+- Если сессии нет → показать форму входа/регистрации
+
+## Логика редиректа
+
+```text
+┌─────────────────────────────────────────────────────────────┐
+│                   Пользователь заходит на                   │
+│              /login, /signup, /register-tutor               │
+└─────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+                    ┌──────────────────┐
+                    │ Проверка сессии  │
+                    └──────────────────┘
+                              │
+              ┌───────────────┴───────────────┐
+              │                               │
+              ▼                               ▼
+      Сессия есть                      Сессии нет
+              │                               │
+              ▼                               ▼
+     Проверка роли                    Показать форму
+              │                       входа/регистрации
+    ┌─────────┴─────────┐
+    │                   │
+    ▼                   ▼
+ Репетитор           Ученик
+    │                   │
+    ▼                   ▼
+/tutor/dashboard      /chat
+```
 
 ## Изменения
 
-### 1. Index.tsx — Навигация "Войти"
+### 1. Login.tsx — Добавить проверку сессии
 
-**Было (строка 106-110):**
+**Добавить в начало компонента:**
 ```tsx
-<DropdownMenuItem asChild>
-  <Link to="/login" className="flex items-center gap-2 cursor-pointer">
-    <GraduationCap className="w-4 h-4" />
-    Я репетитор
-  </Link>
-</DropdownMenuItem>
+useEffect(() => {
+  const checkSession = async () => {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (session) {
+      // Проверяем роль и редиректим
+      const { data: isTutor } = await supabase.rpc("is_tutor", { _user_id: session.user.id });
+      if (isTutor) {
+        navigate("/tutor/dashboard");
+      } else {
+        navigate("/chat");
+      }
+    }
+  };
+  checkSession();
+}, [navigate]);
 ```
 
-**Станет:**
+### 2. SignUp.tsx — Добавить проверку сессии
+
+**Добавить в начало компонента:**
 ```tsx
-<DropdownMenuItem asChild>
-  <Link to="/register-tutor" className="flex items-center gap-2 cursor-pointer">
-    <GraduationCap className="w-4 h-4" />
-    Я репетитор
-  </Link>
-</DropdownMenuItem>
+useEffect(() => {
+  const checkSession = async () => {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (session) {
+      // Ученик на странице регистрации → в чат
+      navigate("/chat");
+    }
+  };
+  checkSession();
+}, [navigate]);
 ```
 
-### 2. Index.tsx — Кнопка "Открыть в браузере"
+### 3. RegisterTutor.tsx — Добавить проверку сессии
 
-**Было (строка 220-224):**
+**Добавить в начало компонента:**
 ```tsx
-<DropdownMenuItem asChild>
-  <Link to="/login" className="flex items-center gap-2 cursor-pointer">
-    <GraduationCap className="w-4 h-4" />
-    Я репетитор
-  </Link>
-</DropdownMenuItem>
-```
-
-**Станет:**
-```tsx
-<DropdownMenuItem asChild>
-  <Link to="/register-tutor" className="flex items-center gap-2 cursor-pointer">
-    <GraduationCap className="w-4 h-4" />
-    Я репетитор
-  </Link>
-</DropdownMenuItem>
-```
-
-### 3. Footer.tsx — Ссылка "Войти" для репетиторов
-
-**Было (строка 88-93):**
-```tsx
-<Link 
-  to="/login" 
-  className="text-accent hover:text-accent/80 transition-colors font-medium"
->
-  Войти
-</Link>
-```
-
-**Станет:**
-```tsx
-<Link 
-  to="/register-tutor" 
-  className="text-accent hover:text-accent/80 transition-colors font-medium"
->
-  Войти
-</Link>
+useEffect(() => {
+  const checkSession = async () => {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (session) {
+      // Репетитор на странице регистрации → в дашборд
+      navigate("/tutor/dashboard");
+    }
+  };
+  checkSession();
+}, [navigate]);
 ```
 
 ## Файлы для изменения
 
-| Файл | Изменения |
+| Файл | Изменение |
 |------|-----------|
-| `src/pages/Index.tsx` | Заменить `/login` на `/register-tutor` в 2 местах (строки 107 и 221) |
-| `src/components/sections/Footer.tsx` | Заменить `/login` на `/register-tutor` (строка 89) |
+| `src/pages/Login.tsx` | Добавить useEffect с проверкой сессии и роли |
+| `src/pages/SignUp.tsx` | Добавить useEffect с проверкой сессии → /chat |
+| `src/pages/RegisterTutor.tsx` | Добавить useEffect с проверкой сессии → /tutor/dashboard |
 
-## Логика
+## UX после изменений
 
-- Страница `/register-tutor` уже содержит форму регистрации И возможность входа через Telegram
-- Для репетиторов это правильная точка входа, т.к.:
-  - Новые репетиторы — регистрируются
-  - Существующие репетиторы — могут войти через Telegram или перейти на `/login` по ссылке "Уже есть аккаунт?"
+| Сценарий | Было | Станет |
+|----------|------|--------|
+| Авторизованный ученик на /login | Видит форму | Редирект на /chat |
+| Авторизованный репетитор на /login | Видит форму | Редирект на /tutor/dashboard |
+| Авторизованный ученик на /signup | Видит форму | Редирект на /chat |
+| Авторизованный пользователь на /register-tutor | Видит форму | Редирект на /tutor/dashboard |
+
+## Технические детали
+
+- Проверка выполняется асинхронно при монтировании компонента
+- Используем `supabase.rpc("is_tutor")` для определения роли (уже есть в Login.tsx)
+- Редирект происходит до рендера формы, поэтому пользователь не увидит "мигание"
+
