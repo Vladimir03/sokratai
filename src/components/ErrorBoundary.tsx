@@ -1,6 +1,5 @@
 import React, { Component, ReactNode } from 'react';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { RefreshCw, AlertTriangle } from 'lucide-react';
 
 interface Props {
@@ -41,7 +40,9 @@ class ErrorBoundary extends Component<Props, State> {
   }
 
   componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
-    console.error('ErrorBoundary caught an error:', error, errorInfo);
+    console.error('ErrorBoundary caught an error:', error.message);
+    console.error('Error stack:', error.stack);
+    console.error('Component stack:', errorInfo.componentStack);
   }
 
   handleReload = () => {
@@ -70,24 +71,30 @@ class ErrorBoundary extends Component<Props, State> {
       }
 
       return (
-        <div className="min-h-screen flex items-center justify-center p-4 bg-background">
-          <Card className="max-w-md w-full">
-            <CardHeader className="text-center">
+        <div 
+          className="min-h-screen flex items-center justify-center p-4 bg-background"
+          style={{ opacity: 1, visibility: 'visible' }}
+        >
+          <div 
+            className="max-w-md w-full bg-card text-card-foreground rounded-lg border shadow-sm"
+            style={{ opacity: 1, visibility: 'visible' }}
+          >
+            <div className="text-center p-6 pb-2">
               <div className="mx-auto mb-4 w-12 h-12 rounded-full bg-destructive/10 flex items-center justify-center">
                 <AlertTriangle className="w-6 h-6 text-destructive" />
               </div>
-              <CardTitle>
+              <h3 className="text-lg font-semibold">
                 {this.state.isChunkLoadError 
                   ? 'Доступна новая версия' 
                   : 'Что-то пошло не так'}
-              </CardTitle>
-              <CardDescription>
+              </h3>
+              <p className="text-sm text-muted-foreground mt-1.5">
                 {this.state.isChunkLoadError 
                   ? 'Приложение было обновлено. Пожалуйста, обновите страницу для загрузки новой версии.'
                   : 'Произошла ошибка при загрузке страницы. Попробуйте обновить страницу.'}
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="flex flex-col gap-3">
+              </p>
+            </div>
+            <div className="p-6 pt-0 flex flex-col gap-3">
               <Button onClick={this.handleReload} className="w-full">
                 <RefreshCw className="w-4 h-4 mr-2" />
                 Обновить страницу
@@ -95,13 +102,13 @@ class ErrorBoundary extends Component<Props, State> {
               <Button variant="outline" onClick={this.handleGoHome} className="w-full">
                 На главную
               </Button>
-              {process.env.NODE_ENV === 'development' && this.state.error && (
+              {this.state.error && (
                 <pre className="mt-4 p-3 bg-muted rounded text-xs overflow-auto max-h-32">
                   {this.state.error.message}
                 </pre>
               )}
-            </CardContent>
-          </Card>
+            </div>
+          </div>
         </div>
       );
     }
