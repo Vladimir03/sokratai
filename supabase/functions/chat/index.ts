@@ -533,26 +533,22 @@ async function processAIRequest(userId: string, messages: any[], systemPrompt?: 
     };
   });
 
-  // Приоритет: OpenRouter API Key, затем Lovable Gateway
-  const OPENROUTER_API_KEY = Deno.env.get("OPENROUTER_API_KEY");
+  // Используем Lovable AI Gateway напрямую
+  // ЗАКОММЕНТИРОВАНО: OpenRouter логика
+  // const OPENROUTER_API_KEY = Deno.env.get("OPENROUTER_API_KEY");
+  // const useOpenRouter = Boolean(OPENROUTER_API_KEY);
+  
   const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
-
-  // Определяем провайдера и модель
-  const useOpenRouter = Boolean(OPENROUTER_API_KEY);
-  const apiUrl = useOpenRouter
-    ? "https://openrouter.ai/api/v1/chat/completions"
-    : "https://ai.gateway.lovable.dev/v1/chat/completions";
-  const apiKey = useOpenRouter ? OPENROUTER_API_KEY : LOVABLE_API_KEY;
-  const modelId = useOpenRouter
-    ? "google/gemini-3-flash-preview"  // Gemini 3 Flash через OpenRouter
-    : "google/gemini-2.5-flash";       // Fallback на Lovable
+  const apiUrl = "https://ai.gateway.lovable.dev/v1/chat/completions";
+  const apiKey = LOVABLE_API_KEY;
+  const modelId = "google/gemini-3-flash-preview";
 
   if (!apiKey) {
-    console.error("No API key configured (OPENROUTER_API_KEY or LOVABLE_API_KEY)");
-    throw new Error("API key is not configured");
+    console.error("LOVABLE_API_KEY is not configured");
+    throw new Error("LOVABLE_API_KEY is not configured");
   }
 
-  console.log(`🤖 Using ${useOpenRouter ? 'OpenRouter (Gemini 3 Flash)' : 'Lovable Gateway (Gemini 2.5 Flash)'}`);
+  console.log(`🤖 Using Lovable Gateway (Gemini 3 Flash Preview)`);
   console.log("Calling AI gateway with messages:", transformedMessages.length);
 
   let effectiveSystemPrompt = systemPrompt || SYSTEM_PROMPT;
@@ -567,11 +563,11 @@ async function processAIRequest(userId: string, messages: any[], systemPrompt?: 
     "Content-Type": "application/json",
   };
 
-  // Дополнительные заголовки для OpenRouter
-  if (useOpenRouter) {
-    headers["HTTP-Referer"] = Deno.env.get("SITE_URL") || "https://sokratai.app";
-    headers["X-Title"] = "Sokratai - AI Tutor";
-  }
+  // ЗАКОММЕНТИРОВАНО: Дополнительные заголовки для OpenRouter
+  // if (useOpenRouter) {
+  //   headers["HTTP-Referer"] = Deno.env.get("SITE_URL") || "https://sokratai.app";
+  //   headers["X-Title"] = "Sokratai - AI Tutor";
+  // }
 
   // Формируем тело запроса
   const requestBody: Record<string, unknown> = {
@@ -586,20 +582,16 @@ async function processAIRequest(userId: string, messages: any[], systemPrompt?: 
     stream: true,
   };
 
-  // Дополнительные параметры для OpenRouter + Gemini 3 Flash
-  if (useOpenRouter) {
-    // Уровень reasoning: low для быстрых ответов, medium для сложных задач
-    // Можно динамически определять по длине/типу сообщения
-    requestBody.reasoning = { effort: "medium" };
-
-    // Fallback модели на случай недоступности основной
-    requestBody.route = "fallback";
-    requestBody.models = [
-      "google/gemini-3-flash-preview",
-      "google/gemini-2.5-flash",
-      "google/gemini-2.0-flash-001"
-    ];
-  }
+  // ЗАКОММЕНТИРОВАНО: Дополнительные параметры для OpenRouter + Gemini 3 Flash
+  // if (useOpenRouter) {
+  //   requestBody.reasoning = { effort: "medium" };
+  //   requestBody.route = "fallback";
+  //   requestBody.models = [
+  //     "google/gemini-3-flash-preview",
+  //     "google/gemini-2.5-flash",
+  //     "google/gemini-2.0-flash-001"
+  //   ];
+  // }
 
   const response = await fetch(apiUrl, {
     method: "POST",
