@@ -998,6 +998,91 @@ export type Database = {
         }
         Relationships: []
       }
+      tutor_availability_exceptions: {
+        Row: {
+          created_at: string | null
+          exception_date: string
+          id: string
+          reason: string | null
+          tutor_id: string
+        }
+        Insert: {
+          created_at?: string | null
+          exception_date: string
+          id?: string
+          reason?: string | null
+          tutor_id: string
+        }
+        Update: {
+          created_at?: string | null
+          exception_date?: string
+          id?: string
+          reason?: string | null
+          tutor_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "tutor_availability_exceptions_tutor_id_fkey"
+            columns: ["tutor_id"]
+            isOneToOne: false
+            referencedRelation: "tutors"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      tutor_calendar_settings: {
+        Row: {
+          allow_student_cancel: boolean
+          auto_confirm: boolean
+          buffer_minutes: number
+          cancel_notice_hours: number
+          created_at: string | null
+          default_duration: number
+          id: string
+          max_advance_days: number
+          min_notice_hours: number
+          timezone: string
+          tutor_id: string
+          updated_at: string | null
+        }
+        Insert: {
+          allow_student_cancel?: boolean
+          auto_confirm?: boolean
+          buffer_minutes?: number
+          cancel_notice_hours?: number
+          created_at?: string | null
+          default_duration?: number
+          id?: string
+          max_advance_days?: number
+          min_notice_hours?: number
+          timezone?: string
+          tutor_id: string
+          updated_at?: string | null
+        }
+        Update: {
+          allow_student_cancel?: boolean
+          auto_confirm?: boolean
+          buffer_minutes?: number
+          cancel_notice_hours?: number
+          created_at?: string | null
+          default_duration?: number
+          id?: string
+          max_advance_days?: number
+          min_notice_hours?: number
+          timezone?: string
+          tutor_id?: string
+          updated_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "tutor_calendar_settings_tutor_id_fkey"
+            columns: ["tutor_id"]
+            isOneToOne: true
+            referencedRelation: "tutors"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       tutor_lesson_reminder_logs: {
         Row: {
           error_message: string | null
