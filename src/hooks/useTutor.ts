@@ -6,13 +6,15 @@ import {
   getMockExams,
   getStudentChats,
   getStudentChatMessages,
-  getTutorPayments,
+  getTutorPayments
+} from '@/lib/tutors';
+import {
   getTutorWeeklySlots,
   getTutorLessons,
   getReminderSettings,
   getTutorPublicInfo,
   getAvailableBookingSlots
-} from '@/lib/tutors';
+} from '@/lib/tutorSchedule';
 import type { 
   Tutor, 
   TutorStudentWithProfile, 

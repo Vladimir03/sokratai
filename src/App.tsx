@@ -44,7 +44,7 @@ const TutorStudents = lazy(() => import("./pages/tutor/TutorStudents"));
 const TutorStudentProfile = lazy(() => import("./pages/tutor/TutorStudentProfile"));
 const TutorPayments = lazy(() => import("./pages/tutor/TutorPayments"));
 const InviteToTelegram = lazy(() => import("./pages/InviteToTelegram"));
-const TutorBooking = lazy(() => import("./pages/booking/TutorBooking"));
+const BookLesson = lazy(() => import("./pages/BookLesson"));
 
 // Simple loading fallback
 const PageLoader = () => (
@@ -278,10 +278,10 @@ const App = () => (
               } 
             />
             <Route 
-              path="/invite/:inviteCode" 
+              path="/tutor/schedule" 
               element={
                 <Suspense fallback={<PageLoader />}>
-                  <InviteToTelegram />
+                  <TutorSchedule />
                 </Suspense>
               } 
             />
@@ -289,11 +289,19 @@ const App = () => (
               path="/book/:bookingLink" 
               element={
                 <Suspense fallback={<PageLoader />}>
-                  <TutorBooking />
+                  <BookLesson />
                 </Suspense>
               } 
             />
             <Route 
+              path="/invite/:inviteCode"
+              element={
+                <Suspense fallback={<PageLoader />}>
+                  <InviteToTelegram />
+                </Suspense>
+              } 
+            />
+            <Route
               path="*"
               element={
                 <Suspense fallback={<PageLoader />}>
