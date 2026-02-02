@@ -1,232 +1,388 @@
 
-# План: Исправление проблем дашборда репетитора
+# План: Календарь в стиле Google Calendar
 
-## Выявленные проблемы
+## Обзор текущей реализации
 
-### Проблема 1: Зависание скелетонов на дашборде
-**Симптом**: Дашборд репетитора показывает скелетоны бесконечно, данные не загружаются.
-
-**Причина**: Хуки `useTutor()`, `useTutorStudents()`, `useTutorPayments()` делают цепочечные запросы:
-1. Сначала `getCurrentTutor()` получает профиль репетитора
-2. Затем `getTutorStudents()` снова вызывает `getCurrentTutor()` внутри себя
-3. То же с `getTutorPayments()`
-
-Каждый хук независимо вызывает `getCurrentTutor()`, что создаёт **3 одинаковых запроса** на каждой странице. При нестабильном соединении это может привести к таймаутам.
-
-### Проблема 2: Редирект на главную при переходе на "Оплаты"
-**Симптом**: При клике на вкладку "Оплаты" пользователя выбрасывает на главную страницу.
-
-**Причина**: `TutorGuard` на каждой странице заново проверяет роль через RPC `is_tutor`. Если запрос выдаёт ошибку (таймаут), срабатывает `navigate("/")`.
-
-### Проблема 3: RegisterTutor редиректит неверно (дополнительно)
-**Симптом**: При переходе на `/register-tutor` авторизованного пользователя (ученика) выбрасывает на главную.
-
-**Причина**: `RegisterTutor.tsx` редиректит любую активную сессию на `/tutor/dashboard`, не проверяя роль.
+Сейчас календарь использует **фиксированную сетку** по часам (08:00, 09:00...21:00), где каждое занятие занимает ровно одну ячейку высотой `h-14` независимо от реальной длительности. Это не позволяет корректно отображать занятия длительностью 45, 90 или 120 минут.
 
 ---
 
-## Решения
+## Требуемые изменения
 
-### Решение 1: Добавить обработку ошибок и таймаутов в хуки
+### 1. Отображение занятий с точной длительностью (Google-style)
 
-**Файл**: `src/lib/tutors.ts`
+**Текущая проблема**: 
+- Сетка привязана к часам (константа `HOURS`)
+- Ячейка `ScheduleCell` имеет фиксированную высоту `h-14`
+- Занятия длительностью 45 или 90 минут визуально не отличаются от 60-минутных
 
-Изменения:
-- Добавить кэширование профиля репетитора в памяти (в рамках сессии)
-- Избежать повторных запросов `getCurrentTutor()` в каждом хуке
+**Решение**:
+- Перейти на **пиксельную сетку**, где 1 минута = 1px (или коэффициент, например 1.2px)
+- Занятия рендерятся как **абсолютно позиционированные** блоки с высотой `duration_min * pixelsPerMinute`
+- Вертикальная позиция вычисляется от начала рабочего дня: `(startMinutes - workDayStart) * pixelsPerMinute`
+
+**Новая структура компонента WeekCalendar**:
+```
+┌─────────┬──────┬──────┬──────┬──────┬──────┬──────┬──────┐
+│  Время  │  Пн  │  Вт  │  Ср  │  Чт  │  Пт  │  Сб  │  Вс  │
+├─────────┼──────┼──────┼──────┼──────┼──────┼──────┼──────┤
+│  09:00  │      │      │      │      │ ░░░░ │      │      │
+│         │      │      │      │      │ ░░░░ │      │      │
+│  10:00  │ ████ │      │      │      │ ░░░░ │      │      │  
+│         │ ████ │      │      │      │      │      │      │
+│  10:30  │ ████ │      │      │      │      │      │      │
+│         │ ████ │      │      │      │      │      │      │
+│  11:00  │      │      │      │      │      │      │      │
+└─────────┴──────┴──────┴──────┴──────┴──────┴──────┴──────┘
+
+████ = 90-минутное занятие (занимает 1.5 строки)
+░░░░ = 45-минутное занятие (занимает 0.75 строки)
+```
+
+**Ключевые изменения в TutorSchedule.tsx**:
 
 ```typescript
-// Кэш профиля репетитора (в памяти)
-let cachedTutor: Tutor | null = null;
-let cachedTutorUserId: string | null = null;
+// Константы для пиксельной сетки
+const PIXELS_PER_HOUR = 60; // 60px на час = 1px на минуту
+const HOUR_LINE_HEIGHT = 60; // Высота часовой линии
 
-export async function getCurrentTutor(): Promise<Tutor | null> {
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) {
-    cachedTutor = null;
-    cachedTutorUserId = null;
-    return null;
-  }
+// Компонент LessonBlock (абсолютное позиционирование)
+function LessonBlock({ lesson, workDayStart }) {
+  const startDate = new Date(lesson.start_at);
+  const startMinutes = startDate.getHours() * 60 + startDate.getMinutes();
   
-  // Возвращаем кэш если user_id не изменился
-  if (cachedTutor && cachedTutorUserId === user.id) {
-    return cachedTutor;
-  }
-
-  const { data, error } = await supabase
-    .from('tutors')
-    .select('*')
-    .eq('user_id', user.id)
-    .single();
+  const top = (startMinutes - workDayStart * 60) * (PIXELS_PER_HOUR / 60);
+  const height = lesson.duration_min * (PIXELS_PER_HOUR / 60);
   
-  if (error) {
-    console.error('Error fetching tutor:', error);
-    return null;
-  }
-  
-  cachedTutor = data as Tutor;
-  cachedTutorUserId = user.id;
-  return cachedTutor;
-}
-
-// Функция для сброса кэша (при выходе из аккаунта)
-export function clearTutorCache() {
-  cachedTutor = null;
-  cachedTutorUserId = null;
+  return (
+    <div 
+      className="absolute left-0 right-0 mx-1 bg-primary text-primary-foreground rounded px-1"
+      style={{ top: `${top}px`, height: `${height}px` }}
+    >
+      <span className="text-xs truncate">
+        {studentName}
+      </span>
+      <span className="text-xs opacity-80">
+        {formatTime} - {formatEndTime}
+      </span>
+    </div>
+  );
 }
 ```
 
-### Решение 2: Улучшить TutorGuard с повторными попытками
+---
 
-**Файл**: `src/components/TutorGuard.tsx`
+### 2. Настройка рабочих часов (слева в расписании)
 
-Изменения:
-- Добавить retry-логику для RPC-запроса
-- Добавить таймаут с понятным сообщением об ошибке
-- Показывать кнопку "Повторить" при ошибке вместо редиректа
+**Текущая проблема**:
+- Жёстко заданы часы `8:00 - 21:00` в константе `HOURS`
+- Нет UI для изменения диапазона
 
+**Решение**:
+Добавить **карточку настроек** в левую часть страницы:
+
+```
+┌─────────────────────────────────┐
+│ ⚙️ Настройки                    │
+├─────────────────────────────────┤
+│ Рабочие часы                    │
+│ От: [09:00 ▾]  До: [21:00 ▾]   │
+│                                 │
+│ ☑ Понедельник                   │
+│ ☑ Вторник                       │
+│ ☑ Среда                         │
+│ ☑ Четверг                       │
+│ ☑ Пятница                       │
+│ ☐ Суббота                       │
+│ ☐ Воскресенье                   │
+└─────────────────────────────────┘
+```
+
+**Реализация**:
+
+1. **Состояние настроек** (localStorage или база данных):
 ```typescript
-const TutorGuard = ({ children }: TutorGuardProps) => {
-  const navigate = useNavigate();
-  const [loading, setLoading] = useState(true);
-  const [authorized, setAuthorized] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+interface ScheduleSettings {
+  workDayStart: number; // 0-23
+  workDayEnd: number;   // 1-24
+  workDays: number[];   // [0,1,2,3,4] = Пн-Пт
+}
 
-  const checkAccess = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    
-    try {
-      const { data: { session } } = await supabase.auth.getSession();
-      
-      if (!session) {
-        navigate("/login");
-        return;
-      }
+const [settings, setSettings] = useState<ScheduleSettings>({
+  workDayStart: 9,
+  workDayEnd: 21,
+  workDays: [0, 1, 2, 3, 4] // Пн-Пт по умолчанию
+});
+```
 
-      // Retry logic для нестабильного соединения
-      let retries = 2;
-      let isTutor = false;
-      let lastError = null;
-      
-      while (retries >= 0) {
-        const { data, error } = await supabase.rpc("is_tutor", { 
-          _user_id: session.user.id 
-        });
-        
-        if (!error) {
-          isTutor = data;
-          break;
-        }
-        
-        lastError = error;
-        retries--;
-        if (retries >= 0) {
-          await new Promise(r => setTimeout(r, 1000)); // Ждём 1 сек
-        }
-      }
-
-      if (lastError && retries < 0) {
-        console.error("Error checking tutor role after retries:", lastError);
-        setError("Ошибка проверки доступа. Попробуйте ещё раз.");
-        return;
-      }
-
-      if (!isTutor) {
-        navigate("/");
-        return;
-      }
-
-      setAuthorized(true);
-    } catch (error) {
-      console.error("Error in TutorGuard:", error);
-      setError("Ошибка соединения. Попробуйте ещё раз.");
-    } finally {
-      setLoading(false);
-    }
-  }, [navigate]);
-
-  useEffect(() => {
-    checkAccess();
-    // ... subscription
-  }, [checkAccess]);
-
-  if (error) {
-    return (
-      <div className="flex min-h-screen items-center justify-center">
-        <div className="text-center space-y-4">
-          <p className="text-destructive">{error}</p>
-          <Button onClick={checkAccess}>Повторить</Button>
+2. **Компонент WorkHoursSettings**:
+```typescript
+function WorkHoursSettings({ settings, onChange }) {
+  const hours = Array.from({ length: 25 }, (_, i) => i); // 0-24
+  
+  return (
+    <Card className="w-64">
+      <CardHeader>
+        <CardTitle className="text-sm">Рабочие часы</CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className="flex items-center gap-2">
+          <Label>От:</Label>
+          <Select value={settings.workDayStart.toString()} onValueChange={...}>
+            {hours.slice(0, 24).map(h => (
+              <SelectItem key={h} value={h.toString()}>
+                {h.toString().padStart(2, '0')}:00
+              </SelectItem>
+            ))}
+          </Select>
         </div>
-      </div>
-    );
-  }
-  
-  // ... rest
-};
+        <div className="flex items-center gap-2">
+          <Label>До:</Label>
+          <Select value={settings.workDayEnd.toString()} onValueChange={...}>
+            {hours.slice(1).map(h => (...))}
+          </Select>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
 ```
 
-### Решение 3: Исправить RegisterTutor с проверкой роли
+3. **Динамический расчёт сетки**:
+```typescript
+const visibleHours = useMemo(() => {
+  return Array.from(
+    { length: settings.workDayEnd - settings.workDayStart },
+    (_, i) => settings.workDayStart + i
+  );
+}, [settings]);
 
-**Файл**: `src/pages/RegisterTutor.tsx`
+const gridHeight = visibleHours.length * PIXELS_PER_HOUR;
+```
 
-Изменения:
-- Проверять роль перед редиректом
-- Редиректить только репетиторов
+---
+
+### 3. Диалог "Добавить занятие" с выбором даты и времени
+
+**Текущая проблема**:
+- Дата и время берутся из клика по ячейке (`selectedDate`, `selectedHour`)
+- При нажатии кнопки "Добавить занятие" используется текущая дата/час
+- Нет возможности вручную указать произвольную дату и время
+
+**Решение**:
+Расширить `AddLessonDialog` с полями для выбора даты и времени:
+
+```
+┌─────────────────────────────────────┐
+│ Добавить занятие                 ✕ │
+├─────────────────────────────────────┤
+│ Дата и время *                      │
+│ ┌─────────────┐ ┌─────────────────┐ │
+│ │ 📅 02.02.26 │ │ 🕐 19:00 ▾     │ │
+│ └─────────────┘ └─────────────────┘ │
+│                                     │
+│ Ученик *                            │
+│ ┌─────────────────────────────────┐ │
+│ │ Выберите ученика            ▾  │ │
+│ └─────────────────────────────────┘ │
+│                                     │
+│ Длительность                        │
+│ ┌─────────────────────────────────┐ │
+│ │ 60 минут                     ▾  │ │
+│ └─────────────────────────────────┘ │
+│                                     │
+│ Заметка (опц.)                      │
+│ ┌─────────────────────────────────┐ │
+│ │ Примечание к занятию...         │ │
+│ └─────────────────────────────────┘ │
+│                                     │
+│              [Отмена] [Создать]     │
+└─────────────────────────────────────┘
+```
+
+**Изменения в AddLessonDialog**:
 
 ```typescript
-useEffect(() => {
-  const checkSession = async () => {
-    const { data: { session } } = await supabase.auth.getSession();
-    if (session) {
-      // Проверяем, является ли пользователь репетитором
-      const { data: isTutor } = await supabase.rpc("is_tutor", { 
-        _user_id: session.user.id 
-      });
-      
-      if (isTutor) {
-        navigate("/tutor/dashboard");
-      }
-      // Если не репетитор — показываем форму регистрации
+function AddLessonDialog({ 
+  open, 
+  onOpenChange, 
+  students, 
+  initialDate,      // Может быть null при ручном создании
+  initialHour,      // Может быть null при ручном создании
+  onSuccess 
+}: AddLessonDialogProps) {
+  // Состояние для даты и времени
+  const [date, setDate] = useState<Date | undefined>(initialDate || new Date());
+  const [hour, setHour] = useState(initialHour?.toString() || '10');
+  const [minute, setMinute] = useState('00');
+  
+  // Обновлять при открытии диалога
+  useEffect(() => {
+    if (open) {
+      setDate(initialDate || new Date());
+      setHour(initialHour?.toString() || new Date().getHours().toString());
+      setMinute('00');
     }
-  };
-  checkSession();
-}, [navigate]);
+  }, [open, initialDate, initialHour]);
+
+  return (
+    <Dialog>
+      <DialogContent>
+        {/* Новое: Выбор даты */}
+        <div className="space-y-2">
+          <Label>Дата и время *</Label>
+          <div className="flex gap-2">
+            <Popover>
+              <PopoverTrigger asChild>
+                <Button variant="outline" className="w-[180px] justify-start">
+                  <CalendarIcon className="mr-2 h-4 w-4" />
+                  {date ? format(date, 'dd.MM.yyyy') : 'Выберите дату'}
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent>
+                <Calendar 
+                  mode="single" 
+                  selected={date} 
+                  onSelect={setDate}
+                  className="pointer-events-auto"
+                />
+              </PopoverContent>
+            </Popover>
+            
+            {/* Выбор времени */}
+            <div className="flex gap-1">
+              <Select value={hour} onValueChange={setHour}>
+                <SelectTrigger className="w-[80px]">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {Array.from({length: 24}, (_, i) => (
+                    <SelectItem key={i} value={i.toString()}>
+                      {i.toString().padStart(2, '0')}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <span className="flex items-center">:</span>
+              <Select value={minute} onValueChange={setMinute}>
+                <SelectTrigger className="w-[80px]">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {['00', '15', '30', '45'].map(m => (
+                    <SelectItem key={m} value={m}>{m}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+        </div>
+        
+        {/* Существующие поля... */}
+      </DialogContent>
+    </Dialog>
+  );
+}
 ```
 
 ---
 
 ## Файлы для изменения
 
-| Файл | Изменение |
+| Файл | Изменения |
 |------|-----------|
-| `src/lib/tutors.ts` | Добавить кэширование `getCurrentTutor()` |
-| `src/components/TutorGuard.tsx` | Добавить retry-логику и UI ошибки |
-| `src/pages/RegisterTutor.tsx` | Проверять роль перед редиректом |
+| `src/pages/tutor/TutorSchedule.tsx` | Полная переработка компонента календаря |
+
+### Новые компоненты внутри файла:
+
+1. **WeekCalendar** — основная сетка с пиксельным позиционированием
+2. **LessonBlock** — блок занятия с динамической высотой
+3. **TimeColumn** — колонка времени слева
+4. **DayColumn** — колонка дня с relative позиционированием для занятий
+5. **WorkHoursSettings** — настройки рабочих часов (сайдбар)
+6. **AddLessonDialog** (обновлённый) — с DatePicker и TimePicker
 
 ---
 
-## Порядок выполнения
+## Структура Layout страницы
 
-1. **Сначала**: Исправить `RegisterTutor.tsx` — это самое простое и критичное
-2. **Затем**: Добавить retry в `TutorGuard.tsx` — предотвращает редирект при таймаутах
-3. **Затем**: Добавить кэширование в `tutors.ts` — оптимизация для медленных соединений
-
----
-
-## Ожидаемый результат
-
-| Сценарий | Было | Станет |
-|----------|------|--------|
-| Репетитор на медленном соединении | Скелетоны зависают | Данные загружаются (с кэшем) |
-| Таймаут при проверке роли | Редирект на `/` | Показ кнопки "Повторить" |
-| Ученик на `/register-tutor` | Редирект на `/` через дашборд | Показ формы регистрации |
-| Репетитор на `/register-tutor` | Редирект на дашборд | Редирект на дашборд ✓ |
+```
+┌──────────────────────────────────────────────────────────────┐
+│ 📅 Расписание                    [Ссылка] [🔔]              │
+├──────────────────────────────────────────────────────────────┤
+│ ┌──────────┐  ┌──────────────────────────────────────────┐  │
+│ │ Настройки │  │           Календарь недели               │  │
+│ │           │  │                                          │  │
+│ │ Рабочие   │  │ ← Пн 3 фев    ...    Вс 9 фев →         │  │
+│ │ часы:     │  │                                          │  │
+│ │ 09-21     │  │  09:00 │    │    │ ██ │    │    │    │  │  │
+│ │           │  │        │    │    │ ██ │    │    │    │  │  │
+│ │ Рабочие   │  │  10:00 │    │    │    │    │    │    │  │  │
+│ │ дни:      │  │        │ ░░ │    │    │    │    │    │  │  │
+│ │ ☑ Пн-Пт   │  │  11:00 │ ░░ │    │    │    │    │    │  │  │
+│ │ ☐ Сб-Вс   │  │        │    │    │    │    │    │    │  │  │
+│ │           │  │  ...                                     │  │
+│ └──────────┘  └──────────────────────────────────────────┘  │
+│                                                              │
+│                    [+ Добавить занятие]                      │
+└──────────────────────────────────────────────────────────────┘
+```
 
 ---
 
 ## Технические детали
 
-- Кэш репетитора хранится в памяти модуля и сбрасывается при перезагрузке страницы
-- Retry делает до 3 попыток с интервалом 1 секунда
-- При ошибке показывается понятное сообщение на русском языке
+### Пиксельная сетка
+
+```typescript
+const PIXELS_PER_MINUTE = 1; // 1px = 1 минута
+const HOUR_HEIGHT = 60; // 60px на час
+
+function calculateLessonPosition(lesson: TutorLesson, workDayStartHour: number) {
+  const startDate = new Date(lesson.start_at);
+  const startMinutes = startDate.getHours() * 60 + startDate.getMinutes();
+  const offsetMinutes = startMinutes - (workDayStartHour * 60);
+  
+  return {
+    top: offsetMinutes * PIXELS_PER_MINUTE,
+    height: lesson.duration_min * PIXELS_PER_MINUTE,
+  };
+}
+```
+
+### Сохранение настроек
+
+Для простоты используем localStorage:
+```typescript
+const SETTINGS_KEY = 'tutor-schedule-settings';
+
+function loadSettings(): ScheduleSettings {
+  const saved = localStorage.getItem(SETTINGS_KEY);
+  return saved ? JSON.parse(saved) : defaultSettings;
+}
+
+function saveSettings(settings: ScheduleSettings) {
+  localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
+}
+```
+
+---
+
+## Порядок выполнения
+
+1. **Рефакторинг календаря**: Переделать сетку на пиксельное позиционирование
+2. **LessonBlock**: Создать компонент для занятий с динамической высотой
+3. **WorkHoursSettings**: Добавить настройки рабочих часов
+4. **AddLessonDialog**: Расширить диалог с DatePicker и TimePicker
+5. **Layout**: Переработать layout с сайдбаром настроек
+
+---
+
+## Ожидаемый результат
+
+| Функция | До | После |
+|---------|-----|-------|
+| Отображение 45-мин занятия | Полная ячейка (как 60 мин) | 3/4 высоты ячейки |
+| Отображение 90-мин занятия | Полная ячейка (как 60 мин) | 1.5 высоты, перекрывает 2 строки |
+| Рабочие часы | Фиксировано 8-21 | Настраивается 0-24 |
+| Добавление занятия | Только по клику на ячейку | Свободный выбор даты/времени |
