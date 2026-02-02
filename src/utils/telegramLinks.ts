@@ -1,5 +1,8 @@
 const TELEGRAM_BOT_USERNAME = 'sokratai_ru_bot';
 
+// Продакшн URL приложения
+const PRODUCTION_URL = 'https://sokratai.ru';
+
 export const getTelegramLink = (utmSource: string): string => {
   return `https://t.me/${TELEGRAM_BOT_USERNAME}?start=${utmSource}`;
 };
@@ -15,7 +18,7 @@ export const getTutorInviteTelegramLink = (inviteCode: string): string => {
  * Генерирует веб-ссылку для приглашения (страница с инструкцией)
  */
 export const getTutorInviteWebLink = (inviteCode: string): string => {
-  return `${window.location.origin}/invite/${inviteCode}`;
+  return `${PRODUCTION_URL}/invite/${inviteCode}`;
 };
 
 export const telegramLinks = {
