@@ -1,107 +1,479 @@
-import { useState, useEffect } from "react";
-import { useNavigate } from "react-router-dom";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { supabase } from "@/lib/supabaseClient";
-import { toast } from "sonner";
-import { GraduationCap, Users, Calendar, CreditCard, LogOut } from "lucide-react";
-import TutorGuard from "@/components/TutorGuard";
+import { useMemo, useState } from 'react';
+import { useNavigate, Link } from 'react-router-dom';
+import QRCode from 'react-qr-code';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Skeleton } from '@/components/ui/skeleton';
+import { Badge } from '@/components/ui/badge';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
+import { 
+  Users, 
+  CreditCard, 
+  AlertTriangle, 
+  UserPlus, 
+  Plus, 
+  ChevronRight,
+  Clock,
+  Copy,
+  ExternalLink,
+  Check
+} from 'lucide-react';
+import { toast } from 'sonner';
+import TutorGuard from '@/components/TutorGuard';
+import { TutorLayout } from '@/components/tutor/TutorLayout';
+import { useTutor, useTutorStudents, useTutorPayments } from '@/hooks/useTutor';
+import { getTutorInviteWebLink, getTutorInviteTelegramLink } from '@/utils/telegramLinks';
+import type { TutorStudentWithProfile, TutorPaymentWithStudent } from '@/types/tutor';
 
-const TutorDashboardContent = () => {
+// =============================================
+// Утилиты
+// =============================================
+
+function formatAmount(amount: number): string {
+  return new Intl.NumberFormat('ru-RU', {
+    style: 'currency',
+    currency: 'RUB',
+    minimumFractionDigits: 0,
+  }).format(amount);
+}
+
+function formatDate(date: Date): string {
+  return date.toLocaleDateString('ru-RU', { 
+    weekday: 'long', 
+    day: 'numeric', 
+    month: 'long' 
+  });
+}
+
+function getEffectiveStatus(payment: TutorPaymentWithStudent): 'paid' | 'pending' | 'overdue' {
+  if (payment.status === 'paid') return 'paid';
+  if (payment.due_date && new Date(payment.due_date) < new Date()) {
+    return 'overdue';
+  }
+  return 'pending';
+}
+
+function getStudentName(payment: TutorPaymentWithStudent): string {
+  return payment.tutor_students?.profiles?.username || 'Без имени';
+}
+
+// =============================================
+// Компоненты карточек статистики
+// =============================================
+
+interface StatCardProps {
+  title: string;
+  value: string | number;
+  subtitle: string;
+  icon: React.ReactNode;
+  href: string;
+  variant?: 'default' | 'success' | 'warning' | 'danger';
+}
+
+function StatCard({ title, value, subtitle, icon, href, variant = 'default' }: StatCardProps) {
   const navigate = useNavigate();
-  const [userName, setUserName] = useState<string>("");
-
-  useEffect(() => {
-    const fetchUser = async () => {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (user?.user_metadata?.username) {
-        setUserName(user.user_metadata.username);
-      } else if (user?.email) {
-        setUserName(user.email.split("@")[0]);
-      }
-    };
-    fetchUser();
-  }, []);
-
-  const handleLogout = async () => {
-    try {
-      await supabase.auth.signOut();
-      toast.success("Вы вышли из системы");
-      navigate("/login");
-    } catch (error) {
-      console.error("Logout error:", error);
-      toast.error("Ошибка выхода");
-    }
+  
+  const variantClasses = {
+    default: '',
+    success: 'border-green-500/30',
+    warning: 'border-yellow-500/30',
+    danger: 'border-destructive/30',
   };
-
-  const upcomingFeatures = [
-    { icon: Users, title: "Список учеников", description: "Управляйте своими учениками" },
-    { icon: Calendar, title: "Расписание", description: "Планируйте занятия" },
-    { icon: CreditCard, title: "Учёт оплат", description: "Отслеживайте платежи" },
-  ];
-
+  
+  const valueClasses = {
+    default: '',
+    success: 'text-green-600',
+    warning: 'text-yellow-600',
+    danger: 'text-destructive',
+  };
+  
   return (
-    <div className="min-h-screen bg-background">
-      {/* Header */}
-      <header className="border-b bg-card">
-        <div className="container mx-auto px-4 py-4 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 bg-primary/10 rounded-full flex items-center justify-center">
-              <GraduationCap className="w-5 h-5 text-primary" />
+    <Card 
+      className={`cursor-pointer transition-all hover:shadow-md ${variantClasses[variant]}`}
+      onClick={() => navigate(href)}
+    >
+      <CardHeader className="pb-2 flex flex-row items-center justify-between">
+        <CardTitle className="text-sm font-medium text-muted-foreground">
+          {title}
+        </CardTitle>
+        <div className="text-muted-foreground">{icon}</div>
+      </CardHeader>
+      <CardContent>
+        <p className={`text-2xl font-bold ${valueClasses[variant]}`}>{value}</p>
+        <div className="flex items-center justify-between mt-1">
+          <p className="text-sm text-muted-foreground">{subtitle}</p>
+          <ChevronRight className="h-4 w-4 text-muted-foreground" />
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+// =============================================
+// Компонент списка "Требуют внимания"
+// =============================================
+
+interface AttentionItem {
+  id: string;
+  name: string;
+  reason: string;
+  type: 'overdue' | 'inactive';
+  link: string;
+}
+
+interface AttentionListProps {
+  items: AttentionItem[];
+}
+
+function AttentionList({ items }: AttentionListProps) {
+  const navigate = useNavigate();
+  
+  if (items.length === 0) return null;
+  
+  return (
+    <Card className="border-yellow-500/30 bg-yellow-500/5">
+      <CardHeader className="pb-3">
+        <CardTitle className="text-base font-medium flex items-center gap-2">
+          <AlertTriangle className="h-4 w-4 text-yellow-600" />
+          Требуют внимания
+        </CardTitle>
+      </CardHeader>
+      <CardContent>
+        <div className="space-y-2">
+          {items.slice(0, 5).map(item => (
+            <div 
+              key={`${item.type}-${item.id}`}
+              className="flex items-center justify-between p-2 rounded-md hover:bg-muted/50 cursor-pointer transition-colors"
+              onClick={() => navigate(item.link)}
+            >
+              <div className="flex items-center gap-3">
+                <Badge variant={item.type === 'overdue' ? 'destructive' : 'secondary'} className="text-xs">
+                  {item.type === 'overdue' ? 'Просрочено' : 'Неактивен'}
+                </Badge>
+                <span className="text-sm font-medium">{item.name}</span>
+              </div>
+              <span className="text-xs text-muted-foreground">{item.reason}</span>
             </div>
-            <span className="font-semibold text-lg">Socrat</span>
-          </div>
-          <Button variant="outline" size="sm" onClick={handleLogout}>
-            <LogOut className="w-4 h-4 mr-2" />
-            Выйти
-          </Button>
-        </div>
-      </header>
-
-      {/* Main Content */}
-      <main className="container mx-auto px-4 py-8 max-w-4xl">
-        {/* Welcome Section */}
-        <Card className="mb-8">
-          <CardHeader>
-            <CardTitle className="text-2xl flex items-center gap-2">
-              👋 Добро пожаловать{userName ? `, ${userName}` : ""}!
-            </CardTitle>
-            <CardDescription>
-              Это ваш кабинет репетитора. Здесь вы сможете управлять учениками и занятиями.
-            </CardDescription>
-          </CardHeader>
-        </Card>
-
-        {/* Upcoming Features */}
-        <h2 className="text-lg font-semibold mb-4 text-muted-foreground">
-          Скоро появится:
-        </h2>
-        <div className="grid gap-4 md:grid-cols-3">
-          {upcomingFeatures.map((feature) => (
-            <Card key={feature.title} className="opacity-60">
-              <CardContent className="pt-6">
-                <div className="flex flex-col items-center text-center">
-                  <div className="w-12 h-12 bg-muted rounded-full flex items-center justify-center mb-4">
-                    <feature.icon className="w-6 h-6 text-muted-foreground" />
-                  </div>
-                  <h3 className="font-medium mb-1">{feature.title}</h3>
-                  <p className="text-sm text-muted-foreground">{feature.description}</p>
-                </div>
-              </CardContent>
-            </Card>
           ))}
+          {items.length > 5 && (
+            <p className="text-xs text-muted-foreground text-center pt-2">
+              И ещё {items.length - 5}...
+            </p>
+          )}
         </div>
-      </main>
+      </CardContent>
+    </Card>
+  );
+}
+
+// =============================================
+// Скелетон загрузки
+// =============================================
+
+function DashboardSkeleton() {
+  return (
+    <div className="space-y-6">
+      <Skeleton className="h-16 w-2/3" />
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <Skeleton className="h-28" />
+        <Skeleton className="h-28" />
+        <Skeleton className="h-28" />
+      </div>
+      <div className="flex gap-3">
+        <Skeleton className="h-10 w-40" />
+        <Skeleton className="h-10 w-40" />
+      </div>
     </div>
   );
-};
+}
 
-const TutorDashboard = () => {
+// =============================================
+// Основной компонент дашборда
+// =============================================
+
+function TutorDashboardContent() {
+  const navigate = useNavigate();
+  const { tutor, loading: tutorLoading } = useTutor();
+  const { students, loading: studentsLoading } = useTutorStudents();
+  const { payments, loading: paymentsLoading } = useTutorPayments();
+  
+  const [inviteModalOpen, setInviteModalOpen] = useState(false);
+  const [copiedLink, setCopiedLink] = useState(false);
+  
+  const loading = tutorLoading || studentsLoading || paymentsLoading;
+  
+  // Invite URLs
+  const inviteCode = tutor?.invite_code;
+  const inviteWebLink = inviteCode ? getTutorInviteWebLink(inviteCode) : '';
+  const inviteTelegramLink = inviteCode ? getTutorInviteTelegramLink(inviteCode) : '';
+  
+  const handleCopyLink = async () => {
+    if (!inviteWebLink) return;
+    try {
+      await navigator.clipboard.writeText(inviteWebLink);
+      setCopiedLink(true);
+      toast.success('Ссылка скопирована');
+      setTimeout(() => setCopiedLink(false), 2000);
+    } catch {
+      toast.error('Не удалось скопировать');
+    }
+  };
+  
+  const handleOpenTelegram = () => {
+    if (inviteTelegramLink) {
+      window.open(inviteTelegramLink, '_blank');
+    }
+  };
+  
+  // Статистика учеников
+  const studentStats = useMemo(() => {
+    const activeStudents = students.filter(s => s.status === 'active');
+    return {
+      active: activeStudents.length,
+      total: students.length,
+    };
+  }, [students]);
+  
+  // Статистика оплат
+  const paymentStats = useMemo(() => {
+    let pendingAmount = 0;
+    let pendingCount = 0;
+    let overdueAmount = 0;
+    let overdueCount = 0;
+    
+    for (const payment of payments) {
+      const effectiveStatus = getEffectiveStatus(payment);
+      if (effectiveStatus === 'pending') {
+        pendingAmount += payment.amount;
+        pendingCount++;
+      } else if (effectiveStatus === 'overdue') {
+        overdueAmount += payment.amount;
+        overdueCount++;
+      }
+    }
+    
+    return { pendingAmount, pendingCount, overdueAmount, overdueCount };
+  }, [payments]);
+  
+  // Элементы "Требуют внимания"
+  const attentionItems = useMemo<AttentionItem[]>(() => {
+    const items: AttentionItem[] = [];
+    const now = new Date();
+    const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+    
+    // Просроченные оплаты
+    for (const payment of payments) {
+      if (getEffectiveStatus(payment) === 'overdue') {
+        items.push({
+          id: payment.id,
+          name: getStudentName(payment),
+          reason: formatAmount(payment.amount),
+          type: 'overdue',
+          link: '/tutor/payments',
+        });
+      }
+    }
+    
+    // Неактивные ученики (>7 дней без активности)
+    for (const student of students) {
+      if (student.status !== 'active') continue;
+      
+      const lastActivity = student.last_activity_at 
+        ? new Date(student.last_activity_at) 
+        : null;
+      
+      if (!lastActivity || lastActivity < sevenDaysAgo) {
+        const daysAgo = lastActivity 
+          ? Math.floor((now.getTime() - lastActivity.getTime()) / (1000 * 60 * 60 * 24))
+          : null;
+        
+        items.push({
+          id: student.id,
+          name: student.profiles?.username || 'Без имени',
+          reason: daysAgo ? `${daysAgo} дн. без активности` : 'Нет активности',
+          type: 'inactive',
+          link: `/tutor/students/${student.id}`,
+        });
+      }
+    }
+    
+    return items;
+  }, [students, payments]);
+  
+  if (loading) {
+    return (
+      <TutorLayout>
+        <DashboardSkeleton />
+      </TutorLayout>
+    );
+  }
+  
+  return (
+    <TutorLayout>
+      <div className="space-y-6">
+        {/* Приветствие */}
+        <div className="space-y-1">
+          <h1 className="text-2xl font-bold">
+            👋 Добро пожаловать{tutor?.name ? `, ${tutor.name}` : ''}!
+          </h1>
+          <p className="text-muted-foreground capitalize">
+            {formatDate(new Date())}
+          </p>
+        </div>
+        
+        {/* Сводные карточки */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <StatCard
+            title="Ученики"
+            value={studentStats.active}
+            subtitle={`${studentStats.total > studentStats.active ? `всего ${studentStats.total}` : 'активных'}`}
+            icon={<Users className="h-5 w-5" />}
+            href="/tutor/students"
+          />
+          
+          <StatCard
+            title="Ожидается к оплате"
+            value={formatAmount(paymentStats.pendingAmount)}
+            subtitle={`${paymentStats.pendingCount} записей`}
+            icon={<Clock className="h-5 w-5" />}
+            href="/tutor/payments"
+            variant={paymentStats.pendingCount > 0 ? 'warning' : 'default'}
+          />
+          
+          <StatCard
+            title="Просрочено"
+            value={formatAmount(paymentStats.overdueAmount)}
+            subtitle={`${paymentStats.overdueCount} записей`}
+            icon={<CreditCard className="h-5 w-5" />}
+            href="/tutor/payments"
+            variant={paymentStats.overdueCount > 0 ? 'danger' : 'success'}
+          />
+        </div>
+        
+        {/* Быстрые действия */}
+        <div className="flex flex-wrap gap-3">
+          <Button onClick={() => setInviteModalOpen(true)}>
+            <UserPlus className="h-4 w-4 mr-2" />
+            Добавить ученика
+          </Button>
+          
+          <Button variant="outline" onClick={() => navigate('/tutor/payments')}>
+            <Plus className="h-4 w-4 mr-2" />
+            Добавить оплату
+          </Button>
+          
+          <Button variant="ghost" asChild>
+            <Link to="/tutor/students">
+              Все ученики
+              <ChevronRight className="h-4 w-4 ml-1" />
+            </Link>
+          </Button>
+        </div>
+        
+        {/* Требуют внимания */}
+        <AttentionList items={attentionItems} />
+        
+        {/* Подсказка для новых репетиторов */}
+        {students.length === 0 && (
+          <Card className="bg-muted/30">
+            <CardContent className="pt-6">
+              <div className="text-center space-y-4">
+                <div className="text-4xl">🎓</div>
+                <div>
+                  <h3 className="font-medium mb-1">Начните работу с Сократом</h3>
+                  <p className="text-sm text-muted-foreground max-w-md mx-auto">
+                    Пригласите первого ученика по ссылке. Он получит доступ к AI-помощнику, 
+                    а вы сможете отслеживать его прогресс и диалоги с ботом.
+                  </p>
+                </div>
+                <Button onClick={() => setInviteModalOpen(true)}>
+                  <UserPlus className="h-4 w-4 mr-2" />
+                  Пригласить ученика
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+        
+        {/* Invite Modal */}
+        <Dialog open={inviteModalOpen} onOpenChange={setInviteModalOpen}>
+          <DialogContent className="max-w-md">
+            <DialogHeader>
+              <DialogTitle>Пригласить ученика</DialogTitle>
+              <DialogDescription>
+                Отправьте эту ссылку ученику. После перехода он автоматически 
+                подключится к вашему кабинету.
+              </DialogDescription>
+            </DialogHeader>
+            
+            <div className="space-y-6 py-4">
+              {/* QR Code */}
+              {inviteWebLink && (
+                <div className="flex justify-center">
+                  <div className="bg-white p-3 rounded-lg shadow-sm">
+                    <QRCode value={inviteWebLink} size={160} level="M" />
+                  </div>
+                </div>
+              )}
+              
+              {/* Link display */}
+              <div className="bg-muted p-3 rounded-md text-sm font-mono break-all text-center">
+                {inviteWebLink || 'Загрузка...'}
+              </div>
+              
+              {/* Actions */}
+              <div className="flex flex-col sm:flex-row gap-2">
+                <Button 
+                  onClick={handleCopyLink} 
+                  variant="outline" 
+                  className="flex-1"
+                  disabled={!inviteCode}
+                >
+                  {copiedLink ? (
+                    <>
+                      <Check className="h-4 w-4 mr-2" />
+                      Скопировано
+                    </>
+                  ) : (
+                    <>
+                      <Copy className="h-4 w-4 mr-2" />
+                      Скопировать
+                    </>
+                  )}
+                </Button>
+                
+                <Button 
+                  onClick={handleOpenTelegram}
+                  className="flex-1"
+                  disabled={!inviteCode}
+                >
+                  <ExternalLink className="h-4 w-4 mr-2" />
+                  Telegram
+                </Button>
+              </div>
+              
+              {/* Instructions */}
+              <div className="text-xs text-muted-foreground space-y-1">
+                <p>1. Ученик открывает ссылку или сканирует QR-код</p>
+                <p>2. Переходит в Telegram и нажимает «Начать»</p>
+                <p>3. Автоматически появляется в вашем списке</p>
+              </div>
+            </div>
+          </DialogContent>
+        </Dialog>
+      </div>
+    </TutorLayout>
+  );
+}
+
+// =============================================
+// Экспорт с гуардом
+// =============================================
+
+export default function TutorDashboard() {
   return (
     <TutorGuard>
       <TutorDashboardContent />
     </TutorGuard>
   );
-};
-
-export default TutorDashboard;
+}
