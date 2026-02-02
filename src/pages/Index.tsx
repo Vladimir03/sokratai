@@ -199,15 +199,32 @@ const Index = () => {
               </a>
               
               {/* Secondary - Web */}
-              <Link to="/chat">
-                <Button
-                  size="lg"
-                  className="bg-white/10 backdrop-blur-sm border-2 border-white/30 text-white hover:bg-white/20 text-base md:text-lg px-8 py-6 rounded-2xl font-semibold transition-all hover:scale-105 w-full sm:w-auto"
-                >
-                  <Globe className="w-5 h-5 mr-2" />
-                  Открыть в браузере
-                </Button>
-              </Link>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    size="lg"
+                    className="bg-white/10 backdrop-blur-sm border-2 border-white/30 text-white hover:bg-white/20 text-base md:text-lg px-8 py-6 rounded-2xl font-semibold transition-all hover:scale-105 w-full sm:w-auto"
+                  >
+                    <Globe className="w-5 h-5 mr-2" />
+                    Открыть в браузере
+                    <ChevronDown className="w-4 h-4 ml-2" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="center" className="w-56">
+                  <DropdownMenuItem asChild>
+                    <Link to="/chat" className="flex items-center gap-2 cursor-pointer">
+                      <BookOpen className="w-4 h-4" />
+                      Я ученик
+                    </Link>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem asChild>
+                    <Link to="/login" className="flex items-center gap-2 cursor-pointer">
+                      <GraduationCap className="w-4 h-4" />
+                      Я репетитор
+                    </Link>
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
             </div>
             
             {/* Platform hints */}
