@@ -12,12 +12,14 @@ import {
   getTutorWeeklySlots,
   getTutorLessons,
   getReminderSettings,
+  getCalendarSettings,
+  getAvailabilityExceptions,
   getTutorPublicInfo,
   getAvailableBookingSlots
 } from '@/lib/tutorSchedule';
-import type { 
-  Tutor, 
-  TutorStudentWithProfile, 
+import type {
+  Tutor,
+  TutorStudentWithProfile,
   MockExam,
   StudentChat,
   StudentChatMessage,
@@ -25,6 +27,8 @@ import type {
   TutorWeeklySlot,
   TutorLessonWithStudent,
   TutorReminderSettings,
+  TutorCalendarSettings,
+  TutorAvailabilityException,
   TutorPublicInfo,
   BookingSlot
 } from '@/types/tutor';
@@ -369,6 +373,64 @@ export function useTutorReminderSettings() {
   }, [fetchSettings]);
 
   return { settings, loading, error, refetch: fetchSettings };
+}
+
+/**
+ * Хук для настроек календаря
+ */
+export function useTutorCalendarSettings() {
+  const [settings, setSettings] = useState<TutorCalendarSettings | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const fetchSettings = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const data = await getCalendarSettings();
+      setSettings(data);
+    } catch (err) {
+      console.error('Error in useTutorCalendarSettings:', err);
+      setError('Не удалось загрузить настройки календаря');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchSettings();
+  }, [fetchSettings]);
+
+  return { settings, loading, error, refetch: fetchSettings };
+}
+
+/**
+ * Хук для исключений доступности
+ */
+export function useTutorAvailabilityExceptions() {
+  const [exceptions, setExceptions] = useState<TutorAvailabilityException[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const fetchExceptions = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const data = await getAvailabilityExceptions();
+      setExceptions(data);
+    } catch (err) {
+      console.error('Error in useTutorAvailabilityExceptions:', err);
+      setError('Не удалось загрузить исключения');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchExceptions();
+  }, [fetchExceptions]);
+
+  return { exceptions, loading, error, refetch: fetchExceptions };
 }
 
 // =============================================

@@ -5,25 +5,28 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
-import { Calendar, Clock, User, Check, ArrowLeft } from 'lucide-react';
+import { Calendar as CalendarWidget } from '@/components/ui/calendar';
+import { Calendar, Clock, User, Check, ArrowLeft, ChevronLeft, ChevronRight } from 'lucide-react';
 import { toast } from 'sonner';
 import { supabase } from '@/lib/supabaseClient';
-import { 
-  getTutorPublicInfo, 
+import { cn } from '@/lib/utils';
+import {
+  getTutorPublicInfo,
   getAvailableBookingSlots,
-  bookLessonSlot 
+  bookLessonSlot
 } from '@/lib/tutorSchedule';
-import { format, parseISO, isSameDay } from 'date-fns';
+import { format, parseISO, isSameDay, startOfMonth, endOfMonth, eachDayOfInterval, addMonths, subMonths } from 'date-fns';
 import { ru } from 'date-fns/locale';
 import type { TutorPublicInfo, BookingSlot } from '@/types/tutor';
 
 export default function BookLesson() {
   const { bookingLink } = useParams<{ bookingLink: string }>();
   const navigate = useNavigate();
-  
+
   const [tutor, setTutor] = useState<TutorPublicInfo | null>(null);
   const [slots, setSlots] = useState<BookingSlot[]>([]);
   const [loading, setLoading] = useState(true);
+  const [selectedDate, setSelectedDate] = useState<Date | null>(null);
   const [selectedSlot, setSelectedSlot] = useState<BookingSlot | null>(null);
   const [booking, setBooking] = useState(false);
   const [booked, setBooked] = useState(false);
@@ -40,14 +43,14 @@ export default function BookLesson() {
   useEffect(() => {
     const fetchData = async () => {
       if (!bookingLink) return;
-      
+
       setLoading(true);
       try {
         const [tutorData, slotsData] = await Promise.all([
           getTutorPublicInfo(bookingLink),
-          getAvailableBookingSlots(bookingLink, 14)
+          getAvailableBookingSlots(bookingLink, 30)
         ]);
-        
+
         setTutor(tutorData);
         setSlots(slotsData);
       } catch (error) {
@@ -57,14 +60,14 @@ export default function BookLesson() {
         setLoading(false);
       }
     };
-    
+
     fetchData();
   }, [bookingLink]);
 
   // Group slots by date
   const slotsByDate = useMemo(() => {
     const grouped: Record<string, BookingSlot[]> = {};
-    
+
     slots.forEach(slot => {
       const dateKey = slot.slot_date;
       if (!grouped[dateKey]) {
@@ -72,27 +75,46 @@ export default function BookLesson() {
       }
       grouped[dateKey].push(slot);
     });
-    
+
     return grouped;
   }, [slots]);
 
-  const availableDates = Object.keys(slotsByDate).sort();
+  // Dates that have available (not booked) slots
+  const availableDates = useMemo(() => {
+    const dates = new Set<string>();
+    slots.forEach(slot => {
+      if (!slot.is_booked) {
+        dates.add(slot.slot_date);
+      }
+    });
+    return dates;
+  }, [slots]);
+
+  // Slots for selected date (only free ones)
+  const selectedDateSlots = useMemo(() => {
+    if (!selectedDate) return [];
+    const dateKey = format(selectedDate, 'yyyy-MM-dd');
+    return (slotsByDate[dateKey] || []).filter(s => !s.is_booked);
+  }, [selectedDate, slotsByDate]);
+
+  const handleSelectDate = (date: Date) => {
+    setSelectedDate(date);
+    setSelectedSlot(null);
+  };
 
   const handleSelectSlot = (slot: BookingSlot) => {
-    if (slot.is_booked) return;
     setSelectedSlot(slot);
   };
 
   const handleBook = async () => {
     if (!selectedSlot || !bookingLink) return;
-    
+
     if (!isAuthenticated) {
-      // Redirect to login with return URL
       toast.info('Войдите, чтобы записаться на занятие');
       navigate(`/login?redirect=/book/${bookingLink}`);
       return;
     }
-    
+
     setBooking(true);
     try {
       await bookLessonSlot(
@@ -160,16 +182,34 @@ export default function BookLesson() {
               Занятие с {tutor.name}
             </p>
             {selectedSlot && (
-              <p className="font-medium mb-6">
-                {format(parseISO(selectedSlot.slot_date), 'd MMMM', { locale: ru })} в {selectedSlot.start_time.slice(0, 5)}
-              </p>
+              <div className="space-y-1 mb-6">
+                <p className="font-medium text-lg">
+                  {format(parseISO(selectedSlot.slot_date), 'EEEE, d MMMM', { locale: ru })}
+                </p>
+                <p className="text-muted-foreground">
+                  {selectedSlot.start_time.slice(0, 5)} ({selectedSlot.duration_min} мин)
+                </p>
+              </div>
             )}
-            <p className="text-sm text-muted-foreground mb-6">
-              Напоминание придёт вам в Telegram перед занятием
-            </p>
-            <Button onClick={() => navigate('/chat')}>
-              Перейти в чат
-            </Button>
+            <div className="bg-muted/50 rounded-lg p-4 mb-6 text-sm text-muted-foreground">
+              <p>Напоминание придёт вам в Telegram:</p>
+              <ul className="mt-1 space-y-0.5">
+                <li>За 24 часа до занятия</li>
+                <li>За 1 час до занятия</li>
+              </ul>
+            </div>
+            <div className="flex gap-3 justify-center">
+              <Button onClick={() => navigate('/chat')}>
+                Перейти в чат
+              </Button>
+              <Button variant="outline" onClick={() => {
+                setBooked(false);
+                setSelectedSlot(null);
+                setSelectedDate(null);
+              }}>
+                Записаться ещё
+              </Button>
+            </div>
           </CardContent>
         </Card>
       </div>
@@ -208,82 +248,106 @@ export default function BookLesson() {
           </CardContent>
         </Card>
 
-        {/* Available Slots */}
+        {/* Calendar date picker */}
         <Card>
-          <CardHeader>
+          <CardHeader className="pb-2">
             <CardTitle className="text-lg flex items-center gap-2">
               <Calendar className="h-5 w-5" />
-              Выберите время
+              Выберите дату
             </CardTitle>
             <CardDescription>
-              Доступные слоты на ближайшие 2 недели
+              Зелёные точки — дни с доступными слотами
             </CardDescription>
           </CardHeader>
           <CardContent>
-            {availableDates.length === 0 ? (
+            {availableDates.size === 0 ? (
               <p className="text-center text-muted-foreground py-8">
                 Нет доступных слотов. Попробуйте позже.
               </p>
             ) : (
-              <div className="space-y-4">
-                {availableDates.map(dateStr => {
-                  const date = parseISO(dateStr);
-                  const daySlots = slotsByDate[dateStr];
-                  
-                  return (
-                    <div key={dateStr}>
-                      <h4 className="font-medium text-sm mb-2">
-                        {format(date, 'EEEE, d MMMM', { locale: ru })}
-                      </h4>
-                      <div className="flex flex-wrap gap-2">
-                        {daySlots.map((slot, i) => {
-                          const isSelected = selectedSlot && 
-                            selectedSlot.slot_date === slot.slot_date && 
-                            selectedSlot.start_time === slot.start_time;
-                          
-                          return (
-                            <Button
-                              key={i}
-                              variant={isSelected ? "default" : slot.is_booked ? "ghost" : "outline"}
-                              size="sm"
-                              disabled={slot.is_booked}
-                              onClick={() => handleSelectSlot(slot)}
-                              className={`gap-1 ${slot.is_booked ? 'line-through opacity-50' : ''}`}
-                            >
-                              <Clock className="h-3 w-3" />
-                              {slot.start_time.slice(0, 5)}
-                            </Button>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
+              <CalendarWidget
+                mode="single"
+                selected={selectedDate || undefined}
+                onSelect={(date) => date && handleSelectDate(date)}
+                locale={ru}
+                className="pointer-events-auto mx-auto"
+                modifiers={{
+                  available: (date) => availableDates.has(format(date, 'yyyy-MM-dd')),
+                }}
+                modifiersClassNames={{
+                  available: 'relative after:absolute after:bottom-0.5 after:left-1/2 after:-translate-x-1/2 after:w-1.5 after:h-1.5 after:rounded-full after:bg-green-500',
+                }}
+                disabled={(date) => !availableDates.has(format(date, 'yyyy-MM-dd'))}
+              />
             )}
           </CardContent>
         </Card>
 
+        {/* Time slots for selected date */}
+        {selectedDate && (
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-base">
+                {format(selectedDate, 'EEEE, d MMMM', { locale: ru })}
+              </CardTitle>
+              <CardDescription>
+                {selectedDateSlots.length > 0
+                  ? `${selectedDateSlots.length} свободных слотов`
+                  : 'Нет свободных слотов'
+                }
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              {selectedDateSlots.length > 0 ? (
+                <div className="flex flex-wrap gap-2">
+                  {selectedDateSlots.map((slot, i) => {
+                    const isSelected = selectedSlot &&
+                      selectedSlot.slot_date === slot.slot_date &&
+                      selectedSlot.start_time === slot.start_time;
+
+                    return (
+                      <Button
+                        key={i}
+                        variant={isSelected ? "default" : "outline"}
+                        size="sm"
+                        onClick={() => handleSelectSlot(slot)}
+                        className="gap-1"
+                      >
+                        <Clock className="h-3 w-3" />
+                        {slot.start_time.slice(0, 5)}
+                      </Button>
+                    );
+                  })}
+                </div>
+              ) : (
+                <p className="text-center text-muted-foreground py-4">
+                  Все слоты заняты на этот день
+                </p>
+              )}
+            </CardContent>
+          </Card>
+        )}
+
         {/* Book Button */}
         {selectedSlot && (
-          <Card className="sticky bottom-4">
+          <Card className="sticky bottom-4 border-primary/50 shadow-lg">
             <CardContent className="py-4">
               <div className="flex items-center justify-between mb-3">
                 <div>
                   <p className="font-medium">
-                    {format(parseISO(selectedSlot.slot_date), 'd MMMM', { locale: ru })}
+                    {format(parseISO(selectedSlot.slot_date), 'EEEE, d MMMM', { locale: ru })}
                   </p>
                   <p className="text-sm text-muted-foreground">
-                    {selectedSlot.start_time.slice(0, 5)} • {selectedSlot.duration_min} мин
+                    {selectedSlot.start_time.slice(0, 5)} | {selectedSlot.duration_min} мин
                   </p>
                 </div>
                 <Button onClick={() => setSelectedSlot(null)} variant="ghost" size="sm">
                   Изменить
                 </Button>
               </div>
-              <Button 
-                className="w-full" 
-                size="lg" 
+              <Button
+                className="w-full"
+                size="lg"
                 onClick={handleBook}
                 disabled={booking}
               >
