@@ -14,7 +14,18 @@ import type {
   TutorPayment,
   TutorPaymentWithStudent,
   CreateTutorPaymentInput,
-  UpdateTutorPaymentInput
+  UpdateTutorPaymentInput,
+  TutorWeeklySlot,
+  CreateWeeklySlotInput,
+  UpdateWeeklySlotInput,
+  TutorLesson,
+  TutorLessonWithStudent,
+  CreateLessonInput,
+  UpdateLessonInput,
+  TutorReminderSettings,
+  UpdateReminderSettingsInput,
+  BookingSlot,
+  TutorPublicInfo
 } from '@/types/tutor';
 
 // In-memory cache for tutor profile
@@ -465,4 +476,374 @@ export async function deleteTutorPayment(id: string): Promise<boolean> {
   }
   
   return true;
+}
+
+// =============================================
+// A1: Недельные слоты (Weekly Slots)
+// =============================================
+
+/**
+ * Получить все недельные слоты репетитора
+ */
+export async function getTutorWeeklySlots(): Promise<TutorWeeklySlot[]> {
+  const tutor = await getCurrentTutor();
+  if (!tutor) return [];
+
+  const { data, error } = await supabase
+    .from('tutor_weekly_slots')
+    .select('*')
+    .eq('tutor_id', tutor.id)
+    .order('day_of_week')
+    .order('start_time');
+  
+  if (error) {
+    console.error('Error fetching weekly slots:', error);
+    return [];
+  }
+  
+  return data as TutorWeeklySlot[];
+}
+
+/**
+ * Создать недельный слот
+ */
+export async function createWeeklySlot(
+  input: CreateWeeklySlotInput
+): Promise<TutorWeeklySlot | null> {
+  const tutor = await getCurrentTutor();
+  if (!tutor) return null;
+
+  const { data, error } = await supabase
+    .from('tutor_weekly_slots')
+    .insert({
+      tutor_id: tutor.id,
+      ...input
+    })
+    .select()
+    .single();
+  
+  if (error) {
+    console.error('Error creating weekly slot:', error);
+    return null;
+  }
+  
+  return data as TutorWeeklySlot;
+}
+
+/**
+ * Обновить недельный слот
+ */
+export async function updateWeeklySlot(
+  id: string,
+  input: UpdateWeeklySlotInput
+): Promise<TutorWeeklySlot | null> {
+  const { data, error } = await supabase
+    .from('tutor_weekly_slots')
+    .update(input)
+    .eq('id', id)
+    .select()
+    .single();
+  
+  if (error) {
+    console.error('Error updating weekly slot:', error);
+    return null;
+  }
+  
+  return data as TutorWeeklySlot;
+}
+
+/**
+ * Удалить недельный слот
+ */
+export async function deleteWeeklySlot(id: string): Promise<boolean> {
+  const { error } = await supabase
+    .from('tutor_weekly_slots')
+    .delete()
+    .eq('id', id);
+  
+  if (error) {
+    console.error('Error deleting weekly slot:', error);
+    return false;
+  }
+  
+  return true;
+}
+
+/**
+ * Переключить доступность слота
+ */
+export async function toggleSlotAvailability(
+  id: string,
+  isAvailable: boolean
+): Promise<TutorWeeklySlot | null> {
+  return updateWeeklySlot(id, { is_available: isAvailable });
+}
+
+// =============================================
+// A1: Занятия (Lessons)
+// =============================================
+
+/**
+ * Получить занятия репетитора за период
+ */
+export async function getTutorLessons(
+  startDate: string,
+  endDate: string
+): Promise<TutorLessonWithStudent[]> {
+  const tutor = await getCurrentTutor();
+  if (!tutor) return [];
+
+  const { data, error } = await supabase
+    .from('tutor_lessons')
+    .select(`
+      *,
+      tutor_students (
+        id,
+        student_id,
+        profiles (
+          id,
+          username,
+          telegram_username
+        )
+      ),
+      profiles (
+        id,
+        username,
+        telegram_username
+      )
+    `)
+    .eq('tutor_id', tutor.id)
+    .gte('start_at', startDate)
+    .lt('start_at', endDate)
+    .order('start_at');
+  
+  if (error) {
+    console.error('Error fetching lessons:', error);
+    return [];
+  }
+  
+  return data as TutorLessonWithStudent[];
+}
+
+/**
+ * Создать занятие вручную
+ */
+export async function createLesson(
+  input: CreateLessonInput
+): Promise<TutorLesson | null> {
+  const tutor = await getCurrentTutor();
+  if (!tutor) return null;
+
+  const { data, error } = await supabase
+    .from('tutor_lessons')
+    .insert({
+      tutor_id: tutor.id,
+      source: 'manual',
+      ...input
+    })
+    .select()
+    .single();
+  
+  if (error) {
+    console.error('Error creating lesson:', error);
+    return null;
+  }
+  
+  return data as TutorLesson;
+}
+
+/**
+ * Обновить занятие
+ */
+export async function updateLesson(
+  id: string,
+  input: UpdateLessonInput
+): Promise<TutorLesson | null> {
+  const updateData: Record<string, unknown> = { ...input };
+  
+  // Если отменяем, добавляем timestamp
+  if (input.status === 'cancelled') {
+    updateData.cancelled_at = new Date().toISOString();
+  }
+  
+  const { data, error } = await supabase
+    .from('tutor_lessons')
+    .update(updateData)
+    .eq('id', id)
+    .select()
+    .single();
+  
+  if (error) {
+    console.error('Error updating lesson:', error);
+    return null;
+  }
+  
+  return data as TutorLesson;
+}
+
+/**
+ * Отменить занятие
+ */
+export async function cancelLesson(
+  id: string,
+  cancelledBy: 'tutor' | 'student' = 'tutor'
+): Promise<TutorLesson | null> {
+  return updateLesson(id, {
+    status: 'cancelled',
+    cancelled_by: cancelledBy
+  });
+}
+
+/**
+ * Удалить занятие
+ */
+export async function deleteLesson(id: string): Promise<boolean> {
+  const { error } = await supabase
+    .from('tutor_lessons')
+    .delete()
+    .eq('id', id);
+  
+  if (error) {
+    console.error('Error deleting lesson:', error);
+    return false;
+  }
+  
+  return true;
+}
+
+// =============================================
+// A2: Настройки напоминаний (Reminder Settings)
+// =============================================
+
+/**
+ * Получить настройки напоминаний
+ */
+export async function getReminderSettings(): Promise<TutorReminderSettings | null> {
+  const tutor = await getCurrentTutor();
+  if (!tutor) return null;
+
+  const { data, error } = await supabase
+    .from('tutor_reminder_settings')
+    .select('*')
+    .eq('tutor_id', tutor.id)
+    .single();
+  
+  if (error) {
+    // Если нет записи, возвращаем null (используем дефолты)
+    if (error.code === 'PGRST116') {
+      return null;
+    }
+    console.error('Error fetching reminder settings:', error);
+    return null;
+  }
+  
+  return data as TutorReminderSettings;
+}
+
+/**
+ * Создать или обновить настройки напоминаний
+ */
+export async function upsertReminderSettings(
+  input: UpdateReminderSettingsInput
+): Promise<TutorReminderSettings | null> {
+  const tutor = await getCurrentTutor();
+  if (!tutor) return null;
+
+  const { data, error } = await supabase
+    .from('tutor_reminder_settings')
+    .upsert({
+      tutor_id: tutor.id,
+      ...input
+    }, {
+      onConflict: 'tutor_id'
+    })
+    .select()
+    .single();
+  
+  if (error) {
+    console.error('Error upserting reminder settings:', error);
+    return null;
+  }
+  
+  return data as TutorReminderSettings;
+}
+
+// =============================================
+// Public Booking (Calendly-like)
+// =============================================
+
+/**
+ * Получить публичную информацию о репетиторе по booking_link
+ */
+export async function getTutorPublicInfo(
+  bookingLink: string
+): Promise<TutorPublicInfo | null> {
+  const { data, error } = await supabase
+    .from('tutors')
+    .select('id, name, avatar_url, subjects, bio')
+    .eq('booking_link', bookingLink)
+    .single();
+  
+  if (error) {
+    console.error('Error fetching tutor public info:', error);
+    return null;
+  }
+  
+  return data as TutorPublicInfo;
+}
+
+/**
+ * Получить доступные слоты для записи (публичная функция)
+ */
+export async function getAvailableBookingSlots(
+  bookingLink: string,
+  daysAhead: number = 7
+): Promise<BookingSlot[]> {
+  const { data, error } = await supabase
+    .rpc('get_available_booking_slots', {
+      _booking_link: bookingLink,
+      _days_ahead: daysAhead
+    });
+  
+  if (error) {
+    console.error('Error fetching booking slots:', error);
+    return [];
+  }
+  
+  return (data || []) as BookingSlot[];
+}
+
+/**
+ * Забронировать слот (для авторизованного ученика)
+ */
+export async function bookLessonSlot(
+  bookingLink: string,
+  slotDate: string,
+  startTime: string,
+  durationMin: number = 60
+): Promise<string | null> {
+  const { data, error } = await supabase
+    .rpc('book_lesson_slot', {
+      _booking_link: bookingLink,
+      _slot_date: slotDate,
+      _start_time: startTime,
+      _duration_min: durationMin
+    });
+  
+  if (error) {
+    console.error('Error booking slot:', error);
+    throw new Error(error.message);
+  }
+  
+  return data as string;
+}
+
+/**
+ * Получить ссылку для записи текущего репетитора
+ */
+export async function getBookingLink(): Promise<string | null> {
+  const tutor = await getCurrentTutor();
+  if (!tutor?.booking_link) return null;
+  
+  return `${window.location.origin}/book/${tutor.booking_link}`;
 }

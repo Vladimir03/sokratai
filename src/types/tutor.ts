@@ -168,3 +168,122 @@ export interface UpdateTutorPaymentInput {
   due_date?: string;
   paid_at?: string;
 }
+
+// =============================================
+// A1: Календарь (Weekly Slots & Lessons)
+// =============================================
+
+export interface TutorWeeklySlot {
+  id: string;
+  tutor_id: string;
+  day_of_week: number; // 0=Mon, 6=Sun
+  start_time: string; // HH:MM:SS
+  duration_min: number;
+  is_available: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CreateWeeklySlotInput {
+  day_of_week: number;
+  start_time: string;
+  duration_min?: number;
+  is_available?: boolean;
+}
+
+export interface UpdateWeeklySlotInput {
+  is_available?: boolean;
+  duration_min?: number;
+}
+
+export type LessonStatus = 'booked' | 'completed' | 'cancelled';
+export type LessonSource = 'manual' | 'self_booking';
+
+export interface TutorLesson {
+  id: string;
+  tutor_id: string;
+  tutor_student_id: string | null;
+  student_id: string | null;
+  start_at: string; // ISO timestamp
+  duration_min: number;
+  status: LessonStatus;
+  source: LessonSource;
+  notes: string | null;
+  cancelled_at: string | null;
+  cancelled_by: 'tutor' | 'student' | null;
+  created_at: string;
+  updated_at: string;
+}
+
+// Lesson with student info for display
+export interface TutorLessonWithStudent extends TutorLesson {
+  tutor_students: {
+    id: string;
+    student_id: string;
+    profiles: {
+      id: string;
+      username: string;
+      telegram_username: string | null;
+    };
+  } | null;
+  profiles: {
+    id: string;
+    username: string;
+    telegram_username: string | null;
+  } | null;
+}
+
+export interface CreateLessonInput {
+  tutor_student_id?: string;
+  student_id?: string;
+  start_at: string;
+  duration_min?: number;
+  notes?: string;
+}
+
+export interface UpdateLessonInput {
+  status?: LessonStatus;
+  notes?: string;
+  cancelled_by?: 'tutor' | 'student';
+}
+
+// =============================================
+// A2: Напоминания (Reminder Settings)
+// =============================================
+
+export interface TutorReminderSettings {
+  id: string;
+  tutor_id: string;
+  enabled: boolean;
+  remind_before_minutes: number[]; // e.g. [1440, 60] = 24h and 1h
+  template_student: string;
+  template_tutor: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface UpdateReminderSettingsInput {
+  enabled?: boolean;
+  remind_before_minutes?: number[];
+  template_student?: string;
+  template_tutor?: string;
+}
+
+// =============================================
+// Public Booking (Calendly-like)
+// =============================================
+
+export interface BookingSlot {
+  slot_date: string; // YYYY-MM-DD
+  start_time: string; // HH:MM:SS
+  duration_min: number;
+  is_booked: boolean;
+}
+
+export interface TutorPublicInfo {
+  id: string;
+  name: string;
+  avatar_url: string | null;
+  subjects: string[];
+  bio: string | null;
+}

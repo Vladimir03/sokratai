@@ -47,3 +47,6 @@ verify_jwt = false
 
 [functions.telegram-webapp-recent-solutions]
 verify_jwt = false
+
+[functions.tutor-lesson-reminders]
+verify_jwt = false

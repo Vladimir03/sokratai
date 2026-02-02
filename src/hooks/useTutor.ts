@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { 
   getCurrentTutor, 
   getTutorStudents, 
@@ -6,7 +6,12 @@ import {
   getMockExams,
   getStudentChats,
   getStudentChatMessages,
-  getTutorPayments
+  getTutorPayments,
+  getTutorWeeklySlots,
+  getTutorLessons,
+  getReminderSettings,
+  getTutorPublicInfo,
+  getAvailableBookingSlots
 } from '@/lib/tutors';
 import type { 
   Tutor, 
@@ -14,7 +19,12 @@ import type {
   MockExam,
   StudentChat,
   StudentChatMessage,
-  TutorPaymentWithStudent
+  TutorPaymentWithStudent,
+  TutorWeeklySlot,
+  TutorLessonWithStudent,
+  TutorReminderSettings,
+  TutorPublicInfo,
+  BookingSlot
 } from '@/types/tutor';
 
 export function useTutor() {
@@ -252,4 +262,183 @@ export function useTutorPayments() {
   }, [fetchPayments]);
 
   return { payments, loading, error, refetch: fetchPayments };
+}
+
+// =============================================
+// A1: Хуки для календаря
+// =============================================
+
+/**
+ * Хук для получения недельных слотов репетитора
+ */
+export function useTutorWeeklySlots() {
+  const [slots, setSlots] = useState<TutorWeeklySlot[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const fetchSlots = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const data = await getTutorWeeklySlots();
+      setSlots(data);
+    } catch (err) {
+      console.error('Error in useTutorWeeklySlots:', err);
+      setError('Не удалось загрузить слоты');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchSlots();
+  }, [fetchSlots]);
+
+  return { slots, loading, error, refetch: fetchSlots };
+}
+
+/**
+ * Хук для получения занятий за указанную неделю
+ */
+export function useTutorLessons(weekStartDate: Date) {
+  const [lessons, setLessons] = useState<TutorLessonWithStudent[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  // Вычислить начало и конец недели
+  const { startDate, endDate } = useMemo(() => {
+    const start = new Date(weekStartDate);
+    start.setHours(0, 0, 0, 0);
+    
+    const end = new Date(start);
+    end.setDate(end.getDate() + 7);
+    
+    return {
+      startDate: start.toISOString(),
+      endDate: end.toISOString()
+    };
+  }, [weekStartDate]);
+
+  const fetchLessons = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const data = await getTutorLessons(startDate, endDate);
+      setLessons(data);
+    } catch (err) {
+      console.error('Error in useTutorLessons:', err);
+      setError('Не удалось загрузить занятия');
+    } finally {
+      setLoading(false);
+    }
+  }, [startDate, endDate]);
+
+  useEffect(() => {
+    fetchLessons();
+  }, [fetchLessons]);
+
+  return { lessons, loading, error, refetch: fetchLessons };
+}
+
+/**
+ * Хук для настроек напоминаний
+ */
+export function useTutorReminderSettings() {
+  const [settings, setSettings] = useState<TutorReminderSettings | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const fetchSettings = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const data = await getReminderSettings();
+      setSettings(data);
+    } catch (err) {
+      console.error('Error in useTutorReminderSettings:', err);
+      setError('Не удалось загрузить настройки');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchSettings();
+  }, [fetchSettings]);
+
+  return { settings, loading, error, refetch: fetchSettings };
+}
+
+// =============================================
+// Public Booking Hooks
+// =============================================
+
+/**
+ * Хук для получения публичной информации о репетиторе
+ */
+export function useTutorPublicInfo(bookingLink: string | undefined) {
+  const [tutor, setTutor] = useState<TutorPublicInfo | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const fetchTutor = useCallback(async () => {
+    if (!bookingLink) {
+      setTutor(null);
+      setLoading(false);
+      return;
+    }
+    
+    setLoading(true);
+    setError(null);
+    try {
+      const data = await getTutorPublicInfo(bookingLink);
+      setTutor(data);
+    } catch (err) {
+      console.error('Error in useTutorPublicInfo:', err);
+      setError('Не удалось загрузить данные репетитора');
+    } finally {
+      setLoading(false);
+    }
+  }, [bookingLink]);
+
+  useEffect(() => {
+    fetchTutor();
+  }, [fetchTutor]);
+
+  return { tutor, loading, error, refetch: fetchTutor };
+}
+
+/**
+ * Хук для получения доступных слотов для записи
+ */
+export function useAvailableBookingSlots(bookingLink: string | undefined, daysAhead: number = 7) {
+  const [slots, setSlots] = useState<BookingSlot[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const fetchSlots = useCallback(async () => {
+    if (!bookingLink) {
+      setSlots([]);
+      setLoading(false);
+      return;
+    }
+    
+    setLoading(true);
+    setError(null);
+    try {
+      const data = await getAvailableBookingSlots(bookingLink, daysAhead);
+      setSlots(data);
+    } catch (err) {
+      console.error('Error in useAvailableBookingSlots:', err);
+      setError('Не удалось загрузить доступные слоты');
+    } finally {
+      setLoading(false);
+    }
+  }, [bookingLink, daysAhead]);
+
+  useEffect(() => {
+    fetchSlots();
+  }, [fetchSlots]);
+
+  return { slots, loading, error, refetch: fetchSlots };
 }
