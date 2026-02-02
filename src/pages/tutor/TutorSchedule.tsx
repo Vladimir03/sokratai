@@ -1,5 +1,7 @@
 import { useState, useMemo, useCallback, useEffect } from 'react';
-import { ChevronLeft, ChevronRight, Link2, Copy, Check, Plus, X, Clock, Bell, Settings } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Link2, Copy, Check, Plus, X, Clock, Bell, Settings, CalendarIcon } from 'lucide-react';
+import { format, addMinutes } from 'date-fns';
+import { ru } from 'date-fns/locale';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -11,6 +13,9 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Switch } from '@/components/ui/switch';
 import { Checkbox } from '@/components/ui/checkbox';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Calendar } from '@/components/ui/calendar';
+import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 import TutorGuard from '@/components/TutorGuard';
 import { TutorLayout } from '@/components/tutor/TutorLayout';
@@ -31,7 +36,35 @@ import type { TutorWeeklySlot, TutorLessonWithStudent, TutorStudentWithProfile, 
 // =============================================
 
 const DAYS_OF_WEEK = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'];
-const HOURS = Array.from({ length: 14 }, (_, i) => i + 8); // 08:00 - 21:00
+const PIXELS_PER_MINUTE = 1; // 1px = 1 minute
+const HOUR_HEIGHT = 60; // 60px per hour
+
+const SETTINGS_KEY = 'tutor-schedule-settings';
+
+interface ScheduleSettings {
+  workDayStart: number; // 0-23
+  workDayEnd: number;   // 1-24
+  workDays: number[];   // [0,1,2,3,4] = Mon-Fri
+}
+
+const defaultSettings: ScheduleSettings = {
+  workDayStart: 9,
+  workDayEnd: 21,
+  workDays: [0, 1, 2, 3, 4]
+};
+
+function loadSettings(): ScheduleSettings {
+  try {
+    const saved = localStorage.getItem(SETTINGS_KEY);
+    return saved ? { ...defaultSettings, ...JSON.parse(saved) } : defaultSettings;
+  } catch {
+    return defaultSettings;
+  }
+}
+
+function saveSettings(settings: ScheduleSettings) {
+  localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
+}
 
 function getWeekStart(date: Date): Date {
   const d = new Date(date);
@@ -46,8 +79,8 @@ function formatDate(date: Date): string {
   return date.toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' });
 }
 
-function formatTime(hour: number): string {
-  return `${hour.toString().padStart(2, '0')}:00`;
+function formatTime(hour: number, minute: number = 0): string {
+  return `${hour.toString().padStart(2, '0')}:${minute.toString().padStart(2, '0')}`;
 }
 
 function getDateForDayOfWeek(weekStart: Date, dayOfWeek: number): Date {
@@ -57,64 +90,158 @@ function getDateForDayOfWeek(weekStart: Date, dayOfWeek: number): Date {
 }
 
 // =============================================
-// Типы ячеек календаря
+// Компонент блока занятия (абсолютное позиционирование)
 // =============================================
 
-type CellStatus = 'unavailable' | 'available' | 'booked';
-
-interface CalendarCell {
-  dayOfWeek: number;
-  hour: number;
-  status: CellStatus;
-  slot?: TutorWeeklySlot;
-  lesson?: TutorLessonWithStudent;
-  studentName?: string;
-}
-
-// =============================================
-// Компонент ячейки
-// =============================================
-
-interface ScheduleCellProps {
-  cell: CalendarCell;
+interface LessonBlockProps {
+  lesson: TutorLessonWithStudent;
+  workDayStart: number;
   onClick: () => void;
 }
 
-function ScheduleCell({ cell, onClick }: ScheduleCellProps) {
-  const { status, studentName } = cell;
+function LessonBlock({ lesson, workDayStart, onClick }: LessonBlockProps) {
+  const startDate = new Date(lesson.start_at);
+  const startMinutes = startDate.getHours() * 60 + startDate.getMinutes();
+  const offsetMinutes = startMinutes - (workDayStart * 60);
   
-  const baseClasses = 'h-14 border border-border/50 rounded-md flex items-center justify-center text-sm cursor-pointer transition-all hover:shadow-md';
+  const top = offsetMinutes * PIXELS_PER_MINUTE;
+  const height = Math.max(lesson.duration_min * PIXELS_PER_MINUTE, 20); // Min 20px height
   
-  const statusClasses = {
-    unavailable: 'bg-muted/50 text-muted-foreground hover:bg-muted',
-    available: 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 hover:bg-green-200 dark:hover:bg-green-900/50',
-    booked: 'bg-primary/90 text-primary-foreground hover:bg-primary',
-  };
+  const studentName = lesson.tutor_students?.profiles?.username 
+    || lesson.profiles?.username 
+    || 'Ученик';
+  
+  const endDate = addMinutes(startDate, lesson.duration_min);
+  const timeStr = `${format(startDate, 'HH:mm')} - ${format(endDate, 'HH:mm')}`;
   
   return (
     <div 
-      className={`${baseClasses} ${statusClasses[status]}`}
+      className="absolute left-0.5 right-0.5 bg-primary text-primary-foreground rounded-md px-1.5 py-0.5 cursor-pointer hover:bg-primary/90 transition-colors overflow-hidden shadow-sm"
+      style={{ top: `${top}px`, height: `${height}px`, minHeight: '20px' }}
       onClick={onClick}
     >
-      {status === 'available' && <Check className="h-4 w-4" />}
-      {status === 'unavailable' && <span className="text-xs">—</span>}
-      {status === 'booked' && studentName && (
-        <span className="truncate px-1 text-xs font-medium">{studentName}</span>
-      )}
+      <div className="flex flex-col h-full justify-center">
+        <span className="text-xs font-medium truncate leading-tight">{studentName}</span>
+        {height >= 35 && (
+          <span className="text-[10px] opacity-80 truncate leading-tight">{timeStr}</span>
+        )}
+      </div>
     </div>
   );
 }
 
 // =============================================
-// Диалог добавления занятия
+// Компонент настроек рабочих часов
+// =============================================
+
+interface WorkHoursSettingsProps {
+  settings: ScheduleSettings;
+  onChange: (settings: ScheduleSettings) => void;
+}
+
+function WorkHoursSettings({ settings, onChange }: WorkHoursSettingsProps) {
+  const hours = Array.from({ length: 25 }, (_, i) => i); // 0-24
+  
+  const handleStartChange = (value: string) => {
+    const newStart = parseInt(value);
+    if (newStart < settings.workDayEnd) {
+      const newSettings = { ...settings, workDayStart: newStart };
+      onChange(newSettings);
+      saveSettings(newSettings);
+    }
+  };
+  
+  const handleEndChange = (value: string) => {
+    const newEnd = parseInt(value);
+    if (newEnd > settings.workDayStart) {
+      const newSettings = { ...settings, workDayEnd: newEnd };
+      onChange(newSettings);
+      saveSettings(newSettings);
+    }
+  };
+  
+  const handleDayToggle = (dayIndex: number) => {
+    const workDays = settings.workDays.includes(dayIndex)
+      ? settings.workDays.filter(d => d !== dayIndex)
+      : [...settings.workDays, dayIndex].sort();
+    const newSettings = { ...settings, workDays };
+    onChange(newSettings);
+    saveSettings(newSettings);
+  };
+  
+  return (
+    <Card className="w-full lg:w-56 flex-shrink-0">
+      <CardHeader className="pb-3">
+        <CardTitle className="text-sm flex items-center gap-2">
+          <Settings className="h-4 w-4" />
+          Настройки
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className="space-y-2">
+          <Label className="text-xs text-muted-foreground">Рабочие часы</Label>
+          <div className="flex items-center gap-2">
+            <Select value={settings.workDayStart.toString()} onValueChange={handleStartChange}>
+              <SelectTrigger className="w-20 h-8 text-xs">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {hours.slice(0, 24).map(h => (
+                  <SelectItem key={h} value={h.toString()}>
+                    {h.toString().padStart(2, '0')}:00
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <span className="text-muted-foreground text-sm">—</span>
+            <Select value={settings.workDayEnd.toString()} onValueChange={handleEndChange}>
+              <SelectTrigger className="w-20 h-8 text-xs">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {hours.slice(1).map(h => (
+                  <SelectItem key={h} value={h.toString()}>
+                    {h.toString().padStart(2, '0')}:00
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+        
+        <div className="space-y-2">
+          <Label className="text-xs text-muted-foreground">Рабочие дни</Label>
+          <div className="space-y-1">
+            {DAYS_OF_WEEK.map((day, i) => (
+              <div key={day} className="flex items-center gap-2">
+                <Checkbox 
+                  id={`day-${i}`} 
+                  checked={settings.workDays.includes(i)}
+                  onCheckedChange={() => handleDayToggle(i)}
+                />
+                <label htmlFor={`day-${i}`} className="text-sm cursor-pointer">
+                  {day}
+                </label>
+              </div>
+            ))}
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+// =============================================
+// Диалог добавления занятия (с выбором даты и времени)
 // =============================================
 
 interface AddLessonDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   students: TutorStudentWithProfile[];
-  selectedDate: Date | null;
-  selectedHour: number | null;
+  initialDate: Date | null;
+  initialHour: number | null;
+  initialMinute?: number;
   onSuccess: () => void;
 }
 
@@ -122,17 +249,36 @@ function AddLessonDialog({
   open, 
   onOpenChange, 
   students, 
-  selectedDate, 
-  selectedHour,
+  initialDate, 
+  initialHour,
+  initialMinute = 0,
   onSuccess 
 }: AddLessonDialogProps) {
+  const [date, setDate] = useState<Date | undefined>(initialDate || new Date());
+  const [hour, setHour] = useState(initialHour?.toString() || new Date().getHours().toString());
+  const [minute, setMinute] = useState(initialMinute.toString().padStart(2, '0'));
   const [studentId, setStudentId] = useState('');
   const [notes, setNotes] = useState('');
   const [duration, setDuration] = useState('60');
   const [isSaving, setIsSaving] = useState(false);
   
+  // Reset form when dialog opens
+  useEffect(() => {
+    if (open) {
+      setDate(initialDate || new Date());
+      setHour(initialHour?.toString() || new Date().getHours().toString());
+      setMinute(initialMinute.toString().padStart(2, '0'));
+      setStudentId('');
+      setNotes('');
+      setDuration('60');
+    }
+  }, [open, initialDate, initialHour, initialMinute]);
+  
   const handleSubmit = async () => {
-    if (!selectedDate || selectedHour === null) return;
+    if (!date) {
+      toast.error('Выберите дату');
+      return;
+    }
     
     if (!studentId) {
       toast.error('Выберите ученика');
@@ -141,8 +287,8 @@ function AddLessonDialog({
     
     setIsSaving(true);
     try {
-      const startAt = new Date(selectedDate);
-      startAt.setHours(selectedHour, 0, 0, 0);
+      const startAt = new Date(date);
+      startAt.setHours(parseInt(hour), parseInt(minute), 0, 0);
       
       // Find tutor_student_id
       const tutorStudent = students.find(s => s.student_id === studentId);
@@ -159,9 +305,6 @@ function AddLessonDialog({
         toast.success('Занятие создано');
         onSuccess();
         onOpenChange(false);
-        setStudentId('');
-        setNotes('');
-        setDuration('60');
       } else {
         toast.error('Не удалось создать занятие');
       }
@@ -173,24 +316,70 @@ function AddLessonDialog({
     }
   };
   
-  const dateStr = selectedDate ? selectedDate.toLocaleDateString('ru-RU', {
-    weekday: 'long',
-    day: 'numeric',
-    month: 'long'
-  }) : '';
-  const timeStr = selectedHour !== null ? formatTime(selectedHour) : '';
-  
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
         <DialogHeader>
           <DialogTitle>Добавить занятие</DialogTitle>
-          <DialogDescription>
-            {dateStr} в {timeStr}
-          </DialogDescription>
         </DialogHeader>
         
         <div className="space-y-4">
+          {/* Date and Time picker */}
+          <div className="space-y-2">
+            <Label>Дата и время *</Label>
+            <div className="flex flex-wrap gap-2">
+              <Popover>
+                <PopoverTrigger asChild>
+                  <Button
+                    variant="outline"
+                    className={cn(
+                      "w-[160px] justify-start text-left font-normal",
+                      !date && "text-muted-foreground"
+                    )}
+                  >
+                    <CalendarIcon className="mr-2 h-4 w-4" />
+                    {date ? format(date, 'dd.MM.yyyy') : 'Выберите дату'}
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-auto p-0" align="start">
+                  <Calendar
+                    mode="single"
+                    selected={date}
+                    onSelect={setDate}
+                    locale={ru}
+                    className="pointer-events-auto"
+                  />
+                </PopoverContent>
+              </Popover>
+              
+              <div className="flex items-center gap-1">
+                <Select value={hour} onValueChange={setHour}>
+                  <SelectTrigger className="w-[70px]">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {Array.from({ length: 24 }, (_, i) => (
+                      <SelectItem key={i} value={i.toString()}>
+                        {i.toString().padStart(2, '0')}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <span className="text-muted-foreground">:</span>
+                <Select value={minute} onValueChange={setMinute}>
+                  <SelectTrigger className="w-[70px]">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {['00', '15', '30', '45'].map(m => (
+                      <SelectItem key={m} value={m}>{m}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+          </div>
+          
           <div className="space-y-2">
             <Label>Ученик *</Label>
             <Select value={studentId} onValueChange={setStudentId}>
@@ -538,6 +727,9 @@ function TutorScheduleContent() {
   const { slots, loading: slotsLoading, refetch: refetchSlots } = useTutorWeeklySlots();
   const { settings: reminderSettings, refetch: refetchReminderSettings } = useTutorReminderSettings();
   
+  // Настройки отображения
+  const [scheduleSettings, setScheduleSettings] = useState<ScheduleSettings>(loadSettings);
+  
   // Неделя
   const [weekStart, setWeekStart] = useState(() => getWeekStart(new Date()));
   const { lessons, loading: lessonsLoading, refetch: refetchLessons } = useTutorLessons(weekStart);
@@ -549,55 +741,43 @@ function TutorScheduleContent() {
   const [selectedLesson, setSelectedLesson] = useState<TutorLessonWithStudent | null>(null);
   const [selectedDate, setSelectedDate] = useState<Date | null>(null);
   const [selectedHour, setSelectedHour] = useState<number | null>(null);
+  const [selectedMinute, setSelectedMinute] = useState<number>(0);
   
   // Booking link
   const [copiedLink, setCopiedLink] = useState(false);
   
   const loading = slotsLoading || lessonsLoading;
   
-  // Построить матрицу ячеек
-  const calendarCells = useMemo<CalendarCell[][]>(() => {
-    const matrix: CalendarCell[][] = HOURS.map(hour => 
-      DAYS_OF_WEEK.map((_, dayOfWeek) => ({
-        dayOfWeek,
-        hour,
-        status: 'unavailable' as CellStatus
-      }))
+  // Видимые часы на основе настроек
+  const visibleHours = useMemo(() => {
+    return Array.from(
+      { length: scheduleSettings.workDayEnd - scheduleSettings.workDayStart },
+      (_, i) => scheduleSettings.workDayStart + i
     );
+  }, [scheduleSettings]);
+  
+  const gridHeight = visibleHours.length * HOUR_HEIGHT;
+  
+  // Группировать занятия по дням недели
+  const lessonsByDay = useMemo(() => {
+    const byDay: Record<number, TutorLessonWithStudent[]> = {};
+    for (let i = 0; i < 7; i++) byDay[i] = [];
     
-    // Заполнить слоты
-    for (const slot of slots) {
-      const hour = parseInt(slot.start_time.split(':')[0]);
-      const hourIndex = hour - 8;
-      if (hourIndex >= 0 && hourIndex < HOURS.length) {
-        const cell = matrix[hourIndex][slot.day_of_week];
-        cell.status = slot.is_available ? 'available' : 'unavailable';
-        cell.slot = slot;
-      }
-    }
-    
-    // Заполнить занятия
     for (const lesson of lessons) {
       if (lesson.status !== 'booked') continue;
       
       const startDate = new Date(lesson.start_at);
-      // Adjust for timezone - convert to local
       const dayOfWeek = (startDate.getDay() + 6) % 7; // Convert to Mon=0
-      const hour = startDate.getHours();
-      const hourIndex = hour - 8;
+      const lessonHour = startDate.getHours();
       
-      if (hourIndex >= 0 && hourIndex < HOURS.length && dayOfWeek >= 0 && dayOfWeek < 7) {
-        const cell = matrix[hourIndex][dayOfWeek];
-        cell.status = 'booked';
-        cell.lesson = lesson;
-        cell.studentName = lesson.tutor_students?.profiles?.username 
-          || lesson.profiles?.username 
-          || 'Ученик';
+      // Only show lessons within visible hours
+      if (lessonHour >= scheduleSettings.workDayStart && lessonHour < scheduleSettings.workDayEnd) {
+        byDay[dayOfWeek].push(lesson);
       }
     }
     
-    return matrix;
-  }, [slots, lessons]);
+    return byDay;
+  }, [lessons, scheduleSettings]);
   
   // Навигация по неделям
   const goToPrevWeek = useCallback(() => {
@@ -620,44 +800,25 @@ function TutorScheduleContent() {
     setWeekStart(getWeekStart(new Date()));
   }, []);
   
-  // Обработка клика по ячейке
-  const handleCellClick = useCallback(async (cell: CalendarCell) => {
-    const date = getDateForDayOfWeek(weekStart, cell.dayOfWeek);
+  // Клик по пустой области для добавления занятия
+  const handleGridClick = useCallback((dayOfWeek: number, clickY: number) => {
+    const minutesFromStart = Math.floor(clickY / PIXELS_PER_MINUTE);
+    const totalMinutes = scheduleSettings.workDayStart * 60 + minutesFromStart;
+    const hour = Math.floor(totalMinutes / 60);
+    const minute = Math.round((totalMinutes % 60) / 15) * 15; // Round to 15 min
     
-    if (cell.status === 'booked' && cell.lesson) {
-      // Показать детали занятия
-      setSelectedLesson(cell.lesson);
-      setLessonDetailsOpen(true);
-    } else if (cell.status === 'available') {
-      // Открыть диалог добавления занятия или сделать unavailable
-      setSelectedDate(date);
-      setSelectedHour(cell.hour);
-      setAddLessonOpen(true);
-    } else if (cell.status === 'unavailable') {
-      // Создать или сделать available
-      if (cell.slot) {
-        // Toggle to available
-        await toggleSlotAvailability(cell.slot.id, true);
-        refetchSlots();
-      } else {
-        // Create new slot
-        await createWeeklySlot({
-          day_of_week: cell.dayOfWeek,
-          start_time: formatTime(cell.hour),
-          is_available: true
-        });
-        refetchSlots();
-      }
-    }
-  }, [weekStart, refetchSlots]);
+    const date = getDateForDayOfWeek(weekStart, dayOfWeek);
+    setSelectedDate(date);
+    setSelectedHour(hour);
+    setSelectedMinute(minute >= 60 ? 0 : minute);
+    setAddLessonOpen(true);
+  }, [weekStart, scheduleSettings.workDayStart]);
   
-  // Сделать слот недоступным (правый клик / долгое нажатие)
-  const handleMakeUnavailable = useCallback(async (cell: CalendarCell) => {
-    if (cell.slot && cell.status === 'available') {
-      await toggleSlotAvailability(cell.slot.id, false);
-      refetchSlots();
-    }
-  }, [refetchSlots]);
+  // Клик по занятию
+  const handleLessonClick = useCallback((lesson: TutorLessonWithStudent) => {
+    setSelectedLesson(lesson);
+    setLessonDetailsOpen(true);
+  }, []);
   
   // Копировать ссылку
   const handleCopyBookingLink = useCallback(async () => {
@@ -700,7 +861,7 @@ function TutorScheduleContent() {
               <span>📅</span> Расписание
             </h1>
             <p className="text-sm text-muted-foreground mt-1">
-              Нажмите на ячейку, чтобы изменить доступность или добавить занятие
+              Нажмите на сетку, чтобы добавить занятие
             </p>
           </div>
           
@@ -733,16 +894,12 @@ function TutorScheduleContent() {
         {/* Legend */}
         <div className="flex flex-wrap gap-4 text-sm">
           <div className="flex items-center gap-2">
-            <div className="w-4 h-4 rounded bg-green-100 dark:bg-green-900/30 border" />
-            <span>Свободно</span>
-          </div>
-          <div className="flex items-center gap-2">
             <div className="w-4 h-4 rounded bg-primary" />
-            <span>Занято</span>
+            <span>Занятие</span>
           </div>
           <div className="flex items-center gap-2">
-            <div className="w-4 h-4 rounded bg-muted/50 border" />
-            <span>Недоступно</span>
+            <div className="w-4 h-4 rounded bg-muted border border-border" />
+            <span>Свободно</span>
           </div>
         </div>
         
@@ -766,48 +923,118 @@ function TutorScheduleContent() {
           </Button>
         </div>
         
-        {/* Calendar grid */}
-        <Card>
-          <CardContent className="p-4 overflow-x-auto">
-            <div className="min-w-[700px]">
-              {/* Header row */}
-              <div className="grid grid-cols-8 gap-1 mb-2">
-                <div className="text-sm font-medium text-muted-foreground p-2">
-                  Время
-                </div>
-                {DAYS_OF_WEEK.map((day, i) => {
-                  const date = getDateForDayOfWeek(weekStart, i);
-                  const isToday = date.toDateString() === new Date().toDateString();
-                  return (
-                    <div 
-                      key={day} 
-                      className={`text-center p-2 rounded ${isToday ? 'bg-primary/10 font-semibold' : ''}`}
-                    >
-                      <div className="text-sm font-medium">{day}</div>
-                      <div className="text-xs text-muted-foreground">{formatDate(date)}</div>
+        {/* Main layout: Settings sidebar + Calendar */}
+        <div className="flex flex-col lg:flex-row gap-4">
+          {/* Settings sidebar */}
+          <WorkHoursSettings 
+            settings={scheduleSettings} 
+            onChange={setScheduleSettings} 
+          />
+          
+          {/* Calendar grid */}
+          <Card className="flex-1 overflow-hidden">
+            <CardContent className="p-0">
+              <div className="overflow-x-auto">
+                <div className="min-w-[700px]">
+                  {/* Header row */}
+                  <div className="grid grid-cols-8 border-b bg-muted/30">
+                    <div className="p-2 text-sm font-medium text-muted-foreground border-r">
+                      Время
                     </div>
-                  );
-                })}
-              </div>
-              
-              {/* Time slots */}
-              {calendarCells.map((row, hourIndex) => (
-                <div key={HOURS[hourIndex]} className="grid grid-cols-8 gap-1 mb-1">
-                  <div className="text-sm text-muted-foreground p-2 flex items-center">
-                    {formatTime(HOURS[hourIndex])}
+                    {DAYS_OF_WEEK.map((day, i) => {
+                      const date = getDateForDayOfWeek(weekStart, i);
+                      const isToday = date.toDateString() === new Date().toDateString();
+                      const isWorkDay = scheduleSettings.workDays.includes(i);
+                      return (
+                        <div 
+                          key={day} 
+                          className={cn(
+                            "text-center p-2 border-r last:border-r-0",
+                            isToday && "bg-primary/10",
+                            !isWorkDay && "bg-muted/50"
+                          )}
+                        >
+                          <div className={cn("text-sm font-medium", isToday && "text-primary")}>{day}</div>
+                          <div className="text-xs text-muted-foreground">{formatDate(date)}</div>
+                        </div>
+                      );
+                    })}
                   </div>
-                  {row.map((cell, dayIndex) => (
-                    <ScheduleCell
-                      key={`${hourIndex}-${dayIndex}`}
-                      cell={cell}
-                      onClick={() => handleCellClick(cell)}
-                    />
-                  ))}
+                  
+                  {/* Time grid */}
+                  <div className="relative">
+                    <div className="grid grid-cols-8">
+                      {/* Time column */}
+                      <div className="border-r">
+                        {visibleHours.map(hour => (
+                          <div 
+                            key={hour} 
+                            className="border-b last:border-b-0 text-xs text-muted-foreground pr-2 text-right"
+                            style={{ height: `${HOUR_HEIGHT}px` }}
+                          >
+                            <span className="relative -top-2">{formatTime(hour)}</span>
+                          </div>
+                        ))}
+                      </div>
+                      
+                      {/* Day columns */}
+                      {DAYS_OF_WEEK.map((_, dayIndex) => {
+                        const isWorkDay = scheduleSettings.workDays.includes(dayIndex);
+                        const dayLessons = lessonsByDay[dayIndex] || [];
+                        
+                        return (
+                          <div 
+                            key={dayIndex}
+                            className={cn(
+                              "relative border-r last:border-r-0",
+                              !isWorkDay && "bg-muted/30"
+                            )}
+                            style={{ height: `${gridHeight}px` }}
+                            onClick={(e) => {
+                              if (isWorkDay) {
+                                const rect = e.currentTarget.getBoundingClientRect();
+                                const clickY = e.clientY - rect.top;
+                                handleGridClick(dayIndex, clickY);
+                              }
+                            }}
+                          >
+                            {/* Hour lines */}
+                            {visibleHours.map((_, hourIdx) => (
+                              <div 
+                                key={hourIdx}
+                                className="absolute left-0 right-0 border-b border-border/50"
+                                style={{ top: `${(hourIdx + 1) * HOUR_HEIGHT}px` }}
+                              />
+                            ))}
+                            
+                            {/* Half-hour lines */}
+                            {visibleHours.map((_, hourIdx) => (
+                              <div 
+                                key={`half-${hourIdx}`}
+                                className="absolute left-0 right-0 border-b border-border/20"
+                                style={{ top: `${hourIdx * HOUR_HEIGHT + 30}px` }}
+                              />
+                            ))}
+                            
+                            {/* Lessons */}
+                            {dayLessons.map(lesson => (
+                              <LessonBlock
+                                key={lesson.id}
+                                lesson={lesson}
+                                workDayStart={scheduleSettings.workDayStart}
+                                onClick={() => handleLessonClick(lesson)}
+                              />
+                            ))}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
                 </div>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
         
         {/* Quick add button */}
         <div className="flex justify-center">
@@ -816,6 +1043,7 @@ function TutorScheduleContent() {
             onClick={() => {
               setSelectedDate(new Date());
               setSelectedHour(new Date().getHours());
+              setSelectedMinute(0);
               setAddLessonOpen(true);
             }}
           >
@@ -829,8 +1057,9 @@ function TutorScheduleContent() {
           open={addLessonOpen}
           onOpenChange={setAddLessonOpen}
           students={students}
-          selectedDate={selectedDate}
-          selectedHour={selectedHour}
+          initialDate={selectedDate}
+          initialHour={selectedHour}
+          initialMinute={selectedMinute}
           onSuccess={() => refetchLessons()}
         />
         
