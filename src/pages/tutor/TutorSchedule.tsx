@@ -1347,6 +1347,94 @@ function TutorScheduleContent() {
               )}
             </Button>
 
+            {/* Work Hours Settings Popover */}
+            <Popover>
+              <PopoverTrigger asChild>
+                <Button variant="outline" size="icon" title="Настройки расписания">
+                  <Settings className="h-4 w-4" />
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-64" align="end">
+                <div className="space-y-4">
+                  <div className="space-y-2">
+                    <Label className="text-xs text-muted-foreground font-medium">Рабочие часы</Label>
+                    <div className="flex items-center gap-2">
+                      <Select 
+                        value={scheduleSettings.workDayStart.toString()} 
+                        onValueChange={(value) => {
+                          const newStart = parseInt(value);
+                          if (newStart < scheduleSettings.workDayEnd) {
+                            const newSettings = { ...scheduleSettings, workDayStart: newStart };
+                            setScheduleSettings(newSettings);
+                            saveSettings(newSettings);
+                          }
+                        }}
+                      >
+                        <SelectTrigger className="w-20 h-8 text-xs">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {Array.from({ length: 24 }, (_, i) => (
+                            <SelectItem key={i} value={i.toString()}>
+                              {i.toString().padStart(2, '0')}:00
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <span className="text-muted-foreground text-sm">—</span>
+                      <Select 
+                        value={scheduleSettings.workDayEnd.toString()} 
+                        onValueChange={(value) => {
+                          const newEnd = parseInt(value);
+                          if (newEnd > scheduleSettings.workDayStart) {
+                            const newSettings = { ...scheduleSettings, workDayEnd: newEnd };
+                            setScheduleSettings(newSettings);
+                            saveSettings(newSettings);
+                          }
+                        }}
+                      >
+                        <SelectTrigger className="w-20 h-8 text-xs">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {Array.from({ length: 24 }, (_, i) => i + 1).map(h => (
+                            <SelectItem key={h} value={h.toString()}>
+                              {h.toString().padStart(2, '0')}:00
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label className="text-xs text-muted-foreground font-medium">Рабочие дни</Label>
+                    <div className="grid grid-cols-4 gap-2">
+                      {DAYS_OF_WEEK.map((day, i) => (
+                        <div key={day} className="flex items-center gap-1.5">
+                          <Checkbox
+                            id={`popover-day-${i}`}
+                            checked={scheduleSettings.workDays.includes(i)}
+                            onCheckedChange={() => {
+                              const workDays = scheduleSettings.workDays.includes(i)
+                                ? scheduleSettings.workDays.filter(d => d !== i)
+                                : [...scheduleSettings.workDays, i].sort();
+                              const newSettings = { ...scheduleSettings, workDays };
+                              setScheduleSettings(newSettings);
+                              saveSettings(newSettings);
+                            }}
+                          />
+                          <label htmlFor={`popover-day-${i}`} className="text-xs cursor-pointer">
+                            {day}
+                          </label>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              </PopoverContent>
+            </Popover>
+
             <Button
               onClick={() => setCalendarSettingsOpen(true)}
               variant="outline"
@@ -1520,7 +1608,6 @@ function TutorScheduleContent() {
               </div>
             </CardContent>
           </Card>
-        </div>
 
         {/* Quick add button */}
         <div className="flex justify-center">
