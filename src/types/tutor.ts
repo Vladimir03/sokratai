@@ -270,6 +270,53 @@ export interface UpdateReminderSettingsInput {
 }
 
 // =============================================
+// Calendar Settings
+// =============================================
+
+export interface TutorCalendarSettings {
+  id: string;
+  tutor_id: string;
+  default_duration: number;
+  buffer_minutes: number;
+  min_notice_hours: number;
+  max_advance_days: number;
+  auto_confirm: boolean;
+  allow_student_cancel: boolean;
+  cancel_notice_hours: number;
+  timezone: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface UpdateCalendarSettingsInput {
+  default_duration?: number;
+  buffer_minutes?: number;
+  min_notice_hours?: number;
+  max_advance_days?: number;
+  auto_confirm?: boolean;
+  allow_student_cancel?: boolean;
+  cancel_notice_hours?: number;
+  timezone?: string;
+}
+
+// =============================================
+// Availability Exceptions (отпуск, болезнь)
+// =============================================
+
+export interface TutorAvailabilityException {
+  id: string;
+  tutor_id: string;
+  exception_date: string; // YYYY-MM-DD
+  reason: string | null;
+  created_at: string;
+}
+
+export interface CreateAvailabilityExceptionInput {
+  exception_date: string;
+  reason?: string;
+}
+
+// =============================================
 // Public Booking (Calendly-like)
 // =============================================
 

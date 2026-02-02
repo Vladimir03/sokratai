@@ -1,9 +1,11 @@
 import { supabase } from '@/lib/supabaseClient';
 import { getCurrentTutor } from '@/lib/tutors';
-import type { 
-  TutorWeeklySlot, 
-  TutorLessonWithStudent, 
+import type {
+  TutorWeeklySlot,
+  TutorLessonWithStudent,
   TutorReminderSettings,
+  TutorCalendarSettings,
+  TutorAvailabilityException,
   TutorPublicInfo,
   BookingSlot
 } from '@/types/tutor';
@@ -324,6 +326,163 @@ export async function upsertReminderSettings(
   }
   
   return data as TutorReminderSettings;
+}
+
+// =============================================
+// Calendar Settings
+// =============================================
+
+export async function getCalendarSettings(): Promise<TutorCalendarSettings | null> {
+  const tutor = await getCurrentTutor();
+  if (!tutor) return null;
+
+  const { data, error } = await supabase
+    .from('tutor_calendar_settings')
+    .select('*')
+    .eq('tutor_id', tutor.id)
+    .single();
+
+  if (error) {
+    if (error.code === 'PGRST116') return null;
+    console.error('Error fetching calendar settings:', error);
+    return null;
+  }
+
+  return data as TutorCalendarSettings;
+}
+
+interface UpdateCalendarSettingsInput {
+  default_duration?: number;
+  buffer_minutes?: number;
+  min_notice_hours?: number;
+  max_advance_days?: number;
+  auto_confirm?: boolean;
+  allow_student_cancel?: boolean;
+  cancel_notice_hours?: number;
+  timezone?: string;
+}
+
+export async function upsertCalendarSettings(
+  input: UpdateCalendarSettingsInput
+): Promise<TutorCalendarSettings | null> {
+  const tutor = await getCurrentTutor();
+  if (!tutor) return null;
+
+  const { data, error } = await supabase
+    .from('tutor_calendar_settings')
+    .upsert({
+      tutor_id: tutor.id,
+      ...input
+    })
+    .select()
+    .single();
+
+  if (error) {
+    console.error('Error upserting calendar settings:', error);
+    return null;
+  }
+
+  return data as TutorCalendarSettings;
+}
+
+// =============================================
+// Availability Exceptions
+// =============================================
+
+export async function getAvailabilityExceptions(): Promise<TutorAvailabilityException[]> {
+  const tutor = await getCurrentTutor();
+  if (!tutor) return [];
+
+  const { data, error } = await supabase
+    .from('tutor_availability_exceptions')
+    .select('*')
+    .eq('tutor_id', tutor.id)
+    .order('exception_date', { ascending: true });
+
+  if (error) {
+    console.error('Error fetching exceptions:', error);
+    return [];
+  }
+
+  return data as TutorAvailabilityException[];
+}
+
+export async function createAvailabilityException(
+  exceptionDate: string,
+  reason?: string
+): Promise<TutorAvailabilityException | null> {
+  const tutor = await getCurrentTutor();
+  if (!tutor) return null;
+
+  const { data, error } = await supabase
+    .from('tutor_availability_exceptions')
+    .insert({
+      tutor_id: tutor.id,
+      exception_date: exceptionDate,
+      reason: reason || null
+    })
+    .select()
+    .single();
+
+  if (error) {
+    console.error('Error creating exception:', error);
+    return null;
+  }
+
+  return data as TutorAvailabilityException;
+}
+
+export async function deleteAvailabilityException(id: string): Promise<boolean> {
+  const { error } = await supabase
+    .from('tutor_availability_exceptions')
+    .delete()
+    .eq('id', id);
+
+  if (error) {
+    console.error('Error deleting exception:', error);
+    return false;
+  }
+
+  return true;
+}
+
+// =============================================
+// Reschedule Lesson
+// =============================================
+
+export async function rescheduleLesson(
+  lessonId: string,
+  newStartAt: string
+): Promise<TutorLessonWithStudent | null> {
+  const { data, error } = await supabase
+    .from('tutor_lessons')
+    .update({ start_at: newStartAt })
+    .eq('id', lessonId)
+    .select(`
+      *,
+      tutor_students (
+        id,
+        student_id,
+        profiles (
+          id,
+          username,
+          telegram_username
+        )
+      ),
+      profiles (
+        id,
+        username,
+        telegram_username
+      )
+    `)
+    .single();
+
+  if (error) {
+    console.error('Error rescheduling lesson:', error);
+    return null;
+  }
+
+  return data as TutorLessonWithStudent;
 }
 
 // =============================================
