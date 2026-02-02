@@ -104,7 +104,7 @@ const Index = () => {
                   </Link>
                 </DropdownMenuItem>
                 <DropdownMenuItem asChild>
-                  <Link to="/login" className="flex items-center gap-2 cursor-pointer">
+                  <Link to="/register-tutor" className="flex items-center gap-2 cursor-pointer">
                     <GraduationCap className="w-4 h-4" />
                     Я репетитор
                   </Link>
@@ -218,7 +218,7 @@ const Index = () => {
                     </Link>
                   </DropdownMenuItem>
                   <DropdownMenuItem asChild>
-                    <Link to="/login" className="flex items-center gap-2 cursor-pointer">
+                    <Link to="/register-tutor" className="flex items-center gap-2 cursor-pointer">
                       <GraduationCap className="w-4 h-4" />
                       Я репетитор
                     </Link>
