@@ -81,6 +81,26 @@ const Footer = () => {
           "Хорошие учителя дают новые знания, а великие – учат мыслить по-новому" (с)
         </p>
 
+        {/* For Tutors */}
+        <div className="mb-8 py-6 border-t border-white/10">
+          <p className="text-sm text-white/60 mb-3">Вы репетитор?</p>
+          <div className="flex justify-center gap-4">
+            <Link 
+              to="/login" 
+              className="text-accent hover:text-accent/80 transition-colors font-medium"
+            >
+              Войти
+            </Link>
+            <span className="text-white/30">|</span>
+            <Link 
+              to="/register-tutor" 
+              className="text-accent hover:text-accent/80 transition-colors font-medium"
+            >
+              Зарегистрироваться
+            </Link>
+          </div>
+        </div>
+
         {/* Legal Links */}
         <div className="flex flex-wrap justify-center gap-4 mb-6 text-sm">
           <Link to="/requisites" className="text-accent hover:text-accent/80 transition-colors">

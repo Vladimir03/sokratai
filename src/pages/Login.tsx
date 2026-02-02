@@ -129,6 +129,12 @@ const Login = () => {
                 Зарегистрироваться
               </Link>
             </p>
+            <p className="text-center text-sm text-muted-foreground mt-2">
+              Вы репетитор?{" "}
+              <Link to="/register-tutor" className="text-primary hover:underline">
+                Регистрация репетитора
+              </Link>
+            </p>
           </form>
         </CardContent>
       </Card>

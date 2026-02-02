@@ -2,7 +2,13 @@ import { lazy, Suspense } from "react";
 import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { telegramLinks } from "@/utils/telegramLinks";
-import { Send, Globe } from "lucide-react";
+import { Send, Globe, LogIn, ChevronDown, BookOpen, GraduationCap } from "lucide-react";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 
 // Lazy load sections
 const SpecialOffer = lazy(() => import("@/components/sections/SpecialOffer"));
@@ -28,7 +34,7 @@ const Index = () => {
 
       {/* Navigation Tabs */}
       <nav className="sticky top-0 z-50 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 border-b">
-        <div className="container mx-auto">
+        <div className="container mx-auto flex items-center justify-between">
           <div className="flex overflow-x-auto scrollbar-hide">
             <a
               href="#hero"
@@ -78,6 +84,33 @@ const Index = () => {
             >
               Для родителей
             </a>
+          </div>
+          
+          {/* Login Dropdown */}
+          <div className="flex-shrink-0 px-2">
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="ghost" size="sm" className="gap-1">
+                  <LogIn className="w-4 h-4" />
+                  <span className="hidden sm:inline">Войти</span>
+                  <ChevronDown className="w-3 h-3" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-48">
+                <DropdownMenuItem asChild>
+                  <Link to="/login" className="flex items-center gap-2 cursor-pointer">
+                    <BookOpen className="w-4 h-4" />
+                    Я ученик
+                  </Link>
+                </DropdownMenuItem>
+                <DropdownMenuItem asChild>
+                  <Link to="/login" className="flex items-center gap-2 cursor-pointer">
+                    <GraduationCap className="w-4 h-4" />
+                    Я репетитор
+                  </Link>
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
           </div>
         </div>
       </nav>
