@@ -1418,9 +1418,9 @@ function TutorScheduleContent() {
           />
 
           {/* Calendar grid */}
-          <Card className="flex-1 overflow-hidden">
+          <Card className="flex-1">
             <CardContent className="p-0">
-              <div className="overflow-x-auto">
+              <div className="overflow-x-auto overflow-y-visible">
                 <div className="min-w-[700px]">
                   {/* Header row */}
                   <div className="grid grid-cols-8 border-b bg-muted/30">
