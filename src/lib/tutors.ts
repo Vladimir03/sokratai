@@ -17,12 +17,32 @@ import type {
   UpdateTutorPaymentInput
 } from '@/types/tutor';
 
+// In-memory cache for tutor profile
+let cachedTutor: Tutor | null = null;
+let cachedTutorUserId: string | null = null;
+
 /**
- * Получить профиль текущего репетитора
+ * Clear tutor cache (call on logout)
+ */
+export function clearTutorCache() {
+  cachedTutor = null;
+  cachedTutorUserId = null;
+}
+
+/**
+ * Получить профиль текущего репетитора (с кэшированием)
  */
 export async function getCurrentTutor(): Promise<Tutor | null> {
   const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return null;
+  if (!user) {
+    clearTutorCache();
+    return null;
+  }
+
+  // Return cached tutor if user_id matches
+  if (cachedTutor && cachedTutorUserId === user.id) {
+    return cachedTutor;
+  }
 
   const { data, error } = await supabase
     .from('tutors')
@@ -35,7 +55,11 @@ export async function getCurrentTutor(): Promise<Tutor | null> {
     return null;
   }
   
-  return data as Tutor;
+  // Cache the result
+  cachedTutor = data as Tutor;
+  cachedTutorUserId = user.id;
+  
+  return cachedTutor;
 }
 
 /**

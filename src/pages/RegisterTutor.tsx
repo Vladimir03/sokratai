@@ -28,12 +28,20 @@ const RegisterTutor = () => {
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
 
-  // Redirect authenticated users to tutor dashboard
+  // Redirect only if user is already a tutor
   useEffect(() => {
     const checkSession = async () => {
       const { data: { session } } = await supabase.auth.getSession();
       if (session) {
-        navigate("/tutor/dashboard");
+        // Check if user is already a tutor
+        const { data: isTutor } = await supabase.rpc("is_tutor", { 
+          _user_id: session.user.id 
+        });
+        
+        if (isTutor) {
+          navigate("/tutor/dashboard");
+        }
+        // If not a tutor, show registration form
       }
     };
     checkSession();

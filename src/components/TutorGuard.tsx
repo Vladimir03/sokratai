@@ -1,6 +1,8 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "@/lib/supabaseClient";
+import { Button } from "@/components/ui/button";
+import { RefreshCw } from "lucide-react";
 
 interface TutorGuardProps {
   children: React.ReactNode;
@@ -10,42 +12,65 @@ const TutorGuard = ({ children }: TutorGuardProps) => {
   const navigate = useNavigate();
   const [loading, setLoading] = useState(true);
   const [authorized, setAuthorized] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    const checkAccess = async () => {
-      try {
-        const { data: { session } } = await supabase.auth.getSession();
-        
-        if (!session) {
-          navigate("/login");
-          return;
-        }
+  const checkAccess = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      
+      if (!session) {
+        navigate("/login");
+        return;
+      }
 
-        // Check if user has tutor role
-        const { data: isTutor, error } = await supabase.rpc("is_tutor", { 
+      // Retry logic for unstable connections
+      let retries = 2;
+      let isTutor = false;
+      let lastError = null;
+      
+      while (retries >= 0) {
+        const { data, error } = await supabase.rpc("is_tutor", { 
           _user_id: session.user.id 
         });
-
-        if (error) {
-          console.error("Error checking tutor role:", error);
-          navigate("/");
-          return;
+        
+        if (!error) {
+          isTutor = data;
+          lastError = null;
+          break;
         }
-
-        if (!isTutor) {
-          navigate("/");
-          return;
+        
+        lastError = error;
+        retries--;
+        if (retries >= 0) {
+          await new Promise(r => setTimeout(r, 1000)); // Wait 1 sec before retry
         }
-
-        setAuthorized(true);
-      } catch (error) {
-        console.error("Error in TutorGuard:", error);
-        navigate("/");
-      } finally {
-        setLoading(false);
       }
-    };
 
+      if (lastError) {
+        console.error("Error checking tutor role after retries:", lastError);
+        setError("Ошибка проверки доступа. Проверьте соединение.");
+        setLoading(false);
+        return;
+      }
+
+      if (!isTutor) {
+        navigate("/");
+        return;
+      }
+
+      setAuthorized(true);
+    } catch (error) {
+      console.error("Error in TutorGuard:", error);
+      setError("Ошибка соединения. Попробуйте ещё раз.");
+    } finally {
+      setLoading(false);
+    }
+  }, [navigate]);
+
+  useEffect(() => {
     checkAccess();
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
@@ -55,7 +80,7 @@ const TutorGuard = ({ children }: TutorGuardProps) => {
     });
 
     return () => subscription.unsubscribe();
-  }, [navigate]);
+  }, [navigate, checkAccess]);
 
   if (loading) {
     return (
@@ -63,6 +88,20 @@ const TutorGuard = ({ children }: TutorGuardProps) => {
         <div className="text-center">
           <div className="w-16 h-16 border-4 border-primary border-t-transparent rounded-full animate-spin mx-auto mb-4" />
           <p className="text-muted-foreground">Загрузка...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-background">
+        <div className="text-center space-y-4">
+          <p className="text-destructive">{error}</p>
+          <Button onClick={checkAccess} variant="outline" className="gap-2">
+            <RefreshCw className="w-4 h-4" />
+            Повторить
+          </Button>
         </div>
       </div>
     );
