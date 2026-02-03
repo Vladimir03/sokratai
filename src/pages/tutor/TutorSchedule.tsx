@@ -18,6 +18,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { Calendar } from '@/components/ui/calendar';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
+import { supabase } from '@/lib/supabaseClient';
 import TutorGuard from '@/components/TutorGuard';
 import { TutorLayout } from '@/components/tutor/TutorLayout';
 import { useTutor, useTutorWeeklySlots, useTutorLessons, useTutorStudents, useTutorReminderSettings, useTutorCalendarSettings, useTutorAvailabilityExceptions } from '@/hooks/useTutor';
@@ -1348,6 +1349,46 @@ function TutorScheduleContent() {
     toast.success('Напоминания об оплате включены!');
   }, [refetchCalendarSettings]);
 
+  // Telegram linking
+  const [linkingTelegram, setLinkingTelegram] = useState(false);
+
+  const handleLinkTelegram = useCallback(async () => {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        toast.error('Необходимо войти в систему');
+        return;
+      }
+
+      setLinkingTelegram(true);
+
+      // Get link token
+      const response = await supabase.functions.invoke('telegram-login-token', {
+        body: { action: 'link', user_id: user.id }
+      });
+
+      if (response.error) {
+        throw response.error;
+      }
+
+      const { token } = response.data;
+
+      // Open Telegram bot with link token
+      window.open(`https://t.me/sokratai_ru_bot?start=link_${token}`, '_blank');
+
+      toast.info('Подтвердите связку в Telegram боте');
+
+      // Simple timeout to reset state (user will see update on next page load)
+      setTimeout(() => {
+        setLinkingTelegram(false);
+      }, 5000);
+    } catch (error) {
+      console.error('Error linking Telegram:', error);
+      toast.error('Ошибка при связывании Telegram');
+      setLinkingTelegram(false);
+    }
+  }, []);
+
   // Sync settings to DB on initial load
   useEffect(() => {
     syncWorkHoursToSlots(
@@ -1620,10 +1661,11 @@ function TutorScheduleContent() {
                 variant="outline"
                 size="sm"
                 className="ml-4 border-blue-300 text-blue-700 hover:bg-blue-100"
-                onClick={() => window.open('https://t.me/sokratai_ru_bot?start=tutor_link', '_blank')}
+                onClick={handleLinkTelegram}
+                disabled={linkingTelegram}
               >
                 <MessageCircle className="h-4 w-4 mr-2" />
-                Подключить
+                {linkingTelegram ? 'Открываем...' : 'Подключить'}
               </Button>
             </AlertDescription>
           </Alert>
