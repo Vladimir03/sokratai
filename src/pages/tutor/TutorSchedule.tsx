@@ -1649,26 +1649,33 @@ function TutorScheduleContent() {
           </div>
         </div>
 
-        {/* Telegram prompt if not connected */}
-        {tutor && !tutor.telegram_id && (
-          <Alert className="bg-blue-50 border-blue-200">
-            <MessageCircle className="h-4 w-4 text-blue-600" />
-            <AlertDescription className="flex items-center justify-between">
-              <span className="text-blue-800">
-                Подключите Telegram, чтобы получать уведомления о новых записях учеников
-              </span>
-              <Button
-                variant="outline"
-                size="sm"
-                className="ml-4 border-blue-300 text-blue-700 hover:bg-blue-100"
-                onClick={handleLinkTelegram}
-                disabled={linkingTelegram}
-              >
-                <MessageCircle className="h-4 w-4 mr-2" />
-                {linkingTelegram ? 'Открываем...' : 'Подключить'}
-              </Button>
-            </AlertDescription>
-          </Alert>
+        {/* Telegram status */}
+        {tutor && (
+          tutor.telegram_username ? (
+            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+              <MessageCircle className="h-4 w-4 text-blue-500" />
+              <span>Telegram: <span className="text-blue-600 font-medium">@{tutor.telegram_username}</span></span>
+            </div>
+          ) : (
+            <Alert className="bg-blue-50 border-blue-200">
+              <MessageCircle className="h-4 w-4 text-blue-600" />
+              <AlertDescription className="flex items-center justify-between">
+                <span className="text-blue-800">
+                  Подключите Telegram, чтобы получать уведомления о новых записях учеников
+                </span>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="ml-4 border-blue-300 text-blue-700 hover:bg-blue-100"
+                  onClick={handleLinkTelegram}
+                  disabled={linkingTelegram}
+                >
+                  <MessageCircle className="h-4 w-4 mr-2" />
+                  {linkingTelegram ? 'Открываем...' : 'Подключить'}
+                </Button>
+              </AlertDescription>
+            </Alert>
+          )
         )}
 
         {/* Stats bar */}

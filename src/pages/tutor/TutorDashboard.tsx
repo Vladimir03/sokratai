@@ -319,6 +319,11 @@ function TutorDashboardContent() {
           <p className="text-muted-foreground capitalize">
             {formatDate(new Date())}
           </p>
+          {tutor?.telegram_username && (
+            <p className="text-sm text-muted-foreground flex items-center gap-1">
+              <span className="text-blue-500">Telegram:</span> @{tutor.telegram_username}
+            </p>
+          )}
         </div>
         
         {/* Сводные карточки */}
