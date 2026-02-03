@@ -10,7 +10,6 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { ScrollArea } from '@/components/ui/scroll-area';
 import { toast } from 'sonner';
 import TutorGuard from '@/components/TutorGuard';
 import { TutorLayout } from '@/components/tutor/TutorLayout';
@@ -300,9 +299,8 @@ function TutorPaymentsContent() {
         
         {/* Таблица */}
         <Card>
-          <ScrollArea className="h-[400px]">
-            <div className="overflow-x-auto">
-              <Table className="min-w-[900px] [&_th]:whitespace-nowrap [&_td]:whitespace-nowrap">
+          <div className="overflow-x-auto">
+            <Table className="min-w-[900px] [&_th]:whitespace-nowrap [&_td]:whitespace-nowrap">
               <TableHeader>
                 <TableRow>
                   <TableHead>Ученик</TableHead>
@@ -385,9 +383,8 @@ function TutorPaymentsContent() {
                   })
                 )}
               </TableBody>
-              </Table>
-            </div>
-          </ScrollArea>
+            </Table>
+          </div>
         </Card>
         
         {/* Диалог добавления */}
