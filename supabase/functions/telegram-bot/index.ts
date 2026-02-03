@@ -2372,6 +2372,87 @@ async function handleDiagnosticCancel(telegramUserId: number) {
   );
 }
 
+// ============= PAYMENT HANDLING =============
+
+async function handlePaymentCallback(telegramUserId: number, data: string, messageId?: number) {
+  // Parse callback data: payment:status:lesson_id
+  const parts = data.split(":");
+  if (parts.length !== 3) {
+    console.error("Invalid payment callback data:", data);
+    return;
+  }
+
+  const [, paymentStatus, lessonId] = parts;
+
+  // Get tutor's telegram_id to verify ownership
+  const { data: tutor } = await supabase
+    .from("tutors")
+    .select("id, telegram_id")
+    .eq("telegram_id", telegramUserId.toString())
+    .single();
+
+  if (!tutor) {
+    await sendTelegramMessage(
+      telegramUserId,
+      "❌ Вы не найдены как репетитор. Свяжите Telegram в настройках."
+    );
+    return;
+  }
+
+  // Update payment status
+  const { error } = await supabase.rpc("update_lesson_payment", {
+    _lesson_id: lessonId,
+    _payment_status: paymentStatus,
+    _tutor_telegram_id: telegramUserId.toString(),
+  });
+
+  if (error) {
+    console.error("Error updating payment status:", error);
+    await sendTelegramMessage(telegramUserId, "❌ Ошибка при обновлении статуса оплаты.");
+    return;
+  }
+
+  // Format response based on status
+  let statusText = "";
+  let emoji = "";
+  switch (paymentStatus) {
+    case "paid":
+      statusText = "Оплачено";
+      emoji = "✅";
+      break;
+    case "paid_earlier":
+      statusText = "Оплачено ранее";
+      emoji = "💳";
+      break;
+    case "pending":
+      statusText = "Оплатит позже";
+      emoji = "⏳";
+      break;
+    default:
+      statusText = paymentStatus;
+      emoji = "📝";
+  }
+
+  // Edit the original message to show the result
+  if (messageId) {
+    await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/editMessageText`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        chat_id: telegramUserId,
+        message_id: messageId,
+        text: `${emoji} <b>Статус оплаты обновлён</b>\n\n${statusText}`,
+        parse_mode: "HTML",
+      }),
+    });
+  } else {
+    await sendTelegramMessage(
+      telegramUserId,
+      `${emoji} Статус оплаты обновлён: ${statusText}`
+    );
+  }
+}
+
 async function parseSSEStream(response: Response): Promise<string> {
   const reader = response.body?.getReader();
   const decoder = new TextDecoder();
@@ -4440,6 +4521,13 @@ async function handleCallbackQuery(callbackQuery: any) {
   // Diagnostic cancel
   if (data === "diagnostic_cancel") {
     await handleDiagnosticCancel(telegramUserId);
+    return;
+  }
+
+  // ============= PAYMENT CALLBACKS (for tutors) =============
+
+  if (data.startsWith("payment:")) {
+    await handlePaymentCallback(telegramUserId, data, callbackQuery.message?.message_id);
     return;
   }
 
