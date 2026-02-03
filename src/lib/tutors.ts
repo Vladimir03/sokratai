@@ -839,11 +839,39 @@ export async function bookLessonSlot(
 }
 
 /**
- * Получить ссылку для записи текущего репетитора
+ * Генерирует уникальный booking_link для репетитора
+ */
+function generateBookingLink(tutorId: string): string {
+  return `tutor-${tutorId.substring(0, 8)}`;
+}
+
+/**
+ * Получить или создать ссылку для записи текущего репетитора
  */
 export async function getBookingLink(): Promise<string | null> {
-  const tutor = await getCurrentTutor();
-  if (!tutor?.booking_link) return null;
+  let tutor = await getCurrentTutor();
+  if (!tutor) return null;
+  
+  // Если booking_link не установлен - создаём автоматически
+  if (!tutor.booking_link) {
+    const newBookingLink = generateBookingLink(tutor.id);
+    
+    const { data, error } = await supabase
+      .from('tutors')
+      .update({ booking_link: newBookingLink })
+      .eq('id', tutor.id)
+      .select()
+      .single();
+    
+    if (error) {
+      console.error('Error creating booking link:', error);
+      return null;
+    }
+    
+    // Сбросить кэш чтобы получить новые данные
+    clearTutorCache();
+    tutor = data as Tutor;
+  }
   
   return `${window.location.origin}/book/${tutor.booking_link}`;
 }

@@ -164,7 +164,7 @@ function LessonBlock({ lesson, workDayStart, onClick }: LessonBlockProps) {
 }
 
 // =============================================
-// WorkHoursSettings sidebar
+// WorkHoursSettings sidebar (kept for reference, not used in UI)
 // =============================================
 
 interface WorkHoursSettingsProps {
@@ -972,8 +972,15 @@ function CalendarSettingsDialog({
               <div className="flex-1">
                 <Popover>
                   <PopoverTrigger asChild>
-                    <Button variant="outline" size="sm" className="w-full justify-start">
-                      <CalendarIcon className="mr-2 h-3 w-3" />
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className={cn(
+                        "w-full justify-start text-left font-normal",
+                        !newExceptionDate && "text-muted-foreground"
+                      )}
+                    >
+                      <CalendarIcon className="mr-2 h-4 w-4" />
                       {newExceptionDate ? format(newExceptionDate, 'dd.MM.yyyy') : 'Дата'}
                     </Button>
                   </PopoverTrigger>
@@ -989,20 +996,22 @@ function CalendarSettingsDialog({
                 </Popover>
               </div>
               <Input
+                placeholder="Причина"
                 value={newExceptionReason}
                 onChange={(e) => setNewExceptionReason(e.target.value)}
-                placeholder="Причина"
-                className="flex-1 h-8 text-sm"
+                className="flex-1"
               />
-              <Button size="sm" variant="outline" onClick={handleAddException} disabled={!newExceptionDate}>
-                <Plus className="h-3 w-3" />
+              <Button size="sm" onClick={handleAddException} disabled={!newExceptionDate}>
+                <Plus className="h-4 w-4" />
               </Button>
             </div>
           </div>
         </div>
 
         <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>Отмена</Button>
+          <Button variant="outline" onClick={() => onOpenChange(false)}>
+            Отмена
+          </Button>
           <Button onClick={handleSave} disabled={isSaving}>
             {isSaving ? 'Сохранение...' : 'Сохранить'}
           </Button>
@@ -1536,117 +1545,109 @@ function TutorScheduleContent() {
           </Button>
         </div>
 
-        {/* Main layout */}
-        <div className="flex flex-col lg:flex-row gap-4">
-          <WorkHoursSettings
-            settings={scheduleSettings}
-            onChange={setScheduleSettings}
-          />
+        {/* Calendar grid - full width, no internal vertical scroll */}
+        <Card animate={false}>
+          <CardContent className="p-0">
+            <div className="overflow-x-auto">
+              <div className="min-w-[700px]">
+                {/* Header row */}
+                <div className="grid grid-cols-8 border-b bg-muted/30">
+                  <div className="p-2 text-sm font-medium text-muted-foreground border-r">
+                    Время
+                  </div>
+                  {DAYS_OF_WEEK.map((day, i) => {
+                    const date = getDateForDayOfWeek(weekStart, i);
+                    const isToday = date.toDateString() === new Date().toDateString();
+                    const isWorkDay = scheduleSettings.workDays.includes(i);
+                    return (
+                      <div
+                        key={day}
+                        className={cn(
+                          "text-center p-2 border-r last:border-r-0",
+                          isToday && "bg-primary/10",
+                          !isWorkDay && "bg-muted/50"
+                        )}
+                      >
+                        <div className={cn("text-sm font-medium", isToday && "text-primary")}>{day}</div>
+                        <div className="text-xs text-muted-foreground">{formatDate(date)}</div>
+                      </div>
+                    );
+                  })}
+                </div>
 
-          {/* Calendar grid */}
-          <Card className="flex-1">
-            <CardContent className="p-0">
-              <div className="overflow-x-auto overflow-y-visible">
-                <div className="min-w-[700px]">
-                  {/* Header row */}
-                  <div className="grid grid-cols-8 border-b bg-muted/30">
-                    <div className="p-2 text-sm font-medium text-muted-foreground border-r">
-                      Время
+                {/* Time grid */}
+                <div className="relative">
+                  <div className="grid grid-cols-8">
+                    {/* Time column */}
+                    <div className="border-r">
+                      {visibleHours.map(hour => (
+                        <div
+                          key={hour}
+                          className="border-b last:border-b-0 text-xs text-muted-foreground pr-2 text-right"
+                          style={{ height: `${HOUR_HEIGHT}px` }}
+                        >
+                          <span className="relative -top-2">{formatTime(hour)}</span>
+                        </div>
+                      ))}
                     </div>
-                    {DAYS_OF_WEEK.map((day, i) => {
-                      const date = getDateForDayOfWeek(weekStart, i);
-                      const isToday = date.toDateString() === new Date().toDateString();
-                      const isWorkDay = scheduleSettings.workDays.includes(i);
+
+                    {/* Day columns */}
+                    {DAYS_OF_WEEK.map((_, dayIndex) => {
+                      const isWorkDay = scheduleSettings.workDays.includes(dayIndex);
+                      const dayLessons = lessonsByDay[dayIndex] || [];
+
                       return (
                         <div
-                          key={day}
+                          key={dayIndex}
                           className={cn(
-                            "text-center p-2 border-r last:border-r-0",
-                            isToday && "bg-primary/10",
-                            !isWorkDay && "bg-muted/50"
+                            "relative border-r last:border-r-0",
+                            !isWorkDay && "bg-muted/30"
                           )}
+                          style={{ height: `${gridHeight}px` }}
+                          onClick={(e) => {
+                            if (isWorkDay) {
+                              const rect = e.currentTarget.getBoundingClientRect();
+                              const clickY = e.clientY - rect.top;
+                              handleGridClick(dayIndex, clickY);
+                            }
+                          }}
                         >
-                          <div className={cn("text-sm font-medium", isToday && "text-primary")}>{day}</div>
-                          <div className="text-xs text-muted-foreground">{formatDate(date)}</div>
+                          {/* Hour lines */}
+                          {visibleHours.map((_, hourIdx) => (
+                            <div
+                              key={hourIdx}
+                              className="absolute left-0 right-0 border-b border-border/50"
+                              style={{ top: `${(hourIdx + 1) * HOUR_HEIGHT}px` }}
+                            />
+                          ))}
+
+                          {/* Half-hour lines */}
+                          {visibleHours.map((_, hourIdx) => (
+                            <div
+                              key={`half-${hourIdx}`}
+                              className="absolute left-0 right-0 border-b border-border/20"
+                              style={{ top: `${hourIdx * HOUR_HEIGHT + 30}px` }}
+                            />
+                          ))}
+
+                          {/* Lessons */}
+                          {dayLessons.map(lesson => (
+                            <LessonBlock
+                              key={lesson.id}
+                              lesson={lesson}
+                              workDayStart={scheduleSettings.workDayStart}
+                              onClick={() => handleLessonClick(lesson)}
+                            />
+                          ))}
                         </div>
                       );
                     })}
                   </div>
-
-                  {/* Time grid */}
-                  <div className="relative">
-                    <div className="grid grid-cols-8">
-                      {/* Time column */}
-                      <div className="border-r">
-                        {visibleHours.map(hour => (
-                          <div
-                            key={hour}
-                            className="border-b last:border-b-0 text-xs text-muted-foreground pr-2 text-right"
-                            style={{ height: `${HOUR_HEIGHT}px` }}
-                          >
-                            <span className="relative -top-2">{formatTime(hour)}</span>
-                          </div>
-                        ))}
-                      </div>
-
-                      {/* Day columns */}
-                      {DAYS_OF_WEEK.map((_, dayIndex) => {
-                        const isWorkDay = scheduleSettings.workDays.includes(dayIndex);
-                        const dayLessons = lessonsByDay[dayIndex] || [];
-
-                        return (
-                          <div
-                            key={dayIndex}
-                            className={cn(
-                              "relative border-r last:border-r-0",
-                              !isWorkDay && "bg-muted/30"
-                            )}
-                            style={{ height: `${gridHeight}px` }}
-                            onClick={(e) => {
-                              if (isWorkDay) {
-                                const rect = e.currentTarget.getBoundingClientRect();
-                                const clickY = e.clientY - rect.top;
-                                handleGridClick(dayIndex, clickY);
-                              }
-                            }}
-                          >
-                            {/* Hour lines */}
-                            {visibleHours.map((_, hourIdx) => (
-                              <div
-                                key={hourIdx}
-                                className="absolute left-0 right-0 border-b border-border/50"
-                                style={{ top: `${(hourIdx + 1) * HOUR_HEIGHT}px` }}
-                              />
-                            ))}
-
-                            {/* Half-hour lines */}
-                            {visibleHours.map((_, hourIdx) => (
-                              <div
-                                key={`half-${hourIdx}`}
-                                className="absolute left-0 right-0 border-b border-border/20"
-                                style={{ top: `${hourIdx * HOUR_HEIGHT + 30}px` }}
-                              />
-                            ))}
-
-                            {/* Lessons */}
-                            {dayLessons.map(lesson => (
-                              <LessonBlock
-                                key={lesson.id}
-                                lesson={lesson}
-                                workDayStart={scheduleSettings.workDayStart}
-                                onClick={() => handleLessonClick(lesson)}
-                              />
-                            ))}
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </div>
                 </div>
               </div>
-            </CardContent>
-          </Card>
-        </div>
+            </div>
+          </CardContent>
+        </Card>
 
         {/* Quick add button */}
         <div className="flex justify-center">
