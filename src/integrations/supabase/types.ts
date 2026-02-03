@@ -1131,11 +1131,16 @@ export type Database = {
           created_at: string | null
           duration_min: number
           id: string
+          is_recurring: boolean
+          lesson_type: string
           notes: string | null
+          parent_lesson_id: string | null
+          recurrence_rule: string | null
           source: string
           start_at: string
           status: string
           student_id: string | null
+          subject: string | null
           tutor_id: string
           tutor_student_id: string | null
           updated_at: string | null
@@ -1146,11 +1151,16 @@ export type Database = {
           created_at?: string | null
           duration_min?: number
           id?: string
+          is_recurring?: boolean
+          lesson_type?: string
           notes?: string | null
+          parent_lesson_id?: string | null
+          recurrence_rule?: string | null
           source?: string
           start_at: string
           status?: string
           student_id?: string | null
+          subject?: string | null
           tutor_id: string
           tutor_student_id?: string | null
           updated_at?: string | null
@@ -1161,16 +1171,28 @@ export type Database = {
           created_at?: string | null
           duration_min?: number
           id?: string
+          is_recurring?: boolean
+          lesson_type?: string
           notes?: string | null
+          parent_lesson_id?: string | null
+          recurrence_rule?: string | null
           source?: string
           start_at?: string
           status?: string
           student_id?: string | null
+          subject?: string | null
           tutor_id?: string
           tutor_student_id?: string | null
           updated_at?: string | null
         }
         Relationships: [
+          {
+            foreignKeyName: "tutor_lessons_parent_lesson_id_fkey"
+            columns: ["parent_lesson_id"]
+            isOneToOne: false
+            referencedRelation: "tutor_lessons"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "tutor_lessons_student_id_fkey"
             columns: ["student_id"]
