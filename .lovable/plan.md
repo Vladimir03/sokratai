@@ -1,154 +1,108 @@
 
-# План: Скрытие настроек календаря за кнопку
 
-## Проблемы
+# План: Исправление кнопки "Ссылка для записи"
 
-### 1. Build-ошибки
-Таблицы `tutor_calendar_settings` и `tutor_availability_exceptions` используются в коде, но отсутствуют в базе данных. Необходимо:
-- Либо добавить миграцию для создания этих таблиц
-- Либо временно удалить код, который их использует (хуки и функции)
+## Диагностика
 
-### 2. UI настроек
-Сейчас панель "Настройки" (`WorkHoursSettings`) занимает ~256px слева от календаря и всегда видна. Пользователь хочет скрыть её под кнопку.
+### Найденная проблема
+Кнопка "Ссылка для записи" не работает, потому что у текущего репетитора (Владимир) поле `booking_link` в базе данных равно `null`:
+
+```
+tutors:
+  id: 70ff3df8-f081-4ed1-83bb-4d1a1f80f795
+  booking_link: null  ← Проблема!
+  invite_code: JPYRPYCN
+```
+
+Функция `getBookingLink()` в `src/lib/tutors.ts` проверяет наличие `booking_link` и возвращает `null` если оно не установлено:
+
+```typescript
+export async function getBookingLink(): Promise<string | null> {
+  const tutor = await getCurrentTutor();
+  if (!tutor?.booking_link) return null;  // ← Возвращает null
+  return `${window.location.origin}/book/${tutor.booking_link}`;
+}
+```
+
+### Что работает
+- Weekly slots создаются успешно (в БД есть 91 слот для дней 0-6, часы 08:00-20:00)
+- Страница `/book/:bookingLink` существует и роутинг настроен
+- RPC функции `get_available_booking_slots` и `book_lesson_slot` существуют
 
 ---
 
 ## Решение
 
-### Расположение кнопки "Настройки"
+### 1. Автогенерация booking_link
 
-Лучшее место для кнопки настроек в header страницы, рядом с другими кнопками действий:
+При нажатии на кнопку "Ссылка для записи", если `booking_link` не установлен, автоматически создать его:
 
-```
-┌───────────────────────────────────────────────────────────────────┐
-│ 📅 Расписание                                                      │
-│ Нажмите на сетку, чтобы добавить занятие                          │
-│                                                                    │
-│                    [Ссылка] [⚙️] [🔔] [📅]                        │
-│                            ↑                                       │
-│                    Кнопка настроек                                 │
-└───────────────────────────────────────────────────────────────────┘
-```
-
-### Реализация
-
-**Файл**: `src/pages/tutor/TutorSchedule.tsx`
-
-#### 1. Добавить Popover для настроек
-
-Заменить боковую карточку `WorkHoursSettings` на Popover, который открывается по клику на кнопку:
+**Файл `src/lib/tutors.ts`:**
 
 ```typescript
-// В header, рядом с другими кнопками
-<Popover>
-  <PopoverTrigger asChild>
-    <Button variant="outline" size="icon" title="Настройки расписания">
-      <Settings className="h-4 w-4" />
-    </Button>
-  </PopoverTrigger>
-  <PopoverContent className="w-64" align="end">
-    <div className="space-y-4">
-      <div className="space-y-2">
-        <Label className="text-xs text-muted-foreground font-medium">
-          Рабочие часы
-        </Label>
-        <div className="flex items-center gap-2">
-          <Select value={...} onValueChange={...}>
-            ...
-          </Select>
-          <span>—</span>
-          <Select value={...} onValueChange={...}>
-            ...
-          </Select>
-        </div>
-      </div>
+/**
+ * Генерирует уникальный booking_link для репетитора
+ */
+function generateBookingLink(tutorId: string): string {
+  // Формат: "tutor-" + первые 8 символов UUID
+  return `tutor-${tutorId.substring(0, 8)}`;
+}
 
-      <div className="space-y-2">
-        <Label className="text-xs text-muted-foreground font-medium">
-          Рабочие дни
-        </Label>
-        <div className="space-y-1">
-          {DAYS_OF_WEEK.map((day, i) => (
-            <div className="flex items-center gap-2">
-              <Checkbox ... />
-              <label>{day}</label>
-            </div>
-          ))}
-        </div>
-      </div>
-    </div>
-  </PopoverContent>
-</Popover>
+/**
+ * Получить или создать ссылку для записи
+ */
+export async function getBookingLink(): Promise<string | null> {
+  let tutor = await getCurrentTutor();
+  if (!tutor) return null;
+  
+  // Если booking_link не установлен - создаём
+  if (!tutor.booking_link) {
+    const newBookingLink = generateBookingLink(tutor.id);
+    
+    const { data, error } = await supabase
+      .from('tutors')
+      .update({ booking_link: newBookingLink })
+      .eq('id', tutor.id)
+      .select()
+      .single();
+    
+    if (error) {
+      console.error('Error creating booking link:', error);
+      return null;
+    }
+    
+    // Обновляем кэш
+    tutor = data as Tutor;
+    clearTutorCache(); // Сбросить кэш чтобы получить новые данные
+  }
+  
+  return `${window.location.origin}/book/${tutor.booking_link}`;
+}
 ```
 
-#### 2. Обновить layout
+### 2. Альтернатива: Триггер в БД
 
-Убрать боковую панель настроек из основного layout:
+Можно также добавить триггер, который автоматически генерирует `booking_link` при создании репетитора (аналогично `invite_code`):
 
-**Было**:
-```typescript
-<div className="flex flex-col lg:flex-row gap-4">
-  <WorkHoursSettings settings={...} onChange={...} />
-  <Card className="flex-1">
-    {/* Calendar */}
-  </Card>
-</div>
+```sql
+-- Добавить DEFAULT значение для booking_link
+ALTER TABLE public.tutors 
+ALTER COLUMN booking_link SET DEFAULT 'tutor-' || substr(gen_random_uuid()::text, 1, 8);
+
+-- Заполнить существующие NULL значения
+UPDATE public.tutors 
+SET booking_link = 'tutor-' || substr(id::text, 1, 8) 
+WHERE booking_link IS NULL;
 ```
-
-**Станет**:
-```typescript
-<Card className="overflow-hidden">
-  {/* Calendar - теперь занимает всю ширину */}
-</Card>
-```
-
-#### 3. Порядок кнопок в header
-
-```
-[Ссылка для записи] [⚙️ Настройки] [🔔 Напоминания] [📅 Календарь]
-```
-
-Логика группировки:
-- **Ссылка для записи** — основное действие, отдельно
-- **Настройки (⚙️)** — настройки отображения календаря (рабочие часы, дни)
-- **Напоминания (🔔)** — настройки уведомлений
-- **Календарь (📅)** — расширенные настройки записи
 
 ---
 
-## Исправление Build-ошибок
+## Рекомендуемый подход
 
-Нужно создать миграцию для таблиц `tutor_calendar_settings` и `tutor_availability_exceptions`:
+Комбинация обоих методов:
 
-```sql
--- tutor_calendar_settings
-CREATE TABLE IF NOT EXISTS public.tutor_calendar_settings (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  tutor_id UUID NOT NULL REFERENCES public.tutors(id) ON DELETE CASCADE UNIQUE,
-  default_duration SMALLINT NOT NULL DEFAULT 60,
-  buffer_minutes SMALLINT NOT NULL DEFAULT 15,
-  min_notice_hours SMALLINT NOT NULL DEFAULT 24,
-  max_advance_days SMALLINT NOT NULL DEFAULT 30,
-  auto_confirm BOOLEAN NOT NULL DEFAULT true,
-  allow_student_cancel BOOLEAN NOT NULL DEFAULT true,
-  cancel_notice_hours SMALLINT NOT NULL DEFAULT 24,
-  timezone TEXT NOT NULL DEFAULT 'Europe/Moscow',
-  created_at TIMESTAMPTZ DEFAULT NOW(),
-  updated_at TIMESTAMPTZ DEFAULT NOW()
-);
-
--- tutor_availability_exceptions
-CREATE TABLE IF NOT EXISTS public.tutor_availability_exceptions (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  tutor_id UUID NOT NULL REFERENCES public.tutors(id) ON DELETE CASCADE,
-  exception_date DATE NOT NULL,
-  reason TEXT,
-  created_at TIMESTAMPTZ DEFAULT NOW(),
-  CONSTRAINT tutor_availability_exceptions_unique UNIQUE (tutor_id, exception_date)
-);
-
--- RLS и триггеры аналогично другим таблицам
-```
+1. **Миграция БД** - заполнить `booking_link` для существующих репетиторов
+2. **Обновить `getBookingLink()`** - на случай если в будущем появятся репетиторы без `booking_link`
 
 ---
 
@@ -156,56 +110,18 @@ CREATE TABLE IF NOT EXISTS public.tutor_availability_exceptions (
 
 | Файл | Изменение |
 |------|-----------|
-| `src/pages/tutor/TutorSchedule.tsx` | Заменить `WorkHoursSettings` на Popover с кнопкой |
-| База данных | Миграция для `tutor_calendar_settings` и `tutor_availability_exceptions` |
+| `src/lib/tutors.ts` | Обновить `getBookingLink()` для автогенерации |
+| База данных | Миграция: заполнить NULL booking_link |
 
 ---
 
-## Визуальный результат
+## Тестирование полного сценария
 
-**До**:
-```
-┌────────────┬─────────────────────────────────────────┐
-│ Настройки  │              Календарь                  │
-│ ─────────  │  ← Пн 3   Вт 4   Ср 5   Чт 6   Пт 7 → │
-│ 09:00-21:00│                                         │
-│            │  09:00 │    │    │    │    │    │    │ │
-│ ☑ Пн       │  10:00 │    │    │    │    │    │    │ │
-│ ☑ Вт       │  ...                                   │
-│ ...        │                                         │
-└────────────┴─────────────────────────────────────────┘
-```
+После исправления проверить:
 
-**После**:
-```
-┌─────────────────────────────────────────────────────┐
-│ 📅 Расписание        [Ссылка] [⚙️] [🔔] [📅]       │
-├─────────────────────────────────────────────────────┤
-│              Календарь (полная ширина)              │
-│  ← Пн 3 фев    Вт 4    Ср 5    Чт 6    Пт 7 фев → │
-│                                                     │
-│  09:00 │      │      │  ██  │      │      │      │ │
-│  10:00 │      │      │  ██  │      │      │      │ │
-│  ...                                                │
-└─────────────────────────────────────────────────────┘
+1. Открыть `/tutor/schedule` как репетитор
+2. Нажать "Ссылка для записи" - должна скопироваться ссылка вида `/book/tutor-70ff3df8`
+3. Открыть эту ссылку в инкогнито как ученик
+4. Выбрать дату с зелёной точкой (дни с доступными слотами)
+5. Выбрать время - подтвердить запись
 
-При клике на ⚙️:
-┌────────────────────┐
-│ Рабочие часы       │
-│ [09:00] — [21:00]  │
-│                    │
-│ Рабочие дни        │
-│ ☑ Пн  ☑ Вт  ☑ Ср  │
-│ ☑ Чт  ☑ Пт  ☐ Сб  │
-│ ☐ Вс               │
-└────────────────────┘
-```
-
----
-
-## Порядок выполнения
-
-1. Создать миграцию для недостающих таблиц (исправит build-ошибки)
-2. Преобразовать `WorkHoursSettings` в Popover
-3. Добавить кнопку настроек в header рядом с другими кнопками
-4. Убрать sidebar layout, календарь займёт всю ширину
