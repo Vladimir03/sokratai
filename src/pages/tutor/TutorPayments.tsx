@@ -20,13 +20,13 @@ import {
   markPaymentAsPaid, 
   deleteTutorPayment 
 } from '@/lib/tutors';
-import type { TutorPaymentWithStudent, PaymentStatus } from '@/types/tutor';
+import type { TutorPaymentWithStudent, TutorPaymentStatus } from '@/types/tutor';
 
 // =============================================
 // Типы и утилиты
 // =============================================
 
-type StatusFilter = 'all' | PaymentStatus;
+type StatusFilter = 'all' | TutorPaymentStatus;
 
 interface PaymentStats {
   pendingAmount: number;
@@ -50,7 +50,7 @@ function formatDate(dateString: string | null): string {
   return new Date(dateString).toLocaleDateString('ru-RU');
 }
 
-function getEffectiveStatus(payment: TutorPaymentWithStudent): PaymentStatus {
+function getEffectiveStatus(payment: TutorPaymentWithStudent): TutorPaymentStatus {
   if (payment.status === 'paid') return 'paid';
   if (payment.due_date && new Date(payment.due_date) < new Date()) {
     return 'overdue';
@@ -58,7 +58,7 @@ function getEffectiveStatus(payment: TutorPaymentWithStudent): PaymentStatus {
   return 'pending';
 }
 
-function getStatusBadge(status: PaymentStatus) {
+function getStatusBadge(status: TutorPaymentStatus) {
   switch (status) {
     case 'paid':
       return <Badge variant="default" className="bg-green-500">Оплачено</Badge>;
