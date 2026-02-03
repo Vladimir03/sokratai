@@ -1024,6 +1024,29 @@ async function handleLinkAccount(telegramUserId: number, telegramUsername: strin
       return;
     }
 
+    // Also update tutors table if user is a tutor
+    const { data: tutorData } = await supabase
+      .from("tutors")
+      .select("id")
+      .eq("user_id", userId)
+      .single();
+
+    if (tutorData) {
+      const { error: tutorUpdateError } = await supabase
+        .from("tutors")
+        .update({
+          telegram_id: telegramUserId.toString(),
+          telegram_username: telegramUsername,
+        })
+        .eq("id", tutorData.id);
+
+      if (tutorUpdateError) {
+        console.error("Error updating tutor telegram:", tutorUpdateError);
+      } else {
+        console.log("Tutor telegram updated successfully");
+      }
+    }
+
     // Update token status
     await supabase
       .from("telegram_login_tokens")
