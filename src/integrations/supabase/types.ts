@@ -1041,6 +1041,8 @@ export type Database = {
           id: string
           max_advance_days: number
           min_notice_hours: number
+          payment_reminder_delay_minutes: number | null
+          payment_reminder_enabled: boolean | null
           timezone: string
           tutor_id: string
           updated_at: string | null
@@ -1055,6 +1057,8 @@ export type Database = {
           id?: string
           max_advance_days?: number
           min_notice_hours?: number
+          payment_reminder_delay_minutes?: number | null
+          payment_reminder_enabled?: boolean | null
           timezone?: string
           tutor_id: string
           updated_at?: string | null
@@ -1069,6 +1073,8 @@ export type Database = {
           id?: string
           max_advance_days?: number
           min_notice_hours?: number
+          payment_reminder_delay_minutes?: number | null
+          payment_reminder_enabled?: boolean | null
           timezone?: string
           tutor_id?: string
           updated_at?: string | null
@@ -1078,6 +1084,41 @@ export type Database = {
             foreignKeyName: "tutor_calendar_settings_tutor_id_fkey"
             columns: ["tutor_id"]
             isOneToOne: true
+            referencedRelation: "tutors"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      tutor_feature_onboarding: {
+        Row: {
+          completed_at: string | null
+          dismissed_at: string | null
+          feature_key: string
+          id: string
+          shown_at: string | null
+          tutor_id: string
+        }
+        Insert: {
+          completed_at?: string | null
+          dismissed_at?: string | null
+          feature_key: string
+          id?: string
+          shown_at?: string | null
+          tutor_id: string
+        }
+        Update: {
+          completed_at?: string | null
+          dismissed_at?: string | null
+          feature_key?: string
+          id?: string
+          shown_at?: string | null
+          tutor_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "tutor_feature_onboarding_tutor_id_fkey"
+            columns: ["tutor_id"]
+            isOneToOne: false
             referencedRelation: "tutors"
             referencedColumns: ["id"]
           },
@@ -1134,7 +1175,12 @@ export type Database = {
           is_recurring: boolean
           lesson_type: string
           notes: string | null
+          paid_at: string | null
           parent_lesson_id: string | null
+          payment_amount: number | null
+          payment_method: string | null
+          payment_reminder_sent: boolean | null
+          payment_status: string | null
           recurrence_rule: string | null
           source: string
           start_at: string
@@ -1154,7 +1200,12 @@ export type Database = {
           is_recurring?: boolean
           lesson_type?: string
           notes?: string | null
+          paid_at?: string | null
           parent_lesson_id?: string | null
+          payment_amount?: number | null
+          payment_method?: string | null
+          payment_reminder_sent?: boolean | null
+          payment_status?: string | null
           recurrence_rule?: string | null
           source?: string
           start_at: string
@@ -1174,7 +1225,12 @@ export type Database = {
           is_recurring?: boolean
           lesson_type?: string
           notes?: string | null
+          paid_at?: string | null
           parent_lesson_id?: string | null
+          payment_amount?: number | null
+          payment_method?: string | null
+          payment_reminder_sent?: boolean | null
+          payment_status?: string | null
           recurrence_rule?: string | null
           source?: string
           start_at?: string
@@ -1706,6 +1762,18 @@ export type Database = {
           topic: string
         }[]
       }
+      get_lessons_needing_payment_reminder: {
+        Args: never
+        Returns: {
+          duration_min: number
+          lesson_date: string
+          lesson_id: string
+          lesson_time: string
+          student_name: string
+          tutor_id: string
+          tutor_telegram_id: string
+        }[]
+      }
       get_subscription_status: {
         Args: { p_user_id: string }
         Returns: {
@@ -1734,9 +1802,21 @@ export type Database = {
       is_admin_email: { Args: { _user_id: string }; Returns: boolean }
       is_tutor: { Args: { _user_id: string }; Returns: boolean }
       is_tutor_of_student: { Args: { _student_id: string }; Returns: boolean }
+      mark_payment_reminder_sent: {
+        Args: { _lesson_id: string }
+        Returns: undefined
+      }
       owns_tutor: { Args: { _tutor_id: string }; Returns: boolean }
       owns_tutor_student: {
         Args: { _tutor_student_id: string }
+        Returns: boolean
+      }
+      update_lesson_payment: {
+        Args: {
+          _lesson_id: string
+          _payment_status: string
+          _tutor_telegram_id: string
+        }
         Returns: boolean
       }
       update_user_stats_on_solve: {

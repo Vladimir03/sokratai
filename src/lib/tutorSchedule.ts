@@ -415,6 +415,8 @@ interface UpdateCalendarSettingsInput {
   allow_student_cancel?: boolean;
   cancel_notice_hours?: number;
   timezone?: string;
+  payment_reminder_enabled?: boolean;
+  payment_reminder_delay_minutes?: number;
 }
 
 export async function upsertCalendarSettings(

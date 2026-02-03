@@ -125,14 +125,14 @@ export interface UpdateTutorInput {
 // =============================================
 // Оплаты (Tutor Payments A3)
 // =============================================
-export type PaymentStatus = 'pending' | 'paid' | 'overdue';
+export type TutorPaymentStatus = 'pending' | 'paid' | 'overdue';
 
 export interface TutorPayment {
   id: string;
   tutor_student_id: string;
   amount: number;
   period: string | null;
-  status: PaymentStatus;
+  status: TutorPaymentStatus;
   due_date: string | null;
   paid_at: string | null;
   created_at: string;
@@ -157,14 +157,14 @@ export interface CreateTutorPaymentInput {
   tutor_student_id: string;
   amount: number;
   period?: string;
-  status?: PaymentStatus;
+  status?: TutorPaymentStatus;
   due_date?: string;
 }
 
 export interface UpdateTutorPaymentInput {
   amount?: number;
   period?: string;
-  status?: PaymentStatus;
+  status?: TutorPaymentStatus;
   due_date?: string;
   paid_at?: string;
 }
@@ -198,8 +198,8 @@ export interface UpdateWeeklySlotInput {
 
 export type LessonStatus = 'booked' | 'completed' | 'cancelled';
 export type LessonSource = 'manual' | 'self_booking';
-export type PaymentStatus = 'unpaid' | 'paid' | 'pending' | 'paid_earlier';
-export type PaymentMethod = 'cash' | 'card' | 'transfer' | 'other';
+export type LessonPaymentStatus = 'unpaid' | 'paid' | 'pending' | 'paid_earlier';
+export type LessonPaymentMethod = 'cash' | 'card' | 'transfer' | 'other';
 
 export interface TutorLesson {
   id: string;
@@ -214,11 +214,11 @@ export interface TutorLesson {
   cancelled_at: string | null;
   cancelled_by: 'tutor' | 'student' | null;
   // Payment fields
-  payment_status: PaymentStatus;
-  payment_amount: number | null;
-  payment_method: PaymentMethod | null;
-  paid_at: string | null;
-  payment_reminder_sent: boolean;
+  payment_status?: LessonPaymentStatus;
+  payment_amount?: number | null;
+  payment_method?: LessonPaymentMethod | null;
+  paid_at?: string | null;
+  payment_reminder_sent?: boolean;
   created_at: string;
   updated_at: string;
 }
