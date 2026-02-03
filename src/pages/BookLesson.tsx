@@ -107,7 +107,7 @@ export default function BookLesson() {
   };
 
   const handleBook = async () => {
-    if (!selectedSlot || !bookingLink) return;
+    if (!selectedSlot || !bookingLink || !tutor) return;
 
     if (!isAuthenticated) {
       toast.info('Войдите, чтобы записаться на занятие');
@@ -125,6 +125,19 @@ export default function BookLesson() {
       );
       setBooked(true);
       toast.success('Вы успешно записались на занятие!');
+
+      // Send notification to tutor (fire and forget)
+      const { data: { user } } = await supabase.auth.getUser();
+      const studentName = user?.user_metadata?.username || user?.email?.split('@')[0] || 'Ученик';
+
+      supabase.functions.invoke('notify-booking', {
+        body: {
+          tutor_id: tutor.id,
+          student_name: studentName,
+          lesson_date: format(parseISO(selectedSlot.slot_date), 'd MMMM yyyy', { locale: ru }),
+          lesson_time: selectedSlot.start_time.slice(0, 5)
+        }
+      }).catch(err => console.error('Notification error:', err));
     } catch (error) {
       console.error('Booking error:', error);
       toast.error('Ошибка записи. Попробуйте ещё раз.');

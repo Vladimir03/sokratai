@@ -1,11 +1,12 @@
 import { useState, useMemo, useCallback, useEffect } from 'react';
-import { ChevronLeft, ChevronRight, Link2, Copy, Check, Plus, X, Clock, Bell, Settings, CalendarIcon, Trash2, CalendarDays } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Link2, Copy, Check, Plus, X, Clock, Bell, Settings, CalendarIcon, Trash2, CalendarDays, MessageCircle } from 'lucide-react';
 import { format, addMinutes, parseISO } from 'date-fns';
 import { ru } from 'date-fns/locale';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Badge } from '@/components/ui/badge';
+import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
@@ -1479,6 +1480,27 @@ function TutorScheduleContent() {
             </Button>
           </div>
         </div>
+
+        {/* Telegram prompt if not connected */}
+        {tutor && !tutor.telegram_id && (
+          <Alert className="bg-blue-50 border-blue-200">
+            <MessageCircle className="h-4 w-4 text-blue-600" />
+            <AlertDescription className="flex items-center justify-between">
+              <span className="text-blue-800">
+                Подключите Telegram, чтобы получать уведомления о новых записях учеников
+              </span>
+              <Button
+                variant="outline"
+                size="sm"
+                className="ml-4 border-blue-300 text-blue-700 hover:bg-blue-100"
+                onClick={() => window.open('https://t.me/sokratai_ru_bot?start=tutor_link', '_blank')}
+              >
+                <MessageCircle className="h-4 w-4 mr-2" />
+                Подключить
+              </Button>
+            </AlertDescription>
+          </Alert>
+        )}
 
         {/* Stats bar */}
         <div className="flex flex-wrap gap-4 text-sm">
