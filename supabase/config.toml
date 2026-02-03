@@ -50,3 +50,6 @@ verify_jwt = false
 
 [functions.tutor-lesson-reminders]
 verify_jwt = false
+
+[functions.payment-reminder]
+verify_jwt = false
