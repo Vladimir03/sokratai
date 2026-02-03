@@ -1728,7 +1728,7 @@ function TutorScheduleContent() {
         {/* Calendar grid - full width, no internal vertical scroll */}
         <Card animate={false}>
           <CardContent className="p-0 overflow-visible">
-            <div className="overflow-x-auto overflow-y-visible max-h-none">
+            <div className="overflow-x-auto overflow-y-hidden max-h-none">
               <div className="min-w-[700px]">
                 {/* Header row */}
                 <div className="grid grid-cols-8 border-b bg-muted/30">
