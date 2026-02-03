@@ -106,6 +106,61 @@ export async function deleteWeeklySlot(id: string): Promise<boolean> {
   return true;
 }
 
+/**
+ * Sync work hours settings to weekly slots in database
+ * This creates hourly slots for each work day based on the tutor's schedule
+ */
+export async function syncWorkHoursToSlots(
+  workDays: number[],
+  workDayStart: number,
+  workDayEnd: number,
+  durationMin: number = 60
+): Promise<boolean> {
+  const tutor = await getCurrentTutor();
+  if (!tutor) return false;
+
+  // Delete all existing weekly slots
+  const { error: deleteError } = await supabase
+    .from('tutor_weekly_slots')
+    .delete()
+    .eq('tutor_id', tutor.id);
+
+  if (deleteError) {
+    console.error('Error deleting existing slots:', deleteError);
+    return false;
+  }
+
+  // Generate new slots
+  const slotsToInsert: CreateWeeklySlotInput[] = [];
+
+  for (const dayOfWeek of workDays) {
+    for (let hour = workDayStart; hour < workDayEnd; hour++) {
+      slotsToInsert.push({
+        tutor_id: tutor.id,
+        day_of_week: dayOfWeek,
+        start_time: `${hour.toString().padStart(2, '0')}:00:00`,
+        duration_min: durationMin,
+        is_available: true
+      });
+    }
+  }
+
+  if (slotsToInsert.length === 0) {
+    return true; // No slots to insert
+  }
+
+  const { error: insertError } = await supabase
+    .from('tutor_weekly_slots')
+    .insert(slotsToInsert);
+
+  if (insertError) {
+    console.error('Error inserting slots:', insertError);
+    return false;
+  }
+
+  return true;
+}
+
 // =============================================
 // Lessons
 // =============================================
