@@ -788,6 +788,9 @@ function CalendarSettingsDialog({
   const [autoConfirm, setAutoConfirm] = useState(settings?.auto_confirm ?? true);
   const [allowStudentCancel, setAllowStudentCancel] = useState(settings?.allow_student_cancel ?? true);
   const [cancelNoticeHours, setCancelNoticeHours] = useState(settings?.cancel_notice_hours?.toString() || '24');
+  // Payment reminder settings
+  const [paymentReminderEnabled, setPaymentReminderEnabled] = useState(settings?.payment_reminder_enabled ?? false);
+  const [paymentReminderDelay, setPaymentReminderDelay] = useState(settings?.payment_reminder_delay_minutes?.toString() || '0');
   const [isSaving, setIsSaving] = useState(false);
 
   // Exception form
@@ -803,6 +806,8 @@ function CalendarSettingsDialog({
       setAutoConfirm(settings.auto_confirm);
       setAllowStudentCancel(settings.allow_student_cancel);
       setCancelNoticeHours(settings.cancel_notice_hours.toString());
+      setPaymentReminderEnabled(settings.payment_reminder_enabled ?? false);
+      setPaymentReminderDelay((settings.payment_reminder_delay_minutes ?? 0).toString());
     }
   }, [settings]);
 
@@ -817,6 +822,8 @@ function CalendarSettingsDialog({
         auto_confirm: autoConfirm,
         allow_student_cancel: allowStudentCancel,
         cancel_notice_hours: parseInt(cancelNoticeHours),
+        payment_reminder_enabled: paymentReminderEnabled,
+        payment_reminder_delay_minutes: parseInt(paymentReminderDelay),
       });
 
       if (result) {
@@ -946,6 +953,35 @@ function CalendarSettingsDialog({
               </div>
               <Switch checked={allowStudentCancel} onCheckedChange={setAllowStudentCancel} />
             </div>
+          </div>
+
+          {/* Payment Reminders */}
+          <div className="space-y-3 border-t pt-4">
+            <Label className="text-sm font-medium flex items-center gap-2">
+              💰 Напоминания об оплате
+            </Label>
+            <div className="flex items-center justify-between">
+              <div>
+                <Label className="text-sm">Напоминать об оплате в Telegram</Label>
+                <p className="text-xs text-muted-foreground">После завершения занятия</p>
+              </div>
+              <Switch checked={paymentReminderEnabled} onCheckedChange={setPaymentReminderEnabled} />
+            </div>
+            {paymentReminderEnabled && (
+              <div className="space-y-2">
+                <Label className="text-sm text-muted-foreground">Когда напоминать</Label>
+                <Select value={paymentReminderDelay} onValueChange={setPaymentReminderDelay}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="0">Сразу после занятия</SelectItem>
+                    <SelectItem value="5">Через 5 минут</SelectItem>
+                    <SelectItem value="15">Через 15 минут</SelectItem>
+                    <SelectItem value="30">Через 30 минут</SelectItem>
+                    <SelectItem value="60">Через 1 час</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
           </div>
 
           {/* Exceptions */}
@@ -1192,6 +1228,74 @@ function ReminderSettingsDialog({
 }
 
 // =============================================
+// Payment Onboarding Dialog
+// =============================================
+
+interface PaymentOnboardingDialogProps {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  onEnablePaymentReminders: () => void;
+}
+
+function PaymentOnboardingDialog({ open, onOpenChange, onEnablePaymentReminders }: PaymentOnboardingDialogProps) {
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            💰 Отслеживание оплаты
+          </DialogTitle>
+          <DialogDescription>
+            Новая функция для фиксации оплаты занятий
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="space-y-4 py-2">
+          <div className="flex items-start gap-3">
+            <div className="w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center text-blue-600 flex-shrink-0">
+              1
+            </div>
+            <div>
+              <p className="font-medium text-sm">Занятие завершилось</p>
+              <p className="text-sm text-muted-foreground">Бот спросит в Telegram о статусе оплаты</p>
+            </div>
+          </div>
+
+          <div className="flex items-start gap-3">
+            <div className="w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center text-blue-600 flex-shrink-0">
+              2
+            </div>
+            <div>
+              <p className="font-medium text-sm">Выберите статус</p>
+              <p className="text-sm text-muted-foreground">Оплачено, оплачено ранее или оплатит позже</p>
+            </div>
+          </div>
+
+          <div className="flex items-start gap-3">
+            <div className="w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center text-blue-600 flex-shrink-0">
+              3
+            </div>
+            <div>
+              <p className="font-medium text-sm">История сохраняется</p>
+              <p className="text-sm text-muted-foreground">Вся информация доступна в карточке занятия</p>
+            </div>
+          </div>
+        </div>
+
+        <DialogFooter className="flex-col sm:flex-row gap-2">
+          <Button variant="outline" onClick={() => onOpenChange(false)} className="w-full sm:w-auto">
+            Позже
+          </Button>
+          <Button onClick={onEnablePaymentReminders} className="w-full sm:w-auto">
+            Включить напоминания
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// =============================================
 // Main Schedule Component
 // =============================================
 
@@ -1220,6 +1324,29 @@ function TutorScheduleContent() {
   const [selectedMinute, setSelectedMinute] = useState<number>(0);
 
   const [copiedLink, setCopiedLink] = useState(false);
+
+  // Payment onboarding
+  const [paymentOnboardingOpen, setPaymentOnboardingOpen] = useState(false);
+
+  // Check if payment onboarding should be shown (once per tutor)
+  useEffect(() => {
+    if (tutor && calendarSettings !== null) {
+      const onboardingKey = `payment_onboarding_shown_${tutor.id}`;
+      const hasShown = localStorage.getItem(onboardingKey);
+      // Show onboarding only if not shown before and payment reminders are not yet enabled
+      if (!hasShown && !calendarSettings?.payment_reminder_enabled) {
+        setPaymentOnboardingOpen(true);
+        localStorage.setItem(onboardingKey, 'true');
+      }
+    }
+  }, [tutor, calendarSettings]);
+
+  const handleEnablePaymentReminders = useCallback(async () => {
+    await upsertCalendarSettings({ payment_reminder_enabled: true, payment_reminder_delay_minutes: 0 });
+    refetchCalendarSettings();
+    setPaymentOnboardingOpen(false);
+    toast.success('Напоминания об оплате включены!');
+  }, [refetchCalendarSettings]);
 
   // Sync settings to DB on initial load
   useEffect(() => {
@@ -1705,6 +1832,12 @@ function TutorScheduleContent() {
           exceptions={exceptions}
           onSuccess={() => refetchCalendarSettings()}
           onExceptionsChange={() => refetchExceptions()}
+        />
+
+        <PaymentOnboardingDialog
+          open={paymentOnboardingOpen}
+          onOpenChange={setPaymentOnboardingOpen}
+          onEnablePaymentReminders={handleEnablePaymentReminders}
         />
       </div>
     </TutorLayout>
