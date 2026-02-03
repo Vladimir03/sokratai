@@ -301,7 +301,8 @@ function TutorPaymentsContent() {
         {/* Таблица */}
         <Card>
           <ScrollArea className="h-[400px]">
-            <Table>
+            <div className="overflow-x-auto">
+              <Table className="min-w-[900px] [&_th]:whitespace-nowrap [&_td]:whitespace-nowrap">
               <TableHeader>
                 <TableRow>
                   <TableHead>Ученик</TableHead>
@@ -384,7 +385,8 @@ function TutorPaymentsContent() {
                   })
                 )}
               </TableBody>
-            </Table>
+              </Table>
+            </div>
           </ScrollArea>
         </Card>
         
