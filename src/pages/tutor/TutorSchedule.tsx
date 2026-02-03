@@ -815,7 +815,7 @@ function CalendarSettingsDialog({
   const handleSave = async () => {
     setIsSaving(true);
     try {
-      const result = await upsertCalendarSettings({
+      const { data, error } = await upsertCalendarSettings({
         default_duration: parseInt(defaultDuration),
         buffer_minutes: parseInt(bufferMinutes),
         min_notice_hours: parseInt(minNoticeHours),
@@ -827,12 +827,12 @@ function CalendarSettingsDialog({
         payment_reminder_delay_minutes: parseInt(paymentReminderDelay),
       });
 
-      if (result) {
+      if (data) {
         toast.success('Настройки сохранены');
         onSuccess();
         onOpenChange(false);
       } else {
-        toast.error('Не удалось сохранить');
+        toast.error(error ? `Не удалось сохранить: ${error}` : 'Не удалось сохранить');
       }
     } catch (err) {
       console.error(err);
@@ -1343,7 +1343,11 @@ function TutorScheduleContent() {
   }, [tutor, calendarSettings]);
 
   const handleEnablePaymentReminders = useCallback(async () => {
-    await upsertCalendarSettings({ payment_reminder_enabled: true, payment_reminder_delay_minutes: 0 });
+    const { error } = await upsertCalendarSettings({ payment_reminder_enabled: true, payment_reminder_delay_minutes: 0 });
+    if (error) {
+      toast.error(error ? `Не удалось включить напоминания: ${error}` : 'Не удалось включить напоминания');
+      return;
+    }
     refetchCalendarSettings();
     setPaymentOnboardingOpen(false);
     toast.success('Напоминания об оплате включены!');

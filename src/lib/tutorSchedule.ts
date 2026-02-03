@@ -421,25 +421,29 @@ interface UpdateCalendarSettingsInput {
 
 export async function upsertCalendarSettings(
   input: UpdateCalendarSettingsInput
-): Promise<TutorCalendarSettings | null> {
+): Promise<{ data: TutorCalendarSettings | null; error: string | null }> {
   const tutor = await getCurrentTutor();
-  if (!tutor) return null;
+  if (!tutor) {
+    return { data: null, error: 'Tutor profile not found' };
+  }
 
   const { data, error } = await supabase
     .from('tutor_calendar_settings')
     .upsert({
       tutor_id: tutor.id,
       ...input
+    }, {
+      onConflict: 'tutor_id'
     })
     .select()
     .single();
 
   if (error) {
     console.error('Error upserting calendar settings:', error);
-    return null;
+    return { data: null, error: error.message };
   }
 
-  return data as TutorCalendarSettings;
+  return { data: data as TutorCalendarSettings, error: null };
 }
 
 // =============================================
