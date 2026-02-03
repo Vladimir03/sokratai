@@ -33,7 +33,8 @@ import {
   upsertCalendarSettings,
   createAvailabilityException,
   deleteAvailabilityException,
-  rescheduleLesson
+  rescheduleLesson,
+  syncWorkHoursToSlots
 } from '@/lib/tutorSchedule';
 import type { TutorWeeklySlot, TutorLessonWithStudent, TutorStudentWithProfile, TutorReminderSettings, TutorCalendarSettings, TutorAvailabilityException } from '@/types/tutor';
 
@@ -68,8 +69,14 @@ function loadSettings(): ScheduleSettings {
   }
 }
 
-function saveSettings(settings: ScheduleSettings) {
+async function saveSettings(settings: ScheduleSettings) {
   localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
+  // Sync to database for booking system
+  await syncWorkHoursToSlots(
+    settings.workDays,
+    settings.workDayStart,
+    settings.workDayEnd
+  );
 }
 
 function getWeekStart(date: Date): Date {
@@ -1203,6 +1210,15 @@ function TutorScheduleContent() {
   const [selectedMinute, setSelectedMinute] = useState<number>(0);
 
   const [copiedLink, setCopiedLink] = useState(false);
+
+  // Sync settings to DB on initial load
+  useEffect(() => {
+    syncWorkHoursToSlots(
+      scheduleSettings.workDays,
+      scheduleSettings.workDayStart,
+      scheduleSettings.workDayEnd
+    );
+  }, []); // Only on mount
 
   const loading = slotsLoading || lessonsLoading;
 
