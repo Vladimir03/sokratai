@@ -6,6 +6,8 @@ import { Send, Loader2, CheckCircle, RefreshCw, ExternalLink } from "lucide-reac
 import { toast } from "sonner";
 import { isIOS } from "@/hooks/use-mobile";
 
+const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
 interface TelegramLoginButtonProps {
   botName?: string;
   className?: string;
@@ -54,7 +56,16 @@ const TelegramLoginButton = ({
           try {
             const { data: { user } } = await supabase.auth.getUser();
             if (user) {
-              const { data: isTutor } = await supabase.rpc("is_tutor", { _user_id: user.id });
+              let isTutor = false;
+              for (let attempt = 0; attempt < 3; attempt++) {
+                const { data, error } = await supabase.rpc("is_tutor", { _user_id: user.id });
+                if (!error && data) {
+                  isTutor = true;
+                  break;
+                }
+                await wait(300);
+              }
+
               if (isTutor) {
                 navigate("/tutor/dashboard");
               } else {

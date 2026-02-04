@@ -6,6 +6,8 @@ import { Send, Loader2, CheckCircle, RefreshCw, ExternalLink } from "lucide-reac
 import { toast } from "sonner";
 import { isIOS } from "@/hooks/use-mobile";
 
+const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
 interface TutorTelegramLoginButtonProps {
   botName?: string;
   className?: string;
@@ -49,9 +51,34 @@ const TutorTelegramLoginButton = ({
         setStatus("success");
         toast.success("Успешный вход через Telegram!");
         
-        // Always redirect to tutor dashboard for tutor registration
-        setTimeout(() => {
-          navigate("/tutor/dashboard");
+        // Ensure tutor role is available before redirect
+        setTimeout(async () => {
+          try {
+            const { data: { user } } = await supabase.auth.getUser();
+            if (!user) {
+              toast.error("Не удалось получить пользователя. Попробуйте войти снова.");
+              return;
+            }
+
+            let isTutor = false;
+            for (let attempt = 0; attempt < 5; attempt++) {
+              const { data, error } = await supabase.rpc("is_tutor", { _user_id: user.id });
+              if (!error && data) {
+                isTutor = true;
+                break;
+              }
+              await wait(500);
+            }
+
+            if (isTutor) {
+              navigate("/tutor/dashboard");
+            } else {
+              toast.error("Не удалось подтвердить роль репетитора. Попробуйте снова или войдите по email.");
+            }
+          } catch (error) {
+            console.error("Tutor role check error:", error);
+            toast.error("Ошибка проверки роли. Попробуйте ещё раз.");
+          }
         }, 500);
         
         return true;

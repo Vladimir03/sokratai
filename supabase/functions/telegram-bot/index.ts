@@ -802,35 +802,57 @@ async function handleWebLogin(telegramUserId: number, telegramUsername: string |
       return;
     }
 
-    // Check if this is a new user and intended_role is 'tutor'
+    // Ensure tutor role and profile when intended_role is 'tutor'
     if (tokenData.intended_role === 'tutor') {
-      // Check if user was created within the last 5 minutes (new user via Telegram)
-      const profileCreatedAt = new Date(profile.created_at);
-      const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000);
-      const isNewUser = profileCreatedAt > fiveMinutesAgo;
-      
-      console.log("Tutor role check:", { isNewUser, profileCreatedAt, intended_role: tokenData.intended_role });
-      
-      if (isNewUser) {
-        // Check if user already has tutor role
-        const { data: existingRole } = await supabase
+      console.log("Tutor role ensure:", { intended_role: tokenData.intended_role });
+
+      // Ensure tutor role exists
+      const { data: existingRole } = await supabase
+        .from("user_roles")
+        .select("id")
+        .eq("user_id", profile.id)
+        .eq("role", "tutor")
+        .maybeSingle();
+
+      if (!existingRole) {
+        const { error: roleError } = await supabase
           .from("user_roles")
-          .select("id")
-          .eq("user_id", profile.id)
-          .eq("role", "tutor")
-          .maybeSingle();
-        
-        if (!existingRole) {
-          // Assign tutor role
-          const { error: roleError } = await supabase
-            .from("user_roles")
-            .insert({ user_id: profile.id, role: "tutor" });
-          
-          if (roleError) {
-            console.error("Failed to assign tutor role:", roleError);
-          } else {
-            console.log("Tutor role assigned to new user:", profile.id);
-          }
+          .insert({ user_id: profile.id, role: "tutor" });
+
+        if (roleError) {
+          console.error("Failed to assign tutor role:", roleError);
+        } else {
+          console.log("Tutor role assigned:", profile.id);
+        }
+      }
+
+      // Ensure tutor profile exists
+      const { data: existingTutor } = await supabase
+        .from("tutors")
+        .select("id")
+        .eq("user_id", profile.id)
+        .maybeSingle();
+
+      if (!existingTutor) {
+        const tutorName = profile.username
+          || (telegramUsername ? `@${telegramUsername}` : null)
+          || "Репетитор";
+        const bookingLink = `tutor-${profile.id.substring(0, 8)}`;
+
+        const { error: tutorError } = await supabase
+          .from("tutors")
+          .insert({
+            user_id: profile.id,
+            name: tutorName,
+            booking_link: bookingLink,
+            telegram_id: String(telegramUserId),
+            telegram_username: telegramUsername,
+          });
+
+        if (tutorError) {
+          console.error("Failed to create tutor profile:", tutorError);
+        } else {
+          console.log("Tutor profile created:", profile.id);
         }
       }
     }
