@@ -56,3 +56,6 @@ verify_jwt = false
 
 [functions.tutor-manual-add-student]
 verify_jwt = true
+
+[functions.tutor-update-student]
+verify_jwt = true
