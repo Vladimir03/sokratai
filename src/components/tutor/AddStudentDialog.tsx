@@ -5,6 +5,7 @@ import {
   DialogContent,
   DialogHeader,
   DialogTitle,
+  DialogDescription,
 } from '@/components/ui/dialog';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
@@ -18,6 +19,13 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import {
+  Accordion,
+  AccordionContent,
+  AccordionItem,
+  AccordionTrigger,
+} from '@/components/ui/accordion';
+import { ScrollArea } from '@/components/ui/scroll-area';
 import { Copy, ExternalLink, Check, Loader2, Link, UserPlus } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { manualAddTutorStudent } from '@/lib/tutors';
@@ -43,7 +51,11 @@ export function AddStudentDialog({
   const { toast } = useToast();
   const [copied, setCopied] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  
+
+  // Learning goal preset state
+  const [learningGoalPreset, setLearningGoalPreset] = useState<string>('');
+  const [learningGoalOther, setLearningGoalOther] = useState<string>('');
+
   // Form state for manual add
   const [formData, setFormData] = useState<ManualAddTutorStudentInput>({
     name: '',
@@ -86,7 +98,11 @@ export function AddStudentDialog({
 
   const handleManualSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    
+
+    // Determine learning goal from preset or custom input
+    const learningGoal =
+      learningGoalPreset === 'other' ? learningGoalOther : learningGoalPreset;
+
     // Validate required fields
     if (!formData.name.trim()) {
       toast({ title: 'Введите имя ученика', variant: 'destructive' });
@@ -96,8 +112,12 @@ export function AddStudentDialog({
       toast({ title: 'Введите Telegram username', variant: 'destructive' });
       return;
     }
-    if (!formData.learning_goal.trim()) {
-      toast({ title: 'Введите цель обучения', variant: 'destructive' });
+    if (!learningGoal.trim()) {
+      toast({ title: 'Выберите цель занятий', variant: 'destructive' });
+      return;
+    }
+    if (learningGoalPreset === 'other' && !learningGoalOther.trim()) {
+      toast({ title: 'Опишите цель занятий', variant: 'destructive' });
       return;
     }
 
@@ -105,14 +125,15 @@ export function AddStudentDialog({
     try {
       const response = await manualAddTutorStudent({
         ...formData,
+        learning_goal: learningGoal,
         telegram_username: formData.telegram_username.replace('@', '').trim(),
       });
-      
+
       toast({
         title: 'Ученик добавлен',
         description: `${formData.name} успешно добавлен`,
       });
-      
+
       // Reset form
       setFormData({
         name: '',
@@ -126,7 +147,9 @@ export function AddStudentDialog({
         notes: '',
         parent_contact: '',
       });
-      
+      setLearningGoalPreset('');
+      setLearningGoalOther('');
+
       onOpenChange(false);
       onManualAdded(response.tutor_student_id);
     } catch (error) {
@@ -142,7 +165,7 @@ export function AddStudentDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-md">
+      <DialogContent className="sm:max-w-2xl">
         <DialogHeader>
           <DialogTitle>Добавить ученика</DialogTitle>
         </DialogHeader>
@@ -212,154 +235,214 @@ export function AddStudentDialog({
           
           {/* Tab: Manual */}
           <TabsContent value="manual" className="mt-4">
-            <form onSubmit={handleManualSubmit} className="space-y-4">
-              {/* Required fields */}
-              <div className="space-y-3">
-                <div>
-                  <Label htmlFor="name">Имя ученика *</Label>
-                  <Input
-                    id="name"
-                    placeholder="Иван Петров"
-                    value={formData.name}
-                    onChange={(e) => handleFormChange('name', e.target.value)}
-                    required
-                  />
-                </div>
-                
-                <div>
-                  <Label htmlFor="telegram_username">Telegram username *</Label>
-                  <Input
-                    id="telegram_username"
-                    placeholder="@username"
-                    value={formData.telegram_username}
-                    onChange={(e) => handleFormChange('telegram_username', e.target.value)}
-                    required
-                  />
-                </div>
-                
-                <div>
-                  <Label htmlFor="learning_goal">Цель обучения *</Label>
-                  <Input
-                    id="learning_goal"
-                    placeholder="Подготовка к ЕГЭ"
-                    value={formData.learning_goal}
-                    onChange={(e) => handleFormChange('learning_goal', e.target.value)}
-                    required
-                  />
-                </div>
-              </div>
-              
-              {/* Optional fields */}
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <Label htmlFor="grade">Класс</Label>
-                  <Select
-                    value={formData.grade?.toString() || ''}
-                    onValueChange={(v) => handleFormChange('grade', v ? parseInt(v) : undefined)}
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Выберите" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {[5, 6, 7, 8, 9, 10, 11].map((g) => (
-                        <SelectItem key={g} value={g.toString()}>
-                          {g} класс
+            <DialogDescription className="mb-4">
+              Заполните данные ученика. Обязательные поля отмечены.
+            </DialogDescription>
+
+            <ScrollArea className="h-[60vh] pr-4">
+              <form onSubmit={handleManualSubmit} className="space-y-6 py-2">
+                <div className="grid gap-4 md:grid-cols-2">
+                  <div className="space-y-2">
+                    <Label htmlFor="name">Имя ученика</Label>
+                    <Input
+                      id="name"
+                      value={formData.name}
+                      onChange={(e) => handleFormChange('name', e.target.value)}
+                      placeholder="Например, Иван"
+                      required
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="telegram_username">Telegram username</Label>
+                    <Input
+                      id="telegram_username"
+                      value={formData.telegram_username}
+                      onChange={(e) =>
+                        handleFormChange('telegram_username', e.target.value)
+                      }
+                      placeholder="@username"
+                      required
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label>Цель занятий</Label>
+                    <Select
+                      value={learningGoalPreset || undefined}
+                      onValueChange={(value) => setLearningGoalPreset(value)}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Выберите цель" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="ЕГЭ">ЕГЭ</SelectItem>
+                        <SelectItem value="ОГЭ">ОГЭ</SelectItem>
+                        <SelectItem value="Школьная программа">
+                          Школьная программа
                         </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                        <SelectItem value="Олимпиада">Олимпиада</SelectItem>
+                        <SelectItem value="other">Другое</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  {learningGoalPreset === 'other' && (
+                    <div className="space-y-2">
+                      <Label htmlFor="learningGoalOther">Опишите цель</Label>
+                      <Input
+                        id="learningGoalOther"
+                        value={learningGoalOther}
+                        onChange={(e) => setLearningGoalOther(e.target.value)}
+                        placeholder="Например, подготовка к олимпиаде"
+                        required
+                      />
+                    </div>
+                  )}
                 </div>
-                
-                <div>
-                  <Label htmlFor="exam_type">Экзамен</Label>
-                  <Select
-                    value={formData.exam_type || ''}
-                    onValueChange={(v) => handleFormChange('exam_type', v || undefined)}
+
+                <Accordion type="single" collapsible>
+                  <AccordionItem value="optional">
+                    <AccordionTrigger>Дополнительные данные</AccordionTrigger>
+                    <AccordionContent>
+                      <div className="grid gap-4 md:grid-cols-2">
+                        <div className="space-y-2">
+                          <Label htmlFor="parent_contact">Контакт родителя</Label>
+                          <Input
+                            id="parent_contact"
+                            value={formData.parent_contact || ''}
+                            onChange={(e) =>
+                              handleFormChange(
+                                'parent_contact',
+                                e.target.value || undefined
+                              )
+                            }
+                            placeholder="+7 999 123-45-67 или @telegram"
+                          />
+                        </div>
+
+                        <div className="space-y-2">
+                          <Label htmlFor="grade">Класс</Label>
+                          <Input
+                            id="grade"
+                            type="number"
+                            min={1}
+                            max={11}
+                            value={formData.grade ?? ''}
+                            onChange={(e) =>
+                              handleFormChange(
+                                'grade',
+                                e.target.value ? parseInt(e.target.value) : undefined
+                              )
+                            }
+                            placeholder="Например, 10"
+                          />
+                        </div>
+
+                        <div className="space-y-2">
+                          <Label>Экзамен</Label>
+                          <Select
+                            value={formData.exam_type || undefined}
+                            onValueChange={(value) =>
+                              handleFormChange(
+                                'exam_type',
+                                value as 'ege' | 'oge' | undefined
+                              )
+                            }
+                          >
+                            <SelectTrigger>
+                              <SelectValue placeholder="Не выбран" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="ege">ЕГЭ</SelectItem>
+                              <SelectItem value="oge">ОГЭ</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+
+                        <div className="space-y-2">
+                          <Label htmlFor="subject">Предмет</Label>
+                          <Input
+                            id="subject"
+                            value={formData.subject || ''}
+                            onChange={(e) =>
+                              handleFormChange(
+                                'subject',
+                                e.target.value || undefined
+                              )
+                            }
+                            placeholder="Математика"
+                          />
+                        </div>
+
+                        <div className="space-y-2">
+                          <Label htmlFor="start_score">Стартовый балл</Label>
+                          <Input
+                            id="start_score"
+                            type="number"
+                            min={0}
+                            max={100}
+                            value={formData.start_score ?? ''}
+                            onChange={(e) =>
+                              handleFormChange(
+                                'start_score',
+                                e.target.value ? parseInt(e.target.value) : undefined
+                              )
+                            }
+                            placeholder="Например, 50"
+                          />
+                        </div>
+
+                        <div className="space-y-2">
+                          <Label htmlFor="target_score">Целевой балл</Label>
+                          <Input
+                            id="target_score"
+                            type="number"
+                            min={0}
+                            max={100}
+                            value={formData.target_score ?? ''}
+                            onChange={(e) =>
+                              handleFormChange(
+                                'target_score',
+                                e.target.value ? parseInt(e.target.value) : undefined
+                              )
+                            }
+                            placeholder="Например, 85"
+                          />
+                        </div>
+                      </div>
+
+                      <div className="space-y-2 mt-4">
+                        <Label htmlFor="notes">Заметки</Label>
+                        <Textarea
+                          id="notes"
+                          value={formData.notes || ''}
+                          onChange={(e) =>
+                            handleFormChange('notes', e.target.value || undefined)
+                          }
+                          placeholder="Дополнительные детали о ученике"
+                          rows={3}
+                        />
+                      </div>
+                    </AccordionContent>
+                  </AccordionItem>
+                </Accordion>
+
+                <div className="flex justify-end gap-2">
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    onClick={() => onOpenChange(false)}
+                    disabled={isSubmitting}
                   >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Выберите" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="ege">ЕГЭ</SelectItem>
-                      <SelectItem value="oge">ОГЭ</SelectItem>
-                    </SelectContent>
-                  </Select>
+                    Отмена
+                  </Button>
+                  <Button type="submit" disabled={isSubmitting}>
+                    {isSubmitting ? 'Сохранение...' : 'Сохранить'}
+                  </Button>
                 </div>
-              </div>
-              
-              <div>
-                <Label htmlFor="subject">Предмет</Label>
-                <Input
-                  id="subject"
-                  placeholder="Математика"
-                  value={formData.subject || ''}
-                  onChange={(e) => handleFormChange('subject', e.target.value || undefined)}
-                />
-              </div>
-              
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <Label htmlFor="start_score">Начальный балл</Label>
-                  <Input
-                    id="start_score"
-                    type="number"
-                    min={0}
-                    max={100}
-                    placeholder="0"
-                    value={formData.start_score ?? ''}
-                    onChange={(e) => handleFormChange('start_score', e.target.value ? parseInt(e.target.value) : undefined)}
-                  />
-                </div>
-                
-                <div>
-                  <Label htmlFor="target_score">Целевой балл</Label>
-                  <Input
-                    id="target_score"
-                    type="number"
-                    min={0}
-                    max={100}
-                    placeholder="100"
-                    value={formData.target_score ?? ''}
-                    onChange={(e) => handleFormChange('target_score', e.target.value ? parseInt(e.target.value) : undefined)}
-                  />
-                </div>
-              </div>
-              
-              <div>
-                <Label htmlFor="parent_contact">Контакт родителя</Label>
-                <Input
-                  id="parent_contact"
-                  placeholder="+7 999 123-45-67 или @username"
-                  value={formData.parent_contact || ''}
-                  onChange={(e) => handleFormChange('parent_contact', e.target.value || undefined)}
-                />
-              </div>
-              
-              <div>
-                <Label htmlFor="notes">Заметки</Label>
-                <Textarea
-                  id="notes"
-                  placeholder="Дополнительная информация..."
-                  value={formData.notes || ''}
-                  onChange={(e) => handleFormChange('notes', e.target.value || undefined)}
-                  rows={2}
-                />
-              </div>
-              
-              <Button type="submit" className="w-full" disabled={isSubmitting}>
-                {isSubmitting ? (
-                  <>
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    Добавление...
-                  </>
-                ) : (
-                  <>
-                    <UserPlus className="mr-2 h-4 w-4" />
-                    Добавить ученика
-                  </>
-                )}
-              </Button>
-            </form>
+              </form>
+            </ScrollArea>
           </TabsContent>
         </Tabs>
       </DialogContent>
