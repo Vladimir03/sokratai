@@ -1,6 +1,6 @@
 import { useState, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { ArrowLeft, Save, Plus, Trash2, MessageSquare, ChevronRight } from 'lucide-react';
+import { ArrowLeft, Save, Plus, Trash2, MessageSquare, ChevronRight, Edit } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -13,6 +13,8 @@ import { Label } from '@/components/ui/label';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { toast } from 'sonner';
 import TutorGuard from '@/components/TutorGuard';
 import { TutorLayout } from '@/components/tutor/TutorLayout';
@@ -26,7 +28,8 @@ import {
   updateTutorStudent, 
   createMockExam, 
   deleteMockExam,
-  removeStudentFromTutor
+  removeStudentFromTutor,
+  updateTutorStudentProfile
 } from '@/lib/tutors';
 import { 
   formatRelativeTime, 
@@ -61,6 +64,21 @@ function TutorStudentProfileContent() {
   const [selectedChatId, setSelectedChatId] = useState<string | null>(null);
   const [deleteStudentOpen, setDeleteStudentOpen] = useState(false);
   const [isDeletingStudent, setIsDeletingStudent] = useState(false);
+  const [editStudentOpen, setEditStudentOpen] = useState(false);
+  const [isUpdatingStudent, setIsUpdatingStudent] = useState(false);
+  const [editFormInitialized, setEditFormInitialized] = useState(false);
+
+  const [editName, setEditName] = useState('');
+  const [editTelegram, setEditTelegram] = useState('');
+  const [editLearningGoalPreset, setEditLearningGoalPreset] = useState('');
+  const [editLearningGoalOther, setEditLearningGoalOther] = useState('');
+  const [editParentContact, setEditParentContact] = useState('');
+  const [editGrade, setEditGrade] = useState('');
+  const [editExamType, setEditExamType] = useState<'ege' | 'oge' | ''>('');
+  const [editSubject, setEditSubject] = useState('');
+  const [editStartScore, setEditStartScore] = useState('');
+  const [editTargetScore, setEditTargetScore] = useState('');
+  const [editNotes, setEditNotes] = useState('');
   
   // Инициализация полей при загрузке студента
   if (student && !notesInitialized) {
@@ -68,6 +86,25 @@ function TutorStudentProfileContent() {
     setParentContact(student.parent_contact || '');
     setLastLessonAt(student.last_lesson_at || '');
     setNotesInitialized(true);
+  }
+
+  if (student && !editFormInitialized) {
+    const learningGoal = student.profiles?.learning_goal || '';
+    const presetOptions = ['ЕГЭ', 'ОГЭ', 'Школьная программа', 'Олимпиада'];
+    const isPreset = presetOptions.includes(learningGoal);
+
+    setEditName(student.profiles?.username || '');
+    setEditTelegram(student.profiles?.telegram_username || '');
+    setEditLearningGoalPreset(isPreset ? learningGoal : learningGoal ? 'other' : '');
+    setEditLearningGoalOther(isPreset ? '' : learningGoal);
+    setEditParentContact(student.parent_contact || '');
+    setEditGrade(student.profiles?.grade ? String(student.profiles.grade) : '');
+    setEditExamType(student.exam_type || '');
+    setEditSubject(student.subject || '');
+    setEditStartScore(student.start_score ? String(student.start_score) : '');
+    setEditTargetScore(student.target_score ? String(student.target_score) : '');
+    setEditNotes(student.notes || '');
+    setEditFormInitialized(true);
   }
   
   // Сохранение изменений
@@ -110,6 +147,74 @@ function TutorStudentProfileContent() {
       setDeleteStudentOpen(false);
     }
   }, [navigate, tutorStudentId]);
+
+  const handleUpdateStudent = useCallback(async () => {
+    if (!tutorStudentId) return;
+    const name = editName.trim();
+    const telegramUsername = editTelegram.trim();
+    const learningGoal = editLearningGoalPreset === 'other'
+      ? editLearningGoalOther.trim()
+      : editLearningGoalPreset.trim();
+
+    if (!name) {
+      toast.error('Укажите имя ученика');
+      return;
+    }
+
+    if (!telegramUsername) {
+      toast.error('Укажите Telegram username');
+      return;
+    }
+
+    if (!learningGoal) {
+      toast.error('Укажите цель занятий');
+      return;
+    }
+
+    const grade = editGrade ? Number(editGrade) : undefined;
+    const startScore = editStartScore ? Number(editStartScore) : undefined;
+    const targetScore = editTargetScore ? Number(editTargetScore) : undefined;
+
+    setIsUpdatingStudent(true);
+    try {
+      await updateTutorStudentProfile({
+        tutor_student_id: tutorStudentId,
+        name,
+        telegram_username: telegramUsername,
+        learning_goal: learningGoal,
+        grade: Number.isFinite(grade) ? grade : undefined,
+        exam_type: editExamType || undefined,
+        subject: editSubject.trim() || undefined,
+        start_score: Number.isFinite(startScore) ? startScore : undefined,
+        target_score: Number.isFinite(targetScore) ? targetScore : undefined,
+        parent_contact: editParentContact.trim() || undefined,
+        notes: editNotes.trim() || undefined,
+      });
+      toast.success('Данные ученика обновлены');
+      setEditStudentOpen(false);
+      setEditFormInitialized(false);
+      refetch();
+    } catch (error: any) {
+      console.error('Error updating student:', error);
+      toast.error(error.message || 'Не удалось обновить ученика');
+    } finally {
+      setIsUpdatingStudent(false);
+    }
+  }, [
+    tutorStudentId,
+    editName,
+    editTelegram,
+    editLearningGoalPreset,
+    editLearningGoalOther,
+    editGrade,
+    editExamType,
+    editSubject,
+    editStartScore,
+    editTargetScore,
+    editParentContact,
+    editNotes,
+    refetch,
+  ]);
   
   // Загрузка
   if (loading) {
@@ -161,6 +266,13 @@ function TutorStudentProfileContent() {
             <ArrowLeft className="h-5 w-5" />
           </Button>
           <h1 className="text-2xl font-bold flex-1">Профиль ученика</h1>
+          <Button
+            variant="outline"
+            onClick={() => setEditStudentOpen(true)}
+          >
+            <Edit className="h-4 w-4 mr-2" />
+            Редактировать
+          </Button>
           <Button
             variant="destructive"
             onClick={() => setDeleteStudentOpen(true)}
@@ -435,6 +547,186 @@ function TutorStudentProfileContent() {
                 {isDeletingStudent ? 'Удаление...' : 'Удалить'}
               </Button>
             </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        <Dialog open={editStudentOpen} onOpenChange={setEditStudentOpen}>
+          <DialogContent className="max-w-2xl flex flex-col">
+            <DialogHeader>
+              <DialogTitle>Редактировать ученика</DialogTitle>
+              <DialogDescription>
+                Обновите данные ученика. Обязательные поля отмечены.
+              </DialogDescription>
+            </DialogHeader>
+
+            <ScrollArea className="h-[70vh] pr-4">
+              <div className="space-y-6 py-4">
+                <div className="grid gap-4 md:grid-cols-2">
+                  <div className="space-y-2">
+                    <Label htmlFor="editName">Имя ученика</Label>
+                    <Input
+                      id="editName"
+                      value={editName}
+                      onChange={(e) => setEditName(e.target.value)}
+                      placeholder="Например, Лера"
+                      required
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="editTelegram">Telegram username</Label>
+                    <Input
+                      id="editTelegram"
+                      value={editTelegram}
+                      onChange={(e) => setEditTelegram(e.target.value)}
+                      placeholder="@username"
+                      required
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label>Цель занятий</Label>
+                    <Select
+                      value={editLearningGoalPreset || undefined}
+                      onValueChange={(value) => setEditLearningGoalPreset(value)}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Выберите цель" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="ЕГЭ">ЕГЭ</SelectItem>
+                        <SelectItem value="ОГЭ">ОГЭ</SelectItem>
+                        <SelectItem value="Школьная программа">Школьная программа</SelectItem>
+                        <SelectItem value="Олимпиада">Олимпиада</SelectItem>
+                        <SelectItem value="other">Другое</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  {editLearningGoalPreset === 'other' && (
+                    <div className="space-y-2">
+                      <Label htmlFor="editLearningGoalOther">Опишите цель</Label>
+                      <Input
+                        id="editLearningGoalOther"
+                        value={editLearningGoalOther}
+                        onChange={(e) => setEditLearningGoalOther(e.target.value)}
+                        placeholder="Например, подготовка к ЕГЭ"
+                        required
+                      />
+                    </div>
+                  )}
+                </div>
+
+                <Accordion type="single" collapsible>
+                  <AccordionItem value="optional">
+                    <AccordionTrigger>Дополнительные данные</AccordionTrigger>
+                    <AccordionContent>
+                      <div className="grid gap-4 md:grid-cols-2">
+                        <div className="space-y-2">
+                          <Label htmlFor="editParentContact">Контакт родителя</Label>
+                          <Input
+                            id="editParentContact"
+                            value={editParentContact}
+                            onChange={(e) => setEditParentContact(e.target.value)}
+                            placeholder="+7 999 123-45-67 или @telegram"
+                          />
+                        </div>
+
+                        <div className="space-y-2">
+                          <Label htmlFor="editGrade">Класс</Label>
+                          <Input
+                            id="editGrade"
+                            type="number"
+                            min={1}
+                            max={11}
+                            value={editGrade}
+                            onChange={(e) => setEditGrade(e.target.value)}
+                            placeholder="Например, 10"
+                          />
+                        </div>
+
+                        <div className="space-y-2">
+                          <Label>Экзамен</Label>
+                          <Select
+                            value={editExamType || undefined}
+                            onValueChange={(value) => setEditExamType(value as 'ege' | 'oge' | '')}
+                          >
+                            <SelectTrigger>
+                              <SelectValue placeholder="Не выбран" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="ege">ЕГЭ</SelectItem>
+                              <SelectItem value="oge">ОГЭ</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+
+                        <div className="space-y-2">
+                          <Label htmlFor="editSubject">Предмет</Label>
+                          <Input
+                            id="editSubject"
+                            value={editSubject}
+                            onChange={(e) => setEditSubject(e.target.value)}
+                            placeholder="Математика"
+                          />
+                        </div>
+
+                        <div className="space-y-2">
+                          <Label htmlFor="editStartScore">Стартовый балл</Label>
+                          <Input
+                            id="editStartScore"
+                            type="number"
+                            min={0}
+                            max={100}
+                            value={editStartScore}
+                            onChange={(e) => setEditStartScore(e.target.value)}
+                            placeholder="Например, 50"
+                          />
+                        </div>
+
+                        <div className="space-y-2">
+                          <Label htmlFor="editTargetScore">Целевой балл</Label>
+                          <Input
+                            id="editTargetScore"
+                            type="number"
+                            min={0}
+                            max={100}
+                            value={editTargetScore}
+                            onChange={(e) => setEditTargetScore(e.target.value)}
+                            placeholder="Например, 85"
+                          />
+                        </div>
+                      </div>
+
+                      <div className="space-y-2 mt-4">
+                        <Label htmlFor="editNotes">Заметки</Label>
+                        <Textarea
+                          id="editNotes"
+                          value={editNotes}
+                          onChange={(e) => setEditNotes(e.target.value)}
+                          placeholder="Дополнительные детали о ученике"
+                          rows={3}
+                        />
+                      </div>
+                    </AccordionContent>
+                  </AccordionItem>
+                </Accordion>
+
+                <div className="flex justify-end gap-2">
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    onClick={() => setEditStudentOpen(false)}
+                    disabled={isUpdatingStudent}
+                  >
+                    Отмена
+                  </Button>
+                  <Button type="button" onClick={handleUpdateStudent} disabled={isUpdatingStudent}>
+                    {isUpdatingStudent ? 'Сохранение...' : 'Сохранить'}
+                  </Button>
+                </div>
+              </div>
+            </ScrollArea>
           </DialogContent>
         </Dialog>
       </div>

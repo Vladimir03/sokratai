@@ -363,7 +363,7 @@ function TutorStudentsContent() {
             }
           }}
         >
-          <DialogContent className="max-w-2xl">
+          <DialogContent className="max-w-2xl flex flex-col">
             <DialogHeader>
               <DialogTitle>Добавить ученика</DialogTitle>
               <DialogDescription>
@@ -377,8 +377,8 @@ function TutorStudentsContent() {
                 <TabsTrigger value="manual">Вручную</TabsTrigger>
               </TabsList>
 
-              <TabsContent value="invite">
-                <ScrollArea className="max-h-[70vh] pr-4">
+              <TabsContent value="invite" className="min-h-0">
+                <ScrollArea className="h-[70vh] pr-4">
                   <div className="space-y-6 py-4">
                   {/* QR Code */}
                   {inviteWebLink && (
@@ -435,8 +435,8 @@ function TutorStudentsContent() {
                 </ScrollArea>
               </TabsContent>
 
-              <TabsContent value="manual">
-                <ScrollArea className="max-h-[70vh] pr-4">
+              <TabsContent value="manual" className="min-h-0">
+                <ScrollArea className="h-[70vh] pr-4">
                   <form onSubmit={handleManualSubmit} className="space-y-6 py-4">
                     <div className="flex justify-between items-center">
                       <Button
