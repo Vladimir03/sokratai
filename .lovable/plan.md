@@ -1,137 +1,118 @@
 
 
-# План: Создание Edge Function `tutor-update-student`
+# План: Создание компонента AddStudentDialog
 
-## Описание
+## Проблема
 
-Новая Edge Function для редактирования профиля ученика репетитором. Нужна потому что:
-- Таблица `profiles` имеет RLS, ограничивающий редактирование только самим пользователем
-- Репетитору нужен доступ через `service_role` для изменения данных ученика
-
-## Что нужно сделать
-
-### 1. Создать Edge Function
-
-Файл: `supabase/functions/tutor-update-student/index.ts`
-
-Принимает:
-| Поле | Тип | Описание |
-|------|-----|----------|
-| `tutor_student_id` | string | ID связи репетитор-ученик |
-| `name` | string | Имя ученика (→ profiles.username) |
-| `telegram_username` | string | Telegram username |
-| `learning_goal` | string | Цель обучения |
-| `grade` | number? | Класс |
-| `exam_type` | string? | ege / oge |
-| `subject` | string? | Предмет |
-| `start_score` | number? | Начальный балл |
-| `target_score` | number? | Целевой балл |
-| `parent_contact` | string? | Контакт родителя |
-| `notes` | string? | Заметки |
-
-Логика:
-1. Проверить JWT и получить user_id
-2. Проверить, что tutor_student принадлежит этому репетитору
-3. Обновить `profiles` через service_role (username, telegram_username, learning_goal, grade)
-4. Обновить `tutor_students` (exam_type, subject, start_score, target_score, parent_contact, notes)
-
-### 2. Добавить конфиг
-
-В `supabase/config.toml`:
-```toml
-[functions.tutor-update-student]
-verify_jwt = true
+Build ошибки в `TutorStudents.tsx` и `TutorDashboard.tsx`:
+```
+Cannot find module '@/components/tutor/AddStudentDialog'
 ```
 
-### 3. Добавить типы
+Компонент упоминается в коде, но файл не существует в директории `src/components/tutor/`.
 
-В `src/types/tutor.ts` добавить:
+## Решение
+
+Создать компонент `AddStudentDialog.tsx` с двумя вкладками:
+1. **По ссылке** — QR-код и копирование инвайт-ссылки
+2. **Вручную** — форма для ручного добавления ученика
+
+## Интерфейс компонента
+
+На основе использования в `TutorStudents.tsx` и `TutorDashboard.tsx`:
+
 ```typescript
-export interface UpdateTutorStudentProfileInput {
-  tutor_student_id: string;
-  name: string;
-  telegram_username: string;
-  learning_goal: string;
-  grade?: number;
-  exam_type?: 'ege' | 'oge';
-  subject?: string;
-  start_score?: number;
-  target_score?: number;
-  parent_contact?: string;
-  notes?: string;
-}
-
-export interface UpdateTutorStudentProfileResponse {
-  success: boolean;
+interface AddStudentDialogProps {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  inviteCode: string | undefined;
+  inviteWebLink: string;
+  inviteTelegramLink: string;
+  onManualAdded: (tutorStudentId: string) => void;
 }
 ```
 
-### 4. Добавить клиентскую функцию
+## Структура компонента
 
-В `src/lib/tutors.ts`:
-```typescript
-export async function updateTutorStudentProfile(
-  input: UpdateTutorStudentProfileInput
-): Promise<boolean> {
-  const { data: { session } } = await supabase.auth.getSession();
-  if (!session) return false;
-
-  const response = await fetch(
-    `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/tutor-update-student`,
-    {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${session.access_token}`,
-      },
-      body: JSON.stringify(input),
-    }
-  );
-
-  return response.ok;
-}
+```text
+┌─────────────────────────────────────────────┐
+│  Добавить ученика                      [X]  │
+├─────────────────────────────────────────────┤
+│  ┌──────────────┐ ┌──────────────────────┐  │
+│  │  По ссылке   │ │     Вручную          │  │
+│  └──────────────┘ └──────────────────────┘  │
+├─────────────────────────────────────────────┤
+│                                             │
+│  Вкладка "По ссылке":                      │
+│    - QR-код (react-qr-code)                │
+│    - Кнопка копирования веб-ссылки         │
+│    - Кнопка открытия Telegram-ссылки       │
+│                                             │
+│  Вкладка "Вручную":                        │
+│    - Имя ученика*                          │
+│    - Telegram username*                    │
+│    - Цель обучения*                        │
+│    - Класс, Экзамен, Предмет               │
+│    - Начальный/Целевой балл                │
+│    - Контакт родителя, Заметки             │
+│    - Кнопка "Добавить"                     │
+│                                             │
+└─────────────────────────────────────────────┘
 ```
 
-### 5. Деплой
+## Зависимости
 
-Задеплоить функцию `tutor-update-student`.
+- `react-qr-code` — уже установлен
+- `manualAddTutorStudent` — уже есть в `src/lib/tutors.ts`
+- `ManualAddTutorStudentInput` — уже есть в `src/types/tutor.ts`
 
 ---
 
 ## Техническая секция
 
-### Структура Edge Function
+### Файл для создания
+
+`src/components/tutor/AddStudentDialog.tsx`
+
+### Импорты
 
 ```typescript
-// supabase/functions/tutor-update-student/index.ts
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
-};
-
-Deno.serve(async (req) => {
-  if (req.method === "OPTIONS") {
-    return new Response(null, { headers: corsHeaders });
-  }
-
-  // 1. Проверить авторизацию
-  // 2. Получить tutor_id по user_id
-  // 3. Проверить, что tutor_student принадлежит репетитору
-  // 4. Получить student_id из tutor_students
-  // 5. Обновить profiles (service_role)
-  // 6. Обновить tutor_students
-  // 7. Вернуть { success: true }
-});
+import { useState } from 'react';
+import QRCode from 'react-qr-code';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import { Copy, ExternalLink, Check, Loader2 } from 'lucide-react';
+import { useToast } from '@/hooks/use-toast';
+import { manualAddTutorStudent } from '@/lib/tutors';
+import type { ManualAddTutorStudentInput } from '@/types/tutor';
 ```
 
-### Файлы для изменения
+### Логика вкладки "Вручную"
 
-| Файл | Действие |
-|------|----------|
-| `supabase/functions/tutor-update-student/index.ts` | Создать |
-| `supabase/config.toml` | Добавить секцию |
-| `src/types/tutor.ts` | Добавить интерфейсы |
-| `src/lib/tutors.ts` | Добавить функцию |
+1. Форма с валидацией обязательных полей (name, telegram_username, learning_goal)
+2. При сабмите — вызов `manualAddTutorStudent(input)`
+3. При успехе — вызов `onManualAdded(response.tutor_student_id)` и закрытие диалога
+4. При ошибке — показать toast с сообщением
+
+### Экспорт
+
+```typescript
+export { AddStudentDialog };
+```
 
