@@ -50,6 +50,7 @@ Deno.serve(async (req) => {
     const body = await req.json();
     const name = typeof body.name === "string" ? body.name.trim() : "";
     const telegramUsernameRaw = typeof body.telegram_username === "string" ? body.telegram_username : "";
+    const learningGoalRaw = typeof body.learning_goal === "string" ? body.learning_goal : "";
 
     if (!name) {
       return new Response(
@@ -65,7 +66,15 @@ Deno.serve(async (req) => {
       );
     }
 
+    if (!learningGoalRaw.trim()) {
+      return new Response(
+        JSON.stringify({ error: "Learning goal is required" }),
+        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      );
+    }
+
     const telegramUsername = normalizeUsername(telegramUsernameRaw);
+    const learningGoal = learningGoalRaw.trim();
 
     const supabaseAdmin = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
       auth: { persistSession: false },
@@ -144,9 +153,7 @@ Deno.serve(async (req) => {
     if (typeof body.grade === "number") {
       profileUpdates.grade = body.grade;
     }
-    if (typeof body.learning_goal === "string" && body.learning_goal.trim()) {
-      profileUpdates.learning_goal = body.learning_goal.trim();
-    }
+    profileUpdates.learning_goal = learningGoal;
 
     const { error: profileUpdateError } = await supabaseAdmin
       .from("profiles")

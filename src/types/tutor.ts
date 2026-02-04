@@ -56,6 +56,7 @@ export interface CreateTutorStudentInput {
 export interface ManualAddTutorStudentInput {
   name: string;
   telegram_username: string;
+  learning_goal: string;
   grade?: number;
   exam_type?: 'ege' | 'oge';
   subject?: string;

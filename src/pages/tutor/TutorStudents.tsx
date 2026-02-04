@@ -12,6 +12,8 @@ import {
 } from '@/components/ui/pagination';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { ScrollArea } from '@/components/ui/scroll-area';
+import { Accordion, AccordionItem, AccordionTrigger, AccordionContent } from '@/components/ui/accordion';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
@@ -63,15 +65,17 @@ function TutorStudentsContent() {
   const [page, setPage] = useState(1);
   const [inviteModalOpen, setInviteModalOpen] = useState(false);
   const [copiedLink, setCopiedLink] = useState(false);
+  const [activeTab, setActiveTab] = useState<'invite' | 'manual'>('invite');
   const [manualName, setManualName] = useState('');
   const [manualTelegram, setManualTelegram] = useState('');
+  const [manualLearningGoalPreset, setManualLearningGoalPreset] = useState<string>('');
+  const [manualLearningGoalOther, setManualLearningGoalOther] = useState('');
   const [manualParentContact, setManualParentContact] = useState('');
   const [manualGrade, setManualGrade] = useState('');
   const [manualExamType, setManualExamType] = useState<'ege' | 'oge' | ''>('');
   const [manualSubject, setManualSubject] = useState('');
   const [manualStartScore, setManualStartScore] = useState('');
   const [manualTargetScore, setManualTargetScore] = useState('');
-  const [manualLearningGoal, setManualLearningGoal] = useState('');
   const [manualNotes, setManualNotes] = useState('');
   const [manualSubmitting, setManualSubmitting] = useState(false);
   
@@ -101,13 +105,14 @@ function TutorStudentsContent() {
   const resetManualForm = useCallback(() => {
     setManualName('');
     setManualTelegram('');
+    setManualLearningGoalPreset('');
+    setManualLearningGoalOther('');
     setManualParentContact('');
     setManualGrade('');
     setManualExamType('');
     setManualSubject('');
     setManualStartScore('');
     setManualTargetScore('');
-    setManualLearningGoal('');
     setManualNotes('');
   }, []);
 
@@ -115,6 +120,9 @@ function TutorStudentsContent() {
     event.preventDefault();
     const name = manualName.trim();
     const telegramUsername = manualTelegram.trim();
+    const learningGoal = manualLearningGoalPreset === 'other'
+      ? manualLearningGoalOther.trim()
+      : manualLearningGoalPreset.trim();
 
     if (!name) {
       toast.error('Укажите имя ученика');
@@ -123,6 +131,11 @@ function TutorStudentsContent() {
 
     if (!telegramUsername) {
       toast.error('Укажите Telegram username');
+      return;
+    }
+
+    if (!learningGoal) {
+      toast.error('Укажите цель занятий');
       return;
     }
 
@@ -142,7 +155,7 @@ function TutorStudentsContent() {
         target_score: Number.isFinite(targetScore) ? targetScore : undefined,
         notes: manualNotes.trim() || undefined,
         parent_contact: manualParentContact.trim() || undefined,
-        learning_goal: manualLearningGoal.trim() || undefined,
+        learning_goal: learningGoal,
       });
 
       toast.success('Ученик добавлен');
@@ -166,7 +179,8 @@ function TutorStudentsContent() {
     manualTargetScore,
     manualNotes,
     manualParentContact,
-    manualLearningGoal,
+    manualLearningGoalPreset,
+    manualLearningGoalOther,
     navigate,
     refetch,
     resetManualForm,
@@ -340,7 +354,15 @@ function TutorStudentsContent() {
         </div>
         
         {/* Invite Modal */}
-        <Dialog open={inviteModalOpen} onOpenChange={setInviteModalOpen}>
+        <Dialog
+          open={inviteModalOpen}
+          onOpenChange={(open) => {
+            setInviteModalOpen(open);
+            if (!open) {
+              setActiveTab('invite');
+            }
+          }}
+        >
           <DialogContent className="max-w-2xl">
             <DialogHeader>
               <DialogTitle>Добавить ученика</DialogTitle>
@@ -349,14 +371,15 @@ function TutorStudentsContent() {
               </DialogDescription>
             </DialogHeader>
 
-            <Tabs defaultValue="invite" className="w-full">
+            <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as 'invite' | 'manual')} className="w-full">
               <TabsList className="grid w-full grid-cols-2">
                 <TabsTrigger value="invite">По ссылке</TabsTrigger>
                 <TabsTrigger value="manual">Вручную</TabsTrigger>
               </TabsList>
 
               <TabsContent value="invite">
-                <div className="space-y-6 py-4">
+                <ScrollArea className="max-h-[70vh] pr-4">
+                  <div className="space-y-6 py-4">
                   {/* QR Code */}
                   {inviteWebLink && (
                     <div className="flex justify-center">
@@ -408,143 +431,188 @@ function TutorStudentsContent() {
                     <p>2. Переходит в Telegram и нажимает «Начать»</p>
                     <p>3. Автоматически появляется в вашем списке учеников</p>
                   </div>
-                </div>
+                  </div>
+                </ScrollArea>
               </TabsContent>
 
               <TabsContent value="manual">
-                <form onSubmit={handleManualSubmit} className="space-y-6 py-4">
-                  <div className="grid gap-4 md:grid-cols-2">
-                    <div className="space-y-2">
-                      <Label htmlFor="manualName">Имя ученика</Label>
-                      <Input
-                        id="manualName"
-                        value={manualName}
-                        onChange={(e) => setManualName(e.target.value)}
-                        placeholder="Например, Лера"
-                        required
-                      />
-                    </div>
-
-                    <div className="space-y-2">
-                      <Label htmlFor="manualTelegram">Telegram username</Label>
-                      <Input
-                        id="manualTelegram"
-                        value={manualTelegram}
-                        onChange={(e) => setManualTelegram(e.target.value)}
-                        placeholder="@username"
-                        required
-                      />
-                      <p className="text-xs text-muted-foreground">
-                        Укажите @username ученика, по нему привяжем Telegram при подключении.
-                      </p>
-                    </div>
-
-                    <div className="space-y-2">
-                      <Label htmlFor="manualParentContact">Контакт родителя</Label>
-                      <Input
-                        id="manualParentContact"
-                        value={manualParentContact}
-                        onChange={(e) => setManualParentContact(e.target.value)}
-                        placeholder="+7 999 123-45-67 или @telegram"
-                      />
-                    </div>
-
-                    <div className="space-y-2">
-                      <Label htmlFor="manualGrade">Класс</Label>
-                      <Input
-                        id="manualGrade"
-                        type="number"
-                        min={1}
-                        max={11}
-                        value={manualGrade}
-                        onChange={(e) => setManualGrade(e.target.value)}
-                        placeholder="Например, 10"
-                      />
-                    </div>
-
-                    <div className="space-y-2">
-                      <Label>Экзамен</Label>
-                      <Select
-                        value={manualExamType || undefined}
-                        onValueChange={(value) => setManualExamType(value as 'ege' | 'oge' | '')}
+                <ScrollArea className="max-h-[70vh] pr-4">
+                  <form onSubmit={handleManualSubmit} className="space-y-6 py-4">
+                    <div className="flex justify-between items-center">
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        onClick={() => setActiveTab('invite')}
+                        className="px-0"
                       >
-                        <SelectTrigger>
-                          <SelectValue placeholder="Не выбран" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="ege">ЕГЭ</SelectItem>
-                          <SelectItem value="oge">ОГЭ</SelectItem>
-                        </SelectContent>
-                      </Select>
+                        Назад к ссылке
+                      </Button>
                     </div>
 
-                    <div className="space-y-2">
-                      <Label htmlFor="manualSubject">Предмет</Label>
-                      <Input
-                        id="manualSubject"
-                        value={manualSubject}
-                        onChange={(e) => setManualSubject(e.target.value)}
-                        placeholder="Математика"
-                      />
+                    <div className="grid gap-4 md:grid-cols-2">
+                      <div className="space-y-2">
+                        <Label htmlFor="manualName">Имя ученика</Label>
+                        <Input
+                          id="manualName"
+                          value={manualName}
+                          onChange={(e) => setManualName(e.target.value)}
+                          placeholder="Например, Лера"
+                          required
+                        />
+                      </div>
+
+                      <div className="space-y-2">
+                        <Label htmlFor="manualTelegram">Telegram username</Label>
+                        <Input
+                          id="manualTelegram"
+                          value={manualTelegram}
+                          onChange={(e) => setManualTelegram(e.target.value)}
+                          placeholder="@username"
+                          required
+                        />
+                        <p className="text-xs text-muted-foreground">
+                          Укажите @username ученика, по нему привяжем Telegram при подключении.
+                        </p>
+                      </div>
+
+                      <div className="space-y-2">
+                        <Label>Цель занятий</Label>
+                        <Select
+                          value={manualLearningGoalPreset || undefined}
+                          onValueChange={(value) => setManualLearningGoalPreset(value)}
+                        >
+                          <SelectTrigger>
+                            <SelectValue placeholder="Выберите цель" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="ЕГЭ">ЕГЭ</SelectItem>
+                            <SelectItem value="ОГЭ">ОГЭ</SelectItem>
+                            <SelectItem value="Школьная программа">Школьная программа</SelectItem>
+                            <SelectItem value="Олимпиада">Олимпиада</SelectItem>
+                            <SelectItem value="other">Другое</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+
+                      {manualLearningGoalPreset === 'other' && (
+                        <div className="space-y-2">
+                          <Label htmlFor="manualLearningGoalOther">Опишите цель</Label>
+                          <Input
+                            id="manualLearningGoalOther"
+                            value={manualLearningGoalOther}
+                            onChange={(e) => setManualLearningGoalOther(e.target.value)}
+                            placeholder="Например, подготовка к ЕГЭ"
+                            required
+                          />
+                        </div>
+                      )}
                     </div>
 
-                    <div className="space-y-2">
-                      <Label htmlFor="manualStartScore">Стартовый балл</Label>
-                      <Input
-                        id="manualStartScore"
-                        type="number"
-                        min={0}
-                        max={100}
-                        value={manualStartScore}
-                        onChange={(e) => setManualStartScore(e.target.value)}
-                        placeholder="Например, 50"
-                      />
+                    <Accordion type="single" collapsible>
+                      <AccordionItem value="optional">
+                        <AccordionTrigger>Дополнительные данные</AccordionTrigger>
+                        <AccordionContent>
+                          <div className="grid gap-4 md:grid-cols-2">
+                            <div className="space-y-2">
+                              <Label htmlFor="manualParentContact">Контакт родителя</Label>
+                              <Input
+                                id="manualParentContact"
+                                value={manualParentContact}
+                                onChange={(e) => setManualParentContact(e.target.value)}
+                                placeholder="+7 999 123-45-67 или @telegram"
+                              />
+                            </div>
+
+                            <div className="space-y-2">
+                              <Label htmlFor="manualGrade">Класс</Label>
+                              <Input
+                                id="manualGrade"
+                                type="number"
+                                min={1}
+                                max={11}
+                                value={manualGrade}
+                                onChange={(e) => setManualGrade(e.target.value)}
+                                placeholder="Например, 10"
+                              />
+                            </div>
+
+                            <div className="space-y-2">
+                              <Label>Экзамен</Label>
+                              <Select
+                                value={manualExamType || undefined}
+                                onValueChange={(value) => setManualExamType(value as 'ege' | 'oge' | '')}
+                              >
+                                <SelectTrigger>
+                                  <SelectValue placeholder="Не выбран" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="ege">ЕГЭ</SelectItem>
+                                  <SelectItem value="oge">ОГЭ</SelectItem>
+                                </SelectContent>
+                              </Select>
+                            </div>
+
+                            <div className="space-y-2">
+                              <Label htmlFor="manualSubject">Предмет</Label>
+                              <Input
+                                id="manualSubject"
+                                value={manualSubject}
+                                onChange={(e) => setManualSubject(e.target.value)}
+                                placeholder="Математика"
+                              />
+                            </div>
+
+                            <div className="space-y-2">
+                              <Label htmlFor="manualStartScore">Стартовый балл</Label>
+                              <Input
+                                id="manualStartScore"
+                                type="number"
+                                min={0}
+                                max={100}
+                                value={manualStartScore}
+                                onChange={(e) => setManualStartScore(e.target.value)}
+                                placeholder="Например, 50"
+                              />
+                            </div>
+
+                            <div className="space-y-2">
+                              <Label htmlFor="manualTargetScore">Целевой балл</Label>
+                              <Input
+                                id="manualTargetScore"
+                                type="number"
+                                min={0}
+                                max={100}
+                                value={manualTargetScore}
+                                onChange={(e) => setManualTargetScore(e.target.value)}
+                                placeholder="Например, 85"
+                              />
+                            </div>
+                          </div>
+
+                          <div className="space-y-2 mt-4">
+                            <Label htmlFor="manualNotes">Заметки</Label>
+                            <Textarea
+                              id="manualNotes"
+                              value={manualNotes}
+                              onChange={(e) => setManualNotes(e.target.value)}
+                              placeholder="Дополнительные детали о ученике"
+                              rows={3}
+                            />
+                          </div>
+                        </AccordionContent>
+                      </AccordionItem>
+                    </Accordion>
+
+                    <div className="flex justify-end gap-2">
+                      <Button type="button" variant="ghost" onClick={resetManualForm} disabled={manualSubmitting}>
+                        Очистить
+                      </Button>
+                      <Button type="submit" disabled={manualSubmitting}>
+                        {manualSubmitting ? 'Добавляем...' : 'Добавить ученика'}
+                      </Button>
                     </div>
-
-                    <div className="space-y-2">
-                      <Label htmlFor="manualTargetScore">Целевой балл</Label>
-                      <Input
-                        id="manualTargetScore"
-                        type="number"
-                        min={0}
-                        max={100}
-                        value={manualTargetScore}
-                        onChange={(e) => setManualTargetScore(e.target.value)}
-                        placeholder="Например, 85"
-                      />
-                    </div>
-                  </div>
-
-                  <div className="space-y-2">
-                    <Label htmlFor="manualLearningGoal">Цель занятий</Label>
-                    <Input
-                      id="manualLearningGoal"
-                      value={manualLearningGoal}
-                      onChange={(e) => setManualLearningGoal(e.target.value)}
-                      placeholder="Например, подготовка к ЕГЭ"
-                    />
-                  </div>
-
-                  <div className="space-y-2">
-                    <Label htmlFor="manualNotes">Заметки</Label>
-                    <Textarea
-                      id="manualNotes"
-                      value={manualNotes}
-                      onChange={(e) => setManualNotes(e.target.value)}
-                      placeholder="Дополнительные детали о ученике"
-                      rows={3}
-                    />
-                  </div>
-
-                  <div className="flex justify-end gap-2">
-                    <Button type="button" variant="ghost" onClick={resetManualForm} disabled={manualSubmitting}>
-                      Очистить
-                    </Button>
-                    <Button type="submit" disabled={manualSubmitting}>
-                      {manualSubmitting ? 'Добавляем...' : 'Добавить ученика'}
-                    </Button>
-                  </div>
-                </form>
+                  </form>
+                </ScrollArea>
               </TabsContent>
             </Tabs>
           </DialogContent>

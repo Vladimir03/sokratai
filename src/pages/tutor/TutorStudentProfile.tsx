@@ -11,7 +11,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Skeleton } from '@/components/ui/skeleton';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { toast } from 'sonner';
 import TutorGuard from '@/components/TutorGuard';
@@ -25,7 +25,8 @@ import {
 import { 
   updateTutorStudent, 
   createMockExam, 
-  deleteMockExam 
+  deleteMockExam,
+  removeStudentFromTutor
 } from '@/lib/tutors';
 import { 
   formatRelativeTime, 
@@ -58,6 +59,8 @@ function TutorStudentProfileContent() {
   // Диалоги
   const [addMockExamOpen, setAddMockExamOpen] = useState(false);
   const [selectedChatId, setSelectedChatId] = useState<string | null>(null);
+  const [deleteStudentOpen, setDeleteStudentOpen] = useState(false);
+  const [isDeletingStudent, setIsDeletingStudent] = useState(false);
   
   // Инициализация полей при загрузке студента
   if (student && !notesInitialized) {
@@ -87,6 +90,26 @@ function TutorStudentProfileContent() {
       setIsSaving(false);
     }
   }, [tutorStudentId, notes, parentContact, lastLessonAt, refetch]);
+
+  const handleDeleteStudent = useCallback(async () => {
+    if (!tutorStudentId) return;
+    setIsDeletingStudent(true);
+    try {
+      const success = await removeStudentFromTutor(tutorStudentId);
+      if (!success) {
+        toast.error('Не удалось удалить ученика');
+        return;
+      }
+      toast.success('Ученик удалён');
+      navigate('/tutor/students');
+    } catch (error) {
+      console.error('Error deleting student:', error);
+      toast.error('Не удалось удалить ученика');
+    } finally {
+      setIsDeletingStudent(false);
+      setDeleteStudentOpen(false);
+    }
+  }, [navigate, tutorStudentId]);
   
   // Загрузка
   if (loading) {
@@ -138,6 +161,13 @@ function TutorStudentProfileContent() {
             <ArrowLeft className="h-5 w-5" />
           </Button>
           <h1 className="text-2xl font-bold flex-1">Профиль ученика</h1>
+          <Button
+            variant="destructive"
+            onClick={() => setDeleteStudentOpen(true)}
+          >
+            <Trash2 className="h-4 w-4 mr-2" />
+            Удалить ученика
+          </Button>
         </div>
         
         {/* Карточка-шапка */}
@@ -378,6 +408,35 @@ function TutorStudentProfileContent() {
             />
           </TabsContent>
         </Tabs>
+
+        <Dialog open={deleteStudentOpen} onOpenChange={setDeleteStudentOpen}>
+          <DialogContent className="max-w-md">
+            <DialogHeader>
+              <DialogTitle>Удалить ученика?</DialogTitle>
+              <DialogDescription>
+                Ученик будет удалён из вашего списка. Аккаунт ученика останется в системе.
+              </DialogDescription>
+            </DialogHeader>
+            <DialogFooter className="gap-2 sm:gap-0">
+              <Button
+                type="button"
+                variant="ghost"
+                onClick={() => setDeleteStudentOpen(false)}
+                disabled={isDeletingStudent}
+              >
+                Отмена
+              </Button>
+              <Button
+                type="button"
+                variant="destructive"
+                onClick={handleDeleteStudent}
+                disabled={isDeletingStudent}
+              >
+                {isDeletingStudent ? 'Удаление...' : 'Удалить'}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       </div>
     </TutorLayout>
   );
