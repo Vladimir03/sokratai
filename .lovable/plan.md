@@ -1,33 +1,72 @@
-# План: Деплой Edge Functions и настройка cron
 
-## ✅ ВЫПОЛНЕНО
 
-### 1. `telegram-bot` — обработчик payment callbacks
-Функция `handlePaymentCallback` уже была реализована (строки 2375-2450):
-- Парсит `payment:status:lessonId`
-- Вызывает RPC `update_lesson_payment`
-- Редактирует сообщение, убирая кнопки
+# План: Исправление ошибки сборки и деплой Edge Functions
 
-### 2. `payment-reminder` — отправка напоминаний
-Функция полностью реализована и задеплоена.
+## 1. Исправить ошибку TypeScript
 
-### 3. Деплой Edge Functions ✅
-- `telegram-bot` — задеплоен
-- `payment-reminder` — задеплоен
+В файле `src/types/tutor.ts` дублируется поле `learning_goal` в интерфейсе `ManualAddTutorStudentInput`:
 
-### 4. Cron-job ✅
-Создан cron job `payment-reminder-job`:
-- Запускается каждые 5 минут (`*/5 * * * *`)
-- Вызывает `payment-reminder` Edge Function
+```typescript
+// Было (строки 56-68):
+export interface ManualAddTutorStudentInput {
+  name: string;
+  telegram_username: string;
+  learning_goal: string;       // строка 59
+  grade?: number;
+  exam_type?: 'ege' | 'oge';
+  subject?: string;
+  start_score?: number;
+  target_score?: number;
+  notes?: string;
+  parent_contact?: string;
+  learning_goal?: string;      // строка 67 — дубликат!
+}
+```
+
+**Решение**: Удалить дублирующую строку 67 (`learning_goal?: string;`).
+
+## 2. Обновить config.toml
+
+Добавить конфигурацию для новой Edge Function:
+
+```toml
+[functions.tutor-manual-add-student]
+verify_jwt = true
+```
+
+## 3. Задеплоить Edge Functions
+
+Две функции требуют деплоя:
+
+| Функция | Описание |
+|---------|----------|
+| `tutor-manual-add-student` | Ручное добавление ученика по Telegram username |
+| `telegram-bot` | Обновлённая логика автопривязки по telegram_username |
 
 ---
 
-## Тестирование
+## Техническая секция
 
-1. Создать занятие и отметить его как `completed`
-2. Включить `payment_reminder_enabled` в настройках календаря
-3. Убедиться что `telegram_id` репетитора заполнен
-4. Подождать 5 минут (или вызвать функцию вручную)
-5. Проверить что пришло сообщение в Telegram с кнопками
-6. Нажать кнопку — проверить что статус обновился в БД
+### Порядок действий
+
+1. **Удалить дублирующее поле** в `src/types/tutor.ts` (строка 67)
+2. **Добавить конфиг** в `supabase/config.toml` для `tutor-manual-add-student`
+3. **Деплой функций** после исправления ошибки сборки
+
+### Финальный интерфейс
+
+```typescript
+export interface ManualAddTutorStudentInput {
+  name: string;
+  telegram_username: string;
+  learning_goal: string;  // обязательное поле — единственное
+  grade?: number;
+  exam_type?: 'ege' | 'oge';
+  subject?: string;
+  start_score?: number;
+  target_score?: number;
+  notes?: string;
+  parent_contact?: string;
+}
+```
 
