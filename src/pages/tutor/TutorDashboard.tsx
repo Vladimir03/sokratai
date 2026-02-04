@@ -1,11 +1,9 @@
 import { useMemo, useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
-import QRCode from 'react-qr-code';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Badge } from '@/components/ui/badge';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { 
   Users, 
   CreditCard, 
@@ -13,14 +11,11 @@ import {
   UserPlus, 
   Plus, 
   ChevronRight,
-  Clock,
-  Copy,
-  ExternalLink,
-  Check
+  Clock
 } from 'lucide-react';
-import { toast } from 'sonner';
 import TutorGuard from '@/components/TutorGuard';
 import { TutorLayout } from '@/components/tutor/TutorLayout';
+import { AddStudentDialog } from '@/components/tutor/AddStudentDialog';
 import { useTutor, useTutorStudents, useTutorPayments } from '@/hooks/useTutor';
 import { getTutorInviteWebLink, getTutorInviteTelegramLink } from '@/utils/telegramLinks';
 import type { TutorStudentWithProfile, TutorPaymentWithStudent } from '@/types/tutor';
@@ -198,32 +193,12 @@ function TutorDashboardContent() {
   const { payments, loading: paymentsLoading } = useTutorPayments();
   
   const [inviteModalOpen, setInviteModalOpen] = useState(false);
-  const [copiedLink, setCopiedLink] = useState(false);
-  
   const loading = tutorLoading || studentsLoading || paymentsLoading;
   
   // Invite URLs
   const inviteCode = tutor?.invite_code;
   const inviteWebLink = inviteCode ? getTutorInviteWebLink(inviteCode) : '';
   const inviteTelegramLink = inviteCode ? getTutorInviteTelegramLink(inviteCode) : '';
-  
-  const handleCopyLink = async () => {
-    if (!inviteWebLink) return;
-    try {
-      await navigator.clipboard.writeText(inviteWebLink);
-      setCopiedLink(true);
-      toast.success('Ссылка скопирована');
-      setTimeout(() => setCopiedLink(false), 2000);
-    } catch {
-      toast.error('Не удалось скопировать');
-    }
-  };
-  
-  const handleOpenTelegram = () => {
-    if (inviteTelegramLink) {
-      window.open(inviteTelegramLink, '_blank');
-    }
-  };
   
   // Статистика учеников
   const studentStats = useMemo(() => {
@@ -400,72 +375,16 @@ function TutorDashboardContent() {
           </Card>
         )}
         
-        {/* Invite Modal */}
-        <Dialog open={inviteModalOpen} onOpenChange={setInviteModalOpen}>
-          <DialogContent className="max-w-md">
-            <DialogHeader>
-              <DialogTitle>Пригласить ученика</DialogTitle>
-              <DialogDescription>
-                Отправьте эту ссылку ученику. После перехода он автоматически 
-                подключится к вашему кабинету.
-              </DialogDescription>
-            </DialogHeader>
-            
-            <div className="space-y-6 py-4">
-              {/* QR Code */}
-              {inviteWebLink && (
-                <div className="flex justify-center">
-                  <div className="bg-white p-3 rounded-lg shadow-sm">
-                    <QRCode value={inviteWebLink} size={160} level="M" />
-                  </div>
-                </div>
-              )}
-              
-              {/* Link display */}
-              <div className="bg-muted p-3 rounded-md text-sm font-mono break-all text-center">
-                {inviteWebLink || 'Загрузка...'}
-              </div>
-              
-              {/* Actions */}
-              <div className="flex flex-col sm:flex-row gap-2">
-                <Button 
-                  onClick={handleCopyLink} 
-                  variant="outline" 
-                  className="flex-1"
-                  disabled={!inviteCode}
-                >
-                  {copiedLink ? (
-                    <>
-                      <Check className="h-4 w-4 mr-2" />
-                      Скопировано
-                    </>
-                  ) : (
-                    <>
-                      <Copy className="h-4 w-4 mr-2" />
-                      Скопировать
-                    </>
-                  )}
-                </Button>
-                
-                <Button 
-                  onClick={handleOpenTelegram}
-                  className="flex-1"
-                  disabled={!inviteCode}
-                >
-                  <ExternalLink className="h-4 w-4 mr-2" />
-                  Telegram
-                </Button>
-              </div>
-              
-              {/* Instructions */}
-              <div className="text-xs text-muted-foreground space-y-1">
-                <p>1. Ученик открывает ссылку или сканирует QR-код</p>
-                <p>2. Переходит в Telegram и нажимает «Начать»</p>
-                <p>3. Автоматически появляется в вашем списке</p>
-              </div>
-            </div>
-          </DialogContent>
-        </Dialog>
+        <AddStudentDialog
+          open={inviteModalOpen}
+          onOpenChange={setInviteModalOpen}
+          inviteCode={inviteCode}
+          inviteWebLink={inviteWebLink}
+          inviteTelegramLink={inviteTelegramLink}
+          onManualAdded={(tutorStudentId) => {
+            navigate(`/tutor/students/${tutorStudentId}`);
+          }}
+        />
       </div>
     </TutorLayout>
   );
