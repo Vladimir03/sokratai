@@ -64,7 +64,6 @@ export interface ManualAddTutorStudentInput {
   target_score?: number;
   notes?: string;
   parent_contact?: string;
-  learning_goal?: string;
 }
 
 export interface ManualAddTutorStudentResponse {
