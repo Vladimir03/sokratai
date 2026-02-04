@@ -53,3 +53,6 @@ verify_jwt = false
 
 [functions.payment-reminder]
 verify_jwt = false
+
+[functions.tutor-manual-add-student]
+verify_jwt = true
