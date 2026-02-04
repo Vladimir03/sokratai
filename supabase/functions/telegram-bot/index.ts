@@ -612,6 +612,42 @@ async function getOrCreateProfile(telegramUserId: number, telegramUsername?: str
     return existingProfile;
   }
 
+  // Try to claim a manually created placeholder profile by telegram username
+  if (telegramUsername) {
+    const normalizedUsername = telegramUsername.trim().replace(/^@/, "").toLowerCase();
+    const { data: placeholderProfile, error: placeholderError } = await supabase
+      .from("profiles")
+      .select("*")
+      .ilike("telegram_username", normalizedUsername)
+      .is("telegram_user_id", null)
+      .eq("registration_source", "manual")
+      .maybeSingle();
+
+    if (placeholderError) {
+      console.error("Error checking placeholder profile:", placeholderError);
+    }
+
+    if (placeholderProfile) {
+      const { data: updatedProfile, error: updateError } = await supabase
+        .from("profiles")
+        .update({
+          telegram_user_id: telegramUserId,
+          telegram_username: normalizedUsername,
+          registration_source: "telegram",
+        })
+        .eq("id", placeholderProfile.id)
+        .select()
+        .single();
+
+      if (updateError) {
+        console.error("Error updating placeholder profile:", updateError);
+        throw new Error("Failed to update placeholder profile");
+      }
+
+      return updatedProfile;
+    }
+  }
+
   // Create new user and profile
   const tempEmail = `telegram_${telegramUserId}@temp.sokratai.ru`;
   const tempPassword = crypto.randomUUID();

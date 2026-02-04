@@ -11,6 +11,11 @@ import {
   PaginationPrevious 
 } from '@/components/ui/pagination';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { UserPlus, Copy, ExternalLink, Check } from 'lucide-react';
 import { toast } from 'sonner';
 import TutorGuard from '@/components/TutorGuard';
@@ -30,6 +35,7 @@ import {
 } from '@/components/tutor/StudentsStates';
 import { useTutorStudents, useTutor } from '@/hooks/useTutor';
 import { calculateProgress, getPaymentStatus } from '@/lib/formatters';
+import { manualAddTutorStudent } from '@/lib/tutors';
 import { getTutorInviteWebLink, getTutorInviteTelegramLink } from '@/utils/telegramLinks';
 import type { TutorStudentWithProfile } from '@/types/tutor';
 
@@ -57,6 +63,17 @@ function TutorStudentsContent() {
   const [page, setPage] = useState(1);
   const [inviteModalOpen, setInviteModalOpen] = useState(false);
   const [copiedLink, setCopiedLink] = useState(false);
+  const [manualName, setManualName] = useState('');
+  const [manualTelegram, setManualTelegram] = useState('');
+  const [manualParentContact, setManualParentContact] = useState('');
+  const [manualGrade, setManualGrade] = useState('');
+  const [manualExamType, setManualExamType] = useState<'ege' | 'oge' | ''>('');
+  const [manualSubject, setManualSubject] = useState('');
+  const [manualStartScore, setManualStartScore] = useState('');
+  const [manualTargetScore, setManualTargetScore] = useState('');
+  const [manualLearningGoal, setManualLearningGoal] = useState('');
+  const [manualNotes, setManualNotes] = useState('');
+  const [manualSubmitting, setManualSubmitting] = useState(false);
   
   // Invite URLs
   const inviteCode = tutor?.invite_code;
@@ -80,6 +97,80 @@ function TutorStudentsContent() {
       window.open(inviteTelegramLink, '_blank');
     }
   };
+
+  const resetManualForm = useCallback(() => {
+    setManualName('');
+    setManualTelegram('');
+    setManualParentContact('');
+    setManualGrade('');
+    setManualExamType('');
+    setManualSubject('');
+    setManualStartScore('');
+    setManualTargetScore('');
+    setManualLearningGoal('');
+    setManualNotes('');
+  }, []);
+
+  const handleManualSubmit = useCallback(async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const name = manualName.trim();
+    const telegramUsername = manualTelegram.trim();
+
+    if (!name) {
+      toast.error('Укажите имя ученика');
+      return;
+    }
+
+    if (!telegramUsername) {
+      toast.error('Укажите Telegram username');
+      return;
+    }
+
+    const grade = manualGrade ? Number(manualGrade) : undefined;
+    const startScore = manualStartScore ? Number(manualStartScore) : undefined;
+    const targetScore = manualTargetScore ? Number(manualTargetScore) : undefined;
+
+    setManualSubmitting(true);
+    try {
+      const response = await manualAddTutorStudent({
+        name,
+        telegram_username: telegramUsername,
+        grade: Number.isFinite(grade) ? grade : undefined,
+        exam_type: manualExamType || undefined,
+        subject: manualSubject.trim() || undefined,
+        start_score: Number.isFinite(startScore) ? startScore : undefined,
+        target_score: Number.isFinite(targetScore) ? targetScore : undefined,
+        notes: manualNotes.trim() || undefined,
+        parent_contact: manualParentContact.trim() || undefined,
+        learning_goal: manualLearningGoal.trim() || undefined,
+      });
+
+      toast.success('Ученик добавлен');
+      setInviteModalOpen(false);
+      resetManualForm();
+      refetch();
+      navigate(`/tutor/students/${response.tutor_student_id}`);
+    } catch (error: any) {
+      console.error('Manual add student error:', error);
+      toast.error(error.message || 'Не удалось добавить ученика');
+    } finally {
+      setManualSubmitting(false);
+    }
+  }, [
+    manualName,
+    manualTelegram,
+    manualGrade,
+    manualExamType,
+    manualSubject,
+    manualStartScore,
+    manualTargetScore,
+    manualNotes,
+    manualParentContact,
+    manualLearningGoal,
+    navigate,
+    refetch,
+    resetManualForm,
+  ]);
 
   // Reset page when filters change
   useEffect(() => {
@@ -250,67 +341,212 @@ function TutorStudentsContent() {
         
         {/* Invite Modal */}
         <Dialog open={inviteModalOpen} onOpenChange={setInviteModalOpen}>
-          <DialogContent className="max-w-md">
+          <DialogContent className="max-w-2xl">
             <DialogHeader>
-              <DialogTitle>Пригласить ученика</DialogTitle>
+              <DialogTitle>Добавить ученика</DialogTitle>
               <DialogDescription>
-                Отправьте эту ссылку ученику. После перехода он автоматически подключится к вашему кабинету и получит доступ к AI-помощнику.
+                Можно отправить ссылку для подключения к AI-помощнику или добавить ученика вручную.
               </DialogDescription>
             </DialogHeader>
-            
-            <div className="space-y-6 py-4">
-              {/* QR Code */}
-              {inviteWebLink && (
-                <div className="flex justify-center">
-                  <div className="bg-white p-3 rounded-lg shadow-sm">
-                    <QRCode value={inviteWebLink} size={160} level="M" />
+
+            <Tabs defaultValue="invite" className="w-full">
+              <TabsList className="grid w-full grid-cols-2">
+                <TabsTrigger value="invite">По ссылке</TabsTrigger>
+                <TabsTrigger value="manual">Вручную</TabsTrigger>
+              </TabsList>
+
+              <TabsContent value="invite">
+                <div className="space-y-6 py-4">
+                  {/* QR Code */}
+                  {inviteWebLink && (
+                    <div className="flex justify-center">
+                      <div className="bg-white p-3 rounded-lg shadow-sm">
+                        <QRCode value={inviteWebLink} size={160} level="M" />
+                      </div>
+                    </div>
+                  )}
+                  
+                  {/* Link display */}
+                  <div className="bg-muted p-3 rounded-md text-sm font-mono break-all text-center">
+                    {inviteWebLink || 'Загрузка...'}
+                  </div>
+                  
+                  {/* Actions */}
+                  <div className="flex flex-col sm:flex-row gap-2">
+                    <Button 
+                      onClick={handleCopyLink} 
+                      variant="outline" 
+                      className="flex-1"
+                      disabled={!inviteCode}
+                    >
+                      {copiedLink ? (
+                        <>
+                          <Check className="h-4 w-4 mr-2" />
+                          Скопировано
+                        </>
+                      ) : (
+                        <>
+                          <Copy className="h-4 w-4 mr-2" />
+                          Скопировать ссылку
+                        </>
+                      )}
+                    </Button>
+                    
+                    <Button 
+                      onClick={handleOpenTelegram}
+                      className="flex-1"
+                      disabled={!inviteCode}
+                    >
+                      <ExternalLink className="h-4 w-4 mr-2" />
+                      Открыть Telegram
+                    </Button>
+                  </div>
+                  
+                  {/* Instructions */}
+                  <div className="text-xs text-muted-foreground space-y-1">
+                    <p>1. Ученик открывает ссылку или сканирует QR-код</p>
+                    <p>2. Переходит в Telegram и нажимает «Начать»</p>
+                    <p>3. Автоматически появляется в вашем списке учеников</p>
                   </div>
                 </div>
-              )}
-              
-              {/* Link display */}
-              <div className="bg-muted p-3 rounded-md text-sm font-mono break-all text-center">
-                {inviteWebLink || 'Загрузка...'}
-              </div>
-              
-              {/* Actions */}
-              <div className="flex flex-col sm:flex-row gap-2">
-                <Button 
-                  onClick={handleCopyLink} 
-                  variant="outline" 
-                  className="flex-1"
-                  disabled={!inviteCode}
-                >
-                  {copiedLink ? (
-                    <>
-                      <Check className="h-4 w-4 mr-2" />
-                      Скопировано
-                    </>
-                  ) : (
-                    <>
-                      <Copy className="h-4 w-4 mr-2" />
-                      Скопировать ссылку
-                    </>
-                  )}
-                </Button>
-                
-                <Button 
-                  onClick={handleOpenTelegram}
-                  className="flex-1"
-                  disabled={!inviteCode}
-                >
-                  <ExternalLink className="h-4 w-4 mr-2" />
-                  Открыть Telegram
-                </Button>
-              </div>
-              
-              {/* Instructions */}
-              <div className="text-xs text-muted-foreground space-y-1">
-                <p>1. Ученик открывает ссылку или сканирует QR-код</p>
-                <p>2. Переходит в Telegram и нажимает «Начать»</p>
-                <p>3. Автоматически появляется в вашем списке учеников</p>
-              </div>
-            </div>
+              </TabsContent>
+
+              <TabsContent value="manual">
+                <form onSubmit={handleManualSubmit} className="space-y-6 py-4">
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <div className="space-y-2">
+                      <Label htmlFor="manualName">Имя ученика</Label>
+                      <Input
+                        id="manualName"
+                        value={manualName}
+                        onChange={(e) => setManualName(e.target.value)}
+                        placeholder="Например, Лера"
+                        required
+                      />
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label htmlFor="manualTelegram">Telegram username</Label>
+                      <Input
+                        id="manualTelegram"
+                        value={manualTelegram}
+                        onChange={(e) => setManualTelegram(e.target.value)}
+                        placeholder="@username"
+                        required
+                      />
+                      <p className="text-xs text-muted-foreground">
+                        Укажите @username ученика, по нему привяжем Telegram при подключении.
+                      </p>
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label htmlFor="manualParentContact">Контакт родителя</Label>
+                      <Input
+                        id="manualParentContact"
+                        value={manualParentContact}
+                        onChange={(e) => setManualParentContact(e.target.value)}
+                        placeholder="+7 999 123-45-67 или @telegram"
+                      />
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label htmlFor="manualGrade">Класс</Label>
+                      <Input
+                        id="manualGrade"
+                        type="number"
+                        min={1}
+                        max={11}
+                        value={manualGrade}
+                        onChange={(e) => setManualGrade(e.target.value)}
+                        placeholder="Например, 10"
+                      />
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label>Экзамен</Label>
+                      <Select
+                        value={manualExamType || undefined}
+                        onValueChange={(value) => setManualExamType(value as 'ege' | 'oge' | '')}
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Не выбран" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="ege">ЕГЭ</SelectItem>
+                          <SelectItem value="oge">ОГЭ</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label htmlFor="manualSubject">Предмет</Label>
+                      <Input
+                        id="manualSubject"
+                        value={manualSubject}
+                        onChange={(e) => setManualSubject(e.target.value)}
+                        placeholder="Математика"
+                      />
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label htmlFor="manualStartScore">Стартовый балл</Label>
+                      <Input
+                        id="manualStartScore"
+                        type="number"
+                        min={0}
+                        max={100}
+                        value={manualStartScore}
+                        onChange={(e) => setManualStartScore(e.target.value)}
+                        placeholder="Например, 50"
+                      />
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label htmlFor="manualTargetScore">Целевой балл</Label>
+                      <Input
+                        id="manualTargetScore"
+                        type="number"
+                        min={0}
+                        max={100}
+                        value={manualTargetScore}
+                        onChange={(e) => setManualTargetScore(e.target.value)}
+                        placeholder="Например, 85"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="manualLearningGoal">Цель занятий</Label>
+                    <Input
+                      id="manualLearningGoal"
+                      value={manualLearningGoal}
+                      onChange={(e) => setManualLearningGoal(e.target.value)}
+                      placeholder="Например, подготовка к ЕГЭ"
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="manualNotes">Заметки</Label>
+                    <Textarea
+                      id="manualNotes"
+                      value={manualNotes}
+                      onChange={(e) => setManualNotes(e.target.value)}
+                      placeholder="Дополнительные детали о ученике"
+                      rows={3}
+                    />
+                  </div>
+
+                  <div className="flex justify-end gap-2">
+                    <Button type="button" variant="ghost" onClick={resetManualForm} disabled={manualSubmitting}>
+                      Очистить
+                    </Button>
+                    <Button type="submit" disabled={manualSubmitting}>
+                      {manualSubmitting ? 'Добавляем...' : 'Добавить ученика'}
+                    </Button>
+                  </div>
+                </form>
+              </TabsContent>
+            </Tabs>
           </DialogContent>
         </Dialog>
 

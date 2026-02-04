@@ -4,6 +4,8 @@ import type {
   TutorStudent, 
   TutorStudentWithProfile,
   CreateTutorStudentInput,
+  ManualAddTutorStudentInput,
+  ManualAddTutorStudentResponse,
   UpdateTutorStudentInput,
   UpdateTutorInput,
   MockExam,
@@ -141,6 +143,24 @@ export async function getTutorStudents(): Promise<TutorStudentWithProfile[]> {
   }
   
   return data as TutorStudentWithProfile[];
+}
+
+/**
+ * Ручное добавление ученика (через edge function)
+ */
+export async function manualAddTutorStudent(
+  input: ManualAddTutorStudentInput,
+): Promise<ManualAddTutorStudentResponse> {
+  const { data, error } = await supabase.functions.invoke("tutor-manual-add-student", {
+    body: input,
+  });
+
+  if (error) {
+    console.error("Error adding student manually:", error);
+    throw new Error(error.message || "Не удалось добавить ученика");
+  }
+
+  return data as ManualAddTutorStudentResponse;
 }
 
 /**

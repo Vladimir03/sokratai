@@ -53,6 +53,25 @@ export interface CreateTutorStudentInput {
   notes?: string;
 }
 
+export interface ManualAddTutorStudentInput {
+  name: string;
+  telegram_username: string;
+  grade?: number;
+  exam_type?: 'ege' | 'oge';
+  subject?: string;
+  start_score?: number;
+  target_score?: number;
+  notes?: string;
+  parent_contact?: string;
+  learning_goal?: string;
+}
+
+export interface ManualAddTutorStudentResponse {
+  tutor_student_id: string;
+  student_id: string;
+  created: boolean;
+}
+
 // Для обновления
 export interface UpdateTutorStudentInput {
   target_score?: number;
