@@ -6,6 +6,8 @@ import type {
   CreateTutorStudentInput,
   ManualAddTutorStudentInput,
   ManualAddTutorStudentResponse,
+  UpdateTutorStudentProfileInput,
+  UpdateTutorStudentProfileResponse,
   UpdateTutorStudentInput,
   UpdateTutorInput,
   MockExam,
@@ -164,6 +166,24 @@ export async function manualAddTutorStudent(
 }
 
 /**
+ * Обновить профиль ученика (через edge function)
+ */
+export async function updateTutorStudentProfile(
+  input: UpdateTutorStudentProfileInput,
+): Promise<UpdateTutorStudentProfileResponse> {
+  const { data, error } = await supabase.functions.invoke("tutor-update-student", {
+    body: input,
+  });
+
+  if (error) {
+    console.error("Error updating student profile:", error);
+    throw new Error(error.message || "Не удалось обновить ученика");
+  }
+
+  return data as UpdateTutorStudentProfileResponse;
+}
+
+/**
  * Получить одного ученика по ID
  */
 export async function getTutorStudent(
@@ -178,7 +198,8 @@ export async function getTutorStudent(
         username,
         telegram_username,
         telegram_user_id,
-        grade
+        grade,
+        learning_goal
       )
     `)
     .eq('id', id)

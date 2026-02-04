@@ -40,6 +40,7 @@ export interface TutorStudentWithProfile extends TutorStudent {
     telegram_username: string | null;
     telegram_user_id: number | null;
     grade: number | null;
+    learning_goal?: string | null;
   };
 }
 
@@ -70,6 +71,24 @@ export interface ManualAddTutorStudentResponse {
   tutor_student_id: string;
   student_id: string;
   created: boolean;
+}
+
+export interface UpdateTutorStudentProfileInput {
+  tutor_student_id: string;
+  name: string;
+  telegram_username: string;
+  learning_goal: string;
+  grade?: number;
+  exam_type?: 'ege' | 'oge';
+  subject?: string;
+  start_score?: number;
+  target_score?: number;
+  parent_contact?: string;
+  notes?: string;
+}
+
+export interface UpdateTutorStudentProfileResponse {
+  success: boolean;
 }
 
 // Для обновления
