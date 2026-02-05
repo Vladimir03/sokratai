@@ -24,7 +24,7 @@ const ValueProposition = () => {
     <section className="py-20 px-4 bg-background">
       <div className="container mx-auto">
         <h2 className="text-3xl md:text-4xl font-bold text-center mb-6 text-primary">
-          💡 Понимай математику сам, не беспокоя учителя и одноклассников
+          💡 Понимай предметы сам, не беспокоя учителя и одноклассников
         </h2>
         <p className="text-center text-lg md:text-xl max-w-3xl mx-auto mb-12 text-muted-foreground">
           Мы не даем готовые решения. Мы задаем <strong>вопросы-подсказки</strong>, которые помогают тебе
