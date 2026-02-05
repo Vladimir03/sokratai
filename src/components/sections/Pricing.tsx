@@ -21,7 +21,7 @@ const Pricing = () => {
     <section className="py-20 px-4 bg-muted/30" id="pricing">
       <div className="container mx-auto">
         <h2 className="text-3xl md:text-4xl font-bold text-center mb-4 text-primary">
-          💎 Начни понимать математику, физику или информатику уже сегодня
+          💎 Начни понимать школьные предметы уже сегодня
         </h2>
         <p className="text-center text-muted-foreground max-w-3xl mx-auto mb-10">
           Все новые пользователи получают 7 дней безлимитного доступа без карты и обязательств. Затем можно остаться на бесплатном тарифе или подключить Premium за 699₽/мес.
@@ -70,7 +70,7 @@ const Pricing = () => {
                   "Вопросы-подсказки вместо готовых ответов",
                   "Несколько способов решения задач",
                   "Работа на компьютере и телефоне",
-                  "Мультичаты по предметам (математика, физика, информатика)",
+                  "Мультичаты по предметам (математика, физика, информатика, химия, русский и др.)",
                 ].map((feature, idx) => (
                   <li key={idx} className="flex items-start">
                     <span className="text-accent mr-2 font-bold text-xl">✓</span>

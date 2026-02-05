@@ -28,9 +28,11 @@ const Index = () => {
   return (
     <div className="min-h-screen">
       {/* Special Offer Banner */}
+      {/* Special Offer Banner - temporarily hidden
       <Suspense fallback={<div className="h-16 bg-muted animate-pulse" />}>
         <SpecialOffer />
       </Suspense>
+      */}
 
       {/* Navigation Tabs */}
       <nav className="sticky top-0 z-50 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 border-b">
@@ -172,13 +174,12 @@ const Index = () => {
               className="text-3xl md:text-5xl font-bold text-primary-foreground mb-6 leading-tight"
               {...({ fetchpriority: "high" } as any)}
             >
-              🎯 ИИ-помощник по математике, физике и информатике, который учит тебя думать и понимать самостоятельно
+              🎯 ИИ-помощник по школьным предметам, который учит тебя думать и понимать самостоятельно
             </h1>
 
             {/* Subheadline */}
             <p className="text-lg md:text-xl text-primary-foreground/90 mb-8 max-w-2xl">
-              Для тех, кто готовится к ОГЭ/ЕГЭ и хочет понимать математику, физику или информатику, а не просто
-              списывать
+              Для тех, кто готовится к ОГЭ/ЕГЭ и хочет понимать предметы, а не просто списывать. Математика, физика, информатика — в приоритете
             </p>
 
             {/* CTA Buttons - Platform Choice */}
