@@ -1,118 +1,131 @@
 
 
-# План: Создание компонента AddStudentDialog
+# План: Скрытие баннера SpecialOffer и обновление предметов на лендинге
 
-## Проблема
+## Часть 1: Закомментировать баннер "Только для первых 100 пользователей..."
 
-Build ошибки в `TutorStudents.tsx` и `TutorDashboard.tsx`:
-```
-Cannot find module '@/components/tutor/AddStudentDialog'
-```
+В файле `src/pages/Index.tsx` нужно закомментировать отображение компонента `SpecialOffer`:
 
-Компонент упоминается в коде, но файл не существует в директории `src/components/tutor/`.
+```tsx
+// Было (строки 30-33):
+{/* Special Offer Banner */}
+<Suspense fallback={<div className="h-16 bg-muted animate-pulse" />}>
+  <SpecialOffer />
+</Suspense>
 
-## Решение
-
-Создать компонент `AddStudentDialog.tsx` с двумя вкладками:
-1. **По ссылке** — QR-код и копирование инвайт-ссылки
-2. **Вручную** — форма для ручного добавления ученика
-
-## Интерфейс компонента
-
-На основе использования в `TutorStudents.tsx` и `TutorDashboard.tsx`:
-
-```typescript
-interface AddStudentDialogProps {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  inviteCode: string | undefined;
-  inviteWebLink: string;
-  inviteTelegramLink: string;
-  onManualAdded: (tutorStudentId: string) => void;
-}
+// Станет:
+{/* Special Offer Banner - temporarily hidden
+<Suspense fallback={<div className="h-16 bg-muted animate-pulse" />}>
+  <SpecialOffer />
+</Suspense>
+*/}
 ```
 
-## Структура компонента
+---
 
-```text
-┌─────────────────────────────────────────────┐
-│  Добавить ученика                      [X]  │
-├─────────────────────────────────────────────┤
-│  ┌──────────────┐ ┌──────────────────────┐  │
-│  │  По ссылке   │ │     Вручную          │  │
-│  └──────────────┘ └──────────────────────┘  │
-├─────────────────────────────────────────────┤
-│                                             │
-│  Вкладка "По ссылке":                      │
-│    - QR-код (react-qr-code)                │
-│    - Кнопка копирования веб-ссылки         │
-│    - Кнопка открытия Telegram-ссылки       │
-│                                             │
-│  Вкладка "Вручную":                        │
-│    - Имя ученика*                          │
-│    - Telegram username*                    │
-│    - Цель обучения*                        │
-│    - Класс, Экзамен, Предмет               │
-│    - Начальный/Целевой балл                │
-│    - Контакт родителя, Заметки             │
-│    - Кнопка "Добавить"                     │
-│                                             │
-└─────────────────────────────────────────────┘
-```
+## Часть 2: Обновление упоминаний предметов на лендинге
 
-## Зависимости
+Согласно системному промпту, Сократ работает со **ВСЕМИ школьными предметами**. Нужно отразить это на лендинге, сохраняя фокус на приоритетных технических предметах.
 
-- `react-qr-code` — уже установлен
-- `manualAddTutorStudent` — уже есть в `src/lib/tutors.ts`
-- `ManualAddTutorStudentInput` — уже есть в `src/types/tutor.ts`
+### Предлагаемая структура текстов
+
+**Главный принцип:** Показать, что есть ВСЕ предметы, но выделить математику, физику и информатику как основные.
+
+### Файлы для редактирования
+
+| Файл | Текущий текст | Новый текст |
+|------|---------------|-------------|
+| `src/pages/Index.tsx` (hero h1) | "ИИ-помощник по математике, физике и информатике" | "ИИ-помощник по математике, физике, информатике и другим школьным предметам" |
+| `src/pages/Index.tsx` (subheadline) | "понимать математику, физику или информатику" | "понимать школьные предметы" |
+| `src/components/sections/ValueProposition.tsx` | "Понимай математику сам" | "Понимай школьные предметы сам" |
+| `src/components/sections/Pricing.tsx` (h2) | "математику, физику или информатику" | "школьные предметы" |
+| `src/components/sections/Footer.tsx` | "понять математику, физику и информатику" | "понять любой школьный предмет" |
+
+### Рекомендация по формулировкам
+
+**Вариант A (компактный):**
+> "ИИ-помощник по математике, физике, информатике и другим предметам"
+
+**Вариант B (с акцентом):**
+> "ИИ-помощник по всем школьным предметам: математика, физика, информатика — в приоритете"
+
+**Вариант C (расширенный список):**
+> "ИИ-помощник: математика • физика • информатика • химия • русский • история и другие"
 
 ---
 
 ## Техническая секция
 
-### Файл для создания
+### Детальные изменения
 
-`src/components/tutor/AddStudentDialog.tsx`
+#### `src/pages/Index.tsx`
 
-### Импорты
+Строка 175 (hero h1):
+```tsx
+// Было:
+🎯 ИИ-помощник по математике, физике и информатике, который учит тебя думать и понимать самостоятельно
 
-```typescript
-import { useState } from 'react';
-import QRCode from 'react-qr-code';
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Textarea } from '@/components/ui/textarea';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
-import { Copy, ExternalLink, Check, Loader2 } from 'lucide-react';
-import { useToast } from '@/hooks/use-toast';
-import { manualAddTutorStudent } from '@/lib/tutors';
-import type { ManualAddTutorStudentInput } from '@/types/tutor';
+// Вариант:
+🎯 ИИ-помощник по школьным предметам, который учит тебя думать и понимать самостоятельно
 ```
 
-### Логика вкладки "Вручную"
+Строки 179-181 (subheadline):
+```tsx
+// Было:
+Для тех, кто готовится к ОГЭ/ЕГЭ и хочет понимать математику, физику или информатику, а не просто списывать
 
-1. Форма с валидацией обязательных полей (name, telegram_username, learning_goal)
-2. При сабмите — вызов `manualAddTutorStudent(input)`
-3. При успехе — вызов `onManualAdded(response.tutor_student_id)` и закрытие диалога
-4. При ошибке — показать toast с сообщением
-
-### Экспорт
-
-```typescript
-export { AddStudentDialog };
+// Вариант:
+Для тех, кто готовится к ОГЭ/ЕГЭ и хочет понимать предметы, а не просто списывать. Математика, физика, информатика — в приоритете
 ```
+
+#### `src/components/sections/ValueProposition.tsx`
+
+Строка 27:
+```tsx
+// Было:
+💡 Понимай математику сам, не беспокоя учителя и одноклассников
+
+// Вариант:
+💡 Понимай предметы сам, не беспокоя учителя и одноклассников
+```
+
+#### `src/components/sections/Pricing.tsx`
+
+Строка 24:
+```tsx
+// Было:
+💎 Начни понимать математику, физику или информатику уже сегодня
+
+// Вариант:
+💎 Начни понимать школьные предметы уже сегодня
+```
+
+Строка 73-74 (в списке фичей FREE):
+```tsx
+// Было:
+"Мультичаты по предметам (математика, физика, информатика)"
+
+// Вариант:
+"Мультичаты по предметам (математика, физика, информатика, химия, русский и др.)"
+```
+
+#### `src/components/sections/Footer.tsx`
+
+Строки 75-76:
+```tsx
+// Было:
+Мы верим, что каждый может понять математику, физику и информатику, если задавать правильные вопросы.
+
+// Вариант:
+Мы верим, что каждый может понять любой школьный предмет, если задавать правильные вопросы.
+```
+
+### Файлы для изменения
+
+| Файл | Действие |
+|------|----------|
+| `src/pages/Index.tsx` | Закомментировать SpecialOffer, обновить тексты |
+| `src/components/sections/ValueProposition.tsx` | Обновить заголовок |
+| `src/components/sections/Pricing.tsx` | Обновить заголовок и список фичей |
+| `src/components/sections/Footer.tsx` | Обновить текст |
 
