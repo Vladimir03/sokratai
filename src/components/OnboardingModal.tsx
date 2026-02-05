@@ -21,6 +21,11 @@ const subjects = [
   { value: "math", label: "Математика", emoji: "📐" },
   { value: "physics", label: "Физика", emoji: "⚛️" },
   { value: "cs", label: "Информатика", emoji: "💻" },
+  { value: "chemistry", label: "Химия", emoji: "🧪" },
+  { value: "russian", label: "Русский язык", emoji: "📝" },
+  { value: "history", label: "История", emoji: "📜" },
+  { value: "biology", label: "Биология", emoji: "🧬" },
+  { value: "other", label: "Другой предмет", emoji: "📖" },
 ];
 
 const goals = [
@@ -181,10 +186,10 @@ const OnboardingModal = ({ open, userId, onComplete }: OnboardingModalProps) => 
             >
               <div className="text-center mb-6">
                 <h2 className="text-xl font-semibold text-foreground">
-                  Какой предмет сложнее всего?
+                  С каким предметом нужна помощь?
                 </h2>
                 <p className="text-sm text-muted-foreground mt-1">
-                  Сфокусируемся на нём
+                  Выбери основной предмет
                 </p>
               </div>
 
