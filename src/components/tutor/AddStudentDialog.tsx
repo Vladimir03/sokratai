@@ -199,28 +199,18 @@ export function AddStudentDialog({
                   </p>
                 </div>
                 
-                <div className="flex flex-col gap-2">
-                  <Button
-                    variant="outline"
-                    className="w-full"
-                    onClick={handleCopyLink}
-                  >
-                    {copied ? (
-                      <Check className="mr-2 h-4 w-4" />
-                    ) : (
-                      <Copy className="mr-2 h-4 w-4" />
-                    )}
-                    {copied ? 'Скопировано!' : 'Копировать ссылку'}
-                  </Button>
-                  
-                  <Button
-                    className="w-full"
-                    onClick={handleOpenTelegram}
-                  >
-                    <ExternalLink className="mr-2 h-4 w-4" />
-                    Открыть в Telegram
-                  </Button>
-                </div>
+                <Button
+                  variant="outline"
+                  className="w-full"
+                  onClick={handleCopyLink}
+                >
+                  {copied ? (
+                    <Check className="mr-2 h-4 w-4" />
+                  ) : (
+                    <Copy className="mr-2 h-4 w-4" />
+                  )}
+                  {copied ? 'Скопировано!' : 'Копировать ссылку'}
+                </Button>
                 
                 <p className="text-xs text-muted-foreground text-center">
                   Ученик перейдёт по ссылке и автоматически привяжется к вам
