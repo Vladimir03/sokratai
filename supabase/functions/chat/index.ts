@@ -10,6 +10,20 @@ const corsHeaders = {
 const MAX_MESSAGE_LENGTH = 2000;
 const FREE_DAILY_LIMIT = 10; // Daily message limit for free users
 
+type ResponseProfile = "default" | "telegram_compact";
+type ResponseMode = "dialog" | "solution" | "hint" | "explain";
+
+interface ChatRequestBody {
+  messages: any[];
+  systemPrompt?: string;
+  taskContext?: string;
+  chatId?: string;
+  userId?: string;
+  responseProfile?: ResponseProfile;
+  responseMode?: ResponseMode;
+  maxChars?: number;
+}
+
 // SECURITY: Allowed domains for image fetching to prevent SSRF attacks
 const ALLOWED_IMAGE_DOMAINS = [
   `${Deno.env.get("SUPABASE_URL")}/storage/v1/object/sign/chat-images/`,
@@ -271,6 +285,71 @@ plt.ylim(-10, 20)
 
 🚨 ПОМНИ: МАКСИМУМ 2 ВОПРОСА ЗА РАЗ!`;
 
+function normalizeResponseProfile(value: unknown): ResponseProfile {
+  return value === "telegram_compact" ? "telegram_compact" : "default";
+}
+
+function normalizeResponseMode(value: unknown): ResponseMode {
+  if (value === "solution" || value === "hint" || value === "explain") {
+    return value;
+  }
+  return "dialog";
+}
+
+function normalizeMaxChars(value: unknown): number | undefined {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return undefined;
+  }
+  return Math.max(200, Math.min(2000, Math.floor(value)));
+}
+
+function buildTelegramCompactAppendix(mode: ResponseMode, maxChars?: number): string {
+  const maxCharsInstruction = maxChars
+    ? `Максимальная длина ответа: до ${maxChars} символов (строго придерживайся лимита).`
+    : "Старайся отвечать коротко и без длинных полотен текста.";
+
+  const modeInstructions: Record<ResponseMode, string> = {
+    dialog: `РЕЖИМ dialog (по умолчанию):
+- Формат строго из 3 блоков и в этом порядке:
+Идея: [1-2 коротких предложения]
+Мини-шаг: [1 конкретное действие/вычисление]
+Вопрос: [ровно 1 вопрос для ученика]
+- Не давай полное решение.`,
+    solution: `РЕЖИМ solution:
+- Формат:
+Решение:
+Шаг 1: ...
+Шаг 2: ...
+Ответ: ...
+- Дай полное решение без лишних отступлений.`,
+    hint: `РЕЖИМ hint:
+- Формат:
+Подсказка: [короткий намек]
+Вопрос: [ровно 1 направляющий вопрос]
+- Не раскрывай полностью решение.`,
+    explain: `РЕЖИМ explain:
+- Формат:
+Разбор шага: [краткое объяснение одного шага]
+Пример: [короткий пример при необходимости]
+Вопрос: [ровно 1 вопрос на проверку понимания]
+- Не повторяй всё решение целиком.`,
+  };
+
+  return `=== TELEGRAM COMPACT PROFILE ===
+Это ответ для Telegram-бота с компактным UX.
+${maxCharsInstruction}
+
+Общие правила:
+- Короткие абзацы, 1-3 строки.
+- Без markdown-шума (никаких "###", code fences и лишних **).
+- Без вложенных списков и без нумерации 1.1/1.2.
+- Минимум эмодзи (используй только при реальной необходимости).
+- Для математики/физики LaTeX только когда это действительно нужно.
+- Не используй больше одного вопроса в конце ответа.
+
+${modeInstructions[mode]}`;
+}
+
 /**
  * Check user subscription, trial status, and daily message limits
  * Priority: Premium > Active Trial > Daily Limits
@@ -382,7 +461,7 @@ serve(async (req) => {
     let userId: string;
     
     if (isServiceRole) {
-      const body = await req.json();
+      const body = await req.json() as ChatRequestBody;
       userId = body.userId;
       
       if (!userId) {
@@ -393,6 +472,9 @@ serve(async (req) => {
       }
       
       const { messages, systemPrompt, taskContext, chatId } = body;
+      const responseProfile = normalizeResponseProfile(body.responseProfile);
+      const responseMode = normalizeResponseMode(body.responseMode);
+      const maxChars = normalizeMaxChars(body.maxChars);
 
       // Apply the same limits for Telegram/service callers
       const { allowed, isPremium, isTrialActive, trialEndsAt, messagesUsed, limit } = await checkSubscriptionAndLimits(userId, adminSupabase);
@@ -410,7 +492,17 @@ serve(async (req) => {
         );
       }
 
-      return await processAIRequest(userId, messages, systemPrompt, taskContext, chatId, req);
+      return await processAIRequest(
+        userId,
+        messages,
+        systemPrompt,
+        taskContext,
+        chatId,
+        responseProfile,
+        responseMode,
+        maxChars,
+        req,
+      );
     } else {
       const supabase = createClient(Deno.env.get("SUPABASE_URL") ?? "", Deno.env.get("SUPABASE_ANON_KEY") ?? "", {
         global: { headers: { Authorization: authHeader } },
@@ -446,9 +538,23 @@ serve(async (req) => {
         );
       }
 
-      const { messages, systemPrompt, taskContext, chatId } = await req.json();
-      
-      return await processAIRequest(userId, messages, systemPrompt, taskContext, chatId, req);
+      const body = await req.json() as ChatRequestBody;
+      const { messages, systemPrompt, taskContext, chatId } = body;
+      const responseProfile = normalizeResponseProfile(body.responseProfile);
+      const responseMode = normalizeResponseMode(body.responseMode);
+      const maxChars = normalizeMaxChars(body.maxChars);
+
+      return await processAIRequest(
+        userId,
+        messages,
+        systemPrompt,
+        taskContext,
+        chatId,
+        responseProfile,
+        responseMode,
+        maxChars,
+        req,
+      );
     }
   } catch (error) {
     console.error("Error in chat function:", error);
@@ -459,7 +565,17 @@ serve(async (req) => {
   }
 });
 
-async function processAIRequest(userId: string, messages: any[], systemPrompt?: string, taskContext?: string, chatId?: string, req?: Request) {
+async function processAIRequest(
+  userId: string,
+  messages: any[],
+  systemPrompt?: string,
+  taskContext?: string,
+  chatId?: string,
+  responseProfile: ResponseProfile = "default",
+  responseMode: ResponseMode = "dialog",
+  maxChars?: number,
+  req?: Request,
+) {
   const corsHeaders = {
     "Access-Control-Allow-Origin": "*",
     "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
@@ -550,11 +666,16 @@ async function processAIRequest(userId: string, messages: any[], systemPrompt?: 
 
   console.log(`🤖 Using Lovable Gateway (Gemini 3 Flash Preview)`);
   console.log("Calling AI gateway with messages:", transformedMessages.length);
+  console.log("Response shaping:", { responseProfile, responseMode, maxChars: maxChars ?? null });
 
   let effectiveSystemPrompt = systemPrompt || SYSTEM_PROMPT;
 
   if (taskContext) {
     effectiveSystemPrompt = `${effectiveSystemPrompt}\n\n📋 КОНТЕКСТ ЗАДАЧИ:\n${taskContext}\n\nИспользуй ИМЕННО эту задачу в своих ответах. НЕ придумывай другие задачи!`;
+  }
+
+  if (responseProfile === "telegram_compact") {
+    effectiveSystemPrompt = `${effectiveSystemPrompt}\n\n${buildTelegramCompactAppendix(responseMode, maxChars)}`;
   }
 
   // Формируем заголовки запроса

@@ -8,11 +8,16 @@ const corsHeaders = {
 const TELEGRAM_BOT_TOKEN = Deno.env.get("TELEGRAM_BOT_TOKEN");
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+const TELEGRAM_FORMAT_V2 = (Deno.env.get("TELEGRAM_FORMAT_V2") ?? "true").toLowerCase() === "true";
+const TELEGRAM_DIALOG_MAX_CHARS = 700;
+const TELEGRAM_MESSAGE_MAX_LENGTH = 4000;
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 const WEB_PAYMENT_URL = "https://sokratai.ru/profile?openPayment=true";
 const WEB_PRICING_URL = "https://sokratai.ru/#pricing";
 const WEBAPP_FALLBACK_URL = "https://sokratai.lovable.app";
+
+type TelegramResponseMode = "dialog" | "solution" | "hint" | "explain";
 
 function getWebAppBaseUrl(): string {
   return Deno.env.get("VITE_WEBAPP_URL") || WEBAPP_FALLBACK_URL;
@@ -3483,28 +3488,517 @@ function splitLongMessage(text: string, maxLength: number = 4000): string[] {
   return parts;
 }
 
-// Create quick action inline keyboard for help depth control
-function createQuickActionsKeyboard() {
-  return {
-    inline_keyboard: [
-      [
-        {
-          text: "✅ Покажи решение",
-          callback_data: "help_depth:solution",
-        },
-        {
-          text: "💡 Дай подсказку",
-          callback_data: "help_depth:hint",
-        },
-      ],
-      [
-        {
-          text: "📖 Объясни подробнее",
-          callback_data: "help_depth:explain",
-        },
-      ],
-    ],
+interface TelegramFormatBlock {
+  type: "paragraph" | "heading" | "step" | "list" | "answer" | "question" | "formula";
+  label?: string;
+  text: string;
+  items?: string[];
+  stepNumber?: number;
+}
+
+interface TelegramFormatResult {
+  formatted: string;
+  parts: string[];
+  truncated: boolean;
+  usedFallback: boolean;
+}
+
+function normalizeTelegramResponseText(text: string): string {
+  return text
+    .replace(/\r\n/g, "\n")
+    .replace(/\r/g, "\n")
+    .replace(/\u00A0/g, " ")
+    .replace(/\u200B/g, "")
+    .replace(/[ \t]+\n/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+function stripMarkdownNoise(text: string): string {
+  let result = text;
+
+  // Remove markdown headings and blockquotes that render poorly in Telegram.
+  result = result.replace(/^\s*#{1,6}\s+/gm, "");
+  result = result.replace(/^\s*>\s?/gm, "");
+  result = result.replace(/^\s*[-=]{3,}\s*$/gm, "");
+
+  // Keep code content, drop fences.
+  result = result.replace(/```[a-zA-Z]*\n([\s\S]*?)```/g, "$1");
+
+  // Remove noisy standalone markdown markers.
+  result = result.replace(/^\s*\*\*\s*$/gm, "");
+  result = result.replace(/^\s*__\s*$/gm, "");
+
+  return result.replace(/\n{3,}/g, "\n\n").trim();
+}
+
+function simplifyLatexExpression(expression: string): string {
+  let formula = expression.trim();
+  formula = formula.replace(/\\left|\\right/g, "");
+
+  let prev = "";
+  while (prev !== formula) {
+    prev = formula;
+    formula = formula.replace(/\\frac\{([^{}]+)\}\{([^{}]+)\}/g, "($1)/($2)");
+  }
+
+  formula = formula.replace(/[{}]/g, "");
+  formula = convertLatexToUnicode(formula);
+  return formula.replace(/\s+/g, " ").trim();
+}
+
+function simplifyLatexForTelegram(text: string): string {
+  let result = text;
+
+  result = result.replace(/\$\$([\s\S]+?)\$\$/g, (_match, expression) => {
+    const converted = simplifyLatexExpression(expression);
+    return converted ? `\n${converted}\n` : "";
+  });
+
+  result = result.replace(/\$([^$\n]+?)\$/g, (_match, expression) => {
+    const converted = simplifyLatexExpression(expression);
+    return converted || expression;
+  });
+
+  return result.replace(/\n{3,}/g, "\n\n").trim();
+}
+
+function removeInlineMarkdown(text: string): string {
+  return text
+    .replace(/\*\*([^*]+)\*\*/g, "$1")
+    .replace(/__([^_]+)__/g, "$1")
+    .replace(/~~([^~]+)~~/g, "$1")
+    .replace(/`([^`]+)`/g, "$1")
+    .replace(/(?<!\*)\*([^*\n]+)\*(?!\*)/g, "$1")
+    .replace(/(?<!_)_([^_\n]+)_(?!_)/g, "$1")
+    .trim();
+}
+
+function parseTelegramBlocks(text: string, responseMode: TelegramResponseMode): TelegramFormatBlock[] {
+  const chunks = text
+    .split(/\n{2,}/)
+    .map((chunk) => chunk.trim())
+    .filter(Boolean);
+
+  const blocks: TelegramFormatBlock[] = [];
+  const labelRegex = /^(Идея|Мини-шаг|Вопрос|Ответ|Решение|Подсказка|Разбор шага|Пример)\s*:\s*(.*)$/i;
+  const stepRegex = /^(?:\*\*)?\s*Шаг\s*(\d+)\s*[:.)-]?\s*(?:\*\*)?\s*(.*)$/i;
+  const listItemRegex = /^(\d+[.)]|[-*•])\s+(.+)$/;
+
+  for (const chunk of chunks) {
+    const lines = chunk.split("\n").map((line) => line.trim()).filter(Boolean);
+    if (lines.length === 0) continue;
+
+    const firstLine = removeInlineMarkdown(lines[0]);
+    const stepMatch = firstLine.match(stepRegex);
+    if (stepMatch) {
+      const body = [stepMatch[2], ...lines.slice(1)].filter(Boolean).join(" ").trim();
+      blocks.push({
+        type: "step",
+        stepNumber: parseInt(stepMatch[1], 10),
+        text: removeInlineMarkdown(body),
+      });
+      continue;
+    }
+
+    const labelMatch = firstLine.match(labelRegex);
+    if (labelMatch) {
+      const label = labelMatch[1];
+      const body = [labelMatch[2], ...lines.slice(1)].filter(Boolean).join(" ").trim();
+      const lower = label.toLowerCase();
+
+      if (lower === "ответ") {
+        blocks.push({ type: "answer", label: "Ответ", text: removeInlineMarkdown(body) });
+      } else if (lower === "вопрос") {
+        blocks.push({ type: "question", label: "Вопрос", text: removeInlineMarkdown(body) });
+      } else if (lower === "решение") {
+        blocks.push({ type: "heading", label: "Решение", text: removeInlineMarkdown(body) });
+      } else {
+        blocks.push({ type: "paragraph", label, text: removeInlineMarkdown(body) });
+      }
+      continue;
+    }
+
+    const listItems = lines
+      .map((line) => line.match(listItemRegex))
+      .filter(Boolean)
+      .map((match) => removeInlineMarkdown((match as RegExpMatchArray)[2]));
+
+    if (listItems.length === lines.length) {
+      blocks.push({ type: "list", text: "", items: listItems });
+      continue;
+    }
+
+    const joined = removeInlineMarkdown(lines.join(" "));
+    const looksLikeFormula =
+      /\\frac|\\sqrt|\\sum|\\int|[=±≤≥∞∑∫]/.test(joined) &&
+      joined.replace(/[0-9a-zA-Zа-яА-Я\s=+\-*/().,:]/g, "").length < 20;
+
+    if (looksLikeFormula) {
+      blocks.push({ type: "formula", text: joined });
+      continue;
+    }
+
+    blocks.push({ type: "paragraph", text: joined });
+  }
+
+  if (responseMode !== "dialog") {
+    return blocks;
+  }
+
+  const containsLabeledDialog = blocks.some((b) => (b.label || "").toLowerCase() === "идея")
+    && blocks.some((b) => (b.label || "").toLowerCase() === "мини-шаг")
+    && blocks.some((b) => b.type === "question" || (b.label || "").toLowerCase() === "вопрос");
+
+  if (containsLabeledDialog) {
+    return blocks;
+  }
+
+  const plainText = blocks
+    .map((block) => block.items ? block.items.join(" ") : block.text)
+    .join(" ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  if (!plainText) {
+    return blocks;
+  }
+
+  const sentences = plainText.split(/(?<=[.!?])\s+/).filter(Boolean);
+  const idea = sentences.slice(0, 2).join(" ").trim() || plainText.slice(0, 180).trim();
+  const ministep = sentences.slice(2, 3).join(" ").trim() || "Сделай один вычислительный шаг и проверь знак/единицы.";
+  const existingQuestion = sentences.find((s) => s.includes("?"));
+  const question = existingQuestion || "Какой следующий шаг ты попробуешь сделать?";
+
+  return [
+    { type: "paragraph", label: "Идея", text: idea },
+    { type: "paragraph", label: "Мини-шаг", text: ministep },
+    { type: "question", label: "Вопрос", text: question.replace(/\?*$/, "?") },
+  ];
+}
+
+function blockPlainLength(block: TelegramFormatBlock): number {
+  if (block.items) {
+    return block.items.join(" ").length;
+  }
+  const labelPart = block.label ? `${block.label}: `.length : 0;
+  return labelPart + block.text.length;
+}
+
+function applyBlockCharLimit(
+  blocks: TelegramFormatBlock[],
+  maxChars?: number,
+): { blocks: TelegramFormatBlock[]; truncated: boolean } {
+  if (!maxChars || maxChars <= 0) {
+    return { blocks, truncated: false };
+  }
+
+  const limited: TelegramFormatBlock[] = [];
+  let total = 0;
+  let truncated = false;
+
+  for (const block of blocks) {
+    const separator = limited.length > 0 ? 2 : 0;
+    const blockLength = blockPlainLength(block);
+
+    if (total + separator + blockLength <= maxChars) {
+      limited.push(block);
+      total += separator + blockLength;
+      continue;
+    }
+
+    const remaining = maxChars - total - separator;
+    if (remaining > 20) {
+      if (block.items && block.items.length > 0) {
+        const items: string[] = [];
+        let used = 0;
+        for (const item of block.items) {
+          const extra = (items.length > 0 ? 1 : 0) + item.length;
+          if (used + extra > remaining - 1) break;
+          items.push(item);
+          used += extra;
+        }
+        if (items.length > 0) {
+          items[items.length - 1] = `${items[items.length - 1].replace(/\.*$/, "")}…`;
+          limited.push({ ...block, items });
+        }
+      } else {
+        const source = block.text || "";
+        const clipped = source.slice(0, Math.max(0, remaining - 1)).trim();
+        if (clipped) {
+          limited.push({ ...block, text: `${clipped}…` });
+        }
+      }
+    }
+
+    truncated = true;
+    break;
+  }
+
+  if (limited.length === 0 && blocks.length > 0) {
+    const fallbackText = blocks[0].text.slice(0, Math.max(0, maxChars - 1)).trim();
+    limited.push({ ...blocks[0], text: `${fallbackText}…` });
+    truncated = true;
+  }
+
+  return { blocks: limited, truncated };
+}
+
+function renderTelegramInline(text: string): string {
+  const cleaned = removeInlineMarkdown(text).replace(/\s+/g, " ").trim();
+  return escapeHtml(cleaned);
+}
+
+function renderTelegramBlock(block: TelegramFormatBlock): string {
+  switch (block.type) {
+    case "heading": {
+      const title = block.label || block.text || "Разбор";
+      const body = block.text && block.text !== block.label ? ` ${renderTelegramInline(block.text)}` : "";
+      return `<b>${escapeHtml(title)}:</b>${body}`.trim();
+    }
+    case "step": {
+      const header = `<b>Шаг ${block.stepNumber ?? 1}:</b>`;
+      if (!block.text) return header;
+      return `${header} ${renderTelegramInline(block.text)}`;
+    }
+    case "answer":
+      return `<b>Ответ:</b> ${renderTelegramInline(block.text)}`.trim();
+    case "question":
+      return `<b>Вопрос:</b> ${renderTelegramInline(block.text)}`.trim();
+    case "list":
+      return (block.items || []).map((item) => `• ${renderTelegramInline(item)}`).join("\n");
+    case "formula":
+      return `<code>${renderTelegramInline(block.text)}</code>`;
+    case "paragraph":
+    default: {
+      if (block.label) {
+        return `<b>${escapeHtml(block.label)}:</b> ${renderTelegramInline(block.text)}`.trim();
+      }
+      return renderTelegramInline(block.text);
+    }
+  }
+}
+
+function splitHtmlSafely(text: string, maxLength: number = TELEGRAM_MESSAGE_MAX_LENGTH): string[] {
+  if (text.length <= maxLength) {
+    return [fixHtmlTags(text)];
+  }
+
+  const parts: string[] = [];
+  const allowedTags = new Set(["b", "i", "u", "s", "code", "pre"]);
+  const stack: string[] = [];
+  let current = "";
+  let i = 0;
+
+  const closeOpenTags = () => {
+    for (let idx = stack.length - 1; idx >= 0; idx--) {
+      current += `</${stack[idx]}>`;
+    }
   };
+
+  const reopenTags = () => stack.map((tag) => `<${tag}>`).join("");
+
+  while (i < text.length) {
+    if (text[i] === "<") {
+      const tagEnd = text.indexOf(">", i);
+      if (tagEnd !== -1) {
+        const token = text.slice(i, tagEnd + 1);
+        const tagMatch = token.match(/^<\/?([a-z]+)(?:\s[^>]*)?>$/i);
+        if (tagMatch && allowedTags.has(tagMatch[1].toLowerCase())) {
+          if (current.length + token.length > maxLength && current.length > 0) {
+            closeOpenTags();
+            parts.push(fixHtmlTags(current.trim()));
+            current = reopenTags();
+          }
+
+          current += token;
+
+          const tagName = tagMatch[1].toLowerCase();
+          const isClosing = token.startsWith("</");
+          if (isClosing) {
+            const idx = stack.lastIndexOf(tagName);
+            if (idx !== -1) stack.splice(idx, 1);
+          } else if (!token.endsWith("/>")) {
+            stack.push(tagName);
+          }
+
+          i = tagEnd + 1;
+          continue;
+        }
+      }
+    }
+
+    const char = text[i];
+    if (current.length + 1 > maxLength && current.length > 0) {
+      closeOpenTags();
+      parts.push(fixHtmlTags(current.trim()));
+      current = reopenTags();
+    }
+    current += char;
+    i += 1;
+  }
+
+  if (current.trim()) {
+    closeOpenTags();
+    parts.push(fixHtmlTags(current.trim()));
+  }
+
+  return parts.filter(Boolean);
+}
+
+function splitTelegramHtmlByBlocks(
+  renderedBlocks: string[],
+  maxLength: number = TELEGRAM_MESSAGE_MAX_LENGTH,
+): string[] {
+  if (renderedBlocks.length === 0) {
+    return [];
+  }
+
+  const parts: string[] = [];
+  let currentBlocks: string[] = [];
+  let currentLength = 0;
+
+  for (const block of renderedBlocks) {
+    const separator = currentBlocks.length > 0 ? 2 : 0;
+    const nextLength = currentLength + separator + block.length;
+
+    if (nextLength <= maxLength) {
+      currentBlocks.push(block);
+      currentLength = nextLength;
+      continue;
+    }
+
+    if (currentBlocks.length > 0) {
+      parts.push(currentBlocks.join("\n\n"));
+      currentBlocks = [];
+      currentLength = 0;
+    }
+
+    if (block.length <= maxLength) {
+      currentBlocks.push(block);
+      currentLength = block.length;
+      continue;
+    }
+
+    const oversizedParts = splitHtmlSafely(block, maxLength);
+    parts.push(...oversizedParts);
+  }
+
+  if (currentBlocks.length > 0) {
+    parts.push(currentBlocks.join("\n\n"));
+  }
+
+  return parts
+    .flatMap((part) => (part.length > maxLength ? splitHtmlSafely(part, maxLength) : [part]))
+    .map((part) => fixHtmlTags(part.trim()))
+    .filter(Boolean);
+}
+
+function formatTelegramResponseV2(
+  rawText: string,
+  options: { responseMode: TelegramResponseMode; maxChars?: number },
+): TelegramFormatResult {
+  const normalized = normalizeTelegramResponseText(rawText);
+  const noMarkdownNoise = stripMarkdownNoise(normalized);
+  const withSimpleLatex = simplifyLatexForTelegram(noMarkdownNoise);
+  const blocks = parseTelegramBlocks(withSimpleLatex, options.responseMode);
+  const limited = applyBlockCharLimit(blocks, options.maxChars);
+  const renderedBlocks = limited.blocks.map(renderTelegramBlock).filter(Boolean);
+  const formatted = fixHtmlTags(renderedBlocks.join("\n\n").trim());
+  const parts = splitTelegramHtmlByBlocks(renderedBlocks, TELEGRAM_MESSAGE_MAX_LENGTH);
+
+  return {
+    formatted,
+    parts: parts.length > 0 ? parts : [formatted],
+    truncated: limited.truncated,
+    usedFallback: false,
+  };
+}
+
+function formatTelegramResponseWithFallback(
+  rawText: string,
+  options: { responseMode: TelegramResponseMode; maxChars?: number },
+): TelegramFormatResult {
+  if (!TELEGRAM_FORMAT_V2) {
+    const formatted = formatForTelegramStructured(rawText);
+    const parts = splitLongMessage(formatted, TELEGRAM_MESSAGE_MAX_LENGTH);
+    return {
+      formatted,
+      parts,
+      truncated: false,
+      usedFallback: true,
+    };
+  }
+
+  try {
+    return formatTelegramResponseV2(rawText, options);
+  } catch (error) {
+    console.error("⚠️ Telegram format V2 failed, using fallback:", error);
+    const formatted = formatForTelegramStructured(rawText);
+    const parts = splitLongMessage(formatted, TELEGRAM_MESSAGE_MAX_LENGTH);
+    return {
+      formatted,
+      parts,
+      truncated: false,
+      usedFallback: true,
+    };
+  }
+}
+
+async function getLatestSolutionIdForUser(userId: string): Promise<string | null> {
+  const { data, error } = await supabase
+    .from("solutions")
+    .select("id")
+    .eq("user_id", userId)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (error) {
+    console.error("Failed to fetch latest solution ID:", error);
+    return null;
+  }
+
+  return data?.id ?? null;
+}
+
+async function resolveKeyboardSolutionId(userId: string, currentSolutionId?: string | null): Promise<string | null> {
+  if (currentSolutionId) return currentSolutionId;
+  return getLatestSolutionIdForUser(userId);
+}
+
+function createQuickActionsKeyboard(solutionId?: string | null) {
+  const inline_keyboard: Array<Array<Record<string, unknown>>> = [
+    [
+      {
+        text: "✅ Покажи решение",
+        callback_data: "help_depth:solution",
+      },
+      {
+        text: "💡 Дай подсказку",
+        callback_data: "help_depth:hint",
+      },
+    ],
+    [
+      {
+        text: "📖 Разобрать шаг",
+        callback_data: "help_depth:explain",
+      },
+    ],
+  ];
+
+  if (solutionId) {
+    inline_keyboard.push([
+      {
+        text: "📱 Открыть полное решение",
+        web_app: {
+          url: `${getWebAppBaseUrl()}/miniapp/solution/${solutionId}`,
+        },
+      },
+    ]);
+  }
+
+  return { inline_keyboard };
 }
 
 /**
@@ -3854,6 +4348,9 @@ async function handleTextMessage(telegramUserId: number, userId: string, text: s
         messages: history || [],
         chatId: chatId,
         userId: userId,
+        responseProfile: "telegram_compact",
+        responseMode: "dialog",
+        maxChars: TELEGRAM_DIALOG_MAX_CHARS,
       }),
     });
 
@@ -3909,12 +4406,18 @@ async function handleTextMessage(telegramUserId: number, userId: string, text: s
     // Save solution to database
     const solutionId = await saveSolution(telegramUserId, telegramUserId, userId, text, aiContent);
 
-    // Format and save AI response
-    const formattedContent = formatForTelegramStructured(aiContent);
-
-    // DEBUG: Log formatted result
-    console.log("\n📝 FORMATTED RESULT (first 500 chars):");
-    console.log(formattedContent.substring(0, 500));
+    const formatResult = formatTelegramResponseWithFallback(aiContent, {
+      responseMode: "dialog",
+      maxChars: TELEGRAM_DIALOG_MAX_CHARS,
+    });
+    console.log("🧾 Telegram format stats:", {
+      responseMode: "dialog",
+      rawLen: aiContent.length,
+      finalLen: formatResult.formatted.length,
+      truncated: formatResult.truncated,
+      partsCount: formatResult.parts.length,
+      usedFallback: formatResult.usedFallback,
+    });
 
     await supabase.from("chat_messages").insert({
       chat_id: chatId,
@@ -3923,8 +4426,8 @@ async function handleTextMessage(telegramUserId: number, userId: string, text: s
       content: aiContent,
     });
 
-    // Split and send response if too long
-    const messageParts = splitLongMessage(formattedContent);
+    const keyboardSolutionId = await resolveKeyboardSolutionId(userId, solutionId);
+    const messageParts = formatResult.parts;
     for (let i = 0; i < messageParts.length; i++) {
       if (i > 0) {
         // Small delay between parts
@@ -3936,15 +4439,8 @@ async function handleTextMessage(telegramUserId: number, userId: string, text: s
       await sendTelegramMessage(
         telegramUserId,
         messageParts[i],
-        isLastPart ? { reply_markup: createQuickActionsKeyboard() } : undefined,
+        isLastPart ? { reply_markup: createQuickActionsKeyboard(keyboardSolutionId) } : undefined,
       );
-    }
-
-    // Send Mini App button if solution was saved
-    if (solutionId) {
-      await sendTelegramMessage(telegramUserId, "📱 Открой полное решение с формулами:", {
-        reply_markup: generateMiniAppButton(solutionId),
-      });
     }
 
     // Post-response UX nudges
@@ -4087,6 +4583,9 @@ async function handlePhotoMessage(telegramUserId: number, userId: string, photo:
         messages: history || [],
         chatId: chatId,
         userId: userId,
+        responseProfile: "telegram_compact",
+        responseMode: "dialog",
+        maxChars: TELEGRAM_DIALOG_MAX_CHARS,
       }),
     });
 
@@ -4131,7 +4630,18 @@ async function handlePhotoMessage(telegramUserId: number, userId: string, photo:
 
     // Format and save AI response
     console.log("Step 20: Formatting content for Telegram...");
-    const formattedContent = formatForTelegramStructured(aiContent);
+    const formatResult = formatTelegramResponseWithFallback(aiContent, {
+      responseMode: "dialog",
+      maxChars: TELEGRAM_DIALOG_MAX_CHARS,
+    });
+    console.log("🧾 Telegram format stats:", {
+      responseMode: "dialog",
+      rawLen: aiContent.length,
+      finalLen: formatResult.formatted.length,
+      truncated: formatResult.truncated,
+      partsCount: formatResult.parts.length,
+      usedFallback: formatResult.usedFallback,
+    });
 
     console.log("Step 21: Saving AI response to database...");
     await supabase.from("chat_messages").insert({
@@ -4143,7 +4653,8 @@ async function handlePhotoMessage(telegramUserId: number, userId: string, photo:
 
     // Split and send response if too long
     console.log("Step 22: Splitting and sending messages...");
-    const messageParts = splitLongMessage(formattedContent);
+    const keyboardSolutionId = await resolveKeyboardSolutionId(userId, solutionId);
+    const messageParts = formatResult.parts;
     console.log("Message parts:", messageParts.length);
 
     for (let i = 0; i < messageParts.length; i++) {
@@ -4155,16 +4666,8 @@ async function handlePhotoMessage(telegramUserId: number, userId: string, photo:
       await sendTelegramMessage(
         telegramUserId,
         messageParts[i],
-        isLastPart ? { reply_markup: createQuickActionsKeyboard() } : undefined,
+        isLastPart ? { reply_markup: createQuickActionsKeyboard(keyboardSolutionId) } : undefined,
       );
-    }
-
-    // Send Mini App button if solution was saved
-    if (solutionId) {
-      console.log("Step 23: Sending Mini App button...");
-      await sendTelegramMessage(telegramUserId, "📱 Открой полное решение с формулами:", {
-        reply_markup: generateMiniAppButton(solutionId),
-      });
     }
 
     console.log("Photo message handled successfully!");
@@ -4185,9 +4688,10 @@ async function handleButtonAction(
   userId: string,
   promptText: string,
   originalMessageId: number | undefined,
-  responseHeader: string
+  responseHeader: string,
+  responseMode: TelegramResponseMode,
 ) {
-  console.log("Handling button action:", { telegramUserId, promptText, originalMessageId });
+  console.log("Handling button action:", { telegramUserId, promptText, originalMessageId, responseMode });
 
   try {
     // Get or create chat
@@ -4260,6 +4764,8 @@ async function handleButtonAction(
         messages: history || [],
         chatId: chatId,
         userId: userId,
+        responseProfile: "telegram_compact",
+        responseMode,
       }),
     });
 
@@ -4321,13 +4827,24 @@ async function handleButtonAction(
     });
 
     // Format for Telegram with improved structure
-    const formattedContent = formatForTelegramStructured(aiContent);
+    const formatResult = formatTelegramResponseWithFallback(aiContent, {
+      responseMode,
+    });
+    console.log("🧾 Telegram format stats:", {
+      responseMode,
+      rawLen: aiContent.length,
+      finalLen: formatResult.formatted.length,
+      truncated: formatResult.truncated,
+      partsCount: formatResult.parts.length,
+      usedFallback: formatResult.usedFallback,
+    });
 
     // Build final message with header
-    const fullMessage = `${responseHeader}\n\n${formattedContent}`;
+    const fullMessage = `${responseHeader}\n\n${formatResult.formatted}`;
 
     // Split if too long (Telegram limit is ~4096 chars)
-    const messageParts = splitLongMessage(fullMessage, 4000);
+    const messageParts = splitHtmlSafely(fullMessage, TELEGRAM_MESSAGE_MAX_LENGTH);
+    const keyboardSolutionId = await resolveKeyboardSolutionId(userId);
 
     // Edit the original message with the first part
     if (originalMessageId && messageParts.length > 0) {
@@ -4338,7 +4855,7 @@ async function handleButtonAction(
             telegramUserId,
             originalMessageId,
             messageParts[0],
-            { reply_markup: createQuickActionsKeyboard() }
+            { reply_markup: createQuickActionsKeyboard(keyboardSolutionId) }
           );
         } else {
           // Multiple parts: edit with first part (no buttons)
@@ -4355,7 +4872,7 @@ async function handleButtonAction(
             await sendTelegramMessage(
               telegramUserId,
               messageParts[i],
-              isLastPart ? { reply_markup: createQuickActionsKeyboard() } : undefined
+              isLastPart ? { reply_markup: createQuickActionsKeyboard(keyboardSolutionId) } : undefined
             );
           }
         }
@@ -4368,7 +4885,7 @@ async function handleButtonAction(
           await sendTelegramMessage(
             telegramUserId,
             messageParts[i],
-            isLastPart ? { reply_markup: createQuickActionsKeyboard() } : undefined
+            isLastPart ? { reply_markup: createQuickActionsKeyboard(keyboardSolutionId) } : undefined
           );
         }
       }
@@ -4382,7 +4899,7 @@ async function handleButtonAction(
         await sendTelegramMessage(
           telegramUserId,
           messageParts[i],
-          isLastPart ? { reply_markup: createQuickActionsKeyboard() } : undefined
+          isLastPart ? { reply_markup: createQuickActionsKeyboard(keyboardSolutionId) } : undefined
         );
       }
     }
@@ -4440,22 +4957,26 @@ async function handleCallbackQuery(callbackQuery: any) {
     let promptText = "";
     let responseHeader = "";
     let buttonText = "";
+    let responseMode: TelegramResponseMode = "dialog";
 
     switch (helpLevel) {
       case "solution":
         promptText = "Покажи полное решение этой задачи с ответом. Не задавай вопросов, просто реши.";
-        responseHeader = "✅ <b>Решение:</b>";
-        buttonText = "✅ Показываю решение...";
+        responseHeader = "<b>Решение:</b>";
+        buttonText = "Показываю решение...";
+        responseMode = "solution";
         break;
       case "hint":
         promptText = "Дай мне только подсказку для следующего шага. Не решай полностью, только намекни на направление.";
-        responseHeader = "💡 <b>Подсказка:</b>";
-        buttonText = "💡 Готовлю подсказку...";
+        responseHeader = "<b>Подсказка:</b>";
+        buttonText = "Готовлю подсказку...";
+        responseMode = "hint";
         break;
       case "explain":
         promptText = "Объясни подробнее последний шаг или концепцию. Разбери детально с примерами.";
-        responseHeader = "📖 <b>Подробное объяснение:</b>";
-        buttonText = "📖 Готовлю объяснение...";
+        responseHeader = "<b>Разбор шага:</b>";
+        buttonText = "Разбираю шаг...";
+        responseMode = "explain";
         break;
       default:
         return;
@@ -4485,7 +5006,7 @@ async function handleCallbackQuery(callbackQuery: any) {
     }
 
     // Process the button action - edit the LOADING message (not original)
-    await handleButtonAction(telegramUserId, userId, promptText, loadingMessageId, responseHeader);
+    await handleButtonAction(telegramUserId, userId, promptText, loadingMessageId, responseHeader, responseMode);
     return;
   }
 
