@@ -45,7 +45,7 @@ export default defineConfig(({ mode }) => ({
     rollupOptions: {
       output: {
         manualChunks: {
-          // Vendor chunks
+          // Core vendor - loaded on every page
           'react-vendor': ['react', 'react-dom', 'react-router-dom'],
           'ui-components': [
             '@radix-ui/react-dialog',
@@ -53,10 +53,14 @@ export default defineConfig(({ mode }) => ({
             '@radix-ui/react-slot',
             '@radix-ui/react-toast'
           ],
-          // Supabase separate chunk
+          // Supabase - loaded on auth pages
           'supabase': ['@supabase/supabase-js'],
-          // Math/LaTeX libraries
+          // Math/LaTeX - loaded only on Chat/student pages
           'math-rendering': ['katex', 'react-katex', 'react-markdown'],
+          // Animations - separate chunk, only loaded by pages that need it
+          'animations': ['framer-motion'],
+          // Charts - loaded only on admin/analytics pages
+          'charts': ['recharts'],
         },
         // Optimize chunk names
         chunkFileNames: 'assets/[name]-[hash].js',
