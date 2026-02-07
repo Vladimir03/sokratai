@@ -26,26 +26,29 @@ const TutorGuard = ({ children }: TutorGuardProps) => {
         return;
       }
 
-      // Retry logic for unstable connections
-      let retries = 2;
+      // Retry logic with increasing delays for role propagation and unstable connections
+      const delays = [0, 1000, 2000, 3000]; // First attempt immediate, then 1s, 2s, 3s
       let isTutor = false;
       let lastError = null;
-      
-      while (retries >= 0) {
-        const { data, error } = await supabase.rpc("is_tutor", { 
-          _user_id: session.user.id 
+
+      for (let i = 0; i < delays.length; i++) {
+        if (delays[i] > 0) {
+          await new Promise(r => setTimeout(r, delays[i]));
+        }
+
+        const { data, error } = await supabase.rpc("is_tutor", {
+          _user_id: session.user.id
         });
-        
-        if (!error) {
-          isTutor = data;
+
+        if (!error && data) {
+          isTutor = true;
           lastError = null;
           break;
         }
-        
+
         lastError = error;
-        retries--;
-        if (retries >= 0) {
-          await new Promise(r => setTimeout(r, 1000)); // Wait 1 sec before retry
+        if (!error && !data && i < delays.length - 1) {
+          console.log(`TutorGuard: is_tutor returned false, retrying (${i + 1}/${delays.length})...`);
         }
       }
 
@@ -57,7 +60,7 @@ const TutorGuard = ({ children }: TutorGuardProps) => {
       }
 
       if (!isTutor) {
-        navigate("/");
+        navigate("/register-tutor");
         return;
       }
 
