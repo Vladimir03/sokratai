@@ -74,5 +74,63 @@ else
   echo "✅ No TypeScript errors"
 fi
 
+# 5. Проверяем кросс-браузерную совместимость (Safari/iOS)
+echo "5. Cross-browser compatibility checks..."
+COMPAT_WARNINGS=0
+
+# Проверяем 100vh (ломает iOS Safari)
+VH_FILES=$(grep -rn "100vh" src/ --include="*.tsx" --include="*.ts" --include="*.css" -l 2>/dev/null || true)
+if [ -n "$VH_FILES" ]; then
+  echo "   ⚠️  100vh found (breaks iOS Safari). Use 100dvh or -webkit-fill-available:"
+  echo "$VH_FILES" | while read f; do echo "      - $f"; done
+  COMPAT_WARNINGS=$((COMPAT_WARNINGS + 1))
+fi
+
+# Проверяем Date парсинг без ISO формата (ломает Safari)
+DATE_SPACE=$(grep -rn 'new Date("[0-9]\{4\}-[0-9]\{2\}-[0-9]\{2\} ' src/ --include="*.tsx" --include="*.ts" -l 2>/dev/null || true)
+if [ -n "$DATE_SPACE" ]; then
+  echo "   ⚠️  Date parsing with space separator (breaks Safari). Use ISO format with T:"
+  echo "$DATE_SPACE" | while read f; do echo "      - $f"; done
+  COMPAT_WARNINGS=$((COMPAT_WARNINGS + 1))
+fi
+
+# Проверяем RegExp lookbehind (не работает в Safari < 16.4)
+LOOKBEHIND=$(grep -rn '(?<=' src/ --include="*.tsx" --include="*.ts" -l 2>/dev/null || true)
+if [ -n "$LOOKBEHIND" ]; then
+  echo "   ⚠️  RegExp lookbehind found (Safari < 16.4). Use capturing groups instead:"
+  echo "$LOOKBEHIND" | while read f; do echo "      - $f"; done
+  COMPAT_WARNINGS=$((COMPAT_WARNINGS + 1))
+fi
+
+# Проверяем structuredClone (Safari < 15.4)
+SCLONE=$(grep -rn 'structuredClone(' src/ --include="*.tsx" --include="*.ts" -l 2>/dev/null || true)
+if [ -n "$SCLONE" ]; then
+  echo "   ⚠️  structuredClone() found (Safari < 15.4). Use JSON.parse(JSON.stringify()) or lodash:"
+  echo "$SCLONE" | while read f; do echo "      - $f"; done
+  COMPAT_WARNINGS=$((COMPAT_WARNINGS + 1))
+fi
+
+# Проверяем .at() на массивах (Safari < 15.4)
+DOT_AT=$(grep -rn '\.at(-' src/ --include="*.tsx" --include="*.ts" -l 2>/dev/null || true)
+if [ -n "$DOT_AT" ]; then
+  echo "   ⚠️  .at() found (Safari < 15.4). Use bracket notation:"
+  echo "$DOT_AT" | while read f; do echo "      - $f"; done
+  COMPAT_WARNINGS=$((COMPAT_WARNINGS + 1))
+fi
+
+# Проверяем маленький font-size на input (Safari iOS зумит)
+SMALL_INPUT=$(grep -rn 'text-xs\|text-\[1[0-3]px\]\|font-size:\s*1[0-3]px' src/ --include="*.tsx" --include="*.ts" -l 2>/dev/null | xargs grep -l '<input\|<textarea\|<select\|<Input\|<Textarea\|<Select' 2>/dev/null || true)
+if [ -n "$SMALL_INPUT" ]; then
+  echo "   ⚠️  Small font-size on inputs found (Safari iOS auto-zooms < 16px):"
+  echo "$SMALL_INPUT" | while read f; do echo "      - $f"; done
+  COMPAT_WARNINGS=$((COMPAT_WARNINGS + 1))
+fi
+
+if [ $COMPAT_WARNINGS -eq 0 ]; then
+  echo "   ✅ No cross-browser issues detected"
+else
+  echo "   ⚠️  $COMPAT_WARNINGS compatibility warning(s) found (non-blocking)"
+fi
+
 echo ""
 echo "=== Smoke Test Complete ==="
