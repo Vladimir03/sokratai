@@ -217,4 +217,17 @@ bun run lint         # ESLint
 bun run preview      # Preview production билда
 bun run analyze      # Анализ размера бандла
 bun run smoke-test   # Smoke-тест (билд + чанки + типы + compat)
+
+# E2E тесты (Playwright)
+npx playwright install chromium  # Первоначальная установка браузера
+bun run test:e2e                 # Запуск всех E2E тестов
+bun run test:e2e:headed          # С видимым браузером
+bun run test:e2e:ui              # Интерактивный UI-режим
 ```
+
+### E2E тесты (Playwright)
+- Тесты в `e2e/` — мокают Supabase API через `page.route()`, **не требуют** живой backend
+- Конфиг: `playwright.config.ts` — Chrome + Safari + iPhone
+- Хелперы для моков: `e2e/helpers/supabase-mock.ts`
+- При изменении auth-flow **обязательно** добавляй/обновляй тесты в `e2e/tutor-registration.spec.ts`
+- Запускай **перед деплоем**: `bun run test:e2e` (после `bun run smoke-test`)

@@ -10,7 +10,10 @@
     "lint": "eslint .",
     "preview": "vite preview",
     "analyze": "vite build && echo '\\n=== Bundle Analysis ===' && ls -lhS dist/assets/*.js | awk '{print $5, $9}'",
-    "smoke-test": "bash scripts/smoke-test.sh"
+    "smoke-test": "bash scripts/smoke-test.sh",
+    "test:e2e": "playwright test",
+    "test:e2e:headed": "playwright test --headed",
+    "test:e2e:ui": "playwright test --ui"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.10.0",
@@ -83,6 +86,7 @@
   ],
   "devDependencies": {
     "@eslint/js": "^9.32.0",
+    "@playwright/test": "^1.58.2",
     "@tailwindcss/typography": "^0.5.19",
     "@types/node": "^22.16.5",
     "@types/react": "^18.3.23",
