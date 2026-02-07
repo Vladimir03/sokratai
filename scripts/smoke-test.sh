@@ -133,4 +133,42 @@ else
 fi
 
 echo ""
+echo "6. Auth flow guardrails..."
+
+if grep -q 'path="/tutor/login"' src/App.tsx; then
+  echo "   ✅ /tutor/login route exists"
+else
+  echo "   ❌ /tutor/login route missing in App.tsx"
+  exit 1
+fi
+
+if grep -q 'Link to="/tutor/login"' src/pages/Login.tsx; then
+  echo "   ✅ student login links tutors to /tutor/login"
+else
+  echo "   ❌ login page tutor link is not routed to /tutor/login"
+  exit 1
+fi
+
+if grep -q 'JSON.stringify({ intended_role: "tutor" })' src/components/TutorTelegramLoginButton.tsx; then
+  echo "   ✅ tutor telegram button sends intended_role=tutor"
+else
+  echo "   ❌ tutor telegram button is missing intended_role=tutor"
+  exit 1
+fi
+
+if grep -q 'upgrade_existing' src/pages/RegisterTutor.tsx; then
+  echo "   ❌ RegisterTutor still references upgrade_existing"
+  exit 1
+else
+  echo "   ✅ RegisterTutor has no upgrade_existing fallback"
+fi
+
+if grep -q 'authError.status === 422' src/pages/RegisterTutor.tsx; then
+  echo "   ❌ RegisterTutor still uses status 422 as email-exists marker"
+  exit 1
+else
+  echo "   ✅ RegisterTutor no longer treats 422 as email-exists"
+fi
+
+echo ""
 echo "=== Smoke Test Complete ==="

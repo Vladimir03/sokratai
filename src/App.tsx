@@ -17,6 +17,7 @@ const AnalyticsTracker = () => {
 
 // Lazy load all pages for optimal code splitting
 const Login = lazy(() => import("./pages/Login"));
+const TutorLogin = lazy(() => import("./pages/TutorLogin"));
 const SignUp = lazy(() => import("./pages/SignUp"));
 const ForgotPassword = lazy(() => import("./pages/ForgotPassword"));
 const ResetPassword = lazy(() => import("./pages/ResetPassword"));
@@ -76,6 +77,14 @@ const App = () => (
                   <Login />
                 </Suspense>
               } 
+            />
+            <Route
+              path="/tutor/login"
+              element={
+                <Suspense fallback={<PageLoader />}>
+                  <TutorLogin />
+                </Suspense>
+              }
             />
             <Route 
               path="/signup" 

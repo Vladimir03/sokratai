@@ -47,46 +47,56 @@ const TutorTelegramLoginButton = ({
           access_token: data.session.access_token,
           refresh_token: data.session.refresh_token,
         });
-        
-        setStatus("success");
-        toast.success("Успешный вход через Telegram!");
-        
-        // Ensure tutor role is available before redirect
-        // Use increasing delays (exponential backoff) for role propagation
-        setTimeout(async () => {
-          try {
-            const { data: { user } } = await supabase.auth.getUser();
-            if (!user) {
-              toast.error("Не удалось получить пользователя. Попробуйте войти снова.");
-              return;
-            }
 
-            let isTutor = false;
-            const delays = [500, 1000, 1500, 2000, 3000]; // Exponential backoff
-            for (let attempt = 0; attempt < delays.length; attempt++) {
-              const { data, error } = await supabase.rpc("is_tutor", { _user_id: user.id });
-              if (!error && data) {
-                isTutor = true;
-                break;
-              }
-              console.log(`is_tutor check attempt ${attempt + 1}/${delays.length}: ${data}, error: ${error?.message}`);
-              await wait(delays[attempt]);
-            }
-
-            if (isTutor) {
-              navigate("/tutor/dashboard");
-            } else {
-              // Role not found yet — redirect to dashboard anyway, TutorGuard will retry
-              console.warn("Tutor role not confirmed after retries, redirecting to dashboard for TutorGuard to verify");
-              navigate("/tutor/dashboard");
-            }
-          } catch (error) {
-            console.error("Tutor role check error:", error);
-            // Still try to redirect — TutorGuard has its own retry logic
-            navigate("/tutor/dashboard");
+        try {
+          const { data: { user } } = await supabase.auth.getUser();
+          if (!user) {
+            await supabase.auth.signOut();
+            setLoading(false);
+            setStatus("idle");
+            setCurrentToken(null);
+            toast.error("Не удалось получить пользователя. Попробуйте войти снова.");
+            return true;
           }
-        }, 1000);
-        
+
+          let isTutor = false;
+          const delays = [500, 1000, 1500, 2000, 3000];
+          for (let attempt = 0; attempt < delays.length; attempt++) {
+            const { data: roleData, error } = await supabase.rpc("is_tutor", { _user_id: user.id });
+            if (!error && roleData) {
+              isTutor = true;
+              break;
+            }
+
+            console.log(`is_tutor check attempt ${attempt + 1}/${delays.length}: ${roleData}, error: ${error?.message}`);
+            await wait(delays[attempt]);
+          }
+
+          if (!isTutor) {
+            console.error("auth_event:telegram_role_missing", {
+              flow: "tutor_telegram_login",
+              user_id: user.id,
+            });
+            await supabase.auth.signOut();
+            setLoading(false);
+            setStatus("idle");
+            setCurrentToken(null);
+            toast.error("Не удалось подтвердить роль репетитора. Попробуйте снова.");
+            return true;
+          }
+
+          setStatus("success");
+          toast.success("Успешный вход через Telegram!");
+          navigate("/tutor/dashboard");
+        } catch (error) {
+          console.error("Tutor role check error:", error);
+          await supabase.auth.signOut();
+          setLoading(false);
+          setStatus("idle");
+          setCurrentToken(null);
+          toast.error("Ошибка проверки роли репетитора. Попробуйте снова.");
+        }
+
         return true;
       }
 

@@ -21,6 +21,16 @@ const registerSchema = z.object({
     .regex(/[0-9]/, { message: "Должна быть цифра" }),
 });
 
+function isExistingEmailError(error: unknown): boolean {
+  const message = String((error as any)?.message || "").toLowerCase();
+  return (
+    message.includes("already registered") ||
+    message.includes("already been registered") ||
+    message.includes("already in use") ||
+    message.includes("user already exists")
+  );
+}
+
 const RegisterTutor = () => {
   const navigate = useNavigate();
   const [name, setName] = useState("");
@@ -71,40 +81,13 @@ const RegisterTutor = () => {
         },
       });
 
-      // If email already registered — try to sign in and upgrade to tutor
-      if (authError && (
-        authError.message?.includes("already registered") ||
-        authError.message?.includes("already been registered") ||
-        authError.message?.includes("already in use") ||
-        authError.status === 422
-      )) {
-        console.log("Email exists, attempting sign in to upgrade to tutor...");
-
-        const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
+      if (authError && isExistingEmailError(authError)) {
+        console.warn("auth_event:existing_email", {
+          flow: "tutor_register",
           email: validation.data.email,
-          password: validation.data.password,
         });
-
-        if (signInError) {
-          toast.error("Этот email уже зарегистрирован. Проверьте пароль или войдите через страницу входа.");
-          setLoading(false);
-          return;
-        }
-
-        if (signInData.user) {
-          // Assign tutor role to existing account
-          const { error: roleError } = await supabase.functions.invoke("assign-tutor-role", {
-            body: { user_id: signInData.user.id, upgrade_existing: true },
-          });
-
-          if (roleError) {
-            console.error("Error assigning tutor role to existing account:", roleError);
-          }
-
-          toast.success("Роль репетитора добавлена!");
-          navigate("/tutor/dashboard");
-          return;
-        }
+        toast.error("Email уже занят. Для репетитора нужен отдельный аккаунт.");
+        return;
       }
 
       if (authError) throw authError;
@@ -119,8 +102,13 @@ const RegisterTutor = () => {
       });
 
       if (roleError) {
-        console.error("Error assigning tutor role:", roleError);
-        // Continue anyway - user is created, role can be fixed later
+        console.error("auth_event:role_assignment_failed", {
+          flow: "tutor_register",
+          user_id: authData.user.id,
+          error: roleError.message,
+        });
+        toast.error("Не удалось назначить роль репетитора. Попробуйте снова.");
+        return;
       }
 
       toast.success("Регистрация успешна!");
@@ -210,7 +198,7 @@ const RegisterTutor = () => {
           <div className="space-y-3 text-center text-sm">
             <p className="text-muted-foreground">
               Уже есть аккаунт?{" "}
-              <Link to="/login" className="text-primary hover:underline">
+              <Link to="/tutor/login" className="text-primary hover:underline">
                 Войти
               </Link>
             </p>

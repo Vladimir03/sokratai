@@ -6,32 +6,32 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { supabase } from "@/lib/supabaseClient";
 import { toast } from "sonner";
 import { z } from "zod";
-import TelegramLoginButton from "@/components/TelegramLoginButton";
+import TutorTelegramLoginButton from "@/components/TutorTelegramLoginButton";
 
 const loginSchema = z.object({
   email: z.string().trim().email({ message: "Неверный формат email" }).max(255),
   password: z.string().min(6, { message: "Минимум 6 символов" }),
 });
 
-const Login = () => {
+const TutorLogin = () => {
   const navigate = useNavigate();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
 
-  // Redirect authenticated users to product
   useEffect(() => {
     const checkSession = async () => {
       const { data: { session } } = await supabase.auth.getSession();
-      if (session) {
-        const { data: isTutor } = await supabase.rpc("is_tutor", { _user_id: session.user.id });
-        if (isTutor) {
-          navigate("/tutor/dashboard");
-        } else {
-          navigate("/chat");
-        }
+      if (!session) return;
+
+      const { data: isTutor } = await supabase.rpc("is_tutor", { _user_id: session.user.id });
+      if (isTutor) {
+        navigate("/tutor/dashboard");
+      } else {
+        await supabase.auth.signOut();
       }
     };
+
     checkSession();
   }, [navigate]);
 
@@ -54,19 +54,22 @@ const Login = () => {
 
       if (error) throw error;
 
-      // Check if user is a tutor and redirect accordingly
-      if (data.user) {
-        const { data: isTutor } = await supabase.rpc("is_tutor", { _user_id: data.user.id });
-        
-        if (isTutor) {
-          toast.success("Успешный вход!");
-          navigate("/tutor/dashboard");
-          return;
-        }
+      if (!data.user) {
+        throw new Error("Не удалось получить пользователя");
+      }
+
+      const { data: isTutor, error: roleError } = await supabase.rpc("is_tutor", { _user_id: data.user.id });
+      if (roleError) throw roleError;
+
+      if (!isTutor) {
+        console.warn("auth_event:not_tutor_account", { user_id: data.user.id });
+        await supabase.auth.signOut();
+        toast.error("Этот аккаунт не репетиторский. Используйте отдельный tutor-аккаунт.");
+        return;
       }
 
       toast.success("Успешный вход!");
-      navigate("/chat");
+      navigate("/tutor/dashboard");
     } catch (error: any) {
       toast.error(error.message || "Ошибка входа");
     } finally {
@@ -78,21 +81,19 @@ const Login = () => {
     <div className="min-h-screen flex items-center justify-center bg-gradient-hero p-4">
       <Card className="w-full max-w-md shadow-elegant">
         <CardHeader className="space-y-1">
-          <CardTitle className="text-3xl font-bold text-center">Вход</CardTitle>
+          <CardTitle className="text-3xl font-bold text-center">Вход для репетитора</CardTitle>
           <CardDescription className="text-center">
-            Войдите в свой аккаунт, чтобы продолжить обучение
+            Войдите в репетиторский кабинет
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">
-          {/* Telegram Login - Primary */}
           <div className="flex flex-col items-center">
             <p className="text-sm text-muted-foreground mb-3">
-              Рекомендуем — не нужен пароль
+              Быстрый вход через Telegram
             </p>
-            <TelegramLoginButton />
+            <TutorTelegramLoginButton className="w-full" />
           </div>
 
-          {/* Divider */}
           <div className="relative">
             <div className="absolute inset-0 flex items-center">
               <span className="w-full border-t border-border" />
@@ -104,7 +105,6 @@ const Login = () => {
             </div>
           </div>
 
-          {/* Email/Password Login */}
           <form onSubmit={handleLogin} className="space-y-4">
             <div className="space-y-2">
               <Input
@@ -125,37 +125,35 @@ const Login = () => {
                 required
                 disabled={loading}
               />
-              <div className="text-right">
-                <Link to="/forgot-password" className="text-sm text-muted-foreground hover:text-primary">
-                  Забыли пароль?
-                </Link>
-              </div>
             </div>
             <Button
-              type="submit" 
-              className="w-full" 
+              type="submit"
+              className="w-full"
               variant="outline"
               disabled={loading}
             >
               {loading ? "Вход..." : "Войти по email"}
             </Button>
-            <p className="text-center text-sm text-muted-foreground">
-              Нет аккаунта?{" "}
-              <Link to="/signup" className="text-primary hover:underline">
+          </form>
+
+          <div className="space-y-3 text-center text-sm">
+            <p className="text-muted-foreground">
+              Нет репетиторского аккаунта?{" "}
+              <Link to="/register-tutor" className="text-primary hover:underline">
                 Зарегистрироваться
               </Link>
             </p>
-            <p className="text-center text-sm text-muted-foreground mt-2">
-              Вы репетитор?{" "}
-              <Link to="/tutor/login" className="text-primary hover:underline">
-                Вход для репетиторов
+            <p className="text-muted-foreground">
+              Вы ученик?{" "}
+              <Link to="/login" className="text-primary hover:underline">
+                Вход ученика
               </Link>
             </p>
-          </form>
+          </div>
         </CardContent>
       </Card>
     </div>
   );
 };
 
-export default Login;
+export default TutorLogin;

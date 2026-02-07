@@ -86,14 +86,14 @@ const Footer = () => {
           <p className="text-sm text-white/60 mb-3">Вы репетитор?</p>
           <div className="flex justify-center gap-4">
             <Link 
-              to="/register-tutor" 
+              to="/tutor/login" 
               className="text-accent hover:text-accent/80 transition-colors font-medium"
             >
               Войти
             </Link>
             <span className="text-white/30">|</span>
             <Link 
-              to="/register-tutor" 
+              to="/tutor/login" 
               className="text-accent hover:text-accent/80 transition-colors font-medium"
             >
               Зарегистрироваться
