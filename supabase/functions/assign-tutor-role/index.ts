@@ -42,7 +42,7 @@ Deno.serve(async (req) => {
     }
 
     // Parse request body
-    const { user_id } = await req.json();
+    const { user_id, upgrade_existing } = await req.json();
 
     // Security check: user can only assign role to themselves
     if (user_id !== user.id) {
@@ -58,11 +58,8 @@ Deno.serve(async (req) => {
       auth: { persistSession: false },
     });
 
-    // Check if user was created recently (within 5 minutes) - prevents abuse
-    const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString();
-    
     const { data: authUser } = await supabaseAdmin.auth.admin.getUserById(user.id);
-    
+
     if (!authUser?.user) {
       return new Response(
         JSON.stringify({ error: "User not found" }),
@@ -70,18 +67,22 @@ Deno.serve(async (req) => {
       );
     }
 
-    const userCreatedAt = new Date(authUser.user.created_at);
-    const cutoffTime = new Date(fiveMinutesAgo);
+    // For new registrations (not upgrades), check if user was created recently
+    if (!upgrade_existing) {
+      const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+      const userCreatedAt = new Date(authUser.user.created_at);
+      const cutoffTime = new Date(fiveMinutesAgo);
 
-    if (userCreatedAt < cutoffTime) {
-      console.error("User account too old for tutor role assignment:", {
-        userId: user.id,
-        createdAt: authUser.user.created_at,
-      });
-      return new Response(
-        JSON.stringify({ error: "Tutor role can only be assigned during registration" }),
-        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
+      if (userCreatedAt < cutoffTime) {
+        console.error("User account too old for tutor role assignment:", {
+          userId: user.id,
+          createdAt: authUser.user.created_at,
+        });
+        return new Response(
+          JSON.stringify({ error: "Tutor role can only be assigned during registration" }),
+          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
     }
 
     // Check if user already has a tutor role

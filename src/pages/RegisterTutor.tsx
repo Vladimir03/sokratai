@@ -71,6 +71,42 @@ const RegisterTutor = () => {
         },
       });
 
+      // If email already registered — try to sign in and upgrade to tutor
+      if (authError && (
+        authError.message?.includes("already registered") ||
+        authError.message?.includes("already been registered") ||
+        authError.message?.includes("already in use") ||
+        authError.status === 422
+      )) {
+        console.log("Email exists, attempting sign in to upgrade to tutor...");
+
+        const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
+          email: validation.data.email,
+          password: validation.data.password,
+        });
+
+        if (signInError) {
+          toast.error("Этот email уже зарегистрирован. Проверьте пароль или войдите через страницу входа.");
+          setLoading(false);
+          return;
+        }
+
+        if (signInData.user) {
+          // Assign tutor role to existing account
+          const { error: roleError } = await supabase.functions.invoke("assign-tutor-role", {
+            body: { user_id: signInData.user.id, upgrade_existing: true },
+          });
+
+          if (roleError) {
+            console.error("Error assigning tutor role to existing account:", roleError);
+          }
+
+          toast.success("Роль репетитора добавлена!");
+          navigate("/tutor/dashboard");
+          return;
+        }
+      }
+
       if (authError) throw authError;
 
       if (!authData.user) {
@@ -91,11 +127,7 @@ const RegisterTutor = () => {
       navigate("/tutor/dashboard");
     } catch (error: any) {
       console.error("Registration error:", error);
-      if (error.message?.includes("already registered")) {
-        toast.error("Этот email уже зарегистрирован");
-      } else {
-        toast.error(error.message || "Ошибка регистрации");
-      }
+      toast.error(error.message || "Ошибка регистрации");
     } finally {
       setLoading(false);
     }

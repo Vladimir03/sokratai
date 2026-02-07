@@ -128,6 +128,29 @@ src/
 3. **AuthGuard / TutorGuard** — guard-компоненты. Изменение может заблокировать доступ для всех пользователей
 4. **Navigation.tsx** — общая навигация. Показывает разное меню для student/tutor
 5. **UI-компоненты** (`button.tsx`, `card.tsx`, `badge.tsx`) — используются ВЕЗДЕ, изменения влияют на ВСЁ приложение
+6. **Telegram Auth Flow** — цепочка: `TelegramLoginButton` → `telegram-login-token` → `telegram-bot/handleWebLogin` → `getOrCreateProfile`. Несогласованность email-адресов между функциями создаёт дубликаты пользователей
+7. **Tutor Role Assignment** — роль назначается через `assign-tutor-role` (email) или `telegram-bot` (Telegram). Обе ветки должны работать с ОДНИМ и тем же user_id
+
+## Auth-flow: критические правила
+
+### Telegram Login
+- `getOrCreateProfile()` создаёт пользователя с email `telegram_XXX@temp.sokratai.ru`
+- Для создания сессии используется `generateLink` + `verifyOtp` (admin API)
+- **НИКОГДА** не создавай второго auth-пользователя для того же telegram_user_id — используй `profile.id` из `getOrCreateProfile`
+- `intended_role` передаётся через `telegram_login_tokens.intended_role`
+
+### Tutor Registration
+- Email-регистрация: `signUp` → `assign-tutor-role` edge function
+- Если email уже зарегистрирован: `signIn` → `assign-tutor-role` с `upgrade_existing: true`
+- Telegram-регистрация: `TutorTelegramLoginButton` → token с `intended_role: "tutor"` → `telegram-bot` назначает роль
+- `TutorGuard` имеет retry-логику (до 4 попыток) для ожидания пропагации роли
+
+### Чеклист при изменении auth-flow
+- [ ] Новый пользователь через email → попадает в правильный кабинет (student/tutor)
+- [ ] Новый пользователь через Telegram → попадает в правильный кабинет
+- [ ] Существующий student переходит в tutor → роль добавляется, редирект работает
+- [ ] `is_tutor()` RPC вызывается для ТОГО ЖЕ user_id, что в сессии
+- [ ] Нет создания дублирующих auth-пользователей в `telegram-bot`
 
 ## Среда разработки и деплоя
 

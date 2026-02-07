@@ -798,41 +798,34 @@ async function handleWebLogin(telegramUserId: number, telegramUsername: string |
         }
       }
     } else {
-      // Telegram-only user - use password-based flow
-      const generatedEmail = `tg_${telegramUserId}@telegram.user`;
-      const generatedPassword = `tg_${telegramUserId}_${profile.id}`;
-      
-      console.log("Telegram user, trying password flow for:", generatedEmail);
+      // Telegram-only user - use generateLink + verifyOtp (same as web users)
+      // This ensures we use the SAME user created by getOrCreateProfile
+      const telegramEmail = userEmail || `telegram_${telegramUserId}@temp.sokratai.ru`;
 
-      // Try to sign in
-      const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
-        email: generatedEmail,
-        password: generatedPassword,
+      console.log("Telegram user, generating session via magic link for:", telegramEmail);
+
+      const { data: linkData, error: linkError } = await supabase.auth.admin.generateLink({
+        type: "magiclink",
+        email: telegramEmail,
       });
 
-      if (signInData?.session) {
-        session = signInData.session;
-        console.log("Sign in successful");
-      } else {
-        console.log("Sign in failed:", signInError?.message);
-        
-        // Try to sign up
-        const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
-          email: generatedEmail,
-          password: generatedPassword,
-          options: {
-            data: {
-              telegram_user_id: telegramUserId,
-              telegram_username: telegramUsername,
-            },
-          },
+      if (linkError) {
+        console.error("Generate link error for telegram user:", linkError);
+      }
+
+      if (linkData?.properties?.hashed_token) {
+        const { data: verifyData, error: verifyError } = await supabase.auth.verifyOtp({
+          token_hash: linkData.properties.hashed_token,
+          type: "magiclink",
         });
 
-        if (signUpData?.session) {
-          session = signUpData.session;
-          console.log("Sign up successful");
-        } else if (signUpError) {
-          console.error("Sign up error:", signUpError);
+        if (verifyError) {
+          console.error("Verify OTP error for telegram user:", verifyError);
+        }
+
+        if (verifyData?.session) {
+          session = verifyData.session;
+          console.log("Telegram user session created via magic link");
         }
       }
     }
