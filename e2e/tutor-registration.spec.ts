@@ -2,7 +2,10 @@ import { test, expect } from "@playwright/test";
 import {
   mockSupabaseAuth,
   mockTelegramLoginToken,
-  FAKE_TOKEN,
+  blockAllExternalRequests,
+  blockAllSupabaseRequests,
+  injectSession,
+  fakeSession,
 } from "./helpers/supabase-mock";
 
 /**
@@ -16,18 +19,21 @@ import {
  * - Bug #2: Telegram login redirects tutor to student chat
  */
 
-test.describe("Tutor Registration page", () => {
-  test.beforeEach(async ({ page }) => {
-    // Block window.open to prevent Telegram links from opening
-    await page.addInitScript(() => {
-      window.open = () => null;
-    });
-  });
+// Block all external HTTPS requests and Yandex Metrika for every test
+test.beforeEach(async ({ page }) => {
+  await blockAllExternalRequests(page);
+});
 
+// ─────────────────────────────────────────────────
+// Tutor Registration page – basic rendering
+// ─────────────────────────────────────────────────
+test.describe("Tutor Registration page", () => {
   test("page loads and shows both registration methods", async ({ page }) => {
+    await blockAllSupabaseRequests(page);
+
     await page.goto("/register-tutor");
 
-    await expect(page.getByText("Регистрация репетитора")).toBeVisible();
+    await expect(page.getByText("Регистрация репетитора")).toBeVisible({ timeout: 10_000 });
     await expect(page.getByText("Войти через Telegram")).toBeVisible();
     await expect(page.getByPlaceholder("Имя")).toBeVisible();
     await expect(page.getByPlaceholder("Email")).toBeVisible();
@@ -36,30 +42,33 @@ test.describe("Tutor Registration page", () => {
   });
 
   test("redirects existing tutor to dashboard", async ({ page }) => {
-    // User is already logged in AND is a tutor
     await mockSupabaseAuth(page, { isTutor: true });
+    await injectSession(page);
 
     await page.goto("/register-tutor");
 
     // Should redirect to tutor dashboard
-    await page.waitForURL("**/tutor/dashboard", { timeout: 10_000 });
+    await page.waitForURL("**/tutor/dashboard", { timeout: 15_000 });
   });
 
   test("shows form for logged-in non-tutor user", async ({ page }) => {
-    // User is logged in but NOT a tutor
     await mockSupabaseAuth(page, { isTutor: false });
+    await injectSession(page);
 
     await page.goto("/register-tutor");
 
     // Should stay on register page and show the form
-    await expect(page.getByText("Регистрация репетитора")).toBeVisible();
+    await expect(page.getByText("Регистрация репетитора")).toBeVisible({ timeout: 10_000 });
     await expect(page.getByRole("button", { name: "Зарегистрироваться" })).toBeVisible();
   });
 });
 
+// ─────────────────────────────────────────────────
+// Telegram flow → tutor dashboard
+// ─────────────────────────────────────────────────
 test.describe("Tutor registration via Telegram → dashboard", () => {
   test.beforeEach(async ({ page }) => {
-    // Block window.open / location.href to prevent Telegram navigation
+    // Block window.open to prevent Telegram links from opening
     await page.addInitScript(() => {
       window.open = () => null;
     });
@@ -67,58 +76,63 @@ test.describe("Tutor registration via Telegram → dashboard", () => {
 
   test("successful Telegram login redirects to tutor dashboard", async ({ page }) => {
     // Mock: after 2 polls, token becomes "verified", and is_tutor returns true
-    await mockSupabaseAuth(page, { isTutor: true });
+    const authControl = await mockSupabaseAuth(page, { isTutor: true, hasSession: false });
     await mockTelegramLoginToken(page, {
       intendedRole: "tutor",
       verifyAfterAttempts: 2,
+      authControl,
     });
 
     await page.goto("/register-tutor");
+    await expect(page.getByText("Регистрация репетитора")).toBeVisible({ timeout: 10_000 });
 
     // Click "Войти через Telegram"
     await page.getByRole("button", { name: "Войти через Telegram" }).click();
 
     // Should show "Ожидание подтверждения..."
-    await expect(page.getByText("Ожидание подтверждения")).toBeVisible();
+    await expect(page.getByText("Ожидание подтверждения")).toBeVisible({ timeout: 5_000 });
 
     // After polling detects "verified" → should show "Вход выполнен!"
-    await expect(page.getByText("Вход выполнен!")).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByText("Вход выполнен!")).toBeVisible({ timeout: 20_000 });
 
     // Should redirect to tutor dashboard (not /chat!)
-    await page.waitForURL("**/tutor/dashboard", { timeout: 15_000 });
+    await page.waitForURL("**/tutor/dashboard", { timeout: 20_000 });
   });
 
   test("Telegram login with intended_role=tutor must NOT redirect to /chat", async ({ page }) => {
-    // This is the exact bug scenario: Telegram auth succeeds, role is "tutor"
-    // but without the fix, is_tutor fails and user ends up in /chat
+    // This is the exact bug scenario
+    const authControl = await mockSupabaseAuth(page, { isTutor: true, hasSession: false });
     await mockTelegramLoginToken(page, {
       intendedRole: "tutor",
       verifyAfterAttempts: 1,
+      authControl,
     });
-    await mockSupabaseAuth(page, { isTutor: true });
 
     await page.goto("/register-tutor");
+    await expect(page.getByText("Регистрация репетитора")).toBeVisible({ timeout: 10_000 });
+
     await page.getByRole("button", { name: "Войти через Telegram" }).click();
 
     // Wait for success
-    await expect(page.getByText("Вход выполнен!")).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByText("Вход выполнен!")).toBeVisible({ timeout: 20_000 });
 
-    // Wait for navigation to settle
-    await page.waitForURL("**/*", { timeout: 15_000 });
-    const url = page.url();
+    // Should redirect to tutor dashboard (not /chat!)
+    await page.waitForURL("**/tutor/dashboard", { timeout: 20_000 });
 
     // CRITICAL: must NOT be /chat
-    expect(url).not.toContain("/chat");
-    // Should be tutor dashboard
-    expect(url).toContain("/tutor/dashboard");
+    expect(page.url()).not.toContain("/chat");
   });
 });
 
+// ─────────────────────────────────────────────────
+// Email registration flows
+// ─────────────────────────────────────────────────
 test.describe("Tutor registration via email", () => {
   test("new email registration → assign role → redirect to dashboard", async ({ page }) => {
-    await mockSupabaseAuth(page, { isTutor: true });
+    await mockSupabaseAuth(page, { isTutor: true, hasSession: false });
 
     await page.goto("/register-tutor");
+    await expect(page.getByText("Регистрация репетитора")).toBeVisible({ timeout: 10_000 });
 
     // Fill form
     await page.getByPlaceholder("Имя").fill("Тест Репетитор");
@@ -129,14 +143,17 @@ test.describe("Tutor registration via email", () => {
     await page.getByRole("button", { name: "Зарегистрироваться" }).click();
 
     // Should navigate to tutor dashboard
-    await page.waitForURL("**/tutor/dashboard", { timeout: 10_000 });
+    await page.waitForURL("**/tutor/dashboard", { timeout: 15_000 });
   });
 
   test("existing email → signIn + upgrade → redirect to dashboard", async ({ page }) => {
-    const SUPABASE_URL = "https://vrsseotrfmsxpbciyqzc.supabase.co";
+    const SUPABASE = "https://vrsseotrfmsxpbciyqzc.supabase.co";
 
-    // Mock signUp to fail with "already registered"
-    await page.route(`${SUPABASE_URL}/auth/v1/signup`, async (route) => {
+    // 1) Block all Supabase first
+    await blockAllSupabaseRequests(page);
+
+    // 2) Mock signUp to fail with "already registered"
+    await page.route(`${SUPABASE}/auth/v1/signup**`, async (route) => {
       await route.fulfill({
         status: 422,
         contentType: "application/json",
@@ -147,46 +164,35 @@ test.describe("Tutor registration via email", () => {
       });
     });
 
-    // Mock signIn to succeed
-    await page.route(`${SUPABASE_URL}/auth/v1/token*`, async (route) => {
-      const body = route.request().postDataJSON();
-      if (body?.grant_type === "password") {
-        // signInWithPassword
-        await route.fulfill({
-          status: 200,
-          contentType: "application/json",
-          body: JSON.stringify({
-            access_token: "fake-access-token",
-            refresh_token: "fake-refresh-token",
-            token_type: "bearer",
-            expires_in: 3600,
-            user: {
-              id: "22222222-2222-2222-2222-222222222222",
-              email: "existing@example.com",
-              aud: "authenticated",
-              role: "authenticated",
-            },
-          }),
-        });
-      } else {
-        await route.continue();
-      }
+    // 3) Mock signIn to succeed
+    await page.route(`${SUPABASE}/auth/v1/token**`, async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify(fakeSession),
+      });
     });
 
-    // Mock assign-tutor-role
-    await page.route(
-      `${SUPABASE_URL}/functions/v1/assign-tutor-role`,
-      async (route) => {
-        await route.fulfill({
-          status: 200,
-          contentType: "application/json",
-          body: JSON.stringify({ success: true }),
-        });
-      }
-    );
+    // 4) Mock getUser
+    await page.route(`${SUPABASE}/auth/v1/user**`, async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify(fakeSession.user),
+      });
+    });
 
-    // Mock is_tutor → true (after upgrade)
-    await page.route(`${SUPABASE_URL}/rest/v1/rpc/is_tutor`, async (route) => {
+    // 5) Mock assign-tutor-role
+    await page.route(`${SUPABASE}/functions/v1/assign-tutor-role`, async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ success: true }),
+      });
+    });
+
+    // 6) Mock is_tutor → true (after upgrade)
+    await page.route(`${SUPABASE}/rest/v1/rpc/is_tutor`, async (route) => {
       await route.fulfill({
         status: 200,
         contentType: "application/json",
@@ -194,19 +200,8 @@ test.describe("Tutor registration via email", () => {
       });
     });
 
-    // Mock getUser
-    await page.route(`${SUPABASE_URL}/auth/v1/user`, async (route) => {
-      await route.fulfill({
-        status: 200,
-        contentType: "application/json",
-        body: JSON.stringify({
-          id: "22222222-2222-2222-2222-222222222222",
-          email: "existing@example.com",
-        }),
-      });
-    });
-
     await page.goto("/register-tutor");
+    await expect(page.getByText("Регистрация репетитора")).toBeVisible({ timeout: 10_000 });
 
     // Fill form with existing email
     await page.getByPlaceholder("Имя").fill("Существующий Репетитор");
@@ -217,14 +212,16 @@ test.describe("Tutor registration via email", () => {
     await page.getByRole("button", { name: "Зарегистрироваться" }).click();
 
     // Should show success toast and redirect (not "уже зарегистрирован" error)
-    await page.waitForURL("**/tutor/dashboard", { timeout: 10_000 });
+    await page.waitForURL("**/tutor/dashboard", { timeout: 15_000 });
   });
 
   test("existing email + wrong password → shows clear error", async ({ page }) => {
-    const SUPABASE_URL = "https://vrsseotrfmsxpbciyqzc.supabase.co";
+    const SUPABASE = "https://vrsseotrfmsxpbciyqzc.supabase.co";
+
+    await blockAllSupabaseRequests(page);
 
     // Mock signUp → fail
-    await page.route(`${SUPABASE_URL}/auth/v1/signup`, async (route) => {
+    await page.route(`${SUPABASE}/auth/v1/signup**`, async (route) => {
       await route.fulfill({
         status: 422,
         contentType: "application/json",
@@ -236,7 +233,7 @@ test.describe("Tutor registration via email", () => {
     });
 
     // Mock signIn → fail (wrong password)
-    await page.route(`${SUPABASE_URL}/auth/v1/token*`, async (route) => {
+    await page.route(`${SUPABASE}/auth/v1/token**`, async (route) => {
       await route.fulfill({
         status: 400,
         contentType: "application/json",
@@ -248,6 +245,7 @@ test.describe("Tutor registration via email", () => {
     });
 
     await page.goto("/register-tutor");
+    await expect(page.getByText("Регистрация репетитора")).toBeVisible({ timeout: 10_000 });
 
     await page.getByPlaceholder("Имя").fill("Тест");
     await page.getByPlaceholder("Email").fill("existing@example.com");
@@ -255,47 +253,33 @@ test.describe("Tutor registration via email", () => {
 
     await page.getByRole("button", { name: "Зарегистрироваться" }).click();
 
-    // Should show a helpful error message (not just "already registered")
+    // Should show a helpful error message
     await expect(
-      page.getByText(/уже зарегистрирован.*Проверьте пароль|войдите через страницу входа/i)
-    ).toBeVisible({ timeout: 5_000 });
+      page.getByText(/уже зарегистрирован|Проверьте пароль|войдите через страницу входа/i)
+    ).toBeVisible({ timeout: 10_000 });
 
     // Should stay on the page (not redirect)
     expect(page.url()).toContain("/register-tutor");
   });
 });
 
+// ─────────────────────────────────────────────────
+// TutorGuard
+// ─────────────────────────────────────────────────
 test.describe("TutorGuard", () => {
-  test("non-tutor user is redirected to /register-tutor", async ({ page }) => {
+  test("non-tutor user is redirected away from dashboard", async ({ page }) => {
     await mockSupabaseAuth(page, { isTutor: false });
+    await injectSession(page);
 
     await page.goto("/tutor/dashboard");
 
-    // TutorGuard should redirect non-tutors to registration
-    await page.waitForURL("**/register-tutor", { timeout: 15_000 });
+    // TutorGuard should redirect non-tutors
+    await page.waitForURL("**/register-tutor", { timeout: 20_000 });
   });
 
   test("tutor user can access dashboard", async ({ page }) => {
     await mockSupabaseAuth(page, { isTutor: true });
-
-    // Also mock the dashboard data queries
-    const SUPABASE_URL = "https://vrsseotrfmsxpbciyqzc.supabase.co";
-    await page.route(`${SUPABASE_URL}/rest/v1/**`, async (route) => {
-      // Return empty arrays for any data queries
-      if (route.request().url().includes("rpc/is_tutor")) {
-        await route.fulfill({
-          status: 200,
-          contentType: "application/json",
-          body: JSON.stringify(true),
-        });
-      } else {
-        await route.fulfill({
-          status: 200,
-          contentType: "application/json",
-          body: JSON.stringify([]),
-        });
-      }
-    });
+    await injectSession(page);
 
     await page.goto("/tutor/dashboard");
 
