@@ -462,14 +462,15 @@ serve(async (req) => {
     
     if (isServiceRole) {
       const body = await req.json() as ChatRequestBody;
-      userId = body.userId;
       
-      if (!userId) {
+      if (!body.userId) {
         return new Response(JSON.stringify({ error: "userId required for service role requests" }), {
           status: 400,
           headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
       }
+      
+      userId = body.userId;
       
       const { messages, systemPrompt, taskContext, chatId } = body;
       const responseProfile = normalizeResponseProfile(body.responseProfile);
