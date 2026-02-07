@@ -68,6 +68,8 @@ export default defineConfig(({ mode }) => ({
         assetFileNames: 'assets/[name]-[hash].[ext]'
       }
     },
+    // Target Safari 15+ and Chrome 90+ for cross-browser compatibility
+    target: ['es2020', 'safari15', 'chrome90'],
     // Use default esbuild minifier (faster than terser)
     minify: 'esbuild',
     // Set chunk size warning limit

@@ -111,10 +111,15 @@ src/
 - [ ] Shared UI-компоненты не получили тяжёлых зависимостей
 
 При работе над **любым** функционалом:
-- [ ] `npm run build` или `bun run build` завершается без ошибок
+- [ ] `bun run build` завершается без ошибок
+- [ ] `bun run smoke-test` проходит без ошибок
 - [ ] Нет новых тяжёлых зависимостей в `src/components/ui/`
 - [ ] Все новые страницы используют `React.lazy()` в `App.tsx`
 - [ ] Нет случайных изменений в файлах, не связанных с задачей
+- [ ] Нет запрещённых паттернов Safari/iOS (см. раздел «Кросс-браузерная совместимость»)
+- [ ] Input/textarea/select имеют `font-size >= 16px` (иначе Safari iOS зумит)
+- [ ] Не используются `100vh` (используй `100dvh` или `-webkit-fill-available`)
+- [ ] Даты парсятся через `date-fns` или ISO-формат с разделителем `T`
 
 ## Известные хрупкие области
 
@@ -123,6 +128,61 @@ src/
 3. **AuthGuard / TutorGuard** — guard-компоненты. Изменение может заблокировать доступ для всех пользователей
 4. **Navigation.tsx** — общая навигация. Показывает разное меню для student/tutor
 5. **UI-компоненты** (`button.tsx`, `card.tsx`, `badge.tsx`) — используются ВЕЗДЕ, изменения влияют на ВСЁ приложение
+
+## Среда разработки и деплоя
+
+- **Деплой и продакшен**: Lovable Cloud + AI
+- **Разработка кода**: Cursor, Claude Code
+- **Тестирование (разработчик)**: Windows + Google Chrome, Android + Google Chrome
+- **Пользователи в продакшене**: macOS + Safari, iPhone + Safari, iPhone/Android + Google Chrome
+
+### Workflow: AI-инструменты
+- **Lovable** — для деплоя и быстрых UI-правок. Не трогает конфиги (vite, eslint, tsconfig)
+- **Cursor / Claude Code** — для серьёзной разработки, рефакторинга, багфиксов
+- После работы в Cursor/Claude Code: **всегда** делай `bun run build` и `bun run smoke-test` перед деплоем
+- После работы в Lovable: проверь, что Lovable не добавил тяжёлые зависимости в `src/components/ui/`
+
+## Кросс-браузерная совместимость (КРИТИЧНО)
+
+Продукт используется на Safari (macOS/iOS) — это главный источник багов. **Все правила ниже обязательны.**
+
+### Build targets
+- В `vite.config.ts` установлен `build.target: ['es2020', 'safari15', 'chrome90']`
+- В `package.json` есть `browserslist` — используется autoprefixer для CSS
+- **НЕ МЕНЯТЬ** эти настройки без веской причины
+
+### Запрещённые паттерны (ломают Safari/iOS)
+
+#### JavaScript / TypeScript
+- **`RegExp` lookbehind** (`(?<=...)`) — Safari < 16.4 НЕ поддерживает. Используй альтернативу через capturing groups
+- **`structuredClone()`** — Safari < 15.4. Используй `JSON.parse(JSON.stringify(obj))` или lodash `cloneDeep`
+- **`Array.at()`** — Safari < 15.4. Используй `arr[arr.length - 1]` вместо `arr.at(-1)`
+- **`Object.hasOwn()`** — Safari < 15.4. Используй `Object.prototype.hasOwnProperty.call()`
+- **`crypto.randomUUID()`** — только HTTPS + Safari 15.4+. В dev-окружении может не работать
+- **`Date` парсинг** — Safari **строг** к формату. `new Date("2024-01-15 10:30:00")` **СЛОМАЕТСЯ**. Всегда используй ISO: `new Date("2024-01-15T10:30:00")` или `date-fns`
+- **`AbortSignal.timeout()`** — Safari < 16. Создавай `AbortController` с `setTimeout` вручную
+
+#### CSS
+- **`100vh`** на iOS — НЕ учитывает адресную строку Safari. Используй `100dvh` или `min-height: -webkit-fill-available`
+- **`overflow: clip`** — Safari < 16. Используй `overflow: hidden` где возможно
+- **`scrollbar-gutter`** — Safari НЕ поддерживает. Не используй
+- **`:has()` селектор** — Safari 15.4+, но может работать нестабильно. В Tailwind лучше использовать `group/peer` утилиты
+- **`backdrop-filter`** — нужен `-webkit-backdrop-filter` (autoprefixer добавит, но проверяй)
+- **`gap` в flexbox** — работает в Safari 14.1+, ОК для наших targets
+- **CSS `@layer`** — Safari 15.4+. Осторожно с использованием
+
+#### iOS-специфичные проблемы
+- **`position: fixed`** + клавиатура iOS — элемент "прыгает" при открытии клавиатуры. Используй `position: sticky` или JavaScript для корректировки
+- **Safe Area Insets** — для iPhone с нотчем/Dynamic Island используй `env(safe-area-inset-*)` в padding
+- **Rubber-band scrolling** — `overscroll-behavior: contain` помогает, но не всегда на iOS
+- **Touch events** — iOS Safari может иметь 300ms delay на tap. `touch-action: manipulation` решает это
+- **Auto-zoom на input** — Safari iOS зумит страницу если `font-size < 16px` на input. **ВСЕГДА** ставь `font-size: 16px` или больше на `<input>`, `<textarea>`, `<select>`
+
+### Правила при написании кода
+1. **Перед использованием нового Web API** — проверь поддержку на caniuse.com для Safari 15+
+2. **Для дат** — всегда используй `date-fns` вместо нативного `Date` парсинга
+3. **CSS анимации** — предпочитай `transform` и `opacity` (GPU-ускорены на всех браузерах)
+4. **Тестируй в Safari** — если меняешь CSS layout, scroll-поведение или формы
 
 ## Команды
 
@@ -133,4 +193,5 @@ bun run build:dev    # Development билд
 bun run lint         # ESLint
 bun run preview      # Preview production билда
 bun run analyze      # Анализ размера бандла
+bun run smoke-test   # Smoke-тест (билд + чанки + типы + compat)
 ```

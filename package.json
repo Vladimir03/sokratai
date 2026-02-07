@@ -73,6 +73,14 @@
     "vaul": "^0.9.9",
     "zod": "^3.25.76"
   },
+  "browserslist": [
+    "Chrome >= 90",
+    "Safari >= 15",
+    "iOS >= 15",
+    "ChromeAndroid >= 90",
+    "last 2 Firefox versions",
+    "not dead"
+  ],
   "devDependencies": {
     "@eslint/js": "^9.32.0",
     "@tailwindcss/typography": "^0.5.19",
