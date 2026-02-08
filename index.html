@@ -55,11 +55,16 @@
     </div>
     <script type="module" src="/src/main.tsx" fetchpriority="high"></script>
     
-    <!-- Яндекс.Метрика: deferred to not block LCP -->
+    <!-- Яндекс.Метрика: deferred to not block TTI -->
     <script type="text/javascript">
-      // Defer Yandex Metrika loading until after page load for better LCP
+      // Defer Yandex Metrika loading until after page becomes interactive (1.5s after load)
+      // This ensures React hydration completes before analytics contends for main thread
       window.addEventListener('load', function() {
-        setTimeout(function() {
+        requestIdleCallback ? requestIdleCallback(function() {
+          setTimeout(loadMetrika, 500);
+        }, { timeout: 2000 }) : setTimeout(loadMetrika, 1500);
+        
+        function loadMetrika() {
           (function(m,e,t,r,i,c,a){m[i]=m[i]||function(){(m[i].a=m[i].a||[]).push(arguments)};
           m[i].l=1*new Date();c=e.createElement(t),a=e.getElementsByTagName(t)[0],
           c.async=1;c.src=r;a.parentNode.insertBefore(c,a)})
@@ -72,7 +77,7 @@
             webvisor:true,
             trackHash:true
           });
-        }, 100);
+        }
       });
     </script>
     <!-- Яндекс.Метрика: noscript-счётчик для пользователей без JavaScript -->
