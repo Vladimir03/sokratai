@@ -21,6 +21,9 @@
     <link rel="dns-prefetch" href="https://vrsseotrfmsxpbciyqzc.supabase.co">
     <link rel="dns-prefetch" href="https://mc.yandex.ru">
     
+    <!-- Preload critical entry point for faster Speed Index -->
+    <link rel="modulepreload" href="/src/main.tsx">
+    
     <title>ИИ-репетитор по математике ЕГЭ - Подготовка 24/7</title>
     <meta name="description" content="Готовься к ЕГЭ по математике с ИИ-репетитором. Мгновенные решения задач, пошаговые объяснения, отслеживание прогресса. Начни бесплатно!" />
     <meta name="author" content="ЕГЭ Репетитор" />
@@ -39,8 +42,8 @@
   <body>
     <!-- Static above-the-fold content for immediate FCP - replaced by React -->
     <div id="root">
-      <div id="static-hero" style="background:linear-gradient(135deg,hsl(237,66%,45%),hsl(270,70%,50%));padding:4rem 1rem;min-height:60vh">
-        <div style="max-width:800px;margin:0 auto">
+      <div id="static-hero" style="background:linear-gradient(135deg,hsl(237,66%,45%),hsl(270,70%,50%));padding:4rem 1rem;min-height:60vh;display:flex;align-items:center;justify-content:center">
+        <div style="max-width:800px;margin:0 auto;text-align:left">
           <h1 style="color:#fff;font-size:clamp(1.5rem,4vw,2.5rem);font-weight:700;margin:0 0 1rem;line-height:1.3">
             🎯 ИИ-помощник по школьным предметам, который учит тебя думать и понимать самостоятельно
           </h1>
@@ -50,7 +53,7 @@
         </div>
       </div>
     </div>
-    <script type="module" src="/src/main.tsx"></script>
+    <script type="module" src="/src/main.tsx" fetchpriority="high"></script>
     
     <!-- Яндекс.Метрика: deferred to not block LCP -->
     <script type="text/javascript">
