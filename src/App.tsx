@@ -1,19 +1,19 @@
-import { Toaster } from "@/components/ui/toaster";
-import { Toaster as Sonner } from "@/components/ui/sonner";
-import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { lazy, Suspense } from "react";
-import { useYandexMetrika } from "@/hooks/useYandexMetrika";
 import ErrorBoundary from "@/components/ErrorBoundary";
 
-import Index from "./pages/Index";
+// Lazy load UI providers to reduce initial bundle
+const LazyToaster = lazy(() => import("@/components/ui/toaster").then(m => ({ default: m.Toaster })));
+const LazySonner = lazy(() => import("@/components/ui/sonner").then(m => ({ default: m.Toaster })));
+const LazyTooltipProvider = lazy(() => import("@/components/ui/tooltip").then(m => ({ default: m.TooltipProvider })));
 
-// Компонент для отслеживания аналитики (должен быть внутри BrowserRouter)
-const AnalyticsTracker = () => {
-  useYandexMetrika();
-  return null;
-};
+// Lazy load analytics tracker
+const AnalyticsTracker = lazy(() => import("@/components/AnalyticsTracker"));
+
+// Lazy load Index page too - it's the landing page but still benefits from code splitting
+const Index = lazy(() => import("./pages/Index"));
+
 
 // Lazy load all pages for optimal code splitting
 const Login = lazy(() => import("./pages/Login"));
@@ -62,14 +62,26 @@ const queryClient = new QueryClient();
 
 const App = () => (
   <QueryClientProvider client={queryClient}>
-    <TooltipProvider>
-      <ErrorBoundary>
-        <Toaster />
-        <Sonner />
-        <BrowserRouter>
-          <AnalyticsTracker />
-          <Routes>
-            <Route path="/" element={<Index />} />
+    <Suspense fallback={null}>
+      <LazyTooltipProvider>
+        <ErrorBoundary>
+          <Suspense fallback={null}>
+            <LazyToaster />
+            <LazySonner />
+          </Suspense>
+          <BrowserRouter>
+            <Suspense fallback={null}>
+              <AnalyticsTracker />
+            </Suspense>
+            <Routes>
+              <Route 
+                path="/" 
+                element={
+                  <Suspense fallback={<PageLoader />}>
+                    <Index />
+                  </Suspense>
+                } 
+              />
             <Route 
               path="/login" 
               element={
@@ -319,9 +331,10 @@ const App = () => (
               } 
             />
           </Routes>
-        </BrowserRouter>
-      </ErrorBoundary>
-    </TooltipProvider>
+          </BrowserRouter>
+        </ErrorBoundary>
+      </LazyTooltipProvider>
+    </Suspense>
   </QueryClientProvider>
 );
 
