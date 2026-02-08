@@ -20,7 +20,8 @@
 
 ### Репетитор (Tutor)
 - Маршруты: `/tutor/dashboard`, `/tutor/students`, `/tutor/students/:id`, `/tutor/schedule`, `/tutor/payments`
-- Guard: `TutorGuard` (проверка `is_tutor()` RPC)
+- Guard: `TutorGuard` (проверка `is_tutor()` RPC с **module-level кешем** авторизации, TTL 10 мин)
+- **ВАЖНО**: Каждая tutor-страница монтирует собственный `<TutorGuard>`. Кеш на уровне модуля делает переключение между вкладками мгновенным (без повторного RPC)
 - Ключевые компоненты: `src/pages/tutor/*`, `src/components/tutor/*`
 - Ключевые хуки: `useTutor`, `useTutorStudents`, `useTutorPayments` (из `src/hooks/useTutor.ts`)
 - Тяжёлые зависимости: нет (лёгкие страницы)
@@ -42,6 +43,13 @@
 - **ЗАПРЕЩЕНО** добавлять тяжёлые библиотеки (recharts, framer-motion, pyodide) в shared-компоненты
 - Все новые страницы ОБЯЗАНЫ использовать `React.lazy()` + `Suspense`
 - Тяжёлые компоненты ОБЯЗАНЫ грузиться лениво (`React.lazy`, dynamic import)
+
+### 2a. Supabase API — быстрые вызовы
+- **`getSession()`** — читает из локального кеша (мгновенно, без сетевого запроса). Используй для получения `user.id` в hot-path
+- **`getUser()`** — делает сетевой запрос к Supabase Auth (медленно). Используй ТОЛЬКО когда нужна свежая серверная верификация
+- **ПРАВИЛО**: в `src/lib/tutors.ts` и `src/lib/tutorSchedule.ts` для получения user.id использовать ТОЛЬКО `getSession()`
+- **Guard-компоненты** (`TutorGuard`, `AuthGuard`) должны кешировать результат проверки ролей, чтобы переход между вкладками был мгновенным
+- **`visibilitychange` обработчик** — обязателен в guard-компонентах для восстановления сессии после бездействия пользователя (2+ минуты)
 
 ### 3. Bundle Splitting
 Vite конфигурация разделяет бандл на чанки:
@@ -109,6 +117,8 @@ src/
 - [ ] Python-графики отображаются в чате
 - [ ] `AuthGuard` не затронут изменениями
 - [ ] Shared UI-компоненты не получили тяжёлых зависимостей
+- [ ] Переход между вкладками кабинета репетитора — мгновенный (кеш `tutorAuthCache` не сломан)
+- [ ] После 2-3 минут бездействия переход на другую вкладку работает без зависания
 
 При работе над **любым** функционалом:
 - [ ] `bun run build` завершается без ошибок
@@ -125,7 +135,7 @@ src/
 
 1. **Chat.tsx** (2000+ строк) — очень сложный компонент. Любые изменения в ChatMessage, ChatInput, ChatSidebar могут сломать чат
 2. **Pyodide/GraphRenderer** — Python-графики. Зависит от CDN, может ломаться при изменениях в ChatMessage
-3. **AuthGuard / TutorGuard** — guard-компоненты. Изменение может заблокировать доступ для всех пользователей
+3. **AuthGuard / TutorGuard** — guard-компоненты. Изменение может заблокировать доступ для всех пользователей. **TutorGuard** имеет module-level кеш (`tutorAuthCache`) — НЕ УДАЛЯТЬ, иначе переключение вкладок станет медленным (is_tutor RPC с retry до 6 секунд на каждый переход)
 4. **Navigation.tsx** — общая навигация. Показывает разное меню для student/tutor
 5. **UI-компоненты** (`button.tsx`, `card.tsx`, `badge.tsx`) — используются ВЕЗДЕ, изменения влияют на ВСЁ приложение
 6. **Telegram Auth Flow** — цепочка: `TelegramLoginButton` → `telegram-login-token` → `telegram-bot/handleWebLogin` → `getOrCreateProfile`. Несогласованность email-адресов между функциями создаёт дубликаты пользователей
