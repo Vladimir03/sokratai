@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "@/lib/supabaseClient";
 import { Button } from "@/components/ui/button";
@@ -8,21 +8,48 @@ interface TutorGuardProps {
   children: React.ReactNode;
 }
 
+// Module-level cache: avoids re-checking is_tutor on every tab navigation
+const tutorAuthCache = {
+  userId: null as string | null,
+  isTutor: false,
+  verifiedAt: 0,
+};
+
+const CACHE_TTL_MS = 10 * 60 * 1000; // 10 minutes
+
+function isCacheValid(userId: string): boolean {
+  return (
+    tutorAuthCache.isTutor &&
+    tutorAuthCache.userId === userId &&
+    Date.now() - tutorAuthCache.verifiedAt < CACHE_TTL_MS
+  );
+}
+
 const TutorGuard = ({ children }: TutorGuardProps) => {
   const navigate = useNavigate();
   const [loading, setLoading] = useState(true);
   const [authorized, setAuthorized] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const isMounted = useRef(true);
 
-  const checkAccess = useCallback(async () => {
+  const checkAccess = useCallback(async (forceRecheck = false) => {
     setLoading(true);
     setError(null);
-    
+
     try {
       const { data: { session } } = await supabase.auth.getSession();
-      
+
       if (!session) {
         navigate("/login");
+        return;
+      }
+
+      // Fast path: use cached authorization if recently verified
+      if (!forceRecheck && isCacheValid(session.user.id)) {
+        if (isMounted.current) {
+          setAuthorized(true);
+          setLoading(false);
+        }
         return;
       }
 
@@ -54,8 +81,10 @@ const TutorGuard = ({ children }: TutorGuardProps) => {
 
       if (lastError) {
         console.error("Error checking tutor role after retries:", lastError);
-        setError("Ошибка проверки доступа. Проверьте соединение.");
-        setLoading(false);
+        if (isMounted.current) {
+          setError("Ошибка проверки доступа. Проверьте соединение.");
+          setLoading(false);
+        }
         return;
       }
 
@@ -64,25 +93,62 @@ const TutorGuard = ({ children }: TutorGuardProps) => {
         return;
       }
 
-      setAuthorized(true);
+      // Update cache on success
+      tutorAuthCache.userId = session.user.id;
+      tutorAuthCache.isTutor = true;
+      tutorAuthCache.verifiedAt = Date.now();
+
+      if (isMounted.current) {
+        setAuthorized(true);
+      }
     } catch (error) {
       console.error("Error in TutorGuard:", error);
-      setError("Ошибка соединения. Попробуйте ещё раз.");
+      if (isMounted.current) {
+        setError("Ошибка соединения. Попробуйте ещё раз.");
+      }
     } finally {
-      setLoading(false);
+      if (isMounted.current) {
+        setLoading(false);
+      }
     }
   }, [navigate]);
 
   useEffect(() => {
+    isMounted.current = true;
+
     checkAccess();
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       if (!session) {
+        // Clear cache on logout
+        tutorAuthCache.userId = null;
+        tutorAuthCache.isTutor = false;
+        tutorAuthCache.verifiedAt = 0;
         navigate("/login");
+      } else if (event === 'TOKEN_REFRESHED') {
+        // Token was refreshed successfully — update cache timestamp
+        tutorAuthCache.verifiedAt = Date.now();
       }
     });
 
-    return () => subscription.unsubscribe();
+    // Visibility change handler: refresh session when tab becomes active after inactivity
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        // Trigger Supabase to refresh the session if needed
+        supabase.auth.getSession().then(({ data: { session } }) => {
+          if (!session && isMounted.current) {
+            navigate("/login");
+          }
+        });
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    return () => {
+      isMounted.current = false;
+      subscription.unsubscribe();
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
   }, [navigate, checkAccess]);
 
   if (loading) {
@@ -101,7 +167,7 @@ const TutorGuard = ({ children }: TutorGuardProps) => {
       <div className="flex min-h-screen items-center justify-center bg-background">
         <div className="text-center space-y-4">
           <p className="text-destructive">{error}</p>
-          <Button onClick={checkAccess} variant="outline" className="gap-2">
+          <Button onClick={() => checkAccess(true)} variant="outline" className="gap-2">
             <RefreshCw className="w-4 h-4" />
             Повторить
           </Button>
