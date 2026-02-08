@@ -48,11 +48,14 @@ export function clearTutorCache() {
  * Получить профиль текущего репетитора (с кэшированием)
  */
 export async function getCurrentTutor(): Promise<Tutor | null> {
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) {
+  // Use getSession() (local cache, instant) instead of getUser() (network call)
+  // We only need the user ID here, not a fresh server-side verification
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session?.user) {
     clearTutorCache();
     return null;
   }
+  const user = session.user;
 
   // Return cached tutor if user_id matches
   if (cachedTutor && cachedTutorUserId === user.id) {
