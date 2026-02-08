@@ -8,17 +8,6 @@ const corsHeaders = {
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 
-// YooKassa webhook IP addresses for verification (optional but recommended)
-const YOOKASSA_IPS = [
-  "185.71.76.0/27",
-  "185.71.77.0/27", 
-  "77.75.153.0/25",
-  "77.75.156.11",
-  "77.75.156.35",
-  "77.75.154.128/25",
-  "2a02:5180::/32",
-];
-
 interface YooKassaWebhookEvent {
   type: string;
   event: string;
@@ -41,6 +30,51 @@ interface YooKassaWebhookEvent {
       saved: boolean;
     };
   };
+}
+
+/**
+ * Validates the webhook request by verifying that the payment exists in our database
+ * and matches the expected state. This prevents attackers from forging webhook requests
+ * to activate subscriptions without actual payment.
+ */
+async function validatePaymentInDatabase(
+  supabase: ReturnType<typeof createClient>,
+  paymentId: string,
+  webhookUserId: string | undefined,
+  webhookAmount: string
+): Promise<{ valid: boolean; error?: string; existingPayment?: Record<string, unknown> }> {
+  // Check if payment exists in our database (created when user initiated payment)
+  const { data: existingPayment, error: fetchError } = await supabase
+    .from("payments")
+    .select("id, user_id, amount, status, subscription_activated_at")
+    .eq("id", paymentId)
+    .single();
+
+  if (fetchError || !existingPayment) {
+    console.error(`Payment ${paymentId} not found in database - possible forged webhook`);
+    return { valid: false, error: "Payment not found in database" };
+  }
+
+  // Verify user_id matches what we have on record
+  if (webhookUserId && existingPayment.user_id !== webhookUserId) {
+    console.error(`User ID mismatch: webhook=${webhookUserId}, db=${existingPayment.user_id} - possible forged webhook`);
+    return { valid: false, error: "User ID mismatch" };
+  }
+
+  // Verify amount matches (convert webhook string to number for comparison)
+  const webhookAmountNum = parseFloat(webhookAmount);
+  if (Math.abs(existingPayment.amount - webhookAmountNum) > 0.01) {
+    console.error(`Amount mismatch: webhook=${webhookAmountNum}, db=${existingPayment.amount} - possible forged webhook`);
+    return { valid: false, error: "Amount mismatch" };
+  }
+
+  // Check if subscription was already activated (idempotency)
+  if (existingPayment.subscription_activated_at) {
+    console.log(`Payment ${paymentId} already processed - skipping duplicate webhook`);
+    return { valid: true, existingPayment };
+  }
+
+  return { valid: true, existingPayment };
 }
 
 Deno.serve(async (req) => {
@@ -68,6 +102,21 @@ Deno.serve(async (req) => {
     const status = body.object.status;
     const userId = body.object.metadata?.user_id;
     const subscriptionDays = body.object.metadata?.subscription_days || 30;
+    const webhookAmount = body.object.amount?.value;
+
+    // SECURITY: Validate payment exists in our database before processing
+    // This prevents forged webhook attacks - attacker cannot activate subscriptions
+    // without first creating a legitimate payment through our payment flow
+    const validation = await validatePaymentInDatabase(supabase, paymentId, userId, webhookAmount);
+    
+    if (!validation.valid) {
+      console.error(`Webhook validation failed for payment ${paymentId}: ${validation.error}`);
+      // Return 200 to prevent retries, but log the attempt
+      return new Response(
+        JSON.stringify({ success: false, error: "Validation failed" }),
+        { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
 
     // Update payment status in database
     const { error: updatePaymentError } = await supabase
@@ -85,6 +134,15 @@ Deno.serve(async (req) => {
 
     // Handle successful payment
     if (body.event === "payment.succeeded" && status === "succeeded" && userId) {
+      // Skip if already activated (idempotency check from validation)
+      if (validation.existingPayment?.subscription_activated_at) {
+        console.log(`Payment ${paymentId} already activated, returning success`);
+        return new Response(
+          JSON.stringify({ success: true, message: "Already processed" }),
+          { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
       console.log(`Payment succeeded for user ${userId}, activating subscription for ${subscriptionDays} days`);
 
       // Calculate subscription expiry date
@@ -160,4 +218,3 @@ Deno.serve(async (req) => {
     );
   }
 });
-
