@@ -15,16 +15,11 @@
       @keyframes loading{0%{background-position:200% 0}100%{background-position:-200% 0}}
     </style>
     
-    <!-- Resource hints for faster loading -->
-    <link rel="dns-prefetch" href="https://fonts.googleapis.com">
-    <link rel="dns-prefetch" href="https://fonts.gstatic.com">
-    <link rel="dns-prefetch" href="https://vrsseotrfmsxpbciyqzc.supabase.co">
+    <!-- Resource hints for faster loading - prioritize critical resources -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link rel="preconnect" href="https://vrsseotrfmsxpbciyqzc.supabase.co">
-    
-    <!-- Preload main module for faster initial render -->
-    <link rel="modulepreload" href="/src/main.tsx">
+    <link rel="dns-prefetch" href="https://vrsseotrfmsxpbciyqzc.supabase.co">
+    <link rel="dns-prefetch" href="https://mc.yandex.ru">
     
     <title>ИИ-репетитор по математике ЕГЭ - Подготовка 24/7</title>
     <meta name="description" content="Готовься к ЕГЭ по математике с ИИ-репетитором. Мгновенные решения задач, пошаговые объяснения, отслеживание прогресса. Начни бесплатно!" />
@@ -45,19 +40,24 @@
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
     
-    <!-- Яндекс.Метрика: основной счётчик (JavaScript) -->
+    <!-- Яндекс.Метрика: deferred to not block LCP -->
     <script type="text/javascript">
-      (function(m,e,t,r,i,c,a){m[i]=m[i]||function(){(m[i].a=m[i].a||[]).push(arguments)};
-      m[i].l=1*new Date();c=e.createElement(t),a=e.getElementsByTagName(t)[0],
-      c.async=1;c.src=r;a.parentNode.insertBefore(c,a)})
-      (window, document, "script", "https://mc.yandex.ru/metrika/tag.js", "ym");
-      
-      ym(105827612, "init", {
-        clickmap:true,
-        trackLinks:true,
-        accurateTrackBounce:true,
-        webvisor:true,
-        trackHash:true
+      // Defer Yandex Metrika loading until after page load for better LCP
+      window.addEventListener('load', function() {
+        setTimeout(function() {
+          (function(m,e,t,r,i,c,a){m[i]=m[i]||function(){(m[i].a=m[i].a||[]).push(arguments)};
+          m[i].l=1*new Date();c=e.createElement(t),a=e.getElementsByTagName(t)[0],
+          c.async=1;c.src=r;a.parentNode.insertBefore(c,a)})
+          (window, document, "script", "https://mc.yandex.ru/metrika/tag.js", "ym");
+          
+          ym(105827612, "init", {
+            clickmap:true,
+            trackLinks:true,
+            accurateTrackBounce:true,
+            webvisor:true,
+            trackHash:true
+          });
+        }, 100);
       });
     </script>
     <!-- Яндекс.Метрика: noscript-счётчик для пользователей без JavaScript -->
