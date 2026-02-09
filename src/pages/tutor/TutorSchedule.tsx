@@ -412,7 +412,7 @@ function AddLessonDialog({
           <DialogTitle>Добавить занятие</DialogTitle>
         </DialogHeader>
 
-        <div className="space-y-4">
+        <div className="space-y-4 max-h-[70vh] overflow-y-auto pr-1">
           {/* Date and Time */}
           <div className="space-y-2">
             <Label>Дата и время *</Label>

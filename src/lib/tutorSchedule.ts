@@ -231,6 +231,16 @@ interface CreateLessonInput {
  * Create a new lesson
  */
 export async function createLesson(input: CreateLessonInput): Promise<TutorLessonWithStudent | null> {
+  // Auto-populate tutor_id if not provided
+  if (!input.tutor_id) {
+    const tutor = await getCurrentTutor();
+    if (!tutor) {
+      console.error('Cannot create lesson: tutor not found');
+      return null;
+    }
+    input.tutor_id = tutor.id;
+  }
+
   const { data, error } = await supabase
     .from('tutor_lessons')
     .insert({
