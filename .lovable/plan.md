@@ -1,108 +1,54 @@
 
-# План: Исправление ошибки сборки и настройка роли репетитора для Дарьи
 
-## Задача 1: Исправить ошибку TypeScript в chat/index.ts
+## Fix Build Errors
 
-### Проблема
-В строке 465 переменная `userId` типа `string` получает значение `body.userId`, которое может быть `undefined` (согласно интерфейсу `ChatRequestBody`).
+There are 3 groups of TypeScript errors to fix:
 
-### Решение
-Нужно изменить логику проверки — сначала получить значение, потом проверить его наличие:
+### 1. Edge Function: `yookassa-webhook/index.ts` (6 errors)
 
-**Файл:** `supabase/functions/chat/index.ts` (строки 461-472)
+**Problem**: The `validatePaymentInDatabase` function types `supabase` as `ReturnType<typeof createClient>` but the generic types don't match, causing the query result to be typed as `never`.
+
+**Fix**: Change the `supabase` parameter type to `any` (since this is a Deno edge function with no generated types) and cast the result appropriately. This is the simplest fix that preserves all existing security logic.
 
 ```typescript
-// Было:
-let userId: string;
-
-if (isServiceRole) {
-  const body = await req.json() as ChatRequestBody;
-  userId = body.userId;  // ❌ Ошибка: body.userId может быть undefined
-  
-  if (!userId) {
-    return new Response(...);
-  }
-  ...
-}
-
-// Станет:
-let userId: string;
-
-if (isServiceRole) {
-  const body = await req.json() as ChatRequestBody;
-  
-  if (!body.userId) {  // ✅ Проверяем сначала
-    return new Response(JSON.stringify({ error: "userId required for service role requests" }), {
-      status: 400,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
-  }
-  
-  userId = body.userId;  // ✅ Теперь TypeScript знает, что это string
-  ...
-}
+// Change line 41 from:
+supabase: ReturnType<typeof createClient>,
+// To:
+supabase: any,
 ```
 
----
+### 2. `TutorGuard.tsx` (3 errors, lines 96-97)
 
-## Задача 2: Настройка роли репетитора для Дарьи
+**Problem**: `supabase.rpc("is_tutor", ...)` returns a `PostgrestFilterBuilder` (thenable but not a strict `Promise`). Passing it to `withTimeout<T>(promise: Promise<T>, ...)` causes a type mismatch. The destructured `{ data, error }` then resolves to type `{}` / `never`.
 
-### Текущее состояние
-| user_id | email | Роль tutor | Профиль tutors |
-|---------|-------|------------|----------------|
-| `936cd7e6-e5f3-42b6-bac7-ad3d6dc263ff` | vlasovadasha2710@mail.ru | ❌ Нет | ❌ Нет |
-| `77ff2fec-c0fa-47cc-9300-b1ac23862663` | tg_1180622424@telegram.user | ❌ Нет | ❌ Нет |
+**Fix**: Wrap the RPC call with `Promise.resolve()` so it becomes a proper `Promise`, or call `.then()` on it before passing to `withTimeout`. The simplest approach:
 
-### SQL-команды для выполнения
-
-Нужно добавить роль `tutor` для обоих аккаунтов и создать профиль репетитора для **основного** email-аккаунта:
-
-```sql
--- 1. Добавить роль tutor для email-аккаунта
-INSERT INTO user_roles (user_id, role) 
-VALUES ('936cd7e6-e5f3-42b6-bac7-ad3d6dc263ff', 'tutor');
-
--- 2. Добавить роль tutor для telegram-аккаунта
-INSERT INTO user_roles (user_id, role) 
-VALUES ('77ff2fec-c0fa-47cc-9300-b1ac23862663', 'tutor');
-
--- 3. Создать профиль репетитора для email-аккаунта
-INSERT INTO tutors (user_id, name, booking_link)
-VALUES (
-  '936cd7e6-e5f3-42b6-bac7-ad3d6dc263ff', 
-  'Дарья', 
-  'tutor-936cd7e6'
-);
-
--- 4. Создать профиль репетитора для telegram-аккаунта
-INSERT INTO tutors (user_id, name, booking_link)
-VALUES (
-  '77ff2fec-c0fa-47cc-9300-b1ac23862663', 
-  'Дарья', 
-  'tutor-77ff2fec'
+```typescript
+const { data, error: rpcError } = await withTimeout(
+  supabase.rpc("is_tutor", { _user_id: session.user.id }).then((r: any) => r),
+  RPC_TIMEOUT_MS,
+  "..."
 );
 ```
 
-> **Примечание:** Два отдельных профиля создаются потому, что это технически разные аккаунты. Если в будущем понадобится объединить их (чтобы ученики были общие), нужно будет связать Telegram с основным email-аккаунтом.
+Alternatively, just remove `withTimeout` wrapper and `await` the RPC directly if the timeout is not critical.
+
+### 3. `TutorSchedule.tsx` (2 errors)
+
+**Error 1 (line 362)**: `createLessonSeries()` (from `tutorSchedule.ts`) uses a local `CreateLessonInput` that requires `tutor_id`, but the call site doesn't pass it. However, `createLessonSeries` internally calls `getCurrentTutor()` to get the tutor_id. The local interface in `tutorSchedule.ts` has `tutor_id` as required. Fix: make `tutor_id` optional in the local `CreateLessonInput` interface in `tutorSchedule.ts` (it's already fetched inside the function).
+
+**Error 2 (line 507)**: `Select onValueChange={setLessonType}` -- `onValueChange` provides `string`, but `setLessonType` expects `LessonType`. Fix: wrap with a cast: `onValueChange={(v) => setLessonType(v as LessonType)}`.
 
 ---
 
-## Техническая секция
+### Summary of Changes
 
-### Изменения в коде
+| File | Change |
+|------|--------|
+| `supabase/functions/yookassa-webhook/index.ts` | Change `supabase` param type to `any` |
+| `src/components/TutorGuard.tsx` | Wrap RPC call to produce a proper Promise type |
+| `src/lib/tutorSchedule.ts` | Make `tutor_id` optional in local `CreateLessonInput` |
+| `src/pages/tutor/TutorSchedule.tsx` | Cast `onValueChange` value to `LessonType` |
 
-| Файл | Изменение |
-|------|-----------|
-| `supabase/functions/chat/index.ts` | Переставить проверку `!body.userId` перед присваиванием (строки 465-472) |
+All fixes are minimal type corrections with zero behavioral or UX impact.
 
-### SQL-операции (через insert tool)
-
-1. `INSERT INTO user_roles` — 2 записи для обоих user_id
-2. `INSERT INTO tutors` — 2 записи с профилями репетитора
-
-### Деплой функций
-
-После исправления ошибки нужно задеплоить функцию `chat`:
-```
-supabase functions deploy chat
-```
