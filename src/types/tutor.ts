@@ -236,6 +236,7 @@ export interface UpdateWeeklySlotInput {
 
 export type LessonStatus = 'booked' | 'completed' | 'cancelled';
 export type LessonSource = 'manual' | 'self_booking';
+export type LessonType = 'regular' | 'trial' | 'mock_exam' | 'consultation';
 export type LessonPaymentStatus = 'unpaid' | 'paid' | 'pending' | 'paid_earlier';
 export type LessonPaymentMethod = 'cash' | 'card' | 'transfer' | 'other';
 
@@ -248,9 +249,20 @@ export interface TutorLesson {
   duration_min: number;
   status: LessonStatus;
   source: LessonSource;
+  lesson_type: LessonType;
+  subject: string | null;
   notes: string | null;
   cancelled_at: string | null;
   cancelled_by: 'tutor' | 'student' | null;
+  // Recurring lesson fields
+  is_recurring: boolean;
+  recurrence_rule: string | null;
+  parent_lesson_id: string | null;
+  // External source fields (Google Calendar import)
+  external_source: string | null;
+  external_event_id: string | null;
+  external_calendar_id: string | null;
+  external_event_updated_at: string | null;
   // Payment fields
   payment_status?: LessonPaymentStatus;
   payment_amount?: number | null;
@@ -284,13 +296,49 @@ export interface CreateLessonInput {
   student_id?: string;
   start_at: string;
   duration_min?: number;
+  lesson_type?: LessonType;
+  subject?: string;
   notes?: string;
+  // Recurring
+  is_recurring?: boolean;
+  recurrence_rule?: string;
+  parent_lesson_id?: string;
+  // External source (Google Calendar)
+  external_source?: string;
+  external_event_id?: string;
+  external_calendar_id?: string;
+  external_event_updated_at?: string;
 }
 
 export interface UpdateLessonInput {
   status?: LessonStatus;
+  lesson_type?: LessonType;
+  subject?: string;
   notes?: string;
   cancelled_by?: 'tutor' | 'student';
+  student_id?: string;
+  tutor_student_id?: string;
+}
+
+// =============================================
+// Google Calendar Integration
+// =============================================
+
+export interface GoogleCalendarConnection {
+  id: string;
+  tutor_id: string;
+  google_email: string;
+  calendar_id: string;
+  last_import_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface GoogleCalendarImportResult {
+  imported: number;
+  updated: number;
+  cancelled: number;
+  skipped: number;
 }
 
 // =============================================
