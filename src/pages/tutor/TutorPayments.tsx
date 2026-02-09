@@ -13,6 +13,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { toast } from 'sonner';
 import TutorGuard from '@/components/TutorGuard';
 import { TutorLayout } from '@/components/tutor/TutorLayout';
+import { TutorDataStatus } from '@/components/tutor/TutorDataStatus';
 import { useTutorPayments, useTutorStudents } from '@/hooks/useTutor';
 import { 
   createTutorPayment, 
@@ -81,8 +82,23 @@ function getParentContact(payment: TutorPaymentWithStudent): string | null {
 // =============================================
 
 function TutorPaymentsContent() {
-  const { payments, loading, error, refetch } = useTutorPayments();
-  const { students } = useTutorStudents();
+  const {
+    payments,
+    loading,
+    error,
+    refetch,
+    isFetching: paymentsIsFetching,
+    isRecovering: paymentsIsRecovering,
+    failureCount: paymentsFailureCount,
+  } = useTutorPayments();
+  const {
+    students,
+    error: studentsError,
+    refetch: refetchStudents,
+    isFetching: studentsIsFetching,
+    isRecovering: studentsIsRecovering,
+    failureCount: studentsFailureCount,
+  } = useTutorStudents();
   
   // Фильтры
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
@@ -95,6 +111,11 @@ function TutorPaymentsContent() {
   // Диалог напоминания
   const [remindDialogOpen, setRemindDialogOpen] = useState(false);
   const [selectedPayment, setSelectedPayment] = useState<TutorPaymentWithStudent | null>(null);
+  const initialLoading = loading && payments.length === 0 && !error;
+  const hasErrors = Boolean(error || studentsError);
+  const isPageFetching = paymentsIsFetching || studentsIsFetching;
+  const isPageRecovering = paymentsIsRecovering || studentsIsRecovering;
+  const pageFailureCount = Math.max(paymentsFailureCount, studentsFailureCount);
   
   // Фильтрация платежей с учётом effective status
   const filteredPayments = useMemo(() => {
@@ -181,9 +202,14 @@ function TutorPaymentsContent() {
     setSelectedPayment(payment);
     setRemindDialogOpen(true);
   }, []);
+
+  const handleRetryAll = useCallback(() => {
+    refetch();
+    refetchStudents();
+  }, [refetch, refetchStudents]);
   
   // Загрузка
-  if (loading) {
+  if (initialLoading) {
     return (
       <TutorLayout>
         <div className="space-y-6">
@@ -198,21 +224,17 @@ function TutorPaymentsContent() {
     );
   }
   
-  // Ошибка
-  if (error) {
-    return (
-      <TutorLayout>
-        <div className="flex flex-col items-center justify-center py-12">
-          <p className="text-muted-foreground mb-4">{error}</p>
-          <Button onClick={refetch}>Повторить</Button>
-        </div>
-      </TutorLayout>
-    );
-  }
-  
   return (
     <TutorLayout>
       <div className="space-y-6">
+        <TutorDataStatus
+          error={error || studentsError}
+          isFetching={isPageFetching}
+          isRecovering={isPageRecovering}
+          failureCount={pageFailureCount}
+          onRetry={handleRetryAll}
+        />
+
         {/* Заголовок */}
         <div className="flex items-center justify-between gap-4 flex-wrap">
           <h1 className="text-2xl font-bold">💳 Оплаты</h1>
@@ -316,7 +338,11 @@ function TutorPaymentsContent() {
                 {filteredPayments.length === 0 ? (
                   <TableRow>
                     <TableCell colSpan={7} className="text-center py-8 text-muted-foreground">
-                      {payments.length === 0 ? 'Нет записей об оплатах' : 'Ничего не найдено'}
+                      {hasErrors
+                        ? 'Не удалось обновить данные об оплатах. Выполняется восстановление...'
+                        : payments.length === 0
+                          ? 'Нет записей об оплатах'
+                          : 'Ничего не найдено'}
                     </TableCell>
                   </TableRow>
                 ) : (

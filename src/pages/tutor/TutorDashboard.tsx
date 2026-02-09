@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import TutorGuard from '@/components/TutorGuard';
 import { TutorLayout } from '@/components/tutor/TutorLayout';
+import { TutorDataStatus } from '@/components/tutor/TutorDataStatus';
 import { AddStudentDialog } from '@/components/tutor/AddStudentDialog';
 import { useTutor, useTutorStudents, useTutorPayments } from '@/hooks/useTutor';
 import { getTutorInviteWebLink, getTutorInviteTelegramLink } from '@/utils/telegramLinks';
@@ -188,12 +189,47 @@ function DashboardSkeleton() {
 
 function TutorDashboardContent() {
   const navigate = useNavigate();
-  const { tutor, loading: tutorLoading } = useTutor();
-  const { students, loading: studentsLoading } = useTutorStudents();
-  const { payments, loading: paymentsLoading } = useTutorPayments();
+  const {
+    tutor,
+    loading: tutorLoading,
+    error: tutorError,
+    refetch: refetchTutor,
+    isFetching: tutorIsFetching,
+    isRecovering: tutorIsRecovering,
+    failureCount: tutorFailureCount,
+  } = useTutor();
+  const {
+    students,
+    loading: studentsLoading,
+    error: studentsError,
+    refetch: refetchStudents,
+    isFetching: studentsIsFetching,
+    isRecovering: studentsIsRecovering,
+    failureCount: studentsFailureCount,
+  } = useTutorStudents();
+  const {
+    payments,
+    loading: paymentsLoading,
+    error: paymentsError,
+    refetch: refetchPayments,
+    isFetching: paymentsIsFetching,
+    isRecovering: paymentsIsRecovering,
+    failureCount: paymentsFailureCount,
+  } = useTutorPayments();
   
   const [inviteModalOpen, setInviteModalOpen] = useState(false);
-  const loading = tutorLoading || studentsLoading || paymentsLoading;
+  const hasAnyData = Boolean(tutor) || students.length > 0 || payments.length > 0;
+  const hasAnyError = Boolean(tutorError || studentsError || paymentsError);
+  const loading = (tutorLoading || studentsLoading || paymentsLoading) && !hasAnyData && !hasAnyError;
+  const isRecovering = tutorIsRecovering || studentsIsRecovering || paymentsIsRecovering;
+  const isFetching = tutorIsFetching || studentsIsFetching || paymentsIsFetching;
+  const failureCount = Math.max(tutorFailureCount, studentsFailureCount, paymentsFailureCount);
+
+  const handleRetryAll = useCallback(() => {
+    refetchTutor();
+    refetchStudents();
+    refetchPayments();
+  }, [refetchPayments, refetchStudents, refetchTutor]);
   
   // Invite URLs
   const inviteCode = tutor?.invite_code;
@@ -286,6 +322,14 @@ function TutorDashboardContent() {
   return (
     <TutorLayout>
       <div className="space-y-6">
+        <TutorDataStatus
+          error={tutorError || studentsError || paymentsError}
+          isFetching={isFetching}
+          isRecovering={isRecovering}
+          failureCount={failureCount}
+          onRetry={handleRetryAll}
+        />
+
         {/* Приветствие */}
         <div className="space-y-1">
           <h1 className="text-2xl font-bold">

@@ -21,6 +21,7 @@ import { toast } from 'sonner';
 import { supabase } from '@/lib/supabaseClient';
 import TutorGuard from '@/components/TutorGuard';
 import { TutorLayout } from '@/components/tutor/TutorLayout';
+import { TutorDataStatus } from '@/components/tutor/TutorDataStatus';
 import { useTutor, useTutorWeeklySlots, useTutorLessons, useTutorStudents, useTutorReminderSettings, useTutorCalendarSettings, useTutorAvailabilityExceptions } from '@/hooks/useTutor';
 import {
   createWeeklySlot,
@@ -1301,17 +1302,68 @@ function PaymentOnboardingDialog({ open, onOpenChange, onEnablePaymentReminders 
 // =============================================
 
 function TutorScheduleContent() {
-  const { tutor } = useTutor();
-  const { students } = useTutorStudents();
-  const { slots, loading: slotsLoading, refetch: refetchSlots } = useTutorWeeklySlots();
-  const { settings: reminderSettings, refetch: refetchReminderSettings } = useTutorReminderSettings();
-  const { settings: calendarSettings, refetch: refetchCalendarSettings } = useTutorCalendarSettings();
-  const { exceptions, refetch: refetchExceptions } = useTutorAvailabilityExceptions();
+  const {
+    tutor,
+    error: tutorError,
+    refetch: refetchTutor,
+    isFetching: tutorIsFetching,
+    isRecovering: tutorIsRecovering,
+    failureCount: tutorFailureCount,
+  } = useTutor();
+  const {
+    students,
+    error: studentsError,
+    refetch: refetchStudents,
+    isFetching: studentsIsFetching,
+    isRecovering: studentsIsRecovering,
+    failureCount: studentsFailureCount,
+  } = useTutorStudents();
+  const {
+    slots,
+    loading: slotsLoading,
+    error: slotsError,
+    refetch: refetchSlots,
+    isFetching: slotsIsFetching,
+    isRecovering: slotsIsRecovering,
+    failureCount: slotsFailureCount,
+  } = useTutorWeeklySlots();
+  const {
+    settings: reminderSettings,
+    error: reminderError,
+    refetch: refetchReminderSettings,
+    isFetching: reminderIsFetching,
+    isRecovering: reminderIsRecovering,
+    failureCount: reminderFailureCount,
+  } = useTutorReminderSettings();
+  const {
+    settings: calendarSettings,
+    error: calendarError,
+    refetch: refetchCalendarSettings,
+    isFetching: calendarIsFetching,
+    isRecovering: calendarIsRecovering,
+    failureCount: calendarFailureCount,
+  } = useTutorCalendarSettings();
+  const {
+    exceptions,
+    error: exceptionsError,
+    refetch: refetchExceptions,
+    isFetching: exceptionsIsFetching,
+    isRecovering: exceptionsIsRecovering,
+    failureCount: exceptionsFailureCount,
+  } = useTutorAvailabilityExceptions();
 
   const [scheduleSettings, setScheduleSettings] = useState<ScheduleSettings>(loadSettings);
 
   const [weekStart, setWeekStart] = useState(() => getWeekStart(new Date()));
-  const { lessons, loading: lessonsLoading, refetch: refetchLessons } = useTutorLessons(weekStart);
+  const {
+    lessons,
+    loading: lessonsLoading,
+    error: lessonsError,
+    refetch: refetchLessons,
+    isFetching: lessonsIsFetching,
+    isRecovering: lessonsIsRecovering,
+    failureCount: lessonsFailureCount,
+  } = useTutorLessons(weekStart);
 
   // Dialogs
   const [addLessonOpen, setAddLessonOpen] = useState(false);
@@ -1403,6 +1455,53 @@ function TutorScheduleContent() {
   }, []); // Only on mount
 
   const loading = slotsLoading || lessonsLoading;
+  const hasScheduleData = slots.length > 0 || lessons.length > 0;
+  const hasCriticalError = Boolean(slotsError || lessonsError);
+  const showInitialSkeleton = loading && !hasScheduleData && !hasCriticalError;
+  const pageError = slotsError || lessonsError || tutorError || studentsError || reminderError || calendarError || exceptionsError;
+  const pageIsFetching =
+    tutorIsFetching ||
+    studentsIsFetching ||
+    slotsIsFetching ||
+    lessonsIsFetching ||
+    reminderIsFetching ||
+    calendarIsFetching ||
+    exceptionsIsFetching;
+  const pageIsRecovering =
+    tutorIsRecovering ||
+    studentsIsRecovering ||
+    slotsIsRecovering ||
+    lessonsIsRecovering ||
+    reminderIsRecovering ||
+    calendarIsRecovering ||
+    exceptionsIsRecovering;
+  const pageFailureCount = Math.max(
+    tutorFailureCount,
+    studentsFailureCount,
+    slotsFailureCount,
+    lessonsFailureCount,
+    reminderFailureCount,
+    calendarFailureCount,
+    exceptionsFailureCount,
+  );
+
+  const handleRetryAll = useCallback(() => {
+    refetchTutor();
+    refetchStudents();
+    refetchSlots();
+    refetchLessons();
+    refetchReminderSettings();
+    refetchCalendarSettings();
+    refetchExceptions();
+  }, [
+    refetchCalendarSettings,
+    refetchExceptions,
+    refetchLessons,
+    refetchReminderSettings,
+    refetchSlots,
+    refetchStudents,
+    refetchTutor,
+  ]);
 
   const visibleHours = useMemo(() => {
     return Array.from(
@@ -1505,7 +1604,7 @@ function TutorScheduleContent() {
     return `${formatDate(weekStart)} — ${formatDate(endDate)}`;
   }, [weekStart]);
 
-  if (loading && slots.length === 0) {
+  if (showInitialSkeleton) {
     return (
       <TutorLayout>
         <div className="space-y-6">
@@ -1519,6 +1618,14 @@ function TutorScheduleContent() {
   return (
     <TutorLayout>
       <div className="space-y-4">
+        <TutorDataStatus
+          error={pageError}
+          isFetching={pageIsFetching}
+          isRecovering={pageIsRecovering}
+          failureCount={pageFailureCount}
+          onRetry={handleRetryAll}
+        />
+
         {/* Header */}
         <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
           <div>

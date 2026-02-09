@@ -12,6 +12,7 @@ import {
 import { UserPlus } from 'lucide-react';
 import TutorGuard from '@/components/TutorGuard';
 import { TutorLayout } from '@/components/tutor/TutorLayout';
+import { TutorDataStatus } from '@/components/tutor/TutorDataStatus';
 import { StudentCard } from '@/components/tutor/StudentCard';
 import { AddStudentDialog } from '@/components/tutor/AddStudentDialog';
 import { 
@@ -41,8 +42,23 @@ type StudentWithExtras = TutorStudentWithProfile & {
 
 function TutorStudentsContent() {
   const navigate = useNavigate();
-  const { tutor } = useTutor();
-  const { students, loading, error, refetch } = useTutorStudents();
+  const {
+    tutor,
+    error: tutorError,
+    refetch: refetchTutor,
+    isFetching: tutorIsFetching,
+    isRecovering: tutorIsRecovering,
+    failureCount: tutorFailureCount,
+  } = useTutor();
+  const {
+    students,
+    loading,
+    error,
+    refetch,
+    isFetching,
+    isRecovering,
+    failureCount,
+  } = useTutorStudents();
   
   // State
   const [sortBy, setSortBy] = useState<SortField>('activity');
@@ -54,6 +70,11 @@ function TutorStudentsContent() {
   });
   const [page, setPage] = useState(1);
   const [inviteModalOpen, setInviteModalOpen] = useState(false);
+  const initialLoading = loading && students.length === 0 && !error;
+  const hasErrors = Boolean(error || tutorError);
+  const isPageFetching = isFetching || tutorIsFetching;
+  const isPageRecovering = isRecovering || tutorIsRecovering;
+  const pageFailureCount = Math.max(failureCount, tutorFailureCount);
   
   // Invite URLs
   const inviteCode = tutor?.invite_code;
@@ -161,6 +182,11 @@ function TutorStudentsContent() {
     navigate(`/tutor/students/${id}`);
   }, [navigate]);
 
+  const handleRetryAll = useCallback(() => {
+    refetchTutor();
+    refetch();
+  }, [refetchTutor, refetch]);
+
   // Render pagination
   const renderPagination = () => {
     if (totalPages <= 1) return null;
@@ -218,6 +244,14 @@ function TutorStudentsContent() {
   return (
     <TutorLayout>
       <div className="space-y-6">
+        <TutorDataStatus
+          error={error || tutorError}
+          isFetching={isPageFetching}
+          isRecovering={isPageRecovering}
+          failureCount={pageFailureCount}
+          onRetry={handleRetryAll}
+        />
+
         {/* Header */}
         <div className="flex items-center justify-between gap-4 flex-wrap">
           <h1 className="text-2xl font-bold">👥 Мои ученики</h1>
@@ -240,18 +274,18 @@ function TutorStudentsContent() {
         />
 
         {/* Loading state */}
-        {loading && <StudentsSkeleton />}
+        {initialLoading && <StudentsSkeleton />}
 
         {/* Error state */}
-        {error && !loading && <StudentsError onRetry={refetch} />}
+        {hasErrors && !initialLoading && students.length === 0 && <StudentsError onRetry={handleRetryAll} />}
 
         {/* Empty state */}
-        {!loading && !error && students.length === 0 && (
+        {!initialLoading && !hasErrors && students.length === 0 && (
           <StudentsEmpty />
         )}
 
         {/* Content */}
-        {!loading && !error && students.length > 0 && (
+        {students.length > 0 && (
           <>
             {/* Toolbar */}
             <StudentsToolbar

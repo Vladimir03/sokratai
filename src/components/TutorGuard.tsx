@@ -8,6 +8,10 @@ interface TutorGuardProps {
   children: React.ReactNode;
 }
 
+const SESSION_TIMEOUT_MS = 8000;
+const RPC_TIMEOUT_MS = 8000;
+const CACHE_TTL_MS = 10 * 60 * 1000;
+
 // Module-level cache: avoids re-checking is_tutor on every tab navigation
 const tutorAuthCache = {
   userId: null as string | null,
@@ -15,14 +19,31 @@ const tutorAuthCache = {
   verifiedAt: 0,
 };
 
-const CACHE_TTL_MS = 10 * 60 * 1000; // 10 minutes
-
 function isCacheValid(userId: string): boolean {
   return (
     tutorAuthCache.isTutor &&
     tutorAuthCache.userId === userId &&
     Date.now() - tutorAuthCache.verifiedAt < CACHE_TTL_MS
   );
+}
+
+const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> {
+  let timeoutId: ReturnType<typeof setTimeout> | null = null;
+
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<T>((_, reject) => {
+        timeoutId = setTimeout(() => reject(new Error(message)), timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timeoutId) {
+      clearTimeout(timeoutId);
+    }
+  }
 }
 
 const TutorGuard = ({ children }: TutorGuardProps) => {
@@ -37,14 +58,22 @@ const TutorGuard = ({ children }: TutorGuardProps) => {
     setError(null);
 
     try {
-      const { data: { session } } = await supabase.auth.getSession();
+      const {
+        data: { session },
+      } = await withTimeout(
+        supabase.auth.getSession(),
+        SESSION_TIMEOUT_MS,
+        "Превышено время ожидания проверки сессии"
+      );
 
       if (!session) {
+        tutorAuthCache.userId = null;
+        tutorAuthCache.isTutor = false;
+        tutorAuthCache.verifiedAt = 0;
         navigate("/login");
         return;
       }
 
-      // Fast path: use cached authorization if recently verified
       if (!forceRecheck && isCacheValid(session.user.id)) {
         if (isMounted.current) {
           setAuthorized(true);
@@ -53,37 +82,76 @@ const TutorGuard = ({ children }: TutorGuardProps) => {
         return;
       }
 
-      // Retry logic with increasing delays for role propagation and unstable connections
-      const delays = [0, 1000, 2000, 3000]; // First attempt immediate, then 1s, 2s, 3s
+      const delays = [0, 1000, 2000, 3000];
       let isTutor = false;
-      let lastError = null;
+      let lastError: string | null = null;
+      let retryFailures = 0;
 
       for (let i = 0; i < delays.length; i++) {
         if (delays[i] > 0) {
-          await new Promise(r => setTimeout(r, delays[i]));
+          await wait(delays[i]);
         }
 
-        const { data, error } = await supabase.rpc("is_tutor", {
-          _user_id: session.user.id
-        });
+        try {
+          const { data, error: rpcError } = await withTimeout(
+            supabase.rpc("is_tutor", { _user_id: session.user.id }),
+            RPC_TIMEOUT_MS,
+            "Превышено время ожидания проверки роли"
+          );
 
-        if (!error && data) {
-          isTutor = true;
+          if (!rpcError && data) {
+            isTutor = true;
+            lastError = null;
+            break;
+          }
+
+          if (rpcError) {
+            lastError = rpcError.message;
+            retryFailures += 1;
+            if (i < delays.length - 1) {
+              console.warn("tutor_query_retry", {
+                queryKey: "is_tutor",
+                failureCount: retryFailures,
+                stage: "guard",
+                error: lastError,
+              });
+            }
+            continue;
+          }
+
           lastError = null;
-          break;
-        }
-
-        lastError = error;
-        if (!error && !data && i < delays.length - 1) {
-          console.log(`TutorGuard: is_tutor returned false, retrying (${i + 1}/${delays.length})...`);
+          if (i < delays.length - 1) {
+            retryFailures += 1;
+            console.warn("tutor_query_retry", {
+              queryKey: "is_tutor",
+              failureCount: retryFailures,
+              stage: "guard",
+              error: "is_tutor returned false",
+            });
+          }
+        } catch (rpcTimeoutError) {
+          lastError = rpcTimeoutError instanceof Error ? rpcTimeoutError.message : "Неизвестная ошибка сети";
+          retryFailures += 1;
+          if (i < delays.length - 1) {
+            console.warn("tutor_query_retry", {
+              queryKey: "is_tutor",
+              failureCount: retryFailures,
+              stage: "guard",
+              error: lastError,
+            });
+          }
         }
       }
 
       if (lastError) {
-        console.error("Error checking tutor role after retries:", lastError);
+        console.error("tutor_query_timeout", {
+          queryKey: "is_tutor",
+          failureCount: retryFailures || delays.length,
+          stage: "guard",
+          error: lastError,
+        });
         if (isMounted.current) {
           setError("Ошибка проверки доступа. Проверьте соединение.");
-          setLoading(false);
         }
         return;
       }
@@ -93,16 +161,27 @@ const TutorGuard = ({ children }: TutorGuardProps) => {
         return;
       }
 
-      // Update cache on success
       tutorAuthCache.userId = session.user.id;
       tutorAuthCache.isTutor = true;
       tutorAuthCache.verifiedAt = Date.now();
+      if (retryFailures > 0) {
+        console.info("tutor_query_recovered", {
+          queryKey: "is_tutor",
+          failureCount: retryFailures,
+          stage: "guard",
+        });
+      }
 
       if (isMounted.current) {
         setAuthorized(true);
       }
-    } catch (error) {
-      console.error("Error in TutorGuard:", error);
+    } catch (guardError) {
+      console.error("Error in TutorGuard:", guardError);
+      console.error("tutor_query_timeout", {
+        queryKey: "is_tutor",
+        stage: "guard",
+        error: guardError instanceof Error ? guardError.message : String(guardError),
+      });
       if (isMounted.current) {
         setError("Ошибка соединения. Попробуйте ещё раз.");
       }
@@ -120,21 +199,17 @@ const TutorGuard = ({ children }: TutorGuardProps) => {
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       if (!session) {
-        // Clear cache on logout
         tutorAuthCache.userId = null;
         tutorAuthCache.isTutor = false;
         tutorAuthCache.verifiedAt = 0;
         navigate("/login");
-      } else if (event === 'TOKEN_REFRESHED') {
-        // Token was refreshed successfully — update cache timestamp
+      } else if (event === "TOKEN_REFRESHED") {
         tutorAuthCache.verifiedAt = Date.now();
       }
     });
 
-    // Visibility change handler: refresh session when tab becomes active after inactivity
     const handleVisibilityChange = () => {
-      if (document.visibilityState === 'visible') {
-        // Trigger Supabase to refresh the session if needed
+      if (document.visibilityState === "visible") {
         supabase.auth.getSession().then(({ data: { session } }) => {
           if (!session && isMounted.current) {
             navigate("/login");
@@ -142,12 +217,12 @@ const TutorGuard = ({ children }: TutorGuardProps) => {
         });
       }
     };
-    document.addEventListener('visibilitychange', handleVisibilityChange);
+    document.addEventListener("visibilitychange", handleVisibilityChange);
 
     return () => {
       isMounted.current = false;
       subscription.unsubscribe();
-      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
   }, [navigate, checkAccess]);
 

@@ -18,6 +18,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { toast } from 'sonner';
 import TutorGuard from '@/components/TutorGuard';
 import { TutorLayout } from '@/components/tutor/TutorLayout';
+import { TutorDataStatus } from '@/components/tutor/TutorDataStatus';
 import { 
   useTutorStudent, 
   useMockExams, 
@@ -48,9 +49,33 @@ function TutorStudentProfileContent() {
   const { tutorStudentId } = useParams<{ tutorStudentId: string }>();
   const navigate = useNavigate();
   
-  const { student, loading, error, refetch } = useTutorStudent(tutorStudentId);
-  const { mockExams, loading: mockExamsLoading, refetch: refetchMockExams } = useMockExams(tutorStudentId);
-  const { chats, loading: chatsLoading } = useStudentChats(student?.student_id);
+  const {
+    student,
+    loading,
+    error,
+    refetch: refetchStudent,
+    isFetching: studentIsFetching,
+    isRecovering: studentIsRecovering,
+    failureCount: studentFailureCount,
+  } = useTutorStudent(tutorStudentId);
+  const {
+    mockExams,
+    loading: mockExamsLoading,
+    error: mockExamsError,
+    refetch: refetchMockExams,
+    isFetching: mockExamsIsFetching,
+    isRecovering: mockExamsIsRecovering,
+    failureCount: mockExamsFailureCount,
+  } = useMockExams(tutorStudentId);
+  const {
+    chats,
+    loading: chatsLoading,
+    error: chatsError,
+    refetch: refetchChats,
+    isFetching: chatsIsFetching,
+    isRecovering: chatsIsRecovering,
+    failureCount: chatsFailureCount,
+  } = useStudentChats(student?.student_id);
   
   // Локальное состояние для редактирования
   const [notes, setNotes] = useState<string>('');
@@ -79,6 +104,11 @@ function TutorStudentProfileContent() {
   const [editStartScore, setEditStartScore] = useState('');
   const [editTargetScore, setEditTargetScore] = useState('');
   const [editNotes, setEditNotes] = useState('');
+  const initialLoading = loading && !student && !error;
+  const pageError = error || mockExamsError || chatsError;
+  const pageIsFetching = studentIsFetching || mockExamsIsFetching || chatsIsFetching;
+  const pageIsRecovering = studentIsRecovering || mockExamsIsRecovering || chatsIsRecovering;
+  const pageFailureCount = Math.max(studentFailureCount, mockExamsFailureCount, chatsFailureCount);
   
   // Инициализация полей при загрузке студента
   if (student && !notesInitialized) {
@@ -119,14 +149,14 @@ function TutorStudentProfileContent() {
         last_lesson_at: lastLessonAt || undefined,
       });
       toast.success('Изменения сохранены');
-      refetch();
+      refetchStudent();
     } catch (err) {
       console.error('Error saving:', err);
       toast.error('Ошибка сохранения');
     } finally {
       setIsSaving(false);
     }
-  }, [tutorStudentId, notes, parentContact, lastLessonAt, refetch]);
+  }, [tutorStudentId, notes, parentContact, lastLessonAt, refetchStudent]);
 
   const handleDeleteStudent = useCallback(async () => {
     if (!tutorStudentId) return;
@@ -193,7 +223,7 @@ function TutorStudentProfileContent() {
       toast.success('Данные ученика обновлены');
       setEditStudentOpen(false);
       setEditFormInitialized(false);
-      refetch();
+      refetchStudent();
     } catch (error: any) {
       console.error('Error updating student:', error);
       toast.error(error.message || 'Не удалось обновить ученика');
@@ -213,11 +243,11 @@ function TutorStudentProfileContent() {
     editTargetScore,
     editParentContact,
     editNotes,
-    refetch,
+    refetchStudent,
   ]);
   
   // Загрузка
-  if (loading) {
+  if (initialLoading) {
     return (
       <TutorLayout>
         <div className="space-y-6">
@@ -256,6 +286,18 @@ function TutorStudentProfileContent() {
   return (
     <TutorLayout>
       <div className="space-y-6">
+        <TutorDataStatus
+          error={pageError}
+          isFetching={pageIsFetching}
+          isRecovering={pageIsRecovering}
+          failureCount={pageFailureCount}
+          onRetry={() => {
+            refetchStudent();
+            refetchMockExams();
+            refetchChats();
+          }}
+        />
+
         {/* Хедер с навигацией */}
         <div className="flex items-center gap-4">
           <Button 
@@ -441,6 +483,12 @@ function TutorStudentProfileContent() {
                 <Skeleton className="h-16 w-full" />
                 <Skeleton className="h-16 w-full" />
               </div>
+            ) : mockExamsError ? (
+              <Card>
+                <CardContent className="py-8 text-center text-muted-foreground">
+                  {mockExamsError}
+                </CardContent>
+              </Card>
             ) : mockExams.length === 0 ? (
               <Card>
                 <CardContent className="py-8 text-center text-muted-foreground">
@@ -482,6 +530,12 @@ function TutorStudentProfileContent() {
                 <Skeleton className="h-16 w-full" />
                 <Skeleton className="h-16 w-full" />
               </div>
+            ) : chatsError ? (
+              <Card>
+                <CardContent className="py-8 text-center text-muted-foreground">
+                  {chatsError}
+                </CardContent>
+              </Card>
             ) : chats.length === 0 ? (
               <Card>
                 <CardContent className="py-8 text-center text-muted-foreground">
@@ -893,7 +947,17 @@ function ChatMessagesDialog({
   chatId: string | null; 
   onClose: () => void;
 }) {
-  const { messages, loading, hasMore, loadMore } = useStudentChatMessages(chatId || undefined);
+  const {
+    messages,
+    loading,
+    hasMore,
+    loadMore,
+    error,
+    refetch,
+    isFetching,
+    isRecovering,
+    failureCount,
+  } = useStudentChatMessages(chatId || undefined);
   
   if (!chatId) return null;
   
@@ -903,6 +967,14 @@ function ChatMessagesDialog({
         <DialogHeader>
           <DialogTitle>История диалога</DialogTitle>
         </DialogHeader>
+
+        <TutorDataStatus
+          error={error}
+          isFetching={isFetching}
+          isRecovering={isRecovering}
+          failureCount={failureCount}
+          onRetry={refetch}
+        />
         
         <ScrollArea className="flex-1 pr-4">
           {loading && messages.length === 0 ? (
@@ -910,6 +982,10 @@ function ChatMessagesDialog({
               <Skeleton className="h-12 w-3/4" />
               <Skeleton className="h-12 w-2/3 ml-auto" />
               <Skeleton className="h-12 w-3/4" />
+            </div>
+          ) : messages.length === 0 ? (
+            <div className="py-10 text-center text-sm text-muted-foreground">
+              {error ? 'Сообщения временно недоступны' : 'Сообщения не найдены'}
             </div>
           ) : (
             <div className="space-y-3">

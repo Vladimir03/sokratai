@@ -1,4 +1,4 @@
-import { ReactNode } from 'react';
+import { ReactNode, useEffect } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
@@ -21,6 +21,28 @@ const navItems = [
 export function TutorLayout({ children }: TutorLayoutProps) {
   const location = useLocation();
   const navigate = useNavigate();
+
+  useEffect(() => {
+    // Warm up lazy tutor route chunks to make tab switches instant.
+    const timer = window.setTimeout(() => {
+      const warmup = (chunkName: string, loader: () => Promise<unknown>) => {
+        void loader().catch((error) => {
+          console.warn('tutor_chunk_warmup_failed', {
+            chunkName,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        });
+      };
+
+      warmup('TutorDashboard', () => import('@/pages/tutor/TutorDashboard'));
+      warmup('TutorSchedule', () => import('@/pages/tutor/TutorSchedule'));
+      warmup('TutorStudents', () => import('@/pages/tutor/TutorStudents'));
+      warmup('TutorStudentProfile', () => import('@/pages/tutor/TutorStudentProfile'));
+      warmup('TutorPayments', () => import('@/pages/tutor/TutorPayments'));
+    }, 300);
+
+    return () => window.clearTimeout(timer);
+  }, []);
 
   const handleLogout = async () => {
     const { error } = await supabase.auth.signOut();
