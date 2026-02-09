@@ -218,6 +218,26 @@ src/
 3. **CSS анимации** — предпочитай `transform` и `opacity` (GPU-ускорены на всех браузерах)
 4. **Тестируй в Safari** — если меняешь CSS layout, scroll-поведение или формы
 
+## Tutor data-loading (macOS Chrome hardening)
+
+- Все tutor-хуки в `src/hooks/useTutor.ts` работают через React Query и обязаны сохранять совместимый контракт:
+  - базовый: `{ dataField, loading, error, refetch }`
+  - диагностический: `isFetching`, `isRecovering`, `failureCount`
+- Общие настройки tutor-запросов централизованы в `src/hooks/tutorQueryOptions.ts`:
+  - `timeout = 10000ms`
+  - bounded retry: до 5 повторов (6 попыток суммарно)
+  - `staleTime = 60000`, `gcTime = 600000`
+  - `refetchOnWindowFocus = true`, `refetchOnReconnect = true`
+  - `refetchInterval = 15000` только при отсутствии данных + ошибке
+- Для списков/чатов нельзя возвращать глобальный "вечный skeleton" после ошибок:
+  - skeleton только на первичной загрузке при отсутствии данных
+  - после ошибок — мягкий recovery-статус через `src/components/tutor/TutorDataStatus.tsx` и доступная навигация
+  - при появлении данных — рендер из cache + фоновый refresh
+- Логи наблюдаемости для tutor-запросов обязательны:
+  - `tutor_query_retry`
+  - `tutor_query_timeout`
+  - `tutor_query_recovered`
+
 ## Команды
 
 ```bash
