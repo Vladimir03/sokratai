@@ -7,7 +7,8 @@ import type {
   TutorCalendarSettings,
   TutorAvailabilityException,
   TutorPublicInfo,
-  BookingSlot
+  BookingSlot,
+  LessonType
 } from '@/types/tutor';
 
 // =============================================
@@ -213,8 +214,17 @@ interface CreateLessonInput {
   student_id?: string;
   start_at: string;
   duration_min?: number;
+  lesson_type?: LessonType;
+  subject?: string;
   notes?: string;
   source?: 'manual' | 'self_booking';
+  is_recurring?: boolean;
+  recurrence_rule?: string;
+  parent_lesson_id?: string;
+  external_source?: string;
+  external_event_id?: string;
+  external_calendar_id?: string;
+  external_event_updated_at?: string;
 }
 
 /**
@@ -254,10 +264,83 @@ export async function createLesson(input: CreateLessonInput): Promise<TutorLesso
   return data as TutorLessonWithStudent;
 }
 
+/**
+ * Create a recurring weekly lesson series.
+ * Returns the root lesson (first in the series).
+ * Max 60 instances per call for safety.
+ */
+export async function createLessonSeries(
+  input: CreateLessonInput,
+  repeatUntil: string // ISO date string (inclusive)
+): Promise<{ root: TutorLessonWithStudent | null; count: number }> {
+  const MAX_INSTANCES = 60;
+  const startDate = new Date(input.start_at);
+  const untilDate = new Date(repeatUntil);
+  untilDate.setHours(23, 59, 59, 999);
+
+  // Generate dates: weekly from start_at until repeatUntil (inclusive)
+  const dates: Date[] = [];
+  const current = new Date(startDate);
+  while (current <= untilDate && dates.length < MAX_INSTANCES) {
+    dates.push(new Date(current));
+    current.setDate(current.getDate() + 7);
+  }
+
+  if (dates.length === 0) {
+    return { root: null, count: 0 };
+  }
+
+  const recurrenceRule = `FREQ=WEEKLY;UNTIL=${repeatUntil}`;
+
+  // Create root lesson (first in series)
+  const rootLesson = await createLesson({
+    ...input,
+    start_at: dates[0].toISOString(),
+    is_recurring: true,
+    recurrence_rule: recurrenceRule,
+  });
+
+  if (!rootLesson || dates.length === 1) {
+    return { root: rootLesson, count: rootLesson ? 1 : 0 };
+  }
+
+  // Create remaining lessons in batch
+  const childInputs = dates.slice(1).map(d => ({
+    tutor_id: input.tutor_id,
+    tutor_student_id: input.tutor_student_id,
+    student_id: input.student_id,
+    start_at: d.toISOString(),
+    duration_min: input.duration_min,
+    lesson_type: input.lesson_type,
+    subject: input.subject,
+    notes: input.notes,
+    source: input.source || 'manual' as const,
+    is_recurring: true,
+    recurrence_rule: recurrenceRule,
+    parent_lesson_id: rootLesson.id,
+  }));
+
+  const { error } = await supabase
+    .from('tutor_lessons')
+    .insert(childInputs);
+
+  if (error) {
+    console.error('Error creating lesson series children:', error);
+    // Root was created, return partial success
+    return { root: rootLesson, count: 1 };
+  }
+
+  return { root: rootLesson, count: dates.length };
+}
+
 interface UpdateLessonInput {
   status?: 'booked' | 'completed' | 'cancelled';
+  lesson_type?: LessonType;
+  subject?: string;
   notes?: string;
   cancelled_by?: 'tutor' | 'student';
+  student_id?: string;
+  tutor_student_id?: string;
 }
 
 /**
@@ -612,4 +695,67 @@ export async function bookLessonSlot(
   }
   
   return data as string;
+}
+
+// =============================================
+// Google Calendar Integration (client helpers)
+// =============================================
+
+export async function getGoogleCalendarStatus(): Promise<{
+  connected: boolean;
+  google_email?: string;
+  last_import_at?: string | null;
+} | null> {
+  try {
+    const response = await supabase.functions.invoke('google-calendar-oauth', {
+      body: { action: 'status' }
+    });
+    if (response.error) throw response.error;
+    return response.data;
+  } catch (err) {
+    console.error('Error checking Google Calendar status:', err);
+    return null;
+  }
+}
+
+export async function getGoogleCalendarAuthUrl(): Promise<string | null> {
+  try {
+    const response = await supabase.functions.invoke('google-calendar-oauth', {
+      body: { action: 'get_auth_url' }
+    });
+    if (response.error) throw response.error;
+    return response.data?.url || null;
+  } catch (err) {
+    console.error('Error getting Google auth URL:', err);
+    return null;
+  }
+}
+
+export async function disconnectGoogleCalendar(): Promise<boolean> {
+  try {
+    const response = await supabase.functions.invoke('google-calendar-oauth', {
+      body: { action: 'disconnect' }
+    });
+    if (response.error) throw response.error;
+    return true;
+  } catch (err) {
+    console.error('Error disconnecting Google Calendar:', err);
+    return false;
+  }
+}
+
+export async function importGoogleCalendarEvents(
+  startDate: string,
+  endDate: string
+): Promise<{ imported: number; updated: number; cancelled: number; skipped: number } | null> {
+  try {
+    const response = await supabase.functions.invoke('google-calendar-import', {
+      body: { start_date: startDate, end_date: endDate }
+    });
+    if (response.error) throw response.error;
+    return response.data;
+  } catch (err) {
+    console.error('Error importing Google Calendar events:', err);
+    return null;
+  }
 }

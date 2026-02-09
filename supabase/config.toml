@@ -59,3 +59,9 @@ verify_jwt = true
 
 [functions.tutor-update-student]
 verify_jwt = true
+
+[functions.google-calendar-oauth]
+verify_jwt = false
+
+[functions.google-calendar-import]
+verify_jwt = true

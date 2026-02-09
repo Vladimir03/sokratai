@@ -1,5 +1,5 @@
-import { useState, useMemo, useCallback, useEffect } from 'react';
-import { ChevronLeft, ChevronRight, Link2, Copy, Check, Plus, X, Clock, Bell, Settings, CalendarIcon, Trash2, CalendarDays, MessageCircle } from 'lucide-react';
+import { useState, useMemo, useCallback, useEffect, useRef } from 'react';
+import { ChevronLeft, ChevronRight, Link2, Copy, Check, Plus, X, Clock, Bell, Settings, CalendarIcon, Trash2, CalendarDays, MessageCircle, Repeat, Download, Unplug } from 'lucide-react';
 import { format, addMinutes, parseISO } from 'date-fns';
 import { ru } from 'date-fns/locale';
 import { Button } from '@/components/ui/button';
@@ -37,9 +37,14 @@ import {
   createAvailabilityException,
   deleteAvailabilityException,
   rescheduleLesson,
-  syncWorkHoursToSlots
+  syncWorkHoursToSlots,
+  createLessonSeries,
+  getGoogleCalendarStatus,
+  getGoogleCalendarAuthUrl,
+  disconnectGoogleCalendar,
+  importGoogleCalendarEvents
 } from '@/lib/tutorSchedule';
-import type { TutorWeeklySlot, TutorLessonWithStudent, TutorStudentWithProfile, TutorReminderSettings, TutorCalendarSettings, TutorAvailabilityException } from '@/types/tutor';
+import type { TutorWeeklySlot, TutorLessonWithStudent, TutorStudentWithProfile, TutorReminderSettings, TutorCalendarSettings, TutorAvailabilityException, LessonType } from '@/types/tutor';
 
 // =============================================
 // Constants & Utils
@@ -105,12 +110,20 @@ function getDateForDayOfWeek(weekStart: Date, dayOfWeek: number): Date {
   return d;
 }
 
-const LESSON_TYPES = [
-  { value: 'regular', label: 'Обычный урок' },
-  { value: 'trial', label: 'Пробное занятие' },
-  { value: 'mock_exam', label: 'Пробный экзамен' },
-  { value: 'consultation', label: 'Консультация' },
+const LESSON_TYPES: { value: LessonType; label: string; shortLabel: string; color: string }[] = [
+  { value: 'regular', label: 'Обычный урок', shortLabel: 'Урок', color: 'bg-primary' },
+  { value: 'trial', label: 'Пробное занятие', shortLabel: 'Пробное', color: 'bg-amber-500' },
+  { value: 'mock_exam', label: 'Пробный экзамен', shortLabel: 'Пробник', color: 'bg-purple-500' },
+  { value: 'consultation', label: 'Консультация', shortLabel: 'Консультация', color: 'bg-teal-500' },
 ];
+
+function getLessonTypeColor(type: LessonType | string): string {
+  return LESSON_TYPES.find(t => t.value === type)?.color || 'bg-primary';
+}
+
+function getLessonTypeLabel(type: LessonType | string): string {
+  return LESSON_TYPES.find(t => t.value === type)?.label || 'Урок';
+}
 
 // =============================================
 // LessonBlock
@@ -137,11 +150,8 @@ function LessonBlock({ lesson, workDayStart, onClick }: LessonBlockProps) {
   const endDate = addMinutes(startDate, lesson.duration_min);
   const timeStr = `${format(startDate, 'HH:mm')} - ${format(endDate, 'HH:mm')}`;
 
-  const lessonType = (lesson as any).lesson_type || 'regular';
-  const typeColor = lessonType === 'trial' ? 'bg-amber-500'
-    : lessonType === 'mock_exam' ? 'bg-purple-500'
-    : lessonType === 'consultation' ? 'bg-teal-500'
-    : 'bg-primary';
+  const lessonType = lesson.lesson_type || 'regular';
+  const typeColor = getLessonTypeColor(lessonType);
 
   return (
     <div
@@ -157,8 +167,8 @@ function LessonBlock({ lesson, workDayStart, onClick }: LessonBlockProps) {
         {height >= 35 && (
           <span className="text-[10px] opacity-80 truncate leading-tight">{timeStr}</span>
         )}
-        {height >= 50 && (lesson as any).subject && (
-          <span className="text-[10px] opacity-70 truncate leading-tight">{(lesson as any).subject}</span>
+        {height >= 50 && lesson.subject && (
+          <span className="text-[10px] opacity-70 truncate leading-tight">{lesson.subject}</span>
         )}
       </div>
     </div>
@@ -295,8 +305,10 @@ function AddLessonDialog({
   const [studentId, setStudentId] = useState('');
   const [notes, setNotes] = useState('');
   const [duration, setDuration] = useState('60');
-  const [lessonType, setLessonType] = useState('regular');
+  const [lessonType, setLessonType] = useState<LessonType>('regular');
   const [subject, setSubject] = useState('');
+  const [isRecurring, setIsRecurring] = useState(false);
+  const [repeatUntil, setRepeatUntil] = useState<Date | undefined>();
   const [isSaving, setIsSaving] = useState(false);
 
   useEffect(() => {
@@ -309,6 +321,8 @@ function AddLessonDialog({
       setDuration('60');
       setLessonType('regular');
       setSubject('');
+      setIsRecurring(false);
+      setRepeatUntil(undefined);
     }
   }, [open, initialDate, initialHour, initialMinute]);
 
@@ -331,6 +345,10 @@ function AddLessonDialog({
       toast.error('Выберите ученика');
       return;
     }
+    if (isRecurring && !repeatUntil) {
+      toast.error('Выберите дату окончания повторений');
+      return;
+    }
 
     setIsSaving(true);
     try {
@@ -339,20 +357,45 @@ function AddLessonDialog({
 
       const tutorStudent = students.find(s => s.student_id === studentId);
 
-      const result = await createLesson({
-        tutor_student_id: tutorStudent?.id,
-        student_id: studentId,
-        start_at: startAt.toISOString(),
-        duration_min: parseInt(duration),
-        notes: notes || undefined
-      });
+      if (isRecurring && repeatUntil) {
+        const { root, count } = await createLessonSeries(
+          {
+            tutor_student_id: tutorStudent?.id,
+            student_id: studentId,
+            start_at: startAt.toISOString(),
+            duration_min: parseInt(duration),
+            lesson_type: lessonType,
+            subject: subject || undefined,
+            notes: notes || undefined,
+          },
+          repeatUntil.toISOString()
+        );
 
-      if (result) {
-        toast.success('Занятие создано');
-        onSuccess();
-        onOpenChange(false);
+        if (root) {
+          toast.success(`Создано ${count} занятий (еженедельно)`);
+          onSuccess();
+          onOpenChange(false);
+        } else {
+          toast.error('Не удалось создать серию занятий');
+        }
       } else {
-        toast.error('Не удалось создать занятие');
+        const result = await createLesson({
+          tutor_student_id: tutorStudent?.id,
+          student_id: studentId,
+          start_at: startAt.toISOString(),
+          duration_min: parseInt(duration),
+          lesson_type: lessonType,
+          subject: subject || undefined,
+          notes: notes || undefined
+        });
+
+        if (result) {
+          toast.success('Занятие создано');
+          onSuccess();
+          onOpenChange(false);
+        } else {
+          toast.error('Не удалось создать занятие');
+        }
       }
     } catch (err) {
       console.error(err);
@@ -483,6 +526,52 @@ function AddLessonDialog({
             />
           </div>
 
+          {/* Recurring lesson */}
+          <div className="space-y-3 border-t pt-3">
+            <div className="flex items-center justify-between">
+              <div>
+                <Label className="text-sm">Повторять еженедельно</Label>
+                <p className="text-xs text-muted-foreground">Создать серию занятий каждую неделю</p>
+              </div>
+              <Switch checked={isRecurring} onCheckedChange={setIsRecurring} />
+            </div>
+
+            {isRecurring && (
+              <div className="space-y-2">
+                <Label>Повторять до *</Label>
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <Button
+                      variant="outline"
+                      className={cn(
+                        "w-full justify-start text-left font-normal",
+                        !repeatUntil && "text-muted-foreground"
+                      )}
+                    >
+                      <CalendarIcon className="mr-2 h-4 w-4" />
+                      {repeatUntil ? format(repeatUntil, 'dd.MM.yyyy') : 'Выберите дату окончания'}
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-auto p-0" align="start">
+                    <Calendar
+                      mode="single"
+                      selected={repeatUntil}
+                      onSelect={setRepeatUntil}
+                      locale={ru}
+                      disabled={(d) => d < (date || new Date())}
+                      className="pointer-events-auto"
+                    />
+                  </PopoverContent>
+                </Popover>
+                {repeatUntil && date && (
+                  <p className="text-xs text-muted-foreground">
+                    Будет создано ~{Math.min(60, Math.floor((repeatUntil.getTime() - date.getTime()) / (7 * 24 * 60 * 60 * 1000)) + 1)} занятий
+                  </p>
+                )}
+              </div>
+            )}
+          </div>
+
           <div className="space-y-2">
             <Label>Заметка (опц.)</Label>
             <Textarea
@@ -499,7 +588,7 @@ function AddLessonDialog({
             Отмена
           </Button>
           <Button onClick={handleSubmit} disabled={isSaving}>
-            {isSaving ? 'Сохранение...' : 'Создать'}
+            {isSaving ? 'Сохранение...' : isRecurring ? 'Создать серию' : 'Создать'}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -543,8 +632,8 @@ function LessonDetailsDialog({
   });
   const timeStr = `${format(startDate, 'HH:mm')} — ${format(endDate, 'HH:mm')}`;
 
-  const lessonType = (lesson as any).lesson_type || 'regular';
-  const typeLabel = LESSON_TYPES.find(t => t.value === lessonType)?.label || 'Урок';
+  const lessonType = lesson.lesson_type || 'regular';
+  const typeLabel = getLessonTypeLabel(lessonType);
 
   const handleCancel = async () => {
     setIsCancelling(true);
@@ -589,7 +678,8 @@ function LessonDetailsDialog({
               {lesson.status === 'booked' ? 'Запланировано' : lesson.status === 'completed' ? 'Проведено' : 'Отменено'}
             </Badge>
             <Badge variant="outline">{typeLabel}</Badge>
-            {(lesson as any).subject && <Badge variant="outline">{(lesson as any).subject}</Badge>}
+            {lesson.subject && <Badge variant="outline">{lesson.subject}</Badge>}
+            {lesson.is_recurring && <Badge variant="outline"><Repeat className="h-3 w-3 mr-1" />Серия</Badge>}
           </div>
 
           {lesson.notes && (
@@ -1381,6 +1471,13 @@ function TutorScheduleContent() {
   // Payment onboarding
   const [paymentOnboardingOpen, setPaymentOnboardingOpen] = useState(false);
 
+  // Google Calendar
+  const [gcalConnected, setGcalConnected] = useState(false);
+  const [gcalEmail, setGcalEmail] = useState<string | null>(null);
+  const [gcalLoading, setGcalLoading] = useState(false);
+  const [gcalImporting, setGcalImporting] = useState(false);
+  const gcalChecked = useRef(false);
+
   // Check if payment onboarding should be shown (once per tutor)
   useEffect(() => {
     if (tutor && calendarSettings !== null) {
@@ -1393,6 +1490,91 @@ function TutorScheduleContent() {
       }
     }
   }, [tutor, calendarSettings]);
+
+  // Check Google Calendar connection status + handle ?gcal=connected param
+  useEffect(() => {
+    if (gcalChecked.current) return;
+    gcalChecked.current = true;
+
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('gcal') === 'connected') {
+      toast.success('Google Calendar подключён');
+      // Clean URL
+      window.history.replaceState({}, '', window.location.pathname);
+    }
+
+    getGoogleCalendarStatus().then(status => {
+      if (status) {
+        setGcalConnected(status.connected);
+        setGcalEmail(status.google_email || null);
+      }
+    });
+  }, []);
+
+  const handleConnectGoogle = useCallback(async () => {
+    setGcalLoading(true);
+    try {
+      const url = await getGoogleCalendarAuthUrl();
+      if (url) {
+        window.location.href = url;
+      } else {
+        toast.error('Не удалось получить ссылку авторизации Google');
+      }
+    } catch {
+      toast.error('Ошибка подключения Google Calendar');
+    } finally {
+      setGcalLoading(false);
+    }
+  }, []);
+
+  const handleDisconnectGoogle = useCallback(async () => {
+    setGcalLoading(true);
+    try {
+      const ok = await disconnectGoogleCalendar();
+      if (ok) {
+        setGcalConnected(false);
+        setGcalEmail(null);
+        toast.success('Google Calendar отключён');
+      } else {
+        toast.error('Не удалось отключить');
+      }
+    } catch {
+      toast.error('Ошибка отключения Google Calendar');
+    } finally {
+      setGcalLoading(false);
+    }
+  }, []);
+
+  const handleImportGoogle = useCallback(async () => {
+    setGcalImporting(true);
+    try {
+      // Import current week + next 4 weeks
+      const start = new Date(weekStart);
+      const end = new Date(weekStart);
+      end.setDate(end.getDate() + 35);
+
+      const result = await importGoogleCalendarEvents(
+        start.toISOString(),
+        end.toISOString()
+      );
+
+      if (result) {
+        const parts: string[] = [];
+        if (result.imported > 0) parts.push(`импортировано: ${result.imported}`);
+        if (result.updated > 0) parts.push(`обновлено: ${result.updated}`);
+        if (result.cancelled > 0) parts.push(`отменено: ${result.cancelled}`);
+        if (result.skipped > 0) parts.push(`пропущено: ${result.skipped}`);
+        toast.success(parts.length > 0 ? parts.join(', ') : 'Нет новых событий');
+        refetchLessons();
+      } else {
+        toast.error('Ошибка импорта из Google Calendar');
+      }
+    } catch {
+      toast.error('Ошибка импорта');
+    } finally {
+      setGcalImporting(false);
+    }
+  }, [weekStart, refetchLessons]);
 
   const handleEnablePaymentReminders = useCallback(async () => {
     const { error } = await upsertCalendarSettings({ payment_reminder_enabled: true, payment_reminder_delay_minutes: 0 });
@@ -1757,6 +1939,41 @@ function TutorScheduleContent() {
             >
               <Bell className="h-4 w-4" />
             </Button>
+
+            {/* Google Calendar */}
+            {gcalConnected ? (
+              <>
+                <Button
+                  onClick={handleImportGoogle}
+                  variant="outline"
+                  size="sm"
+                  disabled={gcalImporting}
+                  title={gcalEmail ? `Google: ${gcalEmail}` : 'Импорт из Google'}
+                >
+                  <Download className="h-4 w-4 mr-2" />
+                  {gcalImporting ? 'Импорт...' : 'Импорт из Google'}
+                </Button>
+                <Button
+                  onClick={handleDisconnectGoogle}
+                  variant="ghost"
+                  size="icon"
+                  disabled={gcalLoading}
+                  title="Отключить Google Calendar"
+                >
+                  <Unplug className="h-4 w-4" />
+                </Button>
+              </>
+            ) : (
+              <Button
+                onClick={handleConnectGoogle}
+                variant="outline"
+                size="sm"
+                disabled={gcalLoading}
+              >
+                <CalendarIcon className="h-4 w-4 mr-2" />
+                {gcalLoading ? 'Подключение...' : 'Google Calendar'}
+              </Button>
+            )}
           </div>
         </div>
 
@@ -1791,22 +2008,12 @@ function TutorScheduleContent() {
 
         {/* Stats bar */}
         <div className="flex flex-wrap gap-4 text-sm">
-          <div className="flex items-center gap-2">
-            <div className="w-3 h-3 rounded bg-primary" />
-            <span>Урок</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <div className="w-3 h-3 rounded bg-amber-500" />
-            <span>Пробное</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <div className="w-3 h-3 rounded bg-purple-500" />
-            <span>Пробник</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <div className="w-3 h-3 rounded bg-teal-500" />
-            <span>Консультация</span>
-          </div>
+          {LESSON_TYPES.map(t => (
+            <div key={t.value} className="flex items-center gap-2">
+              <div className={cn("w-3 h-3 rounded", t.color)} />
+              <span>{t.shortLabel}</span>
+            </div>
+          ))}
           <span className="text-muted-foreground ml-auto">
             Сегодня: {todayLessons} | Неделя: {weekLessons}
           </span>
