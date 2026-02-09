@@ -504,7 +504,7 @@ function AddLessonDialog({
 
             <div className="space-y-2">
               <Label>Тип занятия</Label>
-              <Select value={lessonType} onValueChange={setLessonType}>
+              <Select value={lessonType} onValueChange={(v) => setLessonType(v as LessonType)}>
                 <SelectTrigger>
                   <SelectValue />
                 </SelectTrigger>

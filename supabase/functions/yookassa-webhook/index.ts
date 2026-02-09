@@ -38,7 +38,7 @@ interface YooKassaWebhookEvent {
  * to activate subscriptions without actual payment.
  */
 async function validatePaymentInDatabase(
-  supabase: ReturnType<typeof createClient>,
+  supabase: any,
   paymentId: string,
   webhookUserId: string | undefined,
   webhookAmount: string
