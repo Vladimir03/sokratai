@@ -288,6 +288,17 @@ export async function createLessonSeries(
   const untilDate = new Date(repeatUntil);
   untilDate.setHours(23, 59, 59, 999);
 
+  // Resolve tutor_id upfront so all lessons in the series use it
+  let tutorId = input.tutor_id;
+  if (!tutorId) {
+    const tutor = await getCurrentTutor();
+    if (!tutor) {
+      console.error('Cannot create lesson series: tutor not found');
+      return { root: null, count: 0 };
+    }
+    tutorId = tutor.id;
+  }
+
   // Generate dates: weekly from start_at until repeatUntil (inclusive)
   const dates: Date[] = [];
   const current = new Date(startDate);
@@ -305,6 +316,7 @@ export async function createLessonSeries(
   // Create root lesson (first in series)
   const rootLesson = await createLesson({
     ...input,
+    tutor_id: tutorId,
     start_at: dates[0].toISOString(),
     is_recurring: true,
     recurrence_rule: recurrenceRule,
@@ -316,7 +328,7 @@ export async function createLessonSeries(
 
   // Create remaining lessons in batch
   const childInputs = dates.slice(1).map(d => ({
-    tutor_id: input.tutor_id,
+    tutor_id: tutorId,
     tutor_student_id: input.tutor_student_id,
     student_id: input.student_id,
     start_at: d.toISOString(),
@@ -728,16 +740,22 @@ export async function getGoogleCalendarStatus(): Promise<{
   }
 }
 
-export async function getGoogleCalendarAuthUrl(): Promise<string | null> {
+export async function getGoogleCalendarAuthUrl(): Promise<{ url: string | null; error?: string }> {
   try {
     const response = await supabase.functions.invoke('google-calendar-oauth', {
       body: { action: 'get_auth_url' }
     });
-    if (response.error) throw response.error;
-    return response.data?.url || null;
+    if (response.error) {
+      console.error('Google auth URL edge function error:', response.error);
+      const msg = typeof response.error === 'object' && response.error !== null
+        ? (response.error as any).message || JSON.stringify(response.error)
+        : String(response.error);
+      return { url: null, error: msg };
+    }
+    return { url: response.data?.url || null };
   } catch (err) {
     console.error('Error getting Google auth URL:', err);
-    return null;
+    return { url: null, error: err instanceof Error ? err.message : 'Неизвестная ошибка' };
   }
 }
 

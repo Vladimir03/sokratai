@@ -183,6 +183,12 @@ Deno.serve(async (req) => {
 
   // GET_AUTH_URL: generate OAuth URL
   if (action === "get_auth_url") {
+    // Validate required env vars
+    if (!GOOGLE_CLIENT_ID || !GOOGLE_REDIRECT_URI) {
+      console.error("Missing Google OAuth env vars: GOOGLE_CLIENT_ID or GOOGLE_REDIRECT_URI");
+      return jsonResponse({ error: "Google OAuth не настроен. Обратитесь к администратору." }, 500);
+    }
+
     // Generate random state
     const stateValue = crypto.randomUUID();
 

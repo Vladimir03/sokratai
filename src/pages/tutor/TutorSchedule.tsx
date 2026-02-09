@@ -39,6 +39,7 @@ import {
   rescheduleLesson,
   syncWorkHoursToSlots,
   createLessonSeries,
+  updateLesson,
   getGoogleCalendarStatus,
   getGoogleCalendarAuthUrl,
   disconnectGoogleCalendar,
@@ -604,24 +605,45 @@ interface LessonDetailsDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   lesson: TutorLessonWithStudent | null;
+  students: TutorStudentWithProfile[];
   onCancel: () => void;
   onReschedule: () => void;
+  onUpdate: () => void;
 }
 
 function LessonDetailsDialog({
   open,
   onOpenChange,
   lesson,
+  students,
   onCancel,
-  onReschedule
+  onReschedule,
+  onUpdate
 }: LessonDetailsDialogProps) {
   const [isCancelling, setIsCancelling] = useState(false);
+  const [isEditing, setIsEditing] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [editStudentId, setEditStudentId] = useState<string>('');
+  const [editLessonType, setEditLessonType] = useState<LessonType>('regular');
+  const [editSubject, setEditSubject] = useState('');
+  const [editNotes, setEditNotes] = useState('');
+
+  // Reset edit state when dialog opens with a new lesson
+  useEffect(() => {
+    if (open && lesson) {
+      setIsEditing(false);
+      setEditStudentId(lesson.student_id || '__none__');
+      setEditLessonType((lesson.lesson_type as LessonType) || 'regular');
+      setEditSubject(lesson.subject || '');
+      setEditNotes(lesson.notes || '');
+    }
+  }, [open, lesson]);
 
   if (!lesson) return null;
 
   const studentName = lesson.tutor_students?.profiles?.username
     || lesson.profiles?.username
-    || 'Без имени';
+    || 'Без ученика';
 
   const startDate = new Date(lesson.start_at);
   const endDate = addMinutes(startDate, lesson.duration_min);
@@ -654,6 +676,36 @@ function LessonDetailsDialog({
     }
   };
 
+  const handleSaveEdit = async () => {
+    setIsSaving(true);
+    try {
+      const actualStudentId = editStudentId === '__none__' ? '' : editStudentId;
+      const tutorStudent = actualStudentId
+        ? students.find(s => s.student_id === actualStudentId)
+        : null;
+
+      const result = await updateLesson(lesson.id, {
+        student_id: actualStudentId || undefined,
+        tutor_student_id: tutorStudent?.id || undefined,
+        lesson_type: editLessonType,
+        subject: editSubject || undefined,
+        notes: editNotes || undefined,
+      });
+      if (result) {
+        toast.success('Занятие обновлено');
+        setIsEditing(false);
+        onUpdate();
+      } else {
+        toast.error('Не удалось обновить');
+      }
+    } catch (err) {
+      console.error(err);
+      toast.error('Ошибка при обновлении');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
@@ -670,48 +722,117 @@ function LessonDetailsDialog({
             </div>
           </div>
 
-          <div className="flex flex-wrap gap-2">
-            <Badge variant={lesson.source === 'self_booking' ? 'secondary' : 'outline'}>
-              {lesson.source === 'self_booking' ? 'Самозапись' : 'Вручную'}
-            </Badge>
-            <Badge variant={lesson.status === 'booked' ? 'default' : lesson.status === 'completed' ? 'secondary' : 'destructive'}>
-              {lesson.status === 'booked' ? 'Запланировано' : lesson.status === 'completed' ? 'Проведено' : 'Отменено'}
-            </Badge>
-            <Badge variant="outline">{typeLabel}</Badge>
-            {lesson.subject && <Badge variant="outline">{lesson.subject}</Badge>}
-            {lesson.is_recurring && <Badge variant="outline"><Repeat className="h-3 w-3 mr-1" />Серия</Badge>}
-          </div>
+          {!isEditing ? (
+            <>
+              <div className="flex flex-wrap gap-2">
+                <Badge variant={lesson.source === 'self_booking' ? 'secondary' : 'outline'}>
+                  {lesson.source === 'self_booking' ? 'Самозапись' : lesson.external_source === 'google_calendar' ? 'Google' : 'Вручную'}
+                </Badge>
+                <Badge variant={lesson.status === 'booked' ? 'default' : lesson.status === 'completed' ? 'secondary' : 'destructive'}>
+                  {lesson.status === 'booked' ? 'Запланировано' : lesson.status === 'completed' ? 'Проведено' : 'Отменено'}
+                </Badge>
+                <Badge variant="outline">{typeLabel}</Badge>
+                {lesson.subject && <Badge variant="outline">{lesson.subject}</Badge>}
+                {lesson.is_recurring && <Badge variant="outline"><Repeat className="h-3 w-3 mr-1" />Серия</Badge>}
+              </div>
 
-          {lesson.notes && (
-            <div className="bg-muted/50 p-3 rounded-md text-sm">
-              {lesson.notes}
+              {lesson.notes && (
+                <div className="bg-muted/50 p-3 rounded-md text-sm">
+                  {lesson.notes}
+                </div>
+              )}
+            </>
+          ) : (
+            <div className="space-y-3">
+              <div className="space-y-1.5">
+                <Label className="text-xs">Ученик</Label>
+                <Select value={editStudentId} onValueChange={setEditStudentId}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Выберите ученика" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__none__">Без ученика</SelectItem>
+                    {students.map(s => (
+                      <SelectItem key={s.student_id} value={s.student_id}>
+                        {s.profiles?.username || s.profiles?.telegram_username || 'Ученик'}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1.5">
+                <Label className="text-xs">Тип занятия</Label>
+                <Select value={editLessonType} onValueChange={v => setEditLessonType(v as LessonType)}>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {LESSON_TYPES.map(lt => (
+                      <SelectItem key={lt.value} value={lt.value}>{lt.label}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1.5">
+                <Label className="text-xs">Предмет</Label>
+                <Input
+                  value={editSubject}
+                  onChange={e => setEditSubject(e.target.value)}
+                  placeholder="Предмет"
+                  className="text-base"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label className="text-xs">Заметки</Label>
+                <Textarea
+                  value={editNotes}
+                  onChange={e => setEditNotes(e.target.value)}
+                  placeholder="Заметки"
+                  rows={2}
+                  className="text-base"
+                />
+              </div>
             </div>
           )}
         </div>
 
         <DialogFooter className="flex-col sm:flex-row gap-2">
-          <Button variant="outline" onClick={() => onOpenChange(false)}>
-            Закрыть
-          </Button>
-          {lesson.status === 'booked' && (
+          {isEditing ? (
             <>
-              <Button
-                variant="outline"
-                onClick={() => {
-                  onOpenChange(false);
-                  onReschedule();
-                }}
-              >
-                <CalendarDays className="h-4 w-4 mr-2" />
-                Перенести
+              <Button variant="outline" onClick={() => setIsEditing(false)}>Отмена</Button>
+              <Button onClick={handleSaveEdit} disabled={isSaving}>
+                {isSaving ? 'Сохранение...' : 'Сохранить'}
               </Button>
-              <Button
-                variant="destructive"
-                onClick={handleCancel}
-                disabled={isCancelling}
-              >
-                {isCancelling ? 'Отмена...' : 'Отменить занятие'}
+            </>
+          ) : (
+            <>
+              <Button variant="outline" onClick={() => onOpenChange(false)}>
+                Закрыть
               </Button>
+              {lesson.status === 'booked' && (
+                <>
+                  <Button variant="outline" onClick={() => setIsEditing(true)}>
+                    Редактировать
+                  </Button>
+                  <Button
+                    variant="outline"
+                    onClick={() => {
+                      onOpenChange(false);
+                      onReschedule();
+                    }}
+                  >
+                    <CalendarDays className="h-4 w-4 mr-2" />
+                    Перенести
+                  </Button>
+                  <Button
+                    variant="destructive"
+                    onClick={handleCancel}
+                    disabled={isCancelling}
+                  >
+                    {isCancelling ? 'Отмена...' : 'Отменить занятие'}
+                  </Button>
+                </>
+              )}
             </>
           )}
         </DialogFooter>
@@ -1499,7 +1620,10 @@ function TutorScheduleContent() {
     const params = new URLSearchParams(window.location.search);
     if (params.get('gcal') === 'connected') {
       toast.success('Google Calendar подключён');
-      // Clean URL
+      window.history.replaceState({}, '', window.location.pathname);
+    } else if (params.get('gcal') === 'error') {
+      const reason = params.get('reason') || 'unknown';
+      toast.error(`Ошибка подключения Google Calendar: ${reason}`);
       window.history.replaceState({}, '', window.location.pathname);
     }
 
@@ -1514,11 +1638,12 @@ function TutorScheduleContent() {
   const handleConnectGoogle = useCallback(async () => {
     setGcalLoading(true);
     try {
-      const url = await getGoogleCalendarAuthUrl();
-      if (url) {
-        window.location.href = url;
+      const result = await getGoogleCalendarAuthUrl();
+      if (result.url) {
+        window.location.href = result.url;
       } else {
-        toast.error('Не удалось получить ссылку авторизации Google');
+        const detail = result.error ? `: ${result.error}` : '';
+        toast.error(`Не удалось получить ссылку авторизации Google${detail}`);
       }
     } catch {
       toast.error('Ошибка подключения Google Calendar');
@@ -2174,8 +2299,10 @@ function TutorScheduleContent() {
           open={lessonDetailsOpen}
           onOpenChange={setLessonDetailsOpen}
           lesson={selectedLesson}
+          students={students}
           onCancel={() => refetchLessons()}
           onReschedule={handleReschedule}
+          onUpdate={() => refetchLessons()}
         />
 
         <RescheduleDialog
