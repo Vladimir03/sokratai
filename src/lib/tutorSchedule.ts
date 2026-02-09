@@ -209,7 +209,7 @@ export async function getTutorLessons(
 }
 
 interface CreateLessonInput {
-  tutor_id: string;
+  tutor_id?: string;
   tutor_student_id?: string;
   student_id?: string;
   start_at: string;
@@ -236,7 +236,7 @@ export async function createLesson(input: CreateLessonInput): Promise<TutorLesso
     .insert({
       ...input,
       source: input.source || 'manual'
-    })
+    } as any)
     .select(`
       *,
       tutor_students (

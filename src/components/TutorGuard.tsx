@@ -94,7 +94,7 @@ const TutorGuard = ({ children }: TutorGuardProps) => {
 
         try {
           const { data, error: rpcError } = await withTimeout(
-            supabase.rpc("is_tutor", { _user_id: session.user.id }),
+            Promise.resolve(supabase.rpc("is_tutor", { _user_id: session.user.id })) as Promise<any>,
             RPC_TIMEOUT_MS,
             "Превышено время ожидания проверки роли"
           );
