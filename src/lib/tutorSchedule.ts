@@ -300,7 +300,7 @@ export async function createLessonSeries(
     return { root: null, count: 0 };
   }
 
-  const recurrenceRule = `FREQ=WEEKLY;UNTIL=${repeatUntil}`;
+  const recurrenceRule = 'weekly';
 
   // Create root lesson (first in series)
   const rootLesson = await createLesson({
