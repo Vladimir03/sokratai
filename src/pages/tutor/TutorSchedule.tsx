@@ -1879,10 +1879,10 @@ function TutorScheduleContent() {
   const handleLessonDragEnd = useCallback(() => {
     setDragPreview(null);
     draggedLessonDurationRef.current = 60;
-    window.setTimeout(() => {
-      isLessonDragInProgressRef.current = false;
-      draggedLessonIdRef.current = null;
-    }, 0);
+    // Reset immediately so click handler is not blocked
+    isLessonDragInProgressRef.current = false;
+    draggedLessonIdRef.current = null;
+    suppressNextGridClickRef.current = true;
   }, []);
 
   const handleDayDragOver = useCallback((dayIndex: number, isWorkDay: boolean, event: React.DragEvent<HTMLDivElement>) => {
