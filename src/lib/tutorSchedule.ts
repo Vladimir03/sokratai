@@ -357,6 +357,7 @@ export async function createLessonSeries(
 
 interface UpdateLessonInput {
   status?: 'booked' | 'completed' | 'cancelled';
+  start_at?: string;
   lesson_type?: LessonType;
   subject?: string;
   notes?: string;
@@ -610,45 +611,6 @@ export async function deleteAvailabilityException(id: string): Promise<boolean> 
   }
 
   return true;
-}
-
-// =============================================
-// Reschedule Lesson
-// =============================================
-
-export async function rescheduleLesson(
-  lessonId: string,
-  newStartAt: string
-): Promise<TutorLessonWithStudent | null> {
-  const { data, error } = await supabase
-    .from('tutor_lessons')
-    .update({ start_at: newStartAt })
-    .eq('id', lessonId)
-    .select(`
-      *,
-      tutor_students (
-        id,
-        student_id,
-        profiles (
-          id,
-          username,
-          telegram_username
-        )
-      ),
-      profiles (
-        id,
-        username,
-        telegram_username
-      )
-    `)
-    .single();
-
-  if (error) {
-    console.error('Error rescheduling lesson:', error);
-    return null;
-  }
-
-  return data as TutorLessonWithStudent;
 }
 
 // =============================================

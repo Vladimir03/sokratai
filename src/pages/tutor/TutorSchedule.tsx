@@ -36,7 +36,6 @@ import {
   upsertCalendarSettings,
   createAvailabilityException,
   deleteAvailabilityException,
-  rescheduleLesson,
   syncWorkHoursToSlots,
   createLessonSeries,
   updateLesson,
@@ -134,9 +133,11 @@ interface LessonBlockProps {
   lesson: TutorLessonWithStudent;
   workDayStart: number;
   onClick: () => void;
+  onDragStart: (event: React.DragEvent<HTMLDivElement>) => void;
+  onDragEnd: () => void;
 }
 
-function LessonBlock({ lesson, workDayStart, onClick }: LessonBlockProps) {
+function LessonBlock({ lesson, workDayStart, onClick, onDragStart, onDragEnd }: LessonBlockProps) {
   const startDate = new Date(lesson.start_at);
   const startMinutes = startDate.getHours() * 60 + startDate.getMinutes();
   const offsetMinutes = startMinutes - (workDayStart * 60);
@@ -161,6 +162,9 @@ function LessonBlock({ lesson, workDayStart, onClick }: LessonBlockProps) {
         typeColor
       )}
       style={{ top: `${top}px`, height: `${height}px`, minHeight: '20px' }}
+      draggable
+      onDragStart={onDragStart}
+      onDragEnd={onDragEnd}
       onClick={(e) => { e.stopPropagation(); onClick(); }}
     >
       <div className="flex flex-col h-full justify-center">
@@ -598,7 +602,7 @@ function AddLessonDialog({
 }
 
 // =============================================
-// LessonDetailsDialog (with reschedule)
+// LessonDetailsDialog (edit metadata + date/time)
 // =============================================
 
 interface LessonDetailsDialogProps {
@@ -607,7 +611,6 @@ interface LessonDetailsDialogProps {
   lesson: TutorLessonWithStudent | null;
   students: TutorStudentWithProfile[];
   onCancel: () => void;
-  onReschedule: () => void;
   onUpdate: () => void;
 }
 
@@ -617,7 +620,6 @@ function LessonDetailsDialog({
   lesson,
   students,
   onCancel,
-  onReschedule,
   onUpdate
 }: LessonDetailsDialogProps) {
   const [isCancelling, setIsCancelling] = useState(false);
@@ -627,15 +629,22 @@ function LessonDetailsDialog({
   const [editLessonType, setEditLessonType] = useState<LessonType>('regular');
   const [editSubject, setEditSubject] = useState('');
   const [editNotes, setEditNotes] = useState('');
+  const [editDate, setEditDate] = useState<Date | undefined>();
+  const [editHour, setEditHour] = useState('');
+  const [editMinute, setEditMinute] = useState('00');
 
   // Reset edit state when dialog opens with a new lesson
   useEffect(() => {
     if (open && lesson) {
+      const lessonStart = new Date(lesson.start_at);
       setIsEditing(false);
       setEditStudentId(lesson.student_id || '__none__');
       setEditLessonType((lesson.lesson_type as LessonType) || 'regular');
       setEditSubject(lesson.subject || '');
       setEditNotes(lesson.notes || '');
+      setEditDate(lessonStart);
+      setEditHour(lessonStart.getHours().toString());
+      setEditMinute(lessonStart.getMinutes().toString().padStart(2, '0'));
     }
   }, [open, lesson]);
 
@@ -677,14 +686,30 @@ function LessonDetailsDialog({
   };
 
   const handleSaveEdit = async () => {
+    if (!editDate) {
+      toast.error('Выберите дату');
+      return;
+    }
+
+    const hourValue = Number.parseInt(editHour, 10);
+    const minuteValue = Number.parseInt(editMinute, 10);
+    if (Number.isNaN(hourValue) || Number.isNaN(minuteValue)) {
+      toast.error('Выберите время');
+      return;
+    }
+
     setIsSaving(true);
     try {
+      const newStart = new Date(editDate);
+      newStart.setHours(hourValue, minuteValue, 0, 0);
+
       const actualStudentId = editStudentId === '__none__' ? '' : editStudentId;
       const tutorStudent = actualStudentId
         ? students.find(s => s.student_id === actualStudentId)
         : null;
 
       const result = await updateLesson(lesson.id, {
+        start_at: newStart.toISOString(),
         student_id: actualStudentId || undefined,
         tutor_student_id: tutorStudent?.id || undefined,
         lesson_type: editLessonType,
@@ -744,6 +769,61 @@ function LessonDetailsDialog({
             </>
           ) : (
             <div className="space-y-3">
+              <div className="space-y-1.5">
+                <Label className="text-xs">Дата и время</Label>
+                <div className="flex flex-wrap gap-2">
+                  <Popover>
+                    <PopoverTrigger asChild>
+                      <Button
+                        variant="outline"
+                        className={cn(
+                          "w-[160px] justify-start text-left font-normal",
+                          !editDate && "text-muted-foreground"
+                        )}
+                      >
+                        <CalendarIcon className="mr-2 h-4 w-4" />
+                        {editDate ? format(editDate, 'dd.MM.yyyy') : 'Выберите дату'}
+                      </Button>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-auto p-0" align="start">
+                      <Calendar
+                        mode="single"
+                        selected={editDate}
+                        onSelect={setEditDate}
+                        locale={ru}
+                        className="pointer-events-auto"
+                      />
+                    </PopoverContent>
+                  </Popover>
+
+                  <div className="flex items-center gap-1">
+                    <Select value={editHour} onValueChange={setEditHour}>
+                      <SelectTrigger className="w-[70px]">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {Array.from({ length: 24 }, (_, i) => (
+                          <SelectItem key={i} value={i.toString()}>
+                            {i.toString().padStart(2, '0')}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <span className="text-muted-foreground">:</span>
+                    <Select value={editMinute} onValueChange={setEditMinute}>
+                      <SelectTrigger className="w-[70px]">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {['00', '15', '30', '45'].map(m => (
+                          <SelectItem key={m} value={m}>{m}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+              </div>
+
               <div className="space-y-1.5">
                 <Label className="text-xs">Ученик</Label>
                 <Select value={editStudentId} onValueChange={setEditStudentId}>
@@ -805,168 +885,21 @@ function LessonDetailsDialog({
               </Button>
             </>
           ) : (
-            <>
-              <Button variant="outline" onClick={() => onOpenChange(false)}>
-                Закрыть
-              </Button>
-              {lesson.status === 'booked' && (
-                <>
-                  <Button variant="outline" onClick={() => setIsEditing(true)}>
-                    Редактировать
-                  </Button>
-                  <Button
-                    variant="outline"
-                    onClick={() => {
-                      onOpenChange(false);
-                      onReschedule();
-                    }}
-                  >
-                    <CalendarDays className="h-4 w-4 mr-2" />
-                    Перенести
-                  </Button>
-                  <Button
-                    variant="destructive"
-                    onClick={handleCancel}
-                    disabled={isCancelling}
-                  >
-                    {isCancelling ? 'Отмена...' : 'Отменить занятие'}
-                  </Button>
-                </>
-              )}
-            </>
+            lesson.status === 'booked' && (
+              <>
+                <Button variant="outline" onClick={() => setIsEditing(true)}>
+                  Редактировать
+                </Button>
+                <Button
+                  variant="destructive"
+                  onClick={handleCancel}
+                  disabled={isCancelling}
+                >
+                  {isCancelling ? 'Отмена...' : 'Отменить занятие'}
+                </Button>
+              </>
+            )
           )}
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
-// =============================================
-// RescheduleDialog
-// =============================================
-
-interface RescheduleDialogProps {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  lesson: TutorLessonWithStudent | null;
-  onSuccess: () => void;
-}
-
-function RescheduleDialog({ open, onOpenChange, lesson, onSuccess }: RescheduleDialogProps) {
-  const [date, setDate] = useState<Date | undefined>();
-  const [hour, setHour] = useState('');
-  const [minute, setMinute] = useState('00');
-  const [isSaving, setIsSaving] = useState(false);
-
-  useEffect(() => {
-    if (open && lesson) {
-      const d = new Date(lesson.start_at);
-      setDate(d);
-      setHour(d.getHours().toString());
-      setMinute(d.getMinutes().toString().padStart(2, '0'));
-    }
-  }, [open, lesson]);
-
-  const handleSubmit = async () => {
-    if (!date || !lesson) return;
-
-    setIsSaving(true);
-    try {
-      const newStart = new Date(date);
-      newStart.setHours(parseInt(hour), parseInt(minute), 0, 0);
-
-      const result = await rescheduleLesson(lesson.id, newStart.toISOString());
-      if (result) {
-        toast.success('Занятие перенесено');
-        onSuccess();
-        onOpenChange(false);
-      } else {
-        toast.error('Не удалось перенести');
-      }
-    } catch (err) {
-      console.error(err);
-      toast.error('Ошибка при переносе');
-    } finally {
-      setIsSaving(false);
-    }
-  };
-
-  const studentName = lesson?.tutor_students?.profiles?.username
-    || lesson?.profiles?.username
-    || 'Ученик';
-
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>Перенести занятие</DialogTitle>
-          <DialogDescription>
-            Занятие с {studentName}
-          </DialogDescription>
-        </DialogHeader>
-
-        <div className="space-y-4">
-          <div className="space-y-2">
-            <Label>Новая дата и время</Label>
-            <div className="flex flex-wrap gap-2">
-              <Popover>
-                <PopoverTrigger asChild>
-                  <Button
-                    variant="outline"
-                    className={cn(
-                      "w-[160px] justify-start text-left font-normal",
-                      !date && "text-muted-foreground"
-                    )}
-                  >
-                    <CalendarIcon className="mr-2 h-4 w-4" />
-                    {date ? format(date, 'dd.MM.yyyy') : 'Выберите дату'}
-                  </Button>
-                </PopoverTrigger>
-                <PopoverContent className="w-auto p-0" align="start">
-                  <Calendar
-                    mode="single"
-                    selected={date}
-                    onSelect={setDate}
-                    locale={ru}
-                    className="pointer-events-auto"
-                  />
-                </PopoverContent>
-              </Popover>
-
-              <div className="flex items-center gap-1">
-                <Select value={hour} onValueChange={setHour}>
-                  <SelectTrigger className="w-[70px]">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {Array.from({ length: 24 }, (_, i) => (
-                      <SelectItem key={i} value={i.toString()}>
-                        {i.toString().padStart(2, '0')}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                <span className="text-muted-foreground">:</span>
-                <Select value={minute} onValueChange={setMinute}>
-                  <SelectTrigger className="w-[70px]">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {['00', '15', '30', '45'].map(m => (
-                      <SelectItem key={m} value={m}>{m}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>Отмена</Button>
-          <Button onClick={handleSubmit} disabled={isSaving}>
-            {isSaving ? 'Перенос...' : 'Перенести'}
-          </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
@@ -1581,11 +1514,13 @@ function TutorScheduleContent() {
   const [lessonDetailsOpen, setLessonDetailsOpen] = useState(false);
   const [reminderSettingsOpen, setReminderSettingsOpen] = useState(false);
   const [calendarSettingsOpen, setCalendarSettingsOpen] = useState(false);
-  const [rescheduleOpen, setRescheduleOpen] = useState(false);
   const [selectedLesson, setSelectedLesson] = useState<TutorLessonWithStudent | null>(null);
   const [selectedDate, setSelectedDate] = useState<Date | null>(null);
   const [selectedHour, setSelectedHour] = useState<number | null>(null);
   const [selectedMinute, setSelectedMinute] = useState<number>(0);
+  const draggedLessonIdRef = useRef<string | null>(null);
+  const isLessonDragInProgressRef = useRef(false);
+  const suppressNextGridClickRef = useRef(false);
 
   const [copiedLink, setCopiedLink] = useState(false);
 
@@ -1871,23 +1806,95 @@ function TutorScheduleContent() {
     setWeekStart(getWeekStart(new Date()));
   }, []);
 
+  const getSnappedTimeFromPosition = useCallback((positionY: number, durationMin: number = 0) => {
+    const workStartMinutes = scheduleSettings.workDayStart * 60;
+    const workEndMinutes = scheduleSettings.workDayEnd * 60;
+    const minutesFromStart = Math.floor(positionY / PIXELS_PER_MINUTE);
+    const rawTotalMinutes = workStartMinutes + minutesFromStart;
+    const roundedTotalMinutes = Math.round(rawTotalMinutes / 15) * 15;
+    const latestAllowedStart = Math.max(workStartMinutes, workEndMinutes - durationMin);
+    const clampedTotalMinutes = Math.max(
+      workStartMinutes,
+      Math.min(roundedTotalMinutes, latestAllowedStart)
+    );
+
+    return {
+      hour: Math.floor(clampedTotalMinutes / 60),
+      minute: clampedTotalMinutes % 60
+    };
+  }, [scheduleSettings.workDayStart, scheduleSettings.workDayEnd]);
+
   const handleGridClick = useCallback((dayOfWeek: number, clickY: number) => {
-    const minutesFromStart = Math.floor(clickY / PIXELS_PER_MINUTE);
-    const totalMinutes = scheduleSettings.workDayStart * 60 + minutesFromStart;
-    const hour = Math.floor(totalMinutes / 60);
-    const minute = Math.round((totalMinutes % 60) / 15) * 15;
+    const { hour, minute } = getSnappedTimeFromPosition(clickY);
 
     const date = getDateForDayOfWeek(weekStart, dayOfWeek);
     setSelectedDate(date);
     setSelectedHour(hour);
-    setSelectedMinute(minute >= 60 ? 0 : minute);
+    setSelectedMinute(minute);
     setAddLessonOpen(true);
-  }, [weekStart, scheduleSettings.workDayStart]);
+  }, [getSnappedTimeFromPosition, weekStart]);
 
   const handleLessonClick = useCallback((lesson: TutorLessonWithStudent) => {
+    if (isLessonDragInProgressRef.current) return;
     setSelectedLesson(lesson);
     setLessonDetailsOpen(true);
   }, []);
+
+  const handleLessonDragStart = useCallback((lessonId: string, event: React.DragEvent<HTMLDivElement>) => {
+    isLessonDragInProgressRef.current = true;
+    draggedLessonIdRef.current = lessonId;
+    event.dataTransfer.setData('text/plain', lessonId);
+    event.dataTransfer.effectAllowed = 'move';
+  }, []);
+
+  const handleLessonDragEnd = useCallback(() => {
+    window.setTimeout(() => {
+      isLessonDragInProgressRef.current = false;
+      draggedLessonIdRef.current = null;
+    }, 0);
+  }, []);
+
+  const handleDayDragOver = useCallback((isWorkDay: boolean, event: React.DragEvent<HTMLDivElement>) => {
+    if (!isWorkDay) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'move';
+  }, []);
+
+  const handleLessonDrop = useCallback(async (dayIndex: number, isWorkDay: boolean, event: React.DragEvent<HTMLDivElement>) => {
+    if (!isWorkDay) return;
+
+    event.preventDefault();
+
+    const draggedLessonId = event.dataTransfer.getData('text/plain') || draggedLessonIdRef.current;
+    if (!draggedLessonId) return;
+
+    const draggedLesson = lessons.find(l => l.id === draggedLessonId && l.status === 'booked');
+    if (!draggedLesson) return;
+
+    const rect = event.currentTarget.getBoundingClientRect();
+    const positionY = Math.max(0, Math.min(event.clientY - rect.top, gridHeight));
+    const { hour, minute } = getSnappedTimeFromPosition(positionY, draggedLesson.duration_min);
+    const newStart = getDateForDayOfWeek(weekStart, dayIndex);
+    newStart.setHours(hour, minute, 0, 0);
+
+    if (newStart.getTime() === new Date(draggedLesson.start_at).getTime()) {
+      suppressNextGridClickRef.current = true;
+      return;
+    }
+
+    suppressNextGridClickRef.current = true;
+
+    const result = await updateLesson(draggedLesson.id, {
+      start_at: newStart.toISOString()
+    });
+
+    if (result) {
+      toast.success('Занятие перенесено');
+      refetchLessons();
+    } else {
+      toast.error('Не удалось перенести');
+    }
+  }, [getSnappedTimeFromPosition, gridHeight, lessons, refetchLessons, weekStart]);
 
   const handleCopyBookingLink = useCallback(async () => {
     const link = await getBookingLink();
@@ -1899,10 +1906,6 @@ function TutorScheduleContent() {
     } else {
       toast.error('Не удалось получить ссылку');
     }
-  }, []);
-
-  const handleReschedule = useCallback(() => {
-    setRescheduleOpen(true);
   }, []);
 
   const weekTitle = useMemo(() => {
@@ -2223,7 +2226,13 @@ function TutorScheduleContent() {
                             !isWorkDay && "bg-muted/30"
                           )}
                           style={{ height: `${gridHeight}px` }}
+                          onDragOver={(e) => handleDayDragOver(isWorkDay, e)}
+                          onDrop={(e) => handleLessonDrop(dayIndex, isWorkDay, e)}
                           onClick={(e) => {
+                            if (suppressNextGridClickRef.current) {
+                              suppressNextGridClickRef.current = false;
+                              return;
+                            }
                             if (isWorkDay) {
                               const rect = e.currentTarget.getBoundingClientRect();
                               const clickY = e.clientY - rect.top;
@@ -2256,6 +2265,8 @@ function TutorScheduleContent() {
                               lesson={lesson}
                               workDayStart={scheduleSettings.workDayStart}
                               onClick={() => handleLessonClick(lesson)}
+                              onDragStart={(event) => handleLessonDragStart(lesson.id, event)}
+                              onDragEnd={handleLessonDragEnd}
                             />
                           ))}
                         </div>
@@ -2301,15 +2312,7 @@ function TutorScheduleContent() {
           lesson={selectedLesson}
           students={students}
           onCancel={() => refetchLessons()}
-          onReschedule={handleReschedule}
           onUpdate={() => refetchLessons()}
-        />
-
-        <RescheduleDialog
-          open={rescheduleOpen}
-          onOpenChange={setRescheduleOpen}
-          lesson={selectedLesson}
-          onSuccess={() => refetchLessons()}
         />
 
         <ReminderSettingsDialog

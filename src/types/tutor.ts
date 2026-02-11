@@ -312,6 +312,7 @@ export interface CreateLessonInput {
 
 export interface UpdateLessonInput {
   status?: LessonStatus;
+  start_at?: string;
   lesson_type?: LessonType;
   subject?: string;
   notes?: string;
