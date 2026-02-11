@@ -62,6 +62,13 @@ interface ScheduleSettings {
   workDays: number[];
 }
 
+interface DragPreviewState {
+  dayIndex: number;
+  topPx: number;
+  durationMin: number;
+  visible: boolean;
+}
+
 const defaultSettings: ScheduleSettings = {
   workDayStart: 9,
   workDayEnd: 21,
@@ -1518,7 +1525,10 @@ function TutorScheduleContent() {
   const [selectedDate, setSelectedDate] = useState<Date | null>(null);
   const [selectedHour, setSelectedHour] = useState<number | null>(null);
   const [selectedMinute, setSelectedMinute] = useState<number>(0);
+  const [dragPreview, setDragPreview] = useState<DragPreviewState | null>(null);
+  const [optimisticStartsByLessonId, setOptimisticStartsByLessonId] = useState<Record<string, string>>({});
   const draggedLessonIdRef = useRef<string | null>(null);
+  const draggedLessonDurationRef = useRef<number>(60);
   const isLessonDragInProgressRef = useRef(false);
   const suppressNextGridClickRef = useRef(false);
 
@@ -1754,11 +1764,28 @@ function TutorScheduleContent() {
 
   const gridHeight = visibleHours.length * HOUR_HEIGHT;
 
+  const effectiveLessons = useMemo(() => {
+    if (Object.keys(optimisticStartsByLessonId).length === 0) return lessons;
+    return lessons.map(lesson => (
+      optimisticStartsByLessonId[lesson.id]
+        ? { ...lesson, start_at: optimisticStartsByLessonId[lesson.id] }
+        : lesson
+    ));
+  }, [lessons, optimisticStartsByLessonId]);
+
+  useEffect(() => {
+    setOptimisticStartsByLessonId({});
+    setDragPreview(null);
+    draggedLessonIdRef.current = null;
+    draggedLessonDurationRef.current = 60;
+    isLessonDragInProgressRef.current = false;
+  }, [weekStart]);
+
   const lessonsByDay = useMemo(() => {
     const byDay: Record<number, TutorLessonWithStudent[]> = {};
     for (let i = 0; i < 7; i++) byDay[i] = [];
 
-    for (const lesson of lessons) {
+    for (const lesson of effectiveLessons) {
       if (lesson.status !== 'booked') continue;
 
       const startDate = new Date(lesson.start_at);
@@ -1771,20 +1798,20 @@ function TutorScheduleContent() {
     }
 
     return byDay;
-  }, [lessons, scheduleSettings]);
+  }, [effectiveLessons, scheduleSettings]);
 
   // Stats
   const todayLessons = useMemo(() => {
     const today = new Date();
-    return lessons.filter(l => {
+    return effectiveLessons.filter(l => {
       const d = new Date(l.start_at);
       return l.status === 'booked' && d.toDateString() === today.toDateString();
     }).length;
-  }, [lessons]);
+  }, [effectiveLessons]);
 
   const weekLessons = useMemo(() => {
-    return lessons.filter(l => l.status === 'booked').length;
-  }, [lessons]);
+    return effectiveLessons.filter(l => l.status === 'booked').length;
+  }, [effectiveLessons]);
 
   const goToPrevWeek = useCallback(() => {
     setWeekStart(prev => {
@@ -1840,35 +1867,77 @@ function TutorScheduleContent() {
     setLessonDetailsOpen(true);
   }, []);
 
-  const handleLessonDragStart = useCallback((lessonId: string, event: React.DragEvent<HTMLDivElement>) => {
+  const handleLessonDragStart = useCallback((lessonId: string, durationMin: number, event: React.DragEvent<HTMLDivElement>) => {
     isLessonDragInProgressRef.current = true;
     draggedLessonIdRef.current = lessonId;
+    draggedLessonDurationRef.current = durationMin;
+    setDragPreview(null);
     event.dataTransfer.setData('text/plain', lessonId);
     event.dataTransfer.effectAllowed = 'move';
   }, []);
 
   const handleLessonDragEnd = useCallback(() => {
+    setDragPreview(null);
+    draggedLessonDurationRef.current = 60;
     window.setTimeout(() => {
       isLessonDragInProgressRef.current = false;
       draggedLessonIdRef.current = null;
     }, 0);
   }, []);
 
-  const handleDayDragOver = useCallback((isWorkDay: boolean, event: React.DragEvent<HTMLDivElement>) => {
-    if (!isWorkDay) return;
+  const handleDayDragOver = useCallback((dayIndex: number, isWorkDay: boolean, event: React.DragEvent<HTMLDivElement>) => {
+    if (!isWorkDay) {
+      setDragPreview(null);
+      return;
+    }
+
     event.preventDefault();
     event.dataTransfer.dropEffect = 'move';
-  }, []);
-
-  const handleLessonDrop = useCallback(async (dayIndex: number, isWorkDay: boolean, event: React.DragEvent<HTMLDivElement>) => {
-    if (!isWorkDay) return;
-
-    event.preventDefault();
 
     const draggedLessonId = event.dataTransfer.getData('text/plain') || draggedLessonIdRef.current;
     if (!draggedLessonId) return;
 
-    const draggedLesson = lessons.find(l => l.id === draggedLessonId && l.status === 'booked');
+    const draggedLesson = effectiveLessons.find(l => l.id === draggedLessonId && l.status === 'booked');
+    const durationMin = draggedLesson?.duration_min || draggedLessonDurationRef.current;
+
+    const rect = event.currentTarget.getBoundingClientRect();
+    const positionY = Math.max(0, Math.min(event.clientY - rect.top, gridHeight));
+    const { hour, minute } = getSnappedTimeFromPosition(positionY, durationMin);
+    const topPx = ((hour * 60) + minute - (scheduleSettings.workDayStart * 60)) * PIXELS_PER_MINUTE;
+
+    setDragPreview((prev) => {
+      if (
+        prev &&
+        prev.visible &&
+        prev.dayIndex === dayIndex &&
+        prev.topPx === topPx &&
+        prev.durationMin === durationMin
+      ) {
+        return prev;
+      }
+
+      return {
+        dayIndex,
+        topPx,
+        durationMin,
+        visible: true
+      };
+    });
+  }, [effectiveLessons, getSnappedTimeFromPosition, gridHeight, scheduleSettings.workDayStart]);
+
+  const handleLessonDrop = useCallback(async (dayIndex: number, isWorkDay: boolean, event: React.DragEvent<HTMLDivElement>) => {
+    if (!isWorkDay) {
+      setDragPreview(null);
+      return;
+    }
+
+    event.preventDefault();
+    setDragPreview(null);
+
+    const draggedLessonId = event.dataTransfer.getData('text/plain') || draggedLessonIdRef.current;
+    if (!draggedLessonId) return;
+
+    const draggedLesson = effectiveLessons.find(l => l.id === draggedLessonId && l.status === 'booked');
     if (!draggedLesson) return;
 
     const rect = event.currentTarget.getBoundingClientRect();
@@ -1883,18 +1952,40 @@ function TutorScheduleContent() {
     }
 
     suppressNextGridClickRef.current = true;
+    const optimisticStartIso = newStart.toISOString();
+    setOptimisticStartsByLessonId((prev) => ({
+      ...prev,
+      [draggedLesson.id]: optimisticStartIso
+    }));
 
-    const result = await updateLesson(draggedLesson.id, {
-      start_at: newStart.toISOString()
-    });
+    try {
+      const result = await updateLesson(draggedLesson.id, {
+        start_at: optimisticStartIso
+      });
 
-    if (result) {
-      toast.success('Занятие перенесено');
-      refetchLessons();
-    } else {
-      toast.error('Не удалось перенести');
+      if (result) {
+        setOptimisticStartsByLessonId((prev) => {
+          const { [draggedLesson.id]: _removed, ...rest } = prev;
+          return rest;
+        });
+        toast.success('Занятие перенесено');
+        refetchLessons();
+      } else {
+        setOptimisticStartsByLessonId((prev) => {
+          const { [draggedLesson.id]: _removed, ...rest } = prev;
+          return rest;
+        });
+        toast.error('Не удалось перенести');
+      }
+    } catch (error) {
+      console.error(error);
+      setOptimisticStartsByLessonId((prev) => {
+        const { [draggedLesson.id]: _removed, ...rest } = prev;
+        return rest;
+      });
+      toast.error('Ошибка при переносе');
     }
-  }, [getSnappedTimeFromPosition, gridHeight, lessons, refetchLessons, weekStart]);
+  }, [effectiveLessons, getSnappedTimeFromPosition, gridHeight, refetchLessons, weekStart]);
 
   const handleCopyBookingLink = useCallback(async () => {
     const link = await getBookingLink();
@@ -2226,7 +2317,7 @@ function TutorScheduleContent() {
                             !isWorkDay && "bg-muted/30"
                           )}
                           style={{ height: `${gridHeight}px` }}
-                          onDragOver={(e) => handleDayDragOver(isWorkDay, e)}
+                          onDragOver={(e) => handleDayDragOver(dayIndex, isWorkDay, e)}
                           onDrop={(e) => handleLessonDrop(dayIndex, isWorkDay, e)}
                           onClick={(e) => {
                             if (suppressNextGridClickRef.current) {
@@ -2258,6 +2349,23 @@ function TutorScheduleContent() {
                             />
                           ))}
 
+                          {/* Drag preview */}
+                          {dragPreview?.visible && dragPreview.dayIndex === dayIndex && (
+                            <>
+                              <div
+                                className="absolute left-0.5 right-0.5 rounded-md border border-primary/40 bg-primary/15 pointer-events-none z-20"
+                                style={{
+                                  top: `${dragPreview.topPx}px`,
+                                  height: `${Math.max(4, dragPreview.durationMin * PIXELS_PER_MINUTE)}px`
+                                }}
+                              />
+                              <div
+                                className="absolute left-0 right-0 h-0.5 bg-primary pointer-events-none z-30"
+                                style={{ top: `${dragPreview.topPx}px` }}
+                              />
+                            </>
+                          )}
+
                           {/* Lessons */}
                           {dayLessons.map(lesson => (
                             <LessonBlock
@@ -2265,7 +2373,7 @@ function TutorScheduleContent() {
                               lesson={lesson}
                               workDayStart={scheduleSettings.workDayStart}
                               onClick={() => handleLessonClick(lesson)}
-                              onDragStart={(event) => handleLessonDragStart(lesson.id, event)}
+                              onDragStart={(event) => handleLessonDragStart(lesson.id, lesson.duration_min, event)}
                               onDragEnd={handleLessonDragEnd}
                             />
                           ))}
