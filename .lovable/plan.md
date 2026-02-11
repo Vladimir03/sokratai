@@ -1,32 +1,47 @@
 
 
-## Fix: Add Lesson Dialog Scroll + Lesson Series Creation Error
+## Fix: Lesson click not opening edit dialog
 
-### Problem 1: Dialog not scrollable
-The "Добавить занятие" dialog content overflows the viewport on smaller screens, making the "Создать" button unreachable.
+### Root Cause
 
-### Problem 2: "Не удалось создать серию занятий"
-The `createLesson` and `createLessonSeries` functions require `tutor_id` to insert into the `tutor_lessons` table (it's a NOT NULL column), but the calls from `TutorSchedule.tsx` never pass it. The insert fails silently and returns `null`, triggering the error toast.
+The `LessonBlock` component has `draggable` attribute. On click (especially with tiny mouse movement), the browser fires `dragstart` -> `dragend` -> `click` in that order.
 
----
+1. `dragstart` sets `isLessonDragInProgressRef.current = true`
+2. `dragend` schedules reset via `setTimeout(0)` (next microtask)
+3. `click` fires -- `handleLessonClick` checks the ref, sees `true`, returns early
+4. Only then does `setTimeout` callback run and reset the ref to `false`
 
-### Fix Details
+Result: clicking a lesson never opens the details dialog.
 
-**File 1: `src/pages/tutor/TutorSchedule.tsx`**
+### Fix
 
-1. Add `max-h-[80vh] overflow-y-auto` to the dialog content's inner `div` (the `space-y-4` container) so the form scrolls when it exceeds viewport height.
-2. Pass `tutor_id` from the tutor context into both `createLesson()` and `createLessonSeries()` calls. The `AddLessonDialog` component already receives tutor data via its parent -- need to check how tutor ID is available and thread it through.
+In `handleLessonDragEnd`, track whether the drag actually moved the lesson (i.e. a drop happened with position change). For the click handler, use a different approach: track actual drag distance rather than relying on `isLessonDragInProgressRef` alone.
 
-**File 2: `src/lib/tutorSchedule.ts`**
+**Simplest fix**: In `LessonBlock`, use `onMouseDown`/`onMouseUp` to detect a true click (no significant movement) and call `onClick` directly, bypassing the drag interference. Or alternatively, in `handleLessonDragEnd`, immediately reset `isLessonDragInProgressRef` (no setTimeout) and instead use `suppressNextGridClickRef` to prevent grid click.
 
-- Add `getCurrentTutor()` call inside `createLesson()` to auto-populate `tutor_id` when it's not provided. This ensures both direct calls and calls from `createLessonSeries` work correctly.
+### Proposed Change (minimal)
 
-### Technical Details
+**File: `src/pages/tutor/TutorSchedule.tsx`**
+
+Change `handleLessonDragEnd` to reset the ref immediately (not via setTimeout), and rely on `suppressNextGridClickRef` for preventing the grid click after drag:
+
+```typescript
+const handleLessonDragEnd = useCallback(() => {
+  setDragPreview(null);
+  draggedLessonDurationRef.current = 60;
+  // Reset immediately so click handler is not blocked
+  isLessonDragInProgressRef.current = false;
+  draggedLessonIdRef.current = null;
+  suppressNextGridClickRef.current = true;
+}, []);
+```
+
+This way:
+- Simple clicks: `dragstart` may fire but `dragend` resets ref immediately -> `click` fires and ref is `false` -> dialog opens
+- Real drags: The drop handler processes the move and `suppressNextGridClickRef` prevents the grid from also opening the "add lesson" dialog
 
 | File | Change |
 |------|--------|
-| `src/lib/tutorSchedule.ts` | In `createLesson()`, if `input.tutor_id` is missing, fetch it via `getCurrentTutor()` and inject it before insert |
-| `src/pages/tutor/TutorSchedule.tsx` | Add `max-h-[80vh] overflow-y-auto` to the dialog form container |
+| `src/pages/tutor/TutorSchedule.tsx` | Remove `setTimeout` wrapper in `handleLessonDragEnd`, reset ref immediately, set `suppressNextGridClickRef = true` |
 
-Both fixes are minimal and preserve all existing behavior and design.
-
+This is a one-line change with zero visual or UX impact beyond fixing the bug.
