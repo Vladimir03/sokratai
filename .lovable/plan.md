@@ -1,47 +1,56 @@
 
 
-## Fix: Lesson click not opening edit dialog
+## Add "Edit one or all" choice for recurring lessons
 
-### Root Cause
+When a user clicks "Редактировать" or "Отменить занятие" on a lesson that belongs to a series (`is_recurring === true`), show a choice dialog asking whether to apply the action to just this lesson or the entire series.
 
-The `LessonBlock` component has `draggable` attribute. On click (especially with tiny mouse movement), the browser fires `dragstart` -> `dragend` -> `click` in that order.
+### UX Flow
 
-1. `dragstart` sets `isLessonDragInProgressRef.current = true`
-2. `dragend` schedules reset via `setTimeout(0)` (next microtask)
-3. `click` fires -- `handleLessonClick` checks the ref, sees `true`, returns early
-4. Only then does `setTimeout` callback run and reset the ref to `false`
+1. User clicks on a recurring lesson (has the "Серия" badge)
+2. The details dialog opens as usual
+3. When user clicks "Редактировать" or "Отменить занятие":
+   - If the lesson is NOT recurring -- proceed as before (no change)
+   - If the lesson IS recurring -- show an intermediate choice: "Только это занятие" / "Все занятия серии"
+4. Based on choice, apply the action accordingly
 
-Result: clicking a lesson never opens the details dialog.
+### Implementation Details
 
-### Fix
+**File: `src/lib/tutorSchedule.ts`**
 
-In `handleLessonDragEnd`, track whether the drag actually moved the lesson (i.e. a drop happened with position change). For the click handler, use a different approach: track actual drag distance rather than relying on `isLessonDragInProgressRef` alone.
+Add two new functions:
 
-**Simplest fix**: In `LessonBlock`, use `onMouseDown`/`onMouseUp` to detect a true click (no significant movement) and call `onClick` directly, bypassing the drag interference. Or alternatively, in `handleLessonDragEnd`, immediately reset `isLessonDragInProgressRef` (no setTimeout) and instead use `suppressNextGridClickRef` to prevent grid click.
+- `updateLessonSeries(lessonId, input)` -- finds the root lesson (via `parent_lesson_id` or the lesson itself if it's the root), then updates ALL lessons in the series that are still `booked` and have `start_at >= now()` with the same changes (except `start_at` which shifts by the same delta for each)
+- `cancelLessonSeries(lessonId)` -- cancels all future lessons in the series
 
-### Proposed Change (minimal)
+Both functions use the `parent_lesson_id` to find siblings: query `tutor_lessons` where `parent_lesson_id = rootId OR id = rootId`, filtered to future + booked.
 
-**File: `src/pages/tutor/TutorSchedule.tsx`**
+**File: `src/pages/tutor/TutorSchedule.tsx` (LessonDetailsDialog)**
 
-Change `handleLessonDragEnd` to reset the ref immediately (not via setTimeout), and rely on `suppressNextGridClickRef` for preventing the grid click after drag:
+Add state for series action mode:
 
-```typescript
-const handleLessonDragEnd = useCallback(() => {
-  setDragPreview(null);
-  draggedLessonDurationRef.current = 60;
-  // Reset immediately so click handler is not blocked
-  isLessonDragInProgressRef.current = false;
-  draggedLessonIdRef.current = null;
-  suppressNextGridClickRef.current = true;
-}, []);
-```
+- `seriesAction`: `null | 'edit' | 'cancel'` -- tracks which action triggered the choice
+- When `lesson.is_recurring` and user clicks "Редактировать" or "Отменить", set `seriesAction` and show two buttons instead of proceeding immediately
+- "Только это занятие" proceeds with single-lesson logic (existing code)
+- "Все занятия серии" calls the new series functions
 
-This way:
-- Simple clicks: `dragstart` may fire but `dragend` resets ref immediately -> `click` fires and ref is `false` -> dialog opens
-- Real drags: The drop handler processes the move and `suppressNextGridClickRef` prevents the grid from also opening the "add lesson" dialog
+For editing the series: update all future lessons with the same metadata changes (student, type, subject, notes). Date/time changes apply as a time-of-day shift to all future lessons in the series.
+
+For cancelling the series: cancel all future lessons at once.
+
+### Technical Changes
 
 | File | Change |
 |------|--------|
-| `src/pages/tutor/TutorSchedule.tsx` | Remove `setTimeout` wrapper in `handleLessonDragEnd`, reset ref immediately, set `suppressNextGridClickRef = true` |
+| `src/lib/tutorSchedule.ts` | Add `updateLessonSeries()` and `cancelLessonSeries()` functions |
+| `src/lib/tutors.ts` | Add `cancelLessonSeries()` that cancels all future lessons in a series |
+| `src/pages/tutor/TutorSchedule.tsx` | Add series choice UI in `LessonDetailsDialog` -- when `is_recurring`, show "Только это занятие" / "Все занятия серии" before proceeding with edit or cancel |
 
-This is a one-line change with zero visual or UX impact beyond fixing the bug.
+### UI for the choice
+
+When a recurring lesson's "Редактировать" or "Отменить" is clicked, replace the footer buttons with:
+
+```
+[Только это занятие]  [Все занятия серии]
+```
+
+After the user picks, proceed with the corresponding single or bulk action. The choice step adds minimal UI complexity -- just a conditional render in the dialog footer.
