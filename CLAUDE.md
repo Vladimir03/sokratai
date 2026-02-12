@@ -119,6 +119,9 @@ src/
 - [ ] Shared UI-компоненты не получили тяжёлых зависимостей
 - [ ] Переход между вкладками кабинета репетитора — мгновенный (кеш `tutorAuthCache` не сломан)
 - [ ] После 2-3 минут бездействия переход на другую вкладку работает без зависания
+- [ ] Для `/tutor/schedule`: перенос через модалку доступен только в `Редактировать` (кнопки `Перенести` нет)
+- [ ] Для `/tutor/schedule`: drag-and-drop показывает preview (линия + подсветка диапазона) и не открывает `AddLessonDialog` ложным кликом после drop
+- [ ] Для `/tutor/schedule`: optimistic move работает (карточка двигается сразу), при ошибке есть rollback и toast
 
 При работе над **любым** функционалом:
 - [ ] `bun run build` завершается без ошибок
@@ -140,6 +143,20 @@ src/
 5. **UI-компоненты** (`button.tsx`, `card.tsx`, `badge.tsx`) — используются ВЕЗДЕ, изменения влияют на ВСЁ приложение
 6. **Telegram Auth Flow** — цепочка: `TelegramLoginButton` → `telegram-login-token` → `telegram-bot/handleWebLogin` → `getOrCreateProfile`. Несогласованность email-адресов между функциями создаёт дубликаты пользователей
 7. **Tutor Role Assignment** — роль назначается через `assign-tutor-role` (email) или `telegram-bot` (Telegram). Обе ветки должны работать с ОДНИМ и тем же user_id
+
+## TutorSchedule: текущая логика (обновлено)
+
+- Файл: `src/pages/tutor/TutorSchedule.tsx`
+- Детали занятия: перенос даты/времени встроен в режим `Редактировать` (`LessonDetailsDialog`), отдельного `RescheduleDialog` нет
+- Drag-and-drop перенос в weekly grid:
+  - шаг снапа: 15 минут
+  - учитывает границы рабочего дня и `duration_min`
+  - drop в нерабочий день игнорируется
+  - после drop есть suppress ложного click, чтобы не открывать `AddLessonDialog`
+- UX перетаскивания:
+  - во время drag есть drop-preview (горизонтальная линия + мягкая подсветка диапазона занятия)
+  - перенос использует optimistic update (карточка перемещается сразу)
+  - при неуспешном `updateLesson` выполняется rollback optimistic состояния + error toast
 
 ## Auth-flow: критические правила
 
