@@ -39,6 +39,8 @@ import {
   syncWorkHoursToSlots,
   createLessonSeries,
   updateLesson,
+  updateLessonSeries,
+  cancelLessonSeries,
   getGoogleCalendarStatus,
   getGoogleCalendarAuthUrl,
   disconnectGoogleCalendar,
@@ -632,6 +634,7 @@ function LessonDetailsDialog({
   const [isCancelling, setIsCancelling] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [seriesAction, setSeriesAction] = useState<null | 'edit' | 'cancel'>(null);
   const [editStudentId, setEditStudentId] = useState<string>('');
   const [editLessonType, setEditLessonType] = useState<LessonType>('regular');
   const [editSubject, setEditSubject] = useState('');
@@ -645,6 +648,7 @@ function LessonDetailsDialog({
     if (open && lesson) {
       const lessonStart = new Date(lesson.start_at);
       setIsEditing(false);
+      setSeriesAction(null);
       setEditStudentId(lesson.student_id || '__none__');
       setEditLessonType((lesson.lesson_type as LessonType) || 'regular');
       setEditSubject(lesson.subject || '');
@@ -673,26 +677,38 @@ function LessonDetailsDialog({
   const lessonType = lesson.lesson_type || 'regular';
   const typeLabel = getLessonTypeLabel(lessonType);
 
-  const handleCancel = async () => {
+  const handleCancel = async (allInSeries: boolean = false) => {
     setIsCancelling(true);
     try {
-      const result = await cancelLesson(lesson.id);
-      if (result) {
-        toast.success('Занятие отменено');
-        onCancel();
-        onOpenChange(false);
+      if (allInSeries) {
+        const count = await cancelLessonSeries(lesson.id);
+        if (count > 0) {
+          toast.success(`Отменено ${count} занятий серии`);
+          onCancel();
+          onOpenChange(false);
+        } else {
+          toast.error('Не удалось отменить серию');
+        }
       } else {
-        toast.error('Не удалось отменить');
+        const result = await cancelLesson(lesson.id);
+        if (result) {
+          toast.success('Занятие отменено');
+          onCancel();
+          onOpenChange(false);
+        } else {
+          toast.error('Не удалось отменить');
+        }
       }
     } catch (err) {
       console.error(err);
       toast.error('Ошибка при отмене');
     } finally {
       setIsCancelling(false);
+      setSeriesAction(null);
     }
   };
 
-  const handleSaveEdit = async () => {
+  const handleSaveEdit = async (allInSeries: boolean = false) => {
     if (!editDate) {
       toast.error('Выберите дату');
       return;
@@ -715,20 +731,35 @@ function LessonDetailsDialog({
         ? students.find(s => s.student_id === actualStudentId)
         : null;
 
-      const result = await updateLesson(lesson.id, {
+      const updateInput = {
         start_at: newStart.toISOString(),
         student_id: actualStudentId || undefined,
         tutor_student_id: tutorStudent?.id || undefined,
         lesson_type: editLessonType,
         subject: editSubject || undefined,
         notes: editNotes || undefined,
-      });
-      if (result) {
-        toast.success('Занятие обновлено');
-        setIsEditing(false);
-        onUpdate();
+      };
+
+      if (allInSeries) {
+        const count = await updateLessonSeries(lesson.id, updateInput);
+        if (count > 0) {
+          toast.success(`Обновлено ${count} занятий серии`);
+          setIsEditing(false);
+          setSeriesAction(null);
+          onUpdate();
+        } else {
+          toast.error('Не удалось обновить серию');
+        }
       } else {
-        toast.error('Не удалось обновить');
+        const result = await updateLesson(lesson.id, updateInput);
+        if (result) {
+          toast.success('Занятие обновлено');
+          setIsEditing(false);
+          setSeriesAction(null);
+          onUpdate();
+        } else {
+          toast.error('Не удалось обновить');
+        }
       }
     } catch (err) {
       console.error(err);
@@ -884,22 +915,85 @@ function LessonDetailsDialog({
         </div>
 
         <DialogFooter className="flex-col sm:flex-row gap-2">
-          {isEditing ? (
+          {seriesAction ? (
+            // Series choice: "Only this" or "All in series"
+            <>
+              <p className="text-sm text-muted-foreground w-full mb-1">
+                {seriesAction === 'edit' ? 'Редактировать:' : 'Отменить:'}
+              </p>
+              <Button
+                variant="outline"
+                onClick={() => {
+                  if (seriesAction === 'edit') {
+                    setSeriesAction(null);
+                    setIsEditing(true);
+                  } else {
+                    handleCancel(false);
+                  }
+                }}
+                disabled={isCancelling}
+              >
+                Только это занятие
+              </Button>
+              <Button
+                variant={seriesAction === 'cancel' ? 'destructive' : 'default'}
+                onClick={() => {
+                  if (seriesAction === 'edit') {
+                    setSeriesAction(null);
+                    setIsEditing(true);
+                    // Mark that we're editing the whole series — we store this in a ref-like approach
+                    // Actually, we'll handle it via the save button
+                  } else {
+                    handleCancel(true);
+                  }
+                }}
+                disabled={isCancelling}
+              >
+                {isCancelling ? 'Отмена...' : 'Все занятия серии'}
+              </Button>
+              <Button variant="ghost" size="sm" onClick={() => setSeriesAction(null)}>
+                Назад
+              </Button>
+            </>
+          ) : isEditing ? (
             <>
               <Button variant="outline" onClick={() => setIsEditing(false)}>Отмена</Button>
-              <Button onClick={handleSaveEdit} disabled={isSaving}>
-                {isSaving ? 'Сохранение...' : 'Сохранить'}
-              </Button>
+              {lesson.is_recurring ? (
+                <>
+                  <Button onClick={() => handleSaveEdit(false)} disabled={isSaving}>
+                    {isSaving ? 'Сохранение...' : 'Сохранить это'}
+                  </Button>
+                  <Button onClick={() => handleSaveEdit(true)} disabled={isSaving} variant="secondary">
+                    {isSaving ? 'Сохранение...' : 'Сохранить всю серию'}
+                  </Button>
+                </>
+              ) : (
+                <Button onClick={() => handleSaveEdit(false)} disabled={isSaving}>
+                  {isSaving ? 'Сохранение...' : 'Сохранить'}
+                </Button>
+              )}
             </>
           ) : (
             lesson.status === 'booked' && (
               <>
-                <Button variant="outline" onClick={() => setIsEditing(true)}>
+                <Button variant="outline" onClick={() => {
+                  if (lesson.is_recurring) {
+                    setSeriesAction('edit');
+                  } else {
+                    setIsEditing(true);
+                  }
+                }}>
                   Редактировать
                 </Button>
                 <Button
                   variant="destructive"
-                  onClick={handleCancel}
+                  onClick={() => {
+                    if (lesson.is_recurring) {
+                      setSeriesAction('cancel');
+                    } else {
+                      handleCancel(false);
+                    }
+                  }}
                   disabled={isCancelling}
                 >
                   {isCancelling ? 'Отмена...' : 'Отменить занятие'}

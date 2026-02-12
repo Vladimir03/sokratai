@@ -428,6 +428,137 @@ export async function deleteLesson(id: string): Promise<boolean> {
 }
 
 // =============================================
+// Series Operations (edit/cancel all in series)
+// =============================================
+
+/**
+ * Cancel all future booked lessons in a series.
+ * Finds the root via parent_lesson_id, then cancels all siblings with start_at >= now().
+ */
+export async function cancelLessonSeries(lessonId: string): Promise<number> {
+  // First get the lesson to find the root
+  const { data: lesson, error: fetchErr } = await supabase
+    .from('tutor_lessons')
+    .select('id, parent_lesson_id')
+    .eq('id', lessonId)
+    .single();
+
+  if (fetchErr || !lesson) {
+    console.error('Error fetching lesson for series cancel:', fetchErr);
+    return 0;
+  }
+
+  const rootId = lesson.parent_lesson_id || lesson.id;
+
+  // Find all future booked lessons in the series
+  const { data: siblings, error: sibErr } = await supabase
+    .from('tutor_lessons')
+    .select('id')
+    .or(`parent_lesson_id.eq.${rootId},id.eq.${rootId}`)
+    .eq('status', 'booked')
+    .gte('start_at', new Date().toISOString());
+
+  if (sibErr || !siblings?.length) {
+    console.error('Error fetching series siblings:', sibErr);
+    return 0;
+  }
+
+  const ids = siblings.map(s => s.id);
+  const now = new Date().toISOString();
+
+  const { error: updateErr } = await supabase
+    .from('tutor_lessons')
+    .update({ status: 'cancelled', cancelled_at: now, cancelled_by: 'tutor' })
+    .in('id', ids);
+
+  if (updateErr) {
+    console.error('Error cancelling lesson series:', updateErr);
+    return 0;
+  }
+
+  return ids.length;
+}
+
+/**
+ * Update all future booked lessons in a series with new metadata.
+ * Time changes are applied as a time-of-day shift to each lesson.
+ */
+export async function updateLessonSeries(
+  lessonId: string,
+  input: UpdateLessonInput
+): Promise<number> {
+  // Get the current lesson to find root and compute time delta
+  const { data: lesson, error: fetchErr } = await supabase
+    .from('tutor_lessons')
+    .select('id, parent_lesson_id, start_at')
+    .eq('id', lessonId)
+    .single();
+
+  if (fetchErr || !lesson) {
+    console.error('Error fetching lesson for series update:', fetchErr);
+    return 0;
+  }
+
+  const rootId = lesson.parent_lesson_id || lesson.id;
+
+  // Find all future booked lessons in the series
+  const { data: siblings, error: sibErr } = await supabase
+    .from('tutor_lessons')
+    .select('id, start_at')
+    .or(`parent_lesson_id.eq.${rootId},id.eq.${rootId}`)
+    .eq('status', 'booked')
+    .gte('start_at', new Date().toISOString())
+    .order('start_at', { ascending: true });
+
+  if (sibErr || !siblings?.length) {
+    console.error('Error fetching series siblings:', sibErr);
+    return 0;
+  }
+
+  // Compute time-of-day delta if start_at changed
+  let timeDeltaMs = 0;
+  if (input.start_at) {
+    const oldStart = new Date(lesson.start_at);
+    const newStart = new Date(input.start_at);
+    // Only shift the time-of-day portion
+    const oldMinutes = oldStart.getHours() * 60 + oldStart.getMinutes();
+    const newMinutes = newStart.getHours() * 60 + newStart.getMinutes();
+    timeDeltaMs = (newMinutes - oldMinutes) * 60 * 1000;
+  }
+
+  // Build metadata update (exclude start_at, we handle it per-lesson)
+  const metaUpdate: Record<string, unknown> = {};
+  if (input.lesson_type !== undefined) metaUpdate.lesson_type = input.lesson_type;
+  if (input.subject !== undefined) metaUpdate.subject = input.subject;
+  if (input.notes !== undefined) metaUpdate.notes = input.notes;
+  if (input.student_id !== undefined) metaUpdate.student_id = input.student_id;
+  if (input.tutor_student_id !== undefined) metaUpdate.tutor_student_id = input.tutor_student_id;
+
+  let updated = 0;
+
+  for (const sibling of siblings) {
+    const updateData: Record<string, unknown> = { ...metaUpdate };
+
+    if (timeDeltaMs !== 0) {
+      const sibStart = new Date(sibling.start_at);
+      const shifted = new Date(sibStart.getTime() + timeDeltaMs);
+      updateData.start_at = shifted.toISOString();
+    }
+
+    if (Object.keys(updateData).length === 0) continue;
+
+    const { error } = await supabase
+      .from('tutor_lessons')
+      .update(updateData)
+      .eq('id', sibling.id);
+
+    if (!error) updated++;
+  }
+
+  return updated;
+}
+
+// =============================================
 // Reminder Settings
 // =============================================
 
