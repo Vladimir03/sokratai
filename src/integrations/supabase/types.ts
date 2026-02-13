@@ -1819,6 +1819,19 @@ export type Database = {
         }
         Returns: boolean
       }
+      update_lesson_series: {
+        Args: {
+          _apply_time_shift?: boolean
+          _lesson_type?: string
+          _notes?: string
+          _root_lesson_id: string
+          _shift_minutes?: number
+          _student_id?: string
+          _subject?: string
+          _tutor_student_id?: string
+        }
+        Returns: number
+      }
       update_user_stats_on_solve: {
         Args: { p_is_correct: boolean; p_user_id: string }
         Returns: undefined
