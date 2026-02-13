@@ -428,6 +428,77 @@ export async function deleteLesson(id: string): Promise<boolean> {
 }
 
 // =============================================
+// Series Operations (bulk update/cancel)
+// =============================================
+
+/**
+ * Determine root lesson id for a series.
+ * If lesson has parent_lesson_id, that's the root; otherwise lesson itself is root.
+ */
+function getSeriesRootId(lesson: { id: string; parent_lesson_id?: string | null }): string {
+  return lesson.parent_lesson_id || lesson.id;
+}
+
+/**
+ * Update all lessons in a series (by root id).
+ * Fields like lesson_type, subject, notes, student assignment are applied to all.
+ * Time changes are NOT propagated (each lesson keeps its own time).
+ */
+export async function updateLessonSeries(
+  lesson: { id: string; parent_lesson_id?: string | null },
+  input: {
+    lesson_type?: LessonType;
+    subject?: string;
+    notes?: string;
+    student_id?: string;
+    tutor_student_id?: string;
+  }
+): Promise<boolean> {
+  const rootId = getSeriesRootId(lesson);
+
+  const { error } = await supabase
+    .from('tutor_lessons')
+    .update({
+      ...input,
+      updated_at: new Date().toISOString(),
+    })
+    .or(`id.eq.${rootId},parent_lesson_id.eq.${rootId}`);
+
+  if (error) {
+    console.error('Error updating lesson series:', error);
+    return false;
+  }
+
+  return true;
+}
+
+/**
+ * Cancel all booked lessons in a series.
+ */
+export async function cancelLessonSeries(
+  lesson: { id: string; parent_lesson_id?: string | null }
+): Promise<boolean> {
+  const rootId = getSeriesRootId(lesson);
+
+  const { error } = await supabase
+    .from('tutor_lessons')
+    .update({
+      status: 'cancelled',
+      cancelled_at: new Date().toISOString(),
+      cancelled_by: 'tutor',
+    })
+    .or(`id.eq.${rootId},parent_lesson_id.eq.${rootId}`)
+    .eq('status', 'booked');
+
+  if (error) {
+    console.error('Error cancelling lesson series:', error);
+    return false;
+  }
+
+  return true;
+}
+
+// =============================================
 // Reminder Settings
 // =============================================
 

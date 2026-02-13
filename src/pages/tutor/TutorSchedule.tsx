@@ -1,5 +1,6 @@
 import { useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import { ChevronLeft, ChevronRight, Link2, Copy, Check, Plus, X, Clock, Bell, Settings, CalendarIcon, Trash2, CalendarDays, MessageCircle, Repeat, Download, Unplug } from 'lucide-react';
+import { AlertDialog, AlertDialogContent, AlertDialogHeader, AlertDialogTitle, AlertDialogDescription, AlertDialogFooter, AlertDialogCancel, AlertDialogAction } from '@/components/ui/alert-dialog';
 import { format, addMinutes, parseISO } from 'date-fns';
 import { ru } from 'date-fns/locale';
 import { Button } from '@/components/ui/button';
@@ -39,6 +40,8 @@ import {
   syncWorkHoursToSlots,
   createLessonSeries,
   updateLesson,
+  updateLessonSeries,
+  cancelLessonSeries,
   getGoogleCalendarStatus,
   getGoogleCalendarAuthUrl,
   disconnectGoogleCalendar,
@@ -639,6 +642,8 @@ function LessonDetailsDialog({
   const [editDate, setEditDate] = useState<Date | undefined>();
   const [editHour, setEditHour] = useState('');
   const [editMinute, setEditMinute] = useState('00');
+  // Series confirmation state
+  const [seriesAction, setSeriesAction] = useState<'save' | 'cancel' | null>(null);
 
   // Reset edit state when dialog opens with a new lesson
   useEffect(() => {
@@ -673,12 +678,45 @@ function LessonDetailsDialog({
   const lessonType = lesson.lesson_type || 'regular';
   const typeLabel = getLessonTypeLabel(lessonType);
 
-  const handleCancel = async () => {
+  const isSeriesLesson = !!lesson.is_recurring;
+
+  const handleCancelClick = () => {
+    if (isSeriesLesson) {
+      setSeriesAction('cancel');
+    } else {
+      doCancel(false);
+    }
+  };
+
+  const handleSaveClick = () => {
+    if (!editDate) {
+      toast.error('Выберите дату');
+      return;
+    }
+    const hourValue = Number.parseInt(editHour, 10);
+    const minuteValue = Number.parseInt(editMinute, 10);
+    if (Number.isNaN(hourValue) || Number.isNaN(minuteValue)) {
+      toast.error('Выберите время');
+      return;
+    }
+    if (isSeriesLesson) {
+      setSeriesAction('save');
+    } else {
+      doSave(false);
+    }
+  };
+
+  const doCancel = async (wholeSeries: boolean) => {
     setIsCancelling(true);
     try {
-      const result = await cancelLesson(lesson.id);
+      let result: boolean;
+      if (wholeSeries) {
+        result = await cancelLessonSeries(lesson);
+      } else {
+        result = !!(await cancelLesson(lesson.id));
+      }
       if (result) {
-        toast.success('Занятие отменено');
+        toast.success(wholeSeries ? 'Серия занятий отменена' : 'Занятие отменено');
         onCancel();
         onOpenChange(false);
       } else {
@@ -689,56 +727,65 @@ function LessonDetailsDialog({
       toast.error('Ошибка при отмене');
     } finally {
       setIsCancelling(false);
+      setSeriesAction(null);
     }
   };
 
-  const handleSaveEdit = async () => {
-    if (!editDate) {
-      toast.error('Выберите дату');
-      return;
-    }
-
-    const hourValue = Number.parseInt(editHour, 10);
-    const minuteValue = Number.parseInt(editMinute, 10);
-    if (Number.isNaN(hourValue) || Number.isNaN(minuteValue)) {
-      toast.error('Выберите время');
-      return;
-    }
-
+  const doSave = async (wholeSeries: boolean) => {
     setIsSaving(true);
     try {
-      const newStart = new Date(editDate);
-      newStart.setHours(hourValue, minuteValue, 0, 0);
+      const newStart = new Date(editDate!);
+      newStart.setHours(Number.parseInt(editHour, 10), Number.parseInt(editMinute, 10), 0, 0);
 
       const actualStudentId = editStudentId === '__none__' ? '' : editStudentId;
       const tutorStudent = actualStudentId
         ? students.find(s => s.student_id === actualStudentId)
         : null;
 
-      const result = await updateLesson(lesson.id, {
-        start_at: newStart.toISOString(),
-        student_id: actualStudentId || undefined,
-        tutor_student_id: tutorStudent?.id || undefined,
-        lesson_type: editLessonType,
-        subject: editSubject || undefined,
-        notes: editNotes || undefined,
-      });
-      if (result) {
-        toast.success('Занятие обновлено');
-        setIsEditing(false);
-        onUpdate();
+      if (wholeSeries) {
+        // For series: update metadata only (not time), applied to all lessons
+        const result = await updateLessonSeries(lesson, {
+          student_id: actualStudentId || undefined,
+          tutor_student_id: tutorStudent?.id || undefined,
+          lesson_type: editLessonType,
+          subject: editSubject || undefined,
+          notes: editNotes || undefined,
+        });
+        if (result) {
+          toast.success('Серия занятий обновлена');
+          setIsEditing(false);
+          onUpdate();
+        } else {
+          toast.error('Не удалось обновить серию');
+        }
       } else {
-        toast.error('Не удалось обновить');
+        const result = await updateLesson(lesson.id, {
+          start_at: newStart.toISOString(),
+          student_id: actualStudentId || undefined,
+          tutor_student_id: tutorStudent?.id || undefined,
+          lesson_type: editLessonType,
+          subject: editSubject || undefined,
+          notes: editNotes || undefined,
+        });
+        if (result) {
+          toast.success('Занятие обновлено');
+          setIsEditing(false);
+          onUpdate();
+        } else {
+          toast.error('Не удалось обновить');
+        }
       }
     } catch (err) {
       console.error(err);
       toast.error('Ошибка при обновлении');
     } finally {
       setIsSaving(false);
+      setSeriesAction(null);
     }
   };
 
   return (
+    <>
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
         <DialogHeader>
@@ -887,7 +934,7 @@ function LessonDetailsDialog({
           {isEditing ? (
             <>
               <Button variant="outline" onClick={() => setIsEditing(false)}>Отмена</Button>
-              <Button onClick={handleSaveEdit} disabled={isSaving}>
+              <Button onClick={handleSaveClick} disabled={isSaving}>
                 {isSaving ? 'Сохранение...' : 'Сохранить'}
               </Button>
             </>
@@ -899,7 +946,7 @@ function LessonDetailsDialog({
                 </Button>
                 <Button
                   variant="destructive"
-                  onClick={handleCancel}
+                  onClick={handleCancelClick}
                   disabled={isCancelling}
                 >
                   {isCancelling ? 'Отмена...' : 'Отменить занятие'}
@@ -910,6 +957,40 @@ function LessonDetailsDialog({
         </DialogFooter>
       </DialogContent>
     </Dialog>
+
+    {/* Series confirmation AlertDialog */}
+    <AlertDialog open={seriesAction !== null} onOpenChange={(open) => { if (!open) setSeriesAction(null); }}>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>
+            {seriesAction === 'cancel' ? 'Отменить занятие' : 'Сохранить изменения'}
+          </AlertDialogTitle>
+          <AlertDialogDescription>
+            {seriesAction === 'cancel'
+              ? 'Это занятие — часть серии. Отменить только это занятие или всю серию?'
+              : 'Это занятие — часть серии. Применить изменения только к этому занятию или ко всей серии?'}
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter className="flex-col sm:flex-row gap-2">
+          <AlertDialogCancel onClick={() => setSeriesAction(null)}>Назад</AlertDialogCancel>
+          <Button
+            variant={seriesAction === 'cancel' ? 'destructive' : 'default'}
+            onClick={() => seriesAction === 'cancel' ? doCancel(false) : doSave(false)}
+            disabled={isCancelling || isSaving}
+          >
+            Только это занятие
+          </Button>
+          <Button
+            variant={seriesAction === 'cancel' ? 'destructive' : 'default'}
+            onClick={() => seriesAction === 'cancel' ? doCancel(true) : doSave(true)}
+            disabled={isCancelling || isSaving}
+          >
+            Вся серия
+          </Button>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+    </>
   );
 }
 
