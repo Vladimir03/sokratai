@@ -40,6 +40,7 @@ import {
   syncWorkHoursToSlots,
   createLessonSeries,
   updateLesson,
+  getLessonSeriesCount,
   updateLessonSeries,
   cancelLessonSeries,
   getGoogleCalendarStatus,
@@ -644,6 +645,8 @@ function LessonDetailsDialog({
   const [editMinute, setEditMinute] = useState('00');
   // Series confirmation state
   const [seriesAction, setSeriesAction] = useState<'save' | 'cancel' | null>(null);
+  const [isActualSeries, setIsActualSeries] = useState(false);
+  const [isSeriesCheckLoading, setIsSeriesCheckLoading] = useState(false);
 
   // Reset edit state when dialog opens with a new lesson
   useEffect(() => {
@@ -657,8 +660,46 @@ function LessonDetailsDialog({
       setEditDate(lessonStart);
       setEditHour(lessonStart.getHours().toString());
       setEditMinute(lessonStart.getMinutes().toString().padStart(2, '0'));
+      setSeriesAction(null);
     }
   }, [open, lesson]);
+
+  useEffect(() => {
+    let isActive = true;
+
+    if (!open || !lesson || !lesson.is_recurring) {
+      setIsActualSeries(false);
+      setIsSeriesCheckLoading(false);
+      return;
+    }
+
+    setIsSeriesCheckLoading(true);
+    getLessonSeriesCount(lesson)
+      .then((count) => {
+        if (!isActive) return;
+        setIsActualSeries(count > 1);
+      })
+      .catch((error) => {
+        console.error('Error resolving lesson series state:', error);
+        if (!isActive) return;
+        setIsActualSeries(false);
+      })
+      .finally(() => {
+        if (isActive) {
+          setIsSeriesCheckLoading(false);
+        }
+      });
+
+    return () => {
+      isActive = false;
+    };
+  }, [open, lesson]);
+
+  useEffect(() => {
+    if (!isActualSeries && seriesAction !== null) {
+      setSeriesAction(null);
+    }
+  }, [isActualSeries, seriesAction]);
 
   if (!lesson) return null;
 
@@ -678,10 +719,12 @@ function LessonDetailsDialog({
   const lessonType = lesson.lesson_type || 'regular';
   const typeLabel = getLessonTypeLabel(lessonType);
 
-  const isSeriesLesson = !!lesson.is_recurring;
-
   const handleCancelClick = () => {
-    if (isSeriesLesson) {
+    if (isSeriesCheckLoading) {
+      toast.info('Проверяем серию занятий...');
+      return;
+    }
+    if (isActualSeries) {
       setSeriesAction('cancel');
     } else {
       doCancel(false);
@@ -699,7 +742,11 @@ function LessonDetailsDialog({
       toast.error('Выберите время');
       return;
     }
-    if (isSeriesLesson) {
+    if (isSeriesCheckLoading) {
+      toast.info('Проверяем серию занятий...');
+      return;
+    }
+    if (isActualSeries) {
       setSeriesAction('save');
     } else {
       doSave(false);
@@ -756,13 +803,17 @@ function LessonDetailsDialog({
           applyTimeShift,
           shiftMinutes,
         });
-        if (result) {
-          toast.success('Серия занятий обновлена');
+        if (result.ok) {
+          toast.success(`Серия обновлена (${result.updatedCount})`);
           setIsEditing(false);
           onUpdate();
           onOpenChange(false);
         } else {
-          toast.error('Не удалось обновить серию');
+          if (result.updatedCount === 0) {
+            toast.error('Серия не обновлена: нет подходящих занятий');
+          } else {
+            toast.error(result.error || 'Не удалось обновить серию');
+          }
         }
       } else {
         const result = await updateLesson(lesson.id, {
@@ -819,7 +870,7 @@ function LessonDetailsDialog({
                 </Badge>
                 <Badge variant="outline">{typeLabel}</Badge>
                 {lesson.subject && <Badge variant="outline">{lesson.subject}</Badge>}
-                {lesson.is_recurring && <Badge variant="outline"><Repeat className="h-3 w-3 mr-1" />Серия</Badge>}
+                {isActualSeries && <Badge variant="outline"><Repeat className="h-3 w-3 mr-1" />Серия</Badge>}
               </div>
 
               {lesson.notes && (
@@ -941,7 +992,7 @@ function LessonDetailsDialog({
           {isEditing ? (
             <>
               <Button variant="outline" onClick={() => setIsEditing(false)}>Отмена</Button>
-              <Button onClick={handleSaveClick} disabled={isSaving}>
+              <Button onClick={handleSaveClick} disabled={isSaving || isSeriesCheckLoading}>
                 {isSaving ? 'Сохранение...' : 'Сохранить'}
               </Button>
             </>
@@ -954,7 +1005,7 @@ function LessonDetailsDialog({
                 <Button
                   variant="destructive"
                   onClick={handleCancelClick}
-                  disabled={isCancelling}
+                  disabled={isCancelling || isSeriesCheckLoading}
                 >
                   {isCancelling ? 'Отмена...' : 'Отменить занятие'}
                 </Button>
@@ -966,7 +1017,7 @@ function LessonDetailsDialog({
     </Dialog>
 
     {/* Series confirmation AlertDialog */}
-    <AlertDialog open={seriesAction !== null} onOpenChange={(open) => { if (!open) setSeriesAction(null); }}>
+    <AlertDialog open={seriesAction !== null && isActualSeries} onOpenChange={(open) => { if (!open) setSeriesAction(null); }}>
       <AlertDialogContent>
         <AlertDialogHeader>
           <AlertDialogTitle>

@@ -313,6 +313,19 @@ export async function createLessonSeries(
 
   const recurrenceRule = 'weekly';
 
+  // A single generated date is not an actual series; create a regular lesson.
+  if (dates.length === 1) {
+    const singleLesson = await createLesson({
+      ...input,
+      tutor_id: tutorId,
+      start_at: dates[0].toISOString(),
+      is_recurring: false,
+      recurrence_rule: undefined,
+      parent_lesson_id: undefined,
+    });
+    return { root: singleLesson, count: singleLesson ? 1 : 0 };
+  }
+
   // Create root lesson (first in series)
   const rootLesson = await createLesson({
     ...input,
@@ -322,8 +335,8 @@ export async function createLessonSeries(
     recurrence_rule: recurrenceRule,
   });
 
-  if (!rootLesson || dates.length === 1) {
-    return { root: rootLesson, count: rootLesson ? 1 : 0 };
+  if (!rootLesson) {
+    return { root: null, count: 0 };
   }
 
   // Create remaining lessons in batch
@@ -439,13 +452,36 @@ function getSeriesRootId(lesson: { id: string; parent_lesson_id?: string | null 
   return lesson.parent_lesson_id || lesson.id;
 }
 
+export async function getLessonSeriesCount(
+  lesson: { id: string; parent_lesson_id?: string | null }
+): Promise<number> {
+  const rootId = getSeriesRootId(lesson);
+  const { count, error } = await supabase
+    .from('tutor_lessons')
+    .select('id', { count: 'exact', head: true })
+    .or(`id.eq.${rootId},parent_lesson_id.eq.${rootId}`);
+
+  if (error) {
+    console.error('Error counting lesson series:', error);
+    return 0;
+  }
+
+  return count ?? 0;
+}
+
+export interface UpdateLessonSeriesResult {
+  ok: boolean;
+  updatedCount: number;
+  error?: string;
+}
+
 /**
  * Update all lessons in a series (by root id).
- * Applies metadata changes to booked future lessons.
+ * Applies metadata changes to selected and future booked lessons in the series.
  * Optionally applies a time shift (in minutes) to all matching lessons.
  */
 export async function updateLessonSeries(
-  lesson: { id: string; parent_lesson_id?: string | null },
+  lesson: { id: string; parent_lesson_id?: string | null; start_at: string },
   input: {
     lesson_type?: LessonType;
     subject?: string;
@@ -455,10 +491,12 @@ export async function updateLessonSeries(
     applyTimeShift?: boolean;
     shiftMinutes?: number;
   }
-): Promise<boolean> {
+): Promise<UpdateLessonSeriesResult> {
   const rootId = getSeriesRootId(lesson);
   const rpcArgs: {
     _root_lesson_id: string;
+    _selected_lesson_id: string;
+    _from_start_at: string;
     _apply_time_shift: boolean;
     _shift_minutes: number;
     _lesson_type?: LessonType;
@@ -468,6 +506,8 @@ export async function updateLessonSeries(
     _tutor_student_id?: string;
   } = {
     _root_lesson_id: rootId,
+    _selected_lesson_id: lesson.id,
+    _from_start_at: lesson.start_at,
     _apply_time_shift: input.applyTimeShift ?? false,
     _shift_minutes: input.shiftMinutes ?? 0,
   };
@@ -478,14 +518,19 @@ export async function updateLessonSeries(
   if (input.student_id !== undefined) rpcArgs._student_id = input.student_id;
   if (input.tutor_student_id !== undefined) rpcArgs._tutor_student_id = input.tutor_student_id;
 
-  const { error } = await supabase.rpc('update_lesson_series', rpcArgs);
+  const { data, error } = await supabase.rpc('update_lesson_series', rpcArgs);
 
   if (error) {
     console.error('Error updating lesson series:', error);
-    return false;
+    return { ok: false, updatedCount: 0, error: error.message };
   }
 
-  return true;
+  const updatedCount = typeof data === 'number' ? data : Number(data ?? 0);
+  if (!Number.isFinite(updatedCount) || updatedCount <= 0) {
+    return { ok: false, updatedCount: 0, error: 'No lessons were updated' };
+  }
+
+  return { ok: true, updatedCount };
 }
 
 /**
