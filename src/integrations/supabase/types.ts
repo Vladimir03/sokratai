@@ -1822,11 +1822,9 @@ export type Database = {
       update_lesson_series: {
         Args: {
           _apply_time_shift?: boolean
-          _from_start_at: string
           _lesson_type?: string
           _notes?: string
           _root_lesson_id: string
-          _selected_lesson_id: string
           _shift_minutes?: number
           _student_id?: string
           _subject?: string
