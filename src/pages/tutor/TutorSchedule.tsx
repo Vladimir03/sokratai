@@ -743,18 +743,24 @@ function LessonDetailsDialog({
         : null;
 
       if (wholeSeries) {
-        // For series: update metadata only (not time), applied to all lessons
+        const oldStart = new Date(lesson.start_at);
+        const shiftMinutes = Math.round((newStart.getTime() - oldStart.getTime()) / 60000);
+        const applyTimeShift = shiftMinutes !== 0;
+
         const result = await updateLessonSeries(lesson, {
           student_id: actualStudentId || undefined,
           tutor_student_id: tutorStudent?.id || undefined,
           lesson_type: editLessonType,
           subject: editSubject || undefined,
           notes: editNotes || undefined,
+          applyTimeShift,
+          shiftMinutes,
         });
         if (result) {
           toast.success('Серия занятий обновлена');
           setIsEditing(false);
           onUpdate();
+          onOpenChange(false);
         } else {
           toast.error('Не удалось обновить серию');
         }
@@ -771,6 +777,7 @@ function LessonDetailsDialog({
           toast.success('Занятие обновлено');
           setIsEditing(false);
           onUpdate();
+          onOpenChange(false);
         } else {
           toast.error('Не удалось обновить');
         }
@@ -1624,6 +1631,14 @@ function TutorScheduleContent() {
   const [gcalLoading, setGcalLoading] = useState(false);
   const [gcalImporting, setGcalImporting] = useState(false);
   const gcalChecked = useRef(false);
+
+  useEffect(() => {
+    if (!lessonDetailsOpen || !selectedLesson) return;
+    const freshLesson = lessons.find(l => l.id === selectedLesson.id);
+    if (freshLesson && freshLesson !== selectedLesson) {
+      setSelectedLesson(freshLesson);
+    }
+  }, [lessonDetailsOpen, lessons, selectedLesson]);
 
   // Check if payment onboarding should be shown (once per tutor)
   useEffect(() => {

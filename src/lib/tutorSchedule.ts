@@ -441,8 +441,8 @@ function getSeriesRootId(lesson: { id: string; parent_lesson_id?: string | null 
 
 /**
  * Update all lessons in a series (by root id).
- * Fields like lesson_type, subject, notes, student assignment are applied to all.
- * Time changes are NOT propagated (each lesson keeps its own time).
+ * Applies metadata changes to booked future lessons.
+ * Optionally applies a time shift (in minutes) to all matching lessons.
  */
 export async function updateLessonSeries(
   lesson: { id: string; parent_lesson_id?: string | null },
@@ -452,17 +452,33 @@ export async function updateLessonSeries(
     notes?: string;
     student_id?: string;
     tutor_student_id?: string;
+    applyTimeShift?: boolean;
+    shiftMinutes?: number;
   }
 ): Promise<boolean> {
   const rootId = getSeriesRootId(lesson);
+  const rpcArgs: {
+    _root_lesson_id: string;
+    _apply_time_shift: boolean;
+    _shift_minutes: number;
+    _lesson_type?: LessonType;
+    _subject?: string;
+    _notes?: string;
+    _student_id?: string;
+    _tutor_student_id?: string;
+  } = {
+    _root_lesson_id: rootId,
+    _apply_time_shift: input.applyTimeShift ?? false,
+    _shift_minutes: input.shiftMinutes ?? 0,
+  };
 
-  const { error } = await supabase
-    .from('tutor_lessons')
-    .update({
-      ...input,
-      updated_at: new Date().toISOString(),
-    })
-    .or(`id.eq.${rootId},parent_lesson_id.eq.${rootId}`);
+  if (input.lesson_type !== undefined) rpcArgs._lesson_type = input.lesson_type;
+  if (input.subject !== undefined) rpcArgs._subject = input.subject;
+  if (input.notes !== undefined) rpcArgs._notes = input.notes;
+  if (input.student_id !== undefined) rpcArgs._student_id = input.student_id;
+  if (input.tutor_student_id !== undefined) rpcArgs._tutor_student_id = input.tutor_student_id;
+
+  const { error } = await supabase.rpc('update_lesson_series', rpcArgs);
 
   if (error) {
     console.error('Error updating lesson series:', error);
