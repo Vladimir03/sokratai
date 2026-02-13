@@ -1811,19 +1811,6 @@ export type Database = {
         Args: { _tutor_student_id: string }
         Returns: boolean
       }
-      update_lesson_series: {
-        Args: {
-          _apply_time_shift?: boolean
-          _lesson_type?: string
-          _notes?: string
-          _root_lesson_id: string
-          _shift_minutes?: number
-          _student_id?: string
-          _subject?: string
-          _tutor_student_id?: string
-        }
-        Returns: number
-      }
       update_lesson_payment: {
         Args: {
           _lesson_id: string
