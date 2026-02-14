@@ -25,6 +25,7 @@
 - Ключевые компоненты: `src/pages/tutor/*`, `src/components/tutor/*`
 - Ключевые хуки: `useTutor`, `useTutorStudents`, `useTutorPayments` (из `src/hooks/useTutor.ts`)
 - Тяжёлые зависимости: нет (лёгкие страницы)
+- **Google Calendar интеграция отключена**: в `TutorSchedule` нет кнопок/импорта Google Calendar, edge functions `google-calendar-oauth` и `google-calendar-import` удалены из кода и `supabase/config.toml`
 
 ## КРИТИЧЕСКИЕ ПРАВИЛА
 
@@ -119,6 +120,7 @@ src/
 - [ ] Shared UI-компоненты не получили тяжёлых зависимостей
 - [ ] Переход между вкладками кабинета репетитора — мгновенный (кеш `tutorAuthCache` не сломан)
 - [ ] После 2-3 минут бездействия переход на другую вкладку работает без зависания
+- [ ] В `TutorSchedule` не появляется UI Google Calendar (интеграция отключена)
 
 При работе над **любым** функционалом:
 - [ ] `bun run build` завершается без ошибок
@@ -175,6 +177,7 @@ src/
 - **Cursor / Claude Code** — для серьёзной разработки, рефакторинга, багфиксов
 - После работы в Cursor/Claude Code: **всегда** делай `bun run build` и `bun run smoke-test` перед деплоем
 - После работы в Lovable: проверь, что Lovable не добавил тяжёлые зависимости в `src/components/ui/`
+- Не возвращай Google Calendar интеграцию (UI/edge functions) без отдельного согласованного требования и отдельной миграционной задачи для БД
 
 ## Кросс-браузерная совместимость (КРИТИЧНО)
 

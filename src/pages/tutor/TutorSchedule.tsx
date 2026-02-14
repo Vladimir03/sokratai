@@ -1,5 +1,5 @@
 import { useState, useMemo, useCallback, useEffect, useRef } from 'react';
-import { ChevronLeft, ChevronRight, Link2, Copy, Check, Plus, X, Clock, Bell, Settings, CalendarIcon, Trash2, CalendarDays, MessageCircle, Repeat, Download, Unplug } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Link2, Copy, Check, Plus, X, Clock, Bell, Settings, CalendarIcon, Trash2, CalendarDays, MessageCircle, Repeat } from 'lucide-react';
 import { AlertDialog, AlertDialogContent, AlertDialogHeader, AlertDialogTitle, AlertDialogDescription, AlertDialogFooter, AlertDialogCancel, AlertDialogAction } from '@/components/ui/alert-dialog';
 import { format, addMinutes, parseISO } from 'date-fns';
 import { ru } from 'date-fns/locale';
@@ -42,11 +42,7 @@ import {
   updateLesson,
   getLessonSeriesCount,
   updateLessonSeries,
-  cancelLessonSeries,
-  getGoogleCalendarStatus,
-  getGoogleCalendarAuthUrl,
-  disconnectGoogleCalendar,
-  importGoogleCalendarEvents
+  cancelLessonSeries
 } from '@/lib/tutorSchedule';
 import type { TutorWeeklySlot, TutorLessonWithStudent, TutorStudentWithProfile, TutorReminderSettings, TutorCalendarSettings, TutorAvailabilityException, LessonType } from '@/types/tutor';
 
@@ -863,7 +859,7 @@ function LessonDetailsDialog({
             <>
               <div className="flex flex-wrap gap-2">
                 <Badge variant={lesson.source === 'self_booking' ? 'secondary' : 'outline'}>
-                  {lesson.source === 'self_booking' ? 'Самозапись' : lesson.external_source === 'google_calendar' ? 'Google' : 'Вручную'}
+                  {lesson.source === 'self_booking' ? 'Самозапись' : 'Вручную'}
                 </Badge>
                 <Badge variant={lesson.status === 'booked' ? 'default' : lesson.status === 'completed' ? 'secondary' : 'destructive'}>
                   {lesson.status === 'booked' ? 'Запланировано' : lesson.status === 'completed' ? 'Проведено' : 'Отменено'}
@@ -1676,13 +1672,6 @@ function TutorScheduleContent() {
   // Payment onboarding
   const [paymentOnboardingOpen, setPaymentOnboardingOpen] = useState(false);
 
-  // Google Calendar
-  const [gcalConnected, setGcalConnected] = useState(false);
-  const [gcalEmail, setGcalEmail] = useState<string | null>(null);
-  const [gcalLoading, setGcalLoading] = useState(false);
-  const [gcalImporting, setGcalImporting] = useState(false);
-  const gcalChecked = useRef(false);
-
   useEffect(() => {
     if (!lessonDetailsOpen || !selectedLesson) return;
     const freshLesson = lessons.find(l => l.id === selectedLesson.id);
@@ -1703,95 +1692,6 @@ function TutorScheduleContent() {
       }
     }
   }, [tutor, calendarSettings]);
-
-  // Check Google Calendar connection status + handle ?gcal=connected param
-  useEffect(() => {
-    if (gcalChecked.current) return;
-    gcalChecked.current = true;
-
-    const params = new URLSearchParams(window.location.search);
-    if (params.get('gcal') === 'connected') {
-      toast.success('Google Calendar подключён');
-      window.history.replaceState({}, '', window.location.pathname);
-    } else if (params.get('gcal') === 'error') {
-      const reason = params.get('reason') || 'unknown';
-      toast.error(`Ошибка подключения Google Calendar: ${reason}`);
-      window.history.replaceState({}, '', window.location.pathname);
-    }
-
-    getGoogleCalendarStatus().then(status => {
-      if (status) {
-        setGcalConnected(status.connected);
-        setGcalEmail(status.google_email || null);
-      }
-    });
-  }, []);
-
-  const handleConnectGoogle = useCallback(async () => {
-    setGcalLoading(true);
-    try {
-      const result = await getGoogleCalendarAuthUrl();
-      if (result.url) {
-        window.location.href = result.url;
-      } else {
-        const detail = result.error ? `: ${result.error}` : '';
-        toast.error(`Не удалось получить ссылку авторизации Google${detail}`);
-      }
-    } catch {
-      toast.error('Ошибка подключения Google Calendar');
-    } finally {
-      setGcalLoading(false);
-    }
-  }, []);
-
-  const handleDisconnectGoogle = useCallback(async () => {
-    setGcalLoading(true);
-    try {
-      const ok = await disconnectGoogleCalendar();
-      if (ok) {
-        setGcalConnected(false);
-        setGcalEmail(null);
-        toast.success('Google Calendar отключён');
-      } else {
-        toast.error('Не удалось отключить');
-      }
-    } catch {
-      toast.error('Ошибка отключения Google Calendar');
-    } finally {
-      setGcalLoading(false);
-    }
-  }, []);
-
-  const handleImportGoogle = useCallback(async () => {
-    setGcalImporting(true);
-    try {
-      // Import current week + next 4 weeks
-      const start = new Date(weekStart);
-      const end = new Date(weekStart);
-      end.setDate(end.getDate() + 35);
-
-      const result = await importGoogleCalendarEvents(
-        start.toISOString(),
-        end.toISOString()
-      );
-
-      if (result) {
-        const parts: string[] = [];
-        if (result.imported > 0) parts.push(`импортировано: ${result.imported}`);
-        if (result.updated > 0) parts.push(`обновлено: ${result.updated}`);
-        if (result.cancelled > 0) parts.push(`отменено: ${result.cancelled}`);
-        if (result.skipped > 0) parts.push(`пропущено: ${result.skipped}`);
-        toast.success(parts.length > 0 ? parts.join(', ') : 'Нет новых событий');
-        refetchLessons();
-      } else {
-        toast.error('Ошибка импорта из Google Calendar');
-      }
-    } catch {
-      toast.error('Ошибка импорта');
-    } finally {
-      setGcalImporting(false);
-    }
-  }, [weekStart, refetchLessons]);
 
   const handleEnablePaymentReminders = useCallback(async () => {
     const { error } = await upsertCalendarSettings({ payment_reminder_enabled: true, payment_reminder_delay_minutes: 0 });
@@ -2306,40 +2206,6 @@ function TutorScheduleContent() {
               <Bell className="h-4 w-4" />
             </Button>
 
-            {/* Google Calendar */}
-            {gcalConnected ? (
-              <>
-                <Button
-                  onClick={handleImportGoogle}
-                  variant="outline"
-                  size="sm"
-                  disabled={gcalImporting}
-                  title={gcalEmail ? `Google: ${gcalEmail}` : 'Импорт из Google'}
-                >
-                  <Download className="h-4 w-4 mr-2" />
-                  {gcalImporting ? 'Импорт...' : 'Импорт из Google'}
-                </Button>
-                <Button
-                  onClick={handleDisconnectGoogle}
-                  variant="ghost"
-                  size="icon"
-                  disabled={gcalLoading}
-                  title="Отключить Google Calendar"
-                >
-                  <Unplug className="h-4 w-4" />
-                </Button>
-              </>
-            ) : (
-              <Button
-                onClick={handleConnectGoogle}
-                variant="outline"
-                size="sm"
-                disabled={gcalLoading}
-              >
-                <CalendarIcon className="h-4 w-4 mr-2" />
-                {gcalLoading ? 'Подключение...' : 'Google Calendar'}
-              </Button>
-            )}
           </div>
         </div>
 

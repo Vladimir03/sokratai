@@ -258,7 +258,7 @@ export interface TutorLesson {
   is_recurring: boolean;
   recurrence_rule: string | null;
   parent_lesson_id: string | null;
-  // External source fields (Google Calendar import)
+  // External source fields
   external_source: string | null;
   external_event_id: string | null;
   external_calendar_id: string | null;
@@ -303,7 +303,7 @@ export interface CreateLessonInput {
   is_recurring?: boolean;
   recurrence_rule?: string;
   parent_lesson_id?: string;
-  // External source (Google Calendar)
+  // External source
   external_source?: string;
   external_event_id?: string;
   external_calendar_id?: string;
@@ -319,27 +319,6 @@ export interface UpdateLessonInput {
   cancelled_by?: 'tutor' | 'student';
   student_id?: string;
   tutor_student_id?: string;
-}
-
-// =============================================
-// Google Calendar Integration
-// =============================================
-
-export interface GoogleCalendarConnection {
-  id: string;
-  tutor_id: string;
-  google_email: string;
-  calendar_id: string;
-  last_import_at: string | null;
-  created_at: string;
-  updated_at: string;
-}
-
-export interface GoogleCalendarImportResult {
-  imported: number;
-  updated: number;
-  cancelled: number;
-  skipped: number;
 }
 
 // =============================================
