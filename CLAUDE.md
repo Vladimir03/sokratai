@@ -241,6 +241,24 @@ src/
   - `tutor_query_timeout`
   - `tutor_query_recovered`
 
+## Telegram Homework state machine (Sprint 1.1/1.2)
+
+- Новая подсистема домашки изолирована от legacy-таблиц и использует только префикс `homework_tutor_*`
+- Runtime state Telegram-бота хранится в `public.homework_tutor_user_bot_state` (без fallback на `user_bot_state`)
+- Основные homework-состояния: `IDLE`, `HW_SELECTING`, `HW_SUBMITTING`, `HW_CONFIRMING`, `HW_REVIEW`
+- Файл логики состояния: `supabase/functions/telegram-bot/homework/state_machine.ts`
+  - API: `getState`, `setState`, `resetState`
+  - Реализован stale-reset (по умолчанию 12 часов) для не-idle состояний
+- В `supabase/functions/telegram-bot/index.ts` homework-роутинг должен быть минимально инвазивным:
+  - Команды: `/homework`, `/cancel`
+  - Callbacks: `hw_start:{assignment_id}`, `hw_next`, `hw_submit`
+  - Homework text/photo обрабатываются ранним ответвлением до AI/practice/diagnostic логики
+- При входе в homework-режим обязательно сбрасывать `practice_state` и `diagnostic_state`
+- На этапе 1.2 промежуточные ответы сохраняются только в `context` state machine:
+  - без записи в `homework_tutor_submission_items`
+  - без загрузки фото в `homework-images`
+- Завершение `hw_submit` переводит `homework_tutor_submissions.status` в `submitted` и затем делает `resetState`
+
 ## Команды
 
 ```bash

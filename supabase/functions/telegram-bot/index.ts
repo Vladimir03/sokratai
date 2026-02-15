@@ -1,4 +1,11 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
+import {
+  getState as getHomeworkState,
+  resetState as resetHomeworkState,
+  setState as setHomeworkState,
+  type HomeworkContext,
+  type HomeworkState,
+} from "./homework/state_machine.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -163,6 +170,20 @@ interface DiagnosticState {
   problems: DiagnosticProblemRef[];
   current_index: number;
   answers: Record<number, DiagnosticAnswerRecord>;
+}
+
+interface HomeworkAssignment {
+  id: string;
+  title: string;
+  subject: string;
+  deadline: string | null;
+}
+
+interface HomeworkTask {
+  id: string;
+  order_num: number;
+  task_text: string;
+  max_score: number;
 }
 
 interface EgeProblem {
@@ -543,6 +564,8 @@ async function setMyCommands() {
     { command: "menu", description: "Главное меню" },
     { command: "practice", description: "Тренажёр ЕГЭ" },
     { command: "diagnostic", description: "Диагностика уровня" },
+    { command: "homework", description: "Режим домашки" },
+    { command: "cancel", description: "Отмена текущего режима" },
     { command: "status", description: "Статус подписки" },
     { command: "help", description: "Справка" }
   ];
@@ -1551,6 +1574,591 @@ async function updateDiagnosticState(
     .eq("telegram_user_id", telegramUserId);
 }
 
+// ============= HOMEWORK STATE MACHINE HELPERS =============
+
+async function getHomeworkStateSafe(
+  userId: string,
+): Promise<{ state: HomeworkState; context: HomeworkContext }> {
+  try {
+    return await getHomeworkState(userId);
+  } catch (error) {
+    console.error("Failed to read homework state, fallback to IDLE:", { userId, error });
+    return { state: "IDLE", context: {} };
+  }
+}
+
+function normalizeHomeworkContext(context: HomeworkContext): HomeworkContext {
+  const taskIds = Array.isArray(context.task_ids) ? context.task_ids : [];
+  const images = Array.isArray(context.images) ? context.images : [];
+  const answers = context.answers_by_task && typeof context.answers_by_task === "object"
+    ? context.answers_by_task
+    : {};
+
+  return {
+    assignment_id: context.assignment_id,
+    submission_id: context.submission_id,
+    task_index: typeof context.task_index === "number" && context.task_index > 0 ? context.task_index : 1,
+    total_tasks: typeof context.total_tasks === "number" ? context.total_tasks : taskIds.length,
+    task_ids: taskIds,
+    text: typeof context.text === "string" ? context.text : "",
+    images,
+    answers_by_task: answers,
+  };
+}
+
+function getCurrentHomeworkTaskId(context: HomeworkContext): string | null {
+  const normalized = normalizeHomeworkContext(context);
+  const index = (normalized.task_index ?? 1) - 1;
+  return normalized.task_ids?.[index] ?? null;
+}
+
+async function getActiveHomeworkAssignmentsForStudent(studentId: string): Promise<HomeworkAssignment[]> {
+  const { data: links, error: linksError } = await supabase
+    .from("homework_tutor_student_assignments")
+    .select("assignment_id")
+    .eq("student_id", studentId);
+
+  if (linksError) {
+    console.error("Failed to fetch homework assignment links:", linksError);
+    throw new Error("Failed to fetch homework links");
+  }
+
+  const assignmentIds = [...new Set((links ?? []).map((row: any) => row.assignment_id).filter(Boolean))];
+  if (assignmentIds.length === 0) {
+    return [];
+  }
+
+  const { data: assignments, error: assignmentsError } = await supabase
+    .from("homework_tutor_assignments")
+    .select("id, title, subject, deadline")
+    .in("id", assignmentIds)
+    .eq("status", "active")
+    .order("deadline", { ascending: true, nullsFirst: false });
+
+  if (assignmentsError) {
+    console.error("Failed to fetch active assignments:", assignmentsError);
+    throw new Error("Failed to fetch active assignments");
+  }
+
+  return (assignments ?? []) as HomeworkAssignment[];
+}
+
+async function getHomeworkTasksForAssignment(assignmentId: string): Promise<HomeworkTask[]> {
+  const { data, error } = await supabase
+    .from("homework_tutor_tasks")
+    .select("id, order_num, task_text, max_score")
+    .eq("assignment_id", assignmentId)
+    .order("order_num", { ascending: true });
+
+  if (error) {
+    console.error("Failed to fetch homework tasks:", { assignmentId, error });
+    throw new Error("Failed to fetch homework tasks");
+  }
+
+  return (data ?? []) as HomeworkTask[];
+}
+
+async function getHomeworkTaskById(taskId: string, assignmentId: string): Promise<HomeworkTask | null> {
+  const { data, error } = await supabase
+    .from("homework_tutor_tasks")
+    .select("id, order_num, task_text, max_score")
+    .eq("id", taskId)
+    .eq("assignment_id", assignmentId)
+    .maybeSingle();
+
+  if (error) {
+    console.error("Failed to fetch homework task by id:", { taskId, assignmentId, error });
+    throw new Error("Failed to fetch homework task");
+  }
+
+  return (data as HomeworkTask | null) ?? null;
+}
+
+async function verifyHomeworkAssignmentForStudent(
+  assignmentId: string,
+  studentId: string,
+): Promise<HomeworkAssignment | null> {
+  const { data: link, error: linkError } = await supabase
+    .from("homework_tutor_student_assignments")
+    .select("assignment_id")
+    .eq("assignment_id", assignmentId)
+    .eq("student_id", studentId)
+    .maybeSingle();
+
+  if (linkError) {
+    console.error("Failed to verify homework assignment link:", { assignmentId, studentId, linkError });
+    throw new Error("Failed to verify homework assignment link");
+  }
+
+  if (!link) {
+    return null;
+  }
+
+  const { data: assignment, error: assignmentError } = await supabase
+    .from("homework_tutor_assignments")
+    .select("id, title, subject, deadline")
+    .eq("id", assignmentId)
+    .eq("status", "active")
+    .maybeSingle();
+
+  if (assignmentError) {
+    console.error("Failed to verify active assignment:", { assignmentId, assignmentError });
+    throw new Error("Failed to verify active assignment");
+  }
+
+  return (assignment as HomeworkAssignment | null) ?? null;
+}
+
+async function getOrCreateHomeworkSubmission(
+  assignmentId: string,
+  studentId: string,
+  telegramUserId: number,
+): Promise<string> {
+  const { data: existing, error: existingError } = await supabase
+    .from("homework_tutor_submissions")
+    .select("id")
+    .eq("assignment_id", assignmentId)
+    .eq("student_id", studentId)
+    .maybeSingle();
+
+  if (existingError) {
+    console.error("Failed to fetch homework submission:", { assignmentId, studentId, existingError });
+    throw new Error("Failed to fetch homework submission");
+  }
+
+  if (existing?.id) {
+    return existing.id as string;
+  }
+
+  const { data: created, error: createError } = await supabase
+    .from("homework_tutor_submissions")
+    .insert({
+      assignment_id: assignmentId,
+      student_id: studentId,
+      telegram_chat_id: telegramUserId,
+      status: "in_progress",
+    })
+    .select("id")
+    .single();
+
+  if (!createError && created?.id) {
+    return created.id as string;
+  }
+
+  if ((createError as any)?.code === "23505") {
+    const { data: retried, error: retryError } = await supabase
+      .from("homework_tutor_submissions")
+      .select("id")
+      .eq("assignment_id", assignmentId)
+      .eq("student_id", studentId)
+      .maybeSingle();
+
+    if (retryError || !retried?.id) {
+      console.error("Failed to recover duplicate submission:", { assignmentId, studentId, retryError });
+      throw new Error("Failed to recover homework submission");
+    }
+
+    return retried.id as string;
+  }
+
+  console.error("Failed to create homework submission:", { assignmentId, studentId, createError });
+  throw new Error("Failed to create homework submission");
+}
+
+function buildHomeworkTaskMessage(
+  assignmentTitle: string,
+  task: HomeworkTask,
+  taskIndex: number,
+  totalTasks: number,
+) {
+  return `📘 <b>${escapeHtml(assignmentTitle)}</b>
+
+🧩 Задача ${taskIndex} из ${totalTasks}
+${escapeHtml(task.task_text)}
+
+Отправь ответ текстом или фото (до 4 фото), затем нажми «Далее».
+Для выхода из режима: /cancel`;
+}
+
+async function handleHomeworkCommand(telegramUserId: number, userId: string) {
+  try {
+    await updatePracticeState(telegramUserId, null);
+    await updateDiagnosticState(telegramUserId, null);
+    await setHomeworkState(userId, "HW_SELECTING", {});
+
+    const assignments = await getActiveHomeworkAssignmentsForStudent(userId);
+    if (assignments.length === 0) {
+      await sendTelegramMessage(
+        telegramUserId,
+        `📚 <b>Режим «Домашка»</b>
+
+Сейчас нет активных назначенных домашних заданий.
+Когда репетитор назначит ДЗ, снова используй /homework.
+
+Для выхода в обычный чат: /cancel`,
+      );
+      return;
+    }
+
+    await sendTelegramMessage(
+      telegramUserId,
+      `📚 <b>Режим «Домашка»</b>
+
+Выбери активное домашнее задание:`,
+      { reply_markup: createHomeworkAssignmentsKeyboard(assignments) },
+    );
+  } catch (error) {
+    console.error("handleHomeworkCommand error:", error);
+    await sendTelegramMessage(telegramUserId, "❌ Не удалось открыть режим домашки. Попробуй ещё раз.");
+  }
+}
+
+async function handleHomeworkStartCallback(
+  telegramUserId: number,
+  userId: string,
+  assignmentId: string,
+) {
+  const assignment = await verifyHomeworkAssignmentForStudent(assignmentId, userId);
+  if (!assignment) {
+    await sendTelegramMessage(
+      telegramUserId,
+      "❌ Эта домашка недоступна. Нажми /homework, чтобы загрузить актуальный список.",
+    );
+    return;
+  }
+
+  const tasks = await getHomeworkTasksForAssignment(assignment.id);
+  if (tasks.length === 0) {
+    await sendTelegramMessage(
+      telegramUserId,
+      "❌ В этой домашке пока нет задач. Обратись к репетитору.",
+    );
+    return;
+  }
+
+  const submissionId = await getOrCreateHomeworkSubmission(assignment.id, userId, telegramUserId);
+  const taskIds = tasks.map((task) => task.id);
+
+  const initialContext: HomeworkContext = {
+    assignment_id: assignment.id,
+    submission_id: submissionId,
+    task_index: 1,
+    total_tasks: tasks.length,
+    task_ids: taskIds,
+    text: "",
+    images: [],
+    answers_by_task: {},
+  };
+
+  await setHomeworkState(userId, "HW_SUBMITTING", initialContext);
+  await sendTelegramMessage(
+    telegramUserId,
+    buildHomeworkTaskMessage(assignment.title, tasks[0], 1, tasks.length),
+  );
+}
+
+async function handleHomeworkNextCallback(telegramUserId: number, userId: string) {
+  const stateData = await getHomeworkStateSafe(userId);
+  if (stateData.state !== "HW_SUBMITTING") {
+    await sendTelegramMessage(
+      telegramUserId,
+      "ℹ️ Сейчас ты не на шаге отправки ответа. Нажми /homework, чтобы начать заново.",
+    );
+    return;
+  }
+
+  const context = normalizeHomeworkContext(stateData.context);
+  const assignmentId = context.assignment_id;
+  const submissionId = context.submission_id;
+  const taskIds = context.task_ids ?? [];
+  const totalTasks = context.total_tasks ?? taskIds.length;
+  const currentTaskIndex = context.task_index ?? 1;
+  const currentTaskId = getCurrentHomeworkTaskId(context);
+
+  if (!assignmentId || !submissionId || !currentTaskId || taskIds.length === 0 || totalTasks === 0) {
+    console.error("Invalid homework context for hw_next:", context);
+    await resetHomeworkState(userId);
+    await sendTelegramMessage(telegramUserId, "❌ Состояние домашки повреждено. Нажми /homework и начни заново.");
+    return;
+  }
+
+  const hasText = (context.text ?? "").trim().length > 0;
+  const hasImages = (context.images ?? []).length > 0;
+  if (!hasText && !hasImages) {
+    await sendTelegramMessage(
+      telegramUserId,
+      "📝 Сначала пришли текст или фото ответа на текущую задачу, затем нажми «Далее».",
+    );
+    return;
+  }
+
+  const answersByTask = { ...(context.answers_by_task ?? {}) };
+  answersByTask[currentTaskId] = {
+    text: (context.text ?? "").trim(),
+    images: [...(context.images ?? [])],
+  };
+
+  if (currentTaskIndex < totalTasks) {
+    const nextTaskIndex = currentTaskIndex + 1;
+    const nextTaskId = taskIds[nextTaskIndex - 1];
+    if (!nextTaskId) {
+      console.error("Next task id missing in context:", context);
+      await resetHomeworkState(userId);
+      await sendTelegramMessage(telegramUserId, "❌ Не удалось перейти к следующей задаче. Нажми /homework.");
+      return;
+    }
+
+    const nextTask = await getHomeworkTaskById(nextTaskId, assignmentId);
+    if (!nextTask) {
+      await resetHomeworkState(userId);
+      await sendTelegramMessage(telegramUserId, "❌ Следующая задача не найдена. Нажми /homework.");
+      return;
+    }
+
+    const { data: assignment } = await supabase
+      .from("homework_tutor_assignments")
+      .select("title")
+      .eq("id", assignmentId)
+      .maybeSingle();
+
+    const nextContext: HomeworkContext = {
+      ...context,
+      task_index: nextTaskIndex,
+      text: "",
+      images: [],
+      answers_by_task: answersByTask,
+    };
+
+    await setHomeworkState(userId, "HW_SUBMITTING", nextContext);
+    await sendTelegramMessage(
+      telegramUserId,
+      buildHomeworkTaskMessage(
+        assignment?.title ?? "Домашка",
+        nextTask,
+        nextTaskIndex,
+        totalTasks,
+      ),
+    );
+    return;
+  }
+
+  const confirmContext: HomeworkContext = {
+    ...context,
+    text: "",
+    images: [],
+    answers_by_task: answersByTask,
+  };
+  await setHomeworkState(userId, "HW_CONFIRMING", confirmContext);
+
+  const answeredCount = Object.keys(answersByTask).length;
+  await sendTelegramMessage(
+    telegramUserId,
+    `✅ Ответы по всем задачам собраны (${answeredCount}/${totalTasks}).
+
+Нажми кнопку ниже, чтобы отправить домашку на проверку.`,
+    { reply_markup: createHomeworkSubmitKeyboard() },
+  );
+}
+
+async function handleHomeworkSubmitCallback(telegramUserId: number, userId: string) {
+  const stateData = await getHomeworkStateSafe(userId);
+  if (stateData.state !== "HW_CONFIRMING") {
+    await sendTelegramMessage(
+      telegramUserId,
+      "ℹ️ Сначала заверши ответы по задачам. Нажми /homework, чтобы продолжить.",
+    );
+    return;
+  }
+
+  const context = normalizeHomeworkContext(stateData.context);
+  if (!context.submission_id || !context.assignment_id) {
+    console.error("Invalid homework context for hw_submit:", context);
+    await resetHomeworkState(userId);
+    await sendTelegramMessage(telegramUserId, "❌ Не удалось отправить домашку. Нажми /homework и начни заново.");
+    return;
+  }
+
+  const nowIso = new Date().toISOString();
+  const { data: updatedRow, error: updateError } = await supabase
+    .from("homework_tutor_submissions")
+    .update({
+      status: "submitted",
+      submitted_at: nowIso,
+    })
+    .eq("id", context.submission_id)
+    .eq("student_id", userId)
+    .eq("status", "in_progress")
+    .select("id")
+    .maybeSingle();
+
+  if (updateError) {
+    console.error("Failed to submit homework submission:", updateError);
+    await sendTelegramMessage(telegramUserId, "❌ Ошибка при отправке домашки. Попробуй ещё раз.");
+    return;
+  }
+
+  if (!updatedRow) {
+    const { data: existingSubmission, error: existingError } = await supabase
+      .from("homework_tutor_submissions")
+      .select("status")
+      .eq("id", context.submission_id)
+      .eq("student_id", userId)
+      .maybeSingle();
+
+    if (existingError || !existingSubmission) {
+      console.error("Failed to verify submission after empty update:", { existingError, context });
+      await sendTelegramMessage(telegramUserId, "❌ Не удалось подтвердить отправку. Попробуй позже.");
+      return;
+    }
+
+    const status = existingSubmission.status as string;
+    if (!["submitted", "ai_checked", "tutor_reviewed"].includes(status)) {
+      await sendTelegramMessage(
+        telegramUserId,
+        "❌ Домашка ещё не готова к отправке. Проверь ответы и повтори попытку.",
+      );
+      return;
+    }
+  }
+
+  await resetHomeworkState(userId);
+  await sendTelegramMessage(
+    telegramUserId,
+    `🎉 Домашка отправлена.
+
+Проверка запустится в следующих шагах (1.4). Сейчас ты снова в обычном режиме чата.`,
+  );
+}
+
+async function handleHomeworkCallback(
+  telegramUserId: number,
+  userId: string | null | undefined,
+  data: string,
+) {
+  if (!userId) {
+    await sendTelegramMessage(telegramUserId, "❌ Сначала нажми /start, чтобы подготовить аккаунт.");
+    return;
+  }
+
+  try {
+    if (data.startsWith("hw_start:")) {
+      const assignmentId = data.split(":")[1];
+      if (!assignmentId) {
+        await sendTelegramMessage(telegramUserId, "❌ Некорректная команда выбора домашки.");
+        return;
+      }
+      await handleHomeworkStartCallback(telegramUserId, userId, assignmentId);
+      return;
+    }
+
+    if (data === "hw_next") {
+      await handleHomeworkNextCallback(telegramUserId, userId);
+      return;
+    }
+
+    if (data === "hw_submit") {
+      await handleHomeworkSubmitCallback(telegramUserId, userId);
+      return;
+    }
+
+    await sendTelegramMessage(telegramUserId, "ℹ️ Неизвестная команда домашки. Нажми /homework.");
+  } catch (error) {
+    console.error("handleHomeworkCallback error:", { data, userId, error });
+    await sendTelegramMessage(telegramUserId, "❌ Ошибка в режиме домашки. Нажми /homework и попробуй снова.");
+  }
+}
+
+async function handleHomeworkTextInput(
+  telegramUserId: number,
+  userId: string,
+  text: string,
+  stateData: { state: HomeworkState; context: HomeworkContext },
+) {
+  if (stateData.state === "HW_SUBMITTING") {
+    const value = text.trim();
+    if (!value) {
+      await sendTelegramMessage(telegramUserId, "✍️ Пустой ответ не сохранён. Отправь текст или фото.");
+      return;
+    }
+
+    const context = normalizeHomeworkContext(stateData.context);
+    await setHomeworkState(userId, "HW_SUBMITTING", {
+      ...context,
+      text: value,
+    });
+
+    await sendTelegramMessage(
+      telegramUserId,
+      "✅ Текст ответа сохранён. Если нужно, добавь фото и нажми «Далее».",
+      { reply_markup: createHomeworkNextKeyboard() },
+    );
+    return;
+  }
+
+  if (stateData.state === "HW_CONFIRMING") {
+    await sendTelegramMessage(
+      telegramUserId,
+      "ℹ️ Все ответы уже собраны. Нажми «Отправить на проверку» или /cancel.",
+      { reply_markup: createHomeworkSubmitKeyboard() },
+    );
+    return;
+  }
+
+  if (stateData.state === "HW_SELECTING") {
+    await sendTelegramMessage(
+      telegramUserId,
+      "ℹ️ Сначала выбери домашку кнопкой из списка (или снова нажми /homework).",
+    );
+    return;
+  }
+
+  await sendTelegramMessage(telegramUserId, "ℹ️ Домашка в этом состоянии не принимает текст. Нажми /cancel.");
+}
+
+async function handleHomeworkPhotoInput(
+  telegramUserId: number,
+  userId: string,
+  photo: any,
+  caption: string | undefined,
+  stateData: { state: HomeworkState; context: HomeworkContext },
+) {
+  if (stateData.state !== "HW_SUBMITTING") {
+    await sendTelegramMessage(
+      telegramUserId,
+      "ℹ️ Сейчас фото не требуется для домашки. Нажми /cancel или продолжи текущий шаг.",
+    );
+    return;
+  }
+
+  const fileId = photo?.file_id;
+  if (!fileId) {
+    await sendTelegramMessage(telegramUserId, "❌ Не удалось получить фото. Попробуй ещё раз.");
+    return;
+  }
+
+  const context = normalizeHomeworkContext(stateData.context);
+  const currentImages = [...(context.images ?? [])];
+  if (!currentImages.includes(fileId) && currentImages.length >= 4) {
+    await sendTelegramMessage(telegramUserId, "⚠️ Можно прикрепить максимум 4 фото к одной задаче.");
+    return;
+  }
+
+  const nextImages = currentImages.includes(fileId) ? currentImages : [...currentImages, fileId];
+  const captionText = (caption ?? "").trim();
+
+  await setHomeworkState(userId, "HW_SUBMITTING", {
+    ...context,
+    images: nextImages,
+    text: captionText || context.text || "",
+  });
+
+  await sendTelegramMessage(
+    telegramUserId,
+    `✅ Фото сохранено (${nextImages.length}/4). Если нужно, добавь текст и нажми «Далее».`,
+    { reply_markup: createHomeworkNextKeyboard() },
+  );
+}
+
 // Базовый URL сайта для статических ресурсов
 const SITE_BASE_URL = "https://sokratai.ru";
 
@@ -1869,6 +2477,34 @@ function createMainMenuKeyboard() {
         { text: "💳 Premium", url: WEB_PAYMENT_URL },
       ],
     ],
+  };
+}
+
+function createHomeworkAssignmentsKeyboard(assignments: HomeworkAssignment[]) {
+  return {
+    inline_keyboard: assignments.map((assignment) => {
+      const deadline = assignment.deadline ? ` · до ${formatDate(assignment.deadline)}` : "";
+      const rawLabel = `📚 ${assignment.title}${deadline}`;
+      const buttonLabel = rawLabel.length > 60 ? `${rawLabel.slice(0, 57)}...` : rawLabel;
+      return [
+        {
+          text: buttonLabel,
+          callback_data: `hw_start:${assignment.id}`,
+        },
+      ];
+    }),
+  };
+}
+
+function createHomeworkNextKeyboard() {
+  return {
+    inline_keyboard: [[{ text: "➡️ Далее", callback_data: "hw_next" }]],
+  };
+}
+
+function createHomeworkSubmitKeyboard() {
+  return {
+    inline_keyboard: [[{ text: "✅ Отправить на проверку", callback_data: "hw_submit" }]],
   };
 }
 
@@ -5017,6 +5653,12 @@ async function handleCallbackQuery(callbackQuery: any) {
   const session = await getOnboardingSession(telegramUserId);
   const userId = session?.user_id;
 
+  // ============= HOMEWORK CALLBACKS =============
+  if (data.startsWith("hw_")) {
+    await handleHomeworkCallback(telegramUserId, userId, data);
+    return;
+  }
+
   // ============= PRACTICE CALLBACKS =============
   
   // Main menu
@@ -5267,6 +5909,46 @@ Deno.serve(async (req) => {
       });
     }
 
+    // Handle /homework command
+    if (update.message?.text === "/homework") {
+      const telegramUserId = update.message.from.id;
+      const session = await getOnboardingSession(telegramUserId);
+
+      if (!session?.user_id) {
+        await sendTelegramMessage(telegramUserId, "❌ Сначала нажми /start, чтобы подготовить аккаунт.");
+      } else {
+        await handleHomeworkCommand(telegramUserId, session.user_id);
+      }
+
+      return new Response(JSON.stringify({ ok: true }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    // Handle /cancel command
+    if (update.message?.text === "/cancel") {
+      const telegramUserId = update.message.from.id;
+      const session = await getOnboardingSession(telegramUserId);
+
+      await updatePracticeState(telegramUserId, null);
+      await updateDiagnosticState(telegramUserId, null);
+
+      if (session?.user_id) {
+        await resetHomeworkState(session.user_id);
+      }
+
+      await sendTelegramMessage(
+        telegramUserId,
+        `✅ Текущий режим сброшен.
+
+Ты снова в обычном режиме чата с Сократом.`,
+      );
+
+      return new Response(JSON.stringify({ ok: true }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
     // Handle /menu command
     if (update.message?.text === "/menu") {
       const telegramUserId = update.message.from.id;
@@ -5325,6 +6007,8 @@ Deno.serve(async (req) => {
 /menu — главное меню
 /practice — тренажёр ЕГЭ
 /diagnostic — диагностика уровня
+/homework — режим домашки
+/cancel — выйти из режима домашки
 /status — статус подписки
 /help — эта справка
 
@@ -5378,39 +6062,49 @@ Deno.serve(async (req) => {
       });
     }
 
-    // Handle text messages (after onboarding)
+    // Handle text messages
     if (update.message?.text && !update.message.text.startsWith("/")) {
       const telegramUserId = update.message.from.id;
       const session = await getOnboardingSession(telegramUserId);
 
-      if (session && session.onboarding_state === "completed") {
+      if (session?.user_id) {
         const text = update.message.text;
-        
-        // Check if user is in practice mode
-        const sessionState = await getSessionState(telegramUserId);
-        
-        if (sessionState.practice_state) {
-          // User is answering a practice question
-          const handled = await handlePracticeAnswer(telegramUserId, session.user_id, text);
-          if (handled) {
-            return new Response(JSON.stringify({ ok: true }), {
-              headers: { ...corsHeaders, "Content-Type": "application/json" },
-            });
-          }
+
+        const homeworkState = await getHomeworkStateSafe(session.user_id);
+        if (homeworkState.state !== "IDLE") {
+          await handleHomeworkTextInput(telegramUserId, session.user_id, text, homeworkState);
+          return new Response(JSON.stringify({ ok: true }), {
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          });
         }
-        
-        if (sessionState.diagnostic_state) {
-          // User is answering a diagnostic question
-          const handled = await handleDiagnosticAnswer(telegramUserId, session.user_id, text, false);
-          if (handled) {
-            return new Response(JSON.stringify({ ok: true }), {
-              headers: { ...corsHeaders, "Content-Type": "application/json" },
-            });
+
+        if (session.onboarding_state === "completed") {
+          // Check if user is in practice mode
+          const sessionState = await getSessionState(telegramUserId);
+
+          if (sessionState.practice_state) {
+            // User is answering a practice question
+            const handled = await handlePracticeAnswer(telegramUserId, session.user_id, text);
+            if (handled) {
+              return new Response(JSON.stringify({ ok: true }), {
+                headers: { ...corsHeaders, "Content-Type": "application/json" },
+              });
+            }
           }
+
+          if (sessionState.diagnostic_state) {
+            // User is answering a diagnostic question
+            const handled = await handleDiagnosticAnswer(telegramUserId, session.user_id, text, false);
+            if (handled) {
+              return new Response(JSON.stringify({ ok: true }), {
+                headers: { ...corsHeaders, "Content-Type": "application/json" },
+              });
+            }
+          }
+
+          // Default: AI chat mode
+          await handleTextMessage(telegramUserId, session.user_id, text);
         }
-        
-        // Default: AI chat mode
-        await handleTextMessage(telegramUserId, session.user_id, text);
       }
 
       return new Response(JSON.stringify({ ok: true }), {
@@ -5418,25 +6112,42 @@ Deno.serve(async (req) => {
       });
     }
 
-    // Handle photo messages (after onboarding)
+    // Handle photo messages
     if (update.message?.photo) {
       const telegramUserId = update.message.from.id;
       const session = await getOnboardingSession(telegramUserId);
 
-      if (session && session.onboarding_state === "completed") {
-        // If in practice/diagnostic mode, cancel it first
-        const sessionState = await getSessionState(telegramUserId);
-        if (sessionState.practice_state || sessionState.diagnostic_state) {
-          await updatePracticeState(telegramUserId, null);
-          await updateDiagnosticState(telegramUserId, null);
-          await sendTelegramMessage(
-            telegramUserId,
-            "📸 Вижу фото! Переключаюсь в режим AI-помощника..."
-          );
-        }
-        
+      if (session?.user_id) {
         const photo = update.message.photo[update.message.photo.length - 1]; // Get largest photo
-        await handlePhotoMessage(telegramUserId, session.user_id, photo, update.message.caption);
+
+        const homeworkState = await getHomeworkStateSafe(session.user_id);
+        if (homeworkState.state !== "IDLE") {
+          await handleHomeworkPhotoInput(
+            telegramUserId,
+            session.user_id,
+            photo,
+            update.message.caption,
+            homeworkState,
+          );
+          return new Response(JSON.stringify({ ok: true }), {
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          });
+        }
+
+        if (session.onboarding_state === "completed") {
+          // If in practice/diagnostic mode, cancel it first
+          const sessionState = await getSessionState(telegramUserId);
+          if (sessionState.practice_state || sessionState.diagnostic_state) {
+            await updatePracticeState(telegramUserId, null);
+            await updateDiagnosticState(telegramUserId, null);
+            await sendTelegramMessage(
+              telegramUserId,
+              "📸 Вижу фото! Переключаюсь в режим AI-помощника..."
+            );
+          }
+
+          await handlePhotoMessage(telegramUserId, session.user_id, photo, update.message.caption);
+        }
       }
 
       return new Response(JSON.stringify({ ok: true }), {
