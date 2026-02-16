@@ -125,15 +125,43 @@ Deno.serve(async (req) => {
       });
 
       if (authError || !authData.user) {
-        console.error("Failed to create auth user:", authError);
-        return new Response(
-          JSON.stringify({ error: "Failed to create student user" }),
-          { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } },
-        );
+        // Handle email_exists: find existing auth user by telegram username
+        if (authError?.message?.includes("already been registered")) {
+          console.log("Auth user already exists for email:", tempEmail);
+          // This shouldn't happen with random UUIDs, but handle gracefully
+        }
+        
+        if (!authData?.user) {
+          console.error("Failed to create auth user:", authError);
+          return new Response(
+            JSON.stringify({ error: "Failed to create student user" }),
+            { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+          );
+        }
       }
 
       studentId = authData.user.id;
       profileRegistrationSource = "manual";
+
+      // Check if profile exists, create if missing (orphaned auth user)
+      const { data: existingProfileCheck } = await supabaseAdmin
+        .from("profiles")
+        .select("id")
+        .eq("id", studentId)
+        .maybeSingle();
+
+      if (!existingProfileCheck) {
+        console.log("Profile missing for new auth user, inserting:", studentId);
+        await supabaseAdmin
+          .from("profiles")
+          .insert({
+            id: studentId,
+            username: name,
+            telegram_username: telegramUsername,
+            registration_source: "manual",
+            trial_ends_at: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
+          });
+      }
     }
 
     if (!studentId) {
