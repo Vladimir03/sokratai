@@ -6247,6 +6247,11 @@ Deno.serve(async (req) => {
       const parts = update.message.text.split(" ");
       const utmSource = parts[1] || "header_try";
 
+      const commandsConfigured = await setMyCommands();
+      if (!commandsConfigured) {
+        console.error("Failed to refresh Telegram commands on /start");
+      }
+
       await setChatMenuButton(telegramUserId);
       await handleStart(telegramUserId, telegramUsername, utmSource);
       return new Response(JSON.stringify({ ok: true }), {
