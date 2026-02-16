@@ -1222,46 +1222,46 @@ Deno.serve(async (req: Request): Promise<Response> => {
     // POST /assignments
     if (seg.length === 1 && seg[0] === "assignments" && route.method === "POST") {
       const body = await parseJsonBody(req);
-      return await handleCreateAssignment(db, tutor.id, body, cors);
+      return await handleCreateAssignment(db, userId, body, cors);
     }
 
     // GET /assignments
     if (seg.length === 1 && seg[0] === "assignments" && route.method === "GET") {
-      return await handleListAssignments(db, tutor.id, route.searchParams, cors);
+      return await handleListAssignments(db, userId, route.searchParams, cors);
     }
 
     // GET /assignments/:id
     if (seg.length === 2 && seg[0] === "assignments" && route.method === "GET") {
-      return await handleGetAssignment(db, tutor.id, seg[1], cors);
+      return await handleGetAssignment(db, userId, seg[1], cors);
     }
 
     // PUT /assignments/:id
     if (seg.length === 2 && seg[0] === "assignments" && route.method === "PUT") {
       const body = await parseJsonBody(req);
-      return await handleUpdateAssignment(db, tutor.id, seg[1], body, cors);
+      return await handleUpdateAssignment(db, userId, seg[1], body, cors);
     }
 
     // POST /assignments/:id/assign
     if (seg.length === 3 && seg[0] === "assignments" && seg[2] === "assign" && route.method === "POST") {
       const body = await parseJsonBody(req);
-      return await handleAssignStudents(db, tutor.id, tutor.id, seg[1], body, cors);
+      return await handleAssignStudents(db, userId, userId, seg[1], body, cors);
     }
 
     // POST /assignments/:id/notify
     if (seg.length === 3 && seg[0] === "assignments" && seg[2] === "notify" && route.method === "POST") {
       const body = await parseJsonBody(req);
-      return await handleNotifyStudents(db, tutor.id, seg[1], body, cors);
+      return await handleNotifyStudents(db, userId, seg[1], body, cors);
     }
 
     // GET /assignments/:id/results
     if (seg.length === 3 && seg[0] === "assignments" && seg[2] === "results" && route.method === "GET") {
-      return await handleGetResults(db, tutor.id, seg[1], cors);
+      return await handleGetResults(db, userId, seg[1], cors);
     }
 
     // POST /submissions/:id/review
     if (seg.length === 3 && seg[0] === "submissions" && seg[2] === "review" && route.method === "POST") {
       const body = await parseJsonBody(req);
-      return await handleReviewSubmission(db, tutor.id, seg[1], body, cors);
+      return await handleReviewSubmission(db, userId, seg[1], body, cors);
     }
 
     return jsonError(cors, 404, "NOT_FOUND", `Route not found: ${route.method} /${seg.join("/")}`);
