@@ -1,75 +1,50 @@
 
+## Исправление ошибки "Failed to fetch" при создании ДЗ
 
-## Исправление: восстановление "осиротевшего" auth user без profile
+### Причина 1: CORS блокирует запросы
 
-### Проблема
+Edge function `homework-api` разрешает запросы только с 4 доменов:
+- `sokratai.ru`
+- `sokratai.lovable.app`
+- `localhost:8080`
+- `localhost:5173`
 
-Auth-пользователь `3c9e408c` (email: `telegram_385567670@temp.sokratai.ru`) существует в `auth.users`, но **не имеет записи в `public.profiles`**. Текущий recovery-код делает `UPDATE profiles ... WHERE id = '3c9e408c'`, но обновлять нечего -- 0 строк.
+Но превью Lovable работает на домене `*.lovableproject.com`, который не в списке. Браузер блокирует все запросы.
 
-### Решение
+### Причина 2: Неправильный `tutor_id` при создании
 
-Два изменения:
+В главном обработчике `getTutorOrThrow` возвращает `tutor.id` (ID записи из таблицы `tutors`), но в `handleCreateAssignment` передаётся `userId` (auth user ID) вместо `tutor.id`. Это значит:
+- При INSERT в `homework_tutor_assignments` записывается auth user ID вместо ID из таблицы tutors
+- Последующие проверки ownership могут ломаться
 
-**1. `getOrCreateProfile` в `telegram-bot/index.ts` (строки ~721-737)**
+### План исправления
 
-Если auth user найден, но UPDATE вернул пустой результат -- значит profile отсутствует. Нужно вставить (`INSERT`) новую запись в `profiles`:
+**Файл: `supabase/functions/homework-api/index.ts`**
+
+1. Добавить `*.lovableproject.com` в `FALLBACK_ORIGINS` (а лучше -- сделать wildcard-проверку для lovableproject.com)
+
+2. В главном обработчике (строки 1196-1237): передавать `tutor.id` вместо `userId` во все handler-функции, которые работают с `tutor_id`:
+   - `handleCreateAssignment(db, tutor.id, body, cors)` -- вместо `userId`
+   - `handleListAssignments(db, tutor.id, searchParams, cors)` -- вместо `userId`
+   - `handleGetAssignment(db, tutor.id, seg[1], cors)` -- вместо `userId`
+   - и т.д. для всех остальных handlers
+
+3. Задеплоить обновлённую функцию
+
+### Техническая деталь
+
+CORS-фикс: вместо жёсткого списка, добавить проверку паттерна:
 
 ```text
-if (existingUser) {
-  // Try update first
-  const { data: recoveredProfile, error: recoverError } = await supabase
-    .from("profiles")
-    .update({
-      telegram_user_id: telegramUserId,
-      telegram_username: telegramUsername,
-      registration_source: "telegram",
-    })
-    .eq("id", existingUser.id)
-    .select()
-    .single();
-  
-  if (!recoverError && recoveredProfile) {
-    console.log("Recovered existing profile:", recoveredProfile.id);
-    return recoveredProfile;
-  }
+const FALLBACK_ORIGINS = [
+  "https://sokratai.ru",
+  "https://sokratai.lovable.app",
+  "http://localhost:8080",
+  "http://localhost:5173",
+];
 
-  // Profile row missing -- create it
-  console.log("Profile missing for auth user, inserting:", existingUser.id);
-  const { data: insertedProfile, error: insertError } = await supabase
-    .from("profiles")
-    .insert({
-      id: existingUser.id,
-      username: telegramUsername || `user_${telegramUserId}`,
-      telegram_user_id: telegramUserId,
-      telegram_username: telegramUsername,
-      registration_source: "telegram",
-      trial_ends_at: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
-    })
-    .select()
-    .single();
-
-  if (!insertError && insertedProfile) {
-    console.log("Created missing profile:", insertedProfile.id);
-    return insertedProfile;
-  }
-  console.error("Failed to insert profile:", insertError);
-}
+// + в getCorsHeaders добавить проверку:
+// if (origin.endsWith(".lovableproject.com")) -- разрешить
 ```
 
-**2. `tutor-manual-add-student/index.ts` (строки ~106-119)**
-
-Та же ситуация: при ручном добавлении `createUser` может упасть с `email_exists`. Нужно добавить аналогичный fallback:
-- Поймать ошибку `email_exists`
-- Найти существующего auth user по email через `listUsers`
-- Использовать его ID как `studentId`
-
-### Деплой
-
-После изменения обоих файлов задеплоить:
-- `telegram-bot`
-- `tutor-manual-add-student`
-
-### Результат
-
-- Ссылка `https://t.me/sokratai_ru_bot?start=tutor_KMSB8XLD` заработает для `@Analyst_Vladimir`
-- Ручное добавление репетитором тоже будет работать корректно для пользователей с "осиротевшим" auth user
+Это покроет все превью-домены Lovable без необходимости обновлять список при каждом новом проекте.
