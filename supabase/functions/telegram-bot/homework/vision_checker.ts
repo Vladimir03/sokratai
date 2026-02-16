@@ -25,6 +25,10 @@ export interface CheckHomeworkAnswerResult {
   error_type: HomeworkAiErrorType;
 }
 
+export interface VisionCheckerOptions {
+  strict?: boolean;
+}
+
 type LovableMessageRole = "system" | "user" | "assistant";
 
 interface LovableTextPart {
@@ -464,8 +468,10 @@ function buildCheckPrompt(
 export async function recognizeHomeworkPhoto(
   imageBase64: string,
   subject: HomeworkSubject,
+  options: VisionCheckerOptions = {},
 ): Promise<RecognizeHomeworkPhotoResult> {
-  console.log("homework_vision_recognize_start", { subject });
+  const strict = options.strict === true;
+  console.log("homework_vision_recognize_start", { subject, strict });
 
   try {
     const trimmedBase64 = imageBase64.replace(/^data:[^,]+,/, "").trim();
@@ -489,6 +495,7 @@ export async function recognizeHomeworkPhoto(
 
     console.log("homework_vision_recognize_success", {
       subject,
+      strict,
       confidence: result.confidence,
       recognized_length: result.recognized_text.length,
       has_formulas: result.has_formulas,
@@ -498,8 +505,12 @@ export async function recognizeHomeworkPhoto(
   } catch (error) {
     console.error("homework_vision_recognize_error", {
       subject,
+      strict,
       error: error instanceof Error ? error.message : String(error),
     });
+    if (strict) {
+      throw error;
+    }
     return { ...RECOGNIZE_FALLBACK };
   }
 }
@@ -510,8 +521,10 @@ export async function checkHomeworkAnswer(
   correctAnswer: string | null,
   solutionSteps: string | null,
   subject: HomeworkSubject,
+  options: VisionCheckerOptions = {},
 ): Promise<CheckHomeworkAnswerResult> {
-  console.log("homework_vision_check_start", { subject });
+  const strict = options.strict === true;
+  console.log("homework_vision_check_start", { subject, strict });
 
   try {
     const messages = buildCheckPrompt(recognizedText, taskText, correctAnswer, solutionSteps, subject);
@@ -520,6 +533,7 @@ export async function checkHomeworkAnswer(
 
     console.log("homework_vision_check_success", {
       subject,
+      strict,
       is_correct: result.is_correct,
       confidence: result.confidence,
       error_type: result.error_type,
@@ -529,8 +543,12 @@ export async function checkHomeworkAnswer(
   } catch (error) {
     console.error("homework_vision_check_error", {
       subject,
+      strict,
       error: error instanceof Error ? error.message : String(error),
     });
+    if (strict) {
+      throw error;
+    }
     return { ...CHECK_FALLBACK };
   }
 }

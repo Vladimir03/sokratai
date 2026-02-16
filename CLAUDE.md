@@ -254,18 +254,18 @@ src/
   - Callbacks: `hw_start:{assignment_id}`, `hw_next`, `hw_submit`
   - Homework text/photo обрабатываются ранним ответвлением до AI/practice/diagnostic логики
 - При входе в homework-режим обязательно сбрасывать `practice_state` и `diagnostic_state`
-- На этапе 1.2 промежуточные ответы сохраняются только в `context` state machine:
-  - без записи в `homework_tutor_submission_items`
-  - без загрузки фото в `homework-images`
-- Завершение `hw_submit` переводит `homework_tutor_submissions.status` в `submitted` и затем делает `resetState`
+- Исторический контекст Sprint 1.2: промежуточные ответы хранились только в `context` state machine.
 
 ## Telegram Homework Vision checker (Sprint 1.3)
 
 - Для AI-распознавания и проверки домашки добавлен модуль:
   - `supabase/functions/telegram-bot/homework/vision_checker.ts`
 - Публичные функции модуля:
-  - `recognizeHomeworkPhoto(imageBase64, subject)`
-  - `checkHomeworkAnswer(recognizedText, taskText, correctAnswer, solutionSteps, subject)`
+  - `recognizeHomeworkPhoto(imageBase64, subject, options?)`
+  - `checkHomeworkAnswer(recognizedText, taskText, correctAnswer, solutionSteps, subject, options?)`
+- Поддержан `strict`-режим:
+  - `options.strict = true` => ошибки не маскируются fallback-объектами, пробрасываются наружу
+  - по умолчанию (`strict = false`) сохраняется безопасный fallback-путь
 - Модель и провайдер для Sprint 1.3:
   - только Lovable AI Gateway (`LOVABLE_API_KEY`)
   - модель `google/gemini-3-flash-preview`
@@ -280,6 +280,31 @@ src/
   - НЕ менять `supabase/functions/telegram-bot/index.ts`
   - НЕ менять `supabase/functions/analyze-homework-task/index.ts`
   - интеграция end-to-end (storage + submission_items + runAICheck) остаётся на Sprint 1.4
+
+## Telegram Homework full flow (Sprint 1.4)
+
+- Реализован end-to-end flow: Telegram -> Storage -> Vision -> AI -> результат.
+- Добавлен модуль `supabase/functions/telegram-bot/homework/homework_handler.ts`:
+  - `ensureSubmissionItemsForTasks`
+  - `saveHomeworkTextAnswer`
+  - `saveHomeworkPhotoAnswer`
+  - `runHomeworkAiCheck`
+  - `formatHomeworkResultsMessage`
+  - `buildHomeworkStoragePath`
+- В `HW_SUBMITTING` ответы теперь персистятся в БД:
+  - текст -> `homework_tutor_submission_items.student_text`
+  - фото -> bucket `homework-images`, в `student_image_urls` сохраняются object paths по конвенции `homework/{assignment_id}/{submission_id}/{task_id}/{uuid}.jpg`
+- Ограничение на фото: максимум 4 изображения на задачу (на уровне приложения и с учётом текущих значений в БД).
+- `hw_submit` поведение:
+  - перевод `in_progress -> submitted`
+  - синхронный запуск AI-check
+  - при успехе: `homework_tutor_submissions.status = ai_checked`, заполнение `total_score/total_max_score`, отправка итогового сообщения + кнопки `🧠 Разобрать ошибки`
+  - при техническом сбое AI/storage: статус остаётся `submitted`, пользователь получает дружелюбное сообщение о неуспешной проверке
+  - state всегда сбрасывается в `IDLE`
+- Добавлены homework callbacks:
+  - `hw_photo_help`
+  - `hw_cancel`
+  - `hw_review:{submission_id}` (информационная заглушка до Sprint 3)
 
 ## Команды
 
