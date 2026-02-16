@@ -1,41 +1,57 @@
 
-## Отвязка Telegram от репетитора kamchatkinvova@gmail.com
+## Исправление: обработка "email_exists" в getOrCreateProfile
 
-### Текущие данные
-- **Tutor ID**: `70ff3df8-f081-4ed1-83bb-4d1a1f80f795`
-- **telegram_id**: `385567670`
-- **telegram_username**: `Analyst_Vladimir`
+### Проблема
+Функция `getOrCreateProfile` в `telegram-bot/index.ts` не обрабатывает ситуацию, когда auth user с email `telegram_{id}@temp.sokratai.ru` уже существует, но в таблице `profiles` у него очищен `telegram_user_id`. Это приводит к ошибке `AuthApiError: A user with this email address has already been registered`.
 
-### Что нужно сделать
-Выполнить SQL-миграцию, которая обнулит поля `telegram_id` и `telegram_username` у этого репетитора. Для возможности отката значения сохранены выше.
+### Решение
+В функции `getOrCreateProfile` (строка ~695-708), после неудачного `createUser`, добавить fallback:
 
-### SQL для применения
+1. Если ошибка имеет код `email_exists`, найти существующего auth user по email через `supabase.auth.admin.listUsers()`
+2. Обновить его `profiles` запись, восстановив `telegram_user_id` и `telegram_username`
+3. Вернуть обновлённый profile
 
-```text
--- Сохранённые значения для отката:
--- telegram_id: 385567670
--- telegram_username: Analyst_Vladimir
+### Изменения
 
-UPDATE public.tutors
-SET telegram_id = NULL,
-    telegram_username = NULL,
-    updated_at = now()
-WHERE id = '70ff3df8-f081-4ed1-83bb-4d1a1f80f795';
-```
+**Файл**: `supabase/functions/telegram-bot/index.ts`
 
-### SQL для отката (при необходимости)
+В блоке после `createUser` (строки 695-708), заменить простой `throw` на:
 
 ```text
-UPDATE public.tutors
-SET telegram_id = '385567670',
-    telegram_username = 'Analyst_Vladimir',
-    updated_at = now()
-WHERE id = '70ff3df8-f081-4ed1-83bb-4d1a1f80f795';
+if (authError) {
+  // Handle case where auth user already exists but profile lost telegram_user_id
+  if (authError.message?.includes("already been registered")) {
+    console.log("Auth user already exists, looking up by email:", tempEmail);
+    
+    const { data: listData } = await supabase.auth.admin.listUsers();
+    const existingUser = listData?.users?.find(u => u.email === tempEmail);
+    
+    if (existingUser) {
+      const { data: recoveredProfile, error: recoverError } = await supabase
+        .from("profiles")
+        .update({
+          telegram_user_id: telegramUserId,
+          telegram_username: telegramUsername,
+          registration_source: "telegram",
+        })
+        .eq("id", existingUser.id)
+        .select()
+        .single();
+      
+      if (!recoverError && recoveredProfile) {
+        console.log("Recovered existing profile:", recoveredProfile.id);
+        return recoveredProfile;
+      }
+    }
+  }
+  
+  console.error("Error creating user:", authError);
+  throw new Error("Failed to create user");
+}
 ```
-
-### Также нужно проверить profiles
-
-Таблица `profiles` тоже может содержать `telegram_user_id` и `telegram_username` для user_id `420b1476-6988-4f00-b435-09400420d145`. Если да, их тоже нужно обнулить, чтобы при привязке нового Telegram-аккаунта не было конфликтов.
 
 ### Результат
-После применения в дашборде репетитора пропадёт строка "Telegram: @Analyst_Vladimir", и Telegram-аккаунт Analyst_Vladimir можно будет привязать к другому репетитору для тестирования бота с домашками.
+После этого исправления переход по ссылке `https://t.me/sokratai_ru_bot?start=tutor_KMSB8XLD` будет работать корректно: бот найдёт существующего пользователя, восстановит привязку Telegram и привяжет ученика к репетитору.
+
+### Задеплоить
+После изменения кода нужно задеплоить edge function `telegram-bot`.
