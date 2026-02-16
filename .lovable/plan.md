@@ -1,59 +1,41 @@
 
+## Отвязка Telegram от репетитора kamchatkinvova@gmail.com
 
-## Запуск Telegram-бота для домашек: чеклист
+### Текущие данные
+- **Tutor ID**: `70ff3df8-f081-4ed1-83bb-4d1a1f80f795`
+- **telegram_id**: `385567670`
+- **telegram_username**: `Analyst_Vladimir`
 
-### 1. Применить миграцию Sprint 1.1
+### Что нужно сделать
+Выполнить SQL-миграцию, которая обнулит поля `telegram_id` и `telegram_username` у этого репетитора. Для возможности отката значения сохранены выше.
 
-Файл `supabase/migrations/20260215100000_homework_tutor_system.sql` уже существует в репозитории, но не применён к базе данных. Нужно выполнить его содержимое через инструмент миграции. Это создаст:
+### SQL для применения
 
-- 6 таблиц: `homework_tutor_assignments`, `homework_tutor_tasks`, `homework_tutor_submissions`, `homework_tutor_submission_items`, `homework_tutor_student_assignments`, `homework_tutor_user_bot_state`
-- Индексы на все таблицы
-- RLS-политики для tutors и students
-- Storage bucket `homework-images` (private) с политиками доступа
+```text
+-- Сохранённые значения для отката:
+-- telegram_id: 385567670
+-- telegram_username: Analyst_Vladimir
 
-### 2. Проверить secrets
+UPDATE public.tutors
+SET telegram_id = NULL,
+    telegram_username = NULL,
+    updated_at = now()
+WHERE id = '70ff3df8-f081-4ed1-83bb-4d1a1f80f795';
+```
 
-Из 4 необходимых секретов:
+### SQL для отката (при необходимости)
 
-| Secret | Статус |
-|--------|--------|
-| `TELEGRAM_BOT_TOKEN` | Есть |
-| `LOVABLE_API_KEY` | Есть |
-| `SUPABASE_URL` | Нужно добавить (значение: `https://vrsseotrfmsxpbciyqzc.supabase.co`) |
-| `SUPABASE_SERVICE_ROLE_KEY` | Нужно добавить (взять из настроек Lovable Cloud) |
+```text
+UPDATE public.tutors
+SET telegram_id = '385567670',
+    telegram_username = 'Analyst_Vladimir',
+    updated_at = now()
+WHERE id = '70ff3df8-f081-4ed1-83bb-4d1a1f80f795';
+```
 
-Эти два секрета нужны edge function'ам для работы с БД через service role client. Они есть в системных переменных Supabase, но должны быть доступны edge function'ам как env vars.
+### Также нужно проверить profiles
 
-**Примечание**: судя по конфигурации Supabase, `SUPABASE_URL` и `SUPABASE_SERVICE_ROLE_KEY` уже перечислены в секретах Supabase (видны в `<secrets>` блоке). Они могут быть уже доступны edge function'ам автоматически. Нужно проверить, что функция запускается без ошибок.
+Таблица `profiles` тоже может содержать `telegram_user_id` и `telegram_username` для user_id `420b1476-6988-4f00-b435-09400420d145`. Если да, их тоже нужно обнулить, чтобы при привязке нового Telegram-аккаунта не было конфликтов.
 
-### 3. Деплой edge function `telegram-bot`
-
-Edge function `telegram-bot` автоматически деплоится при сохранении изменений в Lovable. Код уже содержит:
-- Импорт homework handler'ов (`state_machine.ts`, `homework_handler.ts`, `vision_checker.ts`)
-- Команды `/homework` и `/cancel` в `setMyCommands()`
-- Callback-обработчики для `hw_start`, `hw_next`, `hw_submit`
-
-Нужно убедиться, что деплой прошёл успешно, вызвав функцию и проверив логи.
-
-### 4. Обновить команды бота
-
-После деплоя edge function нужно вызвать `setMyCommands` -- это происходит автоматически при обработке первого webhook-запроса, либо можно вызвать `/start` в боте.
-
-### Порядок действий
-
-1. Применить миграцию (создать таблицы + bucket + RLS)
-2. Верифицировать, что secrets `SUPABASE_URL` и `SUPABASE_SERVICE_ROLE_KEY` доступны edge function'ам
-3. Задеплоить `telegram-bot` edge function
-4. Проверить логи деплоя на ошибки
-5. Отправить `/start` боту для регистрации команд
-
-### Технические детали
-
-Миграция содержит 582 строки SQL, включая:
-- `CREATE TABLE IF NOT EXISTS` для всех 6 таблиц с constraints
-- `CREATE INDEX IF NOT EXISTS` для 5 индексов
-- `ALTER TABLE ... ENABLE ROW LEVEL SECURITY` для всех таблиц
-- 25+ RLS-политик (tutor и student доступ)
-- `INSERT INTO storage.buckets` для `homework-images`
-- Storage policies для upload/read с проверкой owner и path
-
+### Результат
+После применения в дашборде репетитора пропадёт строка "Telegram: @Analyst_Vladimir", и Telegram-аккаунт Analyst_Vladimir можно будет привязать к другому репетитору для тестирования бота с домашками.
