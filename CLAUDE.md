@@ -259,6 +259,28 @@ src/
   - без загрузки фото в `homework-images`
 - Завершение `hw_submit` переводит `homework_tutor_submissions.status` в `submitted` и затем делает `resetState`
 
+## Telegram Homework Vision checker (Sprint 1.3)
+
+- Для AI-распознавания и проверки домашки добавлен модуль:
+  - `supabase/functions/telegram-bot/homework/vision_checker.ts`
+- Публичные функции модуля:
+  - `recognizeHomeworkPhoto(imageBase64, subject)`
+  - `checkHomeworkAnswer(recognizedText, taskText, correctAnswer, solutionSteps, subject)`
+- Модель и провайдер для Sprint 1.3:
+  - только Lovable AI Gateway (`LOVABLE_API_KEY`)
+  - модель `google/gemini-3-flash-preview`
+  - без fallback на прямой `GEMINI_API_KEY`
+- Контракт `error_type` в проверке должен строго совпадать с enum из БД (`homework_tutor_submission_items.ai_error_type`)
+- Safety/robustness требования:
+  - timeout 35 сек и 1 retry только для сетевых/5xx ошибок
+  - строгий JSON-парсинг с fallback (raw JSON, code fence, извлечение по `{...}`)
+  - sanitize текста и безопасные fallback-результаты вместо падения
+  - запрет выдачи готового правильного ответа в `feedback`
+- Scope Sprint 1.3:
+  - НЕ менять `supabase/functions/telegram-bot/index.ts`
+  - НЕ менять `supabase/functions/analyze-homework-task/index.ts`
+  - интеграция end-to-end (storage + submission_items + runAICheck) остаётся на Sprint 1.4
+
 ## Команды
 
 ```bash
