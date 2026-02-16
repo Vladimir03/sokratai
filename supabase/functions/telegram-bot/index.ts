@@ -734,6 +734,27 @@ async function getOrCreateProfile(telegramUserId: number, telegramUsername?: str
           console.log("Recovered existing profile:", recoveredProfile.id);
           return recoveredProfile;
         }
+
+        // Profile row missing -- create it
+        console.log("Profile missing for auth user, inserting:", existingUser.id);
+        const { data: insertedProfile, error: insertError } = await supabase
+          .from("profiles")
+          .insert({
+            id: existingUser.id,
+            username: telegramUsername || `user_${telegramUserId}`,
+            telegram_user_id: telegramUserId,
+            telegram_username: telegramUsername,
+            registration_source: "telegram",
+            trial_ends_at: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
+          })
+          .select()
+          .single();
+
+        if (!insertError && insertedProfile) {
+          console.log("Created missing profile:", insertedProfile.id);
+          return insertedProfile;
+        }
+        console.error("Failed to insert missing profile:", insertError);
       }
     }
     
