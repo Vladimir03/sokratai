@@ -1,47 +1,47 @@
 
 
-## Исправление: "Failed to create assignment" — нарушение foreign key
+## Исправление "Some student_ids are not your students"
 
 ### Корневая причина
 
-Таблица `homework_tutor_assignments` имеет foreign key:
-```
-tutor_id -> auth.users(id)
-```
+В базе данных две таблицы используют разные ID для идентификации репетитора:
+- `homework_tutor_assignments.tutor_id` -> `auth.users(id)` (auth user ID)
+- `tutor_students.tutor_id` -> `tutors(id)` (ID записи в таблице tutors)
 
-Это означает, что `tutor_id` должен быть **auth user ID** (UUID пользователя из `auth.users`), а НЕ ID записи из таблицы `tutors`.
+Функция `handleAssignStudents` получает `userId` (auth ID) и использует его для обоих запросов. Проверка владения студентами на строке 716 ищет `tutor_students.tutor_id = auth_user_id`, но в таблице хранится `tutors.id` -- поэтому находит 0 записей.
 
-Предыдущий фикс ошибочно заменил `userId` на `tutor.id` во всех обработчиках. В результате при INSERT записывается ID из таблицы `tutors`, который не существует в `auth.users` -- отсюда ошибка FK constraint.
+### Данные из базы
 
-RLS-политики подтверждают это:
-- `HW tutor assignments insert own`: `tutor_id = auth.uid()`
-- `HW tutor assignments select own`: `tutor_id = auth.uid()`
+- Auth user ID: `420b1476-6988-4f00-b435-09400420d145`
+- Tutors table ID: `70ff3df8-f081-4ed1-83bb-4d1a1f80f795`
+- Оба студента (Lera и Иван) привязаны к `tutor_id = 70ff3df8-...`
 
 ### Решение
 
-В главном обработчике (`Deno.serve`) заменить `tutor.id` обратно на `userId` во всех вызовах handler-функций. `getTutorOrThrow` остаётся как проверка авторизации (что пользователь -- репетитор), но его результат не используется как `tutor_id`.
+В `handleAssignStudents` нужно использовать **два разных ID**:
+- `tutorUserId` (auth ID) -- для проверки владения assignment (таблица `homework_tutor_assignments`)
+- `tutorId` (ID из таблицы `tutors`) -- для проверки владения студентами (таблица `tutor_students`)
+
+Сигнатура функции уже принимает оба параметра (`tutorUserId` и `tutorId`), но на строке 716 используется `tutorId`, который сейчас тоже равен `userId`.
 
 ### Изменения
 
-**Файл: `supabase/functions/homework-api/index.ts`** (строки 1223-1264)
+**Файл: `supabase/functions/homework-api/index.ts`**
 
-Заменить все `tutor.id` на `userId`:
+1. В главном обработчике (строка 1247): изменить вызов, чтобы передавать `tutor.id` как второй параметр:
+   ```
+   // Было:
+   handleAssignStudents(db, userId, userId, seg[1], body, cors)
+   // Станет:
+   handleAssignStudents(db, userId, tutor.id, seg[1], body, cors)
+   ```
 
-```
-handleCreateAssignment(db, userId, body, cors)
-handleListAssignments(db, userId, route.searchParams, cors)
-handleGetAssignment(db, userId, seg[1], cors)
-handleUpdateAssignment(db, userId, seg[1], body, cors)
-handleAssignStudents(db, userId, userId, seg[1], body, cors)
-handleNotifyStudents(db, userId, seg[1], body, cors)
-handleGetResults(db, userId, seg[1], cors)
-handleReviewSubmission(db, userId, seg[1], body, cors)
-```
+2. Задеплоить `homework-api`
 
-После изменения -- задеплоить `homework-api`.
+### Почему только этот handler
 
-### Почему так
+Остальные handler-ы работают только с `homework_tutor_assignments`, где `tutor_id = auth user ID` -- там всё корректно. Только `handleAssignStudents` обращается и к `homework_tutor_assignments`, и к `tutor_students` -- поэтому ему нужны оба ID.
 
-- `getTutorOrThrow` -- проверка, что auth user является репетитором (есть запись в `tutors`)
-- Но сам `tutor_id` в таблицах домашек ссылается на `auth.users(id)`, поэтому нужно использовать auth user ID
+### Lera без Telegram
 
+Это **не проблема** для назначения ДЗ. Отсутствие Telegram аккаунта влияет только на отправку уведомлений (которые и так выключены на скриншоте). Назначить ДЗ можно любому студенту.
