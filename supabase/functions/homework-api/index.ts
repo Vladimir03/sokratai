@@ -889,7 +889,7 @@ async function handleGetResults(
   if (submissionIds.length > 0) {
     const { data } = await db
       .from("homework_tutor_submission_items")
-      .select("id, submission_id, task_id, ai_is_correct, ai_score, ai_error_type, tutor_override_correct, tutor_comment")
+      .select("id, submission_id, task_id, student_text, student_image_urls, recognized_text, ai_is_correct, ai_confidence, ai_feedback, ai_score, ai_error_type, tutor_override_correct, tutor_comment")
       .in("submission_id", submissionIds);
     items = (data ?? []) as Record<string, unknown>[];
   }
@@ -962,6 +962,26 @@ async function handleGetResults(
       }
     }
 
+    const submissionItems = sItems.map((it) => {
+      const taskInfo = taskMap[it.task_id as string];
+      return {
+        task_id: it.task_id,
+        task_order_num: taskInfo?.order_num ?? 0,
+        task_text: taskInfo?.task_text ?? "",
+        max_score: taskInfo?.max_score ?? 1,
+        student_text: it.student_text ?? null,
+        student_image_urls: it.student_image_urls ?? null,
+        recognized_text: it.recognized_text ?? null,
+        ai_is_correct: it.ai_is_correct ?? null,
+        ai_confidence: it.ai_confidence ?? null,
+        ai_feedback: it.ai_feedback ?? null,
+        ai_error_type: it.ai_error_type ?? null,
+        ai_score: it.ai_score ?? null,
+        tutor_override_correct: it.tutor_override_correct ?? null,
+        tutor_comment: it.tutor_comment ?? null,
+      };
+    }).sort((a, b) => a.task_order_num - b.task_order_num);
+
     return {
       student_id: s.student_id,
       name: profileMap[s.student_id] ?? null,
@@ -974,6 +994,7 @@ async function handleGetResults(
         .sort((a, b) => b[1] - a[1])
         .slice(0, 3)
         .map(([type, count]) => ({ type, count })),
+      submission_items: submissionItems,
     };
   });
 

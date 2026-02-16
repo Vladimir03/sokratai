@@ -42,6 +42,7 @@ export function TutorLayout({ children }: TutorLayoutProps) {
       warmup('TutorPayments', () => import('@/pages/tutor/TutorPayments'));
       warmup('TutorHomework', () => import('@/pages/tutor/TutorHomework'));
       warmup('TutorHomeworkCreate', () => import('@/pages/tutor/TutorHomeworkCreate'));
+      warmup('TutorHomeworkResults', () => import('@/pages/tutor/TutorHomeworkResults'));
     }, 300);
 
     return () => window.clearTimeout(timer);

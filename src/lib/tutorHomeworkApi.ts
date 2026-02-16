@@ -206,3 +206,138 @@ export async function deleteTutorHomeworkTaskImage(
       console.warn('homework_task_image_delete_failed', { objectPath, error: String(err) });
     });
 }
+
+// ─── L3: Assignment details + results + review ──────────────────────────────
+
+export interface TutorHomeworkAssignmentDetails {
+  assignment: {
+    id: string;
+    tutor_id: string;
+    title: string;
+    subject: HomeworkSubject;
+    topic: string | null;
+    description: string | null;
+    deadline: string | null;
+    status: HomeworkAssignmentStatus;
+    created_at: string;
+  };
+  tasks: {
+    id: string;
+    order_num: number;
+    task_text: string;
+    task_image_url: string | null;
+    correct_answer: string | null;
+    solution_steps: string | null;
+    max_score: number;
+  }[];
+  assigned_students: {
+    student_id: string;
+    name: string | null;
+    notified: boolean;
+    notified_at: string | null;
+  }[];
+  submissions_summary: {
+    total: number;
+    by_status: Record<string, number>;
+    avg_percent: number | null;
+  };
+}
+
+export interface TutorHomeworkSubmissionItem {
+  task_id: string;
+  task_order_num: number;
+  task_text: string;
+  max_score: number;
+  student_text: string | null;
+  student_image_urls: string[] | null;
+  recognized_text: string | null;
+  ai_is_correct: boolean | null;
+  ai_confidence: number | null;
+  ai_feedback: string | null;
+  ai_error_type: string | null;
+  ai_score: number | null;
+  tutor_override_correct: boolean | null;
+  tutor_comment: string | null;
+}
+
+export interface TutorHomeworkResultsPerStudent {
+  student_id: string;
+  name: string | null;
+  status: string;
+  total_score: number | null;
+  total_max_score: number | null;
+  percent: number | null;
+  submission_id: string;
+  top_error_types: { type: string; count: number }[];
+  submission_items: TutorHomeworkSubmissionItem[];
+}
+
+export interface TutorHomeworkResultsPerTask {
+  task_id: string;
+  order_num: number;
+  max_score: number;
+  avg_score: number | null;
+  correct_rate: number | null;
+  error_type_histogram: { type: string; count: number }[];
+}
+
+export interface TutorHomeworkResultsResponse {
+  summary: {
+    avg_score: number | null;
+    distribution: Record<string, number>;
+    common_error_types: { type: string; count: number }[];
+  };
+  per_student: TutorHomeworkResultsPerStudent[];
+  per_task: TutorHomeworkResultsPerTask[];
+}
+
+export interface ReviewItem {
+  task_id: string;
+  tutor_override_correct?: boolean;
+  tutor_comment?: string | null;
+  tutor_score?: number | null;
+}
+
+export interface ReviewPayload {
+  items: ReviewItem[];
+  status?: string;
+}
+
+export async function getTutorHomeworkAssignment(
+  assignmentId: string,
+): Promise<TutorHomeworkAssignmentDetails> {
+  return requestHomeworkApi<TutorHomeworkAssignmentDetails>(
+    `/assignments/${encodeURIComponent(assignmentId)}`,
+  );
+}
+
+export async function getTutorHomeworkResults(
+  assignmentId: string,
+): Promise<TutorHomeworkResultsResponse> {
+  return requestHomeworkApi<TutorHomeworkResultsResponse>(
+    `/assignments/${encodeURIComponent(assignmentId)}/results`,
+  );
+}
+
+export async function reviewTutorHomeworkSubmission(
+  submissionId: string,
+  payload: ReviewPayload,
+): Promise<{ ok: boolean }> {
+  return requestHomeworkApi<{ ok: boolean }>(
+    `/submissions/${encodeURIComponent(submissionId)}/review`,
+    {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    },
+  );
+}
+
+export async function getHomeworkImageSignedUrl(
+  objectPath: string,
+): Promise<string | null> {
+  const { data, error } = await supabase.storage
+    .from('homework-images')
+    .createSignedUrl(objectPath, 3600);
+  if (error || !data?.signedUrl) return null;
+  return data.signedUrl;
+}
