@@ -32,11 +32,17 @@ function getAllowedOrigins(): string[] {
 function getCorsHeaders(req: Request): Record<string, string> {
   const origin = req.headers.get("Origin") ?? "";
   const allowed = getAllowedOrigins();
-  const matchedOrigin = allowed.includes(origin) ? origin : allowed[0];
+  // Allow any *.lovableproject.com and *.lovable.app preview domains
+  const isLovableOrigin =
+    origin.endsWith(".lovableproject.com") ||
+    origin.endsWith(".lovable.app");
+  const matchedOrigin = allowed.includes(origin) || isLovableOrigin
+    ? origin
+    : allowed[0];
   return {
     "Access-Control-Allow-Origin": matchedOrigin,
     "Access-Control-Allow-Headers":
-      "authorization, x-client-info, apikey, content-type",
+      "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
     "Access-Control-Allow-Methods": "GET, POST, PUT, OPTIONS",
     "Access-Control-Max-Age": "86400",
     "Vary": "Origin",
@@ -1216,46 +1222,46 @@ Deno.serve(async (req: Request): Promise<Response> => {
     // POST /assignments
     if (seg.length === 1 && seg[0] === "assignments" && route.method === "POST") {
       const body = await parseJsonBody(req);
-      return await handleCreateAssignment(db, userId, body, cors);
+      return await handleCreateAssignment(db, tutor.id, body, cors);
     }
 
     // GET /assignments
     if (seg.length === 1 && seg[0] === "assignments" && route.method === "GET") {
-      return await handleListAssignments(db, userId, route.searchParams, cors);
+      return await handleListAssignments(db, tutor.id, route.searchParams, cors);
     }
 
     // GET /assignments/:id
     if (seg.length === 2 && seg[0] === "assignments" && route.method === "GET") {
-      return await handleGetAssignment(db, userId, seg[1], cors);
+      return await handleGetAssignment(db, tutor.id, seg[1], cors);
     }
 
     // PUT /assignments/:id
     if (seg.length === 2 && seg[0] === "assignments" && route.method === "PUT") {
       const body = await parseJsonBody(req);
-      return await handleUpdateAssignment(db, userId, seg[1], body, cors);
+      return await handleUpdateAssignment(db, tutor.id, seg[1], body, cors);
     }
 
     // POST /assignments/:id/assign
     if (seg.length === 3 && seg[0] === "assignments" && seg[2] === "assign" && route.method === "POST") {
       const body = await parseJsonBody(req);
-      return await handleAssignStudents(db, userId, tutor.id, seg[1], body, cors);
+      return await handleAssignStudents(db, tutor.id, tutor.id, seg[1], body, cors);
     }
 
     // POST /assignments/:id/notify
     if (seg.length === 3 && seg[0] === "assignments" && seg[2] === "notify" && route.method === "POST") {
       const body = await parseJsonBody(req);
-      return await handleNotifyStudents(db, userId, seg[1], body, cors);
+      return await handleNotifyStudents(db, tutor.id, seg[1], body, cors);
     }
 
     // GET /assignments/:id/results
     if (seg.length === 3 && seg[0] === "assignments" && seg[2] === "results" && route.method === "GET") {
-      return await handleGetResults(db, userId, seg[1], cors);
+      return await handleGetResults(db, tutor.id, seg[1], cors);
     }
 
     // POST /submissions/:id/review
     if (seg.length === 3 && seg[0] === "submissions" && seg[2] === "review" && route.method === "POST") {
       const body = await parseJsonBody(req);
-      return await handleReviewSubmission(db, userId, seg[1], body, cors);
+      return await handleReviewSubmission(db, tutor.id, seg[1], body, cors);
     }
 
     return jsonError(cors, 404, "NOT_FOUND", `Route not found: ${route.method} /${seg.join("/")}`);

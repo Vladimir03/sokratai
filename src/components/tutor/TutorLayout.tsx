@@ -42,7 +42,7 @@ export function TutorLayout({ children }: TutorLayoutProps) {
       warmup('TutorPayments', () => import('@/pages/tutor/TutorPayments'));
       warmup('TutorHomework', () => import('@/pages/tutor/TutorHomework'));
       warmup('TutorHomeworkCreate', () => import('@/pages/tutor/TutorHomeworkCreate'));
-      warmup('TutorHomeworkResults', () => import('@/pages/tutor/TutorHomeworkResults'));
+      // TutorHomeworkResults warmup will be added in a future sprint
     }, 300);
 
     return () => window.clearTimeout(timer);
