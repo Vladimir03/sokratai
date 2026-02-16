@@ -703,6 +703,32 @@ async function getOrCreateProfile(telegramUserId: number, telegramUsername?: str
   });
 
   if (authError || !authData.user) {
+    // Handle case where auth user already exists but profile lost telegram_user_id
+    if (authError?.message?.includes("already been registered")) {
+      console.log("Auth user already exists, looking up by email:", tempEmail);
+      
+      const { data: listData } = await supabase.auth.admin.listUsers();
+      const existingUser = listData?.users?.find(u => u.email === tempEmail);
+      
+      if (existingUser) {
+        const { data: recoveredProfile, error: recoverError } = await supabase
+          .from("profiles")
+          .update({
+            telegram_user_id: telegramUserId,
+            telegram_username: telegramUsername,
+            registration_source: "telegram",
+          })
+          .eq("id", existingUser.id)
+          .select()
+          .single();
+        
+        if (!recoverError && recoveredProfile) {
+          console.log("Recovered existing profile:", recoveredProfile.id);
+          return recoveredProfile;
+        }
+      }
+    }
+    
     console.error("Error creating user:", authError);
     throw new Error("Failed to create user");
   }
