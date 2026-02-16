@@ -1244,7 +1244,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
     // POST /assignments/:id/assign
     if (seg.length === 3 && seg[0] === "assignments" && seg[2] === "assign" && route.method === "POST") {
       const body = await parseJsonBody(req);
-      return await handleAssignStudents(db, userId, userId, seg[1], body, cors);
+      return await handleAssignStudents(db, userId, tutor.id, seg[1], body, cors);
     }
 
     // POST /assignments/:id/notify
