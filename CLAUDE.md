@@ -306,6 +306,28 @@ src/
   - `hw_cancel`
   - `hw_review:{submission_id}` (информационная заглушка до Sprint 3)
 
+## Homework API — tutor CRUD (Sprint 2.1)
+
+- Edge function: `supabase/functions/homework-api/index.ts`
+- Зарегистрирована в `supabase/config.toml` с `verify_jwt = true`
+- Документация контракта: `supabase/functions/homework-api/README.md`
+- 8 маршрутов:
+  - `POST /assignments` — создание ДЗ + tasks
+  - `GET /assignments?status=...` — список ДЗ с агрегатами (assigned_count, submitted_count, avg_score)
+  - `GET /assignments/:id` — детали ДЗ + tasks + assigned_students + submissions_summary
+  - `PUT /assignments/:id` — patch assignment + replace list для tasks (с блокировкой destructive-изменений при наличии submissions)
+  - `POST /assignments/:id/assign` — назначение учеников (upsert, авто-активация draft → active)
+  - `POST /assignments/:id/notify` — отправка Telegram уведомлений (idempotent, только notified=false)
+  - `GET /assignments/:id/results` — аналитика: summary, per_student, per_task с distribution/error histograms
+  - `POST /submissions/:id/review` — tutor review: override/comment/score → пересчёт totals → статус tutor_reviewed
+- Авторизация: JWT + user client → `auth.getUser()`, затем service client для БД
+- CORS: allowlist из `HOMEWORK_API_ALLOWED_ORIGINS` env (CSV) + fallback origins
+- Формат ошибок: `{ error: { code, message, details? } }` с HTTP 400/401/403/404/500
+- Наблюдаемость: структурные логи `homework_api_request_start/success/error`
+- `tutor_score` хранится в `homework_tutor_submission_items.ai_score` (без новой миграции)
+- Для уведомлений используется прямой вызов Telegram Bot API (`TELEGRAM_BOT_TOKEN`)
+- НЕ МЕНЯТЬ `AuthGuard`, `TutorGuard`, student-компоненты, `telegram-bot/index.ts`
+
 ## Команды
 
 ```bash

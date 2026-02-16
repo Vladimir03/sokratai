@@ -60,3 +60,6 @@ verify_jwt = true
 [functions.tutor-update-student]
 verify_jwt = true
 
+[functions.homework-api]
+verify_jwt = true
+
