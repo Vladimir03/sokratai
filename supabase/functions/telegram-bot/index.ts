@@ -707,8 +707,16 @@ async function getOrCreateProfile(telegramUserId: number, telegramUsername?: str
     if (authError?.message?.includes("already been registered")) {
       console.log("Auth user already exists, looking up by email:", tempEmail);
       
-      const { data: listData } = await supabase.auth.admin.listUsers();
-      const existingUser = listData?.users?.find(u => u.email === tempEmail);
+      // Search with high perPage to find the user; default is only 50
+      let existingUser = null;
+      let page = 1;
+      while (!existingUser && page <= 10) {
+        const { data: listData } = await supabase.auth.admin.listUsers({ page, perPage: 500 });
+        if (!listData?.users?.length) break;
+        existingUser = listData.users.find(u => u.email === tempEmail);
+        page++;
+      }
+      console.log("Lookup result:", existingUser ? `found user ${existingUser.id}` : "user not found");
       
       if (existingUser) {
         const { data: recoveredProfile, error: recoverError } = await supabase
