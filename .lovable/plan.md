@@ -1,50 +1,59 @@
 
 
-## Массовое редактирование серии занятий
+## Запуск Telegram-бота для домашек: чеклист
 
-### Решение по UX
+### 1. Применить миграцию Sprint 1.1
 
-Используем паттерн Google Calendar: при нажатии "Сохранить" (или "Отменить занятие") для урока из серии появляется промежуточный диалог-подтверждение с двумя кнопками:
+Файл `supabase/migrations/20260215100000_homework_tutor_system.sql` уже существует в репозитории, но не применён к базе данных. Нужно выполнить его содержимое через инструмент миграции. Это создаст:
 
-- **"Только это занятие"** -- сохраняет изменения для одного урока (как сейчас)
-- **"Все занятия в серии"** -- применяет изменения ко всем урокам серии
+- 6 таблиц: `homework_tutor_assignments`, `homework_tutor_tasks`, `homework_tutor_submissions`, `homework_tutor_submission_items`, `homework_tutor_student_assignments`, `homework_tutor_user_bot_state`
+- Индексы на все таблицы
+- RLS-политики для tutors и students
+- Storage bucket `homework-images` (private) с политиками доступа
 
-Почему не тумблер в форме:
-- Тумблер добавляет когнитивную нагрузку (пользователь должен заранее решить до редактирования)
-- Тумблер может быть случайно включен/выключен
-- Паттерн Google Calendar знаком пользователям и появляется только когда это нужно (только для уроков серии)
+### 2. Проверить secrets
 
-### Что изменится визуально
+Из 4 необходимых секретов:
 
-1. Пользователь нажимает на урок серии, редактирует поля, нажимает "Сохранить"
-2. Появляется компактный AlertDialog: "Применить изменения к одному занятию или ко всем в серии?"
-3. Два варианта: "Только это" / "Вся серия"
-4. То же самое для кнопки "Отменить занятие" -- можно отменить одно или всю серию
+| Secret | Статус |
+|--------|--------|
+| `TELEGRAM_BOT_TOKEN` | Есть |
+| `LOVABLE_API_KEY` | Есть |
+| `SUPABASE_URL` | Нужно добавить (значение: `https://vrsseotrfmsxpbciyqzc.supabase.co`) |
+| `SUPABASE_SERVICE_ROLE_KEY` | Нужно добавить (взять из настроек Lovable Cloud) |
 
-Для единичных уроков (не серия) -- поведение не меняется, никаких дополнительных диалогов.
+Эти два секрета нужны edge function'ам для работы с БД через service role client. Они есть в системных переменных Supabase, но должны быть доступны edge function'ам как env vars.
 
-### Техническая реализация
+**Примечание**: судя по конфигурации Supabase, `SUPABASE_URL` и `SUPABASE_SERVICE_ROLE_KEY` уже перечислены в секретах Supabase (видны в `<secrets>` блоке). Они могут быть уже доступны edge function'ам автоматически. Нужно проверить, что функция запускается без ошибок.
 
-**Производительность**: Обновление серии выполняется одним SQL-запросом через `UPDATE ... WHERE`, что занимает миллисекунды даже для 60 уроков. Пользователь не увидит задержки.
+### 3. Деплой edge function `telegram-bot`
 
-| Файл | Изменение |
-|------|-----------|
-| `src/lib/tutorSchedule.ts` | Добавить функцию `updateLessonSeries(lessonId, input)` -- один UPDATE по `parent_lesson_id` |
-| `src/lib/tutorSchedule.ts` | Добавить функцию `cancelLessonSeries(lessonId)` -- массовая отмена серии |
-| `src/pages/tutor/TutorSchedule.tsx` | В `LessonDetailsDialog` добавить состояние `seriesAction` и AlertDialog-подтверждение |
+Edge function `telegram-bot` автоматически деплоится при сохранении изменений в Lovable. Код уже содержит:
+- Импорт homework handler'ов (`state_machine.ts`, `homework_handler.ts`, `vision_checker.ts`)
+- Команды `/homework` и `/cancel` в `setMyCommands()`
+- Callback-обработчики для `hw_start`, `hw_next`, `hw_submit`
 
-**Логика определения серии**: Урок принадлежит серии, если `is_recurring = true`. Корень серии -- урок с `parent_lesson_id = null`, дети -- с `parent_lesson_id = root.id`.
+Нужно убедиться, что деплой прошёл успешно, вызвав функцию и проверив логи.
 
-**Функция `updateLessonSeries`**:
-```
-- Определить root_id: если у урока parent_lesson_id -- это root_id, иначе сам урок root
-- UPDATE tutor_lessons SET ... WHERE (id = root_id OR parent_lesson_id = root_id)
-- Для даты/времени: вычислить дельту (разницу) и применить ко всем урокам серии
-```
+### 4. Обновить команды бота
 
-**Функция `cancelLessonSeries`**:
-```
-- Определить root_id аналогично
-- UPDATE tutor_lessons SET status = 'cancelled', cancelled_at = now() WHERE (id = root_id OR parent_lesson_id = root_id) AND status = 'booked'
-```
+После деплоя edge function нужно вызвать `setMyCommands` -- это происходит автоматически при обработке первого webhook-запроса, либо можно вызвать `/start` в боте.
+
+### Порядок действий
+
+1. Применить миграцию (создать таблицы + bucket + RLS)
+2. Верифицировать, что secrets `SUPABASE_URL` и `SUPABASE_SERVICE_ROLE_KEY` доступны edge function'ам
+3. Задеплоить `telegram-bot` edge function
+4. Проверить логи деплоя на ошибки
+5. Отправить `/start` боту для регистрации команд
+
+### Технические детали
+
+Миграция содержит 582 строки SQL, включая:
+- `CREATE TABLE IF NOT EXISTS` для всех 6 таблиц с constraints
+- `CREATE INDEX IF NOT EXISTS` для 5 индексов
+- `ALTER TABLE ... ENABLE ROW LEVEL SECURITY` для всех таблиц
+- 25+ RLS-политик (tutor и student доступ)
+- `INSERT INTO storage.buckets` для `homework-images`
+- Storage policies для upload/read с проверкой owner и path
 
