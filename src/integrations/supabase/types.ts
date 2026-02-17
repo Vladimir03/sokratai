@@ -2037,6 +2037,14 @@ export type Database = {
       }
       is_admin: { Args: { _user_id: string }; Returns: boolean }
       is_admin_email: { Args: { _user_id: string }; Returns: boolean }
+      is_assignment_student: {
+        Args: { _assignment_id: string }
+        Returns: boolean
+      }
+      is_assignment_tutor: {
+        Args: { _assignment_id: string }
+        Returns: boolean
+      }
       is_tutor: { Args: { _user_id: string }; Returns: boolean }
       is_tutor_of_student: { Args: { _student_id: string }; Returns: boolean }
       mark_payment_reminder_sent: {
