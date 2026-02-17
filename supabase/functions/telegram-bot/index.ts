@@ -1909,11 +1909,203 @@ async function runHomeworkAiCheckAndSendResult(
     }
   }
 
+  try {
+    await notifyTutorOnSubmission(submissionId);
+  } catch (notifyErr) {
+    console.error("homework_tutor_notify_after_ai_check_failed", {
+      submission_id: submissionId,
+      error: notifyErr instanceof Error ? notifyErr.message : String(notifyErr),
+    });
+  }
+
   await sendTelegramMessage(
     telegramUserId,
     formatHomeworkResultsMessage(summary),
     { reply_markup: createHomeworkReviewKeyboard(submissionId) },
   );
+}
+
+async function notifyTutorOnSubmission(submissionId: string): Promise<void> {
+  console.log("homework_tutor_notify_start", { submission_id: submissionId });
+
+  try {
+    const { data: submission, error: subErr } = await supabase
+      .from("homework_tutor_submissions")
+      .select("id, assignment_id, student_id, status, total_score, total_max_score")
+      .eq("id", submissionId)
+      .maybeSingle();
+
+    if (subErr || !submission) {
+      console.error("homework_tutor_notify_error", {
+        submission_id: submissionId,
+        reason: "submission_not_found",
+        error: subErr?.message,
+      });
+      return;
+    }
+
+    const status = submission.status as string;
+    if (status !== "ai_checked" && status !== "tutor_reviewed") {
+      console.log("homework_tutor_notify_skipped", {
+        submission_id: submissionId,
+        reason: "status_not_checked",
+        status,
+      });
+      return;
+    }
+
+    const { data: assignment, error: assErr } = await supabase
+      .from("homework_tutor_assignments")
+      .select("id, title, tutor_id")
+      .eq("id", submission.assignment_id)
+      .maybeSingle();
+
+    if (assErr || !assignment) {
+      console.error("homework_tutor_notify_error", {
+        submission_id: submissionId,
+        reason: "assignment_not_found",
+        error: assErr?.message,
+      });
+      return;
+    }
+
+    const tutorUserId = assignment.tutor_id as string;
+
+    let tutorChatId: number | null = null;
+
+    const { data: tutorRow } = await supabase
+      .from("tutors")
+      .select("telegram_id")
+      .eq("user_id", tutorUserId)
+      .maybeSingle();
+
+    if (tutorRow?.telegram_id) {
+      const parsed = parseInt(String(tutorRow.telegram_id), 10);
+      if (Number.isFinite(parsed) && parsed > 0) {
+        tutorChatId = parsed;
+      }
+    }
+
+    if (!tutorChatId) {
+      const { data: sessionRow } = await supabase
+        .from("telegram_sessions")
+        .select("telegram_user_id")
+        .eq("user_id", tutorUserId)
+        .maybeSingle();
+
+      if (sessionRow?.telegram_user_id) {
+        const parsed = typeof sessionRow.telegram_user_id === "number"
+          ? sessionRow.telegram_user_id
+          : parseInt(String(sessionRow.telegram_user_id), 10);
+        if (Number.isFinite(parsed) && parsed > 0) {
+          tutorChatId = parsed;
+        }
+      }
+    }
+
+    if (!tutorChatId) {
+      console.log("homework_tutor_notify_skipped_no_chat_id", {
+        submission_id: submissionId,
+        tutor_user_id: tutorUserId,
+      });
+      return;
+    }
+
+    const { data: studentProfile } = await supabase
+      .from("profiles")
+      .select("username, telegram_username")
+      .eq("id", submission.student_id)
+      .maybeSingle();
+
+    const studentName = studentProfile?.username
+      || (studentProfile?.telegram_username ? `@${studentProfile.telegram_username}` : null)
+      || "Ученик";
+
+    const totalScore = (submission.total_score as number) ?? 0;
+    const totalMaxScore = (submission.total_max_score as number) ?? 0;
+    const percent = totalMaxScore > 0 ? Math.round((totalScore / totalMaxScore) * 100) : 0;
+
+    const { data: submissionItems } = await supabase
+      .from("homework_tutor_submission_items")
+      .select("ai_is_correct, ai_error_type")
+      .eq("submission_id", submissionId);
+
+    const items = (submissionItems ?? []) as Array<{ ai_is_correct: boolean | null; ai_error_type: string | null }>;
+    let nOk = 0;
+    let nBad = 0;
+    const errorCounts: Record<string, number> = {};
+    let hasIncompleteContext = false;
+
+    for (const it of items) {
+      if (it.ai_is_correct === true) {
+        nOk++;
+      } else {
+        nBad++;
+      }
+      if (it.ai_error_type && it.ai_error_type !== "correct") {
+        errorCounts[it.ai_error_type] = (errorCounts[it.ai_error_type] || 0) + 1;
+      }
+      if (it.ai_error_type === "incomplete") {
+        hasIncompleteContext = true;
+      }
+    }
+
+    const errorLabels: Record<string, string> = {
+      calculation: "Ошибка вычисления",
+      concept: "Ошибка в концепции",
+      formatting: "Оформление",
+      incomplete: "Неполное решение",
+      factual_error: "Фактическая ошибка",
+      weak_argument: "Слабая аргументация",
+      wrong_answer: "Неверный ответ",
+      partial: "Частично верно",
+    };
+
+    const topErrors = Object.entries(errorCounts)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 3);
+
+    const topErrorStr = topErrors.length > 0
+      ? topErrors.map(([t, c]) => `${errorLabels[t] ?? t} (${c})`).join(", ")
+      : "—";
+
+    const safeTitle = (assignment.title as string).replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    const safeName = String(studentName).replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
+    const lines: string[] = [
+      `📬 <b>${safeName}</b> сдал «${safeTitle}»`,
+      `📊 Итого: <b>${totalScore}/${totalMaxScore}</b> (${percent}%)`,
+      `✅ ${nOk} | ❌ ${nBad} | Ошибки: ${topErrorStr}`,
+    ];
+
+    if (hasIncompleteContext) {
+      lines.push("⚠️ AI: недостаточно контекста по части задач (проверь вручную)");
+    }
+
+    const message = lines.join("\n");
+
+    const baseUrl = Deno.env.get("VITE_WEBAPP_URL") || SITE_BASE_URL;
+    const deepLink = `${baseUrl}/tutor/homework/${assignment.id}/results?submission=${submissionId}`;
+
+    await sendTelegramMessage(tutorChatId, message, {
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: "📝 Открыть submission", url: deepLink }],
+        ],
+      },
+    });
+
+    console.log("homework_tutor_notify_success", {
+      submission_id: submissionId,
+      tutor_chat_id: tutorChatId,
+      student_name: studentName,
+    });
+  } catch (error) {
+    console.error("homework_tutor_notify_error", {
+      submission_id: submissionId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
 }
 
 async function verifyHomeworkAssignmentForStudent(

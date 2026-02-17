@@ -388,6 +388,24 @@ src/
   - клик по preview открывает полноразмерное изображение в новой вкладке
   - поддержаны `storage://...` и legacy plain path
 
+## Tutor notification on submission + deep link (Sprint 2.2)
+
+- После успешного AI-check (`ai_checked`) бот уведомляет репетитора в Telegram:
+  - функция `notifyTutorOnSubmission(submissionId)` в `supabase/functions/telegram-bot/index.ts`
+  - вызывается из `runHomeworkAiCheckAndSendResult` после обновления статуса submission
+  - обёрнута в отдельный `try/catch`, ошибка уведомления не ломает flow ученика
+- Источник chat_id репетитора: `tutors.telegram_id` (primary), `telegram_sessions.telegram_user_id` (fallback); при отсутствии — skip с логом
+- Сообщение: `📬 {student_name} сдал «{title}»: {score}/{max} ({percent}%)`, счётчики `✅/❌`, top ошибки
+  - при наличии задач с `ai_error_type=incomplete` добавляется строка `⚠️ AI: недостаточно контекста`
+- Кнопка deep link: `📝 Открыть submission` → `/tutor/homework/{assignment_id}/results?submission={submission_id}`
+- На фронте (`src/pages/tutor/TutorHomeworkResults.tsx`) query `?submission=` авто-раскрывает и подсвечивает нужную строку ученика (scroll + ring highlight с fade)
+- AI context fallback в `homework_handler.ts` → `runHomeworkAiCheck`:
+  - если `task_text` пустой или нет ни `student_text`, ни фото → `ai_score=0`, `error_type=incomplete`, `confidence=0.2`
+  - LLM не вызывается, fallback сохраняется в БД как обычный `ai_*` результат
+  - структурный лог `homework_ai_context_insufficient`
+- Наблюдаемость: `homework_tutor_notify_start/success/skipped/skipped_no_chat_id/error`
+- НЕ МЕНЯТЬ: схему БД, `AuthGuard`, `TutorGuard`, student practice/diagnostic, маршруты (кроме поддержки query на results-экране)
+
 ## Команды
 
 ```bash

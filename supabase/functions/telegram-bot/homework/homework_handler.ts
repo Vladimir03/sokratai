@@ -430,6 +430,40 @@ export async function runHomeworkAiCheck(submissionId: string): Promise<Homework
         ? item!.student_image_urls.filter((v): v is string => typeof v === "string")
         : [];
 
+      const hasTaskText = normalizeText(task.task_text).length > 0;
+      const hasStudentText = studentText.length > 0;
+      const hasStudentImages = studentImagePaths.length > 0;
+
+      const maxScore = resolveTaskMaxScore(task.max_score);
+
+      if (!hasTaskText || (!hasStudentText && !hasStudentImages)) {
+        const reason = !hasTaskText
+          ? "empty_task_text"
+          : "no_student_answer";
+        console.log("homework_ai_context_insufficient", {
+          submission_id: submissionId,
+          task_id: task.id,
+          order_num: task.order_num,
+          reason,
+          has_task_text: hasTaskText,
+          has_student_text: hasStudentText,
+          has_student_images: hasStudentImages,
+        });
+
+        taskResults.push({
+          task_id: task.id,
+          order_num: task.order_num,
+          max_score: maxScore,
+          ai_score: 0,
+          is_correct: false,
+          confidence: 0.2,
+          feedback: "Недостаточно контекста для авто-проверки. Нужна ручная проверка репетитором.",
+          error_type: "incomplete" as HomeworkAiErrorType,
+          recognized_text: hasStudentText ? studentText : "",
+        });
+        continue;
+      }
+
       const recognizedParts: string[] = [];
       if (studentText) {
         recognizedParts.push(studentText);
@@ -455,7 +489,6 @@ export async function runHomeworkAiCheck(submissionId: string): Promise<Homework
         { strict: true },
       );
 
-      const maxScore = resolveTaskMaxScore(task.max_score);
       const aiScore = checkResult.score >= 0.5 ? maxScore : 0;
 
       taskResults.push({

@@ -1,5 +1,5 @@
-import { useState, useCallback, useEffect, useMemo } from 'react';
-import { useParams, Link } from 'react-router-dom';
+import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
+import { useParams, useSearchParams, Link } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -290,15 +290,40 @@ function TaskItemReview({
 function StudentRow({
   student,
   assignmentId,
+  autoExpand,
+  highlight,
 }: {
   student: TutorHomeworkResultsPerStudent;
   assignmentId: string;
+  autoExpand?: boolean;
+  highlight?: boolean;
 }) {
-  const [expanded, setExpanded] = useState(false);
+  const [expanded, setExpanded] = useState(autoExpand === true);
+  const rowRef = useRef<HTMLDivElement>(null);
+  const [flash, setFlash] = useState(highlight === true);
   const statusCfg = STATUS_LABELS[student.status] ?? { text: student.status, className: '' };
 
+  useEffect(() => {
+    if (autoExpand && rowRef.current) {
+      const timer = setTimeout(() => {
+        rowRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }, 300);
+      return () => clearTimeout(timer);
+    }
+  }, [autoExpand]);
+
+  useEffect(() => {
+    if (flash) {
+      const timer = setTimeout(() => setFlash(false), 3000);
+      return () => clearTimeout(timer);
+    }
+  }, [flash]);
+
   return (
-    <div className="border rounded-md">
+    <div
+      ref={rowRef}
+      className={`border rounded-md transition-all duration-700 ${flash ? 'ring-2 ring-primary/60 bg-primary/5' : ''}`}
+    >
       <button
         onClick={() => setExpanded(!expanded)}
         className="w-full flex items-center gap-3 p-3 text-left hover:bg-muted/50 transition-colors"
@@ -385,6 +410,8 @@ function TaskBarChart({ perTask }: { perTask: TutorHomeworkResultsResponse['per_
 
 function TutorHomeworkResultsContent() {
   const { id: assignmentId } = useParams<{ id: string }>();
+  const [searchParams] = useSearchParams();
+  const targetSubmissionId = searchParams.get('submission') || null;
   const qk = useMemo(() => ['tutor', 'homework', 'assignment', assignmentId] as const, [assignmentId]);
   const rkq = useMemo(() => ['tutor', 'homework', 'results', assignmentId] as const, [assignmentId]);
 
@@ -534,6 +561,8 @@ function TutorHomeworkResultsContent() {
                       key={s.submission_id}
                       student={s}
                       assignmentId={assignmentId!}
+                      autoExpand={targetSubmissionId === s.submission_id}
+                      highlight={targetSubmissionId === s.submission_id}
                     />
                   ))}
                 </div>
