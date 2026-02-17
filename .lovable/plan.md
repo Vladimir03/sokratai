@@ -1,90 +1,50 @@
 
+## Fix: Homework Results Crash + Add AI/Submission Details to Tutor View
 
-## Исправление ошибки загрузки фото (42P17 — бесконечная рекурсия RLS)
+### Root Cause (Bug 1: "Не сдано" despite submission)
 
-### Проблема
-
-При загрузке фото в `homework-task-images` Postgres возвращает ошибку `42P17` (infinite recursion). Причина: Postgres проверяет ВСЕ INSERT-политики на таблице `storage.objects`, включая политику для другого bucket (`homework-images`), которая обращается к `homework_tutor_assignments`. Далее возникает циклическая зависимость:
-
-```text
-storage.objects INSERT
-  -> homework_tutor_assignments SELECT (RLS)
-    -> homework_tutor_student_assignments SELECT (RLS)
-      -> homework_tutor_assignments SELECT (RLS)  -- рекурсия!
+The `/assignments/:id/results` endpoint in `homework-api` crashes every time with:
+```
+ReferenceError: Cannot access 'taskMap' before initialization
 ```
 
-### Решение
+In `homework-api/index.ts`, `taskMap` is **declared on line 1027** but **used on line 992** (inside a `.map()` callback). JavaScript's `const` has a Temporal Dead Zone, so accessing it before declaration throws a ReferenceError.
 
-Разорвать рекурсию с помощью `SECURITY DEFINER` функций, которые обходят RLS.
+Because the results endpoint always crashes (500), the `TutorHomeworkDetail` page never gets `results.per_student`, so every student shows "Не сдано" even though submissions exist in the database.
 
-**Шаг 1: Создать две security definer функции**
+**Fix**: Move the `taskMap` declaration (lines 1027-1030) **before** the `perStudent` block (before line 977).
 
-- `is_assignment_tutor(_assignment_id uuid)` -- проверяет, является ли `auth.uid()` владельцем задания (tutor_id)
-- `is_assignment_student(_assignment_id uuid)` -- проверяет, назначен ли `auth.uid()` как студент на задание
+### Enhancement (Bug 2: Show AI results and student solutions)
 
-**Шаг 2: Обновить RLS-политики `homework_tutor_student_assignments`**
+Currently the `TutorHomeworkDetail` page only shows a flat student list with status badges. The tutor needs to see:
+- Student's submitted photos/text answers
+- AI check results (score, feedback, confidence, error type)
 
-Заменить подзапрос `EXISTS (SELECT 1 FROM homework_tutor_assignments ...)` на вызов `is_assignment_tutor(assignment_id)`.
+The `TutorHomeworkResults` page already has this UI (`StudentExpandRow`, `TaskItemReview`, `StudentImage`), but the detail page (`/tutor/homework/:id`) doesn't use it.
 
-**Шаг 3: Обновить RLS-политики `homework_tutor_assignments`**
+**Fix**: Enhance the `StudentsList` component in `TutorHomeworkDetail.tsx` to show expandable rows with submission details when results data is available. Each student row will expand to show:
+- Student answer images (with signed URL loading)
+- Student text answer
+- AI verdict (correct/incorrect), score, confidence percentage
+- AI feedback text
+- AI error type badge
 
-Заменить подзапрос `EXISTS (SELECT 1 FROM homework_tutor_student_assignments ...)` на вызов `is_assignment_student(id)`.
+### Changes
 
-**Шаг 4: Обновить storage-политики `homework-images`**
+**1. `supabase/functions/homework-api/index.ts`** (edge function fix)
+- Move `taskMap` declaration from lines 1027-1030 to before line 977
+- This is a 4-line move that fixes the crash
 
-Заменить подзапросы с JOIN через `homework_tutor_assignments` на вызовы security definer функций.
+**2. `src/pages/tutor/TutorHomeworkDetail.tsx`** (frontend enhancement)
+- Add expandable student rows with submission details
+- Show student answer images using signed URLs (reuse `getHomeworkImageSignedUrl`)
+- Display AI check results: score, feedback, confidence, error type
+- Add collapsible/expandable UI with ChevronDown/ChevronUp icons
+- Mobile-responsive layout
 
-### Миграция SQL (одна транзакция)
+### Technical Details
 
-```sql
--- 1. Создать security definer функции
-CREATE OR REPLACE FUNCTION public.is_assignment_tutor(_assignment_id uuid)
-RETURNS boolean LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $$
-  SELECT EXISTS (
-    SELECT 1 FROM homework_tutor_assignments
-    WHERE id = _assignment_id AND tutor_id = auth.uid()
-  )
-$$;
-
-CREATE OR REPLACE FUNCTION public.is_assignment_student(_assignment_id uuid)
-RETURNS boolean LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $$
-  SELECT EXISTS (
-    SELECT 1 FROM homework_tutor_student_assignments
-    WHERE assignment_id = _assignment_id AND student_id = auth.uid()
-  )
-$$;
-
--- 2. Пересоздать политики homework_tutor_assignments (без подзапроса к student_assignments)
-DROP POLICY IF EXISTS "HW students select assigned assignments" ON homework_tutor_assignments;
-CREATE POLICY "HW students select assigned assignments"
-ON homework_tutor_assignments FOR SELECT
-USING (
-  status IN ('active','closed')
-  AND is_assignment_student(id)
-);
-
--- 3. Пересоздать политики homework_tutor_student_assignments (без подзапроса к assignments)
-DROP POLICY IF EXISTS "HW tutor student assignments select by owner" ON homework_tutor_student_assignments;
-CREATE POLICY "HW tutor student assignments select by owner"
-ON homework_tutor_student_assignments FOR SELECT
-USING (is_assignment_tutor(assignment_id) AND is_tutor_of_student(student_id));
-
-DROP POLICY IF EXISTS "HW tutor student assignments insert by owner" ON homework_tutor_student_assignments;
-CREATE POLICY "HW tutor student assignments insert by owner"
-ON homework_tutor_student_assignments FOR INSERT
-WITH CHECK (is_assignment_tutor(assignment_id) AND is_tutor_of_student(student_id));
-
-DROP POLICY IF EXISTS "HW tutor student assignments delete by owner" ON homework_tutor_student_assignments;
-CREATE POLICY "HW tutor student assignments delete by owner"
-ON homework_tutor_student_assignments FOR DELETE
-USING (is_assignment_tutor(assignment_id) AND is_tutor_of_student(student_id));
-
--- 4. Пересоздать storage-политики homework-images (без рекурсивных JOIN)
--- (аналогично заменить подзапросы на вызовы security definer функций)
-```
-
-### Результат
-
-- Загрузка фото в `homework-task-images` будет работать без ошибок
-- Все остальные RLS-политики сохранят свою логику доступа
-- Никаких изменений в frontend коде не требуется
+- No database changes needed
+- Edge function `homework-api` will be redeployed
+- No new dependencies required
+- The `TutorHomeworkResults` page remains as the full-featured results view; the detail page gets a lighter inline preview of submissions
