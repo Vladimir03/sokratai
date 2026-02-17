@@ -10,6 +10,7 @@ import { TutorLayout } from '@/components/tutor/TutorLayout';
 import { TutorDataStatus } from '@/components/tutor/TutorDataStatus';
 import {
   getTutorHomeworkAssignment,
+  getHomeworkImageSignedUrl,
   getTutorHomeworkResults,
   type TutorHomeworkAssignmentDetails,
   type TutorHomeworkResultsResponse,
@@ -126,6 +127,7 @@ function TasksList({ details }: { details: TutorHomeworkAssignmentDetails }) {
             </div>
             <div className="flex-1 min-w-0">
               <p className="text-sm whitespace-pre-wrap break-words">{task.task_text}</p>
+              <TaskImagePreview taskImageUrl={task.task_image_url} />
               <div className="flex items-center gap-3 mt-1 text-xs text-muted-foreground">
                 <span>Макс. баллов: {task.max_score}</span>
                 {task.correct_answer && <span>Ответ: {task.correct_answer}</span>}
@@ -135,6 +137,48 @@ function TasksList({ details }: { details: TutorHomeworkAssignmentDetails }) {
         ))}
       </CardContent>
     </Card>
+  );
+}
+
+function TaskImagePreview({ taskImageUrl }: { taskImageUrl: string | null }) {
+  const imageQuery = useQuery<string | null>({
+    queryKey: ['tutor', 'homework', 'task-image-preview', taskImageUrl],
+    queryFn: () => getHomeworkImageSignedUrl(taskImageUrl!, { defaultBucket: 'homework-task-images' }),
+    enabled: Boolean(taskImageUrl),
+    staleTime: TUTOR_STALE_TIME_MS,
+    gcTime: TUTOR_GC_TIME_MS,
+    retry: 1,
+  });
+
+  if (!taskImageUrl) return null;
+
+  if (imageQuery.isLoading) {
+    return <Skeleton className="mt-2 h-24 w-40 rounded-md" />;
+  }
+
+  if (!imageQuery.data) {
+    return (
+      <p className="mt-2 text-xs text-muted-foreground">
+        Фото задачи недоступно
+      </p>
+    );
+  }
+
+  return (
+    <a
+      href={imageQuery.data}
+      target="_blank"
+      rel="noreferrer"
+      className="mt-2 inline-block rounded-md border bg-background p-1 hover:opacity-90 transition-opacity"
+      title="Открыть фото задачи"
+    >
+      <img
+        src={imageQuery.data}
+        alt="Фото задачи"
+        className="h-24 w-auto max-w-[220px] rounded-sm object-cover"
+        loading="lazy"
+      />
+    </a>
   );
 }
 

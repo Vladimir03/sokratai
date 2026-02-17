@@ -357,6 +357,37 @@ src/
   - защита от потери данных (confirm при выходе + `beforeunload`)
   - финальный toast учитывает `failed_student_ids`
 
+## Prod fixes — Telegram homework images (student+tutor)
+
+- Исправлен показ фото задачи ученику в Telegram homework flow:
+  - в runtime-тип `HomeworkTask` добавлено поле `task_image_url`
+  - в выборках задач (`getHomeworkTasksForAssignment`, `getHomeworkTaskById`) обязательно запрашивается `task_image_url`
+  - добавлен helper `sendHomeworkTaskStep(...)` с гибридной отправкой:
+    - если текст шага короткий -> `sendPhoto` с caption + inline keyboard
+    - если текст длинный -> фото отдельным сообщением, затем полный текст с keyboard
+    - при ошибке `sendPhoto` бот отправляет fallback-текст и не прерывает сценарий
+- Добавлен резолвер ссылок фото задачи `resolveHomeworkTaskImageUrl(...)` в `supabase/functions/telegram-bot/index.ts`:
+  - поддержка `storage://{bucket}/{path}`
+  - поддержка legacy plain path с fallback bucket-ами (`homework-task-images`, `chat-images`, `homework-images`)
+  - поддержка `http(s)` и `/relative/path`
+- Исправлен сбой при загрузке фото ответа ученика:
+  - в `supabase/functions/telegram-bot/homework/homework_handler.ts` добавлены типизированные коды ошибок:
+    - `TELEGRAM_GET_FILE_FAILED`
+    - `TELEGRAM_DOWNLOAD_FAILED`
+    - `HOMEWORK_IMAGE_UPLOAD_FAILED`
+    - `SUBMISSION_ITEM_UPDATE_FAILED`
+    - `MAX_IMAGES_REACHED`
+    - `HOMEWORK_BUCKET_NOT_FOUND`
+  - owner update в `storage.objects` переведён в best-effort (warning, но без падения flow)
+  - в `index.ts` добавлен маппинг error code -> понятное сообщение пользователю
+- Усилена наблюдаемость по фото homework:
+  - структурные логи `homework_photo_save_start/success/error`
+  - обязательные поля: `user_id`, `assignment_id`, `submission_id`, `task_id`, `error_code`
+- В кабинете репетитора добавлен preview фото задачи в деталях ДЗ:
+  - `src/pages/tutor/TutorHomeworkDetail.tsx` рендерит thumbnail (через `getHomeworkImageSignedUrl`)
+  - клик по preview открывает полноразмерное изображение в новой вкладке
+  - поддержаны `storage://...` и legacy plain path
+
 ## Команды
 
 ```bash

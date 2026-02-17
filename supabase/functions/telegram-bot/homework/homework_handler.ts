@@ -69,6 +69,31 @@ export interface SaveHomeworkPhotoAnswerResult {
   added_path: string;
 }
 
+export type HomeworkPhotoSaveErrorCode =
+  | "TELEGRAM_GET_FILE_FAILED"
+  | "TELEGRAM_DOWNLOAD_FAILED"
+  | "HOMEWORK_IMAGE_UPLOAD_FAILED"
+  | "SUBMISSION_ITEM_UPDATE_FAILED"
+  | "MAX_IMAGES_REACHED"
+  | "HOMEWORK_BUCKET_NOT_FOUND";
+
+export class HomeworkPhotoSaveError extends Error {
+  code: HomeworkPhotoSaveErrorCode;
+
+  constructor(code: HomeworkPhotoSaveErrorCode, message: string) {
+    super(message);
+    this.name = "HomeworkPhotoSaveError";
+    this.code = code;
+  }
+}
+
+export function getHomeworkPhotoSaveErrorCode(error: unknown): HomeworkPhotoSaveErrorCode | null {
+  if (error instanceof HomeworkPhotoSaveError) {
+    return error.code;
+  }
+  return null;
+}
+
 function isHomeworkSubject(value: string): value is HomeworkSubject {
   return value === "math" || value === "physics" || value === "history" || value === "social" || value === "english" || value === "cs";
 }
@@ -97,6 +122,11 @@ function bytesToBase64(bytes: Uint8Array): string {
     binary += String.fromCharCode(...chunk);
   }
   return btoa(binary);
+}
+
+function isBucketNotFoundMessage(message: string): boolean {
+  const lower = message.toLowerCase();
+  return lower.includes("bucket not found");
 }
 
 async function fetchTelegramFilePath(fileId: string, telegramBotToken: string): Promise<string> {
@@ -154,7 +184,12 @@ async function uploadHomeworkImage(
     .eq("name", objectPath);
 
   if (ownerError) {
-    throw new Error(`Failed to set storage owner for homework image: ${ownerError.message}`);
+    console.warn("homework_photo_owner_update_failed", {
+      bucket,
+      object_path: objectPath,
+      student_id: studentId,
+      error: ownerError.message,
+    });
   }
 }
 
@@ -211,60 +246,103 @@ export async function saveHomeworkPhotoAnswer(
   const { assignmentId, submissionId, taskId, telegramFileId, telegramBotToken, studentId } = input;
   console.log("homework_photo_save_start", { assignmentId, submissionId, taskId, studentId });
 
-  if (!telegramBotToken) {
-    throw new Error("Missing telegram bot token for homework photo upload");
+  try {
+    if (!telegramBotToken) {
+      throw new HomeworkPhotoSaveError(
+        "TELEGRAM_GET_FILE_FAILED",
+        "Missing telegram bot token for homework photo upload",
+      );
+    }
+
+    await ensureSubmissionItemsForTasks(submissionId, [taskId]);
+
+    const { data: existingItem, error: itemError } = await supabase
+      .from("homework_tutor_submission_items")
+      .select("student_image_urls")
+      .eq("submission_id", submissionId)
+      .eq("task_id", taskId)
+      .maybeSingle();
+
+    if (itemError) {
+      throw new HomeworkPhotoSaveError(
+        "SUBMISSION_ITEM_UPDATE_FAILED",
+        `Failed to load submission item before photo upload: ${itemError.message}`,
+      );
+    }
+
+    const existingPaths = Array.isArray(existingItem?.student_image_urls)
+      ? existingItem.student_image_urls.filter((v): v is string => typeof v === "string")
+      : [];
+
+    if (existingPaths.length >= 4) {
+      throw new HomeworkPhotoSaveError("MAX_IMAGES_REACHED", "MAX_IMAGES_REACHED");
+    }
+
+    let filePath: string;
+    try {
+      filePath = await fetchTelegramFilePath(telegramFileId, telegramBotToken);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      throw new HomeworkPhotoSaveError("TELEGRAM_GET_FILE_FAILED", message);
+    }
+
+    let bytes: Uint8Array;
+    try {
+      bytes = await downloadTelegramFileBytes(filePath, telegramBotToken);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      throw new HomeworkPhotoSaveError("TELEGRAM_DOWNLOAD_FAILED", message);
+    }
+
+    const objectPath = buildHomeworkStoragePath(assignmentId, submissionId, taskId);
+
+    try {
+      await uploadHomeworkImage(HOMEWORK_IMAGES_BUCKET, objectPath, bytes, studentId);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      const code: HomeworkPhotoSaveErrorCode = isBucketNotFoundMessage(message)
+        ? "HOMEWORK_BUCKET_NOT_FOUND"
+        : "HOMEWORK_IMAGE_UPLOAD_FAILED";
+      throw new HomeworkPhotoSaveError(code, message);
+    }
+
+    const nextPaths = [...existingPaths, objectPath];
+    const { error: updateError } = await supabase
+      .from("homework_tutor_submission_items")
+      .update({ student_image_urls: nextPaths })
+      .eq("submission_id", submissionId)
+      .eq("task_id", taskId);
+
+    if (updateError) {
+      throw new HomeworkPhotoSaveError(
+        "SUBMISSION_ITEM_UPDATE_FAILED",
+        `Failed to update submission item with uploaded image: ${updateError.message}`,
+      );
+    }
+
+    console.log("homework_photo_save_success", {
+      assignmentId,
+      submissionId,
+      taskId,
+      studentId,
+      images_count: nextPaths.length,
+    });
+
+    return {
+      image_paths: nextPaths,
+      added_path: objectPath,
+    };
+  } catch (error) {
+    console.error("homework_photo_save_error", {
+      assignment_id: assignmentId,
+      submission_id: submissionId,
+      task_id: taskId,
+      student_id: studentId,
+      error_code: getHomeworkPhotoSaveErrorCode(error),
+      error: error instanceof Error ? error.message : String(error),
+    });
+    throw error;
   }
-
-  await ensureSubmissionItemsForTasks(submissionId, [taskId]);
-
-  const { data: existingItem, error: itemError } = await supabase
-    .from("homework_tutor_submission_items")
-    .select("student_image_urls")
-    .eq("submission_id", submissionId)
-    .eq("task_id", taskId)
-    .maybeSingle();
-
-  if (itemError) {
-    throw new Error(`Failed to load submission item before photo upload: ${itemError.message}`);
-  }
-
-  const existingPaths = Array.isArray(existingItem?.student_image_urls)
-    ? existingItem.student_image_urls.filter((v): v is string => typeof v === "string")
-    : [];
-
-  if (existingPaths.length >= 4) {
-    throw new Error("MAX_IMAGES_REACHED");
-  }
-
-  const filePath = await fetchTelegramFilePath(telegramFileId, telegramBotToken);
-  const bytes = await downloadTelegramFileBytes(filePath, telegramBotToken);
-  const objectPath = buildHomeworkStoragePath(assignmentId, submissionId, taskId);
-
-  await uploadHomeworkImage(HOMEWORK_IMAGES_BUCKET, objectPath, bytes, studentId);
-
-  const nextPaths = [...existingPaths, objectPath];
-  const { error: updateError } = await supabase
-    .from("homework_tutor_submission_items")
-    .update({ student_image_urls: nextPaths })
-    .eq("submission_id", submissionId)
-    .eq("task_id", taskId);
-
-  if (updateError) {
-    throw new Error(`Failed to update submission item with uploaded image: ${updateError.message}`);
-  }
-
-  console.log("homework_photo_save_success", {
-    assignmentId,
-    submissionId,
-    taskId,
-    studentId,
-    images_count: nextPaths.length,
-  });
-
-  return {
-    image_paths: nextPaths,
-    added_path: objectPath,
-  };
 }
 
 async function downloadHomeworkImageAsBase64(objectPath: string): Promise<string> {

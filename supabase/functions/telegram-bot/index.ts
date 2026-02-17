@@ -9,6 +9,7 @@ import {
 import {
   ensureSubmissionItemsForTasks,
   formatHomeworkResultsMessage,
+  getHomeworkPhotoSaveErrorCode,
   runHomeworkAiCheck,
   saveHomeworkPhotoAnswer,
   saveHomeworkTextAnswer,
@@ -25,6 +26,10 @@ const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const TELEGRAM_FORMAT_V2 = (Deno.env.get("TELEGRAM_FORMAT_V2") ?? "true").toLowerCase() === "true";
 const TELEGRAM_DIALOG_MAX_CHARS = 700;
 const TELEGRAM_MESSAGE_MAX_LENGTH = 4000;
+const SITE_BASE_URL = "https://sokratai.ru";
+const HOMEWORK_TASK_IMAGE_DEFAULT_BUCKET = "homework-task-images";
+const HOMEWORK_TASK_IMAGE_FALLBACK_BUCKETS = ["chat-images", "homework-images"];
+const HOMEWORK_TASK_IMAGE_CAPTION_LIMIT = 900;
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 const WEB_PAYMENT_URL = "https://sokratai.ru/profile?openPayment=true";
@@ -190,6 +195,7 @@ interface HomeworkTask {
   id: string;
   order_num: number;
   task_text: string;
+  task_image_url: string | null;
   max_score: number;
 }
 
@@ -1776,7 +1782,7 @@ async function getHomeworkAssignmentVisibilityStatsForStudent(studentId: string)
 async function getHomeworkTasksForAssignment(assignmentId: string): Promise<HomeworkTask[]> {
   const { data, error } = await supabase
     .from("homework_tutor_tasks")
-    .select("id, order_num, task_text, max_score")
+    .select("id, order_num, task_text, task_image_url, max_score")
     .eq("assignment_id", assignmentId)
     .order("order_num", { ascending: true });
 
@@ -1791,7 +1797,7 @@ async function getHomeworkTasksForAssignment(assignmentId: string): Promise<Home
 async function getHomeworkTaskById(taskId: string, assignmentId: string): Promise<HomeworkTask | null> {
   const { data, error } = await supabase
     .from("homework_tutor_tasks")
-    .select("id, order_num, task_text, max_score")
+    .select("id, order_num, task_text, task_image_url, max_score")
     .eq("id", taskId)
     .eq("assignment_id", assignmentId)
     .maybeSingle();
@@ -2016,6 +2022,147 @@ ${escapeHtml(task.task_text)}
 Для выхода из режима: /cancel`;
 }
 
+async function createSignedHomeworkTaskImageUrl(
+  bucket: string,
+  objectPath: string,
+): Promise<string | null> {
+  const { data, error } = await supabase.storage.from(bucket).createSignedUrl(objectPath, 3600);
+  if (error || !data?.signedUrl) {
+    return null;
+  }
+  return data.signedUrl;
+}
+
+async function resolveHomeworkTaskImageUrl(taskImageUrl: string | null): Promise<string | null> {
+  if (!taskImageUrl || typeof taskImageUrl !== "string") {
+    return null;
+  }
+
+  const trimmed = taskImageUrl.trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) {
+    if (trimmed.includes("/storage/v1/object/public/")) {
+      return trimmed;
+    }
+    if (trimmed.includes("/storage/v1/object/sign/")) {
+      return trimmed;
+    }
+    const privateStorageMatch = trimmed.match(/\/storage\/v1\/object\/([^/]+)\/([^?]+)/);
+    if (privateStorageMatch) {
+      const visibility = privateStorageMatch[1];
+      const rawPath = privateStorageMatch[2];
+      if (visibility !== "public" && visibility !== "sign") {
+        const slashIdx = rawPath.indexOf("/");
+        if (slashIdx > 0 && slashIdx < rawPath.length - 1) {
+          const bucket = rawPath.slice(0, slashIdx);
+          const objectPath = rawPath.slice(slashIdx + 1);
+          const signedUrl = await createSignedHomeworkTaskImageUrl(bucket, objectPath);
+          if (signedUrl) return signedUrl;
+        }
+      }
+    }
+    return trimmed;
+  }
+
+  if (trimmed.startsWith("/")) {
+    return `${SITE_BASE_URL}${trimmed}`;
+  }
+
+  if (trimmed.startsWith("storage://")) {
+    const raw = trimmed.slice("storage://".length);
+    const slashIdx = raw.indexOf("/");
+    if (slashIdx > 0 && slashIdx < raw.length - 1) {
+      const bucket = raw.slice(0, slashIdx);
+      const objectPath = raw.slice(slashIdx + 1).replace(/^\/+/, "");
+      if (bucket && objectPath) {
+        return await createSignedHomeworkTaskImageUrl(bucket, objectPath);
+      }
+    }
+    return null;
+  }
+
+  const normalizedPath = trimmed.replace(/^\/+/, "");
+  if (!normalizedPath) {
+    return null;
+  }
+
+  const pathParts = normalizedPath.split("/");
+  if (pathParts.length > 1) {
+    const possibleBucket = pathParts[0];
+    if (
+      possibleBucket === HOMEWORK_TASK_IMAGE_DEFAULT_BUCKET ||
+      HOMEWORK_TASK_IMAGE_FALLBACK_BUCKETS.includes(possibleBucket)
+    ) {
+      const objectPath = pathParts.slice(1).join("/");
+      const signedUrl = await createSignedHomeworkTaskImageUrl(possibleBucket, objectPath);
+      if (signedUrl) return signedUrl;
+    }
+  }
+
+  const candidateBuckets = [HOMEWORK_TASK_IMAGE_DEFAULT_BUCKET, ...HOMEWORK_TASK_IMAGE_FALLBACK_BUCKETS];
+  for (const bucket of candidateBuckets) {
+    const signedUrl = await createSignedHomeworkTaskImageUrl(bucket, normalizedPath);
+    if (signedUrl) return signedUrl;
+  }
+
+  return null;
+}
+
+async function sendHomeworkTaskStep(
+  telegramUserId: number,
+  assignmentTitle: string,
+  task: HomeworkTask,
+  taskIndex: number,
+  totalTasks: number,
+) {
+  const taskMessage = buildHomeworkTaskMessage(assignmentTitle, task, taskIndex, totalTasks);
+  const keyboard = createHomeworkTaskKeyboard(false);
+  const taskImageUrl = await resolveHomeworkTaskImageUrl(task.task_image_url);
+
+  if (!taskImageUrl) {
+    await sendTelegramMessage(telegramUserId, taskMessage, { reply_markup: keyboard });
+    return;
+  }
+
+  if (taskMessage.length <= HOMEWORK_TASK_IMAGE_CAPTION_LIMIT) {
+    try {
+      await sendTelegramPhoto(telegramUserId, taskImageUrl, taskMessage, { reply_markup: keyboard });
+      return;
+    } catch (error) {
+      console.error("homework_task_send_photo_failed", {
+        task_id: task.id,
+        task_index: taskIndex,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      await sendTelegramMessage(
+        telegramUserId,
+        "⚠️ Фото к задаче временно недоступно. Показываю условие текстом.",
+      );
+      await sendTelegramMessage(telegramUserId, taskMessage, { reply_markup: keyboard });
+      return;
+    }
+  }
+
+  try {
+    await sendTelegramPhoto(telegramUserId, taskImageUrl, "📎 Фото к задаче");
+  } catch (error) {
+    console.error("homework_task_send_photo_failed", {
+      task_id: task.id,
+      task_index: taskIndex,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    await sendTelegramMessage(
+      telegramUserId,
+      "⚠️ Фото к задаче временно недоступно. Показываю условие текстом.",
+    );
+  }
+
+  await sendTelegramMessage(telegramUserId, taskMessage, { reply_markup: keyboard });
+}
+
 async function handleHomeworkCommand(telegramUserId: number, userId: string) {
   try {
     await updatePracticeState(telegramUserId, null);
@@ -2113,10 +2260,12 @@ async function handleHomeworkStartCallback(
   };
 
   await setHomeworkState(userId, "HW_SUBMITTING", initialContext);
-  await sendTelegramMessage(
+  await sendHomeworkTaskStep(
     telegramUserId,
-    buildHomeworkTaskMessage(assignment.title, tasks[0], 1, tasks.length),
-    { reply_markup: createHomeworkTaskKeyboard(false) },
+    assignment.title,
+    tasks[0],
+    1,
+    tasks.length,
   );
 }
 
@@ -2198,15 +2347,12 @@ async function handleHomeworkNextCallback(telegramUserId: number, userId: string
     };
 
     await setHomeworkState(userId, "HW_SUBMITTING", nextContext);
-    await sendTelegramMessage(
+    await sendHomeworkTaskStep(
       telegramUserId,
-      buildHomeworkTaskMessage(
-        assignment?.title ?? "Домашка",
-        nextTask,
-        nextTaskIndex,
-        totalTasks,
-      ),
-      { reply_markup: createHomeworkTaskKeyboard(false) },
+      assignment?.title ?? "Домашка",
+      nextTask,
+      nextTaskIndex,
+      totalTasks,
     );
     return;
   }
@@ -2538,6 +2684,13 @@ async function handleHomeworkPhotoInput(
     return;
   }
 
+  console.log("homework_photo_save_start", {
+    user_id: userId,
+    assignment_id: assignmentId,
+    submission_id: submissionId,
+    task_id: currentTaskId,
+  });
+
   try {
     const savedPhoto = await saveHomeworkPhotoAnswer({
       assignmentId,
@@ -2558,14 +2711,22 @@ async function handleHomeworkPhotoInput(
       text: captionText || context.text || "",
     });
 
+    console.log("homework_photo_save_success", {
+      user_id: userId,
+      assignment_id: assignmentId,
+      submission_id: submissionId,
+      task_id: currentTaskId,
+      saved_images_count: savedPhoto.image_paths.length,
+    });
+
     await sendTelegramMessage(
       telegramUserId,
       `✅ Фото сохранено (${savedPhoto.image_paths.length}/4). Если нужно, добавь текст и нажми «Далее».`,
       { reply_markup: createHomeworkTaskKeyboard(true) },
     );
   } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : String(error);
-    if (errorMessage.includes("MAX_IMAGES_REACHED")) {
+    const errorCode = getHomeworkPhotoSaveErrorCode(error);
+    if (errorCode === "MAX_IMAGES_REACHED") {
       await sendTelegramMessage(
         telegramUserId,
         "⚠️ Можно прикрепить максимум 4 фото к одной задаче. Лишние фото не сохранены.",
@@ -2574,23 +2735,33 @@ async function handleHomeworkPhotoInput(
       return;
     }
 
-    console.error("Failed to save homework photo answer:", {
-      userId,
-      assignmentId,
-      submissionId,
-      currentTaskId,
-      error,
+    console.error("homework_photo_save_error", {
+      user_id: userId,
+      assignment_id: assignmentId,
+      submission_id: submissionId,
+      task_id: currentTaskId,
+      error_code: errorCode,
+      error: error instanceof Error ? error.message : String(error),
     });
+
+    let userMessage = "❌ Не удалось обработать фото. Попробуй ещё раз.";
+    if (errorCode === "HOMEWORK_BUCKET_NOT_FOUND") {
+      userMessage = "⚠️ Временная проблема хранилища. Попробуй отправить фото позже.";
+    } else if (errorCode === "TELEGRAM_GET_FILE_FAILED" || errorCode === "TELEGRAM_DOWNLOAD_FAILED") {
+      userMessage = "⚠️ Не удалось скачать фото из Telegram. Отправь это фото ещё раз.";
+    } else if (errorCode === "SUBMISSION_ITEM_UPDATE_FAILED") {
+      userMessage = "⚠️ Фото получено, но не сохранилось в ответе. Отправь фото ещё раз.";
+    } else if (errorCode === "HOMEWORK_IMAGE_UPLOAD_FAILED") {
+      userMessage = "⚠️ Не удалось загрузить фото в хранилище. Попробуй ещё раз чуть позже.";
+    }
+
     await sendTelegramMessage(
       telegramUserId,
-      "❌ Не удалось обработать фото. Попробуй ещё раз.",
+      userMessage,
       { reply_markup: createHomeworkTaskKeyboard(false) },
     );
   }
 }
-
-// Базовый URL сайта для статических ресурсов
-const SITE_BASE_URL = "https://sokratai.ru";
 
 // Получение публичного URL для изображения
 // Обрабатывает: статические пути сайта (/images/...), Supabase Storage URL, внешние URL
