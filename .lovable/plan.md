@@ -1,47 +1,44 @@
 
 
-## Исправление "Some student_ids are not your students"
+## Создание страницы детального просмотра ДЗ (/tutor/homework/:id)
 
-### Корневая причина
+### Что нужно сделать
 
-В базе данных две таблицы используют разные ID для идентификации репетитора:
-- `homework_tutor_assignments.tutor_id` -> `auth.users(id)` (auth user ID)
-- `tutor_students.tutor_id` -> `tutors(id)` (ID записи в таблице tutors)
+Сейчас при клике на карточку ДЗ происходит переход на `/tutor/homework/:id`, но:
+1. Маршрут не зарегистрирован в `App.tsx`
+2. Страница компонента не существует
 
-Функция `handleAssignStudents` получает `userId` (auth ID) и использует его для обоих запросов. Проверка владения студентами на строке 716 ищет `tutor_students.tutor_id = auth_user_id`, но в таблице хранится `tutors.id` -- поэтому находит 0 записей.
+### План
 
-### Данные из базы
+**1. Создать страницу `src/pages/tutor/TutorHomeworkDetail.tsx`**
 
-- Auth user ID: `420b1476-6988-4f00-b435-09400420d145`
-- Tutors table ID: `70ff3df8-f081-4ed1-83bb-4d1a1f80f795`
-- Оба студента (Lera и Иван) привязаны к `tutor_id = 70ff3df8-...`
+Страница будет отображать:
+- Заголовок ДЗ, предмет, статус, дедлайн
+- Список задач (task_text, изображения)
+- Список назначенных учеников и статус сдачи
+- Сводная статистика (сколько сдали, средний балл)
 
-### Решение
+Данные загружаются через существующие API-функции:
+- `getTutorHomeworkAssignment(id)` -- детали задания + задачи + ученики
+- `getTutorHomeworkResults(id)` -- результаты (если есть сдачи)
 
-В `handleAssignStudents` нужно использовать **два разных ID**:
-- `tutorUserId` (auth ID) -- для проверки владения assignment (таблица `homework_tutor_assignments`)
-- `tutorId` (ID из таблицы `tutors`) -- для проверки владения студентами (таблица `tutor_students`)
+Использовать существующие компоненты: `TutorLayout`, `TutorGuard`, `TutorDataStatus`, `Card`, `Badge`, `Skeleton`.
 
-Сигнатура функции уже принимает оба параметра (`tutorUserId` и `tutorId`), но на строке 716 используется `tutorId`, который сейчас тоже равен `userId`.
+**2. Зарегистрировать маршрут в `src/App.tsx`**
 
-### Изменения
+Добавить Route `/tutor/homework/:id` с lazy-загрузкой (Suspense), по аналогии с остальными tutor-маршрутами.
 
-**Файл: `supabase/functions/homework-api/index.ts`**
+**3. Добавить пункт в навигацию `TutorLayout.tsx`**
 
-1. В главном обработчике (строка 1247): изменить вызов, чтобы передавать `tutor.id` как второй параметр:
-   ```
-   // Было:
-   handleAssignStudents(db, userId, userId, seg[1], body, cors)
-   // Станет:
-   handleAssignStudents(db, userId, tutor.id, seg[1], body, cors)
-   ```
+Маршрут уже будет доступен по клику из списка; дополнительных изменений в навигации не требуется.
 
-2. Задеплоить `homework-api`
+### Техническая часть
 
-### Почему только этот handler
+Структура страницы:
+- Хук `useParams()` для получения `id`
+- `useQuery` для загрузки данных через `getTutorHomeworkAssignment`
+- `useQuery` для загрузки результатов через `getTutorHomeworkResults`
+- Секции: Header (назад + заголовок), задачи, ученики, статистика
+- Состояния: loading (skeleton), error (TutorDataStatus), empty submissions
 
-Остальные handler-ы работают только с `homework_tutor_assignments`, где `tutor_id = auth user ID` -- там всё корректно. Только `handleAssignStudents` обращается и к `homework_tutor_assignments`, и к `tutor_students` -- поэтому ему нужны оба ID.
-
-### Lera без Telegram
-
-Это **не проблема** для назначения ДЗ. Отсутствие Telegram аккаунта влияет только на отправку уведомлений (которые и так выключены на скриншоте). Назначить ДЗ можно любому студенту.
+Стили и паттерны берутся из существующих tutor-страниц (`TutorStudentProfile`, `TutorHomework`).
