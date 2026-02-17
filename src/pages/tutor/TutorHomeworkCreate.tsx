@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef } from 'react';
+import { useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { Card, CardContent } from '@/components/ui/card';
@@ -25,6 +25,7 @@ import {
   Loader2,
   Dices,
   Image as ImageIcon,
+  Search,
   X,
   Check,
   Send,
@@ -40,6 +41,7 @@ import {
   notifyTutorHomeworkStudents,
   uploadTutorHomeworkTaskImage,
   deleteTutorHomeworkTaskImage,
+  parseStorageRef,
   type HomeworkSubject,
   type CreateAssignmentTask,
 } from '@/lib/tutorHomeworkApi';
@@ -56,6 +58,8 @@ const SUBJECTS: { value: HomeworkSubject; label: string }[] = [
 ];
 
 type SubmitPhase = 'idle' | 'creating' | 'assigning' | 'notifying' | 'done';
+const MAX_IMAGE_SIZE_BYTES = 10 * 1024 * 1024;
+const IMAGE_REQUIREMENTS_HINT = 'Форматы: JPG, PNG, WEBP, GIF. Размер до 10 МБ.';
 
 // ─── Draft task type ─────────────────────────────────────────────────────────
 
@@ -63,6 +67,9 @@ interface DraftTask {
   localId: string;
   task_text: string;
   task_image_path: string | null;
+  task_image_name: string | null;
+  task_image_preview_url: string | null;
+  task_image_used_fallback: boolean;
   correct_answer: string;
   solution_steps: string;
   max_score: number;
@@ -74,11 +81,20 @@ function createEmptyTask(): DraftTask {
     localId: crypto.randomUUID(),
     task_text: '',
     task_image_path: null,
+    task_image_name: null,
+    task_image_preview_url: null,
+    task_image_used_fallback: false,
     correct_answer: '',
     solution_steps: '',
     max_score: 1,
     uploading: false,
   };
+}
+
+function revokeObjectUrl(url: string | null | undefined) {
+  if (url && url.startsWith('blob:')) {
+    URL.revokeObjectURL(url);
+  }
 }
 
 // ─── Step indicator ──────────────────────────────────────────────────────────
@@ -210,24 +226,44 @@ function TaskEditor({
   canRemove: boolean;
 }) {
   const fileRef = useRef<HTMLInputElement>(null);
+  const parsedRef = parseStorageRef(task.task_image_path);
+  const imageName =
+    task.task_image_name ||
+    parsedRef?.objectPath.split('/').pop() ||
+    'uploaded-image.jpg';
 
   const handleImageUpload = useCallback(
     async (e: React.ChangeEvent<HTMLInputElement>) => {
       const file = e.target.files?.[0];
       if (!file) return;
-      if (file.size > 10 * 1024 * 1024) {
+      if (file.size > MAX_IMAGE_SIZE_BYTES) {
         toast.error('Файл слишком большой (максимум 10 МБ)');
+        if (fileRef.current) fileRef.current.value = '';
         return;
       }
+
+      const previewUrl = URL.createObjectURL(file);
       onUpdate({ ...task, uploading: true });
       try {
-        const { objectPath } = await uploadTutorHomeworkTaskImage(file);
-        onUpdate({ ...task, task_image_path: objectPath, uploading: false });
+        const uploadResult = await uploadTutorHomeworkTaskImage(file);
+        revokeObjectUrl(task.task_image_preview_url);
+        onUpdate({
+          ...task,
+          task_image_path: uploadResult.storageRef,
+          task_image_name: file.name,
+          task_image_preview_url: previewUrl,
+          task_image_used_fallback: uploadResult.usedFallback,
+          uploading: false,
+        });
         toast.success('Изображение загружено');
+        if (uploadResult.usedFallback) {
+          toast.warning('Основной bucket недоступен, использован резервный канал загрузки.');
+        }
       } catch (err) {
+        revokeObjectUrl(previewUrl);
         onUpdate({ ...task, uploading: false });
         toast.error(
-          `Ошибка загрузки: ${err instanceof Error ? err.message : 'неизвестная ошибка'}`,
+          `Ошибка загрузки: ${err instanceof Error ? err.message : 'неизвестная ошибка'}. Попробуйте ещё раз.`,
         );
       }
       if (fileRef.current) fileRef.current.value = '';
@@ -239,7 +275,14 @@ function TaskEditor({
     if (task.task_image_path) {
       void deleteTutorHomeworkTaskImage(task.task_image_path);
     }
-    onUpdate({ ...task, task_image_path: null });
+    revokeObjectUrl(task.task_image_preview_url);
+    onUpdate({
+      ...task,
+      task_image_path: null,
+      task_image_name: null,
+      task_image_preview_url: null,
+      task_image_used_fallback: false,
+    });
   }, [task, onUpdate]);
 
   return (
@@ -270,15 +313,37 @@ function TaskEditor({
         <div className="space-y-2">
           <Label>Изображение</Label>
           {task.task_image_path ? (
-            <div className="flex items-center gap-2 p-2 border rounded-md bg-muted/50">
-              <ImageIcon className="h-4 w-4 text-muted-foreground flex-shrink-0" />
-              <span className="text-sm truncate flex-1">{task.task_image_path.split('/').pop()}</span>
-              <Button variant="ghost" size="sm" onClick={handleImageRemove}>
-                <X className="h-4 w-4" />
-              </Button>
+            <div className="p-2 border rounded-md bg-muted/50 space-y-2">
+              <div className="flex items-center gap-2">
+                {task.task_image_preview_url ? (
+                  <img
+                    src={task.task_image_preview_url}
+                    alt="Превью задачи"
+                    className="h-12 w-12 rounded border object-cover bg-background"
+                  />
+                ) : (
+                  <div className="h-12 w-12 rounded border bg-background flex items-center justify-center">
+                    <ImageIcon className="h-4 w-4 text-muted-foreground" />
+                  </div>
+                )}
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm truncate">{imageName}</p>
+                  <p className="text-xs text-muted-foreground truncate">
+                    {task.task_image_path}
+                  </p>
+                </div>
+                <Button variant="ghost" size="sm" onClick={handleImageRemove}>
+                  <X className="h-4 w-4" />
+                </Button>
+              </div>
+              {task.task_image_used_fallback && (
+                <p className="text-xs text-amber-600 dark:text-amber-400">
+                  Изображение загружено через резервный bucket.
+                </p>
+              )}
             </div>
           ) : (
-            <div>
+            <div className="space-y-2">
               <input
                 ref={fileRef}
                 type="file"
@@ -301,6 +366,7 @@ function TaskEditor({
                 )}
                 {task.uploading ? 'Загрузка...' : 'Загрузить фото'}
               </Button>
+              <p className="text-xs text-muted-foreground">{IMAGE_REQUIREMENTS_HINT}</p>
             </div>
           )}
         </div>
@@ -386,6 +452,7 @@ function StepTasks({
       if (removed.task_image_path) {
         void deleteTutorHomeworkTaskImage(removed.task_image_path);
       }
+      revokeObjectUrl(removed.task_image_preview_url);
       onChange(tasks.filter((_, i) => i !== idx));
     },
     [tasks, onChange],
@@ -433,6 +500,7 @@ function StepAssign({
   onTemplateChange: (v: string) => void;
   errors: Record<string, string>;
 }) {
+  const [searchQuery, setSearchQuery] = useState('');
   const {
     students,
     loading,
@@ -464,6 +532,24 @@ function StepAssign({
     onChangeSelected(new Set());
   }, [onChangeSelected]);
 
+  const filteredStudents = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    if (!q) return students;
+    return students.filter((s) => {
+      const name = (s.profiles?.username ?? '').toLowerCase();
+      const tg = (s.profiles?.telegram_username ?? '').toLowerCase();
+      return name.includes(q) || tg.includes(q);
+    });
+  }, [students, searchQuery]);
+
+  const selectedWithoutTelegram = useMemo(
+    () =>
+      students.filter(
+        (s) => selectedIds.has(s.student_id) && !s.profiles?.telegram_user_id,
+      ).length,
+    [students, selectedIds],
+  );
+
   return (
     <div className="space-y-6">
       {/* Student list */}
@@ -492,6 +578,18 @@ function StepAssign({
           onRetry={refetch}
         />
 
+        {!loading && students.length > 0 && (
+          <div className="relative">
+            <Search className="h-4 w-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              placeholder="Поиск по имени или @username"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="pl-9 text-base"
+            />
+          </div>
+        )}
+
         {loading && !students.length ? (
           <div className="space-y-2">
             {[1, 2, 3].map((i) => (
@@ -509,11 +607,20 @@ function StepAssign({
               </p>
             </CardContent>
           </Card>
+        ) : filteredStudents.length === 0 ? (
+          <Card className="bg-muted/30">
+            <CardContent className="py-6 text-center">
+              <p className="text-sm text-muted-foreground">
+                По запросу ничего не найдено.
+              </p>
+            </CardContent>
+          </Card>
         ) : (
           <div className="space-y-1 max-h-[360px] overflow-y-auto rounded-md border p-1">
-            {students.map((s) => {
+            {filteredStudents.map((s) => {
               const checked = selectedIds.has(s.student_id);
               const name = s.profiles?.username || 'Без имени';
+              const isTelegramConnected = Boolean(s.profiles?.telegram_user_id);
               const statusLabel =
                 s.status === 'active'
                   ? null
@@ -529,12 +636,17 @@ function StepAssign({
                     checked={checked}
                     onCheckedChange={() => handleToggle(s.student_id)}
                   />
-                  <span className="text-sm font-medium flex-1">{name}</span>
-                  {s.profiles?.telegram_username && (
-                    <span className="text-xs text-muted-foreground">
-                      @{s.profiles.telegram_username}
-                    </span>
-                  )}
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-medium truncate">{name}</p>
+                    {s.profiles?.telegram_username && (
+                      <p className="text-xs text-muted-foreground truncate">
+                        @{s.profiles.telegram_username}
+                      </p>
+                    )}
+                  </div>
+                  <Badge variant={isTelegramConnected ? 'default' : 'secondary'} className="text-xs">
+                    {isTelegramConnected ? 'Telegram подключен' : 'Telegram не подключен'}
+                  </Badge>
                   {statusLabel && (
                     <Badge variant="secondary" className="text-xs">
                       {statusLabel}
@@ -547,7 +659,7 @@ function StepAssign({
         )}
 
         <p className="text-xs text-muted-foreground">
-          Выбрано: {selectedIds.size} из {students.length}
+          Выбрано: {selectedIds.size} из {students.length}. Без Telegram: {selectedWithoutTelegram}
         </p>
       </div>
 
@@ -582,6 +694,41 @@ function StepAssign({
   );
 }
 
+function SubmitPhaseTracker({
+  phase,
+  notifyEnabled,
+}: {
+  phase: SubmitPhase;
+  notifyEnabled: boolean;
+}) {
+  const phases: Array<{ key: Exclude<SubmitPhase, 'idle' | 'done'>; label: string }> = [
+    { key: 'creating', label: 'Создание' },
+    { key: 'assigning', label: 'Назначение' },
+    ...(notifyEnabled ? [{ key: 'notifying' as const, label: 'Уведомления' }] : []),
+  ];
+
+  const currentIdx = phases.findIndex((p) => p.key === phase);
+  const doneByFinalState = phase === 'done';
+
+  return (
+    <div className="flex flex-wrap gap-2">
+      {phases.map((p, idx) => {
+        const isDone = doneByFinalState || (currentIdx > -1 && idx < currentIdx);
+        const isCurrent = currentIdx === idx;
+        return (
+          <Badge
+            key={p.key}
+            variant={isDone ? 'default' : 'secondary'}
+            className={isCurrent ? 'ring-1 ring-primary/50' : ''}
+          >
+            {p.label}
+          </Badge>
+        );
+      })}
+    </div>
+  );
+}
+
 // ─── Main Wizard Content ─────────────────────────────────────────────────────
 
 function TutorHomeworkCreateContent() {
@@ -600,6 +747,7 @@ function TutorHomeworkCreateContent() {
 
   // Step 2
   const [tasks, setTasks] = useState<DraftTask[]>([createEmptyTask()]);
+  const tasksRef = useRef<DraftTask[]>(tasks);
 
   // Step 3
   const [selectedStudentIds, setSelectedStudentIds] = useState<Set<string>>(
@@ -612,6 +760,57 @@ function TutorHomeworkCreateContent() {
   const [submitPhase, setSubmitPhase] = useState<SubmitPhase>('idle');
   const createdAssignmentIdRef = useRef<string | null>(null);
   const [errors, setErrors] = useState<Record<string, string>>({});
+
+  useEffect(() => {
+    tasksRef.current = tasks;
+  }, [tasks]);
+
+  useEffect(
+    () => () => {
+      for (const task of tasksRef.current) {
+        revokeObjectUrl(task.task_image_preview_url);
+      }
+    },
+    [],
+  );
+
+  const hasUnsavedChanges = useMemo(() => {
+    if (submitPhase === 'done') return false;
+
+    const metaDirty =
+      meta.title.trim().length > 0 ||
+      meta.subject !== '' ||
+      meta.topic.trim().length > 0 ||
+      meta.deadline.trim().length > 0;
+
+    const tasksDirty =
+      tasks.length !== 1 ||
+      tasks.some(
+        (task) =>
+          task.task_text.trim().length > 0 ||
+          task.task_image_path !== null ||
+          task.correct_answer.trim().length > 0 ||
+          task.solution_steps.trim().length > 0 ||
+          task.max_score !== 1,
+      );
+
+    const assignDirty =
+      selectedStudentIds.size > 0 ||
+      notifyEnabled !== true ||
+      notifyTemplate.trim().length > 0;
+
+    return metaDirty || tasksDirty || assignDirty;
+  }, [meta, tasks, selectedStudentIds, notifyEnabled, notifyTemplate, submitPhase]);
+
+  useEffect(() => {
+    if (!hasUnsavedChanges) return;
+    const handler = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = '';
+    };
+    window.addEventListener('beforeunload', handler);
+    return () => window.removeEventListener('beforeunload', handler);
+  }, [hasUnsavedChanges]);
 
   // ── Validation ──
 
@@ -672,6 +871,16 @@ function TutorHomeworkCreateContent() {
     if (step > 1) setStep(step - 1);
   }, [step]);
 
+  const handleNavigateToList = useCallback(() => {
+    if (
+      hasUnsavedChanges &&
+      !window.confirm('Есть несохранённые изменения. Выйти без сохранения?')
+    ) {
+      return;
+    }
+    navigate('/tutor/homework');
+  }, [hasUnsavedChanges, navigate]);
+
   // ── Submit ──
 
   const handleSubmit = useCallback(async () => {
@@ -714,7 +923,11 @@ function TutorHomeworkCreateContent() {
       );
 
       // Phase 3: notify (optional)
-      let notifyResult: { sent: number; failed: number } | null = null;
+      let notifyResult: {
+        sent: number;
+        failed: number;
+        failed_student_ids: string[];
+      } | null = null;
       if (notifyEnabled) {
         setSubmitPhase('notifying');
         try {
@@ -724,7 +937,11 @@ function TutorHomeworkCreateContent() {
           );
         } catch (notifyErr) {
           console.warn('homework_notify_error', notifyErr);
-          notifyResult = { sent: 0, failed: selectedStudentIds.size };
+          notifyResult = {
+            sent: 0,
+            failed: selectedStudentIds.size,
+            failed_student_ids: [...selectedStudentIds],
+          };
         }
       }
 
@@ -737,6 +954,9 @@ function TutorHomeworkCreateContent() {
 
       // Build toast message
       const parts: string[] = [`ДЗ создано, назначено ${assignResult.added} ученикам`];
+      if (assignResult.assignment_status !== 'active') {
+        parts.push(`Статус задания: ${assignResult.assignment_status}`);
+      }
       if (notifyResult) {
         if (notifyResult.failed > 0 && notifyResult.sent > 0) {
           parts.push(
@@ -746,6 +966,13 @@ function TutorHomeworkCreateContent() {
           parts.push('Не удалось отправить уведомления');
         } else {
           parts.push(`Уведомления отправлены (${notifyResult.sent})`);
+        }
+        if (notifyResult.failed_student_ids.length > 0) {
+          parts.push(
+            `Недоставлено: ${notifyResult.failed_student_ids.slice(0, 5).join(', ')}${
+              notifyResult.failed_student_ids.length > 5 ? '...' : ''
+            }`,
+          );
         }
       }
       toast.success(parts.join('. '));
@@ -790,11 +1017,9 @@ function TutorHomeworkCreateContent() {
       <div className="space-y-6 max-w-2xl mx-auto">
         {/* Header */}
         <div className="flex items-center gap-3">
-          <Button variant="ghost" size="sm" asChild>
-            <Link to="/tutor/homework">
-              <ArrowLeft className="h-4 w-4 mr-1" />
-              Назад
-            </Link>
+          <Button variant="ghost" size="sm" onClick={handleNavigateToList} disabled={isSubmitting}>
+            <ArrowLeft className="h-4 w-4 mr-1" />
+            Назад
           </Button>
           <h1 className="text-2xl font-bold">Создание ДЗ</h1>
         </div>
@@ -826,33 +1051,38 @@ function TutorHomeworkCreateContent() {
         </div>
 
         {/* Navigation footer */}
-        <div className="flex items-center justify-between border-t pt-4 sticky bottom-0 bg-background pb-4 md:pb-0 md:relative z-10">
-          <Button
-            variant="outline"
-            onClick={handleBack}
-            disabled={step === 1 || isSubmitting}
-            className="gap-2"
-          >
-            <ArrowLeft className="h-4 w-4" />
-            Назад
-          </Button>
-
-          {step < 3 ? (
-            <Button onClick={handleNext} className="gap-2">
-              Далее
-              <ArrowRight className="h-4 w-4" />
-            </Button>
-          ) : (
+        <div className="border-t pt-4 sticky bottom-0 bg-background pb-4 md:pb-0 md:relative z-10 space-y-3">
+          {step === 3 && (
+            <SubmitPhaseTracker phase={submitPhase} notifyEnabled={notifyEnabled} />
+          )}
+          <div className="flex items-center justify-between">
             <Button
-              onClick={handleSubmit}
-              disabled={isSubmitting}
+              variant="outline"
+              onClick={handleBack}
+              disabled={step === 1 || isSubmitting}
               className="gap-2"
             >
-              {isSubmitting && <Loader2 className="h-4 w-4 animate-spin" />}
-              {!isSubmitting && (notifyEnabled ? <Send className="h-4 w-4" /> : <Check className="h-4 w-4" />)}
-              {submitLabel}
+              <ArrowLeft className="h-4 w-4" />
+              Назад
             </Button>
-          )}
+
+            {step < 3 ? (
+              <Button onClick={handleNext} className="gap-2">
+                Далее
+                <ArrowRight className="h-4 w-4" />
+              </Button>
+            ) : (
+              <Button
+                onClick={handleSubmit}
+                disabled={isSubmitting}
+                className="gap-2"
+              >
+                {isSubmitting && <Loader2 className="h-4 w-4 animate-spin" />}
+                {!isSubmitting && (notifyEnabled ? <Send className="h-4 w-4" /> : <Check className="h-4 w-4" />)}
+                {submitLabel}
+              </Button>
+            )}
+          </div>
         </div>
       </div>
     </TutorLayout>

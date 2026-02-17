@@ -43,11 +43,13 @@ export interface CreateAssignmentResponse {
 
 export interface AssignStudentsResponse {
   added: number;
+  assignment_status: HomeworkAssignmentStatus;
 }
 
 export interface NotifyStudentsResponse {
   sent: number;
   failed: number;
+  failed_student_ids: string[];
 }
 
 // ─── API Error ───────────────────────────────────────────────────────────────
@@ -160,6 +162,63 @@ export async function notifyTutorHomeworkStudents(
 
 // ─── Storage: task image upload/delete ───────────────────────────────────────
 
+const STORAGE_REF_PREFIX = 'storage://';
+const HOMEWORK_TASK_IMAGES_BUCKET = 'homework-task-images';
+const HOMEWORK_TASK_IMAGES_FALLBACK_BUCKET = 'chat-images';
+
+export interface ParsedStorageRef {
+  bucket: string;
+  objectPath: string;
+}
+
+export interface UploadTutorHomeworkTaskImageResult {
+  storageRef: string;
+  bucket: string;
+  objectPath: string;
+  usedFallback: boolean;
+}
+
+function sanitizeObjectPath(path: string): string {
+  return path.replace(/^\/+/, '').trim();
+}
+
+export function toStorageRef(bucket: string, objectPath: string): string {
+  return `${STORAGE_REF_PREFIX}${bucket}/${sanitizeObjectPath(objectPath)}`;
+}
+
+export function parseStorageRef(
+  value: string | null | undefined,
+  defaultBucket = HOMEWORK_TASK_IMAGES_BUCKET,
+): ParsedStorageRef | null {
+  if (!value || typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+
+  if (trimmed.startsWith(STORAGE_REF_PREFIX)) {
+    const raw = trimmed.slice(STORAGE_REF_PREFIX.length);
+    const slashIdx = raw.indexOf('/');
+    if (slashIdx <= 0 || slashIdx === raw.length - 1) {
+      return null;
+    }
+    const bucket = raw.slice(0, slashIdx);
+    const objectPath = sanitizeObjectPath(raw.slice(slashIdx + 1));
+    if (!bucket || !objectPath) return null;
+    return { bucket, objectPath };
+  }
+
+  const objectPath = sanitizeObjectPath(trimmed);
+  if (!objectPath) return null;
+  return { bucket: defaultBucket, objectPath };
+}
+
+function isBucketNotFoundError(error: unknown): boolean {
+  if (!error || typeof error !== 'object') return false;
+  const maybeError = error as { message?: string; statusCode?: number; status?: number };
+  const message = (maybeError.message ?? '').toLowerCase();
+  const statusCode = maybeError.statusCode ?? maybeError.status;
+  return message.includes('bucket not found') || statusCode === 404;
+}
+
 function generateFileExt(file: File): string {
   const ext = file.name.split('.').pop()?.toLowerCase();
   if (ext && ['jpg', 'jpeg', 'png', 'gif', 'webp'].includes(ext)) return ext;
@@ -171,7 +230,7 @@ function generateFileExt(file: File): string {
 
 export async function uploadTutorHomeworkTaskImage(
   file: File,
-): Promise<{ objectPath: string }> {
+): Promise<UploadTutorHomeworkTaskImageResult> {
   const { data: sessionData } = await supabase.auth.getSession();
   const userId = sessionData?.session?.user?.id;
   if (!userId) {
@@ -180,30 +239,63 @@ export async function uploadTutorHomeworkTaskImage(
 
   const ext = generateFileExt(file);
   const uuid = crypto.randomUUID();
-  const objectPath = `tutor/${userId}/${uuid}.${ext}`;
+  const primaryPath = `tutor/${userId}/${uuid}.${ext}`;
 
-  const { error } = await supabase.storage
-    .from('homework-task-images')
-    .upload(objectPath, file, {
+  const { error: primaryError } = await supabase.storage
+    .from(HOMEWORK_TASK_IMAGES_BUCKET)
+    .upload(primaryPath, file, {
       contentType: file.type || 'image/jpeg',
       upsert: false,
     });
 
-  if (error) {
-    throw new HomeworkApiError(500, 'UPLOAD_ERROR', error.message);
+  if (!primaryError) {
+    return {
+      storageRef: toStorageRef(HOMEWORK_TASK_IMAGES_BUCKET, primaryPath),
+      bucket: HOMEWORK_TASK_IMAGES_BUCKET,
+      objectPath: primaryPath,
+      usedFallback: false,
+    };
   }
 
-  return { objectPath };
+  if (!isBucketNotFoundError(primaryError)) {
+    throw new HomeworkApiError(500, 'UPLOAD_ERROR', primaryError.message);
+  }
+
+  const fallbackPath = `${userId}/homework-task/${uuid}.${ext}`;
+  const { error: fallbackError } = await supabase.storage
+    .from(HOMEWORK_TASK_IMAGES_FALLBACK_BUCKET)
+    .upload(fallbackPath, file, {
+      contentType: file.type || 'image/jpeg',
+      upsert: false,
+    });
+
+  if (fallbackError) {
+    throw new HomeworkApiError(500, 'UPLOAD_ERROR', fallbackError.message);
+  }
+
+  return {
+    storageRef: toStorageRef(HOMEWORK_TASK_IMAGES_FALLBACK_BUCKET, fallbackPath),
+    bucket: HOMEWORK_TASK_IMAGES_FALLBACK_BUCKET,
+    objectPath: fallbackPath,
+    usedFallback: true,
+  };
 }
 
 export async function deleteTutorHomeworkTaskImage(
-  objectPath: string,
+  storageRefOrPath: string,
 ): Promise<void> {
+  const parsed = parseStorageRef(storageRefOrPath, HOMEWORK_TASK_IMAGES_BUCKET);
+  if (!parsed) return;
+
   await supabase.storage
-    .from('homework-task-images')
-    .remove([objectPath])
+    .from(parsed.bucket)
+    .remove([parsed.objectPath])
     .catch((err) => {
-      console.warn('homework_task_image_delete_failed', { objectPath, error: String(err) });
+      console.warn('homework_task_image_delete_failed', {
+        bucket: parsed.bucket,
+        objectPath: parsed.objectPath,
+        error: String(err),
+      });
     });
 }
 
@@ -333,11 +425,20 @@ export async function reviewTutorHomeworkSubmission(
 }
 
 export async function getHomeworkImageSignedUrl(
-  objectPath: string,
+  storageRefOrPath: string,
+  options?: {
+    defaultBucket?: string;
+  },
 ): Promise<string | null> {
+  const parsed = parseStorageRef(
+    storageRefOrPath,
+    options?.defaultBucket ?? 'homework-images',
+  );
+  if (!parsed) return null;
+
   const { data, error } = await supabase.storage
-    .from('homework-images')
-    .createSignedUrl(objectPath, 3600);
+    .from(parsed.bucket)
+    .createSignedUrl(parsed.objectPath, 3600);
   if (error || !data?.signedUrl) return null;
   return data.signedUrl;
 }

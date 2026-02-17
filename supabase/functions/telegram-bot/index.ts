@@ -1729,6 +1729,50 @@ async function getActiveHomeworkAssignmentsForStudent(studentId: string): Promis
   return (assignments ?? []) as HomeworkAssignment[];
 }
 
+async function getHomeworkAssignmentVisibilityStatsForStudent(studentId: string): Promise<{
+  assignedLinksCount: number;
+  activeAssignmentsCount: number;
+  draftAssignmentsCount: number;
+}> {
+  const { data: links, error: linksError } = await supabase
+    .from("homework_tutor_student_assignments")
+    .select("assignment_id")
+    .eq("student_id", studentId);
+
+  if (linksError) {
+    console.error("Failed to fetch assignment visibility links:", { studentId, linksError });
+    throw new Error("Failed to fetch assignment visibility links");
+  }
+
+  const assignmentIds = [...new Set((links ?? []).map((row: any) => row.assignment_id).filter(Boolean))];
+  if (assignmentIds.length === 0) {
+    return {
+      assignedLinksCount: 0,
+      activeAssignmentsCount: 0,
+      draftAssignmentsCount: 0,
+    };
+  }
+
+  const { data: assignments, error: assignmentsError } = await supabase
+    .from("homework_tutor_assignments")
+    .select("id, status")
+    .in("id", assignmentIds);
+
+  if (assignmentsError) {
+    console.error("Failed to fetch assignment visibility statuses:", { studentId, assignmentsError });
+    throw new Error("Failed to fetch assignment visibility statuses");
+  }
+
+  const activeAssignmentsCount = (assignments ?? []).filter((row: any) => row.status === "active").length;
+  const draftAssignmentsCount = (assignments ?? []).filter((row: any) => row.status === "draft").length;
+
+  return {
+    assignedLinksCount: assignmentIds.length,
+    activeAssignmentsCount,
+    draftAssignmentsCount,
+  };
+}
+
 async function getHomeworkTasksForAssignment(assignmentId: string): Promise<HomeworkTask[]> {
   const { data, error } = await supabase
     .from("homework_tutor_tasks")
@@ -1979,7 +2023,32 @@ async function handleHomeworkCommand(telegramUserId: number, userId: string) {
     await setHomeworkState(userId, "HW_SELECTING", {});
 
     const assignments = await getActiveHomeworkAssignmentsForStudent(userId);
+    const visibilityStats = await getHomeworkAssignmentVisibilityStatsForStudent(userId);
+
+    console.log("homework_visibility_diagnostics", {
+      student_id: userId,
+      assigned_links_count: visibilityStats.assignedLinksCount,
+      active_assignments_count: visibilityStats.activeAssignmentsCount,
+      draft_assignments_count: visibilityStats.draftAssignmentsCount,
+    });
+
     if (assignments.length === 0) {
+      if (
+        visibilityStats.assignedLinksCount > 0 &&
+        visibilityStats.draftAssignmentsCount > 0
+      ) {
+        await sendTelegramMessage(
+          telegramUserId,
+          `📚 <b>Режим «Домашка»</b>
+
+ДЗ назначены, но ещё не активированы репетитором.
+Попроси репетитора перевести задание в активный статус.
+
+Для выхода в обычный чат: /cancel`,
+        );
+        return;
+      }
+
       await sendTelegramMessage(
         telegramUserId,
         `📚 <b>Режим «Домашка»</b>

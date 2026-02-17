@@ -76,7 +76,7 @@ Create a new homework assignment with tasks.
 | `tasks` | array | yes | Min 1 task |
 | `tasks[].order_num` | int | no | Auto-assigned 1..N if omitted |
 | `tasks[].task_text` | string | yes | Non-empty |
-| `tasks[].task_image_url` | string | no | |
+| `tasks[].task_image_url` | string | no | Рекомендуемый формат: `storage://{bucket}/{objectPath}` |
 | `tasks[].correct_answer` | string | no | |
 | `tasks[].solution_steps` | string | no | |
 | `tasks[].max_score` | int | no | Default: 1 |
@@ -187,11 +187,14 @@ Assign students to a homework assignment.
 **Behavior:**
 - All `student_ids` must belong to the tutor (via `tutor_students` table).
 - Upsert: re-assigning an already assigned student is a no-op.
-- Auto-activation: if assignment status is `draft` and at least 1 student is assigned, status changes to `active`.
+- Auto-activation: if assignment is `draft`, API forces status to `active` right after successful assign.
 
 **Response (200):**
 ```json
-{ "added": 2 }
+{
+  "added": 2,
+  "assignment_status": "active"
+}
 ```
 
 **Error (403):**
@@ -223,10 +226,15 @@ Send Telegram notifications to assigned students who haven't been notified yet.
 - Uses `TELEGRAM_BOT_TOKEN` to call Telegram Bot API directly.
 - After successful send: sets `notified=true`, `notified_at=now()`.
 - Idempotent: repeated calls won't re-send to already notified students.
+- Failed deliveries are returned as `failed_student_ids` for UI diagnostics.
 
 **Response (200):**
 ```json
-{ "sent": 3, "failed": 1 }
+{
+  "sent": 3,
+  "failed": 1,
+  "failed_student_ids": ["uuid-student-1"]
+}
 ```
 
 ---

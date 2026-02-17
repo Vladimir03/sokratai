@@ -740,16 +740,27 @@ async function handleAssignStudents(
     return jsonError(cors, 500, "DB_ERROR", "Failed to assign students");
   }
 
-  if (assignment.status === "draft") {
-    const { count } = await db
-      .from("homework_tutor_student_assignments")
-      .select("id", { count: "exact", head: true })
-      .eq("assignment_id", assignmentId);
-    if ((count ?? 0) > 0) {
-      await db
-        .from("homework_tutor_assignments")
-        .update({ status: "active" })
-        .eq("id", assignmentId);
+  let assignmentStatus = String(assignment.status ?? "draft");
+  if (assignmentStatus === "draft") {
+    const { data: updatedAssignment, error: statusUpdateError } = await db
+      .from("homework_tutor_assignments")
+      .update({ status: "active" })
+      .eq("id", assignmentId)
+      .eq("status", "draft")
+      .select("status")
+      .maybeSingle();
+
+    if (statusUpdateError) {
+      console.error("homework_api_request_error", {
+        route: "POST /assignments/:id/assign",
+        assignment_id: assignmentId,
+        error: statusUpdateError.message,
+      });
+      return jsonError(cors, 500, "DB_ERROR", "Failed to activate assignment after assign");
+    }
+
+    if (updatedAssignment?.status) {
+      assignmentStatus = updatedAssignment.status as string;
     }
   }
 
@@ -758,8 +769,12 @@ async function handleAssignStudents(
     tutor_id: tutorUserId,
     assignment_id: assignmentId,
     added: (upserted ?? []).length,
+    assignment_status_after_assign: assignmentStatus,
   });
-  return jsonOk(cors, { added: (upserted ?? []).length });
+  return jsonOk(cors, {
+    added: (upserted ?? []).length,
+    assignment_status: assignmentStatus,
+  });
 }
 
 // ─── Endpoint: POST /assignments/:id/notify ──────────────────────────────────
@@ -787,7 +802,7 @@ async function handleNotifyStudents(
     .eq("notified", false);
 
   if (!pendingStudents || pendingStudents.length === 0) {
-    return jsonOk(cors, { sent: 0, failed: 0 });
+    return jsonOk(cors, { sent: 0, failed: 0, failed_student_ids: [] });
   }
 
   const studentIds = pendingStudents.map((s) => s.student_id);
@@ -810,11 +825,13 @@ async function handleNotifyStudents(
   let sent = 0;
   let failed = 0;
   const notifiedStudentIds: string[] = [];
+  const failedStudentIds: string[] = [];
 
   for (const sid of studentIds) {
     const chatId = tgMap[sid];
     if (!chatId) {
       failed++;
+      failedStudentIds.push(sid);
       continue;
     }
     try {
@@ -835,11 +852,13 @@ async function handleNotifyStudents(
         notifiedStudentIds.push(sid);
       } else {
         failed++;
+        failedStudentIds.push(sid);
         const errBody = await resp.text();
         console.error("homework_api_telegram_send_failed", { student_id: sid, chat_id: chatId, error: errBody });
       }
     } catch (err) {
       failed++;
+      failedStudentIds.push(sid);
       console.error("homework_api_telegram_send_error", { student_id: sid, error: String(err) });
     }
   }
@@ -859,8 +878,9 @@ async function handleNotifyStudents(
     assignment_id: assignmentId,
     sent,
     failed,
+    failed_student_ids: failedStudentIds,
   });
-  return jsonOk(cors, { sent, failed });
+  return jsonOk(cors, { sent, failed, failed_student_ids: failedStudentIds });
 }
 
 function escapeMarkdown(text: string): string {

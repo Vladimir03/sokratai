@@ -328,6 +328,35 @@ src/
 - Для уведомлений используется прямой вызов Telegram Bot API (`TELEGRAM_BOT_TOKEN`)
 - НЕ МЕНЯТЬ `AuthGuard`, `TutorGuard`, student-компоненты, `telegram-bot/index.ts`
 
+## CJM fixes — tutor homework (Upload + Visibility + UX)
+
+- Добавлена миграция операционного фикса:
+  - `supabase/migrations/20260217123000_homework_cjm_bugfixes.sql`
+  - idempotent ensure bucket `homework-task-images`
+  - idempotent recreate storage policies для `homework-task-images`
+  - backfill: `homework_tutor_assignments.status = 'draft'` -> `active`, если уже есть назначения в `homework_tutor_student_assignments`
+- Обновлён `homework-api` контракт:
+  - `POST /assignments/:id/assign` возвращает `{ added, assignment_status }`
+  - `POST /assignments/:id/notify` возвращает `{ sent, failed, failed_student_ids }`
+  - в `assign` авто-активация `draft -> active` теперь строгая, с проверкой `update` ошибки
+- В `telegram-bot` добавлена диагностика видимости ДЗ:
+  - лог `homework_visibility_diagnostics` с полями `student_id`, `assigned_links_count`, `active_assignments_count`, `draft_assignments_count`
+  - если есть назначенные `draft` и нет `active`, бот отправляет явный текст, что ДЗ назначены, но ещё не активированы
+- Во фронте (`src/lib/tutorHomeworkApi.ts`) стандартизирован storage reference:
+  - формат хранения: `storage://{bucket}/{objectPath}`
+  - helper-ы: `parseStorageRef`, `toStorageRef`
+  - upload task image: primary bucket `homework-task-images`, fallback bucket `chat-images` при `Bucket not found/404`
+  - delete/sign-url теперь работают через parsed `bucket/path` (с backward compatibility для legacy plain path)
+- UX quick wins в `src/pages/tutor/TutorHomeworkCreate.tsx`:
+  - превью изображения задачи + имя файла + подсказка по ограничениям файла
+  - warning toast при fallback upload
+  - поиск учеников по имени/`@username`
+  - бейджи `Telegram подключен / Telegram не подключен`
+  - summary перед submit: выбрано учеников + сколько без Telegram
+  - phase progress submit (`creating -> assigning -> notifying`)
+  - защита от потери данных (confirm при выходе + `beforeunload`)
+  - финальный toast учитывает `failed_student_ids`
+
 ## Команды
 
 ```bash
