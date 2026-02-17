@@ -1,6 +1,7 @@
+import { useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { ArrowLeft, BookOpen, Users, BarChart3, Clock, CheckCircle2, XCircle, AlertCircle } from 'lucide-react';
+import { ArrowLeft, BookOpen, Users, BarChart3, Clock, CheckCircle2, XCircle, AlertCircle, ChevronDown, ChevronUp, ImageIcon } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -14,6 +15,7 @@ import {
   getTutorHomeworkResults,
   type TutorHomeworkAssignmentDetails,
   type TutorHomeworkResultsResponse,
+  type TutorHomeworkSubmissionItem,
   type HomeworkAssignmentStatus,
   type HomeworkSubject,
 } from '@/lib/tutorHomeworkApi';
@@ -184,6 +186,86 @@ function TaskImagePreview({ taskImageUrl }: { taskImageUrl: string | null }) {
 
 // ─── Students List ───────────────────────────────────────────────────────────
 
+// ─── Student Image ──────────────────────────────────────────────────────────
+
+function StudentImage({ imageRef }: { imageRef: string }) {
+  const imageQuery = useQuery<string | null>({
+    queryKey: ['tutor', 'homework', 'student-image', imageRef],
+    queryFn: () => getHomeworkImageSignedUrl(imageRef, { defaultBucket: 'homework-images' }),
+    staleTime: TUTOR_STALE_TIME_MS,
+    gcTime: TUTOR_GC_TIME_MS,
+    retry: 1,
+  });
+
+  if (imageQuery.isLoading) return <Skeleton className="h-20 w-20 rounded-md" />;
+  if (!imageQuery.data) return <div className="h-20 w-20 rounded-md bg-muted flex items-center justify-center"><ImageIcon className="h-5 w-5 text-muted-foreground" /></div>;
+
+  return (
+    <a href={imageQuery.data} target="_blank" rel="noreferrer" className="inline-block rounded-md border bg-background p-0.5 hover:opacity-90 transition-opacity">
+      <img src={imageQuery.data} alt="Ответ ученика" className="h-20 w-auto max-w-[140px] rounded-sm object-cover" loading="lazy" />
+    </a>
+  );
+}
+
+// ─── Submission Detail Row ──────────────────────────────────────────────────
+
+function SubmissionItemRow({ item }: { item: TutorHomeworkSubmissionItem }) {
+  const isCorrect = item.tutor_override_correct ?? item.ai_is_correct;
+  const score = item.ai_score;
+
+  return (
+    <div className="p-3 rounded-lg bg-muted/20 space-y-2">
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-sm font-medium">Задача {item.task_order_num}</span>
+        <div className="flex items-center gap-2">
+          {isCorrect != null && (
+            <Badge variant="outline" className={isCorrect
+              ? 'bg-green-100 text-green-800 border-green-200 dark:bg-green-900/30 dark:text-green-400'
+              : 'bg-red-100 text-red-800 border-red-200 dark:bg-red-900/30 dark:text-red-400'
+            }>
+              {isCorrect ? '✓ Верно' : '✗ Неверно'}
+            </Badge>
+          )}
+          {score != null && (
+            <span className="text-xs text-muted-foreground">{score}/{item.max_score}</span>
+          )}
+          {item.ai_confidence != null && (
+            <span className="text-xs text-muted-foreground">({Math.round(item.ai_confidence * 100)}%)</span>
+          )}
+        </div>
+      </div>
+
+      {/* Student images */}
+      {item.student_image_urls && item.student_image_urls.length > 0 && (
+        <div className="flex gap-2 flex-wrap">
+          {item.student_image_urls.map((url, i) => (
+            <StudentImage key={i} imageRef={url} />
+          ))}
+        </div>
+      )}
+
+      {/* Student text */}
+      {item.student_text && (
+        <p className="text-sm bg-background rounded p-2 border whitespace-pre-wrap break-words">{item.student_text}</p>
+      )}
+
+      {/* AI feedback */}
+      {item.ai_feedback && (
+        <p className="text-xs text-muted-foreground italic">{item.ai_feedback}</p>
+      )}
+
+      {/* Error type */}
+      {item.ai_error_type && item.ai_error_type !== 'correct' && (
+        <Badge variant="outline" className="bg-orange-100 text-orange-800 border-orange-200 dark:bg-orange-900/30 dark:text-orange-400 text-xs">
+          {item.ai_error_type}
+        </Badge>
+      )}
+    </div>
+  );
+}
+
+// ─── Students List ───────────────────────────────────────────────────────────
+
 function StudentsList({
   details,
   results,
@@ -191,7 +273,9 @@ function StudentsList({
   details: TutorHomeworkAssignmentDetails;
   results: TutorHomeworkResultsResponse | undefined;
 }) {
+  const [expandedStudents, setExpandedStudents] = useState<Set<string>>(new Set());
   const { assigned_students } = details;
+
   if (assigned_students.length === 0) {
     return (
       <Card animate={false} className="bg-muted/30">
@@ -206,6 +290,15 @@ function StudentsList({
     (results?.per_student ?? []).map(s => [s.student_id, s]),
   );
 
+  const toggleExpand = (studentId: string) => {
+    setExpandedStudents(prev => {
+      const next = new Set(prev);
+      if (next.has(studentId)) next.delete(studentId);
+      else next.add(studentId);
+      return next;
+    });
+  };
+
   return (
     <Card animate={false}>
       <CardHeader>
@@ -215,47 +308,71 @@ function StudentsList({
         <div className="divide-y">
           {assigned_students.map((student) => {
             const sub = submissionMap.get(student.student_id);
+            const isExpanded = expandedStudents.has(student.student_id);
+            const hasItems = sub && sub.submission_items && sub.submission_items.length > 0;
+
             return (
-              <div key={student.student_id} className="flex items-center justify-between py-3 gap-2">
-                <div className="min-w-0">
-                  <p className="font-medium text-sm truncate">{student.name || 'Без имени'}</p>
-                  <div className="flex items-center gap-2 mt-0.5">
-                    {student.notified ? (
-                      <span className="text-xs text-green-600 flex items-center gap-0.5">
-                        <CheckCircle2 className="h-3 w-3" /> Уведомлён
-                      </span>
+              <div key={student.student_id} className="py-3">
+                <div
+                  className={`flex items-center justify-between gap-2 ${hasItems ? 'cursor-pointer hover:bg-muted/30 -mx-2 px-2 py-1 rounded-md transition-colors' : ''}`}
+                  onClick={hasItems ? () => toggleExpand(student.student_id) : undefined}
+                >
+                  <div className="min-w-0 flex items-center gap-2">
+                    {hasItems && (
+                      isExpanded
+                        ? <ChevronUp className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+                        : <ChevronDown className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+                    )}
+                    <div>
+                      <p className="font-medium text-sm truncate">{student.name || 'Без имени'}</p>
+                      <div className="flex items-center gap-2 mt-0.5">
+                        {student.notified ? (
+                          <span className="text-xs text-green-600 flex items-center gap-0.5">
+                            <CheckCircle2 className="h-3 w-3" /> Уведомлён
+                          </span>
+                        ) : (
+                          <span className="text-xs text-muted-foreground flex items-center gap-0.5">
+                            <AlertCircle className="h-3 w-3" /> Не уведомлён
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                  <div className="text-right flex-shrink-0">
+                    {sub ? (
+                      <div>
+                        <Badge variant="outline" className={
+                          sub.status === 'ai_checked' || sub.status === 'tutor_reviewed'
+                            ? 'bg-green-100 text-green-800 border-green-200 dark:bg-green-900/30 dark:text-green-400'
+                            : 'bg-yellow-100 text-yellow-800 border-yellow-200 dark:bg-yellow-900/30 dark:text-yellow-400'
+                        }>
+                          {sub.status === 'ai_checked' ? 'Проверено AI' :
+                           sub.status === 'tutor_reviewed' ? 'Проверено' :
+                           sub.status === 'submitted' ? 'Сдано' :
+                           sub.status}
+                        </Badge>
+                        {sub.total_score != null && sub.total_max_score != null && (
+                          <p className="text-xs text-muted-foreground mt-1">
+                            {sub.total_score}/{sub.total_max_score}
+                          </p>
+                        )}
+                      </div>
                     ) : (
-                      <span className="text-xs text-muted-foreground flex items-center gap-0.5">
-                        <AlertCircle className="h-3 w-3" /> Не уведомлён
-                      </span>
+                      <Badge variant="outline" className="bg-muted text-muted-foreground border-muted">
+                        Не сдано
+                      </Badge>
                     )}
                   </div>
                 </div>
-                <div className="text-right flex-shrink-0">
-                  {sub ? (
-                    <div>
-                      <Badge variant="outline" className={
-                        sub.status === 'ai_checked' || sub.status === 'tutor_reviewed'
-                          ? 'bg-green-100 text-green-800 border-green-200 dark:bg-green-900/30 dark:text-green-400'
-                          : 'bg-yellow-100 text-yellow-800 border-yellow-200 dark:bg-yellow-900/30 dark:text-yellow-400'
-                      }>
-                        {sub.status === 'ai_checked' ? 'Проверено AI' :
-                         sub.status === 'tutor_reviewed' ? 'Проверено' :
-                         sub.status === 'submitted' ? 'Сдано' :
-                         sub.status}
-                      </Badge>
-                      {sub.total_score != null && sub.total_max_score != null && (
-                        <p className="text-xs text-muted-foreground mt-1">
-                          {sub.total_score}/{sub.total_max_score}
-                        </p>
-                      )}
-                    </div>
-                  ) : (
-                    <Badge variant="outline" className="bg-muted text-muted-foreground border-muted">
-                      Не сдано
-                    </Badge>
-                  )}
-                </div>
+
+                {/* Expanded submission details */}
+                {isExpanded && hasItems && (
+                  <div className="mt-3 ml-6 space-y-2">
+                    {sub.submission_items.map((item) => (
+                      <SubmissionItemRow key={item.task_id} item={item} />
+                    ))}
+                  </div>
+                )}
               </div>
             );
           })}

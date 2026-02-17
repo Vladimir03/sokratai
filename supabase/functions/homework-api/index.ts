@@ -974,6 +974,11 @@ async function handleGetResults(
     submissionItemsBySubmission[sid].push(item);
   }
 
+  const taskMap: Record<string, { order_num: number; task_text: string; max_score: number }> = {};
+  for (const t of tasks ?? []) {
+    taskMap[t.id] = { order_num: t.order_num, task_text: t.task_text, max_score: t.max_score };
+  }
+
   const perStudent = (submissions ?? []).map((s) => {
     const pct = (s.total_score != null && s.total_max_score != null && s.total_max_score > 0)
       ? Math.round((s.total_score / s.total_max_score) * 100 * 100) / 100
@@ -1024,10 +1029,6 @@ async function handleGetResults(
     };
   });
 
-  const taskMap: Record<string, { order_num: number; task_text: string; max_score: number }> = {};
-  for (const t of tasks ?? []) {
-    taskMap[t.id] = { order_num: t.order_num, task_text: t.task_text, max_score: t.max_score };
-  }
 
   const perTask = (tasks ?? []).map((t) => {
     const taskItems = items.filter((it) => it.task_id === t.id);
