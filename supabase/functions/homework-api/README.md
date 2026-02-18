@@ -186,6 +186,7 @@ Assign students to a homework assignment.
 
 **Behavior:**
 - All `student_ids` must belong to the tutor (via `tutor_students` table).
+- All `student_ids` must have Telegram linked (`profiles.telegram_user_id`), otherwise request is rejected.
 - Upsert: re-assigning an already assigned student is a no-op.
 - Auto-activation: if assignment is `draft`, API forces status to `active` right after successful assign.
 
@@ -208,6 +209,20 @@ Assign students to a homework assignment.
 }
 ```
 
+**Error (400):**
+```json
+{
+  "error": {
+    "code": "STUDENTS_TELEGRAM_NOT_CONNECTED",
+    "message": "Some selected students do not have Telegram linked",
+    "details": {
+      "invalid_student_ids": ["uuid-1"],
+      "invalid_student_names": ["Иван"]
+    }
+  }
+}
+```
+
 ---
 
 ### 6. POST /assignments/:id/notify
@@ -224,16 +239,23 @@ Send Telegram notifications to assigned students who haven't been notified yet.
 **Behavior:**
 - Only sends to students with `notified=false`.
 - Uses `TELEGRAM_BOT_TOKEN` to call Telegram Bot API directly.
+- Chat id resolution:
+  - primary: `profiles.telegram_user_id`
+  - fallback: `telegram_sessions.telegram_user_id` by `user_id`
 - After successful send: sets `notified=true`, `notified_at=now()`.
 - Idempotent: repeated calls won't re-send to already notified students.
 - Failed deliveries are returned as `failed_student_ids` for UI diagnostics.
+- Custom `message_template` is sent as plain text (without Markdown parse mode) to avoid parse errors.
 
 **Response (200):**
 ```json
 {
   "sent": 3,
   "failed": 1,
-  "failed_student_ids": ["uuid-student-1"]
+  "failed_student_ids": ["uuid-student-1"],
+  "failed_by_reason": {
+    "uuid-student-1": "missing_telegram_link"
+  }
 }
 ```
 

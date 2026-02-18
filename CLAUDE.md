@@ -339,8 +339,11 @@ src/
   - `POST /assignments/:id/assign` возвращает `{ added, assignment_status }`
   - `POST /assignments/:id/notify` возвращает `{ sent, failed, failed_student_ids }`
   - в `assign` авто-активация `draft -> active` теперь строгая, с проверкой `update` ошибки
+  - дополнительно: `assign` блокирует учеников без `profiles.telegram_user_id` (`STUDENTS_TELEGRAM_NOT_CONNECTED`)
+  - дополнительно: `notify` поддерживает fallback chat-id через `profiles.telegram_user_id` + `telegram_sessions`, и возвращает `failed_by_reason`
 - В `telegram-bot` добавлена диагностика видимости ДЗ:
   - лог `homework_visibility_diagnostics` с полями `student_id`, `assigned_links_count`, `active_assignments_count`, `draft_assignments_count`
+  - runtime self-heal: перед homework-роутингом бот синхронизирует `telegram_sessions.user_id` с canonical `profiles.id` по `telegram_user_id`
   - если есть назначенные `draft` и нет `active`, бот отправляет явный текст, что ДЗ назначены, но ещё не активированы
 - Во фронте (`src/lib/tutorHomeworkApi.ts`) стандартизирован storage reference:
   - формат хранения: `storage://{bucket}/{objectPath}`

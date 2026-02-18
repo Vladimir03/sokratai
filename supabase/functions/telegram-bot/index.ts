@@ -798,6 +798,98 @@ async function getOnboardingSession(telegramUserId: number) {
   return data;
 }
 
+async function resolveCanonicalUserIdByTelegram(
+  telegramUserId: number,
+): Promise<{ id: string; onboarding_completed: boolean | null } | null> {
+  const { data, error } = await supabase
+    .from("profiles")
+    .select("id, onboarding_completed")
+    .eq("telegram_user_id", telegramUserId)
+    .maybeSingle();
+
+  if (error) {
+    console.error("resolveCanonicalUserIdByTelegram failed:", { telegramUserId, error });
+    return null;
+  }
+
+  return (data as { id: string; onboarding_completed: boolean | null } | null) ?? null;
+}
+
+async function getOrRepairOnboardingSession(telegramUserId: number) {
+  const session = await getOnboardingSession(telegramUserId);
+  const canonicalProfile = await resolveCanonicalUserIdByTelegram(telegramUserId);
+
+  if (!canonicalProfile) {
+    return session;
+  }
+
+  if (!session) {
+    const onboardingState = canonicalProfile.onboarding_completed ? "completed" : "welcome";
+    const { error } = await supabase
+      .from("telegram_sessions")
+      .insert({
+        telegram_user_id: telegramUserId,
+        user_id: canonicalProfile.id,
+        onboarding_state: onboardingState,
+        onboarding_data: {},
+      });
+
+    if (error) {
+      console.error("telegram_session_user_repair_failed", {
+        telegram_user_id: telegramUserId,
+        old_user_id: null,
+        new_user_id: canonicalProfile.id,
+        reason: "missing_session",
+        error: error.message,
+      });
+      return session;
+    }
+
+    console.log("telegram_session_user_repaired", {
+      telegram_user_id: telegramUserId,
+      old_user_id: null,
+      new_user_id: canonicalProfile.id,
+      reason: "missing_session",
+    });
+
+    return {
+      telegram_user_id: telegramUserId,
+      user_id: canonicalProfile.id,
+      onboarding_state: onboardingState,
+      onboarding_data: {},
+    };
+  }
+
+  if (session.user_id === canonicalProfile.id) {
+    return session;
+  }
+
+  const { error: repairError } = await supabase
+    .from("telegram_sessions")
+    .update({ user_id: canonicalProfile.id })
+    .eq("telegram_user_id", telegramUserId);
+
+  if (repairError) {
+    console.error("telegram_session_user_repair_failed", {
+      telegram_user_id: telegramUserId,
+      old_user_id: session.user_id ?? null,
+      new_user_id: canonicalProfile.id,
+      reason: "mismatch",
+      error: repairError.message,
+    });
+    return session;
+  }
+
+  console.log("telegram_session_user_repaired", {
+    telegram_user_id: telegramUserId,
+    old_user_id: session.user_id ?? null,
+    new_user_id: canonicalProfile.id,
+    reason: "mismatch",
+  });
+
+  return { ...session, user_id: canonicalProfile.id };
+}
+
 async function updateOnboardingState(
   telegramUserId: number,
   userId: string,
@@ -810,6 +902,7 @@ async function updateOnboardingState(
     await supabase
       .from("telegram_sessions")
       .update({
+        user_id: userId,
         onboarding_state: state,
         onboarding_data: data ? { ...session.onboarding_data, ...data } : session.onboarding_data,
       })
@@ -1361,6 +1454,7 @@ async function handleStart(telegramUserId: number, telegramUsername: string | un
   // Check if user already completed onboarding - send welcome back message instead
   if (profile.onboarding_completed) {
     console.log("User already completed onboarding, sending welcome back message");
+    await updateOnboardingState(telegramUserId, profile.id, "completed");
     
     const welcomeBackMessage = `👋 С возвращением!
 
@@ -2357,6 +2451,9 @@ async function sendHomeworkTaskStep(
 
 async function handleHomeworkCommand(telegramUserId: number, userId: string) {
   try {
+    const canonicalProfile = await resolveCanonicalUserIdByTelegram(telegramUserId);
+    const canonicalUserId = canonicalProfile?.id ?? null;
+
     await updatePracticeState(telegramUserId, null);
     await updateDiagnosticState(telegramUserId, null);
     await setHomeworkState(userId, "HW_SELECTING", {});
@@ -2366,9 +2463,21 @@ async function handleHomeworkCommand(telegramUserId: number, userId: string) {
 
     console.log("homework_visibility_diagnostics", {
       student_id: userId,
+      session_user_id: userId,
+      canonical_user_id: canonicalUserId,
       assigned_links_count: visibilityStats.assignedLinksCount,
       active_assignments_count: visibilityStats.activeAssignmentsCount,
       draft_assignments_count: visibilityStats.draftAssignmentsCount,
+    });
+
+    console.log("homework_assignment_delivery_diagnostics", {
+      assignment_id: null,
+      student_id: userId,
+      has_profile_telegram_id: Boolean(canonicalUserId),
+      has_session: true,
+      session_user_id: userId,
+      canonical_user_id: canonicalUserId,
+      reason: "homework_visibility_check",
     });
 
     if (assignments.length === 0) {
@@ -6464,7 +6573,8 @@ async function handleCallbackQuery(callbackQuery: any) {
 
   // ============= HOMEWORK CALLBACKS =============
   if (data.startsWith("hw_")) {
-    await handleHomeworkCallback(telegramUserId, userId, data);
+    const repairedSession = await getOrRepairOnboardingSession(telegramUserId);
+    await handleHomeworkCallback(telegramUserId, repairedSession?.user_id ?? null, data);
     return;
   }
 
@@ -6726,7 +6836,7 @@ Deno.serve(async (req) => {
     // Handle /homework command
     if (update.message?.text === "/homework") {
       const telegramUserId = update.message.from.id;
-      const session = await getOnboardingSession(telegramUserId);
+      const session = await getOrRepairOnboardingSession(telegramUserId);
 
       if (!session?.user_id) {
         await sendTelegramMessage(telegramUserId, "❌ Сначала нажми /start, чтобы подготовить аккаунт.");
@@ -6742,7 +6852,7 @@ Deno.serve(async (req) => {
     // Handle /cancel command
     if (update.message?.text === "/cancel") {
       const telegramUserId = update.message.from.id;
-      const session = await getOnboardingSession(telegramUserId);
+      const session = await getOrRepairOnboardingSession(telegramUserId);
       await handleHomeworkCancelFlow(telegramUserId, session?.user_id ?? null);
 
       return new Response(JSON.stringify({ ok: true }), {
@@ -6866,7 +6976,7 @@ Deno.serve(async (req) => {
     // Handle text messages
     if (update.message?.text && !update.message.text.startsWith("/")) {
       const telegramUserId = update.message.from.id;
-      const session = await getOnboardingSession(telegramUserId);
+      const session = await getOrRepairOnboardingSession(telegramUserId);
 
       if (session?.user_id) {
         const text = update.message.text;
@@ -6916,7 +7026,7 @@ Deno.serve(async (req) => {
     // Handle photo messages
     if (update.message?.photo) {
       const telegramUserId = update.message.from.id;
-      const session = await getOnboardingSession(telegramUserId);
+      const session = await getOrRepairOnboardingSession(telegramUserId);
 
       if (session?.user_id) {
         const photo = update.message.photo[update.message.photo.length - 1]; // Get largest photo

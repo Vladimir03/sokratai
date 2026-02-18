@@ -11,6 +11,7 @@ const VALID_SUBJECTS = ["math", "physics", "history", "social", "english", "cs"]
 const VALID_STATUSES = ["draft", "active", "closed"] as const;
 const VALID_STATUS_FILTERS = ["draft", "active", "closed", "all"] as const;
 const VALID_SUBMISSION_STATUSES = ["in_progress", "submitted", "ai_checked", "tutor_reviewed"] as const;
+type NotifyFailureReason = "missing_telegram_link" | "telegram_send_failed" | "telegram_send_error";
 
 const FALLBACK_ORIGINS = [
   "https://sokratai.ru",
@@ -708,7 +709,7 @@ async function handleAssignStudents(
       return jsonError(cors, 400, "VALIDATION", `student_ids[${i}] is not a valid UUID`);
     }
   }
-  const studentIds = b.student_ids as string[];
+  const studentIds = [...new Set(b.student_ids as string[])];
 
   const { data: tutorStudents } = await db
     .from("tutor_students")
@@ -723,6 +724,50 @@ async function handleAssignStudents(
     return jsonError(cors, 403, "INVALID_STUDENTS", "Some student_ids are not your students", {
       invalid_student_ids: invalidIds,
     });
+  }
+
+  const { data: studentProfiles, error: studentProfilesError } = await db
+    .from("profiles")
+    .select("id, username, telegram_username, telegram_user_id")
+    .in("id", studentIds);
+
+  if (studentProfilesError) {
+    console.error("homework_api_request_error", {
+      route: "POST /assignments/:id/assign",
+      assignment_id: assignmentId,
+      error: studentProfilesError.message,
+    });
+    return jsonError(cors, 500, "DB_ERROR", "Failed to validate students telegram linkage");
+  }
+
+  const profileById = new Map((studentProfiles ?? []).map((p: any) => [p.id as string, p]));
+  const studentsWithoutTelegram = studentIds.filter((sid) => {
+    const profile = profileById.get(sid);
+    return !profile?.telegram_user_id;
+  });
+
+  if (studentsWithoutTelegram.length > 0) {
+    const invalidStudentNames = studentsWithoutTelegram.map((sid) => {
+      const profile = profileById.get(sid);
+      if (profile?.username && String(profile.username).trim().length > 0) {
+        return String(profile.username);
+      }
+      if (profile?.telegram_username && String(profile.telegram_username).trim().length > 0) {
+        return `@${String(profile.telegram_username).replace(/^@/, "")}`;
+      }
+      return sid;
+    });
+
+    return jsonError(
+      cors,
+      400,
+      "STUDENTS_TELEGRAM_NOT_CONNECTED",
+      "Some selected students do not have Telegram linked",
+      {
+        invalid_student_ids: studentsWithoutTelegram,
+        invalid_student_names: invalidStudentNames,
+      },
+    );
   }
 
   const rows = studentIds.map((sid) => ({
@@ -802,20 +847,50 @@ async function handleNotifyStudents(
     .eq("notified", false);
 
   if (!pendingStudents || pendingStudents.length === 0) {
-    return jsonOk(cors, { sent: 0, failed: 0, failed_student_ids: [] });
+    return jsonOk(cors, { sent: 0, failed: 0, failed_student_ids: [], failed_by_reason: {} });
   }
 
   const studentIds = pendingStudents.map((s) => s.student_id);
 
-  const { data: sessions } = await db
+  const { data: profiles, error: profilesError } = await db
+    .from("profiles")
+    .select("id, telegram_user_id")
+    .in("id", studentIds);
+
+  if (profilesError) {
+    console.error("homework_api_request_error", {
+      route: "POST /assignments/:id/notify",
+      assignment_id: assignmentId,
+      error: profilesError.message,
+    });
+    return jsonError(cors, 500, "DB_ERROR", "Failed to resolve students telegram links");
+  }
+
+  const { data: sessions, error: sessionsError } = await db
     .from("telegram_sessions")
     .select("user_id, telegram_user_id")
     .in("user_id", studentIds);
 
-  const tgMap: Record<string, number> = {};
+  if (sessionsError) {
+    console.error("homework_api_request_error", {
+      route: "POST /assignments/:id/notify",
+      assignment_id: assignmentId,
+      error: sessionsError.message,
+    });
+    return jsonError(cors, 500, "DB_ERROR", "Failed to resolve telegram sessions");
+  }
+
+  const profileTgMap: Record<string, number> = {};
+  for (const p of profiles ?? []) {
+    if (p.telegram_user_id) {
+      profileTgMap[p.id] = p.telegram_user_id;
+    }
+  }
+
+  const sessionTgMap: Record<string, number> = {};
   for (const s of sessions ?? []) {
     if (s.telegram_user_id) {
-      tgMap[s.user_id] = s.telegram_user_id;
+      sessionTgMap[s.user_id] = s.telegram_user_id;
     }
   }
 
@@ -826,25 +901,52 @@ async function handleNotifyStudents(
   let failed = 0;
   const notifiedStudentIds: string[] = [];
   const failedStudentIds: string[] = [];
+  const failedByReason: Record<string, NotifyFailureReason> = {};
 
   for (const sid of studentIds) {
-    const chatId = tgMap[sid];
+    const profileChatId = profileTgMap[sid];
+    const sessionChatId = sessionTgMap[sid];
+    const chatId = profileChatId ?? sessionChatId;
+
+    const hasProfileTelegramId = Boolean(profileChatId);
+    const hasSession = typeof sessionChatId !== "undefined";
+
+    console.log("homework_assignment_delivery_diagnostics", {
+      assignment_id: assignmentId,
+      student_id: sid,
+      has_profile_telegram_id: hasProfileTelegramId,
+      has_session: hasSession,
+      session_user_id: hasSession ? sid : null,
+      canonical_user_id: sid,
+      reason: chatId ? "ready_to_send" : "missing_telegram_link",
+    });
+
     if (!chatId) {
       failed++;
       failedStudentIds.push(sid);
+      failedByReason[sid] = "missing_telegram_link";
+      console.warn("homework_notify_student_failed", {
+        assignment_id: assignmentId,
+        student_id: sid,
+        reason: "missing_telegram_link",
+      });
       continue;
     }
     try {
+      const payload: Record<string, unknown> = {
+        chat_id: chatId,
+        text,
+      };
+      if (!messageTemplate) {
+        payload.parse_mode = "Markdown";
+      }
+
       const resp = await fetch(
         `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            chat_id: chatId,
-            text,
-            parse_mode: "Markdown",
-          }),
+          body: JSON.stringify(payload),
         },
       );
       if (resp.ok) {
@@ -853,13 +955,34 @@ async function handleNotifyStudents(
       } else {
         failed++;
         failedStudentIds.push(sid);
+        failedByReason[sid] = "telegram_send_failed";
         const errBody = await resp.text();
-        console.error("homework_api_telegram_send_failed", { student_id: sid, chat_id: chatId, error: errBody });
+        console.error("homework_api_telegram_send_failed", {
+          assignment_id: assignmentId,
+          student_id: sid,
+          chat_id: chatId,
+          error: errBody,
+        });
+        console.warn("homework_notify_student_failed", {
+          assignment_id: assignmentId,
+          student_id: sid,
+          reason: "telegram_send_failed",
+        });
       }
     } catch (err) {
       failed++;
       failedStudentIds.push(sid);
-      console.error("homework_api_telegram_send_error", { student_id: sid, error: String(err) });
+      failedByReason[sid] = "telegram_send_error";
+      console.error("homework_api_telegram_send_error", {
+        assignment_id: assignmentId,
+        student_id: sid,
+        error: String(err),
+      });
+      console.warn("homework_notify_student_failed", {
+        assignment_id: assignmentId,
+        student_id: sid,
+        reason: "telegram_send_error",
+      });
     }
   }
 
@@ -879,8 +1002,14 @@ async function handleNotifyStudents(
     sent,
     failed,
     failed_student_ids: failedStudentIds,
+    failed_by_reason: failedByReason,
   });
-  return jsonOk(cors, { sent, failed, failed_student_ids: failedStudentIds });
+  return jsonOk(cors, {
+    sent,
+    failed,
+    failed_student_ids: failedStudentIds,
+    failed_by_reason: failedByReason,
+  });
 }
 
 function escapeMarkdown(text: string): string {

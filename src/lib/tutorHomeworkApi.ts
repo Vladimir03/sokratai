@@ -46,10 +46,21 @@ export interface AssignStudentsResponse {
   assignment_status: HomeworkAssignmentStatus;
 }
 
+export type NotifyFailureReason =
+  | 'missing_telegram_link'
+  | 'telegram_send_failed'
+  | 'telegram_send_error';
+
 export interface NotifyStudentsResponse {
   sent: number;
   failed: number;
   failed_student_ids: string[];
+  failed_by_reason?: Record<string, NotifyFailureReason>;
+}
+
+export interface StudentsTelegramNotConnectedDetails {
+  invalid_student_ids: string[];
+  invalid_student_names?: string[];
 }
 
 // ─── API Error ───────────────────────────────────────────────────────────────

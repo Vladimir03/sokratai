@@ -42,8 +42,10 @@ import {
   uploadTutorHomeworkTaskImage,
   deleteTutorHomeworkTaskImage,
   parseStorageRef,
+  HomeworkApiError,
   type HomeworkSubject,
   type CreateAssignmentTask,
+  type StudentsTelegramNotConnectedDetails,
 } from '@/lib/tutorHomeworkApi';
 
 // ─── Constants ───────────────────────────────────────────────────────────────
@@ -791,6 +793,7 @@ function SubmitPhaseTracker({
 function TutorHomeworkCreateContent() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const { students: tutorStudents } = useTutorStudents();
 
   const [step, setStep] = useState(1);
 
@@ -906,10 +909,23 @@ function TutorHomeworkCreateContent() {
     const errs: Record<string, string> = {};
     if (selectedStudentIds.size === 0) {
       errs._students = 'Выберите хотя бы одного ученика';
+    } else {
+      const selectedWithoutTelegram = tutorStudents.filter(
+        (s) => selectedStudentIds.has(s.student_id) && !s.profiles?.telegram_user_id,
+      );
+      if (selectedWithoutTelegram.length > 0) {
+        const names = selectedWithoutTelegram
+          .map((s) => s.profiles?.username || s.profiles?.telegram_username || s.student_id);
+        const preview = names.slice(0, 5).join(', ');
+        const suffix = names.length > 5 ? '...' : '';
+        errs._students =
+          `Выбраны ученики без Telegram-связки: ${preview}${suffix}. ` +
+          'Попросите ученика нажать /start и повторите.';
+      }
     }
     setErrors(errs);
     return Object.keys(errs).length === 0;
-  }, [selectedStudentIds]);
+  }, [selectedStudentIds, tutorStudents]);
 
   // ── Navigation ──
 
@@ -984,6 +1000,7 @@ function TutorHomeworkCreateContent() {
         sent: number;
         failed: number;
         failed_student_ids: string[];
+        failed_by_reason?: Record<string, string>;
       } | null = null;
       if (notifyEnabled) {
         setSubmitPhase('notifying');
@@ -998,6 +1015,9 @@ function TutorHomeworkCreateContent() {
             sent: 0,
             failed: selectedStudentIds.size,
             failed_student_ids: [...selectedStudentIds],
+            failed_by_reason: Object.fromEntries(
+              [...selectedStudentIds].map((id) => [id, 'telegram_send_error']),
+            ),
           };
         }
       }
@@ -1036,6 +1056,33 @@ function TutorHomeworkCreateContent() {
       navigate('/tutor/homework');
     } catch (err) {
       setSubmitPhase('idle');
+
+      if (
+        err instanceof HomeworkApiError &&
+        err.code === 'STUDENTS_TELEGRAM_NOT_CONNECTED'
+      ) {
+        const details =
+          err.details && typeof err.details === 'object'
+            ? (err.details as StudentsTelegramNotConnectedDetails)
+            : null;
+        const names =
+          details?.invalid_student_names?.filter((name) => typeof name === 'string') ?? [];
+        const ids =
+          details?.invalid_student_ids?.filter((id) => typeof id === 'string') ?? [];
+
+        const selected = names.length > 0 ? names : ids;
+        const preview = selected.slice(0, 5).join(', ');
+        const suffix = selected.length > 5 ? '...' : '';
+        const message = selected.length > 0
+          ? `Выбраны ученики без Telegram-связки: ${preview}${suffix}. Попросите ученика нажать /start и повторите.`
+          : 'У части выбранных учеников не подключен Telegram. Попросите ученика нажать /start и повторите.';
+
+        setErrors({ _students: message });
+        setStep(3);
+        toast.error(message);
+        return;
+      }
+
       const message =
         err instanceof Error ? err.message : 'Неизвестная ошибка';
       toast.error(`Ошибка: ${message}`);
