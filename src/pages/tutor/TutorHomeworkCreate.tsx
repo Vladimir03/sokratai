@@ -232,29 +232,39 @@ function TaskEditor({
     parsedRef?.objectPath.split('/').pop() ||
     'uploaded-image.jpg';
 
-  const handleImageUpload = useCallback(
-    async (e: React.ChangeEvent<HTMLInputElement>) => {
-      const file = e.target.files?.[0];
-      if (!file) return;
-      if (file.size > MAX_IMAGE_SIZE_BYTES) {
-        toast.error('Файл слишком большой (максимум 10 МБ)');
-        if (fileRef.current) fileRef.current.value = '';
+  const processTaskImageFile = useCallback(
+    async (file: File, previousImagePath: string | null) => {
+      if (task.uploading) {
+        toast.warning('Дождись завершения текущей загрузки.');
         return;
       }
 
+      if (file.size > MAX_IMAGE_SIZE_BYTES) {
+        toast.error('Файл слишком большой (максимум 10 МБ)');
+        return;
+      }
+
+      const displayFileName = file.name || 'pasted-image.jpg';
       const previewUrl = URL.createObjectURL(file);
+
       onUpdate({ ...task, uploading: true });
       try {
         const uploadResult = await uploadTutorHomeworkTaskImage(file);
         revokeObjectUrl(task.task_image_preview_url);
+
         onUpdate({
           ...task,
           task_image_path: uploadResult.storageRef,
-          task_image_name: file.name,
+          task_image_name: displayFileName,
           task_image_preview_url: previewUrl,
           task_image_used_fallback: uploadResult.usedFallback,
           uploading: false,
         });
+
+        if (previousImagePath && previousImagePath !== uploadResult.storageRef) {
+          void deleteTutorHomeworkTaskImage(previousImagePath);
+        }
+
         toast.success('Изображение загружено');
         if (uploadResult.usedFallback) {
           toast.warning('Основной bucket недоступен, использован резервный канал загрузки.');
@@ -266,9 +276,55 @@ function TaskEditor({
           `Ошибка загрузки: ${err instanceof Error ? err.message : 'неизвестная ошибка'}. Попробуйте ещё раз.`,
         );
       }
-      if (fileRef.current) fileRef.current.value = '';
     },
     [task, onUpdate],
+  );
+
+  const handleImageUpload = useCallback(
+    async (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0];
+      if (!file) return;
+
+      await processTaskImageFile(file, null);
+
+      if (fileRef.current) fileRef.current.value = '';
+    },
+    [processTaskImageFile],
+  );
+
+  const handleTaskTextPaste = useCallback(
+    (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+      const items = e.clipboardData?.items;
+      if (!items?.length) return;
+
+      let pastedImage: File | null = null;
+      for (const item of items) {
+        if (item.type.startsWith('image/')) {
+          pastedImage = item.getAsFile();
+          if (pastedImage) break;
+        }
+      }
+
+      if (!pastedImage) return;
+
+      e.preventDefault();
+
+      if (task.uploading) {
+        toast.warning('Дождись завершения текущей загрузки.');
+        return;
+      }
+
+      const previousImagePath = task.task_image_path;
+      if (previousImagePath) {
+        const confirmed = window.confirm(
+          'У задачи уже есть фото. Заменить его новым скриншотом?',
+        );
+        if (!confirmed) return;
+      }
+
+      void processTaskImageFile(pastedImage, previousImagePath);
+    },
+    [task.uploading, task.task_image_path, processTaskImageFile],
   );
 
   const handleImageRemove = useCallback(() => {
@@ -303,9 +359,10 @@ function TaskEditor({
           <Label>Текст задачи *</Label>
           <textarea
             className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-base ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 min-h-[80px] resize-y"
-            placeholder="Решите уравнение x² - 5x + 6 = 0"
+            placeholder="Напиши свой вопрос или вставь скриншот (Ctrl+V)..."
             value={task.task_text}
             onChange={(e) => onUpdate({ ...task, task_text: e.target.value })}
+            onPaste={handleTaskTextPaste}
           />
         </div>
 

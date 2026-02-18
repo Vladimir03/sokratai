@@ -350,6 +350,7 @@ src/
 - UX quick wins в `src/pages/tutor/TutorHomeworkCreate.tsx`:
   - превью изображения задачи + имя файла + подсказка по ограничениям файла
   - warning toast при fallback upload
+  - в поле `Текст задачи` поддержан paste-скриншота через `Ctrl+V` (с confirm при замене существующего фото)
   - поиск учеников по имени/`@username`
   - бейджи `Telegram подключен / Telegram не подключен`
   - summary перед submit: выбрано учеников + сколько без Telegram
