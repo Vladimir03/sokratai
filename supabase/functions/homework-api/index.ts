@@ -894,7 +894,7 @@ async function handleNotifyStudents(
     }
   }
 
-  const defaultMessage = `📚 Новое домашнее задание: *${escapeMarkdown(assignment.title as string)}*\n\nПредмет: ${assignment.subject}\nИспользуй /homework чтобы начать.`;
+  const defaultMessage = `📚 Новое домашнее задание: <b>${escapeHtmlEntities(assignment.title as string)}</b>\n\nПредмет: ${escapeHtmlEntities(assignment.subject as string)}\nИспользуй /homework чтобы начать.`;
   const text = messageTemplate ?? defaultMessage;
 
   let sent = 0;
@@ -938,29 +938,50 @@ async function handleNotifyStudents(
         text,
       };
       if (!messageTemplate) {
-        payload.parse_mode = "Markdown";
+        payload.parse_mode = "HTML";
       }
 
-      const resp = await fetch(
-        `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload),
-        },
-      );
-      if (resp.ok) {
+      let lastResp: Response | null = null;
+      const maxAttempts = 2;
+      for (let attempt = 0; attempt < maxAttempts; attempt++) {
+        lastResp = await fetch(
+          `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+          },
+        );
+        if (lastResp.ok) break;
+
+        const status = lastResp.status;
+        // Retry only on transient errors (429 rate limit, 5xx server errors)
+        if (attempt < maxAttempts - 1 && (status === 429 || status >= 500)) {
+          console.warn("homework_notify_telegram_retry", {
+            assignment_id: assignmentId,
+            student_id: sid,
+            attempt: attempt + 1,
+            status,
+          });
+          await new Promise((r) => setTimeout(r, 500));
+          continue;
+        }
+        break;
+      }
+
+      if (lastResp?.ok) {
         sent++;
         notifiedStudentIds.push(sid);
       } else {
         failed++;
         failedStudentIds.push(sid);
         failedByReason[sid] = "telegram_send_failed";
-        const errBody = await resp.text();
+        const errBody = await lastResp?.text().catch(() => "unknown");
         console.error("homework_api_telegram_send_failed", {
           assignment_id: assignmentId,
           student_id: sid,
           chat_id: chatId,
+          status: lastResp?.status,
           error: errBody,
         });
         console.warn("homework_notify_student_failed", {
@@ -1014,6 +1035,13 @@ async function handleNotifyStudents(
 
 function escapeMarkdown(text: string): string {
   return text.replace(/[_*[\]()~`>#+\-=|{}.!]/g, "\\$&");
+}
+
+function escapeHtmlEntities(text: string): string {
+  return text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
 }
 
 // ─── Endpoint: GET /assignments/:id/results ──────────────────────────────────
