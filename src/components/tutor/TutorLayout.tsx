@@ -49,13 +49,10 @@ export function TutorLayout({ children }: TutorLayoutProps) {
   }, []);
 
   const handleLogout = async () => {
-    const { error } = await supabase.auth.signOut();
-    if (error) {
-      toast.error('Ошибка при выходе');
-    } else {
-      toast.success('Вы вышли из системы');
-      navigate('/login');
-    }
+    // Always navigate to login, even if signOut fails (e.g. session already expired)
+    await supabase.auth.signOut();
+    toast.success('Вы вышли из системы');
+    navigate('/login');
   };
 
   return (

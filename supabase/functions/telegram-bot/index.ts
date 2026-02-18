@@ -815,6 +815,24 @@ async function resolveCanonicalUserIdByTelegram(
   return (data as { id: string; onboarding_completed: boolean | null } | null) ?? null;
 }
 
+/**
+ * Resolve the effective user ID for homework operations.
+ * Prefers canonical profile ID (from profiles.telegram_user_id) over session user_id.
+ * This handles the case where telegram_sessions.user_id points to a wrong account.
+ */
+async function resolveHomeworkUserId(telegramUserId: number, sessionUserId: string): Promise<string> {
+  const canonical = await resolveCanonicalUserIdByTelegram(telegramUserId);
+  if (canonical && canonical.id !== sessionUserId) {
+    console.log("homework_user_id_resolved", {
+      telegram_user_id: telegramUserId,
+      session_user_id: sessionUserId,
+      canonical_user_id: canonical.id,
+      source: "canonical_override",
+    });
+  }
+  return canonical?.id ?? sessionUserId;
+}
+
 async function getOrRepairOnboardingSession(telegramUserId: number) {
   const session = await getOnboardingSession(telegramUserId);
   const canonicalProfile = await resolveCanonicalUserIdByTelegram(telegramUserId);
@@ -2451,18 +2469,18 @@ async function sendHomeworkTaskStep(
 
 async function handleHomeworkCommand(telegramUserId: number, userId: string) {
   try {
-    const canonicalProfile = await resolveCanonicalUserIdByTelegram(telegramUserId);
-    const canonicalUserId = canonicalProfile?.id ?? null;
+    const effectiveUserId = await resolveHomeworkUserId(telegramUserId, userId);
+    const canonicalUserId = effectiveUserId !== userId ? effectiveUserId : null;
 
     await updatePracticeState(telegramUserId, null);
     await updateDiagnosticState(telegramUserId, null);
-    await setHomeworkState(userId, "HW_SELECTING", {});
+    await setHomeworkState(effectiveUserId, "HW_SELECTING", {});
 
-    const assignments = await getActiveHomeworkAssignmentsForStudent(userId);
-    const visibilityStats = await getHomeworkAssignmentVisibilityStatsForStudent(userId);
+    const assignments = await getActiveHomeworkAssignmentsForStudent(effectiveUserId);
+    const visibilityStats = await getHomeworkAssignmentVisibilityStatsForStudent(effectiveUserId);
 
     console.log("homework_visibility_diagnostics", {
-      student_id: userId,
+      student_id: effectiveUserId,
       session_user_id: userId,
       canonical_user_id: canonicalUserId,
       assigned_links_count: visibilityStats.assignedLinksCount,
@@ -2472,7 +2490,7 @@ async function handleHomeworkCommand(telegramUserId: number, userId: string) {
 
     console.log("homework_assignment_delivery_diagnostics", {
       assignment_id: null,
-      student_id: userId,
+      student_id: effectiveUserId,
       has_profile_telegram_id: Boolean(canonicalUserId),
       has_session: true,
       session_user_id: userId,
@@ -2527,7 +2545,8 @@ async function handleHomeworkStartCallback(
   userId: string,
   assignmentId: string,
 ) {
-  const assignment = await verifyHomeworkAssignmentForStudent(assignmentId, userId);
+  const effectiveUserId = await resolveHomeworkUserId(telegramUserId, userId);
+  const assignment = await verifyHomeworkAssignmentForStudent(assignmentId, effectiveUserId);
   if (!assignment) {
     await sendTelegramMessage(
       telegramUserId,
@@ -2545,7 +2564,7 @@ async function handleHomeworkStartCallback(
     return;
   }
 
-  const submissionId = await getOrCreateHomeworkSubmission(assignment.id, userId, telegramUserId);
+  const submissionId = await getOrCreateHomeworkSubmission(assignment.id, effectiveUserId, telegramUserId);
   const taskIds = tasks.map((task) => task.id);
   await ensureSubmissionItemsForTasks(submissionId, taskIds);
 
@@ -2560,7 +2579,7 @@ async function handleHomeworkStartCallback(
     answers_by_task: {},
   };
 
-  await setHomeworkState(userId, "HW_SUBMITTING", initialContext);
+  await setHomeworkState(effectiveUserId, "HW_SUBMITTING", initialContext);
   await sendHomeworkTaskStep(
     telegramUserId,
     assignment.title,
@@ -2571,7 +2590,8 @@ async function handleHomeworkStartCallback(
 }
 
 async function handleHomeworkNextCallback(telegramUserId: number, userId: string) {
-  const stateData = await getHomeworkStateSafe(userId);
+  const effectiveUserId = await resolveHomeworkUserId(telegramUserId, userId);
+  const stateData = await getHomeworkStateSafe(effectiveUserId);
   if (stateData.state !== "HW_SUBMITTING") {
     await sendTelegramMessage(
       telegramUserId,
@@ -2590,7 +2610,7 @@ async function handleHomeworkNextCallback(telegramUserId: number, userId: string
 
   if (!assignmentId || !submissionId || !currentTaskId || taskIds.length === 0 || totalTasks === 0) {
     console.error("Invalid homework context for hw_next:", context);
-    await resetHomeworkState(userId);
+    await resetHomeworkState(effectiveUserId);
     await sendTelegramMessage(telegramUserId, "❌ Состояние домашки повреждено. Нажми /homework и начни заново.");
     return;
   }
@@ -2621,14 +2641,14 @@ async function handleHomeworkNextCallback(telegramUserId: number, userId: string
     const nextTaskId = taskIds[nextTaskIndex - 1];
     if (!nextTaskId) {
       console.error("Next task id missing in context:", context);
-      await resetHomeworkState(userId);
+      await resetHomeworkState(effectiveUserId);
       await sendTelegramMessage(telegramUserId, "❌ Не удалось перейти к следующей задаче. Нажми /homework.");
       return;
     }
 
     const nextTask = await getHomeworkTaskById(nextTaskId, assignmentId);
     if (!nextTask) {
-      await resetHomeworkState(userId);
+      await resetHomeworkState(effectiveUserId);
       await sendTelegramMessage(telegramUserId, "❌ Следующая задача не найдена. Нажми /homework.");
       return;
     }
@@ -2647,7 +2667,7 @@ async function handleHomeworkNextCallback(telegramUserId: number, userId: string
       answers_by_task: answersByTask,
     };
 
-    await setHomeworkState(userId, "HW_SUBMITTING", nextContext);
+    await setHomeworkState(effectiveUserId, "HW_SUBMITTING", nextContext);
     await sendHomeworkTaskStep(
       telegramUserId,
       assignment?.title ?? "Домашка",
@@ -2664,7 +2684,7 @@ async function handleHomeworkNextCallback(telegramUserId: number, userId: string
     images: [],
     answers_by_task: answersByTask,
   };
-  await setHomeworkState(userId, "HW_CONFIRMING", confirmContext);
+  await setHomeworkState(effectiveUserId, "HW_CONFIRMING", confirmContext);
 
   const answeredCount = Object.keys(answersByTask).length;
   await sendTelegramMessage(
@@ -2677,11 +2697,12 @@ async function handleHomeworkNextCallback(telegramUserId: number, userId: string
 }
 
 async function handleHomeworkSubmitCallback(telegramUserId: number, userId: string) {
-  const stateData = await getHomeworkStateSafe(userId);
+  const effectiveUserId = await resolveHomeworkUserId(telegramUserId, userId);
+  const stateData = await getHomeworkStateSafe(effectiveUserId);
   if (stateData.state !== "HW_CONFIRMING") {
     if (stateData.state === "IDLE") {
       try {
-        const latestSubmission = await getLatestHomeworkSubmissionForStudent(userId);
+        const latestSubmission = await getLatestHomeworkSubmissionForStudent(effectiveUserId);
         if (!latestSubmission) {
           await sendTelegramMessage(
             telegramUserId,
@@ -2696,9 +2717,9 @@ async function handleHomeworkSubmitCallback(telegramUserId: number, userId: stri
             "⏳ Пытаюсь завершить AI-проверку последней отправленной домашки...",
           );
           try {
-            await runHomeworkAiCheckAndSendResult(telegramUserId, userId, latestSubmission.id);
+            await runHomeworkAiCheckAndSendResult(telegramUserId, effectiveUserId, latestSubmission.id);
           } catch (error) {
-            console.error("Retry AI check failed for submitted homework:", { userId, latestSubmission, error });
+            console.error("Retry AI check failed for submitted homework:", { userId: effectiveUserId, latestSubmission, error });
             await sendTelegramMessage(
               telegramUserId,
               "⚠️ Домашка отправлена, но сейчас не удалось выполнить AI-проверку. Попробуй позже.",
@@ -2715,7 +2736,7 @@ async function handleHomeworkSubmitCallback(telegramUserId: number, userId: stri
           return;
         }
       } catch (error) {
-        console.error("Failed to process homework submit retry:", { userId, error });
+        console.error("Failed to process homework submit retry:", { userId: effectiveUserId, error });
       }
     }
 
@@ -2729,7 +2750,7 @@ async function handleHomeworkSubmitCallback(telegramUserId: number, userId: stri
   const context = normalizeHomeworkContext(stateData.context);
   if (!context.submission_id || !context.assignment_id) {
     console.error("Invalid homework context for hw_submit:", context);
-    await resetHomeworkState(userId);
+    await resetHomeworkState(effectiveUserId);
     await sendTelegramMessage(telegramUserId, "❌ Не удалось отправить домашку. Нажми /homework и начни заново.");
     return;
   }
@@ -2743,7 +2764,7 @@ async function handleHomeworkSubmitCallback(telegramUserId: number, userId: stri
         submitted_at: nowIso,
       })
       .eq("id", context.submission_id)
-      .eq("student_id", userId)
+      .eq("student_id", effectiveUserId)
       .eq("status", "in_progress")
       .select("id, status")
       .maybeSingle();
@@ -2760,7 +2781,7 @@ async function handleHomeworkSubmitCallback(telegramUserId: number, userId: stri
         .from("homework_tutor_submissions")
         .select("status")
         .eq("id", context.submission_id)
-        .eq("student_id", userId)
+        .eq("student_id", effectiveUserId)
         .maybeSingle();
 
       if (existingError || !existingSubmission) {
@@ -2785,10 +2806,10 @@ async function handleHomeworkSubmitCallback(telegramUserId: number, userId: stri
         "⏳ Домашка отправлена. Запускаю AI-проверку, это может занять до минуты...",
       );
       try {
-        await runHomeworkAiCheckAndSendResult(telegramUserId, userId, context.submission_id);
+        await runHomeworkAiCheckAndSendResult(telegramUserId, effectiveUserId, context.submission_id);
       } catch (error) {
         console.error("Failed to run AI check for submitted homework:", {
-          userId,
+          userId: effectiveUserId,
           submissionId: context.submission_id,
           error,
         });
@@ -2805,7 +2826,7 @@ async function handleHomeworkSubmitCallback(telegramUserId: number, userId: stri
       "ℹ️ Домашка уже проверена. Нажми /homework, чтобы отправить новую.",
     );
   } finally {
-    await resetHomeworkState(userId);
+    await resetHomeworkState(effectiveUserId);
   }
 }
 
@@ -2881,6 +2902,7 @@ async function handleHomeworkTextInput(
   text: string,
   stateData: { state: HomeworkState; context: HomeworkContext },
 ) {
+  const effectiveUserId = await resolveHomeworkUserId(telegramUserId, userId);
   if (stateData.state === "HW_SUBMITTING") {
     const value = text.trim();
     if (!value) {
@@ -2893,7 +2915,7 @@ async function handleHomeworkTextInput(
     const currentTaskId = getCurrentHomeworkTaskId(context);
     if (!submissionId || !currentTaskId) {
       console.error("Invalid homework context for text answer:", context);
-      await resetHomeworkState(userId);
+      await resetHomeworkState(effectiveUserId);
       await sendTelegramMessage(telegramUserId, "❌ Не удалось сохранить ответ. Нажми /homework и начни заново.");
       return;
     }
@@ -2901,7 +2923,7 @@ async function handleHomeworkTextInput(
     try {
       await saveHomeworkTextAnswer(submissionId, currentTaskId, value);
 
-      await setHomeworkState(userId, "HW_SUBMITTING", {
+      await setHomeworkState(effectiveUserId, "HW_SUBMITTING", {
         ...context,
         text: value,
       });
@@ -2954,6 +2976,7 @@ async function handleHomeworkPhotoInput(
   caption: string | undefined,
   stateData: { state: HomeworkState; context: HomeworkContext },
 ) {
+  const effectiveUserId = await resolveHomeworkUserId(telegramUserId, userId);
   if (stateData.state !== "HW_SUBMITTING") {
     await sendTelegramMessage(
       telegramUserId,
@@ -2974,7 +2997,7 @@ async function handleHomeworkPhotoInput(
   const currentTaskId = getCurrentHomeworkTaskId(context);
   if (!assignmentId || !submissionId || !currentTaskId) {
     console.error("Invalid homework context for photo answer:", context);
-    await resetHomeworkState(userId);
+    await resetHomeworkState(effectiveUserId);
     await sendTelegramMessage(telegramUserId, "❌ Не удалось сохранить фото. Нажми /homework и начни заново.");
     return;
   }
@@ -3006,7 +3029,7 @@ async function handleHomeworkPhotoInput(
       await saveHomeworkTextAnswer(submissionId, currentTaskId, captionText);
     }
 
-    await setHomeworkState(userId, "HW_SUBMITTING", {
+    await setHomeworkState(effectiveUserId, "HW_SUBMITTING", {
       ...context,
       images: savedPhoto.image_paths,
       text: captionText || context.text || "",
@@ -6853,7 +6876,10 @@ Deno.serve(async (req) => {
     if (update.message?.text === "/cancel") {
       const telegramUserId = update.message.from.id;
       const session = await getOrRepairOnboardingSession(telegramUserId);
-      await handleHomeworkCancelFlow(telegramUserId, session?.user_id ?? null);
+      const cancelUserId = session?.user_id
+        ? await resolveHomeworkUserId(telegramUserId, session.user_id)
+        : null;
+      await handleHomeworkCancelFlow(telegramUserId, cancelUserId);
 
       return new Response(JSON.stringify({ ok: true }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -6981,7 +7007,8 @@ Deno.serve(async (req) => {
       if (session?.user_id) {
         const text = update.message.text;
 
-        const homeworkState = await getHomeworkStateSafe(session.user_id);
+        const hwEffectiveUserId = await resolveHomeworkUserId(telegramUserId, session.user_id);
+        const homeworkState = await getHomeworkStateSafe(hwEffectiveUserId);
         if (homeworkState.state !== "IDLE") {
           await handleHomeworkTextInput(telegramUserId, session.user_id, text, homeworkState);
           return new Response(JSON.stringify({ ok: true }), {
@@ -7031,7 +7058,8 @@ Deno.serve(async (req) => {
       if (session?.user_id) {
         const photo = update.message.photo[update.message.photo.length - 1]; // Get largest photo
 
-        const homeworkState = await getHomeworkStateSafe(session.user_id);
+        const hwEffectiveUserId = await resolveHomeworkUserId(telegramUserId, session.user_id);
+        const homeworkState = await getHomeworkStateSafe(hwEffectiveUserId);
         if (homeworkState.state !== "IDLE") {
           await handleHomeworkPhotoInput(
             telegramUserId,
