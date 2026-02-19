@@ -176,6 +176,10 @@ src/
 - **Lovable** — для деплоя и быстрых UI-правок. Не трогает конфиги (vite, eslint, tsconfig)
 - **Cursor / Claude Code** — для серьёзной разработки, рефакторинга, багфиксов
 - После работы в Cursor/Claude Code: **всегда** делай `bun run build` и `bun run smoke-test` перед деплоем
+- Для локальных проверок запускай команды **строго последовательно**, не параллельно:
+  - `npm run build`
+  - после завершения: `npm run smoke-test`
+  - причина: параллельный запуск может ломаться по `EBUSY` (конкурентная запись в `dist/`)
 - После работы в Lovable: проверь, что Lovable не добавил тяжёлые зависимости в `src/components/ui/`
 - Не возвращай Google Calendar интеграцию (UI/edge functions) без отдельного согласованного требования и отдельной миграционной задачи для БД
 
@@ -409,6 +413,27 @@ src/
   - структурный лог `homework_ai_context_insufficient`
 - Наблюдаемость: `homework_tutor_notify_start/success/skipped/skipped_no_chat_id/error`
 - НЕ МЕНЯТЬ: схему БД, `AuthGuard`, `TutorGuard`, student practice/diagnostic, маршруты (кроме поддержки query на results-экране)
+
+## Tutor cache sync fix — profile updates without reload
+
+- Исправлен UX баг в кабинете репетитора: изменения ученика теперь сразу видны на всех вкладках без ручного `F5`.
+- Добавлен централизованный helper кэша:
+  - `src/lib/tutorStudentCacheSync.ts`
+  - `applyTutorStudentPatchToCache(queryClient, patch)` — мгновенный optimistic patch для:
+    - `['tutor','student', tutorStudentId]`
+    - `['tutor','students']`
+  - `removeTutorStudentFromCache(queryClient, tutorStudentId)` — удаление ученика из list/detail cache
+  - `invalidateTutorStudentDependentQueries(queryClient, tutorStudentId)` — точечная инвалидация:
+    - `['tutor','students']`
+    - `['tutor','student', tutorStudentId]`
+    - `['tutor','payments']`
+    - `['tutor','lessons']`
+    - `['tutor','homework']`
+- Интеграция в `src/pages/tutor/TutorStudentProfile.tsx`:
+  - `handleUpdateStudent`: после успешного API применяется patch + invalidate зависимых query
+  - `handleSave` (notes/parent_contact/last_lesson_at): patch + invalidate
+  - `handleDeleteStudent`: remove from cache + invalidate перед навигацией
+- Контракты API/БД не изменялись, фикс полностью фронтовый (React Query cache sync).
 
 ## Команды
 

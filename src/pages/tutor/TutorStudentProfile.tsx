@@ -1,5 +1,6 @@
 import { useState, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
+import { useQueryClient } from '@tanstack/react-query';
 import { ArrowLeft, Save, Plus, Trash2, MessageSquare, ChevronRight, Edit } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -39,6 +40,11 @@ import {
   getInitials, 
   formatExamType 
 } from '@/lib/formatters';
+import {
+  applyTutorStudentPatchToCache,
+  invalidateTutorStudentDependentQueries,
+  removeTutorStudentFromCache,
+} from '@/lib/tutorStudentCacheSync';
 import type { MockExam } from '@/types/tutor';
 
 // =============================================
@@ -48,6 +54,7 @@ import type { MockExam } from '@/types/tutor';
 function TutorStudentProfileContent() {
   const { tutorStudentId } = useParams<{ tutorStudentId: string }>();
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   
   const {
     student,
@@ -148,6 +155,13 @@ function TutorStudentProfileContent() {
         parent_contact: parentContact || undefined,
         last_lesson_at: lastLessonAt || undefined,
       });
+      applyTutorStudentPatchToCache(queryClient, {
+        tutorStudentId,
+        notes,
+        parentContact: parentContact || undefined,
+        lastLessonAt: lastLessonAt || undefined,
+      });
+      await invalidateTutorStudentDependentQueries(queryClient, tutorStudentId);
       toast.success('Изменения сохранены');
       refetchStudent();
     } catch (err) {
@@ -156,7 +170,7 @@ function TutorStudentProfileContent() {
     } finally {
       setIsSaving(false);
     }
-  }, [tutorStudentId, notes, parentContact, lastLessonAt, refetchStudent]);
+  }, [tutorStudentId, notes, parentContact, lastLessonAt, queryClient, refetchStudent]);
 
   const handleDeleteStudent = useCallback(async () => {
     if (!tutorStudentId) return;
@@ -167,6 +181,8 @@ function TutorStudentProfileContent() {
         toast.error('Не удалось удалить ученика');
         return;
       }
+      removeTutorStudentFromCache(queryClient, tutorStudentId);
+      await invalidateTutorStudentDependentQueries(queryClient, tutorStudentId);
       toast.success('Ученик удалён');
       navigate('/tutor/students');
     } catch (error) {
@@ -176,12 +192,13 @@ function TutorStudentProfileContent() {
       setIsDeletingStudent(false);
       setDeleteStudentOpen(false);
     }
-  }, [navigate, tutorStudentId]);
+  }, [navigate, queryClient, tutorStudentId]);
 
   const handleUpdateStudent = useCallback(async () => {
     if (!tutorStudentId) return;
     const name = editName.trim();
     const telegramUsername = editTelegram.trim();
+    const normalizedTelegramUsername = telegramUsername.replace(/^@/, '');
     const learningGoal = editLearningGoalPreset === 'other'
       ? editLearningGoalOther.trim()
       : editLearningGoalPreset.trim();
@@ -204,22 +221,40 @@ function TutorStudentProfileContent() {
     const grade = editGrade ? Number(editGrade) : undefined;
     const startScore = editStartScore ? Number(editStartScore) : undefined;
     const targetScore = editTargetScore ? Number(editTargetScore) : undefined;
+    const normalizedSubject = editSubject.trim() || undefined;
+    const normalizedParentContact = editParentContact.trim() || undefined;
+    const normalizedNotes = editNotes.trim() || undefined;
 
     setIsUpdatingStudent(true);
     try {
       await updateTutorStudentProfile({
         tutor_student_id: tutorStudentId,
         name,
-        telegram_username: telegramUsername,
+        telegram_username: normalizedTelegramUsername,
         learning_goal: learningGoal,
         grade: Number.isFinite(grade) ? grade : undefined,
         exam_type: editExamType || undefined,
-        subject: editSubject.trim() || undefined,
+        subject: normalizedSubject,
         start_score: Number.isFinite(startScore) ? startScore : undefined,
         target_score: Number.isFinite(targetScore) ? targetScore : undefined,
-        parent_contact: editParentContact.trim() || undefined,
-        notes: editNotes.trim() || undefined,
+        parent_contact: normalizedParentContact,
+        notes: normalizedNotes,
       });
+      applyTutorStudentPatchToCache(queryClient, {
+        tutorStudentId,
+        studentId: student?.student_id,
+        username: name,
+        telegramUsername: normalizedTelegramUsername,
+        learningGoal,
+        grade: Number.isFinite(grade) ? grade : undefined,
+        examType: editExamType || undefined,
+        subject: normalizedSubject,
+        startScore: Number.isFinite(startScore) ? startScore : undefined,
+        targetScore: Number.isFinite(targetScore) ? targetScore : undefined,
+        parentContact: normalizedParentContact,
+        notes: normalizedNotes,
+      });
+      await invalidateTutorStudentDependentQueries(queryClient, tutorStudentId);
       toast.success('Данные ученика обновлены');
       setEditStudentOpen(false);
       setEditFormInitialized(false);
@@ -243,7 +278,9 @@ function TutorStudentProfileContent() {
     editTargetScore,
     editParentContact,
     editNotes,
+    queryClient,
     refetchStudent,
+    student?.student_id,
   ]);
   
   // Загрузка
