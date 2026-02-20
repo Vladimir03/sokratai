@@ -434,6 +434,7 @@ export async function getTutorPayments(): Promise<TutorPaymentWithStudent[]> {
         id,
         student_id,
         parent_contact,
+        hourly_rate_cents,
         tutor_id,
         profiles (
           id,

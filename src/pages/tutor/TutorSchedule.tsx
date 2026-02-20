@@ -161,6 +161,7 @@ function LessonBlock({ lesson, workDayStart, onClick, onDragStart, onDragEnd }: 
 
   const lessonType = lesson.lesson_type || 'regular';
   const typeColor = getLessonTypeColor(lessonType);
+  const hourlyRateCents = lesson.tutor_students?.hourly_rate_cents;
 
   return (
     <div
@@ -178,6 +179,9 @@ function LessonBlock({ lesson, workDayStart, onClick, onDragStart, onDragEnd }: 
         <span className="text-xs font-medium truncate leading-tight">{studentName}</span>
         {height >= 35 && (
           <span className="text-[10px] opacity-80 truncate leading-tight">{timeStr}</span>
+        )}
+        {height >= 50 && hourlyRateCents != null && (
+          <span className="text-[10px] opacity-90 truncate font-semibold leading-tight">{hourlyRateCents / 100} ₽/ч</span>
         )}
         {height >= 50 && lesson.subject && (
           <span className="text-[10px] opacity-70 truncate leading-tight">{lesson.subject}</span>
@@ -854,6 +858,16 @@ function LessonDetailsDialog({
               <p className="text-sm text-muted-foreground">{timeStr} ({lesson.duration_min} мин)</p>
             </div>
           </div>
+          
+          {lesson.tutor_students?.hourly_rate_cents != null && (
+            <div className="flex items-center gap-3">
+              <span className="h-5 w-5 flex items-center justify-center text-muted-foreground">💰</span>
+              <div>
+                <p className="font-medium">{lesson.tutor_students.hourly_rate_cents / 100} ₽/ч</p>
+                <p className="text-sm text-muted-foreground">Ставка ученика</p>
+              </div>
+            </div>
+          )}
 
           {!isEditing ? (
             <>

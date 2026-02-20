@@ -442,7 +442,7 @@ function TutorPaymentsContent() {
 interface AddPaymentDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  students: { id: string; profiles?: { username: string } | null }[];
+  students: { id: string; hourly_rate_cents?: number | null; profiles?: { username: string } | null }[];
   onSuccess: () => void;
 }
 
@@ -452,6 +452,15 @@ function AddPaymentDialog({ open, onOpenChange, students, onSuccess }: AddPaymen
   const [period, setPeriod] = useState('');
   const [dueDate, setDueDate] = useState('');
   const [isSaving, setIsSaving] = useState(false);
+  
+  const selectedStudent = useMemo(() => students.find(s => s.id === studentId), [students, studentId]);
+  const hourlyRate = selectedStudent?.hourly_rate_cents ? selectedStudent.hourly_rate_cents / 100 : null;
+
+  const handleQuickAmount = (hours: number) => {
+    if (hourlyRate) {
+      setAmount((hourlyRate * hours).toString());
+    }
+  };
   
   const handleSubmit = async () => {
     if (!studentId || !amount) {
@@ -518,6 +527,20 @@ function AddPaymentDialog({ open, onOpenChange, students, onSuccess }: AddPaymen
               onChange={(e) => setAmount(e.target.value)}
               placeholder="например, 5000"
             />
+            {hourlyRate && (
+              <div className="mt-2 flex flex-col gap-1.5">
+                <span className="text-xs text-muted-foreground flex items-center gap-1">
+                  <span>💰 Ставка: <strong>{hourlyRate} ₽/ч</strong></span>
+                </span>
+                <div className="flex flex-wrap gap-1.5">
+                  <Badge variant="outline" className="cursor-pointer hover:bg-muted font-normal text-xs py-0.5" onClick={() => handleQuickAmount(1)}>1 ч</Badge>
+                  <Badge variant="outline" className="cursor-pointer hover:bg-muted font-normal text-xs py-0.5" onClick={() => handleQuickAmount(1.5)}>1.5 ч</Badge>
+                  <Badge variant="outline" className="cursor-pointer hover:bg-muted font-normal text-xs py-0.5" onClick={() => handleQuickAmount(2)}>2 ч</Badge>
+                  <Badge variant="outline" className="cursor-pointer hover:bg-muted font-normal text-xs py-0.5" onClick={() => handleQuickAmount(4)}>4 ч</Badge>
+                  <Badge variant="outline" className="cursor-pointer hover:bg-muted font-normal text-xs py-0.5" onClick={() => handleQuickAmount(8)}>8 ч</Badge>
+                </div>
+              </div>
+            )}
           </div>
           
           <div className="space-y-2">

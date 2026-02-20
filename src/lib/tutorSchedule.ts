@@ -183,6 +183,7 @@ export async function getTutorLessons(
       tutor_students (
         id,
         student_id,
+        hourly_rate_cents,
         profiles (
           id,
           username,
@@ -252,6 +253,7 @@ export async function createLesson(input: CreateLessonInput): Promise<TutorLesso
       tutor_students (
         id,
         student_id,
+        hourly_rate_cents,
         profiles (
           id,
           username,
@@ -401,6 +403,7 @@ export async function updateLesson(
       tutor_students (
         id,
         student_id,
+        hourly_rate_cents,
         profiles (
           id,
           username,

@@ -68,6 +68,7 @@ export function AddStudentDialog({
     target_score: undefined,
     notes: '',
     parent_contact: '',
+    hourly_rate_cents: undefined,
   });
 
   const handleCopyLink = async () => {
@@ -146,6 +147,7 @@ export function AddStudentDialog({
         target_score: undefined,
         notes: '',
         parent_contact: '',
+        hourly_rate_cents: undefined,
       });
       setLearningGoalPreset('');
       setLearningGoalOther('');
@@ -309,6 +311,24 @@ export function AddStudentDialog({
                             }
                             placeholder="+7 999 123-45-67 или @telegram"
                           />
+                        </div>
+
+                        <div className="space-y-2">
+                          <Label htmlFor="hourly_rate">Часовая ставка (₽/ч)</Label>
+                          <Input
+                            id="hourly_rate"
+                            type="number"
+                            min={0}
+                            value={formData.hourly_rate_cents ? formData.hourly_rate_cents / 100 : ''}
+                            onChange={(e) =>
+                              handleFormChange(
+                                'hourly_rate_cents',
+                                e.target.value ? parseInt(e.target.value) * 100 : undefined
+                              )
+                            }
+                            placeholder="например, 1500"
+                          />
+                          <p className="text-xs text-muted-foreground mt-1">Ставка за 60 минут. Используется в расписании.</p>
                         </div>
 
                         <div className="space-y-2">

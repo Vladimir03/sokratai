@@ -206,6 +206,9 @@ Deno.serve(async (req) => {
     if (typeof body.parent_contact === "string" && body.parent_contact.trim()) {
       payload.parent_contact = body.parent_contact.trim();
     }
+    if (body.hourly_rate_cents !== undefined) {
+      payload.hourly_rate_cents = typeof body.hourly_rate_cents === "number" ? body.hourly_rate_cents : null;
+    }
 
     const { data: existingLink, error: linkError } = await supabaseAdmin
       .from("tutor_students")

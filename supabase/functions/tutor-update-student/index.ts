@@ -167,6 +167,9 @@ Deno.serve(async (req) => {
     if (typeof body.notes === "string") {
       tutorStudentUpdates.notes = body.notes.trim() || null;
     }
+    if (body.hourly_rate_cents !== undefined) {
+      tutorStudentUpdates.hourly_rate_cents = typeof body.hourly_rate_cents === "number" ? body.hourly_rate_cents : null;
+    }
 
     if (Object.keys(tutorStudentUpdates).length > 0) {
       const { error: tsUpdateError } = await supabaseAdmin

@@ -28,6 +28,7 @@ export interface TutorStudent {
   last_activity_at: string | null;
   parent_contact: string | null;
   last_lesson_at: string | null;
+  hourly_rate_cents: number | null;
   created_at: string;
   updated_at: string;
 }
@@ -52,6 +53,7 @@ export interface CreateTutorStudentInput {
   exam_type?: 'ege' | 'oge';
   subject?: string;
   notes?: string;
+  hourly_rate_cents?: number | null;
 }
 
 export interface ManualAddTutorStudentInput {
@@ -65,6 +67,7 @@ export interface ManualAddTutorStudentInput {
   target_score?: number;
   notes?: string;
   parent_contact?: string;
+  hourly_rate_cents?: number | null;
 }
 
 export interface ManualAddTutorStudentResponse {
@@ -85,6 +88,7 @@ export interface UpdateTutorStudentProfileInput {
   target_score?: number;
   parent_contact?: string;
   notes?: string;
+  hourly_rate_cents?: number | null;
 }
 
 export interface UpdateTutorStudentProfileResponse {
@@ -99,6 +103,7 @@ export interface UpdateTutorStudentInput {
   status?: 'active' | 'paused' | 'completed';
   parent_contact?: string;
   last_lesson_at?: string;
+  hourly_rate_cents?: number | null;
 }
 
 // =============================================
@@ -183,6 +188,7 @@ export interface TutorPaymentWithStudent extends TutorPayment {
     id: string;
     student_id: string;
     parent_contact: string | null;
+    hourly_rate_cents: number | null;
     profiles: {
       id: string;
       username: string;
@@ -278,6 +284,7 @@ export interface TutorLessonWithStudent extends TutorLesson {
   tutor_students: {
     id: string;
     student_id: string;
+    hourly_rate_cents: number | null;
     profiles: {
       id: string;
       username: string;

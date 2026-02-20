@@ -15,6 +15,7 @@ export type TutorStudentCachePatch = {
   parentContact?: string | null;
   notes?: string | null;
   lastLessonAt?: string | null;
+  hourlyRateCents?: number | null;
 };
 
 function patchStudentRow(
@@ -78,6 +79,10 @@ function patchStudentRow(
   }
   if (patch.lastLessonAt !== undefined && nextStudent.last_lesson_at !== patch.lastLessonAt) {
     nextStudent.last_lesson_at = patch.lastLessonAt;
+    changed = true;
+  }
+  if (patch.hourlyRateCents !== undefined && nextStudent.hourly_rate_cents !== patch.hourlyRateCents) {
+    nextStudent.hourly_rate_cents = patch.hourlyRateCents;
     changed = true;
   }
 

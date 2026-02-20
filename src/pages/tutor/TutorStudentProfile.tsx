@@ -88,6 +88,7 @@ function TutorStudentProfileContent() {
   const [notes, setNotes] = useState<string>('');
   const [parentContact, setParentContact] = useState<string>('');
   const [lastLessonAt, setLastLessonAt] = useState<string>('');
+  const [hourlyRate, setHourlyRate] = useState<string>('');
   const [isSaving, setIsSaving] = useState(false);
   const [notesInitialized, setNotesInitialized] = useState(false);
   
@@ -110,6 +111,7 @@ function TutorStudentProfileContent() {
   const [editSubject, setEditSubject] = useState('');
   const [editStartScore, setEditStartScore] = useState('');
   const [editTargetScore, setEditTargetScore] = useState('');
+  const [editHourlyRate, setEditHourlyRate] = useState('');
   const [editNotes, setEditNotes] = useState('');
   const initialLoading = loading && !student && !error;
   const pageError = error || mockExamsError || chatsError;
@@ -122,6 +124,7 @@ function TutorStudentProfileContent() {
     setNotes(student.notes || '');
     setParentContact(student.parent_contact || '');
     setLastLessonAt(student.last_lesson_at || '');
+    setHourlyRate(student.hourly_rate_cents ? String(student.hourly_rate_cents / 100) : '');
     setNotesInitialized(true);
   }
 
@@ -140,6 +143,7 @@ function TutorStudentProfileContent() {
     setEditSubject(student.subject || '');
     setEditStartScore(student.start_score ? String(student.start_score) : '');
     setEditTargetScore(student.target_score ? String(student.target_score) : '');
+    setEditHourlyRate(student.hourly_rate_cents ? String(student.hourly_rate_cents / 100) : '');
     setEditNotes(student.notes || '');
     setEditFormInitialized(true);
   }
@@ -150,16 +154,19 @@ function TutorStudentProfileContent() {
     
     setIsSaving(true);
     try {
+      const parsedRate = hourlyRate ? parseInt(hourlyRate, 10) * 100 : null;
       await updateTutorStudent(tutorStudentId, {
         notes,
         parent_contact: parentContact || undefined,
         last_lesson_at: lastLessonAt || undefined,
+        hourly_rate_cents: parsedRate !== null && !isNaN(parsedRate) ? parsedRate : null,
       });
       applyTutorStudentPatchToCache(queryClient, {
         tutorStudentId,
         notes,
         parentContact: parentContact || undefined,
         lastLessonAt: lastLessonAt || undefined,
+        hourlyRateCents: parsedRate !== null && !isNaN(parsedRate) ? parsedRate : null,
       });
       await invalidateTutorStudentDependentQueries(queryClient, tutorStudentId);
       toast.success('Изменения сохранены');
@@ -170,7 +177,7 @@ function TutorStudentProfileContent() {
     } finally {
       setIsSaving(false);
     }
-  }, [tutorStudentId, notes, parentContact, lastLessonAt, queryClient, refetchStudent]);
+  }, [tutorStudentId, notes, parentContact, lastLessonAt, hourlyRate, queryClient, refetchStudent]);
 
   const handleDeleteStudent = useCallback(async () => {
     if (!tutorStudentId) return;
@@ -224,6 +231,8 @@ function TutorStudentProfileContent() {
     const normalizedSubject = editSubject.trim() || undefined;
     const normalizedParentContact = editParentContact.trim() || undefined;
     const normalizedNotes = editNotes.trim() || undefined;
+    const parsedEditRate = editHourlyRate ? parseInt(editHourlyRate, 10) * 100 : null;
+    const finalEditRate = parsedEditRate !== null && !isNaN(parsedEditRate) ? parsedEditRate : null;
 
     setIsUpdatingStudent(true);
     try {
@@ -238,6 +247,7 @@ function TutorStudentProfileContent() {
         start_score: Number.isFinite(startScore) ? startScore : undefined,
         target_score: Number.isFinite(targetScore) ? targetScore : undefined,
         parent_contact: normalizedParentContact,
+        hourly_rate_cents: finalEditRate,
         notes: normalizedNotes,
       });
       applyTutorStudentPatchToCache(queryClient, {
@@ -252,6 +262,7 @@ function TutorStudentProfileContent() {
         startScore: Number.isFinite(startScore) ? startScore : undefined,
         targetScore: Number.isFinite(targetScore) ? targetScore : undefined,
         parentContact: normalizedParentContact,
+        hourlyRateCents: finalEditRate,
         notes: normalizedNotes,
       });
       await invalidateTutorStudentDependentQueries(queryClient, tutorStudentId);
@@ -276,6 +287,7 @@ function TutorStudentProfileContent() {
     editSubject,
     editStartScore,
     editTargetScore,
+    editHourlyRate,
     editParentContact,
     editNotes,
     queryClient,
@@ -392,6 +404,16 @@ function TutorStudentProfileContent() {
                   <span className={paymentStatus.isPaid ? 'text-green-600' : 'text-amber-600'}>
                     Оплата: {paymentStatus.label}
                   </span>
+                  {student.hourly_rate_cents != null && (
+                    <span className="text-muted-foreground">
+                      💰 {student.hourly_rate_cents / 100} ₽/ч
+                    </span>
+                  )}
+                  {student.hourly_rate_cents == null && (
+                    <span className="text-muted-foreground">
+                      💰 Ставка не указана
+                    </span>
+                  )}
                   {student.profiles?.telegram_username && (
                     <span className="text-muted-foreground">
                       @{student.profiles.telegram_username}
@@ -468,6 +490,17 @@ function TutorStudentProfileContent() {
                       type="date"
                       value={lastLessonAt}
                       onChange={(e) => setLastLessonAt(e.target.value)}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="hourlyRate">Часовая ставка (₽/ч)</Label>
+                    <Input
+                      id="hourlyRate"
+                      type="number"
+                      min={0}
+                      value={hourlyRate}
+                      onChange={(e) => setHourlyRate(e.target.value)}
+                      placeholder="например, 1500"
                     />
                   </div>
                 </div>
@@ -785,6 +818,18 @@ function TutorStudentProfileContent() {
                             value={editTargetScore}
                             onChange={(e) => setEditTargetScore(e.target.value)}
                             placeholder="Например, 85"
+                          />
+                        </div>
+
+                        <div className="space-y-2">
+                          <Label htmlFor="editHourlyRate">Часовая ставка (₽/ч)</Label>
+                          <Input
+                            id="editHourlyRate"
+                            type="number"
+                            min={0}
+                            value={editHourlyRate}
+                            onChange={(e) => setEditHourlyRate(e.target.value)}
+                            placeholder="Например, 1500"
                           />
                         </div>
                       </div>

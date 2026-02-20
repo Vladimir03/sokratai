@@ -119,6 +119,15 @@ export function StudentCard({ student, onClick }: StudentCardProps) {
                 {student.status === 'paused' ? 'Пауза' : 'Завершён'}
               </Badge>
             )}
+
+            {/* Hourly Rate */}
+            <div className="flex items-center gap-1 text-muted-foreground">
+              <span className="font-medium">
+                {student.hourly_rate_cents != null 
+                  ? `💰 ${student.hourly_rate_cents / 100} ₽/ч` 
+                  : '💰 Не указано'}
+              </span>
+            </div>
           </div>
         </div>
       </div>
