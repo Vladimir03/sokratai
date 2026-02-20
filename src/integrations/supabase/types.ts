@@ -1278,7 +1278,6 @@ export type Database = {
           id: string
           max_advance_days: number
           min_notice_hours: number
-          payment_details_text: string | null
           payment_reminder_delay_minutes: number | null
           payment_reminder_enabled: boolean | null
           timezone: string
@@ -1295,7 +1294,6 @@ export type Database = {
           id?: string
           max_advance_days?: number
           min_notice_hours?: number
-          payment_details_text?: string | null
           payment_reminder_delay_minutes?: number | null
           payment_reminder_enabled?: boolean | null
           timezone?: string
@@ -1312,7 +1310,6 @@ export type Database = {
           id?: string
           max_advance_days?: number
           min_notice_hours?: number
-          payment_details_text?: string | null
           payment_reminder_delay_minutes?: number | null
           payment_reminder_enabled?: boolean | null
           timezone?: string
@@ -1518,7 +1515,6 @@ export type Database = {
           created_at: string | null
           due_date: string | null
           id: string
-          lesson_id: string | null
           paid_at: string | null
           period: string | null
           status: string
@@ -1530,7 +1526,6 @@ export type Database = {
           created_at?: string | null
           due_date?: string | null
           id?: string
-          lesson_id?: string | null
           paid_at?: string | null
           period?: string | null
           status?: string
@@ -1542,7 +1537,6 @@ export type Database = {
           created_at?: string | null
           due_date?: string | null
           id?: string
-          lesson_id?: string | null
           paid_at?: string | null
           period?: string | null
           status?: string
@@ -1550,13 +1544,6 @@ export type Database = {
           updated_at?: string | null
         }
         Relationships: [
-          {
-            foreignKeyName: "tutor_payments_lesson_id_fkey"
-            columns: ["lesson_id"]
-            isOneToOne: false
-            referencedRelation: "tutor_lessons"
-            referencedColumns: ["id"]
-          },
           {
             foreignKeyName: "tutor_payments_tutor_student_id_fkey"
             columns: ["tutor_student_id"]
@@ -1982,15 +1969,6 @@ export type Database = {
         }
         Returns: string
       }
-      complete_lesson_and_create_payment: {
-        Args: {
-          _amount: number
-          _lesson_id: string
-          _payment_status?: string
-          _tutor_telegram_id?: string
-        }
-        Returns: boolean
-      }
       check_and_update_streak: { Args: { p_user_id: string }; Returns: number }
       check_problem_answer: {
         Args: { problem_id_input: string; user_answer_input: string }
@@ -2028,22 +2006,12 @@ export type Database = {
         Args: never
         Returns: {
           duration_min: number
-          hourly_rate_cents: number | null
           lesson_date: string
           lesson_id: string
           lesson_time: string
           student_name: string
           tutor_id: string
           tutor_telegram_id: string
-        }[]
-      }
-      get_tutor_students_debt: {
-        Args: never
-        Returns: {
-          debt_amount: number
-          overdue_amount: number
-          pending_amount: number
-          tutor_student_id: string
         }[]
       }
       get_subscription_status: {
