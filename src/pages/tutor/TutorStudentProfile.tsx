@@ -225,6 +225,11 @@ function TutorStudentProfileContent() {
       return;
     }
 
+    if (!editHourlyRate || !editHourlyRate.trim()) {
+      toast.error('Укажите часовую ставку');
+      return;
+    }
+
     const grade = editGrade ? Number(editGrade) : undefined;
     const startScore = editStartScore ? Number(editStartScore) : undefined;
     const targetScore = editTargetScore ? Number(editTargetScore) : undefined;
@@ -748,8 +753,10 @@ function TutorStudentProfileContent() {
                       min={0}
                       value={editHourlyRate}
                       onChange={(e) => setEditHourlyRate(e.target.value)}
-                      placeholder="Например, 1500"
+                      placeholder="например, 1500"
+                      required
                     />
+                    <p className="text-xs text-muted-foreground">Ставка за 60 минут. Используется в расписании.</p>
                   </div>
                 </div>
 
