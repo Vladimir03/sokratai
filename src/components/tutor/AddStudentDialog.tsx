@@ -121,6 +121,10 @@ export function AddStudentDialog({
       toast({ title: 'Опишите цель занятий', variant: 'destructive' });
       return;
     }
+    if (!formData.hourly_rate_cents) {
+      toast({ title: 'Укажите часовую ставку', variant: 'destructive' });
+      return;
+    }
 
     setIsSubmitting(true);
     try {
@@ -291,6 +295,25 @@ export function AddStudentDialog({
                       />
                     </div>
                   )}
+
+                  <div className="space-y-2">
+                    <Label htmlFor="hourly_rate_top">Часовая ставка (₽/ч)</Label>
+                    <Input
+                      id="hourly_rate_top"
+                      type="number"
+                      min={0}
+                      value={formData.hourly_rate_cents ? formData.hourly_rate_cents / 100 : ''}
+                      onChange={(e) =>
+                        handleFormChange(
+                          'hourly_rate_cents',
+                          e.target.value ? parseInt(e.target.value) * 100 : undefined
+                        )
+                      }
+                      placeholder="например, 1500"
+                      required
+                    />
+                    <p className="text-xs text-muted-foreground">Ставка за 60 минут. Используется в расписании.</p>
+                  </div>
                 </div>
 
                 <Accordion type="single" collapsible>
@@ -313,23 +336,6 @@ export function AddStudentDialog({
                           />
                         </div>
 
-                        <div className="space-y-2">
-                          <Label htmlFor="hourly_rate">Часовая ставка (₽/ч)</Label>
-                          <Input
-                            id="hourly_rate"
-                            type="number"
-                            min={0}
-                            value={formData.hourly_rate_cents ? formData.hourly_rate_cents / 100 : ''}
-                            onChange={(e) =>
-                              handleFormChange(
-                                'hourly_rate_cents',
-                                e.target.value ? parseInt(e.target.value) * 100 : undefined
-                              )
-                            }
-                            placeholder="например, 1500"
-                          />
-                          <p className="text-xs text-muted-foreground mt-1">Ставка за 60 минут. Используется в расписании.</p>
-                        </div>
 
                         <div className="space-y-2">
                           <Label htmlFor="grade">Класс</Label>
