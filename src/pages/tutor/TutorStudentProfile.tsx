@@ -739,6 +739,18 @@ function TutorStudentProfileContent() {
                       />
                     </div>
                   )}
+
+                  <div className="space-y-2">
+                    <Label htmlFor="editHourlyRate">Часовая ставка (₽/ч)</Label>
+                    <Input
+                      id="editHourlyRate"
+                      type="number"
+                      min={0}
+                      value={editHourlyRate}
+                      onChange={(e) => setEditHourlyRate(e.target.value)}
+                      placeholder="Например, 1500"
+                    />
+                  </div>
                 </div>
 
                 <Accordion type="single" collapsible>
@@ -821,17 +833,6 @@ function TutorStudentProfileContent() {
                           />
                         </div>
 
-                        <div className="space-y-2">
-                          <Label htmlFor="editHourlyRate">Часовая ставка (₽/ч)</Label>
-                          <Input
-                            id="editHourlyRate"
-                            type="number"
-                            min={0}
-                            value={editHourlyRate}
-                            onChange={(e) => setEditHourlyRate(e.target.value)}
-                            placeholder="Например, 1500"
-                          />
-                        </div>
                       </div>
 
                       <div className="space-y-2 mt-4">
