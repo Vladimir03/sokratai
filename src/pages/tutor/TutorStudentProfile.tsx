@@ -1,4 +1,4 @@
-import { useState, useCallback, useMemo } from 'react';
+import { useState, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { ArrowLeft, Save, Plus, Trash2, MessageSquare, ChevronRight, Edit } from 'lucide-react';
@@ -25,7 +25,6 @@ import {
   useMockExams,
   useStudentChats,
   useStudentChatMessages,
-  useTutorPayments,
 } from '@/hooks/useTutor';
 import { 
   updateTutorStudent, 
@@ -85,14 +84,7 @@ function TutorStudentProfileContent() {
     isRecovering: chatsIsRecovering,
     failureCount: chatsFailureCount,
   } = useStudentChats(student?.student_id);
-  const { payments } = useTutorPayments();
-
-  // Суммарный долг ученика (status != 'paid')
-  const studentDebt = useMemo(() => {
-    return payments
-      .filter(p => p.tutor_student_id === tutorStudentId && p.status !== 'paid')
-      .reduce((sum, p) => sum + p.amount, 0);
-  }, [payments, tutorStudentId]);
+  const studentDebt = student?.debt_amount ?? 0;
 
   // Локальное состояние для редактирования
   const [notes, setNotes] = useState<string>('');

@@ -558,6 +558,28 @@ export async function cancelLessonSeries(
   return true;
 }
 
+/**
+ * Complete a lesson and automatically create a payment
+ */
+export async function completeLessonAndCreatePayment(
+  lessonId: string,
+  amount: number,
+  paymentStatus: string = 'pending'
+): Promise<boolean> {
+  const { data, error } = await supabase.rpc('complete_lesson_and_create_payment', {
+    _lesson_id: lessonId,
+    _amount: amount,
+    _payment_status: paymentStatus
+  });
+
+  if (error) {
+    console.error('Error completing lesson and creating payment:', error);
+    return false;
+  }
+
+  return !!data;
+}
+
 // =============================================
 // Reminder Settings
 // =============================================
@@ -654,6 +676,7 @@ interface UpdateCalendarSettingsInput {
   timezone?: string;
   payment_reminder_enabled?: boolean;
   payment_reminder_delay_minutes?: number;
+  payment_details_text?: string | null;
 }
 
 export async function upsertCalendarSettings(

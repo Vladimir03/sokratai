@@ -17,13 +17,13 @@ import {
 interface StudentCardProps {
   student: TutorStudentWithProfile & { paid_until?: string | null; last_activity_at?: string | null };
   onClick: () => void;
-  debtAmount?: number;
 }
 
-export function StudentCard({ student, onClick, debtAmount = 0 }: StudentCardProps) {
+export function StudentCard({ student, onClick }: StudentCardProps) {
   const progress = calculateProgress(student.current_score, student.target_score);
   const paymentStatus = getPaymentStatus(student.paid_until ?? null);
   const lastActivity = formatRelativeTime(student.last_activity_at ?? null);
+  const debtAmount = student.debt_amount ?? 0;
   
   const displayName = student.profiles?.username || 'Без имени';
   const grade = student.profiles?.grade;

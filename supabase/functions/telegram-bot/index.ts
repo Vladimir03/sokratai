@@ -14,6 +14,7 @@ import {
   saveHomeworkPhotoAnswer,
   saveHomeworkTextAnswer,
 } from "./homework/homework_handler.ts";
+import { calculateLessonPaymentAmount } from "../../../src/lib/paymentAmount.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -4030,23 +4031,166 @@ async function handleDiagnosticCancel(telegramUserId: number) {
 
 // ============= PAYMENT HANDLING =============
 
-async function handlePaymentCallback(telegramUserId: number, data: string, messageId?: number) {
-  // Parse callback data: payment:status:lesson_id
+type ParsedPaymentCallback = {
+  paymentStatus: string;
+  lessonId: string;
+  callbackAmount: number | null;
+  callbackFormat: "legacy" | "v2";
+};
+
+type LessonPaymentContext = {
+  lessonId: string;
+  studentName: string;
+  durationMin: number;
+  hourlyRateCents: number | null;
+  paymentAmount: number | null;
+  parentContact: string | null;
+};
+
+function parsePaymentCallbackData(data: string): ParsedPaymentCallback | null {
+  // Legacy format: payment:status:amount:lesson_id
+  // New format: payment:status:lesson_id
   const parts = data.split(":");
-  if (parts.length !== 3) {
-    console.error("Invalid payment callback data:", data);
-    return;
+  if (parts[0] !== "payment") return null;
+
+  if (parts.length === 4) {
+    const [, paymentStatus, amountStr, lessonId] = parts;
+    const parsedAmount = Number.parseInt(amountStr, 10);
+    return {
+      paymentStatus,
+      lessonId,
+      callbackAmount: Number.isFinite(parsedAmount) ? parsedAmount : null,
+      callbackFormat: "legacy",
+    };
   }
 
-  const [, paymentStatus, lessonId] = parts;
+  if (parts.length === 3) {
+    const [, paymentStatus, lessonId] = parts;
+    return {
+      paymentStatus,
+      lessonId,
+      callbackAmount: null,
+      callbackFormat: "v2",
+    };
+  }
 
-  // Get tutor's telegram_id to verify ownership
-  const { data: tutor } = await supabase
+  return null;
+}
+
+async function getTutorByTelegramId(telegramUserId: number): Promise<{ id: string; telegram_id: string } | null> {
+  const { data: tutor, error } = await supabase
     .from("tutors")
     .select("id, telegram_id")
     .eq("telegram_id", telegramUserId.toString())
     .single();
 
+  if (error || !tutor) {
+    return null;
+  }
+
+  return tutor;
+}
+
+async function getLessonPaymentContext(
+  tutorId: string,
+  lessonId: string
+): Promise<LessonPaymentContext | null> {
+  const { data: lesson, error } = await supabase
+    .from("tutor_lessons")
+    .select(`
+      id,
+      tutor_id,
+      duration_min,
+      payment_amount,
+      tutor_students (
+        parent_contact,
+        hourly_rate_cents,
+        profiles (
+          username
+        )
+      ),
+      profiles (
+        username
+      )
+    `)
+    .eq("id", lessonId)
+    .eq("tutor_id", tutorId)
+    .single();
+
+  if (error || !lesson) {
+    console.error("Error fetching lesson payment context:", error);
+    return null;
+  }
+
+  const tutorStudent = (lesson as any).tutor_students;
+  const tutorStudentProfileName = tutorStudent?.profiles?.username;
+  const lessonStudentName = (lesson as any).profiles?.username;
+
+  return {
+    lessonId: lesson.id,
+    studentName: tutorStudentProfileName || lessonStudentName || "ученика",
+    durationMin: lesson.duration_min,
+    hourlyRateCents: tutorStudent?.hourly_rate_cents ?? null,
+    paymentAmount: lesson.payment_amount ?? null,
+    parentContact: tutorStudent?.parent_contact ?? null,
+  };
+}
+
+function resolveLessonAmount(
+  lessonContext: LessonPaymentContext | null,
+  callbackAmount: number | null
+): number | null {
+  if (lessonContext) {
+    const calculated = calculateLessonPaymentAmount(
+      lessonContext.durationMin,
+      lessonContext.hourlyRateCents
+    );
+    if (calculated != null && calculated > 0) {
+      return calculated;
+    }
+    if (lessonContext.paymentAmount != null && lessonContext.paymentAmount > 0) {
+      return lessonContext.paymentAmount;
+    }
+  }
+
+  if (callbackAmount != null && callbackAmount > 0) {
+    return callbackAmount;
+  }
+
+  return null;
+}
+
+async function sendPaymentReminderPrompt(
+  telegramUserId: number,
+  lessonId: string,
+  amount: number | null
+) {
+  const amountText = amount != null ? ` (${amount} ₽)` : "";
+  await sendTelegramMessage(
+    telegramUserId,
+    `✨ <b>Double WOW</b>\n\nОтправить напоминание родителю с вашими реквизитами${amountText}?`,
+    {
+      reply_markup: {
+        inline_keyboard: [
+          [
+            { text: "Да", callback_data: `payment_remind:yes:${lessonId}` },
+            { text: "Нет", callback_data: `payment_remind:no:${lessonId}` },
+          ],
+        ],
+      },
+    }
+  );
+}
+
+async function handlePaymentRemindCallback(telegramUserId: number, data: string) {
+  const parts = data.split(":");
+  if (parts.length !== 3) {
+    console.error("Invalid payment reminder callback data:", data);
+    return;
+  }
+
+  const [, decision, lessonId] = parts;
+  const tutor = await getTutorByTelegramId(telegramUserId);
   if (!tutor) {
     await sendTelegramMessage(
       telegramUserId,
@@ -4055,38 +4199,156 @@ async function handlePaymentCallback(telegramUserId: number, data: string, messa
     return;
   }
 
-  // Update payment status
-  const { error } = await supabase.rpc("update_lesson_payment", {
-    _lesson_id: lessonId,
-    _payment_status: paymentStatus,
-    _tutor_telegram_id: telegramUserId.toString(),
-  });
-
-  if (error) {
-    console.error("Error updating payment status:", error);
-    await sendTelegramMessage(telegramUserId, "❌ Ошибка при обновлении статуса оплаты.");
+  if (decision === "no") {
+    console.log("payment_remind_no", { telegramUserId, lessonId });
+    await sendTelegramMessage(telegramUserId, "Окей, напоминание не отправляем 👌");
     return;
   }
 
-  // Format response based on status
+  if (decision !== "yes") {
+    console.error("Unknown payment reminder decision:", decision);
+    return;
+  }
+
+  console.log("payment_remind_yes", { telegramUserId, lessonId });
+
+  const lessonContext = await getLessonPaymentContext(tutor.id, lessonId);
+  if (!lessonContext) {
+    await sendTelegramMessage(
+      telegramUserId,
+      "❌ Не удалось найти данные занятия для формирования напоминания."
+    );
+    return;
+  }
+
+  const { data: calendarSettings, error: calendarSettingsError } = await supabase
+    .from("tutor_calendar_settings")
+    .select("payment_details_text")
+    .eq("tutor_id", tutor.id)
+    .single();
+
+  if (calendarSettingsError) {
+    console.error("Error fetching tutor payment details:", calendarSettingsError);
+  }
+
+  const paymentDetailsText = (calendarSettings?.payment_details_text ?? "").trim();
+  if (!paymentDetailsText) {
+    await sendTelegramMessage(
+      telegramUserId,
+      "ℹ️ Реквизиты не заполнены.\n\nДобавьте их в веб-интерфейсе:\nРасписание → Настройки календаря → Реквизиты для оплаты."
+    );
+    return;
+  }
+
+  const resolvedAmount = resolveLessonAmount(lessonContext, null);
+  const amountLine = resolvedAmount != null ? `${resolvedAmount} ₽` : "по договоренности";
+  const parentContactLine = lessonContext.parentContact
+    ? `\nКонтакт родителя: ${escapeHtml(lessonContext.parentContact)}`
+    : "";
+
+  const reminderText = `Здравствуйте! Напоминаю об оплате занятия с ${lessonContext.studentName}.\nСумма: ${amountLine}\n\nРеквизиты для оплаты:\n${paymentDetailsText}\n\nСпасибо!`;
+
+  await sendTelegramMessage(
+    telegramUserId,
+    `📨 <b>Шаблон напоминания готов</b>${parentContactLine}\n\n${escapeHtml(reminderText)}`
+  );
+}
+
+async function handlePaymentCallback(telegramUserId: number, data: string, messageId?: number) {
+  const parsed = parsePaymentCallbackData(data);
+  if (!parsed) {
+    console.error("Invalid payment callback data:", data);
+    return;
+  }
+
+  console.log("payment_callback_parsed", {
+    telegramUserId,
+    lessonId: parsed.lessonId,
+    paymentStatus: parsed.paymentStatus,
+    callbackAmount: parsed.callbackAmount,
+    callbackFormat: parsed.callbackFormat,
+  });
+
+  const tutor = await getTutorByTelegramId(telegramUserId);
+  if (!tutor) {
+    await sendTelegramMessage(
+      telegramUserId,
+      "❌ Вы не найдены как репетитор. Свяжите Telegram в настройках."
+    );
+    return;
+  }
+
   let statusText = "";
   let emoji = "";
-  switch (paymentStatus) {
-    case "paid":
-      statusText = "Оплачено";
-      emoji = "✅";
-      break;
-    case "paid_earlier":
-      statusText = "Оплачено ранее";
-      emoji = "💳";
-      break;
-    case "pending":
-      statusText = "Оплатит позже";
-      emoji = "⏳";
-      break;
-    default:
-      statusText = paymentStatus;
-      emoji = "📝";
+  let shouldOfferReminder = false;
+  let amountForReminder: number | null = null;
+
+  if (parsed.paymentStatus === "cancelled") {
+    const { error } = await supabase
+      .from("tutor_lessons")
+      .update({
+        status: "cancelled",
+        cancelled_at: new Date().toISOString(),
+        cancelled_by: "tutor",
+        payment_reminder_sent: true,
+      })
+      .eq("id", parsed.lessonId)
+      .eq("tutor_id", tutor.id);
+
+    if (error) {
+      console.error("Error cancelling lesson:", error);
+      await sendTelegramMessage(telegramUserId, "❌ Ошибка при отмене урока.");
+      return;
+    }
+
+    statusText = "Урок отменен";
+    emoji = "❌";
+  } else {
+    const lessonContext = await getLessonPaymentContext(tutor.id, parsed.lessonId);
+    const resolvedAmount = resolveLessonAmount(lessonContext, parsed.callbackAmount);
+    const rpcAmount = resolvedAmount ?? 0;
+
+    const { error } = await supabase.rpc("complete_lesson_and_create_payment", {
+      _lesson_id: parsed.lessonId,
+      _amount: rpcAmount,
+      _payment_status: parsed.paymentStatus,
+      _tutor_telegram_id: telegramUserId.toString(),
+    });
+
+    if (error) {
+      console.error("Error completing lesson and creating payment:", error);
+      await sendTelegramMessage(telegramUserId, "❌ Ошибка при завершении урока.");
+      return;
+    }
+
+    console.log("payment_upsert_done", {
+      telegramUserId,
+      lessonId: parsed.lessonId,
+      paymentStatus: parsed.paymentStatus,
+      amount: rpcAmount,
+    });
+
+    switch (parsed.paymentStatus) {
+      case "paid":
+        statusText = "Оплачено";
+        emoji = "✅";
+        shouldOfferReminder = true;
+        amountForReminder = resolvedAmount;
+        break;
+      case "paid_earlier":
+        statusText = "Оплачено ранее";
+        emoji = "💳";
+        break;
+      case "pending":
+        statusText = "Оплатит позже";
+        emoji = "⏳";
+        shouldOfferReminder = true;
+        amountForReminder = resolvedAmount;
+        break;
+      default:
+        statusText = parsed.paymentStatus;
+        emoji = "📝";
+    }
   }
 
   // Edit the original message to show the result
@@ -4097,15 +4359,19 @@ async function handlePaymentCallback(telegramUserId: number, data: string, messa
       body: JSON.stringify({
         chat_id: telegramUserId,
         message_id: messageId,
-        text: `${emoji} <b>Статус оплаты обновлён</b>\n\n${statusText}`,
+        text: `${emoji} <b>Действие выполнено</b>\n\n${statusText}`,
         parse_mode: "HTML",
       }),
     });
   } else {
     await sendTelegramMessage(
       telegramUserId,
-      `${emoji} Статус оплаты обновлён: ${statusText}`
+      `${emoji} Статус обновлён: ${statusText}`
     );
+  }
+
+  if (shouldOfferReminder) {
+    await sendPaymentReminderPrompt(telegramUserId, parsed.lessonId, amountForReminder);
   }
 }
 
@@ -6704,6 +6970,11 @@ async function handleCallbackQuery(callbackQuery: any) {
   }
 
   // ============= PAYMENT CALLBACKS (for tutors) =============
+
+  if (data.startsWith("payment_remind:")) {
+    await handlePaymentRemindCallback(telegramUserId, data);
+    return;
+  }
 
   if (data.startsWith("payment:")) {
     await handlePaymentCallback(telegramUserId, data, callbackQuery.message?.message_id);

@@ -43,6 +43,9 @@ export interface TutorStudentWithProfile extends TutorStudent {
     grade: number | null;
     learning_goal?: string | null;
   };
+  pending_amount?: number;
+  overdue_amount?: number;
+  debt_amount?: number;
 }
 
 // Для создания связи
@@ -173,6 +176,7 @@ export type TutorPaymentStatus = 'pending' | 'paid' | 'overdue';
 export interface TutorPayment {
   id: string;
   tutor_student_id: string;
+  lesson_id?: string | null;
   amount: number;
   period: string | null;
   status: TutorPaymentStatus;
@@ -358,6 +362,7 @@ export interface TutorCalendarSettings {
   // Payment reminder settings
   payment_reminder_enabled: boolean;
   payment_reminder_delay_minutes: number;
+  payment_details_text: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -373,6 +378,7 @@ export interface UpdateCalendarSettingsInput {
   timezone?: string;
   payment_reminder_enabled?: boolean;
   payment_reminder_delay_minutes?: number;
+  payment_details_text?: string | null;
 }
 
 // =============================================

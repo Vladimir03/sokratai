@@ -36,6 +36,13 @@ import type {
 let cachedTutor: Tutor | null = null;
 let cachedTutorUserId: string | null = null;
 
+type TutorStudentDebtRow = {
+  tutor_student_id: string;
+  pending_amount: number;
+  overdue_amount: number;
+  debt_amount: number;
+};
+
 /**
  * Clear tutor cache (call on logout)
  */
@@ -146,8 +153,18 @@ export async function getTutorStudents(): Promise<TutorStudentWithProfile[]> {
     console.error('Error fetching students:', error);
     return [];
   }
-  
-  return data as TutorStudentWithProfile[];
+
+  const students = (data ?? []) as TutorStudentWithProfile[];
+  const debtByStudentId = await getTutorStudentsDebtMap();
+  return students.map((student) => {
+    const debt = debtByStudentId.get(student.id);
+    return {
+      ...student,
+      pending_amount: debt?.pending_amount ?? 0,
+      overdue_amount: debt?.overdue_amount ?? 0,
+      debt_amount: debt?.debt_amount ?? 0,
+    };
+  });
 }
 
 /**
@@ -212,8 +229,28 @@ export async function getTutorStudent(
     console.error('Error fetching student:', error);
     return null;
   }
-  
-  return data as TutorStudentWithProfile;
+
+  const student = data as TutorStudentWithProfile;
+  const debtByStudentId = await getTutorStudentsDebtMap();
+  const debt = debtByStudentId.get(id);
+
+  return {
+    ...student,
+    pending_amount: debt?.pending_amount ?? 0,
+    overdue_amount: debt?.overdue_amount ?? 0,
+    debt_amount: debt?.debt_amount ?? 0,
+  };
+}
+
+async function getTutorStudentsDebtMap(): Promise<Map<string, TutorStudentDebtRow>> {
+  const { data, error } = await supabase.rpc('get_tutor_students_debt');
+  if (error) {
+    console.error('Error fetching students debt:', error);
+    return new Map<string, TutorStudentDebtRow>();
+  }
+
+  const rows = (data || []) as TutorStudentDebtRow[];
+  return new Map(rows.map((row) => [row.tutor_student_id, row]));
 }
 
 /**

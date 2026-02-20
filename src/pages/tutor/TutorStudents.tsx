@@ -27,7 +27,7 @@ import {
   StudentsEmptyFilters, 
   StudentsError 
 } from '@/components/tutor/StudentsStates';
-import { useTutorStudents, useTutor, useTutorPayments } from '@/hooks/useTutor';
+import { useTutorStudents, useTutor } from '@/hooks/useTutor';
 import { calculateProgress, getPaymentStatus } from '@/lib/formatters';
 import { getTutorInviteWebLink, getTutorInviteTelegramLink } from '@/utils/telegramLinks';
 import type { TutorStudentWithProfile } from '@/types/tutor';
@@ -59,19 +59,6 @@ function TutorStudentsContent() {
     isRecovering,
     failureCount,
   } = useTutorStudents();
-  const { payments } = useTutorPayments();
-
-  // Debt map: tutor_student_id -> total unpaid amount (rubles)
-  const debtMap = useMemo(() => {
-    const map = new Map<string, number>();
-    for (const payment of payments) {
-      if (payment.status !== 'paid') {
-        const current = map.get(payment.tutor_student_id) ?? 0;
-        map.set(payment.tutor_student_id, current + payment.amount);
-      }
-    }
-    return map;
-  }, [payments]);
 
   // State
   const [sortBy, setSortBy] = useState<SortField>('activity');
@@ -326,7 +313,6 @@ function TutorStudentsContent() {
                   <StudentCard
                     key={student.id}
                     student={student}
-                    debtAmount={debtMap.get(student.id) ?? 0}
                     onClick={() => handleOpenStudent(student.id)}
                   />
                 ))}

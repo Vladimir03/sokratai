@@ -1,5 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "npm:@supabase/supabase-js@2";
+import { calculateLessonPaymentAmount } from "../../../src/lib/paymentAmount.ts";
 
 const TELEGRAM_BOT_TOKEN = Deno.env.get("TELEGRAM_BOT_TOKEN");
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL");
@@ -18,6 +19,7 @@ interface LessonForReminder {
   lesson_date: string;
   lesson_time: string;
   duration_min: number;
+  hourly_rate_cents: number | null;
 }
 
 async function sendPaymentReminder(
@@ -25,32 +27,40 @@ async function sendPaymentReminder(
   lessonId: string,
   studentName: string,
   lessonDate: string,
-  lessonTime: string
+  lessonTime: string,
+  durationMin: number,
+  hourlyRateCents: number | null
 ): Promise<boolean> {
   if (!TELEGRAM_BOT_TOKEN) {
     console.error("TELEGRAM_BOT_TOKEN not set");
     return false;
   }
 
-  const message = `💰 <b>Оплата занятия</b>
+  const amount = calculateLessonPaymentAmount(durationMin, hourlyRateCents);
+  const amountText = amount ? `\nРасчетная сумма: <b>${amount} ₽</b>` : '';
+  const amountLabel = amount ? ` (${amount} ₽)` : '';
 
-Занятие с <b>${studentName}</b> завершено.
+  const message = `🎓 <b>Занятие завершилось?</b>
+
+Урок с <b>${studentName}</b> подошел к концу (${durationMin} мин).${amountText}
 
 📅 ${lessonDate}
 🕐 ${lessonTime}
 
-Как прошла оплата?`;
+Ваши действия:`;
 
   const keyboard = {
-    inline_keyboard: [
-      [
-        { text: "✅ Оплачено", callback_data: `payment:paid:${lessonId}` },
-        { text: "💳 Оплачено ранее", callback_data: `payment:paid_earlier:${lessonId}` },
+      inline_keyboard: [
+        [
+          { text: `✅ Проведено, жду оплату${amountLabel}`, callback_data: `payment:pending:${lessonId}` },
+        ],
+        [
+          { text: `💳 Уже оплачено${amountLabel}`, callback_data: `payment:paid:${lessonId}` },
+        ],
+        [
+          { text: "❌ Урок отменен", callback_data: `payment:cancelled:${lessonId}` },
+        ],
       ],
-      [
-        { text: "⏳ Оплатит позже", callback_data: `payment:pending:${lessonId}` },
-      ],
-    ],
   };
 
   try {
@@ -127,7 +137,9 @@ serve(async (req) => {
         lesson.lesson_id,
         lesson.student_name,
         formattedDate,
-        formattedTime
+        formattedTime,
+        lesson.duration_min,
+        lesson.hourly_rate_cents
       );
 
       if (sent) {

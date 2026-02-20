@@ -20,9 +20,11 @@ import { Calendar } from '@/components/ui/calendar';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 import { supabase } from '@/lib/supabaseClient';
+import { calculateLessonPaymentAmount } from '@/lib/paymentAmount';
 import TutorGuard from '@/components/TutorGuard';
 import { TutorLayout } from '@/components/tutor/TutorLayout';
 import { TutorDataStatus } from '@/components/tutor/TutorDataStatus';
+import ConfettiBurst from '@/components/ConfettiBurst';
 import { useTutor, useTutorWeeklySlots, useTutorLessons, useTutorStudents, useTutorReminderSettings, useTutorCalendarSettings, useTutorAvailabilityExceptions } from '@/hooks/useTutor';
 import {
   createWeeklySlot,
@@ -40,6 +42,7 @@ import {
   syncWorkHoursToSlots,
   createLessonSeries,
   updateLesson,
+  completeLessonAndCreatePayment,
   getLessonSeriesCount,
   updateLessonSeries,
   cancelLessonSeries
@@ -142,9 +145,19 @@ interface LessonBlockProps {
   onClick: () => void;
   onDragStart: (event: React.DragEvent<HTMLDivElement>) => void;
   onDragEnd: () => void;
+  onCompleteLesson?: (lessonId: string, amount: number, e: React.MouseEvent) => void;
+  isCompleting?: boolean;
 }
 
-function LessonBlock({ lesson, workDayStart, onClick, onDragStart, onDragEnd }: LessonBlockProps) {
+function LessonBlock({
+  lesson,
+  workDayStart,
+  onClick,
+  onDragStart,
+  onDragEnd,
+  onCompleteLesson,
+  isCompleting = false,
+}: LessonBlockProps) {
   const startDate = new Date(lesson.start_at);
   const startMinutes = startDate.getHours() * 60 + startDate.getMinutes();
   const offsetMinutes = startMinutes - (workDayStart * 60);
@@ -162,11 +175,16 @@ function LessonBlock({ lesson, workDayStart, onClick, onDragStart, onDragEnd }: 
   const lessonType = lesson.lesson_type || 'regular';
   const typeColor = getLessonTypeColor(lessonType);
   const hourlyRateCents = lesson.tutor_students?.hourly_rate_cents;
+  const amountToComplete = calculateLessonPaymentAmount(lesson.duration_min, hourlyRateCents);
+
+  const isPast = endDate.getTime() < Date.now();
+  const showCompleteButton = isPast && lesson.status === 'booked' && amountToComplete !== null && onCompleteLesson;
+  const compactCompleteButton = height < 50;
 
   return (
     <div
       className={cn(
-        "absolute left-0.5 right-0.5 text-white rounded-md px-1.5 py-0.5 cursor-pointer hover:opacity-90 transition-opacity overflow-hidden shadow-sm",
+        "absolute left-0.5 right-0.5 text-white rounded-md px-1.5 py-0.5 cursor-pointer hover:opacity-90 transition-opacity overflow-hidden shadow-sm group",
         typeColor
       )}
       style={{ top: `${top}px`, height: `${height}px`, minHeight: '20px' }}
@@ -180,11 +198,42 @@ function LessonBlock({ lesson, workDayStart, onClick, onDragStart, onDragEnd }: 
         {height >= 35 && (
           <span className="text-[10px] opacity-80 truncate leading-tight">{timeStr}</span>
         )}
-        {height >= 50 && hourlyRateCents != null && (
-          <span className="text-[10px] opacity-90 truncate font-semibold leading-tight">{hourlyRateCents / 100} ₽/ч</span>
-        )}
-        {height >= 50 && lesson.subject && (
-          <span className="text-[10px] opacity-70 truncate leading-tight">{lesson.subject}</span>
+        
+        {showCompleteButton ? (
+          <div 
+            className={cn(
+              "mt-1 transition-opacity",
+              compactCompleteButton ? "opacity-100" : "opacity-0 group-hover:opacity-100"
+            )}
+            onClick={(e) => {
+              e.stopPropagation();
+              if (isCompleting) return;
+              onCompleteLesson?.(lesson.id, amountToComplete!, e);
+            }}
+          >
+            <div
+              className={cn(
+                "bg-white/20 hover:bg-white/30 text-white rounded-sm flex items-center justify-center font-medium shadow-sm transition-colors border border-white/20",
+                compactCompleteButton ? "text-[9px] py-0.5 px-1" : "text-[10px] py-1 px-1.5",
+                isCompleting && "opacity-70 cursor-not-allowed"
+              )}
+            >
+              {isCompleting
+                ? "⏳ Завершаем..."
+                : compactCompleteButton
+                  ? `💰 ${amountToComplete} ₽`
+                  : `💰 Завершить: ${amountToComplete} ₽`}
+            </div>
+          </div>
+        ) : (
+          <>
+            {height >= 50 && hourlyRateCents != null && (
+              <span className="text-[10px] opacity-90 truncate font-semibold leading-tight">{hourlyRateCents / 100} ₽/ч</span>
+            )}
+            {height >= 50 && lesson.subject && (
+              <span className="text-[10px] opacity-70 truncate leading-tight">{lesson.subject}</span>
+            )}
+          </>
         )}
       </div>
     </div>
@@ -1093,6 +1142,7 @@ function CalendarSettingsDialog({
   // Payment reminder settings
   const [paymentReminderEnabled, setPaymentReminderEnabled] = useState(settings?.payment_reminder_enabled ?? false);
   const [paymentReminderDelay, setPaymentReminderDelay] = useState(settings?.payment_reminder_delay_minutes?.toString() || '0');
+  const [paymentDetailsText, setPaymentDetailsText] = useState(settings?.payment_details_text || '');
   const [isSaving, setIsSaving] = useState(false);
 
   // Exception form
@@ -1110,6 +1160,7 @@ function CalendarSettingsDialog({
       setCancelNoticeHours(settings.cancel_notice_hours.toString());
       setPaymentReminderEnabled(settings.payment_reminder_enabled ?? false);
       setPaymentReminderDelay((settings.payment_reminder_delay_minutes ?? 0).toString());
+      setPaymentDetailsText(settings.payment_details_text || '');
     }
   }, [settings]);
 
@@ -1126,6 +1177,7 @@ function CalendarSettingsDialog({
         cancel_notice_hours: parseInt(cancelNoticeHours),
         payment_reminder_enabled: paymentReminderEnabled,
         payment_reminder_delay_minutes: parseInt(paymentReminderDelay),
+        payment_details_text: paymentDetailsText.trim() || null,
       });
 
       if (data) {
@@ -1284,6 +1336,18 @@ function CalendarSettingsDialog({
                 </Select>
               </div>
             )}
+            <div className="space-y-2">
+              <Label className="text-sm text-muted-foreground">Реквизиты для оплаты</Label>
+              <Textarea
+                value={paymentDetailsText}
+                onChange={(e) => setPaymentDetailsText(e.target.value)}
+                placeholder="Например: Перевод по СБП +7..., Т-Банк, получатель Иван Иванов"
+                className="min-h-[90px]"
+              />
+              <p className="text-xs text-muted-foreground">
+                Этот текст бот предложит вставить в напоминание родителю после отметки оплаты.
+              </p>
+            </div>
           </div>
 
           {/* Exceptions */}
@@ -1685,6 +1749,9 @@ function TutorScheduleContent() {
 
   // Payment onboarding
   const [paymentOnboardingOpen, setPaymentOnboardingOpen] = useState(false);
+  const [showConfetti, setShowConfetti] = useState(false);
+  const [completingLessonIds, setCompletingLessonIds] = useState<Record<string, boolean>>({});
+  const completingLessonIdsRef = useRef<Record<string, boolean>>({});
 
   useEffect(() => {
     if (!lessonDetailsOpen || !selectedLesson) return;
@@ -2048,6 +2115,36 @@ function TutorScheduleContent() {
     }
   }, [effectiveLessons, getSnappedTimeFromPosition, gridHeight, refetchLessons, weekStart]);
 
+  const handleCompleteLesson = useCallback(async (lessonId: string, amount: number, e: React.MouseEvent) => {
+    if (completingLessonIdsRef.current[lessonId]) {
+      return;
+    }
+
+    completingLessonIdsRef.current = { ...completingLessonIdsRef.current, [lessonId]: true };
+    setCompletingLessonIds((prev) => ({ ...prev, [lessonId]: true }));
+    try {
+      const ok = await completeLessonAndCreatePayment(lessonId, amount);
+      if (ok) {
+        setShowConfetti(true);
+        toast.success(`Урок завершен. Добавлена оплата на ${amount} ₽`);
+        refetchLessons();
+      } else {
+        toast.error('Не удалось завершить урок');
+      }
+    } catch (err) {
+      console.error(err);
+      toast.error('Ошибка при завершении урока');
+    } finally {
+      const nextById = { ...completingLessonIdsRef.current };
+      delete nextById[lessonId];
+      completingLessonIdsRef.current = nextById;
+      setCompletingLessonIds((prev) => {
+        const { [lessonId]: _removed, ...rest } = prev;
+        return rest;
+      });
+    }
+  }, [refetchLessons]);
+
   const handleCopyBookingLink = useCallback(async () => {
     const link = await getBookingLink();
     if (link) {
@@ -2402,6 +2499,8 @@ function TutorScheduleContent() {
                               onClick={() => handleLessonClick(lesson)}
                               onDragStart={(event) => handleLessonDragStart(lesson.id, lesson.duration_min, event)}
                               onDragEnd={handleLessonDragEnd}
+                              onCompleteLesson={handleCompleteLesson}
+                              isCompleting={Boolean(completingLessonIds[lesson.id])}
                             />
                           ))}
                         </div>
@@ -2471,6 +2570,8 @@ function TutorScheduleContent() {
           onOpenChange={setPaymentOnboardingOpen}
           onEnablePaymentReminders={handleEnablePaymentReminders}
         />
+
+        <ConfettiBurst active={showConfetti} onComplete={() => setShowConfetti(false)} />
       </div>
     </TutorLayout>
   );

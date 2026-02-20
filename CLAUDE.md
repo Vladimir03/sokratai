@@ -435,6 +435,30 @@ src/
   - `handleDeleteStudent`: remove from cache + invalidate перед навигацией
 - Контракты API/БД не изменялись, фикс полностью фронтовый (React Query cache sync).
 
+## WOW-фичи оплаты (2026-02-20)
+
+- Добавлена idempotent-цепочка завершения урока и создания платежа:
+  - миграция `supabase/migrations/20260220143000_wow_payment_hardening.sql`
+  - `tutor_payments.lesson_id` + partial unique index (один lesson -> один платеж)
+  - `complete_lesson_and_create_payment` переведена на UPSERT по `lesson_id`
+- Добавлен источник реквизитов репетитора:
+  - `tutor_calendar_settings.payment_details_text`
+  - UI в `src/pages/tutor/TutorSchedule.tsx` (настройки календаря)
+- Усилен Telegram payment-flow:
+  - новый callback-формат: `payment:<status>:<lessonId>`
+  - backward compatibility со старым форматом в `supabase/functions/telegram-bot/index.ts`
+  - Double WOW шаг: `payment_remind:yes/no:<lessonId>` с шаблоном напоминания и реквизитами
+  - structured logs: `payment_callback_parsed`, `payment_upsert_done`, `payment_remind_yes/no`
+- Унифицирован расчет суммы оплаты:
+  - helper `src/lib/paymentAmount.ts`
+  - используется в `supabase/functions/payment-reminder/index.ts`, `supabase/functions/telegram-bot/index.ts`, `src/pages/tutor/TutorSchedule.tsx`
+  - источник истины при записи остается backend RPC
+- Долги учеников переведены на DB-агрегацию:
+  - RPC `get_tutor_students_debt()` (pending + overdue + debt_amount)
+  - `src/lib/tutors.ts` мержит debt-поля в `getTutorStudents()` и `getTutorStudent()`
+  - UI-consumers (`TutorStudents`, `TutorStudentProfile`, `StudentCard`) читают долг из student API
+  - `useTutorPayments` не используется для расчета долга в списке/профиле, но сохранен для страницы платежей
+
 ## Команды
 
 ```bash
