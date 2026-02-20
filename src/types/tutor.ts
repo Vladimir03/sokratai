@@ -264,11 +264,6 @@ export interface TutorLesson {
   is_recurring: boolean;
   recurrence_rule: string | null;
   parent_lesson_id: string | null;
-  // External source fields
-  external_source: string | null;
-  external_event_id: string | null;
-  external_calendar_id: string | null;
-  external_event_updated_at: string | null;
   // Payment fields
   payment_status?: LessonPaymentStatus;
   payment_amount?: number | null;
@@ -310,11 +305,6 @@ export interface CreateLessonInput {
   is_recurring?: boolean;
   recurrence_rule?: string;
   parent_lesson_id?: string;
-  // External source
-  external_source?: string;
-  external_event_id?: string;
-  external_calendar_id?: string;
-  external_event_updated_at?: string;
 }
 
 export interface UpdateLessonInput {

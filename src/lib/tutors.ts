@@ -451,7 +451,7 @@ export async function getTutorPayments(): Promise<TutorPaymentWithStudent[]> {
     return [];
   }
   
-  return data as TutorPaymentWithStudent[];
+  return data as unknown as TutorPaymentWithStudent[];
 }
 
 /**
