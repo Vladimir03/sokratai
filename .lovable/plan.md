@@ -1,80 +1,71 @@
 
 
-## Fix: Homework not visible in Telegram bot + Notification delivery failures
+## Deploy: WOW Payment Hardening + E2E Test Plan
 
-### Root Cause Analysis
+### 1. Apply Migration `20260220143000_wow_payment_hardening.sql`
 
-**Issue 1: Homework not appearing in Telegram bot for students**
+The migration file already exists at `supabase/migrations/20260220143000_wow_payment_hardening.sql`. It adds:
+- `lesson_id` column on `tutor_payments` with unique partial index (idempotent upsert)
+- `payment_details_text` column on `tutor_calendar_settings`
+- `complete_lesson_and_create_payment()` RPC -- idempotent lesson completion + payment creation
+- `get_tutor_students_debt()` RPC -- aggregates pending/overdue/debt per student
 
-The `handleHomeworkCommand` function resolves the canonical user ID from `profiles.telegram_user_id` but then **ignores it**, using only `userId` from `telegram_sessions` for all queries:
+I will apply this migration using the database migration tool (SQL from the file).
+
+### 2. Deploy Edge Functions
+
+Deploy two functions:
+- **payment-reminder** -- sends Telegram reminders for completed unpaid lessons
+- **telegram-bot** -- handles payment callbacks including "Double WOW" parent reminder flow
+
+### 3. E2E Test Scenario (Manual)
+
+After deployment, the following scenario should be verified:
 
 ```text
-Line 2454: canonicalUserId = resolveCanonicalUserIdByTelegram(telegramUserId)  // correct ID
-Line 2459: setHomeworkState(userId, ...)                                        // session ID
-Line 2461: getActiveHomeworkAssignmentsForStudent(userId)                       // session ID (!)
+Step 1: REMINDER
+  - A completed lesson with payment_status='unpaid' and payment_reminder_sent=false
+    triggers a Telegram message to the tutor with 3 buttons:
+    [Проведено, жду оплату] [Уже оплачено] [Урок отменен]
+
+Step 2: PENDING / PAID
+  - Click "Проведено, жду оплату" (pending):
+    -> tutor_lessons.payment_status = 'pending', status = 'completed'
+    -> tutor_payments row created with status='pending'
+    -> Original message edited to show confirmation
+  - Or click "Уже оплачено" (paid):
+    -> tutor_lessons.payment_status = 'paid', paid_at set
+    -> tutor_payments row created with status='paid'
+
+Step 3: DOUBLE WOW (yes/no)
+  - After pending or paid, bot asks "Double WOW -- send payment reminder to parent?"
+  - "Yes": sends parent_contact a message with payment details text from tutor settings
+  - "No": confirms "OK, not sending"
+
+Step 4: DEBT IN UI
+  - TutorStudents page: StudentCard shows debt_amount badge
+  - TutorStudentProfile page: shows studentDebt value
+  - Both pull data from get_tutor_students_debt() RPC
 ```
 
-Database evidence: Analyst_Vladimir (telegram_user_id=385567670) has:
-- `profiles.id` = `3c9e408c-...` (homework is assigned to THIS id)
-- `telegram_sessions.user_id` = `420b1476-...` (this is the tutor Vladmir's account)
+Verification queries to run after test:
+```sql
+-- Check payment was created for the lesson
+SELECT id, lesson_id, amount, status, paid_at
+FROM tutor_payments WHERE lesson_id = '<test_lesson_id>';
 
-The `getOrRepairOnboardingSession` should auto-repair this, but `handleHomeworkCommand` should also defensively use the canonical ID.
+-- Check debt aggregation
+SELECT * FROM get_tutor_students_debt();
 
-**Issue 2: Notifications not delivered**
-
-All 9 student assignments from tutor Milada have `notified=false`. The notify endpoint sends Telegram messages using `parse_mode: "Markdown"` (v1) but uses `escapeMarkdown` designed for MarkdownV2, which can cause rendering issues. More critically, the notify function doesn't retry on transient failures or distinguish between "user blocked bot" vs "temporary error".
-
-### Changes
-
-**1. `supabase/functions/telegram-bot/index.ts` -- Use canonical user ID in homework handlers**
-
-In `handleHomeworkCommand` (line 2452), change the effective user ID used for queries to prefer canonical:
-
-```typescript
-const effectiveUserId = canonicalUserId ?? userId;
-await setHomeworkState(effectiveUserId, "HW_SELECTING", {});
-const assignments = await getActiveHomeworkAssignmentsForStudent(effectiveUserId);
-const visibilityStats = await getHomeworkAssignmentVisibilityStatsForStudent(effectiveUserId);
+-- Check lesson status updated
+SELECT id, status, payment_status, payment_amount, paid_at, payment_reminder_sent
+FROM tutor_lessons WHERE id = '<test_lesson_id>';
 ```
 
-Apply the same pattern in all downstream homework handlers that receive `userId` from session:
-- `handleHomeworkStartCallback` -- resolve canonical before querying assignments/submissions
-- `handleHomeworkNextCallback`, `handleHomeworkSubmitCallback` -- use canonical for state reads
-- `handleHomeworkTextInput`, `handleHomeworkPhotoInput` -- use canonical for state and DB updates
+### Technical Details
 
-Add a helper function at the top of the homework section:
-```typescript
-async function resolveHomeworkUserId(telegramUserId: number, sessionUserId: string): Promise<string> {
-  const canonical = await resolveCanonicalUserIdByTelegram(telegramUserId);
-  return canonical?.id ?? sessionUserId;
-}
-```
-
-**2. `supabase/functions/homework-api/index.ts` -- Fix notification reliability**
-
-In `handleNotifyStudents` (line 897):
-- Switch from `parse_mode: "Markdown"` to `parse_mode: "HTML"` for the default message template (more reliable, consistent with the rest of the bot)
-- Format message as HTML: `<b>title</b>` instead of `*title*`
-- Remove `escapeMarkdown` usage (use HTML escaping instead)
-- Add a simple retry (1 retry after 500ms) for transient Telegram API failures (status 429 or 5xx)
-- Log the actual Telegram response body on failure for debugging
-
-**3. Data fix for Analyst_Vladimir**
-
-The `telegram_sessions` record for telegram_user_id=385567670 currently points to user_id=`420b1476-...` (tutor). The auto-repair in `getOrRepairOnboardingSession` will fix this when the student next types any command. Change #1 ensures homework works even before the repair happens.
-
-### What is NOT changed
-
-- No database migrations
-- No changes to AuthGuard, TutorGuard, or student UI components
-- No changes to the homework state machine or AI check flow
-- No changes to `src/components/ui/`
-- Existing homework flow (create, assign, submit, review) remains intact
-
-### Deploy steps
-
-1. Apply changes to `telegram-bot/index.ts` and `homework-api/index.ts`
-2. Deploy both edge functions: `telegram-bot` and `homework-api`
-3. Ask tutor Milada to re-send notifications (click "Уведомить" on existing assignments, or create a new test assignment)
-4. Ask students to try `/homework` in the bot
+- The `get_lessons_needing_payment_reminder()` DB function already returns `hourly_rate_cents` (updated in a prior migration) -- no changes needed
+- The `complete_lesson_and_create_payment()` RPC uses `ON CONFLICT (lesson_id)` for idempotency, so double-clicking buttons won't create duplicate payments
+- The `get_tutor_students_debt()` RPC is already consumed by `src/lib/tutors.ts` and displayed in `StudentCard` and `TutorStudentProfile`
+- No code changes needed -- only migration application and function deployment
 
