@@ -1640,6 +1640,7 @@ export type Database = {
           created_at: string | null
           current_score: number | null
           exam_type: string | null
+          hourly_rate_cents: number | null
           id: string
           last_activity_at: string | null
           last_lesson_at: string | null
@@ -1658,6 +1659,7 @@ export type Database = {
           created_at?: string | null
           current_score?: number | null
           exam_type?: string | null
+          hourly_rate_cents?: number | null
           id?: string
           last_activity_at?: string | null
           last_lesson_at?: string | null
@@ -1676,6 +1678,7 @@ export type Database = {
           created_at?: string | null
           current_score?: number | null
           exam_type?: string | null
+          hourly_rate_cents?: number | null
           id?: string
           last_activity_at?: string | null
           last_lesson_at?: string | null

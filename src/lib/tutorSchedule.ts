@@ -206,7 +206,7 @@ export async function getTutorLessons(
     return [];
   }
   
-  return data as TutorLessonWithStudent[];
+  return data as unknown as TutorLessonWithStudent[];
 }
 
 interface CreateLessonInput {
@@ -222,10 +222,6 @@ interface CreateLessonInput {
   is_recurring?: boolean;
   recurrence_rule?: string;
   parent_lesson_id?: string;
-  external_source?: string;
-  external_event_id?: string;
-  external_calendar_id?: string;
-  external_event_updated_at?: string;
 }
 
 /**
@@ -273,7 +269,7 @@ export async function createLesson(input: CreateLessonInput): Promise<TutorLesso
     return null;
   }
   
-  return data as TutorLessonWithStudent;
+  return data as unknown as TutorLessonWithStudent;
 }
 
 /**
@@ -423,7 +419,7 @@ export async function updateLesson(
     return null;
   }
   
-  return data as TutorLessonWithStudent;
+  return data as unknown as TutorLessonWithStudent;
 }
 
 /**
