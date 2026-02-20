@@ -5,20 +5,22 @@ import { Badge } from '@/components/ui/badge';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { CheckCircle, AlertCircle, Clock, Bot } from 'lucide-react';
 import type { TutorStudentWithProfile } from '@/types/tutor';
-import { 
-  formatRelativeTime, 
-  calculateProgress, 
-  getPaymentStatus, 
+import {
+  formatRelativeTime,
+  calculateProgress,
+  getPaymentStatus,
   getInitials,
-  formatExamType 
+  formatExamType,
+  formatCurrency,
 } from '@/lib/formatters';
 
 interface StudentCardProps {
   student: TutorStudentWithProfile & { paid_until?: string | null; last_activity_at?: string | null };
   onClick: () => void;
+  debtAmount?: number;
 }
 
-export function StudentCard({ student, onClick }: StudentCardProps) {
+export function StudentCard({ student, onClick, debtAmount = 0 }: StudentCardProps) {
   const progress = calculateProgress(student.current_score, student.target_score);
   const paymentStatus = getPaymentStatus(student.paid_until ?? null);
   const lastActivity = formatRelativeTime(student.last_activity_at ?? null);
@@ -92,9 +94,14 @@ export function StudentCard({ student, onClick }: StudentCardProps) {
               </TooltipContent>
             </Tooltip>
             
-            {/* Payment status */}
+            {/* Payment status / Debt */}
             <div className="flex items-center gap-1">
-              {paymentStatus.isPaid ? (
+              {debtAmount > 0 ? (
+                <>
+                  <AlertCircle className="h-4 w-4 text-red-500" />
+                  <span className="text-red-600 font-medium">Долг: {formatCurrency(debtAmount)}</span>
+                </>
+              ) : paymentStatus.isPaid ? (
                 <>
                   <CheckCircle className="h-4 w-4 text-green-500" />
                   <span className="text-green-600">{paymentStatus.label}</span>
