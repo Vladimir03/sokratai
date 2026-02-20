@@ -21,6 +21,7 @@ import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 import { supabase } from '@/lib/supabaseClient';
 import { calculateLessonPaymentAmount } from '@/lib/paymentAmount';
+import { formatCurrency } from '@/lib/formatters';
 import TutorGuard from '@/components/TutorGuard';
 import { TutorLayout } from '@/components/tutor/TutorLayout';
 import { TutorDataStatus } from '@/components/tutor/TutorDataStatus';
@@ -145,8 +146,6 @@ interface LessonBlockProps {
   onClick: () => void;
   onDragStart: (event: React.DragEvent<HTMLDivElement>) => void;
   onDragEnd: () => void;
-  onCompleteLesson?: (lessonId: string, amount: number, e: React.MouseEvent) => void;
-  isCompleting?: boolean;
 }
 
 function LessonBlock({
@@ -155,8 +154,6 @@ function LessonBlock({
   onClick,
   onDragStart,
   onDragEnd,
-  onCompleteLesson,
-  isCompleting = false,
 }: LessonBlockProps) {
   const startDate = new Date(lesson.start_at);
   const startMinutes = startDate.getHours() * 60 + startDate.getMinutes();
@@ -175,57 +172,59 @@ function LessonBlock({
   const lessonType = lesson.lesson_type || 'regular';
   const typeColor = getLessonTypeColor(lessonType);
   const hourlyRateCents = lesson.tutor_students?.hourly_rate_cents;
-  const amountToComplete = calculateLessonPaymentAmount(lesson.duration_min, hourlyRateCents);
 
   const isPast = endDate.getTime() < Date.now();
-  const showCompleteButton = isPast && lesson.status === 'booked' && amountToComplete !== null && onCompleteLesson;
-  const compactCompleteButton = height < 50;
+  const isCompleted = lesson.status === 'completed';
+  const isCancelled = lesson.status === 'cancelled';
+  const needsAction = isPast && lesson.status === 'booked';
+
+  // Visual state classes
+  const statusClasses = cn(
+    isCompleted && lesson.payment_status === 'paid' && "opacity-60",
+    isCompleted && lesson.payment_status !== 'paid' && "opacity-60",
+    isCancelled && "opacity-40 grayscale",
+  );
+
+  const isDraggable = lesson.status === 'booked';
 
   return (
     <div
       className={cn(
-        "absolute left-0.5 right-0.5 text-white rounded-md px-1.5 py-0.5 cursor-pointer hover:opacity-90 transition-opacity overflow-hidden shadow-sm group",
-        typeColor
+        "absolute left-0.5 right-0.5 text-white rounded-md px-1.5 py-0.5 cursor-pointer hover:opacity-90 transition-opacity overflow-hidden shadow-sm",
+        typeColor,
+        statusClasses,
+        needsAction && "ring-2 ring-amber-400 ring-offset-0",
       )}
       style={{ top: `${top}px`, height: `${height}px`, minHeight: '20px' }}
-      draggable
-      onDragStart={onDragStart}
-      onDragEnd={onDragEnd}
+      draggable={isDraggable}
+      onDragStart={isDraggable ? onDragStart : undefined}
+      onDragEnd={isDraggable ? onDragEnd : undefined}
       onClick={(e) => { e.stopPropagation(); onClick(); }}
     >
       <div className="flex flex-col h-full justify-center">
-        <span className="text-xs font-medium truncate leading-tight">{studentName}</span>
+        <span className={cn(
+          "text-xs font-medium truncate leading-tight",
+          isCancelled && "line-through opacity-70"
+        )}>
+          {studentName}
+        </span>
         {height >= 35 && (
           <span className="text-[10px] opacity-80 truncate leading-tight">{timeStr}</span>
         )}
-        
-        {showCompleteButton ? (
-          <div 
-            className={cn(
-              "mt-1 transition-opacity",
-              compactCompleteButton ? "opacity-100" : "opacity-0 group-hover:opacity-100"
-            )}
-            onClick={(e) => {
-              e.stopPropagation();
-              if (isCompleting) return;
-              onCompleteLesson?.(lesson.id, amountToComplete!, e);
-            }}
-          >
-            <div
-              className={cn(
-                "bg-white/20 hover:bg-white/30 text-white rounded-sm flex items-center justify-center font-medium shadow-sm transition-colors border border-white/20",
-                compactCompleteButton ? "text-[9px] py-0.5 px-1" : "text-[10px] py-1 px-1.5",
-                isCompleting && "opacity-70 cursor-not-allowed"
-              )}
-            >
-              {isCompleting
-                ? "⏳ Завершаем..."
-                : compactCompleteButton
-                  ? `💰 ${amountToComplete} ₽`
-                  : `💰 Завершить: ${amountToComplete} ₽`}
-            </div>
-          </div>
-        ) : (
+
+        {/* Status indicator row */}
+        {height >= 35 && (isCompleted || isCancelled || needsAction) && (
+          <span className="text-[10px] leading-tight mt-0.5 truncate">
+            {needsAction && '⏳ Нужно закрыть'}
+            {isCompleted && lesson.payment_status === 'paid' && '✅ Оплачено'}
+            {isCompleted && lesson.payment_status === 'pending' && '⏳ Жду оплату'}
+            {isCompleted && !lesson.payment_status && '✅ Проведено'}
+            {isCancelled && '❌ Отменено'}
+          </span>
+        )}
+
+        {/* Rate/subject for normal future lessons */}
+        {!isCompleted && !isCancelled && !needsAction && (
           <>
             {height >= 50 && hourlyRateCents != null && (
               <span className="text-[10px] opacity-90 truncate font-semibold leading-tight">{hourlyRateCents / 100} ₽/ч</span>
@@ -672,6 +671,8 @@ interface LessonDetailsDialogProps {
   students: TutorStudentWithProfile[];
   onCancel: () => void;
   onUpdate: () => void;
+  onComplete?: (lessonId: string, amount: number, paymentStatus: string) => void;
+  isCompleting?: boolean;
 }
 
 function LessonDetailsDialog({
@@ -680,7 +681,9 @@ function LessonDetailsDialog({
   lesson,
   students,
   onCancel,
-  onUpdate
+  onUpdate,
+  onComplete,
+  isCompleting = false,
 }: LessonDetailsDialogProps) {
   const [isCancelling, setIsCancelling] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
@@ -767,6 +770,12 @@ function LessonDetailsDialog({
 
   const lessonType = lesson.lesson_type || 'regular';
   const typeLabel = getLessonTypeLabel(lessonType);
+
+  const isPast = endDate.getTime() < Date.now();
+  const amountForCompletion = calculateLessonPaymentAmount(
+    lesson.duration_min,
+    lesson.tutor_students?.hourly_rate_cents
+  );
 
   const handleCancelClick = () => {
     if (isSeriesCheckLoading) {
@@ -1057,18 +1066,50 @@ function LessonDetailsDialog({
             </>
           ) : (
             lesson.status === 'booked' && (
-              <>
-                <Button variant="outline" onClick={() => setIsEditing(true)}>
-                  Редактировать
-                </Button>
-                <Button
-                  variant="destructive"
-                  onClick={handleCancelClick}
-                  disabled={isCancelling || isSeriesCheckLoading}
-                >
-                  {isCancelling ? 'Отмена...' : 'Отменить занятие'}
-                </Button>
-              </>
+              isPast ? (
+                /* Past booked lesson — 3 action buttons matching Telegram bot UX */
+                <div className="flex flex-col gap-2 w-full">
+                  <p className="text-sm text-muted-foreground text-center">
+                    Занятие завершилось. Выберите действие:
+                  </p>
+                  <Button
+                    className="w-full bg-amber-500 hover:bg-amber-600 text-white"
+                    onClick={() => onComplete?.(lesson.id, amountForCompletion ?? 0, 'pending')}
+                    disabled={isCompleting || isCancelling}
+                  >
+                    ✅ Проведено, жду оплату{amountForCompletion ? ` (${formatCurrency(amountForCompletion)})` : ''}
+                  </Button>
+                  <Button
+                    className="w-full bg-green-600 hover:bg-green-700 text-white"
+                    onClick={() => onComplete?.(lesson.id, amountForCompletion ?? 0, 'paid')}
+                    disabled={isCompleting || isCancelling}
+                  >
+                    💳 Уже оплачено{amountForCompletion ? ` (${formatCurrency(amountForCompletion)})` : ''}
+                  </Button>
+                  <Button
+                    variant="destructive"
+                    className="w-full"
+                    onClick={handleCancelClick}
+                    disabled={isCancelling || isCompleting || isSeriesCheckLoading}
+                  >
+                    {isCancelling ? 'Отмена...' : '❌ Урок отменен'}
+                  </Button>
+                </div>
+              ) : (
+                /* Future booked lesson — edit / cancel */
+                <>
+                  <Button variant="outline" onClick={() => setIsEditing(true)}>
+                    Редактировать
+                  </Button>
+                  <Button
+                    variant="destructive"
+                    onClick={handleCancelClick}
+                    disabled={isCancelling || isSeriesCheckLoading}
+                  >
+                    {isCancelling ? 'Отмена...' : 'Отменить занятие'}
+                  </Button>
+                </>
+              )
             )
           )}
         </DialogFooter>
@@ -1914,8 +1955,7 @@ function TutorScheduleContent() {
     for (let i = 0; i < 7; i++) byDay[i] = [];
 
     for (const lesson of effectiveLessons) {
-      if (lesson.status !== 'booked') continue;
-
+      // Show all statuses: booked, completed, cancelled
       const startDate = new Date(lesson.start_at);
       const dayOfWeek = (startDate.getDay() + 6) % 7;
       const lessonHour = startDate.getHours();
@@ -2115,7 +2155,7 @@ function TutorScheduleContent() {
     }
   }, [effectiveLessons, getSnappedTimeFromPosition, gridHeight, refetchLessons, weekStart]);
 
-  const handleCompleteLesson = useCallback(async (lessonId: string, amount: number, e: React.MouseEvent) => {
+  const handleCompleteLesson = useCallback(async (lessonId: string, amount: number, paymentStatus: string) => {
     if (completingLessonIdsRef.current[lessonId]) {
       return;
     }
@@ -2123,10 +2163,15 @@ function TutorScheduleContent() {
     completingLessonIdsRef.current = { ...completingLessonIdsRef.current, [lessonId]: true };
     setCompletingLessonIds((prev) => ({ ...prev, [lessonId]: true }));
     try {
-      const ok = await completeLessonAndCreatePayment(lessonId, amount);
+      const ok = await completeLessonAndCreatePayment(lessonId, amount, paymentStatus);
       if (ok) {
-        setShowConfetti(true);
-        toast.success(`Урок завершен. Добавлена оплата на ${amount} ₽`);
+        if (paymentStatus === 'paid') {
+          setShowConfetti(true);
+          toast.success(amount > 0 ? `Отлично! Оплата ${formatCurrency(amount)} получена` : 'Урок отмечен как оплаченный');
+        } else {
+          toast.success(amount > 0 ? `Урок завершён. Ждём оплату ${formatCurrency(amount)}` : 'Урок завершён');
+        }
+        setLessonDetailsOpen(false);
         refetchLessons();
       } else {
         toast.error('Не удалось завершить урок');
@@ -2499,8 +2544,6 @@ function TutorScheduleContent() {
                               onClick={() => handleLessonClick(lesson)}
                               onDragStart={(event) => handleLessonDragStart(lesson.id, lesson.duration_min, event)}
                               onDragEnd={handleLessonDragEnd}
-                              onCompleteLesson={handleCompleteLesson}
-                              isCompleting={Boolean(completingLessonIds[lesson.id])}
                             />
                           ))}
                         </div>
@@ -2547,6 +2590,8 @@ function TutorScheduleContent() {
           students={students}
           onCancel={() => refetchLessons()}
           onUpdate={() => refetchLessons()}
+          onComplete={handleCompleteLesson}
+          isCompleting={selectedLesson ? Boolean(completingLessonIds[selectedLesson.id]) : false}
         />
 
         <ReminderSettingsDialog
