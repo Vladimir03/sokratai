@@ -58,3 +58,14 @@ export function formatExamType(examType: string | null): string {
   if (!examType) return '';
   return examType.toUpperCase();
 }
+
+/**
+ * Format a number as Russian rubles currency
+ */
+export function formatCurrency(amount: number): string {
+  return new Intl.NumberFormat('ru-RU', {
+    style: 'currency',
+    currency: 'RUB',
+    minimumFractionDigits: 0,
+  }).format(amount);
+}

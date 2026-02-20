@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { ArrowLeft, Save, Plus, Trash2, MessageSquare, ChevronRight, Edit } from 'lucide-react';
@@ -20,11 +20,12 @@ import { toast } from 'sonner';
 import TutorGuard from '@/components/TutorGuard';
 import { TutorLayout } from '@/components/tutor/TutorLayout';
 import { TutorDataStatus } from '@/components/tutor/TutorDataStatus';
-import { 
-  useTutorStudent, 
-  useMockExams, 
-  useStudentChats, 
-  useStudentChatMessages 
+import {
+  useTutorStudent,
+  useMockExams,
+  useStudentChats,
+  useStudentChatMessages,
+  useTutorPayments,
 } from '@/hooks/useTutor';
 import { 
   updateTutorStudent, 
@@ -33,12 +34,13 @@ import {
   removeStudentFromTutor,
   updateTutorStudentProfile
 } from '@/lib/tutors';
-import { 
-  formatRelativeTime, 
-  calculateProgress, 
-  getPaymentStatus, 
-  getInitials, 
-  formatExamType 
+import {
+  formatRelativeTime,
+  calculateProgress,
+  getPaymentStatus,
+  getInitials,
+  formatExamType,
+  formatCurrency,
 } from '@/lib/formatters';
 import {
   applyTutorStudentPatchToCache,
@@ -83,7 +85,15 @@ function TutorStudentProfileContent() {
     isRecovering: chatsIsRecovering,
     failureCount: chatsFailureCount,
   } = useStudentChats(student?.student_id);
-  
+  const { payments } = useTutorPayments();
+
+  // Суммарный долг ученика (status != 'paid')
+  const studentDebt = useMemo(() => {
+    return payments
+      .filter(p => p.tutor_student_id === tutorStudentId && p.status !== 'paid')
+      .reduce((sum, p) => sum + p.amount, 0);
+  }, [payments, tutorStudentId]);
+
   // Локальное состояние для редактирования
   const [notes, setNotes] = useState<string>('');
   const [parentContact, setParentContact] = useState<string>('');
@@ -406,9 +416,15 @@ function TutorStudentProfileContent() {
                 </p>
                 
                 <div className="flex items-center gap-4 text-sm flex-wrap">
-                  <span className={paymentStatus.isPaid ? 'text-green-600' : 'text-amber-600'}>
-                    Оплата: {paymentStatus.label}
-                  </span>
+                  {studentDebt > 0 ? (
+                    <span className="text-red-600 font-medium">
+                      ⚠️ Долг: {formatCurrency(studentDebt)}
+                    </span>
+                  ) : (
+                    <span className={paymentStatus.isPaid ? 'text-green-600' : 'text-amber-600'}>
+                      Оплата: {paymentStatus.label}
+                    </span>
+                  )}
                   {student.hourly_rate_cents != null && (
                     <span className="text-muted-foreground">
                       💰 {student.hourly_rate_cents / 100} ₽/ч
