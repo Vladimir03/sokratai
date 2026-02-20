@@ -14,7 +14,15 @@ import {
   saveHomeworkPhotoAnswer,
   saveHomeworkTextAnswer,
 } from "./homework/homework_handler.ts";
-import { calculateLessonPaymentAmount } from "../../../src/lib/paymentAmount.ts";
+function calculateLessonPaymentAmount(
+  durationMin: number,
+  hourlyRateCents: number | null | undefined
+): number | null {
+  if (hourlyRateCents == null || hourlyRateCents <= 0 || durationMin <= 0) {
+    return null;
+  }
+  return Math.round((durationMin / 60) * (hourlyRateCents / 100));
+}
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",

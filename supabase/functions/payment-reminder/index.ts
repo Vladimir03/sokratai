@@ -1,6 +1,15 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "npm:@supabase/supabase-js@2";
-import { calculateLessonPaymentAmount } from "../../../src/lib/paymentAmount.ts";
+
+function calculateLessonPaymentAmount(
+  durationMin: number,
+  hourlyRateCents: number | null | undefined
+): number | null {
+  if (hourlyRateCents == null || hourlyRateCents <= 0 || durationMin <= 0) {
+    return null;
+  }
+  return Math.round((durationMin / 60) * (hourlyRateCents / 100));
+}
 
 const TELEGRAM_BOT_TOKEN = Deno.env.get("TELEGRAM_BOT_TOKEN");
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL");
