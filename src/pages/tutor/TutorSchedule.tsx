@@ -26,7 +26,7 @@ import TutorGuard from '@/components/TutorGuard';
 import { TutorLayout } from '@/components/tutor/TutorLayout';
 import { TutorDataStatus } from '@/components/tutor/TutorDataStatus';
 import ConfettiBurst from '@/components/ConfettiBurst';
-import { useTutor, useTutorWeeklySlots, useTutorLessons, useTutorStudents, useTutorReminderSettings, useTutorCalendarSettings, useTutorAvailabilityExceptions } from '@/hooks/useTutor';
+import { useTutor, useTutorWeeklySlots, useTutorLessons, useTutorStudents, useTutorReminderSettings, useTutorCalendarSettings, useTutorAvailabilityExceptions, useTutorGroups, useTutorGroupMemberships } from '@/hooks/useTutor';
 import {
   createWeeklySlot,
   toggleSlotAvailability,
@@ -48,7 +48,13 @@ import {
   updateLessonSeries,
   cancelLessonSeries
 } from '@/lib/tutorSchedule';
-import type { TutorWeeklySlot, TutorLessonWithStudent, TutorStudentWithProfile, TutorReminderSettings, TutorCalendarSettings, TutorAvailabilityException, LessonType } from '@/types/tutor';
+import {
+  createMiniGroupLessonsBatch,
+  summarizeMiniGroupCreateResults,
+  type MiniGroupCreateResultItem,
+  type MiniGroupCreateSummary,
+} from '@/lib/tutorScheduleGroupCreate';
+import type { TutorWeeklySlot, TutorLessonWithStudent, TutorStudentWithProfile, TutorReminderSettings, TutorCalendarSettings, TutorAvailabilityException, TutorGroup, TutorGroupMembership, LessonType } from '@/types/tutor';
 
 // =============================================
 // Constants & Utils
@@ -347,6 +353,13 @@ function WorkHoursSettings({ settings, onChange }: WorkHoursSettingsProps) {
 interface AddLessonDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  miniGroupsEnabled: boolean;
+  groups: TutorGroup[];
+  memberships: TutorGroupMembership[];
+  groupsLoading: boolean;
+  membershipsLoading: boolean;
+  groupsError: string | null;
+  membershipsError: string | null;
   students: TutorStudentWithProfile[];
   initialDate: Date | null;
   initialHour: number | null;
@@ -354,9 +367,18 @@ interface AddLessonDialogProps {
   onSuccess: () => void;
 }
 
+type LessonMode = 'individual' | 'mini_group';
+
 function AddLessonDialog({
   open,
   onOpenChange,
+  miniGroupsEnabled,
+  groups,
+  memberships,
+  groupsLoading,
+  membershipsLoading,
+  groupsError,
+  membershipsError,
   students,
   initialDate,
   initialHour,
@@ -366,7 +388,9 @@ function AddLessonDialog({
   const [date, setDate] = useState<Date | undefined>(initialDate || new Date());
   const [hour, setHour] = useState(initialHour?.toString() || new Date().getHours().toString());
   const [minute, setMinute] = useState(initialMinute.toString().padStart(2, '0'));
+  const [lessonMode, setLessonMode] = useState<LessonMode>('individual');
   const [studentId, setStudentId] = useState('');
+  const [groupId, setGroupId] = useState('');
   const [notes, setNotes] = useState('');
   const [duration, setDuration] = useState('60');
   const [lessonType, setLessonType] = useState<LessonType>('regular');
@@ -374,21 +398,39 @@ function AddLessonDialog({
   const [isRecurring, setIsRecurring] = useState(false);
   const [repeatUntil, setRepeatUntil] = useState<Date | undefined>();
   const [isSaving, setIsSaving] = useState(false);
+  const [groupCreateSummary, setGroupCreateSummary] = useState<MiniGroupCreateSummary | null>(null);
 
   useEffect(() => {
     if (open) {
       setDate(initialDate || new Date());
       setHour(initialHour?.toString() || new Date().getHours().toString());
       setMinute(initialMinute.toString().padStart(2, '0'));
+      setLessonMode('individual');
       setStudentId('');
+      setGroupId('');
       setNotes('');
       setDuration('60');
       setLessonType('regular');
       setSubject('');
       setIsRecurring(false);
       setRepeatUntil(undefined);
+      setGroupCreateSummary(null);
     }
   }, [open, initialDate, initialHour, initialMinute]);
+
+  useEffect(() => {
+    if (lessonMode === 'mini_group') {
+      setIsRecurring(false);
+      setRepeatUntil(undefined);
+      setStudentId('');
+    }
+  }, [lessonMode]);
+
+  useEffect(() => {
+    if (lessonMode === 'mini_group') {
+      setGroupCreateSummary(null);
+    }
+  }, [lessonMode, groupId, date, hour, minute, duration, lessonType, subject, notes]);
 
   // Auto-fill subject from student profile
   useEffect(() => {
@@ -400,11 +442,157 @@ function AddLessonDialog({
     }
   }, [studentId, students]);
 
+  const studentsByTutorStudentId = useMemo(() => {
+    const map = new Map<string, TutorStudentWithProfile>();
+    students.forEach((student) => {
+      map.set(student.id, student);
+    });
+    return map;
+  }, [students]);
+
+  const selectedGroupMemberships = useMemo(
+    () =>
+      memberships.filter(
+        (membership) =>
+          membership.is_active && groupId !== '' && membership.tutor_group_id === groupId
+      ),
+    [groupId, memberships]
+  );
+
+  const selectedGroupMembers = useMemo(
+    () =>
+      selectedGroupMemberships.map((membership) => ({
+        membership,
+        student: studentsByTutorStudentId.get(membership.tutor_student_id) ?? null,
+      })),
+    [selectedGroupMemberships, studentsByTutorStudentId]
+  );
+
+  const resolvedGroupMembers = useMemo(
+    () => selectedGroupMembers.filter((member) => member.student !== null),
+    [selectedGroupMembers]
+  );
+
+  const unresolvedGroupMembers = useMemo(
+    () => selectedGroupMembers.filter((member) => member.student === null),
+    [selectedGroupMembers]
+  );
+
+  const membersWithoutRate = useMemo(
+    () =>
+      resolvedGroupMembers.filter(
+        (member) => member.student?.hourly_rate_cents == null
+      ),
+    [resolvedGroupMembers]
+  );
+
+  const miniGroupDataError = groupsError || membershipsError;
+  const canUseMiniGroupMode = miniGroupsEnabled;
+  const isMiniGroupMode = canUseMiniGroupMode && lessonMode === 'mini_group';
+  const isMiniGroupDataLoading = isMiniGroupMode && (groupsLoading || membershipsLoading);
+
+  const selectedGroup = useMemo(
+    () => groups.find((group) => group.id === groupId) ?? null,
+    [groupId, groups]
+  );
+
+  const miniGroupMembersForCreate = useMemo(
+    () =>
+      resolvedGroupMembers.map((member) => ({
+        tutorStudentId: member.student!.id,
+        studentId: member.student!.student_id,
+        studentName: member.student?.profiles?.username || 'Без имени',
+      })),
+    [resolvedGroupMembers]
+  );
+
   const handleSubmit = async () => {
     if (!date) {
       toast.error('Выберите дату');
       return;
     }
+    const startAt = new Date(date);
+    startAt.setHours(parseInt(hour), parseInt(minute), 0, 0);
+    const lessonInput = {
+      start_at: startAt.toISOString(),
+      duration_min: parseInt(duration),
+      lesson_type: lessonType,
+      subject: subject || undefined,
+      notes: notes || undefined,
+    };
+
+    if (isMiniGroupMode) {
+      if (isMiniGroupDataLoading) {
+        toast.error('Подождите, идет загрузка состава мини-группы');
+        return;
+      }
+      if (miniGroupDataError) {
+        toast.error('Не удалось загрузить данные мини-групп');
+        return;
+      }
+      if (!groupId) {
+        toast.error('Выберите мини-группу');
+        return;
+      }
+      if (miniGroupMembersForCreate.length === 0) {
+        toast.error('В выбранной группе нет активных участников');
+        return;
+      }
+      if (unresolvedGroupMembers.length > 0) {
+        toast.error('Часть участников группы не найдена в списке учеников');
+        return;
+      }
+
+      const failedTutorStudentIds = groupCreateSummary?.failedCount
+        ? groupCreateSummary.results
+            .filter((result) => !result.ok)
+            .map((result) => result.tutorStudentId)
+        : undefined;
+
+      setIsSaving(true);
+      try {
+        const latestSummary = await createMiniGroupLessonsBatch({
+          members: miniGroupMembersForCreate,
+          lessonInput,
+          targetTutorStudentIds: failedTutorStudentIds,
+        });
+
+        let finalSummary = latestSummary;
+        if (failedTutorStudentIds && groupCreateSummary) {
+          const mergedByTutorStudentId = new Map<string, MiniGroupCreateResultItem>();
+          groupCreateSummary.results.forEach((result) => {
+            mergedByTutorStudentId.set(result.tutorStudentId, result);
+          });
+          latestSummary.results.forEach((result) => {
+            mergedByTutorStudentId.set(result.tutorStudentId, result);
+          });
+          finalSummary = summarizeMiniGroupCreateResults(
+            groupCreateSummary.results.map(
+              (result) => mergedByTutorStudentId.get(result.tutorStudentId) ?? result
+            )
+          );
+        }
+
+        if (finalSummary.failedCount === 0) {
+          toast.success(`Создано ${finalSummary.createdCount} занятий для мини-группы`);
+          setGroupCreateSummary(null);
+          onSuccess();
+          onOpenChange(false);
+        } else {
+          setGroupCreateSummary(finalSummary);
+          toast.info(
+            `Создано ${finalSummary.createdCount} из ${finalSummary.totalCount}. Исправьте ошибки и повторите для неуспешных.`
+          );
+        }
+      } catch (err) {
+        console.error(err);
+        toast.error('Ошибка при создании занятий для мини-группы');
+      } finally {
+        setIsSaving(false);
+      }
+      return;
+    }
+
     if (!studentId) {
       toast.error('Выберите ученика');
       return;
@@ -416,9 +604,6 @@ function AddLessonDialog({
 
     setIsSaving(true);
     try {
-      const startAt = new Date(date);
-      startAt.setHours(parseInt(hour), parseInt(minute), 0, 0);
-
       const tutorStudent = students.find(s => s.student_id === studentId);
 
       if (isRecurring && repeatUntil) {
@@ -426,11 +611,7 @@ function AddLessonDialog({
           {
             tutor_student_id: tutorStudent?.id,
             student_id: studentId,
-            start_at: startAt.toISOString(),
-            duration_min: parseInt(duration),
-            lesson_type: lessonType,
-            subject: subject || undefined,
-            notes: notes || undefined,
+            ...lessonInput,
           },
           repeatUntil.toISOString()
         );
@@ -446,11 +627,7 @@ function AddLessonDialog({
         const result = await createLesson({
           tutor_student_id: tutorStudent?.id,
           student_id: studentId,
-          start_at: startAt.toISOString(),
-          duration_min: parseInt(duration),
-          lesson_type: lessonType,
-          subject: subject || undefined,
-          notes: notes || undefined
+          ...lessonInput,
         });
 
         if (result) {
@@ -533,21 +710,159 @@ function AddLessonDialog({
             </div>
           </div>
 
-          <div className="space-y-2">
-            <Label>Ученик *</Label>
-            <Select value={studentId} onValueChange={setStudentId}>
-              <SelectTrigger>
-                <SelectValue placeholder="Выберите ученика" />
-              </SelectTrigger>
-              <SelectContent>
-                {students.map(s => (
-                  <SelectItem key={s.student_id} value={s.student_id}>
-                    {s.profiles?.username || 'Без имени'}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
+          {canUseMiniGroupMode && (
+            <div className="space-y-2">
+              <Label>Формат занятия</Label>
+              <Select
+                value={lessonMode}
+                onValueChange={(value) => setLessonMode(value as LessonMode)}
+                disabled={isSaving}
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="individual">Индивидуально</SelectItem>
+                  <SelectItem value="mini_group">Мини-группа</SelectItem>
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground">
+                {lessonMode === 'individual'
+                  ? 'Формат занятия: Индивидуально'
+                  : 'Формат занятия: Мини-группа'}
+              </p>
+            </div>
+          )}
+
+          {!isMiniGroupMode && (
+            <div className="space-y-2">
+              <Label>Ученик *</Label>
+              <Select value={studentId} onValueChange={setStudentId} disabled={isSaving}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Выберите ученика" />
+                </SelectTrigger>
+                <SelectContent>
+                  {students.map(s => (
+                    <SelectItem key={s.student_id} value={s.student_id}>
+                      {s.profiles?.username || 'Без имени'}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
+
+          {isMiniGroupMode && (
+            <div className="space-y-3 rounded-md border p-3">
+              <div className="space-y-2">
+                <Label>Мини-группа *</Label>
+                <Select
+                  value={groupId}
+                  onValueChange={setGroupId}
+                  disabled={isSaving || isMiniGroupDataLoading || groups.length === 0}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Выберите мини-группу" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {groups.map((group) => (
+                      <SelectItem key={group.id} value={group.id}>
+                        {group.short_name || group.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground">
+                  Для мини-группы в MVP создаются отдельные занятия по каждому участнику.
+                </p>
+              </div>
+
+              {isMiniGroupDataLoading && (
+                <p className="text-xs text-muted-foreground">
+                  Загружаем состав мини-групп...
+                </p>
+              )}
+
+              {!isMiniGroupDataLoading && miniGroupDataError && (
+                <Alert variant="destructive">
+                  <AlertDescription>
+                    Не удалось загрузить мини-группы. Попробуйте закрыть и открыть форму снова.
+                  </AlertDescription>
+                </Alert>
+              )}
+
+              {!isMiniGroupDataLoading && !miniGroupDataError && groups.length === 0 && (
+                <Alert>
+                  <AlertDescription>
+                    Нет активных мини-групп. Создайте группу во вкладке "Ученики".
+                  </AlertDescription>
+                </Alert>
+              )}
+
+              {!isMiniGroupDataLoading && !miniGroupDataError && groupId && (
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <p className="text-sm font-medium">
+                      Состав группы {selectedGroup ? `"${selectedGroup.short_name || selectedGroup.name}"` : ''}
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      Участников: {resolvedGroupMembers.length}
+                    </p>
+                  </div>
+
+                  {resolvedGroupMembers.length > 0 && (
+                    <div className="max-h-28 overflow-auto rounded border bg-muted/20 p-2 text-sm">
+                      <ul className="space-y-1">
+                        {resolvedGroupMembers.map((member) => (
+                          <li key={member.student!.id} className="flex items-center justify-between gap-2">
+                            <span>{member.student?.profiles?.username || 'Без имени'}</span>
+                            <span className="text-xs text-muted-foreground">
+                              {member.student?.hourly_rate_cents != null
+                                ? `${member.student.hourly_rate_cents / 100} ₽/ч`
+                                : 'Ставка не указана'}
+                            </span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+
+                  {resolvedGroupMembers.length === 0 && (
+                    <Alert variant="destructive">
+                      <AlertDescription>
+                        В выбранной группе нет активных участников.
+                      </AlertDescription>
+                    </Alert>
+                  )}
+
+                  {resolvedGroupMembers.length === 1 && (
+                    <Alert>
+                      <AlertDescription>
+                        В группе только 1 участник. Будет создано 1 занятие.
+                      </AlertDescription>
+                    </Alert>
+                  )}
+
+                  {membersWithoutRate.length > 0 && (
+                    <Alert>
+                      <AlertDescription>
+                        У части участников не указана ставка ({membersWithoutRate.length}).
+                        Оплаты останутся per-student.
+                      </AlertDescription>
+                    </Alert>
+                  )}
+
+                  {unresolvedGroupMembers.length > 0 && (
+                    <Alert variant="destructive">
+                      <AlertDescription>
+                        Часть участников не найдена в списке учеников ({unresolvedGroupMembers.length}).
+                      </AlertDescription>
+                    </Alert>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
 
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-2">
@@ -591,50 +906,52 @@ function AddLessonDialog({
           </div>
 
           {/* Recurring lesson */}
-          <div className="space-y-3 border-t pt-3">
-            <div className="flex items-center justify-between">
-              <div>
-                <Label className="text-sm">Повторять еженедельно</Label>
-                <p className="text-xs text-muted-foreground">Создать серию занятий каждую неделю</p>
+          {!isMiniGroupMode && (
+            <div className="space-y-3 border-t pt-3">
+              <div className="flex items-center justify-between">
+                <div>
+                  <Label className="text-sm">Повторять еженедельно</Label>
+                  <p className="text-xs text-muted-foreground">Создать серию занятий каждую неделю</p>
+                </div>
+                <Switch checked={isRecurring} onCheckedChange={setIsRecurring} />
               </div>
-              <Switch checked={isRecurring} onCheckedChange={setIsRecurring} />
-            </div>
 
-            {isRecurring && (
-              <div className="space-y-2">
-                <Label>Повторять до *</Label>
-                <Popover>
-                  <PopoverTrigger asChild>
-                    <Button
-                      variant="outline"
-                      className={cn(
-                        "w-full justify-start text-left font-normal",
-                        !repeatUntil && "text-muted-foreground"
-                      )}
-                    >
-                      <CalendarIcon className="mr-2 h-4 w-4" />
-                      {repeatUntil ? format(repeatUntil, 'dd.MM.yyyy') : 'Выберите дату окончания'}
-                    </Button>
-                  </PopoverTrigger>
-                  <PopoverContent className="w-auto p-0" align="start">
-                    <Calendar
-                      mode="single"
-                      selected={repeatUntil}
-                      onSelect={setRepeatUntil}
-                      locale={ru}
-                      disabled={(d) => d < (date || new Date())}
-                      className="pointer-events-auto"
-                    />
-                  </PopoverContent>
-                </Popover>
-                {repeatUntil && date && (
-                  <p className="text-xs text-muted-foreground">
-                    Будет создано ~{Math.min(60, Math.floor((repeatUntil.getTime() - date.getTime()) / (7 * 24 * 60 * 60 * 1000)) + 1)} занятий
-                  </p>
-                )}
-              </div>
-            )}
-          </div>
+              {isRecurring && (
+                <div className="space-y-2">
+                  <Label>Повторять до *</Label>
+                  <Popover>
+                    <PopoverTrigger asChild>
+                      <Button
+                        variant="outline"
+                        className={cn(
+                          "w-full justify-start text-left font-normal",
+                          !repeatUntil && "text-muted-foreground"
+                        )}
+                      >
+                        <CalendarIcon className="mr-2 h-4 w-4" />
+                        {repeatUntil ? format(repeatUntil, 'dd.MM.yyyy') : 'Выберите дату окончания'}
+                      </Button>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-auto p-0" align="start">
+                      <Calendar
+                        mode="single"
+                        selected={repeatUntil}
+                        onSelect={setRepeatUntil}
+                        locale={ru}
+                        disabled={(d) => d < (date || new Date())}
+                        className="pointer-events-auto"
+                      />
+                    </PopoverContent>
+                  </Popover>
+                  {repeatUntil && date && (
+                    <p className="text-xs text-muted-foreground">
+                      Будет создано ~{Math.min(60, Math.floor((repeatUntil.getTime() - date.getTime()) / (7 * 24 * 60 * 60 * 1000)) + 1)} занятий
+                    </p>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
 
           <div className="space-y-2">
             <Label>Заметка (опц.)</Label>
@@ -645,14 +962,62 @@ function AddLessonDialog({
               rows={2}
             />
           </div>
+
+          {isMiniGroupMode && groupCreateSummary && (
+            <Alert variant={groupCreateSummary.failedCount > 0 ? 'destructive' : 'default'}>
+              <AlertDescription>
+                <p>
+                  Создано {groupCreateSummary.createdCount} из {groupCreateSummary.totalCount}.
+                </p>
+                {groupCreateSummary.failedCount > 0 && (
+                  <div className="mt-2 space-y-1">
+                    <p className="text-xs">
+                      Не удалось создать для:
+                    </p>
+                    <ul className="list-disc pl-5 text-xs">
+                      {groupCreateSummary.results
+                        .filter((result) => !result.ok)
+                        .map((result) => (
+                          <li key={result.tutorStudentId}>
+                            {result.studentName}
+                            {result.errorMessage ? `: ${result.errorMessage}` : ''}
+                          </li>
+                        ))}
+                    </ul>
+                  </div>
+                )}
+              </AlertDescription>
+            </Alert>
+          )}
         </div>
 
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>
             Отмена
           </Button>
-          <Button onClick={handleSubmit} disabled={isSaving}>
-            {isSaving ? 'Сохранение...' : isRecurring ? 'Создать серию' : 'Создать'}
+          <Button
+            onClick={handleSubmit}
+            disabled={
+              isSaving ||
+              (isMiniGroupMode &&
+                (
+                  isMiniGroupDataLoading ||
+                  Boolean(miniGroupDataError) ||
+                  !groupId ||
+                  miniGroupMembersForCreate.length === 0 ||
+                  unresolvedGroupMembers.length > 0
+                ))
+            }
+          >
+            {isSaving
+              ? (isMiniGroupMode ? 'Создаем занятия для группы...' : 'Сохранение...')
+              : isMiniGroupMode
+                ? (
+                  groupCreateSummary?.failedCount
+                    ? `Повторить неуспешные (${groupCreateSummary.failedCount})`
+                    : `Создать ${miniGroupMembersForCreate.length} занятий`
+                )
+                : (isRecurring ? 'Создать серию' : 'Создать')}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -1793,6 +2158,17 @@ function TutorScheduleContent() {
   const [showConfetti, setShowConfetti] = useState(false);
   const [completingLessonIds, setCompletingLessonIds] = useState<Record<string, boolean>>({});
   const completingLessonIdsRef = useRef<Record<string, boolean>>({});
+  const miniGroupsEnabled = Boolean(tutor?.mini_groups_enabled);
+  const {
+    groups,
+    loading: groupsLoading,
+    error: groupsError,
+  } = useTutorGroups(miniGroupsEnabled && addLessonOpen);
+  const {
+    memberships,
+    loading: membershipsLoading,
+    error: membershipsError,
+  } = useTutorGroupMemberships(miniGroupsEnabled && addLessonOpen);
 
   useEffect(() => {
     if (!lessonDetailsOpen || !selectedLesson) return;
@@ -2576,6 +2952,13 @@ function TutorScheduleContent() {
         <AddLessonDialog
           open={addLessonOpen}
           onOpenChange={setAddLessonOpen}
+          miniGroupsEnabled={miniGroupsEnabled}
+          groups={groups}
+          memberships={memberships}
+          groupsLoading={groupsLoading}
+          membershipsLoading={membershipsLoading}
+          groupsError={groupsError}
+          membershipsError={membershipsError}
           students={students}
           initialDate={selectedDate}
           initialHour={selectedHour}
