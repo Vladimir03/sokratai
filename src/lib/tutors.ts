@@ -186,8 +186,8 @@ export async function setTutorMiniGroupsEnabled(enabled: boolean): Promise<Tutor
     return null;
   }
 
-  const { data, error } = await supabase
-    .from('tutors')
+  const { data, error } = await (supabase
+    .from('tutors') as any)
     .update({ mini_groups_enabled: enabled })
     .eq('id', tutor.id)
     .select('*')
@@ -209,8 +209,8 @@ export async function getTutorGroups(activeOnly = true): Promise<TutorGroup[]> {
   const tutor = await getCurrentTutor();
   if (!tutor) return [];
 
-  let query = supabase
-    .from('tutor_groups')
+  let query = (supabase
+    .from('tutor_groups') as any)
     .select('*')
     .eq('tutor_id', tutor.id)
     .order('created_at', { ascending: true });
@@ -246,8 +246,8 @@ export async function createTutorGroup(
     return null;
   }
 
-  const { data, error } = await supabase
-    .from('tutor_groups')
+  const { data, error } = await (supabase
+    .from('tutor_groups') as any)
     .insert({
       tutor_id: tutor.id,
       name,
@@ -275,8 +275,8 @@ export async function getTutorGroupMemberships(
   const tutor = await getCurrentTutor();
   if (!tutor) return [];
 
-  let query = supabase
-    .from('tutor_group_memberships')
+  let query = (supabase
+    .from('tutor_group_memberships') as any)
     .select(`
       id,
       tutor_id,
@@ -326,8 +326,8 @@ export async function upsertTutorGroupMembership(
     return null;
   }
 
-  const { error: deactivateOthersError } = await supabase
-    .from('tutor_group_memberships')
+  const { error: deactivateOthersError } = await (supabase
+    .from('tutor_group_memberships') as any)
     .update({ is_active: false })
     .eq('tutor_id', tutor.id)
     .eq('tutor_student_id', tutorStudentId)
@@ -339,8 +339,8 @@ export async function upsertTutorGroupMembership(
     return null;
   }
 
-  const { data, error } = await supabase
-    .from('tutor_group_memberships')
+  const { data, error } = await (supabase
+    .from('tutor_group_memberships') as any)
     .upsert(
       {
         tutor_id: tutor.id,
@@ -381,8 +381,8 @@ export async function deactivateTutorGroupMembership(
     return false;
   }
 
-  const { error } = await supabase
-    .from('tutor_group_memberships')
+  const { error } = await (supabase
+    .from('tutor_group_memberships') as any)
     .update({ is_active: false })
     .eq('tutor_id', tutor.id)
     .eq('tutor_student_id', tutorStudentId)
