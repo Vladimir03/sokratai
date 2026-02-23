@@ -8,9 +8,12 @@
     "build": "vite build",
     "build:dev": "vite build --mode development",
     "lint": "eslint .",
+    "typecheck": "tsc --noEmit",
+    "test": "npm run smoke-check",
     "preview": "vite preview",
     "analyze": "vite build && echo '\\n=== Bundle Analysis ===' && ls -lhS dist/assets/*.js | awk '{print $5, $9}'",
-    "smoke-test": "bash scripts/smoke-test.sh"
+    "smoke-test": "bash scripts/smoke-test.sh",
+    "smoke-check": "node scripts/smoke-check.mjs"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.10.0",

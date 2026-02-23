@@ -1,5 +1,31 @@
 # SokratAI — Гайд для AI-агентов (Claude Code, Cursor, Lovable)
 
+## Быстрый старт для Claude Code
+
+Этот файл остаётся основным контекстом проекта. Для коротких и стабильных правил используй:
+
+- `.claude/rules/00-read-first.md`
+- `.claude/rules/10-safe-change-policy.md`
+- `.claude/rules/20-commands-and-validation.md`
+
+Минимальный порядок работы:
+
+1. Прочитай `AGENTS.md`, `CLAUDE.md`, `docs/engineering/overview/codebase.md`.
+2. Делай минимальные и целевые изменения без затрагивания несвязанных областей.
+3. Не меняй бизнес-логику, auth-flow и публичные API без явного требования задачи.
+4. Перед завершением прогоняй команды последовательно:
+
+```bash
+npm run dev
+npm run lint
+npm run build
+npm run test
+npm run smoke-test
+npm run smoke-check
+```
+
+Примечание: `test` запускает `smoke-check` (Node-based проверка), `smoke-test` оставлен как bash-вариант.
+
 ## Архитектура проекта
 
 - **Стек**: Vite + React 18 + TypeScript + Tailwind CSS + shadcn/ui
