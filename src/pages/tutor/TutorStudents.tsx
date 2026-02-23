@@ -1,6 +1,8 @@
 import { useState, useMemo, useCallback, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
+import { Switch } from '@/components/ui/switch';
+import { Label } from '@/components/ui/label';
 import { 
   Pagination, 
   PaginationContent, 
@@ -27,10 +29,17 @@ import {
   StudentsEmptyFilters, 
   StudentsError 
 } from '@/components/tutor/StudentsStates';
-import { useTutorStudents, useTutor } from '@/hooks/useTutor';
+import { useTutorStudents, useTutor, useTutorGroups, useTutorGroupMemberships } from '@/hooks/useTutor';
+import {
+  createTutorGroup,
+  deactivateTutorGroupMembership,
+  setTutorMiniGroupsEnabled,
+  upsertTutorGroupMembership,
+} from '@/lib/tutors';
 import { calculateProgress, getPaymentStatus } from '@/lib/formatters';
 import { getTutorInviteWebLink, getTutorInviteTelegramLink } from '@/utils/telegramLinks';
-import type { TutorStudentWithProfile } from '@/types/tutor';
+import { toast } from 'sonner';
+import type { TutorGroup, TutorGroupMembership, TutorStudentWithProfile } from '@/types/tutor';
 
 const PAGE_SIZE = 10;
 
@@ -38,6 +47,8 @@ const PAGE_SIZE = 10;
 type StudentWithExtras = TutorStudentWithProfile & {
   paid_until?: string | null;
   last_activity_at?: string | null;
+  mini_group: TutorGroup | null;
+  mini_group_membership: TutorGroupMembership | null;
 };
 
 function TutorStudentsContent() {
@@ -59,6 +70,26 @@ function TutorStudentsContent() {
     isRecovering,
     failureCount,
   } = useTutorStudents();
+  const [miniGroupsEnabled, setMiniGroupsEnabled] = useState(false);
+  const [isSavingMiniGroupsToggle, setIsSavingMiniGroupsToggle] = useState(false);
+  const {
+    groups,
+    loading: groupsLoading,
+    error: groupsError,
+    refetch: refetchGroups,
+    isFetching: groupsIsFetching,
+    isRecovering: groupsIsRecovering,
+    failureCount: groupsFailureCount,
+  } = useTutorGroups(miniGroupsEnabled);
+  const {
+    memberships,
+    loading: membershipsLoading,
+    error: membershipsError,
+    refetch: refetchMemberships,
+    isFetching: membershipsIsFetching,
+    isRecovering: membershipsIsRecovering,
+    failureCount: membershipsFailureCount,
+  } = useTutorGroupMemberships(miniGroupsEnabled);
 
   // State
   const [sortBy, setSortBy] = useState<SortField>('activity');
@@ -67,19 +98,40 @@ function TutorStudentsContent() {
     paymentStatus: null,
     examType: null,
     subject: null,
+    groupMode: 'all',
+    groupId: null,
   });
   const [page, setPage] = useState(1);
   const [inviteModalOpen, setInviteModalOpen] = useState(false);
   const initialLoading = loading && students.length === 0 && !error;
-  const hasErrors = Boolean(error || tutorError);
-  const isPageFetching = isFetching || tutorIsFetching;
-  const isPageRecovering = isRecovering || tutorIsRecovering;
-  const pageFailureCount = Math.max(failureCount, tutorFailureCount);
+  const hasErrors = Boolean(error || tutorError || (miniGroupsEnabled && (groupsError || membershipsError)));
+  const isPageFetching = isFetching || tutorIsFetching || (miniGroupsEnabled && (groupsIsFetching || membershipsIsFetching));
+  const isPageRecovering = isRecovering || tutorIsRecovering || (miniGroupsEnabled && (groupsIsRecovering || membershipsIsRecovering));
+  const pageFailureCount = Math.max(
+    failureCount,
+    tutorFailureCount,
+    miniGroupsEnabled ? groupsFailureCount : 0,
+    miniGroupsEnabled ? membershipsFailureCount : 0
+  );
   
   // Invite URLs
   const inviteCode = tutor?.invite_code;
   const inviteWebLink = inviteCode ? getTutorInviteWebLink(inviteCode) : '';
   const inviteTelegramLink = inviteCode ? getTutorInviteTelegramLink(inviteCode) : '';
+
+  useEffect(() => {
+    if (!tutor) return;
+    setMiniGroupsEnabled(Boolean(tutor.mini_groups_enabled));
+  }, [tutor?.id, tutor?.mini_groups_enabled]);
+
+  useEffect(() => {
+    if (miniGroupsEnabled) return;
+    setFilters((prev) => ({
+      ...prev,
+      groupMode: 'all',
+      groupId: null,
+    }));
+  }, [miniGroupsEnabled]);
 
   // Reset page when filters change
   useEffect(() => {
@@ -87,16 +139,48 @@ function TutorStudentsContent() {
   }, [filters, sortBy, sortOrder]);
 
   // Get unique subjects for filter
+  const groupsById = useMemo(() => {
+    const map = new Map<string, TutorGroup>();
+    groups.forEach((group) => {
+      map.set(group.id, group);
+    });
+    return map;
+  }, [groups]);
+
+  const membershipsByStudentId = useMemo(() => {
+    const map = new Map<string, TutorGroupMembership>();
+    memberships.forEach((membership) => {
+      if (!membership.is_active) return;
+      map.set(membership.tutor_student_id, membership);
+    });
+    return map;
+  }, [memberships]);
+
+  // Cast students to extended type + merge mini-group metadata
+  const studentsWithExtras = useMemo(() => {
+    return (students as (TutorStudentWithProfile & {
+      paid_until?: string | null;
+      last_activity_at?: string | null;
+    })[]).map((student) => {
+      const membership = membershipsByStudentId.get(student.id) ?? null;
+      const groupFromMembership = membership?.tutor_group ?? null;
+      const groupFromMap = membership ? groupsById.get(membership.tutor_group_id) ?? null : null;
+      return {
+        ...student,
+        mini_group_membership: membership,
+        mini_group: groupFromMembership ?? groupFromMap,
+      } as StudentWithExtras;
+    });
+  }, [students, membershipsByStudentId, groupsById]);
+
+  // Get unique subjects for filter
   const subjects = useMemo(() => {
     const subjectSet = new Set<string>();
-    students.forEach(s => {
+    studentsWithExtras.forEach(s => {
       if (s.subject) subjectSet.add(s.subject);
     });
     return Array.from(subjectSet).sort();
-  }, [students]);
-
-  // Cast students to extended type
-  const studentsWithExtras = students as StudentWithExtras[];
+  }, [studentsWithExtras]);
 
   // Filter students
   const filteredStudents = useMemo(() => {
@@ -113,10 +197,17 @@ function TutorStudentsContent() {
       
       // Subject filter
       if (filters.subject && student.subject !== filters.subject) return false;
+
+      if (miniGroupsEnabled) {
+        const hasGroup = Boolean(student.mini_group);
+        if (filters.groupMode === 'grouped' && !hasGroup) return false;
+        if (filters.groupMode === 'individual' && hasGroup) return false;
+        if (filters.groupId && student.mini_group?.id !== filters.groupId) return false;
+      }
       
       return true;
     });
-  }, [studentsWithExtras, filters]);
+  }, [studentsWithExtras, filters, miniGroupsEnabled]);
 
   // Sort students
   const sortedStudents = useMemo(() => {
@@ -172,8 +263,67 @@ function TutorStudentsContent() {
     setFilters(newFilters);
   }, []);
 
+  const handleMiniGroupsToggle = useCallback(
+    async (nextEnabled: boolean) => {
+      const previousEnabled = miniGroupsEnabled;
+      setMiniGroupsEnabled(nextEnabled);
+      setIsSavingMiniGroupsToggle(true);
+
+      try {
+        const updatedTutor = await setTutorMiniGroupsEnabled(nextEnabled);
+        if (!updatedTutor) {
+          throw new Error('Не удалось сохранить настройку мини-групп');
+        }
+        refetchTutor();
+      } catch (toggleError) {
+        console.error('Error updating mini groups feature toggle:', toggleError);
+        setMiniGroupsEnabled(previousEnabled);
+        toast.error('Не удалось сохранить переключатель "Мини-группы"');
+      } finally {
+        setIsSavingMiniGroupsToggle(false);
+      }
+    },
+    [miniGroupsEnabled, refetchTutor]
+  );
+
+  const handleCreateGroup = useCallback(async (name: string) => {
+    const createdGroup = await createTutorGroup({ name });
+    if (!createdGroup) {
+      return null;
+    }
+
+    refetchGroups();
+    return createdGroup;
+  }, [refetchGroups]);
+
+  const handleSyncStudentMembership = useCallback(async (tutorStudentId: string, tutorGroupId: string | null) => {
+    if (!miniGroupsEnabled) {
+      return;
+    }
+
+    if (tutorGroupId) {
+      const synced = await upsertTutorGroupMembership(tutorStudentId, tutorGroupId);
+      if (!synced) {
+        throw new Error('Не удалось назначить мини-группу');
+      }
+    } else {
+      const deactivated = await deactivateTutorGroupMembership(tutorStudentId);
+      if (!deactivated) {
+        throw new Error('Не удалось обновить membership мини-группы');
+      }
+    }
+
+    refetchMemberships();
+  }, [miniGroupsEnabled, refetchMemberships]);
+
   const handleReset = useCallback(() => {
-    setFilters({ paymentStatus: null, examType: null, subject: null });
+    setFilters({
+      paymentStatus: null,
+      examType: null,
+      subject: null,
+      groupMode: 'all',
+      groupId: null,
+    });
     setSortBy('activity');
     setSortOrder('desc');
   }, []);
@@ -185,7 +335,11 @@ function TutorStudentsContent() {
   const handleRetryAll = useCallback(() => {
     refetchTutor();
     refetch();
-  }, [refetchTutor, refetch]);
+    if (miniGroupsEnabled) {
+      refetchGroups();
+      refetchMemberships();
+    }
+  }, [miniGroupsEnabled, refetch, refetchGroups, refetchMemberships, refetchTutor]);
 
   // Render pagination
   const renderPagination = () => {
@@ -254,11 +408,29 @@ function TutorStudentsContent() {
 
         {/* Header */}
         <div className="flex items-center justify-between gap-4 flex-wrap">
-          <h1 className="text-2xl font-bold">👥 Мои ученики</h1>
-          <Button onClick={() => setInviteModalOpen(true)}>
-            <UserPlus className="h-4 w-4 mr-2" />
-            Добавить ученика
-          </Button>
+          <div className="space-y-1">
+            <h1 className="text-2xl font-bold">👥 Мои ученики</h1>
+            <p className="text-sm text-muted-foreground">
+              Mixed-mode: можно вести и мини-группы, и индивидуальные занятия одновременно.
+            </p>
+          </div>
+          <div className="flex items-center gap-3 flex-wrap">
+            <div className="flex items-center gap-2 rounded-md border px-3 py-2">
+              <Label htmlFor="miniGroupsGlobalToggle" className="text-sm font-medium">
+                Мини-группы
+              </Label>
+              <Switch
+                id="miniGroupsGlobalToggle"
+                checked={miniGroupsEnabled}
+                disabled={isSavingMiniGroupsToggle}
+                onCheckedChange={handleMiniGroupsToggle}
+              />
+            </div>
+            <Button onClick={() => setInviteModalOpen(true)}>
+              <UserPlus className="h-4 w-4 mr-2" />
+              Добавить ученика
+            </Button>
+          </div>
         </div>
         
         <AddStudentDialog
@@ -267,8 +439,15 @@ function TutorStudentsContent() {
           inviteCode={inviteCode}
           inviteWebLink={inviteWebLink}
           inviteTelegramLink={inviteTelegramLink}
+          miniGroupsEnabled={miniGroupsEnabled}
+          groups={groups}
+          onCreateGroup={handleCreateGroup}
+          onSyncStudentMembership={handleSyncStudentMembership}
           onManualAdded={(tutorStudentId) => {
             refetch();
+            if (miniGroupsEnabled) {
+              refetchMemberships();
+            }
             navigate(`/tutor/students/${tutorStudentId}`);
           }}
         />
@@ -293,7 +472,9 @@ function TutorStudentsContent() {
               sortOrder={sortOrder}
               filters={filters}
               subjects={subjects}
-              totalCount={students.length}
+              groups={groups}
+              showGroupControls={miniGroupsEnabled}
+              totalCount={studentsWithExtras.length}
               filteredCount={filteredStudents.length}
               onSortChange={handleSortChange}
               onSortOrderToggle={handleSortOrderToggle}
@@ -313,6 +494,7 @@ function TutorStudentsContent() {
                   <StudentCard
                     key={student.id}
                     student={student}
+                    groupLabel={miniGroupsEnabled ? (student.mini_group?.short_name || student.mini_group?.name || null) : null}
                     onClick={() => handleOpenStudent(student.id)}
                   />
                 ))}

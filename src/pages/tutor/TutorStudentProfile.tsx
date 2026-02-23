@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { ArrowLeft, Save, Plus, Trash2, MessageSquare, ChevronRight, Edit } from 'lucide-react';
@@ -11,6 +11,7 @@ import { Progress } from '@/components/ui/progress';
 import { Textarea } from '@/components/ui/textarea';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Switch } from '@/components/ui/switch';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -21,6 +22,9 @@ import TutorGuard from '@/components/TutorGuard';
 import { TutorLayout } from '@/components/tutor/TutorLayout';
 import { TutorDataStatus } from '@/components/tutor/TutorDataStatus';
 import {
+  useTutor,
+  useTutorGroups,
+  useTutorGroupMemberships,
   useTutorStudent,
   useMockExams,
   useStudentChats,
@@ -31,7 +35,10 @@ import {
   createMockExam, 
   deleteMockExam,
   removeStudentFromTutor,
-  updateTutorStudentProfile
+  updateTutorStudentProfile,
+  createTutorGroup,
+  upsertTutorGroupMembership,
+  deactivateTutorGroupMembership,
 } from '@/lib/tutors';
 import {
   formatRelativeTime,
@@ -46,7 +53,7 @@ import {
   invalidateTutorStudentDependentQueries,
   removeTutorStudentFromCache,
 } from '@/lib/tutorStudentCacheSync';
-import type { MockExam } from '@/types/tutor';
+import type { MockExam, TutorGroupMembership } from '@/types/tutor';
 
 // =============================================
 // Компонент профиля ученика
@@ -56,6 +63,7 @@ function TutorStudentProfileContent() {
   const { tutorStudentId } = useParams<{ tutorStudentId: string }>();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const { tutor } = useTutor();
   
   const {
     student,
@@ -84,6 +92,16 @@ function TutorStudentProfileContent() {
     isRecovering: chatsIsRecovering,
     failureCount: chatsFailureCount,
   } = useStudentChats(student?.student_id);
+  const miniGroupsEnabled = Boolean(tutor?.mini_groups_enabled);
+  const {
+    groups,
+    refetch: refetchGroups,
+  } = useTutorGroups(miniGroupsEnabled);
+  const {
+    memberships,
+    loading: membershipsLoading,
+    refetch: refetchMemberships,
+  } = useTutorGroupMemberships(miniGroupsEnabled);
   const studentDebt = student?.debt_amount ?? 0;
 
   // Локальное состояние для редактирования
@@ -115,6 +133,18 @@ function TutorStudentProfileContent() {
   const [editTargetScore, setEditTargetScore] = useState('');
   const [editHourlyRate, setEditHourlyRate] = useState('');
   const [editNotes, setEditNotes] = useState('');
+  const [editIsInMiniGroup, setEditIsInMiniGroup] = useState(false);
+  const [editSelectedGroupId, setEditSelectedGroupId] = useState('');
+  const [editNewGroupName, setEditNewGroupName] = useState('');
+  const [isCreatingEditGroup, setIsCreatingEditGroup] = useState(false);
+  const activeMembership = useMemo<TutorGroupMembership | null>(() => {
+    if (!tutorStudentId) return null;
+    return (
+      memberships.find(
+        (membership) => membership.tutor_student_id === tutorStudentId && membership.is_active
+      ) ?? null
+    );
+  }, [memberships, tutorStudentId]);
   const initialLoading = loading && !student && !error;
   const pageError = error || mockExamsError || chatsError;
   const pageIsFetching = studentIsFetching || mockExamsIsFetching || chatsIsFetching;
@@ -130,7 +160,7 @@ function TutorStudentProfileContent() {
     setNotesInitialized(true);
   }
 
-  if (student && !editFormInitialized) {
+  if (student && !editFormInitialized && (!miniGroupsEnabled || !membershipsLoading)) {
     const learningGoal = student.profiles?.learning_goal || '';
     const presetOptions = ['ЕГЭ', 'ОГЭ', 'Школьная программа', 'Олимпиада'];
     const isPreset = presetOptions.includes(learningGoal);
@@ -147,6 +177,9 @@ function TutorStudentProfileContent() {
     setEditTargetScore(student.target_score ? String(student.target_score) : '');
     setEditHourlyRate(student.hourly_rate_cents ? String(student.hourly_rate_cents / 100) : '');
     setEditNotes(student.notes || '');
+    setEditIsInMiniGroup(Boolean(activeMembership));
+    setEditSelectedGroupId(activeMembership?.tutor_group_id || '');
+    setEditNewGroupName('');
     setEditFormInitialized(true);
   }
   
@@ -203,6 +236,32 @@ function TutorStudentProfileContent() {
     }
   }, [navigate, queryClient, tutorStudentId]);
 
+  const handleCreateEditGroup = useCallback(async () => {
+    const groupName = editNewGroupName.trim();
+    if (!groupName) {
+      toast.error('Введите название мини-группы');
+      return;
+    }
+
+    setIsCreatingEditGroup(true);
+    try {
+      const createdGroup = await createTutorGroup({ name: groupName });
+      if (!createdGroup) {
+        toast.error('Не удалось создать мини-группу');
+        return;
+      }
+      setEditSelectedGroupId(createdGroup.id);
+      setEditNewGroupName('');
+      refetchGroups();
+      toast.success(`Создана мини-группа "${createdGroup.short_name || createdGroup.name}"`);
+    } catch (groupError) {
+      console.error('Error creating tutor group from student profile:', groupError);
+      toast.error('Не удалось создать мини-группу');
+    } finally {
+      setIsCreatingEditGroup(false);
+    }
+  }, [editNewGroupName, refetchGroups]);
+
   const handleUpdateStudent = useCallback(async () => {
     if (!tutorStudentId) return;
     const name = editName.trim();
@@ -229,6 +288,10 @@ function TutorStudentProfileContent() {
 
     if (!editHourlyRate || !editHourlyRate.trim()) {
       toast.error('Укажите часовую ставку');
+      return;
+    }
+    if (miniGroupsEnabled && editIsInMiniGroup && !editSelectedGroupId) {
+      toast.error('Выберите или создайте мини-группу');
       return;
     }
 
@@ -273,7 +336,32 @@ function TutorStudentProfileContent() {
         notes: normalizedNotes,
       });
       await invalidateTutorStudentDependentQueries(queryClient, tutorStudentId);
-      toast.success('Данные ученика обновлены');
+      let membershipWarning: string | null = null;
+      if (miniGroupsEnabled) {
+        try {
+          if (editIsInMiniGroup && editSelectedGroupId) {
+            const syncedMembership = await upsertTutorGroupMembership(tutorStudentId, editSelectedGroupId);
+            if (!syncedMembership) {
+              throw new Error('Не удалось назначить ученика в мини-группу');
+            }
+          } else if (!editIsInMiniGroup) {
+            const deactivatedMembership = await deactivateTutorGroupMembership(tutorStudentId);
+            if (!deactivatedMembership) {
+              throw new Error('Не удалось убрать ученика из мини-группы');
+            }
+          }
+          refetchMemberships();
+        } catch (membershipError) {
+          console.error('Membership sync failed after student profile update:', membershipError);
+          membershipWarning = 'Профиль ученика сохранён, но мини-группа не обновилась. Повторите позже.';
+        }
+      }
+
+      if (membershipWarning) {
+        toast.warning(membershipWarning);
+      } else {
+        toast.success('Данные ученика обновлены');
+      }
       setEditStudentOpen(false);
       setEditFormInitialized(false);
       refetchStudent();
@@ -295,9 +383,13 @@ function TutorStudentProfileContent() {
     editStartScore,
     editTargetScore,
     editHourlyRate,
+    editIsInMiniGroup,
+    editSelectedGroupId,
     editParentContact,
     editNotes,
+    miniGroupsEnabled,
     queryClient,
+    refetchMemberships,
     refetchStudent,
     student?.student_id,
   ]);
@@ -366,7 +458,10 @@ function TutorStudentProfileContent() {
           <h1 className="text-2xl font-bold flex-1">Профиль ученика</h1>
           <Button
             variant="outline"
-            onClick={() => setEditStudentOpen(true)}
+            onClick={() => {
+              setEditFormInitialized(false);
+              setEditStudentOpen(true);
+            }}
           >
             <Edit className="h-4 w-4 mr-2" />
             Редактировать
@@ -766,6 +861,79 @@ function TutorStudentProfileContent() {
                     />
                     <p className="text-xs text-muted-foreground">Ставка за 60 минут. Используется в расписании.</p>
                   </div>
+
+                  {miniGroupsEnabled && (
+                    <div className="space-y-3 rounded-md border p-3 md:col-span-2">
+                      <div className="flex items-center justify-between gap-4">
+                        <div className="space-y-1">
+                          <Label className="text-sm font-medium">Занимается в мини-группе</Label>
+                          <p className="text-xs text-muted-foreground">
+                            OFF: индивидуально, ON: в выбранной мини-группе
+                          </p>
+                        </div>
+                        <Switch
+                          checked={editIsInMiniGroup}
+                          onCheckedChange={(checked) => {
+                            if (!checked && (activeMembership || editSelectedGroupId)) {
+                              const confirmed = window.confirm('Убрать ученика из мини-группы?');
+                              if (!confirmed) {
+                                return;
+                              }
+                            }
+                            setEditIsInMiniGroup(checked);
+                            if (!checked) {
+                              setEditSelectedGroupId('');
+                            }
+                          }}
+                        />
+                      </div>
+
+                      {editIsInMiniGroup && (
+                        <div className="space-y-3">
+                          {groups.length > 0 && (
+                            <div className="space-y-2">
+                              <Label>Мини-группа</Label>
+                              <Select
+                                value={editSelectedGroupId || undefined}
+                                onValueChange={(value) => setEditSelectedGroupId(value)}
+                              >
+                                <SelectTrigger>
+                                  <SelectValue placeholder="Выберите мини-группу" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  {groups.map((group) => (
+                                    <SelectItem key={group.id} value={group.id}>
+                                      {group.short_name || group.name}
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            </div>
+                          )}
+
+                          <div className="space-y-2">
+                            <Label htmlFor="editNewMiniGroupName">Создать новую мини-группу</Label>
+                            <div className="flex gap-2">
+                              <Input
+                                id="editNewMiniGroupName"
+                                value={editNewGroupName}
+                                onChange={(e) => setEditNewGroupName(e.target.value)}
+                                placeholder="Например, Лиза + Соня ЕГЭ база"
+                              />
+                              <Button
+                                type="button"
+                                variant="outline"
+                                disabled={isCreatingEditGroup}
+                                onClick={handleCreateEditGroup}
+                              >
+                                {isCreatingEditGroup ? 'Создание...' : 'Создать'}
+                              </Button>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
 
                 <Accordion type="single" collapsible>

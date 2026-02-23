@@ -1,14 +1,18 @@
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Button } from '@/components/ui/button';
 import { ArrowUpDown, RotateCcw } from 'lucide-react';
+import type { TutorGroup } from '@/types/tutor';
 
 export type SortField = 'activity' | 'name' | 'progress';
 export type SortOrder = 'asc' | 'desc';
+export type GroupFilterMode = 'all' | 'grouped' | 'individual';
 
 export interface FilterValues {
   paymentStatus: 'paid' | 'unpaid' | null;
   examType: 'ege' | 'oge' | null;
   subject: string | null;
+  groupMode: GroupFilterMode;
+  groupId: string | null;
 }
 
 interface StudentsToolbarProps {
@@ -16,6 +20,8 @@ interface StudentsToolbarProps {
   sortOrder: SortOrder;
   filters: FilterValues;
   subjects: string[];
+  groups: TutorGroup[];
+  showGroupControls: boolean;
   totalCount: number;
   filteredCount: number;
   onSortChange: (field: SortField) => void;
@@ -29,6 +35,8 @@ export function StudentsToolbar({
   sortOrder,
   filters,
   subjects,
+  groups,
+  showGroupControls,
   totalCount,
   filteredCount,
   onSortChange,
@@ -38,7 +46,8 @@ export function StudentsToolbar({
 }: StudentsToolbarProps) {
   const hasActiveFilters = filters.paymentStatus !== null || 
                           filters.examType !== null || 
-                          filters.subject !== null;
+                          filters.subject !== null ||
+                          (showGroupControls && (filters.groupMode !== 'all' || filters.groupId !== null));
 
   const handlePaymentChange = (value: string) => {
     onFilterChange({
@@ -58,6 +67,23 @@ export function StudentsToolbar({
     onFilterChange({
       ...filters,
       subject: value === 'all' ? null : value,
+    });
+  };
+
+  const handleGroupModeChange = (value: string) => {
+    const groupMode = value as GroupFilterMode;
+    onFilterChange({
+      ...filters,
+      groupMode,
+      groupId: groupMode === 'grouped' ? filters.groupId : null,
+    });
+  };
+
+  const handleGroupChange = (value: string) => {
+    onFilterChange({
+      ...filters,
+      groupId: value === 'all' ? null : value,
+      groupMode: value === 'all' ? filters.groupMode : 'grouped',
     });
   };
 
@@ -129,6 +155,35 @@ export function StudentsToolbar({
               <SelectItem value="all">Все предметы</SelectItem>
               {subjects.map(subject => (
                 <SelectItem key={subject} value={subject}>{subject}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        )}
+
+        {showGroupControls && (
+          <Select value={filters.groupMode} onValueChange={handleGroupModeChange}>
+            <SelectTrigger className="w-[170px]">
+              <SelectValue placeholder="Формат занятий" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Все форматы</SelectItem>
+              <SelectItem value="grouped">В мини-группе</SelectItem>
+              <SelectItem value="individual">Индивидуально</SelectItem>
+            </SelectContent>
+          </Select>
+        )}
+
+        {showGroupControls && groups.length > 0 && (
+          <Select value={filters.groupId ?? 'all'} onValueChange={handleGroupChange}>
+            <SelectTrigger className="w-[190px]">
+              <SelectValue placeholder="Конкретная группа" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Все мини-группы</SelectItem>
+              {groups.map((group) => (
+                <SelectItem key={group.id} value={group.id}>
+                  {group.short_name || group.name}
+                </SelectItem>
               ))}
             </SelectContent>
           </Select>

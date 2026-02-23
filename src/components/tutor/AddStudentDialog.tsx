@@ -26,10 +26,11 @@ import {
   AccordionTrigger,
 } from '@/components/ui/accordion';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import { Switch } from '@/components/ui/switch';
 import { Copy, ExternalLink, Check, Loader2, Link, UserPlus } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { manualAddTutorStudent } from '@/lib/tutors';
-import type { ManualAddTutorStudentInput } from '@/types/tutor';
+import type { ManualAddTutorStudentInput, TutorGroup } from '@/types/tutor';
 
 interface AddStudentDialogProps {
   open: boolean;
@@ -37,6 +38,10 @@ interface AddStudentDialogProps {
   inviteCode: string | undefined;
   inviteWebLink: string;
   inviteTelegramLink: string;
+  miniGroupsEnabled: boolean;
+  groups: TutorGroup[];
+  onCreateGroup: (name: string) => Promise<TutorGroup | null>;
+  onSyncStudentMembership: (tutorStudentId: string, tutorGroupId: string | null) => Promise<void>;
   onManualAdded: (tutorStudentId: string) => void;
 }
 
@@ -46,6 +51,10 @@ export function AddStudentDialog({
   inviteCode,
   inviteWebLink,
   inviteTelegramLink,
+  miniGroupsEnabled,
+  groups,
+  onCreateGroup,
+  onSyncStudentMembership,
   onManualAdded,
 }: AddStudentDialogProps) {
   const { toast } = useToast();
@@ -55,6 +64,10 @@ export function AddStudentDialog({
   // Learning goal preset state
   const [learningGoalPreset, setLearningGoalPreset] = useState<string>('');
   const [learningGoalOther, setLearningGoalOther] = useState<string>('');
+  const [isInMiniGroup, setIsInMiniGroup] = useState(false);
+  const [selectedGroupId, setSelectedGroupId] = useState('');
+  const [newGroupName, setNewGroupName] = useState('');
+  const [isCreatingGroup, setIsCreatingGroup] = useState(false);
 
   // Form state for manual add
   const [formData, setFormData] = useState<ManualAddTutorStudentInput>({
@@ -70,6 +83,34 @@ export function AddStudentDialog({
     parent_contact: '',
     hourly_rate_cents: undefined,
   });
+
+  const resetManualForm = () => {
+    setFormData({
+      name: '',
+      telegram_username: '',
+      learning_goal: '',
+      grade: undefined,
+      exam_type: undefined,
+      subject: undefined,
+      start_score: undefined,
+      target_score: undefined,
+      notes: '',
+      parent_contact: '',
+      hourly_rate_cents: undefined,
+    });
+    setLearningGoalPreset('');
+    setLearningGoalOther('');
+    setIsInMiniGroup(false);
+    setSelectedGroupId('');
+    setNewGroupName('');
+  };
+
+  const handleDialogOpenChange = (nextOpen: boolean) => {
+    if (!nextOpen) {
+      resetManualForm();
+    }
+    onOpenChange(nextOpen);
+  };
 
   const handleCopyLink = async () => {
     try {
@@ -91,6 +132,37 @@ export function AddStudentDialog({
 
   const handleOpenTelegram = () => {
     window.open(inviteTelegramLink, '_blank');
+  };
+
+  const handleCreateMiniGroup = async () => {
+    const name = newGroupName.trim();
+    if (!name) {
+      toast({ title: 'Введите название мини-группы', variant: 'destructive' });
+      return;
+    }
+
+    setIsCreatingGroup(true);
+    try {
+      const createdGroup = await onCreateGroup(name);
+      if (!createdGroup) {
+        throw new Error('Не удалось создать мини-группу');
+      }
+
+      setSelectedGroupId(createdGroup.id);
+      setNewGroupName('');
+      toast({
+        title: 'Мини-группа создана',
+        description: `Выбрана группа "${createdGroup.short_name || createdGroup.name}"`,
+      });
+    } catch (error) {
+      toast({
+        title: 'Ошибка',
+        description: error instanceof Error ? error.message : 'Не удалось создать мини-группу',
+        variant: 'destructive',
+      });
+    } finally {
+      setIsCreatingGroup(false);
+    }
   };
 
   const handleFormChange = (field: keyof ManualAddTutorStudentInput, value: string | number | undefined) => {
@@ -125,6 +197,14 @@ export function AddStudentDialog({
       toast({ title: 'Укажите часовую ставку', variant: 'destructive' });
       return;
     }
+    if (miniGroupsEnabled && isInMiniGroup && !selectedGroupId) {
+      toast({
+        title: 'Выберите мини-группу',
+        description: 'При включенном тумблере нужно выбрать или создать группу',
+        variant: 'destructive',
+      });
+      return;
+    }
 
     setIsSubmitting(true);
     try {
@@ -134,27 +214,25 @@ export function AddStudentDialog({
         telegram_username: formData.telegram_username.replace('@', '').trim(),
       });
 
+      let membershipSyncFailed = false;
+      if (miniGroupsEnabled && isInMiniGroup && selectedGroupId) {
+        try {
+          await onSyncStudentMembership(response.tutor_student_id, selectedGroupId);
+        } catch (membershipError) {
+          console.error('Membership sync failed after student creation:', membershipError);
+          membershipSyncFailed = true;
+        }
+      }
+
       toast({
         title: 'Ученик добавлен',
-        description: `${formData.name} успешно добавлен`,
+        description: membershipSyncFailed
+          ? `${formData.name} добавлен. Привязку к группе повторите в профиле ученика.`
+          : `${formData.name} успешно добавлен`,
+        variant: membershipSyncFailed ? 'destructive' : 'default',
       });
 
-      // Reset form
-      setFormData({
-        name: '',
-        telegram_username: '',
-        learning_goal: '',
-        grade: undefined,
-        exam_type: undefined,
-        subject: undefined,
-        start_score: undefined,
-        target_score: undefined,
-        notes: '',
-        parent_contact: '',
-        hourly_rate_cents: undefined,
-      });
-      setLearningGoalPreset('');
-      setLearningGoalOther('');
+      resetManualForm();
 
       onOpenChange(false);
       onManualAdded(response.tutor_student_id);
@@ -170,7 +248,7 @@ export function AddStudentDialog({
   };
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open} onOpenChange={handleDialogOpenChange}>
       <DialogContent className="sm:max-w-2xl">
         <DialogHeader>
           <DialogTitle>Добавить ученика</DialogTitle>
@@ -314,6 +392,73 @@ export function AddStudentDialog({
                     />
                     <p className="text-xs text-muted-foreground">Ставка за 60 минут. Используется в расписании.</p>
                   </div>
+
+                  {miniGroupsEnabled && (
+                    <div className="space-y-3 rounded-md border p-3 md:col-span-2">
+                      <div className="flex items-center justify-between gap-4">
+                        <div className="space-y-1">
+                          <Label className="text-sm font-medium">Занимается в мини-группе</Label>
+                          <p className="text-xs text-muted-foreground">
+                            OFF: индивидуально, ON: ученик входит в выбранную группу
+                          </p>
+                        </div>
+                        <Switch
+                          checked={isInMiniGroup}
+                          onCheckedChange={(checked) => {
+                            setIsInMiniGroup(checked);
+                            if (!checked) {
+                              setSelectedGroupId('');
+                            }
+                          }}
+                        />
+                      </div>
+
+                      {isInMiniGroup && (
+                        <div className="space-y-3">
+                          {groups.length > 0 && (
+                            <div className="space-y-2">
+                              <Label>Мини-группа</Label>
+                              <Select
+                                value={selectedGroupId || undefined}
+                                onValueChange={(value) => setSelectedGroupId(value)}
+                              >
+                                <SelectTrigger>
+                                  <SelectValue placeholder="Выберите мини-группу" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  {groups.map((group) => (
+                                    <SelectItem key={group.id} value={group.id}>
+                                      {group.short_name || group.name}
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            </div>
+                          )}
+
+                          <div className="space-y-2">
+                            <Label htmlFor="newMiniGroupName">Быстрое создание мини-группы</Label>
+                            <div className="flex gap-2">
+                              <Input
+                                id="newMiniGroupName"
+                                value={newGroupName}
+                                onChange={(e) => setNewGroupName(e.target.value)}
+                                placeholder="Например, 11 класс ЕГЭ база"
+                              />
+                              <Button
+                                type="button"
+                                variant="outline"
+                                onClick={handleCreateMiniGroup}
+                                disabled={isCreatingGroup}
+                              >
+                                {isCreatingGroup ? 'Создание...' : 'Создать'}
+                              </Button>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
 
                 <Accordion type="single" collapsible>

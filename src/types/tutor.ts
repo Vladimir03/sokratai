@@ -9,8 +9,37 @@ export interface Tutor {
   avatar_url: string | null;
   subjects: string[];
   bio: string | null;
+  mini_groups_enabled: boolean;
   created_at: string;
   updated_at: string;
+}
+
+export interface TutorGroup {
+  id: string;
+  tutor_id: string;
+  name: string;
+  short_name: string | null;
+  color: string | null;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface TutorGroupMembership {
+  id: string;
+  tutor_id: string;
+  tutor_student_id: string;
+  tutor_group_id: string;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+  tutor_group?: TutorGroup | null;
+}
+
+export interface CreateTutorGroupInput {
+  name: string;
+  short_name?: string | null;
+  color?: string | null;
 }
 
 export interface TutorStudent {

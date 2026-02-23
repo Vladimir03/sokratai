@@ -1,6 +1,9 @@
 import { supabase } from '@/lib/supabaseClient';
 import type {
   Tutor,
+  TutorGroup,
+  TutorGroupMembership,
+  CreateTutorGroupInput,
   TutorStudent,
   TutorStudentWithProfile,
   CreateTutorStudentInput,
@@ -171,6 +174,226 @@ export async function getTutorStudents(): Promise<TutorStudentWithProfile[]> {
   const students = (data ?? []) as TutorStudentWithProfile[];
   const debtMap = await getTutorStudentsDebtMap();
   return enrichWithDebt(students, debtMap);
+}
+
+/**
+ * Обновить глобальный feature toggle mini-groups
+ */
+export async function setTutorMiniGroupsEnabled(enabled: boolean): Promise<Tutor | null> {
+  const tutor = await getCurrentTutor();
+  if (!tutor) {
+    console.error('No tutor profile found');
+    return null;
+  }
+
+  const { data, error } = await supabase
+    .from('tutors')
+    .update({ mini_groups_enabled: enabled })
+    .eq('id', tutor.id)
+    .select('*')
+    .single();
+
+  if (error) {
+    console.error('Error updating mini groups toggle:', error);
+    return null;
+  }
+
+  cachedTutor = data as Tutor;
+  return cachedTutor;
+}
+
+/**
+ * Получить список групп текущего репетитора
+ */
+export async function getTutorGroups(activeOnly = true): Promise<TutorGroup[]> {
+  const tutor = await getCurrentTutor();
+  if (!tutor) return [];
+
+  let query = supabase
+    .from('tutor_groups')
+    .select('*')
+    .eq('tutor_id', tutor.id)
+    .order('created_at', { ascending: true });
+
+  if (activeOnly) {
+    query = query.eq('is_active', true);
+  }
+
+  const { data, error } = await query;
+  if (error) {
+    console.error('Error fetching tutor groups:', error);
+    return [];
+  }
+
+  return (data ?? []) as TutorGroup[];
+}
+
+/**
+ * Создать группу текущего репетитора
+ */
+export async function createTutorGroup(
+  input: CreateTutorGroupInput
+): Promise<TutorGroup | null> {
+  const tutor = await getCurrentTutor();
+  if (!tutor) {
+    console.error('No tutor profile found');
+    return null;
+  }
+
+  const name = input.name.trim();
+  if (!name) {
+    console.error('Group name cannot be empty');
+    return null;
+  }
+
+  const { data, error } = await supabase
+    .from('tutor_groups')
+    .insert({
+      tutor_id: tutor.id,
+      name,
+      short_name: input.short_name ?? null,
+      color: input.color ?? null,
+      is_active: true,
+    })
+    .select('*')
+    .single();
+
+  if (error) {
+    console.error('Error creating tutor group:', error);
+    return null;
+  }
+
+  return data as TutorGroup;
+}
+
+/**
+ * Получить memberships учеников по группам (с метаданными группы)
+ */
+export async function getTutorGroupMemberships(
+  activeOnly = true
+): Promise<TutorGroupMembership[]> {
+  const tutor = await getCurrentTutor();
+  if (!tutor) return [];
+
+  let query = supabase
+    .from('tutor_group_memberships')
+    .select(`
+      id,
+      tutor_id,
+      tutor_student_id,
+      tutor_group_id,
+      is_active,
+      created_at,
+      updated_at,
+      tutor_group:tutor_groups (
+        id,
+        tutor_id,
+        name,
+        short_name,
+        color,
+        is_active,
+        created_at,
+        updated_at
+      )
+    `)
+    .eq('tutor_id', tutor.id)
+    .order('created_at', { ascending: true });
+
+  if (activeOnly) {
+    query = query.eq('is_active', true);
+  }
+
+  const { data, error } = await query;
+  if (error) {
+    console.error('Error fetching tutor group memberships:', error);
+    return [];
+  }
+
+  return (data ?? []) as unknown as TutorGroupMembership[];
+}
+
+/**
+ * Назначить (или обновить) активный membership ученика в группе.
+ * В MVP допускается только один активный membership на ученика.
+ */
+export async function upsertTutorGroupMembership(
+  tutorStudentId: string,
+  tutorGroupId: string
+): Promise<TutorGroupMembership | null> {
+  const tutor = await getCurrentTutor();
+  if (!tutor) {
+    console.error('No tutor profile found');
+    return null;
+  }
+
+  const { error: deactivateOthersError } = await supabase
+    .from('tutor_group_memberships')
+    .update({ is_active: false })
+    .eq('tutor_id', tutor.id)
+    .eq('tutor_student_id', tutorStudentId)
+    .eq('is_active', true)
+    .neq('tutor_group_id', tutorGroupId);
+
+  if (deactivateOthersError) {
+    console.error('Error deactivating previous memberships:', deactivateOthersError);
+    return null;
+  }
+
+  const { data, error } = await supabase
+    .from('tutor_group_memberships')
+    .upsert(
+      {
+        tutor_id: tutor.id,
+        tutor_student_id: tutorStudentId,
+        tutor_group_id: tutorGroupId,
+        is_active: true,
+      },
+      { onConflict: 'tutor_student_id,tutor_group_id' }
+    )
+    .select(`
+      id,
+      tutor_id,
+      tutor_student_id,
+      tutor_group_id,
+      is_active,
+      created_at,
+      updated_at
+    `)
+    .single();
+
+  if (error) {
+    console.error('Error upserting tutor group membership:', error);
+    return null;
+  }
+
+  return data as TutorGroupMembership;
+}
+
+/**
+ * Деактивировать активный membership ученика в группе
+ */
+export async function deactivateTutorGroupMembership(
+  tutorStudentId: string
+): Promise<boolean> {
+  const tutor = await getCurrentTutor();
+  if (!tutor) {
+    console.error('No tutor profile found');
+    return false;
+  }
+
+  const { error } = await supabase
+    .from('tutor_group_memberships')
+    .update({ is_active: false })
+    .eq('tutor_id', tutor.id)
+    .eq('tutor_student_id', tutorStudentId)
+    .eq('is_active', true);
+
+  if (error) {
+    console.error('Error deactivating tutor group membership:', error);
+    return false;
+  }
+
+  return true;
 }
 
 /**

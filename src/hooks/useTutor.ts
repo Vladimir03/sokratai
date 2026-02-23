@@ -2,6 +2,8 @@ import { useEffect, useMemo, useRef } from 'react';
 import { useInfiniteQuery, useQuery, type InfiniteData } from '@tanstack/react-query';
 import {
   getCurrentTutor,
+  getTutorGroups,
+  getTutorGroupMemberships,
   getTutorStudents,
   getTutorStudent,
   getMockExams,
@@ -30,6 +32,8 @@ import {
 } from '@/hooks/tutorQueryOptions';
 import type {
   Tutor,
+  TutorGroup,
+  TutorGroupMembership,
   TutorStudentWithProfile,
   MockExam,
   StudentChat,
@@ -165,6 +169,50 @@ export function useTutorStudents() {
 
   return {
     students: result.data,
+    loading: result.loading,
+    error: result.error,
+    refetch: result.refetch,
+    isFetching: result.isFetching,
+    isRecovering: result.isRecovering,
+    failureCount: result.failureCount,
+  };
+}
+
+export function useTutorGroups(enabled = true) {
+  const queryKey = useMemo(() => ['tutor', 'groups'] as const, []);
+  const result = useTutorQuery<TutorGroup[]>({
+    queryKey,
+    queryFn: () => getTutorGroups(true),
+    defaultValue: [],
+    errorMessage: 'Не удалось загрузить мини-группы',
+    enabled,
+    hasData: (data) => data !== undefined,
+  });
+
+  return {
+    groups: result.data,
+    loading: result.loading,
+    error: result.error,
+    refetch: result.refetch,
+    isFetching: result.isFetching,
+    isRecovering: result.isRecovering,
+    failureCount: result.failureCount,
+  };
+}
+
+export function useTutorGroupMemberships(enabled = true) {
+  const queryKey = useMemo(() => ['tutor', 'group-memberships'] as const, []);
+  const result = useTutorQuery<TutorGroupMembership[]>({
+    queryKey,
+    queryFn: () => getTutorGroupMemberships(true),
+    defaultValue: [],
+    errorMessage: 'Не удалось загрузить состав мини-групп',
+    enabled,
+    hasData: (data) => data !== undefined,
+  });
+
+  return {
+    memberships: result.data,
     loading: result.loading,
     error: result.error,
     refetch: result.refetch,

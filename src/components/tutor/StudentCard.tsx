@@ -17,9 +17,10 @@ import {
 interface StudentCardProps {
   student: TutorStudentWithProfile & { paid_until?: string | null; last_activity_at?: string | null };
   onClick: () => void;
+  groupLabel?: string | null;
 }
 
-export function StudentCard({ student, onClick }: StudentCardProps) {
+export function StudentCard({ student, onClick, groupLabel }: StudentCardProps) {
   const progress = calculateProgress(student.current_score, student.target_score);
   const paymentStatus = getPaymentStatus(student.paid_until ?? null);
   const lastActivity = formatRelativeTime(student.last_activity_at ?? null);
@@ -77,6 +78,12 @@ export function StudentCard({ student, onClick }: StudentCardProps) {
 
           {/* Status row */}
           <div className="flex items-center gap-3 flex-wrap text-sm">
+            {groupLabel && (
+              <Badge variant="secondary" className="font-normal">
+                Мини-группа: {groupLabel}
+              </Badge>
+            )}
+
             {/* AI connected status */}
             <Tooltip>
               <TooltipTrigger asChild>
