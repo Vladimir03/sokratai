@@ -142,6 +142,46 @@ function getLessonTypeLabel(type: LessonType | string): string {
   return LESSON_TYPES.find(t => t.value === type)?.label || 'Урок';
 }
 
+function getLessonStudentName(lesson: TutorLessonWithStudent): string {
+  return lesson.tutor_students?.profiles?.username
+    || lesson.profiles?.username
+    || 'Ученик';
+}
+
+interface GroupLessonStatusCounts {
+  booked: number;
+  completed: number;
+  cancelled: number;
+}
+
+interface GroupLessonBucket {
+  key: string;
+  groupId: string;
+  groupName: string;
+  startAt: string;
+  durationMin: number;
+  lessons: TutorLessonWithStudent[];
+  memberNames: string[];
+  statusCounts: GroupLessonStatusCounts;
+}
+
+type DayLessonRenderItem =
+  | { kind: 'single'; lesson: TutorLessonWithStudent }
+  | { kind: 'group'; bucket: GroupLessonBucket };
+
+function getLessonStatusLabel(status: TutorLessonWithStudent['status']): string {
+  switch (status) {
+    case 'booked':
+      return 'Запланировано';
+    case 'completed':
+      return 'Проведено';
+    case 'cancelled':
+      return 'Отменено';
+    default:
+      return 'Статус неизвестен';
+  }
+}
+
 // =============================================
 // LessonBlock
 // =============================================
@@ -168,9 +208,7 @@ function LessonBlock({
   const top = offsetMinutes * PIXELS_PER_MINUTE;
   const height = Math.max(lesson.duration_min * PIXELS_PER_MINUTE, 20);
 
-  const studentName = lesson.tutor_students?.profiles?.username
-    || lesson.profiles?.username
-    || 'Ученик';
+  const studentName = getLessonStudentName(lesson);
 
   const endDate = addMinutes(startDate, lesson.duration_min);
   const timeStr = `${format(startDate, 'HH:mm')} - ${format(endDate, 'HH:mm')}`;
@@ -242,6 +280,164 @@ function LessonBlock({
         )}
       </div>
     </div>
+  );
+}
+
+interface GroupLessonBlockProps {
+  bucket: GroupLessonBucket;
+  workDayStart: number;
+  onClick: () => void;
+}
+
+function GroupLessonBlock({
+  bucket,
+  workDayStart,
+  onClick,
+}: GroupLessonBlockProps) {
+  const startDate = new Date(bucket.startAt);
+  const startMinutes = startDate.getHours() * 60 + startDate.getMinutes();
+  const offsetMinutes = startMinutes - (workDayStart * 60);
+  const top = offsetMinutes * PIXELS_PER_MINUTE;
+  const height = Math.max(bucket.durationMin * PIXELS_PER_MINUTE, 20);
+  const endDate = addMinutes(startDate, bucket.durationMin);
+  const timeStr = `${format(startDate, 'HH:mm')} - ${format(endDate, 'HH:mm')}`;
+
+  const firstLesson = bucket.lessons[0];
+  const typeColor = getLessonTypeColor(firstLesson?.lesson_type || 'regular');
+
+  const isAllCompleted = bucket.statusCounts.completed === bucket.lessons.length;
+  const isAllCancelled = bucket.statusCounts.cancelled === bucket.lessons.length;
+  const needsAction = bucket.lessons.some((lesson) => {
+    const lessonEnd = addMinutes(new Date(lesson.start_at), lesson.duration_min);
+    return lesson.status === 'booked' && lessonEnd.getTime() < Date.now();
+  });
+  const isMixedStatuses = !isAllCompleted && !isAllCancelled && (
+    bucket.statusCounts.completed > 0 || bucket.statusCounts.cancelled > 0
+  );
+
+  const statusClasses = cn(
+    isAllCompleted && 'opacity-70',
+    isAllCancelled && 'opacity-40 grayscale',
+    needsAction && 'ring-2 ring-amber-400 ring-offset-0',
+  );
+
+  const statusLabel = isAllCompleted
+    ? 'Все проведены'
+    : isAllCancelled
+      ? 'Все отменены'
+      : isMixedStatuses
+        ? 'Смешанные статусы'
+        : 'Запланировано';
+
+  return (
+    <div
+      className={cn(
+        'absolute left-0.5 right-0.5 text-white rounded-md px-1.5 py-0.5 cursor-pointer hover:opacity-90 transition-opacity overflow-hidden shadow-sm',
+        typeColor,
+        statusClasses,
+      )}
+      style={{ top: `${top}px`, height: `${height}px`, minHeight: '20px' }}
+      onClick={(e) => {
+        e.stopPropagation();
+        onClick();
+      }}
+      role="button"
+      tabIndex={0}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          onClick();
+        }
+      }}
+    >
+      <div className="flex flex-col h-full justify-center">
+        <span className={cn(
+          'text-xs font-medium truncate leading-tight',
+          isAllCancelled && 'line-through opacity-70',
+        )}>
+          {bucket.groupName} • {bucket.lessons.length}
+        </span>
+        {height >= 35 && (
+          <span className="text-[10px] opacity-80 truncate leading-tight">{timeStr}</span>
+        )}
+        {height >= 35 && (
+          <span className="text-[10px] leading-tight mt-0.5 truncate">
+            {statusLabel}
+          </span>
+        )}
+      </div>
+    </div>
+  );
+}
+
+interface GroupDetailsDialogProps {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  bucket: GroupLessonBucket | null;
+}
+
+function GroupDetailsDialog({
+  open,
+  onOpenChange,
+  bucket,
+}: GroupDetailsDialogProps) {
+  const startDate = bucket ? new Date(bucket.startAt) : null;
+  const endDate = startDate ? addMinutes(startDate, bucket.durationMin) : null;
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-lg">
+        <DialogHeader>
+          <DialogTitle>{bucket?.groupName || 'Мини-группа'}</DialogTitle>
+          <DialogDescription>
+            {startDate && endDate
+              ? `${format(startDate, 'd MMMM, HH:mm', { locale: ru })} - ${format(endDate, 'HH:mm', { locale: ru })}`
+              : 'Детали группового занятия'}
+          </DialogDescription>
+        </DialogHeader>
+
+        {!bucket ? (
+          <p className="text-sm text-muted-foreground">Нет данных для отображения.</p>
+        ) : (
+          <div className="space-y-3">
+            <div className="flex flex-wrap items-center gap-2">
+              <Badge variant="secondary">{bucket.lessons.length} участников</Badge>
+              <Badge variant="outline">
+                {bucket.statusCounts.booked} запл. / {bucket.statusCounts.completed} провед. / {bucket.statusCounts.cancelled} отмен.
+              </Badge>
+            </div>
+
+            <div className="max-h-[45vh] overflow-y-auto space-y-2 pr-1">
+              {bucket.lessons.map((lesson) => (
+                <div key={lesson.id} className="rounded-md border p-2 space-y-1">
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-sm font-medium truncate">{getLessonStudentName(lesson)}</p>
+                    <Badge
+                      variant={lesson.status === 'cancelled'
+                        ? 'destructive'
+                        : lesson.status === 'completed'
+                          ? 'secondary'
+                          : 'default'}
+                    >
+                      {getLessonStatusLabel(lesson.status)}
+                    </Badge>
+                  </div>
+                  {lesson.subject && (
+                    <p className="text-xs text-muted-foreground truncate">{lesson.subject}</p>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)}>
+            Закрыть
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -2138,9 +2334,11 @@ function TutorScheduleContent() {
   // Dialogs
   const [addLessonOpen, setAddLessonOpen] = useState(false);
   const [lessonDetailsOpen, setLessonDetailsOpen] = useState(false);
+  const [groupDetailsOpen, setGroupDetailsOpen] = useState(false);
   const [reminderSettingsOpen, setReminderSettingsOpen] = useState(false);
   const [calendarSettingsOpen, setCalendarSettingsOpen] = useState(false);
   const [selectedLesson, setSelectedLesson] = useState<TutorLessonWithStudent | null>(null);
+  const [selectedGroupBucket, setSelectedGroupBucket] = useState<GroupLessonBucket | null>(null);
   const [selectedDate, setSelectedDate] = useState<Date | null>(null);
   const [selectedHour, setSelectedHour] = useState<number | null>(null);
   const [selectedMinute, setSelectedMinute] = useState<number>(0);
@@ -2163,12 +2361,12 @@ function TutorScheduleContent() {
     groups,
     loading: groupsLoading,
     error: groupsError,
-  } = useTutorGroups(miniGroupsEnabled && addLessonOpen);
+  } = useTutorGroups(miniGroupsEnabled);
   const {
     memberships,
     loading: membershipsLoading,
     error: membershipsError,
-  } = useTutorGroupMemberships(miniGroupsEnabled && addLessonOpen);
+  } = useTutorGroupMemberships(miniGroupsEnabled);
 
   useEffect(() => {
     if (!lessonDetailsOpen || !selectedLesson) return;
@@ -2324,6 +2522,8 @@ function TutorScheduleContent() {
     draggedLessonIdRef.current = null;
     draggedLessonDurationRef.current = 60;
     isLessonDragInProgressRef.current = false;
+    setGroupDetailsOpen(false);
+    setSelectedGroupBucket(null);
   }, [weekStart]);
 
   const lessonsByDay = useMemo(() => {
@@ -2343,6 +2543,180 @@ function TutorScheduleContent() {
 
     return byDay;
   }, [effectiveLessons, scheduleSettings]);
+
+  const activeMembershipByTutorStudentId = useMemo(() => {
+    const map = new Map<string, TutorGroupMembership>();
+    if (!miniGroupsEnabled) return map;
+
+    for (const membership of memberships) {
+      if (!membership.is_active) continue;
+      if (!membership.tutor_student_id) continue;
+      if (membership.tutor_group && membership.tutor_group.is_active === false) continue;
+      map.set(membership.tutor_student_id, membership);
+    }
+
+    return map;
+  }, [memberships, miniGroupsEnabled]);
+
+  const groupById = useMemo(() => {
+    const map = new Map<string, TutorGroup>();
+    if (!miniGroupsEnabled) return map;
+    for (const group of groups) {
+      if (!group.is_active) continue;
+      map.set(group.id, group);
+    }
+    return map;
+  }, [groups, miniGroupsEnabled]);
+
+  const canGroupLessons = miniGroupsEnabled
+    && !groupsLoading
+    && !membershipsLoading
+    && !groupsError
+    && !membershipsError
+    && activeMembershipByTutorStudentId.size > 0
+    && groupById.size > 0;
+
+  const renderItemsByDay = useMemo(() => {
+    const byDay: Record<number, DayLessonRenderItem[]> = {};
+    for (let i = 0; i < 7; i++) byDay[i] = [];
+
+    for (let dayIndex = 0; dayIndex < 7; dayIndex++) {
+      const dayLessons = lessonsByDay[dayIndex] || [];
+      if (!canGroupLessons) {
+        byDay[dayIndex] = dayLessons.map((lesson) => ({ kind: 'single', lesson }));
+        continue;
+      }
+
+      const dayEntries: Array<
+        { kind: 'single'; lesson: TutorLessonWithStudent }
+        | { kind: 'bucket'; bucketKey: string }
+      > = [];
+
+      const bucketByKey = new Map<string, {
+        key: string;
+        groupId: string;
+        groupName: string;
+        startAt: string;
+        durationMin: number;
+        lessons: TutorLessonWithStudent[];
+      }>();
+
+      for (const lesson of dayLessons) {
+        const tutorStudentId = lesson.tutor_student_id;
+        if (!tutorStudentId) {
+          dayEntries.push({ kind: 'single', lesson });
+          continue;
+        }
+
+        const membership = activeMembershipByTutorStudentId.get(tutorStudentId);
+        if (!membership) {
+          dayEntries.push({ kind: 'single', lesson });
+          continue;
+        }
+
+        const group = groupById.get(membership.tutor_group_id) || membership.tutor_group || null;
+        if (!group || !group.is_active) {
+          dayEntries.push({ kind: 'single', lesson });
+          continue;
+        }
+
+        const startAtMinute = Math.floor(new Date(lesson.start_at).getTime() / 60000);
+        const bucketKey = `${group.id}|${startAtMinute}|${lesson.duration_min}`;
+        const existingBucket = bucketByKey.get(bucketKey);
+
+        if (!existingBucket) {
+          bucketByKey.set(bucketKey, {
+            key: bucketKey,
+            groupId: group.id,
+            groupName: group.short_name || group.name || 'Мини-группа',
+            startAt: lesson.start_at,
+            durationMin: lesson.duration_min,
+            lessons: [lesson],
+          });
+          dayEntries.push({ kind: 'bucket', bucketKey });
+        } else {
+          existingBucket.lessons.push(lesson);
+        }
+      }
+
+      const dayRenderItems: DayLessonRenderItem[] = [];
+      for (const entry of dayEntries) {
+        if (entry.kind === 'single') {
+          dayRenderItems.push(entry);
+          continue;
+        }
+
+        const bucket = bucketByKey.get(entry.bucketKey);
+        if (!bucket) continue;
+
+        if (bucket.lessons.length < 2) {
+          bucket.lessons.forEach((lesson) => {
+            dayRenderItems.push({ kind: 'single', lesson });
+          });
+          continue;
+        }
+
+        const sortedLessons = [...bucket.lessons].sort((a, b) => {
+          const timeDiff = new Date(a.start_at).getTime() - new Date(b.start_at).getTime();
+          if (timeDiff !== 0) return timeDiff;
+          return a.id.localeCompare(b.id);
+        });
+
+        const statusCounts = sortedLessons.reduce<GroupLessonStatusCounts>(
+          (acc, lesson) => {
+            if (lesson.status === 'booked') acc.booked += 1;
+            if (lesson.status === 'completed') acc.completed += 1;
+            if (lesson.status === 'cancelled') acc.cancelled += 1;
+            return acc;
+          },
+          { booked: 0, completed: 0, cancelled: 0 }
+        );
+
+        dayRenderItems.push({
+          kind: 'group',
+          bucket: {
+            key: bucket.key,
+            groupId: bucket.groupId,
+            groupName: bucket.groupName,
+            startAt: bucket.startAt,
+            durationMin: bucket.durationMin,
+            lessons: sortedLessons,
+            memberNames: sortedLessons.map((lesson) => getLessonStudentName(lesson)),
+            statusCounts,
+          },
+        });
+      }
+
+      byDay[dayIndex] = dayRenderItems;
+    }
+
+    return byDay;
+  }, [lessonsByDay, canGroupLessons, activeMembershipByTutorStudentId, groupById]);
+
+  const groupedBucketsByKey = useMemo(() => {
+    const map = new Map<string, GroupLessonBucket>();
+    for (let dayIndex = 0; dayIndex < 7; dayIndex++) {
+      const items = renderItemsByDay[dayIndex] || [];
+      for (const item of items) {
+        if (item.kind !== 'group') continue;
+        map.set(item.bucket.key, item.bucket);
+      }
+    }
+    return map;
+  }, [renderItemsByDay]);
+
+  useEffect(() => {
+    if (!groupDetailsOpen || !selectedGroupBucket) return;
+    const freshBucket = groupedBucketsByKey.get(selectedGroupBucket.key);
+    if (!freshBucket) {
+      setGroupDetailsOpen(false);
+      setSelectedGroupBucket(null);
+      return;
+    }
+    if (freshBucket !== selectedGroupBucket) {
+      setSelectedGroupBucket(freshBucket);
+    }
+  }, [groupDetailsOpen, groupedBucketsByKey, selectedGroupBucket]);
 
   // Stats
   const todayLessons = useMemo(() => {
@@ -2409,6 +2783,19 @@ function TutorScheduleContent() {
     if (isLessonDragInProgressRef.current) return;
     setSelectedLesson(lesson);
     setLessonDetailsOpen(true);
+  }, []);
+
+  const handleGroupBucketClick = useCallback((bucket: GroupLessonBucket) => {
+    if (isLessonDragInProgressRef.current) return;
+    setSelectedGroupBucket(bucket);
+    setGroupDetailsOpen(true);
+  }, []);
+
+  const handleGroupDetailsOpenChange = useCallback((open: boolean) => {
+    setGroupDetailsOpen(open);
+    if (!open) {
+      setSelectedGroupBucket(null);
+    }
   }, []);
 
   const handleLessonDragStart = useCallback((lessonId: string, durationMin: number, event: React.DragEvent<HTMLDivElement>) => {
@@ -2852,7 +3239,7 @@ function TutorScheduleContent() {
                     {/* Day columns */}
                     {DAYS_OF_WEEK.map((_, dayIndex) => {
                       const isWorkDay = scheduleSettings.workDays.includes(dayIndex);
-                      const dayLessons = lessonsByDay[dayIndex] || [];
+                      const dayRenderItems = renderItemsByDay[dayIndex] || [];
 
                       return (
                         <div
@@ -2912,16 +3299,30 @@ function TutorScheduleContent() {
                           )}
 
                           {/* Lessons */}
-                          {dayLessons.map(lesson => (
-                            <LessonBlock
-                              key={lesson.id}
-                              lesson={lesson}
-                              workDayStart={scheduleSettings.workDayStart}
-                              onClick={() => handleLessonClick(lesson)}
-                              onDragStart={(event) => handleLessonDragStart(lesson.id, lesson.duration_min, event)}
-                              onDragEnd={handleLessonDragEnd}
-                            />
-                          ))}
+                          {dayRenderItems.map((item) => {
+                            if (item.kind === 'single') {
+                              const lesson = item.lesson;
+                              return (
+                                <LessonBlock
+                                  key={lesson.id}
+                                  lesson={lesson}
+                                  workDayStart={scheduleSettings.workDayStart}
+                                  onClick={() => handleLessonClick(lesson)}
+                                  onDragStart={(event) => handleLessonDragStart(lesson.id, lesson.duration_min, event)}
+                                  onDragEnd={handleLessonDragEnd}
+                                />
+                              );
+                            }
+
+                            return (
+                              <GroupLessonBlock
+                                key={item.bucket.key}
+                                bucket={item.bucket}
+                                workDayStart={scheduleSettings.workDayStart}
+                                onClick={() => handleGroupBucketClick(item.bucket)}
+                              />
+                            );
+                          })}
                         </div>
                       );
                     })}
@@ -2975,6 +3376,12 @@ function TutorScheduleContent() {
           onUpdate={() => refetchLessons()}
           onComplete={handleCompleteLesson}
           isCompleting={selectedLesson ? Boolean(completingLessonIds[selectedLesson.id]) : false}
+        />
+
+        <GroupDetailsDialog
+          open={groupDetailsOpen}
+          onOpenChange={handleGroupDetailsOpenChange}
+          bucket={selectedGroupBucket}
         />
 
         <ReminderSettingsDialog
