@@ -19,13 +19,27 @@
 - Тяжёлые зависимости: Pyodide (Python в браузере), KaTeX, react-markdown, framer-motion
 
 ### Репетитор (Tutor)
-- Маршруты: `/tutor/dashboard`, `/tutor/students`, `/tutor/students/:id`, `/tutor/schedule`, `/tutor/payments`
 - Guard: `TutorGuard` (проверка `is_tutor()` RPC с **module-level кешем** авторизации, TTL 10 мин)
 - **ВАЖНО**: Каждая tutor-страница монтирует собственный `<TutorGuard>`. Кеш на уровне модуля делает переключение между вкладками мгновенным (без повторного RPC)
+- **ОБЯЗАТЕЛЬНО**: каждая tutor-страница оборачивается в `<TutorLayout>` — это даёт боковую навигацию кабинета. Страница без `TutorLayout` сломает UI
 - Ключевые компоненты: `src/pages/tutor/*`, `src/components/tutor/*`
 - Ключевые хуки: `useTutor`, `useTutorStudents`, `useTutorPayments` (из `src/hooks/useTutor.ts`)
 - Тяжёлые зависимости: нет (лёгкие страницы)
 - **Google Calendar интеграция отключена**: в `TutorSchedule` нет кнопок/импорта Google Calendar, edge functions `google-calendar-oauth` и `google-calendar-import` удалены из кода и `supabase/config.toml`
+
+#### Полная таблица tutor-маршрутов
+
+| Маршрут | Файл | Описание |
+|---------|------|----------|
+| `/tutor/dashboard` | `TutorDashboard.tsx` | Главная кабинета |
+| `/tutor/students` | `TutorStudents.tsx` | Список учеников |
+| `/tutor/students/:id` | `TutorStudentProfile.tsx` | Профиль ученика |
+| `/tutor/schedule` | `TutorSchedule.tsx` | Расписание + настройки |
+| `/tutor/payments` | `TutorPayments.tsx` | Платежи |
+| `/tutor/homework` | `TutorHomework.tsx` | Список ДЗ |
+| `/tutor/homework/create` | `TutorHomeworkCreate.tsx` | Создание ДЗ |
+| `/tutor/homework/:id` | `TutorHomeworkDetail.tsx` | Детали ДЗ |
+| `/tutor/homework/:id/results` | `TutorHomeworkResults.tsx` | Результаты ДЗ, `?submission=` авто-раскрывает строку |
 
 ## КРИТИЧЕСКИЕ ПРАВИЛА
 
@@ -51,6 +65,18 @@
 - **ПРАВИЛО**: в `src/lib/tutors.ts` и `src/lib/tutorSchedule.ts` для получения user.id использовать ТОЛЬКО `getSession()`
 - **Guard-компоненты** (`TutorGuard`, `AuthGuard`) должны кешировать результат проверки ролей, чтобы переход между вкладками был мгновенным
 - **`visibilitychange` обработчик** — обязателен в guard-компонентах для восстановления сессии после бездействия пользователя (2+ минуты)
+- **Исключение**: `src/hooks/useTutorAccess.ts` вызывает `getUser()` — это намеренно (условный рендер навигации, не guard-логика). **Не копировать этот паттерн** в новый код.
+
+### 2b. tutors.ts vs tutorSchedule.ts — правило разделения
+- **Вся логика уроков / слотов / бронирования** живёт **ТОЛЬКО** в `src/lib/tutorSchedule.ts`
+- `src/lib/tutors.ts` содержит лишь ре-экспорт функций из `tutorSchedule.ts` (последний блок файла) — не дублируй туда новую логику
+- Добавляя новую функцию расписания/уроков: пиши в `tutorSchedule.ts`, при необходимости добавляй ре-экспорт в `tutors.ts`
+
+### 2c. React Query key-конвенция (tutor)
+- **Обязательный префикс** для всех tutor-запросов: `['tutor', entity, ...params]`
+- Примеры: `['tutor','students']`, `['tutor','student', id]`, `['tutor','payments']`, `['tutor','lessons']`, `['tutor','homework','assignments', filter]`
+- Отклонение от конвенции **ломает** `tutorStudentCacheSync.ts` (`applyTutorStudentPatchToCache`, `invalidateTutorStudentDependentQueries`)
+- Перед добавлением нового tutor-query сверяйся с `src/lib/tutorStudentCacheSync.ts` — там перечислены все ключи для инвалидации
 
 ### 3. Bundle Splitting
 Vite конфигурация разделяет бандл на чанки:
@@ -67,42 +93,75 @@ Vite конфигурация разделяет бандл на чанки:
 - НИКАКИХ тяжёлых зависимостей (framer-motion, recharts, katex, etc.)
 - Если нужна анимация — используй Tailwind CSS (`animate-bounce`, `transition-all duration-200`, etc.)
 
+### 5. Типы — канонический источник
+- Все разделяемые TypeScript-типы живут в **`src/types/`**: `tutor.ts`, `homework.ts`, `practice.ts`, `diagnostic.ts`, `solution.ts`
+- **Не объявляй** локальные интерфейсы в компонентах для данных, которые используются в нескольких местах — расширяй типы в `src/types/`
+
+### 6. Форматирование дат и валюты
+- Канонический источник: **`src/lib/formatters.ts`** — функции форматирования дат, валюты, прогресса
+- Всегда используй `parseISO` из `date-fns` для разбора строк дат (не `new Date(string)` — ломается в Safari)
+- `hourly_rate_cents` / суммы платежей хранятся в копейках (integer). Деление на 100 только при отображении — используй `formatPaymentAmount` из `formatters.ts`
+
 ## Структура файлов
 
 ```
 src/
-├── pages/                 # Страницы (все lazy-loaded)
-│   ├── Chat.tsx           # Чат с ИИ (student)
-│   ├── Practice.tsx       # Практика (student)
-│   ├── Diagnostic.tsx     # Диагностика (student)
-│   ├── tutor/             # ← ВСЕ tutor-страницы тут
+├── pages/                       # Страницы (все lazy-loaded)
+│   ├── Chat.tsx                 # Чат с ИИ (student)
+│   ├── Practice.tsx             # Практика (student)
+│   ├── Diagnostic.tsx           # Диагностика (student)
+│   ├── BookLesson.tsx           # Публичное бронирование /book/:bookingLink
+│   ├── RegisterTutor.tsx        # Регистрация репетитора /register-tutor
+│   ├── TutorLogin.tsx           # Вход репетитора /tutor/login
+│   ├── Admin.tsx                # Панель администратора /admin
+│   ├── MiniApp.tsx              # Telegram WebApp
+│   ├── tutor/                   # ← ВСЕ tutor-страницы тут
 │   │   ├── TutorDashboard.tsx
 │   │   ├── TutorStudents.tsx
 │   │   ├── TutorStudentProfile.tsx
 │   │   ├── TutorSchedule.tsx
-│   │   └── TutorPayments.tsx
+│   │   ├── TutorPayments.tsx
+│   │   ├── TutorHomework.tsx
+│   │   ├── TutorHomeworkCreate.tsx
+│   │   ├── TutorHomeworkDetail.tsx
+│   │   └── TutorHomeworkResults.tsx
 │   └── ...
 ├── components/
-│   ├── ui/                # shadcn/ui (ЛЁГКИЕ, без тяжёлых deps!)
-│   ├── tutor/             # Tutor-specific компоненты
-│   ├── practice/          # Practice-specific компоненты
-│   ├── diagnostic/        # Diagnostic-specific компоненты
-│   ├── admin/             # Admin-specific компоненты
-│   ├── AuthGuard.tsx      # Guard для студентов
-│   ├── TutorGuard.tsx     # Guard для репетиторов
+│   ├── ui/                      # shadcn/ui (ЛЁГКИЕ, без тяжёлых deps!)
+│   ├── tutor/                   # Tutor-specific компоненты
+│   │   └── TutorDataStatus.tsx  # Мягкий error-recovery UI (использовать в новых tutor-страницах)
+│   ├── practice/                # Practice-specific компоненты
+│   ├── diagnostic/              # Diagnostic-specific компоненты
+│   ├── admin/                   # Admin-specific компоненты
+│   ├── AuthGuard.tsx            # Guard для студентов
+│   ├── TutorGuard.tsx           # Guard для репетиторов
 │   └── ...общие компоненты
 ├── hooks/
-│   ├── useTutor.ts        # ВСЕ tutor-хуки
-│   ├── useSubscription.ts # Подписки (student)
-│   ├── usePractice.ts     # Практика (student)
+│   ├── useTutor.ts              # ВСЕ tutor-хуки
+│   ├── tutorQueryOptions.ts     # Общие настройки React Query для tutor-запросов
+│   ├── useTutorHomework.ts      # Tutor homework хуки
+│   ├── useTutorAccess.ts        # ИСКЛЮЧЕНИЕ: использует getUser() — только для Navigation
+│   ├── useSubscription.ts       # Подписки (student)
+│   ├── usePractice.ts           # Практика (student)
 │   └── ...
 ├── lib/
-│   ├── supabaseClient.ts  # Supabase клиент
-│   ├── tutors.ts          # Tutor бизнес-логика
-│   └── ...
+│   ├── supabaseClient.ts        # Supabase клиент
+│   ├── tutors.ts                # Tutor бизнес-логика + ре-экспорт из tutorSchedule
+│   ├── tutorSchedule.ts         # ИСТОЧНИК ИСТИНЫ: уроки, слоты, серии, бронирование
+│   ├── tutorHomeworkApi.ts      # Homework API клиент + storage helpers (parseStorageRef, toStorageRef)
+│   ├── tutorStudentCacheSync.ts # React Query cache sync для tutor-студентов
+│   ├── paymentAmount.ts         # calculateLessonPaymentAmount() — единый расчёт суммы
+│   ├── formatters.ts            # Форматирование дат/валюты/прогресса — канонический источник
+│   └── utils.ts                 # Общие утилиты
+├── types/                       # Канонические TypeScript-типы
+│   ├── tutor.ts
+│   ├── homework.ts
+│   ├── practice.ts
+│   ├── diagnostic.ts
+│   └── solution.ts
 └── utils/
-    ├── pyodide.ts         # Python в браузере (student only!)
-    ├── chatCache.ts       # Кеш чата (student only!)
+    ├── pyodide.ts               # Python в браузере (student only!)
+    ├── chatCache.ts             # Кеш чата (student only!)
     └── ...
 ```
 
@@ -121,6 +180,8 @@ src/
 - [ ] Переход между вкладками кабинета репетитора — мгновенный (кеш `tutorAuthCache` не сломан)
 - [ ] После 2-3 минут бездействия переход на другую вкладку работает без зависания
 - [ ] В `TutorSchedule` не появляется UI Google Calendar (интеграция отключена)
+- [ ] Новая tutor-страница оборачивается в `<TutorLayout>` и добавлена в таблицу маршрутов выше
+- [ ] Новый tutor React Query key начинается с `['tutor', ...]`
 
 При работе над **любым** функционалом:
 - [ ] `bun run build` завершается без ошибок
@@ -177,11 +238,61 @@ src/
 - **Cursor / Claude Code** — для серьёзной разработки, рефакторинга, багфиксов
 - После работы в Cursor/Claude Code: **всегда** делай `bun run build` и `bun run smoke-test` перед деплоем
 - Для локальных проверок запускай команды **строго последовательно**, не параллельно:
-  - `npm run build`
-  - после завершения: `npm run smoke-test`
+  - `bun run build`
+  - после завершения: `bun run smoke-test`
   - причина: параллельный запуск может ломаться по `EBUSY` (конкурентная запись в `dist/`)
 - После работы в Lovable: проверь, что Lovable не добавил тяжёлые зависимости в `src/components/ui/`
 - Не возвращай Google Calendar интеграцию (UI/edge functions) без отдельного согласованного требования и отдельной миграционной задачи для БД
+
+### CI/CD и деплой edge functions
+- `.github/workflows/deploy-supabase-functions.yml` деплоит **только 7 функций**: `telegram-bot`, `chat`, `setup-telegram-webhook`, `telegram-auth`, `telegram-login-token`, `telegram-broadcast`, `telegram-scheduled-reminder`
+- **Остальные функции деплоятся вручную** через Supabase CLI или Lovable. При добавлении новой функции — уточняй, нужно ли добавить её в CI
+- **Неотслеживаемый файл**: `supabase/migrations/20260220130000_wow_payment_magic.sql` — намеренно не закоммичен, заменён `20260220143000_wow_payment_hardening.sql`. Не добавлять в git
+
+## Реестр edge functions
+
+| Функция | `verify_jwt` | CI авто-деплой | Назначение |
+|---------|-------------|----------------|-----------|
+| `telegram-bot` | false | ✅ | Главный Telegram-бот (homework, payments, practice) |
+| `chat` | true | ✅ | AI-чат для студентов |
+| `telegram-auth` | false | ✅ | Telegram OAuth callback |
+| `telegram-login-token` | false | ✅ | Создание одноразового login-токена |
+| `telegram-broadcast` | true | ✅ | Массовая рассылка |
+| `telegram-scheduled-reminder` | false | ✅ | Плановые напоминания |
+| `setup-telegram-webhook` | false | ✅ | Регистрация webhook |
+| `homework-api` | true | ❌ ручной | CRUD домашних заданий (tutor REST API) |
+| `payment-reminder` | false | ❌ ручной | Напоминания об оплате после урока |
+| `assign-tutor-role` | true | ❌ ручной | Назначение роли tutor по email |
+| `tutor-manual-add-student` | true | ❌ ручной | Ручное добавление ученика |
+| `tutor-update-student` | true | ❌ ручной | Обновление профиля ученика |
+| `notify-booking` | false | ❌ ручной | Уведомление репетитора о бронировании |
+| `analyze-homework-task` | true | ❌ ручной | Анализ задачи ДЗ (AI) |
+| `yookassa-create-payment` | true | ❌ ручной | Создание платежа YooKassa (подписки студентов) |
+| `yookassa-webhook` | false | ❌ ручной | Webhook подтверждения оплаты YooKassa |
+| `admin-analytics` | true | ❌ ручной | Аналитика для администратора |
+| `check-solutions` | true | ❌ ручной | Проверка решений (student) |
+| `get-solution` | true | ❌ ручной | Получение решений (student) |
+| `telegram-webapp-recent-solutions` | false | ❌ ручной | Последние решения для Telegram WebApp |
+| `telegram-scheduled-broadcast` | false | ❌ ручной | Плановая рассылка |
+
+## Self-booking система (публичное бронирование)
+
+- Публичный маршрут: `/book/:bookingLink` → `src/pages/BookLesson.tsx`
+- Репетитор получает уникальную ссылку бронирования через `generateBookingLink()` / `getBookingLink()` в `tutors.ts`
+- Настройки доступности: `tutor_weekly_slots`, `tutor_availability_exceptions`
+- Ключевые функции в `tutorSchedule.ts`:
+  - `getTutorPublicInfo(bookingLink)` — публичная инфо репетитора
+  - `getAvailableBookingSlots(tutorId, startDate, endDate)` — свободные слоты
+  - `bookLessonSlot(tutorId, slotData)` — создание брони
+- После успешного бронирования вызывается edge function `notify-booking` (уведомление репетитору)
+- **Не требует авторизации** — это публичный flow
+
+## YooKassa (платежи студентов за подписку)
+
+- Используется для оплаты подписки студентов (не уроков — уроки оплачиваются через `tutor_payments`)
+- Edge functions: `yookassa-create-payment` (`verify_jwt: true`) + `yookassa-webhook` (`verify_jwt: false`)
+- `yookassa-webhook` принимает уведомления от YooKassa о статусе платежа — **нельзя добавлять JWT**
+- Не путать с `tutor_payments` (оплата урока репетитору от ученика) — это разные сущности
 
 ## Кросс-браузерная совместимость (КРИТИЧНО)
 
@@ -221,7 +332,7 @@ src/
 
 ### Правила при написании кода
 1. **Перед использованием нового Web API** — проверь поддержку на caniuse.com для Safari 15+
-2. **Для дат** — всегда используй `date-fns` вместо нативного `Date` парсинга
+2. **Для дат** — всегда используй `date-fns` (`parseISO`) вместо нативного `Date` парсинга. Используй `src/lib/formatters.ts`
 3. **CSS анимации** — предпочитай `transform` и `opacity` (GPU-ускорены на всех браузерах)
 4. **Тестируй в Safari** — если меняешь CSS layout, scroll-поведение или формы
 
@@ -354,6 +465,7 @@ src/
   - helper-ы: `parseStorageRef`, `toStorageRef`
   - upload task image: primary bucket `homework-task-images`, fallback bucket `chat-images` при `Bucket not found/404`
   - delete/sign-url теперь работают через parsed `bucket/path` (с backward compatibility для legacy plain path)
+  - **ПРАВИЛО**: никогда не хранить raw Supabase path — всегда использовать `toStorageRef(bucket, path)`
 - UX quick wins в `src/pages/tutor/TutorHomeworkCreate.tsx`:
   - превью изображения задачи + имя файла + подсказка по ограничениям файла
   - warning toast при fallback upload
@@ -441,6 +553,7 @@ src/
   - миграция `supabase/migrations/20260220143000_wow_payment_hardening.sql`
   - `tutor_payments.lesson_id` + partial unique index (один lesson -> один платеж)
   - `complete_lesson_and_create_payment` переведена на UPSERT по `lesson_id`
+- `hourly_rate_cents` на ученике — **обязательное поле** при создании (хранится в копейках, показывается делённым на 100)
 - Добавлен источник реквизитов репетитора:
   - `tutor_calendar_settings.payment_details_text`
   - UI в `src/pages/tutor/TutorSchedule.tsx` (настройки календаря)
