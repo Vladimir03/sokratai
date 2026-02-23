@@ -1648,99 +1648,6 @@ export type Database = {
           },
         ]
       }
-      tutor_group_memberships: {
-        Row: {
-          created_at: string | null
-          id: string
-          is_active: boolean
-          tutor_group_id: string
-          tutor_id: string
-          tutor_student_id: string
-          updated_at: string | null
-        }
-        Insert: {
-          created_at?: string | null
-          id?: string
-          is_active?: boolean
-          tutor_group_id: string
-          tutor_id: string
-          tutor_student_id: string
-          updated_at?: string | null
-        }
-        Update: {
-          created_at?: string | null
-          id?: string
-          is_active?: boolean
-          tutor_group_id?: string
-          tutor_id?: string
-          tutor_student_id?: string
-          updated_at?: string | null
-        }
-        Relationships: [
-          {
-            foreignKeyName: "tutor_group_memberships_tutor_group_id_fkey"
-            columns: ["tutor_group_id"]
-            isOneToOne: false
-            referencedRelation: "tutor_groups"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "tutor_group_memberships_tutor_id_fkey"
-            columns: ["tutor_id"]
-            isOneToOne: false
-            referencedRelation: "tutors"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "tutor_group_memberships_tutor_student_id_fkey"
-            columns: ["tutor_student_id"]
-            isOneToOne: false
-            referencedRelation: "tutor_students"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
-      tutor_groups: {
-        Row: {
-          color: string | null
-          created_at: string | null
-          id: string
-          is_active: boolean
-          name: string
-          short_name: string | null
-          tutor_id: string
-          updated_at: string | null
-        }
-        Insert: {
-          color?: string | null
-          created_at?: string | null
-          id?: string
-          is_active?: boolean
-          name: string
-          short_name?: string | null
-          tutor_id: string
-          updated_at?: string | null
-        }
-        Update: {
-          color?: string | null
-          created_at?: string | null
-          id?: string
-          is_active?: boolean
-          name?: string
-          short_name?: string | null
-          tutor_id?: string
-          updated_at?: string | null
-        }
-        Relationships: [
-          {
-            foreignKeyName: "tutor_groups_tutor_id_fkey"
-            columns: ["tutor_id"]
-            isOneToOne: false
-            referencedRelation: "tutors"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
       tutor_students: {
         Row: {
           created_at: string | null
@@ -1865,7 +1772,6 @@ export type Database = {
           created_at: string | null
           id: string
           invite_code: string | null
-          mini_groups_enabled: boolean
           name: string
           subjects: string[] | null
           telegram_id: string | null
@@ -1880,7 +1786,6 @@ export type Database = {
           created_at?: string | null
           id?: string
           invite_code?: string | null
-          mini_groups_enabled?: boolean
           name: string
           subjects?: string[] | null
           telegram_id?: string | null
@@ -1895,7 +1800,6 @@ export type Database = {
           created_at?: string | null
           id?: string
           invite_code?: string | null
-          mini_groups_enabled?: boolean
           name?: string
           subjects?: string[] | null
           telegram_id?: string | null

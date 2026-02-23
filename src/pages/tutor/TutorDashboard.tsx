@@ -425,6 +425,10 @@ function TutorDashboardContent() {
           inviteCode={inviteCode}
           inviteWebLink={inviteWebLink}
           inviteTelegramLink={inviteTelegramLink}
+          miniGroupsEnabled={false}
+          groups={[]}
+          onCreateGroup={async () => null}
+          onSyncStudentMembership={async () => {}}
           onManualAdded={(tutorStudentId) => {
             navigate(`/tutor/students/${tutorStudentId}`);
           }}
