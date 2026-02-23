@@ -40,6 +40,11 @@ Notes:
 - In CI, lint is currently informational (non-blocking) until a dedicated lint-debt reduction PR.
 - If lint is red, still run `build` and `smoke-check` and report exact failures.
 
+## Supabase Drift Guardrails
+
+- Before changing `verify_jwt` in `supabase/config.toml` or using `--no-verify-jwt` in workflow deploy commands, run a drift-check between config and workflow and request explicit owner decision for policy changes.
+- Before changing `supabase/config.toml`, verify bidirectional consistency: every `[functions.*]` entry should map to `supabase/functions/*`, and every `supabase/functions/*` directory should have an explicit policy decision in config.
+
 ## Critical Boundaries
 
 - Keep **Student** and **Tutor** modules isolated.

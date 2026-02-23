@@ -1,7 +1,7 @@
 project_id = "vrsseotrfmsxpbciyqzc"
 
 [functions.chat]
-verify_jwt = true
+verify_jwt = false
 
 [functions.analyze-homework-task]
 verify_jwt = true
@@ -46,9 +46,6 @@ verify_jwt = false
 verify_jwt = false
 
 [functions.telegram-webapp-recent-solutions]
-verify_jwt = false
-
-[functions.tutor-lesson-reminders]
 verify_jwt = false
 
 [functions.payment-reminder]

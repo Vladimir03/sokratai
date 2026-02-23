@@ -6,6 +6,7 @@ on:
       - main
     paths:
       - 'supabase/functions/**'
+      - 'supabase/config.toml'
   workflow_dispatch:  # Позволяет запускать вручную
 
 jobs:
@@ -27,7 +28,8 @@ jobs:
         run: |
           supabase link --project-ref ${{ secrets.SUPABASE_PROJECT_ID }}
 
-          # Deploy all functions
+          # This pipeline auto-deploys only 7 edge functions.
+          # Remaining functions are intentionally not covered here and are deployed manually.
           supabase functions deploy telegram-bot --no-verify-jwt
           supabase functions deploy chat --no-verify-jwt
           supabase functions deploy setup-telegram-webhook --no-verify-jwt
