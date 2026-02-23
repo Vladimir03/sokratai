@@ -12,10 +12,11 @@ Project documentation and internal notes live in [`docs/`](./docs/README.md).
 
 Use this short workflow for Codex / Claude / Cursor:
 
-1. Read project constraints first: `AGENTS.md`, `CLAUDE.md`, and `docs/engineering/overview/codebase.md`.
-2. Keep changes small and task-focused. Do not refactor unrelated files.
-3. Do not change business logic, auth flows, or public APIs unless the task explicitly requires it.
-4. Run checks in sequence (not in parallel on Windows):
+1. Read project constraints first: `AGENTS.md`, `CLAUDE.md`, `docs/engineering/overview/codebase.md`, and `docs/engineering/architecture/README.md`.
+2. Map changed files to modules in `docs/engineering/architecture/modules.json` before editing high-risk areas.
+3. Keep changes small and task-focused. Do not refactor unrelated files.
+4. Do not change business logic, auth flows, or public APIs unless the task explicitly requires it.
+5. Run checks in sequence (not in parallel on Windows):
 
 ```sh
 npm run dev
@@ -25,7 +26,7 @@ npm run test
 npm run smoke-check
 ```
 
-5. If `lint` is currently red, still run `build` + `smoke-check` and report exact failures.
+6. If `lint` is currently red, still run `build` + `smoke-check` and report exact failures.
 
 ## How can I edit this code?
 

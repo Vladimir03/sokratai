@@ -7,10 +7,11 @@
 - `.claude/rules/00-read-first.md`
 - `.claude/rules/10-safe-change-policy.md`
 - `.claude/rules/20-commands-and-validation.md`
+- `docs/engineering/architecture/README.md` и `docs/engineering/architecture/modules.json`
 
 Минимальный порядок работы:
 
-1. Прочитай `AGENTS.md`, `CLAUDE.md`, `docs/engineering/overview/codebase.md`.
+1. Прочитай `AGENTS.md`, `CLAUDE.md`, `docs/engineering/overview/codebase.md`, `docs/engineering/architecture/README.md`.
 2. Делай минимальные и целевые изменения без затрагивания несвязанных областей.
 3. Не меняй бизнес-логику, auth-flow и публичные API без явного требования задачи.
 4. Перед завершением прогоняй команды последовательно:

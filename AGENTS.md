@@ -17,6 +17,9 @@ Repository guidance for AI coding agents (Codex, Claude Code, Cursor).
 - Supabase edge functions: `supabase/functions/`
 - Database migrations: `supabase/migrations/`
 - Engineering docs: `docs/engineering/`
+- Architecture map (human): `docs/engineering/architecture/README.md`
+- Architecture map (machine): `docs/engineering/architecture/modules.json`
+- High-risk zones: `docs/engineering/architecture/high-risk-zones.md`
 
 ## Working Commands
 
@@ -39,6 +42,7 @@ Notes:
 - In CI, use `smoke-check` as the main smoke quality gate; treat `smoke-test` as legacy bash fallback.
 - In CI, lint is currently informational (non-blocking) until a dedicated lint-debt reduction PR.
 - If lint is red, still run `build` and `smoke-check` and report exact failures.
+- If docs mention both `bun` and `npm`, treat `package.json` + CI workflows as source of truth (currently `npm run ...`).
 
 ## Supabase Drift Guardrails
 

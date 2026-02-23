@@ -1,0 +1,319 @@
+{
+  "version": "1.0.0",
+  "updated_at": "2026-02-23",
+  "modules": [
+    {
+      "name": "frontend-shell-routing",
+      "path_globs": [
+        "src/main.tsx",
+        "src/App.tsx",
+        "src/pages/**"
+      ],
+      "purpose": "Application entrypoint, route graph, lazy-loading boundaries, and page-level composition.",
+      "dependencies": [
+        "react",
+        "react-router-dom",
+        "AuthGuard",
+        "TutorGuard"
+      ],
+      "risk_level": "high",
+      "validation_commands": [
+        "npm run build",
+        "npm run smoke-check"
+      ],
+      "forbidden_changes": [
+        "Do not alter auth flow semantics unless task explicitly requires it.",
+        "Do not replace lazy route boundaries with eager imports."
+      ],
+      "notes": "Routing regressions can break both student and tutor entry paths."
+    },
+    {
+      "name": "student-domain",
+      "path_globs": [
+        "src/pages/Chat.tsx",
+        "src/pages/Practice.tsx",
+        "src/pages/Diagnostic.tsx",
+        "src/pages/Homework*.tsx",
+        "src/components/practice/**",
+        "src/components/diagnostic/**",
+        "src/components/miniapp/**",
+        "src/utils/pyodide.ts",
+        "src/utils/chatCache.ts"
+      ],
+      "purpose": "Student-facing learning flows: chat, practice, diagnostic, homework, mini app rendering.",
+      "dependencies": [
+        "Supabase client",
+        "React Query",
+        "KaTeX/markdown rendering",
+        "Pyodide runtime"
+      ],
+      "risk_level": "high",
+      "validation_commands": [
+        "npm run build",
+        "npm run smoke-check",
+        "npm run test"
+      ],
+      "forbidden_changes": [
+        "Do not import tutor-only modules into student pages/components.",
+        "Do not move heavy dependencies into shared UI primitives."
+      ],
+      "notes": "Chat path is a fragile integration point with many side effects."
+    },
+    {
+      "name": "tutor-domain",
+      "path_globs": [
+        "src/pages/tutor/**",
+        "src/components/tutor/**",
+        "src/hooks/useTutor*.ts*",
+        "src/hooks/tutorQueryOptions.ts",
+        "src/lib/tutor*.ts",
+        "src/types/tutor.ts"
+      ],
+      "purpose": "Tutor cabinet workflows: students, schedule, payments, homework management.",
+      "dependencies": [
+        "Supabase RPC/functions",
+        "React Query key conventions",
+        "TutorGuard authorization cache"
+      ],
+      "risk_level": "high",
+      "validation_commands": [
+        "npm run build",
+        "npm run smoke-check",
+        "npm run typecheck"
+      ],
+      "forbidden_changes": [
+        "Do not break ['tutor', ...] query key conventions.",
+        "Do not remove or bypass TutorGuard behavior without explicit owner decision."
+      ],
+      "notes": "Tutor cache sync and role checks are tightly coupled to query key shapes."
+    },
+    {
+      "name": "shared-ui-and-core-hooks",
+      "path_globs": [
+        "src/components/ui/**",
+        "src/components/AuthGuard.tsx",
+        "src/components/TutorGuard.tsx",
+        "src/components/Navigation.tsx",
+        "src/hooks/**",
+        "src/types/**"
+      ],
+      "purpose": "Cross-cutting UI primitives, guards, navigation shell, reusable hooks and canonical types.",
+      "dependencies": [
+        "Radix UI",
+        "Tailwind",
+        "Supabase session/auth checks"
+      ],
+      "risk_level": "high",
+      "validation_commands": [
+        "npm run build",
+        "npm run typecheck",
+        "npm run smoke-check"
+      ],
+      "forbidden_changes": [
+        "Do not add heavy runtime dependencies to src/components/ui/**.",
+        "Do not change AuthGuard/TutorGuard logic for unrelated tasks."
+      ],
+      "notes": "Changes here have broad blast radius across both product roles."
+    },
+    {
+      "name": "domain-data-layer",
+      "path_globs": [
+        "src/lib/**",
+        "src/integrations/supabase/**"
+      ],
+      "purpose": "Typed API and data-access layer used by pages/hooks.",
+      "dependencies": [
+        "Supabase client",
+        "Postgres/RPC contracts",
+        "Edge function response formats"
+      ],
+      "risk_level": "high",
+      "validation_commands": [
+        "npm run build",
+        "npm run typecheck",
+        "npm run smoke-check"
+      ],
+      "forbidden_changes": [
+        "Do not change public API contracts unless explicitly requested.",
+        "Do not switch hot paths from getSession() to getUser() without approval."
+      ],
+      "notes": "Contract drift can silently break runtime without immediate compile errors."
+    },
+    {
+      "name": "supabase-edge-telegram-runtime",
+      "path_globs": [
+        "supabase/functions/telegram-bot/**",
+        "supabase/functions/telegram-auth/**",
+        "supabase/functions/telegram-login-token/**",
+        "supabase/functions/telegram-broadcast/**",
+        "supabase/functions/telegram-scheduled-reminder/**",
+        "supabase/functions/telegram-scheduled-broadcast/**",
+        "supabase/functions/telegram-webapp-recent-solutions/**",
+        "supabase/functions/setup-telegram-webhook/**"
+      ],
+      "purpose": "Telegram bot runtime, auth hooks, broadcasts, reminders, mini app companion endpoints.",
+      "dependencies": [
+        "Telegram Bot API",
+        "Supabase service role client",
+        "Homework and payment DB tables"
+      ],
+      "risk_level": "high",
+      "validation_commands": [
+        "npm run build",
+        "node scripts/supabase-drift-check.mjs"
+      ],
+      "forbidden_changes": [
+        "Do not change command/callback contracts without explicit owner approval.",
+        "Do not change JWT verification policy in workflow/config without owner decision."
+      ],
+      "notes": "Operational risk is high because this module is user-facing and webhook-driven."
+    },
+    {
+      "name": "supabase-edge-business-apis",
+      "path_globs": [
+        "supabase/functions/homework-api/**",
+        "supabase/functions/payment-reminder/**",
+        "supabase/functions/assign-tutor-role/**",
+        "supabase/functions/tutor-manual-add-student/**",
+        "supabase/functions/tutor-update-student/**",
+        "supabase/functions/yookassa-create-payment/**",
+        "supabase/functions/yookassa-webhook/**",
+        "supabase/functions/check-solutions/**",
+        "supabase/functions/get-solution/**",
+        "supabase/functions/analyze-homework-task/**",
+        "supabase/functions/admin-analytics/**",
+        "supabase/functions/notify-booking/**",
+        "supabase/functions/chat/**"
+      ],
+      "purpose": "Edge-function APIs for homework, billing, auth-role ops, analytics, and chat backend.",
+      "dependencies": [
+        "Supabase Auth and Postgres",
+        "External payment provider (YooKassa)",
+        "Frontend API callers in src/lib/**"
+      ],
+      "risk_level": "high",
+      "validation_commands": [
+        "npm run build",
+        "node scripts/supabase-drift-check.mjs"
+      ],
+      "forbidden_changes": [
+        "Do not modify public edge function contracts unless task explicitly requires it.",
+        "Do not alter JWT policy outside owner-approved decisions."
+      ],
+      "notes": "Contract stability matters for frontend and external webhook integrations."
+    },
+    {
+      "name": "supabase-config-and-deploy",
+      "path_globs": [
+        "supabase/config.toml",
+        ".github/workflows/deploy-supabase-functions.yml"
+      ],
+      "purpose": "Metadata and deployment policy for edge functions, including JWT verification behavior.",
+      "dependencies": [
+        "Supabase function directories",
+        "GitHub Actions deploy pipeline",
+        "Owner policy decisions"
+      ],
+      "risk_level": "high",
+      "validation_commands": [
+        "node scripts/supabase-drift-check.mjs"
+      ],
+      "forbidden_changes": [
+        "Do not change verify_jwt or --no-verify-jwt semantics without explicit owner decision.",
+        "Do not assume all functions are deployed by one workflow."
+      ],
+      "notes": "Current deploy workflow intentionally covers only 7 functions."
+    },
+    {
+      "name": "database-migrations",
+      "path_globs": [
+        "supabase/migrations/**"
+      ],
+      "purpose": "Schema and data evolution for Postgres-backed product behavior.",
+      "dependencies": [
+        "Runtime SQL/RPC contracts",
+        "Edge function expectations",
+        "Frontend query assumptions"
+      ],
+      "risk_level": "high",
+      "validation_commands": [
+        "npm run build",
+        "npm run typecheck"
+      ],
+      "forbidden_changes": [
+        "Do not edit historical migrations casually.",
+        "Do not include migration changes in docs/process-only PRs."
+      ],
+      "notes": "Treat migration updates as separate, review-heavy PRs."
+    },
+    {
+      "name": "ci-and-quality-gates",
+      "path_globs": [
+        ".github/workflows/**",
+        "package.json"
+      ],
+      "purpose": "CI behavior, quality gates, and command orchestration for reproducible PR checks.",
+      "dependencies": [
+        "npm scripts in package.json",
+        "GitHub Actions runner environment"
+      ],
+      "risk_level": "medium",
+      "validation_commands": [
+        "npm run build",
+        "npm run smoke-check",
+        "npm run test",
+        "npm run typecheck"
+      ],
+      "forbidden_changes": [
+        "Do not make lint blocking while lint debt remains unresolved without owner approval.",
+        "Do not couple deploy and quality-gate workflows into one pipeline."
+      ],
+      "notes": "CI should reflect current script contract and avoid unexpected merge blockers."
+    },
+    {
+      "name": "automation-and-smoke-scripts",
+      "path_globs": [
+        "scripts/**"
+      ],
+      "purpose": "Local/CI helper scripts for smoke checks and report-only drift diagnostics.",
+      "dependencies": [
+        "Node runtime",
+        "Project file layout",
+        "Workflow conventions"
+      ],
+      "risk_level": "low",
+      "validation_commands": [
+        "npm run smoke-check",
+        "node scripts/supabase-drift-check.mjs"
+      ],
+      "forbidden_changes": [
+        "Do not convert report-only scripts into blocking checks without owner decision.",
+        "Do not introduce new dependencies for simple diagnostics."
+      ],
+      "notes": "Scripts should stay deterministic and side-effect-free where possible."
+    },
+    {
+      "name": "documentation-and-agent-policy",
+      "path_globs": [
+        "README.md",
+        "AGENTS.md",
+        "CLAUDE.md",
+        "docs/**"
+      ],
+      "purpose": "Human and agent guidance, architecture intent, and operational guardrails.",
+      "dependencies": [
+        "Current repository structure",
+        "Owner policy decisions"
+      ],
+      "risk_level": "low",
+      "validation_commands": [
+        "node scripts/supabase-drift-check.mjs"
+      ],
+      "forbidden_changes": [
+        "Do not state commands/policies that contradict package.json and workflows.",
+        "Do not remove critical safety rules without replacement."
+      ],
+      "notes": "Keep docs concise, precise, and aligned with executable reality."
+    }
+  ]
+}
