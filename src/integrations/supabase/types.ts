@@ -1457,6 +1457,54 @@ export type Database = {
           },
         ]
       }
+      tutor_lesson_participants: {
+        Row: {
+          created_at: string
+          id: string
+          lesson_id: string
+          paid_at: string | null
+          payment_amount: number | null
+          payment_status: string
+          student_id: string
+          tutor_student_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          lesson_id: string
+          paid_at?: string | null
+          payment_amount?: number | null
+          payment_status?: string
+          student_id: string
+          tutor_student_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          lesson_id?: string
+          paid_at?: string | null
+          payment_amount?: number | null
+          payment_status?: string
+          student_id?: string
+          tutor_student_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "tutor_lesson_participants_lesson_id_fkey"
+            columns: ["lesson_id"]
+            isOneToOne: false
+            referencedRelation: "tutor_lessons"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "tutor_lesson_participants_tutor_student_id_fkey"
+            columns: ["tutor_student_id"]
+            isOneToOne: false
+            referencedRelation: "tutor_students"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       tutor_lesson_reminder_logs: {
         Row: {
           error_message: string | null
@@ -2200,6 +2248,7 @@ export type Database = {
         Args: { _lesson_id: string }
         Returns: undefined
       }
+      owns_lesson: { Args: { _lesson_id: string }; Returns: boolean }
       owns_tutor: { Args: { _tutor_id: string }; Returns: boolean }
       owns_tutor_student: {
         Args: { _tutor_student_id: string }

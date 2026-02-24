@@ -49,15 +49,17 @@ import {
   cancelLessonSeries
 } from '@/lib/tutorSchedule';
 import {
-  createMiniGroupLessonsBatch,
-  summarizeMiniGroupCreateResults,
-  type MiniGroupCreateResultItem,
-  type MiniGroupCreateSummary,
+  createMiniGroupLesson,
+  getLessonParticipants,
+  type MiniGroupCreateResult,
 } from '@/lib/tutorScheduleGroupCreate';
 import {
   runCancelGroupAction,
   runCompleteGroupAction,
   runMoveGroupAction,
+  runMoveGroupLesson,
+  runCancelGroupLesson,
+  runCompleteGroupLesson,
   type GroupActionSummary,
 } from '@/lib/tutorScheduleGroupActions';
 import type { TutorWeeklySlot, TutorLessonWithStudent, TutorStudentWithProfile, TutorReminderSettings, TutorCalendarSettings, TutorAvailabilityException, TutorGroup, TutorGroupMembership, LessonType } from '@/types/tutor';
@@ -425,11 +427,32 @@ function GroupDetailsDialog({
   const [isActionSaving, setIsActionSaving] = useState(false);
   const [actionSummary, setActionSummary] = useState<GroupActionSummary | null>(null);
   const [confirmAction, setConfirmAction] = useState<'cancel' | 'complete' | null>(null);
+  const [participants, setParticipants] = useState<any[]>([]);
+  const [participantsLoading, setParticipantsLoading] = useState(false);
+
+  // Detect unified group lesson (single lesson row with group_session_id)
+  const isUnifiedGroupLesson = !!(bucket?.groupSessionId && bucket.lessons.length === 1 && !bucket.lessons[0].tutor_student_id);
 
   const startDate = bucket ? new Date(bucket.startAt) : null;
   const endDate = startDate ? addMinutes(startDate, bucket.durationMin) : null;
+
+  // Load participants for unified group lessons
+  useEffect(() => {
+    if (!open || !bucket || !isUnifiedGroupLesson) {
+      setParticipants([]);
+      return;
+    }
+    const lessonId = bucket.lessons[0].id;
+    setParticipantsLoading(true);
+    getLessonParticipants(lessonId).then((data) => {
+      setParticipants(data);
+      setParticipantsLoading(false);
+    });
+  }, [open, bucket?.key, isUnifiedGroupLesson]);
+
+  // Legacy per-lesson action items
   const groupActionLessons = useMemo(() => {
-    if (!bucket) return [];
+    if (!bucket || isUnifiedGroupLesson) return [];
     return bucket.lessons.map((lesson) => ({
       lessonId: lesson.id,
       tutorStudentId: lesson.tutor_student_id,
@@ -439,20 +462,28 @@ function GroupDetailsDialog({
       durationMin: lesson.duration_min,
       hourlyRateCents: lesson.tutor_students?.hourly_rate_cents ?? null,
     }));
-  }, [bucket]);
+  }, [bucket, isUnifiedGroupLesson]);
 
-  const bookedCount = useMemo(
-    () => groupActionLessons.filter((lesson) => lesson.status === 'booked').length,
-    [groupActionLessons]
-  );
-  const completeEligibleCount = useMemo(
-    () => groupActionLessons.filter((lesson) => {
+  const mainLesson = bucket?.lessons[0] ?? null;
+  const lessonStatus = mainLesson?.status ?? 'booked';
+
+  const bookedCount = useMemo(() => {
+    if (isUnifiedGroupLesson) return lessonStatus === 'booked' ? 1 : 0;
+    return groupActionLessons.filter((l) => l.status === 'booked').length;
+  }, [isUnifiedGroupLesson, lessonStatus, groupActionLessons]);
+
+  const completeEligibleCount = useMemo(() => {
+    if (isUnifiedGroupLesson) {
+      if (lessonStatus !== 'booked' || !mainLesson) return 0;
+      const lessonEnd = addMinutes(new Date(mainLesson.start_at), mainLesson.duration_min);
+      return lessonEnd.getTime() < Date.now() ? 1 : 0;
+    }
+    return groupActionLessons.filter((lesson) => {
       if (lesson.status !== 'booked') return false;
       const lessonEnd = addMinutes(new Date(lesson.startAt), lesson.durationMin);
       return lessonEnd.getTime() < Date.now();
-    }).length,
-    [groupActionLessons]
-  );
+    }).length;
+  }, [isUnifiedGroupLesson, lessonStatus, mainLesson, groupActionLessons]);
 
   const retryableFailedItems = useMemo(
     () => (actionSummary?.results ?? []).filter((result) => !result.ok && !result.skipped),
@@ -481,27 +512,56 @@ function GroupDetailsDialog({
     setIsActionSaving(true);
     try {
       let summary: GroupActionSummary;
-      if (action === 'move') {
-        const newStartAt = fromDateTimeLocalValue(moveDateTimeValue);
-        if (!newStartAt) {
-          toast.error('Выберите корректную дату и время переноса');
-          return;
+
+      if (isUnifiedGroupLesson && mainLesson) {
+        // Unified: single lesson actions
+        const participantNames = participants.map(
+          (p: any) => p.tutor_students?.profiles?.username ?? 'Ученик'
+        );
+        const lessonInfo = {
+          lessonId: mainLesson.id,
+          status: mainLesson.status as 'booked' | 'completed' | 'cancelled',
+          startAt: mainLesson.start_at,
+          durationMin: mainLesson.duration_min,
+          participantNames,
+        };
+
+        if (action === 'move') {
+          const newStartAt = fromDateTimeLocalValue(moveDateTimeValue);
+          if (!newStartAt) {
+            toast.error('Выберите корректную дату и время переноса');
+            return;
+          }
+          summary = await runMoveGroupLesson(lessonInfo, newStartAt);
+        } else if (action === 'cancel') {
+          summary = await runCancelGroupLesson(lessonInfo);
+        } else {
+          summary = await runCompleteGroupLesson(lessonInfo);
         }
-        summary = await runMoveGroupAction({
-          lessons: groupActionLessons,
-          targetLessonIds,
-          newStartAt,
-        });
-      } else if (action === 'cancel') {
-        summary = await runCancelGroupAction({
-          lessons: groupActionLessons,
-          targetLessonIds,
-        });
       } else {
-        summary = await runCompleteGroupAction({
-          lessons: groupActionLessons,
-          targetLessonIds,
-        });
+        // Legacy: per-lesson actions
+        if (action === 'move') {
+          const newStartAt = fromDateTimeLocalValue(moveDateTimeValue);
+          if (!newStartAt) {
+            toast.error('Выберите корректную дату и время переноса');
+            return;
+          }
+          summary = await runMoveGroupAction({
+            lessons: groupActionLessons,
+            targetLessonIds,
+            newStartAt,
+          });
+        } else if (action === 'cancel') {
+          summary = await runCancelGroupAction({
+            lessons: groupActionLessons,
+            targetLessonIds,
+          });
+        } else {
+          summary = await runCompleteGroupAction({
+            lessons: groupActionLessons,
+            targetLessonIds,
+          });
+        }
       }
 
       setActionSummary(summary);
@@ -533,7 +593,7 @@ function GroupDetailsDialog({
       setIsActionSaving(false);
       setConfirmAction(null);
     }
-  }, [bucket, isActionSaving, moveDateTimeValue, groupActionLessons, onActionApplied]);
+  }, [bucket, isActionSaving, moveDateTimeValue, groupActionLessons, onActionApplied, isUnifiedGroupLesson, mainLesson, participants]);
 
   const retryFailed = useCallback(async () => {
     if (!actionSummary || retryableFailedItems.length === 0) return;
@@ -576,47 +636,95 @@ function GroupDetailsDialog({
           <div className="space-y-3">
             <div className="flex flex-wrap items-center gap-2">
               <Badge variant="secondary">
-                {bucket.groupSizeSnapshot ?? bucket.lessons.length} участников
+                {isUnifiedGroupLesson
+                  ? `${participants.length || bucket.groupSizeSnapshot || '?'} участников`
+                  : `${bucket.groupSizeSnapshot ?? bucket.lessons.length} участников`}
               </Badge>
-              <Badge variant="outline">
-                {bucket.statusCounts.booked} запл. / {bucket.statusCounts.completed} провед. / {bucket.statusCounts.cancelled} отмен.
-              </Badge>
+              {isUnifiedGroupLesson ? (
+                <Badge variant="outline">
+                  {getLessonStatusLabel(lessonStatus)}
+                </Badge>
+              ) : (
+                <Badge variant="outline">
+                  {bucket.statusCounts.booked} запл. / {bucket.statusCounts.completed} провед. / {bucket.statusCounts.cancelled} отмен.
+                </Badge>
+              )}
               {bucket.isLegacyFallback && (
                 <Badge variant="outline">Legacy grouping</Badge>
               )}
             </div>
 
-            <div className="max-h-[45vh] overflow-y-auto space-y-2 pr-1">
-              {bucket.lessons.map((lesson) => (
-                <div key={lesson.id} className="rounded-md border p-2 space-y-1">
-                  <div className="flex items-center justify-between gap-2">
-                    <p className="text-sm font-medium truncate">{getLessonStudentName(lesson)}</p>
-                    <Badge
-                      variant={lesson.status === 'cancelled'
-                        ? 'destructive'
-                        : lesson.status === 'completed'
-                          ? 'secondary'
-                          : 'default'}
-                    >
-                      {getLessonStatusLabel(lesson.status)}
-                    </Badge>
-                  </div>
-                  <div className="flex flex-wrap items-center gap-2">
-                    {lesson.tutor_students?.hourly_rate_cents != null ? (
-                      <span className="text-xs text-muted-foreground">
-                        Ставка: {lesson.tutor_students.hourly_rate_cents / 100} ₽/ч
-                      </span>
-                    ) : (
-                      <span className="text-xs text-amber-600">Ставка не указана</span>
+            {/* Unified group lesson: show participants from junction table */}
+            {isUnifiedGroupLesson ? (
+              <div className="max-h-[45vh] overflow-y-auto space-y-2 pr-1">
+                {participantsLoading ? (
+                  <p className="text-sm text-muted-foreground">Загрузка участников...</p>
+                ) : participants.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">Нет участников</p>
+                ) : (
+                  participants.map((participant: any) => (
+                    <div key={participant.id} className="rounded-md border p-2 space-y-1">
+                      <div className="flex items-center justify-between gap-2">
+                        <p className="text-sm font-medium truncate">
+                          {participant.tutor_students?.profiles?.username ?? 'Ученик'}
+                        </p>
+                        <Badge variant="outline">
+                          {participant.payment_status === 'paid' ? 'Оплачено' :
+                           participant.payment_status === 'pending' ? 'Ожидается' : 'Не оплачено'}
+                        </Badge>
+                      </div>
+                      <div className="flex flex-wrap items-center gap-2">
+                        {participant.tutor_students?.hourly_rate_cents != null ? (
+                          <span className="text-xs text-muted-foreground">
+                            Ставка: {participant.tutor_students.hourly_rate_cents / 100} ₽/ч
+                          </span>
+                        ) : (
+                          <span className="text-xs text-amber-600">Ставка не указана</span>
+                        )}
+                        {participant.payment_amount != null && (
+                          <span className="text-xs text-muted-foreground">
+                            Сумма: {participant.payment_amount} ₽
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            ) : (
+              /* Legacy per-lesson display */
+              <div className="max-h-[45vh] overflow-y-auto space-y-2 pr-1">
+                {bucket.lessons.map((lesson) => (
+                  <div key={lesson.id} className="rounded-md border p-2 space-y-1">
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="text-sm font-medium truncate">{getLessonStudentName(lesson)}</p>
+                      <Badge
+                        variant={lesson.status === 'cancelled'
+                          ? 'destructive'
+                          : lesson.status === 'completed'
+                            ? 'secondary'
+                            : 'default'}
+                      >
+                        {getLessonStatusLabel(lesson.status)}
+                      </Badge>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      {lesson.tutor_students?.hourly_rate_cents != null ? (
+                        <span className="text-xs text-muted-foreground">
+                          Ставка: {lesson.tutor_students.hourly_rate_cents / 100} ₽/ч
+                        </span>
+                      ) : (
+                        <span className="text-xs text-amber-600">Ставка не указана</span>
+                      )}
+                      {renderPaymentIndicator(lesson)}
+                    </div>
+                    {lesson.subject && (
+                      <p className="text-xs text-muted-foreground truncate">{lesson.subject}</p>
                     )}
-                    {renderPaymentIndicator(lesson)}
                   </div>
-                  {lesson.subject && (
-                    <p className="text-xs text-muted-foreground truncate">{lesson.subject}</p>
-                  )}
-                </div>
-              ))}
-            </div>
+                ))}
+              </div>
+            )}
 
             <div className="rounded-md border p-3 space-y-3">
               <p className="text-sm font-medium">Действия для группы</p>
@@ -631,7 +739,9 @@ function GroupDetailsDialog({
                   className="text-sm"
                 />
                 <p className="text-xs text-muted-foreground">
-                  Будет попытка переноса только запланированных уроков: {bookedCount}
+                  {isUnifiedGroupLesson
+                    ? `Статус занятия: ${getLessonStatusLabel(lessonStatus)}`
+                    : `Будет попытка переноса только запланированных уроков: ${bookedCount}`}
                 </p>
                 <Button
                   variant="outline"
@@ -660,7 +770,9 @@ function GroupDetailsDialog({
                 </Button>
               </div>
               <p className="text-xs text-muted-foreground">
-                Для завершения доступны только уже завершившиеся по времени уроки: {completeEligibleCount}
+                {isUnifiedGroupLesson
+                  ? (completeEligibleCount > 0 ? 'Занятие завершилось по времени, можно отметить проведенным' : 'Занятие еще не завершилось по времени')
+                  : `Для завершения доступны только уже завершившиеся по времени уроки: ${completeEligibleCount}`}
               </p>
             </div>
 
@@ -673,21 +785,13 @@ function GroupDetailsDialog({
                   {retryableFailedItems.length > 0 && (
                     <div className="space-y-2">
                       <p className="text-xs">
-                        Неуспешные: {retryableFailedItems.map((item) => item.studentName).join(', ')}
+                        Ошибка: {retryableFailedItems.map((item) => item.reason || item.studentName).join(', ')}
                       </p>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => void retryFailed()}
-                        disabled={isActionSaving}
-                      >
-                        Повторить неуспешные ({retryableFailedItems.length})
-                      </Button>
                     </div>
                   )}
                   {actionSummary.skippedCount > 0 && (
                     <p className="text-xs">
-                      Пропущено: {actionSummary.results.filter((result) => result.skipped).map((result) => result.studentName).join(', ')}
+                      Пропущено: {actionSummary.results.filter((result) => result.skipped).map((result) => result.reason || result.studentName).join(', ')}
                     </p>
                   )}
                 </AlertDescription>
@@ -707,12 +811,16 @@ function GroupDetailsDialog({
       <AlertDialogContent>
         <AlertDialogHeader>
           <AlertDialogTitle>
-            {confirmAction === 'cancel' ? 'Отменить занятия группы?' : 'Отметить занятия проведенными?'}
+            {confirmAction === 'cancel' ? 'Отменить занятие группы?' : 'Отметить занятие проведенным?'}
           </AlertDialogTitle>
           <AlertDialogDescription>
             {confirmAction === 'cancel'
-              ? `Будет попытка отмены запланированных уроков: ${bookedCount}. Завершенные и уже отмененные уроки будут пропущены.`
-              : `Будет попытка завершить уроки, которые уже завершились по времени: ${completeEligibleCount}. Остальные уроки будут пропущены.`}
+              ? (isUnifiedGroupLesson
+                  ? 'Групповое занятие будет отменено для всех участников.'
+                  : `Будет попытка отмены запланированных уроков: ${bookedCount}. Завершенные и уже отмененные уроки будут пропущены.`)
+              : (isUnifiedGroupLesson
+                  ? 'Групповое занятие будет отмечено как проведенное. Оплаты будут созданы для каждого участника.'
+                  : `Будет попытка завершить уроки, которые уже завершились по времени: ${completeEligibleCount}. Остальные уроки будут пропущены.`)}
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
@@ -887,8 +995,6 @@ function AddLessonDialog({
   const [isRecurring, setIsRecurring] = useState(false);
   const [repeatUntil, setRepeatUntil] = useState<Date | undefined>();
   const [isSaving, setIsSaving] = useState(false);
-  const [groupCreateSummary, setGroupCreateSummary] = useState<MiniGroupCreateSummary | null>(null);
-  const [activeGroupSessionId, setActiveGroupSessionId] = useState<string | null>(null);
 
   useEffect(() => {
     if (open) {
@@ -904,8 +1010,6 @@ function AddLessonDialog({
       setSubject('');
       setIsRecurring(false);
       setRepeatUntil(undefined);
-      setGroupCreateSummary(null);
-      setActiveGroupSessionId(null);
     }
   }, [open, initialDate, initialHour, initialMinute]);
 
@@ -916,15 +1020,6 @@ function AddLessonDialog({
       setStudentId('');
     }
   }, [lessonMode]);
-
-  useEffect(() => {
-    if (lessonMode === 'mini_group') {
-      setGroupCreateSummary(null);
-      setActiveGroupSessionId(generateGroupSessionId());
-    } else {
-      setActiveGroupSessionId(null);
-    }
-  }, [lessonMode, groupId, date, hour, minute, duration, lessonType, subject, notes]);
 
   // Auto-fill subject from student profile
   useEffect(() => {
@@ -1037,10 +1132,7 @@ function AddLessonDialog({
         return;
       }
 
-      const sessionId = activeGroupSessionId || generateGroupSessionId();
-      if (!activeGroupSessionId) {
-        setActiveGroupSessionId(sessionId);
-      }
+      const sessionId = generateGroupSessionId();
 
       const groupLessonInput = {
         ...baseLessonInput,
@@ -1050,50 +1142,28 @@ function AddLessonDialog({
         group_size_snapshot: miniGroupMembersForCreate.length,
       };
 
-      const failedTutorStudentIds = groupCreateSummary?.failedCount
-        ? groupCreateSummary.results
-            .filter((result) => !result.ok)
-            .map((result) => result.tutorStudentId)
-        : undefined;
-
       setIsSaving(true);
       try {
-        const latestSummary = await createMiniGroupLessonsBatch({
-          members: miniGroupMembersForCreate,
+        const result = await createMiniGroupLesson({
+          members: miniGroupMembersForCreate.map((m) => ({
+            ...m,
+            hourlyRateCents: resolvedGroupMembers.find(
+              (rm) => rm.student?.id === m.tutorStudentId
+            )?.student?.hourly_rate_cents ?? null,
+          })),
           lessonInput: groupLessonInput,
-          targetTutorStudentIds: failedTutorStudentIds,
         });
 
-        let finalSummary = latestSummary;
-        if (failedTutorStudentIds && groupCreateSummary) {
-          const mergedByTutorStudentId = new Map<string, MiniGroupCreateResultItem>();
-          groupCreateSummary.results.forEach((result) => {
-            mergedByTutorStudentId.set(result.tutorStudentId, result);
-          });
-          latestSummary.results.forEach((result) => {
-            mergedByTutorStudentId.set(result.tutorStudentId, result);
-          });
-          finalSummary = summarizeMiniGroupCreateResults(
-            groupCreateSummary.results.map(
-              (result) => mergedByTutorStudentId.get(result.tutorStudentId) ?? result
-            )
-          );
-        }
-
-        if (finalSummary.failedCount === 0) {
-          toast.success(`Создано ${finalSummary.createdCount} занятий для мини-группы`);
-          setGroupCreateSummary(null);
+        if (result.ok) {
+          toast.success(`Занятие для мини-группы создано (${result.participantsInserted} уч.)`);
           onSuccess();
           onOpenChange(false);
         } else {
-          setGroupCreateSummary(finalSummary);
-          toast.info(
-            `Создано ${finalSummary.createdCount} из ${finalSummary.totalCount}. Исправьте ошибки и повторите для неуспешных.`
-          );
+          toast.error(result.errorMessage || 'Не удалось создать занятие');
         }
       } catch (err) {
         console.error(err);
-        toast.error('Ошибка при создании занятий для мини-группы');
+        toast.error('Ошибка при создании занятия для мини-группы');
       } finally {
         setIsSaving(false);
       }
@@ -1470,32 +1540,6 @@ function AddLessonDialog({
             />
           </div>
 
-          {isMiniGroupMode && groupCreateSummary && (
-            <Alert variant={groupCreateSummary.failedCount > 0 ? 'destructive' : 'default'}>
-              <AlertDescription>
-                <p>
-                  Создано {groupCreateSummary.createdCount} из {groupCreateSummary.totalCount}.
-                </p>
-                {groupCreateSummary.failedCount > 0 && (
-                  <div className="mt-2 space-y-1">
-                    <p className="text-xs">
-                      Не удалось создать для:
-                    </p>
-                    <ul className="list-disc pl-5 text-xs">
-                      {groupCreateSummary.results
-                        .filter((result) => !result.ok)
-                        .map((result) => (
-                          <li key={result.tutorStudentId}>
-                            {result.studentName}
-                            {result.errorMessage ? `: ${result.errorMessage}` : ''}
-                          </li>
-                        ))}
-                    </ul>
-                  </div>
-                )}
-              </AlertDescription>
-            </Alert>
-          )}
         </div>
 
         <DialogFooter>
@@ -1517,13 +1561,9 @@ function AddLessonDialog({
             }
           >
             {isSaving
-              ? (isMiniGroupMode ? 'Создаем занятия для группы...' : 'Сохранение...')
+              ? (isMiniGroupMode ? 'Создаем занятие для группы...' : 'Сохранение...')
               : isMiniGroupMode
-                ? (
-                  groupCreateSummary?.failedCount
-                    ? `Повторить неуспешные (${groupCreateSummary.failedCount})`
-                    : `Создать ${miniGroupMembersForCreate.length} занятий`
-                )
+                ? 'Создать занятие'
                 : (isRecurring ? 'Создать серию' : 'Создать')}
           </Button>
         </DialogFooter>
@@ -3016,7 +3056,9 @@ function TutorScheduleContent() {
         const bucket = bucketByKey.get(entry.bucketKey);
         if (!bucket) continue;
 
-        if (bucket.lessons.length < 2) {
+        // For unified group lessons (groupSessionId set), always show as group card
+        // even if there's only 1 lesson row (participants are in the junction table)
+        if (bucket.lessons.length < 2 && !bucket.groupSessionId) {
           bucket.lessons.forEach((lesson) => {
             dayRenderItems.push({ kind: 'single', lesson });
           });
@@ -3053,7 +3095,9 @@ function TutorScheduleContent() {
             startAt: bucket.startAt,
             durationMin: bucket.durationMin,
             lessons: sortedLessons,
-            memberNames: sortedLessons.map((lesson) => getLessonStudentName(lesson)),
+            memberNames: bucket.groupSessionId && sortedLessons.length === 1 && !sortedLessons[0].tutor_student_id
+              ? [`${bucket.groupSizeSnapshot ?? '?'} уч.`]
+              : sortedLessons.map((lesson) => getLessonStudentName(lesson)),
             statusCounts,
           },
         });
