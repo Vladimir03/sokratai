@@ -2254,6 +2254,14 @@ export type Database = {
         Args: { _tutor_student_id: string }
         Returns: boolean
       }
+      update_group_participant_payment_status: {
+        Args: {
+          _lesson_id: string
+          _payment_status: string
+          _tutor_student_id: string
+        }
+        Returns: Json
+      }
       update_lesson_payment: {
         Args: {
           _lesson_id: string
