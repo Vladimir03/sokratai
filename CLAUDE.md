@@ -579,8 +579,8 @@ src/
 
 - Добавлена idempotent-цепочка завершения урока и создания платежа:
   - миграция `supabase/migrations/20260220143000_wow_payment_hardening.sql`
-  - `tutor_payments.lesson_id` + partial unique index (один lesson -> один платеж)
-  - `complete_lesson_and_create_payment` переведена на UPSERT по `lesson_id`
+  - исторически: `tutor_payments.lesson_id` + partial unique index (single lesson flow)
+  - для mini-group participant payments (PR-G4): idempotency ключ `(lesson_id, tutor_student_id)` + UPSERT по этой паре
 - `hourly_rate_cents` на ученике — **обязательное поле** при создании (хранится в копейках, показывается делённым на 100)
 - Добавлен источник реквизитов репетитора:
   - `tutor_calendar_settings.payment_details_text`

@@ -45,6 +45,7 @@ Notes:
 - If docs mention both `bun` and `npm`, treat `package.json` + CI workflows as source of truth (currently `npm run ...`).
 - For DB-backed features, rollout order is mandatory: apply new Supabase migration(s) first, then deploy frontend; do not assume GitHub merge alone updates production behavior.
 - If frontend references additive DB columns that are not yet migrated, fail safely in UI and report rollout mismatch instead of changing business logic.
+- For mini-group payment flows, use participant-level idempotency key `(lesson_id, tutor_student_id)`; do not assume one payment row per lesson for group lessons.
 
 ## Supabase Drift Guardrails
 

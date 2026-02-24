@@ -278,6 +278,7 @@ export type LessonSource = 'manual' | 'self_booking';
 export type LessonType = 'regular' | 'trial' | 'mock_exam' | 'consultation';
 export type LessonPaymentStatus = 'unpaid' | 'paid' | 'pending' | 'paid_earlier';
 export type LessonPaymentMethod = 'cash' | 'card' | 'transfer' | 'other';
+export type GroupParticipantPaymentStatus = 'pending' | 'paid';
 
 export interface TutorLesson {
   id: string;
@@ -482,8 +483,29 @@ export interface TutorLessonParticipant {
   lesson_id: string;
   tutor_student_id: string;
   student_id: string;
-  payment_status: string;
+  payment_status: LessonPaymentStatus;
   payment_amount: number | null;
   paid_at: string | null;
   created_at: string;
+}
+
+export interface TutorLessonParticipantWithStudent extends TutorLessonParticipant {
+  tutor_students: {
+    id: string;
+    student_id: string;
+    hourly_rate_cents: number | null;
+    profiles: {
+      id: string;
+      username: string;
+      telegram_username: string | null;
+    } | null;
+  } | null;
+}
+
+export interface UpdateGroupParticipantPaymentResult {
+  ok: boolean;
+  status: GroupParticipantPaymentStatus | null;
+  amount: number | null;
+  paid_at: string | null;
+  error_code: string | null;
 }

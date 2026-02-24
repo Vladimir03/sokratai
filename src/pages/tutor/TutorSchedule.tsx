@@ -1,4 +1,5 @@
 import { useState, useMemo, useCallback, useEffect, useRef } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { ChevronLeft, ChevronRight, Link2, Copy, Check, Plus, X, Clock, Bell, Settings, CalendarIcon, Trash2, CalendarDays, MessageCircle, Repeat } from 'lucide-react';
 import { AlertDialog, AlertDialogContent, AlertDialogHeader, AlertDialogTitle, AlertDialogDescription, AlertDialogFooter, AlertDialogCancel, AlertDialogAction } from '@/components/ui/alert-dialog';
 import { format, addMinutes, parseISO } from 'date-fns';
@@ -53,6 +54,7 @@ import {
   getLessonParticipants,
   type MiniGroupCreateResult,
 } from '@/lib/tutorScheduleGroupCreate';
+import { updateGroupParticipantPaymentStatus } from '@/lib/tutorScheduleGroupPayments';
 import {
   runCancelGroupAction,
   runCompleteGroupAction,
@@ -62,7 +64,19 @@ import {
   runCompleteGroupLesson,
   type GroupActionSummary,
 } from '@/lib/tutorScheduleGroupActions';
-import type { TutorWeeklySlot, TutorLessonWithStudent, TutorStudentWithProfile, TutorReminderSettings, TutorCalendarSettings, TutorAvailabilityException, TutorGroup, TutorGroupMembership, LessonType } from '@/types/tutor';
+import type {
+  GroupParticipantPaymentStatus,
+  LessonType,
+  TutorAvailabilityException,
+  TutorCalendarSettings,
+  TutorGroup,
+  TutorGroupMembership,
+  TutorLessonParticipantWithStudent,
+  TutorLessonWithStudent,
+  TutorReminderSettings,
+  TutorStudentWithProfile,
+  TutorWeeklySlot,
+} from '@/types/tutor';
 
 // =============================================
 // Constants & Utils
@@ -415,6 +429,7 @@ interface GroupDetailsDialogProps {
   onOpenChange: (open: boolean) => void;
   bucket: GroupLessonBucket | null;
   onActionApplied?: () => void;
+  onParticipantPaymentUpdated?: () => void;
 }
 
 function GroupDetailsDialog({
@@ -422,13 +437,18 @@ function GroupDetailsDialog({
   onOpenChange,
   bucket,
   onActionApplied,
+  onParticipantPaymentUpdated,
 }: GroupDetailsDialogProps) {
   const [moveDateTimeValue, setMoveDateTimeValue] = useState('');
   const [isActionSaving, setIsActionSaving] = useState(false);
   const [actionSummary, setActionSummary] = useState<GroupActionSummary | null>(null);
   const [confirmAction, setConfirmAction] = useState<'cancel' | 'complete' | null>(null);
-  const [participants, setParticipants] = useState<any[]>([]);
+  const [participants, setParticipants] = useState<TutorLessonParticipantWithStudent[]>([]);
   const [participantsLoading, setParticipantsLoading] = useState(false);
+  const [selectedParticipantId, setSelectedParticipantId] = useState<string | null>(null);
+  const [isParticipantPaymentSaving, setIsParticipantPaymentSaving] = useState(false);
+  const [participantPaymentError, setParticipantPaymentError] = useState<string | null>(null);
+  const [lastParticipantActionStatus, setLastParticipantActionStatus] = useState<GroupParticipantPaymentStatus | null>(null);
 
   // Detect unified group lesson (single lesson row with group_session_id)
   const isUnifiedGroupLesson = !!(bucket?.groupSessionId && bucket.lessons.length === 1 && !bucket.lessons[0].tutor_student_id);
@@ -444,10 +464,17 @@ function GroupDetailsDialog({
     }
     const lessonId = bucket.lessons[0].id;
     setParticipantsLoading(true);
-    getLessonParticipants(lessonId).then((data) => {
-      setParticipants(data);
-      setParticipantsLoading(false);
-    });
+    getLessonParticipants(lessonId)
+      .then((data) => {
+        setParticipants(data);
+      })
+      .catch((error) => {
+        console.error('Failed to load lesson participants:', error);
+        setParticipants([]);
+      })
+      .finally(() => {
+        setParticipantsLoading(false);
+      });
   }, [open, bucket?.key, isUnifiedGroupLesson]);
 
   // Legacy per-lesson action items
@@ -466,6 +493,16 @@ function GroupDetailsDialog({
 
   const mainLesson = bucket?.lessons[0] ?? null;
   const lessonStatus = mainLesson?.status ?? 'booked';
+  const canManageParticipantPayments = isUnifiedGroupLesson && lessonStatus === 'completed';
+
+  const selectedParticipant = useMemo(
+    () => participants.find((participant) => participant.id === selectedParticipantId) ?? null,
+    [participants, selectedParticipantId],
+  );
+
+  const getParticipantName = useCallback((participant: TutorLessonParticipantWithStudent) => {
+    return participant.tutor_students?.profiles?.username ?? 'Ученик';
+  }, []);
 
   const bookedCount = useMemo(() => {
     if (isUnifiedGroupLesson) return lessonStatus === 'booked' ? 1 : 0;
@@ -495,11 +532,17 @@ function GroupDetailsDialog({
       setMoveDateTimeValue('');
       setActionSummary(null);
       setConfirmAction(null);
+      setSelectedParticipantId(null);
+      setParticipantPaymentError(null);
+      setLastParticipantActionStatus(null);
       return;
     }
     setMoveDateTimeValue(toDateTimeLocalValue(bucket.startAt));
     setActionSummary(null);
     setConfirmAction(null);
+    setSelectedParticipantId(null);
+    setParticipantPaymentError(null);
+    setLastParticipantActionStatus(null);
   }, [open, bucket?.key, bucket?.startAt]);
 
   const runAction = useCallback(async (
@@ -515,9 +558,7 @@ function GroupDetailsDialog({
 
       if (isUnifiedGroupLesson && mainLesson) {
         // Unified: single lesson actions
-        const participantNames = participants.map(
-          (p: any) => p.tutor_students?.profiles?.username ?? 'Ученик'
-        );
+        const participantNames = participants.map((participant) => getParticipantName(participant));
         const lessonInfo = {
           lessonId: mainLesson.id,
           status: mainLesson.status as 'booked' | 'completed' | 'cancelled',
@@ -593,7 +634,7 @@ function GroupDetailsDialog({
       setIsActionSaving(false);
       setConfirmAction(null);
     }
-  }, [bucket, isActionSaving, moveDateTimeValue, groupActionLessons, onActionApplied, isUnifiedGroupLesson, mainLesson, participants]);
+  }, [bucket, getParticipantName, isActionSaving, moveDateTimeValue, groupActionLessons, onActionApplied, isUnifiedGroupLesson, mainLesson, participants]);
 
   const retryFailed = useCallback(async () => {
     if (!actionSummary || retryableFailedItems.length === 0) return;
@@ -602,6 +643,98 @@ function GroupDetailsDialog({
       retryableFailedItems.map((item) => item.lessonId),
     );
   }, [actionSummary, retryableFailedItems, runAction]);
+
+  const openParticipantPaymentDialog = useCallback((participant: TutorLessonParticipantWithStudent) => {
+    if (!canManageParticipantPayments) return;
+    if (!participant.tutor_student_id) return;
+    if (isParticipantPaymentSaving) return;
+    setSelectedParticipantId(participant.id);
+    setParticipantPaymentError(null);
+    setLastParticipantActionStatus(null);
+  }, [canManageParticipantPayments, isParticipantPaymentSaving]);
+
+  const closeParticipantPaymentDialog = useCallback((openParticipantDialog: boolean) => {
+    if (openParticipantDialog) return;
+    if (isParticipantPaymentSaving) return;
+    setSelectedParticipantId(null);
+    setParticipantPaymentError(null);
+    setLastParticipantActionStatus(null);
+  }, [isParticipantPaymentSaving]);
+
+  const applyParticipantPaymentStatus = useCallback(async (targetStatus: GroupParticipantPaymentStatus) => {
+    if (!mainLesson || !selectedParticipant) return;
+    if (!selectedParticipant.tutor_student_id) {
+      toast.error('Не удалось определить ученика для обновления оплаты');
+      return;
+    }
+    if (!canManageParticipantPayments) {
+      toast.error('Оплату по ученикам можно менять только после завершения занятия');
+      return;
+    }
+    if (isParticipantPaymentSaving) return;
+
+    const previousParticipant = selectedParticipant;
+    const optimisticPaidAt = targetStatus === 'paid'
+      ? new Date().toISOString()
+      : null;
+
+    setParticipantPaymentError(null);
+    setLastParticipantActionStatus(targetStatus);
+    setIsParticipantPaymentSaving(true);
+    setParticipants((prev) => prev.map((participant) => (
+      participant.id === previousParticipant.id
+        ? { ...participant, payment_status: targetStatus, paid_at: optimisticPaidAt }
+        : participant
+    )));
+
+    try {
+      const result = await updateGroupParticipantPaymentStatus(
+        mainLesson.id,
+        previousParticipant.tutor_student_id,
+        targetStatus,
+      );
+
+      if (!result.ok || !result.status) {
+        setParticipants((prev) => prev.map((participant) => (
+          participant.id === previousParticipant.id ? previousParticipant : participant
+        )));
+        const errorCode = result.error_code ?? 'UPDATE_FAILED';
+        setParticipantPaymentError(errorCode);
+        toast.error('Не удалось обновить оплату ученика');
+        return;
+      }
+
+      setParticipants((prev) => prev.map((participant) => {
+        if (participant.id !== previousParticipant.id) return participant;
+        return {
+          ...participant,
+          payment_status: result.status,
+          paid_at: result.paid_at,
+          payment_amount: result.amount ?? participant.payment_amount,
+        };
+      }));
+
+      if (result.status === 'paid') {
+        toast.success('Оплата ученика отмечена как полученная');
+      } else {
+        toast.success('Оплата ученика отмечена как ожидаемая');
+      }
+
+      setSelectedParticipantId(null);
+      setParticipantPaymentError(null);
+      setLastParticipantActionStatus(null);
+      onParticipantPaymentUpdated?.();
+    } catch (error) {
+      console.error(error);
+      setParticipants((prev) => prev.map((participant) => (
+        participant.id === previousParticipant.id ? previousParticipant : participant
+      )));
+      setParticipantPaymentError('NETWORK_ERROR');
+      toast.error('Ошибка сети при обновлении оплаты');
+    } finally {
+      setIsParticipantPaymentSaving(false);
+    }
+  }, [canManageParticipantPayments, isParticipantPaymentSaving, mainLesson, onParticipantPaymentUpdated, selectedParticipant]);
 
   const renderPaymentIndicator = useCallback((lesson: TutorLessonWithStudent) => {
     if (lesson.status !== 'completed') {
@@ -662,15 +795,38 @@ function GroupDetailsDialog({
                 ) : participants.length === 0 ? (
                   <p className="text-sm text-muted-foreground">Нет участников</p>
                 ) : (
-                  participants.map((participant: any) => (
-                    <div key={participant.id} className="rounded-md border p-2 space-y-1">
+                  participants.map((participant) => {
+                    const isActionable = canManageParticipantPayments && Boolean(participant.tutor_student_id);
+                    const paymentStatusLabel = participant.payment_status === 'paid'
+                      ? 'Оплачено'
+                      : participant.payment_status === 'pending'
+                        ? 'Ожидается'
+                        : 'Не оплачено';
+                    return (
+                    <div
+                      key={participant.id}
+                      className={cn(
+                        "rounded-md border p-2 space-y-1 transition-colors",
+                        isActionable ? "cursor-pointer hover:bg-muted/40" : "cursor-default",
+                        selectedParticipantId === participant.id && "ring-2 ring-primary/40",
+                      )}
+                      role={isActionable ? "button" : undefined}
+                      tabIndex={isActionable ? 0 : undefined}
+                      onClick={() => openParticipantPaymentDialog(participant)}
+                      onKeyDown={(event) => {
+                        if (!isActionable) return;
+                        if (event.key === 'Enter' || event.key === ' ') {
+                          event.preventDefault();
+                          openParticipantPaymentDialog(participant);
+                        }
+                      }}
+                    >
                       <div className="flex items-center justify-between gap-2">
                         <p className="text-sm font-medium truncate">
-                          {participant.tutor_students?.profiles?.username ?? 'Ученик'}
+                          {getParticipantName(participant)}
                         </p>
                         <Badge variant="outline">
-                          {participant.payment_status === 'paid' ? 'Оплачено' :
-                           participant.payment_status === 'pending' ? 'Ожидается' : 'Не оплачено'}
+                          {paymentStatusLabel}
                         </Badge>
                       </div>
                       <div className="flex flex-wrap items-center gap-2">
@@ -687,8 +843,17 @@ function GroupDetailsDialog({
                           </span>
                         )}
                       </div>
+                      {isActionable ? (
+                        <p className="text-[11px] text-muted-foreground">
+                          Нажмите, чтобы изменить статус оплаты ученика
+                        </p>
+                      ) : (
+                        <p className="text-[11px] text-muted-foreground">
+                          Сначала отметьте занятие проведенным, затем укажите оплату по ученикам
+                        </p>
+                      )}
                     </div>
-                  ))
+                  )})
                 )}
               </div>
             ) : (
@@ -805,6 +970,83 @@ function GroupDetailsDialog({
             Закрыть
           </Button>
         </DialogFooter>
+      </DialogContent>
+    </Dialog>
+    <Dialog
+      open={Boolean(selectedParticipantId && selectedParticipant)}
+      onOpenChange={closeParticipantPaymentDialog}
+    >
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle>
+            {selectedParticipant ? `Занятие с ${getParticipantName(selectedParticipant)}` : 'Оплата ученика'}
+          </DialogTitle>
+          <DialogDescription>
+            {startDate && endDate
+              ? `${format(startDate, 'EEEE, d MMMM', { locale: ru })} • ${format(startDate, 'HH:mm')} — ${format(endDate, 'HH:mm')} (${bucket?.durationMin ?? 0} мин)`
+              : 'Индивидуальные действия оплаты в мини-группе'}
+          </DialogDescription>
+        </DialogHeader>
+
+        {selectedParticipant ? (
+          <div className="space-y-4">
+            <div className="rounded-md border p-3 space-y-1">
+              <p className="text-sm font-medium">
+                {selectedParticipant.tutor_students?.hourly_rate_cents != null
+                  ? `${selectedParticipant.tutor_students.hourly_rate_cents / 100} ₽/ч`
+                  : 'Ставка не указана'}
+              </p>
+              <p className="text-xs text-muted-foreground">Ставка ученика</p>
+              <p className="text-sm text-muted-foreground">
+                Сумма: {selectedParticipant.payment_amount != null ? formatCurrency(selectedParticipant.payment_amount) : '—'}
+              </p>
+            </div>
+
+            {!canManageParticipantPayments && (
+              <Alert>
+                <AlertDescription>
+                  Сначала отметьте групповое занятие проведенным, затем можно менять оплату по каждому ученику.
+                </AlertDescription>
+              </Alert>
+            )}
+
+            {participantPaymentError && (
+              <Alert variant="destructive">
+                <AlertDescription className="space-y-2">
+                  <p>Не удалось обновить оплату ({participantPaymentError}).</p>
+                  {lastParticipantActionStatus && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="w-full"
+                      disabled={isParticipantPaymentSaving}
+                      onClick={() => void applyParticipantPaymentStatus(lastParticipantActionStatus)}
+                    >
+                      Повторить
+                    </Button>
+                  )}
+                </AlertDescription>
+              </Alert>
+            )}
+
+            <div className="space-y-2">
+              <Button
+                className="w-full bg-amber-500 hover:bg-amber-600 text-white"
+                disabled={!canManageParticipantPayments || isParticipantPaymentSaving || !selectedParticipant.tutor_student_id}
+                onClick={() => void applyParticipantPaymentStatus('pending')}
+              >
+                ✅ Проведено, жду оплату
+              </Button>
+              <Button
+                className="w-full bg-green-600 hover:bg-green-700 text-white"
+                disabled={!canManageParticipantPayments || isParticipantPaymentSaving || !selectedParticipant.tutor_student_id}
+                onClick={() => void applyParticipantPaymentStatus('paid')}
+              >
+                💳 Уже оплачено
+              </Button>
+            </div>
+          </div>
+        ) : null}
       </DialogContent>
     </Dialog>
     <AlertDialog open={confirmAction !== null} onOpenChange={(open) => { if (!open) setConfirmAction(null); }}>
@@ -2619,6 +2861,7 @@ function PaymentOnboardingDialog({ open, onOpenChange, onEnablePaymentReminders 
 // =============================================
 
 function TutorScheduleContent() {
+  const queryClient = useQueryClient();
   const {
     tutor,
     error: tutorError,
@@ -2707,6 +2950,7 @@ function TutorScheduleContent() {
   const [showConfetti, setShowConfetti] = useState(false);
   const [completingLessonIds, setCompletingLessonIds] = useState<Record<string, boolean>>({});
   const completingLessonIdsRef = useRef<Record<string, boolean>>({});
+  const participantPaymentRefreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const miniGroupsEnabled = Boolean(tutor?.mini_groups_enabled);
   const {
     groups,
@@ -2848,6 +3092,26 @@ function TutorScheduleContent() {
     refetchStudents,
     refetchTutor,
   ]);
+
+  const scheduleParticipantPaymentRefresh = useCallback(() => {
+    if (participantPaymentRefreshTimerRef.current) {
+      clearTimeout(participantPaymentRefreshTimerRef.current);
+    }
+
+    participantPaymentRefreshTimerRef.current = setTimeout(() => {
+      refetchLessons();
+      void queryClient.invalidateQueries({ queryKey: ['tutor', 'payments'] });
+      participantPaymentRefreshTimerRef.current = null;
+    }, 700);
+  }, [queryClient, refetchLessons]);
+
+  useEffect(() => {
+    return () => {
+      if (participantPaymentRefreshTimerRef.current) {
+        clearTimeout(participantPaymentRefreshTimerRef.current);
+      }
+    };
+  }, []);
 
   const visibleHours = useMemo(() => {
     return Array.from(
@@ -3808,6 +4072,7 @@ function TutorScheduleContent() {
           onOpenChange={handleGroupDetailsOpenChange}
           bucket={selectedGroupBucket}
           onActionApplied={() => refetchLessons()}
+          onParticipantPaymentUpdated={scheduleParticipantPaymentRefresh}
         />
 
         <ReminderSettingsDialog

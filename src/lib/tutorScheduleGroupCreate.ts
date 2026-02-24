@@ -1,7 +1,11 @@
 import { supabase } from '@/lib/supabaseClient';
 import { createLesson } from '@/lib/tutorSchedule';
 import { calculateLessonPaymentAmount } from '@/lib/paymentAmount';
-import type { LessonType, TutorLessonWithStudent } from '@/types/tutor';
+import type {
+  LessonType,
+  TutorLessonParticipantWithStudent,
+  TutorLessonWithStudent,
+} from '@/types/tutor';
 
 export interface MiniGroupCreateMember {
   tutorStudentId: string;
@@ -101,7 +105,7 @@ export async function createMiniGroupLesson({
 /**
  * Fetch participants for a given lesson.
  */
-export async function getLessonParticipants(lessonId: string) {
+export async function getLessonParticipants(lessonId: string): Promise<TutorLessonParticipantWithStudent[]> {
   const { data, error } = await supabase
     .from('tutor_lesson_participants')
     .select(`
@@ -117,6 +121,7 @@ export async function getLessonParticipants(lessonId: string) {
         )
       )
     `)
+    .order('created_at', { ascending: true })
     .eq('lesson_id', lessonId);
 
   if (error) {
@@ -124,5 +129,5 @@ export async function getLessonParticipants(lessonId: string) {
     return [];
   }
 
-  return data ?? [];
+  return (data ?? []) as unknown as TutorLessonParticipantWithStudent[];
 }
