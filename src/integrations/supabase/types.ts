@@ -2163,14 +2163,6 @@ export type Database = {
         }
         Returns: boolean
       }
-      update_group_participant_payment_status: {
-        Args: {
-          _lesson_id: string
-          _payment_status: string
-          _tutor_student_id: string
-        }
-        Returns: Json
-      }
       generate_invite_code: { Args: never; Returns: string }
       get_available_booking_slots: {
         Args: { _booking_link: string; _days_ahead?: number }
