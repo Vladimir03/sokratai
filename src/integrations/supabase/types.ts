@@ -1504,10 +1504,6 @@ export type Database = {
           cancelled_by: string | null
           created_at: string | null
           duration_min: number
-          group_session_id: string | null
-          group_size_snapshot: number | null
-          group_source_tutor_group_id: string | null
-          group_title_snapshot: string | null
           id: string
           is_recurring: boolean
           lesson_type: string
@@ -1533,10 +1529,6 @@ export type Database = {
           cancelled_by?: string | null
           created_at?: string | null
           duration_min?: number
-          group_session_id?: string | null
-          group_size_snapshot?: number | null
-          group_source_tutor_group_id?: string | null
-          group_title_snapshot?: string | null
           id?: string
           is_recurring?: boolean
           lesson_type?: string
@@ -1562,10 +1554,6 @@ export type Database = {
           cancelled_by?: string | null
           created_at?: string | null
           duration_min?: number
-          group_session_id?: string | null
-          group_size_snapshot?: number | null
-          group_source_tutor_group_id?: string | null
-          group_title_snapshot?: string | null
           id?: string
           is_recurring?: boolean
           lesson_type?: string
@@ -1592,13 +1580,6 @@ export type Database = {
             columns: ["parent_lesson_id"]
             isOneToOne: false
             referencedRelation: "tutor_lessons"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "tutor_lessons_group_source_tutor_group_id_fkey"
-            columns: ["group_source_tutor_group_id"]
-            isOneToOne: false
-            referencedRelation: "tutor_groups"
             referencedColumns: ["id"]
           },
           {

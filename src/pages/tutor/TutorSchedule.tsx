@@ -2898,6 +2898,7 @@ function TutorScheduleContent() {
 
       const bucketByKey = new Map<string, {
         key: string;
+        groupSessionId: string | null;
         groupId: string;
         groupName: string;
         startAt: string;
