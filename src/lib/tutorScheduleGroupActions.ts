@@ -4,18 +4,9 @@ import {
   completeLessonAndCreatePayment,
   updateLesson,
 } from '@/lib/tutorSchedule';
+import { supabase } from '@/lib/supabaseClient';
 
 export type GroupLessonActionType = 'move' | 'cancel' | 'complete';
-
-export interface GroupActionLessonItem {
-  lessonId: string;
-  tutorStudentId?: string | null;
-  studentName: string;
-  status: 'booked' | 'completed' | 'cancelled';
-  startAt: string;
-  durationMin: number;
-  hourlyRateCents?: number | null;
-}
 
 export interface GroupActionResultItem {
   lessonId: string;
@@ -35,15 +26,6 @@ export interface GroupActionSummary {
   skippedCount: number;
 }
 
-interface GroupActionParams {
-  lessons: GroupActionLessonItem[];
-  targetLessonIds?: string[];
-}
-
-interface RunMoveGroupActionParams extends GroupActionParams {
-  newStartAt: string;
-}
-
 function summarizeResults(
   action: GroupLessonActionType,
   results: GroupActionResultItem[],
@@ -60,6 +42,181 @@ function summarizeResults(
   };
 }
 
+// =============================================
+// Unified group lesson (single row) actions
+// =============================================
+
+interface UnifiedGroupLessonInfo {
+  lessonId: string;
+  status: 'booked' | 'completed' | 'cancelled';
+  startAt: string;
+  durationMin: number;
+  /** Participant names for result reporting */
+  participantNames: string[];
+}
+
+function isLessonPast(startAt: string, durationMin: number): boolean {
+  const endAt = new Date(new Date(startAt).getTime() + durationMin * 60_000);
+  return endAt.getTime() < Date.now();
+}
+
+export async function runMoveGroupLesson(
+  lesson: UnifiedGroupLessonInfo,
+  newStartAt: string,
+): Promise<GroupActionSummary> {
+  const results: GroupActionResultItem[] = [];
+  const allNames = lesson.participantNames.join(', ') || 'Группа';
+
+  if (lesson.status !== 'booked') {
+    results.push({
+      lessonId: lesson.lessonId,
+      studentName: allNames,
+      ok: false,
+      skipped: true,
+      reason: 'Урок не в статусе "Запланировано"',
+    });
+    return summarizeResults('move', results);
+  }
+
+  try {
+    const updated = await updateLesson(lesson.lessonId, { start_at: newStartAt });
+    results.push({
+      lessonId: lesson.lessonId,
+      studentName: allNames,
+      ok: !!updated,
+      skipped: false,
+      reason: updated ? undefined : 'Не удалось перенести урок',
+    });
+  } catch (error) {
+    results.push({
+      lessonId: lesson.lessonId,
+      studentName: allNames,
+      ok: false,
+      skipped: false,
+      reason: error instanceof Error ? error.message : 'Ошибка переноса',
+    });
+  }
+
+  return summarizeResults('move', results);
+}
+
+export async function runCancelGroupLesson(
+  lesson: UnifiedGroupLessonInfo,
+): Promise<GroupActionSummary> {
+  const results: GroupActionResultItem[] = [];
+  const allNames = lesson.participantNames.join(', ') || 'Группа';
+
+  if (lesson.status !== 'booked') {
+    results.push({
+      lessonId: lesson.lessonId,
+      studentName: allNames,
+      ok: false,
+      skipped: true,
+      reason: 'Урок не в статусе "Запланировано"',
+    });
+    return summarizeResults('cancel', results);
+  }
+
+  try {
+    const cancelled = await cancelLesson(lesson.lessonId);
+    results.push({
+      lessonId: lesson.lessonId,
+      studentName: allNames,
+      ok: !!cancelled,
+      skipped: false,
+      reason: cancelled ? undefined : 'Не удалось отменить урок',
+    });
+  } catch (error) {
+    results.push({
+      lessonId: lesson.lessonId,
+      studentName: allNames,
+      ok: false,
+      skipped: false,
+      reason: error instanceof Error ? error.message : 'Ошибка отмены',
+    });
+  }
+
+  return summarizeResults('cancel', results);
+}
+
+export async function runCompleteGroupLesson(
+  lesson: UnifiedGroupLessonInfo,
+): Promise<GroupActionSummary> {
+  const results: GroupActionResultItem[] = [];
+  const allNames = lesson.participantNames.join(', ') || 'Группа';
+
+  if (lesson.status !== 'booked') {
+    results.push({
+      lessonId: lesson.lessonId,
+      studentName: allNames,
+      ok: false,
+      skipped: true,
+      reason: 'Урок не в статусе "Запланировано"',
+    });
+    return summarizeResults('complete', results);
+  }
+
+  if (!isLessonPast(lesson.startAt, lesson.durationMin)) {
+    results.push({
+      lessonId: lesson.lessonId,
+      studentName: allNames,
+      ok: false,
+      skipped: true,
+      reason: 'Урок еще не завершился по времени',
+    });
+    return summarizeResults('complete', results);
+  }
+
+  // Use the RPC which now handles group payments via tutor_lesson_participants
+  try {
+    const completed = await completeLessonAndCreatePayment(
+      lesson.lessonId,
+      0, // amount=0, actual amounts are per-participant in tutor_lesson_participants
+      'pending',
+    );
+    results.push({
+      lessonId: lesson.lessonId,
+      studentName: allNames,
+      ok: !!completed,
+      skipped: false,
+      reason: completed ? undefined : 'Не удалось отметить урок проведенным',
+    });
+  } catch (error) {
+    results.push({
+      lessonId: lesson.lessonId,
+      studentName: allNames,
+      ok: false,
+      skipped: false,
+      reason: error instanceof Error ? error.message : 'Ошибка завершения урока',
+    });
+  }
+
+  return summarizeResults('complete', results);
+}
+
+// =============================================
+// Legacy per-student actions (backward compat for old data)
+// =============================================
+
+export interface GroupActionLessonItem {
+  lessonId: string;
+  tutorStudentId?: string | null;
+  studentName: string;
+  status: 'booked' | 'completed' | 'cancelled';
+  startAt: string;
+  durationMin: number;
+  hourlyRateCents?: number | null;
+}
+
+interface GroupActionParams {
+  lessons: GroupActionLessonItem[];
+  targetLessonIds?: string[];
+}
+
+interface RunMoveGroupActionParams extends GroupActionParams {
+  newStartAt: string;
+}
+
 function resolveTargetLessons(
   lessons: GroupActionLessonItem[],
   targetLessonIds?: string[],
@@ -69,12 +226,6 @@ function resolveTargetLessons(
   }
   const targetSet = new Set(targetLessonIds);
   return lessons.filter((lesson) => targetSet.has(lesson.lessonId));
-}
-
-function isLessonPast(lesson: GroupActionLessonItem): boolean {
-  const startAt = new Date(lesson.startAt);
-  const endAt = new Date(startAt.getTime() + lesson.durationMin * 60_000);
-  return endAt.getTime() < Date.now();
 }
 
 export async function runMoveGroupAction({
@@ -100,24 +251,14 @@ export async function runMoveGroupAction({
 
     try {
       const updated = await updateLesson(lesson.lessonId, { start_at: newStartAt });
-      if (updated) {
-        results.push({
-          lessonId: lesson.lessonId,
-          tutorStudentId: lesson.tutorStudentId,
-          studentName: lesson.studentName,
-          ok: true,
-          skipped: false,
-        });
-      } else {
-        results.push({
-          lessonId: lesson.lessonId,
-          tutorStudentId: lesson.tutorStudentId,
-          studentName: lesson.studentName,
-          ok: false,
-          skipped: false,
-          reason: 'Не удалось перенести урок',
-        });
-      }
+      results.push({
+        lessonId: lesson.lessonId,
+        tutorStudentId: lesson.tutorStudentId,
+        studentName: lesson.studentName,
+        ok: !!updated,
+        skipped: false,
+        reason: updated ? undefined : 'Не удалось перенести урок',
+      });
     } catch (error) {
       results.push({
         lessonId: lesson.lessonId,
@@ -155,24 +296,14 @@ export async function runCancelGroupAction({
 
     try {
       const cancelled = await cancelLesson(lesson.lessonId);
-      if (cancelled) {
-        results.push({
-          lessonId: lesson.lessonId,
-          tutorStudentId: lesson.tutorStudentId,
-          studentName: lesson.studentName,
-          ok: true,
-          skipped: false,
-        });
-      } else {
-        results.push({
-          lessonId: lesson.lessonId,
-          tutorStudentId: lesson.tutorStudentId,
-          studentName: lesson.studentName,
-          ok: false,
-          skipped: false,
-          reason: 'Не удалось отменить урок',
-        });
-      }
+      results.push({
+        lessonId: lesson.lessonId,
+        tutorStudentId: lesson.tutorStudentId,
+        studentName: lesson.studentName,
+        ok: !!cancelled,
+        skipped: false,
+        reason: cancelled ? undefined : 'Не удалось отменить урок',
+      });
     } catch (error) {
       results.push({
         lessonId: lesson.lessonId,
@@ -208,7 +339,7 @@ export async function runCompleteGroupAction({
       continue;
     }
 
-    if (!isLessonPast(lesson)) {
+    if (!isLessonPast(lesson.startAt, lesson.durationMin)) {
       results.push({
         lessonId: lesson.lessonId,
         tutorStudentId: lesson.tutorStudentId,
@@ -231,24 +362,14 @@ export async function runCompleteGroupAction({
         amount,
         'pending',
       );
-      if (completed) {
-        results.push({
-          lessonId: lesson.lessonId,
-          tutorStudentId: lesson.tutorStudentId,
-          studentName: lesson.studentName,
-          ok: true,
-          skipped: false,
-        });
-      } else {
-        results.push({
-          lessonId: lesson.lessonId,
-          tutorStudentId: lesson.tutorStudentId,
-          studentName: lesson.studentName,
-          ok: false,
-          skipped: false,
-          reason: 'Не удалось отметить урок проведенным',
-        });
-      }
+      results.push({
+        lessonId: lesson.lessonId,
+        tutorStudentId: lesson.tutorStudentId,
+        studentName: lesson.studentName,
+        ok: !!completed,
+        skipped: false,
+        reason: completed ? undefined : 'Не удалось отметить урок проведенным',
+      });
     } catch (error) {
       results.push({
         lessonId: lesson.lessonId,

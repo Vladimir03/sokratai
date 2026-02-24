@@ -472,3 +472,18 @@ export interface TutorFeatureOnboarding {
   dismissed_at: string | null;
   completed_at: string | null;
 }
+
+// =============================================
+// Lesson Participants (mini-group junction)
+// =============================================
+
+export interface TutorLessonParticipant {
+  id: string;
+  lesson_id: string;
+  tutor_student_id: string;
+  student_id: string;
+  payment_status: string;
+  payment_amount: number | null;
+  paid_at: string | null;
+  created_at: string;
+}

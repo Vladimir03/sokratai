@@ -1,10 +1,13 @@
+import { supabase } from '@/lib/supabaseClient';
 import { createLesson } from '@/lib/tutorSchedule';
-import type { LessonType } from '@/types/tutor';
+import { calculateLessonPaymentAmount } from '@/lib/paymentAmount';
+import type { LessonType, TutorLessonWithStudent } from '@/types/tutor';
 
 export interface MiniGroupCreateMember {
   tutorStudentId: string;
   studentId: string;
   studentName: string;
+  hourlyRateCents?: number | null;
 }
 
 export interface MiniGroupCreateLessonInput {
@@ -19,106 +22,107 @@ export interface MiniGroupCreateLessonInput {
   group_size_snapshot?: number;
 }
 
-export interface MiniGroupCreateResultItem {
-  tutorStudentId: string;
-  studentId: string;
-  studentName: string;
+export interface MiniGroupCreateResult {
   ok: boolean;
-  lessonId?: string;
+  lesson?: TutorLessonWithStudent;
+  participantsInserted: number;
   errorMessage?: string;
 }
 
-export interface MiniGroupCreateSummary {
-  results: MiniGroupCreateResultItem[];
-  totalCount: number;
-  createdCount: number;
-  failedCount: number;
-}
-
-interface CreateMiniGroupLessonsBatchParams {
+interface CreateMiniGroupLessonParams {
   members: MiniGroupCreateMember[];
   lessonInput: MiniGroupCreateLessonInput;
-  targetTutorStudentIds?: string[];
 }
 
-const DEFAULT_CREATE_ERROR_MESSAGE = 'Не удалось создать занятие';
+/**
+ * Creates a single group lesson and inserts all members as participants.
+ * Returns one lesson + N participants (atomic from the user's perspective).
+ */
+export async function createMiniGroupLesson({
+  members,
+  lessonInput,
+}: CreateMiniGroupLessonParams): Promise<MiniGroupCreateResult> {
+  if (members.length === 0) {
+    return { ok: false, participantsInserted: 0, errorMessage: 'Нет участников' };
+  }
 
-export function summarizeMiniGroupCreateResults(
-  results: MiniGroupCreateResultItem[]
-): MiniGroupCreateSummary {
-  const createdCount = results.filter((result) => result.ok).length;
-  const totalCount = results.length;
+  // 1. Create one lesson row (no tutor_student_id / student_id for group lessons)
+  const lesson = await createLesson({
+    start_at: lessonInput.start_at,
+    duration_min: lessonInput.duration_min,
+    lesson_type: lessonInput.lesson_type,
+    subject: lessonInput.subject,
+    notes: lessonInput.notes,
+    group_session_id: lessonInput.group_session_id,
+    group_source_tutor_group_id: lessonInput.group_source_tutor_group_id,
+    group_title_snapshot: lessonInput.group_title_snapshot,
+    group_size_snapshot: lessonInput.group_size_snapshot ?? members.length,
+    // No tutor_student_id / student_id — this is a group lesson
+  });
+
+  if (!lesson) {
+    return { ok: false, participantsInserted: 0, errorMessage: 'Не удалось создать занятие' };
+  }
+
+  // 2. Insert all participants
+  const participantRows = members.map((member) => ({
+    lesson_id: lesson.id,
+    tutor_student_id: member.tutorStudentId,
+    student_id: member.studentId,
+    payment_amount: calculateLessonPaymentAmount(
+      lessonInput.duration_min,
+      member.hourlyRateCents ?? null,
+    ),
+  }));
+
+  const { error: participantsError, data: insertedParticipants } = await supabase
+    .from('tutor_lesson_participants')
+    .insert(participantRows)
+    .select();
+
+  if (participantsError) {
+    console.error('Error inserting participants:', participantsError);
+    // Lesson was created but participants failed — still return the lesson so it can be cleaned up
+    return {
+      ok: false,
+      lesson,
+      participantsInserted: 0,
+      errorMessage: `Занятие создано, но не удалось добавить участников: ${participantsError.message}`,
+    };
+  }
+
   return {
-    results,
-    totalCount,
-    createdCount,
-    failedCount: totalCount - createdCount,
+    ok: true,
+    lesson,
+    participantsInserted: insertedParticipants?.length ?? members.length,
   };
 }
 
-export async function createMiniGroupLessonsBatch({
-  members,
-  lessonInput,
-  targetTutorStudentIds,
-}: CreateMiniGroupLessonsBatchParams): Promise<MiniGroupCreateSummary> {
-  const targetSet = targetTutorStudentIds
-    ? new Set(targetTutorStudentIds)
-    : null;
+/**
+ * Fetch participants for a given lesson.
+ */
+export async function getLessonParticipants(lessonId: string) {
+  const { data, error } = await supabase
+    .from('tutor_lesson_participants')
+    .select(`
+      *,
+      tutor_students (
+        id,
+        student_id,
+        hourly_rate_cents,
+        profiles (
+          id,
+          username,
+          telegram_username
+        )
+      )
+    `)
+    .eq('lesson_id', lessonId);
 
-  const targetMembers = targetSet
-    ? members.filter((member) => targetSet.has(member.tutorStudentId))
-    : members;
-
-  const results: MiniGroupCreateResultItem[] = [];
-
-  // Sequential mode is safer for MVP: stable ordering and clear per-member error mapping.
-  for (const member of targetMembers) {
-    try {
-      const createdLesson = await createLesson({
-        tutor_student_id: member.tutorStudentId,
-        student_id: member.studentId,
-        start_at: lessonInput.start_at,
-        duration_min: lessonInput.duration_min,
-        lesson_type: lessonInput.lesson_type,
-        subject: lessonInput.subject,
-        notes: lessonInput.notes,
-        group_session_id: lessonInput.group_session_id,
-        group_source_tutor_group_id: lessonInput.group_source_tutor_group_id,
-        group_title_snapshot: lessonInput.group_title_snapshot,
-        group_size_snapshot: lessonInput.group_size_snapshot,
-      });
-
-      if (!createdLesson) {
-        results.push({
-          tutorStudentId: member.tutorStudentId,
-          studentId: member.studentId,
-          studentName: member.studentName,
-          ok: false,
-          errorMessage: DEFAULT_CREATE_ERROR_MESSAGE,
-        });
-        continue;
-      }
-
-      results.push({
-        tutorStudentId: member.tutorStudentId,
-        studentId: member.studentId,
-        studentName: member.studentName,
-        ok: true,
-        lessonId: createdLesson.id,
-      });
-    } catch (error) {
-      results.push({
-        tutorStudentId: member.tutorStudentId,
-        studentId: member.studentId,
-        studentName: member.studentName,
-        ok: false,
-        errorMessage:
-          error instanceof Error && error.message
-            ? error.message
-            : DEFAULT_CREATE_ERROR_MESSAGE,
-      });
-    }
+  if (error) {
+    console.error('Error fetching lesson participants:', error);
+    return [];
   }
 
-  return summarizeMiniGroupCreateResults(results);
+  return data ?? [];
 }
