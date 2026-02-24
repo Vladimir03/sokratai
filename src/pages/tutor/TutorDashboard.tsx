@@ -19,7 +19,7 @@ import { TutorDataStatus } from '@/components/tutor/TutorDataStatus';
 import { AddStudentDialog } from '@/components/tutor/AddStudentDialog';
 import { useTutor, useTutorStudents, useTutorPayments } from '@/hooks/useTutor';
 import { getTutorInviteWebLink, getTutorInviteTelegramLink } from '@/utils/telegramLinks';
-import type { TutorStudentWithProfile, TutorPaymentWithStudent } from '@/types/tutor';
+import type { TutorPaymentWithStudent } from '@/types/tutor';
 
 // =============================================
 // Утилиты
@@ -41,16 +41,9 @@ function formatDate(date: Date): string {
   });
 }
 
-function getEffectiveStatus(payment: TutorPaymentWithStudent): 'paid' | 'pending' | 'overdue' {
+function getEffectiveStatus(payment: TutorPaymentWithStudent): 'paid' | 'pending' {
   if (payment.status === 'paid') return 'paid';
-  if (payment.due_date && new Date(payment.due_date) < new Date()) {
-    return 'overdue';
-  }
   return 'pending';
-}
-
-function getStudentName(payment: TutorPaymentWithStudent): string {
-  return payment.tutor_students?.profiles?.username || 'Без имени';
 }
 
 // =============================================
@@ -113,7 +106,7 @@ interface AttentionItem {
   id: string;
   name: string;
   reason: string;
-  type: 'overdue' | 'inactive';
+  type: 'inactive';
   link: string;
 }
 
@@ -143,8 +136,8 @@ function AttentionList({ items }: AttentionListProps) {
               onClick={() => navigate(item.link)}
             >
               <div className="flex items-center gap-3">
-                <Badge variant={item.type === 'overdue' ? 'destructive' : 'secondary'} className="text-xs">
-                  {item.type === 'overdue' ? 'Просрочено' : 'Неактивен'}
+                <Badge variant="secondary" className="text-xs">
+                  Неактивен
                 </Badge>
                 <span className="text-sm font-medium">{item.name}</span>
               </div>
@@ -249,21 +242,21 @@ function TutorDashboardContent() {
   const paymentStats = useMemo(() => {
     let pendingAmount = 0;
     let pendingCount = 0;
-    let overdueAmount = 0;
-    let overdueCount = 0;
+    let paidAmount = 0;
+    let paidCount = 0;
     
     for (const payment of payments) {
       const effectiveStatus = getEffectiveStatus(payment);
       if (effectiveStatus === 'pending') {
         pendingAmount += payment.amount;
         pendingCount++;
-      } else if (effectiveStatus === 'overdue') {
-        overdueAmount += payment.amount;
-        overdueCount++;
+      } else if (effectiveStatus === 'paid') {
+        paidAmount += payment.amount;
+        paidCount++;
       }
     }
     
-    return { pendingAmount, pendingCount, overdueAmount, overdueCount };
+    return { pendingAmount, pendingCount, paidAmount, paidCount };
   }, [payments]);
   
   // Элементы "Требуют внимания"
@@ -271,20 +264,7 @@ function TutorDashboardContent() {
     const items: AttentionItem[] = [];
     const now = new Date();
     const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
-    
-    // Просроченные оплаты
-    for (const payment of payments) {
-      if (getEffectiveStatus(payment) === 'overdue') {
-        items.push({
-          id: payment.id,
-          name: getStudentName(payment),
-          reason: formatAmount(payment.amount),
-          type: 'overdue',
-          link: '/tutor/payments',
-        });
-      }
-    }
-    
+
     // Неактивные ученики (>7 дней без активности)
     for (const student of students) {
       if (student.status !== 'active') continue;
@@ -309,7 +289,7 @@ function TutorDashboardContent() {
     }
     
     return items;
-  }, [students, payments]);
+  }, [students]);
   
   if (loading) {
     return (
@@ -365,12 +345,12 @@ function TutorDashboardContent() {
           />
           
           <StatCard
-            title="Просрочено"
-            value={formatAmount(paymentStats.overdueAmount)}
-            subtitle={`${paymentStats.overdueCount} записей`}
+            title="Получено"
+            value={formatAmount(paymentStats.paidAmount)}
+            subtitle={`${paymentStats.paidCount} записей`}
             icon={<CreditCard className="h-5 w-5" />}
             href="/tutor/payments"
-            variant={paymentStats.overdueCount > 0 ? 'danger' : 'success'}
+            variant={paymentStats.paidCount > 0 ? 'success' : 'default'}
           />
         </div>
         

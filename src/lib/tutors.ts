@@ -659,6 +659,10 @@ export async function getTutorPayments(): Promise<TutorPaymentWithStudent[]> {
     .from('tutor_payments')
     .select(`
       *,
+      tutor_lessons (
+        id,
+        start_at
+      ),
       tutor_students!inner (
         id,
         student_id,

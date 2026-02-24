@@ -20,21 +20,22 @@ import {
   markPaymentAsPaid, 
   deleteTutorPayment 
 } from '@/lib/tutors';
-import type { TutorPaymentWithStudent, TutorPaymentStatus } from '@/types/tutor';
+import type { TutorPaymentWithStudent } from '@/types/tutor';
 
 // =============================================
 // Типы и утилиты
 // =============================================
 
-type StatusFilter = 'all' | TutorPaymentStatus;
+type PaymentUiStatus = 'pending' | 'paid';
+type StatusFilter = 'all' | PaymentUiStatus;
 
 interface PaymentStats {
   pendingAmount: number;
   pendingCount: number;
-  paidThisMonth: number;
-  paidThisMonthCount: number;
-  overdueAmount: number;
-  overdueCount: number;
+  paidAmount: number;
+  paidCount: number;
+  totalAmount: number;
+  totalCount: number;
 }
 
 function formatAmount(amount: number): string {
@@ -50,20 +51,44 @@ function formatDate(dateString: string | null): string {
   return new Date(dateString).toLocaleDateString('ru-RU');
 }
 
-function getEffectiveStatus(payment: TutorPaymentWithStudent): TutorPaymentStatus {
-  if (payment.status === 'paid') return 'paid';
-  if (payment.due_date && new Date(payment.due_date) < new Date()) {
-    return 'overdue';
-  }
-  return 'pending';
+function toLocalDateKey(dateString: string): string | null {
+  const date = new Date(dateString);
+  if (Number.isNaN(date.getTime())) return null;
+  const yyyy = date.getFullYear();
+  const mm = String(date.getMonth() + 1).padStart(2, '0');
+  const dd = String(date.getDate()).padStart(2, '0');
+  return `${yyyy}-${mm}-${dd}`;
 }
 
-function getStatusBadge(status: TutorPaymentStatus) {
+function formatDateFromKey(dateKey: string | null): string {
+  if (!dateKey) return '—';
+  return new Date(`${dateKey}T00:00:00`).toLocaleDateString('ru-RU');
+}
+
+function resolveLessonDateKey(payment: TutorPaymentWithStudent): string | null {
+  if (payment.tutor_lessons?.start_at) {
+    const key = toLocalDateKey(payment.tutor_lessons.start_at);
+    if (key) return key;
+  }
+
+  if (payment.due_date) {
+    if (/^\d{4}-\d{2}-\d{2}$/.test(payment.due_date)) {
+      return payment.due_date;
+    }
+    return toLocalDateKey(payment.due_date);
+  }
+
+  return null;
+}
+
+function getUiStatus(payment: TutorPaymentWithStudent): PaymentUiStatus {
+  return payment.status === 'paid' ? 'paid' : 'pending';
+}
+
+function getStatusBadge(status: PaymentUiStatus) {
   switch (status) {
     case 'paid':
       return <Badge variant="default" className="bg-green-500">Оплачено</Badge>;
-    case 'overdue':
-      return <Badge variant="destructive">Просрочено</Badge>;
     default:
       return <Badge variant="secondary">Ожидает</Badge>;
   }
@@ -103,7 +128,8 @@ function TutorPaymentsContent() {
   // Фильтры
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
   const [studentFilter, setStudentFilter] = useState<string>('all');
-  const [searchQuery, setSearchQuery] = useState('');
+  const [lessonDateFrom, setLessonDateFrom] = useState('');
+  const [lessonDateTo, setLessonDateTo] = useState('');
   
   // Диалог добавления
   const [addDialogOpen, setAddDialogOpen] = useState(false);
@@ -117,13 +143,14 @@ function TutorPaymentsContent() {
   const isPageRecovering = paymentsIsRecovering || studentsIsRecovering;
   const pageFailureCount = Math.max(paymentsFailureCount, studentsFailureCount);
   
-  // Фильтрация платежей с учётом effective status
+  // Фильтрация платежей
   const filteredPayments = useMemo(() => {
     return payments.filter(payment => {
-      const effectiveStatus = getEffectiveStatus(payment);
+      const uiStatus = getUiStatus(payment);
+      const lessonDateKey = resolveLessonDateKey(payment);
       
       // Фильтр по статусу
-      if (statusFilter !== 'all' && effectiveStatus !== statusFilter) {
+      if (statusFilter !== 'all' && uiStatus !== statusFilter) {
         return false;
       }
       
@@ -131,51 +158,48 @@ function TutorPaymentsContent() {
       if (studentFilter !== 'all' && payment.tutor_student_id !== studentFilter) {
         return false;
       }
-      
-      // Поиск по имени
-      if (searchQuery) {
-        const name = getStudentName(payment).toLowerCase();
-        if (!name.includes(searchQuery.toLowerCase())) {
-          return false;
-        }
+
+      // Фильтр по дате занятия (date-only, inclusive)
+      if (lessonDateFrom || lessonDateTo) {
+        if (!lessonDateKey) return false;
+        if (lessonDateFrom && lessonDateKey < lessonDateFrom) return false;
+        if (lessonDateTo && lessonDateKey > lessonDateTo) return false;
       }
       
       return true;
     });
-  }, [payments, statusFilter, studentFilter, searchQuery]);
+  }, [payments, statusFilter, studentFilter, lessonDateFrom, lessonDateTo]);
   
   // Статистика
   const stats = useMemo<PaymentStats>(() => {
-    const now = new Date();
-    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
-    
     let pendingAmount = 0;
     let pendingCount = 0;
-    let paidThisMonth = 0;
-    let paidThisMonthCount = 0;
-    let overdueAmount = 0;
-    let overdueCount = 0;
+    let paidAmount = 0;
+    let paidCount = 0;
+    let totalAmount = 0;
     
-    for (const payment of payments) {
-      const effectiveStatus = getEffectiveStatus(payment);
+    for (const payment of filteredPayments) {
+      const uiStatus = getUiStatus(payment);
+      totalAmount += payment.amount;
       
-      if (effectiveStatus === 'pending') {
+      if (uiStatus === 'pending') {
         pendingAmount += payment.amount;
         pendingCount++;
-      } else if (effectiveStatus === 'overdue') {
-        overdueAmount += payment.amount;
-        overdueCount++;
-      } else if (effectiveStatus === 'paid' && payment.paid_at) {
-        const paidDate = new Date(payment.paid_at);
-        if (paidDate >= monthStart) {
-          paidThisMonth += payment.amount;
-          paidThisMonthCount++;
-        }
+      } else if (uiStatus === 'paid') {
+        paidAmount += payment.amount;
+        paidCount++;
       }
     }
     
-    return { pendingAmount, pendingCount, paidThisMonth, paidThisMonthCount, overdueAmount, overdueCount };
-  }, [payments]);
+    return {
+      pendingAmount,
+      pendingCount,
+      paidAmount,
+      paidCount,
+      totalAmount,
+      totalCount: filteredPayments.length,
+    };
+  }, [filteredPayments]);
   
   // Обработчики
   const handleMarkAsPaid = useCallback(async (paymentId: string) => {
@@ -244,6 +268,66 @@ function TutorPaymentsContent() {
           </Button>
         </div>
         
+        {/* Фильтры */}
+        <div className="flex flex-wrap items-end gap-3">
+          <div className="space-y-1">
+            <Label className="text-xs text-muted-foreground">Статус</Label>
+            <Select value={statusFilter} onValueChange={(v) => setStatusFilter(v as StatusFilter)}>
+              <SelectTrigger className="w-[170px]">
+                <SelectValue placeholder="Статус" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Все статусы</SelectItem>
+                <SelectItem value="pending">Ожидает</SelectItem>
+                <SelectItem value="paid">Оплачено</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div className="space-y-1">
+            <Label className="text-xs text-muted-foreground">Ученик</Label>
+            <Select value={studentFilter} onValueChange={setStudentFilter}>
+              <SelectTrigger className="w-[220px]">
+                <SelectValue placeholder="Ученик" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Все ученики</SelectItem>
+                {students.map((s) => (
+                  <SelectItem key={s.id} value={s.id}>
+                    {s.profiles?.username || 'Без имени'}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div className="space-y-1">
+            <Label htmlFor="lessonDateFrom" className="text-xs text-muted-foreground">
+              Дата занятия: с
+            </Label>
+            <Input
+              id="lessonDateFrom"
+              type="date"
+              value={lessonDateFrom}
+              onChange={(e) => setLessonDateFrom(e.target.value)}
+              className="w-[170px]"
+            />
+          </div>
+
+          <div className="space-y-1">
+            <Label htmlFor="lessonDateTo" className="text-xs text-muted-foreground">
+              Дата занятия: по
+            </Label>
+            <Input
+              id="lessonDateTo"
+              type="date"
+              value={lessonDateTo}
+              onChange={(e) => setLessonDateTo(e.target.value)}
+              className="w-[170px]"
+            />
+          </div>
+        </div>
+
         {/* Summary Cards */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <Card>
@@ -257,66 +341,30 @@ function TutorPaymentsContent() {
               <p className="text-sm text-muted-foreground">{stats.pendingCount} записей</p>
             </CardContent>
           </Card>
-          
+
           <Card>
             <CardHeader className="pb-2">
               <CardTitle className="text-sm font-medium text-muted-foreground">
-                Получено в этом месяце
+                Получено
               </CardTitle>
             </CardHeader>
             <CardContent>
-              <p className="text-2xl font-bold text-green-600">{formatAmount(stats.paidThisMonth)}</p>
-              <p className="text-sm text-muted-foreground">{stats.paidThisMonthCount} оплат</p>
+              <p className="text-2xl font-bold text-green-600">{formatAmount(stats.paidAmount)}</p>
+              <p className="text-sm text-muted-foreground">{stats.paidCount} оплат</p>
             </CardContent>
           </Card>
-          
+
           <Card>
             <CardHeader className="pb-2">
               <CardTitle className="text-sm font-medium text-muted-foreground">
-                Просрочено
+                Всего
               </CardTitle>
             </CardHeader>
             <CardContent>
-              <p className="text-2xl font-bold text-destructive">{formatAmount(stats.overdueAmount)}</p>
-              <p className="text-sm text-muted-foreground">{stats.overdueCount} записей</p>
+              <p className="text-2xl font-bold">{formatAmount(stats.totalAmount)}</p>
+              <p className="text-sm text-muted-foreground">{stats.totalCount} записей</p>
             </CardContent>
           </Card>
-        </div>
-        
-        {/* Фильтры */}
-        <div className="flex flex-wrap gap-3">
-          <Select value={statusFilter} onValueChange={(v) => setStatusFilter(v as StatusFilter)}>
-            <SelectTrigger className="w-[150px]">
-              <SelectValue placeholder="Статус" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">Все статусы</SelectItem>
-              <SelectItem value="pending">Ожидает</SelectItem>
-              <SelectItem value="paid">Оплачено</SelectItem>
-              <SelectItem value="overdue">Просрочено</SelectItem>
-            </SelectContent>
-          </Select>
-          
-          <Select value={studentFilter} onValueChange={setStudentFilter}>
-            <SelectTrigger className="w-[180px]">
-              <SelectValue placeholder="Ученик" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">Все ученики</SelectItem>
-              {students.map(s => (
-                <SelectItem key={s.id} value={s.id}>
-                  {s.profiles?.username || 'Без имени'}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          
-          <Input
-            placeholder="Поиск по имени..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-[200px]"
-          />
         </div>
         
         {/* Таблица */}
@@ -329,7 +377,7 @@ function TutorPaymentsContent() {
                   <TableHead className="text-right">Сумма</TableHead>
                   <TableHead>Период</TableHead>
                   <TableHead>Статус</TableHead>
-                  <TableHead>Срок</TableHead>
+                  <TableHead>Дата занятия</TableHead>
                   <TableHead>Оплачено</TableHead>
                   <TableHead className="text-right">Действия</TableHead>
                 </TableRow>
@@ -347,8 +395,9 @@ function TutorPaymentsContent() {
                   </TableRow>
                 ) : (
                   filteredPayments.map(payment => {
-                    const effectiveStatus = getEffectiveStatus(payment);
+                    const uiStatus = getUiStatus(payment);
                     const parentContact = getParentContact(payment);
+                    const lessonDateKey = resolveLessonDateKey(payment);
                     
                     return (
                       <TableRow key={payment.id}>
@@ -362,17 +411,17 @@ function TutorPaymentsContent() {
                           {payment.period || '—'}
                         </TableCell>
                         <TableCell>
-                          {getStatusBadge(effectiveStatus)}
+                          {getStatusBadge(uiStatus)}
                         </TableCell>
                         <TableCell className="text-muted-foreground">
-                          {formatDate(payment.due_date)}
+                          {formatDateFromKey(lessonDateKey)}
                         </TableCell>
                         <TableCell className="text-muted-foreground">
                           {formatDate(payment.paid_at)}
                         </TableCell>
                         <TableCell className="text-right">
                           <div className="flex justify-end gap-1">
-                            {effectiveStatus !== 'paid' && (
+                            {uiStatus !== 'paid' && (
                               <Button
                                 variant="ghost"
                                 size="icon"
@@ -383,7 +432,7 @@ function TutorPaymentsContent() {
                               </Button>
                             )}
                             
-                            {effectiveStatus !== 'paid' && parentContact && (
+                            {uiStatus !== 'paid' && parentContact && (
                               <Button
                                 variant="ghost"
                                 size="icon"
@@ -450,7 +499,7 @@ function AddPaymentDialog({ open, onOpenChange, students, onSuccess }: AddPaymen
   const [studentId, setStudentId] = useState('');
   const [amount, setAmount] = useState('');
   const [period, setPeriod] = useState('');
-  const [dueDate, setDueDate] = useState('');
+  const [lessonDate, setLessonDate] = useState('');
   const [isSaving, setIsSaving] = useState(false);
   
   const selectedStudent = useMemo(() => students.find(s => s.id === studentId), [students, studentId]);
@@ -474,7 +523,7 @@ function AddPaymentDialog({ open, onOpenChange, students, onSuccess }: AddPaymen
         tutor_student_id: studentId,
         amount: parseInt(amount, 10),
         period: period || undefined,
-        due_date: dueDate || undefined,
+        due_date: lessonDate || undefined,
       });
       
       if (result) {
@@ -484,7 +533,7 @@ function AddPaymentDialog({ open, onOpenChange, students, onSuccess }: AddPaymen
         setStudentId('');
         setAmount('');
         setPeriod('');
-        setDueDate('');
+        setLessonDate('');
       } else {
         toast.error('Ошибка при сохранении');
       }
@@ -554,12 +603,12 @@ function AddPaymentDialog({ open, onOpenChange, students, onSuccess }: AddPaymen
           </div>
           
           <div className="space-y-2">
-            <Label htmlFor="dueDate">Срок оплаты (опц.)</Label>
+            <Label htmlFor="lessonDate">Дата занятия (опц.)</Label>
             <Input
-              id="dueDate"
+              id="lessonDate"
               type="date"
-              value={dueDate}
-              onChange={(e) => setDueDate(e.target.value)}
+              value={lessonDate}
+              onChange={(e) => setLessonDate(e.target.value)}
             />
           </div>
         </div>
@@ -593,8 +642,9 @@ function RemindDialog({ open, onOpenChange, payment }: RemindDialogProps) {
   const studentName = getStudentName(payment);
   const parentContact = getParentContact(payment);
   const isTelegramUsername = parentContact?.startsWith('@');
+  const lessonDateKey = resolveLessonDateKey(payment);
   
-  const reminderText = `Здравствуйте! Напоминаю об оплате занятий для ${studentName}.\n\nСумма: ${formatAmount(payment.amount)}${payment.period ? `\nПериод: ${payment.period}` : ''}${payment.due_date ? `\nСрок: ${formatDate(payment.due_date)}` : ''}\n\nСпасибо!`;
+  const reminderText = `Здравствуйте! Напоминаю об оплате занятий для ${studentName}.\n\nСумма: ${formatAmount(payment.amount)}${payment.period ? `\nПериод: ${payment.period}` : ''}${lessonDateKey ? `\nДата занятия: ${formatDateFromKey(lessonDateKey)}` : ''}\n\nСпасибо!`;
   
   const handleCopy = async () => {
     try {

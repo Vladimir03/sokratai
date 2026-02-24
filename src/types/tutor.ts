@@ -228,6 +228,10 @@ export interface TutorPaymentWithStudent extends TutorPayment {
       telegram_username: string | null;
     };
   };
+  tutor_lessons?: {
+    id: string;
+    start_at: string;
+  } | null;
 }
 
 export interface CreateTutorPaymentInput {

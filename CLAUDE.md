@@ -581,6 +581,8 @@ src/
   - миграция `supabase/migrations/20260220143000_wow_payment_hardening.sql`
   - исторически: `tutor_payments.lesson_id` + partial unique index (single lesson flow)
   - для mini-group participant payments (PR-G4): idempotency ключ `(lesson_id, tutor_student_id)` + UPSERT по этой паре
+- Для tutor UI в `TutorPayments`/`TutorDashboard` используется двухсостояниевая подача статусов (`pending`/`paid`), legacy `overdue` в интерфейсе нормализуется как `pending` (без миграции БД).
+- Поле/фильтр `Дата занятия` на странице оплат: primary source `tutor_lessons.start_at`, fallback `tutor_payments.due_date` для ручных записей.
 - `hourly_rate_cents` на ученике — **обязательное поле** при создании (хранится в копейках, показывается делённым на 100)
 - Добавлен источник реквизитов репетитора:
   - `tutor_calendar_settings.payment_details_text`
