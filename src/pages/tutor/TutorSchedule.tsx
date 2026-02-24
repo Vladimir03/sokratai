@@ -54,6 +54,12 @@ import {
   type MiniGroupCreateResultItem,
   type MiniGroupCreateSummary,
 } from '@/lib/tutorScheduleGroupCreate';
+import {
+  runCancelGroupAction,
+  runCompleteGroupAction,
+  runMoveGroupAction,
+  type GroupActionSummary,
+} from '@/lib/tutorScheduleGroupActions';
 import type { TutorWeeklySlot, TutorLessonWithStudent, TutorStudentWithProfile, TutorReminderSettings, TutorCalendarSettings, TutorAvailabilityException, TutorGroup, TutorGroupMembership, LessonType } from '@/types/tutor';
 
 // =============================================
@@ -156,7 +162,12 @@ interface GroupLessonStatusCounts {
 
 interface GroupLessonBucket {
   key: string;
-  groupId: string;
+  groupSessionId: string | null;
+  groupId: string | null;
+  groupSourceTutorGroupId: string | null;
+  groupTitleSnapshot: string | null;
+  groupSizeSnapshot: number | null;
+  isLegacyFallback: boolean;
   groupName: string;
   startAt: string;
   durationMin: number;
@@ -180,6 +191,33 @@ function getLessonStatusLabel(status: TutorLessonWithStudent['status']): string 
     default:
       return 'Статус неизвестен';
   }
+}
+
+function generateGroupSessionId(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+
+  // Fallback UUIDv4-like string for older environments.
+  const randomHex = () => Math.floor((1 + Math.random()) * 0x10000).toString(16).slice(1);
+  return `${randomHex()}${randomHex()}-${randomHex()}-4${randomHex().slice(1)}-${((8 + Math.floor(Math.random() * 4)).toString(16))}${randomHex().slice(1)}-${randomHex()}${randomHex()}${randomHex()}`;
+}
+
+function toDateTimeLocalValue(isoString: string): string {
+  const date = new Date(isoString);
+  const year = date.getFullYear();
+  const month = `${date.getMonth() + 1}`.padStart(2, '0');
+  const day = `${date.getDate()}`.padStart(2, '0');
+  const hours = `${date.getHours()}`.padStart(2, '0');
+  const minutes = `${date.getMinutes()}`.padStart(2, '0');
+  return `${year}-${month}-${day}T${hours}:${minutes}`;
+}
+
+function fromDateTimeLocalValue(value: string): string | null {
+  if (!value) return null;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  return date.toISOString();
 }
 
 // =============================================
@@ -355,14 +393,14 @@ function GroupLessonBlock({
           'text-xs font-medium truncate leading-tight',
           isAllCancelled && 'line-through opacity-70',
         )}>
-          {bucket.groupName} • {bucket.lessons.length}
+          {bucket.groupName} • {bucket.groupSizeSnapshot ?? bucket.lessons.length}
         </span>
         {height >= 35 && (
           <span className="text-[10px] opacity-80 truncate leading-tight">{timeStr}</span>
         )}
         {height >= 35 && (
           <span className="text-[10px] leading-tight mt-0.5 truncate">
-            {statusLabel}
+            {statusLabel}{bucket.isLegacyFallback ? ' • legacy' : ''}
           </span>
         )}
       </div>
@@ -374,19 +412,155 @@ interface GroupDetailsDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   bucket: GroupLessonBucket | null;
+  onActionApplied?: () => void;
 }
 
 function GroupDetailsDialog({
   open,
   onOpenChange,
   bucket,
+  onActionApplied,
 }: GroupDetailsDialogProps) {
+  const [moveDateTimeValue, setMoveDateTimeValue] = useState('');
+  const [isActionSaving, setIsActionSaving] = useState(false);
+  const [actionSummary, setActionSummary] = useState<GroupActionSummary | null>(null);
+  const [confirmAction, setConfirmAction] = useState<'cancel' | 'complete' | null>(null);
+
   const startDate = bucket ? new Date(bucket.startAt) : null;
   const endDate = startDate ? addMinutes(startDate, bucket.durationMin) : null;
+  const groupActionLessons = useMemo(() => {
+    if (!bucket) return [];
+    return bucket.lessons.map((lesson) => ({
+      lessonId: lesson.id,
+      tutorStudentId: lesson.tutor_student_id,
+      studentName: getLessonStudentName(lesson),
+      status: lesson.status,
+      startAt: lesson.start_at,
+      durationMin: lesson.duration_min,
+      hourlyRateCents: lesson.tutor_students?.hourly_rate_cents ?? null,
+    }));
+  }, [bucket]);
+
+  const bookedCount = useMemo(
+    () => groupActionLessons.filter((lesson) => lesson.status === 'booked').length,
+    [groupActionLessons]
+  );
+  const completeEligibleCount = useMemo(
+    () => groupActionLessons.filter((lesson) => {
+      if (lesson.status !== 'booked') return false;
+      const lessonEnd = addMinutes(new Date(lesson.startAt), lesson.durationMin);
+      return lessonEnd.getTime() < Date.now();
+    }).length,
+    [groupActionLessons]
+  );
+
+  const retryableFailedItems = useMemo(
+    () => (actionSummary?.results ?? []).filter((result) => !result.ok && !result.skipped),
+    [actionSummary]
+  );
+
+  useEffect(() => {
+    if (!open || !bucket) {
+      setMoveDateTimeValue('');
+      setActionSummary(null);
+      setConfirmAction(null);
+      return;
+    }
+    setMoveDateTimeValue(toDateTimeLocalValue(bucket.startAt));
+    setActionSummary(null);
+    setConfirmAction(null);
+  }, [open, bucket?.key, bucket?.startAt]);
+
+  const runAction = useCallback(async (
+    action: 'move' | 'cancel' | 'complete',
+    targetLessonIds?: string[],
+  ) => {
+    if (!bucket) return;
+    if (isActionSaving) return;
+
+    setIsActionSaving(true);
+    try {
+      let summary: GroupActionSummary;
+      if (action === 'move') {
+        const newStartAt = fromDateTimeLocalValue(moveDateTimeValue);
+        if (!newStartAt) {
+          toast.error('Выберите корректную дату и время переноса');
+          return;
+        }
+        summary = await runMoveGroupAction({
+          lessons: groupActionLessons,
+          targetLessonIds,
+          newStartAt,
+        });
+      } else if (action === 'cancel') {
+        summary = await runCancelGroupAction({
+          lessons: groupActionLessons,
+          targetLessonIds,
+        });
+      } else {
+        summary = await runCompleteGroupAction({
+          lessons: groupActionLessons,
+          targetLessonIds,
+        });
+      }
+
+      setActionSummary(summary);
+
+      if (summary.successCount > 0) {
+        onActionApplied?.();
+      }
+
+      if (summary.failedCount === 0) {
+        const skippedSuffix = summary.skippedCount > 0
+          ? `, пропущено ${summary.skippedCount}`
+          : '';
+        if (summary.action === 'move') {
+          toast.success(`Перенесено ${summary.successCount}${skippedSuffix}`);
+        } else if (summary.action === 'cancel') {
+          toast.success(`Отменено ${summary.successCount}${skippedSuffix}`);
+        } else {
+          toast.success(`Отмечено проведенным ${summary.successCount}${skippedSuffix}`);
+        }
+      } else {
+        toast.info(
+          `Успешно ${summary.successCount}, ошибок ${summary.failedCount}, пропущено ${summary.skippedCount}`,
+        );
+      }
+    } catch (error) {
+      console.error(error);
+      toast.error('Не удалось выполнить групповое действие');
+    } finally {
+      setIsActionSaving(false);
+      setConfirmAction(null);
+    }
+  }, [bucket, isActionSaving, moveDateTimeValue, groupActionLessons, onActionApplied]);
+
+  const retryFailed = useCallback(async () => {
+    if (!actionSummary || retryableFailedItems.length === 0) return;
+    await runAction(
+      actionSummary.action,
+      retryableFailedItems.map((item) => item.lessonId),
+    );
+  }, [actionSummary, retryableFailedItems, runAction]);
+
+  const renderPaymentIndicator = useCallback((lesson: TutorLessonWithStudent) => {
+    if (lesson.status !== 'completed') {
+      return <span className="text-xs text-muted-foreground">Оплата: после завершения</span>;
+    }
+
+    if (lesson.payment_status === 'paid') {
+      return <span className="text-xs text-emerald-600">Оплата: оплачено</span>;
+    }
+    if (lesson.payment_status === 'pending') {
+      return <span className="text-xs text-amber-600">Оплата: ожидается</span>;
+    }
+    return <span className="text-xs text-muted-foreground">Оплата: статус не указан</span>;
+  }, []);
 
   return (
+    <>
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-lg">
+      <DialogContent className="max-w-xl">
         <DialogHeader>
           <DialogTitle>{bucket?.groupName || 'Мини-группа'}</DialogTitle>
           <DialogDescription>
@@ -401,10 +575,15 @@ function GroupDetailsDialog({
         ) : (
           <div className="space-y-3">
             <div className="flex flex-wrap items-center gap-2">
-              <Badge variant="secondary">{bucket.lessons.length} участников</Badge>
+              <Badge variant="secondary">
+                {bucket.groupSizeSnapshot ?? bucket.lessons.length} участников
+              </Badge>
               <Badge variant="outline">
                 {bucket.statusCounts.booked} запл. / {bucket.statusCounts.completed} провед. / {bucket.statusCounts.cancelled} отмен.
               </Badge>
+              {bucket.isLegacyFallback && (
+                <Badge variant="outline">Legacy grouping</Badge>
+              )}
             </div>
 
             <div className="max-h-[45vh] overflow-y-auto space-y-2 pr-1">
@@ -422,12 +601,98 @@ function GroupDetailsDialog({
                       {getLessonStatusLabel(lesson.status)}
                     </Badge>
                   </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    {lesson.tutor_students?.hourly_rate_cents != null ? (
+                      <span className="text-xs text-muted-foreground">
+                        Ставка: {lesson.tutor_students.hourly_rate_cents / 100} ₽/ч
+                      </span>
+                    ) : (
+                      <span className="text-xs text-amber-600">Ставка не указана</span>
+                    )}
+                    {renderPaymentIndicator(lesson)}
+                  </div>
                   {lesson.subject && (
                     <p className="text-xs text-muted-foreground truncate">{lesson.subject}</p>
                   )}
                 </div>
               ))}
             </div>
+
+            <div className="rounded-md border p-3 space-y-3">
+              <p className="text-sm font-medium">Действия для группы</p>
+              <div className="space-y-2">
+                <Label htmlFor="group-move-datetime" className="text-xs">Перенести группу на дату и время</Label>
+                <Input
+                  id="group-move-datetime"
+                  type="datetime-local"
+                  value={moveDateTimeValue}
+                  onChange={(event) => setMoveDateTimeValue(event.target.value)}
+                  disabled={isActionSaving}
+                  className="text-sm"
+                />
+                <p className="text-xs text-muted-foreground">
+                  Будет попытка переноса только запланированных уроков: {bookedCount}
+                </p>
+                <Button
+                  variant="outline"
+                  className="w-full"
+                  disabled={isActionSaving || bookedCount === 0 || !moveDateTimeValue}
+                  onClick={() => void runAction('move')}
+                >
+                  {isActionSaving ? 'Перенос...' : 'Перенести группу'}
+                </Button>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                <Button
+                  variant="destructive"
+                  disabled={isActionSaving || bookedCount === 0}
+                  onClick={() => setConfirmAction('cancel')}
+                >
+                  Отменить группу
+                </Button>
+                <Button
+                  variant="secondary"
+                  disabled={isActionSaving || completeEligibleCount === 0}
+                  onClick={() => setConfirmAction('complete')}
+                >
+                  Отметить проведено
+                </Button>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Для завершения доступны только уже завершившиеся по времени уроки: {completeEligibleCount}
+              </p>
+            </div>
+
+            {actionSummary && (
+              <Alert variant={actionSummary.failedCount > 0 ? 'destructive' : 'default'}>
+                <AlertDescription className="space-y-2">
+                  <p>
+                    Результат: успешно {actionSummary.successCount}, ошибок {actionSummary.failedCount}, пропущено {actionSummary.skippedCount}.
+                  </p>
+                  {retryableFailedItems.length > 0 && (
+                    <div className="space-y-2">
+                      <p className="text-xs">
+                        Неуспешные: {retryableFailedItems.map((item) => item.studentName).join(', ')}
+                      </p>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => void retryFailed()}
+                        disabled={isActionSaving}
+                      >
+                        Повторить неуспешные ({retryableFailedItems.length})
+                      </Button>
+                    </div>
+                  )}
+                  {actionSummary.skippedCount > 0 && (
+                    <p className="text-xs">
+                      Пропущено: {actionSummary.results.filter((result) => result.skipped).map((result) => result.studentName).join(', ')}
+                    </p>
+                  )}
+                </AlertDescription>
+              </Alert>
+            )}
           </div>
         )}
 
@@ -438,6 +703,34 @@ function GroupDetailsDialog({
         </DialogFooter>
       </DialogContent>
     </Dialog>
+    <AlertDialog open={confirmAction !== null} onOpenChange={(open) => { if (!open) setConfirmAction(null); }}>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>
+            {confirmAction === 'cancel' ? 'Отменить занятия группы?' : 'Отметить занятия проведенными?'}
+          </AlertDialogTitle>
+          <AlertDialogDescription>
+            {confirmAction === 'cancel'
+              ? `Будет попытка отмены запланированных уроков: ${bookedCount}. Завершенные и уже отмененные уроки будут пропущены.`
+              : `Будет попытка завершить уроки, которые уже завершились по времени: ${completeEligibleCount}. Остальные уроки будут пропущены.`}
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel disabled={isActionSaving}>Назад</AlertDialogCancel>
+          <AlertDialogAction
+            disabled={isActionSaving}
+            onClick={(event) => {
+              event.preventDefault();
+              if (!confirmAction) return;
+              void runAction(confirmAction);
+            }}
+          >
+            {isActionSaving ? 'Выполняем...' : 'Подтвердить'}
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+    </>
   );
 }
 
@@ -595,6 +888,7 @@ function AddLessonDialog({
   const [repeatUntil, setRepeatUntil] = useState<Date | undefined>();
   const [isSaving, setIsSaving] = useState(false);
   const [groupCreateSummary, setGroupCreateSummary] = useState<MiniGroupCreateSummary | null>(null);
+  const [activeGroupSessionId, setActiveGroupSessionId] = useState<string | null>(null);
 
   useEffect(() => {
     if (open) {
@@ -611,6 +905,7 @@ function AddLessonDialog({
       setIsRecurring(false);
       setRepeatUntil(undefined);
       setGroupCreateSummary(null);
+      setActiveGroupSessionId(null);
     }
   }, [open, initialDate, initialHour, initialMinute]);
 
@@ -625,6 +920,9 @@ function AddLessonDialog({
   useEffect(() => {
     if (lessonMode === 'mini_group') {
       setGroupCreateSummary(null);
+      setActiveGroupSessionId(generateGroupSessionId());
+    } else {
+      setActiveGroupSessionId(null);
     }
   }, [lessonMode, groupId, date, hour, minute, duration, lessonType, subject, notes]);
 
@@ -709,7 +1007,7 @@ function AddLessonDialog({
     }
     const startAt = new Date(date);
     startAt.setHours(parseInt(hour), parseInt(minute), 0, 0);
-    const lessonInput = {
+    const baseLessonInput = {
       start_at: startAt.toISOString(),
       duration_min: parseInt(duration),
       lesson_type: lessonType,
@@ -739,6 +1037,19 @@ function AddLessonDialog({
         return;
       }
 
+      const sessionId = activeGroupSessionId || generateGroupSessionId();
+      if (!activeGroupSessionId) {
+        setActiveGroupSessionId(sessionId);
+      }
+
+      const groupLessonInput = {
+        ...baseLessonInput,
+        group_session_id: sessionId,
+        group_source_tutor_group_id: selectedGroup?.id,
+        group_title_snapshot: selectedGroup?.short_name || selectedGroup?.name || 'Мини-группа',
+        group_size_snapshot: miniGroupMembersForCreate.length,
+      };
+
       const failedTutorStudentIds = groupCreateSummary?.failedCount
         ? groupCreateSummary.results
             .filter((result) => !result.ok)
@@ -749,7 +1060,7 @@ function AddLessonDialog({
       try {
         const latestSummary = await createMiniGroupLessonsBatch({
           members: miniGroupMembersForCreate,
-          lessonInput,
+          lessonInput: groupLessonInput,
           targetTutorStudentIds: failedTutorStudentIds,
         });
 
@@ -807,7 +1118,7 @@ function AddLessonDialog({
           {
             tutor_student_id: tutorStudent?.id,
             student_id: studentId,
-            ...lessonInput,
+            ...baseLessonInput,
           },
           repeatUntil.toISOString()
         );
@@ -823,7 +1134,7 @@ function AddLessonDialog({
         const result = await createLesson({
           tutor_student_id: tutorStudent?.id,
           student_id: studentId,
-          ...lessonInput,
+          ...baseLessonInput,
         });
 
         if (result) {
@@ -2568,13 +2879,11 @@ function TutorScheduleContent() {
     return map;
   }, [groups, miniGroupsEnabled]);
 
-  const canGroupLessons = miniGroupsEnabled
+  const canUseLegacyMembershipGrouping = miniGroupsEnabled
     && !groupsLoading
     && !membershipsLoading
     && !groupsError
-    && !membershipsError
-    && activeMembershipByTutorStudentId.size > 0
-    && groupById.size > 0;
+    && !membershipsError;
 
   const renderItemsByDay = useMemo(() => {
     const byDay: Record<number, DayLessonRenderItem[]> = {};
@@ -2582,11 +2891,6 @@ function TutorScheduleContent() {
 
     for (let dayIndex = 0; dayIndex < 7; dayIndex++) {
       const dayLessons = lessonsByDay[dayIndex] || [];
-      if (!canGroupLessons) {
-        byDay[dayIndex] = dayLessons.map((lesson) => ({ kind: 'single', lesson }));
-        continue;
-      }
-
       const dayEntries: Array<
         { kind: 'single'; lesson: TutorLessonWithStudent }
         | { kind: 'bucket'; bucketKey: string }
@@ -2599,9 +2903,67 @@ function TutorScheduleContent() {
         startAt: string;
         durationMin: number;
         lessons: TutorLessonWithStudent[];
+        groupSourceTutorGroupId: string | null;
+        groupTitleSnapshot: string | null;
+        groupSizeSnapshot: number | null;
+        isLegacyFallback: boolean;
       }>();
 
       for (const lesson of dayLessons) {
+        const startAtMinute = Math.floor(new Date(lesson.start_at).getTime() / 60000);
+
+        if (lesson.group_session_id) {
+          const bucketKey = `session:${lesson.group_session_id}|${startAtMinute}|${lesson.duration_min}`;
+          const existingBucket = bucketByKey.get(bucketKey);
+          const tutorStudentId = lesson.tutor_student_id;
+          const membership = tutorStudentId
+            ? activeMembershipByTutorStudentId.get(tutorStudentId)
+            : null;
+          const fallbackGroup = membership
+            ? (groupById.get(membership.tutor_group_id) || membership.tutor_group || null)
+            : null;
+          const groupName =
+            lesson.group_title_snapshot
+            || fallbackGroup?.short_name
+            || fallbackGroup?.name
+            || 'Мини-группа';
+
+          if (!existingBucket) {
+            bucketByKey.set(bucketKey, {
+              key: bucketKey,
+              groupSessionId: lesson.group_session_id,
+              groupId: lesson.group_source_tutor_group_id || fallbackGroup?.id || null,
+              groupName,
+              startAt: lesson.start_at,
+              durationMin: lesson.duration_min,
+              lessons: [lesson],
+              groupSourceTutorGroupId: lesson.group_source_tutor_group_id || null,
+              groupTitleSnapshot: lesson.group_title_snapshot || null,
+              groupSizeSnapshot: lesson.group_size_snapshot ?? null,
+              isLegacyFallback: false,
+            });
+            dayEntries.push({ kind: 'bucket', bucketKey });
+          } else {
+            existingBucket.lessons.push(lesson);
+            if (!existingBucket.groupTitleSnapshot && lesson.group_title_snapshot) {
+              existingBucket.groupTitleSnapshot = lesson.group_title_snapshot;
+              existingBucket.groupName = lesson.group_title_snapshot;
+            }
+            if (!existingBucket.groupSourceTutorGroupId && lesson.group_source_tutor_group_id) {
+              existingBucket.groupSourceTutorGroupId = lesson.group_source_tutor_group_id;
+            }
+            if (!existingBucket.groupSizeSnapshot && lesson.group_size_snapshot) {
+              existingBucket.groupSizeSnapshot = lesson.group_size_snapshot;
+            }
+          }
+          continue;
+        }
+
+        if (!canUseLegacyMembershipGrouping) {
+          dayEntries.push({ kind: 'single', lesson });
+          continue;
+        }
+
         const tutorStudentId = lesson.tutor_student_id;
         if (!tutorStudentId) {
           dayEntries.push({ kind: 'single', lesson });
@@ -2620,18 +2982,22 @@ function TutorScheduleContent() {
           continue;
         }
 
-        const startAtMinute = Math.floor(new Date(lesson.start_at).getTime() / 60000);
-        const bucketKey = `${group.id}|${startAtMinute}|${lesson.duration_min}`;
+        const bucketKey = `legacy:${group.id}|${startAtMinute}|${lesson.duration_min}`;
         const existingBucket = bucketByKey.get(bucketKey);
 
         if (!existingBucket) {
           bucketByKey.set(bucketKey, {
             key: bucketKey,
+            groupSessionId: null,
             groupId: group.id,
             groupName: group.short_name || group.name || 'Мини-группа',
             startAt: lesson.start_at,
             durationMin: lesson.duration_min,
             lessons: [lesson],
+            groupSourceTutorGroupId: group.id,
+            groupTitleSnapshot: null,
+            groupSizeSnapshot: null,
+            isLegacyFallback: true,
           });
           dayEntries.push({ kind: 'bucket', bucketKey });
         } else {
@@ -2676,7 +3042,12 @@ function TutorScheduleContent() {
           kind: 'group',
           bucket: {
             key: bucket.key,
+            groupSessionId: bucket.groupSessionId,
             groupId: bucket.groupId,
+            groupSourceTutorGroupId: bucket.groupSourceTutorGroupId,
+            groupTitleSnapshot: bucket.groupTitleSnapshot,
+            groupSizeSnapshot: bucket.groupSizeSnapshot,
+            isLegacyFallback: bucket.isLegacyFallback,
             groupName: bucket.groupName,
             startAt: bucket.startAt,
             durationMin: bucket.durationMin,
@@ -2691,7 +3062,7 @@ function TutorScheduleContent() {
     }
 
     return byDay;
-  }, [lessonsByDay, canGroupLessons, activeMembershipByTutorStudentId, groupById]);
+  }, [lessonsByDay, canUseLegacyMembershipGrouping, activeMembershipByTutorStudentId, groupById]);
 
   const groupedBucketsByKey = useMemo(() => {
     const map = new Map<string, GroupLessonBucket>();
@@ -2707,7 +3078,16 @@ function TutorScheduleContent() {
 
   useEffect(() => {
     if (!groupDetailsOpen || !selectedGroupBucket) return;
-    const freshBucket = groupedBucketsByKey.get(selectedGroupBucket.key);
+    let freshBucket = groupedBucketsByKey.get(selectedGroupBucket.key);
+    if (!freshBucket && selectedGroupBucket.groupSessionId) {
+      for (const candidateBucket of groupedBucketsByKey.values()) {
+        if (candidateBucket.groupSessionId === selectedGroupBucket.groupSessionId) {
+          freshBucket = candidateBucket;
+          break;
+        }
+      }
+    }
+
     if (!freshBucket) {
       setGroupDetailsOpen(false);
       setSelectedGroupBucket(null);
@@ -3382,6 +3762,7 @@ function TutorScheduleContent() {
           open={groupDetailsOpen}
           onOpenChange={handleGroupDetailsOpenChange}
           bucket={selectedGroupBucket}
+          onActionApplied={() => refetchLessons()}
         />
 
         <ReminderSettingsDialog

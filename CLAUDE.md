@@ -211,8 +211,8 @@ src/
 - [ ] Новый tutor React Query key начинается с `['tutor', ...]`
 
 При работе над **любым** функционалом:
-- [ ] `bun run build` завершается без ошибок
-- [ ] `bun run smoke-test` проходит без ошибок
+- [ ] `npm run build` завершается без ошибок
+- [ ] `npm run smoke-check` проходит без ошибок
 - [ ] Нет новых тяжёлых зависимостей в `src/components/ui/`
 - [ ] Все новые страницы используют `React.lazy()` в `App.tsx`
 - [ ] Нет случайных изменений в файлах, не связанных с задачей
@@ -263,12 +263,13 @@ src/
 ### Workflow: AI-инструменты
 - **Lovable** — для деплоя и быстрых UI-правок. Не трогает конфиги (vite, eslint, tsconfig)
 - **Cursor / Claude Code** — для серьёзной разработки, рефакторинга, багфиксов
-- После работы в Cursor/Claude Code: **всегда** делай `bun run build` и `bun run smoke-test` перед деплоем
+- После работы в Cursor/Claude Code: **всегда** делай `npm run build` и `npm run smoke-check` перед деплоем
 - Для локальных проверок запускай команды **строго последовательно**, не параллельно:
-  - `bun run build`
-  - после завершения: `bun run smoke-test`
+  - `npm run build`
+  - после завершения: `npm run smoke-check`
   - причина: параллельный запуск может ломаться по `EBUSY` (конкурентная запись в `dist/`)
 - После работы в Lovable: проверь, что Lovable не добавил тяжёлые зависимости в `src/components/ui/`
+- Для изменений с новыми полями/таблицами БД: сначала применяй миграции Supabase, затем выкатывай фронт. Без этого UI может не увидеть новые поля в проде.
 - Не возвращай Google Calendar интеграцию (UI/edge functions) без отдельного согласованного требования и отдельной миграционной задачи для БД
 
 ### CI/CD и деплой edge functions
@@ -602,11 +603,12 @@ src/
 ## Команды
 
 ```bash
-bun run dev          # Запуск dev сервера (порт 8080)
-bun run build        # Production билд
-bun run build:dev    # Development билд
-bun run lint         # ESLint
-bun run preview      # Preview production билда
-bun run analyze      # Анализ размера бандла
-bun run smoke-test   # Smoke-тест (билд + чанки + типы + compat)
+npm run dev          # Запуск dev сервера (порт 8080)
+npm run build        # Production билд
+npm run build:dev    # Development билд
+npm run lint         # ESLint
+npm run preview      # Preview production билда
+npm run analyze      # Анализ размера бандла
+npm run smoke-test   # Legacy bash smoke-тест
+npm run smoke-check  # Основной Node-based smoke-check
 ```

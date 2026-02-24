@@ -198,6 +198,10 @@ interface CreateLessonInput {
   tutor_id?: string;
   tutor_student_id?: string;
   student_id?: string;
+  group_session_id?: string;
+  group_source_tutor_group_id?: string;
+  group_title_snapshot?: string;
+  group_size_snapshot?: number;
   start_at: string;
   duration_min?: number;
   lesson_type?: LessonType;
@@ -325,6 +329,10 @@ export async function createLessonSeries(
 interface UpdateLessonInput {
   status?: 'booked' | 'completed' | 'cancelled';
   start_at?: string;
+  group_session_id?: string | null;
+  group_source_tutor_group_id?: string | null;
+  group_title_snapshot?: string | null;
+  group_size_snapshot?: number | null;
   lesson_type?: LessonType;
   subject?: string;
   notes?: string;

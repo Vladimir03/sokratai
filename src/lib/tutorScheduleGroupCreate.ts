@@ -13,6 +13,10 @@ export interface MiniGroupCreateLessonInput {
   lesson_type: LessonType;
   subject?: string;
   notes?: string;
+  group_session_id?: string;
+  group_source_tutor_group_id?: string;
+  group_title_snapshot?: string;
+  group_size_snapshot?: number;
 }
 
 export interface MiniGroupCreateResultItem {
@@ -78,6 +82,10 @@ export async function createMiniGroupLessonsBatch({
         lesson_type: lessonInput.lesson_type,
         subject: lessonInput.subject,
         notes: lessonInput.notes,
+        group_session_id: lessonInput.group_session_id,
+        group_source_tutor_group_id: lessonInput.group_source_tutor_group_id,
+        group_title_snapshot: lessonInput.group_title_snapshot,
+        group_size_snapshot: lessonInput.group_size_snapshot,
       });
 
       if (!createdLesson) {

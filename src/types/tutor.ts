@@ -284,6 +284,10 @@ export interface TutorLesson {
   tutor_id: string;
   tutor_student_id: string | null;
   student_id: string | null;
+  group_session_id: string | null;
+  group_source_tutor_group_id: string | null;
+  group_title_snapshot: string | null;
+  group_size_snapshot: number | null;
   start_at: string; // ISO timestamp
   duration_min: number;
   status: LessonStatus;
@@ -329,6 +333,10 @@ export interface TutorLessonWithStudent extends TutorLesson {
 export interface CreateLessonInput {
   tutor_student_id?: string;
   student_id?: string;
+  group_session_id?: string;
+  group_source_tutor_group_id?: string;
+  group_title_snapshot?: string;
+  group_size_snapshot?: number;
   start_at: string;
   duration_min?: number;
   lesson_type?: LessonType;
@@ -343,6 +351,10 @@ export interface CreateLessonInput {
 export interface UpdateLessonInput {
   status?: LessonStatus;
   start_at?: string;
+  group_session_id?: string | null;
+  group_source_tutor_group_id?: string | null;
+  group_title_snapshot?: string | null;
+  group_size_snapshot?: number | null;
   lesson_type?: LessonType;
   subject?: string;
   notes?: string;

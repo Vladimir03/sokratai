@@ -43,6 +43,8 @@ Notes:
 - In CI, lint is currently informational (non-blocking) until a dedicated lint-debt reduction PR.
 - If lint is red, still run `build` and `smoke-check` and report exact failures.
 - If docs mention both `bun` and `npm`, treat `package.json` + CI workflows as source of truth (currently `npm run ...`).
+- For DB-backed features, rollout order is mandatory: apply new Supabase migration(s) first, then deploy frontend; do not assume GitHub merge alone updates production behavior.
+- If frontend references additive DB columns that are not yet migrated, fail safely in UI and report rollout mismatch instead of changing business logic.
 
 ## Supabase Drift Guardrails
 
