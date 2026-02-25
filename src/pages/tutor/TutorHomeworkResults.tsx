@@ -18,6 +18,7 @@ import {
   Save,
   Loader2,
   ImageIcon,
+  Bell,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import {
@@ -37,6 +38,7 @@ import {
   getTutorHomeworkResults,
   reviewTutorHomeworkSubmission,
   getHomeworkImageSignedUrl,
+  notifyTutorHomeworkStudents,
   type TutorHomeworkAssignmentDetails,
   type TutorHomeworkResultsResponse,
   type TutorHomeworkResultsPerStudent,
@@ -292,16 +294,22 @@ function StudentRow({
   assignmentId,
   autoExpand,
   highlight,
+  attemptBadge,
 }: {
   student: TutorHomeworkResultsPerStudent;
   assignmentId: string;
   autoExpand?: boolean;
   highlight?: boolean;
+  attemptBadge?: string;
 }) {
   const [expanded, setExpanded] = useState(autoExpand === true);
   const rowRef = useRef<HTMLDivElement>(null);
   const [flash, setFlash] = useState(highlight === true);
   const statusCfg = STATUS_LABELS[student.status] ?? { text: student.status, className: '' };
+
+  const hasLowConfidence = student.submission_items.some(
+    (it) => it.ai_confidence != null && it.ai_confidence < 0.6,
+  );
 
   useEffect(() => {
     if (autoExpand && rowRef.current) {
@@ -334,10 +342,20 @@ function StudentRow({
             <Badge variant="outline" className={statusCfg.className}>
               {statusCfg.text}
             </Badge>
+            {attemptBadge && (
+              <Badge variant="outline" className="text-xs bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-900/20 dark:text-blue-400">
+                {attemptBadge}
+              </Badge>
+            )}
             {student.percent != null && (
               <span className="text-xs text-muted-foreground">
                 {student.total_score}/{student.total_max_score} ({Math.round(student.percent)}%)
               </span>
+            )}
+            {hasLowConfidence && (
+              <Badge variant="outline" className="text-xs bg-yellow-50 text-yellow-700 border-yellow-200 dark:bg-yellow-900/20 dark:text-yellow-400">
+                ⚠️ Низкая уверенность AI
+              </Badge>
             )}
           </div>
         </div>
@@ -354,6 +372,62 @@ function StudentRow({
       </button>
       {expanded && (
         <StudentExpandRow student={student} assignmentId={assignmentId} />
+      )}
+    </div>
+  );
+}
+
+// ─── Student attempt group ───────────────────────────────────────────────────
+
+function StudentRowGroup({
+  attempts,
+  assignmentId,
+  targetSubmissionId,
+}: {
+  attempts: TutorHomeworkResultsPerStudent[];
+  assignmentId: string;
+  targetSubmissionId: string | null;
+}) {
+  const latest = attempts[0];
+  const older = attempts.slice(1);
+  const targetIsOlder = targetSubmissionId != null && older.some((a) => a.submission_id === targetSubmissionId);
+  const [showHistory, setShowHistory] = useState(targetIsOlder);
+
+  const attemptBadge = attempts.length > 1 ? `Попытка ${latest.attempt_no ?? 1}` : undefined;
+
+  return (
+    <div>
+      <StudentRow
+        student={latest}
+        assignmentId={assignmentId}
+        autoExpand={targetSubmissionId === latest.submission_id}
+        highlight={targetSubmissionId === latest.submission_id}
+        attemptBadge={attemptBadge}
+      />
+      {older.length > 0 && (
+        <div className="ml-4">
+          <button
+            onClick={() => setShowHistory((v) => !v)}
+            className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground mt-1 px-1"
+          >
+            {showHistory ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+            {showHistory ? 'Скрыть историю' : `История попыток (${older.length})`}
+          </button>
+          {showHistory && (
+            <div className="space-y-2 mt-1">
+              {older.map((attempt) => (
+                <StudentRow
+                  key={attempt.submission_id}
+                  student={attempt}
+                  assignmentId={assignmentId}
+                  autoExpand={targetSubmissionId === attempt.submission_id}
+                  highlight={targetSubmissionId === attempt.submission_id}
+                  attemptBadge={`Попытка ${attempt.attempt_no ?? 1}`}
+                />
+              ))}
+            </div>
+          )}
+        </div>
       )}
     </div>
   );
@@ -443,10 +517,43 @@ function TutorHomeworkResultsContent() {
   const error = assignmentQuery.error || resultsQuery.error;
   const isFetching = assignmentQuery.isFetching || resultsQuery.isFetching;
 
+  const [notifying, setNotifying] = useState(false);
+
   const handleRetry = useCallback(() => {
     void assignmentQuery.refetch();
     void resultsQuery.refetch();
   }, [assignmentQuery, resultsQuery]);
+
+  const handleRemindUnsubmitted = useCallback(async () => {
+    if (!assignmentId) return;
+    setNotifying(true);
+    try {
+      const res = await notifyTutorHomeworkStudents(assignmentId);
+      if (res.sent > 0) {
+        toast.success(`Напомнено ${res.sent} ученик${res.sent === 1 ? 'у' : 'ам'}`);
+      } else {
+        toast.info('Нет учеников для напоминания');
+      }
+    } catch (err) {
+      toast.error(`Ошибка: ${err instanceof Error ? err.message : 'неизвестная'}`);
+    } finally {
+      setNotifying(false);
+    }
+  }, [assignmentId]);
+
+  // Group per_student by student_id (multiple attempts), sort by attempt_no DESC
+  const groupedStudents = useMemo(() => {
+    if (!results) return [];
+    const groups: Record<string, TutorHomeworkResultsPerStudent[]> = {};
+    for (const s of results.per_student) {
+      if (!groups[s.student_id]) groups[s.student_id] = [];
+      groups[s.student_id].push(s);
+    }
+    for (const group of Object.values(groups)) {
+      group.sort((a, b) => (b.attempt_no ?? 1) - (a.attempt_no ?? 1));
+    }
+    return Object.values(groups);
+  }, [results]);
 
   // Compute metrics
   const metrics = useMemo(() => {
@@ -547,8 +654,24 @@ function TutorHomeworkResultsContent() {
 
             {/* Students table */}
             <div className="space-y-3">
-              <h2 className="text-lg font-semibold">Ученики</h2>
-              {results.per_student.length === 0 ? (
+              <div className="flex items-center justify-between gap-3">
+                <h2 className="text-lg font-semibold">Ученики</h2>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleRemindUnsubmitted}
+                  disabled={notifying}
+                  className="gap-2 shrink-0"
+                >
+                  {notifying ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <Bell className="h-4 w-4" />
+                  )}
+                  Напомнить несдавшим
+                </Button>
+              </div>
+              {groupedStudents.length === 0 ? (
                 <Card className="bg-muted/30">
                   <CardContent className="py-8 text-center">
                     <p className="text-sm text-muted-foreground">Пока нет работ от учеников.</p>
@@ -556,13 +679,12 @@ function TutorHomeworkResultsContent() {
                 </Card>
               ) : (
                 <div className="space-y-2">
-                  {results.per_student.map((s) => (
-                    <StudentRow
-                      key={s.submission_id}
-                      student={s}
+                  {groupedStudents.map((attempts) => (
+                    <StudentRowGroup
+                      key={attempts[0].student_id}
+                      attempts={attempts}
                       assignmentId={assignmentId!}
-                      autoExpand={targetSubmissionId === s.submission_id}
-                      highlight={targetSubmissionId === s.submission_id}
+                      targetSubmissionId={targetSubmissionId}
                     />
                   ))}
                 </div>

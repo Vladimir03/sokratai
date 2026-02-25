@@ -9,6 +9,15 @@ export interface HomeworkAnswerEntry {
 
 export type HomeworkAnswersByTask = Record<string, HomeworkAnswerEntry>;
 
+export interface ReviewContextItem {
+  task_id: string;
+  order_num: number;
+  task_text: string;       // truncated to 500 chars
+  student_text: string | null; // truncated to 500 chars
+  ai_feedback: string;     // truncated to 300 chars
+  ai_error_type: string;
+}
+
 export interface HomeworkContext {
   assignment_id?: string;
   submission_id?: string;
@@ -18,6 +27,12 @@ export interface HomeworkContext {
   text?: string;
   images?: string[];
   answers_by_task?: HomeworkAnswersByTask;
+  // Attempts (Feature 4)
+  attempt_no?: number;
+  // Socratic review (Feature 6)
+  review_submission_id?: string;
+  review_items?: ReviewContextItem[];
+  review_exchange_count?: number;
 }
 
 export interface HomeworkStateRecord {
@@ -64,6 +79,18 @@ function sanitizeContext(raw: unknown): HomeworkContext {
     };
   }
 
+  const reviewItems: ReviewContextItem[] = Array.isArray(ctx.review_items)
+    ? (ctx.review_items as unknown[]).filter((item): item is ReviewContextItem => {
+        if (!item || typeof item !== "object") return false;
+        const ri = item as Record<string, unknown>;
+        return typeof ri.task_id === "string" &&
+          typeof ri.order_num === "number" &&
+          typeof ri.task_text === "string" &&
+          typeof ri.ai_feedback === "string" &&
+          typeof ri.ai_error_type === "string";
+      })
+    : [];
+
   return {
     assignment_id: typeof ctx.assignment_id === "string" ? ctx.assignment_id : undefined,
     submission_id: typeof ctx.submission_id === "string" ? ctx.submission_id : undefined,
@@ -73,6 +100,10 @@ function sanitizeContext(raw: unknown): HomeworkContext {
     text: typeof ctx.text === "string" ? ctx.text : "",
     images,
     answers_by_task: answersByTask,
+    attempt_no: typeof ctx.attempt_no === "number" ? ctx.attempt_no : undefined,
+    review_submission_id: typeof ctx.review_submission_id === "string" ? ctx.review_submission_id : undefined,
+    review_items: reviewItems.length > 0 ? reviewItems : undefined,
+    review_exchange_count: typeof ctx.review_exchange_count === "number" ? ctx.review_exchange_count : undefined,
   };
 }
 

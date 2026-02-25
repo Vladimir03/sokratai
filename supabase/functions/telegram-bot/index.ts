@@ -5,12 +5,18 @@ import {
   setState as setHomeworkState,
   type HomeworkContext,
   type HomeworkState,
+  type ReviewContextItem,
 } from "./homework/state_machine.ts";
 import {
+  createSubmissionForAttempt,
   ensureSubmissionItemsForTasks,
   formatHomeworkResultsMessage,
+  generateSocraticQuestion,
   getHomeworkPhotoSaveErrorCode,
+  loadSubmissionItemsWithErrors,
+  MAX_ATTEMPTS,
   runHomeworkAiCheck,
+  saveHomeworkDocumentAnswer,
   saveHomeworkPhotoAnswer,
   saveHomeworkTextAnswer,
 } from "./homework/homework_handler.ts";
@@ -2039,10 +2045,42 @@ async function runHomeworkAiCheckAndSendResult(
     });
   }
 
+  // Build keyboard: Разобрать ошибки + optional Retry button
+  const keyboardRows: { text: string; callback_data: string }[][] = [
+    [{ text: "🧠 Разобрать ошибки", callback_data: `hw_review:${submissionId}` }],
+  ];
+
+  try {
+    const { data: subRow } = await supabase
+      .from("homework_tutor_submissions")
+      .select("assignment_id, attempt_no")
+      .eq("id", submissionId)
+      .maybeSingle();
+
+    if (subRow) {
+      const currentAttemptNo = (subRow.attempt_no as number) ?? 1;
+      const assignmentId = subRow.assignment_id as string;
+      const { data: assignmentRow } = await supabase
+        .from("homework_tutor_assignments")
+        .select("deadline")
+        .eq("id", assignmentId)
+        .maybeSingle();
+      const deadlinePassed = assignmentRow?.deadline
+        ? new Date(assignmentRow.deadline as string) < new Date()
+        : false;
+
+      if (currentAttemptNo < MAX_ATTEMPTS && !deadlinePassed) {
+        keyboardRows.push([{ text: "🔁 Сдать заново", callback_data: `hw_retry:${assignmentId}` }]);
+      }
+    }
+  } catch (retryInfoErr) {
+    console.warn("homework_retry_button_info_failed", { submissionId, error: retryInfoErr });
+  }
+
   await sendTelegramMessage(
     telegramUserId,
     formatHomeworkResultsMessage(summary),
-    { reply_markup: createHomeworkReviewKeyboard(submissionId) },
+    { reply_markup: { inline_keyboard: keyboardRows } },
   );
 }
 
@@ -2549,6 +2587,191 @@ async function handleHomeworkCommand(telegramUserId: number, userId: string) {
   }
 }
 
+async function handleHomeworkReviewCallback(
+  telegramUserId: number,
+  userId: string,
+  submissionId: string | undefined,
+) {
+  if (!submissionId) {
+    await sendTelegramMessage(telegramUserId, "❌ Некорректная ссылка на разбор. Нажми /homework.");
+    return;
+  }
+  const effectiveUserId = await resolveHomeworkUserId(telegramUserId, userId);
+
+  try {
+    const items = await loadSubmissionItemsWithErrors(submissionId);
+    if (items.length === 0) {
+      await sendTelegramMessage(telegramUserId, "✅ Ошибок нет! Все задачи выполнены верно.");
+      return;
+    }
+
+    const { data: submissionRow } = await supabase
+      .from("homework_tutor_submissions")
+      .select("assignment_id")
+      .eq("id", submissionId)
+      .maybeSingle();
+    const assignmentId = submissionRow?.assignment_id as string | undefined;
+
+    const { data: assignmentRow } = await supabase
+      .from("homework_tutor_assignments")
+      .select("subject")
+      .eq("id", assignmentId ?? "")
+      .maybeSingle();
+    const subject = (assignmentRow?.subject as string) ?? "math";
+
+    await setHomeworkState(effectiveUserId, "HW_REVIEW", {
+      assignment_id: assignmentId,
+      review_submission_id: submissionId,
+      review_items: items,
+      review_exchange_count: 0,
+    });
+
+    const firstQ = await generateSocraticQuestion(items[0], 0, subject);
+    const exitKeyboard = {
+      inline_keyboard: [[{ text: "❌ Завершить разбор", callback_data: "hw_review_exit" }]],
+    };
+    await sendTelegramMessage(
+      telegramUserId,
+      `🧠 *Разбор ошибок* (${items.length} ${items.length === 1 ? "задача" : "задачи"})\n\n${firstQ}`,
+      { reply_markup: exitKeyboard, parse_mode: "Markdown" },
+    );
+  } catch (error) {
+    console.error("handleHomeworkReviewCallback error:", { userId, submissionId, error });
+    await sendTelegramMessage(telegramUserId, "❌ Не удалось загрузить разбор ошибок. Попробуй позже.");
+  }
+}
+
+async function handleHomeworkRetryCallback(
+  telegramUserId: number,
+  userId: string,
+  assignmentId: string | undefined,
+) {
+  if (!assignmentId) {
+    await sendTelegramMessage(telegramUserId, "❌ Некорректная команда пересдачи. Нажми /homework.");
+    return;
+  }
+  const effectiveUserId = await resolveHomeworkUserId(telegramUserId, userId);
+
+  try {
+    const { submissionId, attemptNo } = await createSubmissionForAttempt(
+      assignmentId,
+      effectiveUserId,
+      telegramUserId,
+    );
+
+    const tasks = await getHomeworkTasksForAssignment(assignmentId);
+    if (tasks.length === 0) {
+      await sendTelegramMessage(telegramUserId, "❌ В этой домашке нет задач. Обратись к репетитору.");
+      return;
+    }
+
+    const taskIds = tasks.map((t) => t.id);
+    await ensureSubmissionItemsForTasks(submissionId, taskIds);
+
+    const initialContext: HomeworkContext = {
+      assignment_id: assignmentId,
+      submission_id: submissionId,
+      task_index: 1,
+      total_tasks: tasks.length,
+      task_ids: taskIds,
+      text: "",
+      images: [],
+      answers_by_task: {},
+      attempt_no: attemptNo,
+    };
+
+    await setHomeworkState(effectiveUserId, "HW_SUBMITTING", initialContext);
+
+    const { data: assignmentRow } = await supabase
+      .from("homework_tutor_assignments")
+      .select("title")
+      .eq("id", assignmentId)
+      .maybeSingle();
+
+    await sendTelegramMessage(
+      telegramUserId,
+      `🔁 *Попытка ${attemptNo} из ${MAX_ATTEMPTS}* — «${assignmentRow?.title ?? "Домашка"}»\n\nНачинаем заново. Постарайся учесть предыдущие ошибки!`,
+      { parse_mode: "Markdown" },
+    );
+    await sendHomeworkTaskStep(telegramUserId, assignmentRow?.title ?? "Домашка", tasks[0], 1, tasks.length);
+  } catch (error) {
+    const errMsg = error instanceof Error ? error.message : String(error);
+    if (errMsg.includes("MAX_ATTEMPTS_REACHED")) {
+      await sendTelegramMessage(
+        telegramUserId,
+        `⛔ Лимит пересдач исчерпан (максимум ${MAX_ATTEMPTS} попытки). Обратись к репетитору.`,
+      );
+    } else {
+      console.error("handleHomeworkRetryCallback error:", { userId, assignmentId, error });
+      await sendTelegramMessage(telegramUserId, "❌ Не удалось начать пересдачу. Попробуй /homework снова.");
+    }
+  }
+}
+
+async function handleHomeworkMaterialCallback(
+  telegramUserId: number,
+  materialId: string | undefined,
+) {
+  if (!materialId) {
+    await sendTelegramMessage(telegramUserId, "❌ Некорректная ссылка на материал.");
+    return;
+  }
+
+  try {
+    const { data: material } = await supabase
+      .from("homework_tutor_materials")
+      .select("id, type, storage_ref, url, title")
+      .eq("id", materialId)
+      .maybeSingle();
+
+    if (!material) {
+      await sendTelegramMessage(telegramUserId, "❌ Материал не найден.");
+      return;
+    }
+
+    if (material.type === "link") {
+      await sendTelegramMessage(
+        telegramUserId,
+        `📎 *${material.title}*\n\n${material.url}`,
+        { parse_mode: "Markdown" },
+      );
+      return;
+    }
+
+    const storageRef = material.storage_ref as string;
+    let bucket: string;
+    let objectPath: string;
+
+    if (storageRef.startsWith("storage://")) {
+      const rest = storageRef.slice("storage://".length);
+      const slashIdx = rest.indexOf("/");
+      bucket = rest.slice(0, slashIdx);
+      objectPath = rest.slice(slashIdx + 1);
+    } else {
+      bucket = "homework-materials";
+      objectPath = storageRef;
+    }
+
+    const { data: signedData } = await supabase.storage
+      .from(bucket)
+      .createSignedUrl(objectPath, 3600);
+
+    if (!signedData?.signedUrl) {
+      await sendTelegramMessage(telegramUserId, "❌ Не удалось сгенерировать ссылку на материал.");
+      return;
+    }
+
+    await sendTelegramMessage(
+      telegramUserId,
+      `📎 *${material.title}*\n\n${signedData.signedUrl}\n\n_Ссылка действует 1 час._`,
+      { parse_mode: "Markdown" },
+    );
+  } catch (error) {
+    console.error("handleHomeworkMaterialCallback error:", { telegramUserId, materialId, error });
+    await sendTelegramMessage(telegramUserId, "❌ Не удалось открыть материал. Попробуй позже.");
+  }
+}
+
 async function handleHomeworkStartCallback(
   telegramUserId: number,
   userId: string,
@@ -2865,16 +3088,29 @@ async function handleHomeworkCallback(
       return;
     }
 
-    if (data === "hw_cancel") {
+    if (data === "hw_cancel" || data === "hw_review_exit") {
       await handleHomeworkCancelFlow(telegramUserId, userId);
+      if (data === "hw_review_exit") {
+        await sendTelegramMessage(telegramUserId, "✅ Разбор ошибок завершён. Используй /homework для новой домашки.");
+      }
       return;
     }
 
     if (data.startsWith("hw_review:")) {
-      await sendTelegramMessage(
-        telegramUserId,
-        "🧠 Режим разбора ошибок будет доступен в Sprint 3. Пока можно отправить новую домашку через /homework.",
-      );
+      const submissionId = data.split(":")[1];
+      await handleHomeworkReviewCallback(telegramUserId, userId, submissionId);
+      return;
+    }
+
+    if (data.startsWith("hw_retry:")) {
+      const assignmentId = data.split(":")[1];
+      await handleHomeworkRetryCallback(telegramUserId, userId, assignmentId);
+      return;
+    }
+
+    if (data.startsWith("hw_material:")) {
+      const materialId = data.split(":")[1];
+      await handleHomeworkMaterialCallback(telegramUserId, materialId);
       return;
     }
 
@@ -2972,6 +3208,58 @@ async function handleHomeworkTextInput(
       telegramUserId,
       "ℹ️ Сначала выбери домашку кнопкой из списка (или снова нажми /homework).",
     );
+    return;
+  }
+
+  if (stateData.state === "HW_REVIEW") {
+    const context = stateData.context;
+    const exchangeCount = context.review_exchange_count ?? 0;
+    const reviewItems = context.review_items ?? [];
+    const assignmentId = context.assignment_id;
+
+    if (exchangeCount >= 10 || reviewItems.length === 0) {
+      await resetHomeworkState(effectiveUserId);
+      await sendTelegramMessage(telegramUserId, "✅ Разбор ошибок завершён! Используй /homework для новой домашки.");
+      return;
+    }
+
+    try {
+      const itemIndex = Math.floor(exchangeCount / 2);
+      const item = reviewItems[Math.min(itemIndex, reviewItems.length - 1)];
+
+      const { data: assignmentRow } = await supabase
+        .from("homework_tutor_assignments")
+        .select("subject")
+        .eq("id", assignmentId ?? "")
+        .maybeSingle();
+      const subject = (assignmentRow?.subject as string) ?? "math";
+
+      const nextQ = await generateSocraticQuestion(item, exchangeCount + 1, subject);
+      const newCount = exchangeCount + 1;
+
+      await setHomeworkState(effectiveUserId, "HW_REVIEW", {
+        ...context,
+        review_exchange_count: newCount,
+      });
+
+      const isLast = newCount >= 10 || itemIndex >= reviewItems.length - 1;
+      const exitKeyboard = {
+        inline_keyboard: [[{ text: "❌ Завершить разбор", callback_data: "hw_review_exit" }]],
+      };
+
+      await sendTelegramMessage(telegramUserId, nextQ + (isLast ? "\n\n_Это последний вопрос в разборе._" : ""), {
+        reply_markup: exitKeyboard,
+        parse_mode: "Markdown",
+      });
+
+      if (isLast) {
+        await resetHomeworkState(effectiveUserId);
+      }
+    } catch (error) {
+      console.error("HW_REVIEW text handler error:", { userId, error });
+      await resetHomeworkState(effectiveUserId);
+      await sendTelegramMessage(telegramUserId, "❌ Ошибка в режиме разбора. Попробуй /homework снова.");
+    }
     return;
   }
 
@@ -7365,6 +7653,74 @@ Deno.serve(async (req) => {
           }
 
           await handlePhotoMessage(telegramUserId, session.user_id, photo, update.message.caption);
+        }
+      }
+
+      return new Response(JSON.stringify({ ok: true }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    // Handle document messages (PDF or image files) — Feature 7: PDF support
+    if (update.message?.document) {
+      const telegramUserId = update.message.from.id;
+      const session = await getOrRepairOnboardingSession(telegramUserId);
+
+      if (session?.user_id) {
+        const hwEffectiveUserId = await resolveHomeworkUserId(telegramUserId, session.user_id);
+        const homeworkState = await getHomeworkStateSafe(hwEffectiveUserId);
+
+        if (homeworkState.state === "HW_SUBMITTING") {
+          const doc = update.message.document;
+          const mimeType = doc?.mime_type ?? "";
+          const allowedMimes = ["application/pdf", "image/jpeg", "image/png", "image/jpg"];
+          if (!allowedMimes.includes(mimeType)) {
+            await sendTelegramMessage(
+              telegramUserId,
+              "⚠️ Поддерживаются только PDF и изображения (JPEG, PNG). Попробуй другой файл.",
+            );
+          } else {
+            const context = normalizeHomeworkContext(homeworkState.context);
+            const assignmentId = context.assignment_id;
+            const submissionId = context.submission_id;
+            const currentTaskId = getCurrentHomeworkTaskId(context);
+
+            if (!assignmentId || !submissionId || !currentTaskId || !TELEGRAM_BOT_TOKEN) {
+              await sendTelegramMessage(telegramUserId, "❌ Ошибка контекста. Нажми /homework и начни заново.");
+            } else {
+              try {
+                await saveHomeworkDocumentAnswer({
+                  assignmentId,
+                  submissionId,
+                  taskId: currentTaskId,
+                  telegramFileId: doc.file_id,
+                  telegramBotToken: TELEGRAM_BOT_TOKEN,
+                  studentId: session.user_id,
+                  mimeType,
+                });
+                await sendTelegramMessage(
+                  telegramUserId,
+                  "✅ Файл сохранён. Если нужно, добавь текст и нажми «Далее».",
+                  { reply_markup: createHomeworkTaskKeyboard(true) },
+                );
+              } catch (err) {
+                const code = getHomeworkPhotoSaveErrorCode(err);
+                if (code === "MAX_IMAGES_REACHED") {
+                  await sendTelegramMessage(
+                    telegramUserId,
+                    "⚠️ Можно прикрепить максимум 4 файла к одной задаче.",
+                    { reply_markup: createHomeworkTaskKeyboard(true) },
+                  );
+                } else {
+                  console.error("homework_document_save_error", { userId: session.user_id, code, err });
+                  await sendTelegramMessage(telegramUserId, "❌ Не удалось сохранить файл. Попробуй ещё раз.");
+                }
+              }
+            }
+          }
+          return new Response(JSON.stringify({ ok: true }), {
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          });
         }
       }
 

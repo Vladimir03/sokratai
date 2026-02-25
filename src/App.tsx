@@ -48,6 +48,7 @@ const TutorHomework = lazy(() => import("./pages/tutor/TutorHomework"));
 const TutorHomeworkCreate = lazy(() => import("./pages/tutor/TutorHomeworkCreate"));
 const TutorHomeworkDetail = lazy(() => import("./pages/tutor/TutorHomeworkDetail"));
 const TutorHomeworkResults = lazy(() => import("./pages/tutor/TutorHomeworkResults"));
+const TutorHomeworkTemplates = lazy(() => import("./pages/tutor/TutorHomeworkTemplates"));
 const InviteToTelegram = lazy(() => import("./pages/InviteToTelegram"));
 const BookLesson = lazy(() => import("./pages/BookLesson"));
 
@@ -310,13 +311,21 @@ const App = () => (
                 </Suspense>
               } 
             />
-            <Route 
-              path="/tutor/homework/create" 
+            <Route
+              path="/tutor/homework/templates"
+              element={
+                <Suspense fallback={<PageLoader />}>
+                  <TutorHomeworkTemplates />
+                </Suspense>
+              }
+            />
+            <Route
+              path="/tutor/homework/create"
               element={
                 <Suspense fallback={<PageLoader />}>
                   <TutorHomeworkCreate />
                 </Suspense>
-              } 
+              }
             />
             <Route 
               path="/tutor/homework/:id" 

@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef, useEffect, useMemo } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -29,23 +29,42 @@ import {
   X,
   Check,
   Send,
+  Library,
+  ChevronDown,
+  ChevronUp,
+  Paperclip,
+  ExternalLink,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import TutorGuard from '@/components/TutorGuard';
 import { TutorLayout } from '@/components/tutor/TutorLayout';
 import { TutorDataStatus } from '@/components/tutor/TutorDataStatus';
 import { useTutorStudents } from '@/hooks/useTutor';
+import { useTutorHomeworkTemplates } from '@/hooks/useTutorHomework';
+import {
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+  SheetTrigger,
+} from '@/components/ui/sheet';
 import {
   createTutorHomeworkAssignment,
   assignTutorHomeworkStudents,
   notifyTutorHomeworkStudents,
   uploadTutorHomeworkTaskImage,
   deleteTutorHomeworkTaskImage,
+  uploadTutorHomeworkMaterial,
+  addTutorHomeworkMaterial,
+  getTutorHomeworkTemplate,
+  createTutorHomeworkTemplate,
   parseStorageRef,
   HomeworkApiError,
   type HomeworkSubject,
   type CreateAssignmentTask,
   type StudentsTelegramNotConnectedDetails,
+  type HomeworkTemplateListItem,
+  type MaterialType,
 } from '@/lib/tutorHomeworkApi';
 
 // ─── Constants ───────────────────────────────────────────────────────────────
@@ -59,7 +78,7 @@ const SUBJECTS: { value: HomeworkSubject; label: string }[] = [
   { value: 'cs', label: 'Информатика' },
 ];
 
-type SubmitPhase = 'idle' | 'creating' | 'assigning' | 'notifying' | 'done';
+type SubmitPhase = 'idle' | 'creating' | 'adding_materials' | 'assigning' | 'notifying' | 'done';
 const MAX_IMAGE_SIZE_BYTES = 10 * 1024 * 1024;
 const IMAGE_REQUIREMENTS_HINT = 'Форматы: JPG, PNG, WEBP, GIF. Размер до 10 МБ.';
 
@@ -74,6 +93,7 @@ interface DraftTask {
   task_image_used_fallback: boolean;
   correct_answer: string;
   solution_steps: string;
+  rubric_text: string;
   max_score: number;
   uploading: boolean;
 }
@@ -88,7 +108,30 @@ function createEmptyTask(): DraftTask {
     task_image_used_fallback: false,
     correct_answer: '',
     solution_steps: '',
+    rubric_text: '',
     max_score: 1,
+    uploading: false,
+  };
+}
+
+// ─── Draft material type ──────────────────────────────────────────────────────
+
+interface DraftMaterial {
+  localId: string;
+  type: MaterialType;
+  title: string;
+  file: File | null;
+  url: string;
+  uploading: boolean;
+}
+
+function createEmptyMaterial(): DraftMaterial {
+  return {
+    localId: crypto.randomUUID(),
+    type: 'link',
+    title: '',
+    file: null,
+    url: '',
     uploading: false,
   };
 }
@@ -131,6 +174,223 @@ function StepIndicator({ current, total }: { current: number; total: number }) {
           </div>
         );
       })}
+    </div>
+  );
+}
+
+// ─── Rubric field (collapsible) ───────────────────────────────────────────────
+
+function RubricField({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  const [open, setOpen] = useState(Boolean(value));
+  return (
+    <div className="space-y-1">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
+      >
+        {open ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+        Критерии проверки
+      </button>
+      {open && (
+        <textarea
+          className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-base ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 min-h-[60px] resize-y"
+          placeholder="Полное решение: 2 балла, только ответ: 1 балл, ошибка в знаке: минус 1 балл..."
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+        />
+      )}
+    </div>
+  );
+}
+
+// ─── Template picker (sheet) ──────────────────────────────────────────────────
+
+const SUBJECT_LABELS_MAP: Record<string, string> = {
+  math: 'Математика', physics: 'Физика', history: 'История',
+  social: 'Обществознание', english: 'Английский', cs: 'Информатика',
+};
+
+function TemplatePickerSheet({
+  onSelect,
+}: {
+  onSelect: (template: HomeworkTemplateListItem) => void;
+}) {
+  const [filterSubject, setFilterSubject] = useState<string>('all');
+  const { templates, loading } = useTutorHomeworkTemplates(
+    filterSubject !== 'all' ? (filterSubject as HomeworkSubject) : undefined,
+  );
+  const [open, setOpen] = useState(false);
+
+  const handlePick = useCallback(
+    (tpl: HomeworkTemplateListItem) => {
+      onSelect(tpl);
+      setOpen(false);
+    },
+    [onSelect],
+  );
+
+  return (
+    <Sheet open={open} onOpenChange={setOpen}>
+      <SheetTrigger asChild>
+        <Button variant="outline" size="sm" className="gap-2">
+          <Library className="h-4 w-4" />
+          Из шаблона
+        </Button>
+      </SheetTrigger>
+      <SheetContent side="right" className="w-full sm:max-w-md overflow-y-auto">
+        <SheetHeader>
+          <SheetTitle>Шаблоны домашних заданий</SheetTitle>
+        </SheetHeader>
+        <div className="mt-4 space-y-4">
+          <div className="flex flex-wrap gap-1">
+            {['all', 'math', 'physics', 'history', 'social', 'english', 'cs'].map((s) => (
+              <button
+                key={s}
+                onClick={() => setFilterSubject(s)}
+                className={`px-3 py-1 text-xs rounded-full border transition-colors ${
+                  filterSubject === s
+                    ? 'bg-primary text-primary-foreground border-primary'
+                    : 'border-muted-foreground/30 text-muted-foreground hover:border-primary/50'
+                }`}
+              >
+                {s === 'all' ? 'Все' : (SUBJECT_LABELS_MAP[s] ?? s)}
+              </button>
+            ))}
+          </div>
+          {loading ? (
+            <div className="space-y-2">
+              {[1, 2, 3].map((i) => <Skeleton key={i} className="h-16" />)}
+            </div>
+          ) : templates.length === 0 ? (
+            <p className="text-sm text-muted-foreground text-center py-8">
+              Нет шаблонов. Создайте ДЗ и сохраните как шаблон.
+            </p>
+          ) : (
+            <div className="space-y-2">
+              {templates.map((tpl) => (
+                <button
+                  key={tpl.id}
+                  onClick={() => handlePick(tpl)}
+                  className="w-full text-left p-3 rounded-md border hover:bg-muted/50 transition-colors space-y-1"
+                >
+                  <p className="text-sm font-medium">{tpl.title}</p>
+                  <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                    <span>{SUBJECT_LABELS_MAP[tpl.subject] ?? tpl.subject}</span>
+                    {tpl.topic && <span>· {tpl.topic}</span>}
+                    {tpl.task_count != null && <span>· {tpl.task_count} задач</span>}
+                  </div>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      </SheetContent>
+    </Sheet>
+  );
+}
+
+// ─── Materials section ────────────────────────────────────────────────────────
+
+function MaterialsSection({
+  materials,
+  onChange,
+}: {
+  materials: DraftMaterial[];
+  onChange: (m: DraftMaterial[]) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  const handleAddLink = useCallback(() => {
+    onChange([...materials, { ...createEmptyMaterial(), type: 'link' }]);
+    setOpen(true);
+  }, [materials, onChange]);
+
+  const handleAddFile = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const isPdf = file.type === 'application/pdf';
+    const type: MaterialType = isPdf ? 'pdf' : 'image';
+    onChange([...materials, { ...createEmptyMaterial(), type, file, title: file.name }]);
+    setOpen(true);
+    if (fileRef.current) fileRef.current.value = '';
+  }, [materials, onChange]);
+
+  const handleUpdate = useCallback((idx: number, updated: DraftMaterial) => {
+    const next = [...materials];
+    next[idx] = updated;
+    onChange(next);
+  }, [materials, onChange]);
+
+  const handleRemove = useCallback((idx: number) => {
+    onChange(materials.filter((_, i) => i !== idx));
+  }, [materials, onChange]);
+
+  return (
+    <div className="space-y-2">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="flex items-center gap-1 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"
+      >
+        {open ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+        <Paperclip className="h-4 w-4" />
+        Материалы{materials.length > 0 ? ` (${materials.length})` : ''}
+      </button>
+      {open && (
+        <div className="space-y-3 pl-2 border-l-2 border-muted">
+          {materials.map((mat, idx) => (
+            <div key={mat.localId} className="flex items-start gap-2 p-2 border rounded-md bg-muted/30">
+              <div className="flex-1 space-y-2 min-w-0">
+                <Input
+                  placeholder="Название (например: Конспект урока)"
+                  value={mat.title}
+                  onChange={(e) => handleUpdate(idx, { ...mat, title: e.target.value })}
+                  className="text-sm"
+                />
+                {mat.type === 'link' && (
+                  <Input
+                    placeholder="https://..."
+                    value={mat.url}
+                    onChange={(e) => handleUpdate(idx, { ...mat, url: e.target.value })}
+                    className="text-sm"
+                  />
+                )}
+                {mat.type !== 'link' && mat.file && (
+                  <p className="text-xs text-muted-foreground truncate">{mat.file.name}</p>
+                )}
+                <span className="text-xs text-muted-foreground uppercase">{mat.type}</span>
+              </div>
+              <Button variant="ghost" size="sm" onClick={() => handleRemove(idx)}>
+                <X className="h-4 w-4" />
+              </Button>
+            </div>
+          ))}
+          <div className="flex gap-2">
+            <Button variant="outline" size="sm" className="gap-1" onClick={handleAddLink}>
+              <ExternalLink className="h-3.5 w-3.5" />
+              Ссылка
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              className="gap-1"
+              onClick={() => fileRef.current?.click()}
+            >
+              <Upload className="h-3.5 w-3.5" />
+              Файл
+            </Button>
+            <input
+              ref={fileRef}
+              type="file"
+              accept="image/*,application/pdf"
+              className="hidden"
+              onChange={handleAddFile}
+            />
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -469,6 +729,11 @@ function TaskEditor({
           />
         </div>
 
+        <RubricField
+          value={task.rubric_text}
+          onChange={(v) => onUpdate({ ...task, rubric_text: v })}
+        />
+
         <Button
           variant="ghost"
           size="sm"
@@ -486,10 +751,14 @@ function TaskEditor({
 function StepTasks({
   tasks,
   onChange,
+  materials,
+  onMaterialsChange,
   errors,
 }: {
   tasks: DraftTask[];
   onChange: (t: DraftTask[]) => void;
+  materials: DraftMaterial[];
+  onMaterialsChange: (m: DraftMaterial[]) => void;
   errors: Record<string, string>;
 }) {
   const handleAdd = useCallback(() => {
@@ -536,6 +805,9 @@ function StepTasks({
         <Plus className="h-4 w-4" />
         Добавить задачу
       </Button>
+      <div className="border-t pt-3">
+        <MaterialsSection materials={materials} onChange={onMaterialsChange} />
+      </div>
     </div>
   );
 }
@@ -756,12 +1028,15 @@ function StepAssign({
 function SubmitPhaseTracker({
   phase,
   notifyEnabled,
+  hasMaterials,
 }: {
   phase: SubmitPhase;
   notifyEnabled: boolean;
+  hasMaterials: boolean;
 }) {
   const phases: Array<{ key: Exclude<SubmitPhase, 'idle' | 'done'>; label: string }> = [
     { key: 'creating', label: 'Создание' },
+    ...(hasMaterials ? [{ key: 'adding_materials' as const, label: 'Материалы' }] : []),
     { key: 'assigning', label: 'Назначение' },
     ...(notifyEnabled ? [{ key: 'notifying' as const, label: 'Уведомления' }] : []),
   ];
@@ -793,9 +1068,11 @@ function SubmitPhaseTracker({
 function TutorHomeworkCreateContent() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const [searchParams] = useSearchParams();
   const { students: tutorStudents } = useTutorStudents();
 
   const [step, setStep] = useState(1);
+  const [templateLoading, setTemplateLoading] = useState(false);
 
   // Step 1
   const [meta, setMeta] = useState<MetaState>({
@@ -808,6 +1085,7 @@ function TutorHomeworkCreateContent() {
   // Step 2
   const [tasks, setTasks] = useState<DraftTask[]>([createEmptyTask()]);
   const tasksRef = useRef<DraftTask[]>(tasks);
+  const [materials, setMaterials] = useState<DraftMaterial[]>([]);
 
   // Step 3
   const [selectedStudentIds, setSelectedStudentIds] = useState<Set<string>>(
@@ -815,6 +1093,7 @@ function TutorHomeworkCreateContent() {
   );
   const [notifyEnabled, setNotifyEnabled] = useState(true);
   const [notifyTemplate, setNotifyTemplate] = useState('');
+  const [saveAsTemplate, setSaveAsTemplate] = useState(false);
 
   // Submit state
   const [submitPhase, setSubmitPhase] = useState<SubmitPhase>('idle');
@@ -833,6 +1112,73 @@ function TutorHomeworkCreateContent() {
     },
     [],
   );
+
+  // Auto-load template from ?template_id query param
+  const templateId = searchParams.get('template_id');
+  const templateLoadedRef = useRef(false);
+  useEffect(() => {
+    if (!templateId || templateLoadedRef.current) return;
+    templateLoadedRef.current = true;
+    setTemplateLoading(true);
+    getTutorHomeworkTemplate(templateId)
+      .then((tpl) => {
+        setMeta((m) => ({
+          ...m,
+          title: tpl.title,
+          subject: tpl.subject,
+          topic: tpl.topic ?? '',
+        }));
+        setTasks(
+          tpl.tasks_json.map((t) => ({
+            ...createEmptyTask(),
+            task_text: t.task_text,
+            task_image_path: t.task_image_url ?? null,
+            correct_answer: t.correct_answer ?? '',
+            solution_steps: t.solution_steps ?? '',
+            rubric_text: t.rubric_text ?? '',
+            max_score: t.max_score ?? 1,
+          })),
+        );
+        toast.success(`Шаблон «${tpl.title}» загружен`);
+      })
+      .catch(() => toast.error('Не удалось загрузить шаблон'))
+      .finally(() => setTemplateLoading(false));
+  }, [templateId]);
+
+  // Apply template from picker sheet
+  const handleApplyTemplate = useCallback(async (tpl: HomeworkTemplateListItem) => {
+    const isDirty =
+      meta.title.trim().length > 0 ||
+      tasks.some((t) => t.task_text.trim().length > 0);
+    if (isDirty && !window.confirm('Заменить текущие данные шаблоном?')) return;
+
+    setTemplateLoading(true);
+    try {
+      const full = await getTutorHomeworkTemplate(tpl.id);
+      setMeta((m) => ({
+        ...m,
+        title: full.title,
+        subject: full.subject,
+        topic: full.topic ?? '',
+      }));
+      setTasks(
+        full.tasks_json.map((t) => ({
+          ...createEmptyTask(),
+          task_text: t.task_text,
+          task_image_path: t.task_image_url ?? null,
+          correct_answer: t.correct_answer ?? '',
+          solution_steps: t.solution_steps ?? '',
+          rubric_text: t.rubric_text ?? '',
+          max_score: t.max_score ?? 1,
+        })),
+      );
+      toast.success(`Шаблон «${full.title}» применён`);
+    } catch {
+      toast.error('Не удалось загрузить шаблон');
+    } finally {
+      setTemplateLoading(false);
+    }
+  }, [meta.title, tasks]);
 
   const hasUnsavedChanges = useMemo(() => {
     if (submitPhase === 'done') return false;
@@ -972,6 +1318,7 @@ function TutorHomeworkCreateContent() {
           task_image_url: t.task_image_path || null,
           correct_answer: t.correct_answer.trim() || null,
           solution_steps: t.solution_steps.trim() || null,
+          rubric_text: t.rubric_text.trim() || null,
           max_score: t.max_score,
         }));
 
@@ -986,6 +1333,29 @@ function TutorHomeworkCreateContent() {
         });
         assignmentId = result.assignment_id;
         createdAssignmentIdRef.current = assignmentId;
+      }
+
+      // Phase 1.5: add materials
+      if (materials.length > 0) {
+        setSubmitPhase('adding_materials');
+        for (const mat of materials) {
+          try {
+            let storageRef: string | undefined;
+            if (mat.file) {
+              const uploaded = await uploadTutorHomeworkMaterial(mat.file);
+              storageRef = uploaded.storageRef;
+            }
+            await addTutorHomeworkMaterial(assignmentId!, {
+              type: mat.type,
+              title: mat.title.trim() || mat.file?.name || 'Материал',
+              storage_ref: storageRef ?? null,
+              url: mat.type === 'link' ? (mat.url.trim() || null) : null,
+            });
+          } catch (matErr) {
+            console.warn('homework_material_add_failed', matErr);
+            toast.warning(`Не удалось добавить материал «${mat.title}»`);
+          }
+        }
       }
 
       // Phase 2: assign
@@ -1019,6 +1389,29 @@ function TutorHomeworkCreateContent() {
               [...selectedStudentIds].map((id) => [id, 'telegram_send_error']),
             ),
           };
+        }
+      }
+
+      // Phase: save as template (optional)
+      if (saveAsTemplate) {
+        try {
+          await createTutorHomeworkTemplate({
+            title: meta.title.trim(),
+            subject: meta.subject as HomeworkSubject,
+            topic: meta.topic.trim() || null,
+            tasks_json: tasks.map((t) => ({
+              task_text: t.task_text.trim(),
+              task_image_url: t.task_image_path || null,
+              correct_answer: t.correct_answer.trim() || null,
+              solution_steps: t.solution_steps.trim() || null,
+              rubric_text: t.rubric_text.trim() || null,
+              max_score: t.max_score,
+            })),
+          });
+          void queryClient.invalidateQueries({ queryKey: ['tutor', 'homework', 'templates'] });
+        } catch (tplErr) {
+          console.warn('homework_template_save_failed', tplErr);
+          toast.warning('Не удалось сохранить как шаблон');
         }
       }
 
@@ -1097,6 +1490,8 @@ function TutorHomeworkCreateContent() {
     selectedStudentIds,
     notifyEnabled,
     notifyTemplate,
+    materials,
+    saveAsTemplate,
     navigate,
     queryClient,
   ]);
@@ -1107,6 +1502,8 @@ function TutorHomeworkCreateContent() {
     switch (submitPhase) {
       case 'creating':
         return 'Создаём ДЗ...';
+      case 'adding_materials':
+        return 'Добавляем материалы...';
       case 'assigning':
         return 'Назначаем учеников...';
       case 'notifying':
@@ -1125,7 +1522,11 @@ function TutorHomeworkCreateContent() {
             <ArrowLeft className="h-4 w-4 mr-1" />
             Назад
           </Button>
-          <h1 className="text-2xl font-bold">Создание ДЗ</h1>
+          <h1 className="text-2xl font-bold flex-1">Создание ДЗ</h1>
+          {!isSubmitting && (
+            <TemplatePickerSheet onSelect={handleApplyTemplate} />
+          )}
+          {templateLoading && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />}
         </div>
 
         {/* Step indicator */}
@@ -1139,7 +1540,13 @@ function TutorHomeworkCreateContent() {
             <StepMeta meta={meta} onChange={setMeta} errors={errors} />
           )}
           {step === 2 && (
-            <StepTasks tasks={tasks} onChange={setTasks} errors={errors} />
+            <StepTasks
+              tasks={tasks}
+              onChange={setTasks}
+              materials={materials}
+              onMaterialsChange={setMaterials}
+              errors={errors}
+            />
           )}
           {step === 3 && (
             <StepAssign
@@ -1157,7 +1564,23 @@ function TutorHomeworkCreateContent() {
         {/* Navigation footer */}
         <div className="border-t pt-4 sticky bottom-0 bg-background pb-4 md:pb-0 md:relative z-10 space-y-3">
           {step === 3 && (
-            <SubmitPhaseTracker phase={submitPhase} notifyEnabled={notifyEnabled} />
+            <SubmitPhaseTracker
+              phase={submitPhase}
+              notifyEnabled={notifyEnabled}
+              hasMaterials={materials.length > 0}
+            />
+          )}
+          {step === 3 && submitPhase === 'idle' && (
+            <div className="flex items-center gap-2">
+              <Switch
+                id="save-template-toggle"
+                checked={saveAsTemplate}
+                onCheckedChange={setSaveAsTemplate}
+              />
+              <Label htmlFor="save-template-toggle" className="text-sm cursor-pointer">
+                Сохранить как шаблон
+              </Label>
+            </div>
           )}
           <div className="flex items-center justify-between">
             <Button

@@ -4,7 +4,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Badge } from '@/components/ui/badge';
-import { Plus, BookOpen, Users, BarChart3, Clock } from 'lucide-react';
+import { Plus, BookOpen, Users, BarChart3, Clock, CheckCircle2, WifiOff, Library } from 'lucide-react';
 import TutorGuard from '@/components/TutorGuard';
 import { TutorLayout } from '@/components/tutor/TutorLayout';
 import { TutorDataStatus } from '@/components/tutor/TutorDataStatus';
@@ -171,12 +171,28 @@ function AssignmentCard({ item }: { item: TutorHomeworkAssignmentListItem }) {
           )}
 
           {/* Stats row */}
-          <div className="flex items-center gap-4 text-sm text-muted-foreground pt-1">
+          <div className="flex items-center gap-3 text-sm text-muted-foreground pt-1 flex-wrap">
             {/* Progress */}
             <span className="flex items-center gap-1" title="Сдали / Назначено">
               <Users className="h-3.5 w-3.5" />
               {item.submitted_count}/{item.assigned_count}
             </span>
+
+            {/* Delivered */}
+            {(item.delivered_count ?? 0) > 0 && (
+              <span className="flex items-center gap-1 text-green-600" title="Доставлено">
+                <CheckCircle2 className="h-3.5 w-3.5" />
+                {item.delivered_count}
+              </span>
+            )}
+
+            {/* Not connected */}
+            {(item.not_connected_count ?? 0) > 0 && (
+              <span className="flex items-center gap-1 text-amber-500" title="Telegram не подключён">
+                <WifiOff className="h-3.5 w-3.5" />
+                {item.not_connected_count}
+              </span>
+            )}
 
             {/* Average score */}
             <span className="flex items-center gap-1" title="Средний балл">
@@ -234,12 +250,20 @@ function TutorHomeworkContent() {
               Управляйте домашками и отслеживайте прогресс учеников
             </p>
           </div>
-          <Button asChild>
-            <Link to="/tutor/homework/create">
-              <Plus className="h-4 w-4 mr-2" />
-              Создать ДЗ
-            </Link>
-          </Button>
+          <div className="flex gap-2">
+            <Button variant="outline" asChild>
+              <Link to="/tutor/homework/templates">
+                <Library className="h-4 w-4 mr-2" />
+                Шаблоны
+              </Link>
+            </Button>
+            <Button asChild>
+              <Link to="/tutor/homework/create">
+                <Plus className="h-4 w-4 mr-2" />
+                Создать ДЗ
+              </Link>
+            </Button>
+          </div>
         </div>
 
         {/* Error / Recovery status */}

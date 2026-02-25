@@ -20,10 +20,23 @@ export interface HomeworkTaskRow {
   id: string;
   order_num: number;
   task_text: string;
+  task_image_url: string | null;
   correct_answer: string | null;
   solution_steps: string | null;
+  rubric_text: string | null;
   max_score: number;
 }
+
+export interface ReviewContextItem {
+  task_id: string;
+  order_num: number;
+  task_text: string;
+  student_text: string | null;
+  ai_feedback: string;
+  ai_error_type: string;
+}
+
+const MAX_ATTEMPTS = 3;
 
 export interface HomeworkSubmissionItemRow {
   id: string;
@@ -391,7 +404,7 @@ export async function runHomeworkAiCheck(submissionId: string): Promise<Homework
 
   const { data: tasks, error: tasksError } = await supabase
     .from("homework_tutor_tasks")
-    .select("id, order_num, task_text, correct_answer, solution_steps, max_score")
+    .select("id, order_num, task_text, task_image_url, correct_answer, solution_steps, rubric_text, max_score")
     .eq("assignment_id", assignment.id)
     .order("order_num", { ascending: true });
 
@@ -486,7 +499,7 @@ export async function runHomeworkAiCheck(submissionId: string): Promise<Homework
         task.correct_answer,
         task.solution_steps,
         subject,
-        { strict: true },
+        { strict: true, rubricText: task.rubric_text },
       );
 
       const aiScore = checkResult.score >= 0.5 ? maxScore : 0;
@@ -552,6 +565,263 @@ export async function runHomeworkAiCheck(submissionId: string): Promise<Homework
     total_max_score: totalMaxScore,
     task_results: taskResults,
   };
+}
+
+// ─── Feature 4: Attempts ─────────────────────────────────────────────────────
+
+export async function getCurrentAttemptNo(assignmentId: string, studentId: string): Promise<number> {
+  const { data } = await supabase
+    .from("homework_tutor_submissions")
+    .select("attempt_no")
+    .eq("assignment_id", assignmentId)
+    .eq("student_id", studentId)
+    .order("attempt_no", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  return data?.attempt_no ?? 0;
+}
+
+export async function createSubmissionForAttempt(
+  assignmentId: string,
+  studentId: string,
+  telegramChatId: number,
+): Promise<{ submissionId: string; attemptNo: number }> {
+  const currentMax = await getCurrentAttemptNo(assignmentId, studentId);
+  const nextAttemptNo = currentMax + 1;
+
+  if (nextAttemptNo > MAX_ATTEMPTS) {
+    throw new Error("MAX_ATTEMPTS_REACHED");
+  }
+
+  const { data, error } = await supabase
+    .from("homework_tutor_submissions")
+    .insert({
+      assignment_id: assignmentId,
+      student_id: studentId,
+      telegram_chat_id: telegramChatId,
+      status: "in_progress",
+      attempt_no: nextAttemptNo,
+    })
+    .select("id, attempt_no")
+    .single();
+
+  if (error || !data) {
+    throw new Error(`Failed to create submission attempt ${nextAttemptNo}: ${error?.message ?? "unknown"}`);
+  }
+
+  return { submissionId: data.id, attemptNo: data.attempt_no };
+}
+
+// ─── Feature 6: Socratic dialog ──────────────────────────────────────────────
+
+export async function loadSubmissionItemsWithErrors(
+  submissionId: string,
+): Promise<ReviewContextItem[]> {
+  const { data, error } = await supabase
+    .from("homework_tutor_submission_items")
+    .select("task_id, student_text, ai_feedback, ai_error_type, ai_is_correct, homework_tutor_tasks!inner(order_num, task_text)")
+    .eq("submission_id", submissionId)
+    .eq("ai_is_correct", false);
+
+  if (error) {
+    throw new Error(`Failed to load submission items for review: ${error.message}`);
+  }
+
+  return ((data ?? []) as Array<{
+    task_id: string;
+    student_text: string | null;
+    ai_feedback: string | null;
+    ai_error_type: string | null;
+    homework_tutor_tasks: { order_num: number; task_text: string };
+  }>)
+    .map((row) => ({
+      task_id: row.task_id,
+      order_num: row.homework_tutor_tasks.order_num,
+      task_text: shortenText(normalizeText(row.homework_tutor_tasks.task_text), 500),
+      student_text: row.student_text ? shortenText(normalizeText(row.student_text), 500) : null,
+      ai_feedback: shortenText(normalizeText(row.ai_feedback ?? ""), 300),
+      ai_error_type: row.ai_error_type ?? "incomplete",
+    }))
+    .sort((a, b) => a.order_num - b.order_num);
+}
+
+export async function generateSocraticQuestion(
+  item: ReviewContextItem,
+  exchangeCount: number,
+  subject: string,
+): Promise<string> {
+  const LOVABLE_API_URL = "https://ai.gateway.lovable.dev/v1/chat/completions";
+  const LOVABLE_MODEL = "google/gemini-3-flash-preview";
+  const apiKey = Deno.env.get("LOVABLE_API_KEY");
+
+  if (!apiKey) {
+    return "Подумай ещё раз над своим решением. В чём именно может быть ошибка?";
+  }
+
+  const isLastExchange = exchangeCount >= 4;
+  const systemPrompt = [
+    "Ты Сократический наставник. Помогаешь ученику самостоятельно найти ошибку в решении.",
+    "НЕЛЬЗЯ давать правильный ответ или решение. Только задавай направляющие вопросы.",
+    "Один вопрос за раз, короткий (1-2 предложения).",
+    isLastExchange ? "Это последний вопрос в диалоге — заверши разбор и пригласи пересдать." : "",
+  ].filter(Boolean).join("\n");
+
+  const userPrompt = [
+    `Предмет: ${subject}`,
+    `Задача: ${item.task_text}`,
+    `Ответ ученика: ${item.student_text ?? "[нет текста]"}`,
+    `AI-фидбек о ошибке: ${item.ai_feedback}`,
+    `Тип ошибки: ${item.ai_error_type}`,
+    `Обмен ${exchangeCount + 1} из 5.`,
+    "Задай один направляющий вопрос без раскрытия ответа.",
+  ].join("\n");
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 15_000);
+
+  try {
+    const response = await fetch(LOVABLE_API_URL, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model: LOVABLE_MODEL,
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: userPrompt },
+        ],
+        temperature: 0.6,
+        stream: false,
+      }),
+      signal: controller.signal,
+    });
+
+    if (!response.ok) {
+      return "Подумай ещё раз — в каком шаге решения могла закрасться ошибка?";
+    }
+
+    const payload = await response.json();
+    const content = payload?.choices?.[0]?.message?.content;
+    if (typeof content === "string" && content.trim()) {
+      return content.trim();
+    }
+  } catch {
+    // fallback below
+  } finally {
+    clearTimeout(timeoutId);
+  }
+
+  return "Подумай ещё раз — в каком шаге решения могла закрасться ошибка?";
+}
+
+// ─── Feature 7: PDF document answer ──────────────────────────────────────────
+
+export interface SaveHomeworkDocumentAnswerInput {
+  assignmentId: string;
+  submissionId: string;
+  taskId: string;
+  telegramFileId: string;
+  telegramBotToken: string;
+  studentId: string;
+  mimeType: string;
+}
+
+export async function saveHomeworkDocumentAnswer(
+  input: SaveHomeworkDocumentAnswerInput,
+): Promise<SaveHomeworkPhotoAnswerResult> {
+  const { assignmentId, submissionId, taskId, telegramFileId, telegramBotToken, studentId, mimeType } = input;
+  console.log("homework_document_save_start", { assignmentId, submissionId, taskId, studentId, mimeType });
+
+  try {
+    await ensureSubmissionItemsForTasks(submissionId, [taskId]);
+
+    const { data: existingItem, error: itemError } = await supabase
+      .from("homework_tutor_submission_items")
+      .select("student_image_urls")
+      .eq("submission_id", submissionId)
+      .eq("task_id", taskId)
+      .maybeSingle();
+
+    if (itemError) {
+      throw new HomeworkPhotoSaveError(
+        "SUBMISSION_ITEM_UPDATE_FAILED",
+        `Failed to load submission item before document upload: ${itemError.message}`,
+      );
+    }
+
+    const existingPaths = Array.isArray(existingItem?.student_image_urls)
+      ? existingItem.student_image_urls.filter((v): v is string => typeof v === "string")
+      : [];
+
+    if (existingPaths.length >= 4) {
+      throw new HomeworkPhotoSaveError("MAX_IMAGES_REACHED", "MAX_IMAGES_REACHED");
+    }
+
+    let filePath: string;
+    try {
+      filePath = await fetchTelegramFilePath(telegramFileId, telegramBotToken);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      throw new HomeworkPhotoSaveError("TELEGRAM_GET_FILE_FAILED", message);
+    }
+
+    let bytes: Uint8Array;
+    try {
+      bytes = await downloadTelegramFileBytes(filePath, telegramBotToken);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      throw new HomeworkPhotoSaveError("TELEGRAM_DOWNLOAD_FAILED", message);
+    }
+
+    // Determine file extension from mimeType
+    let ext = "bin";
+    if (mimeType === "application/pdf") ext = "pdf";
+    else if (mimeType === "image/jpeg") ext = "jpg";
+    else if (mimeType === "image/png") ext = "png";
+
+    const objectPath = `homework/${assignmentId}/${submissionId}/${taskId}/${crypto.randomUUID()}.${ext}`;
+
+    const { error: uploadError } = await supabase.storage
+      .from(HOMEWORK_IMAGES_BUCKET)
+      .upload(objectPath, bytes, {
+        contentType: mimeType,
+        upsert: false,
+      });
+
+    if (uploadError) {
+      const code: HomeworkPhotoSaveErrorCode = isBucketNotFoundMessage(uploadError.message)
+        ? "HOMEWORK_BUCKET_NOT_FOUND"
+        : "HOMEWORK_IMAGE_UPLOAD_FAILED";
+      throw new HomeworkPhotoSaveError(code, uploadError.message);
+    }
+
+    const nextPaths = [...existingPaths, objectPath];
+    const { error: updateError } = await supabase
+      .from("homework_tutor_submission_items")
+      .update({ student_image_urls: nextPaths })
+      .eq("submission_id", submissionId)
+      .eq("task_id", taskId);
+
+    if (updateError) {
+      throw new HomeworkPhotoSaveError(
+        "SUBMISSION_ITEM_UPDATE_FAILED",
+        `Failed to update submission item with document: ${updateError.message}`,
+      );
+    }
+
+    console.log("homework_document_save_success", {
+      assignmentId, submissionId, taskId, studentId, files_count: nextPaths.length,
+    });
+
+    return { image_paths: nextPaths, added_path: objectPath };
+  } catch (error) {
+    console.error("homework_document_save_error", {
+      assignment_id: assignmentId, submission_id: submissionId, task_id: taskId,
+      student_id: studentId, mimeType,
+      error_code: getHomeworkPhotoSaveErrorCode(error),
+      error: error instanceof Error ? error.message : String(error),
+    });
+    throw error;
+  }
 }
 
 export function formatHomeworkResultsMessage(summary: HomeworkAiCheckSummary): string {

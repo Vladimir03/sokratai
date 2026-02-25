@@ -44,7 +44,7 @@ function getCorsHeaders(req: Request): Record<string, string> {
     "Access-Control-Allow-Origin": matchedOrigin,
     "Access-Control-Allow-Headers":
       "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
-    "Access-Control-Allow-Methods": "GET, POST, PUT, OPTIONS",
+    "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
     "Access-Control-Max-Age": "86400",
     "Vary": "Origin",
   };
@@ -292,6 +292,7 @@ async function handleCreateAssignment(
     correct_answer: isNonEmptyString(t.correct_answer) ? (t.correct_answer as string).trim() : null,
     solution_steps: isNonEmptyString(t.solution_steps) ? (t.solution_steps as string).trim() : null,
     max_score: isPositiveInt(t.max_score) ? t.max_score : 1,
+    rubric_text: isNonEmptyString(t.rubric_text) ? (t.rubric_text as string).trim() : null,
   }));
 
   const { error: tasksErr } = await db
@@ -302,6 +303,34 @@ async function handleCreateAssignment(
     console.error("homework_api_request_error", { route: "POST /assignments", error: tasksErr.message });
     await db.from("homework_tutor_assignments").delete().eq("id", assignment.id);
     return jsonError(cors, 500, "DB_ERROR", "Failed to create tasks");
+  }
+
+  // Feature 1: save_as_template
+  if (b.save_as_template === true) {
+    const templateTasksJson = taskRows.map((t) => ({
+      task_text: t.task_text,
+      task_image_url: t.task_image_url,
+      correct_answer: t.correct_answer,
+      solution_steps: t.solution_steps,
+      max_score: t.max_score,
+      rubric_text: t.rubric_text,
+    }));
+    const { error: templateErr } = await db
+      .from("homework_tutor_templates")
+      .insert({
+        tutor_id: tutorUserId,
+        title: (b.title as string).trim(),
+        subject: b.subject,
+        topic: isNonEmptyString(b.topic) ? (b.topic as string).trim() : null,
+        tags: [],
+        tasks_json: templateTasksJson,
+      });
+    if (templateErr) {
+      console.warn("homework_api_template_save_failed", {
+        assignment_id: assignment.id,
+        error: templateErr.message,
+      });
+    }
   }
 
   console.log("homework_api_request_success", {
@@ -349,7 +378,7 @@ async function handleListAssignments(
 
   const { data: assignedCounts } = await db
     .from("homework_tutor_student_assignments")
-    .select("assignment_id")
+    .select("assignment_id, delivery_status")
     .in("assignment_id", assignmentIds);
 
   const { data: submissions } = await db
@@ -358,8 +387,15 @@ async function handleListAssignments(
     .in("assignment_id", assignmentIds);
 
   const assignedMap: Record<string, number> = {};
+  const deliveredMap: Record<string, number> = {};
+  const notConnectedMap: Record<string, number> = {};
   for (const r of assignedCounts ?? []) {
     assignedMap[r.assignment_id] = (assignedMap[r.assignment_id] ?? 0) + 1;
+    if (r.delivery_status === "delivered") {
+      deliveredMap[r.assignment_id] = (deliveredMap[r.assignment_id] ?? 0) + 1;
+    } else if (r.delivery_status === "failed_not_connected") {
+      notConnectedMap[r.assignment_id] = (notConnectedMap[r.assignment_id] ?? 0) + 1;
+    }
   }
 
   const submittedMap: Record<string, number> = {};
@@ -387,6 +423,8 @@ async function handleListAssignments(
     created_at: a.created_at,
     assigned_count: assignedMap[a.id] ?? 0,
     submitted_count: submittedMap[a.id] ?? 0,
+    delivered_count: deliveredMap[a.id] ?? 0,
+    not_connected_count: notConnectedMap[a.id] ?? 0,
     avg_score: scoreMap[a.id]
       ? Math.round((scoreMap[a.id].sum / scoreMap[a.id].count) * 100) / 100
       : null,
@@ -414,13 +452,13 @@ async function handleGetAssignment(
 
   const { data: tasks } = await db
     .from("homework_tutor_tasks")
-    .select("id, order_num, task_text, task_image_url, correct_answer, solution_steps, max_score")
+    .select("id, order_num, task_text, task_image_url, correct_answer, solution_steps, max_score, rubric_text")
     .eq("assignment_id", assignmentId)
     .order("order_num", { ascending: true });
 
   const { data: studentAssignments } = await db
     .from("homework_tutor_student_assignments")
-    .select("student_id, notified, notified_at")
+    .select("student_id, notified, notified_at, delivery_status, delivery_error_code")
     .eq("assignment_id", assignmentId);
 
   let assignedStudents: unknown[] = [];
@@ -441,8 +479,16 @@ async function handleGetAssignment(
       name: profileMap[sa.student_id] ?? null,
       notified: sa.notified,
       notified_at: sa.notified_at,
+      delivery_status: sa.delivery_status,
+      delivery_error_code: sa.delivery_error_code,
     }));
   }
+
+  const { data: materials } = await db
+    .from("homework_tutor_materials")
+    .select("id, type, storage_ref, url, title, created_at")
+    .eq("assignment_id", assignmentId)
+    .order("created_at", { ascending: true });
 
   const { data: submissions } = await db
     .from("homework_tutor_submissions")
@@ -476,6 +522,7 @@ async function handleGetAssignment(
     assignment,
     tasks: tasks ?? [],
     assigned_students: assignedStudents,
+    materials: materials ?? [],
     submissions_summary: submissionsSummary,
   });
 }
@@ -603,6 +650,9 @@ async function handleUpdateAssignment(
         if (t.max_score !== undefined) {
           updateFields.max_score = isPositiveInt(t.max_score) ? t.max_score : 1;
         }
+        if (t.rubric_text !== undefined) {
+          updateFields.rubric_text = isNonEmptyString(t.rubric_text) ? (t.rubric_text as string).trim() : null;
+        }
 
         const { error } = await db
           .from("homework_tutor_tasks")
@@ -638,6 +688,7 @@ async function handleUpdateAssignment(
           correct_answer: isNonEmptyString(t.correct_answer) ? (t.correct_answer as string).trim() : null,
           solution_steps: isNonEmptyString(t.solution_steps) ? (t.solution_steps as string).trim() : null,
           max_score: isPositiveInt(t.max_score) ? t.max_score : 1,
+          rubric_text: isNonEmptyString(t.rubric_text) ? (t.rubric_text as string).trim() : null,
         };
         const { error } = await db
           .from("homework_tutor_tasks")
@@ -662,6 +713,7 @@ async function handleUpdateAssignment(
           correct_answer: isNonEmptyString(t.correct_answer) ? (t.correct_answer as string).trim() : null,
           solution_steps: isNonEmptyString(t.solution_steps) ? (t.solution_steps as string).trim() : null,
           max_score: isPositiveInt(t.max_score) ? t.max_score : 1,
+          rubric_text: isNonEmptyString(t.rubric_text) ? (t.rubric_text as string).trim() : null,
         }));
         const { error } = await db
           .from("homework_tutor_tasks")
@@ -1011,9 +1063,31 @@ async function handleNotifyStudents(
     const now = new Date().toISOString();
     await db
       .from("homework_tutor_student_assignments")
-      .update({ notified: true, notified_at: now })
+      .update({ notified: true, notified_at: now, delivery_status: "delivered", delivery_error_code: null })
       .eq("assignment_id", assignmentId)
       .in("student_id", notifiedStudentIds);
+  }
+
+  // Update delivery_status for students who failed due to missing telegram link
+  const noLinkStudents = failedStudentIds.filter((sid) => failedByReason[sid] === "missing_telegram_link");
+  if (noLinkStudents.length > 0) {
+    await db
+      .from("homework_tutor_student_assignments")
+      .update({ delivery_status: "failed_not_connected" })
+      .eq("assignment_id", assignmentId)
+      .in("student_id", noLinkStudents);
+  }
+
+  // Update delivery_status for students who had Telegram send errors
+  const sendFailedStudents = failedStudentIds.filter((sid) =>
+    failedByReason[sid] === "telegram_send_failed" || failedByReason[sid] === "telegram_send_error"
+  );
+  if (sendFailedStudents.length > 0) {
+    await db
+      .from("homework_tutor_student_assignments")
+      .update({ delivery_status: "failed_blocked_or_other" })
+      .eq("assignment_id", assignmentId)
+      .in("student_id", sendFailedStudents);
   }
 
   console.log("homework_api_request_success", {
@@ -1063,8 +1137,9 @@ async function handleGetResults(
 
   const { data: submissions } = await db
     .from("homework_tutor_submissions")
-    .select("id, student_id, status, total_score, total_max_score")
-    .eq("assignment_id", assignmentId);
+    .select("id, student_id, status, total_score, total_max_score, attempt_no")
+    .eq("assignment_id", assignmentId)
+    .order("attempt_no", { ascending: true });
 
   const submissionIds = (submissions ?? []).map((s) => s.id);
 
@@ -1174,6 +1249,7 @@ async function handleGetResults(
       student_id: s.student_id,
       name: profileMap[s.student_id] ?? null,
       status: s.status,
+      attempt_no: s.attempt_no ?? 1,
       total_score: s.total_score,
       total_max_score: s.total_max_score,
       percent: pct,
@@ -1365,6 +1441,352 @@ async function handleReviewSubmission(
   return jsonOk(cors, { ok: true });
 }
 
+// ─── Endpoint: GET /templates ────────────────────────────────────────────────
+
+async function handleListTemplates(
+  db: SupabaseClient,
+  tutorUserId: string,
+  searchParams: URLSearchParams,
+  cors: Record<string, string>,
+): Promise<Response> {
+  const subject = searchParams.get("subject");
+  if (subject && !(VALID_SUBJECTS as readonly string[]).includes(subject)) {
+    return jsonError(cors, 400, "VALIDATION", `subject must be one of: ${VALID_SUBJECTS.join(", ")}`);
+  }
+
+  let query = db
+    .from("homework_tutor_templates")
+    .select("id, title, subject, topic, tags, created_at, tasks_json")
+    .eq("tutor_id", tutorUserId)
+    .order("created_at", { ascending: false });
+
+  if (subject) {
+    query = query.eq("subject", subject);
+  }
+
+  const { data, error } = await query;
+  if (error) {
+    console.error("homework_api_request_error", { route: "GET /templates", error: error.message });
+    return jsonError(cors, 500, "DB_ERROR", "Failed to fetch templates");
+  }
+
+  const result = (data ?? []).map((t) => ({
+    id: t.id,
+    title: t.title,
+    subject: t.subject,
+    topic: t.topic,
+    tags: t.tags,
+    created_at: t.created_at,
+    task_count: Array.isArray(t.tasks_json) ? t.tasks_json.length : 0,
+  }));
+
+  return jsonOk(cors, result);
+}
+
+// ─── Endpoint: POST /templates ───────────────────────────────────────────────
+
+async function handleCreateTemplate(
+  db: SupabaseClient,
+  tutorUserId: string,
+  body: unknown,
+  cors: Record<string, string>,
+): Promise<Response> {
+  if (!body || typeof body !== "object") {
+    return jsonError(cors, 400, "INVALID_BODY", "Request body must be a JSON object");
+  }
+  const b = body as Record<string, unknown>;
+
+  if (!isNonEmptyString(b.title)) {
+    return jsonError(cors, 400, "VALIDATION", "title is required");
+  }
+  if (!isNonEmptyString(b.subject) || !(VALID_SUBJECTS as readonly string[]).includes(b.subject)) {
+    return jsonError(cors, 400, "VALIDATION", `subject must be one of: ${VALID_SUBJECTS.join(", ")}`);
+  }
+  if (!Array.isArray(b.tasks_json)) {
+    return jsonError(cors, 400, "VALIDATION", "tasks_json must be an array");
+  }
+
+  const { data, error } = await db
+    .from("homework_tutor_templates")
+    .insert({
+      tutor_id: tutorUserId,
+      title: (b.title as string).trim(),
+      subject: b.subject,
+      topic: isNonEmptyString(b.topic) ? (b.topic as string).trim() : null,
+      tags: Array.isArray(b.tags) ? b.tags.filter((t) => isString(t)) : [],
+      tasks_json: b.tasks_json,
+    })
+    .select("id")
+    .single();
+
+  if (error || !data) {
+    console.error("homework_api_request_error", { route: "POST /templates", error: error?.message });
+    return jsonError(cors, 500, "DB_ERROR", "Failed to create template");
+  }
+
+  return jsonOk(cors, { template_id: data.id }, 201);
+}
+
+// ─── Endpoint: GET /templates/:id ────────────────────────────────────────────
+
+async function handleGetTemplate(
+  db: SupabaseClient,
+  tutorUserId: string,
+  templateId: string,
+  cors: Record<string, string>,
+): Promise<Response> {
+  if (!isUUID(templateId)) {
+    return jsonError(cors, 400, "INVALID_ID", "Invalid template ID format");
+  }
+
+  const { data, error } = await db
+    .from("homework_tutor_templates")
+    .select("*")
+    .eq("id", templateId)
+    .maybeSingle();
+
+  if (error || !data) {
+    return jsonError(cors, 404, "NOT_FOUND", "Template not found");
+  }
+  if (data.tutor_id !== tutorUserId) {
+    return jsonError(cors, 403, "FORBIDDEN", "Template does not belong to you");
+  }
+
+  return jsonOk(cors, data);
+}
+
+// ─── Endpoint: DELETE /templates/:id ─────────────────────────────────────────
+
+async function handleDeleteTemplate(
+  db: SupabaseClient,
+  tutorUserId: string,
+  templateId: string,
+  cors: Record<string, string>,
+): Promise<Response> {
+  if (!isUUID(templateId)) {
+    return jsonError(cors, 400, "INVALID_ID", "Invalid template ID format");
+  }
+
+  const { data: existing } = await db
+    .from("homework_tutor_templates")
+    .select("tutor_id")
+    .eq("id", templateId)
+    .maybeSingle();
+
+  if (!existing) {
+    return jsonError(cors, 404, "NOT_FOUND", "Template not found");
+  }
+  if (existing.tutor_id !== tutorUserId) {
+    return jsonError(cors, 403, "FORBIDDEN", "Template does not belong to you");
+  }
+
+  const { error } = await db
+    .from("homework_tutor_templates")
+    .delete()
+    .eq("id", templateId);
+
+  if (error) {
+    console.error("homework_api_request_error", { route: "DELETE /templates/:id", error: error.message });
+    return jsonError(cors, 500, "DB_ERROR", "Failed to delete template");
+  }
+
+  return jsonOk(cors, { ok: true });
+}
+
+// ─── Endpoint: POST /assignments/:id/materials ───────────────────────────────
+
+async function handleAddMaterial(
+  db: SupabaseClient,
+  tutorUserId: string,
+  assignmentId: string,
+  body: unknown,
+  cors: Record<string, string>,
+): Promise<Response> {
+  const assignmentOrErr = await getOwnedAssignmentOrThrow(db, assignmentId, tutorUserId, cors);
+  if (assignmentOrErr instanceof Response) return assignmentOrErr;
+
+  if (!body || typeof body !== "object") {
+    return jsonError(cors, 400, "INVALID_BODY", "Request body must be a JSON object");
+  }
+  const b = body as Record<string, unknown>;
+
+  const validTypes = ["pdf", "image", "link"] as const;
+  if (!isNonEmptyString(b.type) || !validTypes.includes(b.type as typeof validTypes[number])) {
+    return jsonError(cors, 400, "VALIDATION", "type must be one of: pdf, image, link");
+  }
+  if (!isNonEmptyString(b.title)) {
+    return jsonError(cors, 400, "VALIDATION", "title is required");
+  }
+
+  const materialType = b.type as string;
+  if (materialType === "link" && !isNonEmptyString(b.url)) {
+    return jsonError(cors, 400, "VALIDATION", "url is required for link type");
+  }
+  if ((materialType === "pdf" || materialType === "image") && !isNonEmptyString(b.storage_ref)) {
+    return jsonError(cors, 400, "VALIDATION", "storage_ref is required for pdf/image type");
+  }
+
+  const { data, error } = await db
+    .from("homework_tutor_materials")
+    .insert({
+      assignment_id: assignmentId,
+      type: materialType,
+      title: (b.title as string).trim(),
+      storage_ref: isNonEmptyString(b.storage_ref) ? (b.storage_ref as string).trim() : null,
+      url: isNonEmptyString(b.url) ? (b.url as string).trim() : null,
+    })
+    .select("id")
+    .single();
+
+  if (error || !data) {
+    console.error("homework_api_request_error", { route: "POST /assignments/:id/materials", error: error?.message });
+    return jsonError(cors, 500, "DB_ERROR", "Failed to add material");
+  }
+
+  return jsonOk(cors, { material_id: data.id }, 201);
+}
+
+// ─── Endpoint: DELETE /assignments/:id/materials/:mid ────────────────────────
+
+async function handleDeleteMaterial(
+  db: SupabaseClient,
+  tutorUserId: string,
+  assignmentId: string,
+  materialId: string,
+  cors: Record<string, string>,
+): Promise<Response> {
+  const assignmentOrErr = await getOwnedAssignmentOrThrow(db, assignmentId, tutorUserId, cors);
+  if (assignmentOrErr instanceof Response) return assignmentOrErr;
+
+  if (!isUUID(materialId)) {
+    return jsonError(cors, 400, "INVALID_ID", "Invalid material ID format");
+  }
+
+  const { data: existing } = await db
+    .from("homework_tutor_materials")
+    .select("id")
+    .eq("id", materialId)
+    .eq("assignment_id", assignmentId)
+    .maybeSingle();
+
+  if (!existing) {
+    return jsonError(cors, 404, "NOT_FOUND", "Material not found");
+  }
+
+  const { error } = await db
+    .from("homework_tutor_materials")
+    .delete()
+    .eq("id", materialId);
+
+  if (error) {
+    console.error("homework_api_request_error", { route: "DELETE /assignments/:id/materials/:mid", error: error.message });
+    return jsonError(cors, 500, "DB_ERROR", "Failed to delete material");
+  }
+
+  return jsonOk(cors, { ok: true });
+}
+
+// ─── Endpoint: GET /assignments/:id/materials/:mid/signed-url ────────────────
+
+async function handleMaterialSignedUrl(
+  db: SupabaseClient,
+  tutorUserId: string,
+  assignmentId: string,
+  materialId: string,
+  cors: Record<string, string>,
+): Promise<Response> {
+  const assignmentOrErr = await getOwnedAssignmentOrThrow(db, assignmentId, tutorUserId, cors);
+  if (assignmentOrErr instanceof Response) return assignmentOrErr;
+
+  if (!isUUID(materialId)) {
+    return jsonError(cors, 400, "INVALID_ID", "Invalid material ID format");
+  }
+
+  const { data: material } = await db
+    .from("homework_tutor_materials")
+    .select("id, type, storage_ref, url")
+    .eq("id", materialId)
+    .eq("assignment_id", assignmentId)
+    .maybeSingle();
+
+  if (!material) {
+    return jsonError(cors, 404, "NOT_FOUND", "Material not found");
+  }
+
+  if (material.type === "link") {
+    return jsonOk(cors, { url: material.url });
+  }
+
+  if (!material.storage_ref) {
+    return jsonError(cors, 400, "NO_STORAGE_REF", "Material has no storage reference");
+  }
+
+  // Parse storage://bucket/objectPath
+  const storageRef = material.storage_ref as string;
+  let bucket: string;
+  let objectPath: string;
+
+  if (storageRef.startsWith("storage://")) {
+    const rest = storageRef.slice("storage://".length);
+    const slashIdx = rest.indexOf("/");
+    if (slashIdx < 0) {
+      return jsonError(cors, 500, "INVALID_STORAGE_REF", "Cannot parse storage reference");
+    }
+    bucket = rest.slice(0, slashIdx);
+    objectPath = rest.slice(slashIdx + 1);
+  } else {
+    bucket = "homework-materials";
+    objectPath = storageRef;
+  }
+
+  const { data: signedData, error: signedErr } = await db.storage
+    .from(bucket)
+    .createSignedUrl(objectPath, 3600);
+
+  if (signedErr || !signedData?.signedUrl) {
+    console.error("homework_api_request_error", { route: "GET /materials/signed-url", error: signedErr?.message });
+    return jsonError(cors, 500, "STORAGE_ERROR", "Failed to generate signed URL");
+  }
+
+  return jsonOk(cors, { url: signedData.signedUrl });
+}
+
+// ─── Endpoint: GET /assignments/:id/attempts ─────────────────────────────────
+
+async function handleListAttempts(
+  db: SupabaseClient,
+  tutorUserId: string,
+  assignmentId: string,
+  searchParams: URLSearchParams,
+  cors: Record<string, string>,
+): Promise<Response> {
+  const assignmentOrErr = await getOwnedAssignmentOrThrow(db, assignmentId, tutorUserId, cors);
+  if (assignmentOrErr instanceof Response) return assignmentOrErr;
+
+  const studentId = searchParams.get("student_id");
+  if (studentId && !isUUID(studentId)) {
+    return jsonError(cors, 400, "INVALID_ID", "Invalid student_id format");
+  }
+
+  let query = db
+    .from("homework_tutor_submissions")
+    .select("id, student_id, attempt_no, status, total_score, total_max_score, submitted_at")
+    .eq("assignment_id", assignmentId)
+    .order("attempt_no", { ascending: true });
+
+  if (studentId) {
+    query = query.eq("student_id", studentId);
+  }
+
+  const { data, error } = await query;
+  if (error) {
+    console.error("homework_api_request_error", { route: "GET /assignments/:id/attempts", error: error.message });
+    return jsonError(cors, 500, "DB_ERROR", "Failed to fetch attempts");
+  }
+
+  return jsonOk(cors, data ?? []);
+}
+
 // ─── Main Handler ────────────────────────────────────────────────────────────
 
 Deno.serve(async (req: Request): Promise<Response> => {
@@ -1434,6 +1856,48 @@ Deno.serve(async (req: Request): Promise<Response> => {
     // GET /assignments/:id/results
     if (seg.length === 3 && seg[0] === "assignments" && seg[2] === "results" && route.method === "GET") {
       return await handleGetResults(db, userId, seg[1], cors);
+    }
+
+    // GET /assignments/:id/attempts
+    if (seg.length === 3 && seg[0] === "assignments" && seg[2] === "attempts" && route.method === "GET") {
+      return await handleListAttempts(db, userId, seg[1], route.searchParams, cors);
+    }
+
+    // POST /assignments/:id/materials
+    if (seg.length === 3 && seg[0] === "assignments" && seg[2] === "materials" && route.method === "POST") {
+      const body = await parseJsonBody(req);
+      return await handleAddMaterial(db, userId, seg[1], body, cors);
+    }
+
+    // DELETE /assignments/:id/materials/:mid
+    if (seg.length === 4 && seg[0] === "assignments" && seg[2] === "materials" && route.method === "DELETE") {
+      return await handleDeleteMaterial(db, userId, seg[1], seg[3], cors);
+    }
+
+    // GET /assignments/:id/materials/:mid/signed-url
+    if (seg.length === 5 && seg[0] === "assignments" && seg[2] === "materials" && seg[4] === "signed-url" && route.method === "GET") {
+      return await handleMaterialSignedUrl(db, userId, seg[1], seg[3], cors);
+    }
+
+    // GET /templates
+    if (seg.length === 1 && seg[0] === "templates" && route.method === "GET") {
+      return await handleListTemplates(db, userId, route.searchParams, cors);
+    }
+
+    // POST /templates
+    if (seg.length === 1 && seg[0] === "templates" && route.method === "POST") {
+      const body = await parseJsonBody(req);
+      return await handleCreateTemplate(db, userId, body, cors);
+    }
+
+    // GET /templates/:id
+    if (seg.length === 2 && seg[0] === "templates" && route.method === "GET") {
+      return await handleGetTemplate(db, userId, seg[1], cors);
+    }
+
+    // DELETE /templates/:id
+    if (seg.length === 2 && seg[0] === "templates" && route.method === "DELETE") {
+      return await handleDeleteTemplate(db, userId, seg[1], cors);
     }
 
     // POST /submissions/:id/review

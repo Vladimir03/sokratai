@@ -64,7 +64,8 @@ npm run smoke-check
 | `/tutor/schedule` | `TutorSchedule.tsx` | Расписание + настройки |
 | `/tutor/payments` | `TutorPayments.tsx` | Платежи |
 | `/tutor/homework` | `TutorHomework.tsx` | Список ДЗ |
-| `/tutor/homework/create` | `TutorHomeworkCreate.tsx` | Создание ДЗ |
+| `/tutor/homework/templates` | `TutorHomeworkTemplates.tsx` | Библиотека шаблонов ДЗ |
+| `/tutor/homework/create` | `TutorHomeworkCreate.tsx` | Создание ДЗ (поддерживает `?template_id=`) |
 | `/tutor/homework/:id` | `TutorHomeworkDetail.tsx` | Детали ДЗ |
 | `/tutor/homework/:id/results` | `TutorHomeworkResults.tsx` | Результаты ДЗ, `?submission=` авто-раскрывает строку |
 

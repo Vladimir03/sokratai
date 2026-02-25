@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { ArrowLeft, BookOpen, Users, BarChart3, Clock, CheckCircle2, XCircle, AlertCircle, ChevronDown, ChevronUp, ImageIcon } from 'lucide-react';
+import { ArrowLeft, BookOpen, Users, BarChart3, Clock, CheckCircle2, XCircle, AlertCircle, ChevronDown, ChevronUp, ImageIcon, WifiOff, Paperclip, ExternalLink } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -12,12 +12,15 @@ import { TutorDataStatus } from '@/components/tutor/TutorDataStatus';
 import {
   getTutorHomeworkAssignment,
   getHomeworkImageSignedUrl,
+  getMaterialSignedUrl,
   getTutorHomeworkResults,
   type TutorHomeworkAssignmentDetails,
   type TutorHomeworkResultsResponse,
   type TutorHomeworkSubmissionItem,
   type HomeworkAssignmentStatus,
   type HomeworkSubject,
+  type DeliveryStatus,
+  type HomeworkMaterial,
 } from '@/lib/tutorHomeworkApi';
 import {
   createTutorRetry,
@@ -46,6 +49,29 @@ function formatDate(d: string | null): string {
   try {
     return new Date(d).toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', year: 'numeric' });
   } catch { return '—'; }
+}
+
+function DeliveryBadge({ status }: { status: DeliveryStatus | undefined }) {
+  if (!status || status === 'pending') return null;
+  if (status === 'delivered') {
+    return (
+      <span className="text-xs text-green-600 flex items-center gap-0.5">
+        <CheckCircle2 className="h-3 w-3" /> Доставлено
+      </span>
+    );
+  }
+  if (status === 'failed_not_connected') {
+    return (
+      <span className="text-xs text-amber-500 flex items-center gap-0.5">
+        <WifiOff className="h-3 w-3" /> Нет Telegram
+      </span>
+    );
+  }
+  return (
+    <span className="text-xs text-red-500 flex items-center gap-0.5">
+      <XCircle className="h-3 w-3" /> Ошибка доставки
+    </span>
+  );
 }
 
 // ─── Skeleton ────────────────────────────────────────────────────────────────
@@ -181,6 +207,50 @@ function TaskImagePreview({ taskImageUrl }: { taskImageUrl: string | null }) {
         loading="lazy"
       />
     </a>
+  );
+}
+
+// ─── Materials Section ───────────────────────────────────────────────────────
+
+function MaterialsList({ assignmentId, materials }: { assignmentId: string; materials: HomeworkMaterial[] }) {
+  if (materials.length === 0) return null;
+
+  const handleOpen = async (material: HomeworkMaterial) => {
+    if (material.type === 'link' && material.url) {
+      window.open(material.url, '_blank', 'noreferrer');
+      return;
+    }
+    try {
+      const { url } = await getMaterialSignedUrl(assignmentId, material.id);
+      window.open(url, '_blank', 'noreferrer');
+    } catch {
+      alert('Не удалось открыть материал');
+    }
+  };
+
+  return (
+    <Card animate={false}>
+      <CardHeader>
+        <CardTitle className="text-lg flex items-center gap-2">
+          <Paperclip className="h-4 w-4" />
+          Материалы ({materials.length})
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-2">
+        {materials.map((m) => (
+          <div key={m.id} className="flex items-center justify-between gap-2 p-2 rounded-lg border bg-muted/20">
+            <div className="min-w-0">
+              <p className="text-sm font-medium truncate">{m.title}</p>
+              <p className="text-xs text-muted-foreground">{m.type.toUpperCase()}</p>
+            </div>
+            <Button size="sm" variant="ghost" onClick={() => void handleOpen(m)}>
+              <ExternalLink className="h-3.5 w-3.5 mr-1" />
+              Открыть
+            </Button>
+          </div>
+        ))}
+      </CardContent>
+    </Card>
   );
 }
 
@@ -325,7 +395,7 @@ function StudentsList({
                     )}
                     <div>
                       <p className="font-medium text-sm truncate">{student.name || 'Без имени'}</p>
-                      <div className="flex items-center gap-2 mt-0.5">
+                      <div className="flex items-center gap-2 mt-0.5 flex-wrap">
                         {student.notified ? (
                           <span className="text-xs text-green-600 flex items-center gap-0.5">
                             <CheckCircle2 className="h-3 w-3" /> Уведомлён
@@ -335,6 +405,7 @@ function StudentsList({
                             <AlertCircle className="h-3 w-3" /> Не уведомлён
                           </span>
                         )}
+                        <DeliveryBadge status={student.delivery_status} />
                       </div>
                     </div>
                   </div>
@@ -469,6 +540,11 @@ function TutorHomeworkDetailContent() {
 
             {/* Tasks */}
             <TasksList details={details} />
+
+            {/* Materials */}
+            {details.materials && details.materials.length > 0 && (
+              <MaterialsList assignmentId={details.assignment.id as string} materials={details.materials} />
+            )}
 
             {/* Students */}
             <StudentsList details={details} results={results} />

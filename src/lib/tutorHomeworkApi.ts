@@ -17,6 +17,8 @@ export interface TutorHomeworkAssignmentListItem {
   assigned_count: number;
   submitted_count: number;
   avg_score: number | null;
+  delivered_count?: number;
+  not_connected_count?: number;
 }
 
 export interface CreateAssignmentTask {
@@ -25,6 +27,7 @@ export interface CreateAssignmentTask {
   task_image_url?: string | null;
   correct_answer?: string | null;
   solution_steps?: string | null;
+  rubric_text?: string | null;
   max_score?: number;
 }
 
@@ -35,6 +38,88 @@ export interface CreateAssignmentPayload {
   description?: string | null;
   deadline?: string | null;
   tasks: CreateAssignmentTask[];
+  save_as_template?: boolean;
+}
+
+// ─── Templates ───────────────────────────────────────────────────────────────
+
+export interface HomeworkTemplateTask {
+  task_text: string;
+  task_image_url?: string | null;
+  correct_answer?: string | null;
+  solution_steps?: string | null;
+  rubric_text?: string | null;
+  max_score?: number;
+}
+
+export interface HomeworkTemplateListItem {
+  id: string;
+  title: string;
+  subject: HomeworkSubject;
+  topic: string | null;
+  tags: string[];
+  created_at: string;
+  task_count?: number;
+}
+
+export interface HomeworkTemplate {
+  id: string;
+  title: string;
+  subject: HomeworkSubject;
+  topic: string | null;
+  tags: string[];
+  tasks_json: HomeworkTemplateTask[];
+  created_at: string;
+}
+
+export interface CreateTemplatePayload {
+  title: string;
+  subject: HomeworkSubject;
+  topic?: string | null;
+  tags?: string[];
+  tasks_json: HomeworkTemplateTask[];
+}
+
+// ─── Materials ───────────────────────────────────────────────────────────────
+
+export type MaterialType = 'pdf' | 'image' | 'link';
+
+export interface HomeworkMaterial {
+  id: string;
+  type: MaterialType;
+  storage_ref: string | null;
+  url: string | null;
+  title: string;
+  created_at: string;
+}
+
+export interface AddMaterialPayload {
+  type: MaterialType;
+  title: string;
+  storage_ref?: string | null;
+  url?: string | null;
+}
+
+export interface UploadTutorHomeworkMaterialResult {
+  storageRef: string;
+  bucket: string;
+  objectPath: string;
+}
+
+// ─── Delivery tracking ───────────────────────────────────────────────────────
+
+export type DeliveryStatus = 'pending' | 'delivered' | 'failed_not_connected' | 'failed_blocked_or_other';
+
+// ─── Attempts ────────────────────────────────────────────────────────────────
+
+export interface TutorHomeworkAttemptSummary {
+  id: string;
+  student_id: string;
+  attempt_no: number;
+  status: string;
+  total_score: number | null;
+  total_max_score: number | null;
+  submitted_at: string | null;
 }
 
 export interface CreateAssignmentResponse {
@@ -331,6 +416,7 @@ export interface TutorHomeworkAssignmentDetails {
     task_image_url: string | null;
     correct_answer: string | null;
     solution_steps: string | null;
+    rubric_text: string | null;
     max_score: number;
   }[];
   assigned_students: {
@@ -338,7 +424,10 @@ export interface TutorHomeworkAssignmentDetails {
     name: string | null;
     notified: boolean;
     notified_at: string | null;
+    delivery_status: DeliveryStatus;
+    delivery_error_code: string | null;
   }[];
+  materials: HomeworkMaterial[];
   submissions_summary: {
     total: number;
     by_status: Record<string, number>;
@@ -371,6 +460,7 @@ export interface TutorHomeworkResultsPerStudent {
   total_max_score: number | null;
   percent: number | null;
   submission_id: string;
+  attempt_no: number;
   top_error_types: { type: string; count: number }[];
   submission_items: TutorHomeworkSubmissionItem[];
 }
@@ -452,4 +542,110 @@ export async function getHomeworkImageSignedUrl(
     .createSignedUrl(parsed.objectPath, 3600);
   if (error || !data?.signedUrl) return null;
   return data.signedUrl;
+}
+
+// ─── Templates API ────────────────────────────────────────────────────────────
+
+export async function listTutorHomeworkTemplates(
+  subject?: HomeworkSubject,
+): Promise<HomeworkTemplateListItem[]> {
+  const qs = subject ? `?subject=${encodeURIComponent(subject)}` : '';
+  return requestHomeworkApi<HomeworkTemplateListItem[]>(`/templates${qs}`);
+}
+
+export async function getTutorHomeworkTemplate(id: string): Promise<HomeworkTemplate> {
+  return requestHomeworkApi<HomeworkTemplate>(`/templates/${encodeURIComponent(id)}`);
+}
+
+export async function createTutorHomeworkTemplate(
+  payload: CreateTemplatePayload,
+): Promise<{ template_id: string }> {
+  return requestHomeworkApi<{ template_id: string }>('/templates', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function deleteTutorHomeworkTemplate(id: string): Promise<void> {
+  await requestHomeworkApi<{ ok: boolean }>(`/templates/${encodeURIComponent(id)}`, {
+    method: 'DELETE',
+  });
+}
+
+// ─── Materials API ────────────────────────────────────────────────────────────
+
+const HOMEWORK_MATERIALS_BUCKET = 'homework-materials';
+
+export async function uploadTutorHomeworkMaterial(
+  file: File,
+): Promise<UploadTutorHomeworkMaterialResult> {
+  const { data: sessionData } = await supabase.auth.getSession();
+  const userId = sessionData?.session?.user?.id;
+  if (!userId) {
+    throw new HomeworkApiError(401, 'UNAUTHORIZED', 'Нет активной сессии');
+  }
+
+  const ext = file.name.split('.').pop()?.toLowerCase() ?? 'bin';
+  const uuid = crypto.randomUUID();
+  const objectPath = `materials/${userId}/${uuid}.${ext}`;
+
+  const { error } = await supabase.storage
+    .from(HOMEWORK_MATERIALS_BUCKET)
+    .upload(objectPath, file, { contentType: file.type, upsert: false });
+
+  if (error) {
+    throw new HomeworkApiError(500, 'UPLOAD_ERROR', error.message);
+  }
+
+  return {
+    storageRef: toStorageRef(HOMEWORK_MATERIALS_BUCKET, objectPath),
+    bucket: HOMEWORK_MATERIALS_BUCKET,
+    objectPath,
+  };
+}
+
+export async function addTutorHomeworkMaterial(
+  assignmentId: string,
+  payload: AddMaterialPayload,
+): Promise<{ material_id: string }> {
+  return requestHomeworkApi<{ material_id: string }>(
+    `/assignments/${encodeURIComponent(assignmentId)}/materials`,
+    { method: 'POST', body: JSON.stringify(payload) },
+  );
+}
+
+export async function deleteTutorHomeworkMaterial(
+  assignmentId: string,
+  materialId: string,
+): Promise<void> {
+  await requestHomeworkApi<{ ok: boolean }>(
+    `/assignments/${encodeURIComponent(assignmentId)}/materials/${encodeURIComponent(materialId)}`,
+    { method: 'DELETE' },
+  );
+}
+
+export async function getMaterialSignedUrl(
+  assignmentId: string,
+  materialId: string,
+): Promise<string | null> {
+  try {
+    const result = await requestHomeworkApi<{ url: string }>(
+      `/assignments/${encodeURIComponent(assignmentId)}/materials/${encodeURIComponent(materialId)}/signed-url`,
+    );
+    return result.url ?? null;
+  } catch {
+    return null;
+  }
+}
+
+// ─── Attempts API ─────────────────────────────────────────────────────────────
+
+export async function listTutorHomeworkAttempts(
+  assignmentId: string,
+  studentId?: string,
+): Promise<TutorHomeworkAttemptSummary[]> {
+  const qs = studentId ? `?student_id=${encodeURIComponent(studentId)}` : '';
+  return requestHomeworkApi<TutorHomeworkAttemptSummary[]>(
+    `/assignments/${encodeURIComponent(assignmentId)}/attempts${qs}`,
+  );
 }

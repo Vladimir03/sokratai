@@ -27,6 +27,7 @@ export interface CheckHomeworkAnswerResult {
 
 export interface VisionCheckerOptions {
   strict?: boolean;
+  rubricText?: string | null;
 }
 
 type LovableMessageRole = "system" | "user" | "assistant";
@@ -429,9 +430,11 @@ function buildCheckPrompt(
   correctAnswer: string | null,
   solutionSteps: string | null,
   subject: HomeworkSubject,
+  rubricText?: string | null,
 ): LovableMessage[] {
   const correctAnswerValue = clampPromptText(correctAnswer) || "[нет эталонного ответа]";
   const solutionStepsValue = clampPromptText(solutionSteps) || "[нет эталонных шагов]";
+  const rubricLine = rubricText ? `rubric_criteria: ${clampPromptText(rubricText)}` : null;
 
   return [
     {
@@ -442,8 +445,9 @@ function buildCheckPrompt(
         'Формат: {"is_correct":boolean,"confidence":0..1,"score":0|1,"feedback":"...","error_type":"..."}',
         "НЕЛЬЗЯ выдавать готовый правильный ответ в feedback.",
         "Feedback должен быть в стиле короткой подсказки-направления.",
+        rubricLine ? "Если предоставлена rubric_criteria — используй её как основной критерий оценки." : "",
         `Допустимые error_type: ${HOMEWORK_ERROR_TYPES.join(", ")}.`,
-      ].join("\n"),
+      ].filter(Boolean).join("\n"),
     },
     {
       role: "user",
@@ -456,9 +460,10 @@ function buildCheckPrompt(
             `recognized_text: ${clampPromptText(recognizedText)}`,
             `correct_answer: ${correctAnswerValue}`,
             `solution_steps: ${solutionStepsValue}`,
+            rubricLine,
             "В ответе score используй только 0 или 1.",
             "Верни строго JSON-объект с ключами is_correct, confidence, score, feedback, error_type.",
-          ].join("\n\n"),
+          ].filter(Boolean).join("\n\n"),
         },
       ],
     },
@@ -524,10 +529,10 @@ export async function checkHomeworkAnswer(
   options: VisionCheckerOptions = {},
 ): Promise<CheckHomeworkAnswerResult> {
   const strict = options.strict === true;
-  console.log("homework_vision_check_start", { subject, strict });
+  console.log("homework_vision_check_start", { subject, strict, has_rubric: !!options.rubricText });
 
   try {
-    const messages = buildCheckPrompt(recognizedText, taskText, correctAnswer, solutionSteps, subject);
+    const messages = buildCheckPrompt(recognizedText, taskText, correctAnswer, solutionSteps, subject, options.rubricText);
     const parsed = await callLovableJson(messages, "homework_vision_check");
     const result = sanitizeCheckResult(parsed, correctAnswer);
 
