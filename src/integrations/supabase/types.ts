@@ -574,9 +574,81 @@ export type Database = {
         }
         Relationships: []
       }
+      homework_tutor_materials: {
+        Row: {
+          assignment_id: string
+          created_at: string
+          id: string
+          storage_ref: string | null
+          title: string
+          type: string
+          url: string | null
+        }
+        Insert: {
+          assignment_id: string
+          created_at?: string
+          id?: string
+          storage_ref?: string | null
+          title: string
+          type: string
+          url?: string | null
+        }
+        Update: {
+          assignment_id?: string
+          created_at?: string
+          id?: string
+          storage_ref?: string | null
+          title?: string
+          type?: string
+          url?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "homework_tutor_materials_assignment_id_fkey"
+            columns: ["assignment_id"]
+            isOneToOne: false
+            referencedRelation: "homework_tutor_assignments"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      homework_tutor_reminder_log: {
+        Row: {
+          assignment_id: string
+          id: string
+          reminder_type: string
+          sent_at: string
+          student_id: string
+        }
+        Insert: {
+          assignment_id: string
+          id?: string
+          reminder_type: string
+          sent_at?: string
+          student_id: string
+        }
+        Update: {
+          assignment_id?: string
+          id?: string
+          reminder_type?: string
+          sent_at?: string
+          student_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "homework_tutor_reminder_log_assignment_id_fkey"
+            columns: ["assignment_id"]
+            isOneToOne: false
+            referencedRelation: "homework_tutor_assignments"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       homework_tutor_student_assignments: {
         Row: {
           assignment_id: string
+          delivery_error_code: string | null
+          delivery_status: string
           id: string
           notified: boolean
           notified_at: string | null
@@ -584,6 +656,8 @@ export type Database = {
         }
         Insert: {
           assignment_id: string
+          delivery_error_code?: string | null
+          delivery_status?: string
           id?: string
           notified?: boolean
           notified_at?: string | null
@@ -591,6 +665,8 @@ export type Database = {
         }
         Update: {
           assignment_id?: string
+          delivery_error_code?: string | null
+          delivery_status?: string
           id?: string
           notified?: boolean
           notified_at?: string | null
@@ -675,6 +751,7 @@ export type Database = {
       homework_tutor_submissions: {
         Row: {
           assignment_id: string
+          attempt_no: number
           id: string
           status: string
           student_id: string
@@ -685,6 +762,7 @@ export type Database = {
         }
         Insert: {
           assignment_id: string
+          attempt_no?: number
           id?: string
           status?: string
           student_id: string
@@ -695,6 +773,7 @@ export type Database = {
         }
         Update: {
           assignment_id?: string
+          attempt_no?: number
           id?: string
           status?: string
           student_id?: string
@@ -720,6 +799,7 @@ export type Database = {
           id: string
           max_score: number
           order_num: number
+          rubric_text: string | null
           solution_steps: string | null
           task_image_url: string | null
           task_text: string
@@ -730,6 +810,7 @@ export type Database = {
           id?: string
           max_score?: number
           order_num: number
+          rubric_text?: string | null
           solution_steps?: string | null
           task_image_url?: string | null
           task_text: string
@@ -740,6 +821,7 @@ export type Database = {
           id?: string
           max_score?: number
           order_num?: number
+          rubric_text?: string | null
           solution_steps?: string | null
           task_image_url?: string | null
           task_text?: string
@@ -753,6 +835,39 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      homework_tutor_templates: {
+        Row: {
+          created_at: string
+          id: string
+          subject: string
+          tags: string[]
+          tasks_json: Json
+          title: string
+          topic: string | null
+          tutor_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          subject: string
+          tags?: string[]
+          tasks_json?: Json
+          title: string
+          topic?: string | null
+          tutor_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          subject?: string
+          tags?: string[]
+          tasks_json?: Json
+          title?: string
+          topic?: string | null
+          tutor_id?: string
+        }
+        Relationships: []
       }
       homework_tutor_user_bot_state: {
         Row: {
