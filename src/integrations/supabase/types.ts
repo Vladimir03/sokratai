@@ -2332,6 +2332,7 @@ export type Database = {
         Returns: {
           amount: number
           due_date: string
+          lesson_start_at: string
           payment_id: string
           period: string
           student_name: string
