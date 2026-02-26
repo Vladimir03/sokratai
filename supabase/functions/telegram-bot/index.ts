@@ -4336,6 +4336,7 @@ type PendingPaymentRow = {
   amount: number;
   period: string | null;
   due_date: string | null;
+  lesson_start_at: string | null;  // actual lesson date from tutor_lessons (matches cabinet)
 };
 
 type ParsedPaymentCallback = {
@@ -4688,6 +4689,21 @@ function formatRub(amount: number): string {
   return `${amount.toLocaleString("ru-RU")} ₽`;
 }
 
+// Returns Russian short date e.g. "21 февраля".
+// Primary source: lesson_start_at (actual lesson date, matches cabinet).
+// Fallback: due_date, then period text.
+function formatLessonDate(row: PendingPaymentRow): string {
+  const ts = row.lesson_start_at ?? (row.due_date ? `${row.due_date}T00:00:00` : null);
+  if (!ts) return row.period ?? "—";
+  const d = new Date(ts);
+  if (isNaN(d.getTime())) return row.period ?? ts;
+  const months = [
+    "января","февраля","марта","апреля","мая","июня",
+    "июля","августа","сентября","октября","ноября","декабря",
+  ];
+  return `${d.getDate()} ${months[d.getMonth()]}`;
+}
+
 function pluralizeStudents(count: number): string {
   const mod10 = count % 10;
   const mod100 = count % 100;
@@ -4800,36 +4816,43 @@ async function handlePaymStudent(
   const studentName = studentRows[0].student_name;
   const totalDebt = studentRows.reduce((acc, r) => acc + r.amount, 0);
 
+  // Rows are already ordered newest-first by the RPC.
+  // Build bullet list showing actual lesson date per payment.
   const paymentLines = studentRows.map((r) => {
-    const dateStr = r.due_date
-      ? new Date(`${r.due_date}T00:00:00`).toLocaleDateString("ru-RU")
-      : null;
-    const periodStr = r.period ?? dateStr ?? "—";
-    return `• ${formatRub(r.amount)} — ${periodStr}`;
+    const dateStr = formatLessonDate(r);
+    return `• ${formatRub(r.amount)} — 📅 ${dateStr}`;
   });
 
-  const text =
-    `👤 <b>${studentName}</b>\n` +
-    `💰 К оплате: <b>${formatRub(totalDebt)}</b>\n\n` +
-    paymentLines.join("\n");
-
-  // Single payment → paym_ok:{payment_id}
-  // Multiple payments → paym_oks:{tutor_student_id} (marks all)
-  const markButton =
+  const headerText =
     studentRows.length === 1
-      ? {
-          text: `✅ Оплачено — ${formatRub(totalDebt)}`,
-          callback_data: `paym_ok:${studentRows[0].payment_id}`,
-        }
-      : {
-          text: `✅ Всё оплачено — ${formatRub(totalDebt)}`,
-          callback_data: `paym_oks:${tutorStudentId}`,
-        };
+      ? `👤 <b>${studentName}</b>\n💰 К оплате: <b>${formatRub(totalDebt)}</b>`
+      : `👤 <b>${studentName}</b>\n💰 Общий долг: <b>${formatRub(totalDebt)}</b>`;
 
-  const keyboard = [
-    [markButton],
-    [{ text: "◀ Все должники", callback_data: "paym_list" }],
+  const text = `${headerText}\n\n${paymentLines.join("\n")}`;
+
+  // One button per payment row (individual lesson date selection)
+  const perPaymentButtons = studentRows.map((r) => [
+    {
+      text: `✅ ${formatLessonDate(r)} — ${formatRub(r.amount)}`,
+      callback_data: `paym_ok:${r.payment_id}`,
+    },
+  ]);
+
+  const keyboard: Array<Array<{ text: string; callback_data: string }>> = [
+    ...perPaymentButtons,
   ];
+
+  // "Mark all" convenience button only when multiple payments
+  if (studentRows.length > 1) {
+    keyboard.push([
+      {
+        text: `✅ Все сразу — ${formatRub(totalDebt)}`,
+        callback_data: `paym_oks:${tutorStudentId}`,
+      },
+    ]);
+  }
+
+  keyboard.push([{ text: "◀ Все должники", callback_data: "paym_list" }]);
 
   if (messageId) {
     await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/editMessageText`, {
