@@ -2327,6 +2327,17 @@ export type Database = {
           trial_ends_at: string
         }[]
       }
+      get_tutor_pending_payments_by_telegram: {
+        Args: { _telegram_id: string }
+        Returns: {
+          amount: number
+          due_date: string
+          payment_id: string
+          period: string
+          student_name: string
+          tutor_student_id: string
+        }[]
+      }
       get_tutor_students_debt: {
         Args: never
         Returns: {
@@ -2359,6 +2370,10 @@ export type Database = {
       }
       is_tutor: { Args: { _user_id: string }; Returns: boolean }
       is_tutor_of_student: { Args: { _student_id: string }; Returns: boolean }
+      mark_payment_as_paid_by_telegram: {
+        Args: { _payment_id: string; _telegram_id: string }
+        Returns: boolean
+      }
       mark_payment_reminder_sent: {
         Args: { _lesson_id: string }
         Returns: undefined
