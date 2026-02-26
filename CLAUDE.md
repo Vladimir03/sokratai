@@ -603,6 +603,41 @@ src/
   - UI-consumers (`TutorStudents`, `TutorStudentProfile`, `StudentCard`) читают долг из student API
   - `useTutorPayments` не используется для расчета долга в списке/профиле, но сохранен для страницы платежей
 
+## Мобильная отметка оплат через Telegram (Sprint «Mobile Pay»)
+
+- Репетитор может отметить оплату прямо из Telegram-бота, не открывая кабинет
+- Команда `/pay` в боте → список должников с кнопками по ученикам
+- Нажатие на ученика → кнопки по каждому занятию с реальной датой урока (`tutor_lessons.start_at`)
+- Нажатие на дату → оплата отмечена, кабинет обновляется при следующем открытии (React Query `refetchOnWindowFocus`)
+
+### Новые RPCs (SECURITY DEFINER, service_role)
+- `get_tutor_pending_payments_by_telegram(_telegram_id TEXT)` — список pending/overdue платежей по `telegram_id`, возвращает `lesson_start_at` из `tutor_lessons` (реальная дата занятия, совпадает с кабинетом)
+- `mark_payment_as_paid_by_telegram(_payment_id UUID, _telegram_id TEXT)` — отмечает платёж как `paid`, проверяет цепочку `telegram_id → tutors → tutor_students → tutor_payments`, идемпотентна
+
+### Ключевые правила
+
+#### Дата занятия — единый источник
+- **Кабинет** (`TutorPayments.tsx`): primary `tutor_lessons.start_at`, fallback `tutor_payments.due_date`
+- **Бот** (`/pay` flow): то же самое — RPC возвращает `lesson_start_at` (из JOIN `tutor_lessons`), бот показывает его через `formatLessonDate()`
+- `tutor_payments.due_date` = `CURRENT_DATE` при создании платежа (≠ дата занятия!). **Никогда не показывай `due_date` как "дату занятия"** без проверки `lesson_start_at`
+
+#### Callback-формат (Telegram, ≤64 байт)
+- `paym_list` — показать/обновить список должников
+- `paym_s:{tutor_student_id}` — детали ученика (44 байта ✓)
+- `paym_ok:{payment_id}` — отметить одну оплату (45 байт ✓)
+- `paym_oks:{tutor_student_id}` — отметить все оплаты ученика (46 байт ✓)
+- Не пересекаются с существующими `payment:` и `payment_remind:` callback-ами
+
+#### Вспомогательные функции в боте
+- `formatLessonDate(row: PendingPaymentRow)` — русский короткий формат «21 февраля», primary `lesson_start_at`, fallback `due_date`, fallback `period`
+- `formatRub(amount)` — форматирование суммы в рублях
+- `getPendingPaymentsByTelegram(telegramUserId)` — обёртка над RPC
+- Все `paym_*` handlers зарегистрированы в `handleCallbackQuery` **до** блока `payment_remind:` / `payment:`
+
+#### Синхронизация с кабинетом
+- Автоматическая через React Query `refetchOnWindowFocus: true` (уже встроено в `tutorQueryOptions.ts`)
+- Дополнительных изменений фронтенда **не нужно**
+
 ## Команды
 
 ```bash
