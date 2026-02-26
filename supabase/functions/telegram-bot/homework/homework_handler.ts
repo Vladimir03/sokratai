@@ -36,7 +36,7 @@ export interface ReviewContextItem {
   ai_error_type: string;
 }
 
-const MAX_ATTEMPTS = 3;
+export const MAX_ATTEMPTS = 3;
 
 export interface HomeworkSubmissionItemRow {
   id: string;
@@ -627,7 +627,7 @@ export async function loadSubmissionItemsWithErrors(
     throw new Error(`Failed to load submission items for review: ${error.message}`);
   }
 
-  return ((data ?? []) as Array<{
+  return ((data ?? []) as unknown as Array<{
     task_id: string;
     student_text: string | null;
     ai_feedback: string | null;

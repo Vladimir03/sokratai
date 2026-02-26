@@ -221,8 +221,8 @@ function MaterialsList({ assignmentId, materials }: { assignmentId: string; mate
       return;
     }
     try {
-      const { url } = await getMaterialSignedUrl(assignmentId, material.id);
-      window.open(url, '_blank', 'noreferrer');
+      const url = await getMaterialSignedUrl(assignmentId, material.id);
+      if (url) window.open(url, '_blank', 'noreferrer');
     } catch {
       alert('Не удалось открыть материал');
     }
