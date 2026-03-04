@@ -1,40 +1,27 @@
 
 
-## Root Cause
+## Problem
 
-The `get_tutor_pending_payments_by_telegram` RPC function has a **type mismatch bug**. It declares `amount INTEGER` in its return signature, but `tutor_payments.amount` is actually `NUMERIC`. This causes a Postgres error at runtime:
+Edge function `homework-api` returns 500 on `POST /assignments` because line 285 inserts `group_id` into `homework_tutor_assignments`, but the database table has no such column.
 
+Error from logs:
 ```
-structure of query does not match function result type
-Returned type numeric does not match expected type integer in column 4
+Could not find the 'group_id' column of 'homework_tutor_assignments' in the schema cache
 ```
-
-The bot catches this error silently and returns an empty array, showing "Нет должников".
 
 ## Fix
 
-One database migration to recreate the function with `amount NUMERIC` instead of `amount INTEGER`:
+Two options:
+1. **Add `group_id` column** to `homework_tutor_assignments` via migration (if mini-groups homework is needed)
+2. **Remove `group_id`** from the insert in the edge function (simpler, since mini-groups for homework isn't active)
 
-```sql
-CREATE OR REPLACE FUNCTION public.get_tutor_pending_payments_by_telegram(
-  _telegram_id TEXT
-)
-RETURNS TABLE (
-  payment_id        UUID,
-  tutor_student_id  UUID,
-  student_name      TEXT,
-  amount            NUMERIC,   -- was INTEGER, must match tutor_payments.amount
-  period            TEXT,
-  due_date          DATE
-)
-...
-```
+**Recommended**: Option 2 — remove `group_id` from the insert statement in `homework-api/index.ts` (lines 254-256 validation + line 285 insert). This is the minimal fix. The validation block (lines 254-256) and the insert field (line 285) both reference `group_id`.
 
-No frontend changes needed. No edge function redeployment needed -- the fix is purely in the database function.
+### Changes
 
-### Files changed
+**`supabase/functions/homework-api/index.ts`**:
+- Remove `group_id` validation (lines 254-256)
+- Remove `group_id` from insert object (line 285)
 
-| File | Change |
-|------|--------|
-| New migration SQL | Fix return type `amount INTEGER` → `amount NUMERIC` |
+Then redeploy the `homework-api` edge function.
 
