@@ -251,10 +251,6 @@ async function handleCreateAssignment(
   if (b.max_attempts !== undefined && b.max_attempts !== null && !isPositiveInt(b.max_attempts)) {
     return jsonError(cors, 400, "VALIDATION", "max_attempts must be a positive integer");
   }
-  if (b.group_id !== undefined && b.group_id !== null && !isUUID(b.group_id)) {
-    return jsonError(cors, 400, "VALIDATION", "group_id must be a UUID or null");
-  }
-
   for (let i = 0; i < b.tasks.length; i++) {
     const t = b.tasks[i];
     if (!t || typeof t !== "object") {
@@ -281,8 +277,6 @@ async function handleCreateAssignment(
       description: isNonEmptyString(b.description) ? (b.description as string).trim() : null,
       deadline: isNonEmptyString(b.deadline) ? b.deadline : null,
       status: "draft",
-      max_attempts: isPositiveInt(b.max_attempts) ? b.max_attempts : 3,
-      group_id: isUUID(b.group_id) ? b.group_id : null,
     })
     .select("id")
     .single();
