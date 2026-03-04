@@ -38,6 +38,8 @@ export interface CreateAssignmentPayload {
   description?: string | null;
   deadline?: string | null;
   tasks: CreateAssignmentTask[];
+  max_attempts?: number;
+  group_id?: string | null;
   save_as_template?: boolean;
 }
 
@@ -129,6 +131,7 @@ export interface CreateAssignmentResponse {
 export interface AssignStudentsResponse {
   added: number;
   assignment_status: HomeworkAssignmentStatus;
+  assigned_group_id?: string | null;
 }
 
 export type NotifyFailureReason =
@@ -231,12 +234,13 @@ export async function createTutorHomeworkAssignment(
 export async function assignTutorHomeworkStudents(
   assignmentId: string,
   studentIds: string[],
+  groupId?: string | null,
 ): Promise<AssignStudentsResponse> {
   return requestHomeworkApi<AssignStudentsResponse>(
     `/assignments/${encodeURIComponent(assignmentId)}/assign`,
     {
       method: 'POST',
-      body: JSON.stringify({ student_ids: studentIds }),
+      body: JSON.stringify({ student_ids: studentIds, group_id: groupId ?? null }),
     },
   );
 }

@@ -39,7 +39,7 @@ import { toast } from 'sonner';
 import TutorGuard from '@/components/TutorGuard';
 import { TutorLayout } from '@/components/tutor/TutorLayout';
 import { TutorDataStatus } from '@/components/tutor/TutorDataStatus';
-import { useTutorStudents } from '@/hooks/useTutor';
+import { useTutorStudents, useTutorGroups, useTutorGroupMemberships } from '@/hooks/useTutor';
 import { useTutorHomeworkTemplates } from '@/hooks/useTutorHomework';
 import {
   Sheet,
@@ -399,9 +399,10 @@ function MaterialsSection({
 
 interface MetaState {
   title: string;
-  subject: HomeworkSubject | '';
+  subject: HomeworkSubject | "";
   topic: string;
   deadline: string;
+  max_attempts: number;
 }
 
 function StepMeta({
@@ -465,6 +466,24 @@ function StepMeta({
           type="datetime-local"
           value={meta.deadline}
           onChange={(e) => onChange({ ...meta, deadline: e.target.value })}
+          className="text-base"
+        />
+      </div>
+
+      <div className="space-y-2">
+        <Label htmlFor="hw-max-attempts">Максимум попыток</Label>
+        <Input
+          id="hw-max-attempts"
+          type="number"
+          min={1}
+          max={10}
+          value={meta.max_attempts}
+          onChange={(e) =>
+            onChange({
+              ...meta,
+              max_attempts: Math.min(10, Math.max(1, Number(e.target.value || 3))),
+            })
+          }
           className="text-base"
         />
       </div>
@@ -760,6 +779,11 @@ function StepTasks({
   materials: DraftMaterial[];
   onMaterialsChange: (m: DraftMaterial[]) => void;
   errors: Record<string, string>;
+  assignMode: 'student' | 'group';
+  onAssignModeChange: (mode: 'student' | 'group') => void;
+  selectedGroupId: string;
+  onGroupIdChange: (groupId: string) => void;
+  groups: Array<{ id: string; name: string }>;
 }) {
   const handleAdd = useCallback(() => {
     onChange([...tasks, createEmptyTask()]);
@@ -822,6 +846,11 @@ function StepAssign({
   notifyTemplate,
   onTemplateChange,
   errors,
+  assignMode,
+  onAssignModeChange,
+  selectedGroupId,
+  onGroupIdChange,
+  groups,
 }: {
   selectedIds: Set<string>;
   onChangeSelected: (s: Set<string>) => void;
@@ -830,6 +859,11 @@ function StepAssign({
   notifyTemplate: string;
   onTemplateChange: (v: string) => void;
   errors: Record<string, string>;
+  assignMode: 'student' | 'group';
+  onAssignModeChange: (mode: 'student' | 'group') => void;
+  selectedGroupId: string;
+  onGroupIdChange: (groupId: string) => void;
+  groups: Array<{ id: string; name: string }>;
 }) {
   const [searchQuery, setSearchQuery] = useState('');
   const {
@@ -883,6 +917,24 @@ function StepAssign({
 
   return (
     <div className="space-y-6">
+      <div className="space-y-2">
+        <Label>Кому назначить</Label>
+        <div className="flex gap-2">
+          <Button type="button" variant={assignMode === 'student' ? 'default' : 'outline'} size="sm" onClick={() => onAssignModeChange('student')}>Ученик</Button>
+          <Button type="button" variant={assignMode === 'group' ? 'default' : 'outline'} size="sm" onClick={() => onAssignModeChange('group')}>Группа</Button>
+        </div>
+        {assignMode === 'group' && (
+          <Select value={selectedGroupId || undefined} onValueChange={onGroupIdChange}>
+            <SelectTrigger><SelectValue placeholder="Выберите группу" /></SelectTrigger>
+            <SelectContent>
+              {groups.map((g) => (
+                <SelectItem key={g.id} value={g.id}>{g.name}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        )}
+      </div>
+
       {/* Student list */}
       <div className="space-y-3">
         <div className="flex items-center justify-between">
@@ -1070,6 +1122,8 @@ function TutorHomeworkCreateContent() {
   const queryClient = useQueryClient();
   const [searchParams] = useSearchParams();
   const { students: tutorStudents } = useTutorStudents();
+  const { groups } = useTutorGroups(step === 3);
+  const { memberships } = useTutorGroupMemberships(step === 3);
 
   const [step, setStep] = useState(1);
   const [templateLoading, setTemplateLoading] = useState(false);
@@ -1080,6 +1134,7 @@ function TutorHomeworkCreateContent() {
     subject: '',
     topic: '',
     deadline: '',
+    max_attempts: 3,
   });
 
   // Step 2
@@ -1091,6 +1146,8 @@ function TutorHomeworkCreateContent() {
   const [selectedStudentIds, setSelectedStudentIds] = useState<Set<string>>(
     new Set(),
   );
+  const [assignMode, setAssignMode] = useState<'student' | 'group'>('student');
+  const [selectedGroupId, setSelectedGroupId] = useState<string>('');
   const [notifyEnabled, setNotifyEnabled] = useState(true);
   const [notifyTemplate, setNotifyTemplate] = useState('');
   const [saveAsTemplate, setSaveAsTemplate] = useState(false);
@@ -1103,6 +1160,22 @@ function TutorHomeworkCreateContent() {
   useEffect(() => {
     tasksRef.current = tasks;
   }, [tasks]);
+
+  useEffect(() => {
+    if (assignMode !== 'group' || !selectedGroupId) return;
+
+    const memberTutorStudentIds = new Set(
+      memberships
+        .filter((m) => m.tutor_group_id === selectedGroupId && m.is_active)
+        .map((m) => m.tutor_student_id),
+    );
+
+    const mappedStudentIds = tutorStudents
+      .filter((s) => memberTutorStudentIds.has(s.id))
+      .map((s) => s.student_id);
+
+    setSelectedStudentIds(new Set(mappedStudentIds));
+  }, [assignMode, selectedGroupId, memberships, tutorStudents]);
 
   useEffect(
     () => () => {
@@ -1330,6 +1403,8 @@ function TutorHomeworkCreateContent() {
             ? new Date(meta.deadline).toISOString()
             : null,
           tasks: apiTasks,
+          max_attempts: meta.max_attempts,
+          group_id: assignMode === 'group' && selectedGroupId ? selectedGroupId : null,
         });
         assignmentId = result.assignment_id;
         createdAssignmentIdRef.current = assignmentId;
@@ -1363,6 +1438,7 @@ function TutorHomeworkCreateContent() {
       const assignResult = await assignTutorHomeworkStudents(
         assignmentId,
         [...selectedStudentIds],
+        assignMode === 'group' && selectedGroupId ? selectedGroupId : null,
       );
 
       // Phase 3: notify (optional)
@@ -1488,6 +1564,8 @@ function TutorHomeworkCreateContent() {
     tasks,
     meta,
     selectedStudentIds,
+    assignMode,
+    selectedGroupId,
     notifyEnabled,
     notifyTemplate,
     materials,
@@ -1557,6 +1635,11 @@ function TutorHomeworkCreateContent() {
               notifyTemplate={notifyTemplate}
               onTemplateChange={setNotifyTemplate}
               errors={errors}
+              assignMode={assignMode}
+              onAssignModeChange={setAssignMode}
+              selectedGroupId={selectedGroupId}
+              onGroupIdChange={setSelectedGroupId}
+              groups={groups.map((g) => ({ id: g.id, name: g.name }))}
             />
           )}
         </div>

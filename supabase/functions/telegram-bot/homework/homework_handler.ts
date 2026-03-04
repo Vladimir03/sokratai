@@ -36,7 +36,6 @@ export interface ReviewContextItem {
   ai_error_type: string;
 }
 
-export const MAX_ATTEMPTS = 3;
 
 export interface HomeworkSubmissionItemRow {
   id: string;
@@ -581,6 +580,18 @@ export async function getCurrentAttemptNo(assignmentId: string, studentId: strin
   return data?.attempt_no ?? 0;
 }
 
+async function getAssignmentMaxAttempts(assignmentId: string): Promise<number> {
+  const { data, error } = await supabase
+    .from("homework_tutor_assignments")
+    .select("max_attempts")
+    .eq("id", assignmentId)
+    .single();
+
+  if (error || !data) return 3;
+  const value = Number(data.max_attempts ?? 3);
+  return Number.isFinite(value) && value > 0 ? value : 3;
+}
+
 export async function createSubmissionForAttempt(
   assignmentId: string,
   studentId: string,
@@ -588,8 +599,9 @@ export async function createSubmissionForAttempt(
 ): Promise<{ submissionId: string; attemptNo: number }> {
   const currentMax = await getCurrentAttemptNo(assignmentId, studentId);
   const nextAttemptNo = currentMax + 1;
+  const maxAttempts = await getAssignmentMaxAttempts(assignmentId);
 
-  if (nextAttemptNo > MAX_ATTEMPTS) {
+  if (nextAttemptNo > maxAttempts) {
     throw new Error("MAX_ATTEMPTS_REACHED");
   }
 

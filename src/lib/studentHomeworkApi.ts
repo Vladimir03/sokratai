@@ -1,0 +1,379 @@
+import { supabase } from '@/lib/supabaseClient';
+import type {
+  StudentHomeworkAssignment,
+  StudentHomeworkAssignmentDetails,
+  StudentHomeworkSubmission,
+} from '@/types/homework';
+
+const HOMEWORK_IMAGES_BUCKET = 'homework-images';
+
+export class StudentHomeworkApiError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'StudentHomeworkApiError';
+  }
+}
+
+function ensureUserId(userId: string | undefined): string {
+  if (!userId) {
+    throw new StudentHomeworkApiError('Пользователь не авторизован');
+  }
+  return userId;
+}
+
+async function getCurrentUserId(): Promise<string> {
+  const { data, error } = await supabase.auth.getUser();
+  if (error) {
+    throw new StudentHomeworkApiError(error.message);
+  }
+  return ensureUserId(data.user?.id);
+}
+
+function isDeadlinePassed(deadline: string | null | undefined): boolean {
+  if (!deadline) return false;
+  return new Date(deadline).getTime() <= Date.now();
+}
+
+export async function listStudentAssignments(): Promise<StudentHomeworkAssignment[]> {
+  const studentId = await getCurrentUserId();
+
+  const { data, error } = await supabase
+    .from('homework_tutor_student_assignments')
+    .select(`
+      assignment_id,
+      homework_tutor_assignments!inner(
+        id,
+        title,
+        subject,
+        topic,
+        description,
+        deadline,
+        status,
+        max_attempts,
+        created_at,
+        updated_at
+      )
+    `)
+    .eq('student_id', studentId)
+    .in('homework_tutor_assignments.status', ['active', 'closed']);
+
+  if (error) {
+    throw new StudentHomeworkApiError(error.message);
+  }
+
+  const assignmentIds = (data ?? []).map((row: any) => row.assignment_id as string);
+
+  const { data: attemptsRows, error: attemptsError } = await supabase
+    .from('homework_tutor_submissions')
+    .select('assignment_id, attempt_no, status')
+    .eq('student_id', studentId)
+    .in('assignment_id', assignmentIds.length > 0 ? assignmentIds : ['00000000-0000-0000-0000-000000000000']);
+
+  if (attemptsError) {
+    throw new StudentHomeworkApiError(attemptsError.message);
+  }
+
+  const attemptsMap = new Map<string, { attempts_used: number; latest_status: string | null }>();
+  for (const row of attemptsRows ?? []) {
+    const assignmentId = row.assignment_id as string;
+    const prev = attemptsMap.get(assignmentId) ?? { attempts_used: 0, latest_status: null };
+    const attemptNo = Number(row.attempt_no ?? 0);
+    if (attemptNo > prev.attempts_used) {
+      attemptsMap.set(assignmentId, {
+        attempts_used: attemptNo,
+        latest_status: typeof row.status === 'string' ? row.status : null,
+      });
+    }
+  }
+
+  return (data ?? [])
+    .map((row: any) => {
+      const assignment = row.homework_tutor_assignments;
+      const attemptInfo = attemptsMap.get(assignment.id) ?? { attempts_used: 0, latest_status: null };
+      return {
+        id: assignment.id,
+        title: assignment.title,
+        subject: assignment.subject,
+        topic: assignment.topic,
+        description: assignment.description,
+        deadline: assignment.deadline,
+        status: assignment.status,
+        max_attempts: assignment.max_attempts ?? 3,
+        attempts_used: attemptInfo.attempts_used,
+        latest_submission_status: attemptInfo.latest_status,
+      } satisfies StudentHomeworkAssignment;
+    })
+    .sort((a, b) => {
+      if (!a.deadline && !b.deadline) return 0;
+      if (!a.deadline) return 1;
+      if (!b.deadline) return -1;
+      return new Date(a.deadline).getTime() - new Date(b.deadline).getTime();
+    });
+}
+
+export async function getStudentSubmissions(assignmentId: string): Promise<StudentHomeworkSubmission[]> {
+  const studentId = await getCurrentUserId();
+  const { data, error } = await supabase
+    .from('homework_tutor_submissions')
+    .select(`
+      id,
+      assignment_id,
+      student_id,
+      attempt_no,
+      status,
+      total_score,
+      total_max_score,
+      submitted_at,
+      created_at,
+      updated_at,
+      homework_tutor_submission_items(
+        id,
+        task_id,
+        student_text,
+        student_image_urls,
+        ai_feedback,
+        ai_score,
+        ai_is_correct,
+        tutor_comment,
+        tutor_override_correct
+      )
+    `)
+    .eq('assignment_id', assignmentId)
+    .eq('student_id', studentId)
+    .order('attempt_no', { ascending: false });
+
+  if (error) {
+    throw new StudentHomeworkApiError(error.message);
+  }
+
+  return (data ?? []) as StudentHomeworkSubmission[];
+}
+
+export async function getStudentAssignment(assignmentId: string): Promise<StudentHomeworkAssignmentDetails> {
+  const studentId = await getCurrentUserId();
+
+  const { data: assigned, error: assignedError } = await supabase
+    .from('homework_tutor_student_assignments')
+    .select('assignment_id')
+    .eq('assignment_id', assignmentId)
+    .eq('student_id', studentId)
+    .maybeSingle();
+
+  if (assignedError) throw new StudentHomeworkApiError(assignedError.message);
+  if (!assigned) throw new StudentHomeworkApiError('Задание не найдено');
+
+  const { data: assignment, error: assignmentError } = await supabase
+    .from('homework_tutor_assignments')
+    .select('id, title, subject, topic, description, deadline, status, max_attempts, created_at, updated_at')
+    .eq('id', assignmentId)
+    .single();
+
+  if (assignmentError || !assignment) {
+    throw new StudentHomeworkApiError(assignmentError?.message ?? 'Задание не найдено');
+  }
+
+  const { data: tasks, error: tasksError } = await supabase
+    .from('homework_tutor_tasks')
+    .select('id, assignment_id, order_num, task_text, task_image_url, max_score')
+    .eq('assignment_id', assignmentId)
+    .order('order_num', { ascending: true });
+
+  if (tasksError) throw new StudentHomeworkApiError(tasksError.message);
+
+  const { data: materials, error: materialsError } = await supabase
+    .from('homework_tutor_materials')
+    .select('id, assignment_id, type, title, storage_ref, url, created_at')
+    .eq('assignment_id', assignmentId)
+    .order('created_at', { ascending: true });
+
+  if (materialsError) throw new StudentHomeworkApiError(materialsError.message);
+
+  const submissions = await getStudentSubmissions(assignmentId);
+
+  return {
+    ...assignment,
+    tasks: (tasks ?? []) as StudentHomeworkAssignmentDetails['tasks'],
+    materials: (materials ?? []) as StudentHomeworkAssignmentDetails['materials'],
+    submissions,
+  } as StudentHomeworkAssignmentDetails;
+}
+
+export async function createStudentSubmission(assignmentId: string): Promise<StudentHomeworkSubmission> {
+  const studentId = await getCurrentUserId();
+
+  const { data: assignment, error: assignmentError } = await supabase
+    .from('homework_tutor_assignments')
+    .select('id, deadline, max_attempts')
+    .eq('id', assignmentId)
+    .single();
+
+  if (assignmentError || !assignment) {
+    throw new StudentHomeworkApiError('Задание не найдено');
+  }
+
+  if (isDeadlinePassed(assignment.deadline)) {
+    throw new StudentHomeworkApiError('Дедлайн уже прошёл. Новая попытка недоступна.');
+  }
+
+  const { data: latestSubmission, error: latestError } = await supabase
+    .from('homework_tutor_submissions')
+    .select('attempt_no')
+    .eq('assignment_id', assignmentId)
+    .eq('student_id', studentId)
+    .order('attempt_no', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (latestError) {
+    throw new StudentHomeworkApiError(latestError.message);
+  }
+
+  const attemptsUsed = Number(latestSubmission?.attempt_no ?? 0);
+  const maxAttempts = Number(assignment.max_attempts ?? 3);
+
+  if (attemptsUsed >= maxAttempts) {
+    throw new StudentHomeworkApiError('Лимит попыток исчерпан.');
+  }
+
+  const { data, error } = await supabase
+    .from('homework_tutor_submissions')
+    .insert({
+      assignment_id: assignmentId,
+      student_id: studentId,
+      attempt_no: attemptsUsed + 1,
+      telegram_chat_id: null,
+      status: 'in_progress',
+    })
+    .select(`
+      id,
+      assignment_id,
+      student_id,
+      attempt_no,
+      status,
+      total_score,
+      total_max_score,
+      submitted_at,
+      created_at,
+      updated_at,
+      homework_tutor_submission_items(
+        id,
+        task_id,
+        student_text,
+        student_image_urls,
+        ai_feedback,
+        ai_score,
+        ai_is_correct,
+        tutor_comment,
+        tutor_override_correct
+      )
+    `)
+    .single();
+
+  if (error || !data) {
+    throw new StudentHomeworkApiError(error?.message ?? 'Не удалось создать попытку');
+  }
+
+  return data as StudentHomeworkSubmission;
+}
+
+export async function uploadStudentHomeworkFiles(
+  assignmentId: string,
+  submissionId: string,
+  taskId: string,
+  files: File[],
+): Promise<string[]> {
+  const uploadedPaths: string[] = [];
+
+  for (const file of files) {
+    const ext = file.name.split('.').pop()?.toLowerCase() || 'jpg';
+    const objectPath = `homework/${assignmentId}/${submissionId}/${taskId}/${crypto.randomUUID()}.${ext}`;
+    const { error } = await supabase.storage.from(HOMEWORK_IMAGES_BUCKET).upload(objectPath, file, {
+      upsert: false,
+      contentType: file.type || 'application/octet-stream',
+    });
+
+    if (error) {
+      throw new StudentHomeworkApiError(`Ошибка загрузки файла: ${error.message}`);
+    }
+    uploadedPaths.push(objectPath);
+  }
+
+  return uploadedPaths;
+}
+
+export async function submitStudentAnswer(
+  submissionId: string,
+  taskId: string,
+  text?: string,
+  files?: File[],
+): Promise<void> {
+  let imagePaths: string[] | null = null;
+
+  if (files && files.length > 0) {
+    const { data: submission, error: submissionError } = await supabase
+      .from('homework_tutor_submissions')
+      .select('assignment_id')
+      .eq('id', submissionId)
+      .single();
+
+    if (submissionError || !submission) {
+      throw new StudentHomeworkApiError('Попытка не найдена');
+    }
+
+    imagePaths = await uploadStudentHomeworkFiles(submission.assignment_id, submissionId, taskId, files);
+  }
+
+  const { error } = await supabase
+    .from('homework_tutor_submission_items')
+    .upsert(
+      {
+        submission_id: submissionId,
+        task_id: taskId,
+        student_text: text?.trim() || null,
+        student_image_urls: imagePaths,
+      },
+      { onConflict: 'submission_id,task_id' },
+    );
+
+  if (error) {
+    throw new StudentHomeworkApiError(error.message);
+  }
+}
+
+export async function finalizeSubmission(submissionId: string): Promise<void> {
+  const { data: submission, error: submissionError } = await supabase
+    .from('homework_tutor_submissions')
+    .select('assignment_id')
+    .eq('id', submissionId)
+    .single();
+
+  if (submissionError || !submission) {
+    throw new StudentHomeworkApiError('Попытка не найдена');
+  }
+
+  const { data: assignment, error: assignmentError } = await supabase
+    .from('homework_tutor_assignments')
+    .select('deadline')
+    .eq('id', submission.assignment_id)
+    .single();
+
+  if (assignmentError || !assignment) {
+    throw new StudentHomeworkApiError('Задание не найдено');
+  }
+
+  if (isDeadlinePassed(assignment.deadline)) {
+    throw new StudentHomeworkApiError('Дедлайн уже прошёл. Сдача недоступна.');
+  }
+
+  const { error } = await supabase
+    .from('homework_tutor_submissions')
+    .update({
+      status: 'submitted',
+      submitted_at: new Date().toISOString(),
+    })
+    .eq('id', submissionId);
+
+  if (error) {
+    throw new StudentHomeworkApiError(error.message);
+  }
+}

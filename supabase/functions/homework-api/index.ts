@@ -248,6 +248,12 @@ async function handleCreateAssignment(
   if (!Array.isArray(b.tasks) || b.tasks.length === 0) {
     return jsonError(cors, 400, "VALIDATION", "tasks must be a non-empty array");
   }
+  if (b.max_attempts !== undefined && b.max_attempts !== null && !isPositiveInt(b.max_attempts)) {
+    return jsonError(cors, 400, "VALIDATION", "max_attempts must be a positive integer");
+  }
+  if (b.group_id !== undefined && b.group_id !== null && !isUUID(b.group_id)) {
+    return jsonError(cors, 400, "VALIDATION", "group_id must be a UUID or null");
+  }
 
   for (let i = 0; i < b.tasks.length; i++) {
     const t = b.tasks[i];
@@ -275,6 +281,8 @@ async function handleCreateAssignment(
       description: isNonEmptyString(b.description) ? (b.description as string).trim() : null,
       deadline: isNonEmptyString(b.deadline) ? b.deadline : null,
       status: "draft",
+      max_attempts: isPositiveInt(b.max_attempts) ? b.max_attempts : 3,
+      group_id: isUUID(b.group_id) ? b.group_id : null,
     })
     .select("id")
     .single();
@@ -753,15 +761,52 @@ async function handleAssignStudents(
   }
   const b = body as Record<string, unknown>;
 
-  if (!Array.isArray(b.student_ids) || b.student_ids.length === 0) {
-    return jsonError(cors, 400, "VALIDATION", "student_ids must be a non-empty array of UUIDs");
+  if (b.group_id !== undefined && b.group_id !== null && !isUUID(b.group_id)) {
+    return jsonError(cors, 400, "VALIDATION", "group_id must be a UUID or null");
   }
-  for (let i = 0; i < b.student_ids.length; i++) {
-    if (!isUUID(b.student_ids[i])) {
-      return jsonError(cors, 400, "VALIDATION", `student_ids[${i}] is not a valid UUID`);
+
+  let studentIds: string[] = [];
+  if (Array.isArray(b.student_ids) && b.student_ids.length > 0) {
+    for (let i = 0; i < b.student_ids.length; i++) {
+      if (!isUUID(b.student_ids[i])) {
+        return jsonError(cors, 400, "VALIDATION", `student_ids[${i}] is not a valid UUID`);
+      }
+    }
+    studentIds = [...new Set(b.student_ids as string[])];
+  }
+
+  if (isUUID(b.group_id)) {
+    const { data: memberships, error: membershipsError } = await db
+      .from("tutor_group_memberships")
+      .select("tutor_student_id")
+      .eq("tutor_id", tutorId)
+      .eq("tutor_group_id", b.group_id)
+      .eq("is_active", true);
+
+    if (membershipsError) {
+      return jsonError(cors, 500, "DB_ERROR", "Failed to load group members");
+    }
+
+    const tutorStudentIds = (memberships ?? []).map((m) => m.tutor_student_id as string);
+    if (tutorStudentIds.length > 0) {
+      const { data: mappedStudents, error: mapError } = await db
+        .from("tutor_students")
+        .select("id, student_id")
+        .eq("tutor_id", tutorId)
+        .in("id", tutorStudentIds);
+      if (mapError) {
+        return jsonError(cors, 500, "DB_ERROR", "Failed to resolve group students");
+      }
+      studentIds = [...new Set([
+        ...studentIds,
+        ...(mappedStudents ?? []).map((m) => m.student_id as string),
+      ])];
     }
   }
-  const studentIds = [...new Set(b.student_ids as string[])];
+
+  if (studentIds.length === 0) {
+    return jsonError(cors, 400, "VALIDATION", "Provide student_ids or group_id with members");
+  }
 
   const { data: tutorStudents } = await db
     .from("tutor_students")
@@ -827,6 +872,13 @@ async function handleAssignStudents(
     student_id: sid,
   }));
 
+  if (isUUID(b.group_id)) {
+    await db
+      .from("homework_tutor_assignments")
+      .update({ group_id: b.group_id })
+      .eq("id", assignmentId);
+  }
+
   const { data: upserted, error } = await db
     .from("homework_tutor_student_assignments")
     .upsert(rows, { onConflict: "assignment_id,student_id", ignoreDuplicates: true })
@@ -871,6 +923,7 @@ async function handleAssignStudents(
   return jsonOk(cors, {
     added: (upserted ?? []).length,
     assignment_status: assignmentStatus,
+    assigned_group_id: isUUID(b.group_id) ? b.group_id : null,
   });
 }
 
@@ -946,7 +999,9 @@ async function handleNotifyStudents(
     }
   }
 
-  const defaultMessage = `📚 Новое домашнее задание: <b>${escapeHtmlEntities(assignment.title as string)}</b>\n\nПредмет: ${escapeHtmlEntities(assignment.subject as string)}\nИспользуй /homework чтобы начать.`;
+  const appUrl = Deno.env.get("PUBLIC_APP_URL")?.trim().replace(/\\/$/, "") ?? null;
+  const homeworkUrl = appUrl ? `${appUrl}/homework/${assignmentId}` : null;
+  const defaultMessage = `📚 Новое домашнее задание: <b>${escapeHtmlEntities(assignment.title as string)}</b>\n\nПредмет: ${escapeHtmlEntities(assignment.subject as string)}${homeworkUrl ? `\n<a href="${escapeHtmlEntities(homeworkUrl)}">Открыть ДЗ</a>` : "\nИспользуй /homework чтобы начать."}`;
   const text = messageTemplate ?? defaultMessage;
 
   let sent = 0;
