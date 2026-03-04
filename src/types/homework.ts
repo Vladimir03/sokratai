@@ -69,3 +69,80 @@ export const PRIORITY_CONFIG = {
   important: { label: 'Важно', color: 'yellow', emoji: '🟡' },
   later: { label: 'Позже', color: 'green', emoji: '🟢' }
 };
+
+export type StudentSubmissionStatus = 'in_progress' | 'submitted' | 'ai_checked' | 'tutor_reviewed';
+export type StudentAssignmentStatus = 'draft' | 'active' | 'closed';
+
+export interface StudentHomeworkAssignment {
+  id: string;
+  title: string;
+  subject: string;
+  topic: string | null;
+  description: string | null;
+  deadline: string | null;
+  status: StudentAssignmentStatus;
+  max_attempts: number;
+  attempts_used: number;
+  latest_submission_status: string | null;
+}
+
+export interface StudentHomeworkTask {
+  id: string;
+  assignment_id: string;
+  order_num: number;
+  task_text: string;
+  task_image_url: string | null;
+  max_score: number;
+}
+
+export interface StudentHomeworkMaterial {
+  id: string;
+  assignment_id: string;
+  type: 'pdf' | 'image' | 'link';
+  title: string;
+  storage_ref: string | null;
+  url: string | null;
+  created_at: string;
+}
+
+export interface StudentHomeworkSubmissionItem {
+  id: string;
+  task_id: string;
+  student_text: string | null;
+  student_image_urls: string[] | null;
+  ai_feedback: string | null;
+  ai_score: number | null;
+  ai_is_correct: boolean | null;
+  tutor_comment: string | null;
+  tutor_override_correct: boolean | null;
+}
+
+export interface StudentHomeworkSubmission {
+  id: string;
+  assignment_id: string;
+  student_id: string;
+  attempt_no: number;
+  status: StudentSubmissionStatus;
+  total_score: number | null;
+  total_max_score: number | null;
+  submitted_at: string | null;
+  created_at: string;
+  updated_at: string;
+  homework_tutor_submission_items: StudentHomeworkSubmissionItem[];
+}
+
+export interface StudentHomeworkAssignmentDetails {
+  id: string;
+  title: string;
+  subject: string;
+  topic: string | null;
+  description: string | null;
+  deadline: string | null;
+  status: StudentAssignmentStatus;
+  max_attempts: number;
+  created_at: string;
+  updated_at: string;
+  tasks: StudentHomeworkTask[];
+  materials: StudentHomeworkMaterial[];
+  submissions: StudentHomeworkSubmission[];
+}

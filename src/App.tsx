@@ -22,10 +22,8 @@ const SignUp = lazy(() => import("./pages/SignUp"));
 const ForgotPassword = lazy(() => import("./pages/ForgotPassword"));
 const ResetPassword = lazy(() => import("./pages/ResetPassword"));
 const Chat = lazy(() => import("./pages/Chat"));
-const Homework = lazy(() => import("./pages/Homework"));
-const HomeworkAdd = lazy(() => import("./pages/HomeworkAdd"));
-const HomeworkTaskList = lazy(() => import("./pages/HomeworkTaskList"));
-const HomeworkTaskDetail = lazy(() => import("./pages/HomeworkTaskDetail"));
+const StudentHomework = lazy(() => import("./pages/StudentHomework"));
+const StudentHomeworkDetail = lazy(() => import("./pages/StudentHomeworkDetail"));
 const Progress = lazy(() => import("./pages/Progress"));
 const Profile = lazy(() => import("./pages/Profile"));
 const MiniApp = lazy(() => import("./pages/MiniApp"));
@@ -139,15 +137,7 @@ const App = () => (
               path="/homework" 
               element={
                 <Suspense fallback={<PageLoader />}>
-                  <Homework />
-                </Suspense>
-              } 
-            />
-            <Route 
-              path="/homework/add" 
-              element={
-                <Suspense fallback={<PageLoader />}>
-                  <HomeworkAdd />
+                  <StudentHomework />
                 </Suspense>
               } 
             />
@@ -155,15 +145,7 @@ const App = () => (
               path="/homework/:id" 
               element={
                 <Suspense fallback={<PageLoader />}>
-                  <HomeworkTaskList />
-                </Suspense>
-              } 
-            />
-            <Route 
-              path="/homework/:homeworkId/task/:taskId" 
-              element={
-                <Suspense fallback={<PageLoader />}>
-                  <HomeworkTaskDetail />
+                  <StudentHomeworkDetail />
                 </Suspense>
               } 
             />
