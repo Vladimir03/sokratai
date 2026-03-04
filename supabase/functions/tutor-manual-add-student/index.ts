@@ -33,12 +33,12 @@ Deno.serve(async (req) => {
       );
     }
 
+    const jwt = authHeader.replace(/^Bearer\s+/i, "");
     const supabaseUser = createClient(SUPABASE_URL, Deno.env.get("SUPABASE_ANON_KEY")!, {
       auth: { persistSession: false },
-      global: { headers: { Authorization: authHeader } },
     });
 
-    const { data: { user }, error: userError } = await supabaseUser.auth.getUser();
+    const { data: { user }, error: userError } = await supabaseUser.auth.getUser(jwt);
     if (userError || !user) {
       console.error("User auth error:", userError);
       return new Response(
