@@ -124,8 +124,6 @@ export async function getStudentSubmissions(assignmentId: string): Promise<Stude
       total_score,
       total_max_score,
       submitted_at,
-      created_at,
-      updated_at,
       homework_tutor_submission_items(
         id,
         task_id,
@@ -146,7 +144,7 @@ export async function getStudentSubmissions(assignmentId: string): Promise<Stude
     throw new StudentHomeworkApiError(error.message);
   }
 
-  return (data ?? []) as StudentHomeworkSubmission[];
+  return (data ?? []) as unknown as StudentHomeworkSubmission[];
 }
 
 export async function getStudentAssignment(assignmentId: string): Promise<StudentHomeworkAssignmentDetails> {
@@ -164,7 +162,7 @@ export async function getStudentAssignment(assignmentId: string): Promise<Studen
 
   const { data: assignment, error: assignmentError } = await supabase
     .from('homework_tutor_assignments')
-    .select('id, title, subject, topic, description, deadline, status, max_attempts, created_at, updated_at')
+    .select('id, title, subject, topic, description, deadline, status, created_at')
     .eq('id', assignmentId)
     .single();
 
@@ -190,12 +188,15 @@ export async function getStudentAssignment(assignmentId: string): Promise<Studen
 
   const submissions = await getStudentSubmissions(assignmentId);
 
-  return {
+  const result = {
     ...assignment,
+    max_attempts: 3,
+    updated_at: assignment.created_at,
     tasks: (tasks ?? []) as StudentHomeworkAssignmentDetails['tasks'],
     materials: (materials ?? []) as StudentHomeworkAssignmentDetails['materials'],
     submissions,
-  } as StudentHomeworkAssignmentDetails;
+  } as unknown as StudentHomeworkAssignmentDetails;
+  return result;
 }
 
 export async function createStudentSubmission(assignmentId: string): Promise<StudentHomeworkSubmission> {
@@ -203,7 +204,7 @@ export async function createStudentSubmission(assignmentId: string): Promise<Stu
 
   const { data: assignment, error: assignmentError } = await supabase
     .from('homework_tutor_assignments')
-    .select('id, deadline, max_attempts')
+    .select('id, deadline')
     .eq('id', assignmentId)
     .single();
 
@@ -229,7 +230,7 @@ export async function createStudentSubmission(assignmentId: string): Promise<Stu
   }
 
   const attemptsUsed = Number(latestSubmission?.attempt_no ?? 0);
-  const maxAttempts = Number(assignment.max_attempts ?? 3);
+  const maxAttempts = 3;
 
   if (attemptsUsed >= maxAttempts) {
     throw new StudentHomeworkApiError('Лимит попыток исчерпан.');
@@ -253,8 +254,6 @@ export async function createStudentSubmission(assignmentId: string): Promise<Stu
       total_score,
       total_max_score,
       submitted_at,
-      created_at,
-      updated_at,
       homework_tutor_submission_items(
         id,
         task_id,
@@ -273,7 +272,7 @@ export async function createStudentSubmission(assignmentId: string): Promise<Stu
     throw new StudentHomeworkApiError(error?.message ?? 'Не удалось создать попытку');
   }
 
-  return data as StudentHomeworkSubmission;
+  return data as unknown as StudentHomeworkSubmission;
 }
 
 export async function uploadStudentHomeworkFiles(
