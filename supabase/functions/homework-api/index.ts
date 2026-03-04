@@ -999,7 +999,7 @@ async function handleNotifyStudents(
     }
   }
 
-  const appUrl = Deno.env.get("PUBLIC_APP_URL")?.trim().replace(/\\/$/, "") ?? null;
+  const appUrl = Deno.env.get("PUBLIC_APP_URL")?.trim().replace(/\/$/, "") ?? null;
   const homeworkUrl = appUrl ? `${appUrl}/homework/${assignmentId}` : null;
   const defaultMessage = `📚 Новое домашнее задание: <b>${escapeHtmlEntities(assignment.title as string)}</b>\n\nПредмет: ${escapeHtmlEntities(assignment.subject as string)}${homeworkUrl ? `\n<a href="${escapeHtmlEntities(homeworkUrl)}">Открыть ДЗ</a>` : "\nИспользуй /homework чтобы начать."}`;
   const text = messageTemplate ?? defaultMessage;

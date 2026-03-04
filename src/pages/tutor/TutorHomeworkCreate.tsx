@@ -779,11 +779,6 @@ function StepTasks({
   materials: DraftMaterial[];
   onMaterialsChange: (m: DraftMaterial[]) => void;
   errors: Record<string, string>;
-  assignMode: 'student' | 'group';
-  onAssignModeChange: (mode: 'student' | 'group') => void;
-  selectedGroupId: string;
-  onGroupIdChange: (groupId: string) => void;
-  groups: Array<{ id: string; name: string }>;
 }) {
   const handleAdd = useCallback(() => {
     onChange([...tasks, createEmptyTask()]);
@@ -1122,10 +1117,9 @@ function TutorHomeworkCreateContent() {
   const queryClient = useQueryClient();
   const [searchParams] = useSearchParams();
   const { students: tutorStudents } = useTutorStudents();
+  const [step, setStep] = useState(1);
   const { groups } = useTutorGroups(step === 3);
   const { memberships } = useTutorGroupMemberships(step === 3);
-
-  const [step, setStep] = useState(1);
   const [templateLoading, setTemplateLoading] = useState(false);
 
   // Step 1
