@@ -1,4 +1,5 @@
 import { createClient, SupabaseClient } from "npm:@supabase/supabase-js@2";
+import { runHomeworkAiCheck } from "../telegram-bot/homework/homework_handler.ts";
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
@@ -1826,6 +1827,100 @@ async function handleListAttempts(
   return jsonOk(cors, data ?? []);
 }
 
+// ─── Endpoint: POST /student/submissions/:id/ai-check ───────────────────────
+
+async function handleStudentSubmissionAiCheck(
+  db: SupabaseClient,
+  studentUserId: string,
+  submissionId: string,
+  cors: Record<string, string>,
+): Promise<Response> {
+  if (!isUUID(submissionId)) {
+    return jsonError(cors, 400, "INVALID_ID", "Invalid submission ID format");
+  }
+
+  const { data: submission, error: submissionError } = await db
+    .from("homework_tutor_submissions")
+    .select("id, student_id, status, total_score, total_max_score")
+    .eq("id", submissionId)
+    .maybeSingle();
+
+  if (submissionError || !submission) {
+    return jsonError(cors, 404, "NOT_FOUND", "Submission not found");
+  }
+
+  if (submission.student_id !== studentUserId) {
+    return jsonError(cors, 403, "FORBIDDEN", "Submission does not belong to current user");
+  }
+
+  const status = submission.status as string;
+  if (status === "ai_checked" || status === "tutor_reviewed") {
+    return jsonOk(cors, {
+      status,
+      total_score: submission.total_score ?? null,
+      total_max_score: submission.total_max_score ?? null,
+    });
+  }
+
+  if (status !== "submitted") {
+    return jsonError(cors, 409, "INVALID_STATE", "Submission is not ready for AI check");
+  }
+
+  let summary: Awaited<ReturnType<typeof runHomeworkAiCheck>>;
+  try {
+    summary = await runHomeworkAiCheck(submissionId);
+  } catch (error) {
+    console.error("homework_api_student_ai_check_failed", {
+      submission_id: submissionId,
+      student_id: studentUserId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return jsonError(cors, 500, "AI_CHECK_FAILED", "Failed to run AI check");
+  }
+
+  const { data: updatedSubmission, error: updateError } = await db
+    .from("homework_tutor_submissions")
+    .update({
+      status: "ai_checked",
+      total_score: summary.total_score,
+      total_max_score: summary.total_max_score,
+    })
+    .eq("id", submissionId)
+    .eq("student_id", studentUserId)
+    .in("status", ["submitted", "ai_checked"])
+    .select("status, total_score, total_max_score")
+    .maybeSingle();
+
+  if (updateError) {
+    return jsonError(cors, 500, "DB_ERROR", "Failed to update submission after AI check");
+  }
+
+  if (!updatedSubmission) {
+    const { data: existingSubmission, error: existingError } = await db
+      .from("homework_tutor_submissions")
+      .select("status, total_score, total_max_score")
+      .eq("id", submissionId)
+      .eq("student_id", studentUserId)
+      .maybeSingle();
+
+    if (existingError || !existingSubmission) {
+      return jsonError(cors, 500, "DB_ERROR", "Failed to verify submission status");
+    }
+
+    return jsonOk(cors, {
+      status: existingSubmission.status,
+      total_score: existingSubmission.total_score ?? null,
+      total_max_score: existingSubmission.total_max_score ?? null,
+    });
+  }
+
+  return jsonOk(cors, {
+    status: updatedSubmission.status,
+    total_score: updatedSubmission.total_score ?? null,
+    total_max_score: updatedSubmission.total_max_score ?? null,
+  });
+}
+
 // ─── Main Handler ────────────────────────────────────────────────────────────
 
 Deno.serve(async (req: Request): Promise<Response> => {
@@ -1852,11 +1947,16 @@ Deno.serve(async (req: Request): Promise<Response> => {
       auth: { persistSession: false },
     });
 
+    const seg = route.segments;
+
+    // POST /student/submissions/:id/ai-check
+    if (seg.length === 4 && seg[0] === "student" && seg[1] === "submissions" && seg[3] === "ai-check" && route.method === "POST") {
+      return await handleStudentSubmissionAiCheck(db, userId, seg[2], cors);
+    }
+
     const tutorResult = await getTutorOrThrow(db, userId, cors);
     if (tutorResult instanceof Response) return tutorResult;
     const tutor = tutorResult;
-
-    const seg = route.segments;
 
     // POST /assignments
     if (seg.length === 1 && seg[0] === "assignments" && route.method === "POST") {

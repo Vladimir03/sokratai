@@ -8,6 +8,33 @@ import type {
 const HOMEWORK_IMAGES_BUCKET = 'homework-images';
 const HOMEWORK_SUBMISSIONS_BUCKET = 'homework-submissions';
 const STORAGE_REF_PREFIX = 'storage://';
+const SUPABASE_URL =
+  import.meta.env.VITE_SUPABASE_URL || 'https://vrsseotrfmsxpbciyqzc.supabase.co';
+const SUPABASE_KEY =
+  import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY ||
+  'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZyc3Nlb3RyZm1zeHBiY2l5cXpjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTk0MjEzMDYsImV4cCI6MjA3NDk5NzMwNn0.fDleU99ULnIvtbiJqlKtgaabZzIWqqw6gZLWQOFAcKw';
+
+const SUBMISSION_SELECT = `
+  id,
+  assignment_id,
+  student_id,
+  attempt_no,
+  status,
+  total_score,
+  total_max_score,
+  submitted_at,
+  homework_tutor_submission_items(
+    id,
+    task_id,
+    student_text,
+    student_image_urls,
+    ai_feedback,
+    ai_score,
+    ai_is_correct,
+    tutor_comment,
+    tutor_override_correct
+  )
+`;
 
 export class StudentHomeworkApiError extends Error {
   constructor(message: string) {
@@ -58,6 +85,51 @@ function isMissingAnswerTypeColumnError(message: string): boolean {
     lower.includes('schema cache') ||
     (lower.includes('column') && lower.includes('does not exist'))
   );
+}
+
+function isTelegramChatIdNotNullError(message: string): boolean {
+  const lower = message.toLowerCase();
+  return lower.includes('telegram_chat_id') &&
+    lower.includes('null value') &&
+    (lower.includes('not-null') || lower.includes('not null'));
+}
+
+async function requestStudentHomeworkApi<T>(
+  path: string,
+  options: RequestInit = {},
+): Promise<T> {
+  const { data: sessionData } = await supabase.auth.getSession();
+  const token = sessionData?.session?.access_token;
+
+  if (!token) {
+    throw new StudentHomeworkApiError('Нет активной сессии');
+  }
+
+  const response = await fetch(`${SUPABASE_URL}/functions/v1/homework-api${path}`, {
+    ...options,
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+      apikey: SUPABASE_KEY,
+      ...(options.headers ?? {}),
+    },
+  });
+
+  if (!response.ok) {
+    let message = `HTTP ${response.status}`;
+    try {
+      const body = await response.json();
+      const errorMessage = body?.error?.message;
+      if (typeof errorMessage === 'string' && errorMessage.trim().length > 0) {
+        message = errorMessage;
+      }
+    } catch {
+      // ignore parse errors
+    }
+    throw new StudentHomeworkApiError(message);
+  }
+
+  return response.json() as Promise<T>;
 }
 
 function toStorageRef(bucket: string, objectPath: string): string {
@@ -147,27 +219,7 @@ export async function getStudentSubmissions(assignmentId: string): Promise<Stude
   const studentId = await getCurrentUserId();
   const { data, error } = await supabase
     .from('homework_tutor_submissions')
-    .select(`
-      id,
-      assignment_id,
-      student_id,
-      attempt_no,
-      status,
-      total_score,
-      total_max_score,
-      submitted_at,
-      homework_tutor_submission_items(
-        id,
-        task_id,
-        student_text,
-        student_image_urls,
-        ai_feedback,
-        ai_score,
-        ai_is_correct,
-        tutor_comment,
-        tutor_override_correct
-      )
-    `)
+    .select(SUBMISSION_SELECT)
     .eq('assignment_id', assignmentId)
     .eq('student_id', studentId)
     .order('attempt_no', { ascending: false });
@@ -268,43 +320,37 @@ export async function createStudentSubmission(assignmentId: string): Promise<Stu
     throw new StudentHomeworkApiError('Лимит попыток исчерпан.');
   }
 
-  const { data, error } = await supabase
+  const createAttempt = async (telegramChatId: number | null) => supabase
     .from('homework_tutor_submissions')
     .insert({
       assignment_id: assignmentId,
       student_id: studentId,
       attempt_no: attemptsUsed + 1,
-      telegram_chat_id: null,
+      telegram_chat_id: telegramChatId,
       status: 'in_progress',
     })
-    .select(`
-      id,
-      assignment_id,
-      student_id,
-      attempt_no,
-      status,
-      total_score,
-      total_max_score,
-      submitted_at,
-      homework_tutor_submission_items(
-        id,
-        task_id,
-        student_text,
-        student_image_urls,
-        ai_feedback,
-        ai_score,
-        ai_is_correct,
-        tutor_comment,
-        tutor_override_correct
-      )
-    `)
+    .select(SUBMISSION_SELECT)
     .single();
 
-  if (error || !data) {
-    throw new StudentHomeworkApiError(translateSupabaseError(error?.message ?? 'Не удалось создать попытку'));
+  const { data, error } = await createAttempt(null);
+  if (!error && data) {
+    return data as unknown as StudentHomeworkSubmission;
   }
 
-  return data as unknown as StudentHomeworkSubmission;
+  if (error && isTelegramChatIdNotNullError(error.message)) {
+    // Legacy prod schema may still require telegram_chat_id. Use 0 as web sentinel.
+    const { data: legacyData, error: legacyError } = await createAttempt(0);
+    if (legacyError || !legacyData) {
+      throw new StudentHomeworkApiError(
+        translateSupabaseError(legacyError?.message ?? 'Не удалось создать попытку'),
+      );
+    }
+    return legacyData as unknown as StudentHomeworkSubmission;
+  }
+
+  throw new StudentHomeworkApiError(
+    translateSupabaseError(error?.message ?? 'Не удалось создать попытку'),
+  );
 }
 
 export async function uploadStudentHomeworkFiles(
@@ -471,4 +517,19 @@ export async function finalizeSubmission(submissionId: string): Promise<void> {
   if (error) {
     throw new StudentHomeworkApiError(error.message);
   }
+}
+
+export interface StudentSubmissionAiCheckResponse {
+  status: 'submitted' | 'ai_checked' | 'tutor_reviewed';
+  total_score: number | null;
+  total_max_score: number | null;
+}
+
+export async function runStudentSubmissionAiCheck(
+  submissionId: string,
+): Promise<StudentSubmissionAiCheckResponse> {
+  return requestStudentHomeworkApi<StudentSubmissionAiCheckResponse>(
+    `/student/submissions/${encodeURIComponent(submissionId)}/ai-check`,
+    { method: 'POST', body: '{}' },
+  );
 }

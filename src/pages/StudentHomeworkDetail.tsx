@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { useParams } from 'react-router-dom';
+import { useNavigate, useParams } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import AuthGuard from '@/components/AuthGuard';
@@ -11,29 +11,132 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import {
   createStudentSubmission,
   finalizeSubmission,
+  runStudentSubmissionAiCheck,
   submitStudentAnswer,
 } from '@/lib/studentHomeworkApi';
 import { useStudentAssignment } from '@/hooks/useStudentHomework';
+import type { StudentHomeworkAssignmentDetails, StudentHomeworkSubmission } from '@/types/homework';
 
 type AnswerType = 'text' | 'image' | 'pdf';
 
+const ANSWER_TYPES: AnswerType[] = ['text', 'image', 'pdf'];
+
+const SUBMISSION_STATUS_LABELS: Record<string, string> = {
+  in_progress: 'Черновик',
+  submitted: 'Отправлено',
+  ai_checked: 'Проверено AI',
+  tutor_reviewed: 'Проверено репетитором',
+};
+
+function formatSubmissionStatus(status: string): string {
+  return SUBMISSION_STATUS_LABELS[status] ?? status;
+}
+
+function inferAnswerTypeFromSubmission(submission: StudentHomeworkSubmission | null, taskId: string): AnswerType {
+  if (!submission) return 'text';
+  const item = submission.homework_tutor_submission_items.find((row) => row.task_id === taskId);
+  if (!item || !item.student_image_urls || item.student_image_urls.length === 0) {
+    return 'text';
+  }
+  return item.student_image_urls.some((path) => path.toLowerCase().endsWith('.pdf')) ? 'pdf' : 'image';
+}
+
+function buildHomeworkChatContext(
+  assignment: StudentHomeworkAssignmentDetails,
+  submission: StudentHomeworkSubmission,
+): string {
+  const itemsByTaskId = new Map(
+    submission.homework_tutor_submission_items.map((item) => [item.task_id, item]),
+  );
+
+  const materialsText = assignment.materials.length === 0
+    ? 'Материалов нет.'
+    : assignment.materials.map((material, index) => {
+      const source = material.url ?? material.storage_ref;
+      return `${index + 1}. ${material.title}${source ? ` — ${source}` : ''}`;
+    }).join('\n');
+
+  const tasksText = assignment.tasks.map((task) => {
+    const item = itemsByTaskId.get(task.id);
+    const lines: string[] = [
+      `Задача ${task.order_num}: ${task.task_text}`,
+    ];
+
+    if (item?.student_text?.trim()) {
+      lines.push(`Мой текстовый ответ: ${item.student_text.trim()}`);
+    }
+
+    if (item?.student_image_urls && item.student_image_urls.length > 0) {
+      lines.push(`Мои файлы: ${item.student_image_urls.join(', ')}`);
+    }
+
+    if (!item?.student_text?.trim() && (!item?.student_image_urls || item.student_image_urls.length === 0)) {
+      lines.push('Мой ответ: [нет данных]');
+    }
+
+    if (item?.ai_feedback?.trim()) {
+      lines.push(`AI-фидбек: ${item.ai_feedback.trim()}`);
+    }
+
+    if (item?.ai_score !== null && item?.ai_score !== undefined) {
+      lines.push(`AI-оценка: ${item.ai_score}/${task.max_score}`);
+    }
+
+    return lines.join('\n');
+  }).join('\n\n');
+
+  return [
+    `Я разбираю домашнюю работу "${assignment.title}".`,
+    `Предмет: ${assignment.subject}.`,
+    assignment.topic ? `Тема: ${assignment.topic}.` : null,
+    assignment.description ? `Описание ДЗ: ${assignment.description}.` : null,
+    `Попытка: #${submission.attempt_no}.`,
+    `Статус проверки: ${formatSubmissionStatus(submission.status)}.`,
+    submission.total_score !== null && submission.total_max_score !== null
+      ? `Итог: ${submission.total_score}/${submission.total_max_score}.`
+      : null,
+    '',
+    'Материалы:',
+    materialsText,
+    '',
+    'Задачи и мои ответы:',
+    tasksText,
+    '',
+    'Помоги разобрать ошибки, объясни логику решения по шагам и дай план, как улучшить результат.',
+  ].filter(Boolean).join('\n');
+}
+
 const StudentHomeworkDetail = () => {
   const { id = '' } = useParams();
+  const navigate = useNavigate();
   const queryClient = useQueryClient();
   const { data, isLoading, error } = useStudentAssignment(id);
 
   const [draftTexts, setDraftTexts] = useState<Record<string, string>>({});
   const [draftFiles, setDraftFiles] = useState<Record<string, File[]>>({});
   const [answerTypes, setAnswerTypes] = useState<Record<string, AnswerType>>({});
-  const [submitting, setSubmitting] = useState(false);
+  const [isStartingAttempt, setIsStartingAttempt] = useState(false);
+  const [isSubmittingAttempt, setIsSubmittingAttempt] = useState(false);
+  const [isRunningAiCheck, setIsRunningAiCheck] = useState(false);
 
   const latestSubmission = useMemo(
     () => data?.submissions?.[0] ?? null,
     [data?.submissions],
   );
+
   const inProgressSubmission = useMemo(
-    () => data?.submissions?.find((s) => s.status === 'in_progress') ?? null,
+    () => data?.submissions?.find((submission) => submission.status === 'in_progress') ?? null,
     [data?.submissions],
+  );
+
+  const latestCompletedSubmission = useMemo(
+    () => data?.submissions?.find((submission) => submission.status !== 'in_progress') ?? null,
+    [data?.submissions],
+  );
+
+  const inProgressItemsMap = useMemo(
+    () => new Map((inProgressSubmission?.homework_tutor_submission_items ?? []).map((item) => [item.task_id, item])),
+    [inProgressSubmission],
   );
 
   const attemptsUsed = latestSubmission?.attempt_no ?? 0;
@@ -41,32 +144,117 @@ const StudentHomeworkDetail = () => {
   const deadlinePassed = data?.deadline ? new Date(data.deadline).getTime() <= Date.now() : false;
   const attemptsReached = attemptsUsed >= maxAttempts;
 
-  const canSubmit = !deadlinePassed && !attemptsReached;
+  const canStartAttempt = Boolean(data) && !deadlinePassed && !attemptsReached && !inProgressSubmission;
+  const canSubmitAttempt = Boolean(data) && Boolean(inProgressSubmission) && !deadlinePassed;
+  const hasAnyCompletedSubmission = Boolean(latestCompletedSubmission);
+  const isBusy = isStartingAttempt || isSubmittingAttempt || isRunningAiCheck;
 
-  const handleFinalize = async () => {
-    if (!data) return;
-    setSubmitting(true);
+  const refreshHomeworkData = async () => {
+    await queryClient.invalidateQueries({ queryKey: ['student', 'homework'] });
+    await queryClient.refetchQueries({ queryKey: ['student', 'homework', 'assignment', id] });
+  };
+
+  const handleStartAttempt = async () => {
+    if (!data || !canStartAttempt) return;
+
+    setIsStartingAttempt(true);
     try {
-      const submission = inProgressSubmission ?? (await createStudentSubmission(data.id));
+      await createStudentSubmission(data.id);
+      setDraftTexts({});
+      setDraftFiles({});
+      setAnswerTypes({});
+      await refreshHomeworkData();
+      toast.success('Попытка создана. Заполните ответы и нажмите «Сдать».');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Не удалось начать попытку');
+    } finally {
+      setIsStartingAttempt(false);
+    }
+  };
 
+  const handleSubmitAttempt = async () => {
+    if (!data || !inProgressSubmission) return;
+
+    const missingTaskNumbers = data.tasks
+      .filter((task) => {
+        const draftText = (draftTexts[task.id] ?? '').trim();
+        const draftFileCount = draftFiles[task.id]?.length ?? 0;
+        const existingItem = inProgressItemsMap.get(task.id);
+        const existingText = (existingItem?.student_text ?? '').trim();
+        const existingFileCount = existingItem?.student_image_urls?.length ?? 0;
+        return draftText.length === 0 && draftFileCount === 0 && existingText.length === 0 && existingFileCount === 0;
+      })
+      .map((task) => task.order_num);
+
+    if (missingTaskNumbers.length > 0) {
+      toast.error(`Заполните ответы для задач: ${missingTaskNumbers.join(', ')}`);
+      return;
+    }
+
+    setIsSubmittingAttempt(true);
+    try {
       for (const task of data.tasks) {
+        const draftText = draftTexts[task.id];
+        const draftTaskFiles = draftFiles[task.id];
+        const hasDraftText = typeof draftText === 'string' && draftText.trim().length > 0;
+        const hasDraftFiles = Array.isArray(draftTaskFiles) && draftTaskFiles.length > 0;
+        const hasStoredAnswer = inProgressItemsMap.has(task.id);
+
+        if (!hasDraftText && !hasDraftFiles && hasStoredAnswer) {
+          continue;
+        }
+
         await submitStudentAnswer(
-          submission.id,
+          inProgressSubmission.id,
           task.id,
-          draftTexts[task.id],
-          draftFiles[task.id],
+          draftText,
+          draftTaskFiles,
           answerTypes[task.id],
         );
       }
 
-      await finalizeSubmission(submission.id);
-      toast.success('Домашнее задание отправлено');
-      await queryClient.invalidateQueries({ queryKey: ['student', 'homework'] });
+      await finalizeSubmission(inProgressSubmission.id);
+      toast.success('Домашка отправлена. Запускаю AI-проверку...');
+      setDraftTexts({});
+      setDraftFiles({});
+      setAnswerTypes({});
+      await refreshHomeworkData();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Ошибка отправки');
+      setIsSubmittingAttempt(false);
+      return;
     } finally {
-      setSubmitting(false);
+      setIsSubmittingAttempt(false);
     }
+
+    setIsRunningAiCheck(true);
+    try {
+      const aiResult = await runStudentSubmissionAiCheck(inProgressSubmission.id);
+      if (aiResult.status === 'ai_checked' && aiResult.total_score !== null && aiResult.total_max_score !== null) {
+        toast.success(`AI-проверка завершена: ${aiResult.total_score}/${aiResult.total_max_score}`);
+      } else if (aiResult.status === 'tutor_reviewed') {
+        toast.success('Работа уже проверена репетитором.');
+      } else {
+        toast.success('AI-проверка завершена.');
+      }
+    } catch {
+      toast.error('Домашка отправлена, но AI-проверка не завершилась. Попробуйте позже.');
+    } finally {
+      setIsRunningAiCheck(false);
+      await refreshHomeworkData();
+    }
+  };
+
+  const handleDiscussWithAi = () => {
+    if (!data || !latestCompletedSubmission) return;
+
+    const contextMessage = buildHomeworkChatContext(data, latestCompletedSubmission);
+    navigate('/chat', {
+      state: {
+        initialMessage: contextMessage,
+        chatType: 'homework_help',
+      },
+    });
   };
 
   return (
@@ -88,10 +276,37 @@ const StudentHomeworkDetail = () => {
                     <p>Предмет: {data.subject}</p>
                     {data.deadline && <p>Дедлайн: {new Date(data.deadline).toLocaleString('ru-RU')}</p>}
                     <p>Попытки: {attemptsUsed}/{maxAttempts}</p>
+                    {inProgressSubmission && (
+                      <Badge variant="secondary">Текущая попытка #{inProgressSubmission.attempt_no}: Черновик</Badge>
+                    )}
+                    {!inProgressSubmission && latestCompletedSubmission?.status === 'submitted' && (
+                      <Badge>Отправлено, идёт AI-проверка</Badge>
+                    )}
                     {deadlinePassed && <Badge variant="destructive">Дедлайн прошёл</Badge>}
                     {attemptsReached && <Badge variant="destructive">Лимит попыток исчерпан</Badge>}
                   </CardContent>
                 </Card>
+
+                {latestCompletedSubmission && (
+                  <Card>
+                    <CardHeader>
+                      <CardTitle>Последняя отправка</CardTitle>
+                    </CardHeader>
+                    <CardContent className="space-y-3">
+                      <p className="text-sm">
+                        Попытка #{latestCompletedSubmission.attempt_no}: {formatSubmissionStatus(latestCompletedSubmission.status)}
+                      </p>
+                      {latestCompletedSubmission.total_score !== null && (
+                        <p className="text-sm font-medium">
+                          Результат: {latestCompletedSubmission.total_score}/{latestCompletedSubmission.total_max_score}
+                        </p>
+                      )}
+                      <Button variant="outline" onClick={handleDiscussWithAi}>
+                        Разобрать с ИИ в чате
+                      </Button>
+                    </CardContent>
+                  </Card>
+                )}
 
                 <Card>
                   <CardHeader>
@@ -118,53 +333,66 @@ const StudentHomeworkDetail = () => {
                     <CardTitle>Задачи</CardTitle>
                   </CardHeader>
                   <CardContent className="space-y-4">
+                    {!inProgressSubmission && canStartAttempt && (
+                      <p className="text-sm text-muted-foreground">
+                        Нажмите «Начать попытку», чтобы открыть ввод ответов.
+                      </p>
+                    )}
                     {data.tasks.map((task) => {
-                      const aType = answerTypes[task.id] ?? 'text';
+                      const inferredType = inferAnswerTypeFromSubmission(inProgressSubmission, task.id);
+                      const answerType = answerTypes[task.id] ?? inferredType;
+                      const existingFileCount = inProgressItemsMap.get(task.id)?.student_image_urls?.length ?? 0;
+
                       return (
                         <div key={task.id} className="space-y-3 border rounded-md p-3">
                           <p className="font-medium">{task.order_num}. {task.task_text}</p>
 
                           <div className="flex gap-2 text-sm">
-                            {(['text', 'image', 'pdf'] as AnswerType[]).map((t) => (
+                            {ANSWER_TYPES.map((type) => (
                               <button
-                                key={t}
+                                key={type}
                                 type="button"
-                                onClick={() => setAnswerTypes((prev) => ({ ...prev, [task.id]: t }))}
+                                disabled={!inProgressSubmission || isBusy}
+                                onClick={() => setAnswerTypes((prev) => ({ ...prev, [task.id]: type }))}
                                 className={`px-3 py-1 rounded border transition-colors ${
-                                  aType === t
+                                  answerType === type
                                     ? 'bg-primary text-primary-foreground border-primary'
                                     : 'border-input hover:bg-accent'
-                                }`}
+                                } disabled:opacity-50 disabled:cursor-not-allowed`}
                               >
-                                {t === 'text' ? 'Текст' : t === 'image' ? 'Фото' : 'PDF'}
+                                {type === 'text' ? 'Текст' : type === 'image' ? 'Фото' : 'PDF'}
                               </button>
                             ))}
                           </div>
 
-                          {aType === 'text' && (
+                          {answerType === 'text' && (
                             <textarea
-                              className="w-full border rounded-md p-2 text-base"
+                              className="w-full border rounded-md p-2 text-base disabled:opacity-60"
                               style={{ fontSize: '16px' }}
                               placeholder="Ваш ответ"
                               rows={4}
+                              disabled={!inProgressSubmission || isBusy}
                               value={draftTexts[task.id] ?? ''}
-                              onChange={(e) =>
-                                setDraftTexts((prev) => ({ ...prev, [task.id]: e.target.value }))
+                              onChange={(event) =>
+                                setDraftTexts((prev) => ({ ...prev, [task.id]: event.target.value }))
                               }
                             />
                           )}
 
-                          {aType === 'image' && (
+                          {answerType === 'image' && (
                             <div className="space-y-1">
                               <input
                                 type="file"
                                 multiple
                                 accept="image/*"
                                 capture="environment"
-                                onChange={(e) =>
+                                className="text-base"
+                                style={{ fontSize: '16px' }}
+                                disabled={!inProgressSubmission || isBusy}
+                                onChange={(event) =>
                                   setDraftFiles((prev) => ({
                                     ...prev,
-                                    [task.id]: Array.from(e.target.files ?? []),
+                                    [task.id]: Array.from(event.target.files ?? []),
                                   }))
                                 }
                               />
@@ -173,24 +401,37 @@ const StudentHomeworkDetail = () => {
                                   Выбрано файлов: {draftFiles[task.id].length}
                                 </p>
                               )}
+                              {(draftFiles[task.id]?.length ?? 0) === 0 && existingFileCount > 0 && (
+                                <p className="text-xs text-muted-foreground">
+                                  Уже прикреплено файлов: {existingFileCount}
+                                </p>
+                              )}
                             </div>
                           )}
 
-                          {aType === 'pdf' && (
+                          {answerType === 'pdf' && (
                             <div className="space-y-1">
                               <input
                                 type="file"
                                 accept="application/pdf"
-                                onChange={(e) =>
+                                className="text-base"
+                                style={{ fontSize: '16px' }}
+                                disabled={!inProgressSubmission || isBusy}
+                                onChange={(event) =>
                                   setDraftFiles((prev) => ({
                                     ...prev,
-                                    [task.id]: Array.from(e.target.files ?? []),
+                                    [task.id]: Array.from(event.target.files ?? []),
                                   }))
                                 }
                               />
                               {(draftFiles[task.id]?.length ?? 0) > 0 && (
                                 <p className="text-xs text-muted-foreground">
                                   {draftFiles[task.id][0].name}
+                                </p>
+                              )}
+                              {(draftFiles[task.id]?.length ?? 0) === 0 && existingFileCount > 0 && (
+                                <p className="text-xs text-muted-foreground">
+                                  Уже прикреплено файлов: {existingFileCount}
                                 </p>
                               )}
                             </div>
@@ -209,7 +450,7 @@ const StudentHomeworkDetail = () => {
                     {data.submissions.length === 0 && <p className="text-muted-foreground">Попыток пока нет</p>}
                     {data.submissions.map((submission) => (
                       <div key={submission.id} className="text-sm border rounded-md p-2">
-                        Попытка #{submission.attempt_no}: {submission.status}
+                        Попытка #{submission.attempt_no}: {formatSubmissionStatus(submission.status)}
                         {submission.total_score !== null && (
                           <span> — {submission.total_score}/{submission.total_max_score}</span>
                         )}
@@ -218,10 +459,26 @@ const StudentHomeworkDetail = () => {
                   </CardContent>
                 </Card>
 
-                {canSubmit && (
-                  <Button disabled={submitting} onClick={handleFinalize} className="w-full">
-                    {submitting ? 'Отправка...' : 'Сдать'}
+                {canStartAttempt && (
+                  <Button disabled={isBusy} onClick={handleStartAttempt} className="w-full">
+                    {isStartingAttempt ? 'Создание попытки...' : 'Начать новую попытку'}
                   </Button>
+                )}
+
+                {canSubmitAttempt && (
+                  <Button disabled={isBusy} onClick={handleSubmitAttempt} className="w-full">
+                    {isSubmittingAttempt
+                      ? 'Отправка...'
+                      : isRunningAiCheck
+                        ? 'Проверка AI...'
+                        : 'Сдать'}
+                  </Button>
+                )}
+
+                {!canStartAttempt && !canSubmitAttempt && !hasAnyCompletedSubmission && (
+                  <p className="text-sm text-muted-foreground text-center">
+                    Новая попытка сейчас недоступна.
+                  </p>
                 )}
               </div>
             )}
