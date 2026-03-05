@@ -1,5 +1,5 @@
 import { createClient, SupabaseClient } from "npm:@supabase/supabase-js@2";
-import { runHomeworkAiCheck } from "../telegram-bot/homework/homework_handler.ts";
+import { runHomeworkAiCheck } from "./ai_check.ts";
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
