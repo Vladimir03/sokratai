@@ -2,11 +2,26 @@
 
 ## Problem
 
-The `ai-check` endpoint returns **403 `NOT_TUTOR`** because the currently **deployed** version of `homework-api` doesn't have the student route placed before the `getTutorOrThrow()` call. The source code is already correct (the student ai-check route is matched at line 1953, before the tutor check at line 1957), but the function was not redeployed after this fix was added.
+Edge function `homework-api` returns 500 on `POST /assignments` because line 285 inserts `group_id` into `homework_tutor_assignments`, but the database table has no such column.
+
+Error from logs:
+```
+Could not find the 'group_id' column of 'homework_tutor_assignments' in the schema cache
+```
 
 ## Fix
 
-**Redeploy the `homework-api` edge function.** No code changes needed — the source already has the correct routing order.
+Two options:
+1. **Add `group_id` column** to `homework_tutor_assignments` via migration (if mini-groups homework is needed)
+2. **Remove `group_id`** from the insert in the edge function (simpler, since mini-groups for homework isn't active)
 
-This single deployment will fix the "Проверить сейчас" button for students.
+**Recommended**: Option 2 — remove `group_id` from the insert statement in `homework-api/index.ts` (lines 254-256 validation + line 285 insert). This is the minimal fix. The validation block (lines 254-256) and the insert field (line 285) both reference `group_id`.
+
+### Changes
+
+**`supabase/functions/homework-api/index.ts`**:
+- Remove `group_id` validation (lines 254-256)
+- Remove `group_id` from insert object (line 285)
+
+Then redeploy the `homework-api` edge function.
 

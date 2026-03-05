@@ -1,5 +1,5 @@
 import { createClient, SupabaseClient } from "npm:@supabase/supabase-js@2";
-import { runHomeworkAiCheck } from "../telegram-bot/homework/homework_handler.ts";
+import { runHomeworkAiCheck } from "./ai_check.ts";
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
@@ -1868,7 +1868,7 @@ async function handleStudentSubmissionAiCheck(
 
   let summary: Awaited<ReturnType<typeof runHomeworkAiCheck>>;
   try {
-    summary = await runHomeworkAiCheck(submissionId);
+    summary = await runHomeworkAiCheck(db, submissionId);
   } catch (error) {
     console.error("homework_api_student_ai_check_failed", {
       submission_id: submissionId,
