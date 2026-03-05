@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
@@ -28,8 +28,24 @@ const SUBMISSION_STATUS_LABELS: Record<string, string> = {
   tutor_reviewed: 'Проверено репетитором',
 };
 
+type AiCheckUiStatus = 'idle' | 'running' | 'failed' | 'done';
+const AUTO_AI_CHECK_MAX_ATTEMPTS = 8;
+const AUTO_AI_CHECK_INTERVAL_MS = 15_000;
+
 function formatSubmissionStatus(status: string): string {
   return SUBMISSION_STATUS_LABELS[status] ?? status;
+}
+
+function translateAiCheckError(error: unknown): string {
+  const rawMessage = error instanceof Error ? error.message : String(error ?? '');
+  const lower = rawMessage.toLowerCase();
+  if (lower.includes('failed to run ai check') || lower.includes('ai_check_failed')) {
+    return 'AI-проверка ещё не завершилась. Мы продолжим проверять автоматически.';
+  }
+  if (lower.includes('invalid state')) {
+    return 'Работа ещё не готова к AI-проверке. Обновим статус автоматически.';
+  }
+  return 'AI-проверка временно недоступна. Повторите проверку чуть позже.';
 }
 
 function inferAnswerTypeFromSubmission(submission: StudentHomeworkSubmission | null, taskId: string): AnswerType {
@@ -118,6 +134,10 @@ const StudentHomeworkDetail = () => {
   const [isStartingAttempt, setIsStartingAttempt] = useState(false);
   const [isSubmittingAttempt, setIsSubmittingAttempt] = useState(false);
   const [isRunningAiCheck, setIsRunningAiCheck] = useState(false);
+  const [aiCheckUiStatus, setAiCheckUiStatus] = useState<AiCheckUiStatus>('idle');
+  const [aiCheckErrorMessage, setAiCheckErrorMessage] = useState<string | null>(null);
+  const aiCheckInFlightRef = useRef(false);
+  const autoAiCheckAttemptsRef = useRef<Record<string, number>>({});
 
   const latestSubmission = useMemo(
     () => data?.submissions?.[0] ?? null,
@@ -139,6 +159,22 @@ const StudentHomeworkDetail = () => {
     [inProgressSubmission],
   );
 
+  const latestCompletedItemsMap = useMemo(
+    () => new Map((latestCompletedSubmission?.homework_tutor_submission_items ?? []).map((item) => [item.task_id, item])),
+    [latestCompletedSubmission],
+  );
+
+  const latestCompletedTaskRows = useMemo(
+    () => {
+      if (!data || !latestCompletedSubmission) return [];
+      return data.tasks.map((task) => ({
+        task,
+        item: latestCompletedItemsMap.get(task.id) ?? null,
+      }));
+    },
+    [data, latestCompletedItemsMap, latestCompletedSubmission],
+  );
+
   const attemptsUsed = latestSubmission?.attempt_no ?? 0;
   const maxAttempts = data?.max_attempts ?? 3;
   const deadlinePassed = data?.deadline ? new Date(data.deadline).getTime() <= Date.now() : false;
@@ -148,11 +184,119 @@ const StudentHomeworkDetail = () => {
   const canSubmitAttempt = Boolean(data) && Boolean(inProgressSubmission) && !deadlinePassed;
   const hasAnyCompletedSubmission = Boolean(latestCompletedSubmission);
   const isBusy = isStartingAttempt || isSubmittingAttempt || isRunningAiCheck;
+  const latestSubmissionNeedsAiCheck = latestCompletedSubmission?.status === 'submitted';
+  const latestSubmissionChecked = latestCompletedSubmission?.status === 'ai_checked' ||
+    latestCompletedSubmission?.status === 'tutor_reviewed';
+  const canDiscussWithAi = Boolean(latestSubmissionChecked && latestCompletedSubmission);
+  const latestCompletedSubmissionId = latestCompletedSubmission?.id ?? null;
+  const latestCompletedSubmissionStatus = latestCompletedSubmission?.status ?? null;
 
-  const refreshHomeworkData = async () => {
+  const refreshHomeworkData = useCallback(async () => {
     await queryClient.invalidateQueries({ queryKey: ['student', 'homework'] });
     await queryClient.refetchQueries({ queryKey: ['student', 'homework', 'assignment', id] });
+  }, [id, queryClient]);
+
+  const runAiCheckForSubmission = useCallback(
+    async (
+      submissionId: string,
+      options?: { silent?: boolean; showSuccessToast?: boolean },
+    ): Promise<boolean> => {
+      if (aiCheckInFlightRef.current) return false;
+
+      aiCheckInFlightRef.current = true;
+      setIsRunningAiCheck(true);
+      setAiCheckUiStatus('running');
+      setAiCheckErrorMessage(null);
+
+      try {
+        const aiResult = await runStudentSubmissionAiCheck(submissionId);
+        if (aiResult.status === 'ai_checked' || aiResult.status === 'tutor_reviewed') {
+          setAiCheckUiStatus('done');
+          setAiCheckErrorMessage(null);
+          if (options?.showSuccessToast) {
+            if (aiResult.total_score !== null && aiResult.total_max_score !== null) {
+              toast.success(`AI-проверка завершена: ${aiResult.total_score}/${aiResult.total_max_score}`);
+            } else {
+              toast.success('AI-проверка завершена.');
+            }
+          }
+          return true;
+        }
+        setAiCheckUiStatus('running');
+        return false;
+      } catch (error) {
+        const translated = translateAiCheckError(error);
+        setAiCheckUiStatus('failed');
+        setAiCheckErrorMessage(translated);
+        if (!options?.silent) {
+          toast.error(translated);
+        }
+        return false;
+      } finally {
+        aiCheckInFlightRef.current = false;
+        setIsRunningAiCheck(false);
+        await refreshHomeworkData();
+      }
+    },
+    [refreshHomeworkData],
+  );
+
+  const handleRetryAiCheck = async () => {
+    if (!latestCompletedSubmissionId || latestCompletedSubmissionStatus !== 'submitted') return;
+
+    autoAiCheckAttemptsRef.current[latestCompletedSubmissionId] = 0;
+    await runAiCheckForSubmission(latestCompletedSubmissionId, {
+      showSuccessToast: true,
+    });
   };
+
+  useEffect(() => {
+    if (!latestCompletedSubmissionId || !latestCompletedSubmissionStatus) {
+      setAiCheckUiStatus('idle');
+      setAiCheckErrorMessage(null);
+      return;
+    }
+
+    if (latestCompletedSubmissionStatus === 'ai_checked' || latestCompletedSubmissionStatus === 'tutor_reviewed') {
+      setAiCheckUiStatus('done');
+      setAiCheckErrorMessage(null);
+      delete autoAiCheckAttemptsRef.current[latestCompletedSubmissionId];
+      return;
+    }
+
+    if (latestCompletedSubmissionStatus === 'submitted') {
+      setAiCheckUiStatus((prev) => (prev === 'failed' ? prev : 'running'));
+      return;
+    }
+
+    setAiCheckUiStatus('idle');
+    setAiCheckErrorMessage(null);
+  }, [latestCompletedSubmissionId, latestCompletedSubmissionStatus]);
+
+  useEffect(() => {
+    if (!latestCompletedSubmissionId || latestCompletedSubmissionStatus !== 'submitted') return;
+    const submissionId = latestCompletedSubmissionId;
+
+    const runAutoCheck = async () => {
+      if (aiCheckInFlightRef.current) return;
+      const attempts = autoAiCheckAttemptsRef.current[submissionId] ?? 0;
+      if (attempts >= AUTO_AI_CHECK_MAX_ATTEMPTS) {
+        setAiCheckUiStatus('failed');
+        setAiCheckErrorMessage((prev) => prev ?? 'AI-проверка заняла больше времени. Нажмите «Проверить сейчас».');
+        return;
+      }
+
+      autoAiCheckAttemptsRef.current[submissionId] = attempts + 1;
+      await runAiCheckForSubmission(submissionId, { silent: true });
+    };
+
+    void runAutoCheck();
+    const intervalId = window.setInterval(() => {
+      void runAutoCheck();
+    }, AUTO_AI_CHECK_INTERVAL_MS);
+
+    return () => window.clearInterval(intervalId);
+  }, [latestCompletedSubmissionId, latestCompletedSubmissionStatus, runAiCheckForSubmission]);
 
   const handleStartAttempt = async () => {
     if (!data || !canStartAttempt) return;
@@ -214,11 +358,15 @@ const StudentHomeworkDetail = () => {
       }
 
       await finalizeSubmission(inProgressSubmission.id);
-      toast.success('Домашка отправлена. Запускаю AI-проверку...');
+      toast.success('Домашка отправлена. AI-проверка запущена.');
       setDraftTexts({});
       setDraftFiles({});
       setAnswerTypes({});
+      setAiCheckUiStatus('running');
+      setAiCheckErrorMessage(null);
+      autoAiCheckAttemptsRef.current[inProgressSubmission.id] = 0;
       await refreshHomeworkData();
+      void runAiCheckForSubmission(inProgressSubmission.id, { silent: true, showSuccessToast: true });
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Ошибка отправки');
       setIsSubmittingAttempt(false);
@@ -226,27 +374,10 @@ const StudentHomeworkDetail = () => {
     } finally {
       setIsSubmittingAttempt(false);
     }
-
-    setIsRunningAiCheck(true);
-    try {
-      const aiResult = await runStudentSubmissionAiCheck(inProgressSubmission.id);
-      if (aiResult.status === 'ai_checked' && aiResult.total_score !== null && aiResult.total_max_score !== null) {
-        toast.success(`AI-проверка завершена: ${aiResult.total_score}/${aiResult.total_max_score}`);
-      } else if (aiResult.status === 'tutor_reviewed') {
-        toast.success('Работа уже проверена репетитором.');
-      } else {
-        toast.success('AI-проверка завершена.');
-      }
-    } catch {
-      toast.error('Домашка отправлена, но AI-проверка не завершилась. Попробуйте позже.');
-    } finally {
-      setIsRunningAiCheck(false);
-      await refreshHomeworkData();
-    }
   };
 
   const handleDiscussWithAi = () => {
-    if (!data || !latestCompletedSubmission) return;
+    if (!data || !latestCompletedSubmission || !canDiscussWithAi) return;
 
     const contextMessage = buildHomeworkChatContext(data, latestCompletedSubmission);
     navigate('/chat', {
@@ -279,8 +410,13 @@ const StudentHomeworkDetail = () => {
                     {inProgressSubmission && (
                       <Badge variant="secondary">Текущая попытка #{inProgressSubmission.attempt_no}: Черновик</Badge>
                     )}
-                    {!inProgressSubmission && latestCompletedSubmission?.status === 'submitted' && (
-                      <Badge>Отправлено, идёт AI-проверка</Badge>
+                    {!inProgressSubmission && latestSubmissionNeedsAiCheck && (
+                      <Badge variant={aiCheckUiStatus === 'failed' ? 'destructive' : 'secondary'}>
+                        {aiCheckUiStatus === 'failed' ? 'AI-проверка задерживается' : 'Отправлено, идёт AI-проверка'}
+                      </Badge>
+                    )}
+                    {!inProgressSubmission && latestSubmissionChecked && (
+                      <Badge>AI-проверка завершена</Badge>
                     )}
                     {deadlinePassed && <Badge variant="destructive">Дедлайн прошёл</Badge>}
                     {attemptsReached && <Badge variant="destructive">Лимит попыток исчерпан</Badge>}
@@ -296,14 +432,57 @@ const StudentHomeworkDetail = () => {
                       <p className="text-sm">
                         Попытка #{latestCompletedSubmission.attempt_no}: {formatSubmissionStatus(latestCompletedSubmission.status)}
                       </p>
+                      {latestSubmissionNeedsAiCheck && (
+                        <p className="text-sm text-muted-foreground">
+                          {aiCheckUiStatus === 'failed'
+                            ? aiCheckErrorMessage ?? 'AI-проверка ещё не завершилась.'
+                            : 'AI-проверка выполняется. Результат появится на этой странице автоматически.'}
+                        </p>
+                      )}
                       {latestCompletedSubmission.total_score !== null && (
                         <p className="text-sm font-medium">
                           Результат: {latestCompletedSubmission.total_score}/{latestCompletedSubmission.total_max_score}
                         </p>
                       )}
-                      <Button variant="outline" onClick={handleDiscussWithAi}>
-                        Разобрать с ИИ в чате
-                      </Button>
+
+                      {latestSubmissionNeedsAiCheck && (
+                        <Button
+                          variant="outline"
+                          onClick={handleRetryAiCheck}
+                          disabled={isRunningAiCheck}
+                        >
+                          {isRunningAiCheck ? 'Проверяем...' : 'Проверить сейчас'}
+                        </Button>
+                      )}
+
+                      {latestSubmissionChecked && latestCompletedTaskRows.length > 0 && (
+                        <div className="space-y-2">
+                          {latestCompletedTaskRows.map(({ task, item }) => {
+                            const score = item?.ai_score ?? 0;
+                            const isCorrect = item?.ai_is_correct;
+                            return (
+                              <div key={task.id} className="rounded-md border p-3 text-sm space-y-1">
+                                <p className="font-medium">
+                                  {isCorrect === true ? '✅' : isCorrect === false ? '❌' : '•'} Задача {task.order_num}: {score}/{task.max_score}
+                                </p>
+                                {item?.ai_feedback?.trim() && (
+                                  <p className="text-muted-foreground">{item.ai_feedback.trim()}</p>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+
+                      {canDiscussWithAi ? (
+                        <Button variant="outline" onClick={handleDiscussWithAi}>
+                          Разобрать с ИИ в чате
+                        </Button>
+                      ) : (
+                        <p className="text-xs text-muted-foreground">
+                          Кнопка разбора с ИИ станет доступна после завершения AI-проверки.
+                        </p>
+                      )}
                     </CardContent>
                   </Card>
                 )}
