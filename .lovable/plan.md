@@ -2,26 +2,26 @@
 
 ## Problem
 
-Edge function `homework-api` returns 500 on `POST /assignments` because line 285 inserts `group_id` into `homework_tutor_assignments`, but the database table has no such column.
+The `telegram-bot` edge function crashes on boot with:
+```
+The requested module './homework/homework_handler.ts' does not provide an export named 'MAX_ATTEMPTS'
+```
 
-Error from logs:
-```
-Could not find the 'group_id' column of 'homework_tutor_assignments' in the schema cache
-```
+`index.ts` line 17 imports `MAX_ATTEMPTS` from `homework_handler.ts`, but that file has no such export. It only has a private `getAssignmentMaxAttempts()` async function that reads the value from DB.
 
 ## Fix
 
-Two options:
-1. **Add `group_id` column** to `homework_tutor_assignments` via migration (if mini-groups homework is needed)
-2. **Remove `group_id`** from the insert in the edge function (simpler, since mini-groups for homework isn't active)
+1. **Add `export const MAX_ATTEMPTS = 3`** to `homework_handler.ts` (as a default/display constant)
+2. Redeploy `telegram-bot`
 
-**Recommended**: Option 2 — remove `group_id` from the insert statement in `homework-api/index.ts` (lines 254-256 validation + line 285 insert). This is the minimal fix. The validation block (lines 254-256) and the insert field (line 285) both reference `group_id`.
+This is the minimal fix. The constant is used in `index.ts` for display messages (e.g. "Попытка X из MAX_ATTEMPTS") and error handling, not for actual enforcement (which happens inside `createSubmissionForAttempt` via DB lookup).
 
 ### Changes
 
-**`supabase/functions/homework-api/index.ts`**:
-- Remove `group_id` validation (lines 254-256)
-- Remove `group_id` from insert object (line 285)
+**`supabase/functions/telegram-bot/homework/homework_handler.ts`** — add before the Feature 4 section (~line 569):
+```typescript
+export const MAX_ATTEMPTS = 3;
+```
 
-Then redeploy the `homework-api` edge function.
+Then redeploy `telegram-bot`.
 
