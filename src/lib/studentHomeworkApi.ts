@@ -52,6 +52,14 @@ function translateSupabaseError(message: string): string {
   return message;
 }
 
+function isMissingAnswerTypeColumnError(message: string): boolean {
+  const lower = message.toLowerCase();
+  return lower.includes('answer_type') && (
+    lower.includes('schema cache') ||
+    (lower.includes('column') && lower.includes('does not exist'))
+  );
+}
+
 function toStorageRef(bucket: string, objectPath: string): string {
   return `${STORAGE_REF_PREFIX}${bucket}/${objectPath}`;
 }
@@ -394,21 +402,36 @@ export async function submitStudentAnswer(
       : (text?.trim() ? 'text' : null)
   );
 
-  const { error } = await supabase
+  const basePayload = {
+    submission_id: submissionId,
+    task_id: taskId,
+    student_text: text?.trim() || null,
+    student_image_urls: filePaths,
+  };
+
+  const { error: withAnswerTypeError } = await supabase
     .from('homework_tutor_submission_items')
     .upsert(
       {
-        submission_id: submissionId,
-        task_id: taskId,
-        student_text: text?.trim() || null,
-        student_image_urls: filePaths,
+        ...basePayload,
         answer_type: resolvedAnswerType,
       },
       { onConflict: 'submission_id,task_id' },
     );
 
-  if (error) {
-    throw new StudentHomeworkApiError(translateSupabaseError(error.message));
+  if (withAnswerTypeError && isMissingAnswerTypeColumnError(withAnswerTypeError.message)) {
+    const { error: legacyError } = await supabase
+      .from('homework_tutor_submission_items')
+      .upsert(basePayload, { onConflict: 'submission_id,task_id' });
+
+    if (legacyError) {
+      throw new StudentHomeworkApiError(translateSupabaseError(legacyError.message));
+    }
+    return;
+  }
+
+  if (withAnswerTypeError) {
+    throw new StudentHomeworkApiError(translateSupabaseError(withAnswerTypeError.message));
   }
 }
 
