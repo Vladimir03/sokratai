@@ -2,26 +2,24 @@
 
 ## Problem
 
-Edge function `homework-api` returns 500 on `POST /assignments` because line 285 inserts `group_id` into `homework_tutor_assignments`, but the database table has no such column.
+When someone mentions `@sokratai_ru_bot` in a group chat, the bot responds in the user's **private DM** instead of the group. The logs prove this:
 
-Error from logs:
-```
-Could not find the 'group_id' column of 'homework_tutor_assignments' in the schema cache
-```
+- The update arrives with `"type": "group"` and `chat.id: -5215652476`
+- But the log shows `Handling text message: { telegramUserId: 385567670 }` — this is the **private chat handler**, not the group handler (which would log `📢 Handling group text message`)
+
+This means the **deployed version** of `telegram-bot` does not contain the group chat handling code (lines 7858-7923 in the source). The private chat handler at line 8138 catches the message and sends the response to `telegramUserId` (user's DM) instead of the group chat.
+
+## Root Cause
+
+The `telegram-bot` edge function source code already has correct group chat handling — it replies to the group chat with `reply_to_message_id`. But the **currently deployed version is stale** and lacks this code.
 
 ## Fix
 
-Two options:
-1. **Add `group_id` column** to `homework_tutor_assignments` via migration (if mini-groups homework is needed)
-2. **Remove `group_id`** from the insert in the edge function (simpler, since mini-groups for homework isn't active)
+1. **Redeploy `telegram-bot`** — no code changes needed, the source is already correct
+2. **Verify `TELEGRAM_BOT_USERNAME` secret** equals `sokratai_ru_bot` (the env var default is `SokratAIBot` which won't match the actual bot username in mention entities)
 
-**Recommended**: Option 2 — remove `group_id` from the insert statement in `homework-api/index.ts` (lines 254-256 validation + line 285 insert). This is the minimal fix. The validation block (lines 254-256) and the insert field (line 285) both reference `group_id`.
-
-### Changes
-
-**`supabase/functions/homework-api/index.ts`**:
-- Remove `group_id` validation (lines 254-256)
-- Remove `group_id` from insert object (line 285)
-
-Then redeploy the `homework-api` edge function.
+The existing group handler (line 6941 `handleGroupTextMessage`) already:
+- Sends responses to `groupChatId` (not `telegramUserId`)
+- Uses `reply_to_message_id` to reply to the original message
+- Properly extracts mentions and reply-to-bot context
 
