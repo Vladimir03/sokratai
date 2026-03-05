@@ -6,6 +6,8 @@ import type {
 } from '@/types/homework';
 
 const HOMEWORK_IMAGES_BUCKET = 'homework-images';
+const HOMEWORK_SUBMISSIONS_BUCKET = 'homework-submissions';
+const STORAGE_REF_PREFIX = 'storage://';
 
 export class StudentHomeworkApiError extends Error {
   constructor(message: string) {
@@ -32,6 +34,26 @@ async function getCurrentUserId(): Promise<string> {
 function isDeadlinePassed(deadline: string | null | undefined): boolean {
   if (!deadline) return false;
   return new Date(deadline).getTime() <= Date.now();
+}
+
+function translateSupabaseError(message: string): string {
+  const lower = message.toLowerCase();
+  if (message.includes('DEADLINE_PASSED')) return 'Дедлайн уже прошёл. Новая попытка недоступна.';
+  if (message.includes('MAX_ATTEMPTS_REACHED')) return 'Лимит попыток исчерпан.';
+  if (message.includes('homework_tutor_submissions_attempt_unique')) {
+    return 'Попытка уже создана. Обновите страницу и попробуйте снова.';
+  }
+  if (lower.includes('row-level security')) {
+    return 'Недостаточно прав для выполнения операции.';
+  }
+  if (lower.includes('permission denied')) {
+    return 'Доступ запрещён для этой операции.';
+  }
+  return message;
+}
+
+function toStorageRef(bucket: string, objectPath: string): string {
+  return `${STORAGE_REF_PREFIX}${bucket}/${objectPath}`;
 }
 
 export async function listStudentAssignments(): Promise<StudentHomeworkAssignment[]> {
@@ -162,7 +184,7 @@ export async function getStudentAssignment(assignmentId: string): Promise<Studen
 
   const { data: assignment, error: assignmentError } = await supabase
     .from('homework_tutor_assignments')
-    .select('id, title, subject, topic, description, deadline, status, created_at')
+    .select('id, title, subject, topic, description, deadline, status, max_attempts, created_at')
     .eq('id', assignmentId)
     .single();
 
@@ -190,7 +212,7 @@ export async function getStudentAssignment(assignmentId: string): Promise<Studen
 
   const result = {
     ...assignment,
-    max_attempts: 3,
+    max_attempts: assignment.max_attempts ?? 3,
     updated_at: assignment.created_at,
     tasks: (tasks ?? []) as StudentHomeworkAssignmentDetails['tasks'],
     materials: (materials ?? []) as StudentHomeworkAssignmentDetails['materials'],
@@ -204,7 +226,7 @@ export async function createStudentSubmission(assignmentId: string): Promise<Stu
 
   const { data: assignment, error: assignmentError } = await supabase
     .from('homework_tutor_assignments')
-    .select('id, deadline')
+    .select('id, deadline, max_attempts')
     .eq('id', assignmentId)
     .single();
 
@@ -230,7 +252,7 @@ export async function createStudentSubmission(assignmentId: string): Promise<Stu
   }
 
   const attemptsUsed = Number(latestSubmission?.attempt_no ?? 0);
-  const maxAttempts = 3;
+  const maxAttempts = assignment.max_attempts ?? 3;
 
   if (attemptsUsed >= maxAttempts) {
     throw new StudentHomeworkApiError('Лимит попыток исчерпан.');
@@ -269,13 +291,14 @@ export async function createStudentSubmission(assignmentId: string): Promise<Stu
     .single();
 
   if (error || !data) {
-    throw new StudentHomeworkApiError(error?.message ?? 'Не удалось создать попытку');
+    throw new StudentHomeworkApiError(translateSupabaseError(error?.message ?? 'Не удалось создать попытку'));
   }
 
   return data as unknown as StudentHomeworkSubmission;
 }
 
 export async function uploadStudentHomeworkFiles(
+  studentId: string,
   assignmentId: string,
   submissionId: string,
   taskId: string,
@@ -284,17 +307,44 @@ export async function uploadStudentHomeworkFiles(
   const uploadedPaths: string[] = [];
 
   for (const file of files) {
-    const ext = file.name.split('.').pop()?.toLowerCase() || 'jpg';
-    const objectPath = `homework/${assignmentId}/${submissionId}/${taskId}/${crypto.randomUUID()}.${ext}`;
-    const { error } = await supabase.storage.from(HOMEWORK_IMAGES_BUCKET).upload(objectPath, file, {
-      upsert: false,
-      contentType: file.type || 'application/octet-stream',
-    });
+    const isPdf = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf');
+    const ext = isPdf ? 'pdf' : (file.name.split('.').pop()?.toLowerCase() || 'jpg');
+    const fileId = crypto.randomUUID();
+    const primaryObjectPath = `${studentId}/${assignmentId}/${submissionId}/${taskId}/${fileId}.${ext}`;
+    const contentType = file.type || (isPdf ? 'application/pdf' : 'application/octet-stream');
 
-    if (error) {
-      throw new StudentHomeworkApiError(`Ошибка загрузки файла: ${error.message}`);
+    const { error: primaryError } = await supabase.storage
+      .from(HOMEWORK_SUBMISSIONS_BUCKET)
+      .upload(primaryObjectPath, file, { upsert: false, contentType });
+
+    if (!primaryError) {
+      uploadedPaths.push(toStorageRef(HOMEWORK_SUBMISSIONS_BUCKET, primaryObjectPath));
+      continue;
     }
-    uploadedPaths.push(objectPath);
+
+    // Fallback to homework-images bucket if homework-submissions not yet created in this env
+    const isBucketMissing =
+      primaryError.message?.toLowerCase().includes('bucket not found') ||
+      (primaryError as unknown as { statusCode?: number }).statusCode === 404;
+
+    if (!isBucketMissing) {
+      throw new StudentHomeworkApiError(
+        `Ошибка загрузки файла: ${translateSupabaseError(primaryError.message)}`,
+      );
+    }
+
+    // Legacy homework-images policies expect path prefix homework/{assignmentId}/...
+    const fallbackObjectPath = `homework/${assignmentId}/${submissionId}/${taskId}/${fileId}.${ext}`;
+    const { error: fallbackError } = await supabase.storage
+      .from(HOMEWORK_IMAGES_BUCKET)
+      .upload(fallbackObjectPath, file, { upsert: false, contentType });
+
+    if (fallbackError) {
+      throw new StudentHomeworkApiError(
+        `Ошибка загрузки файла: ${translateSupabaseError(fallbackError.message)}`,
+      );
+    }
+    uploadedPaths.push(fallbackObjectPath);
   }
 
   return uploadedPaths;
@@ -305,10 +355,13 @@ export async function submitStudentAnswer(
   taskId: string,
   text?: string,
   files?: File[],
+  answerType?: 'text' | 'image' | 'pdf',
 ): Promise<void> {
-  let imagePaths: string[] | null = null;
+  let filePaths: string[] | null = null;
 
   if (files && files.length > 0) {
+    const studentId = await getCurrentUserId();
+
     const { data: submission, error: submissionError } = await supabase
       .from('homework_tutor_submissions')
       .select('assignment_id')
@@ -319,8 +372,25 @@ export async function submitStudentAnswer(
       throw new StudentHomeworkApiError('Попытка не найдена');
     }
 
-    imagePaths = await uploadStudentHomeworkFiles(submission.assignment_id, submissionId, taskId, files);
+    filePaths = await uploadStudentHomeworkFiles(
+      studentId,
+      submission.assignment_id,
+      submissionId,
+      taskId,
+      files,
+    );
   }
+
+  // Determine answer_type if not explicitly provided
+  const resolvedAnswerType: 'text' | 'image' | 'pdf' | null = answerType ?? (
+    files && files.length > 0
+      ? (files.some(
+          (f) => f.type === 'application/pdf' || f.name.toLowerCase().endsWith('.pdf'),
+        )
+          ? 'pdf'
+          : 'image')
+      : (text?.trim() ? 'text' : null)
+  );
 
   const { error } = await supabase
     .from('homework_tutor_submission_items')
@@ -329,13 +399,14 @@ export async function submitStudentAnswer(
         submission_id: submissionId,
         task_id: taskId,
         student_text: text?.trim() || null,
-        student_image_urls: imagePaths,
+        student_image_urls: filePaths,
+        answer_type: resolvedAnswerType,
       },
       { onConflict: 'submission_id,task_id' },
     );
 
   if (error) {
-    throw new StudentHomeworkApiError(error.message);
+    throw new StudentHomeworkApiError(translateSupabaseError(error.message));
   }
 }
 

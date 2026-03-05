@@ -15,6 +15,8 @@ import {
 } from '@/lib/studentHomeworkApi';
 import { useStudentAssignment } from '@/hooks/useStudentHomework';
 
+type AnswerType = 'text' | 'image' | 'pdf';
+
 const StudentHomeworkDetail = () => {
   const { id = '' } = useParams();
   const queryClient = useQueryClient();
@@ -22,6 +24,7 @@ const StudentHomeworkDetail = () => {
 
   const [draftTexts, setDraftTexts] = useState<Record<string, string>>({});
   const [draftFiles, setDraftFiles] = useState<Record<string, File[]>>({});
+  const [answerTypes, setAnswerTypes] = useState<Record<string, AnswerType>>({});
   const [submitting, setSubmitting] = useState(false);
 
   const latestSubmission = useMemo(
@@ -52,6 +55,7 @@ const StudentHomeworkDetail = () => {
           task.id,
           draftTexts[task.id],
           draftFiles[task.id],
+          answerTypes[task.id],
         );
       }
 
@@ -114,30 +118,86 @@ const StudentHomeworkDetail = () => {
                     <CardTitle>Задачи</CardTitle>
                   </CardHeader>
                   <CardContent className="space-y-4">
-                    {data.tasks.map((task) => (
-                      <div key={task.id} className="space-y-2 border rounded-md p-3">
-                        <p className="font-medium">{task.order_num}. {task.task_text}</p>
-                        <textarea
-                          className="w-full border rounded-md p-2"
-                          placeholder="Ваш ответ"
-                          value={draftTexts[task.id] ?? ''}
-                          onChange={(e) =>
-                            setDraftTexts((prev) => ({ ...prev, [task.id]: e.target.value }))
-                          }
-                        />
-                        <input
-                          type="file"
-                          multiple
-                          accept="image/*"
-                          onChange={(e) =>
-                            setDraftFiles((prev) => ({
-                              ...prev,
-                              [task.id]: Array.from(e.target.files ?? []),
-                            }))
-                          }
-                        />
-                      </div>
-                    ))}
+                    {data.tasks.map((task) => {
+                      const aType = answerTypes[task.id] ?? 'text';
+                      return (
+                        <div key={task.id} className="space-y-3 border rounded-md p-3">
+                          <p className="font-medium">{task.order_num}. {task.task_text}</p>
+
+                          <div className="flex gap-2 text-sm">
+                            {(['text', 'image', 'pdf'] as AnswerType[]).map((t) => (
+                              <button
+                                key={t}
+                                type="button"
+                                onClick={() => setAnswerTypes((prev) => ({ ...prev, [task.id]: t }))}
+                                className={`px-3 py-1 rounded border transition-colors ${
+                                  aType === t
+                                    ? 'bg-primary text-primary-foreground border-primary'
+                                    : 'border-input hover:bg-accent'
+                                }`}
+                              >
+                                {t === 'text' ? 'Текст' : t === 'image' ? 'Фото' : 'PDF'}
+                              </button>
+                            ))}
+                          </div>
+
+                          {aType === 'text' && (
+                            <textarea
+                              className="w-full border rounded-md p-2 text-base"
+                              style={{ fontSize: '16px' }}
+                              placeholder="Ваш ответ"
+                              rows={4}
+                              value={draftTexts[task.id] ?? ''}
+                              onChange={(e) =>
+                                setDraftTexts((prev) => ({ ...prev, [task.id]: e.target.value }))
+                              }
+                            />
+                          )}
+
+                          {aType === 'image' && (
+                            <div className="space-y-1">
+                              <input
+                                type="file"
+                                multiple
+                                accept="image/*"
+                                capture="environment"
+                                onChange={(e) =>
+                                  setDraftFiles((prev) => ({
+                                    ...prev,
+                                    [task.id]: Array.from(e.target.files ?? []),
+                                  }))
+                                }
+                              />
+                              {(draftFiles[task.id]?.length ?? 0) > 0 && (
+                                <p className="text-xs text-muted-foreground">
+                                  Выбрано файлов: {draftFiles[task.id].length}
+                                </p>
+                              )}
+                            </div>
+                          )}
+
+                          {aType === 'pdf' && (
+                            <div className="space-y-1">
+                              <input
+                                type="file"
+                                accept="application/pdf"
+                                onChange={(e) =>
+                                  setDraftFiles((prev) => ({
+                                    ...prev,
+                                    [task.id]: Array.from(e.target.files ?? []),
+                                  }))
+                                }
+                              />
+                              {(draftFiles[task.id]?.length ?? 0) > 0 && (
+                                <p className="text-xs text-muted-foreground">
+                                  {draftFiles[task.id][0].name}
+                                </p>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
                   </CardContent>
                 </Card>
 
