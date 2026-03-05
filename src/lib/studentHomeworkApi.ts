@@ -226,7 +226,7 @@ export async function createStudentSubmission(assignmentId: string): Promise<Stu
 
   const { data: assignment, error: assignmentError } = await supabase
     .from('homework_tutor_assignments')
-    .select('id, deadline, max_attempts')
+    .select('id, deadline')
     .eq('id', assignmentId)
     .single();
 
