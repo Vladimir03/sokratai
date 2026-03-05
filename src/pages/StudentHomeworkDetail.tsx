@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import AuthGuard from '@/components/AuthGuard';
 import Navigation from '@/components/Navigation';
@@ -11,6 +11,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import {
   createStudentSubmission,
   finalizeSubmission,
+  getStudentTaskImageSignedUrl,
   runStudentSubmissionAiCheck,
   submitStudentAnswer,
 } from '@/lib/studentHomeworkApi';
@@ -120,6 +121,44 @@ function buildHomeworkChatContext(
     '',
     'Помоги разобрать ошибки, объясни логику решения по шагам и дай план, как улучшить результат.',
   ].filter(Boolean).join('\n');
+}
+
+function TaskConditionImage({ taskImageUrl }: { taskImageUrl: string | null }) {
+  const imageQuery = useQuery<string | null>({
+    queryKey: ['student', 'homework', 'task-image-preview', taskImageUrl],
+    queryFn: () => getStudentTaskImageSignedUrl(taskImageUrl!),
+    enabled: Boolean(taskImageUrl),
+    staleTime: 30 * 60 * 1000,
+    gcTime: 60 * 60 * 1000,
+    retry: 1,
+  });
+
+  if (!taskImageUrl) return null;
+
+  if (imageQuery.isLoading) {
+    return <p className="text-xs text-muted-foreground">Загрузка фото задачи...</p>;
+  }
+
+  if (!imageQuery.data) {
+    return <p className="text-xs text-muted-foreground">Фото задачи недоступно</p>;
+  }
+
+  return (
+    <a
+      href={imageQuery.data}
+      target="_blank"
+      rel="noreferrer"
+      className="inline-block rounded-md border bg-background p-1 hover:opacity-90 transition-opacity"
+      title="Открыть фото задачи"
+    >
+      <img
+        src={imageQuery.data}
+        alt="Фото задачи"
+        className="h-28 w-auto max-w-[260px] rounded-sm object-cover"
+        loading="lazy"
+      />
+    </a>
+  );
 }
 
 const StudentHomeworkDetail = () => {
@@ -525,6 +564,7 @@ const StudentHomeworkDetail = () => {
                       return (
                         <div key={task.id} className="space-y-3 border rounded-md p-3">
                           <p className="font-medium">{task.order_num}. {task.task_text}</p>
+                          <TaskConditionImage taskImageUrl={task.task_image_url} />
 
                           <div className="flex gap-2 text-sm">
                             {ANSWER_TYPES.map((type) => (

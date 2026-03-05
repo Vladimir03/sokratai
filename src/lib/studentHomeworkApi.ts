@@ -7,6 +7,7 @@ import type {
 
 const HOMEWORK_IMAGES_BUCKET = 'homework-images';
 const HOMEWORK_SUBMISSIONS_BUCKET = 'homework-submissions';
+const HOMEWORK_TASK_IMAGES_BUCKET = 'homework-task-images';
 const STORAGE_REF_PREFIX = 'storage://';
 const SUPABASE_URL =
   import.meta.env.VITE_SUPABASE_URL || 'https://vrsseotrfmsxpbciyqzc.supabase.co';
@@ -134,6 +135,35 @@ async function requestStudentHomeworkApi<T>(
 
 function toStorageRef(bucket: string, objectPath: string): string {
   return `${STORAGE_REF_PREFIX}${bucket}/${objectPath}`;
+}
+
+function sanitizeObjectPath(path: string): string {
+  return path.replace(/^\/+/, '').trim();
+}
+
+function parseStorageRef(
+  value: string | null | undefined,
+  defaultBucket = HOMEWORK_TASK_IMAGES_BUCKET,
+): { bucket: string; objectPath: string } | null {
+  if (!value || typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+
+  if (trimmed.startsWith(STORAGE_REF_PREFIX)) {
+    const raw = trimmed.slice(STORAGE_REF_PREFIX.length);
+    const slashIdx = raw.indexOf('/');
+    if (slashIdx <= 0 || slashIdx === raw.length - 1) {
+      return null;
+    }
+    const bucket = raw.slice(0, slashIdx);
+    const objectPath = sanitizeObjectPath(raw.slice(slashIdx + 1));
+    if (!bucket || !objectPath) return null;
+    return { bucket, objectPath };
+  }
+
+  const objectPath = sanitizeObjectPath(trimmed);
+  if (!objectPath) return null;
+  return { bucket: defaultBucket, objectPath };
 }
 
 export async function listStudentAssignments(): Promise<StudentHomeworkAssignment[]> {
@@ -517,6 +547,21 @@ export async function finalizeSubmission(submissionId: string): Promise<void> {
   if (error) {
     throw new StudentHomeworkApiError(error.message);
   }
+}
+
+export async function getStudentTaskImageSignedUrl(taskImageRef: string): Promise<string | null> {
+  const parsed = parseStorageRef(taskImageRef, HOMEWORK_TASK_IMAGES_BUCKET);
+  if (!parsed) return null;
+
+  const { data, error } = await supabase.storage
+    .from(parsed.bucket)
+    .createSignedUrl(parsed.objectPath, 3600);
+
+  if (error || !data?.signedUrl) {
+    return null;
+  }
+
+  return data.signedUrl;
 }
 
 export interface StudentSubmissionAiCheckResponse {
