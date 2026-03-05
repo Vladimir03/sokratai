@@ -2,12 +2,9 @@
 
 Before making changes:
 
-1. Read `CLAUDE.md`.
-2. Read `AGENTS.md`.
+1. Read `AGENTS.md`.
+2. Read `CLAUDE.md`.
 3. Read `docs/engineering/overview/codebase.md`.
+4. Read feature spec (if exists).
 
-Then confirm:
-
-- Task scope is clear.
-- You are not changing unrelated areas.
-- Validation commands are identified.
+Do not start coding without reading spec.
