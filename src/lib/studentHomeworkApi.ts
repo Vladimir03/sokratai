@@ -184,7 +184,7 @@ export async function getStudentAssignment(assignmentId: string): Promise<Studen
 
   const { data: assignment, error: assignmentError } = await supabase
     .from('homework_tutor_assignments')
-    .select('id, title, subject, topic, description, deadline, status, max_attempts, created_at')
+    .select('id, title, subject, topic, description, deadline, status, created_at')
     .eq('id', assignmentId)
     .single();
 
@@ -212,7 +212,7 @@ export async function getStudentAssignment(assignmentId: string): Promise<Studen
 
   const result = {
     ...assignment,
-    max_attempts: assignment.max_attempts ?? 3,
+    max_attempts: 3,
     updated_at: assignment.created_at,
     tasks: (tasks ?? []) as StudentHomeworkAssignmentDetails['tasks'],
     materials: (materials ?? []) as StudentHomeworkAssignmentDetails['materials'],
@@ -226,7 +226,7 @@ export async function createStudentSubmission(assignmentId: string): Promise<Stu
 
   const { data: assignment, error: assignmentError } = await supabase
     .from('homework_tutor_assignments')
-    .select('id, deadline, max_attempts')
+    .select('id, deadline')
     .eq('id', assignmentId)
     .single();
 
@@ -252,7 +252,7 @@ export async function createStudentSubmission(assignmentId: string): Promise<Stu
   }
 
   const attemptsUsed = Number(latestSubmission?.attempt_no ?? 0);
-  const maxAttempts = assignment.max_attempts ?? 3;
+  const maxAttempts = 3;
 
   if (attemptsUsed >= maxAttempts) {
     throw new StudentHomeworkApiError('Лимит попыток исчерпан.');
