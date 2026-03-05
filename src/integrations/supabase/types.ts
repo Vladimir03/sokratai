@@ -543,7 +543,9 @@ export type Database = {
           created_at: string
           deadline: string | null
           description: string | null
+          group_id: string | null
           id: string
+          max_attempts: number
           status: string
           subject: string
           title: string
@@ -554,7 +556,9 @@ export type Database = {
           created_at?: string
           deadline?: string | null
           description?: string | null
+          group_id?: string | null
           id?: string
+          max_attempts?: number
           status?: string
           subject: string
           title: string
@@ -565,14 +569,24 @@ export type Database = {
           created_at?: string
           deadline?: string | null
           description?: string | null
+          group_id?: string | null
           id?: string
+          max_attempts?: number
           status?: string
           subject?: string
           title?: string
           topic?: string | null
           tutor_id?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "homework_tutor_assignments_group_id_fkey"
+            columns: ["group_id"]
+            isOneToOne: false
+            referencedRelation: "tutor_groups"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       homework_tutor_materials: {
         Row: {
@@ -759,7 +773,7 @@ export type Database = {
           status: string
           student_id: string
           submitted_at: string | null
-          telegram_chat_id: number
+          telegram_chat_id: number | null
           total_max_score: number | null
           total_score: number | null
         }
@@ -770,7 +784,7 @@ export type Database = {
           status?: string
           student_id: string
           submitted_at?: string | null
-          telegram_chat_id: number
+          telegram_chat_id?: number | null
           total_max_score?: number | null
           total_score?: number | null
         }
@@ -781,7 +795,7 @@ export type Database = {
           status?: string
           student_id?: string
           submitted_at?: string | null
-          telegram_chat_id?: number
+          telegram_chat_id?: number | null
           total_max_score?: number | null
           total_score?: number | null
         }
