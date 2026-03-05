@@ -212,7 +212,7 @@ export async function getStudentAssignment(assignmentId: string): Promise<Studen
 
   const result = {
     ...assignment,
-    max_attempts: assignment.max_attempts ?? 3,
+    max_attempts: 3,
     updated_at: assignment.created_at,
     tasks: (tasks ?? []) as StudentHomeworkAssignmentDetails['tasks'],
     materials: (materials ?? []) as StudentHomeworkAssignmentDetails['materials'],
