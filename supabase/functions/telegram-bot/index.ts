@@ -387,6 +387,43 @@ async function sendTelegramMessage(chatId: number, text: string, extraParams?: R
 // ID группы для просмотра статистики
 const ADMIN_STATS_CHAT_ID = -5270269461;
 
+// === GROUP CHAT HELPERS ===
+
+const TELEGRAM_BOT_USERNAME = (Deno.env.get("TELEGRAM_BOT_USERNAME") ?? "SokratAIBot").toLowerCase();
+
+function isGroupChat(chatType: string | undefined): boolean {
+  return chatType === "group" || chatType === "supergroup";
+}
+
+function extractBotMention(
+  text: string,
+  entities: Array<{ type: string; offset: number; length: number }> | undefined,
+  botUsername: string,
+): string | null {
+  if (!entities) return null;
+
+  // Collect all bot mention positions, sort in reverse order to preserve offsets during removal
+  const botMentions = entities
+    .filter(e => e.type === "mention"
+      && text.slice(e.offset, e.offset + e.length).toLowerCase() === `@${botUsername}`)
+    .sort((a, b) => b.offset - a.offset);
+
+  if (botMentions.length === 0) return null;
+
+  let cleaned = text;
+  for (const mention of botMentions) {
+    cleaned = cleaned.slice(0, mention.offset) + cleaned.slice(mention.offset + mention.length);
+  }
+  cleaned = cleaned.trim();
+  return cleaned || null;
+}
+
+function isReplyToOurBot(message: any, botUsername: string): boolean {
+  const repliedFrom = message?.reply_to_message?.from;
+  return repliedFrom?.is_bot === true
+    && repliedFrom?.username?.toLowerCase() === botUsername;
+}
+
 // Функция получения статистики воронки 11-классников
 async function getFunnelStats(): Promise<string> {
   try {
@@ -6899,6 +6936,114 @@ async function handleTextMessage(telegramUserId: number, userId: string, text: s
   }
 }
 
+// === GROUP CHAT AI HANDLER ===
+
+async function handleGroupTextMessage(
+  groupChatId: number,
+  messageId: number,
+  telegramUserId: number,
+  userId: string,
+  text: string,
+  replyContext?: string,
+) {
+  console.log("📢 Handling group text message:", { groupChatId, telegramUserId, text: text.substring(0, 100) });
+
+  try {
+    // Check subscription/limits before processing
+    const status = await getSubscriptionStatus(userId);
+    if (status && !status.is_premium && !status.is_trial_active && status.limit_reached) {
+      await sendTelegramMessage(
+        groupChatId,
+        `⏳ Достигнут дневной лимит ${status.daily_limit} сообщений. Напиши мне в личные сообщения для информации о Premium.`,
+        { reply_to_message_id: messageId },
+      );
+      return;
+    }
+
+    // Start typing loop in the group chat
+    const stopTyping = { stop: false };
+    const typingPromise = sendTypingLoop(groupChatId, stopTyping);
+
+    try {
+      // Build messages for AI
+      const messages: Array<{ role: string; content: string }> = [];
+      if (replyContext) {
+        messages.push({ role: "assistant", content: replyContext });
+      }
+      messages.push({ role: "user", content: text });
+
+      // Call AI chat function with group context
+      const chatResponse = await fetch(`${SUPABASE_URL}/functions/v1/chat`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
+        },
+        body: JSON.stringify({
+          messages,
+          userId,
+          responseProfile: "telegram_compact",
+          responseMode: "dialog",
+          maxChars: TELEGRAM_DIALOG_MAX_CHARS,
+          taskContext: "Ты отвечаешь на вопрос ученика в групповом чате Telegram (репетитор и ученики). Отвечай кратко и по делу. Не задавай личных вопросов (класс, имя). Просто ответь на вопрос по предмету.",
+        }),
+      });
+
+      // Handle rate limit error
+      if (chatResponse.status === 429) {
+        await sendTelegramMessage(
+          groupChatId,
+          "⏳ Слишком много запросов. Попробуй чуть позже.",
+          { reply_to_message_id: messageId },
+        );
+        return;
+      }
+
+      if (!chatResponse.ok) {
+        console.error("AI response error (group):", chatResponse.status, await chatResponse.text());
+        await sendTelegramMessage(
+          groupChatId,
+          "❌ Произошла ошибка. Попробуй ещё раз.",
+          { reply_to_message_id: messageId },
+        );
+        return;
+      }
+
+      // Parse SSE stream
+      const aiContent = await parseSSEStream(chatResponse);
+
+      const formatResult = formatTelegramResponseWithFallback(aiContent, {
+        responseMode: "dialog",
+        maxChars: TELEGRAM_DIALOG_MAX_CHARS,
+      });
+
+      // Send response parts as reply to the student's message
+      const messageParts = formatResult.parts;
+      for (let i = 0; i < messageParts.length; i++) {
+        if (i > 0) {
+          await new Promise((resolve) => setTimeout(resolve, 1000));
+        }
+        await sendTelegramMessage(
+          groupChatId,
+          messageParts[i],
+          // Only the first part is a reply to the original message
+          i === 0 ? { reply_to_message_id: messageId } : undefined,
+        );
+      }
+    } finally {
+      stopTyping.stop = true;
+      await typingPromise;
+    }
+  } catch (error) {
+    console.error("Error handling group text message:", error);
+    await sendTelegramMessage(
+      groupChatId,
+      "❌ Произошла ошибка. Попробуй ещё раз.",
+      { reply_to_message_id: messageId },
+    );
+  }
+}
+
 async function handlePhotoMessage(telegramUserId: number, userId: string, photo: any, caption?: string) {
   console.log("Handling photo message:", { telegramUserId, photoId: photo.file_id });
 
@@ -7709,6 +7854,74 @@ Deno.serve(async (req) => {
 
     const update = await req.json();
     console.log("Received update:", JSON.stringify(update, null, 2));
+
+    // === GROUP CHAT HANDLING (early return — does not affect private chat logic) ===
+    if (update.message && isGroupChat(update.message.chat?.type)) {
+      const groupChatId = update.message.chat.id;
+      const telegramUserId = update.message.from?.id;
+      const messageId = update.message.message_id;
+
+      // Anonymous channel posts or service messages have no `from` — skip silently
+      if (!telegramUserId) {
+        return new Response(JSON.stringify({ ok: true }), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      let questionText: string | null = null;
+      let replyContext: string | undefined;
+
+      // Check for @mention in text message
+      if (update.message.text) {
+        questionText = extractBotMention(
+          update.message.text,
+          update.message.entities,
+          TELEGRAM_BOT_USERNAME,
+        );
+
+        // Check for reply-to-our-bot (even without @mention)
+        if (!questionText && isReplyToOurBot(update.message, TELEGRAM_BOT_USERNAME)) {
+          questionText = update.message.text;
+          replyContext = update.message.reply_to_message?.text;
+        }
+      }
+
+      // Check for @mention in photo caption
+      if (!questionText && update.message.photo && update.message.caption) {
+        questionText = extractBotMention(
+          update.message.caption,
+          update.message.caption_entities,
+          TELEGRAM_BOT_USERNAME,
+        );
+      }
+
+      if (!questionText) {
+        // Bot not mentioned and not replied to — ignore
+        return new Response(JSON.stringify({ ok: true }), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      // Resolve user
+      const session = await getOnboardingSession(telegramUserId);
+      if (!session?.user_id) {
+        await sendTelegramMessage(
+          groupChatId,
+          "👋 Привет! Чтобы я мог помочь, сначала напиши мне /start в личных сообщениях.",
+          { reply_to_message_id: messageId },
+        );
+        return new Response(JSON.stringify({ ok: true }), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      await handleGroupTextMessage(groupChatId, messageId, telegramUserId, session.user_id, questionText, replyContext);
+
+      return new Response(JSON.stringify({ ok: true }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+    // === END GROUP CHAT HANDLING ===
 
     // Handle /start command
     if (update.message?.text?.startsWith("/start")) {
