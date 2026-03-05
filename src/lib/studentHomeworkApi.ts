@@ -71,19 +71,21 @@ export async function listStudentAssignments(): Promise<StudentHomeworkAssignmen
         description,
         deadline,
         status,
-        max_attempts,
-        created_at,
-        updated_at
+        created_at
       )
     `)
-    .eq('student_id', studentId)
-    .in('homework_tutor_assignments.status', ['active', 'closed']);
+    .eq('student_id', studentId);
 
   if (error) {
     throw new StudentHomeworkApiError(error.message);
   }
 
-  const assignmentIds = (data ?? []).map((row: any) => row.assignment_id as string);
+  const assignmentRows = (data ?? []).filter((row: any) => {
+    const status = row?.homework_tutor_assignments?.status;
+    return status === 'active' || status === 'closed';
+  });
+
+  const assignmentIds = assignmentRows.map((row: any) => row.assignment_id as string);
 
   const { data: attemptsRows, error: attemptsError } = await supabase
     .from('homework_tutor_submissions')
@@ -108,7 +110,7 @@ export async function listStudentAssignments(): Promise<StudentHomeworkAssignmen
     }
   }
 
-  return (data ?? [])
+  return assignmentRows
     .map((row: any) => {
       const assignment = row.homework_tutor_assignments;
       const attemptInfo = attemptsMap.get(assignment.id) ?? { attempts_used: 0, latest_status: null };
@@ -120,7 +122,7 @@ export async function listStudentAssignments(): Promise<StudentHomeworkAssignmen
         description: assignment.description,
         deadline: assignment.deadline,
         status: assignment.status,
-        max_attempts: assignment.max_attempts ?? 3,
+        max_attempts: 3,
         attempts_used: attemptInfo.attempts_used,
         latest_submission_status: attemptInfo.latest_status,
       } satisfies StudentHomeworkAssignment;
