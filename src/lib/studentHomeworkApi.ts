@@ -252,7 +252,7 @@ export async function createStudentSubmission(assignmentId: string): Promise<Stu
   }
 
   const attemptsUsed = Number(latestSubmission?.attempt_no ?? 0);
-  const maxAttempts = assignment.max_attempts ?? 3;
+  const maxAttempts = 3;
 
   if (attemptsUsed >= maxAttempts) {
     throw new StudentHomeworkApiError('Лимит попыток исчерпан.');
