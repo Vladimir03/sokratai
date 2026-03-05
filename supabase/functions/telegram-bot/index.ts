@@ -8067,8 +8067,13 @@ Deno.serve(async (req) => {
       }
 
       // Route to photo or text handler
-      if (update.message.photo) {
-        const photo = update.message.photo[update.message.photo.length - 1];
+      // Check photo on current message OR on the replied-to message
+      const messagePhoto = update.message.photo;
+      const replyPhoto = update.message.reply_to_message?.photo;
+      const photoArray = messagePhoto || replyPhoto;
+
+      if (photoArray) {
+        const photo = photoArray[photoArray.length - 1];
         await handleGroupPhotoMessage(groupChatId, messageId, telegramUserId, session.user_id, photo, questionText, replyContext);
       } else {
         await handleGroupTextMessage(groupChatId, messageId, telegramUserId, session.user_id, questionText, replyContext);
