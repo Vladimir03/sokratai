@@ -186,7 +186,7 @@ Assign students to a homework assignment.
 
 **Behavior:**
 - All `student_ids` must belong to the tutor (via `tutor_students` table).
-- All `student_ids` must have Telegram linked (`profiles.telegram_user_id`), otherwise request is rejected.
+- Students without Telegram linkage are still assigned to homework (site cabinet access remains available).
 - Upsert: re-assigning an already assigned student is a no-op.
 - Auto-activation: if assignment is `draft`, API forces status to `active` right after successful assign.
 
@@ -194,7 +194,9 @@ Assign students to a homework assignment.
 ```json
 {
   "added": 2,
-  "assignment_status": "active"
+  "assignment_status": "active",
+  "students_without_telegram": ["uuid-2"],
+  "students_without_telegram_names": ["Иван"]
 }
 ```
 
@@ -208,22 +210,6 @@ Assign students to a homework assignment.
   }
 }
 ```
-
-**Error (400):**
-```json
-{
-  "error": {
-    "code": "STUDENTS_TELEGRAM_NOT_CONNECTED",
-    "message": "Some selected students do not have Telegram linked",
-    "details": {
-      "invalid_student_ids": ["uuid-1"],
-      "invalid_student_names": ["Иван"]
-    }
-  }
-}
-```
-
----
 
 ### 6. POST /assignments/:id/notify
 

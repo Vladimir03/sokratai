@@ -132,6 +132,8 @@ export interface AssignStudentsResponse {
   added: number;
   assignment_status: HomeworkAssignmentStatus;
   assigned_group_id?: string | null;
+  students_without_telegram?: string[];
+  students_without_telegram_names?: string[];
 }
 
 export type NotifyFailureReason =
@@ -144,11 +146,6 @@ export interface NotifyStudentsResponse {
   failed: number;
   failed_student_ids: string[];
   failed_by_reason?: Record<string, NotifyFailureReason>;
-}
-
-export interface StudentsTelegramNotConnectedDetails {
-  invalid_student_ids: string[];
-  invalid_student_names?: string[];
 }
 
 // ─── API Error ───────────────────────────────────────────────────────────────

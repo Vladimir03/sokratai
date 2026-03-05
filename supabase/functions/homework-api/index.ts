@@ -817,28 +817,27 @@ async function handleAssignStudents(
     });
   }
 
+  let studentsWithoutTelegram: string[] = [];
+  let studentsWithoutTelegramNames: string[] = [];
+
   const { data: studentProfiles, error: studentProfilesError } = await db
     .from("profiles")
     .select("id, username, telegram_username, telegram_user_id")
     .in("id", studentIds);
 
   if (studentProfilesError) {
-    console.error("homework_api_request_error", {
+    console.warn("homework_api_student_profile_lookup_failed", {
       route: "POST /assignments/:id/assign",
       assignment_id: assignmentId,
       error: studentProfilesError.message,
     });
-    return jsonError(cors, 500, "DB_ERROR", "Failed to validate students telegram linkage");
-  }
-
-  const profileById = new Map((studentProfiles ?? []).map((p: any) => [p.id as string, p]));
-  const studentsWithoutTelegram = studentIds.filter((sid) => {
-    const profile = profileById.get(sid);
-    return !profile?.telegram_user_id;
-  });
-
-  if (studentsWithoutTelegram.length > 0) {
-    const invalidStudentNames = studentsWithoutTelegram.map((sid) => {
+  } else {
+    const profileById = new Map((studentProfiles ?? []).map((p) => [p.id as string, p]));
+    studentsWithoutTelegram = studentIds.filter((sid) => {
+      const profile = profileById.get(sid);
+      return !profile?.telegram_user_id;
+    });
+    studentsWithoutTelegramNames = studentsWithoutTelegram.map((sid) => {
       const profile = profileById.get(sid);
       if (profile?.username && String(profile.username).trim().length > 0) {
         return String(profile.username);
@@ -848,17 +847,6 @@ async function handleAssignStudents(
       }
       return sid;
     });
-
-    return jsonError(
-      cors,
-      400,
-      "STUDENTS_TELEGRAM_NOT_CONNECTED",
-      "Some selected students do not have Telegram linked",
-      {
-        invalid_student_ids: studentsWithoutTelegram,
-        invalid_student_names: invalidStudentNames,
-      },
-    );
   }
 
   const rows = studentIds.map((sid) => ({
@@ -918,6 +906,8 @@ async function handleAssignStudents(
     added: (upserted ?? []).length,
     assignment_status: assignmentStatus,
     assigned_group_id: isUUID(b.group_id) ? b.group_id : null,
+    students_without_telegram: studentsWithoutTelegram,
+    students_without_telegram_names: studentsWithoutTelegramNames,
   });
 }
 

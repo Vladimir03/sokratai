@@ -19,6 +19,7 @@ import {
 import {
   ArrowLeft,
   ArrowRight,
+  Copy,
   Plus,
   Trash2,
   Upload,
@@ -39,7 +40,7 @@ import { toast } from 'sonner';
 import TutorGuard from '@/components/TutorGuard';
 import { TutorLayout } from '@/components/tutor/TutorLayout';
 import { TutorDataStatus } from '@/components/tutor/TutorDataStatus';
-import { useTutorStudents, useTutorGroups, useTutorGroupMemberships } from '@/hooks/useTutor';
+import { useTutor, useTutorStudents, useTutorGroups, useTutorGroupMemberships } from '@/hooks/useTutor';
 import { useTutorHomeworkTemplates } from '@/hooks/useTutorHomework';
 import {
   Sheet,
@@ -59,13 +60,12 @@ import {
   getTutorHomeworkTemplate,
   createTutorHomeworkTemplate,
   parseStorageRef,
-  HomeworkApiError,
   type HomeworkSubject,
   type CreateAssignmentTask,
-  type StudentsTelegramNotConnectedDetails,
   type HomeworkTemplateListItem,
   type MaterialType,
 } from '@/lib/tutorHomeworkApi';
+import { getTutorInviteWebLink } from '@/utils/telegramLinks';
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
@@ -846,6 +846,9 @@ function StepAssign({
   selectedGroupId,
   onGroupIdChange,
   groups,
+  inviteWebLink,
+  studentLoginLink,
+  studentSignupLink,
 }: {
   selectedIds: Set<string>;
   onChangeSelected: (s: Set<string>) => void;
@@ -859,8 +862,12 @@ function StepAssign({
   selectedGroupId: string;
   onGroupIdChange: (groupId: string) => void;
   groups: Array<{ id: string; name: string }>;
+  inviteWebLink: string;
+  studentLoginLink: string;
+  studentSignupLink: string;
 }) {
   const [searchQuery, setSearchQuery] = useState('');
+  const [inviteCopied, setInviteCopied] = useState(false);
   const {
     students,
     loading,
@@ -902,13 +909,40 @@ function StepAssign({
     });
   }, [students, searchQuery]);
 
-  const selectedWithoutTelegram = useMemo(
+  const selectedWithoutTelegramStudents = useMemo(
     () =>
       students.filter(
         (s) => selectedIds.has(s.student_id) && !s.profiles?.telegram_user_id,
-      ).length,
+      ),
     [students, selectedIds],
   );
+
+  const selectedWithoutTelegram = selectedWithoutTelegramStudents.length;
+
+  const selectedWithoutTelegramPreview = useMemo(() => {
+    if (selectedWithoutTelegramStudents.length === 0) return '';
+    const names = selectedWithoutTelegramStudents
+      .slice(0, 3)
+      .map(
+        (s) =>
+          s.profiles?.username ||
+          (s.profiles?.telegram_username ? `@${s.profiles.telegram_username}` : s.student_id),
+      );
+    const suffix = selectedWithoutTelegramStudents.length > 3 ? '...' : '';
+    return `${names.join(', ')}${suffix}`;
+  }, [selectedWithoutTelegramStudents]);
+
+  const handleCopyInviteLink = useCallback(async () => {
+    if (!inviteWebLink) return;
+    try {
+      await navigator.clipboard.writeText(inviteWebLink);
+      setInviteCopied(true);
+      toast.success('Ссылка приглашения скопирована');
+      setTimeout(() => setInviteCopied(false), 2000);
+    } catch {
+      toast.error('Не удалось скопировать ссылку приглашения');
+    }
+  }, [inviteWebLink]);
 
   return (
     <div className="space-y-6">
@@ -1039,6 +1073,50 @@ function StepAssign({
         <p className="text-xs text-muted-foreground">
           Выбрано: {selectedIds.size} из {students.length}. Без Telegram: {selectedWithoutTelegram}
         </p>
+
+        {selectedWithoutTelegram > 0 && (
+          <Card className="border-amber-500/40 bg-amber-50/40">
+            <CardContent className="pt-4 space-y-3">
+              <p className="text-sm">
+                У {selectedWithoutTelegram} ученик(ов) нет Telegram-связки. ДЗ будет назначено в кабинет на сайте,
+                но Telegram-уведомление не отправится.
+              </p>
+              {selectedWithoutTelegramPreview && (
+                <p className="text-xs text-muted-foreground">
+                  Без Telegram: {selectedWithoutTelegramPreview}
+                </p>
+              )}
+              <div className="flex flex-wrap gap-2">
+                <Button size="sm" variant="outline" asChild>
+                  <a href={studentLoginLink} target="_blank" rel="noreferrer">
+                    Вход ученика
+                    <ExternalLink className="h-3.5 w-3.5 ml-1" />
+                  </a>
+                </Button>
+                <Button size="sm" variant="outline" asChild>
+                  <a href={studentSignupLink} target="_blank" rel="noreferrer">
+                    Регистрация ученика
+                    <ExternalLink className="h-3.5 w-3.5 ml-1" />
+                  </a>
+                </Button>
+                {inviteWebLink && (
+                  <>
+                    <Button size="sm" variant="outline" onClick={handleCopyInviteLink}>
+                      {inviteCopied ? <Check className="h-3.5 w-3.5 mr-1" /> : <Copy className="h-3.5 w-3.5 mr-1" />}
+                      {inviteCopied ? 'Скопировано' : 'Копировать инвайт'}
+                    </Button>
+                    <Button size="sm" variant="outline" asChild>
+                      <a href={inviteWebLink} target="_blank" rel="noreferrer">
+                        Страница приглашения
+                        <ExternalLink className="h-3.5 w-3.5 ml-1" />
+                      </a>
+                    </Button>
+                  </>
+                )}
+              </div>
+            </CardContent>
+          </Card>
+        )}
       </div>
 
       {/* Notify toggle */}
@@ -1116,10 +1194,15 @@ function TutorHomeworkCreateContent() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [searchParams] = useSearchParams();
+  const { tutor } = useTutor();
   const { students: tutorStudents } = useTutorStudents();
   const [step, setStep] = useState(1);
   const { groups } = useTutorGroups(step === 3);
   const { memberships } = useTutorGroupMemberships(step === 3);
+  const inviteWebLink = tutor?.invite_code ? getTutorInviteWebLink(tutor.invite_code) : '';
+  const appOrigin = typeof window !== 'undefined' ? window.location.origin : 'https://sokratai.ru';
+  const studentLoginLink = `${appOrigin}/login`;
+  const studentSignupLink = `${appOrigin}/signup`;
   const [templateLoading, setTemplateLoading] = useState(false);
 
   // Step 1
@@ -1322,23 +1405,10 @@ function TutorHomeworkCreateContent() {
     const errs: Record<string, string> = {};
     if (selectedStudentIds.size === 0) {
       errs._students = 'Выберите хотя бы одного ученика';
-    } else {
-      const selectedWithoutTelegram = tutorStudents.filter(
-        (s) => selectedStudentIds.has(s.student_id) && !s.profiles?.telegram_user_id,
-      );
-      if (selectedWithoutTelegram.length > 0) {
-        const names = selectedWithoutTelegram
-          .map((s) => s.profiles?.username || s.profiles?.telegram_username || s.student_id);
-        const preview = names.slice(0, 5).join(', ');
-        const suffix = names.length > 5 ? '...' : '';
-        errs._students =
-          `Выбраны ученики без Telegram-связки: ${preview}${suffix}. ` +
-          'Попросите ученика нажать /start и повторите.';
-      }
     }
     setErrors(errs);
     return Object.keys(errs).length === 0;
-  }, [selectedStudentIds, tutorStudents]);
+  }, [selectedStudentIds]);
 
   // ── Navigation ──
 
@@ -1492,59 +1562,61 @@ function TutorHomeworkCreateContent() {
         queryKey: ['tutor', 'homework', 'assignments'],
       });
 
+      const assignedWithoutTelegramIds = assignResult.students_without_telegram ?? [];
+      const assignedWithoutTelegramNames = assignResult.students_without_telegram_names ?? [];
+
       // Build toast message
       const parts: string[] = [`ДЗ создано, назначено ${assignResult.added} ученикам`];
       if (assignResult.assignment_status !== 'active') {
         parts.push(`Статус задания: ${assignResult.assignment_status}`);
       }
-      if (notifyResult) {
-        if (notifyResult.failed > 0 && notifyResult.sent > 0) {
-          parts.push(
-            `Уведомления: ${notifyResult.sent} отправлено, ${notifyResult.failed} не удалось`,
-          );
-        } else if (notifyResult.failed > 0 && notifyResult.sent === 0) {
-          parts.push('Не удалось отправить уведомления');
-        } else {
-          parts.push(`Уведомления отправлены (${notifyResult.sent})`);
-        }
-        if (notifyResult.failed_student_ids.length > 0) {
-          parts.push(
-            `Недоставлено: ${notifyResult.failed_student_ids.slice(0, 5).join(', ')}${
-              notifyResult.failed_student_ids.length > 5 ? '...' : ''
-            }`,
-          );
+      if (assignedWithoutTelegramIds.length > 0) {
+        const previewList = (
+          assignedWithoutTelegramNames.length > 0
+            ? assignedWithoutTelegramNames
+            : assignedWithoutTelegramIds
+        ).slice(0, 3);
+        const preview = previewList.join(', ');
+        const suffix = assignedWithoutTelegramIds.length > 3 ? '...' : '';
+        parts.push(
+          `Без Telegram-связки: ${assignedWithoutTelegramIds.length} (ДЗ в кабинете назначено, уведомление не отправлено)`,
+        );
+        if (preview) {
+          parts.push(`Ученики без Telegram: ${preview}${suffix}`);
         }
       }
+      if (notifyResult) {
+        const reasonValues = Object.values(notifyResult.failed_by_reason ?? {});
+        const missingTelegramCount = reasonValues.filter(
+          (reason) => reason === 'missing_telegram_link',
+        ).length;
+        const telegramErrorCount = Math.max(notifyResult.failed - missingTelegramCount, 0);
+
+        if (notifyResult.sent > 0) {
+          parts.push(`Telegram: отправлено ${notifyResult.sent}`);
+        }
+        if (missingTelegramCount > 0) {
+          parts.push(`Без Telegram для отправки: ${missingTelegramCount}`);
+        }
+        if (telegramErrorCount > 0) {
+          parts.push(`Ошибки доставки Telegram: ${telegramErrorCount}`);
+        }
+        if (notifyResult.sent === 0 && notifyResult.failed === 0) {
+          parts.push('Telegram: нет новых получателей для уведомления');
+        }
+      } else if (!notifyEnabled) {
+        parts.push('Telegram-уведомления отключены');
+      }
       toast.success(parts.join('. '));
+      if (assignedWithoutTelegramIds.length > 0) {
+        const inviteHint = inviteWebLink
+          ? `Поделитесь ссылкой приглашения: ${inviteWebLink}`
+          : `Дайте ученику ссылку на вход (${studentLoginLink}) или регистрацию (${studentSignupLink})`;
+        toast.info(`Для учеников без Telegram: ${inviteHint}`);
+      }
       navigate('/tutor/homework');
     } catch (err) {
       setSubmitPhase('idle');
-
-      if (
-        err instanceof HomeworkApiError &&
-        err.code === 'STUDENTS_TELEGRAM_NOT_CONNECTED'
-      ) {
-        const details =
-          err.details && typeof err.details === 'object'
-            ? (err.details as StudentsTelegramNotConnectedDetails)
-            : null;
-        const names =
-          details?.invalid_student_names?.filter((name) => typeof name === 'string') ?? [];
-        const ids =
-          details?.invalid_student_ids?.filter((id) => typeof id === 'string') ?? [];
-
-        const selected = names.length > 0 ? names : ids;
-        const preview = selected.slice(0, 5).join(', ');
-        const suffix = selected.length > 5 ? '...' : '';
-        const message = selected.length > 0
-          ? `Выбраны ученики без Telegram-связки: ${preview}${suffix}. Попросите ученика нажать /start и повторите.`
-          : 'У части выбранных учеников не подключен Telegram. Попросите ученика нажать /start и повторите.';
-
-        setErrors({ _students: message });
-        setStep(3);
-        toast.error(message);
-        return;
-      }
 
       const message =
         err instanceof Error ? err.message : 'Неизвестная ошибка';
@@ -1566,6 +1638,9 @@ function TutorHomeworkCreateContent() {
     saveAsTemplate,
     navigate,
     queryClient,
+    inviteWebLink,
+    studentLoginLink,
+    studentSignupLink,
   ]);
 
   const isSubmitting = submitPhase !== 'idle' && submitPhase !== 'done';
@@ -1634,6 +1709,9 @@ function TutorHomeworkCreateContent() {
               selectedGroupId={selectedGroupId}
               onGroupIdChange={setSelectedGroupId}
               groups={groups.map((g) => ({ id: g.id, name: g.name }))}
+              inviteWebLink={inviteWebLink}
+              studentLoginLink={studentLoginLink}
+              studentSignupLink={studentSignupLink}
             />
           )}
         </div>
