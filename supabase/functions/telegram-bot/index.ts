@@ -7044,6 +7044,150 @@ async function handleGroupTextMessage(
   }
 }
 
+// === GROUP CHAT PHOTO HANDLER ===
+
+async function handleGroupPhotoMessage(
+  groupChatId: number,
+  messageId: number,
+  telegramUserId: number,
+  userId: string,
+  photo: { file_id: string },
+  caption: string | null,
+  replyContext?: string,
+) {
+  console.log("📸 Handling group photo message:", { groupChatId, telegramUserId, photoId: photo.file_id });
+
+  try {
+    // Check subscription/limits before processing
+    const status = await getSubscriptionStatus(userId);
+    if (status && !status.is_premium && !status.is_trial_active && status.limit_reached) {
+      await sendTelegramMessage(
+        groupChatId,
+        `⏳ Достигнут дневной лимит ${status.daily_limit} сообщений. Напиши мне в личные сообщения для информации о Premium.`,
+        { reply_to_message_id: messageId },
+      );
+      return;
+    }
+
+    // Download photo from Telegram
+    const fileResponse = await fetch(
+      `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/getFile?file_id=${photo.file_id}`,
+    );
+    const fileData = await fileResponse.json();
+    if (!fileData.ok) {
+      throw new Error(`Failed to get file from Telegram: ${JSON.stringify(fileData)}`);
+    }
+
+    const filePath = fileData.result.file_path;
+    const imageResponse = await fetch(`https://api.telegram.org/file/bot${TELEGRAM_BOT_TOKEN}/${filePath}`);
+    if (!imageResponse.ok) {
+      throw new Error(`Failed to download image: ${imageResponse.status}`);
+    }
+    const imageBlob = await imageResponse.blob();
+
+    // Upload to Supabase Storage
+    const fileName = `${userId}/${Date.now()}.jpg`;
+    const { error: uploadError } = await supabase.storage
+      .from("chat-images")
+      .upload(fileName, imageBlob, { contentType: "image/jpeg", upsert: false });
+
+    if (uploadError) {
+      throw new Error(`Failed to upload image: ${uploadError.message}`);
+    }
+
+    // Create signed URL for AI (24 hours)
+    const { data: signedData, error: signError } = await supabase.storage
+      .from("chat-images")
+      .createSignedUrl(fileName, 86400);
+
+    if (signError || !signedData) {
+      throw new Error(`Failed to create signed URL: ${signError?.message}`);
+    }
+
+    // Start typing loop
+    const stopTyping = { stop: false };
+    const typingPromise = sendTypingLoop(groupChatId, stopTyping);
+
+    try {
+      // Build multimodal message for AI
+      const messages: Array<{ role: string; content: string; image_url?: string }> = [];
+      if (replyContext) {
+        messages.push({ role: "assistant", content: replyContext });
+      }
+      messages.push({
+        role: "user",
+        content: caption || "Помоги решить эту задачу",
+        image_url: signedData.signedUrl,
+      });
+
+      // Call AI chat function with group context
+      const chatResponse = await fetch(`${SUPABASE_URL}/functions/v1/chat`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
+        },
+        body: JSON.stringify({
+          messages,
+          userId,
+          responseProfile: "telegram_compact",
+          responseMode: "dialog",
+          maxChars: TELEGRAM_DIALOG_MAX_CHARS,
+          taskContext: "Ты отвечаешь на вопрос ученика в групповом чате Telegram (репетитор и ученики). Ученик прислал фото задачи. Разбери задачу и помоги решить. Отвечай кратко и по делу.",
+        }),
+      });
+
+      if (chatResponse.status === 429) {
+        await sendTelegramMessage(
+          groupChatId,
+          "⏳ Слишком много запросов. Попробуй чуть позже.",
+          { reply_to_message_id: messageId },
+        );
+        return;
+      }
+
+      if (!chatResponse.ok) {
+        console.error("AI response error (group photo):", chatResponse.status, await chatResponse.text());
+        await sendTelegramMessage(
+          groupChatId,
+          "❌ Произошла ошибка. Попробуй ещё раз.",
+          { reply_to_message_id: messageId },
+        );
+        return;
+      }
+
+      // Parse SSE stream and send response
+      const aiContent = await parseSSEStream(chatResponse);
+      const formatResult = formatTelegramResponseWithFallback(aiContent, {
+        responseMode: "dialog",
+        maxChars: TELEGRAM_DIALOG_MAX_CHARS,
+      });
+
+      const messageParts = formatResult.parts;
+      for (let i = 0; i < messageParts.length; i++) {
+        if (i > 0) {
+          await new Promise((resolve) => setTimeout(resolve, 1000));
+        }
+        await sendTelegramMessage(
+          groupChatId,
+          messageParts[i],
+          i === 0 ? { reply_to_message_id: messageId } : undefined,
+        );
+      }
+    } finally {
+      stopTyping.stop = true;
+      await typingPromise;
+    }
+  } catch (error) {
+    console.error("Error handling group photo message:", error);
+    await sendTelegramMessage(
+      groupChatId,
+      "❌ Ошибка при обработке фото. Попробуй ещё раз.",
+      { reply_to_message_id: messageId },
+    );
+  }
+}
+
 async function handlePhotoMessage(telegramUserId: number, userId: string, photo: any, caption?: string) {
   console.log("Handling photo message:", { telegramUserId, photoId: photo.file_id });
 
@@ -7886,13 +8030,20 @@ Deno.serve(async (req) => {
         }
       }
 
-      // Check for @mention in photo caption
-      if (!questionText && update.message.photo && update.message.caption) {
-        questionText = extractBotMention(
-          update.message.caption,
-          update.message.caption_entities,
-          TELEGRAM_BOT_USERNAME,
-        );
+      // Check for photo with @mention in caption or reply-to-bot with photo
+      if (!questionText && update.message.photo) {
+        if (update.message.caption) {
+          questionText = extractBotMention(
+            update.message.caption,
+            update.message.caption_entities,
+            TELEGRAM_BOT_USERNAME,
+          );
+        }
+        // Photo as reply-to-our-bot (no @mention needed)
+        if (!questionText && isReplyToOurBot(update.message, TELEGRAM_BOT_USERNAME)) {
+          questionText = update.message.caption || "Помоги решить эту задачу";
+          replyContext = update.message.reply_to_message?.text;
+        }
       }
 
       if (!questionText) {
@@ -7915,7 +8066,13 @@ Deno.serve(async (req) => {
         });
       }
 
-      await handleGroupTextMessage(groupChatId, messageId, telegramUserId, session.user_id, questionText, replyContext);
+      // Route to photo or text handler
+      if (update.message.photo) {
+        const photo = update.message.photo[update.message.photo.length - 1];
+        await handleGroupPhotoMessage(groupChatId, messageId, telegramUserId, session.user_id, photo, questionText, replyContext);
+      } else {
+        await handleGroupTextMessage(groupChatId, messageId, telegramUserId, session.user_id, questionText, replyContext);
+      }
 
       return new Response(JSON.stringify({ ok: true }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
