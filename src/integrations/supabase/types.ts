@@ -689,6 +689,7 @@ export type Database = {
           ai_feedback: string | null
           ai_is_correct: boolean | null
           ai_score: number | null
+          answer_type: string | null
           created_at: string
           id: string
           recognized_text: string | null
@@ -705,6 +706,7 @@ export type Database = {
           ai_feedback?: string | null
           ai_is_correct?: boolean | null
           ai_score?: number | null
+          answer_type?: string | null
           created_at?: string
           id?: string
           recognized_text?: string | null
@@ -721,6 +723,7 @@ export type Database = {
           ai_feedback?: string | null
           ai_is_correct?: boolean | null
           ai_score?: number | null
+          answer_type?: string | null
           created_at?: string
           id?: string
           recognized_text?: string | null
