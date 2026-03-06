@@ -11,6 +11,8 @@ import {
 } from "./vision_checker.ts";
 
 const HOMEWORK_IMAGES_BUCKET = "homework-images";
+const HOMEWORK_TASK_IMAGES_BUCKET = "homework-task-images";
+const HOMEWORK_TASK_IMAGE_FALLBACK_BUCKET = "chat-images";
 
 export interface HomeworkTaskRow {
   id: string;
@@ -134,6 +136,42 @@ async function downloadHomeworkImageAsBase64(supabase: SupabaseClient, objectPat
   return bytesToBase64(new Uint8Array(buffer));
 }
 
+async function downloadTaskImageAsBase64(
+  supabase: SupabaseClient,
+  taskImageRef: string,
+): Promise<string> {
+  const isStorageRef = taskImageRef.startsWith("storage://");
+  let bucket = HOMEWORK_TASK_IMAGES_BUCKET;
+  let path = taskImageRef;
+
+  if (isStorageRef) {
+    const withoutPrefix = taskImageRef.slice("storage://".length);
+    const slashIdx = withoutPrefix.indexOf("/");
+    if (slashIdx > 0) {
+      bucket = withoutPrefix.slice(0, slashIdx);
+      path = withoutPrefix.slice(slashIdx + 1);
+    }
+  }
+
+  const { data, error } = await supabase.storage.from(bucket).download(path);
+  if (!error && data) {
+    const buffer = await data.arrayBuffer();
+    return bytesToBase64(new Uint8Array(buffer));
+  }
+
+  if (bucket !== HOMEWORK_TASK_IMAGE_FALLBACK_BUCKET) {
+    const { data: fallbackData, error: fallbackError } = await supabase.storage
+      .from(HOMEWORK_TASK_IMAGE_FALLBACK_BUCKET)
+      .download(path);
+    if (!fallbackError && fallbackData) {
+      const buffer = await fallbackData.arrayBuffer();
+      return bytesToBase64(new Uint8Array(buffer));
+    }
+  }
+
+  throw new Error(`Failed to download task image from storage: ${error?.message ?? "unknown error"}`);
+}
+
 export async function runHomeworkAiCheck(
   supabase: SupabaseClient,
   submissionId: string,
@@ -203,11 +241,36 @@ export async function runHomeworkAiCheck(
     try {
       const item = itemsByTaskId.get(task.id);
       const studentText = normalizeText(item?.student_text);
+      const taskTextParts: string[] = [];
+      const baseTaskText = normalizeText(task.task_text);
+      if (baseTaskText) {
+        taskTextParts.push(baseTaskText);
+      }
+
+      if (task.task_image_url) {
+        try {
+          const taskImageBase64 = await downloadTaskImageAsBase64(supabase, task.task_image_url);
+          const recognizedTask = await recognizeHomeworkPhoto(taskImageBase64, subject, { strict: true });
+          const normalizedTaskImageText = normalizeText(recognizedTask.recognized_text);
+          if (normalizedTaskImageText) {
+            taskTextParts.push(normalizedTaskImageText);
+          }
+        } catch (error) {
+          console.warn("homework_ai_task_image_ocr_failed", {
+            submission_id: submissionId,
+            task_id: task.id,
+            task_image_url: task.task_image_url,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+      }
+
+      const effectiveTaskText = taskTextParts.join("\n\n");
       const studentImagePaths = Array.isArray(item?.student_image_urls)
         ? item!.student_image_urls.filter((v): v is string => typeof v === "string")
         : [];
 
-      const hasTaskText = normalizeText(task.task_text).length > 0;
+      const hasTaskText = effectiveTaskText.length > 0;
       const hasStudentText = studentText.length > 0;
       const hasStudentImages = studentImagePaths.length > 0;
 
@@ -254,7 +317,7 @@ export async function runHomeworkAiCheck(
       const recognizedText = recognizedParts.length > 0 ? recognizedParts.join("\n\n") : "[неразборчиво]";
       const checkResult = await checkHomeworkAnswer(
         recognizedText,
-        task.task_text,
+        effectiveTaskText,
         task.correct_answer,
         task.solution_steps,
         subject,
