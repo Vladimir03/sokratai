@@ -403,6 +403,7 @@ interface MetaState {
   topic: string;
   deadline: string;
   max_attempts: number;
+  workflow_mode: 'classic' | 'guided_chat';
 }
 
 function StepMeta({
@@ -485,6 +486,24 @@ function StepMeta({
             })
           }
           className="text-base"
+        />
+      </div>
+
+      <div className="flex items-center justify-between p-4 bg-muted/50 rounded-lg">
+        <div>
+          <Label htmlFor="workflow-mode" className="text-sm font-medium">
+            Интерактивный чат с AI
+          </Label>
+          <p className="text-xs text-muted-foreground mt-1">
+            Ученик решает задачи по одной в чате с подсказками AI
+          </p>
+        </div>
+        <Switch
+          id="workflow-mode"
+          checked={meta.workflow_mode === 'guided_chat'}
+          onCheckedChange={(checked) =>
+            onChange({ ...meta, workflow_mode: checked ? 'guided_chat' : 'classic' })
+          }
         />
       </div>
     </div>
@@ -1212,6 +1231,7 @@ function TutorHomeworkCreateContent() {
     topic: '',
     deadline: '',
     max_attempts: 3,
+    workflow_mode: 'classic',
   });
 
   // Step 2
@@ -1469,6 +1489,7 @@ function TutorHomeworkCreateContent() {
           tasks: apiTasks,
           max_attempts: meta.max_attempts,
           group_id: assignMode === 'group' && selectedGroupId ? selectedGroupId : null,
+          workflow_mode: meta.workflow_mode,
         });
         assignmentId = result.assignment_id;
         createdAssignmentIdRef.current = assignmentId;

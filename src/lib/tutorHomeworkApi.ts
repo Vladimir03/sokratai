@@ -41,6 +41,7 @@ export interface CreateAssignmentPayload {
   max_attempts?: number;
   group_id?: string | null;
   save_as_template?: boolean;
+  workflow_mode?: 'classic' | 'guided_chat';
 }
 
 // ─── Templates ───────────────────────────────────────────────────────────────
