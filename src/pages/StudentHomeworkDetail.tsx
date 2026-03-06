@@ -505,7 +505,9 @@ const StudentHomeworkDetail = () => {
                                   {isCorrect === true ? '✅' : isCorrect === false ? '❌' : '•'} Задача {task.order_num}: {score}/{task.max_score}
                                 </p>
                                 {item?.ai_feedback?.trim() && (
-                                  <p className="text-muted-foreground">{item.ai_feedback.trim()}</p>
+                                  <p className="text-muted-foreground whitespace-pre-wrap leading-relaxed">
+                                    {item.ai_feedback.trim()}
+                                  </p>
                                 )}
                               </div>
                             );

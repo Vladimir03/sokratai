@@ -241,7 +241,7 @@ function TaskItemReview({
 
         {/* AI results */}
         {item.ai_feedback && (
-          <div className="text-sm bg-background p-2 rounded border">
+          <div className="text-sm bg-background p-2 rounded border whitespace-pre-wrap leading-relaxed">
             <span className="text-xs text-muted-foreground block mb-1">AI отзыв:</span>
             {item.ai_feedback}
           </div>

@@ -12,6 +12,10 @@ const HOMEWORK_IMAGES_BUCKET = "homework-images";
 const HOMEWORK_TASK_IMAGES_BUCKET = "homework-task-images";
 const HOMEWORK_TASK_IMAGE_FALLBACK_BUCKET = "chat-images";
 export const MAX_ATTEMPTS = 3;
+const AI_FEEDBACK_TASK_MAX_LEN = 450;
+const AI_FEEDBACK_COMMENT_MAX_LEN = 280;
+const AI_FEEDBACK_CONDITION_LABEL = "Условие задачи:";
+const AI_FEEDBACK_COMMENT_LABEL = "Краткий комментарий:";
 
 if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
   throw new Error("Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY for homework handler");
@@ -127,6 +131,54 @@ function shortenText(text: string, maxLen: number): string {
   const lastSpace = sliced.lastIndexOf(" ");
   const safe = lastSpace > maxLen * 0.7 ? sliced.slice(0, lastSpace) : sliced;
   return `${safe.trim()}...`;
+}
+
+function toComparableText(text: string): string {
+  return normalizeText(text).replace(/\s+/g, " ");
+}
+
+function appendUniqueTextPart(parts: string[], text: string | null | undefined): void {
+  const normalized = normalizeText(text);
+  if (!normalized) return;
+
+  const comparable = toComparableText(normalized);
+  if (parts.some((part) => toComparableText(part) === comparable)) {
+    return;
+  }
+
+  parts.push(normalized);
+}
+
+function formatAiFeedback(taskCondition: string, comment: string): string {
+  const safeTaskCondition = shortenText(normalizeText(taskCondition), AI_FEEDBACK_TASK_MAX_LEN);
+  const safeComment = shortenText(
+    normalizeText(comment) || "AI не сформировал комментарий. Нужна ручная проверка репетитором.",
+    AI_FEEDBACK_COMMENT_MAX_LEN,
+  );
+
+  if (!safeTaskCondition) {
+    return `${AI_FEEDBACK_COMMENT_LABEL}\n${safeComment}`;
+  }
+
+  return [
+    AI_FEEDBACK_CONDITION_LABEL,
+    safeTaskCondition,
+    "",
+    AI_FEEDBACK_COMMENT_LABEL,
+    safeComment,
+  ].join("\n");
+}
+
+function extractAiFeedbackComment(feedback: string | null | undefined): string {
+  const normalized = normalizeText(feedback);
+  if (!normalized) return "";
+
+  const labelIndex = normalized.indexOf(AI_FEEDBACK_COMMENT_LABEL);
+  if (labelIndex === -1) {
+    return normalized;
+  }
+
+  return normalizeText(normalized.slice(labelIndex + AI_FEEDBACK_COMMENT_LABEL.length));
 }
 
 function bytesToBase64(bytes: Uint8Array): string {
@@ -476,18 +528,14 @@ export async function runHomeworkAiCheck(submissionId: string): Promise<Homework
       const studentText = normalizeText(item?.student_text);
       const taskTextParts: string[] = [];
       const baseTaskText = normalizeText(task.task_text);
-      if (baseTaskText) {
-        taskTextParts.push(baseTaskText);
-      }
+      appendUniqueTextPart(taskTextParts, baseTaskText);
 
       if (task.task_image_url) {
         try {
           const taskImageBase64 = await downloadTaskImageAsBase64(task.task_image_url);
           const recognizedTask = await recognizeHomeworkPhoto(taskImageBase64, subject, { strict: true });
           const normalizedTaskImageText = normalizeText(recognizedTask.recognized_text);
-          if (normalizedTaskImageText) {
-            taskTextParts.push(normalizedTaskImageText);
-          }
+          appendUniqueTextPart(taskTextParts, normalizedTaskImageText);
         } catch (error) {
           console.warn("homework_ai_task_image_ocr_failed", {
             submission_id: submissionId,
@@ -530,7 +578,10 @@ export async function runHomeworkAiCheck(submissionId: string): Promise<Homework
           ai_score: 0,
           is_correct: false,
           confidence: 0.2,
-          feedback: "Недостаточно контекста для авто-проверки. Нужна ручная проверка репетитором.",
+          feedback: formatAiFeedback(
+            effectiveTaskText,
+            "Недостаточно контекста для авто-проверки. Нужна ручная проверка репетитором.",
+          ),
           error_type: "incomplete" as HomeworkAiErrorType,
           recognized_text: hasStudentText ? studentText : "",
         });
@@ -563,6 +614,7 @@ export async function runHomeworkAiCheck(submissionId: string): Promise<Homework
       );
 
       const aiScore = checkResult.score >= 0.5 ? maxScore : 0;
+      const formattedFeedback = formatAiFeedback(effectiveTaskText, checkResult.feedback);
 
       taskResults.push({
         task_id: task.id,
@@ -571,7 +623,7 @@ export async function runHomeworkAiCheck(submissionId: string): Promise<Homework
         ai_score: aiScore,
         is_correct: checkResult.is_correct,
         confidence: checkResult.confidence,
-        feedback: checkResult.feedback,
+        feedback: formattedFeedback,
         error_type: checkResult.error_type,
         recognized_text: recognizedText,
       });
@@ -712,7 +764,7 @@ export async function loadSubmissionItemsWithErrors(
       order_num: row.homework_tutor_tasks.order_num,
       task_text: shortenText(normalizeText(row.homework_tutor_tasks.task_text), 500),
       student_text: row.student_text ? shortenText(normalizeText(row.student_text), 500) : null,
-      ai_feedback: shortenText(normalizeText(row.ai_feedback ?? ""), 300),
+      ai_feedback: shortenText(extractAiFeedbackComment(row.ai_feedback ?? ""), 300),
       ai_error_type: row.ai_error_type ?? "incomplete",
     }))
     .sort((a, b) => a.order_num - b.order_num);
@@ -910,9 +962,9 @@ export function formatHomeworkResultsMessage(summary: HomeworkAiCheckSummary): s
     const marker = task.is_correct ? "✅" : "❌";
     lines.push(`${marker} Задача ${task.order_num}: <b>${task.ai_score}/${task.max_score}</b>`);
 
-    const safeFeedback = escapeHtml(shortenText(normalizeText(task.feedback), 240));
+    const safeFeedback = escapeHtml(normalizeText(task.feedback));
     if (safeFeedback) {
-      lines.push(`💡 ${safeFeedback}`);
+      lines.push(safeFeedback);
     }
     lines.push("");
   }

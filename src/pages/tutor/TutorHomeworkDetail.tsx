@@ -321,7 +321,7 @@ function SubmissionItemRow({ item }: { item: TutorHomeworkSubmissionItem }) {
 
       {/* AI feedback */}
       {item.ai_feedback && (
-        <p className="text-xs text-muted-foreground italic">{item.ai_feedback}</p>
+        <p className="text-xs text-muted-foreground italic whitespace-pre-wrap leading-relaxed">{item.ai_feedback}</p>
       )}
 
       {/* Error type */}

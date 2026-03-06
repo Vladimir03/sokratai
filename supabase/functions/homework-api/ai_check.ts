@@ -13,6 +13,10 @@ import {
 const HOMEWORK_IMAGES_BUCKET = "homework-images";
 const HOMEWORK_TASK_IMAGES_BUCKET = "homework-task-images";
 const HOMEWORK_TASK_IMAGE_FALLBACK_BUCKET = "chat-images";
+const AI_FEEDBACK_TASK_MAX_LEN = 450;
+const AI_FEEDBACK_COMMENT_MAX_LEN = 280;
+const AI_FEEDBACK_CONDITION_LABEL = "Условие задачи:";
+const AI_FEEDBACK_COMMENT_LABEL = "Краткий комментарий:";
 
 export interface HomeworkTaskRow {
   id: string;
@@ -61,6 +65,50 @@ function isHomeworkSubject(value: string): value is HomeworkSubject {
 
 function normalizeText(text: string | null | undefined): string {
   return (text ?? "").replace(/\r\n/g, "\n").replace(/\r/g, "\n").trim();
+}
+
+function shortenText(text: string, maxLen: number): string {
+  if (text.length <= maxLen) return text;
+  const sliced = text.slice(0, maxLen);
+  const lastSpace = sliced.lastIndexOf(" ");
+  const safe = lastSpace > maxLen * 0.7 ? sliced.slice(0, lastSpace) : sliced;
+  return `${safe.trim()}...`;
+}
+
+function toComparableText(text: string): string {
+  return normalizeText(text).replace(/\s+/g, " ");
+}
+
+function appendUniqueTextPart(parts: string[], text: string | null | undefined): void {
+  const normalized = normalizeText(text);
+  if (!normalized) return;
+
+  const comparable = toComparableText(normalized);
+  if (parts.some((part) => toComparableText(part) === comparable)) {
+    return;
+  }
+
+  parts.push(normalized);
+}
+
+function formatAiFeedback(taskCondition: string, comment: string): string {
+  const safeTaskCondition = shortenText(normalizeText(taskCondition), AI_FEEDBACK_TASK_MAX_LEN);
+  const safeComment = shortenText(
+    normalizeText(comment) || "AI не сформировал комментарий. Нужна ручная проверка репетитором.",
+    AI_FEEDBACK_COMMENT_MAX_LEN,
+  );
+
+  if (!safeTaskCondition) {
+    return `${AI_FEEDBACK_COMMENT_LABEL}\n${safeComment}`;
+  }
+
+  return [
+    AI_FEEDBACK_CONDITION_LABEL,
+    safeTaskCondition,
+    "",
+    AI_FEEDBACK_COMMENT_LABEL,
+    safeComment,
+  ].join("\n");
 }
 
 function resolveTaskMaxScore(maxScore: number): number {
@@ -243,18 +291,14 @@ export async function runHomeworkAiCheck(
       const studentText = normalizeText(item?.student_text);
       const taskTextParts: string[] = [];
       const baseTaskText = normalizeText(task.task_text);
-      if (baseTaskText) {
-        taskTextParts.push(baseTaskText);
-      }
+      appendUniqueTextPart(taskTextParts, baseTaskText);
 
       if (task.task_image_url) {
         try {
           const taskImageBase64 = await downloadTaskImageAsBase64(supabase, task.task_image_url);
           const recognizedTask = await recognizeHomeworkPhoto(taskImageBase64, subject, { strict: true });
           const normalizedTaskImageText = normalizeText(recognizedTask.recognized_text);
-          if (normalizedTaskImageText) {
-            taskTextParts.push(normalizedTaskImageText);
-          }
+          appendUniqueTextPart(taskTextParts, normalizedTaskImageText);
         } catch (error) {
           console.warn("homework_ai_task_image_ocr_failed", {
             submission_id: submissionId,
@@ -292,7 +336,10 @@ export async function runHomeworkAiCheck(
           ai_score: 0,
           is_correct: false,
           confidence: 0.2,
-          feedback: "Недостаточно контекста для авто-проверки. Нужна ручная проверка репетитором.",
+          feedback: formatAiFeedback(
+            effectiveTaskText,
+            "Недостаточно контекста для авто-проверки. Нужна ручная проверка репетитором.",
+          ),
           error_type: "incomplete" as HomeworkAiErrorType,
           recognized_text: hasStudentText ? studentText : "",
         });
@@ -325,6 +372,7 @@ export async function runHomeworkAiCheck(
       );
 
       const aiScore = checkResult.score >= 0.5 ? maxScore : 0;
+      const formattedFeedback = formatAiFeedback(effectiveTaskText, checkResult.feedback);
 
       taskResults.push({
         task_id: task.id,
@@ -333,7 +381,7 @@ export async function runHomeworkAiCheck(
         ai_score: aiScore,
         is_correct: checkResult.is_correct,
         confidence: checkResult.confidence,
-        feedback: checkResult.feedback,
+        feedback: formattedFeedback,
         error_type: checkResult.error_type,
         recognized_text: recognizedText,
       });
