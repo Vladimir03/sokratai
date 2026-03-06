@@ -3,6 +3,7 @@ import type {
   StudentHomeworkAssignment,
   StudentHomeworkAssignmentDetails,
   StudentHomeworkSubmission,
+  HomeworkThread,
 } from '@/types/homework';
 
 const HOMEWORK_IMAGES_BUCKET = 'homework-images';
@@ -276,7 +277,7 @@ export async function getStudentAssignment(assignmentId: string): Promise<Studen
 
   const { data: assignment, error: assignmentError } = await supabase
     .from('homework_tutor_assignments')
-    .select('id, title, subject, topic, description, deadline, status, created_at')
+    .select('id, title, subject, topic, description, deadline, status, workflow_mode, created_at')
     .eq('id', assignmentId)
     .single();
 
@@ -576,5 +577,13 @@ export async function runStudentSubmissionAiCheck(
   return requestStudentHomeworkApi<StudentSubmissionAiCheckResponse>(
     `/student/submissions/${encodeURIComponent(submissionId)}/ai-check`,
     { method: 'POST', body: '{}' },
+  );
+}
+
+export async function getStudentHomeworkThread(
+  threadId: string,
+): Promise<HomeworkThread> {
+  return requestStudentHomeworkApi<HomeworkThread>(
+    `/threads/${encodeURIComponent(threadId)}`,
   );
 }

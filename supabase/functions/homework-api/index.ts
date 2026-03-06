@@ -252,6 +252,7 @@ async function handleCreateAssignment(
   if (b.max_attempts !== undefined && b.max_attempts !== null && !isPositiveInt(b.max_attempts)) {
     return jsonError(cors, 400, "VALIDATION", "max_attempts must be a positive integer");
   }
+  const workflowMode = b.workflow_mode === "guided_chat" ? "guided_chat" : "classic";
   for (let i = 0; i < b.tasks.length; i++) {
     const t = b.tasks[i];
     if (!t || typeof t !== "object") {
@@ -278,6 +279,7 @@ async function handleCreateAssignment(
       description: isNonEmptyString(b.description) ? (b.description as string).trim() : null,
       deadline: isNonEmptyString(b.deadline) ? b.deadline : null,
       status: "draft",
+      workflow_mode: workflowMode,
     })
     .select("id")
     .single();
@@ -870,6 +872,55 @@ async function handleAssignStudents(
   if (error) {
     console.error("homework_api_request_error", { route: "POST /assignments/:id/assign", error: error.message });
     return jsonError(cors, 500, "DB_ERROR", "Failed to assign students");
+  }
+
+  // Provision threads for guided_chat assignments
+  if (assignment.workflow_mode === "guided_chat" && upserted && upserted.length > 0) {
+    const { data: tasks } = await db
+      .from("homework_tutor_tasks")
+      .select("id, order_num")
+      .eq("assignment_id", assignmentId)
+      .order("order_num", { ascending: true });
+
+    if (tasks && tasks.length > 0) {
+      const threadRows = upserted.map((sa: { id: string }) => ({
+        student_assignment_id: sa.id,
+        status: "active",
+        current_task_order: 1,
+      }));
+
+      const { data: threads, error: threadErr } = await db
+        .from("homework_tutor_threads")
+        .upsert(threadRows, { onConflict: "student_assignment_id", ignoreDuplicates: true })
+        .select("id, student_assignment_id");
+
+      if (threadErr) {
+        console.warn("homework_api_thread_provision_failed", {
+          assignment_id: assignmentId,
+          error: threadErr.message,
+        });
+      } else if (threads && threads.length > 0) {
+        const taskStateRows = threads.flatMap((thread: { id: string }) =>
+          tasks.map((task: { id: string }, idx: number) => ({
+            thread_id: thread.id,
+            task_id: task.id,
+            status: idx === 0 ? "active" : "locked",
+            attempts: 0,
+          }))
+        );
+
+        const { error: stateErr } = await db
+          .from("homework_tutor_task_states")
+          .upsert(taskStateRows, { onConflict: "thread_id,task_id", ignoreDuplicates: true });
+
+        if (stateErr) {
+          console.warn("homework_api_task_states_provision_failed", {
+            assignment_id: assignmentId,
+            error: stateErr.message,
+          });
+        }
+      }
+    }
   }
 
   let assignmentStatus = String(assignment.status ?? "draft");
@@ -1921,6 +1972,48 @@ async function handleStudentSubmissionAiCheck(
   });
 }
 
+// ─── Endpoint: GET /threads/:id (student) ────────────────────────────────────
+
+async function handleGetThread(
+  db: SupabaseClient,
+  userId: string,
+  threadId: string,
+  cors: Record<string, string>,
+): Promise<Response> {
+  if (!isUUID(threadId)) {
+    return jsonError(cors, 400, "VALIDATION", "Invalid thread ID");
+  }
+
+  const { data: thread, error } = await db
+    .from("homework_tutor_threads")
+    .select(`
+      id, status, current_task_order, created_at, updated_at,
+      student_assignment_id,
+      homework_tutor_thread_messages(id, role, content, image_url, task_order, created_at),
+      homework_tutor_task_states(id, task_id, status, attempts, best_score)
+    `)
+    .eq("id", threadId)
+    .order("created_at", { referencedTable: "homework_tutor_thread_messages", ascending: true })
+    .single();
+
+  if (error || !thread) {
+    return jsonError(cors, 404, "NOT_FOUND", "Thread not found");
+  }
+
+  // Verify ownership: student must own this thread
+  const { data: sa } = await db
+    .from("homework_tutor_student_assignments")
+    .select("student_id")
+    .eq("id", thread.student_assignment_id)
+    .single();
+
+  if (!sa || sa.student_id !== userId) {
+    return jsonError(cors, 403, "FORBIDDEN", "Not your thread");
+  }
+
+  return jsonOk(cors, thread);
+}
+
 // ─── Main Handler ────────────────────────────────────────────────────────────
 
 Deno.serve(async (req: Request): Promise<Response> => {
@@ -1952,6 +2045,11 @@ Deno.serve(async (req: Request): Promise<Response> => {
     // POST /student/submissions/:id/ai-check
     if (seg.length === 4 && seg[0] === "student" && seg[1] === "submissions" && seg[3] === "ai-check" && route.method === "POST") {
       return await handleStudentSubmissionAiCheck(db, userId, seg[2], cors);
+    }
+
+    // GET /threads/:id (student endpoint)
+    if (seg.length === 2 && seg[0] === "threads" && route.method === "GET") {
+      return await handleGetThread(db, userId, seg[1], cors);
     }
 
     const tutorResult = await getTutorOrThrow(db, userId, cors);

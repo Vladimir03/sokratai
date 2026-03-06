@@ -131,6 +131,8 @@ export interface StudentHomeworkSubmission {
   homework_tutor_submission_items: StudentHomeworkSubmissionItem[];
 }
 
+export type WorkflowMode = 'classic' | 'guided_chat';
+
 export interface StudentHomeworkAssignmentDetails {
   id: string;
   title: string;
@@ -140,9 +142,43 @@ export interface StudentHomeworkAssignmentDetails {
   deadline: string | null;
   status: StudentAssignmentStatus;
   max_attempts: number;
+  workflow_mode?: WorkflowMode;
   created_at: string;
   updated_at: string;
   tasks: StudentHomeworkTask[];
   materials: StudentHomeworkMaterial[];
   submissions: StudentHomeworkSubmission[];
+}
+
+// ─── Guided Homework Chat types ─────────────────────────────────────────────
+
+export type ThreadStatus = 'active' | 'completed' | 'abandoned';
+export type TaskStateStatus = 'locked' | 'active' | 'completed' | 'skipped';
+
+export interface HomeworkThread {
+  id: string;
+  student_assignment_id: string;
+  status: ThreadStatus;
+  current_task_order: number;
+  created_at: string;
+  updated_at: string;
+  homework_tutor_thread_messages: HomeworkThreadMessage[];
+  homework_tutor_task_states: HomeworkTaskState[];
+}
+
+export interface HomeworkThreadMessage {
+  id: string;
+  role: 'user' | 'assistant' | 'system';
+  content: string;
+  image_url: string | null;
+  task_order: number | null;
+  created_at: string;
+}
+
+export interface HomeworkTaskState {
+  id: string;
+  task_id: string;
+  status: TaskStateStatus;
+  attempts: number;
+  best_score: number | null;
 }

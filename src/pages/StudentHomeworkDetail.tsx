@@ -427,6 +427,36 @@ const StudentHomeworkDetail = () => {
     });
   };
 
+  // Guided chat mode: show placeholder (Phase 2 will replace with GuidedHomeworkWorkspace)
+  if (data && data.workflow_mode === 'guided_chat') {
+    return (
+      <AuthGuard>
+        <div className="min-h-screen bg-background">
+          <Navigation />
+          <PageContent>
+            <main className="container mx-auto px-4 pb-8">
+              <div className="max-w-4xl mx-auto">
+                <Card>
+                  <CardHeader>
+                    <CardTitle>{data.title}</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <p className="text-muted-foreground">
+                      Интерактивный режим скоро будет доступен.
+                    </p>
+                    <Button onClick={() => navigate('/homework')} className="mt-4">
+                      Назад к заданиям
+                    </Button>
+                  </CardContent>
+                </Card>
+              </div>
+            </main>
+          </PageContent>
+        </div>
+      </AuthGuard>
+    );
+  }
+
   return (
     <AuthGuard>
       <div className="min-h-screen bg-background">
