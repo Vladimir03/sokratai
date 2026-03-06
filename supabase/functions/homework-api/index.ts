@@ -874,50 +874,65 @@ async function handleAssignStudents(
     return jsonError(cors, 500, "DB_ERROR", "Failed to assign students");
   }
 
-  // Provision threads for guided_chat assignments
-  if (assignment.workflow_mode === "guided_chat" && upserted && upserted.length > 0) {
+  // Provision threads for guided_chat assignments (idempotent — safe for retries)
+  if (assignment.workflow_mode === "guided_chat") {
     const { data: tasks } = await db
       .from("homework_tutor_tasks")
       .select("id, order_num")
       .eq("assignment_id", assignmentId)
       .order("order_num", { ascending: true });
 
-    if (tasks && tasks.length > 0) {
-      const threadRows = upserted.map((sa: { id: string }) => ({
+    // Fetch ALL student_assignments (not just upserted) so retries still work
+    const { data: allSas } = await db
+      .from("homework_tutor_student_assignments")
+      .select("id")
+      .eq("assignment_id", assignmentId);
+
+    if (tasks && tasks.length > 0 && allSas && allSas.length > 0) {
+      // Upsert threads — idempotent via UNIQUE(student_assignment_id)
+      const threadRows = allSas.map((sa: { id: string }) => ({
         student_assignment_id: sa.id,
         status: "active",
         current_task_order: 1,
       }));
 
-      const { data: threads, error: threadErr } = await db
+      const { error: threadErr } = await db
         .from("homework_tutor_threads")
-        .upsert(threadRows, { onConflict: "student_assignment_id", ignoreDuplicates: true })
-        .select("id, student_assignment_id");
+        .upsert(threadRows, { onConflict: "student_assignment_id", ignoreDuplicates: true });
 
       if (threadErr) {
         console.warn("homework_api_thread_provision_failed", {
           assignment_id: assignmentId,
           error: threadErr.message,
         });
-      } else if (threads && threads.length > 0) {
-        const taskStateRows = threads.flatMap((thread: { id: string }) =>
-          tasks.map((task: { id: string }, idx: number) => ({
-            thread_id: thread.id,
-            task_id: task.id,
-            status: idx === 0 ? "active" : "locked",
-            attempts: 0,
-          }))
-        );
+      } else {
+        // Re-fetch ALL threads (upsert with ignoreDuplicates doesn't return existing rows)
+        const { data: allThreads } = await db
+          .from("homework_tutor_threads")
+          .select("id")
+          .in("student_assignment_id", allSas.map((sa: { id: string }) => sa.id));
 
-        const { error: stateErr } = await db
-          .from("homework_tutor_task_states")
-          .upsert(taskStateRows, { onConflict: "thread_id,task_id", ignoreDuplicates: true });
+        if (allThreads && allThreads.length > 0) {
+          // Upsert task_states — idempotent via UNIQUE(thread_id, task_id)
+          const taskStateRows = allThreads.flatMap((thread: { id: string }) =>
+            tasks.map((task: { id: string }, idx: number) => ({
+              thread_id: thread.id,
+              task_id: task.id,
+              status: idx === 0 ? "active" : "locked",
+              attempts: 0,
+            }))
+          );
 
-        if (stateErr) {
-          console.warn("homework_api_task_states_provision_failed", {
-            assignment_id: assignmentId,
-            error: stateErr.message,
-          });
+          const { error: stateErr } = await db
+            .from("homework_tutor_task_states")
+            .upsert(taskStateRows, { onConflict: "thread_id,task_id", ignoreDuplicates: true });
+
+          if (stateErr) {
+            console.warn("homework_api_task_states_provision_failed", {
+              assignment_id: assignmentId,
+              error: stateErr.message,
+            });
+          }
         }
       }
     }

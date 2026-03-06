@@ -245,14 +245,32 @@ export async function getStudentAssignment(assignmentId: string): Promise<Studen
   if (assignedError) throw new StudentHomeworkApiError(assignedError.message);
   if (!assigned) throw new StudentHomeworkApiError('Задание не найдено');
 
-  const { data: assignment, error: assignmentError } = await supabase
+  // Try with workflow_mode; fallback without it if column doesn't exist yet (migration not deployed)
+  let assignment: Record<string, unknown> | null = null;
+  const { data: assignmentData, error: assignmentError } = await supabase
     .from('homework_tutor_assignments')
     .select('id, title, subject, topic, description, deadline, status, workflow_mode, created_at')
     .eq('id', assignmentId)
     .single();
 
-  if (assignmentError || !assignment) {
-    throw new StudentHomeworkApiError(assignmentError?.message ?? 'Задание не найдено');
+  if (assignmentError && !assignmentData) {
+    // Retry without workflow_mode — column may not exist before migration
+    const { data: fallbackData, error: fallbackError } = await supabase
+      .from('homework_tutor_assignments')
+      .select('id, title, subject, topic, description, deadline, status, created_at')
+      .eq('id', assignmentId)
+      .single();
+
+    if (fallbackError || !fallbackData) {
+      throw new StudentHomeworkApiError(fallbackError?.message ?? 'Задание не найдено');
+    }
+    assignment = fallbackData as Record<string, unknown>;
+  } else {
+    assignment = assignmentData as Record<string, unknown>;
+  }
+
+  if (!assignment) {
+    throw new StudentHomeworkApiError('Задание не найдено');
   }
 
   const { data: tasks, error: tasksError } = await supabase

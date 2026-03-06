@@ -489,14 +489,22 @@ function StepMeta({
         />
       </div>
 
-      <div className="flex items-center justify-between p-4 bg-muted/50 rounded-lg">
+      <div className="flex items-center justify-between p-4 bg-muted/50 rounded-lg border border-dashed">
         <div>
-          <Label htmlFor="workflow-mode" className="text-sm font-medium">
-            Интерактивный чат с AI
-          </Label>
+          <div className="flex items-center gap-2">
+            <Label htmlFor="workflow-mode" className="text-sm font-medium">
+              Интерактивный чат с AI
+            </Label>
+            <Badge variant="outline" className="text-[10px] px-1.5 py-0">Бета</Badge>
+          </div>
           <p className="text-xs text-muted-foreground mt-1">
             Ученик решает задачи по одной в чате с подсказками AI
           </p>
+          {meta.workflow_mode === 'guided_chat' && (
+            <p className="text-xs text-amber-600 mt-1">
+              ⚠ Ученики пока не смогут решать ДЗ в этом режиме — интерфейс чата в разработке
+            </p>
+          )}
         </div>
         <Switch
           id="workflow-mode"
