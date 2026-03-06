@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
@@ -16,6 +16,8 @@ import {
 } from '@/lib/studentHomeworkApi';
 import { useStudentAssignment } from '@/hooks/useStudentHomework';
 import type { StudentHomeworkAssignmentDetails, StudentHomeworkSubmission } from '@/types/homework';
+
+const GuidedHomeworkWorkspace = lazy(() => import('@/components/homework/GuidedHomeworkWorkspace'));
 
 type AnswerType = 'text' | 'image' | 'pdf';
 
@@ -388,31 +390,21 @@ const StudentHomeworkDetail = () => {
     });
   };
 
-  // Guided chat mode: show placeholder (Phase 2 will replace with GuidedHomeworkWorkspace)
+  // Guided chat mode: render interactive workspace
   if (data && data.workflow_mode === 'guided_chat') {
     return (
       <AuthGuard>
-        <div className="min-h-screen bg-background">
+        <div className="min-h-[100dvh] bg-background flex flex-col">
           <Navigation />
-          <PageContent>
-            <main className="container mx-auto px-4 pb-8">
-              <div className="max-w-4xl mx-auto">
-                <Card>
-                  <CardHeader>
-                    <CardTitle>{data.title}</CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <p className="text-muted-foreground">
-                      Интерактивный режим скоро будет доступен.
-                    </p>
-                    <Button onClick={() => navigate('/homework')} className="mt-4">
-                      Назад к заданиям
-                    </Button>
-                  </CardContent>
-                </Card>
+          <Suspense
+            fallback={
+              <div className="flex-1 flex items-center justify-center text-muted-foreground">
+                Загрузка...
               </div>
-            </main>
-          </PageContent>
+            }
+          >
+            <GuidedHomeworkWorkspace assignment={data} />
+          </Suspense>
         </div>
       </AuthGuard>
     );

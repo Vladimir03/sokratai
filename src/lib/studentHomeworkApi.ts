@@ -560,3 +560,76 @@ export async function getStudentHomeworkThread(
     `/threads/${encodeURIComponent(threadId)}`,
   );
 }
+
+/**
+ * Find the thread for a given assignment by looking up the student_assignment
+ * and querying homework_tutor_threads directly via RLS.
+ */
+export async function getStudentThreadByAssignment(
+  assignmentId: string,
+): Promise<HomeworkThread | null> {
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session) throw new StudentHomeworkApiError('Пользователь не авторизован');
+  const studentId = session.user.id;
+
+  // Find student_assignment_id
+  const { data: sa, error: saErr } = await supabase
+    .from('homework_tutor_student_assignments')
+    .select('id')
+    .eq('assignment_id', assignmentId)
+    .eq('student_id', studentId)
+    .maybeSingle();
+
+  if (saErr) throw new StudentHomeworkApiError(saErr.message);
+  if (!sa) return null;
+
+  // Query thread with nested messages and task_states (RLS allows SELECT for own threads)
+  const { data: thread, error: threadErr } = await supabase
+    .from('homework_tutor_threads')
+    .select(`
+      id, status, current_task_order, created_at, updated_at,
+      student_assignment_id,
+      homework_tutor_thread_messages(id, role, content, image_url, task_order, created_at),
+      homework_tutor_task_states(id, task_id, status, attempts, best_score)
+    `)
+    .eq('student_assignment_id', sa.id)
+    .order('created_at', { referencedTable: 'homework_tutor_thread_messages', ascending: true })
+    .maybeSingle();
+
+  if (threadErr) throw new StudentHomeworkApiError(threadErr.message);
+  return thread as unknown as HomeworkThread | null;
+}
+
+/**
+ * Save a message to a thread via the homework-api edge function.
+ */
+export async function saveThreadMessage(
+  threadId: string,
+  role: 'user' | 'assistant',
+  content: string,
+  taskOrder?: number,
+): Promise<{ id: string }> {
+  return requestStudentHomeworkApi<{ id: string }>(
+    `/threads/${encodeURIComponent(threadId)}/messages`,
+    {
+      method: 'POST',
+      body: JSON.stringify({ content, role, task_order: taskOrder }),
+    },
+  );
+}
+
+/**
+ * Advance to the next task in a guided homework thread.
+ */
+export async function advanceTask(
+  threadId: string,
+  score?: number,
+): Promise<HomeworkThread> {
+  return requestStudentHomeworkApi<HomeworkThread>(
+    `/threads/${encodeURIComponent(threadId)}/advance`,
+    {
+      method: 'POST',
+      body: JSON.stringify(score !== undefined ? { score } : {}),
+    },
+  );
+}
