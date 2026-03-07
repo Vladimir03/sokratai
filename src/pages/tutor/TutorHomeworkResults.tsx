@@ -516,6 +516,30 @@ function TaskItemReview({
   );
 }
 
+// ─── Guided chat: student row with thread viewer (no submission needed) ──────
+
+function GuidedStudentRow({
+  student,
+  assignmentId,
+}: {
+  student: {
+    student_id: string;
+    name: string | null;
+  };
+  assignmentId: string;
+}) {
+  return (
+    <div className="border rounded-md">
+      <div className="p-3">
+        <p className="font-medium text-sm">{student.name ?? 'Без имени'}</p>
+      </div>
+      <div className="px-3 pb-3">
+        <GuidedThreadViewer assignmentId={assignmentId} studentId={student.student_id} />
+      </div>
+    </div>
+  );
+}
+
 // ─── Student table row ───────────────────────────────────────────────────────
 
 function StudentRow({
@@ -910,24 +934,47 @@ function TutorHomeworkResultsContent() {
                   Напомнить несдавшим
                 </Button>
               </div>
-              {groupedStudents.length === 0 ? (
-                <Card className="bg-muted/30">
-                  <CardContent className="py-8 text-center">
-                    <p className="text-sm text-muted-foreground">Пока нет работ от учеников.</p>
-                  </CardContent>
-                </Card>
-              ) : (
+
+              {/* Guided chat mode: show assigned students with threads directly */}
+              {assignment?.workflow_mode === 'guided_chat' && assignmentQuery.data?.assigned_students ? (
                 <div className="space-y-2">
-                  {groupedStudents.map((attempts) => (
-                    <StudentRowGroup
-                      key={attempts[0].student_id}
-                      attempts={attempts}
-                      assignmentId={assignmentId!}
-                      workflowMode={assignment?.workflow_mode}
-                      targetSubmissionId={targetSubmissionId}
-                    />
-                  ))}
+                  {assignmentQuery.data.assigned_students.length === 0 ? (
+                    <Card className="bg-muted/30">
+                      <CardContent className="py-8 text-center">
+                        <p className="text-sm text-muted-foreground">Нет назначенных учеников.</p>
+                      </CardContent>
+                    </Card>
+                  ) : (
+                    assignmentQuery.data.assigned_students.map((student) => (
+                      <GuidedStudentRow
+                        key={student.student_id}
+                        student={student}
+                        assignmentId={assignmentId!}
+                      />
+                    ))
+                  )}
                 </div>
+              ) : (
+                /* Classic mode: show submission-based results */
+                groupedStudents.length === 0 ? (
+                  <Card className="bg-muted/30">
+                    <CardContent className="py-8 text-center">
+                      <p className="text-sm text-muted-foreground">Пока нет работ от учеников.</p>
+                    </CardContent>
+                  </Card>
+                ) : (
+                  <div className="space-y-2">
+                    {groupedStudents.map((attempts) => (
+                      <StudentRowGroup
+                        key={attempts[0].student_id}
+                        attempts={attempts}
+                        assignmentId={assignmentId!}
+                        workflowMode={assignment?.workflow_mode}
+                        targetSubmissionId={targetSubmissionId}
+                      />
+                    ))}
+                  </div>
+                )
               )}
             </div>
 
