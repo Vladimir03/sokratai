@@ -288,7 +288,7 @@ export async function getStudentAssignment(assignmentId: string): Promise<Studen
 
   const { data: assignment, error: assignmentError } = await supabase
     .from('homework_tutor_assignments')
-    .select('id, title, subject, topic, description, deadline, status, workflow_mode, created_at')
+    .select('id, title, subject, topic, description, deadline, status, created_at')
     .eq('id', assignmentId)
     .single();
 
@@ -315,9 +315,9 @@ export async function getStudentAssignment(assignmentId: string): Promise<Studen
   const submissions = await getStudentSubmissions(assignmentId);
 
   const result = {
-    ...assignment,
+    ...(assignment as any),
     max_attempts: 3,
-    updated_at: assignment.created_at,
+    updated_at: (assignment as any).created_at,
     tasks: (tasks ?? []) as StudentHomeworkAssignmentDetails['tasks'],
     materials: (materials ?? []) as StudentHomeworkAssignmentDetails['materials'],
     submissions,
@@ -635,20 +635,20 @@ export async function getStudentThreadByAssignment(
     `;
 
   // Query thread with nested messages and task_states (RLS allows SELECT for own threads)
-  const withKindResult = await supabase
-    .from('homework_tutor_threads')
+  const withKindResult = await (supabase
+    .from('homework_tutor_threads' as any)
     .select(selectWithKind)
     .eq('student_assignment_id', sa.id)
     .order('created_at', { referencedTable: 'homework_tutor_thread_messages', ascending: true })
-    .maybeSingle();
+    .maybeSingle() as any);
 
   if (withKindResult.error && isMissingThreadMessageKindColumnError(withKindResult.error.message)) {
-    const legacyResult = await supabase
-      .from('homework_tutor_threads')
+    const legacyResult = await (supabase
+      .from('homework_tutor_threads' as any)
       .select(selectLegacy)
       .eq('student_assignment_id', sa.id)
       .order('created_at', { referencedTable: 'homework_tutor_thread_messages', ascending: true })
-      .maybeSingle();
+      .maybeSingle() as any);
     if (legacyResult.error) throw new StudentHomeworkApiError(legacyResult.error.message);
     return legacyResult.data as unknown as HomeworkThread | null;
   }
