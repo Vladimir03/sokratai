@@ -2,37 +2,24 @@
 
 ## Problem
 
-The `getStudentAssignment()` function in `src/lib/studentHomeworkApi.ts` (line 291) does not include `workflow_mode` or `max_attempts` in its SELECT query:
+When someone mentions `@sokratai_ru_bot` in a group chat, the bot responds in the user's **private DM** instead of the group. The logs prove this:
 
-```sql
-.select('id, title, subject, topic, description, deadline, status, created_at')
-```
+- The update arrives with `"type": "group"` and `chat.id: -5215652476`
+- But the log shows `Handling text message: { telegramUserId: 385567670 }` — this is the **private chat handler**, not the group handler (which would log `📢 Handling group text message`)
 
-So `data.workflow_mode` is always `undefined`, and the condition on line 433 of `StudentHomeworkDetail.tsx` (`if (data.workflow_mode === 'guided_chat')`) is never true. The student always sees the classic view.
+This means the **deployed version** of `telegram-bot` does not contain the group chat handling code (lines 7858-7923 in the source). The private chat handler at line 8138 catches the message and sends the response to `telegramUserId` (user's DM) instead of the group chat.
 
-Additionally, `max_attempts` is hardcoded to `3` on line 319 instead of being fetched from the DB.
+## Root Cause
+
+The `telegram-bot` edge function source code already has correct group chat handling — it replies to the group chat with `reply_to_message_id`. But the **currently deployed version is stale** and lacks this code.
 
 ## Fix
 
-**File: `src/lib/studentHomeworkApi.ts`**
+1. **Redeploy `telegram-bot`** — no code changes needed, the source is already correct
+2. **Verify `TELEGRAM_BOT_USERNAME` secret** equals `sokratai_ru_bot` (the env var default is `SokratAIBot` which won't match the actual bot username in mention entities)
 
-1. **Line 291** -- Add `workflow_mode` and `max_attempts` to the SELECT:
-```
-.select('id, title, subject, topic, description, deadline, status, workflow_mode, max_attempts, created_at')
-```
-
-2. **Lines 317-324** -- Use the actual `max_attempts` from DB instead of hardcoded `3`:
-```typescript
-const result = {
-  ...(assignment as any),
-  max_attempts: (assignment as any).max_attempts ?? 3,
-  workflow_mode: (assignment as any).workflow_mode ?? 'classic',
-  updated_at: (assignment as any).created_at,
-  tasks: ...,
-  materials: ...,
-  submissions,
-} as unknown as StudentHomeworkAssignmentDetails;
-```
-
-This is a 2-line change. No migration or redeployment needed -- purely a frontend query fix.
+The existing group handler (line 6941 `handleGroupTextMessage`) already:
+- Sends responses to `groupChatId` (not `telegramUserId`)
+- Uses `reply_to_message_id` to reply to the original message
+- Properly extracts mentions and reply-to-bot context
 
