@@ -15,7 +15,7 @@ const ReactMarkdown = lazy(() => import('react-markdown'));
 
 export interface GuidedMessageData {
   id?: string;
-  role: 'user' | 'assistant' | 'system';
+  role: 'user' | 'assistant' | 'system' | 'tutor';
   content: string;
   created_at?: string;
   message_kind?: GuidedMessageKind;
@@ -72,10 +72,13 @@ const GuidedChatMessage = memo(({ message, isStreaming, onRetry }: GuidedChatMes
   }, [hasMath, katexLoaded]);
 
   const displayContent =
-    message.role === 'assistant' ? preprocessLatex(message.content) : message.content;
+    message.role === 'assistant' || message.role === 'tutor'
+      ? preprocessLatex(message.content)
+      : message.content;
 
   const isUser = message.role === 'user';
   const isSystem = message.role === 'system';
+  const isTutor = message.role === 'tutor';
   const kindLabel = formatMessageKind(message.message_kind);
   const isFailed = message.message_delivery_status === 'failed';
   const isSending = message.message_delivery_status === 'sending';
@@ -154,6 +157,34 @@ const GuidedChatMessage = memo(({ message, isStreaming, onRetry }: GuidedChatMes
       <div className="flex justify-center my-2">
         <div className="text-xs text-muted-foreground bg-muted/50 px-3 py-1.5 rounded-full max-w-[85%] text-center">
           {message.content}
+        </div>
+      </div>
+    );
+  }
+
+  if (isTutor) {
+    return (
+      <div className="flex justify-start mb-3">
+        <div className="max-w-[85%] rounded-2xl px-4 py-2.5 bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 rounded-bl-md">
+          <p className="text-[10px] mb-1 uppercase tracking-wide text-emerald-700 dark:text-emerald-400 font-medium">
+            Репетитор
+          </p>
+          <div className="text-sm">
+            <Suspense fallback={<p className="whitespace-pre-wrap break-words">{displayContent}</p>}>
+              <ReactMarkdown
+                remarkPlugins={[remarkGfm, remarkMath]}
+                rehypePlugins={hasMath && katexLoaded ? [rehypeKatex] : []}
+                components={markdownComponents}
+              >
+                {displayContent}
+              </ReactMarkdown>
+            </Suspense>
+          </div>
+          {message.created_at && (
+            <div className="text-[10px] mt-1 text-emerald-600/60 dark:text-emerald-400/60">
+              {formatTime(message.created_at)}
+            </div>
+          )}
         </div>
       </div>
     );

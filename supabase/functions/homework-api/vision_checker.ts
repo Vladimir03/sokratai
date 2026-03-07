@@ -30,23 +30,23 @@ export interface VisionCheckerOptions {
   rubricText?: string | null;
 }
 
-type LovableMessageRole = "system" | "user" | "assistant";
+export type LovableMessageRole = "system" | "user" | "assistant";
 
-interface LovableTextPart {
+export interface LovableTextPart {
   type: "text";
   text: string;
 }
 
-interface LovableImagePart {
+export interface LovableImagePart {
   type: "image_url";
   image_url: {
     url: string;
   };
 }
 
-type LovableMessageContent = string | Array<LovableTextPart | LovableImagePart>;
+export type LovableMessageContent = string | Array<LovableTextPart | LovableImagePart>;
 
-interface LovableMessage {
+export interface LovableMessage {
   role: LovableMessageRole;
   content: LovableMessageContent;
 }
@@ -113,7 +113,7 @@ function clamp01(value: number): number {
   return value;
 }
 
-function softTruncate(value: string, maxLen: number): string {
+export function softTruncate(value: string, maxLen: number): string {
   if (value.length <= maxLen) return value;
   const slice = value.slice(0, maxLen);
   const lastSpaceIdx = slice.lastIndexOf(" ");
@@ -121,7 +121,7 @@ function softTruncate(value: string, maxLen: number): string {
   return `${safeSlice.trim()}\n...[обрезано]`;
 }
 
-function normalizeText(raw: string): string {
+export function normalizeText(raw: string): string {
   return raw
     .replace(/\r\n/g, "\n")
     .replace(/\r/g, "\n")
@@ -130,7 +130,7 @@ function normalizeText(raw: string): string {
     .trim();
 }
 
-function normalizeComparable(raw: string): string {
+export function normalizeComparable(raw: string): string {
   return raw
     .toLowerCase()
     .replace(/\s+/g, "")
@@ -331,7 +331,7 @@ function shouldRetry(error: unknown): boolean {
   return false;
 }
 
-async function callLovableJson(messages: LovableMessage[], telemetryTag: string): Promise<Record<string, unknown>> {
+export async function callLovableJson(messages: LovableMessage[], telemetryTag: string): Promise<Record<string, unknown>> {
   const apiKey = Deno.env.get("LOVABLE_API_KEY");
   if (!apiKey) {
     throw new Error("LOVABLE_API_KEY is not configured");

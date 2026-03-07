@@ -17,7 +17,6 @@ import {
   Lightbulb,
   Loader2,
   MessageSquarePlus,
-  Sparkles,
   ZoomIn,
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
@@ -35,18 +34,22 @@ import GuidedChatInput from './GuidedChatInput';
 import TaskStepper from './TaskStepper';
 import type { TaskStepItem } from './TaskStepper';
 import type {
+  CheckAnswerResponse,
   GuidedHomeworkUiStatus,
   GuidedMessageKind,
   MessageDeliveryStatus,
   HomeworkThreadMessage,
   HomeworkTaskState,
+  HomeworkThread,
+  RequestHintResponse,
   StudentHomeworkAssignmentDetails,
   TaskStateStatus,
 } from '@/types/homework';
 import { useStudentThread } from '@/hooks/useStudentHomework';
 import {
-  advanceTask,
+  checkAnswer,
   getStudentTaskImageSignedUrl,
+  requestHint,
   saveThreadMessage,
 } from '@/lib/studentHomeworkApi';
 import { streamChat, StreamChatError } from '@/lib/streamChat';
@@ -69,13 +72,13 @@ const UI_STATUS_META: Record<GuidedHomeworkUiStatus, { label: string; badgeClass
     label: 'ИИ думает',
     badgeClass: 'bg-indigo-100 text-indigo-800 border-indigo-200 dark:bg-indigo-900/40 dark:text-indigo-300',
   },
-  ready_to_advance: {
-    label: 'Можно перейти',
-    badgeClass: 'bg-emerald-100 text-emerald-800 border-emerald-200 dark:bg-emerald-900/40 dark:text-emerald-300',
+  checking_answer: {
+    label: 'Проверяем ответ',
+    badgeClass: 'bg-blue-100 text-blue-800 border-blue-200 dark:bg-blue-900/40 dark:text-blue-300',
   },
-  advancing: {
-    label: 'Переходим',
-    badgeClass: 'bg-amber-100 text-amber-800 border-amber-200 dark:bg-amber-900/40 dark:text-amber-300',
+  requesting_hint: {
+    label: 'Генерируем подсказку',
+    badgeClass: 'bg-violet-100 text-violet-800 border-violet-200 dark:bg-violet-900/40 dark:text-violet-300',
   },
   send_error: {
     label: 'Ошибка отправки',
@@ -241,7 +244,8 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
   const [threadCurrentTaskOrder, setThreadCurrentTaskOrder] = useState(1);
   const [isStreaming, setIsStreaming] = useState(false);
   const [streamingContent, setStreamingContent] = useState('');
-  const [isAdvancing, setIsAdvancing] = useState(false);
+  const [isCheckingAnswer, setIsCheckingAnswer] = useState(false);
+  const [isRequestingHint, setIsRequestingHint] = useState(false);
   const [threadId, setThreadId] = useState<string | null>(null);
   const [threadStatus, setThreadStatus] = useState<'active' | 'completed' | 'abandoned'>('active');
   const [inputMode, setInputMode] = useState<InputMode>('answer');
@@ -282,6 +286,8 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
         order_num: task.order_num,
         task_text: task.task_text,
         status: (state?.status ?? 'locked') as TaskStateStatus,
+        earned_score: state?.earned_score,
+        max_score: task.max_score,
       };
     });
   }, [assignment.tasks, taskStates]);
@@ -296,10 +302,28 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
     return threadCurrentTaskOrder;
   }, [assignment.tasks, taskStates, threadCurrentTaskOrder]);
 
+  const syncThreadFromResponse = useCallback((updatedThread: HomeworkThread) => {
+    const normalizedMessages = (updatedThread.homework_tutor_thread_messages ?? []).map((msg) => ({
+      ...msg,
+      message_delivery_status: toDeliveryStatus(msg.message_delivery_status),
+    }));
+    setMessages(normalizedMessages);
+    setTaskStates(updatedThread.homework_tutor_task_states ?? []);
+    setCurrentTaskOrder(updatedThread.current_task_order);
+    setThreadCurrentTaskOrder(updatedThread.current_task_order);
+    setThreadStatus(updatedThread.status);
+  }, []);
+
   const currentTask = useMemo(
     () => assignment.tasks.find((t) => t.order_num === currentTaskOrder),
     [assignment.tasks, currentTaskOrder],
   );
+
+  const currentActiveTaskState = useMemo(() => {
+    const activeTask = assignment.tasks.find((t) => t.order_num === activeTaskOrder);
+    if (!activeTask) return null;
+    return taskStates.find((ts) => ts.task_id === activeTask.id) ?? null;
+  }, [assignment.tasks, activeTaskOrder, taskStates]);
 
   const visibleMessages = useMemo(
     () => messages.filter((message) => message.task_order === currentTaskOrder),
@@ -313,15 +337,15 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
   const hasSendErrorForCurrentTask = visibleMessages.some(
     (message) => message.message_delivery_status === 'failed',
   );
-  const uiStatus: GuidedHomeworkUiStatus = isAdvancing
-    ? 'advancing'
-    : isStreaming
-      ? 'streaming_ai'
-      : hasSendErrorForCurrentTask
-        ? 'send_error'
-        : (isViewingActiveTask && hasAiReplyForCurrentTask)
-          ? 'ready_to_advance'
-          : 'awaiting_answer';
+  const uiStatus: GuidedHomeworkUiStatus = isCheckingAnswer
+      ? 'checking_answer'
+      : isRequestingHint
+        ? 'requesting_hint'
+        : isStreaming
+          ? 'streaming_ai'
+          : hasSendErrorForCurrentTask
+            ? 'send_error'
+            : 'awaiting_answer';
 
   const visitedTaskOrders = useMemo(() => {
     const result = new Set<number>([activeTaskOrder]);
@@ -346,13 +370,9 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
     ? currentTaskOrder + 1
     : null;
   const nextTaskVisited = nextTaskOrder !== null ? visitedTaskOrders.has(nextTaskOrder) : false;
-  const canGoNext = nextTaskOrder !== null && (
-    (currentTaskOrder < activeTaskOrder && nextTaskVisited) ||
-    (currentTaskOrder === activeTaskOrder && (nextTaskVisited || uiStatus === 'ready_to_advance')) ||
-    (currentTaskOrder > activeTaskOrder && nextTaskVisited)
-  );
+  const canGoNext = nextTaskOrder !== null && nextTaskVisited;
 
-  const controlsDisabled = threadStatus !== 'active' || isStreaming || isAdvancing;
+  const controlsDisabled = threadStatus !== 'active' || isStreaming || isCheckingAnswer || isRequestingHint;
 
   const patchMessage = useCallback((messageId: string, patch: Partial<HomeworkThreadMessage>) => {
     setMessages((prev) => prev.map((message) => (
@@ -387,7 +407,7 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
       .filter((message) => message.role !== 'system')
       .filter((message) => message.message_delivery_status !== 'failed')
       .map((message) => ({
-        role: message.role === 'system' ? 'assistant' : message.role,
+        role: message.role === 'system' || message.role === 'tutor' ? 'assistant' : message.role,
         content: message.content,
       }));
 
@@ -483,6 +503,88 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
     }
   }, [assignment, patchMessage, persistMessage]);
 
+  const handleCheckAnswer = useCallback(async (answerText: string) => {
+    if (!threadId || !currentTask) return;
+    const taskOrder = currentTask.order_num;
+
+    // Show optimistic user message
+    const tempUserId = `temp-user-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+    setMessages((prev) => [
+      ...prev,
+      {
+        id: tempUserId,
+        role: 'user',
+        content: answerText,
+        image_url: null,
+        task_order: taskOrder,
+        created_at: new Date().toISOString(),
+        message_kind: 'answer',
+        message_delivery_status: 'sending',
+      },
+    ]);
+
+    setIsCheckingAnswer(true);
+    trackGuidedHomeworkEvent('guided_send_click', { assignmentId: assignment.id, taskOrder, sendMode: 'answer' });
+
+    try {
+      const response: CheckAnswerResponse = await checkAnswer(threadId, answerText);
+
+      // Sync full thread from response (includes saved messages)
+      syncThreadFromResponse(response.thread);
+
+      if (response.verdict === 'CORRECT') {
+        trackGuidedHomeworkEvent('guided_answer_correct', {
+          assignmentId: assignment.id,
+          taskOrder,
+          earnedScore: response.earned_score ?? 0,
+          maxScore: response.max_score,
+        });
+        if (response.thread_completed) {
+          toast.success('Все задачи завершены!');
+          trackGuidedHomeworkEvent('guided_all_completed', { assignmentId: assignment.id });
+        } else {
+          toast.success('Правильно! Переходим к следующей задаче.');
+        }
+      } else {
+        trackGuidedHomeworkEvent('guided_answer_incorrect', {
+          assignmentId: assignment.id,
+          taskOrder,
+          wrongAnswerCount: response.wrong_answer_count,
+          availableScore: response.available_score,
+          maxScore: response.max_score,
+        });
+        if (response.available_score < response.max_score) {
+          trackGuidedHomeworkEvent('guided_score_degraded', {
+            assignmentId: assignment.id,
+            taskOrder,
+            availableScore: response.available_score,
+            maxScore: response.max_score,
+          });
+        }
+      }
+
+      await queryClient.invalidateQueries({
+        queryKey: ['student', 'homework', 'thread', assignment.id],
+      });
+    } catch (error) {
+      // Server may have processed the request despite network error.
+      // Refetch thread to get authoritative state instead of allowing retry
+      // (which would double-penalize the student).
+      setMessages((prev) => prev.filter((m) => m.id !== tempUserId));
+      toast.error('Ошибка связи при проверке. Обновляем данные...');
+      trackGuidedHomeworkEvent('guided_check_failed', {
+        assignmentId: assignment.id,
+        taskOrder,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      await queryClient.invalidateQueries({
+        queryKey: ['student', 'homework', 'thread', assignment.id],
+      });
+    } finally {
+      setIsCheckingAnswer(false);
+    }
+  }, [assignment.id, currentTask, queryClient, syncThreadFromResponse, threadId]);
+
   const sendUserMessage = useCallback(async (
     rawText: string,
     sendMode: SendMode,
@@ -497,6 +599,13 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
     const content = rawText.trim();
     if (!content) return;
 
+    // Answer mode uses server-side AI check
+    if (sendMode === 'answer') {
+      await handleCheckAnswer(content);
+      return;
+    }
+
+    // Question and hint_request modes use streaming
     const taskOrder = currentTask.order_num;
     const tempUserId = `temp-user-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
     const userMessage: HomeworkThreadMessage = {
@@ -534,6 +643,7 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
     buildContextMessages,
     controlsDisabled,
     currentTask,
+    handleCheckAnswer,
     isViewingActiveTask,
     patchMessage,
     persistMessage,
@@ -546,13 +656,49 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
     void sendUserMessage(text, mode);
   }, [inputMode, sendUserMessage]);
 
-  const handleHint = useCallback(() => {
+  const handleHint = useCallback(async () => {
+    if (!threadId || controlsDisabled || !isViewingActiveTask) return;
+
     trackGuidedHomeworkEvent('guided_hint', {
       assignmentId: assignment.id,
       taskOrder: currentTaskOrder,
     });
-    void sendUserMessage('Нужна краткая подсказка по текущей задаче.', 'hint_request');
-  }, [assignment.id, currentTaskOrder, sendUserMessage]);
+
+    setIsRequestingHint(true);
+    try {
+      const response: RequestHintResponse = await requestHint(threadId);
+
+      // Sync full thread from response (includes saved messages)
+      syncThreadFromResponse(response.thread);
+
+      if (response.available_score < response.max_score) {
+        trackGuidedHomeworkEvent('guided_score_degraded', {
+          assignmentId: assignment.id,
+          taskOrder: currentTaskOrder,
+          availableScore: response.available_score,
+          maxScore: response.max_score,
+        });
+      }
+
+      await queryClient.invalidateQueries({
+        queryKey: ['student', 'homework', 'thread', assignment.id],
+      });
+    } catch (error) {
+      // Server may have processed the hint despite network error.
+      // Refetch thread to get authoritative state instead of allowing retry.
+      toast.error('Ошибка связи при запросе подсказки. Обновляем данные...');
+      trackGuidedHomeworkEvent('guided_hint_failed', {
+        assignmentId: assignment.id,
+        taskOrder: currentTaskOrder,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      await queryClient.invalidateQueries({
+        queryKey: ['student', 'homework', 'thread', assignment.id],
+      });
+    } finally {
+      setIsRequestingHint(false);
+    }
+  }, [assignment.id, controlsDisabled, currentTaskOrder, isViewingActiveTask, queryClient, syncThreadFromResponse, threadId]);
 
   const handleEnterQuestionMode = useCallback(() => {
     if (!isViewingActiveTask) {
@@ -575,13 +721,18 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
     });
 
     if (message.role === 'user') {
-      const retryMode: SendMode = message.message_kind === 'question'
-        ? 'question'
-        : message.message_kind === 'hint_request'
-          ? 'hint_request'
-          : 'answer';
       setMessages((prev) => prev.filter((item) => item.id !== messageId));
-      void sendUserMessage(message.content, retryMode);
+      // For question mode: safe to retry (idempotent streaming)
+      if (message.message_kind === 'question') {
+        void sendUserMessage(message.content, 'question');
+      } else {
+        // For answer/hint: re-invoke the endpoint (user explicitly chose to retry)
+        if (message.message_kind === 'answer') {
+          void handleCheckAnswer(message.content);
+        } else if (message.message_kind === 'hint_request') {
+          void handleHint();
+        }
+      }
       return;
     }
 
@@ -614,59 +765,7 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
           error: error instanceof Error ? error.message : String(error),
         });
       });
-  }, [activeTaskOrder, assignment.id, patchMessage, sendUserMessage, threadId]);
-
-  const handleAdvanceTask = useCallback(async (): Promise<boolean> => {
-    if (!threadId || controlsDisabled) return false;
-    if (!isViewingActiveTask) {
-      toast.info('Переключитесь на активную задачу перед переходом.');
-      return false;
-    }
-
-    trackGuidedHomeworkEvent('guided_advance_click', {
-      assignmentId: assignment.id,
-      taskOrder: currentTaskOrder,
-    });
-
-    setIsAdvancing(true);
-    try {
-      const updatedThread = await advanceTask(threadId);
-      const normalizedMessages = (updatedThread.homework_tutor_thread_messages ?? []).map((msg) => ({
-        ...msg,
-        message_delivery_status: toDeliveryStatus(msg.message_delivery_status),
-      }));
-      setMessages(normalizedMessages);
-      setTaskStates(updatedThread.homework_tutor_task_states ?? []);
-      setCurrentTaskOrder(updatedThread.current_task_order);
-      setThreadCurrentTaskOrder(updatedThread.current_task_order);
-      setThreadStatus(updatedThread.status);
-      setInputMode('answer');
-
-      await queryClient.invalidateQueries({
-        queryKey: ['student', 'homework', 'thread', assignment.id],
-      });
-
-      if (updatedThread.status === 'completed') {
-        toast.success('Все guided-задачи завершены.');
-      }
-      trackGuidedHomeworkEvent('guided_advance_success', {
-        assignmentId: assignment.id,
-        nextTaskOrder: updatedThread.current_task_order,
-        status: updatedThread.status,
-      });
-      return true;
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Не удалось перейти к следующей задаче.');
-      trackGuidedHomeworkEvent('guided_advance_failed', {
-        assignmentId: assignment.id,
-        taskOrder: currentTaskOrder,
-        error: err instanceof Error ? err.message : String(err),
-      });
-      return false;
-    } finally {
-      setIsAdvancing(false);
-    }
-  }, [assignment.id, controlsDisabled, currentTaskOrder, isViewingActiveTask, queryClient, threadId]);
+  }, [activeTaskOrder, assignment.id, handleCheckAnswer, handleHint, patchMessage, sendUserMessage, threadId]);
 
   const handleTaskClick = useCallback((orderNum: number) => {
     if (!visitedTaskOrders.has(orderNum)) return;
@@ -683,8 +782,8 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
     setCurrentTaskOrder(previousTaskOrder);
   }, [assignment.id, currentTaskOrder, previousTaskOrder]);
 
-  const handleGoNext = useCallback(async () => {
-    if (!nextTaskOrder) return;
+  const handleGoNext = useCallback(() => {
+    if (!nextTaskOrder || !nextTaskVisited) return;
 
     trackGuidedHomeworkEvent('guided_next', {
       assignmentId: assignment.id,
@@ -692,40 +791,14 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
       toTaskOrder: nextTaskOrder,
     });
 
-    if (currentTaskOrder < activeTaskOrder) {
-      if (nextTaskVisited) setCurrentTaskOrder(nextTaskOrder);
-      return;
-    }
-
-    if (currentTaskOrder === activeTaskOrder) {
-      if (nextTaskVisited) {
-        setCurrentTaskOrder(nextTaskOrder);
-        return;
-      }
-      if (uiStatus === 'ready_to_advance') {
-        await handleAdvanceTask();
-      }
-      return;
-    }
-
-    if (nextTaskVisited) {
-      setCurrentTaskOrder(nextTaskOrder);
-    }
-  }, [
-    activeTaskOrder,
-    assignment.id,
-    currentTaskOrder,
-    handleAdvanceTask,
-    nextTaskOrder,
-    nextTaskVisited,
-    uiStatus,
-  ]);
+    setCurrentTaskOrder(nextTaskOrder);
+  }, [assignment.id, currentTaskOrder, nextTaskOrder, nextTaskVisited]);
 
   useEffect(() => {
     if (!threadId || !currentTask) return;
     if (threadStatus !== 'active') return;
     if (currentTask.order_num !== 1) return;
-    if (isStreaming || isAdvancing) return;
+    if (isStreaming || isCheckingAnswer || isRequestingHint) return;
 
     const key = `${threadId}:task-1`;
     if (bootstrapStartedRef.current.has(key)) return;
@@ -788,7 +861,7 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
     };
 
     void runBootstrap();
-  }, [assignment, currentTask, isAdvancing, isStreaming, messages, threadId, threadStatus]);
+  }, [assignment, currentTask, isCheckingAnswer, isRequestingHint, isStreaming, messages, threadId, threadStatus]);
 
   // Loading state
   if (isThreadLoading) {
@@ -840,6 +913,8 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
   // Completed state
   if (threadStatus === 'completed') {
     const completedCount = taskStates.filter((s) => s.status === 'completed').length;
+    const totalEarned = taskStates.reduce((sum, s) => sum + (s.earned_score ?? 0), 0);
+    const totalMax = assignment.tasks.reduce((sum, t) => sum + t.max_score, 0);
     return (
       <div className="flex-1 flex flex-col">
         {/* Header */}
@@ -865,6 +940,11 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
               <p className="text-muted-foreground">
                 Вы решили {completedCount} из {assignment.tasks.length} задач
               </p>
+              {totalMax > 0 && (
+                <p className="text-sm font-medium">
+                  Итого: {totalEarned} / {totalMax} баллов
+                </p>
+              )}
               <TaskStepper
                 tasks={taskStepItems}
                 currentTaskOrder={currentTaskOrder}
@@ -917,9 +997,20 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
 
       {currentTask && (
         <div className="border-b px-4 py-3 shrink-0 bg-slate-50/70 dark:bg-slate-900/30">
-          <p className="text-xs text-muted-foreground mb-1">
-            Задача {currentTask.order_num} из {assignment.tasks.length}
-          </p>
+          <div className="flex items-center justify-between mb-1">
+            <p className="text-xs text-muted-foreground">
+              Задача {currentTask.order_num} из {assignment.tasks.length}
+            </p>
+            {isViewingActiveTask && currentActiveTaskState?.available_score != null && (
+              <span className={`text-xs font-medium ${
+                (currentActiveTaskState.available_score ?? 0) >= currentTask.max_score
+                  ? 'text-emerald-600 dark:text-emerald-400'
+                  : 'text-amber-600 dark:text-amber-400'
+              }`}>
+                {currentActiveTaskState.available_score} / {currentTask.max_score} баллов
+              </span>
+            )}
+          </div>
           <p className="text-sm font-medium whitespace-pre-wrap">{currentTask.task_text}</p>
 
           <div className="mt-2">
@@ -973,7 +1064,7 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
           />
         )}
 
-        {isStreaming && !streamingContent && (
+        {((isStreaming && !streamingContent) || isCheckingAnswer || isRequestingHint) && (
           <div className="flex justify-start mb-3">
             <div className="bg-muted rounded-2xl rounded-bl-md px-4 py-3">
               <div className="flex gap-1">
@@ -1005,7 +1096,7 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
             <Button
               variant="outline"
               size="sm"
-              onClick={() => void handleGoNext()}
+              onClick={handleGoNext}
               disabled={controlsDisabled || !canGoNext}
               className="justify-start gap-1"
             >
@@ -1016,7 +1107,7 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
             <Button
               variant="outline"
               size="sm"
-              onClick={handleHint}
+              onClick={() => void handleHint()}
               disabled={controlsDisabled || !isViewingActiveTask}
               className="justify-start gap-1"
             >
@@ -1035,19 +1126,6 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
               Задать вопрос
             </Button>
           </div>
-
-          <Button
-            className="w-full"
-            onClick={() => void handleAdvanceTask()}
-            disabled={uiStatus !== 'ready_to_advance' || controlsDisabled || !isViewingActiveTask}
-          >
-            {isAdvancing ? (
-              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-            ) : (
-              <Sparkles className="h-4 w-4 mr-2" />
-            )}
-            Проверить и перейти
-          </Button>
 
           {uiStatus === 'send_error' && (
             <div className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive flex items-start gap-2">
@@ -1072,8 +1150,8 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
 
         <GuidedChatInput
           onSend={handleSend}
-          isLoading={isStreaming}
-          disabled={threadStatus !== 'active' || !isViewingActiveTask || isAdvancing}
+          isLoading={isStreaming || isCheckingAnswer || isRequestingHint}
+          disabled={threadStatus !== 'active' || !isViewingActiveTask || isCheckingAnswer || isRequestingHint}
           placeholder={
             inputMode === 'question'
               ? 'Задайте уточняющий вопрос по текущей задаче...'

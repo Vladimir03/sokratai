@@ -5,6 +5,8 @@ import type {
   StudentHomeworkSubmission,
   HomeworkThread,
   GuidedMessageKind,
+  CheckAnswerResponse,
+  RequestHintResponse,
 } from '@/types/homework';
 
 const HOMEWORK_IMAGES_BUCKET = 'homework-images';
@@ -623,7 +625,7 @@ export async function getStudentThreadByAssignment(
       id, status, current_task_order, created_at, updated_at,
       student_assignment_id,
       homework_tutor_thread_messages(id, role, content, image_url, task_order, message_kind, created_at),
-      homework_tutor_task_states(id, task_id, status, attempts, best_score)
+      homework_tutor_task_states(id, task_id, status, attempts, best_score, available_score, earned_score, wrong_answer_count, hint_count)
     `;
   const selectLegacy = `
       id, status, current_task_order, created_at, updated_at,
@@ -691,6 +693,39 @@ export async function advanceTask(
     {
       method: 'POST',
       body: JSON.stringify(score !== undefined ? { score } : {}),
+    },
+  );
+}
+
+/**
+ * Phase 3: Submit answer for AI evaluation.
+ * Server checks correctness, updates scores, auto-advances on correct.
+ */
+export async function checkAnswer(
+  threadId: string,
+  answer: string,
+): Promise<CheckAnswerResponse> {
+  return requestStudentHomeworkApi<CheckAnswerResponse>(
+    `/threads/${encodeURIComponent(threadId)}/check`,
+    {
+      method: 'POST',
+      body: JSON.stringify({ answer }),
+    },
+  );
+}
+
+/**
+ * Phase 3: Request a hint for the current task.
+ * Server generates hint, degrades available_score.
+ */
+export async function requestHint(
+  threadId: string,
+): Promise<RequestHintResponse> {
+  return requestStudentHomeworkApi<RequestHintResponse>(
+    `/threads/${encodeURIComponent(threadId)}/hint`,
+    {
+      method: 'POST',
+      body: '{}',
     },
   );
 }

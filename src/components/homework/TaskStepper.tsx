@@ -17,6 +17,8 @@ export interface TaskStepItem {
   order_num: number;
   task_text: string;
   status: TaskStateStatus;
+  earned_score?: number | null;
+  max_score?: number;
 }
 
 interface TaskStepperProps {
@@ -114,6 +116,11 @@ const TaskStepper = memo(({ tasks, currentTaskOrder, onTaskClick }: TaskStepperP
                 <TooltipContent side="bottom" className="max-w-[260px] text-xs">
                   <div className="font-medium">Задача {task.order_num}</div>
                   <div className="text-muted-foreground mb-1">{STATUS_LABELS[task.status]}</div>
+                  {task.status === 'completed' && task.earned_score != null && task.max_score != null && (
+                    <div className="text-muted-foreground mb-1">
+                      Баллы: {task.earned_score} / {task.max_score}
+                    </div>
+                  )}
                   <div className="max-w-[220px] break-words">{task.task_text}</div>
                 </TooltipContent>
               </Tooltip>

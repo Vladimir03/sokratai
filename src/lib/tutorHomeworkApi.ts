@@ -541,6 +541,39 @@ export async function getTutorStudentGuidedThread(
   );
 }
 
+export async function postTutorThreadMessage(
+  assignmentId: string,
+  studentId: string,
+  content: string,
+  options?: {
+    visible_to_student?: boolean;
+    task_order?: number;
+  },
+): Promise<{ id: string; created_at: string }> {
+  return requestHomeworkApi<{ id: string; created_at: string }>(
+    `/assignments/${encodeURIComponent(assignmentId)}/students/${encodeURIComponent(studentId)}/thread/messages`,
+    {
+      method: 'POST',
+      body: JSON.stringify({
+        content,
+        visible_to_student: options?.visible_to_student ?? true,
+        task_order: options?.task_order,
+      }),
+    },
+  );
+}
+
+export async function resetTutorStudentTask(
+  assignmentId: string,
+  studentId: string,
+  taskOrder: number,
+): Promise<{ ok: boolean }> {
+  return requestHomeworkApi<{ ok: boolean }>(
+    `/assignments/${encodeURIComponent(assignmentId)}/students/${encodeURIComponent(studentId)}/thread/tasks/${taskOrder}/reset`,
+    { method: 'POST', body: '{}' },
+  );
+}
+
 export async function reviewTutorHomeworkSubmission(
   submissionId: string,
   payload: ReviewPayload,
