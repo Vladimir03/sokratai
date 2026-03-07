@@ -316,7 +316,8 @@ export async function getStudentAssignment(assignmentId: string): Promise<Studen
 
   const result = {
     ...(assignment as any),
-    max_attempts: 3,
+    max_attempts: (assignment as any).max_attempts ?? 3,
+    workflow_mode: (assignment as any).workflow_mode ?? 'classic',
     updated_at: (assignment as any).created_at,
     tasks: (tasks ?? []) as StudentHomeworkAssignmentDetails['tasks'],
     materials: (materials ?? []) as StudentHomeworkAssignmentDetails['materials'],
