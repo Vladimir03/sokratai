@@ -1,25 +1,40 @@
 
 
-## Problem
-
-When someone mentions `@sokratai_ru_bot` in a group chat, the bot responds in the user's **private DM** instead of the group. The logs prove this:
-
-- The update arrives with `"type": "group"` and `chat.id: -5215652476`
-- But the log shows `Handling text message: { telegramUserId: 385567670 }` — this is the **private chat handler**, not the group handler (which would log `📢 Handling group text message`)
-
-This means the **deployed version** of `telegram-bot` does not contain the group chat handling code (lines 7858-7923 in the source). The private chat handler at line 8138 catches the message and sends the response to `telegramUserId` (user's DM) instead of the group chat.
-
 ## Root Cause
 
-The `telegram-bot` edge function source code already has correct group chat handling — it replies to the group chat with `reply_to_message_id`. But the **currently deployed version is stale** and lacks this code.
+The database confirms: assignment `4ce28a0e-b77e-4c97-b914-e6dc4717c046` has `workflow_mode = 'classic'` despite the switch being ON in the UI. This happened because the edge function `homework-api` was not yet redeployed with `workflow_mode` support when the assignment was created. The edge function defaulted unknown fields to `'classic'`.
 
-## Fix
+**All 40 assignments in the database have `workflow_mode = 'classic'`** -- none were ever saved as `guided_chat`.
 
-1. **Redeploy `telegram-bot`** — no code changes needed, the source is already correct
-2. **Verify `TELEGRAM_BOT_USERNAME` secret** equals `sokratai_ru_bot` (the env var default is `SokratAIBot` which won't match the actual bot username in mention entities)
+The frontend code is correct (sends `workflow_mode`), the edge function code is correct (saves it), and the student-side query is correct (reads it). The issue was purely a deployment timing gap.
 
-The existing group handler (line 6941 `handleGroupTextMessage`) already:
-- Sends responses to `groupChatId` (not `telegramUserId`)
-- Uses `reply_to_message_id` to reply to the original message
-- Properly extracts mentions and reply-to-bot context
+## Fix Plan
+
+### 1. Fix existing assignment data (SQL UPDATE via insert tool)
+
+Update assignment `4ce28a0e-b77e-4c97-b914-e6dc4717c046` to `workflow_mode = 'guided_chat'`:
+
+```sql
+UPDATE homework_tutor_assignments 
+SET workflow_mode = 'guided_chat' 
+WHERE id = '4ce28a0e-b77e-4c97-b914-e6dc4717c046';
+```
+
+### 2. Provision guided chat thread for the assigned student
+
+The student `ac96a528-4213-471b-ac9d-163a2af6397a` has a `homework_tutor_student_assignments` row but no thread exists yet. Need to:
+
+1. Look up the `student_assignment_id` from `homework_tutor_student_assignments`
+2. Insert a row into `homework_tutor_threads` 
+3. Insert `homework_tutor_task_states` for each task (first = `active`, rest = `locked`)
+
+This requires querying for the student_assignment ID and task IDs first, then inserting thread + task states.
+
+### 3. Redeploy edge function
+
+Redeploy `homework-api` to confirm latest code is live for future assignments.
+
+### No frontend changes needed
+
+The frontend already handles `workflow_mode === 'guided_chat'` correctly at line 433 of `StudentHomeworkDetail.tsx`.
 
