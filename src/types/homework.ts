@@ -154,6 +154,14 @@ export interface StudentHomeworkAssignmentDetails {
 
 export type ThreadStatus = 'active' | 'completed' | 'abandoned';
 export type TaskStateStatus = 'locked' | 'active' | 'completed' | 'skipped';
+export type GuidedMessageKind = 'answer' | 'hint_request' | 'question' | 'ai_reply' | 'system';
+export type MessageDeliveryStatus = 'sending' | 'sent' | 'failed';
+export type GuidedHomeworkUiStatus =
+  | 'awaiting_answer'
+  | 'streaming_ai'
+  | 'ready_to_advance'
+  | 'advancing'
+  | 'send_error';
 
 export interface HomeworkThread {
   id: string;
@@ -173,6 +181,8 @@ export interface HomeworkThreadMessage {
   image_url: string | null;
   task_order: number | null;
   created_at: string;
+  message_kind?: GuidedMessageKind;
+  message_delivery_status?: MessageDeliveryStatus;
 }
 
 export interface HomeworkTaskState {

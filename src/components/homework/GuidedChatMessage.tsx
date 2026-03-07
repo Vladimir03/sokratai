@@ -7,18 +7,25 @@ import { memo, lazy, Suspense, useEffect, useState, useMemo } from 'react';
 import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
+import { AlertTriangle, RotateCcw } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import type { GuidedMessageKind, MessageDeliveryStatus } from '@/types/homework';
 
 const ReactMarkdown = lazy(() => import('react-markdown'));
 
 export interface GuidedMessageData {
+  id?: string;
   role: 'user' | 'assistant' | 'system';
   content: string;
   created_at?: string;
+  message_kind?: GuidedMessageKind;
+  message_delivery_status?: MessageDeliveryStatus;
 }
 
 interface GuidedChatMessageProps {
   message: GuidedMessageData;
   isStreaming?: boolean;
+  onRetry?: (messageId: string) => void;
 }
 
 /** Convert LaTeX delimiters to remark-math compatible format */
@@ -44,7 +51,15 @@ function formatTime(isoString?: string): string {
   });
 }
 
-const GuidedChatMessage = memo(({ message, isStreaming }: GuidedChatMessageProps) => {
+function formatMessageKind(kind: GuidedMessageKind | undefined): string | null {
+  if (!kind) return null;
+  if (kind === 'hint_request') return 'Подсказка';
+  if (kind === 'question') return 'Вопрос';
+  if (kind === 'answer') return 'Ответ';
+  return null;
+}
+
+const GuidedChatMessage = memo(({ message, isStreaming, onRetry }: GuidedChatMessageProps) => {
   const [katexLoaded, setKatexLoaded] = useState(false);
   const hasMath = message.content.includes('$');
 
@@ -61,6 +76,9 @@ const GuidedChatMessage = memo(({ message, isStreaming }: GuidedChatMessageProps
 
   const isUser = message.role === 'user';
   const isSystem = message.role === 'system';
+  const kindLabel = formatMessageKind(message.message_kind);
+  const isFailed = message.message_delivery_status === 'failed';
+  const isSending = message.message_delivery_status === 'sending';
 
   const markdownComponents = useMemo(
     () => ({
@@ -151,6 +169,15 @@ const GuidedChatMessage = memo(({ message, isStreaming }: GuidedChatMessageProps
         }`}
       >
         <div className="text-sm">
+          {kindLabel && (
+            <p
+              className={`text-[10px] mb-1 uppercase tracking-wide ${
+                isUser ? 'text-primary-foreground/80' : 'text-muted-foreground'
+              }`}
+            >
+              {kindLabel}
+            </p>
+          )}
           <Suspense
             fallback={
               <p className="whitespace-pre-wrap break-words">{displayContent}</p>
@@ -175,6 +202,30 @@ const GuidedChatMessage = memo(({ message, isStreaming }: GuidedChatMessageProps
             }`}
           >
             {formatTime(message.created_at)}
+          </div>
+        )}
+        {isSending && (
+          <div className="text-[10px] mt-1 text-muted-foreground">
+            Отправка...
+          </div>
+        )}
+        {isFailed && (
+          <div className="mt-2 flex items-center gap-2">
+            <span className="inline-flex items-center gap-1 text-[10px] text-destructive">
+              <AlertTriangle className="h-3 w-3" />
+              Не отправлено
+            </span>
+            {message.id && onRetry && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-6 px-2 text-[10px]"
+                onClick={() => onRetry(message.id!)}
+              >
+                <RotateCcw className="h-3 w-3 mr-1" />
+                Повторить
+              </Button>
+            )}
           </div>
         )}
       </div>

@@ -105,6 +105,14 @@ function isNonNegativeInt(v: unknown): v is number {
   return typeof v === "number" && Number.isInteger(v) && v >= 0;
 }
 
+function isMissingColumnError(message: string, column: string): boolean {
+  const lower = message.toLowerCase();
+  return lower.includes(column.toLowerCase()) && (
+    lower.includes("schema cache") ||
+    (lower.includes("column") && lower.includes("does not exist"))
+  );
+}
+
 async function parseJsonBody(req: Request): Promise<unknown> {
   try {
     return await req.json();
@@ -2071,6 +2079,11 @@ async function handlePostThreadMessage(
   const role = b.role === "assistant" ? "assistant" : "user";
   const imageUrl = isString(b.image_url) ? (b.image_url as string) : null;
   const taskOrder = typeof b.task_order === "number" ? b.task_order : (thread.current_task_order as number);
+  const messageKindRaw = isString(b.message_kind) ? (b.message_kind as string).trim() : "";
+  const validMessageKinds = new Set(["answer", "hint_request", "question", "ai_reply", "system"]);
+  const messageKind = validMessageKinds.has(messageKindRaw)
+    ? messageKindRaw
+    : (role === "assistant" ? "ai_reply" : "answer");
 
   // Integrity check: assistant messages can only follow a user message
   if (role === "assistant") {
@@ -2087,18 +2100,44 @@ async function handlePostThreadMessage(
     }
   }
 
-  // Insert message
-  const { data: savedMsg, error: insertErr } = await db
+  // Insert message (message_kind is optional for backward compatibility)
+  const payloadWithKind = {
+    thread_id: threadId,
+    role,
+    content: b.content,
+    image_url: imageUrl,
+    task_order: taskOrder,
+    message_kind: messageKind,
+  };
+  const payloadLegacy = {
+    thread_id: threadId,
+    role,
+    content: b.content,
+    image_url: imageUrl,
+    task_order: taskOrder,
+  };
+
+  let savedMsg: Record<string, unknown> | null = null;
+  let insertErr: { message?: string } | null = null;
+
+  const withKindResult = await db
     .from("homework_tutor_thread_messages")
-    .insert({
-      thread_id: threadId,
-      role,
-      content: b.content,
-      image_url: imageUrl,
-      task_order: taskOrder,
-    })
+    .insert(payloadWithKind)
     .select("id, role, content, image_url, task_order, created_at")
     .single();
+
+  if (withKindResult.error && isMissingColumnError(withKindResult.error.message, "message_kind")) {
+    const legacyResult = await db
+      .from("homework_tutor_thread_messages")
+      .insert(payloadLegacy)
+      .select("id, role, content, image_url, task_order, created_at")
+      .single();
+    savedMsg = legacyResult.data as Record<string, unknown> | null;
+    insertErr = legacyResult.error;
+  } else {
+    savedMsg = withKindResult.data as Record<string, unknown> | null;
+    insertErr = withKindResult.error;
+  }
 
   if (insertErr || !savedMsg) {
     console.error("homework_api_thread_message_insert_failed", { error: insertErr?.message });
@@ -2126,7 +2165,10 @@ async function handlePostThreadMessage(
     }
   }
 
-  return jsonOk(cors, savedMsg, 201);
+  return jsonOk(cors, {
+    ...savedMsg,
+    message_kind: messageKind,
+  }, 201);
 }
 
 // ─── Endpoint: POST /threads/:id/advance (student) ──────────────────────────
@@ -2298,6 +2340,78 @@ async function handleAdvanceTask(
   return jsonOk(cors, updatedThread ?? { id: threadId });
 }
 
+// ─── Endpoint: GET /assignments/:id/students/:studentId/thread (tutor) ──────
+
+async function handleGetTutorStudentThread(
+  db: SupabaseClient,
+  tutorUserId: string,
+  assignmentId: string,
+  studentId: string,
+  cors: Record<string, string>,
+): Promise<Response> {
+  if (!isUUID(studentId)) {
+    return jsonError(cors, 400, "VALIDATION", "Invalid student ID");
+  }
+
+  const assignmentOrErr = await getOwnedAssignmentOrThrow(db, assignmentId, tutorUserId, cors);
+  if (assignmentOrErr instanceof Response) return assignmentOrErr;
+
+  const { data: studentAssignment, error: studentAssignmentError } = await db
+    .from("homework_tutor_student_assignments")
+    .select("id")
+    .eq("assignment_id", assignmentId)
+    .eq("student_id", studentId)
+    .maybeSingle();
+
+  if (studentAssignmentError) {
+    return jsonError(cors, 500, "DB_ERROR", "Failed to load student assignment");
+  }
+  if (!studentAssignment) {
+    return jsonError(cors, 404, "NOT_FOUND", "Student is not assigned to this homework");
+  }
+
+  const { data: thread, error: threadError } = await db
+    .from("homework_tutor_threads")
+    .select(`
+      id, status, current_task_order, created_at, updated_at,
+      student_assignment_id,
+      homework_tutor_thread_messages(id, role, content, image_url, task_order, created_at),
+      homework_tutor_task_states(id, task_id, status, attempts, best_score)
+    `)
+    .eq("student_assignment_id", studentAssignment.id)
+    .order("created_at", { referencedTable: "homework_tutor_thread_messages", ascending: true })
+    .maybeSingle();
+
+  if (threadError) {
+    return jsonError(cors, 500, "DB_ERROR", "Failed to load thread");
+  }
+  if (!thread) {
+    return jsonError(cors, 404, "NOT_FOUND", "Thread not found");
+  }
+
+  const { data: tasks, error: tasksError } = await db
+    .from("homework_tutor_tasks")
+    .select("id, order_num, task_text, task_image_url, max_score")
+    .eq("assignment_id", assignmentId)
+    .order("order_num", { ascending: true });
+
+  if (tasksError) {
+    return jsonError(cors, 500, "DB_ERROR", "Failed to load tasks for thread");
+  }
+
+  const { data: profile } = await db
+    .from("profiles")
+    .select("id, full_name, username")
+    .eq("id", studentId)
+    .maybeSingle();
+
+  return jsonOk(cors, {
+    thread,
+    tasks: tasks ?? [],
+    student: profile ?? { id: studentId, full_name: null, username: null },
+  });
+}
+
 // ─── Main Handler ────────────────────────────────────────────────────────────
 
 Deno.serve(async (req: Request): Promise<Response> => {
@@ -2366,6 +2480,11 @@ Deno.serve(async (req: Request): Promise<Response> => {
     // GET /assignments/:id
     if (seg.length === 2 && seg[0] === "assignments" && route.method === "GET") {
       return await handleGetAssignment(db, userId, seg[1], cors);
+    }
+
+    // GET /assignments/:id/students/:studentId/thread
+    if (seg.length === 5 && seg[0] === "assignments" && seg[2] === "students" && seg[4] === "thread" && route.method === "GET") {
+      return await handleGetTutorStudentThread(db, userId, seg[1], seg[3], cors);
     }
 
     // PUT /assignments/:id

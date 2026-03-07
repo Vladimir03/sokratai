@@ -1,4 +1,5 @@
 import { supabase } from '@/lib/supabaseClient';
+import type { HomeworkThread } from '@/types/homework';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -409,6 +410,7 @@ export interface TutorHomeworkAssignmentDetails {
     description: string | null;
     deadline: string | null;
     status: HomeworkAssignmentStatus;
+    workflow_mode?: 'classic' | 'guided_chat';
     created_at: string;
   };
   tasks: {
@@ -486,6 +488,22 @@ export interface TutorHomeworkResultsResponse {
   per_task: TutorHomeworkResultsPerTask[];
 }
 
+export interface TutorStudentGuidedThreadResponse {
+  thread: HomeworkThread;
+  tasks: {
+    id: string;
+    order_num: number;
+    task_text: string;
+    task_image_url: string | null;
+    max_score: number;
+  }[];
+  student: {
+    id: string;
+    full_name: string | null;
+    username: string | null;
+  };
+}
+
 export interface ReviewItem {
   task_id: string;
   tutor_override_correct?: boolean;
@@ -511,6 +529,15 @@ export async function getTutorHomeworkResults(
 ): Promise<TutorHomeworkResultsResponse> {
   return requestHomeworkApi<TutorHomeworkResultsResponse>(
     `/assignments/${encodeURIComponent(assignmentId)}/results`,
+  );
+}
+
+export async function getTutorStudentGuidedThread(
+  assignmentId: string,
+  studentId: string,
+): Promise<TutorStudentGuidedThreadResponse> {
+  return requestHomeworkApi<TutorStudentGuidedThreadResponse>(
+    `/assignments/${encodeURIComponent(assignmentId)}/students/${encodeURIComponent(studentId)}/thread`,
   );
 }
 

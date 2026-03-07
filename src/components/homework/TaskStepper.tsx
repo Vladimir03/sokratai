@@ -5,6 +5,12 @@
 
 import { memo, useRef, useEffect } from 'react';
 import { Check, Lock } from 'lucide-react';
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from '@/components/ui/tooltip';
 import type { TaskStateStatus } from '@/types/homework';
 
 export interface TaskStepItem {
@@ -46,6 +52,13 @@ const STATUS_STYLES: Record<
   },
 };
 
+const STATUS_LABELS: Record<TaskStateStatus, string> = {
+  locked: 'Закрыта',
+  active: 'Активная',
+  completed: 'Завершена',
+  skipped: 'Пропущена',
+};
+
 const TaskStepper = memo(({ tasks, currentTaskOrder, onTaskClick }: TaskStepperProps) => {
   const activeRef = useRef<HTMLButtonElement>(null);
 
@@ -61,51 +74,61 @@ const TaskStepper = memo(({ tasks, currentTaskOrder, onTaskClick }: TaskStepperP
   }, [currentTaskOrder]);
 
   return (
-    <div className="flex gap-2 overflow-x-auto py-2 px-1 scrollbar-none">
-      {tasks.map((task, idx) => {
-        const style = STATUS_STYLES[task.status];
-        const isActive = task.status === 'active';
-        const isClickable = task.status === 'active' || task.status === 'completed';
-        const isLast = idx === tasks.length - 1;
+    <TooltipProvider delayDuration={120}>
+      <div className="flex gap-2 overflow-x-auto py-2 px-1 scrollbar-none">
+        {tasks.map((task, idx) => {
+          const style = STATUS_STYLES[task.status];
+          const isActive = task.status === 'active' || task.order_num === currentTaskOrder;
+          const isClickable = task.status !== 'locked';
+          const isLast = idx === tasks.length - 1;
 
-        return (
-          <div key={task.order_num} className="flex items-center shrink-0">
-            <button
-              ref={isActive ? activeRef : undefined}
-              type="button"
-              disabled={!isClickable}
-              onClick={() => isClickable && onTaskClick?.(task.order_num)}
-              className={`
-                flex items-center justify-center
-                w-8 h-8 rounded-full border-2
-                text-xs font-semibold
-                transition-all duration-200
-                ${style.bg} ${style.border} ${style.text}
-                ${style.ring || ''}
-                ${isClickable ? 'cursor-pointer hover:opacity-80' : 'cursor-default'}
-                disabled:cursor-default
-              `}
-              title={`Задача ${task.order_num}: ${task.task_text.slice(0, 50)}`}
-            >
-              {task.status === 'completed' ? (
-                <Check className="w-4 h-4" />
-              ) : task.status === 'locked' ? (
-                <Lock className="w-3 h-3" />
-              ) : (
-                task.order_num
+          return (
+            <div key={task.order_num} className="flex items-center shrink-0">
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    ref={isActive ? activeRef : undefined}
+                    type="button"
+                    disabled={!isClickable}
+                    onClick={() => isClickable && onTaskClick?.(task.order_num)}
+                    className={`
+                      flex items-center justify-center
+                      w-8 h-8 rounded-full border-2
+                      text-xs font-semibold
+                      transition-all duration-200
+                      ${style.bg} ${style.border} ${style.text}
+                      ${style.ring || ''}
+                      ${isClickable ? 'cursor-pointer hover:opacity-80' : 'cursor-default'}
+                      disabled:cursor-default
+                    `}
+                  >
+                    {task.status === 'completed' ? (
+                      <Check className="w-4 h-4" />
+                    ) : task.status === 'locked' ? (
+                      <Lock className="w-3 h-3" />
+                    ) : (
+                      task.order_num
+                    )}
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent side="bottom" className="max-w-[260px] text-xs">
+                  <div className="font-medium">Задача {task.order_num}</div>
+                  <div className="text-muted-foreground mb-1">{STATUS_LABELS[task.status]}</div>
+                  <div className="max-w-[220px] break-words">{task.task_text}</div>
+                </TooltipContent>
+              </Tooltip>
+              {!isLast && (
+                <div
+                  className={`w-4 h-0.5 mx-0.5 transition-colors duration-200 ${
+                    task.status === 'completed' ? 'bg-green-500' : 'bg-muted-foreground/20'
+                  }`}
+                />
               )}
-            </button>
-            {!isLast && (
-              <div
-                className={`w-4 h-0.5 mx-0.5 transition-colors duration-200 ${
-                  task.status === 'completed' ? 'bg-green-500' : 'bg-muted-foreground/20'
-                }`}
-              />
-            )}
-          </div>
-        );
-      })}
-    </div>
+            </div>
+          );
+        })}
+      </div>
+    </TooltipProvider>
   );
 });
 

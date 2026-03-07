@@ -36,6 +36,7 @@ import { TutorDataStatus } from '@/components/tutor/TutorDataStatus';
 import {
   getTutorHomeworkAssignment,
   getTutorHomeworkResults,
+  getTutorStudentGuidedThread,
   reviewTutorHomeworkSubmission,
   getHomeworkImageSignedUrl,
   notifyTutorHomeworkStudents,
@@ -43,6 +44,7 @@ import {
   type TutorHomeworkResultsResponse,
   type TutorHomeworkResultsPerStudent,
   type TutorHomeworkSubmissionItem,
+  type TutorStudentGuidedThreadResponse,
   type ReviewItem,
 } from '@/lib/tutorHomeworkApi';
 import {
@@ -138,9 +140,11 @@ function StudentImage({ objectPath }: { objectPath: string }) {
 function StudentExpandRow({
   student,
   assignmentId,
+  workflowMode,
 }: {
   student: TutorHomeworkResultsPerStudent;
   assignmentId: string;
+  workflowMode?: 'classic' | 'guided_chat';
 }) {
   const queryClient = useQueryClient();
   const [overrides, setOverrides] = useState<Record<string, boolean | null>>({});
@@ -195,7 +199,130 @@ function StudentExpandRow({
           Сохранить
         </Button>
       </div>
+      {workflowMode === 'guided_chat' && (
+        <GuidedThreadViewer assignmentId={assignmentId} studentId={student.student_id} />
+      )}
     </div>
+  );
+}
+
+function GuidedThreadViewer({
+  assignmentId,
+  studentId,
+}: {
+  assignmentId: string;
+  studentId: string;
+}) {
+  const [opened, setOpened] = useState(false);
+  const [taskFilter, setTaskFilter] = useState<number | 'all'>('all');
+
+  const threadQuery = useQuery<TutorStudentGuidedThreadResponse>({
+    queryKey: ['tutor', 'homework', 'guided-thread', assignmentId, studentId],
+    queryFn: () => getTutorStudentGuidedThread(assignmentId, studentId),
+    enabled: opened,
+    staleTime: TUTOR_STALE_TIME_MS,
+    gcTime: TUTOR_GC_TIME_MS,
+    retry: createTutorRetry(['tutor', 'homework', 'guided-thread', assignmentId, studentId] as const),
+    retryDelay: tutorRetryDelay,
+    refetchOnWindowFocus: false,
+  });
+
+  const taskStatusById = useMemo(
+    () => new Map((threadQuery.data?.thread.homework_tutor_task_states ?? []).map((state) => [state.task_id, state])),
+    [threadQuery.data?.thread.homework_tutor_task_states],
+  );
+
+  const filteredMessages = useMemo(() => {
+    const allMessages = threadQuery.data?.thread.homework_tutor_thread_messages ?? [];
+    if (taskFilter === 'all') return allMessages;
+    return allMessages.filter((message) => message.task_order === taskFilter);
+  }, [taskFilter, threadQuery.data?.thread.homework_tutor_thread_messages]);
+
+  return (
+    <Card className="border-dashed">
+      <CardHeader className="pb-3">
+        <div className="flex items-center justify-between gap-2">
+          <CardTitle className="text-sm">Guided-тред ученика (read-only)</CardTitle>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => setOpened((prev) => !prev)}
+          >
+            {opened ? 'Скрыть' : 'Показать'}
+          </Button>
+        </div>
+      </CardHeader>
+      {opened && (
+        <CardContent className="space-y-3">
+          {threadQuery.isLoading ? (
+            <div className="text-xs text-muted-foreground flex items-center gap-2">
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              Загружаем guided-тред...
+            </div>
+          ) : null}
+
+          {threadQuery.error ? (
+            <div className="text-xs text-destructive">
+              Не удалось загрузить guided-тред: {threadQuery.error instanceof Error ? threadQuery.error.message : 'unknown'}
+            </div>
+          ) : null}
+
+          {threadQuery.data && (
+            <>
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  variant={taskFilter === 'all' ? 'default' : 'outline'}
+                  size="sm"
+                  className="h-7 text-xs"
+                  onClick={() => setTaskFilter('all')}
+                >
+                  Все задачи
+                </Button>
+                {threadQuery.data.tasks.map((task) => {
+                  const state = taskStatusById.get(task.id);
+                  return (
+                    <Button
+                      key={task.id}
+                      variant={taskFilter === task.order_num ? 'default' : 'outline'}
+                      size="sm"
+                      className="h-7 text-xs"
+                      onClick={() => setTaskFilter(task.order_num)}
+                    >
+                      #{task.order_num} {state?.status ?? 'locked'}
+                    </Button>
+                  );
+                })}
+              </div>
+
+              <div className="rounded-md border bg-background p-2 max-h-[320px] overflow-y-auto space-y-2">
+                {filteredMessages.length === 0 ? (
+                  <p className="text-xs text-muted-foreground">Сообщений по этому фильтру пока нет.</p>
+                ) : (
+                  filteredMessages.map((message) => (
+                    <div key={message.id} className="rounded-md border p-2 text-xs space-y-1">
+                      <div className="flex items-center justify-between gap-2">
+                        <Badge variant={message.role === 'assistant' ? 'secondary' : 'outline'}>
+                          {message.role}
+                        </Badge>
+                        <span className="text-muted-foreground">
+                          {message.task_order ? `Задача ${message.task_order}` : 'Без задачи'}
+                        </span>
+                        <span className="text-muted-foreground">
+                          {new Date(message.created_at).toLocaleString('ru-RU')}
+                        </span>
+                      </div>
+                      <div className="whitespace-pre-wrap leading-relaxed break-words">
+                        {message.content}
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            </>
+          )}
+        </CardContent>
+      )}
+    </Card>
   );
 }
 
@@ -292,12 +419,14 @@ function TaskItemReview({
 function StudentRow({
   student,
   assignmentId,
+  workflowMode,
   autoExpand,
   highlight,
   attemptBadge,
 }: {
   student: TutorHomeworkResultsPerStudent;
   assignmentId: string;
+  workflowMode?: 'classic' | 'guided_chat';
   autoExpand?: boolean;
   highlight?: boolean;
   attemptBadge?: string;
@@ -371,7 +500,11 @@ function StudentRow({
         {expanded ? <ChevronUp className="h-4 w-4 flex-shrink-0" /> : <ChevronDown className="h-4 w-4 flex-shrink-0" />}
       </button>
       {expanded && (
-        <StudentExpandRow student={student} assignmentId={assignmentId} />
+        <StudentExpandRow
+          student={student}
+          assignmentId={assignmentId}
+          workflowMode={workflowMode}
+        />
       )}
     </div>
   );
@@ -382,10 +515,12 @@ function StudentRow({
 function StudentRowGroup({
   attempts,
   assignmentId,
+  workflowMode,
   targetSubmissionId,
 }: {
   attempts: TutorHomeworkResultsPerStudent[];
   assignmentId: string;
+  workflowMode?: 'classic' | 'guided_chat';
   targetSubmissionId: string | null;
 }) {
   const latest = attempts[0];
@@ -400,6 +535,7 @@ function StudentRowGroup({
       <StudentRow
         student={latest}
         assignmentId={assignmentId}
+        workflowMode={workflowMode}
         autoExpand={targetSubmissionId === latest.submission_id}
         highlight={targetSubmissionId === latest.submission_id}
         attemptBadge={attemptBadge}
@@ -420,6 +556,7 @@ function StudentRowGroup({
                   key={attempt.submission_id}
                   student={attempt}
                   assignmentId={assignmentId}
+                  workflowMode={workflowMode}
                   autoExpand={targetSubmissionId === attempt.submission_id}
                   highlight={targetSubmissionId === attempt.submission_id}
                   attemptBadge={`Попытка ${attempt.attempt_no ?? 1}`}
@@ -684,6 +821,7 @@ function TutorHomeworkResultsContent() {
                       key={attempts[0].student_id}
                       attempts={attempts}
                       assignmentId={assignmentId!}
+                      workflowMode={assignment?.workflow_mode}
                       targetSubmissionId={targetSubmissionId}
                     />
                   ))}

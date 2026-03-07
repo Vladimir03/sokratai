@@ -4,6 +4,7 @@ import type {
   StudentHomeworkAssignmentDetails,
   StudentHomeworkSubmission,
   HomeworkThread,
+  GuidedMessageKind,
 } from '@/types/homework';
 
 const HOMEWORK_IMAGES_BUCKET = 'homework-images';
@@ -84,6 +85,14 @@ function translateSupabaseError(message: string): string {
 function isMissingAnswerTypeColumnError(message: string): boolean {
   const lower = message.toLowerCase();
   return lower.includes('answer_type') && (
+    lower.includes('schema cache') ||
+    (lower.includes('column') && lower.includes('does not exist'))
+  );
+}
+
+function isMissingThreadMessageKindColumnError(message: string): boolean {
+  const lower = message.toLowerCase();
+  return lower.includes('message_kind') && (
     lower.includes('schema cache') ||
     (lower.includes('column') && lower.includes('does not exist'))
   );
@@ -610,21 +619,40 @@ export async function getStudentThreadByAssignment(
   if (saErr) throw new StudentHomeworkApiError(saErr.message);
   if (!sa) return null;
 
-  // Query thread with nested messages and task_states (RLS allows SELECT for own threads)
-  const { data: thread, error: threadErr } = await supabase
-    .from('homework_tutor_threads')
-    .select(`
+  const selectWithKind = `
+      id, status, current_task_order, created_at, updated_at,
+      student_assignment_id,
+      homework_tutor_thread_messages(id, role, content, image_url, task_order, message_kind, created_at),
+      homework_tutor_task_states(id, task_id, status, attempts, best_score)
+    `;
+  const selectLegacy = `
       id, status, current_task_order, created_at, updated_at,
       student_assignment_id,
       homework_tutor_thread_messages(id, role, content, image_url, task_order, created_at),
       homework_tutor_task_states(id, task_id, status, attempts, best_score)
-    `)
+    `;
+
+  // Query thread with nested messages and task_states (RLS allows SELECT for own threads)
+  const withKindResult = await supabase
+    .from('homework_tutor_threads')
+    .select(selectWithKind)
     .eq('student_assignment_id', sa.id)
     .order('created_at', { referencedTable: 'homework_tutor_thread_messages', ascending: true })
     .maybeSingle();
 
-  if (threadErr) throw new StudentHomeworkApiError(threadErr.message);
-  return thread as unknown as HomeworkThread | null;
+  if (withKindResult.error && isMissingThreadMessageKindColumnError(withKindResult.error.message)) {
+    const legacyResult = await supabase
+      .from('homework_tutor_threads')
+      .select(selectLegacy)
+      .eq('student_assignment_id', sa.id)
+      .order('created_at', { referencedTable: 'homework_tutor_thread_messages', ascending: true })
+      .maybeSingle();
+    if (legacyResult.error) throw new StudentHomeworkApiError(legacyResult.error.message);
+    return legacyResult.data as unknown as HomeworkThread | null;
+  }
+
+  if (withKindResult.error) throw new StudentHomeworkApiError(withKindResult.error.message);
+  return withKindResult.data as unknown as HomeworkThread | null;
 }
 
 /**
@@ -635,12 +663,18 @@ export async function saveThreadMessage(
   role: 'user' | 'assistant',
   content: string,
   taskOrder?: number,
+  messageKind?: GuidedMessageKind,
 ): Promise<{ id: string }> {
   return requestStudentHomeworkApi<{ id: string }>(
     `/threads/${encodeURIComponent(threadId)}/messages`,
     {
       method: 'POST',
-      body: JSON.stringify({ content, role, task_order: taskOrder }),
+      body: JSON.stringify({
+        content,
+        role,
+        task_order: taskOrder,
+        message_kind: messageKind,
+      }),
     },
   );
 }
