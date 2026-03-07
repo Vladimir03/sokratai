@@ -288,7 +288,7 @@ export async function getStudentAssignment(assignmentId: string): Promise<Studen
 
   const { data: assignment, error: assignmentError } = await supabase
     .from('homework_tutor_assignments')
-    .select('id, title, subject, topic, description, deadline, status, created_at')
+    .select('id, title, subject, topic, description, deadline, status, workflow_mode, max_attempts, created_at')
     .eq('id', assignmentId)
     .single();
 
