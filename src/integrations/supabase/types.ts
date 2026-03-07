@@ -551,6 +551,7 @@ export type Database = {
           title: string
           topic: string | null
           tutor_id: string
+          workflow_mode: string
         }
         Insert: {
           created_at?: string
@@ -564,6 +565,7 @@ export type Database = {
           title: string
           topic?: string | null
           tutor_id: string
+          workflow_mode?: string
         }
         Update: {
           created_at?: string
@@ -577,6 +579,7 @@ export type Database = {
           title?: string
           topic?: string | null
           tutor_id?: string
+          workflow_mode?: string
         }
         Relationships: [
           {
@@ -809,6 +812,54 @@ export type Database = {
           },
         ]
       }
+      homework_tutor_task_states: {
+        Row: {
+          attempts: number
+          best_score: number | null
+          created_at: string
+          id: string
+          status: string
+          task_id: string
+          thread_id: string
+          updated_at: string
+        }
+        Insert: {
+          attempts?: number
+          best_score?: number | null
+          created_at?: string
+          id?: string
+          status?: string
+          task_id: string
+          thread_id: string
+          updated_at?: string
+        }
+        Update: {
+          attempts?: number
+          best_score?: number | null
+          created_at?: string
+          id?: string
+          status?: string
+          task_id?: string
+          thread_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "homework_tutor_task_states_task_id_fkey"
+            columns: ["task_id"]
+            isOneToOne: false
+            referencedRelation: "homework_tutor_tasks"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "homework_tutor_task_states_thread_id_fkey"
+            columns: ["thread_id"]
+            isOneToOne: false
+            referencedRelation: "homework_tutor_threads"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       homework_tutor_tasks: {
         Row: {
           assignment_id: string
@@ -885,6 +936,79 @@ export type Database = {
           tutor_id?: string
         }
         Relationships: []
+      }
+      homework_tutor_thread_messages: {
+        Row: {
+          content: string
+          created_at: string
+          id: string
+          image_url: string | null
+          role: string
+          task_order: number | null
+          thread_id: string
+        }
+        Insert: {
+          content: string
+          created_at?: string
+          id?: string
+          image_url?: string | null
+          role: string
+          task_order?: number | null
+          thread_id: string
+        }
+        Update: {
+          content?: string
+          created_at?: string
+          id?: string
+          image_url?: string | null
+          role?: string
+          task_order?: number | null
+          thread_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "homework_tutor_thread_messages_thread_id_fkey"
+            columns: ["thread_id"]
+            isOneToOne: false
+            referencedRelation: "homework_tutor_threads"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      homework_tutor_threads: {
+        Row: {
+          created_at: string
+          current_task_order: number
+          id: string
+          status: string
+          student_assignment_id: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          current_task_order?: number
+          id?: string
+          status?: string
+          student_assignment_id: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          current_task_order?: number
+          id?: string
+          status?: string
+          student_assignment_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "homework_tutor_threads_student_assignment_id_fkey"
+            columns: ["student_assignment_id"]
+            isOneToOne: true
+            referencedRelation: "homework_tutor_student_assignments"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       homework_tutor_user_bot_state: {
         Row: {
