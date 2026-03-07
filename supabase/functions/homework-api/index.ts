@@ -1,5 +1,10 @@
 import { createClient, SupabaseClient } from "npm:@supabase/supabase-js@2";
 import { runHomeworkAiCheck } from "./ai_check.ts";
+import {
+  computeAvailableScore,
+  evaluateStudentAnswer,
+  generateHint,
+} from "./guided_ai.ts";
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
@@ -886,7 +891,7 @@ async function handleAssignStudents(
   if (assignment.workflow_mode === "guided_chat" && upserted && upserted.length > 0) {
     const { data: tasks } = await db
       .from("homework_tutor_tasks")
-      .select("id, order_num")
+      .select("id, order_num, max_score")
       .eq("assignment_id", assignmentId)
       .order("order_num", { ascending: true });
 
@@ -909,11 +914,12 @@ async function handleAssignStudents(
         });
       } else if (threads && threads.length > 0) {
         const taskStateRows = threads.flatMap((thread: { id: string }) =>
-          tasks.map((task: { id: string }, idx: number) => ({
+          tasks.map((task: { id: string; max_score?: number }, idx: number) => ({
             thread_id: thread.id,
             task_id: task.id,
             status: idx === 0 ? "active" : "locked",
             attempts: 0,
+            available_score: task.max_score ?? 1,
           }))
         );
 
@@ -1997,8 +2003,8 @@ async function handleGetThread(
     .select(`
       id, status, current_task_order, created_at, updated_at,
       student_assignment_id,
-      homework_tutor_thread_messages(id, role, content, image_url, task_order, created_at),
-      homework_tutor_task_states(id, task_id, status, attempts, best_score)
+      homework_tutor_thread_messages(id, role, content, image_url, task_order, message_kind, created_at),
+      homework_tutor_task_states(id, task_id, status, attempts, best_score, available_score, earned_score, wrong_answer_count, hint_count)
     `)
     .eq("id", threadId)
     .order("created_at", { referencedTable: "homework_tutor_thread_messages", ascending: true })
@@ -2205,52 +2211,60 @@ async function handleAdvanceTask(
     return jsonError(cors, 400, "NO_INTERACTION", "Complete at least one exchange with the AI before advancing");
   }
 
-  // Find current active task_state
-  const { data: allStates, error: statesErr } = await db
-    .from("homework_tutor_task_states")
-    .select("id, task_id, status, attempts, best_score")
-    .eq("thread_id", threadId);
-
-  if (statesErr || !allStates || allStates.length === 0) {
-    return jsonError(cors, 500, "DB_ERROR", "Failed to load task states");
-  }
-
-  // Get tasks to know ordering
-  // First, get assignment_id from student_assignment
-  const { data: sa } = await db
-    .from("homework_tutor_student_assignments")
-    .select("assignment_id")
-    .eq("id", thread.student_assignment_id)
-    .single();
-
-  if (!sa) {
-    return jsonError(cors, 500, "DB_ERROR", "Student assignment not found");
-  }
-
-  const { data: tasks } = await db
-    .from("homework_tutor_tasks")
-    .select("id, order_num")
-    .eq("assignment_id", sa.assignment_id)
-    .order("order_num", { ascending: true });
-
-  if (!tasks || tasks.length === 0) {
-    return jsonError(cors, 500, "DB_ERROR", "No tasks found");
-  }
-
-  // Build task_id → order_num map
-  const taskOrderMap = new Map(tasks.map((t: { id: string; order_num: number }) => [t.id, t.order_num]));
-  // Build order_num → task_state map
-  const stateByOrder = new Map(
-    allStates.map((s: Record<string, unknown>) => [taskOrderMap.get(s.task_id as string) ?? 0, s]),
-  );
-
-  const currentOrder = thread.current_task_order as number;
-  const currentState = stateByOrder.get(currentOrder);
-
-  if (!currentState || currentState.status !== "active") {
+  // Load advance context using shared helper
+  const ctx = await loadAdvanceContext(db, threadId, thread);
+  if (!ctx) {
     return jsonError(cors, 400, "NO_ACTIVE_TASK", "No active task to advance from");
   }
 
+  // Perform advance using shared helper
+  await performTaskAdvance(
+    db, threadId, ctx.currentState, ctx.stateByOrder, ctx.sortedOrders, ctx.currentOrder, score,
+  );
+
+  // Return updated thread
+  const updatedThread = await fetchFullThread(db, threadId);
+  return jsonOk(cors, updatedThread ?? { id: threadId });
+}
+
+// ─── Helper: fetch full thread with nested data ─────────────────────────────
+
+const THREAD_SELECT = `
+  id, status, current_task_order, created_at, updated_at,
+  student_assignment_id,
+  homework_tutor_thread_messages(id, role, content, image_url, task_order, message_kind, created_at),
+  homework_tutor_task_states(id, task_id, status, attempts, best_score, available_score, earned_score, wrong_answer_count, hint_count)
+`;
+
+async function fetchFullThread(
+  db: SupabaseClient,
+  threadId: string,
+): Promise<Record<string, unknown> | null> {
+  const { data } = await db
+    .from("homework_tutor_threads")
+    .select(THREAD_SELECT)
+    .eq("id", threadId)
+    .order("created_at", { referencedTable: "homework_tutor_thread_messages", ascending: true })
+    .single();
+  return data as Record<string, unknown> | null;
+}
+
+// ─── Helper: shared advance logic (used by /advance and /check) ─────────────
+
+interface AdvanceResult {
+  nextOrder: number | null;
+  threadCompleted: boolean;
+}
+
+async function performTaskAdvance(
+  db: SupabaseClient,
+  threadId: string,
+  currentState: Record<string, unknown>,
+  stateByOrder: Map<number, Record<string, unknown>>,
+  sortedOrders: number[],
+  currentOrder: number,
+  score: number | null,
+): Promise<AdvanceResult> {
   // Mark current task as completed
   const bestScore = score !== null
     ? (currentState.best_score !== null ? Math.max(currentState.best_score as number, score) : score)
@@ -2266,9 +2280,6 @@ async function handleAdvanceTask(
     .eq("id", currentState.id);
 
   // Find next task
-  const sortedOrders = tasks
-    .map((t: { order_num: number }) => t.order_num)
-    .sort((a: number, b: number) => a - b);
   const currentIdx = sortedOrders.indexOf(currentOrder);
   const nextOrder = currentIdx < sortedOrders.length - 1 ? sortedOrders[currentIdx + 1] : null;
 
@@ -2302,7 +2313,10 @@ async function handleAdvanceTask(
         role: "system",
         content: `Задача ${currentOrder} выполнена! Переходим к задаче ${nextOrder}.`,
         task_order: nextOrder,
+        message_kind: "system",
       });
+
+    return { nextOrder, threadCompleted: false };
   } else {
     // All tasks completed
     await db
@@ -2313,7 +2327,6 @@ async function handleAdvanceTask(
       })
       .eq("id", threadId);
 
-    // Insert completion system message
     await db
       .from("homework_tutor_thread_messages")
       .insert({
@@ -2321,23 +2334,359 @@ async function handleAdvanceTask(
         role: "system",
         content: "Все задачи выполнены! 🎉",
         task_order: currentOrder,
+        message_kind: "system",
       });
+
+    return { nextOrder: null, threadCompleted: true };
+  }
+}
+
+// ─── Helper: load advance context (shared between /advance and /check) ──────
+
+async function loadAdvanceContext(
+  db: SupabaseClient,
+  threadId: string,
+  thread: Record<string, unknown>,
+): Promise<{
+  allStates: Record<string, unknown>[];
+  stateByOrder: Map<number, Record<string, unknown>>;
+  sortedOrders: number[];
+  currentState: Record<string, unknown>;
+  currentOrder: number;
+  sa: Record<string, unknown>;
+  tasks: Array<{ id: string; order_num: number; max_score?: number }>;
+} | null> {
+  const { data: allStates, error: statesErr } = await db
+    .from("homework_tutor_task_states")
+    .select("id, task_id, status, attempts, best_score, available_score, earned_score, wrong_answer_count, hint_count")
+    .eq("thread_id", threadId);
+
+  if (statesErr || !allStates || allStates.length === 0) return null;
+
+  const { data: sa } = await db
+    .from("homework_tutor_student_assignments")
+    .select("assignment_id")
+    .eq("id", thread.student_assignment_id)
+    .single();
+  if (!sa) return null;
+
+  const { data: tasks } = await db
+    .from("homework_tutor_tasks")
+    .select("id, order_num, max_score")
+    .eq("assignment_id", sa.assignment_id)
+    .order("order_num", { ascending: true });
+  if (!tasks || tasks.length === 0) return null;
+
+  const taskOrderMap = new Map(tasks.map((t: { id: string; order_num: number }) => [t.id, t.order_num]));
+  const stateByOrder = new Map(
+    allStates.map((s: Record<string, unknown>) => [taskOrderMap.get(s.task_id as string) ?? 0, s]),
+  );
+
+  const currentOrder = thread.current_task_order as number;
+  const currentState = stateByOrder.get(currentOrder);
+  if (!currentState || currentState.status !== "active") return null;
+
+  const sortedOrders = tasks
+    .map((t: { order_num: number }) => t.order_num)
+    .sort((a: number, b: number) => a - b);
+
+  return { allStates, stateByOrder, sortedOrders, currentState, currentOrder, sa, tasks };
+}
+
+// ─── Endpoint: POST /threads/:id/check (student — Phase 3) ─────────────────
+
+async function handleCheckAnswer(
+  db: SupabaseClient,
+  userId: string,
+  threadId: string,
+  body: unknown,
+  cors: Record<string, string>,
+): Promise<Response> {
+  const ownershipResult = await verifyThreadOwnership(db, threadId, userId, cors);
+  if (ownershipResult instanceof Response) return ownershipResult;
+  const { thread } = ownershipResult;
+
+  if (thread.status === "completed") {
+    return jsonError(cors, 400, "ALREADY_COMPLETED", "Thread is already completed");
+  }
+
+  const b = (body && typeof body === "object") ? body as Record<string, unknown> : {};
+  const answer = typeof b.answer === "string" ? b.answer.trim() : "";
+  if (!answer) {
+    return jsonError(cors, 400, "VALIDATION", "answer is required");
+  }
+
+  // Load advance context
+  const ctx = await loadAdvanceContext(db, threadId, thread);
+  if (!ctx) {
+    return jsonError(cors, 400, "NO_ACTIVE_TASK", "No active task to check");
+  }
+
+  const { currentState, currentOrder, stateByOrder, sortedOrders, tasks } = ctx;
+
+  // Load the full task (with correct_answer, solution_steps, rubric)
+  const { data: task } = await db
+    .from("homework_tutor_tasks")
+    .select("id, order_num, task_text, task_image_url, correct_answer, solution_steps, rubric_text, max_score")
+    .eq("id", currentState.task_id)
+    .single();
+
+  if (!task) {
+    return jsonError(cors, 500, "DB_ERROR", "Task not found");
+  }
+
+  // Load assignment for subject
+  const { data: assignment } = await db
+    .from("homework_tutor_assignments")
+    .select("subject")
+    .eq("id", ctx.sa.assignment_id)
+    .single();
+
+  if (!assignment) {
+    return jsonError(cors, 500, "DB_ERROR", "Assignment not found");
+  }
+
+  // Load conversation history (last 15 messages for current task)
+  const { data: recentMessages } = await db
+    .from("homework_tutor_thread_messages")
+    .select("role, content")
+    .eq("thread_id", threadId)
+    .eq("task_order", currentOrder)
+    .order("created_at", { ascending: true })
+    .limit(15);
+
+  // Initialize available_score if null (backward compat for old threads)
+  const currentAvailableScore: number =
+    currentState.available_score != null
+      ? Number(currentState.available_score)
+      : (task.max_score ?? 1);
+
+  // Save user answer message
+  await db.from("homework_tutor_thread_messages").insert({
+    thread_id: threadId,
+    role: "user",
+    content: answer,
+    task_order: currentOrder,
+    message_kind: "answer",
+  });
+
+  // Increment attempts
+  await db
+    .from("homework_tutor_task_states")
+    .update({
+      attempts: ((currentState.attempts as number) ?? 0) + 1,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", currentState.id);
+
+  // Call AI evaluation
+  const totalTasks = tasks.length;
+  const result = await evaluateStudentAnswer({
+    studentAnswer: answer,
+    taskText: task.task_text ?? "",
+    correctAnswer: task.correct_answer,
+    solutionSteps: task.solution_steps,
+    rubricText: task.rubric_text,
+    subject: assignment.subject ?? "math",
+    conversationHistory: recentMessages ?? [],
+    wrongAnswerCount: (currentState.wrong_answer_count as number) ?? 0,
+    hintCount: (currentState.hint_count as number) ?? 0,
+    availableScore: currentAvailableScore,
+    maxScore: task.max_score ?? 1,
+  });
+
+  // Save AI feedback message
+  await db.from("homework_tutor_thread_messages").insert({
+    thread_id: threadId,
+    role: "assistant",
+    content: result.feedback,
+    task_order: currentOrder,
+    message_kind: "ai_reply",
+  });
+
+  let responseData: Record<string, unknown>;
+
+  if (result.verdict === "CORRECT") {
+    // Set earned_score, mark completed, advance
+    const earnedScore = currentAvailableScore;
+
+    await db.from("homework_tutor_task_states").update({
+      status: "completed",
+      earned_score: earnedScore,
+      available_score: currentAvailableScore,
+      best_score: Math.max((currentState.best_score as number) ?? 0, Math.round(earnedScore)),
+      last_ai_feedback: result.feedback,
+      updated_at: new Date().toISOString(),
+    }).eq("id", currentState.id);
+
+    const advanceResult = await performTaskAdvance(
+      db, threadId, currentState, stateByOrder, sortedOrders, currentOrder, Math.round(earnedScore),
+    );
+
+    responseData = {
+      verdict: "CORRECT",
+      feedback: result.feedback,
+      earned_score: earnedScore,
+      available_score: currentAvailableScore,
+      max_score: task.max_score ?? 1,
+      wrong_answer_count: (currentState.wrong_answer_count as number) ?? 0,
+      hint_count: (currentState.hint_count as number) ?? 0,
+      task_completed: true,
+      next_task_order: advanceResult.nextOrder,
+      thread_completed: advanceResult.threadCompleted,
+      total_tasks: totalTasks,
+    };
+  } else {
+    // Increment wrong_answer_count, degrade score
+    const newWrongCount = ((currentState.wrong_answer_count as number) ?? 0) + 1;
+    const newHintCount = (currentState.hint_count as number) ?? 0;
+    const newAvailableScore = computeAvailableScore(
+      task.max_score ?? 1, newWrongCount, newHintCount,
+    );
+
+    await db.from("homework_tutor_task_states").update({
+      wrong_answer_count: newWrongCount,
+      available_score: newAvailableScore,
+      last_ai_feedback: result.feedback,
+      updated_at: new Date().toISOString(),
+    }).eq("id", currentState.id);
+
+    responseData = {
+      verdict: "INCORRECT",
+      feedback: result.feedback,
+      earned_score: null,
+      available_score: newAvailableScore,
+      max_score: task.max_score ?? 1,
+      wrong_answer_count: newWrongCount,
+      hint_count: newHintCount,
+      task_completed: false,
+      next_task_order: null,
+      thread_completed: false,
+      total_tasks: totalTasks,
+    };
   }
 
   // Return updated thread
-  const { data: updatedThread } = await db
-    .from("homework_tutor_threads")
-    .select(`
-      id, status, current_task_order, created_at, updated_at,
-      student_assignment_id,
-      homework_tutor_thread_messages(id, role, content, image_url, task_order, created_at),
-      homework_tutor_task_states(id, task_id, status, attempts, best_score)
-    `)
-    .eq("id", threadId)
-    .order("created_at", { referencedTable: "homework_tutor_thread_messages", ascending: true })
+  const updatedThread = await fetchFullThread(db, threadId);
+  return jsonOk(cors, { ...responseData, thread: updatedThread });
+}
+
+// ─── Endpoint: POST /threads/:id/hint (student — Phase 3) ──────────────────
+
+async function handleRequestHint(
+  db: SupabaseClient,
+  userId: string,
+  threadId: string,
+  cors: Record<string, string>,
+): Promise<Response> {
+  const ownershipResult = await verifyThreadOwnership(db, threadId, userId, cors);
+  if (ownershipResult instanceof Response) return ownershipResult;
+  const { thread } = ownershipResult;
+
+  if (thread.status === "completed") {
+    return jsonError(cors, 400, "ALREADY_COMPLETED", "Thread is already completed");
+  }
+
+  // Get active task_state
+  const { data: activeState } = await db
+    .from("homework_tutor_task_states")
+    .select("id, task_id, status, attempts, best_score, available_score, wrong_answer_count, hint_count")
+    .eq("thread_id", threadId)
+    .eq("status", "active")
+    .limit(1)
+    .maybeSingle();
+
+  if (!activeState) {
+    return jsonError(cors, 400, "NO_ACTIVE_TASK", "No active task for hint");
+  }
+
+  const currentOrder = thread.current_task_order as number;
+
+  // Load task
+  const { data: task } = await db
+    .from("homework_tutor_tasks")
+    .select("id, order_num, task_text, task_image_url, correct_answer, solution_steps, max_score")
+    .eq("id", activeState.task_id)
     .single();
 
-  return jsonOk(cors, updatedThread ?? { id: threadId });
+  if (!task) {
+    return jsonError(cors, 500, "DB_ERROR", "Task not found");
+  }
+
+  // Load assignment for subject
+  const { data: sa } = await db
+    .from("homework_tutor_student_assignments")
+    .select("assignment_id")
+    .eq("id", thread.student_assignment_id)
+    .single();
+
+  const { data: assignment } = await db
+    .from("homework_tutor_assignments")
+    .select("subject")
+    .eq("id", sa?.assignment_id)
+    .single();
+
+  // Load conversation history
+  const { data: recentMessages } = await db
+    .from("homework_tutor_thread_messages")
+    .select("role, content")
+    .eq("thread_id", threadId)
+    .eq("task_order", currentOrder)
+    .order("created_at", { ascending: true })
+    .limit(15);
+
+  // Save hint request message from user
+  await db.from("homework_tutor_thread_messages").insert({
+    thread_id: threadId,
+    role: "user",
+    content: "Подсказка",
+    task_order: currentOrder,
+    message_kind: "hint_request",
+  });
+
+  // Call AI for hint
+  const hintResult = await generateHint({
+    taskText: task.task_text ?? "",
+    correctAnswer: task.correct_answer,
+    solutionSteps: task.solution_steps,
+    subject: assignment?.subject ?? "math",
+    conversationHistory: recentMessages ?? [],
+    wrongAnswerCount: (activeState.wrong_answer_count as number) ?? 0,
+    hintCount: (activeState.hint_count as number) ?? 0,
+  });
+
+  // Save hint reply
+  await db.from("homework_tutor_thread_messages").insert({
+    thread_id: threadId,
+    role: "assistant",
+    content: hintResult.hint,
+    task_order: currentOrder,
+    message_kind: "ai_reply",
+  });
+
+  // Update scoring
+  const newHintCount = ((activeState.hint_count as number) ?? 0) + 1;
+  const newWrongCount = (activeState.wrong_answer_count as number) ?? 0;
+  const newAvailableScore = computeAvailableScore(
+    task.max_score ?? 1, newWrongCount, newHintCount,
+  );
+
+  await db.from("homework_tutor_task_states").update({
+    hint_count: newHintCount,
+    available_score: newAvailableScore,
+    updated_at: new Date().toISOString(),
+  }).eq("id", activeState.id);
+
+  // Return updated thread
+  const updatedThread = await fetchFullThread(db, threadId);
+  return jsonOk(cors, {
+    hint: hintResult.hint,
+    available_score: newAvailableScore,
+    max_score: task.max_score ?? 1,
+    hint_count: newHintCount,
+    wrong_answer_count: newWrongCount,
+    thread: updatedThread,
+  });
 }
 
 // ─── Endpoint: GET /assignments/:id/students/:studentId/thread (tutor) ──────
@@ -2375,8 +2724,8 @@ async function handleGetTutorStudentThread(
     .select(`
       id, status, current_task_order, created_at, updated_at,
       student_assignment_id,
-      homework_tutor_thread_messages(id, role, content, image_url, task_order, created_at),
-      homework_tutor_task_states(id, task_id, status, attempts, best_score)
+      homework_tutor_thread_messages(id, role, content, image_url, task_order, message_kind, created_at),
+      homework_tutor_task_states(id, task_id, status, attempts, best_score, available_score, earned_score, wrong_answer_count, hint_count)
     `)
     .eq("student_assignment_id", studentAssignment.id)
     .order("created_at", { referencedTable: "homework_tutor_thread_messages", ascending: true })
@@ -2460,6 +2809,17 @@ Deno.serve(async (req: Request): Promise<Response> => {
     if (seg.length === 3 && seg[0] === "threads" && seg[2] === "advance" && route.method === "POST") {
       const body = await parseJsonBody(req);
       return await handleAdvanceTask(db, userId, seg[1], body, cors);
+    }
+
+    // POST /threads/:id/check (student endpoint — Phase 3)
+    if (seg.length === 3 && seg[0] === "threads" && seg[2] === "check" && route.method === "POST") {
+      const body = await parseJsonBody(req);
+      return await handleCheckAnswer(db, userId, seg[1], body, cors);
+    }
+
+    // POST /threads/:id/hint (student endpoint — Phase 3)
+    if (seg.length === 3 && seg[0] === "threads" && seg[2] === "hint" && route.method === "POST") {
+      return await handleRequestHint(db, userId, seg[1], cors);
     }
 
     const tutorResult = await getTutorOrThrow(db, userId, cors);

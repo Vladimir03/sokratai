@@ -154,13 +154,13 @@ export interface StudentHomeworkAssignmentDetails {
 
 export type ThreadStatus = 'active' | 'completed' | 'abandoned';
 export type TaskStateStatus = 'locked' | 'active' | 'completed' | 'skipped';
-export type GuidedMessageKind = 'answer' | 'hint_request' | 'question' | 'ai_reply' | 'system';
+export type GuidedMessageKind = 'answer' | 'hint_request' | 'question' | 'ai_reply' | 'system' | 'check_result' | 'hint_reply';
 export type MessageDeliveryStatus = 'sending' | 'sent' | 'failed';
 export type GuidedHomeworkUiStatus =
   | 'awaiting_answer'
   | 'streaming_ai'
-  | 'ready_to_advance'
-  | 'advancing'
+  | 'checking_answer'
+  | 'requesting_hint'
   | 'send_error';
 
 export interface HomeworkThread {
@@ -191,4 +191,35 @@ export interface HomeworkTaskState {
   status: TaskStateStatus;
   attempts: number;
   best_score: number | null;
+  // Phase 3 scoring fields
+  available_score?: number | null;
+  earned_score?: number | null;
+  wrong_answer_count?: number;
+  hint_count?: number;
+}
+
+// Phase 3: API response types
+
+export interface CheckAnswerResponse {
+  verdict: 'CORRECT' | 'INCORRECT';
+  feedback: string;
+  earned_score: number | null;
+  available_score: number;
+  max_score: number;
+  wrong_answer_count: number;
+  hint_count: number;
+  task_completed: boolean;
+  next_task_order: number | null;
+  thread_completed: boolean;
+  total_tasks: number;
+  thread: HomeworkThread;
+}
+
+export interface RequestHintResponse {
+  hint: string;
+  available_score: number;
+  max_score: number;
+  hint_count: number;
+  wrong_answer_count: number;
+  thread: HomeworkThread;
 }
