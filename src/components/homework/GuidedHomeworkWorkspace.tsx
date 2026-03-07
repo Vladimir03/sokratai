@@ -34,13 +34,14 @@ interface GuidedHomeworkWorkspaceProps {
 /** Build the AI task context string */
 function buildTaskContext(
   assignment: StudentHomeworkAssignmentDetails,
-  currentTask: { order_num: number; task_text: string },
+  currentTask: { order_num: number; task_text: string; task_image_url: string | null },
   totalTasks: number,
 ): string {
   const parts = [
     `Задание: "${assignment.title}" по предмету ${assignment.subject}.`,
     assignment.topic ? `Тема: ${assignment.topic}.` : null,
     `Задача ${currentTask.order_num} из ${totalTasks}: ${currentTask.task_text}`,
+    currentTask.task_image_url ? `Изображение условия: ${currentTask.task_image_url}` : null,
     '',
     'Помоги ученику разобраться. Задавай наводящие вопросы. Не давай готовый ответ сразу.',
     'Объясняй по шагам, используй формулы в LaTeX ($..$ или $$..$$) если нужно.',
@@ -362,13 +363,21 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
         />
       </div>
 
-      {/* Current task text */}
+      {/* Current task text + optional image */}
       {currentTask && (
         <div className="border-b px-4 py-3 shrink-0 bg-blue-50/50 dark:bg-blue-950/20">
           <p className="text-xs text-muted-foreground mb-1">
             Задача {currentTask.order_num} из {assignment.tasks.length}
           </p>
           <p className="text-sm font-medium">{currentTask.task_text}</p>
+          {currentTask.task_image_url && (
+            <img
+              src={currentTask.task_image_url}
+              alt={`Условие задачи ${currentTask.order_num}`}
+              className="mt-2 max-h-48 rounded-lg border object-contain"
+              loading="lazy"
+            />
+          )}
         </div>
       )}
 
@@ -413,8 +422,8 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
 
       {/* Task completion button + Input */}
       <div className="shrink-0">
-        {/* "Task completed" button — only for active tasks with at least 1 message */}
-        {currentTask && messages.some((m) => m.role === 'user' && m.task_order === currentTaskOrder) && (
+        {/* "Task completed" button — only for active tasks with at least 1 AI reply */}
+        {currentTask && messages.some((m) => m.role === 'assistant' && m.task_order === currentTaskOrder) && (
           <div className="px-4 pb-2">
             <Button
               variant="outline"
