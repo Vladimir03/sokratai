@@ -815,33 +815,54 @@ export type Database = {
       homework_tutor_task_states: {
         Row: {
           attempts: number
+          available_score: number | null
+          await_mode: string
           best_score: number | null
+          context_summary: string | null
           created_at: string
+          earned_score: number | null
+          hint_count: number
           id: string
+          last_ai_feedback: string | null
           status: string
           task_id: string
           thread_id: string
           updated_at: string
+          wrong_answer_count: number
         }
         Insert: {
           attempts?: number
+          available_score?: number | null
+          await_mode?: string
           best_score?: number | null
+          context_summary?: string | null
           created_at?: string
+          earned_score?: number | null
+          hint_count?: number
           id?: string
+          last_ai_feedback?: string | null
           status?: string
           task_id: string
           thread_id: string
           updated_at?: string
+          wrong_answer_count?: number
         }
         Update: {
           attempts?: number
+          available_score?: number | null
+          await_mode?: string
           best_score?: number | null
+          context_summary?: string | null
           created_at?: string
+          earned_score?: number | null
+          hint_count?: number
           id?: string
+          last_ai_feedback?: string | null
           status?: string
           task_id?: string
           thread_id?: string
           updated_at?: string
+          wrong_answer_count?: number
         }
         Relationships: [
           {
@@ -943,6 +964,7 @@ export type Database = {
           created_at: string
           id: string
           image_url: string | null
+          message_kind: string | null
           role: string
           task_order: number | null
           thread_id: string
@@ -952,6 +974,7 @@ export type Database = {
           created_at?: string
           id?: string
           image_url?: string | null
+          message_kind?: string | null
           role: string
           task_order?: number | null
           thread_id: string
@@ -961,6 +984,7 @@ export type Database = {
           created_at?: string
           id?: string
           image_url?: string | null
+          message_kind?: string | null
           role?: string
           task_order?: number | null
           thread_id?: string
