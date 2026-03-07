@@ -315,9 +315,9 @@ export async function getStudentAssignment(assignmentId: string): Promise<Studen
   const submissions = await getStudentSubmissions(assignmentId);
 
   const result = {
-    ...assignment,
+    ...(assignment as any),
     max_attempts: 3,
-    updated_at: assignment.created_at,
+    updated_at: (assignment as any).created_at,
     tasks: (tasks ?? []) as StudentHomeworkAssignmentDetails['tasks'],
     materials: (materials ?? []) as StudentHomeworkAssignmentDetails['materials'],
     submissions,
