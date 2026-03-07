@@ -2072,6 +2072,21 @@ async function handlePostThreadMessage(
   const imageUrl = isString(b.image_url) ? (b.image_url as string) : null;
   const taskOrder = typeof b.task_order === "number" ? b.task_order : (thread.current_task_order as number);
 
+  // Integrity check: assistant messages can only follow a user message
+  if (role === "assistant") {
+    const { data: lastMsg } = await db
+      .from("homework_tutor_thread_messages")
+      .select("role")
+      .eq("thread_id", threadId)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (!lastMsg || lastMsg.role !== "user") {
+      return jsonError(cors, 400, "INVALID_ORDER", "Assistant message must follow a user message");
+    }
+  }
+
   // Insert message
   const { data: savedMsg, error: insertErr } = await db
     .from("homework_tutor_thread_messages")
@@ -2132,7 +2147,21 @@ async function handleAdvanceTask(
   }
 
   const b = (body && typeof body === "object") ? body as Record<string, unknown> : {};
-  const score = typeof b.score === "number" ? b.score : null;
+  // Clamp score to 0-100 if provided
+  const rawScore = typeof b.score === "number" ? b.score : null;
+  const score = rawScore !== null ? Math.max(0, Math.min(100, rawScore)) : null;
+
+  // Guard: require at least 1 AI reply for the current task before allowing advance
+  const { count: assistantMsgCount } = await db
+    .from("homework_tutor_thread_messages")
+    .select("id", { count: "exact", head: true })
+    .eq("thread_id", threadId)
+    .eq("role", "assistant")
+    .eq("task_order", thread.current_task_order as number);
+
+  if (!assistantMsgCount || assistantMsgCount < 1) {
+    return jsonError(cors, 400, "NO_INTERACTION", "Complete at least one exchange with the AI before advancing");
+  }
 
   // Find current active task_state
   const { data: allStates, error: statesErr } = await db
