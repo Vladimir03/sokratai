@@ -39,6 +39,7 @@ export interface GuidedHintResult {
 export interface EvaluateStudentAnswerParams {
   studentAnswer: string;
   taskText: string;
+  taskImageUrl: string | null;
   correctAnswer: string | null;
   solutionSteps: string | null;
   rubricText: string | null;
@@ -52,6 +53,7 @@ export interface EvaluateStudentAnswerParams {
 
 export interface GenerateHintParams {
   taskText: string;
+  taskImageUrl: string | null;
   correctAnswer: string | null;
   solutionSteps: string | null;
   subject: string;
@@ -184,6 +186,7 @@ function buildCheckPrompt(params: EvaluateStudentAnswerParams): LovableMessage[]
     "Ты проверяешь ответ ученика на задачу по домашнему заданию.",
     `Предмет: ${params.subject}.`,
     `Условие задачи: ${clampPromptText(params.taskText)}`,
+    params.taskImageUrl ? `Изображение условия задачи: ${params.taskImageUrl}` : "",
     `Эталонный ответ: ${correctAnswerValue}`,
     `Шаги решения: ${solutionStepsValue}`,
     rubricLine,
@@ -228,6 +231,7 @@ function buildHintPrompt(params: GenerateHintParams): LovableMessage[] {
     "Ты репетитор, помогаешь ученику с домашним заданием.",
     `Предмет: ${params.subject}.`,
     `Условие задачи: ${clampPromptText(params.taskText)}`,
+    params.taskImageUrl ? `Изображение условия задачи: ${params.taskImageUrl}` : "",
     params.correctAnswer ? `Правильный ответ (НЕ раскрывай ученику!): ${clampPromptText(params.correctAnswer)}` : "",
     params.solutionSteps ? `Шаги решения (для справки, НЕ раскрывай!): ${clampPromptText(params.solutionSteps)}` : "",
     "",

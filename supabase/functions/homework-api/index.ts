@@ -2484,6 +2484,7 @@ async function handleCheckAnswer(
   const result = await evaluateStudentAnswer({
     studentAnswer: answer,
     taskText: task.task_text ?? "",
+    taskImageUrl: task.task_image_url ?? null,
     correctAnswer: task.correct_answer,
     solutionSteps: task.solution_steps,
     rubricText: task.rubric_text,
@@ -2647,6 +2648,7 @@ async function handleRequestHint(
   // Call AI for hint
   const hintResult = await generateHint({
     taskText: task.task_text ?? "",
+    taskImageUrl: task.task_image_url ?? null,
     correctAnswer: task.correct_answer,
     solutionSteps: task.solution_steps,
     subject: assignment?.subject ?? "math",

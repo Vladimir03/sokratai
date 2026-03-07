@@ -567,18 +567,23 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
         queryKey: ['student', 'homework', 'thread', assignment.id],
       });
     } catch (error) {
-      // On failure, mark user message as failed
-      patchMessage(tempUserId, { message_delivery_status: 'failed' });
-      toast.error('Не удалось проверить ответ. Попробуйте снова.');
+      // Server may have processed the request despite network error.
+      // Refetch thread to get authoritative state instead of allowing retry
+      // (which would double-penalize the student).
+      setMessages((prev) => prev.filter((m) => m.id !== tempUserId));
+      toast.error('Ошибка связи при проверке. Обновляем данные...');
       trackGuidedHomeworkEvent('guided_check_failed', {
         assignmentId: assignment.id,
         taskOrder,
         error: error instanceof Error ? error.message : String(error),
       });
+      await queryClient.invalidateQueries({
+        queryKey: ['student', 'homework', 'thread', assignment.id],
+      });
     } finally {
       setIsCheckingAnswer(false);
     }
-  }, [assignment.id, currentTask, patchMessage, queryClient, syncThreadFromResponse, threadId]);
+  }, [assignment.id, currentTask, queryClient, syncThreadFromResponse, threadId]);
 
   const sendUserMessage = useCallback(async (
     rawText: string,
@@ -679,11 +684,16 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
         queryKey: ['student', 'homework', 'thread', assignment.id],
       });
     } catch (error) {
-      toast.error('Не удалось получить подсказку. Попробуйте снова.');
+      // Server may have processed the hint despite network error.
+      // Refetch thread to get authoritative state instead of allowing retry.
+      toast.error('Ошибка связи при запросе подсказки. Обновляем данные...');
       trackGuidedHomeworkEvent('guided_hint_failed', {
         assignmentId: assignment.id,
         taskOrder: currentTaskOrder,
         error: error instanceof Error ? error.message : String(error),
+      });
+      await queryClient.invalidateQueries({
+        queryKey: ['student', 'homework', 'thread', assignment.id],
       });
     } finally {
       setIsRequestingHint(false);
@@ -712,13 +722,16 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
 
     if (message.role === 'user') {
       setMessages((prev) => prev.filter((item) => item.id !== messageId));
-      if (message.message_kind === 'answer') {
-        void handleCheckAnswer(message.content);
-      } else if (message.message_kind === 'hint_request') {
-        void handleHint();
+      // For question mode: safe to retry (idempotent streaming)
+      if (message.message_kind === 'question') {
+        void sendUserMessage(message.content, 'question');
       } else {
-        const retryMode: SendMode = message.message_kind === 'question' ? 'question' : 'answer';
-        void sendUserMessage(message.content, retryMode);
+        // For answer/hint: re-invoke the endpoint (user explicitly chose to retry)
+        if (message.message_kind === 'answer') {
+          void handleCheckAnswer(message.content);
+        } else if (message.message_kind === 'hint_request') {
+          void handleHint();
+        }
       }
       return;
     }
