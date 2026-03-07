@@ -960,6 +960,7 @@ export type Database = {
       }
       homework_tutor_thread_messages: {
         Row: {
+          author_user_id: string | null
           content: string
           created_at: string
           id: string
@@ -968,8 +969,10 @@ export type Database = {
           role: string
           task_order: number | null
           thread_id: string
+          visible_to_student: boolean
         }
         Insert: {
+          author_user_id?: string | null
           content: string
           created_at?: string
           id?: string
@@ -978,8 +981,10 @@ export type Database = {
           role: string
           task_order?: number | null
           thread_id: string
+          visible_to_student?: boolean
         }
         Update: {
+          author_user_id?: string | null
           content?: string
           created_at?: string
           id?: string
@@ -988,6 +993,7 @@ export type Database = {
           role?: string
           task_order?: number | null
           thread_id?: string
+          visible_to_student?: boolean
         }
         Relationships: [
           {
@@ -1004,6 +1010,8 @@ export type Database = {
           created_at: string
           current_task_order: number
           id: string
+          last_student_message_at: string | null
+          last_tutor_message_at: string | null
           status: string
           student_assignment_id: string
           updated_at: string
@@ -1012,6 +1020,8 @@ export type Database = {
           created_at?: string
           current_task_order?: number
           id?: string
+          last_student_message_at?: string | null
+          last_tutor_message_at?: string | null
           status?: string
           student_assignment_id: string
           updated_at?: string
@@ -1020,6 +1030,8 @@ export type Database = {
           created_at?: string
           current_task_order?: number
           id?: string
+          last_student_message_at?: string | null
+          last_tutor_message_at?: string | null
           status?: string
           student_assignment_id?: string
           updated_at?: string
