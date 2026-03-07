@@ -19,6 +19,8 @@ import {
   Loader2,
   ImageIcon,
   Bell,
+  Send,
+  RotateCcw,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import {
@@ -40,6 +42,8 @@ import {
   reviewTutorHomeworkSubmission,
   getHomeworkImageSignedUrl,
   notifyTutorHomeworkStudents,
+  postTutorThreadMessage,
+  resetTutorStudentTask,
   type TutorHomeworkAssignmentDetails,
   type TutorHomeworkResultsResponse,
   type TutorHomeworkResultsPerStudent,
@@ -215,6 +219,9 @@ function GuidedThreadViewer({
 }) {
   const [opened, setOpened] = useState(false);
   const [taskFilter, setTaskFilter] = useState<number | 'all'>('all');
+  const [messageText, setMessageText] = useState('');
+  const [hiddenNote, setHiddenNote] = useState(false);
+  const [isSending, setIsSending] = useState(false);
 
   const threadQuery = useQuery<TutorStudentGuidedThreadResponse>({
     queryKey: ['tutor', 'homework', 'guided-thread', assignmentId, studentId],
@@ -238,11 +245,47 @@ function GuidedThreadViewer({
     return allMessages.filter((message) => message.task_order === taskFilter);
   }, [taskFilter, threadQuery.data?.thread.homework_tutor_thread_messages]);
 
+  const handleSendMessage = useCallback(async () => {
+    const trimmed = messageText.trim();
+    if (!trimmed || isSending) return;
+    setIsSending(true);
+    try {
+      await postTutorThreadMessage(assignmentId, studentId, trimmed, {
+        visible_to_student: !hiddenNote,
+        task_order: taskFilter === 'all' ? undefined : taskFilter,
+      });
+      setMessageText('');
+      void threadQuery.refetch();
+      toast.success(hiddenNote ? 'Заметка сохранена' : 'Сообщение отправлено');
+    } catch (err) {
+      toast.error(`Ошибка: ${err instanceof Error ? err.message : 'неизвестная'}`);
+    } finally {
+      setIsSending(false);
+    }
+  }, [messageText, hiddenNote, isSending, assignmentId, studentId, taskFilter, threadQuery]);
+
+  const handleResetTask = useCallback(async (taskOrder: number) => {
+    try {
+      await resetTutorStudentTask(assignmentId, studentId, taskOrder);
+      toast.success(`Задача ${taskOrder} сброшена`);
+      void threadQuery.refetch();
+    } catch (err) {
+      toast.error(`Ошибка: ${err instanceof Error ? err.message : 'неизвестная'}`);
+    }
+  }, [assignmentId, studentId, threadQuery]);
+
+  const ROLE_LABELS: Record<string, string> = {
+    user: 'Ученик',
+    assistant: 'AI',
+    system: 'Система',
+    tutor: 'Репетитор',
+  };
+
   return (
     <Card className="border-dashed">
       <CardHeader className="pb-3">
         <div className="flex items-center justify-between gap-2">
-          <CardTitle className="text-sm">Guided-тред ученика (read-only)</CardTitle>
+          <CardTitle className="text-sm">Guided-тред ученика</CardTitle>
           <Button
             size="sm"
             variant="outline"
@@ -280,16 +323,29 @@ function GuidedThreadViewer({
                 </Button>
                 {threadQuery.data.tasks.map((task) => {
                   const state = taskStatusById.get(task.id);
+                  const canReset = state?.status === 'completed' || state?.status === 'active';
                   return (
-                    <Button
-                      key={task.id}
-                      variant={taskFilter === task.order_num ? 'default' : 'outline'}
-                      size="sm"
-                      className="h-7 text-xs"
-                      onClick={() => setTaskFilter(task.order_num)}
-                    >
-                      #{task.order_num} {state?.status ?? 'locked'}
-                    </Button>
+                    <div key={task.id} className="flex items-center gap-0.5">
+                      <Button
+                        variant={taskFilter === task.order_num ? 'default' : 'outline'}
+                        size="sm"
+                        className="h-7 text-xs"
+                        onClick={() => setTaskFilter(task.order_num)}
+                      >
+                        #{task.order_num} {state?.status ?? 'locked'}
+                      </Button>
+                      {canReset && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-6 w-6 p-0 text-muted-foreground hover:text-destructive"
+                          onClick={() => handleResetTask(task.order_num)}
+                          title="Сбросить задачу"
+                        >
+                          <RotateCcw className="h-3 w-3" />
+                        </Button>
+                      )}
+                    </div>
                   );
                 })}
               </div>
@@ -300,12 +356,20 @@ function GuidedThreadViewer({
                 ) : (
                   filteredMessages.map((message) => (
                     <div key={message.id} className="rounded-md border p-2 text-xs space-y-1">
-                      <div className="flex items-center justify-between gap-2">
-                        <Badge variant={message.role === 'assistant' ? 'secondary' : 'outline'}>
-                          {message.role}
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <Badge variant={
+                          message.role === 'tutor' ? 'default' :
+                          message.role === 'assistant' ? 'secondary' : 'outline'
+                        }>
+                          {ROLE_LABELS[message.role] ?? message.role}
                         </Badge>
-                        <span className="text-muted-foreground">
-                          {message.task_order ? `Задача ${message.task_order}` : 'Без задачи'}
+                        {message.visible_to_student === false && (
+                          <Badge variant="outline" className="text-[10px] bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-900/20 dark:text-amber-400 dark:border-amber-800">
+                            Скрыто от ученика
+                          </Badge>
+                        )}
+                        <span className="text-muted-foreground ml-auto">
+                          {message.task_order ? `Задача ${message.task_order}` : ''}
                         </span>
                         <span className="text-muted-foreground">
                           {new Date(message.created_at).toLocaleString('ru-RU')}
@@ -317,6 +381,44 @@ function GuidedThreadViewer({
                     </div>
                   ))
                 )}
+              </div>
+
+              {/* Tutor input area */}
+              <div className="space-y-2 pt-1 border-t">
+                <div className="flex items-center gap-2">
+                  <Switch
+                    id={`hidden-note-${studentId}`}
+                    checked={hiddenNote}
+                    onCheckedChange={setHiddenNote}
+                  />
+                  <Label htmlFor={`hidden-note-${studentId}`} className="text-xs cursor-pointer select-none">
+                    {hiddenNote ? 'Скрытая заметка (для AI, не видна ученику)' : 'Сообщение ученику'}
+                  </Label>
+                </div>
+                <div className="flex items-end gap-2">
+                  <textarea
+                    value={messageText}
+                    onChange={(e) => setMessageText(e.target.value)}
+                    placeholder={hiddenNote ? 'Инструкция для AI (ученик не увидит)...' : 'Сообщение ученику...'}
+                    className="flex-1 resize-none rounded-md border border-input bg-background px-3 py-2 text-sm min-h-[40px] focus:outline-none focus:ring-2 focus:ring-ring"
+                    rows={2}
+                    style={{ fontSize: '16px' }}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && !e.shiftKey) {
+                        e.preventDefault();
+                        void handleSendMessage();
+                      }
+                    }}
+                  />
+                  <Button
+                    size="sm"
+                    onClick={() => void handleSendMessage()}
+                    disabled={!messageText.trim() || isSending}
+                    className="shrink-0"
+                  >
+                    {isSending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+                  </Button>
+                </div>
               </div>
             </>
           )}

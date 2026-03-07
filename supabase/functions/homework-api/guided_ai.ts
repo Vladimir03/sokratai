@@ -44,7 +44,7 @@ export interface EvaluateStudentAnswerParams {
   solutionSteps: string | null;
   rubricText: string | null;
   subject: string;
-  conversationHistory: Array<{ role: string; content: string }>;
+  conversationHistory: Array<{ role: string; content: string; visible_to_student?: boolean }>;
   wrongAnswerCount: number;
   hintCount: number;
   availableScore: number;
@@ -57,7 +57,7 @@ export interface GenerateHintParams {
   correctAnswer: string | null;
   solutionSteps: string | null;
   subject: string;
-  conversationHistory: Array<{ role: string; content: string }>;
+  conversationHistory: Array<{ role: string; content: string; visible_to_student?: boolean }>;
   wrongAnswerCount: number;
   hintCount: number;
 }
@@ -211,10 +211,19 @@ function buildCheckPrompt(params: EvaluateStudentAnswerParams): LovableMessage[]
 
   // Add conversation context (last messages)
   for (const msg of params.conversationHistory) {
-    messages.push({
-      role: msg.role === "assistant" ? "assistant" : "user",
-      content: typeof msg.content === "string" ? msg.content.slice(0, 2000) : "",
-    });
+    const contentSlice = typeof msg.content === "string" ? msg.content.slice(0, 2000) : "";
+    if (msg.role === "tutor" && msg.visible_to_student === false) {
+      // Hidden tutor note → inject as system instruction for AI
+      messages.push({
+        role: "system",
+        content: `[Инструкция от репетитора]: ${contentSlice}`,
+      });
+    } else {
+      messages.push({
+        role: msg.role === "assistant" || msg.role === "tutor" ? "assistant" : "user",
+        content: contentSlice,
+      });
+    }
   }
 
   // Add the current answer
@@ -253,10 +262,19 @@ function buildHintPrompt(params: GenerateHintParams): LovableMessage[] {
 
   // Add conversation context
   for (const msg of params.conversationHistory) {
-    messages.push({
-      role: msg.role === "assistant" ? "assistant" : "user",
-      content: typeof msg.content === "string" ? msg.content.slice(0, 2000) : "",
-    });
+    const contentSlice = typeof msg.content === "string" ? msg.content.slice(0, 2000) : "";
+    if (msg.role === "tutor" && msg.visible_to_student === false) {
+      // Hidden tutor note → inject as system instruction for AI
+      messages.push({
+        role: "system",
+        content: `[Инструкция от репетитора]: ${contentSlice}`,
+      });
+    } else {
+      messages.push({
+        role: msg.role === "assistant" || msg.role === "tutor" ? "assistant" : "user",
+        content: contentSlice,
+      });
+    }
   }
 
   messages.push({

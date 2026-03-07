@@ -154,7 +154,7 @@ export interface StudentHomeworkAssignmentDetails {
 
 export type ThreadStatus = 'active' | 'completed' | 'abandoned';
 export type TaskStateStatus = 'locked' | 'active' | 'completed' | 'skipped';
-export type GuidedMessageKind = 'answer' | 'hint_request' | 'question' | 'ai_reply' | 'system' | 'check_result' | 'hint_reply';
+export type GuidedMessageKind = 'answer' | 'hint_request' | 'question' | 'ai_reply' | 'system' | 'check_result' | 'hint_reply' | 'tutor_message' | 'tutor_note';
 export type MessageDeliveryStatus = 'sending' | 'sent' | 'failed';
 export type GuidedHomeworkUiStatus =
   | 'awaiting_answer'
@@ -170,19 +170,23 @@ export interface HomeworkThread {
   current_task_order: number;
   created_at: string;
   updated_at: string;
+  last_student_message_at?: string | null;
+  last_tutor_message_at?: string | null;
   homework_tutor_thread_messages: HomeworkThreadMessage[];
   homework_tutor_task_states: HomeworkTaskState[];
 }
 
 export interface HomeworkThreadMessage {
   id: string;
-  role: 'user' | 'assistant' | 'system';
+  role: 'user' | 'assistant' | 'system' | 'tutor';
   content: string;
   image_url: string | null;
   task_order: number | null;
   created_at: string;
   message_kind?: GuidedMessageKind;
   message_delivery_status?: MessageDeliveryStatus;
+  author_user_id?: string | null;
+  visible_to_student?: boolean;
 }
 
 export interface HomeworkTaskState {

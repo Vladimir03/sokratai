@@ -407,7 +407,7 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
       .filter((message) => message.role !== 'system')
       .filter((message) => message.message_delivery_status !== 'failed')
       .map((message) => ({
-        role: message.role === 'system' ? 'assistant' : message.role,
+        role: message.role === 'system' || message.role === 'tutor' ? 'assistant' : message.role,
         content: message.content,
       }));
 

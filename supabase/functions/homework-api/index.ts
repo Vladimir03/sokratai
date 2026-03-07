@@ -2000,12 +2000,7 @@ async function handleGetThread(
 
   const { data: thread, error } = await db
     .from("homework_tutor_threads")
-    .select(`
-      id, status, current_task_order, created_at, updated_at,
-      student_assignment_id,
-      homework_tutor_thread_messages(id, role, content, image_url, task_order, message_kind, created_at),
-      homework_tutor_task_states(id, task_id, status, attempts, best_score, available_score, earned_score, wrong_answer_count, hint_count)
-    `)
+    .select(THREAD_SELECT)
     .eq("id", threadId)
     .order("created_at", { referencedTable: "homework_tutor_thread_messages", ascending: true })
     .single();
@@ -2231,8 +2226,8 @@ async function handleAdvanceTask(
 
 const THREAD_SELECT = `
   id, status, current_task_order, created_at, updated_at,
-  student_assignment_id,
-  homework_tutor_thread_messages(id, role, content, image_url, task_order, message_kind, created_at),
+  student_assignment_id, last_student_message_at, last_tutor_message_at,
+  homework_tutor_thread_messages(id, role, content, image_url, task_order, message_kind, created_at, author_user_id, visible_to_student),
   homework_tutor_task_states(id, task_id, status, attempts, best_score, available_score, earned_score, wrong_answer_count, hint_count)
 `;
 
@@ -2449,7 +2444,7 @@ async function handleCheckAnswer(
   // Load conversation history (last 15 messages for current task)
   const { data: recentMessages } = await db
     .from("homework_tutor_thread_messages")
-    .select("role, content")
+    .select("role, content, visible_to_student")
     .eq("thread_id", threadId)
     .eq("task_order", currentOrder)
     .order("created_at", { ascending: true })
@@ -2469,6 +2464,11 @@ async function handleCheckAnswer(
     task_order: currentOrder,
     message_kind: "answer",
   });
+
+  // Update last_student_message_at
+  await db.from("homework_tutor_threads")
+    .update({ last_student_message_at: new Date().toISOString() })
+    .eq("id", threadId);
 
   // Increment attempts
   await db
@@ -2630,7 +2630,7 @@ async function handleRequestHint(
   // Load conversation history
   const { data: recentMessages } = await db
     .from("homework_tutor_thread_messages")
-    .select("role, content")
+    .select("role, content, visible_to_student")
     .eq("thread_id", threadId)
     .eq("task_order", currentOrder)
     .order("created_at", { ascending: true })
@@ -2644,6 +2644,11 @@ async function handleRequestHint(
     task_order: currentOrder,
     message_kind: "hint_request",
   });
+
+  // Update last_student_message_at
+  await db.from("homework_tutor_threads")
+    .update({ last_student_message_at: new Date().toISOString() })
+    .eq("id", threadId);
 
   // Call AI for hint
   const hintResult = await generateHint({
@@ -2723,12 +2728,7 @@ async function handleGetTutorStudentThread(
 
   const { data: thread, error: threadError } = await db
     .from("homework_tutor_threads")
-    .select(`
-      id, status, current_task_order, created_at, updated_at,
-      student_assignment_id,
-      homework_tutor_thread_messages(id, role, content, image_url, task_order, message_kind, created_at),
-      homework_tutor_task_states(id, task_id, status, attempts, best_score, available_score, earned_score, wrong_answer_count, hint_count)
-    `)
+    .select(THREAD_SELECT)
     .eq("student_assignment_id", studentAssignment.id)
     .order("created_at", { referencedTable: "homework_tutor_thread_messages", ascending: true })
     .maybeSingle();
@@ -2761,6 +2761,174 @@ async function handleGetTutorStudentThread(
     tasks: tasks ?? [],
     student: profile ?? { id: studentId, full_name: null, username: null },
   });
+}
+
+// ─── Endpoint: POST /assignments/:id/students/:studentId/thread/messages (tutor) ──
+
+async function handleTutorPostMessage(
+  db: SupabaseClient,
+  tutorUserId: string,
+  assignmentId: string,
+  studentId: string,
+  body: unknown,
+  cors: Record<string, string>,
+): Promise<Response> {
+  if (!isUUID(studentId)) {
+    return jsonError(cors, 400, "VALIDATION", "Invalid student ID");
+  }
+
+  const assignmentOrErr = await getOwnedAssignmentOrThrow(db, assignmentId, tutorUserId, cors);
+  if (assignmentOrErr instanceof Response) return assignmentOrErr;
+
+  // Find student assignment
+  const { data: sa } = await db
+    .from("homework_tutor_student_assignments")
+    .select("id")
+    .eq("assignment_id", assignmentId)
+    .eq("student_id", studentId)
+    .maybeSingle();
+
+  if (!sa) {
+    return jsonError(cors, 404, "NOT_FOUND", "Student is not assigned to this homework");
+  }
+
+  // Find thread
+  const { data: thread } = await db
+    .from("homework_tutor_threads")
+    .select("id, status, current_task_order")
+    .eq("student_assignment_id", sa.id)
+    .maybeSingle();
+
+  if (!thread) {
+    return jsonError(cors, 404, "NOT_FOUND", "Thread not found");
+  }
+
+  // Parse body
+  const b = (body && typeof body === "object") ? body as Record<string, unknown> : {};
+  if (!isNonEmptyString(b.content)) {
+    return jsonError(cors, 400, "VALIDATION", "content is required");
+  }
+  const content = (b.content as string).trim();
+  const visibleToStudent = b.visible_to_student !== false; // default true
+  const taskOrder = typeof b.task_order === "number"
+    ? b.task_order
+    : (thread.current_task_order as number);
+
+  // Insert message with role = 'tutor'
+  const { data: msg, error: msgErr } = await db
+    .from("homework_tutor_thread_messages")
+    .insert({
+      thread_id: thread.id,
+      role: "tutor",
+      content,
+      task_order: taskOrder,
+      message_kind: visibleToStudent ? "tutor_message" : "tutor_note",
+      visible_to_student: visibleToStudent,
+      author_user_id: tutorUserId,
+    })
+    .select("id, created_at")
+    .single();
+
+  if (msgErr) {
+    console.error("tutor_post_message_error", { error: msgErr.message });
+    return jsonError(cors, 500, "DB_ERROR", "Failed to save message");
+  }
+
+  // Update last_tutor_message_at
+  await db
+    .from("homework_tutor_threads")
+    .update({ last_tutor_message_at: new Date().toISOString(), updated_at: new Date().toISOString() })
+    .eq("id", thread.id);
+
+  return jsonOk(cors, { id: msg.id, created_at: msg.created_at }, 201);
+}
+
+// ─── Endpoint: POST /assignments/:id/students/:studentId/thread/tasks/:taskOrder/reset (tutor)
+
+async function handleTutorResetTask(
+  db: SupabaseClient,
+  tutorUserId: string,
+  assignmentId: string,
+  studentId: string,
+  taskOrder: number,
+  cors: Record<string, string>,
+): Promise<Response> {
+  if (!isUUID(studentId)) {
+    return jsonError(cors, 400, "VALIDATION", "Invalid student ID");
+  }
+
+  const assignmentOrErr = await getOwnedAssignmentOrThrow(db, assignmentId, tutorUserId, cors);
+  if (assignmentOrErr instanceof Response) return assignmentOrErr;
+
+  // Find student assignment + thread
+  const { data: sa } = await db
+    .from("homework_tutor_student_assignments")
+    .select("id")
+    .eq("assignment_id", assignmentId)
+    .eq("student_id", studentId)
+    .maybeSingle();
+
+  if (!sa) return jsonError(cors, 404, "NOT_FOUND", "Student not assigned");
+
+  const { data: thread } = await db
+    .from("homework_tutor_threads")
+    .select("id, current_task_order")
+    .eq("student_assignment_id", sa.id)
+    .maybeSingle();
+
+  if (!thread) return jsonError(cors, 404, "NOT_FOUND", "Thread not found");
+
+  // Find the task
+  const { data: task } = await db
+    .from("homework_tutor_tasks")
+    .select("id, max_score")
+    .eq("assignment_id", assignmentId)
+    .eq("order_num", taskOrder)
+    .maybeSingle();
+
+  if (!task) return jsonError(cors, 404, "NOT_FOUND", "Task not found");
+
+  // Find and reset the task state
+  const { data: state } = await db
+    .from("homework_tutor_task_states")
+    .select("id, status")
+    .eq("thread_id", thread.id)
+    .eq("task_id", task.id)
+    .maybeSingle();
+
+  if (!state) return jsonError(cors, 404, "NOT_FOUND", "Task state not found");
+
+  await db.from("homework_tutor_task_states").update({
+    status: "active",
+    wrong_answer_count: 0,
+    hint_count: 0,
+    available_score: task.max_score ?? 1,
+    earned_score: null,
+    best_score: null,
+    updated_at: new Date().toISOString(),
+  }).eq("id", state.id);
+
+  // Update current_task_order on thread if needed
+  await db.from("homework_tutor_threads").update({
+    current_task_order: taskOrder,
+    status: "active",
+    updated_at: new Date().toISOString(),
+  }).eq("id", thread.id);
+
+  // Insert system message about reset
+  await db.from("homework_tutor_thread_messages").insert({
+    thread_id: thread.id,
+    role: "system",
+    content: `Репетитор сбросил задачу ${taskOrder}. Попробуйте снова!`,
+    task_order: taskOrder,
+    message_kind: "system",
+    author_user_id: tutorUserId,
+    visible_to_student: true,
+  });
+
+  console.log("tutor_reset_task", { assignmentId, studentId, taskOrder });
+
+  return jsonOk(cors, { ok: true, reset_task_order: taskOrder });
 }
 
 // ─── Main Handler ────────────────────────────────────────────────────────────
@@ -2847,6 +3015,21 @@ Deno.serve(async (req: Request): Promise<Response> => {
     // GET /assignments/:id/students/:studentId/thread
     if (seg.length === 5 && seg[0] === "assignments" && seg[2] === "students" && seg[4] === "thread" && route.method === "GET") {
       return await handleGetTutorStudentThread(db, userId, seg[1], seg[3], cors);
+    }
+
+    // POST /assignments/:id/students/:studentId/thread/messages (tutor)
+    if (seg.length === 6 && seg[0] === "assignments" && seg[2] === "students" && seg[4] === "thread" && seg[5] === "messages" && route.method === "POST") {
+      const body = await parseJsonBody(req);
+      return await handleTutorPostMessage(db, userId, seg[1], seg[3], body, cors);
+    }
+
+    // POST /assignments/:id/students/:studentId/thread/tasks/:taskOrder/reset (tutor)
+    if (seg.length === 8 && seg[0] === "assignments" && seg[2] === "students" && seg[4] === "thread" && seg[5] === "tasks" && seg[7] === "reset" && route.method === "POST") {
+      const taskOrderNum = parseInt(seg[6], 10);
+      if (isNaN(taskOrderNum) || taskOrderNum < 1) {
+        return jsonError(cors, 400, "VALIDATION", "Invalid task order");
+      }
+      return await handleTutorResetTask(db, userId, seg[1], seg[3], taskOrderNum, cors);
     }
 
     // PUT /assignments/:id
