@@ -2020,7 +2020,8 @@ async function handleGetThread(
     return jsonError(cors, 403, "FORBIDDEN", "Not your thread");
   }
 
-  return jsonOk(cors, thread);
+  // Filter out hidden tutor notes (service-role bypasses RLS)
+  return jsonOk(cors, stripHiddenMessages(thread as Record<string, unknown>));
 }
 
 // ─── Endpoint: POST /threads/:id/messages (student) ─────────────────────────
@@ -2217,8 +2218,8 @@ async function handleAdvanceTask(
     db, threadId, ctx.currentState, ctx.stateByOrder, ctx.sortedOrders, ctx.currentOrder, score,
   );
 
-  // Return updated thread
-  const updatedThread = await fetchFullThread(db, threadId);
+  // Return updated thread (student-facing: filter hidden notes)
+  const updatedThread = await fetchStudentThread(db, threadId);
   return jsonOk(cors, updatedThread ?? { id: threadId });
 }
 
@@ -2231,6 +2232,21 @@ const THREAD_SELECT = `
   homework_tutor_task_states(id, task_id, status, attempts, best_score, available_score, earned_score, wrong_answer_count, hint_count)
 `;
 
+/**
+ * Strip hidden tutor notes from thread data before returning to student.
+ * Service-role key bypasses RLS, so we must filter server-side.
+ */
+function stripHiddenMessages(thread: Record<string, unknown>): Record<string, unknown> {
+  const messages = thread.homework_tutor_thread_messages;
+  if (!Array.isArray(messages)) return thread;
+  return {
+    ...thread,
+    homework_tutor_thread_messages: messages.filter(
+      (m: Record<string, unknown>) => m.visible_to_student !== false,
+    ),
+  };
+}
+
 async function fetchFullThread(
   db: SupabaseClient,
   threadId: string,
@@ -2242,6 +2258,15 @@ async function fetchFullThread(
     .order("created_at", { referencedTable: "homework_tutor_thread_messages", ascending: true })
     .single();
   return data as Record<string, unknown> | null;
+}
+
+/** Fetch thread for student: filters out hidden tutor notes. */
+async function fetchStudentThread(
+  db: SupabaseClient,
+  threadId: string,
+): Promise<Record<string, unknown> | null> {
+  const thread = await fetchFullThread(db, threadId);
+  return thread ? stripHiddenMessages(thread) : null;
 }
 
 // ─── Helper: shared advance logic (used by /advance and /check) ─────────────
@@ -2567,8 +2592,8 @@ async function handleCheckAnswer(
     };
   }
 
-  // Return updated thread
-  const updatedThread = await fetchFullThread(db, threadId);
+  // Return updated thread (student-facing: filter hidden notes)
+  const updatedThread = await fetchStudentThread(db, threadId);
   return jsonOk(cors, { ...responseData, thread: updatedThread });
 }
 
@@ -2684,8 +2709,8 @@ async function handleRequestHint(
     updated_at: new Date().toISOString(),
   }).eq("id", activeState.id);
 
-  // Return updated thread
-  const updatedThread = await fetchFullThread(db, threadId);
+  // Return updated thread (student-facing: filter hidden notes)
+  const updatedThread = await fetchStudentThread(db, threadId);
   return jsonOk(cors, {
     hint: hintResult.hint,
     available_score: newAvailableScore,
@@ -2888,7 +2913,7 @@ async function handleTutorResetTask(
 
   if (!task) return jsonError(cors, 404, "NOT_FOUND", "Task not found");
 
-  // Find and reset the task state
+  // Find and validate the task state
   const { data: state } = await db
     .from("homework_tutor_task_states")
     .select("id, status")
@@ -2898,6 +2923,38 @@ async function handleTutorResetTask(
 
   if (!state) return jsonError(cors, 404, "NOT_FOUND", "Task state not found");
 
+  // Only completed or active tasks can be reset (not locked — that would skip the guided sequence)
+  if (state.status === "locked") {
+    return jsonError(cors, 400, "INVALID_STATE", "Cannot reset a locked task");
+  }
+
+  const now = new Date().toISOString();
+
+  // Lock all tasks AFTER the reset point to maintain guided sequence.
+  // This also deactivates any currently-active task that comes later.
+  const { data: tasksAfter } = await db
+    .from("homework_tutor_tasks")
+    .select("id")
+    .eq("assignment_id", assignmentId)
+    .gt("order_num", taskOrder);
+
+  if (tasksAfter && tasksAfter.length > 0) {
+    const taskIdsAfter = tasksAfter.map((t: { id: string }) => t.id);
+    await db.from("homework_tutor_task_states")
+      .update({ status: "locked", updated_at: now })
+      .eq("thread_id", thread.id)
+      .in("task_id", taskIdsAfter);
+  }
+
+  // Deactivate any other currently-active task (before the reset point)
+  // to maintain the single-active invariant
+  await db.from("homework_tutor_task_states")
+    .update({ status: "locked", updated_at: now })
+    .eq("thread_id", thread.id)
+    .eq("status", "active")
+    .neq("id", state.id);
+
+  // Reset the target task
   await db.from("homework_tutor_task_states").update({
     status: "active",
     wrong_answer_count: 0,
@@ -2905,14 +2962,14 @@ async function handleTutorResetTask(
     available_score: task.max_score ?? 1,
     earned_score: null,
     best_score: null,
-    updated_at: new Date().toISOString(),
+    updated_at: now,
   }).eq("id", state.id);
 
-  // Update current_task_order on thread if needed
+  // Update current_task_order + reactivate thread
   await db.from("homework_tutor_threads").update({
     current_task_order: taskOrder,
     status: "active",
-    updated_at: new Date().toISOString(),
+    updated_at: now,
   }).eq("id", thread.id);
 
   // Insert system message about reset
