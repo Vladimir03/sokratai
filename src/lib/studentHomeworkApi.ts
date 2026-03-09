@@ -184,6 +184,7 @@ export async function listStudentAssignments(): Promise<StudentHomeworkAssignmen
   const { data, error } = await supabase
     .from('homework_tutor_student_assignments')
     .select(`
+      id,
       assignment_id,
       homework_tutor_assignments!inner(
         id,
@@ -193,6 +194,8 @@ export async function listStudentAssignments(): Promise<StudentHomeworkAssignmen
         description,
         deadline,
         status,
+        workflow_mode,
+        max_attempts,
         created_at
       )
     `)
@@ -232,10 +235,46 @@ export async function listStudentAssignments(): Promise<StudentHomeworkAssignmen
     }
   }
 
+  // For guided_chat assignments, check thread status instead of submissions
+  const guidedAssignmentStudentIds = assignmentRows
+    .filter((row: any) => row.homework_tutor_assignments?.workflow_mode === 'guided_chat')
+    .map((row: any) => row.id as string);
+
+  const threadMap = new Map<string, { status: string }>();
+  if (guidedAssignmentStudentIds.length > 0) {
+    const { data: threadRows } = await supabase
+      .from('homework_tutor_threads')
+      .select('student_assignment_id, status')
+      .in('student_assignment_id', guidedAssignmentStudentIds);
+
+    for (const t of threadRows ?? []) {
+      threadMap.set(t.student_assignment_id as string, { status: t.status as string });
+    }
+  }
+
   return assignmentRows
     .map((row: any) => {
       const assignment = row.homework_tutor_assignments;
-      const attemptInfo = attemptsMap.get(assignment.id) ?? { attempts_used: 0, latest_status: null };
+      const isGuided = assignment.workflow_mode === 'guided_chat';
+
+      let attempts_used: number;
+      let latest_submission_status: string | null;
+
+      if (isGuided) {
+        const thread = threadMap.get(row.id);
+        if (thread) {
+          attempts_used = 1;
+          latest_submission_status = thread.status === 'completed' ? 'ai_checked' : 'in_progress';
+        } else {
+          attempts_used = 0;
+          latest_submission_status = null;
+        }
+      } else {
+        const attemptInfo = attemptsMap.get(assignment.id) ?? { attempts_used: 0, latest_status: null };
+        attempts_used = attemptInfo.attempts_used;
+        latest_submission_status = attemptInfo.latest_status;
+      }
+
       return {
         id: assignment.id,
         title: assignment.title,
@@ -244,9 +283,9 @@ export async function listStudentAssignments(): Promise<StudentHomeworkAssignmen
         description: assignment.description,
         deadline: assignment.deadline,
         status: assignment.status,
-        max_attempts: 3,
-        attempts_used: attemptInfo.attempts_used,
-        latest_submission_status: attemptInfo.latest_status,
+        max_attempts: assignment.max_attempts ?? 3,
+        attempts_used,
+        latest_submission_status,
       } satisfies StudentHomeworkAssignment;
     })
     .sort((a, b) => {
