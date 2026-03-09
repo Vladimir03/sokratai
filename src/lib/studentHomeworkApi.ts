@@ -184,6 +184,7 @@ export async function listStudentAssignments(): Promise<StudentHomeworkAssignmen
   const { data, error } = await supabase
     .from('homework_tutor_student_assignments')
     .select(`
+      id,
       assignment_id,
       homework_tutor_assignments!inner(
         id,
@@ -193,6 +194,8 @@ export async function listStudentAssignments(): Promise<StudentHomeworkAssignmen
         description,
         deadline,
         status,
+        workflow_mode,
+        max_attempts,
         created_at
       )
     `)
