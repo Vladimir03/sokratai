@@ -1,40 +1,66 @@
 
 
-## Root Cause
+## Problem Analysis
 
-The database confirms: assignment `4ce28a0e-b77e-4c97-b914-e6dc4717c046` has `workflow_mode = 'classic'` despite the switch being ON in the UI. This happened because the edge function `homework-api` was not yet redeployed with `workflow_mode` support when the assignment was created. The edge function defaulted unknown fields to `'classic'`.
+Two separate bugs, both stemming from guided_chat not being accounted for in certain code paths.
 
-**All 40 assignments in the database have `workflow_mode = 'classic'`** -- none were ever saved as `guided_chat`.
+### Issue 1: Student list shows "Назначено" and "0/3 попыток" for completed guided_chat assignment
 
-The frontend code is correct (sends `workflow_mode`), the edge function code is correct (saves it), and the student-side query is correct (reads it). The issue was purely a deployment timing gap.
+**Root cause**: `listStudentAssignments()` in `src/lib/studentHomeworkApi.ts` (lines 212-233) only queries `homework_tutor_submissions` for status and attempt count. Guided chat assignments don't create submissions -- they use threads. So `attemptsMap` is empty, resulting in `attempts_used: 0` and `latest_submission_status: null` (which maps to "Назначено").
 
-## Fix Plan
+**Fix**: After fetching submission-based attempts, also query `homework_tutor_threads` for guided_chat assignments to determine completion status. For guided_chat assignments:
+- Check thread status (`completed` → map to `latest_submission_status: 'ai_checked'`)
+- Set `attempts_used: 1` if thread exists (since guided_chat has one continuous thread, not discrete attempts)
 
-### 1. Fix existing assignment data (SQL UPDATE via insert tool)
+Also need to fetch `workflow_mode` and `max_attempts` in the initial SELECT (lines 186-197) -- currently missing from the join query.
 
-Update assignment `4ce28a0e-b77e-4c97-b914-e6dc4717c046` to `workflow_mode = 'guided_chat'`:
+### Issue 2: Tutor can't see guided thread viewer on results page
 
-```sql
-UPDATE homework_tutor_assignments 
-SET workflow_mode = 'guided_chat' 
-WHERE id = '4ce28a0e-b77e-4c97-b914-e6dc4717c046';
+**Root cause**: The `handleGetResults` edge function endpoint (lines 1228-1414) builds `per_student` exclusively from `homework_tutor_submissions`. For guided_chat, there are no submissions → `per_student` is empty → the UI shows "Пока нет работ от учеников" instead of the `GuidedStudentRow` components.
+
+However, looking at line 939: `assignment?.workflow_mode === 'guided_chat' && assignmentQuery.data?.assigned_students` -- this condition bypasses `per_student` entirely and uses `assigned_students` instead. So **this should already work** if `assignment.workflow_mode` is correctly returned.
+
+Wait -- let me re-check. Line 777: `const assignment = assignmentQuery.data?.assignment;` and line 939 checks `assignment?.workflow_mode`. The API returns the full row via `select("*")` so `workflow_mode: 'guided_chat'` should be there.
+
+The `per_student` empty list goes to the `groupedStudents.length === 0` path at line 959, but only if the guided_chat condition at line 939 is **false**. If `workflow_mode === 'guided_chat'`, line 939-956 takes precedence.
+
+So if `workflow_mode` is correctly `'guided_chat'` in the DB (confirmed), and the edge function returns it (confirmed via `select("*")`), the tutor side should work. Let me verify this is actually deployed.
+
+Actually, the issue might be that `results` query returns empty `per_student` and the component shows "Пока нет работ" before the assignment query resolves. Let me check the render order -- line 779: `const loading = (assignmentQuery.isLoading || resultsQuery.isLoading) && !assignment && !results;`. If `assignmentQuery` is still loading but `resultsQuery` has resolved with empty `per_student`, `loading` could be false, and `assignment` is undefined, so the guided_chat branch at 939 fails (assignment is undefined), falling through to the classic branch showing empty state.
+
+Actually no -- line 779 uses `&&`. If `assignment` is falsy (not yet loaded), `loading` is true only if one of them is still loading. But once both are loaded, `assignment` is set and `workflow_mode` check works.
+
+**The real issue might be simpler**: The edge function might not be deployed with the latest code. Let me verify.
+
+## Plan
+
+### 1. Fix `listStudentAssignments` in `src/lib/studentHomeworkApi.ts`
+
+**a)** Add `workflow_mode, max_attempts` to the Supabase join SELECT (line 186-197):
+```
+homework_tutor_assignments!inner(
+  id, title, subject, topic, description, deadline, status,
+  workflow_mode, max_attempts, created_at
+)
 ```
 
-### 2. Provision guided chat thread for the assigned student
+**b)** After the submissions query (lines 212-233), add a query for guided_chat thread status:
+- Query `homework_tutor_threads` joined through `homework_tutor_student_assignments` to get thread `status` for assignments where `workflow_mode === 'guided_chat'`
+- For completed threads: set `latest_submission_status` to `'ai_checked'` and `attempts_used` to `1`
+- For active threads: set `latest_submission_status` to `'in_progress'` and `attempts_used` to `1`
 
-The student `ac96a528-4213-471b-ac9d-163a2af6397a` has a `homework_tutor_student_assignments` row but no thread exists yet. Need to:
+**c)** In the mapping (lines 235-251), use actual `max_attempts` and `workflow_mode` from assignment data instead of hardcoded `3`.
 
-1. Look up the `student_assignment_id` from `homework_tutor_student_assignments`
-2. Insert a row into `homework_tutor_threads` 
-3. Insert `homework_tutor_task_states` for each task (first = `active`, rest = `locked`)
+### 2. Redeploy `homework-api` edge function
 
-This requires querying for the student_assignment ID and task IDs first, then inserting thread + task states.
+Ensure the latest code with `workflow_mode` support is live. This fixes the tutor-side issue if it's a deployment gap.
 
-### 3. Redeploy edge function
+### 3. Verify tutor results page logic
 
-Redeploy `homework-api` to confirm latest code is live for future assignments.
+The frontend code at line 939 already handles guided_chat correctly using `assigned_students`. If `workflow_mode` is returned from the API (which it should be with `select("*")`), the tutor should see `GuidedStudentRow` with `GuidedThreadViewer` for each student. No frontend changes needed for issue 2.
 
-### No frontend changes needed
+## Files to change
 
-The frontend already handles `workflow_mode === 'guided_chat'` correctly at line 433 of `StudentHomeworkDetail.tsx`.
+1. **`src/lib/studentHomeworkApi.ts`** -- Update `listStudentAssignments` to handle guided_chat threads
+2. **Edge function redeployment** -- Redeploy `homework-api`
 
