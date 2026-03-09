@@ -1,40 +1,31 @@
 
 
-## Root Cause
+## Problem
 
-The database confirms: assignment `4ce28a0e-b77e-4c97-b914-e6dc4717c046` has `workflow_mode = 'classic'` despite the switch being ON in the UI. This happened because the edge function `homework-api` was not yet redeployed with `workflow_mode` support when the assignment was created. The edge function defaulted unknown fields to `'classic'`.
+The frontend code is already correct -- `TutorHomeworkResults.tsx` already has the guided_chat branch (lines 938-956) that uses `assigned_students` instead of `submissions`, and renders `GuidedStudentRow` with `GuidedThreadViewer`. All backend endpoints exist in the edge function code (`POST /thread/messages`, `POST /thread/tasks/:order/reset`, `GET /thread`).
 
-**All 40 assignments in the database have `workflow_mode = 'classic'`** -- none were ever saved as `guided_chat`.
+The issue is **deployment**: `homework-api` is not in the CI auto-deploy list (`.github/workflows/deploy-supabase-functions.yml`). The edge function on production may be stale and missing the Phase 3/4 endpoints (tutor message posting, task reset, scoring).
 
-The frontend code is correct (sends `workflow_mode`), the edge function code is correct (saves it), and the student-side query is correct (reads it). The issue was purely a deployment timing gap.
+## Plan
 
-## Fix Plan
+### 1. Redeploy `homework-api` edge function
 
-### 1. Fix existing assignment data (SQL UPDATE via insert tool)
+Use the Supabase deploy tool to push the latest `homework-api` code to production. This ensures all endpoints are live:
+- `POST /assignments/:id/students/:studentId/thread/messages` (tutor messages)
+- `POST /assignments/:id/students/:studentId/thread/tasks/:order/reset` (task reset)
+- `GET /assignments/:id/students/:studentId/thread` (tutor thread viewer)
+- `workflow_mode` support in assignment creation and retrieval
 
-Update assignment `4ce28a0e-b77e-4c97-b914-e6dc4717c046` to `workflow_mode = 'guided_chat'`:
+### 2. Add `homework-api` to CI deployment workflow
 
+Add `supabase functions deploy homework-api` to `.github/workflows/deploy-supabase-functions.yml` so future pushes auto-deploy it.
+
+### 3. Verify data: assignment 4ce28a0e has workflow_mode = 'guided_chat'
+
+Confirm the earlier SQL fix took effect. If not, re-apply:
 ```sql
-UPDATE homework_tutor_assignments 
-SET workflow_mode = 'guided_chat' 
-WHERE id = '4ce28a0e-b77e-4c97-b914-e6dc4717c046';
+UPDATE homework_tutor_assignments SET workflow_mode = 'guided_chat' WHERE id = '4ce28a0e-b77e-4c97-b914-e6dc4717c046';
 ```
 
-### 2. Provision guided chat thread for the assigned student
-
-The student `ac96a528-4213-471b-ac9d-163a2af6397a` has a `homework_tutor_student_assignments` row but no thread exists yet. Need to:
-
-1. Look up the `student_assignment_id` from `homework_tutor_student_assignments`
-2. Insert a row into `homework_tutor_threads` 
-3. Insert `homework_tutor_task_states` for each task (first = `active`, rest = `locked`)
-
-This requires querying for the student_assignment ID and task IDs first, then inserting thread + task states.
-
-### 3. Redeploy edge function
-
-Redeploy `homework-api` to confirm latest code is live for future assignments.
-
-### No frontend changes needed
-
-The frontend already handles `workflow_mode === 'guided_chat'` correctly at line 433 of `StudentHomeworkDetail.tsx`.
+No frontend code changes needed -- everything is already implemented.
 
