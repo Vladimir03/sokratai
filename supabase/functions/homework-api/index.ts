@@ -887,53 +887,10 @@ async function handleAssignStudents(
     return jsonError(cors, 500, "DB_ERROR", "Failed to assign students");
   }
 
-  // Provision threads for guided_chat assignments
+  // Provision threads for guided_chat assignments (eager)
   if (assignment.workflow_mode === "guided_chat" && upserted && upserted.length > 0) {
-    const { data: tasks } = await db
-      .from("homework_tutor_tasks")
-      .select("id, order_num, max_score")
-      .eq("assignment_id", assignmentId)
-      .order("order_num", { ascending: true });
-
-    if (tasks && tasks.length > 0) {
-      const threadRows = upserted.map((sa: { id: string }) => ({
-        student_assignment_id: sa.id,
-        status: "active",
-        current_task_order: 1,
-      }));
-
-      const { data: threads, error: threadErr } = await db
-        .from("homework_tutor_threads")
-        .upsert(threadRows, { onConflict: "student_assignment_id", ignoreDuplicates: true })
-        .select("id, student_assignment_id");
-
-      if (threadErr) {
-        console.warn("homework_api_thread_provision_failed", {
-          assignment_id: assignmentId,
-          error: threadErr.message,
-        });
-      } else if (threads && threads.length > 0) {
-        const taskStateRows = threads.flatMap((thread: { id: string }) =>
-          tasks.map((task: { id: string; max_score?: number }, idx: number) => ({
-            thread_id: thread.id,
-            task_id: task.id,
-            status: idx === 0 ? "active" : "locked",
-            attempts: 0,
-            available_score: task.max_score ?? 1,
-          }))
-        );
-
-        const { error: stateErr } = await db
-          .from("homework_tutor_task_states")
-          .upsert(taskStateRows, { onConflict: "thread_id,task_id", ignoreDuplicates: true });
-
-        if (stateErr) {
-          console.warn("homework_api_task_states_provision_failed", {
-            assignment_id: assignmentId,
-            error: stateErr.message,
-          });
-        }
-      }
+    for (const sa of upserted as { id: string }[]) {
+      await provisionGuidedThread(db, assignmentId, sa.id);
     }
   }
 
@@ -2269,6 +2226,71 @@ async function fetchStudentThread(
   return thread ? stripHiddenMessages(thread) : null;
 }
 
+// ─── Helper: lazy thread provisioning for guided_chat ───────────────────────
+
+/**
+ * Create a guided_chat thread + task_states for a student assignment.
+ * Used both at assign-time (eager) and on first GET (lazy fallback).
+ * Returns the fully-loaded thread (with nested messages/task_states) or null on failure.
+ */
+async function provisionGuidedThread(
+  db: SupabaseClient,
+  assignmentId: string,
+  studentAssignmentId: string,
+): Promise<Record<string, unknown> | null> {
+  const { data: tasks } = await db
+    .from("homework_tutor_tasks")
+    .select("id, order_num, max_score")
+    .eq("assignment_id", assignmentId)
+    .order("order_num", { ascending: true });
+
+  if (!tasks || tasks.length === 0) {
+    console.warn("provisionGuidedThread: no tasks found", { assignmentId, studentAssignmentId });
+    return null;
+  }
+
+  const { data: thread, error: threadErr } = await db
+    .from("homework_tutor_threads")
+    .upsert(
+      { student_assignment_id: studentAssignmentId, status: "active", current_task_order: 1 },
+      { onConflict: "student_assignment_id", ignoreDuplicates: true },
+    )
+    .select("id")
+    .single();
+
+  if (threadErr || !thread) {
+    console.warn("provisionGuidedThread: thread upsert failed", {
+      assignmentId,
+      studentAssignmentId,
+      error: threadErr?.message,
+    });
+    return null;
+  }
+
+  const taskStateRows = tasks.map((task: { id: string; max_score?: number }, idx: number) => ({
+    thread_id: thread.id,
+    task_id: task.id,
+    status: idx === 0 ? "active" : "locked",
+    attempts: 0,
+    available_score: task.max_score ?? 1,
+  }));
+
+  const { error: stateErr } = await db
+    .from("homework_tutor_task_states")
+    .upsert(taskStateRows, { onConflict: "thread_id,task_id", ignoreDuplicates: true });
+
+  if (stateErr) {
+    console.warn("provisionGuidedThread: task_states upsert failed", {
+      assignmentId,
+      threadId: thread.id,
+      error: stateErr.message,
+    });
+  }
+
+  // Return the full thread with nested relations
+  return await fetchFullThread(db, thread.id);
+}
+
 // ─── Helper: shared advance logic (used by /advance and /check) ─────────────
 
 interface AdvanceResult {
@@ -2751,16 +2773,26 @@ async function handleGetTutorStudentThread(
     return jsonError(cors, 404, "NOT_FOUND", "Student is not assigned to this homework");
   }
 
-  const { data: thread, error: threadError } = await db
-    .from("homework_tutor_threads")
-    .select(THREAD_SELECT)
-    .eq("student_assignment_id", studentAssignment.id)
-    .order("created_at", { referencedTable: "homework_tutor_thread_messages", ascending: true })
-    .maybeSingle();
+  let thread: Record<string, unknown> | null;
+  {
+    const { data, error: threadError } = await db
+      .from("homework_tutor_threads")
+      .select(THREAD_SELECT)
+      .eq("student_assignment_id", studentAssignment.id)
+      .order("created_at", { referencedTable: "homework_tutor_thread_messages", ascending: true })
+      .maybeSingle();
 
-  if (threadError) {
-    return jsonError(cors, 500, "DB_ERROR", "Failed to load thread");
+    if (threadError) {
+      return jsonError(cors, 500, "DB_ERROR", "Failed to load thread");
+    }
+    thread = data as Record<string, unknown> | null;
   }
+
+  // Lazy provisioning: create thread if assignment is guided_chat but thread doesn't exist yet
+  if (!thread && assignmentOrErr.workflow_mode === "guided_chat") {
+    thread = await provisionGuidedThread(db, assignmentId, studentAssignment.id);
+  }
+
   if (!thread) {
     return jsonError(cors, 404, "NOT_FOUND", "Thread not found");
   }
