@@ -285,7 +285,7 @@ export async function getStudentSubmissions(assignmentId: string): Promise<Stude
     .select(SUBMISSION_SELECT)
     .eq('assignment_id', assignmentId)
     .eq('student_id', studentId)
-    .order('created_at', { ascending: false });
+    .order('submitted_at', { ascending: false });
 
   if (error) {
     throw new StudentHomeworkApiError(error.message);
