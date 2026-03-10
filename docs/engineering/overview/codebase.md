@@ -1,6 +1,6 @@
 # SokratAI Codebase Overview
 
-Last updated: 2026-02-23
+Last updated: 2026-03-10
 
 ## Project Summary
 
@@ -17,23 +17,23 @@ Last updated: 2026-02-23
 | Backend          | Supabase (Auth, PostgreSQL, RPC, Storage, Edge Functions) |
 | State Management | TanStack React Query + custom hooks (no Redux/Zustand)  |
 | Routing          | React Router v6, all pages lazy-loaded               |
-| Package Manager  | **bun** (not npm)                                    |
+| Package Manager  | **npm**                                              |
 | Telegram         | Bot (Edge Function) + Mini App (frontend)            |
 | Payments         | YooKassa (via Edge Functions)                        |
 
 ### Commands
 
 ```bash
-bun run dev          # Start dev server (port 8080)
-bun run build        # Production build
-bun run build:dev    # Development build (with source maps)
-bun run lint         # ESLint
-bun run preview      # Preview production build
-bun run analyze      # Build + bundle size report
-bun run smoke-test   # Build + chunk checks + type checks + browser compat checks
+npm run dev          # Start dev server (port 8080)
+npm run build        # Production build
+npm run lint         # ESLint
+npm run smoke-check  # Node-based smoke checks (main quality gate)
+npm run smoke-test   # Legacy bash-based smoke test
+npm run test         # Alias for smoke-check
 ```
 
-> Run `build` and `smoke-test` **sequentially**, never in parallel (concurrent writes to `dist/` cause `EBUSY` on Windows).
+> Run `build` and `smoke-check` **sequentially**, never in parallel (concurrent writes to `dist/` cause `EBUSY` on Windows).
+> If lint fails, still run `build` and `smoke-check` and report failures precisely.
 
 ---
 
@@ -42,11 +42,12 @@ bun run smoke-test   # Build + chunk checks + type checks + browser compat check
 ```
 src/
 ├── pages/                     # All pages (lazy-loaded via React.lazy)
-│   ├── tutor/                 # Tutor-only pages (9 pages)
-│   └── *.tsx                  # Student / public / auth pages (26 pages)
+│   ├── tutor/                 # Tutor-only pages (10 pages)
+│   └── *.tsx                  # Student / public / auth pages (24 pages)
 ├── components/
 │   ├── ui/                    # shadcn/ui base components (MUST stay lightweight)
 │   ├── tutor/                 # Tutor-specific components
+│   ├── homework/              # Guided homework components (GuidedHomeworkWorkspace, etc.)
 │   ├── practice/              # Practice-specific components
 │   ├── diagnostic/            # Diagnostic-specific components
 │   ├── admin/                 # Admin-specific components
@@ -56,9 +57,9 @@ src/
 │   ├── TutorGuard.tsx         # Tutor role guard (module-level cache, TTL 10 min)
 │   ├── Navigation.tsx         # Shared nav bar (shows different menus per role)
 │   └── ...
-├── hooks/                     # Custom React hooks (14 files)
+├── hooks/                     # Custom React hooks (15 files)
 ├── types/                     # Canonical TypeScript types (5 files)
-├── lib/                       # Business logic and API helpers (8 files)
+├── lib/                       # Business logic and API helpers (14 files)
 ├── utils/                     # Utility functions (chatCache, pyodide, haptics, etc.)
 ├── integrations/supabase/     # Auto-generated Supabase client and types
 ├── App.tsx                    # Route configuration (all lazy imports)
@@ -88,10 +89,8 @@ All pages are lazy-loaded via `React.lazy()` + `<Suspense>` in `App.tsx`.
 | `/chat` | `Chat` | AuthGuard | AI chat (2000+ lines, complex) |
 | `/practice` | `Practice` | AuthGuard | Practice problems |
 | `/diagnostic` | `Diagnostic` | AuthGuard | Diagnostic test |
-| `/homework` | `Homework` | AuthGuard | Student homework list |
-| `/homework/add` | `HomeworkAdd` | AuthGuard | Create homework set |
-| `/homework/:id` | `HomeworkTaskList` | AuthGuard | View homework tasks |
-| `/homework/:homeworkId/task/:taskId` | `HomeworkTaskDetail` | AuthGuard | Task detail + chat |
+| `/homework` | `StudentHomework` | AuthGuard | Student homework list (tutor-assigned) |
+| `/homework/:id` | `StudentHomeworkDetail` | AuthGuard | Assignment detail + guided chat |
 | `/progress` | `Progress` | AuthGuard | Progress tracking |
 | `/profile` | `Profile` | AuthGuard | User profile |
 | `/miniapp` | `MiniApp` | No | Telegram Mini App entry |
@@ -119,6 +118,7 @@ All tutor pages are wrapped in `<TutorGuard>` (inside each page or layout). The 
 | `/tutor/schedule` | `TutorSchedule` | Calendar, slots, lessons, payment settings |
 | `/tutor/payments` | `TutorPayments` | Payment history |
 | `/tutor/homework` | `TutorHomework` | Homework assignments list |
+| `/tutor/homework/templates` | `TutorHomeworkTemplates` | Homework templates library |
 | `/tutor/homework/create` | `TutorHomeworkCreate` | Create assignment + tasks + assign students |
 | `/tutor/homework/:id` | `TutorHomeworkDetail` | Assignment detail + task images |
 | `/tutor/homework/:id/results` | `TutorHomeworkResults` | Per-student results, AI scores, deep link support via `?submission=` |
@@ -135,7 +135,13 @@ All tutor pages are wrapped in `<TutorGuard>` (inside each page or layout). The 
 | `tutors.ts` | Tutor business logic: CRUD students, payments, debt aggregation. Re-exports schedule helpers from `tutorSchedule.ts`. |
 | `tutorSchedule.ts` | **Source of truth** for all lesson/slot/booking logic. All schedule-related functions live here. |
 | `tutorHomeworkApi.ts` | Homework API client, `parseStorageRef()`, `toStorageRef()` helpers for `storage://` convention |
+| `studentHomeworkApi.ts` | Student homework API client (assignments, submissions, guided chat) |
+| `homeworkTelemetry.ts` | Homework analytics/telemetry helpers |
+| `streamChat.ts` | Streaming chat helpers for AI responses |
 | `tutorStudentCacheSync.ts` | React Query optimistic cache sync: `applyTutorStudentPatchToCache`, `removeTutorStudentFromCache`, `invalidateTutorStudentDependentQueries` |
+| `tutorScheduleGroupActions.ts` | Group lesson actions (cancel, reschedule) |
+| `tutorScheduleGroupCreate.ts` | Group lesson creation logic |
+| `tutorScheduleGroupPayments.ts` | Group lesson payment logic |
 | `paymentAmount.ts` | `calculateLessonPaymentAmount()` -- unified payment calculation used by frontend and edge functions |
 | `formatters.ts` | Canonical date/currency/progress formatters (uses `parseISO` from date-fns) |
 | `utils.ts` | General utilities (`cn()` for Tailwind class merging, etc.) |
@@ -155,6 +161,8 @@ All tutor pages are wrapped in `<TutorGuard>` (inside each page or layout). The 
 | `useDiagnostic.ts` | Student diagnostic hooks |
 | `useAdminAccess.ts` | Admin access check |
 | `use-mobile.tsx` | Device detection: `useIsMobile()`, `useDeviceType()`, `isAndroid()` |
+| `useStudentHomework.ts` | Student homework hooks (assignments, submissions, guided chat) |
+| `useYandexMetrika.ts` | Yandex Metrika analytics integration |
 | `useVoiceInput.ts` | Voice input for chat |
 | `useNetworkStatus.ts` | Online/offline detection |
 | `useScrollAnimation.tsx` | Scroll-triggered animations |
@@ -164,7 +172,7 @@ All tutor pages are wrapped in `<TutorGuard>` (inside each page or layout). The 
 | File | Domain |
 |------|--------|
 | `tutor.ts` | Tutor, TutorStudent, TutorLesson, TutorPayment, etc. |
-| `homework.ts` | HomeworkSet, HomeworkTask (student legacy) + Tutor homework types |
+| `homework.ts` | Student/Tutor homework types, guided chat types, subjects config |
 | `practice.ts` | Practice problem types |
 | `diagnostic.ts` | Diagnostic test types |
 | `solution.ts` | Solution types + Telegram WebApp types |
@@ -179,6 +187,7 @@ All tutor pages are wrapped in `<TutorGuard>` (inside each page or layout). The 
 | `AddStudentDialog.tsx` | Dialog for adding a student |
 | `StudentsToolbar.tsx` | Search/filter toolbar |
 | `StudentsStates.tsx` | Empty/loading/error states for student list |
+| `GuidedThreadViewer.tsx` | Tutor view of student guided homework thread |
 
 ---
 
@@ -236,6 +245,7 @@ All tutor queries follow the pattern `['tutor', entity, ...params]`:
 | Function | JWT | Description |
 |----------|-----|-------------|
 | `homework-api` | verify | Tutor homework CRUD (8 routes) |
+| `homework-reminder` | -- | Scheduled homework reminders (uses `homework_tutor_*` tables) |
 | `payment-reminder` | -- | Scheduled payment reminders |
 | `assign-tutor-role` | -- | Assigns tutor role to user |
 | `tutor-manual-add-student` | -- | Tutor adds student manually |
@@ -243,7 +253,6 @@ All tutor queries follow the pattern `['tutor', entity, ...params]`:
 | `notify-booking` | -- | Booking notification |
 | `yookassa-create-payment` | verify | Creates YooKassa payment |
 | `yookassa-webhook` | no | YooKassa payment webhook |
-| `analyze-homework-task` | -- | AI analysis of homework task |
 | `admin-analytics` | -- | Admin analytics data |
 | `check-solutions` | -- | Solution checking |
 | `get-solution` | -- | Solution retrieval |
@@ -260,10 +269,8 @@ All tutor queries follow the pattern `['tutor', entity, ...params]`:
 |-------|-------------|
 | `profiles` | User profiles (username, telegram_user_id, etc.) |
 | `user_stats` | XP, level, streak tracking |
-| `chats` | Chat conversations |
+| `chats` | Chat conversations (types: general, practice, diagnostic) |
 | `chat_messages` | Individual messages with images |
-| `homework_sets` | Student homework collections (legacy) |
-| `homework_tasks` | Individual homework tasks (legacy) |
 | `problems_public` | Public problem catalog (view) |
 | `user_solutions` | User problem solutions |
 | `answer_attempts` | Problem answer history |
@@ -293,6 +300,12 @@ All tutor queries follow the pattern `['tutor', entity, ...params]`:
 | `homework_tutor_submission_items` | Per-task items: student text/photos, AI score/feedback/error_type |
 | `homework_tutor_student_assignments` | Assignment-to-student links |
 | `homework_tutor_user_bot_state` | Telegram bot state machine (IDLE/HW_SELECTING/HW_SUBMITTING/HW_CONFIRMING/HW_REVIEW) |
+| `homework_tutor_threads` | Guided homework chat threads (status: active/completed/abandoned) |
+| `homework_tutor_thread_messages` | Messages in guided homework threads (role, message_kind, task_order) |
+| `homework_tutor_task_states` | Per-task progress in guided mode (status, attempts, scores) |
+| `homework_tutor_templates` | Homework assignment templates library |
+| `homework_tutor_materials` | Materials attached to assignments (PDF, images, links) |
+| `homework_tutor_reminder_log` | Homework reminder delivery log |
 
 ### Storage Buckets
 
@@ -300,6 +313,8 @@ All tutor queries follow the pattern `['tutor', entity, ...params]`:
 |--------|---------|
 | `homework-task-images` | Tutor-uploaded task images |
 | `homework-images` | Student-submitted homework photos |
+| `homework-submissions` | Student homework submission images (guided mode) |
+| `homework-materials` | Tutor-uploaded materials (PDFs, images) |
 | `chat-images` | Chat message images (fallback bucket) |
 
 **Storage reference convention**: Always store as `storage://{bucket}/{objectPath}` via `toStorageRef()`. Never store raw Supabase paths. Use `parseStorageRef()` to read them back.
@@ -365,15 +380,15 @@ Tutor pages land in their own chunks automatically via lazy loading.
 Google Calendar integration is **disabled**. Do not add Calendar UI or edge functions without a separate migration task.
 
 ### 5. Package Manager
-Always use `bun`, not `npm`. All scripts: `bun run dev`, `bun run build`, `bun run smoke-test`, etc.
+Always use `npm`. All scripts: `npm run dev`, `npm run build`, `npm run smoke-check`, etc.
 
 ---
 
 ## Pre-Commit Checklist
 
 ```
-[ ] bun run build completes without errors
-[ ] bun run smoke-test passes
+[ ] npm run build completes without errors
+[ ] npm run smoke-check passes
 [ ] No new heavy dependencies in src/components/ui/
 [ ] All new pages use React.lazy() in App.tsx
 [ ] No cross-imports between student and tutor modules

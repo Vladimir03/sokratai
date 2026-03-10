@@ -62,9 +62,12 @@ Domains are strictly isolated.
 
 Student:
 
-`src/pages/chat`
-`src/pages/practice`
-`src/pages/diagnostic`
+`src/pages/Chat.tsx`
+`src/pages/Practice.tsx`
+`src/pages/Diagnostic.tsx`
+`src/pages/StudentHomework.tsx`
+`src/pages/StudentHomeworkDetail.tsx`
+`src/components/homework/*`
 
 Tutor:
 
