@@ -8,10 +8,12 @@ import { PageContent } from '@/components/PageContent';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
+import { ZoomIn } from 'lucide-react';
 import {
   createStudentSubmission,
   finalizeSubmission,
-  getStudentTaskImageSignedUrl,
+  getStudentTaskImageSignedUrlViaBackend,
   runStudentSubmissionAiCheck,
   submitStudentAnswer,
 } from '@/lib/studentHomeworkApi';
@@ -126,11 +128,14 @@ function buildHomeworkChatContext(
   ].filter(Boolean).join('\n');
 }
 
-function TaskConditionImage({ taskImageUrl }: { taskImageUrl: string | null }) {
+function TaskConditionImage({ assignmentId, taskId, taskOrder, taskImageUrl }: { assignmentId: string; taskId: string; taskOrder: number; taskImageUrl: string | null }) {
+  const [open, setOpen] = useState(false);
+  const isExternal = Boolean(taskImageUrl && /^https?:\/\//i.test(taskImageUrl));
+
   const imageQuery = useQuery<string | null>({
-    queryKey: ['student', 'homework', 'task-image-preview', taskImageUrl],
-    queryFn: () => getStudentTaskImageSignedUrl(taskImageUrl!),
-    enabled: Boolean(taskImageUrl),
+    queryKey: ['student', 'homework', 'task-image-preview', assignmentId, taskId],
+    queryFn: () => getStudentTaskImageSignedUrlViaBackend(assignmentId, taskId),
+    enabled: Boolean(taskImageUrl) && !isExternal,
     staleTime: 30 * 60 * 1000,
     gcTime: 60 * 60 * 1000,
     retry: 1,
@@ -138,29 +143,49 @@ function TaskConditionImage({ taskImageUrl }: { taskImageUrl: string | null }) {
 
   if (!taskImageUrl) return null;
 
+  const resolvedUrl = isExternal ? taskImageUrl : (imageQuery.data ?? null);
+
   if (imageQuery.isLoading) {
     return <p className="text-xs text-muted-foreground">Загрузка фото задачи...</p>;
   }
 
-  if (!imageQuery.data) {
+  if (!resolvedUrl) {
     return <p className="text-xs text-muted-foreground">Фото задачи недоступно</p>;
   }
 
   return (
-    <a
-      href={imageQuery.data}
-      target="_blank"
-      rel="noreferrer"
-      className="inline-block rounded-md border bg-background p-1 hover:opacity-90 transition-opacity"
-      title="Открыть фото задачи"
-    >
-      <img
-        src={imageQuery.data}
-        alt="Фото задачи"
-        className="h-28 w-auto max-w-[260px] rounded-sm object-cover"
-        loading="lazy"
-      />
-    </a>
+    <>
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        className="group relative inline-block rounded-md border bg-background p-1 hover:opacity-90 transition-opacity"
+        title="Открыть фото задачи"
+      >
+        <img
+          src={resolvedUrl}
+          alt="Фото задачи"
+          className="h-28 w-auto max-w-[260px] rounded-sm object-cover"
+          loading="lazy"
+        />
+        <span className="absolute right-1 top-1 inline-flex items-center gap-1 rounded-md bg-background/90 px-1.5 py-0.5 text-[10px] opacity-0 transition-opacity group-hover:opacity-100">
+          <ZoomIn className="h-3 w-3" />
+          Увеличить
+        </span>
+      </button>
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogContent className="max-w-4xl p-4">
+          <DialogHeader>
+            <DialogTitle>Задача {taskOrder}</DialogTitle>
+            <DialogDescription>Изображение условия</DialogDescription>
+          </DialogHeader>
+          <img
+            src={resolvedUrl}
+            alt={`Условие задачи ${taskOrder}`}
+            className="max-h-[75vh] w-full rounded-md object-contain"
+          />
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }
 
@@ -584,7 +609,7 @@ const StudentHomeworkDetail = () => {
                       return (
                         <div key={task.id} className="space-y-3 border rounded-md p-3">
                           <p className="font-medium">{task.order_num}. {task.task_text}</p>
-                          <TaskConditionImage taskImageUrl={task.task_image_url} />
+                          <TaskConditionImage assignmentId={data.id} taskId={task.id} taskOrder={task.order_num} taskImageUrl={task.task_image_url} />
 
                           <div className="flex gap-2 text-sm">
                             {ANSWER_TYPES.map((type) => (

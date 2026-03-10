@@ -369,7 +369,7 @@ async function handleListAssignments(
 
   let query = db
     .from("homework_tutor_assignments")
-    .select("id, title, subject, topic, deadline, status, created_at")
+    .select("id, title, subject, topic, deadline, status, workflow_mode, created_at")
     .eq("tutor_id", tutorUserId)
     .order("created_at", { ascending: false });
 
@@ -426,6 +426,82 @@ async function handleListAssignments(
     }
   }
 
+  // Guided chat: count completed threads as "submissions" for stats
+  const guidedAssignmentIds = assignments
+    .filter((a) => a.workflow_mode === "guided_chat")
+    .map((a) => a.id);
+
+  if (guidedAssignmentIds.length > 0) {
+    // Get student assignments for guided chat assignments
+    const { data: guidedSAs } = await db
+      .from("homework_tutor_student_assignments")
+      .select("id, assignment_id")
+      .in("assignment_id", guidedAssignmentIds);
+
+    if (guidedSAs && guidedSAs.length > 0) {
+      const saIds = guidedSAs.map((sa) => sa.id);
+      const saToAssignment: Record<string, string> = {};
+      for (const sa of guidedSAs) {
+        saToAssignment[sa.id] = sa.assignment_id;
+      }
+
+      // Get completed threads
+      const { data: completedThreads } = await db
+        .from("homework_tutor_threads")
+        .select("id, student_assignment_id")
+        .in("student_assignment_id", saIds)
+        .eq("status", "completed");
+
+      if (completedThreads && completedThreads.length > 0) {
+        const threadIds = completedThreads.map((t) => t.id);
+
+        // Get task states for completed threads (need task_id for max_score lookup)
+        const { data: taskStates } = await db
+          .from("homework_tutor_task_states")
+          .select("thread_id, task_id, earned_score")
+          .in("thread_id", threadIds)
+          .eq("status", "completed");
+
+        // Fetch max_score from tasks for guided assignments
+        const { data: guidedTasks } = await db
+          .from("homework_tutor_tasks")
+          .select("id, max_score, assignment_id")
+          .in("assignment_id", guidedAssignmentIds);
+
+        const guidedTaskMaxScore: Record<string, number> = {};
+        for (const t of guidedTasks ?? []) {
+          guidedTaskMaxScore[t.id] = t.max_score ?? 1;
+        }
+
+        // Aggregate scores per thread: earned vs max_score (not available_score)
+        const threadScores: Record<string, { earned: number; maxTotal: number }> = {};
+        for (const ts of taskStates ?? []) {
+          if (!threadScores[ts.thread_id]) {
+            threadScores[ts.thread_id] = { earned: 0, maxTotal: 0 };
+          }
+          threadScores[ts.thread_id].earned += Number(ts.earned_score ?? 0);
+          threadScores[ts.thread_id].maxTotal += guidedTaskMaxScore[ts.task_id] ?? 1;
+        }
+
+        for (const thread of completedThreads) {
+          const aId = saToAssignment[thread.student_assignment_id];
+          if (!aId) continue;
+
+          submittedMap[aId] = (submittedMap[aId] ?? 0) + 1;
+
+          const scores = threadScores[thread.id];
+          if (scores && scores.maxTotal > 0) {
+            if (!scoreMap[aId]) {
+              scoreMap[aId] = { sum: 0, count: 0 };
+            }
+            scoreMap[aId].sum += (scores.earned / scores.maxTotal) * 100;
+            scoreMap[aId].count += 1;
+          }
+        }
+      }
+    }
+  }
+
   const result = assignments.map((a) => ({
     id: a.id,
     title: a.title,
@@ -471,7 +547,7 @@ async function handleGetAssignment(
 
   const { data: studentAssignments } = await db
     .from("homework_tutor_student_assignments")
-    .select("student_id, notified, notified_at, delivery_status, delivery_error_code")
+    .select("id, student_id, notified, notified_at, delivery_status, delivery_error_code")
     .eq("assignment_id", assignmentId);
 
   let assignedStudents: unknown[] = [];
@@ -519,8 +595,56 @@ async function handleGetAssignment(
     }
   }
 
+  // Guided chat: add completed thread data to submissions summary
+  let guidedCompletedCount = 0;
+  if ((assignment as Record<string, unknown>).workflow_mode === "guided_chat" && studentAssignments && studentAssignments.length > 0) {
+    const saIds = studentAssignments.map((sa) => sa.id);
+
+    const { data: completedThreads } = await db
+      .from("homework_tutor_threads")
+      .select("id, student_assignment_id")
+      .in("student_assignment_id", saIds)
+      .eq("status", "completed");
+
+    if (completedThreads && completedThreads.length > 0) {
+      const threadIds = completedThreads.map((t) => t.id);
+
+      const { data: taskStates } = await db
+        .from("homework_tutor_task_states")
+        .select("thread_id, task_id, earned_score")
+        .in("thread_id", threadIds)
+        .eq("status", "completed");
+
+      // Build max_score lookup from tasks already fetched above
+      const taskMaxScoreMap: Record<string, number> = {};
+      for (const t of tasks ?? []) {
+        taskMaxScoreMap[t.id] = t.max_score ?? 1;
+      }
+
+      const threadScores: Record<string, { earned: number; maxTotal: number }> = {};
+      for (const ts of taskStates ?? []) {
+        if (!threadScores[ts.thread_id]) {
+          threadScores[ts.thread_id] = { earned: 0, maxTotal: 0 };
+        }
+        threadScores[ts.thread_id].earned += Number(ts.earned_score ?? 0);
+        threadScores[ts.thread_id].maxTotal += taskMaxScoreMap[ts.task_id] ?? 1;
+      }
+
+      for (const thread of completedThreads) {
+        guidedCompletedCount++;
+        statusCounts["completed"] = (statusCounts["completed"] ?? 0) + 1;
+
+        const scores = threadScores[thread.id];
+        if (scores && scores.maxTotal > 0) {
+          scoreSum += (scores.earned / scores.maxTotal) * 100;
+          scoreCount += 1;
+        }
+      }
+    }
+  }
+
   const submissionsSummary = {
-    total: (submissions ?? []).length,
+    total: (submissions ?? []).length + guidedCompletedCount,
     by_status: statusCounts,
     avg_percent: scoreCount > 0 ? Math.round((scoreSum / scoreCount) * 100) / 100 : null,
   };
@@ -1241,6 +1365,146 @@ async function handleGetResults(
     }
   }
 
+  // Guided chat: gather completed thread data for summary, perStudent, perTask
+  const assignmentRecord = assignmentOrErr as Record<string, unknown>;
+  // deno-lint-ignore no-explicit-any
+  const guidedPerStudent: any[] = [];
+  const guidedTaskScores: Record<string, { scoreSum: number; scoreCount: number; correctCount: number; total: number }> = {};
+
+  if (assignmentRecord.workflow_mode === "guided_chat") {
+    const { data: studentAssignments } = await db
+      .from("homework_tutor_student_assignments")
+      .select("id, student_id")
+      .eq("assignment_id", assignmentId);
+
+    if (studentAssignments && studentAssignments.length > 0) {
+      const saIds = studentAssignments.map((sa) => sa.id);
+      const saToStudent: Record<string, string> = {};
+      for (const sa of studentAssignments) {
+        saToStudent[sa.id] = sa.student_id;
+      }
+
+      const { data: completedThreads } = await db
+        .from("homework_tutor_threads")
+        .select("id, student_assignment_id, updated_at")
+        .in("student_assignment_id", saIds)
+        .eq("status", "completed");
+
+      if (completedThreads && completedThreads.length > 0) {
+        const threadIds = completedThreads.map((t) => t.id);
+
+        const { data: allTaskStates } = await db
+          .from("homework_tutor_task_states")
+          .select("thread_id, task_id, earned_score, available_score, status")
+          .in("thread_id", threadIds);
+
+        // Group task states by thread
+        const statesByThread: Record<string, typeof allTaskStates> = {};
+        for (const ts of allTaskStates ?? []) {
+          if (!statesByThread[ts.thread_id]) statesByThread[ts.thread_id] = [];
+          statesByThread[ts.thread_id]!.push(ts);
+        }
+
+        // Collect student IDs for profile lookup
+        const guidedStudentIds = completedThreads.map((t) => saToStudent[t.student_assignment_id]);
+        const uniqueGuidedStudentIds = [...new Set(guidedStudentIds)].filter((id) => !profileMap[id]);
+        if (uniqueGuidedStudentIds.length > 0) {
+          const { data: profiles } = await db
+            .from("profiles")
+            .select("id, username")
+            .in("id", uniqueGuidedStudentIds);
+          for (const p of profiles ?? []) {
+            profileMap[p.id] = p.username;
+          }
+        }
+
+        for (const thread of completedThreads) {
+          const studentId = saToStudent[thread.student_assignment_id];
+          const states = statesByThread[thread.id] ?? [];
+
+          let threadEarned = 0;
+          let threadMaxTotal = 0;
+          const taskItems: { task_id: string; task_order_num: number; task_text: string; max_score: number; ai_score: number | null }[] = [];
+
+          for (const ts of states) {
+            const earned = Number(ts.earned_score ?? 0);
+            threadEarned += earned;
+
+            const taskInfo = taskMap[ts.task_id];
+            const maxScore = taskInfo?.max_score ?? 1;
+            threadMaxTotal += maxScore;
+
+            if (taskInfo) {
+              taskItems.push({
+                task_id: ts.task_id,
+                task_order_num: taskInfo.order_num,
+                task_text: taskInfo.task_text,
+                max_score: maxScore,
+                ai_score: earned,
+              });
+
+              // Aggregate for perTask
+              if (!guidedTaskScores[ts.task_id]) {
+                guidedTaskScores[ts.task_id] = { scoreSum: 0, scoreCount: 0, correctCount: 0, total: 0 };
+              }
+              guidedTaskScores[ts.task_id].total++;
+              if (ts.status === "completed") {
+                guidedTaskScores[ts.task_id].scoreSum += earned;
+                guidedTaskScores[ts.task_id].scoreCount++;
+                if (earned > 0) {
+                  guidedTaskScores[ts.task_id].correctCount++;
+                }
+              }
+            }
+          }
+
+          const pct = threadMaxTotal > 0
+            ? Math.round((threadEarned / threadMaxTotal) * 100 * 100) / 100
+            : null;
+
+          // Add to summary distribution
+          if (pct != null) {
+            totalScoreSum += (threadEarned / threadMaxTotal) * 100;
+            totalScoreCount++;
+
+            if (pct < 25) distribution["0-24"]++;
+            else if (pct < 50) distribution["25-49"]++;
+            else if (pct < 75) distribution["50-74"]++;
+            else distribution["75-100"]++;
+          }
+
+          guidedPerStudent.push({
+            student_id: studentId,
+            name: profileMap[studentId] ?? null,
+            status: "completed",
+            submitted_at: thread.updated_at ?? null,
+            total_score: threadEarned,
+            total_max_score: threadMaxTotal,
+            percent: pct,
+            submission_id: thread.id,
+            top_error_types: [],
+            submission_items: taskItems.sort((a, b) => a.task_order_num - b.task_order_num).map((ti) => ({
+              task_id: ti.task_id,
+              task_order_num: ti.task_order_num,
+              task_text: ti.task_text,
+              max_score: ti.max_score,
+              student_text: null,
+              student_image_urls: null,
+              recognized_text: null,
+              ai_is_correct: null,
+              ai_confidence: null,
+              ai_feedback: null,
+              ai_error_type: null,
+              ai_score: ti.ai_score,
+              tutor_override_correct: null,
+              tutor_comment: null,
+            })),
+          });
+        }
+      }
+    }
+  }
+
   const summary = {
     avg_score: totalScoreCount > 0
       ? Math.round((totalScoreSum / totalScoreCount) * 100) / 100
@@ -1258,12 +1522,7 @@ async function handleGetResults(
     submissionItemsBySubmission[sid].push(item);
   }
 
-  const taskMap: Record<string, { order_num: number; task_text: string; max_score: number }> = {};
-  for (const t of tasks ?? []) {
-    taskMap[t.id] = { order_num: t.order_num, task_text: t.task_text, max_score: t.max_score };
-  }
-
-  const perStudent = (submissions ?? []).map((s) => {
+  const perStudentClassic = (submissions ?? []).map((s) => {
     const pct = (s.total_score != null && s.total_max_score != null && s.total_max_score > 0)
       ? Math.round((s.total_score / s.total_max_score) * 100 * 100) / 100
       : null;
@@ -1314,12 +1573,14 @@ async function handleGetResults(
     };
   });
 
+  const perStudent = [...perStudentClassic, ...guidedPerStudent];
 
   const perTask = (tasks ?? []).map((t) => {
     const taskItems = items.filter((it) => it.task_id === t.id);
     let scoreSum = 0;
     let scoreCount = 0;
     let correctCount = 0;
+    let totalCount = taskItems.length;
     const taskErrorCounts: Record<string, number> = {};
 
     for (const it of taskItems) {
@@ -1338,13 +1599,22 @@ async function handleGetResults(
       }
     }
 
+    // Add guided chat task scores
+    const guidedData = guidedTaskScores[t.id];
+    if (guidedData) {
+      scoreSum += guidedData.scoreSum;
+      scoreCount += guidedData.scoreCount;
+      correctCount += guidedData.correctCount;
+      totalCount += guidedData.total;
+    }
+
     return {
       task_id: t.id,
       order_num: t.order_num,
       max_score: t.max_score,
       avg_score: scoreCount > 0 ? Math.round((scoreSum / scoreCount) * 100) / 100 : null,
-      correct_rate: taskItems.length > 0
-        ? Math.round((correctCount / taskItems.length) * 100 * 100) / 100
+      correct_rate: totalCount > 0
+        ? Math.round((correctCount / totalCount) * 100 * 100) / 100
         : null,
       error_type_histogram: Object.entries(taskErrorCounts)
         .sort((a, b) => b[1] - a[1])
@@ -1933,6 +2203,100 @@ async function handleMaterialSignedUrl(
 
   if (signedErr || !signedData?.signedUrl) {
     console.error("homework_api_request_error", { route: "GET /materials/signed-url", error: signedErr?.message });
+    return jsonError(cors, 500, "STORAGE_ERROR", "Failed to generate signed URL");
+  }
+
+  return jsonOk(cors, { url: signedData.signedUrl });
+}
+
+// ─── Endpoint: GET /assignments/:id/tasks/:taskId/image-url ──────────────────
+
+async function handleTaskImageSignedUrl(
+  db: SupabaseClient,
+  userId: string,
+  assignmentId: string,
+  taskId: string,
+  cors: Record<string, string>,
+): Promise<Response> {
+  if (!isUUID(assignmentId)) {
+    return jsonError(cors, 400, "INVALID_ID", "Invalid assignment ID format");
+  }
+  if (!isUUID(taskId)) {
+    return jsonError(cors, 400, "INVALID_ID", "Invalid task ID format");
+  }
+
+  // Access check: tutor who owns the assignment OR student assigned to it
+  const { data: assignment } = await db
+    .from("homework_tutor_assignments")
+    .select("id, tutor_id")
+    .eq("id", assignmentId)
+    .maybeSingle();
+
+  if (!assignment) {
+    return jsonError(cors, 404, "NOT_FOUND", "Assignment not found");
+  }
+
+  const isTutor = assignment.tutor_id === userId;
+  if (!isTutor) {
+    // Check if user is an assigned student
+    const { data: studentAssignment } = await db
+      .from("homework_tutor_student_assignments")
+      .select("id")
+      .eq("assignment_id", assignmentId)
+      .eq("student_id", userId)
+      .maybeSingle();
+
+    if (!studentAssignment) {
+      return jsonError(cors, 403, "FORBIDDEN", "Not authorized to access this assignment");
+    }
+  }
+
+  // Get task image URL
+  const { data: task } = await db
+    .from("homework_tutor_tasks")
+    .select("id, task_image_url")
+    .eq("id", taskId)
+    .eq("assignment_id", assignmentId)
+    .maybeSingle();
+
+  if (!task) {
+    return jsonError(cors, 404, "NOT_FOUND", "Task not found");
+  }
+
+  if (!task.task_image_url) {
+    return jsonError(cors, 400, "NO_IMAGE", "Task has no image");
+  }
+
+  const imageRef = task.task_image_url as string;
+
+  // External URL — return as-is
+  if (imageRef.startsWith("http://") || imageRef.startsWith("https://")) {
+    return jsonOk(cors, { url: imageRef });
+  }
+
+  // Parse storage://bucket/objectPath
+  let bucket: string;
+  let objectPath: string;
+
+  if (imageRef.startsWith("storage://")) {
+    const rest = imageRef.slice("storage://".length);
+    const slashIdx = rest.indexOf("/");
+    if (slashIdx < 0) {
+      return jsonError(cors, 500, "INVALID_STORAGE_REF", "Cannot parse storage reference");
+    }
+    bucket = rest.slice(0, slashIdx);
+    objectPath = rest.slice(slashIdx + 1);
+  } else {
+    bucket = "homework-task-images";
+    objectPath = imageRef;
+  }
+
+  const { data: signedData, error: signedErr } = await db.storage
+    .from(bucket)
+    .createSignedUrl(objectPath, 3600);
+
+  if (signedErr || !signedData?.signedUrl) {
+    console.error("homework_api_request_error", { route: "GET /tasks/image-url", error: signedErr?.message });
     return jsonError(cors, 500, "STORAGE_ERROR", "Failed to generate signed URL");
   }
 
@@ -3024,126 +3388,6 @@ async function handleTutorPostMessage(
   return jsonOk(cors, { id: msg.id, created_at: msg.created_at }, 201);
 }
 
-// ─── Endpoint: POST /assignments/:id/students/:studentId/thread/tasks/:taskOrder/reset (tutor)
-
-async function handleTutorResetTask(
-  db: SupabaseClient,
-  tutorUserId: string,
-  assignmentId: string,
-  studentId: string,
-  taskOrder: number,
-  cors: Record<string, string>,
-): Promise<Response> {
-  if (!isUUID(studentId)) {
-    return jsonError(cors, 400, "VALIDATION", "Invalid student ID");
-  }
-
-  const assignmentOrErr = await getOwnedAssignmentOrThrow(db, assignmentId, tutorUserId, cors);
-  if (assignmentOrErr instanceof Response) return assignmentOrErr;
-
-  // Find student assignment + thread
-  const { data: sa } = await db
-    .from("homework_tutor_student_assignments")
-    .select("id")
-    .eq("assignment_id", assignmentId)
-    .eq("student_id", studentId)
-    .maybeSingle();
-
-  if (!sa) return jsonError(cors, 404, "NOT_FOUND", "Student not assigned");
-
-  const { data: thread } = await db
-    .from("homework_tutor_threads")
-    .select("id, current_task_order")
-    .eq("student_assignment_id", sa.id)
-    .maybeSingle();
-
-  if (!thread) return jsonError(cors, 404, "NOT_FOUND", "Thread not found");
-
-  // Find the task
-  const { data: task } = await db
-    .from("homework_tutor_tasks")
-    .select("id, max_score")
-    .eq("assignment_id", assignmentId)
-    .eq("order_num", taskOrder)
-    .maybeSingle();
-
-  if (!task) return jsonError(cors, 404, "NOT_FOUND", "Task not found");
-
-  // Find and validate the task state
-  const { data: state } = await db
-    .from("homework_tutor_task_states")
-    .select("id, status")
-    .eq("thread_id", thread.id)
-    .eq("task_id", task.id)
-    .maybeSingle();
-
-  if (!state) return jsonError(cors, 404, "NOT_FOUND", "Task state not found");
-
-  // Only completed or active tasks can be reset (not locked — that would skip the guided sequence)
-  if (state.status === "locked") {
-    return jsonError(cors, 400, "INVALID_STATE", "Cannot reset a locked task");
-  }
-
-  const now = new Date().toISOString();
-
-  // Lock all tasks AFTER the reset point to maintain guided sequence.
-  // This also deactivates any currently-active task that comes later.
-  const { data: tasksAfter } = await db
-    .from("homework_tutor_tasks")
-    .select("id")
-    .eq("assignment_id", assignmentId)
-    .gt("order_num", taskOrder);
-
-  if (tasksAfter && tasksAfter.length > 0) {
-    const taskIdsAfter = tasksAfter.map((t: { id: string }) => t.id);
-    await db.from("homework_tutor_task_states")
-      .update({ status: "locked", updated_at: now })
-      .eq("thread_id", thread.id)
-      .in("task_id", taskIdsAfter);
-  }
-
-  // Deactivate any other currently-active task (before the reset point)
-  // to maintain the single-active invariant
-  await db.from("homework_tutor_task_states")
-    .update({ status: "locked", updated_at: now })
-    .eq("thread_id", thread.id)
-    .eq("status", "active")
-    .neq("id", state.id);
-
-  // Reset the target task
-  await db.from("homework_tutor_task_states").update({
-    status: "active",
-    wrong_answer_count: 0,
-    hint_count: 0,
-    available_score: task.max_score ?? 1,
-    earned_score: null,
-    best_score: null,
-    updated_at: now,
-  }).eq("id", state.id);
-
-  // Update current_task_order + reactivate thread
-  await db.from("homework_tutor_threads").update({
-    current_task_order: taskOrder,
-    status: "active",
-    updated_at: now,
-  }).eq("id", thread.id);
-
-  // Insert system message about reset
-  await db.from("homework_tutor_thread_messages").insert({
-    thread_id: thread.id,
-    role: "system",
-    content: `Репетитор сбросил задачу ${taskOrder}. Попробуйте снова!`,
-    task_order: taskOrder,
-    message_kind: "system",
-    author_user_id: tutorUserId,
-    visible_to_student: true,
-  });
-
-  console.log("tutor_reset_task", { assignmentId, studentId, taskOrder });
-
-  return jsonOk(cors, { ok: true, reset_task_order: taskOrder });
-}
-
 // ─── Main Handler ────────────────────────────────────────────────────────────
 
 Deno.serve(async (req: Request): Promise<Response> => {
@@ -3205,6 +3449,11 @@ Deno.serve(async (req: Request): Promise<Response> => {
       return await handleRequestHint(db, userId, seg[1], cors);
     }
 
+    // GET /assignments/:id/tasks/:taskId/image-url (tutor + student)
+    if (seg.length === 5 && seg[0] === "assignments" && seg[2] === "tasks" && seg[4] === "image-url" && route.method === "GET") {
+      return await handleTaskImageSignedUrl(db, userId, seg[1], seg[3], cors);
+    }
+
     const tutorResult = await getTutorOrThrow(db, userId, cors);
     if (tutorResult instanceof Response) return tutorResult;
     const tutor = tutorResult;
@@ -3236,14 +3485,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
       return await handleTutorPostMessage(db, userId, seg[1], seg[3], body, cors);
     }
 
-    // POST /assignments/:id/students/:studentId/thread/tasks/:taskOrder/reset (tutor)
-    if (seg.length === 8 && seg[0] === "assignments" && seg[2] === "students" && seg[4] === "thread" && seg[5] === "tasks" && seg[7] === "reset" && route.method === "POST") {
-      const taskOrderNum = parseInt(seg[6], 10);
-      if (isNaN(taskOrderNum) || taskOrderNum < 1) {
-        return jsonError(cors, 400, "VALIDATION", "Invalid task order");
-      }
-      return await handleTutorResetTask(db, userId, seg[1], seg[3], taskOrderNum, cors);
-    }
+
 
     // PUT /assignments/:id
     if (seg.length === 2 && seg[0] === "assignments" && route.method === "PUT") {

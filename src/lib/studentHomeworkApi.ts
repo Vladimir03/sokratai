@@ -576,6 +576,20 @@ export async function getStudentTaskImageSignedUrl(taskImageRef: string): Promis
   return data.signedUrl;
 }
 
+export async function getStudentTaskImageSignedUrlViaBackend(
+  assignmentId: string,
+  taskId: string,
+): Promise<string | null> {
+  try {
+    const result = await requestStudentHomeworkApi<{ url: string }>(
+      `/assignments/${encodeURIComponent(assignmentId)}/tasks/${encodeURIComponent(taskId)}/image-url`,
+    );
+    return result.url ?? null;
+  } catch {
+    return null;
+  }
+}
+
 export interface StudentSubmissionAiCheckResponse {
   status: 'submitted' | 'ai_checked' | 'tutor_reviewed';
   total_score: number | null;

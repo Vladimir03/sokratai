@@ -50,6 +50,7 @@ import { useStudentThread } from '@/hooks/useStudentHomework';
 import {
   checkAnswer,
   getStudentTaskImageSignedUrl,
+  getStudentTaskImageSignedUrlViaBackend,
   requestHint,
   saveThreadMessage,
 } from '@/lib/studentHomeworkApi';
@@ -153,9 +154,13 @@ function MaterialLink({
 }
 
 function TaskConditionImage({
+  assignmentId,
+  taskId,
   taskOrder,
   taskImageUrl,
 }: {
+  assignmentId: string;
+  taskId: string;
   taskOrder: number;
   taskImageUrl: string | null;
 }) {
@@ -163,8 +168,8 @@ function TaskConditionImage({
   const isExternal = Boolean(taskImageUrl && /^https?:\/\//i.test(taskImageUrl));
 
   const imageQuery = useQuery<string | null>({
-    queryKey: ['student', 'homework', 'guided-task-image', taskImageUrl],
-    queryFn: () => getStudentTaskImageSignedUrl(taskImageUrl!),
+    queryKey: ['student', 'homework', 'guided-task-image', assignmentId, taskId],
+    queryFn: () => getStudentTaskImageSignedUrlViaBackend(assignmentId, taskId),
     enabled: Boolean(taskImageUrl) && !isExternal,
     staleTime: 30 * 60 * 1000,
     gcTime: 60 * 60 * 1000,
@@ -1016,6 +1021,8 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
 
           <div className="mt-2">
             <TaskConditionImage
+              assignmentId={assignment.id}
+              taskId={currentTask.id}
               taskOrder={currentTask.order_num}
               taskImageUrl={currentTask.task_image_url}
             />

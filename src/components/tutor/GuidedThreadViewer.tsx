@@ -5,13 +5,12 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
-import { Loader2, Send, RotateCcw } from 'lucide-react';
+import { Loader2, Send } from 'lucide-react';
 import { parseISO } from 'date-fns';
 import { toast } from 'sonner';
 import {
   getTutorStudentGuidedThread,
   postTutorThreadMessage,
-  resetTutorStudentTask,
   type TutorStudentGuidedThreadResponse,
 } from '@/lib/tutorHomeworkApi';
 import {
@@ -89,16 +88,6 @@ export function GuidedThreadViewer({
     }
   }, [messageText, hiddenNote, isSending, assignmentId, studentId, taskFilter, threadQuery]);
 
-  const handleResetTask = useCallback(async (taskOrder: number) => {
-    try {
-      await resetTutorStudentTask(assignmentId, studentId, taskOrder);
-      toast.success(`Задача ${taskOrder} сброшена`);
-      void threadQuery.refetch();
-    } catch (err) {
-      toast.error(`Ошибка: ${err instanceof Error ? err.message : 'неизвестная'}`);
-    }
-  }, [assignmentId, studentId, threadQuery]);
-
   return (
     <Card className="border-dashed">
       <CardHeader className="pb-3">
@@ -141,29 +130,16 @@ export function GuidedThreadViewer({
                 </Button>
                 {threadQuery.data.tasks.map((task) => {
                   const state = taskStatusById.get(task.id);
-                  const canReset = state?.status === 'completed' || state?.status === 'active';
                   return (
-                    <div key={task.id} className="flex items-center gap-0.5">
-                      <Button
-                        variant={taskFilter === task.order_num ? 'default' : 'outline'}
-                        size="sm"
-                        className="h-7 text-xs"
-                        onClick={() => setTaskFilter(task.order_num)}
-                      >
-                        #{task.order_num} {TASK_STATUS_LABELS[state?.status ?? 'locked'] ?? state?.status}
-                      </Button>
-                      {canReset && (
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="h-6 w-6 p-0 text-muted-foreground hover:text-destructive"
-                          onClick={() => handleResetTask(task.order_num)}
-                          title="Сбросить задачу"
-                        >
-                          <RotateCcw className="h-3 w-3" />
-                        </Button>
-                      )}
-                    </div>
+                    <Button
+                      key={task.id}
+                      variant={taskFilter === task.order_num ? 'default' : 'outline'}
+                      size="sm"
+                      className="h-7 text-xs"
+                      onClick={() => setTaskFilter(task.order_num)}
+                    >
+                      #{task.order_num} {TASK_STATUS_LABELS[state?.status ?? 'locked'] ?? state?.status}
+                    </Button>
                   );
                 })}
               </div>
