@@ -3,9 +3,6 @@ project_id = "vrsseotrfmsxpbciyqzc"
 [functions.chat]
 verify_jwt = false
 
-[functions.analyze-homework-task]
-verify_jwt = true
-
 [functions.telegram-bot]
 verify_jwt = false
 
