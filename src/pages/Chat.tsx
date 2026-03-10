@@ -12,7 +12,6 @@ import LoadingIndicator from "@/components/LoadingIndicator";
 import { useSearchParams, useNavigate, useLocation } from "react-router-dom";
 import ConnectionIndicator from "@/components/ConnectionIndicator";
 import { ChatSidebar } from "@/components/ChatSidebar";
-import { TaskContextBanner } from "@/components/TaskContextBanner";
 import Navigation from "@/components/Navigation";
 import AuthGuard from "@/components/AuthGuard";
 import { useIsMobile, useDeviceType, isAndroid } from "@/hooks/use-mobile";
@@ -256,13 +255,7 @@ export default function Chat() {
 
       const { data, error } = await supabase
         .from('chats')
-        .select(`
-          *,
-          homework_task:homework_tasks(
-            *,
-            homework_set:homework_sets(*)
-          )
-        `)
+        .select('*')
         .eq('id', currentChatId)
         .single();
 
@@ -1272,10 +1265,7 @@ export default function Chat() {
         });
       };
 
-      // Отправляем taskContext только в первом сообщении
-      const taskContext = (currentChat?.homework_task && messages.length === 0)
-        ? `Задача №${currentChat.homework_task.task_number}. Тема: ${currentChat.homework_task.homework_set?.topic}. Условие: ${currentChat.homework_task.condition_text}`
-        : undefined;
+      const taskContext = undefined;
 
       // Отправляем только последние 15 сообщений
       const messagesToSend = messages.slice(-15);
@@ -1448,54 +1438,6 @@ export default function Chat() {
     }
   }, [user?.id]);
 
-  // Auto-start conversation with task context using AI
-  useEffect(() => {
-    if (!currentChat?.homework_task || messages.length > 0 || loadingHistory || isLoading) return;
-
-    const generateAIWelcomeMessage = async () => {
-      const task = currentChat.homework_task;
-      setIsLoading(true);
-
-      let assistantSoFar = "";
-      const upsertAssistant = (nextChunk: string) => {
-        assistantSoFar += nextChunk;
-        setMessages([{ role: "assistant", content: assistantSoFar }]);
-      };
-
-      try {
-        const taskContext = `Задача №${task.task_number}. Тема: ${task.homework_set?.topic}. Условие: ${task.condition_text}`;
-        
-        await streamChatWithRetry({
-          messages: [{
-            role: "user",
-            content: "Привет! Помоги мне разобраться с этой задачей"
-          }],
-          onDelta: (chunk) => upsertAssistant(chunk),
-          onDone: () => {
-            setIsLoading(false);
-          },
-          taskContext,
-          chatId: currentChatId,
-          retries: 3,
-        });
-
-        const finalAssistantMsg: Message = { role: "assistant", content: assistantSoFar };
-        await saveMessageToBatch(finalAssistantMsg);
-      } catch (error) {
-        console.error('Error generating welcome message:', error);
-        setIsLoading(false);
-        // Fallback to simple welcome message
-        const fallbackMessage: Message = {
-          role: 'assistant',
-          content: `Привет! Вижу, ты работаешь над задачей ${task.task_number} из темы "${task.homework_set?.topic}". С чего начнём?`
-        };
-        setMessages([fallbackMessage]);
-        await saveMessageToBatch(fallbackMessage);
-      }
-    };
-
-    generateAIWelcomeMessage();
-  }, [currentChat?.homework_task, messages.length, loadingHistory, isLoading]);
 
   const handleChatSelect = (chatId: string) => {
     // Debounce protection
@@ -1876,11 +1818,6 @@ export default function Chat() {
                 <ConnectionIndicator />
               </div>
 
-              {currentChat?.chat_type === 'homework_task' && currentChat.homework_task && (
-                <div className="flex-shrink-0">
-                  <TaskContextBanner task={currentChat.homework_task} />
-                </div>
-              )}
 
               {/* Trial expiry reminder */}
               {subscription.isTrialActive && subscription.trialDaysLeft <= 2 && !trialReminderDismissed && (
