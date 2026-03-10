@@ -9,6 +9,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import TutorGuard from '@/components/TutorGuard';
 import { TutorLayout } from '@/components/tutor/TutorLayout';
 import { TutorDataStatus } from '@/components/tutor/TutorDataStatus';
+import { GuidedThreadViewer } from '@/components/tutor/GuidedThreadViewer';
 import {
   getTutorHomeworkAssignment,
   getHomeworkImageSignedUrl,
@@ -345,6 +346,7 @@ function StudentsList({
 }) {
   const [expandedStudents, setExpandedStudents] = useState<Set<string>>(new Set());
   const { assigned_students } = details;
+  const isGuidedChat = details.assignment.workflow_mode === 'guided_chat';
 
   if (assigned_students.length === 0) {
     return (
@@ -384,11 +386,11 @@ function StudentsList({
             return (
               <div key={student.student_id} className="py-3">
                 <div
-                  className={`flex items-center justify-between gap-2 ${hasItems ? 'cursor-pointer hover:bg-muted/30 -mx-2 px-2 py-1 rounded-md transition-colors' : ''}`}
-                  onClick={hasItems ? () => toggleExpand(student.student_id) : undefined}
+                  className={`flex items-center justify-between gap-2 ${hasItems || isGuidedChat ? 'cursor-pointer hover:bg-muted/30 -mx-2 px-2 py-1 rounded-md transition-colors' : ''}`}
+                  onClick={hasItems || isGuidedChat ? () => toggleExpand(student.student_id) : undefined}
                 >
                   <div className="min-w-0 flex items-center gap-2">
-                    {hasItems && (
+                    {(hasItems || isGuidedChat) && (
                       isExpanded
                         ? <ChevronUp className="h-4 w-4 text-muted-foreground flex-shrink-0" />
                         : <ChevronDown className="h-4 w-4 text-muted-foreground flex-shrink-0" />
@@ -410,7 +412,11 @@ function StudentsList({
                     </div>
                   </div>
                   <div className="text-right flex-shrink-0">
-                    {sub ? (
+                    {isGuidedChat ? (
+                      <Badge variant="outline" className="bg-blue-100 text-blue-800 border-blue-200 dark:bg-blue-900/30 dark:text-blue-400">
+                        Guided Chat
+                      </Badge>
+                    ) : sub ? (
                       <div>
                         <Badge variant="outline" className={
                           sub.status === 'ai_checked' || sub.status === 'tutor_reviewed'
@@ -436,8 +442,18 @@ function StudentsList({
                   </div>
                 </div>
 
-                {/* Expanded submission details */}
-                {isExpanded && hasItems && (
+                {/* Guided chat thread viewer */}
+                {isGuidedChat && isExpanded && (
+                  <div className="mt-3">
+                    <GuidedThreadViewer
+                      assignmentId={details.assignment.id}
+                      studentId={student.student_id}
+                    />
+                  </div>
+                )}
+
+                {/* Expanded submission details (classic mode) */}
+                {!isGuidedChat && isExpanded && hasItems && (
                   <div className="mt-3 ml-6 space-y-2">
                     {sub.submission_items.map((item) => (
                       <SubmissionItemRow key={item.task_id} item={item} />
