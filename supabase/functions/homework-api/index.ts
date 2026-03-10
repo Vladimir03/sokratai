@@ -1772,10 +1772,6 @@ async function handleDeleteAssignment(
     return jsonError(cors, 500, "DB_ERROR", "Failed to delete assignment");
   }
 
-  if (error) {
-    console.error("homework_api_request_error", { route: "DELETE /assignments/:id", error: error.message });
-    return jsonError(cors, 500, "DB_ERROR", "Failed to delete assignment");
-  }
 
   console.log("homework_api_request_success", {
     route: "DELETE /assignments/:id",
