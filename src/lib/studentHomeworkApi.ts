@@ -210,10 +210,10 @@ export async function listStudentAssignments(): Promise<StudentHomeworkAssignmen
   // For classic: fetch latest submission status per assignment
   const { data: submissionRows, error: submissionError } = await supabase
     .from('homework_tutor_submissions')
-    .select('assignment_id, status, created_at')
+    .select('assignment_id, status, submitted_at')
     .eq('student_id', studentId)
     .in('assignment_id', assignmentIds.length > 0 ? assignmentIds : ['00000000-0000-0000-0000-000000000000'])
-    .order('created_at', { ascending: false });
+    .order('submitted_at', { ascending: false });
 
   if (submissionError) {
     throw new StudentHomeworkApiError(submissionError.message);
