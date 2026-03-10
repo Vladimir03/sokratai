@@ -26,10 +26,11 @@ import {
   type TutorHomeworkResultsResponse,
   type TutorHomeworkSubmissionItem,
   type HomeworkAssignmentStatus,
+  type HomeworkSubject,
   type DeliveryStatus,
   type HomeworkMaterial,
 } from '@/lib/tutorHomeworkApi';
-import { SUBJECTS, getSubjectLabel } from '@/types/homework';
+import { getSubjectLabel } from '@/types/homework';
 import { parseISO } from 'date-fns';
 import {
   createTutorRetry,
@@ -47,6 +48,22 @@ const STATUS_CONFIG: Record<HomeworkAssignmentStatus, { label: string; className
   active: { label: 'Активное', className: 'bg-green-100 text-green-800 border-green-200 dark:bg-green-900/30 dark:text-green-400 dark:border-green-800' },
   closed: { label: 'Завершено', className: 'bg-gray-100 text-gray-600 border-gray-200 dark:bg-gray-800 dark:text-gray-400 dark:border-gray-700' },
 };
+
+const HOMEWORK_SUBJECTS: { value: HomeworkSubject; label: string }[] = [
+  { value: 'math', label: 'Математика' },
+  { value: 'physics', label: 'Физика' },
+  { value: 'history', label: 'История' },
+  { value: 'social', label: 'Обществознание' },
+  { value: 'english', label: 'Английский' },
+  { value: 'cs', label: 'Информатика' },
+];
+
+/** Convert an ISO/UTC date string to a local datetime-local input value (YYYY-MM-DDTHH:mm). */
+function toLocalDatetimeString(isoString: string): string {
+  const d = parseISO(isoString);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
 
 function formatDate(d: string | null): string {
   if (!d) return '—';
@@ -543,7 +560,7 @@ function TutorHomeworkDetailContent() {
     setEditTitle(details.assignment.title);
     setEditSubject(details.assignment.subject);
     setEditTopic(details.assignment.topic ?? '');
-    setEditDeadline(details.assignment.deadline ? details.assignment.deadline.slice(0, 16) : '');
+    setEditDeadline(details.assignment.deadline ? toLocalDatetimeString(details.assignment.deadline) : '');
     setEditOpen(true);
   }, [details]);
 
@@ -692,9 +709,9 @@ function TutorHomeworkDetailContent() {
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  {SUBJECTS.map((s) => (
-                    <SelectItem key={s.id} value={s.id}>
-                      {s.emoji} {s.name}
+                  {HOMEWORK_SUBJECTS.map((s) => (
+                    <SelectItem key={s.value} value={s.value}>
+                      {s.label}
                     </SelectItem>
                   ))}
                 </SelectContent>
