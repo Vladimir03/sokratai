@@ -114,6 +114,40 @@ For architecture overview see: docs/engineering/architecture/README.md
 - Всегда используй `parseISO` из `date-fns` для разбора строк дат (не `new Date(string)` — ломается в Safari)
 - `hourly_rate_cents` / суммы платежей хранятся в копейках (integer). Деление на 100 только при отображении — используй `formatPaymentAmount` из `formatters.ts`
 
+## Система домашних заданий
+
+В проекте **ОДНА** система домашних заданий — tutor-connected (`homework_tutor_*` таблицы).
+
+Legacy student-only система (`homework_sets`, `homework_tasks`, `homework_chat_messages`) **полностью удалена** (миграция `20260310110000_drop_legacy_homework.sql`).
+
+### Два режима работы
+- **Classic** (`workflow_mode: 'classic'`): ученик отправляет фото решений через Telegram-бот или веб-кабинет, AI проверяет
+- **Guided Chat** (`workflow_mode: 'guided_chat'`): пошаговый AI-чат, ведёт ученика через каждую задачу с подсказками и проверкой
+
+### Ключевые файлы
+- `src/lib/studentHomeworkApi.ts` — API-клиент для студентов (задания, submissions, guided chat)
+- `src/hooks/useStudentHomework.ts` — React hooks для студенческого ДЗ
+- `src/components/homework/` — Guided homework UI (GuidedHomeworkWorkspace, GuidedChatInput, GuidedChatMessage, TaskStepper)
+- `src/components/tutor/GuidedThreadViewer.tsx` — просмотр guided-чата со стороны репетитора
+- `src/lib/tutorHomeworkApi.ts` — API-клиент для репетиторов
+- `supabase/functions/homework-api/` — Edge function CRUD (8 маршрутов)
+- `supabase/functions/homework-reminder/` — напоминания о ДЗ (cron)
+
+### Таблицы БД
+- `homework_tutor_assignments` — задания (draft/active/archived, workflow_mode)
+- `homework_tutor_tasks` — задачи внутри заданий
+- `homework_tutor_submissions` — submissions учеников
+- `homework_tutor_submission_items` — ответы по задачам (text, photos, AI score)
+- `homework_tutor_threads` — guided chat threads
+- `homework_tutor_thread_messages` — сообщения в guided chat
+- `homework_tutor_task_states` — прогресс по задачам в guided mode
+- `homework_tutor_templates` — шаблоны заданий
+- `homework_tutor_materials` — материалы к заданиям (PDF, images, links)
+
+### Важно
+- Система попыток (attempts) **удалена** — ученик может пересдавать без ограничений
+- `src/types/homework.ts` содержит legacy-типы `HomeworkSet`/`HomeworkTask` (пока используются SUBJECTS конфиг) — не путать с активной системой
+
 ## Известные хрупкие области
 
 1. **Chat.tsx** (2000+ строк) — очень сложный компонент. Любые изменения в ChatMessage, ChatInput, ChatSidebar могут сломать чат
