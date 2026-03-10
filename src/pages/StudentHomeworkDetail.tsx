@@ -17,6 +17,8 @@ import {
 } from '@/lib/studentHomeworkApi';
 import { useStudentAssignment } from '@/hooks/useStudentHomework';
 import type { StudentHomeworkAssignmentDetails, StudentHomeworkSubmission } from '@/types/homework';
+import { getSubjectLabel } from '@/types/homework';
+import { parseISO } from 'date-fns';
 
 const GuidedHomeworkWorkspace = lazy(() => import('@/components/homework/GuidedHomeworkWorkspace'));
 
@@ -106,7 +108,7 @@ function buildHomeworkChatContext(
 
   return [
     `Я разбираю домашнюю работу "${assignment.title}".`,
-    `Предмет: ${assignment.subject}.`,
+    `Предмет: ${getSubjectLabel(assignment.subject)}.`,
     assignment.topic ? `Тема: ${assignment.topic}.` : null,
     assignment.description ? `Описание ДЗ: ${assignment.description}.` : null,
     `Попытка: #${submission.attempt_no}.`,
@@ -218,7 +220,7 @@ const StudentHomeworkDetail = () => {
 
   const attemptsUsed = latestSubmission?.attempt_no ?? 0;
   const maxAttempts = data?.max_attempts ?? 3;
-  const deadlinePassed = data?.deadline ? new Date(data.deadline).getTime() <= Date.now() : false;
+  const deadlinePassed = data?.deadline ? parseISO(data.deadline).getTime() <= Date.now() : false;
   const attemptsReached = attemptsUsed >= maxAttempts;
 
   const canStartAttempt = Boolean(data) && !deadlinePassed && !attemptsReached && !inProgressSubmission;
@@ -465,8 +467,8 @@ const StudentHomeworkDetail = () => {
                     <CardTitle>{data.title}</CardTitle>
                   </CardHeader>
                   <CardContent className="space-y-2">
-                    <p>Предмет: {data.subject}</p>
-                    {data.deadline && <p>Дедлайн: {new Date(data.deadline).toLocaleString('ru-RU')}</p>}
+                    <p>Предмет: {getSubjectLabel(data.subject)}</p>
+                    {data.deadline && <p>Дедлайн: {parseISO(data.deadline).toLocaleString('ru-RU')}</p>}
                     <p>Попытки: {attemptsUsed}/{maxAttempts}</p>
                     {inProgressSubmission && (
                       <Badge variant="secondary">Текущая попытка #{inProgressSubmission.attempt_no}: Черновик</Badge>

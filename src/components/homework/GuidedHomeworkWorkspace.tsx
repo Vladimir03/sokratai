@@ -45,6 +45,7 @@ import type {
   StudentHomeworkAssignmentDetails,
   TaskStateStatus,
 } from '@/types/homework';
+import { getSubjectLabel } from '@/types/homework';
 import { useStudentThread } from '@/hooks/useStudentHomework';
 import {
   checkAnswer,
@@ -100,7 +101,7 @@ function buildTaskContext(
         : 'Режим: проверка ответа ученика. Если ответ вероятно неверный, дай шаг для исправления. Если вероятно верный — похвали и предложи перейти к следующей задаче.';
 
   const parts = [
-    `Задание: "${assignment.title}" по предмету ${assignment.subject}.`,
+    `Задание: "${assignment.title}" по предмету ${getSubjectLabel(assignment.subject)}.`,
     assignment.topic ? `Тема: ${assignment.topic}.` : null,
     `Задача ${currentTask.order_num} из ${totalTasks}.`,
     `Условие: ${currentTask.task_text}`,
@@ -878,7 +879,7 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
       <div className="flex-1 flex items-center justify-center p-4">
         <Card className="max-w-md w-full">
           <CardContent className="pt-6 text-center space-y-4">
-            <p className="text-destructive">Не удалось загрузить guided-чат</p>
+            <p className="text-destructive">Не удалось загрузить домашнее задание</p>
             <p className="text-sm text-muted-foreground">
               {threadError instanceof Error ? threadError.message : 'Попробуйте позже'}
             </p>
@@ -897,7 +898,7 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
       <div className="flex-1 flex items-center justify-center p-4">
         <Card className="max-w-md w-full">
           <CardContent className="pt-6 text-center space-y-4">
-            <p className="text-muted-foreground">Guided-режим пока недоступен</p>
+            <p className="text-muted-foreground">Домашнее задание пока недоступно</p>
             <p className="text-sm text-muted-foreground">
               Попросите репетитора повторно назначить вам это задание
             </p>
@@ -925,7 +926,7 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
             </Button>
             <div className="flex-1 min-w-0">
               <h1 className="text-sm font-semibold truncate">{assignment.title}</h1>
-              <p className="text-xs text-muted-foreground">{assignment.subject}</p>
+              <p className="text-xs text-muted-foreground">{getSubjectLabel(assignment.subject)}</p>
             </div>
           </div>
         </div>
@@ -934,7 +935,7 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
           <Card className="max-w-md w-full">
             <CardHeader className="text-center">
               <CheckCircle2 className="w-12 h-12 text-green-500 mx-auto mb-2" />
-              <CardTitle>Все guided-задачи завершены</CardTitle>
+              <CardTitle>Все задачи домашки сданы</CardTitle>
             </CardHeader>
             <CardContent className="text-center space-y-4">
               <p className="text-muted-foreground">
@@ -970,7 +971,7 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
           <div className="flex-1 min-w-0">
             <h1 className="text-sm font-semibold truncate">{assignment.title}</h1>
             <div className="mt-1 flex flex-wrap items-center gap-2">
-              <p className="text-xs text-muted-foreground">{assignment.subject}</p>
+              <p className="text-xs text-muted-foreground">{getSubjectLabel(assignment.subject)}</p>
               <Badge className={`border text-xs ${UI_STATUS_META[uiStatus].badgeClass}`}>
                 {UI_STATUS_META[uiStatus].label}
               </Badge>

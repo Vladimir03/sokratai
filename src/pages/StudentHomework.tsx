@@ -5,10 +5,12 @@ import AuthGuard from '@/components/AuthGuard';
 import { PageContent } from '@/components/PageContent';
 import { Button } from '@/components/ui/button';
 import { useStudentAssignments } from '@/hooks/useStudentHomework';
+import { getSubjectLabel } from '@/types/homework';
+import { parseISO } from 'date-fns';
 import { Link } from 'react-router-dom';
 
 function formatStatus(status: string | null, deadline: string | null) {
-  if (deadline && new Date(deadline).getTime() <= Date.now()) return 'deadline_missed';
+  if (deadline && parseISO(deadline).getTime() <= Date.now()) return 'deadline_missed';
   if (status === 'tutor_reviewed' || status === 'ai_checked') return 'checked';
   if (status === 'submitted') return 'submitted';
   return 'assigned';
@@ -60,10 +62,10 @@ const StudentHomework = () => {
                         </div>
                       </CardHeader>
                       <CardContent className="space-y-2">
-                        <p className="text-sm text-muted-foreground">Предмет: {assignment.subject}</p>
+                        <p className="text-sm text-muted-foreground">Предмет: {getSubjectLabel(assignment.subject)}</p>
                         {assignment.deadline && (
                           <p className="text-sm text-muted-foreground">
-                            Дедлайн: {new Date(assignment.deadline).toLocaleString('ru-RU')}
+                            Дедлайн: {parseISO(assignment.deadline).toLocaleString('ru-RU')}
                           </p>
                         )}
                         <p className="text-sm">{assignment.attempts_used}/{assignment.max_attempts} попыток</p>

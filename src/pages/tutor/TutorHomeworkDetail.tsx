@@ -19,10 +19,11 @@ import {
   type TutorHomeworkResultsResponse,
   type TutorHomeworkSubmissionItem,
   type HomeworkAssignmentStatus,
-  type HomeworkSubject,
   type DeliveryStatus,
   type HomeworkMaterial,
 } from '@/lib/tutorHomeworkApi';
+import { getSubjectLabel } from '@/types/homework';
+import { parseISO } from 'date-fns';
 import {
   createTutorRetry,
   TUTOR_STALE_TIME_MS,
@@ -34,11 +35,6 @@ import {
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
-const SUBJECT_LABELS: Record<HomeworkSubject, string> = {
-  math: 'Математика', physics: 'Физика', history: 'История',
-  social: 'Обществознание', english: 'Английский', cs: 'Информатика',
-};
-
 const STATUS_CONFIG: Record<HomeworkAssignmentStatus, { label: string; className: string }> = {
   draft: { label: 'Черновик', className: 'bg-muted text-muted-foreground border-muted' },
   active: { label: 'Активное', className: 'bg-green-100 text-green-800 border-green-200 dark:bg-green-900/30 dark:text-green-400 dark:border-green-800' },
@@ -48,7 +44,7 @@ const STATUS_CONFIG: Record<HomeworkAssignmentStatus, { label: string; className
 function formatDate(d: string | null): string {
   if (!d) return '—';
   try {
-    return new Date(d).toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', year: 'numeric' });
+    return parseISO(d).toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', year: 'numeric' });
   } catch { return '—'; }
 }
 
@@ -414,7 +410,7 @@ function StudentsList({
                   <div className="text-right flex-shrink-0">
                     {isGuidedChat ? (
                       <Badge variant="outline" className="bg-blue-100 text-blue-800 border-blue-200 dark:bg-blue-900/30 dark:text-blue-400">
-                        Guided Chat
+                        Пошаговое ДЗ
                       </Badge>
                     ) : sub ? (
                       <div>
@@ -539,7 +535,7 @@ function TutorHomeworkDetailContent() {
                 </Badge>
               </div>
               <div className="flex items-center gap-4 mt-2 text-sm text-muted-foreground flex-wrap">
-                <span>{SUBJECT_LABELS[details.assignment.subject] ?? details.assignment.subject}</span>
+                <span>{getSubjectLabel(details.assignment.subject)}</span>
                 {details.assignment.topic && <span>· {details.assignment.topic}</span>}
                 <span className="flex items-center gap-1">
                   <Clock className="h-3.5 w-3.5" />
