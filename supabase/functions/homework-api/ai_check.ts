@@ -24,7 +24,6 @@ export interface HomeworkTaskRow {
   task_text: string;
   task_image_url: string | null;
   correct_answer: string | null;
-  solution_steps: string | null;
   rubric_text: string | null;
   max_score: number;
 }
@@ -254,7 +253,7 @@ export async function runHomeworkAiCheck(
 
   const { data: tasks, error: tasksError } = await supabase
     .from("homework_tutor_tasks")
-    .select("id, order_num, task_text, task_image_url, correct_answer, solution_steps, rubric_text, max_score")
+    .select("id, order_num, task_text, task_image_url, correct_answer, rubric_text, max_score")
     .eq("assignment_id", assignment.id)
     .order("order_num", { ascending: true });
 
@@ -366,7 +365,6 @@ export async function runHomeworkAiCheck(
         recognizedText,
         effectiveTaskText,
         task.correct_answer,
-        task.solution_steps,
         subject,
         { strict: true, rubricText: task.rubric_text },
       );

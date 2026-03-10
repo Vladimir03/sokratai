@@ -889,7 +889,6 @@ export type Database = {
           max_score: number
           order_num: number
           rubric_text: string | null
-          solution_steps: string | null
           task_image_url: string | null
           task_text: string
         }
@@ -900,7 +899,6 @@ export type Database = {
           max_score?: number
           order_num: number
           rubric_text?: string | null
-          solution_steps?: string | null
           task_image_url?: string | null
           task_text: string
         }
@@ -911,7 +909,6 @@ export type Database = {
           max_score?: number
           order_num?: number
           rubric_text?: string | null
-          solution_steps?: string | null
           task_image_url?: string | null
           task_text?: string
         }

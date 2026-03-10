@@ -1,11 +1,16 @@
-import { useState } from 'react';
-import { useParams, Link } from 'react-router-dom';
-import { useQuery } from '@tanstack/react-query';
-import { ArrowLeft, BookOpen, Users, BarChart3, Clock, CheckCircle2, XCircle, AlertCircle, ChevronDown, ChevronUp, ImageIcon, WifiOff, Paperclip, ExternalLink } from 'lucide-react';
+import { useState, useCallback } from 'react';
+import { useParams, Link, useNavigate } from 'react-router-dom';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { ArrowLeft, BookOpen, Users, BarChart3, Clock, CheckCircle2, XCircle, AlertCircle, ChevronDown, ChevronUp, ImageIcon, WifiOff, Paperclip, ExternalLink, Edit, Trash2 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog';
+import { toast } from 'sonner';
 import TutorGuard from '@/components/TutorGuard';
 import { TutorLayout } from '@/components/tutor/TutorLayout';
 import { TutorDataStatus } from '@/components/tutor/TutorDataStatus';
@@ -15,6 +20,8 @@ import {
   getHomeworkImageSignedUrl,
   getMaterialSignedUrl,
   getTutorHomeworkResults,
+  updateTutorHomeworkAssignment,
+  deleteTutorHomeworkAssignment,
   type TutorHomeworkAssignmentDetails,
   type TutorHomeworkResultsResponse,
   type TutorHomeworkSubmissionItem,
@@ -22,7 +29,7 @@ import {
   type DeliveryStatus,
   type HomeworkMaterial,
 } from '@/lib/tutorHomeworkApi';
-import { getSubjectLabel } from '@/types/homework';
+import { SUBJECTS, getSubjectLabel } from '@/types/homework';
 import { parseISO } from 'date-fns';
 import {
   createTutorRetry,
@@ -469,6 +476,8 @@ function StudentsList({
 
 function TutorHomeworkDetailContent() {
   const { id } = useParams<{ id: string }>();
+  const navigate = useNavigate();
+  const queryClient = useQueryClient();
 
   const detailsQueryKey = ['tutor', 'homework', 'detail', id] as const;
   const resultsQueryKey = ['tutor', 'homework', 'results', id] as const;
@@ -502,17 +511,65 @@ function TutorHomeworkDetailContent() {
     : null;
   const isLoading = detailsQuery.isLoading;
 
+  // ─── Delete dialog ──────────────────────────────────────────────────────────
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+
+  const handleDelete = useCallback(async () => {
+    if (!id) return;
+    setIsDeleting(true);
+    try {
+      await deleteTutorHomeworkAssignment(id);
+      toast.success('ДЗ удалено');
+      void queryClient.invalidateQueries({ queryKey: ['tutor', 'homework'] });
+      navigate('/tutor/homework');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Не удалось удалить ДЗ');
+    } finally {
+      setIsDeleting(false);
+    }
+  }, [id, navigate, queryClient]);
+
+  // ─── Edit dialog ────────────────────────────────────────────────────────────
+  const [editOpen, setEditOpen] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [editTitle, setEditTitle] = useState('');
+  const [editSubject, setEditSubject] = useState('');
+  const [editTopic, setEditTopic] = useState('');
+  const [editDeadline, setEditDeadline] = useState('');
+
+  const openEditDialog = useCallback(() => {
+    if (!details) return;
+    setEditTitle(details.assignment.title);
+    setEditSubject(details.assignment.subject);
+    setEditTopic(details.assignment.topic ?? '');
+    setEditDeadline(details.assignment.deadline ? details.assignment.deadline.slice(0, 16) : '');
+    setEditOpen(true);
+  }, [details]);
+
+  const handleSaveEdit = useCallback(async () => {
+    if (!id || !editTitle.trim()) return;
+    setIsSaving(true);
+    try {
+      await updateTutorHomeworkAssignment(id, {
+        title: editTitle.trim(),
+        subject: editSubject,
+        topic: editTopic.trim() || null,
+        deadline: editDeadline ? new Date(editDeadline).toISOString() : null,
+      });
+      toast.success('Сохранено');
+      setEditOpen(false);
+      void queryClient.invalidateQueries({ queryKey: ['tutor', 'homework', 'detail', id] });
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Не удалось сохранить');
+    } finally {
+      setIsSaving(false);
+    }
+  }, [id, editTitle, editSubject, editTopic, editDeadline, queryClient]);
+
   return (
     <TutorLayout>
       <div className="space-y-6">
-        {/* Back link */}
-        <Button variant="ghost" size="sm" asChild className="gap-2 -ml-2">
-          <Link to="/tutor/homework">
-            <ArrowLeft className="h-4 w-4" />
-            Назад к списку
-          </Link>
-        </Button>
-
         {/* Error */}
         <TutorDataStatus
           error={error}
@@ -527,25 +584,40 @@ function TutorHomeworkDetailContent() {
         ) : details ? (
           <>
             {/* Header */}
-            <div>
-              <div className="flex items-center gap-3 flex-wrap">
-                <h1 className="text-2xl font-bold">{details.assignment.title}</h1>
-                <Badge variant="outline" className={STATUS_CONFIG[details.assignment.status as HomeworkAssignmentStatus]?.className}>
-                  {STATUS_CONFIG[details.assignment.status as HomeworkAssignmentStatus]?.label ?? details.assignment.status}
-                </Badge>
-              </div>
-              <div className="flex items-center gap-4 mt-2 text-sm text-muted-foreground flex-wrap">
-                <span>{getSubjectLabel(details.assignment.subject)}</span>
-                {details.assignment.topic && <span>· {details.assignment.topic}</span>}
-                <span className="flex items-center gap-1">
-                  <Clock className="h-3.5 w-3.5" />
-                  Дедлайн: {formatDate(details.assignment.deadline)}
-                </span>
-              </div>
-              {details.assignment.description && (
-                <p className="text-sm text-muted-foreground mt-2">{details.assignment.description}</p>
-              )}
+            <div className="flex items-center gap-4">
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => navigate('/tutor/homework')}
+              >
+                <ArrowLeft className="h-5 w-5" />
+              </Button>
+              <h1 className="text-2xl font-bold flex-1 truncate">{details.assignment.title}</h1>
+              <Badge variant="outline" className={STATUS_CONFIG[details.assignment.status as HomeworkAssignmentStatus]?.className}>
+                {STATUS_CONFIG[details.assignment.status as HomeworkAssignmentStatus]?.label ?? details.assignment.status}
+              </Badge>
+              <Button variant="outline" onClick={openEditDialog}>
+                <Edit className="h-4 w-4 mr-2" />
+                Редактировать
+              </Button>
+              <Button variant="destructive" onClick={() => setDeleteOpen(true)}>
+                <Trash2 className="h-4 w-4 mr-2" />
+                Удалить ДЗ
+              </Button>
             </div>
+
+            {/* Sub-header info */}
+            <div className="flex items-center gap-4 text-sm text-muted-foreground flex-wrap">
+              <span>{getSubjectLabel(details.assignment.subject)}</span>
+              {details.assignment.topic && <span>· {details.assignment.topic}</span>}
+              <span className="flex items-center gap-1">
+                <Clock className="h-3.5 w-3.5" />
+                Дедлайн: {formatDate(details.assignment.deadline)}
+              </span>
+            </div>
+            {details.assignment.description && (
+              <p className="text-sm text-muted-foreground">{details.assignment.description}</p>
+            )}
 
             {/* Stats */}
             <StatsCards details={details} results={results} />
@@ -563,6 +635,111 @@ function TutorHomeworkDetailContent() {
           </>
         ) : null}
       </div>
+
+      {/* Delete confirmation dialog */}
+      <Dialog open={deleteOpen} onOpenChange={setDeleteOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Удалить домашнее задание?</DialogTitle>
+            <DialogDescription>
+              ДЗ «{details?.assignment.title}» будет удалено вместе со всеми задачами, ответами учеников и материалами. Это действие нельзя отменить.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button
+              type="button"
+              variant="ghost"
+              onClick={() => setDeleteOpen(false)}
+              disabled={isDeleting}
+            >
+              Отмена
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              onClick={() => void handleDelete()}
+              disabled={isDeleting}
+            >
+              {isDeleting ? 'Удаление...' : 'Удалить'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Edit dialog */}
+      <Dialog open={editOpen} onOpenChange={setEditOpen}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Редактировать ДЗ</DialogTitle>
+            <DialogDescription>
+              Измените основные параметры задания.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div className="space-y-2">
+              <Label htmlFor="edit-title">Название</Label>
+              <Input
+                id="edit-title"
+                value={editTitle}
+                onChange={(e) => setEditTitle(e.target.value)}
+                className="text-base"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="edit-subject">Предмет</Label>
+              <Select value={editSubject} onValueChange={setEditSubject}>
+                <SelectTrigger id="edit-subject">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {SUBJECTS.map((s) => (
+                    <SelectItem key={s.id} value={s.id}>
+                      {s.emoji} {s.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="edit-topic">Тема</Label>
+              <Input
+                id="edit-topic"
+                value={editTopic}
+                onChange={(e) => setEditTopic(e.target.value)}
+                placeholder="Необязательно"
+                className="text-base"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="edit-deadline">Дедлайн</Label>
+              <Input
+                id="edit-deadline"
+                type="datetime-local"
+                value={editDeadline}
+                onChange={(e) => setEditDeadline(e.target.value)}
+                className="text-base"
+              />
+            </div>
+          </div>
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button
+              type="button"
+              variant="ghost"
+              onClick={() => setEditOpen(false)}
+              disabled={isSaving}
+            >
+              Отмена
+            </Button>
+            <Button
+              type="button"
+              onClick={() => void handleSaveEdit()}
+              disabled={isSaving || !editTitle.trim()}
+            >
+              {isSaving ? 'Сохранение...' : 'Сохранить'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </TutorLayout>
   );
 }

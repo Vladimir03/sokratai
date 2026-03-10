@@ -428,12 +428,10 @@ function buildCheckPrompt(
   recognizedText: string,
   taskText: string,
   correctAnswer: string | null,
-  solutionSteps: string | null,
   subject: HomeworkSubject,
   rubricText?: string | null,
 ): LovableMessage[] {
   const correctAnswerValue = clampPromptText(correctAnswer) || "[нет эталонного ответа]";
-  const solutionStepsValue = clampPromptText(solutionSteps) || "[нет эталонных шагов]";
   const rubricLine = rubricText ? `rubric_criteria: ${clampPromptText(rubricText)}` : null;
 
   return [
@@ -459,7 +457,6 @@ function buildCheckPrompt(
             `task_text: ${clampPromptText(taskText)}`,
             `recognized_text: ${clampPromptText(recognizedText)}`,
             `correct_answer: ${correctAnswerValue}`,
-            `solution_steps: ${solutionStepsValue}`,
             rubricLine,
             "В ответе score используй только 0 или 1.",
             "Верни строго JSON-объект с ключами is_correct, confidence, score, feedback, error_type.",
@@ -524,7 +521,6 @@ export async function checkHomeworkAnswer(
   recognizedText: string,
   taskText: string,
   correctAnswer: string | null,
-  solutionSteps: string | null,
   subject: HomeworkSubject,
   options: VisionCheckerOptions = {},
 ): Promise<CheckHomeworkAnswerResult> {
@@ -532,7 +528,7 @@ export async function checkHomeworkAnswer(
   console.log("homework_vision_check_start", { subject, strict, has_rubric: !!options.rubricText });
 
   try {
-    const messages = buildCheckPrompt(recognizedText, taskText, correctAnswer, solutionSteps, subject, options.rubricText);
+    const messages = buildCheckPrompt(recognizedText, taskText, correctAnswer, subject, options.rubricText);
     const parsed = await callLovableJson(messages, "homework_vision_check");
     const result = sanitizeCheckResult(parsed, correctAnswer);
 

@@ -55,7 +55,6 @@ Create a new homework assignment with tasks.
       "order_num": 1,
       "task_text": "Решите x^2 - 5x + 6 = 0",
       "correct_answer": "x=2, x=3",
-      "solution_steps": "D=25-24=1, x=(5±1)/2",
       "max_score": 2
     },
     {
@@ -78,7 +77,6 @@ Create a new homework assignment with tasks.
 | `tasks[].task_text` | string | yes | Non-empty |
 | `tasks[].task_image_url` | string | no | Рекомендуемый формат: `storage://{bucket}/{objectPath}` |
 | `tasks[].correct_answer` | string | no | |
-| `tasks[].solution_steps` | string | no | |
 | `tasks[].max_score` | int | no | Default: 1 |
 
 **Response (201):**

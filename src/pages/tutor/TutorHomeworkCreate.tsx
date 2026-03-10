@@ -92,7 +92,6 @@ interface DraftTask {
   task_image_preview_url: string | null;
   task_image_used_fallback: boolean;
   correct_answer: string;
-  solution_steps: string;
   rubric_text: string;
   max_score: number;
   uploading: boolean;
@@ -107,7 +106,6 @@ function createEmptyTask(): DraftTask {
     task_image_preview_url: null,
     task_image_used_fallback: false,
     correct_answer: '',
-    solution_steps: '',
     rubric_text: '',
     max_score: 1,
     uploading: false,
@@ -736,18 +734,6 @@ function TaskEditor({
           </div>
         </div>
 
-        <div className="space-y-2">
-          <Label>Шаги решения</Label>
-          <textarea
-            className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-base ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 min-h-[60px] resize-y"
-            placeholder="D = 25 - 24 = 1; x = (5±1)/2"
-            value={task.solution_steps}
-            onChange={(e) =>
-              onUpdate({ ...task, solution_steps: e.target.value })
-            }
-          />
-        </div>
-
         <RubricField
           value={task.rubric_text}
           onChange={(v) => onUpdate({ ...task, rubric_text: v })}
@@ -807,6 +793,9 @@ function StepTasks({
 
   return (
     <div className="space-y-4">
+      <div className="border-b pb-3">
+        <MaterialsSection materials={materials} onChange={onMaterialsChange} />
+      </div>
       {errors._tasks && (
         <p className="text-sm text-destructive">{errors._tasks}</p>
       )}
@@ -824,9 +813,6 @@ function StepTasks({
         <Plus className="h-4 w-4" />
         Добавить задачу
       </Button>
-      <div className="border-t pt-3">
-        <MaterialsSection materials={materials} onChange={onMaterialsChange} />
-      </div>
     </div>
   );
 }
@@ -1284,7 +1270,6 @@ function TutorHomeworkCreateContent() {
             task_text: t.task_text,
             task_image_path: t.task_image_url ?? null,
             correct_answer: t.correct_answer ?? '',
-            solution_steps: t.solution_steps ?? '',
             rubric_text: t.rubric_text ?? '',
             max_score: t.max_score ?? 1,
           })),
@@ -1317,7 +1302,6 @@ function TutorHomeworkCreateContent() {
           task_text: t.task_text,
           task_image_path: t.task_image_url ?? null,
           correct_answer: t.correct_answer ?? '',
-          solution_steps: t.solution_steps ?? '',
           rubric_text: t.rubric_text ?? '',
           max_score: t.max_score ?? 1,
         })),
@@ -1346,7 +1330,6 @@ function TutorHomeworkCreateContent() {
           task.task_text.trim().length > 0 ||
           task.task_image_path !== null ||
           task.correct_answer.trim().length > 0 ||
-          task.solution_steps.trim().length > 0 ||
           task.max_score !== 1,
       );
 
@@ -1454,7 +1437,6 @@ function TutorHomeworkCreateContent() {
           task_text: t.task_text.trim(),
           task_image_url: t.task_image_path || null,
           correct_answer: t.correct_answer.trim() || null,
-          solution_steps: t.solution_steps.trim() || null,
           rubric_text: t.rubric_text.trim() || null,
           max_score: t.max_score,
         }));
@@ -1543,7 +1525,6 @@ function TutorHomeworkCreateContent() {
               task_text: t.task_text.trim(),
               task_image_url: t.task_image_path || null,
               correct_answer: t.correct_answer.trim() || null,
-              solution_steps: t.solution_steps.trim() || null,
               rubric_text: t.rubric_text.trim() || null,
               max_score: t.max_score,
             })),
