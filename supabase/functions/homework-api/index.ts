@@ -1656,10 +1656,121 @@ async function handleDeleteAssignment(
   const assignmentOrErr = await getOwnedAssignmentOrThrow(db, assignmentId, tutorUserId, cors);
   if (assignmentOrErr instanceof Response) return assignmentOrErr;
 
-  const { error } = await db
-    .from("homework_tutor_assignments")
-    .delete()
-    .eq("id", assignmentId);
+  const { data: taskRows, error: taskRowsError } = await db
+    .from("homework_tutor_tasks")
+    .select("id")
+    .eq("assignment_id", assignmentId);
+  if (taskRowsError) {
+    console.error("homework_api_request_error", { route: "DELETE /assignments/:id", error: taskRowsError.message });
+    return jsonError(cors, 500, "DB_ERROR", "Failed to delete assignment");
+  }
+  const taskIds = (taskRows ?? []).map((row) => row.id);
+
+  const { data: studentAssignmentRows, error: studentAssignmentRowsError } = await db
+    .from("homework_tutor_student_assignments")
+    .select("id")
+    .eq("assignment_id", assignmentId);
+  if (studentAssignmentRowsError) {
+    console.error("homework_api_request_error", { route: "DELETE /assignments/:id", error: studentAssignmentRowsError.message });
+    return jsonError(cors, 500, "DB_ERROR", "Failed to delete assignment");
+  }
+  const studentAssignmentIds = (studentAssignmentRows ?? []).map((row) => row.id);
+
+  let threadIds: string[] = [];
+  if (studentAssignmentIds.length > 0) {
+    const { data: threadRows, error: threadRowsError } = await db
+      .from("homework_tutor_threads")
+      .select("id")
+      .in("student_assignment_id", studentAssignmentIds);
+
+    if (threadRowsError) {
+      console.error("homework_api_request_error", { route: "DELETE /assignments/:id", error: threadRowsError.message });
+      return jsonError(cors, 500, "DB_ERROR", "Failed to delete assignment");
+    }
+
+    threadIds = (threadRows ?? []).map((row) => row.id);
+  }
+
+  const { data: submissionRows, error: submissionRowsError } = await db
+    .from("homework_tutor_submissions")
+    .select("id")
+    .eq("assignment_id", assignmentId);
+  if (submissionRowsError) {
+    console.error("homework_api_request_error", { route: "DELETE /assignments/:id", error: submissionRowsError.message });
+    return jsonError(cors, 500, "DB_ERROR", "Failed to delete assignment");
+  }
+  const submissionIds = (submissionRows ?? []).map((row) => row.id);
+
+  const deleteByAssignment = async (table: string) => {
+    const { error } = await db.from(table).delete().eq("assignment_id", assignmentId);
+    if (error) throw error;
+  };
+
+  try {
+    if (threadIds.length > 0) {
+      const { error: deleteThreadMessagesError } = await db
+        .from("homework_tutor_thread_messages")
+        .delete()
+        .in("thread_id", threadIds);
+      if (deleteThreadMessagesError) throw deleteThreadMessagesError;
+
+      const { error: deleteTaskStatesByThreadError } = await db
+        .from("homework_tutor_task_states")
+        .delete()
+        .in("thread_id", threadIds);
+      if (deleteTaskStatesByThreadError) throw deleteTaskStatesByThreadError;
+    }
+
+    if (taskIds.length > 0) {
+      const { error: deleteTaskStatesByTaskError } = await db
+        .from("homework_tutor_task_states")
+        .delete()
+        .in("task_id", taskIds);
+      if (deleteTaskStatesByTaskError) throw deleteTaskStatesByTaskError;
+
+      const { error: deleteSubmissionItemsByTaskError } = await db
+        .from("homework_tutor_submission_items")
+        .delete()
+        .in("task_id", taskIds);
+      if (deleteSubmissionItemsByTaskError) throw deleteSubmissionItemsByTaskError;
+    }
+
+    if (submissionIds.length > 0) {
+      const { error: deleteSubmissionItemsBySubmissionError } = await db
+        .from("homework_tutor_submission_items")
+        .delete()
+        .in("submission_id", submissionIds);
+      if (deleteSubmissionItemsBySubmissionError) throw deleteSubmissionItemsBySubmissionError;
+    }
+
+    await deleteByAssignment("homework_tutor_submissions");
+
+    if (threadIds.length > 0) {
+      const { error: deleteThreadsError } = await db
+        .from("homework_tutor_threads")
+        .delete()
+        .in("id", threadIds);
+      if (deleteThreadsError) throw deleteThreadsError;
+    }
+
+    await deleteByAssignment("homework_tutor_student_assignments");
+    await deleteByAssignment("homework_tutor_materials");
+    await deleteByAssignment("homework_tutor_reminder_log");
+    await deleteByAssignment("homework_tutor_tasks");
+
+    const { error } = await db
+      .from("homework_tutor_assignments")
+      .delete()
+      .eq("id", assignmentId);
+
+    if (error) {
+      throw error;
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error("homework_api_request_error", { route: "DELETE /assignments/:id", error: message });
+    return jsonError(cors, 500, "DB_ERROR", "Failed to delete assignment");
+  }
 
   if (error) {
     console.error("homework_api_request_error", { route: "DELETE /assignments/:id", error: error.message });
