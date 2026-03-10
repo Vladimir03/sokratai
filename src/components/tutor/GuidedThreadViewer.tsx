@@ -6,6 +6,7 @@ import { Badge } from '@/components/ui/badge';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
 import { Loader2, Send, RotateCcw } from 'lucide-react';
+import { parseISO } from 'date-fns';
 import { toast } from 'sonner';
 import {
   getTutorStudentGuidedThread,
@@ -25,6 +26,13 @@ const ROLE_LABELS: Record<string, string> = {
   assistant: 'AI',
   system: 'Система',
   tutor: 'Репетитор',
+};
+
+const TASK_STATUS_LABELS: Record<string, string> = {
+  locked: 'Закрыта',
+  active: 'Активная',
+  completed: 'Завершена',
+  skipped: 'Пропущена',
 };
 
 export function GuidedThreadViewer({
@@ -142,7 +150,7 @@ export function GuidedThreadViewer({
                         className="h-7 text-xs"
                         onClick={() => setTaskFilter(task.order_num)}
                       >
-                        #{task.order_num} {state?.status ?? 'locked'}
+                        #{task.order_num} {TASK_STATUS_LABELS[state?.status ?? 'locked'] ?? state?.status}
                       </Button>
                       {canReset && (
                         <Button
@@ -182,7 +190,7 @@ export function GuidedThreadViewer({
                           {message.task_order ? `Задача ${message.task_order}` : ''}
                         </span>
                         <span className="text-muted-foreground">
-                          {new Date(message.created_at).toLocaleString('ru-RU')}
+                          {parseISO(message.created_at).toLocaleString('ru-RU')}
                         </span>
                       </div>
                       <div className="whitespace-pre-wrap leading-relaxed break-words">

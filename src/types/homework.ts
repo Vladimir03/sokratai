@@ -64,6 +64,16 @@ export const SUBJECTS = [
   { id: 'other', name: 'Другое', emoji: '📝', category: 'other' }
 ];
 
+/** Quick id→name lookup derived from SUBJECTS */
+export const SUBJECT_NAME_MAP: Record<string, string> = Object.fromEntries(
+  SUBJECTS.map((s) => [s.id, s.name]),
+);
+
+/** Get human-readable Russian subject name; falls back to raw id */
+export function getSubjectLabel(id: string): string {
+  return SUBJECT_NAME_MAP[id] ?? id;
+}
+
 export const PRIORITY_CONFIG = {
   urgent: { label: 'Срочно', color: 'red', emoji: '🔴' },
   important: { label: 'Важно', color: 'yellow', emoji: '🟡' },
@@ -84,6 +94,7 @@ export interface StudentHomeworkAssignment {
   max_attempts: number;
   attempts_used: number;
   latest_submission_status: string | null;
+  created_at: string;
 }
 
 export interface StudentHomeworkTask {

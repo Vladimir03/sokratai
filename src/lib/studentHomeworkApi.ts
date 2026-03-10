@@ -1,3 +1,4 @@
+import { parseISO } from 'date-fns';
 import { supabase } from '@/lib/supabaseClient';
 import type {
   StudentHomeworkAssignment,
@@ -65,7 +66,7 @@ async function getCurrentUserId(): Promise<string> {
 
 function isDeadlinePassed(deadline: string | null | undefined): boolean {
   if (!deadline) return false;
-  return new Date(deadline).getTime() <= Date.now();
+  return parseISO(deadline).getTime() <= Date.now();
 }
 
 function translateSupabaseError(message: string): string {
@@ -286,13 +287,12 @@ export async function listStudentAssignments(): Promise<StudentHomeworkAssignmen
         max_attempts: assignment.max_attempts ?? 3,
         attempts_used,
         latest_submission_status,
+        created_at: assignment.created_at,
       } satisfies StudentHomeworkAssignment;
     })
     .sort((a, b) => {
-      if (!a.deadline && !b.deadline) return 0;
-      if (!a.deadline) return 1;
-      if (!b.deadline) return -1;
-      return new Date(a.deadline).getTime() - new Date(b.deadline).getTime();
+      // Newest assignments first (by creation date descending)
+      return parseISO(b.created_at).getTime() - parseISO(a.created_at).getTime();
     });
 }
 
