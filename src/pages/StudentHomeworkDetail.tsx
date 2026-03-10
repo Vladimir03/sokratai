@@ -111,7 +111,6 @@ function buildHomeworkChatContext(
     `Предмет: ${getSubjectLabel(assignment.subject)}.`,
     assignment.topic ? `Тема: ${assignment.topic}.` : null,
     assignment.description ? `Описание ДЗ: ${assignment.description}.` : null,
-    `Попытка: #${submission.attempt_no}.`,
     `Статус проверки: ${formatSubmissionStatus(submission.status)}.`,
     submission.total_score !== null && submission.total_max_score !== null
       ? `Итог: ${submission.total_score}/${submission.total_max_score}.`
@@ -218,12 +217,9 @@ const StudentHomeworkDetail = () => {
     [data, latestCompletedItemsMap, latestCompletedSubmission],
   );
 
-  const attemptsUsed = latestSubmission?.attempt_no ?? 0;
-  const maxAttempts = data?.max_attempts ?? 3;
   const deadlinePassed = data?.deadline ? parseISO(data.deadline).getTime() <= Date.now() : false;
-  const attemptsReached = attemptsUsed >= maxAttempts;
 
-  const canStartAttempt = Boolean(data) && !deadlinePassed && !attemptsReached && !inProgressSubmission;
+  const canStartAttempt = Boolean(data) && !deadlinePassed && !inProgressSubmission;
   const canSubmitAttempt = Boolean(data) && Boolean(inProgressSubmission) && !deadlinePassed;
   const hasAnyCompletedSubmission = Boolean(latestCompletedSubmission);
   const isBusy = isStartingAttempt || isSubmittingAttempt || isRunningAiCheck;
@@ -469,9 +465,8 @@ const StudentHomeworkDetail = () => {
                   <CardContent className="space-y-2">
                     <p>Предмет: {getSubjectLabel(data.subject)}</p>
                     {data.deadline && <p>Дедлайн: {parseISO(data.deadline).toLocaleString('ru-RU')}</p>}
-                    <p>Попытки: {attemptsUsed}/{maxAttempts}</p>
                     {inProgressSubmission && (
-                      <Badge variant="secondary">Текущая попытка #{inProgressSubmission.attempt_no}: Черновик</Badge>
+                      <Badge variant="secondary">В работе</Badge>
                     )}
                     {!inProgressSubmission && latestSubmissionNeedsAiCheck && (
                       <Badge variant={aiCheckUiStatus === 'failed' ? 'destructive' : 'secondary'}>
@@ -482,7 +477,6 @@ const StudentHomeworkDetail = () => {
                       <Badge>AI-проверка завершена</Badge>
                     )}
                     {deadlinePassed && <Badge variant="destructive">Дедлайн прошёл</Badge>}
-                    {attemptsReached && <Badge variant="destructive">Лимит попыток исчерпан</Badge>}
                   </CardContent>
                 </Card>
 
@@ -493,7 +487,7 @@ const StudentHomeworkDetail = () => {
                     </CardHeader>
                     <CardContent className="space-y-3">
                       <p className="text-sm">
-                        Попытка #{latestCompletedSubmission.attempt_no}: {formatSubmissionStatus(latestCompletedSubmission.status)}
+                        {formatSubmissionStatus(latestCompletedSubmission.status)}
                       </p>
                       {latestSubmissionNeedsAiCheck && (
                         <p className="text-sm text-muted-foreground">
@@ -689,13 +683,13 @@ const StudentHomeworkDetail = () => {
 
                 <Card>
                   <CardHeader>
-                    <CardTitle>История попыток</CardTitle>
+                    <CardTitle>История работ</CardTitle>
                   </CardHeader>
                   <CardContent className="space-y-2">
-                    {data.submissions.length === 0 && <p className="text-muted-foreground">Попыток пока нет</p>}
+                    {data.submissions.length === 0 && <p className="text-muted-foreground">Работ пока нет</p>}
                     {data.submissions.map((submission) => (
                       <div key={submission.id} className="text-sm border rounded-md p-2">
-                        Попытка #{submission.attempt_no}: {formatSubmissionStatus(submission.status)}
+                        {formatSubmissionStatus(submission.status)}
                         {submission.total_score !== null && (
                           <span> — {submission.total_score}/{submission.total_max_score}</span>
                         )}
@@ -706,7 +700,7 @@ const StudentHomeworkDetail = () => {
 
                 {canStartAttempt && (
                   <Button disabled={isBusy} onClick={handleStartAttempt} className="w-full">
-                    {isStartingAttempt ? 'Создание попытки...' : 'Начать новую попытку'}
+                    {isStartingAttempt ? 'Создание...' : 'Начать работу'}
                   </Button>
                 )}
 

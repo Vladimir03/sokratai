@@ -39,7 +39,6 @@ export interface CreateAssignmentPayload {
   description?: string | null;
   deadline?: string | null;
   tasks: CreateAssignmentTask[];
-  max_attempts?: number;
   group_id?: string | null;
   save_as_template?: boolean;
   workflow_mode?: 'classic' | 'guided_chat';
@@ -113,18 +112,6 @@ export interface UploadTutorHomeworkMaterialResult {
 // ─── Delivery tracking ───────────────────────────────────────────────────────
 
 export type DeliveryStatus = 'pending' | 'delivered' | 'failed_not_connected' | 'failed_blocked_or_other';
-
-// ─── Attempts ────────────────────────────────────────────────────────────────
-
-export interface TutorHomeworkAttemptSummary {
-  id: string;
-  student_id: string;
-  attempt_no: number;
-  status: string;
-  total_score: number | null;
-  total_max_score: number | null;
-  submitted_at: string | null;
-}
 
 export interface CreateAssignmentResponse {
   assignment_id: string;
@@ -464,7 +451,7 @@ export interface TutorHomeworkResultsPerStudent {
   total_max_score: number | null;
   percent: number | null;
   submission_id: string;
-  attempt_no: number;
+  submitted_at: string | null;
   top_error_types: { type: string; count: number }[];
   submission_items: TutorHomeworkSubmissionItem[];
 }

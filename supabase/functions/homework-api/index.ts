@@ -262,9 +262,6 @@ async function handleCreateAssignment(
   if (!Array.isArray(b.tasks) || b.tasks.length === 0) {
     return jsonError(cors, 400, "VALIDATION", "tasks must be a non-empty array");
   }
-  if (b.max_attempts !== undefined && b.max_attempts !== null && !isPositiveInt(b.max_attempts)) {
-    return jsonError(cors, 400, "VALIDATION", "max_attempts must be a positive integer");
-  }
   const workflowMode = b.workflow_mode === "guided_chat" ? "guided_chat" : "classic";
   for (let i = 0; i < b.tasks.length; i++) {
     const t = b.tasks[i];
@@ -1199,9 +1196,9 @@ async function handleGetResults(
 
   const { data: submissions } = await db
     .from("homework_tutor_submissions")
-    .select("id, student_id, status, total_score, total_max_score, attempt_no")
+    .select("id, student_id, status, total_score, total_max_score, submitted_at")
     .eq("assignment_id", assignmentId)
-    .order("attempt_no", { ascending: true });
+    .order("submitted_at", { ascending: true });
 
   const submissionIds = (submissions ?? []).map((s) => s.id);
 
@@ -1311,7 +1308,7 @@ async function handleGetResults(
       student_id: s.student_id,
       name: profileMap[s.student_id] ?? null,
       status: s.status,
-      attempt_no: s.attempt_no ?? 1,
+      submitted_at: s.submitted_at ?? null,
       total_score: s.total_score,
       total_max_score: s.total_max_score,
       percent: pct,
@@ -1832,9 +1829,9 @@ async function handleListAttempts(
 
   let query = db
     .from("homework_tutor_submissions")
-    .select("id, student_id, attempt_no, status, total_score, total_max_score, submitted_at")
+    .select("id, student_id, status, total_score, total_max_score, submitted_at")
     .eq("assignment_id", assignmentId)
-    .order("attempt_no", { ascending: true });
+    .order("submitted_at", { ascending: true });
 
   if (studentId) {
     query = query.eq("student_id", studentId);

@@ -14,7 +14,6 @@ import {
   generateSocraticQuestion,
   getHomeworkPhotoSaveErrorCode,
   loadSubmissionItemsWithErrors,
-  MAX_ATTEMPTS,
   runHomeworkAiCheck,
   saveHomeworkDocumentAnswer,
   saveHomeworkPhotoAnswer,
@@ -2091,12 +2090,11 @@ async function runHomeworkAiCheckAndSendResult(
   try {
     const { data: subRow } = await supabase
       .from("homework_tutor_submissions")
-      .select("assignment_id, attempt_no")
+      .select("assignment_id")
       .eq("id", submissionId)
       .maybeSingle();
 
     if (subRow) {
-      const currentAttemptNo = (subRow.attempt_no as number) ?? 1;
       const assignmentId = subRow.assignment_id as string;
       const { data: assignmentRow } = await supabase
         .from("homework_tutor_assignments")
@@ -2107,7 +2105,7 @@ async function runHomeworkAiCheckAndSendResult(
         ? new Date(assignmentRow.deadline as string) < new Date()
         : false;
 
-      if (currentAttemptNo < MAX_ATTEMPTS && !deadlinePassed) {
+      if (!deadlinePassed) {
         keyboardRows.push([{ text: "🔁 Сдать заново", callback_data: `hw_retry:${assignmentId}` }]);
       }
     }
@@ -2691,7 +2689,7 @@ async function handleHomeworkRetryCallback(
   const effectiveUserId = await resolveHomeworkUserId(telegramUserId, userId);
 
   try {
-    const { submissionId, attemptNo } = await createSubmissionForAttempt(
+    const { submissionId } = await createSubmissionForAttempt(
       assignmentId,
       effectiveUserId,
       telegramUserId,
@@ -2715,7 +2713,6 @@ async function handleHomeworkRetryCallback(
       text: "",
       images: [],
       answers_by_task: {},
-      attempt_no: attemptNo,
     };
 
     await setHomeworkState(effectiveUserId, "HW_SUBMITTING", initialContext);
@@ -2728,21 +2725,13 @@ async function handleHomeworkRetryCallback(
 
     await sendTelegramMessage(
       telegramUserId,
-      `🔁 *Попытка ${attemptNo} из ${MAX_ATTEMPTS}* — «${assignmentRow?.title ?? "Домашка"}»\n\nНачинаем заново. Постарайся учесть предыдущие ошибки!`,
+      `🔁 *${assignmentRow?.title ?? "Домашка"}* — начинаем заново. Постарайся учесть предыдущие ошибки!`,
       { parse_mode: "Markdown" },
     );
     await sendHomeworkTaskStep(telegramUserId, assignmentRow?.title ?? "Домашка", tasks[0], 1, tasks.length);
   } catch (error) {
-    const errMsg = error instanceof Error ? error.message : String(error);
-    if (errMsg.includes("MAX_ATTEMPTS_REACHED")) {
-      await sendTelegramMessage(
-        telegramUserId,
-        `⛔ Лимит пересдач исчерпан (максимум ${MAX_ATTEMPTS} попытки). Обратись к репетитору.`,
-      );
-    } else {
-      console.error("handleHomeworkRetryCallback error:", { userId, assignmentId, error });
-      await sendTelegramMessage(telegramUserId, "❌ Не удалось начать пересдачу. Попробуй /homework снова.");
-    }
+    console.error("handleHomeworkRetryCallback error:", { userId, assignmentId, error });
+    await sendTelegramMessage(telegramUserId, "❌ Не удалось начать пересдачу. Попробуй /homework снова.");
   }
 }
 

@@ -325,14 +325,12 @@ function StudentRow({
   workflowMode,
   autoExpand,
   highlight,
-  attemptBadge,
 }: {
   student: TutorHomeworkResultsPerStudent;
   assignmentId: string;
   workflowMode?: 'classic' | 'guided_chat';
   autoExpand?: boolean;
   highlight?: boolean;
-  attemptBadge?: string;
 }) {
   const [expanded, setExpanded] = useState(autoExpand === true);
   const rowRef = useRef<HTMLDivElement>(null);
@@ -374,11 +372,6 @@ function StudentRow({
             <Badge variant="outline" className={statusCfg.className}>
               {statusCfg.text}
             </Badge>
-            {attemptBadge && (
-              <Badge variant="outline" className="text-xs bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-900/20 dark:text-blue-400">
-                {attemptBadge}
-              </Badge>
-            )}
             {student.percent != null && (
               <span className="text-xs text-muted-foreground">
                 {student.total_score}/{student.total_max_score} ({Math.round(student.percent)}%)
@@ -431,8 +424,6 @@ function StudentRowGroup({
   const targetIsOlder = targetSubmissionId != null && older.some((a) => a.submission_id === targetSubmissionId);
   const [showHistory, setShowHistory] = useState(targetIsOlder);
 
-  const attemptBadge = attempts.length > 1 ? `Попытка ${latest.attempt_no ?? 1}` : undefined;
-
   return (
     <div>
       <StudentRow
@@ -441,7 +432,6 @@ function StudentRowGroup({
         workflowMode={workflowMode}
         autoExpand={targetSubmissionId === latest.submission_id}
         highlight={targetSubmissionId === latest.submission_id}
-        attemptBadge={attemptBadge}
       />
       {older.length > 0 && (
         <div className="ml-4">
@@ -450,7 +440,7 @@ function StudentRowGroup({
             className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground mt-1 px-1"
           >
             {showHistory ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
-            {showHistory ? 'Скрыть историю' : `История попыток (${older.length})`}
+            {showHistory ? 'Скрыть историю' : `История (${older.length})`}
           </button>
           {showHistory && (
             <div className="space-y-2 mt-1">
@@ -462,7 +452,6 @@ function StudentRowGroup({
                   workflowMode={workflowMode}
                   autoExpand={targetSubmissionId === attempt.submission_id}
                   highlight={targetSubmissionId === attempt.submission_id}
-                  attemptBadge={`Попытка ${attempt.attempt_no ?? 1}`}
                 />
               ))}
             </div>
@@ -581,7 +570,7 @@ function TutorHomeworkResultsContent() {
     }
   }, [assignmentId]);
 
-  // Group per_student by student_id (multiple attempts), sort by attempt_no DESC
+  // Group per_student by student_id (multiple submissions), sort by submitted_at DESC
   const groupedStudents = useMemo(() => {
     if (!results) return [];
     const groups: Record<string, TutorHomeworkResultsPerStudent[]> = {};
@@ -590,7 +579,11 @@ function TutorHomeworkResultsContent() {
       groups[s.student_id].push(s);
     }
     for (const group of Object.values(groups)) {
-      group.sort((a, b) => (b.attempt_no ?? 1) - (a.attempt_no ?? 1));
+      group.sort((a, b) => {
+        const aTime = a.submitted_at ? new Date(a.submitted_at).getTime() : 0;
+        const bTime = b.submitted_at ? new Date(b.submitted_at).getTime() : 0;
+        return bTime - aTime;
+      });
     }
     return Object.values(groups);
   }, [results]);

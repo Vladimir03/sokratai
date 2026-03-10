@@ -68,7 +68,6 @@ const StudentHomework = () => {
                             Дедлайн: {parseISO(assignment.deadline).toLocaleString('ru-RU')}
                           </p>
                         )}
-                        <p className="text-sm">{assignment.attempts_used}/{assignment.max_attempts} попыток</p>
                         <Button asChild className="w-full">
                           <Link to={`/homework/${assignment.id}`}>Открыть</Link>
                         </Button>
