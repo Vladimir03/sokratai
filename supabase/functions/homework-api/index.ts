@@ -455,21 +455,32 @@ async function handleListAssignments(
       if (completedThreads && completedThreads.length > 0) {
         const threadIds = completedThreads.map((t) => t.id);
 
-        // Get task states for completed threads
+        // Get task states for completed threads (need task_id for max_score lookup)
         const { data: taskStates } = await db
           .from("homework_tutor_task_states")
-          .select("thread_id, earned_score, available_score")
+          .select("thread_id, task_id, earned_score")
           .in("thread_id", threadIds)
           .eq("status", "completed");
 
-        // Aggregate scores per thread, then per assignment
-        const threadScores: Record<string, { earned: number; available: number }> = {};
+        // Fetch max_score from tasks for guided assignments
+        const { data: guidedTasks } = await db
+          .from("homework_tutor_tasks")
+          .select("id, max_score, assignment_id")
+          .in("assignment_id", guidedAssignmentIds);
+
+        const guidedTaskMaxScore: Record<string, number> = {};
+        for (const t of guidedTasks ?? []) {
+          guidedTaskMaxScore[t.id] = t.max_score ?? 1;
+        }
+
+        // Aggregate scores per thread: earned vs max_score (not available_score)
+        const threadScores: Record<string, { earned: number; maxTotal: number }> = {};
         for (const ts of taskStates ?? []) {
           if (!threadScores[ts.thread_id]) {
-            threadScores[ts.thread_id] = { earned: 0, available: 0 };
+            threadScores[ts.thread_id] = { earned: 0, maxTotal: 0 };
           }
           threadScores[ts.thread_id].earned += Number(ts.earned_score ?? 0);
-          threadScores[ts.thread_id].available += Number(ts.available_score ?? 0);
+          threadScores[ts.thread_id].maxTotal += guidedTaskMaxScore[ts.task_id] ?? 1;
         }
 
         for (const thread of completedThreads) {
@@ -479,11 +490,11 @@ async function handleListAssignments(
           submittedMap[aId] = (submittedMap[aId] ?? 0) + 1;
 
           const scores = threadScores[thread.id];
-          if (scores && scores.available > 0) {
+          if (scores && scores.maxTotal > 0) {
             if (!scoreMap[aId]) {
               scoreMap[aId] = { sum: 0, count: 0 };
             }
-            scoreMap[aId].sum += (scores.earned / scores.available) * 100;
+            scoreMap[aId].sum += (scores.earned / scores.maxTotal) * 100;
             scoreMap[aId].count += 1;
           }
         }
@@ -600,17 +611,23 @@ async function handleGetAssignment(
 
       const { data: taskStates } = await db
         .from("homework_tutor_task_states")
-        .select("thread_id, earned_score, available_score")
+        .select("thread_id, task_id, earned_score")
         .in("thread_id", threadIds)
         .eq("status", "completed");
 
-      const threadScores: Record<string, { earned: number; available: number }> = {};
+      // Build max_score lookup from tasks already fetched above
+      const taskMaxScoreMap: Record<string, number> = {};
+      for (const t of tasks ?? []) {
+        taskMaxScoreMap[t.id] = t.max_score ?? 1;
+      }
+
+      const threadScores: Record<string, { earned: number; maxTotal: number }> = {};
       for (const ts of taskStates ?? []) {
         if (!threadScores[ts.thread_id]) {
-          threadScores[ts.thread_id] = { earned: 0, available: 0 };
+          threadScores[ts.thread_id] = { earned: 0, maxTotal: 0 };
         }
         threadScores[ts.thread_id].earned += Number(ts.earned_score ?? 0);
-        threadScores[ts.thread_id].available += Number(ts.available_score ?? 0);
+        threadScores[ts.thread_id].maxTotal += taskMaxScoreMap[ts.task_id] ?? 1;
       }
 
       for (const thread of completedThreads) {
@@ -618,8 +635,8 @@ async function handleGetAssignment(
         statusCounts["completed"] = (statusCounts["completed"] ?? 0) + 1;
 
         const scores = threadScores[thread.id];
-        if (scores && scores.available > 0) {
-          scoreSum += (scores.earned / scores.available) * 100;
+        if (scores && scores.maxTotal > 0) {
+          scoreSum += (scores.earned / scores.maxTotal) * 100;
           scoreCount += 1;
         }
       }
@@ -1352,7 +1369,7 @@ async function handleGetResults(
   const assignmentRecord = assignmentOrErr as Record<string, unknown>;
   // deno-lint-ignore no-explicit-any
   const guidedPerStudent: any[] = [];
-  const guidedTaskScores: Record<string, { scoreSum: number; scoreCount: number; total: number }> = {};
+  const guidedTaskScores: Record<string, { scoreSum: number; scoreCount: number; correctCount: number; total: number }> = {};
 
   if (assignmentRecord.workflow_mode === "guided_chat") {
     const { data: studentAssignments } = await db
@@ -1406,44 +1423,48 @@ async function handleGetResults(
           const states = statesByThread[thread.id] ?? [];
 
           let threadEarned = 0;
-          let threadAvailable = 0;
+          let threadMaxTotal = 0;
           const taskItems: { task_id: string; task_order_num: number; task_text: string; max_score: number; ai_score: number | null }[] = [];
 
           for (const ts of states) {
             const earned = Number(ts.earned_score ?? 0);
-            const available = Number(ts.available_score ?? 0);
             threadEarned += earned;
-            threadAvailable += available;
 
             const taskInfo = taskMap[ts.task_id];
+            const maxScore = taskInfo?.max_score ?? 1;
+            threadMaxTotal += maxScore;
+
             if (taskInfo) {
               taskItems.push({
                 task_id: ts.task_id,
                 task_order_num: taskInfo.order_num,
                 task_text: taskInfo.task_text,
-                max_score: taskInfo.max_score,
+                max_score: maxScore,
                 ai_score: earned,
               });
 
               // Aggregate for perTask
               if (!guidedTaskScores[ts.task_id]) {
-                guidedTaskScores[ts.task_id] = { scoreSum: 0, scoreCount: 0, total: 0 };
+                guidedTaskScores[ts.task_id] = { scoreSum: 0, scoreCount: 0, correctCount: 0, total: 0 };
               }
               guidedTaskScores[ts.task_id].total++;
               if (ts.status === "completed") {
                 guidedTaskScores[ts.task_id].scoreSum += earned;
                 guidedTaskScores[ts.task_id].scoreCount++;
+                if (earned > 0) {
+                  guidedTaskScores[ts.task_id].correctCount++;
+                }
               }
             }
           }
 
-          const pct = threadAvailable > 0
-            ? Math.round((threadEarned / threadAvailable) * 100 * 100) / 100
+          const pct = threadMaxTotal > 0
+            ? Math.round((threadEarned / threadMaxTotal) * 100 * 100) / 100
             : null;
 
           // Add to summary distribution
           if (pct != null) {
-            totalScoreSum += (threadEarned / threadAvailable) * 100;
+            totalScoreSum += (threadEarned / threadMaxTotal) * 100;
             totalScoreCount++;
 
             if (pct < 25) distribution["0-24"]++;
@@ -1458,7 +1479,7 @@ async function handleGetResults(
             status: "completed",
             submitted_at: thread.updated_at ?? null,
             total_score: threadEarned,
-            total_max_score: threadAvailable,
+            total_max_score: threadMaxTotal,
             percent: pct,
             submission_id: thread.id,
             top_error_types: [],
@@ -1583,6 +1604,7 @@ async function handleGetResults(
     if (guidedData) {
       scoreSum += guidedData.scoreSum;
       scoreCount += guidedData.scoreCount;
+      correctCount += guidedData.correctCount;
       totalCount += guidedData.total;
     }
 
