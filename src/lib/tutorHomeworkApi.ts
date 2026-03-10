@@ -547,17 +547,6 @@ export async function postTutorThreadMessage(
   );
 }
 
-export async function resetTutorStudentTask(
-  assignmentId: string,
-  studentId: string,
-  taskOrder: number,
-): Promise<{ ok: boolean }> {
-  return requestHomeworkApi<{ ok: boolean }>(
-    `/assignments/${encodeURIComponent(assignmentId)}/students/${encodeURIComponent(studentId)}/thread/tasks/${taskOrder}/reset`,
-    { method: 'POST', body: '{}' },
-  );
-}
-
 export async function reviewTutorHomeworkSubmission(
   submissionId: string,
   payload: ReviewPayload,
@@ -588,6 +577,20 @@ export async function getHomeworkImageSignedUrl(
     .createSignedUrl(parsed.objectPath, 3600);
   if (error || !data?.signedUrl) return null;
   return data.signedUrl;
+}
+
+export async function getTaskImageSignedUrl(
+  assignmentId: string,
+  taskId: string,
+): Promise<string | null> {
+  try {
+    const result = await requestHomeworkApi<{ url: string }>(
+      `/assignments/${encodeURIComponent(assignmentId)}/tasks/${encodeURIComponent(taskId)}/image-url`,
+    );
+    return result.url ?? null;
+  } catch {
+    return null;
+  }
 }
 
 // ─── Templates API ────────────────────────────────────────────────────────────

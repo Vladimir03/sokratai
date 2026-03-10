@@ -1,7 +1,7 @@
 import { useState, useCallback } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { ArrowLeft, BookOpen, Users, BarChart3, Clock, CheckCircle2, XCircle, AlertCircle, ChevronDown, ChevronUp, ImageIcon, WifiOff, Paperclip, ExternalLink, Edit, Trash2 } from 'lucide-react';
+import { ArrowLeft, BookOpen, Users, BarChart3, Clock, CheckCircle2, XCircle, AlertCircle, ChevronDown, ChevronUp, ImageIcon, WifiOff, Paperclip, ExternalLink, Edit, Trash2, ZoomIn } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -18,6 +18,7 @@ import { GuidedThreadViewer } from '@/components/tutor/GuidedThreadViewer';
 import {
   getTutorHomeworkAssignment,
   getHomeworkImageSignedUrl,
+  getTaskImageSignedUrl,
   getMaterialSignedUrl,
   getTutorHomeworkResults,
   updateTutorHomeworkAssignment,
@@ -176,7 +177,7 @@ function TasksList({ details }: { details: TutorHomeworkAssignmentDetails }) {
             </div>
             <div className="flex-1 min-w-0">
               <p className="text-sm whitespace-pre-wrap break-words">{task.task_text}</p>
-              <TaskImagePreview taskImageUrl={task.task_image_url} />
+              <TaskImagePreview assignmentId={details.assignment.id} taskId={task.id} taskImageUrl={task.task_image_url} />
               <div className="flex items-center gap-3 mt-1 text-xs text-muted-foreground">
                 <span>Макс. баллов: {task.max_score}</span>
                 {task.correct_answer && <span>Ответ: {task.correct_answer}</span>}
@@ -189,11 +190,14 @@ function TasksList({ details }: { details: TutorHomeworkAssignmentDetails }) {
   );
 }
 
-function TaskImagePreview({ taskImageUrl }: { taskImageUrl: string | null }) {
+function TaskImagePreview({ assignmentId, taskId, taskImageUrl }: { assignmentId: string; taskId: string; taskImageUrl: string | null }) {
+  const [open, setOpen] = useState(false);
+  const isExternal = Boolean(taskImageUrl && /^https?:\/\//i.test(taskImageUrl));
+
   const imageQuery = useQuery<string | null>({
-    queryKey: ['tutor', 'homework', 'task-image-preview', taskImageUrl],
-    queryFn: () => getHomeworkImageSignedUrl(taskImageUrl!, { defaultBucket: 'homework-task-images' }),
-    enabled: Boolean(taskImageUrl),
+    queryKey: ['tutor', 'homework', 'task-image-preview', assignmentId, taskId],
+    queryFn: () => getTaskImageSignedUrl(assignmentId, taskId),
+    enabled: Boolean(taskImageUrl) && !isExternal,
     staleTime: TUTOR_STALE_TIME_MS,
     gcTime: TUTOR_GC_TIME_MS,
     retry: 1,
@@ -201,11 +205,13 @@ function TaskImagePreview({ taskImageUrl }: { taskImageUrl: string | null }) {
 
   if (!taskImageUrl) return null;
 
+  const resolvedUrl = isExternal ? taskImageUrl : (imageQuery.data ?? null);
+
   if (imageQuery.isLoading) {
     return <Skeleton className="mt-2 h-24 w-40 rounded-md" />;
   }
 
-  if (!imageQuery.data) {
+  if (!resolvedUrl) {
     return (
       <p className="mt-2 text-xs text-muted-foreground">
         Фото задачи недоступно
@@ -214,20 +220,38 @@ function TaskImagePreview({ taskImageUrl }: { taskImageUrl: string | null }) {
   }
 
   return (
-    <a
-      href={imageQuery.data}
-      target="_blank"
-      rel="noreferrer"
-      className="mt-2 inline-block rounded-md border bg-background p-1 hover:opacity-90 transition-opacity"
-      title="Открыть фото задачи"
-    >
-      <img
-        src={imageQuery.data}
-        alt="Фото задачи"
-        className="h-24 w-auto max-w-[220px] rounded-sm object-cover"
-        loading="lazy"
-      />
-    </a>
+    <>
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        className="group relative mt-2 inline-block rounded-md border bg-background p-1 hover:opacity-90 transition-opacity"
+        title="Открыть фото задачи"
+      >
+        <img
+          src={resolvedUrl}
+          alt="Фото задачи"
+          className="h-24 w-auto max-w-[220px] rounded-sm object-cover"
+          loading="lazy"
+        />
+        <span className="absolute right-1 top-1 inline-flex items-center gap-1 rounded-md bg-background/90 px-1.5 py-0.5 text-[10px] opacity-0 transition-opacity group-hover:opacity-100">
+          <ZoomIn className="h-3 w-3" />
+          Увеличить
+        </span>
+      </button>
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogContent className="max-w-4xl p-4">
+          <DialogHeader>
+            <DialogTitle>Фото задачи</DialogTitle>
+            <DialogDescription>Изображение условия задачи</DialogDescription>
+          </DialogHeader>
+          <img
+            src={resolvedUrl}
+            alt="Фото задачи"
+            className="max-h-[75vh] w-full rounded-md object-contain"
+          />
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }
 
