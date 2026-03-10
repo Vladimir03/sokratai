@@ -41,7 +41,6 @@ export interface EvaluateStudentAnswerParams {
   taskText: string;
   taskImageUrl: string | null;
   correctAnswer: string | null;
-  solutionSteps: string | null;
   rubricText: string | null;
   subject: string;
   conversationHistory: Array<{ role: string; content: string; visible_to_student?: boolean }>;
@@ -55,7 +54,6 @@ export interface GenerateHintParams {
   taskText: string;
   taskImageUrl: string | null;
   correctAnswer: string | null;
-  solutionSteps: string | null;
   subject: string;
   conversationHistory: Array<{ role: string; content: string; visible_to_student?: boolean }>;
   wrongAnswerCount: number;
@@ -179,7 +177,6 @@ function sanitizeCheckResult(
 
 function buildCheckPrompt(params: EvaluateStudentAnswerParams): LovableMessage[] {
   const correctAnswerValue = clampPromptText(params.correctAnswer) || "[нет эталонного ответа — оцени по смыслу]";
-  const solutionStepsValue = clampPromptText(params.solutionSteps) || "[нет эталонных шагов]";
   const rubricLine = params.rubricText ? `Критерии оценки: ${clampPromptText(params.rubricText)}` : "";
 
   const systemContent = [
@@ -188,7 +185,6 @@ function buildCheckPrompt(params: EvaluateStudentAnswerParams): LovableMessage[]
     `Условие задачи: ${clampPromptText(params.taskText)}`,
     params.taskImageUrl ? `Изображение условия задачи: ${params.taskImageUrl}` : "",
     `Эталонный ответ: ${correctAnswerValue}`,
-    `Шаги решения: ${solutionStepsValue}`,
     rubricLine,
     "",
     `Статистика: ${params.wrongAnswerCount} неверных попыток, ${params.hintCount} подсказок.`,
@@ -242,7 +238,6 @@ function buildHintPrompt(params: GenerateHintParams): LovableMessage[] {
     `Условие задачи: ${clampPromptText(params.taskText)}`,
     params.taskImageUrl ? `Изображение условия задачи: ${params.taskImageUrl}` : "",
     params.correctAnswer ? `Правильный ответ (НЕ раскрывай ученику!): ${clampPromptText(params.correctAnswer)}` : "",
-    params.solutionSteps ? `Шаги решения (для справки, НЕ раскрывай!): ${clampPromptText(params.solutionSteps)}` : "",
     "",
     `Ученик уже сделал ${params.wrongAnswerCount} неверных попыток и получил ${params.hintCount} подсказок.`,
     "",

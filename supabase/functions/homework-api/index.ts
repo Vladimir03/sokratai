@@ -305,7 +305,6 @@ async function handleCreateAssignment(
     task_text: (t.task_text as string).trim(),
     task_image_url: isNonEmptyString(t.task_image_url) ? (t.task_image_url as string).trim() : null,
     correct_answer: isNonEmptyString(t.correct_answer) ? (t.correct_answer as string).trim() : null,
-    solution_steps: isNonEmptyString(t.solution_steps) ? (t.solution_steps as string).trim() : null,
     max_score: isPositiveInt(t.max_score) ? t.max_score : 1,
     rubric_text: isNonEmptyString(t.rubric_text) ? (t.rubric_text as string).trim() : null,
   }));
@@ -326,7 +325,6 @@ async function handleCreateAssignment(
       task_text: t.task_text,
       task_image_url: t.task_image_url,
       correct_answer: t.correct_answer,
-      solution_steps: t.solution_steps,
       max_score: t.max_score,
       rubric_text: t.rubric_text,
     }));
@@ -467,7 +465,7 @@ async function handleGetAssignment(
 
   const { data: tasks } = await db
     .from("homework_tutor_tasks")
-    .select("id, order_num, task_text, task_image_url, correct_answer, solution_steps, max_score, rubric_text")
+    .select("id, order_num, task_text, task_image_url, correct_answer, max_score, rubric_text")
     .eq("assignment_id", assignmentId)
     .order("order_num", { ascending: true });
 
@@ -659,9 +657,6 @@ async function handleUpdateAssignment(
         if (t.correct_answer !== undefined) {
           updateFields.correct_answer = isNonEmptyString(t.correct_answer) ? (t.correct_answer as string).trim() : null;
         }
-        if (t.solution_steps !== undefined) {
-          updateFields.solution_steps = isNonEmptyString(t.solution_steps) ? (t.solution_steps as string).trim() : null;
-        }
         if (t.max_score !== undefined) {
           updateFields.max_score = isPositiveInt(t.max_score) ? t.max_score : 1;
         }
@@ -701,7 +696,6 @@ async function handleUpdateAssignment(
           order_num: isPositiveInt(t.order_num) ? t.order_num : i + 1,
           task_image_url: isNonEmptyString(t.task_image_url) ? (t.task_image_url as string).trim() : null,
           correct_answer: isNonEmptyString(t.correct_answer) ? (t.correct_answer as string).trim() : null,
-          solution_steps: isNonEmptyString(t.solution_steps) ? (t.solution_steps as string).trim() : null,
           max_score: isPositiveInt(t.max_score) ? t.max_score : 1,
           rubric_text: isNonEmptyString(t.rubric_text) ? (t.rubric_text as string).trim() : null,
         };
@@ -726,7 +720,6 @@ async function handleUpdateAssignment(
           task_text: (t.task_text as string).trim(),
           task_image_url: isNonEmptyString(t.task_image_url) ? (t.task_image_url as string).trim() : null,
           correct_answer: isNonEmptyString(t.correct_answer) ? (t.correct_answer as string).trim() : null,
-          solution_steps: isNonEmptyString(t.solution_steps) ? (t.solution_steps as string).trim() : null,
           max_score: isPositiveInt(t.max_score) ? t.max_score : 1,
           rubric_text: isNonEmptyString(t.rubric_text) ? (t.rubric_text as string).trim() : null,
         }));
@@ -1652,6 +1645,35 @@ async function handleDeleteTemplate(
   return jsonOk(cors, { ok: true });
 }
 
+// ─── Endpoint: DELETE /assignments/:id ─────────────────────────────────────
+
+async function handleDeleteAssignment(
+  db: SupabaseClient,
+  tutorUserId: string,
+  assignmentId: string,
+  cors: Record<string, string>,
+): Promise<Response> {
+  const assignmentOrErr = await getOwnedAssignmentOrThrow(db, assignmentId, tutorUserId, cors);
+  if (assignmentOrErr instanceof Response) return assignmentOrErr;
+
+  const { error } = await db
+    .from("homework_tutor_assignments")
+    .delete()
+    .eq("id", assignmentId);
+
+  if (error) {
+    console.error("homework_api_request_error", { route: "DELETE /assignments/:id", error: error.message });
+    return jsonError(cors, 500, "DB_ERROR", "Failed to delete assignment");
+  }
+
+  console.log("homework_api_request_success", {
+    route: "DELETE /assignments/:id",
+    tutor_id: tutorUserId,
+    assignment_id: assignmentId,
+  });
+  return jsonOk(cors, { ok: true });
+}
+
 // ─── Endpoint: POST /assignments/:id/materials ───────────────────────────────
 
 async function handleAddMaterial(
@@ -2463,10 +2485,10 @@ async function handleCheckAnswer(
 
   const { currentState, currentOrder, stateByOrder, sortedOrders, tasks } = ctx;
 
-  // Load the full task (with correct_answer, solution_steps, rubric)
+  // Load the full task (with correct_answer, rubric)
   const { data: task } = await db
     .from("homework_tutor_tasks")
-    .select("id, order_num, task_text, task_image_url, correct_answer, solution_steps, rubric_text, max_score")
+    .select("id, order_num, task_text, task_image_url, correct_answer, rubric_text, max_score")
     .eq("id", currentState.task_id)
     .single();
 
@@ -2530,7 +2552,6 @@ async function handleCheckAnswer(
     taskText: task.task_text ?? "",
     taskImageUrl: task.task_image_url ?? null,
     correctAnswer: task.correct_answer,
-    solutionSteps: task.solution_steps,
     rubricText: task.rubric_text,
     subject: assignment.subject ?? "math",
     conversationHistory: recentMessages ?? [],
@@ -2650,7 +2671,7 @@ async function handleRequestHint(
   // Load task
   const { data: task } = await db
     .from("homework_tutor_tasks")
-    .select("id, order_num, task_text, task_image_url, correct_answer, solution_steps, max_score")
+    .select("id, order_num, task_text, task_image_url, correct_answer, max_score")
     .eq("id", activeState.task_id)
     .single();
 
@@ -2699,7 +2720,6 @@ async function handleRequestHint(
     taskText: task.task_text ?? "",
     taskImageUrl: task.task_image_url ?? null,
     correctAnswer: task.correct_answer,
-    solutionSteps: task.solution_steps,
     subject: assignment?.subject ?? "math",
     conversationHistory: recentMessages ?? [],
     wrongAnswerCount: (activeState.wrong_answer_count as number) ?? 0,
@@ -3122,6 +3142,11 @@ Deno.serve(async (req: Request): Promise<Response> => {
     if (seg.length === 2 && seg[0] === "assignments" && route.method === "PUT") {
       const body = await parseJsonBody(req);
       return await handleUpdateAssignment(db, userId, seg[1], body, cors);
+    }
+
+    // DELETE /assignments/:id
+    if (seg.length === 2 && seg[0] === "assignments" && route.method === "DELETE") {
+      return await handleDeleteAssignment(db, userId, seg[1], cors);
     }
 
     // POST /assignments/:id/assign

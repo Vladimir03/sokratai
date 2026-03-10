@@ -27,7 +27,6 @@ export interface CreateAssignmentTask {
   task_text: string;
   task_image_url?: string | null;
   correct_answer?: string | null;
-  solution_steps?: string | null;
   rubric_text?: string | null;
   max_score?: number;
 }
@@ -50,7 +49,6 @@ export interface HomeworkTemplateTask {
   task_text: string;
   task_image_url?: string | null;
   correct_answer?: string | null;
-  solution_steps?: string | null;
   rubric_text?: string | null;
   max_score?: number;
 }
@@ -406,7 +404,6 @@ export interface TutorHomeworkAssignmentDetails {
     task_text: string;
     task_image_url: string | null;
     correct_answer: string | null;
-    solution_steps: string | null;
     rubric_text: string | null;
     max_score: number;
   }[];
@@ -685,6 +682,33 @@ export async function getMaterialSignedUrl(
   } catch {
     return null;
   }
+}
+
+// ─── Assignment update / delete ───────────────────────────────────────────────
+
+export async function updateTutorHomeworkAssignment(
+  assignmentId: string,
+  patch: {
+    title?: string;
+    subject?: string;
+    topic?: string | null;
+    deadline?: string | null;
+    status?: string;
+  },
+): Promise<void> {
+  await requestHomeworkApi<{ ok: boolean }>(
+    `/assignments/${encodeURIComponent(assignmentId)}`,
+    { method: 'PUT', body: JSON.stringify(patch) },
+  );
+}
+
+export async function deleteTutorHomeworkAssignment(
+  assignmentId: string,
+): Promise<void> {
+  await requestHomeworkApi<{ ok: boolean }>(
+    `/assignments/${encodeURIComponent(assignmentId)}`,
+    { method: 'DELETE' },
+  );
 }
 
 // ─── Attempts API ─────────────────────────────────────────────────────────────
