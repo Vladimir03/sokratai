@@ -150,7 +150,33 @@ if (compatWarnings === 0) {
 }
 console.log("");
 
-console.log("3. Auth flow guardrails...");
+console.log("3. Deleted legacy module guardrails...");
+
+const deletedModules = [
+  { pattern: /from\s+["']@\/pages\/Homework["']/, name: "pages/Homework (legacy)" },
+  { pattern: /from\s+["']@\/pages\/HomeworkAdd["']/, name: "pages/HomeworkAdd (legacy)" },
+  { pattern: /from\s+["']@\/pages\/HomeworkTaskList["']/, name: "pages/HomeworkTaskList (legacy)" },
+  { pattern: /from\s+["']@\/pages\/HomeworkTaskDetail["']/, name: "pages/HomeworkTaskDetail (legacy)" },
+  { pattern: /from\s+["']@\/components\/AddTaskDialog["']/, name: "components/AddTaskDialog (legacy)" },
+  { pattern: /from\s+["']@\/components\/TaskContextBanner["']/, name: "components/TaskContextBanner (legacy)" },
+];
+
+let legacyImportFound = false;
+for (const file of textFiles) {
+  const content = readText(file);
+  for (const mod of deletedModules) {
+    if (mod.pattern.test(content)) {
+      fail(`${rel(file)} imports deleted module ${mod.name}`);
+      legacyImportFound = true;
+    }
+  }
+}
+if (!legacyImportFound) {
+  ok("no imports of deleted legacy homework modules");
+}
+console.log("");
+
+console.log("4. Auth flow guardrails...");
 requireContains(
   path.join(rootDir, "src", "App.tsx"),
   'path="/tutor/login"',

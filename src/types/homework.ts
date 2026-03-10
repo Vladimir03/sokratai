@@ -1,45 +1,3 @@
-export type Priority = 'urgent' | 'important' | 'later';
-export type TaskStatus = 'not_started' | 'in_progress' | 'completed';
-
-export interface HomeworkSet {
-  id: string;
-  user_id: string;
-  subject: string;
-  topic: string;
-  photo_url?: string;
-  deadline?: string;
-  priority: Priority;
-  created_at: string;
-  updated_at: string;
-  tasks?: HomeworkTask[];
-}
-
-export interface HomeworkTask {
-  id: string;
-  homework_set_id: string;
-  task_number: string;
-  condition_text?: string;
-  condition_photo_url?: string;
-  ai_analysis?: {
-    difficulty: string;
-    type: string;
-    hints: string[];
-    solution_steps: string[];
-  };
-  status: TaskStatus;
-  created_at: string;
-  updated_at: string;
-}
-
-export interface HomeworkChatMessage {
-  id: string;
-  homework_task_id: string;
-  user_id: string;
-  role: 'user' | 'assistant';
-  content: string;
-  created_at: string;
-}
-
 // Предметы сгруппированы по типу: технические (приоритет), гуманитарные, естественные
 export const SUBJECTS = [
   // 🔬 Технические (приоритет)
@@ -73,12 +31,6 @@ export const SUBJECT_NAME_MAP: Record<string, string> = Object.fromEntries(
 export function getSubjectLabel(id: string): string {
   return SUBJECT_NAME_MAP[id] ?? id;
 }
-
-export const PRIORITY_CONFIG = {
-  urgent: { label: 'Срочно', color: 'red', emoji: '🔴' },
-  important: { label: 'Важно', color: 'yellow', emoji: '🟡' },
-  later: { label: 'Позже', color: 'green', emoji: '🟢' }
-};
 
 export type StudentSubmissionStatus = 'in_progress' | 'submitted' | 'ai_checked' | 'tutor_reviewed';
 export type StudentAssignmentStatus = 'draft' | 'active' | 'closed';

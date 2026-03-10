@@ -1,6 +1,6 @@
 {
   "version": "1.0.0",
-  "updated_at": "2026-02-23",
+  "updated_at": "2026-03-10",
   "modules": [
     {
       "name": "frontend-shell-routing",
@@ -33,19 +33,26 @@
         "src/pages/Chat.tsx",
         "src/pages/Practice.tsx",
         "src/pages/Diagnostic.tsx",
-        "src/pages/Homework*.tsx",
+        "src/pages/StudentHomework.tsx",
+        "src/pages/StudentHomeworkDetail.tsx",
+        "src/components/homework/**",
         "src/components/practice/**",
         "src/components/diagnostic/**",
         "src/components/miniapp/**",
+        "src/hooks/useStudentHomework.ts",
+        "src/lib/studentHomeworkApi.ts",
+        "src/lib/homeworkTelemetry.ts",
+        "src/lib/streamChat.ts",
         "src/utils/pyodide.ts",
         "src/utils/chatCache.ts"
       ],
-      "purpose": "Student-facing learning flows: chat, practice, diagnostic, homework, mini app rendering.",
+      "purpose": "Student-facing learning flows: chat, practice, diagnostic, homework (classic + guided chat), mini app rendering.",
       "dependencies": [
         "Supabase client",
         "React Query",
         "KaTeX/markdown rendering",
-        "Pyodide runtime"
+        "Pyodide runtime",
+        "homework-api edge function"
       ],
       "risk_level": "high",
       "validation_commands": [
@@ -172,6 +179,7 @@
       "name": "supabase-edge-business-apis",
       "path_globs": [
         "supabase/functions/homework-api/**",
+        "supabase/functions/homework-reminder/**",
         "supabase/functions/payment-reminder/**",
         "supabase/functions/assign-tutor-role/**",
         "supabase/functions/tutor-manual-add-student/**",
@@ -180,7 +188,6 @@
         "supabase/functions/yookassa-webhook/**",
         "supabase/functions/check-solutions/**",
         "supabase/functions/get-solution/**",
-        "supabase/functions/analyze-homework-task/**",
         "supabase/functions/admin-analytics/**",
         "supabase/functions/notify-booking/**",
         "supabase/functions/chat/**"
