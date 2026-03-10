@@ -689,6 +689,17 @@ export async function getMaterialSignedUrl(
 
 // ─── Attempts API ─────────────────────────────────────────────────────────────
 
+export interface TutorHomeworkAttemptSummary {
+  id: string;
+  assignment_id: string;
+  student_id: string;
+  status: string;
+  attempt_no: number;
+  submitted_at: string | null;
+  total_score: number | null;
+  total_max_score: number | null;
+}
+
 export async function listTutorHomeworkAttempts(
   assignmentId: string,
   studentId?: string,
