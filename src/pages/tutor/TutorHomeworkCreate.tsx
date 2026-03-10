@@ -402,7 +402,6 @@ interface MetaState {
   subject: HomeworkSubject | "";
   topic: string;
   deadline: string;
-  max_attempts: number;
   workflow_mode: 'classic' | 'guided_chat';
 }
 
@@ -467,24 +466,6 @@ function StepMeta({
           type="datetime-local"
           value={meta.deadline}
           onChange={(e) => onChange({ ...meta, deadline: e.target.value })}
-          className="text-base"
-        />
-      </div>
-
-      <div className="space-y-2">
-        <Label htmlFor="hw-max-attempts">Максимум попыток</Label>
-        <Input
-          id="hw-max-attempts"
-          type="number"
-          min={1}
-          max={10}
-          value={meta.max_attempts}
-          onChange={(e) =>
-            onChange({
-              ...meta,
-              max_attempts: Math.min(10, Math.max(1, Number(e.target.value || 3))),
-            })
-          }
           className="text-base"
         />
       </div>
@@ -1230,7 +1211,6 @@ function TutorHomeworkCreateContent() {
     subject: '',
     topic: '',
     deadline: '',
-    max_attempts: 3,
     workflow_mode: 'classic',
   });
 
@@ -1487,7 +1467,6 @@ function TutorHomeworkCreateContent() {
             ? new Date(meta.deadline).toISOString()
             : null,
           tasks: apiTasks,
-          max_attempts: meta.max_attempts,
           group_id: assignMode === 'group' && selectedGroupId ? selectedGroupId : null,
           workflow_mode: meta.workflow_mode,
         });

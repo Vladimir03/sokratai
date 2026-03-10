@@ -11,7 +11,6 @@ const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
 const HOMEWORK_IMAGES_BUCKET = "homework-images";
 const HOMEWORK_TASK_IMAGES_BUCKET = "homework-task-images";
 const HOMEWORK_TASK_IMAGE_FALLBACK_BUCKET = "chat-images";
-export const MAX_ATTEMPTS = 3;
 const AI_FEEDBACK_TASK_MAX_LEN = 450;
 const AI_FEEDBACK_COMMENT_MAX_LEN = 280;
 const AI_FEEDBACK_CONDITION_LABEL = "Условие задачи:";
@@ -679,45 +678,11 @@ export async function runHomeworkAiCheck(submissionId: string): Promise<Homework
   };
 }
 
-// ─── Feature 4: Attempts ─────────────────────────────────────────────────────
-
-export async function getCurrentAttemptNo(assignmentId: string, studentId: string): Promise<number> {
-  const { data } = await supabase
-    .from("homework_tutor_submissions")
-    .select("attempt_no")
-    .eq("assignment_id", assignmentId)
-    .eq("student_id", studentId)
-    .order("attempt_no", { ascending: false })
-    .limit(1)
-    .maybeSingle();
-  return data?.attempt_no ?? 0;
-}
-
-async function getAssignmentMaxAttempts(assignmentId: string): Promise<number> {
-  const { data, error } = await supabase
-    .from("homework_tutor_assignments")
-    .select("max_attempts")
-    .eq("id", assignmentId)
-    .single();
-
-  if (error || !data) return 3;
-  const value = Number(data.max_attempts ?? 3);
-  return Number.isFinite(value) && value > 0 ? value : 3;
-}
-
 export async function createSubmissionForAttempt(
   assignmentId: string,
   studentId: string,
   telegramChatId: number,
-): Promise<{ submissionId: string; attemptNo: number }> {
-  const currentMax = await getCurrentAttemptNo(assignmentId, studentId);
-  const nextAttemptNo = currentMax + 1;
-  const maxAttempts = await getAssignmentMaxAttempts(assignmentId);
-
-  if (nextAttemptNo > maxAttempts) {
-    throw new Error("MAX_ATTEMPTS_REACHED");
-  }
-
+): Promise<{ submissionId: string }> {
   const { data, error } = await supabase
     .from("homework_tutor_submissions")
     .insert({
@@ -725,16 +690,15 @@ export async function createSubmissionForAttempt(
       student_id: studentId,
       telegram_chat_id: telegramChatId,
       status: "in_progress",
-      attempt_no: nextAttemptNo,
     })
-    .select("id, attempt_no")
+    .select("id")
     .single();
 
   if (error || !data) {
-    throw new Error(`Failed to create submission attempt ${nextAttemptNo}: ${error?.message ?? "unknown"}`);
+    throw new Error(`Failed to create submission: ${error?.message ?? "unknown"}`);
   }
 
-  return { submissionId: data.id, attemptNo: data.attempt_no };
+  return { submissionId: data.id };
 }
 
 // ─── Feature 6: Socratic dialog ──────────────────────────────────────────────

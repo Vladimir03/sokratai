@@ -91,8 +91,6 @@ export interface StudentHomeworkAssignment {
   description: string | null;
   deadline: string | null;
   status: StudentAssignmentStatus;
-  max_attempts: number;
-  attempts_used: number;
   latest_submission_status: string | null;
   created_at: string;
 }
@@ -132,7 +130,6 @@ export interface StudentHomeworkSubmission {
   id: string;
   assignment_id: string;
   student_id: string;
-  attempt_no: number;
   status: StudentSubmissionStatus;
   total_score: number | null;
   total_max_score: number | null;
@@ -152,7 +149,6 @@ export interface StudentHomeworkAssignmentDetails {
   description: string | null;
   deadline: string | null;
   status: StudentAssignmentStatus;
-  max_attempts: number;
   workflow_mode?: WorkflowMode;
   created_at: string;
   updated_at: string;

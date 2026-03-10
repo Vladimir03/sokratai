@@ -24,7 +24,6 @@ const SUBMISSION_SELECT = `
   id,
   assignment_id,
   student_id,
-  attempt_no,
   status,
   total_score,
   total_max_score,
@@ -71,11 +70,7 @@ function isDeadlinePassed(deadline: string | null | undefined): boolean {
 
 function translateSupabaseError(message: string): string {
   const lower = message.toLowerCase();
-  if (message.includes('DEADLINE_PASSED')) return 'Дедлайн уже прошёл. Новая попытка недоступна.';
-  if (message.includes('MAX_ATTEMPTS_REACHED')) return 'Лимит попыток исчерпан.';
-  if (message.includes('homework_tutor_submissions_attempt_unique')) {
-    return 'Попытка уже создана. Обновите страницу и попробуйте снова.';
-  }
+  if (message.includes('DEADLINE_PASSED')) return 'Дедлайн уже прошёл. Сдача недоступна.';
   if (lower.includes('row-level security')) {
     return 'Недостаточно прав для выполнения операции.';
   }
@@ -196,7 +191,6 @@ export async function listStudentAssignments(): Promise<StudentHomeworkAssignmen
         deadline,
         status,
         workflow_mode,
-        max_attempts,
         created_at
       )
     `)
@@ -213,26 +207,23 @@ export async function listStudentAssignments(): Promise<StudentHomeworkAssignmen
 
   const assignmentIds = assignmentRows.map((row: any) => row.assignment_id as string);
 
-  const { data: attemptsRows, error: attemptsError } = await supabase
+  // For classic: fetch latest submission status per assignment
+  const { data: submissionRows, error: submissionError } = await supabase
     .from('homework_tutor_submissions')
-    .select('assignment_id, attempt_no, status')
+    .select('assignment_id, status, created_at')
     .eq('student_id', studentId)
-    .in('assignment_id', assignmentIds.length > 0 ? assignmentIds : ['00000000-0000-0000-0000-000000000000']);
+    .in('assignment_id', assignmentIds.length > 0 ? assignmentIds : ['00000000-0000-0000-0000-000000000000'])
+    .order('created_at', { ascending: false });
 
-  if (attemptsError) {
-    throw new StudentHomeworkApiError(attemptsError.message);
+  if (submissionError) {
+    throw new StudentHomeworkApiError(submissionError.message);
   }
 
-  const attemptsMap = new Map<string, { attempts_used: number; latest_status: string | null }>();
-  for (const row of attemptsRows ?? []) {
+  const latestSubmissionMap = new Map<string, string | null>();
+  for (const row of submissionRows ?? []) {
     const assignmentId = row.assignment_id as string;
-    const prev = attemptsMap.get(assignmentId) ?? { attempts_used: 0, latest_status: null };
-    const attemptNo = Number(row.attempt_no ?? 0);
-    if (attemptNo > prev.attempts_used) {
-      attemptsMap.set(assignmentId, {
-        attempts_used: attemptNo,
-        latest_status: typeof row.status === 'string' ? row.status : null,
-      });
+    if (!latestSubmissionMap.has(assignmentId)) {
+      latestSubmissionMap.set(assignmentId, typeof row.status === 'string' ? row.status : null);
     }
   }
 
@@ -258,22 +249,15 @@ export async function listStudentAssignments(): Promise<StudentHomeworkAssignmen
       const assignment = row.homework_tutor_assignments;
       const isGuided = assignment.workflow_mode === 'guided_chat';
 
-      let attempts_used: number;
       let latest_submission_status: string | null;
 
       if (isGuided) {
         const thread = threadMap.get(row.id);
-        if (thread) {
-          attempts_used = 1;
-          latest_submission_status = thread.status === 'completed' ? 'ai_checked' : 'in_progress';
-        } else {
-          attempts_used = 0;
-          latest_submission_status = null;
-        }
+        latest_submission_status = thread
+          ? (thread.status === 'completed' ? 'ai_checked' : 'in_progress')
+          : null;
       } else {
-        const attemptInfo = attemptsMap.get(assignment.id) ?? { attempts_used: 0, latest_status: null };
-        attempts_used = attemptInfo.attempts_used;
-        latest_submission_status = attemptInfo.latest_status;
+        latest_submission_status = latestSubmissionMap.get(assignment.id) ?? null;
       }
 
       return {
@@ -284,8 +268,6 @@ export async function listStudentAssignments(): Promise<StudentHomeworkAssignmen
         description: assignment.description,
         deadline: assignment.deadline,
         status: assignment.status,
-        max_attempts: assignment.max_attempts ?? 3,
-        attempts_used,
         latest_submission_status,
         created_at: assignment.created_at,
       } satisfies StudentHomeworkAssignment;
@@ -303,7 +285,7 @@ export async function getStudentSubmissions(assignmentId: string): Promise<Stude
     .select(SUBMISSION_SELECT)
     .eq('assignment_id', assignmentId)
     .eq('student_id', studentId)
-    .order('attempt_no', { ascending: false });
+    .order('created_at', { ascending: false });
 
   if (error) {
     throw new StudentHomeworkApiError(error.message);
@@ -327,7 +309,7 @@ export async function getStudentAssignment(assignmentId: string): Promise<Studen
 
   const { data: assignment, error: assignmentError } = await supabase
     .from('homework_tutor_assignments')
-    .select('id, title, subject, topic, description, deadline, status, workflow_mode, max_attempts, created_at')
+    .select('id, title, subject, topic, description, deadline, status, workflow_mode, created_at')
     .eq('id', assignmentId)
     .single();
 
@@ -355,7 +337,6 @@ export async function getStudentAssignment(assignmentId: string): Promise<Studen
 
   const result = {
     ...(assignment as any),
-    max_attempts: (assignment as any).max_attempts ?? 3,
     workflow_mode: (assignment as any).workflow_mode ?? 'classic',
     updated_at: (assignment as any).created_at,
     tasks: (tasks ?? []) as StudentHomeworkAssignmentDetails['tasks'],
@@ -379,59 +360,38 @@ export async function createStudentSubmission(assignmentId: string): Promise<Stu
   }
 
   if (isDeadlinePassed(assignment.deadline)) {
-    throw new StudentHomeworkApiError('Дедлайн уже прошёл. Новая попытка недоступна.');
+    throw new StudentHomeworkApiError('Дедлайн уже прошёл. Сдача недоступна.');
   }
 
-  const { data: latestSubmission, error: latestError } = await supabase
-    .from('homework_tutor_submissions')
-    .select('attempt_no')
-    .eq('assignment_id', assignmentId)
-    .eq('student_id', studentId)
-    .order('attempt_no', { ascending: false })
-    .limit(1)
-    .maybeSingle();
-
-  if (latestError) {
-    throw new StudentHomeworkApiError(latestError.message);
-  }
-
-  const attemptsUsed = Number(latestSubmission?.attempt_no ?? 0);
-  const maxAttempts = 3;
-
-  if (attemptsUsed >= maxAttempts) {
-    throw new StudentHomeworkApiError('Лимит попыток исчерпан.');
-  }
-
-  const createAttempt = async (telegramChatId: number | null) => supabase
+  const createSubmission = async (telegramChatId: number | null) => supabase
     .from('homework_tutor_submissions')
     .insert({
       assignment_id: assignmentId,
       student_id: studentId,
-      attempt_no: attemptsUsed + 1,
       telegram_chat_id: telegramChatId,
       status: 'in_progress',
     })
     .select(SUBMISSION_SELECT)
     .single();
 
-  const { data, error } = await createAttempt(null);
+  const { data, error } = await createSubmission(null);
   if (!error && data) {
     return data as unknown as StudentHomeworkSubmission;
   }
 
   if (error && isTelegramChatIdNotNullError(error.message)) {
     // Legacy prod schema may still require telegram_chat_id. Use 0 as web sentinel.
-    const { data: legacyData, error: legacyError } = await createAttempt(0);
+    const { data: legacyData, error: legacyError } = await createSubmission(0);
     if (legacyError || !legacyData) {
       throw new StudentHomeworkApiError(
-        translateSupabaseError(legacyError?.message ?? 'Не удалось создать попытку'),
+        translateSupabaseError(legacyError?.message ?? 'Не удалось создать работу'),
       );
     }
     return legacyData as unknown as StudentHomeworkSubmission;
   }
 
   throw new StudentHomeworkApiError(
-    translateSupabaseError(error?.message ?? 'Не удалось создать попытку'),
+    translateSupabaseError(error?.message ?? 'Не удалось создать работу'),
   );
 }
 
