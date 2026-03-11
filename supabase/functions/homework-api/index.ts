@@ -2217,10 +2217,26 @@ async function handleMaterialSignedUrl(
 
 // ─── Helper: resolve task image URL to a signed HTTP URL for AI ──────────────
 
+/** Convert ArrayBuffer to base64 string in chunks to avoid stack overflow on large images. */
+function arrayBufferToBase64(buffer: ArrayBuffer): string {
+  const bytes = new Uint8Array(buffer);
+  const CHUNK = 0x8000; // 32 KB chunks
+  let binary = "";
+  for (let i = 0; i < bytes.length; i += CHUNK) {
+    binary += String.fromCharCode.apply(null, Array.from(bytes.subarray(i, i + CHUNK)));
+  }
+  return btoa(binary);
+}
+
 /**
- * Converts a task_image_url (which may be storage://bucket/path or plain path)
- * into a signed HTTP URL that external services (AI API) can access.
- * Returns null if the image ref is empty or signing fails.
+ * Converts a task_image_url (storage://, plain path, or external URL)
+ * into a base64 data URL that the Lovable AI Gateway can use directly.
+ *
+ * The Lovable gateway (proxying Gemini) does NOT fetch external HTTP URLs —
+ * images must be inlined as `data:image/...;base64,...` (same format used by
+ * recognizeHomeworkPhoto in vision_checker.ts).
+ *
+ * Returns null if the image ref is empty or download fails.
  */
 async function resolveTaskImageUrlForAI(
   db: SupabaseClient,
@@ -2228,12 +2244,30 @@ async function resolveTaskImageUrlForAI(
 ): Promise<string | null> {
   if (!imageRef) return null;
 
-  // External URL — already accessible
+  // External HTTP(S) URL — download and convert to base64
   if (imageRef.startsWith("http://") || imageRef.startsWith("https://")) {
-    return imageRef;
+    try {
+      const resp = await fetch(imageRef);
+      if (!resp.ok) {
+        console.error("resolveTaskImageUrlForAI: failed to fetch external URL", {
+          imageRef: imageRef.slice(0, 120),
+          status: resp.status,
+        });
+        return null;
+      }
+      const buf = await resp.arrayBuffer();
+      const mime = resp.headers.get("content-type") || "image/jpeg";
+      return `data:${mime};base64,${arrayBufferToBase64(buf)}`;
+    } catch (err) {
+      console.error("resolveTaskImageUrlForAI: external fetch error", {
+        imageRef: imageRef.slice(0, 120),
+        error: err instanceof Error ? err.message : String(err),
+      });
+      return null;
+    }
   }
 
-  // Parse storage://bucket/objectPath
+  // Parse storage://bucket/objectPath or plain path
   let bucket: string;
   let objectPath: string;
 
@@ -2251,20 +2285,23 @@ async function resolveTaskImageUrlForAI(
     objectPath = imageRef;
   }
 
-  const { data: signedData, error: signedErr } = await db.storage
+  // Download directly from Supabase storage (service_role client — no signed URL needed)
+  const { data: blob, error: dlErr } = await db.storage
     .from(bucket)
-    .createSignedUrl(objectPath, 3600);
+    .download(objectPath);
 
-  if (signedErr || !signedData?.signedUrl) {
-    console.error("resolveTaskImageUrlForAI: failed to sign", {
+  if (dlErr || !blob) {
+    console.error("resolveTaskImageUrlForAI: failed to download", {
       bucket,
       objectPath,
-      error: signedErr?.message,
+      error: dlErr?.message,
     });
     return null;
   }
 
-  return signedData.signedUrl;
+  const buf = await blob.arrayBuffer();
+  const mime = blob.type || "image/jpeg";
+  return `data:${mime};base64,${arrayBufferToBase64(buf)}`;
 }
 
 // ─── Endpoint: GET /assignments/:id/tasks/:taskId/image-url ──────────────────
