@@ -184,16 +184,21 @@ function sanitizeCheckResult(
  * Returns extra prompt guidance when a concrete value is expected.
  */
 function buildAnswerTypeGuidance(correctAnswer: string | null, taskText: string): string {
-  if (!correctAnswer) return "";
-  const trimmed = correctAnswer.trim();
-  const hasNumber = /\d/.test(trimmed);
-  const isShort = trimmed.length < 100;
-  // Common Russian units (physics, math, chemistry)
-  const hasUnits = /(?:м\/с|м\/с²|км\/ч|кг|Н|Дж|Вт|Гц|Па|моль|А|В|Ом|л|мл|см|мм|км|°C|%)/i.test(trimmed);
-  // Task text asks for a specific value
+  // Check if task text asks for a specific value (works even without correctAnswer)
   const askingForValue = /(?:определи|найди|вычисли|рассчитай|чему равн|какова|каков|сколько|найти|определить|вычислить|рассчитать)/i.test(taskText);
 
-  if ((hasNumber && isShort) || hasUnits || askingForValue) {
+  // Check if correct answer looks like a specific numeric/short value
+  let answerLooksNumeric = false;
+  if (correctAnswer) {
+    const trimmed = correctAnswer.trim();
+    const hasNumber = /\d/.test(trimmed);
+    const isShort = trimmed.length < 100;
+    // Common Russian units (physics, math, chemistry)
+    const hasUnits = /(?:м\/с|м\/с²|км\/ч|кг|Н|Дж|Вт|Гц|Па|моль|А|В|Ом|л|мл|см|мм|км|°C|%)/i.test(trimmed);
+    answerLooksNumeric = (hasNumber && isShort) || hasUnits;
+  }
+
+  if (answerLooksNumeric || askingForValue) {
     return [
       "",
       "ВАЖНО: Эта задача требует КОНКРЕТНОГО числового/фактического ответа.",
