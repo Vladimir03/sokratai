@@ -1311,6 +1311,12 @@ async function handleGetResults(
     .eq("assignment_id", assignmentId)
     .order("order_num", { ascending: true });
 
+  // Build taskMap for lookups by task_id
+  const taskMap: Record<string, { order_num: number; task_text: string; max_score: number }> = {};
+  for (const t of tasks ?? []) {
+    taskMap[t.id] = { order_num: t.order_num, task_text: t.task_text, max_score: t.max_score };
+  }
+
   const { data: submissions } = await db
     .from("homework_tutor_submissions")
     .select("id, student_id, status, total_score, total_max_score, submitted_at")
