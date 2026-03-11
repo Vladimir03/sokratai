@@ -1,40 +1,27 @@
 
 
-## Root Cause
+## Problem
 
-The database confirms: assignment `4ce28a0e-b77e-4c97-b914-e6dc4717c046` has `workflow_mode = 'classic'` despite the switch being ON in the UI. This happened because the edge function `homework-api` was not yet redeployed with `workflow_mode` support when the assignment was created. The edge function defaulted unknown fields to `'classic'`.
+The AI **does** receive the task image (confirmed via network logs — signed URL is passed and the chat function processes it). However, the AI model (Gemini 3 Flash Preview) **misreads the graph** — it says "ускорение от 8 до 10 секунд" when the actual task is about "скорость от 1 до 3 секунд."
 
-**All 40 assignments in the database have `workflow_mode = 'classic'`** -- none were ever saved as `guided_chat`.
+Root causes:
+1. **The bootstrap intro message is never persisted to the DB** — it regenerates on every page load, each time potentially getting a different (wrong) interpretation.
+2. **The task text is just "Реши"** — the AI must rely entirely on the image to understand the task, and the model misinterprets the graph.
+3. **No logging in the chat function** confirms whether the image was actually injected as base64 into the AI request (the `📷 Injected` log is absent from captured logs).
 
-The frontend code is correct (sends `workflow_mode`), the edge function code is correct (saves it), and the student-side query is correct (reads it). The issue was purely a deployment timing gap.
+## Fix
 
-## Fix Plan
+### 1. Persist the bootstrap intro message to the DB (GuidedHomeworkWorkspace.tsx, ~line 862-880)
 
-### 1. Fix existing assignment data (SQL UPDATE via insert tool)
+After generating the intro text, save it via `persistMessage()` (or `saveThreadMessage`) so it's stored permanently. This prevents re-generation on every page load.
 
-Update assignment `4ce28a0e-b77e-4c97-b914-e6dc4717c046` to `workflow_mode = 'guided_chat'`:
+### 2. Add diagnostic logging in the chat function (chat/index.ts, ~line 719)
 
-```sql
-UPDATE homework_tutor_assignments 
-SET workflow_mode = 'guided_chat' 
-WHERE id = '4ce28a0e-b77e-4c97-b914-e6dc4717c046';
-```
+Add a `console.log` before the `isValidImageUrl` check to confirm `taskImageUrl` presence, and log the result of `fetchImageAsBase64DataUrl` to diagnose silent failures.
 
-### 2. Provision guided chat thread for the assigned student
+### 3. Improve the system prompt for image-based tasks (GuidedHomeworkWorkspace.tsx, `buildTaskContext`)
 
-The student `ac96a528-4213-471b-ac9d-163a2af6397a` has a `homework_tutor_student_assignments` row but no thread exists yet. Need to:
+When `task_text` is very short (e.g. "Реши") and an image is attached, add explicit instructions: "Условие задачи полностью содержится на изображении. Внимательно прочитай текст и данные на изображении. НЕ придумывай условие — используй ТОЛЬКО то, что написано на картинке."
 
-1. Look up the `student_assignment_id` from `homework_tutor_student_assignments`
-2. Insert a row into `homework_tutor_threads` 
-3. Insert `homework_tutor_task_states` for each task (first = `active`, rest = `locked`)
-
-This requires querying for the student_assignment ID and task IDs first, then inserting thread + task states.
-
-### 3. Redeploy edge function
-
-Redeploy `homework-api` to confirm latest code is live for future assignments.
-
-### No frontend changes needed
-
-The frontend already handles `workflow_mode === 'guided_chat'` correctly at line 433 of `StudentHomeworkDetail.tsx`.
+This is the most impactful fix — telling the model explicitly that the task text IS the image prevents hallucination.
 
