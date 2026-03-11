@@ -1,20 +1,40 @@
 
 
-## Plan: Premium toggle for VladimirKam
+## Root Cause
 
-There's already a "Сбросить на Free (dev)" button gated by `profile?.username === 'VladimirKam'` (line 445). I'll replace that single reset button with a proper toggle (Switch component) that lets you switch between Free and Premium.
+The database confirms: assignment `4ce28a0e-b77e-4c97-b914-e6dc4717c046` has `workflow_mode = 'classic'` despite the switch being ON in the UI. This happened because the edge function `homework-api` was not yet redeployed with `workflow_mode` support when the assignment was created. The edge function defaulted unknown fields to `'classic'`.
 
-### Changes
+**All 40 assignments in the database have `workflow_mode = 'classic'`** -- none were ever saved as `guided_chat`.
 
-**File: `src/pages/Profile.tsx`** (lines 444–466)
+The frontend code is correct (sends `workflow_mode`), the edge function code is correct (saves it), and the student-side query is correct (reads it). The issue was purely a deployment timing gap.
 
-Replace the existing "Сбросить на Free (dev)" button with a Switch toggle:
-- Show only when `profile?.username === 'VladimirKam'`
-- Label: "Premium (dev)" with a Crown icon
-- Toggle ON → sets `subscription_tier: 'premium'`, `subscription_expires_at: +1 year`
-- Toggle OFF → sets `subscription_tier: 'free'`, `subscription_expires_at: null`
-- After toggle, call `subscription.refresh()`
-- Import `Switch` from `@/components/ui/switch`
+## Fix Plan
 
-This keeps the existing payment flow for all other users untouched and gives only your account a quick dev toggle.
+### 1. Fix existing assignment data (SQL UPDATE via insert tool)
+
+Update assignment `4ce28a0e-b77e-4c97-b914-e6dc4717c046` to `workflow_mode = 'guided_chat'`:
+
+```sql
+UPDATE homework_tutor_assignments 
+SET workflow_mode = 'guided_chat' 
+WHERE id = '4ce28a0e-b77e-4c97-b914-e6dc4717c046';
+```
+
+### 2. Provision guided chat thread for the assigned student
+
+The student `ac96a528-4213-471b-ac9d-163a2af6397a` has a `homework_tutor_student_assignments` row but no thread exists yet. Need to:
+
+1. Look up the `student_assignment_id` from `homework_tutor_student_assignments`
+2. Insert a row into `homework_tutor_threads` 
+3. Insert `homework_tutor_task_states` for each task (first = `active`, rest = `locked`)
+
+This requires querying for the student_assignment ID and task IDs first, then inserting thread + task states.
+
+### 3. Redeploy edge function
+
+Redeploy `homework-api` to confirm latest code is live for future assignments.
+
+### No frontend changes needed
+
+The frontend already handles `workflow_mode === 'guided_chat'` correctly at line 433 of `StudentHomeworkDetail.tsx`.
 

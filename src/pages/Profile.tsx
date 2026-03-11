@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from "react";
+import { Switch } from "@/components/ui/switch";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -441,28 +442,33 @@ const Profile = () => {
                         Оформить Premium
                       </Button>
                     )}
-                    {/* Dev button: Reset to free for VladimirKam only */}
-                    {profile?.username === 'VladimirKam' && subscription.isPremium && (
-                      <Button 
-                        size="sm" 
-                        variant="outline"
-                        className="border-red-300 text-red-600 hover:bg-red-50"
-                        onClick={async () => {
-                          if (!userId) return;
-                          const { error } = await supabase
-                            .from('profiles')
-                            .update({ subscription_tier: 'free', subscription_expires_at: null })
-                            .eq('id', userId);
-                          if (error) {
-                            toast.error('Ошибка сброса подписки');
-                          } else {
-                            toast.success('Подписка сброшена на Free');
-                            subscription.refresh();
-                          }
-                        }}
-                      >
-                        Сбросить на Free (dev)
-                      </Button>
+                    {/* Dev toggle: Premium for VladimirKam only */}
+                    {profile?.username === 'VladimirKam' && (
+                      <div className="flex items-center gap-2">
+                        <Crown className="w-4 h-4 text-amber-500" />
+                        <span className="text-sm text-muted-foreground">Premium (dev)</span>
+                        <Switch
+                          checked={subscription.isPremium}
+                          onCheckedChange={async (checked) => {
+                            if (!userId) return;
+                            const { error } = await supabase
+                              .from('profiles')
+                              .update({
+                                subscription_tier: checked ? 'premium' : 'free',
+                                subscription_expires_at: checked
+                                  ? new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString()
+                                  : null,
+                              })
+                              .eq('id', userId);
+                            if (error) {
+                              toast.error('Ошибка переключения тарифа');
+                            } else {
+                              toast.success(checked ? 'Premium активирован' : 'Сброшено на Free');
+                              subscription.refresh();
+                            }
+                          }}
+                        />
+                      </div>
                     )}
                   </div>
                 </div>
