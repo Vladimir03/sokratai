@@ -106,7 +106,7 @@ function buildTaskContext(
     assignment.topic ? `Тема: ${assignment.topic}.` : null,
     `Задача ${currentTask.order_num} из ${totalTasks}.`,
     `Условие: ${currentTask.task_text}`,
-    currentTask.task_image_url ? `Изображение условия: ${currentTask.task_image_url}` : null,
+    currentTask.task_image_url ? 'К задаче прикреплено изображение с условием — оно передано отдельно.' : null,
     modeHint,
     'Пиши кратко, понятно, с фокусом на текущую задачу. LaTeX: $..$ или $$..$$ при необходимости.',
   ];
@@ -435,6 +435,15 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
     setIsStreaming(true);
     setStreamingContent('');
 
+    // Resolve task image to signed URL for AI (if task has image)
+    let resolvedTaskImageUrl: string | undefined;
+    if (task.task_image_url) {
+      const signedUrl = await getStudentTaskImageSignedUrlViaBackend(
+        assignment.id, task.id,
+      );
+      if (signedUrl) resolvedTaskImageUrl = signedUrl;
+    }
+
     let fullContent = '';
     let streamErrorHandled = false;
 
@@ -442,6 +451,7 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
       await streamChat({
         messages: contextMessages,
         taskContext: buildTaskContext(assignment, task, assignment.tasks.length, sendMode),
+        taskImageUrl: resolvedTaskImageUrl,
         onDelta: (delta) => {
           fullContent += delta;
           setStreamingContent(fullContent);
@@ -821,6 +831,15 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
       setIsStreaming(true);
       setStreamingContent('');
 
+      // Resolve task image to signed URL for AI (if task has image)
+      let bootstrapImageUrl: string | undefined;
+      if (currentTask.task_image_url) {
+        const signedUrl = await getStudentTaskImageSignedUrlViaBackend(
+          assignment.id, currentTask.id,
+        );
+        if (signedUrl) bootstrapImageUrl = signedUrl;
+      }
+
       let content = '';
       try {
         await streamChat({
@@ -831,6 +850,7 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
             },
           ],
           taskContext: buildTaskContext(assignment, currentTask, assignment.tasks.length, 'answer'),
+          taskImageUrl: bootstrapImageUrl,
           onDelta: (delta) => {
             content += delta;
             setStreamingContent(content);

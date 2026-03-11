@@ -9,7 +9,10 @@ import {
   normalizeText,
   softTruncate,
   type HomeworkAiErrorType,
+  type LovableImagePart,
   type LovableMessage,
+  type LovableMessageContent,
+  type LovableTextPart,
 } from "./vision_checker.ts";
 
 // ─── Constants ──────────────────────────────────────────────────────────────
@@ -179,11 +182,13 @@ function buildCheckPrompt(params: EvaluateStudentAnswerParams): LovableMessage[]
   const correctAnswerValue = clampPromptText(params.correctAnswer) || "[нет эталонного ответа — оцени по смыслу]";
   const rubricLine = params.rubricText ? `Критерии оценки: ${clampPromptText(params.rubricText)}` : "";
 
+  const hasImage = !!params.taskImageUrl;
+
   const systemContent = [
     "Ты проверяешь ответ ученика на задачу по домашнему заданию.",
     `Предмет: ${params.subject}.`,
     `Условие задачи: ${clampPromptText(params.taskText)}`,
-    params.taskImageUrl ? `Изображение условия задачи: ${params.taskImageUrl}` : "",
+    hasImage ? "К задаче прикреплено изображение с условием — внимательно изучи его." : "",
     `Эталонный ответ: ${correctAnswerValue}`,
     rubricLine,
     "",
@@ -222,21 +227,41 @@ function buildCheckPrompt(params: EvaluateStudentAnswerParams): LovableMessage[]
     }
   }
 
-  // Add the current answer
+  // Build the user message with optional task image
+  const userContent: Array<LovableTextPart | LovableImagePart> = [];
+
+  if (hasImage) {
+    userContent.push({
+      type: "image_url",
+      image_url: { url: params.taskImageUrl as string },
+    });
+    userContent.push({
+      type: "text",
+      text: `Изображение выше — условие задачи.\n\nОтвет ученика: ${clampPromptText(params.studentAnswer)}`,
+    });
+  } else {
+    userContent.push({
+      type: "text",
+      text: `Ответ ученика: ${clampPromptText(params.studentAnswer)}`,
+    });
+  }
+
   messages.push({
     role: "user",
-    content: `Ответ ученика: ${clampPromptText(params.studentAnswer)}`,
+    content: userContent,
   });
 
   return messages;
 }
 
 function buildHintPrompt(params: GenerateHintParams): LovableMessage[] {
+  const hasImage = !!params.taskImageUrl;
+
   const systemContent = [
     "Ты репетитор, помогаешь ученику с домашним заданием.",
     `Предмет: ${params.subject}.`,
     `Условие задачи: ${clampPromptText(params.taskText)}`,
-    params.taskImageUrl ? `Изображение условия задачи: ${params.taskImageUrl}` : "",
+    hasImage ? "К задаче прикреплено изображение с условием — внимательно изучи его." : "",
     params.correctAnswer ? `Правильный ответ (НЕ раскрывай ученику!): ${clampPromptText(params.correctAnswer)}` : "",
     "",
     `Ученик уже сделал ${params.wrongAnswerCount} неверных попыток и получил ${params.hintCount} подсказок.`,
@@ -272,9 +297,28 @@ function buildHintPrompt(params: GenerateHintParams): LovableMessage[] {
     }
   }
 
+  // Build user message with optional task image
+  const userContent: Array<LovableTextPart | LovableImagePart> = [];
+
+  if (hasImage) {
+    userContent.push({
+      type: "image_url",
+      image_url: { url: params.taskImageUrl as string },
+    });
+    userContent.push({
+      type: "text",
+      text: "Изображение выше — условие задачи.\n\nДай подсказку по этой задаче.",
+    });
+  } else {
+    userContent.push({
+      type: "text",
+      text: "Дай подсказку по этой задаче.",
+    });
+  }
+
   messages.push({
     role: "user",
-    content: "Дай подсказку по этой задаче.",
+    content: userContent,
   });
 
   return messages;

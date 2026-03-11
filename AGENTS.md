@@ -171,6 +171,18 @@ For DB-backed features:
 
 ---
 
+# AI Image Handling Rules
+
+When passing images to AI (Lovable/Gemini API):
+
+1. **NEVER** insert `storage://` refs or raw Supabase paths as text in prompts. AI cannot access them.
+2. **ALWAYS** resolve `storage://` → signed HTTP URL via `db.storage.createSignedUrl()` (service_role key) before sending to AI.
+3. **ALWAYS** use multimodal `{ type: "image_url", image_url: { url } }` format in message content arrays. Plain text URLs in system prompts do NOT make AI "see" the image.
+4. When adding a new AI code path that involves images, audit ALL callers (check, hint, question, bootstrap, etc.) — not just the primary one. Each path to AI must independently handle image resolution.
+5. The correct pattern exists in `homework-api/vision_checker.ts` (`recognizeHomeworkPhoto`, line ~486) and `homework-api/guided_ai.ts` (`buildCheckPrompt`, `buildHintPrompt`).
+
+---
+
 # Database Rules
 
 Allowed:
