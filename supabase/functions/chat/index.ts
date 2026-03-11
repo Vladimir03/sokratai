@@ -33,6 +33,38 @@ const ALLOWED_IMAGE_DOMAINS = [
 ];
 
 /**
+ * Downloads an image from an HTTPS URL and returns a base64 data URL.
+ * The Lovable AI Gateway (proxying Gemini) does NOT fetch external HTTP URLs —
+ * images must be inlined as data:image/...;base64,... for the model to see them.
+ * Returns null if the download fails.
+ */
+async function fetchImageAsBase64DataUrl(url: string): Promise<string | null> {
+  try {
+    const resp = await fetch(url);
+    if (!resp.ok) {
+      console.error("fetchImageAsBase64DataUrl: HTTP error", { url: url.slice(0, 120), status: resp.status });
+      return null;
+    }
+    const buf = await resp.arrayBuffer();
+    const mime = resp.headers.get("content-type") || "image/jpeg";
+    // Convert in 32KB chunks to avoid stack overflow on large images
+    const bytes = new Uint8Array(buf);
+    const CHUNK = 0x8000;
+    let binary = "";
+    for (let i = 0; i < bytes.length; i += CHUNK) {
+      binary += String.fromCharCode.apply(null, Array.from(bytes.subarray(i, i + CHUNK)));
+    }
+    return `data:${mime};base64,${btoa(binary)}`;
+  } catch (err) {
+    console.error("fetchImageAsBase64DataUrl: fetch error", {
+      url: url.slice(0, 120),
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return null;
+  }
+}
+
+/**
  * Validates image URL to prevent Server-Side Request Forgery (SSRF) attacks
  */
 function isValidImageUrl(url: string): boolean {
@@ -621,10 +653,10 @@ async function processAIRequest(
     }
   }
 
-  const transformedMessages = messages.map((msg: any) => {
+  const transformedMessages = await Promise.all(messages.map(async (msg: any) => {
     if (msg.image_url) {
       console.log("📷 Processing message with image:", msg.image_url.substring(0, 100) + "...");
-      
+
       if (!isValidImageUrl(msg.image_url)) {
         console.error('[SECURITY] Rejected invalid image URL:', msg.image_url);
         return {
@@ -632,7 +664,17 @@ async function processAIRequest(
           content: msg.content || "Image was rejected due to security policy",
         };
       }
-      
+
+      // Download and convert to base64 — Lovable gateway doesn't fetch external URLs
+      const base64Url = await fetchImageAsBase64DataUrl(msg.image_url);
+      if (!base64Url) {
+        console.error("📷 Failed to download message image, skipping:", msg.image_url.slice(0, 80));
+        return {
+          role: msg.role,
+          content: msg.content || "Изображение не удалось загрузить",
+        };
+      }
+
       return {
         role: msg.role,
         content: [
@@ -643,38 +685,44 @@ async function processAIRequest(
           {
             type: "image_url",
             image_url: {
-              url: msg.image_url,
+              url: base64Url,
             },
           },
         ],
       };
     }
-    
+
     return {
       role: msg.role,
       content: msg.content,
     };
-  });
+  }));
 
-  // If a task image URL is provided (homework context), inject it into the
-  // first user message as a multimodal image_url part so the AI can see it.
+  // If a task image URL is provided (homework context), download it and inject
+  // as a base64 data URL into the first user message so the AI can see it.
+  // The Lovable gateway does NOT fetch external URLs — base64 inline is required.
   if (taskImageUrl && typeof taskImageUrl === "string" && isValidImageUrl(taskImageUrl)) {
-    const firstUserIdx = transformedMessages.findIndex((m: any) => m.role === "user");
-    if (firstUserIdx >= 0) {
-      const original = transformedMessages[firstUserIdx];
-      const textContent = typeof original.content === "string"
-        ? original.content
-        : Array.isArray(original.content)
-          ? (original.content as any[]).filter((p: any) => p.type === "text").map((p: any) => p.text).join("\n")
-          : "";
-      transformedMessages[firstUserIdx] = {
-        role: "user",
-        content: [
-          { type: "image_url", image_url: { url: taskImageUrl } },
-          { type: "text", text: `Изображение выше — условие задачи.\n\n${textContent}` },
-        ],
-      };
-      console.log("📷 Injected task image into first user message:", taskImageUrl.substring(0, 80) + "...");
+    const base64DataUrl = await fetchImageAsBase64DataUrl(taskImageUrl);
+    if (base64DataUrl) {
+      const firstUserIdx = transformedMessages.findIndex((m: any) => m.role === "user");
+      if (firstUserIdx >= 0) {
+        const original = transformedMessages[firstUserIdx];
+        const textContent = typeof original.content === "string"
+          ? original.content
+          : Array.isArray(original.content)
+            ? (original.content as any[]).filter((p: any) => p.type === "text").map((p: any) => p.text).join("\n")
+            : "";
+        transformedMessages[firstUserIdx] = {
+          role: "user",
+          content: [
+            { type: "image_url", image_url: { url: base64DataUrl } },
+            { type: "text", text: `Изображение выше — условие задачи.\n\n${textContent}` },
+          ],
+        };
+        console.log("📷 Injected task image (base64) into first user message, size:", base64DataUrl.length);
+      }
+    } else {
+      console.error("📷 Failed to download task image, proceeding without it:", taskImageUrl.slice(0, 80));
     }
   }
 
