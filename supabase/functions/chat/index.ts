@@ -17,6 +17,8 @@ interface ChatRequestBody {
   messages: any[];
   systemPrompt?: string;
   taskContext?: string;
+  /** Signed HTTP URL of a homework task image — injected as multimodal image_url part */
+  taskImageUrl?: string;
   chatId?: string;
   userId?: string;
   responseProfile?: ResponseProfile;
@@ -27,6 +29,7 @@ interface ChatRequestBody {
 // SECURITY: Allowed domains for image fetching to prevent SSRF attacks
 const ALLOWED_IMAGE_DOMAINS = [
   `${Deno.env.get("SUPABASE_URL")}/storage/v1/object/sign/chat-images/`,
+  `${Deno.env.get("SUPABASE_URL")}/storage/v1/object/sign/homework-task-images/`,
 ];
 
 /**
@@ -472,14 +475,14 @@ serve(async (req) => {
       
       userId = body.userId;
       
-      const { messages, systemPrompt, taskContext, chatId } = body;
+      const { messages, systemPrompt, taskContext, taskImageUrl, chatId } = body;
       const responseProfile = normalizeResponseProfile(body.responseProfile);
       const responseMode = normalizeResponseMode(body.responseMode);
       const maxChars = normalizeMaxChars(body.maxChars);
 
       // Apply the same limits for Telegram/service callers
       const { allowed, isPremium, isTrialActive, trialEndsAt, messagesUsed, limit } = await checkSubscriptionAndLimits(userId, adminSupabase);
-      
+
       if (!allowed) {
         return new Response(
           JSON.stringify({
@@ -498,6 +501,7 @@ serve(async (req) => {
         messages,
         systemPrompt,
         taskContext,
+        taskImageUrl,
         chatId,
         responseProfile,
         responseMode,
@@ -540,7 +544,7 @@ serve(async (req) => {
       }
 
       const body = await req.json() as ChatRequestBody;
-      const { messages, systemPrompt, taskContext, chatId } = body;
+      const { messages, systemPrompt, taskContext, taskImageUrl, chatId } = body;
       const responseProfile = normalizeResponseProfile(body.responseProfile);
       const responseMode = normalizeResponseMode(body.responseMode);
       const maxChars = normalizeMaxChars(body.maxChars);
@@ -550,6 +554,7 @@ serve(async (req) => {
         messages,
         systemPrompt,
         taskContext,
+        taskImageUrl,
         chatId,
         responseProfile,
         responseMode,
@@ -571,6 +576,7 @@ async function processAIRequest(
   messages: any[],
   systemPrompt?: string,
   taskContext?: string,
+  taskImageUrl?: string,
   chatId?: string,
   responseProfile: ResponseProfile = "default",
   responseMode: ResponseMode = "dialog",
@@ -649,6 +655,28 @@ async function processAIRequest(
       content: msg.content,
     };
   });
+
+  // If a task image URL is provided (homework context), inject it into the
+  // first user message as a multimodal image_url part so the AI can see it.
+  if (taskImageUrl && typeof taskImageUrl === "string" && isValidImageUrl(taskImageUrl)) {
+    const firstUserIdx = transformedMessages.findIndex((m: any) => m.role === "user");
+    if (firstUserIdx >= 0) {
+      const original = transformedMessages[firstUserIdx];
+      const textContent = typeof original.content === "string"
+        ? original.content
+        : Array.isArray(original.content)
+          ? (original.content as any[]).filter((p: any) => p.type === "text").map((p: any) => p.text).join("\n")
+          : "";
+      transformedMessages[firstUserIdx] = {
+        role: "user",
+        content: [
+          { type: "image_url", image_url: { url: taskImageUrl } },
+          { type: "text", text: `Изображение выше — условие задачи.\n\n${textContent}` },
+        ],
+      };
+      console.log("📷 Injected task image into first user message:", taskImageUrl.substring(0, 80) + "...");
+    }
+  }
 
   // Используем Lovable AI Gateway напрямую
   // ЗАКОММЕНТИРОВАНО: OpenRouter логика

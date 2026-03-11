@@ -148,6 +148,23 @@ Legacy student-only система (`homework_sets`, `homework_tasks`, `homework
 - Система попыток (attempts) **удалена** — ученик может пересдавать без ограничений
 - `src/types/homework.ts` содержит legacy-типы `HomeworkSet`/`HomeworkTask` (пока используются SUBJECTS конфиг) — не путать с активной системой
 
+### Передача изображений задач в AI (КРИТИЧНО)
+
+`task_image_url` в БД хранится как `storage://homework-task-images/...` — это **внутренняя** ссылка Supabase, **не HTTP URL**. AI API не может её открыть.
+
+**Правило**: перед передачей изображения в AI (Lovable/Gemini) **ОБЯЗАТЕЛЬНО**:
+1. Преобразовать `storage://` → подписанный HTTP URL через `db.storage.createSignedUrl()` (service_role) или через бэкенд-эндпоинт `GET /assignments/:id/tasks/:taskId/image-url`
+2. Передать как multimodal `{ type: "image_url", image_url: { url: "https://..." } }` в массиве `content` user-сообщения
+3. **НИКОГДА** не вставлять `storage://` или raw URL как текст в промпт — AI его не увидит
+
+**Четыре пути к AI в guided chat** (все должны передавать изображение корректно):
+- `answer` → `handleCheckAnswer` → `evaluateStudentAnswer` в `guided_ai.ts` (resolved в `index.ts`)
+- `hint` → `handleRequestHint` → `generateHint` в `guided_ai.ts` (resolved в `index.ts`)
+- `question` → `streamChat()` → `/functions/v1/chat` (resolved на фронтенде, передаётся как `taskImageUrl`)
+- `bootstrap` → `streamChat()` → `/functions/v1/chat` (resolved на фронтенде, передаётся как `taskImageUrl`)
+
+При добавлении нового пути к AI с изображениями — проверить ВСЕ вызывающие точки, не только основную.
+
 ## Известные хрупкие области
 
 1. **Chat.tsx** (2000+ строк) — очень сложный компонент. Любые изменения в ChatMessage, ChatInput, ChatSidebar могут сломать чат

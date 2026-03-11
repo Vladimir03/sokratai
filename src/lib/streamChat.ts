@@ -25,6 +25,8 @@ export interface StreamChatMessage {
 export interface StreamChatOptions {
   messages: StreamChatMessage[];
   taskContext?: string;
+  /** Signed HTTP URL for a task image; injected as multimodal image_url part on the server */
+  taskImageUrl?: string;
   onDelta: (text: string) => void;
   onDone: () => void;
   onError?: (error: Error) => void;
@@ -41,6 +43,7 @@ export interface StreamChatOptions {
 export async function streamChat({
   messages,
   taskContext,
+  taskImageUrl,
   onDelta,
   onDone,
   onError,
@@ -72,7 +75,7 @@ export async function streamChat({
           'Content-Type': 'application/json',
           Authorization: `Bearer ${session.access_token}`,
         },
-        body: JSON.stringify({ messages, taskContext }),
+        body: JSON.stringify({ messages, taskContext, taskImageUrl: taskImageUrl || undefined }),
         signal: controller.signal,
       });
 
