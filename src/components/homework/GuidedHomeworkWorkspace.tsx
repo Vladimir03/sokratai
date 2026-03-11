@@ -13,10 +13,8 @@ import {
   CheckCircle2,
   ChevronLeft,
   ChevronRight,
-  HelpCircle,
   Lightbulb,
   Loader2,
-  MessageSquarePlus,
   ZoomIn,
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
@@ -58,7 +56,6 @@ import { streamChat, StreamChatError } from '@/lib/streamChat';
 import { trackGuidedHomeworkEvent } from '@/lib/homeworkTelemetry';
 
 const MAX_CONTEXT_MESSAGES = 15;
-type InputMode = 'answer' | 'question';
 type SendMode = Extract<GuidedMessageKind, 'answer' | 'hint_request' | 'question'>;
 
 interface GuidedHomeworkWorkspaceProps {
@@ -254,7 +251,6 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
   const [isRequestingHint, setIsRequestingHint] = useState(false);
   const [threadId, setThreadId] = useState<string | null>(null);
   const [threadStatus, setThreadStatus] = useState<'active' | 'completed' | 'abandoned'>('active');
-  const [inputMode, setInputMode] = useState<InputMode>('answer');
 
   useEffect(() => {
     messagesRef.current = messages;
@@ -513,9 +509,6 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
     } finally {
       setIsStreaming(false);
       setStreamingContent('');
-      if (sendMode === 'question') {
-        setInputMode('answer');
-      }
     }
   }, [assignment, patchMessage, persistMessage]);
 
@@ -675,10 +668,13 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
     threadId,
   ]);
 
-  const handleSend = useCallback((text: string) => {
-    const mode: SendMode = inputMode === 'question' ? 'question' : 'answer';
-    void sendUserMessage(text, mode);
-  }, [inputMode, sendUserMessage]);
+  const handleSendAnswer = useCallback((text: string) => {
+    void sendUserMessage(text, 'answer');
+  }, [sendUserMessage]);
+
+  const handleSendStep = useCallback((text: string) => {
+    void sendUserMessage(text, 'question');
+  }, [sendUserMessage]);
 
   const handleHint = useCallback(async () => {
     if (!threadId || controlsDisabled || !isViewingActiveTask) return;
@@ -723,15 +719,6 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
       setIsRequestingHint(false);
     }
   }, [assignment.id, controlsDisabled, currentTaskOrder, isViewingActiveTask, queryClient, syncThreadFromResponse, threadId]);
-
-  const handleEnterQuestionMode = useCallback(() => {
-    if (!isViewingActiveTask) {
-      toast.info('Переключитесь на активную задачу, чтобы задать вопрос.');
-      return;
-    }
-    setInputMode('question');
-    trackGuidedHomeworkEvent('guided_question_mode', { assignmentId: assignment.id, taskOrder: currentTaskOrder });
-  }, [assignment.id, currentTaskOrder, isViewingActiveTask]);
 
   const handleRetryMessage = useCallback((messageId: string) => {
     const message = messagesRef.current.find((item) => item.id === messageId);
@@ -1008,9 +995,6 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
               <Badge className={`border text-xs ${UI_STATUS_META[uiStatus].badgeClass}`}>
                 {UI_STATUS_META[uiStatus].label}
               </Badge>
-              {inputMode === 'question' && (
-                <Badge variant="outline" className="text-xs">Режим вопроса</Badge>
-              )}
               {!isViewingActiveTask && (
                 <Badge variant="secondary" className="text-xs">
                   Просмотр задачи {currentTaskOrder}
@@ -1117,7 +1101,7 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
 
       <div className="shrink-0 border-t bg-background">
         <div className="px-4 pt-3 pb-2 space-y-2">
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+          <div className="grid grid-cols-3 gap-2">
             <Button
               variant="outline"
               size="sm"
@@ -1150,17 +1134,6 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
               <Lightbulb className="h-4 w-4" />
               Подсказка
             </Button>
-
-            <Button
-              variant={inputMode === 'question' ? 'default' : 'outline'}
-              size="sm"
-              onClick={handleEnterQuestionMode}
-              disabled={controlsDisabled || !isViewingActiveTask}
-              className="justify-start gap-1"
-            >
-              <MessageSquarePlus className="h-4 w-4" />
-              Задать вопрос
-            </Button>
           </div>
 
           {uiStatus === 'send_error' && (
@@ -1176,24 +1149,17 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
             </div>
           )}
 
-          {inputMode === 'question' && (
-            <div className="rounded-md border border-primary/30 bg-primary/5 px-3 py-2 text-xs text-primary flex items-start gap-2">
-              <HelpCircle className="h-4 w-4 mt-0.5" />
-              <span>Режим вопроса активен: следующий текст будет отправлен как уточняющий вопрос.</span>
-            </div>
-          )}
         </div>
 
         <GuidedChatInput
-          onSend={handleSend}
+          onSendAnswer={handleSendAnswer}
+          onSendStep={handleSendStep}
           isLoading={isStreaming || isCheckingAnswer || isRequestingHint}
-          disabled={threadStatus !== 'active' || !isViewingActiveTask || isCheckingAnswer || isRequestingHint}
+          disabled={threadStatus !== 'active' || !isViewingActiveTask}
           placeholder={
-            inputMode === 'question'
-              ? 'Задайте уточняющий вопрос по текущей задаче...'
-              : currentTask
-                ? `Введите ответ по задаче ${currentTask.order_num}...`
-                : 'Введите ответ...'
+            currentTask
+              ? `Задача ${currentTask.order_num}: ответ или шаг решения...`
+              : 'Введите ответ или шаг решения...'
           }
         />
       </div>

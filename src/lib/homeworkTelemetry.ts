@@ -7,7 +7,7 @@ type GuidedTelemetryEvent =
   | 'guided_retry_success'
   | 'guided_retry_failed'
   | 'guided_hint'
-  | 'guided_question_mode'
+  | 'guided_answer_on_track'
   | 'guided_advance'
   | 'guided_advance_click'
   | 'guided_advance_success'
