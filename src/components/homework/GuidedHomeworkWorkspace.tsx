@@ -870,13 +870,7 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
 
       // Persist intro to DB so it's not regenerated on every page load
       try {
-        await saveThreadMessage(threadId!, {
-          role: 'assistant',
-          content: introText,
-          task_order: 1,
-          message_kind: 'system',
-          visible_to_student: true,
-        });
+        await saveThreadMessage(threadId!, 'assistant', introText, 1, 'system');
         // Refetch thread to get the persisted message with a real DB id
         void queryClient.invalidateQueries({ queryKey: ['student', 'homework', 'thread', assignment.id] });
       } catch (e) {
