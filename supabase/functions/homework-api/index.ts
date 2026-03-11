@@ -3093,6 +3093,15 @@ async function handleCheckAnswer(
     maxScore: task.max_score ?? 1,
   });
 
+  // Safety guard: without correct_answer, AI cannot reliably auto-close task
+  let effectiveVerdict = result.verdict;
+  if (effectiveVerdict === "CORRECT" && !task.correct_answer?.trim()) {
+    console.log("guided_check_downgrade_no_answer", { taskId: task.id });
+    effectiveVerdict = "ON_TRACK";
+    result.feedback = result.feedback +
+      "\n\nОтлично! Но для полной проверки нужен эталонный ответ от репетитора.";
+  }
+
   // Save AI feedback message
   await db.from("homework_tutor_thread_messages").insert({
     thread_id: threadId,
@@ -3104,7 +3113,7 @@ async function handleCheckAnswer(
 
   let responseData: Record<string, unknown>;
 
-  if (result.verdict === "CORRECT") {
+  if (effectiveVerdict === "CORRECT") {
     // Set earned_score, mark completed, advance
     const earnedScore = currentAvailableScore;
 
@@ -3132,6 +3141,26 @@ async function handleCheckAnswer(
       task_completed: true,
       next_task_order: advanceResult.nextOrder,
       thread_completed: advanceResult.threadCompleted,
+      total_tasks: totalTasks,
+    };
+  } else if (effectiveVerdict === "ON_TRACK") {
+    // Correct step but NOT the final answer — keep task open, no score degradation
+    await db.from("homework_tutor_task_states").update({
+      last_ai_feedback: result.feedback,
+      updated_at: new Date().toISOString(),
+    }).eq("id", currentState.id);
+
+    responseData = {
+      verdict: "ON_TRACK",
+      feedback: result.feedback,
+      earned_score: null,
+      available_score: currentAvailableScore,
+      max_score: task.max_score ?? 1,
+      wrong_answer_count: (currentState.wrong_answer_count as number) ?? 0,
+      hint_count: (currentState.hint_count as number) ?? 0,
+      task_completed: false,
+      next_task_order: null,
+      thread_completed: false,
       total_tasks: totalTasks,
     };
   } else {
