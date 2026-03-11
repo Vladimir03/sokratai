@@ -32,11 +32,18 @@ const ALLOWED_IMAGE_DOMAINS = [
   `${Deno.env.get("SUPABASE_URL")}/storage/v1/object/sign/homework-task-images/`,
 ];
 
+/** Max image size (5 MB raw ≈ 6.7 MB base64) to stay within gateway body limits. */
+const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
+
 /**
- * Downloads an image from an HTTPS URL and returns a base64 data URL.
+ * Downloads an image from a pre-validated HTTPS URL and returns a base64 data URL.
  * The Lovable AI Gateway (proxying Gemini) does NOT fetch external HTTP URLs —
  * images must be inlined as data:image/...;base64,... for the model to see them.
- * Returns null if the download fails.
+ *
+ * Callers MUST validate the URL with isValidImageUrl() before calling this
+ * (only allowlisted Supabase storage domains are accepted).
+ *
+ * Returns null if the download fails or the image exceeds MAX_IMAGE_BYTES.
  */
 async function fetchImageAsBase64DataUrl(url: string): Promise<string | null> {
   try {
@@ -46,6 +53,14 @@ async function fetchImageAsBase64DataUrl(url: string): Promise<string | null> {
       return null;
     }
     const buf = await resp.arrayBuffer();
+    if (buf.byteLength > MAX_IMAGE_BYTES) {
+      console.error("fetchImageAsBase64DataUrl: image too large", {
+        url: url.slice(0, 120),
+        bytes: buf.byteLength,
+        maxBytes: MAX_IMAGE_BYTES,
+      });
+      return null;
+    }
     const mime = resp.headers.get("content-type") || "image/jpeg";
     // Convert in 32KB chunks to avoid stack overflow on large images
     const bytes = new Uint8Array(buf);

@@ -2228,15 +2228,21 @@ function arrayBufferToBase64(buffer: ArrayBuffer): string {
   return btoa(binary);
 }
 
+/** Max image size (5 MB raw ≈ 6.7 MB base64) to stay within gateway body limits. */
+const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
+
 /**
- * Converts a task_image_url (storage://, plain path, or external URL)
+ * Converts a task_image_url (storage:// or plain storage path)
  * into a base64 data URL that the Lovable AI Gateway can use directly.
  *
  * The Lovable gateway (proxying Gemini) does NOT fetch external HTTP URLs —
  * images must be inlined as `data:image/...;base64,...` (same format used by
  * recognizeHomeworkPhoto in vision_checker.ts).
  *
- * Returns null if the image ref is empty or download fails.
+ * SECURITY: External HTTP(S) URLs are rejected to prevent SSRF.
+ * task_image_url must always be a storage:// ref or plain storage path.
+ *
+ * Returns null if the image ref is empty, external, or download fails.
  */
 async function resolveTaskImageUrlForAI(
   db: SupabaseClient,
@@ -2244,27 +2250,12 @@ async function resolveTaskImageUrlForAI(
 ): Promise<string | null> {
   if (!imageRef) return null;
 
-  // External HTTP(S) URL — download and convert to base64
+  // SECURITY: reject external URLs to prevent SSRF — task images must live in storage
   if (imageRef.startsWith("http://") || imageRef.startsWith("https://")) {
-    try {
-      const resp = await fetch(imageRef);
-      if (!resp.ok) {
-        console.error("resolveTaskImageUrlForAI: failed to fetch external URL", {
-          imageRef: imageRef.slice(0, 120),
-          status: resp.status,
-        });
-        return null;
-      }
-      const buf = await resp.arrayBuffer();
-      const mime = resp.headers.get("content-type") || "image/jpeg";
-      return `data:${mime};base64,${arrayBufferToBase64(buf)}`;
-    } catch (err) {
-      console.error("resolveTaskImageUrlForAI: external fetch error", {
-        imageRef: imageRef.slice(0, 120),
-        error: err instanceof Error ? err.message : String(err),
-      });
-      return null;
-    }
+    console.error("resolveTaskImageUrlForAI: external URLs not allowed (SSRF prevention)", {
+      imageRef: imageRef.slice(0, 120),
+    });
+    return null;
   }
 
   // Parse storage://bucket/objectPath or plain path
@@ -2300,6 +2291,16 @@ async function resolveTaskImageUrlForAI(
   }
 
   const buf = await blob.arrayBuffer();
+  if (buf.byteLength > MAX_IMAGE_BYTES) {
+    console.error("resolveTaskImageUrlForAI: image too large", {
+      bucket,
+      objectPath,
+      bytes: buf.byteLength,
+      maxBytes: MAX_IMAGE_BYTES,
+    });
+    return null;
+  }
+
   const mime = blob.type || "image/jpeg";
   return `data:${mime};base64,${arrayBufferToBase64(buf)}`;
 }
