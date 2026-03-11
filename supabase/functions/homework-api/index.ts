@@ -2215,6 +2215,58 @@ async function handleMaterialSignedUrl(
   return jsonOk(cors, { url: signedData.signedUrl });
 }
 
+// ─── Helper: resolve task image URL to a signed HTTP URL for AI ──────────────
+
+/**
+ * Converts a task_image_url (which may be storage://bucket/path or plain path)
+ * into a signed HTTP URL that external services (AI API) can access.
+ * Returns null if the image ref is empty or signing fails.
+ */
+async function resolveTaskImageUrlForAI(
+  db: SupabaseClient,
+  imageRef: string | null | undefined,
+): Promise<string | null> {
+  if (!imageRef) return null;
+
+  // External URL — already accessible
+  if (imageRef.startsWith("http://") || imageRef.startsWith("https://")) {
+    return imageRef;
+  }
+
+  // Parse storage://bucket/objectPath
+  let bucket: string;
+  let objectPath: string;
+
+  if (imageRef.startsWith("storage://")) {
+    const rest = imageRef.slice("storage://".length);
+    const slashIdx = rest.indexOf("/");
+    if (slashIdx < 0) {
+      console.error("resolveTaskImageUrlForAI: cannot parse storage ref", { imageRef });
+      return null;
+    }
+    bucket = rest.slice(0, slashIdx);
+    objectPath = rest.slice(slashIdx + 1);
+  } else {
+    bucket = "homework-task-images";
+    objectPath = imageRef;
+  }
+
+  const { data: signedData, error: signedErr } = await db.storage
+    .from(bucket)
+    .createSignedUrl(objectPath, 3600);
+
+  if (signedErr || !signedData?.signedUrl) {
+    console.error("resolveTaskImageUrlForAI: failed to sign", {
+      bucket,
+      objectPath,
+      error: signedErr?.message,
+    });
+    return null;
+  }
+
+  return signedData.signedUrl;
+}
+
 // ─── Endpoint: GET /assignments/:id/tasks/:taskId/image-url ──────────────────
 
 async function handleTaskImageSignedUrl(
@@ -3022,12 +3074,15 @@ async function handleCheckAnswer(
     })
     .eq("id", currentState.id);
 
+  // Resolve task image to a signed HTTP URL for AI vision
+  const taskImageSignedUrl = await resolveTaskImageUrlForAI(db, task.task_image_url);
+
   // Call AI evaluation
   const totalTasks = tasks.length;
   const result = await evaluateStudentAnswer({
     studentAnswer: answer,
     taskText: task.task_text ?? "",
-    taskImageUrl: task.task_image_url ?? null,
+    taskImageUrl: taskImageSignedUrl,
     correctAnswer: task.correct_answer,
     rubricText: task.rubric_text,
     subject: assignment.subject ?? "math",
@@ -3192,10 +3247,13 @@ async function handleRequestHint(
     .update({ last_student_message_at: new Date().toISOString() })
     .eq("id", threadId);
 
+  // Resolve task image to a signed HTTP URL for AI vision
+  const hintTaskImageUrl = await resolveTaskImageUrlForAI(db, task.task_image_url);
+
   // Call AI for hint
   const hintResult = await generateHint({
     taskText: task.task_text ?? "",
-    taskImageUrl: task.task_image_url ?? null,
+    taskImageUrl: hintTaskImageUrl,
     correctAnswer: task.correct_answer,
     subject: assignment?.subject ?? "math",
     conversationHistory: recentMessages ?? [],
