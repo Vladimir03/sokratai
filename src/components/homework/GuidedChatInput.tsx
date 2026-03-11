@@ -1,14 +1,15 @@
 /**
  * Simple chat input for the guided homework workspace.
- * Intentionally lighter than ChatInput.tsx (no voice, haptics, sheets).
+ * Two submit buttons: "Ответ" (final answer, checked by AI) and "Шаг" (intermediate step, AI discussion).
  */
 
 import { memo, useRef, useState, useCallback, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
-import { Send } from 'lucide-react';
+import { CheckCircle2, MessageCircle } from 'lucide-react';
 
 interface GuidedChatInputProps {
-  onSend: (text: string) => void;
+  onSendAnswer: (text: string) => void;
+  onSendStep: (text: string) => void;
   isLoading: boolean;
   disabled?: boolean;
   placeholder?: string;
@@ -16,10 +17,11 @@ interface GuidedChatInputProps {
 
 const GuidedChatInput = memo(
   ({
-    onSend,
+    onSendAnswer,
+    onSendStep,
     isLoading,
     disabled = false,
-    placeholder = 'Напишите ответ...',
+    placeholder = 'Введите ответ или шаг решения...',
   }: GuidedChatInputProps) => {
     const [message, setMessage] = useState('');
     const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -35,28 +37,42 @@ const GuidedChatInput = memo(
       resizeTextarea();
     }, [message, resizeTextarea]);
 
-    const handleSend = useCallback(() => {
-      const trimmed = message.trim();
-      if (!trimmed || isLoading || disabled) return;
-      onSend(trimmed);
+    const clearAndReset = useCallback(() => {
       setMessage('');
-      // Reset textarea height after clearing
       if (textareaRef.current) {
         textareaRef.current.style.height = 'auto';
       }
-    }, [message, isLoading, disabled, onSend]);
+    }, []);
+
+    const handleSendAnswer = useCallback(() => {
+      const trimmed = message.trim();
+      if (!trimmed || isLoading || disabled) return;
+      onSendAnswer(trimmed);
+      clearAndReset();
+    }, [message, isLoading, disabled, onSendAnswer, clearAndReset]);
+
+    const handleSendStep = useCallback(() => {
+      const trimmed = message.trim();
+      if (!trimmed || isLoading || disabled) return;
+      onSendStep(trimmed);
+      clearAndReset();
+    }, [message, isLoading, disabled, onSendStep, clearAndReset]);
 
     const handleKeyDown = useCallback(
       (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
         if (e.key === 'Enter' && !e.shiftKey) {
           e.preventDefault();
-          handleSend();
+          handleSendAnswer();
         }
       },
-      [handleSend],
+      [handleSendAnswer],
     );
 
     const canSend = message.trim().length > 0 && !isLoading && !disabled;
+
+    const spinner = (
+      <div className="w-3.5 h-3.5 border-2 border-current border-t-transparent rounded-full animate-spin" />
+    );
 
     return (
       <div className="flex items-end gap-2 p-3 border-t bg-background">
@@ -75,18 +91,29 @@ const GuidedChatInput = memo(
             maxHeight: '150px',
           }}
         />
-        <Button
-          size="icon"
-          onClick={handleSend}
-          disabled={!canSend}
-          className="shrink-0 h-10 w-10"
-        >
-          {isLoading ? (
-            <div className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin" />
-          ) : (
-            <Send className="h-4 w-4" />
-          )}
-        </Button>
+        <div className="flex gap-1.5 shrink-0">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleSendStep}
+            disabled={!canSend}
+            className="h-10 px-2.5 gap-1 text-xs whitespace-nowrap"
+            title="Отправить как шаг решения (обсуждение с AI)"
+          >
+            {isLoading ? spinner : <MessageCircle className="h-3.5 w-3.5" />}
+            Шаг
+          </Button>
+          <Button
+            size="sm"
+            onClick={handleSendAnswer}
+            disabled={!canSend}
+            className="h-10 px-2.5 gap-1 text-xs whitespace-nowrap"
+            title="Отправить как итоговый ответ (проверка AI)"
+          >
+            {isLoading ? spinner : <CheckCircle2 className="h-3.5 w-3.5" />}
+            Ответ
+          </Button>
+        </div>
       </div>
     );
   },

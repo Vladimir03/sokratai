@@ -54,7 +54,7 @@ function formatTime(isoString?: string): string {
 function formatMessageKind(kind: GuidedMessageKind | undefined): string | null {
   if (!kind) return null;
   if (kind === 'hint_request') return 'Подсказка';
-  if (kind === 'question') return 'Вопрос';
+  if (kind === 'question') return 'Шаг решения';
   if (kind === 'answer') return 'Ответ';
   return null;
 }

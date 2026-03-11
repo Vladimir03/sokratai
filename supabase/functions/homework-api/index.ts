@@ -3093,13 +3093,14 @@ async function handleCheckAnswer(
     maxScore: task.max_score ?? 1,
   });
 
-  // Safety guard: without correct_answer, AI cannot reliably auto-close task
+  // Safety guard: without correct_answer, only trust high-confidence CORRECT
   let effectiveVerdict = result.verdict;
-  if (effectiveVerdict === "CORRECT" && !task.correct_answer?.trim()) {
-    console.log("guided_check_downgrade_no_answer", { taskId: task.id });
+  if (effectiveVerdict === "CORRECT" && !task.correct_answer?.trim() && result.confidence < 0.7) {
+    console.log("guided_check_downgrade_low_confidence", {
+      taskId: task.id,
+      confidence: result.confidence,
+    });
     effectiveVerdict = "ON_TRACK";
-    result.feedback = result.feedback +
-      "\n\nОтлично! Но для полной проверки нужен эталонный ответ от репетитора.";
   }
 
   // Save AI feedback message
@@ -3144,8 +3145,25 @@ async function handleCheckAnswer(
       total_tasks: totalTasks,
     };
   } else if (effectiveVerdict === "ON_TRACK") {
-    // Correct step but NOT the final answer — keep task open, no score degradation
+    // Correct step but NOT the final answer — keep task open
+    // First 2 ON_TRACKs are free; from 3rd onward, count as hint (degrades score)
+    const currentAttempts = ((currentState.attempts as number) ?? 0) + 1;
+    const wrongCount = (currentState.wrong_answer_count as number) ?? 0;
+    const prevOnTrackCount = currentAttempts - wrongCount - 1; // past ON_TRACK-like attempts
+    let newHintCount = (currentState.hint_count as number) ?? 0;
+    let onTrackAvailableScore = currentAvailableScore;
+
+    if (prevOnTrackCount >= 2) {
+      // 3rd+ ON_TRACK: count as hint, degrade score
+      newHintCount += 1;
+      onTrackAvailableScore = computeAvailableScore(
+        task.max_score ?? 1, wrongCount, newHintCount,
+      );
+    }
+
     await db.from("homework_tutor_task_states").update({
+      hint_count: newHintCount,
+      available_score: onTrackAvailableScore,
       last_ai_feedback: result.feedback,
       updated_at: new Date().toISOString(),
     }).eq("id", currentState.id);
@@ -3154,10 +3172,10 @@ async function handleCheckAnswer(
       verdict: "ON_TRACK",
       feedback: result.feedback,
       earned_score: null,
-      available_score: currentAvailableScore,
+      available_score: onTrackAvailableScore,
       max_score: task.max_score ?? 1,
-      wrong_answer_count: (currentState.wrong_answer_count as number) ?? 0,
-      hint_count: (currentState.hint_count as number) ?? 0,
+      wrong_answer_count: wrongCount,
+      hint_count: newHintCount,
       task_completed: false,
       next_task_order: null,
       thread_completed: false,
