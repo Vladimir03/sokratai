@@ -867,6 +867,22 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
       }
 
       const introText = content.trim() || 'Начинаем с первой задачи. Напиши решение, и я сразу помогу проверить его.';
+
+      // Persist intro to DB so it's not regenerated on every page load
+      try {
+        await saveThreadMessage(threadId!, {
+          role: 'assistant',
+          content: introText,
+          task_order: 1,
+          message_kind: 'system',
+          visible_to_student: true,
+        });
+        // Refetch thread to get the persisted message with a real DB id
+        void queryClient.invalidateQueries({ queryKey: ['student', 'homework', 'thread', assignment.id] });
+      } catch (e) {
+        console.warn('Failed to persist bootstrap intro:', e);
+      }
+
       const introId = `local-bootstrap-${threadId}`;
       setMessages((prev) => (
         prev.some((message) => message.id === introId)

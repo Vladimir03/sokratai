@@ -716,7 +716,9 @@ async function processAIRequest(
   // If a task image URL is provided (homework context), download it and inject
   // as a base64 data URL into the first user message so the AI can see it.
   // The Lovable gateway does NOT fetch external URLs — base64 inline is required.
+  console.log("📷 taskImageUrl received:", taskImageUrl ? `present (${taskImageUrl.slice(0, 80)}...)` : "absent");
   if (taskImageUrl && typeof taskImageUrl === "string" && isValidImageUrl(taskImageUrl)) {
+    console.log("📷 taskImageUrl passed isValidImageUrl, fetching as base64...");
     const base64DataUrl = await fetchImageAsBase64DataUrl(taskImageUrl);
     if (base64DataUrl) {
       const firstUserIdx = transformedMessages.findIndex((m: any) => m.role === "user");
