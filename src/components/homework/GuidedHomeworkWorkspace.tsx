@@ -98,12 +98,19 @@ function buildTaskContext(
         ? 'Режим: промежуточный шаг решения. Ученик показывает свой ход мыслей или шаг решения. Обсуди его, укажи ошибки если есть, помоги продвинуться дальше. Не раскрывай полностью решение и финальный ответ.'
         : 'Режим: проверка ответа ученика. Если ответ вероятно неверный, дай шаг для исправления. Если вероятно верный — похвали и предложи перейти к следующей задаче.';
 
+  const isMinimalText = currentTask.task_text.trim().length <= 15;
+  const hasImage = Boolean(currentTask.task_image_url);
+
   const parts = [
     `Задание: "${assignment.title}" по предмету ${getSubjectLabel(assignment.subject)}.`,
     assignment.topic ? `Тема: ${assignment.topic}.` : null,
     `Задача ${currentTask.order_num} из ${totalTasks}.`,
     `Условие: ${currentTask.task_text}`,
-    currentTask.task_image_url ? 'К задаче прикреплено изображение с условием — оно передано отдельно.' : null,
+    hasImage && isMinimalText
+      ? 'ВАЖНО: Условие задачи полностью содержится на прикреплённом изображении. Внимательно прочитай текст и данные на изображении. НЕ придумывай условие — используй ТОЛЬКО то, что написано и нарисовано на картинке.'
+      : hasImage
+        ? 'К задаче прикреплено изображение с условием — оно передано отдельно.'
+        : null,
     modeHint,
     'Пиши кратко, понятно, с фокусом на текущую задачу. LaTeX: $..$ или $$..$$ при необходимости.',
   ];
@@ -860,6 +867,16 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
       }
 
       const introText = content.trim() || 'Начинаем с первой задачи. Напиши решение, и я сразу помогу проверить его.';
+
+      // Persist intro to DB so it's not regenerated on every page load
+      try {
+        await saveThreadMessage(threadId!, 'assistant', introText, 1, 'system');
+        // Refetch thread to get the persisted message with a real DB id
+        void queryClient.invalidateQueries({ queryKey: ['student', 'homework', 'thread', assignment.id] });
+      } catch (e) {
+        console.warn('Failed to persist bootstrap intro:', e);
+      }
+
       const introId = `local-bootstrap-${threadId}`;
       setMessages((prev) => (
         prev.some((message) => message.id === introId)
