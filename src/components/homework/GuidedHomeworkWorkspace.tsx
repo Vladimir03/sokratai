@@ -561,6 +561,14 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
         } else {
           toast.success('Правильно! Переходим к следующей задаче.');
         }
+      } else if (response.verdict === 'ON_TRACK') {
+        // Correct step but not the final answer — no toast, AI feedback guides the student
+        trackGuidedHomeworkEvent('guided_answer_on_track', {
+          assignmentId: assignment.id,
+          taskOrder,
+          availableScore: response.available_score,
+          maxScore: response.max_score,
+        });
       } else {
         trackGuidedHomeworkEvent('guided_answer_incorrect', {
           assignmentId: assignment.id,

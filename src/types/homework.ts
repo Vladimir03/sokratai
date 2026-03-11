@@ -164,7 +164,7 @@ export interface HomeworkTaskState {
 // Phase 3: API response types
 
 export interface CheckAnswerResponse {
-  verdict: 'CORRECT' | 'INCORRECT';
+  verdict: 'CORRECT' | 'INCORRECT' | 'ON_TRACK';
   feedback: string;
   earned_score: number | null;
   available_score: number;

@@ -22,11 +22,11 @@ const MAX_FEEDBACK_LENGTH = 1_200;
 const SAFE_FEEDBACK_NO_ANSWER =
   "Проверь ход решения шаг за шагом и попробуй исправить первую найденную ошибку самостоятельно.";
 
-const VALID_VERDICTS = new Set(["CORRECT", "INCORRECT"]);
+const VALID_VERDICTS = new Set(["CORRECT", "INCORRECT", "ON_TRACK"]);
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
-export type GuidedVerdict = "CORRECT" | "INCORRECT";
+export type GuidedVerdict = "CORRECT" | "INCORRECT" | "ON_TRACK";
 
 export interface GuidedCheckResult {
   verdict: GuidedVerdict;
@@ -133,12 +133,12 @@ const HOMEWORK_ERROR_TYPES = new Set<HomeworkAiErrorType>([
   "factual_error", "weak_argument", "wrong_answer", "partial", "correct",
 ]);
 
-function sanitizeErrorType(value: unknown, isCorrect: boolean): HomeworkAiErrorType {
+function sanitizeErrorType(value: unknown, verdict: GuidedVerdict): HomeworkAiErrorType {
   if (typeof value === "string") {
     const normalized = value.trim().toLowerCase() as HomeworkAiErrorType;
     if (HOMEWORK_ERROR_TYPES.has(normalized)) return normalized;
   }
-  return isCorrect ? "correct" : "incomplete";
+  return verdict === "CORRECT" ? "correct" : "incomplete";
 }
 
 // ─── Check result sanitization ──────────────────────────────────────────────
@@ -164,25 +164,51 @@ function sanitizeCheckResult(
 
   // Extract confidence
   const confidenceRaw = toNumber(parsed.confidence);
-  const confidence = clamp01(confidenceRaw ?? (verdict === "CORRECT" ? 0.8 : 0.3));
+  const defaultConfidence = verdict === "CORRECT" ? 0.8 : verdict === "ON_TRACK" ? 0.6 : 0.3;
+  const confidence = clamp01(confidenceRaw ?? defaultConfidence);
 
   // Extract and sanitize feedback
   const feedbackRaw = typeof parsed.feedback === "string" ? parsed.feedback : "";
   const feedback = sanitizeFeedback(feedbackRaw, correctAnswer);
 
   // Extract error_type
-  const error_type = sanitizeErrorType(parsed.error_type, verdict === "CORRECT");
+  const error_type = sanitizeErrorType(parsed.error_type, verdict);
 
   return { verdict, feedback, confidence, error_type };
 }
 
 // ─── Prompt builders ────────────────────────────────────────────────────────
 
+/**
+ * Detect if the task expects a specific numeric/short answer (vs. essay/conceptual).
+ * Returns extra prompt guidance when a concrete value is expected.
+ */
+function buildAnswerTypeGuidance(correctAnswer: string | null, taskText: string): string {
+  if (!correctAnswer) return "";
+  const trimmed = correctAnswer.trim();
+  const hasNumber = /\d/.test(trimmed);
+  const isShort = trimmed.length < 100;
+  // Common Russian units (physics, math, chemistry)
+  const hasUnits = /(?:м\/с|м\/с²|км\/ч|кг|Н|Дж|Вт|Гц|Па|моль|А|В|Ом|л|мл|см|мм|км|°C|%)/i.test(trimmed);
+  // Task text asks for a specific value
+  const askingForValue = /(?:определи|найди|вычисли|рассчитай|чему равн|какова|каков|сколько|найти|определить|вычислить|рассчитать)/i.test(taskText);
+
+  if ((hasNumber && isShort) || hasUnits || askingForValue) {
+    return [
+      "",
+      "ВАЖНО: Эта задача требует КОНКРЕТНОГО числового/фактического ответа.",
+      "Формула без подставленных значений и итогового числа — это ON_TRACK, не CORRECT.",
+    ].join("\n");
+  }
+  return "";
+}
+
 function buildCheckPrompt(params: EvaluateStudentAnswerParams): LovableMessage[] {
   const correctAnswerValue = clampPromptText(params.correctAnswer) || "[нет эталонного ответа — оцени по смыслу]";
   const rubricLine = params.rubricText ? `Критерии оценки: ${clampPromptText(params.rubricText)}` : "";
 
   const hasImage = !!params.taskImageUrl;
+  const answerTypeGuidance = buildAnswerTypeGuidance(params.correctAnswer, params.taskText);
 
   const systemContent = [
     "Ты проверяешь ответ ученика на задачу по домашнему заданию.",
@@ -196,14 +222,32 @@ function buildCheckPrompt(params: EvaluateStudentAnswerParams): LovableMessage[]
     `Доступные баллы: ${params.availableScore} из ${params.maxScore}.`,
     "",
     "Верни ТОЛЬКО валидный JSON без markdown-обёрток и лишнего текста.",
-    '{"verdict":"CORRECT"|"INCORRECT","feedback":"...","confidence":0.0-1.0,"error_type":"..."}',
+    '{"verdict":"CORRECT"|"ON_TRACK"|"INCORRECT","feedback":"...","confidence":0.0-1.0,"error_type":"..."}',
     "",
-    "ПРАВИЛА:",
-    "- CORRECT только если ответ верный по существу (мелкие неточности оформления допустимы).",
-    "- feedback при INCORRECT: короткая подсказка-направление (1-2 предложения). НЕ давай ответ!",
-    "- feedback при CORRECT: краткая похвала (1 предложение).",
+    "ПРАВИЛА ОЦЕНКИ:",
+    "",
+    "Перед вынесением вердикта оцени ответ по ЧЕТЫРЁМ критериям:",
+    "1. Ответ относится к вопросу задачи? (а не к другой теме/величине)",
+    "2. Это финальный ответ или промежуточный шаг (формула, определение, часть решения)?",
+    "3. Формат ответа соответствует задаче (число с единицами, все пункты, и т.д.)?",
+    "4. Итоговый результат верный?",
+    "",
+    "Вердикты:",
+    "- CORRECT: ВСЕ 4 критерия выполнены. Ученик дал правильный финальный ответ на вопрос задачи.",
+    "  Мелкие неточности оформления допустимы (единицы записаны иначе, промежуточные шаги опущены).",
+    "- ON_TRACK: Шаг верный (правильная формула, верное рассуждение), но это НЕ финальный ответ на вопрос.",
+    "  Используй когда ученик на верном пути, но не довёл решение до конца.",
+    "- INCORRECT: Ответ неверный, не по теме, или содержит ошибку.",
+    "",
+    "Правила feedback:",
+    "- При CORRECT: краткая похвала (1 предложение).",
+    "- При ON_TRACK: похвали верный шаг и направь к завершению.",
+    '  Пример: "Формула верна! Теперь подставь значения и вычисли итоговый ответ."',
+    "- При INCORRECT: короткая подсказка-направление (1-2 предложения). НЕ давай ответ!",
+    "- Если ответ не на тот вопрос: объясни какую величину просит задача.",
     "- НЕЛЬЗЯ выдавать правильный ответ в feedback.",
     "- error_type: calculation | concept | formatting | incomplete | factual_error | weak_argument | wrong_answer | partial | correct",
+    answerTypeGuidance,
   ].filter(Boolean).join("\n");
 
   const messages: LovableMessage[] = [
