@@ -1,0 +1,143 @@
+// =============================================
+// Knowledge Base Types
+// =============================================
+
+export type ExamType = 'ege' | 'oge';
+
+export type MaterialType = 'file' | 'link' | 'media' | 'board';
+
+// =============================================
+// Каталог Сократа
+// =============================================
+
+export interface KBTopic {
+  id: string;
+  name: string;
+  section: string;
+  exam: ExamType;
+  kim_numbers: number[];
+  sort_order: number;
+  created_at: string;
+}
+
+/** Topic with aggregated counts from kb_topics_with_counts view */
+export interface KBTopicWithCounts extends KBTopic {
+  task_count: number;
+  material_count: number;
+  subtopic_names: string[];
+}
+
+export interface KBSubtopic {
+  id: string;
+  topic_id: string;
+  name: string;
+  sort_order: number;
+}
+
+// =============================================
+// Личная база (папки)
+// =============================================
+
+export interface KBFolder {
+  id: string;
+  owner_id: string;
+  parent_id: string | null;
+  name: string;
+  sort_order: number;
+  created_at: string;
+}
+
+/** Folder node with recursive children for tree rendering */
+export interface KBFolderTreeNode extends KBFolder {
+  children: KBFolderTreeNode[];
+}
+
+export interface CreateKBFolderInput {
+  name: string;
+  parent_id?: string | null;
+}
+
+// =============================================
+// Задачи
+// =============================================
+
+export interface KBTask {
+  id: string;
+  topic_id: string | null;
+  subtopic_id: string | null;
+  folder_id: string | null;
+  owner_id: string | null;
+  exam: ExamType | null;
+  kim_number: number | null;
+  text: string;
+  answer: string | null;
+  solution: string | null;
+  answer_format: string | null;
+  source_label: string | null;
+  attachment_url: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+/** Task with joined subtopic/topic names for display */
+export interface KBTaskWithNames extends KBTask {
+  subtopic_name?: string;
+  topic_name?: string;
+}
+
+export interface CreateKBTaskInput {
+  folder_id: string;
+  text: string;
+  exam?: ExamType;
+  kim_number?: number;
+  answer?: string;
+  solution?: string;
+  answer_format?: string;
+  attachment_url?: string;
+}
+
+// =============================================
+// Материалы
+// =============================================
+
+export interface KBMaterial {
+  id: string;
+  topic_id: string | null;
+  folder_id: string | null;
+  owner_id: string | null;
+  type: MaterialType;
+  name: string;
+  format: string | null;
+  url: string | null;
+  storage_key: string | null;
+  created_at: string;
+}
+
+// =============================================
+// Homework Integration — Snapshot
+// =============================================
+
+/** Draft task in Zustand store (snapshot created on "В ДЗ" click) */
+export interface HWDraftTask {
+  taskId: string;
+  textSnapshot: string;
+  answerSnapshot: string | null;
+  solutionSnapshot: string | null;
+  snapshotEdited: boolean;
+  source: 'socrat' | 'my';
+  subtopic: string;
+  topicName: string;
+}
+
+/** Row from homework_kb_tasks table */
+export interface HomeworkKBTask {
+  id: string;
+  homework_id: string;
+  task_id: string | null;
+  sort_order: number;
+  task_text_snapshot: string;
+  task_answer_snapshot: string | null;
+  task_solution_snapshot: string | null;
+  snapshot_edited: boolean;
+  added_at: string;
+}
