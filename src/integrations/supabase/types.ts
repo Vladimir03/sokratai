@@ -2864,6 +2864,24 @@ export type Database = {
         Args: { _folder_id: string; _owner_id: string }
         Returns: boolean
       }
+      kb_search: {
+        Args: {
+          exam_filter: Database["public"]["Enums"]["exam_type"]
+          query: string
+          result_limit?: number
+          source_filter?: string
+        }
+        Returns: {
+          exam: Database["public"]["Enums"]["exam_type"]
+          parent_topic_id: string
+          relevance: number
+          result_id: string
+          result_type: string
+          snippet: string
+          source: string
+          title: string
+        }[]
+      }
       mark_payment_as_paid_by_telegram: {
         Args: { _payment_id: string; _telegram_id: string }
         Returns: boolean

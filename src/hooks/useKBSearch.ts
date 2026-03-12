@@ -32,7 +32,7 @@ async function fetchKBSearch(
   query: string,
   examFilter: ExamType,
 ): Promise<KBSearchResult[]> {
-  const { data, error } = await supabase.rpc('kb_search', {
+  const { data, error } = await (supabase.rpc as any)('kb_search', {
     query,
     exam_filter: examFilter,
     source_filter: null,
