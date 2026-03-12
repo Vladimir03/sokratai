@@ -2,7 +2,7 @@ import { ReactNode, useEffect } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
-import { LayoutDashboard, Users, CreditCard, CalendarDays, BookOpen, LogOut } from 'lucide-react';
+import { LayoutDashboard, Users, CreditCard, CalendarDays, BookOpen, Library, LogOut } from 'lucide-react';
 import { supabase } from '@/lib/supabaseClient';
 import { toast } from 'sonner';
 import { useNavigate } from 'react-router-dom';
@@ -16,6 +16,7 @@ const navItems = [
   { href: '/tutor/schedule', label: 'Расписание', icon: CalendarDays },
   { href: '/tutor/students', label: 'Ученики', icon: Users },
   { href: '/tutor/homework', label: 'Домашки', icon: BookOpen },
+  { href: '/tutor/knowledge', label: 'База', icon: Library },
   { href: '/tutor/payments', label: 'Оплаты', icon: CreditCard },
 ];
 
@@ -43,6 +44,7 @@ export function TutorLayout({ children }: TutorLayoutProps) {
       warmup('TutorHomework', () => import('@/pages/tutor/TutorHomework'));
       warmup('TutorHomeworkCreate', () => import('@/pages/tutor/TutorHomeworkCreate'));
       warmup('TutorHomeworkDetail', () => import('@/pages/tutor/TutorHomeworkDetail'));
+      warmup('KnowledgeBasePage', () => import('@/pages/tutor/knowledge/KnowledgeBasePage'));
     }, 300);
 
     return () => window.clearTimeout(timer);

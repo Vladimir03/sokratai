@@ -47,6 +47,9 @@ const TutorHomeworkCreate = lazy(() => import("./pages/tutor/TutorHomeworkCreate
 const TutorHomeworkDetail = lazy(() => import("./pages/tutor/TutorHomeworkDetail"));
 const TutorHomeworkResults = lazy(() => import("./pages/tutor/TutorHomeworkResults"));
 const TutorHomeworkTemplates = lazy(() => import("./pages/tutor/TutorHomeworkTemplates"));
+const KnowledgeBasePage = lazy(() => import("./pages/tutor/knowledge/KnowledgeBasePage"));
+const CatalogTopicPage = lazy(() => import("./pages/tutor/knowledge/CatalogTopicPage"));
+const FolderPage = lazy(() => import("./pages/tutor/knowledge/FolderPage"));
 const InviteToTelegram = lazy(() => import("./pages/InviteToTelegram"));
 const BookLesson = lazy(() => import("./pages/BookLesson"));
 
@@ -317,13 +320,37 @@ const App = () => (
                 </Suspense>
               } 
             />
-            <Route 
-              path="/tutor/homework/:id/results" 
+            <Route
+              path="/tutor/homework/:id/results"
               element={
                 <Suspense fallback={<PageLoader />}>
                   <TutorHomeworkResults />
                 </Suspense>
-              } 
+              }
+            />
+            <Route
+              path="/tutor/knowledge"
+              element={
+                <Suspense fallback={<PageLoader />}>
+                  <KnowledgeBasePage />
+                </Suspense>
+              }
+            />
+            <Route
+              path="/tutor/knowledge/topic/:topicId"
+              element={
+                <Suspense fallback={<PageLoader />}>
+                  <CatalogTopicPage />
+                </Suspense>
+              }
+            />
+            <Route
+              path="/tutor/knowledge/folder/:folderId"
+              element={
+                <Suspense fallback={<PageLoader />}>
+                  <FolderPage />
+                </Suspense>
+              }
             />
             <Route 
               path="/book/:bookingLink" 
