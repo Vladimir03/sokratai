@@ -458,6 +458,57 @@ export type Database = {
           },
         ]
       }
+      homework_kb_tasks: {
+        Row: {
+          added_at: string | null
+          homework_id: string
+          id: string
+          snapshot_edited: boolean | null
+          sort_order: number | null
+          task_answer_snapshot: string | null
+          task_id: string | null
+          task_solution_snapshot: string | null
+          task_text_snapshot: string
+        }
+        Insert: {
+          added_at?: string | null
+          homework_id: string
+          id?: string
+          snapshot_edited?: boolean | null
+          sort_order?: number | null
+          task_answer_snapshot?: string | null
+          task_id?: string | null
+          task_solution_snapshot?: string | null
+          task_text_snapshot: string
+        }
+        Update: {
+          added_at?: string | null
+          homework_id?: string
+          id?: string
+          snapshot_edited?: boolean | null
+          sort_order?: number | null
+          task_answer_snapshot?: string | null
+          task_id?: string | null
+          task_solution_snapshot?: string | null
+          task_text_snapshot?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "homework_kb_tasks_homework_id_fkey"
+            columns: ["homework_id"]
+            isOneToOne: false
+            referencedRelation: "homework_tutor_assignments"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "homework_kb_tasks_task_id_fkey"
+            columns: ["task_id"]
+            isOneToOne: false
+            referencedRelation: "kb_tasks"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       homework_sets: {
         Row: {
           created_at: string
@@ -1064,6 +1115,230 @@ export type Database = {
           state?: string
           updated_at?: string
           user_id?: string
+        }
+        Relationships: []
+      }
+      kb_folders: {
+        Row: {
+          created_at: string | null
+          id: string
+          name: string
+          owner_id: string
+          parent_id: string | null
+          sort_order: number | null
+        }
+        Insert: {
+          created_at?: string | null
+          id?: string
+          name: string
+          owner_id: string
+          parent_id?: string | null
+          sort_order?: number | null
+        }
+        Update: {
+          created_at?: string | null
+          id?: string
+          name?: string
+          owner_id?: string
+          parent_id?: string | null
+          sort_order?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "kb_folders_parent_id_fkey"
+            columns: ["parent_id"]
+            isOneToOne: false
+            referencedRelation: "kb_folders"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      kb_materials: {
+        Row: {
+          created_at: string | null
+          folder_id: string | null
+          format: string | null
+          id: string
+          name: string
+          owner_id: string | null
+          storage_key: string | null
+          topic_id: string | null
+          type: string
+          url: string | null
+        }
+        Insert: {
+          created_at?: string | null
+          folder_id?: string | null
+          format?: string | null
+          id?: string
+          name: string
+          owner_id?: string | null
+          storage_key?: string | null
+          topic_id?: string | null
+          type: string
+          url?: string | null
+        }
+        Update: {
+          created_at?: string | null
+          folder_id?: string | null
+          format?: string | null
+          id?: string
+          name?: string
+          owner_id?: string | null
+          storage_key?: string | null
+          topic_id?: string | null
+          type?: string
+          url?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "kb_materials_folder_id_fkey"
+            columns: ["folder_id"]
+            isOneToOne: false
+            referencedRelation: "kb_folders"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "kb_materials_topic_id_fkey"
+            columns: ["topic_id"]
+            isOneToOne: false
+            referencedRelation: "kb_topics"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      kb_subtopics: {
+        Row: {
+          id: string
+          name: string
+          sort_order: number | null
+          topic_id: string | null
+        }
+        Insert: {
+          id?: string
+          name: string
+          sort_order?: number | null
+          topic_id?: string | null
+        }
+        Update: {
+          id?: string
+          name?: string
+          sort_order?: number | null
+          topic_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "kb_subtopics_topic_id_fkey"
+            columns: ["topic_id"]
+            isOneToOne: false
+            referencedRelation: "kb_topics"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      kb_tasks: {
+        Row: {
+          answer: string | null
+          answer_format: string | null
+          attachment_url: string | null
+          created_at: string | null
+          exam: Database["public"]["Enums"]["exam_type"] | null
+          folder_id: string | null
+          id: string
+          kim_number: number | null
+          owner_id: string | null
+          solution: string | null
+          source_label: string | null
+          subtopic_id: string | null
+          text: string
+          topic_id: string | null
+          updated_at: string | null
+        }
+        Insert: {
+          answer?: string | null
+          answer_format?: string | null
+          attachment_url?: string | null
+          created_at?: string | null
+          exam?: Database["public"]["Enums"]["exam_type"] | null
+          folder_id?: string | null
+          id?: string
+          kim_number?: number | null
+          owner_id?: string | null
+          solution?: string | null
+          source_label?: string | null
+          subtopic_id?: string | null
+          text: string
+          topic_id?: string | null
+          updated_at?: string | null
+        }
+        Update: {
+          answer?: string | null
+          answer_format?: string | null
+          attachment_url?: string | null
+          created_at?: string | null
+          exam?: Database["public"]["Enums"]["exam_type"] | null
+          folder_id?: string | null
+          id?: string
+          kim_number?: number | null
+          owner_id?: string | null
+          solution?: string | null
+          source_label?: string | null
+          subtopic_id?: string | null
+          text?: string
+          topic_id?: string | null
+          updated_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "kb_tasks_folder_id_fkey"
+            columns: ["folder_id"]
+            isOneToOne: false
+            referencedRelation: "kb_folders"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "kb_tasks_subtopic_id_fkey"
+            columns: ["subtopic_id"]
+            isOneToOne: false
+            referencedRelation: "kb_subtopics"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "kb_tasks_topic_id_fkey"
+            columns: ["topic_id"]
+            isOneToOne: false
+            referencedRelation: "kb_topics"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      kb_topics: {
+        Row: {
+          created_at: string | null
+          exam: Database["public"]["Enums"]["exam_type"]
+          id: string
+          kim_numbers: number[] | null
+          name: string
+          section: string
+          sort_order: number | null
+        }
+        Insert: {
+          created_at?: string | null
+          exam: Database["public"]["Enums"]["exam_type"]
+          id?: string
+          kim_numbers?: number[] | null
+          name: string
+          section: string
+          sort_order?: number | null
+        }
+        Update: {
+          created_at?: string | null
+          exam?: Database["public"]["Enums"]["exam_type"]
+          id?: string
+          kim_numbers?: number[] | null
+          name?: string
+          section?: string
+          sort_order?: number | null
         }
         Relationships: []
       }
@@ -2546,8 +2821,13 @@ export type Database = {
         Args: { _assignment_id: string }
         Returns: boolean
       }
+      is_kb_homework_tutor: { Args: { _homework_id: string }; Returns: boolean }
       is_tutor: { Args: { _user_id: string }; Returns: boolean }
       is_tutor_of_student: { Args: { _student_id: string }; Returns: boolean }
+      kb_folder_owned_by: {
+        Args: { _folder_id: string; _owner_id: string }
+        Returns: boolean
+      }
       mark_payment_as_paid_by_telegram: {
         Args: { _payment_id: string; _telegram_id: string }
         Returns: boolean
@@ -2600,6 +2880,7 @@ export type Database = {
     }
     Enums: {
       app_role: "admin" | "moderator" | "user" | "tutor"
+      exam_type: "ege" | "oge"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -2728,6 +3009,7 @@ export const Constants = {
   public: {
     Enums: {
       app_role: ["admin", "moderator", "user", "tutor"],
+      exam_type: ["ege", "oge"],
     },
   },
 } as const
