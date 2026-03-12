@@ -9,6 +9,7 @@ import {
   SheetTitle,
 } from '@/components/ui/sheet';
 import { SourceBadge } from '@/components/kb/ui/SourceBadge';
+import { stripLatex } from '@/components/kb/ui/stripLatex';
 import { cn } from '@/lib/utils';
 import { useHWDraftStore, useHWTaskCount } from '@/stores/hwDraftStore';
 import { supabase } from '@/lib/supabaseClient';
@@ -194,7 +195,7 @@ export function HWDrawer({
 
                       {editingId !== task.taskId ? (
                         <p className="line-clamp-2 text-xs leading-relaxed text-slate-700">
-                          {task.textSnapshot}
+                          {stripLatex(task.textSnapshot)}
                         </p>
                       ) : (
                         <div className="mt-1 flex flex-col gap-2">

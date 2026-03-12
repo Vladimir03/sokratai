@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Folder, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { useFolderTree, useCopyTaskToFolder } from '@/hooks/useFolders';
+import { stripLatex } from '@/components/kb/ui/stripLatex';
 import { cn } from '@/lib/utils';
 import type { KBFolderTreeNode, KBTask } from '@/types/kb';
 
@@ -58,7 +59,7 @@ export function CopyToFolderModal({ task, onClose }: CopyToFolderModalProps) {
         <div className="flex items-start justify-between border-b border-socrat-border px-5 py-4">
           <div className="min-w-0 flex-1">
             <h3 className="text-base font-semibold">Копировать в папку</h3>
-            <p className="mt-1 truncate text-xs text-muted-foreground">{task.text}</p>
+            <p className="mt-1 truncate text-xs text-muted-foreground">{stripLatex(task.text)}</p>
           </div>
           <button onClick={onClose} className="ml-2 shrink-0 p-1">
             <X className="h-4 w-4 text-muted-foreground" />

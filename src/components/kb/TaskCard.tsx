@@ -1,6 +1,7 @@
-import { Check, Image, Pencil, Sparkles, Trash2 } from 'lucide-react';
+import { Check, Download, Image, Pencil, Sparkles, Trash2 } from 'lucide-react';
 import { ContextMenu, type ContextMenuItem } from '@/components/kb/ui/ContextMenu';
 import { SourceBadge } from '@/components/kb/ui/SourceBadge';
+import { stripLatex } from '@/components/kb/ui/stripLatex';
 import { cn } from '@/lib/utils';
 import type { KBTask } from '@/types/kb';
 
@@ -85,7 +86,7 @@ export function TaskCard({
               !isExpanded && 'line-clamp-2',
             )}
           >
-            {task.text}
+            {stripLatex(task.text)}
           </p>
 
           {isExpanded && task.answer ? (
@@ -108,6 +109,7 @@ export function TaskCard({
                 'border-socrat-folder/20 bg-socrat-folder-bg text-socrat-folder hover:border-socrat-folder/40',
               )}
             >
+              <Download className="h-3.5 w-3.5" />
               К себе
             </button>
           ) : null}
