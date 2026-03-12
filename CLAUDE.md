@@ -257,3 +257,30 @@ Legacy student-only система (`homework_sets`, `homework_tasks`, `homework
 - `formatRub(amount)` — форматирование суммы в рублях
 - `getPendingPaymentsByTelegram(telegramUserId)` — обёртка над RPC
 - Все `paym_*` handlers зарегистрированы в `handleCallbackQuery` **до** блока `payment_remind:` / `payment:`
+
+## База знаний (KB) — новый модуль
+
+Модуль живёт в Tutor-домене:
+- `src/pages/tutor/knowledge/` — страницы
+- `src/components/kb/` — компоненты
+- `src/hooks/useKnowledgeBase.ts`, `src/hooks/useFolders.ts` — хуки
+- `src/types/kb.ts` — типы
+- `src/stores/hwDraftStore.ts` — Zustand store для корзины ДЗ
+
+### Архитектура двух пространств
+- **Каталог Сократа** (kb_topics + kb_tasks where owner_id IS NULL) — read-only витрина
+- **Моя база** (kb_folders + kb_tasks where owner_id = user) — личные папки
+
+### Дизайн-токены KB
+- Primary: #1B6B4A (socrat green)
+- Folder: #5B5FC7 (purple)
+- Accent: #E8913A (orange, "Моя" badge)
+
+### Snapshot-механика
+При добавлении задачи в ДЗ — текст фиксируется в homework_kb_tasks.task_text_snapshot.
+Ученик видит snapshot, не оригинал. Репетитор может редактировать snapshot в drawer.
+
+### Спецификация
+- Tech spec: docs/kb/kb-tech-spec.md
+- Design ref: docs/kb/kb-design-ref.jsx
+- Tasks: docs/kb/kb-tasks.md
