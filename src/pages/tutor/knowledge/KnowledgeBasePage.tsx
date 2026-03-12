@@ -1,7 +1,6 @@
 import { useCallback, useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Folder, FolderPlus, LayoutGrid, Plus } from 'lucide-react';
-import { toast } from 'sonner';
 import TutorGuard from '@/components/TutorGuard';
 import { CreateFolderModal } from '@/components/kb/CreateFolderModal';
 import { CreateTaskModal } from '@/components/kb/CreateTaskModal';
@@ -31,7 +30,7 @@ function KnowledgeBaseContent() {
 
   return (
     <TutorLayout>
-      <KnowledgeBaseFrame onHomeworkClick={() => toast.info('Корзина ДЗ появится в следующем шаге.')}>
+      <KnowledgeBaseFrame>
         <div className="space-y-8">
           <div className="flex gap-1.5 rounded-2xl bg-socrat-border-light p-1.5">
             {([

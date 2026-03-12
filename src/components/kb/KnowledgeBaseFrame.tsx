@@ -1,22 +1,20 @@
-import type { ReactNode } from 'react';
-import { BookOpen } from 'lucide-react';
+import { type ReactNode, useState } from 'react';
 import { cn } from '@/lib/utils';
+import { HWBadgeButton, HWDrawer } from '@/components/kb/HWDrawer';
 
 interface KnowledgeBaseFrameProps {
   children: ReactNode;
   className?: string;
   contentClassName?: string;
-  onHomeworkClick?: () => void;
-  homeworkLabel?: string;
 }
 
 export function KnowledgeBaseFrame({
   children,
   className,
   contentClassName,
-  onHomeworkClick,
-  homeworkLabel = 'ДЗ',
 }: KnowledgeBaseFrameProps) {
+  const [drawerOpen, setDrawerOpen] = useState(false);
+
   return (
     <section
       className={cn(
@@ -37,23 +35,14 @@ export function KnowledgeBaseFrame({
           </div>
         </div>
 
-        <button
-          type="button"
-          onClick={onHomeworkClick}
-          className={cn(
-            'inline-flex items-center gap-2 rounded-xl border border-socrat-border bg-white px-4 py-2.5',
-            'text-sm font-semibold text-slate-600 shadow-sm transition-all duration-200',
-            'hover:border-socrat-primary/30 hover:text-socrat-primary',
-          )}
-        >
-          <BookOpen className="h-4 w-4" />
-          {homeworkLabel}
-        </button>
+        <HWBadgeButton onClick={() => setDrawerOpen(true)} />
       </header>
 
       <div className={cn('px-6 py-7 sm:px-7 sm:py-8', contentClassName)}>
         {children}
       </div>
+
+      <HWDrawer open={drawerOpen} onOpenChange={setDrawerOpen} />
     </section>
   );
 }

@@ -6,6 +6,7 @@ import { LayoutDashboard, Users, CreditCard, CalendarDays, BookOpen, Library, Lo
 import { supabase } from '@/lib/supabaseClient';
 import { toast } from 'sonner';
 import { useNavigate } from 'react-router-dom';
+import { useHWTaskCount } from '@/stores/hwDraftStore';
 
 interface TutorLayoutProps {
   children: ReactNode;
@@ -23,6 +24,7 @@ const navItems = [
 export function TutorLayout({ children }: TutorLayoutProps) {
   const location = useLocation();
   const navigate = useNavigate();
+  const hwTaskCount = useHWTaskCount();
 
   useEffect(() => {
     // Warm up lazy tutor route chunks to make tab switches instant.
@@ -72,15 +74,21 @@ export function TutorLayout({ children }: TutorLayoutProps) {
           <nav className="hidden md:flex items-center gap-1">
             {navItems.map(item => {
               const isActive = location.pathname === item.href || location.pathname.startsWith(item.href + '/');
+              const showHWBadge = item.href === '/tutor/homework' && hwTaskCount > 0;
               return (
                 <Link key={item.href} to={item.href}>
                   <Button
                     variant={isActive ? 'secondary' : 'ghost'}
                     size="sm"
-                    className="gap-2"
+                    className="relative gap-2"
                   >
                     <item.icon className="h-4 w-4" />
                     {item.label}
+                    {showHWBadge ? (
+                      <span className="ml-1 inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-socrat-primary px-1.5 text-[10px] font-bold text-white">
+                        {hwTaskCount}
+                      </span>
+                    ) : null}
                   </Button>
                 </Link>
               );
@@ -100,19 +108,25 @@ export function TutorLayout({ children }: TutorLayoutProps) {
         <div className="flex justify-around py-2">
           {navItems.map(item => {
             const isActive = location.pathname === item.href || location.pathname.startsWith(item.href + '/');
+            const showHWBadge = item.href === '/tutor/homework' && hwTaskCount > 0;
             return (
-              <Link 
-                key={item.href} 
+              <Link
+                key={item.href}
                 to={item.href}
                 className={cn(
-                  "flex flex-col items-center gap-1 px-3 py-2 text-xs",
+                  "relative flex flex-col items-center gap-1 px-3 py-2 text-xs",
                   isActive
-                    ? "text-primary" 
+                    ? "text-primary"
                     : "text-muted-foreground"
                 )}
               >
                 <item.icon className="h-5 w-5" />
                 {item.label}
+                {showHWBadge ? (
+                  <span className="absolute -top-0.5 right-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-socrat-primary px-1 text-[9px] font-bold text-white">
+                    {hwTaskCount}
+                  </span>
+                ) : null}
               </Link>
             );
           })}

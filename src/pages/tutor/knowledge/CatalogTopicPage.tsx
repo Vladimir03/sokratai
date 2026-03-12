@@ -14,6 +14,7 @@ import { StatCounter } from '@/components/kb/ui/StatCounter';
 import { TopicChip } from '@/components/kb/ui/TopicChip';
 import { TutorLayout } from '@/components/tutor/TutorLayout';
 import { useCatalogTasks, useMaterials, useSubtopics, useTopic } from '@/hooks/useKnowledgeBase';
+import { useHWDraftStore } from '@/stores/hwDraftStore';
 import type { KBTask } from '@/types/kb';
 
 function CatalogTopicContent() {
@@ -33,25 +34,23 @@ function CatalogTopicContent() {
 
   const [expandedTaskId, setExpandedTaskId] = useState<string | null>(null);
   const [copyTask, setCopyTask] = useState<KBTask | null>(null);
-  const [hwTaskIds, setHwTaskIds] = useState<string[]>([]);
+  const { addTask, hasTask } = useHWDraftStore();
 
   const error = topicError || tasksError;
 
   const handleAddToHW = (task: KBTask) => {
-    setHwTaskIds((current) => {
-      if (current.includes(task.id)) {
-        toast.info('Задача уже отмечена для ДЗ.');
-        return current;
-      }
-
-      toast.success('Задача добавлена в ДЗ.');
-      return [...current, task.id];
-    });
+    if (hasTask(task.id)) {
+      toast.info('Задача уже в ДЗ.');
+      return;
+    }
+    const subtopicName = subtopics.find((s) => s.id === task.subtopic_id)?.name;
+    addTask(task, subtopicName, topic?.name);
+    toast.success('Задача добавлена в ДЗ');
   };
 
   return (
     <TutorLayout>
-      <KnowledgeBaseFrame onHomeworkClick={() => toast.info('Корзина ДЗ появится в следующем шаге.')}>
+      <KnowledgeBaseFrame>
         <div className="space-y-7">
           <KBStatusCard
             error={error}
@@ -126,7 +125,7 @@ function CatalogTopicContent() {
                   key={task.id}
                   task={task}
                   isOwn={false}
-                  inHW={hwTaskIds.includes(task.id)}
+                  inHW={hasTask(task.id)}
                   subtopicName={subtopics.find((subtopic) => subtopic.id === task.subtopic_id)?.name}
                   isExpanded={expandedTaskId === task.id}
                   onToggle={() => setExpandedTaskId(expandedTaskId === task.id ? null : task.id)}

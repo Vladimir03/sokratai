@@ -11,6 +11,7 @@ import { KnowledgeBaseFrame } from '@/components/kb/KnowledgeBaseFrame';
 import { TaskCard } from '@/components/kb/TaskCard';
 import { TutorLayout } from '@/components/tutor/TutorLayout';
 import { useFolder } from '@/hooks/useFolders';
+import { useHWDraftStore } from '@/stores/hwDraftStore';
 import type { KBTask } from '@/types/kb';
 
 function FolderContent() {
@@ -19,25 +20,22 @@ function FolderContent() {
   const { folder, children, tasks, breadcrumbs, loading, error, refetch, isFetching } = useFolder(folderId);
 
   const [expandedTaskId, setExpandedTaskId] = useState<string | null>(null);
-  const [hwTaskIds, setHwTaskIds] = useState<string[]>([]);
   const [showCreateFolder, setShowCreateFolder] = useState(false);
   const [showCreateTask, setShowCreateTask] = useState(false);
+  const { addTask, hasTask } = useHWDraftStore();
 
   const handleAddToHW = (task: KBTask) => {
-    setHwTaskIds((current) => {
-      if (current.includes(task.id)) {
-        toast.info('Задача уже отмечена для ДЗ.');
-        return current;
-      }
-
-      toast.success('Задача добавлена в ДЗ.');
-      return [...current, task.id];
-    });
+    if (hasTask(task.id)) {
+      toast.info('Задача уже в ДЗ.');
+      return;
+    }
+    addTask(task);
+    toast.success('Задача добавлена в ДЗ');
   };
 
   return (
     <TutorLayout>
-      <KnowledgeBaseFrame onHomeworkClick={() => toast.info('Корзина ДЗ появится в следующем шаге.')}>
+      <KnowledgeBaseFrame>
         <div className="space-y-7">
           <KBStatusCard error={error} isFetching={isFetching} onRetry={refetch} />
 
@@ -141,7 +139,7 @@ function FolderContent() {
                         key={task.id}
                         task={task}
                         isOwn
-                        inHW={hwTaskIds.includes(task.id)}
+                        inHW={hasTask(task.id)}
                         isExpanded={expandedTaskId === task.id}
                         onToggle={() => setExpandedTaskId(expandedTaskId === task.id ? null : task.id)}
                         onAddToHW={() => handleAddToHW(task)}
