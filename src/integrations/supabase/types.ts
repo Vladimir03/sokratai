@@ -1205,6 +1205,13 @@ export type Database = {
             referencedRelation: "kb_topics"
             referencedColumns: ["id"]
           },
+          {
+            foreignKeyName: "kb_materials_topic_id_fkey"
+            columns: ["topic_id"]
+            isOneToOne: false
+            referencedRelation: "kb_topics_with_counts"
+            referencedColumns: ["id"]
+          },
         ]
       }
       kb_subtopics: {
@@ -1232,6 +1239,13 @@ export type Database = {
             columns: ["topic_id"]
             isOneToOne: false
             referencedRelation: "kb_topics"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "kb_subtopics_topic_id_fkey"
+            columns: ["topic_id"]
+            isOneToOne: false
+            referencedRelation: "kb_topics_with_counts"
             referencedColumns: ["id"]
           },
         ]
@@ -1308,6 +1322,13 @@ export type Database = {
             columns: ["topic_id"]
             isOneToOne: false
             referencedRelation: "kb_topics"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "kb_tasks_topic_id_fkey"
+            columns: ["topic_id"]
+            isOneToOne: false
+            referencedRelation: "kb_topics_with_counts"
             referencedColumns: ["id"]
           },
         ]
@@ -2677,6 +2698,21 @@ export type Database = {
       }
     }
     Views: {
+      kb_topics_with_counts: {
+        Row: {
+          created_at: string | null
+          exam: Database["public"]["Enums"]["exam_type"] | null
+          id: string | null
+          kim_numbers: number[] | null
+          material_count: number | null
+          name: string | null
+          section: string | null
+          sort_order: number | null
+          subtopic_names: string[] | null
+          task_count: number | null
+        }
+        Relationships: []
+      }
       problems_public: {
         Row: {
           created_at: string | null
