@@ -1,12 +1,17 @@
-import { useState, useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { Search, LayoutGrid, Folder, FolderPlus, ChevronRight, Plus } from 'lucide-react';
+import { Folder, FolderPlus, LayoutGrid, Plus } from 'lucide-react';
+import { toast } from 'sonner';
 import TutorGuard from '@/components/TutorGuard';
-import { TutorLayout } from '@/components/tutor/TutorLayout';
-import { TutorDataStatus } from '@/components/tutor/TutorDataStatus';
+import { FolderCard } from '@/components/kb/FolderCard';
+import { KBStatusCard } from '@/components/kb/KBStatusCard';
+import { KnowledgeBaseFrame } from '@/components/kb/KnowledgeBaseFrame';
 import { TopicCard } from '@/components/kb/TopicCard';
-import { useTopics } from '@/hooks/useKnowledgeBase';
+import { FilterChips } from '@/components/kb/ui/FilterChips';
+import { KBSearchInput } from '@/components/kb/ui/KBSearchInput';
+import { TutorLayout } from '@/components/tutor/TutorLayout';
 import { useRootFolders } from '@/hooks/useFolders';
+import { useTopics } from '@/hooks/useKnowledgeBase';
 import { cn } from '@/lib/utils';
 import type { ExamType, KBTopicWithCounts } from '@/types/kb';
 
@@ -22,166 +27,148 @@ function KnowledgeBaseContent() {
 
   return (
     <TutorLayout>
-      <div className="space-y-6">
-        {/* Tab Switcher */}
-        <div className="flex gap-1 rounded-xl bg-socrat-border-light p-1">
-          {([
-            { key: 'catalog' as MainTab, label: 'Каталог Сократа', Icon: LayoutGrid },
-            { key: 'mybase' as MainTab, label: 'Моя база', Icon: Folder },
-          ]).map(tab => (
-            <button
-              key={tab.key}
-              onClick={() => { setMainTab(tab.key); setSearchQuery(''); }}
-              className={cn(
-                'flex flex-1 items-center justify-center gap-2 rounded-[10px] px-4 py-2.5 text-sm font-medium transition-all',
-                mainTab === tab.key
-                  ? 'bg-white font-semibold text-foreground shadow-sm'
-                  : 'text-muted-foreground hover:text-foreground'
-              )}
-            >
-              <tab.Icon className={cn('h-4 w-4', mainTab === tab.key ? 'text-socrat-primary' : 'text-socrat-muted')} />
-              {tab.label}
-            </button>
-          ))}
-        </div>
+      <KnowledgeBaseFrame onHomeworkClick={() => toast.info('Корзина ДЗ появится в следующем шаге.')}>
+        <div className="space-y-8">
+          <div className="flex gap-1.5 rounded-2xl bg-socrat-border-light p-1.5">
+            {([
+              { key: 'catalog' as MainTab, label: 'Каталог Сократа', Icon: LayoutGrid },
+              { key: 'mybase' as MainTab, label: 'Моя база', Icon: Folder },
+            ]).map((tab) => (
+              <button
+                key={tab.key}
+                type="button"
+                onClick={() => {
+                  setMainTab(tab.key);
+                  setSearchQuery('');
+                }}
+                className={cn(
+                  'flex flex-1 items-center justify-center gap-2 rounded-[14px] px-4 py-3 text-sm font-medium transition-all duration-200',
+                  mainTab === tab.key
+                    ? 'bg-white font-semibold text-slate-950 shadow-[0_8px_24px_-18px_rgba(15,23,42,0.45)]'
+                    : 'text-slate-500 hover:text-slate-800',
+                )}
+              >
+                <tab.Icon className={cn('h-4 w-4', mainTab === tab.key ? 'text-socrat-primary' : 'text-slate-400')} />
+                {tab.label}
+              </button>
+            ))}
+          </div>
 
-        {mainTab === 'catalog' && (
-          <CatalogHome
-            searchQuery={searchQuery}
-            setSearchQuery={setSearchQuery}
-            examFilter={examFilter}
-            setExamFilter={setExamFilter}
-            onOpenTopic={(topicId) => navigate(`/tutor/knowledge/topic/${topicId}`)}
-          />
-        )}
-        {mainTab === 'mybase' && (
-          <MyBaseHome
-            onOpenFolder={(folderId) => navigate(`/tutor/knowledge/folder/${folderId}`)}
-          />
-        )}
-      </div>
+          {mainTab === 'catalog' ? (
+            <CatalogHome
+              searchQuery={searchQuery}
+              setSearchQuery={setSearchQuery}
+              examFilter={examFilter}
+              setExamFilter={setExamFilter}
+              onOpenTopic={(topicId) => navigate(`/tutor/knowledge/topic/${topicId}`)}
+            />
+          ) : (
+            <MyBaseHome onOpenFolder={(folderId) => navigate(`/tutor/knowledge/folder/${folderId}`)} />
+          )}
+        </div>
+      </KnowledgeBaseFrame>
     </TutorLayout>
   );
 }
 
-// ─── Catalog Tab ───
-
 interface CatalogHomeProps {
   searchQuery: string;
-  setSearchQuery: (q: string) => void;
+  setSearchQuery: (query: string) => void;
   examFilter: ExamType;
-  setExamFilter: (e: ExamType) => void;
+  setExamFilter: (value: ExamType) => void;
   onOpenTopic: (topicId: string) => void;
 }
 
-function CatalogHome({ searchQuery, setSearchQuery, examFilter, setExamFilter, onOpenTopic }: CatalogHomeProps) {
+function CatalogHome({
+  searchQuery,
+  setSearchQuery,
+  examFilter,
+  setExamFilter,
+  onOpenTopic,
+}: CatalogHomeProps) {
   const { topics, loading, error, refetch, isFetching } = useTopics(examFilter);
 
-  // Client-side search filtering (search also includes subtopic_names)
   const filtered = useMemo(() => {
-    if (!searchQuery.trim()) return topics;
-    const q = searchQuery.toLowerCase();
-    return topics.filter(t =>
-      t.name.toLowerCase().includes(q) ||
-      t.section.toLowerCase().includes(q) ||
-      t.subtopic_names.some(s => s.toLowerCase().includes(q))
+    if (!searchQuery.trim()) {
+      return topics;
+    }
+
+    const normalizedQuery = searchQuery.trim().toLowerCase();
+    return topics.filter((topic) =>
+      topic.name.toLowerCase().includes(normalizedQuery)
+      || topic.section.toLowerCase().includes(normalizedQuery)
+      || topic.subtopic_names.some((name) => name.toLowerCase().includes(normalizedQuery)),
     );
   }, [topics, searchQuery]);
 
-  // Group by section
   const sections = useMemo(() => {
-    const sectionMap = new Map<string, KBTopicWithCounts[]>();
-    for (const t of filtered) {
-      const list = sectionMap.get(t.section) ?? [];
-      list.push(t);
-      sectionMap.set(t.section, list);
+    const grouped = new Map<string, KBTopicWithCounts[]>();
+
+    for (const topic of filtered) {
+      const current = grouped.get(topic.section) ?? [];
+      current.push(topic);
+      grouped.set(topic.section, current);
     }
-    return Array.from(sectionMap.entries());
+
+    return Array.from(grouped.entries());
   }, [filtered]);
 
   return (
     <div>
-      <TutorDataStatus error={error} isFetching={isFetching} onRetry={refetch} />
+      <KBStatusCard error={error} isFetching={isFetching} onRetry={refetch} className="mb-6" />
 
-      {/* Header */}
-      <div className="mb-5">
-        <h1 className="font-display text-2xl font-bold tracking-tight">Каталог задач</h1>
-        <p className="text-sm text-muted-foreground">Общая база · Копируйте нужные задачи к себе</p>
+      <div className="mb-6">
+        <h2 className="font-display text-[2rem] font-bold tracking-[-0.04em] text-slate-950 sm:text-[2.15rem]">
+          Каталог задач
+        </h2>
+        <p className="mt-2 text-sm text-slate-500">Общая база · Копируйте нужные задачи к себе</p>
       </div>
 
-      {/* Search */}
-      <div className="relative mb-4">
-        <Search className="absolute left-3.5 top-3 h-[18px] w-[18px] text-socrat-muted" />
-        <input
-          type="text"
-          placeholder="Поиск по темам, подтемам и задачам..."
-          value={searchQuery}
-          onChange={(e) => setSearchQuery(e.target.value)}
-          className="w-full rounded-xl border-[1.5px] border-socrat-border bg-white py-2.5 pl-11 pr-4 text-sm font-body focus:border-socrat-primary focus:outline-none"
-          style={{ fontSize: 16 }}
-        />
-      </div>
+      <KBSearchInput
+        value={searchQuery}
+        onChange={setSearchQuery}
+        placeholder="Поиск по темам, подтемам и задачам..."
+        className="mb-4"
+      />
 
-      {/* Exam filter pill switcher */}
-      <div className="mb-6 flex gap-1 rounded-xl bg-socrat-border-light p-1">
-        {([
-          { key: 'ege' as ExamType, label: 'ЕГЭ Физика', activeColor: 'text-socrat-ege' },
-          { key: 'oge' as ExamType, label: 'ОГЭ Физика', activeColor: 'text-socrat-oge' },
-        ]).map(ex => (
-          <button
-            key={ex.key}
-            onClick={() => setExamFilter(ex.key)}
-            className={cn(
-              'flex-1 rounded-[10px] px-4 py-2.5 text-sm font-medium transition-all',
-              examFilter === ex.key
-                ? `bg-white font-semibold shadow-sm ${ex.activeColor}`
-                : 'text-muted-foreground'
-            )}
-          >
-            {ex.label}
-          </button>
-        ))}
-      </div>
+      <FilterChips
+        className="mb-7"
+        selected={examFilter}
+        onChange={(key) => setExamFilter(key as ExamType)}
+        options={[
+          { key: 'ege', label: 'ЕГЭ Физика', activeClassName: 'text-socrat-ege' },
+          { key: 'oge', label: 'ОГЭ Физика', activeClassName: 'text-socrat-oge' },
+        ]}
+      />
 
-      {/* Loading skeleton */}
-      {loading && (
-        <div className="space-y-3">
-          {[1, 2, 3].map(i => (
-            <div key={i} className="h-20 animate-pulse rounded-xl bg-socrat-border-light" />
+      {loading ? (
+        <div className="space-y-4">
+          {[1, 2, 3].map((index) => (
+            <div key={index} className="h-28 animate-pulse rounded-[22px] bg-white/80" />
           ))}
         </div>
-      )}
+      ) : null}
 
-      {/* Topic sections */}
-      {!loading && sections.map(([section, topicList]) => (
-        <div key={section} className="mb-7">
-          <h2 className="mb-2.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-            {section}
-          </h2>
-          <div className="flex flex-col gap-1.5">
-            {topicList.map(topic => (
-              <TopicCard
-                key={topic.id}
-                topic={topic}
-                onClick={() => onOpenTopic(topic.id)}
-              />
+      {!loading && sections.map(([section, sectionTopics]) => (
+        <section key={section} className="mb-8">
+          <h3 className="mb-3 text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">{section}</h3>
+          <div className="flex flex-col gap-2.5">
+            {sectionTopics.map((topic) => (
+              <TopicCard key={topic.id} topic={topic} onClick={() => onOpenTopic(topic.id)} />
             ))}
           </div>
-        </div>
+        </section>
       ))}
 
-      {/* Empty search result */}
-      {!loading && filtered.length === 0 && searchQuery.trim() && (
-        <div className="py-12 text-center text-muted-foreground">
-          <p className="text-sm font-medium">Ничего не найдено</p>
-          <p className="text-xs">Попробуйте изменить запрос</p>
+      {!loading && filtered.length === 0 && searchQuery.trim() ? (
+        <div className="rounded-[22px] border border-dashed border-socrat-border bg-white/70 px-5 py-12 text-center">
+          <p className="text-sm font-semibold text-slate-800">Ничего не найдено</p>
+          <p className="mt-1 text-xs text-slate-500">Попробуйте изменить запрос</p>
         </div>
-      )}
+      ) : null}
     </div>
   );
 }
-
-// ─── My Base Tab ───
 
 interface MyBaseHomeProps {
   onOpenFolder: (folderId: string) => void;
@@ -192,67 +179,68 @@ function MyBaseHome({ onOpenFolder }: MyBaseHomeProps) {
 
   return (
     <div>
-      <TutorDataStatus error={error} isFetching={isFetching} onRetry={refetch} />
+      <KBStatusCard error={error} isFetching={isFetching} onRetry={refetch} className="mb-6" />
 
-      <div className="mb-5 flex items-start justify-between">
+      <div className="mb-6 flex items-start justify-between gap-4">
         <div>
-          <h1 className="font-display text-2xl font-bold tracking-tight">Моя база</h1>
-          <p className="text-sm text-muted-foreground">Ваши папки, задачи и материалы</p>
+          <h2 className="font-display text-[2rem] font-bold tracking-[-0.04em] text-slate-950 sm:text-[2.15rem]">
+            Моя база
+          </h2>
+          <p className="mt-2 text-sm text-slate-500">Ваши папки, задачи и материалы</p>
         </div>
         <button
-          onClick={() => { /* placeholder for session 5 */ }}
-          className="flex items-center gap-1.5 rounded-[10px] border-[1.5px] border-socrat-primary/20 bg-socrat-primary-light px-4 py-2 text-sm font-semibold text-socrat-primary"
+          type="button"
+          onClick={() => toast.info('Создание папок подключим следующим шагом.')}
+          className={cn(
+            'inline-flex items-center gap-2 rounded-xl border border-socrat-primary/20 bg-socrat-primary-light px-4 py-2.5',
+            'text-sm font-semibold text-socrat-primary shadow-sm transition-all duration-200 hover:border-socrat-primary/35',
+          )}
         >
           <FolderPlus className="h-4 w-4" />
           Новая папка
         </button>
       </div>
 
-      {/* Loading skeleton */}
-      {loading && (
-        <div className="space-y-1.5">
-          {[1, 2, 3].map(i => (
-            <div key={i} className="h-[72px] animate-pulse rounded-xl bg-socrat-border-light" />
+      {loading ? (
+        <div className="space-y-2.5">
+          {[1, 2, 3].map((index) => (
+            <div key={index} className="h-[82px] animate-pulse rounded-[22px] bg-white/80" />
           ))}
         </div>
-      )}
+      ) : null}
 
-      {/* Folder list */}
-      {!loading && (
-        <div className="flex flex-col gap-1.5">
-          {folders.map(f => (
-            <button
-              key={f.id}
-              onClick={() => onOpenFolder(f.id)}
-              className="flex w-full items-center gap-3 rounded-xl border border-socrat-border bg-white p-3.5 text-left transition-colors hover:border-socrat-folder/40"
-            >
-              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[10px] bg-socrat-folder-bg">
-                <Folder className="h-5 w-5 text-socrat-folder" />
-              </div>
-              <div className="min-w-0 flex-1">
-                <div className="truncate text-[15px] font-semibold">{f.name}</div>
-                {/* Task/child counts will come from enhanced query in future session */}
-              </div>
-              <ChevronRight className="h-[18px] w-[18px] shrink-0 text-socrat-muted" />
-            </button>
+      {!loading ? (
+        <div className="flex flex-col gap-2.5">
+          {folders.map((folder) => (
+            <FolderCard
+              key={folder.id}
+              folder={folder}
+              childCount={folder.child_count}
+              taskCount={folder.task_count}
+              onClick={() => onOpenFolder(folder.id)}
+            />
           ))}
         </div>
-      )}
+      ) : null}
 
-      {/* Add task button */}
-      <button className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl border-[1.5px] border-dashed border-socrat-border bg-transparent px-4 py-3.5 text-sm font-medium text-muted-foreground">
+      <button
+        type="button"
+        onClick={() => toast.info('Создание задач подключим следующим шагом.')}
+        className="mt-4 flex w-full items-center justify-center gap-2 rounded-[22px] border-[1.5px] border-dashed border-socrat-border bg-transparent px-4 py-4 text-sm font-medium text-slate-500 transition-colors duration-200 hover:border-socrat-primary/30 hover:text-socrat-primary"
+      >
         <Plus className="h-4 w-4" />
         Добавить задачу
       </button>
 
-      {/* Empty state */}
-      {!loading && folders.length === 0 && (
-        <div className="py-12 text-center text-socrat-muted">
-          <div className="mb-2 text-4xl">📂</div>
-          <p className="text-sm font-medium">Пока нет папок</p>
-          <p className="text-xs">Создайте папку для своих задач и материалов</p>
+      {!loading && folders.length === 0 ? (
+        <div className="mt-4 rounded-[22px] border border-dashed border-socrat-border bg-white/70 px-5 py-12 text-center">
+          <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-socrat-folder-bg text-socrat-folder">
+            <Folder className="h-7 w-7" />
+          </div>
+          <p className="text-sm font-semibold text-slate-800">Пока нет папок</p>
+          <p className="mt-1 text-xs text-slate-500">Создайте папку для своих задач и материалов</p>
         </div>
-      )}
+      ) : null}
     </div>
   );
 }

@@ -13,6 +13,7 @@ import {
 import type {
   KBFolder,
   KBFolderTreeNode,
+  KBFolderWithCounts,
   KBTask,
   CreateKBFolderInput,
 } from '@/types/kb';
@@ -54,30 +55,49 @@ function buildTree(folders: KBFolder[]): KBFolderTreeNode[] {
   return roots;
 }
 
-async function fetchRootFolders(): Promise<KBFolder[]> {
+async function fetchRootFolders(): Promise<KBFolderWithCounts[]> {
   const { data: { session } } = await supabase.auth.getSession();
   if (!session) throw new Error('Нет активной сессии');
 
   const { data, error } = await supabase
     .from('kb_folders')
-    .select('*')
+    .select('*, kb_folders!kb_folders_parent_id_fkey(count), kb_tasks(count)')
     .eq('owner_id', session.user.id)
     .is('parent_id', null)
     .order('sort_order');
   if (error) throw error;
-  return (data ?? []) as KBFolder[];
+
+  return (data ?? []).map((row: Record<string, unknown>) => {
+    const childArr = row.kb_folders as { count: number }[] | undefined;
+    const taskArr = row.kb_tasks as { count: number }[] | undefined;
+    return {
+      ...row,
+      child_count: childArr?.[0]?.count ?? 0,
+      task_count: taskArr?.[0]?.count ?? 0,
+    };
+  }) as KBFolderWithCounts[];
+}
+
+export interface FolderBreadcrumb {
+  id: string;
+  name: string;
 }
 
 interface FolderDetail {
   folder: KBFolder;
-  children: KBFolder[];
+  children: KBFolderWithCounts[];
   tasks: KBTask[];
+  breadcrumbs: FolderBreadcrumb[];
 }
 
 async function fetchFolder(folderId: string): Promise<FolderDetail> {
   const [folderRes, childrenRes, tasksRes] = await Promise.all([
     supabase.from('kb_folders').select('*').eq('id', folderId).single(),
-    supabase.from('kb_folders').select('*').eq('parent_id', folderId).order('sort_order'),
+    supabase
+      .from('kb_folders')
+      .select('*, kb_folders!kb_folders_parent_id_fkey(count), kb_tasks(count)')
+      .eq('parent_id', folderId)
+      .order('sort_order'),
     supabase.from('kb_tasks').select('*').eq('folder_id', folderId).order('created_at'),
   ]);
 
@@ -85,10 +105,37 @@ async function fetchFolder(folderId: string): Promise<FolderDetail> {
   if (childrenRes.error) throw childrenRes.error;
   if (tasksRes.error) throw tasksRes.error;
 
+  const folder = folderRes.data as KBFolder;
+
+  // Build breadcrumb path by walking parent_id chain
+  const breadcrumbs: FolderBreadcrumb[] = [{ id: folder.id, name: folder.name }];
+  let currentParentId = folder.parent_id;
+  while (currentParentId) {
+    const { data: parent, error: parentErr } = await supabase
+      .from('kb_folders')
+      .select('id, name, parent_id')
+      .eq('id', currentParentId)
+      .single();
+    if (parentErr || !parent) break;
+    breadcrumbs.unshift({ id: parent.id, name: parent.name });
+    currentParentId = (parent as KBFolder).parent_id;
+  }
+
+  const children = (childrenRes.data ?? []).map((row: Record<string, unknown>) => {
+    const childArr = row.kb_folders as { count: number }[] | undefined;
+    const taskArr = row.kb_tasks as { count: number }[] | undefined;
+    return {
+      ...row,
+      child_count: childArr?.[0]?.count ?? 0,
+      task_count: taskArr?.[0]?.count ?? 0,
+    };
+  }) as KBFolderWithCounts[];
+
   return {
-    folder: folderRes.data as KBFolder,
-    children: (childrenRes.data ?? []) as KBFolder[],
+    folder,
+    children,
     tasks: (tasksRes.data ?? []) as KBTask[],
+    breadcrumbs,
   };
 }
 
@@ -235,11 +282,11 @@ export function useFolderTree() {
   };
 }
 
-/** Root-level folders only (parent_id IS NULL) */
+/** Root-level folders only (parent_id IS NULL), with child/task counts */
 export function useRootFolders() {
   const queryKey = useMemo(() => ['tutor', 'kb', 'root-folders'] as const, []);
 
-  const result = useKBQuery<KBFolder[]>({
+  const result = useKBQuery<KBFolderWithCounts[]>({
     queryKey,
     queryFn: fetchRootFolders,
     defaultValue: [],
@@ -268,6 +315,7 @@ export function useFolder(folderId: string | undefined) {
     folder: result.data?.folder ?? null,
     children: result.data?.children ?? [],
     tasks: result.data?.tasks ?? [],
+    breadcrumbs: result.data?.breadcrumbs ?? [],
     loading: result.loading,
     error: result.error,
     refetch: result.refetch,
@@ -316,6 +364,7 @@ export function useCopyTaskToFolder() {
     onSuccess: (_data, variables) => {
       void queryClient.invalidateQueries({ queryKey: ['tutor', 'kb', 'folder', variables.folderId] });
       void queryClient.invalidateQueries({ queryKey: ['tutor', 'kb', 'folder-tree'] });
+      void queryClient.invalidateQueries({ queryKey: ['tutor', 'kb', 'root-folders'] });
     },
   });
 }

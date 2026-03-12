@@ -52,6 +52,11 @@ export interface KBFolderTreeNode extends KBFolder {
   children: KBFolderTreeNode[];
 }
 
+export interface KBFolderWithCounts extends KBFolder {
+  child_count: number;
+  task_count: number;
+}
+
 export interface CreateKBFolderInput {
   name: string;
   parent_id?: string | null;
