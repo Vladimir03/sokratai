@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Folder, FolderPlus, LayoutGrid, Plus } from 'lucide-react';
 import { toast } from 'sonner';
@@ -6,6 +6,7 @@ import TutorGuard from '@/components/TutorGuard';
 import { CreateFolderModal } from '@/components/kb/CreateFolderModal';
 import { CreateTaskModal } from '@/components/kb/CreateTaskModal';
 import { FolderCard } from '@/components/kb/FolderCard';
+import { KBSearchDropdown } from '@/components/kb/KBSearchDropdown';
 import { KBStatusCard } from '@/components/kb/KBStatusCard';
 import { KnowledgeBaseFrame } from '@/components/kb/KnowledgeBaseFrame';
 import { TopicCard } from '@/components/kb/TopicCard';
@@ -13,6 +14,7 @@ import { FilterChips } from '@/components/kb/ui/FilterChips';
 import { KBSearchInput } from '@/components/kb/ui/KBSearchInput';
 import { TutorLayout } from '@/components/tutor/TutorLayout';
 import { useRootFolders } from '@/hooks/useFolders';
+import { useKBSearch } from '@/hooks/useKBSearch';
 import { useTopics } from '@/hooks/useKnowledgeBase';
 import { cn } from '@/lib/utils';
 import type { ExamType, KBTopicWithCounts } from '@/types/kb';
@@ -88,7 +90,19 @@ function CatalogHome({
   setExamFilter,
   onOpenTopic,
 }: CatalogHomeProps) {
+  const navigate = useNavigate();
   const { topics, loading, error, refetch, isFetching } = useTopics(examFilter);
+  const search = useKBSearch(searchQuery, examFilter);
+  const [showDropdown, setShowDropdown] = useState(true);
+
+  const handleSearchChange = useCallback((value: string) => {
+    setSearchQuery(value);
+    setShowDropdown(true);
+  }, [setSearchQuery]);
+
+  const handleCloseDropdown = useCallback(() => {
+    setShowDropdown(false);
+  }, []);
 
   const filtered = useMemo(() => {
     if (!searchQuery.trim()) {
@@ -126,12 +140,32 @@ function CatalogHome({
         <p className="mt-2 text-sm text-slate-500">Общая база · Копируйте нужные задачи к себе</p>
       </div>
 
-      <KBSearchInput
-        value={searchQuery}
-        onChange={setSearchQuery}
-        placeholder="Поиск по темам, подтемам и задачам..."
-        className="mb-4"
-      />
+      <div className="relative mb-4">
+        <KBSearchInput
+          value={searchQuery}
+          onChange={handleSearchChange}
+          placeholder="Поиск по темам, подтемам и задачам..."
+        />
+        {showDropdown ? (
+          <KBSearchDropdown
+            grouped={search}
+            isLoading={search.isLoading}
+            hasResults={search.hasResults}
+            isActive={search.isActive}
+            onSelectTopic={(topicId) => {
+              setShowDropdown(false);
+              navigate(`/tutor/knowledge/topic/${topicId}`);
+            }}
+            onSelectTask={(task) => {
+              setShowDropdown(false);
+              if (task.parent_topic_id) {
+                navigate(`/tutor/knowledge/topic/${task.parent_topic_id}`);
+              }
+            }}
+            onClose={handleCloseDropdown}
+          />
+        ) : null}
+      </div>
 
       <FilterChips
         className="mb-7"
