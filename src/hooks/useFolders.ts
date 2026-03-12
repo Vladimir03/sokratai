@@ -110,6 +110,16 @@ async function insertFolder(input: CreateKBFolderInput): Promise<KBFolder> {
 }
 
 async function removeFolder(folderId: string): Promise<void> {
+  // Delete personal tasks in this folder first to avoid CHECK constraint
+  // violation: kb_tasks_space_check requires (topic_id OR folder_id) to be set,
+  // but ON DELETE SET NULL would null out folder_id on orphaned personal tasks.
+  const { error: tasksError } = await supabase
+    .from('kb_tasks')
+    .delete()
+    .eq('folder_id', folderId)
+    .is('topic_id', null);
+  if (tasksError) throw tasksError;
+
   const { error } = await supabase
     .from('kb_folders')
     .delete()

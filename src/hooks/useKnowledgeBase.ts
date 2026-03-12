@@ -76,11 +76,12 @@ async function fetchCatalogTasks(topicId: string): Promise<KBTask[]> {
   return (data ?? []) as KBTask[];
 }
 
-async function fetchMaterials(topicId: string): Promise<KBMaterial[]> {
+async function fetchCatalogMaterials(topicId: string): Promise<KBMaterial[]> {
   const { data, error } = await supabase
     .from('kb_materials')
     .select('*')
     .eq('topic_id', topicId)
+    .is('owner_id', null)
     .order('created_at');
   if (error) throw error;
   return (data ?? []) as KBMaterial[];
@@ -236,7 +237,7 @@ export function useMaterials(topicId: string | undefined) {
 
   const result = useKBQuery<KBMaterial[]>({
     queryKey,
-    queryFn: () => fetchMaterials(topicId!),
+    queryFn: () => fetchCatalogMaterials(topicId!),
     defaultValue: [],
     errorMessage: 'Не удалось загрузить материалы',
     enabled: Boolean(topicId),
