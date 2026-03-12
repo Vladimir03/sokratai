@@ -3,10 +3,11 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { ChevronRight, Folder, FolderPlus, Plus } from 'lucide-react';
 import { toast } from 'sonner';
 import TutorGuard from '@/components/TutorGuard';
+import { CreateTaskModal } from '@/components/kb/CreateTaskModal';
 import { FolderCard } from '@/components/kb/FolderCard';
 import { KBStatusCard } from '@/components/kb/KBStatusCard';
 import { KnowledgeBaseFrame } from '@/components/kb/KnowledgeBaseFrame';
-import { KnowledgeTaskCard } from '@/components/kb/KnowledgeTaskCard';
+import { TaskCard } from '@/components/kb/TaskCard';
 import { TutorLayout } from '@/components/tutor/TutorLayout';
 import { useFolder } from '@/hooks/useFolders';
 import type { KBTask } from '@/types/kb';
@@ -18,6 +19,7 @@ function FolderContent() {
 
   const [expandedTaskId, setExpandedTaskId] = useState<string | null>(null);
   const [hwTaskIds, setHwTaskIds] = useState<string[]>([]);
+  const [showCreateTask, setShowCreateTask] = useState(false);
 
   const handleAddToHW = (task: KBTask) => {
     setHwTaskIds((current) => {
@@ -98,7 +100,7 @@ function FolderContent() {
                   </button>
                   <button
                     type="button"
-                    onClick={() => toast.info('Создание задач подключим следующим шагом.')}
+                    onClick={() => setShowCreateTask(true)}
                     className="inline-flex items-center gap-2 rounded-xl bg-socrat-primary px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition-colors duration-200 hover:bg-socrat-primary-dark"
                   >
                     <Plus className="h-4 w-4" />
@@ -133,7 +135,7 @@ function FolderContent() {
                   </div>
                   <div className="flex flex-col gap-3">
                     {tasks.map((task) => (
-                      <KnowledgeTaskCard
+                      <TaskCard
                         key={task.id}
                         task={task}
                         isOwn
@@ -162,6 +164,13 @@ function FolderContent() {
             </>
           ) : null}
         </div>
+
+        {showCreateTask && folderId ? (
+          <CreateTaskModal
+            defaultFolderId={folderId}
+            onClose={() => setShowCreateTask(false)}
+          />
+        ) : null}
       </KnowledgeBaseFrame>
     </TutorLayout>
   );

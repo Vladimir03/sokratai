@@ -16,15 +16,15 @@ const colorMap: Record<MaterialType, string> = {
   board: 'bg-slate-100 text-slate-600',
 };
 
-interface KnowledgeMaterialCardProps {
+interface MaterialCardProps {
   material: KBMaterial;
   className?: string;
 }
 
-export function KnowledgeMaterialCard({
+export function MaterialCard({
   material,
   className,
-}: KnowledgeMaterialCardProps) {
+}: MaterialCardProps) {
   const materialType = material.type as MaterialType;
   const Icon = iconMap[materialType] ?? FileText;
 

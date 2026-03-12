@@ -6,8 +6,8 @@ import TutorGuard from '@/components/TutorGuard';
 import { CopyToFolderModal } from '@/components/kb/CopyToFolderModal';
 import { KBStatusCard } from '@/components/kb/KBStatusCard';
 import { KnowledgeBaseFrame } from '@/components/kb/KnowledgeBaseFrame';
-import { KnowledgeMaterialCard } from '@/components/kb/KnowledgeMaterialCard';
-import { KnowledgeTaskCard } from '@/components/kb/KnowledgeTaskCard';
+import { MaterialCard } from '@/components/kb/MaterialCard';
+import { TaskCard } from '@/components/kb/TaskCard';
 import { ExamBadge } from '@/components/kb/ui/ExamBadge';
 import { SourceBadge } from '@/components/kb/ui/SourceBadge';
 import { StatCounter } from '@/components/kb/ui/StatCounter';
@@ -122,7 +122,7 @@ function CatalogTopicContent() {
 
             <div className="flex flex-col gap-3">
               {tasks.map((task) => (
-                <KnowledgeTaskCard
+                <TaskCard
                   key={task.id}
                   task={task}
                   isOwn={false}
@@ -142,7 +142,7 @@ function CatalogTopicContent() {
               <h3 className="mb-3 text-lg font-semibold text-slate-900">Материалы</h3>
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                 {materials.map((material) => (
-                  <KnowledgeMaterialCard key={material.id} material={material} />
+                  <MaterialCard key={material.id} material={material} />
                 ))}
               </div>
             </section>

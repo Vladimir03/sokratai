@@ -4,7 +4,7 @@ import { SourceBadge } from '@/components/kb/ui/SourceBadge';
 import { cn } from '@/lib/utils';
 import type { KBTask } from '@/types/kb';
 
-interface KnowledgeTaskCardProps {
+interface TaskCardProps {
   task: KBTask;
   isExpanded: boolean;
   isOwn: boolean;
@@ -19,7 +19,7 @@ interface KnowledgeTaskCardProps {
   className?: string;
 }
 
-export function KnowledgeTaskCard({
+export function TaskCard({
   task,
   isExpanded,
   isOwn,
@@ -32,7 +32,7 @@ export function KnowledgeTaskCard({
   onDelete,
   onAiSimilar,
   className,
-}: KnowledgeTaskCardProps) {
+}: TaskCardProps) {
   const menuItems: ContextMenuItem[] = [];
 
   if (isOwn && onEdit) {

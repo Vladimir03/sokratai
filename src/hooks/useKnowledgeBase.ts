@@ -258,6 +258,7 @@ export function useCreateTask() {
     mutationFn: insertTask,
     onSuccess: (_data, variables) => {
       void queryClient.invalidateQueries({ queryKey: ['tutor', 'kb', 'catalog-tasks'] });
+      void queryClient.invalidateQueries({ queryKey: ['tutor', 'kb', 'root-folders'] });
       if (variables.folder_id) {
         void queryClient.invalidateQueries({ queryKey: ['tutor', 'kb', 'folder', variables.folder_id] });
       }
