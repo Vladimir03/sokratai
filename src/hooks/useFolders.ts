@@ -58,24 +58,33 @@ function buildTree(folders: KBFolder[]): KBFolderTreeNode[] {
 async function fetchRootFolders(): Promise<KBFolderWithCounts[]> {
   const { data: { session } } = await supabase.auth.getSession();
   if (!session) throw new Error('Нет активной сессии');
+  const userId = session.user.id;
 
-  const { data, error } = await supabase
-    .from('kb_folders')
-    .select('*, kb_folders!kb_folders_parent_id_fkey(count), kb_tasks(count)')
-    .eq('owner_id', session.user.id)
-    .is('parent_id', null)
-    .order('sort_order');
-  if (error) throw error;
+  const [foldersRes, allChildrenRes, allTasksRes] = await Promise.all([
+    supabase.from('kb_folders').select('*').eq('owner_id', userId).is('parent_id', null).order('sort_order'),
+    supabase.from('kb_folders').select('parent_id').eq('owner_id', userId).not('parent_id', 'is', null),
+    supabase.from('kb_tasks').select('folder_id').eq('owner_id', userId).not('folder_id', 'is', null),
+  ]);
+  if (foldersRes.error) throw foldersRes.error;
+  if (allChildrenRes.error) throw allChildrenRes.error;
+  if (allTasksRes.error) throw allTasksRes.error;
 
-  return (data ?? []).map((row: Record<string, unknown>) => {
-    const childArr = row.kb_folders as { count: number }[] | undefined;
-    const taskArr = row.kb_tasks as { count: number }[] | undefined;
-    return {
-      ...row,
-      child_count: childArr?.[0]?.count ?? 0,
-      task_count: taskArr?.[0]?.count ?? 0,
-    };
-  }) as KBFolderWithCounts[];
+  const childCounts = new Map<string, number>();
+  for (const r of allChildrenRes.data ?? []) {
+    const pid = (r as { parent_id: string }).parent_id;
+    childCounts.set(pid, (childCounts.get(pid) ?? 0) + 1);
+  }
+  const taskCounts = new Map<string, number>();
+  for (const r of allTasksRes.data ?? []) {
+    const fid = (r as { folder_id: string }).folder_id;
+    taskCounts.set(fid, (taskCounts.get(fid) ?? 0) + 1);
+  }
+
+  return (foldersRes.data ?? []).map((f) => ({
+    ...f,
+    child_count: childCounts.get(f.id) ?? 0,
+    task_count: taskCounts.get(f.id) ?? 0,
+  })) as KBFolderWithCounts[];
 }
 
 export interface FolderBreadcrumb {
