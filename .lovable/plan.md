@@ -1,40 +1,31 @@
 
 
-## Root Cause
+## Diagnosis
 
-The database confirms: assignment `4ce28a0e-b77e-4c97-b914-e6dc4717c046` has `workflow_mode = 'classic'` despite the switch being ON in the UI. This happened because the edge function `homework-api` was not yet redeployed with `workflow_mode` support when the assignment was created. The edge function defaulted unknown fields to `'classic'`.
+All three KB tables (`kb_topics`, `kb_folders`, `kb_tasks`, etc.) and the `kb_topics_with_counts` view **do not exist** in the database. The migrations were written but never applied:
 
-**All 40 assignments in the database have `workflow_mode = 'classic'`** -- none were ever saved as `guided_chat`.
+1. `20260312120000_kb_knowledge_base.sql` — creates 6 tables + RLS + grants
+2. `20260312120001_kb_seed_physics.sql` — seeds ЕГЭ/ОГЭ physics topics
+3. `20260312130000_kb_topics_with_counts_view.sql` — creates the view
 
-The frontend code is correct (sends `workflow_mode`), the edge function code is correct (saves it), and the student-side query is correct (reads it). The issue was purely a deployment timing gap.
+This also explains the **build errors** in `useFolders.ts`: the auto-generated `types.ts` doesn't know about `kb_folders` or `kb_tasks` because they don't exist in the DB. The Supabase client's type system rejects `.from('kb_folders')`.
 
-## Fix Plan
+## Fix
 
-### 1. Fix existing assignment data (SQL UPDATE via insert tool)
+### Step 1: Apply all 3 migrations via the migration tool (in order)
 
-Update assignment `4ce28a0e-b77e-4c97-b914-e6dc4717c046` to `workflow_mode = 'guided_chat'`:
+Run the SQL from each migration file sequentially:
+1. `20260312120000_kb_knowledge_base.sql` — tables, RLS, grants
+2. `20260312120001_kb_seed_physics.sql` — seed data
+3. `20260312130000_kb_topics_with_counts_view.sql` — view
 
-```sql
-UPDATE homework_tutor_assignments 
-SET workflow_mode = 'guided_chat' 
-WHERE id = '4ce28a0e-b77e-4c97-b914-e6dc4717c046';
-```
+### Step 2: Add GRANT on the view
 
-### 2. Provision guided chat thread for the assigned student
+The view migration file is missing a `GRANT SELECT ON public.kb_topics_with_counts TO authenticated;`. Add this to the migration or run it separately.
 
-The student `ac96a528-4213-471b-ac9d-163a2af6397a` has a `homework_tutor_student_assignments` row but no thread exists yet. Need to:
+### Step 3: Regenerate types
 
-1. Look up the `student_assignment_id` from `homework_tutor_student_assignments`
-2. Insert a row into `homework_tutor_threads` 
-3. Insert `homework_tutor_task_states` for each task (first = `active`, rest = `locked`)
+After the tables exist, the auto-generated `types.ts` will include `kb_folders`, `kb_tasks`, etc., which will resolve all build errors in `useFolders.ts` without any frontend code changes.
 
-This requires querying for the student_assignment ID and task IDs first, then inserting thread + task states.
-
-### 3. Redeploy edge function
-
-Redeploy `homework-api` to confirm latest code is live for future assignments.
-
-### No frontend changes needed
-
-The frontend already handles `workflow_mode === 'guided_chat'` correctly at line 433 of `StudentHomeworkDetail.tsx`.
+**No frontend changes needed.** All build errors stem from missing DB tables.
 
