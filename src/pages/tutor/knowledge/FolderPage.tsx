@@ -3,6 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { ChevronRight, Folder, FolderPlus, Plus } from 'lucide-react';
 import { toast } from 'sonner';
 import TutorGuard from '@/components/TutorGuard';
+import { CreateFolderModal } from '@/components/kb/CreateFolderModal';
 import { CreateTaskModal } from '@/components/kb/CreateTaskModal';
 import { FolderCard } from '@/components/kb/FolderCard';
 import { KBStatusCard } from '@/components/kb/KBStatusCard';
@@ -19,6 +20,7 @@ function FolderContent() {
 
   const [expandedTaskId, setExpandedTaskId] = useState<string | null>(null);
   const [hwTaskIds, setHwTaskIds] = useState<string[]>([]);
+  const [showCreateFolder, setShowCreateFolder] = useState(false);
   const [showCreateTask, setShowCreateTask] = useState(false);
 
   const handleAddToHW = (task: KBTask) => {
@@ -92,7 +94,7 @@ function FolderContent() {
                 <div className="flex flex-wrap gap-2">
                   <button
                     type="button"
-                    onClick={() => toast.info('Создание подпапок подключим следующим шагом.')}
+                    onClick={() => setShowCreateFolder(true)}
                     className="inline-flex items-center gap-2 rounded-xl border border-socrat-border bg-white px-4 py-2.5 text-sm font-semibold text-slate-600 shadow-sm transition-all duration-200 hover:border-socrat-folder/30 hover:text-socrat-folder"
                   >
                     <FolderPlus className="h-4 w-4" />
@@ -164,6 +166,13 @@ function FolderContent() {
             </>
           ) : null}
         </div>
+
+        {showCreateFolder && folderId ? (
+          <CreateFolderModal
+            parentId={folderId}
+            onClose={() => setShowCreateFolder(false)}
+          />
+        ) : null}
 
         {showCreateTask && folderId ? (
           <CreateTaskModal

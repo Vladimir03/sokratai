@@ -3,6 +3,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Folder, FolderPlus, LayoutGrid, Plus } from 'lucide-react';
 import { toast } from 'sonner';
 import TutorGuard from '@/components/TutorGuard';
+import { CreateFolderModal } from '@/components/kb/CreateFolderModal';
 import { CreateTaskModal } from '@/components/kb/CreateTaskModal';
 import { FolderCard } from '@/components/kb/FolderCard';
 import { KBStatusCard } from '@/components/kb/KBStatusCard';
@@ -177,6 +178,7 @@ interface MyBaseHomeProps {
 
 function MyBaseHome({ onOpenFolder }: MyBaseHomeProps) {
   const { folders, loading, error, refetch, isFetching } = useRootFolders();
+  const [showCreateFolder, setShowCreateFolder] = useState(false);
   const [showCreateTask, setShowCreateTask] = useState(false);
 
   return (
@@ -192,7 +194,7 @@ function MyBaseHome({ onOpenFolder }: MyBaseHomeProps) {
         </div>
         <button
           type="button"
-          onClick={() => toast.info('Создание папок подключим следующим шагом.')}
+          onClick={() => setShowCreateFolder(true)}
           className={cn(
             'inline-flex items-center gap-2 rounded-xl border border-socrat-primary/20 bg-socrat-primary-light px-4 py-2.5',
             'text-sm font-semibold text-socrat-primary shadow-sm transition-all duration-200 hover:border-socrat-primary/35',
@@ -242,6 +244,10 @@ function MyBaseHome({ onOpenFolder }: MyBaseHomeProps) {
           <p className="text-sm font-semibold text-slate-800">Пока нет папок</p>
           <p className="mt-1 text-xs text-slate-500">Создайте папку для своих задач и материалов</p>
         </div>
+      ) : null}
+
+      {showCreateFolder ? (
+        <CreateFolderModal onClose={() => setShowCreateFolder(false)} />
       ) : null}
 
       {showCreateTask ? (
