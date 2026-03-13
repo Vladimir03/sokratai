@@ -41,6 +41,7 @@ function TutorAssistantContent() {
           {jobs.map((job) => (
             <Card
               key={job.title}
+              animate={false}
               className="cursor-pointer transition-colors hover:border-socrat-primary/50 hover:bg-accent/50"
             >
               <CardContent className="flex flex-col items-center gap-3 p-6 text-center">
