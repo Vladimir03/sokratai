@@ -5,12 +5,14 @@ import { toast } from 'sonner';
 import TutorGuard from '@/components/TutorGuard';
 import { CreateFolderModal } from '@/components/kb/CreateFolderModal';
 import { CreateTaskModal } from '@/components/kb/CreateTaskModal';
+import { EditTaskModal } from '@/components/kb/EditTaskModal';
 import { FolderCard } from '@/components/kb/FolderCard';
 import { KBStatusCard } from '@/components/kb/KBStatusCard';
 import { KnowledgeBaseFrame } from '@/components/kb/KnowledgeBaseFrame';
 import { TaskCard } from '@/components/kb/TaskCard';
 import { TutorLayout } from '@/components/tutor/TutorLayout';
 import { useFolder } from '@/hooks/useFolders';
+import { useDeleteTask } from '@/hooks/useKnowledgeBase';
 import { useHWDraftStore } from '@/stores/hwDraftStore';
 import type { KBTask } from '@/types/kb';
 
@@ -22,7 +24,9 @@ function FolderContent() {
   const [expandedTaskId, setExpandedTaskId] = useState<string | null>(null);
   const [showCreateFolder, setShowCreateFolder] = useState(false);
   const [showCreateTask, setShowCreateTask] = useState(false);
+  const [editingTask, setEditingTask] = useState<KBTask | null>(null);
   const { addTask, hasTask } = useHWDraftStore();
+  const deleteTask = useDeleteTask();
 
   const handleAddToHW = (task: KBTask) => {
     if (hasTask(task.id)) {
@@ -143,8 +147,15 @@ function FolderContent() {
                         isExpanded={expandedTaskId === task.id}
                         onToggle={() => setExpandedTaskId(expandedTaskId === task.id ? null : task.id)}
                         onAddToHW={() => handleAddToHW(task)}
-                        onEdit={() => toast.info('Редактирование задачи подключим следующим шагом.')}
-                        onDelete={() => toast.info('Удаление задачи подключим следующим шагом.')}
+                        onEdit={() => setEditingTask(task)}
+                        onDelete={() => {
+                          if (window.confirm('Удалить задачу?')) {
+                            deleteTask.mutate(task.id, {
+                              onSuccess: () => toast.success('Задача удалена'),
+                              onError: () => toast.error('Не удалось удалить задачу'),
+                            });
+                          }
+                        }}
                         onAiSimilar={() => toast.info('AI-вариации подключим следующим шагом.')}
                       />
                     ))}
@@ -176,6 +187,13 @@ function FolderContent() {
           <CreateTaskModal
             defaultFolderId={folderId}
             onClose={() => setShowCreateTask(false)}
+          />
+        ) : null}
+
+        {editingTask ? (
+          <EditTaskModal
+            task={editingTask}
+            onClose={() => setEditingTask(null)}
           />
         ) : null}
       </KnowledgeBaseFrame>

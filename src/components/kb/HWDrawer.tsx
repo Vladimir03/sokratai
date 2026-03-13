@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { BookOpen, Pencil, Plus, X } from 'lucide-react';
+import { BookOpen, Image, Pencil, Plus, X } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
@@ -78,6 +78,7 @@ export function HWDrawer({
       const tutorTasks = tasks.map((task, index) => ({
         assignment_id: hw.id,
         task_text: task.textSnapshot,
+        task_image_url: task.attachmentSnapshot ?? null,
         correct_answer: task.answerSnapshot ?? null,
         solution_steps: task.solutionSnapshot ?? null,
         order_num: index + 1,
@@ -210,6 +211,9 @@ export function HWDrawer({
                           <span className="text-[11px] text-slate-400">
                             {task.subtopic}
                           </span>
+                        ) : null}
+                        {task.attachmentSnapshot ? (
+                          <Image className="h-3 w-3 text-slate-400" />
                         ) : null}
                         {task.snapshotEdited ? (
                           <span className="rounded-full bg-socrat-accent-light px-1.5 py-0.5 text-[9px] font-semibold text-socrat-accent">

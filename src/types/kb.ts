@@ -101,6 +101,16 @@ export interface CreateKBTaskInput {
   attachment_url?: string;
 }
 
+export interface UpdateKBTaskInput {
+  text?: string;
+  exam?: ExamType | null;
+  kim_number?: number | null;
+  answer?: string | null;
+  solution?: string | null;
+  answer_format?: string | null;
+  attachment_url?: string | null;
+}
+
 // =============================================
 // Материалы
 // =============================================
@@ -128,6 +138,7 @@ export interface HWDraftTask {
   textSnapshot: string;
   answerSnapshot: string | null;
   solutionSnapshot: string | null;
+  attachmentSnapshot: string | null;
   snapshotEdited: boolean;
   source: 'socrat' | 'my';
   subtopic: string;
