@@ -1,8 +1,26 @@
-import { ReactNode, useEffect } from 'react';
+import { ReactNode, useEffect, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import { Sheet, SheetContent, SheetTrigger } from '@/components/ui/sheet';
 import { cn } from '@/lib/utils';
-import { LayoutDashboard, Users, CreditCard, CalendarDays, BookOpen, Library, LogOut } from 'lucide-react';
+import {
+  LayoutDashboard,
+  Users,
+  CreditCard,
+  CalendarDays,
+  BookOpen,
+  Library,
+  LogOut,
+  Bot,
+  ChevronDown,
+  MoreHorizontal,
+} from 'lucide-react';
 import { supabase } from '@/lib/supabaseClient';
 import { toast } from 'sonner';
 import { useNavigate } from 'react-router-dom';
@@ -12,12 +30,33 @@ interface TutorLayoutProps {
   children: ReactNode;
 }
 
-const navItems = [
-  { href: '/tutor/dashboard', label: 'Дашборд', icon: LayoutDashboard },
+// Desktop: 5 primary items visible in top bar
+const desktopPrimaryItems = [
+  { href: '/tutor/dashboard', label: 'Главная', icon: LayoutDashboard },
   { href: '/tutor/schedule', label: 'Расписание', icon: CalendarDays },
   { href: '/tutor/students', label: 'Ученики', icon: Users },
   { href: '/tutor/homework', label: 'Домашки', icon: BookOpen },
-  { href: '/tutor/knowledge', label: 'База', icon: Library },
+  { href: '/tutor/assistant', label: 'Помощник', icon: Bot },
+];
+
+// Desktop: items inside "Ещё ▾" dropdown
+const desktopMoreItems = [
+  { href: '/tutor/knowledge', label: 'База знаний', icon: Library },
+  { href: '/tutor/payments', label: 'Оплаты', icon: CreditCard },
+];
+
+// Mobile: 4 primary items in bottom bar (Ученики moves to overflow)
+const mobilePrimaryItems = [
+  { href: '/tutor/dashboard', label: 'Главная', icon: LayoutDashboard },
+  { href: '/tutor/schedule', label: 'Расписание', icon: CalendarDays },
+  { href: '/tutor/homework', label: 'Домашки', icon: BookOpen },
+  { href: '/tutor/assistant', label: 'Помощник', icon: Bot },
+];
+
+// Mobile: items inside "Ещё" sheet
+const mobileMoreItems = [
+  { href: '/tutor/students', label: 'Ученики', icon: Users },
+  { href: '/tutor/knowledge', label: 'База знаний', icon: Library },
   { href: '/tutor/payments', label: 'Оплаты', icon: CreditCard },
 ];
 
@@ -25,6 +64,7 @@ export function TutorLayout({ children }: TutorLayoutProps) {
   const location = useLocation();
   const navigate = useNavigate();
   const hwTaskCount = useHWTaskCount();
+  const [mobileMoreOpen, setMobileMoreOpen] = useState(false);
 
   useEffect(() => {
     // Warm up lazy tutor route chunks to make tab switches instant.
@@ -47,6 +87,7 @@ export function TutorLayout({ children }: TutorLayoutProps) {
       warmup('TutorHomeworkCreate', () => import('@/pages/tutor/TutorHomeworkCreate'));
       warmup('TutorHomeworkDetail', () => import('@/pages/tutor/TutorHomeworkDetail'));
       warmup('KnowledgeBasePage', () => import('@/pages/tutor/knowledge/KnowledgeBasePage'));
+      warmup('TutorAssistant', () => import('@/pages/tutor/TutorAssistant'));
     }, 300);
 
     return () => window.clearTimeout(timer);
@@ -58,6 +99,12 @@ export function TutorLayout({ children }: TutorLayoutProps) {
     toast.success('Вы вышли из системы');
     navigate('/login');
   };
+
+  const isActive = (href: string) =>
+    location.pathname === href || location.pathname.startsWith(href + '/');
+
+  const isDesktopMoreActive = desktopMoreItems.some(item => isActive(item.href));
+  const isMobileMoreActive = mobileMoreItems.some(item => isActive(item.href));
 
   return (
     <div className="min-h-screen bg-background">
@@ -72,13 +119,13 @@ export function TutorLayout({ children }: TutorLayoutProps) {
 
           {/* Desktop nav */}
           <nav className="hidden md:flex items-center gap-1">
-            {navItems.map(item => {
-              const isActive = location.pathname === item.href || location.pathname.startsWith(item.href + '/');
+            {desktopPrimaryItems.map(item => {
+              const active = isActive(item.href);
               const showHWBadge = item.href === '/tutor/homework' && hwTaskCount > 0;
               return (
                 <Link key={item.href} to={item.href}>
                   <Button
-                    variant={isActive ? 'secondary' : 'ghost'}
+                    variant={active ? 'secondary' : 'ghost'}
                     size="sm"
                     className="relative gap-2"
                   >
@@ -93,6 +140,30 @@ export function TutorLayout({ children }: TutorLayoutProps) {
                 </Link>
               );
             })}
+
+            {/* "Ещё" dropdown */}
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  variant={isDesktopMoreActive ? 'secondary' : 'ghost'}
+                  size="sm"
+                  className="gap-1"
+                >
+                  Ещё
+                  <ChevronDown className="h-3 w-3" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                {desktopMoreItems.map(item => (
+                  <DropdownMenuItem key={item.href} asChild>
+                    <Link to={item.href} className="flex items-center gap-2">
+                      <item.icon className="h-4 w-4" />
+                      {item.label}
+                    </Link>
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
           </nav>
 
           {/* Logout */}
@@ -106,8 +177,8 @@ export function TutorLayout({ children }: TutorLayoutProps) {
       {/* Mobile bottom nav */}
       <nav className="md:hidden fixed bottom-0 left-0 right-0 z-50 border-t bg-background">
         <div className="flex justify-around py-2">
-          {navItems.map(item => {
-            const isActive = location.pathname === item.href || location.pathname.startsWith(item.href + '/');
+          {mobilePrimaryItems.map(item => {
+            const active = isActive(item.href);
             const showHWBadge = item.href === '/tutor/homework' && hwTaskCount > 0;
             return (
               <Link
@@ -115,9 +186,7 @@ export function TutorLayout({ children }: TutorLayoutProps) {
                 to={item.href}
                 className={cn(
                   "relative flex flex-col items-center gap-1 px-3 py-2 text-xs",
-                  isActive
-                    ? "text-primary"
-                    : "text-muted-foreground"
+                  active ? "text-primary" : "text-muted-foreground"
                 )}
               >
                 <item.icon className="h-5 w-5" />
@@ -130,6 +199,44 @@ export function TutorLayout({ children }: TutorLayoutProps) {
               </Link>
             );
           })}
+
+          {/* "Ещё" bottom sheet trigger */}
+          <Sheet open={mobileMoreOpen} onOpenChange={setMobileMoreOpen}>
+            <SheetTrigger asChild>
+              <button
+                className={cn(
+                  "relative flex flex-col items-center gap-1 px-3 py-2 text-xs",
+                  isMobileMoreActive ? "text-primary" : "text-muted-foreground"
+                )}
+              >
+                <MoreHorizontal className="h-5 w-5" />
+                Ещё
+              </button>
+            </SheetTrigger>
+            <SheetContent side="bottom" className="h-auto">
+              <nav className="grid gap-1 py-4">
+                {mobileMoreItems.map(item => {
+                  const active = isActive(item.href);
+                  return (
+                    <Link
+                      key={item.href}
+                      to={item.href}
+                      onClick={() => setMobileMoreOpen(false)}
+                      className={cn(
+                        "flex items-center gap-3 px-4 py-3 rounded-lg transition-colors",
+                        active
+                          ? "bg-secondary text-primary"
+                          : "text-muted-foreground hover:bg-accent hover:text-accent-foreground"
+                      )}
+                    >
+                      <item.icon className="h-5 w-5" />
+                      <span className="text-sm font-medium">{item.label}</span>
+                    </Link>
+                  );
+                })}
+              </nav>
+            </SheetContent>
+          </Sheet>
         </div>
       </nav>
 
