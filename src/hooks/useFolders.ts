@@ -387,6 +387,7 @@ export function useCopyTaskToFolder() {
       void queryClient.invalidateQueries({ queryKey: ['tutor', 'kb', 'folder', variables.folderId] });
       void queryClient.invalidateQueries({ queryKey: ['tutor', 'kb', 'folder-tree'] });
       void queryClient.invalidateQueries({ queryKey: ['tutor', 'kb', 'root-folders'] });
+      void queryClient.invalidateQueries({ queryKey: ['tutor', 'kb', 'search'] });
     },
   });
 }

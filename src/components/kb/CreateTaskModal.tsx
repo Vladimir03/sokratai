@@ -123,7 +123,7 @@ export function CreateTaskModal({ defaultFolderId, onClose }: CreateTaskModalPro
               onChange={(e) => setText(e.target.value)}
               rows={4}
               placeholder="Введите условие задачи..."
-              className="w-full resize-y rounded-lg border border-socrat-border px-3 py-2.5 text-[16px] leading-relaxed transition-colors duration-200 placeholder:text-socrat-muted focus:border-socrat-primary/50 focus:outline-none sm:text-sm"
+              className="w-full resize-y rounded-lg border border-socrat-border px-3 py-2.5 text-[16px] leading-relaxed transition-colors duration-200 placeholder:text-socrat-muted focus:border-socrat-primary/50 focus:outline-none "
             />
           </fieldset>
 
@@ -134,7 +134,7 @@ export function CreateTaskModal({ defaultFolderId, onClose }: CreateTaskModalPro
               <select
                 value={exam}
                 onChange={(e) => setExam(e.target.value as ExamType | '')}
-                className="w-full rounded-lg border border-socrat-border px-3 py-2 text-[16px] transition-colors duration-200 focus:border-socrat-primary/50 focus:outline-none sm:text-sm"
+                className="w-full rounded-lg border border-socrat-border px-3 py-2 text-[16px] transition-colors duration-200 focus:border-socrat-primary/50 focus:outline-none "
               >
                 <option value="">Не указан</option>
                 <option value="ege">ЕГЭ</option>
@@ -147,7 +147,7 @@ export function CreateTaskModal({ defaultFolderId, onClose }: CreateTaskModalPro
               <select
                 value={answerFormat}
                 onChange={(e) => setAnswerFormat(e.target.value)}
-                className="w-full rounded-lg border border-socrat-border px-3 py-2 text-[16px] transition-colors duration-200 focus:border-socrat-primary/50 focus:outline-none sm:text-sm"
+                className="w-full rounded-lg border border-socrat-border px-3 py-2 text-[16px] transition-colors duration-200 focus:border-socrat-primary/50 focus:outline-none "
               >
                 <option value="">Не указан</option>
                 <option value="number">Число</option>
@@ -166,7 +166,7 @@ export function CreateTaskModal({ defaultFolderId, onClose }: CreateTaskModalPro
               value={answer}
               onChange={(e) => setAnswer(e.target.value)}
               placeholder="Правильный ответ"
-              className="w-full rounded-lg border border-socrat-border px-3 py-2 text-[16px] transition-colors duration-200 placeholder:text-socrat-muted focus:border-socrat-primary/50 focus:outline-none sm:text-sm"
+              className="w-full rounded-lg border border-socrat-border px-3 py-2 text-[16px] transition-colors duration-200 placeholder:text-socrat-muted focus:border-socrat-primary/50 focus:outline-none "
             />
           </fieldset>
 
@@ -178,7 +178,7 @@ export function CreateTaskModal({ defaultFolderId, onClose }: CreateTaskModalPro
               onChange={(e) => setSolution(e.target.value)}
               rows={3}
               placeholder="Подробное решение (опционально)..."
-              className="w-full resize-y rounded-lg border border-socrat-border px-3 py-2.5 text-[16px] leading-relaxed transition-colors duration-200 placeholder:text-socrat-muted focus:border-socrat-primary/50 focus:outline-none sm:text-sm"
+              className="w-full resize-y rounded-lg border border-socrat-border px-3 py-2.5 text-[16px] leading-relaxed transition-colors duration-200 placeholder:text-socrat-muted focus:border-socrat-primary/50 focus:outline-none "
             />
           </fieldset>
         </div>

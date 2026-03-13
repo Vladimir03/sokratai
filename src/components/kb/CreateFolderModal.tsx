@@ -83,7 +83,7 @@ export function CreateFolderModal({ parentId, onClose }: CreateFolderModalProps)
               }}
               placeholder="Введите название папки..."
               autoFocus
-              className="w-full rounded-lg border border-socrat-border px-3 py-2.5 text-[16px] transition-colors duration-200 placeholder:text-socrat-muted focus:border-socrat-primary/50 focus:outline-none sm:text-sm"
+              className="w-full rounded-lg border border-socrat-border px-3 py-2.5 text-[16px] transition-colors duration-200 placeholder:text-socrat-muted focus:border-socrat-primary/50 focus:outline-none"
             />
           </fieldset>
         </div>

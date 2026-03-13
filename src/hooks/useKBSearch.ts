@@ -32,14 +32,15 @@ async function fetchKBSearch(
   query: string,
   examFilter: ExamType,
 ): Promise<KBSearchResult[]> {
-  const { data, error } = await (supabase.rpc as any)('kb_search', {
+  const { data, error } = await supabase.rpc('kb_search', {
     query,
     exam_filter: examFilter,
-    source_filter: null,
+    source_filter: undefined,
     result_limit: 20,
   });
   if (error) throw error;
-  return (data ?? []) as KBSearchResult[];
+  // Generated types mark parent_topic_id/snippet as non-null but SQL returns NULLs
+  return (data ?? []) as unknown as KBSearchResult[];
 }
 
 // =============================================

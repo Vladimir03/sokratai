@@ -28,7 +28,7 @@ export function KBSearchInput({
         className={cn(
           "w-full rounded-xl border-[1.5px] border-socrat-border bg-socrat-card",
           "py-2.5 pl-[42px] pr-4 text-sm font-body",
-          "text-[16px] sm:text-sm",
+          "text-[16px]",
           "placeholder:text-socrat-muted",
           "transition-colors duration-200",
           "focus:border-socrat-primary focus:outline-none",

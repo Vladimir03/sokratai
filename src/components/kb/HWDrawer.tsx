@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { BookOpen, Pencil, Plus, X } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
+import { useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import {
   Sheet,
@@ -22,6 +23,7 @@ export function HWDrawer({
   onOpenChange: (open: boolean) => void;
 }) {
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const { tasks, removeTask, updateSnapshot, clearDraft } = useHWDraftStore();
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editText, setEditText] = useState('');
@@ -72,6 +74,25 @@ export function HWDrawer({
         return;
       }
 
+      // 1) Create homework_tutor_tasks so the student runtime can see these tasks
+      const tutorTasks = tasks.map((task, index) => ({
+        assignment_id: hw.id,
+        task_text: task.textSnapshot,
+        correct_answer: task.answerSnapshot ?? null,
+        solution_steps: task.solutionSnapshot ?? null,
+        order_num: index + 1,
+      }));
+
+      const { error: tasksError } = await supabase
+        .from('homework_tutor_tasks')
+        .insert(tutorTasks);
+
+      if (tasksError) {
+        toast.error(`Ошибка создания задач: ${tasksError.message}`);
+        return;
+      }
+
+      // 2) Create homework_kb_tasks snapshots (KB reference + frozen text)
       const links = tasks.map((task, index) => ({
         homework_id: hw.id,
         task_id: task.taskId,
@@ -85,18 +106,21 @@ export function HWDrawer({
       const { error } = await supabase.from('homework_kb_tasks').insert(links);
 
       if (error) {
-        // If a task_id FK fails (task deleted since draft), retry without task_id
+        // If a specific task_id FK fails (task deleted since draft), retry only that link
         if (error.code === '23503') {
-          const linksWithoutFk = links.map((link) => ({
-            ...link,
-            task_id: null,
-          }));
-          const { error: retryError } = await supabase
-            .from('homework_kb_tasks')
-            .insert(linksWithoutFk);
-          if (retryError) {
-            toast.error(`Ошибка сохранения: ${retryError.message}`);
-            return;
+          for (const link of links) {
+            const { error: singleErr } = await supabase
+              .from('homework_kb_tasks')
+              .insert(link);
+            if (singleErr?.code === '23503') {
+              // This specific task was deleted — insert without FK reference
+              await supabase
+                .from('homework_kb_tasks')
+                .insert({ ...link, task_id: null });
+            } else if (singleErr) {
+              toast.error(`Ошибка сохранения: ${singleErr.message}`);
+              return;
+            }
           }
         } else {
           toast.error(`Ошибка сохранения: ${error.message}`);
@@ -106,7 +130,8 @@ export function HWDrawer({
 
       clearDraft();
       onOpenChange(false);
-      toast.success('ДЗ создано!');
+      void queryClient.invalidateQueries({ queryKey: ['tutor', 'homework', 'assignments'] });
+      toast.success('Черновик ДЗ создан — откройте его в разделе ДЗ для отправки ученику');
       navigate(`/tutor/homework`);
     } catch {
       toast.error('Не удалось отправить ДЗ');
@@ -293,7 +318,7 @@ export function HWDrawer({
                 : 'cursor-not-allowed bg-slate-300',
             )}
           >
-            {submitting ? 'Отправляем...' : 'Отправить ДЗ'}
+            {submitting ? 'Сохранение...' : 'Создать черновик ДЗ'}
           </button>
         </div>
       </SheetContent>
