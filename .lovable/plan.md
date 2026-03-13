@@ -1,40 +1,29 @@
 
 
-## Root Cause
+## Анализ
 
-The database confirms: assignment `4ce28a0e-b77e-4c97-b914-e6dc4717c046` has `workflow_mode = 'classic'` despite the switch being ON in the UI. This happened because the edge function `homework-api` was not yet redeployed with `workflow_mode` support when the assignment was created. The edge function defaulted unknown fields to `'classic'`.
+Код в `TutorAssistant.tsx` выглядит корректно (`sm:grid-cols-3`), но в Lovable preview карточки отображаются в стопку. Две вероятные причины:
 
-**All 40 assignments in the database have `workflow_mode = 'classic'`** -- none were ever saved as `guided_chat`.
+1. **Card component добавляет `animate-in fade-in slide-in-from-bottom-2`** по умолчанию — это может конфликтовать с grid layout в момент анимации входа.
+2. **`hover:bg-accent/50`** на карточках — `--accent` равен зелёному (`142 76% 36%`), отсюда зелёный фон при hover.
 
-The frontend code is correct (sends `workflow_mode`), the edge function code is correct (saves it), and the student-side query is correct (reads it). The issue was purely a deployment timing gap.
+## План исправления
 
-## Fix Plan
+### 1. TutorAssistant — отключить animation на Card
 
-### 1. Fix existing assignment data (SQL UPDATE via insert tool)
+В `src/pages/tutor/TutorAssistant.tsx` — добавить `animate={false}` на каждую `<Card>`, чтобы убрать `animate-in` класс, который может ломать grid:
 
-Update assignment `4ce28a0e-b77e-4c97-b914-e6dc4717c046` to `workflow_mode = 'guided_chat'`:
-
-```sql
-UPDATE homework_tutor_assignments 
-SET workflow_mode = 'guided_chat' 
-WHERE id = '4ce28a0e-b77e-4c97-b914-e6dc4717c046';
+```tsx
+<Card
+  key={job.title}
+  animate={false}
+  className="cursor-pointer transition-colors hover:border-socrat-primary/50 hover:bg-accent/50"
+>
 ```
 
-### 2. Provision guided chat thread for the assigned student
+### 2. База знаний — аналогичная проверка
 
-The student `ac96a528-4213-471b-ac9d-163a2af6397a` has a `homework_tutor_student_assignments` row but no thread exists yet. Need to:
+Проверить `TopicCard`, `FolderCard` и другие KB-компоненты на наличие Card с дефолтной анимацией и отключить где нужно.
 
-1. Look up the `student_assignment_id` from `homework_tutor_student_assignments`
-2. Insert a row into `homework_tutor_threads` 
-3. Insert `homework_tutor_task_states` for each task (first = `active`, rest = `locked`)
-
-This requires querying for the student_assignment ID and task IDs first, then inserting thread + task states.
-
-### 3. Redeploy edge function
-
-Redeploy `homework-api` to confirm latest code is live for future assignments.
-
-### No frontend changes needed
-
-The frontend already handles `workflow_mode === 'guided_chat'` correctly at line 433 of `StudentHomeworkDetail.tsx`.
+Если после отключения анимации grid по-прежнему не работает — проблема в кеше preview, и потребуется hard refresh.
 
