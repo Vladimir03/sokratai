@@ -47,10 +47,21 @@ export async function withTutorTimeout<T>(
   }
 }
 
+/** Error messages that should NOT be retried (resource genuinely missing). */
+function isNonRetryableError(error: unknown): boolean {
+  const msg = toErrorMessage(error).toLowerCase();
+  return msg.includes("not found") || msg.includes("not_found");
+}
+
 export function createTutorRetry(queryKey: TutorQueryKey) {
   const key = tutorQueryKeyToString(queryKey);
 
   return (failureCount: number, error: unknown): boolean => {
+    if (isNonRetryableError(error)) {
+      console.warn("tutor_query_no_retry_not_found", { queryKey: key, error: toErrorMessage(error) });
+      return false;
+    }
+
     if (failureCount <= TUTOR_MAX_RETRIES) {
       console.warn("tutor_query_retry", {
         queryKey: key,
