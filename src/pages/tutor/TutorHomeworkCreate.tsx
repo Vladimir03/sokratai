@@ -66,6 +66,10 @@ import {
   type MaterialType,
 } from '@/lib/tutorHomeworkApi';
 import { getTutorInviteWebLink } from '@/utils/telegramLinks';
+import type { KBTask } from '@/types/kb';
+import { KBPickerSheet } from '@/components/tutor/KBPickerSheet';
+import { SourceBadge } from '@/components/kb/ui/SourceBadge';
+import { supabase } from '@/lib/supabaseClient';
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
@@ -95,6 +99,14 @@ interface DraftTask {
   rubric_text: string;
   max_score: number;
   uploading: boolean;
+  /** KB provenance — set when task added from Knowledge Base picker */
+  kb_task_id?: string | null;
+  kb_source?: 'socrat' | 'my';
+  kb_snapshot_text?: string;
+  kb_snapshot_answer?: string | null;
+  kb_snapshot_solution?: string | null;
+  /** Original KB attachment URL (storage:// or https://). Not usable as task_image_path directly. */
+  kb_attachment_url?: string | null;
 }
 
 function createEmptyTask(): DraftTask {
@@ -109,6 +121,28 @@ function createEmptyTask(): DraftTask {
     rubric_text: '',
     max_score: 1,
     uploading: false,
+  };
+}
+
+// Job: Быстро добавить задачу из базы в черновик ДЗ
+function kbTaskToDraftTask(task: KBTask): DraftTask {
+  return {
+    localId: crypto.randomUUID(),
+    task_text: task.text,
+    task_image_path: null,
+    task_image_name: null,
+    task_image_preview_url: null,
+    task_image_used_fallback: false,
+    correct_answer: task.answer ?? '',
+    rubric_text: '',
+    max_score: 1,
+    uploading: false,
+    kb_task_id: task.id,
+    kb_source: task.owner_id ? 'my' : 'socrat',
+    kb_snapshot_text: task.text,
+    kb_snapshot_answer: task.answer ?? null,
+    kb_snapshot_solution: task.solution ?? null,
+    kb_attachment_url: task.attachment_url ?? null,
   };
 }
 
@@ -624,9 +658,20 @@ function TaskEditor({
     <Card>
       <CardContent className="p-4 space-y-4">
         <div className="flex items-center justify-between">
-          <span className="text-sm font-medium text-muted-foreground">
-            Задача {index + 1}
-          </span>
+          <div className="flex items-center gap-2">
+            <span className="text-sm font-medium text-muted-foreground">
+              Задача {index + 1}
+            </span>
+            {task.kb_source && (
+              <SourceBadge source={task.kb_source} />
+            )}
+            {task.kb_attachment_url && !task.task_image_path && (
+              <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-700">
+                <Paperclip className="h-3 w-3" />
+                Есть изображение в базе
+              </span>
+            )}
+          </div>
           {canRemove && (
             <Button variant="ghost" size="sm" onClick={onRemove}>
               <Trash2 className="h-4 w-4 text-destructive" />
@@ -759,16 +804,41 @@ function StepTasks({
   materials,
   onMaterialsChange,
   errors,
+  topicHint,
 }: {
   tasks: DraftTask[];
   onChange: (t: DraftTask[]) => void;
   materials: DraftMaterial[];
   onMaterialsChange: (m: DraftMaterial[]) => void;
   errors: Record<string, string>;
+  topicHint?: string;
 }) {
+  const [kbPickerOpen, setKbPickerOpen] = useState(false);
+
   const handleAdd = useCallback(() => {
     onChange([...tasks, createEmptyTask()]);
   }, [tasks, onChange]);
+
+  const handleAddFromKB = useCallback(
+    (kbTasks: KBTask[]) => {
+      const newDrafts = kbTasks
+        .filter((t) => !tasks.some((d) => d.kb_task_id === t.id))
+        .map(kbTaskToDraftTask);
+      if (newDrafts.length === 0) return;
+      onChange([...tasks, ...newDrafts]);
+      toast.success(
+        newDrafts.length === 1
+          ? 'Задача добавлена в ДЗ'
+          : `Добавлено задач: ${newDrafts.length}`,
+      );
+    },
+    [tasks, onChange],
+  );
+
+  const addedKbTaskIds = useMemo(
+    () => new Set(tasks.filter((t) => t.kb_task_id).map((t) => t.kb_task_id!)),
+    [tasks],
+  );
 
   const handleUpdate = useCallback(
     (idx: number, updated: DraftTask) => {
@@ -809,10 +879,27 @@ function StepTasks({
           canRemove={tasks.length > 1}
         />
       ))}
-      <Button variant="outline" onClick={handleAdd} className="gap-2 w-full">
-        <Plus className="h-4 w-4" />
-        Добавить задачу
-      </Button>
+      <div className="flex gap-2">
+        <Button variant="outline" onClick={handleAdd} className="gap-2 flex-1">
+          <Plus className="h-4 w-4" />
+          Добавить задачу
+        </Button>
+        <Button
+          variant="outline"
+          onClick={() => setKbPickerOpen(true)}
+          className="gap-2 flex-1"
+        >
+          <Library className="h-4 w-4" />
+          Добавить из базы
+        </Button>
+      </div>
+      <KBPickerSheet
+        open={kbPickerOpen}
+        onOpenChange={setKbPickerOpen}
+        onAddTasks={handleAddFromKB}
+        addedKbTaskIds={addedKbTaskIds}
+        topicHint={topicHint}
+      />
     </div>
   );
 }
@@ -1479,6 +1566,52 @@ function TutorHomeworkCreateContent() {
         }
       }
 
+      // Phase 1.7: link KB tasks (non-blocking)
+      const kbLinkedTasks = tasks.filter((t) => t.kb_task_id);
+      if (kbLinkedTasks.length > 0 && assignmentId) {
+        try {
+          const links = kbLinkedTasks.map((t, idx) => ({
+            homework_id: assignmentId!,
+            task_id: t.kb_task_id!,
+            sort_order: tasks.indexOf(t),
+            // Save final (possibly edited) values, matching HWDrawer semantics
+            task_text_snapshot: t.task_text,
+            task_answer_snapshot: t.correct_answer.trim() || null,
+            task_solution_snapshot: t.kb_snapshot_solution ?? null,
+            snapshot_edited:
+              t.task_text !== (t.kb_snapshot_text ?? '') ||
+              (t.correct_answer.trim() || null) !== (t.kb_snapshot_answer ?? null),
+          }));
+          const { error: kbErr } = await supabase
+            .from('homework_kb_tasks')
+            .insert(links);
+          if (kbErr) {
+            // Graceful FK handling: retry per-link (same pattern as HWDrawer)
+            if (kbErr.code === '23503') {
+              for (const link of links) {
+                const { error: singleErr } = await supabase
+                  .from('homework_kb_tasks')
+                  .insert(link);
+                if (singleErr?.code === '23503') {
+                  await supabase
+                    .from('homework_kb_tasks')
+                    .insert({ ...link, task_id: null });
+                } else if (singleErr) {
+                  console.warn('homework_kb_tasks per-link insert failed', singleErr);
+                  toast.warning('Связь с базой знаний не сохранена');
+                }
+              }
+            } else {
+              console.warn('homework_kb_tasks insert failed', kbErr);
+              toast.warning('Связь с базой знаний не сохранена');
+            }
+          }
+        } catch (kbLinkErr) {
+          console.warn('homework_kb_tasks linking error', kbLinkErr);
+          toast.warning('Связь с базой знаний не сохранена');
+        }
+      }
+
       // Phase 2: assign
       setSubmitPhase('assigning');
       const assignResult = await assignTutorHomeworkStudents(
@@ -1674,6 +1807,7 @@ function TutorHomeworkCreateContent() {
               materials={materials}
               onMaterialsChange={setMaterials}
               errors={errors}
+              topicHint={meta.topic}
             />
           )}
           {step === 3 && (
