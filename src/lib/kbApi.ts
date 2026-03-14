@@ -2,7 +2,7 @@
  * KB Storage API — upload / delete / signed-URL for task images.
  *
  * Follows the same storage:// ref pattern used in tutorHomeworkApi.ts.
- * Primary bucket: kb-attachments. Fallback: homework-task-images.
+ * Primary bucket: kb-attachments.
  */
 import { supabase } from '@/lib/supabaseClient';
 
@@ -10,8 +10,6 @@ import { supabase } from '@/lib/supabaseClient';
 
 const STORAGE_REF_PREFIX = 'storage://';
 const KB_ATTACHMENTS_BUCKET = 'kb-attachments';
-const KB_ATTACHMENTS_FALLBACK_BUCKET = 'homework-task-images';
-
 const ALLOWED_IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
 const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10 MB
 
@@ -58,18 +56,10 @@ function generateFileExt(file: File): string {
   return 'jpg';
 }
 
-function isBucketNotFoundError(error: unknown): boolean {
-  if (!error || typeof error !== 'object') return false;
-  const maybeError = error as { message?: string; statusCode?: number; status?: number };
-  const message = (maybeError.message ?? '').toLowerCase();
-  const statusCode = maybeError.statusCode ?? maybeError.status;
-  return message.includes('bucket not found') || statusCode === 404;
-}
-
 // ─── Validation ──────────────────────────────────────────────────────────────
 
 export function validateImageFile(file: File): string | null {
-  if (!ALLOWED_IMAGE_TYPES.includes(file.type) && !file.type.startsWith('image/')) {
+  if (!ALLOWED_IMAGE_TYPES.includes(file.type)) {
     return 'Допустимы только изображения (JPG, PNG, GIF, WebP)';
   }
   if (file.size > MAX_FILE_SIZE) {
@@ -103,35 +93,14 @@ export async function uploadKBTaskImage(file: File): Promise<UploadKBImageResult
       upsert: false,
     });
 
-  if (!primaryError) {
-    return {
-      storageRef: toStorageRef(KB_ATTACHMENTS_BUCKET, primaryPath),
-      bucket: KB_ATTACHMENTS_BUCKET,
-      objectPath: primaryPath,
-    };
-  }
-
-  // Fallback to homework-task-images if kb-attachments bucket not yet created
-  if (!isBucketNotFoundError(primaryError)) {
+  if (primaryError) {
     throw new Error(`Ошибка загрузки: ${primaryError.message}`);
   }
 
-  const fallbackPath = `${userId}/kb-task/${uuid}.${ext}`;
-  const { error: fallbackError } = await supabase.storage
-    .from(KB_ATTACHMENTS_FALLBACK_BUCKET)
-    .upload(fallbackPath, file, {
-      contentType: file.type || 'image/jpeg',
-      upsert: false,
-    });
-
-  if (fallbackError) {
-    throw new Error(`Ошибка загрузки: ${fallbackError.message}`);
-  }
-
   return {
-    storageRef: toStorageRef(KB_ATTACHMENTS_FALLBACK_BUCKET, fallbackPath),
-    bucket: KB_ATTACHMENTS_FALLBACK_BUCKET,
-    objectPath: fallbackPath,
+    storageRef: toStorageRef(KB_ATTACHMENTS_BUCKET, primaryPath),
+    bucket: KB_ATTACHMENTS_BUCKET,
+    objectPath: primaryPath,
   };
 }
 

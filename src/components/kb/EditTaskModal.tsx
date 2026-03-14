@@ -116,19 +116,13 @@ export function EditTaskModal({ task, onClose }: EditTaskModalProps) {
         // New image uploaded — upload it
         const result = await uploadKBTaskImage(uploadedFile);
         attachmentUrl = result.storageRef;
-
-        // Delete old image if existed
-        if (existingRef) {
-          void deleteKBTaskImage(existingRef);
-        }
       } else if (imageRemoved) {
         // Image was removed
         attachmentUrl = null;
-        if (existingRef) {
-          void deleteKBTaskImage(existingRef);
-        }
       }
       // else: no change to attachment
+
+      const oldRef = existingRef && (uploadedFile || imageRemoved) ? existingRef : null;
 
       const taskText = text.trim() || '[Задача на фото]';
 
@@ -149,6 +143,10 @@ export function EditTaskModal({ task, onClose }: EditTaskModalProps) {
         { taskId: task.id, input },
         {
           onSuccess: () => {
+            // Delete old image only after successful save
+            if (oldRef) {
+              void deleteKBTaskImage(oldRef);
+            }
             toast.success('Задача обновлена');
             onClose();
           },

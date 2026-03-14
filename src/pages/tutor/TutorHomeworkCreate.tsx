@@ -1522,7 +1522,7 @@ function TutorHomeworkCreateContent() {
         const apiTasks: CreateAssignmentTask[] = tasks.map((t, i) => ({
           order_num: i + 1,
           task_text: t.task_text.trim(),
-          task_image_url: t.task_image_path || null,
+          task_image_url: t.task_image_path || t.kb_attachment_url || null,
           correct_answer: t.correct_answer.trim() || null,
           rubric_text: t.rubric_text.trim() || null,
           max_score: t.max_score,
@@ -1656,7 +1656,7 @@ function TutorHomeworkCreateContent() {
             topic: meta.topic.trim() || null,
             tasks_json: tasks.map((t) => ({
               task_text: t.task_text.trim(),
-              task_image_url: t.task_image_path || null,
+              task_image_url: t.task_image_path || t.kb_attachment_url || null,
               correct_answer: t.correct_answer.trim() || null,
               rubric_text: t.rubric_text.trim() || null,
               max_score: t.max_score,
