@@ -3,6 +3,8 @@ import react from "@vitejs/plugin-react-swc";
 import path from "path";
 import { componentTagger } from "lovable-tagger";
 
+const projectRoot = path.resolve(__dirname);
+
 // Plugin to make CSS non-render-blocking
 function asyncCssPlugin() {
   return {
@@ -19,6 +21,7 @@ function asyncCssPlugin() {
 
 // https://vitejs.dev/config/
 export default defineConfig(({ mode }) => ({
+  root: projectRoot,
   server: {
     host: "::",
     port: 8080,
@@ -30,7 +33,7 @@ export default defineConfig(({ mode }) => ({
   ].filter(Boolean),
   resolve: {
     alias: {
-      "@": path.resolve(__dirname, "./src"),
+      "@": path.resolve(projectRoot, "src"),
     },
   },
   build: {

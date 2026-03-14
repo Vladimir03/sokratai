@@ -49,6 +49,56 @@ Then:
 2. Implement minimal solution
 3. Run validation commands
 
+
+---
+
+# Tutor AI Agents — Canonical Product Rules
+
+For tutor product tasks, agents must treat AJTBD and pilot docs as source of truth before proposing features or writing code.
+
+## Canonical read order for tutor tasks
+
+Read in this order:
+
+1. `docs/product/research/ajtbd/08-wedge-decision-memo-sokrat.md`
+2. `docs/product/specs/tutor_ai_agents/14-ajtbd-product-prd-sokrat.md`
+3. `docs/product/specs/tutor_ai_agents/15-backlog-of-jtbd-scenarios-sokrat.md`
+4. `docs/product/specs/tutor_ai_agents/16-ux-principles-for-tutor-product-sokrat.md`
+5. `docs/product/specs/tutor_ai_agents/17-ui-patterns-and-component-rules-sokrat.md`
+6. `docs/product/specs/tutor_ai_agents/18-pilot-execution-playbook-sokrat.md`
+7. relevant file in `docs/features/specs/`
+
+## Tutor product guardrails
+
+For tutor features:
+- start from Jobs / wedge, not from UI taste or generic AI ideas
+- do not turn Tutor Assistant into a generic chat product
+- prioritize flows that end in action: `В ДЗ`, `В мою базу`, `Экспорт` / `Отправить`
+- flag any idea that does not strengthen the paid pilot
+- do not expand scope beyond current wedge unless explicitly requested by a human owner
+
+## Agent role split
+
+- **Claude Code** — primary implementer
+- **Codex / review agent** — independent reviewer for architecture, regressions, and spec drift
+- **Cowork** — research, synthesis, GTM, pilot analysis
+- **Human** — only decision maker for wedge, pricing, segment, and major scope changes
+
+## Tutor feature review checklist
+
+Before accepting a tutor feature, review agents should verify:
+
+```text
+□ Which Job does this feature strengthen?
+□ Does it strengthen the current wedge?
+□ Is there a clear primary CTA?
+□ Does AI output lead to an action?
+□ Are result statuses visible?
+□ Does the screen avoid generic chat UX?
+□ Does it match docs 16 and 17?
+□ Does it avoid unnecessary scope creep?
+```
+
 ---
 
 # Project Overview
