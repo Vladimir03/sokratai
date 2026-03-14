@@ -1,17 +1,39 @@
-export const registerServiceWorker = () => {
-  // Only register SW in production to avoid caching issues in development
-  if (!('serviceWorker' in navigator)) {
-    return;
+/** Strict allow-list: SW runs ONLY on the published production domain. */
+const PROD_HOSTNAME = 'sokratai.lovable.app';
+
+function isProductionHost(): boolean {
+  return window.location.hostname === PROD_HOSTNAME;
+}
+
+/**
+ * Force-clean any previously registered SWs and caches.
+ * Called on every non-prod load to prevent stale UI in preview/dev.
+ */
+async function forceCleanup() {
+  if (!('serviceWorker' in navigator)) return;
+
+  const registrations = await navigator.serviceWorker.getRegistrations();
+  for (const registration of registrations) {
+    await registration.unregister();
+    console.log('Service Worker: Force-unregistered (non-prod)', registration.scope);
   }
 
-  // Check if we're in production (not localhost or preview)
-  const isProduction = 
-    window.location.hostname !== 'localhost' && 
-    !window.location.hostname.includes('preview') &&
-    !window.location.hostname.includes('lovable.app');
+  if ('caches' in window) {
+    const cacheNames = await caches.keys();
+    for (const cacheName of cacheNames) {
+      await caches.delete(cacheName);
+      console.log('Cache deleted (non-prod):', cacheName);
+    }
+  }
+}
 
-  if (!isProduction) {
-    console.log('Service Worker: Skipping registration (not production)');
+export const registerServiceWorker = () => {
+  if (!('serviceWorker' in navigator)) return;
+
+  // Non-prod: force unregister + clear caches, never register
+  if (!isProductionHost()) {
+    console.log('Service Worker: Non-prod host, cleaning up stale SWs...');
+    forceCleanup();
     return;
   }
 
@@ -34,11 +56,7 @@ export const registerServiceWorker = () => {
 
         newWorker.addEventListener('statechange', () => {
           if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
-            // New SW installed but waiting - prompt user to refresh
             console.log('Service Worker: New version available');
-            
-            // Automatically activate new SW and reload
-            // This ensures users always get the latest version
             newWorker.postMessage({ type: 'SKIP_WAITING' });
           }
         });
@@ -67,7 +85,6 @@ export const unregisterAllServiceWorkers = async () => {
       await registration.unregister();
       console.log('Service Worker: Unregistered', registration.scope);
     }
-    // Clear all caches
     const cacheNames = await caches.keys();
     for (const cacheName of cacheNames) {
       await caches.delete(cacheName);

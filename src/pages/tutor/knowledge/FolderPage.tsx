@@ -89,7 +89,7 @@ function FolderContent() {
                 })}
               </nav>
 
-              <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
                 <h2 className="font-display text-[1.85rem] font-bold tracking-[-0.04em] text-slate-950">
                   {folder.name}
                 </h2>

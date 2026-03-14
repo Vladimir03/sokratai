@@ -16,4 +16,9 @@ High-risk files (edit only when task requires):
 Architecture boundaries:
 
 - Keep Student and Tutor modules isolated.
-- Keep `src/components/ui/*` lightweight.
+
+UI parity checklist (after layout changes):
+
+- Structural breakpoints: `md:` for grid-cols/flex-row, NOT `sm:`
+- Card in grid: `animate={false}`
+- Verify SW not caching stale UI in preview (console: "Non-prod host")

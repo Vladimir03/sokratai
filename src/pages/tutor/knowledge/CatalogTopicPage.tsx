@@ -74,7 +74,7 @@ function CatalogTopicContent() {
 
           {topic ? (
             <section className="rounded-[24px] border border-socrat-border bg-white px-5 py-5 shadow-[0_16px_40px_-32px_rgba(15,23,42,0.4)] sm:px-6">
-              <div className="flex flex-col gap-5 sm:flex-row sm:items-start sm:justify-between">
+              <div className="flex flex-col gap-5 md:flex-row md:items-start md:justify-between">
                 <div className="space-y-3">
                   <div className="flex flex-wrap items-center gap-2.5">
                     <h2 className="font-display text-[1.75rem] font-bold tracking-[-0.04em] text-slate-950">
@@ -139,7 +139,7 @@ function CatalogTopicContent() {
           {!materialsLoading && materials.length > 0 ? (
             <section>
               <h3 className="mb-3 text-lg font-semibold text-slate-900">Материалы</h3>
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
                 {materials.map((material) => (
                   <MaterialCard key={material.id} material={material} />
                 ))}

@@ -284,3 +284,24 @@ Legacy student-only система (`homework_sets`, `homework_tasks`, `homework
 - Tech spec: docs/kb/kb-tech-spec.md
 - Design ref: docs/kb/kb-design-ref.jsx
 - Tasks: docs/kb/kb-tasks.md
+
+## Preview parity (КРИТИЧНО)
+
+### Service Worker
+- SW регистрируется **ТОЛЬКО** на продакшен-домене (`sokratai.lovable.app`)
+- На preview/dev/localhost — принудительный `unregister()` + очистка `CacheStorage`
+- Не менять логику allow-list в `src/registerServiceWorker.ts` без веской причины
+
+### Structural breakpoints (tutor/KB)
+- Для переключения колонок/рядов в grid/flex: использовать `md:` (768px+), **НЕ** `sm:` (640px)
+- `sm:` допускается только для типографики, spacing, padding
+- Причина: Lovable preview panel имеет ширину ~640-700px, `sm:` срабатывает нестабильно
+
+### Card-анимации в сетках
+- В `ui/Card` внутри grid/list: всегда `animate={false}`
+- Входные анимации (`animate-in`) конфликтуют с CSS Grid и ломают layout в preview
+
+### Checklist после UI-правок
+1. Убедиться что SW не кэширует stale bundle (консоль preview: «Non-prod host, cleaning up»)
+2. Проверить layout в preview на desktop и mobile
+3. Structural breakpoints = `md:` для колонок
