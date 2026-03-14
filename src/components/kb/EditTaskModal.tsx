@@ -31,8 +31,10 @@ export function EditTaskModal({ task, onClose }: EditTaskModalProps) {
   const [existingRef, setExistingRef] = useState<string | null>(task.attachment_url);
   const [imageRemoved, setImageRemoved] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [isDragging, setIsDragging] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const blobUrlRef = useRef<string | null>(null);
+  const dragCounterRef = useRef(0);
 
   // Load existing image preview via signed URL
   useEffect(() => {
@@ -68,11 +70,12 @@ export function EditTaskModal({ task, onClose }: EditTaskModalProps) {
     };
   }, []);
 
-  const handleFileSelect = useCallback((file: File) => {
+  /** Select a file for upload. Returns true if accepted, false if rejected. */
+  const handleFileSelect = useCallback((file: File): boolean => {
     const error = validateImageFile(file);
     if (error) {
       toast.error(error);
-      return;
+      return false;
     }
     if (blobUrlRef.current) URL.revokeObjectURL(blobUrlRef.current);
 
@@ -81,6 +84,7 @@ export function EditTaskModal({ task, onClose }: EditTaskModalProps) {
     setUploadedFile(file);
     setPreviewUrl(url);
     setImageRemoved(false);
+    return true;
   }, []);
 
   const handleFileInput = useCallback(
@@ -99,6 +103,83 @@ export function EditTaskModal({ task, onClose }: EditTaskModalProps) {
     setPreviewUrl(null);
     setImageRemoved(true);
   }, []);
+
+  // Paste image from clipboard on textarea
+  const handlePaste = useCallback(
+    (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+      if (uploading || updateTask.isPending) return;
+      const items = e.clipboardData?.items;
+      if (!items) return;
+
+      for (const item of items) {
+        if (item.type.startsWith('image/')) {
+          const file = item.getAsFile();
+          if (file) {
+            e.preventDefault();
+            if (handleFileSelect(file)) {
+              toast.success('Изображение вставлено');
+            }
+          }
+          return;
+        }
+      }
+    },
+    [handleFileSelect, uploading, updateTask.isPending],
+  );
+
+  // Drag-and-drop handlers
+  const handleDragEnter = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dragCounterRef.current += 1;
+    if (e.dataTransfer?.types?.includes('Files')) {
+      setIsDragging(true);
+    }
+  }, []);
+
+  const handleDragLeave = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dragCounterRef.current -= 1;
+    if (dragCounterRef.current <= 0) {
+      dragCounterRef.current = 0;
+      setIsDragging(false);
+    }
+  }, []);
+
+  const handleDragOver = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+  }, []);
+
+  const handleDrop = useCallback(
+    (e: React.DragEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      dragCounterRef.current = 0;
+      setIsDragging(false);
+
+      if (uploading || updateTask.isPending) return;
+
+      const files = e.dataTransfer?.files;
+      if (!files?.length) return;
+
+      if (files.length > 1) {
+        toast.info('Можно добавить только одно изображение');
+      }
+
+      const file = files[0];
+      if (!file.type.startsWith('image/')) {
+        toast.error('Допустимы только изображения (JPG, PNG, GIF, WebP)');
+        return;
+      }
+
+      if (handleFileSelect(file)) {
+        toast.success('Изображение добавлено');
+      }
+    },
+    [handleFileSelect, uploading, updateTask.isPending],
+  );
 
   // Image can replace text
   const hasImage = uploadedFile !== null || (existingRef !== null && !imageRemoved);
@@ -182,8 +263,26 @@ export function EditTaskModal({ task, onClose }: EditTaskModalProps) {
           </button>
         </div>
 
-        {/* Content */}
-        <div className="flex-1 space-y-4 overflow-auto px-5 py-4">
+        {/* Content — drag-drop zone covers full scrollable area */}
+        <div
+          className="relative flex-1 space-y-4 overflow-auto px-5 py-4"
+          onDragEnter={handleDragEnter}
+          onDragLeave={handleDragLeave}
+          onDragOver={handleDragOver}
+          onDrop={handleDrop}
+        >
+          {/* Drag overlay */}
+          {isDragging && (
+            <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center rounded-xl border-2 border-dashed border-socrat-primary bg-socrat-primary/5">
+              <div className="flex items-center gap-2 rounded-lg bg-white px-4 py-2 shadow-md">
+                <ImagePlus className="h-5 w-5 text-socrat-primary" />
+                <span className="text-sm font-medium text-socrat-primary">
+                  Отпустите для добавления
+                </span>
+              </div>
+            </div>
+          )}
+
           {/* Task text */}
           <fieldset>
             <legend className="mb-1.5 text-xs font-semibold text-slate-500">
@@ -192,8 +291,9 @@ export function EditTaskModal({ task, onClose }: EditTaskModalProps) {
             <textarea
               value={text}
               onChange={(e) => setText(e.target.value)}
+              onPaste={handlePaste}
               rows={4}
-              placeholder={hasImage ? 'Описание (опционально — фото прикреплено)' : 'Введите условие задачи...'}
+              placeholder={hasImage ? 'Описание (опционально — фото прикреплено)' : 'Введите условие задачи или вставьте скриншот...'}
               className="w-full resize-y rounded-lg border border-socrat-border px-3 py-2.5 text-[16px] leading-relaxed transition-colors duration-200 placeholder:text-socrat-muted focus:border-socrat-primary/50 focus:outline-none"
             />
           </fieldset>
