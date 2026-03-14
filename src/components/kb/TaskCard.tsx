@@ -1,7 +1,9 @@
+import { useEffect, useState } from 'react';
 import { Check, Download, Image, Pencil, Sparkles, Trash2 } from 'lucide-react';
 import { ContextMenu, type ContextMenuItem } from '@/components/kb/ui/ContextMenu';
 import { SourceBadge } from '@/components/kb/ui/SourceBadge';
 import { stripLatex } from '@/components/kb/ui/stripLatex';
+import { getKBImageSignedUrl } from '@/lib/kbApi';
 import { cn } from '@/lib/utils';
 import type { KBTask } from '@/types/kb';
 
@@ -46,6 +48,31 @@ export function TaskCard({
     menuItems.push({ key: 'delete', label: 'Удалить', icon: Trash2, destructive: true, onSelect: onDelete });
   }
 
+  // Resolve attachment_url to signed HTTP URL when expanded
+  const [imageUrl, setImageUrl] = useState<string | null>(null);
+  const [imageLoading, setImageLoading] = useState(false);
+
+  useEffect(() => {
+    if (!isExpanded || !task.attachment_url) {
+      setImageUrl(null);
+      return;
+    }
+
+    let cancelled = false;
+    setImageLoading(true);
+
+    void getKBImageSignedUrl(task.attachment_url).then((url) => {
+      if (!cancelled) {
+        setImageUrl(url);
+        setImageLoading(false);
+      }
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isExpanded, task.attachment_url]);
+
   return (
     <article
       className={cn(
@@ -88,6 +115,27 @@ export function TaskCard({
           >
             {stripLatex(task.text)}
           </p>
+
+          {/* Image preview in expanded view */}
+          {isExpanded && task.attachment_url ? (
+            <div className="mt-3">
+              {imageLoading ? (
+                <div className="h-32 w-48 animate-pulse rounded-xl bg-socrat-surface" />
+              ) : imageUrl ? (
+                <a href={imageUrl} target="_blank" rel="noopener noreferrer">
+                  <img
+                    src={imageUrl}
+                    alt="Фото задачи"
+                    className="max-h-48 rounded-xl border border-socrat-border object-contain transition-opacity hover:opacity-80"
+                  />
+                </a>
+              ) : (
+                <div className="flex h-20 items-center justify-center rounded-xl bg-socrat-surface text-xs text-slate-400">
+                  Не удалось загрузить фото
+                </div>
+              )}
+            </div>
+          ) : null}
 
           {isExpanded && task.answer ? (
             <div className="mt-3 rounded-xl bg-socrat-surface px-3.5 py-3">

@@ -30,6 +30,7 @@ export const useHWDraftStore = create<HWDraftStore>()(
           textSnapshot: task.text,
           answerSnapshot: task.answer ?? null,
           solutionSnapshot: task.solution ?? null,
+          attachmentSnapshot: task.attachment_url ?? null,
           snapshotEdited: false,
           source: task.owner_id ? 'my' : 'socrat',
           subtopic: subtopicName ?? '',

@@ -1,42 +1,52 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Folder, ImagePlus, X } from 'lucide-react';
+import { ImagePlus, X } from 'lucide-react';
 import { toast } from 'sonner';
-import { useFolderTree } from '@/hooks/useFolders';
-import { useCreateTask } from '@/hooks/useKnowledgeBase';
-import { uploadKBTaskImage, validateImageFile } from '@/lib/kbApi';
+import { useUpdateTask } from '@/hooks/useKnowledgeBase';
+import {
+  deleteKBTaskImage,
+  getKBImageSignedUrl,
+  uploadKBTaskImage,
+  validateImageFile,
+} from '@/lib/kbApi';
 import { cn } from '@/lib/utils';
-import type { ExamType, KBFolderTreeNode } from '@/types/kb';
+import type { ExamType, KBTask, UpdateKBTaskInput } from '@/types/kb';
 
-interface CreateTaskModalProps {
-  /** Pre-selected folder id (e.g. current folder on FolderPage) */
-  defaultFolderId?: string;
+interface EditTaskModalProps {
+  task: KBTask;
   onClose: () => void;
 }
 
-export function CreateTaskModal({ defaultFolderId, onClose }: CreateTaskModalProps) {
-  const { tree, loading: treesLoading } = useFolderTree();
-  const createTask = useCreateTask();
+export function EditTaskModal({ task, onClose }: EditTaskModalProps) {
+  const updateTask = useUpdateTask();
 
-  const [folderId, setFolderId] = useState<string | null>(defaultFolderId ?? null);
-  const [text, setText] = useState('');
-  const [answer, setAnswer] = useState('');
-  const [solution, setSolution] = useState('');
-  const [exam, setExam] = useState<ExamType | ''>('');
-  const [answerFormat, setAnswerFormat] = useState('');
+  const [text, setText] = useState(task.text);
+  const [answer, setAnswer] = useState(task.answer ?? '');
+  const [solution, setSolution] = useState(task.solution ?? '');
+  const [exam, setExam] = useState<ExamType | ''>(task.exam ?? '');
+  const [answerFormat, setAnswerFormat] = useState(task.answer_format ?? '');
 
-  // Image upload state
+  // Image state
   const [uploadedFile, setUploadedFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [existingRef, setExistingRef] = useState<string | null>(task.attachment_url);
+  const [imageRemoved, setImageRemoved] = useState(false);
   const [uploading, setUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const blobUrlRef = useRef<string | null>(null);
 
-  // Auto-select defaultFolderId when tree loads
+  // Load existing image preview via signed URL
   useEffect(() => {
-    if (defaultFolderId && !folderId) {
-      setFolderId(defaultFolderId);
-    }
-  }, [defaultFolderId, folderId]);
+    if (!task.attachment_url) return;
+    let cancelled = false;
+
+    void getKBImageSignedUrl(task.attachment_url).then((url) => {
+      if (!cancelled && url) setPreviewUrl(url);
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [task.attachment_url]);
 
   // Esc to close + body scroll lock
   useEffect(() => {
@@ -64,20 +74,19 @@ export function CreateTaskModal({ defaultFolderId, onClose }: CreateTaskModalPro
       toast.error(error);
       return;
     }
-    // Revoke previous blob URL
     if (blobUrlRef.current) URL.revokeObjectURL(blobUrlRef.current);
 
     const url = URL.createObjectURL(file);
     blobUrlRef.current = url;
     setUploadedFile(file);
     setPreviewUrl(url);
+    setImageRemoved(false);
   }, []);
 
   const handleFileInput = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
       const file = e.target.files?.[0];
       if (file) handleFileSelect(file);
-      // Reset input so the same file can be re-selected
       e.target.value = '';
     },
     [handleFileSelect],
@@ -88,45 +97,63 @@ export function CreateTaskModal({ defaultFolderId, onClose }: CreateTaskModalPro
     blobUrlRef.current = null;
     setUploadedFile(null);
     setPreviewUrl(null);
+    setImageRemoved(true);
   }, []);
 
-  // Image can replace text: valid if (text OR image) AND folder
-  const hasContent = text.trim().length > 0 || uploadedFile !== null;
-  const canSave = hasContent && folderId !== null;
+  // Image can replace text
+  const hasImage = uploadedFile !== null || (existingRef !== null && !imageRemoved);
+  const hasContent = text.trim().length > 0 || hasImage;
+  const canSave = hasContent;
 
   const handleSave = async () => {
-    if (!canSave || !folderId) return;
+    if (!canSave) return;
 
     setUploading(true);
     try {
-      let attachmentUrl: string | undefined;
+      let attachmentUrl: string | null | undefined;
 
-      // Upload image first if present
       if (uploadedFile) {
+        // New image uploaded — upload it
         const result = await uploadKBTaskImage(uploadedFile);
         attachmentUrl = result.storageRef;
-      }
 
-      // If no text but image attached, use placeholder
+        // Delete old image if existed
+        if (existingRef) {
+          void deleteKBTaskImage(existingRef);
+        }
+      } else if (imageRemoved) {
+        // Image was removed
+        attachmentUrl = null;
+        if (existingRef) {
+          void deleteKBTaskImage(existingRef);
+        }
+      }
+      // else: no change to attachment
+
       const taskText = text.trim() || '[Задача на фото]';
 
-      createTask.mutate(
-        {
-          folder_id: folderId,
-          text: taskText,
-          answer: answer.trim() || undefined,
-          solution: solution.trim() || undefined,
-          exam: exam || undefined,
-          answer_format: answerFormat || undefined,
-          attachment_url: attachmentUrl,
-        },
+      const input: UpdateKBTaskInput = {
+        text: taskText,
+        answer: answer.trim() || null,
+        solution: solution.trim() || null,
+        exam: exam || null,
+        answer_format: answerFormat || null,
+      };
+
+      // Only include attachment_url if it changed
+      if (attachmentUrl !== undefined) {
+        input.attachment_url = attachmentUrl;
+      }
+
+      updateTask.mutate(
+        { taskId: task.id, input },
         {
           onSuccess: () => {
-            toast.success('Задача создана');
+            toast.success('Задача обновлена');
             onClose();
           },
           onError: () => {
-            toast.error('Не удалось создать задачу');
+            toast.error('Не удалось обновить задачу');
           },
         },
       );
@@ -137,7 +164,7 @@ export function CreateTaskModal({ defaultFolderId, onClose }: CreateTaskModalPro
     }
   };
 
-  const isBusy = uploading || createTask.isPending;
+  const isBusy = uploading || updateTask.isPending;
 
   return (
     <>
@@ -151,7 +178,7 @@ export function CreateTaskModal({ defaultFolderId, onClose }: CreateTaskModalPro
       <div className="fixed left-1/2 top-1/2 z-[301] flex max-h-[85vh] w-[440px] max-w-[92vw] -translate-x-1/2 -translate-y-1/2 flex-col rounded-2xl bg-white shadow-xl animate-in fade-in-0 zoom-in-95">
         {/* Header */}
         <div className="flex items-center justify-between border-b border-socrat-border px-5 py-4">
-          <h3 className="text-base font-semibold">Новая задача</h3>
+          <h3 className="text-base font-semibold">Редактировать задачу</h3>
           <button type="button" onClick={onClose} className="shrink-0 p-1">
             <X className="h-4 w-4 text-muted-foreground" />
           </button>
@@ -159,40 +186,16 @@ export function CreateTaskModal({ defaultFolderId, onClose }: CreateTaskModalPro
 
         {/* Content */}
         <div className="flex-1 space-y-4 overflow-auto px-5 py-4">
-          {/* Folder select */}
-          <fieldset>
-            <legend className="mb-1.5 text-xs font-semibold text-slate-500">
-              Папка <span className="text-red-500">*</span>
-            </legend>
-            <div className="max-h-36 overflow-auto rounded-lg border border-socrat-border">
-              {treesLoading ? (
-                <div className="space-y-1.5 px-2 py-2">
-                  {[1, 2].map((i) => (
-                    <div key={i} className="h-8 animate-pulse rounded bg-socrat-border-light" />
-                  ))}
-                </div>
-              ) : tree.length === 0 ? (
-                <div className="px-3 py-4 text-center text-xs text-socrat-muted">
-                  Нет папок. Создайте папку в «Моя база».
-                </div>
-              ) : (
-                <div className="py-1">
-                  {renderFolderOptions(tree, 0, folderId, setFolderId)}
-                </div>
-              )}
-            </div>
-          </fieldset>
-
           {/* Task text */}
           <fieldset>
             <legend className="mb-1.5 text-xs font-semibold text-slate-500">
-              Условие задачи {!uploadedFile && <span className="text-red-500">*</span>}
+              Условие задачи {!hasImage && <span className="text-red-500">*</span>}
             </legend>
             <textarea
               value={text}
               onChange={(e) => setText(e.target.value)}
               rows={4}
-              placeholder={uploadedFile ? 'Описание (опционально — фото прикреплено)' : 'Введите условие задачи...'}
+              placeholder={hasImage ? 'Описание (опционально — фото прикреплено)' : 'Введите условие задачи...'}
               className="w-full resize-y rounded-lg border border-socrat-border px-3 py-2.5 text-[16px] leading-relaxed transition-colors duration-200 placeholder:text-socrat-muted focus:border-socrat-primary/50 focus:outline-none"
             />
           </fieldset>
@@ -220,6 +223,13 @@ export function CreateTaskModal({ defaultFolderId, onClose }: CreateTaskModalPro
                   className="absolute -right-2 -top-2 flex h-6 w-6 items-center justify-center rounded-full bg-slate-700 text-white shadow-md transition-colors hover:bg-red-500"
                 >
                   <X className="h-3.5 w-3.5" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  className="mt-2 block text-xs text-socrat-primary transition-colors hover:text-socrat-primary-dark"
+                >
+                  Заменить фото
                 </button>
               </div>
             ) : (
@@ -316,37 +326,4 @@ export function CreateTaskModal({ defaultFolderId, onClose }: CreateTaskModalPro
       </div>
     </>
   );
-}
-
-function renderFolderOptions(
-  nodes: KBFolderTreeNode[],
-  depth: number,
-  selectedId: string | null,
-  setSelectedId: (id: string) => void,
-) {
-  return nodes.map((node) => (
-    <div key={node.id}>
-      <button
-        type="button"
-        onClick={() => setSelectedId(node.id)}
-        className={cn(
-          'flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-[13px]',
-          selectedId === node.id
-            ? 'bg-socrat-primary-light font-semibold'
-            : 'hover:bg-socrat-surface',
-        )}
-        style={{ paddingLeft: 12 + depth * 18 }}
-      >
-        <Folder
-          className={cn(
-            'h-3.5 w-3.5 shrink-0',
-            selectedId === node.id ? 'text-socrat-primary' : 'text-socrat-folder',
-          )}
-        />
-        <span>{node.name}</span>
-      </button>
-      {node.children.length > 0 &&
-        renderFolderOptions(node.children, depth + 1, selectedId, setSelectedId)}
-    </div>
-  ));
 }

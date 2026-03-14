@@ -16,6 +16,7 @@ import type {
   KBMaterial,
   KBSubtopic,
   CreateKBTaskInput,
+  UpdateKBTaskInput,
   ExamType,
 } from '@/types/kb';
 
@@ -98,6 +99,20 @@ async function insertTask(input: CreateKBTaskInput): Promise<KBTask> {
       owner_id: session.user.id,
       source_label: 'my',
     })
+    .select()
+    .single();
+  if (error) throw error;
+  return data as KBTask;
+}
+
+async function updateTask(
+  taskId: string,
+  input: UpdateKBTaskInput,
+): Promise<KBTask> {
+  const { data, error } = await supabase
+    .from('kb_tasks')
+    .update(input)
+    .eq('id', taskId)
     .select()
     .single();
   if (error) throw error;
@@ -263,6 +278,19 @@ export function useCreateTask() {
       if (variables.folder_id) {
         void queryClient.invalidateQueries({ queryKey: ['tutor', 'kb', 'folder', variables.folder_id] });
       }
+    },
+  });
+}
+
+/** Update a personal task */
+export function useUpdateTask() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({ taskId, input }: { taskId: string; input: UpdateKBTaskInput }) =>
+      updateTask(taskId, input),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['tutor', 'kb'] });
     },
   });
 }
