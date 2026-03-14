@@ -348,6 +348,7 @@ Expanded:
   + Полный текст
   + Gallery preview всех attachment images (если есть)
   + Блок "Ответ" на сером фоне
+  + Блок "Решение" с solution text и solution image gallery (если есть)
 ```
 
 **Состояние кнопки "В ДЗ":**
@@ -401,6 +402,10 @@ Layout:
     - file picker
     - paste from clipboard
     - drag & drop
+  - Фото решения: до 5 изображений (JPG / PNG / GIF / WebP) → Supabase Storage
+    - file picker
+    - paste from clipboard в textarea решения
+    - drag & drop в solution upload field
 
 Footer:
   [Отмена] [Сохранить]
@@ -409,6 +414,7 @@ Footer:
 При сохранении: `owner_id = user`, `folder_id = selected folder`. Тема/подтема НЕ обязательны для личных задач.
 Если прикреплено хотя бы одно изображение, текст задачи может быть пустым.
 Во время `saving` attachment controls frozen. При failed upload / save уже загруженные новые blobs должны очищаться.
+`Решение / пояснение` и `Фото решения` хранятся вместе как KB-only артефакт и не затрагивают homework pipeline.
 
 ### Задача 2.11 — AddMaterialModal
 
@@ -498,6 +504,7 @@ CREATE TABLE kb_tasks (
   answer_format TEXT,
   source_label TEXT DEFAULT 'socrat',
   attachment_url TEXT, -- single storage ref or JSON array string for multi-image tasks
+  solution_attachment_url TEXT, -- same format, but for solution/explanation images
   created_at TIMESTAMPTZ DEFAULT now(),
   updated_at TIMESTAMPTZ DEFAULT now()
 );
@@ -543,6 +550,12 @@ CREATE INDEX idx_topics_exam ON kb_topics(exam);
 - multi-image -> JSON array string с `storage://` refs
 - каноничные helpers: `parseAttachmentUrls()` / `serializeAttachmentUrls()` в `src/lib/kbApi.ts`
 - current max = `5` images per task (UI-enforced)
+
+**Solution attachment contract (implemented 2026-03-14):**
+
+- `solution_attachment_url` использует тот же serialization format, что и `attachment_url`
+- solution images принадлежат полю `Решение / пояснение`, а не условию задачи
+- при copy / delete / edit нужно обрабатывать **оба** поля симметрично
 
 ### Задача 3.2 — Миграция: homework-связка (со snapshot)
 
@@ -1030,6 +1043,7 @@ interface HWDraftStore {
 
 **Ключевой момент:** с этой секунды snapshot живёт независимо от оригинала. Даже если оригинал задачи изменится или будет удалён — snapshot в ДЗ останется.
 Если у задачи несколько attachment images, snapshot хранит их все, но текущий homework runtime использует только **первое** изображение. UI должен делать это ограничение видимым для репетитора.
+`solution_attachment_url` в snapshot flow не участвует и остаётся внутри KB.
 
 ### Задача 6.5 — Сохранение ДЗ (со snapshot)
 

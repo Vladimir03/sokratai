@@ -1,6 +1,6 @@
 # Feature Spec: Tutor KB Task Upload
 
-**Status:** implemented through Phase 3B (2026-03-14)  
+**Status:** implemented through Phase 3B + solution-image extension (2026-03-14)  
 **Job:** P1.2 — Сохранить результат в свою базу и переиспользовать позже  
 **Supports:** P0.1 — Собрать ДЗ по теме после урока, P0.2 — Нарастить новую практику по теме  
 **Latest hardening commit:** `b6cd865` `fix(kb): harden multi-image task attachment flow`
@@ -57,6 +57,15 @@
 - freeze controls while saving
 - orphan upload cleanup при failed upload / save
 
+## Solution-image extension
+
+- поле `Решение / пояснение` получило тот же image input contract, что и `Условие задачи`
+- paste image в textarea решения -> solution images
+- drag & drop в блок `Фото решения` -> solution images
+- отдельное хранение в `solution_attachment_url`
+- reuse общего `useImageUpload` hook и `ImageUploadField` component
+- solution images остаются KB-only, homework pipeline не меняется
+
 ---
 
 ## Explicitly out of scope
@@ -65,6 +74,7 @@
 - generic upload wizard
 - PDF attachments for KB tasks
 - multi-image support в student homework runtime
+- solution images в student homework runtime
 - reorder / primary image selection
 
 ---
@@ -77,13 +87,21 @@
 - Текст остаётся primary field.
 - Если есть хотя бы одно изображение, текст может быть пустым.
 - Форма должна оставаться понятной без нового экрана и без wizard.
+- Поле `Решение / пояснение` может содержать:
+  - текст
+  - solution screenshots / photos
+  - текст + solution screenshots / photos
 
 ## Attachment block
 
 - Допустимы только изображения: JPG, PNG, GIF, WebP
 - Максимум `5` изображений
 - Максимум `10 MB` на файл
-- Channels:
+- Channels для `Условия задачи`:
+  - file picker
+  - paste from clipboard
+  - drag & drop
+- Channels для `Решения / пояснения`:
   - file picker
   - paste from clipboard
   - drag & drop
@@ -106,6 +124,7 @@
 Поле БД остаётся прежним:
 
 - `kb_tasks.attachment_url TEXT | NULL`
+- `kb_tasks.solution_attachment_url TEXT | NULL`
 
 Serialization contract:
 
@@ -121,6 +140,8 @@ Helpers:
 
 Их нужно использовать во всех новых consumers этого поля.
 
+`attachment_url` и `solution_attachment_url` используют один и тот же serialization format.
+
 ---
 
 ## Downstream contract today
@@ -130,6 +151,9 @@ Helpers:
 - `TaskCard` в KB показывает image icon
 - если изображений больше одного, показывает count
 - в expanded state отображается gallery всех attachment images
+- в expanded state блок `Решение` отображает:
+  - solution text
+  - solution image gallery
 
 ## Homework surfaces
 
@@ -138,6 +162,7 @@ Helpers:
 - в `TutorHomeworkCreate` в `kb_attachment_url` попадает только первое изображение KB-задачи
 - в `HWDrawer` в `task_image_url` уходит только первое изображение
 - count badge в drawer показывает, что у KB-задачи attachment images больше одного
+- `solution_attachment_url` в homework pipeline не передаётся и остаётся внутри KB
 
 Если репетитор добавляет multi-image задачу в ДЗ из KB-страниц, UI должен предупредить, что в ДЗ сейчас используется только первое изображение.
 
@@ -149,6 +174,7 @@ Helpers:
 
 - не создавать вторую upload/storage систему
 - reuse `kbApi.ts` helpers для validation / upload / signed URL / delete
+- reuse `useImageUpload` / `ImageUploadField` вместо дублирования upload-state между `Условием` и `Решением`
 - не менять schema `kb_tasks`
 - не расширять scope в OCR / AI parsing
 
