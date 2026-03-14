@@ -69,6 +69,48 @@ Implement tasks.md.
 Step 4
 Run validation commands.
 
+
+# Tutor AI Agents — Canonical Docs
+
+For tutor product features, Claude must read product and UX source-of-truth docs before proposing implementation.
+
+## Canonical read order for tutor tasks
+
+1. `docs/product/research/ajtbd/08-wedge-decision-memo-sokrat.md`
+2. `docs/product/specs/tutor_ai_agents/14-ajtbd-product-prd-sokrat.md`
+3. `docs/product/specs/tutor_ai_agents/15-backlog-of-jtbd-scenarios-sokrat.md`
+4. `docs/product/specs/tutor_ai_agents/16-ux-principles-for-tutor-product-sokrat.md`
+5. `docs/product/specs/tutor_ai_agents/17-ui-patterns-and-component-rules-sokrat.md`
+6. `docs/product/specs/tutor_ai_agents/18-pilot-execution-playbook-sokrat.md`
+7. relevant file in `docs/features/specs/`
+
+## Tutor product rules
+
+- Do not expand scope beyond the current wedge.
+- Prioritize tutor workflows around homework and practice generation.
+- AI = draft + action, not chat-only output.
+- Prefer additive iterations over refactors unless explicitly asked.
+- If a feature does not strengthen the paid pilot, it is not a priority.
+
+## Tutor implementation workflow
+
+For any tutor feature:
+1. Read canonical tutor docs.
+2. Identify which Job / JTBD scenario the task strengthens.
+3. Propose minimal implementation inside current scope.
+4. Implement.
+5. Run validation.
+6. Make sure output can be reviewed against docs 16 and 17.
+
+## Tutor anti-drift guardrails
+
+Claude must avoid:
+- turning `Помощник` into a generic chat-first screen
+- adding new top-level tutor flows without Job-based justification
+- adding AI output that has no action layer
+- inventing new segment / pricing / wedge decisions in code tasks
+
+
 ---
 
 # Security Rules
@@ -279,6 +321,24 @@ Legacy student-only система (`homework_sets`, `homework_tasks`, `homework
 ### Snapshot-механика
 При добавлении задачи в ДЗ — текст фиксируется в homework_kb_tasks.task_text_snapshot.
 Ученик видит snapshot, не оригинал. Репетитор может редактировать snapshot в drawer.
+
+### Интеграция KB → конструктор ДЗ (KBPickerSheet)
+
+Точка интеграции KB → черновик ДЗ в визарде:
+- `src/components/tutor/KBPickerSheet.tsx` — Sheet-drawer с двумя вкладками (Каталог Сократа / Моя база), drill-down по темам/папкам, batch-select. Монтируется в `TutorHomeworkCreate.tsx`.
+- `kbTaskToDraftTask(task: KBTask): DraftTask` в `TutorHomeworkCreate.tsx` — канонический конвертер KB-задачи в черновик. Заполняет поля провенанса: `kb_task_id`, `kb_source`, `kb_snapshot_text`, `kb_snapshot_answer`, `kb_snapshot_solution`, `kb_attachment_url`.
+
+#### Поля провенанса в DraftTask (обязательны при добавлении задачи из KB)
+- `kb_task_id` — id задачи в KB
+- `kb_source: 'socrat' | 'my'` — источник (каталог vs личная база)
+- `kb_snapshot_text` — снапшот текста на момент добавления
+- `kb_snapshot_answer` — снапшот ответа
+- `kb_snapshot_solution` — снапшот решения
+- `kb_attachment_url` — URL вложения (может быть `storage://...`). **Требует разрешения в signed URL перед передачей в AI** — применяются те же правила, что и для `task_image_url`.
+
+После submit ДЗ — провенанс записывается в `homework_kb_tasks` (snapshot-механика). `snapshot_edited` отслеживает изменения и текста, и ответа.
+
+**Важно:** KBPickerSheet работает через локальный React state визарда (`onAddTasks` callback → `DraftTask[]`), а **НЕ** через глобальный `hwDraftStore` (Zustand). Это отдельный flow от KB-страниц → HWDrawer.
 
 ### Спецификация
 - Tech spec: docs/kb/kb-tech-spec.md

@@ -48,8 +48,24 @@ Implement BLOCK 4 (4.1–4.3)
 ## Task 14: HW draft store
 Implement BLOCK 6 (6.1, 6.2) — Zustand store with snapshots
 
+**Status:** Zustand store (`hwDraftStore`) реализован для Flow B (KB-страницы → HWDrawer).
+Flow A (визард ДЗ) использует локальный React state, а не глобальный store.
+
 ## Task 15: HW Drawer
 Implement BLOCK 6 (6.3) — with snapshot editing
 
+**Status:** `HWDrawer` (`src/components/kb/HWDrawer.tsx`) реализован для Flow B.
+Для Flow A реализован `KBPickerSheet` (`src/components/tutor/KBPickerSheet.tsx`) —
+inline Sheet из визарда, другая архитектура (локальный state, batch callback).
+
 ## Task 16: HW integration
 Implement BLOCK 6 (6.4–6.6) — "В ДЗ" button, save logic
+
+**Status (2026-03-14):** Реализовано через `KBPickerSheet` + `TutorHomeworkCreate.tsx`:
+- «В ДЗ» кнопка в `PickerTaskCard` → `onAddTasks` callback
+- Конвертер `kbTaskToDraftTask` с полями провенанса (`kb_task_id`, `kb_source`, `kb_snapshot_*`)
+- Post-submit insert в `homework_kb_tasks` с FK retry pattern
+- `SourceBadge` + attachment warning badge в TaskEditor
+- Snapshot-семантика: финальный текст, не KB-оригинал; `snapshot_edited` для text + answer
+- Реализация отличается от спеки: inline Sheet вместо navigate + `?hw=draft`
+- См. `docs/features/specs/tutor-kb-picker-drawer.md`

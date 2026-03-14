@@ -239,7 +239,7 @@ RLS: tutor sees only own sessions.
 ### Input method (DECISION: text only in MVP)
 
 - MVP: text input only (paste task text)
-- KB picker ("выбрать из базы") deferred to Phase 6
+- KB picker ("выбрать из базы") deferred to Phase 6 — **РЕАЛИЗОВАНО** (2026-03-14) в `TutorHomeworkCreate.tsx` через `KBPickerSheet`. См. `docs/features/specs/tutor-kb-picker-drawer.md`
 - Photo/screenshot upload deferred post-MVP
 
 ---
@@ -289,6 +289,7 @@ RLS: tutor sees only own sessions.
 ### Phase 6: Cross-integration
 - KB task cards → "AI-похожая" / "Решить" buttons
 - Deep links with query params
+- **KB picker в визарде ДЗ** — ✅ реализовано (KBPickerSheet, 2026-03-14). См. `docs/features/specs/tutor-kb-picker-drawer.md`
 
 ---
 

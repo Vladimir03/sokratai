@@ -50,7 +50,8 @@ KB-модуль создаёт параллельную таблицу `homework
 | `CatalogTopicScreen` | Экран темы каталога (read-only + copy) | BLOCK 2: Frontend |
 | `TaskCard` | Универсальная карточка задачи | BLOCK 2: Frontend |
 | `MaterialCard` | Карточка материала | BLOCK 2: Frontend |
-| `HWDrawer` | Drawer конструктора ДЗ со snapshot | BLOCK 6: HW Integration |
+| `HWDrawer` | Drawer конструктора ДЗ со snapshot (Flow B: KB-страницы) | BLOCK 6: HW Integration |
+| `KBPickerSheet` | Sheet-picker из визарда ДЗ (Flow A: TutorHomeworkCreate) | BLOCK 6: HW Integration |
 | `COLORS`, `FONTS` | Дизайн-токены | BLOCK 1: Design System |
 | `INITIAL_FOLDERS` | Рекурсивная структура папок | BLOCK 3: Data Model |
 
@@ -942,6 +943,16 @@ interface HWDraftStore {
 
 ### Задача 6.3 — HWDrawer (правая панель)
 
+> **NOTE (реализовано 2026-03-14):** Интеграция KB в визард ДЗ реализована через
+> `KBPickerSheet` (`src/components/tutor/KBPickerSheet.tsx`) — Sheet, открываемый
+> inline из `TutorHomeworkCreate.tsx` через локальный React state. `onAddTasks`
+> callback передаёт задачи напрямую в локальный `DraftTask[]` массив визарда.
+> Глобальный Zustand cart (`hwDraftStore`, задача 6.1) и навбар-бейдж (задача 6.2)
+> описанные ниже — **НЕ реализованы** для этого flow и остаются deferred.
+> HWDrawer из `src/components/kb/HWDrawer.tsx` продолжает работать для Flow B
+> (KB-страницы → hwDraftStore → HWDrawer).
+> См. `docs/features/specs/tutor-kb-picker-drawer.md`.
+
 **Референс макета:** компонент `HWDrawer`
 
 Структура:
@@ -1039,13 +1050,21 @@ async function sendHomework() {
 
 ### Задача 6.6 — Точка входа из конструктора ДЗ
 
+> **NOTE (реализовано 2026-03-14):** Вместо навигации на `/tutor/knowledge?hw=draft`
+> реализован inline Sheet-drawer (`KBPickerSheet`) прямо внутри визарда.
+> Кнопка «+ Добавить из базы» открывает drawer без page redirect.
+> Это соответствует принципу 9 из doc 16 (workflow first) и запрету
+> page redirect из doc 17 section 4.3.
+
 Если в кабинете уже есть экран создания ДЗ (`/tutor/homework/new`), добавить кнопку:
 
 ```
 [+ Добавить из Базы знаний]
 ```
 
-Клик → navigate to `/tutor/knowledge` с query param `?hw=draft` чтобы экран знал, что пользователь в режиме подбора задач для ДЗ.
+~~Клик → navigate to `/tutor/knowledge` с query param `?hw=draft` чтобы экран знал, что пользователь в режиме подбора задач для ДЗ.~~
+
+**Актуальная реализация:** Клик → открывает `KBPickerSheet` (side drawer) внутри визарда. Задачи добавляются через `onAddTasks` callback в локальный state.
 
 ---
 
