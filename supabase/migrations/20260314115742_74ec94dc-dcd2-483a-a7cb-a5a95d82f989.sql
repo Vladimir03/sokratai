@@ -1,0 +1,1 @@
+ALTER TABLE public.kb_tasks ADD COLUMN IF NOT EXISTS solution_attachment_url TEXT DEFAULT NULL;

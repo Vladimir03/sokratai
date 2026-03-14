@@ -1262,6 +1262,7 @@ export type Database = {
           kim_number: number | null
           owner_id: string | null
           solution: string | null
+          solution_attachment_url: string | null
           source_label: string | null
           subtopic_id: string | null
           text: string
@@ -1279,6 +1280,7 @@ export type Database = {
           kim_number?: number | null
           owner_id?: string | null
           solution?: string | null
+          solution_attachment_url?: string | null
           source_label?: string | null
           subtopic_id?: string | null
           text: string
@@ -1296,6 +1298,7 @@ export type Database = {
           kim_number?: number | null
           owner_id?: string | null
           solution?: string | null
+          solution_attachment_url?: string | null
           source_label?: string | null
           subtopic_id?: string | null
           text?: string
