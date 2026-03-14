@@ -139,7 +139,7 @@ function CatalogTopicContent() {
           {!materialsLoading && materials.length > 0 ? (
             <section>
               <h3 className="mb-3 text-lg font-semibold text-slate-900">Материалы</h3>
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
                 {materials.map((material) => (
                   <MaterialCard key={material.id} material={material} />
                 ))}
