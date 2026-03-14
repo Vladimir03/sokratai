@@ -5,6 +5,9 @@ import { useUpdateTask } from '@/hooks/useKnowledgeBase';
 import {
   deleteKBTaskImage,
   getKBImageSignedUrl,
+  MAX_TASK_IMAGES,
+  parseAttachmentUrls,
+  serializeAttachmentUrls,
   uploadKBTaskImage,
   validateImageFile,
 } from '@/lib/kbApi';
@@ -25,24 +28,46 @@ export function EditTaskModal({ task, onClose }: EditTaskModalProps) {
   const [exam, setExam] = useState<ExamType | ''>(task.exam ?? '');
   const [answerFormat, setAnswerFormat] = useState(task.answer_format ?? '');
 
-  // Image state
-  const [uploadedFile, setUploadedFile] = useState<File | null>(null);
-  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
-  const [existingRef, setExistingRef] = useState<string | null>(task.attachment_url);
-  const [imageRemoved, setImageRemoved] = useState(false);
+  // ─── Multi-image state ──────────────────────────────────────────────────────
+  // Existing images kept from the original task (refs removed go to removedRefsRef)
+  const existingRefsRef = useRef<string[]>(parseAttachmentUrls(task.attachment_url));
+  const [existingRefs, setExistingRefs] = useState<string[]>(existingRefsRef.current);
+  const [existingSignedUrls, setExistingSignedUrls] = useState<Record<string, string>>({});
+
+  // Newly added images
+  const newFilesRef = useRef<File[]>([]);
+  const newBlobUrlsRef = useRef<string[]>([]);
+  const [newFiles, setNewFiles] = useState<File[]>([]);
+  const [newPreviewUrls, setNewPreviewUrls] = useState<string[]>([]);
+
+  // Refs removed during this edit session (cleaned up after successful save)
+  const removedRefsRef = useRef<string[]>([]);
+
   const [uploading, setUploading] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const blobUrlRef = useRef<string | null>(null);
   const dragCounterRef = useRef(0);
 
-  // Load existing image preview via signed URL
+  const totalImages = existingRefs.length + newFiles.length;
+
+  // Load signed URLs for existing images
   useEffect(() => {
-    if (!task.attachment_url) return;
+    const refs = parseAttachmentUrls(task.attachment_url);
+    if (refs.length === 0) return;
     let cancelled = false;
 
-    void getKBImageSignedUrl(task.attachment_url).then((url) => {
-      if (!cancelled && url) setPreviewUrl(url);
+    void Promise.all(
+      refs.map(async (ref) => {
+        const url = await getKBImageSignedUrl(ref);
+        return { ref, url };
+      }),
+    ).then((results) => {
+      if (cancelled) return;
+      const urlMap: Record<string, string> = {};
+      for (const { ref, url } of results) {
+        if (url) urlMap[ref] = url;
+      }
+      setExistingSignedUrls(urlMap);
     });
 
     return () => {
@@ -63,45 +88,70 @@ export function EditTaskModal({ task, onClose }: EditTaskModalProps) {
     };
   }, [onClose]);
 
-  // Cleanup blob URL on unmount
+  // Cleanup blob URLs on unmount
   useEffect(() => {
     return () => {
-      if (blobUrlRef.current) URL.revokeObjectURL(blobUrlRef.current);
+      for (const url of newBlobUrlsRef.current) URL.revokeObjectURL(url);
     };
   }, []);
 
-  /** Select a file for upload. Returns true if accepted, false if rejected. */
+  // ─── File handlers ────────────────────────────────────────────────────────────
+
+  /**
+   * Add a single file. Uses refs for synchronous count tracking.
+   * Returns true if accepted, false if rejected.
+   */
   const handleFileSelect = useCallback((file: File): boolean => {
     const error = validateImageFile(file);
     if (error) {
       toast.error(error);
       return false;
     }
-    if (blobUrlRef.current) URL.revokeObjectURL(blobUrlRef.current);
+
+    const currentTotal = existingRefsRef.current.length + newFilesRef.current.length;
+    if (currentTotal >= MAX_TASK_IMAGES) {
+      toast.error(`Максимум ${MAX_TASK_IMAGES} изображений`);
+      return false;
+    }
 
     const url = URL.createObjectURL(file);
-    blobUrlRef.current = url;
-    setUploadedFile(file);
-    setPreviewUrl(url);
-    setImageRemoved(false);
+    newFilesRef.current = [...newFilesRef.current, file];
+    newBlobUrlsRef.current = [...newBlobUrlsRef.current, url];
+
+    setNewFiles([...newFilesRef.current]);
+    setNewPreviewUrls([...newBlobUrlsRef.current]);
     return true;
   }, []);
 
   const handleFileInput = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
-      const file = e.target.files?.[0];
-      if (file) handleFileSelect(file);
+      const files = e.target.files;
+      if (!files?.length) return;
+
+      for (const file of Array.from(files)) {
+        handleFileSelect(file);
+      }
+
       e.target.value = '';
     },
     [handleFileSelect],
   );
 
-  const handleRemoveFile = useCallback(() => {
-    if (blobUrlRef.current) URL.revokeObjectURL(blobUrlRef.current);
-    blobUrlRef.current = null;
-    setUploadedFile(null);
-    setPreviewUrl(null);
-    setImageRemoved(true);
+  const handleRemoveExisting = useCallback((ref: string) => {
+    existingRefsRef.current = existingRefsRef.current.filter((r) => r !== ref);
+    removedRefsRef.current = [...removedRefsRef.current, ref];
+    setExistingRefs([...existingRefsRef.current]);
+  }, []);
+
+  const handleRemoveNew = useCallback((index: number) => {
+    const urlToRevoke = newBlobUrlsRef.current[index];
+    if (urlToRevoke) URL.revokeObjectURL(urlToRevoke);
+
+    newFilesRef.current = newFilesRef.current.filter((_, i) => i !== index);
+    newBlobUrlsRef.current = newBlobUrlsRef.current.filter((_, i) => i !== index);
+
+    setNewFiles([...newFilesRef.current]);
+    setNewPreviewUrls([...newBlobUrlsRef.current]);
   }, []);
 
   // Paste image from clipboard on textarea
@@ -164,25 +214,33 @@ export function EditTaskModal({ task, onClose }: EditTaskModalProps) {
       const files = e.dataTransfer?.files;
       if (!files?.length) return;
 
-      if (files.length > 1) {
-        toast.info('Можно добавить только одно изображение');
+      let added = 0;
+      let skippedNonImage = false;
+
+      for (const file of Array.from(files)) {
+        if (!file.type.startsWith('image/')) {
+          skippedNonImage = true;
+          continue;
+        }
+        if (handleFileSelect(file)) added++;
       }
 
-      const file = files[0];
-      if (!file.type.startsWith('image/')) {
+      if (skippedNonImage && added === 0) {
         toast.error('Допустимы только изображения (JPG, PNG, GIF, WebP)');
-        return;
       }
 
-      if (handleFileSelect(file)) {
-        toast.success('Изображение добавлено');
+      if (added > 0) {
+        toast.success(
+          added === 1 ? 'Изображение добавлено' : `Добавлено изображений: ${added}`,
+        );
       }
     },
     [handleFileSelect, uploading, updateTask.isPending],
   );
 
-  // Image can replace text
-  const hasImage = uploadedFile !== null || (existingRef !== null && !imageRemoved);
+  // ─── Save logic ───────────────────────────────────────────────────────────────
+
+  const hasImage = totalImages > 0;
   const hasContent = text.trim().length > 0 || hasImage;
   const canSave = hasContent;
 
@@ -190,20 +248,23 @@ export function EditTaskModal({ task, onClose }: EditTaskModalProps) {
     if (!canSave) return;
 
     setUploading(true);
+    const uploadedRefs: string[] = [];
     try {
-      let attachmentUrl: string | null | undefined;
-
-      if (uploadedFile) {
-        // New image uploaded — upload it
-        const result = await uploadKBTaskImage(uploadedFile);
-        attachmentUrl = result.storageRef;
-      } else if (imageRemoved) {
-        // Image was removed
-        attachmentUrl = null;
+      // Upload new files (track refs for cleanup on failure)
+      for (const file of newFilesRef.current) {
+        const result = await uploadKBTaskImage(file);
+        uploadedRefs.push(result.storageRef);
       }
-      // else: no change to attachment
 
-      const oldRef = existingRef && (uploadedFile || imageRemoved) ? existingRef : null;
+      // Combine remaining existing refs + newly uploaded refs
+      const allRefs = [...existingRefsRef.current, ...uploadedRefs];
+
+      // Determine if attachment changed vs. original
+      const originalRefs = parseAttachmentUrls(task.attachment_url);
+      const hasAttachmentChanges =
+        allRefs.length !== originalRefs.length ||
+        allRefs.some((r, i) => r !== originalRefs[i]) ||
+        removedRefsRef.current.length > 0;
 
       const taskText = text.trim() || '[Задача на фото]';
 
@@ -216,27 +277,31 @@ export function EditTaskModal({ task, onClose }: EditTaskModalProps) {
       };
 
       // Only include attachment_url if it changed
-      if (attachmentUrl !== undefined) {
-        input.attachment_url = attachmentUrl;
+      if (hasAttachmentChanges) {
+        input.attachment_url = serializeAttachmentUrls(allRefs);
       }
 
       updateTask.mutate(
         { taskId: task.id, input },
         {
           onSuccess: () => {
-            // Delete old image only after successful save
-            if (oldRef) {
-              void deleteKBTaskImage(oldRef);
+            // Delete removed refs only after successful save
+            for (const ref of removedRefsRef.current) {
+              void deleteKBTaskImage(ref);
             }
             toast.success('Задача обновлена');
             onClose();
           },
           onError: () => {
+            // Clean up orphan uploads — update failed
+            for (const ref of uploadedRefs) void deleteKBTaskImage(ref);
             toast.error('Не удалось обновить задачу');
           },
         },
       );
     } catch {
+      // Clean up refs already uploaded before the failure
+      for (const ref of uploadedRefs) void deleteKBTaskImage(ref);
       toast.error('Не удалось загрузить изображение');
     } finally {
       setUploading(false);
@@ -298,37 +363,78 @@ export function EditTaskModal({ task, onClose }: EditTaskModalProps) {
             />
           </fieldset>
 
-          {/* Image upload */}
+          {/* Image upload (multi-image) */}
           <fieldset>
-            <legend className="mb-1.5 text-xs font-semibold text-slate-500">Фото задачи</legend>
+            <legend className="mb-1.5 text-xs font-semibold text-slate-500">
+              Фото задачи{totalImages > 0 ? ` (${totalImages}/${MAX_TASK_IMAGES})` : ` — до ${MAX_TASK_IMAGES}`}
+            </legend>
             <input
               ref={fileInputRef}
               type="file"
               accept="image/*"
+              multiple
               onChange={handleFileInput}
               className="hidden"
             />
-            {previewUrl ? (
-              <div className="relative inline-block">
-                <img
-                  src={previewUrl}
-                  alt="Превью"
-                  className="max-h-40 rounded-lg border border-socrat-border object-contain"
-                />
-                <button
-                  type="button"
-                  onClick={handleRemoveFile}
-                  className="absolute -right-2 -top-2 flex h-6 w-6 items-center justify-center rounded-full bg-slate-700 text-white shadow-md transition-colors hover:bg-red-500"
-                >
-                  <X className="h-3.5 w-3.5" />
-                </button>
-                <button
-                  type="button"
-                  onClick={() => fileInputRef.current?.click()}
-                  className="mt-2 block text-xs text-socrat-primary transition-colors hover:text-socrat-primary-dark"
-                >
-                  Заменить фото
-                </button>
+            {totalImages > 0 ? (
+              <div className={cn('space-y-2', isBusy && 'pointer-events-none opacity-60')}>
+                <div className="flex flex-wrap gap-2">
+                  {/* Existing images */}
+                  {existingRefs.map((ref, idx) => {
+                    const signedUrl = existingSignedUrls[ref];
+                    return (
+                      <div key={ref} className="relative">
+                        {signedUrl ? (
+                          <img
+                            src={signedUrl}
+                            alt={`Фото ${idx + 1}`}
+                            className="h-24 w-24 rounded-lg border border-socrat-border object-cover"
+                          />
+                        ) : (
+                          <div className="flex h-24 w-24 items-center justify-center rounded-lg border border-socrat-border bg-socrat-surface">
+                            <ImagePlus className="h-5 w-5 animate-pulse text-slate-300" />
+                          </div>
+                        )}
+                        <button
+                          type="button"
+                          aria-label={`Удалить фото ${idx + 1}`}
+                          onClick={() => handleRemoveExisting(ref)}
+                          className="absolute -right-1.5 -top-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-slate-700 text-white shadow-md transition-colors hover:bg-red-500"
+                        >
+                          <X className="h-3 w-3" />
+                        </button>
+                      </div>
+                    );
+                  })}
+
+                  {/* New images */}
+                  {newPreviewUrls.map((url, index) => (
+                    <div key={`new-${index}`} className="relative">
+                      <img
+                        src={url}
+                        alt={`Фото ${existingRefs.length + index + 1}`}
+                        className="h-24 w-24 rounded-lg border border-socrat-border object-cover"
+                      />
+                      <button
+                        type="button"
+                        aria-label={`Удалить фото ${existingRefs.length + index + 1}`}
+                        onClick={() => handleRemoveNew(index)}
+                        className="absolute -right-1.5 -top-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-slate-700 text-white shadow-md transition-colors hover:bg-red-500"
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+                {totalImages < MAX_TASK_IMAGES && (
+                  <button
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    className="text-xs text-socrat-primary transition-colors hover:text-socrat-primary-dark"
+                  >
+                    Добавить ещё
+                  </button>
+                )}
               </div>
             ) : (
               <button

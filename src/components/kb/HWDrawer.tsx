@@ -12,6 +12,7 @@ import {
 import { SourceBadge } from '@/components/kb/ui/SourceBadge';
 import { stripLatex } from '@/components/kb/ui/stripLatex';
 import { cn } from '@/lib/utils';
+import { parseAttachmentUrls } from '@/lib/kbApi';
 import { useHWDraftStore, useHWTaskCount } from '@/stores/hwDraftStore';
 import { supabase } from '@/lib/supabaseClient';
 
@@ -78,7 +79,7 @@ export function HWDrawer({
       const tutorTasks = tasks.map((task, index) => ({
         assignment_id: hw.id,
         task_text: task.textSnapshot,
-        task_image_url: task.attachmentSnapshot ?? null,
+        task_image_url: parseAttachmentUrls(task.attachmentSnapshot)[0] ?? null,
         correct_answer: task.answerSnapshot ?? null,
         solution_steps: task.solutionSnapshot ?? null,
         order_num: index + 1,
@@ -212,9 +213,17 @@ export function HWDrawer({
                             {task.subtopic}
                           </span>
                         ) : null}
-                        {task.attachmentSnapshot ? (
-                          <Image className="h-3 w-3 text-slate-400" />
-                        ) : null}
+                        {task.attachmentSnapshot ? (() => {
+                          const imgCount = parseAttachmentUrls(task.attachmentSnapshot).length;
+                          return (
+                            <span className="inline-flex items-center gap-0.5">
+                              <Image className="h-3 w-3 text-slate-400" />
+                              {imgCount > 1 && (
+                                <span className="text-[10px] text-slate-400">{imgCount}</span>
+                              )}
+                            </span>
+                          );
+                        })() : null}
                         {task.snapshotEdited ? (
                           <span className="rounded-full bg-socrat-accent-light px-1.5 py-0.5 text-[9px] font-semibold text-socrat-accent">
                             изменено

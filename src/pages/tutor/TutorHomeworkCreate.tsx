@@ -67,6 +67,7 @@ import {
 } from '@/lib/tutorHomeworkApi';
 import { getTutorInviteWebLink } from '@/utils/telegramLinks';
 import type { KBTask } from '@/types/kb';
+import { parseAttachmentUrls } from '@/lib/kbApi';
 import { KBPickerSheet } from '@/components/tutor/KBPickerSheet';
 import { SourceBadge } from '@/components/kb/ui/SourceBadge';
 import { supabase } from '@/lib/supabaseClient';
@@ -142,7 +143,7 @@ function kbTaskToDraftTask(task: KBTask): DraftTask {
     kb_snapshot_text: task.text,
     kb_snapshot_answer: task.answer ?? null,
     kb_snapshot_solution: task.solution ?? null,
-    kb_attachment_url: task.attachment_url ?? null,
+    kb_attachment_url: parseAttachmentUrls(task.attachment_url)[0] ?? null,
   };
 }
 

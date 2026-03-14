@@ -79,6 +79,11 @@ export interface KBTask {
   solution: string | null;
   answer_format: string | null;
   source_label: string | null;
+  /**
+   * Single storage ref (`storage://kb-attachments/…`) or JSON array of refs
+   * (`["storage://…", "storage://…"]`) for multi-image tasks.
+   * Use `parseAttachmentUrls()` / `serializeAttachmentUrls()` from kbApi.ts.
+   */
   attachment_url: string | null;
   created_at: string;
   updated_at: string;

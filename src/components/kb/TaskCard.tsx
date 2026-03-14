@@ -1,9 +1,9 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Check, Download, Image, Pencil, Sparkles, Trash2 } from 'lucide-react';
 import { ContextMenu, type ContextMenuItem } from '@/components/kb/ui/ContextMenu';
 import { SourceBadge } from '@/components/kb/ui/SourceBadge';
 import { stripLatex } from '@/components/kb/ui/stripLatex';
-import { getKBImageSignedUrl } from '@/lib/kbApi';
+import { getKBImageSignedUrl, parseAttachmentUrls } from '@/lib/kbApi';
 import { cn } from '@/lib/utils';
 import type { KBTask } from '@/types/kb';
 
@@ -48,30 +48,36 @@ export function TaskCard({
     menuItems.push({ key: 'delete', label: 'Удалить', icon: Trash2, destructive: true, onSelect: onDelete });
   }
 
-  // Resolve attachment_url to signed HTTP URL when expanded
-  const [imageUrl, setImageUrl] = useState<string | null>(null);
+  // Resolve attachment_url(s) to signed HTTP URLs when expanded
+  const attachmentRefs = useMemo(
+    () => parseAttachmentUrls(task.attachment_url),
+    [task.attachment_url],
+  );
+  const [imageUrls, setImageUrls] = useState<string[]>([]);
   const [imageLoading, setImageLoading] = useState(false);
 
   useEffect(() => {
-    if (!isExpanded || !task.attachment_url) {
-      setImageUrl(null);
+    if (!isExpanded || attachmentRefs.length === 0) {
+      setImageUrls([]);
       return;
     }
 
     let cancelled = false;
     setImageLoading(true);
 
-    void getKBImageSignedUrl(task.attachment_url).then((url) => {
-      if (!cancelled) {
-        setImageUrl(url);
-        setImageLoading(false);
-      }
-    });
+    void Promise.all(attachmentRefs.map((ref) => getKBImageSignedUrl(ref))).then(
+      (urls) => {
+        if (!cancelled) {
+          setImageUrls(urls.filter((u): u is string => u !== null));
+          setImageLoading(false);
+        }
+      },
+    );
 
     return () => {
       cancelled = true;
     };
-  }, [isExpanded, task.attachment_url]);
+  }, [isExpanded, attachmentRefs]);
 
   return (
     <article
@@ -104,7 +110,14 @@ export function TaskCard({
             {task.kim_number ? (
               <span className="text-[11px] font-medium text-slate-500">КИМ № {task.kim_number}</span>
             ) : null}
-            {task.attachment_url ? <Image className="h-3.5 w-3.5 text-slate-400" /> : null}
+            {attachmentRefs.length > 0 ? (
+              <span className="inline-flex items-center gap-0.5">
+                <Image className="h-3.5 w-3.5 text-slate-400" />
+                {attachmentRefs.length > 1 && (
+                  <span className="text-[11px] text-slate-400">{attachmentRefs.length}</span>
+                )}
+              </span>
+            ) : null}
           </div>
 
           <p
@@ -117,18 +130,29 @@ export function TaskCard({
           </p>
 
           {/* Image preview in expanded view */}
-          {isExpanded && task.attachment_url ? (
+          {isExpanded && attachmentRefs.length > 0 ? (
             <div className="mt-3">
               {imageLoading ? (
-                <div className="h-32 w-48 animate-pulse rounded-xl bg-socrat-surface" />
-              ) : imageUrl ? (
-                <a href={imageUrl} target="_blank" rel="noopener noreferrer">
-                  <img
-                    src={imageUrl}
-                    alt="Фото задачи"
-                    className="max-h-48 rounded-xl border border-socrat-border object-contain transition-opacity hover:opacity-80"
-                  />
-                </a>
+                <div className="flex flex-wrap gap-2">
+                  {attachmentRefs.map((_, i) => (
+                    <div
+                      key={i}
+                      className="h-32 w-32 animate-pulse rounded-xl bg-socrat-surface"
+                    />
+                  ))}
+                </div>
+              ) : imageUrls.length > 0 ? (
+                <div className="flex flex-wrap gap-2">
+                  {imageUrls.map((url, i) => (
+                    <a key={i} href={url} target="_blank" rel="noopener noreferrer">
+                      <img
+                        src={url}
+                        alt={`Фото ${i + 1}`}
+                        className="max-h-48 rounded-xl border border-socrat-border object-contain transition-opacity hover:opacity-80"
+                      />
+                    </a>
+                  ))}
+                </div>
               ) : (
                 <div className="flex h-20 items-center justify-center rounded-xl bg-socrat-surface text-xs text-slate-400">
                   Не удалось загрузить фото

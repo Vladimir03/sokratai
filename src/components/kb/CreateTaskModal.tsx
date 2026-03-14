@@ -3,7 +3,13 @@ import { Folder, ImagePlus, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { useFolderTree } from '@/hooks/useFolders';
 import { useCreateTask } from '@/hooks/useKnowledgeBase';
-import { uploadKBTaskImage, validateImageFile } from '@/lib/kbApi';
+import {
+  deleteKBTaskImage,
+  MAX_TASK_IMAGES,
+  serializeAttachmentUrls,
+  uploadKBTaskImage,
+  validateImageFile,
+} from '@/lib/kbApi';
 import { cn } from '@/lib/utils';
 import type { ExamType, KBFolderTreeNode } from '@/types/kb';
 
@@ -24,13 +30,15 @@ export function CreateTaskModal({ defaultFolderId, onClose }: CreateTaskModalPro
   const [exam, setExam] = useState<ExamType | ''>('');
   const [answerFormat, setAnswerFormat] = useState('');
 
-  // Image upload state
-  const [uploadedFile, setUploadedFile] = useState<File | null>(null);
-  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  // Multi-image upload state
+  const [uploadedFiles, setUploadedFiles] = useState<File[]>([]);
+  const [previewUrls, setPreviewUrls] = useState<string[]>([]);
   const [uploading, setUploading] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const blobUrlRef = useRef<string | null>(null);
+  // Refs for synchronous access (avoids stale closures when adding multiple files at once)
+  const filesRef = useRef<File[]>([]);
+  const blobUrlsRef = useRef<string[]>([]);
   const dragCounterRef = useRef(0);
 
   // Auto-select defaultFolderId when tree loads
@@ -53,45 +61,63 @@ export function CreateTaskModal({ defaultFolderId, onClose }: CreateTaskModalPro
     };
   }, [onClose]);
 
-  // Cleanup blob URL on unmount
+  // Cleanup blob URLs on unmount
   useEffect(() => {
     return () => {
-      if (blobUrlRef.current) URL.revokeObjectURL(blobUrlRef.current);
+      for (const url of blobUrlsRef.current) URL.revokeObjectURL(url);
     };
   }, []);
 
-  /** Select a file for upload. Returns true if accepted, false if rejected. */
+  /**
+   * Add a single file to the upload list.
+   * Uses refs for synchronous count tracking (safe for rapid sequential calls).
+   * Returns true if accepted, false if rejected.
+   */
   const handleFileSelect = useCallback((file: File): boolean => {
     const error = validateImageFile(file);
     if (error) {
       toast.error(error);
       return false;
     }
-    // Revoke previous blob URL
-    if (blobUrlRef.current) URL.revokeObjectURL(blobUrlRef.current);
+
+    if (filesRef.current.length >= MAX_TASK_IMAGES) {
+      toast.error(`Максимум ${MAX_TASK_IMAGES} изображений`);
+      return false;
+    }
 
     const url = URL.createObjectURL(file);
-    blobUrlRef.current = url;
-    setUploadedFile(file);
-    setPreviewUrl(url);
+    filesRef.current = [...filesRef.current, file];
+    blobUrlsRef.current = [...blobUrlsRef.current, url];
+
+    setUploadedFiles([...filesRef.current]);
+    setPreviewUrls([...blobUrlsRef.current]);
     return true;
   }, []);
 
   const handleFileInput = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
-      const file = e.target.files?.[0];
-      if (file) handleFileSelect(file);
-      // Reset input so the same file can be re-selected
+      const files = e.target.files;
+      if (!files?.length) return;
+
+      for (const file of Array.from(files)) {
+        handleFileSelect(file);
+      }
+
+      // Reset input so the same file(s) can be re-selected
       e.target.value = '';
     },
     [handleFileSelect],
   );
 
-  const handleRemoveFile = useCallback(() => {
-    if (blobUrlRef.current) URL.revokeObjectURL(blobUrlRef.current);
-    blobUrlRef.current = null;
-    setUploadedFile(null);
-    setPreviewUrl(null);
+  const handleRemoveFile = useCallback((index: number) => {
+    const urlToRevoke = blobUrlsRef.current[index];
+    if (urlToRevoke) URL.revokeObjectURL(urlToRevoke);
+
+    filesRef.current = filesRef.current.filter((_, i) => i !== index);
+    blobUrlsRef.current = blobUrlsRef.current.filter((_, i) => i !== index);
+
+    setUploadedFiles([...filesRef.current]);
+    setPreviewUrls([...blobUrlsRef.current]);
   }, []);
 
   // Paste image from clipboard on textarea
@@ -155,39 +181,49 @@ export function CreateTaskModal({ defaultFolderId, onClose }: CreateTaskModalPro
       const files = e.dataTransfer?.files;
       if (!files?.length) return;
 
-      if (files.length > 1) {
-        toast.info('Можно добавить только одно изображение');
+      let added = 0;
+      let skippedNonImage = false;
+
+      for (const file of Array.from(files)) {
+        if (!file.type.startsWith('image/')) {
+          skippedNonImage = true;
+          continue;
+        }
+        if (handleFileSelect(file)) added++;
       }
 
-      const file = files[0];
-      if (!file.type.startsWith('image/')) {
+      if (skippedNonImage && added === 0) {
         toast.error('Допустимы только изображения (JPG, PNG, GIF, WebP)');
-        return;
       }
 
-      if (handleFileSelect(file)) {
-        toast.success('Изображение добавлено');
+      if (added > 0) {
+        toast.success(
+          added === 1 ? 'Изображение добавлено' : `Добавлено изображений: ${added}`,
+        );
       }
     },
     [handleFileSelect, uploading, createTask.isPending],
   );
 
   // Image can replace text: valid if (text OR image) AND folder
-  const hasContent = text.trim().length > 0 || uploadedFile !== null;
+  const hasContent = text.trim().length > 0 || uploadedFiles.length > 0;
   const canSave = hasContent && folderId !== null;
 
   const handleSave = async () => {
     if (!canSave || !folderId) return;
 
     setUploading(true);
+    const uploadedRefs: string[] = [];
     try {
-      let attachmentUrl: string | undefined;
-
-      // Upload image first if present
-      if (uploadedFile) {
-        const result = await uploadKBTaskImage(uploadedFile);
-        attachmentUrl = result.storageRef;
+      // Upload all images (track refs for cleanup on failure)
+      if (uploadedFiles.length > 0) {
+        for (const file of uploadedFiles) {
+          const result = await uploadKBTaskImage(file);
+          uploadedRefs.push(result.storageRef);
+        }
       }
+
+      const attachmentUrl = serializeAttachmentUrls(uploadedRefs) ?? undefined;
 
       // If no text but image attached, use placeholder
       const taskText = text.trim() || '[Задача на фото]';
@@ -208,11 +244,15 @@ export function CreateTaskModal({ defaultFolderId, onClose }: CreateTaskModalPro
             onClose();
           },
           onError: () => {
+            // Clean up orphan uploads — task creation failed
+            for (const ref of uploadedRefs) void deleteKBTaskImage(ref);
             toast.error('Не удалось создать задачу');
           },
         },
       );
     } catch {
+      // Clean up refs already uploaded before the failure
+      for (const ref of uploadedRefs) void deleteKBTaskImage(ref);
       toast.error('Не удалось загрузить изображение');
     } finally {
       setUploading(false);
@@ -285,42 +325,61 @@ export function CreateTaskModal({ defaultFolderId, onClose }: CreateTaskModalPro
           {/* Task text */}
           <fieldset>
             <legend className="mb-1.5 text-xs font-semibold text-slate-500">
-              Условие задачи {!uploadedFile && <span className="text-red-500">*</span>}
+              Условие задачи {uploadedFiles.length === 0 && <span className="text-red-500">*</span>}
             </legend>
             <textarea
               value={text}
               onChange={(e) => setText(e.target.value)}
               onPaste={handlePaste}
               rows={4}
-              placeholder={uploadedFile ? 'Описание (опционально — фото прикреплено)' : 'Введите условие задачи или вставьте скриншот...'}
+              placeholder={uploadedFiles.length > 0 ? 'Описание (опционально — фото прикреплено)' : 'Введите условие задачи или вставьте скриншот...'}
               className="w-full resize-y rounded-lg border border-socrat-border px-3 py-2.5 text-[16px] leading-relaxed transition-colors duration-200 placeholder:text-socrat-muted focus:border-socrat-primary/50 focus:outline-none"
             />
           </fieldset>
 
-          {/* Image upload */}
+          {/* Image upload (multi-image) */}
           <fieldset>
-            <legend className="mb-1.5 text-xs font-semibold text-slate-500">Фото задачи</legend>
+            <legend className="mb-1.5 text-xs font-semibold text-slate-500">
+              Фото задачи{uploadedFiles.length > 0 ? ` (${uploadedFiles.length}/${MAX_TASK_IMAGES})` : ` — до ${MAX_TASK_IMAGES}`}
+            </legend>
             <input
               ref={fileInputRef}
               type="file"
               accept="image/*"
+              multiple
               onChange={handleFileInput}
               className="hidden"
             />
-            {previewUrl ? (
-              <div className="relative inline-block">
-                <img
-                  src={previewUrl}
-                  alt="Превью"
-                  className="max-h-40 rounded-lg border border-socrat-border object-contain"
-                />
-                <button
-                  type="button"
-                  onClick={handleRemoveFile}
-                  className="absolute -right-2 -top-2 flex h-6 w-6 items-center justify-center rounded-full bg-slate-700 text-white shadow-md transition-colors hover:bg-red-500"
-                >
-                  <X className="h-3.5 w-3.5" />
-                </button>
+            {previewUrls.length > 0 ? (
+              <div className={cn('space-y-2', isBusy && 'pointer-events-none opacity-60')}>
+                <div className="flex flex-wrap gap-2">
+                  {previewUrls.map((url, index) => (
+                    <div key={index} className="relative">
+                      <img
+                        src={url}
+                        alt={`Фото ${index + 1}`}
+                        className="h-24 w-24 rounded-lg border border-socrat-border object-cover"
+                      />
+                      <button
+                        type="button"
+                        aria-label={`Удалить фото ${index + 1}`}
+                        onClick={() => handleRemoveFile(index)}
+                        className="absolute -right-1.5 -top-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-slate-700 text-white shadow-md transition-colors hover:bg-red-500"
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+                {uploadedFiles.length < MAX_TASK_IMAGES && (
+                  <button
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    className="text-xs text-socrat-primary transition-colors hover:text-socrat-primary-dark"
+                  >
+                    Добавить ещё
+                  </button>
+                )}
               </div>
             ) : (
               <button

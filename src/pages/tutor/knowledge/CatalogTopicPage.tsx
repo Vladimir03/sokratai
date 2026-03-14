@@ -14,6 +14,7 @@ import { StatCounter } from '@/components/kb/ui/StatCounter';
 import { TopicChip } from '@/components/kb/ui/TopicChip';
 import { TutorLayout } from '@/components/tutor/TutorLayout';
 import { useCatalogTasks, useMaterials, useSubtopics, useTopic } from '@/hooks/useKnowledgeBase';
+import { parseAttachmentUrls } from '@/lib/kbApi';
 import { useHWDraftStore } from '@/stores/hwDraftStore';
 import type { KBTask } from '@/types/kb';
 
@@ -45,7 +46,12 @@ function CatalogTopicContent() {
     }
     const subtopicName = subtopics.find((s) => s.id === task.subtopic_id)?.name;
     addTask(task, subtopicName, topic?.name);
-    toast.success('Задача добавлена в ДЗ');
+    const imageCount = parseAttachmentUrls(task.attachment_url).length;
+    if (imageCount > 1) {
+      toast.success(`Задача добавлена в ДЗ (в ДЗ уйдёт первое фото из ${imageCount})`);
+    } else {
+      toast.success('Задача добавлена в ДЗ');
+    }
   };
 
   return (

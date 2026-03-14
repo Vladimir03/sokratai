@@ -13,6 +13,7 @@ import { TaskCard } from '@/components/kb/TaskCard';
 import { TutorLayout } from '@/components/tutor/TutorLayout';
 import { useFolder } from '@/hooks/useFolders';
 import { useDeleteTask } from '@/hooks/useKnowledgeBase';
+import { parseAttachmentUrls } from '@/lib/kbApi';
 import { useHWDraftStore } from '@/stores/hwDraftStore';
 import type { KBTask } from '@/types/kb';
 
@@ -34,7 +35,12 @@ function FolderContent() {
       return;
     }
     addTask(task);
-    toast.success('Задача добавлена в ДЗ');
+    const imageCount = parseAttachmentUrls(task.attachment_url).length;
+    if (imageCount > 1) {
+      toast.success(`Задача добавлена в ДЗ (в ДЗ уйдёт первое фото из ${imageCount})`);
+    } else {
+      toast.success('Задача добавлена в ДЗ');
+    }
   };
 
   return (
