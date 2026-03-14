@@ -79,6 +79,37 @@ export function TaskCard({
     };
   }, [isExpanded, attachmentRefs]);
 
+  // Resolve solution images
+  const solutionRefs = useMemo(
+    () => parseAttachmentUrls(task.solution_attachment_url),
+    [task.solution_attachment_url],
+  );
+  const [solutionImageUrls, setSolutionImageUrls] = useState<string[]>([]);
+  const [solutionImageLoading, setSolutionImageLoading] = useState(false);
+
+  useEffect(() => {
+    if (!isExpanded || solutionRefs.length === 0) {
+      setSolutionImageUrls([]);
+      return;
+    }
+
+    let cancelled = false;
+    setSolutionImageLoading(true);
+
+    void Promise.all(solutionRefs.map((ref) => getKBImageSignedUrl(ref))).then(
+      (urls) => {
+        if (!cancelled) {
+          setSolutionImageUrls(urls.filter((u): u is string => u !== null));
+          setSolutionImageLoading(false);
+        }
+      },
+    );
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isExpanded, solutionRefs]);
+
   return (
     <article
       className={cn(
@@ -167,6 +198,50 @@ export function TaskCard({
                 Ответ
               </div>
               <div className="font-mono text-sm font-semibold text-socrat-primary">{task.answer}</div>
+            </div>
+          ) : null}
+
+          {/* Solution text + images */}
+          {isExpanded && (task.solution || solutionRefs.length > 0) ? (
+            <div className="mt-3 rounded-xl bg-socrat-surface px-3.5 py-3">
+              <div className="mb-1 text-[11px] font-medium uppercase tracking-[0.12em] text-slate-500">
+                Решение
+              </div>
+              {task.solution ? (
+                <div className="whitespace-pre-wrap text-sm leading-relaxed text-slate-700">
+                  {stripLatex(task.solution)}
+                </div>
+              ) : null}
+              {solutionRefs.length > 0 ? (
+                <div className={cn('mt-2', !task.solution && 'mt-0')}>
+                  {solutionImageLoading ? (
+                    <div className="flex flex-wrap gap-2">
+                      {solutionRefs.map((_, i) => (
+                        <div
+                          key={i}
+                          className="h-32 w-32 animate-pulse rounded-xl bg-white/60"
+                        />
+                      ))}
+                    </div>
+                  ) : solutionImageUrls.length > 0 ? (
+                    <div className="flex flex-wrap gap-2">
+                      {solutionImageUrls.map((url, i) => (
+                        <a key={i} href={url} target="_blank" rel="noopener noreferrer">
+                          <img
+                            src={url}
+                            alt={`Решение фото ${i + 1}`}
+                            className="max-h-48 rounded-xl border border-socrat-border object-contain transition-opacity hover:opacity-80"
+                          />
+                        </a>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="flex h-20 items-center justify-center rounded-xl bg-white/60 text-xs text-slate-400">
+                      Не удалось загрузить фото решения
+                    </div>
+                  )}
+                </div>
+              ) : null}
             </div>
           ) : null}
         </div>

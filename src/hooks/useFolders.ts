@@ -225,6 +225,7 @@ async function copyTaskToFolder(params: { taskId: string; folderId: string }): P
       answer_format: original.answer_format,
       source_label: 'my',
       attachment_url: original.attachment_url,
+      solution_attachment_url: original.solution_attachment_url,
     })
     .select()
     .single();

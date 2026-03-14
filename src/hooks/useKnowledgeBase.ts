@@ -1,5 +1,6 @@
 import { useMemo } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { deleteKBTaskImage, parseAttachmentUrls } from '@/lib/kbApi';
 import { supabase } from '@/lib/supabaseClient';
 import {
   createTutorRetry,
@@ -120,11 +121,27 @@ async function updateTask(
 }
 
 async function removeTask(taskId: string): Promise<void> {
+  // Fetch task first to get attachment refs for storage cleanup
+  const { data: task } = await supabase
+    .from('kb_tasks')
+    .select('attachment_url, solution_attachment_url')
+    .eq('id', taskId)
+    .single();
+
   const { error } = await supabase
     .from('kb_tasks')
     .delete()
     .eq('id', taskId);
   if (error) throw error;
+
+  // Clean up storage blobs after successful DB delete (best-effort)
+  if (task) {
+    const refs = [
+      ...parseAttachmentUrls(task.attachment_url),
+      ...parseAttachmentUrls(task.solution_attachment_url),
+    ];
+    for (const ref of refs) void deleteKBTaskImage(ref);
+  }
 }
 
 // =============================================

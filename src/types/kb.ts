@@ -85,6 +85,8 @@ export interface KBTask {
    * Use `parseAttachmentUrls()` / `serializeAttachmentUrls()` from kbApi.ts.
    */
   attachment_url: string | null;
+  /** Solution images — same format as attachment_url. */
+  solution_attachment_url: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -104,6 +106,7 @@ export interface CreateKBTaskInput {
   solution?: string;
   answer_format?: string;
   attachment_url?: string;
+  solution_attachment_url?: string;
 }
 
 export interface UpdateKBTaskInput {
@@ -114,6 +117,7 @@ export interface UpdateKBTaskInput {
   solution?: string | null;
   answer_format?: string | null;
   attachment_url?: string | null;
+  solution_attachment_url?: string | null;
 }
 
 // =============================================

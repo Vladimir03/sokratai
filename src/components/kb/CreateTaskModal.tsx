@@ -1,16 +1,17 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { Folder, ImagePlus, X } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { Folder, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { useFolderTree } from '@/hooks/useFolders';
+import { useImageUpload } from '@/hooks/useImageUpload';
 import { useCreateTask } from '@/hooks/useKnowledgeBase';
 import {
   deleteKBTaskImage,
   MAX_TASK_IMAGES,
   serializeAttachmentUrls,
   uploadKBTaskImage,
-  validateImageFile,
 } from '@/lib/kbApi';
 import { cn } from '@/lib/utils';
+import { ImageUploadField } from '@/components/kb/ui/ImageUploadField';
 import type { ExamType, KBFolderTreeNode } from '@/types/kb';
 
 interface CreateTaskModalProps {
@@ -29,17 +30,13 @@ export function CreateTaskModal({ defaultFolderId, onClose }: CreateTaskModalPro
   const [solution, setSolution] = useState('');
   const [exam, setExam] = useState<ExamType | ''>('');
   const [answerFormat, setAnswerFormat] = useState('');
-
-  // Multi-image upload state
-  const [uploadedFiles, setUploadedFiles] = useState<File[]>([]);
-  const [previewUrls, setPreviewUrls] = useState<string[]>([]);
   const [uploading, setUploading] = useState(false);
-  const [isDragging, setIsDragging] = useState(false);
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  // Refs for synchronous access (avoids stale closures when adding multiple files at once)
-  const filesRef = useRef<File[]>([]);
-  const blobUrlsRef = useRef<string[]>([]);
-  const dragCounterRef = useRef(0);
+
+  const isBusy = uploading || createTask.isPending;
+
+  // Image hooks — one for condition, one for solution
+  const conditionImages = useImageUpload({ maxImages: MAX_TASK_IMAGES, disabled: isBusy });
+  const solutionImages = useImageUpload({ maxImages: MAX_TASK_IMAGES, disabled: isBusy });
 
   // Auto-select defaultFolderId when tree loads
   useEffect(() => {
@@ -61,169 +58,31 @@ export function CreateTaskModal({ defaultFolderId, onClose }: CreateTaskModalPro
     };
   }, [onClose]);
 
-  // Cleanup blob URLs on unmount
-  useEffect(() => {
-    return () => {
-      for (const url of blobUrlsRef.current) URL.revokeObjectURL(url);
-    };
-  }, []);
-
-  /**
-   * Add a single file to the upload list.
-   * Uses refs for synchronous count tracking (safe for rapid sequential calls).
-   * Returns true if accepted, false if rejected.
-   */
-  const handleFileSelect = useCallback((file: File): boolean => {
-    const error = validateImageFile(file);
-    if (error) {
-      toast.error(error);
-      return false;
-    }
-
-    if (filesRef.current.length >= MAX_TASK_IMAGES) {
-      toast.error(`Максимум ${MAX_TASK_IMAGES} изображений`);
-      return false;
-    }
-
-    const url = URL.createObjectURL(file);
-    filesRef.current = [...filesRef.current, file];
-    blobUrlsRef.current = [...blobUrlsRef.current, url];
-
-    setUploadedFiles([...filesRef.current]);
-    setPreviewUrls([...blobUrlsRef.current]);
-    return true;
-  }, []);
-
-  const handleFileInput = useCallback(
-    (e: React.ChangeEvent<HTMLInputElement>) => {
-      const files = e.target.files;
-      if (!files?.length) return;
-
-      for (const file of Array.from(files)) {
-        handleFileSelect(file);
-      }
-
-      // Reset input so the same file(s) can be re-selected
-      e.target.value = '';
-    },
-    [handleFileSelect],
-  );
-
-  const handleRemoveFile = useCallback((index: number) => {
-    const urlToRevoke = blobUrlsRef.current[index];
-    if (urlToRevoke) URL.revokeObjectURL(urlToRevoke);
-
-    filesRef.current = filesRef.current.filter((_, i) => i !== index);
-    blobUrlsRef.current = blobUrlsRef.current.filter((_, i) => i !== index);
-
-    setUploadedFiles([...filesRef.current]);
-    setPreviewUrls([...blobUrlsRef.current]);
-  }, []);
-
-  // Paste image from clipboard on textarea
-  const handlePaste = useCallback(
-    (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
-      if (uploading || createTask.isPending) return;
-      const items = e.clipboardData?.items;
-      if (!items) return;
-
-      for (const item of items) {
-        if (item.type.startsWith('image/')) {
-          const file = item.getAsFile();
-          if (file) {
-            e.preventDefault();
-            if (handleFileSelect(file)) {
-              toast.success('Изображение вставлено');
-            }
-          }
-          return;
-        }
-      }
-      // Text paste — let default behavior proceed
-    },
-    [handleFileSelect, uploading, createTask.isPending],
-  );
-
-  // Drag-and-drop handlers
-  const handleDragEnter = useCallback((e: React.DragEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    dragCounterRef.current += 1;
-    if (e.dataTransfer?.types?.includes('Files')) {
-      setIsDragging(true);
-    }
-  }, []);
-
-  const handleDragLeave = useCallback((e: React.DragEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    dragCounterRef.current -= 1;
-    if (dragCounterRef.current <= 0) {
-      dragCounterRef.current = 0;
-      setIsDragging(false);
-    }
-  }, []);
-
-  const handleDragOver = useCallback((e: React.DragEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-  }, []);
-
-  const handleDrop = useCallback(
-    (e: React.DragEvent) => {
-      e.preventDefault();
-      e.stopPropagation();
-      dragCounterRef.current = 0;
-      setIsDragging(false);
-
-      if (uploading || createTask.isPending) return;
-
-      const files = e.dataTransfer?.files;
-      if (!files?.length) return;
-
-      let added = 0;
-      let skippedNonImage = false;
-
-      for (const file of Array.from(files)) {
-        if (!file.type.startsWith('image/')) {
-          skippedNonImage = true;
-          continue;
-        }
-        if (handleFileSelect(file)) added++;
-      }
-
-      if (skippedNonImage && added === 0) {
-        toast.error('Допустимы только изображения (JPG, PNG, GIF, WebP)');
-      }
-
-      if (added > 0) {
-        toast.success(
-          added === 1 ? 'Изображение добавлено' : `Добавлено изображений: ${added}`,
-        );
-      }
-    },
-    [handleFileSelect, uploading, createTask.isPending],
-  );
-
   // Image can replace text: valid if (text OR image) AND folder
-  const hasContent = text.trim().length > 0 || uploadedFiles.length > 0;
+  const hasContent = text.trim().length > 0 || conditionImages.totalImages > 0;
   const canSave = hasContent && folderId !== null;
 
   const handleSave = async () => {
     if (!canSave || !folderId) return;
 
     setUploading(true);
-    const uploadedRefs: string[] = [];
+    const conditionRefs: string[] = [];
+    const solutionRefs: string[] = [];
     try {
-      // Upload all images (track refs for cleanup on failure)
-      if (uploadedFiles.length > 0) {
-        for (const file of uploadedFiles) {
-          const result = await uploadKBTaskImage(file);
-          uploadedRefs.push(result.storageRef);
-        }
+      // Upload condition images
+      for (const file of conditionImages.getNewFiles()) {
+        const result = await uploadKBTaskImage(file);
+        conditionRefs.push(result.storageRef);
       }
 
-      const attachmentUrl = serializeAttachmentUrls(uploadedRefs) ?? undefined;
+      // Upload solution images
+      for (const file of solutionImages.getNewFiles()) {
+        const result = await uploadKBTaskImage(file);
+        solutionRefs.push(result.storageRef);
+      }
+
+      const attachmentUrl = serializeAttachmentUrls(conditionRefs) ?? undefined;
+      const solutionAttachmentUrl = serializeAttachmentUrls(solutionRefs) ?? undefined;
 
       // If no text but image attached, use placeholder
       const taskText = text.trim() || '[Задача на фото]';
@@ -237,6 +96,7 @@ export function CreateTaskModal({ defaultFolderId, onClose }: CreateTaskModalPro
           exam: exam || undefined,
           answer_format: answerFormat || undefined,
           attachment_url: attachmentUrl,
+          solution_attachment_url: solutionAttachmentUrl,
         },
         {
           onSuccess: () => {
@@ -245,21 +105,21 @@ export function CreateTaskModal({ defaultFolderId, onClose }: CreateTaskModalPro
           },
           onError: () => {
             // Clean up orphan uploads — task creation failed
-            for (const ref of uploadedRefs) void deleteKBTaskImage(ref);
+            for (const ref of conditionRefs) void deleteKBTaskImage(ref);
+            for (const ref of solutionRefs) void deleteKBTaskImage(ref);
             toast.error('Не удалось создать задачу');
           },
         },
       );
     } catch {
       // Clean up refs already uploaded before the failure
-      for (const ref of uploadedRefs) void deleteKBTaskImage(ref);
+      for (const ref of conditionRefs) void deleteKBTaskImage(ref);
+      for (const ref of solutionRefs) void deleteKBTaskImage(ref);
       toast.error('Не удалось загрузить изображение');
     } finally {
       setUploading(false);
     }
   };
-
-  const isBusy = uploading || createTask.isPending;
 
   return (
     <>
@@ -279,25 +139,8 @@ export function CreateTaskModal({ defaultFolderId, onClose }: CreateTaskModalPro
           </button>
         </div>
 
-        {/* Content — drag-drop zone covers full scrollable area */}
-        <div
-          className="relative flex-1 space-y-4 overflow-auto px-5 py-4"
-          onDragEnter={handleDragEnter}
-          onDragLeave={handleDragLeave}
-          onDragOver={handleDragOver}
-          onDrop={handleDrop}
-        >
-          {/* Drag overlay */}
-          {isDragging && (
-            <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center rounded-xl border-2 border-dashed border-socrat-primary bg-socrat-primary/5">
-              <div className="flex items-center gap-2 rounded-lg bg-white px-4 py-2 shadow-md">
-                <ImagePlus className="h-5 w-5 text-socrat-primary" />
-                <span className="text-sm font-medium text-socrat-primary">
-                  Отпустите для добавления
-                </span>
-              </div>
-            </div>
-          )}
+        {/* Content */}
+        <div className="relative flex-1 space-y-4 overflow-auto px-5 py-4">
           {/* Folder select */}
           <fieldset>
             <legend className="mb-1.5 text-xs font-semibold text-slate-500">
@@ -325,73 +168,20 @@ export function CreateTaskModal({ defaultFolderId, onClose }: CreateTaskModalPro
           {/* Task text */}
           <fieldset>
             <legend className="mb-1.5 text-xs font-semibold text-slate-500">
-              Условие задачи {uploadedFiles.length === 0 && <span className="text-red-500">*</span>}
+              Условие задачи {conditionImages.totalImages === 0 && <span className="text-red-500">*</span>}
             </legend>
             <textarea
               value={text}
               onChange={(e) => setText(e.target.value)}
-              onPaste={handlePaste}
+              onPaste={conditionImages.handlePaste}
               rows={4}
-              placeholder={uploadedFiles.length > 0 ? 'Описание (опционально — фото прикреплено)' : 'Введите условие задачи или вставьте скриншот...'}
+              placeholder={conditionImages.totalImages > 0 ? 'Описание (опционально — фото прикреплено)' : 'Введите условие задачи или вставьте скриншот...'}
               className="w-full resize-y rounded-lg border border-socrat-border px-3 py-2.5 text-[16px] leading-relaxed transition-colors duration-200 placeholder:text-socrat-muted focus:border-socrat-primary/50 focus:outline-none"
             />
           </fieldset>
 
-          {/* Image upload (multi-image) */}
-          <fieldset>
-            <legend className="mb-1.5 text-xs font-semibold text-slate-500">
-              Фото задачи{uploadedFiles.length > 0 ? ` (${uploadedFiles.length}/${MAX_TASK_IMAGES})` : ` — до ${MAX_TASK_IMAGES}`}
-            </legend>
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept="image/*"
-              multiple
-              onChange={handleFileInput}
-              className="hidden"
-            />
-            {previewUrls.length > 0 ? (
-              <div className={cn('space-y-2', isBusy && 'pointer-events-none opacity-60')}>
-                <div className="flex flex-wrap gap-2">
-                  {previewUrls.map((url, index) => (
-                    <div key={index} className="relative">
-                      <img
-                        src={url}
-                        alt={`Фото ${index + 1}`}
-                        className="h-24 w-24 rounded-lg border border-socrat-border object-cover"
-                      />
-                      <button
-                        type="button"
-                        aria-label={`Удалить фото ${index + 1}`}
-                        onClick={() => handleRemoveFile(index)}
-                        className="absolute -right-1.5 -top-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-slate-700 text-white shadow-md transition-colors hover:bg-red-500"
-                      >
-                        <X className="h-3 w-3" />
-                      </button>
-                    </div>
-                  ))}
-                </div>
-                {uploadedFiles.length < MAX_TASK_IMAGES && (
-                  <button
-                    type="button"
-                    onClick={() => fileInputRef.current?.click()}
-                    className="text-xs text-socrat-primary transition-colors hover:text-socrat-primary-dark"
-                  >
-                    Добавить ещё
-                  </button>
-                )}
-              </div>
-            ) : (
-              <button
-                type="button"
-                onClick={() => fileInputRef.current?.click()}
-                className="flex w-full items-center justify-center gap-2 rounded-lg border-[1.5px] border-dashed border-socrat-border bg-socrat-surface px-4 py-4 text-sm text-slate-500 transition-colors duration-200 hover:border-socrat-primary/40 hover:text-socrat-primary"
-              >
-                <ImagePlus className="h-4.5 w-4.5" />
-                Прикрепить фото
-              </button>
-            )}
-          </fieldset>
+          {/* Condition images */}
+          <ImageUploadField label="Фото задачи" imageUpload={conditionImages} disabled={isBusy} />
 
           {/* Exam + answer format row */}
           <div className="grid grid-cols-2 gap-3">
@@ -442,11 +232,15 @@ export function CreateTaskModal({ defaultFolderId, onClose }: CreateTaskModalPro
             <textarea
               value={solution}
               onChange={(e) => setSolution(e.target.value)}
+              onPaste={solutionImages.handlePaste}
               rows={3}
-              placeholder="Подробное решение (опционально)..."
+              placeholder="Подробное решение (опционально) или вставьте скриншот..."
               className="w-full resize-y rounded-lg border border-socrat-border px-3 py-2.5 text-[16px] leading-relaxed transition-colors duration-200 placeholder:text-socrat-muted focus:border-socrat-primary/50 focus:outline-none"
             />
           </fieldset>
+
+          {/* Solution images */}
+          <ImageUploadField label="Фото решения" imageUpload={solutionImages} disabled={isBusy} />
         </div>
 
         {/* Footer */}
