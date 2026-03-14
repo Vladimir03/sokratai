@@ -333,7 +333,7 @@ interface TaskCardProps {
 
 ```
 Collapsed:
-  Row: Badge (isOwn ? "Моя" : "Каталог") + subtopic + "КИМ № {N}" + Image icon
+  Row: Badge (isOwn ? "Моя" : "Каталог") + subtopic + "КИМ № {N}" + Image icon (+ count if >1)
   Text (line-clamp-2): task.text
 
   Actions:
@@ -346,6 +346,7 @@ Collapsed:
 
 Expanded:
   + Полный текст
+  + Gallery preview всех attachment images (если есть)
   + Блок "Ответ" на сером фоне
 ```
 
@@ -396,13 +397,18 @@ Layout:
   - Ответ (text input)
   - Решение / пояснение (textarea, LaTeX preview)
   - Формат ответа: select [число / выражение / выбор / соответствие]
-  - Вложение: file upload (images, PDF) → Supabase Storage
+  - Вложения: до 5 изображений (JPG / PNG / GIF / WebP) → Supabase Storage
+    - file picker
+    - paste from clipboard
+    - drag & drop
 
 Footer:
   [Отмена] [Сохранить]
 ```
 
 При сохранении: `owner_id = user`, `folder_id = selected folder`. Тема/подтема НЕ обязательны для личных задач.
+Если прикреплено хотя бы одно изображение, текст задачи может быть пустым.
+Во время `saving` attachment controls frozen. При failed upload / save уже загруженные новые blobs должны очищаться.
 
 ### Задача 2.11 — AddMaterialModal
 
@@ -491,7 +497,7 @@ CREATE TABLE kb_tasks (
   solution TEXT,
   answer_format TEXT,
   source_label TEXT DEFAULT 'socrat',
-  attachment_url TEXT,
+  attachment_url TEXT, -- single storage ref or JSON array string for multi-image tasks
   created_at TIMESTAMPTZ DEFAULT now(),
   updated_at TIMESTAMPTZ DEFAULT now()
 );
@@ -529,6 +535,14 @@ CREATE INDEX idx_topics_exam ON kb_topics(exam);
 | Личная база | `folder_id` (NOT NULL) | user_id | Только владелец | Только владелец |
 
 При копировании задачи из каталога в папку: создаётся новая строка в `kb_tasks` с `owner_id = user`, `folder_id = выбранная папка`, `topic_id = NULL`. Оригинал не затрагивается.
+
+**Attachment contract (implemented 2026-03-14):**
+
+- `NULL` -> у задачи нет изображений
+- single image -> `storage://kb-attachments/...`
+- multi-image -> JSON array string с `storage://` refs
+- каноничные helpers: `parseAttachmentUrls()` / `serializeAttachmentUrls()` в `src/lib/kbApi.ts`
+- current max = `5` images per task (UI-enforced)
 
 ### Задача 3.2 — Миграция: homework-связка (со snapshot)
 
@@ -996,16 +1010,17 @@ interface HWDraftStore {
 1. `hwDraftStore.addTask(task)` — внутри метод создаёт snapshot:
    ```ts
    addTask: (task: KBTask) => {
-     const draftTask: HWDraftTask = {
-       taskId: task.id,
-       textSnapshot: task.text,           // фиксируем текущий текст
-       answerSnapshot: task.answer,       // фиксируем текущий ответ
-       solutionSnapshot: task.solution,   // фиксируем текущее решение
-       snapshotEdited: false,
-       source: task.owner_id ? 'my' : 'socrat',
-       subtopic: task.subtopic_name,
-       topicName: task.topic_name,
-     };
+      const draftTask: HWDraftTask = {
+        taskId: task.id,
+        textSnapshot: task.text,           // фиксируем текущий текст
+        answerSnapshot: task.answer,       // фиксируем текущий ответ
+        solutionSnapshot: task.solution,   // фиксируем текущее решение
+        attachmentSnapshot: task.attachment_url, // single ref или JSON array string
+        snapshotEdited: false,
+        source: task.owner_id ? 'my' : 'socrat',
+        subtopic: task.subtopic_name,
+        topicName: task.topic_name,
+      };
      set((state) => ({ tasks: [...state.tasks, draftTask] }));
    }
    ```
@@ -1014,6 +1029,7 @@ interface HWDraftStore {
 4. Badge в навбаре обновляется
 
 **Ключевой момент:** с этой секунды snapshot живёт независимо от оригинала. Даже если оригинал задачи изменится или будет удалён — snapshot в ДЗ останется.
+Если у задачи несколько attachment images, snapshot хранит их все, но текущий homework runtime использует только **первое** изображение. UI должен делать это ограничение видимым для репетитора.
 
 ### Задача 6.5 — Сохранение ДЗ (со snapshot)
 

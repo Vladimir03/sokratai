@@ -69,7 +69,7 @@ kb_source?: 'socrat' | 'my';        // источник
 kb_snapshot_text?: string;           // снапшот текста
 kb_snapshot_answer?: string | null;  // снапшот ответа
 kb_snapshot_solution?: string | null;
-kb_attachment_url?: string | null;   // storage:// URL (не task_image_path!)
+kb_attachment_url?: string | null;   // first image storage:// URL из KB (homework flow пока single-image)
 ```
 
 ## Snapshot-семантика
@@ -77,6 +77,7 @@ kb_attachment_url?: string | null;   // storage:// URL (не task_image_path!)
 - Сохраняется **финальный отредактированный текст** (`t.task_text`), не оригинал KB
 - `snapshot_edited = true` если изменился text ИЛИ answer (сравнение с `kb_snapshot_*`)
 - `task_answer_snapshot = t.correct_answer.trim() || null` — без fallback на KB оригинал
+- Если у KB-задачи несколько attachment images, в `kb_attachment_url` попадает только **первое** изображение. Full multi-image homework support остаётся отдельной future phase.
 
 ## UX-индикаторы
 
@@ -94,7 +95,8 @@ KBPickerSheet работает через **локальный React state** в�
 ## Ограничения (P2)
 
 - Mobile: Sheet `side="right"` — на mobile нужен `side="bottom"` full-screen (doc 17, section 4.3)
-- `kb_attachment_url`: показываем warning badge, но cross-bucket copy (kb-attachments → homework-task-images) не реализован
+- `kb_attachment_url`: homework flow по-прежнему single-image; extra images из multi-image KB task не переносятся в student homework runtime
+- cross-bucket copy (kb-attachments → homework-task-images) не реализован и не нужен для текущего `storage://` pattern
 - Поиск/фильтр внутри picker не реализован
 
 ---
