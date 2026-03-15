@@ -1,9 +1,9 @@
 # Feature Spec: Tutor KB Task Upload
 
-**Status:** implemented through Phase 3B + solution-image extension (2026-03-14)  
+**Status:** implemented through Phase 3B + metadata hardening (2026-03-15)  
 **Job:** P1.2 — Сохранить результат в свою базу и переиспользовать позже  
 **Supports:** P0.1 — Собрать ДЗ по теме после урока, P0.2 — Нарастить новую практику по теме  
-**Latest hardening commit:** `b6cd865` `fix(kb): harden multi-image task attachment flow`
+**Latest implementation layer:** KB task upload + metadata capture in `CreateTaskModal` / `EditTaskModal`
 
 ---
 
@@ -66,6 +66,28 @@
 - reuse общего `useImageUpload` hook и `ImageUploadField` component
 - solution images остаются KB-only, homework pipeline не меняется
 
+## Metadata hardening
+
+- `CreateTaskModal` и `EditTaskModal` поддерживают не только image/text capture, но и metadata capture для reuse
+- always-visible поля:
+  - `Папка в базе`
+  - `Условие задачи`
+  - `Фото условия`
+- collapsible блок `Дополнительные поля`:
+  - `Формат ответа`
+  - `Ответ`
+  - `Решение / пояснение`
+  - `Фото решения`
+  - `Экзамен`
+  - `№ задания`
+  - `Первичный балл`
+  - `Тема`
+  - `Подтема`
+  - `Источник задачи`
+- `EditTaskModal` повторяет тот же progressive disclosure contract, чтобы редактирование не теряло metadata
+- `copyTaskToFolder()` сохраняет `primary_score` при копировании задачи из каталога в папку
+- `removeFolder()` удаляет все задачи папки, включая задачи с заполненными `topic_id` / `subtopic_id`
+
 ---
 
 ## Explicitly out of scope
@@ -84,13 +106,20 @@
 ## Create / Edit
 
 - Репетитор создаёт или редактирует задачу в уже существующем modal flow.
-- Текст остаётся primary field.
+- Primary path остаётся коротким: сначала видны только `Папка в базе`, `Условие задачи`, `Фото условия`.
+- Metadata и дополнительные поля спрятаны в раскрывающийся блок `Дополнительные поля`.
 - Если есть хотя бы одно изображение, текст может быть пустым.
 - Форма должна оставаться понятной без нового экрана и без wizard.
 - Поле `Решение / пояснение` может содержать:
   - текст
   - solution screenshots / photos
   - текст + solution screenshots / photos
+- Metadata для reuse и поиска может быть заполнена вручную:
+  - экзамен
+  - номер задания
+  - первичный балл
+  - тема / подтема
+  - источник задачи
 
 ## Attachment block
 
@@ -121,10 +150,19 @@
 
 ## Data contract
 
-Поле БД остаётся прежним:
+Image fields:
 
 - `kb_tasks.attachment_url TEXT | NULL`
 - `kb_tasks.solution_attachment_url TEXT | NULL`
+
+Metadata fields:
+
+- `kb_tasks.kim_number INTEGER | NULL`
+- `kb_tasks.primary_score SMALLINT | NULL`
+- `kb_tasks.topic_id UUID | NULL`
+- `kb_tasks.subtopic_id UUID | NULL`
+- `kb_tasks.source_label TEXT | NULL`
+- `kb_tasks.answer_format TEXT | NULL`
 
 Serialization contract:
 
@@ -141,6 +179,16 @@ Helpers:
 Их нужно использовать во всех новых consumers этого поля.
 
 `attachment_url` и `solution_attachment_url` используют один и тот же serialization format.
+
+`answer_format` хранится в нормализованных кодах:
+
+- `number`
+- `text`
+- `detailed`
+- `matching`
+- `choice`
+
+Legacy Russian literals нормализуются миграцией `20260315160100_kb_normalize_answer_format.sql`, а edit flow имеет UI fallback до применения миграции.
 
 ---
 
@@ -175,7 +223,7 @@ Helpers:
 - не создавать вторую upload/storage систему
 - reuse `kbApi.ts` helpers для validation / upload / signed URL / delete
 - reuse `useImageUpload` / `ImageUploadField` вместо дублирования upload-state между `Условием` и `Решением`
-- не менять schema `kb_tasks`
+- schema `kb_tasks` можно расширять только additive-миграциями
 - не расширять scope в OCR / AI parsing
 
 ---

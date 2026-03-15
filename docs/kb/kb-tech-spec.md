@@ -389,32 +389,39 @@ Layout:
 Модальное окно создания задачи в личной базе.
 
 ```
-Обязательные поля:
-  - Условие задачи (textarea, поддержка LaTeX через KaTeX preview)
-  - Папка: select из дерева папок пользователя (по умолчанию = текущая папка)
-
-Опциональные поля:
-  - Экзамен: select [ЕГЭ / ОГЭ]
-  - Ответ (text input)
-  - Решение / пояснение (textarea, LaTeX preview)
-  - Формат ответа: select [число / выражение / выбор / соответствие]
-  - Вложения: до 5 изображений (JPG / PNG / GIF / WebP) → Supabase Storage
+Always-visible поля:
+  - Папка в базе: select из дерева папок пользователя (по умолчанию = текущая папка)
+  - Условие задачи (textarea, поддержка paste image)
+  - Фото условия: до 5 изображений (JPG / PNG / GIF / WebP) → Supabase Storage
     - file picker
     - paste from clipboard
     - drag & drop
+  - Validation hint: если нет текста и нет фото, показать inline-подсказку
+
+Collapsible блок "Дополнительные поля":
+  - Формат ответа: select [`number` / `text` / `detailed` / `matching` / `choice`]
+  - Ответ (text input)
+  - Решение / пояснение (textarea, paste image)
   - Фото решения: до 5 изображений (JPG / PNG / GIF / WebP) → Supabase Storage
     - file picker
     - paste from clipboard в textarea решения
     - drag & drop в solution upload field
+  - Экзамен: select [ЕГЭ / ОГЭ]
+  - № задания в экзамене
+  - Первичный балл
+  - Тема: select из каталога тем
+  - Подтема: зависит от выбранной темы
+  - Источник задачи: свободный текст
 
 Footer:
   [Отмена] [Сохранить]
 ```
 
-При сохранении: `owner_id = user`, `folder_id = selected folder`. Тема/подтема НЕ обязательны для личных задач.
+При сохранении: `owner_id = user`, `folder_id = selected folder`. Тема/подтема остаются optional metadata для личных задач и не заменяют принадлежность к папке.
 Если прикреплено хотя бы одно изображение, текст задачи может быть пустым.
 Во время `saving` attachment controls frozen. При failed upload / save уже загруженные новые blobs должны очищаться.
 `Решение / пояснение` и `Фото решения` хранятся вместе как KB-only артефакт и не затрагивают homework pipeline.
+`EditTaskModal` повторяет тот же progressive disclosure contract и должен уметь редактировать `kim_number`, `primary_score`, `topic_id`, `subtopic_id`, `answer_format`.
 
 ### Задача 2.11 — AddMaterialModal
 
@@ -498,10 +505,11 @@ CREATE TABLE kb_tasks (
   owner_id UUID REFERENCES auth.users(id),
   exam exam_type,
   kim_number INTEGER,
+  primary_score SMALLINT,
   text TEXT NOT NULL,
   answer TEXT,
   solution TEXT,
-  answer_format TEXT,
+  answer_format TEXT, -- normalized values: number | text | detailed | matching | choice
   source_label TEXT DEFAULT 'socrat',
   attachment_url TEXT, -- single storage ref or JSON array string for multi-image tasks
   solution_attachment_url TEXT, -- same format, but for solution/explanation images
@@ -539,9 +547,9 @@ CREATE INDEX idx_topics_exam ON kb_topics(exam);
 | Пространство | Задача привязана к | owner_id | Кто видит | Кто редактирует |
 |---|---|---|---|---|
 | Каталог Сократа | `topic_id` (NOT NULL) | NULL | Все | Никто (read-only) |
-| Личная база | `folder_id` (NOT NULL) | user_id | Только владелец | Только владелец |
+| Личная база | `folder_id` (NOT NULL), optional `topic_id/subtopic_id` как metadata | user_id | Только владелец | Только владелец |
 
-При копировании задачи из каталога в папку: создаётся новая строка в `kb_tasks` с `owner_id = user`, `folder_id = выбранная папка`, `topic_id = NULL`. Оригинал не затрагивается.
+При копировании задачи из каталога в папку: создаётся новая строка в `kb_tasks` с `owner_id = user`, `folder_id = выбранная папка`, `topic_id = NULL`, `subtopic_id = NULL`. Экзаменная metadata (`kim_number`, `primary_score`) сохраняется. Оригинал не затрагивается.
 
 **Attachment contract (implemented 2026-03-14):**
 
