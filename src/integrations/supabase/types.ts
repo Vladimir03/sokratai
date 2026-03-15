@@ -1261,6 +1261,7 @@ export type Database = {
           id: string
           kim_number: number | null
           owner_id: string | null
+          primary_score: number | null
           solution: string | null
           solution_attachment_url: string | null
           source_label: string | null
@@ -1279,6 +1280,7 @@ export type Database = {
           id?: string
           kim_number?: number | null
           owner_id?: string | null
+          primary_score?: number | null
           solution?: string | null
           solution_attachment_url?: string | null
           source_label?: string | null
@@ -1297,6 +1299,7 @@ export type Database = {
           id?: string
           kim_number?: number | null
           owner_id?: string | null
+          primary_score?: number | null
           solution?: string | null
           solution_attachment_url?: string | null
           source_label?: string | null
