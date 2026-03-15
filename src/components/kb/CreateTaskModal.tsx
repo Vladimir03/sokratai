@@ -358,12 +358,14 @@ export function CreateTaskModal({ defaultFolderId, onClose }: CreateTaskModalPro
                 >
                   <option value="">Не выбрана</option>
                   {topics.map((t) => (
-                    <option key={t.id} value={t.id}>{t.name}</option>
+                    <option key={t.id} value={t.id}>
+                      {t.name}{t.exam ? ` (${t.exam === 'ege' ? 'ЕГЭ' : 'ОГЭ'})` : ''}
+                    </option>
                   ))}
                 </select>
               </fieldset>
 
-              {/* Subtopic — only visible when topic is selected */}
+              {/* Subtopic — only when topic is selected */}
               {topicId && (
                 <fieldset>
                   <legend className="mb-1.5 text-xs font-semibold text-slate-500">Подтема</legend>
