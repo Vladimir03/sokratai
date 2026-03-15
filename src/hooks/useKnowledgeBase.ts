@@ -98,7 +98,7 @@ async function insertTask(input: CreateKBTaskInput): Promise<KBTask> {
     .insert({
       ...input,
       owner_id: session.user.id,
-      source_label: 'my',
+      source_label: input.source_label || 'my',
     })
     .select()
     .single();

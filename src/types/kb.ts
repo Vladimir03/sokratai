@@ -74,6 +74,7 @@ export interface KBTask {
   owner_id: string | null;
   exam: ExamType | null;
   kim_number: number | null;
+  primary_score: number | null;
   text: string;
   answer: string | null;
   solution: string | null;
@@ -107,12 +108,17 @@ export interface CreateKBTaskInput {
   answer_format?: string;
   attachment_url?: string;
   solution_attachment_url?: string;
+  topic_id?: string;
+  subtopic_id?: string;
+  source_label?: string;
+  primary_score?: number;
 }
 
 export interface UpdateKBTaskInput {
   text?: string;
   exam?: ExamType | null;
   kim_number?: number | null;
+  primary_score?: number | null;
   answer?: string | null;
   solution?: string | null;
   answer_format?: string | null;

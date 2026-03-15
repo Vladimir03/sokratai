@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react';
-import { Folder, X } from 'lucide-react';
+import { ChevronDown, ChevronRight, Folder, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { useFolderTree } from '@/hooks/useFolders';
 import { useImageUpload } from '@/hooks/useImageUpload';
-import { useCreateTask } from '@/hooks/useKnowledgeBase';
+import { useCreateTask, useSubtopics, useTopics } from '@/hooks/useKnowledgeBase';
 import {
   deleteKBTaskImage,
   MAX_TASK_IMAGES,
@@ -20,23 +20,66 @@ interface CreateTaskModalProps {
   onClose: () => void;
 }
 
+/** Flatten folder tree into { id, name, depth } for <select> options */
+function flattenTree(
+  nodes: KBFolderTreeNode[],
+  depth = 0,
+): { id: string; name: string; depth: number }[] {
+  const result: { id: string; name: string; depth: number }[] = [];
+  for (const node of nodes) {
+    result.push({ id: node.id, name: node.name, depth });
+    if (node.children.length > 0) {
+      result.push(...flattenTree(node.children, depth + 1));
+    }
+  }
+  return result;
+}
+
+const ANSWER_FORMAT_OPTIONS = [
+  { value: '', label: 'Не указан' },
+  { value: 'number', label: 'Число' },
+  { value: 'text', label: 'Текст' },
+  { value: 'detailed', label: 'Развернутое решение' },
+  { value: 'matching', label: 'Соответствие' },
+  { value: 'choice', label: 'Выбор ответа' },
+];
+
 export function CreateTaskModal({ defaultFolderId, onClose }: CreateTaskModalProps) {
   const { tree, loading: treesLoading } = useFolderTree();
   const createTask = useCreateTask();
 
-  const [folderId, setFolderId] = useState<string | null>(defaultFolderId ?? null);
+  // Primary fields
+  const [folderId, setFolderId] = useState<string>(defaultFolderId ?? '');
   const [text, setText] = useState('');
+
+  // Additional fields
+  const [answerFormat, setAnswerFormat] = useState('');
   const [answer, setAnswer] = useState('');
   const [solution, setSolution] = useState('');
   const [exam, setExam] = useState<ExamType | ''>('');
-  const [answerFormat, setAnswerFormat] = useState('');
+  const [kimNumber, setKimNumber] = useState('');
+  const [primaryScore, setPrimaryScore] = useState('');
+  const [topicId, setTopicId] = useState('');
+  const [subtopicId, setSubtopicId] = useState('');
+  const [source, setSource] = useState('');
+
+  const [showExtra, setShowExtra] = useState(false);
   const [uploading, setUploading] = useState(false);
 
   const isBusy = uploading || createTask.isPending;
 
-  // Image hooks — one for condition, one for solution
+  // Image hooks
   const conditionImages = useImageUpload({ maxImages: MAX_TASK_IMAGES, disabled: isBusy });
   const solutionImages = useImageUpload({ maxImages: MAX_TASK_IMAGES, disabled: isBusy });
+
+  // Topics & subtopics for selectors
+  const { topics = [], loading: topicsLoading } = useTopics();
+  const { subtopics, loading: subtopicsLoading } = useSubtopics(topicId || undefined);
+
+  // Reset subtopic when topic changes
+  useEffect(() => {
+    setSubtopicId('');
+  }, [topicId]);
 
   // Auto-select defaultFolderId when tree loads
   useEffect(() => {
@@ -58,9 +101,9 @@ export function CreateTaskModal({ defaultFolderId, onClose }: CreateTaskModalPro
     };
   }, [onClose]);
 
-  // Image can replace text: valid if (text OR image) AND folder
+  // Validation: folder + (text OR image)
   const hasContent = text.trim().length > 0 || conditionImages.totalImages > 0;
-  const canSave = hasContent && folderId !== null;
+  const canSave = hasContent && folderId !== '';
 
   const handleSave = async () => {
     if (!canSave || !folderId) return;
@@ -69,13 +112,10 @@ export function CreateTaskModal({ defaultFolderId, onClose }: CreateTaskModalPro
     const conditionRefs: string[] = [];
     const solutionRefs: string[] = [];
     try {
-      // Upload condition images
       for (const file of conditionImages.getNewFiles()) {
         const result = await uploadKBTaskImage(file);
         conditionRefs.push(result.storageRef);
       }
-
-      // Upload solution images
       for (const file of solutionImages.getNewFiles()) {
         const result = await uploadKBTaskImage(file);
         solutionRefs.push(result.storageRef);
@@ -83,9 +123,9 @@ export function CreateTaskModal({ defaultFolderId, onClose }: CreateTaskModalPro
 
       const attachmentUrl = serializeAttachmentUrls(conditionRefs) ?? undefined;
       const solutionAttachmentUrl = serializeAttachmentUrls(solutionRefs) ?? undefined;
-
-      // If no text but image attached, use placeholder
       const taskText = text.trim() || '[Задача на фото]';
+      const kimNum = kimNumber.trim() ? parseInt(kimNumber.trim(), 10) : undefined;
+      const scoreNum = primaryScore.trim() ? parseInt(primaryScore.trim(), 10) : undefined;
 
       createTask.mutate(
         {
@@ -97,6 +137,11 @@ export function CreateTaskModal({ defaultFolderId, onClose }: CreateTaskModalPro
           answer_format: answerFormat || undefined,
           attachment_url: attachmentUrl,
           solution_attachment_url: solutionAttachmentUrl,
+          kim_number: kimNum && !isNaN(kimNum) ? kimNum : undefined,
+          primary_score: scoreNum && !isNaN(scoreNum) ? scoreNum : undefined,
+          topic_id: topicId || undefined,
+          subtopic_id: subtopicId || undefined,
+          source_label: source.trim() || 'my',
         },
         {
           onSuccess: () => {
@@ -104,7 +149,6 @@ export function CreateTaskModal({ defaultFolderId, onClose }: CreateTaskModalPro
             onClose();
           },
           onError: () => {
-            // Clean up orphan uploads — task creation failed
             for (const ref of conditionRefs) void deleteKBTaskImage(ref);
             for (const ref of solutionRefs) void deleteKBTaskImage(ref);
             toast.error('Не удалось создать задачу');
@@ -112,7 +156,6 @@ export function CreateTaskModal({ defaultFolderId, onClose }: CreateTaskModalPro
         },
       );
     } catch {
-      // Clean up refs already uploaded before the failure
       for (const ref of conditionRefs) void deleteKBTaskImage(ref);
       for (const ref of solutionRefs) void deleteKBTaskImage(ref);
       toast.error('Не удалось загрузить изображение');
@@ -120,6 +163,8 @@ export function CreateTaskModal({ defaultFolderId, onClose }: CreateTaskModalPro
       setUploading(false);
     }
   };
+
+  const flatFolders = flattenTree(tree);
 
   return (
     <>
@@ -141,28 +186,38 @@ export function CreateTaskModal({ defaultFolderId, onClose }: CreateTaskModalPro
 
         {/* Content */}
         <div className="relative flex-1 space-y-4 overflow-auto px-5 py-4">
+          {/* ── Primary fields ── */}
+
           {/* Folder select */}
           <fieldset>
             <legend className="mb-1.5 text-xs font-semibold text-slate-500">
-              Папка <span className="text-red-500">*</span>
+              Папка в базе <span className="text-red-500">*</span>
             </legend>
-            <div className="max-h-36 overflow-auto rounded-lg border border-socrat-border">
-              {treesLoading ? (
-                <div className="space-y-1.5 px-2 py-2">
-                  {[1, 2].map((i) => (
-                    <div key={i} className="h-8 animate-pulse rounded bg-socrat-border-light" />
-                  ))}
-                </div>
-              ) : tree.length === 0 ? (
-                <div className="px-3 py-4 text-center text-xs text-socrat-muted">
-                  Нет папок. Создайте папку в «Моя база».
-                </div>
-              ) : (
-                <div className="py-1">
-                  {renderFolderOptions(tree, 0, folderId, setFolderId)}
-                </div>
-              )}
+            <div className="relative">
+              <Folder className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-socrat-folder" />
+              <select
+                value={folderId}
+                onChange={(e) => setFolderId(e.target.value)}
+                className="w-full appearance-none rounded-lg border border-socrat-border py-2 pl-8 pr-8 text-[16px] transition-colors duration-200 focus:border-socrat-primary/50 focus:outline-none"
+              >
+                <option value="">Выберите папку…</option>
+                {treesLoading ? (
+                  <option disabled>Загрузка…</option>
+                ) : (
+                  flatFolders.map((f) => (
+                    <option key={f.id} value={f.id}>
+                      {'　'.repeat(f.depth)}{f.depth > 0 ? '└ ' : ''}{f.name}
+                    </option>
+                  ))
+                )}
+              </select>
+              <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
             </div>
+            {tree.length === 0 && !treesLoading && (
+              <p className="mt-1 text-xs text-socrat-muted">
+                Нет папок. Создайте папку в «Моя база».
+              </p>
+            )}
           </fieldset>
 
           {/* Task text */}
@@ -175,72 +230,170 @@ export function CreateTaskModal({ defaultFolderId, onClose }: CreateTaskModalPro
               onChange={(e) => setText(e.target.value)}
               onPaste={conditionImages.handlePaste}
               rows={4}
-              placeholder={conditionImages.totalImages > 0 ? 'Описание (опционально — фото прикреплено)' : 'Введите условие задачи или вставьте скриншот...'}
+              placeholder={
+                conditionImages.totalImages > 0
+                  ? 'Описание (опционально — фото прикреплено)'
+                  : 'Введите условие задачи или вставьте скриншот…'
+              }
               className="w-full resize-y rounded-lg border border-socrat-border px-3 py-2.5 text-[16px] leading-relaxed transition-colors duration-200 placeholder:text-socrat-muted focus:border-socrat-primary/50 focus:outline-none"
             />
           </fieldset>
 
           {/* Condition images */}
-          <ImageUploadField label="Фото задачи" imageUpload={conditionImages} disabled={isBusy} />
+          <ImageUploadField label="Фото условия" imageUpload={conditionImages} disabled={isBusy} />
 
-          {/* Exam + answer format row */}
-          <div className="grid grid-cols-2 gap-3">
-            <fieldset>
-              <legend className="mb-1.5 text-xs font-semibold text-slate-500">Экзамен</legend>
-              <select
-                value={exam}
-                onChange={(e) => setExam(e.target.value as ExamType | '')}
-                className="w-full rounded-lg border border-socrat-border px-3 py-2 text-[16px] transition-colors duration-200 focus:border-socrat-primary/50 focus:outline-none"
-              >
-                <option value="">Не указан</option>
-                <option value="ege">ЕГЭ</option>
-                <option value="oge">ОГЭ</option>
-              </select>
-            </fieldset>
+          {/* Validation hint */}
+          {!hasContent && (
+            <p className="text-xs text-amber-600">
+              Заполните условие задачи или прикрепите хотя бы одно фото
+            </p>
+          )}
 
-            <fieldset>
-              <legend className="mb-1.5 text-xs font-semibold text-slate-500">Формат ответа</legend>
-              <select
-                value={answerFormat}
-                onChange={(e) => setAnswerFormat(e.target.value)}
-                className="w-full rounded-lg border border-socrat-border px-3 py-2 text-[16px] transition-colors duration-200 focus:border-socrat-primary/50 focus:outline-none"
-              >
-                <option value="">Не указан</option>
-                <option value="number">Число</option>
-                <option value="expression">Выражение</option>
-                <option value="choice">Выбор</option>
-                <option value="matching">Соответствие</option>
-              </select>
-            </fieldset>
-          </div>
+          {/* ── Collapsible additional fields ── */}
+          <button
+            type="button"
+            onClick={() => setShowExtra((v) => !v)}
+            className="flex w-full items-center gap-1.5 rounded-lg py-1.5 text-[13px] font-medium text-socrat-primary hover:underline"
+          >
+            {showExtra ? (
+              <ChevronDown className="h-3.5 w-3.5" />
+            ) : (
+              <ChevronRight className="h-3.5 w-3.5" />
+            )}
+            Дополнительные поля
+          </button>
 
-          {/* Answer */}
-          <fieldset>
-            <legend className="mb-1.5 text-xs font-semibold text-slate-500">Ответ</legend>
-            <input
-              type="text"
-              value={answer}
-              onChange={(e) => setAnswer(e.target.value)}
-              placeholder="Правильный ответ"
-              className="w-full rounded-lg border border-socrat-border px-3 py-2 text-[16px] transition-colors duration-200 placeholder:text-socrat-muted focus:border-socrat-primary/50 focus:outline-none"
-            />
-          </fieldset>
+          {showExtra && (
+            <div className="space-y-4 rounded-lg border border-socrat-border/50 bg-slate-50/50 p-4">
+              {/* Answer format */}
+              <fieldset>
+                <legend className="mb-1.5 text-xs font-semibold text-slate-500">Формат ответа</legend>
+                <select
+                  value={answerFormat}
+                  onChange={(e) => setAnswerFormat(e.target.value)}
+                  className="w-full rounded-lg border border-socrat-border px-3 py-2 text-[16px] transition-colors duration-200 focus:border-socrat-primary/50 focus:outline-none"
+                >
+                  {ANSWER_FORMAT_OPTIONS.map((opt) => (
+                    <option key={opt.value} value={opt.value}>{opt.label}</option>
+                  ))}
+                </select>
+              </fieldset>
 
-          {/* Solution */}
-          <fieldset>
-            <legend className="mb-1.5 text-xs font-semibold text-slate-500">Решение / пояснение</legend>
-            <textarea
-              value={solution}
-              onChange={(e) => setSolution(e.target.value)}
-              onPaste={solutionImages.handlePaste}
-              rows={3}
-              placeholder="Подробное решение (опционально) или вставьте скриншот..."
-              className="w-full resize-y rounded-lg border border-socrat-border px-3 py-2.5 text-[16px] leading-relaxed transition-colors duration-200 placeholder:text-socrat-muted focus:border-socrat-primary/50 focus:outline-none"
-            />
-          </fieldset>
+              {/* Answer */}
+              <fieldset>
+                <legend className="mb-1.5 text-xs font-semibold text-slate-500">Ответ</legend>
+                <input
+                  type="text"
+                  value={answer}
+                  onChange={(e) => setAnswer(e.target.value)}
+                  placeholder="Правильный ответ"
+                  className="w-full rounded-lg border border-socrat-border px-3 py-2 text-[16px] transition-colors duration-200 placeholder:text-socrat-muted focus:border-socrat-primary/50 focus:outline-none"
+                />
+              </fieldset>
 
-          {/* Solution images */}
-          <ImageUploadField label="Фото решения" imageUpload={solutionImages} disabled={isBusy} />
+              {/* Solution */}
+              <fieldset>
+                <legend className="mb-1.5 text-xs font-semibold text-slate-500">Решение / пояснение</legend>
+                <textarea
+                  value={solution}
+                  onChange={(e) => setSolution(e.target.value)}
+                  onPaste={solutionImages.handlePaste}
+                  rows={3}
+                  placeholder="Подробное решение (опционально) или вставьте скриншот…"
+                  className="w-full resize-y rounded-lg border border-socrat-border px-3 py-2.5 text-[16px] leading-relaxed transition-colors duration-200 placeholder:text-socrat-muted focus:border-socrat-primary/50 focus:outline-none"
+                />
+              </fieldset>
+
+              {/* Solution images */}
+              <ImageUploadField label="Фото решения" imageUpload={solutionImages} disabled={isBusy} />
+
+              {/* Exam + KIM number + primary score row */}
+              <div className="grid grid-cols-3 gap-3">
+                <fieldset>
+                  <legend className="mb-1.5 text-xs font-semibold text-slate-500">Экзамен</legend>
+                  <select
+                    value={exam}
+                    onChange={(e) => setExam(e.target.value as ExamType | '')}
+                    className="w-full rounded-lg border border-socrat-border px-3 py-2 text-[16px] transition-colors duration-200 focus:border-socrat-primary/50 focus:outline-none"
+                  >
+                    <option value="">Не указан</option>
+                    <option value="ege">ЕГЭ</option>
+                    <option value="oge">ОГЭ</option>
+                  </select>
+                </fieldset>
+
+                <fieldset>
+                  <legend className="mb-1.5 text-xs font-semibold text-slate-500">№ задания</legend>
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    value={kimNumber}
+                    onChange={(e) => setKimNumber(e.target.value.replace(/\D/g, ''))}
+                    placeholder="1–30"
+                    className="w-full rounded-lg border border-socrat-border px-3 py-2 text-[16px] transition-colors duration-200 placeholder:text-socrat-muted focus:border-socrat-primary/50 focus:outline-none"
+                  />
+                </fieldset>
+
+                <fieldset>
+                  <legend className="mb-1.5 text-xs font-semibold text-slate-500">Первичный балл</legend>
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    value={primaryScore}
+                    onChange={(e) => setPrimaryScore(e.target.value.replace(/\D/g, ''))}
+                    placeholder="1–4"
+                    className="w-full rounded-lg border border-socrat-border px-3 py-2 text-[16px] transition-colors duration-200 placeholder:text-socrat-muted focus:border-socrat-primary/50 focus:outline-none"
+                  />
+                </fieldset>
+              </div>
+
+              {/* Topic */}
+              <fieldset>
+                <legend className="mb-1.5 text-xs font-semibold text-slate-500">Тема</legend>
+                <select
+                  value={topicId}
+                  onChange={(e) => setTopicId(e.target.value)}
+                  disabled={topicsLoading}
+                  className="w-full rounded-lg border border-socrat-border px-3 py-2 text-[16px] transition-colors duration-200 focus:border-socrat-primary/50 focus:outline-none"
+                >
+                  <option value="">Не выбрана</option>
+                  {topics.map((t) => (
+                    <option key={t.id} value={t.id}>{t.name}</option>
+                  ))}
+                </select>
+              </fieldset>
+
+              {/* Subtopic — only visible when topic is selected */}
+              {topicId && (
+                <fieldset>
+                  <legend className="mb-1.5 text-xs font-semibold text-slate-500">Подтема</legend>
+                  <select
+                    value={subtopicId}
+                    onChange={(e) => setSubtopicId(e.target.value)}
+                    disabled={subtopicsLoading}
+                    className="w-full rounded-lg border border-socrat-border px-3 py-2 text-[16px] transition-colors duration-200 focus:border-socrat-primary/50 focus:outline-none"
+                  >
+                    <option value="">Не выбрана</option>
+                    {subtopics.map((s) => (
+                      <option key={s.id} value={s.id}>{s.name}</option>
+                    ))}
+                  </select>
+                </fieldset>
+              )}
+
+              {/* Source */}
+              <fieldset>
+                <legend className="mb-1.5 text-xs font-semibold text-slate-500">Источник задачи</legend>
+                <input
+                  type="text"
+                  value={source}
+                  onChange={(e) => setSource(e.target.value)}
+                  placeholder="ФИПИ, Решу ЕГЭ, свой авторский, учебник…"
+                  className="w-full rounded-lg border border-socrat-border px-3 py-2 text-[16px] transition-colors duration-200 placeholder:text-socrat-muted focus:border-socrat-primary/50 focus:outline-none"
+                />
+              </fieldset>
+            </div>
+          )}
         </div>
 
         {/* Footer */}
@@ -263,43 +416,10 @@ export function CreateTaskModal({ defaultFolderId, onClose }: CreateTaskModalPro
                 : 'cursor-default bg-socrat-border',
             )}
           >
-            {isBusy ? 'Сохранение...' : 'Сохранить'}
+            {isBusy ? 'Сохранение…' : 'Сохранить'}
           </button>
         </div>
       </div>
     </>
   );
-}
-
-function renderFolderOptions(
-  nodes: KBFolderTreeNode[],
-  depth: number,
-  selectedId: string | null,
-  setSelectedId: (id: string) => void,
-) {
-  return nodes.map((node) => (
-    <div key={node.id}>
-      <button
-        type="button"
-        onClick={() => setSelectedId(node.id)}
-        className={cn(
-          'flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-[13px]',
-          selectedId === node.id
-            ? 'bg-socrat-primary-light font-semibold'
-            : 'hover:bg-socrat-surface',
-        )}
-        style={{ paddingLeft: 12 + depth * 18 }}
-      >
-        <Folder
-          className={cn(
-            'h-3.5 w-3.5 shrink-0',
-            selectedId === node.id ? 'text-socrat-primary' : 'text-socrat-folder',
-          )}
-        />
-        <span>{node.name}</span>
-      </button>
-      {node.children.length > 0 &&
-        renderFolderOptions(node.children, depth + 1, selectedId, setSelectedId)}
-    </div>
-  ));
 }

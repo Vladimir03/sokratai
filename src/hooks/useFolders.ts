@@ -179,14 +179,14 @@ async function insertFolder(input: CreateKBFolderInput): Promise<KBFolder> {
 }
 
 async function removeFolder(folderId: string): Promise<void> {
-  // Delete personal tasks in this folder first to avoid CHECK constraint
+  // Delete ALL personal tasks in this folder to avoid CHECK constraint
   // violation: kb_tasks_space_check requires (topic_id OR folder_id) to be set,
   // but ON DELETE SET NULL would null out folder_id on orphaned personal tasks.
+  // Tasks with topic_id set are also deleted — they belong to the folder.
   const { error: tasksError } = await supabase
     .from('kb_tasks')
     .delete()
-    .eq('folder_id', folderId)
-    .is('topic_id', null);
+    .eq('folder_id', folderId);
   if (tasksError) throw tasksError;
 
   const { error } = await supabase
@@ -219,6 +219,7 @@ async function copyTaskToFolder(params: { taskId: string; folderId: string }): P
       subtopic_id: null,
       exam: original.exam,
       kim_number: original.kim_number,
+      primary_score: original.primary_score,
       text: original.text,
       answer: original.answer,
       solution: original.solution,

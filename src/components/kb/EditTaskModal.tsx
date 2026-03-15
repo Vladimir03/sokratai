@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react';
-import { X } from 'lucide-react';
+import { ChevronDown, ChevronRight, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { useImageUpload } from '@/hooks/useImageUpload';
-import { useUpdateTask } from '@/hooks/useKnowledgeBase';
+import { useUpdateTask, useSubtopics, useTopics } from '@/hooks/useKnowledgeBase';
 import {
   deleteKBTaskImage,
   MAX_TASK_IMAGES,
@@ -19,6 +19,28 @@ interface EditTaskModalProps {
   onClose: () => void;
 }
 
+/** Normalize legacy Russian answer_format literals to English codes */
+function normalizeAnswerFormat(value: string | null): string {
+  if (!value) return '';
+  const map: Record<string, string> = {
+    'число': 'number',
+    'выражение': 'text',
+    'выбор': 'choice',
+    'соответствие': 'matching',
+    'развернутое решение': 'detailed',
+  };
+  return map[value] ?? value;
+}
+
+const ANSWER_FORMAT_OPTIONS = [
+  { value: '', label: 'Не указан' },
+  { value: 'number', label: 'Число' },
+  { value: 'text', label: 'Текст' },
+  { value: 'detailed', label: 'Развернутое решение' },
+  { value: 'matching', label: 'Соответствие' },
+  { value: 'choice', label: 'Выбор ответа' },
+];
+
 export function EditTaskModal({ task, onClose }: EditTaskModalProps) {
   const updateTask = useUpdateTask();
 
@@ -26,8 +48,13 @@ export function EditTaskModal({ task, onClose }: EditTaskModalProps) {
   const [answer, setAnswer] = useState(task.answer ?? '');
   const [solution, setSolution] = useState(task.solution ?? '');
   const [exam, setExam] = useState<ExamType | ''>(task.exam ?? '');
-  const [answerFormat, setAnswerFormat] = useState(task.answer_format ?? '');
+  const [answerFormat, setAnswerFormat] = useState(normalizeAnswerFormat(task.answer_format));
+  const [kimNumber, setKimNumber] = useState(task.kim_number?.toString() ?? '');
+  const [primaryScore, setPrimaryScore] = useState(task.primary_score?.toString() ?? '');
+  const [topicId, setTopicId] = useState(task.topic_id ?? '');
+  const [subtopicId, setSubtopicId] = useState(task.subtopic_id ?? '');
   const [uploading, setUploading] = useState(false);
+  const [showExtra, setShowExtra] = useState(false);
 
   const isBusy = uploading || updateTask.isPending;
 
@@ -42,6 +69,21 @@ export function EditTaskModal({ task, onClose }: EditTaskModalProps) {
     disabled: isBusy,
     initialRefs: parseAttachmentUrls(task.solution_attachment_url),
   });
+
+  // Topics & subtopics for selectors
+  const { topics = [], loading: topicsLoading } = useTopics();
+  const { subtopics, loading: subtopicsLoading } = useSubtopics(topicId || undefined);
+
+  // Reset subtopic when topic changes (only if user changes it, not on mount)
+  const [topicInitialized, setTopicInitialized] = useState(false);
+  useEffect(() => {
+    if (topicInitialized) {
+      setSubtopicId('');
+    } else {
+      setTopicInitialized(true);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [topicId]);
 
   // Esc to close + body scroll lock
   useEffect(() => {
@@ -99,6 +141,8 @@ export function EditTaskModal({ task, onClose }: EditTaskModalProps) {
         solutionImages.getRemovedRefs().length > 0;
 
       const taskText = text.trim() || '[Задача на фото]';
+      const kimNum = kimNumber.trim() ? parseInt(kimNumber.trim(), 10) : null;
+      const scoreNum = primaryScore.trim() ? parseInt(primaryScore.trim(), 10) : null;
 
       const input: UpdateKBTaskInput = {
         text: taskText,
@@ -106,6 +150,8 @@ export function EditTaskModal({ task, onClose }: EditTaskModalProps) {
         solution: solution.trim() || null,
         exam: exam || null,
         answer_format: answerFormat || null,
+        kim_number: kimNum && !isNaN(kimNum) ? kimNum : null,
+        primary_score: scoreNum && !isNaN(scoreNum) ? scoreNum : null,
       };
 
       // Only include attachment fields if changed
@@ -186,64 +232,139 @@ export function EditTaskModal({ task, onClose }: EditTaskModalProps) {
           {/* Condition images */}
           <ImageUploadField label="Фото задачи" imageUpload={conditionImages} disabled={isBusy} />
 
-          {/* Exam + answer format row */}
-          <div className="grid grid-cols-2 gap-3">
-            <fieldset>
-              <legend className="mb-1.5 text-xs font-semibold text-slate-500">Экзамен</legend>
-              <select
-                value={exam}
-                onChange={(e) => setExam(e.target.value as ExamType | '')}
-                className="w-full rounded-lg border border-socrat-border px-3 py-2 text-[16px] transition-colors duration-200 focus:border-socrat-primary/50 focus:outline-none"
-              >
-                <option value="">Не указан</option>
-                <option value="ege">ЕГЭ</option>
-                <option value="oge">ОГЭ</option>
-              </select>
-            </fieldset>
+          {/* ── Collapsible additional fields ── */}
+          <button
+            type="button"
+            onClick={() => setShowExtra((v) => !v)}
+            className="flex w-full items-center gap-1.5 rounded-lg py-1.5 text-[13px] font-medium text-socrat-primary hover:underline"
+          >
+            {showExtra ? (
+              <ChevronDown className="h-3.5 w-3.5" />
+            ) : (
+              <ChevronRight className="h-3.5 w-3.5" />
+            )}
+            Дополнительные поля
+          </button>
 
-            <fieldset>
-              <legend className="mb-1.5 text-xs font-semibold text-slate-500">Формат ответа</legend>
-              <select
-                value={answerFormat}
-                onChange={(e) => setAnswerFormat(e.target.value)}
-                className="w-full rounded-lg border border-socrat-border px-3 py-2 text-[16px] transition-colors duration-200 focus:border-socrat-primary/50 focus:outline-none"
-              >
-                <option value="">Не указан</option>
-                <option value="number">Число</option>
-                <option value="expression">Выражение</option>
-                <option value="choice">Выбор</option>
-                <option value="matching">Соответствие</option>
-              </select>
-            </fieldset>
-          </div>
+          {showExtra && (
+            <div className="space-y-4 rounded-lg border border-socrat-border/50 bg-slate-50/50 p-4">
+              {/* Answer format */}
+              <fieldset>
+                <legend className="mb-1.5 text-xs font-semibold text-slate-500">Формат ответа</legend>
+                <select
+                  value={answerFormat}
+                  onChange={(e) => setAnswerFormat(e.target.value)}
+                  className="w-full rounded-lg border border-socrat-border px-3 py-2 text-[16px] transition-colors duration-200 focus:border-socrat-primary/50 focus:outline-none"
+                >
+                  {ANSWER_FORMAT_OPTIONS.map((opt) => (
+                    <option key={opt.value} value={opt.value}>{opt.label}</option>
+                  ))}
+                </select>
+              </fieldset>
 
-          {/* Answer */}
-          <fieldset>
-            <legend className="mb-1.5 text-xs font-semibold text-slate-500">Ответ</legend>
-            <input
-              type="text"
-              value={answer}
-              onChange={(e) => setAnswer(e.target.value)}
-              placeholder="Правильный ответ"
-              className="w-full rounded-lg border border-socrat-border px-3 py-2 text-[16px] transition-colors duration-200 placeholder:text-socrat-muted focus:border-socrat-primary/50 focus:outline-none"
-            />
-          </fieldset>
+              {/* Answer */}
+              <fieldset>
+                <legend className="mb-1.5 text-xs font-semibold text-slate-500">Ответ</legend>
+                <input
+                  type="text"
+                  value={answer}
+                  onChange={(e) => setAnswer(e.target.value)}
+                  placeholder="Правильный ответ"
+                  className="w-full rounded-lg border border-socrat-border px-3 py-2 text-[16px] transition-colors duration-200 placeholder:text-socrat-muted focus:border-socrat-primary/50 focus:outline-none"
+                />
+              </fieldset>
 
-          {/* Solution */}
-          <fieldset>
-            <legend className="mb-1.5 text-xs font-semibold text-slate-500">Решение / пояснение</legend>
-            <textarea
-              value={solution}
-              onChange={(e) => setSolution(e.target.value)}
-              onPaste={solutionImages.handlePaste}
-              rows={3}
-              placeholder="Подробное решение (опционально) или вставьте скриншот..."
-              className="w-full resize-y rounded-lg border border-socrat-border px-3 py-2.5 text-[16px] leading-relaxed transition-colors duration-200 placeholder:text-socrat-muted focus:border-socrat-primary/50 focus:outline-none"
-            />
-          </fieldset>
+              {/* Solution */}
+              <fieldset>
+                <legend className="mb-1.5 text-xs font-semibold text-slate-500">Решение / пояснение</legend>
+                <textarea
+                  value={solution}
+                  onChange={(e) => setSolution(e.target.value)}
+                  onPaste={solutionImages.handlePaste}
+                  rows={3}
+                  placeholder="Подробное решение (опционально) или вставьте скриншот..."
+                  className="w-full resize-y rounded-lg border border-socrat-border px-3 py-2.5 text-[16px] leading-relaxed transition-colors duration-200 placeholder:text-socrat-muted focus:border-socrat-primary/50 focus:outline-none"
+                />
+              </fieldset>
 
-          {/* Solution images */}
-          <ImageUploadField label="Фото решения" imageUpload={solutionImages} disabled={isBusy} />
+              {/* Solution images */}
+              <ImageUploadField label="Фото решения" imageUpload={solutionImages} disabled={isBusy} />
+
+              {/* Exam + KIM number + primary score row */}
+              <div className="grid grid-cols-3 gap-3">
+                <fieldset>
+                  <legend className="mb-1.5 text-xs font-semibold text-slate-500">Экзамен</legend>
+                  <select
+                    value={exam}
+                    onChange={(e) => setExam(e.target.value as ExamType | '')}
+                    className="w-full rounded-lg border border-socrat-border px-3 py-2 text-[16px] transition-colors duration-200 focus:border-socrat-primary/50 focus:outline-none"
+                  >
+                    <option value="">Не указан</option>
+                    <option value="ege">ЕГЭ</option>
+                    <option value="oge">ОГЭ</option>
+                  </select>
+                </fieldset>
+
+                <fieldset>
+                  <legend className="mb-1.5 text-xs font-semibold text-slate-500">№ задания</legend>
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    value={kimNumber}
+                    onChange={(e) => setKimNumber(e.target.value.replace(/\D/g, ''))}
+                    placeholder="1–30"
+                    className="w-full rounded-lg border border-socrat-border px-3 py-2 text-[16px] transition-colors duration-200 placeholder:text-socrat-muted focus:border-socrat-primary/50 focus:outline-none"
+                  />
+                </fieldset>
+
+                <fieldset>
+                  <legend className="mb-1.5 text-xs font-semibold text-slate-500">Первичный балл</legend>
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    value={primaryScore}
+                    onChange={(e) => setPrimaryScore(e.target.value.replace(/\D/g, ''))}
+                    placeholder="1–4"
+                    className="w-full rounded-lg border border-socrat-border px-3 py-2 text-[16px] transition-colors duration-200 placeholder:text-socrat-muted focus:border-socrat-primary/50 focus:outline-none"
+                  />
+                </fieldset>
+              </div>
+
+              {/* Topic */}
+              <fieldset>
+                <legend className="mb-1.5 text-xs font-semibold text-slate-500">Тема</legend>
+                <select
+                  value={topicId}
+                  onChange={(e) => setTopicId(e.target.value)}
+                  disabled={topicsLoading}
+                  className="w-full rounded-lg border border-socrat-border px-3 py-2 text-[16px] transition-colors duration-200 focus:border-socrat-primary/50 focus:outline-none"
+                >
+                  <option value="">Не выбрана</option>
+                  {topics.map((t) => (
+                    <option key={t.id} value={t.id}>{t.name}</option>
+                  ))}
+                </select>
+              </fieldset>
+
+              {/* Subtopic — only visible when topic is selected */}
+              {topicId && (
+                <fieldset>
+                  <legend className="mb-1.5 text-xs font-semibold text-slate-500">Подтема</legend>
+                  <select
+                    value={subtopicId}
+                    onChange={(e) => setSubtopicId(e.target.value)}
+                    disabled={subtopicsLoading}
+                    className="w-full rounded-lg border border-socrat-border px-3 py-2 text-[16px] transition-colors duration-200 focus:border-socrat-primary/50 focus:outline-none"
+                  >
+                    <option value="">Не выбрана</option>
+                    {subtopics.map((s) => (
+                      <option key={s.id} value={s.id}>{s.name}</option>
+                    ))}
+                  </select>
+                </fieldset>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Footer */}
