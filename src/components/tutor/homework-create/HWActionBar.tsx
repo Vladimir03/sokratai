@@ -2,7 +2,7 @@ import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { Badge } from '@/components/ui/badge';
-import { ArrowLeft, ArrowRight, Loader2, Check, Send } from 'lucide-react';
+import { Loader2, Check, Send } from 'lucide-react';
 import type { SubmitPhase } from './types';
 
 // ─── Submit phase tracker ────────────────────────────────────────────────────
@@ -43,12 +43,9 @@ function SubmitPhaseTracker({ phase, notifyEnabled, hasMaterials }: SubmitPhaseT
   );
 }
 
-// ─── Action bar ──────────────────────────────────────────────────────────────
+// ─── Action bar (single-page: submit only, no step navigation) ──────────────
 
 export interface HWActionBarProps {
-  step: number;
-  onBack: () => void;
-  onNext: () => void;
   onSubmit: () => void;
   isSubmitting: boolean;
   submitPhase: SubmitPhase;
@@ -60,9 +57,6 @@ export interface HWActionBarProps {
 }
 
 export function HWActionBar({
-  step,
-  onBack,
-  onNext,
   onSubmit,
   isSubmitting,
   submitPhase,
@@ -74,14 +68,12 @@ export function HWActionBar({
 }: HWActionBarProps) {
   return (
     <div className="border-t pt-4 sticky bottom-0 bg-background pb-4 md:pb-0 md:relative z-10 space-y-3">
-      {step === 3 && (
-        <SubmitPhaseTracker
-          phase={submitPhase}
-          notifyEnabled={notifyEnabled}
-          hasMaterials={hasMaterials}
-        />
-      )}
-      {step === 3 && submitPhase === 'idle' && (
+      <SubmitPhaseTracker
+        phase={submitPhase}
+        notifyEnabled={notifyEnabled}
+        hasMaterials={hasMaterials}
+      />
+      {submitPhase === 'idle' && (
         <div className="flex items-center gap-2">
           <Switch
             id="save-template-toggle"
@@ -93,33 +85,16 @@ export function HWActionBar({
           </Label>
         </div>
       )}
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-end">
         <Button
-          variant="outline"
-          onClick={onBack}
-          disabled={step === 1 || isSubmitting}
+          onClick={onSubmit}
+          disabled={isSubmitting}
           className="gap-2"
         >
-          <ArrowLeft className="h-4 w-4" />
-          Назад
+          {isSubmitting && <Loader2 className="h-4 w-4 animate-spin" />}
+          {!isSubmitting && (notifyEnabled ? <Send className="h-4 w-4" /> : <Check className="h-4 w-4" />)}
+          {submitLabel}
         </Button>
-
-        {step < 3 ? (
-          <Button onClick={onNext} className="gap-2">
-            Далее
-            <ArrowRight className="h-4 w-4" />
-          </Button>
-        ) : (
-          <Button
-            onClick={onSubmit}
-            disabled={isSubmitting}
-            className="gap-2"
-          >
-            {isSubmitting && <Loader2 className="h-4 w-4 animate-spin" />}
-            {!isSubmitting && (notifyEnabled ? <Send className="h-4 w-4" /> : <Check className="h-4 w-4" />)}
-            {submitLabel}
-          </Button>
-        )}
       </div>
     </div>
   );

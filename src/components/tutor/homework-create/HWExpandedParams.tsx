@@ -15,20 +15,27 @@ export interface HWExpandedParamsProps {
   meta: MetaState;
   onChange: (m: MetaState) => void;
   errors: Record<string, string>;
+  /** Auto-generated title shown as placeholder when manual title is empty */
+  autoTitle?: string;
 }
 
-export function HWExpandedParams({ meta, onChange, errors }: HWExpandedParamsProps) {
+export function HWExpandedParams({ meta, onChange, errors, autoTitle }: HWExpandedParamsProps) {
   return (
     <div className="space-y-5">
       <div className="space-y-2">
-        <Label htmlFor="hw-title">Название *</Label>
+        <Label htmlFor="hw-title">Название</Label>
         <Input
           id="hw-title"
-          placeholder="Квадратные уравнения"
+          placeholder={autoTitle || 'Квадратные уравнения'}
           value={meta.title}
           onChange={(e) => onChange({ ...meta, title: e.target.value })}
           className="text-base"
         />
+        {!meta.title.trim() && autoTitle && (
+          <p className="text-xs text-muted-foreground">
+            Будет использовано: {autoTitle}
+          </p>
+        )}
         {errors.title && <p className="text-sm text-destructive">{errors.title}</p>}
       </div>
 
@@ -53,14 +60,17 @@ export function HWExpandedParams({ meta, onChange, errors }: HWExpandedParamsPro
       </div>
 
       <div className="space-y-2">
-        <Label htmlFor="hw-topic">Тема (необязательно)</Label>
+        <Label htmlFor="hw-topic">Тема</Label>
         <Input
           id="hw-topic"
-          placeholder="Алгебра, глава 5"
+          placeholder="Кинематика, законы Ньютона..."
           value={meta.topic}
           onChange={(e) => onChange({ ...meta, topic: e.target.value })}
           className="text-base"
         />
+        {errors._topicHint && !meta.topic.trim() && (
+          <p className="text-xs text-amber-600">{errors._topicHint}</p>
+        )}
       </div>
 
       <div className="space-y-2">

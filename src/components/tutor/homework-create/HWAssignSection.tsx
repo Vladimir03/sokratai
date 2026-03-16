@@ -136,7 +136,6 @@ export function HWAssignSection({
   return (
     <div className="space-y-6">
       <div className="space-y-2">
-        <Label>Кому назначить</Label>
         <div className="flex gap-2">
           <Button type="button" variant={assignMode === 'student' ? 'default' : 'outline'} size="sm" onClick={() => onAssignModeChange('student')}>Ученик</Button>
           <Button type="button" variant={assignMode === 'group' ? 'default' : 'outline'} size="sm" onClick={() => onAssignModeChange('group')}>Группа</Button>

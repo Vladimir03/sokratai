@@ -63,7 +63,7 @@ Implement BLOCK 6 (6.4–6.6) — "В ДЗ" button, save logic
 
 **Status (2026-03-14):** Реализовано через `KBPickerSheet` + `TutorHomeworkCreate.tsx`:
 - «В ДЗ» кнопка в `PickerTaskCard` → `onAddTasks` callback
-- Конвертер `kbTaskToDraftTask` с полями провенанса (`kb_task_id`, `kb_source`, `kb_snapshot_*`)
+- Конвертер `kbTaskToDraftTask` с полями провенанса (`kb_task_id`, `kb_source`, `kb_snapshot_*`) — живёт в `src/components/tutor/homework-create/HWTasksSection.tsx` (перенесён из `TutorHomeworkCreate.tsx` в Phase 1 рефакторинга, 2026-03-16)
 - Post-submit insert в `homework_kb_tasks` с FK retry pattern
 - `SourceBadge` + attachment warning badge в TaskEditor
 - Snapshot-семантика: финальный текст, не KB-оригинал; `snapshot_edited` для text + answer

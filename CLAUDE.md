@@ -326,7 +326,7 @@ Legacy student-only система (`homework_sets`, `homework_tasks`, `homework
 
 Точка интеграции KB → черновик ДЗ в визарде:
 - `src/components/tutor/KBPickerSheet.tsx` — Sheet-drawer с двумя вкладками (Каталог Сократа / Моя база), drill-down по темам/папкам, batch-select. Монтируется в `TutorHomeworkCreate.tsx`.
-- `kbTaskToDraftTask(task: KBTask): DraftTask` в `TutorHomeworkCreate.tsx` — канонический конвертер KB-задачи в черновик. Заполняет поля провенанса: `kb_task_id`, `kb_source`, `kb_snapshot_text`, `kb_snapshot_answer`, `kb_snapshot_solution`, `kb_attachment_url`.
+- `kbTaskToDraftTask(task: KBTask): DraftTask` в `src/components/tutor/homework-create/HWTasksSection.tsx` — канонический конвертер KB-задачи в черновик. Заполняет поля провенанса: `kb_task_id`, `kb_source`, `kb_snapshot_text`, `kb_snapshot_answer`, `kb_snapshot_solution`, `kb_attachment_url`.
 
 #### Поля провенанса в DraftTask (обязательны при добавлении задачи из KB)
 - `kb_task_id` — id задачи в KB

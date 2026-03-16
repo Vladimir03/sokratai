@@ -1,7 +1,9 @@
+// Job: P0.1 — Собрать ДЗ по теме после урока
 import { useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
-import { parseISO } from 'date-fns';
+import { format, parseISO } from 'date-fns';
+import { ru } from 'date-fns/locale';
 import { Button } from '@/components/ui/button';
 import { ArrowLeft, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
@@ -30,17 +32,15 @@ import {
   type MetaState,
   type SubmitPhase,
   createEmptyTask,
-  createEmptyMaterial,
   revokeObjectUrl,
 } from '@/components/tutor/homework-create/types';
-import { HWStepIndicator } from '@/components/tutor/homework-create/HWStepIndicator';
 import { HWTemplatePicker } from '@/components/tutor/homework-create/HWTemplatePicker';
 import { HWExpandedParams } from '@/components/tutor/homework-create/HWExpandedParams';
 import { HWTasksSection } from '@/components/tutor/homework-create/HWTasksSection';
 import { HWAssignSection } from '@/components/tutor/homework-create/HWAssignSection';
 import { HWActionBar } from '@/components/tutor/homework-create/HWActionBar';
 
-// ─── Main Wizard Content ─────────────────────────────────────────────────────
+// ─── Main Single-Page Constructor ───────────────────────────────────────────
 
 function TutorHomeworkCreateContent() {
   const navigate = useNavigate();
@@ -48,16 +48,16 @@ function TutorHomeworkCreateContent() {
   const [searchParams] = useSearchParams();
   const { tutor } = useTutor();
   const { students: tutorStudents } = useTutorStudents();
-  const [step, setStep] = useState(1);
-  const { groups } = useTutorGroups(step === 3);
-  const { memberships } = useTutorGroupMemberships(step === 3);
+  // Always fetch groups — no step gating in single-page layout
+  const { groups } = useTutorGroups(true);
+  const { memberships } = useTutorGroupMemberships(true);
   const inviteWebLink = tutor?.invite_code ? getTutorInviteWebLink(tutor.invite_code) : '';
   const appOrigin = typeof window !== 'undefined' ? window.location.origin : 'https://sokratai.ru';
   const studentLoginLink = `${appOrigin}/login`;
   const studentSignupLink = `${appOrigin}/signup`;
   const [templateLoading, setTemplateLoading] = useState(false);
 
-  // Step 1
+  // ── Meta ──
   const [meta, setMeta] = useState<MetaState>({
     title: '',
     subject: '',
@@ -66,12 +66,18 @@ function TutorHomeworkCreateContent() {
     workflow_mode: 'classic',
   });
 
-  // Step 2
+  // Auto-generated title: «ДЗ {topic} {dd.MM}» — used when manual title is empty
+  const autoTitle = useMemo(() => {
+    const dateStr = format(new Date(), 'dd.MM', { locale: ru });
+    return meta.topic.trim() ? `ДЗ ${meta.topic.trim()} ${dateStr}` : `ДЗ ${dateStr}`;
+  }, [meta.topic]);
+
+  // ── Tasks ──
   const [tasks, setTasks] = useState<DraftTask[]>([createEmptyTask()]);
   const tasksRef = useRef<DraftTask[]>(tasks);
   const [materials, setMaterials] = useState<DraftMaterial[]>([]);
 
-  // Step 3
+  // ── Assign ──
   const [selectedStudentIds, setSelectedStudentIds] = useState<Set<string>>(
     new Set(),
   );
@@ -81,7 +87,7 @@ function TutorHomeworkCreateContent() {
   const [notifyTemplate, setNotifyTemplate] = useState('');
   const [saveAsTemplate, setSaveAsTemplate] = useState(false);
 
-  // Submit state
+  // ── Submit state ──
   const [submitPhase, setSubmitPhase] = useState<SubmitPhase>('idle');
   const createdAssignmentIdRef = useRef<string | null>(null);
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -115,7 +121,7 @@ function TutorHomeworkCreateContent() {
     [],
   );
 
-  // Auto-load template from ?template_id query param
+  // ── Auto-load template from ?template_id query param ──
   const templateId = searchParams.get('template_id');
   const templateLoadedRef = useRef(false);
   useEffect(() => {
@@ -146,7 +152,7 @@ function TutorHomeworkCreateContent() {
       .finally(() => setTemplateLoading(false));
   }, [templateId]);
 
-  // Apply template from picker sheet
+  // ── Apply template from picker sheet ──
   const handleApplyTemplate = useCallback(async (tpl: HomeworkTemplateListItem) => {
     const isDirty =
       meta.title.trim().length > 0 ||
@@ -180,6 +186,7 @@ function TutorHomeworkCreateContent() {
     }
   }, [meta.title, tasks]);
 
+  // ── Unsaved changes guard ──
   const hasUnsavedChanges = useMemo(() => {
     if (submitPhase === 'done') return false;
 
@@ -217,18 +224,17 @@ function TutorHomeworkCreateContent() {
     return () => window.removeEventListener('beforeunload', handler);
   }, [hasUnsavedChanges]);
 
-  // ── Validation ──
+  // ── Inline validation (all sections at once) ──
 
-  const validateStep1 = useCallback((): boolean => {
+  const validateAll = useCallback((): boolean => {
     const errs: Record<string, string> = {};
-    if (!meta.title.trim()) errs.title = 'Введите название';
+
+    // Meta: subject required, title auto-generated if empty
     if (!meta.subject) errs.subject = 'Выберите предмет';
-    setErrors(errs);
-    return Object.keys(errs).length === 0;
-  }, [meta]);
+    // Soft warning: topic empty → auto-title is generic, KB picker has no hint
+    if (!meta.topic.trim()) errs._topicHint = 'Укажите тему — название ДЗ и поиск в базе будут точнее';
 
-  const validateStep2 = useCallback((): boolean => {
-    const errs: Record<string, string> = {};
+    // Tasks
     if (tasks.length === 0) {
       errs._tasks = 'Добавьте хотя бы одну задачу';
     }
@@ -246,35 +252,17 @@ function TutorHomeworkCreateContent() {
         break;
       }
     }
-    setErrors(errs);
-    return Object.keys(errs).length === 0;
-  }, [tasks]);
 
-  const validateStep3 = useCallback((): boolean => {
-    const errs: Record<string, string> = {};
+    // Students
     if (selectedStudentIds.size === 0) {
       errs._students = 'Выберите хотя бы одного ученика';
     }
+
     setErrors(errs);
     return Object.keys(errs).length === 0;
-  }, [selectedStudentIds]);
+  }, [meta, tasks, selectedStudentIds]);
 
   // ── Navigation ──
-
-  const handleNext = useCallback(() => {
-    if (step === 1 && validateStep1()) {
-      setErrors({});
-      setStep(2);
-    } else if (step === 2 && validateStep2()) {
-      setErrors({});
-      setStep(3);
-    }
-  }, [step, validateStep1, validateStep2]);
-
-  const handleBack = useCallback(() => {
-    setErrors({});
-    if (step > 1) setStep(step - 1);
-  }, [step]);
 
   const handleNavigateToList = useCallback(() => {
     if (
@@ -286,13 +274,16 @@ function TutorHomeworkCreateContent() {
     navigate('/tutor/homework');
   }, [hasUnsavedChanges, navigate]);
 
-  // ── Submit ──
+  // ── Submit (NOT changed — same 4-phase logic) ──
 
   const handleSubmit = useCallback(async () => {
-    if (!validateStep3()) return;
+    if (!validateAll()) return;
 
     const isRetry = createdAssignmentIdRef.current !== null;
     let assignmentId = createdAssignmentIdRef.current;
+
+    // Resolve title: manual override or auto-generated
+    const resolvedTitle = meta.title.trim() || autoTitle;
 
     try {
       // Phase 1: create (skip if already created)
@@ -308,7 +299,7 @@ function TutorHomeworkCreateContent() {
         }));
 
         const result = await createTutorHomeworkAssignment({
-          title: meta.title.trim(),
+          title: resolvedTitle,
           subject: meta.subject as HomeworkSubject,
           topic: meta.topic.trim() || null,
           deadline: meta.deadline
@@ -349,11 +340,10 @@ function TutorHomeworkCreateContent() {
       const kbLinkedTasks = tasks.filter((t) => t.kb_task_id);
       if (kbLinkedTasks.length > 0 && assignmentId) {
         try {
-          const links = kbLinkedTasks.map((t, idx) => ({
+          const links = kbLinkedTasks.map((t) => ({
             homework_id: assignmentId!,
             task_id: t.kb_task_id!,
             sort_order: tasks.indexOf(t),
-            // Save final (possibly edited) values, matching HWDrawer semantics
             task_text_snapshot: t.task_text,
             task_answer_snapshot: t.correct_answer.trim() || null,
             task_solution_snapshot: t.kb_snapshot_solution ?? null,
@@ -365,7 +355,6 @@ function TutorHomeworkCreateContent() {
             .from('homework_kb_tasks')
             .insert(links);
           if (kbErr) {
-            // Graceful FK handling: retry per-link (same pattern as HWDrawer)
             if (kbErr.code === '23503') {
               for (const link of links) {
                 const { error: singleErr } = await supabase
@@ -430,7 +419,7 @@ function TutorHomeworkCreateContent() {
       if (saveAsTemplate) {
         try {
           await createTutorHomeworkTemplate({
-            title: meta.title.trim(),
+            title: resolvedTitle,
             subject: meta.subject as HomeworkSubject,
             topic: meta.topic.trim() || null,
             tasks_json: tasks.map((t) => ({
@@ -519,7 +508,8 @@ function TutorHomeworkCreateContent() {
       }
     }
   }, [
-    validateStep3,
+    validateAll,
+    autoTitle,
     tasks,
     meta,
     selectedStudentIds,
@@ -549,13 +539,13 @@ function TutorHomeworkCreateContent() {
       case 'notifying':
         return 'Отправляем уведомления...';
       default:
-        return notifyEnabled ? 'Создать и уведомить' : 'Создать ДЗ';
+        return notifyEnabled ? 'Отправить ДЗ' : 'Создать ДЗ';
     }
   })();
 
   return (
     <TutorLayout>
-      <div className="space-y-6 max-w-2xl mx-auto">
+      <div className="space-y-6 max-w-2xl mx-auto pb-24 md:pb-6">
         {/* Header */}
         <div className="flex items-center gap-3">
           <Button variant="ghost" size="sm" onClick={handleNavigateToList} disabled={isSubmitting}>
@@ -569,52 +559,53 @@ function TutorHomeworkCreateContent() {
           {templateLoading && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />}
         </div>
 
-        {/* Step indicator */}
-        <div className="flex justify-center">
-          <HWStepIndicator current={step} total={3} />
-        </div>
+        {/* Section 1: Meta params (all visible) */}
+        <section>
+          <HWExpandedParams
+            meta={meta}
+            onChange={setMeta}
+            errors={errors}
+            autoTitle={autoTitle}
+          />
+        </section>
 
-        {/* Step content */}
-        <div className="min-h-[300px]">
-          {step === 1 && (
-            <HWExpandedParams meta={meta} onChange={setMeta} errors={errors} />
-          )}
-          {step === 2 && (
-            <HWTasksSection
-              tasks={tasks}
-              onChange={setTasks}
-              materials={materials}
-              onMaterialsChange={setMaterials}
-              errors={errors}
-              topicHint={meta.topic}
-            />
-          )}
-          {step === 3 && (
-            <HWAssignSection
-              selectedIds={selectedStudentIds}
-              onChangeSelected={setSelectedStudentIds}
-              notifyEnabled={notifyEnabled}
-              onNotifyChange={setNotifyEnabled}
-              notifyTemplate={notifyTemplate}
-              onTemplateChange={setNotifyTemplate}
-              errors={errors}
-              assignMode={assignMode}
-              onAssignModeChange={setAssignMode}
-              selectedGroupId={selectedGroupId}
-              onGroupIdChange={setSelectedGroupId}
-              groups={groups.map((g) => ({ id: g.id, name: g.name }))}
-              inviteWebLink={inviteWebLink}
-              studentLoginLink={studentLoginLink}
-              studentSignupLink={studentSignupLink}
-            />
-          )}
-        </div>
+        {/* Section 2: Tasks + Materials */}
+        <section>
+          <h2 className="text-lg font-semibold mb-3">Задачи</h2>
+          <HWTasksSection
+            tasks={tasks}
+            onChange={setTasks}
+            materials={materials}
+            onMaterialsChange={setMaterials}
+            errors={errors}
+            topicHint={meta.topic}
+          />
+        </section>
 
-        {/* Navigation footer */}
+        {/* Section 3: Assign students */}
+        <section>
+          <h2 className="text-lg font-semibold mb-3">Кому назначить</h2>
+          <HWAssignSection
+            selectedIds={selectedStudentIds}
+            onChangeSelected={setSelectedStudentIds}
+            notifyEnabled={notifyEnabled}
+            onNotifyChange={setNotifyEnabled}
+            notifyTemplate={notifyTemplate}
+            onTemplateChange={setNotifyTemplate}
+            errors={errors}
+            assignMode={assignMode}
+            onAssignModeChange={setAssignMode}
+            selectedGroupId={selectedGroupId}
+            onGroupIdChange={setSelectedGroupId}
+            groups={groups.map((g) => ({ id: g.id, name: g.name }))}
+            inviteWebLink={inviteWebLink}
+            studentLoginLink={studentLoginLink}
+            studentSignupLink={studentSignupLink}
+          />
+        </section>
+
+        {/* Action bar (sticky on mobile) */}
         <HWActionBar
-          step={step}
-          onBack={handleBack}
-          onNext={handleNext}
           onSubmit={handleSubmit}
           isSubmitting={isSubmitting}
           submitPhase={submitPhase}
