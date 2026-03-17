@@ -7,6 +7,13 @@ import { ru } from 'date-fns/locale';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { ArrowLeft, Loader2, ChevronDown, ChevronUp } from 'lucide-react';
 import { toast } from 'sonner';
 import TutorGuard from '@/components/TutorGuard';
@@ -33,6 +40,8 @@ import {
   type DraftMaterial,
   type MetaState,
   type SubmitPhase,
+  type SubmitSuccessResult,
+  SUBJECTS,
   createEmptyTask,
   revokeObjectUrl,
 } from '@/components/tutor/homework-create/types';
@@ -42,6 +51,7 @@ import { HWTasksSection } from '@/components/tutor/homework-create/HWTasksSectio
 import { HWMaterialsSection } from '@/components/tutor/homework-create/HWMaterialsSection';
 import { HWAssignSection } from '@/components/tutor/homework-create/HWAssignSection';
 import { HWActionBar } from '@/components/tutor/homework-create/HWActionBar';
+import { HWSubmitSuccess } from '@/components/tutor/homework-create/HWSubmitSuccess';
 
 // ─── Main Single-Page Constructor ───────────────────────────────────────────
 
@@ -95,6 +105,7 @@ function TutorHomeworkCreateContent() {
   const [submitPhase, setSubmitPhase] = useState<SubmitPhase>('idle');
   const createdAssignmentIdRef = useRef<string | null>(null);
   const [errors, setErrors] = useState<Record<string, string>>({});
+  const [successResult, setSuccessResult] = useState<SubmitSuccessResult | null>(null);
 
   useEffect(() => {
     tasksRef.current = tasks;
@@ -261,11 +272,6 @@ function TutorHomeworkCreateContent() {
     // Students
     if (selectedStudentIds.size === 0) {
       errs._students = 'Выберите хотя бы одного ученика';
-    }
-
-    // Auto-expand L1 if subject error (required field hidden in collapsible)
-    if (errs.subject) {
-      setShowAdvanced(true);
     }
 
     setErrors(errs);
@@ -456,59 +462,37 @@ function TutorHomeworkCreateContent() {
         queryKey: ['tutor', 'homework', 'assignments'],
       });
 
-      const assignedWithoutTelegramIds = assignResult.students_without_telegram ?? [];
-      const assignedWithoutTelegramNames = assignResult.students_without_telegram_names ?? [];
+      // Build per-student delivery status for inline success view
+      const noTelegramIds = new Set(assignResult.students_without_telegram ?? []);
+      const failedNotifyIds = new Set(notifyResult?.failed_student_ids ?? []);
 
-      // Build toast message
-      const parts: string[] = [`ДЗ создано, назначено ${assignResult.added} ученикам`];
-      if (assignResult.assignment_status !== 'active') {
-        parts.push(`Статус задания: ${assignResult.assignment_status}`);
-      }
-      if (assignedWithoutTelegramIds.length > 0) {
-        const previewList = (
-          assignedWithoutTelegramNames.length > 0
-            ? assignedWithoutTelegramNames
-            : assignedWithoutTelegramIds
-        ).slice(0, 3);
-        const preview = previewList.join(', ');
-        const suffix = assignedWithoutTelegramIds.length > 3 ? '...' : '';
-        parts.push(
-          `Без Telegram-связки: ${assignedWithoutTelegramIds.length} (ДЗ в кабинете назначено, уведомление не отправлено)`,
-        );
-        if (preview) {
-          parts.push(`Ученики без Telegram: ${preview}${suffix}`);
-        }
-      }
-      if (notifyResult) {
-        const reasonValues = Object.values(notifyResult.failed_by_reason ?? {});
-        const missingTelegramCount = reasonValues.filter(
-          (reason) => reason === 'missing_telegram_link',
-        ).length;
-        const telegramErrorCount = Math.max(notifyResult.failed - missingTelegramCount, 0);
+      const studentStatuses = [...selectedStudentIds].map((profileId) => {
+        const ts = tutorStudents.find((s) => s.student_id === profileId);
+        const name =
+          ts?.profiles?.username ||
+          (ts?.profiles?.telegram_username ? `@${ts.profiles.telegram_username}` : profileId);
+        const hasTelegram = !noTelegramIds.has(profileId);
+        const notified = hasTelegram && notifyEnabled && notifyResult !== null && !failedNotifyIds.has(profileId);
+        const deliveryFailed = hasTelegram && notifyEnabled && notifyResult !== null && failedNotifyIds.has(profileId);
+        return { studentId: profileId, name, hasTelegram, notified, deliveryFailed };
+      });
 
-        if (notifyResult.sent > 0) {
-          parts.push(`Telegram: отправлено ${notifyResult.sent}`);
-        }
-        if (missingTelegramCount > 0) {
-          parts.push(`Без Telegram для отправки: ${missingTelegramCount}`);
-        }
-        if (telegramErrorCount > 0) {
-          parts.push(`Ошибки доставки Telegram: ${telegramErrorCount}`);
-        }
-        if (notifyResult.sent === 0 && notifyResult.failed === 0) {
-          parts.push('Telegram: нет новых получателей для уведомления');
-        }
-      } else if (!notifyEnabled) {
-        parts.push('Telegram-уведомления отключены');
-      }
-      toast.success(parts.join('. '));
-      if (assignedWithoutTelegramIds.length > 0) {
-        const inviteHint = inviteWebLink
-          ? `Поделитесь ссылкой приглашения: ${inviteWebLink}`
-          : `Дайте ученику ссылку на вход (${studentLoginLink}) или регистрацию (${studentSignupLink})`;
-        toast.info(`Для учеников без Telegram: ${inviteHint}`);
-      }
-      navigate('/tutor/homework');
+      const groupName =
+        assignMode === 'group' && selectedGroupId
+          ? groups.find((g) => g.id === selectedGroupId)?.name
+          : undefined;
+
+      setSuccessResult({
+        assignmentId,
+        title: resolvedTitle,
+        topic: meta.topic.trim(),
+        taskCount: tasks.length,
+        assignedCount: assignResult.added,
+        groupName,
+        studentStatuses,
+        inviteWebLink,
+        studentLoginLink,
+      });
     } catch (err) {
       setSubmitPhase('idle');
 
@@ -525,8 +509,10 @@ function TutorHomeworkCreateContent() {
     tasks,
     meta,
     selectedStudentIds,
+    tutorStudents,
     assignMode,
     selectedGroupId,
+    groups,
     notifyEnabled,
     notifyTemplate,
     materials,
@@ -535,8 +521,44 @@ function TutorHomeworkCreateContent() {
     queryClient,
     inviteWebLink,
     studentLoginLink,
-    studentSignupLink,
   ]);
+
+  // ── "Создать ещё" — reset form, preserve group selection ──
+
+  const handleCreateAnother = useCallback(() => {
+    // Revoke blob URLs from current tasks to prevent memory leaks
+    for (const task of tasksRef.current) {
+      revokeObjectUrl(task.task_image_preview_url);
+    }
+
+    // If group mode, recompute student IDs directly (effect won't re-fire — deps unchanged)
+    if (assignMode === 'group' && selectedGroupId) {
+      const memberTutorStudentIds = new Set(
+        memberships
+          .filter((m) => m.tutor_group_id === selectedGroupId && m.is_active)
+          .map((m) => m.tutor_student_id),
+      );
+      const mappedStudentIds = tutorStudents
+        .filter((s) => memberTutorStudentIds.has(s.id))
+        .map((s) => s.student_id);
+      setSelectedStudentIds(new Set(mappedStudentIds));
+    } else {
+      setSelectedStudentIds(new Set());
+    }
+
+    setMeta({ title: '', subject: 'physics', topic: '', deadline: '', workflow_mode: 'guided_chat' });
+    setTasks([createEmptyTask()]);
+    setMaterials([]);
+    setNotifyEnabled(true);
+    setNotifyTemplate('');
+    setSaveAsTemplate(false);
+    setSubmitPhase('idle');
+    createdAssignmentIdRef.current = null;
+    setErrors({});
+    setSuccessResult(null);
+    setShowAdvanced(false);
+    // assignMode and selectedGroupId intentionally preserved
+  }, [assignMode, selectedGroupId, memberships, tutorStudents]);
 
   const isSubmitting = submitPhase !== 'idle' && submitPhase !== 'done';
 
@@ -554,6 +576,18 @@ function TutorHomeworkCreateContent() {
         return notifyEnabled ? 'Отправить ДЗ' : 'Создать ДЗ';
     }
   })();
+
+  // ── Inline success state (Phase 4) ──
+  if (successResult) {
+    return (
+      <TutorLayout>
+        <HWSubmitSuccess
+          result={successResult}
+          onCreateAnother={handleCreateAnother}
+        />
+      </TutorLayout>
+    );
+  }
 
   return (
     <TutorLayout>
@@ -573,19 +607,41 @@ function TutorHomeworkCreateContent() {
 
         {/* ── L0: Always visible ── */}
 
-        {/* Topic (L0 — key field for auto-title and KB search) */}
-        <section className="space-y-2">
-          <Label htmlFor="hw-topic">Тема</Label>
-          <Input
-            id="hw-topic"
-            placeholder="Кинематика, законы Ньютона..."
-            value={meta.topic}
-            onChange={(e) => setMeta({ ...meta, topic: e.target.value })}
-            className="text-base"
-          />
-          {errors._topicHint && !meta.topic.trim() && (
-            <p className="text-xs text-amber-600">{errors._topicHint}</p>
-          )}
+        {/* Topic + Subject (L0 — always visible) */}
+        <section className="space-y-4">
+          <div className="space-y-2">
+            <Label htmlFor="hw-topic">Тема</Label>
+            <Input
+              id="hw-topic"
+              placeholder="Кинематика, законы Ньютона..."
+              value={meta.topic}
+              onChange={(e) => setMeta({ ...meta, topic: e.target.value })}
+              className="text-base"
+            />
+            {errors._topicHint && !meta.topic.trim() && (
+              <p className="text-xs text-amber-600">{errors._topicHint}</p>
+            )}
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="hw-subject">Предмет *</Label>
+            <Select
+              value={meta.subject}
+              onValueChange={(v) => setMeta({ ...meta, subject: v as HomeworkSubject })}
+            >
+              <SelectTrigger id="hw-subject" className="text-base">
+                <SelectValue placeholder="Выберите предмет" />
+              </SelectTrigger>
+              <SelectContent>
+                {SUBJECTS.map((s) => (
+                  <SelectItem key={s.value} value={s.value}>
+                    {s.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {errors.subject && <p className="text-sm text-destructive">{errors.subject}</p>}
+          </div>
         </section>
 
         {/* Recipients (L0) */}
@@ -632,7 +688,7 @@ function TutorHomeworkCreateContent() {
             {showAdvanced ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
             {showAdvanced ? 'Скрыть параметры' : 'Расширенные параметры'}
             {/* Dot indicator: show when L1 has user data but collapsed */}
-            {!showAdvanced && (meta.title.trim() || meta.subject !== 'physics' || meta.deadline.trim() || meta.workflow_mode !== 'guided_chat' || materials.length > 0) && (
+            {!showAdvanced && (meta.title.trim() || meta.deadline.trim() || meta.workflow_mode !== 'guided_chat' || materials.length > 0) && (
               <span className="inline-block w-2 h-2 rounded-full bg-primary" />
             )}
           </button>

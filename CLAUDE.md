@@ -166,6 +166,11 @@ Legacy student-only система (`homework_sets`, `homework_tasks`, `homework
 - **Classic** (`workflow_mode: 'classic'`): ученик отправляет фото решений через Telegram-бот или веб-кабинет, AI проверяет
 - **Guided Chat** (`workflow_mode: 'guided_chat'`): пошаговый AI-чат, ведёт ученика через каждую задачу с подсказками и проверкой
 
+**Дефолты конструктора ДЗ** (`TutorHomeworkCreate.tsx`):
+- `subject: 'physics'` — предмет по умолчанию (целевой сегмент: репетиторы физики ЕГЭ/ОГЭ)
+- `workflow_mode: 'guided_chat'` — guided mode по умолчанию
+- Если репетитор меняет эти значения — открыть L1 («Расширенные параметры»)
+
 ### Ключевые файлы
 - `src/lib/studentHomeworkApi.ts` — API-клиент для студентов (задания, submissions, guided chat)
 - `src/hooks/useStudentHomework.ts` — React hooks для студенческого ДЗ
@@ -322,9 +327,23 @@ Legacy student-only система (`homework_sets`, `homework_tasks`, `homework
 При добавлении задачи в ДЗ — текст фиксируется в homework_kb_tasks.task_text_snapshot.
 Ученик видит snapshot, не оригинал. Репетитор может редактировать snapshot в drawer.
 
+### Конструктор ДЗ — L0/L1 архитектура (Phase 3, 2026-03-17)
+
+`TutorHomeworkCreate.tsx` — single-page конструктор с progressive disclosure:
+
+**L0 (всегда видно):** Тема → Кому (`HWAssignSection`) → Задачи (`HWTasksSection`) → `HWActionBar`
+**L1 (collapsible, «Расширенные параметры»):** `HWExpandedParams` (название, предмет, дедлайн, режим) + `HWMaterialsSection`
+
+Правила:
+- Dot indicator на L1-кнопке: показывается если `title`, `subject !== 'physics'`, `deadline`, `workflow_mode !== 'guided_chat'` или `materials.length > 0`
+- L1 auto-expand при ошибке валидации `subject`
+- `_topicHint` — soft warning (non-blocking): ключи с суффиксом `Hint` не считаются blocking errors
+- Поле «Тема» в L0 (контейнере), НЕ в `HWExpandedParams`
+- `HWTasksSection` не содержит `materials` props — материалы в L1 контейнера
+
 ### Интеграция KB → конструктор ДЗ (KBPickerSheet)
 
-Точка интеграции KB → черновик ДЗ в визарде:
+Точка интеграции KB → черновик ДЗ в конструкторе:
 - `src/components/tutor/KBPickerSheet.tsx` — Sheet-drawer с двумя вкладками (Каталог Сократа / Моя база), drill-down по темам/папкам, batch-select. Монтируется в `TutorHomeworkCreate.tsx`.
 - `kbTaskToDraftTask(task: KBTask): DraftTask` в `src/components/tutor/homework-create/HWTasksSection.tsx` — канонический конвертер KB-задачи в черновик. Заполняет поля провенанса: `kb_task_id`, `kb_source`, `kb_snapshot_text`, `kb_snapshot_answer`, `kb_snapshot_solution`, `kb_attachment_url`.
 

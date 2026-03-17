@@ -1,15 +1,7 @@
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
-import type { HomeworkSubject } from '@/lib/tutorHomeworkApi';
-import { type MetaState, SUBJECTS } from './types';
+import type { MetaState } from './types';
 
 export interface HWExpandedParamsProps {
   meta: MetaState;
@@ -20,8 +12,8 @@ export interface HWExpandedParamsProps {
 }
 
 /**
- * L1 (collapsible) meta fields: title, subject, deadline, workflow mode.
- * Topic field is rendered separately in L0 by the container.
+ * L1 (collapsible) meta fields: title, deadline, workflow mode.
+ * Topic + Subject are rendered in L0 by the container (always visible).
  */
 export function HWExpandedParams({ meta, onChange, errors, autoTitle }: HWExpandedParamsProps) {
   return (
@@ -41,26 +33,6 @@ export function HWExpandedParams({ meta, onChange, errors, autoTitle }: HWExpand
           </p>
         )}
         {errors.title && <p className="text-sm text-destructive">{errors.title}</p>}
-      </div>
-
-      <div className="space-y-2">
-        <Label>Предмет *</Label>
-        <Select
-          value={meta.subject}
-          onValueChange={(v) => onChange({ ...meta, subject: v as HomeworkSubject })}
-        >
-          <SelectTrigger className="text-base">
-            <SelectValue placeholder="Выберите предмет" />
-          </SelectTrigger>
-          <SelectContent>
-            {SUBJECTS.map((s) => (
-              <SelectItem key={s.value} value={s.value}>
-                {s.label}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        {errors.subject && <p className="text-sm text-destructive">{errors.subject}</p>}
       </div>
 
       <div className="space-y-2">

@@ -4,8 +4,8 @@
 **Тип задачи (doc 20):** Тип B — рефакторинг flow
 **Job:** P0.1 — Собрать ДЗ по теме после урока
 **Wedge:** Собрать ДЗ за 5–10 минут вместо 30–60
-**Статус:** Phase 1 complete (2026-03-16) — Phase 2 ready for development
-**Дата:** 2026-03-16
+**Статус:** Phase 1 ✅ (2026-03-16) · Phase 2 ✅ (2026-03-16) · Phase 3 ✅ (2026-03-17) · Phase 4 ✅ (2026-03-17)
+**Дата:** 2026-03-17
 
 ---
 
@@ -119,7 +119,7 @@ src/components/tutor/homework-create/
 
 **Результат (2026-03-16):** компоненты извлечены в `src/components/tutor/homework-create/`. Дополнительно исправлены: `crypto.randomUUID()` → `generateUUID()` (Safari 15.0–15.3), `Card animate={false}`, `sm:` → `md:`, `new Date()` → `parseISO`, copy «чат с AI» → «Пошаговое решение с подсказками», placeholder задачи. `handleSubmit`, `KBPickerSheet`, image upload, template logic не тронуты.
 
-### Phase 2: Single-page layout
+### Phase 2: Single-page layout ✅ DONE 2026-03-16
 
 **Цель:** убрать step-навигацию, показать все секции на одной странице.
 
@@ -143,7 +143,9 @@ src/components/tutor/homework-create/
 
 **Критерий Phase 2 done:** single-page работает, все поля доступны, submit отправляет ДЗ. lint/build/test pass.
 
-### Phase 3: Progressive disclosure + polish
+**Результат (2026-03-16):** step-навигация убрана. Все секции на одной странице. Auto-title `ДЗ {topic} {dd.MM}` через `useMemo`. `validateAll()` — inline errors. Soft topic hint (amber, не красный). Groups/memberships fetch без step-gating. `kbTaskToDraftTask` перенесён в `HWTasksSection.tsx`. `CLAUDE.md` и `kb-tasks.md` обновлены.
+
+### Phase 3: Progressive disclosure + polish ✅ DONE 2026-03-17
 
 **Цель:** реализовать L0/L1 разделение и mobile layout.
 
@@ -156,7 +158,22 @@ src/components/tutor/homework-create/
 
 **Критерий Phase 3 done:** L0 path работает за 4–6 кликов. Mobile и desktop layouts корректны.
 
-### Phase 4: Inline success state
+**Результат (2026-03-17):**
+- L0 (всегда видно): Тема, Кому (HWAssignSection), Задачи, ActionBar
+- L1 (collapsible, CSS grid animation): Название, Предмет, Дедлайн, Режим (HWExpandedParams) + Материалы (HWMaterialsSection)
+- Кнопка «Расширенные параметры» / «Скрыть параметры» + dot indicator при наличии данных в L1
+- Dot indicator учитывает: `title`, `subject !== 'physics'`, `deadline`, `workflow_mode !== 'guided_chat'`, `materials`
+- Auto-expand L1 при ошибке валидации скрытого `subject`
+- `_topicHint` non-blocking: фильтрация Hint-ключей из blocking check
+- Default `subject: 'physics'` — L0 fast path без открытия L1
+- Default `workflow_mode: 'guided_chat'` — guided mode по умолчанию
+- `HWTasksSection`: материалы вынесены в L1 (удалены props `materials`/`onMaterialsChange`)
+- `HWExpandedParams`: поле Тема перенесено в L0 контейнер
+- lint/build/smoke-check pass
+
+**Out of scope (Phase 3):** компактный `HomeworkRecipientPicker` (compact dropdown), `HWInstructionSection` (поле не существует в БД), `HWHeaderSection` как отдельный компонент. Эти пункты — кандидаты в Phase 5 или отдельный subtask.
+
+### Phase 4: Inline success state ✅ DONE 2026-03-17
 
 **Цель:** после отправки показать результат на той же странице.
 
@@ -167,6 +184,16 @@ src/components/tutor/homework-create/
 5. «Создать ещё» сбрасывает форму, но сохраняет `selectedGroupId`
 
 **Критерий Phase 4 done:** полный цикл create→success на одной странице. lint/build/test pass.
+
+**Результат (2026-03-17):**
+- `HWSubmitSuccess.tsx` — inline success state, заменяет toast+navigate
+- Per-student `StudentDeliveryStatus`: ✅ Уведомлен / ⚠️ Ошибка доставки / ✓ ДЗ назначено / ⚠️ нет Telegram
+- `deliveryFailed` поле отделяет реальную ошибку Telegram от «уведомления отключены»
+- «Создать ещё»: revoke blob URLs (memory-safe), recompute group students без effect re-trigger
+- Subject вынесен из L1 в L0 (между Тема и Кому) — всегда виден, нельзя пропустить
+- Dot indicator L1 обновлён: subject убран (он в L0)
+- `handleSubmit` финальный блок: success state вместо toast, 4-phase core logic не тронут
+- lint/build/smoke-check pass
 
 ---
 
