@@ -532,6 +532,7 @@ export async function postTutorThreadMessage(
   options?: {
     visible_to_student?: boolean;
     task_order?: number;
+    image_url?: string;
   },
 ): Promise<{ id: string; created_at: string }> {
   return requestHomeworkApi<{ id: string; created_at: string }>(
@@ -542,6 +543,7 @@ export async function postTutorThreadMessage(
         content,
         visible_to_student: options?.visible_to_student ?? true,
         task_order: options?.task_order,
+        image_url: options?.image_url,
       }),
     },
   );

@@ -1,16 +1,20 @@
-import { useState, useCallback, useMemo } from 'react';
+import { useState, useCallback, useMemo, useRef } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
-import { Loader2, Send } from 'lucide-react';
+import { Skeleton } from '@/components/ui/skeleton';
+import { Loader2, Send, ImageIcon, Paperclip, X } from 'lucide-react';
+import { MathText } from '@/components/kb/ui/MathText';
 import { parseISO } from 'date-fns';
 import { toast } from 'sonner';
 import {
   getTutorStudentGuidedThread,
   postTutorThreadMessage,
+  getHomeworkImageSignedUrl,
+  uploadTutorHomeworkTaskImage,
   type TutorStudentGuidedThreadResponse,
 } from '@/lib/tutorHomeworkApi';
 import {
@@ -34,23 +38,51 @@ const TASK_STATUS_LABELS: Record<string, string> = {
   skipped: 'Пропущена',
 };
 
+// ─── Message image (resolves storage:// refs) ──────────────────────────────
+
+function MessageImage({ imageRef }: { imageRef: string }) {
+  const imageQuery = useQuery<string | null>({
+    queryKey: ['tutor', 'homework', 'thread-image', imageRef],
+    queryFn: () => getHomeworkImageSignedUrl(imageRef, { defaultBucket: 'homework-images' }),
+    staleTime: TUTOR_STALE_TIME_MS,
+    gcTime: TUTOR_GC_TIME_MS,
+    retry: 1,
+  });
+
+  if (imageQuery.isLoading) return <Skeleton className="h-20 w-20 rounded-md" />;
+  if (!imageQuery.data) return <div className="h-20 w-20 rounded-md bg-muted flex items-center justify-center"><ImageIcon className="h-5 w-5 text-muted-foreground" /></div>;
+
+  return (
+    <a href={imageQuery.data} target="_blank" rel="noreferrer" className="inline-block rounded-md border bg-background p-0.5 hover:opacity-90 transition-opacity">
+      <img src={imageQuery.data} alt="Вложение" className="h-20 w-auto max-w-[140px] rounded-sm object-cover" loading="lazy" />
+    </a>
+  );
+}
+
+// ─── Main component ─────────────────────────────────────────────────────────
+
 export function GuidedThreadViewer({
   assignmentId,
   studentId,
+  enabled = true,
 }: {
   assignmentId: string;
   studentId: string;
+  /** Controls whether the thread query fires. Parent should pass false when viewer is collapsed. */
+  enabled?: boolean;
 }) {
-  const [opened, setOpened] = useState(false);
   const [taskFilter, setTaskFilter] = useState<number | 'all'>('all');
   const [messageText, setMessageText] = useState('');
   const [hiddenNote, setHiddenNote] = useState(false);
   const [isSending, setIsSending] = useState(false);
+  const [attachedFile, setAttachedFile] = useState<File | null>(null);
+  const [attachPreview, setAttachPreview] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const threadQuery = useQuery<TutorStudentGuidedThreadResponse>({
     queryKey: ['tutor', 'homework', 'guided-thread', assignmentId, studentId],
     queryFn: () => getTutorStudentGuidedThread(assignmentId, studentId),
-    enabled: opened,
+    enabled,
     staleTime: TUTOR_STALE_TIME_MS,
     gcTime: TUTOR_GC_TIME_MS,
     retry: createTutorRetry(['tutor', 'homework', 'guided-thread', assignmentId, studentId] as const),
@@ -69,16 +101,46 @@ export function GuidedThreadViewer({
     return allMessages.filter((message) => message.task_order === taskFilter);
   }, [taskFilter, threadQuery.data?.thread.homework_tutor_thread_messages]);
 
+  const handleFileSelect = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (file.size > 10 * 1024 * 1024) {
+      toast.error('Файл слишком большой (макс. 10 МБ)');
+      return;
+    }
+    setAttachedFile(file);
+    // Revoke previous preview URL to avoid memory leak
+    setAttachPreview((prev) => {
+      if (prev) URL.revokeObjectURL(prev);
+      return file.type.startsWith('image/') ? URL.createObjectURL(file) : null;
+    });
+    // Reset input so the same file can be re-selected
+    e.target.value = '';
+  }, []);
+
+  const clearAttachment = useCallback(() => {
+    if (attachPreview) URL.revokeObjectURL(attachPreview);
+    setAttachedFile(null);
+    setAttachPreview(null);
+  }, [attachPreview]);
+
   const handleSendMessage = useCallback(async () => {
     const trimmed = messageText.trim();
-    if (!trimmed || isSending) return;
+    if ((!trimmed && !attachedFile) || isSending) return;
     setIsSending(true);
     try {
-      await postTutorThreadMessage(assignmentId, studentId, trimmed, {
+      let imageUrl: string | undefined;
+      if (attachedFile) {
+        const upload = await uploadTutorHomeworkTaskImage(attachedFile);
+        imageUrl = upload.storageRef;
+      }
+      await postTutorThreadMessage(assignmentId, studentId, trimmed || '(файл)', {
         visible_to_student: !hiddenNote,
         task_order: taskFilter === 'all' ? undefined : taskFilter,
+        image_url: imageUrl,
       });
       setMessageText('');
+      clearAttachment();
       void threadQuery.refetch();
       toast.success(hiddenNote ? 'Заметка сохранена' : 'Сообщение отправлено');
     } catch (err) {
@@ -86,24 +148,14 @@ export function GuidedThreadViewer({
     } finally {
       setIsSending(false);
     }
-  }, [messageText, hiddenNote, isSending, assignmentId, studentId, taskFilter, threadQuery]);
+  }, [messageText, attachedFile, hiddenNote, isSending, assignmentId, studentId, taskFilter, threadQuery, clearAttachment]);
 
   return (
     <Card className="border-dashed">
       <CardHeader className="pb-3">
-        <div className="flex items-center justify-between gap-2">
-          <CardTitle className="text-sm">Переписка по ДЗ</CardTitle>
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={() => setOpened((prev) => !prev)}
-          >
-            {opened ? 'Скрыть' : 'Показать переписку'}
-          </Button>
-        </div>
+        <CardTitle className="text-sm">Переписка по ДЗ</CardTitle>
       </CardHeader>
-      {opened && (
-        <CardContent className="space-y-3">
+      <CardContent className="space-y-3">
           {threadQuery.isLoading ? (
             <div className="text-xs text-muted-foreground flex items-center gap-2">
               <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -169,9 +221,10 @@ export function GuidedThreadViewer({
                           {parseISO(message.created_at).toLocaleString('ru-RU')}
                         </span>
                       </div>
-                      <div className="whitespace-pre-wrap leading-relaxed break-words">
-                        {message.content}
-                      </div>
+                      <MathText text={message.content} className="whitespace-pre-wrap leading-relaxed break-words" />
+                      {message.image_url && (
+                        <MessageImage imageRef={message.image_url} />
+                      )}
                     </div>
                   ))
                 )}
@@ -189,7 +242,38 @@ export function GuidedThreadViewer({
                     {hiddenNote ? 'Скрытая заметка (для AI, не видна ученику)' : 'Сообщение ученику'}
                   </Label>
                 </div>
+                {/* Attachment preview */}
+                {attachedFile && (
+                  <div className="flex items-center gap-2 rounded-md border bg-muted/30 p-2">
+                    {attachPreview ? (
+                      <img src={attachPreview} alt="Превью" className="h-12 w-auto max-w-[80px] rounded-sm object-cover" />
+                    ) : (
+                      <Paperclip className="h-4 w-4 text-muted-foreground" />
+                    )}
+                    <span className="text-xs text-muted-foreground truncate flex-1">{attachedFile.name}</span>
+                    <Button variant="ghost" size="sm" className="h-6 w-6 p-0 shrink-0" onClick={clearAttachment}>
+                      <X className="h-3.5 w-3.5" />
+                    </Button>
+                  </div>
+                )}
                 <div className="flex items-end gap-2">
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept="image/*"
+                    className="hidden"
+                    onChange={handleFileSelect}
+                  />
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="shrink-0 px-2"
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={isSending}
+                    title="Прикрепить файл"
+                  >
+                    <Paperclip className="h-4 w-4" />
+                  </Button>
                   <textarea
                     value={messageText}
                     onChange={(e) => setMessageText(e.target.value)}
@@ -207,7 +291,7 @@ export function GuidedThreadViewer({
                   <Button
                     size="sm"
                     onClick={() => void handleSendMessage()}
-                    disabled={!messageText.trim() || isSending}
+                    disabled={(!messageText.trim() && !attachedFile) || isSending}
                     className="shrink-0"
                   >
                     {isSending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
@@ -216,8 +300,7 @@ export function GuidedThreadViewer({
               </div>
             </>
           )}
-        </CardContent>
-      )}
+      </CardContent>
     </Card>
   );
 }

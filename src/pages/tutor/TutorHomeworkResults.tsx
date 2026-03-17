@@ -310,14 +310,22 @@ function GuidedStudentRow({
   };
   assignmentId: string;
 }) {
+  const [expanded, setExpanded] = useState(false);
+
   return (
     <div className="border rounded-md">
-      <div className="p-3">
-        <p className="font-medium text-sm">{student.name ?? 'Без имени'}</p>
-      </div>
-      <div className="px-3 pb-3">
-        <GuidedThreadViewer assignmentId={assignmentId} studentId={student.student_id} />
-      </div>
+      <button
+        onClick={() => setExpanded(!expanded)}
+        className="w-full flex items-center gap-3 p-3 text-left hover:bg-muted/50 transition-colors"
+      >
+        <p className="font-medium text-sm flex-1">{student.name ?? 'Без имени'}</p>
+        <ChevronDown className={`h-4 w-4 text-muted-foreground transition-transform ${expanded ? 'rotate-180' : ''}`} />
+      </button>
+      {expanded && (
+        <div className="px-3 pb-3">
+          <GuidedThreadViewer assignmentId={assignmentId} studentId={student.student_id} />
+        </div>
+      )}
     </div>
   );
 }

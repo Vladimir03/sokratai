@@ -186,6 +186,15 @@ Legacy student-only система (`homework_sets`, `homework_tasks`, `homework
 - `TutorHomework.tsx` — сортировка (created_desc / deadline_asc) + deadline urgency badges (overdue/today/soon/normal)
 - **Правило**: dense surfaces (collapsed card headers, lists) → `stripLatex` + truncation; expanded/detail views → полный `MathText`
 
+### GuidedThreadViewer — UX improvements (Sprint 2, 2026-03-17)
+- Убран лишний клик «Показать переписку» — тред загружается автоматически при раскрытии ученика
+- `enabled` prop контролирует lazy-loading запроса (на Results-странице — по expand ученика)
+- Сообщения рендерятся через `MathText` (LaTeX формулы в AI/tutor сообщениях)
+- `MessageImage` компонент резолвит `storage://` refs через `getHomeworkImageSignedUrl` для отображения вложений
+- Репетитор может прикрепить изображение к сообщению (upload через `uploadTutorHomeworkTaskImage`, ref сохраняется в `image_url`)
+- Student-side `GuidedChatMessage` тоже отображает `image_url` через `MessageAttachment` (резолвит через `getStudentTaskImageSignedUrl`)
+- Backend `handleTutorPostMessage` принимает optional `image_url` в body
+
 ### Таблицы БД
 - `homework_tutor_assignments` — задания (draft/active/archived, workflow_mode)
 - `homework_tutor_tasks` — задачи внутри заданий

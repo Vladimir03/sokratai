@@ -4,7 +4,7 @@
 **Продукт:** Сократ
 **Версия:** v0.1
 **Дата:** 2026-03-17
-**Статус:** Sprint 1 implemented (2026-03-17), Sprint 2 ready for implementation
+**Статус:** Sprint 1 implemented (2026-03-17), Sprint 2 implemented (2026-03-17)
 **Родительский документ:** `docs/features/specs/homework-ux-audit-and-improvements.md`
 
 ---

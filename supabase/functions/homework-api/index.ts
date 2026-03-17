@@ -3507,6 +3507,7 @@ async function handleTutorPostMessage(
   const taskOrder = typeof b.task_order === "number"
     ? b.task_order
     : (thread.current_task_order as number);
+  const imageUrl = typeof b.image_url === "string" && b.image_url.trim() ? b.image_url.trim() : null;
 
   // Insert message with role = 'tutor'
   const { data: msg, error: msgErr } = await db
@@ -3515,6 +3516,7 @@ async function handleTutorPostMessage(
       thread_id: thread.id,
       role: "tutor",
       content,
+      image_url: imageUrl,
       task_order: taskOrder,
       message_kind: visibleToStudent ? "tutor_message" : "tutor_note",
       visible_to_student: visibleToStudent,
