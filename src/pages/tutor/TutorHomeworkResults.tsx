@@ -53,6 +53,9 @@ import {
   TUTOR_STALE_TIME_MS,
   TUTOR_GC_TIME_MS,
 } from '@/hooks/tutorQueryOptions';
+import { parseISO } from 'date-fns';
+import { MathText } from '@/components/kb/ui/MathText';
+import { stripLatex } from '@/components/kb/ui/stripLatex';
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
@@ -224,7 +227,9 @@ function TaskItemReview({
     <Card>
       <CardContent className="p-4 space-y-3">
         <div className="flex items-center justify-between">
-          <span className="text-sm font-medium">Задача {item.task_order_num}: {item.task_text.length > 60 ? item.task_text.slice(0, 60) + '...' : item.task_text}</span>
+          <span className="text-sm font-medium truncate min-w-0">
+            Задача {item.task_order_num}: {(() => { const t = stripLatex(item.task_text); return t.length > 80 ? t.slice(0, 80) + '…' : t; })()}
+          </span>
           <span className="text-xs text-muted-foreground">{item.ai_score ?? '—'}/{item.max_score}</span>
         </div>
 
@@ -232,7 +237,7 @@ function TaskItemReview({
         {item.student_text && (
           <div className="text-sm bg-background p-2 rounded border">
             <span className="text-xs text-muted-foreground block mb-1">Ответ ученика:</span>
-            {item.student_text}
+            <MathText text={item.student_text} className="whitespace-pre-wrap break-words" />
           </div>
         )}
 
@@ -247,9 +252,9 @@ function TaskItemReview({
 
         {/* AI results */}
         {item.ai_feedback && (
-          <div className="text-sm bg-background p-2 rounded border whitespace-pre-wrap leading-relaxed">
+          <div className="text-sm bg-background p-2 rounded border">
             <span className="text-xs text-muted-foreground block mb-1">AI отзыв:</span>
-            {item.ai_feedback}
+            <MathText text={item.ai_feedback} className="whitespace-pre-wrap leading-relaxed" />
           </div>
         )}
 
@@ -580,8 +585,8 @@ function TutorHomeworkResultsContent() {
     }
     for (const group of Object.values(groups)) {
       group.sort((a, b) => {
-        const aTime = a.submitted_at ? new Date(a.submitted_at).getTime() : 0;
-        const bTime = b.submitted_at ? new Date(b.submitted_at).getTime() : 0;
+        const aTime = a.submitted_at ? parseISO(a.submitted_at).getTime() : 0;
+        const bTime = b.submitted_at ? parseISO(b.submitted_at).getTime() : 0;
         return bTime - aTime;
       });
     }
@@ -629,7 +634,7 @@ function TutorHomeworkResultsContent() {
                 <p className="text-sm text-muted-foreground">
                   {SUBJECT_LABELS[assignment.subject] ?? assignment.subject}
                   {assignment.deadline && (
-                    <> · Дедлайн: {new Date(assignment.deadline).toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' })}</>
+                    <> · Дедлайн: {(() => { try { const d = parseISO(assignment.deadline); return isNaN(d.getTime()) ? '—' : d.toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' }); } catch { return '—'; } })()}</>
                   )}
                 </p>
               </>

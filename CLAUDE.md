@@ -180,6 +180,12 @@ Legacy student-only система (`homework_sets`, `homework_tasks`, `homework
 - `supabase/functions/homework-api/` — Edge function CRUD (8 маршрутов)
 - `supabase/functions/homework-reminder/` — напоминания о ДЗ (cron)
 
+### LaTeX в деталях и результатах ДЗ (Sprint 1, 2026-03-17)
+- `TutorHomeworkDetail.tsx` — task_text, correct_answer, student_text, ai_feedback рендерятся через `MathText`
+- `TutorHomeworkResults.tsx` — student_text, ai_feedback через `MathText`; task header в review-карточке — `stripLatex` (compact plain-text preview)
+- `TutorHomework.tsx` — сортировка (created_desc / deadline_asc) + deadline urgency badges (overdue/today/soon/normal)
+- **Правило**: dense surfaces (collapsed card headers, lists) → `stripLatex` + truncation; expanded/detail views → полный `MathText`
+
 ### Таблицы БД
 - `homework_tutor_assignments` — задания (draft/active/archived, workflow_mode)
 - `homework_tutor_tasks` — задачи внутри заданий

@@ -33,6 +33,7 @@ import {
 } from '@/lib/tutorHomeworkApi';
 import { getSubjectLabel } from '@/types/homework';
 import { parseISO } from 'date-fns';
+import { MathText } from '@/components/kb/ui/MathText';
 import {
   createTutorRetry,
   TUTOR_STALE_TIME_MS,
@@ -176,11 +177,11 @@ function TasksList({ details }: { details: TutorHomeworkAssignmentDetails }) {
               {idx + 1}
             </div>
             <div className="flex-1 min-w-0">
-              <p className="text-sm whitespace-pre-wrap break-words">{task.task_text}</p>
+              <MathText text={task.task_text} className="text-sm whitespace-pre-wrap break-words" />
               <TaskImagePreview assignmentId={details.assignment.id} taskId={task.id} taskImageUrl={task.task_image_url} />
               <div className="flex items-center gap-3 mt-1 text-xs text-muted-foreground">
                 <span>Макс. баллов: {task.max_score}</span>
-                {task.correct_answer && <span>Ответ: {task.correct_answer}</span>}
+                {task.correct_answer && <span>Ответ: <MathText text={task.correct_answer} as="span" className="font-mono" /></span>}
               </div>
             </div>
           </div>
@@ -361,12 +362,12 @@ function SubmissionItemRow({ item }: { item: TutorHomeworkSubmissionItem }) {
 
       {/* Student text */}
       {item.student_text && (
-        <p className="text-sm bg-background rounded p-2 border whitespace-pre-wrap break-words">{item.student_text}</p>
+        <MathText text={item.student_text} className="text-sm bg-background rounded p-2 border whitespace-pre-wrap break-words" />
       )}
 
       {/* AI feedback */}
       {item.ai_feedback && (
-        <p className="text-xs text-muted-foreground italic whitespace-pre-wrap leading-relaxed">{item.ai_feedback}</p>
+        <MathText text={item.ai_feedback} className="text-xs text-muted-foreground italic whitespace-pre-wrap leading-relaxed" />
       )}
 
       {/* Error type */}

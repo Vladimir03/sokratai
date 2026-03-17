@@ -1,5 +1,6 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useMemo } from 'react';
 import { Link } from 'react-router-dom';
+import { parseISO, isToday, isPast, isTomorrow, differenceInDays } from 'date-fns';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -9,6 +10,7 @@ import TutorGuard from '@/components/TutorGuard';
 import { TutorLayout } from '@/components/tutor/TutorLayout';
 import { TutorDataStatus } from '@/components/tutor/TutorDataStatus';
 import { useTutorHomeworkAssignments } from '@/hooks/useTutorHomework';
+import { cn } from '@/lib/utils';
 import type {
   HomeworkAssignmentsFilter,
   HomeworkAssignmentStatus,
@@ -57,12 +59,93 @@ const STATUS_CONFIG: Record<HomeworkAssignmentStatus, { label: string; className
   },
 };
 
+// ─── Sort ────────────────────────────────────────────────────────────────────
+
+type HomeworkSortKey = 'created_desc' | 'deadline_asc';
+
+const SORT_OPTIONS: { value: HomeworkSortKey; label: string }[] = [
+  { value: 'created_desc', label: 'Новые первыми' },
+  { value: 'deadline_asc', label: 'По дедлайну' },
+];
+
+function sortAssignments(
+  items: TutorHomeworkAssignmentListItem[],
+  sortKey: HomeworkSortKey,
+): TutorHomeworkAssignmentListItem[] {
+  const sorted = [...items];
+  switch (sortKey) {
+    case 'created_desc':
+      sorted.sort((a, b) => {
+        const da = a.created_at ? parseISO(a.created_at).getTime() : 0;
+        const db = b.created_at ? parseISO(b.created_at).getTime() : 0;
+        return (isNaN(db) ? 0 : db) - (isNaN(da) ? 0 : da);
+      });
+      break;
+    case 'deadline_asc':
+      sorted.sort((a, b) => {
+        const ta = a.deadline ? parseISO(a.deadline).getTime() : NaN;
+        const tb = b.deadline ? parseISO(b.deadline).getTime() : NaN;
+        const aValid = !isNaN(ta);
+        const bValid = !isNaN(tb);
+        if (!aValid && !bValid) return 0;
+        if (!aValid) return 1;
+        if (!bValid) return -1;
+        return ta - tb;
+      });
+      break;
+  }
+  return sorted;
+}
+
+// ─── Deadline urgency ────────────────────────────────────────────────────────
+
+type DeadlineUrgency = 'overdue' | 'today' | 'soon' | 'normal' | 'none';
+
+function getDeadlineUrgency(deadline: string | null): DeadlineUrgency {
+  if (!deadline) return 'none';
+  try {
+    const d = parseISO(deadline);
+    if (isNaN(d.getTime())) return 'none';
+    if (isPast(d) && !isToday(d)) return 'overdue';
+    if (isToday(d)) return 'today';
+    if (isTomorrow(d) || differenceInDays(d, new Date()) <= 2) return 'soon';
+    return 'normal';
+  } catch {
+    return 'none';
+  }
+}
+
+const URGENCY_CONFIG: Record<DeadlineUrgency, { label?: string; className: string; iconClassName: string }> = {
+  overdue: {
+    label: 'Просрочено',
+    className: 'text-red-600 font-medium',
+    iconClassName: 'text-red-500',
+  },
+  today: {
+    label: 'Сегодня',
+    className: 'text-amber-600 font-medium',
+    iconClassName: 'text-amber-500',
+  },
+  soon: {
+    className: 'text-amber-500',
+    iconClassName: 'text-amber-400',
+  },
+  normal: {
+    className: '',
+    iconClassName: '',
+  },
+  none: {
+    className: '',
+    iconClassName: '',
+  },
+};
+
 // ─── Utilities ───────────────────────────────────────────────────────────────
 
 function formatDeadline(deadline: string | null): string | null {
   if (!deadline) return null;
   try {
-    const d = new Date(deadline);
+    const d = parseISO(deadline);
     if (isNaN(d.getTime())) return null;
     return d.toLocaleDateString('ru-RU', {
       day: 'numeric',
@@ -201,12 +284,16 @@ function AssignmentCard({ item }: { item: TutorHomeworkAssignmentListItem }) {
             </span>
 
             {/* Deadline */}
-            {deadlineStr && (
-              <span className="flex items-center gap-1 ml-auto" title="Дедлайн">
-                <Clock className="h-3.5 w-3.5" />
-                {deadlineStr}
-              </span>
-            )}
+            {deadlineStr && (() => {
+              const urgency = getDeadlineUrgency(item.deadline);
+              const cfg = URGENCY_CONFIG[urgency];
+              return (
+                <span className={cn('flex items-center gap-1 ml-auto', cfg.className)} title="Дедлайн">
+                  <Clock className={cn('h-3.5 w-3.5', cfg.iconClassName)} />
+                  {cfg.label ? `${cfg.label} · ${deadlineStr}` : deadlineStr}
+                </span>
+              );
+            })()}
           </div>
         </CardContent>
       </Card>
@@ -218,6 +305,7 @@ function AssignmentCard({ item }: { item: TutorHomeworkAssignmentListItem }) {
 
 function TutorHomeworkContent() {
   const [filter, setFilter] = useState<HomeworkAssignmentsFilter>('all');
+  const [sortKey, setSortKey] = useState<HomeworkSortKey>('created_desc');
 
   const {
     assignments,
@@ -228,6 +316,11 @@ function TutorHomeworkContent() {
     isRecovering,
     failureCount,
   } = useTutorHomeworkAssignments(filter);
+
+  const sortedAssignments = useMemo(
+    () => sortAssignments(assignments, sortKey),
+    [assignments, sortKey],
+  );
 
   const hasData = assignments.length > 0;
   const showSkeleton = loading && !hasData && !error;
@@ -275,21 +368,32 @@ function TutorHomeworkContent() {
           onRetry={handleRetry}
         />
 
-        {/* Filter Tabs */}
-        <div className="flex gap-1 border-b">
-          {FILTER_TABS.map((tab) => (
-            <button
-              key={tab.value}
-              onClick={() => setFilter(tab.value)}
-              className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
-                filter === tab.value
-                  ? 'border-primary text-primary'
-                  : 'border-transparent text-muted-foreground hover:text-foreground hover:border-muted-foreground/30'
-              }`}
-            >
-              {tab.label}
-            </button>
-          ))}
+        {/* Filter Tabs + Sort */}
+        <div className="flex items-center justify-between gap-4">
+          <div className="flex gap-1 border-b">
+            {FILTER_TABS.map((tab) => (
+              <button
+                key={tab.value}
+                onClick={() => setFilter(tab.value)}
+                className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+                  filter === tab.value
+                    ? 'border-primary text-primary'
+                    : 'border-transparent text-muted-foreground hover:text-foreground hover:border-muted-foreground/30'
+                }`}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
+          <select
+            value={sortKey}
+            onChange={(e) => setSortKey(e.target.value as HomeworkSortKey)}
+            className="rounded-lg border border-input bg-background px-3 py-1.5 text-[16px] sm:text-sm"
+          >
+            {SORT_OPTIONS.map((opt) => (
+              <option key={opt.value} value={opt.value}>{opt.label}</option>
+            ))}
+          </select>
         </div>
 
         {/* Content */}
@@ -299,7 +403,7 @@ function TutorHomeworkContent() {
           <EmptyState filter={filter} />
         ) : hasData ? (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {assignments.map((item) => (
+            {sortedAssignments.map((item) => (
               <AssignmentCard key={item.id} item={item} />
             ))}
           </div>

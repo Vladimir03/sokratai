@@ -46,17 +46,21 @@ function MathRenderer({ text, className, Tag }: { text: string; className?: stri
 
   const processedText = useMemo(() => preprocessLatex(text), [text]);
 
-  // Override ReactMarkdown's <p> to remove margins (enables line-clamp on parent)
+  // Override ReactMarkdown's <p> to remove margins (enables line-clamp on parent).
+  // When Tag is 'span', render inner paragraphs as <span> to avoid invalid block-in-inline HTML.
   const markdownComponents = useMemo(
     () => ({
-      p: ({ node, ...props }: Record<string, unknown>) => (
-        <p className="mb-0 break-words whitespace-pre-wrap last:mb-0" {...(props as React.HTMLAttributes<HTMLParagraphElement>)} />
-      ),
+      p: ({ node, ...props }: Record<string, unknown>) => {
+        if (Tag === 'span') {
+          return <span className="break-words whitespace-pre-wrap" {...(props as React.HTMLAttributes<HTMLSpanElement>)} />;
+        }
+        return <p className="mb-0 break-words whitespace-pre-wrap last:mb-0" {...(props as React.HTMLAttributes<HTMLParagraphElement>)} />;
+      },
       a: ({ node, ...props }: Record<string, unknown>) => (
         <a target="_blank" rel="noopener noreferrer" {...(props as React.AnchorHTMLAttributes<HTMLAnchorElement>)} />
       ),
     }),
-    [],
+    [Tag],
   );
 
   return (
