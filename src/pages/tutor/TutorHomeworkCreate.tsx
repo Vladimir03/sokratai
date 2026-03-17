@@ -5,7 +5,9 @@ import { useQueryClient } from '@tanstack/react-query';
 import { format, parseISO } from 'date-fns';
 import { ru } from 'date-fns/locale';
 import { Button } from '@/components/ui/button';
-import { ArrowLeft, Loader2 } from 'lucide-react';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { ArrowLeft, Loader2, ChevronDown, ChevronUp } from 'lucide-react';
 import { toast } from 'sonner';
 import TutorGuard from '@/components/TutorGuard';
 import { TutorLayout } from '@/components/tutor/TutorLayout';
@@ -37,6 +39,7 @@ import {
 import { HWTemplatePicker } from '@/components/tutor/homework-create/HWTemplatePicker';
 import { HWExpandedParams } from '@/components/tutor/homework-create/HWExpandedParams';
 import { HWTasksSection } from '@/components/tutor/homework-create/HWTasksSection';
+import { HWMaterialsSection } from '@/components/tutor/homework-create/HWMaterialsSection';
 import { HWAssignSection } from '@/components/tutor/homework-create/HWAssignSection';
 import { HWActionBar } from '@/components/tutor/homework-create/HWActionBar';
 
@@ -56,14 +59,15 @@ function TutorHomeworkCreateContent() {
   const studentLoginLink = `${appOrigin}/login`;
   const studentSignupLink = `${appOrigin}/signup`;
   const [templateLoading, setTemplateLoading] = useState(false);
+  const [showAdvanced, setShowAdvanced] = useState(false);
 
   // ── Meta ──
   const [meta, setMeta] = useState<MetaState>({
     title: '',
-    subject: '',
+    subject: 'physics',
     topic: '',
     deadline: '',
-    workflow_mode: 'classic',
+    workflow_mode: 'guided_chat',
   });
 
   // Auto-generated title: «ДЗ {topic} {dd.MM}» — used when manual title is empty
@@ -192,9 +196,10 @@ function TutorHomeworkCreateContent() {
 
     const metaDirty =
       meta.title.trim().length > 0 ||
-      meta.subject !== '' ||
+      (meta.subject !== '' && meta.subject !== 'physics') ||
       meta.topic.trim().length > 0 ||
-      meta.deadline.trim().length > 0;
+      meta.deadline.trim().length > 0 ||
+      meta.workflow_mode !== 'guided_chat';
 
     const tasksDirty =
       tasks.length !== 1 ||
@@ -258,8 +263,15 @@ function TutorHomeworkCreateContent() {
       errs._students = 'Выберите хотя бы одного ученика';
     }
 
+    // Auto-expand L1 if subject error (required field hidden in collapsible)
+    if (errs.subject) {
+      setShowAdvanced(true);
+    }
+
     setErrors(errs);
-    return Object.keys(errs).length === 0;
+    // Hint keys (e.g. _topicHint) are non-blocking soft warnings
+    const blockingErrors = Object.keys(errs).filter((k) => !k.endsWith('Hint'));
+    return blockingErrors.length === 0;
   }, [meta, tasks, selectedStudentIds]);
 
   // ── Navigation ──
@@ -559,30 +571,24 @@ function TutorHomeworkCreateContent() {
           {templateLoading && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />}
         </div>
 
-        {/* Section 1: Meta params (all visible) */}
-        <section>
-          <HWExpandedParams
-            meta={meta}
-            onChange={setMeta}
-            errors={errors}
-            autoTitle={autoTitle}
+        {/* ── L0: Always visible ── */}
+
+        {/* Topic (L0 — key field for auto-title and KB search) */}
+        <section className="space-y-2">
+          <Label htmlFor="hw-topic">Тема</Label>
+          <Input
+            id="hw-topic"
+            placeholder="Кинематика, законы Ньютона..."
+            value={meta.topic}
+            onChange={(e) => setMeta({ ...meta, topic: e.target.value })}
+            className="text-base"
           />
+          {errors._topicHint && !meta.topic.trim() && (
+            <p className="text-xs text-amber-600">{errors._topicHint}</p>
+          )}
         </section>
 
-        {/* Section 2: Tasks + Materials */}
-        <section>
-          <h2 className="text-lg font-semibold mb-3">Задачи</h2>
-          <HWTasksSection
-            tasks={tasks}
-            onChange={setTasks}
-            materials={materials}
-            onMaterialsChange={setMaterials}
-            errors={errors}
-            topicHint={meta.topic}
-          />
-        </section>
-
-        {/* Section 3: Assign students */}
+        {/* Recipients (L0) */}
         <section>
           <h2 className="text-lg font-semibold mb-3">Кому назначить</h2>
           <HWAssignSection
@@ -604,7 +610,56 @@ function TutorHomeworkCreateContent() {
           />
         </section>
 
-        {/* Action bar (sticky on mobile) */}
+        {/* Tasks (L0) */}
+        <section>
+          <h2 className="text-lg font-semibold mb-3">Задачи</h2>
+          <HWTasksSection
+            tasks={tasks}
+            onChange={setTasks}
+            errors={errors}
+            topicHint={meta.topic}
+          />
+        </section>
+
+        {/* ── L1: Collapsible advanced params ── */}
+
+        <section>
+          <button
+            type="button"
+            onClick={() => setShowAdvanced((v) => !v)}
+            className="flex items-center gap-1.5 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"
+          >
+            {showAdvanced ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+            {showAdvanced ? 'Скрыть параметры' : 'Расширенные параметры'}
+            {/* Dot indicator: show when L1 has user data but collapsed */}
+            {!showAdvanced && (meta.title.trim() || meta.subject !== 'physics' || meta.deadline.trim() || meta.workflow_mode !== 'guided_chat' || materials.length > 0) && (
+              <span className="inline-block w-2 h-2 rounded-full bg-primary" />
+            )}
+          </button>
+
+          <div
+            className="grid transition-[grid-template-rows] duration-200 ease-in-out"
+            style={{ gridTemplateRows: showAdvanced ? '1fr' : '0fr' }}
+          >
+            <div className="overflow-hidden">
+              <div className="pt-4 space-y-6">
+                <HWExpandedParams
+                  meta={meta}
+                  onChange={setMeta}
+                  errors={errors}
+                  autoTitle={autoTitle}
+                />
+
+                <HWMaterialsSection
+                  materials={materials}
+                  onChange={setMaterials}
+                />
+              </div>
+            </div>
+          </div>
+        </section>
+
+        {/* Action bar (sticky on mobile, inline on desktop) */}
         <HWActionBar
           onSubmit={handleSubmit}
           isSubmitting={isSubmitting}

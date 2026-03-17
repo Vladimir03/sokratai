@@ -7,8 +7,7 @@ import type { KBTask } from '@/types/kb';
 import { parseAttachmentUrls } from '@/lib/kbApi';
 import { KBPickerSheet } from '@/components/tutor/KBPickerSheet';
 import { HWTaskCard } from './HWTaskCard';
-import { HWMaterialsSection } from './HWMaterialsSection';
-import { type DraftTask, type DraftMaterial, createEmptyTask, generateUUID, revokeObjectUrl } from './types';
+import { type DraftTask, createEmptyTask, generateUUID, revokeObjectUrl } from './types';
 
 // Job: Быстро добавить задачу из базы в черновик ДЗ
 function kbTaskToDraftTask(task: KBTask): DraftTask {
@@ -35,8 +34,6 @@ function kbTaskToDraftTask(task: KBTask): DraftTask {
 export interface HWTasksSectionProps {
   tasks: DraftTask[];
   onChange: (t: DraftTask[]) => void;
-  materials: DraftMaterial[];
-  onMaterialsChange: (m: DraftMaterial[]) => void;
   errors: Record<string, string>;
   topicHint?: string;
 }
@@ -44,8 +41,6 @@ export interface HWTasksSectionProps {
 export function HWTasksSection({
   tasks,
   onChange,
-  materials,
-  onMaterialsChange,
   errors,
   topicHint,
 }: HWTasksSectionProps) {
@@ -99,9 +94,6 @@ export function HWTasksSection({
 
   return (
     <div className="space-y-4">
-      <div className="border-b pb-3">
-        <HWMaterialsSection materials={materials} onChange={onMaterialsChange} />
-      </div>
       {errors._tasks && (
         <p className="text-sm text-destructive">{errors._tasks}</p>
       )}

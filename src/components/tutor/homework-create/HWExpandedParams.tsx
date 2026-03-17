@@ -19,6 +19,10 @@ export interface HWExpandedParamsProps {
   autoTitle?: string;
 }
 
+/**
+ * L1 (collapsible) meta fields: title, subject, deadline, workflow mode.
+ * Topic field is rendered separately in L0 by the container.
+ */
 export function HWExpandedParams({ meta, onChange, errors, autoTitle }: HWExpandedParamsProps) {
   return (
     <div className="space-y-5">
@@ -57,20 +61,6 @@ export function HWExpandedParams({ meta, onChange, errors, autoTitle }: HWExpand
           </SelectContent>
         </Select>
         {errors.subject && <p className="text-sm text-destructive">{errors.subject}</p>}
-      </div>
-
-      <div className="space-y-2">
-        <Label htmlFor="hw-topic">Тема</Label>
-        <Input
-          id="hw-topic"
-          placeholder="Кинематика, законы Ньютона..."
-          value={meta.topic}
-          onChange={(e) => onChange({ ...meta, topic: e.target.value })}
-          className="text-base"
-        />
-        {errors._topicHint && !meta.topic.trim() && (
-          <p className="text-xs text-amber-600">{errors._topicHint}</p>
-        )}
       </div>
 
       <div className="space-y-2">
