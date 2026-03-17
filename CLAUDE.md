@@ -310,9 +310,19 @@ Legacy student-only система (`homework_sets`, `homework_tasks`, `homework
 Модуль живёт в Tutor-домене:
 - `src/pages/tutor/knowledge/` — страницы
 - `src/components/kb/` — компоненты
+- `src/components/kb/ui/` — UI-утилиты KB (MathText, CopyTaskButton, stripLatex, preprocessLatex, SourceBadge, ContextMenu)
 - `src/hooks/useKnowledgeBase.ts`, `src/hooks/useFolders.ts` — хуки
 - `src/types/kb.ts` — типы
 - `src/stores/hwDraftStore.ts` — Zustand store для корзины ДЗ
+
+### LaTeX-рендеринг в KB (Sprint 1, 2026-03-17)
+- `MathText` (`src/components/kb/ui/MathText.tsx`) — lazy-loaded KaTeX рендеринг формул в карточках задач
+- `preprocessLatex` (`src/components/kb/ui/preprocessLatex.ts`) — нормализация LaTeX-делимитеров (`\[..\]` → `$$`, `\(..\)` → `$`)
+- `stripLatex` (`src/components/kb/ui/stripLatex.ts`) — plain-text fallback (убирает LaTeX, используется в CopyToFolderModal и как Suspense fallback)
+- `CopyTaskButton` (`src/components/kb/ui/CopyTaskButton.tsx`) — копирование текста задачи в буфер обмена
+- MathText используется в: `TaskCard.tsx`, `KBPickerSheet.tsx`, `HWDrawer.tsx`
+- **Правило**: hasMath = false → plain text (нулевой overhead KaTeX); hasMath = true → lazy ReactMarkdown + remarkMath + rehypeKatex
+- **Не импортировать** MathText/KaTeX в `src/components/ui/*` (performance.md)
 
 ### Архитектура двух пространств
 - **Каталог Сократа** (kb_topics + kb_tasks where owner_id IS NULL) — read-only витрина

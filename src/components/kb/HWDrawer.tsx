@@ -9,8 +9,8 @@ import {
   SheetDescription,
   SheetTitle,
 } from '@/components/ui/sheet';
+import { MathText } from '@/components/kb/ui/MathText';
 import { SourceBadge } from '@/components/kb/ui/SourceBadge';
-import { stripLatex } from '@/components/kb/ui/stripLatex';
 import { cn } from '@/lib/utils';
 import { parseAttachmentUrls } from '@/lib/kbApi';
 import { useHWDraftStore, useHWTaskCount } from '@/stores/hwDraftStore';
@@ -232,9 +232,10 @@ export function HWDrawer({
                       </div>
 
                       {editingId !== task.taskId ? (
-                        <p className="line-clamp-2 text-xs leading-relaxed text-slate-700">
-                          {stripLatex(task.textSnapshot)}
-                        </p>
+                        <MathText
+                          text={task.textSnapshot}
+                          className="line-clamp-2 text-xs leading-relaxed text-slate-700"
+                        />
                       ) : (
                         <div className="mt-1 flex flex-col gap-2">
                           <div>

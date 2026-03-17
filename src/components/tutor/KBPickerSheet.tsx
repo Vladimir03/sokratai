@@ -16,8 +16,8 @@ import {
   SheetTitle,
 } from '@/components/ui/sheet';
 import { Button } from '@/components/ui/button';
+import { MathText } from '@/components/kb/ui/MathText';
 import { SourceBadge } from '@/components/kb/ui/SourceBadge';
-import { stripLatex } from '@/components/kb/ui/stripLatex';
 import { cn } from '@/lib/utils';
 import { useTopics, useCatalogTasks, useSubtopics } from '@/hooks/useKnowledgeBase';
 import { useRootFolders, useFolder } from '@/hooks/useFolders';
@@ -54,7 +54,6 @@ function PickerTaskCard({
   onToggleSelect: () => void;
 }) {
   const source = task.owner_id ? 'my' : 'socrat';
-  const preview = stripLatex(task.text).slice(0, 120);
 
   return (
     <div
@@ -91,9 +90,11 @@ function PickerTaskCard({
               </span>
             )}
           </div>
-          <p className="line-clamp-2 text-sm leading-snug text-gray-800">
-            {preview || 'Без текста'}
-          </p>
+          {task.text ? (
+            <MathText text={task.text} className="line-clamp-2 text-sm leading-snug text-gray-800" />
+          ) : (
+            <p className="text-sm text-gray-400">Без текста</p>
+          )}
         </div>
 
         <Button
