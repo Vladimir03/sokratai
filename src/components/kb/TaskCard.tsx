@@ -58,9 +58,9 @@ export function TaskCard({
   );
 
   // Detect image-only tasks (Phase 2)
+  // Only hide text when it's truly empty or an explicit marker — never for short text + photo
   const isImageOnly = !task.text?.trim()
-    || IMAGE_ONLY_MARKERS.includes(task.text.trim())
-    || (task.text.trim().length < 20 && attachmentRefs.length > 0);
+    || IMAGE_ONLY_MARKERS.includes(task.text.trim());
 
   // Collapsed preview: load up to 3 images for horizontal strip
   const collapsedImageCount = Math.min(attachmentRefs.length, 3);

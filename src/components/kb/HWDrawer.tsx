@@ -64,7 +64,7 @@ export function HWDrawer({
         .insert({
           tutor_id: session.user.id,
           title: `ДЗ из Базы знаний`,
-          subject: 'math',
+          subject: 'physics',
           status: 'draft',
         })
         .select('id')
