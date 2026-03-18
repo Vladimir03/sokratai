@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Check, ChevronDown, Download, EyeOff, Image, Pencil, RefreshCw, Sparkles, Trash2 } from 'lucide-react';
+import { Check, ChevronDown, Download, EyeOff, FolderInput, Image, Pencil, RefreshCw, Sparkles, Trash2 } from 'lucide-react';
 import { ContextMenu, type ContextMenuItem } from '@/components/kb/ui/ContextMenu';
 import { CopyTaskButton } from '@/components/kb/ui/CopyTaskButton';
 import { MathText } from '@/components/kb/ui/MathText';
@@ -21,6 +21,7 @@ interface TaskCardProps {
   onEdit?: () => void;
   onDelete?: () => void;
   onAiSimilar?: () => void;
+  onMoveToFolder?: () => void;
   onUnpublish?: () => void;
   onReassign?: () => void;
   className?: string;
@@ -41,6 +42,7 @@ export function TaskCard({
   onEdit,
   onDelete,
   onAiSimilar,
+  onMoveToFolder,
   onUnpublish,
   onReassign,
   className,
@@ -56,6 +58,9 @@ export function TaskCard({
   }
   if (isOwn && onAiSimilar) {
     menuItems.push({ key: 'ai_similar', label: 'Похожая AI', icon: Sparkles, onSelect: onAiSimilar });
+  }
+  if ((isOwn || isModerator) && onMoveToFolder) {
+    menuItems.push({ key: 'move', label: 'Переместить', icon: FolderInput, onSelect: onMoveToFolder });
   }
   if (isOwn && onDelete) {
     menuItems.push({ key: 'delete', label: 'Удалить', icon: Trash2, destructive: true, onSelect: onDelete });
