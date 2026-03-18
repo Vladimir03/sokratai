@@ -1214,6 +1214,36 @@ export type Database = {
           },
         ]
       }
+      kb_moderation_log: {
+        Row: {
+          action: string
+          created_at: string | null
+          details: Json | null
+          id: string
+          moderator_id: string
+          source_task_id: string | null
+          task_id: string | null
+        }
+        Insert: {
+          action: string
+          created_at?: string | null
+          details?: Json | null
+          id?: string
+          moderator_id: string
+          source_task_id?: string | null
+          task_id?: string | null
+        }
+        Update: {
+          action?: string
+          created_at?: string | null
+          details?: Json | null
+          id?: string
+          moderator_id?: string
+          source_task_id?: string | null
+          task_id?: string | null
+        }
+        Relationships: []
+      }
       kb_subtopics: {
         Row: {
           id: string
@@ -1257,14 +1287,21 @@ export type Database = {
           attachment_url: string | null
           created_at: string | null
           exam: Database["public"]["Enums"]["exam_type"] | null
+          fingerprint: string | null
           folder_id: string | null
+          hidden_reason: string | null
           id: string
           kim_number: number | null
+          moderation_status: string
           owner_id: string | null
           primary_score: number | null
+          published_at: string | null
+          published_by: string | null
+          published_task_id: string | null
           solution: string | null
           solution_attachment_url: string | null
           source_label: string | null
+          source_task_id: string | null
           subtopic_id: string | null
           text: string
           topic_id: string | null
@@ -1276,14 +1313,21 @@ export type Database = {
           attachment_url?: string | null
           created_at?: string | null
           exam?: Database["public"]["Enums"]["exam_type"] | null
+          fingerprint?: string | null
           folder_id?: string | null
+          hidden_reason?: string | null
           id?: string
           kim_number?: number | null
+          moderation_status?: string
           owner_id?: string | null
           primary_score?: number | null
+          published_at?: string | null
+          published_by?: string | null
+          published_task_id?: string | null
           solution?: string | null
           solution_attachment_url?: string | null
           source_label?: string | null
+          source_task_id?: string | null
           subtopic_id?: string | null
           text: string
           topic_id?: string | null
@@ -1295,14 +1339,21 @@ export type Database = {
           attachment_url?: string | null
           created_at?: string | null
           exam?: Database["public"]["Enums"]["exam_type"] | null
+          fingerprint?: string | null
           folder_id?: string | null
+          hidden_reason?: string | null
           id?: string
           kim_number?: number | null
+          moderation_status?: string
           owner_id?: string | null
           primary_score?: number | null
+          published_at?: string | null
+          published_by?: string | null
+          published_task_id?: string | null
           solution?: string | null
           solution_attachment_url?: string | null
           source_label?: string | null
+          source_task_id?: string | null
           subtopic_id?: string | null
           text?: string
           topic_id?: string | null
@@ -1314,6 +1365,20 @@ export type Database = {
             columns: ["folder_id"]
             isOneToOne: false
             referencedRelation: "kb_folders"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "kb_tasks_published_task_id_fkey"
+            columns: ["published_task_id"]
+            isOneToOne: false
+            referencedRelation: "kb_tasks"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "kb_tasks_source_task_id_fkey"
+            columns: ["source_task_id"]
+            isOneToOne: false
+            referencedRelation: "kb_tasks"
             referencedColumns: ["id"]
           },
           {
@@ -2772,6 +2837,41 @@ export type Database = {
         }
         Returns: boolean
       }
+      fetch_catalog_tasks_v2: {
+        Args: { p_topic_id: string }
+        Returns: {
+          answer: string | null
+          answer_format: string | null
+          attachment_url: string | null
+          created_at: string | null
+          exam: Database["public"]["Enums"]["exam_type"] | null
+          fingerprint: string | null
+          folder_id: string | null
+          hidden_reason: string | null
+          id: string
+          kim_number: number | null
+          moderation_status: string
+          owner_id: string | null
+          primary_score: number | null
+          published_at: string | null
+          published_by: string | null
+          published_task_id: string | null
+          solution: string | null
+          solution_attachment_url: string | null
+          source_label: string | null
+          source_task_id: string | null
+          subtopic_id: string | null
+          text: string
+          topic_id: string | null
+          updated_at: string | null
+        }[]
+        SetofOptions: {
+          from: "*"
+          to: "kb_tasks"
+          isOneToOne: false
+          isSetofReturn: true
+        }
+      }
       generate_invite_code: { Args: never; Returns: string }
       get_available_booking_slots: {
         Args: { _booking_link: string; _days_ahead?: number }
@@ -2870,6 +2970,21 @@ export type Database = {
         Args: { _folder_id: string; _owner_id: string }
         Returns: boolean
       }
+      kb_is_in_socrat_tree: { Args: { p_folder_id: string }; Returns: boolean }
+      kb_mod_reassign: {
+        Args: { p_new_source_task_id: string; p_published_task_id: string }
+        Returns: undefined
+      }
+      kb_mod_unpublish: {
+        Args: { p_published_task_id: string }
+        Returns: undefined
+      }
+      kb_normalize_fingerprint: {
+        Args: { p_answer: string; p_text: string }
+        Returns: string
+      }
+      kb_publish_task: { Args: { p_source_task_id: string }; Returns: string }
+      kb_resync_task: { Args: { p_source_task_id: string }; Returns: undefined }
       kb_search: {
         Args: {
           exam_filter: Database["public"]["Enums"]["exam_type"]
@@ -2901,6 +3016,18 @@ export type Database = {
       owns_tutor_student: {
         Args: { _tutor_student_id: string }
         Returns: boolean
+      }
+      promote_folder_to_catalog: {
+        Args: {
+          p_folder_id: string
+          p_source_label?: string
+          p_subtopic_id?: string
+          p_topic_id: string
+        }
+        Returns: {
+          promoted_count: number
+          task_ids: string[]
+        }[]
       }
       update_group_participant_payment_status: {
         Args: {
