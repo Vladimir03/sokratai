@@ -28,6 +28,7 @@ function FolderContent() {
   const [showCreateFolder, setShowCreateFolder] = useState(false);
   const [showCreateTask, setShowCreateTask] = useState(false);
   const [editingTask, setEditingTask] = useState<KBTask | null>(null);
+  const [movingTask, setMovingTask] = useState<KBTask | null>(null);
   const { addTask, hasTask } = useHWDraftStore();
   const deleteTask = useDeleteTask();
   const { isModerator } = useIsModerator();
