@@ -2772,6 +2772,34 @@ export type Database = {
         }
         Returns: boolean
       }
+      fetch_catalog_tasks_v2: {
+        Args: { p_topic_id: string }
+        Returns: {
+          answer: string | null
+          answer_format: string | null
+          attachment_url: string | null
+          created_at: string | null
+          exam: Database["public"]["Enums"]["exam_type"] | null
+          folder_id: string | null
+          id: string
+          kim_number: number | null
+          owner_id: string | null
+          primary_score: number | null
+          solution: string | null
+          solution_attachment_url: string | null
+          source_label: string | null
+          subtopic_id: string | null
+          text: string
+          topic_id: string | null
+          updated_at: string | null
+        }[]
+        SetofOptions: {
+          from: "*"
+          to: "kb_tasks"
+          isOneToOne: false
+          isSetofReturn: true
+        }
+      }
       generate_invite_code: { Args: never; Returns: string }
       get_available_booking_slots: {
         Args: { _booking_link: string; _days_ahead?: number }
