@@ -7,6 +7,7 @@ import { CreateFolderModal } from '@/components/kb/CreateFolderModal';
 import { CreateTaskModal } from '@/components/kb/CreateTaskModal';
 import { EditTaskModal } from '@/components/kb/EditTaskModal';
 import { FolderCard } from '@/components/kb/FolderCard';
+import { MoveToFolderModal } from '@/components/kb/MoveToFolderModal';
 import { KBStatusCard } from '@/components/kb/KBStatusCard';
 import { KnowledgeBaseFrame } from '@/components/kb/KnowledgeBaseFrame';
 import { TaskCard } from '@/components/kb/TaskCard';
