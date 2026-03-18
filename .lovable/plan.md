@@ -2,29 +2,34 @@
 
 ## Problem
 
-Two bugs:
+The 54 Demidova 2025 tasks exist in the database but are owned by user `a7212758-8cdd-4d7c-8608-4fedcb34d74c` and stored in that user's "Черновики для сократа" folder (`d9b1b759-...`).
 
-1. **`topic_id` and `subtopic_id` are never saved** — `EditTaskModal.handleSave` builds the `UpdateKBTaskInput` object but never includes `topic_id` or `subtopic_id`. The type `UpdateKBTaskInput` also lacks these fields.
+You are logged in as `kamchatkinvova@gmail.com` (`420b1476-6988-4f00-b435-09400420d145`), who has a separate "Черновики для сократа" folder (`997471c7-5440-46f6-bca8-7e11b9476c63`).
 
-2. **Moderator tasks in "сократ" folder don't auto-publish to catalog** — The DB trigger `trg_fn_kb_after_update_moderation` already handles this: when a task in a "сократ" folder tree gets a `topic_id` set (and belongs to a moderator), it calls `kb_publish_task`. So fixing bug #1 will automatically fix bug #2 — no additional code needed.
+RLS on `kb_tasks` filters by `owner_id = auth.uid()`, so these tasks are invisible to you. The folder query in `useFolders.ts` also filters `.eq('owner_id', session.user.id)`.
 
-## Plan
+## Fix
 
-### 1. Add `topic_id` and `subtopic_id` to `UpdateKBTaskInput` (src/types/kb.ts)
+Run a single data UPDATE (via the insert/update tool, not a migration) to reassign all 54 tasks:
 
-Add two optional fields to the interface:
-```ts
-topic_id?: string | null;
-subtopic_id?: string | null;
+```sql
+UPDATE kb_tasks
+SET owner_id  = '420b1476-6988-4f00-b435-09400420d145',
+    folder_id = '997471c7-5440-46f6-bca8-7e11b9476c63',
+    updated_at = NOW()
+WHERE folder_id = 'd9b1b759-cc97-4e9d-a12d-921c6ac6e90f'
+  AND source_label = 'demidova_2025';
 ```
 
-### 2. Include `topic_id` and `subtopic_id` in save payload (src/components/kb/EditTaskModal.tsx)
+This moves all 54 tasks into **your** "Черновики для сократа" folder. No code changes needed — the frontend already queries by `owner_id = auth.uid()` and will display them immediately.
 
-In `handleSave`, add these two fields to the `input` object (around line 147):
-```ts
-topic_id: topicId || null,
-subtopic_id: subtopicId || null,
+Optionally, clean up the orphaned folders owned by `a7212758-...` if that user is not real:
+
+```sql
+DELETE FROM kb_folders WHERE owner_id = 'a7212758-8cdd-4d7c-8608-4fedcb34d74c';
 ```
 
-That's it — two small edits. The existing DB triggers handle catalog publication automatically when a moderator's task in the "сократ" folder tree gets a `topic_id` assigned.
+## No code changes
+
+The frontend (`useFolders.ts`, `FolderPage.tsx`) already handles this correctly — it queries folders and tasks by `owner_id`. Once the data is reassigned, the 54 tasks will appear.
 

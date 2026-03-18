@@ -152,6 +152,8 @@ export function EditTaskModal({ task, onClose }: EditTaskModalProps) {
         answer_format: answerFormat || null,
         kim_number: kimNum && !isNaN(kimNum) ? kimNum : null,
         primary_score: scoreNum && !isNaN(scoreNum) ? scoreNum : null,
+        topic_id: topicId || null,
+        subtopic_id: subtopicId || null,
       };
 
       // Only include attachment fields if changed
