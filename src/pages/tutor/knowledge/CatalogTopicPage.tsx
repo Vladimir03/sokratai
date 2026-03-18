@@ -1,7 +1,8 @@
-import { useState } from 'react';
+import { useCallback, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { ArrowLeft } from 'lucide-react';
 import { toast } from 'sonner';
+import { useQueryClient } from '@tanstack/react-query';
 import TutorGuard from '@/components/TutorGuard';
 import { CopyToFolderModal } from '@/components/kb/CopyToFolderModal';
 import { KBStatusCard } from '@/components/kb/KBStatusCard';
@@ -14,7 +15,8 @@ import { StatCounter } from '@/components/kb/ui/StatCounter';
 import { TopicChip } from '@/components/kb/ui/TopicChip';
 import { TutorLayout } from '@/components/tutor/TutorLayout';
 import { useCatalogTasks, useMaterials, useSubtopics, useTopic } from '@/hooks/useKnowledgeBase';
-import { parseAttachmentUrls } from '@/lib/kbApi';
+import { useIsModerator } from '@/hooks/useIsModerator';
+import { kbModUnpublish, kbModReassign, parseAttachmentUrls } from '@/lib/kbApi';
 import { useHWDraftStore } from '@/stores/hwDraftStore';
 import type { KBTask } from '@/types/kb';
 
@@ -36,6 +38,39 @@ function CatalogTopicContent() {
   const [expandedTaskId, setExpandedTaskId] = useState<string | null>(null);
   const [copyTask, setCopyTask] = useState<KBTask | null>(null);
   const { addTask, hasTask } = useHWDraftStore();
+  const { isModerator } = useIsModerator();
+  const queryClient = useQueryClient();
+
+  const handleUnpublish = useCallback(
+    async (task: KBTask) => {
+      if (!window.confirm(`Снять публикацию задачи #${task.number ?? ''}?`)) return;
+      try {
+        await kbModUnpublish(task.id);
+        await queryClient.invalidateQueries({ queryKey: ['tutor', 'kb'] });
+        toast.success('Публикация снята');
+      } catch (err) {
+        console.error('Unpublish failed', err);
+        toast.error('Не удалось снять публикацию');
+      }
+    },
+    [queryClient],
+  );
+
+  const handleReassign = useCallback(
+    async (task: KBTask) => {
+      const newSourceId = window.prompt('UUID задачи-источника для перепривязки:');
+      if (!newSourceId?.trim()) return;
+      try {
+        await kbModReassign(task.id, newSourceId.trim());
+        await queryClient.invalidateQueries({ queryKey: ['tutor', 'kb'] });
+        toast.success('Источник перепривязан');
+      } catch (err) {
+        console.error('Reassign failed', err);
+        toast.error('Не удалось перепривязать источник');
+      }
+    },
+    [queryClient],
+  );
 
   const error = topicError || tasksError;
 
@@ -132,11 +167,14 @@ function CatalogTopicContent() {
                   task={task}
                   isOwn={false}
                   inHW={hasTask(task.id)}
+                  isModerator={isModerator}
                   subtopicName={subtopics.find((subtopic) => subtopic.id === task.subtopic_id)?.name}
                   isExpanded={expandedTaskId === task.id}
                   onToggle={() => setExpandedTaskId(expandedTaskId === task.id ? null : task.id)}
                   onCopyToFolder={() => setCopyTask(task)}
                   onAddToHW={() => handleAddToHW(task)}
+                  onUnpublish={() => handleUnpublish(task)}
+                  onReassign={() => handleReassign(task)}
                 />
               ))}
             </div>

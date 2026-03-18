@@ -339,9 +339,53 @@ Legacy student-only система (`homework_sets`, `homework_tasks`, `homework
 - **Правило**: hasMath = false → plain text (нулевой overhead KaTeX); hasMath = true → lazy ReactMarkdown + remarkMath + rehypeKatex
 - **Не импортировать** MathText/KaTeX в `src/components/ui/*` (performance.md)
 
-### Архитектура двух пространств
-- **Каталог Сократа** (kb_topics + kb_tasks where owner_id IS NULL) — read-only витрина
+### Архитектура двух пространств + Source→Copy Model (Moderation V2)
+- **Каталог Сократа** — read-only витрина. Читает **ТОЛЬКО** `kb_tasks WHERE owner_id IS NULL AND moderation_status = 'active'`
 - **Моя база** (kb_folders + kb_tasks where owner_id = user) — личные папки
+- **Запрос каталога**: `fetch_catalog_tasks_v2(topic_id)` — фильтрует owner_id=NULL + moderation_status='active'
+- **Модераторы**: роль через `has_role(uid, 'moderator')` (таблица `user_roles`), не хардкод email
+- **Source→Copy**: задача-источник в папке «сократ» модератора → каноническая публичная копия (owner_id=NULL) в каталоге
+  - `published_task_id` на источнике → указывает на публичную копию
+  - `source_task_id` на копии → указывает на источник
+- **Auto-publish**: перенос в «сократ» → триггер автоматически создаёт публичную копию
+- **Auto-resync**: правка источника в «сократ» → триггер обновляет публичную копию
+- **Fingerprint dedup**: `kb_normalize_fingerprint(text, answer)` + `pg_advisory_xact_lock`
+  - Первый опубликовавший fingerprint побеждает; дубли → `hidden_duplicate`
+  - Правка, создающая дубль → `RAISE EXCEPTION` (save blocked)
+  - После unpublish скрытые дубли НЕ восстанавливаются
+- **RPCs**: `kb_mod_unpublish(p_published_task_id)`, `kb_mod_reassign(p_published_task_id, p_new_source_task_id)`
+- **RPC wrappers**: `kbModUnpublish(publishedTaskId)`, `kbModReassign(publishedTaskId, newSourceTaskId)` в `src/lib/kbApi.ts`
+- **Fallback**: `promote_folder_to_catalog()` — переводит задачи в owner_id=NULL напрямую (если модератор уходит)
+- **Audit**: `kb_moderation_log` — все действия логируются
+- **Security**: `kb_publish_task()` / `kb_resync_task()` — REVOKE FROM PUBLIC, authenticated (только триггеры)
+- **RLS**: non-moderators видят только `moderation_status = 'active'` каталожные задачи
+- **UNIQUE indexes**: `idx_kb_tasks_unique_source`, `idx_kb_tasks_unique_published` — one-to-one source↔copy
+
+### Модерационный пайплайн (KB)
+- Миграции: `20260318130000_kb_moderation_pipeline.sql`, `20260318140000_kb_catalog_live_sync.sql`, `20260318150000_kb_moderation_v2.sql`
+- У каждого модератора: папка «Черновики для сократа» (скрыта) + «сократ» (auto-publish в каталог)
+- Поток: SQL-сид → Черновики → ревью → перенос в «сократ» (+ topic_id) → триггер создаёт публичную копию → каталог
+- Подпапки в «сократ» разрешены — `kb_is_in_socrat_tree()` рекурсивно проверяет
+- Diagram: `kb_pipeline_diagram.html`
+
+### Moderator UI (Sprint 3, 2026-03-18)
+- `src/hooks/useIsModerator.ts` — React Query хук, вызывает `has_role(uid, 'moderator')` RPC. Query key: `['tutor', 'kb', 'isModerator', userId]` — скопирован по user.id для корректной инвалидации при смене аккаунта
+- `src/lib/kbApi.ts` — `kbModUnpublish(publishedTaskId)`, `kbModReassign(publishedTaskId, newSourceTaskId)` — RPC wrappers
+- `src/components/kb/TaskCard.tsx` — props: `isModerator`, `onUnpublish`, `onReassign`. Бейджи: «дубль скрыт» (red), «снято» (amber). ContextMenu: «Снять публикацию», «Перепривязать источник»
+- **ПОДКЛЮЧЕНО** (Sprint 3, 2026-03-18):
+  - `CatalogTopicPage.tsx` — `useIsModerator()` + `handleUnpublish` / `handleReassign` → props в `<TaskCard>`
+  - `FolderPage.tsx` — `useIsModerator()` → `isModerator` prop в `<TaskCard>` (handlers не нужны — задачи `isOwn`, `isModeratable=false`)
+
+### Триггеры модерации (точные имена)
+- `trg_kb_before_update_block_dup` — BEFORE UPDATE, блокирует дубли fingerprint
+- `trg_kb_after_update_moderation` — AFTER UPDATE, auto-publish при перемещении в «сократ» + auto-resync при правке
+- `trg_kb_after_insert_moderation` — AFTER INSERT, auto-publish если задача вставлена в «сократ»
+
+### SVG-графики для задач
+- `kb-graphs/z1_01.svg` ... `z1_27.svg` — SVG-графики для Задания 1 (кинематика, Демидова 2025)
+- Seed-миграция ссылается на `storage://kb-attachments/demidova2025/z1_XX.svg`
+- Upload script: `scripts/upload-kb-graphs.sh` — загрузка в Supabase Storage
+- `generate_kb_graphs.py` — генератор (matplotlib), запускать из корня проекта
 
 ### Дизайн-токены KB
 - Primary: #1B6B4A (socrat green)

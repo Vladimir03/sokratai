@@ -13,6 +13,7 @@ import { TaskCard } from '@/components/kb/TaskCard';
 import { TutorLayout } from '@/components/tutor/TutorLayout';
 import { useFolder } from '@/hooks/useFolders';
 import { useDeleteTask } from '@/hooks/useKnowledgeBase';
+import { useIsModerator } from '@/hooks/useIsModerator';
 import { parseAttachmentUrls } from '@/lib/kbApi';
 import { useHWDraftStore } from '@/stores/hwDraftStore';
 import type { KBTask } from '@/types/kb';
@@ -28,6 +29,7 @@ function FolderContent() {
   const [editingTask, setEditingTask] = useState<KBTask | null>(null);
   const { addTask, hasTask } = useHWDraftStore();
   const deleteTask = useDeleteTask();
+  const { isModerator } = useIsModerator();
 
   const handleAddToHW = (task: KBTask) => {
     if (hasTask(task.id)) {
@@ -150,6 +152,7 @@ function FolderContent() {
                         task={task}
                         isOwn
                         inHW={hasTask(task.id)}
+                        isModerator={isModerator}
                         isExpanded={expandedTaskId === task.id}
                         onToggle={() => setExpandedTaskId(expandedTaskId === task.id ? null : task.id)}
                         onAddToHW={() => handleAddToHW(task)}
