@@ -1214,6 +1214,36 @@ export type Database = {
           },
         ]
       }
+      kb_moderation_log: {
+        Row: {
+          action: string
+          created_at: string | null
+          details: Json | null
+          id: string
+          moderator_id: string
+          source_task_id: string | null
+          task_id: string | null
+        }
+        Insert: {
+          action: string
+          created_at?: string | null
+          details?: Json | null
+          id?: string
+          moderator_id: string
+          source_task_id?: string | null
+          task_id?: string | null
+        }
+        Update: {
+          action?: string
+          created_at?: string | null
+          details?: Json | null
+          id?: string
+          moderator_id?: string
+          source_task_id?: string | null
+          task_id?: string | null
+        }
+        Relationships: []
+      }
       kb_subtopics: {
         Row: {
           id: string
@@ -2941,6 +2971,14 @@ export type Database = {
         Returns: boolean
       }
       kb_is_in_socrat_tree: { Args: { p_folder_id: string }; Returns: boolean }
+      kb_mod_reassign: {
+        Args: { p_new_source_task_id: string; p_published_task_id: string }
+        Returns: undefined
+      }
+      kb_mod_unpublish: {
+        Args: { p_published_task_id: string }
+        Returns: undefined
+      }
       kb_normalize_fingerprint: {
         Args: { p_answer: string; p_text: string }
         Returns: string
