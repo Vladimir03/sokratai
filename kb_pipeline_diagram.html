@@ -1,0 +1,407 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>KB Pipeline — Moderation V2: Source→Copy Model</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background: #f8fafc;
+    color: #1e293b;
+    padding: 32px 24px;
+  }
+  h1 { font-size: 22px; font-weight: 700; margin-bottom: 8px; }
+  .subtitle { font-size: 14px; color: #64748b; margin-bottom: 32px; }
+
+  .pipeline {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+    max-width: 800px;
+    margin: 0 auto;
+  }
+
+  .stage {
+    background: #fff;
+    border: 1.5px solid #e2e8f0;
+    border-radius: 16px;
+    padding: 20px 24px;
+    position: relative;
+  }
+  .stage.active { border-color: #1B6B4A; box-shadow: 0 4px 20px rgba(27,107,74,0.12); }
+  .stage.manual { border-color: #5B5FC7; }
+  .stage.rpc { border-color: #E8913A; }
+  .stage.trigger { border-color: #0ea5e9; box-shadow: 0 4px 20px rgba(14,165,233,0.12); }
+  .stage.dedup { border-color: #ef4444; box-shadow: 0 4px 20px rgba(239,68,68,0.08); }
+  .stage.audit { border-color: #8b5cf6; }
+
+  .stage-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 10px;
+  }
+  .stage-number {
+    width: 32px; height: 32px;
+    border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-weight: 700; font-size: 14px; color: #fff; flex-shrink: 0;
+  }
+  .stage.active .stage-number { background: #1B6B4A; }
+  .stage.manual .stage-number { background: #5B5FC7; }
+  .stage.rpc .stage-number { background: #E8913A; }
+  .stage.trigger .stage-number { background: #0ea5e9; }
+  .stage.dedup .stage-number { background: #ef4444; }
+  .stage.audit .stage-number { background: #8b5cf6; }
+
+  .stage-title { font-size: 16px; font-weight: 600; }
+  .stage-body { font-size: 13px; color: #475569; line-height: 1.7; margin-left: 44px; }
+  .stage-body code {
+    background: #f1f5f9; padding: 2px 6px; border-radius: 4px;
+    font-size: 12px; font-family: 'JetBrains Mono', monospace;
+  }
+
+  .badge {
+    display: inline-block;
+    padding: 2px 8px; border-radius: 6px;
+    font-size: 11px; font-weight: 600; margin-left: 4px;
+  }
+  .badge-auto { background: #dcfce7; color: #166534; }
+  .badge-manual { background: #ede9fe; color: #5B5FC7; }
+  .badge-rpc { background: #fff3e0; color: #c77816; }
+  .badge-trigger { background: #e0f2fe; color: #0369a1; }
+  .badge-dedup { background: #fee2e2; color: #b91c1c; }
+  .badge-audit { background: #ede9fe; color: #6d28d9; }
+  .badge-fallback { background: #fce4ec; color: #c62828; font-size: 10px; }
+
+  .arrow {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 6px 0;
+  }
+  .arrow-line { width: 2px; height: 20px; background: #cbd5e1; }
+  .arrow-head {
+    width: 0; height: 0;
+    border-left: 6px solid transparent;
+    border-right: 6px solid transparent;
+    border-top: 8px solid #cbd5e1;
+  }
+  .arrow-label { font-size: 11px; color: #94a3b8; margin-top: 2px; font-style: italic; }
+
+  /* Side note */
+  .side-note {
+    display: flex;
+    gap: 16px;
+    max-width: 800px;
+    margin: 12px auto;
+    align-items: stretch;
+  }
+  .side-note .stage { flex: 1; }
+
+  .db-tables {
+    margin-top: 36px;
+    background: #fff;
+    border: 1.5px solid #e2e8f0;
+    border-radius: 16px;
+    padding: 20px 24px;
+    max-width: 800px;
+    margin-left: auto; margin-right: auto;
+  }
+  .db-tables h3 { font-size: 15px; font-weight: 600; margin-bottom: 12px; }
+  .table-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+  }
+  .table-item {
+    background: #f8fafc;
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+    padding: 8px 12px;
+    font-size: 12px;
+  }
+  .table-item strong { font-weight: 600; color: #1e293b; display: block; font-size: 13px; }
+  .table-item span { color: #64748b; }
+
+  .legend {
+    display: flex; gap: 16px; flex-wrap: wrap;
+    margin-top: 24px; max-width: 800px;
+    margin-left: auto; margin-right: auto;
+  }
+  .legend-item { display: flex; align-items: center; gap: 6px; font-size: 12px; color: #64748b; }
+  .legend-dot { width: 12px; height: 12px; border-radius: 50%; }
+
+  .moderators {
+    margin-top: 16px; max-width: 800px;
+    margin-left: auto; margin-right: auto;
+    font-size: 12px; color: #64748b;
+    background: #faf5ff; border: 1px solid #e9d5ff; border-radius: 8px;
+    padding: 10px 14px;
+  }
+  .moderators strong { color: #5B5FC7; }
+
+  .flow-link {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    padding: 4px 0;
+    font-size: 11px;
+    color: #0ea5e9;
+    font-weight: 600;
+  }
+  .flow-link .dash {
+    width: 60px; height: 2px;
+    background: repeating-linear-gradient(90deg, #0ea5e9 0, #0ea5e9 6px, transparent 6px, transparent 10px);
+  }
+</style>
+</head>
+<body>
+  <h1>Пайплайн загрузки задач → Каталог Сократа</h1>
+  <p class="subtitle">Moderation V2: Source→Copy — задача-источник в «сократ» автоматически создаёт каноническую публичную копию в каталоге</p>
+
+  <div class="pipeline">
+    <!-- Stage 1: SQL seed -->
+    <div class="stage active">
+      <div class="stage-header">
+        <div class="stage-number">1</div>
+        <div class="stage-title">SQL-миграция: парсинг задач <span class="badge badge-auto">AUTO</span></div>
+      </div>
+      <div class="stage-body">
+        Файл: <code>20260318120000_kb_seed_demidova_kinematics.sql</code><br>
+        54 задачи из учебника Демидовой → INSERT в <code>kb_tasks</code><br>
+        <code>owner_id = модератор</code>, <code>folder_id = "Черновики для сократа"</code><br>
+        <code>source_label = 'demidova_2025'</code>, LaTeX: <code>$...$</code> inline
+      </div>
+    </div>
+
+    <div class="arrow">
+      <div class="arrow-line"></div>
+      <div class="arrow-head"></div>
+      <div class="arrow-label">supabase db push</div>
+    </div>
+
+    <!-- Stage 2: Drafts review -->
+    <div class="stage manual">
+      <div class="stage-header">
+        <div class="stage-number">2</div>
+        <div class="stage-title">Черновики для сократа <span class="badge badge-manual">МОДЕРАТОР</span></div>
+      </div>
+      <div class="stage-body">
+        Папка в «Моя база» модератора (personal space)<br>
+        Видна только модератору. Не попадает в каталог!<br>
+        Проверка: текст, ответ, LaTeX, вложения, topic_id<br>
+        Исправление ошибок OCR, дополнение решений
+      </div>
+    </div>
+
+    <div class="arrow">
+      <div class="arrow-line"></div>
+      <div class="arrow-head"></div>
+      <div class="arrow-label">Перенос в «сократ» (вручную в UI) + установка topic_id</div>
+    </div>
+
+    <!-- Stage 3: сократ folder → auto-publish trigger -->
+    <div class="stage trigger">
+      <div class="stage-header">
+        <div class="stage-number">3</div>
+        <div class="stage-title">Папка «сократ» → Auto-Publish <span class="badge badge-trigger">TRIGGER</span></div>
+      </div>
+      <div class="stage-body">
+        При перемещении задачи в «сократ» (или подпапку) срабатывают триггеры:<br>
+        <code>trg_kb_after_update_moderation</code> / <code>trg_kb_after_insert_moderation</code> → <code>kb_publish_task(source_id)</code><br>
+        Триггер создаёт <b>каноническую публичную копию</b> (<code>owner_id = NULL</code>) в каталоге<br>
+        Двунаправленные ссылки: <code>published_task_id</code> на источнике ↔ <code>source_task_id</code> на копии<br>
+        <code>fingerprint</code> = MD5(normalized text + answer) для дедупликации<br>
+        Аудит: запись <code>publish</code> в <code>kb_moderation_log</code>
+      </div>
+    </div>
+  </div>
+
+  <!-- Side-by-side: Auto-Resync + Fingerprint Dedup -->
+  <div class="side-note">
+    <div class="stage trigger" style="flex:1">
+      <div class="stage-header">
+        <div class="stage-number" style="font-size:11px">3a</div>
+        <div class="stage-title" style="font-size:14px">Auto-Resync <span class="badge badge-trigger">TRIGGER</span></div>
+      </div>
+      <div class="stage-body" style="margin-left:36px">
+        Правка источника в «сократ» →<br>
+        <code>trg_kb_after_update_moderation</code> → <code>kb_resync_task()</code><br>
+        Обновляет публичную копию: text, answer,<br>
+        solution, attachment_url, fingerprint<br>
+        Аудит: <code>resync</code>
+      </div>
+    </div>
+    <div class="stage dedup" style="flex:1">
+      <div class="stage-header">
+        <div class="stage-number" style="font-size:11px">3b</div>
+        <div class="stage-title" style="font-size:14px">Fingerprint Dedup <span class="badge badge-dedup">BLOCK</span></div>
+      </div>
+      <div class="stage-body" style="margin-left:36px">
+        <code>trg_kb_before_update_block_dup</code> (BEFORE UPDATE)<br>
+        <code>pg_advisory_xact_lock</code> для атомарности<br>
+        Первый опубликовавший fingerprint побеждает<br>
+        Дубли → <code>hidden_duplicate</code><br>
+        Правка, создающая дубль → RAISE EXCEPTION
+      </div>
+    </div>
+  </div>
+
+  <div class="pipeline">
+    <div class="arrow">
+      <div class="arrow-line"></div>
+      <div class="arrow-head"></div>
+      <div class="arrow-label">Каноническая копия (owner_id=NULL, moderation_status='active')</div>
+    </div>
+
+    <!-- Stage 4: Каталог -->
+    <div class="stage active">
+      <div class="stage-header">
+        <div class="stage-number">4</div>
+        <div class="stage-title">Каталог Сократа <span class="badge badge-auto">PUBLIC</span></div>
+      </div>
+      <div class="stage-body">
+        <code>fetch_catalog_tasks_v2(topic_id)</code> — SECURITY DEFINER<br>
+        Возвращает: <code>kb_tasks WHERE owner_id IS NULL AND moderation_status = 'active'</code><br>
+        Все репетиторы видят задачи, группированные по topic → subtopic<br>
+        Read-only витрина: копирование в «Мою базу» или добавление в ДЗ<br>
+        RLS: не-модераторы видят только <code>moderation_status = 'active'</code>
+      </div>
+    </div>
+
+    <div class="arrow">
+      <div class="arrow-line"></div>
+      <div class="arrow-head"></div>
+      <div class="arrow-label">Модерационные действия (RPCs)</div>
+    </div>
+
+    <!-- Stage 5: Moderation RPCs -->
+    <div class="stage rpc">
+      <div class="stage-header">
+        <div class="stage-number">5</div>
+        <div class="stage-title">Модерация <span class="badge badge-rpc">RPC</span></div>
+      </div>
+      <div class="stage-body">
+        <code>kb_mod_unpublish(task_id)</code> — снять публикацию (копия → <code>unpublished</code>)<br>
+        <code>kb_mod_reassign(task_id, new_source_id)</code> — перепривязать источник<br>
+        Проверка: <code>has_role(uid, 'moderator')</code>, новый источник в «сократ» дереве<br>
+        Аудит: все действия → <code>kb_moderation_log</code><br>
+        После unpublish скрытые дубли <b>НЕ</b> восстанавливаются автоматически
+      </div>
+    </div>
+  </div>
+
+  <!-- Audit log -->
+  <div class="pipeline" style="margin-top:12px">
+    <div class="stage audit" style="opacity:0.85">
+      <div class="stage-header">
+        <div class="stage-number">✦</div>
+        <div class="stage-title">Аудит-лог <span class="badge badge-audit">LOG</span></div>
+      </div>
+      <div class="stage-body">
+        <code>kb_moderation_log</code> — все действия: publish, resync, unpublish, reassign, hide_duplicate<br>
+        Поля: action, task_id, source_task_id, moderator_id, details (JSONB), created_at<br>
+        RLS: только модераторы видят лог (SELECT WHERE <code>has_role()</code>)
+      </div>
+    </div>
+  </div>
+
+  <!-- Fallback -->
+  <div class="pipeline" style="margin-top:12px">
+    <div class="stage rpc" style="opacity: 0.6">
+      <div class="stage-header">
+        <div class="stage-number">F</div>
+        <div class="stage-title">Промоушен <span class="badge badge-rpc">RPC</span> <span class="badge badge-fallback">FALLBACK</span></div>
+      </div>
+      <div class="stage-body">
+        <code>promote_folder_to_catalog(folder_id, topic_id)</code><br>
+        Переводит задачи в <code>owner_id = NULL</code> напрямую (финализация)<br>
+        Используется: если модератор уходит или нужна полная независимость каталога<br>
+        Обычный V2 flow не требует этого шага
+      </div>
+    </div>
+  </div>
+
+  <!-- Moderators -->
+  <div class="moderators">
+    <strong>Модераторы:</strong> определяются через <code>has_role(uid, 'moderator')</code> (таблица <code>user_roles</code>)<br>
+    У каждого свои папки «Черновики для сократа» + «сократ». Перенос в «сократ» → auto-publish → каталог.
+  </div>
+
+  <!-- DB Tables -->
+  <div class="db-tables">
+    <h3>Таблицы, триггеры и функции</h3>
+    <div class="table-grid">
+      <div class="table-item">
+        <strong>kb_tasks</strong>
+        <span>Задачи. Новые поля: published_task_id, source_task_id, fingerprint, moderation_status, hidden_reason, published_by, published_at</span>
+      </div>
+      <div class="table-item">
+        <strong>kb_folders</strong>
+        <span>Папки модераторов. «Черновики» (скрыты) + «сократ» (auto-publish) + подпапки</span>
+      </div>
+      <div class="table-item">
+        <strong>kb_moderation_log</strong>
+        <span>Аудит-лог. action, task_id, source_task_id, moderator_id, details (JSONB)</span>
+      </div>
+      <div class="table-item">
+        <strong>user_roles</strong>
+        <span>Роли пользователей. has_role(uid, 'moderator') — SECURITY DEFINER</span>
+      </div>
+      <div class="table-item">
+        <strong>kb_publish_task()</strong>
+        <span>SECURITY DEFINER. Создаёт каноническую копию. REVOKE FROM PUBLIC — только триггеры</span>
+      </div>
+      <div class="table-item">
+        <strong>kb_resync_task()</strong>
+        <span>SECURITY DEFINER. Синхронизирует копию с источником. REVOKE FROM PUBLIC — только триггеры</span>
+      </div>
+      <div class="table-item">
+        <strong>fetch_catalog_tasks_v2()</strong>
+        <span>RPC SECURITY DEFINER. WHERE owner_id IS NULL AND moderation_status = 'active'</span>
+      </div>
+      <div class="table-item">
+        <strong>kb_normalize_fingerprint()</strong>
+        <span>MD5(lower(trim(text)) || '::' || lower(trim(answer))). Для дедупликации</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Trigger summary -->
+  <div class="db-tables" style="margin-top:12px">
+    <h3>Триггеры (3 шт.)</h3>
+    <div class="table-grid">
+      <div class="table-item">
+        <strong>trg_kb_before_update_block_dup</strong>
+        <span>BEFORE UPDATE. Блокирует правку, создающую дублирующий fingerprint. pg_advisory_xact_lock</span>
+      </div>
+      <div class="table-item">
+        <strong>trg_kb_after_update_moderation</strong>
+        <span>AFTER UPDATE. Auto-publish при перемещении в «сократ» + auto-resync при правке → kb_publish_task() / kb_resync_task()</span>
+      </div>
+      <div class="table-item">
+        <strong>trg_kb_after_insert_moderation</strong>
+        <span>AFTER INSERT. Auto-publish если задача вставлена сразу в «сократ» дерево с topic_id → kb_publish_task()</span>
+      </div>
+      <div class="table-item">
+        <strong>UNIQUE indexes</strong>
+        <span>idx_kb_tasks_unique_source (source_task_id), idx_kb_tasks_unique_published (published_task_id) — one-to-one</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Legend -->
+  <div class="legend">
+    <div class="legend-item"><div class="legend-dot" style="background:#1B6B4A"></div> Автоматический / Каталог</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#5B5FC7"></div> Ручная работа модератора</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#0ea5e9"></div> Триггер (auto-publish / resync)</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#ef4444"></div> Fingerprint dedup (block)</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#E8913A"></div> RPC-функция</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#8b5cf6"></div> Аудит-лог</div>
+  </div>
+</body>
+</html>
