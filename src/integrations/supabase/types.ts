@@ -2902,6 +2902,18 @@ export type Database = {
         Args: { _tutor_student_id: string }
         Returns: boolean
       }
+      promote_folder_to_catalog: {
+        Args: {
+          p_folder_id: string
+          p_source_label?: string
+          p_subtopic_id?: string
+          p_topic_id: string
+        }
+        Returns: {
+          promoted_count: number
+          task_ids: string[]
+        }[]
+      }
       update_group_participant_payment_status: {
         Args: {
           _lesson_id: string
