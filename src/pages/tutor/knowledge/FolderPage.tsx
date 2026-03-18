@@ -158,6 +158,7 @@ function FolderContent() {
                         isExpanded={expandedTaskId === task.id}
                         onToggle={() => setExpandedTaskId(expandedTaskId === task.id ? null : task.id)}
                         onAddToHW={() => handleAddToHW(task)}
+                        onMoveToFolder={() => setMovingTask(task)}
                         onEdit={() => setEditingTask(task)}
                         onDelete={() => {
                           if (window.confirm('Удалить задачу?')) {
