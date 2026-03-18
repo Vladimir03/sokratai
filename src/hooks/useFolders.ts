@@ -379,8 +379,42 @@ export function useDeleteFolder() {
   });
 }
 
+/** Move a task to a different folder (update folder_id) */
+export function useMoveTaskToFolder() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (params: { taskId: string; targetFolderId: string; sourceFolderId: string }) => {
+      const { error } = await supabase
+        .from('kb_tasks')
+        .update({ folder_id: params.targetFolderId, updated_at: new Date().toISOString() })
+        .eq('id', params.taskId);
+      if (error) throw error;
+    },
+    onSuccess: (_data, variables) => {
+      void queryClient.invalidateQueries({ queryKey: ['tutor', 'kb', 'folder', variables.sourceFolderId] });
+      void queryClient.invalidateQueries({ queryKey: ['tutor', 'kb', 'folder', variables.targetFolderId] });
+      void queryClient.invalidateQueries({ queryKey: ['tutor', 'kb', 'folder-tree'] });
+      void queryClient.invalidateQueries({ queryKey: ['tutor', 'kb', 'root-folders'] });
+      void queryClient.invalidateQueries({ queryKey: ['tutor', 'kb', 'search'] });
+    },
+  });
+}
+
 /** Copy a catalog task into a personal folder */
 export function useCopyTaskToFolder() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: copyTaskToFolder,
+    onSuccess: (_data, variables) => {
+      void queryClient.invalidateQueries({ queryKey: ['tutor', 'kb', 'folder', variables.folderId] });
+      void queryClient.invalidateQueries({ queryKey: ['tutor', 'kb', 'folder-tree'] });
+      void queryClient.invalidateQueries({ queryKey: ['tutor', 'kb', 'root-folders'] });
+      void queryClient.invalidateQueries({ queryKey: ['tutor', 'kb', 'search'] });
+    },
+  });
+}
   const queryClient = useQueryClient();
 
   return useMutation({

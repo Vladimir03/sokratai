@@ -208,6 +208,14 @@ function FolderContent() {
             onClose={() => setEditingTask(null)}
           />
         ) : null}
+
+        {movingTask && folderId ? (
+          <MoveToFolderModal
+            task={movingTask}
+            currentFolderId={folderId}
+            onClose={() => setMovingTask(null)}
+          />
+        ) : null}
       </KnowledgeBaseFrame>
     </TutorLayout>
   );
