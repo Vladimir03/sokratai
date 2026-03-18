@@ -58,12 +58,12 @@ function buildTree(folders: KBFolder[]): KBFolderTreeNode[] {
 async function fetchRootFolders(): Promise<KBFolderWithCounts[]> {
   const { data: { session } } = await supabase.auth.getSession();
   if (!session) throw new Error('Нет активной сессии');
-  const userId = session.user.id;
 
+  // RLS handles visibility: own folders + moderator peers' folders
   const [foldersRes, allChildrenRes, allTasksRes] = await Promise.all([
-    supabase.from('kb_folders').select('*').eq('owner_id', userId).is('parent_id', null).order('sort_order'),
-    supabase.from('kb_folders').select('parent_id').eq('owner_id', userId).not('parent_id', 'is', null),
-    supabase.from('kb_tasks').select('folder_id').eq('owner_id', userId).not('folder_id', 'is', null),
+    supabase.from('kb_folders').select('*').is('parent_id', null).order('sort_order'),
+    supabase.from('kb_folders').select('parent_id').not('parent_id', 'is', null),
+    supabase.from('kb_tasks').select('folder_id').not('folder_id', 'is', null),
   ]);
   if (foldersRes.error) throw foldersRes.error;
   if (allChildrenRes.error) throw allChildrenRes.error;
