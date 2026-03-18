@@ -26,10 +26,10 @@ async function fetchAllFolders(): Promise<KBFolder[]> {
   const { data: { session } } = await supabase.auth.getSession();
   if (!session) throw new Error('Нет активной сессии');
 
+  // RLS handles visibility: own folders + moderator peers' folders
   const { data, error } = await supabase
     .from('kb_folders')
     .select('*')
-    .eq('owner_id', session.user.id)
     .order('sort_order');
   if (error) throw error;
   return (data ?? []) as KBFolder[];
