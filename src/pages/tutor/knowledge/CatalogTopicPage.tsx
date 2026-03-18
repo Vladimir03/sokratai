@@ -43,7 +43,7 @@ function CatalogTopicContent() {
 
   const handleUnpublish = useCallback(
     async (task: KBTask) => {
-      if (!window.confirm(`Снять публикацию задачи #${task.number ?? ''}?`)) return;
+      if (!window.confirm(`Снять публикацию задачи?`)) return;
       try {
         await kbModUnpublish(task.id);
         await queryClient.invalidateQueries({ queryKey: ['tutor', 'kb'] });

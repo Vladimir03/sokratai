@@ -205,7 +205,7 @@ export async function kbModReassign(
   publishedTaskId: string,
   newSourceTaskId: string,
 ): Promise<void> {
-  const { error } = await supabase.rpc('kb_mod_reassign', {
+  const { error } = await (supabase.rpc as any)('kb_mod_reassign', {
     p_published_task_id: publishedTaskId,
     p_new_source_task_id: newSourceTaskId,
   });
