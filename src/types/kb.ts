@@ -66,6 +66,8 @@ export interface CreateKBFolderInput {
 // Задачи
 // =============================================
 
+export type ModerationStatus = 'active' | 'hidden_duplicate' | 'unpublished';
+
 export interface KBTask {
   id: string;
   topic_id: string | null;
@@ -88,6 +90,20 @@ export interface KBTask {
   attachment_url: string | null;
   /** Solution images — same format as attachment_url. */
   solution_attachment_url: string | null;
+  /** Source task → its canonical public copy (set on source tasks in сократ) */
+  published_task_id: string | null;
+  /** Canonical public copy → its source task (set on catalog copies) */
+  source_task_id: string | null;
+  /** Normalized text+answer hash for dedup (set on catalog copies) */
+  fingerprint: string | null;
+  /** Moderation lifecycle: active, hidden_duplicate, unpublished */
+  moderation_status: ModerationStatus;
+  /** Explanation when hidden/unpublished */
+  hidden_reason: string | null;
+  /** Who published this task (moderator user_id, set on catalog copies) */
+  published_by: string | null;
+  /** When published (set on catalog copies) */
+  published_at: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -171,4 +187,21 @@ export interface HomeworkKBTask {
   task_solution_snapshot: string | null;
   snapshot_edited: boolean;
   added_at: string;
+}
+
+// =============================================
+// Moderation
+// =============================================
+
+export type ModerationAction = 'publish' | 'resync' | 'unpublish' | 'reassign' | 'hide_duplicate';
+
+/** Row from kb_moderation_log table */
+export interface KBModerationLogEntry {
+  id: string;
+  action: ModerationAction;
+  task_id: string | null;
+  source_task_id: string | null;
+  moderator_id: string;
+  details: Record<string, unknown>;
+  created_at: string;
 }

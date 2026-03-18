@@ -183,3 +183,31 @@ export async function getKBImageSignedUrl(
   if (error || !data?.signedUrl) return null;
   return data.signedUrl;
 }
+
+// ─── Moderation RPCs (V2) ────────────────────────────────────────────────────
+
+/**
+ * Unpublish a catalog task (moderator-only).
+ * Sets moderation_status = 'unpublished' on the canonical copy.
+ */
+export async function kbModUnpublish(publishedTaskId: string): Promise<void> {
+  const { error } = await supabase.rpc('kb_mod_unpublish', {
+    p_published_task_id: publishedTaskId,
+  });
+  if (error) throw error;
+}
+
+/**
+ * Reassign a catalog task to a new source (moderator-only).
+ * Relinks the canonical copy to a different source task.
+ */
+export async function kbModReassign(
+  publishedTaskId: string,
+  newSourceTaskId: string,
+): Promise<void> {
+  const { error } = await supabase.rpc('kb_mod_reassign', {
+    p_published_task_id: publishedTaskId,
+    p_new_source_task_id: newSourceTaskId,
+  });
+  if (error) throw error;
+}

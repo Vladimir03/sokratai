@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Check, ChevronDown, Download, Image, Pencil, Sparkles, Trash2 } from 'lucide-react';
+import { Check, ChevronDown, Download, EyeOff, Image, Pencil, RefreshCw, Sparkles, Trash2 } from 'lucide-react';
 import { ContextMenu, type ContextMenuItem } from '@/components/kb/ui/ContextMenu';
 import { CopyTaskButton } from '@/components/kb/ui/CopyTaskButton';
 import { MathText } from '@/components/kb/ui/MathText';
@@ -13,6 +13,7 @@ interface TaskCardProps {
   isExpanded: boolean;
   isOwn: boolean;
   inHW?: boolean;
+  isModerator?: boolean;
   subtopicName?: string;
   onToggle: () => void;
   onAddToHW?: () => void;
@@ -20,6 +21,8 @@ interface TaskCardProps {
   onEdit?: () => void;
   onDelete?: () => void;
   onAiSimilar?: () => void;
+  onUnpublish?: () => void;
+  onReassign?: () => void;
   className?: string;
 }
 
@@ -30,6 +33,7 @@ export function TaskCard({
   isExpanded,
   isOwn,
   inHW = false,
+  isModerator = false,
   subtopicName,
   onToggle,
   onAddToHW,
@@ -37,8 +41,14 @@ export function TaskCard({
   onEdit,
   onDelete,
   onAiSimilar,
+  onUnpublish,
+  onReassign,
   className,
 }: TaskCardProps) {
+  const isHiddenDuplicate = task.moderation_status === 'hidden_duplicate';
+  const isUnpublished = task.moderation_status === 'unpublished';
+  const isModeratable = isModerator && !isOwn && task.owner_id === null;
+
   const menuItems: ContextMenuItem[] = [];
 
   if (isOwn && onEdit) {
@@ -49,6 +59,13 @@ export function TaskCard({
   }
   if (isOwn && onDelete) {
     menuItems.push({ key: 'delete', label: 'Удалить', icon: Trash2, destructive: true, onSelect: onDelete });
+  }
+  // Moderator actions on catalog tasks
+  if (isModeratable && onUnpublish) {
+    menuItems.push({ key: 'unpublish', label: 'Снять публикацию', icon: EyeOff, destructive: true, onSelect: onUnpublish });
+  }
+  if (isModeratable && onReassign) {
+    menuItems.push({ key: 'reassign', label: 'Перепривязать источник', icon: RefreshCw, onSelect: onReassign });
   }
 
   // Resolve attachment_url(s) to signed HTTP URLs
@@ -190,6 +207,16 @@ export function TaskCard({
           ) : null}
           {task.kim_number ? (
             <span className="text-[11px] font-medium text-slate-500">КИМ № {task.kim_number}</span>
+          ) : null}
+          {isHiddenDuplicate ? (
+            <span className="inline-flex items-center gap-1 rounded-md bg-red-50 px-1.5 py-0.5 text-[10px] font-semibold text-red-600">
+              дубль скрыт
+            </span>
+          ) : null}
+          {isUnpublished ? (
+            <span className="inline-flex items-center gap-1 rounded-md bg-amber-50 px-1.5 py-0.5 text-[10px] font-semibold text-amber-600">
+              снято
+            </span>
           ) : null}
           {attachmentRefs.length > 0 ? (
             <span className="inline-flex items-center gap-0.5">
@@ -401,7 +428,7 @@ export function TaskCard({
           </button>
         ) : null}
 
-        {isOwn && menuItems.length > 0 ? <ContextMenu items={menuItems} /> : null}
+        {menuItems.length > 0 ? <ContextMenu items={menuItems} /> : null}
       </div>
     </article>
   );
