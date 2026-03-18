@@ -2,34 +2,36 @@
 
 ## Problem
 
-The 54 Demidova 2025 tasks exist in the database but are owned by user `a7212758-8cdd-4d7c-8608-4fedcb34d74c` and stored in that user's "Черновики для сократа" folder (`d9b1b759-...`).
+- **kamchatkinvova@gmail.com** has 53 tasks in "Черновики для сократа" (folder `997471c7`). Both users have the `moderator` role.
+- **egor.o.blinov@gmail.com** has 3 tasks in "Черновики для Сократа" (folder `59f40091`) and 0 in a duplicate "Черновики для сократа" (folder `d9b1b759`). No code bug — it's a data issue: the tasks were only ever created in kamchatkinvova's folder.
 
-You are logged in as `kamchatkinvova@gmail.com` (`420b1476-6988-4f00-b435-09400420d145`), who has a separate "Черновики для сократа" folder (`997471c7-5440-46f6-bca8-7e11b9476c63`).
+## Plan
 
-RLS on `kb_tasks` filters by `owner_id = auth.uid()`, so these tasks are invisible to you. The folder query in `useFolders.ts` also filters `.eq('owner_id', session.user.id)`.
+**Single SQL migration** to:
 
-## Fix
+1. **Copy 53 tasks** from kamchatkinvova's "Черновики для сократа" into egor's "Черновики для Сократа" folder — inserting them with `owner_id = egor's user_id`, preserving all task content (text, answer, solution, attachments, exam, kim_number, etc.), and setting `source_label = 'my'`.
 
-Run a single data UPDATE (via the insert/update tool, not a migration) to reassign all 54 tasks:
+2. **Delete the duplicate empty folder** "Черновики для сократа" (`d9b1b759`) belonging to egor to clean up the UI.
 
-```sql
-UPDATE kb_tasks
-SET owner_id  = '420b1476-6988-4f00-b435-09400420d145',
-    folder_id = '997471c7-5440-46f6-bca8-7e11b9476c63',
-    updated_at = NOW()
-WHERE folder_id = 'd9b1b759-cc97-4e9d-a12d-921c6ac6e90f'
-  AND source_label = 'demidova_2025';
-```
-
-This moves all 54 tasks into **your** "Черновики для сократа" folder. No code changes needed — the frontend already queries by `owner_id = auth.uid()` and will display them immediately.
-
-Optionally, clean up the orphaned folders owned by `a7212758-...` if that user is not real:
+### SQL logic (simplified)
 
 ```sql
-DELETE FROM kb_folders WHERE owner_id = 'a7212758-8cdd-4d7c-8608-4fedcb34d74c';
+-- 1. Copy 53 tasks
+INSERT INTO kb_tasks (folder_id, owner_id, topic_id, subtopic_id, exam, kim_number,
+  primary_score, text, answer, solution, answer_format, source_label,
+  attachment_url, solution_attachment_url)
+SELECT
+  '59f40091-...'::uuid,           -- egor's "Черновики для Сократа"
+  'a7212758-...'::uuid,           -- egor's user_id
+  topic_id, subtopic_id, exam, kim_number, primary_score,
+  text, answer, solution, answer_format, 'my',
+  attachment_url, solution_attachment_url
+FROM kb_tasks
+WHERE folder_id = '997471c7-...'; -- kamchatkinvova's folder
+
+-- 2. Remove duplicate empty folder
+DELETE FROM kb_folders WHERE id = 'd9b1b759-...';
 ```
 
-## No code changes
-
-The frontend (`useFolders.ts`, `FolderPage.tsx`) already handles this correctly — it queries folders and tasks by `owner_id`. Once the data is reassigned, the 54 tasks will appear.
+No code changes needed — only a database migration.
 
