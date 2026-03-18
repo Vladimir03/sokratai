@@ -1,40 +1,35 @@
 
 
-## Root Cause
+## Problem
 
-The database confirms: assignment `4ce28a0e-b77e-4c97-b914-e6dc4717c046` has `workflow_mode = 'classic'` despite the switch being ON in the UI. This happened because the edge function `homework-api` was not yet redeployed with `workflow_mode` support when the assignment was created. The edge function defaulted unknown fields to `'classic'`.
+The 54 Demidova 2025 tasks exist in the database but are owned by user `a7212758-8cdd-4d7c-8608-4fedcb34d74c` and stored in that user's "Черновики для сократа" folder (`d9b1b759-...`).
 
-**All 40 assignments in the database have `workflow_mode = 'classic'`** -- none were ever saved as `guided_chat`.
+You are logged in as `kamchatkinvova@gmail.com` (`420b1476-6988-4f00-b435-09400420d145`), who has a separate "Черновики для сократа" folder (`997471c7-5440-46f6-bca8-7e11b9476c63`).
 
-The frontend code is correct (sends `workflow_mode`), the edge function code is correct (saves it), and the student-side query is correct (reads it). The issue was purely a deployment timing gap.
+RLS on `kb_tasks` filters by `owner_id = auth.uid()`, so these tasks are invisible to you. The folder query in `useFolders.ts` also filters `.eq('owner_id', session.user.id)`.
 
-## Fix Plan
+## Fix
 
-### 1. Fix existing assignment data (SQL UPDATE via insert tool)
-
-Update assignment `4ce28a0e-b77e-4c97-b914-e6dc4717c046` to `workflow_mode = 'guided_chat'`:
+Run a single data UPDATE (via the insert/update tool, not a migration) to reassign all 54 tasks:
 
 ```sql
-UPDATE homework_tutor_assignments 
-SET workflow_mode = 'guided_chat' 
-WHERE id = '4ce28a0e-b77e-4c97-b914-e6dc4717c046';
+UPDATE kb_tasks
+SET owner_id  = '420b1476-6988-4f00-b435-09400420d145',
+    folder_id = '997471c7-5440-46f6-bca8-7e11b9476c63',
+    updated_at = NOW()
+WHERE folder_id = 'd9b1b759-cc97-4e9d-a12d-921c6ac6e90f'
+  AND source_label = 'demidova_2025';
 ```
 
-### 2. Provision guided chat thread for the assigned student
+This moves all 54 tasks into **your** "Черновики для сократа" folder. No code changes needed — the frontend already queries by `owner_id = auth.uid()` and will display them immediately.
 
-The student `ac96a528-4213-471b-ac9d-163a2af6397a` has a `homework_tutor_student_assignments` row but no thread exists yet. Need to:
+Optionally, clean up the orphaned folders owned by `a7212758-...` if that user is not real:
 
-1. Look up the `student_assignment_id` from `homework_tutor_student_assignments`
-2. Insert a row into `homework_tutor_threads` 
-3. Insert `homework_tutor_task_states` for each task (first = `active`, rest = `locked`)
+```sql
+DELETE FROM kb_folders WHERE owner_id = 'a7212758-8cdd-4d7c-8608-4fedcb34d74c';
+```
 
-This requires querying for the student_assignment ID and task IDs first, then inserting thread + task states.
+## No code changes
 
-### 3. Redeploy edge function
-
-Redeploy `homework-api` to confirm latest code is live for future assignments.
-
-### No frontend changes needed
-
-The frontend already handles `workflow_mode === 'guided_chat'` correctly at line 433 of `StudentHomeworkDetail.tsx`.
+The frontend (`useFolders.ts`, `FolderPage.tsx`) already handles this correctly — it queries folders and tasks by `owner_id`. Once the data is reassigned, the 54 tasks will appear.
 
