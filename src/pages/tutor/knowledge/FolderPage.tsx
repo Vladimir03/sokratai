@@ -7,6 +7,7 @@ import { CreateFolderModal } from '@/components/kb/CreateFolderModal';
 import { CreateTaskModal } from '@/components/kb/CreateTaskModal';
 import { EditTaskModal } from '@/components/kb/EditTaskModal';
 import { FolderCard } from '@/components/kb/FolderCard';
+import { MoveToFolderModal } from '@/components/kb/MoveToFolderModal';
 import { KBStatusCard } from '@/components/kb/KBStatusCard';
 import { KnowledgeBaseFrame } from '@/components/kb/KnowledgeBaseFrame';
 import { TaskCard } from '@/components/kb/TaskCard';
@@ -27,6 +28,7 @@ function FolderContent() {
   const [showCreateFolder, setShowCreateFolder] = useState(false);
   const [showCreateTask, setShowCreateTask] = useState(false);
   const [editingTask, setEditingTask] = useState<KBTask | null>(null);
+  const [movingTask, setMovingTask] = useState<KBTask | null>(null);
   const { addTask, hasTask } = useHWDraftStore();
   const deleteTask = useDeleteTask();
   const { isModerator } = useIsModerator();
@@ -156,6 +158,7 @@ function FolderContent() {
                         isExpanded={expandedTaskId === task.id}
                         onToggle={() => setExpandedTaskId(expandedTaskId === task.id ? null : task.id)}
                         onAddToHW={() => handleAddToHW(task)}
+                        onMoveToFolder={() => setMovingTask(task)}
                         onEdit={() => setEditingTask(task)}
                         onDelete={() => {
                           if (window.confirm('Удалить задачу?')) {
@@ -203,6 +206,14 @@ function FolderContent() {
           <EditTaskModal
             task={editingTask}
             onClose={() => setEditingTask(null)}
+          />
+        ) : null}
+
+        {movingTask && folderId ? (
+          <MoveToFolderModal
+            task={movingTask}
+            currentFolderId={folderId}
+            onClose={() => setMovingTask(null)}
           />
         ) : null}
       </KnowledgeBaseFrame>

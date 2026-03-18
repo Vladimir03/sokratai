@@ -2,42 +2,34 @@
 
 ## Problem
 
-`FolderPage.tsx` renders `TaskCard` without passing `onMoveToFolder`, so the "Переместить" menu item never appears — even though `TaskCard` already supports it (line 62).
+The 54 Demidova 2025 tasks exist in the database but are owned by user `a7212758-8cdd-4d7c-8608-4fedcb34d74c` and stored in that user's "Черновики для сократа" folder (`d9b1b759-...`).
 
-There is no "move task to folder" mutation yet. Only "copy task to folder" exists (`useCopyTaskToFolder`). Moving = updating `folder_id` on an existing task.
+You are logged in as `kamchatkinvova@gmail.com` (`420b1476-6988-4f00-b435-09400420d145`), who has a separate "Черновики для сократа" folder (`997471c7-5440-46f6-bca8-7e11b9476c63`).
 
-## Plan
+RLS on `kb_tasks` filters by `owner_id = auth.uid()`, so these tasks are invisible to you. The folder query in `useFolders.ts` also filters `.eq('owner_id', session.user.id)`.
 
-### 1. Add `useMoveTaskToFolder` hook in `src/hooks/useFolders.ts`
+## Fix
 
-A simple mutation that updates `kb_tasks.folder_id` for an existing task owned by the current user:
+Run a single data UPDATE (via the insert/update tool, not a migration) to reassign all 54 tasks:
 
-```ts
-async function moveTaskToFolder(taskId: string, targetFolderId: string) {
-  const { error } = await supabase
-    .from('kb_tasks')
-    .update({ folder_id: targetFolderId, updated_at: new Date().toISOString() })
-    .eq('id', taskId);
-  if (error) throw error;
-}
-
-export function useMoveTaskToFolder() {
-  // invalidate source + target folder queries + folder-tree
-}
+```sql
+UPDATE kb_tasks
+SET owner_id  = '420b1476-6988-4f00-b435-09400420d145',
+    folder_id = '997471c7-5440-46f6-bca8-7e11b9476c63',
+    updated_at = NOW()
+WHERE folder_id = 'd9b1b759-cc97-4e9d-a12d-921c6ac6e90f'
+  AND source_label = 'demidova_2025';
 ```
 
-### 2. Create `MoveToFolderModal` component
+This moves all 54 tasks into **your** "Черновики для сократа" folder. No code changes needed — the frontend already queries by `owner_id = auth.uid()` and will display them immediately.
 
-Reuse the same folder-tree picker pattern from `CopyToFolderModal`, but call the move mutation instead of copy. File: `src/components/kb/MoveToFolderModal.tsx`. Exclude the current folder from selection.
+Optionally, clean up the orphaned folders owned by `a7212758-...` if that user is not real:
 
-### 3. Wire up in `FolderPage.tsx`
+```sql
+DELETE FROM kb_folders WHERE owner_id = 'a7212758-8cdd-4d7c-8608-4fedcb34d74c';
+```
 
-- Add state `movingTask: KBTask | null`
-- Pass `onMoveToFolder={() => setMovingTask(task)}` to each `TaskCard`
-- Render `MoveToFolderModal` when `movingTask` is set
-- Invalidate the current folder on success so the moved task disappears from the list
+## No code changes
 
-### No database changes needed
-
-RLS on `kb_tasks` already allows owners to update their own tasks. The `folder_id` column is updatable.
+The frontend (`useFolders.ts`, `FolderPage.tsx`) already handles this correctly — it queries folders and tasks by `owner_id`. Once the data is reassigned, the 54 tasks will appear.
 
