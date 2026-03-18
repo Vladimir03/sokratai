@@ -1257,14 +1257,21 @@ export type Database = {
           attachment_url: string | null
           created_at: string | null
           exam: Database["public"]["Enums"]["exam_type"] | null
+          fingerprint: string | null
           folder_id: string | null
+          hidden_reason: string | null
           id: string
           kim_number: number | null
+          moderation_status: string
           owner_id: string | null
           primary_score: number | null
+          published_at: string | null
+          published_by: string | null
+          published_task_id: string | null
           solution: string | null
           solution_attachment_url: string | null
           source_label: string | null
+          source_task_id: string | null
           subtopic_id: string | null
           text: string
           topic_id: string | null
@@ -1276,14 +1283,21 @@ export type Database = {
           attachment_url?: string | null
           created_at?: string | null
           exam?: Database["public"]["Enums"]["exam_type"] | null
+          fingerprint?: string | null
           folder_id?: string | null
+          hidden_reason?: string | null
           id?: string
           kim_number?: number | null
+          moderation_status?: string
           owner_id?: string | null
           primary_score?: number | null
+          published_at?: string | null
+          published_by?: string | null
+          published_task_id?: string | null
           solution?: string | null
           solution_attachment_url?: string | null
           source_label?: string | null
+          source_task_id?: string | null
           subtopic_id?: string | null
           text: string
           topic_id?: string | null
@@ -1295,14 +1309,21 @@ export type Database = {
           attachment_url?: string | null
           created_at?: string | null
           exam?: Database["public"]["Enums"]["exam_type"] | null
+          fingerprint?: string | null
           folder_id?: string | null
+          hidden_reason?: string | null
           id?: string
           kim_number?: number | null
+          moderation_status?: string
           owner_id?: string | null
           primary_score?: number | null
+          published_at?: string | null
+          published_by?: string | null
+          published_task_id?: string | null
           solution?: string | null
           solution_attachment_url?: string | null
           source_label?: string | null
+          source_task_id?: string | null
           subtopic_id?: string | null
           text?: string
           topic_id?: string | null
@@ -1314,6 +1335,20 @@ export type Database = {
             columns: ["folder_id"]
             isOneToOne: false
             referencedRelation: "kb_folders"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "kb_tasks_published_task_id_fkey"
+            columns: ["published_task_id"]
+            isOneToOne: false
+            referencedRelation: "kb_tasks"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "kb_tasks_source_task_id_fkey"
+            columns: ["source_task_id"]
+            isOneToOne: false
+            referencedRelation: "kb_tasks"
             referencedColumns: ["id"]
           },
           {
@@ -2780,14 +2815,21 @@ export type Database = {
           attachment_url: string | null
           created_at: string | null
           exam: Database["public"]["Enums"]["exam_type"] | null
+          fingerprint: string | null
           folder_id: string | null
+          hidden_reason: string | null
           id: string
           kim_number: number | null
+          moderation_status: string
           owner_id: string | null
           primary_score: number | null
+          published_at: string | null
+          published_by: string | null
+          published_task_id: string | null
           solution: string | null
           solution_attachment_url: string | null
           source_label: string | null
+          source_task_id: string | null
           subtopic_id: string | null
           text: string
           topic_id: string | null
@@ -2898,6 +2940,13 @@ export type Database = {
         Args: { _folder_id: string; _owner_id: string }
         Returns: boolean
       }
+      kb_is_in_socrat_tree: { Args: { p_folder_id: string }; Returns: boolean }
+      kb_normalize_fingerprint: {
+        Args: { p_answer: string; p_text: string }
+        Returns: string
+      }
+      kb_publish_task: { Args: { p_source_task_id: string }; Returns: string }
+      kb_resync_task: { Args: { p_source_task_id: string }; Returns: undefined }
       kb_search: {
         Args: {
           exam_filter: Database["public"]["Enums"]["exam_type"]
