@@ -16,7 +16,6 @@ export default defineConfig(({ mode }) => ({
   plugins: [
     react(), 
     mode === "development" && componentTagger(),
-    asyncCssPlugin()
   ].filter(Boolean),
   resolve: {
     alias: {
