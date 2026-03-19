@@ -179,6 +179,16 @@ Deno.serve(async (req: Request): Promise<Response> => {
     return new Response(null, { headers: corsHeaders });
   }
 
+  // Scheduler secret check
+  const authHeader = req.headers.get("Authorization");
+  const expectedSecret = Deno.env.get("SCHEDULER_SECRET");
+  if (!expectedSecret || authHeader !== `Bearer ${expectedSecret}`) {
+    return new Response(JSON.stringify({ error: "Unauthorized" }), {
+      status: 401,
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
+  }
+
   try {
     const result = await runReminders();
     return new Response(JSON.stringify(result), {
