@@ -5,19 +5,6 @@ import { componentTagger } from "lovable-tagger";
 
 const projectRoot = path.resolve(__dirname);
 
-// Plugin to make CSS non-render-blocking
-function asyncCssPlugin() {
-  return {
-    name: 'async-css',
-    transformIndexHtml(html: string) {
-      // Transform CSS link tags to load asynchronously
-      return html.replace(
-        /<link([^>]*?)rel="stylesheet"([^>]*?)>/g,
-        '<link$1rel="preload"$2 as="style" onload="this.onload=null;this.rel=\'stylesheet\'"><noscript><link$1rel="stylesheet"$2></noscript>'
-      );
-    }
-  };
-}
 
 // https://vitejs.dev/config/
 export default defineConfig(({ mode }) => ({
@@ -29,7 +16,6 @@ export default defineConfig(({ mode }) => ({
   plugins: [
     react(), 
     mode === "development" && componentTagger(),
-    asyncCssPlugin()
   ].filter(Boolean),
   resolve: {
     alias: {
