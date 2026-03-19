@@ -315,6 +315,7 @@ Component: TutorHomeworkCreate.tsx + editMode prop
 ### Sprint 1: LaTeX + Sort + Deadline (Паттерн 3, UX Polish) — IMPLEMENTED
 
 > **Student-side Sprint S1** (MathText + Bootstrap + Input Safety) реализован 2026-03-19.
+> **Свободный порядок задач** (free task navigation) реализован 2026-03-19.
 > См. `docs/features/specs/student-homework-sprint-s1-spec.md`.
 
 ```text

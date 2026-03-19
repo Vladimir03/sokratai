@@ -305,15 +305,7 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
     });
   }, [assignment.tasks, taskStates]);
 
-  const activeTaskOrder = useMemo(() => {
-    for (const task of assignment.tasks) {
-      const taskState = taskStates.find((state) => state.task_id === task.id);
-      if (taskState?.status === 'active') {
-        return task.order_num;
-      }
-    }
-    return threadCurrentTaskOrder;
-  }, [assignment.tasks, taskStates, threadCurrentTaskOrder]);
+  const activeTaskOrder = currentTaskOrder;
 
   const syncThreadFromResponse = useCallback((updatedThread: HomeworkThread) => {
     const normalizedMessages = (updatedThread.homework_tutor_thread_messages ?? []).map((msg) => ({
@@ -343,7 +335,7 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
     [messages, currentTaskOrder],
   );
 
-  const isViewingActiveTask = currentTaskOrder === activeTaskOrder;
+  const isViewingActiveTask = currentActiveTaskState?.status === 'active';
   const hasAiReplyForCurrentTask = visibleMessages.some(
     (message) => message.role === 'assistant' && message.message_delivery_status !== 'failed' && message.message_kind !== 'system',
   );
@@ -547,7 +539,7 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
     trackGuidedHomeworkEvent('guided_send_click', { assignmentId: assignment.id, taskOrder, sendMode: 'answer' });
 
     try {
-      const response: CheckAnswerResponse = await checkAnswer(threadId, answerText);
+      const response: CheckAnswerResponse = await checkAnswer(threadId, answerText, currentTask.order_num);
 
       // Sync full thread from response (includes saved messages)
       syncThreadFromResponse(response.thread);
@@ -697,7 +689,7 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
 
     setIsRequestingHint(true);
     try {
-      const response: RequestHintResponse = await requestHint(threadId);
+      const response: RequestHintResponse = await requestHint(threadId, currentTaskOrder);
 
       // Sync full thread from response (includes saved messages)
       syncThreadFromResponse(response.thread);
@@ -819,6 +811,7 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
 
   useEffect(() => {
     if (!threadId || !currentTask) return;
+    if (isThreadLoading) return;
     if (threadStatus !== 'active') return;
     if (isStreaming || isCheckingAnswer || isRequestingHint) return;
 
@@ -907,7 +900,7 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
     };
 
     void runBootstrap();
-  }, [assignment, currentTask, isCheckingAnswer, isRequestingHint, isStreaming, messages, threadId, threadStatus]);
+  }, [assignment, currentTask, isCheckingAnswer, isRequestingHint, isStreaming, isThreadLoading, messages, threadId, threadStatus]);
 
   // Loading state
   if (isThreadLoading) {

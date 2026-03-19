@@ -653,6 +653,38 @@ npm run smoke-check
 
 ---
 
+## Дополнение: Свободный порядок задач (2026-03-19)
+
+После Sprint S1 реализован свободный порядок решения задач (как на ЕГЭ/ОГЭ).
+
+### Что изменилось
+
+**Backend (`homework-api/index.ts`):**
+- `provisionGuidedThread`: все `task_states` создаются как `"active"` (было: первая active, остальные locked)
+- `loadAdvanceContext`: принимает `overrideTaskOrder` — клиент указывает задачу для check/hint
+- `handleCheckAnswer`: читает `task_order` из body, передаёт в `loadAdvanceContext`
+- `handleRequestHint`: принимает body, находит task_state по `task_order` вместо первого active
+
+**Frontend (`studentHomeworkApi.ts`):**
+- `checkAnswer(threadId, answer, taskOrder)` — передаёт `task_order` в body
+- `requestHint(threadId, taskOrder)` — передаёт `task_order` в body
+
+**Frontend (`GuidedHomeworkWorkspace.tsx`):**
+- `activeTaskOrder` = `currentTaskOrder` (следует за выбором ученика)
+- `isViewingActiveTask` = `currentActiveTaskState?.status === 'active'`
+- Все вызовы check/hint передают текущий `task_order`
+
+**Frontend (`TaskStepper.tsx`):**
+- `isActive` = `order_num === currentTaskOrder` (ring только на текущей задаче)
+- `activeRef` — только на текущей задаче
+
+### Backward compatibility
+- `thread.current_task_order` остаётся в БД, используется как fallback
+- Старые треды (sequential) продолжат работать — task_states уже имеют корректные статусы
+- Новые треды получают all-active сразу
+
+---
+
 ## Definition of Done (doc 19)
 
 - [x] Связь с Job C: «Провести ученика через прорешивание»

@@ -2949,10 +2949,10 @@ async function provisionGuidedThread(
     return null;
   }
 
-  const taskStateRows = tasks.map((task: { id: string; max_score?: number }, idx: number) => ({
+  const taskStateRows = tasks.map((task: { id: string; max_score?: number }) => ({
     thread_id: thread.id,
     task_id: task.id,
-    status: idx === 0 ? "active" : "locked",
+    status: "active",
     attempts: 0,
     available_score: task.max_score ?? 1,
   }));
@@ -3071,6 +3071,7 @@ async function loadAdvanceContext(
   db: SupabaseClient,
   threadId: string,
   thread: Record<string, unknown>,
+  overrideTaskOrder?: number,
 ): Promise<{
   allStates: Record<string, unknown>[];
   stateByOrder: Map<number, Record<string, unknown>>;
@@ -3106,7 +3107,7 @@ async function loadAdvanceContext(
     allStates.map((s: Record<string, unknown>) => [taskOrderMap.get(s.task_id as string) ?? 0, s]),
   );
 
-  const currentOrder = thread.current_task_order as number;
+  const currentOrder = overrideTaskOrder ?? (thread.current_task_order as number);
   const currentState = stateByOrder.get(currentOrder);
   if (!currentState || currentState.status !== "active") return null;
 
@@ -3139,9 +3140,10 @@ async function handleCheckAnswer(
   if (!answer) {
     return jsonError(cors, 400, "VALIDATION", "answer is required");
   }
+  const requestedTaskOrder = typeof b.task_order === "number" ? b.task_order : undefined;
 
   // Load advance context
-  const ctx = await loadAdvanceContext(db, threadId, thread);
+  const ctx = await loadAdvanceContext(db, threadId, thread, requestedTaskOrder);
   if (!ctx) {
     return jsonError(cors, 400, "NO_ACTIVE_TASK", "No active task to check");
   }
@@ -3356,6 +3358,7 @@ async function handleRequestHint(
   db: SupabaseClient,
   userId: string,
   threadId: string,
+  body: unknown,
   cors: Record<string, string>,
 ): Promise<Response> {
   const ownershipResult = await verifyThreadOwnership(db, threadId, userId, cors);
@@ -3366,20 +3369,35 @@ async function handleRequestHint(
     return jsonError(cors, 400, "ALREADY_COMPLETED", "Thread is already completed");
   }
 
-  // Get active task_state
-  const { data: activeState } = await db
+  const b = (body && typeof body === "object") ? body as Record<string, unknown> : {};
+  const requestedTaskOrder = typeof b.task_order === "number" ? b.task_order : undefined;
+  const currentOrder = requestedTaskOrder ?? (thread.current_task_order as number);
+
+  // Get task_state for the requested task order
+  const { data: allStates } = await db
     .from("homework_tutor_task_states")
     .select("id, task_id, status, attempts, best_score, available_score, wrong_answer_count, hint_count")
-    .eq("thread_id", threadId)
-    .eq("status", "active")
-    .limit(1)
-    .maybeSingle();
+    .eq("thread_id", threadId);
 
-  if (!activeState) {
+  // Find the task state matching the requested order
+  const { data: saData } = await db
+    .from("homework_tutor_student_assignments")
+    .select("assignment_id")
+    .eq("id", thread.student_assignment_id)
+    .single();
+
+  const { data: tasks } = await db
+    .from("homework_tutor_tasks")
+    .select("id, order_num")
+    .eq("assignment_id", saData?.assignment_id)
+    .order("order_num", { ascending: true });
+
+  const taskForOrder = tasks?.find((t: { order_num: number }) => t.order_num === currentOrder);
+  const activeState = allStates?.find((s: Record<string, unknown>) => s.task_id === taskForOrder?.id);
+
+  if (!activeState || activeState.status !== "active") {
     return jsonError(cors, 400, "NO_ACTIVE_TASK", "No active task for hint");
   }
-
-  const currentOrder = thread.current_task_order as number;
 
   // Load task
   const { data: task } = await db
@@ -3392,17 +3410,11 @@ async function handleRequestHint(
     return jsonError(cors, 500, "DB_ERROR", "Task not found");
   }
 
-  // Load assignment for subject
-  const { data: sa } = await db
-    .from("homework_tutor_student_assignments")
-    .select("assignment_id")
-    .eq("id", thread.student_assignment_id)
-    .single();
-
+  // Load assignment for subject (reuse saData from above)
   const { data: assignment } = await db
     .from("homework_tutor_assignments")
     .select("subject")
-    .eq("id", sa?.assignment_id)
+    .eq("id", saData?.assignment_id)
     .single();
 
   // Load conversation history
@@ -3693,7 +3705,8 @@ Deno.serve(async (req: Request): Promise<Response> => {
 
     // POST /threads/:id/hint (student endpoint — Phase 3)
     if (seg.length === 3 && seg[0] === "threads" && seg[2] === "hint" && route.method === "POST") {
-      return await handleRequestHint(db, userId, seg[1], cors);
+      const body = await parseJsonBody(req);
+      return await handleRequestHint(db, userId, seg[1], body, cors);
     }
 
     // GET /assignments/:id/tasks/:taskId/image-url (tutor + student)

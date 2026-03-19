@@ -80,7 +80,7 @@ const TaskStepper = memo(({ tasks, currentTaskOrder, onTaskClick }: TaskStepperP
       <div className="flex gap-2 overflow-x-auto py-2 px-1 scrollbar-none">
         {tasks.map((task, idx) => {
           const style = STATUS_STYLES[task.status];
-          const isActive = task.status === 'active' || task.order_num === currentTaskOrder;
+          const isActive = task.order_num === currentTaskOrder;
           const isClickable = task.status !== 'locked';
           const isLast = idx === tasks.length - 1;
 
@@ -99,7 +99,7 @@ const TaskStepper = memo(({ tasks, currentTaskOrder, onTaskClick }: TaskStepperP
                       text-xs font-semibold
                       transition-all duration-200
                       ${style.bg} ${style.border} ${style.text}
-                      ${style.ring || ''}
+                      ${isActive ? (style.ring || '') : ''}
                       ${isClickable ? 'cursor-pointer hover:opacity-80' : 'cursor-default'}
                       disabled:cursor-default
                     `}

@@ -718,12 +718,13 @@ export async function advanceTask(
 export async function checkAnswer(
   threadId: string,
   answer: string,
+  taskOrder?: number,
 ): Promise<CheckAnswerResponse> {
   return requestStudentHomeworkApi<CheckAnswerResponse>(
     `/threads/${encodeURIComponent(threadId)}/check`,
     {
       method: 'POST',
-      body: JSON.stringify({ answer }),
+      body: JSON.stringify({ answer, ...(taskOrder != null && { task_order: taskOrder }) }),
     },
   );
 }
@@ -734,12 +735,13 @@ export async function checkAnswer(
  */
 export async function requestHint(
   threadId: string,
+  taskOrder?: number,
 ): Promise<RequestHintResponse> {
   return requestStudentHomeworkApi<RequestHintResponse>(
     `/threads/${encodeURIComponent(threadId)}/hint`,
     {
       method: 'POST',
-      body: '{}',
+      body: JSON.stringify(taskOrder != null ? { task_order: taskOrder } : {}),
     },
   );
 }
