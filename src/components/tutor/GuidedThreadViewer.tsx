@@ -209,6 +209,11 @@ export function GuidedThreadViewer({
                         }>
                           {ROLE_LABELS[message.role] ?? message.role}
                         </Badge>
+                        {message.message_kind === 'system' && message.role === 'assistant' && (
+                          <Badge variant="outline" className="text-[10px] bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-900/20 dark:text-blue-400 dark:border-blue-800">
+                            Введение
+                          </Badge>
+                        )}
                         {message.visible_to_student === false && (
                           <Badge variant="outline" className="text-[10px] bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-900/20 dark:text-amber-400 dark:border-amber-800">
                             Скрыто от ученика

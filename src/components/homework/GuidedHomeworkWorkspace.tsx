@@ -3,7 +3,7 @@
  * Students solve tasks one by one in an interactive chat with AI.
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
@@ -30,6 +30,8 @@ import {
 import GuidedChatMessage from './GuidedChatMessage';
 import GuidedChatInput from './GuidedChatInput';
 import TaskStepper from './TaskStepper';
+
+const MathText = lazy(() => import('@/components/kb/ui/MathText').then((m) => ({ default: m.MathText })));
 import type { TaskStepItem } from './TaskStepper';
 import type {
   CheckAnswerResponse,
@@ -56,6 +58,8 @@ import { streamChat, StreamChatError } from '@/lib/streamChat';
 import { trackGuidedHomeworkEvent } from '@/lib/homeworkTelemetry';
 
 const MAX_CONTEXT_MESSAGES = 15;
+const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad|iPod/.test(navigator.platform);
+const modKey = isMac ? 'Cmd' : 'Ctrl';
 type SendMode = Extract<GuidedMessageKind, 'answer' | 'hint_request' | 'question'>;
 
 interface GuidedHomeworkWorkspaceProps {
@@ -787,8 +791,9 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
 
   const handleTaskClick = useCallback((orderNum: number) => {
     if (!visitedTaskOrders.has(orderNum)) return;
+    if (isStreaming || isCheckingAnswer || isRequestingHint) return;
     setCurrentTaskOrder(orderNum);
-  }, [visitedTaskOrders]);
+  }, [visitedTaskOrders, isStreaming, isCheckingAnswer, isRequestingHint]);
 
   const handleGoPrev = useCallback(() => {
     if (previousTaskOrder === null) return;
@@ -815,13 +820,16 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
   useEffect(() => {
     if (!threadId || !currentTask) return;
     if (threadStatus !== 'active') return;
-    if (currentTask.order_num !== 1) return;
     if (isStreaming || isCheckingAnswer || isRequestingHint) return;
 
-    const key = `${threadId}:task-1`;
+    const taskOrder = currentTask.order_num;
+    const key = `${threadId}:task-${taskOrder}`;
     if (bootstrapStartedRef.current.has(key)) return;
 
-    const hasAnyTaskMessages = messages.some((message) => message.task_order === 1);
+    // Exclude backend transition messages (role='system') — they don't count as bootstrap
+    const hasAnyTaskMessages = messages.some(
+      (message) => message.task_order === taskOrder && message.role !== 'system',
+    );
     if (hasAnyTaskMessages) {
       bootstrapStartedRef.current.add(key);
       return;
@@ -866,18 +874,18 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
         setStreamingContent('');
       }
 
-      const introText = content.trim() || 'Начинаем с первой задачи. Напиши решение, и я сразу помогу проверить его.';
+      const introText = content.trim() || `Начинаем задачу ${taskOrder}. Напиши решение, и я помогу проверить.`;
 
       // Persist intro to DB so it's not regenerated on every page load
       try {
-        await saveThreadMessage(threadId!, 'assistant', introText, 1, 'system');
+        await saveThreadMessage(threadId!, 'assistant', introText, taskOrder, 'system');
         // Refetch thread to get the persisted message with a real DB id
         void queryClient.invalidateQueries({ queryKey: ['student', 'homework', 'thread', assignment.id] });
       } catch (e) {
         console.warn('Failed to persist bootstrap intro:', e);
       }
 
-      const introId = `local-bootstrap-${threadId}`;
+      const introId = `local-bootstrap-${threadId}-task-${taskOrder}`;
       setMessages((prev) => (
         prev.some((message) => message.id === introId)
           ? prev
@@ -888,14 +896,14 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
               role: 'assistant',
               content: introText,
               image_url: null,
-              task_order: 1,
+              task_order: taskOrder,
               created_at: new Date().toISOString(),
               message_kind: 'system',
               message_delivery_status: 'sent',
             },
           ]
       ));
-      trackGuidedHomeworkEvent('guided_first_run_intro', { assignmentId: assignment.id });
+      trackGuidedHomeworkEvent('guided_first_run_intro', { assignmentId: assignment.id, taskOrder });
     };
 
     void runBootstrap();
@@ -1046,7 +1054,9 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
               </span>
             )}
           </div>
-          <p className="text-sm font-medium whitespace-pre-wrap">{currentTask.task_text}</p>
+          <Suspense fallback={<p className="text-sm font-medium whitespace-pre-wrap">{currentTask.task_text}</p>}>
+            <MathText text={currentTask.task_text} className="text-sm font-medium whitespace-pre-wrap" />
+          </Suspense>
 
           <div className="mt-2">
             <TaskConditionImage
@@ -1175,8 +1185,8 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
           disabled={threadStatus !== 'active' || !isViewingActiveTask}
           placeholder={
             currentTask
-              ? `Задача ${currentTask.order_num}: ответ или шаг решения...`
-              : 'Введите ответ или шаг решения...'
+              ? `Задача ${currentTask.order_num}: обсудите с AI (Enter) или ответ (${modKey}+Enter)...`
+              : `Обсудите с AI (Enter) или ответ (${modKey}+Enter)...`
           }
         />
       </div>

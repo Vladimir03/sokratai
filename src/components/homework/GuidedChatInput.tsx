@@ -7,6 +7,9 @@ import { memo, useRef, useState, useCallback, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { CheckCircle2, MessageCircle } from 'lucide-react';
 
+const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad|iPod/.test(navigator.platform);
+const modKey = isMac ? 'Cmd' : 'Ctrl';
+
 interface GuidedChatInputProps {
   onSendAnswer: (text: string) => void;
   onSendStep: (text: string) => void;
@@ -62,10 +65,14 @@ const GuidedChatInput = memo(
       (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
         if (e.key === 'Enter' && !e.shiftKey) {
           e.preventDefault();
-          handleSendAnswer();
+          if (e.ctrlKey || e.metaKey) {
+            handleSendAnswer();
+          } else {
+            handleSendStep();
+          }
         }
       },
-      [handleSendAnswer],
+      [handleSendAnswer, handleSendStep],
     );
 
     const canSend = message.trim().length > 0 && !isLoading && !disabled;
@@ -98,7 +105,7 @@ const GuidedChatInput = memo(
             onClick={handleSendStep}
             disabled={!canSend}
             className="h-10 px-2.5 gap-1 text-xs whitespace-nowrap"
-            title="Отправить как шаг решения (обсуждение с AI)"
+            title="Обсудить шаг (Enter)"
           >
             {isLoading ? spinner : <MessageCircle className="h-3.5 w-3.5" />}
             Шаг
@@ -108,7 +115,7 @@ const GuidedChatInput = memo(
             onClick={handleSendAnswer}
             disabled={!canSend}
             className="h-10 px-2.5 gap-1 text-xs whitespace-nowrap"
-            title="Отправить как итоговый ответ (проверка AI)"
+            title={`Итоговый ответ (${modKey}+Enter)`}
           >
             {isLoading ? spinner : <CheckCircle2 className="h-3.5 w-3.5" />}
             Ответ

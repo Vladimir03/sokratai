@@ -12,6 +12,7 @@ import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { getStudentTaskImageSignedUrl } from '@/lib/studentHomeworkApi';
 import type { GuidedMessageKind, MessageDeliveryStatus } from '@/types/homework';
+import { preprocessLatex } from '@/components/kb/ui/preprocessLatex';
 
 const ReactMarkdown = lazy(() => import('react-markdown'));
 
@@ -31,19 +32,6 @@ interface GuidedChatMessageProps {
   onRetry?: (messageId: string) => void;
 }
 
-/** Convert LaTeX delimiters to remark-math compatible format */
-function preprocessLatex(text: string): string {
-  // Convert \[...\] to $$...$$
-  text = text.replace(/\\\[/g, '$$');
-  text = text.replace(/\\\]/g, '$$');
-  // Convert \(...\) to $...$
-  text = text.replace(/\\\(/g, '$');
-  text = text.replace(/\\\)/g, '$');
-  // Fix \textfrac to \frac
-  text = text.replace(/\\textfrac/g, '\\frac');
-  return text;
-}
-
 function formatTime(isoString?: string): string {
   if (!isoString) return '';
   const date = new Date(isoString);
@@ -56,6 +44,7 @@ function formatTime(isoString?: string): string {
 
 function formatMessageKind(kind: GuidedMessageKind | undefined): string | null {
   if (!kind) return null;
+  if (kind === 'system') return 'Введение';
   if (kind === 'hint_request') return 'Подсказка';
   if (kind === 'question') return 'Шаг решения';
   if (kind === 'answer') return 'Ответ';
@@ -89,7 +78,7 @@ function MessageAttachment({ imageRef }: { imageRef: string }) {
 
 const GuidedChatMessage = memo(({ message, isStreaming, onRetry }: GuidedChatMessageProps) => {
   const [katexLoaded, setKatexLoaded] = useState(false);
-  const hasMath = message.content.includes('$');
+  const hasMath = message.content.includes('$') || message.content.includes('\\(') || message.content.includes('\\[');
 
   useEffect(() => {
     if (hasMath && !katexLoaded) {

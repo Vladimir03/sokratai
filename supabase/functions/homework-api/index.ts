@@ -2726,7 +2726,8 @@ async function handlePostThreadMessage(
     : (role === "assistant" ? "ai_reply" : "answer");
 
   // Integrity check: assistant messages can only follow a user message
-  if (role === "assistant") {
+  // Exception: bootstrap intro messages (message_kind='system') can be first in thread
+  if (role === "assistant" && messageKind !== "system") {
     const { data: lastMsg } = await db
       .from("homework_tutor_thread_messages")
       .select("role")

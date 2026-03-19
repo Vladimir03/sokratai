@@ -312,7 +312,10 @@ Component: TutorHomeworkCreate.tsx + editMode prop
 
 ## Часть 8. Промпт для Claude Code
 
-### Sprint 1: LaTeX + Sort + Deadline (Паттерн 3, UX Polish)
+### Sprint 1: LaTeX + Sort + Deadline (Паттерн 3, UX Polish) — IMPLEMENTED
+
+> **Student-side Sprint S1** (MathText + Bootstrap + Input Safety) реализован 2026-03-19.
+> См. `docs/features/specs/student-homework-sprint-s1-spec.md`.
 
 ```text
 Твоя роль: senior product-minded full-stack engineer в проекте SokratAI.

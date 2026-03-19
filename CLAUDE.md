@@ -227,6 +227,20 @@ Legacy student-only система (`homework_sets`, `homework_tasks`, `homework
 
 При добавлении нового пути к AI с изображениями — проверить ВСЕ вызывающие точки, не только основную.
 
+### Student Guided Homework UX (Sprint S1, 2026-03-19)
+
+Реализованы 5 quick wins для guided mode прорешивания:
+
+- **S1-1: MathText в условии задачи** — `GuidedHomeworkWorkspace.tsx` рендерит `task_text` через lazy `MathText` (с `Suspense` fallback). `whitespace-pre-wrap` сохранён для plain-text задач
+- **S1-2: Bootstrap для всех задач** — убрано ограничение `order_num !== 1`. AI intro генерируется при первом открытии любой задачи без сообщений. Backend system messages (`role: 'system'`) исключаются из проверки `hasAnyTaskMessages`. Backend integrity check (`INVALID_ORDER`) обходится для `message_kind: 'system'` — bootstrap сохраняется в БД и виден репетитору
+- **S1-3: Enter = Обсудить** — `Enter` → `handleSendStep` (question mode, безопасный). `Ctrl/Cmd+Enter` → `handleSendAnswer` (answer mode, проверка). Платформо-зависимый label (`Cmd` на Mac, `Ctrl` на Windows)
+- **S1-4: Label «Введение»** — `formatMessageKind('system')` → `'Введение'` в student view. В tutor `GuidedThreadViewer` — badge «Введение» только для `role: 'assistant'` + `message_kind: 'system'` (не для transition messages с `role: 'system'`)
+- **S1-5: Shared preprocessLatex** — удалён inline дубликат из `GuidedChatMessage.tsx`, импорт из `@/components/kb/ui/preprocessLatex.ts`. Inline версия имела баг: `'$$'` — спецсимвол в `String.replace`
+
+**Race guard**: `handleTaskClick` блокирует навигацию при `isStreaming || isCheckingAnswer || isRequestingHint`
+
+**Spec**: `docs/features/specs/student-homework-sprint-s1-spec.md`
+
 ## Известные хрупкие области
 
 1. **Chat.tsx** (2000+ строк) — очень сложный компонент. Любые изменения в ChatMessage, ChatInput, ChatSidebar могут сломать чат
