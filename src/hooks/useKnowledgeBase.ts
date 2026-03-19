@@ -68,12 +68,10 @@ async function fetchSubtopics(topicId: string): Promise<KBSubtopic[]> {
 }
 
 async function fetchCatalogTasks(topicId: string): Promise<KBTask[]> {
+  // Reads only canonical public tasks (owner_id=NULL, moderation_status='active')
+  // via fetch_catalog_tasks_v2 RPC (simplified in moderation_v2 migration)
   const { data, error } = await supabase
-    .from('kb_tasks')
-    .select('*')
-    .eq('topic_id', topicId)
-    .is('owner_id', null)
-    .order('created_at');
+    .rpc('fetch_catalog_tasks_v2', { p_topic_id: topicId });
   if (error) throw error;
   return (data ?? []) as KBTask[];
 }
