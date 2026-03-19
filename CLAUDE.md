@@ -396,6 +396,20 @@ Legacy student-only система (`homework_sets`, `homework_tasks`, `homework
 При добавлении задачи в ДЗ — текст фиксируется в homework_kb_tasks.task_text_snapshot.
 Ученик видит snapshot, не оригинал. Репетитор может редактировать snapshot в drawer.
 
+### Reorder задач в конструкторе ДЗ (2026-03-19)
+
+Репетитор может менять порядок задач кнопками ↑/↓ в header каждой карточки задачи.
+
+- `HWTaskCard.tsx` — props: `onMoveUp`, `onMoveDown`, `isFirst`, `isLast`. Кнопки `ChevronUp`/`ChevronDown` слева от "Задача N"
+- `HWTasksSection.tsx` — `handleMove(fromIdx, toIdx)` — splice-based reorder, передаёт в `onChange`
+- Порядок определяется позицией в массиве `tasks[]`. На submit: `order_num: i + 1`
+- **Backend**: `hw_reorder_tasks(assignment_id, task_order_jsonb)` — PL/pgSQL, `SECURITY DEFINER`, атомарная транзакция. Двухфазный update (negative temporaries → final values) обходит `UNIQUE(assignment_id, order_num)`
+- **Миграция**: `20260319100000_hw_reorder_tasks_atomic.sql`
+- **Валидация**: дубли `order_num` ловятся на двух уровнях — edge function (400 VALIDATION) + PL/pgSQL (RAISE EXCEPTION)
+- **Порядок операций в PUT /assignments/:id** (ветка без submissions): reorder RPC → field updates → insert → delete (delete последним = no data loss on partial failure)
+- **Known limitation**: весь task diff (reorder + fields + insert + delete) не одна DB транзакция end-to-end. Reorder сам по себе атомарный
+- **DnD не реализован** — только кнопки ↑/↓. Drag-and-drop отложен как L2/power-user feature
+
 ### Конструктор ДЗ — L0/L1 архитектура (Phase 3, 2026-03-17)
 
 `TutorHomeworkCreate.tsx` — single-page конструктор с progressive disclosure:

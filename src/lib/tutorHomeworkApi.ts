@@ -691,14 +691,27 @@ export async function getMaterialSignedUrl(
 
 // ─── Assignment update / delete ───────────────────────────────────────────────
 
+export interface UpdateAssignmentTask {
+  id?: string;
+  task_text: string;
+  order_num?: number;
+  task_image_url?: string | null;
+  correct_answer?: string | null;
+  max_score?: number;
+  rubric_text?: string | null;
+}
+
 export async function updateTutorHomeworkAssignment(
   assignmentId: string,
   patch: {
     title?: string;
     subject?: string;
     topic?: string | null;
+    description?: string | null;
     deadline?: string | null;
     status?: string;
+    workflow_mode?: 'classic' | 'guided_chat';
+    tasks?: UpdateAssignmentTask[];
   },
 ): Promise<void> {
   await requestHomeworkApi<{ ok: boolean }>(

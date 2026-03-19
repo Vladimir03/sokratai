@@ -36,6 +36,14 @@ export interface HWTasksSectionProps {
   onChange: (t: DraftTask[]) => void;
   errors: Record<string, string>;
   topicHint?: string;
+  /** Disable removing existing tasks (e.g. when submissions exist) */
+  disableExistingTaskRemove?: boolean;
+  /** Disable adding new tasks (e.g. when submissions exist) */
+  disableTaskAdd?: boolean;
+  /** When set, defer storage image deletes instead of executing immediately (edit mode safety) */
+  onDeferImageDelete?: (storagePath: string) => void;
+  /** When true, show confirm dialog before removing a task (active HW) */
+  confirmOnRemove?: boolean;
 }
 
 export function HWTasksSection({
@@ -43,6 +51,10 @@ export function HWTasksSection({
   onChange,
   errors,
   topicHint,
+  disableExistingTaskRemove,
+  disableTaskAdd,
+  onDeferImageDelete,
+  confirmOnRemove,
 }: HWTasksSectionProps) {
   const [kbPickerOpen, setKbPickerOpen] = useState(false);
 
@@ -71,6 +83,17 @@ export function HWTasksSection({
     [tasks],
   );
 
+  const handleMove = useCallback(
+    (fromIdx: number, toIdx: number) => {
+      if (toIdx < 0 || toIdx >= tasks.length) return;
+      const next = [...tasks];
+      const [moved] = next.splice(fromIdx, 1);
+      next.splice(toIdx, 0, moved);
+      onChange(next);
+    },
+    [tasks, onChange],
+  );
+
   const handleUpdate = useCallback(
     (idx: number, updated: DraftTask) => {
       const next = [...tasks];
@@ -82,14 +105,21 @@ export function HWTasksSection({
 
   const handleRemove = useCallback(
     (idx: number) => {
+      if (confirmOnRemove && !window.confirm('Удалить задачу? Ученики могут потерять прогресс по ней.')) {
+        return;
+      }
       const removed = tasks[idx];
       if (removed.task_image_path) {
-        void deleteTutorHomeworkTaskImage(removed.task_image_path);
+        if (onDeferImageDelete) {
+          onDeferImageDelete(removed.task_image_path);
+        } else {
+          void deleteTutorHomeworkTaskImage(removed.task_image_path);
+        }
       }
       revokeObjectUrl(removed.task_image_preview_url);
       onChange(tasks.filter((_, i) => i !== idx));
     },
-    [tasks, onChange],
+    [tasks, onChange, confirmOnRemove, onDeferImageDelete],
   );
 
   return (
@@ -104,11 +134,21 @@ export function HWTasksSection({
           index={i}
           onUpdate={(t) => handleUpdate(i, t)}
           onRemove={() => handleRemove(i)}
-          canRemove={tasks.length > 1}
+          canRemove={tasks.length > 1 && !(disableExistingTaskRemove && task.id)}
+          onDeferImageDelete={onDeferImageDelete}
+          onMoveUp={() => handleMove(i, i - 1)}
+          onMoveDown={() => handleMove(i, i + 1)}
+          isFirst={i === 0}
+          isLast={i === tasks.length - 1}
         />
       ))}
+      {disableTaskAdd && (
+        <p className="text-xs text-muted-foreground">
+          Нельзя добавлять или удалять задачи — ученики уже отправили ответы.
+        </p>
+      )}
       <div className="flex gap-2">
-        <Button variant="outline" onClick={handleAdd} className="gap-2 flex-1">
+        <Button variant="outline" onClick={handleAdd} className="gap-2 flex-1" disabled={disableTaskAdd}>
           <Plus className="h-4 w-4" />
           Добавить задачу
         </Button>
@@ -116,6 +156,7 @@ export function HWTasksSection({
           variant="outline"
           onClick={() => setKbPickerOpen(true)}
           className="gap-2 flex-1"
+          disabled={disableTaskAdd}
         >
           <Library className="h-4 w-4" />
           Добавить из базы

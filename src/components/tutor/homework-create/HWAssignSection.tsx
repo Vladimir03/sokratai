@@ -36,6 +36,10 @@ export interface HWAssignSectionProps {
   inviteWebLink: string;
   studentLoginLink: string;
   studentSignupLink: string;
+  /** IDs of students already assigned (edit mode) — these cannot be unchecked */
+  existingStudentIds?: Set<string>;
+  /** Hide notify section entirely (edit mode) */
+  hideNotify?: boolean;
 }
 
 export function HWAssignSection({
@@ -54,6 +58,8 @@ export function HWAssignSection({
   inviteWebLink,
   studentLoginLink,
   studentSignupLink,
+  existingStudentIds,
+  hideNotify,
 }: HWAssignSectionProps) {
   const [searchQuery, setSearchQuery] = useState('');
   const [inviteCopied, setInviteCopied] = useState(false);
@@ -227,14 +233,16 @@ export function HWAssignSection({
                   : s.status === 'paused'
                   ? 'На паузе'
                   : 'Завершён';
+              const isLocked = existingStudentIds?.has(s.student_id) ?? false;
               return (
                 <label
                   key={s.student_id}
-                  className="flex items-center gap-3 p-2.5 rounded-md cursor-pointer hover:bg-muted/50 transition-colors"
+                  className={`flex items-center gap-3 p-2.5 rounded-md transition-colors ${isLocked ? 'opacity-70 cursor-default' : 'cursor-pointer hover:bg-muted/50'}`}
                 >
                   <Checkbox
                     checked={checked}
                     onCheckedChange={() => handleToggle(s.student_id)}
+                    disabled={isLocked}
                   />
                   <div className="min-w-0 flex-1">
                     <p className="text-sm font-medium truncate">{name}</p>
@@ -307,33 +315,35 @@ export function HWAssignSection({
         )}
       </div>
 
-      {/* Notify toggle */}
-      <div className="space-y-3 border-t pt-4">
-        <div className="flex items-center justify-between">
-          <Label htmlFor="notify-toggle" className="text-base cursor-pointer">
-            Отправить уведомления в Telegram
-          </Label>
-          <Switch
-            id="notify-toggle"
-            checked={notifyEnabled}
-            onCheckedChange={onNotifyChange}
-          />
-        </div>
-        {notifyEnabled && (
-          <div className="space-y-2">
-            <Label htmlFor="notify-template" className="text-sm text-muted-foreground">
-              Текст сообщения (необязательно, по умолчанию стандартный)
+      {/* Notify toggle — hidden in edit mode */}
+      {!hideNotify && (
+        <div className="space-y-3 border-t pt-4">
+          <div className="flex items-center justify-between">
+            <Label htmlFor="notify-toggle" className="text-base cursor-pointer">
+              Отправить уведомления в Telegram
             </Label>
-            <textarea
-              id="notify-template"
-              className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-base ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 min-h-[60px] resize-y"
-              placeholder="Новая домашка! Используй /homework чтобы начать."
-              value={notifyTemplate}
-              onChange={(e) => onTemplateChange(e.target.value)}
+            <Switch
+              id="notify-toggle"
+              checked={notifyEnabled}
+              onCheckedChange={onNotifyChange}
             />
           </div>
-        )}
-      </div>
+          {notifyEnabled && (
+            <div className="space-y-2">
+              <Label htmlFor="notify-template" className="text-sm text-muted-foreground">
+                Текст сообщения (необязательно, по умолчанию стандартный)
+              </Label>
+              <textarea
+                id="notify-template"
+                className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-base ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 min-h-[60px] resize-y"
+                placeholder="Новая домашка! Используй /homework чтобы начать."
+                value={notifyTemplate}
+                onChange={(e) => onTemplateChange(e.target.value)}
+              />
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }

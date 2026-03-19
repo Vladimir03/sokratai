@@ -6,9 +6,6 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog';
 import { toast } from 'sonner';
 import TutorGuard from '@/components/TutorGuard';
@@ -21,13 +18,11 @@ import {
   getTaskImageSignedUrl,
   getMaterialSignedUrl,
   getTutorHomeworkResults,
-  updateTutorHomeworkAssignment,
   deleteTutorHomeworkAssignment,
   type TutorHomeworkAssignmentDetails,
   type TutorHomeworkResultsResponse,
   type TutorHomeworkSubmissionItem,
   type HomeworkAssignmentStatus,
-  type HomeworkSubject,
   type DeliveryStatus,
   type HomeworkMaterial,
 } from '@/lib/tutorHomeworkApi';
@@ -50,22 +45,6 @@ const STATUS_CONFIG: Record<HomeworkAssignmentStatus, { label: string; className
   active: { label: 'Активное', className: 'bg-green-100 text-green-800 border-green-200 dark:bg-green-900/30 dark:text-green-400 dark:border-green-800' },
   closed: { label: 'Завершено', className: 'bg-gray-100 text-gray-600 border-gray-200 dark:bg-gray-800 dark:text-gray-400 dark:border-gray-700' },
 };
-
-const HOMEWORK_SUBJECTS: { value: HomeworkSubject; label: string }[] = [
-  { value: 'math', label: 'Математика' },
-  { value: 'physics', label: 'Физика' },
-  { value: 'history', label: 'История' },
-  { value: 'social', label: 'Обществознание' },
-  { value: 'english', label: 'Английский' },
-  { value: 'cs', label: 'Информатика' },
-];
-
-/** Convert an ISO/UTC date string to a local datetime-local input value (YYYY-MM-DDTHH:mm). */
-function toLocalDatetimeString(isoString: string): string {
-  const d = parseISO(isoString);
-  const pad = (n: number) => String(n).padStart(2, '0');
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
-}
 
 function formatDate(d: string | null): string {
   if (!d) return '—';
@@ -572,42 +551,7 @@ function TutorHomeworkDetailContent() {
     }
   }, [id, navigate, queryClient]);
 
-  // ─── Edit dialog ────────────────────────────────────────────────────────────
-  const [editOpen, setEditOpen] = useState(false);
-  const [isSaving, setIsSaving] = useState(false);
-  const [editTitle, setEditTitle] = useState('');
-  const [editSubject, setEditSubject] = useState('');
-  const [editTopic, setEditTopic] = useState('');
-  const [editDeadline, setEditDeadline] = useState('');
-
-  const openEditDialog = useCallback(() => {
-    if (!details) return;
-    setEditTitle(details.assignment.title);
-    setEditSubject(details.assignment.subject);
-    setEditTopic(details.assignment.topic ?? '');
-    setEditDeadline(details.assignment.deadline ? toLocalDatetimeString(details.assignment.deadline) : '');
-    setEditOpen(true);
-  }, [details]);
-
-  const handleSaveEdit = useCallback(async () => {
-    if (!id || !editTitle.trim()) return;
-    setIsSaving(true);
-    try {
-      await updateTutorHomeworkAssignment(id, {
-        title: editTitle.trim(),
-        subject: editSubject,
-        topic: editTopic.trim() || null,
-        deadline: editDeadline ? new Date(editDeadline).toISOString() : null,
-      });
-      toast.success('Сохранено');
-      setEditOpen(false);
-      void queryClient.invalidateQueries({ queryKey: ['tutor', 'homework', 'detail', id] });
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Не удалось сохранить');
-    } finally {
-      setIsSaving(false);
-    }
-  }, [id, editTitle, editSubject, editTopic, editDeadline, queryClient]);
+  // Edit now handled by /tutor/homework/:id/edit route
 
   return (
     <TutorLayout>
@@ -638,7 +582,7 @@ function TutorHomeworkDetailContent() {
               <Badge variant="outline" className={STATUS_CONFIG[details.assignment.status as HomeworkAssignmentStatus]?.className}>
                 {STATUS_CONFIG[details.assignment.status as HomeworkAssignmentStatus]?.label ?? details.assignment.status}
               </Badge>
-              <Button variant="outline" onClick={openEditDialog}>
+              <Button variant="outline" onClick={() => navigate(`/tutor/homework/${id}/edit`)}>
                 <Edit className="h-4 w-4 mr-2" />
                 Редактировать
               </Button>
@@ -708,80 +652,7 @@ function TutorHomeworkDetailContent() {
         </DialogContent>
       </Dialog>
 
-      {/* Edit dialog */}
-      <Dialog open={editOpen} onOpenChange={setEditOpen}>
-        <DialogContent className="max-w-lg">
-          <DialogHeader>
-            <DialogTitle>Редактировать ДЗ</DialogTitle>
-            <DialogDescription>
-              Измените основные параметры задания.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-4 py-2">
-            <div className="space-y-2">
-              <Label htmlFor="edit-title">Название</Label>
-              <Input
-                id="edit-title"
-                value={editTitle}
-                onChange={(e) => setEditTitle(e.target.value)}
-                className="text-base"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="edit-subject">Предмет</Label>
-              <Select value={editSubject} onValueChange={setEditSubject}>
-                <SelectTrigger id="edit-subject">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {HOMEWORK_SUBJECTS.map((s) => (
-                    <SelectItem key={s.value} value={s.value}>
-                      {s.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="edit-topic">Тема</Label>
-              <Input
-                id="edit-topic"
-                value={editTopic}
-                onChange={(e) => setEditTopic(e.target.value)}
-                placeholder="Необязательно"
-                className="text-base"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="edit-deadline">Дедлайн</Label>
-              <Input
-                id="edit-deadline"
-                type="datetime-local"
-                value={editDeadline}
-                onChange={(e) => setEditDeadline(e.target.value)}
-                className="text-base"
-              />
-            </div>
-          </div>
-          <DialogFooter className="gap-2 sm:gap-0">
-            <Button
-              type="button"
-              variant="ghost"
-              onClick={() => setEditOpen(false)}
-              disabled={isSaving}
-            >
-              Отмена
-            </Button>
-            <Button
-              type="button"
-              onClick={() => void handleSaveEdit()}
-              disabled={isSaving || !editTitle.trim()}
-            >
-              {isSaving ? 'Сохранение...' : 'Сохранить'}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      {/* Edit dialog removed — now handled by /tutor/homework/:id/edit route */}
     </TutorLayout>
   );
 }

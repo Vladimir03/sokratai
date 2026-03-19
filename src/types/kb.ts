@@ -142,6 +142,7 @@ export interface UpdateKBTaskInput {
   solution_attachment_url?: string | null;
   topic_id?: string | null;
   subtopic_id?: string | null;
+  folder_id?: string | null;
 }
 
 // =============================================

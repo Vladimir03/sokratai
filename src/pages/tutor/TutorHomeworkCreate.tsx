@@ -1,7 +1,7 @@
 // Job: P0.1 — Собрать ДЗ по теме после урока
 import { useState, useCallback, useRef, useEffect, useMemo } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
-import { useQueryClient } from '@tanstack/react-query';
+import { useNavigate, useSearchParams, useParams } from 'react-router-dom';
+import { useQueryClient, useQuery } from '@tanstack/react-query';
 import { format, parseISO } from 'date-fns';
 import { ru } from 'date-fns/locale';
 import { Button } from '@/components/ui/button';
@@ -14,7 +14,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { ArrowLeft, Loader2, ChevronDown, ChevronUp } from 'lucide-react';
+import { ArrowLeft, Loader2, ChevronDown, ChevronUp, AlertCircle, Save } from 'lucide-react';
 import { toast } from 'sonner';
 import TutorGuard from '@/components/TutorGuard';
 import { TutorLayout } from '@/components/tutor/TutorLayout';
@@ -25,10 +25,15 @@ import {
   notifyTutorHomeworkStudents,
   uploadTutorHomeworkMaterial,
   addTutorHomeworkMaterial,
+  deleteTutorHomeworkMaterial,
+  deleteTutorHomeworkTaskImage,
+  getTutorHomeworkAssignment,
+  updateTutorHomeworkAssignment,
   getTutorHomeworkTemplate,
   createTutorHomeworkTemplate,
   type HomeworkSubject,
   type CreateAssignmentTask,
+  type UpdateAssignmentTask,
   type HomeworkTemplateListItem,
 } from '@/lib/tutorHomeworkApi';
 import { getTutorInviteWebLink } from '@/utils/telegramLinks';
@@ -43,6 +48,7 @@ import {
   type SubmitSuccessResult,
   SUBJECTS,
   createEmptyTask,
+  generateUUID,
   revokeObjectUrl,
 } from '@/components/tutor/homework-create/types';
 import { HWTemplatePicker } from '@/components/tutor/homework-create/HWTemplatePicker';
@@ -53,12 +59,23 @@ import { HWAssignSection } from '@/components/tutor/homework-create/HWAssignSect
 import { HWActionBar } from '@/components/tutor/homework-create/HWActionBar';
 import { HWSubmitSuccess } from '@/components/tutor/homework-create/HWSubmitSuccess';
 
+// ─── Helpers ────────────────────────────────────────────────────────────────
+
+/** Convert an ISO/UTC date string to a local datetime-local input value (YYYY-MM-DDTHH:mm). Safari-safe via parseISO. */
+function toLocalDatetimeString(isoString: string): string {
+  const d = parseISO(isoString);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
 // ─── Main Single-Page Constructor ───────────────────────────────────────────
 
 function TutorHomeworkCreateContent() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [searchParams] = useSearchParams();
+  const { id: editId } = useParams<{ id?: string }>();
+  const isEditMode = !!editId;
   const { tutor } = useTutor();
   const { students: tutorStudents } = useTutorStudents();
   // Always fetch groups — no step gating in single-page layout
@@ -90,6 +107,12 @@ function TutorHomeworkCreateContent() {
   const [tasks, setTasks] = useState<DraftTask[]>([createEmptyTask()]);
   const tasksRef = useRef<DraftTask[]>(tasks);
   const [materials, setMaterials] = useState<DraftMaterial[]>([]);
+
+  // ── Deferred image deletes (edit mode: only delete after successful save) ──
+  const deferredImageDeletesRef = useRef<string[]>([]);
+  const handleDeferImageDelete = useCallback((storagePath: string) => {
+    deferredImageDeletesRef.current.push(storagePath);
+  }, []);
 
   // ── Assign ──
   const [selectedStudentIds, setSelectedStudentIds] = useState<Set<string>>(
@@ -134,6 +157,95 @@ function TutorHomeworkCreateContent() {
       }
     },
     [],
+  );
+
+  // ── Edit mode: fetch existing assignment ──
+  const editQuery = useQuery({
+    queryKey: ['tutor', 'homework', 'detail', editId],
+    queryFn: () => getTutorHomeworkAssignment(editId!),
+    enabled: isEditMode,
+    staleTime: 30_000,
+  });
+  const existingAssignment = editQuery.data;
+
+  // Track whether we already prefilled to avoid re-running on refetch
+  const editPrefilledRef = useRef(false);
+  useEffect(() => {
+    if (!isEditMode || !existingAssignment || editPrefilledRef.current) return;
+    editPrefilledRef.current = true;
+
+    const a = existingAssignment.assignment;
+    setMeta({
+      title: a.title,
+      subject: a.subject,
+      topic: a.topic ?? '',
+      deadline: a.deadline ? toLocalDatetimeString(a.deadline) : '',
+      workflow_mode: a.workflow_mode ?? 'classic',
+    });
+
+    setTasks(
+      [...existingAssignment.tasks]
+        .sort((x, y) => x.order_num - y.order_num)
+        .map((t) => ({
+          ...createEmptyTask(),
+          id: t.id,
+          localId: generateUUID(),
+          task_text: t.task_text,
+          task_image_path: t.task_image_url,
+          correct_answer: t.correct_answer ?? '',
+          rubric_text: t.rubric_text ?? '',
+          max_score: t.max_score,
+        })),
+    );
+
+    setMaterials(
+      existingAssignment.materials.map((m) => ({
+        id: m.id,
+        localId: generateUUID(),
+        type: m.type,
+        title: m.title,
+        file: null,
+        url: m.url ?? '',
+        uploading: false,
+      })),
+    );
+
+    const assignedIds = existingAssignment.assigned_students.map((s) => s.student_id);
+    setSelectedStudentIds(new Set(assignedIds));
+  }, [isEditMode, existingAssignment]);
+
+  // Store initial state snapshot for unsaved-changes comparison in edit mode
+  const editInitialSnapshotRef = useRef<{ meta: MetaState; taskTexts: string; studentIds: string; materialIds: string } | null>(null);
+  useEffect(() => {
+    if (!isEditMode || !existingAssignment || editInitialSnapshotRef.current) return;
+    const a = existingAssignment.assignment;
+    editInitialSnapshotRef.current = {
+      meta: {
+        title: a.title,
+        subject: a.subject,
+        topic: a.topic ?? '',
+        deadline: a.deadline ? toLocalDatetimeString(a.deadline) : '',
+        workflow_mode: a.workflow_mode ?? 'classic',
+      },
+      taskTexts: existingAssignment.tasks.map((t) => `${t.id}|${t.task_text}|${t.correct_answer ?? ''}|${t.rubric_text ?? ''}|${t.task_image_url ?? ''}|${t.max_score}`).join(';;'),
+      studentIds: existingAssignment.assigned_students.map((s) => s.student_id).sort().join(','),
+      materialIds: existingAssignment.materials.map((m) => m.id).sort().join(','),
+    };
+  }, [isEditMode, existingAssignment]);
+
+  // Reset refs when editId changes (navigation between different edit pages)
+  useEffect(() => {
+    editPrefilledRef.current = false;
+    editInitialSnapshotRef.current = null;
+    deferredImageDeletesRef.current = [];
+  }, [editId]);
+
+  const hasSubmissions = (existingAssignment?.submissions_summary?.total ?? 0) > 0;
+
+  // Set of student IDs already assigned — used to lock checkboxes in edit mode
+  const editExistingStudentIds = useMemo(
+    () => new Set(existingAssignment?.assigned_students.map((s) => s.student_id) ?? []),
+    [existingAssignment],
   );
 
   // ── Auto-load template from ?template_id query param ──
@@ -205,6 +317,26 @@ function TutorHomeworkCreateContent() {
   const hasUnsavedChanges = useMemo(() => {
     if (submitPhase === 'done') return false;
 
+    // Edit mode: compare against initial snapshot
+    if (isEditMode) {
+      const snap = editInitialSnapshotRef.current;
+      if (!snap) return false; // not yet loaded
+      const metaDirty =
+        meta.title !== snap.meta.title ||
+        meta.subject !== snap.meta.subject ||
+        meta.topic !== snap.meta.topic ||
+        meta.deadline !== snap.meta.deadline ||
+        meta.workflow_mode !== snap.meta.workflow_mode;
+      const currentTaskTexts = tasks.map((t) => `${t.id ?? ''}|${t.task_text}|${t.correct_answer}|${t.rubric_text}|${t.task_image_path ?? ''}|${t.max_score}`).join(';;');
+      const tasksDirty = currentTaskTexts !== snap.taskTexts;
+      const currentStudentIds = [...selectedStudentIds].sort().join(',');
+      const studentsDirty = currentStudentIds !== snap.studentIds;
+      const currentMaterialIds = materials.map((m) => m.id ?? m.localId).sort().join(',');
+      const materialsDirty = currentMaterialIds !== snap.materialIds;
+      return metaDirty || tasksDirty || studentsDirty || materialsDirty;
+    }
+
+    // Create mode: compare against defaults
     const metaDirty =
       meta.title.trim().length > 0 ||
       (meta.subject !== '' && meta.subject !== 'physics') ||
@@ -228,7 +360,7 @@ function TutorHomeworkCreateContent() {
       notifyTemplate.trim().length > 0;
 
     return metaDirty || tasksDirty || assignDirty;
-  }, [meta, tasks, selectedStudentIds, notifyEnabled, notifyTemplate, submitPhase]);
+  }, [meta, tasks, selectedStudentIds, notifyEnabled, notifyTemplate, submitPhase, isEditMode, materials]);
 
   useEffect(() => {
     if (!hasUnsavedChanges) return;
@@ -282,15 +414,15 @@ function TutorHomeworkCreateContent() {
 
   // ── Navigation ──
 
-  const handleNavigateToList = useCallback(() => {
+  const handleNavigateBack = useCallback(() => {
     if (
       hasUnsavedChanges &&
       !window.confirm('Есть несохранённые изменения. Выйти без сохранения?')
     ) {
       return;
     }
-    navigate('/tutor/homework');
-  }, [hasUnsavedChanges, navigate]);
+    navigate(isEditMode ? `/tutor/homework/${editId}` : '/tutor/homework');
+  }, [hasUnsavedChanges, navigate, isEditMode, editId]);
 
   // ── Submit (NOT changed — same 4-phase logic) ──
 
@@ -523,6 +655,106 @@ function TutorHomeworkCreateContent() {
     studentLoginLink,
   ]);
 
+  // ── Edit submit (PUT) ──
+
+  const handleEditSubmit = useCallback(async () => {
+    if (!editId || !validateAll()) return;
+
+    const resolvedTitle = meta.title.trim() || autoTitle;
+
+    try {
+      setSubmitPhase('saving');
+
+      // Build tasks array for PUT (backend handles diff via id presence)
+      const apiTasks: UpdateAssignmentTask[] = tasks.map((t, i) => ({
+        ...(t.id ? { id: t.id } : {}),
+        order_num: i + 1,
+        task_text: t.task_text.trim(),
+        task_image_url: t.task_image_path || t.kb_attachment_url || null,
+        correct_answer: t.correct_answer.trim() || null,
+        rubric_text: t.rubric_text.trim() || null,
+        max_score: t.max_score,
+      }));
+
+      await updateTutorHomeworkAssignment(editId, {
+        title: resolvedTitle,
+        subject: meta.subject as HomeworkSubject,
+        topic: meta.topic.trim() || null,
+        deadline: meta.deadline ? parseISO(meta.deadline).toISOString() : null,
+        workflow_mode: meta.workflow_mode,
+        tasks: apiTasks,
+      });
+
+      // Material diff: add new, delete removed
+      if (existingAssignment) {
+        const existingMaterialIds = new Set(existingAssignment.materials.map((m) => m.id));
+        const currentMaterialIds = new Set(materials.filter((m) => m.id).map((m) => m.id!));
+
+        // Delete removed materials
+        for (const mid of existingMaterialIds) {
+          if (!currentMaterialIds.has(mid)) {
+            try {
+              await deleteTutorHomeworkMaterial(editId, mid);
+            } catch (err) {
+              console.warn('homework_material_delete_failed', err);
+            }
+          }
+        }
+
+        // Add new materials (no id = new)
+        for (const mat of materials) {
+          if (mat.id) continue; // existing, skip
+          try {
+            let storageRef: string | undefined;
+            if (mat.file) {
+              const uploaded = await uploadTutorHomeworkMaterial(mat.file);
+              storageRef = uploaded.storageRef;
+            }
+            await addTutorHomeworkMaterial(editId, {
+              type: mat.type,
+              title: mat.title.trim() || mat.file?.name || 'Материал',
+              storage_ref: storageRef ?? null,
+              url: mat.type === 'link' ? (mat.url.trim() || null) : null,
+            });
+          } catch (matErr) {
+            console.warn('homework_material_add_failed', matErr);
+            toast.warning(`Не удалось добавить материал «${mat.title}»`);
+          }
+        }
+
+        // Add new students (append-only)
+        const existingStudentIds = new Set(existingAssignment.assigned_students.map((s) => s.student_id));
+        const newStudentIds = [...selectedStudentIds].filter((id) => !existingStudentIds.has(id));
+        if (newStudentIds.length > 0) {
+          await assignTutorHomeworkStudents(editId, newStudentIds);
+        }
+      }
+
+      // Flush deferred image deletes (safe — save succeeded)
+      for (const path of deferredImageDeletesRef.current) {
+        void deleteTutorHomeworkTaskImage(path);
+      }
+      deferredImageDeletesRef.current = [];
+
+      // Done — invalidate caches and navigate back
+      setSubmitPhase('done');
+      void queryClient.invalidateQueries({ queryKey: ['tutor', 'homework', 'assignments'] });
+      void queryClient.invalidateQueries({ queryKey: ['tutor', 'homework', 'detail', editId] });
+      toast.success('Изменения сохранены');
+      navigate(`/tutor/homework/${editId}`);
+    } catch (err) {
+      setSubmitPhase('idle');
+      const message = err instanceof Error ? err.message : 'Неизвестная ошибка';
+
+      // Handle DESTRUCTIVE_CHANGE specifically
+      if (message.includes('DESTRUCTIVE_CHANGE') || message.includes('Cannot add or remove tasks')) {
+        toast.error('Нельзя добавлять или удалять задачи — ученики уже отправили ответы. Можно только редактировать существующие задачи.');
+      } else {
+        toast.error(`Ошибка: ${message}`);
+      }
+    }
+  }, [editId, validateAll, autoTitle, tasks, meta, materials, selectedStudentIds, existingAssignment, queryClient, navigate]);
+
   // ── "Создать ещё" — reset form, preserve group selection ──
 
   const handleCreateAnother = useCallback(() => {
@@ -564,6 +796,8 @@ function TutorHomeworkCreateContent() {
 
   const submitLabel = (() => {
     switch (submitPhase) {
+      case 'saving':
+        return 'Сохраняем...';
       case 'creating':
         return 'Создаём ДЗ...';
       case 'adding_materials':
@@ -573,12 +807,13 @@ function TutorHomeworkCreateContent() {
       case 'notifying':
         return 'Отправляем уведомления...';
       default:
+        if (isEditMode) return 'Сохранить изменения';
         return notifyEnabled ? 'Отправить ДЗ' : 'Создать ДЗ';
     }
   })();
 
-  // ── Inline success state (Phase 4) ──
-  if (successResult) {
+  // ── Inline success state (Phase 4) — create mode only ──
+  if (successResult && !isEditMode) {
     return (
       <TutorLayout>
         <HWSubmitSuccess
@@ -589,21 +824,77 @@ function TutorHomeworkCreateContent() {
     );
   }
 
+  // ── Edit mode: loading state ──
+  if (isEditMode && editQuery.isLoading) {
+    return (
+      <TutorLayout>
+        <div className="space-y-6 max-w-2xl mx-auto pb-24 md:pb-6">
+          <div className="flex items-center gap-3">
+            <Button variant="ghost" size="sm" onClick={handleNavigateBack}>
+              <ArrowLeft className="h-4 w-4 mr-1" />
+              Назад
+            </Button>
+            <h1 className="text-2xl font-bold flex-1">Редактирование ДЗ</h1>
+          </div>
+          <div className="flex items-center justify-center py-12">
+            <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+          </div>
+        </div>
+      </TutorLayout>
+    );
+  }
+
+  // ── Edit mode: error state ──
+  if (isEditMode && editQuery.isError) {
+    return (
+      <TutorLayout>
+        <div className="space-y-6 max-w-2xl mx-auto pb-24 md:pb-6">
+          <div className="flex items-center gap-3">
+            <Button variant="ghost" size="sm" onClick={handleNavigateBack}>
+              <ArrowLeft className="h-4 w-4 mr-1" />
+              Назад
+            </Button>
+            <h1 className="text-2xl font-bold flex-1">Редактирование ДЗ</h1>
+          </div>
+          <div className="text-center py-12 text-muted-foreground">
+            <p>Не удалось загрузить домашнее задание.</p>
+            <Button variant="outline" className="mt-4" onClick={() => void editQuery.refetch()}>
+              Попробовать снова
+            </Button>
+          </div>
+        </div>
+      </TutorLayout>
+    );
+  }
+
   return (
     <TutorLayout>
       <div className="space-y-6 max-w-2xl mx-auto pb-24 md:pb-6">
         {/* Header */}
         <div className="flex items-center gap-3">
-          <Button variant="ghost" size="sm" onClick={handleNavigateToList} disabled={isSubmitting}>
+          <Button variant="ghost" size="sm" onClick={handleNavigateBack} disabled={isSubmitting}>
             <ArrowLeft className="h-4 w-4 mr-1" />
             Назад
           </Button>
-          <h1 className="text-2xl font-bold flex-1">Создание ДЗ</h1>
-          {!isSubmitting && (
+          <h1 className="text-2xl font-bold flex-1">
+            {isEditMode ? 'Редактирование ДЗ' : 'Создание ДЗ'}
+          </h1>
+          {!isEditMode && !isSubmitting && (
             <HWTemplatePicker onSelect={handleApplyTemplate} />
           )}
           {templateLoading && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />}
         </div>
+
+        {/* Warning banner: editing active (sent) HW */}
+        {isEditMode && existingAssignment?.assignment.status === 'active' && (
+          <div className="flex items-start gap-3 border border-amber-200 bg-amber-50 p-4 rounded-xl text-amber-800">
+            <AlertCircle className="h-5 w-5 mt-0.5 flex-shrink-0" />
+            <div>
+              <p className="font-medium">ДЗ уже отправлено ученикам</p>
+              <p className="text-sm mt-1">Изменения будут видны всем назначенным ученикам. Будьте осторожны с удалением задач.</p>
+            </div>
+          </div>
+        )}
 
         {/* ── L0: Always visible ── */}
 
@@ -663,6 +954,8 @@ function TutorHomeworkCreateContent() {
             inviteWebLink={inviteWebLink}
             studentLoginLink={studentLoginLink}
             studentSignupLink={studentSignupLink}
+            existingStudentIds={isEditMode ? editExistingStudentIds : undefined}
+            hideNotify={isEditMode}
           />
         </section>
 
@@ -674,6 +967,10 @@ function TutorHomeworkCreateContent() {
             onChange={setTasks}
             errors={errors}
             topicHint={meta.topic}
+            disableExistingTaskRemove={isEditMode && hasSubmissions}
+            disableTaskAdd={isEditMode && hasSubmissions}
+            onDeferImageDelete={isEditMode ? handleDeferImageDelete : undefined}
+            confirmOnRemove={isEditMode && existingAssignment?.assignment.status === 'active'}
           />
         </section>
 
@@ -717,7 +1014,7 @@ function TutorHomeworkCreateContent() {
 
         {/* Action bar (sticky on mobile, inline on desktop) */}
         <HWActionBar
-          onSubmit={handleSubmit}
+          onSubmit={isEditMode ? handleEditSubmit : handleSubmit}
           isSubmitting={isSubmitting}
           submitPhase={submitPhase}
           submitLabel={submitLabel}
@@ -725,6 +1022,7 @@ function TutorHomeworkCreateContent() {
           hasMaterials={materials.length > 0}
           saveAsTemplate={saveAsTemplate}
           onSaveAsTemplateChange={setSaveAsTemplate}
+          isEditMode={isEditMode}
         />
       </div>
     </TutorLayout>

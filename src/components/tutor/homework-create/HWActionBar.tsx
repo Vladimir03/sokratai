@@ -2,7 +2,7 @@ import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { Badge } from '@/components/ui/badge';
-import { Loader2, Check, Send } from 'lucide-react';
+import { Loader2, Check, Send, Save } from 'lucide-react';
 import type { SubmitPhase } from './types';
 
 // ─── Submit phase tracker ────────────────────────────────────────────────────
@@ -54,6 +54,7 @@ export interface HWActionBarProps {
   hasMaterials: boolean;
   saveAsTemplate: boolean;
   onSaveAsTemplateChange: (v: boolean) => void;
+  isEditMode?: boolean;
 }
 
 export function HWActionBar({
@@ -65,15 +66,24 @@ export function HWActionBar({
   hasMaterials,
   saveAsTemplate,
   onSaveAsTemplateChange,
+  isEditMode,
 }: HWActionBarProps) {
+  const idleIcon = isEditMode
+    ? <Save className="h-4 w-4" />
+    : notifyEnabled
+      ? <Send className="h-4 w-4" />
+      : <Check className="h-4 w-4" />;
+
   return (
     <div className="border-t pt-4 sticky bottom-0 bg-background pb-4 md:pb-0 md:relative z-10 space-y-3">
-      <SubmitPhaseTracker
-        phase={submitPhase}
-        notifyEnabled={notifyEnabled}
-        hasMaterials={hasMaterials}
-      />
-      {submitPhase === 'idle' && (
+      {!isEditMode && (
+        <SubmitPhaseTracker
+          phase={submitPhase}
+          notifyEnabled={notifyEnabled}
+          hasMaterials={hasMaterials}
+        />
+      )}
+      {!isEditMode && submitPhase === 'idle' && (
         <div className="flex items-center gap-2">
           <Switch
             id="save-template-toggle"
@@ -92,7 +102,7 @@ export function HWActionBar({
           className="gap-2"
         >
           {isSubmitting && <Loader2 className="h-4 w-4 animate-spin" />}
-          {!isSubmitting && (notifyEnabled ? <Send className="h-4 w-4" /> : <Check className="h-4 w-4" />)}
+          {!isSubmitting && idleIcon}
           {submitLabel}
         </Button>
       </div>

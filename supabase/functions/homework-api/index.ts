@@ -15,6 +15,7 @@ const TELEGRAM_BOT_TOKEN = Deno.env.get("TELEGRAM_BOT_TOKEN") ?? "";
 
 const VALID_SUBJECTS = ["math", "physics", "history", "social", "english", "cs"] as const;
 const VALID_STATUSES = ["draft", "active", "closed"] as const;
+const VALID_WORKFLOW_MODES = ["classic", "guided_chat"] as const;
 const VALID_STATUS_FILTERS = ["draft", "active", "closed", "all"] as const;
 const VALID_SUBMISSION_STATUSES = ["in_progress", "submitted", "ai_checked", "tutor_reviewed"] as const;
 type NotifyFailureReason = "missing_telegram_link" | "telegram_send_failed" | "telegram_send_error";
@@ -707,6 +708,12 @@ async function handleUpdateAssignment(
     }
     patch.status = b.status;
   }
+  if (b.workflow_mode !== undefined) {
+    if (!isNonEmptyString(b.workflow_mode) || !(VALID_WORKFLOW_MODES as readonly string[]).includes(b.workflow_mode)) {
+      return jsonError(cors, 400, "VALIDATION", `workflow_mode must be one of: ${VALID_WORKFLOW_MODES.join(", ")}`);
+    }
+    patch.workflow_mode = b.workflow_mode;
+  }
 
   if (Object.keys(patch).length > 0) {
     const { error } = await db
@@ -735,6 +742,9 @@ async function handleUpdateAssignment(
       if (t.max_score !== undefined && t.max_score !== null && !isPositiveInt(t.max_score)) {
         return jsonError(cors, 400, "VALIDATION", `tasks[${i}].max_score must be a positive integer`);
       }
+      if (t.order_num !== undefined && t.order_num !== null && !isPositiveInt(t.order_num)) {
+        return jsonError(cors, 400, "VALIDATION", `tasks[${i}].order_num must be a positive integer`);
+      }
     }
 
     const { count: submissionCount } = await db
@@ -748,15 +758,34 @@ async function handleUpdateAssignment(
       .from("homework_tutor_tasks")
       .select("id, order_num")
       .eq("assignment_id", assignmentId);
-    const existingIds = new Set((existingTasks ?? []).map((t) => t.id));
-
-    const incomingTasks = b.tasks as Record<string, unknown>[];
-    const incomingIds = new Set(
-      incomingTasks.filter((t) => isUUID(t.id)).map((t) => t.id as string),
+    const existingTaskRows = existingTasks ?? [];
+    const existingIds = new Set(existingTaskRows.map((t) => t.id));
+    const maxCurrentOrder = Math.max(
+      0,
+      ...existingTaskRows.map((t) => (typeof t.order_num === "number" ? t.order_num : 0)),
     );
 
+    const incomingTasks = b.tasks as Record<string, unknown>[];
+    const normalizedIncomingTasks = incomingTasks.map((task, index) => {
+      const taskId = isUUID(task.id) ? (task.id as string) : null;
+      return {
+        task,
+        desiredOrder: isPositiveInt(task.order_num) ? (task.order_num as number) : index + 1,
+        existingId: taskId && existingIds.has(taskId) ? taskId : null,
+      };
+    });
+    const incomingIds = new Set(
+      normalizedIncomingTasks
+        .filter((t) => t.existingId)
+        .map((t) => t.existingId as string),
+    );
+    const desiredOrderNums = new Set(normalizedIncomingTasks.map((t) => t.desiredOrder));
+    if (desiredOrderNums.size !== normalizedIncomingTasks.length) {
+      return jsonError(cors, 400, "VALIDATION", "Duplicate order_num values in tasks");
+    }
+
     if (hasSubmissions) {
-      const newTasks = incomingTasks.filter((t) => !isUUID(t.id) || !existingIds.has(t.id as string));
+      const newTasks = normalizedIncomingTasks.filter((t) => !t.existingId);
       const removedIds = [...existingIds].filter((id) => !incomingIds.has(id));
 
       if (newTasks.length > 0 || removedIds.length > 0) {
@@ -769,12 +798,26 @@ async function handleUpdateAssignment(
         );
       }
 
+      // Atomic reorder via PL/pgSQL transaction (avoids UNIQUE constraint corruption)
+      const taskOrder = normalizedIncomingTasks
+        .filter((t) => t.existingId)
+        .map((t) => ({ id: t.existingId as string, order_num: t.desiredOrder }));
+      if (taskOrder.length > 0) {
+        const { error: reorderErr } = await db.rpc("hw_reorder_tasks", {
+          p_assignment_id: assignmentId,
+          p_task_order: taskOrder,
+        });
+        if (reorderErr) {
+          console.error("homework_api_request_error", { route: "PUT /assignments/:id tasks reorder", error: reorderErr.message });
+          return jsonError(cors, 500, "DB_ERROR", "Failed to reorder tasks");
+        }
+      }
+      // Update task fields (order_num already set atomically above)
       for (let i = 0; i < incomingTasks.length; i++) {
         const t = incomingTasks[i];
         if (!isUUID(t.id)) continue;
         const updateFields: Record<string, unknown> = {};
         updateFields.task_text = (t.task_text as string).trim();
-        updateFields.order_num = isPositiveInt(t.order_num) ? t.order_num : i + 1;
         if (t.task_image_url !== undefined) {
           updateFields.task_image_url = isNonEmptyString(t.task_image_url) ? (t.task_image_url as string).trim() : null;
         }
@@ -795,29 +838,23 @@ async function handleUpdateAssignment(
           .eq("assignment_id", assignmentId);
         if (error) {
           console.error("homework_api_request_error", { route: "PUT /assignments/:id tasks update", error: error.message });
+          return jsonError(cors, 500, "DB_ERROR", "Failed to update task fields");
         }
       }
     } else {
-      const toUpdate = incomingTasks.filter((t) => isUUID(t.id) && existingIds.has(t.id as string));
-      const toInsert = incomingTasks.filter((t) => !isUUID(t.id) || !existingIds.has(t.id as string));
+      const toUpdate = normalizedIncomingTasks.filter((t) => t.existingId);
+      const toInsert = normalizedIncomingTasks.filter((t) => !t.existingId);
       const toDeleteIds = [...existingIds].filter((id) => !incomingIds.has(id));
 
-      if (toDeleteIds.length > 0) {
-        const { error } = await db
-          .from("homework_tutor_tasks")
-          .delete()
-          .in("id", toDeleteIds)
-          .eq("assignment_id", assignmentId);
-        if (error) {
-          console.error("homework_api_request_error", { route: "PUT /assignments/:id tasks delete", error: error.message });
-        }
-      }
+      // Order: update existing fields → insert new at temp orders → atomic final reorder → delete removed.
+      // This lets a tutor replace a removed task with a new one at the same visible position.
 
+      // 1. Update existing task fields without touching order_num.
       for (let i = 0; i < toUpdate.length; i++) {
-        const t = toUpdate[i];
+        const entry = toUpdate[i];
+        const t = entry.task;
         const updateFields: Record<string, unknown> = {
           task_text: (t.task_text as string).trim(),
-          order_num: isPositiveInt(t.order_num) ? t.order_num : i + 1,
           task_image_url: isNonEmptyString(t.task_image_url) ? (t.task_image_url as string).trim() : null,
           correct_answer: isNonEmptyString(t.correct_answer) ? (t.correct_answer as string).trim() : null,
           max_score: isPositiveInt(t.max_score) ? t.max_score : 1,
@@ -826,33 +863,91 @@ async function handleUpdateAssignment(
         const { error } = await db
           .from("homework_tutor_tasks")
           .update(updateFields)
-          .eq("id", t.id)
+          .eq("id", entry.existingId as string)
           .eq("assignment_id", assignmentId);
         if (error) {
           console.error("homework_api_request_error", { route: "PUT /assignments/:id tasks update", error: error.message });
+          return jsonError(cors, 500, "DB_ERROR", "Failed to update task fields");
         }
       }
 
-      if (toInsert.length > 0) {
-        const maxExistingOrder = Math.max(
+      // 2. Insert new tasks at temporary high order_num values to avoid UNIQUE conflicts.
+      const tempOrderBase =
+        Math.max(
+          maxCurrentOrder,
+          ...normalizedIncomingTasks.map((t) => t.desiredOrder),
           0,
-          ...toUpdate.map((t) => (isPositiveInt(t.order_num) ? (t.order_num as number) : 0)),
-        );
-        const insertRows = toInsert.map((t, i) => ({
-          assignment_id: assignmentId,
-          order_num: isPositiveInt(t.order_num) ? t.order_num : maxExistingOrder + i + 1,
-          task_text: (t.task_text as string).trim(),
-          task_image_url: isNonEmptyString(t.task_image_url) ? (t.task_image_url as string).trim() : null,
-          correct_answer: isNonEmptyString(t.correct_answer) ? (t.correct_answer as string).trim() : null,
-          max_score: isPositiveInt(t.max_score) ? t.max_score : 1,
-          rubric_text: isNonEmptyString(t.rubric_text) ? (t.rubric_text as string).trim() : null,
-        }));
+        ) + 1000;
+      const insertedTaskIds: string[] = [];
+      if (toInsert.length > 0) {
+        for (let i = 0; i < toInsert.length; i++) {
+          const t = toInsert[i].task;
+          const { data: insertedRow, error } = await db
+            .from("homework_tutor_tasks")
+            .insert({
+              assignment_id: assignmentId,
+              order_num: tempOrderBase + i + 1,
+              task_text: (t.task_text as string).trim(),
+              task_image_url: isNonEmptyString(t.task_image_url) ? (t.task_image_url as string).trim() : null,
+              correct_answer: isNonEmptyString(t.correct_answer) ? (t.correct_answer as string).trim() : null,
+              max_score: isPositiveInt(t.max_score) ? t.max_score : 1,
+              rubric_text: isNonEmptyString(t.rubric_text) ? (t.rubric_text as string).trim() : null,
+            })
+            .select("id")
+            .single();
+          const insertedId = (insertedRow as { id?: string } | null)?.id ?? null;
+          if (error || !isUUID(insertedId)) {
+            console.error("homework_api_request_error", { route: "PUT /assignments/:id tasks insert", error: error?.message ?? "missing inserted id" });
+            return jsonError(cors, 500, "DB_ERROR", "Failed to insert new tasks");
+          }
+          insertedTaskIds.push(insertedId);
+        }
+      }
+
+      // 3. Final atomic reorder:
+      // kept tasks get their final desired order, removed tasks are parked at the tail,
+      // then the actual delete happens last.
+      const insertedIdQueue = [...insertedTaskIds];
+      const keptTaskOrder = normalizedIncomingTasks.map((entry) => {
+        if (entry.existingId) {
+          return { id: entry.existingId, order_num: entry.desiredOrder };
+        }
+        const insertedId = insertedIdQueue.shift();
+        return insertedId ? { id: insertedId, order_num: entry.desiredOrder } : null;
+      });
+      if (keptTaskOrder.some((entry) => entry === null)) {
+        return jsonError(cors, 500, "DB_ERROR", "Failed to map inserted tasks for reorder");
+      }
+      const parkingBase = tempOrderBase + toInsert.length;
+      const parkingTaskOrder = toDeleteIds.map((id, index) => ({
+        id,
+        order_num: parkingBase + index + 1,
+      }));
+      const reorderPayload = [
+        ...(keptTaskOrder as Array<{ id: string; order_num: number }>),
+        ...parkingTaskOrder,
+      ];
+      if (reorderPayload.length > 0) {
+        const { error: reorderErr } = await db.rpc("hw_reorder_tasks", {
+          p_assignment_id: assignmentId,
+          p_task_order: reorderPayload,
+        });
+        if (reorderErr) {
+          console.error("homework_api_request_error", { route: "PUT /assignments/:id tasks reorder", error: reorderErr.message });
+          return jsonError(cors, 500, "DB_ERROR", "Failed to reorder tasks");
+        }
+      }
+
+      // 4. Delete removed tasks only after the final order is safely in place.
+      if (toDeleteIds.length > 0) {
         const { error } = await db
           .from("homework_tutor_tasks")
-          .insert(insertRows);
+          .delete()
+          .in("id", toDeleteIds)
+          .eq("assignment_id", assignmentId);
         if (error) {
-          console.error("homework_api_request_error", { route: "PUT /assignments/:id tasks insert", error: error.message });
-          return jsonError(cors, 500, "DB_ERROR", "Failed to insert new tasks");
+          console.error("homework_api_request_error", { route: "PUT /assignments/:id tasks delete", error: error.message });
+          return jsonError(cors, 500, "DB_ERROR", "Failed to delete removed tasks");
         }
       }
     }

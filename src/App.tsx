@@ -313,13 +313,21 @@ const App = () => (
                 </Suspense>
               }
             />
-            <Route 
-              path="/tutor/homework/:id" 
+            <Route
+              path="/tutor/homework/:id/edit"
+              element={
+                <Suspense fallback={<PageLoader />}>
+                  <TutorHomeworkCreate />
+                </Suspense>
+              }
+            />
+            <Route
+              path="/tutor/homework/:id"
               element={
                 <Suspense fallback={<PageLoader />}>
                   <TutorHomeworkDetail />
                 </Suspense>
-              } 
+              }
             />
             <Route
               path="/tutor/homework/:id/results"

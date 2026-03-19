@@ -57,9 +57,15 @@ export interface HWTaskCardProps {
   onUpdate: (t: DraftTask) => void;
   onRemove: () => void;
   canRemove: boolean;
+  /** When set, defer storage image deletes instead of executing immediately (edit mode safety) */
+  onDeferImageDelete?: (storagePath: string) => void;
+  onMoveUp?: () => void;
+  onMoveDown?: () => void;
+  isFirst?: boolean;
+  isLast?: boolean;
 }
 
-export function HWTaskCard({ task, index, onUpdate, onRemove, canRemove }: HWTaskCardProps) {
+export function HWTaskCard({ task, index, onUpdate, onRemove, canRemove, onDeferImageDelete, onMoveUp, onMoveDown, isFirst, isLast }: HWTaskCardProps) {
   const fileRef = useRef<HTMLInputElement>(null);
   const parsedRef = parseStorageRef(task.task_image_path);
   const imageName =
@@ -97,7 +103,11 @@ export function HWTaskCard({ task, index, onUpdate, onRemove, canRemove }: HWTas
         });
 
         if (previousImagePath && previousImagePath !== uploadResult.storageRef) {
-          void deleteTutorHomeworkTaskImage(previousImagePath);
+          if (onDeferImageDelete) {
+            onDeferImageDelete(previousImagePath);
+          } else {
+            void deleteTutorHomeworkTaskImage(previousImagePath);
+          }
         }
 
         toast.success('Изображение загружено');
@@ -112,7 +122,7 @@ export function HWTaskCard({ task, index, onUpdate, onRemove, canRemove }: HWTas
         );
       }
     },
-    [task, onUpdate],
+    [task, onUpdate, onDeferImageDelete],
   );
 
   const handleImageUpload = useCallback(
@@ -164,7 +174,11 @@ export function HWTaskCard({ task, index, onUpdate, onRemove, canRemove }: HWTas
 
   const handleImageRemove = useCallback(() => {
     if (task.task_image_path) {
-      void deleteTutorHomeworkTaskImage(task.task_image_path);
+      if (onDeferImageDelete) {
+        onDeferImageDelete(task.task_image_path);
+      } else {
+        void deleteTutorHomeworkTaskImage(task.task_image_path);
+      }
     }
     revokeObjectUrl(task.task_image_preview_url);
     onUpdate({
@@ -174,13 +188,23 @@ export function HWTaskCard({ task, index, onUpdate, onRemove, canRemove }: HWTas
       task_image_preview_url: null,
       task_image_used_fallback: false,
     });
-  }, [task, onUpdate]);
+  }, [task, onUpdate, onDeferImageDelete]);
 
   return (
     <Card animate={false}>
       <CardContent className="p-4 space-y-4">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
+            <div className="flex items-center gap-0.5">
+              <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={onMoveUp} disabled={isFirst}
+                aria-label="Переместить вверх">
+                <ChevronUp className="h-4 w-4" />
+              </Button>
+              <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={onMoveDown} disabled={isLast}
+                aria-label="Переместить вниз">
+                <ChevronDown className="h-4 w-4" />
+              </Button>
+            </div>
             <span className="text-sm font-medium text-muted-foreground">
               Задача {index + 1}
             </span>
