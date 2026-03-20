@@ -672,6 +672,56 @@ export async function getStudentThreadByAssignment(
 }
 
 /**
+ * Upload a file from guided chat to Supabase Storage.
+ * Returns a storage:// ref suitable for persisting in thread messages.
+ */
+export async function uploadStudentThreadImage(
+  file: File,
+  assignmentId: string,
+  threadId: string,
+  taskOrder: number,
+): Promise<string> {
+  const studentId = await getCurrentUserId();
+  const isPdf = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf');
+  const ext = isPdf ? 'pdf' : (file.name.split('.').pop()?.toLowerCase() || 'jpg');
+  const fileId = `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+  const objectPath = `${studentId}/${assignmentId}/threads/${taskOrder}/${fileId}.${ext}`;
+  const contentType = file.type || (isPdf ? 'application/pdf' : 'application/octet-stream');
+
+  const { error: primaryError } = await supabase.storage
+    .from(HOMEWORK_SUBMISSIONS_BUCKET)
+    .upload(objectPath, file, { upsert: false, contentType });
+
+  if (!primaryError) {
+    return toStorageRef(HOMEWORK_SUBMISSIONS_BUCKET, objectPath);
+  }
+
+  // Fallback to homework-images bucket if homework-submissions not yet created
+  const isBucketMissing =
+    primaryError.message?.toLowerCase().includes('bucket not found') ||
+    (primaryError as unknown as { statusCode?: number }).statusCode === 404;
+
+  if (!isBucketMissing) {
+    throw new StudentHomeworkApiError(
+      `Ошибка загрузки файла: ${translateSupabaseError(primaryError.message)}`,
+    );
+  }
+
+  const fallbackPath = `homework/${assignmentId}/threads/${taskOrder}/${fileId}.${ext}`;
+  const { error: fallbackError } = await supabase.storage
+    .from(HOMEWORK_IMAGES_BUCKET)
+    .upload(fallbackPath, file, { upsert: false, contentType });
+
+  if (fallbackError) {
+    throw new StudentHomeworkApiError(
+      `Ошибка загрузки файла: ${translateSupabaseError(fallbackError.message)}`,
+    );
+  }
+
+  return toStorageRef(HOMEWORK_IMAGES_BUCKET, fallbackPath);
+}
+
+/**
  * Save a message to a thread via the homework-api edge function.
  */
 export async function saveThreadMessage(
@@ -721,12 +771,17 @@ export async function checkAnswer(
   threadId: string,
   answer: string,
   taskOrder?: number,
+  imageUrl?: string,
 ): Promise<CheckAnswerResponse> {
   return requestStudentHomeworkApi<CheckAnswerResponse>(
     `/threads/${encodeURIComponent(threadId)}/check`,
     {
       method: 'POST',
-      body: JSON.stringify({ answer, ...(taskOrder != null && { task_order: taskOrder }) }),
+      body: JSON.stringify({
+        answer,
+        ...(taskOrder != null && { task_order: taskOrder }),
+        ...(imageUrl && { image_url: imageUrl }),
+      }),
     },
   );
 }

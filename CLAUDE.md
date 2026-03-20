@@ -200,6 +200,19 @@ Legacy student-only система (`homework_sets`, `homework_tasks`, `homework
 - `saveThreadMessage()` в `src/lib/studentHomeworkApi.ts` принимает optional `imageUrl` и отправляет его как `image_url` в `POST /threads/:id/messages`
 - Phase 1 покрывает только transport/persist layer; student upload UI, Storage upload и передача student image в AI остаются в следующих фазах
 
+### Guided chat media upload — Phase 2 (2026-03-20)
+- **GuidedChatInput.tsx** — кнопка 📎 (Paperclip) слева от textarea, hidden `<input type="file" accept="image/*">`, `AttachmentPreview` компонент (thumbnail 48px, имя, размер, ✕/spinner)
+- Валидация: JPG/PNG/HEIC/WebP, ≤ 10 МБ, max 3 файла. PDF убран (MessageAttachment рендерит только `<img>`)
+- `URL.revokeObjectURL` cleanup при unmount и remove файла
+- **GuidedHomeworkWorkspace.tsx** — `attachedFiles` / `isUploading` state, file handlers, `sendUserMessage(text, mode, files?)` с upload flow
+- `isUploading` добавлен в race guard (`controlsDisabled`, `handleTaskClick`)
+- `content = '(фото)'` если текст пустой, но есть файл
+- **studentHomeworkApi.ts** — `uploadStudentThreadImage(file, assignmentId, threadId, taskOrder)` → upload в `homework-submissions` bucket, path `{studentId}/{assignmentId}/threads/{taskOrder}/{fileId}.{ext}`, возвращает `storage://` ref
+- ID файла: `Date.now()-Math.random()` (не `crypto.randomUUID` — Safari < 15.4)
+- **answer+image end-to-end**: `checkAnswer()` принимает optional `imageUrl`, backend `handleCheckAnswer` парсит `image_url` из body и сохраняет в `homework_tutor_thread_messages`
+- **retry+image**: retry failed user message передаёт `image_url` из сохранённого сообщения, не теряет вложение
+- Phase 2 покрывает UI + upload + persist; передача student image в AI (evaluateStudentAnswer, streamChat) остаётся в Phase 4
+
 ### Таблицы БД
 - `homework_tutor_assignments` — задания (draft/active/archived, workflow_mode)
 - `homework_tutor_tasks` — задачи внутри заданий

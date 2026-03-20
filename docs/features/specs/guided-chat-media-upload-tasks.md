@@ -18,7 +18,7 @@
 
 **Рекомендация:** начать с Phase 1 (backend) → Phase 3 (upload) → Phase 2 (UI) → Phase 4 (AI) → Phase 5 (polish).
 
-**Статус на 2026-03-20:** Phase 1 реализован; Phase 2-5 остаются в backlog.
+**Статус на 2026-03-20:** Phase 1 и Phase 2 реализованы (включая upload pipeline из Phase 3). Phase 3 (Storage bucket policies), Phase 4 (AI integration), Phase 5 (clipboard paste, DnD) остаются в backlog.
 
 ---
 
@@ -164,13 +164,13 @@ const MAX_FILES = 3;
 - Уже 3 файла → `toast.error('Максимум 3 вложения')`
 
 **Acceptance criteria:**
-- [ ] Кнопка 📎 слева от textarea
-- [ ] File picker открывается по клику
-- [ ] Валидация типа и размера
-- [ ] Error toasts при невалидном файле
-- [ ] Кнопка disabled в нужных states
-- [ ] Layout не ломается на mobile (iOS Safari)
-- [ ] Input font-size ≥ 16px сохранён
+- [x] Кнопка 📎 слева от textarea
+- [x] File picker открывается по клику
+- [x] Валидация типа и размера
+- [x] Error toasts при невалидном файле
+- [x] Кнопка disabled в нужных states
+- [x] Layout не ломается на mobile (iOS Safari)
+- [x] Input font-size ≥ 16px сохранён
 
 **Не делать:**
 - Не добавлять framer-motion
@@ -216,13 +216,13 @@ function AttachmentPreview({ files, onRemove, isUploading }: {
 - `URL.revokeObjectURL()` при unmount или remove
 
 **Acceptance criteria:**
-- [ ] Превью показывается при наличии attached files
-- [ ] Thumbnail для изображений (object URL)
-- [ ] Иконка для PDF
-- [ ] Имя файла + размер (human-readable)
-- [ ] Кнопка ✕ удаляет конкретный файл
-- [ ] Во время загрузки: ✕ заменяется на spinner
-- [ ] Memory cleanup (revokeObjectURL)
+- [x] Превью показывается при наличии attached files
+- [x] Thumbnail для изображений (object URL)
+- [x] Иконка для PDF → убрана (PDF исключён из accept, MessageAttachment рендерит только img)
+- [x] Имя файла + размер (human-readable)
+- [x] Кнопка ✕ удаляет конкретный файл
+- [x] Во время загрузки: ✕ заменяется на spinner
+- [x] Memory cleanup (revokeObjectURL)
 
 ---
 
@@ -274,13 +274,13 @@ if (isStreaming || isCheckingAnswer || isRequestingHint || isUploading) return;
 ```
 
 **Acceptance criteria:**
-- [ ] `attachedFiles` state управляется в workspace
-- [ ] Upload происходит при отправке сообщения
-- [ ] Storage ref передаётся в `saveThreadMessage`
-- [ ] Race guard включает `isUploading`
-- [ ] Файлы очищаются после успешной отправки
-- [ ] Toast при ошибке загрузки
-- [ ] Сообщение без текста + с файлом → content = '(фото)'
+- [x] `attachedFiles` state управляется в workspace
+- [x] Upload происходит при отправке сообщения
+- [x] Storage ref передаётся в `saveThreadMessage`
+- [x] Race guard включает `isUploading`
+- [x] Файлы очищаются после успешной отправки
+- [x] Toast при ошибке загрузки
+- [x] Сообщение без текста + с файлом → content = '(фото)'
 
 ---
 
@@ -331,11 +331,12 @@ export async function uploadStudentThreadImage(
 **Safari fallback:** не использовать `crypto.randomUUID()` — fallback через `Date.now()` (см. CLAUDE.md: Safari < 15.4).
 
 **Acceptance criteria:**
-- [ ] Функция загружает файл в `homework-submissions` bucket
-- [ ] Возвращает `storage://...` ref
-- [ ] Path содержит studentId, assignmentId, taskOrder
-- [ ] Работает в Safari 15+ (no crypto.randomUUID)
-- [ ] Throws при ошибке (caller обрабатывает)
+- [x] Функция загружает файл в `homework-submissions` bucket
+- [x] Возвращает `storage://...` ref
+- [x] Path содержит studentId, assignmentId, taskOrder
+- [x] Работает в Safari 15+ (no crypto.randomUUID — использует Date.now + Math.random)
+- [x] Throws при ошибке (caller обрабатывает)
+- [x] Fallback на `homework-images` bucket (по паттерну `uploadStudentHomeworkFiles`)
 
 ---
 

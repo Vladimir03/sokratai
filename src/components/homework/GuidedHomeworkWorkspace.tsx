@@ -53,6 +53,7 @@ import {
   getStudentTaskImageSignedUrlViaBackend,
   requestHint,
   saveThreadMessage,
+  uploadStudentThreadImage,
 } from '@/lib/studentHomeworkApi';
 import { streamChat, StreamChatError } from '@/lib/streamChat';
 import { trackGuidedHomeworkEvent } from '@/lib/homeworkTelemetry';
@@ -262,6 +263,8 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
   const [isRequestingHint, setIsRequestingHint] = useState(false);
   const [threadId, setThreadId] = useState<string | null>(null);
   const [threadStatus, setThreadStatus] = useState<'active' | 'completed' | 'abandoned'>('active');
+  const [attachedFiles, setAttachedFiles] = useState<File[]>([]);
+  const [isUploading, setIsUploading] = useState(false);
 
   useEffect(() => {
     messagesRef.current = messages;
@@ -377,7 +380,7 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
   const nextTaskVisited = nextTaskOrder !== null ? visitedTaskOrders.has(nextTaskOrder) : false;
   const canGoNext = nextTaskOrder !== null && nextTaskVisited;
 
-  const controlsDisabled = threadStatus !== 'active' || isStreaming || isCheckingAnswer || isRequestingHint;
+  const controlsDisabled = threadStatus !== 'active' || isStreaming || isCheckingAnswer || isRequestingHint || isUploading;
 
   const patchMessage = useCallback((messageId: string, patch: Partial<HomeworkThreadMessage>) => {
     setMessages((prev) => prev.map((message) => (
@@ -393,12 +396,13 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
     content: string,
     taskOrder: number,
     messageKind: GuidedMessageKind,
+    imageUrl?: string,
   ) => {
     if (!threadId) {
       throw new Error('Чат еще не инициализирован');
     }
 
-    const saved = await saveThreadMessage(threadId, role, content, taskOrder, messageKind);
+    const saved = await saveThreadMessage(threadId, role, content, taskOrder, messageKind, imageUrl);
     patchMessage(tempId, {
       id: saved.id,
       message_delivery_status: 'sent',
@@ -515,7 +519,7 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
     }
   }, [assignment, patchMessage, persistMessage]);
 
-  const handleCheckAnswer = useCallback(async (answerText: string) => {
+  const handleCheckAnswer = useCallback(async (answerText: string, imageUrl?: string) => {
     if (!threadId || !currentTask) return;
     const taskOrder = currentTask.order_num;
 
@@ -527,7 +531,7 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
         id: tempUserId,
         role: 'user',
         content: answerText,
-        image_url: null,
+        image_url: imageUrl ?? null,
         task_order: taskOrder,
         created_at: new Date().toISOString(),
         message_kind: 'answer',
@@ -539,7 +543,7 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
     trackGuidedHomeworkEvent('guided_send_click', { assignmentId: assignment.id, taskOrder, sendMode: 'answer' });
 
     try {
-      const response: CheckAnswerResponse = await checkAnswer(threadId, answerText, currentTask.order_num);
+      const response: CheckAnswerResponse = await checkAnswer(threadId, answerText, currentTask.order_num, imageUrl);
 
       // Sync full thread from response (includes saved messages)
       syncThreadFromResponse(response.thread);
@@ -608,6 +612,7 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
   const sendUserMessage = useCallback(async (
     rawText: string,
     sendMode: SendMode,
+    files?: File[],
   ) => {
     if (!threadId || !currentTask) return;
     if (!isViewingActiveTask) {
@@ -616,12 +621,34 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
     }
     if (controlsDisabled) return;
 
-    const content = rawText.trim();
-    if (!content) return;
+    const hasFiles = files && files.length > 0;
+    const content = rawText.trim() || (hasFiles ? '(фото)' : '');
+    if (!content && !hasFiles) return;
+
+    // Upload files first (if any)
+    let imageUrl: string | undefined;
+    if (hasFiles) {
+      setIsUploading(true);
+      try {
+        // MVP: upload first file only, store as image_url
+        imageUrl = await uploadStudentThreadImage(
+          files[0],
+          assignment.id,
+          threadId,
+          currentTask.order_num,
+        );
+      } catch (e) {
+        toast.error('Ошибка загрузки файла');
+        setIsUploading(false);
+        return;
+      }
+      setIsUploading(false);
+    }
 
     // Answer mode uses server-side AI check
     if (sendMode === 'answer') {
-      await handleCheckAnswer(content);
+      if (hasFiles) setAttachedFiles([]);
+      await handleCheckAnswer(content, imageUrl);
       return;
     }
 
@@ -632,7 +659,7 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
       id: tempUserId,
       role: 'user',
       content,
-      image_url: null,
+      image_url: imageUrl ?? null,
       task_order: taskOrder,
       created_at: new Date().toISOString(),
       message_kind: sendMode,
@@ -640,11 +667,14 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
     };
 
     setMessages((prev) => [...prev, userMessage]);
+    // Clear attached files after adding to messages
+    if (hasFiles) setAttachedFiles([]);
+
     const contextMessages = buildContextMessages(taskOrder, content);
     trackGuidedHomeworkEvent('guided_send_click', { assignmentId: assignment.id, taskOrder, sendMode });
 
     try {
-      await persistMessage(tempUserId, 'user', content, taskOrder, sendMode);
+      await persistMessage(tempUserId, 'user', content, taskOrder, sendMode, imageUrl);
     } catch (error) {
       patchMessage(tempUserId, { message_delivery_status: 'failed' });
       toast.error('Не удалось отправить сообщение. Нажмите "Повторить".');
@@ -672,12 +702,58 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
   ]);
 
   const handleSendAnswer = useCallback((text: string) => {
-    void sendUserMessage(text, 'answer');
-  }, [sendUserMessage]);
+    const files = attachedFiles.length > 0 ? [...attachedFiles] : undefined;
+    void sendUserMessage(text, 'answer', files);
+  }, [attachedFiles, sendUserMessage]);
 
   const handleSendStep = useCallback((text: string) => {
-    void sendUserMessage(text, 'question');
-  }, [sendUserMessage]);
+    const files = attachedFiles.length > 0 ? [...attachedFiles] : undefined;
+    void sendUserMessage(text, 'question', files);
+  }, [attachedFiles, sendUserMessage]);
+
+  const handleFileSelect = useCallback((file: File) => {
+    setAttachedFiles((prev) => (prev.length >= 3 ? prev : [...prev, file]));
+  }, []);
+
+  const handleFileRemove = useCallback((index: number) => {
+    setAttachedFiles((prev) => prev.filter((_, i) => i !== index));
+  }, []);
+
+  /** Retry a failed user message that already has a storage ref (no re-upload). */
+  const retryWithStorageRef = useCallback(async (
+    content: string,
+    sendMode: SendMode,
+    taskOrder: number,
+    imageUrl?: string,
+  ) => {
+    if (!threadId) return;
+
+    const tempUserId = `temp-user-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+    const userMessage: HomeworkThreadMessage = {
+      id: tempUserId,
+      role: 'user',
+      content,
+      image_url: imageUrl ?? null,
+      task_order: taskOrder,
+      created_at: new Date().toISOString(),
+      message_kind: sendMode,
+      message_delivery_status: 'sending',
+    };
+
+    setMessages((prev) => [...prev, userMessage]);
+    const contextMessages = buildContextMessages(taskOrder, content);
+    trackGuidedHomeworkEvent('guided_send_click', { assignmentId: assignment.id, taskOrder, sendMode });
+
+    try {
+      await persistMessage(tempUserId, 'user', content, taskOrder, sendMode, imageUrl);
+    } catch (error) {
+      patchMessage(tempUserId, { message_delivery_status: 'failed' });
+      toast.error('Не удалось отправить сообщение. Нажмите "Повторить".');
+      return;
+    }
+
+    await requestAssistantReply(taskOrder, sendMode, contextMessages);
+  }, [assignment.id, buildContextMessages, patchMessage, persistMessage, requestAssistantReply, threadId]);
 
   const handleHint = useCallback(async () => {
     if (!threadId || controlsDisabled || !isViewingActiveTask) return;
@@ -735,14 +811,17 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
     });
 
     if (message.role === 'user') {
+      // Capture storage ref before removing the message from state
+      const storedImageUrl = message.image_url ?? undefined;
       setMessages((prev) => prev.filter((item) => item.id !== messageId));
-      // For question mode: safe to retry (idempotent streaming)
+      // For question mode: safe to retry (idempotent streaming).
+      // File was already uploaded — pass storage ref directly, not File objects.
       if (message.message_kind === 'question') {
-        void sendUserMessage(message.content, 'question');
+        void retryWithStorageRef(message.content, 'question', message.task_order ?? currentTaskOrder, storedImageUrl);
       } else {
         // For answer/hint: re-invoke the endpoint (user explicitly chose to retry)
         if (message.message_kind === 'answer') {
-          void handleCheckAnswer(message.content);
+          void handleCheckAnswer(message.content, storedImageUrl);
         } else if (message.message_kind === 'hint_request') {
           void handleHint();
         }
@@ -779,13 +858,13 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
           error: error instanceof Error ? error.message : String(error),
         });
       });
-  }, [activeTaskOrder, assignment.id, handleCheckAnswer, handleHint, patchMessage, sendUserMessage, threadId]);
+  }, [activeTaskOrder, assignment.id, currentTaskOrder, handleCheckAnswer, handleHint, patchMessage, retryWithStorageRef, threadId]);
 
   const handleTaskClick = useCallback((orderNum: number) => {
     if (!visitedTaskOrders.has(orderNum)) return;
-    if (isStreaming || isCheckingAnswer || isRequestingHint) return;
+    if (isStreaming || isCheckingAnswer || isRequestingHint || isUploading) return;
     setCurrentTaskOrder(orderNum);
-  }, [visitedTaskOrders, isStreaming, isCheckingAnswer, isRequestingHint]);
+  }, [visitedTaskOrders, isStreaming, isCheckingAnswer, isRequestingHint, isUploading]);
 
   const handleGoPrev = useCallback(() => {
     if (previousTaskOrder === null) return;
@@ -1181,6 +1260,10 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
               ? `Задача ${currentTask.order_num}: обсудите с AI (Enter) или ответ (${modKey}+Enter)...`
               : `Обсудите с AI (Enter) или ответ (${modKey}+Enter)...`
           }
+          attachedFiles={attachedFiles}
+          onFileSelect={handleFileSelect}
+          onFileRemove={handleFileRemove}
+          isUploading={isUploading}
         />
       </div>
     </div>

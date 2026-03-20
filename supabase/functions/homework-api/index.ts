@@ -3143,6 +3143,9 @@ async function handleCheckAnswer(
     return jsonError(cors, 400, "VALIDATION", "answer is required");
   }
   const requestedTaskOrder = typeof b.task_order === "number" ? b.task_order : undefined;
+  const imageUrl = typeof b.image_url === "string" && b.image_url.trim().startsWith("storage://")
+    ? b.image_url.trim()
+    : null;
 
   // Load advance context
   const ctx = await loadAdvanceContext(db, threadId, thread, requestedTaskOrder);
@@ -3189,13 +3192,14 @@ async function handleCheckAnswer(
       ? Number(currentState.available_score)
       : (task.max_score ?? 1);
 
-  // Save user answer message
+  // Save user answer message (with optional student image attachment)
   await db.from("homework_tutor_thread_messages").insert({
     thread_id: threadId,
     role: "user",
     content: answer,
     task_order: currentOrder,
     message_kind: "answer",
+    ...(imageUrl && { image_url: imageUrl }),
   });
 
   // Update last_student_message_at
