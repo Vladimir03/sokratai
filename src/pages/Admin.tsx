@@ -15,6 +15,7 @@ import { AdminFunnelChart } from "@/components/admin/AdminFunnelChart";
 import { AdminLineChart } from "@/components/admin/AdminLineChart";
 import { AdminCRM } from "@/components/admin/AdminCRM";
 import { AdminPayments } from "@/components/admin/AdminPayments";
+import { AdminHomeworkChats } from "@/components/admin/AdminHomeworkChats";
 import { AdminSegmentsChart, SegmentsData } from "@/components/admin/AdminSegmentsChart";
 import { AdminTopUsers, TopUser } from "@/components/admin/AdminTopUsers";
 import { ArrowLeft, RefreshCw, Shield, CalendarIcon, BarChart3, MessageSquare, CreditCard } from "lucide-react";
