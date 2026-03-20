@@ -24,11 +24,14 @@ export interface StreamChatMessage {
 
 export interface StreamChatOptions {
   messages: StreamChatMessage[];
+  systemPrompt?: string;
   taskContext?: string;
   /** Signed HTTP URL for a task image; injected as multimodal image_url part on the server */
   taskImageUrl?: string;
-  /** Signed HTTP URL for the latest student solution image; injected on the server */
+  /** Signed HTTP URL for the latest student solution image; kept for backward compatibility */
   studentImageUrl?: string;
+  /** Signed HTTP URLs for the latest student solution attachments */
+  studentImageUrls?: string[];
   onDelta: (text: string) => void;
   onDone: () => void;
   onError?: (error: Error) => void;
@@ -44,9 +47,11 @@ export interface StreamChatOptions {
  */
 export async function streamChat({
   messages,
+  systemPrompt,
   taskContext,
   taskImageUrl,
   studentImageUrl,
+  studentImageUrls,
   onDelta,
   onDone,
   onError,
@@ -54,6 +59,10 @@ export async function streamChat({
   timeoutMs = 30_000,
 }: StreamChatOptions): Promise<void> {
   const chatUrl = `${SUPABASE_URL}/functions/v1/chat`;
+  const normalizedStudentImageUrls = (studentImageUrls?.length
+    ? studentImageUrls
+    : (studentImageUrl ? [studentImageUrl] : [])
+  ).filter(Boolean);
 
   for (let attempt = 0; attempt < retries; attempt++) {
     const controller = new AbortController();
@@ -80,9 +89,11 @@ export async function streamChat({
         },
         body: JSON.stringify({
           messages,
+          systemPrompt,
           taskContext,
           taskImageUrl: taskImageUrl || undefined,
-          studentImageUrl: studentImageUrl || undefined,
+          studentImageUrl: normalizedStudentImageUrls[0] || undefined,
+          studentImageUrls: normalizedStudentImageUrls.length > 0 ? normalizedStudentImageUrls : undefined,
         }),
         signal: controller.signal,
       });

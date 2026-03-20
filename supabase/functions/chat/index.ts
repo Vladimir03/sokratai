@@ -21,6 +21,8 @@ interface ChatRequestBody {
   taskImageUrl?: string;
   /** Signed HTTP URL of the latest student solution image — injected as multimodal image_url part */
   studentImageUrl?: string;
+  /** Signed HTTP URLs of the latest student solution images */
+  studentImageUrls?: string[];
   chatId?: string;
   userId?: string;
   responseProfile?: ResponseProfile;
@@ -580,7 +582,7 @@ serve(async (req) => {
       
       userId = body.userId;
       
-      const { messages, systemPrompt, taskContext, taskImageUrl, studentImageUrl, chatId } = body;
+      const { messages, systemPrompt, taskContext, taskImageUrl, studentImageUrl, studentImageUrls, chatId } = body;
       const responseProfile = normalizeResponseProfile(body.responseProfile);
       const responseMode = normalizeResponseMode(body.responseMode);
       const maxChars = normalizeMaxChars(body.maxChars);
@@ -608,6 +610,7 @@ serve(async (req) => {
         taskContext,
         taskImageUrl,
         studentImageUrl,
+        studentImageUrls,
         chatId,
         responseProfile,
         responseMode,
@@ -650,7 +653,7 @@ serve(async (req) => {
       }
 
       const body = await req.json() as ChatRequestBody;
-      const { messages, systemPrompt, taskContext, taskImageUrl, studentImageUrl, chatId } = body;
+      const { messages, systemPrompt, taskContext, taskImageUrl, studentImageUrl, studentImageUrls, chatId } = body;
       const responseProfile = normalizeResponseProfile(body.responseProfile);
       const responseMode = normalizeResponseMode(body.responseMode);
       const maxChars = normalizeMaxChars(body.maxChars);
@@ -662,6 +665,7 @@ serve(async (req) => {
         taskContext,
         taskImageUrl,
         studentImageUrl,
+        studentImageUrls,
         chatId,
         responseProfile,
         responseMode,
@@ -685,6 +689,7 @@ async function processAIRequest(
   taskContext?: string,
   taskImageUrl?: string,
   studentImageUrl?: string,
+  studentImageUrls?: string[],
   chatId?: string,
   responseProfile: ResponseProfile = "default",
   responseMode: ResponseMode = "dialog",
@@ -775,7 +780,7 @@ async function processAIRequest(
   }));
 
   let taskPromptImageDataUrl: string | null = null;
-  let studentPromptImageDataUrl: string | null = null;
+  const studentPromptImageDataUrls: string[] = [];
 
   console.log("📷 taskImageUrl received:", taskImageUrl ? "present" : "absent");
   if (taskImageUrl && typeof taskImageUrl === "string") {
@@ -791,37 +796,48 @@ async function processAIRequest(
     }
   }
 
-  console.log("📷 studentImageUrl received:", studentImageUrl ? "present" : "absent");
-  if (studentImageUrl && typeof studentImageUrl === "string") {
-    if (isValidImageUrl(studentImageUrl)) {
-      const base64DataUrl = await fetchImageAsBase64DataUrl(studentImageUrl);
-      if (base64DataUrl) {
-        studentPromptImageDataUrl = base64DataUrl;
-      } else {
-        console.error("📷 Failed to download student image, proceeding without it");
-      }
+  const normalizedStudentImageUrls = (Array.isArray(studentImageUrls) && studentImageUrls.length > 0
+    ? studentImageUrls
+    : (studentImageUrl ? [studentImageUrl] : [])
+  )
+    .filter((url): url is string => typeof url === "string" && url.trim().length > 0)
+    .slice(0, 3);
+
+  console.log("📷 studentImageUrls received:", normalizedStudentImageUrls.length);
+  for (const url of normalizedStudentImageUrls) {
+    if (!isValidImageUrl(url)) {
+      console.error("[SECURITY] Rejected invalid student image URL");
+      continue;
+    }
+
+    const base64DataUrl = await fetchImageAsBase64DataUrl(url);
+    if (base64DataUrl) {
+      studentPromptImageDataUrls.push(base64DataUrl);
     } else {
-      console.error('[SECURITY] Rejected invalid studentImageUrl');
+      console.error("📷 Failed to download student image, proceeding without it");
     }
   }
 
   const promptAttachments: ChatPromptImageAttachment[] = [];
-  const hasBothPromptImages = Boolean(taskPromptImageDataUrl && studentPromptImageDataUrl);
   if (taskPromptImageDataUrl) {
     promptAttachments.push({
-      label: hasBothPromptImages
+      label: studentPromptImageDataUrls.length > 0
         ? "Изображение 1 — условие задачи."
         : "Изображение выше — условие задачи.",
       dataUrl: taskPromptImageDataUrl,
     });
   }
-  if (studentPromptImageDataUrl) {
-    promptAttachments.push({
-      label: taskPromptImageDataUrl
-        ? "Изображение 2 — рукописное решение ученика."
-        : "Изображение выше — рукописное решение ученика.",
-      dataUrl: studentPromptImageDataUrl,
-    });
+  if (studentPromptImageDataUrls.length > 0) {
+    let imageCounter = taskPromptImageDataUrl ? 2 : 1;
+    for (const [index, dataUrl] of studentPromptImageDataUrls.entries()) {
+      promptAttachments.push({
+        label: !taskPromptImageDataUrl && studentPromptImageDataUrls.length === 1
+          ? "Изображение выше — рукописное решение ученика."
+          : `Изображение ${imageCounter} — решение ученика${studentPromptImageDataUrls.length > 1 ? `, файл ${index + 1}` : ""}.`,
+        dataUrl,
+      });
+      imageCounter += 1;
+    }
   }
 
   injectHomeworkImagesIntoLastUserMessage(transformedMessages, promptAttachments);

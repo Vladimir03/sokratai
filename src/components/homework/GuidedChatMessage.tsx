@@ -7,12 +7,12 @@ import { memo, lazy, Suspense, useEffect, useState, useMemo } from 'react';
 import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
-import { AlertTriangle, ImageIcon, RotateCcw } from 'lucide-react';
+import { AlertTriangle, RotateCcw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { Skeleton } from '@/components/ui/skeleton';
 import { getStudentTaskImageSignedUrl } from '@/lib/studentHomeworkApi';
 import type { GuidedMessageKind, MessageDeliveryStatus } from '@/types/homework';
 import { preprocessLatex } from '@/components/kb/ui/preprocessLatex';
+import { ThreadAttachments } from './ThreadAttachments';
 
 const ReactMarkdown = lazy(() => import('react-markdown'));
 
@@ -49,31 +49,6 @@ function formatMessageKind(kind: GuidedMessageKind | undefined): string | null {
   if (kind === 'question') return 'Шаг решения';
   if (kind === 'answer') return 'Ответ';
   return null;
-}
-
-function MessageAttachment({ imageRef }: { imageRef: string }) {
-  const [url, setUrl] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    let cancelled = false;
-    void getStudentTaskImageSignedUrl(imageRef).then((signed) => {
-      if (!cancelled) {
-        setUrl(signed);
-        setLoading(false);
-      }
-    });
-    return () => { cancelled = true; };
-  }, [imageRef]);
-
-  if (loading) return <Skeleton className="h-24 w-24 rounded-md mt-2" />;
-  if (!url) return <div className="h-20 w-20 rounded-md bg-muted/50 flex items-center justify-center mt-2"><ImageIcon className="h-5 w-5 text-muted-foreground" /></div>;
-
-  return (
-    <a href={url} target="_blank" rel="noreferrer" className="inline-block rounded-md border p-0.5 mt-2 hover:opacity-90 transition-opacity">
-      <img src={url} alt="Вложение" className="h-24 w-auto max-w-[200px] rounded-sm object-cover" loading="lazy" />
-    </a>
-  );
 }
 
 const GuidedChatMessage = memo(({ message, isStreaming, onRetry }: GuidedChatMessageProps) => {
@@ -196,7 +171,12 @@ const GuidedChatMessage = memo(({ message, isStreaming, onRetry }: GuidedChatMes
                 {displayContent}
               </ReactMarkdown>
             </Suspense>
-            {message.image_url && <MessageAttachment imageRef={message.image_url} />}
+            {message.image_url && (
+              <ThreadAttachments
+                attachmentValue={message.image_url}
+                resolveSignedUrl={getStudentTaskImageSignedUrl}
+              />
+            )}
           </div>
           {message.created_at && (
             <div className="text-[10px] mt-1 text-emerald-600/60 dark:text-emerald-400/60">
@@ -240,7 +220,12 @@ const GuidedChatMessage = memo(({ message, isStreaming, onRetry }: GuidedChatMes
               {displayContent}
             </ReactMarkdown>
           </Suspense>
-          {message.image_url && <MessageAttachment imageRef={message.image_url} />}
+          {message.image_url && (
+            <ThreadAttachments
+              attachmentValue={message.image_url}
+              resolveSignedUrl={getStudentTaskImageSignedUrl}
+            />
+          )}
           {isStreaming && (
             <span className="inline-block w-1.5 h-4 bg-current animate-pulse ml-0.5 align-text-bottom" />
           )}

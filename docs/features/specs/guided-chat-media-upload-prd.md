@@ -3,7 +3,7 @@
 **Продукт:** Сократ
 **Автор:** Vladimir / UX-аудит
 **Версия:** v0.1
-**Статус:** in progress (Phase 1-3 implemented, Phase 4-5 pending)
+**Статус:** implemented for guided chat upload/storage/render + image-to-AI; PDF currently stays in chat/tutor view and is not sent to AI
 **Дата:** 2026-03-20
 **Тип задачи:** A — новая фича
 
@@ -15,7 +15,7 @@
 
 **Фича:** добавить мультимодальный ввод (текст + изображение/PDF) в `GuidedChatInput` и провести изображение через весь pipeline: загрузка → хранение → отображение → передача в AI.
 
-**Статус на 2026-03-20:** все фазы (Phase 1–5) реализованы. Полный pipeline: выбор/вставка изображения → preview → upload в Storage → persist `image_url` → отображение в чате → передача в AI (answer, hint, question). Clipboard paste работает через `clipboardData.files` + `items` fallback (Safari/Firefox). Mobile camera через native file picker.
+**Статус на 2026-03-20:** все фазы (Phase 1–5) реализованы для end-to-end image flow. Полный pipeline: выбор/вставка 1-3 файлов → preview → upload в Storage → persist refs в `image_url` → отображение в чате и у репетитора → передача изображений в AI (`answer`, `hint`, `question`). Clipboard paste работает через `clipboardData.files` + `items` fallback (Safari/Firefox). Mobile camera доступна через native file picker. PDF поддержан в upload/storage/rendering, но в AI path пока передаются только изображения.
 
 ---
 
@@ -30,7 +30,7 @@
 Wedge: «быстро собрать ДЗ и новую практику по теме урока».
 - Репетитор задаёт задачи из ЕГЭ с графиками → ученик должен уметь показать своё решение
 - AI видит рукописное решение → даёт step-level фидбэк → ученик учится
-- Репетитор видит фото решения в GuidedThreadViewer (уже работает для tutor→student, не работает student→AI)
+- Репетитор видит фото и PDF решения в GuidedThreadViewer
 
 ### Повышает ли шанс платного пилота
 **Да.** Без загрузки фото:
@@ -44,7 +44,7 @@ Wedge: «быстро собрать ДЗ и новую практику по т
 
 1. Ученик может прикрепить 1-3 изображения (JPG, PNG, HEIC) или PDF к сообщению в guided chat
 2. Фото отображается в чате как кликабельный thumbnail (с zoom)
-3. Репетитор видит фото ученика в GuidedThreadViewer (уже работает через `MessageImage`)
+3. Репетитор видит вложения ученика в GuidedThreadViewer
 4. AI получает фото ученика при проверке ответа (`answer` mode) и при обсуждении (`question` mode)
 5. Clipboard paste (Ctrl+V / Cmd+V) работает на десктопе
 6. Камера/галерея доступны на мобильном через bottom sheet
@@ -73,20 +73,20 @@ Wedge: «быстро собрать ДЗ и новую практику по т
 | Storage bucket `homework-submissions` | ✅ Есть | RLS: студент может загружать в `{student_id}/...` |
 | `uploadStudentHomeworkFiles()` | ✅ Есть | Загрузка в `homework-submissions`, возвращает `storage://...` ref |
 | `getStudentTaskImageSignedUrl()` | ✅ Есть | Резолвит `storage://` → signed HTTP URL |
-| `MessageAttachment` в `GuidedChatMessage` | ✅ Есть | Рендерит `message.image_url` через signed URL |
-| `image_url` column в `homework_tutor_thread_messages` | ✅ Есть | Может хранить `storage://...` ref |
+| `ThreadAttachments` в `GuidedChatMessage` | ✅ Есть | Рендерит 1-3 attachment refs из `message.image_url` через signed URL |
+| `image_url` column в `homework_tutor_thread_messages` | ✅ Есть | Хранит single `storage://...` ref или JSON array refs |
 | Tutor upload + display (GuidedThreadViewer) | ✅ Есть | `uploadTutorHomeworkTaskImage()` + `handleSendMessage()` |
 | Передача task image в AI | ✅ Есть | `storage://` → signed URL → multimodal API |
 
 ### Что нужно добавить
 | Компонент | Статус | Что делать |
 |-----------|--------|------------|
-| UI загрузки в `GuidedChatInput` | ✅ Phase 2 | Кнопка 📎, preview, remove, upload/error states |
-| Student upload function для guided chat | ✅ Phase 3 | `uploadStudentThreadImage()` загружает в Storage и возвращает `storage://...` ref |
-| `saveThreadMessage()` с `image_url` | ✅ Phase 1 | `saveThreadMessage()` принимает optional `imageUrl` и передаёт `image_url` в body |
-| Backend: `POST /threads/:id/messages` | ✅ Phase 1 | Student `handlePostThreadMessage` принимает optional `image_url`, валидирует `storage://` и сохраняет в `homework_tutor_thread_messages` |
-| Передача student image в AI | ❌ Нет | Расширить `evaluateStudentAnswer` + `streamChat` |
-| Clipboard paste handler | ❌ Нет | `paste` event → file extraction → preview |
+| UI загрузки в `GuidedChatInput` | ✅ | Кнопка 📎, preview stack, remove, upload/error states, `multiple`, PDF cards |
+| Student upload function для guided chat | ✅ | `uploadStudentThreadImage()` загружает в Storage и возвращает `storage://...` ref |
+| `saveThreadMessage()` с attachments | ✅ | `saveThreadMessage()` принимает array refs и сериализует их в `image_url` |
+| Backend: `POST /threads/:id/messages` | ✅ | Student `handlePostThreadMessage` валидирует ownership/path и сохраняет refs в `homework_tutor_thread_messages` |
+| Передача student image в AI | ✅ | `evaluateStudentAnswer`, `generateHint`, `streamChat` принимают multiple student images |
+| Clipboard paste handler | ✅ | `paste` event → file extraction → preview |
 
 ---
 
@@ -121,13 +121,14 @@ Wedge: «быстро собрать ДЗ и новую практику по т
 Режим "Ответ" (answer):
   → Student image uploaded → storage ref
   → Backend resolves storage ref → signed URL
-  → evaluateStudentAnswer() receives { studentAnswer, studentImageUrl }
+  → evaluateStudentAnswer() receives { studentAnswer, studentImageUrls }
   → AI prompt: "Изображение — рукописное решение ученика. Текст ответа: ..."
   → AI видит и текст, и фото → даёт фидбэк
+  → Если среди вложений есть PDF, он остаётся в чате, но в AI path не передаётся
 
 Режим "Шаг" (question):
-  → streamChat() receives { messages, taskImageUrl, studentImageUrl? }
-  → AI видит условие задачи + фото ученика + текст вопроса
+  → streamChat() receives { messages, taskImageUrl, studentImageUrls? }
+  → AI видит условие задачи + последние изображения ученика + текст вопроса
   → Отвечает в контексте увиденного
 ```
 
@@ -235,8 +236,8 @@ Student selects file
 
 ### 10.2. Message persist path
 ```
-[Client] saveThreadMessage(threadId, 'user', text, taskOrder, messageKind, imageUrl?)
-  → POST /threads/:id/messages { content, role, task_order, message_kind, image_url? }
+[Client] saveThreadMessage(threadId, 'user', text, taskOrder, messageKind, attachmentRefs?)
+  → POST /threads/:id/messages { content, role, task_order, message_kind, image_url?, image_urls? }
   → [Backend] INSERT INTO homework_tutor_thread_messages (..., image_url)
 ```
 
@@ -246,14 +247,14 @@ Student selects file
   → POST /threads/:id/check { answer, task_order }
   → [Backend] load latest user message with image_url
   → [Backend] resolve storage:// → signed HTTP URL
-  → [Backend] evaluateStudentAnswer({ studentAnswer, studentImageUrl, taskImageUrl })
-  → [AI] receives multimodal: task image + student image + answer text
+  → [Backend] evaluateStudentAnswer({ studentAnswer, studentImageUrls, taskImageUrl })
+  → [AI] receives multimodal: task image + student images + answer text
 ```
 
 ### 10.4. AI path (question/step mode)
 ```
-[Client] streamChat({ messages, taskImageUrl, studentImageUrl? })
-  → POST /functions/v1/chat { messages, taskImageUrl, studentImageUrl? }
+[Client] streamChat({ messages, taskImageUrl, studentImageUrls? })
+  → POST /functions/v1/chat { messages, taskImageUrl, studentImageUrls? }
   → [Backend] builds multimodal prompt with both images
   → [AI] responds in context of both images
 ```
@@ -274,26 +275,28 @@ Student selects file
 
 ## 12. Acceptance Criteria
 
-### Реализовано в Phase 1-3
-- [x] `POST /threads/:id/messages` принимает optional `image_url`
-- [x] `saveThreadMessage()` передаёт `image_url` в backend
+### Реализовано
+- [x] `POST /threads/:id/messages` принимает `image_url` / `image_urls`
+- [x] `saveThreadMessage()` передаёт attachment refs в backend
 - [x] Вызовы без `image_url` остаются backward compatible
 - [x] `uploadStudentThreadImage()` загружает student image в Storage и возвращает `storage://...` ref
 - [x] Upload pipeline использует `getSession()` и Safari-safe ID без `crypto.randomUUID()`
 - [x] Guided upload сохраняет fallback на legacy `homework-images` bucket, если `homework-submissions` недоступен
+- [x] Backend валидирует student attachment refs по bucket + student-scoped path
 
 ### P0 (Must Have)
-- [ ] Ученик может прикрепить 1-3 изображения к сообщению в guided chat
+- [x] Ученик может прикрепить 1-3 изображения/PDF к сообщению в guided chat
 - [x] Превью вложения показывается над полем ввода
 - [x] Ученик может удалить вложение до отправки
-- [x] Фото отправляется с текстом или без текста
-- [x] Фото отображается в чате как thumbnail (кликабельный → zoom)
-- [x] Репетитор видит фото ученика в GuidedThreadViewer (уже работает через MessageImage)
+- [x] Вложение отправляется с текстом или без текста
+- [x] Изображения отображаются в чате как thumbnail, PDF как file card
+- [x] Репетитор видит вложения ученика в GuidedThreadViewer
 - [x] Clipboard paste (Ctrl+V) работает на десктопе
-- [x] Камера доступна на мобильном (input capture)
+- [x] Камера доступна на мобильном через native file picker
 - [x] Кнопки send disabled во время загрузки файла
 - [x] AI получает фото ученика при проверке ответа
 - [x] AI получает фото ученика при обсуждении (question mode)
+- [x] AI получает фото ученика при hint mode
 - [x] File size > 10 МБ → error toast
 - [x] Unsupported format → error toast
 
@@ -330,16 +333,14 @@ Student selects file
 - `src/components/homework/GuidedChatInput.tsx` — основные изменения (UI загрузки)
 - `src/components/homework/GuidedHomeworkWorkspace.tsx` — extend sendUserMessage, handleCheckAnswer
 - `src/lib/studentHomeworkApi.ts` — новая функция uploadStudentThreadImage + extend saveThreadMessage
-- `src/lib/streamChat.ts` — accept optional studentImageUrl
+- `src/lib/streamChat.ts` — accept optional studentImageUrls
 
 ### Backend
-- `supabase/functions/homework-api/index.ts` — extend handlePostThreadMessage (accept image_url)
-- `supabase/functions/homework-api/guided_ai.ts` — extend evaluateStudentAnswer (accept studentImageUrl)
+- `supabase/functions/homework-api/index.ts` — extend handlePostThreadMessage (accept attachments + validate ownership)
+- `supabase/functions/homework-api/guided_ai.ts` — extend evaluateStudentAnswer / generateHint (accept studentImageUrls)
 
 ### Не трогаем
-- `GuidedChatMessage.tsx` — MessageAttachment уже рендерит image_url (без изменений)
-- `GuidedThreadViewer.tsx` — tutor уже видит image_url (без изменений)
-- Storage buckets / RLS — `homework-submissions` уже настроен
+- Storage buckets / RLS policy model — используем существующие `homework-submissions` / `homework-images`
 - DB schema — `image_url` column уже есть
 
 ---

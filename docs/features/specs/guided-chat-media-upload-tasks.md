@@ -160,7 +160,7 @@ const MAX_FILES = 3;
 
 **Error handling:**
 - Размер > 10 МБ → `toast.error('Файл слишком большой. Максимум 10 МБ')`
-- Неподдерживаемый формат → `toast.error('Поддерживаются: JPG, PNG, PDF')`
+- Неподдерживаемый формат → `toast.error('Поддерживаются: JPG, PNG, HEIC, WebP, PDF')`
 - Уже 3 файла → `toast.error('Максимум 3 вложения')`
 
 **Acceptance criteria:**
@@ -218,7 +218,7 @@ function AttachmentPreview({ files, onRemove, isUploading }: {
 **Acceptance criteria:**
 - [x] Превью показывается при наличии attached files
 - [x] Thumbnail для изображений (object URL)
-- [x] Иконка для PDF → убрана (PDF исключён из accept, MessageAttachment рендерит только img)
+- [x] Для PDF показывается file card / иконка вместо thumbnail
 - [x] Имя файла + размер (human-readable)
 - [x] Кнопка ✕ удаляет конкретный файл
 - [x] Во время загрузки: ✕ заменяется на spinner
@@ -237,7 +237,7 @@ function AttachmentPreview({ files, onRemove, isUploading }: {
 4. При отправке с файлами:
    - Set `isUploading = true`
    - Upload each file → получить storage refs
-   - Persist message with `image_url` (первый файл) — multiple images: отдельные сообщения или первый в image_url
+   - Persist message with serialized attachments in `image_url` (+ `image_urls` for new clients)
    - Set `isUploading = false`
    - Clear `attachedFiles`
 
@@ -246,12 +246,13 @@ function AttachmentPreview({ files, onRemove, isUploading }: {
 async function sendUserMessage(rawText: string, sendMode: 'question' | 'answer', files?: File[]) {
   // ... existing validation
 
-  let imageUrl: string | undefined;
+  let attachmentRefs: string[] = [];
   if (files && files.length > 0) {
     setIsUploading(true);
     try {
-      // Upload first file (MVP: 1 image per message)
-      imageUrl = await uploadStudentThreadImage(files[0], assignment.id, threadId, activeTaskOrder);
+      attachmentRefs = await Promise.all(
+        files.map((file) => uploadStudentThreadImage(file, assignment.id, threadId, activeTaskOrder))
+      );
     } catch (e) {
       toast.error('Ошибка загрузки файла');
       setIsUploading(false);
@@ -261,8 +262,8 @@ async function sendUserMessage(rawText: string, sendMode: 'question' | 'answer',
   }
 
   // Persist message
-  const content = rawText.trim() || (imageUrl ? '(фото)' : '');
-  const saved = await saveThreadMessage(threadId, 'user', content, taskOrder, messageKind, imageUrl);
+  const content = rawText.trim() || buildGuidedAttachmentPlaceholder(files ?? []);
+  const saved = await saveThreadMessage(threadId, 'user', content, taskOrder, messageKind, attachmentRefs);
 
   // ... rest of flow (AI streaming)
 }
@@ -347,8 +348,8 @@ export async function uploadStudentThreadImage(
 **Файл:** `supabase/functions/homework-api/guided_ai.ts`
 
 **Что сделать:**
-1. Добавить `studentImageUrl?: string` в `EvaluateStudentAnswerParams`
-2. В `buildCheckPrompt()`: если есть `studentImageUrl`, добавить как multimodal image
+1. Добавить `studentImageUrls?: string[]` в `EvaluateStudentAnswerParams`
+2. В `buildCheckPrompt()`: если есть `studentImageUrls`, добавить их как multimodal image parts
 3. Резолвить `storage://` → signed URL в caller (`handleCheckAnswer` в index.ts)
 
 **Текущий interface:**
@@ -369,7 +370,7 @@ export interface EvaluateStudentAnswerParams {
   correctAnswer: string;
   studentAnswer: string;
   taskImageUrl: string | null;      // task condition image
-  studentImageUrl: string | null;   // NEW: student's handwritten solution
+  studentImageUrls?: string[] | null; // NEW: student's handwritten solution images
   // ... other fields
 }
 ```
@@ -377,23 +378,19 @@ export interface EvaluateStudentAnswerParams {
 **В buildCheckPrompt():**
 ```typescript
 // After task image:
-if (params.studentImageUrl) {
+for (const imageUrl of params.studentImageUrls ?? []) {
   userContent.push({
     type: "image_url",
-    image_url: { url: params.studentImageUrl },
-  });
-  userContent.push({
-    type: "text",
-    text: "Изображение выше — рукописное решение ученика.",
+    image_url: { url: imageUrl },
   });
 }
 ```
 
 **Acceptance criteria:**
-- [x] `evaluateStudentAnswer` принимает optional `studentImageUrl`
-- [x] AI получает и task image, и student image (оба как multimodal)
+- [x] `evaluateStudentAnswer` принимает optional `studentImageUrls`
+- [x] AI получает и task image, и latest student images (оба как multimodal)
 - [x] Prompt ясно указывает AI что каждое изображение — task vs student solution
-- [x] Без studentImageUrl → работает как раньше
+- [x] Без studentImageUrls → работает как раньше
 
 ---
 
@@ -405,12 +402,12 @@ if (params.studentImageUrl) {
 **Что сделать:**
 1. После получения student answer, загрузить latest user message с `image_url`
 2. Если есть `image_url` → резолвить `storage://` → signed URL
-3. Передать signed URL в `evaluateStudentAnswer({ studentImageUrl })`
+3. Передать signed URLs в `evaluateStudentAnswer({ studentImageUrls })`
 
 **Логика:**
 ```typescript
 // In handleCheckAnswer, after getting studentAnswer:
-let studentImageUrl: string | null = null;
+let studentImageUrls: string[] = [];
 
 // Load latest user message for this task
 const { data: latestMsg } = await db
@@ -423,28 +420,20 @@ const { data: latestMsg } = await db
   .limit(1)
   .single();
 
-if (latestMsg?.image_url?.startsWith('storage://')) {
-  const parsed = parseStorageRef(latestMsg.image_url);
-  if (parsed) {
-    const { data: signedData } = await db.storage
-      .from(parsed.bucket)
-      .createSignedUrl(parsed.path, 3600);
-    studentImageUrl = signedData?.signedUrl ?? null;
-  }
-}
+studentImageUrls = await loadLatestStudentImageUrlsForTask(...);
 
 // Pass to AI
 await evaluateStudentAnswer({
   ...existingParams,
-  studentImageUrl,
+  studentImageUrls,
 });
 ```
 
 **Acceptance criteria:**
 - [x] Backend загружает latest user message image_url для текущей задачи
-- [x] Резолвит storage:// → signed HTTP URL
+- [x] Резолвит storage:// → signed HTTP URLs
 - [x] Передаёт в evaluateStudentAnswer
-- [x] Без image_url → studentImageUrl = null (backward compatible)
+- [x] Без image_url → studentImageUrls = [] (backward compatible)
 
 ---
 
@@ -453,16 +442,16 @@ await evaluateStudentAnswer({
 **Файл:** `src/lib/streamChat.ts` + `src/components/homework/GuidedHomeworkWorkspace.tsx`
 
 **Что сделать:**
-1. В `StreamChatOptions`: добавить optional `studentImageUrl?: string`
-2. В `requestAssistantReply()`: если latest user message имеет `image_url`, резолвить → signed URL → передать в streamChat
-3. `/functions/v1/chat` endpoint: принять и использовать `studentImageUrl`
+1. В `StreamChatOptions`: добавить optional `studentImageUrls?: string[]`
+2. В `requestAssistantReply()`: если latest user message имеет `image_url`, резолвить → signed URLs → передать в streamChat
+3. `/functions/v1/chat` endpoint: принять и использовать `studentImageUrls`
 
 **Это менее критично чем answer mode** — в question mode AI тоже полезно видеть фото, но основной use case — answer checking (Phase 4.1-4.2).
 
 **Acceptance criteria:**
-- [x] streamChat принимает optional studentImageUrl
+ - [x] streamChat принимает optional studentImageUrls
 - [x] Chat endpoint строит multimodal prompt с обоими изображениями
-- [x] Без studentImageUrl → работает как раньше
+- [x] Без studentImageUrls → работает как раньше
 
 ---
 

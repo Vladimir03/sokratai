@@ -6,7 +6,7 @@ import { Badge } from '@/components/ui/badge';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
 import { Skeleton } from '@/components/ui/skeleton';
-import { Loader2, Send, ImageIcon, Paperclip, X } from 'lucide-react';
+import { Loader2, Paperclip, X } from 'lucide-react';
 import { MathText } from '@/components/kb/ui/MathText';
 import { parseISO } from 'date-fns';
 import { toast } from 'sonner';
@@ -23,6 +23,7 @@ import {
   TUTOR_STALE_TIME_MS,
   TUTOR_GC_TIME_MS,
 } from '@/hooks/tutorQueryOptions';
+import { ThreadAttachments } from '@/components/homework/ThreadAttachments';
 
 const ROLE_LABELS: Record<string, string> = {
   user: 'Ученик',
@@ -37,27 +38,6 @@ const TASK_STATUS_LABELS: Record<string, string> = {
   completed: 'Завершена',
   skipped: 'Пропущена',
 };
-
-// ─── Message image (resolves storage:// refs) ──────────────────────────────
-
-function MessageImage({ imageRef }: { imageRef: string }) {
-  const imageQuery = useQuery<string | null>({
-    queryKey: ['tutor', 'homework', 'thread-image', imageRef],
-    queryFn: () => getHomeworkImageSignedUrl(imageRef, { defaultBucket: 'homework-images' }),
-    staleTime: TUTOR_STALE_TIME_MS,
-    gcTime: TUTOR_GC_TIME_MS,
-    retry: 1,
-  });
-
-  if (imageQuery.isLoading) return <Skeleton className="h-20 w-20 rounded-md" />;
-  if (!imageQuery.data) return <div className="h-20 w-20 rounded-md bg-muted flex items-center justify-center"><ImageIcon className="h-5 w-5 text-muted-foreground" /></div>;
-
-  return (
-    <a href={imageQuery.data} target="_blank" rel="noreferrer" className="inline-block rounded-md border bg-background p-0.5 hover:opacity-90 transition-opacity">
-      <img src={imageQuery.data} alt="Вложение" className="h-20 w-auto max-w-[140px] rounded-sm object-cover" loading="lazy" />
-    </a>
-  );
-}
 
 // ─── Main component ─────────────────────────────────────────────────────────
 
@@ -228,7 +208,11 @@ export function GuidedThreadViewer({
                       </div>
                       <MathText text={message.content} className="whitespace-pre-wrap leading-relaxed break-words" />
                       {message.image_url && (
-                        <MessageImage imageRef={message.image_url} />
+                        <ThreadAttachments
+                          attachmentValue={message.image_url}
+                          resolveSignedUrl={(ref) => getHomeworkImageSignedUrl(ref, { defaultBucket: 'homework-images' })}
+                          compact
+                        />
                       )}
                     </div>
                   ))

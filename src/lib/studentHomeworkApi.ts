@@ -9,6 +9,7 @@ import type {
   CheckAnswerResponse,
   RequestHintResponse,
 } from '@/types/homework';
+import { serializeThreadAttachmentRefs } from '@/lib/homeworkThreadAttachments';
 
 const HOMEWORK_IMAGES_BUCKET = 'homework-images';
 const HOMEWORK_SUBMISSIONS_BUCKET = 'homework-submissions';
@@ -56,6 +57,17 @@ function ensureUserId(userId: string | undefined): string {
 }
 
 async function getCurrentUserId(): Promise<string> {
+  const {
+    data: { session },
+    error: sessionError,
+  } = await supabase.auth.getSession();
+  if (sessionError) {
+    throw new StudentHomeworkApiError(sessionError.message);
+  }
+  if (session?.user?.id) {
+    return session.user.id;
+  }
+
   const { data, error } = await supabase.auth.getUser();
   if (error) {
     throw new StudentHomeworkApiError(error.message);
@@ -714,7 +726,7 @@ export async function uploadStudentThreadImage(
     );
   }
 
-  const fallbackPath = `homework/${assignmentId}/threads/${taskOrder}/${fileId}.${ext}`;
+  const fallbackPath = `${studentId}/${assignmentId}/threads/${taskOrder}/${fileId}.${ext}`;
   const { error: fallbackError } = await supabase.storage
     .from(HOMEWORK_IMAGES_BUCKET)
     .upload(fallbackPath, file, { upsert: false, contentType });
@@ -737,8 +749,10 @@ export async function saveThreadMessage(
   content: string,
   taskOrder?: number,
   messageKind?: GuidedMessageKind,
-  imageUrl?: string,
+  attachmentRefs?: string[],
 ): Promise<{ id: string }> {
+  const normalizedAttachmentRefs = (attachmentRefs ?? []).map((ref) => ref.trim()).filter(Boolean);
+  const serializedAttachments = serializeThreadAttachmentRefs(normalizedAttachmentRefs);
   return requestStudentHomeworkApi<{ id: string }>(
     `/threads/${encodeURIComponent(threadId)}/messages`,
     {
@@ -748,7 +762,8 @@ export async function saveThreadMessage(
         role,
         task_order: taskOrder,
         message_kind: messageKind,
-        image_url: imageUrl,
+        image_url: serializedAttachments,
+        image_urls: normalizedAttachmentRefs.length > 0 ? normalizedAttachmentRefs : undefined,
       }),
     },
   );
@@ -778,8 +793,10 @@ export async function checkAnswer(
   threadId: string,
   answer: string,
   taskOrder?: number,
-  imageUrl?: string,
+  attachmentRefs?: string[],
 ): Promise<CheckAnswerResponse> {
+  const normalizedAttachmentRefs = (attachmentRefs ?? []).map((ref) => ref.trim()).filter(Boolean);
+  const serializedAttachments = serializeThreadAttachmentRefs(normalizedAttachmentRefs);
   return requestStudentHomeworkApi<CheckAnswerResponse>(
     `/threads/${encodeURIComponent(threadId)}/check`,
     {
@@ -787,7 +804,8 @@ export async function checkAnswer(
       body: JSON.stringify({
         answer,
         ...(taskOrder != null && { task_order: taskOrder }),
-        ...(imageUrl && { image_url: imageUrl }),
+        ...(serializedAttachments && { image_url: serializedAttachments }),
+        ...(normalizedAttachmentRefs.length > 0 && { image_urls: normalizedAttachmentRefs }),
       }),
     },
   );

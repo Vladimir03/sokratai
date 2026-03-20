@@ -44,7 +44,7 @@ export interface EvaluateStudentAnswerParams {
   studentAnswer: string;
   taskText: string;
   taskImageUrl: string | null;
-  studentImageUrl?: string | null;
+  studentImageUrls?: string[] | null;
   correctAnswer: string | null;
   rubricText: string | null;
   subject: string;
@@ -58,7 +58,7 @@ export interface EvaluateStudentAnswerParams {
 export interface GenerateHintParams {
   taskText: string;
   taskImageUrl: string | null;
-  studentImageUrl?: string | null;
+  studentImageUrls?: string[] | null;
   correctAnswer: string | null;
   subject: string;
   conversationHistory: Array<{ role: string; content: string; visible_to_student?: boolean }>;
@@ -163,6 +163,17 @@ async function inlinePromptImageUrl(imageUrl: string | null | undefined): Promis
     });
     return null;
   }
+}
+
+async function inlinePromptImageUrls(imageUrls: string[] | null | undefined): Promise<string[]> {
+  const normalized = (imageUrls ?? [])
+    .map((url) => url.trim())
+    .filter(Boolean);
+
+  if (normalized.length === 0) return [];
+
+  const inlined = await Promise.all(normalized.map((url) => inlinePromptImageUrl(url)));
+  return inlined.filter((url): url is string => Boolean(url));
 }
 
 function stripMarkdownWrappers(text: string): string {
@@ -278,7 +289,9 @@ function buildCheckPrompt(params: EvaluateStudentAnswerParams): LovableMessage[]
   const rubricLine = params.rubricText ? `Критерии оценки: ${clampPromptText(params.rubricText)}` : "";
 
   const hasTaskImage = !!params.taskImageUrl;
-  const hasStudentImage = !!params.studentImageUrl;
+  const studentImageUrls = (params.studentImageUrls ?? []).filter(Boolean);
+  const studentImageCount = studentImageUrls.length;
+  const hasStudentImage = studentImageCount > 0;
   const answerTypeGuidance = buildAnswerTypeGuidance(params.correctAnswer, params.taskText);
 
   const systemContent = [
@@ -286,7 +299,9 @@ function buildCheckPrompt(params: EvaluateStudentAnswerParams): LovableMessage[]
     `Предмет: ${params.subject}.`,
     `Условие задачи: ${clampPromptText(params.taskText)}`,
     hasTaskImage ? "К задаче прикреплено изображение с условием — внимательно изучи его." : "",
-    hasStudentImage ? "Ученик также приложил изображение со своим рукописным решением — используй его при проверке." : "",
+    hasStudentImage
+      ? `Ученик также приложил ${studentImageCount > 1 ? `${studentImageCount} изображения` : "изображение"} со своим решением — используй ${studentImageCount > 1 ? "их" : "его"} при проверке.`
+      : "",
     `Эталонный ответ: ${correctAnswerValue}`,
     rubricLine,
     "",
@@ -358,16 +373,20 @@ function buildCheckPrompt(params: EvaluateStudentAnswerParams): LovableMessage[]
   }
 
   if (hasStudentImage) {
-    userContent.push({
-      type: "text",
-      text: hasTaskImage
-        ? "Изображение 2 — рукописное решение ученика."
-        : "Изображение выше — рукописное решение ученика.",
-    });
-    userContent.push({
-      type: "image_url",
-      image_url: { url: params.studentImageUrl as string },
-    });
+    let imageCounter = hasTaskImage ? 2 : 1;
+    for (const [index, imageUrl] of studentImageUrls.entries()) {
+      userContent.push({
+        type: "text",
+        text: !hasTaskImage && studentImageCount === 1
+          ? "Изображение выше — рукописное решение ученика."
+          : `Изображение ${imageCounter} — решение ученика${studentImageCount > 1 ? `, файл ${index + 1}` : ""}.`,
+      });
+      userContent.push({
+        type: "image_url",
+        image_url: { url: imageUrl },
+      });
+      imageCounter += 1;
+    }
   }
 
   userContent.push({
@@ -385,14 +404,18 @@ function buildCheckPrompt(params: EvaluateStudentAnswerParams): LovableMessage[]
 
 function buildHintPrompt(params: GenerateHintParams): LovableMessage[] {
   const hasTaskImage = !!params.taskImageUrl;
-  const hasStudentImage = !!params.studentImageUrl;
+  const studentImageUrls = (params.studentImageUrls ?? []).filter(Boolean);
+  const studentImageCount = studentImageUrls.length;
+  const hasStudentImage = studentImageCount > 0;
 
   const systemContent = [
     "Ты репетитор, помогаешь ученику с домашним заданием.",
     `Предмет: ${params.subject}.`,
     `Условие задачи: ${clampPromptText(params.taskText)}`,
     hasTaskImage ? "К задаче прикреплено изображение с условием — внимательно изучи его." : "",
-    hasStudentImage ? "Ученик приложил изображение своего решения — учитывай его, когда даёшь подсказку." : "",
+    hasStudentImage
+      ? `Ученик приложил ${studentImageCount > 1 ? `${studentImageCount} изображения` : "изображение"} своего решения — учитывай ${studentImageCount > 1 ? "их" : "его"}, когда даёшь подсказку.`
+      : "",
     params.correctAnswer ? `Правильный ответ (НЕ раскрывай ученику!): ${clampPromptText(params.correctAnswer)}` : "",
     "",
     `Ученик уже сделал ${params.wrongAnswerCount} неверных попыток и получил ${params.hintCount} подсказок.`,
@@ -443,16 +466,20 @@ function buildHintPrompt(params: GenerateHintParams): LovableMessage[] {
   }
 
   if (hasStudentImage) {
-    userContent.push({
-      type: "text",
-      text: hasTaskImage
-        ? "Изображение 2 — рукописное решение ученика."
-        : "Изображение выше — рукописное решение ученика.",
-    });
-    userContent.push({
-      type: "image_url",
-      image_url: { url: params.studentImageUrl as string },
-    });
+    let imageCounter = hasTaskImage ? 2 : 1;
+    for (const [index, imageUrl] of studentImageUrls.entries()) {
+      userContent.push({
+        type: "text",
+        text: !hasTaskImage && studentImageCount === 1
+          ? "Изображение выше — рукописное решение ученика."
+          : `Изображение ${imageCounter} — решение ученика${studentImageCount > 1 ? `, файл ${index + 1}` : ""}.`,
+      });
+      userContent.push({
+        type: "image_url",
+        image_url: { url: imageUrl },
+      });
+      imageCounter += 1;
+    }
   }
 
   userContent.push({
@@ -484,14 +511,14 @@ export async function evaluateStudentAnswer(
   });
 
   try {
-    const [taskImageUrl, studentImageUrl] = await Promise.all([
+    const [taskImageUrl, studentImageUrls] = await Promise.all([
       inlinePromptImageUrl(params.taskImageUrl),
-      inlinePromptImageUrl(params.studentImageUrl),
+      inlinePromptImageUrls(params.studentImageUrls),
     ]);
     const messages = buildCheckPrompt({
       ...params,
       taskImageUrl,
-      studentImageUrl,
+      studentImageUrls,
     });
     const parsed = await callLovableJson(messages, "guided_check");
     const result = sanitizeCheckResult(parsed, params.correctAnswer);
@@ -521,14 +548,14 @@ export async function generateHint(
   });
 
   try {
-    const [taskImageUrl, studentImageUrl] = await Promise.all([
+    const [taskImageUrl, studentImageUrls] = await Promise.all([
       inlinePromptImageUrl(params.taskImageUrl),
-      inlinePromptImageUrl(params.studentImageUrl),
+      inlinePromptImageUrls(params.studentImageUrls),
     ]);
     const messages = buildHintPrompt({
       ...params,
       taskImageUrl,
-      studentImageUrl,
+      studentImageUrls,
     });
     const parsed = await callLovableJson(messages, "guided_hint");
 

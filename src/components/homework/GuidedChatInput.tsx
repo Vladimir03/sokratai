@@ -6,8 +6,9 @@
 
 import { memo, useCallback, useEffect, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
-import { CheckCircle2, Loader2, MessageCircle, Paperclip, X } from 'lucide-react';
+import { CheckCircle2, FileText, Loader2, MessageCircle, Paperclip, X } from 'lucide-react';
 import { toast } from 'sonner';
+import { MAX_GUIDED_CHAT_ATTACHMENTS } from '@/lib/homeworkThreadAttachments';
 
 const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad|iPod/.test(navigator.platform);
 const modKey = isMac ? 'Cmd' : 'Ctrl';
@@ -18,9 +19,10 @@ const ALLOWED_TYPES = [
   'image/heic',
   'image/heif',
   'image/webp',
+  'application/pdf',
 ];
 const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10 MB
-const MAX_FILES = 3;
+const MAX_FILES = MAX_GUIDED_CHAT_ATTACHMENTS;
 
 function formatFileSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} Б`;
@@ -87,18 +89,25 @@ function AttachmentPreview({
   return (
     <div className="flex flex-col gap-1.5 px-3 pt-2">
       {files.map((file, index) => {
-        const objectUrl = getObjectUrl(file);
+        const isPdf = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf');
+        const objectUrl = !isPdf ? getObjectUrl(file) : null;
         return (
           <div
             key={`${file.name}-${file.size}-${file.lastModified}`}
             className="flex items-center gap-2 rounded-lg border bg-muted/30 px-2 py-1.5"
           >
             {/* Thumbnail */}
-            <img
-              src={objectUrl}
-              alt={file.name}
-              className="h-12 w-12 shrink-0 rounded object-cover"
-            />
+            {objectUrl ? (
+              <img
+                src={objectUrl}
+                alt={file.name}
+                className="h-12 w-12 shrink-0 rounded object-cover"
+              />
+            ) : (
+              <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded bg-background text-muted-foreground">
+                <FileText className="h-5 w-5" />
+              </div>
+            )}
 
             {/* File info */}
             <div className="min-w-0 flex-1">
@@ -199,18 +208,19 @@ const GuidedChatInput = memo(
         const fileList = e.target.files;
         if (!fileList) return;
 
+        let availableSlots = MAX_FILES - attachedFiles.length;
         for (let i = 0; i < fileList.length; i++) {
           const file = fileList[i];
 
           // Check max files
-          if (attachedFiles.length >= MAX_FILES) {
+          if (availableSlots <= 0) {
             toast.error(`Максимум ${MAX_FILES} вложения`);
             break;
           }
 
           // Check file type
           if (!ALLOWED_TYPES.includes(file.type) && !file.name.toLowerCase().endsWith('.heic') && !file.name.toLowerCase().endsWith('.heif')) {
-            toast.error('Поддерживаются: JPG, PNG, HEIC, WebP');
+            toast.error('Поддерживаются: JPG, PNG, HEIC, WebP, PDF');
             continue;
           }
 
@@ -221,6 +231,7 @@ const GuidedChatInput = memo(
           }
 
           onFileSelect(file);
+          availableSlots -= 1;
         }
 
         // Reset input so same file can be re-selected
@@ -266,7 +277,7 @@ const GuidedChatInput = memo(
 
         if (!ALLOWED_TYPES.includes(imageFile.type)) {
           e.preventDefault();
-          toast.error('Поддерживаются: JPG, PNG, HEIC, WebP');
+          toast.error('Поддерживаются: JPG, PNG, HEIC, WebP, PDF');
           return;
         }
 
@@ -301,7 +312,8 @@ const GuidedChatInput = memo(
           <input
             ref={fileInputRef}
             type="file"
-            accept="image/*"
+            accept="image/*,.pdf"
+            multiple
             className="hidden"
             onChange={handleFileChange}
             disabled={attachDisabled}

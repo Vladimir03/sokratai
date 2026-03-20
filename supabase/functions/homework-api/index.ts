@@ -90,6 +90,10 @@ function jsonError(
 // ─── Helpers: Validation ─────────────────────────────────────────────────────
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const MAX_THREAD_ATTACHMENTS = 3;
+const THREAD_IMAGE_EXTENSIONS = new Set(["jpg", "jpeg", "png", "webp", "heic", "heif", "gif", "bmp"]);
+const THREAD_ATTACHMENT_EXTENSIONS = new Set([...THREAD_IMAGE_EXTENSIONS, "pdf"]);
+const THREAD_ATTACHMENT_BUCKETS = new Set(["homework-submissions", "homework-images"]);
 
 function isUUID(v: unknown): v is string {
   return typeof v === "string" && UUID_RE.test(v);
@@ -117,6 +121,76 @@ function isMissingColumnError(message: string, column: string): boolean {
     lower.includes("schema cache") ||
     (lower.includes("column") && lower.includes("does not exist"))
   );
+}
+
+function hasUnsafeObjectPath(path: string): boolean {
+  return path
+    .split("/")
+    .map((segment) => segment.trim())
+    .filter(Boolean)
+    .some((segment) => (
+      segment === ".." ||
+      segment.includes("\\") ||
+      segment.includes("\0")
+    ));
+}
+
+function normalizeThreadAttachmentRefs(refs: string[]): string[] {
+  const unique = new Set<string>();
+  for (const ref of refs) {
+    const trimmed = ref.trim();
+    if (!trimmed) continue;
+    unique.add(trimmed);
+  }
+  return Array.from(unique);
+}
+
+function parseStoredThreadAttachmentRefs(value: unknown): string[] {
+  if (typeof value !== "string") return [];
+  const trimmed = value.trim();
+  if (!trimmed) return [];
+
+  if (trimmed.startsWith("[")) {
+    try {
+      const parsed = JSON.parse(trimmed);
+      if (!Array.isArray(parsed)) return [];
+      return normalizeThreadAttachmentRefs(
+        parsed.filter((item): item is string => typeof item === "string"),
+      );
+    } catch {
+      return [];
+    }
+  }
+
+  return [trimmed];
+}
+
+function serializeThreadAttachmentRefs(refs: string[]): string | null {
+  const normalized = normalizeThreadAttachmentRefs(refs);
+  if (normalized.length === 0) return null;
+  if (normalized.length === 1) return normalized[0];
+  return JSON.stringify(normalized);
+}
+
+function getThreadAttachmentExtension(value: string): string {
+  const trimmed = value.trim();
+  const rawPath = trimmed.startsWith("storage://")
+    ? trimmed.slice("storage://".length).split("/").slice(1).join("/")
+    : (() => {
+      try {
+        return new URL(trimmed).pathname;
+      } catch {
+        return trimmed;
+      }
+    })();
+  const cleanPath = rawPath.split("?")[0].split("#")[0];
+  const lastSegment = cleanPath.split("/").filter(Boolean).pop() ?? "";
+  const dotIdx = lastSegment.lastIndexOf(".");
+  return dotIdx >= 0 ? lastSegment.slice(dotIdx + 1).toLowerCase() : "";
+}
+
+function isImageThreadAttachmentRef(value: string): boolean {
+  return THREAD_IMAGE_EXTENSIONS.has(getThreadAttachmentExtension(value));
 }
 
 async function parseJsonBody(req: Request): Promise<unknown> {
@@ -2323,16 +2397,89 @@ function parseStorageRef(
     if (slashIdx <= 0 || slashIdx === rest.length - 1) {
       return null;
     }
+    const objectPath = rest.slice(slashIdx + 1).replace(/^\/+/, "");
+    if (!objectPath || hasUnsafeObjectPath(objectPath)) {
+      return null;
+    }
     return {
       bucket: rest.slice(0, slashIdx),
-      objectPath: rest.slice(slashIdx + 1).replace(/^\/+/, ""),
+      objectPath,
     };
+  }
+
+  if (hasUnsafeObjectPath(trimmed)) {
+    return null;
   }
 
   return {
     bucket: defaultBucket,
     objectPath: trimmed.replace(/^\/+/, ""),
   };
+}
+
+function isValidStudentThreadAttachmentRef(
+  storageRef: string,
+  userId: string,
+  assignmentId: string,
+): boolean {
+  if (!storageRef.trim().startsWith("storage://")) {
+    return false;
+  }
+
+  const parsed = parseStorageRef(storageRef, "homework-submissions");
+  if (!parsed?.bucket || !parsed.objectPath) {
+    return false;
+  }
+
+  if (!THREAD_ATTACHMENT_BUCKETS.has(parsed.bucket)) {
+    return false;
+  }
+
+  if (hasUnsafeObjectPath(parsed.objectPath)) {
+    return false;
+  }
+
+  const extension = getThreadAttachmentExtension(storageRef);
+  if (!THREAD_ATTACHMENT_EXTENSIONS.has(extension)) {
+    return false;
+  }
+
+  return parsed.objectPath.startsWith(`${userId}/${assignmentId}/threads/`);
+}
+
+function extractStudentThreadAttachmentRefs(
+  body: Record<string, unknown>,
+  userId: string,
+  assignmentId: string,
+  cors: Record<string, string>,
+): string[] | Response {
+  let refs: string[] = [];
+
+  if (Array.isArray(body.image_urls) && body.image_urls.length > 0) {
+    if (!body.image_urls.every((item) => typeof item === "string")) {
+      return jsonError(cors, 400, "INVALID_ATTACHMENT_REF", "image_urls must be an array of strings");
+    }
+    refs = normalizeThreadAttachmentRefs(body.image_urls as string[]);
+  } else {
+    refs = parseStoredThreadAttachmentRefs(body.image_url);
+  }
+
+  if (refs.length > MAX_THREAD_ATTACHMENTS) {
+    return jsonError(
+      cors,
+      400,
+      "TOO_MANY_ATTACHMENTS",
+      `Maximum ${MAX_THREAD_ATTACHMENTS} attachments are allowed`,
+    );
+  }
+
+  for (const ref of refs) {
+    if (!isValidStudentThreadAttachmentRef(ref, userId, assignmentId)) {
+      return jsonError(cors, 400, "INVALID_ATTACHMENT_REF", "Invalid attachment reference");
+    }
+  }
+
+  return refs;
 }
 
 async function createSignedStorageUrl(
@@ -2361,11 +2508,13 @@ async function createSignedStorageUrl(
   return data.signedUrl;
 }
 
-async function loadLatestStudentImageUrlForTask(
+async function loadLatestStudentImageUrlsForTask(
   db: SupabaseClient,
   threadId: string,
   taskOrder: number,
-): Promise<string | null> {
+  userId: string,
+  assignmentId: string,
+): Promise<string[]> {
   const { data: latestMsg, error } = await db
     .from("homework_tutor_thread_messages")
     .select("image_url")
@@ -2383,37 +2532,45 @@ async function loadLatestStudentImageUrlForTask(
       taskOrder,
       error: error.message,
     });
-    return null;
+    return [];
   }
 
-  const imageRef = typeof latestMsg?.image_url === "string" ? latestMsg.image_url.trim() : "";
-  if (!imageRef) return null;
-  if (imageRef.startsWith("http://")) {
-    console.warn("homework_api_latest_student_image_rejected", {
-      reason: "non_https_url",
-      threadId,
-      taskOrder,
-    });
-    return null;
-  }
-  if (imageRef.startsWith("https://")) {
-    const supabaseUrl = Deno.env.get("SUPABASE_URL");
-    const isAllowedSignedUrl = Boolean(
-      supabaseUrl &&
-      imageRef.startsWith(`${supabaseUrl}/storage/v1/object/sign/`),
-    );
-    if (isAllowedSignedUrl) {
-      return imageRef;
+  const imageRefs = parseStoredThreadAttachmentRefs(latestMsg?.image_url)
+    .filter(isImageThreadAttachmentRef)
+    .filter((ref) => isValidStudentThreadAttachmentRef(ref, userId, assignmentId));
+
+  if (imageRefs.length === 0) return [];
+
+  const signedUrls = await Promise.all(imageRefs.map(async (imageRef) => {
+    if (imageRef.startsWith("http://")) {
+      console.warn("homework_api_latest_student_image_rejected", {
+        reason: "non_https_url",
+        threadId,
+        taskOrder,
+      });
+      return null;
     }
-    console.warn("homework_api_latest_student_image_rejected", {
-      reason: "external_https_url",
-      threadId,
-      taskOrder,
-    });
-    return null;
-  }
+    if (imageRef.startsWith("https://")) {
+      const supabaseUrl = Deno.env.get("SUPABASE_URL");
+      const isAllowedSignedUrl = Boolean(
+        supabaseUrl &&
+        imageRef.startsWith(`${supabaseUrl}/storage/v1/object/sign/`),
+      );
+      if (isAllowedSignedUrl) {
+        return imageRef;
+      }
+      console.warn("homework_api_latest_student_image_rejected", {
+        reason: "external_https_url",
+        threadId,
+        taskOrder,
+      });
+      return null;
+    }
 
-  return await createSignedStorageUrl(db, imageRef, "homework-submissions");
+    return await createSignedStorageUrl(db, imageRef, "homework-submissions");
+  }));
+
+  return signedUrls.filter((value): value is string => Boolean(value));
 }
 
 // ─── Helper: resolve task image URL to an AI-compatible data URL ─────────────
@@ -2775,7 +2932,10 @@ async function verifyThreadOwnership(
   threadId: string,
   userId: string,
   cors: Record<string, string>,
-): Promise<{ thread: Record<string, unknown> } | Response> {
+): Promise<{
+  thread: Record<string, unknown>;
+  studentAssignment: { id: string; assignment_id: string; student_id: string };
+} | Response> {
   if (!isUUID(threadId)) {
     return jsonError(cors, 400, "VALIDATION", "Invalid thread ID");
   }
@@ -2792,7 +2952,7 @@ async function verifyThreadOwnership(
 
   const { data: sa } = await db
     .from("homework_tutor_student_assignments")
-    .select("student_id")
+    .select("id, assignment_id, student_id")
     .eq("id", thread.student_assignment_id)
     .single();
 
@@ -2800,7 +2960,10 @@ async function verifyThreadOwnership(
     return jsonError(cors, 403, "FORBIDDEN", "Not your thread");
   }
 
-  return { thread: thread as Record<string, unknown> };
+  return {
+    thread: thread as Record<string, unknown>,
+    studentAssignment: sa as { id: string; assignment_id: string; student_id: string },
+  };
 }
 
 async function handlePostThreadMessage(
@@ -2812,7 +2975,7 @@ async function handlePostThreadMessage(
 ): Promise<Response> {
   const ownershipResult = await verifyThreadOwnership(db, threadId, userId, cors);
   if (ownershipResult instanceof Response) return ownershipResult;
-  const { thread } = ownershipResult;
+  const { thread, studentAssignment } = ownershipResult;
 
   if (!body || typeof body !== "object") {
     return jsonError(cors, 400, "INVALID_BODY", "Request body must be a JSON object");
@@ -2823,9 +2986,11 @@ async function handlePostThreadMessage(
     return jsonError(cors, 400, "VALIDATION", "content is required (non-empty string)");
   }
   const role = b.role === "assistant" ? "assistant" : "user";
-  const imageUrl = typeof b.image_url === "string" && b.image_url.trim().startsWith("storage://")
-    ? b.image_url.trim()
-    : null;
+  const attachmentRefs = role === "user"
+    ? extractStudentThreadAttachmentRefs(b, userId, studentAssignment.assignment_id, cors)
+    : [];
+  if (attachmentRefs instanceof Response) return attachmentRefs;
+  const serializedAttachments = serializeThreadAttachmentRefs(attachmentRefs);
   const taskOrder = typeof b.task_order === "number" ? b.task_order : (thread.current_task_order as number);
   const messageKindRaw = isString(b.message_kind) ? (b.message_kind as string).trim() : "";
   const validMessageKinds = new Set(["answer", "hint_request", "question", "ai_reply", "system"]);
@@ -2854,7 +3019,7 @@ async function handlePostThreadMessage(
     thread_id: threadId,
     role,
     content: b.content,
-    image_url: imageUrl,
+    image_url: serializedAttachments,
     task_order: taskOrder,
     message_kind: messageKind,
   };
@@ -2862,7 +3027,7 @@ async function handlePostThreadMessage(
     thread_id: threadId,
     role,
     content: b.content,
-    image_url: imageUrl,
+    image_url: serializedAttachments,
     task_order: taskOrder,
   };
 
@@ -2931,7 +3096,7 @@ async function handleAdvanceTask(
 ): Promise<Response> {
   const ownershipResult = await verifyThreadOwnership(db, threadId, userId, cors);
   if (ownershipResult instanceof Response) return ownershipResult;
-  const { thread } = ownershipResult;
+  const { thread, studentAssignment } = ownershipResult;
 
   if (thread.status === "completed") {
     return jsonError(cors, 400, "ALREADY_COMPLETED", "Thread is already completed");
@@ -3237,7 +3402,7 @@ async function handleCheckAnswer(
 ): Promise<Response> {
   const ownershipResult = await verifyThreadOwnership(db, threadId, userId, cors);
   if (ownershipResult instanceof Response) return ownershipResult;
-  const { thread } = ownershipResult;
+  const { thread, studentAssignment } = ownershipResult;
 
   if (thread.status === "completed") {
     return jsonError(cors, 400, "ALREADY_COMPLETED", "Thread is already completed");
@@ -3249,9 +3414,9 @@ async function handleCheckAnswer(
     return jsonError(cors, 400, "VALIDATION", "answer is required");
   }
   const requestedTaskOrder = typeof b.task_order === "number" ? b.task_order : undefined;
-  const imageUrl = typeof b.image_url === "string" && b.image_url.trim().startsWith("storage://")
-    ? b.image_url.trim()
-    : null;
+  const attachmentRefs = extractStudentThreadAttachmentRefs(b, userId, studentAssignment.assignment_id, cors);
+  if (attachmentRefs instanceof Response) return attachmentRefs;
+  const serializedAttachments = serializeThreadAttachmentRefs(attachmentRefs);
 
   // Load advance context
   const ctx = await loadAdvanceContext(db, threadId, thread, requestedTaskOrder);
@@ -3305,7 +3470,7 @@ async function handleCheckAnswer(
     content: answer,
     task_order: currentOrder,
     message_kind: "answer",
-    ...(imageUrl && { image_url: imageUrl }),
+    ...(serializedAttachments && { image_url: serializedAttachments }),
   });
 
   // Update last_student_message_at
@@ -3324,7 +3489,13 @@ async function handleCheckAnswer(
 
   // Resolve task image into an AI-compatible data URL and latest student image into a signed URL
   const taskImageSignedUrl = await resolveTaskImageUrlForAI(db, task.task_image_url);
-  const studentImageUrl = await loadLatestStudentImageUrlForTask(db, threadId, currentOrder);
+  const studentImageUrls = await loadLatestStudentImageUrlsForTask(
+    db,
+    threadId,
+    currentOrder,
+    userId,
+    studentAssignment.assignment_id,
+  );
 
   // Call AI evaluation
   const totalTasks = tasks.length;
@@ -3332,7 +3503,7 @@ async function handleCheckAnswer(
     studentAnswer: answer,
     taskText: task.task_text ?? "",
     taskImageUrl: taskImageSignedUrl,
-    studentImageUrl,
+    studentImageUrls,
     correctAnswer: task.correct_answer,
     rubricText: task.rubric_text,
     subject: assignment.subject ?? "math",
@@ -3477,7 +3648,7 @@ async function handleRequestHint(
 ): Promise<Response> {
   const ownershipResult = await verifyThreadOwnership(db, threadId, userId, cors);
   if (ownershipResult instanceof Response) return ownershipResult;
-  const { thread } = ownershipResult;
+  const { thread, studentAssignment } = ownershipResult;
 
   if (thread.status === "completed") {
     return jsonError(cors, 400, "ALREADY_COMPLETED", "Thread is already completed");
@@ -3556,13 +3727,19 @@ async function handleRequestHint(
 
   // Resolve task image into an AI-compatible data URL and latest student image into a signed URL
   const hintTaskImageUrl = await resolveTaskImageUrlForAI(db, task.task_image_url);
-  const studentImageUrl = await loadLatestStudentImageUrlForTask(db, threadId, currentOrder);
+  const studentImageUrls = await loadLatestStudentImageUrlsForTask(
+    db,
+    threadId,
+    currentOrder,
+    userId,
+    studentAssignment.assignment_id,
+  );
 
   // Call AI for hint
   const hintResult = await generateHint({
     taskText: task.task_text ?? "",
     taskImageUrl: hintTaskImageUrl,
-    studentImageUrl,
+    studentImageUrls,
     correctAnswer: task.correct_answer,
     subject: assignment?.subject ?? "math",
     conversationHistory: recentMessages ?? [],

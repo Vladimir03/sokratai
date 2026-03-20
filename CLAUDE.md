@@ -190,9 +190,9 @@ Legacy student-only система (`homework_sets`, `homework_tasks`, `homework
 - Убран лишний клик «Показать переписку» — тред загружается автоматически при раскрытии ученика
 - `enabled` prop контролирует lazy-loading запроса (на Results-странице — по expand ученика)
 - Сообщения рендерятся через `MathText` (LaTeX формулы в AI/tutor сообщениях)
-- `MessageImage` компонент резолвит `storage://` refs через `getHomeworkImageSignedUrl` для отображения вложений
+- `ThreadAttachments` резолвит `storage://` refs через signed URLs и отображает как изображения или file cards
 - Репетитор может прикрепить изображение к сообщению (upload через `uploadTutorHomeworkTaskImage`, ref сохраняется в `image_url`)
-- Student-side `GuidedChatMessage` тоже отображает `image_url` через `MessageAttachment` (резолвит через `getStudentTaskImageSignedUrl`)
+- Student-side `GuidedChatMessage` тоже отображает `image_url` через `ThreadAttachments` (резолвит через `getStudentTaskImageSignedUrl`)
 - Backend `handleTutorPostMessage` принимает optional `image_url` в body
 
 ### Guided chat media upload — Phase 1 (2026-03-20)
@@ -201,21 +201,21 @@ Legacy student-only система (`homework_sets`, `homework_tasks`, `homework
 - Phase 1 покрывает только transport/persist layer; student upload UI, Storage upload и передача student image в AI остаются в следующих фазах
 
 ### Guided chat media upload — Phase 2 (2026-03-20)
-- **GuidedChatInput.tsx** — кнопка 📎 (Paperclip) слева от textarea, hidden `<input type="file" accept="image/*">`, `AttachmentPreview` компонент (thumbnail 48px, имя, размер, ✕/spinner)
-- Валидация: JPG/PNG/HEIC/WebP, ≤ 10 МБ, max 3 файла. PDF убран (MessageAttachment рендерит только `<img>`)
+- **GuidedChatInput.tsx** — кнопка 📎 (Paperclip) слева от textarea, hidden `<input type="file" accept="image/*,.pdf" multiple>`, `AttachmentPreview` компонент (thumbnail/file card 48px, имя, размер, ✕/spinner)
+- Валидация: JPG/PNG/HEIC/WebP/PDF, ≤ 10 МБ, max 3 файла
 - `URL.revokeObjectURL` cleanup при unmount и remove файла
-- **GuidedHomeworkWorkspace.tsx** — `attachedFiles` / `isUploading` state, file handlers, `sendUserMessage(text, mode, files?)` с upload flow
+- **GuidedHomeworkWorkspace.tsx** — `attachedFiles` / `isUploading` state, file handlers, `sendUserMessage(text, mode, files?)` с multi-upload flow
 - `isUploading` добавлен в race guard (`controlsDisabled`, `handleTaskClick`)
-- `content = '(фото)'` если текст пустой, но есть файл
+- `content` для file-only сообщений строится через placeholder (`(фото)`, `(PDF)`, `(вложения xN)`)
 - **studentHomeworkApi.ts** — `uploadStudentThreadImage(file, assignmentId, threadId, taskOrder)` → upload в `homework-submissions` bucket, path `{studentId}/{assignmentId}/threads/{taskOrder}/{fileId}.{ext}`, возвращает `storage://` ref
 - ID файла: `Date.now()-Math.random()` (не `crypto.randomUUID` — Safari < 15.4)
-- **answer+image end-to-end**: `checkAnswer()` принимает optional `imageUrl`, backend `handleCheckAnswer` парсит `image_url` из body и сохраняет в `homework_tutor_thread_messages`
-- **retry+image**: retry failed user message передаёт `image_url` из сохранённого сообщения, не теряет вложение
-- Phase 2 покрывает UI + upload + persist; Phase 4 доводит `student image -> AI` для `answer`, `hint` и `question`, при этом `bootstrap` по дизайну остаётся без student image
+- **answer+image end-to-end**: `checkAnswer()` принимает attachment refs, backend `handleCheckAnswer` валидирует student path ownership и сохраняет serialized attachments в `homework_tutor_thread_messages`
+- **retry+image**: retry failed user message передаёт serialized `image_url` из сохранённого сообщения, не теряет вложения
+- AI path использует latest student images для `answer`, `hint` и `question`; PDF сохраняется и отображается, но в AI пока не передаётся
 
 ### Guided chat media upload — Phase 5 (2026-03-20)
 - **5.1 Clipboard paste**: `onPaste` handler на container div в `GuidedChatInput.tsx`. Перехватывает image paste через `clipboardData.files` с fallback на `clipboardData.items` + `getAsFile()` (Safari/Firefox). Text paste не перехватывается. `preventDefault()` вызывается только после успешной валидации (type/size/max files)
-- **5.2 Mobile camera**: `<input type="file" accept="image/*">` — native file picker на iOS/Android предлагает камеру (Variant A). Bottom sheet (Variant B) отложен в P1
+- **5.2 Mobile camera**: `<input type="file" accept="image/*,.pdf" multiple>` — native file picker на iOS/Android предлагает камеру/галерею/документ picker. Bottom sheet (Variant B) отложен в P1
 - **touch-action: manipulation** добавлен на все interactive элементы: 📎, Шаг, Ответ, ✕ (remove attachment) — предотвращает 300ms tap delay на iOS Safari
 - **НЕ реализовано (P1)**: bottom sheet, drag-and-drop, HEIC конвертация, image compression
 
@@ -247,7 +247,7 @@ Legacy student-only система (`homework_sets`, `homework_tasks`, `homework
 **Четыре пути к AI в guided chat** (все должны передавать изображение корректно):
 - `answer` → `handleCheckAnswer` → `evaluateStudentAnswer` в `guided_ai.ts` (task image resolved в `index.ts`, latest student image resolved в signed URL и inline-ится в `guided_ai.ts`)
 - `hint` → `handleRequestHint` → `generateHint` в `guided_ai.ts` (task image resolved в `index.ts`, latest student image resolved в signed URL и inline-ится в `guided_ai.ts`)
-- `question` → `streamChat()` → `/functions/v1/chat` (resolved на фронтенде, передаются `taskImageUrl` и optional `studentImageUrl`, затем backend inline-ит их в base64/data URL)
+- `question` → `streamChat()` → `/functions/v1/chat` (resolved на фронтенде, передаются `taskImageUrl` и optional `studentImageUrls`, затем backend inline-ит их в base64/data URL)
 - `bootstrap` → `streamChat()` → `/functions/v1/chat` (resolved на фронтенде, передаётся только `taskImageUrl`; student image на intro не передаётся по дизайну)
 
 При добавлении нового пути к AI с изображениями — проверить ВСЕ вызывающие точки, не только основную.
