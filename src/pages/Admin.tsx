@@ -287,6 +287,10 @@ const Admin = () => {
             <AdminCRM />
           </TabsContent>
 
+          <TabsContent value="homework">
+            <AdminHomeworkChats />
+          </TabsContent>
+
           <TabsContent value="payments">
             <AdminPayments />
           </TabsContent>
