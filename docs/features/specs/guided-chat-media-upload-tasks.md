@@ -18,7 +18,7 @@
 
 **Рекомендация:** начать с Phase 1 (backend) → Phase 3 (upload) → Phase 2 (UI) → Phase 4 (AI) → Phase 5 (polish).
 
-**Статус на 2026-03-20:** Phase 1 и Phase 2 реализованы (включая upload pipeline из Phase 3). Phase 3 (Storage bucket policies), Phase 4 (AI integration), Phase 5 (clipboard paste, DnD) остаются в backlog.
+**Статус на 2026-03-20:** Phase 1, Phase 2 и Phase 3.1 реализованы. Review follow-up также выровнял classic upload с Safari-safe ID generation и сохранил fallback guided upload на legacy `homework-images` bucket. В backlog остаются только Phase 4 (AI integration) и Phase 5 (clipboard paste, DnD/mobile polish).
 
 ---
 

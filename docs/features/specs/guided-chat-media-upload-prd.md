@@ -3,7 +3,7 @@
 **Продукт:** Сократ
 **Автор:** Vladimir / UX-аудит
 **Версия:** v0.1
-**Статус:** draft
+**Статус:** in progress (Phase 1-3 implemented, Phase 4-5 pending)
 **Дата:** 2026-03-20
 **Тип задачи:** A — новая фича
 
@@ -15,7 +15,7 @@
 
 **Фича:** добавить мультимодальный ввод (текст + изображение/PDF) в `GuidedChatInput` и провести изображение через весь pipeline: загрузка → хранение → отображение → передача в AI.
 
-**Статус на 2026-03-20:** реализован только Phase 1 — backend `POST /threads/:id/messages` принимает optional `image_url`, а client `saveThreadMessage()` передаёт `image_url` в request body. UI загрузки, storage upload и AI integration остаются в следующих фазах.
+**Статус на 2026-03-20:** реализованы Phase 1, Phase 2 и Phase 3 для image upload/persist flow. Student guided chat уже умеет выбрать изображение, показать preview, загрузить файл в Storage и сохранить `image_url` в сообщении. AI integration (Phase 4), clipboard paste и mobile polish (Phase 5) остаются в следующих фазах.
 
 ---
 
@@ -81,8 +81,8 @@ Wedge: «быстро собрать ДЗ и новую практику по т
 ### Что нужно добавить
 | Компонент | Статус | Что делать |
 |-----------|--------|------------|
-| UI загрузки в `GuidedChatInput` | ❌ Нет | Кнопка 📎 + превью + clear |
-| Student upload function для guided chat | ❌ Нет | Новая функция (по паттерну `uploadStudentHomeworkFiles`) |
+| UI загрузки в `GuidedChatInput` | ✅ Phase 2 | Кнопка 📎, preview, remove, upload/error states |
+| Student upload function для guided chat | ✅ Phase 3 | `uploadStudentThreadImage()` загружает в Storage и возвращает `storage://...` ref |
 | `saveThreadMessage()` с `image_url` | ✅ Phase 1 | `saveThreadMessage()` принимает optional `imageUrl` и передаёт `image_url` в body |
 | Backend: `POST /threads/:id/messages` | ✅ Phase 1 | Student `handlePostThreadMessage` принимает optional `image_url`, валидирует `storage://` и сохраняет в `homework_tutor_thread_messages` |
 | Передача student image в AI | ❌ Нет | Расширить `evaluateStudentAnswer` + `streamChat` |
@@ -228,7 +228,7 @@ Wedge: «быстро собрать ДЗ и новую практику по т
 ```
 Student selects file
   → [Client] validate: type (jpg/png/heic/pdf), size (≤ 10 MB)
-  → [Client] generate path: {studentId}/{assignmentId}/threads/{threadId}/{taskOrder}/{uuid}.{ext}
+  → [Client] generate path: {studentId}/{assignmentId}/threads/{taskOrder}/{uuid}.{ext}
   → [Client] supabase.storage.from('homework-submissions').upload(path, file)
   → [Client] returns storageRef: 'storage://homework-submissions/...'
 ```
@@ -274,25 +274,28 @@ Student selects file
 
 ## 12. Acceptance Criteria
 
-### Реализовано в Phase 1
+### Реализовано в Phase 1-3
 - [x] `POST /threads/:id/messages` принимает optional `image_url`
 - [x] `saveThreadMessage()` передаёт `image_url` в backend
 - [x] Вызовы без `image_url` остаются backward compatible
+- [x] `uploadStudentThreadImage()` загружает student image в Storage и возвращает `storage://...` ref
+- [x] Upload pipeline использует `getSession()` и Safari-safe ID без `crypto.randomUUID()`
+- [x] Guided upload сохраняет fallback на legacy `homework-images` bucket, если `homework-submissions` недоступен
 
 ### P0 (Must Have)
 - [ ] Ученик может прикрепить 1-3 изображения к сообщению в guided chat
-- [ ] Превью вложения показывается над полем ввода
-- [ ] Ученик может удалить вложение до отправки
-- [ ] Фото отправляется с текстом или без текста
-- [ ] Фото отображается в чате как thumbnail (кликабельный → zoom)
-- [ ] Репетитор видит фото ученика в GuidedThreadViewer (уже работает через MessageImage)
+- [x] Превью вложения показывается над полем ввода
+- [x] Ученик может удалить вложение до отправки
+- [x] Фото отправляется с текстом или без текста
+- [x] Фото отображается в чате как thumbnail (кликабельный → zoom)
+- [x] Репетитор видит фото ученика в GuidedThreadViewer (уже работает через MessageImage)
 - [ ] Clipboard paste (Ctrl+V) работает на десктопе
 - [ ] Камера доступна на мобильном (input capture)
-- [ ] Кнопки send disabled во время загрузки файла
+- [x] Кнопки send disabled во время загрузки файла
 - [ ] AI получает фото ученика при проверке ответа
 - [ ] AI получает фото ученика при обсуждении (question mode)
-- [ ] File size > 10 МБ → error toast
-- [ ] Unsupported format → error toast
+- [x] File size > 10 МБ → error toast
+- [x] Unsupported format → error toast
 
 ### P1 (Should Have)
 - [ ] Bottom sheet на мобильном (Камера / Галерея / Документ)

@@ -145,6 +145,10 @@ function toStorageRef(bucket: string, objectPath: string): string {
   return `${STORAGE_REF_PREFIX}${bucket}/${objectPath}`;
 }
 
+function generateStorageObjectId(): string {
+  return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
 function sanitizeObjectPath(path: string): string {
   return path.replace(/^\/+/, '').trim();
 }
@@ -407,7 +411,7 @@ export async function uploadStudentHomeworkFiles(
   for (const file of files) {
     const isPdf = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf');
     const ext = isPdf ? 'pdf' : (file.name.split('.').pop()?.toLowerCase() || 'jpg');
-    const fileId = crypto.randomUUID();
+    const fileId = generateStorageObjectId();
     const primaryObjectPath = `${studentId}/${assignmentId}/${submissionId}/${taskId}/${fileId}.${ext}`;
     const contentType = file.type || (isPdf ? 'application/pdf' : 'application/octet-stream');
 
@@ -678,15 +682,19 @@ export async function getStudentThreadByAssignment(
 export async function uploadStudentThreadImage(
   file: File,
   assignmentId: string,
-  threadId: string,
+  _threadId: string,
   taskOrder: number,
 ): Promise<string> {
-  const studentId = await getCurrentUserId();
-  const isPdf = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf');
-  const ext = isPdf ? 'pdf' : (file.name.split('.').pop()?.toLowerCase() || 'jpg');
-  const fileId = `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+  const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
+  if (sessionError) {
+    throw new StudentHomeworkApiError(sessionError.message);
+  }
+
+  const studentId = ensureUserId(sessionData.session?.user?.id);
+  const ext = file.name.split('.').pop()?.toLowerCase() || 'jpg';
+  const fileId = generateStorageObjectId();
   const objectPath = `${studentId}/${assignmentId}/threads/${taskOrder}/${fileId}.${ext}`;
-  const contentType = file.type || (isPdf ? 'application/pdf' : 'application/octet-stream');
+  const contentType = file.type || 'application/octet-stream';
 
   const { error: primaryError } = await supabase.storage
     .from(HOMEWORK_SUBMISSIONS_BUCKET)
@@ -696,7 +704,6 @@ export async function uploadStudentThreadImage(
     return toStorageRef(HOMEWORK_SUBMISSIONS_BUCKET, objectPath);
   }
 
-  // Fallback to homework-images bucket if homework-submissions not yet created
   const isBucketMissing =
     primaryError.message?.toLowerCase().includes('bucket not found') ||
     (primaryError as unknown as { statusCode?: number }).statusCode === 404;
