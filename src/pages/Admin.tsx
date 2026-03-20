@@ -18,7 +18,7 @@ import { AdminPayments } from "@/components/admin/AdminPayments";
 import { AdminHomeworkChats } from "@/components/admin/AdminHomeworkChats";
 import { AdminSegmentsChart, SegmentsData } from "@/components/admin/AdminSegmentsChart";
 import { AdminTopUsers, TopUser } from "@/components/admin/AdminTopUsers";
-import { ArrowLeft, RefreshCw, Shield, CalendarIcon, BarChart3, MessageSquare, CreditCard } from "lucide-react";
+import { ArrowLeft, RefreshCw, Shield, CalendarIcon, BarChart3, MessageSquare, CreditCard, BookOpen } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 interface CohortRetentionData {
