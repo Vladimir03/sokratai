@@ -2717,7 +2717,9 @@ async function handlePostThreadMessage(
     return jsonError(cors, 400, "VALIDATION", "content is required (non-empty string)");
   }
   const role = b.role === "assistant" ? "assistant" : "user";
-  const imageUrl = isString(b.image_url) ? (b.image_url as string) : null;
+  const imageUrl = typeof b.image_url === "string" && b.image_url.trim().startsWith("storage://")
+    ? b.image_url.trim()
+    : null;
   const taskOrder = typeof b.task_order === "number" ? b.task_order : (thread.current_task_order as number);
   const messageKindRaw = isString(b.message_kind) ? (b.message_kind as string).trim() : "";
   const validMessageKinds = new Set(["answer", "hint_request", "question", "ai_reply", "system"]);

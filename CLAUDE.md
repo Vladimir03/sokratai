@@ -195,6 +195,11 @@ Legacy student-only система (`homework_sets`, `homework_tasks`, `homework
 - Student-side `GuidedChatMessage` тоже отображает `image_url` через `MessageAttachment` (резолвит через `getStudentTaskImageSignedUrl`)
 - Backend `handleTutorPostMessage` принимает optional `image_url` в body
 
+### Guided chat media upload — Phase 1 (2026-03-20)
+- Student backend `handlePostThreadMessage` принимает optional `image_url`, принимает только `storage://...` refs и сохраняет `image_url` в `homework_tutor_thread_messages`
+- `saveThreadMessage()` в `src/lib/studentHomeworkApi.ts` принимает optional `imageUrl` и отправляет его как `image_url` в `POST /threads/:id/messages`
+- Phase 1 покрывает только transport/persist layer; student upload UI, Storage upload и передача student image в AI остаются в следующих фазах
+
 ### Таблицы БД
 - `homework_tutor_assignments` — задания (draft/active/archived, workflow_mode)
 - `homework_tutor_tasks` — задачи внутри заданий

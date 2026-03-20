@@ -680,6 +680,7 @@ export async function saveThreadMessage(
   content: string,
   taskOrder?: number,
   messageKind?: GuidedMessageKind,
+  imageUrl?: string,
 ): Promise<{ id: string }> {
   return requestStudentHomeworkApi<{ id: string }>(
     `/threads/${encodeURIComponent(threadId)}/messages`,
@@ -690,6 +691,7 @@ export async function saveThreadMessage(
         role,
         task_order: taskOrder,
         message_kind: messageKind,
+        image_url: imageUrl,
       }),
     },
   );
