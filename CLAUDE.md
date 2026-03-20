@@ -213,6 +213,12 @@ Legacy student-only система (`homework_sets`, `homework_tasks`, `homework
 - **retry+image**: retry failed user message передаёт `image_url` из сохранённого сообщения, не теряет вложение
 - Phase 2 покрывает UI + upload + persist; Phase 4 доводит `student image -> AI` для `answer`, `hint` и `question`, при этом `bootstrap` по дизайну остаётся без student image
 
+### Guided chat media upload — Phase 5 (2026-03-20)
+- **5.1 Clipboard paste**: `onPaste` handler на container div в `GuidedChatInput.tsx`. Перехватывает image paste через `clipboardData.files` с fallback на `clipboardData.items` + `getAsFile()` (Safari/Firefox). Text paste не перехватывается. `preventDefault()` вызывается только после успешной валидации (type/size/max files)
+- **5.2 Mobile camera**: `<input type="file" accept="image/*">` — native file picker на iOS/Android предлагает камеру (Variant A). Bottom sheet (Variant B) отложен в P1
+- **touch-action: manipulation** добавлен на все interactive элементы: 📎, Шаг, Ответ, ✕ (remove attachment) — предотвращает 300ms tap delay на iOS Safari
+- **НЕ реализовано (P1)**: bottom sheet, drag-and-drop, HEIC конвертация, image compression
+
 ### Таблицы БД
 - `homework_tutor_assignments` — задания (draft/active/archived, workflow_mode)
 - `homework_tutor_tasks` — задачи внутри заданий

@@ -18,7 +18,7 @@
 
 **Рекомендация:** начать с Phase 1 (backend) → Phase 3 (upload) → Phase 2 (UI) → Phase 4 (AI) → Phase 5 (polish).
 
-**Статус на 2026-03-20:** Phase 1, Phase 2, Phase 3.1 и Phase 4 реализованы. Review follow-up также выровнял classic upload с Safari-safe ID generation, сохранил fallback guided upload на legacy `homework-images` bucket, ужесточил backend validation для student image URL и убрал вывод signed URL в логах. В backlog остаётся только Phase 5 (clipboard paste, DnD/mobile polish).
+**Статус на 2026-03-20:** Все фазы (Phase 1–5) реализованы. Phase 5: clipboard paste (Ctrl+V) с fallback `clipboardData.items` для Safari/Firefox, mobile camera через native file picker (Variant A), `touch-action: manipulation` на всех кнопках. В P1 backlog: bottom sheet, drag-and-drop, HEIC конвертация, image compression.
 
 ---
 
@@ -491,10 +491,10 @@ const handlePaste = (e: React.ClipboardEvent) => {
 ```
 
 **Acceptance criteria:**
-- [ ] Ctrl+V / Cmd+V с изображением в буфере → прикрепляет файл
-- [ ] Ctrl+V с текстом → вставляет текст (не перехватывает)
-- [ ] Работает в Chrome, Safari desktop, Firefox
-- [ ] На мобильном: не ломает обычный paste текста
+- [x] Ctrl+V / Cmd+V с изображением в буфере → прикрепляет файл
+- [x] Ctrl+V с текстом → вставляет текст (не перехватывает)
+- [x] Работает в Chrome, Safari desktop, Firefox
+- [x] На мобильном: не ломает обычный paste текста
 
 ---
 
@@ -519,9 +519,9 @@ const handlePaste = (e: React.ClipboardEvent) => {
 **Рекомендация:** Вариант A для Phase 5. Вариант B — отдельная задача P1.
 
 **Acceptance criteria:**
-- [ ] На мобильном файловый picker включает опцию камеры (native behavior)
-- [ ] Фото с камеры прикрепляется как обычный файл
-- [ ] Работает в Safari iOS и Chrome Android
+- [x] На мобильном файловый picker включает опцию камеры (native behavior)
+- [x] Фото с камеры прикрепляется как обычный файл
+- [x] Работает в Safari iOS и Chrome Android
 
 ---
 

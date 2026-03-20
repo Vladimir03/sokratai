@@ -15,7 +15,7 @@
 
 **Фича:** добавить мультимодальный ввод (текст + изображение/PDF) в `GuidedChatInput` и провести изображение через весь pipeline: загрузка → хранение → отображение → передача в AI.
 
-**Статус на 2026-03-20:** реализованы Phase 1, Phase 2 и Phase 3 для image upload/persist flow. Student guided chat уже умеет выбрать изображение, показать preview, загрузить файл в Storage и сохранить `image_url` в сообщении. AI integration (Phase 4), clipboard paste и mobile polish (Phase 5) остаются в следующих фазах.
+**Статус на 2026-03-20:** все фазы (Phase 1–5) реализованы. Полный pipeline: выбор/вставка изображения → preview → upload в Storage → persist `image_url` → отображение в чате → передача в AI (answer, hint, question). Clipboard paste работает через `clipboardData.files` + `items` fallback (Safari/Firefox). Mobile camera через native file picker.
 
 ---
 
@@ -289,11 +289,11 @@ Student selects file
 - [x] Фото отправляется с текстом или без текста
 - [x] Фото отображается в чате как thumbnail (кликабельный → zoom)
 - [x] Репетитор видит фото ученика в GuidedThreadViewer (уже работает через MessageImage)
-- [ ] Clipboard paste (Ctrl+V) работает на десктопе
-- [ ] Камера доступна на мобильном (input capture)
+- [x] Clipboard paste (Ctrl+V) работает на десктопе
+- [x] Камера доступна на мобильном (input capture)
 - [x] Кнопки send disabled во время загрузки файла
-- [ ] AI получает фото ученика при проверке ответа
-- [ ] AI получает фото ученика при обсуждении (question mode)
+- [x] AI получает фото ученика при проверке ответа
+- [x] AI получает фото ученика при обсуждении (question mode)
 - [x] File size > 10 МБ → error toast
 - [x] Unsupported format → error toast
 

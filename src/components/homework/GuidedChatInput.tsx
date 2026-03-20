@@ -114,6 +114,7 @@ function AttachmentPreview({
                 type="button"
                 onClick={() => onRemove(index)}
                 className="shrink-0 rounded-full p-1 hover:bg-muted"
+                style={{ touchAction: 'manipulation' }}
                 aria-label={`Удалить ${file.name}`}
               >
                 <X className="h-3.5 w-3.5 text-muted-foreground" />
@@ -230,12 +231,63 @@ const GuidedChatInput = memo(
 
     const attachDisabled = isLoading || disabled || isUploading;
 
+    /** 5.1 — Clipboard paste: intercept image paste on container, let text paste through.
+     *  Uses clipboardData.files first (Chrome), falls back to clipboardData.items + getAsFile()
+     *  for Safari desktop and Firefox which may not populate .files for pasted images. */
+    const handlePaste = useCallback(
+      (e: React.ClipboardEvent) => {
+        // Try .files first (Chrome), then .items fallback (Safari/Firefox)
+        let imageFile: File | undefined;
+        const files = Array.from(e.clipboardData.files);
+        imageFile = files.find((f) => f.type.startsWith('image/'));
+
+        if (!imageFile && e.clipboardData.items) {
+          for (let i = 0; i < e.clipboardData.items.length; i++) {
+            const item = e.clipboardData.items[i];
+            if (item.kind === 'file' && item.type.startsWith('image/')) {
+              imageFile = item.getAsFile() ?? undefined;
+              break;
+            }
+          }
+        }
+
+        if (!imageFile) return; // text paste — let textarea handle it
+
+        if (attachDisabled) {
+          e.preventDefault();
+          return;
+        }
+
+        if (attachedFiles.length >= MAX_FILES) {
+          e.preventDefault();
+          toast.error(`Максимум ${MAX_FILES} вложения`);
+          return;
+        }
+
+        if (!ALLOWED_TYPES.includes(imageFile.type)) {
+          e.preventDefault();
+          toast.error('Поддерживаются: JPG, PNG, HEIC, WebP');
+          return;
+        }
+
+        if (imageFile.size > MAX_FILE_SIZE) {
+          e.preventDefault();
+          toast.error('Файл слишком большой. Максимум 10 МБ');
+          return;
+        }
+
+        e.preventDefault();
+        onFileSelect(imageFile);
+      },
+      [attachDisabled, attachedFiles.length, onFileSelect],
+    );
+
     const spinner = (
       <div className="w-3.5 h-3.5 border-2 border-current border-t-transparent rounded-full animate-spin" />
     );
 
     return (
-      <div className="border-t bg-background">
+      <div className="border-t bg-background" onPaste={handlePaste}>
         {/* Attachment preview */}
         <AttachmentPreview
           files={attachedFiles}
@@ -292,6 +344,7 @@ const GuidedChatInput = memo(
               onClick={handleSendStep}
               disabled={!canSend}
               className="h-10 px-2.5 gap-1 text-xs whitespace-nowrap"
+              style={{ touchAction: 'manipulation' }}
               title="Обсудить шаг (Enter)"
             >
               {isLoading ? spinner : <MessageCircle className="h-3.5 w-3.5" />}
@@ -302,6 +355,7 @@ const GuidedChatInput = memo(
               onClick={handleSendAnswer}
               disabled={!canSend}
               className="h-10 px-2.5 gap-1 text-xs whitespace-nowrap"
+              style={{ touchAction: 'manipulation' }}
               title={`Итоговый ответ (${modKey}+Enter)`}
             >
               {isLoading ? spinner : <CheckCircle2 className="h-3.5 w-3.5" />}
