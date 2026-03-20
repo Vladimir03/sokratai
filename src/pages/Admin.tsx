@@ -209,6 +209,10 @@ const Admin = () => {
               <MessageSquare className="w-4 h-4" />
               CRM
             </TabsTrigger>
+            <TabsTrigger value="homework" className="flex items-center gap-2">
+              <BookOpen className="w-4 h-4" />
+              ДЗ
+            </TabsTrigger>
             <TabsTrigger value="payments" className="flex items-center gap-2">
               <CreditCard className="w-4 h-4" />
               Платежи
