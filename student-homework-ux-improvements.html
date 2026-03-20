@@ -1,0 +1,1562 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Сократ — UX Improvements: Student Homework Flow</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  :root {
+    --primary: #3B3F8C;
+    --primary-light: #5B5FC7;
+    --green: #1B6B4A;
+    --green-light: #22C55E;
+    --orange: #E8913A;
+    --red: #EF4444;
+    --bg: #F8F9FB;
+    --card: #FFFFFF;
+    --text: #1E293B;
+    --muted: #64748B;
+    --border: #E2E8F0;
+    --radius: 12px;
+  }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: var(--bg); color: var(--text); line-height: 1.6; }
+
+  /* Navigation */
+  .nav { position: sticky; top: 0; z-index: 100; background: var(--card); border-bottom: 1px solid var(--border); padding: 0 24px; }
+  .nav-inner { max-width: 1200px; margin: 0 auto; display: flex; align-items: center; gap: 32px; height: 56px; overflow-x: auto; }
+  .nav-tab { font-size: 14px; font-weight: 500; color: var(--muted); cursor: pointer; padding: 16px 0; border-bottom: 2px solid transparent; white-space: nowrap; text-decoration: none; }
+  .nav-tab.active { color: var(--primary); border-bottom-color: var(--primary); }
+  .nav-tab:hover { color: var(--primary); }
+
+  /* Content */
+  .container { max-width: 1200px; margin: 0 auto; padding: 32px 24px; }
+  .hero { text-align: center; padding: 48px 0 32px; }
+  .hero h1 { font-size: 32px; font-weight: 700; margin-bottom: 8px; }
+  .hero p { font-size: 16px; color: var(--muted); max-width: 600px; margin: 0 auto; }
+
+  /* Section */
+  .section { margin-bottom: 48px; scroll-margin-top: 72px; }
+  .section-header { display: flex; align-items: center; gap: 12px; margin-bottom: 24px; }
+  .section-num { width: 36px; height: 36px; border-radius: 50%; background: var(--primary); color: white; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 16px; flex-shrink: 0; }
+  .section h2 { font-size: 22px; font-weight: 700; }
+  .section h3 { font-size: 17px; font-weight: 600; margin: 20px 0 12px; color: var(--primary); }
+
+  /* Cards */
+  .card { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); padding: 24px; margin-bottom: 16px; }
+  .card-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  @media (max-width: 768px) { .card-grid { grid-template-columns: 1fr; } }
+
+  /* Labels */
+  .label-current { display: inline-block; padding: 2px 10px; border-radius: 20px; font-size: 12px; font-weight: 600; background: #FEE2E2; color: var(--red); }
+  .label-proposed { display: inline-block; padding: 2px 10px; border-radius: 20px; font-size: 12px; font-weight: 600; background: #DCFCE7; color: var(--green); }
+  .label-best { display: inline-block; padding: 2px 10px; border-radius: 20px; font-size: 12px; font-weight: 600; background: #DBEAFE; color: #2563EB; }
+  .label-priority { display: inline-block; padding: 2px 10px; border-radius: 20px; font-size: 12px; font-weight: 600; }
+  .p0 { background: #FEE2E2; color: var(--red); }
+  .p1 { background: #FEF3C7; color: #D97706; }
+  .p2 { background: #E0E7FF; color: #4F46E5; }
+
+  /* Comparison */
+  .comparison { display: grid; grid-template-columns: 1fr 1fr; gap: 2px; background: var(--border); border-radius: var(--radius); overflow: hidden; margin: 16px 0; }
+  .comparison > div { background: var(--card); padding: 20px; }
+  .comparison .col-header { font-weight: 600; font-size: 13px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--muted); margin-bottom: 12px; }
+  @media (max-width: 768px) { .comparison { grid-template-columns: 1fr; } }
+
+  /* Wireframe */
+  .wireframe { background: #F1F5F9; border: 2px dashed var(--border); border-radius: var(--radius); padding: 20px; font-family: 'Courier New', monospace; font-size: 13px; line-height: 1.5; margin: 16px 0; overflow-x: auto; white-space: pre; }
+
+  /* Phone mockup */
+  .phone { width: 375px; max-width: 100%; margin: 16px auto; background: var(--card); border-radius: 32px; border: 3px solid #1E293B; overflow: hidden; box-shadow: 0 8px 32px rgba(0,0,0,0.12); }
+  .phone-notch { height: 24px; background: #1E293B; border-radius: 0 0 16px 16px; width: 150px; margin: 0 auto; }
+  .phone-screen { padding: 0; min-height: 600px; }
+  .phone-bar { padding: 12px 16px; background: var(--card); border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 8px; }
+  .phone-title { font-size: 15px; font-weight: 600; }
+  .phone-content { padding: 16px; }
+
+  /* Bullet points */
+  .pros li { list-style: none; padding-left: 24px; position: relative; margin-bottom: 6px; }
+  .pros li::before { content: '✓'; position: absolute; left: 0; color: var(--green); font-weight: 700; }
+  .cons li { list-style: none; padding-left: 24px; position: relative; margin-bottom: 6px; }
+  .cons li::before { content: '✗'; position: absolute; left: 0; color: var(--red); font-weight: 700; }
+
+  /* Table */
+  table { width: 100%; border-collapse: collapse; margin: 12px 0; font-size: 14px; }
+  th, td { padding: 10px 12px; text-align: left; border-bottom: 1px solid var(--border); }
+  th { font-weight: 600; color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; }
+
+  /* Tags */
+  .tag { display: inline-block; padding: 2px 8px; border-radius: 6px; font-size: 11px; font-weight: 600; margin-right: 4px; }
+  .tag-khanmigo { background: #DCFCE7; color: #166534; }
+  .tag-duolingo { background: #FEF3C7; color: #92400E; }
+  .tag-photomath { background: #E0E7FF; color: #3730A3; }
+  .tag-ixl { background: #FCE7F3; color: #9D174D; }
+
+  /* Divider */
+  hr { border: none; border-top: 1px solid var(--border); margin: 32px 0; }
+
+  /* Telegram mockup */
+  .tg-msg { background: #E3F2FD; border-radius: 12px 12px 12px 4px; padding: 12px 16px; margin: 8px 0; max-width: 320px; font-size: 14px; }
+  .tg-msg.bot { background: #E8F5E9; }
+  .tg-btn { display: inline-block; padding: 8px 16px; border: 1px solid #42A5F5; border-radius: 8px; color: #1565C0; font-size: 13px; font-weight: 500; margin: 4px 4px 4px 0; cursor: pointer; background: white; }
+  .tg-btn:hover { background: #E3F2FD; }
+
+  /* Flow diagram */
+  .flow { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 16px 0; }
+  .flow-step { background: var(--primary); color: white; padding: 8px 16px; border-radius: 8px; font-size: 13px; font-weight: 500; }
+  .flow-step.green { background: var(--green); }
+  .flow-step.orange { background: var(--orange); }
+  .flow-arrow { color: var(--muted); font-size: 20px; }
+
+  .text-muted { color: var(--muted); font-size: 14px; }
+  .mt-8 { margin-top: 8px; }
+  .mt-16 { margin-top: 16px; }
+  .mb-8 { margin-bottom: 8px; }
+  .bold { font-weight: 600; }
+
+  /* Mini mockup components */
+  .mock-badge { display: inline-block; padding: 2px 8px; border-radius: 12px; font-size: 11px; font-weight: 600; }
+  .mock-badge.assigned { background: #DBEAFE; color: #1D4ED8; }
+  .mock-badge.overdue { background: #FEE2E2; color: #DC2626; }
+  .mock-badge.done { background: #DCFCE7; color: #166534; }
+  .mock-badge.progress { background: #FEF3C7; color: #D97706; }
+
+  .mock-progress { height: 6px; background: #E2E8F0; border-radius: 3px; overflow: hidden; margin: 8px 0; }
+  .mock-progress-fill { height: 100%; border-radius: 3px; background: var(--green); }
+
+  .mock-input { border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; font-size: 13px; color: var(--muted); background: #F8FAFC; width: 100%; }
+  .mock-btn { display: inline-block; padding: 8px 16px; border-radius: 8px; font-size: 13px; font-weight: 600; cursor: pointer; border: none; }
+  .mock-btn.primary { background: var(--primary); color: white; }
+  .mock-btn.secondary { background: #F1F5F9; color: var(--text); border: 1px solid var(--border); }
+  .mock-btn.green { background: var(--green); color: white; }
+  .mock-btn.sm { padding: 4px 10px; font-size: 12px; }
+
+  .mock-card { background: white; border: 1px solid var(--border); border-radius: 10px; padding: 14px; margin-bottom: 10px; }
+  .mock-stepper { display: flex; gap: 8px; margin: 12px 0; }
+  .mock-step { width: 32px; height: 32px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 600; }
+  .mock-step.active { background: var(--primary); color: white; box-shadow: 0 0 0 3px rgba(59,63,140,0.2); }
+  .mock-step.done { background: var(--green); color: white; }
+  .mock-step.pending { background: #E2E8F0; color: var(--muted); }
+
+  .mock-msg { padding: 10px 14px; border-radius: 12px; margin: 6px 0; font-size: 13px; max-width: 85%; }
+  .mock-msg.ai { background: #F1F5F9; border-radius: 12px 12px 12px 4px; }
+  .mock-msg.user { background: var(--primary); color: white; border-radius: 12px 12px 4px 12px; margin-left: auto; }
+  .mock-msg.hint { background: #FEF3C7; border-radius: 12px 12px 12px 4px; border-left: 3px solid var(--orange); }
+  .mock-msg.intro { background: #EFF6FF; border-radius: 12px; border-left: 3px solid var(--primary-light); }
+
+  .mock-msg-label { font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px; }
+  .mock-msg-label.hint-label { color: var(--orange); }
+  .mock-msg-label.intro-label { color: var(--primary-light); }
+  .mock-msg-label.answer-label { color: var(--green); }
+  .mock-msg-label.step-label { color: var(--muted); }
+
+  .mock-feedback { border-radius: 10px; padding: 12px; margin: 8px 0; display: flex; gap: 10px; align-items: flex-start; }
+  .mock-feedback.correct { background: #F0FDF4; border: 1px solid #BBF7D0; }
+  .mock-feedback.wrong { background: #FEF2F2; border: 1px solid #FECACA; }
+  .mock-feedback.partial { background: #FFFBEB; border: 1px solid #FDE68A; }
+  .mock-feedback-icon { font-size: 20px; flex-shrink: 0; }
+
+  .emoji { font-style: normal; }
+
+  /* Summary table */
+  .summary-row { display: grid; grid-template-columns: 40px 1fr 80px 100px; gap: 8px; padding: 12px; border-bottom: 1px solid var(--border); align-items: center; font-size: 14px; }
+  .summary-row.header { font-weight: 600; font-size: 12px; color: var(--muted); text-transform: uppercase; }
+</style>
+</head>
+<body>
+
+<nav class="nav">
+  <div class="nav-inner">
+    <span style="font-weight:700; color: var(--primary); font-size: 16px;">🎓 Сократ UX</span>
+    <a class="nav-tab active" href="#analysis">Анализ</a>
+    <a class="nav-tab" href="#homework-list">Список ДЗ</a>
+    <a class="nav-tab" href="#guided-solving">Прорешивание</a>
+    <a class="nav-tab" href="#feedback">Обратная связь</a>
+    <a class="nav-tab" href="#telegram">Telegram</a>
+    <a class="nav-tab" href="#summary">Итого</a>
+  </div>
+</nav>
+
+<div class="container">
+
+<!-- HERO -->
+<div class="hero">
+  <h1>UX-аудит: Student Homework Flow</h1>
+  <p>Анализ текущего flow ученика + предложения по улучшению на основе best practices EduTech (Khanmigo, Photomath, Duolingo, IXL)</p>
+</div>
+
+<!-- ============================================ -->
+<!-- SECTION 1: ANALYSIS -->
+<!-- ============================================ -->
+<div class="section" id="analysis">
+  <div class="section-header">
+    <div class="section-num">1</div>
+    <h2>Анализ текущего flow по скриншотам</h2>
+  </div>
+
+  <div class="card">
+    <h3>Текущий flow ученика</h3>
+    <div class="flow">
+      <div class="flow-step">Список ДЗ</div>
+      <div class="flow-arrow">→</div>
+      <div class="flow-step">Открыть ДЗ</div>
+      <div class="flow-arrow">→</div>
+      <div class="flow-step">Увидеть задачу</div>
+      <div class="flow-arrow">→</div>
+      <div class="flow-step green">Чат с AI</div>
+      <div class="flow-arrow">→</div>
+      <div class="flow-step green">Ответ</div>
+      <div class="flow-arrow">→</div>
+      <div class="flow-step orange">Следующая</div>
+    </div>
+  </div>
+
+  <div class="card-grid">
+    <div class="card">
+      <div class="label-current mb-8">Проблема</div>
+      <h3 style="margin-top:8px">Скриншот 1: Список ДЗ</h3>
+      <ul class="cons mt-8">
+        <li>Нет индикации прогресса (сколько задач решено)</li>
+        <li>Нет дедлайна на карточке</li>
+        <li>Одинаковые названия «ЕГЭ №1, 3» — не различимы</li>
+        <li>Бейдж «Назначено» не несёт полезной информации (все одинаковые)</li>
+        <li>Нет приоритизации — что решать в первую очередь?</li>
+        <li>Кнопка «Открыть» слишком большая, занимает половину карточки</li>
+      </ul>
+    </div>
+    <div class="card">
+      <div class="label-current mb-8">Проблема</div>
+      <h3 style="margin-top:8px">Скриншот 2-3: Guided solving</h3>
+      <ul class="cons mt-8">
+        <li>Условие задачи — маленькая картинка, трудно прочитать</li>
+        <li>Нет прогресса «3 из 8 задач решено»</li>
+        <li>Нет индикации сложности задачи или баллов на stepper</li>
+        <li>Кнопки «Предыдущая / Следующая» занимают много места</li>
+        <li>Нет индикации что AI «Введение» — это не обязательное к прочтению</li>
+        <li>Нет мотивации / геймификации (streak, прогресс)</li>
+        <li>Нет визуальной разницы между типами сообщений AI</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>Что хорошо уже сейчас</h3>
+    <ul class="pros">
+      <li>Свободный порядок задач (как на ЕГЭ) — ученик не заблокирован</li>
+      <li>Enter = безопасный «Шаг», Ctrl+Enter = «Ответ» — защита от случайной потери баллов</li>
+      <li>LaTeX рендеринг через MathText — формулы читаемы</li>
+      <li>Bootstrap (AI intro) для каждой задачи — ученик не остаётся один</li>
+      <li>Изображения задач с zoom — можно рассмотреть</li>
+      <li>Подсказки по кнопке — ученик контролирует уровень помощи</li>
+    </ul>
+  </div>
+</div>
+
+<hr>
+
+<!-- ============================================ -->
+<!-- SECTION 2: HOMEWORK LIST -->
+<!-- ============================================ -->
+<div class="section" id="homework-list">
+  <div class="section-header">
+    <div class="section-num">2</div>
+    <h2>Улучшение: Список домашних заданий</h2>
+  </div>
+
+  <div class="comparison">
+    <div>
+      <div class="col-header">🔴 Сейчас</div>
+      <div class="mock-card">
+        <div style="display:flex; justify-content:space-between; align-items:center">
+          <span class="bold">ЕГЭ №1, 3</span>
+          <span class="mock-badge assigned">Назначено</span>
+        </div>
+        <div class="text-muted mt-8">Предмет: Физика</div>
+        <div class="mock-btn primary mt-16" style="width:100%; text-align:center">Открыть</div>
+      </div>
+      <ul class="cons mt-8" style="font-size:13px">
+        <li>Нет прогресса</li>
+        <li>Нет дедлайна</li>
+        <li>Не различимые названия</li>
+        <li>Огромная кнопка</li>
+      </ul>
+    </div>
+    <div>
+      <div class="col-header">🟢 Предложение</div>
+      <div class="mock-card" style="cursor:pointer; border-left: 3px solid var(--primary)">
+        <div style="display:flex; justify-content:space-between; align-items:center">
+          <span class="bold">Кинематика · ЕГЭ</span>
+          <span class="mock-badge progress">2 из 5</span>
+        </div>
+        <div class="mock-progress"><div class="mock-progress-fill" style="width:40%"></div></div>
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-top: 8px">
+          <span class="text-muted" style="font-size:12px">Физика · от Иван П.</span>
+          <span style="font-size:12px; color: var(--orange); font-weight:600">⏰ До завтра</span>
+        </div>
+      </div>
+      <div class="mock-card" style="cursor:pointer; border-left: 3px solid var(--red)">
+        <div style="display:flex; justify-content:space-between; align-items:center">
+          <span class="bold">Законы Ньютона</span>
+          <span class="mock-badge overdue">Просрочено</span>
+        </div>
+        <div class="mock-progress"><div class="mock-progress-fill" style="width:0%; background: var(--red)"></div></div>
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-top: 8px">
+          <span class="text-muted" style="font-size:12px">Физика · от Иван П.</span>
+          <span style="font-size:12px; color: var(--red); font-weight:600">⚠️ Вчера</span>
+        </div>
+      </div>
+      <div class="mock-card" style="cursor:pointer; border-left: 3px solid var(--green)">
+        <div style="display:flex; justify-content:space-between; align-items:center">
+          <span class="bold">Вариант ЕГЭ</span>
+          <span class="mock-badge done">✓ Проверено</span>
+        </div>
+        <div class="mock-progress"><div class="mock-progress-fill" style="width:100%"></div></div>
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-top: 8px">
+          <span class="text-muted" style="font-size:12px">Обществознание</span>
+          <span style="font-size:12px; color: var(--green); font-weight:600">8/10 баллов</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>Ключевые изменения</h3>
+    <table>
+      <tr><th>Элемент</th><th>Best practice</th><th>Приоритет</th></tr>
+      <tr>
+        <td><strong>Progress bar</strong> на каждой карточке</td>
+        <td><span class="tag tag-ixl">IXL</span><span class="tag tag-duolingo">Duolingo</span> Visual progress → мотивация завершить</td>
+        <td><span class="label-priority p0">P0</span></td>
+      </tr>
+      <tr>
+        <td><strong>Дедлайн</strong> с urgency-цветом</td>
+        <td><span class="tag tag-khanmigo">Khanmigo</span> Deadline proximity = priority signal</td>
+        <td><span class="label-priority p0">P0</span></td>
+      </tr>
+      <tr>
+        <td><strong>Сортировка</strong>: просроченные → сегодня → завтра → остальные</td>
+        <td>Urgency-first sorting снижает пропуск дедлайнов</td>
+        <td><span class="label-priority p0">P0</span></td>
+      </tr>
+      <tr>
+        <td><strong>Вся карточка кликабельна</strong> (не только кнопка)</td>
+        <td>Fitts' law — большая area = быстрее клик. Убираем отдельную кнопку «Открыть»</td>
+        <td><span class="label-priority p1">P1</span></td>
+      </tr>
+      <tr>
+        <td><strong>Цветовая полоска</strong> слева: синяя (active), красная (overdue), зелёная (done)</td>
+        <td>Быстрый скан статуса без чтения текста</td>
+        <td><span class="label-priority p1">P1</span></td>
+      </tr>
+      <tr>
+        <td><strong>Имя тьютора</strong> на карточке</td>
+        <td>Для учеников с несколькими репетиторами — контекст</td>
+        <td><span class="label-priority p2">P2</span></td>
+      </tr>
+    </table>
+  </div>
+</div>
+
+<hr>
+
+<!-- ============================================ -->
+<!-- SECTION 3: GUIDED SOLVING -->
+<!-- ============================================ -->
+<div class="section" id="guided-solving">
+  <div class="section-header">
+    <div class="section-num">3</div>
+    <h2>Улучшение: Guided solving workspace</h2>
+  </div>
+
+  <h3>3.1. Улучшенный Task Stepper с прогрессом</h3>
+
+  <div class="comparison">
+    <div>
+      <div class="col-header">🔴 Сейчас</div>
+      <div class="mock-stepper">
+        <div class="mock-step active">1</div>
+        <div class="mock-step pending">2</div>
+      </div>
+      <p class="text-muted" style="font-size:13px">Кружки без контекста. Hover показывает tooltip, но на mobile hover недоступен.</p>
+    </div>
+    <div>
+      <div class="col-header">🟢 Предложение</div>
+      <div style="display:flex; align-items:center; gap:12px; margin:12px 0; padding: 12px; background: #F8FAFC; border-radius: 10px;">
+        <div style="text-align:center">
+          <div class="mock-step active">1</div>
+          <div style="font-size:10px; color:var(--primary); margin-top:2px">1 балл</div>
+        </div>
+        <div style="width:40px; height:2px; background: #CBD5E1; position: relative;">
+          <div style="width:100%; height:2px; background: var(--green);"></div>
+        </div>
+        <div style="text-align:center">
+          <div class="mock-step done">✓</div>
+          <div style="font-size:10px; color:var(--green); margin-top:2px">1 балл</div>
+        </div>
+        <div style="width:40px; height:2px; background: #CBD5E1;"></div>
+        <div style="text-align:center">
+          <div class="mock-step pending">3</div>
+          <div style="font-size:10px; color:var(--muted); margin-top:2px">2 балла</div>
+        </div>
+        <div style="flex:1; text-align:right; font-size:12px; color:var(--muted)">
+          <strong style="color:var(--text); font-size:16px">1</strong>/3 решено
+        </div>
+      </div>
+      <p class="text-muted" style="font-size:13px">Линии-коннекторы между кружками. Баллы видны. Счётчик прогресса справа.</p>
+    </div>
+  </div>
+
+  <h3>3.2. Улучшенная область условия задачи</h3>
+
+  <div class="comparison">
+    <div>
+      <div class="col-header">🔴 Сейчас</div>
+      <div style="background:#F8FAFC; padding: 12px; border-radius: 8px; margin: 8px 0">
+        <div style="font-size:12px; color:var(--muted)">Задача 1 из 2</div>
+        <div class="bold mt-8">Реши</div>
+        <div style="width:120px; height:80px; background:#E2E8F0; border-radius:6px; margin-top:8px; display:flex; align-items:center; justify-content:center; font-size:11px; color:var(--muted)">маленькая картинка</div>
+      </div>
+      <p class="text-muted" style="font-size:13px">Картинка задачи маленькая. Заголовок «Реши» не информативен.</p>
+    </div>
+    <div>
+      <div class="col-header">🟢 Предложение</div>
+      <div style="background:#F8FAFC; padding: 14px; border-radius: 10px; margin: 8px 0; border-left: 3px solid var(--primary)">
+        <div style="display:flex; justify-content:space-between; align-items:center">
+          <div>
+            <span style="font-size:11px; font-weight:600; color:var(--primary); text-transform:uppercase">Задача 1</span>
+            <span style="font-size:11px; color:var(--muted)"> · Кинематика · 1 балл</span>
+          </div>
+          <span style="font-size:12px; color:var(--green); font-weight:600">1/1 баллов</span>
+        </div>
+        <div style="margin-top:10px; font-size:14px; line-height:1.5">
+          На рисунке представлен график зависимости пути <em>S</em> от времени <em>t</em>. Определите скорость движения на отрезке от 1 с до 3 с.
+        </div>
+        <div style="width:100%; height:120px; background:#E2E8F0; border-radius:8px; margin-top:10px; display:flex; align-items:center; justify-content:center; font-size:12px; color:var(--muted); cursor:pointer">
+          📷 Нажмите для увеличения
+        </div>
+      </div>
+      <p class="text-muted" style="font-size:13px">Текст задачи крупнее. Картинка на всю ширину. Метаданные в header.</p>
+    </div>
+  </div>
+
+  <h3>3.3. Типы сообщений AI — визуальная иерархия</h3>
+
+  <div class="card">
+    <div class="label-best mb-8">Best practice: Khanmigo + Photomath</div>
+    <p class="text-muted mb-8">Каждый тип сообщения AI имеет свой визуальный стиль, чтобы ученик мгновенно понимал контекст.</p>
+
+    <div style="max-width: 400px; margin: 16px auto;">
+      <!-- Intro -->
+      <div class="mock-msg intro">
+        <div class="mock-msg-label intro-label">ВВЕДЕНИЕ</div>
+        Привет! Давай разберём эту задачу. На графике показана зависимость пути от времени...
+      </div>
+
+      <!-- User question -->
+      <div class="mock-msg user">
+        <div class="mock-msg-label step-label" style="color:rgba(255,255,255,0.7)">ШАГ РЕШЕНИЯ</div>
+        Мне кажется, скорость = путь / время, значит нужно посмотреть S при t=1 и t=3?
+      </div>
+
+      <!-- AI response -->
+      <div class="mock-msg ai">
+        Отлично мыслишь! Да, скорость — это изменение пути за время. А что именно ты видишь на графике между 1 с и 3 с?
+      </div>
+
+      <!-- Hint -->
+      <div class="mock-msg hint">
+        <div class="mock-msg-label hint-label">💡 ПОДСКАЗКА</div>
+        Обрати внимание: между t=1 и t=3 путь S не меняется. Что это значит для скорости?
+      </div>
+
+      <!-- User answer -->
+      <div class="mock-msg user" style="background: var(--green)">
+        <div class="mock-msg-label answer-label" style="color:rgba(255,255,255,0.7)">ОТВЕТ</div>
+        Скорость = 0 м/с, потому что тело не двигалось
+      </div>
+
+      <!-- Feedback correct -->
+      <div class="mock-feedback correct">
+        <div class="mock-feedback-icon">✅</div>
+        <div>
+          <div class="bold" style="color:#166534">Верно! +1 балл</div>
+          <div class="text-muted" style="font-size:13px">Тело находилось в покое на этом отрезке. Скорость действительно равна нулю.</div>
+        </div>
+      </div>
+    </div>
+
+    <table style="margin-top:16px">
+      <tr><th>Тип</th><th>Стиль</th><th>Цель</th></tr>
+      <tr>
+        <td>Введение</td>
+        <td>Голубой фон + синяя полоска слева</td>
+        <td>Ориентировка в задаче, не требует ответа</td>
+      </tr>
+      <tr>
+        <td>Шаг решения (AI)</td>
+        <td>Серый фон (стандартный)</td>
+        <td>Сократический диалог — наводящие вопросы</td>
+      </tr>
+      <tr>
+        <td>Подсказка</td>
+        <td>Жёлтый фон + оранжевая полоска + 💡</td>
+        <td>Явная помощь, более прямая</td>
+      </tr>
+      <tr>
+        <td>Ответ ученика</td>
+        <td>Зелёный фон (отличается от «Шага»)</td>
+        <td>Финальный ответ — AI оценивает</td>
+      </tr>
+      <tr>
+        <td>Фидбэк ✅</td>
+        <td>Зелёная карточка с иконкой и баллом</td>
+        <td>Мгновенная позитивная обратная связь</td>
+      </tr>
+      <tr>
+        <td>Фидбэк ❌</td>
+        <td>Красная карточка + подсказка что не так</td>
+        <td>Конструктивная критика, не деморализующая</td>
+      </tr>
+    </table>
+  </div>
+
+  <h3>3.4. Кнопки навигации → компактная панель</h3>
+
+  <div class="comparison">
+    <div>
+      <div class="col-header">🔴 Сейчас</div>
+      <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:4px; margin:12px 0">
+        <div class="mock-btn secondary" style="text-align:center; font-size:12px">← Предыдущая</div>
+        <div class="mock-btn secondary" style="text-align:center; font-size:12px; font-weight:700">→ Следующая</div>
+        <div class="mock-btn secondary" style="text-align:center; font-size:12px">💡 Подсказка</div>
+      </div>
+      <p class="text-muted" style="font-size:13px">3 кнопки равного размера. «Предыдущая» занимает место, хотя используется редко.</p>
+    </div>
+    <div>
+      <div class="col-header">🟢 Предложение</div>
+      <div style="display:flex; gap:8px; margin:12px 0; align-items:center">
+        <div class="mock-btn secondary sm">←</div>
+        <div style="flex:1"></div>
+        <div class="mock-btn secondary" style="font-size:12px; display:flex; align-items:center; gap:4px">💡 Подсказка</div>
+        <div class="mock-btn primary" style="font-size:12px; display:flex; align-items:center; gap:4px">Следующая →</div>
+      </div>
+      <p class="text-muted" style="font-size:13px">«←» компактная. «Подсказка» secondary. «Следующая» primary CTA. Фокус на прогрессе вперёд.</p>
+    </div>
+  </div>
+
+  <h3>3.5. Мотивационный блок после завершения всех задач</h3>
+
+  <div class="card" style="text-align:center; padding:32px">
+    <div class="label-best mb-8">Best practice: Duolingo + IXL</div>
+    <div style="font-size:48px; margin:16px 0">🎉</div>
+    <div style="font-size:20px; font-weight:700; margin-bottom:8px">Отлично! Все задачи решены!</div>
+    <div style="font-size:32px; font-weight:700; color:var(--green); margin:8px 0">4/5 баллов</div>
+    <div class="mock-progress" style="max-width:200px; margin:12px auto; height:8px">
+      <div class="mock-progress-fill" style="width:80%"></div>
+    </div>
+    <div class="text-muted" style="margin-bottom:20px">
+      Кинематика · 2 задачи из 2
+    </div>
+    <div style="display:flex; gap:12px; justify-content:center; flex-wrap:wrap">
+      <div class="mock-btn green">Отправить репетитору</div>
+      <div class="mock-btn secondary">Пересмотреть ошибки</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>Дополнительные мотивационные паттерны</h3>
+    <table>
+      <tr><th>Паттерн</th><th>Источник</th><th>Как применить</th><th>Приоритет</th></tr>
+      <tr>
+        <td><strong>Streak-счётчик</strong></td>
+        <td><span class="tag tag-duolingo">Duolingo</span></td>
+        <td>«3 задачи подряд верно 🔥» — текст в stepper area</td>
+        <td><span class="label-priority p2">P2</span></td>
+      </tr>
+      <tr>
+        <td><strong>Celebration moment</strong></td>
+        <td><span class="tag tag-duolingo">Duolingo</span></td>
+        <td>Конфетти / анимация при правильном ответе (CSS, не framer-motion)</td>
+        <td><span class="label-priority p1">P1</span></td>
+      </tr>
+      <tr>
+        <td><strong>Финальный экран</strong></td>
+        <td><span class="tag tag-ixl">IXL</span></td>
+        <td>Summary: баллы + время + ошибки + «Отправить репетитору»</td>
+        <td><span class="label-priority p0">P0</span></td>
+      </tr>
+      <tr>
+        <td><strong>Прогресс-трекер</strong></td>
+        <td><span class="tag tag-photomath">Photomath</span></td>
+        <td>Мини-прогресс «2/5» в header — всегда виден</td>
+        <td><span class="label-priority p0">P0</span></td>
+      </tr>
+    </table>
+  </div>
+
+  <h3>3.6. Загрузка фото, скриншотов и PDF в чат решения</h3>
+
+  <div class="card">
+    <div class="label-best mb-8">Best practice: Photomath + Gradescope + ChatGPT</div>
+    <p class="text-muted">Для физики и математики текстовый ввод недостаточен — ученику нужно отправлять рукописные решения, графики, схемы. 80%+ решений в ЕГЭ физике пишутся от руки.</p>
+
+    <h3>Проблема</h3>
+    <ul class="cons">
+      <li>Сейчас в guided chat можно отправить только текст — нет кнопки вложения</li>
+      <li>Ученик не может показать AI своё рукописное решение</li>
+      <li>Нет поддержки Ctrl+V / Cmd+V для вставки скриншота из буфера</li>
+      <li>Нет drag-and-drop для файлов на десктопе</li>
+      <li>Для физики это критично: формулы, чертежи, графики — всё пишется от руки</li>
+    </ul>
+  </div>
+
+  <div class="comparison">
+    <div>
+      <div class="col-header">🔴 Сейчас: только текст</div>
+      <div style="border: 1px solid var(--border); border-radius:10px; padding:12px; margin:8px 0">
+        <div class="mock-input">Задача 1: обсудите с AI (Enter) или ответ (Ctrl+Enter)...</div>
+        <div style="display:flex; gap:8px; margin-top:8px; justify-content:flex-end">
+          <div class="mock-btn secondary sm">💬 Шаг</div>
+          <div class="mock-btn green sm">✓ Ответ</div>
+        </div>
+      </div>
+      <p class="text-muted" style="font-size:13px">Только текстовый ввод. Нет способа приложить фото решения.</p>
+    </div>
+    <div>
+      <div class="col-header">🟢 Предложение: мультимодальный ввод</div>
+      <div style="border: 1px solid var(--border); border-radius:10px; padding:12px; margin:8px 0">
+        <!-- Attachment preview -->
+        <div style="display:flex; gap:8px; margin-bottom:8px; padding:8px; background:#F8FAFC; border-radius:8px">
+          <div style="width:56px; height:56px; background:#E2E8F0; border-radius:6px; display:flex; align-items:center; justify-content:center; font-size:11px; color:var(--muted); position:relative; flex-shrink:0">
+            📷 фото
+            <div style="position:absolute; top:-4px; right:-4px; width:18px; height:18px; background:var(--red); color:white; border-radius:50%; font-size:10px; display:flex; align-items:center; justify-content:center; cursor:pointer">✕</div>
+          </div>
+          <div style="font-size:12px; color:var(--muted); display:flex; align-items:center">решение_задача1.jpg · 2.1 МБ</div>
+        </div>
+        <!-- Input -->
+        <div style="display:flex; gap:8px; align-items:flex-end">
+          <div style="display:flex; gap:4px; flex-shrink:0">
+            <div class="mock-btn secondary sm" title="Прикрепить файл" style="padding:4px 8px; font-size:16px">📎</div>
+          </div>
+          <div style="flex:1">
+            <div class="mock-input" style="font-size:12px">Вот моё решение, v = ΔS/Δt = 0...</div>
+          </div>
+          <div style="display:flex; gap:4px; flex-shrink:0">
+            <div class="mock-btn secondary sm">💬 Шаг</div>
+            <div class="mock-btn green sm">✓ Ответ</div>
+          </div>
+        </div>
+      </div>
+      <p class="text-muted" style="font-size:13px">Кнопка 📎 + clipboard paste + drag-and-drop. Превью вложения над полем ввода.</p>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>Кнопка 📎 — Bottom Sheet (мобильный)</h3>
+    <div style="max-width:320px; margin:16px auto; background:#F1F5F9; border-radius:16px 16px 0 0; padding:16px; border:1px solid var(--border)">
+      <div style="width:40px; height:4px; background:#CBD5E1; border-radius:2px; margin:0 auto 16px"></div>
+      <div style="font-weight:600; margin-bottom:12px; font-size:15px">Прикрепить</div>
+      <div style="display:flex; flex-direction:column; gap:8px">
+        <div style="display:flex; align-items:center; gap:12px; padding:12px; background:white; border-radius:10px; cursor:pointer; border:1px solid var(--border)">
+          <div style="width:40px; height:40px; background:#DBEAFE; border-radius:10px; display:flex; align-items:center; justify-content:center; font-size:20px">📷</div>
+          <div>
+            <div class="bold" style="font-size:14px">Сфотографировать</div>
+            <div class="text-muted" style="font-size:12px">Камера для фото решения</div>
+          </div>
+        </div>
+        <div style="display:flex; align-items:center; gap:12px; padding:12px; background:white; border-radius:10px; cursor:pointer; border:1px solid var(--border)">
+          <div style="width:40px; height:40px; background:#F0FDF4; border-radius:10px; display:flex; align-items:center; justify-content:center; font-size:20px">🖼️</div>
+          <div>
+            <div class="bold" style="font-size:14px">Галерея</div>
+            <div class="text-muted" style="font-size:12px">Выбрать из фотоплёнки</div>
+          </div>
+        </div>
+        <div style="display:flex; align-items:center; gap:12px; padding:12px; background:white; border-radius:10px; cursor:pointer; border:1px solid var(--border)">
+          <div style="width:40px; height:40px; background:#FEF3C7; border-radius:10px; display:flex; align-items:center; justify-content:center; font-size:20px">📄</div>
+          <div>
+            <div class="bold" style="font-size:14px">Документ</div>
+            <div class="text-muted" style="font-size:12px">PDF, Word, изображения</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>Способы ввода: платформа × метод</h3>
+    <table>
+      <tr><th>Метод</th><th>Mobile (iOS/Android)</th><th>Desktop (Win/Mac)</th><th>Приоритет</th></tr>
+      <tr>
+        <td><strong>📎 Кнопка вложения</strong></td>
+        <td>Bottom sheet: Камера / Галерея / Файл</td>
+        <td>File picker (jpg, png, pdf)</td>
+        <td><span class="label-priority p0">P0</span></td>
+      </tr>
+      <tr>
+        <td><strong>📋 Clipboard paste</strong></td>
+        <td>Кнопка «Вставить из буфера» (paste API ограничен на mobile)</td>
+        <td>Ctrl+V / Cmd+V → превью вложения</td>
+        <td><span class="label-priority p0">P0</span></td>
+      </tr>
+      <tr>
+        <td><strong>🖱️ Drag & Drop</strong></td>
+        <td>—</td>
+        <td>Drag файл на область чата → зона подсвечивается</td>
+        <td><span class="label-priority p1">P1</span></td>
+      </tr>
+      <tr>
+        <td><strong>📷 Камера прямая</strong></td>
+        <td>capture="environment" → задняя камера</td>
+        <td>— (только через File picker)</td>
+        <td><span class="label-priority p0">P0</span></td>
+      </tr>
+    </table>
+  </div>
+
+  <div class="card">
+    <h3>Состояния загрузки (state machine)</h3>
+    <div style="display:flex; flex-wrap:wrap; gap:12px; margin:16px 0">
+      <!-- Ready -->
+      <div style="text-align:center; flex:1; min-width:100px">
+        <div style="width:56px; height:56px; margin:0 auto; background:#F1F5F9; border-radius:10px; display:flex; align-items:center; justify-content:center; font-size:24px; border:2px dashed var(--border)">📎</div>
+        <div style="font-size:11px; margin-top:4px; color:var(--muted)">Готов</div>
+      </div>
+      <div style="display:flex; align-items:center; color:var(--muted)">→</div>
+      <!-- Preview -->
+      <div style="text-align:center; flex:1; min-width:100px">
+        <div style="width:56px; height:56px; margin:0 auto; background:#DBEAFE; border-radius:10px; display:flex; align-items:center; justify-content:center; font-size:24px; border:2px solid var(--primary)">🖼️</div>
+        <div style="font-size:11px; margin-top:4px; color:var(--primary); font-weight:600">Превью</div>
+        <div style="font-size:10px; color:var(--muted)">✕ убрать</div>
+      </div>
+      <div style="display:flex; align-items:center; color:var(--muted)">→</div>
+      <!-- Uploading -->
+      <div style="text-align:center; flex:1; min-width:100px">
+        <div style="width:56px; height:56px; margin:0 auto; background:#FEF3C7; border-radius:10px; display:flex; align-items:center; justify-content:center; font-size:13px; color:var(--orange); font-weight:600; border:2px solid var(--orange)">64%</div>
+        <div style="font-size:11px; margin-top:4px; color:var(--orange); font-weight:600">Загрузка</div>
+      </div>
+      <div style="display:flex; align-items:center; color:var(--muted)">→</div>
+      <!-- Done -->
+      <div style="text-align:center; flex:1; min-width:100px">
+        <div style="width:56px; height:56px; margin:0 auto; background:#F0FDF4; border-radius:10px; display:flex; align-items:center; justify-content:center; font-size:24px; border:2px solid var(--green)">✅</div>
+        <div style="font-size:11px; margin-top:4px; color:var(--green); font-weight:600">Отправлено</div>
+      </div>
+      <div style="display:flex; align-items:center; color:var(--muted)">→</div>
+      <!-- Error -->
+      <div style="text-align:center; flex:1; min-width:100px">
+        <div style="width:56px; height:56px; margin:0 auto; background:#FEF2F2; border-radius:10px; display:flex; align-items:center; justify-content:center; font-size:24px; border:2px solid var(--red)">⚠️</div>
+        <div style="font-size:11px; margin-top:4px; color:var(--red); font-weight:600">Ошибка</div>
+        <div style="font-size:10px; color:var(--muted)">Повторить</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>Как фото решения выглядит в чате</h3>
+    <div style="max-width:400px; margin:16px auto">
+      <!-- User message with image -->
+      <div class="mock-msg user" style="background: var(--green); padding:8px">
+        <div class="mock-msg-label answer-label" style="color:rgba(255,255,255,0.7)">ОТВЕТ</div>
+        <div style="width:100%; background:rgba(255,255,255,0.15); border-radius:8px; padding:8px; margin:4px 0">
+          <div style="width:100%; height:120px; background:rgba(255,255,255,0.2); border-radius:6px; display:flex; align-items:center; justify-content:center; font-size:12px; color:rgba(255,255,255,0.8); cursor:pointer">
+            📷 Рукописное решение (нажмите для увеличения)
+          </div>
+        </div>
+        <div style="font-size:13px; margin-top:4px">Скорость = 0 м/с, тело в покое. Вот мои выкладки.</div>
+      </div>
+
+      <!-- AI feedback on image -->
+      <div class="mock-feedback correct" style="margin-top:8px">
+        <div class="mock-feedback-icon">✅</div>
+        <div>
+          <div class="bold" style="color:#166534">Верно! +1 балл</div>
+          <div class="text-muted" style="font-size:13px">Вижу по фото: формула v = ΔS/Δt применена правильно, ΔS = 0 на отрезке [1;3]. Отличное оформление!</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>Drag & Drop зона (десктоп)</h3>
+    <div style="margin:16px 0">
+      <div style="border: 2px dashed var(--primary); border-radius:12px; padding:32px; text-align:center; background:rgba(59,63,140,0.04); transition: all 0.2s">
+        <div style="font-size:32px; margin-bottom:8px">📁</div>
+        <div class="bold">Перетащите фото или PDF сюда</div>
+        <div class="text-muted" style="font-size:13px; margin-top:4px">JPG, PNG, PDF · до 20 МБ</div>
+      </div>
+      <p class="text-muted mt-8" style="font-size:13px">Зона появляется при dragover. Рамка подсвечивается синим. При отпускании — превью + автозагрузка.</p>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>Технические ограничения и рекомендации</h3>
+    <table>
+      <tr><th>Параметр</th><th>Значение</th><th>Причина</th></tr>
+      <tr>
+        <td>Макс. размер файла</td>
+        <td>20 МБ</td>
+        <td>Достаточно для фото 12MP. Supabase Storage лимит</td>
+      </tr>
+      <tr>
+        <td>Форматы</td>
+        <td>JPG, PNG, HEIC, PDF</td>
+        <td>HEIC — формат iPhone по умолчанию (конвертировать в JPG на клиенте)</td>
+      </tr>
+      <tr>
+        <td>Авто-сжатие</td>
+        <td>Если > 5 МБ → JPEG 85%</td>
+        <td>Уменьшает время загрузки, не теряя читаемости</td>
+      </tr>
+      <tr>
+        <td>Макс. вложений за сообщение</td>
+        <td>3 файла</td>
+        <td>Для многостраничных решений (но не спам)</td>
+      </tr>
+      <tr>
+        <td>Safari iOS input font-size</td>
+        <td>≥ 16px</td>
+        <td>КРИТИЧНО: iOS зумит при font-size &lt; 16px</td>
+      </tr>
+      <tr>
+        <td>Clipboard paste (mobile)</td>
+        <td>Кнопка «Вставить»</td>
+        <td>Ctrl+V не работает на iOS/Android в textarea</td>
+      </tr>
+    </table>
+  </div>
+
+  <div class="card">
+    <h3>Приоритеты реализации загрузки</h3>
+    <table>
+      <tr><th>#</th><th>Фича</th><th>Effort</th><th>Приоритет</th></tr>
+      <tr><td>1</td><td><strong>Кнопка 📎 + file picker</strong> (камера/галерея/файл)</td><td>M</td><td><span class="label-priority p0">P0</span></td></tr>
+      <tr><td>2</td><td><strong>Превью вложения</strong> над полем ввода (thumbnail + remove)</td><td>S</td><td><span class="label-priority p0">P0</span></td></tr>
+      <tr><td>3</td><td><strong>Clipboard paste</strong> (Ctrl+V на десктопе)</td><td>S</td><td><span class="label-priority p0">P0</span></td></tr>
+      <tr><td>4</td><td><strong>Отображение фото в чате</strong> (thumbnail + lightbox zoom)</td><td>M</td><td><span class="label-priority p0">P0</span></td></tr>
+      <tr><td>5</td><td><strong>Drag & Drop зона</strong> (десктоп)</td><td>S</td><td><span class="label-priority p1">P1</span></td></tr>
+      <tr><td>6</td><td><strong>HEIC → JPG конвертация</strong></td><td>S</td><td><span class="label-priority p1">P1</span></td></tr>
+      <tr><td>7</td><td><strong>Авто-сжатие > 5 МБ</strong></td><td>S</td><td><span class="label-priority p1">P1</span></td></tr>
+      <tr><td>8</td><td><strong>Progress bar загрузки</strong></td><td>S</td><td><span class="label-priority p2">P2</span></td></tr>
+    </table>
+  </div>
+</div>
+
+<hr>
+
+<!-- ============================================ -->
+<!-- SECTION 4: FEEDBACK -->
+<!-- ============================================ -->
+<div class="section" id="feedback">
+  <div class="section-header">
+    <div class="section-num">4</div>
+    <h2>Улучшение: Обратная связь AI</h2>
+  </div>
+
+  <div class="card">
+    <h3>Трёхуровневая система фидбэка</h3>
+    <div class="label-best mb-8">Best practice: aiPlato + IXL</div>
+    <p class="text-muted">Исследования показывают: stepwise feedback (по каждому шагу) эффективнее answer-only feedback на 40%+ для долгосрочного усвоения.</p>
+
+    <table>
+      <tr><th>Уровень</th><th>Когда</th><th>Что показывать</th><th>Визуал</th></tr>
+      <tr>
+        <td><strong>L1: Правильность</strong></td>
+        <td>Мгновенно (&lt;500мс)</td>
+        <td>✅ Верно / ❌ Неверно / ⚠️ Частично</td>
+        <td>Иконка + цветовая карточка</td>
+      </tr>
+      <tr>
+        <td><strong>L2: Объяснение</strong></td>
+        <td>1-3 секунды (AI stream)</td>
+        <td>Почему верно/неверно + физическая формула + закон</td>
+        <td>Текст с LaTeX в карточке фидбэка</td>
+      </tr>
+      <tr>
+        <td><strong>L3: Направление</strong></td>
+        <td>После L2</td>
+        <td>«Попробуй ещё раз» / «Следующая задача» / «Повтори тему X»</td>
+        <td>CTA-кнопки внизу карточки</td>
+      </tr>
+    </table>
+  </div>
+
+  <div class="comparison">
+    <div>
+      <div class="col-header">❌ Неправильный ответ</div>
+      <div class="mock-feedback wrong">
+        <div class="mock-feedback-icon">❌</div>
+        <div>
+          <div class="bold" style="color:#DC2626">Не совсем. Давай разберёмся.</div>
+          <div class="text-muted" style="font-size:13px; margin-top:4px">
+            Ты написал v = 2 м/с, но обрати внимание: на участке 1-3 с путь <em>не меняется</em>. Если ΔS = 0, то v = ΔS/Δt = 0.
+          </div>
+          <div style="margin-top:10px; display:flex; gap:8px">
+            <div class="mock-btn secondary sm">Попробовать ещё</div>
+            <div class="mock-btn secondary sm">💡 Подсказку</div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div>
+      <div class="col-header">⚠️ Частично правильный</div>
+      <div class="mock-feedback partial">
+        <div class="mock-feedback-icon">⚠️</div>
+        <div>
+          <div class="bold" style="color:#D97706">Почти! Направление верное.</div>
+          <div class="text-muted" style="font-size:13px; margin-top:4px">
+            Ты правильно определил, что скорость = 0. Но в ответе не указаны единицы измерения. Правильно: <strong>v = 0 м/с</strong>.
+          </div>
+          <div style="margin-top:10px; display:flex; gap:8px">
+            <div class="mock-btn secondary sm">Исправить ответ</div>
+            <div class="mock-btn green sm">Далее →</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>Правило тона AI-фидбэка</h3>
+    <div class="label-best mb-8">Best practice: Khanmigo</div>
+    <table>
+      <tr><th>Ситуация</th><th>✅ Тон Сократа</th><th>❌ Анти-паттерн</th></tr>
+      <tr>
+        <td>Правильный ответ</td>
+        <td>«Отлично! Верное применение закона.»</td>
+        <td>«Корректно.» (слишком сухо)</td>
+      </tr>
+      <tr>
+        <td>Неправильный ответ</td>
+        <td>«Не совсем, но идея правильная. Посмотри на...»</td>
+        <td>«Неверно. Правильный ответ: 0.» (убивает мотивацию)</td>
+      </tr>
+      <tr>
+        <td>Повторная ошибка</td>
+        <td>«Давай подойдём с другой стороны. Что если...»</td>
+        <td>«Вы снова ошиблись.» (деморализация)</td>
+      </tr>
+      <tr>
+        <td>3+ попыток</td>
+        <td>«Это сложная тема. Вот пошаговое решение:...»</td>
+        <td>Продолжать спрашивать наводящие вопросы (бесконечный loop)</td>
+      </tr>
+    </table>
+  </div>
+</div>
+
+<hr>
+
+<!-- ============================================ -->
+<!-- SECTION 5: TELEGRAM -->
+<!-- ============================================ -->
+<div class="section" id="telegram">
+  <div class="section-header">
+    <div class="section-num">5</div>
+    <h2>Улучшение: Telegram-бот уведомления</h2>
+  </div>
+
+  <!-- AUDIT OF CURRENT STATE -->
+  <div class="card" style="border-left:3px solid var(--red)">
+    <h3>5.1. Аудит текущей реализации (по коду)</h3>
+    <table>
+      <tr><th>Уведомление</th><th>Сейчас</th><th>Проблемы</th></tr>
+      <tr>
+        <td><strong>Назначение ДЗ → ученику</strong></td>
+        <td>
+          ✅ Есть: <code>POST /assignments/:id/notify</code><br>
+          Текст: «📚 Новое домашнее задание: <b>Название</b>»<br>
+          Ссылка: <code>&lt;a href="...homework/{id}"&gt;Открыть ДЗ&lt;/a&gt;</code>
+        </td>
+        <td>
+          <ul class="cons" style="font-size:13px">
+            <li>Ссылка — обычный HTML <code>&lt;a&gt;</code> тег, НЕ inline button</li>
+            <li>Нет кол-ва задач и дедлайна в тексте</li>
+            <li>Нет имени репетитора (актуально при нескольких репетиторах)</li>
+            <li>Ссылка ведёт на <code>/homework/{id}</code> — это ОК, но нет WebApp button</li>
+          </ul>
+        </td>
+      </tr>
+      <tr>
+        <td><strong>Результаты ДЗ → репетитору</strong></td>
+        <td>
+          ✅ Есть: <code>notifyTutorOnSubmission()</code><br>
+          Текст: «📬 {Имя} сдал «{Название}» · Итого: {баллы}»<br>
+          Кнопка: <code>📝 Открыть submission</code><br>
+          URL: <code>/tutor/homework/{id}/results?submission={sid}</code>
+        </td>
+        <td>
+          <ul class="cons" style="font-size:13px">
+            <li><strong>«Открыть submission»</strong> — технический термин. Ученик/репетитор не говорит «submission»</li>
+            <li>URL ведёт на <code>/results?submission=...</code> — это промежуточная страница с query-параметром, не основной UI ДЗ</li>
+            <li>Нет WebApp inline button — обычная URL ссылка</li>
+            <li>Нет конкретных ошибок в тексте (хотя в коде есть error types — они формируются, но «Ошибки: Неверный ответ (1)» — длинно)</li>
+          </ul>
+        </td>
+      </tr>
+      <tr>
+        <td><strong>Напоминания о дедлайне</strong></td>
+        <td>
+          ✅ Есть: cron каждые 30 мин<br>
+          24 часа: «⏰ нужно сдать через 24 часа»<br>
+          1 час: «🔔 нужно сдать через 1 час»
+        </td>
+        <td>
+          <ul class="cons" style="font-size:13px">
+            <li>Нет прогресса ученика (сколько задач решил)</li>
+            <li>Нет мотивирующего текста</li>
+            <li>Нет inline-кнопки «Продолжить»</li>
+          </ul>
+        </td>
+      </tr>
+    </table>
+  </div>
+
+  <!-- 5.2 ASSIGNMENT NOTIFICATION -->
+  <div class="card">
+    <h3>5.2. Уведомление ученику: ДЗ назначено</h3>
+    <p class="text-muted mb-8">Цель: уведомление должно <strong>приглашать на сайт для решения</strong>, а не просто информировать.</p>
+
+    <div class="comparison">
+      <div>
+        <div class="col-header">🔴 Сейчас</div>
+        <div class="tg-msg bot">
+          📚 Новое домашнее задание: <strong>ЕГЭ №1, 3</strong><br><br>
+          Предмет: Физика<br>
+          <a href="#" style="color:#1565C0">Открыть ДЗ</a>
+        </div>
+        <ul class="cons mt-8" style="font-size:12px">
+          <li>Обычная ссылка, не inline button</li>
+          <li>Нет задач, дедлайна, репетитора</li>
+          <li>Не мотивирует начать</li>
+        </ul>
+      </div>
+      <div>
+        <div class="col-header">🟢 Предложение</div>
+        <div class="tg-msg bot">
+          📚 <strong>Новое ДЗ от Ивана Петровича</strong><br><br>
+          <strong>Кинематика</strong> · Физика<br>
+          📋 5 задач · ⏰ до 22 марта<br><br>
+          <em>Начни сейчас — AI поможет разобраться!</em>
+        </div>
+        <div style="margin-top:4px">
+          <div class="tg-btn" style="background:#E8F5E9; border-color:#4CAF50; color:#2E7D32; font-weight:600; width:100%; text-align:center; display:block">▶️ Начать решать</div>
+        </div>
+        <ul class="pros mt-8" style="font-size:12px">
+          <li>WebApp inline button (открывает сайт прямо в Telegram)</li>
+          <li>Имя репетитора, кол-во задач, дедлайн</li>
+          <li>Мотивирующий CTA «AI поможет разобраться»</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="card" style="background:#F0FDF4; border-color:#BBF7D0; margin-top:16px">
+      <h3 style="color:var(--green)">Техническое решение: WebApp Button vs URL</h3>
+      <table>
+        <tr><th>Подход</th><th>Плюсы</th><th>Минусы</th><th>Рекомендация</th></tr>
+        <tr>
+          <td><strong>Telegram WebApp Button</strong><br><code>web_app: { url }</code></td>
+          <td>Открывает сайт прямо внутри Telegram (как мини-приложение). Ученик не уходит из мессенджера. Фулл-скрин.</td>
+          <td>Не все ученики знают что это. На десктопе открывает в sidebar (узко).</td>
+          <td><span class="label-priority p0" style="background:#DCFCE7; color:var(--green)">Рекомендуемый для mobile</span></td>
+        </tr>
+        <tr>
+          <td><strong>Inline URL Button</strong><br><code>url: "https://..."</code></td>
+          <td>Открывает в браузере (полноценный UI). Привычно. Работает везде.</td>
+          <td>Ученик уходит из Telegram. Дополнительный переход.</td>
+          <td><span class="label-priority p1">Fallback для десктопа</span></td>
+        </tr>
+      </table>
+      <p class="text-muted mt-8" style="font-size:13px"><strong>Рекомендация:</strong> использовать <code>web_app</code> button как основной (ученик остаётся в Telegram → сразу решает). URL ведёт на <code>/homework/{assignmentId}</code> — это guided workspace, не промежуточная страница.</p>
+    </div>
+  </div>
+
+  <!-- 5.3 RESULTS NOTIFICATION TO TUTOR -->
+  <div class="card">
+    <h3>5.3. Уведомление репетитору: ученик сдал ДЗ</h3>
+
+    <div class="comparison">
+      <div>
+        <div class="col-header">🔴 Сейчас (по скриншоту)</div>
+        <div class="tg-msg bot">
+          📬 <strong>VladimirKam</strong> сдал «ДЗ Законы Ньютона 17.03»<br>
+          📊 Итого: <strong>0/1</strong> (0%)<br>
+          ✅ 0 | ❌ 1 | Ошибки: Неверный ответ (1)
+        </div>
+        <div style="margin-top:4px">
+          <div class="tg-btn">📝 Открыть submission</div>
+        </div>
+        <ul class="cons mt-8" style="font-size:12px">
+          <li><strong>«Открыть submission»</strong> — тех. термин, непонятно</li>
+          <li>URL: <code>/tutor/homework/{id}/results?submission={sid}</code> — ведёт на страницу Results с query, не на основной Detail</li>
+          <li>Иконка 📝 не соответствует действию «посмотреть результат»</li>
+          <li>Нет второй кнопки для быстрого действия</li>
+        </ul>
+      </div>
+      <div>
+        <div class="col-header">🟢 Предложение</div>
+        <div class="tg-msg bot">
+          📬 <strong>Владимир</strong> сдал ДЗ<br><br>
+          <strong>Законы Ньютона 17.03</strong><br>
+          Результат: <strong>0/1</strong> (0%) — нужен ваш взгляд<br><br>
+          ❌ Задача 1: Неверный ответ
+        </div>
+        <div style="margin-top:4px; display:flex; gap:4px">
+          <div class="tg-btn" style="flex:1; text-align:center; font-weight:600">📊 Смотреть результаты</div>
+          <div class="tg-btn" style="flex:1; text-align:center">💬 Написать ученику</div>
+        </div>
+        <ul class="pros mt-8" style="font-size:12px">
+          <li><strong>«Смотреть результаты»</strong> — понятный текст</li>
+          <li>URL: <code>/tutor/homework/{id}</code> → Detail page (с tab results)</li>
+          <li>Вторая кнопка «Написать ученику» → guided chat для комментария</li>
+          <li>При 0% добавляет «нужен ваш взгляд» — приоритизация внимания</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="card" style="margin-top:16px">
+      <h3>URL: куда ведёт кнопка?</h3>
+      <table>
+        <tr><th>Подход</th><th>URL</th><th>Что видит репетитор</th><th>Рекомендация</th></tr>
+        <tr>
+          <td><span class="label-current">Сейчас</span></td>
+          <td><code>/tutor/homework/{id}/results?submission={sid}</code></td>
+          <td>Страница Results для конкретного submission. Если submission невалиден или нет query — может быть пустой экран.</td>
+          <td>—</td>
+        </tr>
+        <tr>
+          <td><span class="label-proposed">Вариант A</span></td>
+          <td><code>/tutor/homework/{id}</code></td>
+          <td>Detail page ДЗ — сводка по всем ученикам, можно раскрыть конкретного. Единый entry point.</td>
+          <td><span class="label-priority p0" style="background:#DCFCE7; color:var(--green)">Рекомендуемый</span></td>
+        </tr>
+        <tr>
+          <td><span class="label-proposed">Вариант B</span></td>
+          <td><code>/tutor/homework/{id}?student={studentId}&tab=results</code></td>
+          <td>Detail page, но сразу открывает вкладку Results с раскрытым учеником. Ещё точнее, но зависит от фронтенда.</td>
+          <td><span class="label-priority p1">Если реализовать deeplink</span></td>
+        </tr>
+      </table>
+    </div>
+
+    <div class="card" style="margin-top:16px">
+      <h3>Адаптивный тон сообщения по результату</h3>
+      <table>
+        <tr><th>Результат</th><th>Тон</th><th>Текст-суффикс</th></tr>
+        <tr>
+          <td>80-100%</td>
+          <td>Позитивный</td>
+          <td>«Отличный результат!»</td>
+        </tr>
+        <tr>
+          <td>50-79%</td>
+          <td>Нейтральный</td>
+          <td>«Есть над чем поработать»</td>
+        </tr>
+        <tr>
+          <td>0-49%</td>
+          <td>Привлечение внимания</td>
+          <td>«Нужен ваш взгляд» → мотивирует репетитора проверить вручную</td>
+        </tr>
+        <tr>
+          <td>AI uncertainty</td>
+          <td>Предупреждение</td>
+          <td>«⚠️ AI не уверен — проверьте вручную»</td>
+        </tr>
+      </table>
+    </div>
+  </div>
+
+  <!-- 5.4 REMINDERS -->
+  <div class="card-grid">
+    <div class="card">
+      <div class="col-header mb-8">🟢 УЛУЧШЕНИЕ: Напоминание ученику</div>
+      <div class="tg-msg bot">
+        <strong>⏰ Не забудь!</strong><br><br>
+        <strong>Кинематика</strong> — осталось 3 задачи<br>
+        Дедлайн: <strong>завтра, 20:00</strong><br><br>
+        <em>Ты уже решил 2 из 5 — осталось немного!</em> 💪
+      </div>
+      <div style="margin-top:4px">
+        <div class="tg-btn" style="width:100%; text-align:center; display:block">▶️ Продолжить (2/5)</div>
+      </div>
+      <p class="text-muted mt-8" style="font-size:12px">WebApp button → <code>/homework/{id}</code>. Показывает прогресс. Адаптивный текст: 0 решено → «Начни сейчас», >50% → «Осталось немного!»</p>
+    </div>
+
+    <div class="card">
+      <div class="col-header mb-8">🟢 НОВОЕ: Мотивация (streak)</div>
+      <div class="tg-msg bot">
+        <strong>🔥 3 дня подряд!</strong><br><br>
+        Ты решаешь ДЗ 3 дня подряд — отличный результат!<br><br>
+        Новое ДЗ уже ждёт: <strong>Законы Ньютона</strong> (4 задачи)
+      </div>
+      <div style="margin-top:4px">
+        <div class="tg-btn" style="width:100%; text-align:center; display:block">▶️ Решить</div>
+      </div>
+      <p class="text-muted mt-8" style="font-size:12px">Trigger: ученик сдал ДЗ → проверить streak → если 3+ дней подряд, поздравить. Максимум 1 раз в день.</p>
+    </div>
+  </div>
+
+  <!-- FULL CYCLE TABLE -->
+  <div class="card">
+    <h3>5.5. Полный цикл уведомлений: ученик + репетитор</h3>
+    <table>
+      <tr><th>#</th><th>Кому</th><th>Триггер</th><th>Кнопка</th><th>URL</th><th>Статус</th></tr>
+      <tr>
+        <td>1</td>
+        <td>Ученик</td>
+        <td><strong>ДЗ назначено</strong></td>
+        <td>▶️ Начать решать</td>
+        <td><code>/homework/{id}</code></td>
+        <td>✅ Есть (улучшить кнопку)</td>
+      </tr>
+      <tr>
+        <td>2</td>
+        <td>Ученик</td>
+        <td><strong>24ч до дедлайна</strong></td>
+        <td>▶️ Продолжить (N/M)</td>
+        <td><code>/homework/{id}</code></td>
+        <td>✅ Есть (добавить прогресс)</td>
+      </tr>
+      <tr>
+        <td>3</td>
+        <td>Ученик</td>
+        <td><strong>1ч до дедлайна</strong></td>
+        <td>▶️ Решить сейчас</td>
+        <td><code>/homework/{id}</code></td>
+        <td>✅ Есть (добавить прогресс)</td>
+      </tr>
+      <tr>
+        <td>4</td>
+        <td><strong>Репетитор</strong></td>
+        <td><strong>Ученик сдал ДЗ</strong></td>
+        <td>📊 Смотреть результаты</td>
+        <td><code>/tutor/homework/{id}</code></td>
+        <td>✅ Есть (исправить текст + URL)</td>
+      </tr>
+      <tr>
+        <td>5</td>
+        <td>Ученик</td>
+        <td><strong>Результаты AI-проверки</strong></td>
+        <td>📊 Мои результаты</td>
+        <td><code>/homework/{id}/results</code></td>
+        <td><span class="label-priority p0">Новое</span></td>
+      </tr>
+      <tr>
+        <td>6</td>
+        <td>Ученик</td>
+        <td><strong>Комментарий репетитора</strong></td>
+        <td>💬 Открыть чат</td>
+        <td><code>/homework/{id}</code></td>
+        <td><span class="label-priority p1">Новое</span></td>
+      </tr>
+      <tr>
+        <td>7</td>
+        <td>Ученик</td>
+        <td><strong>Streak 3+ дней</strong></td>
+        <td>▶️ Решить</td>
+        <td><code>/homework/{id}</code></td>
+        <td><span class="label-priority p2">Новое</span></td>
+      </tr>
+    </table>
+  </div>
+
+  <!-- ANTI-SPAM -->
+  <div class="card">
+    <h3>Anti-spam правила</h3>
+    <ul class="pros">
+      <li>Максимум 3 уведомления в день на одного ученика</li>
+      <li>Не отправлять уведомления с 22:00 до 08:00 (часовой пояс ученика)</li>
+      <li>Streak-уведомления — максимум 1 раз в день</li>
+      <li>Если ученик уже решил ДЗ — не отправлять напоминание о дедлайне</li>
+      <li>Дедупликация через homework_tutor_reminder_log (уже реализовано)</li>
+      <li>Кнопка «Начать решать» → WebApp button (web_app URL), не обычная ссылка</li>
+    </ul>
+  </div>
+
+  <!-- PRINCIPLE: TG → SITE -->
+  <div class="card" style="background:#EFF6FF; border-color:#93C5FD">
+    <h3 style="color:#1D4ED8">Принцип: Telegram = трамплин → Сайт</h3>
+    <p style="font-size:14px">Telegram-бот не должен быть самостоятельной средой решения ДЗ. Его задача — <strong>приглашать на сайт</strong>, где ученик получает полный guided experience с AI, LaTeX, изображениями, историей чата.</p>
+    <table style="margin-top:12px">
+      <tr><th>В боте</th><th>На сайте</th></tr>
+      <tr><td>Уведомление + 1 кнопка</td><td>Полный guided solving workspace</td></tr>
+      <tr><td>Краткий результат (баллы)</td><td>Детальный разбор + чат с AI</td></tr>
+      <tr><td>Быстрые действия (mark paid)</td><td>Полное управление ДЗ</td></tr>
+      <tr><td>Reminder + мотивация</td><td>Progress dashboard + stepper</td></tr>
+    </table>
+    <p class="text-muted mt-8" style="font-size:13px">Исключение: /pay flow в боте для репетитора — это ОК, т.к. это простое действие (1 клик = отметить оплату).</p>
+  </div>
+</div>
+
+<hr>
+
+<!-- ============================================ -->
+<!-- SECTION 6: SUMMARY -->
+<!-- ============================================ -->
+<div class="section" id="summary">
+  <div class="section-header">
+    <div class="section-num">6</div>
+    <h2>Сводная таблица улучшений</h2>
+  </div>
+
+  <div class="card" style="padding:0; overflow-x:auto">
+    <table>
+      <tr><th>#</th><th>Улучшение</th><th>Область</th><th>Impact</th><th>Effort</th><th>Приоритет</th></tr>
+      <tr>
+        <td>1</td>
+        <td><strong>Progress bar на карточках ДЗ</strong></td>
+        <td>Список ДЗ</td>
+        <td>Высокий</td>
+        <td>S</td>
+        <td><span class="label-priority p0">P0</span></td>
+      </tr>
+      <tr>
+        <td>2</td>
+        <td><strong>Дедлайн + urgency на карточках</strong></td>
+        <td>Список ДЗ</td>
+        <td>Высокий</td>
+        <td>S</td>
+        <td><span class="label-priority p0">P0</span></td>
+      </tr>
+      <tr>
+        <td>3</td>
+        <td><strong>Финальный экран «Всё решено!» + итоги</strong></td>
+        <td>Guided solving</td>
+        <td>Высокий</td>
+        <td>M</td>
+        <td><span class="label-priority p0">P0</span></td>
+      </tr>
+      <tr>
+        <td>4</td>
+        <td><strong>Мини-прогресс «2/5» в header</strong></td>
+        <td>Guided solving</td>
+        <td>Высокий</td>
+        <td>S</td>
+        <td><span class="label-priority p0">P0</span></td>
+      </tr>
+      <tr>
+        <td>5</td>
+        <td><strong>📎 Загрузка фото/PDF в guided chat</strong></td>
+        <td>Guided solving</td>
+        <td>Высокий</td>
+        <td>L</td>
+        <td><span class="label-priority p0">P0</span></td>
+      </tr>
+      <tr>
+        <td>6</td>
+        <td><strong>📋 Clipboard paste (Ctrl+V)</strong></td>
+        <td>Guided solving</td>
+        <td>Высокий</td>
+        <td>S</td>
+        <td><span class="label-priority p0">P0</span></td>
+      </tr>
+      <tr>
+        <td>7</td>
+        <td><strong>Уведомление: ДЗ назначено (WebApp button)</strong></td>
+        <td>Telegram</td>
+        <td>Высокий</td>
+        <td>S</td>
+        <td><span class="label-priority p0">P0</span></td>
+      </tr>
+      <tr>
+        <td>8</td>
+        <td><strong>Уведомление: результаты → репетитору (исправить текст + URL)</strong></td>
+        <td>Telegram</td>
+        <td>Высокий</td>
+        <td>S</td>
+        <td><span class="label-priority p0">P0</span></td>
+      </tr>
+      <tr>
+        <td>9</td>
+        <td><strong>Визуальные типы сообщений AI</strong></td>
+        <td>Guided solving</td>
+        <td>Средний</td>
+        <td>M</td>
+        <td><span class="label-priority p1">P1</span></td>
+      </tr>
+      <tr>
+        <td>8</td>
+        <td><strong>Трёхуровневый фидбэк (✅/❌/⚠️)</strong></td>
+        <td>Guided solving</td>
+        <td>Средний</td>
+        <td>M</td>
+        <td><span class="label-priority p1">P1</span></td>
+      </tr>
+      <tr>
+        <td>9</td>
+        <td><strong>Условие задачи: крупнее + full-width image</strong></td>
+        <td>Guided solving</td>
+        <td>Средний</td>
+        <td>S</td>
+        <td><span class="label-priority p1">P1</span></td>
+      </tr>
+      <tr>
+        <td>10</td>
+        <td><strong>Компактные кнопки навигации</strong></td>
+        <td>Guided solving</td>
+        <td>Средний</td>
+        <td>S</td>
+        <td><span class="label-priority p1">P1</span></td>
+      </tr>
+      <tr>
+        <td>11</td>
+        <td><strong>Вся карточка кликабельна</strong></td>
+        <td>Список ДЗ</td>
+        <td>Средний</td>
+        <td>S</td>
+        <td><span class="label-priority p1">P1</span></td>
+      </tr>
+      <tr>
+        <td>12</td>
+        <td><strong>Celebration animation при ✅</strong></td>
+        <td>Guided solving</td>
+        <td>Средний</td>
+        <td>S</td>
+        <td><span class="label-priority p1">P1</span></td>
+      </tr>
+      <tr>
+        <td>13</td>
+        <td><strong>Напоминания с прогрессом ДЗ</strong></td>
+        <td>Telegram</td>
+        <td>Средний</td>
+        <td>S</td>
+        <td><span class="label-priority p1">P1</span></td>
+      </tr>
+      <tr>
+        <td>14</td>
+        <td><strong>Уведомление: комментарий репетитора</strong></td>
+        <td>Telegram</td>
+        <td>Средний</td>
+        <td>S</td>
+        <td><span class="label-priority p1">P1</span></td>
+      </tr>
+      <tr>
+        <td>15</td>
+        <td><strong>Stepper с коннекторами + баллы</strong></td>
+        <td>Guided solving</td>
+        <td>Низкий</td>
+        <td>M</td>
+        <td><span class="label-priority p2">P2</span></td>
+      </tr>
+      <tr>
+        <td>16</td>
+        <td><strong>Streak-мотивация (🔥)</strong></td>
+        <td>Telegram + UI</td>
+        <td>Низкий</td>
+        <td>L</td>
+        <td><span class="label-priority p2">P2</span></td>
+      </tr>
+    </table>
+  </div>
+
+  <div class="card">
+    <h3>Рекомендуемый порядок реализации (4 спринта)</h3>
+
+    <div style="margin-top:16px">
+      <div class="bold" style="color:var(--primary); font-size:15px; margin-bottom:8px">Sprint S2: Information Architecture (1 неделя)</div>
+      <ul class="pros" style="font-size:13px">
+        <li>Progress bar + дедлайн на карточках ДЗ в списке</li>
+        <li>Мини-прогресс «2/5» в header guided workspace</li>
+        <li>Условие задачи: крупнее текст + full-width image</li>
+        <li>Компактные кнопки навигации (← | Подсказка | Далее →)</li>
+      </ul>
+    </div>
+
+    <div style="margin-top:20px">
+      <div class="bold" style="color:var(--green); font-size:15px; margin-bottom:8px">Sprint S3: Photo Upload + Feedback (1-2 недели)</div>
+      <ul class="pros" style="font-size:13px">
+        <li><strong>📎 Кнопка вложения</strong> (камера/галерея/файл) + превью</li>
+        <li><strong>📋 Clipboard paste</strong> (Ctrl+V на десктопе) для скриншотов</li>
+        <li>Отображение фото в чате (thumbnail + lightbox zoom)</li>
+        <li>Финальный экран «Всё решено!» + итоги</li>
+        <li>Визуальные типы сообщений AI (intro/hint/feedback стили)</li>
+        <li>Трёхуровневый фидбэк (✅ верно / ❌ неверно / ⚠️ частично)</li>
+      </ul>
+    </div>
+
+    <div style="margin-top:20px">
+      <div class="bold" style="color:var(--orange); font-size:15px; margin-bottom:8px">Sprint S4: Telegram Notifications (1 неделя)</div>
+      <ul class="pros" style="font-size:13px">
+        <li>Исправить «Открыть submission» → «📊 Смотреть результаты» + URL на Detail page</li>
+        <li>Уведомление ДЗ назначено: WebApp button + прогресс + имя репетитора</li>
+        <li>Напоминания с прогрессом ученика (N из M решено)</li>
+        <li>Уведомление о результатах AI-проверки → ученику</li>
+      </ul>
+    </div>
+
+    <div style="margin-top:20px">
+      <div class="bold" style="color:var(--red); font-size:15px; margin-bottom:8px">Sprint S5: Polish (1 неделя)</div>
+      <ul class="pros" style="font-size:13px">
+        <li>Drag & Drop зона на десктопе</li>
+        <li>HEIC → JPG конвертация (iPhone)</li>
+        <li>Celebration animation при правильном ответе</li>
+        <li>Уведомление о комментарии репетитора</li>
+        <li>Streak-мотивация</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="card" style="background: #F0FDF4; border-color: #BBF7D0">
+    <h3 style="color:var(--green)">Соответствие UX-принципам Сократа (doc 16)</h3>
+    <table>
+      <tr><th>Принцип</th><th>Как улучшения соответствуют</th></tr>
+      <tr>
+        <td>П1. Jobs-first</td>
+        <td>Job C: «Провести ученика через прорешивание» — все улучшения усиливают именно этот Job</td>
+      </tr>
+      <tr>
+        <td>П5. AI → действие</td>
+        <td>Фидбэк AI включает action layer: «Попробовать ещё» / «Далее» / «Подсказку»</td>
+      </tr>
+      <tr>
+        <td>П6. Прозрачный статус</td>
+        <td>Progress bar, stepper с баллами, мини-прогресс в header — ученик всегда знает где он</td>
+      </tr>
+      <tr>
+        <td>П7. Progressive disclosure</td>
+        <td>Финальный экран показывает summary; детали — по клику</td>
+      </tr>
+      <tr>
+        <td>П12. Надёжность > эффектность</td>
+        <td>Celebration через CSS, не framer-motion. Фидбэк конструктивный, не «вау»</td>
+      </tr>
+      <tr>
+        <td>П16. Физика ≠ текст</td>
+        <td>LaTeX в фидбэке, формулы в карточках фидбэка, графики в условии крупнее</td>
+      </tr>
+    </table>
+  </div>
+</div>
+
+</div>
+
+<script>
+// Simple smooth scroll for nav
+document.querySelectorAll('.nav-tab').forEach(tab => {
+  tab.addEventListener('click', function(e) {
+    e.preventDefault();
+    const target = document.querySelector(this.getAttribute('href'));
+    if (target) {
+      target.scrollIntoView({ behavior: 'smooth' });
+      document.querySelectorAll('.nav-tab').forEach(t => t.classList.remove('active'));
+      this.classList.add('active');
+    }
+  });
+});
+
+// Update active tab on scroll
+window.addEventListener('scroll', () => {
+  const sections = document.querySelectorAll('.section');
+  const tabs = document.querySelectorAll('.nav-tab');
+  let current = '';
+  sections.forEach(section => {
+    const top = section.offsetTop - 100;
+    if (window.scrollY >= top) current = section.id;
+  });
+  tabs.forEach(tab => {
+    tab.classList.remove('active');
+    if (tab.getAttribute('href') === '#' + current) tab.classList.add('active');
+  });
+});
+</script>
+
+</body>
+</html>
