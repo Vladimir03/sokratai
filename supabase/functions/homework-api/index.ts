@@ -2310,7 +2310,113 @@ async function handleMaterialSignedUrl(
   return jsonOk(cors, { url: signedData.signedUrl });
 }
 
-// ─── Helper: resolve task image URL to a signed HTTP URL for AI ──────────────
+function parseStorageRef(
+  value: string | null | undefined,
+  defaultBucket: string,
+): { bucket: string; objectPath: string } | null {
+  if (!isNonEmptyString(value)) return null;
+  const trimmed = value.trim();
+
+  if (trimmed.startsWith("storage://")) {
+    const rest = trimmed.slice("storage://".length);
+    const slashIdx = rest.indexOf("/");
+    if (slashIdx <= 0 || slashIdx === rest.length - 1) {
+      return null;
+    }
+    return {
+      bucket: rest.slice(0, slashIdx),
+      objectPath: rest.slice(slashIdx + 1).replace(/^\/+/, ""),
+    };
+  }
+
+  return {
+    bucket: defaultBucket,
+    objectPath: trimmed.replace(/^\/+/, ""),
+  };
+}
+
+async function createSignedStorageUrl(
+  db: SupabaseClient,
+  storageRef: string | null | undefined,
+  defaultBucket: string,
+): Promise<string | null> {
+  const parsed = parseStorageRef(storageRef, defaultBucket);
+  if (!parsed?.bucket || !parsed.objectPath) {
+    return null;
+  }
+
+  const { data, error } = await db.storage
+    .from(parsed.bucket)
+    .createSignedUrl(parsed.objectPath, 3600);
+
+  if (error || !data?.signedUrl) {
+    console.error("homework_api_signed_url_failed", {
+      bucket: parsed.bucket,
+      objectPath: parsed.objectPath,
+      error: error?.message,
+    });
+    return null;
+  }
+
+  return data.signedUrl;
+}
+
+async function loadLatestStudentImageUrlForTask(
+  db: SupabaseClient,
+  threadId: string,
+  taskOrder: number,
+): Promise<string | null> {
+  const { data: latestMsg, error } = await db
+    .from("homework_tutor_thread_messages")
+    .select("image_url")
+    .eq("thread_id", threadId)
+    .eq("role", "user")
+    .eq("task_order", taskOrder)
+    .not("image_url", "is", null)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (error) {
+    console.error("homework_api_latest_student_image_failed", {
+      threadId,
+      taskOrder,
+      error: error.message,
+    });
+    return null;
+  }
+
+  const imageRef = typeof latestMsg?.image_url === "string" ? latestMsg.image_url.trim() : "";
+  if (!imageRef) return null;
+  if (imageRef.startsWith("http://")) {
+    console.warn("homework_api_latest_student_image_rejected", {
+      reason: "non_https_url",
+      threadId,
+      taskOrder,
+    });
+    return null;
+  }
+  if (imageRef.startsWith("https://")) {
+    const supabaseUrl = Deno.env.get("SUPABASE_URL");
+    const isAllowedSignedUrl = Boolean(
+      supabaseUrl &&
+      imageRef.startsWith(`${supabaseUrl}/storage/v1/object/sign/`),
+    );
+    if (isAllowedSignedUrl) {
+      return imageRef;
+    }
+    console.warn("homework_api_latest_student_image_rejected", {
+      reason: "external_https_url",
+      threadId,
+      taskOrder,
+    });
+    return null;
+  }
+
+  return await createSignedStorageUrl(db, imageRef, "homework-submissions");
+}
+
+// ─── Helper: resolve task image URL to an AI-compatible data URL ─────────────
 
 /** Convert ArrayBuffer to base64 string in chunks to avoid stack overflow on large images. */
 function arrayBufferToBase64(buffer: ArrayBuffer): string {
@@ -3216,8 +3322,9 @@ async function handleCheckAnswer(
     })
     .eq("id", currentState.id);
 
-  // Resolve task image to a signed HTTP URL for AI vision
+  // Resolve task image into an AI-compatible data URL and latest student image into a signed URL
   const taskImageSignedUrl = await resolveTaskImageUrlForAI(db, task.task_image_url);
+  const studentImageUrl = await loadLatestStudentImageUrlForTask(db, threadId, currentOrder);
 
   // Call AI evaluation
   const totalTasks = tasks.length;
@@ -3225,6 +3332,7 @@ async function handleCheckAnswer(
     studentAnswer: answer,
     taskText: task.task_text ?? "",
     taskImageUrl: taskImageSignedUrl,
+    studentImageUrl,
     correctAnswer: task.correct_answer,
     rubricText: task.rubric_text,
     subject: assignment.subject ?? "math",
@@ -3446,13 +3554,15 @@ async function handleRequestHint(
     .update({ last_student_message_at: new Date().toISOString() })
     .eq("id", threadId);
 
-  // Resolve task image to a signed HTTP URL for AI vision
+  // Resolve task image into an AI-compatible data URL and latest student image into a signed URL
   const hintTaskImageUrl = await resolveTaskImageUrlForAI(db, task.task_image_url);
+  const studentImageUrl = await loadLatestStudentImageUrlForTask(db, threadId, currentOrder);
 
   // Call AI for hint
   const hintResult = await generateHint({
     taskText: task.task_text ?? "",
     taskImageUrl: hintTaskImageUrl,
+    studentImageUrl,
     correctAnswer: task.correct_answer,
     subject: assignment?.subject ?? "math",
     conversationHistory: recentMessages ?? [],

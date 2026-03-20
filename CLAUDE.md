@@ -211,7 +211,7 @@ Legacy student-only система (`homework_sets`, `homework_tasks`, `homework
 - ID файла: `Date.now()-Math.random()` (не `crypto.randomUUID` — Safari < 15.4)
 - **answer+image end-to-end**: `checkAnswer()` принимает optional `imageUrl`, backend `handleCheckAnswer` парсит `image_url` из body и сохраняет в `homework_tutor_thread_messages`
 - **retry+image**: retry failed user message передаёт `image_url` из сохранённого сообщения, не теряет вложение
-- Phase 2 покрывает UI + upload + persist; передача student image в AI (evaluateStudentAnswer, streamChat) остаётся в Phase 4
+- Phase 2 покрывает UI + upload + persist; Phase 4 доводит `student image -> AI` для `answer`, `hint` и `question`, при этом `bootstrap` по дизайну остаётся без student image
 
 ### Таблицы БД
 - `homework_tutor_assignments` — задания (draft/active/archived, workflow_mode)
@@ -234,14 +234,15 @@ Legacy student-only система (`homework_sets`, `homework_tasks`, `homework
 
 **Правило**: перед передачей изображения в AI (Lovable/Gemini) **ОБЯЗАТЕЛЬНО**:
 1. Преобразовать `storage://` → подписанный HTTP URL через `db.storage.createSignedUrl()` (service_role) или через бэкенд-эндпоинт `GET /assignments/:id/tasks/:taskId/image-url`
-2. Передать как multimodal `{ type: "image_url", image_url: { url: "https://..." } }` в массиве `content` user-сообщения
-3. **НИКОГДА** не вставлять `storage://` или raw URL как текст в промпт — AI его не увидит
+2. Если путь идёт через Lovable gateway, который не скачивает remote image сам, подписанный URL нужно дополнительно заинлайнить в `data:image/...;base64,...` перед вызовом модели
+3. Передать как multimodal `{ type: "image_url", image_url: { url: "https://..." } }` или `data:` URL в массиве `content` user-сообщения
+4. **НИКОГДА** не вставлять `storage://` или raw URL как текст в промпт — AI его не увидит
 
 **Четыре пути к AI в guided chat** (все должны передавать изображение корректно):
-- `answer` → `handleCheckAnswer` → `evaluateStudentAnswer` в `guided_ai.ts` (resolved в `index.ts`)
-- `hint` → `handleRequestHint` → `generateHint` в `guided_ai.ts` (resolved в `index.ts`)
-- `question` → `streamChat()` → `/functions/v1/chat` (resolved на фронтенде, передаётся как `taskImageUrl`)
-- `bootstrap` → `streamChat()` → `/functions/v1/chat` (resolved на фронтенде, передаётся как `taskImageUrl`)
+- `answer` → `handleCheckAnswer` → `evaluateStudentAnswer` в `guided_ai.ts` (task image resolved в `index.ts`, latest student image resolved в signed URL и inline-ится в `guided_ai.ts`)
+- `hint` → `handleRequestHint` → `generateHint` в `guided_ai.ts` (task image resolved в `index.ts`, latest student image resolved в signed URL и inline-ится в `guided_ai.ts`)
+- `question` → `streamChat()` → `/functions/v1/chat` (resolved на фронтенде, передаются `taskImageUrl` и optional `studentImageUrl`, затем backend inline-ит их в base64/data URL)
+- `bootstrap` → `streamChat()` → `/functions/v1/chat` (resolved на фронтенде, передаётся только `taskImageUrl`; student image на intro не передаётся по дизайну)
 
 При добавлении нового пути к AI с изображениями — проверить ВСЕ вызывающие точки, не только основную.
 

@@ -19,6 +19,8 @@ interface ChatRequestBody {
   taskContext?: string;
   /** Signed HTTP URL of a homework task image — injected as multimodal image_url part */
   taskImageUrl?: string;
+  /** Signed HTTP URL of the latest student solution image — injected as multimodal image_url part */
+  studentImageUrl?: string;
   chatId?: string;
   userId?: string;
   responseProfile?: ResponseProfile;
@@ -30,6 +32,8 @@ interface ChatRequestBody {
 const ALLOWED_IMAGE_DOMAINS = [
   `${Deno.env.get("SUPABASE_URL")}/storage/v1/object/sign/chat-images/`,
   `${Deno.env.get("SUPABASE_URL")}/storage/v1/object/sign/homework-task-images/`,
+  `${Deno.env.get("SUPABASE_URL")}/storage/v1/object/sign/homework-submissions/`,
+  `${Deno.env.get("SUPABASE_URL")}/storage/v1/object/sign/homework-images/`,
 ];
 
 /** Max image size (5 MB raw ≈ 6.7 MB base64) to stay within gateway body limits. */
@@ -111,6 +115,60 @@ function isValidImageUrl(url: string): boolean {
     console.error("[SECURITY] Invalid URL format:", url, error);
     return false;
   }
+}
+
+interface ChatPromptImageAttachment {
+  label: string;
+  dataUrl: string;
+}
+
+function extractMessageText(content: unknown): string {
+  if (typeof content === "string") {
+    return content;
+  }
+
+  if (!Array.isArray(content)) {
+    return "";
+  }
+
+  return content
+    .filter((part) => part?.type === "text" && typeof part.text === "string")
+    .map((part) => part.text)
+    .join("\n");
+}
+
+function injectHomeworkImagesIntoLastUserMessage(
+  messages: Array<{ role: string; content: unknown }>,
+  attachments: ChatPromptImageAttachment[],
+): void {
+  if (attachments.length === 0) return;
+
+  let lastUserIdx = -1;
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    if (messages[i]?.role === "user") {
+      lastUserIdx = i;
+      break;
+    }
+  }
+
+  if (lastUserIdx < 0) return;
+
+  const original = messages[lastUserIdx];
+  const originalText = extractMessageText(original.content).trim();
+  const multimodalContent = attachments.flatMap((attachment) => ([
+    { type: "text", text: attachment.label },
+    { type: "image_url", image_url: { url: attachment.dataUrl } },
+  ]));
+
+  multimodalContent.push({
+    type: "text",
+    text: originalText || "Ученик приложил решение на изображении.",
+  });
+
+  messages[lastUserIdx] = {
+    role: original.role,
+    content: multimodalContent,
+  };
 }
 
 const SYSTEM_PROMPT = `Ты опытный репетитор ЕГЭ по ВСЕМ школьным предметам.
@@ -522,7 +580,7 @@ serve(async (req) => {
       
       userId = body.userId;
       
-      const { messages, systemPrompt, taskContext, taskImageUrl, chatId } = body;
+      const { messages, systemPrompt, taskContext, taskImageUrl, studentImageUrl, chatId } = body;
       const responseProfile = normalizeResponseProfile(body.responseProfile);
       const responseMode = normalizeResponseMode(body.responseMode);
       const maxChars = normalizeMaxChars(body.maxChars);
@@ -549,6 +607,7 @@ serve(async (req) => {
         systemPrompt,
         taskContext,
         taskImageUrl,
+        studentImageUrl,
         chatId,
         responseProfile,
         responseMode,
@@ -591,7 +650,7 @@ serve(async (req) => {
       }
 
       const body = await req.json() as ChatRequestBody;
-      const { messages, systemPrompt, taskContext, taskImageUrl, chatId } = body;
+      const { messages, systemPrompt, taskContext, taskImageUrl, studentImageUrl, chatId } = body;
       const responseProfile = normalizeResponseProfile(body.responseProfile);
       const responseMode = normalizeResponseMode(body.responseMode);
       const maxChars = normalizeMaxChars(body.maxChars);
@@ -602,6 +661,7 @@ serve(async (req) => {
         systemPrompt,
         taskContext,
         taskImageUrl,
+        studentImageUrl,
         chatId,
         responseProfile,
         responseMode,
@@ -624,6 +684,7 @@ async function processAIRequest(
   systemPrompt?: string,
   taskContext?: string,
   taskImageUrl?: string,
+  studentImageUrl?: string,
   chatId?: string,
   responseProfile: ResponseProfile = "default",
   responseMode: ResponseMode = "dialog",
@@ -713,35 +774,57 @@ async function processAIRequest(
     };
   }));
 
-  // If a task image URL is provided (homework context), download it and inject
-  // as a base64 data URL into the first user message so the AI can see it.
-  // The Lovable gateway does NOT fetch external URLs — base64 inline is required.
-  console.log("📷 taskImageUrl received:", taskImageUrl ? `present (${taskImageUrl.slice(0, 80)}...)` : "absent");
-  if (taskImageUrl && typeof taskImageUrl === "string" && isValidImageUrl(taskImageUrl)) {
-    console.log("📷 taskImageUrl passed isValidImageUrl, fetching as base64...");
-    const base64DataUrl = await fetchImageAsBase64DataUrl(taskImageUrl);
-    if (base64DataUrl) {
-      const firstUserIdx = transformedMessages.findIndex((m: any) => m.role === "user");
-      if (firstUserIdx >= 0) {
-        const original = transformedMessages[firstUserIdx];
-        const textContent = typeof original.content === "string"
-          ? original.content
-          : Array.isArray(original.content)
-            ? (original.content as any[]).filter((p: any) => p.type === "text").map((p: any) => p.text).join("\n")
-            : "";
-        transformedMessages[firstUserIdx] = {
-          role: "user",
-          content: [
-            { type: "image_url", image_url: { url: base64DataUrl } },
-            { type: "text", text: `Изображение выше — условие задачи.\n\n${textContent}` },
-          ],
-        };
-        console.log("📷 Injected task image (base64) into first user message, size:", base64DataUrl.length);
+  let taskPromptImageDataUrl: string | null = null;
+  let studentPromptImageDataUrl: string | null = null;
+
+  console.log("📷 taskImageUrl received:", taskImageUrl ? "present" : "absent");
+  if (taskImageUrl && typeof taskImageUrl === "string") {
+    if (isValidImageUrl(taskImageUrl)) {
+      const base64DataUrl = await fetchImageAsBase64DataUrl(taskImageUrl);
+      if (base64DataUrl) {
+        taskPromptImageDataUrl = base64DataUrl;
+      } else {
+        console.error("📷 Failed to download task image, proceeding without it");
       }
     } else {
-      console.error("📷 Failed to download task image, proceeding without it:", taskImageUrl.slice(0, 80));
+      console.error('[SECURITY] Rejected invalid taskImageUrl');
     }
   }
+
+  console.log("📷 studentImageUrl received:", studentImageUrl ? "present" : "absent");
+  if (studentImageUrl && typeof studentImageUrl === "string") {
+    if (isValidImageUrl(studentImageUrl)) {
+      const base64DataUrl = await fetchImageAsBase64DataUrl(studentImageUrl);
+      if (base64DataUrl) {
+        studentPromptImageDataUrl = base64DataUrl;
+      } else {
+        console.error("📷 Failed to download student image, proceeding without it");
+      }
+    } else {
+      console.error('[SECURITY] Rejected invalid studentImageUrl');
+    }
+  }
+
+  const promptAttachments: ChatPromptImageAttachment[] = [];
+  const hasBothPromptImages = Boolean(taskPromptImageDataUrl && studentPromptImageDataUrl);
+  if (taskPromptImageDataUrl) {
+    promptAttachments.push({
+      label: hasBothPromptImages
+        ? "Изображение 1 — условие задачи."
+        : "Изображение выше — условие задачи.",
+      dataUrl: taskPromptImageDataUrl,
+    });
+  }
+  if (studentPromptImageDataUrl) {
+    promptAttachments.push({
+      label: taskPromptImageDataUrl
+        ? "Изображение 2 — рукописное решение ученика."
+        : "Изображение выше — рукописное решение ученика.",
+      dataUrl: studentPromptImageDataUrl,
+    });
+  }
+
+  injectHomeworkImagesIntoLastUserMessage(transformedMessages, promptAttachments);
 
   // Используем Lovable AI Gateway напрямую
   // ЗАКОММЕНТИРОВАНО: OpenRouter логика

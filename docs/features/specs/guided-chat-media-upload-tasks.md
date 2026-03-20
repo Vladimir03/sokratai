@@ -18,7 +18,7 @@
 
 **Рекомендация:** начать с Phase 1 (backend) → Phase 3 (upload) → Phase 2 (UI) → Phase 4 (AI) → Phase 5 (polish).
 
-**Статус на 2026-03-20:** Phase 1, Phase 2 и Phase 3.1 реализованы. Review follow-up также выровнял classic upload с Safari-safe ID generation и сохранил fallback guided upload на legacy `homework-images` bucket. В backlog остаются только Phase 4 (AI integration) и Phase 5 (clipboard paste, DnD/mobile polish).
+**Статус на 2026-03-20:** Phase 1, Phase 2, Phase 3.1 и Phase 4 реализованы. Review follow-up также выровнял classic upload с Safari-safe ID generation, сохранил fallback guided upload на legacy `homework-images` bucket, ужесточил backend validation для student image URL и убрал вывод signed URL в логах. В backlog остаётся только Phase 5 (clipboard paste, DnD/mobile polish).
 
 ---
 
@@ -390,10 +390,10 @@ if (params.studentImageUrl) {
 ```
 
 **Acceptance criteria:**
-- [ ] `evaluateStudentAnswer` принимает optional `studentImageUrl`
-- [ ] AI получает и task image, и student image (оба как multimodal)
-- [ ] Prompt ясно указывает AI что каждое изображение — task vs student solution
-- [ ] Без studentImageUrl → работает как раньше
+- [x] `evaluateStudentAnswer` принимает optional `studentImageUrl`
+- [x] AI получает и task image, и student image (оба как multimodal)
+- [x] Prompt ясно указывает AI что каждое изображение — task vs student solution
+- [x] Без studentImageUrl → работает как раньше
 
 ---
 
@@ -441,10 +441,10 @@ await evaluateStudentAnswer({
 ```
 
 **Acceptance criteria:**
-- [ ] Backend загружает latest user message image_url для текущей задачи
-- [ ] Резолвит storage:// → signed HTTP URL
-- [ ] Передаёт в evaluateStudentAnswer
-- [ ] Без image_url → studentImageUrl = null (backward compatible)
+- [x] Backend загружает latest user message image_url для текущей задачи
+- [x] Резолвит storage:// → signed HTTP URL
+- [x] Передаёт в evaluateStudentAnswer
+- [x] Без image_url → studentImageUrl = null (backward compatible)
 
 ---
 
@@ -460,9 +460,9 @@ await evaluateStudentAnswer({
 **Это менее критично чем answer mode** — в question mode AI тоже полезно видеть фото, но основной use case — answer checking (Phase 4.1-4.2).
 
 **Acceptance criteria:**
-- [ ] streamChat принимает optional studentImageUrl
-- [ ] Chat endpoint строит multimodal prompt с обоими изображениями
-- [ ] Без studentImageUrl → работает как раньше
+- [x] streamChat принимает optional studentImageUrl
+- [x] Chat endpoint строит multimodal prompt с обоими изображениями
+- [x] Без studentImageUrl → работает как раньше
 
 ---
 

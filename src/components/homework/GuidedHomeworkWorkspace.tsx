@@ -427,10 +427,40 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
     return baseMessages.slice(-MAX_CONTEXT_MESSAGES);
   }, []);
 
+  const resolveLatestStudentImageUrl = useCallback(async (
+    taskOrder: number,
+    fallbackImageRef?: string,
+  ): Promise<string | undefined> => {
+    const latestPersistedImageRef = [...messagesRef.current]
+      .reverse()
+      .find((message) => (
+        message.task_order === taskOrder &&
+        message.role === 'user' &&
+        message.message_delivery_status !== 'failed' &&
+        typeof message.image_url === 'string' &&
+        message.image_url.trim().length > 0
+      ))?.image_url;
+
+    const candidate = fallbackImageRef ?? latestPersistedImageRef ?? undefined;
+    if (!candidate) return undefined;
+
+    const trimmed = candidate.trim();
+    if (!trimmed) return undefined;
+    if (/^https?:\/\//i.test(trimmed)) {
+      return trimmed;
+    }
+    if (!trimmed.startsWith('storage://')) {
+      return undefined;
+    }
+
+    return (await getStudentTaskImageSignedUrl(trimmed)) ?? undefined;
+  }, []);
+
   const requestAssistantReply = useCallback(async (
     taskOrder: number,
     sendMode: SendMode,
     contextMessages: Array<{ role: string; content: string }>,
+    latestUserImageRef?: string,
   ) => {
     const task = assignment.tasks.find((assignmentTask) => assignmentTask.order_num === taskOrder);
     if (!task) return;
@@ -438,14 +468,12 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
     setIsStreaming(true);
     setStreamingContent('');
 
-    // Resolve task image to signed URL for AI (if task has image)
-    let resolvedTaskImageUrl: string | undefined;
-    if (task.task_image_url) {
-      const signedUrl = await getStudentTaskImageSignedUrlViaBackend(
-        assignment.id, task.id,
-      );
-      if (signedUrl) resolvedTaskImageUrl = signedUrl;
-    }
+    const [resolvedTaskImageUrl, resolvedStudentImageUrl] = await Promise.all([
+      task.task_image_url
+        ? getStudentTaskImageSignedUrlViaBackend(assignment.id, task.id)
+        : Promise.resolve(null),
+      resolveLatestStudentImageUrl(taskOrder, latestUserImageRef),
+    ]);
 
     let fullContent = '';
     let streamErrorHandled = false;
@@ -454,7 +482,8 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
       await streamChat({
         messages: contextMessages,
         taskContext: buildTaskContext(assignment, task, assignment.tasks.length, sendMode),
-        taskImageUrl: resolvedTaskImageUrl,
+        taskImageUrl: resolvedTaskImageUrl ?? undefined,
+        studentImageUrl: resolvedStudentImageUrl,
         onDelta: (delta) => {
           fullContent += delta;
           setStreamingContent(fullContent);
@@ -517,7 +546,7 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
       setIsStreaming(false);
       setStreamingContent('');
     }
-  }, [assignment, patchMessage, persistMessage]);
+  }, [assignment, patchMessage, persistMessage, resolveLatestStudentImageUrl]);
 
   const handleCheckAnswer = useCallback(async (answerText: string, imageUrl?: string) => {
     if (!threadId || !currentTask) return;
@@ -687,7 +716,7 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
       return;
     }
 
-    await requestAssistantReply(taskOrder, sendMode, contextMessages);
+    await requestAssistantReply(taskOrder, sendMode, contextMessages, imageUrl);
   }, [
     assignment.id,
     buildContextMessages,
@@ -752,7 +781,7 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
       return;
     }
 
-    await requestAssistantReply(taskOrder, sendMode, contextMessages);
+    await requestAssistantReply(taskOrder, sendMode, contextMessages, imageUrl);
   }, [assignment.id, buildContextMessages, patchMessage, persistMessage, requestAssistantReply, threadId]);
 
   const handleHint = useCallback(async () => {
