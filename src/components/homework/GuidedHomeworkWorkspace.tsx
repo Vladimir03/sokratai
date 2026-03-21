@@ -137,6 +137,55 @@ function buildTaskContext(
   return parts.filter(Boolean).join('\n');
 }
 
+function buildGuidedSystemPrompt(
+  sendMode: SendMode,
+  options?: { hasStudentImage?: boolean; isBootstrap?: boolean },
+): string {
+  const hasStudentImage = Boolean(options?.hasStudentImage);
+
+  const baseRules = [
+    'Ты AI-ассистент внутри guided homework chat для одной текущей задачи.',
+    'Это НЕ generic chat. Твоя цель: помочь ученику продвинуться по текущей задаче, не уходя в сторону.',
+    'Никогда не игнорируй приложенные изображения.',
+    'Порядок приоритета источников: 1) последнее изображение ученика, 2) изображение условия задачи, 3) текст задачи и сообщения.',
+    hasStudentImage
+      ? 'Если у ученика есть изображение, сначала опиши, что именно на нём видно по текущей задаче. Если изображение нерелевантно, прямо скажи это.'
+      : 'Если изображения ученика нет, опирайся на условие задачи и текст сообщения.',
+    'Не придумывай детали, которых не видно на изображении.',
+    'Не подменяй изображение ученика изображением условия задачи.',
+  ];
+
+  if (options?.isBootstrap) {
+    return [
+      ...baseRules,
+      'Сейчас нужен короткий стартовый заход по задаче без полного решения.',
+      'Сформулируй 1-2 коротких предложения, которые запускают разбор.',
+    ].join('\n');
+  }
+
+  const modeRules =
+    sendMode === 'question'
+      ? [
+        'Режим: шаг решения.',
+        'Отвечай на текущее действие ученика и на его приложенное решение.',
+        'Если ученик спрашивает, что видно на его картинке, отвечай именно про картинку ученика.',
+        'Не раскрывай полное решение и финальный ответ.',
+      ]
+      : sendMode === 'hint_request'
+        ? [
+          'Режим: подсказка.',
+          'Дай короткую подсказку по текущему состоянию решения ученика.',
+          'Не раскрывай полное решение и финальный ответ.',
+        ]
+        : [
+          'Режим: проверка ответа.',
+          'Используй изображение ученика как часть проверки ответа.',
+          'Если изображение не содержит решения по текущей задаче, явно сообщи об этом.',
+        ];
+
+  return [...baseRules, ...modeRules].join('\n');
+}
+
 function MaterialLink({
   title,
   url,
@@ -503,6 +552,9 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
     try {
       await streamChat({
         messages: contextMessages,
+        systemPrompt: buildGuidedSystemPrompt(sendMode, {
+          hasStudentImage: resolvedStudentImageUrls.length > 0,
+        }),
         taskContext: buildTaskContext(assignment, task, assignment.tasks.length, sendMode, {
           hasStudentImage: resolvedStudentImageUrls.length > 0,
         }),
@@ -997,7 +1049,8 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
               content: 'Сформулируй короткое стартовое сообщение для ученика по этой задаче.',
             },
           ],
-          taskContext: buildTaskContext(assignment, currentTask, assignment.tasks.length, 'answer'),
+          systemPrompt: buildGuidedSystemPrompt('question', { isBootstrap: true }),
+          taskContext: buildTaskContext(assignment, currentTask, assignment.tasks.length, 'question'),
           taskImageUrl: bootstrapImageUrl,
           onDelta: (delta) => {
             content += delta;
