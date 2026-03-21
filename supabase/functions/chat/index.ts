@@ -161,6 +161,16 @@ function injectHomeworkImagesIntoLastUserMessage(
     { type: "text", text: attachment.label },
     { type: "image_url", image_url: { url: attachment.dataUrl } },
   ]));
+  const hasStudentSolutionAttachment = attachments.some((attachment) =>
+    attachment.label.toLowerCase().includes("решение ученика")
+  );
+
+  if (hasStudentSolutionAttachment) {
+    multimodalContent.unshift({
+      type: "text",
+      text: "Сначала внимательно проанализируй изображение решения ученика. Если на нём нет решения по текущей задаче или оно нерелевантно, прямо скажи об этом.",
+    });
+  }
 
   multimodalContent.push({
     type: "text",
@@ -819,16 +829,8 @@ async function processAIRequest(
   }
 
   const promptAttachments: ChatPromptImageAttachment[] = [];
-  if (taskPromptImageDataUrl) {
-    promptAttachments.push({
-      label: studentPromptImageDataUrls.length > 0
-        ? "Изображение 1 — условие задачи."
-        : "Изображение выше — условие задачи.",
-      dataUrl: taskPromptImageDataUrl,
-    });
-  }
   if (studentPromptImageDataUrls.length > 0) {
-    let imageCounter = taskPromptImageDataUrl ? 2 : 1;
+    let imageCounter = 1;
     for (const [index, dataUrl] of studentPromptImageDataUrls.entries()) {
       promptAttachments.push({
         label: !taskPromptImageDataUrl && studentPromptImageDataUrls.length === 1
@@ -838,6 +840,14 @@ async function processAIRequest(
       });
       imageCounter += 1;
     }
+  }
+  if (taskPromptImageDataUrl) {
+    promptAttachments.push({
+      label: studentPromptImageDataUrls.length > 0
+        ? `Изображение ${studentPromptImageDataUrls.length + 1} — условие задачи. Используй его для сверки с решением ученика.`
+        : "Изображение выше — условие задачи.",
+      dataUrl: taskPromptImageDataUrl,
+    });
   }
 
   injectHomeworkImagesIntoLastUserMessage(transformedMessages, promptAttachments);

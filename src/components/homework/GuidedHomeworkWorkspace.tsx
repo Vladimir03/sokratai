@@ -102,6 +102,7 @@ function buildTaskContext(
   currentTask: { order_num: number; task_text: string; task_image_url: string | null },
   totalTasks: number,
   sendMode: SendMode,
+  options?: { hasStudentImage?: boolean },
 ): string {
   const modeHint =
     sendMode === 'hint_request'
@@ -109,6 +110,11 @@ function buildTaskContext(
       : sendMode === 'question'
         ? 'Режим: промежуточный шаг решения. Ученик показывает свой ход мыслей или шаг решения. Обсуди его, укажи ошибки если есть, помоги продвинуться дальше. Не раскрывай полностью решение и финальный ответ.'
         : 'Режим: проверка ответа ученика. Если ответ вероятно неверный, дай шаг для исправления. Если вероятно верный — похвали и предложи перейти к следующей задаче.';
+  const studentImageHint = options?.hasStudentImage
+    ? sendMode === 'question'
+      ? 'КРИТИЧНО: к сообщению ученика приложено изображение его решения или скриншота. СНАЧАЛА внимательно посмотри именно на изображение ученика. Если на нём нет решения по текущей задаче, прямо скажи это и попроси прислать корректный шаг решения.'
+      : 'КРИТИЧНО: к сообщению ученика приложено изображение его решения. Обязательно используй его при анализе. Если изображение не относится к текущей задаче или на нём нет решения, явно сообщи об этом.'
+    : null;
 
   const isMinimalText = currentTask.task_text.trim().length <= 15;
   const hasImage = Boolean(currentTask.task_image_url);
@@ -123,6 +129,7 @@ function buildTaskContext(
       : hasImage
         ? 'К задаче прикреплено изображение с условием — оно передано отдельно.'
         : null,
+    studentImageHint,
     modeHint,
     'Пиши кратко, понятно, с фокусом на текущую задачу. LaTeX: $..$ или $$..$$ при необходимости.',
   ];
@@ -496,7 +503,9 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
     try {
       await streamChat({
         messages: contextMessages,
-        taskContext: buildTaskContext(assignment, task, assignment.tasks.length, sendMode),
+        taskContext: buildTaskContext(assignment, task, assignment.tasks.length, sendMode, {
+          hasStudentImage: resolvedStudentImageUrls.length > 0,
+        }),
         taskImageUrl: resolvedTaskImageUrl ?? undefined,
         studentImageUrls: resolvedStudentImageUrls,
         onDelta: (delta) => {

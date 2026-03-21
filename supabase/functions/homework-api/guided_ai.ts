@@ -302,6 +302,9 @@ function buildCheckPrompt(params: EvaluateStudentAnswerParams): LovableMessage[]
     hasStudentImage
       ? `Ученик также приложил ${studentImageCount > 1 ? `${studentImageCount} изображения` : "изображение"} со своим решением — используй ${studentImageCount > 1 ? "их" : "его"} при проверке.`
       : "",
+    hasStudentImage
+      ? "КРИТИЧНО: сначала внимательно изучи решение ученика на приложенном изображении. Если на изображении нет решения по текущей задаче или оно нерелевантно, прямо сообщи об этом в feedback."
+      : "",
     `Эталонный ответ: ${correctAnswerValue}`,
     rubricLine,
     "",
@@ -361,19 +364,8 @@ function buildCheckPrompt(params: EvaluateStudentAnswerParams): LovableMessage[]
   // Build the user message with optional task image
   const userContent: Array<LovableTextPart | LovableImagePart> = [];
 
-  if (hasTaskImage) {
-    userContent.push({
-      type: "text",
-      text: hasStudentImage ? "Изображение 1 — условие задачи." : "Изображение выше — условие задачи.",
-    });
-    userContent.push({
-      type: "image_url",
-      image_url: { url: params.taskImageUrl as string },
-    });
-  }
-
   if (hasStudentImage) {
-    let imageCounter = hasTaskImage ? 2 : 1;
+    let imageCounter = 1;
     for (const [index, imageUrl] of studentImageUrls.entries()) {
       userContent.push({
         type: "text",
@@ -387,6 +379,19 @@ function buildCheckPrompt(params: EvaluateStudentAnswerParams): LovableMessage[]
       });
       imageCounter += 1;
     }
+  }
+
+  if (hasTaskImage) {
+    userContent.push({
+      type: "text",
+      text: hasStudentImage
+        ? `Изображение ${studentImageCount + 1} — условие задачи. Используй его для сверки с решением ученика.`
+        : "Изображение выше — условие задачи.",
+    });
+    userContent.push({
+      type: "image_url",
+      image_url: { url: params.taskImageUrl as string },
+    });
   }
 
   userContent.push({
@@ -415,6 +420,9 @@ function buildHintPrompt(params: GenerateHintParams): LovableMessage[] {
     hasTaskImage ? "К задаче прикреплено изображение с условием — внимательно изучи его." : "",
     hasStudentImage
       ? `Ученик приложил ${studentImageCount > 1 ? `${studentImageCount} изображения` : "изображение"} своего решения — учитывай ${studentImageCount > 1 ? "их" : "его"}, когда даёшь подсказку.`
+      : "",
+    hasStudentImage
+      ? "КРИТИЧНО: сначала внимательно изучи решение ученика на приложенном изображении. Если на нём нет шага решения по текущей задаче, прямо сообщи об этом и попроси прислать релевантное решение."
       : "",
     params.correctAnswer ? `Правильный ответ (НЕ раскрывай ученику!): ${clampPromptText(params.correctAnswer)}` : "",
     "",
@@ -454,19 +462,8 @@ function buildHintPrompt(params: GenerateHintParams): LovableMessage[] {
   // Build user message with optional task image
   const userContent: Array<LovableTextPart | LovableImagePart> = [];
 
-  if (hasTaskImage) {
-    userContent.push({
-      type: "text",
-      text: hasStudentImage ? "Изображение 1 — условие задачи." : "Изображение выше — условие задачи.",
-    });
-    userContent.push({
-      type: "image_url",
-      image_url: { url: params.taskImageUrl as string },
-    });
-  }
-
   if (hasStudentImage) {
-    let imageCounter = hasTaskImage ? 2 : 1;
+    let imageCounter = 1;
     for (const [index, imageUrl] of studentImageUrls.entries()) {
       userContent.push({
         type: "text",
@@ -480,6 +477,19 @@ function buildHintPrompt(params: GenerateHintParams): LovableMessage[] {
       });
       imageCounter += 1;
     }
+  }
+
+  if (hasTaskImage) {
+    userContent.push({
+      type: "text",
+      text: hasStudentImage
+        ? `Изображение ${studentImageCount + 1} — условие задачи. Используй его для сверки с решением ученика.`
+        : "Изображение выше — условие задачи.",
+    });
+    userContent.push({
+      type: "image_url",
+      image_url: { url: params.taskImageUrl as string },
+    });
   }
 
   userContent.push({
