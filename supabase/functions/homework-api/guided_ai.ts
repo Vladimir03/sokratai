@@ -284,6 +284,10 @@ function buildAnswerTypeGuidance(correctAnswer: string | null, taskText: string)
   return "";
 }
 
+function isImageDescriptionRequest(text: string): boolean {
+  return /(что\s+(?:ты\s+)?видишь|что\s+на|опиши|что\s+изображен|что\s+изображено).*(?:картинк|изображени|фото|скрин)/i.test(text);
+}
+
 function buildCheckPrompt(params: EvaluateStudentAnswerParams): LovableMessage[] {
   const correctAnswerValue = clampPromptText(params.correctAnswer) || "[нет эталонного ответа — оцени по смыслу]";
   const rubricLine = params.rubricText ? `Критерии оценки: ${clampPromptText(params.rubricText)}` : "";
@@ -293,6 +297,7 @@ function buildCheckPrompt(params: EvaluateStudentAnswerParams): LovableMessage[]
   const studentImageCount = studentImageUrls.length;
   const hasStudentImage = studentImageCount > 0;
   const answerTypeGuidance = buildAnswerTypeGuidance(params.correctAnswer, params.taskText);
+  const wantsImageDescription = hasStudentImage && isImageDescriptionRequest(params.studentAnswer);
 
   const systemContent = [
     "Ты проверяешь ответ ученика на задачу по домашнему заданию.",
@@ -304,6 +309,9 @@ function buildCheckPrompt(params: EvaluateStudentAnswerParams): LovableMessage[]
       : "",
     hasStudentImage
       ? "КРИТИЧНО: сначала внимательно изучи решение ученика на приложенном изображении. Если на изображении нет решения по текущей задаче или оно нерелевантно, прямо сообщи об этом в feedback."
+      : "",
+    wantsImageDescription
+      ? "Пользователь явно спрашивает про своё изображение. В начале feedback сначала коротко опиши, что видно именно на изображении ученика, а затем мягко поясни, что это не финальный ответ по задаче, если ответ не завершён."
       : "",
     `Эталонный ответ: ${correctAnswerValue}`,
     rubricLine,

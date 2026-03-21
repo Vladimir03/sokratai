@@ -3464,14 +3464,27 @@ async function handleCheckAnswer(
       : (task.max_score ?? 1);
 
   // Save user answer message (with optional student image attachment)
-  await db.from("homework_tutor_thread_messages").insert({
-    thread_id: threadId,
-    role: "user",
-    content: answer,
-    task_order: currentOrder,
-    message_kind: "answer",
-    ...(serializedAttachments && { image_url: serializedAttachments }),
-  });
+  const { data: savedUserAnswerMessage, error: saveUserAnswerError } = await db
+    .from("homework_tutor_thread_messages")
+    .insert({
+      thread_id: threadId,
+      role: "user",
+      content: answer,
+      task_order: currentOrder,
+      message_kind: "answer",
+      ...(serializedAttachments && { image_url: serializedAttachments }),
+    })
+    .select("id, role, content, image_url, task_order, message_kind, created_at, author_user_id, visible_to_student")
+    .single();
+
+  if (saveUserAnswerError || !savedUserAnswerMessage) {
+    console.error("homework_api_check_answer_insert_failed", {
+      threadId,
+      currentOrder,
+      error: saveUserAnswerError?.message,
+    });
+    return jsonError(cors, 500, "DB_ERROR", "Failed to save answer message");
+  }
 
   // Update last_student_message_at
   await db.from("homework_tutor_threads")
@@ -3634,6 +3647,33 @@ async function handleCheckAnswer(
 
   // Return updated thread (student-facing: filter hidden notes)
   const updatedThread = await fetchStudentThread(db, threadId);
+  if (
+    updatedThread &&
+    Array.isArray(updatedThread.homework_tutor_thread_messages)
+  ) {
+    const existingIndex = updatedThread.homework_tutor_thread_messages.findIndex(
+      (message) => message.id === savedUserAnswerMessage.id,
+    );
+
+    if (existingIndex >= 0) {
+      const existingMessage = updatedThread.homework_tutor_thread_messages[existingIndex];
+      if (!existingMessage.image_url && savedUserAnswerMessage.image_url) {
+        updatedThread.homework_tutor_thread_messages[existingIndex] = {
+          ...existingMessage,
+          image_url: savedUserAnswerMessage.image_url,
+        };
+      }
+    } else {
+      updatedThread.homework_tutor_thread_messages = [
+        ...updatedThread.homework_tutor_thread_messages,
+        savedUserAnswerMessage as Record<string, unknown>,
+      ].sort((a, b) => {
+        const aTime = typeof a.created_at === "string" ? Date.parse(a.created_at) : 0;
+        const bTime = typeof b.created_at === "string" ? Date.parse(b.created_at) : 0;
+        return aTime - bTime;
+      });
+    }
+  }
   return jsonOk(cors, { ...responseData, thread: updatedThread });
 }
 

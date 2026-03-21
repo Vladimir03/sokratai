@@ -139,6 +139,10 @@ function extractMessageText(content: unknown): string {
     .join("\n");
 }
 
+function isImageDescriptionRequest(text: string): boolean {
+  return /(что\s+(?:ты\s+)?видишь|что\s+на|опиши|что\s+изображен|что\s+изображено).*(?:картинк|изображени|фото|скрин)/i.test(text);
+}
+
 function injectHomeworkImagesIntoLastUserMessage(
   messages: Array<{ role: string; content: unknown }>,
   attachments: ChatPromptImageAttachment[],
@@ -169,6 +173,13 @@ function injectHomeworkImagesIntoLastUserMessage(
     multimodalContent.unshift({
       type: "text",
       text: "Сначала внимательно проанализируй изображение решения ученика. Если на нём нет решения по текущей задаче или оно нерелевантно, прямо скажи об этом.",
+    });
+  }
+
+  if (hasStudentSolutionAttachment && isImageDescriptionRequest(originalText)) {
+    multimodalContent.unshift({
+      type: "text",
+      text: "Пользователь явно спрашивает, что видно именно на ЕГО изображении. Сначала коротко опиши изображение ученика и не подменяй его условием задачи.",
     });
   }
 
