@@ -6,7 +6,7 @@ import { Badge } from '@/components/ui/badge';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
 import { Skeleton } from '@/components/ui/skeleton';
-import { Loader2, Paperclip, X } from 'lucide-react';
+import { Loader2, Paperclip, Send, X } from 'lucide-react';
 import { MathText } from '@/components/kb/ui/MathText';
 import { parseISO } from 'date-fns';
 import { toast } from 'sonner';
