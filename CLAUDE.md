@@ -288,6 +288,30 @@ Legacy student-only система (`homework_sets`, `homework_tasks`, `homework
 - `performTaskAdvance` по-прежнему обновляет `current_task_order` при завершении задачи, но это не блокирует навигацию
 - Ученик НЕ МОЖЕТ отправлять ответы/подсказки для `completed` задач — проверка `status === 'active'` на обоих сторонах
 
+### Два поля ввода «Ответ» и «Обсуждение» (Sprint S2, 2026-03-22)
+
+Заменено одно текстовое поле на два раздельных в `GuidedChatInput.tsx`:
+
+- **AnswerField** (зелёная рамка `border-2 border-green-600`, сверху): Enter = `onSendAnswer` → AI проверяет ответ
+- **DiscussionField** (серая рамка `border border-slate-200`, снизу): Enter = `onSendStep` → AI обсуждает шаг
+
+**Причина:** ученик путал Enter (обсуждение) и Ctrl+Enter (проверка) → AI начинал обсуждать вместо проверки → churn
+
+**Ключевые решения:**
+- Два независимых state: `answerText` + `discussionText`. Каждое поле очищается только при своей отправке
+- Ctrl+Enter / Cmd+Enter **полностью убран** — больше не нужен
+- `attachedFiles` — shared (один `<input type="file">`), `AttachmentPreview` фиксированно над answer-полем
+- `placeholder` prop deprecated (игнорируется) — каждое поле имеет hardcoded placeholder с `taskNumber`
+- Props `onSendAnswer(text)` и `onSendStep(text)` — без изменений сигнатуры
+
+**Фазы:**
+- Phase 1 (done): рефакторинг GuidedChatInput → два поля
+- Phase 2 (pending): мобильный аккордеон — discussion свёрнуто по умолчанию на `<768px`
+- Phase 3 (pending): обновление GuidedHomeworkWorkspace — убрать `placeholder`, добавить `taskNumber`, удалить `modKey`
+- Phase 4 (pending): QA кросс-браузерная проверка
+
+**Spec:** `docs/features/specs/guided-chat-two-fields-tasks.md`
+
 ## Известные хрупкие области
 
 1. **Chat.tsx** (2000+ строк) — очень сложный компонент. Любые изменения в ChatMessage, ChatInput, ChatSidebar могут сломать чат

@@ -1,7 +1,8 @@
 /**
- * Simple chat input for the guided homework workspace.
- * Two submit buttons: "Ответ" (final answer, checked by AI) and "Шаг" (intermediate step, AI discussion).
- * Supports file attachments (images) via 📎 button with preview above textarea.
+ * Two-field chat input for the guided homework workspace.
+ * AnswerField (green border, top): Enter = check answer via AI.
+ * DiscussionField (gray border, bottom): Enter = discuss with AI.
+ * Supports file attachments (images) via shared 📎 button with preview above answer field.
  */
 
 import { memo, useCallback, useEffect, useRef, useState } from 'react';
@@ -9,9 +10,6 @@ import { Button } from '@/components/ui/button';
 import { CheckCircle2, FileText, Loader2, MessageCircle, Paperclip, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { MAX_GUIDED_CHAT_ATTACHMENTS } from '@/lib/homeworkThreadAttachments';
-
-const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad|iPod/.test(navigator.platform);
-const modKey = isMac ? 'Cmd' : 'Ctrl';
 
 const ALLOWED_TYPES = [
   'image/jpeg',
@@ -35,11 +33,13 @@ interface GuidedChatInputProps {
   onSendStep: (text: string) => void;
   isLoading: boolean;
   disabled?: boolean;
+  /** @deprecated Ignored — each field has its own hardcoded placeholder. Remove in Phase 3. */
   placeholder?: string;
   attachedFiles: File[];
   onFileSelect: (file: File) => void;
   onFileRemove: (index: number) => void;
   isUploading: boolean;
+  taskNumber?: number;
 }
 
 /** Attachment preview card above textarea */
@@ -136,68 +136,87 @@ function AttachmentPreview({
   );
 }
 
+/** Auto-resize a textarea to fit content up to maxHeight */
+function useAutoResize(ref: React.RefObject<HTMLTextAreaElement | null>, value: string) {
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    el.style.height = 'auto';
+    el.style.height = `${Math.min(el.scrollHeight, 150)}px`;
+  }, [ref, value]);
+}
+
+const spinner = (
+  <div className="w-3.5 h-3.5 border-2 border-current border-t-transparent rounded-full animate-spin" />
+);
+
 const GuidedChatInput = memo(
   ({
     onSendAnswer,
     onSendStep,
     isLoading,
     disabled = false,
-    placeholder = 'Введите ответ или шаг решения...',
     attachedFiles,
     onFileSelect,
     onFileRemove,
     isUploading,
+    taskNumber,
   }: GuidedChatInputProps) => {
-    const [message, setMessage] = useState('');
-    const textareaRef = useRef<HTMLTextAreaElement>(null);
+    const [answerText, setAnswerText] = useState('');
+    const [discussionText, setDiscussionText] = useState('');
+    const answerRef = useRef<HTMLTextAreaElement>(null);
+    const discussionRef = useRef<HTMLTextAreaElement>(null);
     const fileInputRef = useRef<HTMLInputElement>(null);
 
-    const resizeTextarea = useCallback(() => {
-      const el = textareaRef.current;
-      if (!el) return;
-      el.style.height = 'auto';
-      el.style.height = `${Math.min(el.scrollHeight, 150)}px`;
-    }, []);
+    useAutoResize(answerRef, answerText);
+    useAutoResize(discussionRef, discussionText);
 
-    useEffect(() => {
-      resizeTextarea();
-    }, [message, resizeTextarea]);
+    // --- Send handlers ---
 
-    const clearAndReset = useCallback(() => {
-      setMessage('');
-      if (textareaRef.current) {
-        textareaRef.current.style.height = 'auto';
-      }
-    }, []);
+    const hasAnswerContent = answerText.trim().length > 0 || attachedFiles.length > 0;
+    const hasDiscussionContent = discussionText.trim().length > 0 || attachedFiles.length > 0;
+    const controlsDisabled = isLoading || disabled || isUploading;
 
-    const hasContent = message.trim().length > 0 || attachedFiles.length > 0;
-    const canSend = hasContent && !isLoading && !disabled && !isUploading;
+    const canSendAnswer = hasAnswerContent && !controlsDisabled;
+    const canSendDiscussion = hasDiscussionContent && !controlsDisabled;
 
     const handleSendAnswer = useCallback(() => {
-      if (!canSend) return;
-      onSendAnswer(message.trim());
-      clearAndReset();
-    }, [message, canSend, onSendAnswer, clearAndReset]);
+      if (!canSendAnswer) return;
+      onSendAnswer(answerText.trim());
+      setAnswerText('');
+      if (answerRef.current) answerRef.current.style.height = 'auto';
+    }, [answerText, canSendAnswer, onSendAnswer]);
 
     const handleSendStep = useCallback(() => {
-      if (!canSend) return;
-      onSendStep(message.trim());
-      clearAndReset();
-    }, [message, canSend, onSendStep, clearAndReset]);
+      if (!canSendDiscussion) return;
+      onSendStep(discussionText.trim());
+      setDiscussionText('');
+      if (discussionRef.current) discussionRef.current.style.height = 'auto';
+    }, [discussionText, canSendDiscussion, onSendStep]);
 
-    const handleKeyDown = useCallback(
+    // --- KeyDown: Enter = send from own field, Shift+Enter = newline ---
+
+    const handleAnswerKeyDown = useCallback(
       (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
         if (e.key === 'Enter' && !e.shiftKey) {
           e.preventDefault();
-          if (e.ctrlKey || e.metaKey) {
-            handleSendAnswer();
-          } else {
-            handleSendStep();
-          }
+          handleSendAnswer();
         }
       },
-      [handleSendAnswer, handleSendStep],
+      [handleSendAnswer],
     );
+
+    const handleDiscussionKeyDown = useCallback(
+      (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+        if (e.key === 'Enter' && !e.shiftKey) {
+          e.preventDefault();
+          handleSendStep();
+        }
+      },
+      [handleSendStep],
+    );
+
+    // --- File handling ---
 
     const handleFileClick = useCallback(() => {
       fileInputRef.current?.click();
@@ -212,19 +231,16 @@ const GuidedChatInput = memo(
         for (let i = 0; i < fileList.length; i++) {
           const file = fileList[i];
 
-          // Check max files
           if (availableSlots <= 0) {
             toast.error(`Максимум ${MAX_FILES} вложения`);
             break;
           }
 
-          // Check file type
           if (!ALLOWED_TYPES.includes(file.type) && !file.name.toLowerCase().endsWith('.heic') && !file.name.toLowerCase().endsWith('.heif')) {
             toast.error('Поддерживаются: JPG, PNG, HEIC, WebP, PDF');
             continue;
           }
 
-          // Check file size
           if (file.size > MAX_FILE_SIZE) {
             toast.error('Файл слишком большой. Максимум 10 МБ');
             continue;
@@ -234,20 +250,17 @@ const GuidedChatInput = memo(
           availableSlots -= 1;
         }
 
-        // Reset input so same file can be re-selected
         e.target.value = '';
       },
       [attachedFiles.length, onFileSelect],
     );
 
-    const attachDisabled = isLoading || disabled || isUploading;
+    const attachDisabled = controlsDisabled;
 
-    /** 5.1 — Clipboard paste: intercept image paste on container, let text paste through.
-     *  Uses clipboardData.files first (Chrome), falls back to clipboardData.items + getAsFile()
-     *  for Safari desktop and Firefox which may not populate .files for pasted images. */
+    // --- Clipboard paste: image → onFileSelect, text → native textarea ---
+
     const handlePaste = useCallback(
       (e: React.ClipboardEvent) => {
-        // Try .files first (Chrome), then .items fallback (Safari/Firefox)
         let imageFile: File | undefined;
         const files = Array.from(e.clipboardData.files);
         imageFile = files.find((f) => f.type.startsWith('image/'));
@@ -293,86 +306,145 @@ const GuidedChatInput = memo(
       [attachDisabled, attachedFiles.length, onFileSelect],
     );
 
-    const spinner = (
-      <div className="w-3.5 h-3.5 border-2 border-current border-t-transparent rounded-full animate-spin" />
-    );
+    // --- Placeholders ---
+
+    const answerPlaceholder = taskNumber
+      ? `Задача ${taskNumber}: введите ответ...`
+      : 'Введите ответ...';
+
+    const discussionPlaceholder = taskNumber
+      ? `Задача ${taskNumber}: задайте вопрос AI...`
+      : 'Задайте вопрос AI...';
+
+    // --- Shared styles ---
+
+    const textareaClasses =
+      'flex-1 resize-none rounded-lg border-0 bg-transparent px-3 py-2 text-base ring-0 placeholder:text-muted-foreground focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50';
+
+    const textareaStyle: React.CSSProperties = {
+      fontSize: '16px', // Prevent iOS Safari auto-zoom
+      touchAction: 'manipulation',
+      maxHeight: '150px',
+    };
 
     return (
       <div className="border-t bg-background" onPaste={handlePaste}>
-        {/* Attachment preview */}
+        {/* Hidden file input — shared between both fields */}
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="image/*,.pdf"
+          multiple
+          className="hidden"
+          onChange={handleFileChange}
+          disabled={attachDisabled}
+        />
+
+        {/* Attachment preview — above answer field */}
         <AttachmentPreview
           files={attachedFiles}
           onRemove={onFileRemove}
           isUploading={isUploading}
         />
 
-        {/* Input row */}
-        <div className="flex items-end gap-2 p-3">
-          {/* Hidden file input */}
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept="image/*,.pdf"
-            multiple
-            className="hidden"
-            onChange={handleFileChange}
-            disabled={attachDisabled}
-          />
+        <div className="flex flex-col gap-2 p-3">
+          {/* ===== ANSWER FIELD (green) ===== */}
+          <div className="rounded-lg border-2 border-green-600 p-3">
+            {/* Label */}
+            <div className="mb-2 flex items-center gap-1.5">
+              <CheckCircle2 className="h-4 w-4 text-green-600" />
+              <span className="text-sm font-bold text-green-700">Ответ к задаче</span>
+            </div>
 
-          {/* Paperclip button */}
-          <button
-            type="button"
-            onClick={handleFileClick}
-            disabled={attachDisabled}
-            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-input bg-background text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground disabled:cursor-not-allowed disabled:opacity-50"
-            style={{ touchAction: 'manipulation', minWidth: '44px', minHeight: '44px' }}
-            aria-label="Прикрепить файл"
-          >
-            <Paperclip className="h-4 w-4" />
-          </button>
+            {/* Input row */}
+            <div className="flex items-end gap-2">
+              <button
+                type="button"
+                onClick={handleFileClick}
+                disabled={attachDisabled}
+                className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-input bg-background text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground disabled:cursor-not-allowed disabled:opacity-50"
+                style={{ touchAction: 'manipulation', minWidth: '44px', minHeight: '44px' }}
+                aria-label="Прикрепить файл"
+              >
+                <Paperclip className="h-4 w-4" />
+              </button>
 
-          {/* Textarea */}
-          <textarea
-            ref={textareaRef}
-            value={message}
-            onChange={(e) => setMessage(e.target.value)}
-            onKeyDown={handleKeyDown}
-            placeholder={placeholder}
-            disabled={isLoading || disabled}
-            rows={1}
-            className="flex-1 resize-none rounded-lg border border-input bg-background px-3 py-2 text-base ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
-            style={{
-              fontSize: '16px', // Prevent iOS Safari auto-zoom
-              touchAction: 'manipulation', // Fix iOS 300ms tap delay
-              maxHeight: '150px',
-            }}
-          />
+              <textarea
+                ref={answerRef}
+                value={answerText}
+                onChange={(e) => setAnswerText(e.target.value)}
+                onKeyDown={handleAnswerKeyDown}
+placeholder={answerPlaceholder}
+                disabled={controlsDisabled}
+                rows={1}
+                className={textareaClasses + ' border border-input rounded-lg'}
+                style={textareaStyle}
+              />
 
-          {/* Send buttons */}
-          <div className="flex gap-1.5 shrink-0">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={handleSendStep}
-              disabled={!canSend}
-              className="h-10 px-2.5 gap-1 text-xs whitespace-nowrap"
-              style={{ touchAction: 'manipulation' }}
-              title="Обсудить шаг (Enter)"
-            >
-              {isLoading ? spinner : <MessageCircle className="h-3.5 w-3.5" />}
-              Шаг
-            </Button>
-            <Button
-              size="sm"
-              onClick={handleSendAnswer}
-              disabled={!canSend}
-              className="h-10 px-2.5 gap-1 text-xs whitespace-nowrap"
-              style={{ touchAction: 'manipulation' }}
-              title={`Итоговый ответ (${modKey}+Enter)`}
-            >
-              {isLoading ? spinner : <CheckCircle2 className="h-3.5 w-3.5" />}
-              Ответ
-            </Button>
+              <Button
+                size="sm"
+                onClick={handleSendAnswer}
+                disabled={!canSendAnswer}
+                className="h-10 shrink-0 gap-1 whitespace-nowrap bg-green-600 px-3 text-xs hover:bg-green-700"
+                style={{ touchAction: 'manipulation' }}
+              >
+                {isLoading ? spinner : <CheckCircle2 className="h-3.5 w-3.5" />}
+                Проверить
+              </Button>
+            </div>
+
+            {/* Hint */}
+            <p className="mt-1 text-[10px] text-muted-foreground">Enter = отправить на проверку</p>
+          </div>
+
+          {/* ===== DISCUSSION FIELD (gray) ===== */}
+          <div className="rounded-lg border border-slate-200 p-3">
+            {/* Label */}
+            <div className="mb-2 flex items-center gap-1.5">
+              <MessageCircle className="h-4 w-4 text-muted-foreground" />
+              <span className="text-sm font-semibold text-muted-foreground">Обсуждение</span>
+            </div>
+
+            {/* Input row */}
+            <div className="flex items-end gap-2">
+              <button
+                type="button"
+                onClick={handleFileClick}
+                disabled={attachDisabled}
+                className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-input bg-background text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground disabled:cursor-not-allowed disabled:opacity-50"
+                style={{ touchAction: 'manipulation', minWidth: '44px', minHeight: '44px' }}
+                aria-label="Прикрепить файл"
+              >
+                <Paperclip className="h-4 w-4" />
+              </button>
+
+              <textarea
+                ref={discussionRef}
+                value={discussionText}
+                onChange={(e) => setDiscussionText(e.target.value)}
+                onKeyDown={handleDiscussionKeyDown}
+placeholder={discussionPlaceholder}
+                disabled={controlsDisabled}
+                rows={1}
+                className={textareaClasses + ' border border-input rounded-lg'}
+                style={textareaStyle}
+              />
+
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleSendStep}
+                disabled={!canSendDiscussion}
+                className="h-10 shrink-0 gap-1 whitespace-nowrap px-3 text-xs"
+                style={{ touchAction: 'manipulation' }}
+              >
+                {isLoading ? spinner : <MessageCircle className="h-3.5 w-3.5" />}
+                Спросить
+              </Button>
+            </div>
+
+            {/* Hint */}
+            <p className="mt-1 text-[10px] text-muted-foreground">Enter = обсудить с AI</p>
           </div>
         </div>
       </div>
