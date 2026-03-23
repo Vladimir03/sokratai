@@ -66,8 +66,6 @@ import { streamChat, StreamChatError } from '@/lib/streamChat';
 import { trackGuidedHomeworkEvent } from '@/lib/homeworkTelemetry';
 
 const MAX_CONTEXT_MESSAGES = 15;
-const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad|iPod/.test(navigator.platform);
-const modKey = isMac ? 'Cmd' : 'Ctrl';
 type SendMode = Extract<GuidedMessageKind, 'answer' | 'hint_request' | 'question'>;
 
 interface GuidedHomeworkWorkspaceProps {
@@ -329,9 +327,23 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
   const [attachedFiles, setAttachedFiles] = useState<File[]>([]);
   const [isUploading, setIsUploading] = useState(false);
 
+  // Per-task drafts: save/restore text + files when switching tasks
+  type TaskDraft = { answer: string; discussion: string; files: File[] };
+  const taskDraftsRef = useRef<Map<number, TaskDraft>>(new Map());
+  const currentDraftRef = useRef<{ answer: string; discussion: string }>({ answer: '', discussion: '' });
+  const attachedFilesRef = useRef<File[]>([]);
+
+  const handleDraftChange = useCallback((answer: string, discussion: string) => {
+    currentDraftRef.current = { answer, discussion };
+  }, []);
+
   useEffect(() => {
     messagesRef.current = messages;
   }, [messages]);
+
+  useEffect(() => {
+    attachedFilesRef.current = attachedFiles;
+  }, [attachedFiles]);
 
   // Initialize from thread data
   useEffect(() => {
@@ -380,8 +392,25 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
     }));
     setMessages(normalizedMessages);
     setTaskStates(updatedThread.homework_tutor_task_states ?? []);
-    setCurrentTaskOrder(updatedThread.current_task_order);
-    setThreadCurrentTaskOrder(updatedThread.current_task_order);
+
+    // Save current draft + load target draft (same logic as switchToTask, but
+    // reads currentTaskOrder via functional updater to avoid stale closure)
+    const newOrder = updatedThread.current_task_order;
+    setCurrentTaskOrder((prevOrder) => {
+      if (prevOrder !== newOrder) {
+        taskDraftsRef.current.set(prevOrder, {
+          answer: currentDraftRef.current.answer,
+          discussion: currentDraftRef.current.discussion,
+          files: [...attachedFilesRef.current],
+        });
+        const draft = taskDraftsRef.current.get(newOrder);
+        setAttachedFiles(draft?.files ?? []);
+        currentDraftRef.current = { answer: draft?.answer ?? '', discussion: draft?.discussion ?? '' };
+      }
+      return newOrder;
+    });
+
+    setThreadCurrentTaskOrder(newOrder);
     setThreadStatus(updatedThread.status);
   }, []);
 
@@ -765,6 +794,8 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
     // Answer mode uses server-side AI check
     if (sendMode === 'answer') {
       if (hasFiles) setAttachedFiles([]);
+      currentDraftRef.current = { answer: '', discussion: '' };
+      taskDraftsRef.current.delete(currentTaskOrder);
       await handleCheckAnswer(content, attachmentRefs);
       return;
     }
@@ -784,8 +815,10 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
     };
 
     setMessages((prev) => [...prev, userMessage]);
-    // Clear attached files after adding to messages
+    // Clear attached files and draft after adding to messages
     if (hasFiles) setAttachedFiles([]);
+    currentDraftRef.current = { answer: '', discussion: '' };
+    taskDraftsRef.current.delete(currentTaskOrder);
 
     const contextMessages = buildContextMessages(taskOrder, content);
     trackGuidedHomeworkEvent('guided_send_click', { assignmentId: assignment.id, taskOrder, sendMode });
@@ -810,6 +843,7 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
     buildContextMessages,
     controlsDisabled,
     currentTask,
+    currentTaskOrder,
     handleCheckAnswer,
     isViewingActiveTask,
     patchMessage,
@@ -978,11 +1012,24 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
       });
   }, [activeTaskOrder, assignment.id, currentTaskOrder, handleCheckAnswer, handleHint, patchMessage, retryWithStorageRef, threadId]);
 
+  // Save current draft + restore target draft + switch task
+  const switchToTask = useCallback((newOrder: number) => {
+    taskDraftsRef.current.set(currentTaskOrder, {
+      answer: currentDraftRef.current.answer,
+      discussion: currentDraftRef.current.discussion,
+      files: [...attachedFiles],
+    });
+    const draft = taskDraftsRef.current.get(newOrder);
+    setAttachedFiles(draft?.files ?? []);
+    currentDraftRef.current = { answer: draft?.answer ?? '', discussion: draft?.discussion ?? '' };
+    setCurrentTaskOrder(newOrder);
+  }, [currentTaskOrder, attachedFiles]);
+
   const handleTaskClick = useCallback((orderNum: number) => {
     if (!visitedTaskOrders.has(orderNum)) return;
     if (isStreaming || isCheckingAnswer || isRequestingHint || isUploading) return;
-    setCurrentTaskOrder(orderNum);
-  }, [visitedTaskOrders, isStreaming, isCheckingAnswer, isRequestingHint, isUploading]);
+    switchToTask(orderNum);
+  }, [visitedTaskOrders, isStreaming, isCheckingAnswer, isRequestingHint, isUploading, switchToTask]);
 
   const handleGoPrev = useCallback(() => {
     if (previousTaskOrder === null) return;
@@ -991,8 +1038,8 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
       fromTaskOrder: currentTaskOrder,
       toTaskOrder: previousTaskOrder,
     });
-    setCurrentTaskOrder(previousTaskOrder);
-  }, [assignment.id, currentTaskOrder, previousTaskOrder]);
+    switchToTask(previousTaskOrder);
+  }, [assignment.id, currentTaskOrder, previousTaskOrder, switchToTask]);
 
   const handleGoNext = useCallback(() => {
     if (!nextTaskOrder || !nextTaskVisited) return;
@@ -1003,8 +1050,8 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
       toTaskOrder: nextTaskOrder,
     });
 
-    setCurrentTaskOrder(nextTaskOrder);
-  }, [assignment.id, currentTaskOrder, nextTaskOrder, nextTaskVisited]);
+    switchToTask(nextTaskOrder);
+  }, [assignment.id, currentTaskOrder, nextTaskOrder, nextTaskVisited, switchToTask]);
 
   useEffect(() => {
     if (!threadId || !currentTask) return;
@@ -1370,15 +1417,15 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
         </div>
 
         <GuidedChatInput
+          key={currentTaskOrder}
           onSendAnswer={handleSendAnswer}
           onSendStep={handleSendStep}
           isLoading={isStreaming || isCheckingAnswer || isRequestingHint}
           disabled={threadStatus !== 'active' || !isViewingActiveTask}
-          placeholder={
-            currentTask
-              ? `Задача ${currentTask.order_num}: обсудите с AI (Enter) или ответ (${modKey}+Enter)...`
-              : `Обсудите с AI (Enter) или ответ (${modKey}+Enter)...`
-          }
+          taskNumber={currentTask?.order_num}
+          initialAnswerText={currentDraftRef.current.answer}
+          initialDiscussionText={currentDraftRef.current.discussion}
+          onDraftChange={handleDraftChange}
           attachedFiles={attachedFiles}
           onFileSelect={handleFileSelect}
           onFileRemove={handleFileRemove}

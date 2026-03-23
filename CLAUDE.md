@@ -311,7 +311,16 @@ Legacy student-only система (`homework_sets`, `homework_tasks`, `homework
   - Discussion wrapper: `max-h-0` (collapsed) / `max-h-96` (expanded) / `md:max-h-none` (desktop override)
   - Compact answer: `answerCompact` derived var → label `hidden md:flex`, hint `hidden md:block`, padding `p-2 md:p-3`
   - `aria-expanded` + `aria-controls` на toggle, `touch-action: manipulation`
-- Phase 3 (pending): обновление GuidedHomeworkWorkspace — убрать `placeholder`, добавить `taskNumber`, удалить `modKey`
+- Phase 3 (done): обновление GuidedHomeworkWorkspace + per-task drafts
+  - Убран `placeholder` prop из `GuidedChatInputProps` и destructuring
+  - Добавлен `taskNumber={currentTask?.order_num}` prop
+  - Удалены неиспользуемые `modKey`/`isMac` constants
+  - Per-task drafts: `taskDraftsRef` (Map<number, {answer, discussion, files}>) сохраняет/восстанавливает черновики при смене задачи
+  - `switchToTask()` — единая точка навигации с draft save/restore
+  - `syncThreadFromResponse()` — server-driven advance тоже проходит через draft save/restore (через functional updater `setCurrentTaskOrder`)
+  - `key={currentTaskOrder}` на `<GuidedChatInput />` — remount при смене задачи
+  - `onDraftChange` callback — GuidedChatInput синхронизирует текст в parent `currentDraftRef` через useEffect
+  - `attachedFilesRef` — ref-зеркало `attachedFiles` для доступа из стабильных callbacks (`deps: []`)
 - Phase 4 (pending): QA кросс-браузерная проверка
 
 **Spec:** `docs/features/specs/guided-chat-two-fields-tasks.md`

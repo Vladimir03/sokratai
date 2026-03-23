@@ -34,13 +34,14 @@ interface GuidedChatInputProps {
   onSendStep: (text: string) => void;
   isLoading: boolean;
   disabled?: boolean;
-  /** @deprecated Ignored — each field has its own hardcoded placeholder. Remove in Phase 3. */
-  placeholder?: string;
   attachedFiles: File[];
   onFileSelect: (file: File) => void;
   onFileRemove: (index: number) => void;
   isUploading: boolean;
   taskNumber?: number;
+  initialAnswerText?: string;
+  initialDiscussionText?: string;
+  onDraftChange?: (answer: string, discussion: string) => void;
 }
 
 /** Attachment preview card above textarea */
@@ -162,9 +163,12 @@ const GuidedChatInput = memo(
     onFileRemove,
     isUploading,
     taskNumber,
+    initialAnswerText = '',
+    initialDiscussionText = '',
+    onDraftChange,
   }: GuidedChatInputProps) => {
-    const [answerText, setAnswerText] = useState('');
-    const [discussionText, setDiscussionText] = useState('');
+    const [answerText, setAnswerText] = useState(initialAnswerText);
+    const [discussionText, setDiscussionText] = useState(initialDiscussionText);
     const [isDiscussionExpanded, setIsDiscussionExpanded] = useState(false);
     const answerRef = useRef<HTMLTextAreaElement>(null);
     const discussionRef = useRef<HTMLTextAreaElement>(null);
@@ -175,6 +179,11 @@ const GuidedChatInput = memo(
 
     useAutoResize(answerRef, answerText);
     useAutoResize(discussionRef, discussionText);
+
+    // Sync draft text to parent (parent stores in ref — no re-render)
+    useEffect(() => {
+      onDraftChange?.(answerText, discussionText);
+    }, [answerText, discussionText, onDraftChange]);
 
     // --- Send handlers ---
 
