@@ -1,49 +1,121 @@
+Задача: восстановить ответы Telegram-бота для учеников и подготовить сообщение для @Dawsik11 с переводом на сайт без регистрации.
 
+Что удалось подтвердить по данным:
 
-## Plan: Add Homework Conversations to Admin Panel
+- У ученика @Dawsik11 профиль и Telegram-сессия существуют и выглядят корректно:
+  - `profiles.telegram_username = Dawsik11`
+  - `profiles.telegram_user_id = 1943199297`
+  - `telegram_sessions.onboarding_state = completed`
+- Сообщения ученика сегодня реально дошли до backend и сохранились в `chat_messages`.
+- После 09:59–10:16 UTC есть только `role=user`, а новых `role=assistant` нет.
+- Значит, проблема не в приёме webhook и не в маппинге пользователя. Сбой происходит позже — в цепочке `telegram-bot -> chat -> AI response -> sendTelegramMessage`.
 
-### Overview
-Add a new "ДЗ" (Homework) tab to the admin CRM section showing guided homework chat threads between students and AI, with the ability to view full conversation transcripts per student per assignment.
+Вероятная причина:
 
-### Step 1: Database — Add admin RLS policies for homework tables
+- В `telegram-bot/index.ts` бот перед каждым ответом отправляет в `chat` до 20 последних сообщений истории.
+- Для фото-сообщений эта история включает несколько старых `image_url`.
+- В `chat/index.ts` каждая такая картинка повторно скачивается и инлайнится в base64 перед вызовом AI.
+- У Dawsik11 сегодня как раз было несколько подряд фото одной задачи, поэтому payload резко раздувается и вызов AI, вероятно, зависает/падает до момента сохранения `assistant`-ответа.
+- Это согласуется с симптомом: входящие сообщения записались, а исходящего ответа и assistant-row нет.
 
-Create a migration adding SELECT policies for admins on these tables:
-- `homework_tutor_threads` — so admin can list all threads
-- `homework_tutor_thread_messages` — so admin can read all messages (including `visible_to_student = false`)
-- `homework_tutor_task_states` — so admin can see task progress
-- `homework_tutor_assignments` — so admin can see assignment titles/subjects
-- `homework_tutor_student_assignments` — so admin can join threads to students
-- `homework_tutor_submissions` — so admin can see submission status
+План минимального безопасного фикса
 
-All policies use `has_role(auth.uid(), 'admin'::app_role) OR is_admin_email(auth.uid())` pattern matching existing admin policies.
+1. Урезать payload для Telegram в `supabase/functions/telegram-bot/index.ts`
 
-### Step 2: Create `AdminHomeworkChats` component
+- Для `handleTextMessage`, `handlePhotoMessage` и `handleButtonAction` перестать слать “сырой” хвост из 20 сообщений.
+- Ввести компактную подготовку истории именно для Telegram:
+  - брать только последние N сообщений текста/assistant (например 6–8),
+  - оставлять только самое последнее изображение пользователя,
+  - удалять старые исторические изображения из payload.
+- Это сохранит контекст, но резко уменьшит вероятность таймаута/падения.
 
-New component `src/components/admin/AdminHomeworkChats.tsx`:
+2. Стабилизировать фото-флоу
 
-**List view:**
-- Fetches all `homework_tutor_threads` joined with `homework_tutor_student_assignments` → `profiles` and `homework_tutor_assignments`
-- Shows: student name, assignment title, subject, thread status, message count, last activity
-- Search by student name
-- Filter tabs: All / Active / Completed
-- Sorted by last activity (using `updated_at`)
+- В `handlePhotoMessage` при сборке истории гарантировать, что в AI уходит только текущее фото и максимум одно последнее релевантное изображение, а не все предыдущие повторы.
+- Не менять UX для ученика: фото по-прежнему можно отправлять как раньше, просто backend перестанет перегружать AI историческими картинками.
 
-**Detail view (on click):**
-- Shows all `homework_tutor_thread_messages` for the selected thread, ordered by `created_at`
-- Displays task states progress bar
-- Message bubbles similar to existing `AdminChatView` — user messages on right, assistant/system/tutor on left
-- Shows `message_kind` as small badges (hint_request, check_result, etc.)
-- Image support via signed URLs from `homework-images` bucket
+3. Добавить защиту от “тишины” при вызове `chat`
 
-### Step 3: Add "ДЗ" tab to Admin page
+- В `telegram-bot/index.ts` обернуть fetch к `functions/v1/chat` в явный timeout/abort.
+- Если AI не ответил вовремя или вернул невалидный поток:
+  - отправлять ученику короткий fallback-ответ вместо полного молчания,
+  - логировать тип сбоя понятным telemetry-tag.
+- Пример fallback: “Сейчас отвечаю дольше обычного. Попробуй ещё раз или перейди на сайт — там чат работает стабильнее.”
 
-In `src/pages/Admin.tsx`, add a fourth tab next to "Аналитика", "CRM", "Платежи":
-- Tab label: "ДЗ" with `BookOpen` icon
-- Content: `<AdminHomeworkChats />`
+4. Добавить более точные логи в критической цепочке
 
-### Technical details
-- Reuses existing `supabaseClient` and admin auth pattern
-- No new edge functions needed — direct Supabase queries with RLS
-- Message rendering reuses `MathText` component for LaTeX support
-- Profile lookup via join to `profiles` table (already has admin SELECT policy)
+- Логировать:
+  - размер истории,
+  - число сообщений с изображениями,
+  - статус ответа `chat`,
+  - timeout / parse failure / Telegram send failure.
+- Это нужно, потому что в текущих edge logs почти нет полезных следов, и без этого подобные сбои снова будет сложно расследовать.
 
+5. Проверить, не затронут ли guided homework flow
+
+- Так как недавно менялись `GuidedHomeworkWorkspace.tsx`, `chat/index.ts`, `guided_ai.ts`, нужно убедиться, что ограничение payload применяется только к Telegram generic chat flow и не ломает guided homework.
+- Для guided homework уже есть отдельные поля `studentImageUrls` / `taskImageUrl`; их трогать не нужно.
+
+6. После фикса — точечная проверка
+
+- Проверить сценарии:
+  - ученик отправляет обычный текст в Telegram,
+  - ученик отправляет одно фото задачи,
+  - ученик отправляет несколько фото подряд,
+  - после фото задаёт уточняющий текстовый вопрос.
+- Критерий успеха: после каждого входящего сообщения появляется assistant-ответ и новая `role=assistant` запись.
+
+Текст для ученика @Dawsik11
+Вариант, который можно отправить от лица сервиса:
+
+«Привет! Вижу, ты сегодня пробовал решить задачи через Telegram, но там сейчас ответы могли приходить нестабильно.  
+Чтобы не терять время, переходи сразу на сайт — там AI-чат работает быстрее и удобнее, и самое главное: без регистрации, можно сразу написать задачу или отправить фото.
+
+Вот ссылка: [https://sokratai.ru/chat](https://sokratai.ru/chat)
+
+Если хочешь, можешь просто продолжить с того же места: отправь задачу текстом или фото, и я помогу решить.»
+
+Более мотивационный вариант:
+«Привет! Ты сегодня уже пробовал решить задачу со мной — давай продолжим там, где всё работает стабильнее.  
+На сайте можно сразу зайти в AI-чат без регистрации, просто открыть ссылку и написать вопрос или отправить фото задачи. Это быстрее, удобнее и не нужно ничего настраивать.
+
+Переходи сюда: [https://sokratai.ru/chat](https://sokratai.ru/chat)
+
+Можешь прямо так и написать: “помоги решить эту задачу” — и продолжим.»
+
+Технические детали
+
+```text
+Текущая цепочка:
+Telegram message
+  -> telegram-bot/index.ts
+  -> save chat_messages(role=user)
+  -> fetch /functions/v1/chat
+  -> chat/index.ts re-downloads every image from history
+  -> AI gateway
+  -> save assistant
+  -> sendTelegramMessage
+
+Подозрение:
+слишком тяжёлая history с несколькими image_url
+  => долгий/падающий AI вызов
+  => assistant не сохраняется
+  => ученик видит тишину
+```
+
+Что именно менять:
+
+- `supabase/functions/telegram-bot/index.ts`
+  - подготовка history перед вызовом `chat`
+  - timeout + fallback
+  - диагностические логи
+- `supabase/functions/chat/index.ts`
+  - только если понадобится дополнительная защита на стороне chat:
+    - ограничить число historical image messages для Telegram profile
+- `guided_ai.ts` трогать только если выяснится, что туда попала общая логика, но по текущему анализу это не основной кандидат.
+
+Риск изменений
+
+- Низкий, если ограничить фикс только Telegram generic chat flow.
+- Поведение UI и сайта менять не нужно.
+- Основная идея — не менять пользовательский опыт, а убрать backend-молчание и сделать ответ устойчивым.
