@@ -459,7 +459,7 @@ const StudentHomeworkDetail = () => {
   if (data && data.workflow_mode === 'guided_chat') {
     return (
       <AuthGuard>
-        <div className="fixed inset-x-0 bottom-0 z-40 bg-background flex flex-col overflow-hidden top-[6.8rem] md:top-[6.5rem]">
+        <div className="fixed inset-x-0 bottom-0 z-40 bg-background flex flex-col overflow-hidden top-14">
           <Suspense
             fallback={
               <div className="flex-1 flex items-center justify-center text-muted-foreground">

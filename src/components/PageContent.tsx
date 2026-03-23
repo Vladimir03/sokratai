@@ -14,7 +14,7 @@ export const PageContent = ({
   return (
     <div 
       className={cn(
-        "pt-[110px] md:pt-[104px]",
+        "pt-2",
         fullHeight && "min-h-screen",
         className
       )}
