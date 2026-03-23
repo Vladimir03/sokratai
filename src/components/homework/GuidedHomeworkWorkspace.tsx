@@ -11,6 +11,7 @@ import {
   AlertTriangle,
   ArrowLeft,
   CheckCircle2,
+  ChevronDown,
   ChevronLeft,
   ChevronRight,
   Lightbulb,
@@ -326,6 +327,7 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
   const [threadStatus, setThreadStatus] = useState<'active' | 'completed' | 'abandoned'>('active');
   const [attachedFiles, setAttachedFiles] = useState<File[]>([]);
   const [isUploading, setIsUploading] = useState(false);
+  const [isConditionExpanded, setIsConditionExpanded] = useState(false);
 
   // Per-task drafts: save/restore text + files when switching tasks
   type TaskDraft = { answer: string; discussion: string; files: File[] };
@@ -1246,7 +1248,7 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
   // Active chat workspace
   return (
     <div className="flex-1 flex flex-col min-h-0">
-      <div className="border-b px-4 py-3 shrink-0">
+      <div className="border-b px-4 py-3 shrink-0 hidden md:block">
         <div className="flex items-center gap-3">
           <Button variant="ghost" size="icon" onClick={() => navigate('/homework')}>
             <ArrowLeft className="h-4 w-4" />
@@ -1277,49 +1279,64 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
       </div>
 
       {currentTask && (
-        <div className="border-b px-4 py-3 shrink-0 bg-slate-50/70 dark:bg-slate-900/30">
-          <div className="flex items-center justify-between mb-1">
-            <p className="text-xs text-muted-foreground">
-              Задача {currentTask.order_num} из {assignment.tasks.length}
-            </p>
-            {isViewingActiveTask && currentActiveTaskState?.available_score != null && (
-              <span className={`text-xs font-medium ${
-                (currentActiveTaskState.available_score ?? 0) >= currentTask.max_score
-                  ? 'text-emerald-600 dark:text-emerald-400'
-                  : 'text-amber-600 dark:text-amber-400'
-              }`}>
-                {currentActiveTaskState.available_score} / {currentTask.max_score} баллов
-              </span>
-            )}
-          </div>
-          <Suspense fallback={<p className="text-sm font-medium whitespace-pre-wrap">{currentTask.task_text}</p>}>
-            <MathText text={currentTask.task_text} className="text-sm font-medium whitespace-pre-wrap" />
-          </Suspense>
-
-          <div className="mt-2">
-            <TaskConditionImage
-              assignmentId={assignment.id}
-              taskId={currentTask.id}
-              taskOrder={currentTask.order_num}
-              taskImageUrl={currentTask.task_image_url}
-            />
-          </div>
-
-          {assignment.materials.length > 0 && (
-            <div className="mt-3 rounded-md border bg-background/70 px-3 py-2">
-              <p className="text-xs font-medium mb-1">Материалы</p>
-              <div className="flex flex-wrap gap-3">
-                {assignment.materials.map((material) => (
-                  <MaterialLink
-                    key={material.id}
-                    title={material.title}
-                    url={material.url}
-                    storageRef={material.storage_ref}
-                  />
-                ))}
-              </div>
+        <div className="border-b shrink-0 bg-slate-50/70 dark:bg-slate-900/30">
+          {/* Header row — always visible, acts as toggle on mobile */}
+          <button
+            type="button"
+            onClick={() => setIsConditionExpanded(prev => !prev)}
+            className="flex w-full items-center justify-between px-4 py-2 text-left md:pointer-events-none"
+            style={{ touchAction: 'manipulation' }}
+          >
+            <div className="flex items-center gap-2">
+              <p className="text-xs text-muted-foreground">
+                Задача {currentTask.order_num} из {assignment.tasks.length}
+              </p>
+              {isViewingActiveTask && currentActiveTaskState?.available_score != null && (
+                <span className={`text-xs font-medium ${
+                  (currentActiveTaskState.available_score ?? 0) >= currentTask.max_score
+                    ? 'text-emerald-600 dark:text-emerald-400'
+                    : 'text-amber-600 dark:text-amber-400'
+                }`}>
+                  {currentActiveTaskState.available_score} / {currentTask.max_score} баллов
+                </span>
+              )}
             </div>
-          )}
+            <ChevronDown className={`h-4 w-4 text-muted-foreground transition-transform duration-200 md:hidden ${isConditionExpanded ? 'rotate-180' : ''}`} />
+          </button>
+
+          {/* Collapsible content — collapsed on mobile by default, always open on desktop */}
+          <div className={`overflow-hidden transition-all duration-200 md:max-h-none md:overflow-visible ${isConditionExpanded ? 'max-h-[60vh]' : 'max-h-0'}`}>
+            <div className="px-4 pb-3">
+              <Suspense fallback={<p className="text-sm font-medium whitespace-pre-wrap">{currentTask.task_text}</p>}>
+                <MathText text={currentTask.task_text} className="text-sm font-medium whitespace-pre-wrap" />
+              </Suspense>
+
+              <div className="mt-2">
+                <TaskConditionImage
+                  assignmentId={assignment.id}
+                  taskId={currentTask.id}
+                  taskOrder={currentTask.order_num}
+                  taskImageUrl={currentTask.task_image_url}
+                />
+              </div>
+
+              {assignment.materials.length > 0 && (
+                <div className="mt-3 rounded-md border bg-background/70 px-3 py-2">
+                  <p className="text-xs font-medium mb-1">Материалы</p>
+                  <div className="flex flex-wrap gap-3">
+                    {assignment.materials.map((material) => (
+                      <MaterialLink
+                        key={material.id}
+                        title={material.title}
+                        url={material.url}
+                        storageRef={material.storage_ref}
+                      />
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
         </div>
       )}
 
@@ -1365,8 +1382,8 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
       </div>
 
       <div className="shrink-0 border-t bg-background">
-        <div className="px-4 pt-3 pb-2 space-y-2">
-          <div className="grid grid-cols-3 gap-2">
+        <div className="px-4 pt-2 pb-1 md:pt-3 md:pb-2 space-y-2">
+          <div className="grid grid-cols-3 gap-1 md:gap-2">
             <Button
               variant="outline"
               size="sm"

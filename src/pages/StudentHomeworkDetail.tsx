@@ -453,11 +453,13 @@ const StudentHomeworkDetail = () => {
   };
 
   // Guided chat mode: render interactive workspace
+  // AuthGuard provides <Navigation /> (fixed, h=4rem) and wraps children in pt-16 pb-20.
+  // We use a fixed-position overlay starting below the nav bar to escape the padding
+  // wrapper entirely, preventing scrollIntoView from scrolling parent containers.
   if (data && data.workflow_mode === 'guided_chat') {
     return (
       <AuthGuard>
-        <div className="min-h-[100dvh] bg-background flex flex-col">
-          <Navigation />
+        <div className="fixed inset-x-0 bottom-0 z-40 bg-background flex flex-col overflow-hidden top-[6.8rem] md:top-[6.5rem]">
           <Suspense
             fallback={
               <div className="flex-1 flex items-center justify-center text-muted-foreground">
