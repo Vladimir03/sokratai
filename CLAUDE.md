@@ -258,7 +258,7 @@ Legacy student-only система (`homework_sets`, `homework_tasks`, `homework
 
 - **S1-1: MathText в условии задачи** — `GuidedHomeworkWorkspace.tsx` рендерит `task_text` через lazy `MathText` (с `Suspense` fallback). `whitespace-pre-wrap` сохранён для plain-text задач
 - **S1-2: Bootstrap для всех задач** — убрано ограничение `order_num !== 1`. AI intro генерируется при первом открытии любой задачи без сообщений. Backend system messages (`role: 'system'`) исключаются из проверки `hasAnyTaskMessages`. Backend integrity check (`INVALID_ORDER`) обходится для `message_kind: 'system'` — bootstrap сохраняется в БД и виден репетитору
-- **S1-3: Enter = Обсудить** — `Enter` → `handleSendStep` (question mode, безопасный). `Ctrl/Cmd+Enter` → `handleSendAnswer` (answer mode, проверка). Платформо-зависимый label (`Cmd` на Mac, `Ctrl` на Windows)
+- **S1-3: Enter = отправить** — `Enter` в AnswerField → проверка ответа, `Enter` в DiscussionField → обсуждение с AI. Два раздельных поля (см. Sprint S2)
 - **S1-4: Label «Введение»** — `formatMessageKind('system')` → `'Введение'` в student view. В tutor `GuidedThreadViewer` — badge «Введение» только для `role: 'assistant'` + `message_kind: 'system'` (не для transition messages с `role: 'system'`)
 - **S1-5: Shared preprocessLatex** — удалён inline дубликат из `GuidedChatMessage.tsx`, импорт из `@/components/kb/ui/preprocessLatex.ts`. Inline версия имела баг: `'$$'` — спецсимвол в `String.replace`
 
@@ -301,16 +301,17 @@ Legacy student-only система (`homework_sets`, `homework_tasks`, `homework
 - Два независимых state: `answerText` + `discussionText`. Каждое поле очищается только при своей отправке
 - Ctrl+Enter / Cmd+Enter **полностью убран** — больше не нужен
 - `attachedFiles` — shared (один `<input type="file">`), `AttachmentPreview` фиксированно над answer-полем
-- `placeholder` prop deprecated (игнорируется) — каждое поле имеет hardcoded placeholder с `taskNumber`
+- `placeholder` prop удалён — каждое поле имеет короткий hardcoded placeholder (`Ответ...` / `Обсуди с AI...`)
 - Props `onSendAnswer(text)` и `onSendStep(text)` — без изменений сигнатуры
 
 **Фазы:**
 - Phase 1 (done): рефакторинг GuidedChatInput → два поля
-- Phase 2 (done): мобильный аккордеон — discussion свёрнуто по умолчанию на `<768px`
-  - `isDiscussionExpanded` state, toggle-кнопка `md:hidden`, CSS `transition-all duration-200`
-  - Discussion wrapper: `max-h-0` (collapsed) / `max-h-96` (expanded) / `md:max-h-none` (desktop override)
-  - Compact answer: `answerCompact` derived var → label `hidden md:flex`, hint `hidden md:block`, padding `p-2 md:p-3`
+- Phase 2 (done): аккордеон обсуждения — discussion свёрнуто по умолчанию на **всех** экранах
+  - `isDiscussionExpanded` state, toggle-кнопка видна на mobile и desktop
+  - Discussion wrapper: `max-h-0` (collapsed) / `max-h-96` (expanded)
+  - Compact answer: `answerCompact` derived var → label `hidden md:flex`, padding `p-2 md:p-3`
   - `aria-expanded` + `aria-controls` на toggle, `touch-action: manipulation`
+  - Подсказки «Enter = ...» убраны — занимали место без пользы
 - Phase 3 (done): обновление GuidedHomeworkWorkspace + per-task drafts
   - Убран `placeholder` prop из `GuidedChatInputProps` и destructuring
   - Добавлен `taskNumber={currentTask?.order_num}` prop
@@ -325,12 +326,33 @@ Legacy student-only система (`homework_sets`, `homework_tasks`, `homework
 
 **Spec:** `docs/features/specs/guided-chat-two-fields-tasks.md`
 
+### Mobile UX polish (Sprint S3, 2026-03-23)
+
+Оптимизация мобильного и десктоп-UX guided homework chat для максимизации пространства чата.
+
+**Навигация (`Navigation.tsx`):**
+- Логотип + вкладки + logout объединены в одну строку `h-14`
+- Вкладка «Главная» удалена — логотип «Сократ» ведёт на `/`
+- На мобиле текст «Сократ» скрыт (`hidden md:inline`), вкладки горизонтально скроллятся
+
+**Layout workspace (`GuidedHomeworkWorkspace.tsx`):**
+- Блок с названием ДЗ / предметом / статусом **удалён** (был desktop-only `hidden md:block`)
+- Условие задачи: collapsible toggle работает и на mobile и на desktop (убраны `md:pointer-events-none`, `md:hidden`, `md:max-h-none`)
+- Условие раскрыто по умолчанию (`useState(true)`) — ученик видит задачу при первом заходе
+- Кнопки «Предыдущая» / «Следующая»: icon-only на мобиле (`hidden md:inline` для текста)
+
+**Input (`GuidedChatInput.tsx`):**
+- Кнопки 📎 / «Проверить» / «Написать»: `h-8 md:h-10` (компактнее на мобиле)
+- Подсказки «Enter = ...» убраны полностью (и mobile, и desktop)
+- Плейсхолдеры: `Ответ...` и `Обсуди с AI...` (короткие, в одну строку)
+- Discussion toggle работает и на desktop (убраны `md:hidden`, `md:max-h-none md:overflow-visible`)
+
 ## Известные хрупкие области
 
 1. **Chat.tsx** (2000+ строк) — очень сложный компонент. Любые изменения в ChatMessage, ChatInput, ChatSidebar могут сломать чат
 2. **Pyodide/GraphRenderer** — Python-графики. Зависит от CDN, может ломаться при изменениях в ChatMessage
 3. **AuthGuard / TutorGuard** — guard-компоненты. Изменение может заблокировать доступ для всех пользователей. **TutorGuard** имеет module-level кеш (`tutorAuthCache`) — НЕ УДАЛЯТЬ, иначе переключение вкладок станет медленным (is_tutor RPC с retry до 6 секунд на каждый переход)
-4. **Navigation.tsx** — общая навигация. Показывает разное меню для student/tutor
+4. **Navigation.tsx** — общая навигация. Одна строка: логотип «Сократ» (→ `/`) + вкладки (Домашка, Чат, Тренажёр, Прогресс, Профиль) + logout. На мобиле текст «Сократ» скрыт, вкладки горизонтально скроллятся. Вкладка «Главная» удалена — логотип ведёт на `/`
 5. **UI-компоненты** (`button.tsx`, `card.tsx`, `badge.tsx`) — используются ВЕЗДЕ, изменения влияют на ВСЁ приложение
 6. **Telegram Auth Flow** — цепочка: `TelegramLoginButton` → `telegram-login-token` → `telegram-bot/handleWebLogin` → `getOrCreateProfile`. Несогласованность email-адресов между функциями создаёт дубликаты пользователей
 7. **Tutor Role Assignment** — роль назначается через `assign-tutor-role` (email) или `telegram-bot` (Telegram). Обе ветки должны работать с ОДНИМ и тем же user_id
