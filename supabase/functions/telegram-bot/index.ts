@@ -7312,12 +7312,10 @@ async function handlePhotoMessage(telegramUserId: number, userId: string, photo:
     async function refreshImageUrls(messages: any[]) {
       return await Promise.all(
         messages.map(async (msg) => {
-          // Если есть image_path, создаём новый signed URL
           if (msg.image_path) {
             const { data: signedData, error } = await supabase.storage
               .from("chat-images")
-              .createSignedUrl(msg.image_path, 3600); // 1 hour для истории
-            
+              .createSignedUrl(msg.image_path, 3600);
             if (!error && signedData) {
               return { ...msg, image_url: signedData.signedUrl };
             }
@@ -7344,7 +7342,7 @@ async function handlePhotoMessage(telegramUserId: number, userId: string, photo:
       input_method: "photo",
     });
 
-    // Get chat history - limit to last 20 messages (10 pairs)
+    // Get chat history - limit to last 20 messages, then compact
     console.log("Step 12: Getting chat history...");
     const { data: historyReversed, error: historyError } = await supabase
       .from("chat_messages")
@@ -7360,36 +7358,39 @@ async function handlePhotoMessage(telegramUserId: number, userId: string, photo:
     let history = historyReversed?.reverse() || [];
     console.log("Step 13: Chat history loaded, messages:", history.length);
 
-    // Обновить signed URLs для всех изображений в истории
-    console.log("Step 13.5: Refreshing image URLs...");
-    history = await refreshImageUrls(history);
-    console.log("Step 13.5: Image URLs refreshed");
+    // Compact history: keep only last N messages, strip old images
+    const compacted = compactHistoryForTelegram(history);
+    
+    // Refresh signed URLs only for messages that still have images
+    const readyHistory = await refreshImageUrls(compacted);
+    
+    const imageCount = readyHistory.filter((m: any) => m.image_url).length;
+    console.log("📊 [handlePhotoMessage] history compact:", {
+      rawCount: history.length,
+      compactedCount: readyHistory.length,
+      imagesKept: imageCount,
+    });
 
     // Start typing loop
     const stopTyping = { stop: false };
     const typingPromise = sendTypingLoop(telegramUserId, stopTyping);
 
-    // Call AI chat function with service role authorization
+    // Call AI chat function with timeout
     console.log("Step 14: Calling AI chat function...");
-    const chatResponse = await fetch(`${SUPABASE_URL}/functions/v1/chat`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
-      },
-      body: JSON.stringify({
-        messages: history || [],
-        chatId: chatId,
-        userId: userId,
-        responseProfile: "telegram_compact",
-        responseMode: "dialog",
-        maxChars: TELEGRAM_DIALOG_MAX_CHARS,
-      }),
-    });
+    const chatResponse = await fetchChatWithTimeout({
+      messages: readyHistory,
+      chatId: chatId,
+      userId: userId,
+      responseProfile: "telegram_compact",
+      responseMode: "dialog",
+      maxChars: TELEGRAM_DIALOG_MAX_CHARS,
+    }, telegramUserId, "handlePhotoMessage");
 
     // Stop typing
     stopTyping.stop = true;
     await typingPromise;
+
+    if (!chatResponse) return; // fallback already sent
 
     console.log("Step 15: AI response status:", chatResponse.status);
 
