@@ -111,7 +111,7 @@ const handleDiscussionKeyDown = useCallback((e: React.KeyboardEvent<HTMLTextArea
 │                                                         │
 │ ┌─ border border-muted rounded-lg p-3 ────────────────┐ │
 │ │ 💬 Обсуждение                                        │ │
-│ │ [📎] [textarea: "Задать вопрос AI..."]    [Спросить] │ │
+│ │ [📎] [textarea: "Задать вопрос AI..."]    [Написать] │ │
 │ │ Enter = обсудить с AI                                │ │
 │ └──────────────────────────────────────────────────────┘ │
 └─────────────────────────────────────────────────────────┘
@@ -150,7 +150,7 @@ interface GuidedChatInputProps {
 | Рамка | `border-2 border-green-600` | `border border-slate-200` |
 | Иконка | `✅` (CheckCircle2, green) | `💬` (MessageCircle, muted) |
 | Label | `font-bold text-green-700` «Ответ к задаче» | `font-semibold text-muted-foreground` «Обсуждение» |
-| Кнопка | `variant="default" className="bg-green-600 hover:bg-green-700"` «Проверить» | `variant="outline"` «Спросить» |
+| Кнопка | `variant="default" className="bg-green-600 hover:bg-green-700"` «Проверить» | `variant="outline"` «Написать» |
 | Hint под полем | `text-[10px] text-muted-foreground` «Enter = проверить» | «Enter = обсудить с AI» |
 | Кнопка при isLoading | spinner + disabled | spinner + disabled |
 
@@ -369,7 +369,7 @@ const answerPlaceholder = taskNumber
 // Discussion field
 const discussionPlaceholder = taskNumber
   ? `Задача ${taskNumber}: задайте вопрос AI...`
-  : 'Задайте вопрос AI...';
+  : 'Обсудите с AI...';
 ```
 
 **Acceptance criteria:**

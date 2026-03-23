@@ -318,8 +318,8 @@ const GuidedChatInput = memo(
       : 'Введите ответ...';
 
     const discussionPlaceholder = taskNumber
-      ? `Задача ${taskNumber}: задайте вопрос AI...`
-      : 'Задайте вопрос AI...';
+      ? `Задача ${taskNumber}: обсудите с AI...`
+      : 'Обсудите с AI...';
 
     // --- Shared styles ---
 
@@ -474,7 +474,7 @@ placeholder={answerPlaceholder}
                   style={{ touchAction: 'manipulation' }}
                 >
                   {isLoading ? spinner : <MessageCircle className="h-3.5 w-3.5" />}
-                  Спросить
+                  Написать
                 </Button>
               </div>
 
