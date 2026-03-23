@@ -44,8 +44,77 @@ const SITE_BASE_URL = "https://sokratai.ru";
 const HOMEWORK_TASK_IMAGE_DEFAULT_BUCKET = "homework-task-images";
 const HOMEWORK_TASK_IMAGE_FALLBACK_BUCKETS = ["chat-images", "homework-images"];
 const HOMEWORK_TASK_IMAGE_CAPTION_LIMIT = 900;
+const TELEGRAM_HISTORY_LIMIT = 8; // max messages to send to AI from Telegram
+const TELEGRAM_CHAT_TIMEOUT_MS = 55_000; // 55s timeout for AI chat call
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+
+/**
+ * Compact chat history for Telegram AI calls:
+ * - Keep only last TELEGRAM_HISTORY_LIMIT messages
+ * - Strip image_url from all but the latest user message with an image
+ * This prevents payload bloat when students send multiple photos.
+ */
+function compactHistoryForTelegram(
+  messages: Array<{ role: string; content: string; image_url?: string | null; image_path?: string | null }>,
+): Array<{ role: string; content: string; image_url?: string | null }> {
+  const trimmed = messages.slice(-TELEGRAM_HISTORY_LIMIT);
+
+  // Find index of last user message with image
+  let lastImageIdx = -1;
+  for (let i = trimmed.length - 1; i >= 0; i--) {
+    if (trimmed[i].role === "user" && trimmed[i].image_url) {
+      lastImageIdx = i;
+      break;
+    }
+  }
+
+  return trimmed.map((msg, i) => ({
+    role: msg.role,
+    content: msg.content,
+    image_url: i === lastImageIdx ? msg.image_url : undefined,
+  }));
+}
+
+/**
+ * Fetch AI chat with timeout and fallback message on failure.
+ * Returns parsed AI content or null if fallback was sent.
+ */
+async function fetchChatWithTimeout(
+  body: Record<string, unknown>,
+  telegramUserId: number,
+  label: string,
+): Promise<Response | null> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), TELEGRAM_CHAT_TIMEOUT_MS);
+
+  try {
+    const chatResponse = await fetch(`${SUPABASE_URL}/functions/v1/chat`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
+      },
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    });
+    clearTimeout(timeoutId);
+    return chatResponse;
+  } catch (err: unknown) {
+    clearTimeout(timeoutId);
+    const isTimeout = err instanceof Error && err.name === "AbortError";
+    console.error(`🔴 [${label}] chat fetch failed`, {
+      telegramUserId,
+      error: isTimeout ? "TIMEOUT" : (err instanceof Error ? err.message : String(err)),
+      historySize: (body.messages as unknown[])?.length ?? 0,
+    });
+    await sendTelegramMessage(
+      telegramUserId,
+      "⏳ Сейчас отвечаю дольше обычного. Попробуй ещё раз или перейди на сайт — там чат работает стабильнее: https://sokratai.ru/chat",
+    );
+    return null;
+  }
+}
 const WEB_PAYMENT_URL = "https://sokratai.ru/profile?openPayment=true";
 const WEB_PRICING_URL = "https://sokratai.ru/#pricing";
 const WEBAPP_FALLBACK_URL = "https://sokratai.lovable.app";
