@@ -327,7 +327,7 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
   const [threadStatus, setThreadStatus] = useState<'active' | 'completed' | 'abandoned'>('active');
   const [attachedFiles, setAttachedFiles] = useState<File[]>([]);
   const [isUploading, setIsUploading] = useState(false);
-  const [isConditionExpanded, setIsConditionExpanded] = useState(false);
+  const [isConditionExpanded, setIsConditionExpanded] = useState(true);
 
   // Per-task drafts: save/restore text + files when switching tasks
   type TaskDraft = { answer: string; discussion: string; files: File[] };
@@ -1301,7 +1301,10 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
                 </span>
               )}
             </div>
-            <ChevronDown className={`h-4 w-4 text-muted-foreground transition-transform duration-200 md:hidden ${isConditionExpanded ? 'rotate-180' : ''}`} />
+            <span className="flex items-center gap-1 text-xs text-muted-foreground md:hidden">
+              {isConditionExpanded ? 'Скрыть' : 'Раскрыть'}
+              <ChevronDown className={`h-4 w-4 transition-transform duration-200 ${isConditionExpanded ? 'rotate-180' : ''}`} />
+            </span>
           </button>
 
           {/* Collapsible content — collapsed on mobile by default, always open on desktop */}
@@ -1389,10 +1392,10 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
               size="sm"
               onClick={handleGoPrev}
               disabled={controlsDisabled || previousTaskOrder === null}
-              className="justify-start gap-1"
+              className="justify-center md:justify-start gap-1"
             >
               <ChevronLeft className="h-4 w-4" />
-              Предыдущая
+              <span className="hidden md:inline">Предыдущая</span>
             </Button>
 
             <Button
@@ -1400,10 +1403,10 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
               size="sm"
               onClick={handleGoNext}
               disabled={controlsDisabled || !canGoNext}
-              className="justify-start gap-1"
+              className="justify-center md:justify-start gap-1"
             >
               <ChevronRight className="h-4 w-4" />
-              Следующая
+              <span className="hidden md:inline">Следующая</span>
             </Button>
 
             <Button

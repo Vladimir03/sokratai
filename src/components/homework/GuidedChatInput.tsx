@@ -361,7 +361,7 @@ const GuidedChatInput = memo(
           isUploading={isUploading}
         />
 
-        <div className="flex flex-col gap-2 p-3">
+        <div className="flex flex-col gap-1.5 p-2 md:gap-2 md:p-3">
           {/* ===== ANSWER FIELD (green) ===== */}
           <div className={cn(
             "rounded-lg border-2 border-green-600",
@@ -369,7 +369,7 @@ const GuidedChatInput = memo(
           )}>
             {/* Label: hide on mobile in compact mode */}
             <div className={cn(
-              "mb-2 flex items-center gap-1.5",
+              "mb-1 md:mb-2 flex items-center gap-1.5",
               answerCompact && "hidden md:flex"
             )}>
               <CheckCircle2 className="h-4 w-4 text-green-600" />
@@ -382,8 +382,8 @@ const GuidedChatInput = memo(
                 type="button"
                 onClick={handleFileClick}
                 disabled={attachDisabled}
-                className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-input bg-background text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground disabled:cursor-not-allowed disabled:opacity-50"
-                style={{ touchAction: 'manipulation', minWidth: '44px', minHeight: '44px' }}
+                className="flex h-8 w-8 md:h-10 md:w-10 shrink-0 items-center justify-center rounded-lg border border-input bg-background text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground disabled:cursor-not-allowed disabled:opacity-50"
+                style={{ touchAction: 'manipulation' }}
                 aria-label="Прикрепить файл"
               >
                 <Paperclip className="h-4 w-4" />
@@ -405,7 +405,7 @@ placeholder={answerPlaceholder}
                 size="sm"
                 onClick={handleSendAnswer}
                 disabled={!canSendAnswer}
-                className="h-10 shrink-0 gap-1 whitespace-nowrap bg-green-600 px-3 text-xs hover:bg-green-700"
+                className="h-8 md:h-10 shrink-0 gap-1 whitespace-nowrap bg-green-600 px-3 text-xs hover:bg-green-700"
                 style={{ touchAction: 'manipulation' }}
               >
                 {isLoading ? spinner : <CheckCircle2 className="h-3.5 w-3.5" />}
@@ -415,7 +415,7 @@ placeholder={answerPlaceholder}
 
             {/* Hint: hide on mobile in compact mode */}
             <p className={cn(
-              "mt-1 text-[10px] text-muted-foreground",
+              "mt-0.5 md:mt-1 text-[10px] text-muted-foreground",
               answerCompact && "hidden md:block"
             )}>Enter = отправить на проверку</p>
           </div>
@@ -442,9 +442,9 @@ placeholder={answerPlaceholder}
               "md:max-h-none md:overflow-visible"
             )}
           >
-            <div className="rounded-lg border border-slate-200 p-3">
+            <div className="rounded-lg border border-slate-200 p-2 md:p-3">
               {/* Label */}
-              <div className="mb-2 flex items-center gap-1.5">
+              <div className="mb-1 md:mb-2 flex items-center gap-1.5">
                 <MessageCircle className="h-4 w-4 text-muted-foreground" />
                 <span className="text-sm font-semibold text-muted-foreground">Обсуждение</span>
               </div>
@@ -455,8 +455,8 @@ placeholder={answerPlaceholder}
                   type="button"
                   onClick={handleFileClick}
                   disabled={attachDisabled}
-                  className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-input bg-background text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground disabled:cursor-not-allowed disabled:opacity-50"
-                  style={{ touchAction: 'manipulation', minWidth: '44px', minHeight: '44px' }}
+                  className="flex h-8 w-8 md:h-10 md:w-10 shrink-0 items-center justify-center rounded-lg border border-input bg-background text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground disabled:cursor-not-allowed disabled:opacity-50"
+                  style={{ touchAction: 'manipulation' }}
                   aria-label="Прикрепить файл"
                 >
                   <Paperclip className="h-4 w-4" />
@@ -479,7 +479,7 @@ placeholder={answerPlaceholder}
                   size="sm"
                   onClick={handleSendStep}
                   disabled={!canSendDiscussion}
-                  className="h-10 shrink-0 gap-1 whitespace-nowrap px-3 text-xs"
+                  className="h-8 md:h-10 shrink-0 gap-1 whitespace-nowrap px-3 text-xs"
                   style={{ touchAction: 'manipulation' }}
                 >
                   {isLoading ? spinner : <MessageCircle className="h-3.5 w-3.5" />}
@@ -488,7 +488,7 @@ placeholder={answerPlaceholder}
               </div>
 
               {/* Hint */}
-              <p className="mt-1 text-[10px] text-muted-foreground">Enter = обсудить с AI</p>
+              <p className="mt-0.5 md:mt-1 text-[10px] text-muted-foreground">Enter = обсудить с AI</p>
             </div>
           </div>
         </div>
