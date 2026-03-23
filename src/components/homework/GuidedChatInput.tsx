@@ -322,13 +322,8 @@ const GuidedChatInput = memo(
 
     // --- Placeholders ---
 
-    const answerPlaceholder = taskNumber
-      ? `Задача ${taskNumber}: введите ответ...`
-      : 'Введите ответ...';
-
-    const discussionPlaceholder = taskNumber
-      ? `Задача ${taskNumber}: обсудите с AI...`
-      : 'Обсудите с AI...';
+    const answerPlaceholder = 'Ответ...';
+    const discussionPlaceholder = 'Вопрос к AI...';
 
     // --- Shared styles ---
 
@@ -413,11 +408,6 @@ placeholder={answerPlaceholder}
               </Button>
             </div>
 
-            {/* Hint: hide on mobile in compact mode */}
-            <p className={cn(
-              "mt-0.5 md:mt-1 text-[10px] text-muted-foreground",
-              answerCompact && "hidden md:block"
-            )}>Enter = отправить на проверку</p>
           </div>
 
           {/* ===== DISCUSSION TOGGLE (mobile only) ===== */}
@@ -426,7 +416,7 @@ placeholder={answerPlaceholder}
             onClick={() => setIsDiscussionExpanded(prev => !prev)}
             aria-expanded={isDiscussionExpanded}
             aria-controls="guided-discussion-field"
-            className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-slate-300 py-2.5 text-sm text-muted-foreground md:hidden"
+            className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-slate-300 py-2.5 text-sm text-muted-foreground"
             style={{ touchAction: 'manipulation' }}
           >
             <MessageCircle className="h-4 w-4" />
@@ -438,8 +428,7 @@ placeholder={answerPlaceholder}
             id="guided-discussion-field"
             className={cn(
               "transition-all duration-200 overflow-hidden",
-              isDiscussionExpanded ? "max-h-96" : "max-h-0",
-              "md:max-h-none md:overflow-visible"
+              isDiscussionExpanded ? "max-h-96" : "max-h-0"
             )}
           >
             <div className="rounded-lg border border-slate-200 p-2 md:p-3">
@@ -487,8 +476,6 @@ placeholder={answerPlaceholder}
                 </Button>
               </div>
 
-              {/* Hint */}
-              <p className="mt-0.5 md:mt-1 text-[10px] text-muted-foreground">Enter = обсудить с AI</p>
             </div>
           </div>
         </div>

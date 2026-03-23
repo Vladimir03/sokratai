@@ -18,7 +18,6 @@ import {
   Loader2,
   ZoomIn,
 } from 'lucide-react';
-import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import {
@@ -1248,28 +1247,6 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
   // Active chat workspace
   return (
     <div className="flex-1 flex flex-col min-h-0">
-      <div className="border-b px-4 py-3 shrink-0 hidden md:block">
-        <div className="flex items-center gap-3">
-          <Button variant="ghost" size="icon" onClick={() => navigate('/homework')}>
-            <ArrowLeft className="h-4 w-4" />
-          </Button>
-          <div className="flex-1 min-w-0">
-            <h1 className="text-sm font-semibold truncate">{assignment.title}</h1>
-            <div className="mt-1 flex flex-wrap items-center gap-2">
-              <p className="text-xs text-muted-foreground">{getSubjectLabel(assignment.subject)}</p>
-              <Badge className={`border text-xs ${UI_STATUS_META[uiStatus].badgeClass}`}>
-                {UI_STATUS_META[uiStatus].label}
-              </Badge>
-              {!isViewingActiveTask && (
-                <Badge variant="secondary" className="text-xs">
-                  Просмотр задачи {currentTaskOrder}
-                </Badge>
-              )}
-            </div>
-          </div>
-        </div>
-      </div>
-
       <div className="border-b px-4 py-1 shrink-0 bg-muted/30">
         <TaskStepper
           tasks={taskStepItems}
@@ -1284,7 +1261,7 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
           <button
             type="button"
             onClick={() => setIsConditionExpanded(prev => !prev)}
-            className="flex w-full items-center justify-between px-4 py-2 text-left md:pointer-events-none"
+            className="flex w-full items-center justify-between px-4 py-2 text-left"
             style={{ touchAction: 'manipulation' }}
           >
             <div className="flex items-center gap-2">
@@ -1301,14 +1278,14 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
                 </span>
               )}
             </div>
-            <span className="flex items-center gap-1 text-xs text-muted-foreground md:hidden">
+            <span className="flex items-center gap-1 text-xs text-muted-foreground">
               {isConditionExpanded ? 'Скрыть' : 'Раскрыть'}
               <ChevronDown className={`h-4 w-4 transition-transform duration-200 ${isConditionExpanded ? 'rotate-180' : ''}`} />
             </span>
           </button>
 
           {/* Collapsible content — collapsed on mobile by default, always open on desktop */}
-          <div className={`overflow-hidden transition-all duration-200 md:max-h-none md:overflow-visible ${isConditionExpanded ? 'max-h-[60vh]' : 'max-h-0'}`}>
+          <div className={`overflow-hidden transition-all duration-200 ${isConditionExpanded ? 'max-h-[60vh]' : 'max-h-0'}`}>
             <div className="px-4 pb-3">
               <Suspense fallback={<p className="text-sm font-medium whitespace-pre-wrap">{currentTask.task_text}</p>}>
                 <MathText text={currentTask.task_text} className="text-sm font-medium whitespace-pre-wrap" />
