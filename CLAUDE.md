@@ -306,7 +306,11 @@ Legacy student-only система (`homework_sets`, `homework_tasks`, `homework
 
 **Фазы:**
 - Phase 1 (done): рефакторинг GuidedChatInput → два поля
-- Phase 2 (pending): мобильный аккордеон — discussion свёрнуто по умолчанию на `<768px`
+- Phase 2 (done): мобильный аккордеон — discussion свёрнуто по умолчанию на `<768px`
+  - `isDiscussionExpanded` state, toggle-кнопка `md:hidden`, CSS `transition-all duration-200`
+  - Discussion wrapper: `max-h-0` (collapsed) / `max-h-96` (expanded) / `md:max-h-none` (desktop override)
+  - Compact answer: `answerCompact` derived var → label `hidden md:flex`, hint `hidden md:block`, padding `p-2 md:p-3`
+  - `aria-expanded` + `aria-controls` на toggle, `touch-action: manipulation`
 - Phase 3 (pending): обновление GuidedHomeworkWorkspace — убрать `placeholder`, добавить `taskNumber`, удалить `modKey`
 - Phase 4 (pending): QA кросс-браузерная проверка
 

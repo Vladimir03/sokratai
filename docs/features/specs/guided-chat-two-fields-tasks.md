@@ -241,14 +241,16 @@ const [isDiscussionExpanded, setIsDiscussionExpanded] = useState(false);
 ```
 **Важно:** на desktop (`md:`) — `max-h-none` переопределяет inline style, поле всегда видно.
 
-**Acceptance criteria:**
-- [ ] Desktop (≥768px): оба поля видны, нет toggle-кнопки
-- [ ] Mobile (<768px): «Обсуждение» свёрнуто, видна кнопка «💬 Обсудить шаг с AI ▾»
-- [ ] Тап на кнопку → плавное раскрытие (CSS transition, duration 200ms)
-- [ ] Кнопка ▴ → сворачивание обратно
-- [ ] После отправки discussion-сообщения → поле остаётся раскрытым
-- [ ] Structural breakpoint: `md:` (768px), **НЕ** `sm:` (640px)
-- [ ] Нет framer-motion — только CSS transitions
+**Acceptance criteria:** ✅ Phase 2.1 DONE (2026-03-23)
+- [x] Desktop (≥768px): оба поля видны, нет toggle-кнопки
+- [x] Mobile (<768px): «Обсуждение» свёрнуто, видна кнопка «💬 Обсудить шаг с AI ▾»
+- [x] Тап на кнопку → плавное раскрытие (CSS transition, duration 200ms)
+- [x] Кнопка ▴ → сворачивание обратно
+- [x] После отправки discussion-сообщения → поле остаётся раскрытым
+- [x] Structural breakpoint: `md:` (768px), **НЕ** `sm:` (640px)
+- [x] Нет framer-motion — только CSS transitions
+- [x] `aria-expanded` + `aria-controls` на toggle-кнопке (accessibility)
+- [x] `max-h-96` (384px) вместо `max-h-[300px]` — запас для text zoom
 
 ---
 
@@ -284,10 +286,11 @@ const answerCompact = isDiscussionExpanded; // только влияет на mo
 </div>
 ```
 
-**Acceptance criteria:**
-- [ ] Mobile + discussion expanded: answer field в compact-режиме (нет label, меньше padding)
-- [ ] Desktop: answer field всегда в full-режиме (label видна)
-- [ ] Переход compact ↔ full плавный (CSS transition)
+**Acceptance criteria:** ✅ Phase 2.2 DONE (2026-03-23)
+- [x] Mobile + discussion expanded: answer field в compact-режиме (нет label, меньше padding)
+- [x] Desktop: answer field всегда в full-режиме (label видна)
+- [x] Переход compact ↔ full плавный (CSS transition)
+- [x] `answerCompact` derived variable для читаемости
 
 ---
 

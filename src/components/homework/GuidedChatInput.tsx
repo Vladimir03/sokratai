@@ -8,6 +8,7 @@
 import { memo, useCallback, useEffect, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { CheckCircle2, FileText, Loader2, MessageCircle, Paperclip, X } from 'lucide-react';
+import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 import { MAX_GUIDED_CHAT_ATTACHMENTS } from '@/lib/homeworkThreadAttachments';
 
@@ -164,9 +165,13 @@ const GuidedChatInput = memo(
   }: GuidedChatInputProps) => {
     const [answerText, setAnswerText] = useState('');
     const [discussionText, setDiscussionText] = useState('');
+    const [isDiscussionExpanded, setIsDiscussionExpanded] = useState(false);
     const answerRef = useRef<HTMLTextAreaElement>(null);
     const discussionRef = useRef<HTMLTextAreaElement>(null);
     const fileInputRef = useRef<HTMLInputElement>(null);
+
+    // Compact answer mode: hide label/hint + reduce padding on mobile when discussion is open
+    const answerCompact = isDiscussionExpanded;
 
     useAutoResize(answerRef, answerText);
     useAutoResize(discussionRef, discussionText);
@@ -349,9 +354,15 @@ const GuidedChatInput = memo(
 
         <div className="flex flex-col gap-2 p-3">
           {/* ===== ANSWER FIELD (green) ===== */}
-          <div className="rounded-lg border-2 border-green-600 p-3">
-            {/* Label */}
-            <div className="mb-2 flex items-center gap-1.5">
+          <div className={cn(
+            "rounded-lg border-2 border-green-600",
+            answerCompact ? "p-2 md:p-3" : "p-3"
+          )}>
+            {/* Label: hide on mobile in compact mode */}
+            <div className={cn(
+              "mb-2 flex items-center gap-1.5",
+              answerCompact && "hidden md:flex"
+            )}>
               <CheckCircle2 className="h-4 w-4 text-green-600" />
               <span className="text-sm font-bold text-green-700">Ответ к задаче</span>
             </div>
@@ -393,58 +404,83 @@ placeholder={answerPlaceholder}
               </Button>
             </div>
 
-            {/* Hint */}
-            <p className="mt-1 text-[10px] text-muted-foreground">Enter = отправить на проверку</p>
+            {/* Hint: hide on mobile in compact mode */}
+            <p className={cn(
+              "mt-1 text-[10px] text-muted-foreground",
+              answerCompact && "hidden md:block"
+            )}>Enter = отправить на проверку</p>
           </div>
 
+          {/* ===== DISCUSSION TOGGLE (mobile only) ===== */}
+          <button
+            type="button"
+            onClick={() => setIsDiscussionExpanded(prev => !prev)}
+            aria-expanded={isDiscussionExpanded}
+            aria-controls="guided-discussion-field"
+            className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-slate-300 py-2.5 text-sm text-muted-foreground md:hidden"
+            style={{ touchAction: 'manipulation' }}
+          >
+            <MessageCircle className="h-4 w-4" />
+            {isDiscussionExpanded ? 'Свернуть обсуждение \u25B4' : 'Обсудить шаг с AI \u25BE'}
+          </button>
+
           {/* ===== DISCUSSION FIELD (gray) ===== */}
-          <div className="rounded-lg border border-slate-200 p-3">
-            {/* Label */}
-            <div className="mb-2 flex items-center gap-1.5">
-              <MessageCircle className="h-4 w-4 text-muted-foreground" />
-              <span className="text-sm font-semibold text-muted-foreground">Обсуждение</span>
+          <div
+            id="guided-discussion-field"
+            className={cn(
+              "transition-all duration-200 overflow-hidden",
+              isDiscussionExpanded ? "max-h-96" : "max-h-0",
+              "md:max-h-none md:overflow-visible"
+            )}
+          >
+            <div className="rounded-lg border border-slate-200 p-3">
+              {/* Label */}
+              <div className="mb-2 flex items-center gap-1.5">
+                <MessageCircle className="h-4 w-4 text-muted-foreground" />
+                <span className="text-sm font-semibold text-muted-foreground">Обсуждение</span>
+              </div>
+
+              {/* Input row */}
+              <div className="flex items-end gap-2">
+                <button
+                  type="button"
+                  onClick={handleFileClick}
+                  disabled={attachDisabled}
+                  className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-input bg-background text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground disabled:cursor-not-allowed disabled:opacity-50"
+                  style={{ touchAction: 'manipulation', minWidth: '44px', minHeight: '44px' }}
+                  aria-label="Прикрепить файл"
+                >
+                  <Paperclip className="h-4 w-4" />
+                </button>
+
+                <textarea
+                  ref={discussionRef}
+                  value={discussionText}
+                  onChange={(e) => setDiscussionText(e.target.value)}
+                  onKeyDown={handleDiscussionKeyDown}
+                  placeholder={discussionPlaceholder}
+                  disabled={controlsDisabled}
+                  rows={1}
+                  className={textareaClasses + ' border border-input rounded-lg'}
+                  style={textareaStyle}
+                />
+
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleSendStep}
+                  disabled={!canSendDiscussion}
+                  className="h-10 shrink-0 gap-1 whitespace-nowrap px-3 text-xs"
+                  style={{ touchAction: 'manipulation' }}
+                >
+                  {isLoading ? spinner : <MessageCircle className="h-3.5 w-3.5" />}
+                  Спросить
+                </Button>
+              </div>
+
+              {/* Hint */}
+              <p className="mt-1 text-[10px] text-muted-foreground">Enter = обсудить с AI</p>
             </div>
-
-            {/* Input row */}
-            <div className="flex items-end gap-2">
-              <button
-                type="button"
-                onClick={handleFileClick}
-                disabled={attachDisabled}
-                className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-input bg-background text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground disabled:cursor-not-allowed disabled:opacity-50"
-                style={{ touchAction: 'manipulation', minWidth: '44px', minHeight: '44px' }}
-                aria-label="Прикрепить файл"
-              >
-                <Paperclip className="h-4 w-4" />
-              </button>
-
-              <textarea
-                ref={discussionRef}
-                value={discussionText}
-                onChange={(e) => setDiscussionText(e.target.value)}
-                onKeyDown={handleDiscussionKeyDown}
-placeholder={discussionPlaceholder}
-                disabled={controlsDisabled}
-                rows={1}
-                className={textareaClasses + ' border border-input rounded-lg'}
-                style={textareaStyle}
-              />
-
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={handleSendStep}
-                disabled={!canSendDiscussion}
-                className="h-10 shrink-0 gap-1 whitespace-nowrap px-3 text-xs"
-                style={{ touchAction: 'manipulation' }}
-              >
-                {isLoading ? spinner : <MessageCircle className="h-3.5 w-3.5" />}
-                Спросить
-              </Button>
-            </div>
-
-            {/* Hint */}
-            <p className="mt-1 text-[10px] text-muted-foreground">Enter = обсудить с AI</p>
           </div>
         </div>
       </div>
