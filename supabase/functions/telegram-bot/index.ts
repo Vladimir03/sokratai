@@ -6848,12 +6848,10 @@ async function handleTextMessage(telegramUserId: number, userId: string, text: s
     async function refreshImageUrls(messages: any[]) {
       return await Promise.all(
         messages.map(async (msg) => {
-          // Если есть image_path, создаём новый signed URL
           if (msg.image_path) {
             const { data: signedData, error } = await supabase.storage
               .from("chat-images")
-              .createSignedUrl(msg.image_path, 3600); // 1 hour для истории
-            
+              .createSignedUrl(msg.image_path, 3600);
             if (!error && signedData) {
               return { ...msg, image_url: signedData.signedUrl };
             }
@@ -6863,7 +6861,7 @@ async function handleTextMessage(telegramUserId: number, userId: string, text: s
       );
     }
 
-    // Get chat history - limit to last 20 messages (10 pairs)
+    // Get chat history - limit to last 20 messages, then compact
     const { data: historyReversed } = await supabase
       .from("chat_messages")
       .select("role, content, image_url, image_path")
@@ -6873,33 +6871,38 @@ async function handleTextMessage(telegramUserId: number, userId: string, text: s
 
     let history = historyReversed?.reverse() || [];
     
-    // Обновить signed URLs для всех изображений в истории
-    history = await refreshImageUrls(history);
+    // Compact history: keep only last N messages, strip old images
+    const compacted = compactHistoryForTelegram(history);
+    
+    // Refresh signed URLs only for messages that still have images
+    const readyHistory = await refreshImageUrls(compacted);
+    
+    const imageCount = readyHistory.filter(m => m.image_url).length;
+    console.log("📊 [handleTextMessage] history compact:", {
+      rawCount: history.length,
+      compactedCount: readyHistory.length,
+      imagesKept: imageCount,
+    });
 
     // Start typing loop
     const stopTyping = { stop: false };
     const typingPromise = sendTypingLoop(telegramUserId, stopTyping);
 
-    // Call AI chat function with service role authorization
-    const chatResponse = await fetch(`${SUPABASE_URL}/functions/v1/chat`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
-      },
-      body: JSON.stringify({
-        messages: history || [],
-        chatId: chatId,
-        userId: userId,
-        responseProfile: "telegram_compact",
-        responseMode: "dialog",
-        maxChars: TELEGRAM_DIALOG_MAX_CHARS,
-      }),
-    });
+    // Call AI chat function with timeout
+    const chatResponse = await fetchChatWithTimeout({
+      messages: readyHistory,
+      chatId: chatId,
+      userId: userId,
+      responseProfile: "telegram_compact",
+      responseMode: "dialog",
+      maxChars: TELEGRAM_DIALOG_MAX_CHARS,
+    }, telegramUserId, "handleTextMessage");
 
     // Stop typing
     stopTyping.stop = true;
     await typingPromise;
+
+    if (!chatResponse) return; // fallback already sent
 
     // Handle rate limit error
     if (chatResponse.status === 429) {
