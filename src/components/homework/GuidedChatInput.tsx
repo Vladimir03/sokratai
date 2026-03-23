@@ -323,7 +323,7 @@ const GuidedChatInput = memo(
     // --- Placeholders ---
 
     const answerPlaceholder = 'Ответ...';
-    const discussionPlaceholder = 'Вопрос к AI...';
+    const discussionPlaceholder = 'Обсуди с AI...';
 
     // --- Shared styles ---
 
