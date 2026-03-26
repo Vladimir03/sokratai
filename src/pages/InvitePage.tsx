@@ -139,7 +139,7 @@ export default function InvitePage() {
           password: validation.data.password,
           options: {
             emailRedirectTo: `${window.location.origin}/homework`,
-            data: { full_name: validation.data.studentName },
+            data: { username: validation.data.studentName, full_name: validation.data.studentName },
           },
         });
 

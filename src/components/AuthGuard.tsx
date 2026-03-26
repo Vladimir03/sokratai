@@ -1,6 +1,7 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "@/lib/supabaseClient";
+import { claimPendingInvite } from "@/lib/inviteApi";
 import Navigation from "./Navigation";
 import OnboardingModal from "./OnboardingModal";
 
@@ -13,6 +14,7 @@ const AuthGuard = ({ children }: AuthGuardProps) => {
   const [loading, setLoading] = useState(true);
   const [showOnboarding, setShowOnboarding] = useState(false);
   const [userId, setUserId] = useState<string | null>(null);
+  const claimAttempted = useRef(false);
 
   useEffect(() => {
     supabase.auth.getSession().then(async ({ data: { session } }) => {
@@ -22,6 +24,14 @@ const AuthGuard = ({ children }: AuthGuardProps) => {
       }
 
       setUserId(session.user.id);
+
+      // Claim pending invite if any (non-blocking, fire-once)
+      if (!claimAttempted.current) {
+        claimAttempted.current = true;
+        claimPendingInvite().catch(() => {
+          // Silently ignore — retriable errors stay in localStorage
+        });
+      }
 
       // Check onboarding status
       const { data: profile } = await supabase
