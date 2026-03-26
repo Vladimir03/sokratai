@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Send, Loader2, CheckCircle, RefreshCw, ExternalLink } from "lucide-react";
 import { toast } from "sonner";
 import { isIOS } from "@/hooks/use-mobile";
+import { claimPendingInvite } from "@/lib/inviteApi";
 
 const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -51,9 +52,15 @@ const TelegramLoginButton = ({
         setStatus("success");
         toast.success("Успешный вход через Telegram!");
         
-        // Check if user is a tutor and redirect accordingly
+        // Claim pending invite (non-blocking) then redirect
         setTimeout(async () => {
           try {
+            try {
+              await claimPendingInvite();
+            } catch {
+              // Claim error does not block Telegram login
+            }
+
             const { data: { user } } = await supabase.auth.getUser();
             if (user) {
               let isTutor = false;

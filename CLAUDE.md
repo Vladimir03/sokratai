@@ -357,6 +357,27 @@ Legacy student-only система (`homework_sets`, `homework_tasks`, `homework
 6. **Telegram Auth Flow** — цепочка: `TelegramLoginButton` → `telegram-login-token` → `telegram-bot/handleWebLogin` → `getOrCreateProfile`. Несогласованность email-адресов между функциями создаёт дубликаты пользователей
 7. **Tutor Role Assignment** — роль назначается через `assign-tutor-role` (email) или `telegram-bot` (Telegram). Обе ветки должны работать с ОДНИМ и тем же user_id
 
+## Web invite flow (Phase 0 onboarding, 2026-03-26)
+
+Telegram заблокирован в РФ → invite-ссылка ведёт на web-регистрацию, не на Telegram-бота.
+
+### Ключевые файлы
+- `src/pages/InvitePage.tsx` — invite-страница (`/invite/:code`): email signup/login + collapsed Telegram секция
+- `src/lib/inviteApi.ts` — `claimInvite(code)` и `claimPendingInvite()` (localStorage → edge function)
+- `supabase/functions/claim-invite/index.ts` — edge function: JWT → tutor_students link
+- `src/pages/Login.tsx`, `src/pages/SignUp.tsx` — `claimPendingInvite()` после email auth
+- `src/components/TelegramLoginButton.tsx` — `claimPendingInvite()` после `setSession()`
+
+### Claim flow
+- **InvitePage**: после auth → `claimInvite(inviteCode)` напрямую. При ошибке → fallback в `localStorage('pending_invite_code')`
+- **Login/SignUp/Telegram**: после auth → `claimPendingInvite()` читает localStorage, вызывает claim, чистит при успехе
+- **Non-blocking**: ошибка claim не блокирует вход (try/catch)
+- **Terminal errors**: 400/404 (невалидный код, self-link) → localStorage чистится. 5xx/network → остаётся для retry
+- **Идемпотентность**: повторный claim → `already_linked` (200)
+
+### Spec
+- `docs/features/specs/phase0-onboarding-tasks.md`
+
 ## Среда разработки и деплоя
 
 - **Деплой и продакшен**: Lovable Cloud + AI

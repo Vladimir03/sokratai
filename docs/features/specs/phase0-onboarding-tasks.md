@@ -417,6 +417,8 @@ export async function claimPendingInvite(): Promise<{
 
 ## Phase 3: Интеграция invite-страницы + claim-invite
 
+**Статус:** ✅ Phase 3 реализована (2026-03-26)
+
 ### Задача 3.1: Вызов claim-invite после auth на invite-странице
 
 **Файл:** `src/pages/InvitePage.tsx` (из Phase 1)
@@ -441,11 +443,11 @@ const handleAuthSuccess = async () => {
 ```
 
 **Acceptance criteria:**
-- [ ] Регистрация через invite → ученик автоматически привязан к репетитору
-- [ ] Вход через invite → ученик автоматически привязан (если не был)
-- [ ] Success state: «✅ Вы привязаны к репетитору {Имя}» + кнопка «Перейти к ДЗ»
-- [ ] При ошибке claim — localStorage fallback, redirect на /homework
-- [ ] Нет двойного claim (идемпотентность backend)
+- [x] Регистрация через invite → ученик автоматически привязан к репетитору
+- [x] Вход через invite → ученик автоматически привязан (если не был)
+- [x] Success state: «✅ Вы привязаны к репетитору {Имя}» + кнопка «Перейти к ДЗ»
+- [x] При ошибке claim — localStorage fallback, redirect на /homework
+- [x] Нет двойного claim (идемпотентность backend)
 
 ---
 
@@ -469,11 +471,13 @@ try {
 ```
 
 **Acceptance criteria:**
-- [ ] Login через `/login` с `pending_invite_code` в localStorage → claim выполняется
-- [ ] SignUp через `/signup` с `pending_invite_code` в localStorage → claim выполняется
-- [ ] Если нет `pending_invite_code` → ничего не происходит (no-op)
-- [ ] Ошибка claim не блокирует вход (non-blocking try/catch)
-- [ ] После успешного claim — `pending_invite_code` удалён из localStorage
+- [x] Login через `/login` с `pending_invite_code` в localStorage → claim выполняется
+- [x] SignUp через `/signup` с `pending_invite_code` в localStorage → claim выполняется
+- [x] Telegram auth через TelegramLoginButton с `pending_invite_code` → claim выполняется
+- [x] Если нет `pending_invite_code` → ничего не происходит (no-op)
+- [x] Ошибка claim не блокирует вход (non-blocking try/catch)
+- [x] После успешного claim — `pending_invite_code` удалён из localStorage
+- [x] Terminal errors (400/404) очищают localStorage (нет бесконечных retry)
 
 **Не делать:**
 - Не менять redirect-логику (tutor vs student routing)

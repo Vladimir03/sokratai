@@ -7,6 +7,7 @@ import { supabase } from "@/lib/supabaseClient";
 import { toast } from "sonner";
 import { z } from "zod";
 import TelegramLoginButton from "@/components/TelegramLoginButton";
+import { claimPendingInvite } from "@/lib/inviteApi";
 
 const signupSchema = z.object({
   email: z.string().trim().email({ message: "Неверный формат email" }).max(255),
@@ -51,7 +52,7 @@ const SignUp = () => {
         return;
       }
 
-      const { error } = await supabase.auth.signUp({
+      const { data, error } = await supabase.auth.signUp({
         email: validation.data.email,
         password: validation.data.password,
         options: {
@@ -63,6 +64,15 @@ const SignUp = () => {
       });
 
       if (error) throw error;
+
+      // Only claim if session is established (no email confirmation pending)
+      if (data.session) {
+        try {
+          await claimPendingInvite();
+        } catch {
+          // Claim error does not block signup
+        }
+      }
 
       toast.success("Регистрация успешна! Входим в систему...");
       navigate("/chat");

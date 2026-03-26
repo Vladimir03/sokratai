@@ -7,6 +7,7 @@ import { supabase } from "@/lib/supabaseClient";
 import { toast } from "sonner";
 import { z } from "zod";
 import TelegramLoginButton from "@/components/TelegramLoginButton";
+import { claimPendingInvite } from "@/lib/inviteApi";
 
 const loginSchema = z.object({
   email: z.string().trim().email({ message: "Неверный формат email" }).max(255),
@@ -54,10 +55,17 @@ const Login = () => {
 
       if (error) throw error;
 
+      // Non-blocking: claim pending invite if exists in localStorage
+      try {
+        await claimPendingInvite();
+      } catch {
+        // Claim error does not block login
+      }
+
       // Check if user is a tutor and redirect accordingly
       if (data.user) {
         const { data: isTutor } = await supabase.rpc("is_tutor", { _user_id: data.user.id });
-        
+
         if (isTutor) {
           toast.success("Успешный вход!");
           navigate("/tutor/dashboard");

@@ -8,6 +8,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { ArrowLeft, ChevronDown, ChevronUp, Eye, EyeOff } from 'lucide-react';
 import { supabase } from '@/lib/supabaseClient';
 import { getTutorInviteTelegramLink } from '@/utils/telegramLinks';
+import { claimInvite } from '@/lib/inviteApi';
 import { z } from 'zod';
 
 interface TutorInfo {
@@ -49,6 +50,7 @@ export default function InvitePage() {
 
   // Success state
   const [authSuccess, setAuthSuccess] = useState(false);
+  const [claimedTutorName, setClaimedTutorName] = useState<string | null>(null);
   const [needsEmailConfirm, setNeedsEmailConfirm] = useState(false);
 
   // Telegram collapsed section
@@ -171,9 +173,16 @@ export default function InvitePage() {
         }
       }
 
-      // Auth succeeded — save invite code for Phase 3 claim
+      // Auth succeeded — claim invite immediately
       if (inviteCode) {
-        localStorage.setItem('pending_invite_code', inviteCode);
+        try {
+          const result = await claimInvite(inviteCode);
+          setClaimedTutorName(result.tutor_name);
+          localStorage.removeItem('pending_invite_code');
+        } catch {
+          // Claim failed — save to localStorage as fallback for next login
+          localStorage.setItem('pending_invite_code', inviteCode);
+        }
       }
 
       setAuthSuccess(true);
@@ -260,11 +269,16 @@ export default function InvitePage() {
           <CardHeader>
             <div className="text-4xl mb-3">&#10003;</div>
             <CardTitle className="text-xl">
-              {isLogin ? 'Вы вошли в систему' : 'Регистрация прошла успешно'}
+              {claimedTutorName
+                ? `Вы привязаны к репетитору ${claimedTutorName}`
+                : isLogin ? 'Вы вошли в систему' : 'Регистрация прошла успешно'
+              }
             </CardTitle>
-            <CardDescription>
-              Подключение к репетитору {tutor.name} произойдёт автоматически
-            </CardDescription>
+            {!claimedTutorName && (
+              <CardDescription>
+                Подключение к репетитору {tutor.name} произойдёт автоматически
+              </CardDescription>
+            )}
           </CardHeader>
           <CardContent>
             <Button
