@@ -29,7 +29,7 @@ function jsonResponse(body: unknown, status: number): Response {
 }
 
 async function updateRegistrationSourceIfNeeded(
-  supabaseAdmin: ReturnType<typeof createClient>,
+  supabaseAdmin: any,
   userId: string,
 ): Promise<{ ok: true } | { ok: false; error: unknown }> {
   const { error } = await supabaseAdmin
