@@ -151,11 +151,15 @@ Acceptance criteria:
 
 Новый механизм привязки ученик→репетитор без Telegram-бота. Работает через invite-ссылку + веб-регистрацию.
 
+Статус на 2026-03-26:
+- ✅ Phase 2 backend готов: `claim-invite` edge function + `src/lib/inviteApi.ts`
+- ⏳ Phase 3 pending: автоматический вызов после auth на invite/login/signup flows
+
 Acceptance criteria:
-- [ ] Новая Edge function `claim-invite` (или расширение существующей): принимает `{invite_code, user_id}`, создаёт `tutor_students` link
+- [x] Новая Edge function `claim-invite`: принимает `{invite_code}`, берёт `user_id` из JWT и создаёт `tutor_students` link
 - [ ] Вызывается автоматически после регистрации/входа через invite-страницу
-- [ ] Проверки: invite_code валиден, tutor существует, link не дублируется
-- [ ] Если link уже есть → молча пропускаем (идемпотентность)
+- [x] Проверки: invite_code валиден, tutor существует, link не дублируется
+- [x] Если link уже есть → молча пропускаем (идемпотентность)
 - [ ] `invite_code` передаётся через URL param и сохраняется в `localStorage('pending_invite_code')` (не sessionStorage — очищается на iOS Safari). После claim — чистим
 - [ ] Работает для обоих случаев: новая регистрация и вход существующего ученика
 
@@ -475,6 +479,7 @@ ALTER TABLE homework_tutor_student_assignments
 | `src/pages/Login.tsx` | Email = primary, Telegram = secondary с hint про VPN |
 | `index.html` | Обновить OG-теги (title, description, image) |
 | `supabase/functions/claim-invite/index.ts` | **Новый** — web-based tutor-student linking |
+| `src/lib/inviteApi.ts` | **Новый** — typed client helper для `claim-invite` + retry-safe `pending_invite_code` flow |
 | `src/utils/telegramLinks.ts` | Добавить `getInviteWebLink(inviteCode)` для web-ссылки |
 
 #### Phase 1 (доставка)

@@ -265,6 +265,8 @@ const InvitePage = React.lazy(() => import('./pages/InvitePage'));
 
 ## Phase 2: Edge function `claim-invite`
 
+**Статус:** ✅ Phase 2 реализована (2026-03-26)
+
 ### Задача 2.1: Создать Edge function `claim-invite`
 
 **Файл:** `supabase/functions/claim-invite/index.ts` (новый)
@@ -290,7 +292,15 @@ const { data: tutor } = await supabase
   .from('tutors')
   .select('id, user_id, name')
   .eq('invite_code', invite_code)
-  .single();
+  .maybeSingle();
+
+if (!tutor) {
+  return new Response(JSON.stringify({ error: 'Invite code not found' }), { status: 404 });
+}
+
+if (tutor.user_id === user.id) {
+  return new Response(JSON.stringify({ error: 'Cannot link to yourself' }), { status: 400 });
+}
 
 // 3. Проверить: ученик уже привязан?
 const { data: existing } = await supabase
@@ -318,6 +328,7 @@ const { error } = await supabase
   });
 
 // 5. Записать в profiles.registration_source = 'invite_web' (если ещё не записан)
+// Ошибка этого шага не должна блокировать основной linking flow
 await supabase
   .from('profiles')
   .update({ registration_source: 'invite_web' })
@@ -333,17 +344,19 @@ return new Response(JSON.stringify({
 
 **Error responses:**
 - `400` — `invite_code` не передан
+- `400` — self-linking attempt (`tutor.user_id === user.id`)
 - `404` — invite_code не найден (невалидный)
 - `401` — нет JWT / невалидный токен
 - `500` — ошибка БД
 
 **Acceptance criteria:**
-- [ ] `POST /claim-invite` с валидным JWT + invite_code → создаёт `tutor_students` link
-- [ ] Идемпотентность: повторный вызов → `already_linked` (200), не дубликат
-- [ ] Невалидный invite_code → 404
-- [ ] Без JWT → 401
-- [ ] `registration_source` обновляется на `'invite_web'` (если был null)
-- [ ] CORS headers для фронтенда (стандартные Supabase Edge Function CORS)
+- [x] `POST /claim-invite` с валидным JWT + invite_code → создаёт `tutor_students` link
+- [x] Идемпотентность: повторный вызов → `already_linked` (200), не дубликат
+- [x] Невалидный invite_code → 404
+- [x] Без JWT → 401
+- [x] `registration_source` обновляется на `'invite_web'` (если был null)
+- [x] CORS headers для фронтенда (стандартные Supabase Edge Function CORS)
+- [x] Self-linking blocked → `400`
 
 **Не делать:**
 - Не добавлять email-рассылку (Phase 1 PRD)
@@ -357,7 +370,7 @@ return new Response(JSON.stringify({
 **Файл:** `src/lib/inviteApi.ts` (новый)
 
 ```typescript
-import { supabase } from '@/integrations/supabase/client';
+import { supabase } from '@/lib/supabaseClient';
 
 export async function claimInvite(inviteCode: string): Promise<{
   status: 'linked' | 'already_linked';
@@ -395,10 +408,10 @@ export async function claimPendingInvite(): Promise<{
 ```
 
 **Acceptance criteria:**
-- [ ] `claimInvite(code)` вызывает edge function и возвращает результат
-- [ ] `claimPendingInvite()` читает из localStorage, вызывает claim, чистит при успехе
-- [ ] При ошибке — НЕ чистит localStorage (retry при следующем входе)
-- [ ] Типизация: TypeScript, без `any`
+- [x] `claimInvite(code)` вызывает edge function и возвращает результат
+- [x] `claimPendingInvite()` читает из localStorage, вызывает claim, чистит при успехе
+- [x] При ошибке — НЕ чистит localStorage (retry при следующем входе)
+- [x] Типизация: TypeScript, без `any`
 
 ---
 
