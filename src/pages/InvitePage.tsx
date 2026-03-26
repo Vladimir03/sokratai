@@ -145,7 +145,7 @@ export default function InvitePage() {
 
         if (authError) {
           if (authError.message.includes('already registered')) {
-            setFormError('Этот email уже зарегистрирован. Попробуйте войти.');
+            setFormError('Этот email уже зарегистрирован. Попробуйте войти или восстановите пароль.');
           } else {
             setFormError(authError.message);
           }
@@ -157,7 +157,7 @@ export default function InvitePage() {
         // or if the email is already taken (masked as success for security).
         // Detect fake signup: identities array is empty → email already exists.
         if (signUpData.user && (!signUpData.user.identities || signUpData.user.identities.length === 0)) {
-          setFormError('Этот email уже зарегистрирован. Попробуйте войти.');
+          setFormError('Этот email уже зарегистрирован. Попробуйте войти или восстановите пароль.');
           setSubmitting(false);
           return;
         }
@@ -359,7 +359,14 @@ export default function InvitePage() {
             </div>
 
             {formError && (
-              <p className="text-sm text-destructive">{formError}</p>
+              <div className="text-sm text-destructive">
+                <p>{formError}</p>
+                {formError.includes('уже зарегистрирован') && (
+                  <a href="/forgot-password" className="underline text-primary mt-1 inline-block">
+                    Восстановить пароль
+                  </a>
+                )}
+              </div>
             )}
 
             <Button
