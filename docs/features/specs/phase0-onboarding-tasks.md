@@ -601,12 +601,12 @@ Telegram          [____________]  ← теперь опциональное
 5. **Подсказка** под полями: `text-xs text-muted-foreground` «Рекомендуем указать email — Telegram может быть недоступен»
 
 **Acceptance criteria:**
-- [ ] Поле email добавлено на вкладку «Добавить вручную»
-- [ ] `telegram_username` стало опциональным
-- [ ] Валидация: хотя бы одно из email/telegram заполнено
-- [ ] Подсказка «Рекомендуем email» видна
-- [ ] `font-size ≥ 16px` на input (iOS)
-- [ ] При submit: передаём email в `manualAddTutorStudent()`
+- [x] Поле email добавлено на вкладку «Добавить вручную»
+- [x] `telegram_username` стало опциональным
+- [x] Валидация: хотя бы одно из email/telegram заполнено
+- [x] Подсказка «Рекомендуем email» видна
+- [x] `font-size ≥ 16px` на input (iOS)
+- [x] При submit: передаём email в `manualAddTutorStudent()`
 
 ---
 
@@ -651,13 +651,13 @@ Telegram          [____________]  ← теперь опциональное
 **Рекомендация:** вариант с `admin.createUser()` проще — не нужен merge-логика. Ученик получит email «Вас добавил репетитор» со ссылкой на reset password.
 
 **Acceptance criteria:**
-- [ ] Принимает `email` в body (optional)
-- [ ] Валидация: `email` или `telegram_username` обязателен
-- [ ] Если email → ищет существующий профиль, не дублирует
-- [ ] Если профиль не найден → создаёт placeholder (или admin.createUser)
-- [ ] Создаёт `tutor_students` link с правильным `student_id`
-- [ ] Email-формат валидируется на бэкенде
-- [ ] Backward compatible: существующие вызовы без email продолжают работать
+- [x] Принимает `email` в body (optional)
+- [x] Валидация: `email` или `telegram_username` обязателен
+- [x] Если email → ищет существующий профиль, не дублирует
+- [x] Если профиль не найден → создаёт placeholder (или admin.createUser)
+- [x] Создаёт `tutor_students` link с правильным `student_id`
+- [x] Email-формат валидируется на бэкенде
+- [x] Backward compatible: существующие вызовы без email продолжают работать
 
 ---
 
@@ -682,10 +682,10 @@ interface ManualAddTutorStudentInput {
 ```
 
 **Acceptance criteria:**
-- [ ] `ManualAddTutorStudentInput.telegram_username` — optional
-- [ ] `ManualAddTutorStudentInput.email` — новое optional поле
-- [ ] `manualAddTutorStudent()` передаёт email в edge function
-- [ ] TypeScript компилируется без ошибок
+- [x] `ManualAddTutorStudentInput.telegram_username` — optional
+- [x] `ManualAddTutorStudentInput.email` — новое optional поле
+- [x] `manualAddTutorStudent()` передаёт email в edge function
+- [x] TypeScript компилируется без ошибок
 
 ---
 

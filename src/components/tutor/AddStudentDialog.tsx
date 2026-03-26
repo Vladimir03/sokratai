@@ -73,6 +73,7 @@ export function AddStudentDialog({
   const [formData, setFormData] = useState<ManualAddTutorStudentInput>({
     name: '',
     telegram_username: '',
+    email: '',
     learning_goal: '',
     grade: undefined,
     exam_type: undefined,
@@ -88,6 +89,7 @@ export function AddStudentDialog({
     setFormData({
       name: '',
       telegram_username: '',
+      email: '',
       learning_goal: '',
       grade: undefined,
       exam_type: undefined,
@@ -181,8 +183,14 @@ export function AddStudentDialog({
       toast({ title: 'Введите имя ученика', variant: 'destructive' });
       return;
     }
-    if (!formData.telegram_username.trim()) {
-      toast({ title: 'Введите Telegram username', variant: 'destructive' });
+    const hasEmail = formData.email?.trim();
+    const hasTelegram = formData.telegram_username?.trim();
+    if (!hasEmail && !hasTelegram) {
+      toast({ title: 'Укажите email или Telegram ученика', variant: 'destructive' });
+      return;
+    }
+    if (hasEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(hasEmail)) {
+      toast({ title: 'Некорректный формат email', variant: 'destructive' });
       return;
     }
     if (!learningGoal.trim()) {
@@ -211,7 +219,10 @@ export function AddStudentDialog({
       const response = await manualAddTutorStudent({
         ...formData,
         learning_goal: learningGoal,
-        telegram_username: formData.telegram_username.replace('@', '').trim(),
+        telegram_username: formData.telegram_username
+          ? formData.telegram_username.replace('@', '').trim()
+          : undefined,
+        email: formData.email?.trim() || undefined,
       });
 
       let membershipSyncFailed = false;
@@ -328,17 +339,34 @@ export function AddStudentDialog({
                   </div>
 
                   <div className="space-y-2">
+                    <Label htmlFor="student_email">Email ученика</Label>
+                    <Input
+                      id="student_email"
+                      type="email"
+                      value={formData.email || ''}
+                      onChange={(e) =>
+                        handleFormChange('email', e.target.value)
+                      }
+                      placeholder="student@example.com"
+                      className="text-base"
+                    />
+                  </div>
+
+                  <div className="space-y-2">
                     <Label htmlFor="telegram_username">Telegram username</Label>
                     <Input
                       id="telegram_username"
-                      value={formData.telegram_username}
+                      value={formData.telegram_username || ''}
                       onChange={(e) =>
                         handleFormChange('telegram_username', e.target.value)
                       }
                       placeholder="@username"
-                      required
                     />
                   </div>
+
+                  <p className="text-xs text-muted-foreground md:col-span-2">
+                    Заполните email или Telegram (или оба). Рекомендуем указать email — Telegram может быть недоступен
+                  </p>
 
                   <div className="space-y-2">
                     <Label>Цель занятий</Label>

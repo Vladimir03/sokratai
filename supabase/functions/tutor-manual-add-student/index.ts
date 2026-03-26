@@ -50,6 +50,7 @@ Deno.serve(async (req) => {
     const body = await req.json();
     const name = typeof body.name === "string" ? body.name.trim() : "";
     const telegramUsernameRaw = typeof body.telegram_username === "string" ? body.telegram_username : "";
+    const emailRaw = typeof body.email === "string" ? body.email.trim().toLowerCase() : "";
     const learningGoalRaw = typeof body.learning_goal === "string" ? body.learning_goal : "";
 
     if (!name) {
@@ -59,9 +60,16 @@ Deno.serve(async (req) => {
       );
     }
 
-    if (!telegramUsernameRaw.trim()) {
+    if (!telegramUsernameRaw.trim() && !emailRaw) {
       return new Response(
-        JSON.stringify({ error: "Telegram username is required" }),
+        JSON.stringify({ error: "Email or Telegram username is required" }),
+        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      );
+    }
+
+    if (emailRaw && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailRaw)) {
+      return new Response(
+        JSON.stringify({ error: "Invalid email format" }),
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } },
       );
     }
@@ -73,7 +81,8 @@ Deno.serve(async (req) => {
       );
     }
 
-    const telegramUsername = normalizeUsername(telegramUsernameRaw);
+    const telegramUsername = telegramUsernameRaw.trim() ? normalizeUsername(telegramUsernameRaw) : "";
+    const email = emailRaw;
     const learningGoal = learningGoalRaw.trim();
 
     const supabaseAdmin = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
@@ -98,40 +107,94 @@ Deno.serve(async (req) => {
     let profileRegistrationSource: string | null = null;
     let existingTelegramUserId: number | null = null;
 
-    const { data: existingProfile, error: profileError } = await supabaseAdmin
-      .from("profiles")
-      .select("id, registration_source, telegram_user_id, username")
-      .ilike("telegram_username", telegramUsername)
-      .limit(1)
-      .maybeSingle();
+    // Step 1: Try to find existing user by email (priority) or telegram
+    if (email) {
+      // getUserByEmail uses index lookup — reliable regardless of user count
+      const { data: authUserData, error: authUserError } =
+        await supabaseAdmin.auth.admin.getUserByEmail(email);
 
-    if (profileError) {
-      console.error("Error checking profile:", profileError);
+      if (!authUserError && authUserData?.user) {
+        studentId = authUserData.user.id;
+        // Fetch profile for metadata
+        const { data: emailProfile } = await supabaseAdmin
+          .from("profiles")
+          .select("id, registration_source, telegram_user_id, username")
+          .eq("id", authUserData.user.id)
+          .maybeSingle();
+        if (emailProfile) {
+          profileRegistrationSource = emailProfile.registration_source ?? null;
+          existingTelegramUserId = emailProfile.telegram_user_id ?? null;
+        }
+      }
     }
 
-    if (existingProfile) {
-      studentId = existingProfile.id;
-      profileRegistrationSource = existingProfile.registration_source ?? null;
-      existingTelegramUserId = existingProfile.telegram_user_id ?? null;
+    if (!studentId && telegramUsername) {
+      const { data: existingProfile, error: profileError } = await supabaseAdmin
+        .from("profiles")
+        .select("id, registration_source, telegram_user_id, username")
+        .ilike("telegram_username", telegramUsername)
+        .limit(1)
+        .maybeSingle();
+
+      if (profileError) {
+        console.error("Error checking profile:", profileError);
+      }
+
+      if (existingProfile) {
+        studentId = existingProfile.id;
+        profileRegistrationSource = existingProfile.registration_source ?? null;
+        existingTelegramUserId = existingProfile.telegram_user_id ?? null;
+      }
     }
 
+    // Step 2: Ensure profile exists for found user (orphan recovery)
+    if (studentId) {
+      const { data: profileCheck } = await supabaseAdmin
+        .from("profiles")
+        .select("id")
+        .eq("id", studentId)
+        .maybeSingle();
+
+      if (!profileCheck) {
+        console.log("Profile missing for existing auth user, inserting:", studentId);
+        const profileInsert: Record<string, unknown> = {
+          id: studentId,
+          username: name,
+          registration_source: profileRegistrationSource ?? "manual",
+          trial_ends_at: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
+        };
+        if (telegramUsername) {
+          profileInsert.telegram_username = telegramUsername;
+        }
+        await supabaseAdmin.from("profiles").insert(profileInsert);
+      }
+    }
+
+    // Step 3: Create user if not found
     if (!studentId) {
-      const tempEmail = `manual_${crypto.randomUUID()}@temp.sokratai.ru`;
+      const userEmail = email || `manual_${crypto.randomUUID()}@temp.sokratai.ru`;
+      const randomPassword = crypto.randomUUID() + crypto.randomUUID();
 
       const { data: authData, error: authError } = await supabaseAdmin.auth.admin.createUser({
-        email: tempEmail,
+        email: userEmail,
         email_confirm: true,
+        password: randomPassword,
         user_metadata: { username: name },
       });
 
       if (authError || !authData.user) {
-        // Handle email_exists: find existing auth user by telegram username
         if (authError?.message?.includes("already been registered")) {
-          console.log("Auth user already exists for email:", tempEmail);
-          // This shouldn't happen with random UUIDs, but handle gracefully
+          console.log("Auth user already exists for email:", userEmail);
+          // Retrieve by exact email lookup (race: user registered between our check and create)
+          const { data: raceUser } =
+            await supabaseAdmin.auth.admin.getUserByEmail(userEmail);
+          if (raceUser?.user) {
+            studentId = raceUser.user.id;
+            profileRegistrationSource = "manual";
+          }
         }
-        
-        if (!authData?.user) {
+
+        if (!studentId && !authData?.user) {
           console.error("Failed to create auth user:", authError);
           return new Response(
             JSON.stringify({ error: "Failed to create student user" }),
@@ -140,27 +203,30 @@ Deno.serve(async (req) => {
         }
       }
 
-      studentId = authData.user.id;
+      if (!studentId && authData?.user) {
+        studentId = authData.user.id;
+      }
       profileRegistrationSource = "manual";
 
-      // Check if profile exists, create if missing (orphaned auth user)
+      // Create profile if missing
       const { data: existingProfileCheck } = await supabaseAdmin
         .from("profiles")
         .select("id")
-        .eq("id", studentId)
+        .eq("id", studentId!)
         .maybeSingle();
 
       if (!existingProfileCheck) {
         console.log("Profile missing for new auth user, inserting:", studentId);
-        await supabaseAdmin
-          .from("profiles")
-          .insert({
-            id: studentId,
-            username: name,
-            telegram_username: telegramUsername,
-            registration_source: "manual",
-            trial_ends_at: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
-          });
+        const profileInsert: Record<string, unknown> = {
+          id: studentId,
+          username: name,
+          registration_source: "manual",
+          trial_ends_at: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
+        };
+        if (telegramUsername) {
+          profileInsert.telegram_username = telegramUsername;
+        }
+        await supabaseAdmin.from("profiles").insert(profileInsert);
       }
     }
 
@@ -175,7 +241,9 @@ Deno.serve(async (req) => {
     if (profileRegistrationSource === "manual" && !existingTelegramUserId) {
       profileUpdates.username = name;
     }
-    profileUpdates.telegram_username = telegramUsername;
+    if (telegramUsername) {
+      profileUpdates.telegram_username = telegramUsername;
+    }
     profileUpdates.registration_source = profileRegistrationSource ?? "manual";
 
     if (typeof body.grade === "number") {
@@ -244,7 +312,22 @@ Deno.serve(async (req) => {
       .select("id")
       .single();
 
-    if (insertError || !tutorStudent) {
+    if (insertError) {
+      // Race: concurrent double-submit hit unique constraint (tutor_id, student_id)
+      if (insertError.code === "23505") {
+        const { data: raceLink } = await supabaseAdmin
+          .from("tutor_students")
+          .select("id")
+          .eq("tutor_id", tutor.id)
+          .eq("student_id", studentId)
+          .single();
+        if (raceLink) {
+          return new Response(
+            JSON.stringify({ tutor_student_id: raceLink.id, student_id: studentId, created: false }),
+            { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+          );
+        }
+      }
       console.error("Failed to create tutor_students:", insertError);
       return new Response(
         JSON.stringify({ error: "Failed to create tutor student" }),
