@@ -93,27 +93,7 @@ const SignUp = () => {
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">
-          {/* Telegram Login - Primary */}
-          <div className="flex flex-col items-center">
-            <p className="text-sm text-muted-foreground mb-3">
-              Быстрая регистрация через Telegram
-            </p>
-            <TelegramLoginButton />
-          </div>
-
-          {/* Divider */}
-          <div className="relative">
-            <div className="absolute inset-0 flex items-center">
-              <span className="w-full border-t border-border" />
-            </div>
-            <div className="relative flex justify-center text-xs uppercase">
-              <span className="bg-card px-2 text-muted-foreground">
-                или по email
-              </span>
-            </div>
-          </div>
-
-          {/* Email/Password Signup */}
+          {/* Email/Password Signup - Primary */}
           <form onSubmit={handleSignUp} className="space-y-4">
             <div className="space-y-2">
               <Input
@@ -146,10 +126,9 @@ const SignUp = () => {
                 disabled={loading}
               />
             </div>
-            <Button 
-              type="submit" 
-              className="w-full" 
-              variant="outline"
+            <Button
+              type="submit"
+              className="w-full"
               disabled={loading}
             >
               {loading ? "Регистрация..." : "Зарегистрироваться по email"}
@@ -161,6 +140,26 @@ const SignUp = () => {
               </Link>
             </p>
           </form>
+
+          {/* Divider */}
+          <div className="relative">
+            <div className="absolute inset-0 flex items-center">
+              <span className="w-full border-t border-border" />
+            </div>
+            <div className="relative flex justify-center text-xs uppercase">
+              <span className="bg-card px-2 text-muted-foreground">
+                или
+              </span>
+            </div>
+          </div>
+
+          {/* Telegram Login - Secondary */}
+          <div className="flex flex-col items-center">
+            <TelegramLoginButton />
+            <p className="text-xs text-muted-foreground mt-2">
+              Или зарегистрируйтесь через Telegram (нужен VPN)
+            </p>
+          </div>
         </CardContent>
       </Card>
     </div>

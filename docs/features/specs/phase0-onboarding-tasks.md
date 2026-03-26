@@ -530,14 +530,14 @@ try {
    Реализация: `setTimeout(30000)` после нажатия на Telegram-кнопку → state `showTelegramHint`
 
 **Acceptance criteria:**
-- [ ] Email-форма показана **первой** (сверху)
-- [ ] Telegram-кнопка показана **после** email-формы
-- [ ] Текст «Рекомендуем — не нужен пароль» убран
-- [ ] Добавлен текст «нужен VPN» рядом с Telegram
-- [ ] 30с timeout → hint «Telegram может быть недоступен»
-- [ ] Telegram auth flow не сломан (TelegramLoginButton без изменений внутри)
-- [ ] Ссылка «Регистрация» → `/signup` (без изменений)
-- [ ] Redirect-логика (tutor vs student) без изменений
+- [x] Email-форма показана **первой** (сверху)
+- [x] Telegram-кнопка показана **после** email-формы
+- [x] Текст «Рекомендуем — не нужен пароль» убран
+- [x] Добавлен текст «нужен VPN» рядом с Telegram
+- [x] 30с timeout → hint «Telegram может быть недоступен»
+- [x] Telegram auth flow не сломан (TelegramLoginButton без изменений внутри)
+- [x] Ссылка «Регистрация» → `/signup` (без изменений)
+- [x] Redirect-логика (tutor vs student) без изменений
 
 **Не делать:**
 - Не менять `TelegramLoginButton.tsx`
@@ -556,10 +556,10 @@ try {
 3. Убрать акцент на Telegram если есть
 
 **Acceptance criteria:**
-- [ ] Email-регистрация — primary CTA
-- [ ] Telegram — secondary с «нужен VPN»
-- [ ] Валидация пароля как в PRD (min 8, 1 upper, 1 digit)
-- [ ] Нет broken imports
+- [x] Email-регистрация — primary CTA
+- [x] Telegram — secondary с «нужен VPN»
+- [x] Валидация пароля как в PRD (min 8, 1 upper, 1 digit)
+- [x] Нет broken imports
 
 ---
 

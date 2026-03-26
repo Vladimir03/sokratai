@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useNavigate, Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -19,6 +19,15 @@ const Login = () => {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
+  const [showTelegramHint, setShowTelegramHint] = useState(false);
+  const telegramTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Cleanup telegram timeout on unmount
+  useEffect(() => {
+    return () => {
+      if (telegramTimeoutRef.current) clearTimeout(telegramTimeoutRef.current);
+    };
+  }, []);
 
   // Redirect authenticated users to product
   useEffect(() => {
@@ -92,27 +101,7 @@ const Login = () => {
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">
-          {/* Telegram Login - Primary */}
-          <div className="flex flex-col items-center">
-            <p className="text-sm text-muted-foreground mb-3">
-              Рекомендуем — не нужен пароль
-            </p>
-            <TelegramLoginButton />
-          </div>
-
-          {/* Divider */}
-          <div className="relative">
-            <div className="absolute inset-0 flex items-center">
-              <span className="w-full border-t border-border" />
-            </div>
-            <div className="relative flex justify-center text-xs uppercase">
-              <span className="bg-card px-2 text-muted-foreground">
-                или по email
-              </span>
-            </div>
-          </div>
-
-          {/* Email/Password Login */}
+          {/* Email/Password Login - Primary */}
           <form onSubmit={handleLogin} className="space-y-4">
             <div className="space-y-2">
               <Input
@@ -140,9 +129,8 @@ const Login = () => {
               </div>
             </div>
             <Button
-              type="submit" 
-              className="w-full" 
-              variant="outline"
+              type="submit"
+              className="w-full"
               disabled={loading}
             >
               {loading ? "Вход..." : "Войти по email"}
@@ -160,6 +148,45 @@ const Login = () => {
               </Link>
             </p>
           </form>
+
+          {/* Divider */}
+          <div className="relative">
+            <div className="absolute inset-0 flex items-center">
+              <span className="w-full border-t border-border" />
+            </div>
+            <div className="relative flex justify-center text-xs uppercase">
+              <span className="bg-card px-2 text-muted-foreground">
+                или
+              </span>
+            </div>
+          </div>
+
+          {/* Telegram Login - Secondary */}
+          <div className="flex flex-col items-center">
+            <div
+              onClick={() => {
+                // Reset on each click: clear previous timer + hide stale hint
+                if (telegramTimeoutRef.current) {
+                  clearTimeout(telegramTimeoutRef.current);
+                }
+                setShowTelegramHint(false);
+                telegramTimeoutRef.current = setTimeout(() => {
+                  setShowTelegramHint(true);
+                  telegramTimeoutRef.current = null;
+                }, 30_000);
+              }}
+            >
+              <TelegramLoginButton />
+            </div>
+            <p className="text-xs text-muted-foreground mt-2">
+              Или войдите через Telegram (нужен VPN)
+            </p>
+            {showTelegramHint && (
+              <p className="text-xs text-amber-600 mt-1">
+                Telegram может быть недоступен. Попробуйте войти по email&nbsp;↑
+              </p>
+            )}
+          </div>
         </CardContent>
       </Card>
     </div>
