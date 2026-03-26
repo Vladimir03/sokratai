@@ -1,24 +1,32 @@
 
 
+## Fix: Build error in `claim-invite/index.ts`
 
-## Plan: Fix Telegram Bot Silent Failures
+### Problem
+Build fails with TS2345 in `claim-invite/index.ts`:
+- Line 32: `ReturnType<typeof createClient>` creates a strict generic type that doesn't match the actual client instance
+- Line 139: passing `supabaseAdmin` to that function triggers the type mismatch
 
-### Status: DONE ✅
+This is a **pre-existing typing issue** unrelated to the recent telegram-bot commits. The Deno type checker in Lovable's build is stricter than what was used when this file was committed via GitHub.
 
-### Changes made in `supabase/functions/telegram-bot/index.ts`:
+### Fix (1 file, 1 line change)
 
-1. **`compactHistoryForTelegram()`** — новая функция, обрезает историю до 8 сообщений и оставляет `image_url` только у последнего user-сообщения с картинкой. Предотвращает раздувание payload при множественных фото.
+**`supabase/functions/claim-invite/index.ts`** — line 32:
+```typescript
+// Before:
+supabaseAdmin: ReturnType<typeof createClient>,
 
-2. **`fetchChatWithTimeout()`** — обёртка над fetch к `/functions/v1/chat` с 55-секундным AbortController timeout. При таймауте или сетевой ошибке отправляет ученику fallback-сообщение со ссылкой на сайт вместо молчания.
+// After:
+supabaseAdmin: any,
+```
 
-3. **`handleTextMessage`** — использует compact history + timeout fetch.
+Using `any` for an internal helper parameter is safe here — the function is private, called once, and the Supabase client API is stable.
 
-4. **`handlePhotoMessage`** — использует compact history + timeout fetch. Signed URL обновляются только для оставшихся после компактизации сообщений.
+### What the recent commits changed (no Lovable action needed)
+The last 4 commits added:
+1. `compactHistoryForTelegram()` + `fetchChatWithTimeout()` in `telegram-bot/index.ts` — **already deployed** via `supabase--deploy_edge_functions`
+2. Telegram messages sent to @Dawsik11 and @Analyst_Vladimir — **done**
+3. `.lovable/plan.md` updated — cosmetic
 
-5. **Диагностические логи** — оба handler'а логируют rawCount, compactedCount, imagesKept.
+**Only the `claim-invite` type fix is needed to unblock the build.**
 
-### Не затронуто:
-- `chat/index.ts` — без изменений
-- `guided_ai.ts` — без изменений  
-- Guided homework flow — не затронут (использует отдельные поля `studentImageUrls`/`taskImageUrl`)
-- Фронтенд — без изменений
