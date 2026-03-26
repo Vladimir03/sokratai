@@ -51,7 +51,7 @@ const TutorAssistant = lazy(() => import("./pages/tutor/TutorAssistant"));
 const KnowledgeBasePage = lazy(() => import("./pages/tutor/knowledge/KnowledgeBasePage"));
 const CatalogTopicPage = lazy(() => import("./pages/tutor/knowledge/CatalogTopicPage"));
 const FolderPage = lazy(() => import("./pages/tutor/knowledge/FolderPage"));
-const InviteToTelegram = lazy(() => import("./pages/InviteToTelegram"));
+const InvitePage = lazy(() => import("./pages/InvitePage"));
 const BookLesson = lazy(() => import("./pages/BookLesson"));
 
 // Simple loading fallback
@@ -381,7 +381,7 @@ const App = () => (
               path="/invite/:inviteCode"
               element={
                 <Suspense fallback={<PageLoader />}>
-                  <InviteToTelegram />
+                  <InvitePage />
                 </Suspense>
               } 
             />

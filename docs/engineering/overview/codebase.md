@@ -97,7 +97,7 @@ All pages are lazy-loaded via `React.lazy()` + `<Suspense>` in `App.tsx`.
 | `/miniapp/solution/:id` | `MiniAppSolution` | No | Solution viewer |
 | `/admin` | `Admin` | AdminGuard | Admin dashboard |
 | `/retention-analysis` | `RetentionAnalysis` | AdminGuard | Retention analytics |
-| `/invite/:inviteCode` | `InviteToTelegram` | No | Telegram invite deep link |
+| `/invite/:inviteCode` | `InvitePage` | No | Student invite: email signup/login + Telegram fallback |
 | `/book/:bookingLink` | `BookLesson` | No | Public lesson booking |
 | `/register-tutor` | `RegisterTutor` | No | Tutor registration |
 | `/offer` | `Offer` | No | Legal: public offer |
