@@ -114,7 +114,7 @@ export interface StudentHomeworkAssignmentDetails {
 
 export type ThreadStatus = 'active' | 'completed' | 'abandoned';
 export type TaskStateStatus = 'locked' | 'active' | 'completed' | 'skipped';
-export type GuidedMessageKind = 'answer' | 'hint_request' | 'question' | 'ai_reply' | 'system' | 'check_result' | 'hint_reply' | 'tutor_message' | 'tutor_note';
+export type GuidedMessageKind = 'answer' | 'hint_request' | 'question' | 'bootstrap' | 'ai_reply' | 'system' | 'check_result' | 'hint_reply' | 'tutor_message' | 'tutor_note';
 export type MessageDeliveryStatus = 'sending' | 'sent' | 'failed';
 export type GuidedHomeworkUiStatus =
   | 'awaiting_answer'
