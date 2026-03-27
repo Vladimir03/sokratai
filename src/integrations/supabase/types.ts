@@ -681,6 +681,7 @@ export type Database = {
           created_at: string
           deadline: string | null
           description: string | null
+          disable_ai_bootstrap: boolean
           group_id: string | null
           id: string
           max_attempts: number
@@ -695,6 +696,7 @@ export type Database = {
           created_at?: string
           deadline?: string | null
           description?: string | null
+          disable_ai_bootstrap?: boolean
           group_id?: string | null
           id?: string
           max_attempts?: number
@@ -709,6 +711,7 @@ export type Database = {
           created_at?: string
           deadline?: string | null
           description?: string | null
+          disable_ai_bootstrap?: boolean
           group_id?: string | null
           id?: string
           max_attempts?: number
