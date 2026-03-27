@@ -1758,7 +1758,7 @@ export default function Chat() {
         )}
         
         {/* Chat container with proper offset for fixed navigation */}
-        <div className="fixed inset-0 top-[110px] md:top-[104px] flex flex-col">
+        <div className="fixed inset-0 top-14 flex flex-col">
           <div className="flex flex-1 overflow-hidden relative min-h-0">
             {/* Mobile overlay */}
             {isMobile && isSidebarOpen && (
@@ -1775,7 +1775,7 @@ export default function Chat() {
               onTouchEnd={handleTouchEnd}
               className={`
               ${isMobile 
-                ? 'fixed top-[110px] bottom-0 left-0 z-50 w-80 transform transition-transform duration-300'
+                ? 'fixed top-14 bottom-0 left-0 z-50 w-80 transform transition-transform duration-300'
                 : 'relative w-64'
               }
               ${isMobile && !isSidebarOpen ? '-translate-x-full' : 'translate-x-0'}

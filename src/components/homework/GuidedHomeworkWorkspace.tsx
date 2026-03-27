@@ -324,6 +324,7 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
   const [isRequestingHint, setIsRequestingHint] = useState(false);
   const [threadId, setThreadId] = useState<string | null>(null);
   const [threadStatus, setThreadStatus] = useState<'active' | 'completed' | 'abandoned'>('active');
+  const [showCompletedView, setShowCompletedView] = useState(false);
   const [attachedFiles, setAttachedFiles] = useState<File[]>([]);
   const [isUploading, setIsUploading] = useState(false);
   const [isConditionExpanded, setIsConditionExpanded] = useState(true);
@@ -359,6 +360,10 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
       setThreadCurrentTaskOrder(thread.current_task_order);
       setThreadId(thread.id);
       setThreadStatus(thread.status);
+      // If user returns to an already-completed thread, show results immediately
+      if (thread.status === 'completed') {
+        setShowCompletedView(true);
+      }
     }
   }, [thread]);
 
