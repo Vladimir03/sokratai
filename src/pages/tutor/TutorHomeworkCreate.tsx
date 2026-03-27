@@ -31,6 +31,7 @@ import {
   updateTutorHomeworkAssignment,
   getTutorHomeworkTemplate,
   createTutorHomeworkTemplate,
+  getHomeworkImageSignedUrl,
   type HomeworkSubject,
   type CreateAssignmentTask,
   type UpdateAssignmentTask,
