@@ -1,0 +1,1 @@
+ALTER TABLE public.homework_tutor_tasks ADD COLUMN IF NOT EXISTS ocr_text TEXT DEFAULT NULL;
