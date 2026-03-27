@@ -63,3 +63,6 @@ verify_jwt = false
 [functions.claim-invite]
 verify_jwt = true
 
+[functions.process-email-queue]
+verify_jwt = true
+
