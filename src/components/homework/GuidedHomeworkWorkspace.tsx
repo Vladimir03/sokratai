@@ -66,7 +66,7 @@ import { streamChat, StreamChatError } from '@/lib/streamChat';
 import { trackGuidedHomeworkEvent } from '@/lib/homeworkTelemetry';
 
 const MAX_CONTEXT_MESSAGES = 15;
-type SendMode = Extract<GuidedMessageKind, 'answer' | 'hint_request' | 'question'>;
+type SendMode = Extract<GuidedMessageKind, 'answer' | 'hint_request' | 'question'> | 'bootstrap';
 
 interface GuidedHomeworkWorkspaceProps {
   assignment: StudentHomeworkAssignmentDetails;
@@ -103,18 +103,22 @@ function buildTaskContext(
   options?: { hasStudentImage?: boolean },
 ): string {
   const modeHint =
-    sendMode === 'hint_request'
-      ? 'Режим: подсказка. Дай короткую подсказку без полного решения и без финального ответа.'
-      : sendMode === 'question'
-        ? 'Режим: промежуточный шаг решения. Ученик показывает свой ход мыслей или шаг решения. Обсуди его, укажи ошибки если есть, помоги продвинуться дальше. Не раскрывай полностью решение и финальный ответ.'
-        : 'Режим: проверка ответа ученика. Если ответ вероятно неверный, дай шаг для исправления. Если вероятно верный — похвали и предложи перейти к следующей задаче.';
+    sendMode === 'bootstrap'
+      ? 'Режим: стартовое сообщение. Ученик ТОЛЬКО ОТКРЫЛ задачу. Никакого решения ещё нет. Сформулируй короткий стартовый заход: помоги разобрать условие.'
+      : sendMode === 'hint_request'
+        ? 'Режим: подсказка. Дай короткую подсказку без полного решения и без финального ответа.'
+        : sendMode === 'question'
+          ? 'Режим: промежуточный шаг решения. Ученик показывает свой ход мыслей или шаг решения. Обсуди его, укажи ошибки если есть, помоги продвинуться дальше. Не раскрывай полностью решение и финальный ответ.'
+          : 'Режим: проверка ответа ученика. Если ответ вероятно неверный, дай шаг для исправления. Если вероятно верный — похвали и предложи перейти к следующей задаче.';
   const studentImageHint = options?.hasStudentImage
     ? sendMode === 'question'
       ? 'КРИТИЧНО: к сообщению ученика приложено изображение его решения или скриншота. СНАЧАЛА внимательно посмотри именно на изображение ученика. Если на нём нет решения по текущей задаче, прямо скажи это и попроси прислать корректный шаг решения.'
       : 'КРИТИЧНО: к сообщению ученика приложено изображение его решения. Обязательно используй его при анализе. Если изображение не относится к текущей задаче или на нём нет решения, явно сообщи об этом.'
     : null;
 
-  const isMinimalText = currentTask.task_text.trim().length <= 15;
+  const trimmedText = currentTask.task_text.trim();
+  const isPlaceholder = /^\[.*\]$/.test(trimmedText);
+  const isMinimalText = trimmedText.length <= 20 || isPlaceholder;
   const hasImage = Boolean(currentTask.task_image_url);
 
   const parts = [
@@ -157,6 +161,8 @@ function buildGuidedSystemPrompt(
     return [
       ...baseRules,
       'Сейчас нужен короткий стартовый заход по задаче без полного решения.',
+      'Ученик ТОЛЬКО ОТКРЫЛ задачу. Он ещё НИЧЕГО не писал и не загружал. НЕ упоминай «твоё решение», «твой ответ» или «вижу, что ты написал».',
+      'Если условие на изображении и ты не можешь его прочитать, напиши нейтральный стартовый заход: предложи ученику описать задачу или задать вопрос.',
       'Сформулируй 1-2 коротких предложения, которые запускают разбор.',
     ].join('\n');
   }
@@ -1078,6 +1084,12 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
       return;
     }
 
+    // TASK-0B: skip bootstrap if tutor disabled AI intro for this assignment
+    if (assignment.disable_ai_bootstrap) {
+      bootstrapStartedRef.current.add(key);
+      return;
+    }
+
     bootstrapStartedRef.current.add(key);
 
     const runBootstrap = async () => {
@@ -1102,8 +1114,8 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
               content: 'Сформулируй короткое стартовое сообщение для ученика по этой задаче.',
             },
           ],
-          systemPrompt: buildGuidedSystemPrompt('question', { isBootstrap: true }),
-          taskContext: buildTaskContext(assignment, currentTask, assignment.tasks.length, 'question'),
+          systemPrompt: buildGuidedSystemPrompt('bootstrap', { isBootstrap: true }),
+          taskContext: buildTaskContext(assignment, currentTask, assignment.tasks.length, 'bootstrap'),
           taskImageUrl: bootstrapImageUrl,
           onDelta: (delta) => {
             content += delta;

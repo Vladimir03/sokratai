@@ -98,6 +98,7 @@ export interface MetaState {
   topic: string;
   deadline: string;
   workflow_mode: 'classic' | 'guided_chat';
+  disable_ai_bootstrap?: boolean;
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────

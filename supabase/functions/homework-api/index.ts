@@ -374,6 +374,7 @@ async function handleCreateAssignment(
       deadline: isNonEmptyString(b.deadline) ? b.deadline : null,
       status: "draft",
       workflow_mode: workflowMode,
+      disable_ai_bootstrap: b.disable_ai_bootstrap === true,
     })
     .select("id")
     .single();
@@ -797,6 +798,9 @@ async function handleUpdateAssignment(
       return jsonError(cors, 400, "VALIDATION", `workflow_mode must be one of: ${VALID_WORKFLOW_MODES.join(", ")}`);
     }
     patch.workflow_mode = b.workflow_mode;
+  }
+  if (b.disable_ai_bootstrap !== undefined) {
+    patch.disable_ai_bootstrap = b.disable_ai_bootstrap === true;
   }
 
   if (Object.keys(patch).length > 0) {

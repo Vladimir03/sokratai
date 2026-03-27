@@ -102,6 +102,7 @@ export interface StudentHomeworkAssignmentDetails {
   deadline: string | null;
   status: StudentAssignmentStatus;
   workflow_mode?: WorkflowMode;
+  disable_ai_bootstrap?: boolean;
   created_at: string;
   updated_at: string;
   tasks: StudentHomeworkTask[];

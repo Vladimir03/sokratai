@@ -63,6 +63,26 @@ export function HWExpandedParams({ meta, onChange, errors, autoTitle }: HWExpand
           }
         />
       </div>
+
+      {meta.workflow_mode === 'guided_chat' && (
+        <div className="flex items-center justify-between p-4 bg-muted/50 rounded-lg">
+          <div>
+            <Label htmlFor="ai-bootstrap" className="text-sm font-medium">
+              AI-вступление к задачам
+            </Label>
+            <p className="text-xs text-muted-foreground mt-1">
+              AI пишет стартовое сообщение при открытии каждой задачи
+            </p>
+          </div>
+          <Switch
+            id="ai-bootstrap"
+            checked={!(meta.disable_ai_bootstrap ?? false)}
+            onCheckedChange={(checked) =>
+              onChange({ ...meta, disable_ai_bootstrap: !checked })
+            }
+          />
+        </div>
+      )}
     </div>
   );
 }

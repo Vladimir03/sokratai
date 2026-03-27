@@ -41,6 +41,7 @@ export interface CreateAssignmentPayload {
   group_id?: string | null;
   save_as_template?: boolean;
   workflow_mode?: 'classic' | 'guided_chat';
+  disable_ai_bootstrap?: boolean;
 }
 
 // ─── Templates ───────────────────────────────────────────────────────────────
@@ -406,6 +407,7 @@ export interface TutorHomeworkAssignmentDetails {
     deadline: string | null;
     status: HomeworkAssignmentStatus;
     workflow_mode?: 'classic' | 'guided_chat';
+    disable_ai_bootstrap?: boolean;
     created_at: string;
   };
   tasks: {
@@ -721,6 +723,7 @@ export async function updateTutorHomeworkAssignment(
     deadline?: string | null;
     status?: string;
     workflow_mode?: 'classic' | 'guided_chat';
+    disable_ai_bootstrap?: boolean;
     tasks?: UpdateAssignmentTask[];
   },
 ): Promise<void> {

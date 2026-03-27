@@ -95,6 +95,7 @@ function TutorHomeworkCreateContent() {
     topic: '',
     deadline: '',
     workflow_mode: 'guided_chat',
+    disable_ai_bootstrap: false,
   });
 
   // Auto-generated title: «ДЗ {topic} {dd.MM}» — used when manual title is empty
@@ -181,6 +182,7 @@ function TutorHomeworkCreateContent() {
       topic: a.topic ?? '',
       deadline: a.deadline ? toLocalDatetimeString(a.deadline) : '',
       workflow_mode: a.workflow_mode ?? 'classic',
+      disable_ai_bootstrap: a.disable_ai_bootstrap ?? false,
     });
 
     setTasks(
@@ -226,6 +228,7 @@ function TutorHomeworkCreateContent() {
         topic: a.topic ?? '',
         deadline: a.deadline ? toLocalDatetimeString(a.deadline) : '',
         workflow_mode: a.workflow_mode ?? 'classic',
+        disable_ai_bootstrap: a.disable_ai_bootstrap ?? false,
       },
       taskTexts: existingAssignment.tasks.map((t) => `${t.id}|${t.task_text}|${t.correct_answer ?? ''}|${t.rubric_text ?? ''}|${t.task_image_url ?? ''}|${t.max_score}`).join(';;'),
       studentIds: existingAssignment.assigned_students.map((s) => s.student_id).sort().join(','),
@@ -326,7 +329,8 @@ function TutorHomeworkCreateContent() {
         meta.subject !== snap.meta.subject ||
         meta.topic !== snap.meta.topic ||
         meta.deadline !== snap.meta.deadline ||
-        meta.workflow_mode !== snap.meta.workflow_mode;
+        meta.workflow_mode !== snap.meta.workflow_mode ||
+        (meta.disable_ai_bootstrap ?? false) !== (snap.meta.disable_ai_bootstrap ?? false);
       const currentTaskTexts = tasks.map((t) => `${t.id ?? ''}|${t.task_text}|${t.correct_answer}|${t.rubric_text}|${t.task_image_path ?? ''}|${t.max_score}`).join(';;');
       const tasksDirty = currentTaskTexts !== snap.taskTexts;
       const currentStudentIds = [...selectedStudentIds].sort().join(',');
@@ -342,7 +346,8 @@ function TutorHomeworkCreateContent() {
       (meta.subject !== '' && meta.subject !== 'physics') ||
       meta.topic.trim().length > 0 ||
       meta.deadline.trim().length > 0 ||
-      meta.workflow_mode !== 'guided_chat';
+      meta.workflow_mode !== 'guided_chat' ||
+      (meta.disable_ai_bootstrap ?? false);
 
     const tasksDirty =
       tasks.length !== 1 ||
@@ -458,6 +463,7 @@ function TutorHomeworkCreateContent() {
           tasks: apiTasks,
           group_id: assignMode === 'group' && selectedGroupId ? selectedGroupId : null,
           workflow_mode: meta.workflow_mode,
+          disable_ai_bootstrap: meta.disable_ai_bootstrap ?? false,
         });
         assignmentId = result.assignment_id;
         createdAssignmentIdRef.current = assignmentId;
@@ -684,6 +690,7 @@ function TutorHomeworkCreateContent() {
         topic: meta.topic.trim() || null,
         deadline: meta.deadline ? parseISO(meta.deadline).toISOString() : null,
         workflow_mode: meta.workflow_mode,
+        disable_ai_bootstrap: meta.disable_ai_bootstrap ?? false,
         tasks: apiTasks,
       });
 
@@ -780,7 +787,7 @@ function TutorHomeworkCreateContent() {
       setSelectedStudentIds(new Set());
     }
 
-    setMeta({ title: '', subject: 'physics', topic: '', deadline: '', workflow_mode: 'guided_chat' });
+    setMeta({ title: '', subject: 'physics', topic: '', deadline: '', workflow_mode: 'guided_chat', disable_ai_bootstrap: false });
     setTasks([createEmptyTask()]);
     setMaterials([]);
     setNotifyEnabled(true);
@@ -987,7 +994,7 @@ function TutorHomeworkCreateContent() {
             {showAdvanced ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
             {showAdvanced ? 'Скрыть параметры' : 'Расширенные параметры'}
             {/* Dot indicator: show when L1 has user data but collapsed */}
-            {!showAdvanced && (meta.title.trim() || meta.deadline.trim() || meta.workflow_mode !== 'guided_chat' || materials.length > 0) && (
+            {!showAdvanced && (meta.title.trim() || meta.deadline.trim() || meta.workflow_mode !== 'guided_chat' || meta.disable_ai_bootstrap || materials.length > 0) && (
               <span className="inline-block w-2 h-2 rounded-full bg-primary" />
             )}
           </button>

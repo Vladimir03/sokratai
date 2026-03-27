@@ -347,6 +347,27 @@ Legacy student-only система (`homework_sets`, `homework_tasks`, `homework
 - Плейсхолдеры: `Ответ...` и `Обсуди с AI...` (короткие, в одну строку)
 - Discussion toggle работает и на desktop (убраны `md:hidden`, `md:max-h-none md:overflow-visible`)
 
+### Bootstrap hallucination fix + disable toggle (Sprint S4, 2026-03-27)
+
+**TASK-0A: Fix Bootstrap Hallucination (CRITICAL)**
+- `buildTaskContext()` в `GuidedHomeworkWorkspace.tsx` теперь поддерживает `sendMode: 'bootstrap'` — отдельный `modeHint` для стартового сообщения
+- Bootstrap call передаёт `'bootstrap'` вместо `'question'` → AI больше не галлюцинирует «вижу твоё решение»
+- `isMinimalText` порог расширен: `length <= 20` + regex `/^\[.*\]$/` для placeholder-ов вроде `[Задача на фото]`
+- Bootstrap system prompt усилен: явный запрет упоминать «решение ученика», fallback для нечитаемых изображений
+
+**TASK-0B: Disable AI Bootstrap Toggle**
+- Колонка `disable_ai_bootstrap boolean NOT NULL DEFAULT false` в `homework_tutor_assignments`
+- Миграция: `20260327210000_add_disable_ai_bootstrap.sql`
+- Toggle «AI-вступление к задачам» (позитивная формулировка) в L1 `HWExpandedParams.tsx`, видим только при `workflow_mode === 'guided_chat'`
+- Checked = bootstrap ON (default), unchecked → `disable_ai_bootstrap: true`
+- Backend: `homework-api/index.ts` — create + update handlers принимают `disable_ai_bootstrap`
+- Student-side: `studentHomeworkApi.ts` SELECT включает `disable_ai_bootstrap`, guard в `GuidedHomeworkWorkspace.tsx` пропускает bootstrap если `assignment.disable_ai_bootstrap`
+- Edit flow: prefill + snapshot в `TutorHomeworkCreate.tsx` переносят значение флага, не сбрасывают
+- Create-mode dirty check: `disable_ai_bootstrap` учитывается в unsaved-changes guard
+- Dot indicator в L1-кнопке: включает `disable_ai_bootstrap`
+
+**Spec**: `docs/features/specs/student-guided-hints-spec.md` (TASK-0A, TASK-0B)
+
 ## Известные хрупкие области
 
 1. **Chat.tsx** (2000+ строк) — очень сложный компонент. Любые изменения в ChatMessage, ChatInput, ChatSidebar могут сломать чат
