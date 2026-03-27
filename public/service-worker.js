@@ -143,3 +143,97 @@ self.addEventListener('message', (event) => {
     self.skipWaiting();
   }
 });
+
+// --- Push Notification Handlers (Phase 1.1) ---
+
+self.addEventListener('push', (event) => {
+  var data = { title: 'Сократ', body: 'Новое уведомление', url: '/' };
+  try {
+    if (event.data) {
+      var parsed = event.data.json();
+      data = {
+        title: parsed.title || data.title,
+        body: parsed.body || data.body,
+        url: parsed.url || data.url,
+        icon: parsed.icon,
+        badge: parsed.badge,
+      };
+    }
+  } catch (e) {
+    console.warn('Service Worker: Failed to parse push payload', e);
+  }
+
+  event.waitUntil(
+    self.registration.showNotification(data.title, {
+      body: data.body,
+      icon: data.icon || '/favicon.ico',
+      badge: data.badge || '/favicon.ico',
+      data: { url: data.url || '/' },
+    })
+  );
+});
+
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  var rawUrl = (event.notification.data && event.notification.data.url) || '/';
+
+  // Same-origin validation: only allow relative paths or same-origin URLs
+  var targetUrl = '/';
+  if (rawUrl.startsWith('/')) {
+    targetUrl = rawUrl;
+  } else {
+    try {
+      var parsed = new URL(rawUrl);
+      if (parsed.origin === self.location.origin) {
+        targetUrl = parsed.pathname + parsed.search + parsed.hash;
+      }
+    } catch (e) {
+      // Invalid URL — fall back to root
+    }
+  }
+
+  event.waitUntil(
+    clients.matchAll({ type: 'window', includeUncontrolled: true }).then(function (windowClients) {
+      // Only reuse a tab that is already on the same URL path (no data loss)
+      var fullTargetUrl = self.location.origin + targetUrl;
+      for (var i = 0; i < windowClients.length; i++) {
+        var client = windowClients[i];
+        if (client.url === fullTargetUrl && 'focus' in client) {
+          return client.focus();
+        }
+      }
+      return clients.openWindow(targetUrl);
+    })
+  );
+});
+
+self.addEventListener('pushsubscriptionchange', (event) => {
+  // Browser revoked or expired the subscription — re-subscribe with same VAPID key,
+  // then notify a client window to persist via authenticated API call.
+  // SW has no JWT, so it cannot call push-subscribe directly.
+  event.waitUntil(
+    self.registration.pushManager.subscribe(event.oldSubscription.options)
+      .then(function (newSub) {
+        // Ask an open client window to persist the new subscription
+        return clients.matchAll({ type: 'window' }).then(function (windowClients) {
+          var subJson = newSub.toJSON();
+          var message = {
+            type: 'PUSH_SUBSCRIPTION_CHANGED',
+            subscription: {
+              endpoint: subJson.endpoint,
+              keys: { p256dh: subJson.keys.p256dh, auth: subJson.keys.auth },
+              expirationTime: newSub.expirationTime || null,
+            },
+          };
+          for (var i = 0; i < windowClients.length; i++) {
+            windowClients[i].postMessage(message);
+          }
+          // If no client windows are open, the stale subscription will be caught
+          // as a 410 Gone during the next push send (Phase 1.3 cascade cleanup).
+        });
+      })
+      .catch(function (err) {
+        console.error('Service Worker: pushsubscriptionchange re-subscribe failed', err);
+      })
+  );
+});

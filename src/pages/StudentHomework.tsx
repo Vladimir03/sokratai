@@ -8,6 +8,7 @@ import { useStudentAssignments } from '@/hooks/useStudentHomework';
 import { getSubjectLabel } from '@/types/homework';
 import { parseISO } from 'date-fns';
 import { Link } from 'react-router-dom';
+import PushOptInBanner from '@/components/PushOptInBanner';
 
 function formatStatus(status: string | null, deadline: string | null) {
   if (deadline && parseISO(deadline).getTime() <= Date.now()) return 'deadline_missed';
@@ -32,6 +33,7 @@ const StudentHomework = () => {
         <Navigation />
         <PageContent>
           <main className="container mx-auto px-4 pb-8">
+            <PushOptInBanner />
             <div className="max-w-5xl mx-auto space-y-4">
               <h1 className="text-3xl font-bold">Домашние задания</h1>
 

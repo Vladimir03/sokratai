@@ -1,7 +1,7 @@
 # PRD: Telegram-независимый онбординг и мультиканальная доставка ДЗ
 
-**Статус:** Draft v2
-**Дата:** 2026-03-26
+**Статус:** Draft v3 — Phase 0 DONE
+**Дата:** 2026-03-26 (Phase 0 shipped)
 **Автор:** Vladimir + Claude
 **Jobs:** R4-2 (Отправить ДЗ всем ученикам группы через единый канал), S3-1 (Получить ДЗ в Telegram — там, где я и так живу)
 **Источник:** `docs/product/research/ajtbd/job-graphs/elite-physics-finish-sprint-job-graph.md`
@@ -32,19 +32,19 @@
 
 Репетитор создаёт ДЗ в Сократе и хочет одним действием отправить его всем ученикам группы. Единственный канал — Telegram-бот. При блокировке критическое звено цепочки R4-1 → R4-2 → S3-1 → решение → обратная связь **сломано**.
 
-**Текущее состояние кодовой базы:**
+**Состояние кодовой базы (после Phase 0, 2026-03-26):**
 
-| Компонент | Telegram-зависимость | Альтернатива |
-|-----------|---------------------|-------------|
-| Invite page (`InviteToTelegram.tsx`) | 100% — только QR к боту | ❌ Нет |
-| Manual add student (`AddStudentDialog.tsx`) | `telegram_username` обязателен | ❌ Нет email-добавления |
-| Tutor-student linking | Только через бот (`handleTutorInvite`) | ❌ Нет web-linking |
-| Student login (`Login.tsx`) | Telegram = primary, email = secondary | ⚠️ Email работает, но UX плохой |
-| HW delivery (`handleNotifyStudents`) | Только Telegram `sendMessage` | ❌ Нет push/email |
-| HW reminders (`homework-reminder`) | Только Telegram | ❌ Нет push/email |
-| OG meta tags (`index.html`) | Статические, неактуальные | ❌ Нет динамических |
+| Компонент | До Phase 0 | После Phase 0 | Статус |
+|-----------|-----------|--------------|--------|
+| Invite page | 100% Telegram (`InviteToTelegram.tsx`) | ✅ Email primary (`InvitePage.tsx`) | **DONE** |
+| Manual add student | `telegram_username` обязателен | ✅ Email или Telegram (min 1) | **DONE** |
+| Tutor-student linking | Только через бот | ✅ `claim-invite` edge function | **DONE** |
+| Student login | Telegram primary | ✅ Email primary + VPN warning | **DONE** |
+| OG meta tags | «математика ЕГЭ» | ✅ «физика и математика ЕГЭ и ОГЭ» | **DONE** |
+| HW delivery (`handleNotifyStudents`) | Только Telegram | ❌ Только Telegram | **Phase 1** |
+| HW reminders (`homework-reminder`) | Только Telegram | ❌ Только Telegram | **Phase 1** |
 
-**Цена бездействия:** Репетитор не может завести учеников → нет кому отправлять ДЗ → пилот провален.
+**Phase 0 убрал блокер:** Репетитор теперь может завести учеников через email → ученики регистрируются без Telegram → можно переходить к Phase 1 (push/email доставка ДЗ).
 
 ---
 
@@ -116,77 +116,177 @@
 
 ## Requirements
 
-### PHASE 0 — Telegram-независимый онбординг (БЛОКЕР для всего остального)
+### PHASE 0 — Telegram-независимый онбординг ✅ DONE (2026-03-26)
 
-> **Без Phase 0 невозможно ни набрать учеников, ни отправить им ДЗ. Это первый приоритет.**
+> **Статус: ПОЛНОСТЬЮ РЕАЛИЗОВАНО.** Все 5 requirements shipped. Онбординг работает без Telegram.
 
-**P0-ONBOARD-1. Новая invite-страница с email-регистрацией**
+**Ключевые файлы реализации:**
 
-Полная переработка `/invite/:code` — вместо Telegram-инструкций показываем email-регистрацию как основной путь, Telegram как опцию.
+| Файл | Что делает |
+|------|-----------|
+| `src/pages/InvitePage.tsx` | Новая invite-страница (заменила `InviteToTelegram.tsx`) |
+| `src/lib/inviteApi.ts` | Client-side claim helpers (`claimInvite`, `claimPendingInvite`) |
+| `supabase/functions/claim-invite/index.ts` | Edge function web-linking |
+| `src/pages/Login.tsx` | Email primary, Telegram secondary |
+| `src/pages/SignUp.tsx` | Email primary, Telegram secondary |
+| `src/components/tutor/AddStudentDialog.tsx` | Email поле, telegram optional |
+| `supabase/functions/tutor-manual-add-student/index.ts` | Email lookup + `admin.createUser()` |
+| `src/types/tutor.ts` | `ManualAddTutorStudentInput.email` |
+| `src/components/TelegramLoginButton.tsx` | `claimPendingInvite()` после Telegram auth |
+| `index.html` | Обновлённые OG-теги |
 
-Acceptance criteria:
-- [ ] Страница показывает: «Вас пригласил репетитор {Имя}» (из `tutors` по `invite_code`)
-- [ ] **Основной CTA**: форма email + пароль + кнопка «Зарегистрироваться» (или «Войти», если аккаунт уже есть)
-- [ ] При регистрации: `supabase.auth.signUp()` с `email_confirm: true` (без email-верификации — zero-friction) → автоматическая привязка к репетитору через `invite_code` (новый web-linking flow, см. P0-ONBOARD-3)
-- [ ] При входе существующего аккаунта: `supabase.auth.signInWithPassword()` → автоматическая привязка (если не привязан)
-- [ ] **Опциональный блок внизу**: «Или подключитесь через Telegram» со свёрнутой секцией (QR + кнопка). НЕ основной путь
-- [ ] Убрать 3-шаговую инструкцию про Telegram
-- [ ] Валидация пароля: min 8 chars, 1 uppercase, 1 digit (как на `/signup`)
-- [ ] Mobile-first layout: работает на iPhone Safari без зума (`font-size ≥ 16px` на input)
-- [ ] После успешной регистрации/входа → redirect на `/homework` (студенческий кабинет)
+**Task spec:** `docs/features/specs/phase0-onboarding-tasks.md`
+**Промпты:** `docs/features/specs/phase0-onboarding-prompts.md`
 
-**P0-ONBOARD-2. Добавление ученика по email (репетитор)**
+---
 
-Расширить `AddStudentDialog.tsx`: репетитор может добавить ученика по email, не только по Telegram username.
+**P0-ONBOARD-1. Новая invite-страница с email-регистрацией** ✅
 
-Acceptance criteria:
-- [ ] Вкладка «Добавить вручную»: поле `telegram_username` становится **опциональным** (не обязательным)
-- [ ] Новое поле: `email` (опциональное). Хотя бы одно из `email` / `telegram_username` должно быть заполнено
-- [ ] При добавлении по email: создаётся placeholder profile с `registration_source: 'manual'` и `email`
-- [ ] Если ученик с таким email уже есть в `profiles` — привязать (`tutor_students`) без создания дубликата
-- [ ] Edge function `tutor-manual-add-student` принимает `email` как альтернативу `telegram_username`
-- [ ] Если у ученика есть email — репетитор может отправить ему invite-email со ссылкой на `/invite/:code`
-
-**P0-ONBOARD-3. Web-based tutor-student linking**
-
-Новый механизм привязки ученик→репетитор без Telegram-бота. Работает через invite-ссылку + веб-регистрацию.
-
-Статус на 2026-03-26:
-- ✅ Phase 2 backend готов: `claim-invite` edge function + `src/lib/inviteApi.ts`
-- ⏳ Phase 3 pending: автоматический вызов после auth на invite/login/signup flows
+Полная переработка `/invite/:code` — `InviteToTelegram.tsx` заменён на `InvitePage.tsx`. Email-регистрация — основной путь, Telegram — collapsed секция с пометкой «нужен VPN».
 
 Acceptance criteria:
-- [x] Новая Edge function `claim-invite`: принимает `{invite_code}`, берёт `user_id` из JWT и создаёт `tutor_students` link
-- [ ] Вызывается автоматически после регистрации/входа через invite-страницу
-- [x] Проверки: invite_code валиден, tutor существует, link не дублируется
-- [x] Если link уже есть → молча пропускаем (идемпотентность)
-- [ ] `invite_code` передаётся через URL param и сохраняется в `localStorage('pending_invite_code')` (не sessionStorage — очищается на iOS Safari). После claim — чистим
-- [ ] Работает для обоих случаев: новая регистрация и вход существующего ученика
+- [x] Страница показывает: «Вас пригласил репетитор {Имя}» (из `tutors` по `invite_code`)
+- [x] **Основной CTA**: форма email + пароль + имя + кнопка «Зарегистрироваться» (или «Войти», если аккаунт уже есть)
+- [x] Переключатель login/signup: `isLogin` state — «Уже есть аккаунт? Войти» / «Нет аккаунта? Зарегистрироваться»
+- [x] При регистрации: `supabase.auth.signUp()` без email-верификации (`email_confirm: true` в Dashboard) → автоматический `claimInvite()` → привязка к репетитору
+- [x] При входе существующего аккаунта: `supabase.auth.signInWithPassword()` → автоматический `claimInvite()`
+- [x] **Опциональный блок внизу**: collapsed accordion «Или подключитесь через Telegram» (QR + кнопка + предупреждение «нужен VPN»)
+- [x] 3-шаговая инструкция про Telegram убрана
+- [x] Валидация (Zod): email формат, пароль min 8 chars + 1 uppercase + 1 digit, имя min 2 chars
+- [x] Mobile-first: `font-size: 16px` на всех input (iOS zoom prevention), `touch-action: manipulation` на кнопках
+- [x] После успешной регистрации/входа + claim → success state «✅ Вы привязаны к репетитору {Имя}» → redirect на `/homework`
+- [x] Error handling: невалидный invite_code → «Ссылка недействительна»; email занят → подсказка про восстановление пароля
+- [x] При ошибке claim → fallback в `localStorage('pending_invite_code')` → claim при следующем входе
 
-**P0-ONBOARD-4. Email как primary auth на странице входа**
+**Реализация (детали):**
+- Файл: `src/pages/InvitePage.tsx` (lazy-loaded через `React.lazy` в `App.tsx`)
+- Route: `/invite/:inviteCode` → `<InvitePage />`
+- Auth metadata: `options.data.full_name` передаётся при signup
+- `emailRedirectTo: /homework`
+- Telegram секция использует `getTutorInviteTelegramLink()` из `src/utils/telegramLinks.ts`
 
-Обновить `Login.tsx`: email = основной способ, Telegram = опция.
+---
+
+**P0-ONBOARD-2. Добавление ученика по email (репетитор)** ✅
+
+`AddStudentDialog.tsx` расширен: email как альтернатива telegram_username. Хотя бы одно обязательно.
 
 Acceptance criteria:
-- [ ] Email-форма показана **первой** (сверху), без пометки «вторичный»
-- [ ] Telegram-кнопка **под email-формой**, с пометкой «Или войдите через Telegram (нужен VPN)»
-- [ ] Если Telegram-кнопка нажата и polling не получает ответ 30+ сек → показать hint: «Telegram может быть недоступен. Попробуйте войти по email»
-- [ ] Убрать текст «Рекомендуем — не нужен пароль» у Telegram-кнопки
+- [x] Вкладка «Добавить вручную»: поле `telegram_username` стало **опциональным**
+- [x] Новое поле: `email` (type="email", `text-base` для iOS). Хотя бы одно из `email` / `telegram_username` заполнено
+- [x] Email validation: regex `^[^\s@]+@[^\s@]+\.[^\s@]+$` на frontend + backend
+- [x] Подсказка: «Рекомендуем указать email — Telegram может быть недоступен»
+- [x] При добавлении по email: edge function ищет существующий профиль через `auth.admin.getUserByEmail()` (indexed lookup)
+- [x] Если не найден → `admin.createUser({ email, email_confirm: true, password: random })` — auto-confirmed placeholder
+- [x] Если найден → использует его id, создаёт `tutor_students` link без дубликата
+- [x] Orphan recovery: если auth user есть, но профиль отсутствует → создаёт профиль
+- [x] Race-safe: UNIQUE constraint violation (23505) на `tutor_students` → fallback select
+- [x] Backward compatible: вызовы без email (только telegram) продолжают работать
 
-**P0-ONBOARD-5. Актуальные OG-теги**
+**Реализация (детали):**
+- Frontend: `src/components/tutor/AddStudentDialog.tsx` — email поле + валидация
+- Types: `src/types/tutor.ts` — `ManualAddTutorStudentInput.email?: string`, `telegram_username?: string`
+- API client: `src/lib/tutors.ts` — `manualAddTutorStudent()` передаёт email
+- Backend: `supabase/functions/tutor-manual-add-student/index.ts` — full email path + orphan recovery
+- `registration_source: 'manual'` записывается в profiles при создании
 
-Обновить статические OG-теги в `index.html` на актуальную информацию.
+---
+
+**P0-ONBOARD-3. Web-based tutor-student linking** ✅
+
+Новый механизм привязки ученик→репетитор без Telegram-бота. Edge function `claim-invite` + client helpers + интеграция во все auth-точки.
 
 Acceptance criteria:
-- [ ] `og:title`: «Сократ — AI-помощник для подготовки к ЕГЭ и ОГЭ» (не «по математике»)
-- [ ] `og:description`: «Готовься к ЕГЭ и ОГЭ по физике и математике с AI-помощником 24/7» (добавить физику)
-- [ ] `og:image`: актуальное изображение (если текущее Lovable-дефолтное — заменить на брендированное)
-- [ ] `og:url`: `https://sokratai.ru`
-- [ ] `og:site_name`: «Сократ»
+- [x] Edge function `claim-invite` (`POST /functions/v1/claim-invite`): принимает `{invite_code}`, берёт `user_id` из JWT, создаёт `tutor_students` link
+- [x] Вызывается автоматически после auth на invite-странице (`InvitePage.tsx` → `claimInvite()`)
+- [x] Вызывается автоматически после auth на `/login`, `/signup`, и Telegram auth (`claimPendingInvite()`)
+- [x] Проверки: invite_code валиден, tutor существует, self-link блокируется (400), link не дублируется
+- [x] Идемпотентность: повторный claim → `already_linked` (200), race condition → UNIQUE constraint catch (23505)
+- [x] `invite_code` сохраняется в `localStorage('pending_invite_code')` при ошибке claim. После успешного claim — чистим
+- [x] Terminal errors (400/404) → localStorage чистится (нет бесконечного retry). Retriable errors (5xx/network) → остаётся
+- [x] `profiles.registration_source` обновляется на `'invite_web'` (только если null)
+- [x] Работает для обоих случаев: новая регистрация и вход существующего ученика
+
+**Реализация (детали):**
+- Backend: `supabase/functions/claim-invite/index.ts` — JWT auth, CORS, service_role для DB
+- Client: `src/lib/inviteApi.ts` — `claimInvite(code)`, `claimPendingInvite()`, `isTerminalClaimError()`
+- Интеграция: `InvitePage.tsx` (прямой claim), `Login.tsx` (pending claim), `SignUp.tsx` (pending claim), `TelegramLoginButton.tsx` (pending claim после `setSession`)
+- Non-blocking: ошибка claim никогда не блокирует вход — только try/catch + console.error
+
+**Claim flow диаграмма:**
+```
+InvitePage → auth → claimInvite(code) → success → "✅ Привязаны"
+                                       → error → localStorage('pending_invite_code')
+                                                     ↓
+Login/SignUp/Telegram auth → claimPendingInvite() → claim → cleanup localStorage
+                                                   → terminal error → cleanup
+                                                   → retriable error → keep for next login
+```
+
+---
+
+**P0-ONBOARD-4. Email как primary auth на странице входа** ✅
+
+`Login.tsx` и `SignUp.tsx` переработаны: email = primary, Telegram = secondary с предупреждением.
+
+Acceptance criteria:
+- [x] `Login.tsx`: Email-форма показана **первой** (сверху), Telegram **после** разделителя «или»
+- [x] Telegram-кнопка с пометкой «Или войдите через Telegram (нужен VPN)»
+- [x] Текст «Рекомендуем — не нужен пароль» убран
+- [x] 30-секундный timeout hint: если Telegram polling не получает ответ → amber-текст «Telegram может быть недоступен. Попробуйте войти по email ↑»
+  - `telegramTimeoutRef` с `setTimeout(30000)` после клика на Telegram, cleanup при unmount
+- [x] `SignUp.tsx`: Email-форма primary, Telegram secondary с «нужен VPN»
+- [x] Redirect-логика (tutor vs student) не изменена
+- [x] `TelegramLoginButton.tsx` не изменён (внутренняя логика), только добавлен `claimPendingInvite()` после auth
+
+---
+
+**P0-ONBOARD-5. Актуальные OG-теги** ✅
+
+Статические OG-теги в `index.html` обновлены на актуальную информацию.
+
+Acceptance criteria:
+- [x] `og:title`: «Сократ — AI-помощник для подготовки к ЕГЭ и ОГЭ»
+- [x] `og:description`: «Готовься к ЕГЭ и ОГЭ по физике и математике с AI-помощником 24/7»
+- [x] `og:url`: `https://sokratai.ru`
+- [x] `og:site_name`: «Сократ»
+- [x] `<title>` и `<meta name="description">` синхронизированы с OG-тегами
+- [x] Twitter card теги обновлены аналогично
+- [x] `og:image`: оставлен текущий (Lovable default) — брендированный запланирован как P1
+- [x] Static hero text в inline CSS обновлён
+
+---
+
+**Phase 0 — Resolved Decisions (решения, принятые при реализации)**
+
+| # | Решение | Обоснование |
+|---|---------|-------------|
+| D1 | Email без верификации (zero-friction signup) | Школьники 14-18 лет — любой дополнительный шаг = churn. `email_confirm: true` в Dashboard |
+| D2 | `localStorage` вместо `sessionStorage` для pending invite | iOS Safari очищает sessionStorage при переключении табов |
+| D3 | Terminal vs retriable errors в claim | 400/404 (невалидный код) → чистим localStorage. 5xx → оставляем для retry |
+| D4 | `admin.createUser()` для manual add по email | Проще, чем placeholder profile + merge. Ученик получает настоящий auth аккаунт сразу |
+| D5 | Self-link блокировка в claim-invite | `tutor.user_id === user.id` → 400. Репетитор не может привязать себя как ученика |
+| D6 | Non-blocking claim после auth | Ошибка claim никогда не блокирует вход. UX > strict linking |
+| D7 | `claimPendingInvite()` в TelegramLoginButton | Telegram auth тоже проверяет localStorage — единая точка claim для всех auth-путей |
+
+---
+
+**Phase 0 — Обновлённая таблица зависимостей от Telegram**
+
+| Компонент | До Phase 0 | После Phase 0 |
+|-----------|-----------|--------------|
+| Invite page (`InvitePage.tsx`) | 100% Telegram | ✅ Email primary, Telegram collapsed |
+| Manual add student (`AddStudentDialog.tsx`) | `telegram_username` обязателен | ✅ Email или Telegram (min 1) |
+| Tutor-student linking | Только через бот | ✅ `claim-invite` edge function (web) + бот (fallback) |
+| Student login (`Login.tsx`) | Telegram primary | ✅ Email primary, Telegram secondary + VPN warning |
+| Student signup (`SignUp.tsx`) | Telegram рядом с email | ✅ Email primary, Telegram secondary |
+| OG meta tags (`index.html`) | «математика ЕГЭ» | ✅ «физика и математика ЕГЭ и ОГЭ» |
+| HW delivery (`handleNotifyStudents`) | Только Telegram | ❌ Только Telegram — **Phase 1** |
+| HW reminders (`homework-reminder`) | Только Telegram | ❌ Только Telegram — **Phase 1** |
 
 ### PHASE 1 — Web Push + каскадная доставка ДЗ
 
-> **Зависит от Phase 0** — ученики должны быть в системе с email.
+> **Phase 0 DONE** ✅ — ученики теперь в системе с email. Можно приступать.
 
 **P0-PUSH-1. Web Push уведомления (основной канал доставки)**
 
@@ -307,7 +407,7 @@ Server-side rendering или edge function для персонализирова
 | Метрика | Target | Stretch | Как измеряем |
 |---------|--------|---------|-------------|
 | Delivery rate | ≥90% | ≥95% | `delivery_status IN ('delivered_push','delivered_telegram','delivered_email')` / total assigned |
-| Push subscription rate | ≥60% | ≥80% | `push_subscriptions WHERE active = true` / total students |
+| Push subscription rate | ≥60% | ≥80% | `count(DISTINCT user_id) FROM push_subscriptions WHERE (expires_at IS NULL OR expires_at > now())` / total students |
 | Time to open ДЗ | <2 часа (median) | <30 мин | `first_opened_at - notified_at` |
 | Retry rate | <10% | <5% | Повторные вызовы `/notify` per student |
 
