@@ -3077,6 +3077,10 @@ export type Database = {
         }
         Returns: boolean
       }
+      hw_reorder_tasks: {
+        Args: { p_assignment_id: string; p_task_order: Json }
+        Returns: undefined
+      }
       increment_demo_hints: {
         Args: { analytics_id: string }
         Returns: undefined
