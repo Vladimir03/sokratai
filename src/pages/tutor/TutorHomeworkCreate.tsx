@@ -31,6 +31,7 @@ import {
   updateTutorHomeworkAssignment,
   getTutorHomeworkTemplate,
   createTutorHomeworkTemplate,
+  getHomeworkImageSignedUrl,
   type HomeworkSubject,
   type CreateAssignmentTask,
   type UpdateAssignmentTask,
@@ -185,20 +186,30 @@ function TutorHomeworkCreateContent() {
       disable_ai_bootstrap: a.disable_ai_bootstrap ?? false,
     });
 
-    setTasks(
-      [...existingAssignment.tasks]
-        .sort((x, y) => x.order_num - y.order_num)
-        .map((t) => ({
-          ...createEmptyTask(),
-          id: t.id,
-          localId: generateUUID(),
-          task_text: t.task_text,
-          task_image_path: t.task_image_url,
-          correct_answer: t.correct_answer ?? '',
-          rubric_text: t.rubric_text ?? '',
-          max_score: t.max_score,
-        })),
-    );
+    const newTasks = [...existingAssignment.tasks]
+      .sort((x, y) => x.order_num - y.order_num)
+      .map((t) => ({
+        ...createEmptyTask(),
+        id: t.id,
+        localId: generateUUID(),
+        task_text: t.task_text,
+        task_image_path: t.task_image_url,
+        correct_answer: t.correct_answer ?? '',
+        rubric_text: t.rubric_text ?? '',
+        max_score: t.max_score,
+      }));
+
+    setTasks(newTasks);
+
+    // Resolve storage:// refs to signed preview URLs
+    Promise.all(
+      newTasks.map(async (t, i) => {
+        if (t.task_image_path) {
+          const url = await getHomeworkImageSignedUrl(t.task_image_path);
+          if (url) newTasks[i] = { ...newTasks[i], task_image_preview_url: url };
+        }
+      }),
+    ).then(() => setTasks([...newTasks]));
 
     setMaterials(
       existingAssignment.materials.map((m) => ({
