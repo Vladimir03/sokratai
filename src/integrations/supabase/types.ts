@@ -770,6 +770,7 @@ export type Database = {
       homework_tutor_reminder_log: {
         Row: {
           assignment_id: string
+          channel: string | null
           id: string
           reminder_type: string
           sent_at: string
@@ -777,6 +778,7 @@ export type Database = {
         }
         Insert: {
           assignment_id: string
+          channel?: string | null
           id?: string
           reminder_type: string
           sent_at?: string
@@ -784,6 +786,7 @@ export type Database = {
         }
         Update: {
           assignment_id?: string
+          channel?: string | null
           id?: string
           reminder_type?: string
           sent_at?: string
@@ -802,6 +805,7 @@ export type Database = {
       homework_tutor_student_assignments: {
         Row: {
           assignment_id: string
+          delivery_channel: string | null
           delivery_error_code: string | null
           delivery_status: string
           id: string
@@ -811,6 +815,7 @@ export type Database = {
         }
         Insert: {
           assignment_id: string
+          delivery_channel?: string | null
           delivery_error_code?: string | null
           delivery_status?: string
           id?: string
@@ -820,6 +825,7 @@ export type Database = {
         }
         Update: {
           assignment_id?: string
+          delivery_channel?: string | null
           delivery_error_code?: string | null
           delivery_status?: string
           id?: string
