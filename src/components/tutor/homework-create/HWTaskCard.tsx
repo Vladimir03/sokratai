@@ -236,30 +236,25 @@ export function HWTaskCard({ task, index, onUpdate, onRemove, canRemove, onDefer
         {/* Image upload */}
         <div className="space-y-2">
           <Label>Изображение</Label>
-          {task.task_image_path ? (
+        {task.task_image_path ? (
             <div className="p-2 border rounded-md bg-muted/50 space-y-2">
               <div className="flex items-center gap-2">
-                {task.task_image_preview_url ? (
-                  <img
-                    src={task.task_image_preview_url}
-                    alt="Превью задачи"
-                    className="h-12 w-12 rounded border object-cover bg-background"
-                  />
-                ) : (
-                  <div className="h-12 w-12 rounded border bg-background flex items-center justify-center">
-                    <ImageIcon className="h-4 w-4 text-muted-foreground" />
-                  </div>
-                )}
-                <div className="min-w-0 flex-1">
-                  <p className="text-sm truncate">{imageName}</p>
-                  <p className="text-xs text-muted-foreground truncate">
-                    {task.task_image_path}
-                  </p>
-                </div>
+                <p className="text-sm truncate min-w-0 flex-1">{imageName}</p>
                 <Button variant="ghost" size="sm" onClick={handleImageRemove}>
                   <X className="h-4 w-4" />
                 </Button>
               </div>
+              {task.task_image_preview_url ? (
+                <img
+                  src={task.task_image_preview_url}
+                  alt="Превью задачи"
+                  className="w-full max-h-48 rounded-lg border object-contain bg-background"
+                />
+              ) : (
+                <div className="h-24 w-full rounded-lg border bg-background flex items-center justify-center">
+                  <ImageIcon className="h-5 w-5 text-muted-foreground" />
+                </div>
+              )}
               {task.task_image_used_fallback && (
                 <p className="text-xs text-amber-600 dark:text-amber-400">
                   Изображение загружено через резервный bucket.

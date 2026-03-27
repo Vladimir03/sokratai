@@ -73,22 +73,25 @@ function PickerTaskCard({
     return () => { cancelled = true; };
   }, [attachmentRefs]);
 
+  const isImageOnly = !task.text || task.text === '[Задача на фото]';
+
   return (
     <div
       className={cn(
-        'rounded-xl border bg-white p-3 transition-all duration-200',
+        'rounded-xl border bg-white p-3 transition-all duration-200 space-y-2',
         added
           ? 'border-socrat-primary/30 bg-socrat-primary/[0.03]'
           : 'border-socrat-border hover:border-socrat-primary/25',
       )}
     >
-      <div className="flex items-start gap-2">
+      {/* Header: checkbox + badge + KIM + button */}
+      <div className="flex items-center gap-2">
         {showCheckbox && !added && (
           <button
             type="button"
             onClick={onToggleSelect}
             className={cn(
-              'mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded border transition-colors',
+              'flex h-5 w-5 shrink-0 items-center justify-center rounded border transition-colors',
               selected
                 ? 'border-socrat-primary bg-socrat-primary text-white'
                 : 'border-gray-300 hover:border-socrat-primary/50',
@@ -98,36 +101,13 @@ function PickerTaskCard({
             {selected && <Check className="h-3 w-3" />}
           </button>
         )}
-
-        {/* Attachment thumbnail */}
-        {thumbUrl ? (
-          <img
-            src={thumbUrl}
-            alt=""
-            className="h-12 w-12 shrink-0 rounded border border-gray-200 object-cover bg-gray-50"
-          />
-        ) : attachmentRefs.length > 0 ? (
-          <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded border border-gray-200 bg-gray-50">
-            <ImageIcon className="h-4 w-4 text-muted-foreground" />
-          </div>
-        ) : null}
-
-        <div className="min-w-0 flex-1">
-          <div className="mb-1 flex items-center gap-1.5">
-            <SourceBadge source={source} />
-            {task.kim_number != null && (
-              <span className="text-[11px] text-muted-foreground">
-                КИМ №{task.kim_number}
-              </span>
-            )}
-          </div>
-          {task.text ? (
-            <MathText text={task.text} className="line-clamp-2 text-sm leading-snug text-gray-800" />
-          ) : (
-            <p className="text-sm text-gray-400">Без текста</p>
-          )}
-        </div>
-
+        <SourceBadge source={source} />
+        {task.kim_number != null && (
+          <span className="text-[11px] text-muted-foreground">
+            КИМ №{task.kim_number}
+          </span>
+        )}
+        <div className="flex-1" />
         <Button
           size="sm"
           variant={added ? 'ghost' : 'outline'}
@@ -151,6 +131,29 @@ function PickerTaskCard({
           )}
         </Button>
       </div>
+
+      {/* Task text */}
+      {!isImageOnly && task.text ? (
+        <MathText text={task.text} className="line-clamp-3 text-sm leading-snug text-gray-800" />
+      ) : !isImageOnly && (
+        <p className="text-sm text-gray-400">Без текста</p>
+      )}
+
+      {/* Full-width image below text */}
+      {thumbUrl ? (
+        <img
+          src={thumbUrl}
+          alt="Вложение к задаче"
+          className={cn(
+            'w-full rounded-xl border border-gray-200 bg-gray-50 object-contain',
+            isImageOnly ? 'max-h-64' : 'max-h-48',
+          )}
+        />
+      ) : attachmentRefs.length > 0 ? (
+        <div className="flex h-24 w-full items-center justify-center rounded-xl border border-gray-200 bg-gray-50">
+          <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+        </div>
+      ) : null}
     </div>
   );
 }
