@@ -1034,6 +1034,7 @@ export type Database = {
           correct_answer: string | null
           id: string
           max_score: number
+          ocr_text: string | null
           order_num: number
           rubric_text: string | null
           solution_steps: string | null
@@ -1045,6 +1046,7 @@ export type Database = {
           correct_answer?: string | null
           id?: string
           max_score?: number
+          ocr_text?: string | null
           order_num: number
           rubric_text?: string | null
           solution_steps?: string | null
@@ -1056,6 +1058,7 @@ export type Database = {
           correct_answer?: string | null
           id?: string
           max_score?: number
+          ocr_text?: string | null
           order_num?: number
           rubric_text?: string | null
           solution_steps?: string | null

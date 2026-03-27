@@ -51,6 +51,7 @@ import {
   checkAnswer,
   getStudentTaskImageSignedUrl,
   getStudentTaskImageSignedUrlViaBackend,
+  ocrTaskImage,
   requestHint,
   saveThreadMessage,
   uploadStudentThreadImage,
@@ -100,7 +101,7 @@ function buildTaskContext(
   currentTask: { order_num: number; task_text: string; task_image_url: string | null },
   totalTasks: number,
   sendMode: SendMode,
-  options?: { hasStudentImage?: boolean },
+  options?: { hasStudentImage?: boolean; ocrText?: string },
 ): string {
   const modeHint =
     sendMode === 'bootstrap'
@@ -126,9 +127,12 @@ function buildTaskContext(
     assignment.topic ? `Тема: ${assignment.topic}.` : null,
     `Задача ${currentTask.order_num} из ${totalTasks}.`,
     `Условие: ${currentTask.task_text}`,
-    hasImage && isMinimalText
+    options?.ocrText
+      ? `РАСПОЗНАННЫЙ ТЕКСТ С ИЗОБРАЖЕНИЯ (используй как эталон условия задачи — НЕ придумывай своё):\n${options.ocrText}`
+      : null,
+    hasImage && isMinimalText && !options?.ocrText
       ? 'ВАЖНО: Условие задачи полностью содержится на прикреплённом изображении. Внимательно прочитай текст и данные на изображении. НЕ придумывай условие — используй ТОЛЬКО то, что написано и нарисовано на картинке.'
-      : hasImage
+      : hasImage && !options?.ocrText
         ? 'К задаче прикреплено изображение с условием — оно передано отдельно.'
         : null,
     studentImageHint,
@@ -313,6 +317,7 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const messagesRef = useRef<HomeworkThreadMessage[]>([]);
   const bootstrapStartedRef = useRef<Set<string>>(new Set());
+  const ocrTextByTaskRef = useRef<Map<number, string>>(new Map());
 
   const {
     data: thread,
@@ -600,6 +605,7 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
         }),
         taskContext: buildTaskContext(assignment, task, assignment.tasks.length, sendMode, {
           hasStudentImage: resolvedStudentImageUrls.length > 0,
+          ocrText: ocrTextByTaskRef.current.get(taskOrder),
         }),
         taskImageUrl: resolvedTaskImageUrl ?? undefined,
         studentImageUrls: resolvedStudentImageUrls,
@@ -1098,6 +1104,22 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
       setIsStreaming(true);
       setStreamingContent('');
 
+      // Pre-OCR: run dedicated OCR on task image to get ground-truth text
+      let ocrText: string | undefined;
+      if (currentTask.task_image_url && !ocrTextByTaskRef.current.has(taskOrder)) {
+        try {
+          const ocrResult = await ocrTaskImage(assignment.id, currentTask.id);
+          if (ocrResult.recognized_text && ocrResult.recognized_text !== '[неразборчиво]') {
+            ocrText = ocrResult.recognized_text;
+            ocrTextByTaskRef.current.set(taskOrder, ocrText);
+          }
+        } catch (e) {
+          console.warn('Pre-OCR failed, falling back to vision-only:', e);
+        }
+      } else {
+        ocrText = ocrTextByTaskRef.current.get(taskOrder);
+      }
+
       // Resolve task image to signed URL for AI (if task has image)
       let bootstrapImageUrl: string | undefined;
       if (currentTask.task_image_url) {
@@ -1117,7 +1139,7 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
             },
           ],
           systemPrompt: buildGuidedSystemPrompt('bootstrap', { isBootstrap: true }),
-          taskContext: buildTaskContext(assignment, currentTask, assignment.tasks.length, 'bootstrap'),
+          taskContext: buildTaskContext(assignment, currentTask, assignment.tasks.length, 'bootstrap', { ocrText }),
           taskImageUrl: bootstrapImageUrl,
           onDelta: (delta) => {
             content += delta;
