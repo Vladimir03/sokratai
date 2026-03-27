@@ -702,8 +702,6 @@ async function setMyCommands() {
     { command: "menu", description: "Главное меню" },
     { command: "practice", description: "Тренажёр ЕГЭ" },
     { command: "diagnostic", description: "Диагностика уровня" },
-    { command: "homework", description: "Режим домашки" },
-    { command: "cancel", description: "Отмена текущего режима" },
     { command: "status", description: "Статус подписки" },
     { command: "help", description: "Справка" },
     { command: "pay", description: "Отметить оплату ученика (для репетиторов)" }
@@ -8198,31 +8196,23 @@ Deno.serve(async (req) => {
       });
     }
 
-    // Handle /homework command
+    // Handle /homework command — redirect to web app
     if (update.message?.text === "/homework") {
       const telegramUserId = update.message.from.id;
-      const session = await getOrRepairOnboardingSession(telegramUserId);
-
-      if (!session?.user_id) {
-        await sendTelegramMessage(telegramUserId, "❌ Сначала нажми /start, чтобы подготовить аккаунт.");
-      } else {
-        await handleHomeworkCommand(telegramUserId, session.user_id);
-      }
-
+      const baseUrl = Deno.env.get("PUBLIC_APP_URL") || "https://sokratai.lovable.app";
+      await sendTelegramMessage(
+        telegramUserId,
+        `📚 Домашние задания теперь доступны в личном кабинете на сайте.\n\n<a href="${baseUrl}/student/homework">Открыть домашку</a>`,
+      );
       return new Response(JSON.stringify({ ok: true }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
-    // Handle /cancel command
+    // Handle /cancel command — redirect to web app
     if (update.message?.text === "/cancel") {
       const telegramUserId = update.message.from.id;
-      const session = await getOrRepairOnboardingSession(telegramUserId);
-      const cancelUserId = session?.user_id
-        ? await resolveHomeworkUserId(telegramUserId, session.user_id)
-        : null;
-      await handleHomeworkCancelFlow(telegramUserId, cancelUserId);
-
+      await sendTelegramMessage(telegramUserId, "ℹ️ Режим домашки в боте больше не используется. Открой личный кабинет на сайте.");
       return new Response(JSON.stringify({ ok: true }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });

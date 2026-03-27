@@ -269,7 +269,9 @@ async function runReminders(): Promise<ReminderResult> {
 
       // Step 2: Try Telegram
       if (!delivered && hasTelegram) {
-        const text = `${emoji} <b>Напоминание о домашке!</b>\n\n«${assignment.title}» нужно сдать через <b>${hoursLabel}</b>.\n\nЕсли ещё не сдал, нажми /homework и отправь ответы сейчас!`;
+        const appUrl = Deno.env.get("PUBLIC_APP_URL") || "https://sokratai.lovable.app";
+        const hwLink = `${appUrl}/student/homework`;
+        const text = `${emoji} <b>Напоминание о домашке!</b>\n\n«${assignment.title}» нужно сдать через <b>${hoursLabel}</b>.\n\n<a href="${hwLink}">Открыть домашку</a>`;
         const ok = await sendTelegramMessage(chatId!, text);
         if (ok) {
           delivered = true;
