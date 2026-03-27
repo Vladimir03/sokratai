@@ -1,20 +1,23 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from "recharts";
 import { format, parseISO } from "date-fns";
 import { ru } from "date-fns/locale";
 
 interface ChartDataPoint {
   date: string;
   value: number;
+  students?: number;
+  tutors?: number;
 }
 
 interface AdminLineChartProps {
   title: string;
   data: ChartDataPoint[];
   color?: string;
+  multiLine?: boolean;
 }
 
-export const AdminLineChart = ({ title, data, color = "#8884d8" }: AdminLineChartProps) => {
+export const AdminLineChart = ({ title, data, color = "#8884d8", multiLine = false }: AdminLineChartProps) => {
   const formattedData = data.map(item => ({
     ...item,
     formattedDate: format(parseISO(item.date), "d MMM", { locale: ru }),
@@ -48,14 +51,38 @@ export const AdminLineChart = ({ title, data, color = "#8884d8" }: AdminLineChar
                 }}
                 labelStyle={{ color: "hsl(var(--foreground))" }}
               />
+              {multiLine && <Legend />}
               <Line
                 type="monotone"
                 dataKey="value"
+                name={multiLine ? "Всего" : undefined}
                 stroke={color}
                 strokeWidth={2}
                 dot={{ fill: color, strokeWidth: 2 }}
                 activeDot={{ r: 6, fill: color }}
               />
+              {multiLine && (
+                <>
+                  <Line
+                    type="monotone"
+                    dataKey="students"
+                    name="Ученики"
+                    stroke="#3b82f6"
+                    strokeWidth={2}
+                    dot={{ fill: "#3b82f6", strokeWidth: 2 }}
+                    activeDot={{ r: 5, fill: "#3b82f6" }}
+                  />
+                  <Line
+                    type="monotone"
+                    dataKey="tutors"
+                    name="Репетиторы"
+                    stroke="#f97316"
+                    strokeWidth={2}
+                    dot={{ fill: "#f97316", strokeWidth: 2 }}
+                    activeDot={{ r: 5, fill: "#f97316" }}
+                  />
+                </>
+              )}
             </LineChart>
           </ResponsiveContainer>
         </div>

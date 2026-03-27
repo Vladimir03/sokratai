@@ -3,7 +3,11 @@ import { Users, MessageSquare, UserCheck, TrendingUp } from "lucide-react";
 
 interface SummaryData {
   totalUsers: number;
+  totalTutors: number;
+  totalStudents: number;
   newUsers: number;
+  newTutors: number;
+  newStudents: number;
   totalMessages: number;
   activeUsersToday: number;
 }
@@ -17,6 +21,7 @@ export const AdminSummaryCards = ({ data }: AdminSummaryCardsProps) => {
     {
       title: "Всего пользователей",
       value: data.totalUsers,
+      sub: `${data.totalStudents} уч. / ${data.totalTutors} реп.`,
       icon: Users,
       color: "text-blue-500",
       bgColor: "bg-blue-50",
@@ -24,6 +29,7 @@ export const AdminSummaryCards = ({ data }: AdminSummaryCardsProps) => {
     {
       title: "Новых за период",
       value: data.newUsers,
+      sub: `${data.newStudents} уч. / ${data.newTutors} реп.`,
       icon: TrendingUp,
       color: "text-green-500",
       bgColor: "bg-green-50",
@@ -53,6 +59,9 @@ export const AdminSummaryCards = ({ data }: AdminSummaryCardsProps) => {
               <div>
                 <p className="text-sm text-muted-foreground">{card.title}</p>
                 <p className="text-3xl font-bold mt-1">{card.value.toLocaleString()}</p>
+                {"sub" in card && card.sub && (
+                  <p className="text-xs text-muted-foreground mt-1">{card.sub}</p>
+                )}
               </div>
               <div className={`p-3 rounded-full ${card.bgColor}`}>
                 <card.icon className={`w-6 h-6 ${card.color}`} />

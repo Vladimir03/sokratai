@@ -32,13 +32,17 @@ interface CohortRetentionData {
 interface AnalyticsData {
   summary: {
     totalUsers: number;
+    totalTutors: number;
+    totalStudents: number;
     newUsers: number;
+    newTutors: number;
+    newStudents: number;
     totalMessages: number;
     activeUsersToday: number;
   };
-  registrations: { date: string; value: number }[];
+  registrations: { date: string; value: number; students?: number; tutors?: number }[];
   messages: { date: string; value: number }[];
-  dau: { date: string; value: number }[];
+  wau: { date: string; value: number; students?: number; tutors?: number }[];
   cohortRetention: CohortRetentionData[];
   funnel: {
     registered: number;
