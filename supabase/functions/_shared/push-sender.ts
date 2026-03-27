@@ -102,7 +102,7 @@ async function createVapidJwt(
 
   // WebCrypto returns DER-encoded signature; VAPID needs raw r||s (64 bytes)
   const signature = derToRaw(new Uint8Array(signatureBuffer));
-  const signatureB64 = base64UrlEncode(signature.buffer);
+  const signatureB64 = base64UrlEncode(signature.buffer.slice(signature.byteOffset, signature.byteOffset + signature.byteLength) as ArrayBuffer);
 
   return `${unsignedToken}.${signatureB64}`;
 }
