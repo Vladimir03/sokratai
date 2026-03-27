@@ -10,7 +10,7 @@ import {
   Dices,
   Image as ImageIcon,
   X,
-  Paperclip,
+  
   ChevronDown,
   ChevronUp,
 } from 'lucide-react';
@@ -20,7 +20,7 @@ import {
   deleteTutorHomeworkTaskImage,
   parseStorageRef,
 } from '@/lib/tutorHomeworkApi';
-import { getKBImageSignedUrl } from '@/lib/kbApi';
+
 import { SourceBadge } from '@/components/kb/ui/SourceBadge';
 import { type DraftTask, MAX_IMAGE_SIZE_BYTES, IMAGE_REQUIREMENTS_HINT, revokeObjectUrl } from './types';
 
