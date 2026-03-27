@@ -101,7 +101,7 @@ function buildTaskContext(
   currentTask: { order_num: number; task_text: string; task_image_url: string | null },
   totalTasks: number,
   sendMode: SendMode,
-  options?: { hasStudentImage?: boolean },
+  options?: { hasStudentImage?: boolean; ocrText?: string },
 ): string {
   const modeHint =
     sendMode === 'bootstrap'
@@ -127,9 +127,12 @@ function buildTaskContext(
     assignment.topic ? `Тема: ${assignment.topic}.` : null,
     `Задача ${currentTask.order_num} из ${totalTasks}.`,
     `Условие: ${currentTask.task_text}`,
-    hasImage && isMinimalText
+    options?.ocrText
+      ? `РАСПОЗНАННЫЙ ТЕКСТ С ИЗОБРАЖЕНИЯ (используй как эталон условия задачи — НЕ придумывай своё):\n${options.ocrText}`
+      : null,
+    hasImage && isMinimalText && !options?.ocrText
       ? 'ВАЖНО: Условие задачи полностью содержится на прикреплённом изображении. Внимательно прочитай текст и данные на изображении. НЕ придумывай условие — используй ТОЛЬКО то, что написано и нарисовано на картинке.'
-      : hasImage
+      : hasImage && !options?.ocrText
         ? 'К задаче прикреплено изображение с условием — оно передано отдельно.'
         : null,
     studentImageHint,
