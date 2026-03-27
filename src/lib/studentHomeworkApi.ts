@@ -11,6 +11,23 @@ import type {
 } from '@/types/homework';
 import { serializeThreadAttachmentRefs } from '@/lib/homeworkThreadAttachments';
 
+export interface OcrTaskResult {
+  recognized_text: string;
+  confidence?: number;
+  has_formulas?: boolean;
+  cached: boolean;
+}
+
+export async function ocrTaskImage(
+  assignmentId: string,
+  taskId: string,
+): Promise<OcrTaskResult> {
+  return requestStudentHomeworkApi<OcrTaskResult>(
+    `/assignments/${assignmentId}/tasks/${taskId}/ocr`,
+    { method: 'POST' },
+  );
+}
+
 const HOMEWORK_IMAGES_BUCKET = 'homework-images';
 const HOMEWORK_SUBMISSIONS_BUCKET = 'homework-submissions';
 const HOMEWORK_TASK_IMAGES_BUCKET = 'homework-task-images';

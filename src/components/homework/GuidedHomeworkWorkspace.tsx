@@ -51,6 +51,7 @@ import {
   checkAnswer,
   getStudentTaskImageSignedUrl,
   getStudentTaskImageSignedUrlViaBackend,
+  ocrTaskImage,
   requestHint,
   saveThreadMessage,
   uploadStudentThreadImage,

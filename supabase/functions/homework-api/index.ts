@@ -1,5 +1,6 @@
 import { createClient, SupabaseClient } from "npm:@supabase/supabase-js@2";
 import { runHomeworkAiCheck } from "./ai_check.ts";
+import { recognizeHomeworkPhoto } from "./vision_checker.ts";
 import {
   computeAvailableScore,
   evaluateStudentAnswer,
@@ -2927,6 +2928,142 @@ async function handleTaskImageSignedUrl(
   return jsonOk(cors, { url: signedData.signedUrl });
 }
 
+// ─── Endpoint: POST /assignments/:id/tasks/:taskId/ocr ───────────────────────
+
+async function handleTaskOcr(
+  db: SupabaseClient,
+  userId: string,
+  assignmentId: string,
+  taskId: string,
+  cors: Record<string, string>,
+): Promise<Response> {
+  if (!isUUID(assignmentId) || !isUUID(taskId)) {
+    return jsonError(cors, 400, "INVALID_ID", "Invalid ID format");
+  }
+
+  // Access: student assigned to the assignment
+  const { data: sa } = await db
+    .from("homework_tutor_student_assignments")
+    .select("id")
+    .eq("assignment_id", assignmentId)
+    .eq("student_id", userId)
+    .maybeSingle();
+
+  if (!sa) {
+    // Also allow tutor
+    const { data: assignment } = await db
+      .from("homework_tutor_assignments")
+      .select("id, tutor_id, subject")
+      .eq("id", assignmentId)
+      .maybeSingle();
+    if (!assignment || assignment.tutor_id !== userId) {
+      return jsonError(cors, 403, "FORBIDDEN", "Not authorized");
+    }
+  }
+
+  // Get task
+  const { data: task } = await db
+    .from("homework_tutor_tasks")
+    .select("id, task_image_url, ocr_text, assignment_id")
+    .eq("id", taskId)
+    .eq("assignment_id", assignmentId)
+    .maybeSingle();
+
+  if (!task) {
+    return jsonError(cors, 404, "NOT_FOUND", "Task not found");
+  }
+
+  // Return cached result if available
+  if (task.ocr_text) {
+    return jsonOk(cors, { recognized_text: task.ocr_text, cached: true });
+  }
+
+  if (!task.task_image_url) {
+    return jsonError(cors, 400, "NO_IMAGE", "Task has no image");
+  }
+
+  // Resolve image to base64
+  const imageRef = task.task_image_url as string;
+  let imageBase64: string | null = null;
+
+  try {
+    let imageUrl: string;
+    if (imageRef.startsWith("http://") || imageRef.startsWith("https://")) {
+      imageUrl = imageRef;
+    } else if (imageRef.startsWith("storage://")) {
+      const rest = imageRef.slice("storage://".length);
+      const slashIdx = rest.indexOf("/");
+      if (slashIdx < 0) {
+        return jsonError(cors, 500, "INVALID_STORAGE_REF", "Cannot parse storage reference");
+      }
+      const bucket = rest.slice(0, slashIdx);
+      const objectPath = rest.slice(slashIdx + 1);
+      const { data: signedData, error: signedErr } = await db.storage
+        .from(bucket)
+        .createSignedUrl(objectPath, 600);
+      if (signedErr || !signedData?.signedUrl) {
+        return jsonError(cors, 500, "STORAGE_ERROR", "Failed to generate signed URL");
+      }
+      imageUrl = signedData.signedUrl;
+    } else {
+      const { data: signedData, error: signedErr } = await db.storage
+        .from("homework-task-images")
+        .createSignedUrl(imageRef, 600);
+      if (signedErr || !signedData?.signedUrl) {
+        return jsonError(cors, 500, "STORAGE_ERROR", "Failed to generate signed URL");
+      }
+      imageUrl = signedData.signedUrl;
+    }
+
+    // Download and convert to base64
+    const imgResp = await fetch(imageUrl);
+    if (!imgResp.ok) {
+      throw new Error(`Image fetch failed: ${imgResp.status}`);
+    }
+    const arrayBuf = await imgResp.arrayBuffer();
+    const bytes = new Uint8Array(arrayBuf);
+    let binary = "";
+    for (let i = 0; i < bytes.length; i++) {
+      binary += String.fromCharCode(bytes[i]);
+    }
+    imageBase64 = btoa(binary);
+  } catch (e) {
+    console.error("task_ocr_image_fetch_error", { taskId, error: String(e) });
+    return jsonError(cors, 500, "IMAGE_FETCH_ERROR", "Failed to fetch task image");
+  }
+
+  // Get subject from assignment
+  const { data: assignmentData } = await db
+    .from("homework_tutor_assignments")
+    .select("subject")
+    .eq("id", assignmentId)
+    .maybeSingle();
+  const subject = (assignmentData?.subject as string) ?? "math";
+
+  // Run OCR
+  try {
+    const result = await recognizeHomeworkPhoto(imageBase64, subject as any);
+
+    // Cache in DB (best-effort)
+    if (result.recognized_text && result.recognized_text !== "[неразборчиво]") {
+      await db
+        .from("homework_tutor_tasks")
+        .update({ ocr_text: result.recognized_text })
+        .eq("id", taskId);
+    }
+
+    return jsonOk(cors, {
+      recognized_text: result.recognized_text,
+      confidence: result.confidence,
+      has_formulas: result.has_formulas,
+      cached: false,
+    });
+  } catch (e) {
+    console.error("task_ocr_error", { taskId, error: String(e) });
+    return jsonError(cors, 500, "OCR_ERROR", "OCR failed");
+  }
+}
+
 // ─── Endpoint: GET /assignments/:id/attempts ─────────────────────────────────
 
 async function handleListAttempts(
@@ -4215,6 +4352,11 @@ Deno.serve(async (req: Request): Promise<Response> => {
     // GET /assignments/:id/tasks/:taskId/image-url (tutor + student)
     if (seg.length === 5 && seg[0] === "assignments" && seg[2] === "tasks" && seg[4] === "image-url" && route.method === "GET") {
       return await handleTaskImageSignedUrl(db, userId, seg[1], seg[3], cors);
+    }
+
+    // POST /assignments/:id/tasks/:taskId/ocr (student — pre-OCR task image)
+    if (seg.length === 5 && seg[0] === "assignments" && seg[2] === "tasks" && seg[4] === "ocr" && route.method === "POST") {
+      return await handleTaskOcr(db, userId, seg[1], seg[3], cors);
     }
 
     const tutorResult = await getTutorOrThrow(db, userId, cors);
