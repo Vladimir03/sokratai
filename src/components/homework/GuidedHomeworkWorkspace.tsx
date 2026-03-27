@@ -605,6 +605,7 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
         }),
         taskContext: buildTaskContext(assignment, task, assignment.tasks.length, sendMode, {
           hasStudentImage: resolvedStudentImageUrls.length > 0,
+          ocrText: ocrTextByTaskRef.current.get(taskOrder),
         }),
         taskImageUrl: resolvedTaskImageUrl ?? undefined,
         studentImageUrls: resolvedStudentImageUrls,
