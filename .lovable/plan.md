@@ -1,43 +1,61 @@
 
 
-## Fix: Chat empty space + Guided homework chat closing on answer
+## Fix: Homework notifications broken — `profiles.email` column doesn't exist
 
-### Problem 1 — Empty space in Chat header
-The Chat page uses `top-[110px] md:top-[104px]` for the fixed chat container, but Navigation is only `h-14` (56px). This creates ~54px of dead space visible in the screenshot. The sidebar also uses `top-[110px]`.
+### Root Cause
 
-**Fix**: Change `top-[110px]` → `top-14` (both mobile and desktop) in `src/pages/Chat.tsx`:
-- Line 1761: main chat container `top-[110px] md:top-[104px]` → `top-14`
-- Line 1778: mobile sidebar `top-[110px]` → `top-14`
+Both `homework-api/index.ts` (line 1264) and `homework-reminder/index.ts` (line 165) query `profiles.select("id, telegram_user_id, email")`, but the `profiles` table has **no `email` column**. This causes the PostgREST query to fail, returning an error that triggers `return jsonError(cors, 500, "DB_ERROR", ...)` — silently aborting the entire notify flow before any channel (push, telegram, email) is attempted.
 
-### Problem 2 — Chat closes when student submits answer
-In `GuidedHomeworkWorkspace.tsx`, when `syncThreadFromResponse` sets `threadStatus = 'completed'` (after all tasks done), the component immediately renders the "completed" card (line 1199), replacing the entire chat. The student loses the AI's last feedback message.
+This is why George shows "Не уведомлён" despite having a linked Telegram account.
 
-**Fix**: Instead of immediately switching to completed view, add a delay/confirmation:
-- Add `showCompletedView` state (default `false`)
-- When `threadStatus` becomes `'completed'`, don't immediately render the completed card — show the last task's messages with a "Результаты" button
-- Only switch to completed view when student clicks the button or after initial mount with `completed` status (returning user)
+### Fix options
 
-**Files to modify:**
-1. `src/pages/Chat.tsx` — fix `top-[110px]` → `top-14` (2 places)
-2. `src/components/homework/GuidedHomeworkWorkspace.tsx` — delay completed view transition
+**Option A (minimal fix — remove email from profiles query, get email from auth.users):**
+- Remove `email` from the `profiles` select
+- Use `dbService.auth.admin.listUsers()` or `getUserById()` to fetch emails from `auth.users` for the email cascade step
+- More complex, slower (N+1 or batch auth calls)
+
+**Option B (recommended — add `email` column to profiles):**
+- Add migration: `ALTER TABLE profiles ADD COLUMN email TEXT`
+- Populate from `auth.users` via a one-time backfill
+- Add trigger to keep in sync on auth user creation/update
+- Both edge functions work as-is after migration
+
+**Option C (quickest — split the query, gracefully handle missing email):**
+- Change `.select("id, telegram_user_id, email")` → `.select("id, telegram_user_id")` in both files
+- For email, use `dbService.auth.admin.listUsers()` filtered by student IDs, or query `auth.users` directly from service role
+- This unblocks push + telegram immediately
+
+### Recommended approach: Option C (quick unblock)
+
+This is a production-down bug. Fix it fast:
+
+1. **`homework-api/index.ts`** (line 1264): change select to `"id, telegram_user_id"`, then fetch emails separately via `auth.admin` for students who need email fallback
+2. **`homework-reminder/index.ts`** (line 165): same change
+3. **Deploy** both edge functions
+4. **Verify** by re-sending notification to George
 
 ### Technical details
 
-**Chat.tsx** (2 line changes):
-```
-// Line 1761
-- "fixed inset-0 top-[110px] md:top-[104px] flex flex-col"
-+ "fixed inset-0 top-14 flex flex-col"
+**homework-api/index.ts** changes (~lines 1262-1318):
+- `.select("id, telegram_user_id, email")` → `.select("id, telegram_user_id")`
+- After profiles query, fetch emails from `auth.users` via service-role client:
+  ```ts
+  // Fetch emails from auth for email cascade
+  for (const sid of studentIds) {
+    const { data } = await dbService.auth.admin.getUserById(sid);
+    if (data?.user?.email && !data.user.email.endsWith('@temp.sokratai.ru')) {
+      emailMap[sid] = data.user.email;
+    }
+  }
+  ```
+- Remove the `p.email` check from the profiles loop
 
-// Line 1778
-- 'fixed top-[110px] bottom-0 left-0 z-50 w-80 ...'
-+ 'fixed top-14 bottom-0 left-0 z-50 w-80 ...'
-```
+**homework-reminder/index.ts** (~line 165): identical fix
 
-**GuidedHomeworkWorkspace.tsx**:
-- New state: `const [showCompletedView, setShowCompletedView] = useState(false)`
-- Initialize to `true` if thread is already `completed` on first load (user returning)
-- On `syncThreadFromResponse`: when status transitions to `completed` during active session, keep `showCompletedView = false` so the chat stays visible with the last AI response
-- Replace the completed guard `if (threadStatus === 'completed')` with `if (threadStatus === 'completed' && showCompletedView)`
-- Add a prominent "Посмотреть результаты" button in the chat when `threadStatus === 'completed' && !showCompletedView`
+**Deploy**: `homework-api`, `homework-reminder`
+
+### Files to modify
+1. `supabase/functions/homework-api/index.ts` — fix profiles select + add auth email lookup
+2. `supabase/functions/homework-reminder/index.ts` — same fix
 
