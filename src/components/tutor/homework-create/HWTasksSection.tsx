@@ -4,18 +4,19 @@ import { Plus, Library } from 'lucide-react';
 import { toast } from 'sonner';
 import { deleteTutorHomeworkTaskImage } from '@/lib/tutorHomeworkApi';
 import type { KBTask } from '@/types/kb';
-import { parseAttachmentUrls } from '@/lib/kbApi';
+import { parseAttachmentUrls, getKBImageSignedUrl } from '@/lib/kbApi';
 import { KBPickerSheet } from '@/components/tutor/KBPickerSheet';
 import { HWTaskCard } from './HWTaskCard';
 import { type DraftTask, createEmptyTask, generateUUID, revokeObjectUrl } from './types';
 
 // Job: Быстро добавить задачу из базы в черновик ДЗ
 function kbTaskToDraftTask(task: KBTask): DraftTask {
+  const attachmentRef = parseAttachmentUrls(task.attachment_url)[0] ?? null;
   return {
     localId: generateUUID(),
     task_text: task.text,
-    task_image_path: null,
-    task_image_name: null,
+    task_image_path: attachmentRef,
+    task_image_name: attachmentRef?.split('/').pop() ?? null,
     task_image_preview_url: null,
     task_image_used_fallback: false,
     correct_answer: task.answer ?? '',
@@ -27,8 +28,12 @@ function kbTaskToDraftTask(task: KBTask): DraftTask {
     kb_snapshot_text: task.text,
     kb_snapshot_answer: task.answer ?? null,
     kb_snapshot_solution: task.solution ?? null,
-    kb_attachment_url: parseAttachmentUrls(task.attachment_url)[0] ?? null,
+    kb_attachment_url: attachmentRef,
   };
+}
+
+function isEmptyTask(t: DraftTask): boolean {
+  return !t.task_text.trim() && !t.task_image_path && !t.correct_answer.trim() && !t.kb_task_id;
 }
 
 export interface HWTasksSectionProps {
@@ -63,12 +68,25 @@ export function HWTasksSection({
   }, [tasks, onChange]);
 
   const handleAddFromKB = useCallback(
-    (kbTasks: KBTask[]) => {
+    async (kbTasks: KBTask[]) => {
       const newDrafts = kbTasks
         .filter((t) => !tasks.some((d) => d.kb_task_id === t.id))
         .map(kbTaskToDraftTask);
       if (newDrafts.length === 0) return;
-      onChange([...tasks, ...newDrafts]);
+
+      // Resolve signed URLs for KB attachments
+      await Promise.all(
+        newDrafts.map(async (draft) => {
+          if (draft.task_image_path) {
+            const url = await getKBImageSignedUrl(draft.task_image_path);
+            if (url) draft.task_image_preview_url = url;
+          }
+        }),
+      );
+
+      // Remove empty placeholder tasks
+      const kept = tasks.filter((t) => !isEmptyTask(t));
+      onChange([...kept, ...newDrafts]);
       toast.success(
         newDrafts.length === 1
           ? 'Задача добавлена в ДЗ'
