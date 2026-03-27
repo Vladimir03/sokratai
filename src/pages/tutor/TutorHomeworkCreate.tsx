@@ -95,7 +95,7 @@ function TutorHomeworkCreateContent() {
     topic: '',
     deadline: '',
     workflow_mode: 'guided_chat',
-    disable_ai_bootstrap: false,
+    disable_ai_bootstrap: true,
   });
 
   // Auto-generated title: «ДЗ {topic} {dd.MM}» — used when manual title is empty
@@ -347,7 +347,7 @@ function TutorHomeworkCreateContent() {
       meta.topic.trim().length > 0 ||
       meta.deadline.trim().length > 0 ||
       meta.workflow_mode !== 'guided_chat' ||
-      (meta.disable_ai_bootstrap ?? false);
+      !(meta.disable_ai_bootstrap ?? true);
 
     const tasksDirty =
       tasks.length !== 1 ||
@@ -787,7 +787,7 @@ function TutorHomeworkCreateContent() {
       setSelectedStudentIds(new Set());
     }
 
-    setMeta({ title: '', subject: 'physics', topic: '', deadline: '', workflow_mode: 'guided_chat', disable_ai_bootstrap: false });
+    setMeta({ title: '', subject: 'physics', topic: '', deadline: '', workflow_mode: 'guided_chat', disable_ai_bootstrap: true });
     setTasks([createEmptyTask()]);
     setMaterials([]);
     setNotifyEnabled(true);
@@ -994,7 +994,7 @@ function TutorHomeworkCreateContent() {
             {showAdvanced ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
             {showAdvanced ? 'Скрыть параметры' : 'Расширенные параметры'}
             {/* Dot indicator: show when L1 has user data but collapsed */}
-            {!showAdvanced && (meta.title.trim() || meta.deadline.trim() || meta.workflow_mode !== 'guided_chat' || meta.disable_ai_bootstrap || materials.length > 0) && (
+            {!showAdvanced && (meta.title.trim() || meta.deadline.trim() || meta.workflow_mode !== 'guided_chat' || !(meta.disable_ai_bootstrap ?? true) || materials.length > 0) && (
               <span className="inline-block w-2 h-2 rounded-full bg-primary" />
             )}
           </button>
