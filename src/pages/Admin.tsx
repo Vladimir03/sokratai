@@ -32,13 +32,17 @@ interface CohortRetentionData {
 interface AnalyticsData {
   summary: {
     totalUsers: number;
+    totalTutors: number;
+    totalStudents: number;
     newUsers: number;
+    newTutors: number;
+    newStudents: number;
     totalMessages: number;
     activeUsersToday: number;
   };
-  registrations: { date: string; value: number }[];
+  registrations: { date: string; value: number; students?: number; tutors?: number }[];
   messages: { date: string; value: number }[];
-  dau: { date: string; value: number }[];
+  wau: { date: string; value: number; students?: number; tutors?: number }[];
   cohortRetention: CohortRetentionData[];
   funnel: {
     registered: number;
@@ -259,6 +263,7 @@ const Admin = () => {
                     title="Регистрации"
                     data={analytics.registrations}
                     color="#22c55e"
+                    multiLine
                   />
                   <AdminLineChart
                     title="Сообщения"
@@ -270,9 +275,10 @@ const Admin = () => {
                 {/* Charts Row 2 */}
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                   <AdminLineChart
-                    title="DAU (активные пользователи)"
-                    data={analytics.dau}
+                    title="WAU (активные за неделю)"
+                    data={analytics.wau}
                     color="#3b82f6"
+                    multiLine
                   />
                   <AdminRetentionCards cohortRetention={analytics.cohortRetention} />
                 </div>
