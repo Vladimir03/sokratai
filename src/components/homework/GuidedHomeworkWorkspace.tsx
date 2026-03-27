@@ -310,6 +310,7 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const messagesContainerRef = useRef<HTMLDivElement>(null);
   const messagesRef = useRef<HomeworkThreadMessage[]>([]);
   const bootstrapStartedRef = useRef<Set<string>>(new Set());
 
@@ -375,8 +376,9 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
 
   // Auto-scroll to bottom when messages change
   useEffect(() => {
-    if (messagesEndRef.current) {
-      messagesEndRef.current.scrollIntoView({ behavior: 'smooth' });
+    const container = messagesContainerRef.current;
+    if (container) {
+      container.scrollTo({ top: container.scrollHeight, behavior: 'smooth' });
     }
   }, [messages, currentTaskOrder, streamingContent]);
 
@@ -1337,7 +1339,7 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
         </div>
       )}
 
-      <div className="flex-1 overflow-y-auto px-4 py-4 min-h-0">
+      <div ref={messagesContainerRef} className="flex-1 overflow-y-auto px-4 py-4 min-h-0">
         {visibleMessages.length === 0 && !isStreaming && (
           <div className="text-center text-sm text-muted-foreground py-8 space-y-1">
             <p>Отправьте ответ по задаче или запросите подсказку.</p>
