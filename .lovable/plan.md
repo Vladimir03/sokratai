@@ -1,41 +1,50 @@
+## Add Student/Tutor breakdown to Admin analytics
 
+### What changes
 
-## Fix: Chat area collapses to zero after sending a message
+**1. Summary cards** — first two cards ("Всего пользователей", "Новых за период") get sub-labels showing student/tutor split (e.g. "265" with "250 уч. / 15 реп." underneath).
 
-### Root cause
+**2. Charts** — "Регистрации" and "DAU → WAU" get multi-line breakdown:
 
-`GuidedHomeworkWorkspace.tsx` line 377-381 uses `messagesEndRef.current.scrollIntoView({ behavior: 'smooth' })` to auto-scroll after messages update. 
+- Rename DAU to WAU (Weekly Active Users) — count unique users with activity in weeks (2026-03-23 etc in monday weeks)
+- Both charts show 3 lines: Total, Students, Tutors
 
-`scrollIntoView` scrolls **all** scrollable ancestors — not just the immediate `overflow-y-auto` container. The fixed overlay sits inside AuthGuard's wrapper `<div className="pt-14 pb-20">`, which is a normal-flow block that CAN scroll. When `scrollIntoView` fires, it pushes the AuthGuard wrapper out of view, creating the white void below the navigation bar. The fixed overlay stays positioned correctly, but its parent content has scrolled away, causing the visual collapse.
+### Backend changes
 
-### Fix
+**File: `supabase/functions/admin-analytics/index.ts**`
 
-**File: `src/components/homework/GuidedHomeworkWorkspace.tsx`**
+1. Query `user_roles WHERE role = 'tutor'` to get set of tutor user IDs
+2. Add to `summary`:
+  - `totalTutors` / `totalStudents` (total users minus tutors)
+  - `newTutors` / `newStudents` (new registrations split)
+3. Add to chart data:
+  - `registrations` → each day gets `{ date, value, students, tutors }`
+  - Replace `dau` with `wau` → each day: count unique users with activity in weeks (2026-03-23 etc in monday weeks), split by student/tutor
+4. WAU calculation: 
 
-1. **Add a ref to the messages scroll container** (the `flex-1 overflow-y-auto` div at line 1340):
-   ```tsx
-   const messagesContainerRef = useRef<HTMLDivElement>(null);
-   ```
+### Frontend changes
 
-2. **Replace `scrollIntoView` with direct container scroll** (line 377-381):
-   ```tsx
-   useEffect(() => {
-     const container = messagesContainerRef.current;
-     if (container) {
-       container.scrollTo({ top: container.scrollHeight, behavior: 'smooth' });
-     }
-   }, [messages, currentTaskOrder, streamingContent]);
-   ```
-   This scrolls only the messages container, never ancestors.
+**File: `src/components/admin/AdminSummaryCards.tsx**`
 
-3. **Attach the ref** to the messages div:
-   ```tsx
-   <div ref={messagesContainerRef} className="flex-1 overflow-y-auto px-4 py-4 min-h-0">
-   ```
+- Add optional `sub` field to card config (e.g. "250 уч. / 15 реп.")
+- Render sub-label below the main value in smaller muted text
+- Props: `SummaryData` gets `totalTutors`, `totalStudents`, `newTutors`, `newStudents`
 
-4. **Keep `messagesEndRef`** only as the scroll sentinel inside the container (no changes needed to the `<div ref={messagesEndRef} />` at line 1378).
+**File: `src/components/admin/AdminLineChart.tsx**`
 
-### Why this fixes it
+- Support optional `students` and `tutors` data keys alongside `value`
+- When present, render 3 lines (total=main color, students=blue, tutors=orange) with legend
+- Props: add optional `multiLine?: boolean` flag
 
-`container.scrollTo()` operates on the element itself — it cannot scroll ancestors. The AuthGuard wrapper stays at scroll position 0, and the chat messages scroll correctly within their container.
+**File: `src/pages/Admin.tsx**`
 
+- Update `AnalyticsData` interface: summary gets tutor/student counts, `dau` → `wau`, chart data points get `students?`/`tutors?` fields
+- Rename DAU chart title to "WAU (активные за неделю)"
+- Pass `multiLine` prop to registrations and WAU charts
+
+### Files modified
+
+- `supabase/functions/admin-analytics/index.ts` — tutor set query, summary split, WAU calc, chart split
+- `src/components/admin/AdminSummaryCards.tsx` — sub-label rendering
+- `src/components/admin/AdminLineChart.tsx` — multi-line support
+- `src/pages/Admin.tsx` — updated types and chart config
