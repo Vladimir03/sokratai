@@ -1,37 +1,30 @@
-## Plan: Remove /homework from Telegram bot + update notification messages
+## Diagnosis: `disable_ai_bootstrap` not saved to DB
 
-### What's changing
+### Root cause
 
-The `/homework` command in the Telegram bot is being removed because students now do homework through the web app, not the bot. The bot should direct students to the web link instead.
+The assignment "Налоги" (`82145896`) was created at `2026-03-27T13:39:03Z` with `disable_ai_bootstrap: false` in the DB, despite the user toggling it OFF in the UI.
 
-### Changes
+**The frontend code and backend code are both correct.** The toggle logic works properly:
 
-**1. `supabase/functions/telegram-bot/index.ts**`
+- Toggle OFF → `disable_ai_bootstrap: true` in state → sent in POST body → backend writes `b.disable_ai_bootstrap === true`
 
-- Remove `{ command: "homework", description: "Режим домашки" }` from `setMyCommands()` (line 705)
-- Remove the `/homework` command handler block (~line 8201-8210) — respond with a message redirecting to web app instead, or just ignore
-- Keep the homework state machine imports and handlers for now (they handle callback flows from old messages) — but the `/homework` entry point is removed
-- Remove `{ command: "cancel", description: "Отмена текущего режима" }` from menu (it was only relevant for homework mode)
+**Most likely cause**: the `homework-api` edge function was not yet deployed with the `disable_ai_bootstrap` code when the assignment was created. The migration added the column (default `false`), but the edge function still running the old code would ignore the `disable_ai_bootstrap` field in the request body, resulting in the DB default `false`.
 
-**2. `supabase/functions/homework-api/index.ts**` (line 1357)
+### Fix
 
-- Update `defaultMessage` — remove any reference to `/homework`. Current message already uses a web link (`<a href="...">Открыть ДЗ</a>`), which is correct. No change needed here.
+1. **Redeploy `homework-api**` edge function to ensure the latest code is live
+2. **Manually fix the existing assignment** via SQL: `UPDATE homework_tutor_assignments SET disable_ai_bootstrap = true WHERE id = '82145896-0476-4698-9a5a-bb715abb307a'`
+3. **Test end-to-end**: create a new assignment with AI bootstrap disabled, verify DB value is `true`, verify student sees no intro messages.  
+также сделай по дефолту выключенный тоггл AI вступления
 
-**3. `supabase/functions/homework-reminder/index.ts**` (line 272)
+### Files changed
 
-- Change Telegram reminder text: replace `нажми /homework и отправь ответы сейчас!` with a web link to the homework
+None — this is a deployment issue, not a code bug.
 
-**4. `src/components/tutor/homework-create/HWAssignSection.tsx**` (line 339)
+### Technical details
 
-- Update placeholder from `"Новая домашка! Используй /homework чтобы начать."` to something like `"Новая домашка! Открой ссылку выше, чтобы начать."`
-
-**5. Deploy**
-
-- Deploy `telegram-bot` and `homework-reminder` edge functions
-- Trigger `?action=set_commands` on the bot to refresh the Telegram menu
-
-### Not changing
-
-- Homework handler code (`homework/state_machine.ts`, `homework/homework_handler.ts`) — kept for backward compatibility with any in-progress sessions
-- `homework-api/index.ts` default message — already uses web link, no `/homework` reference
-- Push/email notification templates — no `/homework` references
+- Column exists: `disable_ai_bootstrap boolean NOT NULL DEFAULT false` ✓
+- Backend code (line 377): `disable_ai_bootstrap: b.disable_ai_bootstrap === true` ✓
+- Frontend sends: `disable_ai_bootstrap: meta.disable_ai_bootstrap ?? false` ✓
+- Toggle logic: `checked={!(meta.disable_ai_bootstrap ?? false)}`, `onCheckedChange={(checked) => onChange({ ...meta, disable_ai_bootstrap: !checked })}` ✓
+- Student guard (line 1088): `if (assignment.disable_ai_bootstrap) { skip bootstrap }` ✓
