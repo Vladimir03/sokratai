@@ -1201,7 +1201,7 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
   }
 
   // Completed state
-  if (threadStatus === 'completed') {
+  if (threadStatus === 'completed' && showCompletedView) {
     const completedCount = taskStates.filter((s) => s.status === 'completed').length;
     const totalEarned = taskStates.reduce((sum, s) => sum + (s.earned_score ?? 0), 0);
     const totalMax = assignment.tasks.reduce((sum, t) => sum + t.max_score, 0);
