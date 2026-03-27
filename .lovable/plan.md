@@ -1,30 +1,33 @@
-## Diagnosis: `disable_ai_bootstrap` not saved to DB
 
-### Root cause
 
-The assignment "Налоги" (`82145896`) was created at `2026-03-27T13:39:03Z` with `disable_ai_bootstrap: false` in the DB, despite the user toggling it OFF in the UI.
+## Plan: KB Picker wider + image thumbnails; HWTaskCard image preview
 
-**The frontend code and backend code are both correct.** The toggle logic works properly:
+Two issues:
+1. KB Picker Sheet is too narrow (460px ≈ 25% of screen) — widen to ~75%
+2. PickerTaskCard doesn't show image thumbnails for tasks with attachments
+3. HWTaskCard doesn't show image preview when task has `kb_attachment_url` but no uploaded image (shows only amber badge text)
 
-- Toggle OFF → `disable_ai_bootstrap: true` in state → sent in POST body → backend writes `b.disable_ai_bootstrap === true`
+### Changes
 
-**Most likely cause**: the `homework-api` edge function was not yet deployed with the `disable_ai_bootstrap` code when the assignment was created. The migration added the column (default `false`), but the edge function still running the old code would ignore the `disable_ai_bootstrap` field in the request body, resulting in the DB default `false`.
+**1. `src/components/tutor/KBPickerSheet.tsx`**
 
-### Fix
+- Change Sheet width from `w-[460px]` to `w-[75vw] max-w-[900px]` (line 573)
+- In `PickerTaskCard`: add image thumbnail next to task text
+  - Parse `task.attachment_url` via `parseAttachmentUrls`
+  - Resolve first ref to signed URL via `getKBImageSignedUrl` (same pattern as `TaskCard.tsx`)
+  - Show small thumbnail (48×48 or 64×64) with `object-cover rounded` styling
+  - Only load when attachment exists (lazy, same `useEffect` pattern as TaskCard)
 
-1. **Redeploy `homework-api**` edge function to ensure the latest code is live
-2. **Manually fix the existing assignment** via SQL: `UPDATE homework_tutor_assignments SET disable_ai_bootstrap = true WHERE id = '82145896-0476-4698-9a5a-bb715abb307a'`
-3. **Test end-to-end**: create a new assignment with AI bootstrap disabled, verify DB value is `true`, verify student sees no intro messages.  
-также сделай по дефолту выключенный тоггл AI вступления
+**2. `src/components/tutor/homework-create/HWTaskCard.tsx`**
 
-### Files changed
-
-None — this is a deployment issue, not a code bug.
+- When task has `kb_attachment_url` but no `task_image_path` (no uploaded image): resolve `kb_attachment_url` to signed URL and show a small preview thumbnail instead of just the amber text badge
+  - Use `getKBImageSignedUrl` from `kbApi.ts` to resolve `storage://` → signed URL
+  - Show thumbnail (48×48) in the image section area, with the existing amber badge text
 
 ### Technical details
 
-- Column exists: `disable_ai_bootstrap boolean NOT NULL DEFAULT false` ✓
-- Backend code (line 377): `disable_ai_bootstrap: b.disable_ai_bootstrap === true` ✓
-- Frontend sends: `disable_ai_bootstrap: meta.disable_ai_bootstrap ?? false` ✓
-- Toggle logic: `checked={!(meta.disable_ai_bootstrap ?? false)}`, `onCheckedChange={(checked) => onChange({ ...meta, disable_ai_bootstrap: !checked })}` ✓
-- Student guard (line 1088): `if (assignment.disable_ai_bootstrap) { skip bootstrap }` ✓
+- `getKBImageSignedUrl(ref: string): Promise<string | null>` already exists in `src/lib/kbApi.ts`
+- `parseAttachmentUrls` handles both single refs and JSON arrays
+- Signed URLs are cached by the function internally
+- Image loading uses the standard `useEffect` + cancelled flag pattern from `TaskCard.tsx`
+
