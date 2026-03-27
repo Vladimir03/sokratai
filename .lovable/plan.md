@@ -1,32 +1,18 @@
 
 
-## Fix: Image previews missing in edit mode
+## Fix: `hw_reorder_tasks` function missing from database
 
 ### Root cause
 
-In `TutorHomeworkCreate.tsx` (lines 188-201), the edit prefill sets `task_image_path` from the DB (`t.task_image_url`, which is a `storage://` ref), but never resolves it to a signed HTTP URL for `task_image_preview_url`. Without a preview URL, `HWTaskCard` shows only the file name and a generic icon — no actual image.
+The migration `20260319100000_hw_reorder_tasks_atomic.sql` exists in the repo but was never applied to the production database. When the PUT handler tries to call `hw_reorder_tasks` RPC, it fails with "Could not find the function in the schema cache" → 500.
 
 ### Fix
 
-**`src/pages/tutor/TutorHomeworkCreate.tsx`** — after setting tasks in the edit prefill `useEffect`, resolve `task_image_path` → signed URL for each task:
+Apply the migration to create the `hw_reorder_tasks` PL/pgSQL function. The SQL is already written and correct in `supabase/migrations/20260319100000_hw_reorder_tasks_atomic.sql`. We need to run it as a new migration since the old one was apparently skipped.
 
-```typescript
-// After setTasks(...) in the edit prefill useEffect:
-// Resolve storage:// refs to signed preview URLs
-const resolvedTasks = [...newTasks]; // the tasks array just set
-Promise.all(
-  resolvedTasks.map(async (t, i) => {
-    if (t.task_image_path) {
-      const url = await getHomeworkImageSignedUrl(t.task_image_path);
-      if (url) resolvedTasks[i] = { ...resolvedTasks[i], task_image_preview_url: url };
-    }
-  })
-).then(() => setTasks([...resolvedTasks]));
-```
+**New migration**: Create `hw_reorder_tasks(UUID, JSONB)` function — same content as the existing migration file. This is a `SECURITY DEFINER` function granted only to `service_role`.
 
-Import `getHomeworkImageSignedUrl` from `@/lib/tutorHomeworkApi` (already partially imported).
+### Also: image preview issue
 
-### Result
-
-Edit mode will show full image previews (48×48 thumbnails) for all tasks with `storage://` image refs, identical to newly uploaded images.
+The screenshot shows no image preview for the second task (which has `task_image_url: storage://kb-attachments/demidova2025/z1_25.svg`). This was addressed in the previous fix (resolving `task_image_path` → signed URL in edit prefill). If it's still not working, it may be because the `getHomeworkImageSignedUrl` function doesn't handle `storage://kb-attachments/...` paths (different bucket). Will verify after the reorder fix.
 
