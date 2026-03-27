@@ -1,32 +1,47 @@
 
 
-## Fix: Build error in `claim-invite/index.ts`
+## Plan: Fix Build Errors + Configure Push & Email Infrastructure
 
-### Problem
-Build fails with TS2345 in `claim-invite/index.ts`:
-- Line 32: `ReturnType<typeof createClient>` creates a strict generic type that doesn't match the actual client instance
-- Line 139: passing `supabaseAdmin` to that function triggers the type mismatch
+### Part 1 — Fix Build Errors (3 files)
 
-This is a **pre-existing typing issue** unrelated to the recent telegram-bot commits. The Deno type checker in Lovable's build is stricter than what was used when this file was committed via GitHub.
+**1. `supabase/functions/process-email-queue/index.ts`** — 7 TS errors
+- Change `moveToDlq` parameter type from `ReturnType<typeof createClient>` to `any` (same pattern as claim-invite fix)
+- Add explicit `any` type annotations on `.map((msg: any)` and `.filter((id: any)` lambdas
+- All `supabase` argument mismatches resolve from the `any` parameter fix
 
-### Fix (1 file, 1 line change)
+**2. `supabase/functions/tutor-manual-add-student/index.ts`** — 2 TS errors
+- `getUserByEmail` doesn't exist on the Supabase auth admin API. Replace with `listUsers({ filter: email })` pattern or use `supabase.from('auth.users')` query. The correct Supabase approach: use `supabase.auth.admin.listUsers()` with filter, or query profiles table by email first, then `getUserById`.
 
-**`supabase/functions/claim-invite/index.ts`** — line 32:
-```typescript
-// Before:
-supabaseAdmin: ReturnType<typeof createClient>,
+**3. `src/lib/pushApi.ts`** — 1 TS error (Uint8Array assignability)
+- Add `as BufferSource` assertion on the return of `urlBase64ToUint8Array`, or change return type to use `new Uint8Array(...) as unknown as BufferSource`
 
-// After:
-supabaseAdmin: any,
-```
+### Part 2 — VAPID Keys for Web Push
 
-Using `any` for an internal helper parameter is safe here — the function is private, called once, and the Supabase client API is stable.
+Generate VAPID keys and configure:
+- Add secret `VAPID_PUBLIC_KEY` (edge function)
+- Add secret `VAPID_PRIVATE_KEY` (edge function)  
+- Add secret `VAPID_SUBJECT` = `mailto:support@sokratai.ru` (edge function)
+- Add secret `VITE_VAPID_PUBLIC_KEY` (frontend env — same public key)
 
-### What the recent commits changed (no Lovable action needed)
-The last 4 commits added:
-1. `compactHistoryForTelegram()` + `fetchChatWithTimeout()` in `telegram-bot/index.ts` — **already deployed** via `supabase--deploy_edge_functions`
-2. Telegram messages sent to @Dawsik11 and @Analyst_Vladimir — **done**
-3. `.lovable/plan.md` updated — cosmetic
+User will need to generate keys via `npx web-push generate-vapid-keys` and paste them.
 
-**Only the `claim-invite` type fix is needed to unblock the build.**
+### Part 3 — Email Secrets
+
+- Add secret `PUBLIC_APP_URL` = `https://sokratai.ru`
+- `LOVABLE_API_KEY` already exists ✅
+
+### Part 4 — Deploy Edge Functions
+
+Deploy: `push-subscribe`, `process-email-queue`
+
+### Part 5 — Email Infrastructure Verification
+
+Email domain `notify.sokratai.ru` is verified ✅. Verify cron job exists for `process-email-queue` (was set up by `setup_email_infra` earlier). If missing, re-run `setup_email_infra`.
+
+### Execution Order
+
+1. Fix 3 build errors (parallel file edits)
+2. Add secrets (VAPID keys — requires user input)
+3. Deploy edge functions
+4. Verify cron job
 
