@@ -95,7 +95,7 @@ function TutorHomeworkCreateContent() {
     topic: '',
     deadline: '',
     workflow_mode: 'guided_chat',
-    disable_ai_bootstrap: false,
+    disable_ai_bootstrap: true,
   });
 
   // Auto-generated title: «ДЗ {topic} {dd.MM}» — used when manual title is empty
@@ -787,7 +787,7 @@ function TutorHomeworkCreateContent() {
       setSelectedStudentIds(new Set());
     }
 
-    setMeta({ title: '', subject: 'physics', topic: '', deadline: '', workflow_mode: 'guided_chat', disable_ai_bootstrap: false });
+    setMeta({ title: '', subject: 'physics', topic: '', deadline: '', workflow_mode: 'guided_chat', disable_ai_bootstrap: true });
     setTasks([createEmptyTask()]);
     setMaterials([]);
     setNotifyEnabled(true);
