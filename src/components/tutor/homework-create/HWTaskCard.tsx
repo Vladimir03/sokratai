@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback } from 'react';
+import { useState, useRef, useCallback, useEffect } from 'react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -20,6 +20,7 @@ import {
   deleteTutorHomeworkTaskImage,
   parseStorageRef,
 } from '@/lib/tutorHomeworkApi';
+import { getKBImageSignedUrl } from '@/lib/kbApi';
 import { SourceBadge } from '@/components/kb/ui/SourceBadge';
 import { type DraftTask, MAX_IMAGE_SIZE_BYTES, IMAGE_REQUIREMENTS_HINT, revokeObjectUrl } from './types';
 
@@ -212,10 +213,7 @@ export function HWTaskCard({ task, index, onUpdate, onRemove, canRemove, onDefer
               <SourceBadge source={task.kb_source} />
             )}
             {task.kb_attachment_url && !task.task_image_path && (
-              <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-700">
-                <Paperclip className="h-3 w-3" />
-                Есть изображение в базе
-              </span>
+              <KBAttachmentBadge storageRef={task.kb_attachment_url} />
             )}
           </div>
           {canRemove && (

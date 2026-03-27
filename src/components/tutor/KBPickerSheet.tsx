@@ -5,6 +5,7 @@ import {
   Check,
   ChevronRight,
   Folder,
+  Image as ImageIcon,
   Library,
   Loader2,
   Plus,
@@ -21,6 +22,7 @@ import { SourceBadge } from '@/components/kb/ui/SourceBadge';
 import { cn } from '@/lib/utils';
 import { useTopics, useCatalogTasks, useSubtopics } from '@/hooks/useKnowledgeBase';
 import { useRootFolders, useFolder } from '@/hooks/useFolders';
+import { getKBImageSignedUrl, parseAttachmentUrls } from '@/lib/kbApi';
 import type { KBTask, KBTopicWithCounts, KBFolderWithCounts } from '@/types/kb';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -55,6 +57,22 @@ function PickerTaskCard({
 }) {
   const source = task.owner_id ? 'my' : 'socrat';
 
+  // Resolve attachment thumbnail
+  const attachmentRefs = useMemo(
+    () => parseAttachmentUrls(task.attachment_url),
+    [task.attachment_url],
+  );
+  const [thumbUrl, setThumbUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!attachmentRefs.length) return;
+    let cancelled = false;
+    getKBImageSignedUrl(attachmentRefs[0]).then((url) => {
+      if (!cancelled) setThumbUrl(url);
+    });
+    return () => { cancelled = true; };
+  }, [attachmentRefs]);
+
   return (
     <div
       className={cn(
@@ -80,6 +98,19 @@ function PickerTaskCard({
             {selected && <Check className="h-3 w-3" />}
           </button>
         )}
+
+        {/* Attachment thumbnail */}
+        {thumbUrl ? (
+          <img
+            src={thumbUrl}
+            alt=""
+            className="h-12 w-12 shrink-0 rounded border border-gray-200 object-cover bg-gray-50"
+          />
+        ) : attachmentRefs.length > 0 ? (
+          <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded border border-gray-200 bg-gray-50">
+            <ImageIcon className="h-4 w-4 text-muted-foreground" />
+          </div>
+        ) : null}
 
         <div className="min-w-0 flex-1">
           <div className="mb-1 flex items-center gap-1.5">
@@ -570,7 +601,7 @@ export function KBPickerSheet({
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent
         side="right"
-        className="flex w-[460px] max-w-[90vw] flex-col gap-0 p-0"
+        className="flex w-[75vw] max-w-[900px] flex-col gap-0 p-0"
       >
         <SheetHeader className="border-b px-4 pb-3 pt-4">
           <SheetTitle className="flex items-center gap-2 text-base">
