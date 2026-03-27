@@ -214,9 +214,6 @@ export function HWTaskCard({ task, index, onUpdate, onRemove, canRemove, onDefer
             {task.kb_source && (
               <SourceBadge source={task.kb_source} />
             )}
-            {task.kb_attachment_url && !task.task_image_path && (
-              <KBAttachmentBadge storageRef={task.kb_attachment_url} />
-            )}
           </div>
           {canRemove && (
             <Button variant="ghost" size="sm" onClick={onRemove}>

@@ -68,12 +68,25 @@ export function HWTasksSection({
   }, [tasks, onChange]);
 
   const handleAddFromKB = useCallback(
-    (kbTasks: KBTask[]) => {
+    async (kbTasks: KBTask[]) => {
       const newDrafts = kbTasks
         .filter((t) => !tasks.some((d) => d.kb_task_id === t.id))
         .map(kbTaskToDraftTask);
       if (newDrafts.length === 0) return;
-      onChange([...tasks, ...newDrafts]);
+
+      // Resolve signed URLs for KB attachments
+      await Promise.all(
+        newDrafts.map(async (draft) => {
+          if (draft.task_image_path) {
+            const url = await getKBImageSignedUrl(draft.task_image_path);
+            if (url) draft.task_image_preview_url = url;
+          }
+        }),
+      );
+
+      // Remove empty placeholder tasks
+      const kept = tasks.filter((t) => !isEmptyTask(t));
+      onChange([...kept, ...newDrafts]);
       toast.success(
         newDrafts.length === 1
           ? 'Задача добавлена в ДЗ'
