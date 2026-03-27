@@ -162,15 +162,24 @@ async function runReminders(): Promise<ReminderResult> {
 
     const { data: profiles } = await db
       .from("profiles")
-      .select("id, telegram_user_id, email")
+      .select("id, telegram_user_id")
       .in("id", toNotifyIds);
 
     const profileTgMap: Record<string, number> = {};
-    const emailMap: Record<string, string> = {};
     for (const p of profiles ?? []) {
       if (p.telegram_user_id) profileTgMap[p.id as string] = p.telegram_user_id as number;
-      if (p.email && !String(p.email).endsWith("@temp.sokratai.ru")) {
-        emailMap[p.id as string] = p.email as string;
+    }
+
+    // Fetch emails from auth.users (profiles table has no email column)
+    const emailMap: Record<string, string> = {};
+    for (const sid of toNotifyIds) {
+      try {
+        const { data } = await db.auth.admin.getUserById(sid);
+        if (data?.user?.email && !data.user.email.endsWith("@temp.sokratai.ru")) {
+          emailMap[sid] = data.user.email;
+        }
+      } catch {
+        // Skip
       }
     }
 

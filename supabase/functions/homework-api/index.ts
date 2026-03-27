@@ -1261,7 +1261,7 @@ async function handleNotifyStudents(
 
   const { data: profiles, error: profilesError } = await db
     .from("profiles")
-    .select("id, telegram_user_id, email")
+    .select("id, telegram_user_id")
     .in("id", studentIds);
 
   if (profilesError) {
@@ -1307,13 +1307,22 @@ async function handleNotifyStudents(
 
   // Build lookup maps
   const profileTgMap: Record<string, number> = {};
-  const emailMap: Record<string, string> = {};
   for (const p of profiles ?? []) {
     if (p.telegram_user_id) {
       profileTgMap[p.id] = p.telegram_user_id;
     }
-    if (p.email && !String(p.email).endsWith("@temp.sokratai.ru")) {
-      emailMap[p.id] = p.email as string;
+  }
+
+  // Fetch emails from auth.users (profiles table has no email column)
+  const emailMap: Record<string, string> = {};
+  for (const sid of studentIds) {
+    try {
+      const { data } = await dbService.auth.admin.getUserById(sid);
+      if (data?.user?.email && !data.user.email.endsWith("@temp.sokratai.ru")) {
+        emailMap[sid] = data.user.email;
+      }
+    } catch {
+      // Skip — student won't get email fallback
     }
   }
 
