@@ -485,34 +485,61 @@ serve(async (req) => {
       currentDate.setDate(currentDate.getDate() + 1);
     }
 
-    const registrationsChart = chartDays.map(day => ({
-      date: day,
-      value: registrationsByDay[day] || 0,
-    }));
+    const registrationsChart = chartDays.map(day => {
+      const d = registrationsByDay[day];
+      return {
+        date: day,
+        value: d?.total || 0,
+        students: d?.students || 0,
+        tutors: d?.tutors || 0,
+      };
+    });
 
     const messagesChart = chartDays.map(day => ({
       date: day,
       value: messagesByDay[day] || 0,
     }));
 
-    const dauChart = chartDays.map(day => ({
-      date: day,
-      value: dauByDay[day] || 0,
+    // WAU chart: compute per-week, assign to Monday of each week
+    chartDays.forEach((day) => {
+      const monday = getMonday(day);
+      if (!processedWeeks.has(monday)) {
+        processedWeeks.add(monday);
+        const weekUsers = uniqueUsersByWeek[monday] || new Set<string>();
+        let tutors = 0;
+        let students = 0;
+        weekUsers.forEach((uid) => {
+          if (tutorSet.has(uid)) tutors++;
+          else students++;
+        });
+        wauByDay[monday] = { total: weekUsers.size, students, tutors };
+      }
+    });
+
+    const wauChart = [...processedWeeks].sort().map(monday => ({
+      date: monday,
+      value: wauByDay[monday]?.total || 0,
+      students: wauByDay[monday]?.students || 0,
+      tutors: wauByDay[monday]?.tutors || 0,
     }));
 
     const analytics = {
       summary: {
         totalUsers: totalUsers || 0,
-        newUsers: totalRegistered || 0,
+        totalTutors,
+        totalStudents,
+        newUsers: newUsers || 0,
+        newTutors,
+        newStudents,
         totalMessages: totalMessages || 0,
         activeUsersToday: activeUsersToday || 0,
       },
       registrations: registrationsChart,
       messages: messagesChart,
-      dau: dauChart,
+      wau: wauChart,
       cohortRetention,
       funnel: {
-        registered: totalRegistered || 0,
+        registered: newUsers || 0,
         completedOnboarding: completedOnboarding || 0,
         sentFirstMessage,
       },
