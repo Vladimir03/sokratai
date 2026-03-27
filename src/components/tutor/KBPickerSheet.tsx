@@ -604,7 +604,7 @@ export function KBPickerSheet({
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent
         side="right"
-        className="flex w-[75vw] max-w-none flex-col gap-0 p-0"
+        className="flex w-[75vw] !max-w-none flex-col gap-0 p-0"
       >
         <SheetHeader className="border-b px-4 pb-3 pt-4">
           <SheetTitle className="flex items-center gap-2 text-base">
