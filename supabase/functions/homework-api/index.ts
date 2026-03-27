@@ -1343,15 +1343,15 @@ async function handleNotifyStudents(
     .single();
   const tutorName = (tutorProfile?.display_name as string) || "Репетитор";
 
-  const appUrl = Deno.env.get("PUBLIC_APP_URL")?.trim().replace(/\/$/, "") ?? null;
-  const homeworkUrl = appUrl ? `${appUrl}/homework/${assignmentId}` : null;
-  const defaultMessage = `📚 Новое домашнее задание: <b>${escapeHtmlEntities(assignment.title as string)}</b>\n\nПредмет: ${escapeHtmlEntities(assignment.subject as string)}${homeworkUrl ? `\n<a href="${escapeHtmlEntities(homeworkUrl)}">Открыть ДЗ</a>` : "\nИспользуй /homework чтобы начать."}`;
+  const appUrl = Deno.env.get("PUBLIC_APP_URL")?.trim().replace(/\/$/, "") ?? "https://sokratai.lovable.app";
+  const homeworkUrl = `${appUrl}/homework/${assignmentId}`;
+  const defaultMessage = `📚 Новое домашнее задание: <b>${escapeHtmlEntities(assignment.title as string)}</b>\n\nПредмет: ${escapeHtmlEntities(assignment.subject as string)}\n<a href="${escapeHtmlEntities(homeworkUrl)}">Открыть ДЗ</a>`;
   const tgText = messageTemplate ?? defaultMessage;
 
   const pushPayload: PushPayload = {
-    title: `Новое ДЗ: ${escapeHtmlEntities(assignment.title as string)}`,
+    title: `Новое ДЗ: ${assignment.title as string}`,
     body: `Новое задание по ${assignment.subject as string}`,
-    url: homeworkUrl ?? undefined,
+    url: homeworkUrl,
   };
 
   // ─── Cascade delivery per student ───────────────────────────────────────────
@@ -1364,7 +1364,7 @@ async function handleNotifyStudents(
   const failedByReason: Record<string, NotifyFailureReason> = {};
 
   for (const sid of studentIds) {
-    const hasPush = (pushSubsMap[sid]?.length ?? 0) > 0;
+    let hasPush = (pushSubsMap[sid]?.length ?? 0) > 0;
     const chatId = profileTgMap[sid] ?? sessionTgMap[sid];
     const hasTelegram = Boolean(chatId);
     const hasEmail = Boolean(emailMap[sid]);
@@ -1423,7 +1423,11 @@ async function handleNotifyStudents(
         }
         // Try next subscription
       }
-      if (!delivered) lastFailedReason = allGone ? "push_expired" : "push_send_failed";
+      if (!delivered) {
+        lastFailedReason = allGone ? "push_expired" : "push_send_failed";
+        // If all subscriptions expired, this student effectively has no push channel
+        if (allGone) hasPush = false;
+      }
     }
 
     // ── Step 2: Try Telegram (preserved existing logic) ───────────────────────

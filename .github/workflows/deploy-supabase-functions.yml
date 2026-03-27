@@ -28,8 +28,8 @@ jobs:
         run: |
           supabase link --project-ref ${{ secrets.SUPABASE_PROJECT_ID }}
 
-          # This pipeline auto-deploys only 7 edge functions.
-          # Remaining functions are intentionally not covered here and are deployed manually.
+          # Deploy all actively maintained edge functions.
+          # JWT verification is configured per-function in supabase/config.toml.
           supabase functions deploy telegram-bot --no-verify-jwt
           supabase functions deploy chat --no-verify-jwt
           supabase functions deploy setup-telegram-webhook --no-verify-jwt
@@ -38,5 +38,7 @@ jobs:
           supabase functions deploy telegram-broadcast --no-verify-jwt
           supabase functions deploy telegram-scheduled-reminder --no-verify-jwt
           supabase functions deploy homework-api
+          supabase functions deploy push-subscribe
+          supabase functions deploy homework-reminder --no-verify-jwt
 
           echo "✅ All functions deployed successfully!"

@@ -103,14 +103,18 @@ async function runReminders(): Promise<ReminderResult> {
     // Get assigned students who haven't submitted
     const { data: studentAssignments } = await db
       .from("homework_tutor_student_assignments")
-      .select("student_id")
+      .select("id, student_id")
       .eq("assignment_id", assignment.id);
 
     if (!studentAssignments || studentAssignments.length === 0) continue;
 
     const allStudentIds = studentAssignments.map((sa) => sa.student_id as string);
+    const saIdToStudentId: Record<string, string> = {};
+    for (const sa of studentAssignments) {
+      saIdToStudentId[sa.id as string] = sa.student_id as string;
+    }
 
-    // Get students who already have a submission
+    // Get students who already have a classic submission
     const { data: submissions } = await db
       .from("homework_tutor_submissions")
       .select("student_id")
@@ -118,6 +122,22 @@ async function runReminders(): Promise<ReminderResult> {
       .in("status", ["submitted", "ai_checked", "tutor_reviewed"]);
 
     const submittedIds = new Set((submissions ?? []).map((s) => s.student_id as string));
+
+    // Get students who completed guided_chat threads
+    const saIds = studentAssignments.map((sa) => sa.id as string);
+    if (saIds.length > 0) {
+      const { data: completedThreads } = await db
+        .from("homework_tutor_threads")
+        .select("student_assignment_id")
+        .in("student_assignment_id", saIds)
+        .eq("status", "completed");
+
+      for (const t of completedThreads ?? []) {
+        const studentId = saIdToStudentId[t.student_assignment_id as string];
+        if (studentId) submittedIds.add(studentId);
+      }
+    }
+
     const unsubmittedIds = allStudentIds.filter((id) => !submittedIds.has(id));
 
     if (unsubmittedIds.length === 0) continue;
