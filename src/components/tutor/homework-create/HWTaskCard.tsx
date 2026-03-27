@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback } from 'react';
+import { useState, useRef, useCallback, useEffect } from 'react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -20,6 +20,7 @@ import {
   deleteTutorHomeworkTaskImage,
   parseStorageRef,
 } from '@/lib/tutorHomeworkApi';
+import { getKBImageSignedUrl } from '@/lib/kbApi';
 import { SourceBadge } from '@/components/kb/ui/SourceBadge';
 import { type DraftTask, MAX_IMAGE_SIZE_BYTES, IMAGE_REQUIREMENTS_HINT, revokeObjectUrl } from './types';
 
@@ -46,6 +47,31 @@ function RubricField({ value, onChange }: { value: string; onChange: (v: string)
         />
       )}
     </div>
+  );
+}
+
+// ─── KB attachment badge with thumbnail ──────────────────────────────────────
+
+function KBAttachmentBadge({ storageRef }: { storageRef: string }) {
+  const [thumbUrl, setThumbUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    getKBImageSignedUrl(storageRef).then((url) => {
+      if (!cancelled) setThumbUrl(url);
+    });
+    return () => { cancelled = true; };
+  }, [storageRef]);
+
+  return (
+    <span className="inline-flex items-center gap-1.5 rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-700">
+      {thumbUrl ? (
+        <img src={thumbUrl} alt="" className="h-5 w-5 rounded object-cover" />
+      ) : (
+        <Paperclip className="h-3 w-3" />
+      )}
+      Фото из базы
+    </span>
   );
 }
 
@@ -212,10 +238,7 @@ export function HWTaskCard({ task, index, onUpdate, onRemove, canRemove, onDefer
               <SourceBadge source={task.kb_source} />
             )}
             {task.kb_attachment_url && !task.task_image_path && (
-              <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-700">
-                <Paperclip className="h-3 w-3" />
-                Есть изображение в базе
-              </span>
+              <KBAttachmentBadge storageRef={task.kb_attachment_url} />
             )}
           </div>
           {canRemove && (
