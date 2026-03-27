@@ -73,17 +73,32 @@ serve(async (req) => {
     const startDateStr = startDate.toISOString();
     const endDateStr = endDate.toISOString();
 
-    // 1. Registration stats by day
+    // 0. Get tutor user IDs
+    const { data: tutorRoles } = await supabaseAdmin
+      .from("user_roles")
+      .select("user_id")
+      .eq("role", "tutor");
+    const tutorSet = new Set((tutorRoles || []).map((r: { user_id: string }) => r.user_id));
+
+    // 1. Registration stats by day (with tutor/student split)
     const { data: registrations } = await supabaseAdmin
       .from("profiles")
-      .select("created_at")
+      .select("id, created_at")
       .gte("created_at", startDateStr)
       .lte("created_at", endDateStr);
 
-    const registrationsByDay: Record<string, number> = {};
+    const registrationsByDay: Record<string, { total: number; students: number; tutors: number }> = {};
     registrations?.forEach((r) => {
       const day = r.created_at?.split("T")[0];
-      if (day) registrationsByDay[day] = (registrationsByDay[day] || 0) + 1;
+      if (day) {
+        if (!registrationsByDay[day]) registrationsByDay[day] = { total: 0, students: 0, tutors: 0 };
+        registrationsByDay[day].total++;
+        if (tutorSet.has(r.id)) {
+          registrationsByDay[day].tutors++;
+        } else {
+          registrationsByDay[day].students++;
+        }
+      }
     });
 
     // 2. Message activity by day
@@ -105,10 +120,26 @@ serve(async (req) => {
       }
     });
 
-    const dauByDay: Record<string, number> = {};
+    // WAU: for each day, count unique users active in the ISO week (Mon-Sun) containing that day
+    const getMonday = (dateStr: string) => {
+      const d = new Date(dateStr);
+      const day = d.getUTCDay();
+      const diff = d.getUTCDate() - day + (day === 0 ? -6 : 1);
+      d.setUTCDate(diff);
+      return d.toISOString().split("T")[0];
+    };
+
+    // Group unique users by week
+    const uniqueUsersByWeek: Record<string, Set<string>> = {};
     Object.entries(uniqueUsersByDay).forEach(([day, users]) => {
-      dauByDay[day] = users.size;
+      const monday = getMonday(day);
+      if (!uniqueUsersByWeek[monday]) uniqueUsersByWeek[monday] = new Set();
+      users.forEach((u) => uniqueUsersByWeek[monday].add(u));
     });
+
+    // For each chart day, look up its week
+    const wauByDay: Record<string, { total: number; students: number; tutors: number }> = {};
+    const processedWeeks = new Set<string>();
 
     // 3. Cohort retention calculation
     const calculateCohortRetention = async () => {
@@ -233,10 +264,17 @@ serve(async (req) => {
       }
     }
 
-    // 5. Summary stats
-    const { count: totalUsers } = await supabaseAdmin
+    // 5. Summary stats (with tutor/student split)
+    const { data: allProfiles } = await supabaseAdmin
       .from("profiles")
-      .select("id", { count: "exact", head: true });
+      .select("id");
+    const totalUsers = allProfiles?.length || 0;
+    const totalTutors = allProfiles?.filter((p) => tutorSet.has(p.id)).length || 0;
+    const totalStudents = totalUsers - totalTutors;
+
+    const newUsers = registrations?.length || 0;
+    const newTutors = registrations?.filter((r) => tutorSet.has(r.id)).length || 0;
+    const newStudents = newUsers - newTutors;
 
     const { count: totalMessages } = await supabaseAdmin
       .from("chat_messages")
