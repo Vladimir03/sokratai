@@ -4,18 +4,19 @@ import { Plus, Library } from 'lucide-react';
 import { toast } from 'sonner';
 import { deleteTutorHomeworkTaskImage } from '@/lib/tutorHomeworkApi';
 import type { KBTask } from '@/types/kb';
-import { parseAttachmentUrls } from '@/lib/kbApi';
+import { parseAttachmentUrls, getKBImageSignedUrl } from '@/lib/kbApi';
 import { KBPickerSheet } from '@/components/tutor/KBPickerSheet';
 import { HWTaskCard } from './HWTaskCard';
 import { type DraftTask, createEmptyTask, generateUUID, revokeObjectUrl } from './types';
 
 // Job: Быстро добавить задачу из базы в черновик ДЗ
 function kbTaskToDraftTask(task: KBTask): DraftTask {
+  const attachmentRef = parseAttachmentUrls(task.attachment_url)[0] ?? null;
   return {
     localId: generateUUID(),
     task_text: task.text,
-    task_image_path: null,
-    task_image_name: null,
+    task_image_path: attachmentRef,
+    task_image_name: attachmentRef?.split('/').pop() ?? null,
     task_image_preview_url: null,
     task_image_used_fallback: false,
     correct_answer: task.answer ?? '',
@@ -27,8 +28,12 @@ function kbTaskToDraftTask(task: KBTask): DraftTask {
     kb_snapshot_text: task.text,
     kb_snapshot_answer: task.answer ?? null,
     kb_snapshot_solution: task.solution ?? null,
-    kb_attachment_url: parseAttachmentUrls(task.attachment_url)[0] ?? null,
+    kb_attachment_url: attachmentRef,
   };
+}
+
+function isEmptyTask(t: DraftTask): boolean {
+  return !t.task_text.trim() && !t.task_image_path && !t.correct_answer.trim() && !t.kb_task_id;
 }
 
 export interface HWTasksSectionProps {
