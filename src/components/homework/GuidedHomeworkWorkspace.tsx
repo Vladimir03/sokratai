@@ -324,6 +324,7 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
   const [isRequestingHint, setIsRequestingHint] = useState(false);
   const [threadId, setThreadId] = useState<string | null>(null);
   const [threadStatus, setThreadStatus] = useState<'active' | 'completed' | 'abandoned'>('active');
+  const [showCompletedView, setShowCompletedView] = useState(false);
   const [attachedFiles, setAttachedFiles] = useState<File[]>([]);
   const [isUploading, setIsUploading] = useState(false);
   const [isConditionExpanded, setIsConditionExpanded] = useState(true);
@@ -359,6 +360,10 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
       setThreadCurrentTaskOrder(thread.current_task_order);
       setThreadId(thread.id);
       setThreadStatus(thread.status);
+      // If user returns to an already-completed thread, show results immediately
+      if (thread.status === 'completed') {
+        setShowCompletedView(true);
+      }
     }
   }, [thread]);
 
@@ -1196,7 +1201,7 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
   }
 
   // Completed state
-  if (threadStatus === 'completed') {
+  if (threadStatus === 'completed' && showCompletedView) {
     const completedCount = taskStates.filter((s) => s.status === 'completed').length;
     const totalEarned = taskStates.reduce((sum, s) => sum + (s.earned_score ?? 0), 0);
     const totalMax = assignment.tasks.reduce((sum, t) => sum + t.max_score, 0);
@@ -1413,21 +1418,33 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
 
         </div>
 
-        <GuidedChatInput
-          key={currentTaskOrder}
-          onSendAnswer={handleSendAnswer}
-          onSendStep={handleSendStep}
-          isLoading={isStreaming || isCheckingAnswer || isRequestingHint}
-          disabled={threadStatus !== 'active' || !isViewingActiveTask}
-          taskNumber={currentTask?.order_num}
-          initialAnswerText={currentDraftRef.current.answer}
-          initialDiscussionText={currentDraftRef.current.discussion}
-          onDraftChange={handleDraftChange}
-          attachedFiles={attachedFiles}
-          onFileSelect={handleFileSelect}
-          onFileRemove={handleFileRemove}
-          isUploading={isUploading}
-        />
+        {threadStatus === 'completed' && !showCompletedView ? (
+          <div className="border-t px-4 py-3 bg-muted/30">
+            <Button
+              onClick={() => setShowCompletedView(true)}
+              className="w-full gap-2"
+            >
+              <CheckCircle2 className="h-4 w-4" />
+              Посмотреть результаты
+            </Button>
+          </div>
+        ) : (
+          <GuidedChatInput
+            key={currentTaskOrder}
+            onSendAnswer={handleSendAnswer}
+            onSendStep={handleSendStep}
+            isLoading={isStreaming || isCheckingAnswer || isRequestingHint}
+            disabled={threadStatus !== 'active' || !isViewingActiveTask}
+            taskNumber={currentTask?.order_num}
+            initialAnswerText={currentDraftRef.current.answer}
+            initialDiscussionText={currentDraftRef.current.discussion}
+            onDraftChange={handleDraftChange}
+            attachedFiles={attachedFiles}
+            onFileSelect={handleFileSelect}
+            onFileRemove={handleFileRemove}
+            isUploading={isUploading}
+          />
+        )}
       </div>
     </div>
   );
