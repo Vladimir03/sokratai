@@ -28,7 +28,8 @@ export interface PushResult {
 
 // ─── Base64 URL helpers ──────────────────────────────────────
 
-function base64UrlEncode(buffer: ArrayBuffer): string {
+function base64UrlEncode(buffer: ArrayBuffer | Uint8Array): string {
+  if (buffer instanceof Uint8Array) buffer = buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength) as ArrayBuffer;
   const bytes = new Uint8Array(buffer);
   let binary = '';
   for (let i = 0; i < bytes.length; i++) {
@@ -138,17 +139,20 @@ async function hkdf(
   info: Uint8Array,
   length: number,
 ): Promise<Uint8Array> {
-  const key = await crypto.subtle.importKey('raw', ikm, { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+  const _ikm = ikm.buffer.slice(ikm.byteOffset, ikm.byteOffset + ikm.byteLength) as ArrayBuffer;
+  const key = await crypto.subtle.importKey('raw', _ikm, { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
 
   // Extract
-  const saltKey = salt.length > 0
-    ? await crypto.subtle.importKey('raw', salt, { name: 'HMAC', hash: 'SHA-256' }, false, ['sign'])
-    : await crypto.subtle.importKey('raw', new Uint8Array(32), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+  const _salt = salt.length > 0
+    ? salt.buffer.slice(salt.byteOffset, salt.byteOffset + salt.byteLength) as ArrayBuffer
+    : new ArrayBuffer(32);
+  const saltKey = await crypto.subtle.importKey('raw', _salt, { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
 
-  const prk = new Uint8Array(await crypto.subtle.sign('HMAC', saltKey, ikm));
+  const prk = new Uint8Array(await crypto.subtle.sign('HMAC', saltKey, _ikm));
 
   // Expand
-  const prkKey = await crypto.subtle.importKey('raw', prk, { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+  const _prk = prk.buffer.slice(prk.byteOffset, prk.byteOffset + prk.byteLength) as ArrayBuffer;
+  const prkKey = await crypto.subtle.importKey('raw', _prk, { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
   const infoWithCounter = new Uint8Array(info.length + 1);
   infoWithCounter.set(info);
   infoWithCounter[info.length] = 1;
@@ -207,9 +211,10 @@ async function encryptPayload(
   );
 
   // Import subscriber's public key
+  const _subPubBuf = subscriberPublicKeyBytes.buffer.slice(subscriberPublicKeyBytes.byteOffset, subscriberPublicKeyBytes.byteOffset + subscriberPublicKeyBytes.byteLength) as ArrayBuffer;
   const subscriberPublicKey = await crypto.subtle.importKey(
     'raw',
-    subscriberPublicKeyBytes,
+    _subPubBuf,
     { name: 'ECDH', namedCurve: 'P-256' },
     false,
     [],
@@ -253,9 +258,12 @@ async function encryptPayload(
   const paddedPlaintext = concat(plaintext, new Uint8Array([2]));
 
   // AES-128-GCM encrypt
-  const aesKey = await crypto.subtle.importKey('raw', cek, 'AES-GCM', false, ['encrypt']);
+  const _cekBuf = cek.buffer.slice(cek.byteOffset, cek.byteOffset + cek.byteLength) as ArrayBuffer;
+  const aesKey = await crypto.subtle.importKey('raw', _cekBuf, 'AES-GCM', false, ['encrypt']);
+  const _nonceBuf = nonce.buffer.slice(nonce.byteOffset, nonce.byteOffset + nonce.byteLength) as ArrayBuffer;
+  const _plainBuf = paddedPlaintext.buffer.slice(paddedPlaintext.byteOffset, paddedPlaintext.byteOffset + paddedPlaintext.byteLength) as ArrayBuffer;
   const ciphertext = new Uint8Array(
-    await crypto.subtle.encrypt({ name: 'AES-GCM', iv: nonce }, aesKey, paddedPlaintext),
+    await crypto.subtle.encrypt({ name: 'AES-GCM', iv: _nonceBuf }, aesKey, _plainBuf),
   );
 
   // aes128gcm header: salt(16) + rs(4) + idlen(1) + keyid(65) + ciphertext
@@ -312,7 +320,7 @@ export async function sendPushNotification(
         'TTL': '86400',
         'Urgency': 'normal',
       },
-      body: encrypted,
+      body: encrypted.buffer.slice(encrypted.byteOffset, encrypted.byteOffset + encrypted.byteLength) as ArrayBuffer,
     });
 
     const gone = response.status === 410;
