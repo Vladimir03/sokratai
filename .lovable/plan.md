@@ -1,18 +1,41 @@
 
 
-## Fix: `hw_reorder_tasks` function missing from database
+## Plan: Improve image display in KB Picker and HW Task Card
 
-### Root cause
+### Problem
 
-The migration `20260319100000_hw_reorder_tasks_atomic.sql` exists in the repo but was never applied to the production database. When the PUT handler tries to call `hw_reorder_tasks` RPC, it fails with "Could not find the function in the schema cache" → 500.
+1. **KBPickerSheet**: Task cards show tiny 48x48 thumbnails that are unreadable. The catalog (screenshot 3) shows full-width images — the picker should match that quality.
+2. **HWTaskCard**: After adding a KB task, the image preview is also 48x48 with a raw storage path shown. Should display a proper large preview.
 
-### Fix
+### Changes
 
-Apply the migration to create the `hw_reorder_tasks` PL/pgSQL function. The SQL is already written and correct in `supabase/migrations/20260319100000_hw_reorder_tasks_atomic.sql`. We need to run it as a new migration since the old one was apparently skipped.
+#### 1. `src/components/tutor/KBPickerSheet.tsx` — `PickerTaskCard` redesign
 
-**New migration**: Create `hw_reorder_tasks(UUID, JSONB)` function — same content as the existing migration file. This is a `SECURITY DEFINER` function granted only to `service_role`.
+Current layout: horizontal row with 48x48 thumbnail + text + button.
 
-### Also: image preview issue
+New layout inspired by catalog `TaskCard`:
+- **Header row**: SourceBadge + KIM number + "В ДЗ" button (right-aligned)
+- **Text**: `MathText` with `line-clamp-3` (instead of 2)
+- **Image below text**: full-width, `max-h-48 object-contain rounded-xl border` — same as catalog collapsed preview
+- Image-only tasks (`[Задача на фото]` marker): hero image `max-h-64`, text hidden
+- Remove the tiny 48x48 thumbnail entirely
 
-The screenshot shows no image preview for the second task (which has `task_image_url: storage://kb-attachments/demidova2025/z1_25.svg`). This was addressed in the previous fix (resolving `task_image_path` → signed URL in edit prefill). If it's still not working, it may be because the `getHomeworkImageSignedUrl` function doesn't handle `storage://kb-attachments/...` paths (different bucket). Will verify after the reorder fix.
+This matches the catalog UX from screenshot 3.
+
+#### 2. `src/components/tutor/homework-create/HWTaskCard.tsx` — larger image preview
+
+Current: 48x48 thumbnail with filename + raw storage path.
+
+New:
+- Image preview: `max-h-48 w-full object-contain rounded-lg border` (full-width, large)
+- Keep filename + remove button on a row above the image
+- Remove the raw `storage://` path display (useless to tutor)
+
+### Files
+- `src/components/tutor/KBPickerSheet.tsx` — redesign `PickerTaskCard` layout
+- `src/components/tutor/homework-create/HWTaskCard.tsx` — enlarge image preview section
+
+### Not changing
+- `src/components/kb/TaskCard.tsx` — already good (screenshot 3)
+- Sheet width — already fixed to 75vw
 
