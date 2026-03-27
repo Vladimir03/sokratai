@@ -1104,6 +1104,22 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
       setIsStreaming(true);
       setStreamingContent('');
 
+      // Pre-OCR: run dedicated OCR on task image to get ground-truth text
+      let ocrText: string | undefined;
+      if (currentTask.task_image_url && !ocrTextByTaskRef.current.has(taskOrder)) {
+        try {
+          const ocrResult = await ocrTaskImage(assignment.id, currentTask.id);
+          if (ocrResult.recognized_text && ocrResult.recognized_text !== '[неразборчиво]') {
+            ocrText = ocrResult.recognized_text;
+            ocrTextByTaskRef.current.set(taskOrder, ocrText);
+          }
+        } catch (e) {
+          console.warn('Pre-OCR failed, falling back to vision-only:', e);
+        }
+      } else {
+        ocrText = ocrTextByTaskRef.current.get(taskOrder);
+      }
+
       // Resolve task image to signed URL for AI (if task has image)
       let bootstrapImageUrl: string | undefined;
       if (currentTask.task_image_url) {
@@ -1123,7 +1139,7 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
             },
           ],
           systemPrompt: buildGuidedSystemPrompt('bootstrap', { isBootstrap: true }),
-          taskContext: buildTaskContext(assignment, currentTask, assignment.tasks.length, 'bootstrap'),
+          taskContext: buildTaskContext(assignment, currentTask, assignment.tasks.length, 'bootstrap', { ocrText }),
           taskImageUrl: bootstrapImageUrl,
           onDelta: (delta) => {
             content += delta;
