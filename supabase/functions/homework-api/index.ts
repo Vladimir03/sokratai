@@ -5,6 +5,8 @@ import {
   evaluateStudentAnswer,
   generateHint,
 } from "./guided_ai.ts";
+import { sendPushNotification, type PushSubscriptionData, type PushPayload } from "../_shared/push-sender.ts";
+import { sendHomeworkNotificationEmail } from "../_shared/email-sender.ts";
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
@@ -12,13 +14,20 @@ const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY")!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const TELEGRAM_BOT_TOKEN = Deno.env.get("TELEGRAM_BOT_TOKEN") ?? "";
+const VAPID_PUBLIC_KEY = Deno.env.get("VAPID_PUBLIC_KEY") ?? "";
+const VAPID_PRIVATE_KEY = Deno.env.get("VAPID_PRIVATE_KEY") ?? "";
+const VAPID_SUBJECT = Deno.env.get("VAPID_SUBJECT") ?? "mailto:support@sokratai.ru";
 
 const VALID_SUBJECTS = ["math", "physics", "history", "social", "english", "cs"] as const;
 const VALID_STATUSES = ["draft", "active", "closed"] as const;
 const VALID_WORKFLOW_MODES = ["classic", "guided_chat"] as const;
 const VALID_STATUS_FILTERS = ["draft", "active", "closed", "all"] as const;
 const VALID_SUBMISSION_STATUSES = ["in_progress", "submitted", "ai_checked", "tutor_reviewed"] as const;
-type NotifyFailureReason = "missing_telegram_link" | "telegram_send_failed" | "telegram_send_error";
+type NotifyFailureReason =
+  | "missing_telegram_link" | "telegram_send_failed" | "telegram_send_error"
+  | "push_expired" | "push_send_failed"
+  | "email_send_failed"
+  | "no_channels_available" | "all_channels_failed";
 
 const FALLBACK_ORIGINS = [
   "https://sokratai.ru",
@@ -479,9 +488,10 @@ async function handleListAssignments(
   const notConnectedMap: Record<string, number> = {};
   for (const r of assignedCounts ?? []) {
     assignedMap[r.assignment_id] = (assignedMap[r.assignment_id] ?? 0) + 1;
-    if (r.delivery_status === "delivered") {
+    const ds = r.delivery_status as string;
+    if (ds === "delivered" || ds === "delivered_push" || ds === "delivered_telegram" || ds === "delivered_email") {
       deliveredMap[r.assignment_id] = (deliveredMap[r.assignment_id] ?? 0) + 1;
-    } else if (r.delivery_status === "failed_not_connected") {
+    } else if (ds === "failed_not_connected" || ds === "failed_no_channel") {
       notConnectedMap[r.assignment_id] = (notConnectedMap[r.assignment_id] ?? 0) + 1;
     }
   }
@@ -1247,9 +1257,11 @@ async function handleNotifyStudents(
 
   const studentIds = pendingStudents.map((s) => s.student_id);
 
+  // ─── Resolve all delivery channels ──────────────────────────────────────────
+
   const { data: profiles, error: profilesError } = await db
     .from("profiles")
-    .select("id, telegram_user_id")
+    .select("id, telegram_user_id, email")
     .in("id", studentIds);
 
   if (profilesError) {
@@ -1275,10 +1287,33 @@ async function handleNotifyStudents(
     return jsonError(cors, 500, "DB_ERROR", "Failed to resolve telegram sessions");
   }
 
+  // Service-role client for push_subscriptions (RLS limits to own user)
+  const dbService = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
+    auth: { persistSession: false },
+  });
+
+  const { data: pushSubs, error: pushSubsError } = await dbService
+    .from("push_subscriptions")
+    .select("user_id, endpoint, p256dh, auth")
+    .in("user_id", studentIds);
+
+  if (pushSubsError) {
+    console.error("homework_notify_push_subs_query_error", {
+      assignment_id: assignmentId,
+      error: pushSubsError.message,
+    });
+    // Continue without push — cascade to telegram/email
+  }
+
+  // Build lookup maps
   const profileTgMap: Record<string, number> = {};
+  const emailMap: Record<string, string> = {};
   for (const p of profiles ?? []) {
     if (p.telegram_user_id) {
       profileTgMap[p.id] = p.telegram_user_id;
+    }
+    if (p.email && !String(p.email).endsWith("@temp.sokratai.ru")) {
+      emailMap[p.id] = p.email as string;
     }
   }
 
@@ -1289,150 +1324,266 @@ async function handleNotifyStudents(
     }
   }
 
+  const pushSubsMap: Record<string, PushSubscriptionData[]> = {};
+  for (const sub of pushSubs ?? []) {
+    const uid = sub.user_id as string;
+    if (!pushSubsMap[uid]) pushSubsMap[uid] = [];
+    pushSubsMap[uid].push({
+      endpoint: sub.endpoint as string,
+      p256dh: sub.p256dh as string,
+      auth: sub.auth as string,
+    });
+  }
+
+  // Fetch tutor name for email template
+  const { data: tutorProfile } = await dbService
+    .from("profiles")
+    .select("display_name")
+    .eq("id", tutorUserId)
+    .single();
+  const tutorName = (tutorProfile?.display_name as string) || "Репетитор";
+
   const appUrl = Deno.env.get("PUBLIC_APP_URL")?.trim().replace(/\/$/, "") ?? null;
   const homeworkUrl = appUrl ? `${appUrl}/homework/${assignmentId}` : null;
   const defaultMessage = `📚 Новое домашнее задание: <b>${escapeHtmlEntities(assignment.title as string)}</b>\n\nПредмет: ${escapeHtmlEntities(assignment.subject as string)}${homeworkUrl ? `\n<a href="${escapeHtmlEntities(homeworkUrl)}">Открыть ДЗ</a>` : "\nИспользуй /homework чтобы начать."}`;
-  const text = messageTemplate ?? defaultMessage;
+  const tgText = messageTemplate ?? defaultMessage;
+
+  const pushPayload: PushPayload = {
+    title: `Новое ДЗ: ${escapeHtmlEntities(assignment.title as string)}`,
+    body: `Новое задание по ${assignment.subject as string}`,
+    url: homeworkUrl ?? undefined,
+  };
+
+  // ─── Cascade delivery per student ───────────────────────────────────────────
 
   let sent = 0;
   let failed = 0;
-  const notifiedStudentIds: string[] = [];
+  const sentByChannel = { push: 0, telegram: 0, email: 0 };
+  const deliveredStudents: { sid: string; status: string; channel: string }[] = [];
   const failedStudentIds: string[] = [];
   const failedByReason: Record<string, NotifyFailureReason> = {};
 
   for (const sid of studentIds) {
-    const profileChatId = profileTgMap[sid];
-    const sessionChatId = sessionTgMap[sid];
-    const chatId = profileChatId ?? sessionChatId;
-
-    const hasProfileTelegramId = Boolean(profileChatId);
-    const hasSession = typeof sessionChatId !== "undefined";
+    const hasPush = (pushSubsMap[sid]?.length ?? 0) > 0;
+    const chatId = profileTgMap[sid] ?? sessionTgMap[sid];
+    const hasTelegram = Boolean(chatId);
+    const hasEmail = Boolean(emailMap[sid]);
 
     console.log("homework_assignment_delivery_diagnostics", {
       assignment_id: assignmentId,
       student_id: sid,
-      has_profile_telegram_id: hasProfileTelegramId,
-      has_session: hasSession,
-      session_user_id: hasSession ? sid : null,
-      canonical_user_id: sid,
-      reason: chatId ? "ready_to_send" : "missing_telegram_link",
+      has_push: hasPush,
+      has_telegram: hasTelegram,
+      has_email: hasEmail,
     });
 
-    if (!chatId) {
-      failed++;
-      failedStudentIds.push(sid);
-      failedByReason[sid] = "missing_telegram_link";
-      console.warn("homework_notify_student_failed", {
-        assignment_id: assignmentId,
-        student_id: sid,
-        reason: "missing_telegram_link",
-      });
-      continue;
-    }
-    try {
-      const payload: Record<string, unknown> = {
-        chat_id: chatId,
-        text,
-      };
-      if (!messageTemplate) {
-        payload.parse_mode = "HTML";
-      }
+    let delivered = false;
+    let deliveryChannel: string | null = null;
+    let deliveryStatus: string | null = null;
+    let lastFailedReason: NotifyFailureReason | null = null;
 
-      let lastResp: Response | null = null;
-      const maxAttempts = 2;
-      for (let attempt = 0; attempt < maxAttempts; attempt++) {
-        lastResp = await fetch(
-          `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`,
-          {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(payload),
-          },
-        );
-        if (lastResp.ok) break;
+    // ── Step 1: Try Push ──────────────────────────────────────────────────────
+    if (hasPush && VAPID_PUBLIC_KEY && VAPID_PRIVATE_KEY) {
+      const subs = pushSubsMap[sid];
+      let allGone = true;
+      for (const sub of subs) {
+        let pushResult = await sendPushNotification(sub, pushPayload, VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY, VAPID_SUBJECT);
 
-        const status = lastResp.status;
-        // Retry only on transient errors (429 rate limit, 5xx server errors)
-        if (attempt < maxAttempts - 1 && (status === 429 || status >= 500)) {
-          console.warn("homework_notify_telegram_retry", {
-            assignment_id: assignmentId,
-            student_id: sid,
-            attempt: attempt + 1,
-            status,
-          });
-          await new Promise((r) => setTimeout(r, 500));
+        if (pushResult.success) {
+          delivered = true;
+          deliveryChannel = "push";
+          deliveryStatus = "delivered_push";
+          allGone = false;
+          console.log("homework_notify_push_ok", { assignment_id: assignmentId, student_id: sid });
+          break;
+        }
+
+        if (pushResult.gone) {
+          // 410 Gone — subscription expired, clean up
+          console.warn("homework_notify_push_gone", { assignment_id: assignmentId, student_id: sid, endpoint: sub.endpoint });
+          await dbService.from("push_subscriptions").delete().eq("endpoint", sub.endpoint).eq("user_id", sid);
           continue;
         }
-        break;
-      }
 
-      if (lastResp?.ok) {
-        sent++;
-        notifiedStudentIds.push(sid);
-      } else {
-        failed++;
-        failedStudentIds.push(sid);
-        failedByReason[sid] = "telegram_send_failed";
-        const errBody = await lastResp?.text().catch(() => "unknown");
-        console.error("homework_api_telegram_send_failed", {
-          assignment_id: assignmentId,
-          student_id: sid,
-          chat_id: chatId,
-          status: lastResp?.status,
-          error: errBody,
-        });
-        console.warn("homework_notify_student_failed", {
-          assignment_id: assignmentId,
-          student_id: sid,
-          reason: "telegram_send_failed",
-        });
+        allGone = false;
+        // 5xx — retry once
+        if (pushResult.status >= 500) {
+          console.warn("homework_notify_push_retry", { assignment_id: assignmentId, student_id: sid, status: pushResult.status });
+          pushResult = await sendPushNotification(sub, pushPayload, VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY, VAPID_SUBJECT);
+          if (pushResult.success) {
+            delivered = true;
+            deliveryChannel = "push";
+            deliveryStatus = "delivered_push";
+            console.log("homework_notify_push_ok_retry", { assignment_id: assignmentId, student_id: sid });
+            break;
+          }
+          if (pushResult.gone) {
+            await dbService.from("push_subscriptions").delete().eq("endpoint", sub.endpoint).eq("user_id", sid);
+          }
+        }
+        // Try next subscription
       }
-    } catch (err) {
+      if (!delivered) lastFailedReason = allGone ? "push_expired" : "push_send_failed";
+    }
+
+    // ── Step 2: Try Telegram (preserved existing logic) ───────────────────────
+    if (!delivered && hasTelegram) {
+      try {
+        const payload: Record<string, unknown> = {
+          chat_id: chatId,
+          text: tgText,
+        };
+        if (!messageTemplate) {
+          payload.parse_mode = "HTML";
+        }
+
+        let lastResp: Response | null = null;
+        const maxAttempts = 2;
+        for (let attempt = 0; attempt < maxAttempts; attempt++) {
+          lastResp = await fetch(
+            `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`,
+            {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(payload),
+            },
+          );
+          if (lastResp.ok) break;
+
+          const status = lastResp.status;
+          // Retry only on transient errors (429 rate limit, 5xx server errors)
+          if (attempt < maxAttempts - 1 && (status === 429 || status >= 500)) {
+            console.warn("homework_notify_telegram_retry", {
+              assignment_id: assignmentId,
+              student_id: sid,
+              attempt: attempt + 1,
+              status,
+            });
+            await new Promise((r) => setTimeout(r, 500));
+            continue;
+          }
+          break;
+        }
+
+        if (lastResp?.ok) {
+          delivered = true;
+          deliveryChannel = "telegram";
+          deliveryStatus = "delivered_telegram";
+          console.log("homework_notify_telegram_ok", { assignment_id: assignmentId, student_id: sid });
+        } else {
+          const errBody = await lastResp?.text().catch(() => "unknown");
+          console.error("homework_api_telegram_send_failed", {
+            assignment_id: assignmentId,
+            student_id: sid,
+            chat_id: chatId,
+            status: lastResp?.status,
+            error: errBody,
+          });
+        }
+        if (!delivered) lastFailedReason = "telegram_send_failed";
+      } catch (err) {
+        console.error("homework_api_telegram_send_error", {
+          assignment_id: assignmentId,
+          student_id: sid,
+          error: String(err),
+        });
+        lastFailedReason = "telegram_send_error";
+      }
+    }
+
+    // ── Step 3: Try Email ─────────────────────────────────────────────────────
+    if (!delivered && hasEmail) {
+      try {
+        const emailResult = await sendHomeworkNotificationEmail(
+          dbService,
+          emailMap[sid],
+          {
+            tutorName,
+            assignmentTitle: assignment.title as string,
+            subject: assignment.subject as string,
+            deadline: (assignment.deadline as string) ?? null,
+            homeworkUrl: homeworkUrl ?? `https://sokratai.lovable.app/homework/${assignmentId}`,
+          },
+          assignmentId,
+        );
+
+        if (emailResult.success && !emailResult.skipped) {
+          delivered = true;
+          deliveryChannel = "email";
+          deliveryStatus = "delivered_email";
+          console.log("homework_notify_email_ok", { assignment_id: assignmentId, student_id: sid });
+        } else if (emailResult.skipped) {
+          console.log("homework_notify_email_skipped", { assignment_id: assignmentId, student_id: sid, reason: emailResult.skipped });
+        } else {
+          console.error("homework_notify_email_failed", { assignment_id: assignmentId, student_id: sid, error: emailResult.error });
+        }
+      } catch (err) {
+        console.error("homework_notify_email_error", { assignment_id: assignmentId, student_id: sid, error: String(err) });
+      }
+      if (!delivered) lastFailedReason = "email_send_failed";
+    }
+
+    // ── Step 4: Record result ─────────────────────────────────────────────────
+    if (delivered) {
+      sent++;
+      sentByChannel[deliveryChannel as keyof typeof sentByChannel]++;
+      deliveredStudents.push({ sid, status: deliveryStatus!, channel: deliveryChannel! });
+    } else {
       failed++;
       failedStudentIds.push(sid);
-      failedByReason[sid] = "telegram_send_error";
-      console.error("homework_api_telegram_send_error", {
-        assignment_id: assignmentId,
-        student_id: sid,
-        error: String(err),
-      });
+      if (!hasPush && !hasTelegram && !hasEmail) {
+        failedByReason[sid] = "no_channels_available";
+      } else {
+        // Use the most specific reason from the last failed channel
+        failedByReason[sid] = lastFailedReason ?? "all_channels_failed";
+      }
       console.warn("homework_notify_student_failed", {
         assignment_id: assignmentId,
         student_id: sid,
-        reason: "telegram_send_error",
+        reason: failedByReason[sid],
+        channels_tried: { push: hasPush, telegram: hasTelegram, email: hasEmail },
       });
     }
   }
 
-  if (notifiedStudentIds.length > 0) {
+  // ─── Update DB ────────────────────────────────────────────────────────────
+
+  if (deliveredStudents.length > 0) {
     const now = new Date().toISOString();
-    await db
-      .from("homework_tutor_student_assignments")
-      .update({ notified: true, notified_at: now, delivery_status: "delivered", delivery_error_code: null })
-      .eq("assignment_id", assignmentId)
-      .in("student_id", notifiedStudentIds);
+    // Group by (status, channel) for batch update
+    const groups: Record<string, string[]> = {};
+    for (const s of deliveredStudents) {
+      const key = `${s.status}|${s.channel}`;
+      if (!groups[key]) groups[key] = [];
+      groups[key].push(s.sid);
+    }
+    for (const [key, sids] of Object.entries(groups)) {
+      const [status, channel] = key.split("|");
+      await db
+        .from("homework_tutor_student_assignments")
+        .update({ notified: true, notified_at: now, delivery_status: status, delivery_channel: channel, delivery_error_code: null })
+        .eq("assignment_id", assignmentId)
+        .in("student_id", sids);
+    }
   }
 
-  // Update delivery_status for students who failed due to missing telegram link
-  const noLinkStudents = failedStudentIds.filter((sid) => failedByReason[sid] === "missing_telegram_link");
-  if (noLinkStudents.length > 0) {
+  // Update failed students
+  const noChannelStudents = failedStudentIds.filter((sid) => failedByReason[sid] === "no_channels_available");
+  if (noChannelStudents.length > 0) {
     await db
       .from("homework_tutor_student_assignments")
-      .update({ delivery_status: "failed_not_connected" })
+      .update({ delivery_status: "failed_no_channel" })
       .eq("assignment_id", assignmentId)
-      .in("student_id", noLinkStudents);
+      .in("student_id", noChannelStudents);
   }
 
-  // Update delivery_status for students who had Telegram send errors
-  const sendFailedStudents = failedStudentIds.filter((sid) =>
-    failedByReason[sid] === "telegram_send_failed" || failedByReason[sid] === "telegram_send_error"
-  );
-  if (sendFailedStudents.length > 0) {
+  const allChannelsFailedStudents = failedStudentIds.filter((sid) => failedByReason[sid] !== "no_channels_available");
+  if (allChannelsFailedStudents.length > 0) {
     await db
       .from("homework_tutor_student_assignments")
-      .update({ delivery_status: "failed_blocked_or_other" })
+      .update({ delivery_status: "failed_all_channels" })
       .eq("assignment_id", assignmentId)
-      .in("student_id", sendFailedStudents);
+      .in("student_id", allChannelsFailedStudents);
   }
 
   console.log("homework_api_request_success", {
@@ -1441,12 +1592,14 @@ async function handleNotifyStudents(
     assignment_id: assignmentId,
     sent,
     failed,
+    sent_by_channel: sentByChannel,
     failed_student_ids: failedStudentIds,
     failed_by_reason: failedByReason,
   });
   return jsonOk(cors, {
     sent,
     failed,
+    sent_by_channel: sentByChannel,
     failed_student_ids: failedStudentIds,
     failed_by_reason: failedByReason,
   });

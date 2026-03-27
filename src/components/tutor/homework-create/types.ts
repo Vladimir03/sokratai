@@ -29,11 +29,14 @@ export interface StudentDeliveryStatus {
   /** Student profile ID (= student_id in tutor_students) */
   studentId: string;
   name: string;
+  /** @deprecated kept for backward compat; prefer checking notified/deliveryFailed directly */
   hasTelegram: boolean;
-  /** true = Telegram notification was sent successfully */
+  /** true = notification delivered via any channel (push/telegram/email) */
   notified: boolean;
-  /** true = hasTelegram but send failed (telegram_send_error or api error) */
+  /** true = notification attempted but all channels failed */
   deliveryFailed: boolean;
+  /** true = student has no delivery channels at all */
+  noChannels: boolean;
 }
 
 export interface SubmitSuccessResult {

@@ -31,50 +31,49 @@ function StudentRow({ student, inviteWebLink, studentLoginLink }: StudentRowProp
     }
   }, [inviteWebLink, studentLoginLink, student.name]);
 
-  if (student.hasTelegram) {
-    // 3 states: notified ✅ / delivery failed ⚠️ / notifications disabled ✓
-    if (student.notified) {
-      return (
-        <div className="flex items-center gap-2 py-1.5">
-          <CheckCircle2 className="h-4 w-4 text-green-600 shrink-0" />
-          <span className="text-sm flex-1 min-w-0 truncate">{student.name}</span>
-          <Badge variant="default" className="text-xs shrink-0 bg-green-600 hover:bg-green-700">Уведомлен</Badge>
-        </div>
-      );
-    }
-    if (student.deliveryFailed) {
-      return (
-        <div className="flex items-center gap-2 py-1.5">
-          <AlertTriangle className="h-4 w-4 text-amber-500 shrink-0" />
-          <span className="text-sm flex-1 min-w-0 truncate">{student.name}</span>
-          <Badge variant="secondary" className="text-xs shrink-0 text-amber-600">Ошибка доставки</Badge>
-        </div>
-      );
-    }
-    // Notifications were disabled or not attempted
+  // 4 states: notified ✅ / delivery failed ⚠️ / no channels ❌ / not attempted ✓
+  if (student.notified) {
     return (
       <div className="flex items-center gap-2 py-1.5">
-        <CheckCircle2 className="h-4 w-4 text-muted-foreground shrink-0" />
+        <CheckCircle2 className="h-4 w-4 text-green-600 shrink-0" />
         <span className="text-sm flex-1 min-w-0 truncate">{student.name}</span>
-        <Badge variant="secondary" className="text-xs shrink-0">ДЗ назначено</Badge>
+        <Badge variant="default" className="text-xs shrink-0 bg-green-600 hover:bg-green-700">Уведомлен</Badge>
       </div>
     );
   }
-
+  if (student.noChannels) {
+    return (
+      <div className="flex items-center gap-2 py-1.5">
+        <AlertTriangle className="h-4 w-4 text-amber-500 shrink-0" />
+        <span className="text-sm flex-1 min-w-0 truncate">{student.name}</span>
+        <span className="text-xs text-muted-foreground shrink-0">нет каналов</span>
+        <Button
+          variant="outline"
+          size="sm"
+          className="h-7 gap-1 text-xs shrink-0"
+          onClick={handleCopy}
+        >
+          {copied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
+          {copied ? 'Скопировано' : 'Ссылка'}
+        </Button>
+      </div>
+    );
+  }
+  if (student.deliveryFailed) {
+    return (
+      <div className="flex items-center gap-2 py-1.5">
+        <AlertTriangle className="h-4 w-4 text-amber-500 shrink-0" />
+        <span className="text-sm flex-1 min-w-0 truncate">{student.name}</span>
+        <Badge variant="secondary" className="text-xs shrink-0 text-amber-600">Ошибка доставки</Badge>
+      </div>
+    );
+  }
+  // Notifications were disabled or not attempted
   return (
     <div className="flex items-center gap-2 py-1.5">
-      <AlertTriangle className="h-4 w-4 text-amber-500 shrink-0" />
+      <CheckCircle2 className="h-4 w-4 text-muted-foreground shrink-0" />
       <span className="text-sm flex-1 min-w-0 truncate">{student.name}</span>
-      <span className="text-xs text-muted-foreground shrink-0">нет Telegram</span>
-      <Button
-        variant="outline"
-        size="sm"
-        className="h-7 gap-1 text-xs shrink-0"
-        onClick={handleCopy}
-      >
-        {copied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
-        {copied ? 'Скопировано' : 'Ссылка'}
-      </Button>
+      <Badge variant="secondary" className="text-xs shrink-0">ДЗ назначено</Badge>
     </div>
   );
 }
@@ -90,7 +89,7 @@ export function HWSubmitSuccess({ result, onCreateAnother }: HWSubmitSuccessProp
   const navigate = useNavigate();
 
   const notifiedCount = result.studentStatuses.filter((s) => s.notified).length;
-  const noTelegramStudents = result.studentStatuses.filter((s) => !s.hasTelegram);
+  const noChannelStudents = result.studentStatuses.filter((s) => s.noChannels);
 
   return (
     <div className="space-y-6 max-w-2xl mx-auto">
@@ -130,7 +129,7 @@ export function HWSubmitSuccess({ result, onCreateAnother }: HWSubmitSuccessProp
             <Badge variant="secondary">{result.taskCount} задач(и)</Badge>
             {notifiedCount > 0 && (
               <Badge variant="default" className="bg-green-600 hover:bg-green-700">
-                Telegram: {notifiedCount}
+                Уведомлены: {notifiedCount}
               </Badge>
             )}
           </div>
@@ -153,13 +152,13 @@ export function HWSubmitSuccess({ result, onCreateAnother }: HWSubmitSuccessProp
           </CardContent>
         </Card>
 
-        {noTelegramStudents.length > 0 && (
+        {noChannelStudents.length > 0 && (
           <p className="text-xs text-muted-foreground mt-2">
-            ⚠️ {noTelegramStudents.length} ученик(ов) без Telegram — ДЗ назначено в кабинет,
+            ⚠️ {noChannelStudents.length} ученик(ов) без каналов доставки — ДЗ назначено в кабинет,
             уведомление не отправлено. Скопируйте ссылку и отправьте им вручную.
           </p>
         )}
-        {result.inviteWebLink && noTelegramStudents.length > 0 && (
+        {result.inviteWebLink && noChannelStudents.length > 0 && (
           <Button
             variant="outline"
             size="sm"

@@ -109,7 +109,11 @@ export interface UploadTutorHomeworkMaterialResult {
 
 // ─── Delivery tracking ───────────────────────────────────────────────────────
 
-export type DeliveryStatus = 'pending' | 'delivered' | 'failed_not_connected' | 'failed_blocked_or_other';
+export type DeliveryStatus =
+  | 'pending' | 'delivered'
+  | 'delivered_push' | 'delivered_telegram' | 'delivered_email'
+  | 'failed_not_connected' | 'failed_blocked_or_other'
+  | 'failed_all_channels' | 'failed_no_channel';
 
 export interface CreateAssignmentResponse {
   assignment_id: string;
@@ -126,11 +130,17 @@ export interface AssignStudentsResponse {
 export type NotifyFailureReason =
   | 'missing_telegram_link'
   | 'telegram_send_failed'
-  | 'telegram_send_error';
+  | 'telegram_send_error'
+  | 'push_expired'
+  | 'push_send_failed'
+  | 'email_send_failed'
+  | 'no_channels_available'
+  | 'all_channels_failed';
 
 export interface NotifyStudentsResponse {
   sent: number;
   failed: number;
+  sent_by_channel?: { push: number; telegram: number; email: number };
   failed_student_ids: string[];
   failed_by_reason?: Record<string, NotifyFailureReason>;
 }

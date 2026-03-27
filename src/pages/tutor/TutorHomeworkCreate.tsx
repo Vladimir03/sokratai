@@ -594,9 +594,10 @@ function TutorHomeworkCreateContent() {
         queryKey: ['tutor', 'homework', 'assignments'],
       });
 
-      // Build per-student delivery status for inline success view
+      // Build per-student delivery status for inline success view (channel-agnostic)
       const noTelegramIds = new Set(assignResult.students_without_telegram ?? []);
       const failedNotifyIds = new Set(notifyResult?.failed_student_ids ?? []);
+      const failedReasons = notifyResult?.failed_by_reason ?? {};
 
       const studentStatuses = [...selectedStudentIds].map((profileId) => {
         const ts = tutorStudents.find((s) => s.student_id === profileId);
@@ -604,9 +605,10 @@ function TutorHomeworkCreateContent() {
           ts?.profiles?.username ||
           (ts?.profiles?.telegram_username ? `@${ts.profiles.telegram_username}` : profileId);
         const hasTelegram = !noTelegramIds.has(profileId);
-        const notified = hasTelegram && notifyEnabled && notifyResult !== null && !failedNotifyIds.has(profileId);
-        const deliveryFailed = hasTelegram && notifyEnabled && notifyResult !== null && failedNotifyIds.has(profileId);
-        return { studentId: profileId, name, hasTelegram, notified, deliveryFailed };
+        const notified = notifyEnabled && notifyResult !== null && !failedNotifyIds.has(profileId);
+        const deliveryFailed = notifyEnabled && notifyResult !== null && failedNotifyIds.has(profileId);
+        const noChannels = deliveryFailed && failedReasons[profileId] === 'no_channels_available';
+        return { studentId: profileId, name, hasTelegram, notified, deliveryFailed, noChannels };
       });
 
       const groupName =

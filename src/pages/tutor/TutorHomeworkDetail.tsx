@@ -1,7 +1,7 @@
 import { useState, useCallback } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { ArrowLeft, BookOpen, Users, BarChart3, Clock, CheckCircle2, XCircle, AlertCircle, ChevronDown, ChevronUp, ImageIcon, WifiOff, Paperclip, ExternalLink, Edit, Trash2, ZoomIn } from 'lucide-react';
+import { ArrowLeft, BookOpen, Users, BarChart3, Clock, CheckCircle2, XCircle, AlertCircle, ChevronDown, ChevronUp, ImageIcon, WifiOff, Paperclip, ExternalLink, Edit, Trash2, ZoomIn, Bell, Send, Mail } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -55,10 +55,46 @@ function formatDate(d: string | null): string {
 
 function DeliveryBadge({ status }: { status: DeliveryStatus | undefined }) {
   if (!status || status === 'pending') return null;
+
+  if (status === 'delivered_push') {
+    return (
+      <span className="text-xs text-green-600 flex items-center gap-0.5">
+        <Bell className="h-3 w-3" /> Push
+      </span>
+    );
+  }
+  if (status === 'delivered_telegram') {
+    return (
+      <span className="text-xs text-green-600 flex items-center gap-0.5">
+        <Send className="h-3 w-3" /> Telegram
+      </span>
+    );
+  }
+  if (status === 'delivered_email') {
+    return (
+      <span className="text-xs text-green-600 flex items-center gap-0.5">
+        <Mail className="h-3 w-3" /> Email
+      </span>
+    );
+  }
   if (status === 'delivered') {
     return (
       <span className="text-xs text-green-600 flex items-center gap-0.5">
         <CheckCircle2 className="h-3 w-3" /> Доставлено
+      </span>
+    );
+  }
+  if (status === 'failed_no_channel') {
+    return (
+      <span className="text-xs text-red-500 flex items-center gap-0.5" title="Попросите ученика включить уведомления или добавить email">
+        <XCircle className="h-3 w-3" /> Нет каналов
+      </span>
+    );
+  }
+  if (status === 'failed_all_channels') {
+    return (
+      <span className="text-xs text-red-500 flex items-center gap-0.5" title="Попытки push, Telegram и email не удались">
+        <XCircle className="h-3 w-3" /> Все каналы failed
       </span>
     );
   }

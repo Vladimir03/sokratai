@@ -187,7 +187,7 @@ Acceptance criteria:
 
 ---
 
-#### P0-4. Каскадная логика доставки в `handleNotifyStudents`
+#### P0-4. Каскадная логика доставки в `handleNotifyStudents` ✅ DONE (2026-03-27)
 
 Расширить существующий `POST /assignments/:id/notify` — для каждого ученика выбирать лучший канал автоматически.
 
@@ -279,7 +279,7 @@ Acceptance criteria:
 
 ---
 
-#### P0-5. Каскадные напоминания о дедлайне (`homework-reminder`)
+#### P0-5. Каскадные напоминания о дедлайне (`homework-reminder`) ✅ DONE (2026-03-27)
 
 Расширить cron-функцию `homework-reminder` — отправлять напоминания через push и email, не только Telegram.
 
@@ -295,7 +295,7 @@ Acceptance criteria:
 
 ---
 
-#### P0-6. Delivery status UI (обновление для мультиканальности)
+#### P0-6. Delivery status UI (обновление для мультиканальности) ✅ DONE (2026-03-27)
 
 Обновить `DeliveryBadge` в `TutorHomeworkDetail.tsx` для отображения канала.
 

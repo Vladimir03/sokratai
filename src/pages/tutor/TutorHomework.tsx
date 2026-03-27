@@ -271,7 +271,7 @@ function AssignmentCard({ item }: { item: TutorHomeworkAssignmentListItem }) {
 
             {/* Not connected */}
             {(item.not_connected_count ?? 0) > 0 && (
-              <span className="flex items-center gap-1 text-amber-500" title="Telegram не подключён">
+              <span className="flex items-center gap-1 text-amber-500" title="Нет каналов доставки">
                 <WifiOff className="h-3.5 w-3.5" />
                 {item.not_connected_count}
               </span>
