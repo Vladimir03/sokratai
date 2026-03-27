@@ -715,3 +715,22 @@ Phase 1.3 собирает push (Phase 1.1) + email (Phase 1.2) + Telegram в е
 1. Убедиться что SW не кэширует stale bundle (консоль preview: «Non-prod host, cleaning up»)
 2. Проверить layout в preview на desktop и mobile
 3. Structural breakpoints = `md:` для колонок
+
+### Profiles table — нет колонки email (КРИТИЧНО)
+
+Таблица `profiles` **НЕ содержит** колонку `email`. Email пользователей хранится **только** в `auth.users`.
+
+**Правило**: при необходимости получить email — использовать `dbService.auth.admin.getUserById(userId)`, **НЕ** добавлять `email` в `.select()` из `profiles`. PostgREST вернёт ошибку и сломает весь flow.
+
+**Контекст бага (2026-03-27)**: `homework-api` и `homework-reminder` запрашивали `profiles.select("id, telegram_user_id, email")` — несуществующая колонка вызывала 500 ошибку, полностью блокируя каскад уведомлений (push, telegram, email). Исправлено: email берётся из `auth.admin.getUserById()`, `@temp.sokratai.ru` email-ы автоматически пропускаются.
+
+### Telegram-бот — команда /homework удалена (2026-03-27)
+
+Команда `/homework` и `/cancel` **полностью удалены** из меню бота (`setMyCommands`).
+
+- При вводе `/homework` бот отвечает редиректом на веб-кабинет (`/student/homework`)
+- При вводе `/cancel` бот отвечает что режим домашки в боте больше не используется
+- Код state machine (`homework/state_machine.ts`, `homework/homework_handler.ts`) **сохранён** для backward-совместимости с in-progress сессиями
+- `homework-reminder` отправляет web-ссылку вместо `/homework`
+- Плейсхолдер уведомления в конструкторе ДЗ: `"Новая домашка! Открой ссылку выше, чтобы начать."`
+- После деплоя бота необходимо вызвать `?action=set_commands` для обновления меню в Telegram
