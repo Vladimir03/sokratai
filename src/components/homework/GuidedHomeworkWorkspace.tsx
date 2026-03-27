@@ -310,6 +310,7 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const messagesContainerRef = useRef<HTMLDivElement>(null);
   const messagesRef = useRef<HomeworkThreadMessage[]>([]);
   const bootstrapStartedRef = useRef<Set<string>>(new Set());
 
