@@ -1,33 +1,26 @@
 
 
-## Plan: KB Picker wider + image thumbnails; HWTaskCard image preview
+## Fix: KB Picker Sheet width constrained by `sm:max-w-sm`
 
-Two issues:
-1. KB Picker Sheet is too narrow (460px ≈ 25% of screen) — widen to ~75%
-2. PickerTaskCard doesn't show image thumbnails for tasks with attachments
-3. HWTaskCard doesn't show image preview when task has `kb_attachment_url` but no uploaded image (shows only amber badge text)
+### Root cause
+
+The `SheetContent` component in `src/components/ui/sheet.tsx` (line 41) applies `sm:max-w-sm` (384px) to the `right` side variant. This overrides the `w-[75vw]` set in `KBPickerSheet.tsx` on any screen ≥640px — explaining why it looks small on desktop.
 
 ### Changes
 
-**1. `src/components/tutor/KBPickerSheet.tsx`**
+**`src/components/tutor/KBPickerSheet.tsx` (line 604)**
 
-- Change Sheet width from `w-[460px]` to `w-[75vw] max-w-[900px]` (line 573)
-- In `PickerTaskCard`: add image thumbnail next to task text
-  - Parse `task.attachment_url` via `parseAttachmentUrls`
-  - Resolve first ref to signed URL via `getKBImageSignedUrl` (same pattern as `TaskCard.tsx`)
-  - Show small thumbnail (48×48 or 64×64) with `object-cover rounded` styling
-  - Only load when attachment exists (lazy, same `useEffect` pattern as TaskCard)
+Override the sheet's built-in max-width by adding `!max-w-none` (or `sm:max-w-none`) to the className, so the `w-[75vw]` actually takes effect:
 
-**2. `src/components/tutor/homework-create/HWTaskCard.tsx`**
+```
+className="flex w-[75vw] max-w-none flex-col gap-0 p-0"
+```
 
-- When task has `kb_attachment_url` but no `task_image_path` (no uploaded image): resolve `kb_attachment_url` to signed URL and show a small preview thumbnail instead of just the amber text badge
-  - Use `getKBImageSignedUrl` from `kbApi.ts` to resolve `storage://` → signed URL
-  - Show thumbnail (48×48) in the image section area, with the existing amber badge text
+This removes the 900px cap too — 75vw will apply universally. On mobile (390px viewport), 75vw ≈ 293px which matches screenshot 2 nicely. On 1440px desktop, 75vw = 1080px — generous but appropriate for a task browser.
 
-### Technical details
+No changes to `sheet.tsx` (shared component, affects all sheets app-wide).
 
-- `getKBImageSignedUrl(ref: string): Promise<string | null>` already exists in `src/lib/kbApi.ts`
-- `parseAttachmentUrls` handles both single refs and JSON arrays
-- Signed URLs are cached by the function internally
-- Image loading uses the standard `useEffect` + cancelled flag pattern from `TaskCard.tsx`
+### Not changing
+- `src/components/ui/sheet.tsx` — the `sm:max-w-sm` default is fine for other sheets
+- Mobile behavior — already good per user feedback
 
