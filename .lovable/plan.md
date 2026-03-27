@@ -1,37 +1,32 @@
 
 
-## Plan: KB image auto-upload + empty task cleanup
+## Fix: Image previews missing in edit mode
 
-Two issues to fix:
+### Root cause
 
-### 1. Auto-upload KB attachment as real task image
+In `TutorHomeworkCreate.tsx` (lines 188-201), the edit prefill sets `task_image_path` from the DB (`t.task_image_url`, which is a `storage://` ref), but never resolves it to a signed HTTP URL for `task_image_preview_url`. Without a preview URL, `HWTaskCard` shows only the file name and a generic icon — no actual image.
 
-**Problem**: When a task is added from KB with `kb_attachment_url`, it shows a small amber badge "Фото из базы" instead of a proper image preview like manually uploaded images.
+### Fix
 
-**Fix in `HWTasksSection.tsx` → `kbTaskToDraftTask`**:
-- After converting KB task to draft, resolve `kb_attachment_url` via `getKBImageSignedUrl` to get a signed HTTP URL
-- Set that URL as `task_image_preview_url` on the draft task so the existing image preview UI in HWTaskCard renders it immediately
-- Set `task_image_path` to the `kb_attachment_url` value (the `storage://` ref) so the backend receives it as the task image
-- Set `task_image_name` to filename extracted from the storage ref
+**`src/pages/tutor/TutorHomeworkCreate.tsx`** — after setting tasks in the edit prefill `useEffect`, resolve `task_image_path` → signed URL for each task:
 
-This makes KB images display identically to manually uploaded images — full preview in the image section, not just a badge.
+```typescript
+// After setTasks(...) in the edit prefill useEffect:
+// Resolve storage:// refs to signed preview URLs
+const resolvedTasks = [...newTasks]; // the tasks array just set
+Promise.all(
+  resolvedTasks.map(async (t, i) => {
+    if (t.task_image_path) {
+      const url = await getHomeworkImageSignedUrl(t.task_image_path);
+      if (url) resolvedTasks[i] = { ...resolvedTasks[i], task_image_preview_url: url };
+    }
+  })
+).then(() => setTasks([...resolvedTasks]));
+```
 
-**Also in `HWTaskCard.tsx`**: Remove or simplify the `KBAttachmentBadge` component — it's no longer needed when `kb_attachment_url` is properly mapped to `task_image_path`/`task_image_preview_url`.
+Import `getHomeworkImageSignedUrl` from `@/lib/tutorHomeworkApi` (already partially imported).
 
-### 2. Remove empty first task when adding from KB
+### Result
 
-**Problem**: Constructor starts with one empty task. When tutor adds from KB, the KB task becomes task 2, leaving an empty task 1.
-
-**Fix in `HWTasksSection.tsx` → `handleAddFromKB`**:
-- Before appending KB tasks, check if any existing tasks are "empty" (no text, no image, no answer)
-- If the first task is empty and untouched, remove it before adding KB tasks
-- Helper: `isEmptyTask(t)` = `!t.task_text.trim() && !t.task_image_path && !t.correct_answer.trim() && !t.kb_task_id`
-
-### Files changed
-- `src/components/tutor/homework-create/HWTasksSection.tsx` — `kbTaskToDraftTask` resolves image, `handleAddFromKB` removes empty tasks
-- `src/components/tutor/homework-create/HWTaskCard.tsx` — simplify/remove `KBAttachmentBadge` (image now shows in standard image section)
-
-### Technical note
-- `getKBImageSignedUrl` is async — `kbTaskToDraftTask` will need to become async, or image resolution happens in `handleAddFromKB` after conversion
-- The `storage://` ref stored in `task_image_path` is already handled by the backend submit flow
+Edit mode will show full image previews (48×48 thumbnails) for all tasks with `storage://` image refs, identical to newly uploaded images.
 
