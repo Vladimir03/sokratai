@@ -109,28 +109,22 @@ Deno.serve(async (req) => {
 
     // Step 1: Try to find existing user by email (priority) or telegram
     if (email) {
-      // listUsers with email filter — reliable lookup
-      const { data: listData, error: listError } =
-        await supabaseAdmin.auth.admin.listUsers({ page: 1, perPage: 1 });
+      // Cast to any — getUserByEmail exists at runtime but not in bundled types
+      const { data: authUserData, error: authUserError } =
+        await (supabaseAdmin.auth.admin as any).getUserByEmail(email);
 
-      // Search through users by email (listUsers doesn't support email filter directly)
-      // Use profiles table for email lookup instead
-      const { data: emailProfile } = await supabaseAdmin
-        .from("profiles")
-        .select("id, registration_source, telegram_user_id, username")
-        .eq("id", ((): string => {
-          // Try to find auth user by iterating (fallback approach)
-          return "";
-        })())
-        .maybeSingle();
-
-      // Better approach: search auth users by email using raw query workaround
-      // The Supabase JS client v2 doesn't have getUserByEmail, so we use listUsers
-      // and filter, or query the profiles table which may have email
-      // For now, skip auth lookup by email and rely on profile telegram_username lookup
-      // The email will be used when creating a new user if not found by telegram
-      void listData;
-      void listError;
+      if (!authUserError && authUserData?.user) {
+        studentId = authUserData.user.id;
+        const { data: emailProfile } = await supabaseAdmin
+          .from("profiles")
+          .select("id, registration_source, telegram_user_id, username")
+          .eq("id", authUserData.user.id)
+          .maybeSingle();
+        if (emailProfile) {
+          profileRegistrationSource = emailProfile.registration_source ?? null;
+          existingTelegramUserId = emailProfile.telegram_user_id ?? null;
+        }
+      }
     }
 
     if (!studentId && telegramUsername) {
@@ -192,7 +186,7 @@ Deno.serve(async (req) => {
           console.log("Auth user already exists for email:", userEmail);
           // Retrieve by exact email lookup (race: user registered between our check and create)
           const { data: raceUser } =
-            await supabaseAdmin.auth.admin.getUserByEmail(userEmail);
+            await (supabaseAdmin.auth.admin as any).getUserByEmail(userEmail);
           if (raceUser?.user) {
             studentId = raceUser.user.id;
             profileRegistrationSource = "manual";
