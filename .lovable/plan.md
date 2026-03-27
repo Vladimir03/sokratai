@@ -1,41 +1,26 @@
 
 
-## Plan: Improve image display in KB Picker and HW Task Card
+## Fix: KBPickerSheet width capped by `sm:max-w-sm` in Sheet component
 
-### Problem
+### Root cause
 
-1. **KBPickerSheet**: Task cards show tiny 48x48 thumbnails that are unreadable. The catalog (screenshot 3) shows full-width images — the picker should match that quality.
-2. **HWTaskCard**: After adding a KB task, the image preview is also 48x48 with a raw storage path shown. Should display a proper large preview.
+The `sheetVariants` in `src/components/ui/sheet.tsx` (line 41) defines the `right` side variant with `sm:max-w-sm` — this caps the sheet at **384px** on screens ≥640px, overriding the `w-[75vw]` set in `KBPickerSheet.tsx`.
 
-### Changes
+The `max-w-none` class in KBPickerSheet's className loses specificity against the CVA variant's `sm:max-w-sm`.
 
-#### 1. `src/components/tutor/KBPickerSheet.tsx` — `PickerTaskCard` redesign
+### Fix
 
-Current layout: horizontal row with 48x48 thumbnail + text + button.
+**`src/components/ui/sheet.tsx`** — Remove the `sm:max-w-sm` constraint from the `right` (and `left`) side variants. This is a global Sheet component, but the default `w-3/4` (75%) remains as fallback width. Consumers that need narrower sheets can pass their own `max-w-*` via className.
 
-New layout inspired by catalog `TaskCard`:
-- **Header row**: SourceBadge + KIM number + "В ДЗ" button (right-aligned)
-- **Text**: `MathText` with `line-clamp-3` (instead of 2)
-- **Image below text**: full-width, `max-h-48 object-contain rounded-xl border` — same as catalog collapsed preview
-- Image-only tasks (`[Задача на фото]` marker): hero image `max-h-64`, text hidden
-- Remove the tiny 48x48 thumbnail entirely
+Alternatively, to avoid touching the shared UI component: override specificity in `KBPickerSheet.tsx` by using `!max-w-none` (Tailwind important modifier). This is the safer, scoped approach.
 
-This matches the catalog UX from screenshot 3.
+### Recommended approach (scoped)
 
-#### 2. `src/components/tutor/homework-create/HWTaskCard.tsx` — larger image preview
+**`src/components/tutor/KBPickerSheet.tsx`** line 607 — change `max-w-none` to `!max-w-none` so it wins over the variant's `sm:max-w-sm`:
 
-Current: 48x48 thumbnail with filename + raw storage path.
+```
+className="flex w-[75vw] !max-w-none flex-col gap-0 p-0"
+```
 
-New:
-- Image preview: `max-h-48 w-full object-contain rounded-lg border` (full-width, large)
-- Keep filename + remove button on a row above the image
-- Remove the raw `storage://` path display (useless to tutor)
-
-### Files
-- `src/components/tutor/KBPickerSheet.tsx` — redesign `PickerTaskCard` layout
-- `src/components/tutor/homework-create/HWTaskCard.tsx` — enlarge image preview section
-
-### Not changing
-- `src/components/kb/TaskCard.tsx` — already good (screenshot 3)
-- Sheet width — already fixed to 75vw
+Single line change. Sheet stays 75vw on desktop and mobile.
 
