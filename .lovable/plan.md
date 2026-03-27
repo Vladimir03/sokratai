@@ -1,26 +1,41 @@
 
 
-## Fix: KBPickerSheet width capped by `sm:max-w-sm` in Sheet component
+## Fix: Chat area collapses to zero after sending a message
 
 ### Root cause
 
-The `sheetVariants` in `src/components/ui/sheet.tsx` (line 41) defines the `right` side variant with `sm:max-w-sm` — this caps the sheet at **384px** on screens ≥640px, overriding the `w-[75vw]` set in `KBPickerSheet.tsx`.
+`GuidedHomeworkWorkspace.tsx` line 377-381 uses `messagesEndRef.current.scrollIntoView({ behavior: 'smooth' })` to auto-scroll after messages update. 
 
-The `max-w-none` class in KBPickerSheet's className loses specificity against the CVA variant's `sm:max-w-sm`.
+`scrollIntoView` scrolls **all** scrollable ancestors — not just the immediate `overflow-y-auto` container. The fixed overlay sits inside AuthGuard's wrapper `<div className="pt-14 pb-20">`, which is a normal-flow block that CAN scroll. When `scrollIntoView` fires, it pushes the AuthGuard wrapper out of view, creating the white void below the navigation bar. The fixed overlay stays positioned correctly, but its parent content has scrolled away, causing the visual collapse.
 
 ### Fix
 
-**`src/components/ui/sheet.tsx`** — Remove the `sm:max-w-sm` constraint from the `right` (and `left`) side variants. This is a global Sheet component, but the default `w-3/4` (75%) remains as fallback width. Consumers that need narrower sheets can pass their own `max-w-*` via className.
+**File: `src/components/homework/GuidedHomeworkWorkspace.tsx`**
 
-Alternatively, to avoid touching the shared UI component: override specificity in `KBPickerSheet.tsx` by using `!max-w-none` (Tailwind important modifier). This is the safer, scoped approach.
+1. **Add a ref to the messages scroll container** (the `flex-1 overflow-y-auto` div at line 1340):
+   ```tsx
+   const messagesContainerRef = useRef<HTMLDivElement>(null);
+   ```
 
-### Recommended approach (scoped)
+2. **Replace `scrollIntoView` with direct container scroll** (line 377-381):
+   ```tsx
+   useEffect(() => {
+     const container = messagesContainerRef.current;
+     if (container) {
+       container.scrollTo({ top: container.scrollHeight, behavior: 'smooth' });
+     }
+   }, [messages, currentTaskOrder, streamingContent]);
+   ```
+   This scrolls only the messages container, never ancestors.
 
-**`src/components/tutor/KBPickerSheet.tsx`** line 607 — change `max-w-none` to `!max-w-none` so it wins over the variant's `sm:max-w-sm`:
+3. **Attach the ref** to the messages div:
+   ```tsx
+   <div ref={messagesContainerRef} className="flex-1 overflow-y-auto px-4 py-4 min-h-0">
+   ```
 
-```
-className="flex w-[75vw] !max-w-none flex-col gap-0 p-0"
-```
+4. **Keep `messagesEndRef`** only as the scroll sentinel inside the container (no changes needed to the `<div ref={messagesEndRef} />` at line 1378).
 
-Single line change. Sheet stays 75vw on desktop and mobile.
+### Why this fixes it
+
+`container.scrollTo()` operates on the element itself — it cannot scroll ancestors. The AuthGuard wrapper stays at scroll position 0, and the chat messages scroll correctly within their container.
 
