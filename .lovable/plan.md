@@ -1,47 +1,43 @@
 
 
-## Plan: Fix Build Errors + Configure Push & Email Infrastructure
+## Fix: Chat empty space + Guided homework chat closing on answer
 
-### Part 1 — Fix Build Errors (3 files)
+### Problem 1 — Empty space in Chat header
+The Chat page uses `top-[110px] md:top-[104px]` for the fixed chat container, but Navigation is only `h-14` (56px). This creates ~54px of dead space visible in the screenshot. The sidebar also uses `top-[110px]`.
 
-**1. `supabase/functions/process-email-queue/index.ts`** — 7 TS errors
-- Change `moveToDlq` parameter type from `ReturnType<typeof createClient>` to `any` (same pattern as claim-invite fix)
-- Add explicit `any` type annotations on `.map((msg: any)` and `.filter((id: any)` lambdas
-- All `supabase` argument mismatches resolve from the `any` parameter fix
+**Fix**: Change `top-[110px]` → `top-14` (both mobile and desktop) in `src/pages/Chat.tsx`:
+- Line 1761: main chat container `top-[110px] md:top-[104px]` → `top-14`
+- Line 1778: mobile sidebar `top-[110px]` → `top-14`
 
-**2. `supabase/functions/tutor-manual-add-student/index.ts`** — 2 TS errors
-- `getUserByEmail` doesn't exist on the Supabase auth admin API. Replace with `listUsers({ filter: email })` pattern or use `supabase.from('auth.users')` query. The correct Supabase approach: use `supabase.auth.admin.listUsers()` with filter, or query profiles table by email first, then `getUserById`.
+### Problem 2 — Chat closes when student submits answer
+In `GuidedHomeworkWorkspace.tsx`, when `syncThreadFromResponse` sets `threadStatus = 'completed'` (after all tasks done), the component immediately renders the "completed" card (line 1199), replacing the entire chat. The student loses the AI's last feedback message.
 
-**3. `src/lib/pushApi.ts`** — 1 TS error (Uint8Array assignability)
-- Add `as BufferSource` assertion on the return of `urlBase64ToUint8Array`, or change return type to use `new Uint8Array(...) as unknown as BufferSource`
+**Fix**: Instead of immediately switching to completed view, add a delay/confirmation:
+- Add `showCompletedView` state (default `false`)
+- When `threadStatus` becomes `'completed'`, don't immediately render the completed card — show the last task's messages with a "Результаты" button
+- Only switch to completed view when student clicks the button or after initial mount with `completed` status (returning user)
 
-### Part 2 — VAPID Keys for Web Push
+**Files to modify:**
+1. `src/pages/Chat.tsx` — fix `top-[110px]` → `top-14` (2 places)
+2. `src/components/homework/GuidedHomeworkWorkspace.tsx` — delay completed view transition
 
-Generate VAPID keys and configure:
-- Add secret `VAPID_PUBLIC_KEY` (edge function)
-- Add secret `VAPID_PRIVATE_KEY` (edge function)  
-- Add secret `VAPID_SUBJECT` = `mailto:support@sokratai.ru` (edge function)
-- Add secret `VITE_VAPID_PUBLIC_KEY` (frontend env — same public key)
+### Technical details
 
-User will need to generate keys via `npx web-push generate-vapid-keys` and paste them.
+**Chat.tsx** (2 line changes):
+```
+// Line 1761
+- "fixed inset-0 top-[110px] md:top-[104px] flex flex-col"
++ "fixed inset-0 top-14 flex flex-col"
 
-### Part 3 — Email Secrets
+// Line 1778
+- 'fixed top-[110px] bottom-0 left-0 z-50 w-80 ...'
++ 'fixed top-14 bottom-0 left-0 z-50 w-80 ...'
+```
 
-- Add secret `PUBLIC_APP_URL` = `https://sokratai.ru`
-- `LOVABLE_API_KEY` already exists ✅
-
-### Part 4 — Deploy Edge Functions
-
-Deploy: `push-subscribe`, `process-email-queue`
-
-### Part 5 — Email Infrastructure Verification
-
-Email domain `notify.sokratai.ru` is verified ✅. Verify cron job exists for `process-email-queue` (was set up by `setup_email_infra` earlier). If missing, re-run `setup_email_infra`.
-
-### Execution Order
-
-1. Fix 3 build errors (parallel file edits)
-2. Add secrets (VAPID keys — requires user input)
-3. Deploy edge functions
-4. Verify cron job
+**GuidedHomeworkWorkspace.tsx**:
+- New state: `const [showCompletedView, setShowCompletedView] = useState(false)`
+- Initialize to `true` if thread is already `completed` on first load (user returning)
+- On `syncThreadFromResponse`: when status transitions to `completed` during active session, keep `showCompletedView = false` so the chat stays visible with the last AI response
+- Replace the completed guard `if (threadStatus === 'completed')` with `if (threadStatus === 'completed' && showCompletedView)`
+- Add a prominent "Посмотреть результаты" button in the chat when `threadStatus === 'completed' && !showCompletedView`
 
