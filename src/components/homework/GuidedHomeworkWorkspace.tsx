@@ -317,6 +317,7 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const messagesRef = useRef<HomeworkThreadMessage[]>([]);
   const bootstrapStartedRef = useRef<Set<string>>(new Set());
+  const ocrTextByTaskRef = useRef<Map<number, string>>(new Map());
 
   const {
     data: thread,
