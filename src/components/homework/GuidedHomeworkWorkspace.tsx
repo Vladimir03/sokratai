@@ -1418,21 +1418,33 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
 
         </div>
 
-        <GuidedChatInput
-          key={currentTaskOrder}
-          onSendAnswer={handleSendAnswer}
-          onSendStep={handleSendStep}
-          isLoading={isStreaming || isCheckingAnswer || isRequestingHint}
-          disabled={threadStatus !== 'active' || !isViewingActiveTask}
-          taskNumber={currentTask?.order_num}
-          initialAnswerText={currentDraftRef.current.answer}
-          initialDiscussionText={currentDraftRef.current.discussion}
-          onDraftChange={handleDraftChange}
-          attachedFiles={attachedFiles}
-          onFileSelect={handleFileSelect}
-          onFileRemove={handleFileRemove}
-          isUploading={isUploading}
-        />
+        {threadStatus === 'completed' && !showCompletedView ? (
+          <div className="border-t px-4 py-3 bg-muted/30">
+            <Button
+              onClick={() => setShowCompletedView(true)}
+              className="w-full gap-2"
+            >
+              <CheckCircle2 className="h-4 w-4" />
+              Посмотреть результаты
+            </Button>
+          </div>
+        ) : (
+          <GuidedChatInput
+            key={currentTaskOrder}
+            onSendAnswer={handleSendAnswer}
+            onSendStep={handleSendStep}
+            isLoading={isStreaming || isCheckingAnswer || isRequestingHint}
+            disabled={threadStatus !== 'active' || !isViewingActiveTask}
+            taskNumber={currentTask?.order_num}
+            initialAnswerText={currentDraftRef.current.answer}
+            initialDiscussionText={currentDraftRef.current.discussion}
+            onDraftChange={handleDraftChange}
+            attachedFiles={attachedFiles}
+            onFileSelect={handleFileSelect}
+            onFileRemove={handleFileRemove}
+            isUploading={isUploading}
+          />
+        )}
       </div>
     </div>
   );
