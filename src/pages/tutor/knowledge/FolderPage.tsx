@@ -1,18 +1,20 @@
 import { useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { ChevronRight, Folder, FolderPlus, Plus } from 'lucide-react';
+import { ChevronRight, Folder, FolderPlus, Pencil, Plus, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 import TutorGuard from '@/components/TutorGuard';
 import { CreateFolderModal } from '@/components/kb/CreateFolderModal';
 import { CreateTaskModal } from '@/components/kb/CreateTaskModal';
+import { DeleteFolderDialog } from '@/components/kb/DeleteFolderDialog';
 import { EditTaskModal } from '@/components/kb/EditTaskModal';
 import { FolderCard } from '@/components/kb/FolderCard';
 import { MoveToFolderModal } from '@/components/kb/MoveToFolderModal';
+import { RenameFolderModal } from '@/components/kb/RenameFolderModal';
 import { KBStatusCard } from '@/components/kb/KBStatusCard';
 import { KnowledgeBaseFrame } from '@/components/kb/KnowledgeBaseFrame';
 import { TaskCard } from '@/components/kb/TaskCard';
 import { TutorLayout } from '@/components/tutor/TutorLayout';
-import { useFolder } from '@/hooks/useFolders';
+import { useDeleteFolder, useFolder } from '@/hooks/useFolders';
 import { useDeleteTask } from '@/hooks/useKnowledgeBase';
 import { useIsModerator } from '@/hooks/useIsModerator';
 import { parseAttachmentUrls } from '@/lib/kbApi';
@@ -29,8 +31,11 @@ function FolderContent() {
   const [showCreateTask, setShowCreateTask] = useState(false);
   const [editingTask, setEditingTask] = useState<KBTask | null>(null);
   const [movingTask, setMovingTask] = useState<KBTask | null>(null);
+  const [renamingFolder, setRenamingFolder] = useState<{ id: string; name: string } | null>(null);
+  const [deletingFolder, setDeletingFolder] = useState<{ id: string; name: string } | null>(null);
   const { addTask, hasTask } = useHWDraftStore();
   const deleteTask = useDeleteTask();
+  const deleteFolder = useDeleteFolder();
   const { isModerator } = useIsModerator();
 
   const handleAddToHW = (task: KBTask) => {
@@ -100,9 +105,27 @@ function FolderContent() {
               </nav>
 
               <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-                <h2 className="font-display text-[1.85rem] font-bold tracking-[-0.04em] text-slate-950">
-                  {folder.name}
-                </h2>
+                <div className="flex items-center gap-2">
+                  <h2 className="font-display text-[1.85rem] font-bold tracking-[-0.04em] text-slate-950">
+                    {folder.name}
+                  </h2>
+                  <button
+                    type="button"
+                    onClick={() => setRenamingFolder({ id: folder.id, name: folder.name })}
+                    className="rounded-lg p-1.5 text-slate-400 transition-colors duration-200 hover:bg-slate-100 hover:text-socrat-primary"
+                    aria-label="Переименовать папку"
+                  >
+                    <Pencil className="h-4 w-4" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setDeletingFolder({ id: folder.id, name: folder.name })}
+                    className="rounded-lg p-1.5 text-slate-400 transition-colors duration-200 hover:bg-red-50 hover:text-red-500"
+                    aria-label="Удалить папку"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </button>
+                </div>
                 <div className="flex flex-wrap gap-2">
                   <button
                     type="button"
@@ -136,6 +159,11 @@ function FolderContent() {
                         childCount={subfolder.child_count}
                         taskCount={subfolder.task_count}
                         onClick={() => navigate(`/tutor/knowledge/folder/${subfolder.id}`)}
+                        onRename={() => setRenamingFolder({ id: subfolder.id, name: subfolder.name })}
+                        onDelete={() => setDeletingFolder({
+                          id: subfolder.id,
+                          name: subfolder.name,
+                        })}
                       />
                     ))}
                   </div>
@@ -214,6 +242,36 @@ function FolderContent() {
             task={movingTask}
             currentFolderId={folderId}
             onClose={() => setMovingTask(null)}
+          />
+        ) : null}
+
+        {renamingFolder ? (
+          <RenameFolderModal
+            folderId={renamingFolder.id}
+            currentName={renamingFolder.name}
+            onClose={() => setRenamingFolder(null)}
+          />
+        ) : null}
+
+        {deletingFolder ? (
+          <DeleteFolderDialog
+            folder={deletingFolder}
+            isPending={deleteFolder.isPending}
+            onConfirm={() => {
+              deleteFolder.mutate(deletingFolder.id, {
+                onSuccess: () => {
+                  toast.success('Папка удалена');
+                  const isDeletingCurrent = deletingFolder.id === folderId;
+                  setDeletingFolder(null);
+                  if (isDeletingCurrent) {
+                    const parentCrumb = breadcrumbs.length > 1 ? breadcrumbs[breadcrumbs.length - 2] : null;
+                    navigate(parentCrumb ? `/tutor/knowledge/folder/${parentCrumb.id}` : '/tutor/knowledge?tab=mybase');
+                  }
+                },
+                onError: () => toast.error('Не удалось удалить папку'),
+              });
+            }}
+            onClose={() => setDeletingFolder(null)}
           />
         ) : null}
       </KnowledgeBaseFrame>

@@ -1,18 +1,21 @@
 import { useCallback, useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Folder, FolderPlus, LayoutGrid, Plus } from 'lucide-react';
+import { toast } from 'sonner';
 import TutorGuard from '@/components/TutorGuard';
 import { CreateFolderModal } from '@/components/kb/CreateFolderModal';
 import { CreateTaskModal } from '@/components/kb/CreateTaskModal';
+import { DeleteFolderDialog } from '@/components/kb/DeleteFolderDialog';
 import { FolderCard } from '@/components/kb/FolderCard';
 import { KBSearchDropdown } from '@/components/kb/KBSearchDropdown';
 import { KBStatusCard } from '@/components/kb/KBStatusCard';
 import { KnowledgeBaseFrame } from '@/components/kb/KnowledgeBaseFrame';
+import { RenameFolderModal } from '@/components/kb/RenameFolderModal';
 import { TopicCard } from '@/components/kb/TopicCard';
 import { FilterChips } from '@/components/kb/ui/FilterChips';
 import { KBSearchInput } from '@/components/kb/ui/KBSearchInput';
 import { TutorLayout } from '@/components/tutor/TutorLayout';
-import { useRootFolders } from '@/hooks/useFolders';
+import { useDeleteFolder, useRootFolders } from '@/hooks/useFolders';
 import { useKBSearch } from '@/hooks/useKBSearch';
 import { useTopics } from '@/hooks/useKnowledgeBase';
 import { cn } from '@/lib/utils';
@@ -213,6 +216,9 @@ function MyBaseHome({ onOpenFolder }: MyBaseHomeProps) {
   const { folders, loading, error, refetch, isFetching } = useRootFolders();
   const [showCreateFolder, setShowCreateFolder] = useState(false);
   const [showCreateTask, setShowCreateTask] = useState(false);
+  const [renamingFolder, setRenamingFolder] = useState<{ id: string; name: string } | null>(null);
+  const [deletingFolder, setDeletingFolder] = useState<{ id: string; name: string } | null>(null);
+  const deleteFolder = useDeleteFolder();
 
   return (
     <div>
@@ -255,6 +261,11 @@ function MyBaseHome({ onOpenFolder }: MyBaseHomeProps) {
               childCount={folder.child_count}
               taskCount={folder.task_count}
               onClick={() => onOpenFolder(folder.id)}
+              onRename={() => setRenamingFolder({ id: folder.id, name: folder.name })}
+              onDelete={() => setDeletingFolder({
+                id: folder.id,
+                name: folder.name,
+              })}
             />
           ))}
         </div>
@@ -285,6 +296,31 @@ function MyBaseHome({ onOpenFolder }: MyBaseHomeProps) {
 
       {showCreateTask ? (
         <CreateTaskModal onClose={() => setShowCreateTask(false)} />
+      ) : null}
+
+      {renamingFolder ? (
+        <RenameFolderModal
+          folderId={renamingFolder.id}
+          currentName={renamingFolder.name}
+          onClose={() => setRenamingFolder(null)}
+        />
+      ) : null}
+
+      {deletingFolder ? (
+        <DeleteFolderDialog
+          folder={deletingFolder}
+          isPending={deleteFolder.isPending}
+          onConfirm={() => {
+            deleteFolder.mutate(deletingFolder.id, {
+              onSuccess: () => {
+                toast.success('Папка удалена');
+                setDeletingFolder(null);
+              },
+              onError: () => toast.error('Не удалось удалить папку'),
+            });
+          }}
+          onClose={() => setDeletingFolder(null)}
+        />
       ) : null}
     </div>
   );

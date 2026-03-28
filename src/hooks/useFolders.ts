@@ -178,21 +178,84 @@ async function insertFolder(input: CreateKBFolderInput): Promise<KBFolder> {
   return data as KBFolder;
 }
 
+async function fetchDescendantFolderIds(folderId: string): Promise<string[]> {
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session) throw new Error('Нет активной сессии');
+
+  const { data, error } = await supabase
+    .from('kb_folders')
+    .select('id, parent_id')
+    .eq('owner_id', session.user.id);
+  if (error) throw error;
+
+  const childrenMap = new Map<string, string[]>();
+  for (const f of data ?? []) {
+    const pid = f.parent_id as string | null;
+    if (pid) {
+      const list = childrenMap.get(pid) ?? [];
+      list.push(f.id);
+      childrenMap.set(pid, list);
+    }
+  }
+
+  const result: string[] = [];
+  const stack = [folderId];
+  while (stack.length > 0) {
+    const current = stack.pop()!;
+    result.push(current);
+    for (const child of childrenMap.get(current) ?? []) {
+      stack.push(child);
+    }
+  }
+  return result;
+}
+
+export async function countFolderDescendants(folderId: string): Promise<{ subfolderCount: number; taskCount: number }> {
+  const allIds = await fetchDescendantFolderIds(folderId);
+  const subfolderCount = allIds.length - 1; // exclude the folder itself
+
+  let taskCount = 0;
+  for (let i = 0; i < allIds.length; i += 200) {
+    const batch = allIds.slice(i, i + 200);
+    const { count, error } = await supabase
+      .from('kb_tasks')
+      .select('*', { count: 'exact', head: true })
+      .in('folder_id', batch);
+    if (error) throw error;
+    taskCount += count ?? 0;
+  }
+
+  return { subfolderCount, taskCount };
+}
+
 async function removeFolder(folderId: string): Promise<void> {
-  // Delete ALL personal tasks in this folder to avoid CHECK constraint
-  // violation: kb_tasks_space_check requires (topic_id OR folder_id) to be set,
-  // but ON DELETE SET NULL would null out folder_id on orphaned personal tasks.
-  // Tasks with topic_id set are also deleted — they belong to the folder.
-  const { error: tasksError } = await supabase
-    .from('kb_tasks')
-    .delete()
-    .eq('folder_id', folderId);
-  if (tasksError) throw tasksError;
+  // Collect ALL descendant folder IDs (including folderId itself).
+  // We must delete tasks in every descendant folder before deleting the root,
+  // because DB cascades child folder deletion but SET NULLs folder_id on tasks,
+  // violating kb_tasks_space_check for personal tasks (topic_id is also NULL).
+  const allFolderIds = await fetchDescendantFolderIds(folderId);
+
+  for (let i = 0; i < allFolderIds.length; i += 200) {
+    const batch = allFolderIds.slice(i, i + 200);
+    const { error: tasksError } = await supabase
+      .from('kb_tasks')
+      .delete()
+      .in('folder_id', batch);
+    if (tasksError) throw tasksError;
+  }
 
   const { error } = await supabase
     .from('kb_folders')
     .delete()
     .eq('id', folderId);
+  if (error) throw error;
+}
+
+async function renameFolder(params: { folderId: string; name: string }): Promise<void> {
+  const { error } = await supabase
+    .from('kb_folders')
+    .update({ name: params.name })
+    .eq('id', params.folderId);
   if (error) throw error;
 }
 
@@ -373,6 +436,18 @@ export function useDeleteFolder() {
 
   return useMutation({
     mutationFn: removeFolder,
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['tutor', 'kb'] });
+    },
+  });
+}
+
+/** Rename a folder */
+export function useRenameFolder() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: renameFolder,
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['tutor', 'kb'] });
     },
