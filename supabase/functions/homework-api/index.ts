@@ -1,6 +1,6 @@
 import { createClient, SupabaseClient } from "npm:@supabase/supabase-js@2";
 import { runHomeworkAiCheck } from "./ai_check.ts";
-import { recognizeHomeworkPhoto } from "./vision_checker.ts";
+import { recognizeHomeworkPhoto, type HomeworkSubject } from "./vision_checker.ts";
 import {
   computeAvailableScore,
   evaluateStudentAnswer,
@@ -2834,6 +2834,44 @@ async function resolveTaskImageUrlForAI(
   return `data:${mime};base64,${arrayBufferToBase64(buf)}`;
 }
 
+async function ensureTaskOcrText(
+  db: SupabaseClient,
+  task: { id: string; task_image_url: string | null; ocr_text?: string | null },
+  subject: string | null | undefined,
+): Promise<string | null> {
+  if (typeof task.ocr_text === "string" && task.ocr_text.trim() && task.ocr_text !== "[неразборчиво]") {
+    return task.ocr_text.trim();
+  }
+
+  if (!task.task_image_url) return null;
+
+  const imageDataUrl = await resolveTaskImageUrlForAI(db, task.task_image_url);
+  if (!imageDataUrl) return null;
+
+  const normalizedSubject = VALID_SUBJECTS.includes(subject as typeof VALID_SUBJECTS[number])
+    ? subject as HomeworkSubject
+    : "math";
+
+  try {
+    const result = await recognizeHomeworkPhoto(imageDataUrl, normalizedSubject);
+    if (result.recognized_text && result.recognized_text !== "[неразборчиво]") {
+      await db
+        .from("homework_tutor_tasks")
+        .update({ ocr_text: result.recognized_text })
+        .eq("id", task.id);
+      return result.recognized_text;
+    }
+  } catch (error) {
+    console.error("homework_api_task_ocr_ensure_failed", {
+      taskId: task.id,
+      subject: normalizedSubject,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+
+  return null;
+}
+
 // ─── Endpoint: GET /assignments/:id/tasks/:taskId/image-url ──────────────────
 
 async function handleTaskImageSignedUrl(
@@ -3736,7 +3774,7 @@ async function handleCheckAnswer(
   // Load the full task (with correct_answer, rubric)
   const { data: task } = await db
     .from("homework_tutor_tasks")
-    .select("id, order_num, task_text, task_image_url, correct_answer, rubric_text, max_score")
+    .select("id, order_num, task_text, task_image_url, ocr_text, correct_answer, rubric_text, max_score")
     .eq("id", currentState.task_id)
     .single();
 
@@ -3758,7 +3796,7 @@ async function handleCheckAnswer(
   // Load conversation history (last 15 messages for current task)
   const { data: recentMessages } = await db
     .from("homework_tutor_thread_messages")
-    .select("role, content, visible_to_student")
+    .select("role, content, visible_to_student, message_kind")
     .eq("thread_id", threadId)
     .eq("task_order", currentOrder)
     .order("created_at", { ascending: true })
@@ -3798,17 +3836,9 @@ async function handleCheckAnswer(
     .update({ last_student_message_at: new Date().toISOString() })
     .eq("id", threadId);
 
-  // Increment attempts
-  await db
-    .from("homework_tutor_task_states")
-    .update({
-      attempts: ((currentState.attempts as number) ?? 0) + 1,
-      updated_at: new Date().toISOString(),
-    })
-    .eq("id", currentState.id);
-
   // Resolve task image into an AI-compatible data URL and latest student image into a signed URL
   const taskImageSignedUrl = await resolveTaskImageUrlForAI(db, task.task_image_url);
+  const taskOcrText = await ensureTaskOcrText(db, task, assignment.subject ?? "math");
   const studentImageUrls = await loadLatestStudentImageUrlsForTask(
     db,
     threadId,
@@ -3824,6 +3854,7 @@ async function handleCheckAnswer(
     taskText: task.task_text ?? "",
     taskImageUrl: taskImageSignedUrl,
     studentImageUrls,
+    taskOcrText,
     correctAnswer: task.correct_answer,
     rubricText: task.rubric_text,
     subject: assignment.subject ?? "math",
@@ -3854,12 +3885,14 @@ async function handleCheckAnswer(
   });
 
   let responseData: Record<string, unknown>;
+  const nextAttemptCount = ((currentState.attempts as number) ?? 0) + 1;
 
   if (effectiveVerdict === "CORRECT") {
     // Set earned_score, mark completed, advance
     const earnedScore = currentAvailableScore;
 
     await db.from("homework_tutor_task_states").update({
+      attempts: nextAttemptCount,
       status: "completed",
       earned_score: earnedScore,
       available_score: currentAvailableScore,
@@ -3885,10 +3918,29 @@ async function handleCheckAnswer(
       thread_completed: advanceResult.threadCompleted,
       total_tasks: totalTasks,
     };
+  } else if (effectiveVerdict === "CHECK_FAILED") {
+    await db.from("homework_tutor_task_states").update({
+      last_ai_feedback: result.feedback,
+      updated_at: new Date().toISOString(),
+    }).eq("id", currentState.id);
+
+    responseData = {
+      verdict: "CHECK_FAILED",
+      feedback: result.feedback,
+      earned_score: null,
+      available_score: currentAvailableScore,
+      max_score: task.max_score ?? 1,
+      wrong_answer_count: (currentState.wrong_answer_count as number) ?? 0,
+      hint_count: (currentState.hint_count as number) ?? 0,
+      task_completed: false,
+      next_task_order: null,
+      thread_completed: false,
+      total_tasks: totalTasks,
+    };
   } else if (effectiveVerdict === "ON_TRACK") {
     // Correct step but NOT the final answer — keep task open
     // First 2 ON_TRACKs are free; from 3rd onward, count as hint (degrades score)
-    const currentAttempts = ((currentState.attempts as number) ?? 0) + 1;
+    const currentAttempts = nextAttemptCount;
     const wrongCount = (currentState.wrong_answer_count as number) ?? 0;
     const prevOnTrackCount = currentAttempts - wrongCount - 1; // past ON_TRACK-like attempts
     let newHintCount = (currentState.hint_count as number) ?? 0;
@@ -3903,6 +3955,7 @@ async function handleCheckAnswer(
     }
 
     await db.from("homework_tutor_task_states").update({
+      attempts: nextAttemptCount,
       hint_count: newHintCount,
       available_score: onTrackAvailableScore,
       last_ai_feedback: result.feedback,
@@ -3931,6 +3984,7 @@ async function handleCheckAnswer(
     );
 
     await db.from("homework_tutor_task_states").update({
+      attempts: nextAttemptCount,
       wrong_answer_count: newWrongCount,
       available_score: newAvailableScore,
       last_ai_feedback: result.feedback,
@@ -4034,7 +4088,7 @@ async function handleRequestHint(
   // Load task
   const { data: task } = await db
     .from("homework_tutor_tasks")
-    .select("id, order_num, task_text, task_image_url, correct_answer, max_score")
+    .select("id, order_num, task_text, task_image_url, ocr_text, correct_answer, max_score")
     .eq("id", activeState.task_id)
     .single();
 
@@ -4052,7 +4106,7 @@ async function handleRequestHint(
   // Load conversation history
   const { data: recentMessages } = await db
     .from("homework_tutor_thread_messages")
-    .select("role, content, visible_to_student")
+    .select("role, content, visible_to_student, message_kind")
     .eq("thread_id", threadId)
     .eq("task_order", currentOrder)
     .order("created_at", { ascending: true })
@@ -4074,6 +4128,7 @@ async function handleRequestHint(
 
   // Resolve task image into an AI-compatible data URL and latest student image into a signed URL
   const hintTaskImageUrl = await resolveTaskImageUrlForAI(db, task.task_image_url);
+  const taskOcrText = await ensureTaskOcrText(db, task, assignment?.subject ?? "math");
   const studentImageUrls = await loadLatestStudentImageUrlsForTask(
     db,
     threadId,
@@ -4087,6 +4142,7 @@ async function handleRequestHint(
     taskText: task.task_text ?? "",
     taskImageUrl: hintTaskImageUrl,
     studentImageUrls,
+    taskOcrText,
     correctAnswer: task.correct_answer,
     subject: assignment?.subject ?? "math",
     conversationHistory: recentMessages ?? [],

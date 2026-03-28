@@ -1,6 +1,6 @@
-# Guided Homework Chat: Implementation Summary (Phases 1 + 2 + 2.1)
+# Guided Homework Chat: Implementation Summary (Phases 1 + 2 + 2.1 + 3)
 
-Status: Phase 1 + 2 + 2.1 completed, Phases 3-6 pending.
+Status: Phases 1 + 2 + 2.1 + 3 shipped. Reliability hardening for answer checking, OCR grounding, and fair scoring shipped on 2026-03-28.
 
 ---
 
@@ -209,14 +209,72 @@ Events tracked: `guided_send_click`, `guided_send_failed`, `guided_retry_click`,
 
 ---
 
+## Phase 3: AI Checking, Hints, Scoring
+
+**Goal:** Turn guided homework into a scored task-by-task workflow with answer checking, hint degradation, and auto-advance on correct final answers.
+
+### Student Answer Check
+
+`POST /threads/:id/check` now:
+- saves the student's green-field answer with `message_kind = "answer"`
+- evaluates the answer against `task_text`, `correct_answer`, `rubric_text`, task image, latest student images, and recent task-scoped conversation history
+- returns one of four verdicts:
+
+```
+GuidedVerdict = 'CORRECT' | 'ON_TRACK' | 'INCORRECT' | 'CHECK_FAILED'
+```
+
+- `CORRECT` completes the current task and auto-advances the thread
+- `ON_TRACK` keeps the task open without marking the final answer as complete
+- `INCORRECT` increments `wrong_answer_count` and degrades available score
+- `CHECK_FAILED` means evaluation was not reliable; no score or attempt penalty is applied
+
+### Hints and Score Degradation
+
+- `POST /threads/:id/hint` generates a short guided hint and increments `hint_count`
+- Available score is recomputed with:
+
+```
+computeAvailableScore(maxScore, wrongCount, hintCount)
+= maxScore * max(0.5, 1 - 0.1 * (wrongCount + hintCount))
+```
+
+- Floor is 50% of task score
+- `ON_TRACK` answers are free for the first two occurrences; starting from the third, they degrade score like a hint
+
+### Reliability Hardening (2026-03-28)
+
+The guided-homework AI paths were hardened to fix real student-facing failures on graph tasks:
+
+- **Fair failure state:** `CHECK_FAILED` was introduced so AI / gateway / JSON failures no longer look like student mistakes
+- **Deterministic short-answer fast-path:** short numeric or factual answers can now be accepted before the AI call:
+  - `2,5` and `2.5`
+  - `2.5 м/с`
+  - `v = 2,5 м/с`
+- **Concrete unit alias normalization:** common physics units are normalized through explicit alias mapping (`m/s`, `km/h`, `kg`, `N`, `Pa`, etc.) instead of fragile character-by-character replacement
+- **Unified context across Answer / Hint / Discussion:** backend `check` and `hint` paths now select `message_kind`, drop system transition messages from `conversationHistory`, and use OCR-backed task facts
+- **Graph anti-hallucination guidance:** prompts now explicitly tell AI not to invent coordinates, axis values, scale labels, or intermediate numbers if they cannot be read confidently from text, OCR, or image
+- **Backend OCR reuse:** when `homework_tutor_tasks.ocr_text` is missing, the backend recognizes the task image once, persists OCR, and reuses it in future checks/hints
+- **Attempts fairness:** `attempts` are incremented only for real learning verdicts (`CORRECT`, `ON_TRACK`, `INCORRECT`), not for `CHECK_FAILED`
+
+### New / Updated Files for Phase 3
+
+| File | Purpose |
+|---|---|
+| `supabase/functions/homework-api/guided_ai.ts` | answer evaluation, hint generation, deterministic short-answer fast-path, graph grounding |
+| `supabase/functions/homework-api/index.ts` | `/check` and `/hint` runtime wiring, OCR ensure helper, fair scoring / attempts updates |
+| `supabase/functions/homework-api/vision_checker.ts` | raw-response preview on JSON parse failures for observability |
+| `src/components/homework/GuidedHomeworkWorkspace.tsx` | frontend handling for `CHECK_FAILED`, OCR-aware discussion/bootstrap context |
+| `src/types/homework.ts` | `CheckAnswerResponse.verdict` extended with `CHECK_FAILED` |
+| `src/lib/homeworkTelemetry.ts` | `guided_answer_check_failed` telemetry event |
+
+---
+
 ## What's NOT Implemented Yet
 
 | PRD Feature | Status | Target Phase |
 |---|---|---|
-| AI answer checking (correct/incorrect detection) | Not implemented | Phase 3 |
-| Score degradation (10% per wrong answer/hint, 50% floor) | Not implemented | Phase 3 |
 | `await_mode` state machine (answer/question) on server | Client-only (message_kind) | Phase 3 |
-| Auto-advance on correct answer | Not implemented (manual only) | Phase 3 |
 | Tutor writes messages into student thread | Not implemented | Phase 4 |
 | Tutor messages as AI instructional context | Not implemented | Phase 4 |
 | Derived sync to homework_tutor_submissions/items | Not implemented | Phase 5 |

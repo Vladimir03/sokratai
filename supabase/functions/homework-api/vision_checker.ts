@@ -212,7 +212,8 @@ function extractJsonObject(raw: string): Record<string, unknown> {
     }
   }
 
-  throw new Error("Failed to extract valid JSON object from model response");
+  const preview = normalized.replace(/\s+/g, " ").slice(0, 180);
+  throw new Error(`Failed to extract valid JSON object from model response: ${preview}`);
 }
 
 function sanitizeRecognizedText(text: string): string {

@@ -11,7 +11,8 @@ https://<project-ref>.supabase.co/functions/v1/homework-api
 ## Authentication
 
 All requests require a valid Supabase JWT in the `Authorization: Bearer <token>` header.
-The authenticated user must have a record in the `tutors` table.
+- Tutor dashboard endpoints require the authenticated user to have a record in the `tutors` table.
+- Student guided-homework endpoints require the authenticated user to own the corresponding `homework_tutor_student_assignments` / thread.
 
 ## CORS
 
@@ -351,6 +352,84 @@ Submit tutor review for a student's submission.
 
 ---
 
+## Student Guided Chat Endpoints
+
+These endpoints are used by the student guided-homework workspace when an assignment has `workflow_mode = "guided_chat"`.
+
+### POST /threads/:id/check
+
+Check the student's answer for the current task.
+
+**Request:**
+```json
+{
+  "answer": "2,5 м/с",
+  "task_order": 2,
+  "image_urls": ["storage://homework-submissions/student/assignment/threads/2/file.jpg"]
+}
+```
+
+**Behavior:**
+- Saves the answer as a `homework_tutor_thread_messages` row with `message_kind = "answer"`.
+- Loads only the current task context (`task_order`, task text, task image, correct answer, rubric, recent task messages).
+- Uses OCR from `homework_tutor_tasks.ocr_text` when available; otherwise best-effort recognizes the task image and caches OCR back to the task row.
+- Passes task image + latest student images to AI as multimodal content.
+- For short numeric / factual answers, runs a deterministic fast-path before calling AI:
+  - accepts decimal comma and decimal dot (`2,5` / `2.5`)
+  - accepts short wrappers like `v = 2,5 м/с`
+  - normalizes common unit aliases (for example `m/s`, `km/h`, `kg`, `N`, `Pa`)
+- Filters `role = "system"` / `message_kind = "system"` messages out of AI conversation history so task-transition messages do not pollute answer checking.
+
+**Response (200):**
+```json
+{
+  "verdict": "CORRECT",
+  "feedback": "Верно, это правильный итоговый ответ.",
+  "earned_score": 0.5,
+  "available_score": 0.5,
+  "max_score": 1,
+  "wrong_answer_count": 0,
+  "hint_count": 0,
+  "task_completed": true,
+  "next_task_order": null,
+  "thread_completed": false,
+  "total_tasks": 2,
+  "thread": { "...": "updated thread payload" }
+}
+```
+
+**Guided verdicts:**
+- `CORRECT` — final correct answer; task is completed and the thread auto-advances.
+- `ON_TRACK` — correct reasoning / intermediate step, but not the final answer.
+- `INCORRECT` — wrong answer; `wrong_answer_count` increases and `available_score` degrades.
+- `CHECK_FAILED` — automatic evaluation did not complete reliably. The student sees neutral feedback, but `attempts`, `wrong_answer_count`, `hint_count`, `earned_score`, and `available_score` stay unchanged.
+
+**Scoring notes:**
+- Score degradation uses the same `computeAvailableScore()` rule as hints/wrong answers: `maxScore * max(0.5, 1 - 0.1 * (wrong + hints))`.
+- `attempts` are incremented only for real learning verdicts (`CORRECT`, `ON_TRACK`, `INCORRECT`), not for `CHECK_FAILED`.
+
+### POST /threads/:id/hint
+
+Generate a short hint for the student's current task.
+
+**Behavior:**
+- Saves a user message with `message_kind = "hint_request"`.
+- Uses the same task image, latest student image, OCR grounding, and filtered `conversationHistory` rules as `/check`.
+- Hint path includes graph/image anti-hallucination guidance: if a value cannot be read confidently from text, OCR, or the image itself, AI should ask the student to read the coordinate / value instead of inventing it.
+- Increments `hint_count` and recomputes `available_score`.
+
+### Discussion Path (`POST /threads/:id/messages` + `/functions/v1/chat`)
+
+The discussion field ("Обсудить") uses:
+- `POST /threads/:id/messages` to persist the student message with `message_kind = "question"`
+- `/functions/v1/chat` for streaming assistant responses
+
+Prompt context for discussion now mirrors `/check` and `/hint` more closely:
+- task OCR is requested on demand in the student workspace and included in task context
+- graph/image guidance explicitly tells AI not to invent coordinates, axis values, or intermediate numbers
+
+---
+
 ## Environment Variables
 
 | Variable | Required | Description |
@@ -367,6 +446,10 @@ Structured logs emitted:
 - `homework_api_request_start` — route, method
 - `homework_api_request_success` — route, tutor_id, relevant IDs
 - `homework_api_request_error` — route, error message
+- `guided_check_fast_path_match` — deterministic short-answer match succeeded before AI call
+- `guided_check_invalid_payload` — model returned malformed / unsupported guided-check payload
+- `guided_check_error` — guided answer evaluation failed; includes classified `failure_reason`
+- `homework_api_task_ocr_ensure_failed` — backend OCR fetch/recognition failed for a task image
 
 ## Tables Used
 

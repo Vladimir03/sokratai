@@ -20,6 +20,7 @@ type GuidedTelemetryEvent =
   | 'guided_first_run_intro'
   | 'guided_answer_correct'
   | 'guided_answer_incorrect'
+  | 'guided_answer_check_failed'
   | 'guided_score_degraded'
   | 'guided_all_completed'
   | 'guided_check_failed'

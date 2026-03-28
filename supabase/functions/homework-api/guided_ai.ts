@@ -22,18 +22,35 @@ const MAX_FEEDBACK_LENGTH = 1_200;
 const MAX_PROMPT_IMAGE_BYTES = 5 * 1024 * 1024;
 const SAFE_FEEDBACK_NO_ANSWER =
   "Проверь ход решения шаг за шагом и попробуй исправить первую найденную ошибку самостоятельно.";
+const CHECK_FAILED_FEEDBACK =
+  "Автопроверка сейчас не сработала, но баллы не списаны. Попробуй ещё раз или перейди в режим «Обсудить», и я помогу по шагам.";
 
 const VALID_VERDICTS = new Set(["CORRECT", "INCORRECT", "ON_TRACK"]);
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
-export type GuidedVerdict = "CORRECT" | "INCORRECT" | "ON_TRACK";
+export type GuidedVerdict = "CORRECT" | "INCORRECT" | "ON_TRACK" | "CHECK_FAILED";
+export type GuidedCheckFailureReason =
+  | "timeout"
+  | "gateway_error"
+  | "invalid_json"
+  | "empty_model_response"
+  | "image_fetch_failed"
+  | "unknown";
+
+interface GuidedConversationHistoryMessage {
+  role: string;
+  content: string;
+  visible_to_student?: boolean;
+  message_kind?: string | null;
+}
 
 export interface GuidedCheckResult {
   verdict: GuidedVerdict;
   feedback: string;
   confidence: number;
   error_type: HomeworkAiErrorType;
+  failure_reason?: GuidedCheckFailureReason;
 }
 
 export interface GuidedHintResult {
@@ -45,10 +62,11 @@ export interface EvaluateStudentAnswerParams {
   taskText: string;
   taskImageUrl: string | null;
   studentImageUrls?: string[] | null;
+  taskOcrText?: string | null;
   correctAnswer: string | null;
   rubricText: string | null;
   subject: string;
-  conversationHistory: Array<{ role: string; content: string; visible_to_student?: boolean }>;
+  conversationHistory: GuidedConversationHistoryMessage[];
   wrongAnswerCount: number;
   hintCount: number;
   availableScore: number;
@@ -59,9 +77,10 @@ export interface GenerateHintParams {
   taskText: string;
   taskImageUrl: string | null;
   studentImageUrls?: string[] | null;
+  taskOcrText?: string | null;
   correctAnswer: string | null;
   subject: string;
-  conversationHistory: Array<{ role: string; content: string; visible_to_student?: boolean }>;
+  conversationHistory: GuidedConversationHistoryMessage[];
   wrongAnswerCount: number;
   hintCount: number;
 }
@@ -217,13 +236,161 @@ function sanitizeErrorType(value: unknown, verdict: GuidedVerdict): HomeworkAiEr
   return verdict === "CORRECT" ? "correct" : "incomplete";
 }
 
+function normalizeShortAnswerText(raw: string): string {
+  return normalizeText(raw)
+    .toLowerCase()
+    .replace(/[–—−]/g, "-")
+    .replace(/(\d),(\d)/g, "$1.$2")
+    .replace(/^[a-zа-я][a-zа-я0-9_]*\s*=\s*/i, "")
+    .replace(/[.!?]+$/g, "")
+    .trim();
+}
+
+/** Known unit aliases: latin/mixed → canonical Cyrillic form */
+const UNIT_ALIASES: Array<[RegExp, string]> = [
+  // velocity
+  [/^m\/s2$/i, "м/с2"],
+  [/^m\/s\^2$/i, "м/с2"],
+  [/^м\/с2$/i, "м/с2"],
+  [/^м\/с\^2$/i, "м/с2"],
+  [/^м\/c2$/i, "м/с2"],   // mixed cyrillic м + latin c
+  [/^м\/c\^2$/i, "м/с2"],
+  [/^m\/s$/i, "м/с"],
+  [/^m\/c$/i, "м/с"],     // latin m + cyrillic с
+  [/^м\/c$/i, "м/с"],     // cyrillic м + latin c
+  // distance
+  [/^km\/h$/i, "км/ч"],
+  [/^km\/ch$/i, "км/ч"],
+  [/^km$/i, "км"],
+  [/^cm$/i, "см"],
+  [/^mm$/i, "мм"],
+  [/^m$/i, "м"],
+  // mass / force / energy
+  [/^kg$/i, "кг"],
+  [/^g$/i, "г"],
+  [/^n$/i, "н"],
+  [/^j$/i, "дж"],
+  [/^w$/i, "вт"],
+  [/^pa$/i, "па"],
+  // electric
+  [/^a$/i, "а"],
+  [/^v$/i, "в"],
+  // time
+  [/^s$/i, "с"],
+  [/^sec$/i, "с"],
+];
+
+function normalizeUnitToken(raw: string): string {
+  const compact = raw.toLowerCase().replace(/\s+/g, "").replace(/²/g, "2");
+  for (const [pattern, canonical] of UNIT_ALIASES) {
+    if (pattern.test(compact)) return canonical;
+  }
+  return compact;
+}
+
+function stripOptionalOuterPunctuation(raw: string): string {
+  return raw.replace(/^[=:\-–—]+/, "").replace(/[=:\-–—]+$/, "").trim();
+}
+
+function extractShortAnswerSignature(raw: string): { exact: string; numeric: string | null; unit: string | null } {
+  const normalized = stripOptionalOuterPunctuation(normalizeShortAnswerText(raw));
+  const compact = normalized.replace(/\s+/g, "");
+  const match = compact.match(/^(-?\d+(?:\.\d+)?)([a-zа-я/%°\/^0-9]*)$/iu);
+  if (!match) {
+    return { exact: compact, numeric: null, unit: null };
+  }
+
+  return {
+    exact: compact,
+    numeric: match[1],
+    unit: match[2] ? normalizeUnitToken(match[2]) : null,
+  };
+}
+
+function shouldUseDeterministicFastPath(studentAnswer: string, correctAnswer: string | null): boolean {
+  if (!correctAnswer) return false;
+  const student = normalizeShortAnswerText(studentAnswer);
+  const correct = normalizeShortAnswerText(correctAnswer);
+  if (!student || !correct) return false;
+  if (student.includes("\n") || correct.includes("\n")) return false;
+  return student.length <= 48 && correct.length <= 48;
+}
+
+function tryDeterministicShortAnswerMatch(
+  studentAnswer: string,
+  correctAnswer: string | null,
+): GuidedCheckResult | null {
+  if (!shouldUseDeterministicFastPath(studentAnswer, correctAnswer)) {
+    return null;
+  }
+
+  const student = extractShortAnswerSignature(studentAnswer);
+  const correct = extractShortAnswerSignature(correctAnswer ?? "");
+
+  if (student.exact && student.exact === correct.exact) {
+    return {
+      verdict: "CORRECT",
+      feedback: "Верно, это правильный итоговый ответ.",
+      confidence: 0.99,
+      error_type: "correct",
+    };
+  }
+
+  if (!student.numeric || !correct.numeric) {
+    return null;
+  }
+
+  if (student.numeric !== correct.numeric) {
+    return null;
+  }
+
+  if (student.unit && correct.unit && student.unit !== correct.unit) {
+    return null;
+  }
+
+  return {
+    verdict: "CORRECT",
+    feedback: "Верно, это правильный итоговый ответ.",
+    confidence: 0.98,
+    error_type: "correct",
+  };
+}
+
+function buildGraphGroundingGuidance(taskOcrText: string | null | undefined, hasTaskImage: boolean): string[] {
+  if (!hasTaskImage && !taskOcrText) return [];
+
+  return [
+    taskOcrText
+      ? `Распознанный текст и факты с изображения задачи (используй как опору, не придумывай данные вне этого текста): ${clampPromptText(taskOcrText)}`
+      : "",
+    hasTaskImage
+      ? "Для графиков и рисунков НЕ придумывай координаты точек, значения на осях, подписи, деления шкалы и промежуточные числа. Если значение нельзя уверенно считать по изображению или OCR, прямо скажи об этом."
+      : "",
+  ].filter(Boolean);
+}
+
+function classifyGuidedCheckFailure(error: unknown): GuidedCheckFailureReason {
+  if (error instanceof Error) {
+    const message = error.message.toLowerCase();
+    if (error.name === "AbortError" || message.includes("abort")) return "timeout";
+    if (message.includes("http 5") || message.includes("http 4") || message.includes("lovable api returned http")) {
+      return "gateway_error";
+    }
+    if (message.includes("empty")) return "empty_model_response";
+    if (message.includes("failed to extract valid json")) return "invalid_json";
+    if (message.includes("image")) return "image_fetch_failed";
+  }
+  return "unknown";
+}
+
 // ─── Check result sanitization ──────────────────────────────────────────────
 
 const CHECK_FALLBACK: GuidedCheckResult = {
-  verdict: "INCORRECT",
-  confidence: 0.2,
-  feedback: "Не удалось проверить автоматически. Попробуй переформулировать ответ.",
+  verdict: "CHECK_FAILED",
+  confidence: 0,
+  feedback: CHECK_FAILED_FEEDBACK,
   error_type: "incomplete",
+  failure_reason: "unknown",
 };
 
 function sanitizeCheckResult(
@@ -234,9 +401,13 @@ function sanitizeCheckResult(
   const rawVerdict = typeof parsed.verdict === "string"
     ? parsed.verdict.trim().toUpperCase()
     : null;
-  const verdict: GuidedVerdict = rawVerdict && VALID_VERDICTS.has(rawVerdict)
-    ? (rawVerdict as GuidedVerdict)
-    : "INCORRECT";
+  if (!rawVerdict || !VALID_VERDICTS.has(rawVerdict)) {
+    return {
+      ...CHECK_FALLBACK,
+      failure_reason: "invalid_json",
+    };
+  }
+  const verdict = rawVerdict as Exclude<GuidedVerdict, "CHECK_FAILED">;
 
   // Extract confidence
   const confidenceRaw = toNumber(parsed.confidence);
@@ -298,11 +469,13 @@ function buildCheckPrompt(params: EvaluateStudentAnswerParams): LovableMessage[]
   const hasStudentImage = studentImageCount > 0;
   const answerTypeGuidance = buildAnswerTypeGuidance(params.correctAnswer, params.taskText);
   const wantsImageDescription = hasStudentImage && isImageDescriptionRequest(params.studentAnswer);
+  const graphGroundingGuidance = buildGraphGroundingGuidance(params.taskOcrText, hasTaskImage);
 
   const systemContent = [
     "Ты проверяешь ответ ученика на задачу по домашнему заданию.",
     `Предмет: ${params.subject}.`,
     `Условие задачи: ${clampPromptText(params.taskText)}`,
+    ...graphGroundingGuidance,
     hasTaskImage ? "К задаче прикреплено изображение с условием — внимательно изучи его." : "",
     hasStudentImage
       ? `Ученик также приложил ${studentImageCount > 1 ? `${studentImageCount} изображения` : "изображение"} со своим решением — используй ${studentImageCount > 1 ? "их" : "его"} при проверке.`
@@ -355,15 +528,22 @@ function buildCheckPrompt(params: EvaluateStudentAnswerParams): LovableMessage[]
   // Add conversation context (last messages)
   for (const msg of params.conversationHistory) {
     const contentSlice = typeof msg.content === "string" ? msg.content.slice(0, 2000) : "";
+    if (!contentSlice) continue;
+    if (msg.role === "system" || msg.message_kind === "system") continue;
     if (msg.role === "tutor" && msg.visible_to_student === false) {
       // Hidden tutor note → inject as system instruction for AI
       messages.push({
         role: "system",
         content: `[Инструкция от репетитора]: ${contentSlice}`,
       });
-    } else {
+    } else if (msg.role === "assistant" || msg.role === "tutor") {
       messages.push({
-        role: msg.role === "assistant" || msg.role === "tutor" ? "assistant" : "user",
+        role: "assistant",
+        content: contentSlice,
+      });
+    } else if (msg.role === "user") {
+      messages.push({
+        role: "user",
         content: contentSlice,
       });
     }
@@ -420,11 +600,13 @@ function buildHintPrompt(params: GenerateHintParams): LovableMessage[] {
   const studentImageUrls = (params.studentImageUrls ?? []).filter(Boolean);
   const studentImageCount = studentImageUrls.length;
   const hasStudentImage = studentImageCount > 0;
+  const graphGroundingGuidance = buildGraphGroundingGuidance(params.taskOcrText, hasTaskImage);
 
   const systemContent = [
     "Ты репетитор, помогаешь ученику с домашним заданием.",
     `Предмет: ${params.subject}.`,
     `Условие задачи: ${clampPromptText(params.taskText)}`,
+    ...graphGroundingGuidance,
     hasTaskImage ? "К задаче прикреплено изображение с условием — внимательно изучи его." : "",
     hasStudentImage
       ? `Ученик приложил ${studentImageCount > 1 ? `${studentImageCount} изображения` : "изображение"} своего решения — учитывай ${studentImageCount > 1 ? "их" : "его"}, когда даёшь подсказку.`
@@ -453,15 +635,22 @@ function buildHintPrompt(params: GenerateHintParams): LovableMessage[] {
   // Add conversation context
   for (const msg of params.conversationHistory) {
     const contentSlice = typeof msg.content === "string" ? msg.content.slice(0, 2000) : "";
+    if (!contentSlice) continue;
+    if (msg.role === "system" || msg.message_kind === "system") continue;
     if (msg.role === "tutor" && msg.visible_to_student === false) {
       // Hidden tutor note → inject as system instruction for AI
       messages.push({
         role: "system",
         content: `[Инструкция от репетитора]: ${contentSlice}`,
       });
-    } else {
+    } else if (msg.role === "assistant" || msg.role === "tutor") {
       messages.push({
-        role: msg.role === "assistant" || msg.role === "tutor" ? "assistant" : "user",
+        role: "assistant",
+        content: contentSlice,
+      });
+    } else if (msg.role === "user") {
+      messages.push({
+        role: "user",
         content: contentSlice,
       });
     }
@@ -528,6 +717,18 @@ export async function evaluateStudentAnswer(
     maxScore: params.maxScore,
   });
 
+  const deterministicMatch = tryDeterministicShortAnswerMatch(
+    params.studentAnswer,
+    params.correctAnswer,
+  );
+  if (deterministicMatch) {
+    console.log("guided_check_fast_path_match", {
+      subject: params.subject,
+      confidence: deterministicMatch.confidence,
+    });
+    return deterministicMatch;
+  }
+
   try {
     const [taskImageUrl, studentImageUrls] = await Promise.all([
       inlinePromptImageUrl(params.taskImageUrl),
@@ -541,6 +742,13 @@ export async function evaluateStudentAnswer(
     const parsed = await callLovableJson(messages, "guided_check");
     const result = sanitizeCheckResult(parsed, params.correctAnswer);
 
+    if (result.verdict === "CHECK_FAILED") {
+      console.warn("guided_check_invalid_payload", {
+        subject: params.subject,
+        failure_reason: result.failure_reason ?? "invalid_json",
+      });
+    }
+
     console.log("guided_check_success", {
       verdict: result.verdict,
       confidence: result.confidence,
@@ -549,10 +757,15 @@ export async function evaluateStudentAnswer(
 
     return result;
   } catch (error) {
+    const failure_reason = classifyGuidedCheckFailure(error);
     console.error("guided_check_error", {
       error: error instanceof Error ? error.message : String(error),
+      failure_reason,
     });
-    return { ...CHECK_FALLBACK };
+    return {
+      ...CHECK_FALLBACK,
+      failure_reason,
+    };
   }
 }
 

@@ -135,6 +135,9 @@ function buildTaskContext(
       : hasImage && !options?.ocrText
         ? 'К задаче прикреплено изображение с условием — оно передано отдельно.'
         : null,
+    hasImage
+      ? 'Для графиков и рисунков НЕ придумывай координаты точек, подписи осей, деления шкалы, числовые значения и промежуточные результаты. Если значение нельзя уверенно считать по тексту, OCR или самому изображению, прямо попроси ученика назвать нужные координаты или значения.'
+      : null,
     studentImageHint,
     modeHint,
     'Пиши кратко, понятно, с фокусом на текущую задачу. LaTeX: $..$ или $$..$$ при необходимости.',
@@ -159,6 +162,8 @@ function buildGuidedSystemPrompt(
       : 'Если изображения ученика нет, опирайся на условие задачи и текст сообщения.',
     'Не придумывай детали, которых не видно на изображении.',
     'Не подменяй изображение ученика изображением условия задачи.',
+    'Для задач с графиками и рисунками не называй координаты точек, значения на осях, подписи и числа, если они не подтверждены текстом задачи, OCR или не читаются уверенно на изображении.',
+    'Если не уверен в значении на графике или рисунке, прямо скажи об этом и попроси ученика снять координаты или назвать нужные величины.',
   ];
 
   if (options?.isBootstrap) {
@@ -350,6 +355,29 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
   const handleDraftChange = useCallback((answer: string, discussion: string) => {
     currentDraftRef.current = { answer, discussion };
   }, []);
+
+  const ensureTaskOcrText = useCallback(async (
+    taskOrder: number,
+    taskId: string,
+    taskImageUrl: string | null,
+  ): Promise<string | undefined> => {
+    if (!taskImageUrl) return undefined;
+
+    const cached = ocrTextByTaskRef.current.get(taskOrder);
+    if (cached) return cached;
+
+    try {
+      const ocrResult = await ocrTaskImage(assignment.id, taskId);
+      if (ocrResult.recognized_text && ocrResult.recognized_text !== '[неразборчиво]') {
+        ocrTextByTaskRef.current.set(taskOrder, ocrResult.recognized_text);
+        return ocrResult.recognized_text;
+      }
+    } catch (error) {
+      console.warn('On-demand OCR failed, proceeding with image-only context:', error);
+    }
+
+    return undefined;
+  }, [assignment.id]);
 
   useEffect(() => {
     messagesRef.current = messages;
@@ -587,6 +615,8 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
     setIsStreaming(true);
     setStreamingContent('');
 
+    const ocrText = await ensureTaskOcrText(taskOrder, task.id, task.task_image_url);
+
     const [resolvedTaskImageUrl, resolvedStudentImageUrls] = await Promise.all([
       task.task_image_url
         ? getStudentTaskImageSignedUrlViaBackend(assignment.id, task.id)
@@ -605,7 +635,7 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
         }),
         taskContext: buildTaskContext(assignment, task, assignment.tasks.length, sendMode, {
           hasStudentImage: resolvedStudentImageUrls.length > 0,
-          ocrText: ocrTextByTaskRef.current.get(taskOrder),
+          ocrText,
         }),
         taskImageUrl: resolvedTaskImageUrl ?? undefined,
         studentImageUrls: resolvedStudentImageUrls,
@@ -671,7 +701,7 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
       setIsStreaming(false);
       setStreamingContent('');
     }
-  }, [assignment, patchMessage, persistMessage, resolveLatestStudentImageUrls]);
+  }, [assignment, ensureTaskOcrText, patchMessage, persistMessage, resolveLatestStudentImageUrls]);
 
   const handleCheckAnswer = useCallback(async (answerText: string, attachmentRefs?: string[]) => {
     if (!threadId || !currentTask) return;
@@ -724,6 +754,14 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
       } else if (response.verdict === 'ON_TRACK') {
         // Correct step but not the final answer — no toast, AI feedback guides the student
         trackGuidedHomeworkEvent('guided_answer_on_track', {
+          assignmentId: assignment.id,
+          taskOrder,
+          availableScore: response.available_score,
+          maxScore: response.max_score,
+        });
+      } else if (response.verdict === 'CHECK_FAILED') {
+        toast.info('Автопроверка не сработала, но баллы не списаны. Можно попробовать снова или обсудить шаг с AI.');
+        trackGuidedHomeworkEvent('guided_answer_check_failed', {
           assignmentId: assignment.id,
           taskOrder,
           availableScore: response.available_score,
@@ -1104,21 +1142,7 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
       setIsStreaming(true);
       setStreamingContent('');
 
-      // Pre-OCR: run dedicated OCR on task image to get ground-truth text
-      let ocrText: string | undefined;
-      if (currentTask.task_image_url && !ocrTextByTaskRef.current.has(taskOrder)) {
-        try {
-          const ocrResult = await ocrTaskImage(assignment.id, currentTask.id);
-          if (ocrResult.recognized_text && ocrResult.recognized_text !== '[неразборчиво]') {
-            ocrText = ocrResult.recognized_text;
-            ocrTextByTaskRef.current.set(taskOrder, ocrText);
-          }
-        } catch (e) {
-          console.warn('Pre-OCR failed, falling back to vision-only:', e);
-        }
-      } else {
-        ocrText = ocrTextByTaskRef.current.get(taskOrder);
-      }
+      const ocrText = await ensureTaskOcrText(taskOrder, currentTask.id, currentTask.task_image_url);
 
       // Resolve task image to signed URL for AI (if task has image)
       let bootstrapImageUrl: string | undefined;
@@ -1187,7 +1211,7 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
     };
 
     void runBootstrap();
-  }, [assignment, currentTask, isCheckingAnswer, isRequestingHint, isStreaming, isThreadLoading, messages, threadId, threadStatus]);
+  }, [assignment, currentTask, ensureTaskOcrText, isCheckingAnswer, isRequestingHint, isStreaming, isThreadLoading, messages, threadId, threadStatus]);
 
   // Loading state
   if (isThreadLoading) {
