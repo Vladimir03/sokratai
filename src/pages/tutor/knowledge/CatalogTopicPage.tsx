@@ -14,7 +14,7 @@ import { SourceBadge } from '@/components/kb/ui/SourceBadge';
 import { StatCounter } from '@/components/kb/ui/StatCounter';
 import { TopicChip } from '@/components/kb/ui/TopicChip';
 import { TutorLayout } from '@/components/tutor/TutorLayout';
-import { useCatalogTasks, useMaterials, useSubtopics, useTopic } from '@/hooks/useKnowledgeBase';
+import { useCatalogTasks, useCatalogTasksAll, useMaterials, useSubtopics, useTopic } from '@/hooks/useKnowledgeBase';
 import { useIsModerator } from '@/hooks/useIsModerator';
 import { kbModUnpublish, kbModReassign, parseAttachmentUrls } from '@/lib/kbApi';
 import { useHWDraftStore } from '@/stores/hwDraftStore';
@@ -32,13 +32,18 @@ function CatalogTopicContent() {
     isFetching: topicFetching,
   } = useTopic(topicId);
   const { subtopics } = useSubtopics(topicId);
-  const { tasks, loading: tasksLoading, error: tasksError, refetch: refetchTasks } = useCatalogTasks(topicId);
+  const { isModerator } = useIsModerator();
+  const { tasks: publicTasks, loading: publicLoading, error: publicError, refetch: refetchPublic } = useCatalogTasks(topicId);
+  const { tasks: allTasks, loading: allLoading, error: allError, refetch: refetchAll } = useCatalogTasksAll(topicId, isModerator);
+  const tasks = isModerator ? allTasks : publicTasks;
+  const tasksLoading = isModerator ? allLoading : publicLoading;
+  const tasksError = isModerator ? allError : publicError;
+  const refetchTasks = isModerator ? refetchAll : refetchPublic;
   const { materials, loading: materialsLoading } = useMaterials(topicId);
 
   const [expandedTaskId, setExpandedTaskId] = useState<string | null>(null);
   const [copyTask, setCopyTask] = useState<KBTask | null>(null);
   const { addTask, hasTask } = useHWDraftStore();
-  const { isModerator } = useIsModerator();
   const queryClient = useQueryClient();
 
   const handleUnpublish = useCallback(

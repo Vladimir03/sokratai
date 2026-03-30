@@ -76,6 +76,14 @@ async function fetchCatalogTasks(topicId: string): Promise<KBTask[]> {
   return (data ?? []) as KBTask[];
 }
 
+async function fetchCatalogTasksAll(topicId: string): Promise<KBTask[]> {
+  // For moderators: includes hidden_duplicate and unpublished tasks
+  const { data, error } = await supabase
+    .rpc('fetch_catalog_tasks_all', { p_topic_id: topicId });
+  if (error) throw error;
+  return (data ?? []) as KBTask[];
+}
+
 async function fetchCatalogMaterials(topicId: string): Promise<KBMaterial[]> {
   const { data, error } = await supabase
     .from('kb_materials')
@@ -253,6 +261,24 @@ export function useCatalogTasks(topicId: string | undefined) {
     defaultValue: [],
     errorMessage: 'Не удалось загрузить задачи',
     enabled: Boolean(topicId),
+  });
+
+  return { tasks: result.data, ...result };
+}
+
+/** Catalog tasks including hidden_duplicate/unpublished (for moderators) */
+export function useCatalogTasksAll(topicId: string | undefined, enabled: boolean) {
+  const queryKey = useMemo(
+    () => ['tutor', 'kb', 'catalog-tasks-all', topicId ?? 'none'] as const,
+    [topicId],
+  );
+
+  const result = useKBQuery<KBTask[]>({
+    queryKey,
+    queryFn: () => fetchCatalogTasksAll(topicId!),
+    defaultValue: [],
+    errorMessage: 'Не удалось загрузить задачи',
+    enabled: Boolean(topicId) && enabled,
   });
 
   return { tasks: result.data, ...result };
