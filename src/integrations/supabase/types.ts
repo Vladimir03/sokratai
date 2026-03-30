@@ -2968,6 +2968,41 @@ export type Database = {
         Args: { payload: Json; queue_name: string }
         Returns: number
       }
+      fetch_catalog_tasks_all: {
+        Args: { p_topic_id: string }
+        Returns: {
+          answer: string | null
+          answer_format: string | null
+          attachment_url: string | null
+          created_at: string | null
+          exam: Database["public"]["Enums"]["exam_type"] | null
+          fingerprint: string | null
+          folder_id: string | null
+          hidden_reason: string | null
+          id: string
+          kim_number: number | null
+          moderation_status: string
+          owner_id: string | null
+          primary_score: number | null
+          published_at: string | null
+          published_by: string | null
+          published_task_id: string | null
+          solution: string | null
+          solution_attachment_url: string | null
+          source_label: string | null
+          source_task_id: string | null
+          subtopic_id: string | null
+          text: string
+          topic_id: string | null
+          updated_at: string | null
+        }[]
+        SetofOptions: {
+          from: "*"
+          to: "kb_tasks"
+          isOneToOne: false
+          isSetofReturn: true
+        }
+      }
       fetch_catalog_tasks_v2: {
         Args: { p_topic_id: string }
         Returns: {
