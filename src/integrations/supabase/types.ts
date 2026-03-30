@@ -3149,10 +3149,16 @@ export type Database = {
         Args: { p_published_task_id: string }
         Returns: undefined
       }
-      kb_normalize_fingerprint: {
-        Args: { p_answer: string; p_text: string }
-        Returns: string
-      }
+      kb_normalize_fingerprint:
+        | { Args: { p_answer: string; p_text: string }; Returns: string }
+        | {
+            Args: {
+              p_answer: string
+              p_attachment_url?: string
+              p_text: string
+            }
+            Returns: string
+          }
       kb_publish_task: { Args: { p_source_task_id: string }; Returns: string }
       kb_resync_task: { Args: { p_source_task_id: string }; Returns: undefined }
       kb_search: {
