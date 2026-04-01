@@ -77,6 +77,34 @@ function compactHistoryForTelegram(
 }
 
 /**
+ * Merge consecutive same-role messages into one to ensure proper turn-taking.
+ * This prevents AI failures when previous calls failed and left multiple
+ * consecutive user messages without assistant responses.
+ */
+function mergeConsecutiveUserMessages(
+  messages: Array<{ role: string; content: string; image_url?: string | null }>,
+): Array<{ role: string; content: string; image_url?: string | null }> {
+  if (messages.length === 0) return messages;
+
+  const merged: Array<{ role: string; content: string; image_url?: string | null }> = [];
+
+  for (const msg of messages) {
+    const last = merged[merged.length - 1];
+    if (last && last.role === msg.role && msg.role === "user") {
+      // Merge: join content, keep latest image_url
+      last.content = last.content + "\n\n" + msg.content;
+      if (msg.image_url) {
+        last.image_url = msg.image_url;
+      }
+    } else {
+      merged.push({ ...msg });
+    }
+  }
+
+  return merged;
+}
+
+/**
  * Fetch AI chat with timeout and fallback message on failure.
  * Returns parsed AI content or null if fallback was sent.
  */
