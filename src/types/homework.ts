@@ -152,6 +152,7 @@ export interface HomeworkThreadMessage {
 export interface HomeworkTaskState {
   id: string;
   task_id: string;
+  task_order: number;
   status: TaskStateStatus;
   attempts: number;
   best_score: number | null;
