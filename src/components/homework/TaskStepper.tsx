@@ -25,6 +25,7 @@ interface TaskStepperProps {
   tasks: TaskStepItem[];
   currentTaskOrder: number;
   onTaskClick?: (orderNum: number) => void;
+  celebratingTaskOrder?: number | null;
 }
 
 const STATUS_STYLES: Record<
@@ -61,7 +62,7 @@ const STATUS_LABELS: Record<TaskStateStatus, string> = {
   skipped: 'Пропущена',
 };
 
-const TaskStepper = memo(({ tasks, currentTaskOrder, onTaskClick }: TaskStepperProps) => {
+const TaskStepper = memo(({ tasks, currentTaskOrder, onTaskClick, celebratingTaskOrder }: TaskStepperProps) => {
   const activeRef = useRef<HTMLButtonElement>(null);
 
   // Auto-scroll to active task
@@ -81,6 +82,7 @@ const TaskStepper = memo(({ tasks, currentTaskOrder, onTaskClick }: TaskStepperP
         {tasks.map((task, idx) => {
           const style = STATUS_STYLES[task.status];
           const isActive = task.order_num === currentTaskOrder;
+          const isCelebrating = task.order_num === celebratingTaskOrder;
           const isClickable = task.status !== 'locked';
           const isLast = idx === tasks.length - 1;
 
@@ -88,30 +90,39 @@ const TaskStepper = memo(({ tasks, currentTaskOrder, onTaskClick }: TaskStepperP
             <div key={task.order_num} className="flex items-center shrink-0">
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <button
-                    ref={isActive ? activeRef : undefined}
-                    type="button"
-                    disabled={!isClickable}
-                    onClick={() => isClickable && onTaskClick?.(task.order_num)}
-                    className={`
-                      flex items-center justify-center
-                      w-8 h-8 rounded-full border-2
-                      text-xs font-semibold
-                      transition-all duration-200
-                      ${style.bg} ${style.border} ${style.text}
-                      ${isActive ? (style.ring || '') : ''}
-                      ${isClickable ? 'cursor-pointer hover:opacity-80' : 'cursor-default'}
-                      disabled:cursor-default
-                    `}
-                  >
-                    {task.status === 'completed' ? (
-                      <Check className="w-4 h-4" />
-                    ) : task.status === 'locked' ? (
-                      <Lock className="w-3 h-3" />
-                    ) : (
-                      task.order_num
+                  <div className="relative">
+                    <button
+                      ref={isActive ? activeRef : undefined}
+                      type="button"
+                      disabled={!isClickable}
+                      onClick={() => isClickable && onTaskClick?.(task.order_num)}
+                      className={`
+                        flex items-center justify-center
+                        w-8 h-8 rounded-full border-2
+                        text-xs font-semibold
+                        transition-all duration-300
+                        ${isCelebrating ? 'bg-green-500 border-green-500 text-white ring-2 ring-green-500/30 ring-offset-2 scale-110' : `${style.bg} ${style.border} ${style.text}`}
+                        ${!isCelebrating && isActive ? (style.ring || '') : ''}
+                        ${isClickable ? 'cursor-pointer hover:opacity-80' : 'cursor-default'}
+                        disabled:cursor-default
+                      `}
+                    >
+                      {isCelebrating ? (
+                        <Check className="w-4 h-4" />
+                      ) : task.status === 'completed' ? (
+                        <Check className="w-4 h-4" />
+                      ) : task.status === 'locked' ? (
+                        <Lock className="w-3 h-3" />
+                      ) : (
+                        task.order_num
+                      )}
+                    </button>
+                    {isCelebrating && (
+                      <span className="absolute -top-1 -right-1 flex h-4 w-4 items-center justify-center rounded-full bg-green-500 text-white text-[10px] animate-bounce">
+                        ✓
+                      </span>
                     )}
-                  </button>
+                  </div>
                 </TooltipTrigger>
                 <TooltipContent side="bottom" className="max-w-[260px] text-xs">
                   <div className="font-medium">Задача {task.order_num}</div>

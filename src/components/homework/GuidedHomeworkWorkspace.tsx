@@ -344,6 +344,8 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
   const [showCompletedView, setShowCompletedView] = useState(false);
   const [attachedFiles, setAttachedFiles] = useState<File[]>([]);
   const [isUploading, setIsUploading] = useState(false);
+  const [celebratingTaskOrder, setCelebratingTaskOrder] = useState<number | null>(null);
+  const celebrationTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [isConditionExpanded, setIsConditionExpanded] = useState(true);
 
   // Per-task drafts: save/restore text + files when switching tasks
@@ -397,6 +399,17 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
       setMessages(normalizedMessages);
       setTaskStates(thread.homework_tutor_task_states ?? []);
       setCurrentTaskOrder(thread.current_task_order);
+      // Fallback: if saved task is already completed, jump to first active task
+      const states = thread.homework_tutor_task_states ?? [];
+      const targetState = states.find((s) => s.task_order === thread.current_task_order);
+      if (targetState?.status === 'completed') {
+        const firstActive = states
+          .filter((s) => s.status === 'active')
+          .sort((a, b) => a.task_order - b.task_order)[0];
+        if (firstActive) {
+          setCurrentTaskOrder(firstActive.task_order);
+        }
+      }
       setThreadCurrentTaskOrder(thread.current_task_order);
       setThreadId(thread.id);
       setThreadStatus(thread.status);
@@ -415,6 +428,15 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
     }
   }, [messages, currentTaskOrder, streamingContent]);
 
+  // Cleanup celebration timer on unmount
+  useEffect(() => {
+    return () => {
+      if (celebrationTimerRef.current) {
+        clearTimeout(celebrationTimerRef.current);
+      }
+    };
+  }, []);
+
   // Build task stepper items
   const taskStepItems: TaskStepItem[] = useMemo(() => {
     const stateByTaskId = new Map(taskStates.map((ts) => [ts.task_id, ts]));
@@ -432,32 +454,18 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
 
   const activeTaskOrder = currentTaskOrder;
 
-  const syncThreadFromResponse = useCallback((updatedThread: HomeworkThread) => {
+  /**
+   * Sync thread DATA (messages, task_states, status) without changing navigation.
+   * Called after check/hint responses — student stays on their chosen task.
+   */
+  const syncThreadDataOnly = useCallback((updatedThread: HomeworkThread) => {
     const normalizedMessages = (updatedThread.homework_tutor_thread_messages ?? []).map((msg) => ({
       ...msg,
       message_delivery_status: toDeliveryStatus(msg.message_delivery_status),
     }));
     setMessages(normalizedMessages);
     setTaskStates(updatedThread.homework_tutor_task_states ?? []);
-
-    // Save current draft + load target draft (same logic as switchToTask, but
-    // reads currentTaskOrder via functional updater to avoid stale closure)
-    const newOrder = updatedThread.current_task_order;
-    setCurrentTaskOrder((prevOrder) => {
-      if (prevOrder !== newOrder) {
-        taskDraftsRef.current.set(prevOrder, {
-          answer: currentDraftRef.current.answer,
-          discussion: currentDraftRef.current.discussion,
-          files: [...attachedFilesRef.current],
-        });
-        const draft = taskDraftsRef.current.get(newOrder);
-        setAttachedFiles(draft?.files ?? []);
-        currentDraftRef.current = { answer: draft?.answer ?? '', discussion: draft?.discussion ?? '' };
-      }
-      return newOrder;
-    });
-
-    setThreadCurrentTaskOrder(newOrder);
+    setThreadCurrentTaskOrder(updatedThread.current_task_order);
     setThreadStatus(updatedThread.status);
   }, []);
 
@@ -736,9 +744,36 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
       );
 
       // Sync full thread from response (includes saved messages)
-      syncThreadFromResponse(response.thread);
+      syncThreadDataOnly(response.thread);
 
       if (response.verdict === 'CORRECT') {
+        // R4: Visual celebration on TaskStepper
+        setCelebratingTaskOrder(taskOrder);
+
+        // Find next active task for auto-advance (prefer tasks after current, wrap around)
+        const updatedStates = response.thread.homework_tutor_task_states ?? [];
+        const nextActive = updatedStates
+          .filter((s) => s.status === 'active' && s.task_order !== taskOrder)
+          .sort((a, b) => {
+            const aKey = a.task_order > taskOrder ? a.task_order : a.task_order + 1000;
+            const bKey = b.task_order > taskOrder ? b.task_order : b.task_order + 1000;
+            return aKey - bKey;
+          })[0];
+
+        if (response.thread_completed) {
+          toast.success('Все задачи завершены!');
+          celebrationTimerRef.current = setTimeout(() => setCelebratingTaskOrder(null), 1200);
+        } else if (nextActive) {
+          toast.success('Правильно! Переходим к следующей задаче.');
+          celebrationTimerRef.current = setTimeout(() => {
+            setCelebratingTaskOrder(null);
+            switchToTask(nextActive.task_order);
+          }, 1200);
+        } else {
+          // No more active tasks but thread not marked complete — stay on current
+          celebrationTimerRef.current = setTimeout(() => setCelebratingTaskOrder(null), 1200);
+        }
+
         trackGuidedHomeworkEvent('guided_answer_correct', {
           assignmentId: assignment.id,
           taskOrder,
@@ -746,10 +781,7 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
           maxScore: response.max_score,
         });
         if (response.thread_completed) {
-          toast.success('Все задачи завершены!');
           trackGuidedHomeworkEvent('guided_all_completed', { assignmentId: assignment.id });
-        } else {
-          toast.success('Правильно! Переходим к следующей задаче.');
         }
       } else if (response.verdict === 'ON_TRACK') {
         // Correct step but not the final answer — no toast, AI feedback guides the student
@@ -805,7 +837,7 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
     } finally {
       setIsCheckingAnswer(false);
     }
-  }, [assignment.id, currentTask, queryClient, syncThreadFromResponse, threadId]);
+  }, [assignment.id, currentTask, queryClient, switchToTask, syncThreadDataOnly, threadId]);
 
   const sendUserMessage = useCallback(async (
     rawText: string,
@@ -978,7 +1010,7 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
       const response: RequestHintResponse = await requestHint(threadId, currentTaskOrder);
 
       // Sync full thread from response (includes saved messages)
-      syncThreadFromResponse(response.thread);
+      syncThreadDataOnly(response.thread);
 
       if (response.available_score < response.max_score) {
         trackGuidedHomeworkEvent('guided_score_degraded', {
@@ -1007,7 +1039,7 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
     } finally {
       setIsRequestingHint(false);
     }
-  }, [assignment.id, controlsDisabled, currentTaskOrder, isViewingActiveTask, queryClient, syncThreadFromResponse, threadId]);
+  }, [assignment.id, controlsDisabled, currentTaskOrder, isViewingActiveTask, queryClient, syncThreadDataOnly, threadId]);
 
   const handleRetryMessage = useCallback((messageId: string) => {
     const message = messagesRef.current.find((item) => item.id === messageId);
@@ -1072,6 +1104,11 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
 
   // Save current draft + restore target draft + switch task
   const switchToTask = useCallback((newOrder: number) => {
+    if (celebrationTimerRef.current) {
+      clearTimeout(celebrationTimerRef.current);
+      celebrationTimerRef.current = null;
+      setCelebratingTaskOrder(null);
+    }
     taskDraftsRef.current.set(currentTaskOrder, {
       answer: currentDraftRef.current.answer,
       discussion: currentDraftRef.current.discussion,
@@ -1086,8 +1123,9 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
   const handleTaskClick = useCallback((orderNum: number) => {
     if (!visitedTaskOrders.has(orderNum)) return;
     if (isStreaming || isCheckingAnswer || isRequestingHint || isUploading) return;
+    if (celebratingTaskOrder !== null) return;
     switchToTask(orderNum);
-  }, [visitedTaskOrders, isStreaming, isCheckingAnswer, isRequestingHint, isUploading, switchToTask]);
+  }, [visitedTaskOrders, isStreaming, isCheckingAnswer, isRequestingHint, isUploading, celebratingTaskOrder, switchToTask]);
 
   const handleGoPrev = useCallback(() => {
     if (previousTaskOrder === null) return;
@@ -1317,6 +1355,7 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
           tasks={taskStepItems}
           currentTaskOrder={currentTaskOrder}
           onTaskClick={handleTaskClick}
+          celebratingTaskOrder={celebratingTaskOrder}
         />
       </div>
 
