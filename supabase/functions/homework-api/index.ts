@@ -959,7 +959,7 @@ async function handleUpdateAssignment(
           correct_answer: isNonEmptyString(t.correct_answer) ? (t.correct_answer as string).trim() : null,
           max_score: isPositiveInt(t.max_score) ? t.max_score : 1,
           rubric_text: isNonEmptyString(t.rubric_text) ? (t.rubric_text as string).trim() : null,
-          check_format: (VALID_CHECK_FORMATS as readonly string[]).includes(t.check_format) ? t.check_format : "short_answer",
+          check_format: (VALID_CHECK_FORMATS as readonly string[]).includes(t.check_format as string) ? t.check_format : "short_answer",
         };
         const { error } = await db
           .from("homework_tutor_tasks")
