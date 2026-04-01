@@ -1,72 +1,75 @@
 
 
-## Diagnosis: AI hallucinating task conditions from images
+## Fix: Telegram bot silent failure for @dawsik11
 
-### What's happening
+### Diagnosis
 
-When the student opens task 2 (or any task with an image-only condition), the AI bootstrap reads the task image but **generates a plausible but WRONG physics problem description** instead of accurately reading the text on the image. For example:
+The bot stopped responding to @dawsik11 since March 23 due to a **compounding failure loop**:
 
-- **Actual image** (screenshot 3): "Плоский воздушный конденсатор **с диэлектриком** между пластинами **подключён к аккумулятору**..."
-- **AI's hallucination** (screenshot 2): "Плоский воздушный конденсатор **зарядили и отключили** от источника тока..."
+1. On March 23 at 09:59, the student sent a photo message. The AI call either timed out or failed silently
+2. The user message was saved to DB **before** the AI call, but no assistant response was saved
+3. The student retried 5 more times rapidly (4 photos + 2 text messages within 17 minutes)
+4. Each retry added another user message to history — but still no assistant response
+5. Now the last 8 messages (the bot's context window) are ALL user messages with zero assistant responses
+6. The AI model (Gemini) receives a broken conversation with 8 consecutive user turns — no alternation — and fails or produces unusable output
+7. Every subsequent attempt (March 26, March 30) hits the same broken history and fails again
 
-These are two different electrostatics problems. The model (Gemini 3 Flash) sees a physics problem about capacitors and generates a similar-sounding but incorrect description.
+This is a **user-specific** issue — no other users are affected (verified via query).
 
-Once the bootstrap message is persisted with wrong text, **all subsequent messages inherit this error** — the hallucinated content sits in `contextMessages` and the AI keeps repeating it.
+### Fix: Two parts
 
-### Root cause
+**Part 1: Immediate data repair** — Delete the orphaned consecutive user messages (keep only the latest) so the next bot interaction starts clean. Alternatively, insert a synthetic assistant message to restore turn-taking.
 
-The system relies entirely on the vision model to interpret the task image on-the-fly during every chat call. For dense physics text (small font, tables, formulas), Gemini Flash makes OCR errors. There is no verification step.
+**Part 2: Code fix in `telegram-bot/index.ts`** — Prevent this from happening to any user in the future.
 
-### Proposed fix: Pre-OCR task images at bootstrap time
+#### Code changes in `handleTextMessage` and `handlePhotoMessage`:
 
-**Approach**: Before the bootstrap AI call, run a dedicated OCR pass on the task image using `recognizeHomeworkPhoto` (which already exists in `homework-api/vision_checker.ts`). Store the recognized text and inject it into `taskContext` as ground truth.
+Before sending history to the AI, add a **consecutive user message merge** step after `compactHistoryForTelegram`:
 
-This gives the AI **two sources** — the image AND the extracted text — making hallucination much less likely.
+```text
+compactHistoryForTelegram(history)
+  → mergeConsecutiveUserMessages(compacted)   ← NEW
+  → refreshImageUrls(merged)
+  → fetchChatWithTimeout(...)
+```
 
-### Implementation
+`mergeConsecutiveUserMessages` logic:
+- Walk through compacted messages
+- If multiple consecutive `role: "user"` messages appear, merge their content into one (join with `\n\n`)
+- Keep `image_url` from the last one (if any)
+- This ensures the AI always sees proper turn-taking, even if previous calls failed
 
-**1. New backend endpoint in `homework-api/index.ts`**
-- `POST /tasks/:taskId/ocr` — accepts `assignmentId`, resolves the task image, calls `recognizeHomeworkPhoto`, returns `{ recognized_text, confidence, has_formulas }`
-- Caches result in a new column `homework_tutor_tasks.ocr_text` (nullable text) so OCR runs only once per task
-- Falls back gracefully if OCR fails
+This is a 20-line helper function added once and called in both `handleTextMessage` (line ~6873) and `handlePhotoMessage` (line ~7360).
 
-**2. Database migration**
-- Add `ocr_text TEXT DEFAULT NULL` to `homework_tutor_tasks`
-- No RLS changes needed (column inherits existing policies)
+### Part 1 detail: Data repair migration
 
-**3. Frontend: pre-OCR before bootstrap (`GuidedHomeworkWorkspace.tsx`)**
-- Before `runBootstrap()`, if `currentTask.task_image_url` exists and `currentTask.ocr_text` is null, call the new OCR endpoint
-- Store the result in local state (and it gets cached in DB for future visits)
-- Pass `ocrText` into `buildTaskContext()` as a new parameter
+SQL to clean up this specific user's chat:
 
-**4. Enhanced `buildTaskContext()` with OCR text**
-- When `ocrText` is available, add it to the context:
-  ```
-  РАСПОЗНАННЫЙ ТЕКСТ С ИЗОБРАЖЕНИЯ (используй как эталон):
-  {ocrText}
-  ```
-- This gives the model explicit ground truth, preventing hallucination
+```sql
+-- Delete orphaned user messages (keep latest 2, delete the 6 stale ones from March 23)
+DELETE FROM chat_messages 
+WHERE chat_id = '824206d7-5cfc-4919-8645-b68260f9b34f'
+  AND role = 'user'
+  AND created_at >= '2026-03-23'
+  AND id NOT IN (
+    SELECT id FROM chat_messages
+    WHERE chat_id = '824206d7-5cfc-4919-8645-b68260f9b34f'
+      AND role = 'user'
+      AND created_at >= '2026-03-23'
+    ORDER BY created_at DESC
+    LIMIT 1
+  );
+```
 
-**5. Pass OCR text for all modes (not just bootstrap)**
-- `sendUserMessage` and `handleHint` also call `requestAssistantReply` — pass the cached `ocrText` through `buildTaskContext` in all cases
-- Store `ocrTextByTask` ref (Map<number, string>) to avoid re-fetching
+### Files modified
 
-### Why this works
-
-- `recognizeHomeworkPhoto` uses a focused OCR prompt ("return only JSON with recognized_text") which is more accurate than a general chat model interpreting an image
-- The extracted text acts as anchor — even if the model misreads the image, the explicit text overrides hallucination
-- OCR runs once per task (cached in DB), no latency penalty on subsequent messages
-- Graceful degradation: if OCR fails, the flow works exactly as before
-
-### Files to modify
-- `supabase/functions/homework-api/index.ts` — new OCR route + caching
-- `supabase/migrations/XXXXXXXX_add_task_ocr_text.sql` — new column
-- `src/components/homework/GuidedHomeworkWorkspace.tsx` — pre-OCR call, `buildTaskContext` update
-- `src/lib/studentHomeworkApi.ts` — new `ocrTaskImage()` API function
-- `src/types/homework.ts` — add `ocr_text` to task type (if not auto-generated)
+- `supabase/functions/telegram-bot/index.ts` — add `mergeConsecutiveUserMessages()` helper, call it in `handleTextMessage` and `handlePhotoMessage`
+- Database: one-time cleanup query for this user's orphaned messages
+- Deploy `telegram-bot` edge function after code change
 
 ### Not changing
-- `vision_checker.ts` — already has the right OCR logic
-- `streamChat.ts` — no changes needed (taskContext handles this)
+
 - `chat/index.ts` — no changes needed
+- `homework-api/` — unrelated
+- Frontend — unrelated
 
