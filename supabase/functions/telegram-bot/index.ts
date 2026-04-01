@@ -6900,8 +6900,11 @@ async function handleTextMessage(telegramUserId: number, userId: string, text: s
     // Compact history: keep only last N messages, strip old images
     const compacted = compactHistoryForTelegram(history);
     
+    // Merge consecutive user messages to ensure proper turn-taking
+    const merged = mergeConsecutiveUserMessages(compacted);
+    
     // Refresh signed URLs only for messages that still have images
-    const readyHistory = await refreshImageUrls(compacted);
+    const readyHistory = await refreshImageUrls(merged);
     
     const imageCount = readyHistory.filter(m => m.image_url).length;
     console.log("📊 [handleTextMessage] history compact:", {
