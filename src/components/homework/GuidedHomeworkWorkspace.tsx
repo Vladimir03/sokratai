@@ -711,6 +711,24 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
     }
   }, [assignment, ensureTaskOcrText, patchMessage, persistMessage, resolveLatestStudentImageUrls]);
 
+  // Save current draft + restore target draft + switch task
+  const switchToTask = useCallback((newOrder: number) => {
+    if (celebrationTimerRef.current) {
+      clearTimeout(celebrationTimerRef.current);
+      celebrationTimerRef.current = null;
+      setCelebratingTaskOrder(null);
+    }
+    taskDraftsRef.current.set(currentTaskOrder, {
+      answer: currentDraftRef.current.answer,
+      discussion: currentDraftRef.current.discussion,
+      files: [...attachedFiles],
+    });
+    const draft = taskDraftsRef.current.get(newOrder);
+    setAttachedFiles(draft?.files ?? []);
+    currentDraftRef.current = { answer: draft?.answer ?? '', discussion: draft?.discussion ?? '' };
+    setCurrentTaskOrder(newOrder);
+  }, [currentTaskOrder, attachedFiles]);
+
   const handleCheckAnswer = useCallback(async (answerText: string, attachmentRefs?: string[]) => {
     if (!threadId || !currentTask) return;
     const taskOrder = currentTask.order_num;
@@ -1102,23 +1120,6 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
       });
   }, [activeTaskOrder, assignment.id, currentTaskOrder, handleCheckAnswer, handleHint, patchMessage, retryWithStorageRef, threadId]);
 
-  // Save current draft + restore target draft + switch task
-  const switchToTask = useCallback((newOrder: number) => {
-    if (celebrationTimerRef.current) {
-      clearTimeout(celebrationTimerRef.current);
-      celebrationTimerRef.current = null;
-      setCelebratingTaskOrder(null);
-    }
-    taskDraftsRef.current.set(currentTaskOrder, {
-      answer: currentDraftRef.current.answer,
-      discussion: currentDraftRef.current.discussion,
-      files: [...attachedFiles],
-    });
-    const draft = taskDraftsRef.current.get(newOrder);
-    setAttachedFiles(draft?.files ?? []);
-    currentDraftRef.current = { answer: draft?.answer ?? '', discussion: draft?.discussion ?? '' };
-    setCurrentTaskOrder(newOrder);
-  }, [currentTaskOrder, attachedFiles]);
 
   const handleTaskClick = useCallback((orderNum: number) => {
     if (!visitedTaskOrders.has(orderNum)) return;
