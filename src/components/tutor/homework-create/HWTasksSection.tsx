@@ -9,6 +9,11 @@ import { KBPickerSheet } from '@/components/tutor/KBPickerSheet';
 import { HWTaskCard } from './HWTaskCard';
 import { type DraftTask, createEmptyTask, generateUUID, revokeObjectUrl } from './types';
 
+function inferCheckFormat(kimNumber: number | null): 'short_answer' | 'detailed_solution' {
+  if (kimNumber && kimNumber >= 21 && kimNumber <= 26) return 'detailed_solution';
+  return 'short_answer';
+}
+
 // Job: Быстро добавить задачу из базы в черновик ДЗ
 function kbTaskToDraftTask(task: KBTask): DraftTask {
   const attachmentRef = parseAttachmentUrls(task.attachment_url)[0] ?? null;
@@ -21,8 +26,9 @@ function kbTaskToDraftTask(task: KBTask): DraftTask {
     task_image_used_fallback: false,
     correct_answer: task.answer ?? '',
     rubric_text: '',
-    max_score: 1,
+    max_score: task.primary_score ?? 1,
     uploading: false,
+    check_format: (task.answer_format as 'short_answer' | 'detailed_solution') ?? inferCheckFormat(task.kim_number),
     kb_task_id: task.id,
     kb_source: task.owner_id ? 'my' : 'socrat',
     kb_snapshot_text: task.text,

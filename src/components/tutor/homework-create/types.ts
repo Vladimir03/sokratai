@@ -75,6 +75,7 @@ export interface DraftTask {
   kb_snapshot_solution?: string | null;
   /** Original KB attachment URL (storage:// or https://). Not usable as task_image_path directly. */
   kb_attachment_url?: string | null;
+  check_format: 'short_answer' | 'detailed_solution';
 }
 
 // ─── Draft material type ──────────────────────────────────────────────────────
@@ -124,6 +125,7 @@ export function createEmptyTask(): DraftTask {
     rubric_text: '',
     max_score: 1,
     uploading: false,
+    check_format: 'short_answer',
   };
 }
 

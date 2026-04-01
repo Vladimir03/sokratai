@@ -23,6 +23,7 @@ const VALID_SUBJECTS = ["math", "physics", "history", "social", "english", "cs"]
 const VALID_STATUSES = ["draft", "active", "closed"] as const;
 const VALID_WORKFLOW_MODES = ["classic", "guided_chat"] as const;
 const VALID_STATUS_FILTERS = ["draft", "active", "closed", "all"] as const;
+const VALID_CHECK_FORMATS = ["short_answer", "detailed_solution"] as const;
 const VALID_SUBMISSION_STATUSES = ["in_progress", "submitted", "ai_checked", "tutor_reviewed"] as const;
 type NotifyFailureReason =
   | "missing_telegram_link" | "telegram_send_failed" | "telegram_send_error"
@@ -362,6 +363,9 @@ async function handleCreateAssignment(
     if (t.order_num !== undefined && t.order_num !== null && !isPositiveInt(t.order_num)) {
       return jsonError(cors, 400, "VALIDATION", `tasks[${i}].order_num must be a positive integer`);
     }
+    if (t.check_format !== undefined && t.check_format !== null && !(VALID_CHECK_FORMATS as readonly string[]).includes(t.check_format)) {
+      return jsonError(cors, 400, "VALIDATION", `tasks[${i}].check_format must be one of: ${VALID_CHECK_FORMATS.join(", ")}`);
+    }
   }
 
   const { data: assignment, error: assignErr } = await db
@@ -393,6 +397,7 @@ async function handleCreateAssignment(
     correct_answer: isNonEmptyString(t.correct_answer) ? (t.correct_answer as string).trim() : null,
     max_score: isPositiveInt(t.max_score) ? t.max_score : 1,
     rubric_text: isNonEmptyString(t.rubric_text) ? (t.rubric_text as string).trim() : null,
+    check_format: (VALID_CHECK_FORMATS as readonly string[]).includes(t.check_format) ? t.check_format : "short_answer",
   }));
 
   const { error: tasksErr } = await db
@@ -834,6 +839,9 @@ async function handleUpdateAssignment(
       if (t.order_num !== undefined && t.order_num !== null && !isPositiveInt(t.order_num)) {
         return jsonError(cors, 400, "VALIDATION", `tasks[${i}].order_num must be a positive integer`);
       }
+      if (t.check_format !== undefined && t.check_format !== null && !(VALID_CHECK_FORMATS as readonly string[]).includes(t.check_format)) {
+        return jsonError(cors, 400, "VALIDATION", `tasks[${i}].check_format must be one of: ${VALID_CHECK_FORMATS.join(", ")}`);
+      }
     }
 
     const { count: submissionCount } = await db
@@ -919,6 +927,9 @@ async function handleUpdateAssignment(
         if (t.rubric_text !== undefined) {
           updateFields.rubric_text = isNonEmptyString(t.rubric_text) ? (t.rubric_text as string).trim() : null;
         }
+        if (t.check_format !== undefined) {
+          updateFields.check_format = (VALID_CHECK_FORMATS as readonly string[]).includes(t.check_format) ? t.check_format : "short_answer";
+        }
 
         const { error } = await db
           .from("homework_tutor_tasks")
@@ -948,6 +959,7 @@ async function handleUpdateAssignment(
           correct_answer: isNonEmptyString(t.correct_answer) ? (t.correct_answer as string).trim() : null,
           max_score: isPositiveInt(t.max_score) ? t.max_score : 1,
           rubric_text: isNonEmptyString(t.rubric_text) ? (t.rubric_text as string).trim() : null,
+          check_format: (VALID_CHECK_FORMATS as readonly string[]).includes(t.check_format) ? t.check_format : "short_answer",
         };
         const { error } = await db
           .from("homework_tutor_tasks")
@@ -981,6 +993,7 @@ async function handleUpdateAssignment(
               correct_answer: isNonEmptyString(t.correct_answer) ? (t.correct_answer as string).trim() : null,
               max_score: isPositiveInt(t.max_score) ? t.max_score : 1,
               rubric_text: isNonEmptyString(t.rubric_text) ? (t.rubric_text as string).trim() : null,
+              check_format: (VALID_CHECK_FORMATS as readonly string[]).includes(t.check_format) ? t.check_format : "short_answer",
             })
             .select("id")
             .single();
@@ -3774,7 +3787,7 @@ async function handleCheckAnswer(
   // Load the full task (with correct_answer, rubric)
   const { data: task } = await db
     .from("homework_tutor_tasks")
-    .select("id, order_num, task_text, task_image_url, ocr_text, correct_answer, rubric_text, max_score")
+    .select("id, order_num, task_text, task_image_url, ocr_text, correct_answer, rubric_text, max_score, check_format")
     .eq("id", currentState.task_id)
     .single();
 
@@ -3863,6 +3876,7 @@ async function handleCheckAnswer(
     hintCount: (currentState.hint_count as number) ?? 0,
     availableScore: currentAvailableScore,
     maxScore: task.max_score ?? 1,
+    checkFormat: task.check_format ?? undefined,
   });
 
   // Safety guard: without correct_answer, only trust high-confidence CORRECT

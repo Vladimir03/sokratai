@@ -71,6 +71,7 @@ export interface EvaluateStudentAnswerParams {
   hintCount: number;
   availableScore: number;
   maxScore: number;
+  checkFormat?: "short_answer" | "detailed_solution";
 }
 
 export interface GenerateHintParams {
@@ -455,6 +456,30 @@ function buildAnswerTypeGuidance(correctAnswer: string | null, taskText: string)
   return "";
 }
 
+function buildCheckFormatGuidance(
+  checkFormat: "short_answer" | "detailed_solution" | undefined,
+  studentAnswer: string,
+): string {
+  if (checkFormat !== "detailed_solution") return "";
+
+  const lines = [
+    "",
+    "ФОРМАТ ПРОВЕРКИ: РАЗВЁРНУТОЕ РЕШЕНИЕ.",
+    "Ученик ОБЯЗАН показать ход решения (шаги, формулы, рассуждения).",
+    "Если ответ содержит только число/слово без хода решения — выстави score: 0",
+    "и в feedback попроси ученика показать ход решения.",
+    "Не принимай ответ без объяснения шагов.",
+  ];
+
+  if (studentAnswer.length < 30) {
+    lines.push(
+      "ВНИМАНИЕ: ответ ученика очень короткий для развёрнутого решения — скорее всего ход решения отсутствует.",
+    );
+  }
+
+  return lines.join("\n");
+}
+
 function isImageDescriptionRequest(text: string): boolean {
   return /(что\s+(?:ты\s+)?видишь|что\s+на|опиши|что\s+изображен|что\s+изображено).*(?:картинк|изображени|фото|скрин)/i.test(text);
 }
@@ -470,6 +495,7 @@ function buildCheckPrompt(params: EvaluateStudentAnswerParams): LovableMessage[]
   const answerTypeGuidance = buildAnswerTypeGuidance(params.correctAnswer, params.taskText);
   const wantsImageDescription = hasStudentImage && isImageDescriptionRequest(params.studentAnswer);
   const graphGroundingGuidance = buildGraphGroundingGuidance(params.taskOcrText, hasTaskImage);
+  const checkFormatGuidance = buildCheckFormatGuidance(params.checkFormat, params.studentAnswer);
 
   const systemContent = [
     "Ты проверяешь ответ ученика на задачу по домашнему заданию.",
@@ -519,6 +545,7 @@ function buildCheckPrompt(params: EvaluateStudentAnswerParams): LovableMessage[]
     "- НЕЛЬЗЯ выдавать правильный ответ в feedback.",
     "- error_type: calculation | concept | formatting | incomplete | factual_error | weak_argument | wrong_answer | partial | correct",
     answerTypeGuidance,
+    checkFormatGuidance,
   ].filter(Boolean).join("\n");
 
   const messages: LovableMessage[] = [
@@ -717,16 +744,19 @@ export async function evaluateStudentAnswer(
     maxScore: params.maxScore,
   });
 
-  const deterministicMatch = tryDeterministicShortAnswerMatch(
-    params.studentAnswer,
-    params.correctAnswer,
-  );
-  if (deterministicMatch) {
-    console.log("guided_check_fast_path_match", {
-      subject: params.subject,
-      confidence: deterministicMatch.confidence,
-    });
-    return deterministicMatch;
+  // Skip deterministic fast path for detailed_solution — AI must enforce format
+  if (params.checkFormat !== "detailed_solution") {
+    const deterministicMatch = tryDeterministicShortAnswerMatch(
+      params.studentAnswer,
+      params.correctAnswer,
+    );
+    if (deterministicMatch) {
+      console.log("guided_check_fast_path_match", {
+        subject: params.subject,
+        confidence: deterministicMatch.confidence,
+      });
+      return deterministicMatch;
+    }
   }
 
   try {

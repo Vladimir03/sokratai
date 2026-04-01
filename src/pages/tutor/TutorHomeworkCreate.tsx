@@ -197,6 +197,7 @@ function TutorHomeworkCreateContent() {
         correct_answer: t.correct_answer ?? '',
         rubric_text: t.rubric_text ?? '',
         max_score: t.max_score,
+        check_format: t.check_format ?? 'short_answer',
       }));
 
     setTasks(newTasks);
@@ -462,6 +463,7 @@ function TutorHomeworkCreateContent() {
           correct_answer: t.correct_answer.trim() || null,
           rubric_text: t.rubric_text.trim() || null,
           max_score: t.max_score,
+          check_format: t.check_format,
         }));
 
         const result = await createTutorHomeworkAssignment({
@@ -693,6 +695,7 @@ function TutorHomeworkCreateContent() {
         correct_answer: t.correct_answer.trim() || null,
         rubric_text: t.rubric_text.trim() || null,
         max_score: t.max_score,
+        check_format: t.check_format,
       }));
 
       await updateTutorHomeworkAssignment(editId, {

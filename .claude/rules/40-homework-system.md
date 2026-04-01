@@ -15,6 +15,26 @@ Legacy student-only система (`homework_sets`, `homework_tasks`, `homework
 - `workflow_mode: 'guided_chat'` — guided mode по умолчанию
 - Если репетитор меняет эти значения — открыть L1 («Расширенные параметры»)
 
+### Формат проверки задач (`check_format`, Phase 1, 2026-04-01)
+
+Колонка `check_format` в `homework_tutor_tasks` определяет как AI проверяет ответ ученика в guided chat.
+
+**Значения:**
+- `'short_answer'` (default) — краткий ответ (число, слово, формула). AI проверяет как обычно
+- `'detailed_solution'` — развёрнутое решение. AI отклоняет голые ответы без хода решения (`score: 0`)
+
+**Ключевые решения:**
+- Enforcement **только в guided chat** (classic mode не поддерживает)
+- Deterministic fast path (`tryDeterministicShortAnswerMatch`) **отключён** для `detailed_solution` — AI должен оценить наличие хода решения
+- `buildCheckFormatGuidance()` в `guided_ai.ts` добавляет enforcement-промпт + hint при коротком ответе (`< 30 символов`)
+- При добавлении задачи из KB: `answer_format` → `check_format`, fallback `inferCheckFormat(kim_number)` (КИМ 21-26 → `detailed_solution`)
+
+**Файлы:**
+- `guided_ai.ts`: `buildCheckFormatGuidance()`, `EvaluateStudentAnswerParams.checkFormat`
+- `index.ts`: `VALID_CHECK_FORMATS`, `handleCreateAssignment`, `handleUpdateAssignment`, `handleCheckAnswer` (SELECT + pass to AI)
+- Миграция: `20260401120000_add_check_format_to_homework_tutor_tasks.sql`
+- Спека: `docs/delivery/features/check-format/spec.md`
+
 ### Ключевые файлы
 - `src/lib/studentHomeworkApi.ts` — API-клиент для студентов (задания, submissions, guided chat)
 - `src/hooks/useStudentHomework.ts` — React hooks для студенческого ДЗ

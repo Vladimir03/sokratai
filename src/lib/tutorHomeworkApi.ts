@@ -29,6 +29,7 @@ export interface CreateAssignmentTask {
   correct_answer?: string | null;
   rubric_text?: string | null;
   max_score?: number;
+  check_format?: 'short_answer' | 'detailed_solution';
 }
 
 export interface CreateAssignmentPayload {
@@ -711,6 +712,7 @@ export interface UpdateAssignmentTask {
   correct_answer?: string | null;
   max_score?: number;
   rubric_text?: string | null;
+  check_format?: 'short_answer' | 'detailed_solution';
 }
 
 export async function updateTutorHomeworkAssignment(
