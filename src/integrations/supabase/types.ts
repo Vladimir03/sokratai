@@ -1031,6 +1031,7 @@ export type Database = {
       homework_tutor_tasks: {
         Row: {
           assignment_id: string
+          check_format: string
           correct_answer: string | null
           id: string
           max_score: number
@@ -1043,6 +1044,7 @@ export type Database = {
         }
         Insert: {
           assignment_id: string
+          check_format?: string
           correct_answer?: string | null
           id?: string
           max_score?: number
@@ -1055,6 +1057,7 @@ export type Database = {
         }
         Update: {
           assignment_id?: string
+          check_format?: string
           correct_answer?: string | null
           id?: string
           max_score?: number
