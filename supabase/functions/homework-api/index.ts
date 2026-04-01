@@ -928,7 +928,7 @@ async function handleUpdateAssignment(
           updateFields.rubric_text = isNonEmptyString(t.rubric_text) ? (t.rubric_text as string).trim() : null;
         }
         if (t.check_format !== undefined) {
-          updateFields.check_format = (VALID_CHECK_FORMATS as readonly string[]).includes(t.check_format) ? t.check_format : "short_answer";
+          updateFields.check_format = (VALID_CHECK_FORMATS as readonly string[]).includes(t.check_format as string) ? t.check_format : "short_answer";
         }
 
         const { error } = await db
