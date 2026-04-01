@@ -419,6 +419,7 @@ export interface TutorHomeworkAssignmentDetails {
     correct_answer: string | null;
     rubric_text: string | null;
     max_score: number;
+    check_format?: 'short_answer' | 'detailed_solution';
   }[];
   assigned_students: {
     student_id: string;
