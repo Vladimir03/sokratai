@@ -7510,6 +7510,103 @@ async function handlePhotoMessage(telegramUserId: number, userId: string, photo:
   }
 }
 
+// ============= VOICE MESSAGE TRANSCRIPTION =============
+
+async function handleVoiceMessage(
+  telegramUserId: number,
+  userId: string,
+  voice: { file_id: string; duration: number; mime_type?: string },
+) {
+  console.log("Handling voice message:", { telegramUserId, duration: voice.duration, mime: voice.mime_type });
+
+  const stopSignal = { stop: false };
+  sendTypingLoop(telegramUserId, stopSignal);
+
+  try {
+    // 1. Get file path from Telegram
+    const fileInfoRes = await fetch(
+      `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/getFile`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ file_id: voice.file_id }),
+      },
+    );
+    const fileInfoData = await fileInfoRes.json();
+    if (!fileInfoData.ok || !fileInfoData.result?.file_path) {
+      stopSignal.stop = true;
+      await sendTelegramMessage(telegramUserId, "❌ Не удалось получить голосовое сообщение. Попробуй ещё раз.");
+      return;
+    }
+
+    const filePath = fileInfoData.result.file_path;
+
+    // 2. Download the OGG file
+    const fileUrl = `https://api.telegram.org/file/bot${TELEGRAM_BOT_TOKEN}/${filePath}`;
+    const fileRes = await fetch(fileUrl);
+    if (!fileRes.ok) {
+      stopSignal.stop = true;
+      await sendTelegramMessage(telegramUserId, "❌ Не удалось скачать голосовое сообщение.");
+      return;
+    }
+    const audioBuffer = await fileRes.arrayBuffer();
+
+    // 3. Send to Lemonfox API for transcription
+    const LEMONFOX_API_KEY = Deno.env.get("LEMONFOX_API_KEY");
+    if (!LEMONFOX_API_KEY) {
+      stopSignal.stop = true;
+      console.error("LEMONFOX_API_KEY is not configured");
+      await sendTelegramMessage(telegramUserId, "❌ Расшифровка голосовых временно недоступна.");
+      return;
+    }
+
+    const formData = new FormData();
+    formData.append("file", new Blob([audioBuffer], { type: voice.mime_type || "audio/ogg" }), "voice.ogg");
+    formData.append("language", "ru");
+
+    const transcribeRes = await fetch("https://api.lemonfox.ai/v1/audio/transcriptions", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${LEMONFOX_API_KEY}`,
+      },
+      body: formData,
+    });
+
+    if (!transcribeRes.ok) {
+      const errText = await transcribeRes.text().catch(() => "unknown");
+      console.error("Lemonfox transcription failed:", { status: transcribeRes.status, body: errText });
+      stopSignal.stop = true;
+      await sendTelegramMessage(telegramUserId, "❌ Не удалось расшифровать голосовое сообщение. Попробуй отправить текстом.");
+      return;
+    }
+
+    const transcribeData = await transcribeRes.json();
+    const transcribedText = transcribeData?.text?.trim();
+
+    if (!transcribedText) {
+      stopSignal.stop = true;
+      await sendTelegramMessage(telegramUserId, "❌ Не удалось распознать речь. Попробуй записать ещё раз или отправь текстом.");
+      return;
+    }
+
+    stopSignal.stop = true;
+
+    // 4. Show transcription to user
+    const durationStr = voice.duration >= 60
+      ? `${Math.floor(voice.duration / 60)}:${String(voice.duration % 60).padStart(2, "0")}`
+      : `0:${String(voice.duration).padStart(2, "0")}`;
+
+    await sendTelegramMessage(telegramUserId, `🎤 Расшифровка [${durationStr}]:\n«${transcribedText}»`);
+
+    // 5. Process as regular text message
+    await handleTextMessage(telegramUserId, userId, transcribedText);
+  } catch (err) {
+    stopSignal.stop = true;
+    console.error("Voice message handling error:", err);
+    await sendTelegramMessage(telegramUserId, "❌ Ошибка при обработке голосового сообщения. Попробуй ещё раз.");
+  }
+}
+
 /**
  * Handles button actions (solution/hint/explain) by editing the original message
  * Instead of sending new messages, this function edits the message where buttons were clicked
@@ -8538,6 +8635,20 @@ Deno.serve(async (req) => {
             headers: { ...corsHeaders, "Content-Type": "application/json" },
           });
         }
+      }
+
+      return new Response(JSON.stringify({ ok: true }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    // Handle voice messages
+    if (update.message?.voice) {
+      const telegramUserId = update.message.from.id;
+      const session = await getOrRepairOnboardingSession(telegramUserId);
+
+      if (session?.user_id && session.onboarding_state === "completed") {
+        await handleVoiceMessage(telegramUserId, session.user_id, update.message.voice);
       }
 
       return new Response(JSON.stringify({ ok: true }), {
