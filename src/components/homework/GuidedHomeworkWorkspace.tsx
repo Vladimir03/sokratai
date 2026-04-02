@@ -354,6 +354,7 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
   const [isUploading, setIsUploading] = useState(false);
   const [celebratingTaskOrder, setCelebratingTaskOrder] = useState<number | null>(null);
   const celebrationTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const hasInitializedRef = useRef(false);
   const [isConditionExpanded, setIsConditionExpanded] = useState(true);
 
   // Per-task drafts: save/restore text + files when switching tasks
@@ -397,7 +398,12 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
     attachedFilesRef.current = attachedFiles;
   }, [attachedFiles]);
 
-  // Initialize from thread data
+  // Reset init guard when switching to a different assignment (same route, no remount)
+  useEffect(() => {
+    hasInitializedRef.current = false;
+  }, [assignment.id]);
+
+  // Sync thread data on every refetch; set navigation only on first load per assignment
   useEffect(() => {
     if (thread) {
       const normalizedMessages = (thread.homework_tutor_thread_messages ?? []).map((msg) => ({
@@ -406,22 +412,28 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
       }));
       setMessages(normalizedMessages);
       setTaskStates(thread.homework_tutor_task_states ?? []);
-      setCurrentTaskOrder(thread.current_task_order);
-      // Fallback: if saved task is already completed, jump to first active task
-      const states = thread.homework_tutor_task_states ?? [];
-      const targetState = states.find((s) => s.task_order === thread.current_task_order);
-      if (targetState?.status === 'completed') {
-        const firstActive = states
-          .filter((s) => s.status === 'active')
-          .sort((a, b) => a.task_order - b.task_order)[0];
-        if (firstActive) {
-          setCurrentTaskOrder(firstActive.task_order);
-        }
-      }
       setThreadCurrentTaskOrder(thread.current_task_order);
       setThreadId(thread.id);
       setThreadStatus(thread.status);
-      // If user returns to an already-completed thread, show results immediately
+
+      // Only set navigation on first load — after that, switchToTask() and
+      // auto-advance (CORRECT + 1200ms) control which task the student sees.
+      if (!hasInitializedRef.current) {
+        hasInitializedRef.current = true;
+        setCurrentTaskOrder(thread.current_task_order);
+        // Fallback: if saved task is already completed, jump to first active task
+        const states = thread.homework_tutor_task_states ?? [];
+        const targetState = states.find((s) => s.task_order === thread.current_task_order);
+        if (targetState?.status === 'completed') {
+          const firstActive = states
+            .filter((s) => s.status === 'active')
+            .sort((a, b) => a.task_order - b.task_order)[0];
+          if (firstActive) {
+            setCurrentTaskOrder(firstActive.task_order);
+          }
+        }
+      }
+
       if (thread.status === 'completed') {
         setShowCompletedView(true);
       }

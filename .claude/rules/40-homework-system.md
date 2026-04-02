@@ -221,6 +221,12 @@ Legacy student-only система (`homework_sets`, `homework_tasks`, `homework
 - `GuidedHomeworkWorkspace.tsx` — `syncThreadDataOnly`, celebration logic, timer cleanup
 - `TaskStepper.tsx` — `celebratingTaskOrder` prop, CSS animation (no framer-motion)
 
+**Init-once навигация (2026-04-02):**
+- `hasInitializedRef` — навигация (`setCurrentTaskOrder`) устанавливается только при первом получении `thread`, не при каждом refetch
+- Причина: `queryClient.invalidateQueries` после check/hint вызывал refetch → init effect перезаписывал `currentTaskOrder` серверным `current_task_order` → ученик перебрасывался на другую задачу
+- `assignment.id` change → ref сбрасывается (поддержка навигации между ДЗ без remount)
+- После инициализации навигацию контролируют только `switchToTask()` (клик) и auto-advance (CORRECT + 1200ms)
+
 **Спека:** `docs/delivery/features/guided-chat/task-lock-spec.md`
 
 ### Bootstrap hallucination fix + disable toggle (Sprint S4, 2026-03-27)
