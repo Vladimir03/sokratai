@@ -81,6 +81,7 @@ export interface KBTask {
   answer: string | null;
   solution: string | null;
   answer_format: string | null;
+  check_format: string | null;
   source_label: string | null;
   /**
    * Single storage ref (`storage://kb-attachments/…`) or JSON array of refs
