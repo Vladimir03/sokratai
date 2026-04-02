@@ -27,7 +27,7 @@ Legacy student-only система (`homework_sets`, `homework_tasks`, `homework
 - Enforcement **только в guided chat** (classic mode не поддерживает)
 - Deterministic fast path (`tryDeterministicShortAnswerMatch`) **отключён** для `detailed_solution` — AI должен оценить наличие хода решения
 - `buildCheckFormatGuidance()` в `guided_ai.ts` добавляет enforcement-промпт + hint при коротком ответе (`< 30 символов`)
-- При добавлении задачи из KB: `answer_format` → `check_format`, fallback `inferCheckFormat(kim_number)` (КИМ 21-26 → `detailed_solution`)
+- При добавлении задачи из KB: приоритет `task.check_format` → `mapAnswerFormatToCheckFormat(task.answer_format)` → `inferCheckFormat(kim_number)` (КИМ 21-26 → `detailed_solution`). Legacy `answer_format` значения (`detailed`, `number`, `text`, `choice`, `matching`) маппятся в `mapAnswerFormatToCheckFormat()` в `HWTasksSection.tsx`
 
 **Student-facing UX (R8, 2026-04-02):**
 - `StudentHomeworkTask` включает `check_format: 'short_answer' | 'detailed_solution'`
@@ -45,6 +45,12 @@ Legacy student-only система (`homework_sets`, `homework_tasks`, `homework
 - `src/lib/studentHomeworkApi.ts`: `check_format` в SELECT query
 - Миграция: `20260401120000_add_check_format_to_homework_tutor_tasks.sql`
 - Спека: `docs/delivery/features/check-format/spec.md`
+
+**Tutor UI (Phase 2, 2026-04-02):**
+- `HWTaskCard.tsx`: нативный `<select>` для `check_format` (Краткий ответ / Развёрнутое решение) + hint text под selector
+- `HWTaskCard.tsx`: badge «из БЗ» рядом с «Макс. баллов» когда `kb_task_id` и `max_score > 1`
+- `HWTasksSection.tsx`: `mapAnswerFormatToCheckFormat()` — маппинг legacy `answer_format` → `check_format` enum
+- `select` элемент: `font-size: 16px` + `touch-action: manipulation` (iOS Safari auto-zoom prevention)
 
 ### Ключевые файлы
 - `src/lib/studentHomeworkApi.ts` — API-клиент для студентов (задания, submissions, guided chat)

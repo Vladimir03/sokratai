@@ -363,8 +363,8 @@ npm run lint && npm run build && npm run smoke-check
 ### Phase 2 — P1 (fast follow-up)
 
 - [ ] TASK-8: DB миграция — add `check_format` to `kb_tasks`
-- [ ] TASK-9: UI — check_format selector в `HWTaskCard.tsx`
-- [ ] TASK-10: UI — max_score display/edit в `HWTaskCard.tsx`
+- [x] TASK-9: UI — check_format selector в `HWTaskCard.tsx`
+- [x] TASK-10: UI — max_score display/edit в `HWTaskCard.tsx`
 - [ ] TASK-11: Seed script — заполнить `check_format` в KB задачах по `kim_number`
 
 ---

@@ -303,7 +303,12 @@ export function HWTaskCard({ task, index, onUpdate, onRemove, canRemove, onDefer
             />
           </div>
           <div className="space-y-2">
-            <Label>Макс. баллов</Label>
+            <Label className="flex items-center gap-2">
+              Макс. баллов
+              {task.kb_task_id && task.max_score > 1 && (
+                <span className="text-xs text-muted-foreground font-normal">из БЗ</span>
+              )}
+            </Label>
             <Input
               type="number"
               min={1}
@@ -315,6 +320,27 @@ export function HWTaskCard({ task, index, onUpdate, onRemove, canRemove, onDefer
               className="text-base"
             />
           </div>
+        </div>
+
+        <div className="space-y-1">
+          <Label htmlFor={`check-format-${task.localId}`}>Формат проверки</Label>
+          <select
+            id={`check-format-${task.localId}`}
+            value={task.check_format}
+            onChange={(e) =>
+              onUpdate({ ...task, check_format: e.target.value as 'short_answer' | 'detailed_solution' })
+            }
+            className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-base ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+            style={{ fontSize: '16px', touchAction: 'manipulation' }}
+          >
+            <option value="short_answer">Краткий ответ</option>
+            <option value="detailed_solution">Развёрнутое решение</option>
+          </select>
+          <p className="text-xs text-muted-foreground">
+            {task.check_format === 'detailed_solution'
+              ? 'AI потребует ход решения от ученика'
+              : 'Число, слово или формула'}
+          </p>
         </div>
 
         <RubricField

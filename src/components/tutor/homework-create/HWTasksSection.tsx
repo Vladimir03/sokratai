@@ -14,9 +14,22 @@ function inferCheckFormat(kimNumber: number | null): 'short_answer' | 'detailed_
   return 'short_answer';
 }
 
+/** Map legacy KB answer_format values to check_format enum */
+function mapAnswerFormatToCheckFormat(af: string | null): 'short_answer' | 'detailed_solution' | null {
+  if (!af) return null;
+  if (af === 'short_answer' || af === 'detailed_solution') return af;
+  if (af === 'detailed') return 'detailed_solution';
+  // number, text, choice, matching → short answer
+  return 'short_answer';
+}
+
 // Job: Быстро добавить задачу из базы в черновик ДЗ
 function kbTaskToDraftTask(task: KBTask): DraftTask {
   const attachmentRef = parseAttachmentUrls(task.attachment_url)[0] ?? null;
+  const checkFormat: 'short_answer' | 'detailed_solution' =
+    (task.check_format === 'short_answer' || task.check_format === 'detailed_solution' ? task.check_format : null)
+    ?? mapAnswerFormatToCheckFormat(task.answer_format)
+    ?? inferCheckFormat(task.kim_number);
   return {
     localId: generateUUID(),
     task_text: task.text,
@@ -28,7 +41,7 @@ function kbTaskToDraftTask(task: KBTask): DraftTask {
     rubric_text: '',
     max_score: task.primary_score ?? 1,
     uploading: false,
-    check_format: (task.answer_format as 'short_answer' | 'detailed_solution') ?? inferCheckFormat(task.kim_number),
+    check_format: checkFormat,
     kb_task_id: task.id,
     kb_source: task.owner_id ? 'my' : 'socrat',
     kb_snapshot_text: task.text,
