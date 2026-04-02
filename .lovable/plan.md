@@ -1,28 +1,59 @@
 
 
-## Fix: Student homework page crash ("Cannot access 'le' before initialization")
+## Voice Message Transcription in Telegram Bot
 
-The published site crashes with a TDZ (Temporal Dead Zone) error because of two issues in the codebase.
+### Problem
+Bot currently ignores voice messages. Need to transcribe them via Lemonfox API and process as text.
 
-### Root cause
+### Key constraint: No ffmpeg in Edge Functions
+Supabase Edge Functions run in Deno isolate — no system binaries like ffmpeg. However, Lemonfox API (OpenAI-compatible) likely accepts OGG/OGA directly (Whisper-compatible APIs accept opus-in-ogg). We'll try sending OGG directly first; if it fails, we'll use a JS-based audio conversion library.
 
-**Issue 1: Missing `task_order` on `HomeworkTaskState` type**
-`src/types/homework.ts` line 152 — the `HomeworkTaskState` interface lacks `task_order: number`. The DB returns this field, but TypeScript doesn't know about it. 11 references in `GuidedHomeworkWorkspace.tsx` fail compilation.
+### Plan
 
-**Issue 2: `switchToTask` used before declaration**
-`GuidedHomeworkWorkspace.tsx` line 840 — `checkAnswer` callback references `switchToTask` in its dependency array, but `switchToTask` is defined at line 1106. This causes a TDZ error at runtime (the "Cannot access 'le' before initialization" — where `le` is the minified variable name for `switchToTask`).
+**Step 1: Add LEMONFOX_API_KEY secret**
+- Use `add_secret` tool to request the API key from user
 
-### Fix plan
+**Step 2: Add `handleVoiceMessage()` function in `telegram-bot/index.ts`**
 
-**File 1: `src/types/homework.ts`**
-- Add `task_order: number;` to the `HomeworkTaskState` interface (after `task_id`)
+Logic:
+1. Start typing indicator (`sendTypingLoop`)
+2. Call Telegram `getFile` API to get `file_path`
+3. Download OGG file from `https://api.telegram.org/file/bot{token}/{file_path}`
+4. Send to Lemonfox API as `multipart/form-data` (file + `language=ru`)
+5. On success: send transcription preview to user, then call `handleTextMessage()` with transcribed text
+6. On failure: send error message, stop
 
-**File 2: `src/components/homework/GuidedHomeworkWorkspace.tsx`**
-- Move `switchToTask` callback declaration **before** `checkAnswer` (before line ~700, after `syncThreadDataOnly` and other dependencies it uses)
-- This resolves both the build error and the runtime TDZ crash
+Message format:
+```
+🎤 Расшифровка: "{transcribed text}"
+```
+Then the AI response follows as usual (via `handleTextMessage`).
 
-### Impact
-- Fixes the production crash for all students opening guided homework
-- No database changes needed
-- No backend changes needed
+**Step 3: Wire into message dispatch** (after photo handler, before final return ~line 8546)
+
+Add block:
+```
+if (update.message?.voice) {
+  // get session, check onboarding_state === 'completed'
+  // call handleVoiceMessage(telegramUserId, session.user_id, update.message.voice)
+}
+```
+
+### Technical details
+
+- Voice messages in Telegram arrive as `update.message.voice` with `file_id`, `duration`, `mime_type` (usually `audio/ogg`)
+- Lemonfox API is OpenAI-compatible — should accept OGG opus directly (no conversion needed)
+- File download: `fetch(fileUrl)` → `arrayBuffer()` → build `FormData` with `Blob`
+- Duration shown in user-facing message: `voice.duration` seconds
+- `input_method: 'voice'` saved in `chat_messages` for analytics
+- Error handling: if transcription returns empty or API fails → friendly message to user
+
+### Files modified
+- `supabase/functions/telegram-bot/index.ts` — add `handleVoiceMessage()` + dispatch block
+- Secret: `LEMONFOX_API_KEY`
+
+### Not changing
+- `handleTextMessage` — reused as-is after transcription
+- Frontend — no changes
+- Database — no schema changes (existing `input_method` column used)
 
