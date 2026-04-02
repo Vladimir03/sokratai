@@ -1404,11 +1404,6 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
                 <MathText text={currentTask.task_text} className="text-sm font-medium whitespace-pre-wrap" />
               </Suspense>
 
-              {currentTask.check_format === 'detailed_solution' && (
-                <div className="bg-amber-50 border-l-4 border-amber-400 text-amber-800 text-sm p-3 rounded-r-md mt-2">
-                  📝 Задача с развёрнутым решением — покажи ход решения, как на ЕГЭ. Без хода решения получишь 0 баллов.
-                </div>
-              )}
 
               <div className="mt-2">
                 <TaskConditionImage
@@ -1436,6 +1431,12 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
               )}
             </div>
           </div>
+
+          {currentTask.check_format === 'detailed_solution' && (
+            <div className="bg-amber-50 border-l-4 border-amber-400 text-amber-800 text-sm p-3 rounded-r-md mx-4 mb-3">
+              📝 Задача с развёрнутым решением — покажи ход решения, как на ЕГЭ. Без хода решения получишь 0 баллов.
+            </div>
+          )}
         </div>
       )}
 
