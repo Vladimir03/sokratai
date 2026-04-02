@@ -1556,26 +1556,24 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
 
         </div>
 
-        {threadStatus !== 'completed' && (
-          <GuidedChatInput
-            key={currentTaskOrder}
-            onSendAnswer={handleSendAnswer}
-            onSendStep={handleSendStep}
-            isLoading={isStreaming || isCheckingAnswer || isRequestingHint}
-            disabled={!isViewingActiveTask}
-            taskNumber={currentTask?.order_num}
-            answerPlaceholder={currentTask?.check_format === 'detailed_solution'
-              ? 'Напиши решение с ходом рассуждений...'
-              : undefined}
-            initialAnswerText={currentDraftRef.current.answer}
-            initialDiscussionText={currentDraftRef.current.discussion}
-            onDraftChange={handleDraftChange}
-            attachedFiles={attachedFiles}
-            onFileSelect={handleFileSelect}
-            onFileRemove={handleFileRemove}
-            isUploading={isUploading}
-          />
-        )}
+        <GuidedChatInput
+          key={currentTaskOrder}
+          onSendAnswer={handleSendAnswer}
+          onSendStep={handleSendStep}
+          isLoading={isStreaming || isCheckingAnswer || isRequestingHint}
+          disabled={threadStatus !== 'active' || !isViewingActiveTask}
+          taskNumber={currentTask?.order_num}
+          answerPlaceholder={currentTask?.check_format === 'detailed_solution'
+            ? 'Напиши решение с ходом рассуждений...'
+            : undefined}
+          initialAnswerText={currentDraftRef.current.answer}
+          initialDiscussionText={currentDraftRef.current.discussion}
+          onDraftChange={handleDraftChange}
+          attachedFiles={attachedFiles}
+          onFileSelect={handleFileSelect}
+          onFileRemove={handleFileRemove}
+          isUploading={isUploading}
+        />
       </div>
     </div>
   );
