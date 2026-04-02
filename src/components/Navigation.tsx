@@ -9,11 +9,11 @@ const Navigation = () => {
   const navigate = useNavigate();
 
   const navItems = [
-    { path: "/homework", icon: Backpack, label: "Домашка", emoji: "🎒" },
-    { path: "/chat", icon: MessageSquare, label: "Чат", emoji: "💬" },
-    { path: "/practice", icon: Target, label: "Тренажёр", emoji: "🎯" },
-    { path: "/progress", icon: TrendingUp, label: "Прогресс", emoji: "📈" },
-    { path: "/profile", icon: User, label: "Профиль", emoji: "👤" },
+    { path: "/homework", icon: Backpack, label: "Домашка" },
+    { path: "/chat", icon: MessageSquare, label: "Чат" },
+    { path: "/practice", icon: Target, label: "Тренажёр" },
+    { path: "/progress", icon: TrendingUp, label: "Прогресс" },
+    { path: "/profile", icon: User, label: "Профиль" },
   ];
 
   const handleLogout = async () => {
@@ -32,18 +32,15 @@ const Navigation = () => {
       <div className="container mx-auto px-4 h-14 flex items-center gap-3">
         {/* Logo — home link */}
         <Link to="/" className="flex items-center gap-2 group shrink-0">
-          <div className="w-10 h-10 rounded-lg bg-indigo-600 flex items-center justify-center transition-transform duration-300 group-hover:scale-110">
-            <svg className="w-8 h-8" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
-              <path d="M 15 25 Q 15 15 25 15 L 45 15 Q 55 15 55 25 L 55 40 Q 55 50 45 50 L 30 50 L 20 60 L 20 50 Q 15 50 15 40 Z"
-                    fill="#10b981" opacity="0.9"/>
-              <text x="35" y="37" fontFamily="Manrope, sans-serif" fontSize="20" fontWeight="bold" fill="white" textAnchor="middle">?</text>
-              <path d="M 45 55 Q 45 45 55 45 L 75 45 Q 85 45 85 55 L 85 70 Q 85 80 75 80 L 60 80 L 80 90 L 60 90 Q 45 90 45 80 Z"
-                    fill="white" opacity="0.95"/>
-              <text x="65" y="67" fontFamily="Manrope, sans-serif" fontSize="20" fontWeight="bold" fill="#2d3561" textAnchor="middle">💡</text>
+          <div className="w-8 h-8 rounded-lg bg-[#1B6B4A] flex items-center justify-center transition-transform duration-300 group-hover:scale-105">
+            <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+              <circle cx="12" cy="17" r="0.5" fill="white" stroke="white" strokeWidth="1"/>
+              <circle cx="12" cy="12" r="10" stroke="white" strokeWidth="1.5" fill="none"/>
             </svg>
           </div>
-          <span className="font-bold text-lg bg-gradient-hero bg-clip-text text-transparent hidden md:inline">
-            Сократ AI
+          <span className="font-semibold text-lg text-slate-800 hidden md:inline">
+            Сократ
           </span>
         </Link>
 
@@ -59,8 +56,8 @@ const Navigation = () => {
                   to={item.path}
                   className={`flex items-center gap-1.5 md:gap-2 px-2.5 md:px-4 py-2 rounded-lg whitespace-nowrap transition-colors text-sm ${
                     active
-                      ? "bg-primary text-primary-foreground font-medium"
-                      : "bg-secondary/50 text-foreground hover:bg-secondary"
+                      ? "bg-[#1B6B4A] text-white font-medium"
+                      : "text-slate-600 hover:bg-slate-100"
                   }`}
                 >
                   <Icon className="w-4 h-4" />

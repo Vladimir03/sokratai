@@ -14,8 +14,9 @@ export default {
     },
     extend: {
       fontFamily: {
-        display: ["Georgia", "'Times New Roman'", "serif"],
-        body: ["'Segoe UI'", "-apple-system", "system-ui", "sans-serif"],
+        sans: ["'Golos Text'", "system-ui", "-apple-system", "sans-serif"],
+        display: ["'Golos Text'", "system-ui", "-apple-system", "sans-serif"],
+        body: ["'Golos Text'", "system-ui", "-apple-system", "sans-serif"],
         mono: ["'SF Mono'", "'Fira Code'", "monospace"],
       },
       colors: {

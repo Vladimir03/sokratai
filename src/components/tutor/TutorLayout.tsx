@@ -113,8 +113,14 @@ export function TutorLayout({ children }: TutorLayoutProps) {
         <div className="container flex h-14 items-center justify-between px-4">
           {/* Logo */}
           <Link to="/tutor/dashboard" className="flex items-center gap-2 font-semibold">
-            <span className="text-xl">📚</span>
-            <span>Сократ AI для репетиторов</span>
+            <div className="w-7 h-7 rounded-md bg-[#1B6B4A] flex items-center justify-center">
+              <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                <circle cx="12" cy="17" r="0.5" fill="white" stroke="white" strokeWidth="1"/>
+                <circle cx="12" cy="12" r="10" stroke="white" strokeWidth="1.5" fill="none"/>
+              </svg>
+            </div>
+            <span className="text-slate-800">Сократ</span>
           </Link>
 
           {/* Desktop nav */}

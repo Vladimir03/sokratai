@@ -154,14 +154,14 @@ const Index = () => {
                 />
                 <text
                   x="65"
-                  y="67"
-                  fontFamily="Manrope, sans-serif"
-                  fontSize="20"
+                  y="69"
+                  fontFamily="'Golos Text', system-ui, sans-serif"
+                  fontSize="22"
                   fontWeight="bold"
-                  fill="#2d3561"
+                  fill="#1B6B4A"
                   textAnchor="middle"
                 >
-                  💡
+                  !
                 </text>
               </svg>
               <div className="flex flex-col">
@@ -173,7 +173,7 @@ const Index = () => {
             <h1
               className="text-3xl md:text-5xl font-bold text-primary-foreground mb-6 leading-tight"
             >
-              🎯 AI-помощник по школьным предметам, который учит тебя думать и понимать самостоятельно
+              AI-помощник по школьным предметам, который учит тебя думать и понимать самостоятельно
             </h1>
 
             {/* Subheadline */}
@@ -183,27 +183,12 @@ const Index = () => {
 
             {/* CTA Buttons - Platform Choice */}
             <div className="flex flex-col sm:flex-row gap-4 mb-4">
-              {/* Primary - Telegram */}
-              <a 
-                href={telegramLinks.headerTry} 
-                target="_blank" 
-                rel="noopener noreferrer"
-              >
-                <Button
-                  size="lg"
-                  className="bg-[#0088cc] hover:bg-[#0077b5] text-white shadow-glow text-base md:text-lg px-8 py-6 rounded-2xl font-semibold transition-all hover:scale-105 w-full sm:w-auto"
-                >
-                  <Send className="w-5 h-5 mr-2" />
-                  Открыть в Telegram
-                </Button>
-              </a>
-              
-              {/* Secondary - Web */}
+              {/* Primary - Web (main product) */}
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <Button
                     size="lg"
-                    className="bg-white/10 backdrop-blur-sm border-2 border-white/30 text-white hover:bg-white/20 text-base md:text-lg px-8 py-6 rounded-2xl font-semibold transition-all hover:scale-105 w-full sm:w-auto"
+                    className="bg-[#1B6B4A] hover:bg-[#145236] text-white shadow-glow text-base md:text-lg px-8 py-6 rounded-2xl font-semibold transition-all hover:scale-105 w-full sm:w-auto"
                   >
                     <Globe className="w-5 h-5 mr-2" />
                     Открыть в браузере
@@ -225,13 +210,28 @@ const Index = () => {
                   </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
+
+              {/* Secondary - Telegram */}
+              <a
+                href={telegramLinks.headerTry}
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                <Button
+                  size="lg"
+                  className="bg-white/10 backdrop-blur-sm border-2 border-white/30 text-white hover:bg-white/20 text-base md:text-lg px-8 py-6 rounded-2xl font-semibold transition-all hover:scale-105 w-full sm:w-auto"
+                >
+                  <Send className="w-5 h-5 mr-2" />
+                  Открыть в Telegram
+                </Button>
+              </a>
             </div>
-            
+
             {/* Platform hints */}
             <p className="text-sm text-primary-foreground/70 flex flex-wrap gap-x-3 gap-y-1">
-              <span>📱 Telegram — удобнее на телефоне</span>
+              <span>Веб-кабинет — основная платформа</span>
               <span className="hidden sm:inline">•</span>
-              <span>🖥️ Веб — для больших экранов</span>
+              <span>Telegram — для быстрых вопросов</span>
             </p>
           </div>
         </div>
@@ -303,4 +303,4 @@ const Index = () => {
   );
 };
 
-export default Index;
+export default Index;
