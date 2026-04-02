@@ -784,3 +784,25 @@ Phase 1.3 собирает push (Phase 1.1) + email (Phase 1.2) + Telegram в е
 - `homework-reminder` отправляет web-ссылку вместо `/homework`
 - Плейсхолдер уведомления в конструкторе ДЗ: `"Новая домашка! Открой ссылку выше, чтобы начать."`
 - После деплоя бота необходимо вызвать `?action=set_commands` для обновления меню в Telegram
+
+### Голосовые сообщения в Telegram-боте (2026-04-02)
+
+Бот расшифровывает голосовые сообщения пользователей через Lemonfox API (OpenAI-compatible Whisper).
+
+**Flow:**
+1. Пользователь отправляет голосовое → бот показывает typing indicator
+2. `handleVoiceMessage()` скачивает OGG через Telegram `getFile` API
+3. OGG отправляется напрямую в Lemonfox API (`POST https://api.lemonfox.ai/v1/audio/transcriptions`, `model: 'whisper-large-v3'`, `language: 'ru'`)
+4. Бот отправляет превью: `🎤 Расшифровка [M:SS]:\n«текст»`
+5. Расшифрованный текст передаётся в `handleTextMessage()` как обычное сообщение
+
+**Технические детали:**
+- **Нет ffmpeg**: Edge Functions не имеют системных бинарников. Lemonfox принимает OGG/Opus напрямую (Whisper-compatible)
+- **FormData**: `new Blob([audioBuffer], { type: "audio/ogg" })` + filename `voice.ogg`
+- **Typing loop**: `sendChatAction('typing')` каждые 4 секунды во время расшифровки
+- **Dispatch**: блок `update.message?.voice` в message loop, проверяет `onboarding_state === 'completed'`
+- **Ошибки**: если расшифровка не удалась → сообщение пользователю «Не удалось расшифровать…»
+- **Secret**: `LEMONFOX_API_KEY` — API ключ для Lemonfox
+
+**Файлы:**
+- `supabase/functions/telegram-bot/index.ts` — `handleVoiceMessage()` + dispatch block
