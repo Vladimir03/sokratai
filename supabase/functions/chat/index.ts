@@ -40,6 +40,17 @@ const ALLOWED_IMAGE_DOMAINS = [
 
 /** Max image size (5 MB raw ≈ 6.7 MB base64) to stay within gateway body limits. */
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
+const MAX_VOICE_BYTES = 10 * 1024 * 1024;
+const VOICE_TRANSCRIPTION_MODEL = "whisper-large-v3";
+const ALLOWED_VOICE_MIME_TYPES = new Set([
+  "audio/webm",
+  "audio/mp4",
+  "audio/ogg",
+  "audio/mpeg",
+  "audio/mp3",
+  "audio/wav",
+  "audio/x-wav",
+]);
 
 /**
  * Downloads an image from a pre-validated HTTPS URL and returns a base64 data URL.
@@ -481,12 +492,42 @@ ${maxCharsInstruction}
 ${modeInstructions[mode]}`;
 }
 
+function isAcceptedVoiceMimeType(mimeType: string): boolean {
+  if (!mimeType) return false;
+
+  const normalized = mimeType.toLowerCase().split(";")[0].trim();
+  return ALLOWED_VOICE_MIME_TYPES.has(normalized);
+}
+
+function getVoiceFilename(mimeType: string, providedName?: string): string {
+  if (providedName && providedName.trim()) {
+    return providedName;
+  }
+
+  const normalized = mimeType.toLowerCase().split(";")[0].trim();
+  if (normalized.includes("ogg")) return "voice.ogg";
+  if (normalized.includes("mpeg")) return "voice.mp3";
+  if (normalized.includes("mp4")) return "voice.mp4";
+  if (normalized.includes("wav")) return "voice.wav";
+  return "voice.webm";
+}
+
+interface SubscriptionCheckOptions {
+  incrementUsage?: boolean;
+}
+
 /**
  * Check user subscription, trial status, and daily message limits
  * Priority: Premium > Active Trial > Daily Limits
  * Returns: { allowed: boolean, isPremium: boolean, isTrialActive: boolean, trialEndsAt: string | null, messagesUsed: number, limit: number }
  */
-async function checkSubscriptionAndLimits(userId: string, adminSupabase: any) {
+async function checkSubscriptionAndLimits(
+  userId: string,
+  adminSupabase: any,
+  options: SubscriptionCheckOptions = {},
+) {
+  const shouldIncrementUsage = options.incrementUsage ?? true;
+
   try {
     const { data: status, error } = await adminSupabase
       .rpc('get_subscription_status', { p_user_id: userId })
@@ -524,6 +565,18 @@ async function checkSubscriptionAndLimits(userId: string, adminSupabase: any) {
         trialEndsAt,
         messagesUsed, 
         limit: dailyLimit 
+      };
+    }
+
+    if (!shouldIncrementUsage) {
+      console.log(`📊 Limit check passed without increment: ${messagesUsed}/${dailyLimit}`);
+      return {
+        allowed: true,
+        isPremium: false,
+        isTrialActive: false,
+        trialEndsAt,
+        messagesUsed,
+        limit: dailyLimit,
       };
     }
 
@@ -569,10 +622,132 @@ async function checkSubscriptionAndLimits(userId: string, adminSupabase: any) {
   }
 }
 
+async function transcribeVoiceMessage(req: Request, userId: string, adminSupabase: any): Promise<Response> {
+  const contentType = req.headers.get("content-type") || "";
+  if (!contentType.toLowerCase().includes("multipart/form-data")) {
+    return new Response(JSON.stringify({ error: "Ожидалась загрузка аудиофайла" }), {
+      status: 400,
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
+  }
+
+  const formData = await req.formData();
+  const file = formData.get("file");
+
+  if (!(file instanceof Blob)) {
+    return new Response(JSON.stringify({ error: "Аудиофайл не найден" }), {
+      status: 400,
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
+  }
+
+  if (file.size === 0) {
+    return new Response(JSON.stringify({ error: "Пустое голосовое сообщение" }), {
+      status: 400,
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
+  }
+
+  if (file.size > MAX_VOICE_BYTES) {
+    return new Response(JSON.stringify({ error: "Голосовое сообщение слишком большое" }), {
+      status: 413,
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
+  }
+
+  const mimeType = file.type || "application/octet-stream";
+  if (!isAcceptedVoiceMimeType(mimeType)) {
+    return new Response(JSON.stringify({ error: "Неподдерживаемый формат голосового сообщения" }), {
+      status: 400,
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
+  }
+
+  const { allowed, isPremium, messagesUsed, limit } = await checkSubscriptionAndLimits(
+    userId,
+    adminSupabase,
+    { incrementUsage: true },
+  );
+
+  if (!allowed) {
+    return new Response(
+      JSON.stringify({
+        error: "limit_reached",
+        message: `Вы достигли дневного лимита в ${limit} сообщений. Оформите подписку для безлимитного доступа!`,
+        messages_used: messagesUsed,
+        limit,
+        isPremium,
+      }),
+      { status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+    );
+  }
+
+  const lemonfoxApiKey = Deno.env.get("LEMONFOX_API_KEY");
+  if (!lemonfoxApiKey) {
+    console.error("LEMONFOX_API_KEY is not configured for voice transcription");
+    return new Response(JSON.stringify({ error: "Расшифровка голосовых временно недоступна" }), {
+      status: 503,
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
+  }
+
+  const uploadedName = file instanceof File ? file.name : undefined;
+  const outboundForm = new FormData();
+  outboundForm.append("file", file, getVoiceFilename(mimeType, uploadedName));
+  outboundForm.append("model", VOICE_TRANSCRIPTION_MODEL);
+  outboundForm.append("language", "ru");
+
+  console.log("Voice transcription request received", {
+    userId,
+    mimeType,
+    size: file.size,
+  });
+
+  const transcriptionRes = await fetch("https://api.lemonfox.ai/v1/audio/transcriptions", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${lemonfoxApiKey}`,
+    },
+    body: outboundForm,
+  });
+
+  if (!transcriptionRes.ok) {
+    const errText = await transcriptionRes.text().catch(() => "unknown");
+    console.error("Voice transcription failed", {
+      userId,
+      status: transcriptionRes.status,
+      body: errText,
+    });
+    return new Response(JSON.stringify({ error: "Не удалось расшифровать голосовое сообщение" }), {
+      status: 502,
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
+  }
+
+  const transcriptionData = await transcriptionRes.json();
+  const text = typeof transcriptionData?.text === "string"
+    ? transcriptionData.text.trim()
+    : "";
+
+  if (!text) {
+    return new Response(JSON.stringify({ error: "Не удалось распознать речь" }), {
+      status: 422,
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
+  }
+
+  return new Response(JSON.stringify({ text }), {
+    status: 200,
+    headers: { ...corsHeaders, "Content-Type": "application/json" },
+  });
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
   try {
+    const pathname = new URL(req.url).pathname;
+    const isVoiceTranscriptionRoute = pathname.endsWith("/transcribe-voice");
     const authHeader = req.headers.get("Authorization");
     if (!authHeader) {
       return new Response(JSON.stringify({ error: "Требуется авторизация" }), {
@@ -588,6 +763,26 @@ serve(async (req) => {
       Deno.env.get("SUPABASE_URL") ?? "",
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "",
     );
+
+    if (isVoiceTranscriptionRoute) {
+      const supabase = createClient(Deno.env.get("SUPABASE_URL") ?? "", Deno.env.get("SUPABASE_ANON_KEY") ?? "", {
+        global: { headers: { Authorization: authHeader } },
+      });
+
+      const {
+        data: { user },
+        error: userError,
+      } = await supabase.auth.getUser();
+
+      if (userError || !user) {
+        return new Response(JSON.stringify({ error: "Неверный токен" }), {
+          status: 401,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      return await transcribeVoiceMessage(req, user.id, adminSupabase);
+    }
     
     let userId: string;
     
@@ -657,8 +852,19 @@ serve(async (req) => {
 
       userId = user.id;
 
+      const body = await req.json() as ChatRequestBody;
+      const { messages, systemPrompt, taskContext, taskImageUrl, studentImageUrl, studentImageUrls, chatId } = body;
+      const latestUserMessage = Array.isArray(messages)
+        ? [...messages].reverse().find((message) => message?.role === "user")
+        : null;
+      const shouldIncrementUsage = latestUserMessage?.input_method !== "voice";
+
       // Check subscription and daily limits
-      const { allowed, isPremium, messagesUsed, limit } = await checkSubscriptionAndLimits(userId, adminSupabase);
+      const { allowed, isPremium, messagesUsed, limit } = await checkSubscriptionAndLimits(
+        userId,
+        adminSupabase,
+        { incrementUsage: shouldIncrementUsage },
+      );
       
       if (!allowed) {
         return new Response(
@@ -672,9 +878,6 @@ serve(async (req) => {
           { status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" } },
         );
       }
-
-      const body = await req.json() as ChatRequestBody;
-      const { messages, systemPrompt, taskContext, taskImageUrl, studentImageUrl, studentImageUrls, chatId } = body;
       const responseProfile = normalizeResponseProfile(body.responseProfile);
       const responseMode = normalizeResponseMode(body.responseMode);
       const maxChars = normalizeMaxChars(body.maxChars);
