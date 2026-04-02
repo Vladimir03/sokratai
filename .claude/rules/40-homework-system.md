@@ -48,7 +48,7 @@ Legacy student-only система (`homework_sets`, `homework_tasks`, `homework
 
 **Tutor UI (Phase 2, 2026-04-02):**
 - `HWTaskCard.tsx`: нативный `<select>` для `check_format` (Краткий ответ / Развёрнутое решение) + hint text под selector
-- `HWTaskCard.tsx`: badge «из БЗ» рядом с «Макс. баллов» когда `kb_task_id` и `max_score > 1`
+- `HWTaskCard.tsx`: inline badge «из БЗ» (без flex на Label — flex ломает выравнивание grid) рядом с «Макс. баллов» когда `kb_task_id` и `max_score > 1`
 - `HWTasksSection.tsx`: `mapAnswerFormatToCheckFormat()` — маппинг legacy `answer_format` → `check_format` enum
 - `select` элемент: `font-size: 16px` + `touch-action: manipulation` (iOS Safari auto-zoom prevention)
 

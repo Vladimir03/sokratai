@@ -633,7 +633,7 @@ async function handleGetAssignment(
 
   const { data: tasks } = await db
     .from("homework_tutor_tasks")
-    .select("id, order_num, task_text, task_image_url, correct_answer, max_score, rubric_text")
+    .select("id, order_num, task_text, task_image_url, correct_answer, max_score, rubric_text, check_format")
     .eq("assignment_id", assignmentId)
     .order("order_num", { ascending: true });
 

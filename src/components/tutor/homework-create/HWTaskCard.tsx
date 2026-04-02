@@ -303,10 +303,10 @@ export function HWTaskCard({ task, index, onUpdate, onRemove, canRemove, onDefer
             />
           </div>
           <div className="space-y-2">
-            <Label className="flex items-center gap-2">
+            <Label>
               Макс. баллов
               {task.kb_task_id && task.max_score > 1 && (
-                <span className="text-xs text-muted-foreground font-normal">из БЗ</span>
+                <span className="ml-2 text-xs text-muted-foreground font-normal">из БЗ</span>
               )}
             </Label>
             <Input
