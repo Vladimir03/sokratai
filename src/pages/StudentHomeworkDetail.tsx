@@ -562,11 +562,11 @@ const StudentHomeworkDetail = () => {
 
                       {canDiscussWithAi ? (
                         <Button variant="outline" onClick={handleDiscussWithAi}>
-                          Разобрать с ИИ в чате
+                          Разобрать с AI в чате
                         </Button>
                       ) : (
                         <p className="text-xs text-muted-foreground">
-                          Кнопка разбора с ИИ станет доступна после завершения AI-проверки.
+                          Кнопка разбора с AI станет доступна после завершения AI-проверки.
                         </p>
                       )}
                     </CardContent>

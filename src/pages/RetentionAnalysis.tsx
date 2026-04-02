@@ -372,7 +372,7 @@ const RetentionAnalysis = () => {
               <div className="p-4 bg-amber-50 rounded-lg border border-amber-200">
                 <h4 className="font-semibold text-amber-800 mb-2">📊 Pattern</h4>
                 <p className="text-amber-700">
-                  <strong>90% churned диалогов</strong> оборвались после ответа Сократа с вопросом. 
+                  <strong>90% churned диалогов</strong> оборвались после ответа Сократ AI с вопросом. 
                   Пользователь ожидал решения, получил вопрос — ушёл.
                 </p>
               </div>

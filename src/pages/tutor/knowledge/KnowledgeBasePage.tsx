@@ -37,7 +37,7 @@ function KnowledgeBaseContent() {
         <div className="space-y-8">
           <div className="flex gap-1.5 rounded-2xl bg-socrat-border-light p-1.5">
             {([
-              { key: 'catalog' as MainTab, label: 'Каталог Сократа', Icon: LayoutGrid },
+              { key: 'catalog' as MainTab, label: 'Каталог Сократ AI', Icon: LayoutGrid },
               { key: 'mybase' as MainTab, label: 'Моя база', Icon: Folder },
             ]).map((tab) => (
               <button

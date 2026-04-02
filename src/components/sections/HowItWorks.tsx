@@ -29,7 +29,7 @@ const HowItWorks = () => {
               {/* Sokrat message */}
               <div className="flex gap-3 items-start">
                 <div className="flex-shrink-0 w-8 h-8 rounded-full bg-accent/20 flex items-center justify-center text-xs font-semibold text-accent">
-                  Сократ
+                  Сократ AI
                 </div>
                 <div className="flex-1 bg-accent/5 rounded-lg p-3 text-sm md:text-base border border-accent/20">
                   Хороший вопрос! Квадратное уравнение можно решить разными способами.
@@ -50,7 +50,7 @@ const HowItWorks = () => {
               {/* Sokrat message */}
               <div className="flex gap-3 items-start">
                 <div className="flex-shrink-0 w-8 h-8 rounded-full bg-accent/20 flex items-center justify-center text-xs font-semibold text-accent">
-                  Сократ
+                  Сократ AI
                 </div>
                 <div className="flex-1 bg-accent/5 rounded-lg p-3 text-sm md:text-base border border-accent/20">
                   Отлично! Дискриминант находится по формуле D = b² - 4ac.
@@ -71,7 +71,7 @@ const HowItWorks = () => {
               {/* Sokrat message */}
               <div className="flex gap-3 items-start">
                 <div className="flex-shrink-0 w-8 h-8 rounded-full bg-accent/20 flex items-center justify-center text-xs font-semibold text-accent">
-                  Сократ
+                  Сократ AI
                 </div>
                 <div className="flex-1 bg-accent/5 rounded-lg p-3 text-sm md:text-base border border-accent/20">
                   Правильно! Теперь подставь эти значения в формулу дискриминанта. Что получится?
@@ -91,7 +91,7 @@ const HowItWorks = () => {
               {/* Sokrat message */}
               <div className="flex gap-3 items-start">
                 <div className="flex-shrink-0 w-8 h-8 rounded-full bg-accent/20 flex items-center justify-center text-xs font-semibold text-accent">
-                  Сократ
+                  Сократ AI
                 </div>
                 <div className="flex-1 bg-accent/5 rounded-lg p-3 text-sm md:text-base border border-accent/20">
                   ОТЛИЧНО! 🎉 Ты все правильно посчитал! Теперь можешь найти корни по формуле
@@ -103,16 +103,16 @@ const HowItWorks = () => {
 
           {/* Comparison Table */}
           <div className="bg-background rounded-xl p-6 md:p-8 shadow-elegant">
-            <h3 className="text-xl font-bold text-center mb-6 text-primary">Разница с обычными ИИ:</h3>
+            <h3 className="text-xl font-bold text-center mb-6 text-primary">Разница с обычными AI:</h3>
             <div className="space-y-4">
               <div className="p-4 border-b-2 border-border">
-                <strong className="text-foreground">Традиционный ИИ (ChatGPT):</strong>
+                <strong className="text-foreground">Традиционный AI (ChatGPT):</strong>
                 <p className="mt-2 text-muted-foreground">
                   Дает готовый ответ → ты списал → на контрольной не можешь решить
                 </p>
               </div>
               <div className="p-4 bg-accent/10 rounded-lg">
-                <strong className="text-foreground">Сократ:</strong>
+                <strong className="text-foreground">Сократ AI:</strong>
                 <p className="mt-2 text-foreground">
                   Задает вопросы-подсказки → ты понял сам → на контрольной решаешь уверенно! ✅
                 </p>

@@ -694,7 +694,7 @@ const Profile = () => {
               <div className="rounded-lg border bg-gradient-to-r from-emerald-50 via-cyan-50 to-blue-50 p-4">
                 <div className="font-semibold">✨ Готово!</div>
                 <div className="text-sm text-muted-foreground mt-1">
-                  Спасибо за поддержку — приятной учёбы со Сократом.
+                  Спасибо за поддержку — приятной учёбы с Сократ AI.
                 </div>
               </div>
             ) : (

@@ -388,7 +388,7 @@ function checkAnswer(
 }
 
 const welcomeMessages: Record<string, string> = {
-  default: `🎓 Привет! Я Сократ - твой умный помощник по учёбе!
+  default: `🎓 Привет! Я Сократ AI - твой умный помощник по учёбе!
 
 Помогаю разбираться с:
 📐 Математикой
@@ -405,7 +405,7 @@ const welcomeMessages: Record<string, string> = {
 
 Давай познакомимся! Ответь на 3 простых вопроса, чтобы я мог лучше тебе помогать 👇`,
 
-  header_try: `🎓 Привет! Я Сократ - твой ИИ-помощник по математике, физике и информатике!
+  header_try: `🎓 Привет! Я Сократ AI - твой AI-помощник по математике, физике и информатике!
 
 Помогаю школьникам понимать сложные темы и готовиться к экзаменам.
 
@@ -413,7 +413,7 @@ const welcomeMessages: Record<string, string> = {
 
 Чтобы я мог лучше тебе помогать, ответь на 3 коротких вопроса 👇`,
 
-  plan_free: `🎓 Привет! Я Сократ!
+  plan_free: `🎓 Привет! Я Сократ AI!
 👋 Отлично, что решил попробовать
 
 В бесплатном тарифе у тебя:
@@ -423,7 +423,7 @@ const welcomeMessages: Record<string, string> = {
 
 Давай познакомимся! Ответь на 3 вопроса, чтобы я понял, как тебе лучше помочь 👇`,
 
-  plan_premium: `🎓 Привет! Я Сократ!
+  plan_premium: `🎓 Привет! Я Сократ AI!
 🚀 Супер выбор. Популярный тариф - это максимум возможностей!
 
 Что ты получаешь за 699₽/месяц:
@@ -435,19 +435,19 @@ const welcomeMessages: Record<string, string> = {
 
 Ответь на 3 вопроса, чтобы я подстроился под тебя 👇`,
 
-  plan_pro: `🎓 Привет! Я Сократ!
+  plan_pro: `🎓 Привет! Я Сократ AI!
 🎯 Вау, ты нацелен на максимальный результат!
 
-Тариф "ИИ + Репетитор" включает:
+Тариф "AI + Репетитор" включает:
 👨‍🏫 1 час с живым репетитором в неделю
-🤖 Безлимитный ИИ-помощник 24/7
+🤖 Безлимитный AI-помощник 24/7
 
-Начнем с ИИ-помощника (7 дней бесплатно).
+Начнем с AI-помощника (7 дней бесплатно).
 Репетитора подключим после оплаты.
 
 Сначала давай познакомимся! Ответь на 3 вопроса для персонализации 👇`,
 
-  parent_trial: `Здравствуйте! Я Сократ - безопасный ИИ-помощник для подготовки к ЕГЭ.
+  parent_trial: `Здравствуйте! Я Сократ AI - безопасный AI-помощник для подготовки к ЕГЭ.
 
 Для родителей у нас есть:
 ✅ Полный контроль прогресса ребенка
@@ -1567,7 +1567,7 @@ async function handleTutorInvite(telegramUserId: number, telegramUsername: strin
 ✏️ Писать задачи текстом
 ❓ Задавать любые вопросы по предмету
 
-Я — AI-помощник Сократ. Помогу разобраться с любой задачей! 🚀`;
+Я — AI-помощник Сократ AI. Помогу разобраться с любой задачей! 🚀`;
 
     await sendTelegramMessage(telegramUserId, successMessage);
 
@@ -1921,7 +1921,7 @@ async function handleHomeworkCancelFlow(
     telegramUserId,
     `✅ Текущий режим сброшен.
 
-Ты снова в обычном режиме чата с Сократом.`,
+Ты снова в обычном режиме чата с Сократ AI.`,
   );
 }
 
@@ -3813,7 +3813,7 @@ function createMainMenuKeyboard() {
         { text: "🎯 Диагностика", callback_data: "diagnostic_start" },
       ],
       [
-        { text: "💬 Спросить Сократа", callback_data: "chat_mode" },
+        { text: "💬 Спросить Сократ AI", callback_data: "chat_mode" },
         { text: "📊 Статус", callback_data: "subscription_status" },
       ],
       [
@@ -7562,6 +7562,7 @@ async function handleVoiceMessage(
 
     const formData = new FormData();
     formData.append("file", new Blob([audioBuffer], { type: voice.mime_type || "audio/ogg" }), "voice.ogg");
+    formData.append("model", "whisper-large-v3");
     formData.append("language", "ru");
 
     const transcribeRes = await fetch("https://api.lemonfox.ai/v1/audio/transcriptions", {
@@ -7965,7 +7966,7 @@ async function handleCallbackQuery(callbackQuery: any) {
   if (data === "main_menu") {
     await sendTelegramMessage(
       telegramUserId,
-      `🎓 <b>Сократ</b> — твой AI-репетитор по математике\n\nВыбери, что хочешь делать:`,
+      `🎓 <b>Сократ AI</b> — твой AI-репетитор по математике\n\nВыбери, что хочешь делать:`,
       { reply_markup: createMainMenuKeyboard() }
     );
     return;
@@ -8104,7 +8105,7 @@ async function handleCallbackQuery(callbackQuery: any) {
     
     await sendTelegramMessage(
       telegramUserId,
-      `💬 <b>Режим чата с Сократом</b>
+      `💬 <b>Режим чата с Сократ AI</b>
 
 Отправь мне:
 📸 Фото задачи из учебника
@@ -8122,7 +8123,7 @@ async function handleCallbackQuery(callbackQuery: any) {
     const detailsMessage = `🚀 <b>Подробнее об обновлениях:</b>
 
 <b>1. Все школьные предметы</b>
-Теперь Сократ помогает не только с математикой, но и с:
+Теперь Сократ AI помогает не только с математикой, но и с:
 • Обществознанием и историей
 • Биологией и химией
 • Русским языком и литературой
@@ -8134,7 +8135,7 @@ async function handleCallbackQuery(callbackQuery: any) {
 • Даёт более структурированные ответы
 
 <b>3. Графики и визуализация</b>
-Попроси «построй график y = x² - 4x + 3» — Сократ нарисует его прямо в чате! Работает в веб-версии.
+Попроси «построй график y = x² - 4x + 3» — Сократ AI нарисует его прямо в чате! Работает в веб-версии.
 
 🎯 <i>Попробуй прямо сейчас — отправь задачу из сегодняшней домашки!</i>`;
 
@@ -8357,7 +8358,7 @@ Deno.serve(async (req) => {
       if (session && session.onboarding_state === "completed") {
         await sendTelegramMessage(
           telegramUserId,
-          `🎓 <b>Сократ</b> — твой AI-репетитор по математике\n\nВыбери, что хочешь делать:`,
+          `🎓 <b>Сократ AI</b> — твой AI-репетитор по математике\n\nВыбери, что хочешь делать:`,
           { reply_markup: createMainMenuKeyboard() }
         );
       } else {
@@ -8400,7 +8401,7 @@ Deno.serve(async (req) => {
       
       await sendTelegramMessage(
         telegramUserId,
-        `🎓 <b>Сократ — AI-репетитор по математике ЕГЭ</b>
+        `🎓 <b>Сократ AI — AI-репетитор по математике ЕГЭ</b>
 
 <b>Доступные команды:</b>
 /start — начать работу

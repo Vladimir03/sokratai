@@ -165,7 +165,7 @@ const Index = () => {
                 </text>
               </svg>
               <div className="flex flex-col">
-                <h2 className="text-3xl md:text-4xl font-bold text-primary-foreground">Сократ</h2>
+                <h2 className="text-3xl md:text-4xl font-bold text-primary-foreground">Сократ AI</h2>
               </div>
             </div>
 
@@ -173,7 +173,7 @@ const Index = () => {
             <h1
               className="text-3xl md:text-5xl font-bold text-primary-foreground mb-6 leading-tight"
             >
-              🎯 ИИ-помощник по школьным предметам, который учит тебя думать и понимать самостоятельно
+              🎯 AI-помощник по школьным предметам, который учит тебя думать и понимать самостоятельно
             </h1>
 
             {/* Subheadline */}

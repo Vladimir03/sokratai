@@ -469,7 +469,7 @@ export default function InvitePage() {
 
           {/* Footer */}
           <p className="text-xs text-center text-muted-foreground">
-            Сократ — AI-помощник для подготовки к ЕГЭ и ОГЭ
+            Сократ AI — AI-помощник для подготовки к ЕГЭ и ОГЭ
           </p>
         </CardContent>
       </Card>

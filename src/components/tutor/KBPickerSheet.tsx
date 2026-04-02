@@ -624,7 +624,7 @@ export function KBPickerSheet({
               )}
               onClick={() => setTab('catalog')}
             >
-              Каталог Сократа
+              Каталог Сократ AI
             </button>
             <button
               type="button"

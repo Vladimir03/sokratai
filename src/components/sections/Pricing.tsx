@@ -62,7 +62,7 @@ const Pricing = () => {
                 0₽<span className="text-xl md:text-2xl opacity-80 font-semibold">/месяц</span>
               </div>
 
-              <p className="mb-8 text-lg text-muted-foreground">Отлично для знакомства с Сократом!</p>
+              <p className="mb-8 text-lg text-muted-foreground">Отлично для знакомства с Сократ AI!</p>
 
               <ul className="space-y-3 mb-8 text-foreground">
                 {[
@@ -139,7 +139,7 @@ const Pricing = () => {
             {/* Tier 3: PRO - 1399₽ */}
             <div className="bg-background rounded-2xl p-8 md:p-10 shadow-2xl border-2 border-border flex-shrink-0 w-[320px] md:w-[400px] relative">
               <Badge className="absolute -top-3 left-8 bg-primary text-primary-foreground font-bold">PRO</Badge>
-              <h3 className="text-2xl font-bold mb-2 text-primary">💎 ИИ-помощник Сократ + Репетитор</h3>
+              <h3 className="text-2xl font-bold mb-2 text-primary">💎 AI-помощник Сократ AI + Репетитор</h3>
               <p className="text-lg mb-6 text-muted-foreground">Максимальный результат на ЕГЭ!</p>
 
               <div className="text-5xl md:text-6xl font-bold my-6 text-primary">
@@ -155,7 +155,7 @@ const Pricing = () => {
               </p>
 
               <ul className="space-y-3 mb-6 text-foreground">
-                {["1 час занятия с Репетитором", "Настройка ИИ-помощника под твои цели"].map((feature, idx) => (
+                {["1 час занятия с Репетитором", "Настройка AI-помощника под твои цели"].map((feature, idx) => (
                   <li key={idx} className="flex items-start">
                     <span className="text-accent mr-2 font-bold text-xl">✓</span>
                     {feature}
@@ -164,7 +164,7 @@ const Pricing = () => {
               </ul>
 
               <p className="mb-8 text-base leading-relaxed text-muted-foreground italic">
-                ⚡ Репетитор проведет занятие, а также поможет с настройкой ИИ-помощника под твои цели в учебе. Можно
+                ⚡ Репетитор проведет занятие, а также поможет с настройкой AI-помощника под твои цели в учебе. Можно
                 договориться на последующие занятия, если все понравится!
               </p>
 
@@ -188,7 +188,7 @@ const Pricing = () => {
               <p className="text-muted-foreground">
                 <span className="line-through">Netflix: 500₽/мес</span> → развлечение
               </p>
-              <p className="text-accent font-bold text-2xl mt-4">Сократ: от 0₽/мес → твое образование и будущее! 🎓</p>
+              <p className="text-accent font-bold text-2xl mt-4">Сократ AI: от 0₽/мес → твое образование и будущее! 🎓</p>
             </div>
           </div>
         </div>

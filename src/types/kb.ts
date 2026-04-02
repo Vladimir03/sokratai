@@ -7,7 +7,7 @@ export type ExamType = 'ege' | 'oge';
 export type MaterialType = 'file' | 'link' | 'media' | 'board';
 
 // =============================================
-// Каталог Сократа
+// Каталог Сократ AI
 // =============================================
 
 export interface KBTopic {

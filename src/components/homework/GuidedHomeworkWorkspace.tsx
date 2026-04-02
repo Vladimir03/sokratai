@@ -79,7 +79,7 @@ const UI_STATUS_META: Record<GuidedHomeworkUiStatus, { label: string; badgeClass
     badgeClass: 'bg-slate-100 text-slate-800 border-slate-200 dark:bg-slate-900/40 dark:text-slate-200',
   },
   streaming_ai: {
-    label: 'ИИ думает',
+    label: 'AI думает',
     badgeClass: 'bg-indigo-100 text-indigo-800 border-indigo-200 dark:bg-indigo-900/40 dark:text-indigo-300',
   },
   checking_answer: {
@@ -682,7 +682,7 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
               toast.error(error.message);
             }
           } else {
-            toast.error('Ошибка при получении ответа ИИ. Попробуйте снова.');
+            toast.error('Ошибка при получении ответа AI. Попробуйте снова.');
           }
         },
       });
@@ -708,7 +708,7 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
         await persistMessage(assistantTempId, 'assistant', assistantText, taskOrder, 'ai_reply');
       } catch (error) {
         patchMessage(assistantTempId, { message_delivery_status: 'failed' });
-        toast.error('Ответ ИИ получен, но не сохранен. Нажмите "Повторить".');
+        toast.error('Ответ AI получен, но не сохранен. Нажмите "Повторить".');
         trackGuidedHomeworkEvent('guided_assistant_save_failed', {
           assignmentId: assignment.id,
           taskOrder,
@@ -717,7 +717,7 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
       }
     } catch (error) {
       if (!streamErrorHandled) {
-        toast.error(error instanceof Error ? error.message : 'Ошибка при получении ответа ИИ.');
+        toast.error(error instanceof Error ? error.message : 'Ошибка при получении ответа AI.');
       }
       trackGuidedHomeworkEvent('guided_stream_failed', {
         assignmentId: assignment.id,
@@ -908,7 +908,7 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
         )));
 
         if (selectedFiles.some((file) => file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf'))) {
-          toast.info('PDF сохранен в чате. ИИ пока учитывает только изображения.');
+          toast.info('PDF сохранен в чате. AI пока учитывает только изображения.');
         }
       } catch (e) {
         toast.error('Ошибка загрузки файла');
@@ -1455,7 +1455,7 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
         {visibleMessages.length === 0 && !isStreaming && (
           <div className="text-center text-sm text-muted-foreground py-8 space-y-1">
             <p>Отправьте ответ по задаче или запросите подсказку.</p>
-            <p className="text-xs">ИИ работает в контексте только текущей задачи.</p>
+            <p className="text-xs">AI работает в контексте только текущей задачи.</p>
           </div>
         )}
 

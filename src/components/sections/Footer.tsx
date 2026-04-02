@@ -41,11 +41,11 @@ const Footer = () => {
               💡
             </text>
           </svg>
-          <div className="text-3xl font-bold">Сократ</div>
+          <div className="text-3xl font-bold">Сократ AI</div>
         </div>
 
         <p className="text-lg mb-8 max-w-2xl mx-auto">
-          ИИ-помощник, который помогает думать и понимать, а не списывать!
+          AI-помощник, который помогает думать и понимать, а не списывать!
         </p>
 
         {/* Contacts */}
@@ -72,7 +72,7 @@ const Footer = () => {
 
         {/* Brand Story */}
         <p className="text-sm italic opacity-75 max-w-3xl mx-auto mb-2">
-          Мы верим, что каждый может понять любой школьный предмет, если задавать правильные вопросы. Наш ИИ
+          Мы верим, что каждый может понять любой школьный предмет, если задавать правильные вопросы. Наш AI
           использует сократовский метод: через вопросы-подсказки ты сам приходишь к ответу, а значит — по-настоящему
           понимаешь материал. Не списывание, а настоящее обучение!
         </p>
@@ -117,7 +117,7 @@ const Footer = () => {
         </div>
 
         <div className="border-t border-white/20 pt-6">
-          <p className="text-sm opacity-60">© 2025 Сократ. Все права защищены.</p>
+          <p className="text-sm opacity-60">© 2025 Сократ AI. Все права защищены.</p>
         </div>
       </div>
     </footer>

@@ -114,7 +114,7 @@ export const ResultCard = ({ result, userAnswer, onNext, onAskSocrat }: ResultCa
               className="w-full bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700"
             >
               <Bot className="w-4 h-4 mr-2" />
-              Не понял? Спроси Сократа
+              Не понял? Спроси Сократ AI
             </Button>
           )}
           <Button 

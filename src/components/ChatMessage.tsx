@@ -237,7 +237,7 @@ const ChatMessage = memo(({ message, isLoading, onQuickMessage, onRetry, onFeedb
                   <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
                     <path d="M10 3a3 3 0 00-3 3v4a3 3 0 006 0V6a3 3 0 00-3-3zM5 10a1 1 0 011 1v1a4 4 0 008 0v-1a1 1 0 112 0v1a6 6 0 01-11.999.002L4 12a1 1 0 011-1z"/>
                   </svg>
-                  <span>Голосовой ввод</span>
+                  <span>Голосовое сообщение</span>
                 </>
               )}
               {message.input_method === "button" && (
@@ -298,11 +298,11 @@ const ChatMessage = memo(({ message, isLoading, onQuickMessage, onRetry, onFeedb
             </div>
           </div>
           
-          {/* Индикатор "ИИ думает" */}
+          {/* Индикатор "AI думает" */}
           {message.status === 'ai_thinking' && (
             <div className="flex items-center gap-2 mt-2 text-sm text-gray-500">
               <Brain className="w-4 h-4 animate-pulse" />
-              <span>Сократ думает над ответом</span>
+              <span>Сократ AI думает над ответом</span>
               <div className="flex gap-1">
                 <span className="animate-bounce" style={{ animationDelay: '0ms' }}>.</span>
                 <span className="animate-bounce" style={{ animationDelay: '150ms' }}>.</span>

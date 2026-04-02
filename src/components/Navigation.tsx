@@ -43,7 +43,7 @@ const Navigation = () => {
             </svg>
           </div>
           <span className="font-bold text-lg bg-gradient-hero bg-clip-text text-transparent hidden md:inline">
-            Сократ
+            Сократ AI
           </span>
         </Link>
 

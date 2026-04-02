@@ -384,7 +384,7 @@ function TutorDashboardContent() {
               <div className="text-center space-y-4">
                 <div className="text-4xl">🎓</div>
                 <div>
-                  <h3 className="font-medium mb-1">Начните работу с Сократом</h3>
+                  <h3 className="font-medium mb-1">Начните работу с Сократ AI</h3>
                   <p className="text-sm text-muted-foreground max-w-md mx-auto">
                     Пригласите первого ученика по ссылке. Он получит доступ к AI-помощнику, 
                     а вы сможете отслеживать его прогресс и диалоги с ботом.

@@ -54,7 +54,7 @@ const Comparison = () => {
                   <th className="bg-primary text-primary-foreground p-4 md:p-5 text-left font-bold">
                     ChatGPT/Deepseek
                   </th>
-                  <th className="bg-accent text-accent-foreground p-4 md:p-5 text-left font-bold">Сократ ✅</th>
+                  <th className="bg-accent text-accent-foreground p-4 md:p-5 text-left font-bold">Сократ AI ✅</th>
                 </tr>
               </thead>
               <tbody>
@@ -105,10 +105,10 @@ const Comparison = () => {
             💡 Важно: Мы не заменяем репетитора
           </h3>
           <p className="text-lg text-amber-800 dark:text-amber-400">
-            Идеальная модель: <strong>Репетитор (раз в неделю) + Сократ (каждый день)</strong>
+            Идеальная модель: <strong>Репетитор (раз в неделю) + Сократ AI (каждый день)</strong>
             <br />
             <br />
-            Репетитор ставит цели и направляет, Сократ помогает между занятиями. Вместе это дает лучший результат!
+            Репетитор ставит цели и направляет, Сократ AI помогает между занятиями. Вместе это дает лучший результат!
           </p>
         </div>
       </div>

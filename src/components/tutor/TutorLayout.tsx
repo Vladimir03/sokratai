@@ -114,7 +114,7 @@ export function TutorLayout({ children }: TutorLayoutProps) {
           {/* Logo */}
           <Link to="/tutor/dashboard" className="flex items-center gap-2 font-semibold">
             <span className="text-xl">📚</span>
-            <span>Сократ для репетиторов</span>
+            <span>Сократ AI для репетиторов</span>
           </Link>
 
           {/* Desktop nav */}
