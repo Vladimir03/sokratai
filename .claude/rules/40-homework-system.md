@@ -227,6 +227,12 @@ Legacy student-only система (`homework_sets`, `homework_tasks`, `homework
 - `assignment.id` change → ref сбрасывается (поддержка навигации между ДЗ без remount)
 - После инициализации навигацию контролируют только `switchToTask()` (клик) и auto-advance (CORRECT + 1200ms)
 
+**Completed view UX (2026-04-02):**
+- Экран результатов **НЕ** показывается автоматически — ученик сначала видит чат с решениями
+- Кнопка «Завершить и посмотреть результаты» рендерится inline в области сообщений после последнего сообщения (под «Все задачи выполнены!»)
+- `GuidedChatInput` скрывается при `threadStatus === 'completed'` (нет ложного поля ввода)
+- На экране результатов только «Назад к заданиям» (без «Посмотреть решения задач» — вызывало путаницу с заблокированным вводом)
+
 **Спека:** `docs/delivery/features/guided-chat/task-lock-spec.md`
 
 ### Bootstrap hallucination fix + disable toggle (Sprint S4, 2026-03-27)

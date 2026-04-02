@@ -434,9 +434,8 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
         }
       }
 
-      if (thread.status === 'completed') {
-        setShowCompletedView(true);
-      }
+      // Don't auto-show completed view — student sees chat first,
+      // clicks "Завершить" inline button to go to results.
     }
   }, [thread]);
 
@@ -1490,6 +1489,18 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
           </div>
         )}
 
+        {threadStatus === 'completed' && !showCompletedView && (
+          <div className="flex justify-center my-4">
+            <Button
+              onClick={() => setShowCompletedView(true)}
+              className="gap-2"
+            >
+              <CheckCircle2 className="h-4 w-4" />
+              Завершить и посмотреть результаты
+            </Button>
+          </div>
+        )}
+
         <div ref={messagesEndRef} />
       </div>
 
@@ -1545,23 +1556,13 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
 
         </div>
 
-        {threadStatus === 'completed' && !showCompletedView ? (
-          <div className="border-t px-4 py-3 bg-muted/30">
-            <Button
-              onClick={() => setShowCompletedView(true)}
-              className="w-full gap-2"
-            >
-              <CheckCircle2 className="h-4 w-4" />
-              Посмотреть результаты
-            </Button>
-          </div>
-        ) : (
+        {threadStatus !== 'completed' && (
           <GuidedChatInput
             key={currentTaskOrder}
             onSendAnswer={handleSendAnswer}
             onSendStep={handleSendStep}
             isLoading={isStreaming || isCheckingAnswer || isRequestingHint}
-            disabled={threadStatus !== 'active' || !isViewingActiveTask}
+            disabled={!isViewingActiveTask}
             taskNumber={currentTask?.order_num}
             answerPlaceholder={currentTask?.check_format === 'detailed_solution'
               ? 'Напиши решение с ходом рассуждений...'
