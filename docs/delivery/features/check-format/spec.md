@@ -3,7 +3,7 @@
 **Версия:** v0.1
 **Дата:** 2026-04-01
 **Автор:** Vladimir
-**Статус:** phase1-done
+**Статус:** phase1-done (R8 student-facing UX done 2026-04-02)
 **PRD:** `docs/delivery/features/check-format/prd.md`
 
 ---
@@ -71,6 +71,7 @@
 - R2: `kbTaskToDraftTask()` прокидывает `primary_score → max_score` и `answer_format → check_format`
 - R3: Backend `handleCreateAssignment` / `handleUpdateAssignment` принимают и сохраняют `check_format`
 - R4: AI enforcement в guided chat: `buildCheckPrompt()` добавляет инструкцию при `detailed_solution`
+- R8: Student-side: `check_format` доступен ученику (тип `StudentHomeworkTask` + student API query + notice banner + placeholder + AI bootstrap)
 
 **In scope (P1 — Nice-to-Have):**
 - R5: `check_format` колонка в `kb_tasks` + default mapping по `kim_number` (1-20 → `short_answer`, 21-26 → `detailed_solution`)
@@ -102,11 +103,17 @@
 
 ### Затрагиваемые файлы
 
-**Frontend:**
+**Frontend (Tutor):**
 - `src/components/tutor/homework-create/HWTasksSection.tsx` — fix `kbTaskToDraftTask()`: прокидывать `primary_score` и `answer_format`
 - `src/components/tutor/homework-create/types.ts` — добавить `check_format` в `DraftTask`
 - `src/components/tutor/homework-create/HWTaskCard.tsx` — UI для `check_format` selector (P1)
 - `src/lib/tutorHomeworkApi.ts` — добавить `check_format` в `CreateAssignmentTask` и `UpdateAssignmentTask`
+
+**Frontend (Student, P0 — R8):**
+- `src/types/homework.ts` — добавить `check_format` в `StudentHomeworkTask`
+- `src/lib/studentHomeworkApi.ts` — добавить `check_format` в SELECT query `getStudentAssignment()`
+- `src/components/homework/GuidedHomeworkWorkspace.tsx` — notice banner при `detailed_solution`, передача `check_format` в bootstrap и в `GuidedChatInput`
+- `src/components/homework/GuidedChatInput.tsx` — dynamic `answerPlaceholder` prop
 
 **Backend (Edge Functions):**
 - `supabase/functions/homework-api/index.ts` — `handleCreateAssignment` и `handleUpdateAssignment`: принимать и сохранять `check_format`. `handleCheckAnswer`: передавать `check_format` в AI
@@ -177,7 +184,7 @@ interface EvaluateStudentAnswerParams {
 Формат проверки: РАЗВЁРНУТОЕ РЕШЕНИЕ.
 Ученик ОБЯЗАН показать ход решения (шаги, формулы, рассуждения).
 Если ответ содержит только число/слово без хода решения —
-выстави score: 0 и в feedback попроси ученика показать ход решения.
+выстави verdict: INCORRECT и в feedback попроси ученика показать ход решения.
 Не принимай ответ без объяснения шагов.
 ```
 
@@ -241,11 +248,38 @@ ALTER TABLE kb_tasks
 - Если задача из KB — значение предзаполнено, но editable
 - Если задача вручную — default `short_answer`
 
-### Guided chat — enforcement UX
+### Guided chat — student-facing UX для `detailed_solution` (P0, R8)
+
+**Проблема**: ученик не знает что для этой задачи нужно решение, пока не получит 0 баллов. Это frustrating.
+
+**Решение**: 3 точки, где ученик узнаёт про требование ДО отправки ответа:
+
+**1. Notice banner** (под условием задачи в `GuidedHomeworkWorkspace`):
+- Показывается если `currentTask.check_format === 'detailed_solution'`
+- Текст: «Задача с развёрнутым решением — покажи ход решения, как на ЕГЭ. Без хода решения получишь 0 баллов.»
+- Стиль: `bg-amber-50 border-l-4 border-amber-400 text-amber-800 text-sm p-3`
+- Размещение: после task_text/image, перед chat messages
+- Внутри collapsible-блока условия (видна при раскрытом условии)
+
+**2. Placeholder в поле «Ответ»** (GuidedChatInput → AnswerField):
+- Если `check_format === 'detailed_solution'`: placeholder = `«Напиши решение с ходом рассуждений...»`
+- Если `check_format === 'short_answer'` или не указан: placeholder = `«Ответ...»` (текущий)
+- Передаётся через новый prop `answerPlaceholder` из GuidedHomeworkWorkspace
+
+**3. AI bootstrap message** (intro при первом открытии задачи):
+- В `buildGuidedSystemPrompt('bootstrap')`: если `check_format === 'detailed_solution'`, добавить context: «Эта задача требует развёрнутого решения. Упомяни в intro что ученик должен показать ход решения, иначе получит 0 баллов. Мотивируй это подготовкой к ЕГЭ.»
+- AI сам формулирует intro — не хардкодим текст, но задаём requirement
+
+**Технический pre-req**: ~~`check_format` сейчас **НЕ доступен** на student side~~ ✅ Реализовано 2026-04-02:
+- `StudentHomeworkTask.check_format: 'short_answer' | 'detailed_solution'` (строго типизирован)
+- `getStudentAssignment()` включает `check_format` в SELECT
+- Banner, placeholder, bootstrap — реализованы
+
+### Guided chat — enforcement UX (после отправки)
 
 Когда AI отклоняет короткий ответ на `detailed_solution` задачу:
 - AI-сообщение в чате: «Для этой задачи нужно показать ход решения. Напиши шаги, которые привели к ответу»
-- Score выставляется `0` — ученик может повторить попытку с развёрнутым ответом
+- Verdict выставляется `INCORRECT` — ученик может повторить попытку с развёрнутым ответом
 - AI спрашивает, а не блокирует (soft enforcement)
 
 ### UX-принципы (из doc 16)
@@ -266,13 +300,15 @@ ALTER TABLE kb_tasks
 
 - **AC-1**: Добавить задачу КИМ №25 (`primary_score: 3`, `answer_format: 'detailed_solution'`) из KB в ДЗ → в draft-задаче `max_score === 3` и `check_format === 'detailed_solution'` (не `1` и не `undefined`). PASS/FAIL.
 
-- **AC-2**: Создать ДЗ с задачей `check_format: 'detailed_solution'` → ученик в guided chat отправляет ответ «42» → AI-ответ содержит просьбу показать ход решения и `score === 0`. PASS/FAIL.
+- **AC-2**: Создать ДЗ с задачей `check_format: 'detailed_solution'` → ученик в guided chat отправляет ответ «42» → AI-ответ содержит просьбу показать ход решения и `verdict === 'INCORRECT'`. PASS/FAIL.
 
 - **AC-3**: Создать ДЗ с задачей `check_format: 'short_answer'` → ученик отправляет ответ «42» → AI проверяет ответ как обычно (не просит ход решения). PASS/FAIL.
 
 - **AC-4**: Создать задачу вручную (не из KB) → `check_format` по умолчанию `'short_answer'`, `max_score` по умолчанию `1`. PASS/FAIL.
 
 - **AC-5**: В `homework_tutor_tasks` таблице новая колонка `check_format` с constraint `IN ('short_answer', 'detailed_solution')`. `npm run build` и `npm run smoke-check` проходят. PASS/FAIL.
+
+- **AC-6**: Ученик открывает задачу с `check_format: 'detailed_solution'` в guided chat → видит notice banner «Задача с развёрнутым решением» + placeholder «Напиши решение с ходом рассуждений...» в поле ответа. Для задачи с `short_answer` — banner НЕ показан, placeholder = «Ответ...». PASS/FAIL.
 
 ---
 
@@ -321,7 +357,8 @@ npm run lint && npm run build && npm run smoke-check
 - [x] TASK-4: Frontend types — add `check_format` to `DraftTask`, `CreateAssignmentTask`, `UpdateAssignmentTask`
 - [x] TASK-5: AI enforcement — add `checkFormat` param to `evaluateStudentAnswer()`, update `buildCheckPrompt()` in `guided_ai.ts`
 - [x] TASK-6: Wire `check_format` through `handleCheckAnswer` in `index.ts`
-- [x] TASK-7: Smoke test + AC verification
+- [ ] TASK-7a: Student-side: `check_format` в `StudentHomeworkTask` + student API query + notice banner + placeholder + bootstrap context
+- [ ] TASK-7b: Smoke test + AC verification (AC-1 — AC-6)
 
 ### Phase 2 — P1 (fast follow-up)
 
@@ -354,4 +391,4 @@ npm run lint && npm run build && npm run smoke-check
 - [x] High-risk файлы не затрагиваются
 - [x] Student/Tutor изоляция не нарушена
 - [x] Parking Lot заполнен
-- [x] Requirements приоритизированы (4× P0, 3× P1)
+- [x] Requirements приоритизированы (4× P0, 3�

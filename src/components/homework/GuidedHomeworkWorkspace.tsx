@@ -148,7 +148,7 @@ function buildTaskContext(
 
 function buildGuidedSystemPrompt(
   sendMode: SendMode,
-  options?: { hasStudentImage?: boolean; isBootstrap?: boolean },
+  options?: { hasStudentImage?: boolean; isBootstrap?: boolean; checkFormat?: 'short_answer' | 'detailed_solution' },
 ): string {
   const hasStudentImage = Boolean(options?.hasStudentImage);
 
@@ -167,13 +167,21 @@ function buildGuidedSystemPrompt(
   ];
 
   if (options?.isBootstrap) {
-    return [
+    const bootstrapRules = [
       ...baseRules,
       'Сейчас нужен короткий стартовый заход по задаче без полного решения.',
       'Ученик ТОЛЬКО ОТКРЫЛ задачу. Он ещё НИЧЕГО не писал и не загружал. НЕ упоминай «твоё решение», «твой ответ» или «вижу, что ты написал».',
       'Если условие на изображении и ты не можешь его прочитать, напиши нейтральный стартовый заход: предложи ученику описать задачу или задать вопрос.',
       'Сформулируй 1-2 коротких предложения, которые запускают разбор.',
-    ].join('\n');
+    ];
+    if (options.checkFormat === 'detailed_solution') {
+      bootstrapRules.push(
+        'Эта задача требует развёрнутого решения с ходом рассуждений.',
+        'В стартовом сообщении обязательно упомяни, что ученик должен показать ход решения (шаги, формулы, рассуждения), иначе получит 0 баллов.',
+        'Мотивируй это подготовкой к ЕГЭ — на экзамене за голый ответ без решения ставят 0.',
+      );
+    }
+    return bootstrapRules.join('\n');
   }
 
   const modeRules =
@@ -1201,7 +1209,7 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
               content: 'Сформулируй короткое стартовое сообщение для ученика по этой задаче.',
             },
           ],
-          systemPrompt: buildGuidedSystemPrompt('bootstrap', { isBootstrap: true }),
+          systemPrompt: buildGuidedSystemPrompt('bootstrap', { isBootstrap: true, checkFormat: currentTask.check_format }),
           taskContext: buildTaskContext(assignment, currentTask, assignment.tasks.length, 'bootstrap', { ocrText }),
           taskImageUrl: bootstrapImageUrl,
           onDelta: (delta) => {
@@ -1396,6 +1404,12 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
                 <MathText text={currentTask.task_text} className="text-sm font-medium whitespace-pre-wrap" />
               </Suspense>
 
+              {currentTask.check_format === 'detailed_solution' && (
+                <div className="bg-amber-50 border-l-4 border-amber-400 text-amber-800 text-sm p-3 rounded-r-md mt-2">
+                  📝 Задача с развёрнутым решением — покажи ход решения, как на ЕГЭ. Без хода решения получишь 0 баллов.
+                </div>
+              )}
+
               <div className="mt-2">
                 <TaskConditionImage
                   assignmentId={assignment.id}
@@ -1536,6 +1550,9 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
             isLoading={isStreaming || isCheckingAnswer || isRequestingHint}
             disabled={threadStatus !== 'active' || !isViewingActiveTask}
             taskNumber={currentTask?.order_num}
+            answerPlaceholder={currentTask?.check_format === 'detailed_solution'
+              ? 'Напиши решение с ходом рассуждений...'
+              : undefined}
             initialAnswerText={currentDraftRef.current.answer}
             initialDiscussionText={currentDraftRef.current.discussion}
             onDraftChange={handleDraftChange}

@@ -21,7 +21,7 @@ Legacy student-only система (`homework_sets`, `homework_tasks`, `homework
 
 **Значения:**
 - `'short_answer'` (default) — краткий ответ (число, слово, формула). AI проверяет как обычно
-- `'detailed_solution'` — развёрнутое решение. AI отклоняет голые ответы без хода решения (`score: 0`)
+- `'detailed_solution'` — развёрнутое решение. AI отклоняет голые ответы без хода решения (`verdict: INCORRECT`)
 
 **Ключевые решения:**
 - Enforcement **только в guided chat** (classic mode не поддерживает)
@@ -29,9 +29,20 @@ Legacy student-only система (`homework_sets`, `homework_tasks`, `homework
 - `buildCheckFormatGuidance()` в `guided_ai.ts` добавляет enforcement-промпт + hint при коротком ответе (`< 30 символов`)
 - При добавлении задачи из KB: `answer_format` → `check_format`, fallback `inferCheckFormat(kim_number)` (КИМ 21-26 → `detailed_solution`)
 
+**Student-facing UX (R8, 2026-04-02):**
+- `StudentHomeworkTask` включает `check_format: 'short_answer' | 'detailed_solution'`
+- `getStudentAssignment()` загружает `check_format` из БД
+- **Notice banner** (amber) в `GuidedHomeworkWorkspace.tsx` под условием задачи: показывается только для `detailed_solution`
+- **Dynamic placeholder** в `GuidedChatInput.tsx`: `answerPlaceholder` prop — `'Напиши решение с ходом рассуждений...'` для `detailed_solution`, `'Ответ...'` для `short_answer`
+- **AI bootstrap**: `buildGuidedSystemPrompt('bootstrap', { checkFormat })` добавляет инструкцию упомянуть требование хода решения в intro
+
 **Файлы:**
 - `guided_ai.ts`: `buildCheckFormatGuidance()`, `EvaluateStudentAnswerParams.checkFormat`
 - `index.ts`: `VALID_CHECK_FORMATS`, `handleCreateAssignment`, `handleUpdateAssignment`, `handleCheckAnswer` (SELECT + pass to AI)
+- `GuidedHomeworkWorkspace.tsx`: banner, bootstrap checkFormat, answerPlaceholder pass-through
+- `GuidedChatInput.tsx`: `answerPlaceholder` prop
+- `src/types/homework.ts`: `StudentHomeworkTask.check_format`
+- `src/lib/studentHomeworkApi.ts`: `check_format` в SELECT query
 - Миграция: `20260401120000_add_check_format_to_homework_tutor_tasks.sql`
 - Спека: `docs/delivery/features/check-format/spec.md`
 

@@ -73,7 +73,7 @@
 **Что делаем:**
 1. Добавить `checkFormat?: 'short_answer' | 'detailed_solution'` в `EvaluateStudentAnswerParams` (или аналогичный интерфейс)
 2. В `buildCheckPrompt()` (или где строится system prompt для проверки):
-   - Если `checkFormat === 'detailed_solution'`: добавить блок в промпт: «Формат проверки: РАЗВЁРНУТОЕ РЕШЕНИЕ. Ученик ОБЯЗАН показать ход решения. Если ответ — только число/слово без хода решения, выстави score: 0 и попроси показать ход решения.»
+   - Если `checkFormat === 'detailed_solution'`: добавить блок в промпт: «Формат проверки: РАЗВЁРНУТОЕ РЕШЕНИЕ. Ученик ОБЯЗАН показать ход решения. Если ответ — только число/слово без хода решения, выстави verdict: INCORRECT и попроси показать ход решения.»
    - Если `checkFormat === 'short_answer'` или не указан: без изменений
 3. Дополнительный hint если `answer.length < 30` и `checkFormat === 'detailed_solution'`
 
@@ -92,18 +92,51 @@
 
 ---
 
-### ~~TASK-7: Smoke test + AC verification~~ ✅
+### ~~TASK-7a: Student-side — `check_format` доступен ученику + notice banner + placeholder + bootstrap~~ ✅
+
+**Job**: R1-3, R1-4, S1
+**Agent**: Claude Code
+**Files**: `src/types/homework.ts`, `src/lib/studentHomeworkApi.ts`, `src/components/homework/GuidedHomeworkWorkspace.tsx`, `src/components/homework/GuidedChatInput.tsx`
+**AC**: AC-6
+
+**Что делаем:**
+
+**A. Data access (student side):**
+1. В `src/types/homework.ts` → интерфейс `StudentHomeworkTask`: добавить `check_format: 'short_answer' | 'detailed_solution'`
+2. В `src/lib/studentHomeworkApi.ts` → `getStudentAssignment()`: добавить `check_format` в SELECT query задач
+
+**B. Notice banner (GuidedHomeworkWorkspace):**
+3. После MathText условия задачи (после `</Suspense>`, перед `TaskConditionImage`): если `currentTask.check_format === 'detailed_solution'`, рендерить banner:
+   - Стиль: `bg-amber-50 border-l-4 border-amber-400 text-amber-800 text-sm p-3 rounded-r-md`
+   - Текст: «📝 Задача с развёрнутым решением — покажи ход решения, как на ЕГЭ. Без хода решения получишь 0 баллов.»
+   - Внутри collapsible-блока условия задачи (видна при раскрытом условии)
+
+**C. Dynamic placeholder (GuidedChatInput):**
+4. Добавить prop `answerPlaceholder?: string` в GuidedChatInput
+5. Использовать вместо hardcoded `'Ответ...'`
+6. В GuidedHomeworkWorkspace: передавать `answerPlaceholder={currentTask.check_format === 'detailed_solution' ? 'Напиши решение с ходом рассуждений...' : 'Ответ...'}`
+
+**D. AI bootstrap context:**
+7. В `buildGuidedSystemPrompt('bootstrap')` или `buildTaskContext()`: если задача `detailed_solution`, добавить в system prompt: «Эта задача требует развёрнутого решения. Упомяни в intro что ученик должен показать ход решения, иначе получит 0 баллов. Мотивируй это подготовкой к ЕГЭ.»
+8. `check_format` передавать из workspace в bootstrap через existing `taskContext` или новый параметр
+
+---
+
+### TASK-7b: Smoke test + AC verification (Phase 1 final)
 
 **Job**: R4-1
 **Agent**: Claude Code
 **Files**: —
-**AC**: AC-1 — AC-5
+**AC**: AC-1 — AC-6
 
 **Что делаем:**
 1. `npm run lint && npm run build && npm run smoke-check`
 2. Проверить что все типы корректны и нет TS ошибок
 3. Проверить что `kbTaskToDraftTask()` для задачи с `primary_score: 3` возвращает `max_score: 3`
 4. Проверить что default `check_format` = `'short_answer'`
+5. Проверить что `StudentHomeworkTask` содержит `check_format`
+6. Проверить что GuidedHomeworkWorkspace рендерит banner при `detailed_solution`
+7. Проверить что GuidedChatInput принимает `answerPlaceholder` prop
 
 ---
 
@@ -357,7 +390,93 @@ Guardrails:
 - npm run lint && npm run build && npm run smoke-check
 ```
 
-### TASK-7
+### TASK-7a (student-side UX)
+
+```
+Твоя роль: senior product-minded full-stack engineer в проекте SokratAI.
+
+Контекст: SokratAI — платформа для репетиторов физики ЕГЭ/ОГЭ. Мы добавили check_format ('short_answer' | 'detailed_solution') в homework_tutor_tasks. AI уже enforcement-ит формат при проверке. Но ученик НЕ ЗНАЕТ заранее, что задача требует развёрнутого решения, и получает 0 баллов неожиданно. Это frustrating и критично для UX.
+
+Задача: показать ученику ДО отправки ответа, что задача требует развёрнутого решения. 3 точки:
+1. Notice banner под условием задачи
+2. Dynamic placeholder в поле «Ответ»
+3. AI bootstrap (intro) упоминает требование
+
+Прочитай перед работой:
+1. docs/delivery/features/check-format/spec.md (Section 6: UX / UI — student-facing)
+2. CLAUDE.md
+3. .claude/rules/40-homework-system.md (секция «Student Guided Homework UX», «Два поля ввода»)
+4. .claude/rules/80-cross-browser.md
+5. src/types/homework.ts (StudentHomeworkTask — сейчас НЕ содержит check_format)
+6. src/lib/studentHomeworkApi.ts (getStudentAssignment → SELECT query задач)
+7. src/components/homework/GuidedHomeworkWorkspace.tsx (collapsible task text, строки ~1363-1425; bootstrap useEffect, строки ~1150-1253; buildGuidedSystemPrompt, строки ~149-200)
+8. src/components/homework/GuidedChatInput.tsx (answerPlaceholder hardcoded 'Ответ...', строка ~325)
+
+Шаги:
+
+ЧАСТЬ A — Data access:
+1. В src/types/homework.ts, интерфейс StudentHomeworkTask:
+   - Добавить: check_format: string;
+2. В src/lib/studentHomeworkApi.ts, функция getStudentAssignment:
+   - Найти SELECT query для задач (строка ~355)
+   - Добавить check_format в список колонок
+
+ЧАСТЬ B — Notice banner:
+3. В GuidedHomeworkWorkspace.tsx, внутри collapsible-блока условия задачи:
+   - После MathText / </Suspense> (строка ~1398), ПЕРЕД TaskConditionImage
+   - Условие: currentTask?.check_format === 'detailed_solution'
+   - JSX:
+     <div className="bg-amber-50 border-l-4 border-amber-400 text-amber-800 text-sm p-3 rounded-r-md mt-2">
+       📝 Задача с развёрнутым решением — покажи ход решения, как на ЕГЭ. Без хода решения получишь 0 баллов.
+     </div>
+   - НЕ показывать для short_answer или undefined
+
+ЧАСТЬ C — Dynamic placeholder:
+4. В GuidedChatInput.tsx:
+   - Добавить prop: answerPlaceholder?: string
+   - Заменить const answerPlaceholder = 'Ответ...' на:
+     const resolvedPlaceholder = props.answerPlaceholder || 'Ответ...';
+   - Использовать resolvedPlaceholder в textarea
+5. В GuidedHomeworkWorkspace.tsx:
+   - Передать в GuidedChatInput:
+     answerPlaceholder={currentTask?.check_format === 'detailed_solution'
+       ? 'Напиши решение с ходом рассуждений...'
+       : undefined}
+
+ЧАСТЬ D — AI bootstrap context:
+6. В GuidedHomeworkWorkspace.tsx, функция buildGuidedSystemPrompt (строки ~149-200):
+   - Принимает options. Добавить optional checkFormat в options
+   - Если mode === 'bootstrap' && options.checkFormat === 'detailed_solution':
+     добавить в systemRules:
+     "Эта задача требует развёрнутого решения с ходом рассуждений.
+     В стартовом сообщении обязательно упомяни, что ученик должен показать ход решения (шаги, формулы, рассуждения), иначе получит 0 баллов.
+     Мотивируй это подготовкой к ЕГЭ — на экзамене за голый ответ без решения ставят 0."
+7. В bootstrap useEffect (строки ~1150-1253):
+   - Передать checkFormat: currentTask?.check_format в buildGuidedSystemPrompt
+
+Acceptance Criteria:
+- AC-6: ученик открывает задачу с check_format: 'detailed_solution' → видит amber banner + placeholder «Напиши решение с ходом рассуждений...»
+- AC-6 inverse: задача с short_answer → banner НЕ показан, placeholder = «Ответ...»
+- Bootstrap AI message для detailed_solution задачи упоминает требование хода решения
+- TypeScript компилируется без ошибок
+
+Guardrails:
+- НЕ менять AnswerField / DiscussionField layout (два поля остаются)
+- НЕ менять bootstrap flow для short_answer задач
+- НЕ добавлять framer-motion
+- НЕ использовать :has() CSS selector
+- touch-action: manipulation на banner (если кликабелен)
+- font-size >= 16px на любых новых input/textarea
+- Student/Tutor изоляция: изменения ТОЛЬКО в student-side файлах
+- НЕ трогать Chat.tsx, AuthGuard, TutorGuard
+
+По завершении:
+- Список изменённых файлов
+- Краткое summary
+- npm run lint && npm run build && npm run smoke-check
+```
+
+### TASK-7b
 
 ```
 Твоя роль: senior product-minded full-stack engineer в проекте SokratAI.
@@ -366,7 +485,7 @@ Guardrails:
 1. docs/delivery/features/check-format/spec.md (Section 7: Acceptance Criteria)
 2. CLAUDE.md
 
-Задача: финальная валидация Phase 1 check-format фичи.
+Задача: финальная валидация Phase 1 check-format фичи (включая student UX).
 
 Шаги:
 1. npm run lint
@@ -379,9 +498,13 @@ Guardrails:
 8. Проверить что CreateAssignmentTask и UpdateAssignmentTask содержат optional check_format
 9. Проверить что handleCheckAnswer SELECT включает check_format
 10. Проверить что evaluateStudentAnswer принимает checkFormat
+11. Проверить что StudentHomeworkTask содержит check_format
+12. Проверить что GuidedHomeworkWorkspace рендерит amber banner при detailed_solution
+13. Проверить что GuidedChatInput принимает answerPlaceholder prop
+14. Проверить что buildGuidedSystemPrompt принимает checkFormat в options
 
 Acceptance Criteria:
-- AC-1 через AC-5: все PASS
+- AC-1 через AC-6: все PASS
 - Нет lint warnings, build errors, smoke failures
 
 По завершении:
@@ -549,6 +672,4 @@ Acceptance Criteria:
 - Нет Safari-несовместимых паттернов в новом коде
 
 По завершении:
-- Список проверенных AC с результатом PASS/FAIL
-- Любые найденные проблемы
-```
+- Список проверенных AC с результатом PASS/FA

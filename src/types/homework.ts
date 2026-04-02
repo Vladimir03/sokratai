@@ -54,6 +54,7 @@ export interface StudentHomeworkTask {
   task_text: string;
   task_image_url: string | null;
   max_score: number;
+  check_format: 'short_answer' | 'detailed_solution';
 }
 
 export interface StudentHomeworkMaterial {

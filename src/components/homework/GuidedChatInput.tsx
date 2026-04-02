@@ -39,6 +39,7 @@ interface GuidedChatInputProps {
   onFileRemove: (index: number) => void;
   isUploading: boolean;
   taskNumber?: number;
+  answerPlaceholder?: string;
   initialAnswerText?: string;
   initialDiscussionText?: string;
   onDraftChange?: (answer: string, discussion: string) => void;
@@ -163,6 +164,7 @@ const GuidedChatInput = memo(
     onFileRemove,
     isUploading,
     taskNumber,
+    answerPlaceholder: answerPlaceholderProp,
     initialAnswerText = '',
     initialDiscussionText = '',
     onDraftChange,
@@ -322,7 +324,7 @@ const GuidedChatInput = memo(
 
     // --- Placeholders ---
 
-    const answerPlaceholder = 'Ответ...';
+    const resolvedAnswerPlaceholder = answerPlaceholderProp || 'Ответ...';
     const discussionPlaceholder = 'Обсуди с AI...';
 
     // --- Shared styles ---
@@ -389,7 +391,7 @@ const GuidedChatInput = memo(
                 value={answerText}
                 onChange={(e) => setAnswerText(e.target.value)}
                 onKeyDown={handleAnswerKeyDown}
-placeholder={answerPlaceholder}
+placeholder={resolvedAnswerPlaceholder}
                 disabled={controlsDisabled}
                 rows={1}
                 className={textareaClasses + ' border border-input rounded-lg'}
