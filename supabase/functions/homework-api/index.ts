@@ -105,6 +105,17 @@ const MAX_THREAD_ATTACHMENTS = 3;
 const THREAD_IMAGE_EXTENSIONS = new Set(["jpg", "jpeg", "png", "webp", "heic", "heif", "gif", "bmp"]);
 const THREAD_ATTACHMENT_EXTENSIONS = new Set([...THREAD_IMAGE_EXTENSIONS, "pdf"]);
 const THREAD_ATTACHMENT_BUCKETS = new Set(["homework-submissions", "homework-images"]);
+const MAX_VOICE_BYTES = 10 * 1024 * 1024;
+const VOICE_TRANSCRIPTION_MODEL = "whisper-large-v3";
+const ALLOWED_VOICE_MIME_TYPES = new Set([
+  "audio/webm",
+  "audio/mp4",
+  "audio/ogg",
+  "audio/mpeg",
+  "audio/mp3",
+  "audio/wav",
+  "audio/x-wav",
+]);
 
 function isUUID(v: unknown): v is string {
   return typeof v === "string" && UUID_RE.test(v);
@@ -210,6 +221,26 @@ async function parseJsonBody(req: Request): Promise<unknown> {
   } catch {
     return null;
   }
+}
+
+function isAcceptedVoiceMimeType(mimeType: string): boolean {
+  if (!mimeType) return false;
+
+  const normalized = mimeType.toLowerCase().split(";")[0].trim();
+  return ALLOWED_VOICE_MIME_TYPES.has(normalized);
+}
+
+function getVoiceFilename(mimeType: string, providedName?: string): string {
+  if (providedName && providedName.trim()) {
+    return providedName;
+  }
+
+  const normalized = mimeType.toLowerCase().split(";")[0].trim();
+  if (normalized.includes("ogg")) return "voice.ogg";
+  if (normalized.includes("mpeg")) return "voice.mp3";
+  if (normalized.includes("mp4")) return "voice.m4a";
+  if (normalized.includes("wav")) return "voice.wav";
+  return "voice.webm";
 }
 
 // ─── Helpers: Auth & Ownership ───────────────────────────────────────────────
@@ -3324,6 +3355,95 @@ async function verifyThreadOwnership(
   };
 }
 
+async function handleTranscribeThreadVoice(
+  db: SupabaseClient,
+  userId: string,
+  threadId: string,
+  req: Request,
+  cors: Record<string, string>,
+): Promise<Response> {
+  const ownershipResult = await verifyThreadOwnership(db, threadId, userId, cors);
+  if (ownershipResult instanceof Response) return ownershipResult;
+
+  const { thread } = ownershipResult;
+  if (thread.status !== "active") {
+    return jsonError(cors, 409, "THREAD_NOT_ACTIVE", "Thread is not active");
+  }
+
+  const contentType = req.headers.get("content-type") ?? "";
+  if (!contentType.toLowerCase().includes("multipart/form-data")) {
+    return jsonError(cors, 400, "INVALID_BODY", "Expected multipart audio upload");
+  }
+
+  const formData = await req.formData();
+  const file = formData.get("file");
+  if (!(file instanceof Blob)) {
+    return jsonError(cors, 400, "VALIDATION", "Audio file is required");
+  }
+
+  if (file.size === 0) {
+    return jsonError(cors, 400, "VALIDATION", "Voice message is empty");
+  }
+
+  if (file.size > MAX_VOICE_BYTES) {
+    return jsonError(cors, 413, "VOICE_TOO_LARGE", "Голосовое сообщение слишком большое");
+  }
+
+  const mimeType = file.type || "application/octet-stream";
+  if (!isAcceptedVoiceMimeType(mimeType)) {
+    return jsonError(cors, 400, "VOICE_UNSUPPORTED_FORMAT", "Неподдерживаемый формат голосового сообщения");
+  }
+
+  const lemonfoxApiKey = Deno.env.get("LEMONFOX_API_KEY");
+  if (!lemonfoxApiKey) {
+    console.error("LEMONFOX_API_KEY is not configured for homework voice transcription");
+    return jsonError(cors, 503, "VOICE_UNAVAILABLE", "Расшифровка голосовых временно недоступна");
+  }
+
+  const outboundForm = new FormData();
+  const uploadedName = file instanceof File ? file.name : undefined;
+  outboundForm.append("file", file, getVoiceFilename(mimeType, uploadedName));
+  outboundForm.append("model", VOICE_TRANSCRIPTION_MODEL);
+  outboundForm.append("language", "ru");
+
+  console.log("homework_voice_transcription_request", {
+    threadId,
+    userId,
+    mimeType,
+    size: file.size,
+  });
+
+  const transcriptionRes = await fetch("https://api.lemonfox.ai/v1/audio/transcriptions", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${lemonfoxApiKey}`,
+    },
+    body: outboundForm,
+  });
+
+  if (!transcriptionRes.ok) {
+    const errText = await transcriptionRes.text().catch(() => "unknown");
+    console.error("homework_voice_transcription_failed", {
+      threadId,
+      userId,
+      status: transcriptionRes.status,
+      body: errText,
+    });
+    return jsonError(cors, 502, "VOICE_TRANSCRIPTION_FAILED", "Не удалось расшифровать голосовое сообщение");
+  }
+
+  const transcriptionData = await transcriptionRes.json();
+  const text = typeof transcriptionData?.text === "string"
+    ? transcriptionData.text.trim()
+    : "";
+
+  if (!text) {
+    return jsonError(cors, 422, "VOICE_EMPTY_TRANSCRIPT", "Не удалось распознать речь");
+  }
+
+  return jsonOk(cors, { text });
+}
+
 async function handlePostThreadMessage(
   db: SupabaseClient,
   userId: string,
@@ -4393,6 +4513,11 @@ Deno.serve(async (req: Request): Promise<Response> => {
     // GET /threads/:id (student endpoint)
     if (seg.length === 2 && seg[0] === "threads" && route.method === "GET") {
       return await handleGetThread(db, userId, seg[1], cors);
+    }
+
+    // POST /threads/:id/transcribe-voice (student endpoint)
+    if (seg.length === 3 && seg[0] === "threads" && seg[2] === "transcribe-voice" && route.method === "POST") {
+      return await handleTranscribeThreadVoice(db, userId, seg[1], req, cors);
     }
 
     // POST /threads/:id/messages (student endpoint)

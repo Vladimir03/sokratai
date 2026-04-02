@@ -1558,6 +1558,7 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
 
         <GuidedChatInput
           key={currentTaskOrder}
+          threadId={threadId}
           onSendAnswer={handleSendAnswer}
           onSendStep={handleSendStep}
           isLoading={isStreaming || isCheckingAnswer || isRequestingHint}

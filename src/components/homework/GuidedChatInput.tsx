@@ -3,14 +3,17 @@
  * AnswerField (green border, top): Enter = check answer via AI.
  * DiscussionField (gray border, bottom): Enter = discuss with AI.
  * Supports file attachments (images) via shared 📎 button with preview above answer field.
+ * Supports voice recording -> transcription -> draft confirmation for both fields.
  */
 
 import { memo, useCallback, useEffect, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
-import { CheckCircle2, FileText, Loader2, MessageCircle, Paperclip, X } from 'lucide-react';
+import { CheckCircle2, FileText, Loader2, MessageCircle, Mic, MicOff, Paperclip, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 import { MAX_GUIDED_CHAT_ATTACHMENTS } from '@/lib/homeworkThreadAttachments';
+import { useVoiceRecorder } from '@/hooks/useVoiceRecorder';
+import { transcribeThreadVoice } from '@/lib/studentHomeworkApi';
 
 const ALLOWED_TYPES = [
   'image/jpeg',
@@ -22,6 +25,9 @@ const ALLOWED_TYPES = [
 ];
 const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10 MB
 const MAX_FILES = MAX_GUIDED_CHAT_ATTACHMENTS;
+const MAX_VOICE_RECORDING_SECONDS = 120;
+
+type VoiceTarget = 'answer' | 'discussion';
 
 function formatFileSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} Б`;
@@ -29,7 +35,21 @@ function formatFileSize(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} МБ`;
 }
 
+function formatVoiceDuration(seconds: number): string {
+  const safeSeconds = Math.max(0, seconds);
+  if (safeSeconds >= 60) {
+    return `${Math.floor(safeSeconds / 60)}:${String(safeSeconds % 60).padStart(2, '0')}`;
+  }
+  return `0:${String(safeSeconds).padStart(2, '0')}`;
+}
+
+function appendVoiceTranscript(currentText: string, transcript: string): string {
+  const trimmedCurrent = currentText.trim();
+  return trimmedCurrent ? `${trimmedCurrent}\n${transcript}` : transcript;
+}
+
 interface GuidedChatInputProps {
+  threadId?: string | null;
   onSendAnswer: (text: string) => void;
   onSendStep: (text: string) => void;
   isLoading: boolean;
@@ -155,6 +175,7 @@ const spinner = (
 
 const GuidedChatInput = memo(
   ({
+    threadId,
     onSendAnswer,
     onSendStep,
     isLoading,
@@ -172,15 +193,66 @@ const GuidedChatInput = memo(
     const [answerText, setAnswerText] = useState(initialAnswerText);
     const [discussionText, setDiscussionText] = useState(initialDiscussionText);
     const [isDiscussionExpanded, setIsDiscussionExpanded] = useState(false);
+    const [isTranscribingVoice, setIsTranscribingVoice] = useState(false);
+    const [voiceTarget, setVoiceTarget] = useState<VoiceTarget | null>(null);
+    const [voiceStatusText, setVoiceStatusText] = useState<string | null>(null);
+    const [voiceStatusTarget, setVoiceStatusTarget] = useState<VoiceTarget | null>(null);
     const answerRef = useRef<HTMLTextAreaElement>(null);
     const discussionRef = useRef<HTMLTextAreaElement>(null);
+    const answerTextRef = useRef(initialAnswerText);
+    const discussionTextRef = useRef(initialDiscussionText);
     const fileInputRef = useRef<HTMLInputElement>(null);
+    const voiceStatusTimeoutRef = useRef<number | null>(null);
+    const voiceAutoStopTriggeredRef = useRef(false);
+
+    const {
+      isRecording,
+      isSupported: isVoiceSupported,
+      recordingDurationSeconds,
+      startRecording,
+      stopRecording,
+      cancelRecording,
+    } = useVoiceRecorder();
 
     // Compact answer mode: hide label/hint + reduce padding on mobile when discussion is open
     const answerCompact = isDiscussionExpanded;
 
     useAutoResize(answerRef, answerText);
     useAutoResize(discussionRef, discussionText);
+
+    useEffect(() => {
+      answerTextRef.current = answerText;
+    }, [answerText]);
+
+    useEffect(() => {
+      discussionTextRef.current = discussionText;
+    }, [discussionText]);
+
+    const clearVoiceStatus = useCallback(() => {
+      if (voiceStatusTimeoutRef.current !== null) {
+        window.clearTimeout(voiceStatusTimeoutRef.current);
+        voiceStatusTimeoutRef.current = null;
+      }
+      setVoiceStatusText(null);
+      setVoiceStatusTarget(null);
+    }, []);
+
+    const setTemporaryVoiceStatus = useCallback((target: VoiceTarget, text: string, durationMs = 4000) => {
+      clearVoiceStatus();
+      setVoiceStatusTarget(target);
+      setVoiceStatusText(text);
+      voiceStatusTimeoutRef.current = window.setTimeout(() => {
+        setVoiceStatusText(null);
+        setVoiceStatusTarget(null);
+        voiceStatusTimeoutRef.current = null;
+      }, durationMs);
+    }, [clearVoiceStatus]);
+
+    useEffect(() => {
+      return () => {
+        clearVoiceStatus();
+      };
+    }, [clearVoiceStatus]);
 
     // Sync draft text to parent (parent stores in ref — no re-render)
     useEffect(() => {
@@ -192,23 +264,163 @@ const GuidedChatInput = memo(
     const hasAnswerContent = answerText.trim().length > 0 || attachedFiles.length > 0;
     const hasDiscussionContent = discussionText.trim().length > 0 || attachedFiles.length > 0;
     const controlsDisabled = isLoading || disabled || isUploading;
+    const answerRecording = isRecording && voiceTarget === 'answer';
+    const discussionRecording = isRecording && voiceTarget === 'discussion';
 
-    const canSendAnswer = hasAnswerContent && !controlsDisabled;
-    const canSendDiscussion = hasDiscussionContent && !controlsDisabled;
+    const canSendAnswer = hasAnswerContent && !controlsDisabled && !isRecording && !isTranscribingVoice;
+    const canSendDiscussion = hasDiscussionContent && !controlsDisabled && !isRecording && !isTranscribingVoice;
 
     const handleSendAnswer = useCallback(() => {
       if (!canSendAnswer) return;
+      clearVoiceStatus();
       onSendAnswer(answerText.trim());
+      answerTextRef.current = '';
       setAnswerText('');
       if (answerRef.current) answerRef.current.style.height = 'auto';
-    }, [answerText, canSendAnswer, onSendAnswer]);
+    }, [answerText, canSendAnswer, clearVoiceStatus, onSendAnswer]);
 
     const handleSendStep = useCallback(() => {
       if (!canSendDiscussion) return;
+      clearVoiceStatus();
       onSendStep(discussionText.trim());
+      discussionTextRef.current = '';
       setDiscussionText('');
       if (discussionRef.current) discussionRef.current.style.height = 'auto';
-    }, [discussionText, canSendDiscussion, onSendStep]);
+    }, [discussionText, canSendDiscussion, clearVoiceStatus, onSendStep]);
+
+    const focusVoiceTarget = useCallback((target: VoiceTarget, nextValue: string) => {
+      requestAnimationFrame(() => {
+        const field = target === 'answer' ? answerRef.current : discussionRef.current;
+        if (!field) return;
+        field.focus();
+        field.setSelectionRange(nextValue.length, nextValue.length);
+      });
+    }, []);
+
+    const applyVoiceTranscript = useCallback((
+      target: VoiceTarget,
+      transcript: string,
+      durationSeconds: number,
+    ) => {
+      const normalizedTranscript = transcript.replace(/\s+/g, ' ').trim();
+      if (!normalizedTranscript) {
+        throw new Error('Не удалось распознать речь. Попробуй записать ещё раз.');
+      }
+
+      const currentValue = target === 'answer'
+        ? answerTextRef.current
+        : discussionTextRef.current;
+      const nextValue = appendVoiceTranscript(currentValue, normalizedTranscript);
+
+      if (target === 'answer') {
+        answerTextRef.current = nextValue;
+        setAnswerText(nextValue);
+      } else {
+        discussionTextRef.current = nextValue;
+        setDiscussionText(nextValue);
+      }
+
+      if (target === 'discussion') {
+        setIsDiscussionExpanded(true);
+      }
+
+      const previewText = normalizedTranscript.length > 90
+        ? `${normalizedTranscript.slice(0, 87)}...`
+        : normalizedTranscript;
+      const actionLabel = target === 'answer' ? 'Проверить' : 'Написать';
+
+      setTemporaryVoiceStatus(
+        target,
+        `Расшифровка [${formatVoiceDuration(durationSeconds)}]: «${previewText}». Проверь текст и нажми ${actionLabel}.`,
+      );
+      focusVoiceTarget(target, nextValue);
+    }, [
+      focusVoiceTarget,
+      setTemporaryVoiceStatus,
+    ]);
+
+    const handleVoiceButton = useCallback(async (target: VoiceTarget) => {
+      if (!threadId || controlsDisabled || isTranscribingVoice) {
+        return;
+      }
+
+      if (isRecording) {
+        if (voiceTarget !== target) {
+          toast.info('Сначала завершите текущую запись.');
+          return;
+        }
+
+        setIsTranscribingVoice(true);
+        setVoiceStatusTarget(target);
+        setVoiceStatusText('Расшифровываю голосовое...');
+
+        try {
+          const recording = await stopRecording();
+          if (!recording) {
+            clearVoiceStatus();
+            return;
+          }
+
+          const { text } = await transcribeThreadVoice(threadId, recording.blob, recording.fileName);
+          applyVoiceTranscript(target, text, recording.durationSeconds);
+        } catch (error) {
+          console.error('Homework voice transcription failed:', error);
+          clearVoiceStatus();
+          toast.error(error instanceof Error ? error.message : 'Не удалось расшифровать голосовое сообщение.');
+        } finally {
+          setIsTranscribingVoice(false);
+          setVoiceTarget(null);
+        }
+
+        return;
+      }
+
+      clearVoiceStatus();
+      const started = await startRecording();
+      if (!started) {
+        return;
+      }
+
+      setVoiceTarget(target);
+      if (target === 'discussion') {
+        setIsDiscussionExpanded(true);
+      }
+    }, [
+      applyVoiceTranscript,
+      clearVoiceStatus,
+      controlsDisabled,
+      isRecording,
+      isTranscribingVoice,
+      startRecording,
+      stopRecording,
+      threadId,
+      voiceTarget,
+    ]);
+
+    const handleCancelVoiceRecording = useCallback(() => {
+      cancelRecording();
+      clearVoiceStatus();
+      setVoiceTarget(null);
+    }, [cancelRecording, clearVoiceStatus]);
+
+    useEffect(() => {
+      if (!isRecording) {
+        voiceAutoStopTriggeredRef.current = false;
+        return;
+      }
+
+      if (recordingDurationSeconds < MAX_VOICE_RECORDING_SECONDS) {
+        return;
+      }
+
+      if (voiceAutoStopTriggeredRef.current || !voiceTarget) {
+        return;
+      }
+
+      voiceAutoStopTriggeredRef.current = true;
+      toast.info('Достигнут лимит 2 минуты. Останавливаю запись и готовлю расшифровку.');
+      void handleVoiceButton(voiceTarget);
+    }, [handleVoiceButton, isRecording, recordingDurationSeconds, voiceTarget]);
 
     // --- KeyDown: Enter = send from own field, Shift+Enter = newline ---
 
@@ -271,7 +483,7 @@ const GuidedChatInput = memo(
       [attachedFiles.length, onFileSelect],
     );
 
-    const attachDisabled = controlsDisabled;
+    const attachDisabled = controlsDisabled || isRecording || isTranscribingVoice;
 
     // --- Clipboard paste: image → onFileSelect, text → native textarea ---
 
@@ -326,6 +538,17 @@ const GuidedChatInput = memo(
 
     const resolvedAnswerPlaceholder = answerPlaceholderProp || 'Ответ...';
     const discussionPlaceholder = 'Обсуди с AI...';
+    const hasVoiceControls = Boolean(threadId) && isVoiceSupported;
+    const answerVoiceStatus = (() => {
+      if (isTranscribingVoice && voiceTarget === 'answer') return 'Расшифровываю голосовое...';
+      if (isRecording && voiceTarget === 'answer') return `Идёт запись ${formatVoiceDuration(recordingDurationSeconds)}`;
+      return voiceStatusTarget === 'answer' ? voiceStatusText : null;
+    })();
+    const discussionVoiceStatus = (() => {
+      if (isTranscribingVoice && voiceTarget === 'discussion') return 'Расшифровываю голосовое...';
+      if (isRecording && voiceTarget === 'discussion') return `Идёт запись ${formatVoiceDuration(recordingDurationSeconds)}`;
+      return voiceStatusTarget === 'discussion' ? voiceStatusText : null;
+    })();
 
     // --- Shared styles ---
 
@@ -373,6 +596,12 @@ const GuidedChatInput = memo(
               <span className="text-sm font-bold text-green-700">Ответ к задаче</span>
             </div>
 
+            {answerVoiceStatus && (
+              <div className="mb-2 text-xs text-muted-foreground">
+                {answerVoiceStatus}
+              </div>
+            )}
+
             {/* Input row */}
             <div className="flex items-end gap-2">
               <button
@@ -389,24 +618,58 @@ const GuidedChatInput = memo(
               <textarea
                 ref={answerRef}
                 value={answerText}
-                onChange={(e) => setAnswerText(e.target.value)}
+                onChange={(e) => {
+                  if (voiceStatusTarget === 'answer') {
+                    clearVoiceStatus();
+                  }
+                  answerTextRef.current = e.target.value;
+                  setAnswerText(e.target.value);
+                }}
                 onKeyDown={handleAnswerKeyDown}
-placeholder={resolvedAnswerPlaceholder}
-                disabled={controlsDisabled}
+                placeholder={resolvedAnswerPlaceholder}
+                disabled={controlsDisabled || isTranscribingVoice || discussionRecording}
                 rows={1}
                 className={textareaClasses + ' border border-input rounded-lg'}
                 style={textareaStyle}
               />
 
+              {hasVoiceControls && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    void handleVoiceButton('answer');
+                  }}
+                  disabled={controlsDisabled || isTranscribingVoice || discussionRecording}
+                  className="flex h-8 w-8 md:h-10 md:w-10 shrink-0 items-center justify-center rounded-lg border border-input bg-background text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground disabled:cursor-not-allowed disabled:opacity-50"
+                  style={{ touchAction: 'manipulation' }}
+                  aria-label={answerRecording ? 'Остановить и расшифровать голосовое' : 'Записать голосовое для ответа'}
+                  title={answerRecording ? 'Остановить и расшифровать' : 'Записать голосовое'}
+                >
+                  {isTranscribingVoice && voiceTarget === 'answer' ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : answerRecording ? (
+                    <MicOff className="h-4 w-4" />
+                  ) : (
+                    <Mic className="h-4 w-4" />
+                  )}
+                </button>
+              )}
+
               <Button
                 size="sm"
-                onClick={handleSendAnswer}
-                disabled={!canSendAnswer}
+                onClick={answerRecording ? handleCancelVoiceRecording : handleSendAnswer}
+                disabled={isTranscribingVoice || discussionRecording || (!answerRecording && !canSendAnswer)}
                 className="h-8 md:h-10 shrink-0 gap-1 whitespace-nowrap bg-green-600 px-3 text-xs hover:bg-green-700"
                 style={{ touchAction: 'manipulation' }}
               >
-                {isLoading ? spinner : <CheckCircle2 className="h-3.5 w-3.5" />}
-                Проверить
+                {answerRecording ? (
+                  <X className="h-3.5 w-3.5" />
+                ) : isLoading ? (
+                  spinner
+                ) : (
+                  <CheckCircle2 className="h-3.5 w-3.5" />
+                )}
+                {answerRecording ? 'Отмена' : 'Проверить'}
               </Button>
             </div>
 
@@ -440,6 +703,12 @@ placeholder={resolvedAnswerPlaceholder}
                 <span className="text-sm font-semibold text-muted-foreground">Обсуждение</span>
               </div>
 
+              {discussionVoiceStatus && (
+                <div className="mb-2 text-xs text-muted-foreground">
+                  {discussionVoiceStatus}
+                </div>
+              )}
+
               {/* Input row */}
               <div className="flex items-end gap-2">
                 <button
@@ -456,25 +725,59 @@ placeholder={resolvedAnswerPlaceholder}
                 <textarea
                   ref={discussionRef}
                   value={discussionText}
-                  onChange={(e) => setDiscussionText(e.target.value)}
+                  onChange={(e) => {
+                    if (voiceStatusTarget === 'discussion') {
+                      clearVoiceStatus();
+                    }
+                    discussionTextRef.current = e.target.value;
+                    setDiscussionText(e.target.value);
+                  }}
                   onKeyDown={handleDiscussionKeyDown}
                   placeholder={discussionPlaceholder}
-                  disabled={controlsDisabled}
+                  disabled={controlsDisabled || isTranscribingVoice || answerRecording}
                   rows={1}
                   className={textareaClasses + ' border border-input rounded-lg'}
                   style={textareaStyle}
                 />
 
+                {hasVoiceControls && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      void handleVoiceButton('discussion');
+                    }}
+                    disabled={controlsDisabled || isTranscribingVoice || answerRecording}
+                    className="flex h-8 w-8 md:h-10 md:w-10 shrink-0 items-center justify-center rounded-lg border border-input bg-background text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground disabled:cursor-not-allowed disabled:opacity-50"
+                    style={{ touchAction: 'manipulation' }}
+                    aria-label={discussionRecording ? 'Остановить и расшифровать голосовое' : 'Записать голосовое для обсуждения'}
+                    title={discussionRecording ? 'Остановить и расшифровать' : 'Записать голосовое'}
+                  >
+                    {isTranscribingVoice && voiceTarget === 'discussion' ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : discussionRecording ? (
+                      <MicOff className="h-4 w-4" />
+                    ) : (
+                      <Mic className="h-4 w-4" />
+                    )}
+                  </button>
+                )}
+
                 <Button
                   variant="outline"
                   size="sm"
-                  onClick={handleSendStep}
-                  disabled={!canSendDiscussion}
+                  onClick={discussionRecording ? handleCancelVoiceRecording : handleSendStep}
+                  disabled={isTranscribingVoice || answerRecording || (!discussionRecording && !canSendDiscussion)}
                   className="h-8 md:h-10 shrink-0 gap-1 whitespace-nowrap px-3 text-xs"
                   style={{ touchAction: 'manipulation' }}
                 >
-                  {isLoading ? spinner : <MessageCircle className="h-3.5 w-3.5" />}
-                  Написать
+                  {discussionRecording ? (
+                    <X className="h-3.5 w-3.5" />
+                  ) : isLoading ? (
+                    spinner
+                  ) : (
+                    <MessageCircle className="h-3.5 w-3.5" />
+                  )}
+                  {discussionRecording ? 'Отмена' : 'Написать'}
                 </Button>
               </div>
 

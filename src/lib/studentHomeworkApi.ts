@@ -170,6 +170,87 @@ async function requestStudentHomeworkApi<T>(
   return response.json() as Promise<T>;
 }
 
+export interface TranscribeThreadVoiceResult {
+  text: string;
+}
+
+export async function transcribeThreadVoice(
+  threadId: string,
+  audioBlob: Blob,
+  fileName = 'voice.webm',
+  timeoutMs = 45_000,
+): Promise<TranscribeThreadVoiceResult> {
+  const {
+    data: { session },
+    error: sessionError,
+  } = await supabase.auth.getSession();
+
+  if (sessionError) {
+    throw new StudentHomeworkApiError(sessionError.message);
+  }
+
+  const token = session?.access_token;
+  if (!token) {
+    throw new StudentHomeworkApiError('Нет активной сессии');
+  }
+
+  const controller = new AbortController();
+  const timeoutId = window.setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    const formData = new FormData();
+    formData.append('file', audioBlob, fileName);
+
+    const response = await fetch(
+      `${SUPABASE_URL}/functions/v1/homework-api/threads/${encodeURIComponent(threadId)}/transcribe-voice`,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          apikey: SUPABASE_KEY,
+        },
+        body: formData,
+        signal: controller.signal,
+      },
+    );
+
+    if (!response.ok) {
+      let message = `HTTP ${response.status}`;
+      try {
+        const body = await response.json();
+        const errorMessage = body?.error?.message;
+        if (typeof errorMessage === 'string' && errorMessage.trim().length > 0) {
+          message = errorMessage;
+        }
+      } catch {
+        // ignore malformed error body
+      }
+
+      throw new StudentHomeworkApiError(message);
+    }
+
+    const data = await response.json();
+    const text = typeof data?.text === 'string' ? data.text.trim() : '';
+    if (!text) {
+      throw new StudentHomeworkApiError('Не удалось распознать речь');
+    }
+
+    return { text };
+  } catch (error) {
+    if (error instanceof StudentHomeworkApiError) {
+      throw error;
+    }
+
+    if (error instanceof Error && error.name === 'AbortError') {
+      throw new StudentHomeworkApiError('Расшифровка заняла слишком много времени. Попробуй ещё раз.');
+    }
+
+    throw new StudentHomeworkApiError('Не удалось отправить голосовое сообщение на расшифровку.');
+  } finally {
+    window.clearTimeout(timeoutId);
+  }
+}
+
 function toStorageRef(bucket: string, objectPath: string): string {
   return `${STORAGE_REF_PREFIX}${bucket}/${objectPath}`;
 }

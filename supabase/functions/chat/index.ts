@@ -507,7 +507,7 @@ function getVoiceFilename(mimeType: string, providedName?: string): string {
   const normalized = mimeType.toLowerCase().split(";")[0].trim();
   if (normalized.includes("ogg")) return "voice.ogg";
   if (normalized.includes("mpeg")) return "voice.mp3";
-  if (normalized.includes("mp4")) return "voice.mp4";
+  if (normalized.includes("mp4")) return "voice.m4a";
   if (normalized.includes("wav")) return "voice.wav";
   return "voice.webm";
 }
