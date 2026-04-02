@@ -8642,6 +8642,20 @@ Deno.serve(async (req) => {
       });
     }
 
+    // Handle voice messages
+    if (update.message?.voice) {
+      const telegramUserId = update.message.from.id;
+      const session = await getOrRepairOnboardingSession(telegramUserId);
+
+      if (session?.user_id && session.onboarding_state === "completed") {
+        await handleVoiceMessage(telegramUserId, session.user_id, update.message.voice);
+      }
+
+      return new Response(JSON.stringify({ ok: true }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
     return new Response(JSON.stringify({ ok: true }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
