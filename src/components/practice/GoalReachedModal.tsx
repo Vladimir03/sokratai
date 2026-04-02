@@ -59,7 +59,7 @@ export const GoalReachedModal = ({ isOpen, onClose, stats }: GoalReachedModalPro
               <Award className="w-12 h-12 text-white" />
             </motion.div>
 
-            <h2 className="text-2xl font-black mb-2 bg-gradient-to-r from-orange-600 to-yellow-500 bg-clip-text text-transparent uppercase tracking-tight">
+            <h2 className="text-2xl font-black mb-2 text-orange-600 uppercase tracking-tight">
               Цель достигнута!
             </h2>
             <p className="text-muted-foreground mb-8 font-medium">
@@ -70,17 +70,17 @@ export const GoalReachedModal = ({ isOpen, onClose, stats }: GoalReachedModalPro
               <div className="flex flex-col items-center">
                 <div className="text-orange-500 mb-1"><Flame className="w-5 h-5" /></div>
                 <span className="text-lg font-bold">{stats.streak}</span>
-                <span className="text-[10px] text-muted-foreground uppercase font-bold">Дней</span>
+                <span className="text-xs text-muted-foreground uppercase font-bold">Дней</span>
               </div>
               <div className="flex flex-col items-center">
                 <div className="text-blue-500 mb-1"><Target className="w-5 h-5" /></div>
                 <span className="text-lg font-bold">{stats.solved}</span>
-                <span className="text-[10px] text-muted-foreground uppercase font-bold">Задач</span>
+                <span className="text-xs text-muted-foreground uppercase font-bold">Задач</span>
               </div>
               <div className="flex flex-col items-center">
-                <div className="text-purple-500 mb-1"><Zap className="w-5 h-5" /></div>
+                <div className="text-amber-500 mb-1"><Zap className="w-5 h-5" /></div>
                 <span className="text-lg font-bold">{stats.xp}</span>
-                <span className="text-[10px] text-muted-foreground uppercase font-bold">Очков</span>
+                <span className="text-xs text-muted-foreground uppercase font-bold">Очков</span>
               </div>
             </div>
 

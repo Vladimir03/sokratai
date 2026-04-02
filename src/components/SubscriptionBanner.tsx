@@ -52,7 +52,7 @@ export function SubscriptionBanner({
       <div className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium ${
         isTrialEnding 
           ? 'bg-amber-500/10 text-amber-600 border border-amber-500/20' 
-          : 'bg-gradient-to-r from-purple-500/10 to-pink-500/10 text-purple-600 border border-purple-500/20'
+          : 'bg-emerald-500/10 text-emerald-700 border border-emerald-500/20'
       }`}>
         <Gift className="w-3.5 h-3.5" />
         <span>
@@ -93,13 +93,14 @@ export function SubscriptionBanner({
         >
           <Card className={`relative overflow-hidden border-0 p-3 sm:p-6 text-white ${
             trialHighlight
-              ? 'bg-gradient-to-br from-emerald-600 via-teal-500 to-blue-500'
-              : 'bg-gradient-to-br from-purple-600 via-pink-500 to-orange-400'
+              ? 'bg-gradient-to-br from-emerald-600 via-teal-500 to-cyan-600'
+              : 'bg-gradient-to-br from-slate-800 via-slate-700 to-emerald-800'
           }`}>
             {!limitReached && (
-              <button 
+              <button
                 onClick={() => setDismissed(true)}
                 className="absolute top-2 right-2 sm:top-3 sm:right-3 p-1 hover:bg-white/20 rounded-full transition-colors"
+                aria-label="Закрыть"
               >
                 <X className="w-4 h-4" />
               </button>
@@ -144,7 +145,7 @@ export function SubscriptionBanner({
                 
                 <Button 
                   onClick={handleOpenPayment}
-                  className="w-full bg-white text-purple-600 hover:bg-white/90 font-bold text-sm sm:text-base py-2 sm:py-2.5"
+                  className="w-full bg-white text-emerald-700 hover:bg-white/90 font-bold text-sm sm:text-base py-2 sm:py-2.5"
                   size="default"
                 >
                   <CreditCard className="w-3.5 h-3.5 sm:w-4 sm:h-4 mr-1.5 sm:mr-2" />

@@ -20,7 +20,7 @@ const Progress = () => {
       <PageContent>
         <div className="container mx-auto px-4 pb-6">
           <div className="mb-8">
-            <h1 className="text-4xl font-bold mb-2">Ваш прогресс</h1>
+            <h1 className="text-2xl font-bold mb-2">Ваш прогресс</h1>
             <p className="text-muted-foreground">Отслеживайте свои достижения в тренажёре</p>
           </div>
 
@@ -68,12 +68,12 @@ const Progress = () => {
                   </CardContent>
                 </Card>
 
-                <Card className="bg-gradient-to-br from-purple-50 to-white dark:from-purple-950/20 dark:to-background border-purple-100 dark:border-purple-900/50">
+                <Card className="bg-gradient-to-br from-amber-50 to-white dark:from-amber-950/20 dark:to-background border-amber-100 dark:border-amber-900/50">
                   <CardHeader className="flex flex-row items-center justify-between pb-2">
                     <CardTitle className="text-xs md:text-sm font-medium text-muted-foreground">
                       Прогноз ЕГЭ
                     </CardTitle>
-                    <Award className="w-4 h-4 text-purple-500" />
+                    <Award className="w-4 h-4 text-amber-500" />
                   </CardHeader>
                   <CardContent>
                     <div className="text-2xl md:text-3xl font-bold">
@@ -109,7 +109,7 @@ const Progress = () => {
                                 </div>
                                 <div>
                                   <span className="font-semibold">{egeInfo.name}</span>
-                                  <p className="text-[10px] text-muted-foreground uppercase tracking-wider">
+                                  <p className="text-xs text-muted-foreground uppercase tracking-wider">
                                     {item.total_attempts} попыток • {item.current_difficulty === 1 ? 'Лёгкий' : item.current_difficulty === 2 ? 'Средний' : 'Сложный'}
                                   </p>
                                 </div>
@@ -141,7 +141,7 @@ const Progress = () => {
                   <Card key={i} className={`text-center p-4 transition-all duration-500 ${ach.active ? 'bg-primary/5 border-primary/20 scale-100' : 'opacity-40 grayscale scale-95'}`}>
                     <div className="text-3xl mb-2">{ach.icon}</div>
                     <div className="text-sm font-bold">{ach.label}</div>
-                    <div className="text-[10px] text-muted-foreground uppercase">{ach.desc}</div>
+                    <div className="text-xs text-muted-foreground uppercase">{ach.desc}</div>
                   </Card>
                 ))}
               </div>

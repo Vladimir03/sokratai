@@ -136,10 +136,10 @@ function CatalogHome({
       <KBStatusCard error={error} isFetching={isFetching} onRetry={refetch} className="mb-6" />
 
       <div className="mb-6">
-        <h2 className="font-display text-[2rem] font-bold tracking-[-0.04em] text-slate-950 sm:text-[2.15rem]">
+        <h2 className="text-2xl font-bold text-foreground">
           Каталог задач
         </h2>
-        <p className="mt-2 text-sm text-slate-500">Общая база · Копируйте нужные задачи к себе</p>
+        <p className="mt-2 text-sm text-muted-foreground">Общая база · Копируйте нужные задачи к себе</p>
       </div>
 
       <div className="relative mb-4">
@@ -226,7 +226,7 @@ function MyBaseHome({ onOpenFolder }: MyBaseHomeProps) {
 
       <div className="mb-6 flex items-start justify-between gap-4">
         <div>
-          <h2 className="font-display text-[2rem] font-bold tracking-[-0.04em] text-slate-950 sm:text-[2.15rem]">
+          <h2 className="text-2xl font-bold text-foreground">
             Моя база
           </h2>
           <p className="mt-2 text-sm text-slate-500">Ваши папки, задачи и материалы</p>

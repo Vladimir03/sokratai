@@ -42,7 +42,7 @@ export const TodayStatsCard = ({ stats }: TodayStatsCardProps) => {
   }, [stats.current_streak]);
 
   return (
-    <Card className="w-full bg-gradient-to-r from-indigo-500/10 to-purple-500/10 border-indigo-500/20 overflow-hidden relative">
+    <Card className="w-full bg-gradient-to-r from-emerald-500/10 to-teal-500/10 border-emerald-500/20 overflow-hidden relative">
       <ConfettiBurst active={showConfetti} onComplete={() => setShowConfetti(false)} />
       
       <CardContent className="pt-4">
@@ -73,7 +73,7 @@ export const TodayStatsCard = ({ stats }: TodayStatsCardProps) => {
                 {displayedStreak}
               </motion.span>
             </AnimatePresence>
-            <span className="text-[10px] text-muted-foreground font-medium">дней</span>
+            <span className="text-xs text-muted-foreground font-medium">дней</span>
           </div>
 
           {/* Решено сегодня */}
@@ -82,7 +82,7 @@ export const TodayStatsCard = ({ stats }: TodayStatsCardProps) => {
               <Target className="w-5 h-5" />
             </div>
             <span className="text-lg font-bold">{stats.problems_solved_today}</span>
-            <span className="text-[10px] text-muted-foreground font-medium">решено</span>
+            <span className="text-xs text-muted-foreground font-medium">решено</span>
           </div>
 
           {/* Точность */}
@@ -91,22 +91,22 @@ export const TodayStatsCard = ({ stats }: TodayStatsCardProps) => {
               <TrendingUp className="w-5 h-5" />
             </div>
             <span className="text-lg font-bold">{accuracy}%</span>
-            <span className="text-[10px] text-muted-foreground font-medium">точность</span>
+            <span className="text-xs text-muted-foreground font-medium">точность</span>
           </div>
 
           {/* XP */}
           <div className="flex flex-col items-center">
-            <div className="w-10 h-10 rounded-full bg-purple-100 dark:bg-purple-900/30 flex items-center justify-center mb-1 text-purple-500">
+            <div className="w-10 h-10 rounded-full bg-amber-100 dark:bg-amber-900/30 flex items-center justify-center mb-1 text-amber-500">
               <Zap className="w-5 h-5" />
             </div>
             <span className="text-lg font-bold">{stats.xp_today}</span>
-            <span className="text-[10px] text-muted-foreground font-medium">XP</span>
+            <span className="text-xs text-muted-foreground font-medium">XP</span>
           </div>
         </div>
 
         {/* Прогресс дневной цели */}
         <div className="mt-4 px-1">
-          <div className="flex justify-between text-[10px] uppercase tracking-wider font-bold text-muted-foreground mb-1.5">
+          <div className="flex justify-between text-xs uppercase tracking-wider font-bold text-muted-foreground mb-1.5">
             <span>Дневная цель</span>
             <span className={stats.problems_solved_today >= stats.daily_goal_problems ? 'text-green-600' : ''}>
               {stats.problems_solved_today}/{stats.daily_goal_problems}

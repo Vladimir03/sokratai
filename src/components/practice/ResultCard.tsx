@@ -111,7 +111,7 @@ export const ResultCard = ({ result, userAnswer, onNext, onAskSocrat }: ResultCa
             <Button 
               onClick={onAskSocrat}
               variant="default"
-              className="w-full bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700"
+              className="w-full bg-socrat-primary hover:bg-socrat-primary-dark"
             >
               <Bot className="w-4 h-4 mr-2" />
               Не понял? Спроси Сократ AI

@@ -106,7 +106,7 @@ function FolderContent() {
 
               <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
                 <div className="flex items-center gap-2">
-                  <h2 className="font-display text-[1.85rem] font-bold tracking-[-0.04em] text-slate-950">
+                  <h2 className="text-2xl font-bold text-foreground">
                     {folder.name}
                   </h2>
                   <button
