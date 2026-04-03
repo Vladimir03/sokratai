@@ -235,7 +235,7 @@ export function GuidedThreadViewer({
                 {attachedFile && (
                   <div className="flex items-center gap-2 rounded-md border bg-muted/30 p-2">
                     {attachPreview ? (
-                      <img src={attachPreview} alt="Превью" className="h-12 w-auto max-w-[80px] rounded-sm object-cover" />
+                      <img src={attachPreview} alt="Превью" className="h-12 w-auto max-w-[80px] rounded-sm object-cover" loading="lazy" />
                     ) : (
                       <Paperclip className="h-4 w-4 text-muted-foreground" />
                     )}

@@ -176,7 +176,7 @@ export const AdminCRM = () => {
                 </div>
                 <div className="absolute -bottom-1 -right-1 bg-background rounded-full p-0.5 border border-border">
                   {getChatPlatform(chat) === "telegram" ? (
-                    <Bot className="w-3 h-3 text-[#0088cc]" />
+                    <Bot className="w-3 h-3 text-socrat-telegram" />
                   ) : (
                     <Globe className="w-3 h-3 text-emerald-500" />
                   )}

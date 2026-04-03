@@ -37,6 +37,8 @@ export default {
           muted: "#9CA3AF",
           folder: "#5B5FC7",
           "folder-bg": "#EEEFFE",
+          telegram: "#0088cc",
+          "telegram-dark": "#006699",
         },
         border: "hsl(var(--border))",
         input: "hsl(var(--input))",

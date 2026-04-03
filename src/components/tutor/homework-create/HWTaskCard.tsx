@@ -249,6 +249,7 @@ export function HWTaskCard({ task, index, onUpdate, onRemove, canRemove, onDefer
                   src={task.task_image_preview_url}
                   alt="Превью задачи"
                   className="w-full max-h-48 rounded-lg border object-contain bg-background"
+                  loading="lazy"
                 />
               ) : (
                 <div className="h-24 w-full rounded-lg border bg-background flex items-center justify-center">

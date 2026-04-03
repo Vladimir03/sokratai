@@ -472,6 +472,7 @@ function AdminHWThreadView({
                             src={msg.image_url}
                             alt="Вложение"
                             className="max-w-full max-h-48 rounded-md object-contain"
+                            loading="lazy"
                             onError={(e) => {
                               (e.target as HTMLImageElement).style.display = "none";
                             }}

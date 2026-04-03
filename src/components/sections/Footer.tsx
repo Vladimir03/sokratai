@@ -9,7 +9,7 @@ const Footer = () => {
           <svg className="w-16 h-16" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
             <path
               d="M 15 25 Q 15 15 25 15 L 45 15 Q 55 15 55 25 L 55 40 Q 55 50 45 50 L 30 50 L 20 60 L 20 50 Q 15 50 15 40 Z"
-              fill="#1B6B4A"
+              className="fill-accent"
               opacity="0.9"
             />
             <text
@@ -35,7 +35,7 @@ const Footer = () => {
               fontFamily="'Golos Text', system-ui, sans-serif"
               fontSize="22"
               fontWeight="bold"
-              fill="#1B6B4A"
+              className="fill-accent"
               textAnchor="middle"
             >
               !

@@ -26,7 +26,15 @@ Text-2:     #64748B  (slate-500)   — body text, подписи
 Border:     #E2E8F0  (slate-200)   — границы карточек, разделители
 ```
 
+**Tailwind-токены (используй вместо hex):**
+- `bg-accent` / `text-accent` / `fill-accent` — socrat green (#1B6B4A)
+- `bg-socrat-telegram` / `hover:bg-socrat-telegram-dark` — Telegram blue (#0088cc / #006699)
+- `bg-socrat-surface` — warm surface (#F7F6F3), для hover-состояний KB-карточек
+- Полный список: `tailwind.config.ts` → `colors.socrat`
+
 **ЗАПРЕЩЕНЫ:**
+- Hard-coded hex `bg-[#1B6B4A]` — используй `bg-accent`
+- Hard-coded hex `text-[#0088cc]` — используй `text-socrat-telegram`
 - Фиолетовый градиент (legacy лендинг)
 - Ярко-зелёный #22C55E (слишком кислотный)
 - Бежевый/кремовый фон (legacy KB header)
@@ -91,7 +99,7 @@ Emoji допустимы ТОЛЬКО в:
 ### Навигация
 - Tutor и Student nav ДОЛЖНЫ использовать один visual frame (высота h-14, один ряд)
 - Lucide icons вместо emoji в tabs
-- Active tab: accent color (#1B6B4A), не purple/blue
+- Active tab: `bg-accent text-white`, не purple/blue
 - Logo: «Сократ» (текст, font-weight 600) — позже заменить на SVG-логотип
 
 ### Карточки (homework, student, KB)
@@ -101,7 +109,7 @@ Emoji допустимы ТОЛЬКО в:
 - На hover: `shadow-md transition-shadow` (не border change)
 
 ### Кнопки
-- Primary: bg-[#1B6B4A] text-white — для главного действия на странице
+- Primary: `bg-accent text-white` — для главного действия на странице
 - Secondary: bg-white border-slate-200 text-slate-700 — для вторичных
 - Destructive: bg-red-500 text-white — только для удаления
 - Ghost: text-slate-500 hover:text-slate-700 — для tertiary actions
@@ -110,7 +118,7 @@ Emoji допустимы ТОЛЬКО в:
 ### Формы
 - Label: text-sm font-medium text-slate-700
 - Input: border-slate-200 rounded-md text-base (16px!)
-- Focus ring: ring-2 ring-[#1B6B4A]/20 border-[#1B6B4A]
+- Focus ring: `ring-2 ring-accent/20 border-accent`
 - Error: border-red-500 + text-sm text-red-500 под input
 
 ## Конкурентные референсы (вдохновение)

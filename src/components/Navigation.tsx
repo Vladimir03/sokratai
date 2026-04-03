@@ -32,7 +32,7 @@ const Navigation = () => {
       <div className="container mx-auto px-4 h-14 flex items-center gap-3">
         {/* Logo — home link */}
         <Link to="/" className="flex items-center gap-2 group shrink-0">
-          <div className="w-8 h-8 rounded-lg bg-[#1B6B4A] flex items-center justify-center">
+          <div className="w-8 h-8 rounded-lg bg-accent flex items-center justify-center">
             <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
               <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
               <circle cx="12" cy="17" r="0.5" fill="white" stroke="white" strokeWidth="1"/>
@@ -56,7 +56,7 @@ const Navigation = () => {
                   to={item.path}
                   className={`flex items-center gap-1.5 md:gap-2 px-2.5 md:px-4 py-2 rounded-lg whitespace-nowrap transition-colors text-sm ${
                     active
-                      ? "bg-[#1B6B4A] text-white font-medium"
+                      ? "bg-accent text-white font-medium"
                       : "text-slate-600 hover:bg-slate-100"
                   }`}
                 >

@@ -26,7 +26,7 @@ export const FolderCard = memo(function FolderCard({ folder, childCount = null, 
       onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onClick(); } }}
       className={cn(
         'group flex w-full items-center gap-3 rounded-[22px] border border-socrat-border bg-white px-4 py-4 text-left cursor-pointer',
-        'shadow-[0_14px_32px_-30px_rgba(15,23,42,0.28)] transition-all duration-200 hover:border-socrat-folder/35 hover:bg-[#FCFBF8]'
+        'shadow-[0_14px_32px_-30px_rgba(15,23,42,0.28)] transition-all duration-200 hover:border-socrat-folder/35 hover:bg-socrat-surface'
       )}
     >
       <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[10px] bg-socrat-folder-bg">

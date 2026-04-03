@@ -256,7 +256,7 @@ const TelegramLoginButton = ({
   return (
     <Button 
       onClick={handleTelegramLogin}
-      className={`bg-[#0088cc] hover:bg-[#0077b5] text-white ${className}`}
+      className={`bg-socrat-telegram hover:bg-socrat-telegram-dark text-white ${className}`}
       size="lg"
       disabled={loading}
     >

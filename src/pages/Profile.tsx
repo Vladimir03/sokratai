@@ -480,7 +480,7 @@ const Profile = () => {
           <Card className="shadow-elegant">
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
-                <Send className="w-5 h-5 text-[#0088cc]" />
+                <Send className="w-5 h-5 text-socrat-telegram" />
                 Telegram
               </CardTitle>
             </CardHeader>
@@ -548,7 +548,7 @@ const Profile = () => {
                   <p className="text-sm text-muted-foreground mb-4">
                     Свяжите аккаунт, чтобы отправлять задачи через Telegram
                   </p>
-                  <Button onClick={handleLinkTelegram} className="bg-[#0088cc] hover:bg-[#006699]">
+                  <Button onClick={handleLinkTelegram} className="bg-socrat-telegram hover:bg-socrat-telegram-dark">
                     <Send className="w-4 h-4 mr-2" />
                     Связать Telegram
                   </Button>

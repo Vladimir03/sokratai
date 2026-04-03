@@ -16,7 +16,7 @@ const SokratLogo = ({ className = "" }: SokratLogoProps) => {
       <g>
         <path
           d="M4 32C4 27.5817 7.58172 24 12 24H24C28.4183 24 32 27.5817 32 32V38C32 42.4183 28.4183 46 24 46H16L8 52V46C5.79086 46 4 44.2091 4 42V32Z"
-          fill="#1B6B4A"
+          className="fill-accent"
           opacity="0.9"
         />
         {/* Question mark */}
@@ -37,7 +37,7 @@ const SokratLogo = ({ className = "" }: SokratLogoProps) => {
         <path
           d="M36 14C36 9.58172 39.5817 6 44 6H56C60.4183 6 64 9.58172 64 14V20C64 24.4183 60.4183 28 56 28H48L40 34V28C37.7909 28 36 26.2091 36 24V14Z"
           fill="white"
-          stroke="#1B6B4A"
+          className="stroke-accent"
           strokeWidth="2"
         />
         {/* Lightbulb */}

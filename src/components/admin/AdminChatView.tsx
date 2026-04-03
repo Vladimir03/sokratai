@@ -86,7 +86,7 @@ export const AdminChatView = ({
               {platform && (
                 <Badge variant="outline" className="text-[10px] h-4 px-1 uppercase flex items-center gap-1">
                   {platform === "telegram" ? (
-                    <Bot className="w-3 h-3 text-[#0088cc]" />
+                    <Bot className="w-3 h-3 text-socrat-telegram" />
                   ) : (
                     <Globe className="w-3 h-3 text-emerald-500" />
                   )}
@@ -146,6 +146,7 @@ export const AdminChatView = ({
                             src={message.signedImageUrl || message.image_url || ""}
                             alt="Прикреплённое изображение"
                             className="max-w-full max-h-48 rounded-md object-contain"
+                            loading="lazy"
                             onError={(e) => {
                               (e.target as HTMLImageElement).style.display = "none";
                               (e.target as HTMLImageElement).nextElementSibling?.classList.remove("hidden");

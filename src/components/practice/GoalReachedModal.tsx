@@ -42,7 +42,7 @@ export const GoalReachedModal = ({ isOpen, onClose, stats }: GoalReachedModalPro
         <div className="absolute inset-0 bg-gradient-to-b from-primary/5 to-transparent -z-10" />
 
         <div
-          className="inline-flex items-center justify-center w-24 h-24 rounded-full bg-[#1B6B4A] shadow-lg shadow-[#1B6B4A]/40 mb-6"
+          className="inline-flex items-center justify-center w-24 h-24 rounded-full bg-accent shadow-lg shadow-accent/40 mb-6"
         >
           <Award className="w-12 h-12 text-white" />
         </div>

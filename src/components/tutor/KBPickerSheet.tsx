@@ -144,6 +144,7 @@ function PickerTaskCard({
         <img
           src={thumbUrl}
           alt="Вложение к задаче"
+          loading="lazy"
           className={cn(
             'w-full rounded-xl border border-gray-200 bg-gray-50 object-contain',
             isImageOnly ? 'max-h-64' : 'max-h-48',

@@ -86,7 +86,7 @@ export function SubscriptionBanner({
         <div className="p-2 sm:p-4 animate-in fade-in slide-in-from-bottom-4 duration-300">
           <Card className={`relative overflow-hidden border-0 p-3 sm:p-6 text-white ${
             trialHighlight
-              ? 'bg-[#1B6B4A]'
+              ? 'bg-accent'
               : 'bg-slate-800'
           }`}>
             {!limitReached && (

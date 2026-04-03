@@ -12,7 +12,7 @@ export const TopicCard = memo(function TopicCard({ topic, onClick }: TopicCardPr
   return (
     <button
       onClick={onClick}
-      className="group flex w-full items-center justify-between rounded-[22px] border border-socrat-border bg-white px-5 py-4 text-left transition-all duration-200 hover:border-socrat-primary/25 hover:bg-[#FCFBF8]"
+      className="group flex w-full items-center justify-between rounded-[22px] border border-socrat-border bg-white px-5 py-4 text-left transition-all duration-200 hover:border-socrat-primary/25 hover:bg-socrat-surface"
     >
       <div className="min-w-0 flex-1">
         <div className="mb-1.5 flex flex-wrap items-center gap-2">
