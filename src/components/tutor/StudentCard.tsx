@@ -1,3 +1,4 @@
+import { memo } from 'react';
 import { Card } from '@/components/ui/card';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Progress } from '@/components/ui/progress';
@@ -20,7 +21,7 @@ interface StudentCardProps {
   groupLabel?: string | null;
 }
 
-export function StudentCard({ student, onClick, groupLabel }: StudentCardProps) {
+export const StudentCard = memo(function StudentCard({ student, onClick, groupLabel }: StudentCardProps) {
   const progress = calculateProgress(student.current_score, student.target_score);
   const paymentStatus = getPaymentStatus(student.paid_until ?? null);
   const lastActivity = formatRelativeTime(student.last_activity_at ?? null);
@@ -137,9 +138,9 @@ export function StudentCard({ student, onClick, groupLabel }: StudentCardProps) 
             {/* Hourly Rate */}
             <div className="flex items-center gap-1 text-muted-foreground">
               <span className="font-medium">
-                {student.hourly_rate_cents != null 
-                  ? `💰 ${student.hourly_rate_cents / 100} ₽/ч` 
-                  : '💰 Не указано'}
+                {student.hourly_rate_cents != null
+                  ? `${student.hourly_rate_cents / 100} ₽/ч`
+                  : 'Не указано'}
               </span>
             </div>
           </div>
@@ -147,4 +148,4 @@ export function StudentCard({ student, onClick, groupLabel }: StudentCardProps) 
       </div>
     </Card>
   );
-}
+});

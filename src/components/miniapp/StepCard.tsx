@@ -1,3 +1,4 @@
+import { memo } from 'react';
 import { MathBlock } from './MathBlock';
 import { RichContent } from './RichContent';
 import type { SolutionStep } from '@/types/solution';
@@ -10,7 +11,7 @@ interface StepCardProps {
 /**
  * Individual solution step card component with rich markdown and LaTeX rendering
  */
-export function StepCard({ step, isActive = false }: StepCardProps) {
+export const StepCard = memo(function StepCard({ step, isActive = false }: StepCardProps) {
   return (
     <div
       className={`
@@ -87,4 +88,4 @@ export function StepCard({ step, isActive = false }: StepCardProps) {
       )}
     </div>
   );
-}
+});

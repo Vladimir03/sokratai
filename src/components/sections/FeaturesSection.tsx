@@ -27,7 +27,7 @@ const FeaturesSection = ({ features }: FeaturesSectionProps) => {
                 className="group hover:shadow-elegant transition-all duration-300 hover:-translate-y-2"
               >
                 <CardContent className="pt-6">
-                  <div className="w-12 h-12 bg-gradient-hero rounded-lg flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
+                  <div className="w-12 h-12 bg-slate-800 rounded-lg flex items-center justify-center mb-4 transition-colors">
                     <Icon className="w-6 h-6 text-primary-foreground" />
                   </div>
                   <h3 className="text-xl font-bold mb-2">{feature.title}</h3>

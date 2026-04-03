@@ -62,7 +62,7 @@ export function DiagnosticResult({
   return (
     <div className="max-w-2xl mx-auto space-y-6 pb-10">
       {/* Main score card */}
-      <Card className="border-2 border-primary/20 bg-gradient-to-br from-primary/5 to-background overflow-hidden relative">
+      <Card className="border-2 border-primary/20 bg-primary/5 overflow-hidden relative">
         <div className="absolute top-0 right-0 w-32 h-32 bg-primary/5 rounded-full -translate-y-1/2 translate-x-1/2" />
         
         <CardHeader className="text-center relative">
@@ -99,7 +99,7 @@ export function DiagnosticResult({
 
       {/* Recommendation block */}
       {result.recommendedTopic && (
-        <Card className="border-2 border-amber-200 dark:border-amber-800 bg-gradient-to-r from-amber-50 to-yellow-50 dark:from-amber-950/30 dark:to-yellow-950/30 overflow-hidden">
+        <Card className="border-2 border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/30 overflow-hidden">
           <CardContent className="pt-6">
             <div className="flex items-start gap-3">
               <div className="p-2 bg-amber-100 dark:bg-amber-900/50 rounded-lg shrink-0">

@@ -51,7 +51,7 @@ export function DiagnosticIntro({
 
   return (
     <div className="max-w-2xl mx-auto">
-      <Card className="border-2 border-primary/20 bg-gradient-to-br from-primary/5 to-background">
+      <Card className="border-2 border-primary/20 bg-primary/5">
         <CardHeader className="text-center pb-2">
           <div className="mx-auto mb-4 w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center">
             <Target className="w-8 h-8 text-primary" />

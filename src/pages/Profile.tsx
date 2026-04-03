@@ -347,7 +347,7 @@ const Profile = () => {
 
         <div className="space-y-6">
           {/* Main Profile Card */}
-          <Card className="bg-gradient-hero text-primary-foreground shadow-glow">
+          <Card className="bg-slate-800 text-primary-foreground shadow-elegant">
             <CardHeader>
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-4">
@@ -635,7 +635,7 @@ const Profile = () => {
             </CardHeader>
             <CardContent>
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                <div className="text-center p-4 bg-gradient-card rounded-lg border-2 border-accent">
+                <div className="text-center p-4 bg-accent/10 rounded-lg border-2 border-accent">
                   <div className="text-4xl mb-2">🎯</div>
                   <div className="text-sm font-medium">Новичок</div>
                   <div className="text-xs text-muted-foreground">Зарегистрирован</div>
@@ -691,8 +691,8 @@ const Profile = () => {
 
           <div className="mt-2">
             {isPremiumConfirmed ? (
-              <div className="rounded-lg border bg-gradient-to-r from-emerald-50 via-cyan-50 to-blue-50 p-4">
-                <div className="font-semibold">✨ Готово!</div>
+              <div className="rounded-lg border bg-accent/5 p-4">
+                <div className="font-semibold">Готово!</div>
                 <div className="text-sm text-muted-foreground mt-1">
                   Спасибо за поддержку — приятной учёбы с Сократ AI.
                 </div>

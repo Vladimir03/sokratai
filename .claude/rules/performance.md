@@ -3,6 +3,7 @@
   - Используй CSS transitions/animations (`transition-all`, `animate-in fade-in`, `zoom-in-*`, `slide-in-from-*`) из `tailwindcss-animate`
   - `hover:scale-*` / `active:scale-*` запрещены на shared-компонентах (button, badge, card) — используй `transition-colors`
   - Для entrance-анимаций: `animate-in fade-in zoom-in-90 slide-in-from-bottom-4 duration-300`
+- **List-item компоненты** обёрнуты в `React.memo`: `StudentCard`, `TopicCard`, `FolderCard`, `MaterialCard`, `TaskCard`, `StepCard`. Новые list-item компоненты тоже оборачивай в `memo()`
 - **ЗАПРЕЩЕНО** добавлять тяжёлые библиотеки (recharts, pyodide) в shared-компоненты
 - Изображения в карточках и чате ОБЯЗАНЫ иметь `loading="lazy"`
 - Все новые страницы ОБЯЗАНЫ использовать `React.lazy()` + `Suspense`

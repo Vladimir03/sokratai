@@ -1,3 +1,4 @@
+import { memo } from 'react';
 import { ChevronRight } from 'lucide-react';
 import { ExamBadge } from '@/components/kb/ui/ExamBadge';
 import type { KBTopicWithCounts } from '@/types/kb';
@@ -7,7 +8,7 @@ interface TopicCardProps {
   onClick: () => void;
 }
 
-export function TopicCard({ topic, onClick }: TopicCardProps) {
+export const TopicCard = memo(function TopicCard({ topic, onClick }: TopicCardProps) {
   return (
     <button
       onClick={onClick}
@@ -34,4 +35,4 @@ export function TopicCard({ topic, onClick }: TopicCardProps) {
       <ChevronRight className="ml-3 h-[18px] w-[18px] shrink-0 text-slate-400 transition-colors duration-200 group-hover:text-socrat-primary" />
     </button>
   );
-}
+});

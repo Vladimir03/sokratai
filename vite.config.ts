@@ -46,8 +46,6 @@ export default defineConfig(({ mode }) => ({
           'supabase': ['@supabase/supabase-js'],
           // Math/LaTeX - loaded only on Chat/student pages
           'math-rendering': ['katex', 'react-katex', 'react-markdown'],
-          // Animations - separate chunk, only loaded by pages that need it
-          'animations': ['framer-motion'],
           // Charts - loaded only on admin/analytics pages
           'charts': ['recharts'],
         },

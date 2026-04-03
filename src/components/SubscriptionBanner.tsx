@@ -1,7 +1,7 @@
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
-import { MessageCircle, Crown, CreditCard, X, Gift } from "lucide-react";
+import { MessageCircle, Crown, CreditCard, X, Gift, AlertTriangle } from "lucide-react";
 import { useState } from "react";
 
 interface SubscriptionBannerProps {
@@ -86,8 +86,8 @@ export function SubscriptionBanner({
         <div className="p-2 sm:p-4 animate-in fade-in slide-in-from-bottom-4 duration-300">
           <Card className={`relative overflow-hidden border-0 p-3 sm:p-6 text-white ${
             trialHighlight
-              ? 'bg-gradient-to-br from-emerald-600 via-teal-500 to-cyan-600'
-              : 'bg-gradient-to-br from-slate-800 via-slate-700 to-emerald-800'
+              ? 'bg-[#1B6B4A]'
+              : 'bg-slate-800'
           }`}>
             {!limitReached && (
               <button
@@ -106,10 +106,10 @@ export function SubscriptionBanner({
                 </div>
                 <h3 className="text-sm sm:text-lg font-bold leading-tight">
                   {trialHighlight
-                    ? `🎁 Триал: ${trialDaysLeft} ${pluralizeDays(trialDaysLeft)}`
-                    : limitReached 
-                      ? "🚀 Лимит исчерпан" 
-                      : "🎓 Полный доступ"
+                    ? `Триал: ${trialDaysLeft} ${pluralizeDays(trialDaysLeft)}`
+                    : limitReached
+                      ? "Лимит исчерпан"
+                      : "Полный доступ"
                   }
                 </h3>
               </div>
@@ -128,7 +128,7 @@ export function SubscriptionBanner({
               
               <div className="space-y-2 sm:space-y-3">
                 <div className="bg-white/10 rounded-lg p-2 sm:p-3">
-                  <p className="font-semibold text-sm sm:text-base">✨ Премиум — 699₽/мес</p>
+                  <p className="font-semibold text-sm sm:text-base">Премиум — 699₽/мес</p>
                   <ul className="text-xs sm:text-sm text-white/90 mt-1.5 space-y-0.5">
                     <li>• Безлимитные сообщения</li>
                     <li>• Приоритетная поддержка</li>
@@ -203,13 +203,15 @@ export function TrialExpiryReminder({
       <div
         className={`mx-4 mb-3 p-4 rounded-xl border animate-in fade-in slide-in-from-top-4 duration-300 ${
           isLastDay 
-            ? 'bg-gradient-to-r from-red-500/10 to-orange-500/10 border-red-500/30' 
-            : 'bg-gradient-to-r from-amber-500/10 to-yellow-500/10 border-amber-500/30'
+            ? 'bg-red-50 border-red-500/30'
+            : 'bg-amber-50 border-amber-500/30'
         }`}
       >
         <div className="flex items-start justify-between gap-3">
           <div className="flex items-start gap-3">
-            <span className="text-2xl">{isLastDay ? '⏰' : '⚠️'}</span>
+            <div className="p-1.5 shrink-0">
+              <AlertTriangle className="w-5 h-5 text-amber-500" />
+            </div>
             <div>
               <p className="font-semibold text-foreground">
                 {isLastDay 
@@ -236,9 +238,9 @@ export function TrialExpiryReminder({
         <Button 
           onClick={handleOpenPayment}
           className={`w-full mt-3 ${
-            isLastDay 
-              ? 'bg-gradient-to-r from-red-500 to-orange-500 hover:from-red-600 hover:to-orange-600' 
-              : 'bg-gradient-to-r from-amber-500 to-yellow-500 hover:from-amber-600 hover:to-yellow-600'
+            isLastDay
+              ? 'bg-red-500 hover:bg-red-600'
+              : 'bg-amber-500 hover:bg-amber-600'
           } text-white font-medium`}
           size="lg"
         >

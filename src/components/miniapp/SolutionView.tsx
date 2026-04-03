@@ -82,7 +82,7 @@ export function SolutionView({ solution }: SolutionViewProps) {
             className="h-full transition-all duration-500 ease-out rounded-full shadow-glow"
             style={{
               width: `${((currentStep + 1) / solution.steps.length) * 100}%`,
-              background: 'var(--gradient-accent)',
+              backgroundColor: 'var(--gradient-accent)',
             }}
           />
         </div>

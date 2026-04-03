@@ -41,7 +41,7 @@ export const TodayStatsCard = ({ stats }: TodayStatsCardProps) => {
   }, [stats.current_streak]);
 
   return (
-    <Card className="w-full bg-gradient-to-r from-emerald-500/10 to-teal-500/10 border-emerald-500/20 overflow-hidden relative">
+    <Card className="w-full bg-accent/5 border-accent/20 overflow-hidden relative">
       <ConfettiBurst active={showConfetti} onComplete={() => setShowConfetti(false)} />
       
       <CardContent className="pt-4">
@@ -105,7 +105,7 @@ export const TodayStatsCard = ({ stats }: TodayStatsCardProps) => {
               style={{ width: `${goalProgress}%` }}
               className={`h-full transition-all duration-500 ${
                 goalProgress >= 100
-                  ? 'bg-gradient-to-r from-orange-400 to-yellow-400'
+                  ? 'bg-accent'
                   : 'bg-primary'
               }`}
             />

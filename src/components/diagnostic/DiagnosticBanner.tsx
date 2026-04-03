@@ -15,7 +15,7 @@ export const DiagnosticBanner = ({
 }: DiagnosticBannerProps) => {
   if (hasCompletedDiagnostic && lastScore !== undefined) {
     return (
-      <Card className="mb-6 bg-gradient-to-r from-primary/10 to-primary/5 border-primary/20">
+      <Card className="mb-6 bg-primary/5 border-primary/20">
         <CardContent className="p-4">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
@@ -39,7 +39,7 @@ export const DiagnosticBanner = ({
   }
 
   return (
-    <Card className="mb-6 bg-gradient-to-r from-amber-500/10 to-orange-500/10 border-amber-500/20">
+    <Card className="mb-6 bg-amber-50 border-amber-500/20">
       <CardContent className="p-4">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">

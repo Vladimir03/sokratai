@@ -2011,7 +2011,7 @@ export default function Chat() {
               {/* Trial status bar near input */}
               {subscription.isTrialActive && !subscription.limitReached && !trialBannerDismissed && (
                 <div className="px-4 pb-3">
-                  <div className="rounded-xl border bg-gradient-to-r from-emerald-50 via-cyan-50 to-blue-50 text-foreground shadow-sm relative">
+                  <div className="rounded-xl border bg-accent/5 text-foreground shadow-sm relative">
                     <button
                       onClick={() => setTrialBannerDismissed(true)}
                       className="absolute top-2 right-2 p-1 hover:bg-black/10 rounded-full transition-colors"
@@ -2021,8 +2021,8 @@ export default function Chat() {
                     </button>
                     <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 px-4 py-3 pr-10">
                       <div className="space-y-1">
-                        <p className="text-sm font-semibold text-emerald-700">
-                          🎁 Бесплатный 7-дневный триал
+                        <p className="text-sm font-semibold text-accent">
+                          Бесплатный 7-дневный триал
                         </p>
                         <p className="text-sm text-muted-foreground">
                           Осталось {subscription.trialDaysLeft} {pluralizeDays(subscription.trialDaysLeft)}. Подключи Premium за 699₽/мес, чтобы сохранить безлимит после триала.

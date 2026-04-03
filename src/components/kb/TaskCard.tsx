@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 import { Check, ChevronDown, Download, EyeOff, FolderInput, Image, Pencil, RefreshCw, Sparkles, Trash2 } from 'lucide-react';
 import { ContextMenu, type ContextMenuItem } from '@/components/kb/ui/ContextMenu';
 import { CopyTaskButton } from '@/components/kb/ui/CopyTaskButton';
@@ -29,7 +29,7 @@ interface TaskCardProps {
 
 const IMAGE_ONLY_MARKERS = ['[Задача на фото]', '[задача на фото]'];
 
-export function TaskCard({
+export const TaskCard = memo(function TaskCard({
   task,
   isExpanded,
   isOwn,
@@ -437,4 +437,4 @@ export function TaskCard({
       </div>
     </article>
   );
-}
+});

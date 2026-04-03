@@ -531,13 +531,13 @@ export function PaymentModal({ isOpen, onClose, onSuccess }: PaymentModalProps) 
 
         {/* Benefits reminder */}
         {(status === "loading" || status === "widget" || status === "idle") && (
-          <div className="mt-4 p-4 bg-gradient-to-r from-emerald-500/10 to-teal-500/10 rounded-lg border border-emerald-500/20">
+          <div className="mt-4 p-4 bg-accent/5 rounded-lg border border-accent/20">
             <h4 className="font-medium text-sm mb-2">Что включено в Premium:</h4>
             <ul className="text-sm text-muted-foreground space-y-1">
-              <li>✨ Безлимитные сообщения</li>
-              <li>⚡ Приоритетная скорость ответов</li>
-              <li>🎓 Доступ ко всем функциям</li>
-              <li>💬 Приоритетная поддержка</li>
+              <li>Безлимитные сообщения</li>
+              <li>Приоритетная скорость ответов</li>
+              <li>Доступ ко всем функциям</li>
+              <li>Приоритетная поддержка</li>
             </ul>
 
             {redirectUrl && (

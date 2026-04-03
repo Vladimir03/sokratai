@@ -1,3 +1,4 @@
+import { memo } from 'react';
 import { Folder, ChevronRight, Pencil, Trash2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -13,7 +14,7 @@ interface FolderCardProps {
   onDelete?: () => void;
 }
 
-export function FolderCard({ folder, childCount = null, taskCount = null, onClick, onRename, onDelete }: FolderCardProps) {
+export const FolderCard = memo(function FolderCard({ folder, childCount = null, taskCount = null, onClick, onRename, onDelete }: FolderCardProps) {
   const hasCounts = childCount !== null || taskCount !== null;
   const hasActions = Boolean(onRename || onDelete);
 
@@ -68,4 +69,4 @@ export function FolderCard({ folder, childCount = null, taskCount = null, onClic
       <ChevronRight className="h-[18px] w-[18px] shrink-0 text-slate-400 transition-colors duration-200 group-hover:text-socrat-folder" />
     </div>
   );
-}
+});

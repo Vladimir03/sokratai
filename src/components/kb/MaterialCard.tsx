@@ -1,3 +1,4 @@
+import { memo } from 'react';
 import { FileText, Image, Link2, PanelsTopLeft } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { KBMaterial, MaterialType } from '@/types/kb';
@@ -21,7 +22,7 @@ interface MaterialCardProps {
   className?: string;
 }
 
-export function MaterialCard({
+export const MaterialCard = memo(function MaterialCard({
   material,
   className,
 }: MaterialCardProps) {
@@ -70,4 +71,4 @@ export function MaterialCard({
       {content}
     </div>
   );
-}
+});

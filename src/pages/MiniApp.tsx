@@ -75,7 +75,7 @@ export default function MiniApp() {
         {/* Header */}
         <div className="text-center">
           <h1 className="text-3xl font-bold mb-2" style={{ color: 'var(--tg-theme-text-color, hsl(var(--foreground)))' }}>
-            🎓 Сократ AI
+            Сократ AI
           </h1>
           <p className="text-base" style={{ color: 'var(--tg-theme-hint-color, hsl(var(--muted-foreground)))' }}>
             Дашборд решений по математике и физике
