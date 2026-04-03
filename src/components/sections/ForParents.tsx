@@ -6,7 +6,7 @@ const ForParents = () => {
   return (
     <section className="py-20 px-4 bg-muted/30">
       <div className="container mx-auto">
-        <h2 className="text-3xl md:text-4xl font-bold text-center mb-12 text-primary">🎓 Для родителей</h2>
+        <h2 className="text-3xl md:text-4xl font-bold text-center mb-12 text-primary">Для родителей</h2>
 
         <div className="max-w-4xl mx-auto">
           <Card className="mb-8">
@@ -14,31 +14,31 @@ const ForParents = () => {
               <h3 className="text-2xl font-bold mb-6 text-primary">Почему стоит попробовать:</h3>
               <ul className="space-y-4 text-lg">
                 <li className="flex items-start">
-                  <span className="text-accent mr-3 text-2xl">✅</span>
+                  <span className="text-accent mr-3 text-xl font-bold">✓</span>
                   <span>
                     <strong>Видимый прогресс:</strong> Вы увидите улучшение оценок за 2-3 месяца
                   </span>
                 </li>
                 <li className="flex items-start">
-                  <span className="text-accent mr-3 text-2xl">✅</span>
+                  <span className="text-accent mr-3 text-xl font-bold">✓</span>
                   <span>
                     <strong>Самостоятельность:</strong> Ребенок учится решать проблемы сам
                   </span>
                 </li>
                 <li className="flex items-start">
-                  <span className="text-accent mr-3 text-2xl">✅</span>
+                  <span className="text-accent mr-3 text-xl font-bold">✓</span>
                   <span>
                     <strong>Доступная цена:</strong> 699₽/мес вместо 5,000-20,000₽/мес за репетитора
                   </span>
                 </li>
                 <li className="flex items-start">
-                  <span className="text-accent mr-3 text-2xl">✅</span>
+                  <span className="text-accent mr-3 text-xl font-bold">✓</span>
                   <span>
                     <strong>Безопасность:</strong> Ребенок учится дома, без посторонних людей
                   </span>
                 </li>
                 <li className="flex items-start">
-                  <span className="text-accent mr-3 text-2xl">✅</span>
+                  <span className="text-accent mr-3 text-xl font-bold">✓</span>
                   <span>
                     <strong>Без стресса:</strong> Никто не увидит ошибки ребенка, только AI
                   </span>
@@ -57,7 +57,7 @@ const ForParents = () => {
             <div className="font-bold" style={{ color: "hsl(231, 36%, 29%)" }}>
               — Елена, мама ученицы 10 класса
             </div>
-            <div className="text-amber-500 mt-2">⭐⭐⭐⭐⭐</div>
+            <div className="text-amber-500 mt-2 text-sm font-medium tracking-wider">★ ★ ★ ★ ★</div>
           </div>
 
           {/* CTA */}
@@ -74,7 +74,7 @@ const ForParents = () => {
                 size="lg"
                 className="bg-accent hover:bg-accent/90 text-accent-foreground text-base md:text-lg px-8 md:px-12 py-6 whitespace-normal leading-snug h-auto"
               >
-                👨‍👩‍👧 Начать в Telegram
+                Начать в Telegram
               </Button>
             </a>
           </div>

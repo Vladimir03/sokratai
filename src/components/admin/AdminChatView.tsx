@@ -113,7 +113,7 @@ export const AdminChatView = ({
             Сообщений нет
           </div>
         ) : (
-          <ScrollArea className="h-[600px]">
+          <ScrollArea className="h-[400px] md:h-[600px]">
             <div className="p-4 space-y-4">
               {messages.map((message) => (
                 <div

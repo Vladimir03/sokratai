@@ -131,13 +131,13 @@ const Index = () => {
                 {/* First bubble (question) */}
                 <path
                   d="M 15 25 Q 15 15 25 15 L 45 15 Q 55 15 55 25 L 55 40 Q 55 50 45 50 L 30 50 L 20 60 L 20 50 Q 15 50 15 40 Z"
-                  fill="#10b981"
+                  fill="#1B6B4A"
                   opacity="0.9"
                 />
                 <text
                   x="35"
                   y="37"
-                  fontFamily="Manrope, sans-serif"
+                  fontFamily="'Golos Text', system-ui, sans-serif"
                   fontSize="20"
                   fontWeight="bold"
                   fill="white"
@@ -188,7 +188,7 @@ const Index = () => {
                 <DropdownMenuTrigger asChild>
                   <Button
                     size="lg"
-                    className="bg-[#1B6B4A] hover:bg-[#145236] text-white shadow-glow text-base md:text-lg px-8 py-6 rounded-2xl font-semibold transition-all hover:scale-105 w-full sm:w-auto"
+                    className="bg-accent hover:bg-accent/90 text-accent-foreground shadow-glow text-base md:text-lg px-8 py-6 rounded-2xl font-semibold transition-colors w-full sm:w-auto"
                   >
                     <Globe className="w-5 h-5 mr-2" />
                     Открыть в браузере
@@ -219,7 +219,7 @@ const Index = () => {
               >
                 <Button
                   size="lg"
-                  className="bg-white/10 backdrop-blur-sm border-2 border-white/30 text-white hover:bg-white/20 text-base md:text-lg px-8 py-6 rounded-2xl font-semibold transition-all hover:scale-105 w-full sm:w-auto"
+                  className="bg-white/10 backdrop-blur-sm border-2 border-white/30 text-white hover:bg-white/20 text-base md:text-lg px-8 py-6 rounded-2xl font-semibold transition-colors w-full sm:w-auto"
                 >
                   <Send className="w-5 h-5 mr-2" />
                   Открыть в Telegram

@@ -72,6 +72,7 @@ export const ProblemCard = ({ problem }: ProblemCardProps) => {
               src={problem.condition_image_url} 
               alt="Условие задачи" 
               className="max-w-full h-auto rounded-lg border"
+              loading="lazy"
             />
           </div>
         )}

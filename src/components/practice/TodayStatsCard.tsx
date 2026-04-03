@@ -3,7 +3,6 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import { Flame, Target, Zap, TrendingUp } from "lucide-react";
 import type { TodayStats } from "@/types/practice";
-import { motion, AnimatePresence } from "framer-motion";
 import { ConfettiBurst } from "@/components/ConfettiBurst";
 import { haptics } from "@/utils/haptics";
 
@@ -49,30 +48,19 @@ export const TodayStatsCard = ({ stats }: TodayStatsCardProps) => {
         <div className="grid grid-cols-4 gap-2 text-center">
           {/* Streak */}
           <div className="flex flex-col items-center relative">
-            <motion.div 
-              animate={displayedStreak > 0 ? {
-                scale: [1, 1.2, 1],
-                filter: ["drop-shadow(0 0 0px #ffaa00)", "drop-shadow(0 0 10px #ffaa00)", "drop-shadow(0 0 0px #ffaa00)"]
-              } : {}}
-              transition={{ repeat: Infinity, duration: 2 }}
-              className={`w-10 h-10 rounded-full flex items-center justify-center mb-1 ${
+            <div
+              className={`w-10 h-10 rounded-full flex items-center justify-center mb-1 transition-all duration-300 ${
                 displayedStreak > 0 ? 'bg-orange-500 shadow-lg shadow-orange-500/50' : 'bg-orange-100 dark:bg-orange-900/30'
               }`}
             >
               <Flame className={`w-5 h-5 ${displayedStreak > 0 ? 'text-white' : 'text-orange-500'}`} />
-            </motion.div>
-            
-            <AnimatePresence mode="wait">
-              <motion.span
-                key={displayedStreak}
-                initial={{ y: 10, opacity: 0 }}
-                animate={{ y: 0, opacity: 1 }}
-                exit={{ y: -10, opacity: 0 }}
-                className={`text-lg font-bold ${displayedStreak > 0 ? 'text-orange-600' : ''}`}
-              >
-                {displayedStreak}
-              </motion.span>
-            </AnimatePresence>
+            </div>
+
+            <span
+              className={`text-lg font-bold transition-all duration-300 ${displayedStreak > 0 ? 'text-orange-600' : ''}`}
+            >
+              {displayedStreak}
+            </span>
             <span className="text-xs text-muted-foreground font-medium">дней</span>
           </div>
 
@@ -113,22 +101,14 @@ export const TodayStatsCard = ({ stats }: TodayStatsCardProps) => {
             </span>
           </div>
           <div className="relative h-2.5 w-full bg-secondary rounded-full overflow-hidden">
-            <motion.div
-              initial={{ width: 0 }}
-              animate={{ width: `${goalProgress}%` }}
-              className={`h-full transition-all ${
-                goalProgress >= 100 
-                  ? 'bg-gradient-to-r from-orange-400 to-yellow-400' 
+            <div
+              style={{ width: `${goalProgress}%` }}
+              className={`h-full transition-all duration-500 ${
+                goalProgress >= 100
+                  ? 'bg-gradient-to-r from-orange-400 to-yellow-400'
                   : 'bg-primary'
               }`}
             />
-            {goalProgress >= 100 && (
-              <motion.div
-                animate={{ x: ['-100%', '200%'] }}
-                transition={{ repeat: Infinity, duration: 1.5, ease: "linear" }}
-                className="absolute inset-0 bg-white/30 skew-x-12"
-              />
-            )}
           </div>
         </div>
       </CardContent>

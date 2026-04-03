@@ -264,7 +264,8 @@ const ChatMessage = memo(({ message, isLoading, onQuickMessage, onRetry, onFeedb
                 <img 
                   src={message.image_url} 
                   alt="Загруженное изображение"
-                  className="max-w-full max-h-[280px] sm:max-h-[320px] object-contain rounded-xl shadow-md border border-border/10 cursor-pointer hover:shadow-lg hover:scale-[1.02] transition-all duration-200"
+                  className="max-w-full max-h-[280px] sm:max-h-[320px] object-contain rounded-xl shadow-md border border-border/10 cursor-pointer hover:shadow-lg transition-shadow duration-200"
+                  loading="lazy"
                   onClick={() => setImageModalOpen(true)}
                 />
               </div>
@@ -318,7 +319,7 @@ const ChatMessage = memo(({ message, isLoading, onQuickMessage, onRetry, onFeedb
               <span className="text-xs text-red-700 flex-1">Не удалось отправить. Проверьте интернет.</span>
               <button
                 onClick={onRetry}
-                className="text-xs px-3 py-1.5 bg-red-100 hover:bg-red-200 text-red-700 rounded-full border border-red-300 transition-colors flex items-center gap-1"
+                className="text-sm px-3 py-2 bg-red-100 hover:bg-red-200 text-red-700 rounded-full border border-red-300 transition-colors flex items-center gap-1"
               >
                 <RotateCw className="w-3 h-3" />
                 Повторить

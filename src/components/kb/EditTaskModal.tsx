@@ -205,7 +205,7 @@ export function EditTaskModal({ task, onClose }: EditTaskModalProps) {
       />
 
       {/* Modal */}
-      <div className="fixed left-1/2 top-1/2 z-[301] flex max-h-[85vh] w-[440px] max-w-[92vw] -translate-x-1/2 -translate-y-1/2 flex-col rounded-2xl bg-white shadow-xl animate-in fade-in-0 zoom-in-95">
+      <div className="fixed left-1/2 top-1/2 z-[301] flex max-h-[85vh] w-[calc(100%-2rem)] max-w-[440px] -translate-x-1/2 -translate-y-1/2 flex-col rounded-2xl bg-white shadow-xl animate-in fade-in-0 zoom-in-95">
         {/* Header */}
         <div className="flex items-center justify-between border-b border-socrat-border px-5 py-4">
           <h3 className="text-base font-semibold">Редактировать задачу</h3>

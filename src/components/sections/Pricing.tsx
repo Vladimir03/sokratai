@@ -21,7 +21,7 @@ const Pricing = () => {
     <section className="py-20 px-4 bg-muted/30" id="pricing">
       <div className="container mx-auto">
         <h2 className="text-3xl md:text-4xl font-bold text-center mb-4 text-primary">
-          💎 Начни понимать школьные предметы уже сегодня
+          Начни понимать школьные предметы уже сегодня
         </h2>
         <p className="text-center text-muted-foreground max-w-3xl mx-auto mb-10">
           Все новые пользователи получают 7 дней безлимитного доступа без карты и обязательств. Затем можно остаться на бесплатном тарифе или подключить Premium за 699₽/мес.
@@ -55,7 +55,7 @@ const Pricing = () => {
             {/* Tier 1: FREE */}
             <div className="bg-background rounded-2xl p-8 md:p-10 shadow-2xl border-2 border-border flex-shrink-0 w-[320px] md:w-[400px] relative">
               <Badge className="absolute -top-3 left-8 bg-muted text-muted-foreground font-bold">FREE</Badge>
-              <h3 className="text-2xl font-bold mb-2 text-primary">🎁 Попробуй бесплатно</h3>
+              <h3 className="text-2xl font-bold mb-2 text-primary">Попробуй бесплатно</h3>
               <p className="text-lg mb-6 text-muted-foreground">Без карты. Без обязательств.</p>
 
               <div className="text-5xl md:text-6xl font-bold my-6 text-primary">
@@ -81,7 +81,7 @@ const Pricing = () => {
 
               <a href={telegramLinks.planFree} target="_blank" rel="noopener noreferrer" className="block w-full">
                 <Button size="lg" className="w-full bg-accent hover:bg-accent/90 text-accent-foreground text-lg py-6">
-                  🎁 Начать бесплатно
+                  Начать бесплатно
                 </Button>
               </a>
             </div>
@@ -95,7 +95,7 @@ const Pricing = () => {
 
               <Badge className="absolute -top-3 left-8 bg-background text-foreground font-bold">PREMIUM</Badge>
 
-              <h3 className="text-2xl font-bold mb-2">🚀 Безлимитное обучение</h3>
+              <h3 className="text-2xl font-bold mb-2">Безлимитное обучение</h3>
               <p className="text-lg mb-6 opacity-90">7 дней бесплатно. Без карты. Без обязательств.</p>
 
               <div className="text-5xl md:text-6xl font-bold my-6">
@@ -129,7 +129,7 @@ const Pricing = () => {
 
               <a href={telegramLinks.planPremium} target="_blank" rel="noopener noreferrer" className="block w-full">
                 <Button size="lg" className="w-full bg-accent hover:bg-accent/90 text-accent-foreground text-lg py-6">
-                  🚀 Попробовать бесплатно
+                  Попробовать бесплатно
                 </Button>
               </a>
 
@@ -139,7 +139,7 @@ const Pricing = () => {
             {/* Tier 3: PRO - 1399₽ */}
             <div className="bg-background rounded-2xl p-8 md:p-10 shadow-2xl border-2 border-border flex-shrink-0 w-[320px] md:w-[400px] relative">
               <Badge className="absolute -top-3 left-8 bg-primary text-primary-foreground font-bold">PRO</Badge>
-              <h3 className="text-2xl font-bold mb-2 text-primary">💎 AI-помощник Сократ AI + Репетитор</h3>
+              <h3 className="text-2xl font-bold mb-2 text-primary">AI-помощник Сократ AI + Репетитор</h3>
               <p className="text-lg mb-6 text-muted-foreground">Максимальный результат на ЕГЭ!</p>
 
               <div className="text-5xl md:text-6xl font-bold my-6 text-primary">
@@ -164,13 +164,13 @@ const Pricing = () => {
               </ul>
 
               <p className="mb-8 text-base leading-relaxed text-muted-foreground italic">
-                ⚡ Репетитор проведет занятие, а также поможет с настройкой AI-помощника под твои цели в учебе. Можно
+                Репетитор проведет занятие, а также поможет с настройкой AI-помощника под твои цели в учебе. Можно
                 договориться на последующие занятия, если все понравится!
               </p>
 
               <a href={telegramLinks.planPro} target="_blank" rel="noopener noreferrer" className="block w-full">
                 <Button size="lg" className="w-full bg-accent hover:bg-accent/90 text-accent-foreground text-lg py-6">
-                  ✍️ Связаться в Telegram
+                  Связаться в Telegram
                 </Button>
               </a>
             </div>
@@ -180,7 +180,7 @@ const Pricing = () => {
         {/* Price Comparison Box */}
         <div className="text-center mt-12">
           <div className="inline-block bg-background rounded-2xl p-8 md:p-12 shadow-elegant">
-            <h3 className="text-2xl font-bold mb-6 text-primary-variant">💰 Сравни:</h3>
+            <h3 className="text-2xl font-bold mb-6 text-primary-variant">Сравни</h3>
             <div className="space-y-3 text-lg">
               <p className="text-muted-foreground">
                 <span className="line-through">Telegram Premium: 300₽/мес</span> → только эмодзи
@@ -188,7 +188,7 @@ const Pricing = () => {
               <p className="text-muted-foreground">
                 <span className="line-through">Netflix: 500₽/мес</span> → развлечение
               </p>
-              <p className="text-accent font-bold text-2xl mt-4">Сократ AI: от 0₽/мес → твое образование и будущее! 🎓</p>
+              <p className="text-accent font-bold text-2xl mt-4">Сократ AI: от 0₽/мес — твое образование и будущее</p>
             </div>
           </div>
         </div>

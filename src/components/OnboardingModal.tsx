@@ -2,7 +2,6 @@ import { useState, useEffect } from "react";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { supabase } from "@/lib/supabaseClient";
-import { motion, AnimatePresence } from "framer-motion";
 import { cn } from "@/lib/utils";
 
 interface OnboardingModalProps {
@@ -101,12 +100,10 @@ const OnboardingModal = ({ open, userId, onComplete }: OnboardingModalProps) => 
     selected: boolean;
     onClick: () => void;
   }) => (
-    <motion.button
-      whileHover={{ scale: 1.02 }}
-      whileTap={{ scale: 0.98 }}
+    <button
       onClick={onClick}
       className={cn(
-        "flex items-center gap-3 p-4 rounded-xl border-2 transition-all w-full text-left",
+        "flex items-center gap-3 p-4 rounded-xl border-2 transition-colors w-full text-left",
         selected
           ? "border-primary bg-primary/10"
           : "border-border bg-card hover:border-primary/50 hover:bg-accent"
@@ -114,7 +111,7 @@ const OnboardingModal = ({ open, userId, onComplete }: OnboardingModalProps) => 
     >
       <span className="text-2xl">{emoji}</span>
       <span className="font-medium text-foreground">{label}</span>
-    </motion.button>
+    </button>
   );
 
   const ProgressDots = () => (
@@ -144,14 +141,10 @@ const OnboardingModal = ({ open, userId, onComplete }: OnboardingModalProps) => 
       >
         <ProgressDots />
 
-        <AnimatePresence mode="wait">
           {step === 1 && (
-            <motion.div
+            <div
               key="step1"
-              initial={{ opacity: 0, x: 20 }}
-              animate={{ opacity: 1, x: 0 }}
-              exit={{ opacity: 0, x: -20 }}
-              className="space-y-4"
+              className="space-y-4 animate-in fade-in slide-in-from-right-4 duration-200"
             >
               <div className="text-center mb-6">
                 <h2 className="text-xl font-semibold text-foreground">
@@ -173,16 +166,13 @@ const OnboardingModal = ({ open, userId, onComplete }: OnboardingModalProps) => 
                   />
                 ))}
               </div>
-            </motion.div>
+            </div>
           )}
 
           {step === 2 && (
-            <motion.div
+            <div
               key="step2"
-              initial={{ opacity: 0, x: 20 }}
-              animate={{ opacity: 1, x: 0 }}
-              exit={{ opacity: 0, x: -20 }}
-              className="space-y-4"
+              className="space-y-4 animate-in fade-in slide-in-from-right-4 duration-200"
             >
               <div className="text-center mb-6">
                 <h2 className="text-xl font-semibold text-foreground">
@@ -212,16 +202,13 @@ const OnboardingModal = ({ open, userId, onComplete }: OnboardingModalProps) => 
               >
                 ← Назад
               </Button>
-            </motion.div>
+            </div>
           )}
 
           {step === 3 && (
-            <motion.div
+            <div
               key="step3"
-              initial={{ opacity: 0, x: 20 }}
-              animate={{ opacity: 1, x: 0 }}
-              exit={{ opacity: 0, x: -20 }}
-              className="space-y-4"
+              className="space-y-4 animate-in fade-in slide-in-from-right-4 duration-200"
             >
               <div className="text-center mb-6">
                 <h2 className="text-xl font-semibold text-foreground">
@@ -252,9 +239,8 @@ const OnboardingModal = ({ open, userId, onComplete }: OnboardingModalProps) => 
               >
                 ← Назад
               </Button>
-            </motion.div>
+            </div>
           )}
-        </AnimatePresence>
       </DialogContent>
     </Dialog>
   );

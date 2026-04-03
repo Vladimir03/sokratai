@@ -295,7 +295,7 @@ All colors MUST be HSL.
     /* Fix viewport height on iOS when keyboard appears */
     body {
       /* Use viewport height that accounts for browser UI */
-      min-height: 100vh;
+      min-height: 100dvh;
       min-height: -webkit-fill-available;
     }
 

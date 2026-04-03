@@ -5,27 +5,27 @@ const AhaMoments = () => {
     const ref = useScrollAnimation();
     return (
       <div ref={ref} className="fade-base bg-background rounded-2xl p-8 md:p-10 shadow-2xl">
-        <h3 className="text-2xl font-bold mb-4 text-accent">🎯 Способ 1: Получи подсказку и реши сам</h3>
+        <h3 className="text-2xl font-bold mb-4 text-accent">Способ 1: Получи подсказку и реши сам</h3>
         <p className="mb-6 text-lg text-foreground">
           Застрял на задаче по алгебре? Не беги к одноклассникам. Просто спроси у AI:
         </p>
         <ul className="space-y-3 mb-8 text-foreground">
           <li className="flex items-start gap-2">
-            <span className="text-accent flex-shrink-0">✅</span>
+            <span className="text-accent flex-shrink-0 font-bold">✓</span>
             <span>Отправь задачу</span>
           </li>
           <li className="flex items-start gap-2">
-            <span className="text-accent flex-shrink-0">✅</span>
+            <span className="text-accent flex-shrink-0 font-bold">✓</span>
             <span>
               Получи <strong>вопрос-подсказку</strong> вместо готового ответа
             </span>
           </li>
           <li className="flex items-start gap-2">
-            <span className="text-accent flex-shrink-0">✅</span>
+            <span className="text-accent flex-shrink-0 font-bold">✓</span>
             <span>Подумай еще раз</span>
           </li>
           <li className="flex items-start gap-2">
-            <span className="text-accent flex-shrink-0">✅</span>
+            <span className="text-accent flex-shrink-0 font-bold">✓</span>
             <span>
               <strong>Решил сам!</strong> Вот оно — чувство "я смог!"
             </span>
@@ -48,24 +48,24 @@ const AhaMoments = () => {
     return (
       <div ref={ref} className="fade-base bg-background rounded-2xl p-8 md:p-10 shadow-2xl">
         <h3 className="text-2xl font-bold mb-4 text-accent">
-          🔥 Способ 2: Выбери способ решения, понятный именно тебе
+          Способ 2: Выбери способ решения, понятный именно тебе
         </h3>
         <p className="mb-6 text-lg text-foreground">Учитель объяснил одним способом, но ты не понял?</p>
         <ul className="space-y-3 mb-8 text-foreground">
           <li className="flex items-start gap-2">
-            <span className="text-accent flex-shrink-0">✅</span>
+            <span className="text-accent flex-shrink-0 font-bold">✓</span>
             <span>
               Попроси показать <strong>2-3 разных способа</strong> решения той же задачи
             </span>
           </li>
           <li className="flex items-start gap-2">
-            <span className="text-accent flex-shrink-0">✅</span>
+            <span className="text-accent flex-shrink-0 font-bold">✓</span>
             <span>
               Выбери тот, который кажется логичным <strong>для твоего мышления</strong>
             </span>
           </li>
           <li className="flex items-start gap-2">
-            <span className="text-accent flex-shrink-0">✅</span>
+            <span className="text-accent flex-shrink-0 font-bold">✓</span>
             <span>Решай дальше понятным тебе алгоритмом</span>
           </li>
         </ul>
@@ -83,7 +83,7 @@ const AhaMoments = () => {
   return (
     <section className="py-20 px-4 bg-accent relative overflow-hidden">
       <div className="container mx-auto relative z-10">
-        <h2 className="text-3xl md:text-4xl font-bold text-center mb-12 text-white">✨ Испытай радость от понимания</h2>
+        <h2 className="text-3xl md:text-4xl font-bold text-center mb-12 text-white">Испытай радость от понимания</h2>
 
         <div className="space-y-8">
           <Card1 />

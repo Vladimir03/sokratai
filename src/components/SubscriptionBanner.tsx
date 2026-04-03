@@ -2,7 +2,6 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import { MessageCircle, Crown, CreditCard, X, Gift } from "lucide-react";
-import { motion, AnimatePresence } from "framer-motion";
 import { useState } from "react";
 
 interface SubscriptionBannerProps {
@@ -84,13 +83,7 @@ export function SubscriptionBanner({
     const trialHighlight = isTrialActive && !limitReached;
 
     return (
-      <AnimatePresence>
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          exit={{ opacity: 0, y: 20 }}
-          className="p-2 sm:p-4"
-        >
+        <div className="p-2 sm:p-4 animate-in fade-in slide-in-from-bottom-4 duration-300">
           <Card className={`relative overflow-hidden border-0 p-3 sm:p-6 text-white ${
             trialHighlight
               ? 'bg-gradient-to-br from-emerald-600 via-teal-500 to-cyan-600'
@@ -165,8 +158,7 @@ export function SubscriptionBanner({
               </div>
             )}
           </Card>
-        </motion.div>
-      </AnimatePresence>
+        </div>
     );
   }
 
@@ -178,14 +170,12 @@ export function MessageLimitWarning({ remaining }: { remaining: number }) {
   if (remaining > 3 || remaining <= 0) return null;
   
   return (
-    <motion.div
-      initial={{ opacity: 0, scale: 0.95 }}
-      animate={{ opacity: 1, scale: 1 }}
-      className="flex items-center gap-2 px-3 py-2 bg-amber-500/10 border border-amber-500/30 rounded-lg text-sm text-amber-600"
+    <div
+      className="flex items-center gap-2 px-3 py-2 bg-amber-500/10 border border-amber-500/30 rounded-lg text-sm text-amber-600 animate-in fade-in zoom-in-95 duration-200"
     >
       <span>⚠️</span>
       <span>Осталось {remaining} {remaining === 1 ? 'сообщение' : remaining <= 4 ? 'сообщения' : 'сообщений'}</span>
-    </motion.div>
+    </div>
   );
 }
 
@@ -210,12 +200,8 @@ export function TrialExpiryReminder({
   };
   
   return (
-    <AnimatePresence>
-      <motion.div
-        initial={{ opacity: 0, y: -20 }}
-        animate={{ opacity: 1, y: 0 }}
-        exit={{ opacity: 0, y: -20 }}
-        className={`mx-4 mb-3 p-4 rounded-xl border ${
+      <div
+        className={`mx-4 mb-3 p-4 rounded-xl border animate-in fade-in slide-in-from-top-4 duration-300 ${
           isLastDay 
             ? 'bg-gradient-to-r from-red-500/10 to-orange-500/10 border-red-500/30' 
             : 'bg-gradient-to-r from-amber-500/10 to-yellow-500/10 border-amber-500/30'
@@ -259,7 +245,6 @@ export function TrialExpiryReminder({
           <Crown className="w-4 h-4 mr-2" />
           Оформить подписку — 699₽/мес
         </Button>
-      </motion.div>
-    </AnimatePresence>
+      </div>
   );
 }

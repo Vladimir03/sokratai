@@ -9,13 +9,13 @@ const Footer = () => {
           <svg className="w-16 h-16" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
             <path
               d="M 15 25 Q 15 15 25 15 L 45 15 Q 55 15 55 25 L 55 40 Q 55 50 45 50 L 30 50 L 20 60 L 20 50 Q 15 50 15 40 Z"
-              fill="#10b981"
+              fill="#1B6B4A"
               opacity="0.9"
             />
             <text
               x="35"
               y="37"
-              fontFamily="Manrope, sans-serif"
+              fontFamily="'Golos Text', system-ui, sans-serif"
               fontSize="20"
               fontWeight="bold"
               fill="white"
@@ -31,14 +31,14 @@ const Footer = () => {
             />
             <text
               x="65"
-              y="67"
-              fontFamily="Manrope, sans-serif"
-              fontSize="20"
+              y="69"
+              fontFamily="'Golos Text', system-ui, sans-serif"
+              fontSize="22"
               fontWeight="bold"
-              fill="#2d3561"
+              fill="#1B6B4A"
               textAnchor="middle"
             >
-              💡
+              !
             </text>
           </svg>
           <div className="text-3xl font-bold">Сократ AI</div>
@@ -51,19 +51,16 @@ const Footer = () => {
         {/* Contacts */}
         <div className="mb-8 space-y-2">
           <p className="text-lg">
-            🌐{" "}
             <a href="https://sokratai.ru" className="text-accent hover:text-accent/80 transition-colors">
               sokratai.ru
             </a>
           </p>
           <p className="text-lg">
-            📱{" "}
             <a href="https://t.me/sokratai_ru_bot" className="text-accent hover:text-accent/80 transition-colors">
               Telegram: @sokratai_ru_bot
             </a>
           </p>
           <p className="text-lg">
-            📧{" "}
             <a href="mailto:sokratai@yandex.ru" className="text-accent hover:text-accent/80 transition-colors">
               sokratai@yandex.ru
             </a>

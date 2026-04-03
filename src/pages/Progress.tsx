@@ -32,7 +32,7 @@ const Progress = () => {
             <div className="space-y-6">
               {/* Main Stats */}
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4 md:gap-6">
-                <Card className="bg-gradient-to-br from-indigo-50 to-white dark:from-indigo-950/20 dark:to-background border-indigo-100 dark:border-indigo-900/50">
+                <Card className="border-slate-200">
                   <CardHeader className="flex flex-row items-center justify-between pb-2">
                     <CardTitle className="text-xs md:text-sm font-medium text-muted-foreground">
                       Всего задач
@@ -44,7 +44,7 @@ const Progress = () => {
                   </CardContent>
                 </Card>
 
-                <Card className="bg-gradient-to-br from-orange-50 to-white dark:from-orange-950/20 dark:to-background border-orange-100 dark:border-orange-900/50">
+                <Card className="border-slate-200">
                   <CardHeader className="flex flex-row items-center justify-between pb-2">
                     <CardTitle className="text-xs md:text-sm font-medium text-muted-foreground">
                       Streak
@@ -56,7 +56,7 @@ const Progress = () => {
                   </CardContent>
                 </Card>
 
-                <Card className="bg-gradient-to-br from-green-50 to-white dark:from-green-950/20 dark:to-background border-green-100 dark:border-green-900/50">
+                <Card className="border-slate-200">
                   <CardHeader className="flex flex-row items-center justify-between pb-2">
                     <CardTitle className="text-xs md:text-sm font-medium text-muted-foreground">
                       Точность
@@ -68,7 +68,7 @@ const Progress = () => {
                   </CardContent>
                 </Card>
 
-                <Card className="bg-gradient-to-br from-amber-50 to-white dark:from-amber-950/20 dark:to-background border-amber-100 dark:border-amber-900/50">
+                <Card className="border-slate-200">
                   <CardHeader className="flex flex-row items-center justify-between pb-2">
                     <CardTitle className="text-xs md:text-sm font-medium text-muted-foreground">
                       Прогноз ЕГЭ

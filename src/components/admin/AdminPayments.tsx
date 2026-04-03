@@ -167,7 +167,7 @@ export const AdminPayments = () => {
         </div>
 
         {/* Table */}
-        <ScrollArea className="h-[400px] rounded-md border">
+        <ScrollArea className="h-[300px] md:h-[400px] rounded-md border">
           <Table>
             <TableHeader>
               <TableRow>

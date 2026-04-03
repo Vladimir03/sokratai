@@ -161,7 +161,7 @@ export const AdminCRM = () => {
   const telegramChats = filteredChats.filter(chat => getChatPlatform(chat) === "telegram");
 
   const ChatList = ({ chatsToDisplay }: { chatsToDisplay: ChatWithUser[] }) => (
-    <ScrollArea className="h-[600px]">
+    <ScrollArea className="h-[400px] md:h-[600px]">
       <div className="space-y-1">
         {chatsToDisplay.map((chat) => (
           <div

@@ -1,9 +1,10 @@
 ### 2. Производительность (< 2 секунды загрузка)
-- **ЗАПРЕЩЕНО** добавлять `framer-motion` в компоненты `src/components/ui/*` (Button, Card, Badge и т.д.)
-  - Причина: эти компоненты используются ВЕЗДЕ, `framer-motion` (~50KB) попадает в каждый чанк
-  - Используй CSS transitions/animations (`transition-all`, `animate-*`) вместо framer-motion
-  - framer-motion допустим ТОЛЬКО в страничных компонентах (`src/pages/*`) и feature-компонентах
-- **ЗАПРЕЩЕНО** добавлять тяжёлые библиотеки (recharts, framer-motion, pyodide) в shared-компоненты
+- **ЗАПРЕЩЕНО** использовать `framer-motion` где-либо в проекте (полностью удалён 2026-04-03)
+  - Используй CSS transitions/animations (`transition-all`, `animate-in fade-in`, `zoom-in-*`, `slide-in-from-*`) из `tailwindcss-animate`
+  - `hover:scale-*` / `active:scale-*` запрещены на shared-компонентах (button, badge, card) — используй `transition-colors`
+  - Для entrance-анимаций: `animate-in fade-in zoom-in-90 slide-in-from-bottom-4 duration-300`
+- **ЗАПРЕЩЕНО** добавлять тяжёлые библиотеки (recharts, pyodide) в shared-компоненты
+- Изображения в карточках и чате ОБЯЗАНЫ иметь `loading="lazy"`
 - Все новые страницы ОБЯЗАНЫ использовать `React.lazy()` + `Suspense`
 - Тяжёлые компоненты ОБЯЗАНЫ грузиться лениво (`React.lazy`, dynamic import)
 

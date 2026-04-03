@@ -32,7 +32,7 @@ const Navigation = () => {
       <div className="container mx-auto px-4 h-14 flex items-center gap-3">
         {/* Logo — home link */}
         <Link to="/" className="flex items-center gap-2 group shrink-0">
-          <div className="w-8 h-8 rounded-lg bg-[#1B6B4A] flex items-center justify-center transition-transform duration-300 group-hover:scale-105">
+          <div className="w-8 h-8 rounded-lg bg-[#1B6B4A] flex items-center justify-center">
             <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
               <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
               <circle cx="12" cy="17" r="0.5" fill="white" stroke="white" strokeWidth="1"/>
@@ -73,7 +73,7 @@ const Navigation = () => {
           variant="ghost"
           size="icon"
           onClick={handleLogout}
-          className="h-8 w-8 shrink-0"
+          className="shrink-0"
         >
           <LogOut className="w-4 h-4" />
         </Button>

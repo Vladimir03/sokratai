@@ -13,8 +13,8 @@ interface DevPanelProps {
 export default function DevPanel({ userId, onReset }: DevPanelProps) {
   const { toast } = useToast();
 
-  // Показываем только для dev user
-  if (userId !== DEV_USER_ID) return null;
+  // Only show in development mode for the dev user
+  if (!import.meta.env.DEV || userId !== DEV_USER_ID) return null;
 
   const handleResetOnboarding = async () => {
     try {

@@ -148,6 +148,7 @@ export function DiagnosticQuestion({
                 src={problem.condition_image_url}
                 alt="Изображение к задаче"
                 className="max-w-full max-h-64 rounded-lg border"
+                loading="lazy"
               />
             </div>
           )}

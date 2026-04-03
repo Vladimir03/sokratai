@@ -189,7 +189,7 @@ export const AdminHomeworkChats = () => {
   }
 
   const ThreadList = ({ items }: { items: ThreadListItem[] }) => (
-    <ScrollArea className="h-[600px]">
+    <ScrollArea className="h-[400px] md:h-[600px]">
       <div className="space-y-1">
         {items.map((t) => (
           <div
@@ -412,7 +412,7 @@ function AdminHWThreadView({
         ) : messages.length === 0 ? (
           <div className="p-8 text-center text-muted-foreground">Сообщений нет</div>
         ) : (
-          <ScrollArea className="h-[600px]">
+          <ScrollArea className="h-[400px] md:h-[600px]">
             <div className="p-4 space-y-3">
               {messages.map((msg) => {
                 const isUser = msg.role === "user";

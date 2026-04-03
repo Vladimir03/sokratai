@@ -20,7 +20,6 @@ import DevPanel from "@/components/DevPanel";
 import { PageContent } from "@/components/PageContent";
 import { saveChatToSessionCache, loadChatFromSessionCache, clearChatCache } from "@/utils/chatCache";
 import { preloadPyodide } from "@/utils/pyodide";
-import { motion, AnimatePresence } from "framer-motion";
 import { haptics } from "@/utils/haptics";
 import { useSubscription } from "@/hooks/useSubscription";
 import { SubscriptionBanner, MessageLimitWarning, TrialExpiryReminder } from "@/components/SubscriptionBanner";
@@ -1737,7 +1736,7 @@ export default function Chat() {
       <AuthGuard>
         <div className="min-h-screen bg-background">
           <Navigation />
-          <div className="flex items-center justify-center h-[calc(100vh-4rem)]">
+          <div className="flex items-center justify-center h-[calc(100dvh-4rem)]">
             <ChatSkeleton />
           </div>
         </div>
@@ -1982,42 +1981,18 @@ export default function Chat() {
               </div>
 
               {/* Scroll to bottom button - Telegram style - OUTSIDE scroll container */}
-              <AnimatePresence>
-                {showScrollButton && (
-                  <motion.button
-                    onClick={() => {
-                      haptics.tap();
-                      scrollToBottom(true);
-                    }}
-                    className="
-                      fixed bottom-20 md:bottom-24 right-4 md:right-6 z-50
-                      flex items-center justify-center
-                      w-10 h-10 md:w-12 md:h-12
-                      bg-white
-                      border border-gray-300
-                      rounded-full
-                      shadow-lg
-                      hover:bg-gray-50
-                      active:scale-95
-                      will-change-transform
-                    "
-                    aria-label="Прокрутить вниз"
-                    initial={{ opacity: 0, scale: 0.8, y: 10 }}
-                    animate={{ opacity: 1, scale: 1, y: 0 }}
-                    exit={{ opacity: 0, scale: 0.8, y: 10 }}
-                    transition={{ 
-                      type: "spring", 
-                      stiffness: 500, 
-                      damping: 30,
-                      duration: 0.2
-                    }}
-                    whileHover={{ scale: 1.1 }}
-                    whileTap={{ scale: 0.9 }}
-                  >
-                    <ChevronDown className="w-5 h-5 md:w-6 md:h-6 text-gray-600" />
-                  </motion.button>
-                )}
-              </AnimatePresence>
+              {showScrollButton && (
+                <button
+                  onClick={() => {
+                    haptics.tap();
+                    scrollToBottom(true);
+                  }}
+                  className="fixed bottom-20 md:bottom-24 right-4 md:right-6 z-50 flex items-center justify-center w-11 h-11 md:w-12 md:h-12 bg-white border border-gray-300 rounded-full shadow-lg hover:bg-gray-50 active:scale-95 transition-all duration-200 animate-in fade-in zoom-in-90 slide-in-from-bottom-2"
+                  aria-label="Прокрутить вниз"
+                >
+                  <ChevronDown className="w-5 h-5 md:w-6 md:h-6 text-gray-600" />
+                </button>
+              )}
 
               {/* Full subscription banner when limit is reached */}
               {subscription.limitReached && (
