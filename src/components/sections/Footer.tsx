@@ -1,4 +1,5 @@
 import { Link } from "react-router-dom";
+import sokratLogo from "@/assets/sokrat-logo.png";
 
 const Footer = () => {
   return (
