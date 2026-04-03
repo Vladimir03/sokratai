@@ -1,5 +1,5 @@
 import { lazy, Suspense } from "react";
-import sokratLogo from "@/assets/sokrat-logo.png";
+import sokratChatIcon from "@/assets/sokrat-chat-icon.png";
 import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { telegramLinks } from "@/utils/telegramLinks";
@@ -124,7 +124,7 @@ const Index = () => {
           <div className="flex flex-col items-start max-w-4xl">
             {/* Logo and brand */}
             <div className="flex items-center gap-6 mb-8">
-              <img src={sokratLogo} alt="Сократ" className="w-20 h-20 md:w-24 md:h-24 flex-shrink-0" />
+              <img src={sokratChatIcon} alt="Сократ" className="w-20 h-20 md:w-24 md:h-24 flex-shrink-0" />
               <div className="flex flex-col">
                 <h2 className="text-3xl md:text-4xl font-bold text-primary-foreground">Сократ AI</h2>
               </div>

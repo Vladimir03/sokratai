@@ -1,5 +1,5 @@
 import { Link } from "react-router-dom";
-import sokratLogo from "@/assets/sokrat-logo.png";
+import sokratChatIcon from "@/assets/sokrat-chat-icon.png";
 
 const Footer = () => {
   return (
@@ -7,7 +7,7 @@ const Footer = () => {
       <div className="container mx-auto text-center">
         {/* Logo and Name */}
         <div className="flex items-center justify-center gap-4 mb-6">
-          <img src={sokratLogo} alt="Сократ" className="w-16 h-16" />
+          <img src={sokratChatIcon} alt="Сократ" className="w-16 h-16" />
           <div className="text-3xl font-bold">Сократ AI</div>
         </div>
 
