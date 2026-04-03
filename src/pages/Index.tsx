@@ -1,4 +1,5 @@
 import { lazy, Suspense } from "react";
+import sokratLogo from "@/assets/sokrat-logo.png";
 import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { telegramLinks } from "@/utils/telegramLinks";
