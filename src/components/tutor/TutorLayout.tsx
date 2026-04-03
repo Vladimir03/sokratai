@@ -1,4 +1,5 @@
 import { ReactNode, useEffect, useState } from 'react';
+import sokratLogo from "@/assets/sokrat-logo.png";
 import { Link, useLocation } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import {
