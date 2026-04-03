@@ -32,13 +32,19 @@ const Navigation = () => {
       <div className="container mx-auto px-4 h-14 flex items-center gap-3">
         {/* Logo — home link */}
         <Link to="/" className="flex items-center gap-2 group shrink-0">
-          <div className="w-8 h-8 rounded-lg bg-accent flex items-center justify-center">
-            <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-              <circle cx="12" cy="17" r="0.5" fill="white" stroke="white" strokeWidth="1"/>
-              <circle cx="12" cy="12" r="10" stroke="white" strokeWidth="1.5" fill="none"/>
-            </svg>
-          </div>
+          <svg className="w-8 h-8" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <circle cx="50" cy="50" r="50" className="fill-accent" />
+            <path d="M18 22 Q18 14 26 14 L48 14 Q56 14 56 22 L56 38 Q56 46 48 46 L34 46 L24 54 L24 46 Q18 46 18 38 Z" fill="white"/>
+            <text x="37" y="37" fontFamily="Georgia, serif" fontSize="22" fontWeight="bold" className="fill-accent" textAnchor="middle">?</text>
+            <path d="M54 38 C62 42 66 48 64 56" stroke="white" strokeWidth="2.5" fill="none" strokeLinecap="round" opacity="0.7"/>
+            <path d="M42 56 Q42 48 50 48 L74 48 Q82 48 82 56 L82 72 Q82 80 74 80 L60 80 L70 88 L50 80 Q42 80 42 72 Z" fill="white"/>
+            <circle cx="62" cy="56" r="8" fill="none" stroke="#E8913A" strokeWidth="2"/>
+            <path d="M59 56 C60 51 64 51 65 56" fill="none" stroke="#E8913A" strokeWidth="1.5" strokeLinecap="round"/>
+            <line x1="59" y1="63" x2="65" y2="63" stroke="#E8913A" strokeWidth="1.5" strokeLinecap="round"/>
+            <line x1="62" y1="44" x2="62" y2="41" stroke="#E8913A" strokeWidth="1.5" strokeLinecap="round"/>
+            <line x1="71" y1="50" x2="74" y2="48" stroke="#E8913A" strokeWidth="1.5" strokeLinecap="round"/>
+            <line x1="53" y1="50" x2="50" y2="48" stroke="#E8913A" strokeWidth="1.5" strokeLinecap="round"/>
+          </svg>
           <span className="font-semibold text-lg text-slate-800 hidden md:inline">
             Сократ
           </span>

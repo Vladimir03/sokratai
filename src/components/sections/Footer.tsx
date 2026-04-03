@@ -6,40 +6,20 @@ const Footer = () => {
       <div className="container mx-auto text-center">
         {/* Logo and Name */}
         <div className="flex items-center justify-center gap-4 mb-6">
-          <svg className="w-16 h-16" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
-            <path
-              d="M 15 25 Q 15 15 25 15 L 45 15 Q 55 15 55 25 L 55 40 Q 55 50 45 50 L 30 50 L 20 60 L 20 50 Q 15 50 15 40 Z"
-              className="fill-accent"
-              opacity="0.9"
-            />
-            <text
-              x="35"
-              y="37"
-              fontFamily="'Golos Text', system-ui, sans-serif"
-              fontSize="20"
-              fontWeight="bold"
-              fill="white"
-              textAnchor="middle"
-            >
-              ?
-            </text>
-
-            <path
-              d="M 45 55 Q 45 45 55 45 L 75 45 Q 85 45 85 55 L 85 70 Q 85 80 75 80 L 60 80 L 80 90 L 60 90 Q 45 90 45 80 Z"
-              fill="white"
-              opacity="0.95"
-            />
-            <text
-              x="65"
-              y="69"
-              fontFamily="'Golos Text', system-ui, sans-serif"
-              fontSize="22"
-              fontWeight="bold"
-              className="fill-accent"
-              textAnchor="middle"
-            >
-              !
-            </text>
+          <svg className="w-16 h-16" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <circle cx="50" cy="50" r="50" className="fill-accent" />
+            <path d="M18 22 Q18 14 26 14 L48 14 Q56 14 56 22 L56 38 Q56 46 48 46 L34 46 L24 54 L24 46 Q18 46 18 38 Z" fill="white"/>
+            <text x="37" y="37" fontFamily="Georgia, serif" fontSize="22" fontWeight="bold" className="fill-accent" textAnchor="middle">?</text>
+            <path d="M54 38 C62 42 66 48 64 56" stroke="white" strokeWidth="2.5" fill="none" strokeLinecap="round" opacity="0.7"/>
+            <path d="M60 54 L64 57 L67 52" stroke="white" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round" opacity="0.7"/>
+            <path d="M42 56 Q42 48 50 48 L74 48 Q82 48 82 56 L82 72 Q82 80 74 80 L60 80 L70 88 L50 80 Q42 80 42 72 Z" fill="white"/>
+            <circle cx="62" cy="56" r="8" fill="none" stroke="#E8913A" strokeWidth="2"/>
+            <path d="M59 56 C60 51 64 51 65 56" fill="none" stroke="#E8913A" strokeWidth="1.5" strokeLinecap="round"/>
+            <line x1="59" y1="63" x2="65" y2="63" stroke="#E8913A" strokeWidth="1.5" strokeLinecap="round"/>
+            <line x1="60" y1="65.5" x2="64" y2="65.5" stroke="#E8913A" strokeWidth="1.5" strokeLinecap="round"/>
+            <line x1="62" y1="44" x2="62" y2="41" stroke="#E8913A" strokeWidth="1.5" strokeLinecap="round"/>
+            <line x1="71" y1="50" x2="74" y2="48" stroke="#E8913A" strokeWidth="1.5" strokeLinecap="round"/>
+            <line x1="53" y1="50" x2="50" y2="48" stroke="#E8913A" strokeWidth="1.5" strokeLinecap="round"/>
           </svg>
           <div className="text-3xl font-bold">Сократ AI</div>
         </div>
