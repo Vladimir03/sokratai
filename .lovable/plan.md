@@ -1,27 +1,28 @@
 
 
-## Fix: "Развёрнутое решение" warning hidden when condition is collapsed
+## Replace Site Icon Everywhere with Uploaded Image
 
-### Problem
-The amber banner "📝 Задача с развёрнутым решением — покажи ход решения" is placed **inside** the collapsible condition block (line 1407). When the student navigates to task 2 and the condition is collapsed (default on mobile), the warning is invisible.
+### What changes
 
-### Solution
-Move the `detailed_solution` banner **outside** the collapsible `div`, so it's always visible in the header area regardless of expand/collapse state. Place it right after the collapsible block closes (after line ~1422), still inside the `border-b` container.
+1. **Copy uploaded PNG to project** as `src/assets/sokrat-logo.png` (for React components) and `public/sokrat-logo.png` (for favicon)
 
-### File: `src/components/homework/GuidedHomeworkWorkspace.tsx`
+2. **Favicon** — update `index.html`:
+   - Add `<link rel="icon" href="/sokrat-logo.png" type="image/png">`
+   - Delete `public/favicon.ico` if it exists (browsers auto-request it and it overrides)
 
-1. **Remove** the amber banner from inside the collapsible block (lines 1407-1411)
-2. **Add** it after the collapsible `</div>` closes (~line 1422), before the parent `</div>` of the `border-b` container — so it's always visible when `check_format === 'detailed_solution'`
+3. **SokratLogo component** — rewrite `src/components/SokratLogo.tsx`:
+   - Replace the inline SVG with an `<img>` tag importing from `@/assets/sokrat-logo.png`
+   - Keep the same `className` prop for sizing
+   - This automatically updates everywhere it's used (currently: `HowItWorks.tsx` section header)
 
-```text
-┌─────────────────────────────────────┐
-│ Задача 2 из 3  1/1 баллов  Раскрыть │  ← header (always visible)
-├─────────────────────────────────────┤
-│ 📝 Развёрнутое решение — покажи ход │  ← NEW: always visible
-├─────────────────────────────────────┤
-│ (collapsible: task text + image)    │  ← expands on click
-└─────────────────────────────────────┘
-```
+### Quality preservation
+- The uploaded PNG is high-resolution. Using it as-is (not converting to SVG) preserves full quality.
+- For favicon, browsers handle PNG favicons well at all sizes.
+- For the React component, the image scales cleanly via CSS `width`/`height` classes already passed as `className`.
 
-Single file change, ~6 lines moved.
+### Files modified
+- `index.html` — favicon link
+- `src/components/SokratLogo.tsx` — img instead of SVG
+- `src/assets/sokrat-logo.png` — new file (copy from upload)
+- `public/sokrat-logo.png` — new file (copy from upload)
 
