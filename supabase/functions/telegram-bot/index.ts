@@ -81,6 +81,8 @@ function compactHistoryForTelegram(
  * This prevents AI failures when previous calls failed and left multiple
  * consecutive user messages without assistant responses.
  */
+const MERGED_MESSAGE_MAX_CHARS = 8000;
+
 function mergeConsecutiveUserMessages(
   messages: Array<{ role: string; content: string; image_url?: string | null }>,
 ): Array<{ role: string; content: string; image_url?: string | null }> {
@@ -92,7 +94,13 @@ function mergeConsecutiveUserMessages(
     const last = merged[merged.length - 1];
     if (last && last.role === msg.role && msg.role === "user") {
       // Merge: join content, keep latest image_url
-      last.content = last.content + "\n\n" + msg.content;
+      const candidate = last.content + "\n\n" + msg.content;
+      // Truncate from the start to keep the most recent context within limit
+      if (candidate.length > MERGED_MESSAGE_MAX_CHARS) {
+        last.content = "…" + candidate.slice(candidate.length - MERGED_MESSAGE_MAX_CHARS + 1);
+      } else {
+        last.content = candidate;
+      }
       if (msg.image_url) {
         last.image_url = msg.image_url;
       }

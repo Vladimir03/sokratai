@@ -7,7 +7,7 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
-const MAX_MESSAGE_LENGTH = 2000;
+const MAX_MESSAGE_LENGTH = 10000;
 const FREE_DAILY_LIMIT = 10; // Daily message limit for free users
 
 type ResponseProfile = "default" | "telegram_compact";
