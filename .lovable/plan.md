@@ -1,28 +1,24 @@
 
 
-## Replace old SVG logo with new PNG everywhere
+## Fix: Eliminate slow icon loading on landing page
 
 ### Problem
-The new logo PNG was only applied in `SokratLogo.tsx` (used in HowItWorks). Four other files still have the old inline SVG logo hardcoded.
+The chat icon (`sokrat-chat-icon.png`) is **2.8 MB** and **1645x1645 px**, but displayed at only 96x96 CSS pixels. Same issue with `sokrat-logo.png` (2.7 MB). On slow connections, these massive images load visibly late.
 
-### Files to update
+### Solution
+Resize and compress both images to appropriate dimensions:
 
-1. **`src/components/Navigation.tsx`** (line ~35) — student navbar logo
-   - Replace the inline `<svg>` with `<img src={sokratLogo} alt="Сократ" className="w-8 h-8" />`
-   - Import `sokratLogo` from `@/assets/sokrat-logo.png`
+- **sokrat-chat-icon.png**: resize to 192x192 px (2x retina for max display of 96px) — expected size ~10-20 KB
+- **sokrat-logo.png**: resize to 192x192 px (2x retina for max display of 64px in footer) — expected size ~10-20 KB
+- Also update `public/sokrat-logo.png` (favicon) to a smaller version
 
-2. **`src/pages/Index.tsx`** (line ~126) — hero section large logo
-   - Replace the inline `<svg>` with `<img src={sokratLogo} alt="Сократ" className="w-20 h-20 md:w-24 md:h-24 flex-shrink-0" />`
-   - Import `sokratLogo`
+This alone will reduce load time by ~99%. No code changes needed — just optimized assets replacing the current ones.
 
-3. **`src/components/tutor/TutorLayout.tsx`** (line ~116) — tutor dashboard navbar logo
-   - Replace the inline `<svg>` with `<img src={sokratLogo} alt="Сократ" className="w-7 h-7" />`
-   - Import `sokratLogo`
+### Steps
+1. Resize `src/assets/sokrat-chat-icon.png` to 192x192 with PNG compression
+2. Resize `src/assets/sokrat-logo.png` to 192x192 with PNG compression
+3. Resize `public/sokrat-logo.png` to 192x192 with PNG compression
 
-4. **`src/components/sections/Footer.tsx`** (line ~9) — footer logo
-   - Replace the inline `<svg>` with `<img src={sokratLogo} alt="Сократ" className="w-16 h-16" />`
-   - Import `sokratLogo`
-
-### Approach
-Each file: add one import line, replace ~15-line inline SVG block with a single `<img>` tag keeping the same `className` for sizing. No other changes.
+### Technical note
+At 192px, the images cover 2x retina at every usage (hero: 96px, footer: 64px, navbar: 32px). Quality will be identical to the eye since the originals were being downscaled by the browser anyway.
 
