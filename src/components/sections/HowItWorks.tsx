@@ -49,8 +49,8 @@ const HowItWorks = () => {
 
               {/* Sokrat message */}
               <div className="flex gap-3 items-start">
-                <div className="flex-shrink-0 w-8 h-8 rounded-full bg-accent/20 flex items-center justify-center text-xs font-semibold text-accent">
-                  Сократ AI
+                <div className="flex-shrink-0 rounded-full bg-accent/20 px-2.5 py-1 text-[11px] font-bold text-accent whitespace-nowrap leading-tight">
+                  Сократ<br/>AI
                 </div>
                 <div className="flex-1 bg-accent/5 rounded-lg p-3 text-sm md:text-base border border-accent/20">
                   Отлично! Дискриминант находится по формуле D = b² - 4ac.
