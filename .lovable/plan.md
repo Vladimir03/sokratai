@@ -1,24 +1,59 @@
 
+## Fix blank space in “Понимай предметы сам...” block
 
-## Fix: Eliminate slow icon loading on landing page
+### What is actually wrong
+The cards in `ValueProposition.tsx` are still rendered with `fade-base`, which sets them to `opacity: 0` by default. They only become visible if `useScrollAnimation()` successfully adds `animate-fade-in-up`.
 
-### Problem
-The chat icon (`sokrat-chat-icon.png`) is **2.8 MB** and **1645x1645 px**, but displayed at only 96x96 CSS pixels. Same issue with `sokrat-logo.png` (2.7 MB). On slow connections, these massive images load visibly late.
+So the empty white area is not “removed” right now — the cards are simply hidden.
 
-### Solution
-Resize and compress both images to appropriate dimensions:
+There is also a second source of fragility:
+- `Card` already has its own default mount animation in `src/components/ui/card.tsx`
+- `ValueProposition` adds a separate scroll-hidden animation on top
 
-- **sokrat-chat-icon.png**: resize to 192x192 px (2x retina for max display of 96px) — expected size ~10-20 KB
-- **sokrat-logo.png**: resize to 192x192 px (2x retina for max display of 64px in footer) — expected size ~10-20 KB
-- Also update `public/sokrat-logo.png` (favicon) to a smaller version
+That combination is brittle for a near-the-top landing section.
 
-This alone will reduce load time by ~99%. No code changes needed — just optimized assets replacing the current ones.
+### Minimal fix
+Make the 3 value cards visible immediately instead of depending on `IntersectionObserver`.
 
-### Steps
-1. Resize `src/assets/sokrat-chat-icon.png` to 192x192 with PNG compression
-2. Resize `src/assets/sokrat-logo.png` to 192x192 with PNG compression
-3. Resize `public/sokrat-logo.png` to 192x192 with PNG compression
+### Planned changes
+1. **Update `src/components/sections/ValueProposition.tsx`**
+   - remove `useScrollAnimation` from this section
+   - remove `fade-base` from the cards
+   - render cards normally so they are always visible on first paint
 
-### Technical note
-At 192px, the images cover 2x retina at every usage (hero: 96px, footer: 64px, navbar: 32px). Quality will be identical to the eye since the originals were being downscaled by the browser anyway.
+2. **Disable double animation on these cards**
+   - pass `animate={false}` to `Card` in this section if needed
+   - keep hover styles (`hover:shadow-elegant`, `hover:-translate-y-2`, etc.)
 
+3. **Keep spacing compact**
+   - preserve the reduced section padding already applied
+   - keep the grid and text layout unchanged
+
+### Technical details
+Current issue in code:
+```tsx
+<Card
+  ref={ref}
+  className="fade-base ..."
+>
+```
+
+And in CSS:
+```css
+.fade-base {
+  opacity: 0;
+  transform: translateY(30px);
+}
+```
+
+If the observer does not reveal the card in time, the user sees whitespace with no text.
+
+Safer result:
+- for this specific section, cards should not start hidden at all
+- this removes the failure mode completely instead of trying to “fix” observer timing
+
+### Files to modify
+- `src/components/sections/ValueProposition.tsx`
+
+### Optional follow-up audit
+I also see the same hidden-by-default animation pattern in other landing sections (`AhaMoments`, `Testimonials`). I would first fix this block only, then optionally audit the rest of the landing for similar “invisible until observed” behavior so this does not repeat elsewhere.
