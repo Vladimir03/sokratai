@@ -22,7 +22,7 @@ const ValueProposition = () => {
   ];
 
   return (
-    <section className="py-20 px-4 bg-background">
+    <section className="py-12 px-4 bg-background">
       <div className="container mx-auto">
         <h2 className="text-3xl md:text-4xl font-bold text-center mb-6 text-primary">
           Понимай предметы сам, не беспокоя учителя и одноклассников
