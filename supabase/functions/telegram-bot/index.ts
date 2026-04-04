@@ -38,7 +38,7 @@ const TELEGRAM_BOT_TOKEN = Deno.env.get("TELEGRAM_BOT_TOKEN");
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const TELEGRAM_FORMAT_V2 = (Deno.env.get("TELEGRAM_FORMAT_V2") ?? "true").toLowerCase() === "true";
-const TELEGRAM_DIALOG_MAX_CHARS = 700;
+const TELEGRAM_DIALOG_MAX_CHARS = 1000;
 const TELEGRAM_MESSAGE_MAX_LENGTH = 4000;
 const SITE_BASE_URL = "https://sokratai.ru";
 const HOMEWORK_TASK_IMAGE_DEFAULT_BUCKET = "homework-task-images";
@@ -105,43 +105,81 @@ function mergeConsecutiveUserMessages(
 }
 
 /**
- * Fetch AI chat with timeout and fallback message on failure.
- * Returns parsed AI content or null if fallback was sent.
+ * Fetch AI chat with timeout, retry on transient errors (network + 5xx), and fallback message.
+ * Returns Response or null if fallback was sent.
  */
 async function fetchChatWithTimeout(
   body: Record<string, unknown>,
   telegramUserId: number,
   label: string,
 ): Promise<Response | null> {
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), TELEGRAM_CHAT_TIMEOUT_MS);
+  const MAX_ATTEMPTS = 2;
+  const RETRY_DELAY_MS = 2000;
+  let lastError: unknown;
 
-  try {
-    const chatResponse = await fetch(`${SUPABASE_URL}/functions/v1/chat`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
-      },
-      body: JSON.stringify(body),
-      signal: controller.signal,
-    });
-    clearTimeout(timeoutId);
-    return chatResponse;
-  } catch (err: unknown) {
-    clearTimeout(timeoutId);
-    const isTimeout = err instanceof Error && err.name === "AbortError";
-    console.error(`🔴 [${label}] chat fetch failed`, {
-      telegramUserId,
-      error: isTimeout ? "TIMEOUT" : (err instanceof Error ? err.message : String(err)),
-      historySize: (body.messages as unknown[])?.length ?? 0,
-    });
-    await sendTelegramMessage(
-      telegramUserId,
-      "⏳ Сейчас отвечаю дольше обычного. Попробуй ещё раз или перейди на сайт — там чат работает стабильнее: https://sokratai.ru/chat",
-    );
-    return null;
+  for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), TELEGRAM_CHAT_TIMEOUT_MS);
+
+    try {
+      const resp = await fetch(`${SUPABASE_URL}/functions/v1/chat`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
+        },
+        body: JSON.stringify(body),
+        signal: controller.signal,
+      });
+      clearTimeout(timeoutId);
+
+      // Retry on 5xx (gateway timeout, internal error, etc.)
+      if (resp.status >= 500 && attempt < MAX_ATTEMPTS - 1) {
+        const errBody = await resp.text().catch(() => "");
+        console.warn(`[${label}] attempt ${attempt + 1} got ${resp.status}, retrying in ${RETRY_DELAY_MS}ms`, {
+          telegramUserId,
+          status: resp.status,
+          bodyPreview: errBody.substring(0, 200),
+        });
+        await new Promise((r) => setTimeout(r, RETRY_DELAY_MS));
+        continue;
+      }
+
+      return resp;
+    } catch (err) {
+      clearTimeout(timeoutId);
+      lastError = err;
+
+      const isRetryable = err instanceof Error && (
+        err.name === "AbortError" ||
+        err.message.includes("network") ||
+        err.message.includes("fetch") ||
+        err.message.includes("ECONNRESET")
+      );
+
+      if (isRetryable && attempt < MAX_ATTEMPTS - 1) {
+        console.warn(`[${label}] attempt ${attempt + 1} failed, retrying in ${RETRY_DELAY_MS}ms`, {
+          telegramUserId,
+          error: err instanceof Error ? err.message : String(err),
+        });
+        await new Promise((r) => setTimeout(r, RETRY_DELAY_MS));
+        continue;
+      }
+    }
   }
+
+  // All attempts exhausted
+  const isTimeout = lastError instanceof Error && lastError.name === "AbortError";
+  console.error(`[${label}] chat fetch failed after ${MAX_ATTEMPTS} attempts`, {
+    telegramUserId,
+    error: isTimeout ? "TIMEOUT" : (lastError instanceof Error ? lastError.message : String(lastError)),
+    historySize: (body.messages as unknown[])?.length ?? 0,
+  });
+  await safeSendError(
+    telegramUserId,
+    "Сейчас отвечаю дольше обычного. Попробуй ещё раз или перейди на сайт: https://sokratai.ru/chat",
+  );
+  return null;
 }
 const WEB_PAYMENT_URL = "https://sokratai.ru/profile?openPayment=true";
 const WEB_PRICING_URL = "https://sokratai.ru/#pricing";
@@ -478,6 +516,17 @@ async function sendTelegramMessage(chatId: number, text: string, extraParams?: R
   }
 
   return response.json();
+}
+
+async function safeSendError(chatId: number, text: string): Promise<void> {
+  try {
+    await sendTelegramMessage(chatId, text);
+  } catch (e) {
+    console.error("safeSendError: failed to deliver error message", {
+      chatId,
+      error: e instanceof Error ? e.message : String(e),
+    });
+  }
 }
 
 // ID группы для просмотра статистики
@@ -5157,13 +5206,17 @@ async function parseSSEStream(response: Response): Promise<string> {
   return fullContent;
 }
 
-async function sendTypingLoop(telegramUserId: number, stopSignal: { stop: boolean }) {
+async function sendTypingLoop(chatId: number, stopSignal: { stop: boolean }) {
   while (!stopSignal.stop) {
-    await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendChatAction`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ chat_id: telegramUserId, action: "typing" }),
-    });
+    try {
+      await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendChatAction`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ chat_id: chatId, action: "typing" }),
+      });
+    } catch (_) {
+      // Non-critical — typing indicator failure must never break the main flow
+    }
     await new Promise((resolve) => setTimeout(resolve, 5000));
   }
 }
@@ -6211,39 +6264,8 @@ function parseTelegramBlocks(text: string, responseMode: TelegramResponseMode): 
     blocks.push({ type: "paragraph", text: joined });
   }
 
-  if (responseMode !== "dialog") {
-    return blocks;
-  }
-
-  const containsLabeledDialog = blocks.some((b) => (b.label || "").toLowerCase() === "идея")
-    && blocks.some((b) => (b.label || "").toLowerCase() === "мини-шаг")
-    && blocks.some((b) => b.type === "question" || (b.label || "").toLowerCase() === "вопрос");
-
-  if (containsLabeledDialog) {
-    return blocks;
-  }
-
-  const plainText = blocks
-    .map((block) => block.items ? block.items.join(" ") : block.text)
-    .join(" ")
-    .replace(/\s+/g, " ")
-    .trim();
-
-  if (!plainText) {
-    return blocks;
-  }
-
-  const sentences = plainText.split(/(?<=[.!?])\s+/).filter(Boolean);
-  const idea = sentences.slice(0, 2).join(" ").trim() || plainText.slice(0, 180).trim();
-  const ministep = sentences.slice(2, 3).join(" ").trim() || "Сделай один вычислительный шаг и проверь знак/единицы.";
-  const existingQuestion = sentences.find((s) => s.includes("?"));
-  const question = existingQuestion || "Какой следующий шаг ты попробуешь сделать?";
-
-  return [
-    { type: "paragraph", label: "Идея", text: idea },
-    { type: "paragraph", label: "Мини-шаг", text: ministep },
-    { type: "question", label: "Вопрос", text: question.replace(/\?*$/, "?") },
-  ];
+  // Return blocks as-is for natural formatting — no forced Идея/Мини-шаг/Вопрос restructuring
+  return blocks;
 }
 
 function blockPlainLength(block: TelegramFormatBlock): number {
@@ -7021,8 +7043,14 @@ async function handleTextMessage(telegramUserId: number, userId: string, text: s
     // Post-response UX nudges
     await maybeSendTrialReminder(telegramUserId, userId);
   } catch (error) {
-    console.error("Error handling text message:", error);
-    await sendTelegramMessage(telegramUserId, "❌ Произошла ошибка. Попробуй ещё раз.");
+    console.error("handleTextMessage error:", {
+      telegramUserId,
+      userId,
+      textPreview: text.substring(0, 100),
+      error: error instanceof Error ? error.message : String(error),
+      stack: error instanceof Error ? error.stack : undefined,
+    });
+    await safeSendError(telegramUserId, "❌ Произошла ошибка. Попробуй ещё раз.");
   }
 }
 
@@ -7062,22 +7090,17 @@ async function handleGroupTextMessage(
       }
       messages.push({ role: "user", content: text });
 
-      // Call AI chat function with group context
-      const chatResponse = await fetch(`${SUPABASE_URL}/functions/v1/chat`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
-        },
-        body: JSON.stringify({
-          messages,
-          userId,
-          responseProfile: "telegram_compact",
-          responseMode: "dialog",
-          maxChars: TELEGRAM_DIALOG_MAX_CHARS,
-          taskContext: "Ты отвечаешь на вопрос ученика в групповом чате Telegram (репетитор и ученики). Отвечай кратко и по делу. Не задавай личных вопросов (класс, имя). Просто ответь на вопрос по предмету.",
-        }),
-      });
+      // Call AI chat function with group context (with timeout + retry)
+      const chatResponse = await fetchChatWithTimeout({
+        messages,
+        userId,
+        responseProfile: "telegram_compact",
+        responseMode: "dialog",
+        maxChars: TELEGRAM_DIALOG_MAX_CHARS,
+        taskContext: "Ты отвечаешь на вопрос ученика в групповом чате Telegram (репетитор и ученики). Отвечай кратко и по делу. Не задавай личных вопросов (класс, имя). Просто ответь на вопрос по предмету.",
+      }, groupChatId, "handleGroupTextMessage");
+
+      if (!chatResponse) return; // fallback already sent
 
       // Handle rate limit error
       if (chatResponse.status === 429) {
@@ -7210,22 +7233,17 @@ async function handleGroupPhotoMessage(
         image_url: signedData.signedUrl,
       });
 
-      // Call AI chat function with group context
-      const chatResponse = await fetch(`${SUPABASE_URL}/functions/v1/chat`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
-        },
-        body: JSON.stringify({
-          messages,
-          userId,
-          responseProfile: "telegram_compact",
-          responseMode: "dialog",
-          maxChars: TELEGRAM_DIALOG_MAX_CHARS,
-          taskContext: "Ты отвечаешь на вопрос ученика в групповом чате Telegram (репетитор и ученики). Ученик прислал фото задачи. Разбери задачу и помоги решить. Отвечай кратко и по делу.",
-        }),
-      });
+      // Call AI chat function with group context (with timeout + retry)
+      const chatResponse = await fetchChatWithTimeout({
+        messages,
+        userId,
+        responseProfile: "telegram_compact",
+        responseMode: "dialog",
+        maxChars: TELEGRAM_DIALOG_MAX_CHARS,
+        taskContext: "Ты отвечаешь на вопрос ученика в групповом чате Telegram (репетитор и ученики). Ученик прислал фото задачи. Разбери задачу и помоги решить. Отвечай кратко и по делу.",
+      }, groupChatId, "handleGroupPhotoMessage");
+
+      if (!chatResponse) return; // fallback already sent
 
       if (chatResponse.status === 429) {
         await sendTelegramMessage(
@@ -7503,10 +7521,14 @@ async function handlePhotoMessage(telegramUserId: number, userId: string, photo:
 
     console.log("Photo message handled successfully!");
   } catch (error) {
-    console.error("❌ Error handling photo message:", error);
-    console.error("Error stack:", error instanceof Error ? error.stack : "No stack trace");
-    const errorMsg = error instanceof Error ? error.message : String(error);
-    await sendTelegramMessage(telegramUserId, `❌ Ошибка при обработке фото: ${errorMsg.substring(0, 200)}`);
+    console.error("handlePhotoMessage error:", {
+      telegramUserId,
+      userId,
+      photoFileId: photo?.file_id,
+      error: error instanceof Error ? error.message : String(error),
+      stack: error instanceof Error ? error.stack : undefined,
+    });
+    await safeSendError(telegramUserId, "❌ Ошибка при обработке фото. Попробуй ещё раз.");
   }
 }
 
@@ -7520,7 +7542,7 @@ async function handleVoiceMessage(
   console.log("Handling voice message:", { telegramUserId, duration: voice.duration, mime: voice.mime_type });
 
   const stopSignal = { stop: false };
-  sendTypingLoop(telegramUserId, stopSignal);
+  const typingPromise = sendTypingLoop(telegramUserId, stopSignal);
 
   try {
     // 1. Get file path from Telegram
@@ -7591,6 +7613,7 @@ async function handleVoiceMessage(
     }
 
     stopSignal.stop = true;
+    await typingPromise;
 
     // 4. Show transcription to user
     const durationStr = voice.duration >= 60
@@ -7603,8 +7626,15 @@ async function handleVoiceMessage(
     await handleTextMessage(telegramUserId, userId, transcribedText);
   } catch (err) {
     stopSignal.stop = true;
-    console.error("Voice message handling error:", err);
-    await sendTelegramMessage(telegramUserId, "❌ Ошибка при обработке голосового сообщения. Попробуй ещё раз.");
+    await typingPromise;
+    console.error("handleVoiceMessage error:", {
+      telegramUserId,
+      userId,
+      voiceDuration: voice.duration,
+      error: err instanceof Error ? err.message : String(err),
+      stack: err instanceof Error ? err.stack : undefined,
+    });
+    await safeSendError(telegramUserId, "❌ Ошибка при обработке голосового сообщения. Попробуй ещё раз.");
   }
 }
 
@@ -7682,25 +7712,20 @@ async function handleButtonAction(
     const stopTyping = { stop: false };
     const typingPromise = sendTypingLoop(telegramUserId, stopTyping);
 
-    // Call AI chat function
-    const chatResponse = await fetch(`${SUPABASE_URL}/functions/v1/chat`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
-      },
-      body: JSON.stringify({
-        messages: history || [],
-        chatId: chatId,
-        userId: userId,
-        responseProfile: "telegram_compact",
-        responseMode,
-      }),
-    });
+    // Call AI chat function (with timeout + retry)
+    const chatResponse = await fetchChatWithTimeout({
+      messages: history || [],
+      chatId: chatId,
+      userId: userId,
+      responseProfile: "telegram_compact",
+      responseMode,
+    }, telegramUserId, "handleButtonAction");
 
     // Stop typing
     stopTyping.stop = true;
     await typingPromise;
+
+    if (!chatResponse) return; // fallback already sent
 
     // Handle errors
     if (chatResponse.status === 429) {
@@ -8177,6 +8202,10 @@ Deno.serve(async (req) => {
     return new Response(null, { headers: corsHeaders });
   }
 
+  // Declared before try so it's accessible in catch
+  let fallbackChatId: number | null = null;
+  let errorMessageDelivered = false;
+
   try {
     // Handle special action to set bot menu commands
     const url = new URL(req.url);
@@ -8190,6 +8219,12 @@ Deno.serve(async (req) => {
 
     const update = await req.json();
     console.log("Received update:", JSON.stringify(update, null, 2));
+
+    // Extract fallback chat ID for top-level error handling
+    fallbackChatId = update?.message?.from?.id
+      ?? update?.message?.chat?.id
+      ?? update?.callback_query?.from?.id
+      ?? null;
 
     // === GROUP CHAT HANDLING (early return — does not affect private chat logic) ===
     if (update.message && isGroupChat(update.message.chat?.type)) {
@@ -8523,7 +8558,13 @@ Deno.serve(async (req) => {
 
           // Default: AI chat mode
           await handleTextMessage(telegramUserId, session.user_id, text);
+        } else {
+          console.warn("telegram_onboarding_incomplete:text", { telegramUserId, state: session.onboarding_state });
+          await safeSendError(telegramUserId, "Давай сначала завершим регистрацию! Нажми /start");
         }
+      } else {
+        console.warn("telegram_no_session:text", { telegramUserId, hasSession: !!session });
+        await safeSendError(telegramUserId, "Для начала работы нажми /start");
       }
 
       return new Response(JSON.stringify({ ok: true }), {
@@ -8567,7 +8608,13 @@ Deno.serve(async (req) => {
           }
 
           await handlePhotoMessage(telegramUserId, session.user_id, photo, update.message.caption);
+        } else {
+          console.warn("telegram_onboarding_incomplete:photo", { telegramUserId, state: session.onboarding_state });
+          await safeSendError(telegramUserId, "Давай сначала завершим регистрацию! Нажми /start");
         }
+      } else {
+        console.warn("telegram_no_session:photo", { telegramUserId, hasSession: !!session });
+        await safeSendError(telegramUserId, "Для начала работы нажми /start");
       }
 
       return new Response(JSON.stringify({ ok: true }), {
@@ -8650,6 +8697,12 @@ Deno.serve(async (req) => {
 
       if (session?.user_id && session.onboarding_state === "completed") {
         await handleVoiceMessage(telegramUserId, session.user_id, update.message.voice);
+      } else if (!session?.user_id) {
+        console.warn("telegram_no_session:voice", { telegramUserId });
+        await safeSendError(telegramUserId, "Для начала работы нажми /start");
+      } else {
+        console.warn("telegram_onboarding_incomplete:voice", { telegramUserId, state: session?.onboarding_state });
+        await safeSendError(telegramUserId, "Давай сначала завершим регистрацию! Нажми /start");
       }
 
       return new Response(JSON.stringify({ ok: true }), {
@@ -8662,6 +8715,21 @@ Deno.serve(async (req) => {
     });
   } catch (error) {
     console.error("Error processing update:", error);
+    if (fallbackChatId) {
+      try {
+        await sendTelegramMessage(fallbackChatId, "❌ Произошла непредвиденная ошибка. Попробуй ещё раз или напиши /start.");
+        errorMessageDelivered = true;
+      } catch (sendErr) {
+        console.error("Failed to deliver top-level error message:", sendErr instanceof Error ? sendErr.message : String(sendErr));
+      }
+    }
+    // If we delivered error message — return 200 (user is informed, no point retrying).
+    // If we couldn't deliver — return 500 so Telegram retries the update.
+    if (errorMessageDelivered) {
+      return new Response(JSON.stringify({ ok: true }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
     const errorMessage = error instanceof Error ? error.message : "Unknown error occurred";
     return new Response(JSON.stringify({ error: errorMessage }), {
       status: 500,
