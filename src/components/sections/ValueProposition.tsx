@@ -1,6 +1,22 @@
 import { Card, CardContent } from "@/components/ui/card";
 import { useScrollAnimation } from "@/hooks/useScrollAnimation";
-import { ShieldCheck, Lightbulb, Heart } from "lucide-react";
+import { ShieldCheck, Lightbulb, Heart, LucideIcon } from "lucide-react";
+
+const ValueCard = ({ icon: Icon, title, description }: { icon: LucideIcon; title: string; description: string }) => {
+  const ref = useScrollAnimation();
+  return (
+    <Card 
+      ref={ref}
+      className="fade-base group hover:shadow-elegant transition-all duration-300 hover:-translate-y-2 hover:border-accent"
+    >
+      <CardContent className="pt-6">
+        <div className="mb-4"><Icon className="w-10 h-10 text-accent" /></div>
+        <h3 className="text-xl font-bold mb-2 text-primary-variant">{title}</h3>
+        <p className="text-muted-foreground">{description}</p>
+      </CardContent>
+    </Card>
+  );
+};
 
 const ValueProposition = () => {
   const values = [
@@ -34,24 +50,9 @@ const ValueProposition = () => {
         </p>
 
         <div className="grid md:grid-cols-3 gap-8">
-          {values.map((value, index) => {
-            const ValueCard = () => {
-              const ref = useScrollAnimation();
-              return (
-                <Card 
-                  ref={ref}
-                  className="fade-base group hover:shadow-elegant transition-all duration-300 hover:-translate-y-2 hover:border-accent"
-                >
-                  <CardContent className="pt-6">
-                    <div className="mb-4"><value.icon className="w-10 h-10 text-accent" /></div>
-                    <h3 className="text-xl font-bold mb-2 text-primary-variant">{value.title}</h3>
-                    <p className="text-muted-foreground">{value.description}</p>
-                  </CardContent>
-                </Card>
-              );
-            };
-            return <ValueCard key={index} />;
-          })}
+          {values.map((value, index) => (
+            <ValueCard key={index} icon={value.icon} title={value.title} description={value.description} />
+          ))}
         </div>
       </div>
     </section>
