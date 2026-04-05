@@ -17,9 +17,7 @@ import {
   type RoundResult,
 } from '@/lib/formulaEngine';
 import type { FormulaRound } from '@/lib/formulaRoundApi';
-import { supabase } from '@/lib/supabaseClient';
 
-const PREVIEW_TESTER_PASSWORD = 'FormulaRound123!';
 
 const PREVIEW_TESTERS = {
   '7f4c2e10-0000-4000-8000-000000000301': {
@@ -48,6 +46,18 @@ const PREVIEW_TESTERS = {
     email: 'formula-round+student5@sokratai.test',
   },
 } as const;
+
+const PREVIEW_ROUNDS: Record<string, FormulaRound> = {
+  '7f4c2e10-0000-4000-8000-000000000201': {
+    id: '7f4c2e10-0000-4000-8000-000000000201',
+    assignment_id: '7f4c2e10-0000-4000-8000-000000000101',
+    section: 'kinematics',
+    formula_count: 12,
+    questions_per_round: 10,
+    lives: 3,
+    created_at: '2026-04-05T08:36:25.530903+00:00',
+  },
+};
 
 type PreviewTester = (typeof PREVIEW_TESTERS)[keyof typeof PREVIEW_TESTERS];
 type PreviewAuthStatus = 'idle' | 'loading' | 'ready' | 'error';
@@ -126,11 +136,23 @@ const StudentFormulaRound = () => {
     [previewStudentId],
   );
   const previewModeEnabled = previewHost && previewModeRequested;
+  const previewRound = useMemo<FormulaRound | null>(() => {
+    if (!previewModeEnabled || !roundId || !id) {
+      return null;
+    }
+
+    const candidate = PREVIEW_ROUNDS[roundId] ?? null;
+    if (!candidate || candidate.assignment_id !== id) {
+      return null;
+    }
+
+    return candidate;
+  }, [id, previewModeEnabled, roundId]);
   const [previewAuthStatus, setPreviewAuthStatus] = useState<PreviewAuthStatus>(
     previewModeEnabled ? 'idle' : 'ready',
   );
   const [previewAuthError, setPreviewAuthError] = useState<string | null>(null);
-  const roundQueryEnabled = previewAuthStatus === 'ready';
+  const roundQueryEnabled = previewModeEnabled ? false : previewAuthStatus === 'ready';
   const { data: round, isLoading, error } = useFormulaRound(
     roundQueryEnabled ? roundId : '',
   );
@@ -139,11 +161,13 @@ const StudentFormulaRound = () => {
   const [questions, setQuestions] = useState<FormulaQuestion[]>([]);
   const [roundResult, setRoundResult] = useState<RoundResult | null>(null);
 
+  const resolvedRound = previewRound ?? round ?? null;
+
   const roundConfig = useMemo(
-    () => (round ? toRoundConfig(round) : null),
-    [round],
+    () => (resolvedRound ? toRoundConfig(resolvedRound) : null),
+    [resolvedRound],
   );
-  const assignmentMismatch = Boolean(round && id && round.assignment_id !== id);
+  const assignmentMismatch = Boolean(resolvedRound && id && resolvedRound.assignment_id !== id);
   const roundScreenKey = useMemo(
     () => questions.map((question) => question.id).join(':'),
     [questions],
@@ -168,77 +192,39 @@ const StudentFormulaRound = () => {
       };
     }
 
-    const bootstrapPreviewSession = async () => {
-      setPreviewAuthStatus('loading');
-      setPreviewAuthError(null);
+    if (!previewRound) {
+      setPreviewAuthStatus('error');
+      setPreviewAuthError('Preview-данные раунда не найдены для этой ссылки.');
+      return () => {
+        cancelled = true;
+      };
+    }
 
-      try {
-        const {
-          data: { session },
-          error: sessionError,
-        } = await supabase.auth.getSession();
-
-        if (sessionError) {
-          throw sessionError;
-        }
-
-        if (session?.user?.id === previewTester.id) {
-          if (!cancelled) {
-            setPreviewAuthStatus('ready');
-          }
-          return;
-        }
-
-        if (session?.user?.id && session.user.id !== previewTester.id) {
-          const { error: signOutError } = await supabase.auth.signOut();
-          if (signOutError) {
-            throw signOutError;
-          }
-        }
-
-        const { error: signInError } = await supabase.auth.signInWithPassword({
-          email: previewTester.email,
-          password: PREVIEW_TESTER_PASSWORD,
-        });
-
-        if (signInError) {
-          throw signInError;
-        }
-
-        if (!cancelled) {
-          setPreviewAuthStatus('ready');
-        }
-      } catch (authError) {
-        if (!cancelled) {
-          setPreviewAuthStatus('error');
-          setPreviewAuthError(
-            authError instanceof Error
-              ? authError.message
-              : 'Не удалось включить preview-режим для тестировщика.',
-          );
-        }
-      }
-    };
-
-    void bootstrapPreviewSession();
+    setPreviewAuthStatus('ready');
+    setPreviewAuthError(null);
 
     return () => {
       cancelled = true;
     };
-  }, [previewModeEnabled, previewTester]);
+  }, [previewModeEnabled, previewRound, previewTester]);
 
   useEffect(() => {
-    if (!round?.id || !roundConfig) {
+    if (!resolvedRound?.id || !roundConfig) {
       return;
     }
 
     setRoundResult(null);
     setQuestions(buildQuestions(roundConfig));
-  }, [round?.id, roundConfig]);
+  }, [resolvedRound?.id, roundConfig]);
 
   const handleRoundComplete = useCallback(
     (result: RoundResult) => {
       setRoundResult(result);
+
+      if (previewModeEnabled) {
+        return;
+      }
+
       saveResultMutation.mutate(
         { roundId, result },
         {
@@ -252,7 +238,7 @@ const StudentFormulaRound = () => {
         },
       );
     },
-    [roundId, saveResultMutation],
+    [previewModeEnabled, roundId, saveResultMutation],
   );
 
   const handleRetryErrors = useCallback(() => {
@@ -275,6 +261,9 @@ const StudentFormulaRound = () => {
     if (previewAuthError) {
       return previewAuthError;
     }
+    if (previewModeEnabled && !previewRound) {
+      return 'Preview-данные раунда не найдены.';
+    }
     if (assignmentMismatch) {
       return 'Этот раунд не относится к выбранной домашке.';
     }
@@ -285,7 +274,7 @@ const StudentFormulaRound = () => {
       return 'Не указан roundId.';
     }
     return 'Не удалось загрузить раунд.';
-  }, [assignmentMismatch, error, previewAuthError, previewHost, previewModeRequested, roundId]);
+  }, [assignmentMismatch, error, previewAuthError, previewHost, previewModeEnabled, previewModeRequested, previewRound, roundId]);
 
   const pageContent = (
     <>
