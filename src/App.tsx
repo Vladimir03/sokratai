@@ -155,6 +155,14 @@ const App = () => (
               } 
             />
             <Route 
+              path="/homework/:id/round/:roundId" 
+              element={
+                <Suspense fallback={<PageLoader />}>
+                  <StudentFormulaRound />
+                </Suspense>
+              } 
+            />
+            <Route 
               path="/practice" 
               element={
                 <Suspense fallback={<PageLoader />}>
