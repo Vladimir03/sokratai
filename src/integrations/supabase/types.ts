@@ -510,6 +510,94 @@ export type Database = {
         }
         Relationships: []
       }
+      formula_round_results: {
+        Row: {
+          answers: Json
+          completed: boolean
+          created_at: string
+          duration_seconds: number
+          id: string
+          lives_remaining: number
+          round_id: string
+          score: number
+          student_id: string
+          total: number
+          weak_formulas: Json
+        }
+        Insert: {
+          answers?: Json
+          completed?: boolean
+          created_at?: string
+          duration_seconds?: number
+          id?: string
+          lives_remaining?: number
+          round_id: string
+          score?: number
+          student_id: string
+          total?: number
+          weak_formulas?: Json
+        }
+        Update: {
+          answers?: Json
+          completed?: boolean
+          created_at?: string
+          duration_seconds?: number
+          id?: string
+          lives_remaining?: number
+          round_id?: string
+          score?: number
+          student_id?: string
+          total?: number
+          weak_formulas?: Json
+        }
+        Relationships: [
+          {
+            foreignKeyName: "formula_round_results_round_id_fkey"
+            columns: ["round_id"]
+            isOneToOne: false
+            referencedRelation: "formula_rounds"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      formula_rounds: {
+        Row: {
+          assignment_id: string
+          created_at: string
+          formula_count: number
+          id: string
+          lives: number
+          questions_per_round: number
+          section: string
+        }
+        Insert: {
+          assignment_id: string
+          created_at?: string
+          formula_count?: number
+          id?: string
+          lives?: number
+          questions_per_round?: number
+          section?: string
+        }
+        Update: {
+          assignment_id?: string
+          created_at?: string
+          formula_count?: number
+          id?: string
+          lives?: number
+          questions_per_round?: number
+          section?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "formula_rounds_assignment_id_fkey"
+            columns: ["assignment_id"]
+            isOneToOne: false
+            referencedRelation: "homework_tutor_assignments"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       homework_chat_messages: {
         Row: {
           content: string
