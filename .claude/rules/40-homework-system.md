@@ -262,6 +262,46 @@ Legacy student-only система (`homework_sets`, `homework_tasks`, `homework
 - `_topicHint` — soft warning (non-blocking): ключи с суффиксом `Hint` не считаются blocking errors
 - Поле «Тема» в L0 (контейнере), НЕ в `HWExpandedParams`
 
+### Тренажёр формул — Formula Rounds (Phase 1a, 2026-04-05)
+
+Новый homework-артефакт: ученик проходит раунд из 10 заданий по формулам (3-5 минут, 3 жизни).
+
+**Архитектура:**
+- **Formula engine — client-side** (`src/lib/formulaEngine/`). Нет AI-вызовов, нет edge functions. Генерация заданий из статической базы 12 формул кинематики. При добавлении разделов (динамика, etc.) — формулы переедут в DB
+- **Три типа заданий** по слоям знания (GDD §4.1, §4.5, §4.8):
+  - Layer 3: `TrueOrFalseCard` — формула верна/неверна (мутации из `MUTATION_LIBRARY`)
+  - Layer 2: `BuildFormulaCard` — собери формулу из токенов (числитель/знаменатель)
+  - Layer 1: `SituationCard` — ситуация → выбери формулу
+
+**Критичное: structured answer validation**
+- `BuildFormulaAnswer { numerator: string[]; denominator: string[] }` — НЕ flat array
+- `BUILD_RECIPES` в `questionGenerator.ts` хранит `numeratorTokens` / `denominatorTokens`
+- **Все карточки возвращают raw answer**, correctness определяется ТОЛЬКО в `FormulaRoundScreen.handleAnswer` (single source of truth). НЕ ПЕРЕНОСИТЬ проверку обратно в карточки
+- Дистракторы: `relatedFormulas` first → sameSection backfill (GDD §6.4). НЕ shuffle(merged)
+
+**Фазы:**
+- **Phase 1a** (текущая): student-facing round UI + DB + formula engine. Ученик заходит по `/homework/:id/round/:roundId`
+- **Phase 1b** (отдельная spec): tutor assignment UI в TutorHomeworkCreate + tutor visibility в TutorHomeworkDetail/Results + homework completion integration
+
+**DB таблицы:**
+- `formula_rounds` — конфигурация раунда (привязана к assignment, section, lives, question count)
+- `formula_round_results` — результаты прохождения (score, answers JSONB, weak_formulas JSONB)
+- RLS: student видит свои rounds/results. `tutor_read_results` policy **существует** (для Phase 1b), но tutor UI пока не реализован
+
+**Ключевые файлы:**
+- `src/lib/formulaEngine/formulas.ts` — 12 формул кинематики (статическая база)
+- `src/lib/formulaEngine/questionGenerator.ts` — генерация заданий, мутации, дистракторы, feedback
+- `src/lib/formulaEngine/types.ts` — `FormulaQuestion`, `BuildFormulaAnswer`, `RoundResult`
+- `src/components/homework/formula-round/FormulaRoundScreen.tsx` — основной экран раунда (fullscreen, correctness checking)
+- `src/components/homework/formula-round/RoundResultScreen.tsx` — итоговый экран (score, weak formulas, retry)
+- `src/pages/StudentFormulaRound.tsx` — page component, route `/homework/:id/round/:roundId`
+- `src/hooks/useFormulaRound.ts` — React Query hooks
+- `src/lib/formulaRoundApi.ts` — API для сохранения результатов
+- `supabase/migrations/20260406_formula_rounds.sql` — миграция
+
+**Спека:** `docs/delivery/features/formula-rounds/spec.md`
+**GDD (source of truth для gameplay):** `docs/SokratAI_physics_game-design-document.md`
+
 ### Reorder задач в конструкторе ДЗ (2026-03-19)
 
 - `HWTaskCard.tsx` — props: `onMoveUp`, `onMoveDown`, `isFirst`, `isLast`. Кнопки `ChevronUp`/`ChevronDown`
