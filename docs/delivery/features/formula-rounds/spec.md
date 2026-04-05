@@ -486,6 +486,27 @@ supabase/migrations/20260406_formula_rounds.sql
 # 5. Проверить запись в formula_round_results через Supabase dashboard
 ```
 
+### Preview / Lovable QA mode
+
+- Для ручного QA в preview/dev использовать `supabase/seed/formula-round-seed.sql`
+- Seed создаёт 5 фиксированных test students и прямые ссылки с `?student=<seed_uuid>`
+- `src/pages/StudentFormulaRound.tsx` поддерживает auto-login по этим ссылкам **только** на preview/dev host:
+  - `localhost`
+  - `*.lovableproject.com`
+  - non-prod `*.lovable.app`
+- На `sokratai.ru` и `sokratai.lovable.app` query param `student` не должен обходить обычную авторизацию
+- Если меняются UUID в seed, нужно синхронно обновлять preview bootstrap в `StudentFormulaRound.tsx`
+
+### Phase 1b tutor UI guardrails
+
+- Phase 1b не должен вводить новый top-level tutor module для formula rounds
+- Конфигурация formula round должна жить внутри существующего homework create flow (`TutorHomeworkCreate`)
+- Видимость прохождений и результатов должна жить внутри assignment detail/results flows (`TutorHomeworkDetail`, `TutorHomeworkResults`)
+- Tutor UI обязан оставаться jobs-first:
+  - primary action = собрать/отправить ДЗ или просмотреть результат
+  - formula round = подблок homework artifact, а не standalone game screen
+- Использовать существующие данные `formula_rounds` / `formula_round_results` и политику `tutor_read_results`; не создавать отдельную tutor-only result schema
+
 ### Связь с pilot KPI
 
 - **Leading**: student activation rate (% учеников, запустивших round в первые 24ч)

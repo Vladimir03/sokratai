@@ -288,6 +288,34 @@ Legacy student-only система (`homework_sets`, `homework_tasks`, `homework
 - `formula_round_results` — результаты прохождения (score, answers JSONB, weak_formulas JSONB)
 - RLS: student видит свои rounds/results. `tutor_read_results` policy **существует** (для Phase 1b), но tutor UI пока не реализован
 
+**Seed + preview QA path (2026-04-05):**
+- `supabase/seed/formula-round-seed.sql` — каноничный dev seed для formula rounds
+- Seed создаёт:
+  - `test-tutor`
+  - `test_student_1` ... `test_student_5`
+  - один `homework_tutor_assignment`
+  - один `formula_round`
+  - 5 записей в `homework_tutor_student_assignments`
+- Все UUID в seed фиксированные. НЕ заменять на `gen_random_uuid()` — прямые ссылки должны оставаться воспроизводимыми
+- Password для seed students: `FormulaRound123!`
+- `StudentFormulaRound.tsx` поддерживает preview/dev-only auto-login по query param `?student=<seed_uuid>`
+- Этот bypass допустим **только** на:
+  - `localhost`
+  - `*.lovableproject.com`
+  - `*.lovable.app`, кроме `sokratai.lovable.app`
+- На production host (`sokratai.ru`, `sokratai.lovable.app`) query param `student` не должен открывать round без обычной auth session
+
+**Phase 1b tutor UI guardrails (обязательно для следующей реализации):**
+- НЕ создавать новый top-level tutor route ради formula rounds
+- Встраивать formula rounds только в существующие tutor surfaces:
+  - `TutorHomeworkCreate.tsx` — assignment-time configuration
+  - `TutorHomeworkDetail.tsx` — block/status inside assignment detail
+  - `TutorHomeworkResults.tsx` — visibility по ученикам и попыткам
+- Formula round в tutor UI = часть homework workflow, не отдельный "игровой модуль"
+- На tutor-экранах primary CTA должен оставаться связанным с job репетитора (`Создать ДЗ`, `Отправить`, `Открыть результаты`), а не с абстрактным "управлением тренажёром"
+- Для Phase 1b использовать уже существующие данные (`formula_rounds`, `formula_round_results`, `tutor_read_results` policy), а не вводить отдельную tutor-only схему
+- Не добавлять generic analytics dashboard без прямой связи с homework result flow
+
 **Ключевые файлы:**
 - `src/lib/formulaEngine/formulas.ts` — 12 формул кинематики (статическая база)
 - `src/lib/formulaEngine/questionGenerator.ts` — генерация заданий, мутации, дистракторы, feedback
