@@ -1,4 +1,4 @@
-import { supabase } from '@/integrations/supabase/client';
+import { supabase } from '@/lib/supabaseClient';
 import type { RoundResult } from './formulaEngine/types';
 
 export interface FormulaRound {

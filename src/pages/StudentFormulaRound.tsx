@@ -17,7 +17,7 @@ import {
   type RoundResult,
 } from '@/lib/formulaEngine';
 import type { FormulaRound } from '@/lib/formulaRoundApi';
-import { supabase } from '@/integrations/supabase/client';
+import { supabase } from '@/lib/supabaseClient';
 
 const PREVIEW_TESTER_PASSWORD = 'FormulaRound123!';
 
