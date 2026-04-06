@@ -770,6 +770,7 @@ export type Database = {
           deadline: string | null
           description: string | null
           disable_ai_bootstrap: boolean
+          exam_type: string
           group_id: string | null
           id: string
           max_attempts: number
@@ -784,6 +785,7 @@ export type Database = {
           deadline?: string | null
           description?: string | null
           disable_ai_bootstrap?: boolean
+          exam_type?: string
           group_id?: string | null
           id?: string
           max_attempts?: number
@@ -798,6 +800,7 @@ export type Database = {
           deadline?: string | null
           description?: string | null
           disable_ai_bootstrap?: boolean
+          exam_type?: string
           group_id?: string | null
           id?: string
           max_attempts?: number
