@@ -778,6 +778,7 @@ export type Database = {
           title: string
           topic: string | null
           tutor_id: string
+          workflow_mode: string
         }
         Insert: {
           created_at?: string
@@ -792,6 +793,7 @@ export type Database = {
           title: string
           topic?: string | null
           tutor_id: string
+          workflow_mode?: string
         }
         Update: {
           created_at?: string
@@ -806,6 +808,7 @@ export type Database = {
           title?: string
           topic?: string | null
           tutor_id?: string
+          workflow_mode?: string
         }
         Relationships: [
           {
@@ -924,6 +927,119 @@ export type Database = {
         Relationships: [
           {
             foreignKeyName: "homework_tutor_student_assignments_assignment_id_fkey"
+            columns: ["assignment_id"]
+            isOneToOne: false
+            referencedRelation: "homework_tutor_assignments"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      homework_tutor_submission_items: {
+        Row: {
+          ai_confidence: number | null
+          ai_error_type: string | null
+          ai_feedback: string | null
+          ai_is_correct: boolean | null
+          ai_score: number | null
+          answer_type: string | null
+          created_at: string
+          id: string
+          recognized_text: string | null
+          student_image_urls: string[] | null
+          student_text: string | null
+          submission_id: string
+          task_id: string
+          tutor_comment: string | null
+          tutor_override_correct: boolean | null
+        }
+        Insert: {
+          ai_confidence?: number | null
+          ai_error_type?: string | null
+          ai_feedback?: string | null
+          ai_is_correct?: boolean | null
+          ai_score?: number | null
+          answer_type?: string | null
+          created_at?: string
+          id?: string
+          recognized_text?: string | null
+          student_image_urls?: string[] | null
+          student_text?: string | null
+          submission_id: string
+          task_id: string
+          tutor_comment?: string | null
+          tutor_override_correct?: boolean | null
+        }
+        Update: {
+          ai_confidence?: number | null
+          ai_error_type?: string | null
+          ai_feedback?: string | null
+          ai_is_correct?: boolean | null
+          ai_score?: number | null
+          answer_type?: string | null
+          created_at?: string
+          id?: string
+          recognized_text?: string | null
+          student_image_urls?: string[] | null
+          student_text?: string | null
+          submission_id?: string
+          task_id?: string
+          tutor_comment?: string | null
+          tutor_override_correct?: boolean | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "homework_tutor_submission_items_submission_id_fkey"
+            columns: ["submission_id"]
+            isOneToOne: false
+            referencedRelation: "homework_tutor_submissions"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "homework_tutor_submission_items_task_id_fkey"
+            columns: ["task_id"]
+            isOneToOne: false
+            referencedRelation: "homework_tutor_tasks"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      homework_tutor_submissions: {
+        Row: {
+          assignment_id: string
+          attempt_no: number
+          id: string
+          status: string
+          student_id: string
+          submitted_at: string | null
+          telegram_chat_id: number | null
+          total_max_score: number | null
+          total_score: number | null
+        }
+        Insert: {
+          assignment_id: string
+          attempt_no?: number
+          id?: string
+          status?: string
+          student_id: string
+          submitted_at?: string | null
+          telegram_chat_id?: number | null
+          total_max_score?: number | null
+          total_score?: number | null
+        }
+        Update: {
+          assignment_id?: string
+          attempt_no?: number
+          id?: string
+          status?: string
+          student_id?: string
+          submitted_at?: string | null
+          telegram_chat_id?: number | null
+          total_max_score?: number | null
+          total_score?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "homework_tutor_submissions_assignment_id_fkey"
             columns: ["assignment_id"]
             isOneToOne: false
             referencedRelation: "homework_tutor_assignments"
