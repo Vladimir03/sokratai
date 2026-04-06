@@ -1,3 +1,4 @@
+import { parseISO } from 'date-fns';
 import { supabase } from '@/lib/supabaseClient';
 import type { HomeworkThread } from '@/types/homework';
 
@@ -472,6 +473,30 @@ export interface TutorStudentGuidedThreadResponse {
     id: string;
     full_name: string | null;
     username: string | null;
+  };
+}
+
+export function mergeThreadMessage(
+  prev: TutorStudentGuidedThreadResponse | null | undefined,
+  newMessage: HomeworkThread['homework_tutor_thread_messages'][number],
+): TutorStudentGuidedThreadResponse | null | undefined {
+  if (prev == null) return prev;
+
+  const messages = prev.thread.homework_tutor_thread_messages ?? [];
+  if (messages.some((message) => message.id === newMessage.id)) {
+    return prev;
+  }
+
+  const nextMessages = [...messages, newMessage].sort(
+    (a, b) => parseISO(a.created_at).getTime() - parseISO(b.created_at).getTime(),
+  );
+
+  return {
+    ...prev,
+    thread: {
+      ...prev.thread,
+      homework_tutor_thread_messages: nextMessages,
+    },
   };
 }
 

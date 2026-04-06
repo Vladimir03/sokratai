@@ -1,0 +1,1 @@
+alter publication supabase_realtime add table public.homework_tutor_thread_messages;

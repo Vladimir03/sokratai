@@ -1,5 +1,5 @@
-import { useState, useCallback, useMemo, useRef } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -14,6 +14,7 @@ import {
   getTutorStudentGuidedThread,
   postTutorThreadMessage,
   getHomeworkImageSignedUrl,
+  mergeThreadMessage,
   uploadTutorHomeworkTaskImage,
   type TutorStudentGuidedThreadResponse,
 } from '@/lib/tutorHomeworkApi';
@@ -24,6 +25,10 @@ import {
   TUTOR_GC_TIME_MS,
 } from '@/hooks/tutorQueryOptions';
 import { ThreadAttachments } from '@/components/homework/ThreadAttachments';
+import { supabase } from '@/lib/supabaseClient';
+import type { Database } from '@/integrations/supabase/types';
+
+const STICKY_BOTTOM_THRESHOLD_PX = 100;
 
 const ROLE_LABELS: Record<string, string> = {
   user: 'Ученик',
@@ -51,6 +56,7 @@ export function GuidedThreadViewer({
   /** Controls whether the thread query fires. Parent should pass false when viewer is collapsed. */
   enabled?: boolean;
 }) {
+  // Job: Видеть прогресс ученика по ДЗ без дёрганий во время занятия.
   const [taskFilter, setTaskFilter] = useState<number | 'all'>('all');
   const [messageText, setMessageText] = useState('');
   const [hiddenNote, setHiddenNote] = useState(false);
@@ -58,17 +64,90 @@ export function GuidedThreadViewer({
   const [attachedFile, setAttachedFile] = useState<File | null>(null);
   const [attachPreview, setAttachPreview] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const queryClient = useQueryClient();
+  const threadQueryKey = useMemo(
+    () => ['tutor', 'homework', 'thread', assignmentId, studentId] as const,
+    [assignmentId, studentId],
+  );
 
   const threadQuery = useQuery<TutorStudentGuidedThreadResponse>({
-    queryKey: ['tutor', 'homework', 'guided-thread', assignmentId, studentId],
+    queryKey: threadQueryKey,
     queryFn: () => getTutorStudentGuidedThread(assignmentId, studentId),
     enabled,
     staleTime: TUTOR_STALE_TIME_MS,
     gcTime: TUTOR_GC_TIME_MS,
-    retry: createTutorRetry(['tutor', 'homework', 'guided-thread', assignmentId, studentId] as const),
+    retry: createTutorRetry(threadQueryKey),
     retryDelay: tutorRetryDelay,
     refetchOnWindowFocus: false,
   });
+  const threadId = threadQuery.data?.thread.id;
+
+  const getWasAtBottom = useCallback(() => {
+    const element = scrollContainerRef.current;
+    if (!element) return true;
+    return element.scrollHeight - element.scrollTop - element.clientHeight < STICKY_BOTTOM_THRESHOLD_PX;
+  }, []);
+
+  const scrollToBottomIfNeeded = useCallback((wasAtBottom: boolean) => {
+    if (!wasAtBottom) return;
+    requestAnimationFrame(() => {
+      const element = scrollContainerRef.current;
+      if (!element) return;
+      element.scrollTop = element.scrollHeight;
+    });
+  }, []);
+
+  useEffect(() => {
+    if (!enabled || !threadId) return;
+
+    // Cleanup обязателен — иначе утечка каналов при rapid toggle.
+    const channel = supabase
+      .channel(`thread-${threadId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'homework_tutor_thread_messages',
+          filter: `thread_id=eq.${threadId}`,
+        },
+        (payload) => {
+          const element = scrollContainerRef.current;
+          const wasAtBottom =
+            !element ||
+            element.scrollHeight - element.scrollTop - element.clientHeight < STICKY_BOTTOM_THRESHOLD_PX;
+          const newMessage = payload.new as Database['public']['Tables']['homework_tutor_thread_messages']['Row'];
+          queryClient.setQueryData<TutorStudentGuidedThreadResponse | undefined>(
+            ['tutor', 'homework', 'thread', assignmentId, studentId],
+            (prev) =>
+              mergeThreadMessage(prev, {
+                id: newMessage.id,
+                role: newMessage.role as 'user' | 'assistant' | 'system' | 'tutor',
+                content: newMessage.content,
+                image_url: newMessage.image_url,
+                task_order: newMessage.task_order,
+                created_at: newMessage.created_at,
+                message_kind: newMessage.message_kind ?? undefined,
+                author_user_id: newMessage.author_user_id,
+                visible_to_student: newMessage.visible_to_student,
+              }),
+          );
+          if (wasAtBottom) {
+            requestAnimationFrame(() => {
+              const nextElement = scrollContainerRef.current;
+              if (!nextElement) return;
+              nextElement.scrollTop = nextElement.scrollHeight;
+            });
+          }
+        },
+      )
+      .subscribe();
+
+    return () => {
+      void channel.unsubscribe();
+    };
+  }, [enabled, threadId, queryClient]);
 
   const taskStatusById = useMemo(
     () => new Map((threadQuery.data?.thread.homework_tutor_task_states ?? []).map((state) => [state.task_id, state])),
@@ -114,21 +193,35 @@ export function GuidedThreadViewer({
         const upload = await uploadTutorHomeworkTaskImage(attachedFile);
         imageUrl = upload.storageRef;
       }
-      await postTutorThreadMessage(assignmentId, studentId, trimmed || '(файл)', {
+      const response = await postTutorThreadMessage(assignmentId, studentId, trimmed || '(файл)', {
         visible_to_student: !hiddenNote,
         task_order: taskFilter === 'all' ? undefined : taskFilter,
         image_url: imageUrl,
       });
+      const wasAtBottom = getWasAtBottom();
+      queryClient.setQueryData<TutorStudentGuidedThreadResponse | undefined>(
+        threadQueryKey,
+        (prev) =>
+          mergeThreadMessage(prev, {
+            id: response.id,
+            role: 'tutor',
+            content: trimmed || '(файл)',
+            image_url: imageUrl ?? null,
+            task_order: taskFilter === 'all' ? null : taskFilter,
+            created_at: response.created_at,
+            visible_to_student: !hiddenNote,
+          }),
+      );
+      scrollToBottomIfNeeded(wasAtBottom);
       setMessageText('');
       clearAttachment();
-      void threadQuery.refetch();
       toast.success(hiddenNote ? 'Заметка сохранена' : 'Сообщение отправлено');
     } catch (err) {
       toast.error(`Ошибка: ${err instanceof Error ? err.message : 'неизвестная'}`);
     } finally {
       setIsSending(false);
     }
-  }, [messageText, attachedFile, hiddenNote, isSending, assignmentId, studentId, taskFilter, threadQuery, clearAttachment]);
+  }, [messageText, attachedFile, hiddenNote, isSending, assignmentId, studentId, taskFilter, clearAttachment, getWasAtBottom, queryClient, scrollToBottomIfNeeded, threadQueryKey]);
 
   return (
     <Card className="border-dashed">
@@ -176,7 +269,10 @@ export function GuidedThreadViewer({
                 })}
               </div>
 
-              <div className="rounded-md border bg-background p-2 max-h-[320px] overflow-y-auto space-y-2">
+              <div
+                ref={scrollContainerRef}
+                className="rounded-md border bg-background p-2 max-h-[320px] overflow-y-auto space-y-2"
+              >
                 {filteredMessages.length === 0 ? (
                   <p className="text-xs text-muted-foreground">Сообщений по этому фильтру пока нет.</p>
                 ) : (

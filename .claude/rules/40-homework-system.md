@@ -57,6 +57,11 @@
 - `supabase/functions/homework-api/` — Edge function CRUD (8 маршрутов)
 - `supabase/functions/homework-reminder/` — напоминания о ДЗ (cron)
 
+### Realtime thread viewer (E9, 2026-04-06)
+- Для live-обновлений треда репетитора таблица `public.homework_tutor_thread_messages` должна быть добавлена в publication `supabase_realtime`
+- Каноничная миграция: `20260406143000_enable_realtime_homework_tutor_thread_messages.sql`
+- Scope realtime Phase 1: только `INSERT` события сообщений guided chat; не расширять эту настройку на другие homework-таблицы без отдельной spec
+
 ### LaTeX в деталях и результатах ДЗ (Sprint 1, 2026-03-17)
 - `TutorHomeworkDetail.tsx` — task_text, correct_answer, student_text, ai_feedback рендерятся через `MathText`
 - `TutorHomeworkResults.tsx` — student_text, ai_feedback через `MathText`; task header в review-карточке — `stripLatex` (compact plain-text preview)
@@ -71,6 +76,22 @@
 - Репетитор может прикрепить изображение к сообщению (upload через `uploadTutorHomeworkTaskImage`, ref сохраняется в `image_url`)
 - Student-side `GuidedChatMessage` тоже отображает `image_url` через `ThreadAttachments` (резолвит через `getStudentTaskImageSignedUrl`)
 - Backend `handleTutorPostMessage` принимает optional `image_url` в body
+
+### Realtime thread viewer (Е9, 2026-04-07)
+- `GuidedThreadViewer.tsx` подписывается на Supabase Realtime `INSERT` по `public.homework_tutor_thread_messages` с фильтром `thread_id=eq.${threadId}`
+- Query cache для viewer: `['tutor', 'homework', 'thread', threadId]`; новые сообщения мержатся локально, без полного refetch
+- Каноничный merge path: `mergeThreadMessage()` в `src/lib/tutorHomeworkApi.ts`
+- `mergeThreadMessage()` обязан дедупить по `message.id` и сохранять сортировку по `created_at`
+- Для realtime callback использовать merge-helper, а не `invalidateQueries()` — иначе будет flicker списка и лишние запросы
+- Cleanup обязателен: `channel.unsubscribe()` в `useEffect` return
+- Этот cleanup критичен при rapid expand/collapse viewer и при смене `threadId`
+- Sticky-bottom поведение: автоскролл только если репетитор уже почти внизу треда
+- Каноничный порог: `STICKY_BOTTOM_THRESHOLD_PX = 100`
+- Если пользователь проскроллил вверх и читает историю, realtime не должен дёргать scroll
+- Таблица `homework_tutor_thread_messages` должна быть опубликована в `supabase_realtime`
+- Каноничная миграция publication: `supabase/migrations/20260406143000_enable_realtime_homework_tutor_thread_messages.sql`
+- Не добавлять новые realtime-подписки в viewer без merge-helper слоя в `tutorHomeworkApi.ts`
+- Спека: `docs/delivery/features/realtime-thread/spec.md`
 
 ### Guided chat media upload — Phase 1 (2026-03-20)
 - Student backend `handlePostThreadMessage` принимает optional `image_url`, принимает только `storage://...` refs и сохраняет `image_url` в `homework_tutor_thread_messages`
