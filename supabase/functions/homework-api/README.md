@@ -13,6 +13,7 @@ https://<project-ref>.supabase.co/functions/v1/homework-api
 All requests require a valid Supabase JWT in the `Authorization: Bearer <token>` header.
 - Tutor dashboard endpoints require the authenticated user to have a record in the `tutors` table.
 - Student guided-homework endpoints require the authenticated user to own the corresponding `homework_tutor_student_assignments` / thread.
+- Student formula-round endpoints require the authenticated user to be assigned to the homework linked from `formula_rounds.assignment_id`.
 
 ## CORS
 
@@ -351,6 +352,56 @@ Submit tutor review for a student's submission.
 ```
 
 ---
+
+## Student Formula Round Endpoints
+
+These endpoints power `/homework/:id/round/:roundId` and keep the round result write-once at completion.
+
+### GET /formula-rounds/:roundId
+
+Load formula round configuration for the current student.
+
+**Response (200):**
+```json
+{
+  "id": "uuid",
+  "assignment_id": "uuid",
+  "section": "kinematics",
+  "formula_count": 12,
+  "questions_per_round": 10,
+  "lives": 3,
+  "created_at": "2026-04-06T10:00:00Z"
+}
+```
+
+### GET /formula-rounds/:roundId/results
+
+Load all saved attempts for the current student, newest first.
+
+### POST /formula-rounds/:roundId/results
+
+Persist a completed round result for the current student.
+
+**Request:**
+```json
+{
+  "score": 7,
+  "total": 10,
+  "livesRemaining": 1,
+  "completed": true,
+  "durationSeconds": 214,
+  "answers": [],
+  "weakFormulas": []
+}
+```
+
+**Response (201):**
+```json
+{
+  "id": "uuid",
+  "played_at": "2026-04-06T10:05:00Z"
+}
+```
 
 ## Student Guided Chat Endpoints
 

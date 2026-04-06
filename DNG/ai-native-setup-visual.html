@@ -1,0 +1,805 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI-Native Product Development Setup</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap');
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: 'Inter', sans-serif;
+    background: #0a0a0f;
+    color: #e8e8f0;
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  .container {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 48px 24px;
+  }
+
+  /* ── Header ── */
+  .header {
+    text-align: center;
+    margin-bottom: 64px;
+  }
+
+  .header .tag {
+    display: inline-block;
+    background: rgba(99, 102, 241, 0.15);
+    border: 1px solid rgba(99, 102, 241, 0.3);
+    color: #a5b4fc;
+    padding: 6px 16px;
+    border-radius: 100px;
+    font-size: 13px;
+    font-weight: 600;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+    margin-bottom: 20px;
+  }
+
+  .header h1 {
+    font-size: clamp(32px, 5vw, 56px);
+    font-weight: 900;
+    line-height: 1.1;
+    background: linear-gradient(135deg, #fff 0%, #a5b4fc 50%, #818cf8 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    margin-bottom: 16px;
+  }
+
+  .header .subtitle {
+    font-size: 18px;
+    color: #8888a0;
+    max-width: 600px;
+    margin: 0 auto;
+    line-height: 1.5;
+  }
+
+  /* ── Pipeline ── */
+  .pipeline {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+    margin-bottom: 80px;
+  }
+
+  /* Vertical connector line */
+  .pipeline::before {
+    content: '';
+    position: absolute;
+    left: 50%;
+    top: 0;
+    bottom: 0;
+    width: 2px;
+    background: linear-gradient(to bottom,
+      #6366f1 0%,
+      #8b5cf6 25%,
+      #10b981 50%,
+      #f59e0b 75%,
+      #ef4444 100%
+    );
+    opacity: 0.3;
+    z-index: 0;
+  }
+
+  .layer {
+    position: relative;
+    z-index: 1;
+    display: grid;
+    grid-template-columns: 1fr 80px 1fr;
+    align-items: center;
+    gap: 0;
+    padding: 16px 0;
+  }
+
+  .layer-card {
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 16px;
+    padding: 28px;
+    backdrop-filter: blur(10px);
+    transition: all 0.3s ease;
+  }
+
+  .layer-card:hover {
+    background: rgba(255, 255, 255, 0.06);
+    border-color: rgba(255, 255, 255, 0.15);
+    transform: translateY(-2px);
+  }
+
+  .layer-card.left { grid-column: 1; text-align: right; }
+  .layer-card.right { grid-column: 3; text-align: left; }
+
+  .layer-node {
+    grid-column: 2;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .node-circle {
+    width: 56px;
+    height: 56px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 24px;
+    font-weight: 800;
+    position: relative;
+    z-index: 2;
+  }
+
+  .node-circle::after {
+    content: '';
+    position: absolute;
+    inset: -4px;
+    border-radius: 50%;
+    border: 2px solid;
+    border-color: inherit;
+    opacity: 0.3;
+    animation: pulse-ring 3s infinite;
+  }
+
+  @keyframes pulse-ring {
+    0%, 100% { transform: scale(1); opacity: 0.3; }
+    50% { transform: scale(1.15); opacity: 0.1; }
+  }
+
+  .layer-num {
+    font-size: 12px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    margin-bottom: 6px;
+    opacity: 0.6;
+  }
+
+  .layer-title {
+    font-size: 20px;
+    font-weight: 800;
+    margin-bottom: 8px;
+    line-height: 1.2;
+  }
+
+  .layer-desc {
+    font-size: 14px;
+    line-height: 1.6;
+    opacity: 0.7;
+  }
+
+  .layer-tools {
+    display: flex;
+    gap: 6px;
+    margin-top: 12px;
+    flex-wrap: wrap;
+  }
+
+  .layer-card.left .layer-tools { justify-content: flex-end; }
+
+  .tool-tag {
+    display: inline-block;
+    padding: 3px 10px;
+    border-radius: 6px;
+    font-size: 11px;
+    font-weight: 600;
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    white-space: nowrap;
+  }
+
+  /* Layer colors */
+  .c1 .node-circle { background: rgba(99, 102, 241, 0.2); border-color: #6366f1; color: #a5b4fc; }
+  .c1 .layer-title { color: #a5b4fc; }
+  .c1 .layer-num { color: #6366f1; }
+
+  .c2 .node-circle { background: rgba(139, 92, 246, 0.2); border-color: #8b5cf6; color: #c4b5fd; }
+  .c2 .layer-title { color: #c4b5fd; }
+  .c2 .layer-num { color: #8b5cf6; }
+
+  .c3 .node-circle { background: rgba(16, 185, 129, 0.2); border-color: #10b981; color: #6ee7b7; }
+  .c3 .layer-title { color: #6ee7b7; }
+  .c3 .layer-num { color: #10b981; }
+
+  .c4 .node-circle { background: rgba(245, 158, 11, 0.2); border-color: #f59e0b; color: #fcd34d; }
+  .c4 .layer-title { color: #fcd34d; }
+  .c4 .layer-num { color: #f59e0b; }
+
+  /* ── Feedback loop arrow ── */
+  .feedback-loop {
+    text-align: center;
+    padding: 32px 0 48px;
+    position: relative;
+  }
+
+  .feedback-arrow {
+    display: inline-flex;
+    align-items: center;
+    gap: 12px;
+    background: rgba(239, 68, 68, 0.1);
+    border: 1px solid rgba(239, 68, 68, 0.25);
+    padding: 12px 24px;
+    border-radius: 100px;
+    color: #fca5a5;
+    font-size: 14px;
+    font-weight: 600;
+  }
+
+  .feedback-arrow svg {
+    width: 20px;
+    height: 20px;
+    animation: spin-loop 4s linear infinite;
+  }
+
+  @keyframes spin-loop {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+  }
+
+  /* ── VS Section ── */
+  .vs-section {
+    margin-bottom: 64px;
+  }
+
+  .vs-header {
+    text-align: center;
+    margin-bottom: 40px;
+  }
+
+  .vs-header h2 {
+    font-size: clamp(24px, 4vw, 40px);
+    font-weight: 900;
+    background: linear-gradient(135deg, #ef4444 0%, #f59e0b 50%, #10b981 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    margin-bottom: 8px;
+  }
+
+  .vs-grid {
+    display: grid;
+    grid-template-columns: 1fr 60px 1fr;
+    gap: 0;
+    align-items: stretch;
+  }
+
+  .vs-card {
+    border-radius: 20px;
+    padding: 32px;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .vs-card.bad {
+    background: rgba(239, 68, 68, 0.05);
+    border: 1px solid rgba(239, 68, 68, 0.2);
+  }
+
+  .vs-card.good {
+    background: rgba(16, 185, 129, 0.05);
+    border: 1px solid rgba(16, 185, 129, 0.2);
+  }
+
+  .vs-card .card-label {
+    font-size: 12px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    margin-bottom: 12px;
+  }
+
+  .vs-card.bad .card-label { color: #ef4444; }
+  .vs-card.good .card-label { color: #10b981; }
+
+  .vs-card h3 {
+    font-size: 22px;
+    font-weight: 800;
+    margin-bottom: 20px;
+    line-height: 1.2;
+  }
+
+  .vs-card.bad h3 { color: #fca5a5; }
+  .vs-card.good h3 { color: #6ee7b7; }
+
+  .vs-divider {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .vs-badge {
+    width: 48px;
+    height: 48px;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.08);
+    border: 2px solid rgba(255, 255, 255, 0.2);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 16px;
+    font-weight: 900;
+    color: #888;
+  }
+
+  .trait-list {
+    list-style: none;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .trait-list li {
+    display: flex;
+    gap: 10px;
+    align-items: flex-start;
+    font-size: 14px;
+    line-height: 1.5;
+    opacity: 0.85;
+  }
+
+  .trait-icon {
+    flex-shrink: 0;
+    width: 22px;
+    height: 22px;
+    border-radius: 6px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 12px;
+    margin-top: 1px;
+  }
+
+  .bad .trait-icon { background: rgba(239, 68, 68, 0.2); color: #ef4444; }
+  .good .trait-icon { background: rgba(16, 185, 129, 0.2); color: #10b981; }
+
+  /* ── Bottom line ── */
+  .bottom-insight {
+    text-align: center;
+    padding: 40px 24px;
+    margin: 0 auto;
+    max-width: 800px;
+  }
+
+  .insight-box {
+    background: linear-gradient(135deg, rgba(99, 102, 241, 0.1) 0%, rgba(16, 185, 129, 0.1) 100%);
+    border: 1px solid rgba(99, 102, 241, 0.2);
+    border-radius: 20px;
+    padding: 40px;
+  }
+
+  .insight-box .big-quote {
+    font-size: clamp(18px, 3vw, 24px);
+    font-weight: 700;
+    line-height: 1.4;
+    color: #e0e0f0;
+    margin-bottom: 16px;
+  }
+
+  .insight-box .big-quote em {
+    font-style: normal;
+    background: linear-gradient(90deg, #a5b4fc, #6ee7b7);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+
+  .insight-box .author {
+    font-size: 14px;
+    color: #666680;
+  }
+
+  /* ── Stats bar ── */
+  .stats-bar {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    gap: 16px;
+    margin-bottom: 64px;
+    padding: 0 16px;
+  }
+
+  .stat-item {
+    text-align: center;
+    padding: 20px 12px;
+    background: rgba(255, 255, 255, 0.02);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 12px;
+  }
+
+  .stat-num {
+    font-size: 28px;
+    font-weight: 900;
+    background: linear-gradient(135deg, #a5b4fc, #6ee7b7);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    line-height: 1;
+    margin-bottom: 4px;
+  }
+
+  .stat-label {
+    font-size: 12px;
+    color: #666680;
+    font-weight: 500;
+  }
+
+  /* ── Flow comparison (horizontal) ── */
+  .flow-compare {
+    margin-bottom: 64px;
+  }
+
+  .flow-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 16px 20px;
+    border-radius: 12px;
+    margin-bottom: 12px;
+    flex-wrap: wrap;
+  }
+
+  .flow-row.bad-flow {
+    background: rgba(239, 68, 68, 0.05);
+    border: 1px solid rgba(239, 68, 68, 0.15);
+  }
+
+  .flow-row.good-flow {
+    background: rgba(16, 185, 129, 0.05);
+    border: 1px solid rgba(16, 185, 129, 0.15);
+  }
+
+  .flow-label {
+    font-size: 13px;
+    font-weight: 700;
+    min-width: 140px;
+    flex-shrink: 0;
+  }
+
+  .bad-flow .flow-label { color: #ef4444; }
+  .good-flow .flow-label { color: #10b981; }
+
+  .flow-step {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 4px 10px;
+    border-radius: 6px;
+    font-size: 12px;
+    font-weight: 500;
+    white-space: nowrap;
+  }
+
+  .bad-flow .flow-step {
+    background: rgba(239, 68, 68, 0.1);
+    color: #fca5a5;
+  }
+
+  .good-flow .flow-step {
+    background: rgba(16, 185, 129, 0.1);
+    color: #6ee7b7;
+  }
+
+  .flow-arrow {
+    color: #444;
+    font-size: 14px;
+    flex-shrink: 0;
+  }
+
+  .flow-step.ai-step {
+    border: 1px solid rgba(139, 92, 246, 0.3);
+    background: rgba(139, 92, 246, 0.15);
+    color: #c4b5fd;
+  }
+
+  .flow-step.human-step {
+    border: 1px solid rgba(245, 158, 11, 0.3);
+    background: rgba(245, 158, 11, 0.15);
+    color: #fcd34d;
+  }
+
+  .flow-step.break-step {
+    border: 1px dashed rgba(239, 68, 68, 0.4);
+    background: transparent;
+    color: #ef4444;
+    font-style: italic;
+  }
+
+  /* ── Responsive ── */
+  @media (max-width: 768px) {
+    .layer {
+      grid-template-columns: 48px 1fr;
+      gap: 0 12px;
+    }
+    .layer-card.left, .layer-card.right {
+      grid-column: 2;
+      text-align: left;
+    }
+    .layer-card.left .layer-tools { justify-content: flex-start; }
+    .layer-node { grid-column: 1; grid-row: 1; }
+    .node-circle { width: 40px; height: 40px; font-size: 18px; }
+
+    .vs-grid {
+      grid-template-columns: 1fr;
+      gap: 16px;
+    }
+    .vs-divider { display: none; }
+
+    .flow-row { flex-direction: column; align-items: flex-start; }
+    .flow-label { min-width: auto; }
+  }
+
+  /* ── Watermark ── */
+  .watermark {
+    text-align: center;
+    padding: 24px;
+    font-size: 12px;
+    color: #333345;
+  }
+
+  .watermark a {
+    color: #4f46e5;
+    text-decoration: none;
+  }
+</style>
+</head>
+<body>
+
+<div class="container">
+
+  <!-- Header -->
+  <div class="header">
+    <div class="tag">Framework</div>
+    <h1>AI-Native Product Development</h1>
+    <p class="subtitle">Замкнутый цикл: от исследования рынка до работающего кода. AI выполняет 90% операционки. Фаундер — стратегический decision-maker.</p>
+  </div>
+
+  <!-- Stats -->
+  <div class="stats-bar">
+    <div class="stat-item">
+      <div class="stat-num">1</div>
+      <div class="stat-label">человек в команде</div>
+    </div>
+    <div class="stat-item">
+      <div class="stat-num">20</div>
+      <div class="stat-label">продуктовых документов</div>
+    </div>
+    <div class="stat-item">
+      <div class="stat-num">9</div>
+      <div class="stat-label">AI-промптов в пайплайне</div>
+    </div>
+    <div class="stat-item">
+      <div class="stat-num">500+</div>
+      <div class="stat-label">строк CLAUDE.md</div>
+    </div>
+    <div class="stat-item">
+      <div class="stat-num">37</div>
+      <div class="stat-label">sub-jobs в графе работ</div>
+    </div>
+    <div class="stat-item">
+      <div class="stat-num">часы</div>
+      <div class="stat-label">а не недели на фичу</div>
+    </div>
+  </div>
+
+  <!-- Pipeline -->
+  <div class="pipeline">
+
+    <!-- Layer 1 -->
+    <div class="layer c1">
+      <div class="layer-card left">
+        <div class="layer-num">Слой 1 — Knowledge</div>
+        <div class="layer-title">Методологическая база</div>
+        <div class="layer-desc">AJTBD + AURA — оцифрованная методология Замесина. Не заметки, а операционные ресурсы: AI читает и выполняет фреймворк по шагам</div>
+        <div class="layer-tools">
+          <span class="tool-tag">AJTBD Core</span>
+          <span class="tool-tag">AURA Framework</span>
+          <span class="tool-tag">6 промптов</span>
+        </div>
+      </div>
+      <div class="layer-node">
+        <div class="node-circle">M</div>
+      </div>
+      <div></div>
+    </div>
+
+    <!-- Layer 2 -->
+    <div class="layer c2">
+      <div></div>
+      <div class="layer-node">
+        <div class="node-circle">R</div>
+      </div>
+      <div class="layer-card right">
+        <div class="layer-num">Слой 2 — Discovery</div>
+        <div class="layer-title">AI-исследование рынка</div>
+        <div class="layer-desc">Цепочка промптов, где результат каждого = вход следующего. B2C → B2B → Кросс-анализ → Граф работ. Ноль ручного copy-paste</div>
+        <div class="layer-tools">
+          <span class="tool-tag">ChatGPT Deep Research</span>
+          <span class="tool-tag">Claude Opus</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Layer 3 -->
+    <div class="layer c3">
+      <div class="layer-card left">
+        <div class="layer-num">Слой 3 — Strategy</div>
+        <div class="layer-title">Продуктовые документы</div>
+        <div class="layer-desc">20 docs: от Wedge Memo до UI Patterns. Каноничный порядок чтения — и для человека, и для AI-агента. Живут в репозитории рядом с кодом</div>
+        <div class="layer-tools">
+          <span class="tool-tag">PRD</span>
+          <span class="tool-tag">UX Principles</span>
+          <span class="tool-tag">UI Patterns</span>
+          <span class="tool-tag">CLAUDE.md</span>
+        </div>
+      </div>
+      <div class="layer-node">
+        <div class="node-circle">P</div>
+      </div>
+      <div></div>
+    </div>
+
+    <!-- Layer 4 -->
+    <div class="layer c4">
+      <div></div>
+      <div class="layer-node">
+        <div class="node-circle">E</div>
+      </div>
+      <div class="layer-card right">
+        <div class="layer-num">Слой 4 — Delivery</div>
+        <div class="layer-title">AI-разработка кода</div>
+        <div class="layer-desc">AI-агент читает canonical docs перед каждым коммитом. CLAUDE.md = конституция. Guardrails не дают дрифтить. Review = второй агент + человек</div>
+        <div class="layer-tools">
+          <span class="tool-tag">Claude Code</span>
+          <span class="tool-tag">Cursor</span>
+          <span class="tool-tag">Lovable</span>
+          <span class="tool-tag">Supabase</span>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- Feedback loop -->
+  <div class="feedback-loop">
+    <div class="feedback-arrow">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+        <path d="M1 4v6h6M23 20v-6h-6"/>
+        <path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10m22 4l-4.64 4.36A9 9 0 0 1 3.51 15"/>
+      </svg>
+      Feedback от пилота возвращается в Research
+    </div>
+  </div>
+
+  <!-- Flow comparison -->
+  <div class="flow-compare">
+    <div class="vs-header">
+      <h2>Vibe Coding vs AI-Native</h2>
+    </div>
+
+    <div class="flow-row bad-flow">
+      <div class="flow-label">Vibe Coding</div>
+      <span class="flow-step human-step">Идея в голове</span>
+      <span class="flow-arrow">→</span>
+      <span class="flow-step ai-step">AI пишет код</span>
+      <span class="flow-arrow">→</span>
+      <span class="flow-step break-step">? а зачем</span>
+      <span class="flow-arrow">→</span>
+      <span class="flow-step ai-step">AI фиксит баги</span>
+      <span class="flow-arrow">→</span>
+      <span class="flow-step break-step">? кому это нужно</span>
+      <span class="flow-arrow">→</span>
+      <span class="flow-step human-step">Рефактор</span>
+      <span class="flow-arrow">→</span>
+      <span class="flow-step break-step">0 пользователей</span>
+    </div>
+
+    <div class="flow-row good-flow">
+      <div class="flow-label">AI-Native</div>
+      <span class="flow-step ai-step">AI Research</span>
+      <span class="flow-arrow">→</span>
+      <span class="flow-step ai-step">Сегменты</span>
+      <span class="flow-arrow">→</span>
+      <span class="flow-step ai-step">Граф работ</span>
+      <span class="flow-arrow">→</span>
+      <span class="flow-step human-step">Wedge decision</span>
+      <span class="flow-arrow">→</span>
+      <span class="flow-step ai-step">PRD + UX + UI</span>
+      <span class="flow-arrow">→</span>
+      <span class="flow-step ai-step">Код по docs</span>
+      <span class="flow-arrow">→</span>
+      <span class="flow-step human-step">Pilot</span>
+    </div>
+  </div>
+
+  <!-- VS Cards -->
+  <div class="vs-section">
+    <div class="vs-grid">
+
+      <div class="vs-card bad">
+        <div class="card-label">Vibe Coding</div>
+        <h3>«AI, сделай мне приложение»</h3>
+        <ul class="trait-list">
+          <li>
+            <span class="trait-icon">!</span>
+            <span>Код есть, продукта нет. Нет ответа на «кому и зачем»</span>
+          </li>
+          <li>
+            <span class="trait-icon">!</span>
+            <span>AI фантазирует — нет методологии, нет фреймворка</span>
+          </li>
+          <li>
+            <span class="trait-icon">!</span>
+            <span>Каждый промпт — с нуля. Потеря контекста между сессиями</span>
+          </li>
+          <li>
+            <span class="trait-icon">!</span>
+            <span>Дрифт: «Помощник» превращается в generic чат</span>
+          </li>
+          <li>
+            <span class="trait-icon">!</span>
+            <span>Рефакторы без конца — нет canonical source of truth</span>
+          </li>
+          <li>
+            <span class="trait-icon">!</span>
+            <span>Скорость кодинга, но не скорость product-market fit</span>
+          </li>
+        </ul>
+      </div>
+
+      <div class="vs-divider">
+        <div class="vs-badge">vs</div>
+      </div>
+
+      <div class="vs-card good">
+        <div class="card-label">AI-Native Development</div>
+        <h3>AI-система от research до кода</h3>
+        <ul class="trait-list">
+          <li>
+            <span class="trait-icon">&#10003;</span>
+            <span>Каждая строка кода привязана к Job: исследование → код</span>
+          </li>
+          <li>
+            <span class="trait-icon">&#10003;</span>
+            <span>AJTBD-методология закодирована в промпты — AI не фантазирует</span>
+          </li>
+          <li>
+            <span class="trait-icon">&#10003;</span>
+            <span>Результат AI = вход следующего AI. Ноль потери контекста</span>
+          </li>
+          <li>
+            <span class="trait-icon">&#10003;</span>
+            <span>Guardrails в CLAUDE.md — агент физически не может сломать фокус</span>
+          </li>
+          <li>
+            <span class="trait-icon">&#10003;</span>
+            <span>20 canonical docs = source of truth. Docs рядом с кодом в Git</span>
+          </li>
+          <li>
+            <span class="trait-icon">&#10003;</span>
+            <span>Скорость кодинга + скорость нахождения PMF</span>
+          </li>
+        </ul>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- Bottom insight -->
+  <div class="bottom-insight">
+    <div class="insight-box">
+      <div class="big-quote">
+        Парадокс: <em>чем больше ограничений для AI</em> — тем лучше результат. CLAUDE.md, canonical docs, guardrails — не бюрократия. Это <em>операционная система</em>, которая превращает одного человека в полноценную команду.
+      </div>
+      <div class="author">Владимир Камчаткин / SokratAI / 2026</div>
+    </div>
+  </div>
+
+</div>
+
+<div class="watermark">AI-Native Product Development Setup — SokratAI</div>
+
+</body>
+</html>

@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npx eslint:*)",
+      "mcp__Claude_Preview__preview_start",
+      "Bash(echo \"exit: $?\")",
+      "Bash(git push:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)"
+    ]
+  }
+}
