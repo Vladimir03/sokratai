@@ -19,7 +19,6 @@ Guided Homework Chat replaces the batch submit-wait-check homework flow with a t
 
 | Table | Purpose |
 |---|---|
-| `homework_tutor_assignments.workflow_mode` | `text NOT NULL DEFAULT 'classic'` -- `'classic' \| 'guided_chat'` |
 | `homework_tutor_threads` | One per (student_assignment), tracks `status`, `current_task_order` |
 | `homework_tutor_thread_messages` | Chat history: `role` (user/assistant/system), `content`, optional `image_url`, `task_order` |
 | `homework_tutor_task_states` | Per-task progress: `status` (locked/active/completed/skipped), `attempts`, `best_score` |
@@ -28,7 +27,7 @@ RLS policies: students can SELECT their own threads/messages/states through `stu
 
 ### Thread Provisioning
 
-When a tutor assigns a `guided_chat` assignment to students:
+When a tutor assigns a homework to students (single-mode guided chat, classic removed 2026-04-06):
 1. `POST /assignments/:id/assign` creates `homework_tutor_student_assignments` rows.
 2. For each student_assignment, a thread is upserted (idempotent via UNIQUE constraint).
 3. Task states are upserted for every task: first task = `active`, rest = `locked`.
@@ -41,15 +40,13 @@ Result: student opens the assignment and the thread is already ready.
 
 ### Frontend
 
-- **`TutorHomeworkCreate.tsx`** -- workflow_mode toggle on assignment creation form.
-- **`StudentHomeworkDetail.tsx`** -- detects `guided_chat` mode, renders placeholder (replaced in Phase 2).
+- **`StudentHomeworkDetail.tsx`** -- renders guided-chat workspace (replaced in Phase 2).
 - **`studentHomeworkApi.ts`** -- `getStudentThreadByAssignment()` queries via RLS.
 - **`useStudentHomework.ts`** -- `useStudentThread(assignmentId)` hook, query key `['student','homework','thread', id]`, staleTime 30s.
 
 ### Types (`src/types/homework.ts`)
 
 ```
-WorkflowMode = 'classic' | 'guided_chat'
 ThreadStatus = 'active' | 'completed' | 'abandoned'
 TaskStateStatus = 'locked' | 'active' | 'completed' | 'skipped'
 HomeworkThread, HomeworkThreadMessage, HomeworkTaskState
@@ -277,9 +274,8 @@ The guided-homework AI paths were hardened to fix real student-facing failures o
 | `await_mode` state machine (answer/question) on server | Client-only (message_kind) | Phase 3 |
 | Tutor writes messages into student thread | Not implemented | Phase 4 |
 | Tutor messages as AI instructional context | Not implemented | Phase 4 |
-| Derived sync to homework_tutor_submissions/items | Not implemented | Phase 5 |
 | Guided-mode reporting in tutor cabinet | Partial (read-only viewer) | Phase 5 |
-| Migration guard for old assignments | Implicit (workflow_mode default) | Phase 5 |
+| Migration guard for old assignments | Done (classic removed 2026-04-06) | Phase 5 |
 | Separate chat quota (no general /chat usage) | Not implemented (uses shared endpoint) | Phase 5 |
 | Task bank and folders | Not started | Phase 6 |
 
@@ -309,7 +305,7 @@ The guided-homework AI paths were hardened to fix real student-facing failures o
 | `src/types/homework.ts` | 1 + 2.1 | Thread/message/state types, message_kind, delivery status, UI status |
 | `src/lib/tutorHomeworkApi.ts` | 2.1 | getTutorStudentGuidedThread |
 | `src/pages/tutor/TutorHomeworkResults.tsx` | 2.1 | GuidedThreadViewer component |
-| `src/pages/tutor/TutorHomeworkCreate.tsx` | 1 | workflow_mode toggle |
+| `src/pages/tutor/TutorHomeworkCreate.tsx` | 1 | guided-chat assignment create flow |
 
 ### Database Migration
 

@@ -41,7 +41,6 @@ export interface CreateAssignmentPayload {
   tasks: CreateAssignmentTask[];
   group_id?: string | null;
   save_as_template?: boolean;
-  workflow_mode?: 'classic' | 'guided_chat';
   disable_ai_bootstrap?: boolean;
 }
 
@@ -407,7 +406,6 @@ export interface TutorHomeworkAssignmentDetails {
     description: string | null;
     deadline: string | null;
     status: HomeworkAssignmentStatus;
-    workflow_mode?: 'classic' | 'guided_chat';
     disable_ai_bootstrap?: boolean;
     created_at: string;
   };
@@ -434,37 +432,13 @@ export interface TutorHomeworkAssignmentDetails {
     total: number;
     by_status: Record<string, number>;
     avg_percent: number | null;
+    /**
+     * True if any student has posted at least one user message in the guided
+     * thread for this assignment. Mirrors the destructive-change gate in
+     * PUT /assignments/:id and drives "lock task edits" in the tutor editor.
+     */
+    has_interactions: boolean;
   };
-}
-
-export interface TutorHomeworkSubmissionItem {
-  task_id: string;
-  task_order_num: number;
-  task_text: string;
-  max_score: number;
-  student_text: string | null;
-  student_image_urls: string[] | null;
-  recognized_text: string | null;
-  ai_is_correct: boolean | null;
-  ai_confidence: number | null;
-  ai_feedback: string | null;
-  ai_error_type: string | null;
-  ai_score: number | null;
-  tutor_override_correct: boolean | null;
-  tutor_comment: string | null;
-}
-
-export interface TutorHomeworkResultsPerStudent {
-  student_id: string;
-  name: string | null;
-  status: string;
-  total_score: number | null;
-  total_max_score: number | null;
-  percent: number | null;
-  submission_id: string;
-  submitted_at: string | null;
-  top_error_types: { type: string; count: number }[];
-  submission_items: TutorHomeworkSubmissionItem[];
 }
 
 export interface TutorHomeworkResultsPerTask {
@@ -482,7 +456,6 @@ export interface TutorHomeworkResultsResponse {
     distribution: Record<string, number>;
     common_error_types: { type: string; count: number }[];
   };
-  per_student: TutorHomeworkResultsPerStudent[];
   per_task: TutorHomeworkResultsPerTask[];
 }
 
@@ -500,18 +473,6 @@ export interface TutorStudentGuidedThreadResponse {
     full_name: string | null;
     username: string | null;
   };
-}
-
-export interface ReviewItem {
-  task_id: string;
-  tutor_override_correct?: boolean;
-  tutor_comment?: string | null;
-  tutor_score?: number | null;
-}
-
-export interface ReviewPayload {
-  items: ReviewItem[];
-  status?: string;
 }
 
 export async function getTutorHomeworkAssignment(
@@ -563,19 +524,6 @@ export async function postTutorThreadMessage(
   );
 }
 
-export async function reviewTutorHomeworkSubmission(
-  submissionId: string,
-  payload: ReviewPayload,
-): Promise<{ ok: boolean }> {
-  return requestHomeworkApi<{ ok: boolean }>(
-    `/submissions/${encodeURIComponent(submissionId)}/review`,
-    {
-      method: 'POST',
-      body: JSON.stringify(payload),
-    },
-  );
-}
-
 export async function getHomeworkImageSignedUrl(
   storageRefOrPath: string,
   options?: {
@@ -584,7 +532,7 @@ export async function getHomeworkImageSignedUrl(
 ): Promise<string | null> {
   const parsed = parseStorageRef(
     storageRefOrPath,
-    options?.defaultBucket ?? 'homework-images',
+    options?.defaultBucket ?? HOMEWORK_TASK_IMAGES_BUCKET,
   );
   if (!parsed) return null;
 
@@ -725,7 +673,6 @@ export async function updateTutorHomeworkAssignment(
     description?: string | null;
     deadline?: string | null;
     status?: string;
-    workflow_mode?: 'classic' | 'guided_chat';
     disable_ai_bootstrap?: boolean;
     tasks?: UpdateAssignmentTask[];
   },
@@ -742,28 +689,5 @@ export async function deleteTutorHomeworkAssignment(
   await requestHomeworkApi<{ ok: boolean }>(
     `/assignments/${encodeURIComponent(assignmentId)}`,
     { method: 'DELETE' },
-  );
-}
-
-// ─── Attempts API ─────────────────────────────────────────────────────────────
-
-export interface TutorHomeworkAttemptSummary {
-  id: string;
-  assignment_id: string;
-  student_id: string;
-  status: string;
-  attempt_no: number;
-  submitted_at: string | null;
-  total_score: number | null;
-  total_max_score: number | null;
-}
-
-export async function listTutorHomeworkAttempts(
-  assignmentId: string,
-  studentId?: string,
-): Promise<TutorHomeworkAttemptSummary[]> {
-  const qs = studentId ? `?student_id=${encodeURIComponent(studentId)}` : '';
-  return requestHomeworkApi<TutorHomeworkAttemptSummary[]>(
-    `/assignments/${encodeURIComponent(assignmentId)}/attempts${qs}`,
   );
 }

@@ -296,10 +296,7 @@ All tutor queries follow the pattern `['tutor', entity, ...params]`:
 |-------|-------------|
 | `homework_tutor_assignments` | Homework assignments (draft/active/archived) |
 | `homework_tutor_tasks` | Tasks within assignments (with `task_image_url`) |
-| `homework_tutor_submissions` | Student submissions (status: in_progress/submitted/ai_checked/tutor_reviewed) |
-| `homework_tutor_submission_items` | Per-task items: student text/photos, AI score/feedback/error_type |
 | `homework_tutor_student_assignments` | Assignment-to-student links |
-| `homework_tutor_user_bot_state` | Telegram bot state machine (IDLE/HW_SELECTING/HW_SUBMITTING/HW_CONFIRMING/HW_REVIEW) |
 | `homework_tutor_threads` | Guided homework chat threads (status: active/completed/abandoned) |
 | `homework_tutor_thread_messages` | Messages in guided homework threads (role, message_kind, task_order) |
 | `homework_tutor_task_states` | Per-task progress in guided mode (status, attempts, scores) |

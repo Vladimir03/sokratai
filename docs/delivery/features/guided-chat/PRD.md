@@ -13,7 +13,7 @@ Guided Homework Chat replaces the legacy batch "submit all answers -> wait for A
 
 - New `homework_tutor_threads` domain, NOT retrofitting `chats/chat_messages`.
 - Homework guided chat does NOT consume general `/chat` daily limits (to be decoupled in Phase 5; currently shared).
-- Legacy `homework_tutor_submissions` becomes a derived read-model for guided mode.
+- Classic submissions tables (`homework_tutor_submissions*`) were dropped on 2026-04-06; guided chat is the only homework mode.
 - Task bank and folders are a separate initiative (Phase 6).
 
 ---
@@ -22,7 +22,7 @@ Guided Homework Chat replaces the legacy batch "submit all answers -> wait for A
 
 | Phase | Status | Scope |
 |---|---|---|
-| Phase 1: Schema + Provisioning | DONE | DB tables, RLS, thread creation on assign, workflow_mode toggle |
+| Phase 1: Schema + Provisioning | DONE | DB tables, RLS, thread creation on assign |
 | Phase 2: Student Workspace | DONE | Chat UI, SSE streaming, message persistence, task advancement |
 | Phase 2.1: UX Polish | DONE | State machine, hint/question modes, message reliability, tutor read-only viewer, telemetry |
 | Phase 3: AI Orchestration + Scoring | NOT STARTED | Answer checking, score degradation, auto-advance, await_mode server state |
@@ -39,8 +39,7 @@ See `implementation-summary.md` for detailed technical inventory of Phases 1-2.1
 ### Existing Tables (implemented)
 
 ```
-homework_tutor_assignments
-  + workflow_mode TEXT NOT NULL DEFAULT 'classic'  -- 'classic' | 'guided_chat'
+homework_tutor_assignments  -- single-mode guided chat (workflow_mode column dropped 2026-04-06)
 
 homework_tutor_threads
   id              UUID PK
@@ -333,21 +332,18 @@ Events pushed to console + Google Analytics dataLayer:
 
 ### Phase 5: Compatibility and Rollout
 
-**Goal:** Guided mode coexists with legacy. Reporting works for both.
+**Goal:** Guided mode is the only mode (classic removed 2026-04-06). Reporting works across all assignments.
 
 **Subtasks:**
-1. Derived sync: when guided task is completed, write matching `homework_tutor_submission_items` row.
-2. Tutor results pages: show guided scores alongside legacy submission scores.
-3. Quota separation: guided homework uses separate daily limit (or no limit, per PRD).
-4. Migration guard: `workflow_mode` default is `classic`, existing assignments unaffected.
-5. Reporting: total score per student = sum of earned_scores across tasks.
-6. Export: allow tutor to export thread transcript as PDF.
+1. Tutor results pages: show guided scores per task from thread-based aggregates.
+2. Quota separation: guided homework uses separate daily limit (or no limit, per PRD).
+3. Reporting: total score per student = sum of earned_scores across tasks.
+4. Export: allow tutor to export thread transcript as PDF.
 
 **Acceptance:**
-- Legacy assignments keep current attempt/submit/AI-check behavior.
-- Tutor cabinet shows guided results in same table as legacy.
+- Tutor cabinet shows guided results for all assignments.
 - Guided homework does not consume /chat limits.
-- Existing data is not affected by new schema.
+- Thread-based aggregates replace submission-based reporting.
 
 ### Phase 6: Task Bank + Folders (separate initiative)
 
@@ -378,7 +374,6 @@ Events pushed to console + Google Analytics dataLayer:
 - [x] Hint/question mode changes message_kind.
 - [x] Tutor can read student thread (read-only viewer).
 - [x] Telemetry events fire for key interactions.
-- [x] Existing `classic` assignments keep current behavior unchanged.
 - [x] Lazy loading: workspace is separate chunk, does not bloat main bundle.
 - [x] iOS Safari: 16px font on inputs, 100dvh, touch-action:manipulation, no forbidden APIs.
 

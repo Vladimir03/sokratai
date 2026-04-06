@@ -176,8 +176,8 @@ For architecture overview see: docs/delivery/engineering/architecture/README.md
 Таблица `profiles` **НЕ содержит** колонку `email`. Email хранится **только** в `auth.users`.
 Используй `dbService.auth.admin.getUserById(userId)`, **НЕ** `profiles.select("email")`.
 
-### 3. Система домашних заданий — ОДНА
-Tutor-connected (`homework_tutor_*` таблицы). Legacy система удалена. Подробности: `.claude/rules/40-homework-system.md`
+### 3. Система домашних заданий — guided chat
+Единая система ДЗ (`homework_tutor_*` таблицы), работает через guided chat (пошаговый AI-чат). Classic режим (photo upload + OCR) и legacy student-only система удалены. Подробности: `.claude/rules/40-homework-system.md`
 
 ### 4. Formula rounds — preview-only test access и Phase 1b границы
 - Seed для formula rounds: `supabase/seed/formula-round-seed.sql`

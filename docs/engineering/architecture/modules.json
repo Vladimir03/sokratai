@@ -46,7 +46,7 @@
         "src/utils/pyodide.ts",
         "src/utils/chatCache.ts"
       ],
-      "purpose": "Student-facing learning flows: chat, practice, diagnostic, homework (classic + guided chat), mini app rendering.",
+      "purpose": "Student-facing learning flows: chat, practice, diagnostic, homework (guided chat), mini app rendering.",
       "dependencies": [
         "Supabase client",
         "React Query",

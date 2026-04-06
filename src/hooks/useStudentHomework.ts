@@ -1,7 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import {
   getStudentAssignment,
-  getStudentSubmissions,
   getStudentThreadByAssignment,
   listStudentAssignments,
 } from '@/lib/studentHomeworkApi';
@@ -18,14 +17,6 @@ export function useStudentAssignment(id: string) {
     queryKey: ['student', 'homework', 'assignment', id],
     queryFn: () => getStudentAssignment(id),
     enabled: Boolean(id),
-  });
-}
-
-export function useStudentSubmissions(assignmentId: string) {
-  return useQuery({
-    queryKey: ['student', 'homework', 'submissions', assignmentId],
-    queryFn: () => getStudentSubmissions(assignmentId),
-    enabled: Boolean(assignmentId),
   });
 }
 

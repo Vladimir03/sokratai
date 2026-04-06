@@ -170,7 +170,7 @@ Acceptance criteria:
 | Метрика | Цель | Как измерить |
 |---------|------|--------------|
 | Ученики, решающие >80% задач в ДЗ | рост | task_states `completed` / total per thread |
-| Повторное использование guided mode репетитором | стабильно или рост | assignments с `workflow_mode: 'guided_chat'` per week |
+| Повторное использование guided mode репетитором | стабильно или рост | assignments per week |
 
 ---
 

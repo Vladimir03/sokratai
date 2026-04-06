@@ -51,7 +51,6 @@ import {
   checkAnswer,
   getStudentTaskImageSignedUrl,
   getStudentTaskImageSignedUrlViaBackend,
-  ocrTaskImage,
   requestHint,
   saveThreadMessage,
   uploadStudentThreadImage,
@@ -101,7 +100,7 @@ function buildTaskContext(
   currentTask: { order_num: number; task_text: string; task_image_url: string | null },
   totalTasks: number,
   sendMode: SendMode,
-  options?: { hasStudentImage?: boolean; ocrText?: string },
+  options?: { hasStudentImage?: boolean },
 ): string {
   const modeHint =
     sendMode === 'bootstrap'
@@ -127,16 +126,13 @@ function buildTaskContext(
     assignment.topic ? `Тема: ${assignment.topic}.` : null,
     `Задача ${currentTask.order_num} из ${totalTasks}.`,
     `Условие: ${currentTask.task_text}`,
-    options?.ocrText
-      ? `РАСПОЗНАННЫЙ ТЕКСТ С ИЗОБРАЖЕНИЯ (используй как эталон условия задачи — НЕ придумывай своё):\n${options.ocrText}`
-      : null,
-    hasImage && isMinimalText && !options?.ocrText
+    hasImage && isMinimalText
       ? 'ВАЖНО: Условие задачи полностью содержится на прикреплённом изображении. Внимательно прочитай текст и данные на изображении. НЕ придумывай условие — используй ТОЛЬКО то, что написано и нарисовано на картинке.'
-      : hasImage && !options?.ocrText
+      : hasImage
         ? 'К задаче прикреплено изображение с условием — оно передано отдельно.'
         : null,
     hasImage
-      ? 'Для графиков и рисунков НЕ придумывай координаты точек, подписи осей, деления шкалы, числовые значения и промежуточные результаты. Если значение нельзя уверенно считать по тексту, OCR или самому изображению, прямо попроси ученика назвать нужные координаты или значения.'
+      ? 'Для графиков и рисунков НЕ придумывай координаты точек, подписи осей, деления шкалы, числовые значения и промежуточные результаты. Если значение нельзя уверенно считать по тексту или по самому изображению, прямо попроси ученика назвать нужные координаты или значения.'
       : null,
     studentImageHint,
     modeHint,
@@ -330,7 +326,6 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const messagesRef = useRef<HomeworkThreadMessage[]>([]);
   const bootstrapStartedRef = useRef<Set<string>>(new Set());
-  const ocrTextByTaskRef = useRef<Map<number, string>>(new Map());
 
   const {
     data: thread,
@@ -366,29 +361,6 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
   const handleDraftChange = useCallback((answer: string, discussion: string) => {
     currentDraftRef.current = { answer, discussion };
   }, []);
-
-  const ensureTaskOcrText = useCallback(async (
-    taskOrder: number,
-    taskId: string,
-    taskImageUrl: string | null,
-  ): Promise<string | undefined> => {
-    if (!taskImageUrl) return undefined;
-
-    const cached = ocrTextByTaskRef.current.get(taskOrder);
-    if (cached) return cached;
-
-    try {
-      const ocrResult = await ocrTaskImage(assignment.id, taskId);
-      if (ocrResult.recognized_text && ocrResult.recognized_text !== '[неразборчиво]') {
-        ocrTextByTaskRef.current.set(taskOrder, ocrResult.recognized_text);
-        return ocrResult.recognized_text;
-      }
-    } catch (error) {
-      console.warn('On-demand OCR failed, proceeding with image-only context:', error);
-    }
-
-    return undefined;
-  }, [assignment.id]);
 
   useEffect(() => {
     messagesRef.current = messages;
@@ -642,8 +614,6 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
     setIsStreaming(true);
     setStreamingContent('');
 
-    const ocrText = await ensureTaskOcrText(taskOrder, task.id, task.task_image_url);
-
     const [resolvedTaskImageUrl, resolvedStudentImageUrls] = await Promise.all([
       task.task_image_url
         ? getStudentTaskImageSignedUrlViaBackend(assignment.id, task.id)
@@ -662,7 +632,6 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
         }),
         taskContext: buildTaskContext(assignment, task, assignment.tasks.length, sendMode, {
           hasStudentImage: resolvedStudentImageUrls.length > 0,
-          ocrText,
         }),
         taskImageUrl: resolvedTaskImageUrl ?? undefined,
         studentImageUrls: resolvedStudentImageUrls,
@@ -728,7 +697,7 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
       setIsStreaming(false);
       setStreamingContent('');
     }
-  }, [assignment, ensureTaskOcrText, patchMessage, persistMessage, resolveLatestStudentImageUrls]);
+  }, [assignment, patchMessage, persistMessage, resolveLatestStudentImageUrls]);
 
   // Save current draft + restore target draft + switch task
   const switchToTask = useCallback((newOrder: number) => {
@@ -1200,8 +1169,6 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
       setIsStreaming(true);
       setStreamingContent('');
 
-      const ocrText = await ensureTaskOcrText(taskOrder, currentTask.id, currentTask.task_image_url);
-
       // Resolve task image to signed URL for AI (if task has image)
       let bootstrapImageUrl: string | undefined;
       if (currentTask.task_image_url) {
@@ -1221,7 +1188,7 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
             },
           ],
           systemPrompt: buildGuidedSystemPrompt('bootstrap', { isBootstrap: true, checkFormat: currentTask.check_format }),
-          taskContext: buildTaskContext(assignment, currentTask, assignment.tasks.length, 'bootstrap', { ocrText }),
+          taskContext: buildTaskContext(assignment, currentTask, assignment.tasks.length, 'bootstrap'),
           taskImageUrl: bootstrapImageUrl,
           onDelta: (delta) => {
             content += delta;
@@ -1269,7 +1236,7 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
     };
 
     void runBootstrap();
-  }, [assignment, currentTask, ensureTaskOcrText, isCheckingAnswer, isRequestingHint, isStreaming, isThreadLoading, messages, threadId, threadStatus]);
+  }, [assignment, currentTask, isCheckingAnswer, isRequestingHint, isStreaming, isThreadLoading, messages, threadId, threadStatus]);
 
   // Loading state
   if (isThreadLoading) {

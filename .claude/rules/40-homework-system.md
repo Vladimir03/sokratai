@@ -2,18 +2,15 @@
 
 ## Система домашних заданий
 
-В проекте **ОДНА** система домашних заданий — tutor-connected (`homework_tutor_*` таблицы).
+В проекте **ОДНА** система домашних заданий — tutor-connected (`homework_tutor_*` таблицы), работает через **guided chat** (пошаговый AI-чат, ведёт ученика через каждую задачу с подсказками и проверкой).
 
-Legacy student-only система (`homework_sets`, `homework_tasks`, `homework_chat_messages`) **полностью удалена** (миграция `20260310110000_drop_legacy_homework.sql`).
-
-### Два режима работы
-- **Classic** (`workflow_mode: 'classic'`): ученик отправляет фото решений через Telegram-бот или веб-кабинет, AI проверяет
-- **Guided Chat** (`workflow_mode: 'guided_chat'`): пошаговый AI-чат, ведёт ученика через каждую задачу с подсказками и проверкой
+Удалённые подсистемы:
+- Legacy student-only (`homework_sets`, `homework_tasks`, `homework_chat_messages`) — удалена миграцией `20260310110000_drop_legacy_homework.sql`
+- Classic mode (photo upload + OCR) — удалён миграцией `20260406120000_drop_classic_homework.sql`. Колонка `workflow_mode` и таблицы `homework_tutor_submissions`/`homework_tutor_submission_items` дропнуты
 
 **Дефолты конструктора ДЗ** (`TutorHomeworkCreate.tsx`):
 - `subject: 'physics'` — предмет по умолчанию (целевой сегмент: репетиторы физики ЕГЭ/ОГЭ)
-- `workflow_mode: 'guided_chat'` — guided mode по умолчанию
-- Если репетитор меняет эти значения — открыть L1 («Расширенные параметры»)
+- Если репетитор меняет предмет — открыть L1 («Расширенные параметры»)
 
 ### Формат проверки задач (`check_format`, Phase 1, 2026-04-01)
 
@@ -24,7 +21,6 @@ Legacy student-only система (`homework_sets`, `homework_tasks`, `homework
 - `'detailed_solution'` — развёрнутое решение. AI отклоняет голые ответы без хода решения (`verdict: INCORRECT`)
 
 **Ключевые решения:**
-- Enforcement **только в guided chat** (classic mode не поддерживает)
 - Deterministic fast path (`tryDeterministicShortAnswerMatch`) **отключён** для `detailed_solution` — AI должен оценить наличие хода решения
 - `buildCheckFormatGuidance()` в `guided_ai.ts` добавляет enforcement-промпт + hint при коротком ответе (`< 30 символов`)
 - При добавлении задачи из KB: приоритет `task.check_format` → `mapAnswerFormatToCheckFormat(task.answer_format)` → `inferCheckFormat(kim_number)` (КИМ 21-26 → `detailed_solution`). Legacy `answer_format` значения (`detailed`, `number`, `text`, `choice`, `matching`) маппятся в `mapAnswerFormatToCheckFormat()` в `HWTasksSection.tsx`
@@ -101,10 +97,8 @@ Legacy student-only система (`homework_sets`, `homework_tasks`, `homework
 - **НЕ реализовано (P1)**: bottom sheet, drag-and-drop, HEIC конвертация, image compression
 
 ### Таблицы БД
-- `homework_tutor_assignments` — задания (draft/active/archived, workflow_mode)
+- `homework_tutor_assignments` — задания (draft/active/archived)
 - `homework_tutor_tasks` — задачи внутри заданий
-- `homework_tutor_submissions` — submissions учеников
-- `homework_tutor_submission_items` — ответы по задачам (text, photos, AI score)
 - `homework_tutor_threads` — guided chat threads
 - `homework_tutor_thread_messages` — сообщения в guided chat
 - `homework_tutor_task_states` — прогресс по задачам в guided mode
@@ -245,7 +239,7 @@ Legacy student-only система (`homework_sets`, `homework_tasks`, `homework
 
 **TASK-0B: Disable AI Bootstrap Toggle**
 - Колонка `disable_ai_bootstrap boolean NOT NULL DEFAULT false` в `homework_tutor_assignments`
-- Toggle «AI-вступление к задачам» (позитивная формулировка) в L1 `HWExpandedParams.tsx`, видим только при `workflow_mode === 'guided_chat'`
+- Toggle «AI-вступление к задачам» (позитивная формулировка) в L1 `HWExpandedParams.tsx`
 - Backend: `homework-api/index.ts` — create + update handlers принимают `disable_ai_bootstrap`
 - Student-side: guard в `GuidedHomeworkWorkspace.tsx` пропускает bootstrap если `assignment.disable_ai_bootstrap`
 
@@ -254,10 +248,10 @@ Legacy student-only система (`homework_sets`, `homework_tasks`, `homework
 `TutorHomeworkCreate.tsx` — single-page конструктор с progressive disclosure:
 
 **L0 (всегда видно):** Тема → Кому (`HWAssignSection`) → Задачи (`HWTasksSection`) → `HWActionBar`
-**L1 (collapsible, «Расширенные параметры»):** `HWExpandedParams` (название, предмет, дедлайн, режим) + `HWMaterialsSection`
+**L1 (collapsible, «Расширенные параметры»):** `HWExpandedParams` (название, предмет, дедлайн, AI-вступление) + `HWMaterialsSection`
 
 Правила:
-- Dot indicator на L1-кнопке: показывается если `title`, `subject !== 'physics'`, `deadline`, `workflow_mode !== 'guided_chat'` или `materials.length > 0`
+- Dot indicator на L1-кнопке: показывается если `title`, `subject !== 'physics'`, `deadline` или `materials.length > 0`
 - L1 auto-expand при ошибке валидации `subject`
 - `_topicHint` — soft warning (non-blocking): ключи с суффиксом `Hint` не считаются blocking errors
 - Поле «Тема» в L0 (контейнере), НЕ в `HWExpandedParams`

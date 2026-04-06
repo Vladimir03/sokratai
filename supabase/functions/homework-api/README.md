@@ -115,14 +115,14 @@ List tutor's assignments with aggregate stats.
 | Field | Notes |
 |---|---|
 | `assigned_count` | Number of students assigned |
-| `submitted_count` | Submissions with status `submitted\|ai_checked\|tutor_reviewed` |
-| `avg_score` | Average `(total_score/total_max_score)*100`, null if no scores |
+| `submitted_count` | Students whose guided thread reached status `submitted` or `completed` |
+| `avg_score` | Average `(total_score/total_max_score)*100` across guided threads, null if no scores |
 
 ---
 
 ### 3. GET /assignments/:id
 
-Get full assignment details including tasks, assigned students, and submission summary.
+Get full assignment details including tasks, assigned students, and a guided-thread summary.
 
 **Response (200):**
 ```json
@@ -136,11 +136,13 @@ Get full assignment details including tasks, assigned students, and submission s
   ],
   "submissions_summary": {
     "total": 5,
-    "by_status": { "submitted": 2, "ai_checked": 1, "tutor_reviewed": 2 },
+    "by_status": { "in_progress": 2, "submitted": 1, "completed": 2 },
     "avg_percent": 75.5
   }
 }
 ```
+
+`submissions_summary` aggregates guided threads for this assignment; statuses mirror `homework_tutor_threads.status`.
 
 ---
 
@@ -162,8 +164,8 @@ Update assignment metadata and/or replace tasks list.
 
 **Task update behavior (replace list):**
 - If `tasks` is omitted — only assignment metadata is updated.
-- If `tasks` is provided and **submissions exist** — only existing tasks can be updated (by `id`). Adding or removing tasks returns `400 DESTRUCTIVE_CHANGE`.
-- If `tasks` is provided and **no submissions** — full replace: update existing (by `id`), insert new, delete omitted.
+- If `tasks` is provided and **any assigned student has already posted in their guided thread** — only existing tasks can be updated (by `id`). Adding or removing tasks returns `400 DESTRUCTIVE_CHANGE`.
+- If `tasks` is provided and **no student messages exist yet** — full replace: update existing (by `id`), insert new, delete omitted.
 
 **Response (200):**
 ```json
@@ -248,7 +250,7 @@ Send Telegram notifications to assigned students who haven't been notified yet.
 
 ### 7. GET /assignments/:id/results
 
-Get detailed results and analytics for an assignment.
+Get aggregate analytics for an assignment, computed from guided task states.
 
 **Response (200):**
 ```json
@@ -256,41 +258,8 @@ Get detailed results and analytics for an assignment.
   "summary": {
     "avg_score": 72.5,
     "distribution": { "0-24": 1, "25-49": 0, "50-74": 2, "75-100": 3 },
-    "common_error_types": [
-      { "type": "calculation", "count": 5 },
-      { "type": "concept", "count": 2 }
-    ]
+    "common_error_types": []
   },
-  "per_student": [
-    {
-      "student_id": "uuid",
-      "name": "Иван",
-      "status": "ai_checked",
-      "total_score": 7,
-      "total_max_score": 10,
-      "percent": 70.0,
-      "submission_id": "uuid",
-      "top_error_types": [{ "type": "calculation", "count": 2 }],
-      "submission_items": [
-        {
-          "task_id": "uuid",
-          "task_order_num": 1,
-          "task_text": "Решите x² - 5x + 6 = 0",
-          "max_score": 2,
-          "student_text": "x=2, x=3",
-          "student_image_urls": ["homework/uuid/uuid/uuid/file.jpg"],
-          "recognized_text": "x=2, x=3",
-          "ai_is_correct": true,
-          "ai_confidence": 0.95,
-          "ai_feedback": "Решение верное",
-          "ai_error_type": "correct",
-          "ai_score": 2,
-          "tutor_override_correct": null,
-          "tutor_comment": null
-        }
-      ]
-    }
-  ],
   "per_task": [
     {
       "task_id": "uuid",
@@ -298,57 +267,13 @@ Get detailed results and analytics for an assignment.
       "max_score": 2,
       "avg_score": 1.5,
       "correct_rate": 60.0,
-      "error_type_histogram": [{ "type": "calculation", "count": 3 }]
+      "error_type_histogram": []
     }
   ]
 }
 ```
 
----
-
-### 8. POST /submissions/:id/review
-
-Submit tutor review for a student's submission.
-
-**Request:**
-```json
-{
-  "items": [
-    {
-      "task_id": "uuid",
-      "tutor_override_correct": true,
-      "tutor_comment": "Хорошая работа",
-      "tutor_score": 2
-    },
-    {
-      "task_id": "uuid-2",
-      "tutor_override_correct": false,
-      "tutor_comment": "Ошибка в знаке",
-      "tutor_score": 0
-    }
-  ],
-  "status": "tutor_reviewed"
-}
-```
-
-| Field | Type | Required | Notes |
-|---|---|---|---|
-| `items` | array | yes | Min 1 item |
-| `items[].task_id` | UUID | yes | |
-| `items[].tutor_override_correct` | boolean | no | |
-| `items[].tutor_comment` | string | no | |
-| `items[].tutor_score` | int (>=0) | no | Stored in `ai_score` column |
-| `status` | string | no | Default: `tutor_reviewed` |
-
-**Score logic:**
-- If `tutor_score` is provided, it's written to `ai_score`.
-- If only `tutor_override_correct` is provided (no `tutor_score`), score is auto-calculated: `max_score` if correct, `0` if not.
-- Submission `total_score` / `total_max_score` are recalculated from all items.
-
-**Response (200):**
-```json
-{ "ok": true }
-```
+Per-student detail is no longer returned by this endpoint — use `GET /assignments/:id/students/:studentId/thread` to view individual guided progress. `common_error_types` / `error_type_histogram` are kept as empty arrays for backward compatibility.
 
 ---
 
@@ -406,7 +331,7 @@ Persist a completed round result for the current student.
 
 ## Student Guided Chat Endpoints
 
-These endpoints are used by the student guided-homework workspace when an assignment has `workflow_mode = "guided_chat"`.
+These endpoints are used by the student guided-homework workspace. All assignments use guided chat (single-mode, classic removed 2026-04-06).
 
 ### POST /threads/:id/check
 
@@ -507,9 +432,10 @@ Structured logs emitted:
 
 - `homework_tutor_assignments` — assignment metadata
 - `homework_tutor_tasks` — individual tasks within assignments
-- `homework_tutor_submissions` — student submissions
-- `homework_tutor_submission_items` — per-task submission data + AI/tutor scores
 - `homework_tutor_student_assignments` — student-to-assignment links with notification status
+- `homework_tutor_threads` — guided chat thread per student assignment
+- `homework_tutor_thread_messages` — messages in guided chat threads
+- `homework_tutor_task_states` — per-task guided progress (status, scores, attempts)
 - `tutors` — tutor profile lookup
 - `tutor_students` — verifying student ownership
 - `profiles` — student names

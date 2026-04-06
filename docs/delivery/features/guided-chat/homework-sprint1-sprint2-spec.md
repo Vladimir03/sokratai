@@ -139,7 +139,6 @@ function prefillFromAssignment(details: TutorHomeworkAssignmentDetails) {
   setSubject(details.assignment.subject);
   setTopic(details.assignment.topic || '');
   setDeadline(details.assignment.deadline || '');
-  setWorkflowMode(details.assignment.workflow_mode || 'guided_chat');
 
   // Step 2 (Tasks):
   setTasks(details.tasks.map(t => ({

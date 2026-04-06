@@ -32,7 +32,6 @@ export function getSubjectLabel(id: string): string {
   return SUBJECT_NAME_MAP[id] ?? id;
 }
 
-export type StudentSubmissionStatus = 'in_progress' | 'submitted' | 'ai_checked' | 'tutor_reviewed';
 export type StudentAssignmentStatus = 'draft' | 'active' | 'closed';
 
 export interface StudentHomeworkAssignment {
@@ -67,33 +66,6 @@ export interface StudentHomeworkMaterial {
   created_at: string;
 }
 
-export interface StudentHomeworkSubmissionItem {
-  id: string;
-  task_id: string;
-  student_text: string | null;
-  student_image_urls: string[] | null;
-  ai_feedback: string | null;
-  ai_score: number | null;
-  ai_is_correct: boolean | null;
-  tutor_comment: string | null;
-  tutor_override_correct: boolean | null;
-}
-
-export interface StudentHomeworkSubmission {
-  id: string;
-  assignment_id: string;
-  student_id: string;
-  status: StudentSubmissionStatus;
-  total_score: number | null;
-  total_max_score: number | null;
-  submitted_at: string | null;
-  created_at: string;
-  updated_at: string;
-  homework_tutor_submission_items: StudentHomeworkSubmissionItem[];
-}
-
-export type WorkflowMode = 'classic' | 'guided_chat';
-
 export interface StudentHomeworkAssignmentDetails {
   id: string;
   title: string;
@@ -102,13 +74,11 @@ export interface StudentHomeworkAssignmentDetails {
   description: string | null;
   deadline: string | null;
   status: StudentAssignmentStatus;
-  workflow_mode?: WorkflowMode;
   disable_ai_bootstrap?: boolean;
   created_at: string;
   updated_at: string;
   tasks: StudentHomeworkTask[];
   materials: StudentHomeworkMaterial[];
-  submissions: StudentHomeworkSubmission[];
 }
 
 // ─── Guided Homework Chat types ─────────────────────────────────────────────

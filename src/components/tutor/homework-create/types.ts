@@ -98,7 +98,6 @@ export interface MetaState {
   subject: HomeworkSubject | "";
   topic: string;
   deadline: string;
-  workflow_mode: 'classic' | 'guided_chat';
   disable_ai_bootstrap?: boolean;
 }
 

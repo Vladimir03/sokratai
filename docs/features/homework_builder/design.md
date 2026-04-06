@@ -3,8 +3,9 @@ System components:
 Frontend
 - TutorHomeworkCreate.tsx
 - TutorHomeworkDetail.tsx
-- StudentHomeworkList.tsx
-- StudentHomeworkPage.tsx
+- TutorHomeworkResults.tsx
+- StudentHomework.tsx
+- StudentHomeworkDetail.tsx (guided chat overlay)
 
 Backend
 - homework-api edge function
@@ -13,20 +14,24 @@ Database
 homework_tutor_assignments
 homework_tutor_tasks
 homework_tutor_student_assignments
-homework_tutor_submissions
-homework_tutor_submission_items
+homework_tutor_threads
+homework_tutor_thread_messages
+homework_tutor_task_states
+homework_tutor_materials
+homework_tutor_templates
 
-Submission flow
+Guided chat flow
 
 studentHomeworkApi
-createAttempt
-submitAnswer
-finalizeAttempt
+- getStudentAssignment
+- saveThreadMessage
+- checkAnswer
+- requestHint
+- uploadStudentThreadImage
 
-Supported answer types
+Supported attachment types
 
-text
-image
+image (jpg, png, heic, webp)
 pdf
 
 Storage
@@ -36,20 +41,21 @@ bucket: homework-submissions
 structure:
 
 homework-submissions/
-studentId/
-assignmentId/
-submissionId/
-taskId/
-file
+  studentId/
+    assignmentId/
+      threads/
+        {taskOrder}/
+          {fileId}.{ext}
 
-homework_tutor_submission_items
+homework_tutor_thread_messages
 
 id
-submission_id
-task_id
-answer_type
-answer_text
-file_url
-ai_score
-tutor_score
+thread_id
+role (user | assistant | system)
+message_kind (answer | hint | question | system)
+task_order
+content
+image_url (storage:// ref or null)
+score
 feedback
+created_at

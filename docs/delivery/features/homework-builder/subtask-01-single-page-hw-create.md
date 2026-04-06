@@ -35,7 +35,6 @@ title: string
 subject: HomeworkSubject
 topic: string
 deadline: string | null
-workflowMode: 'classic' | 'guided_chat'
 draftTasks: DraftTask[]
 materials: MaterialDraft[]
 selectedStudentIds: string[]
@@ -160,13 +159,13 @@ src/components/tutor/homework-create/
 
 **Результат (2026-03-17):**
 - L0 (всегда видно): Тема, Кому (HWAssignSection), Задачи, ActionBar
-- L1 (collapsible, CSS grid animation): Название, Предмет, Дедлайн, Режим (HWExpandedParams) + Материалы (HWMaterialsSection)
+- L1 (collapsible, CSS grid animation): Название, Предмет, Дедлайн (HWExpandedParams) + Материалы (HWMaterialsSection)
 - Кнопка «Расширенные параметры» / «Скрыть параметры» + dot indicator при наличии данных в L1
-- Dot indicator учитывает: `title`, `subject !== 'physics'`, `deadline`, `workflow_mode !== 'guided_chat'`, `materials`
+- Dot indicator учитывает: `title`, `subject !== 'physics'`, `deadline`, `materials`
 - Auto-expand L1 при ошибке валидации скрытого `subject`
 - `_topicHint` non-blocking: фильтрация Hint-ключей из blocking check
 - Default `subject: 'physics'` — L0 fast path без открытия L1
-- Default `workflow_mode: 'guided_chat'` — guided mode по умолчанию
+- Single-mode guided chat (classic removed 2026-04-06)
 - `HWTasksSection`: материалы вынесены в L1 (удалены props `materials`/`onMaterialsChange`)
 - `HWExpandedParams`: поле Тема перенесено в L0 контейнер
 - lint/build/smoke-check pass

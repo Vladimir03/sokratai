@@ -114,16 +114,8 @@ async function runReminders(): Promise<ReminderResult> {
       saIdToStudentId[sa.id as string] = sa.student_id as string;
     }
 
-    // Get students who already have a classic submission
-    const { data: submissions } = await db
-      .from("homework_tutor_submissions")
-      .select("student_id")
-      .eq("assignment_id", assignment.id)
-      .in("status", ["submitted", "ai_checked", "tutor_reviewed"]);
-
-    const submittedIds = new Set((submissions ?? []).map((s) => s.student_id as string));
-
-    // Get students who completed guided_chat threads
+    // Get students who completed guided chat threads
+    const submittedIds = new Set<string>();
     const saIds = studentAssignments.map((sa) => sa.id as string);
     if (saIds.length > 0) {
       const { data: completedThreads } = await db

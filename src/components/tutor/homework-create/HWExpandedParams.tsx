@@ -12,7 +12,7 @@ export interface HWExpandedParamsProps {
 }
 
 /**
- * L1 (collapsible) meta fields: title, deadline, workflow mode.
+ * L1 (collapsible) meta fields: title, deadline, AI bootstrap toggle.
  * Topic + Subject are rendered in L0 by the container (always visible).
  */
 export function HWExpandedParams({ meta, onChange, errors, autoTitle }: HWExpandedParamsProps) {
@@ -48,41 +48,21 @@ export function HWExpandedParams({ meta, onChange, errors, autoTitle }: HWExpand
 
       <div className="flex items-center justify-between p-4 bg-muted/50 rounded-lg">
         <div>
-          <Label htmlFor="workflow-mode" className="text-sm font-medium">
-            Пошаговое решение с подсказками
+          <Label htmlFor="ai-bootstrap" className="text-sm font-medium">
+            AI-вступление к задачам
           </Label>
           <p className="text-xs text-muted-foreground mt-1">
-            Ученик решает задачи по одной, получая подсказки и проверку на каждом шаге
+            AI пишет стартовое сообщение при открытии каждой задачи
           </p>
         </div>
         <Switch
-          id="workflow-mode"
-          checked={meta.workflow_mode === 'guided_chat'}
+          id="ai-bootstrap"
+          checked={!(meta.disable_ai_bootstrap ?? false)}
           onCheckedChange={(checked) =>
-            onChange({ ...meta, workflow_mode: checked ? 'guided_chat' : 'classic' })
+            onChange({ ...meta, disable_ai_bootstrap: !checked })
           }
         />
       </div>
-
-      {meta.workflow_mode === 'guided_chat' && (
-        <div className="flex items-center justify-between p-4 bg-muted/50 rounded-lg">
-          <div>
-            <Label htmlFor="ai-bootstrap" className="text-sm font-medium">
-              AI-вступление к задачам
-            </Label>
-            <p className="text-xs text-muted-foreground mt-1">
-              AI пишет стартовое сообщение при открытии каждой задачи
-            </p>
-          </div>
-          <Switch
-            id="ai-bootstrap"
-            checked={!(meta.disable_ai_bootstrap ?? false)}
-            onCheckedChange={(checked) =>
-              onChange({ ...meta, disable_ai_bootstrap: !checked })
-            }
-          />
-        </div>
-      )}
     </div>
   );
 }

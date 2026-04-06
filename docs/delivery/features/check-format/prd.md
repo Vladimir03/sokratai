@@ -54,7 +54,6 @@
 
 - Автоматический парсинг задач с neofamily/РЕШУ ЕГЭ (это Ж1, отдельная фича)
 - Отдельный scoring rubric с критериями (ФИПИ-стиль) — слишком сложно для MVP
-- Classic mode enforcement (только guided chat)
 
 ### LATER (потом)
 
@@ -97,7 +96,6 @@
 | Вопрос | Решение | Кто решил |
 |---|---|---|
 | Порог «слишком короткий ответ» для `detailed_solution` — по длине или по наличию шагов? | **По длине.** Начинаем с простого порога, уточняем по feedback | product |
-| Нужен ли `check_format` в classic mode или только guided chat? | **Только guided chat.** Classic mode планируется к полному удалению из кода и документов (отдельный тикет) | product |
 | Как обрабатывать задачи без `kim_number` в KB — какой default `check_format`? | **`short_answer`** — наименее ограничительный вариант, не ломает текущее поведение. Репетитор может повысить до `detailed_solution` вручную | product + engineering |
 | `primary_score = null` в существующих KB задачах — заполнять миграцией или оставить fallback? | **Fallback `max_score: 1` если null.** Миграция не нужна на MVP — заполнится при seed новых задач с `kim_number` | engineering |
 

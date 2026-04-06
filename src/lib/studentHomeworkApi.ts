@@ -3,30 +3,12 @@ import { supabase } from '@/lib/supabaseClient';
 import type {
   StudentHomeworkAssignment,
   StudentHomeworkAssignmentDetails,
-  StudentHomeworkSubmission,
   HomeworkThread,
   GuidedMessageKind,
   CheckAnswerResponse,
   RequestHintResponse,
 } from '@/types/homework';
 import { serializeThreadAttachmentRefs } from '@/lib/homeworkThreadAttachments';
-
-export interface OcrTaskResult {
-  recognized_text: string;
-  confidence?: number;
-  has_formulas?: boolean;
-  cached: boolean;
-}
-
-export async function ocrTaskImage(
-  assignmentId: string,
-  taskId: string,
-): Promise<OcrTaskResult> {
-  return requestStudentHomeworkApi<OcrTaskResult>(
-    `/assignments/${assignmentId}/tasks/${taskId}/ocr`,
-    { method: 'POST' },
-  );
-}
 
 const HOMEWORK_IMAGES_BUCKET = 'homework-images';
 const HOMEWORK_SUBMISSIONS_BUCKET = 'homework-submissions';
@@ -37,27 +19,6 @@ const SUPABASE_URL =
 const SUPABASE_KEY =
   import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY ||
   'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZyc3Nlb3RyZm1zeHBiY2l5cXpjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTk0MjEzMDYsImV4cCI6MjA3NDk5NzMwNn0.fDleU99ULnIvtbiJqlKtgaabZzIWqqw6gZLWQOFAcKw';
-
-const SUBMISSION_SELECT = `
-  id,
-  assignment_id,
-  student_id,
-  status,
-  total_score,
-  total_max_score,
-  submitted_at,
-  homework_tutor_submission_items(
-    id,
-    task_id,
-    student_text,
-    student_image_urls,
-    ai_feedback,
-    ai_score,
-    ai_is_correct,
-    tutor_comment,
-    tutor_override_correct
-  )
-`;
 
 export class StudentHomeworkApiError extends Error {
   constructor(message: string) {
@@ -92,11 +53,6 @@ async function getCurrentUserId(): Promise<string> {
   return ensureUserId(data.user?.id);
 }
 
-function isDeadlinePassed(deadline: string | null | undefined): boolean {
-  if (!deadline) return false;
-  return parseISO(deadline).getTime() <= Date.now();
-}
-
 function translateSupabaseError(message: string): string {
   const lower = message.toLowerCase();
   if (message.includes('DEADLINE_PASSED')) return 'Дедлайн уже прошёл. Сдача недоступна.';
@@ -109,27 +65,12 @@ function translateSupabaseError(message: string): string {
   return message;
 }
 
-function isMissingAnswerTypeColumnError(message: string): boolean {
-  const lower = message.toLowerCase();
-  return lower.includes('answer_type') && (
-    lower.includes('schema cache') ||
-    (lower.includes('column') && lower.includes('does not exist'))
-  );
-}
-
 function isMissingThreadMessageKindColumnError(message: string): boolean {
   const lower = message.toLowerCase();
   return lower.includes('message_kind') && (
     lower.includes('schema cache') ||
     (lower.includes('column') && lower.includes('does not exist'))
   );
-}
-
-function isTelegramChatIdNotNullError(message: string): boolean {
-  const lower = message.toLowerCase();
-  return lower.includes('telegram_chat_id') &&
-    lower.includes('null value') &&
-    (lower.includes('not-null') || lower.includes('not null'));
 }
 
 async function requestStudentHomeworkApi<T>(
@@ -304,7 +245,6 @@ export async function listStudentAssignments(): Promise<StudentHomeworkAssignmen
         description,
         deadline,
         status,
-        workflow_mode,
         created_at
       )
     `)
@@ -319,39 +259,14 @@ export async function listStudentAssignments(): Promise<StudentHomeworkAssignmen
     return status === 'active' || status === 'closed';
   });
 
-  const assignmentIds = assignmentRows.map((row: any) => row.assignment_id as string);
-
-  // For classic: fetch latest submission status per assignment
-  const { data: submissionRows, error: submissionError } = await supabase
-    .from('homework_tutor_submissions')
-    .select('assignment_id, status, submitted_at')
-    .eq('student_id', studentId)
-    .in('assignment_id', assignmentIds.length > 0 ? assignmentIds : ['00000000-0000-0000-0000-000000000000'])
-    .order('submitted_at', { ascending: false });
-
-  if (submissionError) {
-    throw new StudentHomeworkApiError(submissionError.message);
-  }
-
-  const latestSubmissionMap = new Map<string, string | null>();
-  for (const row of submissionRows ?? []) {
-    const assignmentId = row.assignment_id as string;
-    if (!latestSubmissionMap.has(assignmentId)) {
-      latestSubmissionMap.set(assignmentId, typeof row.status === 'string' ? row.status : null);
-    }
-  }
-
-  // For guided_chat assignments, check thread status instead of submissions
-  const guidedAssignmentStudentIds = assignmentRows
-    .filter((row: any) => row.homework_tutor_assignments?.workflow_mode === 'guided_chat')
-    .map((row: any) => row.id as string);
+  const studentAssignmentIds = assignmentRows.map((row: any) => row.id as string);
 
   const threadMap = new Map<string, { status: string }>();
-  if (guidedAssignmentStudentIds.length > 0) {
+  if (studentAssignmentIds.length > 0) {
     const { data: threadRows } = await supabase
       .from('homework_tutor_threads')
       .select('student_assignment_id, status')
-      .in('student_assignment_id', guidedAssignmentStudentIds);
+      .in('student_assignment_id', studentAssignmentIds);
 
     for (const t of threadRows ?? []) {
       threadMap.set(t.student_assignment_id as string, { status: t.status as string });
@@ -361,18 +276,10 @@ export async function listStudentAssignments(): Promise<StudentHomeworkAssignmen
   return assignmentRows
     .map((row: any) => {
       const assignment = row.homework_tutor_assignments;
-      const isGuided = assignment.workflow_mode === 'guided_chat';
-
-      let latest_submission_status: string | null;
-
-      if (isGuided) {
-        const thread = threadMap.get(row.id);
-        latest_submission_status = thread
-          ? (thread.status === 'completed' ? 'ai_checked' : 'in_progress')
-          : null;
-      } else {
-        latest_submission_status = latestSubmissionMap.get(assignment.id) ?? null;
-      }
+      const thread = threadMap.get(row.id);
+      const latest_submission_status = thread
+        ? (thread.status === 'completed' ? 'ai_checked' : 'in_progress')
+        : null;
 
       return {
         id: assignment.id,
@@ -392,22 +299,6 @@ export async function listStudentAssignments(): Promise<StudentHomeworkAssignmen
     });
 }
 
-export async function getStudentSubmissions(assignmentId: string): Promise<StudentHomeworkSubmission[]> {
-  const studentId = await getCurrentUserId();
-  const { data, error } = await supabase
-    .from('homework_tutor_submissions')
-    .select(SUBMISSION_SELECT)
-    .eq('assignment_id', assignmentId)
-    .eq('student_id', studentId)
-    .order('submitted_at', { ascending: false });
-
-  if (error) {
-    throw new StudentHomeworkApiError(error.message);
-  }
-
-  return (data ?? []) as unknown as StudentHomeworkSubmission[];
-}
-
 export async function getStudentAssignment(assignmentId: string): Promise<StudentHomeworkAssignmentDetails> {
   const studentId = await getCurrentUserId();
 
@@ -423,7 +314,7 @@ export async function getStudentAssignment(assignmentId: string): Promise<Studen
 
   const { data: assignment, error: assignmentError } = await supabase
     .from('homework_tutor_assignments')
-    .select('id, title, subject, topic, description, deadline, status, workflow_mode, disable_ai_bootstrap, created_at')
+    .select('id, title, subject, topic, description, deadline, status, disable_ai_bootstrap, created_at')
     .eq('id', assignmentId)
     .single();
 
@@ -447,232 +338,13 @@ export async function getStudentAssignment(assignmentId: string): Promise<Studen
 
   if (materialsError) throw new StudentHomeworkApiError(materialsError.message);
 
-  const submissions = await getStudentSubmissions(assignmentId);
-
   const result = {
     ...(assignment as any),
-    workflow_mode: (assignment as any).workflow_mode ?? 'classic',
     updated_at: (assignment as any).created_at,
     tasks: (tasks ?? []) as StudentHomeworkAssignmentDetails['tasks'],
     materials: (materials ?? []) as StudentHomeworkAssignmentDetails['materials'],
-    submissions,
   } as unknown as StudentHomeworkAssignmentDetails;
   return result;
-}
-
-export async function createStudentSubmission(assignmentId: string): Promise<StudentHomeworkSubmission> {
-  const studentId = await getCurrentUserId();
-
-  const { data: assignment, error: assignmentError } = await supabase
-    .from('homework_tutor_assignments')
-    .select('id, deadline')
-    .eq('id', assignmentId)
-    .single();
-
-  if (assignmentError || !assignment) {
-    throw new StudentHomeworkApiError('Задание не найдено');
-  }
-
-  if (isDeadlinePassed(assignment.deadline)) {
-    throw new StudentHomeworkApiError('Дедлайн уже прошёл. Сдача недоступна.');
-  }
-
-  const createSubmission = async (telegramChatId: number | null) => supabase
-    .from('homework_tutor_submissions')
-    .insert({
-      assignment_id: assignmentId,
-      student_id: studentId,
-      telegram_chat_id: telegramChatId,
-      status: 'in_progress',
-    })
-    .select(SUBMISSION_SELECT)
-    .single();
-
-  const { data, error } = await createSubmission(null);
-  if (!error && data) {
-    return data as unknown as StudentHomeworkSubmission;
-  }
-
-  if (error && isTelegramChatIdNotNullError(error.message)) {
-    // Legacy prod schema may still require telegram_chat_id. Use 0 as web sentinel.
-    const { data: legacyData, error: legacyError } = await createSubmission(0);
-    if (legacyError || !legacyData) {
-      throw new StudentHomeworkApiError(
-        translateSupabaseError(legacyError?.message ?? 'Не удалось создать работу'),
-      );
-    }
-    return legacyData as unknown as StudentHomeworkSubmission;
-  }
-
-  throw new StudentHomeworkApiError(
-    translateSupabaseError(error?.message ?? 'Не удалось создать работу'),
-  );
-}
-
-export async function uploadStudentHomeworkFiles(
-  studentId: string,
-  assignmentId: string,
-  submissionId: string,
-  taskId: string,
-  files: File[],
-): Promise<string[]> {
-  const uploadedPaths: string[] = [];
-
-  for (const file of files) {
-    const isPdf = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf');
-    const ext = isPdf ? 'pdf' : (file.name.split('.').pop()?.toLowerCase() || 'jpg');
-    const fileId = generateStorageObjectId();
-    const primaryObjectPath = `${studentId}/${assignmentId}/${submissionId}/${taskId}/${fileId}.${ext}`;
-    const contentType = file.type || (isPdf ? 'application/pdf' : 'application/octet-stream');
-
-    const { error: primaryError } = await supabase.storage
-      .from(HOMEWORK_SUBMISSIONS_BUCKET)
-      .upload(primaryObjectPath, file, { upsert: false, contentType });
-
-    if (!primaryError) {
-      uploadedPaths.push(toStorageRef(HOMEWORK_SUBMISSIONS_BUCKET, primaryObjectPath));
-      continue;
-    }
-
-    // Fallback to homework-images bucket if homework-submissions not yet created in this env
-    const isBucketMissing =
-      primaryError.message?.toLowerCase().includes('bucket not found') ||
-      (primaryError as unknown as { statusCode?: number }).statusCode === 404;
-
-    if (!isBucketMissing) {
-      throw new StudentHomeworkApiError(
-        `Ошибка загрузки файла: ${translateSupabaseError(primaryError.message)}`,
-      );
-    }
-
-    // Legacy homework-images policies expect path prefix homework/{assignmentId}/...
-    const fallbackObjectPath = `homework/${assignmentId}/${submissionId}/${taskId}/${fileId}.${ext}`;
-    const { error: fallbackError } = await supabase.storage
-      .from(HOMEWORK_IMAGES_BUCKET)
-      .upload(fallbackObjectPath, file, { upsert: false, contentType });
-
-    if (fallbackError) {
-      throw new StudentHomeworkApiError(
-        `Ошибка загрузки файла: ${translateSupabaseError(fallbackError.message)}`,
-      );
-    }
-    uploadedPaths.push(fallbackObjectPath);
-  }
-
-  return uploadedPaths;
-}
-
-export async function submitStudentAnswer(
-  submissionId: string,
-  taskId: string,
-  text?: string,
-  files?: File[],
-  answerType?: 'text' | 'image' | 'pdf',
-): Promise<void> {
-  let filePaths: string[] | null = null;
-
-  if (files && files.length > 0) {
-    const studentId = await getCurrentUserId();
-
-    const { data: submission, error: submissionError } = await supabase
-      .from('homework_tutor_submissions')
-      .select('assignment_id')
-      .eq('id', submissionId)
-      .single();
-
-    if (submissionError || !submission) {
-      throw new StudentHomeworkApiError('Попытка не найдена');
-    }
-
-    filePaths = await uploadStudentHomeworkFiles(
-      studentId,
-      submission.assignment_id,
-      submissionId,
-      taskId,
-      files,
-    );
-  }
-
-  // Determine answer_type if not explicitly provided
-  const resolvedAnswerType: 'text' | 'image' | 'pdf' | null = answerType ?? (
-    files && files.length > 0
-      ? (files.some(
-          (f) => f.type === 'application/pdf' || f.name.toLowerCase().endsWith('.pdf'),
-        )
-          ? 'pdf'
-          : 'image')
-      : (text?.trim() ? 'text' : null)
-  );
-
-  const basePayload = {
-    submission_id: submissionId,
-    task_id: taskId,
-    student_text: text?.trim() || null,
-    student_image_urls: filePaths,
-  };
-
-  const { error: withAnswerTypeError } = await supabase
-    .from('homework_tutor_submission_items')
-    .upsert(
-      {
-        ...basePayload,
-        answer_type: resolvedAnswerType,
-      },
-      { onConflict: 'submission_id,task_id' },
-    );
-
-  if (withAnswerTypeError && isMissingAnswerTypeColumnError(withAnswerTypeError.message)) {
-    const { error: legacyError } = await supabase
-      .from('homework_tutor_submission_items')
-      .upsert(basePayload, { onConflict: 'submission_id,task_id' });
-
-    if (legacyError) {
-      throw new StudentHomeworkApiError(translateSupabaseError(legacyError.message));
-    }
-    return;
-  }
-
-  if (withAnswerTypeError) {
-    throw new StudentHomeworkApiError(translateSupabaseError(withAnswerTypeError.message));
-  }
-}
-
-export async function finalizeSubmission(submissionId: string): Promise<void> {
-  const { data: submission, error: submissionError } = await supabase
-    .from('homework_tutor_submissions')
-    .select('assignment_id')
-    .eq('id', submissionId)
-    .single();
-
-  if (submissionError || !submission) {
-    throw new StudentHomeworkApiError('Попытка не найдена');
-  }
-
-  const { data: assignment, error: assignmentError } = await supabase
-    .from('homework_tutor_assignments')
-    .select('deadline')
-    .eq('id', submission.assignment_id)
-    .single();
-
-  if (assignmentError || !assignment) {
-    throw new StudentHomeworkApiError('Задание не найдено');
-  }
-
-  if (isDeadlinePassed(assignment.deadline)) {
-    throw new StudentHomeworkApiError('Дедлайн уже прошёл. Сдача недоступна.');
-  }
-
-  const { error } = await supabase
-    .from('homework_tutor_submissions')
-    .update({
-      status: 'submitted',
-      submitted_at: new Date().toISOString(),
-    })
-    .eq('id', submissionId);
-
-  if (error) {
-    throw new StudentHomeworkApiError(error.message);
-  }
 }
 
 export async function getStudentTaskImageSignedUrl(taskImageRef: string): Promise<string | null> {
@@ -702,21 +374,6 @@ export async function getStudentTaskImageSignedUrlViaBackend(
   } catch {
     return null;
   }
-}
-
-export interface StudentSubmissionAiCheckResponse {
-  status: 'submitted' | 'ai_checked' | 'tutor_reviewed';
-  total_score: number | null;
-  total_max_score: number | null;
-}
-
-export async function runStudentSubmissionAiCheck(
-  submissionId: string,
-): Promise<StudentSubmissionAiCheckResponse> {
-  return requestStudentHomeworkApi<StudentSubmissionAiCheckResponse>(
-    `/student/submissions/${encodeURIComponent(submissionId)}/ai-check`,
-    { method: 'POST', body: '{}' },
-  );
 }
 
 export async function getStudentHomeworkThread(

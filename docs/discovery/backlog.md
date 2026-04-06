@@ -28,7 +28,7 @@ Job Graph: `docs/discovery/research/SokratAI_AJTBD_job-graphs/`
 | 2026-03-31 | Маркетинговая рассылка репетиторам физики | — | да (привлечение) | P0 | in_progress | Vladimir |
 | 2026-04-01 | Банк задач ЕГЭ по физике (neofamily + РЕШУ ЕГЭ) | R4-1, R4-3, S1 | да (частичный блокер) | P1 | ticket | signal/Женя #1 |
 | 2026-04-01 | Статистика по ДЗ в формате ЕГЭ (по задачам × по ученикам + динамика) | R1-2, R1-4, R2 | да | P1 | ticket | signal/Женя #2 |
-| 2026-04-01 | Удалить classic mode полностью (код + документы) | — | инфра (упрощение) | P2 | intake | Vladimir |
+| 2026-04-06 | Удалить classic mode полностью (код + документы) | — | инфра (упрощение) | P2 | done | Vladimir |
 | 2026-03-31 | Декомпозиция CLAUDE.md → .claude/rules/ | — | инфра | P1 | done | playbook |
 
 ## Killed

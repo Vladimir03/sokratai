@@ -1,6 +1,4 @@
 import { createClient, SupabaseClient } from "npm:@supabase/supabase-js@2";
-import { runHomeworkAiCheck } from "./ai_check.ts";
-import { recognizeHomeworkPhoto, type HomeworkSubject } from "./vision_checker.ts";
 import {
   computeAvailableScore,
   evaluateStudentAnswer,
@@ -21,10 +19,8 @@ const VAPID_SUBJECT = Deno.env.get("VAPID_SUBJECT") ?? "mailto:support@sokratai.
 
 const VALID_SUBJECTS = ["math", "physics", "history", "social", "english", "cs"] as const;
 const VALID_STATUSES = ["draft", "active", "closed"] as const;
-const VALID_WORKFLOW_MODES = ["classic", "guided_chat"] as const;
 const VALID_STATUS_FILTERS = ["draft", "active", "closed", "all"] as const;
 const VALID_CHECK_FORMATS = ["short_answer", "detailed_solution"] as const;
-const VALID_SUBMISSION_STATUSES = ["in_progress", "submitted", "ai_checked", "tutor_reviewed"] as const;
 type NotifyFailureReason =
   | "missing_telegram_link" | "telegram_send_failed" | "telegram_send_error"
   | "push_expired" | "push_send_failed"
@@ -311,30 +307,6 @@ async function getOwnedAssignmentOrThrow(
   return data as Record<string, unknown>;
 }
 
-async function getOwnedSubmissionOrThrow(
-  db: SupabaseClient,
-  submissionId: string,
-  tutorUserId: string,
-  cors: Record<string, string>,
-): Promise<Record<string, unknown> | Response> {
-  if (!isUUID(submissionId)) {
-    return jsonError(cors, 400, "INVALID_ID", "Invalid submission ID format");
-  }
-  const { data, error } = await db
-    .from("homework_tutor_submissions")
-    .select("*, homework_tutor_assignments!inner(tutor_id)")
-    .eq("id", submissionId)
-    .maybeSingle();
-  if (error || !data) {
-    return jsonError(cors, 404, "NOT_FOUND", "Submission not found");
-  }
-  const assignment = data.homework_tutor_assignments as { tutor_id: string };
-  if (assignment.tutor_id !== tutorUserId) {
-    return jsonError(cors, 403, "FORBIDDEN", "Submission does not belong to your assignment");
-  }
-  return data as Record<string, unknown>;
-}
-
 // ─── Routing ─────────────────────────────────────────────────────────────────
 
 interface RouteMatch {
@@ -383,7 +355,6 @@ async function handleCreateAssignment(
   if (!Array.isArray(b.tasks) || b.tasks.length === 0) {
     return jsonError(cors, 400, "VALIDATION", "tasks must be a non-empty array");
   }
-  const workflowMode = b.workflow_mode === "guided_chat" ? "guided_chat" : "classic";
   for (let i = 0; i < b.tasks.length; i++) {
     const t = b.tasks[i];
     if (!t || typeof t !== "object") {
@@ -413,7 +384,6 @@ async function handleCreateAssignment(
       description: isNonEmptyString(b.description) ? (b.description as string).trim() : null,
       deadline: isNonEmptyString(b.deadline) ? b.deadline : null,
       status: "draft",
-      workflow_mode: workflowMode,
       disable_ai_bootstrap: b.disable_ai_bootstrap === true,
     })
     .select("id")
@@ -495,7 +465,7 @@ async function handleListAssignments(
 
   let query = db
     .from("homework_tutor_assignments")
-    .select("id, title, subject, topic, deadline, status, workflow_mode, created_at")
+    .select("id, title, subject, topic, deadline, status, created_at")
     .eq("tutor_id", tutorUserId)
     .order("created_at", { ascending: false });
 
@@ -517,19 +487,18 @@ async function handleListAssignments(
 
   const { data: assignedCounts } = await db
     .from("homework_tutor_student_assignments")
-    .select("assignment_id, delivery_status")
-    .in("assignment_id", assignmentIds);
-
-  const { data: submissions } = await db
-    .from("homework_tutor_submissions")
-    .select("assignment_id, status, total_score, total_max_score")
+    .select("id, assignment_id, delivery_status")
     .in("assignment_id", assignmentIds);
 
   const assignedMap: Record<string, number> = {};
   const deliveredMap: Record<string, number> = {};
   const notConnectedMap: Record<string, number> = {};
+  const saIdToAssignment: Record<string, string> = {};
+  const allSaIds: string[] = [];
   for (const r of assignedCounts ?? []) {
     assignedMap[r.assignment_id] = (assignedMap[r.assignment_id] ?? 0) + 1;
+    saIdToAssignment[r.id as string] = r.assignment_id as string;
+    allSaIds.push(r.id as string);
     const ds = r.delivery_status as string;
     if (ds === "delivered" || ds === "delivered_push" || ds === "delivered_telegram" || ds === "delivered_email") {
       deliveredMap[r.assignment_id] = (deliveredMap[r.assignment_id] ?? 0) + 1;
@@ -540,90 +509,60 @@ async function handleListAssignments(
 
   const submittedMap: Record<string, number> = {};
   const scoreMap: Record<string, { sum: number; count: number }> = {};
-  for (const s of submissions ?? []) {
-    if (["submitted", "ai_checked", "tutor_reviewed"].includes(s.status)) {
-      submittedMap[s.assignment_id] = (submittedMap[s.assignment_id] ?? 0) + 1;
-    }
-    if (s.total_score != null && s.total_max_score != null && s.total_max_score > 0) {
-      if (!scoreMap[s.assignment_id]) {
-        scoreMap[s.assignment_id] = { sum: 0, count: 0 };
-      }
-      scoreMap[s.assignment_id].sum += (s.total_score / s.total_max_score) * 100;
-      scoreMap[s.assignment_id].count += 1;
-    }
-  }
 
   // Guided chat: count completed threads as "submissions" for stats
-  const guidedAssignmentIds = assignments
-    .filter((a) => a.workflow_mode === "guided_chat")
-    .map((a) => a.id);
+  if (allSaIds.length > 0) {
+    // Get completed threads
+    const { data: completedThreads } = await db
+      .from("homework_tutor_threads")
+      .select("id, student_assignment_id")
+      .in("student_assignment_id", allSaIds)
+      .eq("status", "completed");
 
-  if (guidedAssignmentIds.length > 0) {
-    // Get student assignments for guided chat assignments
-    const { data: guidedSAs } = await db
-      .from("homework_tutor_student_assignments")
-      .select("id, assignment_id")
-      .in("assignment_id", guidedAssignmentIds);
+    if (completedThreads && completedThreads.length > 0) {
+      const threadIds = completedThreads.map((t) => t.id);
 
-    if (guidedSAs && guidedSAs.length > 0) {
-      const saIds = guidedSAs.map((sa) => sa.id);
-      const saToAssignment: Record<string, string> = {};
-      for (const sa of guidedSAs) {
-        saToAssignment[sa.id] = sa.assignment_id;
-      }
-
-      // Get completed threads
-      const { data: completedThreads } = await db
-        .from("homework_tutor_threads")
-        .select("id, student_assignment_id")
-        .in("student_assignment_id", saIds)
+      // Get task states for completed threads (need task_id for max_score lookup)
+      const { data: taskStates } = await db
+        .from("homework_tutor_task_states")
+        .select("thread_id, task_id, earned_score")
+        .in("thread_id", threadIds)
         .eq("status", "completed");
 
-      if (completedThreads && completedThreads.length > 0) {
-        const threadIds = completedThreads.map((t) => t.id);
+      // Fetch max_score from tasks for guided assignments
+      const { data: guidedTasks } = await db
+        .from("homework_tutor_tasks")
+        .select("id, max_score, assignment_id")
+        .in("assignment_id", assignmentIds);
 
-        // Get task states for completed threads (need task_id for max_score lookup)
-        const { data: taskStates } = await db
-          .from("homework_tutor_task_states")
-          .select("thread_id, task_id, earned_score")
-          .in("thread_id", threadIds)
-          .eq("status", "completed");
+      const guidedTaskMaxScore: Record<string, number> = {};
+      for (const t of guidedTasks ?? []) {
+        guidedTaskMaxScore[t.id] = t.max_score ?? 1;
+      }
 
-        // Fetch max_score from tasks for guided assignments
-        const { data: guidedTasks } = await db
-          .from("homework_tutor_tasks")
-          .select("id, max_score, assignment_id")
-          .in("assignment_id", guidedAssignmentIds);
-
-        const guidedTaskMaxScore: Record<string, number> = {};
-        for (const t of guidedTasks ?? []) {
-          guidedTaskMaxScore[t.id] = t.max_score ?? 1;
+      // Aggregate scores per thread: earned vs max_score (not available_score)
+      const threadScores: Record<string, { earned: number; maxTotal: number }> = {};
+      for (const ts of taskStates ?? []) {
+        if (!threadScores[ts.thread_id]) {
+          threadScores[ts.thread_id] = { earned: 0, maxTotal: 0 };
         }
+        threadScores[ts.thread_id].earned += Number(ts.earned_score ?? 0);
+        threadScores[ts.thread_id].maxTotal += guidedTaskMaxScore[ts.task_id] ?? 1;
+      }
 
-        // Aggregate scores per thread: earned vs max_score (not available_score)
-        const threadScores: Record<string, { earned: number; maxTotal: number }> = {};
-        for (const ts of taskStates ?? []) {
-          if (!threadScores[ts.thread_id]) {
-            threadScores[ts.thread_id] = { earned: 0, maxTotal: 0 };
+      for (const thread of completedThreads) {
+        const aId = saIdToAssignment[thread.student_assignment_id];
+        if (!aId) continue;
+
+        submittedMap[aId] = (submittedMap[aId] ?? 0) + 1;
+
+        const scores = threadScores[thread.id];
+        if (scores && scores.maxTotal > 0) {
+          if (!scoreMap[aId]) {
+            scoreMap[aId] = { sum: 0, count: 0 };
           }
-          threadScores[ts.thread_id].earned += Number(ts.earned_score ?? 0);
-          threadScores[ts.thread_id].maxTotal += guidedTaskMaxScore[ts.task_id] ?? 1;
-        }
-
-        for (const thread of completedThreads) {
-          const aId = saToAssignment[thread.student_assignment_id];
-          if (!aId) continue;
-
-          submittedMap[aId] = (submittedMap[aId] ?? 0) + 1;
-
-          const scores = threadScores[thread.id];
-          if (scores && scores.maxTotal > 0) {
-            if (!scoreMap[aId]) {
-              scoreMap[aId] = { sum: 0, count: 0 };
-            }
-            scoreMap[aId].sum += (scores.earned / scores.maxTotal) * 100;
-            scoreMap[aId].count += 1;
-          }
+          scoreMap[aId].sum += (scores.earned / scores.maxTotal) * 100;
+          scoreMap[aId].count += 1;
         }
       }
     }
@@ -706,34 +645,37 @@ async function handleGetAssignment(
     .eq("assignment_id", assignmentId)
     .order("created_at", { ascending: true });
 
-  const { data: submissions } = await db
-    .from("homework_tutor_submissions")
-    .select("status, total_score, total_max_score")
-    .eq("assignment_id", assignmentId);
-
   const statusCounts: Record<string, number> = {};
   let scoreSum = 0;
   let scoreCount = 0;
-  for (const s of submissions ?? []) {
-    statusCounts[s.status] = (statusCounts[s.status] ?? 0) + 1;
-    if (s.total_score != null && s.total_max_score != null && s.total_max_score > 0) {
-      scoreSum += (s.total_score / s.total_max_score) * 100;
-      scoreCount += 1;
-    }
-  }
+  let guidedCompletedCount = 0;
+  // `has_interactions` mirrors the destructive-change gate in PUT /assignments/:id:
+  // any user message across all threads counts as "student has started solving".
+  // The tutor editor reads this to lock add/remove task actions.
+  let hasInteractions = false;
 
   // Guided chat: add completed thread data to submissions summary
-  let guidedCompletedCount = 0;
-  if ((assignment as Record<string, unknown>).workflow_mode === "guided_chat" && studentAssignments && studentAssignments.length > 0) {
+  if (studentAssignments && studentAssignments.length > 0) {
     const saIds = studentAssignments.map((sa) => sa.id);
 
-    const { data: completedThreads } = await db
+    const { data: allThreads } = await db
       .from("homework_tutor_threads")
-      .select("id, student_assignment_id")
-      .in("student_assignment_id", saIds)
-      .eq("status", "completed");
+      .select("id, student_assignment_id, status")
+      .in("student_assignment_id", saIds);
 
-    if (completedThreads && completedThreads.length > 0) {
+    const allThreadIds = (allThreads ?? []).map((t) => t.id as string);
+    if (allThreadIds.length > 0) {
+      const { count: userMsgCount } = await db
+        .from("homework_tutor_thread_messages")
+        .select("id", { count: "exact", head: true })
+        .in("thread_id", allThreadIds)
+        .eq("role", "user");
+      hasInteractions = (userMsgCount ?? 0) > 0;
+    }
+
+    const completedThreads = (allThreads ?? []).filter((t) => t.status === "completed");
+
+    if (completedThreads.length > 0) {
       const threadIds = completedThreads.map((t) => t.id);
 
       const { data: taskStates } = await db
@@ -771,9 +713,10 @@ async function handleGetAssignment(
   }
 
   const submissionsSummary = {
-    total: (submissions ?? []).length + guidedCompletedCount,
+    total: guidedCompletedCount,
     by_status: statusCounts,
     avg_percent: scoreCount > 0 ? Math.round((scoreSum / scoreCount) * 100) / 100 : null,
+    has_interactions: hasInteractions,
   };
 
   console.log("homework_api_request_success", {
@@ -834,12 +777,6 @@ async function handleUpdateAssignment(
     }
     patch.status = b.status;
   }
-  if (b.workflow_mode !== undefined) {
-    if (!isNonEmptyString(b.workflow_mode) || !(VALID_WORKFLOW_MODES as readonly string[]).includes(b.workflow_mode)) {
-      return jsonError(cors, 400, "VALIDATION", `workflow_mode must be one of: ${VALID_WORKFLOW_MODES.join(", ")}`);
-    }
-    patch.workflow_mode = b.workflow_mode;
-  }
   if (b.disable_ai_bootstrap !== undefined) {
     patch.disable_ai_bootstrap = b.disable_ai_bootstrap === true;
   }
@@ -879,12 +816,31 @@ async function handleUpdateAssignment(
       }
     }
 
-    const { count: submissionCount } = await db
-      .from("homework_tutor_submissions")
-      .select("id", { count: "exact", head: true })
-      .eq("assignment_id", assignmentId);
-
-    const hasSubmissions = (submissionCount ?? 0) > 0;
+    // Detect if any student has interacted with the assignment via guided threads.
+    // Block destructive task changes only if there are existing thread messages.
+    let hasSubmissions = false;
+    {
+      const { data: existingSAs } = await db
+        .from("homework_tutor_student_assignments")
+        .select("id")
+        .eq("assignment_id", assignmentId);
+      const existingSAIds = (existingSAs ?? []).map((sa) => sa.id as string);
+      if (existingSAIds.length > 0) {
+        const { data: existingThreads } = await db
+          .from("homework_tutor_threads")
+          .select("id")
+          .in("student_assignment_id", existingSAIds);
+        const existingThreadIds = (existingThreads ?? []).map((t) => t.id as string);
+        if (existingThreadIds.length > 0) {
+          const { count: msgCount } = await db
+            .from("homework_tutor_thread_messages")
+            .select("id", { count: "exact", head: true })
+            .in("thread_id", existingThreadIds)
+            .eq("role", "user");
+          hasSubmissions = (msgCount ?? 0) > 0;
+        }
+      }
+    }
 
     const { data: existingTasks } = await db
       .from("homework_tutor_tasks")
@@ -1233,8 +1189,8 @@ async function handleAssignStudents(
     return jsonError(cors, 500, "DB_ERROR", "Failed to assign students");
   }
 
-  // Provision threads for guided_chat assignments (eager)
-  if (assignment.workflow_mode === "guided_chat" && upserted && upserted.length > 0) {
+  // Provision guided threads eagerly for newly assigned students
+  if (upserted && upserted.length > 0) {
     for (const sa of upserted as { id: string }[]) {
       await provisionGuidedThread(db, assignmentId, sa.id);
     }
@@ -1705,195 +1661,81 @@ async function handleGetResults(
     taskMap[t.id] = { order_num: t.order_num, task_text: t.task_text, max_score: t.max_score };
   }
 
-  const { data: submissions } = await db
-    .from("homework_tutor_submissions")
-    .select("id, student_id, status, total_score, total_max_score, submitted_at")
-    .eq("assignment_id", assignmentId)
-    .order("submitted_at", { ascending: true });
-
-  const submissionIds = (submissions ?? []).map((s) => s.id);
-
-  let items: Record<string, unknown>[] = [];
-  if (submissionIds.length > 0) {
-    const { data } = await db
-      .from("homework_tutor_submission_items")
-      .select("id, submission_id, task_id, student_text, student_image_urls, recognized_text, ai_is_correct, ai_confidence, ai_feedback, ai_score, ai_error_type, tutor_override_correct, tutor_comment")
-      .in("submission_id", submissionIds);
-    items = (data ?? []) as Record<string, unknown>[];
-  }
-
-  const studentIds = [...new Set((submissions ?? []).map((s) => s.student_id))];
-  let profileMap: Record<string, string | null> = {};
-  if (studentIds.length > 0) {
-    const { data: profiles } = await db
-      .from("profiles")
-      .select("id, username")
-      .in("id", studentIds);
-    for (const p of profiles ?? []) {
-      profileMap[p.id] = p.username;
-    }
-  }
-
   let totalScoreSum = 0;
   let totalScoreCount = 0;
   const distribution = { "0-24": 0, "25-49": 0, "50-74": 0, "75-100": 0 };
-  const errorTypeCounts: Record<string, number> = {};
 
-  for (const s of submissions ?? []) {
-    if (s.total_score != null && s.total_max_score != null && s.total_max_score > 0) {
-      const pct = (s.total_score / s.total_max_score) * 100;
-      totalScoreSum += pct;
-      totalScoreCount++;
-
-      if (pct < 25) distribution["0-24"]++;
-      else if (pct < 50) distribution["25-49"]++;
-      else if (pct < 75) distribution["50-74"]++;
-      else distribution["75-100"]++;
-    }
-  }
-
-  for (const item of items) {
-    if (item.ai_error_type && item.ai_error_type !== "correct") {
-      const et = item.ai_error_type as string;
-      errorTypeCounts[et] = (errorTypeCounts[et] ?? 0) + 1;
-    }
-  }
-
-  // Guided chat: gather completed thread data for summary, perStudent, perTask
-  const assignmentRecord = assignmentOrErr as Record<string, unknown>;
-  // deno-lint-ignore no-explicit-any
-  const guidedPerStudent: any[] = [];
+  // Guided chat: gather completed thread data for summary and perTask aggregates
   const guidedTaskScores: Record<string, { scoreSum: number; scoreCount: number; correctCount: number; total: number }> = {};
 
-  if (assignmentRecord.workflow_mode === "guided_chat") {
-    const { data: studentAssignments } = await db
-      .from("homework_tutor_student_assignments")
-      .select("id, student_id")
-      .eq("assignment_id", assignmentId);
+  const { data: studentAssignments } = await db
+    .from("homework_tutor_student_assignments")
+    .select("id, student_id")
+    .eq("assignment_id", assignmentId);
 
-    if (studentAssignments && studentAssignments.length > 0) {
-      const saIds = studentAssignments.map((sa) => sa.id);
-      const saToStudent: Record<string, string> = {};
-      for (const sa of studentAssignments) {
-        saToStudent[sa.id] = sa.student_id;
+  if (studentAssignments && studentAssignments.length > 0) {
+    const saIds = studentAssignments.map((sa) => sa.id);
+
+    const { data: completedThreads } = await db
+      .from("homework_tutor_threads")
+      .select("id, student_assignment_id")
+      .in("student_assignment_id", saIds)
+      .eq("status", "completed");
+
+    if (completedThreads && completedThreads.length > 0) {
+      const threadIds = completedThreads.map((t) => t.id);
+
+      const { data: allTaskStates } = await db
+        .from("homework_tutor_task_states")
+        .select("thread_id, task_id, earned_score, status")
+        .in("thread_id", threadIds);
+
+      // Group task states by thread
+      const statesByThread: Record<string, Array<{ thread_id: string; task_id: string; earned_score: number | null; status: string | null }>> = {};
+      for (const ts of allTaskStates ?? []) {
+        if (!statesByThread[ts.thread_id]) statesByThread[ts.thread_id] = [];
+        statesByThread[ts.thread_id]!.push(ts as { thread_id: string; task_id: string; earned_score: number | null; status: string | null });
       }
 
-      const { data: completedThreads } = await db
-        .from("homework_tutor_threads")
-        .select("id, student_assignment_id, updated_at")
-        .in("student_assignment_id", saIds)
-        .eq("status", "completed");
+      for (const thread of completedThreads) {
+        const states = statesByThread[thread.id] ?? [];
 
-      if (completedThreads && completedThreads.length > 0) {
-        const threadIds = completedThreads.map((t) => t.id);
+        let threadEarned = 0;
+        let threadMaxTotal = 0;
 
-        const { data: allTaskStates } = await db
-          .from("homework_tutor_task_states")
-          .select("thread_id, task_id, earned_score, available_score, status")
-          .in("thread_id", threadIds);
+        for (const ts of states) {
+          const earned = Number(ts.earned_score ?? 0);
+          threadEarned += earned;
 
-        // Group task states by thread
-        const statesByThread: Record<string, typeof allTaskStates> = {};
-        for (const ts of allTaskStates ?? []) {
-          if (!statesByThread[ts.thread_id]) statesByThread[ts.thread_id] = [];
-          statesByThread[ts.thread_id]!.push(ts);
-        }
+          const taskInfo = taskMap[ts.task_id];
+          const maxScore = taskInfo?.max_score ?? 1;
+          threadMaxTotal += maxScore;
 
-        // Collect student IDs for profile lookup
-        const guidedStudentIds = completedThreads.map((t) => saToStudent[t.student_assignment_id]);
-        const uniqueGuidedStudentIds = [...new Set(guidedStudentIds)].filter((id) => !profileMap[id]);
-        if (uniqueGuidedStudentIds.length > 0) {
-          const { data: profiles } = await db
-            .from("profiles")
-            .select("id, username")
-            .in("id", uniqueGuidedStudentIds);
-          for (const p of profiles ?? []) {
-            profileMap[p.id] = p.username;
-          }
-        }
-
-        for (const thread of completedThreads) {
-          const studentId = saToStudent[thread.student_assignment_id];
-          const states = statesByThread[thread.id] ?? [];
-
-          let threadEarned = 0;
-          let threadMaxTotal = 0;
-          const taskItems: { task_id: string; task_order_num: number; task_text: string; max_score: number; ai_score: number | null }[] = [];
-
-          for (const ts of states) {
-            const earned = Number(ts.earned_score ?? 0);
-            threadEarned += earned;
-
-            const taskInfo = taskMap[ts.task_id];
-            const maxScore = taskInfo?.max_score ?? 1;
-            threadMaxTotal += maxScore;
-
-            if (taskInfo) {
-              taskItems.push({
-                task_id: ts.task_id,
-                task_order_num: taskInfo.order_num,
-                task_text: taskInfo.task_text,
-                max_score: maxScore,
-                ai_score: earned,
-              });
-
-              // Aggregate for perTask
-              if (!guidedTaskScores[ts.task_id]) {
-                guidedTaskScores[ts.task_id] = { scoreSum: 0, scoreCount: 0, correctCount: 0, total: 0 };
-              }
-              guidedTaskScores[ts.task_id].total++;
-              if (ts.status === "completed") {
-                guidedTaskScores[ts.task_id].scoreSum += earned;
-                guidedTaskScores[ts.task_id].scoreCount++;
-                if (earned > 0) {
-                  guidedTaskScores[ts.task_id].correctCount++;
-                }
+          if (taskInfo) {
+            // Aggregate for perTask
+            if (!guidedTaskScores[ts.task_id]) {
+              guidedTaskScores[ts.task_id] = { scoreSum: 0, scoreCount: 0, correctCount: 0, total: 0 };
+            }
+            guidedTaskScores[ts.task_id].total++;
+            if (ts.status === "completed") {
+              guidedTaskScores[ts.task_id].scoreSum += earned;
+              guidedTaskScores[ts.task_id].scoreCount++;
+              if (earned > 0) {
+                guidedTaskScores[ts.task_id].correctCount++;
               }
             }
           }
+        }
 
-          const pct = threadMaxTotal > 0
-            ? Math.round((threadEarned / threadMaxTotal) * 100 * 100) / 100
-            : null;
+        if (threadMaxTotal > 0) {
+          const pct = (threadEarned / threadMaxTotal) * 100;
+          totalScoreSum += pct;
+          totalScoreCount++;
 
-          // Add to summary distribution
-          if (pct != null) {
-            totalScoreSum += (threadEarned / threadMaxTotal) * 100;
-            totalScoreCount++;
-
-            if (pct < 25) distribution["0-24"]++;
-            else if (pct < 50) distribution["25-49"]++;
-            else if (pct < 75) distribution["50-74"]++;
-            else distribution["75-100"]++;
-          }
-
-          guidedPerStudent.push({
-            student_id: studentId,
-            name: profileMap[studentId] ?? null,
-            status: "completed",
-            submitted_at: thread.updated_at ?? null,
-            total_score: threadEarned,
-            total_max_score: threadMaxTotal,
-            percent: pct,
-            submission_id: thread.id,
-            top_error_types: [],
-            submission_items: taskItems.sort((a, b) => a.task_order_num - b.task_order_num).map((ti) => ({
-              task_id: ti.task_id,
-              task_order_num: ti.task_order_num,
-              task_text: ti.task_text,
-              max_score: ti.max_score,
-              student_text: null,
-              student_image_urls: null,
-              recognized_text: null,
-              ai_is_correct: null,
-              ai_confidence: null,
-              ai_feedback: null,
-              ai_error_type: null,
-              ai_score: ti.ai_score,
-              tutor_override_correct: null,
-              tutor_comment: null,
-            })),
-          });
+          if (pct < 25) distribution["0-24"]++;
+          else if (pct < 50) distribution["25-49"]++;
+          else if (pct < 75) distribution["50-74"]++;
+          else distribution["75-100"]++;
         }
       }
     }
@@ -1904,103 +1746,15 @@ async function handleGetResults(
       ? Math.round((totalScoreSum / totalScoreCount) * 100) / 100
       : null,
     distribution,
-    common_error_types: Object.entries(errorTypeCounts)
-      .sort((a, b) => b[1] - a[1])
-      .map(([type, count]) => ({ type, count })),
+    common_error_types: [] as { type: string; count: number }[],
   };
 
-  const submissionItemsBySubmission: Record<string, Record<string, unknown>[]> = {};
-  for (const item of items) {
-    const sid = item.submission_id as string;
-    if (!submissionItemsBySubmission[sid]) submissionItemsBySubmission[sid] = [];
-    submissionItemsBySubmission[sid].push(item);
-  }
-
-  const perStudentClassic = (submissions ?? []).map((s) => {
-    const pct = (s.total_score != null && s.total_max_score != null && s.total_max_score > 0)
-      ? Math.round((s.total_score / s.total_max_score) * 100 * 100) / 100
-      : null;
-
-    const sItems = submissionItemsBySubmission[s.id] ?? [];
-    const topErrors: Record<string, number> = {};
-    for (const it of sItems) {
-      if (it.ai_error_type && it.ai_error_type !== "correct") {
-        const et = it.ai_error_type as string;
-        topErrors[et] = (topErrors[et] ?? 0) + 1;
-      }
-    }
-
-    const submissionItems = sItems.map((it) => {
-      const taskInfo = taskMap[it.task_id as string];
-      return {
-        task_id: it.task_id,
-        task_order_num: taskInfo?.order_num ?? 0,
-        task_text: taskInfo?.task_text ?? "",
-        max_score: taskInfo?.max_score ?? 1,
-        student_text: it.student_text ?? null,
-        student_image_urls: it.student_image_urls ?? null,
-        recognized_text: it.recognized_text ?? null,
-        ai_is_correct: it.ai_is_correct ?? null,
-        ai_confidence: it.ai_confidence ?? null,
-        ai_feedback: it.ai_feedback ?? null,
-        ai_error_type: it.ai_error_type ?? null,
-        ai_score: it.ai_score ?? null,
-        tutor_override_correct: it.tutor_override_correct ?? null,
-        tutor_comment: it.tutor_comment ?? null,
-      };
-    }).sort((a, b) => a.task_order_num - b.task_order_num);
-
-    return {
-      student_id: s.student_id,
-      name: profileMap[s.student_id] ?? null,
-      status: s.status,
-      submitted_at: s.submitted_at ?? null,
-      total_score: s.total_score,
-      total_max_score: s.total_max_score,
-      percent: pct,
-      submission_id: s.id,
-      top_error_types: Object.entries(topErrors)
-        .sort((a, b) => b[1] - a[1])
-        .slice(0, 3)
-        .map(([type, count]) => ({ type, count })),
-      submission_items: submissionItems,
-    };
-  });
-
-  const perStudent = [...perStudentClassic, ...guidedPerStudent];
-
   const perTask = (tasks ?? []).map((t) => {
-    const taskItems = items.filter((it) => it.task_id === t.id);
-    let scoreSum = 0;
-    let scoreCount = 0;
-    let correctCount = 0;
-    let totalCount = taskItems.length;
-    const taskErrorCounts: Record<string, number> = {};
-
-    for (const it of taskItems) {
-      const isCorrect = it.tutor_override_correct ?? it.ai_is_correct;
-      if (isCorrect === true) correctCount++;
-
-      const score = it.ai_score as number | null;
-      if (score != null) {
-        scoreSum += score;
-        scoreCount++;
-      }
-
-      if (it.ai_error_type && it.ai_error_type !== "correct") {
-        const et = it.ai_error_type as string;
-        taskErrorCounts[et] = (taskErrorCounts[et] ?? 0) + 1;
-      }
-    }
-
-    // Add guided chat task scores
     const guidedData = guidedTaskScores[t.id];
-    if (guidedData) {
-      scoreSum += guidedData.scoreSum;
-      scoreCount += guidedData.scoreCount;
-      correctCount += guidedData.correctCount;
-      totalCount += guidedData.total;
-    }
+    const scoreSum = guidedData?.scoreSum ?? 0;
+    const scoreCount = guidedData?.scoreCount ?? 0;
+    const correctCount = guidedData?.correctCount ?? 0;
+    const totalCount = guidedData?.total ?? 0;
 
     return {
       task_id: t.id,
@@ -2010,9 +1764,7 @@ async function handleGetResults(
       correct_rate: totalCount > 0
         ? Math.round((correctCount / totalCount) * 100 * 100) / 100
         : null,
-      error_type_histogram: Object.entries(taskErrorCounts)
-        .sort((a, b) => b[1] - a[1])
-        .map(([type, count]) => ({ type, count })),
+      error_type_histogram: [] as { type: string; count: number }[],
     };
   });
 
@@ -2022,139 +1774,7 @@ async function handleGetResults(
     assignment_id: assignmentId,
   });
 
-  return jsonOk(cors, { summary, per_student: perStudent, per_task: perTask });
-}
-
-// ─── Endpoint: POST /submissions/:id/review ──────────────────────────────────
-
-async function handleReviewSubmission(
-  db: SupabaseClient,
-  tutorUserId: string,
-  submissionId: string,
-  body: unknown,
-  cors: Record<string, string>,
-): Promise<Response> {
-  const submissionOrErr = await getOwnedSubmissionOrThrow(db, submissionId, tutorUserId, cors);
-  if (submissionOrErr instanceof Response) return submissionOrErr;
-  const submission = submissionOrErr;
-
-  if (!body || typeof body !== "object") {
-    return jsonError(cors, 400, "INVALID_BODY", "Request body must be a JSON object");
-  }
-  const b = body as Record<string, unknown>;
-
-  if (!Array.isArray(b.items) || b.items.length === 0) {
-    return jsonError(cors, 400, "VALIDATION", "items must be a non-empty array");
-  }
-
-  for (let i = 0; i < b.items.length; i++) {
-    const item = b.items[i];
-    if (!item || typeof item !== "object") {
-      return jsonError(cors, 400, "VALIDATION", `items[${i}] must be an object`);
-    }
-    if (!isUUID(item.task_id)) {
-      return jsonError(cors, 400, "VALIDATION", `items[${i}].task_id must be a valid UUID`);
-    }
-    if (item.tutor_override_correct !== undefined && typeof item.tutor_override_correct !== "boolean") {
-      return jsonError(cors, 400, "VALIDATION", `items[${i}].tutor_override_correct must be boolean`);
-    }
-    if (item.tutor_comment !== undefined && item.tutor_comment !== null && !isString(item.tutor_comment)) {
-      return jsonError(cors, 400, "VALIDATION", `items[${i}].tutor_comment must be a string`);
-    }
-    if (item.tutor_score !== undefined && item.tutor_score !== null && !isNonNegativeInt(item.tutor_score)) {
-      return jsonError(cors, 400, "VALIDATION", `items[${i}].tutor_score must be a non-negative integer`);
-    }
-  }
-
-  const { data: taskInfos } = await db
-    .from("homework_tutor_tasks")
-    .select("id, max_score")
-    .eq("assignment_id", submission.assignment_id);
-  const taskMaxScoreMap: Record<string, number> = {};
-  for (const t of taskInfos ?? []) {
-    taskMaxScoreMap[t.id] = t.max_score;
-  }
-
-  for (const item of b.items as Record<string, unknown>[]) {
-    const taskId = item.task_id as string;
-    const maxScore = taskMaxScoreMap[taskId] ?? 1;
-
-    const updateFields: Record<string, unknown> = {};
-
-    if (item.tutor_override_correct !== undefined) {
-      updateFields.tutor_override_correct = item.tutor_override_correct;
-    }
-    if (item.tutor_comment !== undefined) {
-      updateFields.tutor_comment = isNonEmptyString(item.tutor_comment)
-        ? (item.tutor_comment as string).trim()
-        : null;
-    }
-
-    if (item.tutor_score !== undefined && item.tutor_score !== null) {
-      updateFields.ai_score = item.tutor_score;
-    } else if (item.tutor_override_correct !== undefined && (item.tutor_score === undefined || item.tutor_score === null)) {
-      updateFields.ai_score = item.tutor_override_correct ? maxScore : 0;
-    }
-
-    if (Object.keys(updateFields).length > 0) {
-      const { error } = await db
-        .from("homework_tutor_submission_items")
-        .update(updateFields)
-        .eq("submission_id", submissionId)
-        .eq("task_id", taskId);
-      if (error) {
-        console.error("homework_api_request_error", {
-          route: "POST /submissions/:id/review",
-          error: error.message,
-          task_id: taskId,
-        });
-      }
-    }
-  }
-
-  const { data: allItems } = await db
-    .from("homework_tutor_submission_items")
-    .select("ai_score, task_id")
-    .eq("submission_id", submissionId);
-
-  let totalScore = 0;
-  let totalMaxScore = 0;
-  for (const it of allItems ?? []) {
-    const maxS = taskMaxScoreMap[it.task_id] ?? 1;
-    totalMaxScore += maxS;
-    totalScore += it.ai_score ?? 0;
-  }
-
-  const newStatus = isNonEmptyString(b.status) &&
-      (VALID_SUBMISSION_STATUSES as readonly string[]).includes(b.status as string)
-    ? b.status
-    : "tutor_reviewed";
-
-  const { error: subUpdateErr } = await db
-    .from("homework_tutor_submissions")
-    .update({
-      total_score: totalScore,
-      total_max_score: totalMaxScore,
-      status: newStatus,
-    })
-    .eq("id", submissionId);
-
-  if (subUpdateErr) {
-    console.error("homework_api_request_error", {
-      route: "POST /submissions/:id/review submission update",
-      error: subUpdateErr.message,
-    });
-    return jsonError(cors, 500, "DB_ERROR", "Failed to update submission totals");
-  }
-
-  console.log("homework_api_request_success", {
-    route: "POST /submissions/:id/review",
-    tutor_id: tutorUserId,
-    submission_id: submissionId,
-    total_score: totalScore,
-    total_max_score: totalMaxScore,
-  });
-  return jsonOk(cors, { ok: true });
+  return jsonOk(cors, { summary, per_task: perTask });
 }
 
 // ─── Endpoint: GET /templates ────────────────────────────────────────────────
@@ -2355,16 +1975,6 @@ async function handleDeleteAssignment(
     threadIds = (threadRows ?? []).map((row) => row.id);
   }
 
-  const { data: submissionRows, error: submissionRowsError } = await db
-    .from("homework_tutor_submissions")
-    .select("id")
-    .eq("assignment_id", assignmentId);
-  if (submissionRowsError) {
-    console.error("homework_api_request_error", { route: "DELETE /assignments/:id", error: submissionRowsError.message });
-    return jsonError(cors, 500, "DB_ERROR", "Failed to delete assignment");
-  }
-  const submissionIds = (submissionRows ?? []).map((row) => row.id);
-
   const deleteByAssignment = async (table: string) => {
     const { error } = await db.from(table).delete().eq("assignment_id", assignmentId);
     if (error) throw error;
@@ -2391,23 +2001,7 @@ async function handleDeleteAssignment(
         .delete()
         .in("task_id", taskIds);
       if (deleteTaskStatesByTaskError) throw deleteTaskStatesByTaskError;
-
-      const { error: deleteSubmissionItemsByTaskError } = await db
-        .from("homework_tutor_submission_items")
-        .delete()
-        .in("task_id", taskIds);
-      if (deleteSubmissionItemsByTaskError) throw deleteSubmissionItemsByTaskError;
     }
-
-    if (submissionIds.length > 0) {
-      const { error: deleteSubmissionItemsBySubmissionError } = await db
-        .from("homework_tutor_submission_items")
-        .delete()
-        .in("submission_id", submissionIds);
-      if (deleteSubmissionItemsBySubmissionError) throw deleteSubmissionItemsBySubmissionError;
-    }
-
-    await deleteByAssignment("homework_tutor_submissions");
 
     if (threadIds.length > 0) {
       const { error: deleteThreadsError } = await db
@@ -2813,8 +2407,7 @@ const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
  * into a base64 data URL that the Lovable AI Gateway can use directly.
  *
  * The Lovable gateway (proxying Gemini) does NOT fetch external HTTP URLs —
- * images must be inlined as `data:image/...;base64,...` (same format used by
- * recognizeHomeworkPhoto in vision_checker.ts).
+ * images must be inlined as `data:image/...;base64,...`.
  *
  * SECURITY: External HTTP(S) URLs are rejected to prevent SSRF.
  * task_image_url must always be a storage:// ref or plain storage path.
@@ -2883,40 +2476,16 @@ async function resolveTaskImageUrlForAI(
 }
 
 async function ensureTaskOcrText(
-  db: SupabaseClient,
+  _db: SupabaseClient,
   task: { id: string; task_image_url: string | null; ocr_text?: string | null },
-  subject: string | null | undefined,
+  _subject: string | null | undefined,
 ): Promise<string | null> {
   if (typeof task.ocr_text === "string" && task.ocr_text.trim() && task.ocr_text !== "[неразборчиво]") {
     return task.ocr_text.trim();
   }
 
-  if (!task.task_image_url) return null;
-
-  const imageDataUrl = await resolveTaskImageUrlForAI(db, task.task_image_url);
-  if (!imageDataUrl) return null;
-
-  const normalizedSubject = VALID_SUBJECTS.includes(subject as typeof VALID_SUBJECTS[number])
-    ? subject as HomeworkSubject
-    : "math";
-
-  try {
-    const result = await recognizeHomeworkPhoto(imageDataUrl, normalizedSubject);
-    if (result.recognized_text && result.recognized_text !== "[неразборчиво]") {
-      await db
-        .from("homework_tutor_tasks")
-        .update({ ocr_text: result.recognized_text })
-        .eq("id", task.id);
-      return result.recognized_text;
-    }
-  } catch (error) {
-    console.error("homework_api_task_ocr_ensure_failed", {
-      taskId: task.id,
-      subject: normalizedSubject,
-      error: error instanceof Error ? error.message : String(error),
-    });
-  }
-
+  // OCR recognition path was removed with the classic-mode vision_checker.
+  // Guided check/hint will fall back to the task image without OCR text.
   return null;
 }
 
@@ -3012,178 +2581,6 @@ async function handleTaskImageSignedUrl(
   }
 
   return jsonOk(cors, { url: signedData.signedUrl });
-}
-
-// ─── Endpoint: POST /assignments/:id/tasks/:taskId/ocr ───────────────────────
-
-async function handleTaskOcr(
-  db: SupabaseClient,
-  userId: string,
-  assignmentId: string,
-  taskId: string,
-  cors: Record<string, string>,
-): Promise<Response> {
-  if (!isUUID(assignmentId) || !isUUID(taskId)) {
-    return jsonError(cors, 400, "INVALID_ID", "Invalid ID format");
-  }
-
-  // Access: student assigned to the assignment
-  const { data: sa } = await db
-    .from("homework_tutor_student_assignments")
-    .select("id")
-    .eq("assignment_id", assignmentId)
-    .eq("student_id", userId)
-    .maybeSingle();
-
-  if (!sa) {
-    // Also allow tutor
-    const { data: assignment } = await db
-      .from("homework_tutor_assignments")
-      .select("id, tutor_id, subject")
-      .eq("id", assignmentId)
-      .maybeSingle();
-    if (!assignment || assignment.tutor_id !== userId) {
-      return jsonError(cors, 403, "FORBIDDEN", "Not authorized");
-    }
-  }
-
-  // Get task
-  const { data: task } = await db
-    .from("homework_tutor_tasks")
-    .select("id, task_image_url, ocr_text, assignment_id")
-    .eq("id", taskId)
-    .eq("assignment_id", assignmentId)
-    .maybeSingle();
-
-  if (!task) {
-    return jsonError(cors, 404, "NOT_FOUND", "Task not found");
-  }
-
-  // Return cached result if available
-  if (task.ocr_text) {
-    return jsonOk(cors, { recognized_text: task.ocr_text, cached: true });
-  }
-
-  if (!task.task_image_url) {
-    return jsonError(cors, 400, "NO_IMAGE", "Task has no image");
-  }
-
-  // Resolve image to base64
-  const imageRef = task.task_image_url as string;
-  let imageBase64: string | null = null;
-
-  try {
-    let imageUrl: string;
-    if (imageRef.startsWith("http://") || imageRef.startsWith("https://")) {
-      imageUrl = imageRef;
-    } else if (imageRef.startsWith("storage://")) {
-      const rest = imageRef.slice("storage://".length);
-      const slashIdx = rest.indexOf("/");
-      if (slashIdx < 0) {
-        return jsonError(cors, 500, "INVALID_STORAGE_REF", "Cannot parse storage reference");
-      }
-      const bucket = rest.slice(0, slashIdx);
-      const objectPath = rest.slice(slashIdx + 1);
-      const { data: signedData, error: signedErr } = await db.storage
-        .from(bucket)
-        .createSignedUrl(objectPath, 600);
-      if (signedErr || !signedData?.signedUrl) {
-        return jsonError(cors, 500, "STORAGE_ERROR", "Failed to generate signed URL");
-      }
-      imageUrl = signedData.signedUrl;
-    } else {
-      const { data: signedData, error: signedErr } = await db.storage
-        .from("homework-task-images")
-        .createSignedUrl(imageRef, 600);
-      if (signedErr || !signedData?.signedUrl) {
-        return jsonError(cors, 500, "STORAGE_ERROR", "Failed to generate signed URL");
-      }
-      imageUrl = signedData.signedUrl;
-    }
-
-    // Download and convert to base64
-    const imgResp = await fetch(imageUrl);
-    if (!imgResp.ok) {
-      throw new Error(`Image fetch failed: ${imgResp.status}`);
-    }
-    const arrayBuf = await imgResp.arrayBuffer();
-    const bytes = new Uint8Array(arrayBuf);
-    let binary = "";
-    for (let i = 0; i < bytes.length; i++) {
-      binary += String.fromCharCode(bytes[i]);
-    }
-    imageBase64 = btoa(binary);
-  } catch (e) {
-    console.error("task_ocr_image_fetch_error", { taskId, error: String(e) });
-    return jsonError(cors, 500, "IMAGE_FETCH_ERROR", "Failed to fetch task image");
-  }
-
-  // Get subject from assignment
-  const { data: assignmentData } = await db
-    .from("homework_tutor_assignments")
-    .select("subject")
-    .eq("id", assignmentId)
-    .maybeSingle();
-  const subject = (assignmentData?.subject as string) ?? "math";
-
-  // Run OCR
-  try {
-    const result = await recognizeHomeworkPhoto(imageBase64, subject as any);
-
-    // Cache in DB (best-effort)
-    if (result.recognized_text && result.recognized_text !== "[неразборчиво]") {
-      await db
-        .from("homework_tutor_tasks")
-        .update({ ocr_text: result.recognized_text })
-        .eq("id", taskId);
-    }
-
-    return jsonOk(cors, {
-      recognized_text: result.recognized_text,
-      confidence: result.confidence,
-      has_formulas: result.has_formulas,
-      cached: false,
-    });
-  } catch (e) {
-    console.error("task_ocr_error", { taskId, error: String(e) });
-    return jsonError(cors, 500, "OCR_ERROR", "OCR failed");
-  }
-}
-
-// ─── Endpoint: GET /assignments/:id/attempts ─────────────────────────────────
-
-async function handleListAttempts(
-  db: SupabaseClient,
-  tutorUserId: string,
-  assignmentId: string,
-  searchParams: URLSearchParams,
-  cors: Record<string, string>,
-): Promise<Response> {
-  const assignmentOrErr = await getOwnedAssignmentOrThrow(db, assignmentId, tutorUserId, cors);
-  if (assignmentOrErr instanceof Response) return assignmentOrErr;
-
-  const studentId = searchParams.get("student_id");
-  if (studentId && !isUUID(studentId)) {
-    return jsonError(cors, 400, "INVALID_ID", "Invalid student_id format");
-  }
-
-  let query = db
-    .from("homework_tutor_submissions")
-    .select("id, student_id, status, total_score, total_max_score, submitted_at")
-    .eq("assignment_id", assignmentId)
-    .order("submitted_at", { ascending: true });
-
-  if (studentId) {
-    query = query.eq("student_id", studentId);
-  }
-
-  const { data, error } = await query;
-  if (error) {
-    console.error("homework_api_request_error", { route: "GET /assignments/:id/attempts", error: error.message });
-    return jsonError(cors, 500, "DB_ERROR", "Failed to fetch attempts");
-  }
-
-  return jsonOk(cors, data ?? []);
 }
 
 // ─── Formula round endpoints (student) ──────────────────────────────────────
@@ -3376,100 +2773,6 @@ async function handleCreateFormulaRoundResult(
   });
 
   return jsonOk(cors, savedResult, 201);
-}
-
-// ─── Endpoint: POST /student/submissions/:id/ai-check ───────────────────────
-
-async function handleStudentSubmissionAiCheck(
-  db: SupabaseClient,
-  studentUserId: string,
-  submissionId: string,
-  cors: Record<string, string>,
-): Promise<Response> {
-  if (!isUUID(submissionId)) {
-    return jsonError(cors, 400, "INVALID_ID", "Invalid submission ID format");
-  }
-
-  const { data: submission, error: submissionError } = await db
-    .from("homework_tutor_submissions")
-    .select("id, student_id, status, total_score, total_max_score")
-    .eq("id", submissionId)
-    .maybeSingle();
-
-  if (submissionError || !submission) {
-    return jsonError(cors, 404, "NOT_FOUND", "Submission not found");
-  }
-
-  if (submission.student_id !== studentUserId) {
-    return jsonError(cors, 403, "FORBIDDEN", "Submission does not belong to current user");
-  }
-
-  const status = submission.status as string;
-  if (status === "ai_checked" || status === "tutor_reviewed") {
-    return jsonOk(cors, {
-      status,
-      total_score: submission.total_score ?? null,
-      total_max_score: submission.total_max_score ?? null,
-    });
-  }
-
-  if (status !== "submitted") {
-    return jsonError(cors, 409, "INVALID_STATE", "Submission is not ready for AI check");
-  }
-
-  let summary: Awaited<ReturnType<typeof runHomeworkAiCheck>>;
-  try {
-    summary = await runHomeworkAiCheck(db, submissionId);
-  } catch (error) {
-    console.error("homework_api_student_ai_check_failed", {
-      submission_id: submissionId,
-      student_id: studentUserId,
-      error: error instanceof Error ? error.message : String(error),
-    });
-    return jsonError(cors, 500, "AI_CHECK_FAILED", "Failed to run AI check");
-  }
-
-  const { data: updatedSubmission, error: updateError } = await db
-    .from("homework_tutor_submissions")
-    .update({
-      status: "ai_checked",
-      total_score: summary.total_score,
-      total_max_score: summary.total_max_score,
-    })
-    .eq("id", submissionId)
-    .eq("student_id", studentUserId)
-    .in("status", ["submitted", "ai_checked"])
-    .select("status, total_score, total_max_score")
-    .maybeSingle();
-
-  if (updateError) {
-    return jsonError(cors, 500, "DB_ERROR", "Failed to update submission after AI check");
-  }
-
-  if (!updatedSubmission) {
-    const { data: existingSubmission, error: existingError } = await db
-      .from("homework_tutor_submissions")
-      .select("status, total_score, total_max_score")
-      .eq("id", submissionId)
-      .eq("student_id", studentUserId)
-      .maybeSingle();
-
-    if (existingError || !existingSubmission) {
-      return jsonError(cors, 500, "DB_ERROR", "Failed to verify submission status");
-    }
-
-    return jsonOk(cors, {
-      status: existingSubmission.status,
-      total_score: existingSubmission.total_score ?? null,
-      total_max_score: existingSubmission.total_max_score ?? null,
-    });
-  }
-
-  return jsonOk(cors, {
-    status: updatedSubmission.status,
-    total_score: updatedSubmission.total_score ?? null,
-    total_max_score: updatedSubmission.total_max_score ?? null,
-  });
 }
 
 // ─── Endpoint: GET /threads/:id (student) ────────────────────────────────────
@@ -4559,8 +3862,8 @@ async function handleGetTutorStudentThread(
     thread = data as Record<string, unknown> | null;
   }
 
-  // Lazy provisioning: create thread if assignment is guided_chat but thread doesn't exist yet
-  if (!thread && assignmentOrErr.workflow_mode === "guided_chat") {
+  // Lazy provisioning: create thread if it doesn't exist yet
+  if (!thread) {
     thread = await provisionGuidedThread(db, assignmentId, studentAssignment.id);
   }
 
@@ -4701,11 +4004,6 @@ Deno.serve(async (req: Request): Promise<Response> => {
 
     const seg = route.segments;
 
-    // POST /student/submissions/:id/ai-check
-    if (seg.length === 4 && seg[0] === "student" && seg[1] === "submissions" && seg[3] === "ai-check" && route.method === "POST") {
-      return await handleStudentSubmissionAiCheck(db, userId, seg[2], cors);
-    }
-
     // GET /threads/:id (student endpoint)
     if (seg.length === 2 && seg[0] === "threads" && route.method === "GET") {
       return await handleGetThread(db, userId, seg[1], cors);
@@ -4743,11 +4041,6 @@ Deno.serve(async (req: Request): Promise<Response> => {
     // GET /assignments/:id/tasks/:taskId/image-url (tutor + student)
     if (seg.length === 5 && seg[0] === "assignments" && seg[2] === "tasks" && seg[4] === "image-url" && route.method === "GET") {
       return await handleTaskImageSignedUrl(db, userId, seg[1], seg[3], cors);
-    }
-
-    // POST /assignments/:id/tasks/:taskId/ocr (student — pre-OCR task image)
-    if (seg.length === 5 && seg[0] === "assignments" && seg[2] === "tasks" && seg[4] === "ocr" && route.method === "POST") {
-      return await handleTaskOcr(db, userId, seg[1], seg[3], cors);
     }
 
     // GET /formula-rounds/:roundId (student endpoint)
@@ -4827,11 +4120,6 @@ Deno.serve(async (req: Request): Promise<Response> => {
       return await handleGetResults(db, userId, seg[1], cors);
     }
 
-    // GET /assignments/:id/attempts
-    if (seg.length === 3 && seg[0] === "assignments" && seg[2] === "attempts" && route.method === "GET") {
-      return await handleListAttempts(db, userId, seg[1], route.searchParams, cors);
-    }
-
     // POST /assignments/:id/materials
     if (seg.length === 3 && seg[0] === "assignments" && seg[2] === "materials" && route.method === "POST") {
       const body = await parseJsonBody(req);
@@ -4867,12 +4155,6 @@ Deno.serve(async (req: Request): Promise<Response> => {
     // DELETE /templates/:id
     if (seg.length === 2 && seg[0] === "templates" && route.method === "DELETE") {
       return await handleDeleteTemplate(db, userId, seg[1], cors);
-    }
-
-    // POST /submissions/:id/review
-    if (seg.length === 3 && seg[0] === "submissions" && seg[2] === "review" && route.method === "POST") {
-      const body = await parseJsonBody(req);
-      return await handleReviewSubmission(db, userId, seg[1], body, cors);
     }
 
     return jsonError(cors, 404, "NOT_FOUND", `Route not found: ${route.method} /${seg.join("/")}`);

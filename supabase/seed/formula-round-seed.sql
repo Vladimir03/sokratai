@@ -124,8 +124,7 @@ INSERT INTO public.homework_tutor_assignments (
   title,
   subject,
   topic,
-  status,
-  workflow_mode
+  status
 )
 VALUES (
   '7f4c2e10-0000-4000-8000-000000000101',
@@ -133,8 +132,7 @@ VALUES (
   'Formula Round Test - Кинематика',
   'physics',
   'Кинематика',
-  'active',
-  'classic'
+  'active'
 )
 ON CONFLICT (id) DO NOTHING;
 
