@@ -6,7 +6,14 @@ import { Badge } from '@/components/ui/badge';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
 import { Skeleton } from '@/components/ui/skeleton';
-import { Loader2, Paperclip, Send, X } from 'lucide-react';
+import { ChevronDown, ChevronUp, Loader2, Paperclip, Send, X, ZoomIn } from 'lucide-react';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+} from '@/components/ui/dialog';
 import { MathText } from '@/components/kb/ui/MathText';
 import { parseISO } from 'date-fns';
 import { toast } from 'sonner';
@@ -14,6 +21,7 @@ import {
   getTutorStudentGuidedThread,
   postTutorThreadMessage,
   getHomeworkImageSignedUrl,
+  getTaskImageSignedUrl,
   mergeThreadMessage,
   uploadTutorHomeworkTaskImage,
   type TutorStudentGuidedThreadResponse,
@@ -44,6 +52,86 @@ const TASK_STATUS_LABELS: Record<string, string> = {
   skipped: 'Пропущена',
 };
 
+// ─── Task condition image with click-to-zoom ───────────────────────────────
+// Mirrors TaskImagePreview in TutorHomeworkDetail.tsx. Reuses the exact
+// React Query key so a tutor who opened the assignment detail gets a warm
+// cache hit when they later open the thread viewer for the same task.
+function TaskContextImage({
+  assignmentId,
+  taskId,
+  taskOrder,
+  taskImageUrl,
+}: {
+  assignmentId: string;
+  taskId: string;
+  taskOrder: number;
+  taskImageUrl: string | null;
+}) {
+  const [open, setOpen] = useState(false);
+  const isExternal = Boolean(taskImageUrl && /^https?:\/\//i.test(taskImageUrl));
+
+  const imageQuery = useQuery<string | null>({
+    queryKey: ['tutor', 'homework', 'task-image-preview', assignmentId, taskId],
+    queryFn: () => getTaskImageSignedUrl(assignmentId, taskId),
+    enabled: Boolean(taskImageUrl) && !isExternal,
+    staleTime: TUTOR_STALE_TIME_MS,
+    gcTime: TUTOR_GC_TIME_MS,
+    retry: 1,
+  });
+
+  if (!taskImageUrl) return null;
+
+  const resolvedUrl = isExternal ? taskImageUrl : (imageQuery.data ?? null);
+
+  if (imageQuery.isLoading) {
+    return <Skeleton className="mt-2 h-24 w-40 rounded-md" />;
+  }
+
+  if (!resolvedUrl) {
+    return (
+      <p className="mt-2 text-xs text-muted-foreground">
+        Фото задачи недоступно
+      </p>
+    );
+  }
+
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        aria-label={`Открыть фото условия задачи №${taskOrder}`}
+        title="Открыть фото задачи"
+        className="group relative mt-2 inline-block rounded-md border bg-background p-1 hover:opacity-90 transition-opacity touch-manipulation"
+      >
+        <img
+          src={resolvedUrl}
+          alt={`Фото условия задачи №${taskOrder}`}
+          className="h-24 w-auto max-w-[220px] rounded-sm object-cover"
+          loading="lazy"
+        />
+        <span className="absolute right-1 top-1 inline-flex items-center gap-1 rounded-md bg-background/90 px-1.5 py-0.5 text-[10px] opacity-0 transition-opacity group-hover:opacity-100">
+          <ZoomIn className="h-3 w-3" />
+          Увеличить
+        </span>
+      </button>
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogContent className="max-w-4xl p-4">
+          <DialogHeader>
+            <DialogTitle>Условие задачи №{taskOrder}</DialogTitle>
+            <DialogDescription>Изображение условия задачи</DialogDescription>
+          </DialogHeader>
+          <img
+            src={resolvedUrl}
+            alt={`Фото условия задачи №${taskOrder}`}
+            className="max-h-[75vh] w-full rounded-md object-contain"
+          />
+        </DialogContent>
+      </Dialog>
+    </>
+  );
+}
+
 // ─── Main component ─────────────────────────────────────────────────────────
 
 export function GuidedThreadViewer({
@@ -58,6 +146,7 @@ export function GuidedThreadViewer({
 }) {
   // Job: Видеть прогресс ученика по ДЗ без дёрганий во время занятия.
   const [taskFilter, setTaskFilter] = useState<number | 'all'>('all');
+  const [isTaskContextExpanded, setIsTaskContextExpanded] = useState(true);
   const [messageText, setMessageText] = useState('');
   const [hiddenNote, setHiddenNote] = useState(false);
   const [isSending, setIsSending] = useState(false);
@@ -153,6 +242,16 @@ export function GuidedThreadViewer({
     () => new Map((threadQuery.data?.thread.homework_tutor_task_states ?? []).map((state) => [state.task_id, state])),
     [threadQuery.data?.thread.homework_tutor_task_states],
   );
+
+  const selectedTask = useMemo(() => {
+    if (taskFilter === 'all') return null;
+    return threadQuery.data?.tasks.find((task) => task.order_num === taskFilter) ?? null;
+  }, [taskFilter, threadQuery.data?.tasks]);
+
+  // Раскрываем блок при каждой смене задачи — иначе репетитор «теряет» условие.
+  useEffect(() => {
+    setIsTaskContextExpanded(true);
+  }, [taskFilter]);
 
   const filteredMessages = useMemo(() => {
     const allMessages = threadQuery.data?.thread.homework_tutor_thread_messages ?? [];
@@ -268,6 +367,46 @@ export function GuidedThreadViewer({
                   );
                 })}
               </div>
+
+              {selectedTask && (
+                <div className="rounded-md border bg-background p-3 text-xs space-y-2">
+                  <div className="flex items-center gap-2">
+                    <span className="font-medium text-muted-foreground">
+                      Условие задачи #{selectedTask.order_num}
+                    </span>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="ml-auto h-6 w-6 p-0 shrink-0"
+                      onClick={() => setIsTaskContextExpanded((prev) => !prev)}
+                      title={isTaskContextExpanded ? 'Свернуть' : 'Развернуть'}
+                      aria-expanded={isTaskContextExpanded}
+                      aria-label={isTaskContextExpanded ? 'Свернуть условие задачи' : 'Развернуть условие задачи'}
+                    >
+                      {isTaskContextExpanded ? (
+                        <ChevronUp className="h-3.5 w-3.5" />
+                      ) : (
+                        <ChevronDown className="h-3.5 w-3.5" />
+                      )}
+                    </Button>
+                  </div>
+                  {isTaskContextExpanded && (
+                    <div className="max-h-[200px] overflow-y-auto space-y-2">
+                      <MathText
+                        text={selectedTask.task_text}
+                        className="whitespace-pre-wrap leading-relaxed break-words"
+                      />
+                      <TaskContextImage
+                        key={selectedTask.id}
+                        assignmentId={assignmentId}
+                        taskId={selectedTask.id}
+                        taskOrder={selectedTask.order_num}
+                        taskImageUrl={selectedTask.task_image_url}
+                      />
+                    </div>
+                  )}
+                </div>
+              )}
 
               <div
                 ref={scrollContainerRef}

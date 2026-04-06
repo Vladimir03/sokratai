@@ -2801,7 +2801,7 @@ async function handleGetThread(
   // Verify ownership: student must own this thread
   const { data: sa } = await db
     .from("homework_tutor_student_assignments")
-    .select("student_id")
+    .select("student_id, assignment_id")
     .eq("id", thread.student_assignment_id)
     .single();
 
@@ -2809,8 +2809,21 @@ async function handleGetThread(
     return jsonError(cors, 403, "FORBIDDEN", "Not your thread");
   }
 
+  const { data: tasks, error: tasksError } = await db
+    .from("homework_tutor_tasks")
+    .select("id, order_num, task_text, task_image_url, max_score, check_format")
+    .eq("assignment_id", sa.assignment_id)
+    .order("order_num", { ascending: true });
+
+  if (tasksError) {
+    return jsonError(cors, 500, "DB_ERROR", "Failed to load tasks for thread");
+  }
+
   // Filter out hidden tutor notes (service-role bypasses RLS)
-  return jsonOk(cors, stripHiddenMessages(thread as Record<string, unknown>));
+  return jsonOk(cors, {
+    ...stripHiddenMessages(thread as Record<string, unknown>),
+    tasks: tasks ?? [],
+  });
 }
 
 // ─── Endpoint: POST /threads/:id/messages (student) ─────────────────────────
@@ -3875,7 +3888,7 @@ async function handleGetTutorStudentThread(
 
   const { data: tasks, error: tasksError } = await db
     .from("homework_tutor_tasks")
-    .select("id, order_num, task_text, task_image_url, max_score")
+    .select("id, order_num, task_text, task_image_url, max_score, check_format")
     .eq("assignment_id", assignmentId)
     .order("order_num", { ascending: true });
 

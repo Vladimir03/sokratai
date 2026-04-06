@@ -468,6 +468,7 @@ export interface TutorStudentGuidedThreadResponse {
     task_text: string;
     task_image_url: string | null;
     max_score: number;
+    check_format: 'short_answer' | 'detailed_solution';
   }[];
   student: {
     id: string;

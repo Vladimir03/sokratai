@@ -77,6 +77,16 @@
 - Student-side `GuidedChatMessage` тоже отображает `image_url` через `ThreadAttachments` (резолвит через `getStudentTaskImageSignedUrl`)
 - Backend `handleTutorPostMessage` принимает optional `image_url` в body
 
+### GuidedThreadViewer — блок «Условие задачи» + click-to-zoom (Е8, 2026-04-06)
+- Collapsible-блок «Условие задачи #N» рендерится в `GuidedThreadViewer.tsx` между row фильтров и контейнером сообщений — только при `taskFilter !== 'all'`
+- Локальный state `isTaskContextExpanded` (default `true`), сбрасывается в `true` при смене `taskFilter`
+- `task_text` рендерится через `MathText`; `max-h-[200px] overflow-y-auto` предотвращает переполнение при длинных условиях
+- Изображение условия — локальный sub-компонент `TaskContextImage` (module-scope в `GuidedThreadViewer.tsx`): миниатюра + hover-badge `ZoomIn` + Radix `Dialog` с `max-h-[75vh] object-contain`
+- Query key для signed URL: `['tutor', 'homework', 'task-image-preview', assignmentId, taskId]` — тот же, что в `TaskImagePreview` в `TutorHomeworkDetail.tsx`; даёт warm cache hit при переходе Detail → Results
+- `key={selectedTask.id}` на `TaskContextImage` — remount при переключении задачи закрывает открытый Dialog
+- Не трогать `ThreadAttachments` и `GuidedChatMessage` (student-side) — изолировано в tutor-домене
+- Спека: `docs/delivery/features/thread-viewer-task-context/spec.md`
+
 ### Realtime thread viewer (Е9, 2026-04-07)
 - `GuidedThreadViewer.tsx` подписывается на Supabase Realtime `INSERT` по `public.homework_tutor_thread_messages` с фильтром `thread_id=eq.${threadId}`
 - Query cache для viewer: `['tutor', 'homework', 'thread', threadId]`; новые сообщения мержатся локально, без полного refetch
