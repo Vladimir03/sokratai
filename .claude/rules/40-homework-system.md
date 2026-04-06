@@ -90,6 +90,7 @@
 - Если пользователь проскроллил вверх и читает историю, realtime не должен дёргать scroll
 - Таблица `homework_tutor_thread_messages` должна быть опубликована в `supabase_realtime`
 - Каноничная миграция publication: `supabase/migrations/20260406143000_enable_realtime_homework_tutor_thread_messages.sql`
+- Для tutor-side Realtime нужен отдельный `SELECT` RLS policy на `homework_tutor_thread_messages`; backend `handleGetThread` сам по себе подписку не открывает
 - Не добавлять новые realtime-подписки в viewer без merge-helper слоя в `tutorHomeworkApi.ts`
 - Спека: `docs/delivery/features/realtime-thread/spec.md`
 
