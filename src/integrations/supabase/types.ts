@@ -3108,6 +3108,10 @@ export type Database = {
         Args: { _assignment_id: string }
         Returns: boolean
       }
+      is_homework_thread_visible_to_tutor: {
+        Args: { _thread_id: string }
+        Returns: boolean
+      }
       is_kb_homework_tutor: { Args: { _homework_id: string }; Returns: boolean }
       is_tutor: { Args: { _user_id: string }; Returns: boolean }
       is_tutor_of_student: { Args: { _student_id: string }; Returns: boolean }
