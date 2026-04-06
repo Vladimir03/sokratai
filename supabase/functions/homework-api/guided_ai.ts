@@ -1,6 +1,6 @@
 /**
  * Phase 3: AI evaluation and hint generation for guided homework chat.
- * Uses the Lovable AI Gateway (same as vision_checker.ts).
+ * Uses the Lovable AI Gateway via shared utilities.
  */
 
 import {
@@ -13,7 +13,7 @@ import {
   type LovableMessage,
   type LovableMessageContent,
   type LovableTextPart,
-} from "./vision_checker.ts";
+} from "./ai_shared.ts";
 
 // ─── Constants ──────────────────────────────────────────────────────────────
 
