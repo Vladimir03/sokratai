@@ -128,7 +128,7 @@ export function GuidedThreadViewer({
                 image_url: newMessage.image_url,
                 task_order: newMessage.task_order,
                 created_at: newMessage.created_at,
-                message_kind: newMessage.message_kind ?? undefined,
+                message_kind: (newMessage.message_kind as import('@/types/homework').GuidedMessageKind) ?? undefined,
                 author_user_id: newMessage.author_user_id,
                 visible_to_student: newMessage.visible_to_student,
               }),
