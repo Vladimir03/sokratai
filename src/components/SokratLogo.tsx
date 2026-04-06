@@ -8,7 +8,7 @@ const SokratLogo = ({ className = "" }: SokratLogoProps) => {
   return (
     <img
       src={sokratLogo}
-      alt="Сократ"
+      alt="Сократ AI"
       className={className}
     />
   );

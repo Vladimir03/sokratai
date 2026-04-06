@@ -35,7 +35,7 @@ const Navigation = () => {
         <Link to="/" className="flex items-center gap-2 group shrink-0">
           <img src={sokratLogo} alt="Сократ" className="w-8 h-8" />
           <span className="font-semibold text-lg text-slate-800 hidden md:inline">
-            Сократ
+            Сократ AI
           </span>
         </Link>
 
