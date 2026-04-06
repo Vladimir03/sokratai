@@ -60,13 +60,13 @@ For tutor product tasks, agents must treat AJTBD and pilot docs as source of tru
 
 Read in this order:
 
-1. `docs/product/research/ajtbd/08-wedge-decision-memo-sokrat.md`
-2. `docs/product/specs/tutor_ai_agents/14-ajtbd-product-prd-sokrat.md`
-3. `docs/product/specs/tutor_ai_agents/15-backlog-of-jtbd-scenarios-sokrat.md`
-4. `docs/product/specs/tutor_ai_agents/16-ux-principles-for-tutor-product-sokrat.md`
-5. `docs/product/specs/tutor_ai_agents/17-ui-patterns-and-component-rules-sokrat.md`
-6. `docs/product/specs/tutor_ai_agents/18-pilot-execution-playbook-sokrat.md`
-7. relevant file in `docs/features/specs/`
+1. `docs/discovery/research/08-wedge-decision-memo-sokrat.md`
+2. `docs/discovery/product/tutor-ai-agents/14-ajtbd-product-prd-sokrat.md`
+3. `docs/discovery/product/tutor-ai-agents/15-backlog-of-jtbd-scenarios-sokrat.md`
+4. `docs/discovery/product/tutor-ai-agents/16-ux-principles-for-tutor-product-sokrat.md`
+5. `docs/discovery/product/tutor-ai-agents/17-ui-patterns-and-component-rules-sokrat.md`
+6. `docs/discovery/product/tutor-ai-agents/18-pilot-execution-playbook-sokrat.md`
+7. relevant file in `docs/delivery/features/`
 
 ## Tutor product guardrails
 
@@ -147,16 +147,16 @@ Database migrations:
 `supabase/migrations/`
 
 Engineering docs:
-`docs/engineering/`
+`docs/delivery/engineering/`
 
 Architecture map (human):
-`docs/engineering/architecture/README.md`
+`docs/delivery/engineering/architecture/README.md`
 
 Architecture map (machine):
-`docs/engineering/architecture/modules.json`
+`docs/delivery/engineering/architecture/modules.json`
 
 High-risk zones:
-`docs/engineering/architecture/high-risk-zones.md`
+`docs/delivery/engineering/architecture/high-risk-zones.md`
 
 ---
 
