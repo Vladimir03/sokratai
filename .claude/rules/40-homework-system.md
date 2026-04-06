@@ -91,6 +91,7 @@
 - Таблица `homework_tutor_thread_messages` должна быть опубликована в `supabase_realtime`
 - Каноничная миграция publication: `supabase/migrations/20260406143000_enable_realtime_homework_tutor_thread_messages.sql`
 - Для tutor-side Realtime нужен отдельный `SELECT` RLS policy на `homework_tutor_thread_messages`; backend `handleGetThread` сам по себе подписку не открывает
+- Tutor `SELECT` policy для Realtime не строить через raw JOIN на `homework_tutor_threads` внутри `USING (...)`; использовать `SECURITY DEFINER` helper, иначе policy ломается от RLS на промежуточных таблицах
 - Не добавлять новые realtime-подписки в viewer без merge-helper слоя в `tutorHomeworkApi.ts`
 - Спека: `docs/delivery/features/realtime-thread/spec.md`
 
