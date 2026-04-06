@@ -96,6 +96,7 @@ function TutorHomeworkCreateContent() {
     topic: '',
     deadline: '',
     disable_ai_bootstrap: true,
+    exam_type: 'ege',
   });
 
   // Auto-generated title: «ДЗ {topic} {dd.MM}» — used when manual title is empty
@@ -182,6 +183,7 @@ function TutorHomeworkCreateContent() {
       topic: a.topic ?? '',
       deadline: a.deadline ? toLocalDatetimeString(a.deadline) : '',
       disable_ai_bootstrap: a.disable_ai_bootstrap ?? false,
+      exam_type: (a.exam_type as 'ege' | 'oge') ?? 'ege',
     });
 
     const newTasks = [...existingAssignment.tasks]
@@ -238,6 +240,7 @@ function TutorHomeworkCreateContent() {
         topic: a.topic ?? '',
         deadline: a.deadline ? toLocalDatetimeString(a.deadline) : '',
         disable_ai_bootstrap: a.disable_ai_bootstrap ?? false,
+        exam_type: (a.exam_type as 'ege' | 'oge') ?? 'ege',
       },
       taskTexts: existingAssignment.tasks.map((t) => `${t.id}|${t.task_text}|${t.correct_answer ?? ''}|${t.rubric_text ?? ''}|${t.task_image_url ?? ''}|${t.max_score}`).join(';;'),
       studentIds: existingAssignment.assigned_students.map((s) => s.student_id).sort().join(','),
@@ -345,7 +348,8 @@ function TutorHomeworkCreateContent() {
         meta.subject !== snap.meta.subject ||
         meta.topic !== snap.meta.topic ||
         meta.deadline !== snap.meta.deadline ||
-        (meta.disable_ai_bootstrap ?? false) !== (snap.meta.disable_ai_bootstrap ?? false);
+        (meta.disable_ai_bootstrap ?? false) !== (snap.meta.disable_ai_bootstrap ?? false) ||
+        (meta.exam_type ?? 'ege') !== (snap.meta.exam_type ?? 'ege');
       const currentTaskTexts = tasks.map((t) => `${t.id ?? ''}|${t.task_text}|${t.correct_answer}|${t.rubric_text}|${t.task_image_path ?? ''}|${t.max_score}`).join(';;');
       const tasksDirty = currentTaskTexts !== snap.taskTexts;
       const currentStudentIds = [...selectedStudentIds].sort().join(',');
@@ -478,6 +482,7 @@ function TutorHomeworkCreateContent() {
           tasks: apiTasks,
           group_id: assignMode === 'group' && selectedGroupId ? selectedGroupId : null,
           disable_ai_bootstrap: meta.disable_ai_bootstrap ?? false,
+          exam_type: meta.exam_type ?? 'ege',
         });
         assignmentId = result.assignment_id;
         createdAssignmentIdRef.current = assignmentId;
@@ -705,6 +710,7 @@ function TutorHomeworkCreateContent() {
         topic: meta.topic.trim() || null,
         deadline: meta.deadline ? parseISO(meta.deadline).toISOString() : null,
         disable_ai_bootstrap: meta.disable_ai_bootstrap ?? false,
+        exam_type: meta.exam_type ?? 'ege',
         tasks: apiTasks,
       });
 
@@ -801,7 +807,7 @@ function TutorHomeworkCreateContent() {
       setSelectedStudentIds(new Set());
     }
 
-    setMeta({ title: '', subject: 'physics', topic: '', deadline: '', disable_ai_bootstrap: true });
+    setMeta({ title: '', subject: 'physics', topic: '', deadline: '', disable_ai_bootstrap: true, exam_type: 'ege' });
     setTasks([createEmptyTask()]);
     setMaterials([]);
     setNotifyEnabled(true);
@@ -921,7 +927,7 @@ function TutorHomeworkCreateContent() {
 
         {/* ── L0: Always visible ── */}
 
-        {/* Topic + Subject (L0 — always visible) */}
+        {/* Topic + Subject + Exam type (L0 — always visible) */}
         <section className="space-y-4">
           <div className="space-y-2">
             <Label htmlFor="hw-topic">Тема</Label>
@@ -937,24 +943,43 @@ function TutorHomeworkCreateContent() {
             )}
           </div>
 
-          <div className="space-y-2">
-            <Label htmlFor="hw-subject">Предмет *</Label>
-            <Select
-              value={meta.subject}
-              onValueChange={(v) => setMeta({ ...meta, subject: v as HomeworkSubject })}
-            >
-              <SelectTrigger id="hw-subject" className="text-base">
-                <SelectValue placeholder="Выберите предмет" />
-              </SelectTrigger>
-              <SelectContent>
-                {SUBJECTS.map((s) => (
-                  <SelectItem key={s.value} value={s.value}>
-                    {s.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            {errors.subject && <p className="text-sm text-destructive">{errors.subject}</p>}
+          <div className="grid gap-4 md:grid-cols-2">
+            <div className="space-y-2">
+              <Label htmlFor="hw-subject">Предмет *</Label>
+              <Select
+                value={meta.subject}
+                onValueChange={(v) => setMeta({ ...meta, subject: v as HomeworkSubject })}
+              >
+                <SelectTrigger id="hw-subject" className="text-base">
+                  <SelectValue placeholder="Выберите предмет" />
+                </SelectTrigger>
+                <SelectContent>
+                  {SUBJECTS.map((s) => (
+                    <SelectItem key={s.value} value={s.value}>
+                      {s.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {errors.subject && <p className="text-sm text-destructive">{errors.subject}</p>}
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="hw-exam-type">Тип экзамена</Label>
+              <select
+                id="hw-exam-type"
+                value={meta.exam_type ?? 'ege'}
+                onChange={(e) => setMeta({ ...meta, exam_type: e.target.value as 'ege' | 'oge' })}
+                className="w-full border border-slate-200 rounded-md px-3 py-2 bg-white"
+                style={{ fontSize: '16px', touchAction: 'manipulation' }}
+              >
+                <option value="ege">ЕГЭ</option>
+                <option value="oge">ОГЭ</option>
+              </select>
+              <p className="text-xs text-muted-foreground">
+                Выберите сразу, чтобы ученик видел корректные формулировки в guided chat.
+              </p>
+            </div>
           </div>
         </section>
 

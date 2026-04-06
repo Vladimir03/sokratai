@@ -100,8 +100,9 @@ function buildTaskContext(
   currentTask: { order_num: number; task_text: string; task_image_url: string | null },
   totalTasks: number,
   sendMode: SendMode,
-  options?: { hasStudentImage?: boolean },
+  options?: { hasStudentImage?: boolean; examType?: 'ege' | 'oge' },
 ): string {
+  const examTypeLabel = options?.examType === 'oge' ? 'ОГЭ' : 'ЕГЭ';
   const modeHint =
     sendMode === 'bootstrap'
       ? 'Режим: стартовое сообщение. Ученик ТОЛЬКО ОТКРЫЛ задачу. Никакого решения ещё нет. Сформулируй короткий стартовый заход: помоги разобрать условие.'
@@ -124,6 +125,7 @@ function buildTaskContext(
   const parts = [
     `Задание: "${assignment.title}" по предмету ${getSubjectLabel(assignment.subject)}.`,
     assignment.topic ? `Тема: ${assignment.topic}.` : null,
+    `Тип экзамена: ${examTypeLabel}.`,
     `Задача ${currentTask.order_num} из ${totalTasks}.`,
     `Условие: ${currentTask.task_text}`,
     hasImage && isMinimalText
@@ -144,9 +146,15 @@ function buildTaskContext(
 
 function buildGuidedSystemPrompt(
   sendMode: SendMode,
-  options?: { hasStudentImage?: boolean; isBootstrap?: boolean; checkFormat?: 'short_answer' | 'detailed_solution' },
+  options?: {
+    hasStudentImage?: boolean;
+    isBootstrap?: boolean;
+    checkFormat?: 'short_answer' | 'detailed_solution';
+    examType?: 'ege' | 'oge';
+  },
 ): string {
   const hasStudentImage = Boolean(options?.hasStudentImage);
+  const examTypeLabel = options?.examType === 'oge' ? 'ОГЭ' : 'ЕГЭ';
 
   const baseRules = [
     'Ты AI-ассистент внутри guided homework chat для одной текущей задачи.',
@@ -174,7 +182,7 @@ function buildGuidedSystemPrompt(
       bootstrapRules.push(
         'Эта задача требует развёрнутого решения с ходом рассуждений.',
         'В стартовом сообщении обязательно упомяни, что ученик должен показать ход решения (шаги, формулы, рассуждения), иначе получит 0 баллов.',
-        'Мотивируй это подготовкой к ЕГЭ — на экзамене за голый ответ без решения ставят 0.',
+        `Мотивируй это подготовкой к ${examTypeLabel} — на экзамене за голый ответ без решения ставят 0.`,
       );
     }
     return bootstrapRules.join('\n');
@@ -464,6 +472,8 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
     () => assignment.tasks.find((t) => t.order_num === currentTaskOrder),
     [assignment.tasks, currentTaskOrder],
   );
+  const examType = assignment.exam_type ?? 'ege';
+  const examTypeLabel = examType === 'oge' ? 'ОГЭ' : 'ЕГЭ';
 
   const currentActiveTaskState = useMemo(() => {
     const activeTask = assignment.tasks.find((t) => t.order_num === activeTaskOrder);
@@ -629,9 +639,11 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
         messages: contextMessages,
         systemPrompt: buildGuidedSystemPrompt(sendMode, {
           hasStudentImage: resolvedStudentImageUrls.length > 0,
+          examType,
         }),
         taskContext: buildTaskContext(assignment, task, assignment.tasks.length, sendMode, {
           hasStudentImage: resolvedStudentImageUrls.length > 0,
+          examType,
         }),
         taskImageUrl: resolvedTaskImageUrl ?? undefined,
         studentImageUrls: resolvedStudentImageUrls,
@@ -697,7 +709,7 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
       setIsStreaming(false);
       setStreamingContent('');
     }
-  }, [assignment, patchMessage, persistMessage, resolveLatestStudentImageUrls]);
+  }, [assignment, examType, patchMessage, persistMessage, resolveLatestStudentImageUrls]);
 
   // Save current draft + restore target draft + switch task
   const switchToTask = useCallback((newOrder: number) => {
@@ -1187,8 +1199,14 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
               content: 'Сформулируй короткое стартовое сообщение для ученика по этой задаче.',
             },
           ],
-          systemPrompt: buildGuidedSystemPrompt('bootstrap', { isBootstrap: true, checkFormat: currentTask.check_format }),
-          taskContext: buildTaskContext(assignment, currentTask, assignment.tasks.length, 'bootstrap'),
+          systemPrompt: buildGuidedSystemPrompt('bootstrap', {
+            isBootstrap: true,
+            checkFormat: currentTask.check_format,
+            examType,
+          }),
+          taskContext: buildTaskContext(assignment, currentTask, assignment.tasks.length, 'bootstrap', {
+            examType,
+          }),
           taskImageUrl: bootstrapImageUrl,
           onDelta: (delta) => {
             content += delta;
@@ -1236,7 +1254,7 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
     };
 
     void runBootstrap();
-  }, [assignment, currentTask, isCheckingAnswer, isRequestingHint, isStreaming, isThreadLoading, messages, threadId, threadStatus]);
+  }, [assignment, currentTask, examType, isCheckingAnswer, isRequestingHint, isStreaming, isThreadLoading, messages, queryClient, threadId, threadStatus]);
 
   // Loading state
   if (isThreadLoading) {
@@ -1412,7 +1430,7 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
 
           {currentTask.check_format === 'detailed_solution' && (
             <div className="bg-amber-50 border-l-4 border-amber-400 text-amber-800 text-sm p-3 rounded-r-md mx-4 mb-3">
-              📝 Задача с развёрнутым решением — покажи ход решения, как на ЕГЭ. Без хода решения получишь 0 баллов.
+              📝 Задача с развёрнутым решением — покажи ход решения, как на {examTypeLabel}. Без хода решения получишь 0 баллов.
             </div>
           )}
         </div>

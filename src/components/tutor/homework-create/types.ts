@@ -99,6 +99,7 @@ export interface MetaState {
   topic: string;
   deadline: string;
   disable_ai_bootstrap?: boolean;
+  exam_type?: 'ege' | 'oge';
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────

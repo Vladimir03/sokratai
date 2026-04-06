@@ -21,6 +21,7 @@ const VALID_SUBJECTS = ["math", "physics", "history", "social", "english", "cs"]
 const VALID_STATUSES = ["draft", "active", "closed"] as const;
 const VALID_STATUS_FILTERS = ["draft", "active", "closed", "all"] as const;
 const VALID_CHECK_FORMATS = ["short_answer", "detailed_solution"] as const;
+const VALID_EXAM_TYPES = ["ege", "oge"] as const;
 type NotifyFailureReason =
   | "missing_telegram_link" | "telegram_send_failed" | "telegram_send_error"
   | "push_expired" | "push_send_failed"
@@ -352,6 +353,9 @@ async function handleCreateAssignment(
   if (b.deadline !== undefined && b.deadline !== null && !isString(b.deadline)) {
     return jsonError(cors, 400, "VALIDATION", "deadline must be an ISO date string or null");
   }
+  if (b.exam_type !== undefined && b.exam_type !== null && !(VALID_EXAM_TYPES as readonly string[]).includes(b.exam_type as string)) {
+    return jsonError(cors, 400, "VALIDATION", `exam_type must be one of: ${VALID_EXAM_TYPES.join(", ")}`);
+  }
   if (!Array.isArray(b.tasks) || b.tasks.length === 0) {
     return jsonError(cors, 400, "VALIDATION", "tasks must be a non-empty array");
   }
@@ -384,6 +388,7 @@ async function handleCreateAssignment(
       description: isNonEmptyString(b.description) ? (b.description as string).trim() : null,
       deadline: isNonEmptyString(b.deadline) ? b.deadline : null,
       status: "draft",
+      exam_type: (VALID_EXAM_TYPES as readonly string[]).includes(b.exam_type as string) ? b.exam_type : "ege",
       disable_ai_bootstrap: b.disable_ai_bootstrap === true,
     })
     .select("id")
@@ -770,6 +775,12 @@ async function handleUpdateAssignment(
   }
   if (b.deadline !== undefined) {
     patch.deadline = isNonEmptyString(b.deadline) ? b.deadline : null;
+  }
+  if (b.exam_type !== undefined) {
+    if (!isNonEmptyString(b.exam_type) || !(VALID_EXAM_TYPES as readonly string[]).includes(b.exam_type)) {
+      return jsonError(cors, 400, "VALIDATION", `exam_type must be one of: ${VALID_EXAM_TYPES.join(", ")}`);
+    }
+    patch.exam_type = b.exam_type;
   }
   if (b.status !== undefined) {
     if (!isNonEmptyString(b.status) || !(VALID_STATUSES as readonly string[]).includes(b.status)) {
@@ -2826,6 +2837,70 @@ async function handleGetThread(
   });
 }
 
+// ─── Endpoint: GET /assignments/:id/student (student) ────────────────────────
+
+async function handleGetStudentAssignment(
+  db: SupabaseClient,
+  userId: string,
+  assignmentId: string,
+  cors: Record<string, string>,
+): Promise<Response> {
+  if (!isUUID(assignmentId)) {
+    return jsonError(cors, 400, "VALIDATION", "Invalid assignment ID");
+  }
+
+  const { data: assigned, error: assignedError } = await db
+    .from("homework_tutor_student_assignments")
+    .select("assignment_id")
+    .eq("assignment_id", assignmentId)
+    .eq("student_id", userId)
+    .maybeSingle();
+
+  if (assignedError) {
+    return jsonError(cors, 500, "DB_ERROR", "Failed to verify student assignment");
+  }
+  if (!assigned) {
+    return jsonError(cors, 404, "NOT_FOUND", "Assignment not found");
+  }
+
+  const { data: assignment, error: assignmentError } = await db
+    .from("homework_tutor_assignments")
+    .select("id, title, subject, topic, description, deadline, status, disable_ai_bootstrap, exam_type, created_at")
+    .eq("id", assignmentId)
+    .single();
+
+  if (assignmentError || !assignment) {
+    return jsonError(cors, 404, "NOT_FOUND", "Assignment not found");
+  }
+
+  const { data: tasks, error: tasksError } = await db
+    .from("homework_tutor_tasks")
+    .select("id, assignment_id, order_num, task_text, task_image_url, max_score, check_format")
+    .eq("assignment_id", assignmentId)
+    .order("order_num", { ascending: true });
+
+  if (tasksError) {
+    return jsonError(cors, 500, "DB_ERROR", "Failed to load tasks");
+  }
+
+  const { data: materials, error: materialsError } = await db
+    .from("homework_tutor_materials")
+    .select("id, assignment_id, type, title, storage_ref, url, created_at")
+    .eq("assignment_id", assignmentId)
+    .order("created_at", { ascending: true });
+
+  if (materialsError) {
+    return jsonError(cors, 500, "DB_ERROR", "Failed to load materials");
+  }
+
+  return jsonOk(cors, {
+    ...assignment,
+    updated_at: assignment.created_at,
+    tasks: tasks ?? [],
+    materials: materials ?? [],
+  });
+}
+
 // ─── Endpoint: POST /threads/:id/messages (student) ─────────────────────────
 
 async function verifyThreadOwnership(
@@ -3266,23 +3341,15 @@ async function performTaskAdvance(
     })
     .eq("id", currentState.id);
 
-  // Find next task
-  const currentIdx = sortedOrders.indexOf(currentOrder);
-  const nextOrder = currentIdx < sortedOrders.length - 1 ? sortedOrders[currentIdx + 1] : null;
+  // Find the first remaining active task in order. `stateByOrder` is a snapshot
+  // from before the DB update above, so we must explicitly exclude the task we
+  // just completed.
+  const remainingActiveOrders = sortedOrders.filter(
+    (order) => order !== currentOrder && stateByOrder.get(order)?.status === "active",
+  );
+  const nextOrder = remainingActiveOrders.length > 0 ? remainingActiveOrders[0] : null;
 
   if (nextOrder !== null) {
-    // Unlock next task
-    const nextState = stateByOrder.get(nextOrder);
-    if (nextState) {
-      await db
-        .from("homework_tutor_task_states")
-        .update({
-          status: "active",
-          updated_at: new Date().toISOString(),
-        })
-        .eq("id", nextState.id);
-    }
-
     // Update thread current_task_order
     await db
       .from("homework_tutor_threads")
@@ -4051,6 +4118,11 @@ Deno.serve(async (req: Request): Promise<Response> => {
     if (seg.length === 3 && seg[0] === "threads" && seg[2] === "hint" && route.method === "POST") {
       const body = await parseJsonBody(req);
       return await handleRequestHint(db, userId, seg[1], body, cors);
+    }
+
+    // GET /assignments/:id/student (student endpoint)
+    if (seg.length === 3 && seg[0] === "assignments" && seg[2] === "student" && route.method === "GET") {
+      return await handleGetStudentAssignment(db, userId, seg[1], cors);
     }
 
     // GET /assignments/:id/tasks/:taskId/image-url (tutor + student)

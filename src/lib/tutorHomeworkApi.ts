@@ -43,6 +43,7 @@ export interface CreateAssignmentPayload {
   group_id?: string | null;
   save_as_template?: boolean;
   disable_ai_bootstrap?: boolean;
+  exam_type?: 'ege' | 'oge';
 }
 
 // ─── Templates ───────────────────────────────────────────────────────────────
@@ -700,6 +701,7 @@ export async function updateTutorHomeworkAssignment(
     deadline?: string | null;
     status?: string;
     disable_ai_bootstrap?: boolean;
+    exam_type?: 'ege' | 'oge';
     tasks?: UpdateAssignmentTask[];
   },
 ): Promise<void> {

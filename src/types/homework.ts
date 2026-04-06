@@ -70,6 +70,7 @@ export interface StudentHomeworkAssignmentDetails {
   id: string;
   title: string;
   subject: string;
+  exam_type?: 'ege' | 'oge';
   topic: string | null;
   description: string | null;
   deadline: string | null;

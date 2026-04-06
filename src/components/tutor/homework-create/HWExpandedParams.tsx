@@ -13,7 +13,7 @@ export interface HWExpandedParamsProps {
 
 /**
  * L1 (collapsible) meta fields: title, deadline, AI bootstrap toggle.
- * Topic + Subject are rendered in L0 by the container (always visible).
+ * Topic + Subject + exam type are rendered in L0 by the container (always visible).
  */
 export function HWExpandedParams({ meta, onChange, errors, autoTitle }: HWExpandedParamsProps) {
   return (
