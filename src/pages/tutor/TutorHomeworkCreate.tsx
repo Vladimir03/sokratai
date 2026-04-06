@@ -977,7 +977,7 @@ function TutorHomeworkCreateContent() {
                 <option value="oge">ОГЭ</option>
               </select>
               <p className="text-xs text-muted-foreground">
-                Выберите сразу, чтобы ученик видел корректные формулировки в guided chat.
+                Выберите сразу, чтобы ученик видел корректные формулировки в чате с AI.
               </p>
             </div>
           </div>
