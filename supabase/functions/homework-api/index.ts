@@ -3776,6 +3776,8 @@ async function handleRequestHint(
     taskImageUrl: hintTaskImageUrl,
     studentImageUrls,
     taskOcrText,
+    taskId: task.id ?? null,
+    assignmentId: studentAssignment.assignment_id ?? saData?.assignment_id ?? null,
     correctAnswer: task.correct_answer,
     subject: assignment?.subject ?? "math",
     conversationHistory: recentMessages ?? [],

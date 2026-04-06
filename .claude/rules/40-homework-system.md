@@ -150,6 +150,17 @@
 
 При добавлении нового пути к AI с изображениями — проверить ВСЕ вызывающие точки, не только основную.
 
+### Hint quality — FORBIDDEN_HINT_PHRASES + retry-once + fallback (Е10, 2026-04-06)
+
+- `generateHint` в `supabase/functions/homework-api/guided_ai.ts` использует deterministic ban list `FORBIDDEN_HINT_PHRASES` и post-gen `validateHintContent`
+- Запрещённые фразы для hint: «перечитай условие», «выдели ключевые данные», «подумай внимательнее», «вспомни материал», «что тебе дано»
+- Flow: `generate -> validate -> 1 retry` с replacement prompt -> `buildFallbackHint`
+- Контракт: `<= 1 retry`, никогда больше. Циклы regen запрещены, иначе latency blowout
+- Fallback должен быть deterministic: упоминать существительное/термин из `task_text` или фразу про изображение задачи; длина `>= 40` символов
+- Telemetry: `console.warn(JSON.stringify(...))` с событиями `hint_rejected` и `hint_fallback_used`; без текста hint, без `task_text`, без PII
+- Phase B (`level escalation 1-3`) — отдельная итерация после `2026-04-08`, не добавлять в текущий flow
+- Спека: `docs/delivery/features/hint-quality/spec.md`
+
 ### Student Guided Homework UX (Sprint S1, 2026-03-19)
 
 Реализованы 5 quick wins для guided mode прорешивания:

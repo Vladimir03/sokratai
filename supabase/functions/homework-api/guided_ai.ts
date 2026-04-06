@@ -26,6 +26,69 @@ const CHECK_FAILED_FEEDBACK =
   "Автопроверка сейчас не сработала, но баллы не списаны. Попробуй ещё раз или перейди в режим «Обсудить», и я помогу по шагам.";
 
 const VALID_VERDICTS = new Set(["CORRECT", "INCORRECT", "ON_TRACK"]);
+const MIN_HINT_LENGTH = 40;
+const FORBIDDEN_HINT_PHRASES: RegExp[] = [
+  /перечита(?:й|йте|ть)\s+услов/iu,
+  /прочита(?:й|йте|ть)\s+услов/iu,
+  /выдел(?:и|ите|ить)\s+ключев/iu,
+  /подумай(?:те)?\s+внимательн/iu,
+  /вспом(?:ни|ните|нить|инай)\s+материал/iu,
+  /что\s+(?:тебе|нам|у\s+тебя|у\s+нас)\s+дано/iu,
+  /какие\s+данные\s+у\s+(?:нас|тебя)/iu,
+  /обрати\s+внимание\s+на\s+услов/iu,
+  /попробуй\s+ещ[её]\s+раз/iu,
+];
+const FORBIDDEN_HINT_PROMPT_LINES = [
+  "«перечитай условие», «прочитай условие»",
+  "«выдели ключевые данные»",
+  "«подумай внимательнее»",
+  "«вспомни материал»",
+  "«что тебе дано в задаче», «что нам дано»",
+  "«какие данные у нас»",
+  "«обрати внимание на условие»",
+  "«попробуй ещё раз»",
+];
+const FALLBACK_PHYSICS_KEYWORDS: Array<{ stem: string; label: string }> = [
+  { stem: "брусок", label: "брусок" },
+  { stem: "скорост", label: "скорость" },
+  { stem: "ускорен", label: "ускорение" },
+  { stem: "сил", label: "сила" },
+  { stem: "трени", label: "трение" },
+  { stem: "масс", label: "масса" },
+  { stem: "энерги", label: "энергия" },
+  { stem: "импульс", label: "импульс" },
+  { stem: "давлен", label: "давление" },
+  { stem: "температур", label: "температура" },
+  { stem: "заряд", label: "заряд" },
+  { stem: "ток", label: "ток" },
+  { stem: "цеп", label: "цепь" },
+  { stem: "напряжен", label: "напряжение" },
+  { stem: "сопротивлен", label: "сопротивление" },
+  { stem: "частот", label: "частота" },
+  { stem: "период", label: "период" },
+  { stem: "работ", label: "работа" },
+  { stem: "мощност", label: "мощность" },
+  { stem: "поле", label: "поле" },
+];
+const FALLBACK_STOPWORDS = new Set([
+  "задача",
+  "условие",
+  "найдите",
+  "найти",
+  "определите",
+  "определи",
+  "вычислите",
+  "вычисли",
+  "рассчитайте",
+  "рассчитай",
+  "докажите",
+  "докажи",
+  "данные",
+  "дано",
+  "нужно",
+  "также",
+  "попробуй",
+]);
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -79,6 +142,8 @@ export interface GenerateHintParams {
   taskImageUrl: string | null;
   studentImageUrls?: string[] | null;
   taskOcrText?: string | null;
+  taskId?: string | null;
+  assignmentId?: string | null;
   correctAnswer: string | null;
   subject: string;
   conversationHistory: GuidedConversationHistoryMessage[];
@@ -112,6 +177,100 @@ function clampPromptText(text: string | null | undefined): string {
 function clamp01(value: number): number {
   if (!Number.isFinite(value)) return 0;
   return Math.min(1, Math.max(0, value));
+}
+
+export function validateHintContent(text: string): { ok: boolean; reason?: string } {
+  const normalized = text.trim();
+
+  for (const rx of FORBIDDEN_HINT_PHRASES) {
+    if (rx.test(normalized)) {
+      return { ok: false, reason: `forbidden:${rx.source}` };
+    }
+  }
+
+  if (normalized.length < MIN_HINT_LENGTH) {
+    return { ok: false, reason: "too_short" };
+  }
+
+  return { ok: true };
+}
+
+function pickFallbackKeyword(taskText: string): string | null {
+  const normalizedTaskText = normalizeText(taskText);
+  const lowercaseTaskText = normalizedTaskText.toLowerCase();
+
+  for (const { stem, label } of FALLBACK_PHYSICS_KEYWORDS) {
+    if (lowercaseTaskText.includes(stem)) {
+      return label;
+    }
+  }
+
+  const keywordCandidates = normalizedTaskText.match(/[А-Яа-яA-Za-z]{5,}/gu) ?? [];
+  for (const keyword of keywordCandidates) {
+    if (!FALLBACK_STOPWORDS.has(keyword.toLowerCase())) {
+      return keyword;
+    }
+  }
+
+  return null;
+}
+
+export function buildFallbackHint(
+  taskContext: { taskText?: string | null; hasImage?: boolean },
+): string {
+  const taskText = taskContext.taskText ?? "";
+  const keyword = pickFallbackKeyword(taskText);
+
+  if (keyword) {
+    return `Сосредоточься на том, что в задаче фигурирует «${keyword}». Какая физическая величина это описывает и какой закон с ней связан?`;
+  }
+
+  if (!taskText.trim() && taskContext.hasImage) {
+    return "На изображении задачи есть конкретные величины — назови, что именно дано (силы, расстояния, время) и какой закон их связывает.";
+  }
+
+  return "Какая физическая величина является искомой в этой задаче и какие данные нужны, чтобы её найти?";
+}
+
+function buildValidatedFallbackHint(taskContext: { taskText?: string | null; hasImage?: boolean }): string {
+  const fallbackHint = buildFallbackHint(taskContext);
+  if (validateHintContent(fallbackHint).ok) {
+    return fallbackHint;
+  }
+
+  return "Какая физическая величина является искомой в этой задаче и какой закон поможет её найти по известным данным?";
+}
+
+function sanitizeHintText(rawHint: unknown, correctAnswer: string | null): string {
+  const hint = typeof rawHint === "string"
+    ? normalizeText(stripMarkdownWrappers(rawHint))
+    : "";
+
+  const normalizedAnswer = normalizeComparable(correctAnswer ?? "");
+  if (normalizedAnswer.length >= 2) {
+    const normalizedHint = normalizeComparable(hint);
+    if (normalizedHint.includes(normalizedAnswer)) {
+      return "";
+    }
+  }
+
+  return softTruncate(hint, MAX_FEEDBACK_LENGTH);
+}
+
+function getGeneratedHintCheck(text: string): { ok: boolean; reason?: string } {
+  if (!text.trim()) {
+    return { ok: false, reason: "empty_after_sanitize" };
+  }
+
+  return validateHintContent(text);
+}
+
+function reasonToHumanMessage(reason: string | undefined): string {
+  if (!reason) return "нарушен формат подсказки";
+  if (reason.startsWith("forbidden:")) return "ты использовал запрещённую шаблонную фразу";
+  if (reason === "too_short") return "подсказка получилась слишком короткой";
+  if (reason === "empty_after_sanitize") return "подсказка оказалась пустой или содержала правильный ответ";
+  return "нарушен формат подсказки";
 }
 
 function toNumber(value: unknown): number | null {
@@ -484,6 +643,31 @@ function isImageDescriptionRequest(text: string): boolean {
   return /(что\s+(?:ты\s+)?видишь|что\s+на|опиши|что\s+изображен|что\s+изображено).*(?:картинк|изображени|фото|скрин)/i.test(text);
 }
 
+function buildPriorHintsSummary(conversationHistory: GuidedConversationHistoryMessage[]): string {
+  const priorHints = conversationHistory
+    .filter((msg) => msg.role === "assistant" && msg.message_kind === "hint")
+    .map((msg) => clampPromptText(msg.content))
+    .filter(Boolean);
+
+  if (priorHints.length === 0) {
+    return "[нет предыдущих подсказок]";
+  }
+
+  return priorHints.join(" | ");
+}
+
+function getLatestStudentMessage(conversationHistory: GuidedConversationHistoryMessage[]): string {
+  for (let i = conversationHistory.length - 1; i >= 0; i -= 1) {
+    const msg = conversationHistory[i];
+    if (msg.role !== "user") continue;
+
+    const content = clampPromptText(msg.content);
+    if (content) return content;
+  }
+
+  return "[ученик ещё не присылал решение]";
+}
+
 function buildCheckPrompt(params: EvaluateStudentAnswerParams): LovableMessage[] {
   const correctAnswerValue = clampPromptText(params.correctAnswer) || "[нет эталонного ответа — оцени по смыслу]";
   const rubricLine = params.rubricText ? `Критерии оценки: ${clampPromptText(params.rubricText)}` : "";
@@ -628,13 +812,37 @@ function buildHintPrompt(params: GenerateHintParams): LovableMessage[] {
   const studentImageCount = studentImageUrls.length;
   const hasStudentImage = studentImageCount > 0;
   const graphGroundingGuidance = buildGraphGroundingGuidance(params.taskOcrText, hasTaskImage);
+  const taskContext = [
+    clampPromptText(params.taskText) || "[текст задачи отсутствует, опирайся на изображение задачи]",
+    ...graphGroundingGuidance,
+    hasTaskImage ? "[к задаче приложено изображение]" : "",
+  ].filter(Boolean).join("\n");
+  const priorHints = buildPriorHintsSummary(params.conversationHistory);
+  const studentLatest = getLatestStudentMessage(params.conversationHistory);
 
   const systemContent = [
-    "Ты репетитор, помогаешь ученику с домашним заданием.",
-    `Предмет: ${params.subject}.`,
-    `Условие задачи: ${clampPromptText(params.taskText)}`,
-    ...graphGroundingGuidance,
-    hasTaskImage ? "К задаче прикреплено изображение с условием — внимательно изучи его." : "",
+    "Ты — физик-наставник. Ученик просит подсказку по задаче ЕГЭ/ОГЭ.",
+    "",
+    "УРОВЕНЬ ПОДСКАЗКИ: 1/3",
+    "- Level 1 (nudge): одним коротким вопросом направь внимание на ключевую величину или закон",
+    "- Level 2 (hint): назови закон/формулу, которые применимы, но не решай за ученика",
+    "- Level 3 (big hint): покажи формулу с подстановкой, но не вычисляй финальный ответ",
+    "",
+    "КАТЕГОРИЧЕСКИ ЗАПРЕЩЕНО использовать фразы:",
+    ...FORBIDDEN_HINT_PROMPT_LINES.map((line) => `- ${line}`),
+    "- любые общие фразы без привязки к физике этой задачи",
+    "",
+    "ОБЯЗАТЕЛЬНО:",
+    "- Упоминай конкретную величину (скорость, ускорение, сила трения, напряжение, ...) или закон (Ньютон, Ом, Кирхгоф, ...) из ЭТОЙ задачи",
+    "- Если задача на изображении и текст пустой — опиши что видишь и дай подсказку по видимым величинам",
+    "- Если у тебя недостаточно контекста, лучше задай короткий вопрос о конкретной величине, чем используй шаблонную фразу",
+    "- Длина: 1-3 предложения, без воды",
+    "- Сохрани сократический тон Level 1: мягко направь ученика к следующему шагу, а не решай за него",
+    "- Не раскрывай правильный ответ ученику",
+    "",
+    `КОНТЕКСТ ЗАДАЧИ ({task_text}): ${taskContext}`,
+    `ПРЕДЫДУЩИЕ ПОДСКАЗКИ по этой задаче ({prior_hints}): ${priorHints}`,
+    `ТЕКУЩЕЕ РЕШЕНИЕ УЧЕНИКА ({student_latest}): ${studentLatest}`,
     hasStudentImage
       ? `Ученик приложил ${studentImageCount > 1 ? `${studentImageCount} изображения` : "изображение"} своего решения — учитывай ${studentImageCount > 1 ? "их" : "его"}, когда даёшь подсказку.`
       : "",
@@ -643,16 +851,10 @@ function buildHintPrompt(params: GenerateHintParams): LovableMessage[] {
       : "",
     params.correctAnswer ? `Правильный ответ (НЕ раскрывай ученику!): ${clampPromptText(params.correctAnswer)}` : "",
     "",
-    `Ученик уже сделал ${params.wrongAnswerCount} неверных попыток и получил ${params.hintCount} подсказок.`,
+    `Статистика: ${params.wrongAnswerCount} неверных попыток, ${params.hintCount} подсказок.`,
     "",
     "Верни ТОЛЬКО валидный JSON без markdown-обёрток:",
     '{"hint":"..."}',
-    "",
-    "ПРАВИЛА:",
-    "- Дай короткую педагогическую подсказку (1-3 предложения).",
-    "- Направь ученика к решению, НЕ давай готовый ответ.",
-    "- Используй LaTeX ($..$ или $$..$) если нужны формулы.",
-    "- Если это не первая подсказка — сделай её чуть более конкретной.",
   ].filter(Boolean).join("\n");
 
   const messages: LovableMessage[] = [
@@ -808,44 +1010,97 @@ export async function generateHint(
     hintCount: params.hintCount,
   });
 
+  let resolvedTaskImageUrl: string | null = null;
+  const telemetryMeta = {
+    task_id: params.taskId ?? null,
+    assignment_id: params.assignmentId ?? null,
+  };
+
   try {
     const [taskImageUrl, studentImageUrls] = await Promise.all([
       inlinePromptImageUrl(params.taskImageUrl),
       inlinePromptImageUrls(params.studentImageUrls),
     ]);
+    resolvedTaskImageUrl = taskImageUrl;
     const messages = buildHintPrompt({
       ...params,
       taskImageUrl,
       studentImageUrls,
     });
     const parsed = await callLovableJson(messages, "guided_hint");
+    const firstHint = sanitizeHintText(parsed.hint, params.correctAnswer);
+    const firstCheck = getGeneratedHintCheck(firstHint);
 
-    let hint = typeof parsed.hint === "string"
-      ? normalizeText(stripMarkdownWrappers(parsed.hint))
-      : "";
-
-    if (!hint) {
-      hint = "Попробуй разбить задачу на шаги и решить каждый отдельно.";
+    if (firstCheck.ok) {
+      console.log("guided_hint_success", { hint_length: firstHint.length, attempt: 1 });
+      return { hint: firstHint };
     }
 
-    // Strip correct answer from hint
-    const normalizedAnswer = normalizeComparable(params.correctAnswer ?? "");
-    if (normalizedAnswer.length >= 2) {
-      const normalizedHint = normalizeComparable(hint);
-      if (normalizedHint.includes(normalizedAnswer)) {
-        hint = "Попробуй разбить задачу на шаги и решить каждый отдельно.";
-      }
+    console.warn(JSON.stringify({
+      event: "hint_rejected",
+      reason: firstCheck.reason ?? null,
+      retry: 1,
+      ...telemetryMeta,
+    }));
+
+    const retryMessages: LovableMessage[] = [...messages];
+    if (firstHint.trim()) {
+      retryMessages.push({
+        role: "assistant",
+        content: firstHint,
+      });
+    }
+    retryMessages.push({
+      role: "user",
+      content:
+        `Предыдущая версия подсказки не подходит: ${reasonToHumanMessage(firstCheck.reason)}. ` +
+        "Перепиши подсказку так, чтобы она явно упоминала конкретную физическую величину или закон из этой задачи. " +
+        "1-3 предложения, без общих фраз и без правильного ответа.",
+    });
+
+    const retryParsed = await callLovableJson(retryMessages, "guided_hint");
+    const secondHint = sanitizeHintText(retryParsed.hint, params.correctAnswer);
+    const secondCheck = getGeneratedHintCheck(secondHint);
+
+    if (secondCheck.ok) {
+      console.log("guided_hint_success", { hint_length: secondHint.length, attempt: 2 });
+      return { hint: secondHint };
     }
 
-    hint = softTruncate(hint, MAX_FEEDBACK_LENGTH);
+    console.warn(JSON.stringify({
+      event: "hint_rejected",
+      reason: secondCheck.reason ?? null,
+      retry: 2,
+      ...telemetryMeta,
+    }));
 
-    console.log("guided_hint_success", { hint_length: hint.length });
+    const fallbackHint = buildValidatedFallbackHint({
+      taskText: params.taskText,
+      hasImage: Boolean(resolvedTaskImageUrl),
+    });
 
-    return { hint };
+    console.warn(JSON.stringify({
+      event: "hint_fallback_used",
+      reason: "retry_invalid",
+      ...telemetryMeta,
+    }));
+
+    return { hint: fallbackHint };
   } catch (error) {
+    const fallbackHint = buildValidatedFallbackHint({
+      taskText: params.taskText,
+      hasImage: Boolean(resolvedTaskImageUrl),
+    });
+
+    console.warn(JSON.stringify({
+      event: "hint_fallback_used",
+      reason: "exception",
+      ...telemetryMeta,
+    }));
+
     console.error("guided_hint_error", {
       error: error instanceof Error ? error.message : String(error),
     });
-    return { hint: "Попробуй перечитать условие задачи и выделить ключевые данные." };
+    return { hint: fallbackHint };
   }
 }

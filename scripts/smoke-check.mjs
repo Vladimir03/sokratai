@@ -67,6 +67,34 @@ function requireNotContains(filePath, snippet, failMessage, okMessage) {
   ok(okMessage);
 }
 
+function extractForbiddenHintRegexes(guidedAiContent) {
+  const match = guidedAiContent.match(/const FORBIDDEN_HINT_PHRASES: RegExp\[\] = \[([\s\S]*?)\n\];/);
+  if (!match) {
+    fail("FORBIDDEN_HINT_PHRASES block not found in guided_ai.ts");
+  }
+
+  try {
+    return Function(`"use strict"; return [${match[1]}];`)();
+  } catch (error) {
+    fail(`failed to parse FORBIDDEN_HINT_PHRASES from guided_ai.ts: ${String(error)}`);
+  }
+}
+
+function validateHintContentSmoke(text, forbiddenRegexes) {
+  const normalized = String(text ?? "").trim();
+  for (const rx of forbiddenRegexes) {
+    if (rx.test(normalized)) {
+      return { ok: false, reason: `forbidden:${rx.source}` };
+    }
+  }
+
+  if (normalized.length < 40) {
+    return { ok: false, reason: "too_short" };
+  }
+
+  return { ok: true };
+}
+
 console.log("=== SokratAI Smoke Check (Static) ===");
 console.log("");
 
@@ -211,6 +239,27 @@ requireNotContains(
   "RegisterTutor still treats status 422 as email-exists marker",
   "RegisterTutor no longer treats 422 as email-exists",
 );
+
+console.log("");
+console.log("5. Hint quality guardrails...");
+
+const guidedAiPath = path.join(rootDir, "supabase", "functions", "homework-api", "guided_ai.ts");
+const guidedAiContent = readText(guidedAiPath);
+const forbiddenHintRegexes = extractForbiddenHintRegexes(guidedAiContent);
+
+const livePilotPhrase = "Попробуй перечитать условие задачи и выделить ключевые данные";
+const livePhraseCheck = validateHintContentSmoke(livePilotPhrase, forbiddenHintRegexes);
+if (livePhraseCheck.ok) {
+  fail("live pilot phrase still passes hint validator");
+}
+ok(`live pilot phrase is rejected (${livePhraseCheck.reason})`);
+
+const validPhysicsHint = "По второму закону Ньютона ускорение бруска равно отношению силы к массе.";
+const validPhysicsHintCheck = validateHintContentSmoke(validPhysicsHint, forbiddenHintRegexes);
+if (!validPhysicsHintCheck.ok) {
+  fail(`valid physics hint was rejected by smoke-check (${validPhysicsHintCheck.reason})`);
+}
+ok("content-specific physics hint passes validator");
 
 console.log("");
 console.log("=== Smoke Check Complete ===");
