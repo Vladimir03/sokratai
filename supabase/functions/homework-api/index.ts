@@ -137,6 +137,10 @@ function isNonNegativeInt(v: unknown): v is number {
   return typeof v === "number" && Number.isInteger(v) && v >= 0;
 }
 
+function isBoolean(v: unknown): v is boolean {
+  return typeof v === "boolean";
+}
+
 function isMissingColumnError(message: string, column: string): boolean {
   const lower = message.toLowerCase();
   return lower.includes(column.toLowerCase()) && (
@@ -3182,6 +3186,198 @@ async function handleListAttempts(
   return jsonOk(cors, data ?? []);
 }
 
+// ─── Formula round endpoints (student) ──────────────────────────────────────
+
+interface FormulaRoundRecord {
+  id: string;
+  assignment_id: string;
+  section: string;
+  formula_count: number;
+  questions_per_round: number;
+  lives: number;
+  created_at: string;
+}
+
+async function verifyFormulaRoundOwnership(
+  db: SupabaseClient,
+  roundId: string,
+  userId: string,
+  cors: Record<string, string>,
+): Promise<FormulaRoundRecord | Response> {
+  if (!isUUID(roundId)) {
+    return jsonError(cors, 400, "INVALID_ID", "Invalid formula round ID format");
+  }
+
+  const { data: round, error: roundError } = await db
+    .from("formula_rounds")
+    .select("id, assignment_id, section, formula_count, questions_per_round, lives, created_at")
+    .eq("id", roundId)
+    .maybeSingle();
+
+  if (roundError) {
+    console.error("homework_api_request_error", {
+      route: "formula-rounds:verify",
+      round_id: roundId,
+      error: roundError.message,
+    });
+    return jsonError(cors, 500, "DB_ERROR", "Failed to load formula round");
+  }
+
+  if (!round) {
+    return jsonError(cors, 404, "NOT_FOUND", "Formula round not found");
+  }
+
+  const { data: studentAssignment, error: assignmentError } = await db
+    .from("homework_tutor_student_assignments")
+    .select("id")
+    .eq("assignment_id", round.assignment_id)
+    .eq("student_id", userId)
+    .maybeSingle();
+
+  if (assignmentError) {
+    console.error("homework_api_request_error", {
+      route: "formula-rounds:verify",
+      round_id: roundId,
+      error: assignmentError.message,
+    });
+    return jsonError(cors, 500, "DB_ERROR", "Failed to verify formula round access");
+  }
+
+  if (!studentAssignment) {
+    return jsonError(cors, 403, "FORBIDDEN", "Not authorized to access this formula round");
+  }
+
+  return round as FormulaRoundRecord;
+}
+
+async function handleGetFormulaRound(
+  db: SupabaseClient,
+  userId: string,
+  roundId: string,
+  cors: Record<string, string>,
+): Promise<Response> {
+  const round = await verifyFormulaRoundOwnership(db, roundId, userId, cors);
+  if (round instanceof Response) return round;
+
+  return jsonOk(cors, round);
+}
+
+async function handleListFormulaRoundResults(
+  db: SupabaseClient,
+  userId: string,
+  roundId: string,
+  cors: Record<string, string>,
+): Promise<Response> {
+  const round = await verifyFormulaRoundOwnership(db, roundId, userId, cors);
+  if (round instanceof Response) return round;
+
+  const { data: results, error } = await db
+    .from("formula_round_results")
+    .select("id, round_id, student_id, score, total, lives_remaining, completed, duration_seconds, answers, weak_formulas, created_at")
+    .eq("round_id", round.id)
+    .eq("student_id", userId)
+    .order("created_at", { ascending: false });
+
+  if (error) {
+    console.error("homework_api_request_error", {
+      route: "GET /formula-rounds/:roundId/results",
+      round_id: roundId,
+      user_id: userId,
+      error: error.message,
+    });
+    return jsonError(cors, 500, "DB_ERROR", "Failed to load formula round results");
+  }
+
+  return jsonOk(cors, results ?? []);
+}
+
+async function handleCreateFormulaRoundResult(
+  db: SupabaseClient,
+  userId: string,
+  roundId: string,
+  body: unknown,
+  cors: Record<string, string>,
+): Promise<Response> {
+  const round = await verifyFormulaRoundOwnership(db, roundId, userId, cors);
+  if (round instanceof Response) return round;
+
+  if (!body || typeof body !== "object") {
+    return jsonError(cors, 400, "INVALID_BODY", "Request body must be a JSON object");
+  }
+
+  const payload = body as Record<string, unknown>;
+  const score = payload.score;
+  const total = payload.total;
+  const livesRemaining = payload.livesRemaining ?? payload.lives_remaining;
+  const completed = payload.completed;
+  const durationSeconds = payload.durationSeconds ?? payload.duration_seconds;
+  const answers = payload.answers;
+  const weakFormulas = payload.weakFormulas ?? payload.weak_formulas ?? [];
+
+  if (!isNonNegativeInt(score)) {
+    return jsonError(cors, 400, "VALIDATION", "score must be a non-negative integer");
+  }
+  if (!isPositiveInt(total)) {
+    return jsonError(cors, 400, "VALIDATION", "total must be a positive integer");
+  }
+  if (!isNonNegativeInt(livesRemaining)) {
+    return jsonError(cors, 400, "VALIDATION", "livesRemaining must be a non-negative integer");
+  }
+  if (!isBoolean(completed)) {
+    return jsonError(cors, 400, "VALIDATION", "completed must be a boolean");
+  }
+  if (durationSeconds !== undefined && durationSeconds !== null && !isNonNegativeInt(durationSeconds)) {
+    return jsonError(cors, 400, "VALIDATION", "durationSeconds must be a non-negative integer or null");
+  }
+  if (!Array.isArray(answers)) {
+    return jsonError(cors, 400, "VALIDATION", "answers must be an array");
+  }
+  if (!Array.isArray(weakFormulas)) {
+    return jsonError(cors, 400, "VALIDATION", "weakFormulas must be an array");
+  }
+  if (score > total) {
+    return jsonError(cors, 400, "VALIDATION", "score cannot exceed total");
+  }
+  if (livesRemaining > round.lives) {
+    return jsonError(cors, 400, "VALIDATION", "livesRemaining cannot exceed round lives");
+  }
+
+  const { data: savedResult, error } = await db
+    .from("formula_round_results")
+    .insert({
+      round_id: round.id,
+      student_id: userId,
+      score,
+      total,
+      lives_remaining: livesRemaining,
+      completed,
+      duration_seconds: durationSeconds ?? null,
+      answers,
+      weak_formulas: weakFormulas,
+    })
+    .select("id, created_at")
+    .single();
+
+  if (error || !savedResult) {
+    console.error("homework_api_request_error", {
+      route: "POST /formula-rounds/:roundId/results",
+      round_id: roundId,
+      user_id: userId,
+      error: error?.message,
+    });
+    return jsonError(cors, 500, "DB_ERROR", "Failed to save formula round result");
+  }
+
+  console.log("homework_api_request_success", {
+    route: "POST /formula-rounds/:roundId/results",
+    round_id: roundId,
+    user_id: userId,
+    result_id: savedResult.id,
+  });
+
+  return jsonOk(cors, savedResult, 201);
+}
+
 // ─── Endpoint: POST /student/submissions/:id/ai-check ───────────────────────
 
 async function handleStudentSubmissionAiCheck(
@@ -4552,6 +4748,22 @@ Deno.serve(async (req: Request): Promise<Response> => {
     // POST /assignments/:id/tasks/:taskId/ocr (student — pre-OCR task image)
     if (seg.length === 5 && seg[0] === "assignments" && seg[2] === "tasks" && seg[4] === "ocr" && route.method === "POST") {
       return await handleTaskOcr(db, userId, seg[1], seg[3], cors);
+    }
+
+    // GET /formula-rounds/:roundId (student endpoint)
+    if (seg.length === 2 && seg[0] === "formula-rounds" && route.method === "GET") {
+      return await handleGetFormulaRound(db, userId, seg[1], cors);
+    }
+
+    // GET /formula-rounds/:roundId/results (student endpoint)
+    if (seg.length === 3 && seg[0] === "formula-rounds" && seg[2] === "results" && route.method === "GET") {
+      return await handleListFormulaRoundResults(db, userId, seg[1], cors);
+    }
+
+    // POST /formula-rounds/:roundId/results (student endpoint)
+    if (seg.length === 3 && seg[0] === "formula-rounds" && seg[2] === "results" && route.method === "POST") {
+      const body = await parseJsonBody(req);
+      return await handleCreateFormulaRoundResult(db, userId, seg[1], body, cors);
     }
 
     const tutorResult = await getTutorOrThrow(db, userId, cors);

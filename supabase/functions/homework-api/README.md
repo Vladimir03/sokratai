@@ -352,6 +352,58 @@ Submit tutor review for a student's submission.
 
 ---
 
+## Student Formula Round Endpoints
+
+These endpoints power `/homework/:id/round/:roundId`.
+- The authenticated student must own the assignment linked from `formula_rounds.assignment_id`.
+- Preview-mode links still stay a frontend concern; these endpoints describe the normal authenticated flow.
+
+### GET /formula-rounds/:roundId
+
+Load formula round configuration for the current student.
+
+**Response (200):**
+```json
+{
+  "id": "uuid",
+  "assignment_id": "uuid",
+  "section": "kinematics",
+  "formula_count": 12,
+  "questions_per_round": 10,
+  "lives": 3,
+  "created_at": "2026-04-06T10:00:00Z"
+}
+```
+
+### GET /formula-rounds/:roundId/results
+
+Load the current student's saved attempts for this round, newest first.
+
+### POST /formula-rounds/:roundId/results
+
+Persist a completed round result for the current student.
+
+**Request:**
+```json
+{
+  "score": 7,
+  "total": 10,
+  "livesRemaining": 1,
+  "completed": true,
+  "durationSeconds": 214,
+  "answers": [],
+  "weakFormulas": []
+}
+```
+
+**Response (201):**
+```json
+{
+  "id": "uuid",
+  "created_at": "2026-04-06T10:05:00Z"
+}
+```
+
 ## Student Guided Chat Endpoints
 
 These endpoints are used by the student guided-homework workspace when an assignment has `workflow_mode = "guided_chat"`.
