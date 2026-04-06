@@ -1,9 +1,9 @@
 # Feature Spec: Формат проверки из KB + развернутое решение
 
-**Версия:** v0.1
+**Версия:** v0.2
 **Дата:** 2026-04-01
 **Автор:** Vladimir
-**Статус:** phase1-done (R8 student-facing UX done 2026-04-02)
+**Статус:** phase2-in-progress (`kb_tasks.check_format` DB + seed done 2026-04-06; remaining follow-up = final QA)
 **PRD:** `docs/delivery/features/check-format/prd.md`
 
 ---
@@ -236,6 +236,10 @@ ALTER TABLE kb_tasks
   CHECK (check_format IS NULL OR check_format IN ('short_answer', 'detailed_solution'));
 ```
 
+Реализовано в `main`:
+- `supabase/migrations/20260401140000_add_check_format_to_kb_tasks.sql`
+- `supabase/migrations/20260401140100_seed_check_format_kb_tasks.sql`
+
 ---
 
 ## 6. UX / UI
@@ -357,15 +361,15 @@ npm run lint && npm run build && npm run smoke-check
 - [x] TASK-4: Frontend types — add `check_format` to `DraftTask`, `CreateAssignmentTask`, `UpdateAssignmentTask`
 - [x] TASK-5: AI enforcement — add `checkFormat` param to `evaluateStudentAnswer()`, update `buildCheckPrompt()` in `guided_ai.ts`
 - [x] TASK-6: Wire `check_format` through `handleCheckAnswer` in `index.ts`
-- [ ] TASK-7a: Student-side: `check_format` в `StudentHomeworkTask` + student API query + notice banner + placeholder + bootstrap context
+- [x] TASK-7a: Student-side: `check_format` в `StudentHomeworkTask` + student API query + notice banner + placeholder + bootstrap context
 - [ ] TASK-7b: Smoke test + AC verification (AC-1 — AC-6)
 
 ### Phase 2 — P1 (fast follow-up)
 
-- [ ] TASK-8: DB миграция — add `check_format` to `kb_tasks`
+- [x] TASK-8: DB миграция — add `check_format` to `kb_tasks`
 - [x] TASK-9: UI — check_format selector в `HWTaskCard.tsx`
 - [x] TASK-10: UI — max_score display/edit в `HWTaskCard.tsx`
-- [ ] TASK-11: Seed script — заполнить `check_format` в KB задачах по `kim_number`
+- [x] TASK-11: Seed script — заполнить `check_format` в KB задачах по `kim_number`
 
 ---
 

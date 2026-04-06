@@ -142,13 +142,15 @@
 
 ## Phase 2 — P1 (fast follow-up)
 
-### TASK-8: DB миграция — add `check_format` to `kb_tasks` + extend KBTask type
+### ~~TASK-8: DB миграция — add `check_format` to `kb_tasks` + extend KBTask type~~ ✅
 
 **Job**: R4-1
 **Agent**: Claude Code
 **Files**: `supabase/migrations/` (новый файл), `src/types/kb.ts`
 **AC**: —
 **Зависимости**: TASK-11 (seed) зависит от этой миграции
+
+**Реализовано**: `supabase/migrations/20260401140000_add_check_format_to_kb_tasks.sql`, `src/types/kb.ts`
 
 **Что делаем:**
 1. SQL-миграция: `ALTER TABLE kb_tasks ADD COLUMN check_format text DEFAULT NULL` с CHECK constraint `IN ('short_answer', 'detailed_solution')`
@@ -195,13 +197,15 @@
 
 ---
 
-### TASK-11: Seed script — заполнить `check_format` в KB задачах по `kim_number`
+### ~~TASK-11: Seed script — заполнить `check_format` в KB задачах по `kim_number`~~ ✅
 
 **Job**: R4-1
 **Agent**: Claude Code
 **Files**: `supabase/migrations/` (новый файл)
 **AC**: —
 **Зависимости**: после TASK-8 (колонка должна существовать)
+
+**Реализовано**: `supabase/migrations/20260401140100_seed_check_format_kb_tasks.sql`
 
 **Что делаем:**
 Data migration — заполнить `check_format` для существующих KB-задач:
@@ -515,6 +519,12 @@ Acceptance Criteria:
 ---
 
 ## Phase 2 — Copy-paste промпты для агентов
+
+### Статус на 2026-04-06
+
+- `TASK-8` выполнен: колонка `kb_tasks.check_format` и TypeScript тип `KBTask.check_format` в `main`
+- `TASK-11` выполнен: существующие KB-задачи заполняются по `kim_number`
+- В Phase 2 из незавершённого остался в основном финальный smoke/QA (`TASK-12`)
 
 ### TASK-8 + TASK-11 (объединённый промпт — миграция KB + seed)
 
