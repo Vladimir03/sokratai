@@ -3,7 +3,7 @@
 **Версия:** v0.1
 **Дата:** 2026-04-06
 **Автор:** Vladimir
-**Статус:** draft
+**Статус:** implemented
 
 ---
 
@@ -135,7 +135,9 @@ alter publication supabase_realtime add table public.homework_tutor_thread_messa
 Без изменений.
 
 ### Миграции
-Возможна 1 (см. выше, условно).
+- `20260406143000_enable_realtime_homework_tutor_thread_messages.sql` — publication `supabase_realtime`
+- `20260406173000_enable_tutor_realtime_read_homework_thread_messages.sql` — tutor `SELECT` policy для browser-side Realtime
+- `20260406181500_fix_tutor_realtime_thread_message_policy.sql` — перевод tutor policy на `SECURITY DEFINER` helper (`is_homework_thread_visible_to_tutor`)
 
 ---
 
@@ -169,6 +171,13 @@ npm run lint && npm run build && npm run smoke-check
 ```
 Плюс manual: открыть thread viewer в Chrome, отправить сообщение от имени ученика с другого устройства — должно появиться в течение 1-2 сек.
 
+### Фактический итог внедрения (2026-04-06)
+- Realtime заработал после двух DB-условий: publication + tutor-side RLS для browser subscription
+- Первичная гипотеза «достаточно existing RLS, раз `handleGetThread` уже работает» оказалась неверной для Supabase Realtime
+- Raw JOIN policy для tutor `SELECT` на `homework_tutor_thread_messages` была недостаточной: она ломалась из-за RLS на промежуточных homework-таблицах
+- Каноничное решение: `SECURITY DEFINER` helper `is_homework_thread_visible_to_tutor(thread_id)` внутри policy
+- Ручной pilot-check пройден: ученик пишет с телефона, репетитор видит новые сообщения без `F5`
+
 ---
 
 ## 8. Risks & Open Questions
@@ -176,7 +185,7 @@ npm run lint && npm run build && npm run smoke-check
 | Риск | Вероятность | Митигация |
 |---|---|---|
 | Таблица не в publication supabase_realtime | Средняя | SQL-проверка до старта, одна миграция |
-| RLS блокирует realtime payload (репетитор не видит свой thread) | Низкая | `handleGetThread` уже работает, тот же JWT даёт realtime доступ |
+| RLS блокирует realtime payload (репетитор не видит свой thread) | Высокая | Для browser-side Realtime нужен отдельный tutor `SELECT` policy; использовать `SECURITY DEFINER` helper, не raw JOIN |
 | Утечка каналов при быстром expand/collapse карточек | Средняя | Обязательный cleanup в return useEffect, тест rapid toggle |
 | Auto-scroll ломает чтение истории | Средняя | Sticky-bottom: scroll только если юзер был внизу (`scrollHeight - scrollTop - clientHeight < 100`) |
 | Safari < 16 WebSocket reconnect | Низкая | Supabase JS client уже умеет reconnect, проверить в Safari 15.4 |
@@ -189,13 +198,14 @@ npm run lint && npm run build && npm run smoke-check
 
 ## 9. Implementation Tasks
 
-- [ ] Проверить, что `homework_tutor_thread_messages` в publication `supabase_realtime`; если нет — миграция
-- [ ] Добавить `useRealtimeThreadMessages(threadId, enabled)` hook или inline useEffect в `GuidedThreadViewer`
-- [ ] Merge helper для React Query cache (`mergeThreadMessage`)
-- [ ] Sticky-bottom scroll logic
-- [ ] Cleanup на unmount и при `enabled=false`
-- [ ] Smoke test в Chrome + Safari (desktop) + Safari iOS
-- [ ] Обновить `.claude/rules/40-homework-system.md` с секцией «Realtime thread viewer»
+- [x] Проверить, что `homework_tutor_thread_messages` в publication `supabase_realtime`; добавлена миграция publication
+- [x] Добавить inline Realtime `useEffect` в `GuidedThreadViewer`
+- [x] Merge helper для React Query cache (`mergeThreadMessage`)
+- [x] Sticky-bottom scroll logic
+- [x] Cleanup на unmount и при `enabled=false`
+- [x] Tutor-side RLS для browser Realtime вынесен в отдельные миграции; финальная policy использует `SECURITY DEFINER` helper
+- [x] Обновить `.claude/rules/40-homework-system.md` с секцией «Realtime thread viewer»
+- [x] Ручной pilot smoke test: ученик пишет с телефона, репетитор видит сообщение без `F5`
 
 ---
 

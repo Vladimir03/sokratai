@@ -1,5 +1,7 @@
 # Tasks: Realtime Thread Viewer (Е9)
 
+**Implementation status**: done
+
 **Spec**: `docs/delivery/features/realtime-thread/spec.md`
 **Feature**: Supabase Realtime подписка в `GuidedThreadViewer` — репетитор видит сообщения ученика без перезагрузки страницы.
 **Priority**: P0 (pilot blocker, Егор 2026-04-06)
@@ -8,6 +10,8 @@
 ---
 
 ## TASK-1: Проверить/включить Realtime publication для `homework_tutor_thread_messages`
+
+**Status**: done
 
 **Job**: R2-3 (видимость прогресса ученика без дёрганий)
 **Agent**: Claude Code
@@ -56,6 +60,8 @@ Mandatory end block:
 ---
 
 ## TASK-2: Реализовать Realtime subscription + merge helper в `GuidedThreadViewer`
+
+**Status**: done
 
 **Job**: R2-3, R1-4
 **Agent**: Claude Code
@@ -121,6 +127,8 @@ Mandatory end block:
 
 ## TASK-3: Sticky-bottom auto-scroll
 
+**Status**: done
+
 **Job**: R2-3
 **Agent**: Claude Code
 **Files**: `src/components/tutor/GuidedThreadViewer.tsx`
@@ -171,6 +179,8 @@ Mandatory end block:
 
 ## TASK-4: Cleanup подписок + rapid toggle test
 
+**Status**: done
+
 **Job**: R2-3 (надёжность сессии)
 **Agent**: Claude Code
 **Files**: `src/components/tutor/GuidedThreadViewer.tsx`
@@ -217,6 +227,8 @@ Mandatory end block:
 
 ## TASK-5: Cross-browser smoke test
 
+**Status**: partially done
+
 **Job**: R2-3
 **Agent**: Vladimir (manual QA)
 **Files**: нет кодовых изменений
@@ -234,6 +246,21 @@ Mandatory end block:
 ---
 
 ## TASK-6: Обновить `.claude/rules/40-homework-system.md`
+
+**Status**: done
+
+---
+
+## Implementation notes (2026-04-06)
+
+- Realtime заработал только после трёх additive-миграций:
+  - `20260406143000_enable_realtime_homework_tutor_thread_messages.sql`
+  - `20260406173000_enable_tutor_realtime_read_homework_thread_messages.sql`
+  - `20260406181500_fix_tutor_realtime_thread_message_policy.sql`
+- Критичный нюанс: для Supabase browser Realtime недостаточно того, что tutor может читать тред через backend `handleGetThread`
+- Tutor `SELECT` policy на `homework_tutor_thread_messages` должна идти через `SECURITY DEFINER` helper `is_homework_thread_visible_to_tutor(thread_id)`
+- Raw JOIN policy на homework-таблицы внутри `USING (...)` ломалась из-за RLS на промежуточных таблицах и не пропускала live events
+- Фактическая проверка пройдена: ученик пишет с телефона, репетитор видит новые сообщения без `F5`
 
 **Job**: R2-3 (документация для будущих агентов)
 **Agent**: Claude Code
