@@ -1,5 +1,5 @@
+import { memo } from 'react';
 import { Heart } from 'lucide-react';
-import { Progress } from '@/components/ui/progress';
 
 interface RoundProgressProps {
   current: number;
@@ -8,27 +8,50 @@ interface RoundProgressProps {
   maxLives: number;
 }
 
-export function RoundProgress({ current, total, lives, maxLives }: RoundProgressProps) {
-  const percent = total > 0 ? Math.round((current / total) * 100) : 0;
-
+const RoundProgress = memo(function RoundProgress({
+  current,
+  total,
+  lives,
+  maxLives,
+}: RoundProgressProps) {
   return (
-    <div className="flex items-center gap-3">
-      <Progress value={percent} className="flex-1 h-2" />
-      <span className="text-xs font-medium text-muted-foreground whitespace-nowrap">
+    <div className="flex items-center justify-between gap-4">
+      {/* Progress dots */}
+      <div className="flex items-center gap-1.5 flex-1 min-w-0">
+        {Array.from({ length: total }, (_, i) => (
+          <div
+            key={i}
+            className={`h-2 flex-1 rounded-full transition-colors duration-200 ${
+              i < current
+                ? 'bg-accent'
+                : i === current
+                  ? 'bg-accent/50'
+                  : 'bg-slate-200'
+            }`}
+          />
+        ))}
+      </div>
+
+      {/* Question counter */}
+      <span className="text-sm font-medium text-slate-500 tabular-nums shrink-0">
         {current}/{total}
       </span>
-      <div className="flex items-center gap-0.5">
-        {Array.from({ length: maxLives }).map((_, i) => (
+
+      {/* Lives */}
+      <div className="flex items-center gap-0.5 shrink-0">
+        {Array.from({ length: maxLives }, (_, i) => (
           <Heart
             key={i}
-            className={`w-4 h-4 ${
+            className={`w-5 h-5 transition-all duration-300 ${
               i < lives
-                ? 'fill-destructive text-destructive'
-                : 'text-muted-foreground/30'
+                ? 'fill-red-500 text-red-500'
+                : 'fill-slate-200 text-slate-200'
             }`}
           />
         ))}
       </div>
     </div>
   );
-}
+});
+
+export { RoundProgress };
