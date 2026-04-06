@@ -409,6 +409,7 @@ export interface TutorHomeworkAssignmentDetails {
     deadline: string | null;
     status: HomeworkAssignmentStatus;
     disable_ai_bootstrap?: boolean;
+    exam_type?: 'ege' | 'oge';
     created_at: string;
   };
   tasks: {
