@@ -1,6 +1,6 @@
 # Product Backlog — SokratAI
 
-Последнее обновление: 2026-04-01
+Последнее обновление: 2026-04-03
 
 Pipeline: `docs/discovery/development-pipeline.md`
 Job Graph: `docs/discovery/research/SokratAI_AJTBD_job-graphs/`
@@ -16,6 +16,7 @@ Job Graph: `docs/discovery/research/SokratAI_AJTBD_job-graphs/`
 
 | Дата | Название | Job | Пилот? | Приоритет | Статус | Источник |
 |---|---|---|---|---|---|---|
+| 2026-04-03 | Тренажёр формул механики для ЕГЭ (tutor-assigned micro-drill) | R4-1, S1-2, S1-4, S2-4 | да (через ДЗ) | P2 | ticket | Vladimir |
 | 2026-04-01 | KB → ДЗ: подгружать макс. баллы и формат проверки из базы | R4-1 | да | P1 | phase1-done | signal/Егор #1 |
 | 2026-04-01 | Guided chat: не перебрасывать на другую задачу | S1 | да (блокер UX) | P0 | done | signal/Егор #2 |
 | 2026-04-01 | Уведомление репетитору о регистрации нового ученика | R4-2 | да | P1 | ticket | signal/Егор #3 |
