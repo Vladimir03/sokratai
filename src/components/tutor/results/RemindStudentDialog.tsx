@@ -119,7 +119,7 @@ export function RemindStudentDialog({
 
   return (
     <Dialog open={open} onOpenChange={(next) => (sending ? null : onOpenChange(next))}>
-      <DialogContent className="sm:max-w-lg">
+      <DialogContent className="md:max-w-lg">
         <DialogHeader>
           <DialogTitle>Напомнить ученику</DialogTitle>
           <DialogDescription>

@@ -120,6 +120,7 @@ Code review для **каждой** задачи проводит **Codex** не
 - **Что сделано:** клик по строке → `StudentDrillDown` раскрывается в Card «Разбор ученика» под Materials. Горизонтальный ряд `TaskMiniCard` (все задачи + «Все задачи»). Клик по мини-карточке → `key` меняется → viewer ремоунтится (сбрасывает E8/E9/scroll). `hideTaskFilter={true}` скрывает дублирующий pill-ряд внутри viewer. Клик по ячейке → `e.stopPropagation()` + expand student + set task. Telemetry `drill_down_expanded` с `firstProblemTaskOrder` cascade (red/hint → amber → null), ОДИН раз на expand через `lastDrillTrackedRef`.
 - **Guardrails соблюдены:** нет cards-in-cards, `touch-pan-x` на scroll-ряду, `touch-manipulation` на cells и mini-cards, `React.memo` на TaskMiniCard.
 - **Validation:** ✅ `npm run lint` (baseline +0), ✅ `npm run build`, ✅ `npm run smoke-check`. Manual: drill-down opens, TaskMiniCard selection, viewer remount on task switch, cell click sets task directly, realtime E9 works.
+- **Follow-up fix (post-review, 2026-04-07):** обнаружен cards-in-cards (outer Card в `TutorHomeworkDetail` + inner Card в `GuidedThreadViewer`). Добавлен additive prop `hideOuterCard?: boolean` в `GuidedThreadViewer`; `StudentDrillDown` передаёт `hideOuterCard={true}`, чтобы parent Card «Разбор ученика» оставался единственной рамкой. Guardrail соблюдён.
 
 ### TASK-7 — Модалка правки балла (`tutor_score_override`)
 
@@ -143,6 +144,7 @@ Code review для **каждой** задачи проводит **Codex** не
   - `<input type="number">` `font-size: 16px` (iOS auto-zoom).
   - Никаких новых tutor query keys вне префикса `['tutor', ...]` (см. `tutorStudentCacheSync.ts`).
 - **Validation:** lint+build+smoke + manual: правка балла, сброс override, refetch detail-страницы.
+- **Status (2026-04-07):** ✅ DONE. Реализовано в `EditScoreDialog.tsx`, `setTutorScoreOverride()` API, backend `PATCH /assignments/:id/students/:sid/tasks/:tid/score-override`. **Follow-up fix (post-review):** инвалидация thread query переведена с prefix `['tutor','homework','thread']` на точный ключ `['tutor','homework','thread', assignmentId, studentId]` (см. `GuidedThreadViewer.tsx:173`). `npm run build` ✅, `npm run smoke-check` ✅.
 
 ### TASK-8 — Telemetry: 4 события через `homeworkTelemetry.ts`
 
@@ -159,6 +161,7 @@ Code review для **каждой** задачи проводит **Codex** не
   - `telegram_reminder_sent_from_results` — payload: `{ assignmentId, studentId, kind }` где `kind: 'remind' | 'praise'`
 - **Guardrails:** нет PII (имени, email, текста сообщения, `task_text`, `ai_feedback`). Все ID — uuid строки. `kind` ограничен enum.
 - **Validation:** lint+build+smoke + manual: открыть DevTools `window.dataLayer`, проверить что все 4 события улетают.
+- **Status (2026-04-07):** ✅ DONE. Все 4 события объявлены в `GuidedTelemetryEvent` union и стреляют в правильных точках вызова: `results_v2_opened` (TutorHomeworkDetail.tsx — useEffect once per id; примечание: `TutorHomeworkResults.tsx` удалён в merge Detail+Results), `drill_down_expanded` (TutorHomeworkDetail.tsx — deduped по `lastDrillTrackedRef`), `manual_score_override_saved` (EditScoreDialog.tsx — `onSuccess`), `telegram_reminder_sent_from_results` (RemindStudentDialog.tsx — после успешного send). Type-safety enforcement: 4 typed payload interfaces + function overloads в `homeworkTelemetry.ts`, `kind` literal type `'remind' | 'praise'`, payload `manual_score_override_saved` обрезан до spec-полей. `npm run build` ✅, `npm run smoke-check` ✅. Manual DevTools verification: все 4 события появляются в `window.dataLayer`.
 
 ### TASK-9 — Регрессионная проверка Safari/iOS + cross-tab consistency
 

@@ -152,6 +152,7 @@ export function StudentDrillDown({
           enabled={true}
           initialTaskFilter={selectedTaskOrder}
           hideTaskFilter={true}
+          hideOuterCard={true}
         />
       </div>
     </div>

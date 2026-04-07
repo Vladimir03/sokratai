@@ -110,10 +110,11 @@ export function EditScoreDialog({
       queryClient.invalidateQueries({
         queryKey: ['tutor', 'homework', 'detail', assignmentId],
       });
-      // Partial key prefix — invalidates `['tutor','homework','thread', *]`
-      // for any open GuidedThreadViewer (we don't need the threadId here).
+      // Precise key — GuidedThreadViewer keys its query by
+      // [..., assignmentId, studentId] (see GuidedThreadViewer.tsx:173).
+      // Avoid prefix invalidation so unrelated viewers don't refetch.
       queryClient.invalidateQueries({
-        queryKey: ['tutor', 'homework', 'thread'],
+        queryKey: ['tutor', 'homework', 'thread', assignmentId, studentId],
       });
 
       toast.success(isReset ? 'Правка сброшена' : 'Балл обновлён');
@@ -182,7 +183,7 @@ export function EditScoreDialog({
           </div>
         </div>
 
-        <DialogFooter className="flex-col gap-2 sm:flex-row sm:justify-between">
+        <DialogFooter className="flex-col gap-2 md:flex-row md:justify-between">
           <div>
             {currentOverride != null ? (
               <Button

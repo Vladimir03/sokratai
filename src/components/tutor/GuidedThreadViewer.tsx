@@ -140,6 +140,7 @@ export function GuidedThreadViewer({
   enabled = true,
   initialTaskFilter = 'all',
   hideTaskFilter = false,
+  hideOuterCard = false,
 }: {
   assignmentId: string;
   studentId: string;
@@ -157,6 +158,12 @@ export function GuidedThreadViewer({
    * duplicate switches that could leave the two surfaces out of sync.
    */
   hideTaskFilter?: boolean;
+  /**
+   * Render without the outer `<Card>` wrapper. Used by `StudentDrillDown` so
+   * we don't get cards-in-cards (parent already wraps the drill-down in a
+   * Card with the «Разбор ученика» title).
+   */
+  hideOuterCard?: boolean;
 }) {
   // Job: Видеть прогресс ученика по ДЗ без дёрганий во время занятия.
   const [taskFilter, setTaskFilter] = useState<number | 'all'>(initialTaskFilter);
@@ -336,12 +343,8 @@ export function GuidedThreadViewer({
     }
   }, [messageText, attachedFile, hiddenNote, isSending, assignmentId, studentId, taskFilter, clearAttachment, getWasAtBottom, queryClient, scrollToBottomIfNeeded, threadQueryKey]);
 
-  return (
-    <Card className="border-dashed">
-      <CardHeader className="pb-3">
-        <CardTitle className="text-sm">Переписка по ДЗ</CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-3">
+  const body = (
+    <div className="space-y-3">
           {threadQuery.isLoading ? (
             <div className="text-xs text-muted-foreground flex items-center gap-2">
               <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -540,7 +543,19 @@ export function GuidedThreadViewer({
               </div>
             </>
           )}
-      </CardContent>
+    </div>
+  );
+
+  if (hideOuterCard) {
+    return body;
+  }
+
+  return (
+    <Card className="border-dashed">
+      <CardHeader className="pb-3">
+        <CardTitle className="text-sm">Переписка по ДЗ</CardTitle>
+      </CardHeader>
+      <CardContent>{body}</CardContent>
     </Card>
   );
 }
