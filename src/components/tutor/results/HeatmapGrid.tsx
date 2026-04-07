@@ -15,10 +15,16 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
 import { hintOveruseThreshold } from '@/lib/homeworkResultsConstants';
-import { getCellStyle } from './heatmapStyles';
+import {
+  getCellStyle,
+  formatScore,
+  formatTotalTime,
+  type StudentDisplayStatus,
+} from './heatmapStyles';
 import type {
   TutorHomeworkAssignmentDetails,
   TutorHomeworkResultsResponse,
+  TutorHomeworkResultsPerStudent,
   DeliveryStatus,
 } from '@/lib/tutorHomeworkApi';
 
@@ -145,6 +151,14 @@ interface HeatmapRowProps {
   expanded: boolean;
   showHintOveruse: boolean;
   hintTotal: number;
+  /**
+   * homework-student-totals TASK-2 — right-side Балл / Подсказки / Время.
+   * All scalars so React.memo shallow comparison stays cheap on 10×26 grids.
+   */
+  totalScore: number;
+  totalMax: number;
+  totalTimeMinutes: number | null;
+  displayStatus: StudentDisplayStatus;
   onToggle: (studentId: string) => void;
   onCellClick?: (studentId: string, taskId: string) => void;
   selectedTaskId: string | null;
@@ -157,6 +171,10 @@ const HeatmapRow = memo(function HeatmapRow({
   expanded,
   showHintOveruse,
   hintTotal,
+  totalScore,
+  totalMax,
+  totalTimeMinutes,
+  displayStatus,
   onToggle,
   onCellClick,
   selectedTaskId,
@@ -218,15 +236,9 @@ const HeatmapRow = memo(function HeatmapRow({
                 </span>
               )}
               <DeliveryBadge status={student.delivery_status} />
-              {showHintOveruse && (
-                <span
-                  title={`Подсказок: ${hintTotal}`}
-                  className="inline-flex items-center gap-1 rounded-full bg-amber-100 text-amber-800 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide"
-                >
-                  <Lightbulb className="h-3 w-3" aria-hidden="true" />
-                  Много подсказок
-                </span>
-              )}
+              {/* Hint overuse signal moved to the new "Подсказки" column
+                  (homework-student-totals TASK-2). Single source of truth so
+                  the same student is not flagged twice on one row. */}
             </div>
           </div>
         </div>
@@ -246,6 +258,58 @@ const HeatmapRow = memo(function HeatmapRow({
           />
         );
       })}
+
+      {/* ─── homework-student-totals TASK-2 — right-side totals ───────────
+          Three additive columns: Балл / Подсказки / Время.
+          - First (Балл) carries `border-l-2` to visually separate task cells
+            from the totals block.
+          - Status-aware rendering per spec AC-2/AC-3/AC-4 + UX decision Q1
+            (in_progress shows «—» for score+hints to avoid the literal "0/Y"
+            being indistinguishable from not_started).
+          - text-sm (14px) on every cell — task guardrail. */}
+
+      {/* Балл */}
+      <td className="border-b border-l-2 border-slate-200 px-3 py-2 align-middle text-right text-sm tabular-nums">
+        {displayStatus === 'completed' && totalMax > 0 ? (
+          <span className="font-semibold text-slate-900">
+            {formatScore(totalScore)}/{formatScore(totalMax)}
+          </span>
+        ) : (
+          <span className="text-slate-400">—</span>
+        )}
+      </td>
+
+      {/* Подсказки */}
+      <td className="border-b border-slate-200 px-2 py-2 align-middle text-right text-sm">
+        {displayStatus === 'completed' ? (
+          showHintOveruse ? (
+            <span
+              title={`Подсказок: ${hintTotal}`}
+              className="inline-flex items-center gap-1 rounded-full bg-amber-100 text-amber-900 px-2 py-0.5 text-sm font-semibold tabular-nums"
+            >
+              <Lightbulb className="h-3 w-3" aria-hidden="true" />
+              {hintTotal}
+            </span>
+          ) : (
+            <span className="text-slate-500 tabular-nums">{hintTotal}</span>
+          )
+        ) : (
+          <span className="text-slate-400">—</span>
+        )}
+      </td>
+
+      {/* Время */}
+      <td className="border-b border-slate-200 px-3 py-2 align-middle text-right text-sm">
+        <span
+          className={cn(
+            displayStatus === 'completed'
+              ? 'text-slate-700 tabular-nums'
+              : 'text-slate-400',
+          )}
+        >
+          {formatTotalTime(totalTimeMinutes, displayStatus)}
+        </span>
+      </td>
     </tr>
   );
 });
@@ -316,6 +380,19 @@ export function HeatmapGrid({
     return map;
   }, [per_student]);
 
+  // homework-student-totals TASK-2: full per_student lookup so each row can
+  // pull `total_score`, `total_max`, `total_time_minutes`, `submitted` in one
+  // hop. Kept separate from `taskScoresByStudent` / `hintTotalByStudent` to
+  // minimize the diff against TASK-5/6 — those two memoized maps stay
+  // referentially stable when only totals change.
+  const perStudentByStudent = useMemo(() => {
+    const map = new Map<string, TutorHomeworkResultsPerStudent>();
+    for (const entry of per_student ?? []) {
+      map.set(entry.student_id, entry);
+    }
+    return map;
+  }, [per_student]);
+
   const taskCount = tasks.length;
   const threshold = taskCount > 0 ? hintOveruseThreshold(taskCount) : Infinity;
 
@@ -369,6 +446,10 @@ export function HeatmapGrid({
               {tasks.map((task) => (
                 <col key={task.id} style={{ width: '56px' }} />
               ))}
+              {/* homework-student-totals TASK-2 — Балл / Подсказки / Время */}
+              <col style={{ width: '90px' }} />
+              <col style={{ width: '60px' }} />
+              <col style={{ width: '90px' }} />
             </colgroup>
             <thead>
               <tr>
@@ -388,6 +469,33 @@ export function HeatmapGrid({
                     №{task.order_num}
                   </th>
                 ))}
+
+                {/* ─── homework-student-totals TASK-2 — totals headers ───
+                    Not sticky (right edge of the table). The first one
+                    (Балл) carries `border-l-2` to separate the totals
+                    block from the task cells. Lightbulb header is
+                    icon-only — `aria-label` provides the screen-reader
+                    name, `title` provides the desktop hover hint. */}
+                <th
+                  scope="col"
+                  className="border-b border-l-2 border-slate-200 text-right px-3 py-2 text-[11px] font-semibold tabular-nums text-slate-600 uppercase tracking-wider"
+                >
+                  Балл
+                </th>
+                <th
+                  scope="col"
+                  aria-label="Подсказки"
+                  title="Подсказки"
+                  className="border-b border-slate-200 text-right px-3 py-2 text-slate-600"
+                >
+                  <Lightbulb className="h-3.5 w-3.5 inline" aria-hidden="true" />
+                </th>
+                <th
+                  scope="col"
+                  className="border-b border-slate-200 text-right px-3 py-2 text-[11px] font-semibold text-slate-600 uppercase tracking-wider"
+                >
+                  Время
+                </th>
               </tr>
             </thead>
             <tbody>
@@ -397,6 +505,21 @@ export function HeatmapGrid({
                   (EMPTY_TASK_SCORES_MAP as Map<string, { final_score: number; hint_count: number }>);
                 const hintTotal = hintTotalByStudent.get(student.student_id) ?? 0;
                 const showHintOveruse = hintTotal >= threshold;
+
+                // homework-student-totals TASK-2 — derive scalar props for the
+                // right-side Балл / Подсказки / Время columns. All values are
+                // primitives so React.memo on HeatmapRow stays cheap.
+                const summary = perStudentByStudent.get(student.student_id);
+                const totalScore = summary?.total_score ?? 0;
+                const totalMax = summary?.total_max ?? 0;
+                const totalTimeMinutes = summary?.total_time_minutes ?? null;
+                const submitted = summary?.submitted ?? false;
+                const displayStatus: StudentDisplayStatus = submitted
+                  ? 'completed'
+                  : totalTimeMinutes !== null
+                    ? 'in_progress'
+                    : 'not_started';
+
                 return (
                   <HeatmapRow
                     key={student.student_id}
@@ -406,6 +529,10 @@ export function HeatmapGrid({
                     expanded={expandedStudentId === student.student_id}
                     showHintOveruse={showHintOveruse}
                     hintTotal={hintTotal}
+                    totalScore={totalScore}
+                    totalMax={totalMax}
+                    totalTimeMinutes={totalTimeMinutes}
+                    displayStatus={displayStatus}
                     onToggle={onToggleExpand}
                     onCellClick={onCellClick}
                     selectedTaskId={

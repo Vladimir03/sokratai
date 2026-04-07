@@ -484,6 +484,19 @@ function computeFinalScore(ts: TaskStateScoreFields, maxScore: number): number {
   return 0;
 }
 
+/**
+ * Wall-clock minutes between the first and last `homework_tutor_thread_messages.created_at`
+ * for a student. `Math.max(1, …)` ensures any non-empty thread reports ≥1 min.
+ * Returns `null` when there is no thread or no messages (frontend renders «—»).
+ * See: docs/delivery/features/homework-student-totals/spec.md AC-9.
+ */
+function computeTotalMinutes(times: { first: string; last: string } | undefined): number | null {
+  if (!times) return null;
+  const diffMs = new Date(times.last).getTime() - new Date(times.first).getTime();
+  if (!Number.isFinite(diffMs) || diffMs < 0) return null;
+  return Math.max(1, Math.round(diffMs / 60000));
+}
+
 // ─── Endpoint: GET /assignments ──────────────────────────────────────────────
 
 async function handleListAssignments(
@@ -2072,6 +2085,9 @@ async function handleGetResults(
     hint_total: number;
     needs_attention: boolean;
     task_scores: { task_id: string; final_score: number; hint_count: number; has_override: boolean }[];
+    total_score: number;
+    total_max: number;
+    total_time_minutes: number | null;
   }[] = [];
 
   // student_id → task_id → { final_score, hint_count, has_override }. Built
@@ -2201,11 +2217,67 @@ async function handleGetResults(
       }
     }
 
+    // ─── Wall-clock time aggregation (homework-student-totals AC-9) ──────────
+    // Fetch ALL threads (any status — completed, active, abandoned) to populate
+    // total_time_minutes for both submitted and in-progress students. This is
+    // ONE round-trip independent of student count; the second round-trip below
+    // (homework_tutor_thread_messages) uses the existing
+    // idx_thread_messages_thread index on (thread_id, created_at).
+    const { data: allThreads } = await db
+      .from("homework_tutor_threads")
+      .select("id, student_assignment_id")
+      .in("student_assignment_id", saIds);
+
+    const timeByStudent: Record<string, { first: string; last: string }> = {};
+    const allThreadIds = (allThreads ?? []).map((t) => t.id);
+
+    if (allThreadIds.length > 0) {
+      const { data: msgRows } = await db
+        .from("homework_tutor_thread_messages")
+        .select("thread_id, created_at")
+        .in("thread_id", allThreadIds);
+
+      // thread_id → {first, last} (single pass over rows)
+      const threadTimes: Record<string, { first: string; last: string }> = {};
+      for (const m of msgRows ?? []) {
+        const created = m.created_at as string;
+        const t = threadTimes[m.thread_id as string];
+        if (!t) {
+          threadTimes[m.thread_id as string] = { first: created, last: created };
+        } else {
+          if (created < t.first) t.first = created;
+          if (created > t.last) t.last = created;
+        }
+      }
+
+      // thread_id → student_id (defensive accumulation if a student somehow
+      // has multiple threads — DB invariant is UNIQUE(student_assignment_id),
+      // but mirror the existing acc-pattern in this function).
+      for (const th of allThreads ?? []) {
+        const sid = studentBySa[th.student_assignment_id as string];
+        if (!sid) continue;
+        const tt = threadTimes[th.id as string];
+        if (!tt) continue;
+        const cur = timeByStudent[sid];
+        if (!cur) {
+          timeByStudent[sid] = { first: tt.first, last: tt.last };
+        } else {
+          if (tt.first < cur.first) cur.first = tt.first;
+          if (tt.last > cur.last) cur.last = tt.last;
+        }
+      }
+    }
+
+    // total_max is stable across all students (Σ max_score over ALL tasks of
+    // the assignment). Guard: empty assignment → 0/0 (frontend renders «—»).
+    const totalMaxForAll = assignmentMaxScoreTotal;
+
     // Build per_student in the same order as student_assignments. Students
     // without a completed thread → submitted=false, scores=0, max=assignment
     // total (so the frontend can still render a sensible "0 / N").
     for (const sa of studentAssignments) {
       const acc = studentAcc[sa.student_id];
+      const totalTimeMinutes = computeTotalMinutes(timeByStudent[sa.student_id]);
       if (acc) {
         const lowScore = acc.max > 0 && acc.final < 0.3 * acc.max;
         const overuse = acc.hints >= hintOveruseThreshold;
@@ -2225,6 +2297,9 @@ async function handleGetResults(
           hint_total: acc.hints,
           needs_attention: lowScore || overuse,
           task_scores: taskScores,
+          total_score: totalMaxForAll === 0 ? 0 : Math.round(acc.final * 100) / 100,
+          total_max: totalMaxForAll,
+          total_time_minutes: totalTimeMinutes,
         });
       } else {
         perStudent.push({
@@ -2235,6 +2310,9 @@ async function handleGetResults(
           hint_total: 0,
           needs_attention: false,
           task_scores: [],
+          total_score: 0,
+          total_max: totalMaxForAll,
+          total_time_minutes: totalTimeMinutes,
         });
       }
     }

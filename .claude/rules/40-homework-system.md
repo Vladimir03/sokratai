@@ -99,6 +99,61 @@ Audit/normalize/optimize/harden pass на `/tutor/homework` и `/tutor/homework/
 - **`TaskImagePreview` ZoomIn button — `aria-label="Открыть фото задачи во весь экран"`** + `title` (desktop hover). Декоративный hover-overlay span — `aria-hidden`
 - **`MaterialsList.handleOpen` — `toast.error('Не удалось открыть материал')` на ОБА failure path-а** (catch + null url). `alert()` запрещён — рвёт toast-driven UX, блокирует viewport на mobile, не локализуется
 
+### Homework Student Totals — backend contract (TASK-1, 2026-04-08)
+
+`handleGetResults` возвращает в каждом `per_student` четыре additive-поля для правых колонок HeatmapGrid (фича `homework-student-totals`):
+
+- `total_score: number` — Σ `final_score` через **существующий** `computeFinalScore(ts, maxScore)`. Не дублировать формулу. `0` для не сдавших и при `total_max === 0`.
+- `total_max: number` — `assignmentMaxScoreTotal`, считается один раз вне цикла per_student. Одинаков для всех учеников данного ДЗ. `0` только если у ДЗ нет задач.
+- `hint_total: number` — уже существовал, оставлен как есть (= `acc.hints`).
+- `total_time_minutes: number | null` — wall-clock минуты между min/max `created_at` по всем тредам ученика **любого статуса** (completed И in-progress). `Math.max(1, round(diff_ms/60000))`. `null` если нет thread/messages. Фронт использует связку `submitted` + `total_time_minutes` для 3-state рендеринга (`{N} мин` / `— в процессе` / `—`).
+
+**Time агрегация — два round-trip'а, без N+1 и без RPC** (консистентно с остальным файлом — `handleGetResults` нигде не использует RPC):
+1. `homework_tutor_threads` (all statuses) `.in('student_assignment_id', saIds)` — получить `(id, student_assignment_id)`.
+2. `homework_tutor_thread_messages` `.select('thread_id, created_at').in('thread_id', allThreadIds)` — группируется в JS в `Map<thread_id, {first, last}>`, затем через `studentBySa` мапится в `Map<student_id, {first, last}>`.
+
+Использует индекс `idx_thread_messages_thread (thread_id, created_at)` (миграция `20260306100000_guided_homework_threads.sql:46`). EXPLAIN должен показывать `Bitmap Index Scan` / `Index Scan`, **не** `Seq Scan`.
+
+**Helper:** `computeTotalMinutes(times)` — локальный в `supabase/functions/homework-api/index.ts`, рядом с `computeFinalScore`. Защитный `!Number.isFinite(diffMs) || diffMs < 0 → null`.
+
+**TS-тип:** `TutorHomeworkResultsPerStudent` в `src/lib/tutorHomeworkApi.ts` расширен required additive-полями `total_score`, `total_max`, `total_time_minutes` (+ JSDoc с правилами 3-state рендеринга). `hint_total` не трогали.
+
+**Инвариант:** `total_max` одинаков у всех `per_student` одного response — не пересчитывать per-student.
+
+Спека: `docs/delivery/features/homework-student-totals/spec.md`.
+
+### Homework Student Totals — frontend (TASK-2, 2026-04-08)
+
+Три правые колонки в `HeatmapGrid` — Балл / Подсказки / Время. Рендерятся в том же `<table>`, что и матрица задач, после task cells, в том же горизонтальном скролле.
+
+**heatmapStyles.ts — single source of truth для формата времени:**
+- Экспортирует тип `StudentDisplayStatus = 'completed' | 'in_progress' | 'not_started'`
+- Экспортирует `formatTotalTime(minutes: number | null, status: StudentDisplayStatus): string` — ветки `not_started → '—'`, `in_progress → '— в процессе'`, `completed + null → '—'`, `completed + N → '${N} мин'`. **НЕ дублировать** — только импортировать отсюда в `HeatmapGrid`
+
+**HeatmapGrid `<colgroup>`:** после task `<col>` добавлены три: `90px` (Балл), `60px` (Подсказки), `90px` (Время). Итог table width = `220 + 56·N + 240` px. `width: max-content` + `table-layout: fixed` — правила sticky name column не меняются
+
+**HeatmapGrid `<thead>`:** три новых `<th>`, **не sticky** (правый край). Все `text-right`. Первый (Балл) имеет `border-l-2 border-slate-200` — визуальный сепаратор между «задачами» и «итого». Заголовок «Подсказки» — Lucide `Lightbulb` icon с `aria-label="Подсказки"` + `title="Подсказки"` (иконка сама по себе не accessible name)
+
+**HeatmapRow props:** `totalScore`, `totalMax`, `totalTimeMinutes`, `displayStatus` — все scalar, `React.memo` shallow comparison остаётся стабильной. Деривация `displayStatus` — в map-loop `HeatmapGrid`, не внутри `HeatmapRow`:
+- `submitted=true → 'completed'`
+- `submitted=false && total_time_minutes !== null → 'in_progress'`
+- иначе `'not_started'`
+
+**`perStudentByStudent: Map<student_id, TutorHomeworkResultsPerStudent>`** — новый `useMemo` рядом с существующими `taskScoresByStudent` и `hintTotalByStudent`. Не консолидировать с ними — это поломает TASK-5/6 memoization, а дополнительный один проход по `per_student` дешевле регрессии
+
+**Рендер трёх `<td>`:**
+- Балл — `completed && totalMax > 0` → `formatScore(totalScore)/formatScore(totalMax)` в `font-semibold text-slate-900`; иначе `—` в `text-slate-400`. `border-l-2 border-slate-200`
+- Подсказки — `completed` + `showHintOveruse` → amber chip (`bg-amber-100 text-amber-900` + Lucide `Lightbulb` 12px + `{hintTotal}`); `completed` без overuse → `{hintTotal}` в `text-slate-500`; иначе `—`. Константа `hintOveruseThreshold(taskCount)` — **одна** на весь HeatmapGrid, не создавать вторую
+- Время — `formatTotalTime(totalTimeMinutes, displayStatus)`. Цвет: `completed` → `text-slate-700 tabular-nums`; `in_progress` / `not_started` → `text-slate-400`
+
+**Все новые `<td>` используют `text-sm` (14px) + `tabular-nums`.** `text-xs` из оригинальной спеки отвергнут — 14px минимум для читаемости и для защиты от iOS auto-zoom в будущем (если `<td>` станут interactive)
+
+**Чип «Много подсказок» в sticky name column удалён.** Единственный визуальный сигнал hint overuse теперь — amber chip в колонке «Подсказки». Это single source of truth, не дублируется
+
+**Backend-gap (UX-отклонение от spec AC-4):** для `in_progress` студентов Балл и Подсказки показывают `—`, а не текущие агрегаты. Причина: backend (`handleGetResults`) возвращает `total_score=0`, `hint_total=0` для `submitted=false` — литеральный `0/14` неотличим от `not_started`. Исправление — P1, одновременно с backend-апгрейдом на партиальные агрегаты для in-progress. При изменении backend frontend должен обновить ветку `displayStatus === 'in_progress'` в `HeatmapRow`
+
+Спека: `docs/delivery/features/homework-student-totals/spec.md` (P0-2 ✅ Done 2026-04-08).
+
 ### HeatmapGrid (Results v2 TASK-5, 2026-04-07)
 
 `src/components/tutor/results/HeatmapGrid.tsx` — единая таблица students × tasks. **Заменил** локальный `StudentsList` в `TutorHomeworkDetail.tsx`. Локальный `DeliveryBadge` (раньше жил в Detail) **переехал внутрь** HeatmapGrid — других потребителей нет, не дублировать. Phase 2 спеки: `docs/delivery/features/homework-results-v2/spec.md` (P0-3, AC-2). TASK-3 (header), TASK-4 (action block), TASK-5 (heatmap), TASK-6 (drill-down) ✅ done.

@@ -525,6 +525,37 @@ export interface TutorHomeworkResultsPerStudent {
     /** Original AI-evaluated score, independent of tutor override. */
     ai_score?: number | null;
   }[];
+
+  /**
+   * Σ final_score across all completed-thread task_states for this student,
+   * computed via the same `computeFinalScore` priority chain as
+   * `final_score_total` (no formula duplication). Always 0 for not-submitted
+   * students. 0 if `total_max === 0` (empty assignment guard).
+   *
+   * Source: `homework-student-totals` spec AC-9 / P0-1.
+   */
+  total_score: number;
+
+  /**
+   * Σ max_score across ALL tasks of the assignment (NOT per task_states).
+   * Stable per assignment — same value for every student. 0 only if the
+   * assignment has no tasks (empty-assignment guard).
+   */
+  total_max: number;
+
+  /**
+   * Wall-clock minutes from the first to the last `homework_tutor_thread_messages.created_at`
+   * across the student's threads (any status — completed OR in-progress),
+   * rounded with `Math.max(1, round(diff_ms / 60000))`. `null` if the student
+   * has no thread or no messages.
+   *
+   * Frontend (`HeatmapGrid` TASK-2) uses this together with `submitted` to
+   * derive 3-state rendering:
+   * - `submitted=true`                              → `{N} мин`
+   * - `submitted=false, total_time_minutes !== null` → «— в процессе»
+   * - `submitted=false, total_time_minutes === null` → «—»
+   */
+  total_time_minutes: number | null;
 }
 
 // ─── Manual score override (Homework Results v2 P0-5 / AC-5) ─────────────────
