@@ -28,7 +28,8 @@ type GuidedTelemetryEvent =
   // Homework Results v2 — AC-10 telemetry surface (no PII).
   | 'results_v2_opened'
   | 'telegram_reminder_sent_from_results'
-  | 'drill_down_expanded';
+  | 'drill_down_expanded'
+  | 'manual_score_override_saved';
 
 type GuidedTelemetryPayload = Record<string, string | number | boolean | null | undefined>;
 

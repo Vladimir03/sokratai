@@ -205,7 +205,7 @@ For architecture overview see: docs/delivery/engineering/architecture/README.md
 - Cell click (TASK-6 ✅): `handleCellClick(studentId, taskId)` → expand student + set `drillDownTaskId`. `e.stopPropagation()` обязателен. `StudentDrillDown` заменяет прямой `GuidedThreadViewer` в Card «Разбор ученика»
 - `getCellStyle` + `formatScore` — вынесены в `src/components/tutor/results/heatmapStyles.ts` (избегает react-refresh warning). **НЕ дублировать** эти helpers — импортировать из heatmapStyles.ts
 - `GuidedThreadViewer` props (additive): `initialTaskFilter?: number | 'all'`, `hideTaskFilter?: boolean`. `hideTaskFilter=true` в `StudentDrillDown` скрывает дублирующий pill-ряд
-- TASK-3 (header), TASK-4 (action block), TASK-5 (heatmap), TASK-6 (drill-down) ✅ done. TASK-7..9 (edit-score modal + telemetry + QA) — отдельные итерации
+- TASK-3 (header), TASK-4 (action block), TASK-5 (heatmap), TASK-6 (drill-down), TASK-7 (edit-score modal) ✅ done. TASK-8..9 (telemetry audit + QA) — отдельные итерации
 
 ## Известные хрупкие области
 

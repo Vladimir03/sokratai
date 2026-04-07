@@ -2071,14 +2071,14 @@ async function handleGetResults(
     max_score_total: number;
     hint_total: number;
     needs_attention: boolean;
-    task_scores: { task_id: string; final_score: number; hint_count: number }[];
+    task_scores: { task_id: string; final_score: number; hint_count: number; has_override: boolean }[];
   }[] = [];
 
-  // student_id → task_id → { final_score, hint_count }. Built alongside the
-  // aggregate accumulator so the per_student heatmap cells and the totals use
-  // the same computeFinalScore priority chain. Only submitted students get an
-  // entry — not-submitted students receive `task_scores: []` below.
-  const taskScoresByStudent: Record<string, Record<string, { final_score: number; hint_count: number }>> = {};
+  // student_id → task_id → { final_score, hint_count, has_override }. Built
+  // alongside the aggregate accumulator so the per_student heatmap cells and
+  // the totals use the same computeFinalScore priority chain. Only submitted
+  // students get an entry — not-submitted students receive `task_scores: []`.
+  const taskScoresByStudent: Record<string, Record<string, { final_score: number; hint_count: number; has_override: boolean }>> = {};
 
   const { data: studentAssignments } = await db
     .from("homework_tutor_student_assignments")
@@ -2148,6 +2148,7 @@ async function handleGetResults(
             taskScoresByStudent[studentId][ts.task_id] = {
               final_score: Math.round(finalScore * 100) / 100,
               hint_count: hintCount,
+              has_override: ts.tutor_score_override != null,
             };
           }
 
@@ -2204,6 +2205,7 @@ async function handleGetResults(
           task_id,
           final_score: cell.final_score,
           hint_count: cell.hint_count,
+          has_override: cell.has_override,
         }));
         perStudent.push({
           student_id: sa.student_id,
@@ -2262,6 +2264,151 @@ async function handleGetResults(
   });
 
   return jsonOk(cors, { summary, per_task: perTask, per_student: perStudent });
+}
+
+// ─── Endpoint: PATCH /assignments/:id/students/:sid/tasks/:tid/score-override
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// Manual score override (Homework Results v2 P0-5 / AC-5). Tutor sets a score
+// for a single (student, task) pair without touching ai_score / ai_score_comment.
+// `final_score = COALESCE(tutor_score_override, ai_score)` is computed via the
+// shared `computeFinalScore` helper — never duplicate the priority chain here.
+//
+// Reset = same handler with `tutor_score_override: null`.
+async function handleSetTutorScoreOverride(
+  db: SupabaseClient,
+  tutorUserId: string,
+  assignmentId: string,
+  studentId: string,
+  taskId: string,
+  body: Record<string, unknown>,
+  cors: Record<string, string>,
+): Promise<Response> {
+  if (!isUUID(assignmentId) || !isUUID(studentId) || !isUUID(taskId)) {
+    return jsonError(cors, 400, "INVALID_ID", "Invalid id format");
+  }
+
+  const assignmentOrErr = await getOwnedAssignmentOrThrow(db, assignmentId, tutorUserId, cors);
+  if (assignmentOrErr instanceof Response) return assignmentOrErr;
+
+  // Validate task belongs to this assignment & get max_score for range check.
+  const { data: task, error: taskErr } = await db
+    .from("homework_tutor_tasks")
+    .select("id, max_score, assignment_id")
+    .eq("id", taskId)
+    .maybeSingle();
+  if (taskErr || !task || task.assignment_id !== assignmentId) {
+    return jsonError(cors, 404, "TASK_NOT_FOUND", "Task not found");
+  }
+  const maxScore = Number(task.max_score ?? 0);
+
+  // Validate body.
+  const rawOverride = body?.tutor_score_override;
+  let overrideValue: number | null;
+  if (rawOverride === null) {
+    overrideValue = null;
+  } else if (typeof rawOverride === "number" && Number.isFinite(rawOverride)) {
+    if (rawOverride < 0 || rawOverride > maxScore) {
+      return jsonError(cors, 400, "VALIDATION", `tutor_score_override must be in [0, ${maxScore}]`);
+    }
+    if (Math.round(rawOverride * 2) !== rawOverride * 2) {
+      return jsonError(cors, 400, "VALIDATION", "tutor_score_override must be a multiple of 0.5");
+    }
+    overrideValue = rawOverride;
+  } else {
+    return jsonError(cors, 400, "VALIDATION", "tutor_score_override must be a number or null");
+  }
+
+  let commentValue: string | null = null;
+  const rawComment = body?.tutor_score_override_comment;
+  if (overrideValue !== null && typeof rawComment === "string") {
+    const trimmed = rawComment.trim();
+    if (trimmed.length > 1000) {
+      return jsonError(cors, 400, "VALIDATION", "comment too long (max 1000)");
+    }
+    commentValue = trimmed.length > 0 ? trimmed : null;
+  }
+
+  // Resolve thread for (assignment, student) → task_state row.
+  const { data: sa, error: saErr } = await db
+    .from("homework_tutor_student_assignments")
+    .select("id")
+    .eq("assignment_id", assignmentId)
+    .eq("student_id", studentId)
+    .maybeSingle();
+  if (saErr || !sa) {
+    return jsonError(cors, 404, "STUDENT_NOT_ASSIGNED", "Student not assigned");
+  }
+
+  const { data: thread, error: threadErr } = await db
+    .from("homework_tutor_threads")
+    .select("id")
+    .eq("student_assignment_id", sa.id)
+    .maybeSingle();
+  if (threadErr || !thread) {
+    return jsonError(cors, 404, "THREAD_NOT_FOUND", "Guided thread not found");
+  }
+
+  const { data: existing, error: tsErr } = await db
+    .from("homework_tutor_task_states")
+    .select("id, ai_score, tutor_score_override, earned_score, status, hint_count, attempts, thread_id, task_id")
+    .eq("thread_id", thread.id)
+    .eq("task_id", taskId)
+    .maybeSingle();
+  if (tsErr || !existing) {
+    return jsonError(cors, 404, "TASK_STATE_NOT_FOUND", "Task state not found");
+  }
+
+  const updatePayload: Record<string, unknown> = overrideValue === null
+    ? {
+        tutor_score_override: null,
+        tutor_score_override_comment: null,
+        tutor_score_override_at: null,
+        tutor_score_override_by: null,
+      }
+    : {
+        tutor_score_override: overrideValue,
+        tutor_score_override_comment: commentValue,
+        tutor_score_override_at: new Date().toISOString(),
+        tutor_score_override_by: tutorUserId,
+      };
+
+  const { data: updated, error: updErr } = await db
+    .from("homework_tutor_task_states")
+    .update(updatePayload)
+    .eq("id", existing.id)
+    .select("id, ai_score, tutor_score_override, tutor_score_override_comment, tutor_score_override_at, earned_score, status, hint_count, attempts, thread_id, task_id")
+    .maybeSingle();
+  if (updErr || !updated) {
+    console.error("homework_api_request_error", { route: "PATCH score-override", error: updErr?.message });
+    return jsonError(cors, 500, "DB_ERROR", "Failed to update task state");
+  }
+
+  const finalScore = computeFinalScore(updated as TaskStateScoreFields, maxScore);
+
+  console.log("homework_api_request_success", {
+    route: "PATCH /assignments/:id/students/:sid/tasks/:tid/score-override",
+    tutor_id: tutorUserId,
+    assignment_id: assignmentId,
+    student_id: studentId,
+    task_id: taskId,
+    is_reset: overrideValue === null,
+  });
+
+  return jsonOk(cors, {
+    ok: true,
+    task_state: {
+      id: updated.id,
+      thread_id: updated.thread_id,
+      task_id: updated.task_id,
+      ai_score: updated.ai_score,
+      tutor_score_override: updated.tutor_score_override,
+      tutor_score_override_comment: updated.tutor_score_override_comment,
+      tutor_score_override_at: updated.tutor_score_override_at,
+      final_score: Math.round(finalScore * 100) / 100,
+      max_score: maxScore,
+    },
+  });
 }
 
 // ─── Endpoint: GET /templates ────────────────────────────────────────────────
@@ -4741,6 +4888,19 @@ Deno.serve(async (req: Request): Promise<Response> => {
     // GET /assignments/:id/results
     if (seg.length === 3 && seg[0] === "assignments" && seg[2] === "results" && route.method === "GET") {
       return await handleGetResults(db, userId, seg[1], cors);
+    }
+
+    // PATCH /assignments/:id/students/:sid/tasks/:tid/score-override
+    if (
+      seg.length === 7 &&
+      seg[0] === "assignments" &&
+      seg[2] === "students" &&
+      seg[4] === "tasks" &&
+      seg[6] === "score-override" &&
+      route.method === "PATCH"
+    ) {
+      const body = await parseJsonBody(req);
+      return await handleSetTutorScoreOverride(db, userId, seg[1], seg[3], seg[5], body, cors);
     }
 
     // POST /assignments/:id/materials

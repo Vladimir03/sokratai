@@ -512,7 +512,54 @@ export interface TutorHomeworkResultsPerStudent {
    *
    * For not-submitted students this is always `[]`.
    */
-  task_scores: { task_id: string; final_score: number; hint_count: number }[];
+  task_scores: {
+    task_id: string;
+    final_score: number;
+    hint_count: number;
+    /**
+     * True if `tutor_score_override` is set on the underlying task_state.
+     * Drives the small "правка репетитора" indicator on TaskMiniCard
+     * (Homework Results v2 P0-5). `final_score` already reflects the override.
+     */
+    has_override?: boolean;
+  }[];
+}
+
+// ─── Manual score override (Homework Results v2 P0-5 / AC-5) ─────────────────
+
+export interface SetTutorScoreOverrideResponse {
+  ok: true;
+  task_state: {
+    id: string;
+    thread_id: string;
+    task_id: string;
+    ai_score: number | null;
+    tutor_score_override: number | null;
+    tutor_score_override_comment: string | null;
+    tutor_score_override_at: string | null;
+    final_score: number;
+    max_score: number;
+  };
+}
+
+export async function setTutorScoreOverride(params: {
+  assignmentId: string;
+  studentId: string;
+  taskId: string;
+  tutorScoreOverride: number | null;
+  comment?: string | null;
+}): Promise<SetTutorScoreOverrideResponse> {
+  const { assignmentId, studentId, taskId, tutorScoreOverride, comment } = params;
+  return requestHomeworkApi<SetTutorScoreOverrideResponse>(
+    `/assignments/${encodeURIComponent(assignmentId)}/students/${encodeURIComponent(studentId)}/tasks/${encodeURIComponent(taskId)}/score-override`,
+    {
+      method: 'PATCH',
+      body: JSON.stringify({
+        tutor_score_override: tutorScoreOverride,
+        tutor_score_override_comment: tutorScoreOverride === null ? null : (comment ?? null),
+      }),
+    },
+  );
 }
 
 export interface TutorHomeworkResultsResponse {
