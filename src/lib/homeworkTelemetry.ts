@@ -33,6 +33,40 @@ type GuidedTelemetryEvent =
 
 type GuidedTelemetryPayload = Record<string, string | number | boolean | null | undefined>;
 
+// ─── AC-10 typed payloads (no PII — ids + numbers only) ──────────────────────
+// Each interface extends GuidedTelemetryPayload so it is assignable to the
+// implementation signature. The `kind` literal union enforces allowed values
+// at compile time without needing a runtime enum.
+
+interface ResultsV2OpenedPayload extends Record<string, string | number | boolean | null | undefined> {
+  assignmentId: string;
+  submittedCount: number;
+  totalCount: number;
+}
+
+interface DrillDownExpandedPayload extends Record<string, string | number | boolean | null | undefined> {
+  assignmentId: string;
+  studentId: string;
+  firstProblemTaskOrder: number | null;
+}
+
+interface ManualScoreOverrideSavedPayload extends Record<string, string | number | boolean | null | undefined> {
+  assignmentId: string;
+  taskId: string;
+  aiScore: number | null;
+  tutorScore: number | null;
+  hadComment: boolean;
+}
+
+interface TelegramReminderSentPayload extends Record<string, string | number | boolean | null | undefined> {
+  assignmentId: string;
+  studentId: string;
+  /** Constrained to known reminder kinds — no free-form strings. */
+  kind: 'remind' | 'praise';
+  /** Actual channel used; may differ from tab selection when backend auto-cascades. */
+  channel?: string;
+}
+
 interface DataLayerWindow extends Window {
   dataLayer?: Array<Record<string, unknown>>;
   gtag?: (...args: unknown[]) => void;
@@ -47,6 +81,11 @@ function toSafePayload(payload: GuidedTelemetryPayload): Record<string, unknown>
   return safe;
 }
 
+export function trackGuidedHomeworkEvent(event: 'results_v2_opened', payload: ResultsV2OpenedPayload): void;
+export function trackGuidedHomeworkEvent(event: 'drill_down_expanded', payload: DrillDownExpandedPayload): void;
+export function trackGuidedHomeworkEvent(event: 'manual_score_override_saved', payload: ManualScoreOverrideSavedPayload): void;
+export function trackGuidedHomeworkEvent(event: 'telegram_reminder_sent_from_results', payload: TelegramReminderSentPayload): void;
+export function trackGuidedHomeworkEvent(event: GuidedTelemetryEvent, payload?: GuidedTelemetryPayload): void;
 export function trackGuidedHomeworkEvent(
   event: GuidedTelemetryEvent,
   payload: GuidedTelemetryPayload = {},

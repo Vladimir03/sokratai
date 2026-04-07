@@ -97,12 +97,10 @@ export function EditScoreDialog({
       const isReset = mode === 'reset';
       trackGuidedHomeworkEvent('manual_score_override_saved', {
         assignmentId,
-        studentId,
         taskId: task.id,
         aiScore: aiScore ?? null,
-        tutorScore: isReset ? null : numericValue,
-        isReset,
-        hadComment: !isReset && comment.trim().length > 0,
+        tutorScore: mode === 'reset' ? null : numericValue,
+        hadComment: mode !== 'reset' && comment.trim().length > 0,
       });
 
       // Invalidate the three React Query keys required by AC-5.
