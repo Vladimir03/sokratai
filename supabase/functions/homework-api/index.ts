@@ -571,7 +571,7 @@ async function handleListAssignments(
         .in("assignment_id", assignmentIds);
 
       const guidedTaskMaxScore: Record<string, number> = {};
-      const totalMaxByAssignment: Record<string, number> = {};
+      totalMaxByAssignment = {};
       for (const t of guidedTasks ?? []) {
         guidedTaskMaxScore[t.id] = t.max_score ?? 1;
         totalMaxByAssignment[t.assignment_id] =
