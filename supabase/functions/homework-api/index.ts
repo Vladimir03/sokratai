@@ -2145,11 +2145,19 @@ async function handleGetResults(
             if (!taskScoresByStudent[studentId]) {
               taskScoresByStudent[studentId] = {};
             }
+            // Compute the score that would apply WITHOUT the tutor override,
+            // so the edit dialog can show "AI: X/Y" even when an override exists.
+            const scoreWithoutOverride =
+              ts.ai_score != null ? Math.round(Number(ts.ai_score) * 100) / 100
+              : ts.earned_score != null ? Math.round(Number(ts.earned_score) * 100) / 100
+              : ts.status === "completed" ? maxScore
+              : 0;
+
             taskScoresByStudent[studentId][ts.task_id] = {
               final_score: Math.round(finalScore * 100) / 100,
               hint_count: hintCount,
               has_override: ts.tutor_score_override != null,
-              ai_score: ts.ai_score != null ? Math.round(Number(ts.ai_score) * 100) / 100 : null,
+              ai_score: scoreWithoutOverride,
             };
           }
 
