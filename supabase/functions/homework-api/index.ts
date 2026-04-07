@@ -1830,9 +1830,17 @@ async function handleRemindStudent(
   // ── Try Telegram first (skipped if tutor picked email explicitly) ────────
   if (chatId != null && channelPreference !== "email") {
     try {
+      const appUrl =
+        Deno.env.get("PUBLIC_APP_URL")?.trim().replace(/\/$/, "") ??
+        "https://sokratai.lovable.app";
+      const homeworkUrl = `${appUrl}/homework/${assignmentId}`;
+      const textWithLink =
+        `${escapeHtmlEntities(message)}\n\n<a href="${escapeHtmlEntities(homeworkUrl)}">Открыть ДЗ</a>`;
+
       const payload: Record<string, unknown> = {
         chat_id: chatId,
-        text: message, // plain text — tutor authored, no HTML parse_mode
+        text: textWithLink,
+        parse_mode: "HTML",
       };
 
       let lastResp: Response | null = null;
