@@ -19,6 +19,8 @@ export interface TutorHomeworkAssignmentListItem {
   assigned_count: number;
   submitted_count: number;
   avg_score: number | null;
+  /** Sum of max_score for all tasks in this assignment. Used to display "X/Y" format. */
+  max_score_total?: number | null;
   delivered_count?: number;
   not_connected_count?: number;
 }
@@ -499,6 +501,18 @@ export interface TutorHomeworkResultsPerStudent {
   max_score_total: number;
   hint_total: number;
   needs_attention: boolean;
+  /**
+   * Per-task breakdown for the heatmap grid (Results v2 TASK-5).
+   *
+   * Only tasks with an existing `homework_tutor_task_states` row for this
+   * student appear in the array — absence means "не приступал к этой задаче"
+   * and the frontend renders a grey cell with an em-dash. `final_score`
+   * follows the same priority chain as `final_score_total`
+   * (`tutor_score_override → ai_score → earned_score → status fallback`).
+   *
+   * For not-submitted students this is always `[]`.
+   */
+  task_scores: { task_id: string; final_score: number; hint_count: number }[];
 }
 
 export interface TutorHomeworkResultsResponse {

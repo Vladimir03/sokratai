@@ -1,6 +1,11 @@
 import { useState, useCallback, useMemo } from 'react';
 import { Link } from 'react-router-dom';
-import { parseISO, isToday, isPast, isTomorrow, differenceInDays } from 'date-fns';
+import { parseISO } from 'date-fns';
+import {
+  getDeadlineUrgency,
+  URGENCY_CONFIG,
+  formatDeadline,
+} from '@/lib/homeworkDeadline';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -97,67 +102,15 @@ function sortAssignments(
   return sorted;
 }
 
-// ─── Deadline urgency ────────────────────────────────────────────────────────
-
-type DeadlineUrgency = 'overdue' | 'today' | 'soon' | 'normal' | 'none';
-
-function getDeadlineUrgency(deadline: string | null): DeadlineUrgency {
-  if (!deadline) return 'none';
-  try {
-    const d = parseISO(deadline);
-    if (isNaN(d.getTime())) return 'none';
-    if (isPast(d) && !isToday(d)) return 'overdue';
-    if (isToday(d)) return 'today';
-    if (isTomorrow(d) || differenceInDays(d, new Date()) <= 2) return 'soon';
-    return 'normal';
-  } catch {
-    return 'none';
-  }
-}
-
-const URGENCY_CONFIG: Record<DeadlineUrgency, { label?: string; className: string; iconClassName: string }> = {
-  overdue: {
-    label: 'Просрочено',
-    className: 'text-red-600 font-medium',
-    iconClassName: 'text-red-500',
-  },
-  today: {
-    label: 'Сегодня',
-    className: 'text-amber-600 font-medium',
-    iconClassName: 'text-amber-500',
-  },
-  soon: {
-    className: 'text-amber-500',
-    iconClassName: 'text-amber-400',
-  },
-  normal: {
-    className: '',
-    iconClassName: '',
-  },
-  none: {
-    className: '',
-    iconClassName: '',
-  },
-};
-
 // ─── Utilities ───────────────────────────────────────────────────────────────
 
-function formatDeadline(deadline: string | null): string | null {
-  if (!deadline) return null;
-  try {
-    const d = parseISO(deadline);
-    if (isNaN(d.getTime())) return null;
-    return d.toLocaleDateString('ru-RU', {
-      day: 'numeric',
-      month: 'short',
-    });
-  } catch {
-    return null;
-  }
-}
-
-function formatScore(score: number | null): string {
+function formatScore(score: number | null, maxScore?: number | null): string {
   if (score === null || score === undefined) return '—';
+  if (maxScore != null && maxScore > 0) {
+    const s = Number.isInteger(score) ? String(score) : score.toFixed(1);
+    const m = Number.isInteger(maxScore) ? String(maxScore) : maxScore.toFixed(1);
+    return `${s}/${m}`;
+  }
   return `${Math.round(score)}%`;
 }
 
@@ -280,7 +233,7 @@ function AssignmentCard({ item }: { item: TutorHomeworkAssignmentListItem }) {
             {/* Average score */}
             <span className="flex items-center gap-1" title="Средний балл">
               <BarChart3 className="h-3.5 w-3.5" />
-              {formatScore(item.avg_score)}
+              {formatScore(item.avg_score, item.max_score_total)}
             </span>
 
             {/* Deadline */}

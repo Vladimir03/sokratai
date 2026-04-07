@@ -458,6 +458,32 @@ async function handleCreateAssignment(
   return jsonOk(cors, { assignment_id: assignment.id }, 201);
 }
 
+// ─── Shared score helpers (used by handleListAssignments + handleGetResults) ──
+
+interface TaskStateScoreFields {
+  thread_id: string;
+  task_id: string;
+  earned_score: number | null;
+  status: string | null;
+  ai_score: number | null;
+  tutor_score_override: number | null;
+  hint_count: number | null;
+  attempts: number | null;
+}
+
+/**
+ * Compute the final score for a single task state with the priority chain
+ * tutor_score_override → ai_score → earned_score → status fallback. Used by
+ * both per-student and per-task aggregations so the shapes stay consistent.
+ */
+function computeFinalScore(ts: TaskStateScoreFields, maxScore: number): number {
+  if (ts.tutor_score_override != null) return Number(ts.tutor_score_override);
+  if (ts.ai_score != null) return Number(ts.ai_score);
+  if (ts.earned_score != null) return Number(ts.earned_score);
+  if (ts.status === "completed") return maxScore;
+  return 0;
+}
+
 // ─── Endpoint: GET /assignments ──────────────────────────────────────────────
 
 async function handleListAssignments(
@@ -530,12 +556,12 @@ async function handleListAssignments(
     if (completedThreads && completedThreads.length > 0) {
       const threadIds = completedThreads.map((t) => t.id);
 
-      // Get task states for completed threads (need task_id for max_score lookup)
+      // Get ALL task states for completed threads (no status filter — active tasks
+      // contribute 0/max to the average, matching handleGetResults behaviour).
       const { data: taskStates } = await db
         .from("homework_tutor_task_states")
-        .select("thread_id, task_id, earned_score")
-        .in("thread_id", threadIds)
-        .eq("status", "completed");
+        .select("thread_id, task_id, earned_score, ai_score, tutor_score_override, status")
+        .in("thread_id", threadIds);
 
       // Fetch max_score from tasks for guided assignments
       const { data: guidedTasks } = await db
@@ -544,18 +570,26 @@ async function handleListAssignments(
         .in("assignment_id", assignmentIds);
 
       const guidedTaskMaxScore: Record<string, number> = {};
+      const totalMaxByAssignment: Record<string, number> = {};
       for (const t of guidedTasks ?? []) {
         guidedTaskMaxScore[t.id] = t.max_score ?? 1;
+        totalMaxByAssignment[t.assignment_id] =
+          (totalMaxByAssignment[t.assignment_id] ?? 0) + (t.max_score ?? 1);
       }
 
-      // Aggregate scores per thread: earned vs max_score (not available_score)
+      // Aggregate scores per thread using the same computeFinalScore chain as
+      // handleGetResults so both surfaces show the same value.
       const threadScores: Record<string, { earned: number; maxTotal: number }> = {};
       for (const ts of taskStates ?? []) {
+        const maxScore = guidedTaskMaxScore[ts.task_id] ?? 1;
         if (!threadScores[ts.thread_id]) {
           threadScores[ts.thread_id] = { earned: 0, maxTotal: 0 };
         }
-        threadScores[ts.thread_id].earned += Number(ts.earned_score ?? 0);
-        threadScores[ts.thread_id].maxTotal += guidedTaskMaxScore[ts.task_id] ?? 1;
+        threadScores[ts.thread_id].earned += computeFinalScore(
+          ts as TaskStateScoreFields,
+          maxScore,
+        );
+        threadScores[ts.thread_id].maxTotal += maxScore;
       }
 
       for (const thread of completedThreads) {
@@ -569,7 +603,8 @@ async function handleListAssignments(
           if (!scoreMap[aId]) {
             scoreMap[aId] = { sum: 0, count: 0 };
           }
-          scoreMap[aId].sum += (scores.earned / scores.maxTotal) * 100;
+          // Accumulate absolute score (not %) — divided at the end to get avg.
+          scoreMap[aId].sum += scores.earned;
           scoreMap[aId].count += 1;
         }
       }
@@ -588,9 +623,11 @@ async function handleListAssignments(
     submitted_count: submittedMap[a.id] ?? 0,
     delivered_count: deliveredMap[a.id] ?? 0,
     not_connected_count: notConnectedMap[a.id] ?? 0,
-    avg_score: scoreMap[a.id]
+    // Absolute average score (e.g. 3.2 out of 5). Use max_score_total for display.
+    avg_score: scoreMap[a.id]?.count
       ? Math.round((scoreMap[a.id].sum / scoreMap[a.id].count) * 100) / 100
       : null,
+    max_score_total: totalMaxByAssignment[a.id] ?? null,
   }));
 
   console.log("homework_api_request_success", {
@@ -1988,30 +2025,6 @@ async function handleRemindStudent(
 
 // ─── Endpoint: GET /assignments/:id/results ──────────────────────────────────
 
-interface TaskStateScoreFields {
-  thread_id: string;
-  task_id: string;
-  earned_score: number | null;
-  status: string | null;
-  ai_score: number | null;
-  tutor_score_override: number | null;
-  hint_count: number | null;
-  attempts: number | null;
-}
-
-/**
- * Compute the final score for a single task state with the priority chain
- * tutor_score_override → ai_score → earned_score → status fallback. Used by
- * both per-student and per-task aggregations so the shapes stay consistent.
- */
-function computeFinalScore(ts: TaskStateScoreFields, maxScore: number): number {
-  if (ts.tutor_score_override != null) return Number(ts.tutor_score_override);
-  if (ts.ai_score != null) return Number(ts.ai_score);
-  if (ts.earned_score != null) return Number(ts.earned_score);
-  if (ts.status === "completed") return maxScore;
-  return 0;
-}
-
 async function handleGetResults(
   db: SupabaseClient,
   tutorUserId: string,
@@ -2057,7 +2070,14 @@ async function handleGetResults(
     max_score_total: number;
     hint_total: number;
     needs_attention: boolean;
+    task_scores: { task_id: string; final_score: number; hint_count: number }[];
   }[] = [];
+
+  // student_id → task_id → { final_score, hint_count }. Built alongside the
+  // aggregate accumulator so the per_student heatmap cells and the totals use
+  // the same computeFinalScore priority chain. Only submitted students get an
+  // entry — not-submitted students receive `task_scores: []` below.
+  const taskScoresByStudent: Record<string, Record<string, { final_score: number; hint_count: number }>> = {};
 
   const { data: studentAssignments } = await db
     .from("homework_tutor_student_assignments")
@@ -2112,10 +2132,23 @@ async function handleGetResults(
           const taskInfo = taskMap[ts.task_id];
           const maxScore = taskInfo?.max_score ?? 1;
           const finalScore = computeFinalScore(ts, maxScore);
+          const hintCount = Number(ts.hint_count ?? 0);
 
           threadFinal += finalScore;
           threadMaxTotal += maxScore;
-          threadHints += Number(ts.hint_count ?? 0);
+          threadHints += hintCount;
+
+          // Per-cell scores for the heatmap. Keyed by (student_id, task_id),
+          // last-write-wins if the same student somehow has multiple threads.
+          if (studentId && taskInfo) {
+            if (!taskScoresByStudent[studentId]) {
+              taskScoresByStudent[studentId] = {};
+            }
+            taskScoresByStudent[studentId][ts.task_id] = {
+              final_score: Math.round(finalScore * 100) / 100,
+              hint_count: hintCount,
+            };
+          }
 
           if (taskInfo) {
             // Aggregate for perTask using the same final-score helper.
@@ -2165,6 +2198,12 @@ async function handleGetResults(
       if (acc) {
         const lowScore = acc.max > 0 && acc.final < 0.3 * acc.max;
         const overuse = acc.hints >= hintOveruseThreshold;
+        const cellMap = taskScoresByStudent[sa.student_id] ?? {};
+        const taskScores = Object.entries(cellMap).map(([task_id, cell]) => ({
+          task_id,
+          final_score: cell.final_score,
+          hint_count: cell.hint_count,
+        }));
         perStudent.push({
           student_id: sa.student_id,
           submitted: true,
@@ -2172,6 +2211,7 @@ async function handleGetResults(
           max_score_total: acc.max,
           hint_total: acc.hints,
           needs_attention: lowScore || overuse,
+          task_scores: taskScores,
         });
       } else {
         perStudent.push({
@@ -2181,6 +2221,7 @@ async function handleGetResults(
           max_score_total: assignmentMaxScoreTotal,
           hint_total: 0,
           needs_attention: false,
+          task_scores: [],
         });
       }
     }

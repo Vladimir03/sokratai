@@ -79,8 +79,61 @@
   2. Сдал с `final_score < 30% max_score` — `lowScore` в backend
   3. Сдал + `hint_total >= ceil(tasks.length * 0.6)` — `overuse` в backend
 - Query key unification: Detail использует `['tutor','homework','detail', id]` для assignment query, `['tutor','homework','results', id]` для results query. `TutorHomeworkResults` раньше использовал `['tutor','homework','assignment', id]` — этот ключ **больше не используется**, не копировать в новый код
-- `hintTotalByStudent: Map<string, number>` строится в родительском компоненте из `results.per_student` и прокидывается в `StudentsList` — чип «Много подсказок» рендерится рядом с delivery badge при `hintTotal >= hintOveruseThreshold(taskCount)`
-- Defensive guards обязательны: `results.per_student ?? []` в telemetry useEffect и memo `hintTotalByStudent`, `perStudent ?? []` + `assignedStudents ?? []` в `ResultsActionBlock.useMemo` — backend может транзиентно вернуть response без `per_student` поля
+- `hintTotalByStudent: Map<string, number>` строится **внутри** `HeatmapGrid` из `results.per_student` (прежде в Detail) — чип «Много подсказок» рендерится рядом с delivery badge при `hintTotal >= hintOveruseThreshold(taskCount)`
+- Defensive guards обязательны: `results.per_student ?? []` в telemetry useEffect, `perStudent ?? []` + `assignedStudents ?? []` в `ResultsActionBlock.useMemo`, `per_student ?? []` в `HeatmapGrid` useMemo — backend может транзиентно вернуть response без `per_student` поля
+
+### HeatmapGrid (Results v2 TASK-5, 2026-04-07)
+
+`src/components/tutor/results/HeatmapGrid.tsx` — единая таблица students × tasks. **Заменил** локальный `StudentsList` в `TutorHomeworkDetail.tsx`. Локальный `DeliveryBadge` (раньше жил в Detail) **переехал внутрь** HeatmapGrid — других потребителей нет, не дублировать. Phase 2 спеки: `docs/delivery/features/homework-results-v2/spec.md` (P0-3, AC-2). TASK-3 (header), TASK-4 (action block), TASK-5 (heatmap), TASK-6 (drill-down) ✅ done.
+
+**Backend extension (Phase 2 prerequisite, в одном PR с TASK-5):**
+- `handleGetResults` (`supabase/functions/homework-api/index.ts`) теперь возвращает в каждом `per_student` поле `task_scores: { task_id; final_score; hint_count }[]`
+- Сборка через `taskScoresByStudent: Record<student_id, Record<task_id, ...>>` в основном цикле task_states — `final_score` идёт через тот же `computeFinalScore(ts, maxScore)` что и агрегаты, не дублировать формулу
+- Для `submitted=false` студентов → `task_scores: []`. Отсутствие task_id в массиве = «не приступал» = серая клетка с em-dash на фронте
+- Тип в `src/lib/tutorHomeworkApi.ts` → `TutorHomeworkResultsPerStudent.task_scores` — additive поле, остальные не трогали
+
+**Цвета клеток (AC-2, single source of truth `getCellStyle`):**
+- `null` (нет в `task_scores`) → `bg-slate-100 text-slate-400`, текст «—»
+- `< 0.3` → `bg-red-100 text-red-900`
+- `0.3 ≤ ratio < 0.8` → `bg-amber-100 text-amber-900`
+- `≥ 0.8` → `bg-emerald-100 text-emerald-900`
+- Текст клетки: `score/max` через `formatScore()` (trim trailing zero для 0.5 step → `2.5/4`, `10/16`)
+- **НЕ дублировать** color helper в TASK-6/7/8 — импортировать из HeatmapGrid (если нужно — экспортировать) или вынести в `homeworkResultsConstants.ts`
+
+**Layout (КРИТИЧНО для iOS Safari):**
+- `<table>`: `border-separate border-spacing-0` + inline style `{ tableLayout: 'fixed', width: 'max-content' }` + `<colgroup>` с фиксированными ширинами `220px` (имя) + `56px` × N (задачи)
+- **НЕ менять** на `border-collapse` — `position: sticky` на `<td>` ломается в WebKit при `border-collapse`. См. `.claude/rules/80-cross-browser.md`
+- **НЕ возвращать** `w-full` на table — table-layout сожмёт колонки под container и съест горизонтальный скролл. `width: max-content` + colgroup = таблица растёт ровно на `220 + 56·N` px
+- Wrapping `<div>`: `overflow-x-auto touch-pan-x` — `touch-pan-x` обязателен, иначе row `onClick` может съесть touchstart на iOS и блокировать swipe
+- Sticky-колонка имени: `sticky left-0 z-10` на `<td>`, `z-20` на `<th>`. Бэкграунд = `bg-white` или `bg-slate-50` (expanded) — sticky прозрачным быть не должен, иначе содержимое будет просвечивать
+- Высота клетки `h-11` (44px), `text-sm` (14px) — это не input, iOS auto-zoom не сработает
+
+**Memoization (обязательно для перформанса):**
+- `React.memo` на `HeatmapRow` и `HeatmapCell`. При 26 × 10 = 260 ячеек без memo expand/collapse заметно лагает
+- `taskScoresByStudent` и `hintTotalByStudent` — `useMemo` на `per_student`. `EMPTY_TASK_SCORES_MAP` — module-scope shared empty map, чтобы не инвалидировать `HeatmapRow` memo для не сдавших
+- НЕ оборачивать tasks в useMemo — это уже стабильная ссылка из props
+
+**Drill-down (TASK-5 версия → TASK-6 ✅):**
+- Клик/Enter/Space по строке → `onToggleExpand(student_id)` → state `expandedStudentId` в `TutorHomeworkDetailContent`. Только один ученик раскрыт за раз (AC-3 совместимо)
+- Раскрытая строка подсвечена `bg-slate-50` (без `ring-*` — конфликтует с sticky-колонкой, выглядит грязно)
+- Отдельная Card «Разбор ученика: {имя}» с `StudentDrillDown` рендерится **под** Materials в Detail. Не inline в таблице — sticky-колонка и horizontal-scroll иначе ломаются
+- `expandedStudentId` + `drillDownTaskId` сбрасываются в `null` через useEffect при смене `id` (assignment)
+- **Cell click (TASK-6 ✅):** `handleCellClick(studentId, taskId)` → `setExpandedStudentId(studentId)` + `setDrillDownTaskId(taskId)`. `e.stopPropagation()` обязателен — иначе всплывёт row click и toggle collapse
+
+**Out of scope для текущей итерации (TASK-7..9):**
+- `EditScoreDialog` (`tutor_score_override`) + `setTutorScoreOverride` API + Pencil-icon на клетке — TASK-7
+- Telemetry `manual_score_override_saved` — TASK-8 (`results_v2_opened`, `drill_down_expanded` уже работают)
+- Lightbulb-иконка на клетке при `hint_count >= 1`, title tooltip `Балл: X/Y · подсказок: Z`, footer row с avg per task, правая колонка row с total — P0-3 full, не AC-2 minimum
+- KIM number в заголовке колонки — нет `kim_number` в `homework_tutor_tasks`, требует расширения схемы
+
+### Drill-down (Results v2 TASK-6, 2026-04-07)
+
+- `src/components/tutor/results/heatmapStyles.ts` — single source of truth для `getCellStyle` + `formatScore`. Вынесено из `HeatmapGrid.tsx` — react-refresh/only-export-components предупреждение при экспорте non-component из component file. **НЕ дублировать** color/format helpers — импортировать отсюда.
+- `src/components/tutor/results/TaskMiniCard.tsx` — `React.memo` мини-карточка задачи. Props: `{ taskOrder, taskId, score, maxScore, hintCount, isSelected, isAllTasks?, onSelect }`. Цвет фона через `getCellStyle`. `ring-2 ring-slate-800 ring-offset-1` при `isSelected`. Lucide `Lightbulb` 12px при `hintCount >= 1`. `touch-action: manipulation`. `aria-pressed`, `role="button"`, `tabIndex={0}`.
+- `src/components/tutor/results/StudentDrillDown.tsx` — контейнер drill-down. Горизонтальный scroll-ряд (кнопка «Все задачи» + `TaskMiniCard[]`) + `GuidedThreadViewer` ниже. `key={selectedTaskId ?? 'all'}` форсит ремоунт viewer при смене задачи — сбрасывает E9 realtime channel, E8 collapsible context, scroll. `hideTaskFilter={true}` скрывает внутренний ряд pill в viewer. `touch-pan-x` на scroll-ряду. Нет вложенных Card (правило design system).
+- `GuidedThreadViewer` props (additive): `initialTaskFilter?: number | 'all'` (default `'all'`), `hideTaskFilter?: boolean` (default `false`).
+- `TutorHomeworkDetail` state: `drillDownTaskId: string | null`. `handleCellClick = useCallback((studentId, taskId) => { setExpandedStudentId(studentId); setDrillDownTaskId(taskId); }, [])`. `handleToggleExpand` сбрасывает `drillDownTaskId` при collapse или при expand другого ученика.
+- Telemetry `drill_down_expanded` — payload `{ assignmentId, studentId, firstProblemTaskOrder }`. Fired ОДИН раз на expand, отслеживается через `lastDrillTrackedRef`. `firstProblemTaskOrder`: первая задача где `score/max < 0.3 || hint_count >= 1`; иначе первая где `< 0.8`; иначе `null`.
 
 ### Реминдер ученику с выбором канала (2026-04-07)
 - `RemindStudentDialog.tsx` — Radix Dialog с **tabs** `[Telegram] [Email]` сверху. Дефолтная активная вкладка = Telegram если `hasTelegram`, иначе Email. Недоступные табы рендерятся `disabled` + `aria-disabled` + `title="У ученика не привязан Telegram" / "У ученика нет email"`

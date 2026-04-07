@@ -1,7 +1,7 @@
-import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import { Link, useParams, useNavigate } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { CheckCircle2, XCircle, AlertCircle, ChevronDown, ChevronUp, WifiOff, Paperclip, ExternalLink, Edit, Trash2, ZoomIn, Bell, Send, Mail, Lightbulb } from 'lucide-react';
+import { ChevronDown, Paperclip, ExternalLink, Edit, Trash2, ZoomIn } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -11,9 +11,10 @@ import { toast } from 'sonner';
 import TutorGuard from '@/components/TutorGuard';
 import { TutorLayout } from '@/components/tutor/TutorLayout';
 import { TutorDataStatus } from '@/components/tutor/TutorDataStatus';
-import { GuidedThreadViewer } from '@/components/tutor/GuidedThreadViewer';
 import { ResultsHeader } from '@/components/tutor/results/ResultsHeader';
 import { ResultsActionBlock } from '@/components/tutor/results/ResultsActionBlock';
+import { HeatmapGrid } from '@/components/tutor/results/HeatmapGrid';
+import { StudentDrillDown } from '@/components/tutor/results/StudentDrillDown';
 import {
   getTutorHomeworkAssignment,
   getTaskImageSignedUrl,
@@ -23,10 +24,8 @@ import {
   type TutorHomeworkAssignmentDetails,
   type TutorHomeworkResultsResponse,
   type HomeworkAssignmentStatus,
-  type DeliveryStatus,
   type HomeworkMaterial,
 } from '@/lib/tutorHomeworkApi';
-import { hintOveruseThreshold } from '@/lib/homeworkResultsConstants';
 import { trackGuidedHomeworkEvent } from '@/lib/homeworkTelemetry';
 import { MathText } from '@/components/kb/ui/MathText';
 import {
@@ -45,65 +44,6 @@ const STATUS_CONFIG: Record<HomeworkAssignmentStatus, { label: string; className
   active: { label: 'Активное', className: 'bg-green-100 text-green-800 border-green-200 dark:bg-green-900/30 dark:text-green-400 dark:border-green-800' },
   closed: { label: 'Завершено', className: 'bg-gray-100 text-gray-600 border-gray-200 dark:bg-gray-800 dark:text-gray-400 dark:border-gray-700' },
 };
-
-function DeliveryBadge({ status }: { status: DeliveryStatus | undefined }) {
-  if (!status || status === 'pending') return null;
-
-  if (status === 'delivered_push') {
-    return (
-      <span className="text-xs text-green-600 flex items-center gap-0.5">
-        <Bell className="h-3 w-3" /> Push
-      </span>
-    );
-  }
-  if (status === 'delivered_telegram') {
-    return (
-      <span className="text-xs text-green-600 flex items-center gap-0.5">
-        <Send className="h-3 w-3" /> Telegram
-      </span>
-    );
-  }
-  if (status === 'delivered_email') {
-    return (
-      <span className="text-xs text-green-600 flex items-center gap-0.5">
-        <Mail className="h-3 w-3" /> Email
-      </span>
-    );
-  }
-  if (status === 'delivered') {
-    return (
-      <span className="text-xs text-green-600 flex items-center gap-0.5">
-        <CheckCircle2 className="h-3 w-3" /> Доставлено
-      </span>
-    );
-  }
-  if (status === 'failed_no_channel') {
-    return (
-      <span className="text-xs text-red-500 flex items-center gap-0.5" title="Попросите ученика включить уведомления или добавить email">
-        <XCircle className="h-3 w-3" /> Нет каналов
-      </span>
-    );
-  }
-  if (status === 'failed_all_channels') {
-    return (
-      <span className="text-xs text-red-500 flex items-center gap-0.5" title="Попытки push, Telegram и email не удались">
-        <XCircle className="h-3 w-3" /> Все каналы failed
-      </span>
-    );
-  }
-  if (status === 'failed_not_connected') {
-    return (
-      <span className="text-xs text-amber-500 flex items-center gap-0.5">
-        <WifiOff className="h-3 w-3" /> Нет Telegram
-      </span>
-    );
-  }
-  return (
-    <span className="text-xs text-red-500 flex items-center gap-0.5">
-      <XCircle className="h-3 w-3" /> Ошибка доставки
-    </span>
-  );
-}
 
 // ─── Skeleton ────────────────────────────────────────────────────────────────
 
@@ -306,112 +246,6 @@ function MaterialsList({ assignmentId, materials }: { assignmentId: string; mate
   );
 }
 
-// ─── Students List ───────────────────────────────────────────────────────────
-
-function StudentsList({
-  details,
-  hintTotalByStudent,
-}: {
-  details: TutorHomeworkAssignmentDetails;
-  hintTotalByStudent: Map<string, number>;
-}) {
-  const [expandedStudents, setExpandedStudents] = useState<Set<string>>(new Set());
-  const { assigned_students } = details;
-  const taskCount = details.tasks.length;
-  const threshold = taskCount > 0 ? hintOveruseThreshold(taskCount) : Infinity;
-
-  if (assigned_students.length === 0) {
-    return (
-      <Card animate={false} className="bg-muted/30">
-        <CardContent className="py-8 text-center">
-          <p className="text-muted-foreground">Ученики ещё не назначены</p>
-        </CardContent>
-      </Card>
-    );
-  }
-
-  const toggleExpand = (studentId: string) => {
-    setExpandedStudents(prev => {
-      const next = new Set(prev);
-      if (next.has(studentId)) next.delete(studentId);
-      else next.add(studentId);
-      return next;
-    });
-  };
-
-  return (
-    <Card animate={false}>
-      <CardHeader>
-        <CardTitle className="text-lg">Ученики</CardTitle>
-      </CardHeader>
-      <CardContent>
-        <div className="divide-y">
-          {assigned_students.map((student) => {
-            const isExpanded = expandedStudents.has(student.student_id);
-            const hintTotal = hintTotalByStudent.get(student.student_id) ?? 0;
-            const showHintOveruse = hintTotal >= threshold;
-
-            return (
-              <div key={student.student_id} className="py-3">
-                <div
-                  className="flex items-center justify-between gap-2 cursor-pointer hover:bg-muted/30 -mx-2 px-2 py-1 rounded-md transition-colors"
-                  onClick={() => toggleExpand(student.student_id)}
-                >
-                  <div className="min-w-0 flex items-center gap-2">
-                    {isExpanded
-                      ? <ChevronUp className="h-4 w-4 text-muted-foreground flex-shrink-0" />
-                      : <ChevronDown className="h-4 w-4 text-muted-foreground flex-shrink-0" />
-                    }
-                    <div>
-                      <p className="font-medium text-sm truncate">{student.name || 'Без имени'}</p>
-                      <div className="flex items-center gap-2 mt-0.5 flex-wrap">
-                        {student.notified ? (
-                          <span className="text-xs text-green-600 flex items-center gap-0.5">
-                            <CheckCircle2 className="h-3 w-3" /> Уведомлён
-                          </span>
-                        ) : (
-                          <span className="text-xs text-muted-foreground flex items-center gap-0.5">
-                            <AlertCircle className="h-3 w-3" /> Не уведомлён
-                          </span>
-                        )}
-                        <DeliveryBadge status={student.delivery_status} />
-                      </div>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-2 flex-shrink-0">
-                    {showHintOveruse && (
-                      <span
-                        title={`Подсказок: ${hintTotal}`}
-                        className="inline-flex items-center gap-1 rounded-full bg-amber-100 text-amber-800 px-2 py-0.5 text-xs font-medium"
-                      >
-                        <Lightbulb className="h-3 w-3" />
-                        Много подсказок
-                      </span>
-                    )}
-                    <Badge variant="outline" className="bg-blue-100 text-blue-800 border-blue-200 dark:bg-blue-900/30 dark:text-blue-400">
-                      Пошаговое ДЗ
-                    </Badge>
-                  </div>
-                </div>
-
-                {/* Guided chat thread viewer */}
-                {isExpanded && (
-                  <div className="mt-3">
-                    <GuidedThreadViewer
-                      assignmentId={details.assignment.id}
-                      studentId={student.student_id}
-                    />
-                  </div>
-                )}
-              </div>
-            );
-          })}
-        </div>
-      </CardContent>
-    </Card>
-  );
-}
-
 // ─── Main Content ────────────────────────────────────────────────────────────
 
 function TutorHomeworkDetailContent() {
@@ -451,14 +285,100 @@ function TutorHomeworkDetailContent() {
     : null;
   const isLoading = detailsQuery.isLoading;
 
-  // Per-student lookup for hint totals — drives the "Много подсказок" chip.
-  const hintTotalByStudent = useMemo(() => {
-    const map = new Map<string, number>();
-    for (const s of results?.per_student ?? []) {
-      map.set(s.student_id, s.hint_total);
+  // Currently-expanded student in HeatmapGrid. When set, a separate
+  // "Разбор ученика" section renders below the grid with StudentDrillDown.
+  // Only one student can be expanded at a time (AC-3).
+  const [expandedStudentId, setExpandedStudentId] = useState<string | null>(null);
+  // TASK-6 (AC-4): task id selected from a HeatmapGrid cell click. Gets passed
+  // to StudentDrillDown as `initialTaskId` — child syncs its local state when
+  // this changes, so a cell click on an already-expanded student just moves
+  // the viewer filter. `null` = "Все задачи".
+  const [drillDownTaskId, setDrillDownTaskId] = useState<string | null>(null);
+
+  // Reset expanded state whenever we navigate to a different assignment so
+  // stale selections don't leak across pages.
+  useEffect(() => {
+    setExpandedStudentId(null);
+    setDrillDownTaskId(null);
+  }, [id]);
+
+  const handleToggleExpand = useCallback((studentId: string) => {
+    setExpandedStudentId((prev) => {
+      if (prev === studentId) {
+        // Collapse — reset task selection too.
+        setDrillDownTaskId(null);
+        return null;
+      }
+      // Expand a different student — start on "Все задачи".
+      setDrillDownTaskId(null);
+      return studentId;
+    });
+  }, []);
+
+  const handleCellClick = useCallback((studentId: string, taskId: string) => {
+    // Expand (or re-focus) the student and select the clicked task. The child
+    // drill-down's useEffect on `initialTaskId` picks up the new selection
+    // whether or not the student was already expanded.
+    setExpandedStudentId(studentId);
+    setDrillDownTaskId(taskId);
+  }, []);
+
+  const expandedStudent = expandedStudentId && details
+    ? details.assigned_students.find((s) => s.student_id === expandedStudentId) ?? null
+    : null;
+  const expandedPerStudent = expandedStudentId && results
+    ? results.per_student?.find((s) => s.student_id === expandedStudentId) ?? null
+    : null;
+
+  // TASK-6 telemetry: fire `drill_down_expanded` once per expand action (by
+  // assignmentId|studentId pair). `firstProblemTaskOrder` cascade:
+  //   1. first task (by order_num) with ratio < 0.3 OR hint_count >= 1
+  //   2. else first task with ratio < 0.8
+  //   3. else null
+  // Not-attempted tasks (absent from task_scores) are ignored. This keeps
+  // the metric aligned with the needs_attention logic and the cell colors.
+  const lastDrillTrackedRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!expandedStudentId || !id || !details || !expandedPerStudent) {
+      lastDrillTrackedRef.current = null;
+      return;
     }
-    return map;
-  }, [results]);
+    const key = `${id}|${expandedStudentId}`;
+    if (lastDrillTrackedRef.current === key) return;
+    lastDrillTrackedRef.current = key;
+
+    const taskMaxById = new Map<string, { order_num: number; max_score: number }>();
+    for (const t of details.tasks) {
+      taskMaxById.set(t.id, { order_num: t.order_num, max_score: t.max_score });
+    }
+    const scored = (expandedPerStudent.task_scores ?? [])
+      .map((ts) => {
+        const meta = taskMaxById.get(ts.task_id);
+        if (!meta) return null;
+        const ratio = meta.max_score > 0 ? ts.final_score / meta.max_score : 0;
+        return {
+          order_num: meta.order_num,
+          ratio,
+          hint_count: ts.hint_count,
+        };
+      })
+      .filter((x): x is { order_num: number; ratio: number; hint_count: number } => x !== null)
+      .sort((a, b) => a.order_num - b.order_num);
+
+    const firstRedOrHint = scored.find((t) => t.ratio < 0.3 || t.hint_count >= 1);
+    const firstAmber = scored.find((t) => t.ratio < 0.8);
+    const firstProblemTaskOrder = firstRedOrHint
+      ? firstRedOrHint.order_num
+      : firstAmber
+        ? firstAmber.order_num
+        : null;
+
+    trackGuidedHomeworkEvent('drill_down_expanded', {
+      assignmentId: id,
+      studentId: expandedStudentId,
+      firstProblemTaskOrder,
+    });
+  }, [expandedStudentId, id, details, expandedPerStudent]);
 
   // AC-10 telemetry: fire results_v2_opened exactly once per assignment id.
   // Payload contains only counts + id — no PII. `per_student` can transiently
@@ -546,16 +466,53 @@ function TutorHomeworkDetailContent() {
               />
             ) : null}
 
-            {/* Tasks (collapsible, closed by default) */}
+            {/* Tasks (collapsible, closed by default). Placed between the
+                action block and the heatmap so tutors can review conditions
+                before looking at per-student scores. */}
             <TasksList details={details} />
+
+            {/* Heatmap grid (TASK-5, AC-2). Replaces the previous StudentsList —
+                each row is now a student with a colored task-score matrix.
+                Clicking a row toggles the "Разбор ученика" section below.
+                TASK-6: cell click expands the student and pre-selects that
+                task inside the drill-down. */}
+            {results ? (
+              <HeatmapGrid
+                details={details}
+                results={results}
+                expandedStudentId={expandedStudentId}
+                onToggleExpand={handleToggleExpand}
+                onCellClick={handleCellClick}
+                selectedTaskId={drillDownTaskId}
+              />
+            ) : null}
 
             {/* Materials */}
             {details.materials && details.materials.length > 0 && (
               <MaterialsList assignmentId={details.assignment.id as string} materials={details.materials} />
             )}
 
-            {/* Students with thread viewer + hint-overuse chip */}
-            <StudentsList details={details} hintTotalByStudent={hintTotalByStudent} />
+            {/* Per-student drill-down. Only one student is ever expanded so
+                this section renders once below the grid. TaskMiniCard row +
+                GuidedThreadViewer filtered by the selected task (TASK-6). */}
+            {expandedStudent ? (
+              <Card animate={false}>
+                <CardHeader>
+                  <CardTitle className="text-lg">
+                    Разбор ученика: {expandedStudent.name || 'Без имени'}
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <StudentDrillDown
+                    assignmentId={details.assignment.id}
+                    studentId={expandedStudent.student_id}
+                    tasks={details.tasks}
+                    perStudent={expandedPerStudent}
+                    initialTaskId={drillDownTaskId}
+                  />
+                </CardContent>
+              </Card>
+            ) : null}
           </>
         ) : null}
       </div>

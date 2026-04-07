@@ -75,43 +75,51 @@ Code review для **каждой** задачи проводит **Codex** не
   - В payload telemetry **никаких** имён/email/текста сообщения.
 - **Validation:** lint+build+smoke. Manual: 1 ученик с TG, 1 без TG (только email), 1 ученик с hint overuse.
 
-### TASK-5 — Хитмап с цифрами и порогами цвета
+### TASK-5 — Хитмап с цифрами и порогами цвета ✅ DONE (2026-04-07)
 
 - **Job:** R1-2.
 - **AC:** AC-2.
 - **Agent:** Claude Code.
-- **Files:**
-  - `src/components/tutor/results/HeatmapGrid.tsx` (новый)
-  - `src/pages/tutor/TutorHomeworkResults.tsx` — интеграция
-- **Что делаем:** табличный хитмап `students × tasks`. Колонки: фиксированная ширина 56px (min), высота строки 44px. Цвет клетки по `final_score / max_score`:
-  - `null` (не приступал) → `bg-slate-100 text-slate-400`
+- **Files (фактические):**
+  - `src/components/tutor/results/HeatmapGrid.tsx` (новый, ~340 строк)
+  - `src/pages/tutor/TutorHomeworkDetail.tsx` (интеграция; **не** `TutorHomeworkResults.tsx` — удалён 2026-04-07)
+  - `supabase/functions/homework-api/index.ts` — `handleGetResults` extension (per_student.task_scores)
+  - `src/lib/tutorHomeworkApi.ts` — `TutorHomeworkResultsPerStudent.task_scores` тип
+- **Что сделано:** табличный хитмап `students × tasks` заменил локальный `StudentsList`. Backend `handleGetResults` расширен полем `per_student[*].task_scores: { task_id; final_score; hint_count }[]` (использует существующий `computeFinalScore`). Цвет клетки по `final_score / max_score`:
+  - `null` (нет в массиве `task_scores`) → `bg-slate-100 text-slate-400`, текст «—»
   - `< 0.3` → `bg-red-100 text-red-900`
   - `0.3..0.8` → `bg-amber-100 text-amber-900`
   - `>= 0.8` → `bg-emerald-100 text-emerald-900`
-  В клетке — число баллов или `—` для null. На > ~720px ширины таблицы — горизонтальный скролл с sticky колонкой имён.
-- **Guardrails:**
-  - НЕ `framer-motion`, только CSS `transition-colors`.
-  - НЕ emoji в клетках.
-  - На iOS Safari — `font-size: 14px` в клетках (не <16 для inputs, тут не input → 14 ОК).
-  - Структурный breakpoint — `md:`, не `sm:`.
-- **Validation:** lint+build+smoke + manual 26 × 10 на десктопе и iPhone.
+  Клик по строке → отдельная Card «Разбор ученика» под Materials с `GuidedThreadViewer`. Только один ученик раскрыт за раз. Cell-click → no-op (TASK-6).
+- **Layout (iOS Safari critical):**
+  - `<table>`: `border-separate border-spacing-0` (НЕ `border-collapse` — ломает sticky на iOS) + `<colgroup>` с `220px` + `56px×N` + `tableLayout: 'fixed'` + `width: 'max-content'`
+  - Wrapping `<div>`: `overflow-x-auto touch-pan-x` (`touch-pan-x` обязателен — иначе row onClick съедает touchstart)
+  - `React.memo` на `HeatmapRow` и `HeatmapCell`. `EMPTY_TASK_SCORES_MAP` shared module-scope
+  - Локальный `DeliveryBadge` (раньше в Detail) переехал внутрь HeatmapGrid
+- **Guardrails (соблюдены):**
+  - Без `framer-motion`, только CSS `transition-colors`
+  - Без emoji в клетках, Lucide `ChevronUp`/`ChevronDown`
+  - `text-sm` (14px) в клетках — не input, iOS auto-zoom не сработает
+  - `md:` breakpoint, не `sm:` (в текущем виде breakpoints не нужны вообще)
+- **Validation:** ✅ `npm run lint` (194 errors / 31 warnings = baseline, +0), ✅ `npm run build` (17.94s), ✅ `npm run smoke-check`. Mobile horizontal scroll подтверждён программно (`scrollWidth 388 > clientWidth 342` на 375px viewport, scrollLeft работает) и визуально через preview (sticky колонка УЧЕНИК остаётся при scrollLeft, видимые задачи меняются с №1/№2 на №2/№3).
+- **Bugfix follow-up:** initial implementation использовал `border-collapse` + `w-full` → на мобильном Safari горизонтальный скролл не работал, sticky-колонка ломалась. Фикс: `border-separate` + `<colgroup>` + `width: max-content` + `touch-pan-x`. Подробности в `.claude/rules/80-cross-browser.md` (новые правила про table sticky и table layout) и `.claude/rules/40-homework-system.md` (секция HeatmapGrid).
 
-### TASK-6 — Drill-down: мини-карточки задач + reuse `GuidedThreadViewer`
+### TASK-6 — Drill-down: мини-карточки задач + reuse `GuidedThreadViewer` ✅ DONE (2026-04-07)
 
 - **Job:** R1-2, R3.
 - **AC:** AC-3, AC-4.
 - **Agent:** Claude Code.
-- **Files:**
-  - `src/pages/tutor/TutorHomeworkResults.tsx`
-  - `src/components/tutor/results/StudentDrillDown.tsx` (новый)
-  - `src/components/tutor/results/TaskMiniCard.tsx` (новый)
-- **Что делаем:** клик по строке ученика в хитмапе раскрывает inline-блок под строкой: горизонтальный ряд `TaskMiniCard` (по одной на задачу: номер, балл, цвет по тем же порогам что в TASK-5) + `GuidedThreadViewer` справа/снизу с `taskFilter = selectedTaskId`. Клик по `TaskMiniCard` меняет `selectedTaskId` → viewer ремоунтится через `key={selectedTaskId}`. Кольцо выбранной мини-карточки — `ring-2 ring-slate-800`. Telemetry: `drill_down_expanded` с `firstProblemTaskOrder` (минимальный `order_num` среди клеток `< 0.3`, либо `null`).
-- **Guardrails:**
-  - НЕ переписывать `GuidedThreadViewer` — только prop `taskFilter` + `enabled={true}`.
-  - Lazy mount viewer (`enabled` загружается только на expand).
-  - Не ломать E8 (task context block) и E9 (realtime INSERT subscription).
-  - Не вкладывать карточки в карточки (anti-pattern AI slop).
-- **Validation:** lint+build+smoke + manual: открыть drill-down, переключить 3 задачи подряд, проверить что viewer ремоунтится и realtime работает.
+- **Files (фактические):**
+  - `src/components/tutor/results/heatmapStyles.ts` (новый — `getCellStyle`, `formatScore` вынесены из HeatmapGrid во избежание react-refresh warning)
+  - `src/components/tutor/results/TaskMiniCard.tsx` (новый — `React.memo`, ring selected, Lightbulb hint icon)
+  - `src/components/tutor/results/StudentDrillDown.tsx` (новый — scroll row + GuidedThreadViewer с `key` remount)
+  - `src/components/tutor/GuidedThreadViewer.tsx` (additive: `initialTaskFilter` + `hideTaskFilter` props)
+  - `src/components/tutor/results/HeatmapGrid.tsx` (cell click + `onCellClick` + `selectedTaskId` props)
+  - `src/pages/tutor/TutorHomeworkDetail.tsx` (drillDownTaskId state, handleCellClick, telemetry)
+  - `src/lib/homeworkTelemetry.ts` (добавлен `'drill_down_expanded'`)
+- **Что сделано:** клик по строке → `StudentDrillDown` раскрывается в Card «Разбор ученика» под Materials. Горизонтальный ряд `TaskMiniCard` (все задачи + «Все задачи»). Клик по мини-карточке → `key` меняется → viewer ремоунтится (сбрасывает E8/E9/scroll). `hideTaskFilter={true}` скрывает дублирующий pill-ряд внутри viewer. Клик по ячейке → `e.stopPropagation()` + expand student + set task. Telemetry `drill_down_expanded` с `firstProblemTaskOrder` cascade (red/hint → amber → null), ОДИН раз на expand через `lastDrillTrackedRef`.
+- **Guardrails соблюдены:** нет cards-in-cards, `touch-pan-x` на scroll-ряду, `touch-manipulation` на cells и mini-cards, `React.memo` на TaskMiniCard.
+- **Validation:** ✅ `npm run lint` (baseline +0), ✅ `npm run build`, ✅ `npm run smoke-check`. Manual: drill-down opens, TaskMiniCard selection, viewer remount on task switch, cell click sets task directly, realtime E9 works.
 
 ### TASK-7 — Модалка правки балла (`tutor_score_override`)
 

@@ -190,9 +190,22 @@ For architecture overview see: docs/delivery/engineering/architecture/README.md
 - Phase 1b должен оставаться jobs-first: formula round = optional block внутри homework workflow, а не отдельный продукт/игра
 
 ### 5. Единая страница детальной инфы + результатов ДЗ (2026-04-07)
-- `TutorHomeworkResults.tsx` **удалён**. Каноническая страница ДЗ для репетитора — `TutorHomeworkDetail.tsx` на URL `/tutor/homework/:id`. Она содержит v2-шапку (`ResultsHeader` с метриками Сдали/Средний балл/Не приступали/Требует внимания + actions Редактировать/Удалить), `ResultsActionBlock` (danger-пункты «не приступал» с tabs Telegram/Email в диалоге), collapsible секцию задач, материалы и список учеников с `GuidedThreadViewer`
+- `TutorHomeworkResults.tsx` **удалён**. Каноническая страница ДЗ для репетитора — `TutorHomeworkDetail.tsx` на URL `/tutor/homework/:id`. Она содержит v2-шапку (`ResultsHeader` с метриками Сдали/Средний балл/Не приступали/Требует внимания + actions Редактировать/Удалить), `ResultsActionBlock` (danger-пункты «не приступал» с tabs Telegram/Email в диалоге), `HeatmapGrid` (students × tasks), collapsible секцию задач, материалы и отдельную секцию «Разбор ученика» с `GuidedThreadViewer`
 - Route `/tutor/homework/:id/results` остался как redirect на `/tutor/homework/:id` — для backward compat с Telegram-ссылками из `homework-reminder`
 - Semantic invariant метрики «Требует внимания» в шапке = `notStarted + per_student.filter(s => s.needs_attention).length`. Backend считает `needs_attention` только для сдавших — frontend обязан прибавлять `notStarted` (не сдавших), иначе метрика рассогласована с action block. Подробности: `.claude/rules/40-homework-system.md` → секция «Merged Detail + Results страница»
+
+### 6. HeatmapGrid (Results v2 TASK-5, 2026-04-07)
+- `src/components/tutor/results/HeatmapGrid.tsx` — единая таблица students × tasks. **Заменил** локальный `StudentsList` в `TutorHomeworkDetail.tsx`. Локальный `DeliveryBadge` тоже переехал внутрь HeatmapGrid (других потребителей нет)
+- Цвета клеток (AC-2): `null → bg-slate-100 text-slate-400 («—»)`, `< 0.3 → bg-red-100`, `0.3..0.8 → bg-amber-100`, `≥ 0.8 → bg-emerald-100`. Helper `getCellStyle` — single source of truth, не дублировать
+- Backend `handleGetResults` теперь возвращает `per_student[*].task_scores: { task_id; final_score; hint_count }[]` — одна точка для матрицы. Не делать N запросов на student-thread
+- Клик по строке → `expandedStudentId` в `TutorHomeworkDetailContent` → отдельная Card «Разбор ученика» с `GuidedThreadViewer` рендерится **под** Materials. Только один ученик раскрыт за раз (AC-3 совместимо). `expandedStudentId` сбрасывается при смене assignment id
+- **КРИТИЧНО для iOS Safari**: таблица использует `border-separate border-spacing-0` + `<colgroup>` с фиксированными ширинами + `table-layout: fixed` + `width: max-content`. **НЕ менять** на `border-collapse` — `position: sticky` на `<td>` ломается в WebKit при `border-collapse`. **НЕ возвращать** `w-full` на table — съест горизонтальный скролл, потому что table-layout сжимает столбцы под container
+- Wrapping `<div>` имеет `overflow-x-auto touch-pan-x` — `touch-pan-x` обязателен, иначе row onClick может съесть touchstart на iOS и блокировать swipe
+- `React.memo` на `HeatmapRow` и `HeatmapCell` — обязательно, при 26×10 = 260 ячеек без memo ловится лаг при expand/collapse
+- Cell click (TASK-6 ✅): `handleCellClick(studentId, taskId)` → expand student + set `drillDownTaskId`. `e.stopPropagation()` обязателен. `StudentDrillDown` заменяет прямой `GuidedThreadViewer` в Card «Разбор ученика»
+- `getCellStyle` + `formatScore` — вынесены в `src/components/tutor/results/heatmapStyles.ts` (избегает react-refresh warning). **НЕ дублировать** эти helpers — импортировать из heatmapStyles.ts
+- `GuidedThreadViewer` props (additive): `initialTaskFilter?: number | 'all'`, `hideTaskFilter?: boolean`. `hideTaskFilter=true` в `StudentDrillDown` скрывает дублирующий pill-ряд
+- TASK-3 (header), TASK-4 (action block), TASK-5 (heatmap), TASK-6 (drill-down) ✅ done. TASK-7..9 (edit-score modal + telemetry + QA) — отдельные итерации
 
 ## Известные хрупкие области
 

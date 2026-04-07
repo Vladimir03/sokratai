@@ -138,14 +138,28 @@ export function GuidedThreadViewer({
   assignmentId,
   studentId,
   enabled = true,
+  initialTaskFilter = 'all',
+  hideTaskFilter = false,
 }: {
   assignmentId: string;
   studentId: string;
   /** Controls whether the thread query fires. Parent should pass false when viewer is collapsed. */
   enabled?: boolean;
+  /**
+   * Initial value of the task filter. Parent should force a remount via `key`
+   * when changing this — StudentDrillDown (TASK-6) keys the viewer by the
+   * selected task so the internal filter always reflects the new selection.
+   */
+  initialTaskFilter?: number | 'all';
+  /**
+   * Hide the internal task filter pill row. Used by StudentDrillDown so the
+   * TaskMiniCard row is the single task selector inside the drill-down — no
+   * duplicate switches that could leave the two surfaces out of sync.
+   */
+  hideTaskFilter?: boolean;
 }) {
   // Job: Видеть прогресс ученика по ДЗ без дёрганий во время занятия.
-  const [taskFilter, setTaskFilter] = useState<number | 'all'>('all');
+  const [taskFilter, setTaskFilter] = useState<number | 'all'>(initialTaskFilter);
   const [isTaskContextExpanded, setIsTaskContextExpanded] = useState(true);
   const [messageText, setMessageText] = useState('');
   const [hiddenNote, setHiddenNote] = useState(false);
@@ -343,30 +357,32 @@ export function GuidedThreadViewer({
 
           {threadQuery.data && (
             <>
-              <div className="flex flex-wrap gap-2">
-                <Button
-                  variant={taskFilter === 'all' ? 'default' : 'outline'}
-                  size="sm"
-                  className="h-7 text-xs"
-                  onClick={() => setTaskFilter('all')}
-                >
-                  Все задачи
-                </Button>
-                {threadQuery.data.tasks.map((task) => {
-                  const state = taskStatusById.get(task.id);
-                  return (
-                    <Button
-                      key={task.id}
-                      variant={taskFilter === task.order_num ? 'default' : 'outline'}
-                      size="sm"
-                      className="h-7 text-xs"
-                      onClick={() => setTaskFilter(task.order_num)}
-                    >
-                      #{task.order_num} {TASK_STATUS_LABELS[state?.status ?? 'locked'] ?? state?.status}
-                    </Button>
-                  );
-                })}
-              </div>
+              {hideTaskFilter ? null : (
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    variant={taskFilter === 'all' ? 'default' : 'outline'}
+                    size="sm"
+                    className="h-7 text-xs"
+                    onClick={() => setTaskFilter('all')}
+                  >
+                    Все задачи
+                  </Button>
+                  {threadQuery.data.tasks.map((task) => {
+                    const state = taskStatusById.get(task.id);
+                    return (
+                      <Button
+                        key={task.id}
+                        variant={taskFilter === task.order_num ? 'default' : 'outline'}
+                        size="sm"
+                        className="h-7 text-xs"
+                        onClick={() => setTaskFilter(task.order_num)}
+                      >
+                        #{task.order_num} {TASK_STATUS_LABELS[state?.status ?? 'locked'] ?? state?.status}
+                      </Button>
+                    );
+                  })}
+                </div>
+              )}
 
               {selectedTask && (
                 <div className="rounded-md border bg-background p-3 text-xs space-y-2">

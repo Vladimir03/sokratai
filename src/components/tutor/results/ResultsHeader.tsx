@@ -39,6 +39,10 @@ interface ResultsHeaderProps {
   backTo?: string;
 }
 
+function fmtAbs(n: number): string {
+  return Number.isInteger(n) ? String(n) : n.toFixed(1);
+}
+
 export const ResultsHeader = memo(function ResultsHeader({
   assignment,
   totalStudents,
@@ -58,9 +62,17 @@ export const ResultsHeader = memo(function ResultsHeader({
   const attentionFromScores = perStudent.filter((s) => s.needs_attention).length;
   const needsAttention = notStarted + attentionFromScores;
 
+  const submittedPerStudent = perStudent.filter((s) => s.submitted);
+  // max_score_total is constant for all students in the same assignment.
+  const maxScoreTotal = results?.per_student[0]?.max_score_total ?? 0;
+  const avgAbsolute =
+    submittedPerStudent.length > 0
+      ? submittedPerStudent.reduce((sum, s) => sum + s.final_score_total, 0) /
+        submittedPerStudent.length
+      : null;
   const avgScoreLabel =
-    results?.summary.avg_score != null
-      ? `${Math.round(results.summary.avg_score)}%`
+    avgAbsolute != null && maxScoreTotal > 0
+      ? `${fmtAbs(avgAbsolute)}/${fmtAbs(maxScoreTotal)}`
       : '—';
 
   const showSkeleton = isLoading && !assignment;
