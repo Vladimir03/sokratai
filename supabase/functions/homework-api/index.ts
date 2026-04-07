@@ -543,6 +543,7 @@ async function handleListAssignments(
 
   const submittedMap: Record<string, number> = {};
   const scoreMap: Record<string, { sum: number; count: number }> = {};
+  let totalMaxByAssignment: Record<string, number> = {};
 
   // Guided chat: count completed threads as "submissions" for stats
   if (allSaIds.length > 0) {
@@ -570,7 +571,7 @@ async function handleListAssignments(
         .in("assignment_id", assignmentIds);
 
       const guidedTaskMaxScore: Record<string, number> = {};
-      const totalMaxByAssignment: Record<string, number> = {};
+      totalMaxByAssignment = {};
       for (const t of guidedTasks ?? []) {
         guidedTaskMaxScore[t.id] = t.max_score ?? 1;
         totalMaxByAssignment[t.assignment_id] =
