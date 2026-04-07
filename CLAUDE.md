@@ -186,9 +186,13 @@ For architecture overview see: docs/delivery/engineering/architecture/README.md
 - На `https://sokratai.ru` и `https://sokratai.lovable.app` preview bypass **запрещён** — там остаётся обычный auth flow
 - Для Formula Rounds Phase 1b tutor UI НЕ создавать новый top-level route или отдельный standalone dashboard. Интегрировать только в существующие tutor flows:
   - `src/pages/tutor/TutorHomeworkCreate.tsx`
-  - `src/pages/tutor/TutorHomeworkDetail.tsx`
-  - `src/pages/tutor/TutorHomeworkResults.tsx`
+  - `src/pages/tutor/TutorHomeworkDetail.tsx` (единая каноническая страница для ДЗ — детальная инфа + результаты v2, см. ниже)
 - Phase 1b должен оставаться jobs-first: formula round = optional block внутри homework workflow, а не отдельный продукт/игра
+
+### 5. Единая страница детальной инфы + результатов ДЗ (2026-04-07)
+- `TutorHomeworkResults.tsx` **удалён**. Каноническая страница ДЗ для репетитора — `TutorHomeworkDetail.tsx` на URL `/tutor/homework/:id`. Она содержит v2-шапку (`ResultsHeader` с метриками Сдали/Средний балл/Не приступали/Требует внимания + actions Редактировать/Удалить), `ResultsActionBlock` (danger-пункты «не приступал» с tabs Telegram/Email в диалоге), collapsible секцию задач, материалы и список учеников с `GuidedThreadViewer`
+- Route `/tutor/homework/:id/results` остался как redirect на `/tutor/homework/:id` — для backward compat с Telegram-ссылками из `homework-reminder`
+- Semantic invariant метрики «Требует внимания» в шапке = `notStarted + per_student.filter(s => s.needs_attention).length`. Backend считает `needs_attention` только для сдавших — frontend обязан прибавлять `notStarted` (не сдавших), иначе метрика рассогласована с action block. Подробности: `.claude/rules/40-homework-system.md` → секция «Merged Detail + Results страница»
 
 ## Известные хрупкие области
 

@@ -16,6 +16,10 @@ import {
   renderHomeworkReminder,
   type HomeworkReminderData,
 } from './transactional-email-templates/homework-reminder.ts';
+import {
+  renderHomeworkTutorMessage,
+  type HomeworkTutorMessageData,
+} from './transactional-email-templates/homework-tutor-message.ts';
 
 // ─── Types ───────────────────────────────────────────────────
 
@@ -30,6 +34,9 @@ export type HomeworkNotificationInput = Omit<HomeworkNotificationData, 'unsubscr
 
 /** Data for homework reminder email (unsubscribeUrl added internally). */
 export type HomeworkReminderInput = Omit<HomeworkReminderData, 'unsubscribeUrl'>;
+
+/** Data for tutor-authored homework reminder message (unsubscribeUrl added internally). */
+export type HomeworkTutorMessageInput = Omit<HomeworkTutorMessageData, 'unsubscribeUrl'>;
 
 // ─── Constants ───────────────────────────────────────────────
 
@@ -202,6 +209,54 @@ export async function sendHomeworkNotificationEmail(
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     console.error('sendHomeworkNotificationEmail_error', { to, assignmentId, error: msg });
+    return { success: false, error: msg };
+  }
+}
+
+/**
+ * Render and enqueue a tutor-authored homework reminder message email.
+ * Used by Homework Results v2 RemindStudentDialog email-fallback path
+ * (student has no Telegram link). Skips temp emails (@temp.sokratai.ru)
+ * and suppressed addresses.
+ *
+ * Idempotency key includes a timestamp because a tutor may legitimately
+ * send multiple reminder emails for the same assignment+student.
+ */
+export async function sendHomeworkTutorMessageEmail(
+  db: SupabaseClient,
+  to: string,
+  data: HomeworkTutorMessageInput,
+  assignmentId: string,
+): Promise<EmailResult> {
+  try {
+    const skip = await preSendChecks(db, to);
+    if (skip) return skip;
+
+    const unsubToken = await getOrCreateUnsubscribeToken(db, to);
+    const unsubscribeUrl = buildUnsubscribeUrl(unsubToken);
+
+    const rendered = renderHomeworkTutorMessage({ ...data, unsubscribeUrl });
+
+    const payload: EnqueuePayload = {
+      message_id: crypto.randomUUID(),
+      run_id: crypto.randomUUID(),
+      to,
+      from: SENDER_FROM,
+      sender_domain: SENDER_DOMAIN,
+      subject: rendered.subject,
+      html: rendered.html,
+      text: rendered.text,
+      purpose: 'transactional',
+      label: 'homework-tutor-message',
+      idempotency_key: `hw-tutor-msg-${assignmentId}-${to}-${Date.now()}`,
+      unsubscribe_token: unsubToken,
+      queued_at: new Date().toISOString(),
+    };
+
+    return await enqueue(db, payload);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error('sendHomeworkTutorMessageEmail_error', { to, assignmentId, error: msg });
     return { success: false, error: msg };
   }
 }

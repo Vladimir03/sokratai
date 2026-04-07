@@ -64,9 +64,37 @@
 
 ### LaTeX в деталях и результатах ДЗ (Sprint 1, 2026-03-17)
 - `TutorHomeworkDetail.tsx` — task_text, correct_answer, student_text, ai_feedback рендерятся через `MathText`
-- `TutorHomeworkResults.tsx` — student_text, ai_feedback через `MathText`; task header в review-карточке — `stripLatex` (compact plain-text preview)
 - `TutorHomework.tsx` — сортировка (created_desc / deadline_asc) + deadline urgency badges (overdue/today/soon/normal)
 - **Правило**: dense surfaces (collapsed card headers, lists) → `stripLatex` + truncation; expanded/detail views → полный `MathText`
+
+### Merged Detail + Results страница (2026-04-07)
+- `TutorHomeworkResults.tsx` **удалён**. Полезная функциональность (v2-шапка `ResultsHeader`, `ResultsActionBlock`, hint chip «Много подсказок», telemetry `results_v2_opened`) переехала в `TutorHomeworkDetail.tsx`. Причина: на `/tutor/homework/:id/results` из UI никто не линковал — туда вели только Telegram deep links
+- Каноничный URL для детальной страницы ДЗ — `/tutor/homework/:id`
+- Route `/tutor/homework/:id/results` оставлен как `<Navigate to="/tutor/homework/:id" replace>` (local helper `RedirectHomeworkResultsToDetail` в `App.tsx`) — backward compat для старых Telegram/push уведомлений
+- `ResultsHeader` получил optional `rightSlot?: ReactNode` + `backTo?: string`. Detail передаёт `rightSlot={<DetailActions status=... />}` — внутри status badge («Черновик»/«Активное»/«Завершено») + «Редактировать» + «Удалить ДЗ». На мобиле кнопки = icon-only (`hidden md:inline` для текста)
+- Секция «Задачи» в Detail — **collapsible**, свёрнута по умолчанию (`useState(false)`). Раскрытие по клику на заголовок с chevron
+- **Semantic invariant: метрика «Требует внимания»** в шапке = `notStarted + per_student.filter(s => s.needs_attention).length`. Backend считает `needs_attention` только для сдавших (`final_score < 0.3 × max_score` OR `hint_total >= ceil(tasks.length * 0.6)`) и явно ставит `false` для не сдавших. Поэтому frontend **обязан** прибавлять `notStarted` — иначе метрика в шапке не согласуется с action block ниже (который рендерит один danger-пункт на каждого не сдавшего)
+- Условия попадания в «Требует внимания» (логическое ИЛИ):
+  1. Не приступал (нет completed thread) — `notStarted` на frontend
+  2. Сдал с `final_score < 30% max_score` — `lowScore` в backend
+  3. Сдал + `hint_total >= ceil(tasks.length * 0.6)` — `overuse` в backend
+- Query key unification: Detail использует `['tutor','homework','detail', id]` для assignment query, `['tutor','homework','results', id]` для results query. `TutorHomeworkResults` раньше использовал `['tutor','homework','assignment', id]` — этот ключ **больше не используется**, не копировать в новый код
+- `hintTotalByStudent: Map<string, number>` строится в родительском компоненте из `results.per_student` и прокидывается в `StudentsList` — чип «Много подсказок» рендерится рядом с delivery badge при `hintTotal >= hintOveruseThreshold(taskCount)`
+- Defensive guards обязательны: `results.per_student ?? []` в telemetry useEffect и memo `hintTotalByStudent`, `perStudent ?? []` + `assignedStudents ?? []` в `ResultsActionBlock.useMemo` — backend может транзиентно вернуть response без `per_student` поля
+
+### Реминдер ученику с выбором канала (2026-04-07)
+- `RemindStudentDialog.tsx` — Radix Dialog с **tabs** `[Telegram] [Email]` сверху. Дефолтная активная вкладка = Telegram если `hasTelegram`, иначе Email. Недоступные табы рендерятся `disabled` + `aria-disabled` + `title="У ученика не привязан Telegram" / "У ученика нет email"`
+- Props: `hasTelegram: boolean` + `hasEmail: boolean` (заменили старый single `channel` prop)
+- `<textarea>` использует `text-base` (16px) — iOS Safari auto-zoom prevention
+- `ResultsActionBlock.tsx` — кнопка «Напомнить» на row дизейблится если `!hasTelegram && !hasEmail`, с `title="Нет каналов для уведомления"` и иконкой `MailX`. Label: оба канала → `Напомнить`, только email → `Напомнить на email`, ни одного → `Нет каналов`
+- Backend `handleGetAssignment` возвращает два флага на каждого assigned student: `has_telegram_link` (через `profiles.telegram_user_id` OR `telegram_sessions.user_id`) и `has_email` (через `auth.admin.getUserById` с фильтром `@temp.sokratai.ru`)
+- Backend `POST /assignments/:id/students/:sid/remind` принимает optional `channel: 'auto' | 'telegram' | 'email'` в body. **`'auto'` (default)** = cascade Telegram → Email (текущее поведение). **`'telegram'` explicit** = только Telegram, 422 `NO_TELEGRAM` если не привязан, 502 `TELEGRAM_FAILED` без fallback на email. **`'email'` explicit** = только Email, 422 `NO_EMAIL` если нет email
+- Push-канал **вне скоупа P0** (отложен в P1) — в UI только Telegram + Email
+- Telemetry `telegram_reminder_sent_from_results` принимает `channel: res.channel` из ответа (не из выбранной tab — backend может fallback'нуться в auto-режиме)
+
+### Fallback для legacy subject ids (2026-04-07)
+- `src/types/homework.ts` — `LEGACY_SUBJECT_LABELS: Record<string, string>` для устаревших ключей предметов (`math` → `Математика`, `rus` → `Русский язык`). Применяется в `getSubjectLabel()` как второй fallback после `SUBJECT_NAME_MAP`
+- Существующие ДЗ с `subject: 'math'` (до разделения на `algebra`/`geometry`) теперь рендерятся с русским лейблом, не с raw english id
 
 ### GuidedThreadViewer — UX improvements (Sprint 2, 2026-03-17)
 - Убран лишний клик «Показать переписку» — тред загружается автоматически при раскрытии ученика

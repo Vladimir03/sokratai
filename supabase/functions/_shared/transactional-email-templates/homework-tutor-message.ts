@@ -1,0 +1,131 @@
+/**
+ * Email template: tutor-authored reminder message attached to a homework
+ * assignment. The body is free-text written by the tutor inside the
+ * RemindStudentDialog and rendered via this template when the student has no
+ * Telegram link (email fallback per Homework Results v2 AC-7).
+ *
+ * Pure function — no side effects, no DB calls.
+ * Returns pre-rendered { subject, html, text } ready for enqueue.
+ */
+
+// ─── Types ───────────────────────────────────────────────────
+
+export interface HomeworkTutorMessageData {
+  tutorName: string;
+  studentName: string;
+  assignmentTitle: string;
+  /** Free-text message authored by the tutor. Plain text, may include newlines. */
+  message: string;
+  homeworkUrl: string;
+  unsubscribeUrl: string;
+}
+
+export interface RenderedEmail {
+  subject: string;
+  html: string;
+  text: string;
+}
+
+// ─── Private helpers ─────────────────────────────────────────
+
+function esc(s: string): string {
+  return s
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+/** Escape and convert newlines to <br> for HTML body rendering. */
+function escMultiline(s: string): string {
+  return esc(s).replace(/\r?\n/g, '<br>');
+}
+
+function wrapEmail(previewText: string, bodyHtml: string): string {
+  return `<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="color-scheme" content="light">
+<meta name="supported-color-schemes" content="light">
+<!--[if mso]><noscript><xml><o:OfficeDocumentSettings><o:PixelsPerInch>96</o:PixelsPerInch></o:OfficeDocumentSettings></xml></noscript><![endif]-->
+<title>${esc(previewText)}</title>
+</head>
+<body style="margin:0;padding:0;background-color:#f4f4f5;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;-webkit-font-smoothing:antialiased;">
+<div style="display:none;max-height:0;overflow:hidden;">${esc(previewText)}</div>
+<table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="background-color:#f4f4f5;">
+<tr><td align="center" style="padding:24px 16px;">
+<table role="presentation" cellpadding="0" cellspacing="0" width="600" style="max-width:600px;width:100%;background-color:#ffffff;border-radius:8px;overflow:hidden;">
+${bodyHtml}
+</table>
+</td></tr>
+</table>
+</body>
+</html>`;
+}
+
+function ctaButton(label: string, url: string): string {
+  return `<table role="presentation" cellpadding="0" cellspacing="0" style="margin:24px 0;">
+<tr><td style="background-color:#1B6B4A;border-radius:6px;text-align:center;">
+<a href="${esc(url)}" target="_blank" style="display:inline-block;padding:12px 32px;color:#ffffff;font-size:16px;font-weight:600;text-decoration:none;border-radius:6px;">${esc(label)}</a>
+</td></tr>
+</table>`;
+}
+
+function footer(unsubscribeUrl: string): string {
+  return `<tr><td style="padding:0 32px;">
+<hr style="border:none;border-top:1px solid #e4e4e7;margin:0;">
+</td></tr>
+<tr><td style="padding:20px 32px 24px;color:#71717a;font-size:13px;line-height:1.5;">
+Сократ — AI-помощник для подготовки к ЕГЭ и ОГЭ<br>
+<a href="${esc(unsubscribeUrl)}" style="color:#71717a;text-decoration:underline;">Отписаться от уведомлений</a>
+</td></tr>`;
+}
+
+// ─── Public API ──────────────────────────────────────────────
+
+export function renderHomeworkTutorMessage(
+  data: HomeworkTutorMessageData,
+): RenderedEmail {
+  const { tutorName, studentName, assignmentTitle, message, homeworkUrl, unsubscribeUrl } = data;
+
+  const subjectLine = `Сообщение от ${tutorName} — ${assignmentTitle}`;
+
+  const html = wrapEmail(
+    subjectLine,
+    `
+<tr><td style="padding:32px 32px 8px;">
+<h1 style="margin:0;font-size:22px;font-weight:700;color:#0f172a;line-height:1.3;">Сообщение от репетитора</h1>
+</td></tr>
+<tr><td style="padding:0 32px 8px;font-size:15px;line-height:1.5;color:#27272a;">
+${esc(studentName)}, у тебя сообщение от <strong>${esc(tutorName)}</strong> по заданию <strong>${esc(assignmentTitle)}</strong>:
+</td></tr>
+<tr><td style="padding:8px 32px 0;">
+<table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="background-color:#f8fafc;border:1px solid #e2e8f0;border-radius:6px;">
+<tr><td style="padding:16px 20px;font-size:15px;line-height:1.55;color:#0f172a;white-space:pre-wrap;">
+${escMultiline(message)}
+</td></tr>
+</table>
+</td></tr>
+<tr><td style="padding:0 32px;">
+${ctaButton('Открыть ДЗ', homeworkUrl)}
+</td></tr>
+${footer(unsubscribeUrl)}
+`,
+  );
+
+  const text = [
+    `Сообщение от ${tutorName} по заданию «${assignmentTitle}»`,
+    '',
+    message,
+    '',
+    `Открыть ДЗ: ${homeworkUrl}`,
+    '',
+    '---',
+    'Сократ — AI-помощник для подготовки к ЕГЭ и ОГЭ',
+    `Отписаться: ${unsubscribeUrl}`,
+  ].join('\n');
+
+  return { subject: subjectLine, html, text };
+}

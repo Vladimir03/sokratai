@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter, Routes, Route } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate, useParams } from "react-router-dom";
 import { lazy, Suspense } from "react";
 import ErrorBoundary from "@/components/ErrorBoundary";
 
@@ -46,8 +46,14 @@ const TutorPayments = lazy(() => import("./pages/tutor/TutorPayments"));
 const TutorHomework = lazy(() => import("./pages/tutor/TutorHomework"));
 const TutorHomeworkCreate = lazy(() => import("./pages/tutor/TutorHomeworkCreate"));
 const TutorHomeworkDetail = lazy(() => import("./pages/tutor/TutorHomeworkDetail"));
-const TutorHomeworkResults = lazy(() => import("./pages/tutor/TutorHomeworkResults"));
 const TutorHomeworkTemplates = lazy(() => import("./pages/tutor/TutorHomeworkTemplates"));
+
+// Redirect legacy /tutor/homework/:id/results links (Telegram reminders,
+// push notifications) to the unified Detail page.
+function RedirectHomeworkResultsToDetail() {
+  const { id } = useParams<{ id: string }>();
+  return <Navigate to={`/tutor/homework/${id ?? ''}`} replace />;
+}
 const TutorAssistant = lazy(() => import("./pages/tutor/TutorAssistant"));
 const KnowledgeBasePage = lazy(() => import("./pages/tutor/knowledge/KnowledgeBasePage"));
 const CatalogTopicPage = lazy(() => import("./pages/tutor/knowledge/CatalogTopicPage"));
@@ -340,11 +346,7 @@ const App = () => (
             />
             <Route
               path="/tutor/homework/:id/results"
-              element={
-                <Suspense fallback={<PageLoader />}>
-                  <TutorHomeworkResults />
-                </Suspense>
-              }
+              element={<RedirectHomeworkResultsToDetail />}
             />
             <Route
               path="/tutor/assistant"

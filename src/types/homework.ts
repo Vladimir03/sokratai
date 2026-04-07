@@ -27,9 +27,19 @@ export const SUBJECT_NAME_MAP: Record<string, string> = Object.fromEntries(
   SUBJECTS.map((s) => [s.id, s.name]),
 );
 
+/**
+ * Legacy subject ids that were used before the subject list was split
+ * (e.g. general "math" split into algebra/geometry). Map them to a sensible
+ * Russian label so existing assignments don't render raw english ids in UI.
+ */
+const LEGACY_SUBJECT_LABELS: Record<string, string> = {
+  math: 'Математика',
+  rus: 'Русский язык',
+};
+
 /** Get human-readable Russian subject name; falls back to raw id */
 export function getSubjectLabel(id: string): string {
-  return SUBJECT_NAME_MAP[id] ?? id;
+  return SUBJECT_NAME_MAP[id] ?? LEGACY_SUBJECT_LABELS[id] ?? id;
 }
 
 export type StudentAssignmentStatus = 'draft' | 'active' | 'closed';

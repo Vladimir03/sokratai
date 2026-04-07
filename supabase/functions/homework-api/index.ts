@@ -5,7 +5,10 @@ import {
   generateHint,
 } from "./guided_ai.ts";
 import { sendPushNotification, type PushSubscriptionData, type PushPayload } from "../_shared/push-sender.ts";
-import { sendHomeworkNotificationEmail } from "../_shared/email-sender.ts";
+import {
+  sendHomeworkNotificationEmail,
+  sendHomeworkTutorMessageEmail,
+} from "../_shared/email-sender.ts";
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
@@ -626,12 +629,43 @@ async function handleGetAssignment(
     const studentIds = studentAssignments.map((sa) => sa.student_id);
     const { data: profiles } = await db
       .from("profiles")
-      .select("id, username")
+      .select("id, username, telegram_user_id")
       .in("id", studentIds);
 
     const profileMap: Record<string, string | null> = {};
+    const telegramFromProfile: Record<string, boolean> = {};
     for (const p of profiles ?? []) {
       profileMap[p.id] = p.username;
+      if (p.telegram_user_id != null) telegramFromProfile[p.id] = true;
+    }
+
+    // Resolve has_telegram_link via profiles.telegram_user_id OR
+    // telegram_sessions.user_id (used by web Telegram login flow).
+    const { data: tgSessions } = await db
+      .from("telegram_sessions")
+      .select("user_id, telegram_user_id")
+      .in("user_id", studentIds);
+
+    const telegramFromSessions: Record<string, boolean> = {};
+    for (const s of tgSessions ?? []) {
+      if (s.telegram_user_id != null) {
+        telegramFromSessions[s.user_id as string] = true;
+      }
+    }
+
+    // Resolve has_email via auth.users.email (skip placeholder temp emails so
+    // "Напомнить на email" doesn't offer a dead channel for Telegram-only users).
+    const emailByUser: Record<string, boolean> = {};
+    for (const uid of studentIds) {
+      try {
+        const { data: userRes } = await db.auth.admin.getUserById(uid);
+        const email = userRes?.user?.email;
+        if (email && !email.endsWith("@temp.sokratai.ru")) {
+          emailByUser[uid] = true;
+        }
+      } catch {
+        // treat lookup failure as "no email" — channel will just be unavailable
+      }
     }
 
     assignedStudents = studentAssignments.map((sa) => ({
@@ -641,6 +675,10 @@ async function handleGetAssignment(
       notified_at: sa.notified_at,
       delivery_status: sa.delivery_status,
       delivery_error_code: sa.delivery_error_code,
+      has_telegram_link:
+        Boolean(telegramFromProfile[sa.student_id]) ||
+        Boolean(telegramFromSessions[sa.student_id]),
+      has_email: Boolean(emailByUser[sa.student_id]),
     }));
   }
 
@@ -1649,7 +1687,322 @@ function escapeHtmlEntities(text: string): string {
     .replace(/>/g, "&gt;");
 }
 
+// ─── Endpoint: POST /assignments/:id/students/:sid/remind ────────────────────
+//
+// Per-student re-engagement reminder used by Homework Results v2 action block
+// (RemindStudentDialog). The tutor authors a free-text message and we deliver
+// it via Telegram (preferred) or email-fallback (AC-7) in a single attempt.
+//
+// Differences vs. handleNotifyStudents:
+//   - targets exactly one student (already in the assignment)
+//   - tutor message is plain text (no HTML parse_mode)
+//   - does NOT mutate notified / notified_at / delivery_status — this is a
+//     re-engagement nudge, not initial delivery
+//   - returns the resolved channel so the frontend can show a channel-specific
+//     toast and emit telemetry without PII
+//
+// Body: { message: string } (1..2000 chars, trimmed)
+// Response: { success, channel: 'telegram' | 'email', reason? }
+
+const REMIND_MESSAGE_MIN_CHARS = 1;
+const REMIND_MESSAGE_MAX_CHARS = 2000;
+
+async function handleRemindStudent(
+  db: SupabaseClient,
+  tutorUserId: string,
+  assignmentId: string,
+  studentId: string,
+  body: unknown,
+  cors: Record<string, string>,
+): Promise<Response> {
+  if (!isUUID(studentId)) {
+    return jsonError(cors, 400, "VALIDATION", "studentId is not a valid UUID");
+  }
+
+  const assignmentOrErr = await getOwnedAssignmentOrThrow(db, assignmentId, tutorUserId, cors);
+  if (assignmentOrErr instanceof Response) return assignmentOrErr;
+  const assignment = assignmentOrErr;
+
+  const b = (body && typeof body === "object") ? body as Record<string, unknown> : {};
+  if (!isNonEmptyString(b.message)) {
+    return jsonError(cors, 400, "VALIDATION", "message must be a non-empty string");
+  }
+  const message = (b.message as string).trim();
+  if (message.length < REMIND_MESSAGE_MIN_CHARS) {
+    return jsonError(cors, 400, "VALIDATION", "message is empty after trim");
+  }
+  if (message.length > REMIND_MESSAGE_MAX_CHARS) {
+    return jsonError(
+      cors,
+      400,
+      "VALIDATION",
+      `message must be at most ${REMIND_MESSAGE_MAX_CHARS} characters`,
+    );
+  }
+
+  // Optional channel override. `'auto'` (default) = cascade telegram → email.
+  // Explicit `'telegram'` / `'email'` forces that channel only — no fallback.
+  const rawChannel = typeof b.channel === "string" ? b.channel : "auto";
+  const channelPreference: "auto" | "telegram" | "email" =
+    rawChannel === "telegram" || rawChannel === "email" ? rawChannel : "auto";
+
+  // Confirm the student is actually assigned to this homework. Avoids
+  // accidentally messaging students from other tutors via id-spoofing.
+  const { data: studentAssignmentRow, error: saError } = await db
+    .from("homework_tutor_student_assignments")
+    .select("id, student_id")
+    .eq("assignment_id", assignmentId)
+    .eq("student_id", studentId)
+    .maybeSingle();
+
+  if (saError) {
+    console.error("homework_remind_student_sa_error", {
+      assignment_id: assignmentId,
+      student_id: studentId,
+      error: saError.message,
+    });
+    return jsonError(cors, 500, "DB_ERROR", "Failed to validate student assignment");
+  }
+  if (!studentAssignmentRow) {
+    return jsonError(cors, 404, "NOT_FOUND", "Student is not assigned to this homework");
+  }
+
+  // ── Resolve channels for this student ─────────────────────────────────────
+  const dbService = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
+    auth: { persistSession: false },
+  });
+
+  const { data: studentProfile } = await db
+    .from("profiles")
+    .select("id, telegram_user_id")
+    .eq("id", studentId)
+    .maybeSingle();
+
+  let chatId: number | null =
+    studentProfile?.telegram_user_id != null
+      ? (studentProfile.telegram_user_id as number)
+      : null;
+
+  if (chatId == null) {
+    const { data: sessionRow } = await db
+      .from("telegram_sessions")
+      .select("telegram_user_id")
+      .eq("user_id", studentId)
+      .maybeSingle();
+    if (sessionRow?.telegram_user_id != null) {
+      chatId = sessionRow.telegram_user_id as number;
+    }
+  }
+
+  let studentEmail: string | null = null;
+  try {
+    const { data } = await dbService.auth.admin.getUserById(studentId);
+    if (data?.user?.email && !data.user.email.endsWith("@temp.sokratai.ru")) {
+      studentEmail = data.user.email;
+    }
+  } catch {
+    // ignore — student simply has no email fallback
+  }
+
+  if (chatId == null && !studentEmail) {
+    console.warn("homework_remind_student_no_channel", {
+      assignment_id: assignmentId,
+      student_id: studentId,
+    });
+    return jsonError(
+      cors,
+      422,
+      "NO_CHANNEL",
+      "Student has neither a Telegram link nor a usable email",
+    );
+  }
+
+  // Honor explicit channel preference: if the tutor picked a channel in the
+  // dialog tab and it's unavailable, fail fast (no silent fallback — the UI
+  // should never offer a tab for a channel that's unusable).
+  if (channelPreference === "telegram" && chatId == null) {
+    return jsonError(cors, 422, "NO_TELEGRAM", "Student has no Telegram link");
+  }
+  if (channelPreference === "email" && !studentEmail) {
+    return jsonError(cors, 422, "NO_EMAIL", "Student has no usable email");
+  }
+
+  // ── Try Telegram first (skipped if tutor picked email explicitly) ────────
+  if (chatId != null && channelPreference !== "email") {
+    try {
+      const payload: Record<string, unknown> = {
+        chat_id: chatId,
+        text: message, // plain text — tutor authored, no HTML parse_mode
+      };
+
+      let lastResp: Response | null = null;
+      const maxAttempts = 2;
+      for (let attempt = 0; attempt < maxAttempts; attempt++) {
+        lastResp = await fetch(
+          `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+          },
+        );
+        if (lastResp.ok) break;
+
+        const status = lastResp.status;
+        if (attempt < maxAttempts - 1 && (status === 429 || status >= 500)) {
+          console.warn("homework_remind_student_telegram_retry", {
+            assignment_id: assignmentId,
+            student_id: studentId,
+            attempt: attempt + 1,
+            status,
+          });
+          await new Promise((r) => setTimeout(r, 500));
+          continue;
+        }
+        break;
+      }
+
+      if (lastResp?.ok) {
+        console.log("homework_remind_student_ok", {
+          assignment_id: assignmentId,
+          student_id: studentId,
+          channel: "telegram",
+        });
+        return jsonOk(cors, { success: true, channel: "telegram" });
+      }
+
+      const errBody = await lastResp?.text().catch(() => "unknown");
+      console.error("homework_remind_student_telegram_failed", {
+        assignment_id: assignmentId,
+        student_id: studentId,
+        status: lastResp?.status,
+        error: errBody,
+      });
+      if (channelPreference === "telegram") {
+        return jsonError(
+          cors,
+          502,
+          "TELEGRAM_FAILED",
+          "Failed to deliver via Telegram",
+        );
+      }
+      // fall through to email fallback (auto cascade only)
+    } catch (err) {
+      console.error("homework_remind_student_telegram_error", {
+        assignment_id: assignmentId,
+        student_id: studentId,
+        error: String(err),
+      });
+      if (channelPreference === "telegram") {
+        return jsonError(
+          cors,
+          502,
+          "TELEGRAM_FAILED",
+          "Failed to deliver via Telegram",
+        );
+      }
+      // fall through to email fallback (auto cascade only)
+    }
+  }
+
+  // ── Email fallback ────────────────────────────────────────────────────────
+  if (studentEmail) {
+    // Resolve student/tutor display names for the email body. Falls back to
+    // safe placeholders so we never leak raw uuids or block on missing rows.
+    const { data: studentProfileForName } = await dbService
+      .from("profiles")
+      .select("display_name, username")
+      .eq("id", studentId)
+      .maybeSingle();
+    const studentName =
+      (studentProfileForName?.display_name as string) ||
+      (studentProfileForName?.username as string) ||
+      "Ученик";
+
+    const { data: tutorProfile } = await dbService
+      .from("profiles")
+      .select("display_name")
+      .eq("id", tutorUserId)
+      .maybeSingle();
+    const tutorName = (tutorProfile?.display_name as string) || "Репетитор";
+
+    const appUrl =
+      Deno.env.get("PUBLIC_APP_URL")?.trim().replace(/\/$/, "") ??
+      "https://sokratai.lovable.app";
+    const homeworkUrl = `${appUrl}/homework/${assignmentId}`;
+
+    const emailResult = await sendHomeworkTutorMessageEmail(
+      dbService,
+      studentEmail,
+      {
+        tutorName,
+        studentName,
+        assignmentTitle: assignment.title as string,
+        message,
+        homeworkUrl,
+      },
+      assignmentId,
+    );
+
+    if (emailResult.success && !emailResult.skipped) {
+      console.log("homework_remind_student_ok", {
+        assignment_id: assignmentId,
+        student_id: studentId,
+        channel: "email",
+      });
+      return jsonOk(cors, { success: true, channel: "email" });
+    }
+
+    console.error("homework_remind_student_email_failed", {
+      assignment_id: assignmentId,
+      student_id: studentId,
+      skipped: emailResult.skipped,
+      error: emailResult.error,
+    });
+    return jsonError(
+      cors,
+      502,
+      "EMAIL_FAILED",
+      emailResult.skipped
+        ? `Email skipped: ${emailResult.skipped}`
+        : `Email send failed: ${emailResult.error ?? "unknown"}`,
+    );
+  }
+
+  // Telegram failed AND no email available
+  return jsonError(
+    cors,
+    502,
+    "TELEGRAM_FAILED",
+    "Failed to deliver via Telegram and no email fallback available",
+  );
+}
+
 // ─── Endpoint: GET /assignments/:id/results ──────────────────────────────────
+
+interface TaskStateScoreFields {
+  thread_id: string;
+  task_id: string;
+  earned_score: number | null;
+  status: string | null;
+  ai_score: number | null;
+  tutor_score_override: number | null;
+  hint_count: number | null;
+  attempts: number | null;
+}
+
+/**
+ * Compute the final score for a single task state with the priority chain
+ * tutor_score_override → ai_score → earned_score → status fallback. Used by
+ * both per-student and per-task aggregations so the shapes stay consistent.
+ */
+function computeFinalScore(ts: TaskStateScoreFields, maxScore: number): number {
+  if (ts.tutor_score_override != null) return Number(ts.tutor_score_override);
+  if (ts.ai_score != null) return Number(ts.ai_score);
+  if (ts.earned_score != null) return Number(ts.earned_score);
+  if (ts.status === "completed") return maxScore;
+  return 0;
+}
 
 async function handleGetResults(
   db: SupabaseClient,
@@ -1672,6 +2025,16 @@ async function handleGetResults(
     taskMap[t.id] = { order_num: t.order_num, task_text: t.task_text, max_score: t.max_score };
   }
 
+  // Sum of max_score across all tasks in the assignment (used as fallback
+  // denominator when a student does not yet have any task_states).
+  const assignmentMaxScoreTotal = (tasks ?? []).reduce(
+    (sum, t) => sum + (t.max_score ?? 0),
+    0,
+  );
+
+  // Hint overuse threshold per spec: ceil(tasks.length * 0.6).
+  const hintOveruseThreshold = Math.max(1, Math.ceil((tasks?.length ?? 0) * 0.6));
+
   let totalScoreSum = 0;
   let totalScoreCount = 0;
   const distribution = { "0-24": 0, "25-49": 0, "50-74": 0, "75-100": 0 };
@@ -1679,10 +2042,25 @@ async function handleGetResults(
   // Guided chat: gather completed thread data for summary and perTask aggregates
   const guidedTaskScores: Record<string, { scoreSum: number; scoreCount: number; correctCount: number; total: number }> = {};
 
+  const perStudent: {
+    student_id: string;
+    submitted: boolean;
+    final_score_total: number;
+    max_score_total: number;
+    hint_total: number;
+    needs_attention: boolean;
+  }[] = [];
+
   const { data: studentAssignments } = await db
     .from("homework_tutor_student_assignments")
     .select("id, student_id")
     .eq("assignment_id", assignmentId);
+
+  // Map student_assignment_id → student_id for joining threads → students.
+  const studentBySa: Record<string, string> = {};
+  for (const sa of studentAssignments ?? []) {
+    studentBySa[sa.id] = sa.student_id;
+  }
 
   if (studentAssignments && studentAssignments.length > 0) {
     const saIds = studentAssignments.map((sa) => sa.id);
@@ -1693,45 +2071,54 @@ async function handleGetResults(
       .in("student_assignment_id", saIds)
       .eq("status", "completed");
 
+    // student_id → aggregate accumulator (built only for submitted students).
+    const studentAcc: Record<string, { final: number; max: number; hints: number }> = {};
+
     if (completedThreads && completedThreads.length > 0) {
       const threadIds = completedThreads.map((t) => t.id);
 
       const { data: allTaskStates } = await db
         .from("homework_tutor_task_states")
-        .select("thread_id, task_id, earned_score, status")
+        .select(
+          "thread_id, task_id, earned_score, status, ai_score, tutor_score_override, hint_count, attempts",
+        )
         .in("thread_id", threadIds);
 
       // Group task states by thread
-      const statesByThread: Record<string, Array<{ thread_id: string; task_id: string; earned_score: number | null; status: string | null }>> = {};
+      const statesByThread: Record<string, TaskStateScoreFields[]> = {};
       for (const ts of allTaskStates ?? []) {
-        if (!statesByThread[ts.thread_id]) statesByThread[ts.thread_id] = [];
-        statesByThread[ts.thread_id]!.push(ts as { thread_id: string; task_id: string; earned_score: number | null; status: string | null });
+        const row = ts as TaskStateScoreFields;
+        if (!statesByThread[row.thread_id]) statesByThread[row.thread_id] = [];
+        statesByThread[row.thread_id]!.push(row);
       }
 
       for (const thread of completedThreads) {
         const states = statesByThread[thread.id] ?? [];
+        const studentId = studentBySa[thread.student_assignment_id];
 
-        let threadEarned = 0;
+        let threadFinal = 0;
         let threadMaxTotal = 0;
+        let threadHints = 0;
 
         for (const ts of states) {
-          const earned = Number(ts.earned_score ?? 0);
-          threadEarned += earned;
-
           const taskInfo = taskMap[ts.task_id];
           const maxScore = taskInfo?.max_score ?? 1;
+          const finalScore = computeFinalScore(ts, maxScore);
+
+          threadFinal += finalScore;
           threadMaxTotal += maxScore;
+          threadHints += Number(ts.hint_count ?? 0);
 
           if (taskInfo) {
-            // Aggregate for perTask
+            // Aggregate for perTask using the same final-score helper.
             if (!guidedTaskScores[ts.task_id]) {
               guidedTaskScores[ts.task_id] = { scoreSum: 0, scoreCount: 0, correctCount: 0, total: 0 };
             }
             guidedTaskScores[ts.task_id].total++;
             if (ts.status === "completed") {
-              guidedTaskScores[ts.task_id].scoreSum += earned;
+              guidedTaskScores[ts.task_id].scoreSum += finalScore;
               guidedTaskScores[ts.task_id].scoreCount++;
-              if (earned > 0) {
+              if (finalScore > 0) {
                 guidedTaskScores[ts.task_id].correctCount++;
               }
             }
@@ -1739,7 +2126,7 @@ async function handleGetResults(
         }
 
         if (threadMaxTotal > 0) {
-          const pct = (threadEarned / threadMaxTotal) * 100;
+          const pct = (threadFinal / threadMaxTotal) * 100;
           totalScoreSum += pct;
           totalScoreCount++;
 
@@ -1748,6 +2135,45 @@ async function handleGetResults(
           else if (pct < 75) distribution["50-74"]++;
           else distribution["75-100"]++;
         }
+
+        if (studentId) {
+          // Multiple completed threads per student should not happen, but if
+          // they do, accumulate so we still return one entry per student.
+          if (!studentAcc[studentId]) {
+            studentAcc[studentId] = { final: 0, max: 0, hints: 0 };
+          }
+          studentAcc[studentId].final += threadFinal;
+          studentAcc[studentId].max += threadMaxTotal;
+          studentAcc[studentId].hints += threadHints;
+        }
+      }
+    }
+
+    // Build per_student in the same order as student_assignments. Students
+    // without a completed thread → submitted=false, scores=0, max=assignment
+    // total (so the frontend can still render a sensible "0 / N").
+    for (const sa of studentAssignments) {
+      const acc = studentAcc[sa.student_id];
+      if (acc) {
+        const lowScore = acc.max > 0 && acc.final < 0.3 * acc.max;
+        const overuse = acc.hints >= hintOveruseThreshold;
+        perStudent.push({
+          student_id: sa.student_id,
+          submitted: true,
+          final_score_total: Math.round(acc.final * 100) / 100,
+          max_score_total: acc.max,
+          hint_total: acc.hints,
+          needs_attention: lowScore || overuse,
+        });
+      } else {
+        perStudent.push({
+          student_id: sa.student_id,
+          submitted: false,
+          final_score_total: 0,
+          max_score_total: assignmentMaxScoreTotal,
+          hint_total: 0,
+          needs_attention: false,
+        });
       }
     }
   }
@@ -1785,7 +2211,7 @@ async function handleGetResults(
     assignment_id: assignmentId,
   });
 
-  return jsonOk(cors, { summary, per_task: perTask });
+  return jsonOk(cors, { summary, per_task: perTask, per_student: perStudent });
 }
 
 // ─── Endpoint: GET /templates ────────────────────────────────────────────────
@@ -4254,6 +4680,12 @@ Deno.serve(async (req: Request): Promise<Response> => {
     if (seg.length === 3 && seg[0] === "assignments" && seg[2] === "notify" && route.method === "POST") {
       const body = await parseJsonBody(req);
       return await handleNotifyStudents(db, userId, seg[1], body, cors);
+    }
+
+    // POST /assignments/:id/students/:sid/remind
+    if (seg.length === 5 && seg[0] === "assignments" && seg[2] === "students" && seg[4] === "remind" && route.method === "POST") {
+      const body = await parseJsonBody(req);
+      return await handleRemindStudent(db, userId, seg[1], seg[3], body, cors);
     }
 
     // GET /assignments/:id/results

@@ -1,7 +1,7 @@
-import { useState, useCallback } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
+import { Link, useParams, useNavigate } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { ArrowLeft, BookOpen, Users, BarChart3, Clock, CheckCircle2, XCircle, AlertCircle, ChevronDown, ChevronUp, WifiOff, Paperclip, ExternalLink, Edit, Trash2, ZoomIn, Bell, Send, Mail } from 'lucide-react';
+import { CheckCircle2, XCircle, AlertCircle, ChevronDown, ChevronUp, WifiOff, Paperclip, ExternalLink, Edit, Trash2, ZoomIn, Bell, Send, Mail, Lightbulb } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -12,6 +12,8 @@ import TutorGuard from '@/components/TutorGuard';
 import { TutorLayout } from '@/components/tutor/TutorLayout';
 import { TutorDataStatus } from '@/components/tutor/TutorDataStatus';
 import { GuidedThreadViewer } from '@/components/tutor/GuidedThreadViewer';
+import { ResultsHeader } from '@/components/tutor/results/ResultsHeader';
+import { ResultsActionBlock } from '@/components/tutor/results/ResultsActionBlock';
 import {
   getTutorHomeworkAssignment,
   getTaskImageSignedUrl,
@@ -24,8 +26,8 @@ import {
   type DeliveryStatus,
   type HomeworkMaterial,
 } from '@/lib/tutorHomeworkApi';
-import { getSubjectLabel } from '@/types/homework';
-import { parseISO } from 'date-fns';
+import { hintOveruseThreshold } from '@/lib/homeworkResultsConstants';
+import { trackGuidedHomeworkEvent } from '@/lib/homeworkTelemetry';
 import { MathText } from '@/components/kb/ui/MathText';
 import {
   createTutorRetry,
@@ -43,13 +45,6 @@ const STATUS_CONFIG: Record<HomeworkAssignmentStatus, { label: string; className
   active: { label: 'Активное', className: 'bg-green-100 text-green-800 border-green-200 dark:bg-green-900/30 dark:text-green-400 dark:border-green-800' },
   closed: { label: 'Завершено', className: 'bg-gray-100 text-gray-600 border-gray-200 dark:bg-gray-800 dark:text-gray-400 dark:border-gray-700' },
 };
-
-function formatDate(d: string | null): string {
-  if (!d) return '—';
-  try {
-    return parseISO(d).toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', year: 'numeric' });
-  } catch { return '—'; }
-}
 
 function DeliveryBadge({ status }: { status: DeliveryStatus | undefined }) {
   if (!status || status === 'pending') return null;
@@ -125,64 +120,61 @@ function DetailSkeleton() {
   );
 }
 
-// ─── Stats Cards ─────────────────────────────────────────────────────────────
+// ─── Detail actions (rightSlot for ResultsHeader) ───────────────────────────
 
-function StatsCards({
-  details,
-  results,
+function DetailActions({
+  status,
+  assignmentId,
+  onDelete,
 }: {
-  details: TutorHomeworkAssignmentDetails;
-  results: TutorHomeworkResultsResponse | undefined;
+  status: HomeworkAssignmentStatus;
+  assignmentId: string;
+  onDelete: () => void;
 }) {
-  const { submissions_summary, assigned_students } = details;
-  const avgScore = results?.summary?.avg_score;
-
+  const cfg = STATUS_CONFIG[status];
   return (
-    <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-      <Card animate={false}>
-        <CardContent className="p-4 text-center">
-          <Users className="h-5 w-5 mx-auto mb-1 text-muted-foreground" />
-          <div className="text-2xl font-bold">{assigned_students.length}</div>
-          <div className="text-xs text-muted-foreground">Назначено</div>
-        </CardContent>
-      </Card>
-      <Card animate={false}>
-        <CardContent className="p-4 text-center">
-          <CheckCircle2 className="h-5 w-5 mx-auto mb-1 text-green-600" />
-          <div className="text-2xl font-bold">{submissions_summary.total}</div>
-          <div className="text-xs text-muted-foreground">Сдали</div>
-        </CardContent>
-      </Card>
-      <Card animate={false}>
-        <CardContent className="p-4 text-center">
-          <BarChart3 className="h-5 w-5 mx-auto mb-1 text-blue-600" />
-          <div className="text-2xl font-bold">
-            {avgScore != null ? `${Math.round(avgScore)}%` : '—'}
-          </div>
-          <div className="text-xs text-muted-foreground">Средний балл</div>
-        </CardContent>
-      </Card>
-      <Card animate={false}>
-        <CardContent className="p-4 text-center">
-          <BookOpen className="h-5 w-5 mx-auto mb-1 text-muted-foreground" />
-          <div className="text-2xl font-bold">{details.tasks.length}</div>
-          <div className="text-xs text-muted-foreground">Задач</div>
-        </CardContent>
-      </Card>
-    </div>
+    <>
+      <Badge variant="outline" className={cfg?.className}>
+        {cfg?.label ?? status}
+      </Badge>
+      <Button variant="outline" size="sm" asChild>
+        <Link to={`/tutor/homework/${assignmentId}/edit`}>
+          <Edit className="h-4 w-4 md:mr-2" />
+          <span className="hidden md:inline">Редактировать</span>
+        </Link>
+      </Button>
+      <Button variant="destructive" size="sm" onClick={onDelete}>
+        <Trash2 className="h-4 w-4 md:mr-2" />
+        <span className="hidden md:inline">Удалить ДЗ</span>
+      </Button>
+    </>
   );
 }
 
 // ─── Tasks List ──────────────────────────────────────────────────────────────
 
 function TasksList({ details }: { details: TutorHomeworkAssignmentDetails }) {
+  const [open, setOpen] = useState(false);
   if (details.tasks.length === 0) return null;
 
   return (
     <Card animate={false}>
-      <CardHeader>
-        <CardTitle className="text-lg">Задачи</CardTitle>
+      <CardHeader className="pb-2">
+        <button
+          type="button"
+          onClick={() => setOpen((v) => !v)}
+          className="w-full flex items-center justify-between gap-2 text-left"
+          aria-expanded={open}
+        >
+          <CardTitle className="text-lg">
+            Задачи <span className="text-muted-foreground font-normal">({details.tasks.length})</span>
+          </CardTitle>
+          <ChevronDown
+            className={`h-5 w-5 text-muted-foreground transition-transform ${open ? 'rotate-180' : ''}`}
+          />
+        </button>
       </CardHeader>
+      {open && (
       <CardContent className="space-y-3">
         {details.tasks.map((task, idx) => (
           <div key={task.id} className="flex gap-3 p-3 rounded-lg bg-muted/30">
@@ -200,6 +192,7 @@ function TasksList({ details }: { details: TutorHomeworkAssignmentDetails }) {
           </div>
         ))}
       </CardContent>
+      )}
     </Card>
   );
 }
@@ -317,11 +310,15 @@ function MaterialsList({ assignmentId, materials }: { assignmentId: string; mate
 
 function StudentsList({
   details,
+  hintTotalByStudent,
 }: {
   details: TutorHomeworkAssignmentDetails;
+  hintTotalByStudent: Map<string, number>;
 }) {
   const [expandedStudents, setExpandedStudents] = useState<Set<string>>(new Set());
   const { assigned_students } = details;
+  const taskCount = details.tasks.length;
+  const threshold = taskCount > 0 ? hintOveruseThreshold(taskCount) : Infinity;
 
   if (assigned_students.length === 0) {
     return (
@@ -351,6 +348,8 @@ function StudentsList({
         <div className="divide-y">
           {assigned_students.map((student) => {
             const isExpanded = expandedStudents.has(student.student_id);
+            const hintTotal = hintTotalByStudent.get(student.student_id) ?? 0;
+            const showHintOveruse = hintTotal >= threshold;
 
             return (
               <div key={student.student_id} className="py-3">
@@ -379,7 +378,16 @@ function StudentsList({
                       </div>
                     </div>
                   </div>
-                  <div className="text-right flex-shrink-0">
+                  <div className="flex items-center gap-2 flex-shrink-0">
+                    {showHintOveruse && (
+                      <span
+                        title={`Подсказок: ${hintTotal}`}
+                        className="inline-flex items-center gap-1 rounded-full bg-amber-100 text-amber-800 px-2 py-0.5 text-xs font-medium"
+                      >
+                        <Lightbulb className="h-3 w-3" />
+                        Много подсказок
+                      </span>
+                    )}
                     <Badge variant="outline" className="bg-blue-100 text-blue-800 border-blue-200 dark:bg-blue-900/30 dark:text-blue-400">
                       Пошаговое ДЗ
                     </Badge>
@@ -443,6 +451,31 @@ function TutorHomeworkDetailContent() {
     : null;
   const isLoading = detailsQuery.isLoading;
 
+  // Per-student lookup for hint totals — drives the "Много подсказок" chip.
+  const hintTotalByStudent = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const s of results?.per_student ?? []) {
+      map.set(s.student_id, s.hint_total);
+    }
+    return map;
+  }, [results]);
+
+  // AC-10 telemetry: fire results_v2_opened exactly once per assignment id.
+  // Payload contains only counts + id — no PII. `per_student` can transiently
+  // be undefined while results are still hydrating, so guard defensively.
+  const trackedAssignmentRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!id || !details || !results) return;
+    if (trackedAssignmentRef.current === id) return;
+    trackedAssignmentRef.current = id;
+    const perStudent = results.per_student ?? [];
+    trackGuidedHomeworkEvent('results_v2_opened', {
+      assignmentId: id,
+      submittedCount: perStudent.filter((s) => s.submitted).length,
+      totalCount: details.assigned_students.length,
+    });
+  }, [id, details, results]);
+
   // ─── Delete dialog ──────────────────────────────────────────────────────────
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
@@ -476,50 +509,44 @@ function TutorHomeworkDetailContent() {
           onRetry={() => void detailsQuery.refetch()}
         />
 
+        {/* Header (v2) — metrics + actions. Always rendered so it shows
+            skeleton state while loading. */}
+        <ResultsHeader
+          assignment={details?.assignment ?? null}
+          totalStudents={details?.assigned_students.length ?? 0}
+          results={results ?? null}
+          isLoading={isLoading && !details}
+          rightSlot={
+            details?.assignment ? (
+              <DetailActions
+                status={details.assignment.status as HomeworkAssignmentStatus}
+                assignmentId={details.assignment.id}
+                onDelete={() => setDeleteOpen(true)}
+              />
+            ) : null
+          }
+        />
+
         {isLoading && !details ? (
           <DetailSkeleton />
         ) : details ? (
           <>
-            {/* Header */}
-            <div className="flex items-center gap-4">
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={() => navigate('/tutor/homework')}
-              >
-                <ArrowLeft className="h-5 w-5" />
-              </Button>
-              <h1 className="text-2xl font-bold flex-1 truncate">{details.assignment.title}</h1>
-              <Badge variant="outline" className={STATUS_CONFIG[details.assignment.status as HomeworkAssignmentStatus]?.className}>
-                {STATUS_CONFIG[details.assignment.status as HomeworkAssignmentStatus]?.label ?? details.assignment.status}
-              </Badge>
-              <Button variant="outline" onClick={() => navigate(`/tutor/homework/${id}/edit`)}>
-                <Edit className="h-4 w-4 mr-2" />
-                Редактировать
-              </Button>
-              <Button variant="destructive" onClick={() => setDeleteOpen(true)}>
-                <Trash2 className="h-4 w-4 mr-2" />
-                Удалить ДЗ
-              </Button>
-            </div>
-
-            {/* Sub-header info */}
-            <div className="flex items-center gap-4 text-sm text-muted-foreground flex-wrap">
-              <span>{getSubjectLabel(details.assignment.subject)}</span>
-              {details.assignment.topic && <span>· {details.assignment.topic}</span>}
-              <span className="flex items-center gap-1">
-                <Clock className="h-3.5 w-3.5" />
-                Дедлайн: {formatDate(details.assignment.deadline)}
-              </span>
-            </div>
+            {/* Optional description (stays below header on its own) */}
             {details.assignment.description && (
               <p className="text-sm text-muted-foreground">{details.assignment.description}</p>
             )}
 
-            {/* Stats */}
-            <StatsCards details={details} results={results} />
+            {/* Action block: per-student "Требует внимания" (не приступал). */}
+            {results ? (
+              <ResultsActionBlock
+                assignmentId={details.assignment.id}
+                assignmentTitle={details.assignment.title}
+                assignedStudents={details.assigned_students}
+                perStudent={results.per_student}
+              />
+            ) : null}
 
-            {/* Tasks */}
+            {/* Tasks (collapsible, closed by default) */}
             <TasksList details={details} />
 
             {/* Materials */}
@@ -527,8 +554,8 @@ function TutorHomeworkDetailContent() {
               <MaterialsList assignmentId={details.assignment.id as string} materials={details.materials} />
             )}
 
-            {/* Students */}
-            <StudentsList details={details} />
+            {/* Students with thread viewer + hint-overuse chip */}
+            <StudentsList details={details} hintTotalByStudent={hintTotalByStudent} />
           </>
         ) : null}
       </div>

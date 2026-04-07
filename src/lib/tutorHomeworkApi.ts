@@ -257,6 +257,34 @@ export async function notifyTutorHomeworkStudents(
   );
 }
 
+/**
+ * Per-student re-engagement reminder authored by the tutor (Homework Results v2,
+ * AC-6 / AC-7). Backend resolves Telegram first; if unavailable, falls back to
+ * the transactional email queue. Does NOT mutate notified / notified_at /
+ * delivery_status — this is a re-engagement, not initial delivery.
+ */
+export interface RemindHomeworkStudentResponse {
+  success: boolean;
+  channel: 'telegram' | 'email';
+}
+
+export type RemindChannelPreference = 'auto' | 'telegram' | 'email';
+
+export async function remindHomeworkStudent(
+  assignmentId: string,
+  studentId: string,
+  message: string,
+  channel: RemindChannelPreference = 'auto',
+): Promise<RemindHomeworkStudentResponse> {
+  return requestHomeworkApi<RemindHomeworkStudentResponse>(
+    `/assignments/${encodeURIComponent(assignmentId)}/students/${encodeURIComponent(studentId)}/remind`,
+    {
+      method: 'POST',
+      body: JSON.stringify({ message, channel }),
+    },
+  );
+}
+
 // ─── Storage: task image upload/delete ───────────────────────────────────────
 
 const STORAGE_REF_PREFIX = 'storage://';
@@ -429,6 +457,17 @@ export interface TutorHomeworkAssignmentDetails {
     notified_at: string | null;
     delivery_status: DeliveryStatus;
     delivery_error_code: string | null;
+    /**
+     * True if backend resolved either profiles.telegram_user_id OR an active
+     * telegram_sessions row for this student. Drives RemindStudentDialog
+     * channel selection (telegram vs email fallback) per AC-7.
+     */
+    has_telegram_link: boolean;
+    /**
+     * True if auth.users.email exists AND is not a `@temp.sokratai.ru`
+     * placeholder. Drives the email tab availability in RemindStudentDialog.
+     */
+    has_email: boolean;
   }[];
   materials: HomeworkMaterial[];
   submissions_summary: {
@@ -453,6 +492,15 @@ export interface TutorHomeworkResultsPerTask {
   error_type_histogram: { type: string; count: number }[];
 }
 
+export interface TutorHomeworkResultsPerStudent {
+  student_id: string;
+  submitted: boolean;
+  final_score_total: number;
+  max_score_total: number;
+  hint_total: number;
+  needs_attention: boolean;
+}
+
 export interface TutorHomeworkResultsResponse {
   summary: {
     avg_score: number | null;
@@ -460,6 +508,7 @@ export interface TutorHomeworkResultsResponse {
     common_error_types: { type: string; count: number }[];
   };
   per_task: TutorHomeworkResultsPerTask[];
+  per_student: TutorHomeworkResultsPerStudent[];
 }
 
 export interface TutorStudentGuidedThreadResponse {

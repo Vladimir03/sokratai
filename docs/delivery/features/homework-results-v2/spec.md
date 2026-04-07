@@ -106,13 +106,13 @@
 
 Каждый AC ниже = действие, которое возвращает PASS/FAIL при ручном или автоматическом тесте.
 
-- **AC-1:** Открыв `/tutor/homework/:id/results` для ДЗ, где ≥1 ученик сдал, репетитор видит шапку-сводку (сдали X/Y, средний балл, среднее время, среднее число подсказок) **в течение одного scroll-screen** без открытия отдельных переписок.
+- **AC-1:** Открыв `/tutor/homework/:id` (canonical) или `/tutor/homework/:id/results` (legacy → redirect) для ДЗ, где ≥1 ученик сдал, репетитор видит шапку-сводку (сдали X/Y, средний балл, не приступали, требует внимания) **в течение одного scroll-screen** без открытия отдельных переписок. **Semantic invariant:** метрика «Требует внимания» в шапке = `notStarted + per_student.filter(s => s.needs_attention).length`. Backend считает `needs_attention` только для сдавших (`lowScore < 30%` OR `hint_overuse >= ceil(tasks*0.6)`), поэтому фронтенд явно добавляет `notStarted` — иначе шапка не согласуется с action block ниже.
 - **AC-2:** В таблице хитмапа `score === null` рендерится серой клеткой с прочерком; `score / max ≥ 0.8` — зелёная; `0.3..0.8` — жёлтая; `< 0.3` — красная. Проверяется на seed-данных с 4 разными ситуациями в одной строке.
 - **AC-3:** Клик по строке ученика раскрывает inline drill-down с полоской мини-карточек задач и `GuidedThreadViewer` с `taskFilter = selectedTaskId`. Только один ученик раскрыт одновременно.
 - **AC-4:** Клик по мини-карточке задачи в drill-down меняет `selectedTaskId`, `GuidedThreadViewer` ремоунтится (`key={taskId}`), скролл сбрасывается наверх треда.
 - **AC-5:** Открытие модалки правки балла → ввод значения `0..max_score` (шаг 0.5) → «Сохранить» → в БД появляются `tutor_score_override`, `tutor_score_override_at`, `tutor_score_override_by`; `ai_score` не затирается; React Query инвалидируется на 3 ключа; в хитмапе клетка обновляется.
 - **AC-6:** Для ученика без `submitted` в шапке отображается chip «N не приступали»; в блоке «Требует внимания» появляется danger-пункт с CTA «Напомнить в Telegram»; клик по CTA открывает Dialog с preset-сообщением и редактируемой textarea.
-- **AC-7:** Для ученика без Telegram-связки CTA «Напомнить» подменяется на «Напомнить на email» (тот же Dialog-pattern, использует существующий email queue).
+- **AC-7:** Для ученика без Telegram-связки CTA «Напомнить» подменяется на «Напомнить на email» (тот же Dialog-pattern, использует существующий email queue). Если у ученика **ни Telegram, ни email**, кнопка дизейблится с tooltip «Нет каналов для уведомления». Внутри `RemindStudentDialog` рендерятся tabs `[Telegram] [Email]`; недоступные каналы — disabled. Backend `POST /assignments/:id/students/:sid/remind` принимает optional `channel: 'auto' | 'telegram' | 'email'` — explicit значение отключает cascade-fallback.
 - **AC-8:** Backfill-миграция применяется без downtime: для существующих `homework_tutor_task_states` `ai_score = (verdict === 'CORRECT' ? max_score : 0)`. Существующие ДЗ открываются без ошибок.
 - **AC-9:** Для нового guided chat на `detailed_solution` задаче `evaluateStudentAnswer` возвращает `{ verdict, ai_score, ai_score_comment }`, где `ai_score ∈ [0, max_score]` с шагом 0.5; `ai_score` сохраняется в `homework_tutor_task_states` в реальном времени.
 - **AC-10:** Telemetry-события `results_v2_opened`, `drill_down_expanded`, `manual_score_override_saved`, `telegram_reminder_sent_from_results` уезжают в `window.dataLayer` с payload без PII (только id и числа). Проверяется через DevTools при ручном прогоне.
@@ -354,7 +354,7 @@
 
 - **P0-6 (backend частичные баллы)** — блокирует всё остальное. Без `ai_score` в БД хитмап показывает либо 0 либо max, и вся ценность «формата ЕГЭ» теряется. **Начать с этого.**
 - **`GuidedThreadViewer` с `taskFilter`** — уже работает (E8/E9), просто переиспользуем.
-- **`TutorHomeworkResults.tsx`** — уже существует, Results v2 = серьёзный рефакторинг этого файла, не новый route.
+- **`TutorHomeworkDetail.tsx`** (канонический merge target, 2026-04-07) — Results v2 интегрируется в существующую детальную страницу, а не в отдельный `TutorHomeworkResults.tsx` (удалён). Причина: на `/tutor/homework/:id/results` из UI никто не линкует — туда ведут только deep links из Telegram-бота. Репетитор, кликая ДЗ в `/tutor/homework`, попадает на `/tutor/homework/:id`, поэтому v2-шапка, action block, hint chip и telemetry живут именно там. Route `/tutor/homework/:id/results` остаётся как `<Navigate replace>` на canonical URL для backward compat (Telegram reminders).
 - **Миграция `homework_tutor_task_states`** — синхронизация с backfill, без downtime.
 
 **Предлагаемое фазирование:**
