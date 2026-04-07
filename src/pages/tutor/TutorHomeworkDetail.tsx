@@ -108,7 +108,10 @@ function TasksList({ details }: { details: TutorHomeworkAssignmentDetails }) {
           aria-controls={panelId}
         >
           <CardTitle className="text-lg">
-            Задачи <span className="text-muted-foreground font-normal">({details.tasks.length})</span>
+            Задачи{' '}
+            <span className="text-muted-foreground font-normal tabular-nums">
+              ({details.tasks.length})
+            </span>
           </CardTitle>
           <ChevronDown
             className={`h-5 w-5 text-muted-foreground transition-transform ${open ? 'rotate-180' : ''}`}
@@ -120,13 +123,13 @@ function TasksList({ details }: { details: TutorHomeworkAssignmentDetails }) {
       <CardContent id={panelId} className="space-y-3">
         {details.tasks.map((task, idx) => (
           <div key={task.id} className="flex gap-3 p-3 rounded-lg bg-muted/30">
-            <div className="flex-shrink-0 w-7 h-7 rounded-full bg-primary/10 text-primary flex items-center justify-center text-sm font-medium">
+            <div className="flex-shrink-0 w-7 h-7 rounded-full bg-primary/10 text-primary flex items-center justify-center text-sm font-semibold tabular-nums">
               {idx + 1}
             </div>
             <div className="flex-1 min-w-0">
-              <MathText text={task.task_text} className="text-sm whitespace-pre-wrap break-words" />
+              <MathText text={task.task_text} className="text-sm leading-relaxed whitespace-pre-wrap break-words" />
               <TaskImagePreview assignmentId={details.assignment.id} taskId={task.id} taskImageUrl={task.task_image_url} />
-              <div className="flex items-center gap-3 mt-1 text-xs text-muted-foreground">
+              <div className="flex items-center gap-3 mt-1.5 text-xs text-muted-foreground tabular-nums">
                 <span>Макс. баллов: {task.max_score}</span>
                 {task.correct_answer && <span>Ответ: <MathText text={task.correct_answer} as="span" className="font-mono" /></span>}
               </div>
@@ -234,8 +237,11 @@ function MaterialsList({ assignmentId, materials }: { assignmentId: string; mate
     <Card animate={false}>
       <CardHeader>
         <CardTitle className="text-lg flex items-center gap-2">
-          <Paperclip className="h-4 w-4" />
-          Материалы ({materials.length})
+          <Paperclip className="h-4 w-4" aria-hidden="true" />
+          Материалы{' '}
+          <span className="text-muted-foreground font-normal tabular-nums">
+            ({materials.length})
+          </span>
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-2">
@@ -243,10 +249,12 @@ function MaterialsList({ assignmentId, materials }: { assignmentId: string; mate
           <div key={m.id} className="flex items-center justify-between gap-2 p-2 rounded-lg border bg-muted/20">
             <div className="min-w-0">
               <p className="text-sm font-medium truncate">{m.title}</p>
-              <p className="text-xs text-muted-foreground">{m.type.toUpperCase()}</p>
+              <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mt-0.5">
+                {m.type}
+              </p>
             </div>
             <Button size="sm" variant="ghost" onClick={() => void handleOpen(m)}>
-              <ExternalLink className="h-3.5 w-3.5 mr-1" />
+              <ExternalLink className="h-3.5 w-3.5 mr-1" aria-hidden="true" />
               Открыть
             </Button>
           </div>

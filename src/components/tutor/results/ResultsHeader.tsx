@@ -79,17 +79,20 @@ export const ResultsHeader = memo(function ResultsHeader({
 
   return (
     <Card className="border-slate-200">
-      <CardContent className="p-4 md:p-6 space-y-4">
+      <CardContent className="p-4 md:p-6 space-y-4 md:space-y-5">
         {/* Row 1: back button + title + deadline badge + optional rightSlot */}
         <div className="flex items-start gap-3 flex-wrap md:flex-nowrap">
           <Button
             variant="ghost"
             size="sm"
             asChild
-            className="shrink-0 -ml-2"
+            className="shrink-0 -ml-2 group"
           >
             <Link to={backTo}>
-              <ArrowLeft className="h-4 w-4 mr-1" />
+              <ArrowLeft
+                className="h-4 w-4 mr-1 transition-transform duration-200 ease-out group-hover:-translate-x-0.5"
+                aria-hidden="true"
+              />
               Назад
             </Link>
           </Button>
@@ -102,7 +105,7 @@ export const ResultsHeader = memo(function ResultsHeader({
             ) : assignment ? (
               <>
                 <div className="flex items-center gap-2 flex-wrap">
-                  <h1 className="text-xl md:text-2xl font-semibold text-slate-900 truncate">
+                  <h1 className="text-xl md:text-2xl font-semibold tracking-tight text-slate-900 truncate">
                     {assignment.title}
                   </h1>
                   <DeadlineBadge deadline={assignment.deadline} />
@@ -124,7 +127,7 @@ export const ResultsHeader = memo(function ResultsHeader({
         </div>
 
         {/* Row 2: metric strip */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 pt-4 border-t border-slate-200">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 md:gap-6 pt-4 md:pt-5 border-t border-slate-200">
           <Metric
             icon={Users}
             label="Сдали"
@@ -165,11 +168,11 @@ function DeadlineBadge({ deadline }: { deadline: string | null }) {
   return (
     <span
       className={cn(
-        'inline-flex items-center gap-1 rounded-full border px-2.5 py-0.5 text-xs font-medium',
+        'inline-flex items-center gap-1 rounded-full border px-2.5 py-0.5 text-xs font-semibold tracking-wide',
         styles[urgency],
       )}
     >
-      <Clock className="h-3 w-3" />
+      <Clock className="h-3 w-3" aria-hidden="true" />
       {cfg.label ?? 'Скоро'}
     </span>
   );
@@ -188,13 +191,13 @@ function Metric({
 }) {
   return (
     <div>
-      <div className="flex items-center gap-2 text-slate-500 mb-1">
-        <Icon className="h-4 w-4" />
-        <span className="text-xs font-medium">{label}</span>
+      <div className="flex items-center gap-2 text-slate-500 mb-1.5">
+        <Icon className="h-4 w-4" aria-hidden="true" />
+        <span className="text-[11px] font-semibold uppercase tracking-wider">{label}</span>
       </div>
       <p
         className={cn(
-          'text-2xl font-semibold tabular-nums',
+          'text-2xl font-semibold tracking-tight tabular-nums leading-none',
           tone === 'neutral' && 'text-slate-900',
           tone === 'warn' && 'text-amber-600',
           tone === 'danger' && 'text-red-600',

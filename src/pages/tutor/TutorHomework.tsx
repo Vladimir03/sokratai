@@ -109,29 +109,30 @@ function HomeworkListSkeleton() {
 function EmptyState({ filter }: { filter: HomeworkAssignmentsFilter }) {
   const isFiltered = filter !== 'all';
   return (
-    <Card className="bg-muted/30">
-      <CardContent className="pt-6">
-        <div className="text-center space-y-4 py-8">
-          <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-muted">
-            <Inbox className="h-8 w-8 text-muted-foreground" aria-hidden="true" />
-          </div>
-          <div>
-            <h3 className="font-medium mb-1 text-lg">
-              {isFiltered ? 'Нет домашних заданий' : 'Пока нет домашних заданий'}
-            </h3>
-            <p className="text-sm text-muted-foreground max-w-md mx-auto">
-              {isFiltered
-                ? 'Попробуйте выбрать другой фильтр или создайте новое задание.'
-                : 'Создайте первое домашнее задание для ваших учеников.'}
-            </p>
-          </div>
-          <Button asChild>
-            <Link to="/tutor/homework/create">
-              <Plus className="h-4 w-4 mr-2" />
-              Создать ДЗ
-            </Link>
-          </Button>
+    <Card className="bg-muted/30 group">
+      <CardContent className="flex flex-col items-center text-center gap-5 py-12">
+        <div className="flex h-16 w-16 items-center justify-center rounded-full bg-muted transition-transform duration-300 ease-out group-hover:-rotate-6">
+          <Inbox className="h-8 w-8 text-muted-foreground" aria-hidden="true" />
         </div>
+        <div className="space-y-1.5">
+          <h3 className="font-semibold tracking-tight text-xl">
+            {isFiltered ? 'Нет домашних заданий' : 'Пока нет домашних заданий'}
+          </h3>
+          <p className="text-sm text-muted-foreground max-w-md mx-auto leading-relaxed">
+            {isFiltered
+              ? 'Попробуйте выбрать другой фильтр или создайте новое задание.'
+              : 'Создайте первое домашнее задание для ваших учеников.'}
+          </p>
+        </div>
+        <Button asChild className="group/cta">
+          <Link to="/tutor/homework/create">
+            <Plus
+              className="h-4 w-4 mr-2 transition-transform duration-300 ease-out group-hover/cta:rotate-90"
+              aria-hidden="true"
+            />
+            Создать ДЗ
+          </Link>
+        </Button>
       </CardContent>
     </Card>
   );
@@ -156,11 +157,14 @@ const AssignmentCard = memo(function AssignmentCard({ item }: { item: TutorHomew
 
   return (
     <Link to={`/tutor/homework/${item.id}`} className="block">
-      <Card animate={false} className="transition-shadow hover:shadow-md cursor-pointer">
+      <Card
+        animate={false}
+        className="cursor-pointer hover:shadow-md hover:border-slate-300 transition-[box-shadow,border-color] duration-200 ease-out"
+      >
         <CardContent className="p-4 space-y-3">
-          {/* Header: subject + status */}
+          {/* Header: subject (eyebrow) + status */}
           <div className="flex items-center justify-between gap-2">
-            <span className="text-sm text-muted-foreground">
+            <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
               {subjectLabel}
             </span>
             <Badge
@@ -172,7 +176,7 @@ const AssignmentCard = memo(function AssignmentCard({ item }: { item: TutorHomew
           </div>
 
           {/* Title */}
-          <h3 className="font-semibold text-base leading-tight line-clamp-2">
+          <h3 className="font-semibold text-base tracking-tight leading-snug line-clamp-2">
             {item.title}
           </h3>
 
@@ -184,8 +188,10 @@ const AssignmentCard = memo(function AssignmentCard({ item }: { item: TutorHomew
           {/* Stats row. `aria-label` carries the full sentence for screen
               readers (the icon alone is meaningless); `title` is kept for
               desktop hover tooltips. Lucide icons get `aria-hidden` so AT
-              users hear the label once, not twice. */}
-          <div className="flex items-center gap-3 text-sm text-muted-foreground pt-1 flex-wrap">
+              users hear the label once, not twice.
+              `tabular-nums` keeps counts/scores on a fixed grid so they
+              don't visually jitter while scrolling the list. */}
+          <div className="flex items-center gap-3 text-sm text-muted-foreground tabular-nums pt-2 flex-wrap">
             {/* Progress */}
             <span
               className="flex items-center gap-1"
@@ -287,24 +293,30 @@ function TutorHomeworkContent() {
         {/* Header */}
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
           <div>
-            <h1 className="text-2xl font-bold flex items-center gap-2">
+            <h1 className="text-2xl font-semibold tracking-tight flex items-center gap-2">
               <BookOpen className="h-6 w-6" />
               Домашние задания
             </h1>
-            <p className="text-muted-foreground text-sm mt-1">
+            <p className="text-muted-foreground text-sm mt-1.5">
               Управляйте домашками и отслеживайте прогресс учеников
             </p>
           </div>
           <div className="flex gap-2">
-            <Button variant="outline" asChild>
+            <Button variant="outline" asChild className="group">
               <Link to="/tutor/homework/templates">
-                <Library className="h-4 w-4 mr-2" />
+                <Library
+                  className="h-4 w-4 mr-2 transition-transform duration-200 ease-out group-hover:-translate-x-0.5"
+                  aria-hidden="true"
+                />
                 Шаблоны
               </Link>
             </Button>
-            <Button asChild>
+            <Button asChild className="group">
               <Link to="/tutor/homework/create">
-                <Plus className="h-4 w-4 mr-2" />
+                <Plus
+                  className="h-4 w-4 mr-2 transition-transform duration-300 ease-out group-hover:rotate-90"
+                  aria-hidden="true"
+                />
                 Создать ДЗ
               </Link>
             </Button>

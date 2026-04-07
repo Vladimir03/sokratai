@@ -124,7 +124,7 @@ const HeatmapCell = memo(function HeatmapCell({
   return (
     <td
       className={cn(
-        'h-11 px-1 text-center text-sm font-medium border border-white transition-colors',
+        'h-11 px-1 text-center text-sm font-semibold tabular-nums border border-white transition-colors',
         className,
         clickable && 'cursor-pointer touch-manipulation',
         isSelected && 'ring-2 ring-slate-800 ring-inset',
@@ -186,10 +186,14 @@ const HeatmapRow = memo(function HeatmapRow({
       {/* Sticky name column. z-10 so cells scroll under it. Uses a flat
           background so sticky content never shows through. Width comes from
           <colgroup> in HeatmapGrid so iOS Safari + table-layout fixed honor
-          it (min-w on td is ignored by table layout). */}
+          it (min-w on td is ignored by table layout).
+          The right-edge inset shadow is a quiet depth cue: when the table
+          scrolls horizontally, the sticky column reads as elevated above
+          the scrolling cells instead of floating flat. */}
       <td
         className={cn(
           'sticky left-0 z-10 px-3 py-2 align-middle border-b border-slate-200',
+          'shadow-[4px_0_8px_-6px_rgba(15,23,42,0.12)]',
           expanded ? 'bg-slate-50' : 'bg-white',
         )}
       >
@@ -217,9 +221,9 @@ const HeatmapRow = memo(function HeatmapRow({
               {showHintOveruse && (
                 <span
                   title={`Подсказок: ${hintTotal}`}
-                  className="inline-flex items-center gap-1 rounded-full bg-amber-100 text-amber-800 px-2 py-0.5 text-[10px] font-medium"
+                  className="inline-flex items-center gap-1 rounded-full bg-amber-100 text-amber-800 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide"
                 >
-                  <Lightbulb className="h-3 w-3" />
+                  <Lightbulb className="h-3 w-3" aria-hidden="true" />
                   Много подсказок
                 </span>
               )}
@@ -340,7 +344,7 @@ export function HeatmapGrid({
       <CardHeader>
         <CardTitle className="text-lg flex items-center gap-2">
           Ученики и задачи
-          <Badge variant="outline" className="font-normal">
+          <Badge variant="outline" className="font-medium tabular-nums">
             {assigned_students.length} × {taskCount}
           </Badge>
         </CardTitle>
@@ -370,7 +374,7 @@ export function HeatmapGrid({
               <tr>
                 <th
                   scope="col"
-                  className="sticky left-0 z-20 bg-white border-b border-slate-200 text-left px-3 py-2 text-xs font-medium text-slate-600 uppercase tracking-wide"
+                  className="sticky left-0 z-20 bg-white border-b border-slate-200 text-left px-3 py-2 text-[11px] font-semibold text-slate-600 uppercase tracking-wider shadow-[4px_0_8px_-6px_rgba(15,23,42,0.12)]"
                 >
                   Ученик
                 </th>
@@ -378,7 +382,7 @@ export function HeatmapGrid({
                   <th
                     key={task.id}
                     scope="col"
-                    className="border-b border-slate-200 text-center px-1 py-2 text-xs font-medium text-slate-600"
+                    className="border-b border-slate-200 text-center px-1 py-2 text-[11px] font-semibold tabular-nums text-slate-600 uppercase tracking-wider"
                     title={`Макс. баллов: ${task.max_score}`}
                   >
                     №{task.order_num}
