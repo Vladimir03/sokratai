@@ -936,6 +936,8 @@ export type Database = {
       }
       homework_tutor_task_states: {
         Row: {
+          ai_score: number | null
+          ai_score_comment: string | null
           attempts: number
           available_score: number | null
           await_mode: string
@@ -949,10 +951,16 @@ export type Database = {
           status: string
           task_id: string
           thread_id: string
+          tutor_score_override: number | null
+          tutor_score_override_at: string | null
+          tutor_score_override_by: string | null
+          tutor_score_override_comment: string | null
           updated_at: string
           wrong_answer_count: number
         }
         Insert: {
+          ai_score?: number | null
+          ai_score_comment?: string | null
           attempts?: number
           available_score?: number | null
           await_mode?: string
@@ -966,10 +974,16 @@ export type Database = {
           status?: string
           task_id: string
           thread_id: string
+          tutor_score_override?: number | null
+          tutor_score_override_at?: string | null
+          tutor_score_override_by?: string | null
+          tutor_score_override_comment?: string | null
           updated_at?: string
           wrong_answer_count?: number
         }
         Update: {
+          ai_score?: number | null
+          ai_score_comment?: string | null
           attempts?: number
           available_score?: number | null
           await_mode?: string
@@ -983,6 +997,10 @@ export type Database = {
           status?: string
           task_id?: string
           thread_id?: string
+          tutor_score_override?: number | null
+          tutor_score_override_at?: string | null
+          tutor_score_override_by?: string | null
+          tutor_score_override_comment?: string | null
           updated_at?: string
           wrong_answer_count?: number
         }
