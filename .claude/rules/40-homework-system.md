@@ -82,6 +82,23 @@
 - `hintTotalByStudent: Map<string, number>` строится **внутри** `HeatmapGrid` из `results.per_student` (прежде в Detail) — чип «Много подсказок» рендерится рядом с delivery badge при `hintTotal >= hintOveruseThreshold(taskCount)`
 - Defensive guards обязательны: `results.per_student ?? []` в telemetry useEffect, `perStudent ?? []` + `assignedStudents ?? []` в `ResultsActionBlock.useMemo`, `per_student ?? []` в `HeatmapGrid` useMemo — backend может транзиентно вернуть response без `per_student` поля
 
+### Shared homework status module + tutor homework a11y baseline (2026-04-07)
+
+Audit/normalize/optimize/harden pass на `/tutor/homework` и `/tutor/homework/:id` зафиксировал ряд инвариантов — не откатывать без явного решения:
+
+- **Single source of truth для status badge:** `src/lib/homeworkStatus.ts` экспортирует `HOMEWORK_STATUS_CONFIG: Record<HomeworkAssignmentStatus, { label, className }>` + `formatHomeworkScore(score, maxScore)`. Оба consumer-а (`TutorHomework.tsx`, `TutorHomeworkDetail.tsx`) импортируют отсюда; локальные `STATUS_CONFIG` / `formatScore` копии **запрещены** — раньше они дрейфовали (detail-копия теряла `dark:` варианты на draft)
+- **Subject label на ДЗ-карточках = `getSubjectLabel(item.subject as string)`** из `@/types/homework`. Локальные `SUBJECT_LABELS` карты в tutor-страницах запрещены — тип `HomeworkSubject` в `tutorHomeworkApi.ts` **уже** чем реальные runtime значения (`algebra` / `geometry` / `russian` / ...), а legacy `math` / `rus` обрабатываются через `LEGACY_SUBJECT_LABELS` внутри `getSubjectLabel`
+- **Никаких subject emoji на tutor homework карточках.** `SUBJECT_EMOJI` map был удалён 2026-04-07; subject row = text-only. Per `.claude/rules/90-design-system.md` "Anti-patterns #1". Если новый дизайн просит визуальный маркер — Lucide icon, не emoji
+- **Empty state — Lucide `Inbox` в circular muted bg**, не emoji. Тот же запрет
+- **`AssignmentCard` — `React.memo` + `animate={false}` + `transition-shadow`** (не `transition-all`). Per `.claude/rules/performance.md` ("List-item компоненты обёрнуты в `React.memo`") + `.claude/rules/10-safe-change-policy.md` ("Card in grid: animate={false}"). Skeleton cards — тоже `animate={false}`
+- **Detail page lookups — `useMemo`:** `expandedStudent` / `expandedPerStudent` обёрнуты в `useMemo([expandedStudentId, details/results])`. До этого две `find` walks выполнялись на каждом unrelated render (delete dialog, refetch races, telemetry effects)
+- **Filter group = `<div role="group" aria-label="Фильтр…">` + `<button aria-pressed>`** с `min-h-[44px]` и focus-visible ring. **Не** `<TabsList>` (это фильтр одного списка, не реальный tablist) и **не** bare `<button>` без ARIA. Если нужен arrow-key keyboard support — добавлять явно, не подменять primitive
+- **Sort `<select>` — `text-base` (16px) на ВСЕХ viewport-ах** + `aria-label` + `min-h-[44px]`. **Не** `sm:text-sm` — Safari iPad Auto-zoom (см. `.claude/rules/80-cross-browser.md`)
+- **Stats spans на assignment card — `aria-label` (для AT) + `title` (для desktop hover)** оба, lucide icons получают `aria-hidden="true"`. `title` сам по себе не обеспечивает screen reader name
+- **`TasksList` collapsible disclosure:** `aria-expanded` + `aria-controls={panelId}` где `panelId = useId()`, на `<CardContent id={panelId}>`. `min-h-[44px]` + focus-visible ring на trigger. ChevronDown — `aria-hidden`
+- **`TaskImagePreview` ZoomIn button — `aria-label="Открыть фото задачи во весь экран"`** + `title` (desktop hover). Декоративный hover-overlay span — `aria-hidden`
+- **`MaterialsList.handleOpen` — `toast.error('Не удалось открыть материал')` на ОБА failure path-а** (catch + null url). `alert()` запрещён — рвёт toast-driven UX, блокирует viewport на mobile, не локализуется
+
 ### HeatmapGrid (Results v2 TASK-5, 2026-04-07)
 
 `src/components/tutor/results/HeatmapGrid.tsx` — единая таблица students × tasks. **Заменил** локальный `StudentsList` в `TutorHomeworkDetail.tsx`. Локальный `DeliveryBadge` (раньше жил в Detail) **переехал внутрь** HeatmapGrid — других потребителей нет, не дублировать. Phase 2 спеки: `docs/delivery/features/homework-results-v2/spec.md` (P0-3, AC-2). TASK-3 (header), TASK-4 (action block), TASK-5 (heatmap), TASK-6 (drill-down) ✅ done.

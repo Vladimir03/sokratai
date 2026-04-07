@@ -1,4 +1,4 @@
-import { useState, useCallback, useMemo } from 'react';
+import { memo, useState, useCallback, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import { parseISO } from 'date-fns';
 import {
@@ -10,16 +10,16 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Badge } from '@/components/ui/badge';
-import { Plus, BookOpen, Users, BarChart3, Clock, CheckCircle2, WifiOff, Library } from 'lucide-react';
+import { Plus, BookOpen, Users, BarChart3, Clock, CheckCircle2, WifiOff, Library, Inbox } from 'lucide-react';
 import TutorGuard from '@/components/TutorGuard';
 import { TutorLayout } from '@/components/tutor/TutorLayout';
 import { TutorDataStatus } from '@/components/tutor/TutorDataStatus';
 import { useTutorHomeworkAssignments } from '@/hooks/useTutorHomework';
 import { cn } from '@/lib/utils';
+import { getSubjectLabel } from '@/types/homework';
+import { HOMEWORK_STATUS_CONFIG, formatHomeworkScore } from '@/lib/homeworkStatus';
 import type {
   HomeworkAssignmentsFilter,
-  HomeworkAssignmentStatus,
-  HomeworkSubject,
   TutorHomeworkAssignmentListItem,
 } from '@/lib/tutorHomeworkApi';
 
@@ -31,38 +31,15 @@ const FILTER_TABS: { value: HomeworkAssignmentsFilter; label: string }[] = [
   { value: 'closed', label: 'Завершённые' },
 ];
 
-const SUBJECT_LABELS: Record<HomeworkSubject, string> = {
-  math: 'Математика',
-  physics: 'Физика',
-  history: 'История',
-  social: 'Обществознание',
-  english: 'Английский',
-  cs: 'Информатика',
-};
-
-const SUBJECT_EMOJI: Record<HomeworkSubject, string> = {
-  math: '📐',
-  physics: '⚡',
-  history: '📜',
-  social: '🏛️',
-  english: '🇬🇧',
-  cs: '💻',
-};
-
-const STATUS_CONFIG: Record<HomeworkAssignmentStatus, { label: string; className: string }> = {
-  draft: {
-    label: 'Черновик',
-    className: 'bg-muted text-muted-foreground border-muted',
-  },
-  active: {
-    label: 'Активное',
-    className: 'bg-green-100 text-green-800 border-green-200 dark:bg-green-900/30 dark:text-green-400 dark:border-green-800',
-  },
-  closed: {
-    label: 'Завершено',
-    className: 'bg-gray-100 text-gray-600 border-gray-200 dark:bg-gray-800 dark:text-gray-400 dark:border-gray-700',
-  },
-};
+// Subject labels + status badge palette are intentionally centralised:
+//   - subject label → `getSubjectLabel()` in `@/types/homework` (handles
+//     both current SUBJECTS ids and legacy `math`/`rus` fallbacks).
+//   - status badge  → `HOMEWORK_STATUS_CONFIG` in `@/lib/homeworkStatus`
+//     (shared with TutorHomeworkDetail so palette drift can't happen).
+//
+// No emoji on cards: per `.claude/rules/90-design-system.md` — Sokrat is a
+// working surface for exam tutors, not a gamified product, so subject rows
+// stay text-only.
 
 // ─── Sort ────────────────────────────────────────────────────────────────────
 
@@ -102,25 +79,13 @@ function sortAssignments(
   return sorted;
 }
 
-// ─── Utilities ───────────────────────────────────────────────────────────────
-
-function formatScore(score: number | null, maxScore?: number | null): string {
-  if (score === null || score === undefined) return '—';
-  if (maxScore != null && maxScore > 0) {
-    const s = Number.isInteger(score) ? String(score) : score.toFixed(1);
-    const m = Number.isInteger(maxScore) ? String(maxScore) : maxScore.toFixed(1);
-    return `${s}/${m}`;
-  }
-  return `${Math.round(score)}%`;
-}
-
 // ─── Skeleton ────────────────────────────────────────────────────────────────
 
 function HomeworkListSkeleton() {
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
       {[1, 2, 3, 4, 5, 6].map((i) => (
-        <Card key={i}>
+        <Card key={i} animate={false}>
           <CardContent className="p-4 space-y-3">
             <div className="flex items-center justify-between">
               <Skeleton className="h-5 w-20" />
@@ -147,7 +112,9 @@ function EmptyState({ filter }: { filter: HomeworkAssignmentsFilter }) {
     <Card className="bg-muted/30">
       <CardContent className="pt-6">
         <div className="text-center space-y-4 py-8">
-          <div className="text-5xl">📚</div>
+          <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-muted">
+            <Inbox className="h-8 w-8 text-muted-foreground" aria-hidden="true" />
+          </div>
           <div>
             <h3 className="font-medium mb-1 text-lg">
               {isFiltered ? 'Нет домашних заданий' : 'Пока нет домашних заданий'}
@@ -172,20 +139,28 @@ function EmptyState({ filter }: { filter: HomeworkAssignmentsFilter }) {
 
 // ─── Assignment Card ─────────────────────────────────────────────────────────
 
-function AssignmentCard({ item }: { item: TutorHomeworkAssignmentListItem }) {
-  const statusCfg = STATUS_CONFIG[item.status];
+// Memoised list-item per `.claude/rules/performance.md` ("List-item компоненты
+// обёрнуты в React.memo… новые list-item компоненты тоже оборачивай в memo()").
+// `animate={false}` is required by `.claude/rules/10-safe-change-policy.md`
+// ("Card in grid: animate={false}") — otherwise every refetch (window-focus,
+// filter switch, sort change) replays the slide-in for all 6+ visible cards.
+// `transition-shadow` (not `transition-all`) per design system spec.
+const AssignmentCard = memo(function AssignmentCard({ item }: { item: TutorHomeworkAssignmentListItem }) {
+  const statusCfg = HOMEWORK_STATUS_CONFIG[item.status];
   const deadlineStr = formatDeadline(item.deadline);
-  const subjectEmoji = SUBJECT_EMOJI[item.subject] ?? '📖';
-  const subjectLabel = SUBJECT_LABELS[item.subject] ?? item.subject;
+  // Use the canonical subject helper so legacy ids (`math`, `rus`) and the
+  // current SUBJECTS list both render correctly. The local `HomeworkSubject`
+  // type is narrower than the runtime values that actually live in the DB,
+  // so cast to `string` for the lookup.
+  const subjectLabel = getSubjectLabel(item.subject as unknown as string);
 
   return (
     <Link to={`/tutor/homework/${item.id}`} className="block">
-      <Card className="transition-all hover:shadow-md cursor-pointer">
+      <Card animate={false} className="transition-shadow hover:shadow-md cursor-pointer">
         <CardContent className="p-4 space-y-3">
           {/* Header: subject + status */}
           <div className="flex items-center justify-between gap-2">
-            <span className="text-sm text-muted-foreground flex items-center gap-1.5">
-              <span>{subjectEmoji}</span>
+            <span className="text-sm text-muted-foreground">
               {subjectLabel}
             </span>
             <Badge
@@ -206,44 +181,68 @@ function AssignmentCard({ item }: { item: TutorHomeworkAssignmentListItem }) {
             <p className="text-sm text-muted-foreground line-clamp-1">{item.topic}</p>
           )}
 
-          {/* Stats row */}
+          {/* Stats row. `aria-label` carries the full sentence for screen
+              readers (the icon alone is meaningless); `title` is kept for
+              desktop hover tooltips. Lucide icons get `aria-hidden` so AT
+              users hear the label once, not twice. */}
           <div className="flex items-center gap-3 text-sm text-muted-foreground pt-1 flex-wrap">
             {/* Progress */}
-            <span className="flex items-center gap-1" title="Сдали / Назначено">
-              <Users className="h-3.5 w-3.5" />
+            <span
+              className="flex items-center gap-1"
+              title="Сдали / Назначено"
+              aria-label={`Сдали ${item.submitted_count} из ${item.assigned_count}`}
+            >
+              <Users className="h-3.5 w-3.5" aria-hidden="true" />
               {item.submitted_count}/{item.assigned_count}
             </span>
 
             {/* Delivered */}
             {(item.delivered_count ?? 0) > 0 && (
-              <span className="flex items-center gap-1 text-green-600" title="Доставлено">
-                <CheckCircle2 className="h-3.5 w-3.5" />
+              <span
+                className="flex items-center gap-1 text-green-600"
+                title="Доставлено"
+                aria-label={`Доставлено ${item.delivered_count}`}
+              >
+                <CheckCircle2 className="h-3.5 w-3.5" aria-hidden="true" />
                 {item.delivered_count}
               </span>
             )}
 
             {/* Not connected */}
             {(item.not_connected_count ?? 0) > 0 && (
-              <span className="flex items-center gap-1 text-amber-500" title="Нет каналов доставки">
-                <WifiOff className="h-3.5 w-3.5" />
+              <span
+                className="flex items-center gap-1 text-amber-500"
+                title="Нет каналов доставки"
+                aria-label={`Нет каналов доставки: ${item.not_connected_count}`}
+              >
+                <WifiOff className="h-3.5 w-3.5" aria-hidden="true" />
                 {item.not_connected_count}
               </span>
             )}
 
             {/* Average score */}
-            <span className="flex items-center gap-1" title="Средний балл">
-              <BarChart3 className="h-3.5 w-3.5" />
-              {formatScore(item.avg_score, item.max_score_total)}
+            <span
+              className="flex items-center gap-1"
+              title="Средний балл"
+              aria-label={`Средний балл: ${formatHomeworkScore(item.avg_score, item.max_score_total)}`}
+            >
+              <BarChart3 className="h-3.5 w-3.5" aria-hidden="true" />
+              {formatHomeworkScore(item.avg_score, item.max_score_total)}
             </span>
 
             {/* Deadline */}
             {deadlineStr && (() => {
               const urgency = getDeadlineUrgency(item.deadline);
               const cfg = URGENCY_CONFIG[urgency];
+              const fullText = cfg.label ? `${cfg.label} · ${deadlineStr}` : deadlineStr;
               return (
-                <span className={cn('flex items-center gap-1 ml-auto', cfg.className)} title="Дедлайн">
-                  <Clock className={cn('h-3.5 w-3.5', cfg.iconClassName)} />
-                  {cfg.label ? `${cfg.label} · ${deadlineStr}` : deadlineStr}
+                <span
+                  className={cn('flex items-center gap-1 ml-auto', cfg.className)}
+                  title="Дедлайн"
+                  aria-label={`Дедлайн: ${fullText}`}
+                >
+                  <Clock className={cn('h-3.5 w-3.5', cfg.iconClassName)} aria-hidden="true" />
+                  {fullText}
                 </span>
               );
             })()}
@@ -252,7 +251,7 @@ function AssignmentCard({ item }: { item: TutorHomeworkAssignmentListItem }) {
       </Card>
     </Link>
   );
-}
+});
 
 // ─── Main Content ────────────────────────────────────────────────────────────
 
@@ -321,27 +320,45 @@ function TutorHomeworkContent() {
           onRetry={handleRetry}
         />
 
-        {/* Filter Tabs + Sort */}
+        {/* Filter group + Sort.
+            The filter is a toggle button group (not a tablist) — it
+            re-filters the same list rather than revealing hidden panels, so
+            ARIA Authoring Practices says use `role="group"` + `aria-pressed`,
+            not `role="tablist"`. `min-h-[44px]` for iOS HIG touch target.
+            Sort select stays at 16px on every viewport per
+            `.claude/rules/80-cross-browser.md` (iOS auto-zoom prevention). */}
         <div className="flex items-center justify-between gap-4">
-          <div className="flex gap-1 border-b">
-            {FILTER_TABS.map((tab) => (
-              <button
-                key={tab.value}
-                onClick={() => setFilter(tab.value)}
-                className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
-                  filter === tab.value
-                    ? 'border-primary text-primary'
-                    : 'border-transparent text-muted-foreground hover:text-foreground hover:border-muted-foreground/30'
-                }`}
-              >
-                {tab.label}
-              </button>
-            ))}
+          <div
+            role="group"
+            aria-label="Фильтр домашних заданий по статусу"
+            className="flex gap-1 border-b"
+          >
+            {FILTER_TABS.map((tab) => {
+              const isActive = filter === tab.value;
+              return (
+                <button
+                  key={tab.value}
+                  type="button"
+                  onClick={() => setFilter(tab.value)}
+                  aria-pressed={isActive}
+                  className={cn(
+                    'min-h-[44px] px-4 text-sm font-medium border-b-2 transition-colors',
+                    'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:rounded-sm',
+                    isActive
+                      ? 'border-primary text-primary'
+                      : 'border-transparent text-muted-foreground hover:text-foreground hover:border-muted-foreground/30',
+                  )}
+                >
+                  {tab.label}
+                </button>
+              );
+            })}
           </div>
           <select
             value={sortKey}
             onChange={(e) => setSortKey(e.target.value as HomeworkSortKey)}
-            className="rounded-lg border border-input bg-background px-3 py-1.5 text-[16px] sm:text-sm"
+            aria-label="Сортировка домашних заданий"
+            className="min-h-[44px] rounded-lg border border-input bg-background px-3 py-1.5 text-base focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1"
           >
             {SORT_OPTIONS.map((opt) => (
               <option key={opt.value} value={opt.value}>{opt.label}</option>

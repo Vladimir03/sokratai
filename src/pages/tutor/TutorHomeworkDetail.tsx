@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useRef } from 'react';
+import { useState, useCallback, useEffect, useId, useMemo, useRef } from 'react';
 import { Link, useParams, useNavigate } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { ChevronDown, Paperclip, ExternalLink, Edit, Trash2, ZoomIn } from 'lucide-react';
@@ -26,6 +26,7 @@ import {
   type HomeworkAssignmentStatus,
   type HomeworkMaterial,
 } from '@/lib/tutorHomeworkApi';
+import { HOMEWORK_STATUS_CONFIG } from '@/lib/homeworkStatus';
 import { trackGuidedHomeworkEvent } from '@/lib/homeworkTelemetry';
 import { MathText } from '@/components/kb/ui/MathText';
 import {
@@ -37,13 +38,8 @@ import {
   toTutorErrorMessage,
 } from '@/hooks/tutorQueryOptions';
 
-// ─── Constants ───────────────────────────────────────────────────────────────
-
-const STATUS_CONFIG: Record<HomeworkAssignmentStatus, { label: string; className: string }> = {
-  draft: { label: 'Черновик', className: 'bg-muted text-muted-foreground border-muted' },
-  active: { label: 'Активное', className: 'bg-green-100 text-green-800 border-green-200 dark:bg-green-900/30 dark:text-green-400 dark:border-green-800' },
-  closed: { label: 'Завершено', className: 'bg-gray-100 text-gray-600 border-gray-200 dark:bg-gray-800 dark:text-gray-400 dark:border-gray-700' },
-};
+// Status badge palette is shared with TutorHomework (list page) via
+// `HOMEWORK_STATUS_CONFIG` so any change happens in exactly one file.
 
 // ─── Skeleton ────────────────────────────────────────────────────────────────
 
@@ -71,7 +67,7 @@ function DetailActions({
   assignmentId: string;
   onDelete: () => void;
 }) {
-  const cfg = STATUS_CONFIG[status];
+  const cfg = HOMEWORK_STATUS_CONFIG[status];
   return (
     <>
       <Badge variant="outline" className={cfg?.className}>
@@ -95,6 +91,10 @@ function DetailActions({
 
 function TasksList({ details }: { details: TutorHomeworkAssignmentDetails }) {
   const [open, setOpen] = useState(false);
+  // Stable per-instance id so the disclosure button references its own
+  // panel via `aria-controls`. WAI-ARIA Authoring Practices — Disclosure
+  // pattern.
+  const panelId = useId();
   if (details.tasks.length === 0) return null;
 
   return (
@@ -103,19 +103,21 @@ function TasksList({ details }: { details: TutorHomeworkAssignmentDetails }) {
         <button
           type="button"
           onClick={() => setOpen((v) => !v)}
-          className="w-full flex items-center justify-between gap-2 text-left"
+          className="w-full flex items-center justify-between gap-2 text-left min-h-[44px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:rounded-sm"
           aria-expanded={open}
+          aria-controls={panelId}
         >
           <CardTitle className="text-lg">
             Задачи <span className="text-muted-foreground font-normal">({details.tasks.length})</span>
           </CardTitle>
           <ChevronDown
             className={`h-5 w-5 text-muted-foreground transition-transform ${open ? 'rotate-180' : ''}`}
+            aria-hidden="true"
           />
         </button>
       </CardHeader>
       {open && (
-      <CardContent className="space-y-3">
+      <CardContent id={panelId} className="space-y-3">
         {details.tasks.map((task, idx) => (
           <div key={task.id} className="flex gap-3 p-3 rounded-lg bg-muted/30">
             <div className="flex-shrink-0 w-7 h-7 rounded-full bg-primary/10 text-primary flex items-center justify-center text-sm font-medium">
@@ -171,8 +173,9 @@ function TaskImagePreview({ assignmentId, taskId, taskImageUrl }: { assignmentId
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className="group relative mt-2 inline-block rounded-md border bg-background p-1 hover:opacity-90 transition-opacity"
+        className="group relative mt-2 inline-block rounded-md border bg-background p-1 hover:opacity-90 transition-opacity focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1"
         title="Открыть фото задачи"
+        aria-label="Открыть фото задачи во весь экран"
       >
         <img
           src={resolvedUrl}
@@ -180,7 +183,10 @@ function TaskImagePreview({ assignmentId, taskId, taskImageUrl }: { assignmentId
           className="h-24 w-auto max-w-[220px] rounded-sm object-cover"
           loading="lazy"
         />
-        <span className="absolute right-1 top-1 inline-flex items-center gap-1 rounded-md bg-background/90 px-1.5 py-0.5 text-[10px] opacity-0 transition-opacity group-hover:opacity-100">
+        <span
+          aria-hidden="true"
+          className="absolute right-1 top-1 inline-flex items-center gap-1 rounded-md bg-background/90 px-1.5 py-0.5 text-[10px] opacity-0 transition-opacity group-hover:opacity-100"
+        >
           <ZoomIn className="h-3 w-3" />
           Увеличить
         </span>
@@ -214,9 +220,13 @@ function MaterialsList({ assignmentId, materials }: { assignmentId: string; mate
     }
     try {
       const url = await getMaterialSignedUrl(assignmentId, material.id);
-      if (url) window.open(url, '_blank', 'noreferrer');
+      if (url) {
+        window.open(url, '_blank', 'noreferrer');
+      } else {
+        toast.error('Не удалось открыть материал');
+      }
     } catch {
-      alert('Не удалось открыть материал');
+      toast.error('Не удалось открыть материал');
     }
   };
 
@@ -323,12 +333,23 @@ function TutorHomeworkDetailContent() {
     setDrillDownTaskId(taskId);
   }, []);
 
-  const expandedStudent = expandedStudentId && details
-    ? details.assigned_students.find((s) => s.student_id === expandedStudentId) ?? null
-    : null;
-  const expandedPerStudent = expandedStudentId && results
-    ? results.per_student?.find((s) => s.student_id === expandedStudentId) ?? null
-    : null;
+  // Memoised so unrelated state changes (delete dialog open, refetch races,
+  // sibling re-renders) don't re-run two `find` walks over `assigned_students`
+  // and `per_student` on every render.
+  const expandedStudent = useMemo(
+    () =>
+      expandedStudentId && details
+        ? details.assigned_students.find((s) => s.student_id === expandedStudentId) ?? null
+        : null,
+    [expandedStudentId, details],
+  );
+  const expandedPerStudent = useMemo(
+    () =>
+      expandedStudentId && results
+        ? results.per_student?.find((s) => s.student_id === expandedStudentId) ?? null
+        : null,
+    [expandedStudentId, results],
+  );
 
   // TASK-6 telemetry: fire `drill_down_expanded` once per expand action (by
   // assignmentId|studentId pair). `firstProblemTaskOrder` cascade:
