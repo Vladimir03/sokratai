@@ -118,7 +118,7 @@ export function EditScoreDialog({
         queryKey: ['tutor', 'homework', 'thread'],
       });
 
-      toast.success(isReset ? 'Override сброшен' : 'Балл обновлён');
+      toast.success(isReset ? 'Правка сброшена' : 'Балл обновлён');
       onOpenChange(false);
     },
     onError: (err) => {
@@ -193,7 +193,7 @@ export function EditScoreDialog({
                 disabled={isPending}
                 onClick={() => saveMutation.mutate('reset')}
               >
-                Сбросить override
+                Сбросить правку
               </Button>
             ) : null}
           </div>
