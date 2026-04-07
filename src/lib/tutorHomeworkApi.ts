@@ -522,6 +522,8 @@ export interface TutorHomeworkResultsPerStudent {
      * (Homework Results v2 P0-5). `final_score` already reflects the override.
      */
     has_override?: boolean;
+    /** Original AI-evaluated score, independent of tutor override. */
+    ai_score?: number | null;
   }[];
 }
 

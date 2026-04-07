@@ -45,13 +45,14 @@ export function StudentDrillDown({
   const taskMeta = useMemo(() => {
     const scoresById = new Map<
       string,
-      { final_score: number; hint_count: number; has_override: boolean }
+      { final_score: number; hint_count: number; has_override: boolean; ai_score: number | null }
     >();
     for (const ts of perStudent?.task_scores ?? []) {
       scoresById.set(ts.task_id, {
         final_score: ts.final_score,
         hint_count: ts.hint_count,
         has_override: ts.has_override ?? false,
+        ai_score: ts.ai_score ?? null,
       });
     }
     return tasks.map((task) => {
@@ -63,6 +64,7 @@ export function StudentDrillDown({
         score: cell ? cell.final_score : null,
         hint_count: cell ? cell.hint_count : 0,
         has_override: cell?.has_override ?? false,
+        ai_score: cell?.ai_score ?? null,
       };
     });
   }, [tasks, perStudent]);
@@ -133,7 +135,7 @@ export function StudentDrillDown({
           }}
           // When override is set, results endpoint returns final_score but
           // not ai_score separately — show "—" rather than misleading value.
-          aiScore={editingTask.has_override ? null : editingTask.score}
+          aiScore={editingTask.ai_score}
           currentOverride={editingTask.has_override ? editingTask.score : null}
           currentComment={null}
         />

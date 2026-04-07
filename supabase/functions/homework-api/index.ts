@@ -2078,7 +2078,7 @@ async function handleGetResults(
   // alongside the aggregate accumulator so the per_student heatmap cells and
   // the totals use the same computeFinalScore priority chain. Only submitted
   // students get an entry — not-submitted students receive `task_scores: []`.
-  const taskScoresByStudent: Record<string, Record<string, { final_score: number; hint_count: number; has_override: boolean }>> = {};
+  const taskScoresByStudent: Record<string, Record<string, { final_score: number; hint_count: number; has_override: boolean; ai_score: number | null }>> = {};
 
   const { data: studentAssignments } = await db
     .from("homework_tutor_student_assignments")
@@ -2149,6 +2149,7 @@ async function handleGetResults(
               final_score: Math.round(finalScore * 100) / 100,
               hint_count: hintCount,
               has_override: ts.tutor_score_override != null,
+              ai_score: ts.ai_score != null ? Math.round(Number(ts.ai_score) * 100) / 100 : null,
             };
           }
 
@@ -2206,6 +2207,7 @@ async function handleGetResults(
           final_score: cell.final_score,
           hint_count: cell.hint_count,
           has_override: cell.has_override,
+          ai_score: cell.ai_score,
         }));
         perStudent.push({
           student_id: sa.student_id,
