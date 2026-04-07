@@ -1,59 +1,46 @@
 
-## Fix blank space in “Понимай предметы сам...” block
 
-### What is actually wrong
-The cards in `ValueProposition.tsx` are still rendered with `fade-base`, which sets them to `opacity: 0` by default. They only become visible if `useScrollAnimation()` successfully adds `animate-fade-in-up`.
+## Problem
 
-So the empty white area is not “removed” right now — the cards are simply hidden.
+When the tutor sends a reminder via the "Напомнить" button, the Telegram message arrives as plain text without a link to the homework. The initial homework notification includes an "Открыть ДЗ" link — the reminder should too.
 
-There is also a second source of fragility:
-- `Card` already has its own default mount animation in `src/components/ui/card.tsx`
-- `ValueProposition` adds a separate scroll-hidden animation on top
+## Solution
 
-That combination is brittle for a near-the-top landing section.
+Modify `handleRemindStudent` in `supabase/functions/homework-api/index.ts` to append a homework link to the Telegram message and send it with HTML parse mode.
 
-### Minimal fix
-Make the 3 value cards visible immediately instead of depending on `IntersectionObserver`.
+## Changes
 
-### Planned changes
-1. **Update `src/components/sections/ValueProposition.tsx`**
-   - remove `useScrollAnimation` from this section
-   - remove `fade-base` from the cards
-   - render cards normally so they are always visible on first paint
+### File: `supabase/functions/homework-api/index.ts` (edge function)
 
-2. **Disable double animation on these cards**
-   - pass `animate={false}` to `Card` in this section if needed
-   - keep hover styles (`hover:shadow-elegant`, `hover:-translate-y-2`, etc.)
+In the Telegram sending block (~lines 1833–1836), change from:
 
-3. **Keep spacing compact**
-   - preserve the reduced section padding already applied
-   - keep the grid and text layout unchanged
-
-### Technical details
-Current issue in code:
-```tsx
-<Card
-  ref={ref}
-  className="fade-base ..."
->
+```ts
+const payload: Record<string, unknown> = {
+  chat_id: chatId,
+  text: message,
+};
 ```
 
-And in CSS:
-```css
-.fade-base {
-  opacity: 0;
-  transform: translateY(30px);
-}
+To:
+
+```ts
+const appUrl =
+  Deno.env.get("PUBLIC_APP_URL")?.trim().replace(/\/$/, "") ??
+  "https://sokratai.lovable.app";
+const homeworkUrl = `${appUrl}/homework/${assignmentId}`;
+const textWithLink =
+  `${escapeHtmlEntities(message)}\n\n<a href="${escapeHtmlEntities(homeworkUrl)}">Открыть ДЗ</a>`;
+
+const payload: Record<string, unknown> = {
+  chat_id: chatId,
+  text: textWithLink,
+  parse_mode: "HTML",
+};
 ```
 
-If the observer does not reveal the card in time, the user sees whitespace with no text.
+This reuses the same `PUBLIC_APP_URL` + `/homework/{id}` pattern already used in the initial notification (line 1413–1415) and the email fallback (line 1929–1932). The `escapeHtmlEntities` function is already available in this file.
 
-Safer result:
-- for this specific section, cards should not start hidden at all
-- this removes the failure mode completely instead of trying to “fix” observer timing
+### Deployment
 
-### Files to modify
-- `src/components/sections/ValueProposition.tsx`
+Redeploy edge function `homework-api` — no frontend or migration changes needed.
 
-### Optional follow-up audit
-I also see the same hidden-by-default animation pattern in other landing sections (`AhaMoments`, `Testimonials`). I would first fix this block only, then optionally audit the rest of the landing for similar “invisible until observed” behavior so this does not repeat elsewhere.
