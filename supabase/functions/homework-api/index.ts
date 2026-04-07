@@ -2832,7 +2832,9 @@ async function handleGetThread(
 
   // Filter out hidden tutor notes (service-role bypasses RLS)
   return jsonOk(cors, {
-    ...stripHiddenMessages(thread as Record<string, unknown>),
+    ...stripStudentSensitiveTaskStateFields(
+      stripHiddenMessages(thread as Record<string, unknown>),
+    ),
     tasks: tasks ?? [],
   });
 }
@@ -3206,7 +3208,7 @@ const THREAD_SELECT = `
   id, status, current_task_order, created_at, updated_at,
   student_assignment_id, last_student_message_at, last_tutor_message_at,
   homework_tutor_thread_messages(id, role, content, image_url, task_order, message_kind, created_at, author_user_id, visible_to_student),
-  homework_tutor_task_states(id, task_id, status, attempts, best_score, available_score, earned_score, wrong_answer_count, hint_count)
+  homework_tutor_task_states(id, task_id, status, attempts, best_score, available_score, earned_score, wrong_answer_count, hint_count, ai_score, ai_score_comment)
 `;
 
 /**
@@ -3221,6 +3223,27 @@ function stripHiddenMessages(thread: Record<string, unknown>): Record<string, un
     homework_tutor_thread_messages: messages.filter(
       (m: Record<string, unknown>) => m.visible_to_student !== false,
     ),
+  };
+}
+
+/**
+ * Remove tutor-facing draft commentary from student responses.
+ */
+function stripStudentSensitiveTaskStateFields(
+  thread: Record<string, unknown>,
+): Record<string, unknown> {
+  const taskStates = thread.homework_tutor_task_states;
+  if (!Array.isArray(taskStates)) return thread;
+  return {
+    ...thread,
+    homework_tutor_task_states: taskStates.map((taskState) => {
+      if (!taskState || typeof taskState !== "object") return taskState;
+      const { ai_score_comment: _aiScoreComment, ...safeTaskState } = taskState as Record<
+        string,
+        unknown
+      >;
+      return safeTaskState;
+    }),
   };
 }
 
@@ -3243,7 +3266,9 @@ async function fetchStudentThread(
   threadId: string,
 ): Promise<Record<string, unknown> | null> {
   const thread = await fetchFullThread(db, threadId);
-  return thread ? stripHiddenMessages(thread) : null;
+  return thread
+    ? stripStudentSensitiveTaskStateFields(stripHiddenMessages(thread))
+    : null;
 }
 
 // ─── Helper: lazy thread provisioning for guided_chat ───────────────────────
@@ -3588,6 +3613,21 @@ async function handleCheckAnswer(
     effectiveVerdict = "ON_TRACK";
   }
 
+  const maxScore = task.max_score ?? 1;
+  const isDetailedSolution = task.check_format === "detailed_solution";
+  const effectiveAiScore = effectiveVerdict === result.verdict
+    ? result.ai_score
+    : effectiveVerdict === "ON_TRACK"
+      ? (isDetailedSolution
+        ? Math.min(result.ai_score ?? 0, Math.max(0, maxScore - 0.5))
+        : 0)
+      : result.ai_score;
+  const effectiveAiScoreComment =
+    isDetailedSolution && effectiveAiScore != null && effectiveAiScore < maxScore
+      ? result.ai_score_comment ??
+        "Решение пока не дотягивает до полного зачёта по критериям, поэтому балл не максимальный."
+      : null;
+
   // Save AI feedback message
   await db.from("homework_tutor_thread_messages").insert({
     thread_id: threadId,
@@ -3609,6 +3649,8 @@ async function handleCheckAnswer(
       status: "completed",
       earned_score: earnedScore,
       available_score: currentAvailableScore,
+      ai_score: effectiveAiScore,
+      ai_score_comment: effectiveAiScoreComment,
       best_score: Math.max((currentState.best_score as number) ?? 0, Math.round(earnedScore)),
       last_ai_feedback: result.feedback,
       updated_at: new Date().toISOString(),
@@ -3621,9 +3663,11 @@ async function handleCheckAnswer(
     responseData = {
       verdict: "CORRECT",
       feedback: result.feedback,
+      ai_score: effectiveAiScore,
+      ai_score_comment: effectiveAiScoreComment,
       earned_score: earnedScore,
       available_score: currentAvailableScore,
-      max_score: task.max_score ?? 1,
+      max_score: maxScore,
       wrong_answer_count: (currentState.wrong_answer_count as number) ?? 0,
       hint_count: (currentState.hint_count as number) ?? 0,
       task_completed: true,
@@ -3640,9 +3684,11 @@ async function handleCheckAnswer(
     responseData = {
       verdict: "CHECK_FAILED",
       feedback: result.feedback,
+      ai_score: null,
+      ai_score_comment: null,
       earned_score: null,
       available_score: currentAvailableScore,
-      max_score: task.max_score ?? 1,
+      max_score: maxScore,
       wrong_answer_count: (currentState.wrong_answer_count as number) ?? 0,
       hint_count: (currentState.hint_count as number) ?? 0,
       task_completed: false,
@@ -3671,6 +3717,8 @@ async function handleCheckAnswer(
       attempts: nextAttemptCount,
       hint_count: newHintCount,
       available_score: onTrackAvailableScore,
+      ai_score: effectiveAiScore,
+      ai_score_comment: effectiveAiScoreComment,
       last_ai_feedback: result.feedback,
       updated_at: new Date().toISOString(),
     }).eq("id", currentState.id);
@@ -3678,9 +3726,11 @@ async function handleCheckAnswer(
     responseData = {
       verdict: "ON_TRACK",
       feedback: result.feedback,
+      ai_score: effectiveAiScore,
+      ai_score_comment: effectiveAiScoreComment,
       earned_score: null,
       available_score: onTrackAvailableScore,
-      max_score: task.max_score ?? 1,
+      max_score: maxScore,
       wrong_answer_count: wrongCount,
       hint_count: newHintCount,
       task_completed: false,
@@ -3700,6 +3750,8 @@ async function handleCheckAnswer(
       attempts: nextAttemptCount,
       wrong_answer_count: newWrongCount,
       available_score: newAvailableScore,
+      ai_score: effectiveAiScore,
+      ai_score_comment: effectiveAiScoreComment,
       last_ai_feedback: result.feedback,
       updated_at: new Date().toISOString(),
     }).eq("id", currentState.id);
@@ -3707,9 +3759,11 @@ async function handleCheckAnswer(
     responseData = {
       verdict: "INCORRECT",
       feedback: result.feedback,
+      ai_score: effectiveAiScore,
+      ai_score_comment: effectiveAiScoreComment,
       earned_score: null,
       available_score: newAvailableScore,
-      max_score: task.max_score ?? 1,
+      max_score: maxScore,
       wrong_answer_count: newWrongCount,
       hint_count: newHintCount,
       task_completed: false,

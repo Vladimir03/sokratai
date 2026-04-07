@@ -19,6 +19,7 @@ import {
 
 const MAX_PROMPT_TEXT = 8_000;
 const MAX_FEEDBACK_LENGTH = 1_200;
+const MAX_SCORE_COMMENT_LENGTH = 280;
 const MAX_PROMPT_IMAGE_BYTES = 5 * 1024 * 1024;
 const SAFE_FEEDBACK_NO_ANSWER =
   "Проверь ход решения шаг за шагом и попробуй исправить первую найденную ошибку самостоятельно.";
@@ -113,6 +114,8 @@ export interface GuidedCheckResult {
   feedback: string;
   confidence: number;
   error_type: HomeworkAiErrorType;
+  ai_score: number | null;
+  ai_score_comment: string | null;
   failure_reason?: GuidedCheckFailureReason;
 }
 
@@ -177,6 +180,19 @@ function clampPromptText(text: string | null | undefined): string {
 function clamp01(value: number): number {
   if (!Number.isFinite(value)) return 0;
   return Math.min(1, Math.max(0, value));
+}
+
+function roundToHalf(value: number): number {
+  return Math.round(value * 2) / 2;
+}
+
+function clampScore(value: number, maxScore: number): number {
+  if (!Number.isFinite(value) || !Number.isFinite(maxScore)) return 0;
+  return Math.min(maxScore, Math.max(0, roundToHalf(value)));
+}
+
+function getNonPerfectScoreCeiling(maxScore: number): number {
+  return Math.max(0, roundToHalf(maxScore - 0.5));
 }
 
 export function validateHintContent(text: string): { ok: boolean; reason?: string } {
@@ -280,6 +296,47 @@ function toNumber(value: unknown): number | null {
     if (Number.isFinite(parsed)) return parsed;
   }
   return null;
+}
+
+function sanitizeAiScoreComment(rawComment: unknown, correctAnswer: string | null): string | null {
+  if (typeof rawComment !== "string") return null;
+
+  let comment = normalizeText(stripMarkdownWrappers(rawComment))
+    .replace(/\$+/g, "")
+    .replace(/\\[A-Za-z]+/g, "")
+    .replace(/[{}]/g, "")
+    .trim();
+
+  if (!comment) return null;
+
+  comment = softTruncate(comment, MAX_SCORE_COMMENT_LENGTH);
+
+  const normalizedAnswer = normalizeComparable(correctAnswer ?? "");
+  if (normalizedAnswer.length >= 2) {
+    const normalizedComment = normalizeComparable(comment);
+    if (normalizedComment.includes(normalizedAnswer)) {
+      return null;
+    }
+  }
+
+  return comment || null;
+}
+
+function buildFallbackAiScoreComment(
+  verdict: Exclude<GuidedVerdict, "CHECK_FAILED">,
+  aiScore: number,
+): string {
+  if (verdict === "CORRECT") {
+    return "Итоговый ответ верный, но в обосновании или оформлении не хватает части шагов для максимального балла.";
+  }
+  if (verdict === "ON_TRACK") {
+    return aiScore > 0
+      ? "Есть верные содержательные шаги, но решение ещё не доведено до полного ответа по критериям."
+      : "Решение пока не доведено до полного ответа, поэтому максимальный балл не ставится.";
+  }
+  return aiScore > 0
+    ? "В решении есть отдельные верные элементы, но остаётся существенная ошибка, поэтому балл не максимальный."
+    : "В решении есть существенная ошибка или не хватает корректного хода, поэтому балл не начислен.";
 }
 
 function arrayBufferToBase64(buffer: ArrayBuffer): string {
@@ -455,7 +512,7 @@ function stripOptionalOuterPunctuation(raw: string): string {
 function extractShortAnswerSignature(raw: string): { exact: string; numeric: string | null; unit: string | null } {
   const normalized = stripOptionalOuterPunctuation(normalizeShortAnswerText(raw));
   const compact = normalized.replace(/\s+/g, "");
-  const match = compact.match(/^(-?\d+(?:\.\d+)?)([a-zа-я/%°\/^0-9]*)$/iu);
+  const match = compact.match(/^(-?\d+(?:\.\d+)?)([a-zа-я/%°/^0-9]*)$/iu);
   if (!match) {
     return { exact: compact, numeric: null, unit: null };
   }
@@ -479,6 +536,7 @@ function shouldUseDeterministicFastPath(studentAnswer: string, correctAnswer: st
 function tryDeterministicShortAnswerMatch(
   studentAnswer: string,
   correctAnswer: string | null,
+  maxScore: number,
 ): GuidedCheckResult | null {
   if (!shouldUseDeterministicFastPath(studentAnswer, correctAnswer)) {
     return null;
@@ -493,6 +551,8 @@ function tryDeterministicShortAnswerMatch(
       feedback: "Верно, это правильный итоговый ответ.",
       confidence: 0.99,
       error_type: "correct",
+      ai_score: maxScore,
+      ai_score_comment: null,
     };
   }
 
@@ -513,6 +573,8 @@ function tryDeterministicShortAnswerMatch(
     feedback: "Верно, это правильный итоговый ответ.",
     confidence: 0.98,
     error_type: "correct",
+    ai_score: maxScore,
+    ai_score_comment: null,
   };
 }
 
@@ -550,12 +612,15 @@ const CHECK_FALLBACK: GuidedCheckResult = {
   confidence: 0,
   feedback: CHECK_FAILED_FEEDBACK,
   error_type: "incomplete",
+  ai_score: null,
+  ai_score_comment: null,
   failure_reason: "unknown",
 };
 
 function sanitizeCheckResult(
   parsed: Record<string, unknown>,
   correctAnswer: string | null,
+  scoring: Pick<EvaluateStudentAnswerParams, "checkFormat" | "maxScore">,
 ): GuidedCheckResult {
   // Extract verdict
   const rawVerdict = typeof parsed.verdict === "string"
@@ -580,8 +645,39 @@ function sanitizeCheckResult(
 
   // Extract error_type
   const error_type = sanitizeErrorType(parsed.error_type, verdict);
+  const maxScore = Math.max(0, scoring.maxScore);
 
-  return { verdict, feedback, confidence, error_type };
+  if (scoring.checkFormat !== "detailed_solution") {
+    return {
+      verdict,
+      feedback,
+      confidence,
+      error_type,
+      ai_score: verdict === "CORRECT" ? maxScore : 0,
+      ai_score_comment: null,
+    };
+  }
+
+  const rawAiScore = toNumber(parsed.ai_score);
+  const initialScore = rawAiScore ?? (verdict === "CORRECT" ? maxScore : 0);
+  const clampedScore = clampScore(initialScore, maxScore);
+  const cappedScore = verdict === "CORRECT"
+    ? clampedScore
+    : Math.min(clampedScore, getNonPerfectScoreCeiling(maxScore));
+  const ai_score = clampScore(cappedScore, maxScore);
+  const ai_score_comment = ai_score < maxScore
+    ? sanitizeAiScoreComment(parsed.ai_score_comment, correctAnswer) ??
+      buildFallbackAiScoreComment(verdict, ai_score)
+    : null;
+
+  return {
+    verdict,
+    feedback,
+    confidence,
+    error_type,
+    ai_score,
+    ai_score_comment,
+  };
 }
 
 // ─── Prompt builders ────────────────────────────────────────────────────────
@@ -639,6 +735,32 @@ function buildCheckFormatGuidance(
   return lines.join("\n");
 }
 
+function buildAiScoreGuidance(
+  checkFormat: "short_answer" | "detailed_solution" | undefined,
+  maxScore: number,
+): string {
+  if (checkFormat === "detailed_solution") {
+    return [
+      "",
+      `БАЛЛ ПО КРИТЕРИЯМ ФИПИ: верни ai_score в диапазоне 0..${maxScore} с шагом 0.5.`,
+      "- ai_score зависит только от качества решения и соответствия критериям, а НЕ от числа попыток, подсказок или времени.",
+      "- CORRECT может иметь ai_score < max_score, если итог верный, но обоснование или оформление неполное.",
+      "- ON_TRACK может иметь частичный ai_score, если есть содержательно верные шаги, но решение не завершено.",
+      "- INCORRECT может иметь 0 или частичный ai_score, если есть отдельные верные содержательные элементы, но решение содержит ошибку.",
+      "- Если ai_score < max_score, обязательно верни ai_score_comment: 1-2 коротких предложения без LaTeX, почему балл не максимальный.",
+      "- Если ai_score = max_score, верни ai_score_comment как null или пустую строку.",
+    ].join("\n");
+  }
+
+  return [
+    "",
+    `БАЛЛ: для short_answer ai_score может быть только 0 или ${maxScore}.`,
+    "- CORRECT => ai_score = max_score.",
+    "- ON_TRACK или INCORRECT => ai_score = 0.",
+    "- ai_score_comment для short_answer всегда null.",
+  ].join("\n");
+}
+
 function isImageDescriptionRequest(text: string): boolean {
   return /(что\s+(?:ты\s+)?видишь|что\s+на|опиши|что\s+изображен|что\s+изображено).*(?:картинк|изображени|фото|скрин)/i.test(text);
 }
@@ -680,6 +802,7 @@ function buildCheckPrompt(params: EvaluateStudentAnswerParams): LovableMessage[]
   const wantsImageDescription = hasStudentImage && isImageDescriptionRequest(params.studentAnswer);
   const graphGroundingGuidance = buildGraphGroundingGuidance(params.taskOcrText, hasTaskImage);
   const checkFormatGuidance = buildCheckFormatGuidance(params.checkFormat, params.studentAnswer);
+  const aiScoreGuidance = buildAiScoreGuidance(params.checkFormat, params.maxScore);
 
   const systemContent = [
     "Ты проверяешь ответ ученика на задачу по домашнему заданию.",
@@ -699,11 +822,12 @@ function buildCheckPrompt(params: EvaluateStudentAnswerParams): LovableMessage[]
     `Эталонный ответ: ${correctAnswerValue}`,
     rubricLine,
     "",
+    `Максимальный балл по задаче: ${params.maxScore}.`,
     `Статистика: ${params.wrongAnswerCount} неверных попыток, ${params.hintCount} подсказок.`,
-    `Доступные баллы: ${params.availableScore} из ${params.maxScore}.`,
+    "Статистика попыток дана только как контекст диалога и НЕ влияет на verdict или ai_score.",
     "",
     "Верни ТОЛЬКО валидный JSON без markdown-обёрток и лишнего текста.",
-    '{"verdict":"CORRECT"|"ON_TRACK"|"INCORRECT","feedback":"...","confidence":0.0-1.0,"error_type":"..."}',
+    '{"verdict":"CORRECT"|"ON_TRACK"|"INCORRECT","feedback":"...","confidence":0.0-1.0,"error_type":"...","ai_score":0,"ai_score_comment":null}',
     "",
     "ПРАВИЛА ОЦЕНКИ:",
     "",
@@ -728,6 +852,7 @@ function buildCheckPrompt(params: EvaluateStudentAnswerParams): LovableMessage[]
     "- Если ответ не на тот вопрос: объясни какую величину просит задача.",
     "- НЕЛЬЗЯ выдавать правильный ответ в feedback.",
     "- error_type: calculation | concept | formatting | incomplete | factual_error | weak_argument | wrong_answer | partial | correct",
+    aiScoreGuidance,
     answerTypeGuidance,
     checkFormatGuidance,
   ].filter(Boolean).join("\n");
@@ -951,6 +1076,7 @@ export async function evaluateStudentAnswer(
     const deterministicMatch = tryDeterministicShortAnswerMatch(
       params.studentAnswer,
       params.correctAnswer,
+      params.maxScore,
     );
     if (deterministicMatch) {
       console.log("guided_check_fast_path_match", {
@@ -972,7 +1098,10 @@ export async function evaluateStudentAnswer(
       studentImageUrls,
     });
     const parsed = await callLovableJson(messages, "guided_check");
-    const result = sanitizeCheckResult(parsed, params.correctAnswer);
+    const result = sanitizeCheckResult(parsed, params.correctAnswer, {
+      checkFormat: params.checkFormat,
+      maxScore: params.maxScore,
+    });
 
     if (result.verdict === "CHECK_FAILED") {
       console.warn("guided_check_invalid_payload", {
@@ -985,6 +1114,7 @@ export async function evaluateStudentAnswer(
       verdict: result.verdict,
       confidence: result.confidence,
       error_type: result.error_type,
+      ai_score: result.ai_score,
     });
 
     return result;
