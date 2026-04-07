@@ -4899,7 +4899,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
       seg[6] === "score-override" &&
       route.method === "PATCH"
     ) {
-      const body = await parseJsonBody(req);
+      const body = await parseJsonBody(req) as Record<string, unknown>;
       return await handleSetTutorScoreOverride(db, userId, seg[1], seg[3], seg[5], body, cors);
     }
 
