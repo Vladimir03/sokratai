@@ -543,6 +543,7 @@ async function handleListAssignments(
 
   const submittedMap: Record<string, number> = {};
   const scoreMap: Record<string, { sum: number; count: number }> = {};
+  let totalMaxByAssignment: Record<string, number> = {};
 
   // Guided chat: count completed threads as "submissions" for stats
   if (allSaIds.length > 0) {
