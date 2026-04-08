@@ -215,6 +215,7 @@ export function FormulaRoundScreen({
         <FeedbackOverlay
           isCorrect={feedbackPayload.isCorrect}
           canonicalLatex={feedbackPayload.canonicalLatex}
+          questionLatex={feedbackPayload.questionLatex}
           userAnswerLatex={feedbackPayload.userAnswerLatex}
           reasoning={feedbackPayload.reasoning}
           trap={feedbackPayload.trap}

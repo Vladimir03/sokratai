@@ -57,6 +57,23 @@ const BuildFormulaCard = memo(function BuildFormulaCard({
     }
   }, [submitted]);
 
+  const leftSideLatex = useMemo(() => {
+    if (!question.displayFormula) {
+      return null;
+    }
+
+    const unwrapped = question.displayFormula
+      .replace(/^\\\(/u, '')
+      .replace(/\\\)$/u, '');
+
+    if (!unwrapped.includes('=')) {
+      return null;
+    }
+
+    const [leftSide] = unwrapped.split('=');
+    return `${leftSide.trim()} =`;
+  }, [question.displayFormula]);
+
   // Build LaTeX preview from placed tokens (AC-9)
   const assembledLatex = useMemo(() => {
     if (numerator.length === 0 && denominator.length === 0) return null;
@@ -67,10 +84,19 @@ const BuildFormulaCard = memo(function BuildFormulaCard({
       ? denominator.join(' \\cdot ')
       : '';
 
-    if (denStr && numStr) return `$\\frac{${numStr}}{${denStr}}$`;
-    if (denStr) return `$\\frac{1}{${denStr}}$`;
-    return `$${numStr}$`;
-  }, [numerator, denominator]);
+    let rightSide = '';
+    if (denStr && numStr) {
+      rightSide = `\\frac{${numStr}}{${denStr}}`;
+    } else if (denStr) {
+      rightSide = `\\frac{1}{${denStr}}`;
+    } else {
+      rightSide = numStr;
+    }
+
+    return leftSideLatex
+      ? `$${leftSideLatex} ${rightSide}$`
+      : `$${rightSide}$`;
+  }, [leftSideLatex, numerator, denominator]);
 
   const hasTokensPlaced = numerator.length > 0 || denominator.length > 0;
 
@@ -94,6 +120,14 @@ const BuildFormulaCard = memo(function BuildFormulaCard({
           <p className="text-sm text-slate-500 mt-1">
             Собери правую часть формулы
           </p>
+          {leftSideLatex && (
+            <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+              <p className="text-xs font-medium text-slate-500 mb-1">
+                Нужно получить
+              </p>
+              <MathText text={`$${leftSideLatex}$`} className="text-lg text-slate-900" />
+            </div>
+          )}
         </div>
 
         {/* Token pool */}

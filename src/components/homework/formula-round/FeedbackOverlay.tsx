@@ -8,6 +8,7 @@ const MathText = lazy(() =>
 interface FeedbackOverlayProps {
   isCorrect: boolean;
   canonicalLatex: string;
+  questionLatex: string | null;
   userAnswerLatex: string | null;
   reasoning: string;
   trap: string;
@@ -25,6 +26,7 @@ interface FeedbackOverlayProps {
 export const FeedbackOverlay = memo(function FeedbackOverlay({
   isCorrect,
   canonicalLatex,
+  questionLatex,
   userAnswerLatex,
   reasoning,
   trap,
@@ -45,8 +47,24 @@ export const FeedbackOverlay = memo(function FeedbackOverlay({
           {isCorrect ? '✓ Верно!' : '✗ Неверно'}
         </h2>
 
+        {questionLatex && questionLatex !== canonicalLatex && (
+          <div className={cardBg}>
+            <p className="text-xs font-medium text-slate-500 mb-1">
+              В задании было:
+            </p>
+            <Suspense fallback={<span className="text-sm text-slate-700">{questionLatex}</span>}>
+              <div className="text-center">
+                <MathText text={`$${questionLatex}$`} className="text-lg text-slate-900" />
+              </div>
+            </Suspense>
+          </div>
+        )}
+
         {/* Block 1: Canonical LaTeX formula */}
         <div className={cardBg}>
+          <p className="text-xs font-medium text-slate-500 mb-1">
+            Правильная формула:
+          </p>
           <Suspense fallback={<span className="text-sm text-slate-700">{canonicalLatex}</span>}>
             <div className="text-center">
               <MathText text={`$${canonicalLatex}$`} className="text-lg text-slate-900" />
@@ -57,7 +75,9 @@ export const FeedbackOverlay = memo(function FeedbackOverlay({
         {/* Block 2: User's answer */}
         <div className={cardBg}>
           <p className="text-xs font-medium text-slate-500 mb-1">Твой ответ:</p>
-          {userAnswerLatex ? (
+          {userAnswerLatex === 'верно' || userAnswerLatex === 'неверно' ? (
+            <p className="text-sm text-slate-700">{userAnswerLatex}</p>
+          ) : userAnswerLatex ? (
             <Suspense fallback={<span className="text-sm text-slate-700">{userAnswerLatex}</span>}>
               <MathText text={`$${userAnswerLatex}$`} className="text-sm text-slate-700" />
             </Suspense>

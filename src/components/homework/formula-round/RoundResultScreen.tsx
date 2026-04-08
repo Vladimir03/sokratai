@@ -1,7 +1,7 @@
 import { memo, Suspense, lazy, useMemo, useState } from 'react';
 import { AlertTriangle, ChevronDown, ChevronUp } from 'lucide-react';
 import type { RoundResult, Layer } from '@/lib/formulaEngine/types';
-import { kinematicsFormulas } from '@/lib/formulaEngine/formulas';
+import { mechanicsFormulas } from '@/lib/formulaEngine/formulas';
 
 const MathText = lazy(() =>
   import('@/components/kb/ui/MathText').then((m) => ({ default: m.MathText })),
@@ -36,9 +36,12 @@ export const RoundResultScreen = memo(function RoundResultScreen({
   const percentage = Math.round((result.score / result.total) * 100);
 
   const formulaMap = useMemo(() => {
-    const map = new Map<string, string>();
-    for (const f of kinematicsFormulas) {
-      map.set(f.id, f.formula);
+    const map = new Map<string, { latex: string; title: string }>();
+    for (const f of mechanicsFormulas) {
+      map.set(f.id, {
+        latex: f.formula,
+        title: f.buildTitle || f.name,
+      });
     }
     return map;
   }, []);
@@ -84,7 +87,7 @@ export const RoundResultScreen = memo(function RoundResultScreen({
               </h2>
               <div className="space-y-2">
                 {displayedWeakFormulas.map((wf) => {
-                  const latex = formulaMap.get(wf.formulaId);
+                  const formula = formulaMap.get(wf.formulaId);
                   return (
                     <div
                       key={wf.formulaId}
@@ -92,16 +95,16 @@ export const RoundResultScreen = memo(function RoundResultScreen({
                     >
                       <AlertTriangle className="w-5 h-5 text-amber-500 shrink-0 mt-0.5" />
                       <div className="min-w-0">
-                        {latex ? (
+                        {formula ? (
                           <Suspense
                             fallback={
                               <span className="text-sm font-medium text-slate-800">
-                                {latex}
+                                {formula.title}
                               </span>
                             }
                           >
                             <MathText
-                              text={`$${latex}$`}
+                              text={`$${formula.latex}$`}
                               className="text-sm font-medium text-slate-800"
                             />
                           </Suspense>

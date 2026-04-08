@@ -21,6 +21,35 @@ interface BuildRecipe {
   denominatorTokens: string[];
 }
 
+const SUPPORTED_BUILD_FORMULA_IDS = new Set([
+  'kin.01',
+  'kin.02',
+  'kin.07',
+  'kin.08',
+  'kin.09',
+  'kin.10',
+  'kin.11',
+  'kin.12',
+  'dyn.01',
+  'dyn.02',
+  'dyn.03',
+  'dyn.04',
+  'dyn.06',
+  'cons.01',
+  'cons.03',
+  'cons.04',
+  'cons.06',
+  'cons.07',
+  'hydro.01',
+  'hydro.03',
+  'hydro.04',
+]);
+
+const CONTEXT_DEPENDENT_TRUE_FALSE_IDS = new Set([
+  'cons.05',
+  'hydro.02',
+]);
+
 const DEFAULT_ROUND_DISTRIBUTIONS: RoundDistribution[] = [
   { trueOrFalse: 4, buildFormula: 4, situationToFormula: 2 },
   { trueOrFalse: 4, buildFormula: 3, situationToFormula: 3 },
@@ -90,8 +119,8 @@ const BUILD_RECIPES: Record<string, BuildRecipe> = {
   },
   'dyn.01': {
     displayFormula: 'F = m \\cdot a',
-    numeratorTokens: ['F'],
-    denominatorTokens: ['m', 'a'],
+    numeratorTokens: ['m', 'a'],
+    denominatorTokens: [],
   },
   'dyn.02': {
     displayFormula: 'f = \\mu \\cdot N',
@@ -175,8 +204,8 @@ const BUILD_RECIPES: Record<string, BuildRecipe> = {
   },
   'hydro.04': {
     displayFormula: '\\frac{F_1}{S_1} = \\frac{F_2}{S_2}',
-    numeratorTokens: ['F_1', 'S_2'],
-    denominatorTokens: ['S_1', 'F_2'],
+    numeratorTokens: ['F_2'],
+    denominatorTokens: ['S_2'],
   },
 };
 
@@ -514,6 +543,16 @@ function wrapMath(latex: string): string {
   return `\\(${latex}\\)`;
 }
 
+function unwrapMath(latex: string | undefined): string | null {
+  if (!latex) {
+    return null;
+  }
+
+  return latex
+    .replace(/^\\\(/u, '')
+    .replace(/\\\)$/u, '');
+}
+
 function normalizeMathToken(token: string): string {
   return token
     .replace(/_\{([А-Яа-яЁё]+)\}/gu, '_{\\text{$1}}')
@@ -615,6 +654,14 @@ function getBuildRecipe(formula: Formula): BuildRecipe {
   };
 }
 
+function supportsBuildQuestion(formula: Formula): boolean {
+  return SUPPORTED_BUILD_FORMULA_IDS.has(formula.id);
+}
+
+function supportsTrueOrFalseQuestion(formula: Formula): boolean {
+  return !CONTEXT_DEPENDENT_TRUE_FALSE_IDS.has(formula.id);
+}
+
 function getSameSectionFormulas(formula: Formula, pool: Formula[]): Formula[] {
   return pool.filter((candidate) => candidate.section === formula.section && candidate.id !== formula.id);
 }
@@ -690,6 +737,10 @@ function getProportionalityHint(formula: Formula): string {
 }
 
 function getLayer1MemoryCue(formula: Formula): string {
+  if (formula.section !== 'Кинематика') {
+    return `Ориентир: ${formula.whenToUse[0] ?? formula.physicalMeaning}`;
+  }
+
   const noTimeTrigger = formula.whenToUse.find((entry) => /нет времени/i.test(entry));
 
   if (noTimeTrigger) {
@@ -778,6 +829,7 @@ export function generateSituationToFormula(formula: Formula, pool: Formula[]): F
 
 export interface FeedbackPayload {
   canonicalLatex: string;
+  questionLatex: string | null;
   userAnswerLatex: string | null;
   reasoning: string;
   trap: string;
@@ -790,6 +842,7 @@ export function generateFeedbackPayload(question: FormulaQuestion, isCorrect: bo
   if (!formula) {
     return {
       canonicalLatex: '?',
+      questionLatex: null,
       userAnswerLatex: null,
       reasoning: isCorrect ? 'Верно!' : 'Нужна ещё одна попытка.',
       trap: '',
@@ -798,6 +851,7 @@ export function generateFeedbackPayload(question: FormulaQuestion, isCorrect: bo
   }
 
   const canonicalLatex = formula.formula;
+  const questionLatex = unwrapMath(question.displayFormula);
 
   // Build userAnswerLatex based on question type and answer (for BOTH correct and incorrect)
   let userAnswerLatex: string | null = null;
@@ -819,6 +873,7 @@ export function generateFeedbackPayload(question: FormulaQuestion, isCorrect: bo
   if (isCorrect) {
     return {
       canonicalLatex,
+      questionLatex,
       userAnswerLatex,
       reasoning: formula.physicalMeaning,
       trap: getLayer1MemoryCue(formula),
@@ -831,6 +886,7 @@ export function generateFeedbackPayload(question: FormulaQuestion, isCorrect: bo
     const mutation = MUTATION_LIBRARY[formula.id]?.find((m) => m.type === question.mutationType);
     return {
       canonicalLatex,
+      questionLatex,
       userAnswerLatex,
       reasoning: mutation?.hint ?? getMutationExplanation(question, formula),
       trap: formula.dimensions,
@@ -844,6 +900,7 @@ export function generateFeedbackPayload(question: FormulaQuestion, isCorrect: bo
     const formattedTokens = allTokens.map((token) => `$${token}$`).join(', ');
     return {
       canonicalLatex,
+      questionLatex,
       userAnswerLatex: userAnswerLatex ?? null,
       reasoning: `Нужны элементы: ${formattedTokens}`,
       trap: trimLine(formula.commonMistakes[0] ?? 'не подменяй переменные'),
@@ -854,6 +911,7 @@ export function generateFeedbackPayload(question: FormulaQuestion, isCorrect: bo
   // Layer 1
   return {
     canonicalLatex,
+    questionLatex,
     userAnswerLatex: userAnswerLatex ?? null,
     reasoning: trimLine(question.explanation || formula.whenToUse[0] || formula.physicalMeaning),
     trap: getLayer1MemoryCue(formula),
@@ -905,12 +963,24 @@ export function generateFeedback(question: FormulaQuestion, isCorrect: boolean):
 }
 
 function buildRoundQuestions(formulas: Formula[], distribution: RoundDistribution, pool: Formula[]): FormulaQuestion[] {
-  const trueOrFalseFormulas = formulas.slice(0, distribution.trueOrFalse);
-  const buildFormulaFormulas = formulas.slice(
-    distribution.trueOrFalse,
-    distribution.trueOrFalse + distribution.buildFormula,
-  );
-  const situationFormulas = formulas.slice(distribution.trueOrFalse + distribution.buildFormula);
+  const shuffledFormulas = shuffle(formulas);
+  const usedFormulaIds = new Set<string>();
+
+  const buildFormulaFormulas = shuffledFormulas
+    .filter((formula) => supportsBuildQuestion(formula))
+    .slice(0, distribution.buildFormula);
+  for (const formula of buildFormulaFormulas) {
+    usedFormulaIds.add(formula.id);
+  }
+
+  const trueOrFalseFormulas = shuffledFormulas
+    .filter((formula) => !usedFormulaIds.has(formula.id) && supportsTrueOrFalseQuestion(formula))
+    .slice(0, distribution.trueOrFalse);
+  for (const formula of trueOrFalseFormulas) {
+    usedFormulaIds.add(formula.id);
+  }
+
+  const situationFormulas = shuffledFormulas.filter((formula) => !usedFormulaIds.has(formula.id));
 
   const questions = [
     ...trueOrFalseFormulas.map((formula) => generateTrueOrFalse(formula)),
