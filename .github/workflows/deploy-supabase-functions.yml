@@ -37,6 +37,7 @@ jobs:
           supabase functions deploy telegram-login-token --no-verify-jwt
           supabase functions deploy telegram-broadcast --no-verify-jwt
           supabase functions deploy telegram-scheduled-reminder --no-verify-jwt
+          supabase functions deploy trainer-submit --no-verify-jwt
           supabase functions deploy homework-api
           supabase functions deploy push-subscribe
           supabase functions deploy homework-reminder --no-verify-jwt

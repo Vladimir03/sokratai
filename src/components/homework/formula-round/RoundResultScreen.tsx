@@ -1,13 +1,11 @@
 import { memo, Suspense, lazy, useMemo } from 'react';
-import { Heart, AlertTriangle } from 'lucide-react';
+import { AlertTriangle } from 'lucide-react';
 import type { RoundResult, Layer } from '@/lib/formulaEngine/types';
 import { kinematicsFormulas } from '@/lib/formulaEngine/formulas';
 
 const MathText = lazy(() =>
   import('@/components/kb/ui/MathText').then((m) => ({ default: m.MathText })),
 );
-
-const MAX_LIVES = 3;
 
 const LAYER_LABELS: Record<Layer, string> = {
   3: 'путает структуру',
@@ -17,23 +15,22 @@ const LAYER_LABELS: Record<Layer, string> = {
 
 interface RoundResultScreenProps {
   result: RoundResult;
-  onRetryErrors: () => void;
-  onClose: () => void;
+  onRetryWrong: () => void;
+  onExit: () => void;
 }
 
 /**
- * Result screen shown after round ends (AC-5: lives=0, AC-6: all 10 answered).
- * Displays score, remaining lives, weak formulas with layer descriptions,
- * and retry/close CTAs (AC-8).
+ * Result screen shown after round ends. Displays score, weak formulas
+ * with layer descriptions, and retry/exit CTAs.
  *
- * Layout matches FormulaRoundScreen (fullscreen z-50, bg-slate-50).
- * Design: doc 17 — one primary CTA, Lucide icons, accent palette.
- * GDD §2.3 — wireframe reference.
+ * Phase 1 standalone trainer: no lives display. One primary CTA
+ * («Пройти ещё раз», only when weakFormulas > 0) + «Назад» per doc 17
+ * and design system rules.
  */
 export const RoundResultScreen = memo(function RoundResultScreen({
   result,
-  onRetryErrors,
-  onClose,
+  onRetryWrong,
+  onExit,
 }: RoundResultScreenProps) {
   const percentage = Math.round((result.score / result.total) * 100);
 
@@ -65,7 +62,7 @@ export const RoundResultScreen = memo(function RoundResultScreen({
           </h1>
 
           {/* Score card */}
-          <div className="bg-white rounded-lg border border-slate-200 p-6 space-y-4">
+          <div className="bg-white rounded-lg border border-slate-200 p-6">
             <div className="text-center">
               <p className={`text-4xl font-bold tabular-nums ${scoreColor}`}>
                 {result.score}/{result.total}
@@ -73,25 +70,6 @@ export const RoundResultScreen = memo(function RoundResultScreen({
               <p className="text-sm text-slate-500 mt-1">
                 {percentage}% правильных
               </p>
-            </div>
-
-            {/* Lives remaining */}
-            <div className="flex items-center justify-center gap-2">
-              <div className="flex items-center gap-0.5">
-                {Array.from({ length: MAX_LIVES }, (_, i) => (
-                  <Heart
-                    key={i}
-                    className={`w-5 h-5 ${
-                      i < result.livesRemaining
-                        ? 'fill-red-500 text-red-500'
-                        : 'fill-slate-200 text-slate-200'
-                    }`}
-                  />
-                ))}
-              </div>
-              <span className="text-sm text-slate-500">
-                Осталось жизней: {result.livesRemaining}
-              </span>
             </div>
           </div>
 
@@ -148,20 +126,22 @@ export const RoundResultScreen = memo(function RoundResultScreen({
           {hasWeakFormulas && (
             <button
               type="button"
-              onClick={onRetryErrors}
-              className="flex-1 py-3 rounded-lg bg-accent text-white font-medium text-base transition-colors hover:bg-accent/90"
+              onClick={onRetryWrong}
+              className="flex-1 py-3 rounded-lg bg-accent text-white font-medium text-base transition-colors hover:bg-accent/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/30"
+              style={{ touchAction: 'manipulation' }}
             >
-              Повторить ошибки
+              Пройти ещё раз
             </button>
           )}
           <button
             type="button"
-            onClick={onClose}
-            className={`py-3 rounded-lg border border-slate-200 bg-white text-slate-700 font-medium text-base transition-colors hover:bg-slate-50 ${
+            onClick={onExit}
+            className={`py-3 rounded-lg border border-slate-200 bg-white text-slate-700 font-medium text-base transition-colors hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-300 ${
               hasWeakFormulas ? 'flex-1' : 'w-full'
             }`}
+            style={{ touchAction: 'manipulation' }}
           >
-            Закрыть
+            Назад
           </button>
         </div>
       </div>

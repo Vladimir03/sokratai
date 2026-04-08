@@ -24,7 +24,6 @@ const ResetPassword = lazy(() => import("./pages/ResetPassword"));
 const Chat = lazy(() => import("./pages/Chat"));
 const StudentHomework = lazy(() => import("./pages/StudentHomework"));
 const StudentHomeworkDetail = lazy(() => import("./pages/StudentHomeworkDetail"));
-const StudentFormulaRound = lazy(() => import("./pages/StudentFormulaRound"));
 const Progress = lazy(() => import("./pages/Progress"));
 const Profile = lazy(() => import("./pages/Profile"));
 const MiniApp = lazy(() => import("./pages/MiniApp"));
@@ -37,6 +36,7 @@ const PrivacyPolicy = lazy(() => import("./pages/PrivacyPolicy"));
 const NotFound = lazy(() => import("./pages/NotFound"));
 const Practice = lazy(() => import("./pages/Practice"));
 const Diagnostic = lazy(() => import("./pages/Diagnostic"));
+const TrainerPage = lazy(() => import("./pages/TrainerPage"));
 const RegisterTutor = lazy(() => import("./pages/RegisterTutor"));
 const TutorDashboard = lazy(() => import("./pages/tutor/TutorDashboard"));
 const TutorSchedule = lazy(() => import("./pages/tutor/TutorSchedule"));
@@ -161,14 +161,6 @@ const App = () => (
               } 
             />
             <Route 
-              path="/homework/:id/round/:roundId" 
-              element={
-                <Suspense fallback={<PageLoader />}>
-                  <StudentFormulaRound />
-                </Suspense>
-              } 
-            />
-            <Route 
               path="/practice" 
               element={
                 <Suspense fallback={<PageLoader />}>
@@ -183,6 +175,14 @@ const App = () => (
                   <Diagnostic />
                 </Suspense>
               } 
+            />
+            <Route
+              path="/trainer"
+              element={
+                <Suspense fallback={<div className="min-h-[100dvh] grid place-items-center text-slate-500">Загрузка…</div>}>
+                  <TrainerPage />
+                </Suspense>
+              }
             />
             <Route 
               path="/progress" 

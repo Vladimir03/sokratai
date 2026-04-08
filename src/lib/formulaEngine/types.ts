@@ -81,6 +81,7 @@ export interface RoundResult {
   livesRemaining: number;
   completed: boolean;
   durationSeconds: number;
+  durationMs: number;
   answers: AnswerRecord[];
   weakFormulas: WeakFormula[];
 }

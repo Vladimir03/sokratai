@@ -1,4 +1,5 @@
-import { useState, useRef, useCallback, useMemo } from 'react';
+import { useState, useRef, useCallback } from 'react';
+import { ArrowLeft } from 'lucide-react';
 import { RoundProgress } from './RoundProgress';
 import { FeedbackOverlay } from './FeedbackOverlay';
 import { TrueOrFalseCard } from './TrueOrFalseCard';
@@ -8,7 +9,6 @@ import { generateFeedback } from '@/lib/formulaEngine/questionGenerator';
 import type {
   FormulaQuestion,
   BuildFormulaAnswer,
-  RoundConfig,
   RoundResult,
   AnswerRecord,
   WeakFormula,
@@ -17,9 +17,9 @@ import type {
 type RoundPhase = 'playing' | 'feedback';
 
 interface FormulaRoundScreenProps {
-  roundConfig: RoundConfig;
   questions: FormulaQuestion[];
   onComplete: (result: RoundResult) => void;
+  onExit: () => void;
 }
 
 /**
@@ -28,36 +28,32 @@ interface FormulaRoundScreenProps {
  *
  * Dispatches to real card components per question.type:
  * TrueOrFalseCard (L3), BuildFormulaCard (L2), SituationCard (L1).
- * Correctness is determined here, not inside cards.
+ * Correctness is determined here (CLAUDE.md §11), not inside cards.
+ *
+ * Phase 1 standalone trainer: no lives, no game-over — round always plays
+ * until all questions answered. Timing via performance.now() (monotonic).
  */
 export function FormulaRoundScreen({
-  roundConfig,
   questions,
   onComplete,
+  onExit,
 }: FormulaRoundScreenProps) {
   const [currentIndex, setCurrentIndex] = useState(0);
-  const [lives, setLives] = useState(roundConfig.lives);
   const [score, setScore] = useState(0);
   const [answers, setAnswers] = useState<AnswerRecord[]>([]);
   const [phase, setPhase] = useState<RoundPhase>('playing');
   const [lastCorrect, setLastCorrect] = useState<boolean | null>(null);
   const [feedbackText, setFeedbackText] = useState('');
 
-  const startTimeRef = useRef(Date.now());
-  const questionStartRef = useRef(Date.now());
+  const startTimeRef = useRef(performance.now());
+  const questionStartRef = useRef(performance.now());
 
   const currentQuestion = questions[currentIndex] as FormulaQuestion | undefined;
 
   const buildResult = useCallback(
-    (
-      updatedAnswers: AnswerRecord[],
-      updatedScore: number,
-      updatedLives: number,
-      completed: boolean,
-    ): RoundResult => {
-      const durationSeconds = Math.round(
-        (Date.now() - startTimeRef.current) / 1000,
-      );
+    (updatedAnswers: AnswerRecord[], updatedScore: number): RoundResult => {
+      const durationMs = Math.round(performance.now() - startTimeRef.current);
+      const durationSeconds = Math.round(durationMs / 1000);
 
       // Compute weak formulas: any formula with at least one wrong answer
       const wrongByFormula = new Map<string, AnswerRecord>();
@@ -80,9 +76,10 @@ export function FormulaRoundScreen({
       return {
         score: updatedScore,
         total: questions.length,
-        livesRemaining: updatedLives,
-        completed,
+        livesRemaining: 0,
+        completed: true,
         durationSeconds,
+        durationMs,
         answers: updatedAnswers,
         weakFormulas,
       };
@@ -94,7 +91,7 @@ export function FormulaRoundScreen({
     (selectedAnswer: string | boolean | BuildFormulaAnswer) => {
       if (!currentQuestion || phase !== 'playing') return;
 
-      const responseMs = Date.now() - questionStartRef.current;
+      const responseMs = performance.now() - questionStartRef.current;
 
       // Determine correctness — single source of truth
       let correct = false;
@@ -115,14 +112,13 @@ export function FormulaRoundScreen({
       }
 
       const newScore = correct ? score + 1 : score;
-      const newLives = correct ? lives : lives - 1;
       const record: AnswerRecord = {
         questionId: currentQuestion.id,
         formulaId: currentQuestion.formulaId,
         questionType: currentQuestion.type,
         layer: currentQuestion.layer,
         correct,
-        responseMs,
+        responseMs: Math.round(responseMs),
         selectedAnswer,
         expectedAnswer: currentQuestion.correctAnswer,
         mutationType: currentQuestion.mutationType,
@@ -131,28 +127,20 @@ export function FormulaRoundScreen({
       const newAnswers = [...answers, record];
 
       setScore(newScore);
-      setLives(newLives);
       setAnswers(newAnswers);
       setLastCorrect(correct);
       setFeedbackText(generateFeedback(currentQuestion, correct));
       setPhase('feedback');
     },
-    [currentQuestion, phase, score, lives, answers],
+    [currentQuestion, phase, score, answers],
   );
 
   const handleNext = useCallback(() => {
     const newIndex = currentIndex + 1;
 
-    // Check end conditions
-    if (lives <= 0) {
-      // Lives exhausted during feedback — end round
-      onComplete(buildResult(answers, score, 0, false));
-      return;
-    }
-
     if (newIndex >= questions.length) {
-      // All questions answered
-      onComplete(buildResult(answers, score, lives, true));
+      // All questions answered — complete round
+      onComplete(buildResult(answers, score));
       return;
     }
 
@@ -161,17 +149,8 @@ export function FormulaRoundScreen({
     setPhase('playing');
     setLastCorrect(null);
     setFeedbackText('');
-    questionStartRef.current = Date.now();
-  }, [currentIndex, lives, questions.length, answers, score, onComplete, buildResult]);
-
-  // Section title from config
-  const sectionTitle = useMemo(() => {
-    const sectionMap: Record<string, string> = {
-      kinematics: 'Кинематика',
-      'Кинематика': 'Кинематика',
-    };
-    return sectionMap[roundConfig.section] ?? roundConfig.section;
-  }, [roundConfig.section]);
+    questionStartRef.current = performance.now();
+  }, [currentIndex, questions.length, answers, score, onComplete, buildResult]);
 
   if (!currentQuestion) {
     return null;
@@ -181,15 +160,23 @@ export function FormulaRoundScreen({
     <div className="fixed inset-0 z-50 flex flex-col bg-slate-50">
       {/* Header */}
       <div className="px-4 pt-4 pb-3 bg-white border-b border-slate-200">
-        <p className="text-sm font-medium text-slate-500 mb-2">
-          {sectionTitle} — Формулы
-        </p>
-        <RoundProgress
-          current={currentIndex + (phase === 'feedback' ? 1 : 0)}
-          total={questions.length}
-          lives={lives}
-          maxLives={roundConfig.lives}
-        />
+        <div className="flex items-center gap-3">
+          <button
+            type="button"
+            onClick={onExit}
+            aria-label="Выйти из раунда"
+            className="shrink-0 inline-flex h-11 w-11 items-center justify-center rounded-md text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/30"
+            style={{ touchAction: 'manipulation' }}
+          >
+            <ArrowLeft className="h-5 w-5" />
+          </button>
+          <div className="flex-1 min-w-0">
+            <RoundProgress
+              current={currentIndex + (phase === 'feedback' ? 1 : 0)}
+              total={questions.length}
+            />
+          </div>
+        </div>
       </div>
 
       {/* Question area */}
@@ -223,11 +210,10 @@ export function FormulaRoundScreen({
         <FeedbackOverlay
           isCorrect={lastCorrect ?? false}
           explanation={feedbackText}
-          livesLost={lastCorrect ? 0 : 1}
+          livesLost={0}
           onContinue={handleNext}
         />
       )}
     </div>
   );
 }
-
