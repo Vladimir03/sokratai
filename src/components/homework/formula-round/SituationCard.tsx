@@ -1,4 +1,4 @@
-import { memo, useMemo } from 'react';
+import { memo, useMemo, Suspense } from 'react';
 import { MathText } from '@/components/kb/ui/MathText';
 import type { FormulaQuestion } from '@/lib/formulaEngine/types';
 
@@ -15,6 +15,7 @@ interface SituationCardProps {
  * GDD §4.8: description WITHOUT numbers, 4 options (correct + 3 distractors).
  * Options are already shuffled by questionGenerator.
  * AC-9 (P1): all 4 formulas rendered via MathText.
+ * Bug fix: situation prompt text may contain LaTeX, rendered via MathText with Suspense.
  */
 const SituationCard = memo(function SituationCard({ question, onAnswer }: SituationCardProps) {
   // Options come pre-shuffled from the generator, but re-shuffle on mount
@@ -42,9 +43,9 @@ const SituationCard = memo(function SituationCard({ question, onAnswer }: Situat
         <p className="text-sm font-medium text-slate-500">
           Какую формулу использовать?
         </p>
-        <p className="text-base text-slate-900 whitespace-pre-wrap">
-          {question.prompt}
-        </p>
+        <Suspense fallback={<p className="text-base text-slate-900 whitespace-pre-wrap">{question.prompt}</p>}>
+          <MathText text={question.prompt} className="text-base text-slate-900 whitespace-pre-wrap" />
+        </Suspense>
       </div>
 
       {/* Formula options */}

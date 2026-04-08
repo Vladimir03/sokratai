@@ -34,9 +34,9 @@ const BUILD_RECIPES: Record<string, BuildRecipe> = {
     denominatorTokens: [],
   },
   'kin.02': {
-    displayFormula: 'v_{ср} = \\frac{s_{общ}}{t_{общ}}',
-    numeratorTokens: ['s_{общ}'],
-    denominatorTokens: ['t_{общ}'],
+    displayFormula: 'v_{\\text{ср}} = \\frac{s_{\\text{общ}}}{t_{\\text{общ}}}',
+    numeratorTokens: ['s_{\\text{общ}}'],
+    denominatorTokens: ['t_{\\text{общ}}'],
   },
   'kin.03': {
     displayFormula: 'v = v_0 + a \\cdot t',
@@ -825,10 +825,11 @@ export function generateFeedbackPayload(question: FormulaQuestion, isCorrect: bo
   if (question.layer === 2) {
     const recipe = getBuildRecipe(formula);
     const allTokens = [...recipe.numeratorTokens, ...recipe.denominatorTokens];
+    const formattedTokens = allTokens.map((token) => `$${token}$`).join(', ');
     return {
       canonicalLatex,
       userAnswerLatex: userAnswerLatex ?? null,
-      reasoning: `Нужны элементы: ${allTokens.join(', ')}`,
+      reasoning: `Нужны элементы: ${formattedTokens}`,
       trap: trimLine(formula.commonMistakes[0] ?? 'не подменяй переменные'),
       isCorrect: false,
     };

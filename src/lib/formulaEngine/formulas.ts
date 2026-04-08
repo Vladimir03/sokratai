@@ -219,7 +219,7 @@ export const kinematicsFormulas: Formula[] = [
       { symbol: 'g', name: 'ускорение свободного падения', unit: 'м/с²' },
       { symbol: 't', name: 'время падения', unit: 'с' },
     ],
-    physicalMeaning: 'Частный случай kin.04 при v₀ = 0 и a = g. Тело падает с нарастающей скоростью.',
+    physicalMeaning: 'Частный случай перемещения при равноускоренном движении с нулевой начальной скоростью и a = g. Тело падает с нарастающей скоростью.',
     proportionality: {
       direct: ['g → h', 't² → h'],
       inverse: [],
@@ -251,7 +251,7 @@ export const kinematicsFormulas: Formula[] = [
       { symbol: 'g', name: 'ускорение свободного падения', unit: 'м/с²' },
       { symbol: 't', name: 'время падения', unit: 'с' },
     ],
-    physicalMeaning: 'Частный случай kin.03 при v₀ = 0. Скорость растёт линейно с временем.',
+    physicalMeaning: 'Частный случай равноускоренного движения при v₀ = 0. Скорость растёт линейно с временем.',
     proportionality: {
       direct: ['g → v', 't → v'],
       inverse: [],
