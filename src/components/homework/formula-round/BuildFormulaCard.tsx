@@ -86,9 +86,11 @@ const BuildFormulaCard = memo(function BuildFormulaCard({
       {/* Prompt */}
       <div className="bg-white rounded-lg border border-slate-200 p-5 space-y-4">
         <div>
-          <p className="text-base font-medium text-slate-900">
-            {question.prompt}
-          </p>
+          <MathText
+            text={question.prompt}
+            as="p"
+            className="text-base font-medium text-slate-900"
+          />
           <p className="text-sm text-slate-500 mt-1">
             Собери правую часть формулы
           </p>

@@ -26,9 +26,11 @@ export const TrueOrFalseCard = memo(function TrueOrFalseCard({
   return (
     <div className="w-full max-w-md space-y-6">
       <div className="bg-white rounded-lg border border-slate-200 p-6 text-center space-y-4">
-        <p className="text-base font-medium text-slate-700">
-          {question.prompt}
-        </p>
+        <MathText
+          text={question.prompt}
+          as="p"
+          className="text-base font-medium text-slate-700"
+        />
         {question.displayFormula && (
           <MathText
             text={question.displayFormula}
