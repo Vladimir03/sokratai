@@ -514,6 +514,12 @@ function wrapMath(latex: string): string {
   return `\\(${latex}\\)`;
 }
 
+function normalizeMathToken(token: string): string {
+  return token
+    .replace(/_\{([А-Яа-яЁё]+)\}/gu, '_{\\text{$1}}')
+    .replace(/_([А-Яа-яЁё]+)/gu, '_{\\text{$1}}');
+}
+
 function shuffle<T>(items: T[]): T[] {
   const next = [...items];
 
@@ -596,7 +602,17 @@ function pickFormulas(pool: Formula[], count: number): Formula[] {
 }
 
 function getBuildRecipe(formula: Formula): BuildRecipe {
-  return BUILD_RECIPES[formula.id] ?? { displayFormula: formula.formula, numeratorTokens: formula.variables.map((variable) => variable.symbol), denominatorTokens: [] };
+  const recipe = BUILD_RECIPES[formula.id] ?? {
+    displayFormula: formula.formula,
+    numeratorTokens: formula.variables.map((variable) => variable.symbol),
+    denominatorTokens: [],
+  };
+
+  return {
+    displayFormula: recipe.displayFormula,
+    numeratorTokens: recipe.numeratorTokens.map(normalizeMathToken),
+    denominatorTokens: recipe.denominatorTokens.map(normalizeMathToken),
+  };
 }
 
 function getSameSectionFormulas(formula: Formula, pool: Formula[]): Formula[] {
@@ -632,7 +648,7 @@ function getDistractorTokens(formula: Formula, count: number, pool: Formula[]): 
     .filter((token) => !correctTokens.includes(token));
 
   const fallbackTokens = getSameSectionFormulas(formula, pool)
-    .flatMap((candidate) => candidate.variables.map((variable) => variable.symbol))
+    .flatMap((candidate) => candidate.variables.map((variable) => normalizeMathToken(variable.symbol)))
     .filter((token) => !correctTokens.includes(token));
 
   return shuffle(unique([...relatedTokens, ...fallbackTokens])).slice(0, count);
