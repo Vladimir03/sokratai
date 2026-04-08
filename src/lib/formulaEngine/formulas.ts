@@ -382,7 +382,622 @@ export const kinematicsFormulas: Formula[] = [
   },
 ];
 
-const formulasById = new Map(kinematicsFormulas.map((formula) => [formula.id, formula]));
+export const dynamicsFormulas: Formula[] = [
+  {
+    id: 'dyn.01',
+    section: 'Динамика',
+    topic: 'Второй закон Ньютона',
+    name: 'Второй закон Ньютона',
+    formula: 'F = m \\cdot a',
+    formulaPlain: 'F = m * a',
+    variables: [
+      { symbol: 'F', name: 'сила', unit: 'Н' },
+      { symbol: 'm', name: 'масса', unit: 'кг' },
+      { symbol: 'a', name: 'ускорение', unit: 'м/с²' },
+    ],
+    physicalMeaning:
+      'Сила пропорциональна массе и ускорению. Чем больше сила или чем меньше масса — тем больше ускорение.',
+    proportionality: {
+      direct: ['F → a', 'm → F (при фиксированном a)'],
+      inverse: ['m → a (при фиксированной F)'],
+    },
+    dimensions: '[M·L/T²] = [M] * [L/T²]',
+    derivedFrom: 'Фундаментальный закон механики',
+    whenToUse: [
+      'Нужно найти силу, массу или ускорение',
+      'Есть информация о двух из трёх величин',
+      'Используется в большинстве задач на силы',
+    ],
+    commonMistakes: [
+      'Путают F = ma и F = m + a',
+      'Забывают переводить силу в ньютоны',
+      'Суммируют силы неверно (не учитывают направление)',
+    ],
+    relatedFormulas: ['dyn.02', 'dyn.03', 'kin.03'],
+    difficulty: 1,
+  },
+  {
+    id: 'dyn.02',
+    section: 'Динамика',
+    topic: 'Сила трения',
+    name: 'Сила трения',
+    formula: 'f = \\mu \\cdot N',
+    formulaPlain: 'f = μ * N',
+    variables: [
+      { symbol: 'f', name: 'сила трения', unit: 'Н' },
+      { symbol: 'μ', name: 'коэффициент трения', unit: '(безразмерный)' },
+      { symbol: 'N', name: 'нормальная сила (реакция опоры)', unit: 'Н' },
+    ],
+    physicalMeaning:
+      'Сила трения пропорциональна силе прижатия (нормальной силе). Коэффициент μ зависит от материалов.',
+    proportionality: {
+      direct: ['μ → f', 'N → f'],
+      inverse: [],
+    },
+    dimensions: '[M·L/T²] = [M·L/T²]',
+    derivedFrom: 'Эмпирический закон сухого трения',
+    whenToUse: [
+      'Тело скользит по поверхности',
+      'Нужно найти силу трения при известной нормальной силе',
+      'На горизонтальной поверхности: N = mg',
+    ],
+    commonMistakes: [
+      'Путают нормальную силу N с силой тяжести (не всегда N = mg)',
+      'На наклонной плоскости забывают, что N = mg·cos(α)',
+      'Пытаются найти f без знания N',
+    ],
+    relatedFormulas: ['dyn.01', 'dyn.04'],
+    difficulty: 2,
+  },
+  {
+    id: 'dyn.03',
+    section: 'Динамика',
+    topic: 'Вес и нормальная сила',
+    name: 'Сила тяжести (вес)',
+    formula: 'F_g = m \\cdot g',
+    formulaPlain: 'F_g = m * g',
+    variables: [
+      { symbol: 'F_g', name: 'сила тяжести (вес)', unit: 'Н' },
+      { symbol: 'm', name: 'масса', unit: 'кг' },
+      { symbol: 'g', name: 'ускорение свободного падения', unit: 'м/с²' },
+    ],
+    physicalMeaning:
+      'Вес тела равен произведению массы на ускорение свободного падения. На Земле g ≈ 10 м/с².',
+    proportionality: {
+      direct: ['m → F_g'],
+      inverse: [],
+    },
+    dimensions: '[M·L/T²] = [M] * [L/T²]',
+    derivedFrom: 'Следствие из второго закона Ньютона',
+    whenToUse: [
+      'Известна масса, нужно найти вес',
+      'На Земле используй g ≈ 10 м/с² (или 9.8)',
+      'Вес = сила, с которой тело давит на опору',
+    ],
+    commonMistakes: [
+      'Путают вес и массу (масса в кг, вес в ньютонах)',
+      'Используют разные значения g без указания',
+      'Забывают, что вес может быть ноль при свободном падении',
+    ],
+    relatedFormulas: ['dyn.01', 'dyn.02'],
+    difficulty: 1,
+  },
+  {
+    id: 'dyn.04',
+    section: 'Динамика',
+    topic: 'Движение по окружности',
+    name: 'Центростремительная сила',
+    formula: 'F_c = m \\cdot a_c = \\frac{m v^2}{R} = m \\omega^2 R',
+    formulaPlain: 'F_c = m * a_c = m * v²/R = m * ω²R',
+    variables: [
+      { symbol: 'F_c', name: 'центростремительная сила', unit: 'Н' },
+      { symbol: 'm', name: 'масса', unit: 'кг' },
+      { symbol: 'v', name: 'линейная скорость', unit: 'м/с' },
+      { symbol: 'R', name: 'радиус', unit: 'м' },
+      { symbol: 'ω', name: 'угловая скорость', unit: 'рад/с' },
+    ],
+    physicalMeaning:
+      'Сила, направленная к центру окружности, необходимая для кругового движения. Пропорциональна m и v².',
+    proportionality: {
+      direct: ['m → F_c', 'v² → F_c', 'ω² → F_c'],
+      inverse: ['R → F_c'],
+    },
+    dimensions: '[M·L/T²] = [M] * [L/T²]',
+    derivedFrom: 'F = m·a_центростремительное',
+    whenToUse: [
+      'Тело движется по окружности',
+      'Нужна сила для поворота: нить, трение, нормальная сила',
+      'Спутники, петли мёртвого цикла, закруглённые дороги',
+    ],
+    commonMistakes: [
+      'Путают центростремительную силу и центробежную (последняя — в неинерциальной системе)',
+      'Забывают квадрат скорости в формуле v²/R',
+      'Путают формы: mv²/R vs mω²R',
+    ],
+    relatedFormulas: ['dyn.01', 'kin.09', 'kin.12'],
+    difficulty: 2,
+  },
+  {
+    id: 'dyn.05',
+    section: 'Динамика',
+    topic: 'Третий закон Ньютона',
+    name: 'Третий закон Ньютона',
+    formula: 'F_{AB} = -F_{BA}',
+    formulaPlain: 'F_AB = -F_BA',
+    variables: [
+      { symbol: 'F_AB', name: 'сила A на B', unit: 'Н' },
+      { symbol: 'F_BA', name: 'сила B на A', unit: 'Н' },
+    ],
+    physicalMeaning:
+      'Силы действия и противодействия равны по величине и противоположны по направлению. Действуют на разные тела.',
+    proportionality: {
+      direct: [],
+      inverse: [],
+    },
+    dimensions: '[M·L/T²] = [M·L/T²]',
+    derivedFrom: 'Фундаментальный принцип механики',
+    whenToUse: [
+      'При анализе систем из двух взаимодействующих тел',
+      'Важен выбор системы отсчёта',
+      'Силы действуют на РАЗНЫЕ тела (не взаимоуничтожаются)',
+    ],
+    commonMistakes: [
+      'Путают третий закон с равновесием (действие и противодействие действуют на разные тела)',
+      'Ошибки при выборе системы: пытаются вычитать третий закон из уравнений движения',
+    ],
+    relatedFormulas: ['dyn.01'],
+    difficulty: 1,
+  },
+  {
+    id: 'dyn.06',
+    section: 'Динамика',
+    topic: 'Упругие силы',
+    name: 'Закон Гука',
+    formula: 'F = k \\cdot \\Delta x',
+    formulaPlain: 'F = k * Δx',
+    variables: [
+      { symbol: 'F', name: 'сила упругости', unit: 'Н' },
+      { symbol: 'k', name: 'жёсткость пружины', unit: 'Н/м' },
+      { symbol: '\\Delta x', name: 'удлинение/сжатие', unit: 'м' },
+    ],
+    physicalMeaning:
+      'Сила упругости пружины пропорциональна деформации (удлинению или сжатию) с коэффициентом жёсткости k.',
+    proportionality: {
+      direct: ['k → F', 'Δx → F'],
+      inverse: [],
+    },
+    dimensions: '[M·L/T²] = [M/T²] * [L]',
+    derivedFrom: 'Эмпирический закон упругости линейных материалов',
+    whenToUse: [
+      'Пружина растягивается или сжимается',
+      'Деформация небольшая (линейная область)',
+      'Системы с пружинами, маятники',
+    ],
+    commonMistakes: [
+      'Забывают минус (F = -kx, но часто работают с модулем)',
+      'Путают жёсткость k разных пружин',
+      'Пытаются применить вне линейной области',
+    ],
+    relatedFormulas: ['dyn.01'],
+    difficulty: 2,
+  },
+];
+
+export const conservationFormulas: Formula[] = [
+  {
+    id: 'cons.01',
+    section: 'Законы сохранения',
+    topic: 'Импульс',
+    name: 'Импульс тела',
+    formula: 'p = m \\cdot v',
+    formulaPlain: 'p = m * v',
+    variables: [
+      { symbol: 'p', name: 'импульс', unit: 'кг·м/с' },
+      { symbol: 'm', name: 'масса', unit: 'кг' },
+      { symbol: 'v', name: 'скорость', unit: 'м/с' },
+    ],
+    physicalMeaning:
+      'Импульс — мера количества движения. Произведение массы на скорость. Векторная величина.',
+    proportionality: {
+      direct: ['m → p', 'v → p'],
+      inverse: [],
+    },
+    dimensions: '[M·L/T]',
+    derivedFrom: 'Определение',
+    whenToUse: [
+      'При анализе столкновений и взрывов',
+      'При применении закона сохранения импульса',
+      'В задачах с передачей количества движения',
+    ],
+    commonMistakes: [
+      'Забывают, что импульс — векторная величина',
+      'Путают импульс с энергией',
+      'Суммируют скорости вместо импульсов',
+    ],
+    relatedFormulas: ['cons.02', 'dyn.01'],
+    difficulty: 1,
+  },
+  {
+    id: 'cons.02',
+    section: 'Законы сохранения',
+    topic: 'Сохранение импульса',
+    name: 'Закон сохранения импульса',
+    formula: "m_1 v_1 + m_2 v_2 = m_1 v_1' + m_2 v_2'",
+    formulaPlain: 'm₁v₁ + m₂v₂ = m₁v₁\' + m₂v₂\'',
+    variables: [
+      { symbol: 'm_1, m_2', name: 'массы тел', unit: 'кг' },
+      { symbol: 'v, v\'', name: 'скорости до и после', unit: 'м/с' },
+    ],
+    physicalMeaning:
+      'При отсутствии внешних сил суммарный импульс системы сохраняется. Применяется для столкновений и взрывов.',
+    proportionality: {
+      direct: [],
+      inverse: [],
+    },
+    dimensions: '[M·L/T]',
+    derivedFrom: 'Следствие из третьего закона Ньютона и второго закона',
+    whenToUse: [
+      'Столкновения: упругие и неупругие',
+      'Взрывы и отскоки',
+      'Системы без внешних сил',
+    ],
+    commonMistakes: [
+      'Забывают, что это векторное уравнение (выбирают направление оси)',
+      'Не учитывают, что сохраняется импульс системы, а не энергия',
+      'Ошибки в знаках при движении в противоположных направлениях',
+    ],
+    relatedFormulas: ['cons.01', 'cons.03'],
+    difficulty: 2,
+  },
+  {
+    id: 'cons.03',
+    section: 'Законы сохранения',
+    topic: 'Кинетическая энергия',
+    name: 'Кинетическая энергия',
+    formula: 'E_k = \\frac{m v^2}{2}',
+    formulaPlain: 'E_k = m * v²/2',
+    variables: [
+      { symbol: 'E_k', name: 'кинетическая энергия', unit: 'Дж' },
+      { symbol: 'm', name: 'масса', unit: 'кг' },
+      { symbol: 'v', name: 'скорость', unit: 'м/с' },
+    ],
+    physicalMeaning: 'Энергия движения тела. Зависит от массы и квадрата скорости. Всегда положительна.',
+    proportionality: {
+      direct: ['m → E_k', 'v² → E_k'],
+      inverse: [],
+    },
+    dimensions: '[M·L²/T²] (Джоули)',
+    derivedFrom: 'Работа при разгоне тела из покоя: W = F·s = ma·(v²/2a) = mv²/2',
+    whenToUse: [
+      'При применении теоремы о кинетической энергии',
+      'Расчёт работы силы',
+      'В задачах со столкновениями (упругость)',
+    ],
+    commonMistakes: [
+      'Забывают делить на 2',
+      'Путают кинетическую и потенциальную энергию',
+      'Забывают квадрат скорости',
+    ],
+    relatedFormulas: ['cons.04', 'cons.03'],
+    difficulty: 1,
+  },
+  {
+    id: 'cons.04',
+    section: 'Законы сохранения',
+    topic: 'Потенциальная энергия',
+    name: 'Потенциальная энергия в гравитационном поле',
+    formula: 'E_p = m \\cdot g \\cdot h',
+    formulaPlain: 'E_p = m * g * h',
+    variables: [
+      { symbol: 'E_p', name: 'потенциальная энергия', unit: 'Дж' },
+      { symbol: 'm', name: 'масса', unit: 'кг' },
+      { symbol: 'g', name: 'ускорение свободного падения', unit: 'м/с²' },
+      { symbol: 'h', name: 'высота над уровнем отсчёта', unit: 'м' },
+    ],
+    physicalMeaning:
+      'Энергия, обусловленная положением тела в гравитационном поле. Зависит от высоты над выбранным уровнем.',
+    proportionality: {
+      direct: ['m → E_p', 'h → E_p'],
+      inverse: [],
+    },
+    dimensions: '[M·L²/T²] (Джоули)',
+    derivedFrom: 'Работа силы тяжести: W = mgh',
+    whenToUse: [
+      'Высота тела выше нулевого уровня потенциальной энергии',
+      'При применении закона сохранения механической энергии',
+      'В системах с гравитационным полем',
+    ],
+    commonMistakes: [
+      'Забывают выбрать уровень отсчёта',
+      'Путают потенциальную энергию с кинетической',
+      'Путают работу против силы тяжести с работой силы тяжести',
+    ],
+    relatedFormulas: ['cons.03', 'cons.05'],
+    difficulty: 1,
+  },
+  {
+    id: 'cons.05',
+    section: 'Законы сохранения',
+    topic: 'Механическая энергия',
+    name: 'Закон сохранения механической энергии',
+    formula: 'E_k + E_p = \\text{const}',
+    formulaPlain: 'E_k + E_p = const',
+    variables: [
+      { symbol: 'E_k', name: 'кинетическая энергия', unit: 'Дж' },
+      { symbol: 'E_p', name: 'потенциальная энергия', unit: 'Дж' },
+    ],
+    physicalMeaning:
+      'При отсутствии трения и воздействия внешних сил сумма кинетической и потенциальной энергии остаётся постоянной.',
+    proportionality: {
+      direct: [],
+      inverse: [],
+    },
+    dimensions: '[M·L²/T²]',
+    derivedFrom: 'Следствие из второго закона Ньютона',
+    whenToUse: [
+      'Нет диссипативных сил (трение, сопротивление воздуха)',
+      'Падение, бросание, маятники в идеальном случае',
+      'Переходы между кинетической и потенциальной энергией',
+    ],
+    commonMistakes: [
+      'Применяют в присутствии трения (нужно учитывать работу трения)',
+      'Путают с законом сохранения импульса',
+      'Ошибки в выборе нулевого уровня потенциальной энергии',
+    ],
+    relatedFormulas: ['cons.03', 'cons.04'],
+    difficulty: 2,
+  },
+  {
+    id: 'cons.06',
+    section: 'Законы сохранения',
+    topic: 'Работа и энергия',
+    name: 'Работа силы',
+    formula: 'A = F \\cdot s \\cdot \\cos(\\alpha)',
+    formulaPlain: 'A = F * s * cos(α)',
+    variables: [
+      { symbol: 'A', name: 'работа', unit: 'Дж' },
+      { symbol: 'F', name: 'сила', unit: 'Н' },
+      { symbol: 's', name: 'перемещение', unit: 'м' },
+      { symbol: '\\alpha', name: 'угол между F и s', unit: '°' },
+    ],
+    physicalMeaning:
+      'Работа — произведение силы, перемещения и косинуса угла между ними. Скалярная величина (может быть отрицательной).',
+    proportionality: {
+      direct: ['F → A', 's → A'],
+      inverse: [],
+    },
+    dimensions: '[M·L²/T²] (Джоули)',
+    derivedFrom: 'Определение работы как скалярного произведения',
+    whenToUse: [
+      'Расчёт работы при известных F, s и угле',
+      'Применение теоремы о работе и кинетической энергии',
+      'Вычисление полезной работы и работы против сил',
+    ],
+    commonMistakes: [
+      'Забывают косинус угла',
+      'Путают работу с энергией',
+      'Путают угол: если сила перпендикулярна перемещению, A = 0',
+    ],
+    relatedFormulas: ['cons.03', 'cons.04'],
+    difficulty: 2,
+  },
+  {
+    id: 'cons.07',
+    section: 'Законы сохранения',
+    topic: 'Мощность',
+    name: 'Мощность',
+    formula: 'P = \\frac{A}{t} = F \\cdot v',
+    formulaPlain: 'P = A/t = F * v',
+    variables: [
+      { symbol: 'P', name: 'мощность', unit: 'Вт' },
+      { symbol: 'A', name: 'работа', unit: 'Дж' },
+      { symbol: 't', name: 'время', unit: 'с' },
+      { symbol: 'F', name: 'сила', unit: 'Н' },
+      { symbol: 'v', name: 'скорость', unit: 'м/с' },
+    ],
+    physicalMeaning:
+      'Мощность — скорость выполнения работы. Среднее количество энергии, передаваемое в единицу времени.',
+    proportionality: {
+      direct: ['A → P', 'v → P'],
+      inverse: ['t → P'],
+    },
+    dimensions: '[M·L²/T³] (Ватты)',
+    derivedFrom: 'P = dA/dt',
+    whenToUse: [
+      'При расчётах КПД двигателей',
+      'Когда работа выполняется не мгновенно',
+      'Мощность электрических и механических систем',
+    ],
+    commonMistakes: [
+      'Путают мощность с энергией',
+      'Забывают, что это скорость выполнения работы, а не сама работа',
+      'Ошибки в единицах: кВт, МВт вместо Вт',
+    ],
+    relatedFormulas: ['cons.06'],
+    difficulty: 2,
+  },
+];
+
+export const staticsFormulas: Formula[] = [
+  {
+    id: 'stat.01',
+    section: 'Статика',
+    topic: 'Равновесие',
+    name: 'Условие равновесия (сумма сил)',
+    formula: '\\sum F = 0',
+    formulaPlain: 'ΣF = 0',
+    variables: [
+      { symbol: '\\sum F', name: 'сумма всех сил', unit: 'Н' },
+    ],
+    physicalMeaning:
+      'Для равновесия тела векторная сумма всех действующих сил должна быть равна нулю. Тело не ускоряется.',
+    proportionality: {
+      direct: [],
+      inverse: [],
+    },
+    dimensions: '[M·L/T²]',
+    derivedFrom: 'Следствие из второго закона Ньютона при a = 0',
+    whenToUse: [
+      'Анализ статических конструкций',
+      'Рычаги и системы в равновесии',
+      'Когда скорость постоянна или тело покоится',
+    ],
+    commonMistakes: [
+      'Забывают, что это векторное условие (работает по каждой оси отдельно)',
+      'Путают сумму сил с равновесием моментов (вращение)',
+      'Не учитывают все силы (часто забывают нормальную силу или натяжение)',
+    ],
+    relatedFormulas: ['dyn.01'],
+    difficulty: 1,
+  },
+];
+
+export const hydrostaticsFormulas: Formula[] = [
+  {
+    id: 'hydro.01',
+    section: 'Гидростатика',
+    topic: 'Давление жидкости',
+    name: 'Давление жидкости',
+    formula: 'P = \\frac{F}{S}',
+    formulaPlain: 'P = F / S',
+    variables: [
+      { symbol: 'P', name: 'давление', unit: 'Па' },
+      { symbol: 'F', name: 'сила перпендикулярная поверхности', unit: 'Н' },
+      { symbol: 'S', name: 'площадь поверхности', unit: 'м²' },
+    ],
+    physicalMeaning:
+      'Давление — сила, действующая на единицу площади поверхности. Может действовать во всех направлениях.',
+    proportionality: {
+      direct: ['F → P'],
+      inverse: ['S → P'],
+    },
+    dimensions: '[M/(L·T²)] (Паскали)',
+    derivedFrom: 'Определение давления',
+    whenToUse: [
+      'Расчёты с жидкостями и газами',
+      'Гидростатические системы',
+      'Закон Паскаля и архимедова сила',
+    ],
+    commonMistakes: [
+      'Путают давление и силу',
+      'Забывают переводить единицы (1 атм ≈ 100000 Па)',
+      'Забывают, что давление действует перпендикулярно поверхности',
+    ],
+    relatedFormulas: ['hydro.02', 'hydro.03'],
+    difficulty: 1,
+  },
+  {
+    id: 'hydro.02',
+    section: 'Гидростатика',
+    topic: 'Гидростатическое давление',
+    name: 'Гидростатическое давление',
+    formula: 'P = P_0 + \\rho \\cdot g \\cdot h',
+    formulaPlain: 'P = P₀ + ρ * g * h',
+    variables: [
+      { symbol: 'P', name: 'давление на глубине h', unit: 'Па' },
+      { symbol: 'P_0', name: 'атмосферное давление', unit: 'Па' },
+      { symbol: '\\rho', name: 'плотность жидкости', unit: 'кг/м³' },
+      { symbol: 'g', name: 'ускорение свободного падения', unit: 'м/с²' },
+      { symbol: 'h', name: 'глубина', unit: 'м' },
+    ],
+    physicalMeaning:
+      'Давление жидкости на глубине складывается из атмосферного давления и давления столба жидкости ρgh.',
+    proportionality: {
+      direct: ['ρ → P', 'h → P'],
+      inverse: [],
+    },
+    dimensions: '[M/(L·T²)]',
+    derivedFrom: 'Вес столба жидкости / площадь основания',
+    whenToUse: [
+      'Расчёты для погружённых объектов',
+      'Давление на дне сосуда с жидкостью',
+      'Гидростатические парадоксы и системы',
+    ],
+    commonMistakes: [
+      'Забывают атмосферное давление P₀',
+      'Путают плотность жидкостей (вода = 1000 кг/м³)',
+      'Забывают, что давление растёт с глубиной линейно',
+    ],
+    relatedFormulas: ['hydro.01', 'hydro.03', 'hydro.04'],
+    difficulty: 2,
+  },
+  {
+    id: 'hydro.03',
+    section: 'Гидростатика',
+    topic: 'Архимедова сила',
+    name: 'Архимедова сила (выталкивающая сила)',
+    formula: 'F_A = \\rho \\cdot g \\cdot V',
+    formulaPlain: 'F_A = ρ * g * V',
+    variables: [
+      { symbol: 'F_A', name: 'архимедова сила', unit: 'Н' },
+      { symbol: '\\rho', name: 'плотность жидкости', unit: 'кг/м³' },
+      { symbol: 'g', name: 'ускорение свободного падения', unit: 'м/с²' },
+      { symbol: 'V', name: 'объём тела (или объём вытесненной жидкости)', unit: 'м³' },
+    ],
+    physicalMeaning:
+      'Выталкивающая сила равна весу вытесненной жидкости. Направлена вверх, равна ρgV.',
+    proportionality: {
+      direct: ['ρ → F_A', 'V → F_A'],
+      inverse: [],
+    },
+    dimensions: '[M·L/T²] (Ньютоны)',
+    derivedFrom: 'Разница давлений на верхней и нижней поверхности погружённого тела',
+    whenToUse: [
+      'Плавание тел',
+      'Условие плавания: F_A = mg (плотность тела = плотность жидкости)',
+      'Воздушные шары и дирижабли',
+    ],
+    commonMistakes: [
+      'Путают с давлением (это сила, а не давление)',
+      'Забывают, что F_A зависит от ЖИДКОСТИ, а не от тела',
+      'На V влияет только погружённая часть, а не всё тело',
+    ],
+    relatedFormulas: ['hydro.02'],
+    difficulty: 2,
+  },
+  {
+    id: 'hydro.04',
+    section: 'Гидростатика',
+    topic: 'Закон Паскаля',
+    name: 'Закон Паскаля (гидравлический пресс)',
+    formula: '\\frac{F_1}{S_1} = \\frac{F_2}{S_2}',
+    formulaPlain: 'F₁/S₁ = F₂/S₂',
+    variables: [
+      { symbol: 'F_1, F_2', name: 'силы на поршнях', unit: 'Н' },
+      { symbol: 'S_1, S_2', name: 'площади поршней', unit: 'м²' },
+    ],
+    physicalMeaning:
+      'Давление в несжимаемой жидкости передаётся одинаково во все стороны. Усиление силы через разные площади.',
+    proportionality: {
+      direct: [],
+      inverse: [],
+    },
+    dimensions: '[M/(L·T²)]',
+    derivedFrom: 'Свойства несжимаемой жидкости и законов гидростатики',
+    whenToUse: [
+      'Гидравлические прессы и домкраты',
+      'Усиление силы через гидравлику',
+      'Системы передачи давления в жидкостях',
+    ],
+    commonMistakes: [
+      'Путают давление и силу',
+      'Забывают, что это отношение (малая сила на малой площади = большая сила на большой площади)',
+      'Забывают про высоту столба жидкости в разных трубках',
+    ],
+    relatedFormulas: ['hydro.01', 'hydro.02'],
+    difficulty: 2,
+  },
+];
+
+export const mechanicsFormulas: Formula[] = [
+  ...kinematicsFormulas,
+  ...dynamicsFormulas,
+  ...conservationFormulas,
+  ...staticsFormulas,
+  ...hydrostaticsFormulas,
+];
+
+const formulasById = new Map(mechanicsFormulas.map((formula) => [formula.id, formula]));
 
 export function getFormulaById(id: string): Formula | undefined {
   return formulasById.get(id);
@@ -395,8 +1010,6 @@ export function getRelatedFormulas(formulaId: string): Formula[] {
     return [];
   }
 
-  // Phase 1a keeps only the kinematics slice in TS, so cross-section references stay as IDs
-  // but are filtered out here until the wider mechanics catalog is added.
   return formula.relatedFormulas
     .map((relatedId) => formulasById.get(relatedId))
     .filter((relatedFormula): relatedFormula is Formula => Boolean(relatedFormula));

@@ -6,6 +6,11 @@ import {
   generateRetryRound,
   generateRound,
   kinematicsFormulas,
+  dynamicsFormulas,
+  conservationFormulas,
+  staticsFormulas,
+  hydrostaticsFormulas,
+  mechanicsFormulas,
   type FormulaQuestion,
   type RoundConfig,
   type RoundResult,
@@ -13,46 +18,66 @@ import {
 import { submitTrainerRound } from '@/lib/trainerApi';
 
 type TrainerPageState = 'intro' | 'running' | 'result';
+type SectionType = 'mechanics' | 'kinematics' | 'dynamics' | 'conservation' | 'statics' | 'hydrostatics';
 
-const TRAINER_ROUND_CONFIG: RoundConfig = {
-  section: 'kinematics',
-  questionCount: 10,
-  lives: 0,
-  formulaPool: kinematicsFormulas,
+const SECTION_POOLS: Record<SectionType, { formulas: typeof kinematicsFormulas; label: string }> = {
+  mechanics: { formulas: mechanicsFormulas, label: 'Вся механика' },
+  kinematics: { formulas: kinematicsFormulas, label: 'Кинематика' },
+  dynamics: { formulas: dynamicsFormulas, label: 'Динамика' },
+  conservation: { formulas: conservationFormulas, label: 'Законы сохранения' },
+  statics: { formulas: staticsFormulas, label: 'Статика' },
+  hydrostatics: { formulas: hydrostaticsFormulas, label: 'Гидростатика' },
 };
 
-function createTrainerRound(): FormulaQuestion[] {
-  return generateRound(TRAINER_ROUND_CONFIG);
+function createTrainerRound(section: SectionType): FormulaQuestion[] {
+  const pool = SECTION_POOLS[section].formulas;
+  const questionCount = Math.min(10, Math.max(3, pool.length * 3));
+  const config: RoundConfig = {
+    section,
+    questionCount,
+    lives: 0,
+    formulaPool: pool,
+  };
+  return generateRound(config);
 }
 
-function createRetryRound(result: RoundResult): FormulaQuestion[] {
-  const retryQuestions = generateRetryRound(result.weakFormulas, TRAINER_ROUND_CONFIG);
-  return retryQuestions.length > 0 ? retryQuestions : createTrainerRound();
+function createRetryRound(result: RoundResult, section: SectionType): FormulaQuestion[] {
+  const pool = SECTION_POOLS[section].formulas;
+  const questionCount = Math.min(10, Math.max(3, pool.length * 3));
+  const config: RoundConfig = {
+    section,
+    questionCount,
+    lives: 0,
+    formulaPool: pool,
+  };
+  const retryQuestions = generateRetryRound(result.weakFormulas, config);
+  return retryQuestions.length > 0 ? retryQuestions : createTrainerRound(section);
 }
 
 export default function TrainerPage() {
   const { sessionId, startedAt } = useTrainerSession();
   const [state, setState] = useState<TrainerPageState>('intro');
+  const [selectedSection, setSelectedSection] = useState<SectionType>('mechanics');
   const [questions, setQuestions] = useState<FormulaQuestion[]>([]);
   const [roundResult, setRoundResult] = useState<RoundResult | null>(null);
   const [roundKey, setRoundKey] = useState(0);
 
   const handleStart = useCallback(() => {
     setRoundResult(null);
-    setQuestions(createTrainerRound());
+    setQuestions(createTrainerRound(selectedSection));
     setRoundKey((currentKey) => currentKey + 1);
     setState('running');
-  }, []);
+  }, [selectedSection]);
 
   const handleRetryWrong = useCallback(() => {
     if (!roundResult) {
       return;
     }
 
-    setQuestions(createRetryRound(roundResult));
+    setQuestions(createRetryRound(roundResult, selectedSection));
     setRoundKey((currentKey) => currentKey + 1);
     setState('running');
-  }, [roundResult]);
+  }, [roundResult, selectedSection]);
 
   const handleComplete = useCallback(
     (result: RoundResult) => {
@@ -107,21 +132,52 @@ export default function TrainerPage() {
                   Тренажёр формул физики
                 </h1>
                 <p className="max-w-xl text-base leading-7 text-slate-600">
-                  Пройдите короткий раунд по кинематике и сразу увидите, какие формулы
+                  Выбери раздел механики и пройди раунд. Увидишь, какие формулы
                   держатся уверенно, а какие стоит повторить. Всё работает без
-                  регистрации и запускается в один тап.
+                  регистрации.
                 </p>
               </div>
             </header>
 
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-3">
+                  Выбери раздел механики
+                </label>
+                <div className="flex flex-wrap gap-2">
+                  {(Object.entries(SECTION_POOLS) as Array<[SectionType, typeof SECTION_POOLS[SectionType]]>).map(
+                    ([section, { label }]) => (
+                      <button
+                        key={section}
+                        type="button"
+                        onClick={() => setSelectedSection(section)}
+                        className={`min-h-[44px] rounded-lg px-4 py-2 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-1 focus-visible:ring-accent ${
+                          selectedSection === section
+                            ? 'bg-accent text-white'
+                            : 'border border-slate-200 bg-white text-slate-700 hover:border-slate-300'
+                        }`}
+                        style={{ touchAction: 'manipulation', fontSize: '16px' }}
+                      >
+                        {label}
+                      </button>
+                    ),
+                  )}
+                </div>
+              </div>
+            </div>
+
             <div className="grid gap-4 rounded-xl border border-slate-200 bg-slate-50 p-4 md:grid-cols-3">
               <div className="rounded-lg bg-white p-4">
                 <p className="text-sm font-medium text-slate-500">Раздел</p>
-                <p className="mt-2 text-lg font-semibold text-slate-900">Кинематика</p>
+                <p className="mt-2 text-lg font-semibold text-slate-900">
+                  {SECTION_POOLS[selectedSection].label}
+                </p>
               </div>
               <div className="rounded-lg bg-white p-4">
                 <p className="text-sm font-medium text-slate-500">Формат</p>
-                <p className="mt-2 text-lg font-semibold text-slate-900">10 заданий</p>
+                <p className="mt-2 text-lg font-semibold text-slate-900">
+                  {Math.min(10, Math.max(3, SECTION_POOLS[selectedSection].formulas.length * 3))} заданий
+                </p>
               </div>
               <div className="rounded-lg bg-white p-4">
                 <p className="text-sm font-medium text-slate-500">Результат</p>
@@ -139,7 +195,7 @@ export default function TrainerPage() {
                 className="inline-flex items-center justify-center rounded-lg bg-accent px-6 py-3 text-base font-medium text-white transition-colors hover:bg-accent/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/30"
                 style={{ touchAction: 'manipulation' }}
               >
-                Начать
+                Начать раунд
               </button>
             </div>
           </div>

@@ -179,11 +179,13 @@ For architecture overview see: docs/delivery/engineering/architecture/README.md
 ### 3. Система домашних заданий — guided chat
 Единая система ДЗ (`homework_tutor_*` таблицы), работает через guided chat (пошаговый AI-чат). Classic режим (photo upload + OCR) и legacy student-only система удалены. Подробности: `.claude/rules/40-homework-system.md`
 
-### 4. Formula rounds — preview-only test access и Phase 1b границы
+### 4. Formula rounds — standalone pivot status и Phase 1b границы
 - Seed для formula rounds: `supabase/seed/formula-round-seed.sql`
 - Seed создаёт `test-tutor` и 5 фиксированных `test_student_*` аккаунтов с воспроизводимыми UUID
-- Preview/dev QA path: `src/pages/StudentFormulaRound.tsx` поддерживает auto-login по `?student=<seed_uuid>` **только** на preview/dev host (`localhost`, `*.lovableproject.com`, non-prod `*.lovable.app`)
-- На `https://sokratai.ru` и `https://sokratai.lovable.app` preview bypass **запрещён** — там остаётся обычный auth flow
+- Formula Round Phase 1 сейчас пивотится в standalone `/trainer`; backend groundwork уже есть в `supabase/migrations/20260408160000_trainer_standalone_schema.sql` и `supabase/functions/trainer-submit/index.ts`
+- `trainer-submit` — публичный endpoint без JWT-check, пишет в `formula_round_results` через `service_role`
+- В текущей schema repo ориентируйся на `formula_round_results.student_id`, `formula_round_results.round_id`, `formula_round_results.duration_seconds`; не предполагай колонки `user_id`, `formula_round_id`, `duration_ms`, `client_started_at`, пока они не добавлены отдельной миграцией
+- Legacy preview-flow через `StudentFormulaRound.tsx` / `?student=<seed_uuid>` считать устаревающим; не расширять его для standalone trainer
 - Для Formula Rounds Phase 1b tutor UI НЕ создавать новый top-level route или отдельный standalone dashboard. Интегрировать только в существующие tutor flows:
   - `src/pages/tutor/TutorHomeworkCreate.tsx`
   - `src/pages/tutor/TutorHomeworkDetail.tsx` (единая каноническая страница для ДЗ — детальная инфа + результаты v2, см. ниже)
@@ -220,7 +222,8 @@ For architecture overview see: docs/delivery/engineering/architecture/README.md
 10. **Telegram bot reliability** — все вызовы AI идут через `fetchChatWithTimeout` (retry + timeout). `sendTypingLoop` ловит ошибки внутри. Все message routing ветки отвечают пользователю. `mergeConsecutiveUserMessages` обрезает склеенные сообщения до 8000 символов (`MAX_MESSAGE_LENGTH` в chat = 10000). Подробности: `.claude/rules/60-telegram-bot.md`
 9. **Voice messages in Student web chat** — `ChatInput.tsx` + `useVoiceRecorder.ts` + `chatVoice.ts` + `chat/index.ts` образуют один pipeline: запись через `MediaRecorder`, серверная расшифровка и только потом ручная отправка в чат
 11. **FormulaRoundScreen** — correctness checking centralized в `handleAnswer`. Карточки (TrueOrFalseCard, BuildFormulaCard, SituationCard) возвращают raw answer, НЕ boolean correctness. `BuildFormulaAnswer` = `{ numerator, denominator }`, не flat array. Подробности: `.claude/rules/40-homework-system.md`
-12. **StudentFormulaRound preview bootstrap** — preview/dev-host links с `?student=<seed_uuid>` могут автоматически логинить только 5 seed-студентов из `supabase/seed/formula-round-seed.sql`. Если меняется seed или preview-flow — обновить одновременно seed, `StudentFormulaRound.tsx` и `.claude/rules/40-homework-system.md`
+12. **Formula round standalone pivot** — backend groundwork уже использует `trainer-submit` + nullable `student_id`/`round_id` flow. Если меняется trainer schema или submit contract — синхронно обновить `supabase/functions/trainer-submit/index.ts`, `supabase/migrations/20260408160000_trainer_standalone_schema.sql` и `.claude/rules/40-homework-system.md`
+13. **Тренажёр формул (2026-04-08)** — расширен с 12 кинематических формул на 28 формул по всей механике. Добавлены динамика (6 формул), законы сохранения (7 формул), статика (1 формула), гидростатика (4 формулы). `TrainerPage.tsx` имеет новый UI с выбором раздела (6 кнопок: Вся механика, Кинематика, Динамика, Законы сохранения, Статика, Гидростатика). Каталог формул в `src/lib/formulaEngine/formulas.ts` разбит на пять массивов (`kinematicsFormulas`, `dynamicsFormulas`, `conservationFormulas`, `staticsFormulas`, `hydrostaticsFormulas`) и унифицирован в `mechanicsFormulas`.
 
 ## Среда разработки и деплоя
 
@@ -236,9 +239,4 @@ For architecture overview see: docs/delivery/engineering/architecture/README.md
 - Нет `ffmpeg`: Supabase Edge Functions не имеют системных бинарников, поэтому OGG/Opus отправляется в Lemonfox напрямую.
 - Для multipart upload используется `FormData` с `new Blob([audioBuffer], { type: "audio/ogg" })` и filename `voice.ogg`.
 - Во время расшифровки бот поддерживает typing loop через `sendChatAction('typing')` каждые ~4 секунды.
-- Dispatch на голосовые сообщения живёт в message loop и должен уважать текущие guardrails онбординга так же, как text flow.
-- При ошибке расшифровки бот отвечает пользователю сообщением вида «Не удалось расшифровать…», а не молчит.
-- Secret: `LEMONFOX_API_KEY`.
-- Основной файл: `supabase/functions/telegram-bot/index.ts`.
-
-## Голосовые сообщения в веб-чате у�
+- Dispatch на голосовые сооб�

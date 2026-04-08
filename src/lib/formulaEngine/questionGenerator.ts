@@ -88,6 +88,96 @@ const BUILD_RECIPES: Record<string, BuildRecipe> = {
     numeratorTokens: ['v^2'],
     denominatorTokens: ['R'],
   },
+  'dyn.01': {
+    displayFormula: 'F = m \\cdot a',
+    numeratorTokens: ['F'],
+    denominatorTokens: ['m', 'a'],
+  },
+  'dyn.02': {
+    displayFormula: 'f = \\mu \\cdot N',
+    numeratorTokens: ['\\mu', 'N'],
+    denominatorTokens: [],
+  },
+  'dyn.03': {
+    displayFormula: 'F_g = m \\cdot g',
+    numeratorTokens: ['m', 'g'],
+    denominatorTokens: [],
+  },
+  'dyn.04': {
+    displayFormula: 'F_c = \\frac{m v^2}{R}',
+    numeratorTokens: ['m', 'v^2'],
+    denominatorTokens: ['R'],
+  },
+  'dyn.05': {
+    displayFormula: 'F_{AB} = -F_{BA}',
+    numeratorTokens: ['F_{AB}'],
+    denominatorTokens: [],
+  },
+  'dyn.06': {
+    displayFormula: 'F = k \\cdot \\Delta x',
+    numeratorTokens: ['k', '\\Delta x'],
+    denominatorTokens: [],
+  },
+  'cons.01': {
+    displayFormula: 'p = m \\cdot v',
+    numeratorTokens: ['m', 'v'],
+    denominatorTokens: [],
+  },
+  'cons.02': {
+    displayFormula: "m_1 v_1 + m_2 v_2 = m_1 v_1' + m_2 v_2'",
+    numeratorTokens: ['m_1', 'v_1', 'm_2', 'v_2'],
+    denominatorTokens: [],
+  },
+  'cons.03': {
+    displayFormula: 'E_k = \\frac{m v^2}{2}',
+    numeratorTokens: ['m', 'v^2'],
+    denominatorTokens: ['2'],
+  },
+  'cons.04': {
+    displayFormula: 'E_p = m \\cdot g \\cdot h',
+    numeratorTokens: ['m', 'g', 'h'],
+    denominatorTokens: [],
+  },
+  'cons.05': {
+    displayFormula: 'E_k + E_p = \\text{const}',
+    numeratorTokens: ['E_k', 'E_p'],
+    denominatorTokens: [],
+  },
+  'cons.06': {
+    displayFormula: 'A = F \\cdot s \\cdot \\cos(\\alpha)',
+    numeratorTokens: ['F', 's', '\\cos(\\alpha)'],
+    denominatorTokens: [],
+  },
+  'cons.07': {
+    displayFormula: 'P = \\frac{A}{t}',
+    numeratorTokens: ['A'],
+    denominatorTokens: ['t'],
+  },
+  'stat.01': {
+    displayFormula: '\\sum F = 0',
+    numeratorTokens: ['F_1', 'F_2'],
+    denominatorTokens: [],
+  },
+  'hydro.01': {
+    displayFormula: 'P = \\frac{F}{S}',
+    numeratorTokens: ['F'],
+    denominatorTokens: ['S'],
+  },
+  'hydro.02': {
+    displayFormula: 'P = P_0 + \\rho \\cdot g \\cdot h',
+    numeratorTokens: ['P_0', '\\rho', 'g', 'h'],
+    denominatorTokens: [],
+  },
+  'hydro.03': {
+    displayFormula: 'F_A = \\rho \\cdot g \\cdot V',
+    numeratorTokens: ['\\rho', 'g', 'V'],
+    denominatorTokens: [],
+  },
+  'hydro.04': {
+    displayFormula: '\\frac{F_1}{S_1} = \\frac{F_2}{S_2}',
+    numeratorTokens: ['F_1', 'S_2'],
+    denominatorTokens: ['S_1', 'F_2'],
+  },
 };
 
 const MUTATION_LIBRARY: Record<string, FormulaMutation[]> = {
@@ -218,6 +308,197 @@ const MUTATION_LIBRARY: Record<string, FormulaMutation[]> = {
       type: 'swap_variable',
       latex: 'a_{цс} = \\frac{v^2}{T}',
       hint: 'В формуле кругового движения нужен радиус R, а не период T.',
+    },
+  ],
+  'dyn.01': [
+    {
+      type: 'swap_fraction',
+      latex: 'a = \\frac{m}{F}',
+      hint: 'Ускорение обратно пропорционально массе: большая масса — меньше ускорение.',
+    },
+    {
+      type: 'swap_variable',
+      latex: 'F = a / m',
+      hint: 'Сила пропорциональна массе и ускорению, нужно умножение, а не деление.',
+    },
+  ],
+  'dyn.02': [
+    {
+      type: 'swap_variable',
+      latex: 'f = \\mu + N',
+      hint: 'Сила трения зависит от произведения коэффициента и нормальной силы.',
+    },
+    {
+      type: 'drop_coefficient',
+      latex: 'f = N',
+      hint: 'Коэффициент трения μ определяет, какую часть нормальной силы составляет трение.',
+    },
+  ],
+  'dyn.03': [
+    {
+      type: 'swap_variable',
+      latex: 'F_g = m + g',
+      hint: 'Вес — произведение массы на ускорение свободного падения.',
+    },
+    {
+      type: 'wrong_power',
+      latex: 'F_g = m \\cdot g^2',
+      hint: 'g не возводится в степень в формуле веса.',
+    },
+  ],
+  'dyn.04': [
+    {
+      type: 'wrong_power',
+      latex: 'F_c = \\frac{m v}{R}',
+      hint: 'Центростремительная сила зависит от квадрата скорости.',
+    },
+    {
+      type: 'swap_variable',
+      latex: 'F_c = \\frac{v^2}{m R}',
+      hint: 'Масса умножается на ускорение, она в числителе.',
+    },
+  ],
+  'dyn.05': [
+    {
+      type: 'swap_fraction',
+      latex: 'F_{AB} = F_{BA}',
+      hint: 'Силы действия и противодействия противоположны по направлению.',
+    },
+  ],
+  'dyn.06': [
+    {
+      type: 'swap_variable',
+      latex: 'F = \\Delta x / k',
+      hint: 'Сила упругости пропорциональна деформации, k в числителе.',
+    },
+    {
+      type: 'drop_coefficient',
+      latex: 'F = \\Delta x',
+      hint: 'Жёсткость k показывает, насколько сильно пружина сопротивляется деформации.',
+    },
+  ],
+  'cons.01': [
+    {
+      type: 'swap_variable',
+      latex: 'p = v / m',
+      hint: 'Импульс — произведение, а не отношение.',
+    },
+  ],
+  'cons.02': [
+    {
+      type: 'swap_fraction',
+      latex: "m_1 v_1 - m_2 v_2 = m_1 v_1' - m_2 v_2'",
+      hint: 'В законе сохранения импульса складываются импульсы, а не вычитаются.',
+    },
+  ],
+  'cons.03': [
+    {
+      type: 'drop_coefficient',
+      latex: 'E_k = m v^2',
+      hint: 'Кинетическая энергия содержит делитель 2 в формуле.',
+    },
+    {
+      type: 'wrong_power',
+      latex: 'E_k = \\frac{m v}{2}',
+      hint: 'Энергия зависит от квадрата скорости, а не от первой степени.',
+    },
+  ],
+  'cons.04': [
+    {
+      type: 'swap_variable',
+      latex: 'E_p = m \\cdot g / h',
+      hint: 'Потенциальная энергия растёт с высотой, h в числителе.',
+    },
+    {
+      type: 'wrong_power',
+      latex: 'E_p = m \\cdot g \\cdot h^2',
+      hint: 'Потенциальная энергия линейна по высоте, без квадрата.',
+    },
+  ],
+  'cons.05': [
+    {
+      type: 'swap_variable',
+      latex: 'E_k - E_p = \\text{const}',
+      hint: 'При сохранении механической энергии кинетическая и потенциальная складываются.',
+    },
+  ],
+  'cons.06': [
+    {
+      type: 'drop_coefficient',
+      latex: 'A = F \\cdot s',
+      hint: 'Угол между силой и перемещением влияет на работу через косинус.',
+    },
+    {
+      type: 'wrong_power',
+      latex: 'A = F^2 \\cdot s',
+      hint: 'Работа линейна по силе, не зависит от её квадрата.',
+    },
+  ],
+  'cons.07': [
+    {
+      type: 'swap_fraction',
+      latex: 'P = \\frac{t}{A}',
+      hint: 'Мощность — работа, делённая на время, а не наоборот.',
+    },
+    {
+      type: 'swap_variable',
+      latex: 'P = F / v',
+      hint: 'Мощность может быть выражена как произведение силы и скорости.',
+    },
+  ],
+  'stat.01': [
+    {
+      type: 'swap_fraction',
+      latex: '\\sum F = \\text{max}',
+      hint: 'При равновесии сумма всех сил должна быть нулевой.',
+    },
+  ],
+  'hydro.01': [
+    {
+      type: 'swap_fraction',
+      latex: 'P = \\frac{S}{F}',
+      hint: 'Давление — сила, делённая на площадь.',
+    },
+    {
+      type: 'wrong_power',
+      latex: 'P = F \\cdot S',
+      hint: 'Давление — это отношение силы к площади, а не произведение.',
+    },
+  ],
+  'hydro.02': [
+    {
+      type: 'drop_coefficient',
+      latex: 'P = P_0 + \\rho \\cdot g \\cdot h / 2',
+      hint: 'Гидростатическое давление растёт линейно с глубиной, без делителя.',
+    },
+    {
+      type: 'swap_variable',
+      latex: 'P = \\rho \\cdot g \\cdot h',
+      hint: 'Полное давление включает атмосферное давление P₀.',
+    },
+  ],
+  'hydro.03': [
+    {
+      type: 'swap_variable',
+      latex: 'F_A = m \\cdot g \\cdot V',
+      hint: 'Архимедова сила зависит от плотности жидкости, а не от плотности тела.',
+    },
+    {
+      type: 'drop_coefficient',
+      latex: 'F_A = \\rho \\cdot V',
+      hint: 'Архимедова сила равна весу вытесненной жидкости: ρgV.',
+    },
+  ],
+  'hydro.04': [
+    {
+      type: 'swap_fraction',
+      latex: '\\frac{S_1}{F_1} = \\frac{S_2}{F_2}',
+      hint: 'В гидравлическом прессе давление одинаково, поэтому F/S постоянно.',
+    },
+    {
+      type: 'swap_variable',
+      latex: 'F_1 \\cdot S_1 = F_2 \\cdot S_2',
+      hint: 'Закон Паскаля основан на равенстве давлений, а не на равенстве произведений.',
     },
   ],
 };
