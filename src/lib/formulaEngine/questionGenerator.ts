@@ -84,7 +84,7 @@ const BUILD_RECIPES: Record<string, BuildRecipe> = {
     denominatorTokens: ['T'],
   },
   'kin.12': {
-    displayFormula: 'a_{цс} = \\frac{v^2}{R}',
+    displayFormula: 'a_{\\text{цс}} = \\frac{v^2}{R}',
     numeratorTokens: ['v^2'],
     denominatorTokens: ['R'],
   },
@@ -196,7 +196,7 @@ const MUTATION_LIBRARY: Record<string, FormulaMutation[]> = {
   'kin.02': [
     {
       type: 'swap_fraction',
-      latex: 'v_{ср} = \\frac{t_{общ}}{s_{общ}}',
+      latex: 'v_{\\text{ср}} = \\frac{t_{\\text{общ}}}{s_{\\text{общ}}}',
       hint: 'Средняя скорость считается как путь, делённый на время, а не наоборот.',
     },
   ],
@@ -301,12 +301,12 @@ const MUTATION_LIBRARY: Record<string, FormulaMutation[]> = {
   'kin.12': [
     {
       type: 'wrong_power',
-      latex: 'a_{цс} = \\frac{v}{R} = \\omega R',
+      latex: 'a_{\\text{цс}} = \\frac{v}{R} = \\omega R',
       hint: 'Центростремительное ускорение зависит от квадрата скорости и квадрата угловой скорости.',
     },
     {
       type: 'swap_variable',
-      latex: 'a_{цс} = \\frac{v^2}{T}',
+      latex: 'a_{\\text{цс}} = \\frac{v^2}{T}',
       hint: 'В формуле кругового движения нужен радиус R, а не период T.',
     },
   ],

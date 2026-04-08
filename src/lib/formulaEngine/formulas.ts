@@ -41,7 +41,7 @@ export const kinematicsFormulas: Formula[] = [
     topic: 'Средняя скорость',
     name: 'Средняя скорость',
     buildTitle: 'Средняя скорость за всё время движения',
-    formula: 'v_{ср} = \\frac{s_{общ}}{t_{общ}}',
+    formula: 'v_{\\text{ср}} = \\frac{s_{\\text{общ}}}{t_{\\text{общ}}}',
     formulaPlain: 'v_ср = s_общ / t_общ',
     variables: [
       { symbol: 'v_ср', name: 'средняя скорость', unit: 'м/с' },
@@ -363,7 +363,7 @@ export const kinematicsFormulas: Formula[] = [
     topic: 'Движение по окружности',
     name: 'Центростремительное ускорение',
     buildTitle: 'Центростремительное ускорение при вращении',
-    formula: 'a_{цс} = \\frac{v^2}{R} = \\omega^2 R',
+    formula: 'a_{\\text{цс}} = \\frac{v^2}{R} = \\omega^2 R',
     formulaPlain: 'a_цс = v²/R = ω²R',
     variables: [
       { symbol: 'a_цс', name: 'центростремительное ускорение', unit: 'м/с²' },
