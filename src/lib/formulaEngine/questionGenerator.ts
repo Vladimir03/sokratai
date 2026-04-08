@@ -783,9 +783,9 @@ export function generateFeedbackPayload(question: FormulaQuestion, isCorrect: bo
 
   const canonicalLatex = formula.formula;
 
-  // Build userAnswerLatex based on question type and correctness
+  // Build userAnswerLatex based on question type and answer (for BOTH correct and incorrect)
   let userAnswerLatex: string | null = null;
-  if (!isCorrect && userAnswer) {
+  if (userAnswer) {
     if (question.layer === 3) {
       userAnswerLatex = userAnswer === true ? 'верно' : 'неверно';
     } else if (question.layer === 2 && typeof userAnswer === 'object' && 'numerator' in userAnswer) {
@@ -803,9 +803,9 @@ export function generateFeedbackPayload(question: FormulaQuestion, isCorrect: bo
   if (isCorrect) {
     return {
       canonicalLatex,
-      userAnswerLatex: null,
-      reasoning: `Верно собрано! ${formula.physicalMeaning}`,
-      trap: `Запомни: ${getLayer1MemoryCue(formula)}`,
+      userAnswerLatex,
+      reasoning: formula.physicalMeaning,
+      trap: getLayer1MemoryCue(formula),
       isCorrect: true,
     };
   }
@@ -815,9 +815,9 @@ export function generateFeedbackPayload(question: FormulaQuestion, isCorrect: bo
     const mutation = MUTATION_LIBRARY[formula.id]?.find((m) => m.type === question.mutationType);
     return {
       canonicalLatex,
-      userAnswerLatex: null,
+      userAnswerLatex,
       reasoning: mutation?.hint ?? getMutationExplanation(question, formula),
-      trap: `Проверка: ${formula.dimensions}`,
+      trap: formula.dimensions,
       isCorrect: false,
     };
   }
@@ -829,7 +829,7 @@ export function generateFeedbackPayload(question: FormulaQuestion, isCorrect: bo
       canonicalLatex,
       userAnswerLatex: userAnswerLatex ?? null,
       reasoning: `Нужны элементы: ${allTokens.join(', ')}`,
-      trap: `Частая ловушка: ${trimLine(formula.commonMistakes[0] ?? 'не подменяй переменные')}`,
+      trap: trimLine(formula.commonMistakes[0] ?? 'не подменяй переменные'),
       isCorrect: false,
     };
   }
@@ -838,8 +838,8 @@ export function generateFeedbackPayload(question: FormulaQuestion, isCorrect: bo
   return {
     canonicalLatex,
     userAnswerLatex: userAnswerLatex ?? null,
-    reasoning: `Триггер: ${trimLine(question.explanation || formula.whenToUse[0] || formula.physicalMeaning)}`,
-    trap: `Запомни: ${getLayer1MemoryCue(formula)}`,
+    reasoning: trimLine(question.explanation || formula.whenToUse[0] || formula.physicalMeaning),
+    trap: getLayer1MemoryCue(formula),
     isCorrect: false,
   };
 }

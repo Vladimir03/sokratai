@@ -76,9 +76,11 @@ export const FeedbackOverlay = memo(function FeedbackOverlay({
             )}
             <div>
               <p className="text-xs font-medium text-slate-500 mb-0.5">
-                {isCorrect ? 'Как запомнить:' : 'Как рассуждать:'}
+                Как рассуждать:
               </p>
-              <p className="text-sm text-slate-700">{reasoning}</p>
+              <Suspense fallback={<span className="text-sm text-slate-700">{reasoning}</span>}>
+                <MathText text={reasoning} className="text-sm text-slate-700" />
+              </Suspense>
             </div>
           </div>
         </div>
@@ -95,7 +97,9 @@ export const FeedbackOverlay = memo(function FeedbackOverlay({
               <p className="text-xs font-medium text-slate-600 mb-0.5">
                 {isCorrect ? 'Запомни:' : 'Частая ловушка:'}
               </p>
-              <p className="text-sm text-slate-700">{trap}</p>
+              <Suspense fallback={<span className="text-sm text-slate-700">{trap}</span>}>
+                <MathText text={trap} className="text-sm text-slate-700" />
+              </Suspense>
             </div>
           </div>
         </div>

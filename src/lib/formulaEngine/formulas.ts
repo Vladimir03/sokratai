@@ -107,7 +107,7 @@ export const kinematicsFormulas: Formula[] = [
     section: 'Кинематика',
     topic: 'Равноускоренное движение',
     name: 'Перемещение при равноускоренном движении',
-    buildTitle: 'Перемещение при ускорении из начального положения',
+    buildTitle: 'Перемещение при равноускоренном движении с начальной скоростью',
     formula: 's = v_0 t + \\frac{a t^2}{2}',
     formulaPlain: 's = v₀t + at²/2',
     variables: [
