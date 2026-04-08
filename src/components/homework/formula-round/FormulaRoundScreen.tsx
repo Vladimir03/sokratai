@@ -5,7 +5,7 @@ import { FeedbackOverlay } from './FeedbackOverlay';
 import { TrueOrFalseCard } from './TrueOrFalseCard';
 import { BuildFormulaCard } from './BuildFormulaCard';
 import { SituationCard } from './SituationCard';
-import { generateFeedback } from '@/lib/formulaEngine/questionGenerator';
+import { generateFeedback, generateFeedbackPayload } from '@/lib/formulaEngine/questionGenerator';
 import type {
   FormulaQuestion,
   BuildFormulaAnswer,
@@ -13,6 +13,7 @@ import type {
   AnswerRecord,
   WeakFormula,
 } from '@/lib/formulaEngine/types';
+import type { FeedbackPayload } from '@/lib/formulaEngine/questionGenerator';
 
 type RoundPhase = 'playing' | 'feedback';
 
@@ -43,7 +44,8 @@ export function FormulaRoundScreen({
   const [answers, setAnswers] = useState<AnswerRecord[]>([]);
   const [phase, setPhase] = useState<RoundPhase>('playing');
   const [lastCorrect, setLastCorrect] = useState<boolean | null>(null);
-  const [feedbackText, setFeedbackText] = useState('');
+  const [feedbackPayload, setFeedbackPayload] = useState<FeedbackPayload | null>(null);
+  const [selectedAnswer, setSelectedAnswer] = useState<string | boolean | BuildFormulaAnswer | null>(null);
 
   const startTimeRef = useRef(performance.now());
   const questionStartRef = useRef(performance.now());
@@ -125,11 +127,13 @@ export function FormulaRoundScreen({
       };
 
       const newAnswers = [...answers, record];
+      const payload = generateFeedbackPayload(currentQuestion, correct, selectedAnswer);
 
       setScore(newScore);
       setAnswers(newAnswers);
       setLastCorrect(correct);
-      setFeedbackText(generateFeedback(currentQuestion, correct));
+      setFeedbackPayload(payload);
+      setSelectedAnswer(selectedAnswer);
       setPhase('feedback');
     },
     [currentQuestion, phase, score, answers],
@@ -148,7 +152,8 @@ export function FormulaRoundScreen({
     setCurrentIndex(newIndex);
     setPhase('playing');
     setLastCorrect(null);
-    setFeedbackText('');
+    setFeedbackPayload(null);
+    setSelectedAnswer(null);
     questionStartRef.current = performance.now();
   }, [currentIndex, questions.length, answers, score, onComplete, buildResult]);
 
@@ -206,11 +211,13 @@ export function FormulaRoundScreen({
       </div>
 
       {/* Feedback overlay */}
-      {phase === 'feedback' && (
+      {phase === 'feedback' && feedbackPayload && (
         <FeedbackOverlay
-          isCorrect={lastCorrect ?? false}
-          explanation={feedbackText}
-          livesLost={0}
+          isCorrect={feedbackPayload.isCorrect}
+          canonicalLatex={feedbackPayload.canonicalLatex}
+          userAnswerLatex={feedbackPayload.userAnswerLatex}
+          reasoning={feedbackPayload.reasoning}
+          trap={feedbackPayload.trap}
           onContinue={handleNext}
         />
       )}

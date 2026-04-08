@@ -14,6 +14,7 @@ export interface Formula {
   section: string;
   topic: string;
   name: string;
+  buildTitle?: string;
   formula: string;
   formulaPlain: string;
   variables: Variable[];

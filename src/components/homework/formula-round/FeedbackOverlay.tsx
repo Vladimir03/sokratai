@@ -1,5 +1,5 @@
 import { memo, Suspense, lazy } from 'react';
-import { Heart } from 'lucide-react';
+import { AlertTriangle, Lightbulb, CheckCircle2, Sparkles } from 'lucide-react';
 
 const MathText = lazy(() =>
   import('@/components/kb/ui/MathText').then((m) => ({ default: m.MathText })),
@@ -7,76 +7,106 @@ const MathText = lazy(() =>
 
 interface FeedbackOverlayProps {
   isCorrect: boolean;
-  explanation: string;
-  livesLost: 0 | 1;
+  canonicalLatex: string;
+  userAnswerLatex: string | null;
+  reasoning: string;
+  trap: string;
   onContinue: () => void;
 }
 
 /**
- * Feedback overlay shown after every answer (GDD §7.1: feedback ALWAYS).
+ * Feedback overlay with 4-block structure (PART D v2 overhaul).
  *
- * Correct: green background, "Верно!" + explanation (≤2 lines).
- * Incorrect: red background, "Неверно" + explanation (2-4 lines) + lives lost.
- *
- * "Далее →" button = secondary (doc 17: answer button is primary CTA,
- * navigation is secondary).
+ * Block 1: Canonical LaTeX formula (centered, large)
+ * Block 2: User's answer or verdict
+ * Block 3: Reasoning (💡 icon for reasoning, or sparkles for memorization tips)
+ * Block 4: Trap/Tip (⚠️ for incorrect, ✨ for correct)
  */
 export const FeedbackOverlay = memo(function FeedbackOverlay({
   isCorrect,
-  explanation,
-  livesLost,
+  canonicalLatex,
+  userAnswerLatex,
+  reasoning,
+  trap,
   onContinue,
 }: FeedbackOverlayProps) {
+  const bgColor = isCorrect ? 'bg-green-50 border-green-200' : 'bg-red-50 border-red-200';
+  const titleColor = isCorrect ? 'text-emerald-700' : 'text-red-700';
+  const cardBg = 'bg-white border border-slate-200 rounded-lg p-3';
+  const trapBg = isCorrect ? 'bg-emerald-50' : 'bg-amber-50';
+
   return (
     <div
-      className={`absolute inset-x-0 bottom-0 px-4 py-5 border-t animate-in slide-in-from-bottom-4 duration-200 ${
-        isCorrect
-          ? 'bg-green-50 border-green-200'
-          : 'bg-red-50 border-red-200'
-      }`}
+      className={`absolute inset-x-0 bottom-0 px-4 py-5 border-t animate-in slide-in-from-bottom-4 duration-200 ${bgColor}`}
     >
       <div className="max-w-md mx-auto space-y-3">
-        {/* Header: verdict + lives lost */}
-        <div className="flex items-center justify-between">
-          <span
-            className={`text-base font-semibold ${
-              isCorrect ? 'text-green-700' : 'text-red-600'
-            }`}
-          >
-            {isCorrect ? '\u2713 \u0412\u0435\u0440\u043D\u043E!' : '\u2717 \u041D\u0435\u0432\u0435\u0440\u043D\u043E'}
-          </span>
+        {/* Title */}
+        <h2 className={`text-base font-semibold ${titleColor}`}>
+          {isCorrect ? '✓ Верно!' : '✗ Неверно'}
+        </h2>
 
-          {!isCorrect && livesLost > 0 && (
-            <span className="flex items-center gap-1 text-sm font-medium text-red-500">
-              <Heart className="w-4 h-4 fill-red-500 text-red-500" />
-              <span>&minus;{livesLost}</span>
-            </span>
+        {/* Block 1: Canonical LaTeX formula */}
+        <div className={cardBg}>
+          <Suspense fallback={<span className="text-sm text-slate-700">{canonicalLatex}</span>}>
+            <div className="text-center">
+              <MathText text={`$${canonicalLatex}$`} className="text-lg text-slate-900" />
+            </div>
+          </Suspense>
+        </div>
+
+        {/* Block 2: User's answer */}
+        <div className={cardBg}>
+          <p className="text-xs font-medium text-slate-500 mb-1">Твой ответ:</p>
+          {userAnswerLatex ? (
+            <Suspense fallback={<span className="text-sm text-slate-700">{userAnswerLatex}</span>}>
+              <MathText text={`$${userAnswerLatex}$`} className="text-sm text-slate-700" />
+            </Suspense>
+          ) : (
+            <p className="text-sm text-slate-500">✓ Собрано верно</p>
           )}
         </div>
 
-        {/* Explanation — MathText for formulas in feedback (GDD §7.2) */}
-        <Suspense
-          fallback={
-            <p className="text-sm text-slate-600 whitespace-pre-wrap">
-              {explanation}
-            </p>
-          }
-        >
-          <MathText
-            text={explanation}
-            className={`text-sm leading-relaxed ${
-              isCorrect ? 'text-green-800' : 'text-red-800'
-            }`}
-          />
-        </Suspense>
+        {/* Block 3: Reasoning */}
+        <div className={cardBg}>
+          <div className="flex items-start gap-2">
+            {isCorrect ? (
+              <Lightbulb className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
+            ) : (
+              <Lightbulb className="w-4 h-4 text-slate-600 shrink-0 mt-0.5" />
+            )}
+            <div>
+              <p className="text-xs font-medium text-slate-500 mb-0.5">
+                {isCorrect ? 'Как запомнить:' : 'Как рассуждать:'}
+              </p>
+              <p className="text-sm text-slate-700">{reasoning}</p>
+            </div>
+          </div>
+        </div>
 
-        {/* "Далее →" = secondary button (doc 17: one primary CTA per screen) */}
+        {/* Block 4: Trap/Tip */}
+        <div className={`${cardBg} ${trapBg}`}>
+          <div className="flex items-start gap-2">
+            {isCorrect ? (
+              <Sparkles className="w-4 h-4 text-emerald-700 shrink-0 mt-0.5" />
+            ) : (
+              <AlertTriangle className="w-4 h-4 text-amber-700 shrink-0 mt-0.5" />
+            )}
+            <div>
+              <p className="text-xs font-medium text-slate-600 mb-0.5">
+                {isCorrect ? 'Запомни:' : 'Частая ловушка:'}
+              </p>
+              <p className="text-sm text-slate-700">{trap}</p>
+            </div>
+          </div>
+        </div>
+
+        {/* Continue button */}
         <button
           type="button"
           onClick={onContinue}
-          className="w-full py-3 rounded-md border border-slate-200 bg-white text-slate-800 font-medium text-base transition-colors hover:bg-slate-50"
+          className="w-full py-3 rounded-lg border border-slate-200 bg-white text-slate-700 font-medium text-base transition-colors hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-300"
         >
-          {'\u0414\u0430\u043B\u0435\u0435 \u2192'}
+          Далее →
         </button>
       </div>
     </div>

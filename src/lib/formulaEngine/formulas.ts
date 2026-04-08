@@ -6,6 +6,7 @@ export const kinematicsFormulas: Formula[] = [
     section: 'Кинематика',
     topic: 'Равномерное движение',
     name: 'Перемещение при равномерном движении',
+    buildTitle: 'Перемещение при постоянной скорости',
     formula: 's = v \\cdot t',
     formulaPlain: 's = v * t',
     variables: [
@@ -39,6 +40,7 @@ export const kinematicsFormulas: Formula[] = [
     section: 'Кинематика',
     topic: 'Средняя скорость',
     name: 'Средняя скорость',
+    buildTitle: 'Средняя скорость за всё время движения',
     formula: 'v_{ср} = \\frac{s_{общ}}{t_{общ}}',
     formulaPlain: 'v_ср = s_общ / t_общ',
     variables: [
@@ -71,6 +73,7 @@ export const kinematicsFormulas: Formula[] = [
     section: 'Кинематика',
     topic: 'Равноускоренное движение',
     name: 'Скорость при равноускоренном движении',
+    buildTitle: 'Скорость при равноускоренном движении',
     formula: 'v = v_0 + a \\cdot t',
     formulaPlain: 'v = v₀ + a * t',
     variables: [
@@ -104,6 +107,7 @@ export const kinematicsFormulas: Formula[] = [
     section: 'Кинематика',
     topic: 'Равноускоренное движение',
     name: 'Перемещение при равноускоренном движении',
+    buildTitle: 'Перемещение при ускорении из начального положения',
     formula: 's = v_0 t + \\frac{a t^2}{2}',
     formulaPlain: 's = v₀t + at²/2',
     variables: [
@@ -139,6 +143,7 @@ export const kinematicsFormulas: Formula[] = [
     section: 'Кинематика',
     topic: 'Равноускоренное движение',
     name: 'Перемещение через среднюю скорость',
+    buildTitle: 'Перемещение через среднюю скорость',
     formula: 's = \\frac{v + v_0}{2} \\cdot t',
     formulaPlain: 's = (v + v₀) / 2 * t',
     variables: [
@@ -170,6 +175,7 @@ export const kinematicsFormulas: Formula[] = [
     section: 'Кинематика',
     topic: 'Равноускоренное движение',
     name: 'Формула без времени',
+    buildTitle: 'Связь скорости, ускорения и пути без времени',
     formula: 'v^2 = v_0^2 + 2as',
     formulaPlain: 'v² = v₀² + 2as',
     variables: [
@@ -205,6 +211,7 @@ export const kinematicsFormulas: Formula[] = [
     section: 'Кинематика',
     topic: 'Свободное падение',
     name: 'Высота свободного падения',
+    buildTitle: 'Высота при свободном падении из покоя',
     formula: 'h = \\frac{g t^2}{2}',
     formulaPlain: 'h = gt²/2',
     variables: [
@@ -236,6 +243,7 @@ export const kinematicsFormulas: Formula[] = [
     section: 'Кинематика',
     topic: 'Свободное падение',
     name: 'Скорость при свободном падении',
+    buildTitle: 'Скорость при свободном падении из покоя',
     formula: 'v = g \\cdot t',
     formulaPlain: 'v = g * t',
     variables: [
@@ -263,6 +271,7 @@ export const kinematicsFormulas: Formula[] = [
     section: 'Кинематика',
     topic: 'Движение по окружности',
     name: 'Линейная скорость при движении по окружности',
+    buildTitle: 'Линейная скорость при равномерном вращении',
     formula: 'v = \\frac{2 \\pi R}{T}',
     formulaPlain: 'v = 2πR / T',
     variables: [
@@ -294,6 +303,7 @@ export const kinematicsFormulas: Formula[] = [
     section: 'Кинематика',
     topic: 'Движение по окружности',
     name: 'Связь периода и частоты',
+    buildTitle: 'Связь периода и частоты вращения',
     formula: 'T = \\frac{1}{\\nu}',
     formulaPlain: 'T = 1 / ν',
     variables: [
@@ -321,6 +331,7 @@ export const kinematicsFormulas: Formula[] = [
     section: 'Кинематика',
     topic: 'Движение по окружности',
     name: 'Угловая скорость',
+    buildTitle: 'Угловая скорость при вращении',
     formula: '\\omega = \\frac{2\\pi}{T} = 2\\pi\\nu',
     formulaPlain: 'ω = 2π/T = 2πν',
     variables: [
@@ -351,6 +362,7 @@ export const kinematicsFormulas: Formula[] = [
     section: 'Кинематика',
     topic: 'Движение по окружности',
     name: 'Центростремительное ускорение',
+    buildTitle: 'Центростремительное ускорение при вращении',
     formula: 'a_{цс} = \\frac{v^2}{R} = \\omega^2 R',
     formulaPlain: 'a_цс = v²/R = ω²R',
     variables: [
@@ -388,6 +400,7 @@ export const dynamicsFormulas: Formula[] = [
     section: 'Динамика',
     topic: 'Второй закон Ньютона',
     name: 'Второй закон Ньютона',
+    buildTitle: 'Второй закон Ньютона',
     formula: 'F = m \\cdot a',
     formulaPlain: 'F = m * a',
     variables: [
@@ -421,6 +434,7 @@ export const dynamicsFormulas: Formula[] = [
     section: 'Динамика',
     topic: 'Сила трения',
     name: 'Сила трения',
+    buildTitle: 'Сила трения при скольжении',
     formula: 'f = \\mu \\cdot N',
     formulaPlain: 'f = μ * N',
     variables: [
@@ -454,6 +468,7 @@ export const dynamicsFormulas: Formula[] = [
     section: 'Динамика',
     topic: 'Вес и нормальная сила',
     name: 'Сила тяжести (вес)',
+    buildTitle: 'Сила тяжести (вес тела)',
     formula: 'F_g = m \\cdot g',
     formulaPlain: 'F_g = m * g',
     variables: [
@@ -487,6 +502,7 @@ export const dynamicsFormulas: Formula[] = [
     section: 'Динамика',
     topic: 'Движение по окружности',
     name: 'Центростремительная сила',
+    buildTitle: 'Центростремительная сила при вращении',
     formula: 'F_c = m \\cdot a_c = \\frac{m v^2}{R} = m \\omega^2 R',
     formulaPlain: 'F_c = m * a_c = m * v²/R = m * ω²R',
     variables: [
@@ -522,6 +538,7 @@ export const dynamicsFormulas: Formula[] = [
     section: 'Динамика',
     topic: 'Третий закон Ньютона',
     name: 'Третий закон Ньютона',
+    buildTitle: 'Третий закон Ньютона',
     formula: 'F_{AB} = -F_{BA}',
     formulaPlain: 'F_AB = -F_BA',
     variables: [
@@ -553,6 +570,7 @@ export const dynamicsFormulas: Formula[] = [
     section: 'Динамика',
     topic: 'Упругие силы',
     name: 'Закон Гука',
+    buildTitle: 'Закон Гука для пружины',
     formula: 'F = k \\cdot \\Delta x',
     formulaPlain: 'F = k * Δx',
     variables: [
@@ -589,6 +607,7 @@ export const conservationFormulas: Formula[] = [
     section: 'Законы сохранения',
     topic: 'Импульс',
     name: 'Импульс тела',
+    buildTitle: 'Импульс тела',
     formula: 'p = m \\cdot v',
     formulaPlain: 'p = m * v',
     variables: [
@@ -622,6 +641,7 @@ export const conservationFormulas: Formula[] = [
     section: 'Законы сохранения',
     topic: 'Сохранение импульса',
     name: 'Закон сохранения импульса',
+    buildTitle: 'Закон сохранения импульса',
     formula: "m_1 v_1 + m_2 v_2 = m_1 v_1' + m_2 v_2'",
     formulaPlain: 'm₁v₁ + m₂v₂ = m₁v₁\' + m₂v₂\'',
     variables: [
@@ -654,6 +674,7 @@ export const conservationFormulas: Formula[] = [
     section: 'Законы сохранения',
     topic: 'Кинетическая энергия',
     name: 'Кинетическая энергия',
+    buildTitle: 'Кинетическая энергия',
     formula: 'E_k = \\frac{m v^2}{2}',
     formulaPlain: 'E_k = m * v²/2',
     variables: [
@@ -686,6 +707,7 @@ export const conservationFormulas: Formula[] = [
     section: 'Законы сохранения',
     topic: 'Потенциальная энергия',
     name: 'Потенциальная энергия в гравитационном поле',
+    buildTitle: 'Потенциальная энергия в гравитационном поле',
     formula: 'E_p = m \\cdot g \\cdot h',
     formulaPlain: 'E_p = m * g * h',
     variables: [
@@ -720,6 +742,7 @@ export const conservationFormulas: Formula[] = [
     section: 'Законы сохранения',
     topic: 'Механическая энергия',
     name: 'Закон сохранения механической энергии',
+    buildTitle: 'Закон сохранения механической энергии',
     formula: 'E_k + E_p = \\text{const}',
     formulaPlain: 'E_k + E_p = const',
     variables: [
@@ -752,6 +775,7 @@ export const conservationFormulas: Formula[] = [
     section: 'Законы сохранения',
     topic: 'Работа и энергия',
     name: 'Работа силы',
+    buildTitle: 'Работа постоянной силы',
     formula: 'A = F \\cdot s \\cdot \\cos(\\alpha)',
     formulaPlain: 'A = F * s * cos(α)',
     variables: [
@@ -786,6 +810,7 @@ export const conservationFormulas: Formula[] = [
     section: 'Законы сохранения',
     topic: 'Мощность',
     name: 'Мощность',
+    buildTitle: 'Мощность',
     formula: 'P = \\frac{A}{t} = F \\cdot v',
     formulaPlain: 'P = A/t = F * v',
     variables: [
@@ -824,6 +849,7 @@ export const staticsFormulas: Formula[] = [
     section: 'Статика',
     topic: 'Равновесие',
     name: 'Условие равновесия (сумма сил)',
+    buildTitle: 'Условие равновесия сил',
     formula: '\\sum F = 0',
     formulaPlain: 'ΣF = 0',
     variables: [
@@ -858,6 +884,7 @@ export const hydrostaticsFormulas: Formula[] = [
     section: 'Гидростатика',
     topic: 'Давление жидкости',
     name: 'Давление жидкости',
+    buildTitle: 'Давление',
     formula: 'P = \\frac{F}{S}',
     formulaPlain: 'P = F / S',
     variables: [
@@ -891,6 +918,7 @@ export const hydrostaticsFormulas: Formula[] = [
     section: 'Гидростатика',
     topic: 'Гидростатическое давление',
     name: 'Гидростатическое давление',
+    buildTitle: 'Гидростатическое давление на глубине',
     formula: 'P = P_0 + \\rho \\cdot g \\cdot h',
     formulaPlain: 'P = P₀ + ρ * g * h',
     variables: [
@@ -926,6 +954,7 @@ export const hydrostaticsFormulas: Formula[] = [
     section: 'Гидростатика',
     topic: 'Архимедова сила',
     name: 'Архимедова сила (выталкивающая сила)',
+    buildTitle: 'Сила Архимеда на погружённое тело',
     formula: 'F_A = \\rho \\cdot g \\cdot V',
     formulaPlain: 'F_A = ρ * g * V',
     variables: [
@@ -960,6 +989,7 @@ export const hydrostaticsFormulas: Formula[] = [
     section: 'Гидростатика',
     topic: 'Закон Паскаля',
     name: 'Закон Паскаля (гидравлический пресс)',
+    buildTitle: 'Закон Паскаля для гидравлического пресса',
     formula: '\\frac{F_1}{S_1} = \\frac{F_2}{S_2}',
     formulaPlain: 'F₁/S₁ = F₂/S₂',
     variables: [

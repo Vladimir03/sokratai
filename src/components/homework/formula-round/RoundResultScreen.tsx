@@ -1,5 +1,5 @@
-import { memo, Suspense, lazy, useMemo } from 'react';
-import { AlertTriangle } from 'lucide-react';
+import { memo, Suspense, lazy, useMemo, useState } from 'react';
+import { AlertTriangle, ChevronDown, ChevronUp } from 'lucide-react';
 import type { RoundResult, Layer } from '@/lib/formulaEngine/types';
 import { kinematicsFormulas } from '@/lib/formulaEngine/formulas';
 
@@ -32,6 +32,7 @@ export const RoundResultScreen = memo(function RoundResultScreen({
   onRetryWrong,
   onExit,
 }: RoundResultScreenProps) {
+  const [isExpanded, setIsExpanded] = useState(false);
   const percentage = Math.round((result.score / result.total) * 100);
 
   const formulaMap = useMemo(() => {
@@ -43,6 +44,8 @@ export const RoundResultScreen = memo(function RoundResultScreen({
   }, []);
 
   const hasWeakFormulas = result.weakFormulas.length > 0;
+  const displayedWeakFormulas = isExpanded ? result.weakFormulas : result.weakFormulas.slice(0, 3);
+  const hiddenCount = Math.max(0, result.weakFormulas.length - 3);
 
   const scoreColor =
     percentage >= 80
@@ -73,19 +76,19 @@ export const RoundResultScreen = memo(function RoundResultScreen({
             </div>
           </div>
 
-          {/* Weak formulas list */}
+          {/* Weak formulas list with accordion */}
           {hasWeakFormulas && (
             <div className="space-y-3">
               <h2 className="text-base font-medium text-slate-700">
                 Проблемные формулы:
               </h2>
               <div className="space-y-2">
-                {result.weakFormulas.map((wf) => {
+                {displayedWeakFormulas.map((wf) => {
                   const latex = formulaMap.get(wf.formulaId);
                   return (
                     <div
                       key={wf.formulaId}
-                      className="flex items-start gap-3 bg-white rounded-lg border border-slate-200 px-4 py-3"
+                      className="flex items-start gap-3 bg-white rounded-lg border border-slate-200 px-4 py-3 animate-in slide-in-from-top-2 duration-200"
                     >
                       <AlertTriangle className="w-5 h-5 text-amber-500 shrink-0 mt-0.5" />
                       <div className="min-w-0">
@@ -114,6 +117,28 @@ export const RoundResultScreen = memo(function RoundResultScreen({
                     </div>
                   );
                 })}
+
+                {/* Accordion button */}
+                {hiddenCount > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setIsExpanded(!isExpanded)}
+                    className="w-full py-2 rounded-lg border border-slate-200 bg-white text-slate-600 text-sm font-medium transition-colors hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-300 flex items-center justify-center gap-2"
+                    style={{ touchAction: 'manipulation' }}
+                  >
+                    {isExpanded ? (
+                      <>
+                        <span>Свернуть</span>
+                        <ChevronUp className="w-4 h-4" />
+                      </>
+                    ) : (
+                      <>
+                        <span>Показать ещё {hiddenCount} формул{hiddenCount === 1 ? 'у' : hiddenCount < 5 ? 'ы' : ''}</span>
+                        <ChevronDown className="w-4 h-4" />
+                      </>
+                    )}
+                  </button>
+                )}
               </div>
             </div>
           )}

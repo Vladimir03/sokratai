@@ -734,7 +734,7 @@ export function generateBuildFormula(formula: Formula, pool: Formula[] = []): Fo
     type: 'build_formula',
     layer: 2,
     formulaId: formula.id,
-    prompt: `Собери формулу: ${formula.name}`,
+    prompt: formula.buildTitle || formula.name,
     displayFormula: wrapMath(recipe.displayFormula),
     options: shuffle(unique([...allTokens, ...distractors])),
     correctAnswer: { numerator: recipe.numeratorTokens, denominator: recipe.denominatorTokens },
@@ -757,6 +757,90 @@ export function generateSituationToFormula(formula: Formula, pool: Formula[]): F
     options,
     correctAnswer: correctOption,
     explanation: trimLine(trigger),
+  };
+}
+
+export interface FeedbackPayload {
+  canonicalLatex: string;
+  userAnswerLatex: string | null;
+  reasoning: string;
+  trap: string;
+  isCorrect: boolean;
+}
+
+export function generateFeedbackPayload(question: FormulaQuestion, isCorrect: boolean, userAnswer?: string | boolean | { numerator: string[]; denominator: string[] }): FeedbackPayload {
+  const formula = getFormulaById(question.formulaId);
+
+  if (!formula) {
+    return {
+      canonicalLatex: '?',
+      userAnswerLatex: null,
+      reasoning: isCorrect ? 'Верно!' : 'Нужна ещё одна попытка.',
+      trap: '',
+      isCorrect,
+    };
+  }
+
+  const canonicalLatex = formula.formula;
+
+  // Build userAnswerLatex based on question type and correctness
+  let userAnswerLatex: string | null = null;
+  if (!isCorrect && userAnswer) {
+    if (question.layer === 3) {
+      userAnswerLatex = userAnswer === true ? 'верно' : 'неверно';
+    } else if (question.layer === 2 && typeof userAnswer === 'object' && 'numerator' in userAnswer) {
+      const { numerator, denominator } = userAnswer;
+      const numStr = numerator.length > 0 ? numerator.join(' \\cdot ') : '';
+      const denStr = denominator.length > 0 ? denominator.join(' \\cdot ') : '';
+      if (denStr && numStr) userAnswerLatex = `\\frac{${numStr}}{${denStr}}`;
+      else if (denStr) userAnswerLatex = `\\frac{1}{${denStr}}`;
+      else if (numStr) userAnswerLatex = numStr;
+    } else if (question.layer === 1 && typeof userAnswer === 'string') {
+      userAnswerLatex = userAnswer;
+    }
+  }
+
+  if (isCorrect) {
+    return {
+      canonicalLatex,
+      userAnswerLatex: null,
+      reasoning: `Верно собрано! ${formula.physicalMeaning}`,
+      trap: `Запомни: ${getLayer1MemoryCue(formula)}`,
+      isCorrect: true,
+    };
+  }
+
+  // Incorrect answer feedback
+  if (question.layer === 3) {
+    const mutation = MUTATION_LIBRARY[formula.id]?.find((m) => m.type === question.mutationType);
+    return {
+      canonicalLatex,
+      userAnswerLatex: null,
+      reasoning: mutation?.hint ?? getMutationExplanation(question, formula),
+      trap: `Проверка: ${formula.dimensions}`,
+      isCorrect: false,
+    };
+  }
+
+  if (question.layer === 2) {
+    const recipe = getBuildRecipe(formula);
+    const allTokens = [...recipe.numeratorTokens, ...recipe.denominatorTokens];
+    return {
+      canonicalLatex,
+      userAnswerLatex: userAnswerLatex ?? null,
+      reasoning: `Нужны элементы: ${allTokens.join(', ')}`,
+      trap: `Частая ловушка: ${trimLine(formula.commonMistakes[0] ?? 'не подменяй переменные')}`,
+      isCorrect: false,
+    };
+  }
+
+  // Layer 1
+  return {
+    canonicalLatex,
+    userAnswerLatex: userAnswerLatex ?? null,
+    reasoning: `Триггер: ${trimLine(question.explanation || formula.whenToUse[0] || formula.physicalMeaning)}`,
+    trap: `Запомни: ${getLayer1MemoryCue(formula)}`,
+    isCorrect: false,
   };
 }
 

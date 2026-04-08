@@ -85,9 +85,14 @@ const BuildFormulaCard = memo(function BuildFormulaCard({
     <div className="w-full max-w-md space-y-5">
       {/* Prompt */}
       <div className="bg-white rounded-lg border border-slate-200 p-5 space-y-4">
-        <p className="text-base font-medium text-slate-700">
-          {question.prompt}
-        </p>
+        <div>
+          <p className="text-base font-medium text-slate-900">
+            {question.prompt}
+          </p>
+          <p className="text-sm text-slate-500 mt-1">
+            Собери правую часть формулы
+          </p>
+        </div>
 
         {/* Token pool */}
         <div className="flex flex-wrap gap-2 justify-center">
