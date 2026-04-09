@@ -407,8 +407,12 @@ export async function manualAddTutorStudent(
   });
 
   if (error) {
-    console.error("Error adding student manually:", error);
-    throw new Error(error.message || "Не удалось добавить ученика");
+    console.error("Error adding student manually:", error, "data:", data);
+    const detail =
+      (data && typeof data === "object" && typeof (data as any).error === "string")
+        ? (data as any).error
+        : error.message || "Не удалось добавить ученика";
+    throw new Error(detail);
   }
 
   return data as ManualAddTutorStudentResponse;
