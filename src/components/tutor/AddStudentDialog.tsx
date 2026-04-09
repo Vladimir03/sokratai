@@ -335,6 +335,8 @@ export function AddStudentDialog({
                       onChange={(e) => handleFormChange('name', e.target.value)}
                       placeholder="Например, Иван"
                       required
+                      onInvalid={(e) => (e.target as HTMLInputElement).setCustomValidity('Пожалуйста, заполните это поле')}
+                      onInput={(e) => (e.target as HTMLInputElement).setCustomValidity('')}
                     />
                   </div>
 
@@ -398,6 +400,8 @@ export function AddStudentDialog({
                         onChange={(e) => setLearningGoalOther(e.target.value)}
                         placeholder="Например, подготовка к олимпиаде"
                         required
+                        onInvalid={(e) => (e.target as HTMLInputElement).setCustomValidity('Пожалуйста, заполните это поле')}
+                        onInput={(e) => (e.target as HTMLInputElement).setCustomValidity('')}
                       />
                     </div>
                   )}
@@ -417,6 +421,8 @@ export function AddStudentDialog({
                       }
                       placeholder="например, 1500"
                       required
+                      onInvalid={(e) => (e.target as HTMLInputElement).setCustomValidity('Пожалуйста, заполните это поле')}
+                      onInput={(e) => (e.target as HTMLInputElement).setCustomValidity('')}
                     />
                     <p className="text-xs text-muted-foreground">Ставка за 60 минут. Используется в расписании.</p>
                   </div>
