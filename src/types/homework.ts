@@ -36,6 +36,9 @@ export const SUBJECT_NAME_MAP: Record<string, string> = Object.fromEntries(
 const LEGACY_SUBJECT_LABELS: Record<string, string> = {
   math: 'Математика',
   rus: 'Русский язык',
+  french: 'Французский язык',
+  chemistry: 'Химия',
+  cs: 'Информатика',
 };
 
 /** Get human-readable Russian subject name; falls back to raw id */
