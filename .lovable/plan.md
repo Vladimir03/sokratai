@@ -1,43 +1,55 @@
-## Problem
 
-When a tutor tries to manually add a student, the toast shows a generic "Edge Function returned a non-2xx status code" error. Two issues:
 
-1. **Poor error handling in frontend**: `supabase.functions.invoke()` returns a generic error message for any non-2xx response. The actual error details (e.g., "Email or Telegram username is required") are in the `data` field, but the code only reads `error.message`.
-2. **Missing from CI deploy**: `tutor-manual-add-student` is not listed in `.github/workflows/deploy-supabase-functions.yml`, so it may become stale after code changes.
+## Plan: Add French & Chemistry to subjects, ensure all Russian labels
 
-## Changes
+### Problem
+1. Homework creation dropdown (`/tutor/homework/create`) only has 6 subjects — missing French and Chemistry
+2. Student-facing views need all subjects displayed in Russian
+3. Some places may show English IDs instead of Russian labels
 
-### 1. Fix error handling in `src/lib/tutors.ts` (~line 402-415)
+### Changes
 
-Update `manualAddTutorStudent` to extract the actual error message from the function's response body:
-
+#### 1. `src/lib/tutorHomeworkApi.ts` (line 7)
+Expand `HomeworkSubject` type to include `'french'` and `'chemistry'`:
 ```ts
-export async function manualAddTutorStudent(
-  input: ManualAddTutorStudentInput,
-): Promise<ManualAddTutorStudentResponse> {
-  const { data, error } = await supabase.functions.invoke("tutor-manual-add-student", {
-    body: input,
-  });
-
-  if (error) {
-    console.error("Error adding student manually:", error, "data:", data);
-    const detail =
-      (data && typeof data === "object" && typeof data.error === "string")
-        ? data.error
-        : error.message || "Не удалось добавить ученика";
-    throw new Error(detail);
-  }
-
-  return data as ManualAddTutorStudentResponse;
-}
+export type HomeworkSubject = 'math' | 'physics' | 'history' | 'social' | 'english' | 'cs' | 'french' | 'chemistry';
 ```
 
-### 2. Add to CI deploy workflow `.github/workflows/deploy-supabase-functions.yml`
+#### 2. `src/components/tutor/homework-create/types.ts` (lines 5-17)
+Add French and Chemistry to both `SUBJECTS` array and `SUBJECT_LABELS_MAP`:
+```ts
+export const SUBJECTS = [
+  { value: 'math', label: 'Математика' },
+  { value: 'physics', label: 'Физика' },
+  { value: 'history', label: 'История' },
+  { value: 'social', label: 'Обществознание' },
+  { value: 'english', label: 'Английский' },
+  { value: 'cs', label: 'Информатика' },
+  { value: 'french', label: 'Французский' },
+  { value: 'chemistry', label: 'Химия' },
+];
 
-Add `supabase functions deploy tutor-manual-add-student` and `supabase functions deploy tutor-update-student` to the deploy script.
+export const SUBJECT_LABELS_MAP = {
+  math: 'Математика', physics: 'Физика', history: 'История',
+  social: 'Обществознание', english: 'Английский', cs: 'Информатика',
+  french: 'Французский', chemistry: 'Химия',
+};
+```
 
-### 3. Redeploy edge function
+#### 3. `src/types/homework.ts` (lines 1-42)
+Add `french` and `chemistry` to the canonical `SUBJECTS` array (which feeds `SUBJECT_NAME_MAP` and `getSubjectLabel`). Also add `french` to `LEGACY_SUBJECT_LABELS` as a fallback. This ensures student-facing pages (`StudentHomework.tsx`, `GuidedHomeworkWorkspace.tsx`) and tutor results pages all show Russian labels for the new subjects.
 
-Deploy `tutor-manual-add-student` to ensure it's current.
+Add to SUBJECTS array:
+```ts
+{ id: 'french', name: 'Французский язык', emoji: '🇫🇷', category: 'humanities' },
+```
+(Chemistry already exists as `{ id: 'chemistry', name: 'Химия', emoji: '🧪', category: 'natural' }`)
 
-Whrite what was the problem and why!
+Add to LEGACY_SUBJECT_LABELS:
+```ts
+french: 'Французский язык',
+chemistry: 'Химия',
+```
+
+This covers all UI touchpoints since `getSubjectLabel()` is the single source of truth used by student list, student workspace header, tutor homework list, and tutor results header.
+
