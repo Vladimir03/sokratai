@@ -23,6 +23,8 @@ const SUBJECT_LABELS: Record<HomeworkSubject, string> = {
   social: 'Обществознание',
   english: 'Английский',
   cs: 'Информатика',
+  french: 'Французский',
+  chemistry: 'Химия',
 };
 
 const SUBJECT_EMOJI: Record<HomeworkSubject, string> = {
@@ -32,6 +34,8 @@ const SUBJECT_EMOJI: Record<HomeworkSubject, string> = {
   social: '🏛️',
   english: '🇬🇧',
   cs: '💻',
+  french: '🇫🇷',
+  chemistry: '🧪',
 };
 
 const SUBJECT_FILTERS: { value: HomeworkSubject | 'all'; label: string }[] = [

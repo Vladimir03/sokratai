@@ -12,6 +12,7 @@ export const SUBJECTS = [
   { id: 'history', name: 'История', emoji: '📜', category: 'humanities' },
   { id: 'social', name: 'Обществознание', emoji: '⚖️', category: 'humanities' },
   { id: 'english', name: 'Английский язык', emoji: '🇬🇧', category: 'humanities' },
+  { id: 'french', name: 'Французский язык', emoji: '🇫🇷', category: 'humanities' },
 
   // 🧬 Естественные
   { id: 'chemistry', name: 'Химия', emoji: '🧪', category: 'natural' },
@@ -35,6 +36,9 @@ export const SUBJECT_NAME_MAP: Record<string, string> = Object.fromEntries(
 const LEGACY_SUBJECT_LABELS: Record<string, string> = {
   math: 'Математика',
   rus: 'Русский язык',
+  french: 'Французский язык',
+  chemistry: 'Химия',
+  cs: 'Информатика',
 };
 
 /** Get human-readable Russian subject name; falls back to raw id */
