@@ -1,59 +1,43 @@
-
-
 ## Problem
 
-Two issues in the score editing dialog:
-1. "Сбросить override" button text is not understandable for Russian-speaking tutors
-2. After saving a tutor override and reopening the dialog, AI score shows "—" instead of the actual AI score, because the backend doesn't return `ai_score` separately in `task_scores`
+When a tutor tries to manually add a student, the toast shows a generic "Edge Function returned a non-2xx status code" error. Two issues:
 
-## Root Cause (Issue #2)
-
-The backend `handleGetResults` returns `task_scores` with `final_score` (which becomes the override value when set), `hint_count`, and `has_override` — but NOT `ai_score`. The frontend in `StudentDrillDown.tsx` (line 136) tries to guess: if `has_override` is true, it passes `aiScore={null}` because it can't distinguish the AI score from the override. This causes the "AI: —/2" display.
+1. **Poor error handling in frontend**: `supabase.functions.invoke()` returns a generic error message for any non-2xx response. The actual error details (e.g., "Email or Telegram username is required") are in the `data` field, but the code only reads `error.message`.
+2. **Missing from CI deploy**: `tutor-manual-add-student` is not listed in `.github/workflows/deploy-supabase-functions.yml`, so it may become stale after code changes.
 
 ## Changes
 
-### 1. Backend: `supabase/functions/homework-api/index.ts`
+### 1. Fix error handling in `src/lib/tutors.ts` (~line 402-415)
 
-In the `handleGetResults` function (~line 2148), add `ai_score` to the task_scores output:
-
-```ts
-taskScoresByStudent[studentId][ts.task_id] = {
-  final_score: Math.round(finalScore * 100) / 100,
-  hint_count: hintCount,
-  has_override: ts.tutor_score_override != null,
-  ai_score: ts.ai_score != null ? Math.round(Number(ts.ai_score) * 100) / 100 : null,
-};
-```
-
-Redeploy `homework-api`.
-
-### 2. Frontend type: `src/lib/tutorHomeworkApi.ts`
-
-Add `ai_score` to the `task_scores` type (~line 515):
+Update `manualAddTutorStudent` to extract the actual error message from the function's response body:
 
 ```ts
-task_scores: {
-  task_id: string;
-  final_score: number;
-  hint_count: number;
-  has_override?: boolean;
-  ai_score?: number | null;  // ← add
-}[];
+export async function manualAddTutorStudent(
+  input: ManualAddTutorStudentInput,
+): Promise<ManualAddTutorStudentResponse> {
+  const { data, error } = await supabase.functions.invoke("tutor-manual-add-student", {
+    body: input,
+  });
+
+  if (error) {
+    console.error("Error adding student manually:", error, "data:", data);
+    const detail =
+      (data && typeof data === "object" && typeof data.error === "string")
+        ? data.error
+        : error.message || "Не удалось добавить ученика";
+    throw new Error(detail);
+  }
+
+  return data as ManualAddTutorStudentResponse;
+}
 ```
 
-### 3. Frontend: `src/components/tutor/results/StudentDrillDown.tsx`
+### 2. Add to CI deploy workflow `.github/workflows/deploy-supabase-functions.yml`
 
-- Store `ai_score` in `taskMeta` alongside other fields
-- Pass actual `ai_score` to `EditScoreDialog` instead of guessing:
+Add `supabase functions deploy tutor-manual-add-student` and `supabase functions deploy tutor-update-student` to the deploy script.
 
-```ts
-// Line ~136: replace guessing logic
-aiScore={editingTask.ai_score ?? null}
-currentOverride={editingTask.has_override ? editingTask.score : null}
-```
+### 3. Redeploy edge function
 
-### 4. Frontend: `src/components/tutor/results/EditScoreDialog.tsx`
+Deploy `tutor-manual-add-student` to ensure it's current.
 
-- Line 196: "Сбросить override" → "Сбросить правку"
-- Line 121: toast "Override сброшен" → "Правка сброшена"
-
+Whrite what was the problem and why!
