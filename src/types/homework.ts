@@ -12,6 +12,7 @@ export const SUBJECTS = [
   { id: 'history', name: 'История', emoji: '📜', category: 'humanities' },
   { id: 'social', name: 'Обществознание', emoji: '⚖️', category: 'humanities' },
   { id: 'english', name: 'Английский язык', emoji: '🇬🇧', category: 'humanities' },
+  { id: 'french', name: 'Французский язык', emoji: '🇫🇷', category: 'humanities' },
 
   // 🧬 Естественные
   { id: 'chemistry', name: 'Химия', emoji: '🧪', category: 'natural' },

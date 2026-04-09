@@ -9,11 +9,14 @@ export const SUBJECTS: { value: HomeworkSubject; label: string }[] = [
   { value: 'social', label: 'Обществознание' },
   { value: 'english', label: 'Английский' },
   { value: 'cs', label: 'Информатика' },
+  { value: 'french', label: 'Французский' },
+  { value: 'chemistry', label: 'Химия' },
 ];
 
 export const SUBJECT_LABELS_MAP: Record<string, string> = {
   math: 'Математика', physics: 'Физика', history: 'История',
   social: 'Обществознание', english: 'Английский', cs: 'Информатика',
+  french: 'Французский', chemistry: 'Химия',
 };
 
 export const MAX_IMAGE_SIZE_BYTES = 10 * 1024 * 1024;

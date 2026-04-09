@@ -4,7 +4,7 @@ import type { HomeworkThread } from '@/types/homework';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
-export type HomeworkSubject = 'math' | 'physics' | 'history' | 'social' | 'english' | 'cs';
+export type HomeworkSubject = 'math' | 'physics' | 'history' | 'social' | 'english' | 'cs' | 'french' | 'chemistry';
 export type HomeworkAssignmentStatus = 'draft' | 'active' | 'closed';
 export type HomeworkAssignmentsFilter = 'all' | 'active' | 'closed';
 
