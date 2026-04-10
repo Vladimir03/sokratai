@@ -1113,6 +1113,7 @@ export type Database = {
           image_url: string | null
           message_kind: string | null
           role: string
+          task_id: string | null
           task_order: number | null
           thread_id: string
           visible_to_student: boolean
@@ -1125,6 +1126,7 @@ export type Database = {
           image_url?: string | null
           message_kind?: string | null
           role: string
+          task_id?: string | null
           task_order?: number | null
           thread_id: string
           visible_to_student?: boolean
@@ -1137,11 +1139,19 @@ export type Database = {
           image_url?: string | null
           message_kind?: string | null
           role?: string
+          task_id?: string | null
           task_order?: number | null
           thread_id?: string
           visible_to_student?: boolean
         }
         Relationships: [
+          {
+            foreignKeyName: "homework_tutor_thread_messages_task_id_fkey"
+            columns: ["task_id"]
+            isOneToOne: false
+            referencedRelation: "homework_tutor_tasks"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "homework_tutor_thread_messages_thread_id_fkey"
             columns: ["thread_id"]
@@ -1154,6 +1164,7 @@ export type Database = {
       homework_tutor_threads: {
         Row: {
           created_at: string
+          current_task_id: string | null
           current_task_order: number
           id: string
           last_student_message_at: string | null
@@ -1164,6 +1175,7 @@ export type Database = {
         }
         Insert: {
           created_at?: string
+          current_task_id?: string | null
           current_task_order?: number
           id?: string
           last_student_message_at?: string | null
@@ -1174,6 +1186,7 @@ export type Database = {
         }
         Update: {
           created_at?: string
+          current_task_id?: string | null
           current_task_order?: number
           id?: string
           last_student_message_at?: string | null
@@ -1183,6 +1196,13 @@ export type Database = {
           updated_at?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "homework_tutor_threads_current_task_id_fkey"
+            columns: ["current_task_id"]
+            isOneToOne: false
+            referencedRelation: "homework_tutor_tasks"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "homework_tutor_threads_student_assignment_id_fkey"
             columns: ["student_assignment_id"]
