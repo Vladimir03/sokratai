@@ -20,7 +20,7 @@ const VAPID_PUBLIC_KEY = Deno.env.get("VAPID_PUBLIC_KEY") ?? "";
 const VAPID_PRIVATE_KEY = Deno.env.get("VAPID_PRIVATE_KEY") ?? "";
 const VAPID_SUBJECT = Deno.env.get("VAPID_SUBJECT") ?? "mailto:support@sokratai.ru";
 
-const VALID_SUBJECTS = ["math", "physics", "history", "social", "english", "cs"] as const;
+const VALID_SUBJECTS = ["math", "physics", "history", "social", "english", "cs", "french", "chemistry"] as const;
 const VALID_STATUSES = ["draft", "active", "closed"] as const;
 const VALID_STATUS_FILTERS = ["draft", "active", "closed", "all"] as const;
 const VALID_CHECK_FORMATS = ["short_answer", "detailed_solution"] as const;
@@ -367,8 +367,8 @@ async function handleCreateAssignment(
     if (!t || typeof t !== "object") {
       return jsonError(cors, 400, "VALIDATION", `tasks[${i}] must be an object`);
     }
-    if (!isNonEmptyString(t.task_text)) {
-      return jsonError(cors, 400, "VALIDATION", `tasks[${i}].task_text is required`);
+    if (!isNonEmptyString(t.task_text) && !isNonEmptyString(t.task_image_url)) {
+      return jsonError(cors, 400, "VALIDATION", `tasks[${i}].task_text is required (or provide task_image_url)`);
     }
     if (t.max_score !== undefined && t.max_score !== null && !isPositiveInt(t.max_score)) {
       return jsonError(cors, 400, "VALIDATION", `tasks[${i}].max_score must be a positive integer`);
@@ -405,7 +405,7 @@ async function handleCreateAssignment(
   const taskRows = (b.tasks as Record<string, unknown>[]).map((t, i) => ({
     assignment_id: assignment.id,
     order_num: isPositiveInt(t.order_num) ? t.order_num : i + 1,
-    task_text: (t.task_text as string).trim(),
+    task_text: isNonEmptyString(t.task_text) ? (t.task_text as string).trim() : "[Задача на фото]",
     task_image_url: isNonEmptyString(t.task_image_url) ? (t.task_image_url as string).trim() : null,
     correct_answer: isNonEmptyString(t.correct_answer) ? (t.correct_answer as string).trim() : null,
     max_score: isPositiveInt(t.max_score) ? t.max_score : 1,
@@ -902,8 +902,8 @@ async function handleUpdateAssignment(
       if (!t || typeof t !== "object") {
         return jsonError(cors, 400, "VALIDATION", `tasks[${i}] must be an object`);
       }
-      if (!isNonEmptyString(t.task_text)) {
-        return jsonError(cors, 400, "VALIDATION", `tasks[${i}].task_text is required`);
+      if (!isNonEmptyString(t.task_text) && !isNonEmptyString(t.task_image_url)) {
+        return jsonError(cors, 400, "VALIDATION", `tasks[${i}].task_text is required (or provide task_image_url)`);
       }
       if (t.max_score !== undefined && t.max_score !== null && !isPositiveInt(t.max_score)) {
         return jsonError(cors, 400, "VALIDATION", `tasks[${i}].max_score must be a positive integer`);
@@ -1005,7 +1005,7 @@ async function handleUpdateAssignment(
         const t = incomingTasks[i];
         if (!isUUID(t.id)) continue;
         const updateFields: Record<string, unknown> = {};
-        updateFields.task_text = (t.task_text as string).trim();
+        updateFields.task_text = isNonEmptyString(t.task_text) ? (t.task_text as string).trim() : "[Задача на фото]";
         if (t.task_image_url !== undefined) {
           updateFields.task_image_url = isNonEmptyString(t.task_image_url) ? (t.task_image_url as string).trim() : null;
         }
@@ -1045,7 +1045,7 @@ async function handleUpdateAssignment(
         const entry = toUpdate[i];
         const t = entry.task;
         const updateFields: Record<string, unknown> = {
-          task_text: (t.task_text as string).trim(),
+          task_text: isNonEmptyString(t.task_text) ? (t.task_text as string).trim() : "[Задача на фото]",
           task_image_url: isNonEmptyString(t.task_image_url) ? (t.task_image_url as string).trim() : null,
           correct_answer: isNonEmptyString(t.correct_answer) ? (t.correct_answer as string).trim() : null,
           max_score: isPositiveInt(t.max_score) ? t.max_score : 1,
@@ -1079,7 +1079,7 @@ async function handleUpdateAssignment(
             .insert({
               assignment_id: assignmentId,
               order_num: tempOrderBase + i + 1,
-              task_text: (t.task_text as string).trim(),
+              task_text: isNonEmptyString(t.task_text) ? (t.task_text as string).trim() : "[Задача на фото]",
               task_image_url: isNonEmptyString(t.task_image_url) ? (t.task_image_url as string).trim() : null,
               correct_answer: isNonEmptyString(t.correct_answer) ? (t.correct_answer as string).trim() : null,
               max_score: isPositiveInt(t.max_score) ? t.max_score : 1,

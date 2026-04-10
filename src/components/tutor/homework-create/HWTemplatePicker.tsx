@@ -11,7 +11,7 @@ import {
 import { Library } from 'lucide-react';
 import { useTutorHomeworkTemplates } from '@/hooks/useTutorHomework';
 import type { HomeworkSubject, HomeworkTemplateListItem } from '@/lib/tutorHomeworkApi';
-import { SUBJECT_LABELS_MAP } from './types';
+import { SUBJECTS, SUBJECT_LABELS_MAP } from './types';
 
 export interface HWTemplatePickerProps {
   onSelect: (template: HomeworkTemplateListItem) => void;
@@ -46,7 +46,7 @@ export function HWTemplatePicker({ onSelect }: HWTemplatePickerProps) {
         </SheetHeader>
         <div className="mt-4 space-y-4">
           <div className="flex flex-wrap gap-1">
-            {['all', 'math', 'physics', 'history', 'social', 'english', 'cs'].map((s) => (
+            {['all', ...SUBJECTS.map(s => s.value)].map((s) => (
               <button
                 key={s}
                 onClick={() => setFilterSubject(s)}

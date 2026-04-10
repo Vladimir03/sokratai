@@ -410,8 +410,8 @@ function TutorHomeworkCreateContent() {
       errs._tasks = 'Добавьте хотя бы одну задачу';
     }
     for (let i = 0; i < tasks.length; i++) {
-      if (!tasks[i].task_text.trim()) {
-        errs._tasks = `Задача ${i + 1}: введите текст задачи`;
+      if (!tasks[i].task_text.trim() && !tasks[i].task_image_path) {
+        errs._tasks = `Задача ${i + 1}: введите текст задачи или прикрепите фото`;
         break;
       }
       if (tasks[i].max_score < 1) {
@@ -464,7 +464,7 @@ function TutorHomeworkCreateContent() {
         setSubmitPhase('creating');
         const apiTasks: CreateAssignmentTask[] = tasks.map((t, i) => ({
           order_num: i + 1,
-          task_text: t.task_text.trim(),
+          task_text: t.task_text.trim() || '[Задача на фото]',
           task_image_url: t.task_image_path || t.kb_attachment_url || null,
           correct_answer: t.correct_answer.trim() || null,
           rubric_text: t.rubric_text.trim() || null,
@@ -696,7 +696,7 @@ function TutorHomeworkCreateContent() {
       const apiTasks: UpdateAssignmentTask[] = tasks.map((t, i) => ({
         ...(t.id ? { id: t.id } : {}),
         order_num: i + 1,
-        task_text: t.task_text.trim(),
+        task_text: t.task_text.trim() || '[Задача на фото]',
         task_image_url: t.task_image_path || t.kb_attachment_url || null,
         correct_answer: t.correct_answer.trim() || null,
         rubric_text: t.rubric_text.trim() || null,

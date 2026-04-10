@@ -223,10 +223,10 @@ export function HWTaskCard({ task, index, onUpdate, onRemove, canRemove, onDefer
         </div>
 
         <div className="space-y-2">
-          <Label>Текст задачи *</Label>
+          <Label>Текст задачи {!task.task_image_path && <span className="text-red-500">*</span>}</Label>
           <textarea
             className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-base ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 min-h-[80px] resize-y"
-            placeholder="Условие задачи (можно вставить скриншот Ctrl+V)..."
+            placeholder={task.task_image_path ? 'Описание (опционально — фото прикреплено)' : 'Условие задачи (можно вставить скриншот Ctrl+V)...'}
             value={task.task_text}
             onChange={(e) => onUpdate({ ...task, task_text: e.target.value })}
             onPaste={handleTaskTextPaste}
