@@ -4059,13 +4059,18 @@ async function handleAdvanceTask(
   const rawScore = typeof b.score === "number" ? b.score : null;
   const score = rawScore !== null ? Math.max(0, Math.min(100, rawScore)) : null;
 
-  // Guard: require at least 1 AI reply for the current task before allowing advance
-  const { count: assistantMsgCount } = await db
+  // Guard: require at least 1 AI reply for the current task before allowing advance.
+  // Use task_id (immutable) instead of task_order (positional, can change on reorder).
+  const currentTaskId = typeof thread.current_task_id === "string" ? thread.current_task_id : null;
+  const guardQuery = db
     .from("homework_tutor_thread_messages")
     .select("id", { count: "exact", head: true })
     .eq("thread_id", threadId)
-    .eq("role", "assistant")
-    .eq("task_order", thread.current_task_order as number);
+    .eq("role", "assistant");
+
+  const { count: assistantMsgCount } = currentTaskId
+    ? await guardQuery.eq("task_id", currentTaskId)
+    : await guardQuery.eq("task_order", thread.current_task_order as number);
 
   if (!assistantMsgCount || assistantMsgCount < 1) {
     return jsonError(cors, 400, "NO_INTERACTION", "Complete at least one exchange with the AI before advancing");

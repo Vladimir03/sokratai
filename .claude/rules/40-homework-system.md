@@ -8,6 +8,18 @@
 - Legacy student-only (`homework_sets`, `homework_tasks`, `homework_chat_messages`) — удалена миграцией `20260310110000_drop_legacy_homework.sql`
 - Classic mode (photo upload + OCR) — удалён миграцией `20260406120000_drop_classic_homework.sql`. Колонка `workflow_mode` и таблицы `homework_tutor_submissions`/`homework_tutor_submission_items` дропнуты
 
+### Task identity — canonical source of truth (2026-04-10)
+
+`task_id` (UUID FK to `homework_tutor_tasks.id`) — единственный immutable identity для привязки сообщений, AI-контекста и state к задаче. `task_order` — display/sort field, может меняться при reorder.
+
+**Правила:**
+- Все новые message-insert'ы ОБЯЗАНЫ включать `task_id`. `task_order` пишется для backward compat, но не используется для filtering
+- Все message-filter'ы (backend и frontend) ОБЯЗАНЫ использовать `task_id` как primary match. Fallback на `task_order` допускается ТОЛЬКО для pre-migration messages (где `task_id IS NULL`)
+- При отображении номера задачи в UI — resolve через `task_id → tasks[].order_num` (текущий порядок), НЕ использовать stored `message.task_order` (может быть stale после reorder)
+- AI context (conversation history, task text, image) строится ТОЛЬКО по `task_id`-scoped messages
+
+**Миграция:** `20260410153000_guided_thread_task_identity_foundation.sql` — добавила `task_id` в `homework_tutor_thread_messages` и `current_task_id` в `homework_tutor_threads`, backfill по `order_num`
+
 **Дефолты конструктора ДЗ** (`TutorHomeworkCreate.tsx`):
 - `subject: 'physics'` — предмет по умолчанию (целевой сегмент: репетиторы физики ЕГЭ/ОГЭ)
 - Если репетитор меняет предмет — открыть L1 («Расширенные параметры»)

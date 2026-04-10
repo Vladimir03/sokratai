@@ -192,7 +192,6 @@ export function GuidedThreadViewer({
     refetchOnWindowFocus: false,
   });
   const threadId = threadQuery.data?.thread.id;
-
   const getWasAtBottom = useCallback(() => {
     const element = scrollContainerRef.current;
     if (!element) return true;
@@ -236,6 +235,7 @@ export function GuidedThreadViewer({
                 role: newMessage.role as 'user' | 'assistant' | 'system' | 'tutor',
                 content: newMessage.content,
                 image_url: newMessage.image_url,
+                task_id: newMessage.task_id,
                 task_order: newMessage.task_order,
                 created_at: newMessage.created_at,
                 message_kind: (newMessage.message_kind as import('@/types/homework').GuidedMessageKind) ?? undefined,
@@ -264,6 +264,12 @@ export function GuidedThreadViewer({
     [threadQuery.data?.thread.homework_tutor_task_states],
   );
 
+  // Resolve task_id → current order_num for display (reorder-safe)
+  const taskOrderById = useMemo(
+    () => new Map((threadQuery.data?.tasks ?? []).map((task) => [task.id, task.order_num])),
+    [threadQuery.data?.tasks],
+  );
+
   const selectedTask = useMemo(() => {
     if (taskFilter === 'all') return null;
     return threadQuery.data?.tasks.find((task) => task.order_num === taskFilter) ?? null;
@@ -277,8 +283,14 @@ export function GuidedThreadViewer({
   const filteredMessages = useMemo(() => {
     const allMessages = threadQuery.data?.thread.homework_tutor_thread_messages ?? [];
     if (taskFilter === 'all') return allMessages;
-    return allMessages.filter((message) => message.task_order === taskFilter);
-  }, [taskFilter, threadQuery.data?.thread.homework_tutor_thread_messages]);
+    const task = selectedTask ?? threadQuery.data?.tasks.find((item) => item.order_num === taskFilter) ?? null;
+    return allMessages.filter((message) => {
+      if (!task) return false;
+      // Prefer immutable task_id; fall back to task_order only for pre-migration messages
+      if (message.task_id) return message.task_id === task.id;
+      return message.task_order === task.order_num;
+    });
+  }, [selectedTask, taskFilter, threadQuery.data?.tasks, threadQuery.data?.thread.homework_tutor_thread_messages]);
 
   const handleFileSelect = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -316,6 +328,7 @@ export function GuidedThreadViewer({
       const response = await postTutorThreadMessage(assignmentId, studentId, trimmed || '(файл)', {
         visible_to_student: !hiddenNote,
         task_order: taskFilter === 'all' ? undefined : taskFilter,
+        task_id: taskFilter === 'all' ? undefined : selectedTask?.id,
         image_url: imageUrl,
       });
       const wasAtBottom = getWasAtBottom();
@@ -327,6 +340,7 @@ export function GuidedThreadViewer({
             role: 'tutor',
             content: trimmed || '(файл)',
             image_url: imageUrl ?? null,
+            task_id: taskFilter === 'all' ? null : selectedTask?.id ?? null,
             task_order: taskFilter === 'all' ? null : taskFilter,
             created_at: response.created_at,
             visible_to_student: !hiddenNote,
@@ -341,7 +355,7 @@ export function GuidedThreadViewer({
     } finally {
       setIsSending(false);
     }
-  }, [messageText, attachedFile, hiddenNote, isSending, assignmentId, studentId, taskFilter, clearAttachment, getWasAtBottom, queryClient, scrollToBottomIfNeeded, threadQueryKey]);
+  }, [messageText, attachedFile, hiddenNote, isSending, assignmentId, selectedTask?.id, studentId, taskFilter, clearAttachment, getWasAtBottom, queryClient, scrollToBottomIfNeeded, threadQueryKey]);
 
   const body = (
     <div className="space-y-3">
@@ -454,7 +468,12 @@ export function GuidedThreadViewer({
                           </Badge>
                         )}
                         <span className="text-muted-foreground ml-auto">
-                          {message.task_order ? `Задача ${message.task_order}` : ''}
+                          {(() => {
+                            const displayOrder = message.task_id
+                              ? taskOrderById.get(message.task_id) ?? message.task_order
+                              : message.task_order;
+                            return displayOrder ? `Задача ${displayOrder}` : '';
+                          })()}
                         </span>
                         <span className="text-muted-foreground">
                           {parseISO(message.created_at).toLocaleString('ru-RU')}

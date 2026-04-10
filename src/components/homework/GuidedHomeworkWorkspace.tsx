@@ -370,6 +370,20 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
     currentDraftRef.current = { answer, discussion };
   }, []);
 
+  const taskById = useMemo(
+    () => new Map(assignment.tasks.map((task) => [task.id, task])),
+    [assignment.tasks],
+  );
+
+  const matchMessageToTask = useCallback((
+    message: HomeworkThreadMessage,
+    task: StudentHomeworkAssignmentDetails['tasks'][number] | null | undefined,
+  ) => {
+    if (!task) return false;
+    if (message.task_id && task.id) return message.task_id === task.id;
+    return message.task_order === task.order_num;
+  }, []);
+
   useEffect(() => {
     messagesRef.current = messages;
   }, [messages]);
@@ -400,16 +414,23 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
       // auto-advance (CORRECT + 1200ms) control which task the student sees.
       if (!hasInitializedRef.current) {
         hasInitializedRef.current = true;
-        setCurrentTaskOrder(thread.current_task_order);
+        const threadTaskOrder = thread.current_task_id
+          ? assignment.tasks.find((task) => task.id === thread.current_task_id)?.order_num ?? thread.current_task_order
+          : thread.current_task_order;
+        setCurrentTaskOrder(threadTaskOrder);
         // Fallback: if saved task is already completed, jump to first active task
         const states = thread.homework_tutor_task_states ?? [];
-        const targetState = states.find((s) => s.task_order === thread.current_task_order);
+        const targetTask = thread.current_task_id
+          ? assignment.tasks.find((task) => task.id === thread.current_task_id) ?? null
+          : assignment.tasks.find((task) => task.order_num === thread.current_task_order) ?? null;
+        const targetState = targetTask ? states.find((s) => s.task_id === targetTask.id) : null;
         if (targetState?.status === 'completed') {
           const firstActive = states
             .filter((s) => s.status === 'active')
-            .sort((a, b) => a.task_order - b.task_order)[0];
+            .map((state) => ({ state, taskOrder: taskById.get(state.task_id)?.order_num ?? Number.MAX_SAFE_INTEGER }))
+            .sort((a, b) => a.taskOrder - b.taskOrder)[0];
           if (firstActive) {
-            setCurrentTaskOrder(firstActive.task_order);
+            setCurrentTaskOrder(firstActive.taskOrder);
           }
         }
       }
@@ -417,7 +438,7 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
       // Don't auto-show completed view — student sees chat first,
       // clicks "Завершить" inline button to go to results.
     }
-  }, [thread]);
+  }, [assignment.tasks, taskById, thread]);
 
   // Auto-scroll to bottom when messages change
   useEffect(() => {
@@ -482,8 +503,8 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
   }, [assignment.tasks, activeTaskOrder, taskStates]);
 
   const visibleMessages = useMemo(
-    () => messages.filter((message) => message.task_order === currentTaskOrder),
-    [messages, currentTaskOrder],
+    () => messages.filter((message) => matchMessageToTask(message, currentTask)),
+    [currentTask, matchMessageToTask, messages],
   );
 
   const isViewingActiveTask = currentActiveTaskState?.status === 'active';
@@ -510,10 +531,15 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
       if (task.status !== 'locked') result.add(task.order_num);
     }
     for (const message of messages) {
-      if (typeof message.task_order === 'number') result.add(message.task_order);
+      // Prefer task_id → current order_num (reorder-safe); fall back to stored task_order
+      const resolvedOrder = message.task_id
+        ? taskById.get(message.task_id)?.order_num
+        : undefined;
+      const order = resolvedOrder ?? message.task_order;
+      if (typeof order === 'number') result.add(order);
     }
     return result;
-  }, [activeTaskOrder, messages, taskStepItems]);
+  }, [activeTaskOrder, messages, taskById, taskStepItems]);
 
   const previousTaskOrder = useMemo(() => {
     for (let candidate = currentTaskOrder - 1; candidate >= 1; candidate -= 1) {
@@ -544,13 +570,14 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
     content: string,
     taskOrder: number,
     messageKind: GuidedMessageKind,
+    taskId?: string,
     attachmentRefs?: string[],
   ) => {
     if (!threadId) {
       throw new Error('Чат еще не инициализирован');
     }
 
-    const saved = await saveThreadMessage(threadId, role, content, taskOrder, messageKind, attachmentRefs);
+    const saved = await saveThreadMessage(threadId, role, content, taskOrder, messageKind, taskId, attachmentRefs);
     patchMessage(tempId, {
       id: saved.id,
       message_delivery_status: 'sent',
@@ -558,9 +585,10 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
     });
   }, [patchMessage, threadId]);
 
-  const buildContextMessages = useCallback((taskOrder: number, draftUserContent?: string) => {
+  const buildContextMessages = useCallback((taskOrder: number, taskId?: string, draftUserContent?: string) => {
+    const task = taskId ? taskById.get(taskId) : assignment.tasks.find((item) => item.order_num === taskOrder);
     const baseMessages = messagesRef.current
-      .filter((message) => message.task_order === taskOrder)
+      .filter((message) => matchMessageToTask(message, task))
       .filter((message) => message.role !== 'system')
       .filter((message) => message.message_delivery_status !== 'failed')
       .map((message) => ({
@@ -573,17 +601,19 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
     }
 
     return baseMessages.slice(-MAX_CONTEXT_MESSAGES);
-  }, []);
+  }, [assignment.tasks, matchMessageToTask, taskById]);
 
   const resolveLatestStudentImageUrls = useCallback(async (
     taskOrder: number,
+    taskId?: string,
     fallbackAttachmentRefs?: string[],
   ): Promise<string[]> => {
+    const task = taskId ? taskById.get(taskId) : assignment.tasks.find((item) => item.order_num === taskOrder);
     const latestPersistedAttachmentRefs = parseThreadAttachmentRefs(
       [...messagesRef.current]
       .reverse()
       .find((message) => (
-        message.task_order === taskOrder &&
+        matchMessageToTask(message, task) &&
         message.role === 'user' &&
         message.message_delivery_status !== 'failed' &&
         typeof message.image_url === 'string' &&
@@ -610,7 +640,7 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
     }));
 
     return signedUrls.filter((url): url is string => Boolean(url));
-  }, []);
+  }, [assignment.tasks, matchMessageToTask, taskById]);
 
   const requestAssistantReply = useCallback(async (
     taskOrder: number,
@@ -628,7 +658,7 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
       task.task_image_url
         ? getStudentTaskImageSignedUrlViaBackend(assignment.id, task.id)
         : Promise.resolve(null),
-      resolveLatestStudentImageUrls(taskOrder, latestUserAttachmentRefs),
+      resolveLatestStudentImageUrls(taskOrder, task.id, latestUserAttachmentRefs),
     ]);
 
     let fullContent = '';
@@ -678,6 +708,7 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
           role: 'assistant',
           content: assistantText,
           image_url: null,
+          task_id: task.id,
           task_order: taskOrder,
           created_at: new Date().toISOString(),
           message_kind: 'ai_reply',
@@ -686,7 +717,7 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
       ]);
 
       try {
-        await persistMessage(assistantTempId, 'assistant', assistantText, taskOrder, 'ai_reply');
+        await persistMessage(assistantTempId, 'assistant', assistantText, taskOrder, 'ai_reply', task.id);
       } catch (error) {
         patchMessage(assistantTempId, { message_delivery_status: 'failed' });
         toast.error('Ответ AI получен, но не сохранен. Нажмите "Повторить".');
@@ -729,9 +760,17 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
     setCurrentTaskOrder(newOrder);
   }, [currentTaskOrder, attachedFiles]);
 
-  const handleCheckAnswer = useCallback(async (answerText: string, attachmentRefs?: string[]) => {
-    if (!threadId || !currentTask) return;
-    const taskOrder = currentTask.order_num;
+  const handleCheckAnswer = useCallback(async (
+    answerText: string,
+    attachmentRefs?: string[],
+    taskOverride?: { taskId?: string | null; taskOrder?: number | null },
+  ) => {
+    if (!threadId) return;
+    const task = taskOverride?.taskId
+      ? assignment.tasks.find((item) => item.id === taskOverride.taskId)
+      : assignment.tasks.find((item) => item.order_num === (taskOverride?.taskOrder ?? currentTask?.order_num));
+    if (!task) return;
+    const taskOrder = task.order_num;
     const serializedAttachments = serializeThreadAttachmentRefs(attachmentRefs ?? []);
 
     // Show optimistic user message
@@ -743,6 +782,7 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
           role: 'user',
           content: answerText,
           image_url: serializedAttachments,
+          task_id: task.id,
           task_order: taskOrder,
           created_at: new Date().toISOString(),
           message_kind: 'answer',
@@ -757,7 +797,8 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
       const response: CheckAnswerResponse = await checkAnswer(
         threadId,
         answerText,
-        currentTask.order_num,
+        task.order_num,
+        task.id,
         attachmentRefs,
       );
 
@@ -771,10 +812,12 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
         // Find next active task for auto-advance (prefer tasks after current, wrap around)
         const updatedStates = response.thread.homework_tutor_task_states ?? [];
         const nextActive = updatedStates
-          .filter((s) => s.status === 'active' && s.task_order !== taskOrder)
+          .filter((s) => s.status === 'active' && (taskById.get(s.task_id)?.order_num ?? s.task_order) !== taskOrder)
           .sort((a, b) => {
-            const aKey = a.task_order > taskOrder ? a.task_order : a.task_order + 1000;
-            const bKey = b.task_order > taskOrder ? b.task_order : b.task_order + 1000;
+            const aOrder = taskById.get(a.task_id)?.order_num ?? a.task_order;
+            const bOrder = taskById.get(b.task_id)?.order_num ?? b.task_order;
+            const aKey = aOrder > taskOrder ? aOrder : aOrder + 1000;
+            const bKey = bOrder > taskOrder ? bOrder : bOrder + 1000;
             return aKey - bKey;
           })[0];
 
@@ -785,7 +828,8 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
           toast.success('Правильно! Переходим к следующей задаче.');
           celebrationTimerRef.current = setTimeout(() => {
             setCelebratingTaskOrder(null);
-            switchToTask(nextActive.task_order);
+            const nextOrder = taskById.get(nextActive.task_id)?.order_num ?? nextActive.task_order;
+            switchToTask(nextOrder);
           }, 1200);
         } else {
           // No more active tasks but thread not marked complete — stay on current
@@ -855,7 +899,7 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
     } finally {
       setIsCheckingAnswer(false);
     }
-  }, [assignment.id, currentTask, queryClient, switchToTask, syncThreadDataOnly, threadId]);
+  }, [assignment.id, assignment.tasks, currentTask, queryClient, switchToTask, syncThreadDataOnly, taskById, threadId]);
 
   const sendUserMessage = useCallback(async (
     rawText: string,
@@ -916,6 +960,7 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
       role: 'user',
       content,
       image_url: serializeThreadAttachmentRefs(attachmentRefs),
+      task_id: currentTask.id,
       task_order: taskOrder,
       created_at: new Date().toISOString(),
       message_kind: sendMode,
@@ -928,11 +973,11 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
     currentDraftRef.current = { answer: '', discussion: '' };
     taskDraftsRef.current.delete(currentTaskOrder);
 
-    const contextMessages = buildContextMessages(taskOrder, content);
+    const contextMessages = buildContextMessages(taskOrder, currentTask.id, content);
     trackGuidedHomeworkEvent('guided_send_click', { assignmentId: assignment.id, taskOrder, sendMode });
 
     try {
-      await persistMessage(tempUserId, 'user', content, taskOrder, sendMode, attachmentRefs);
+      await persistMessage(tempUserId, 'user', content, taskOrder, sendMode, currentTask.id, attachmentRefs);
     } catch (error) {
       patchMessage(tempUserId, { message_delivery_status: 'failed' });
       toast.error('Не удалось отправить сообщение. Нажмите "Повторить".');
@@ -983,9 +1028,14 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
     content: string,
     sendMode: SendMode,
     taskOrder: number,
+    taskId?: string | null,
     attachmentValue?: string,
   ) => {
     if (!threadId) return;
+    const task = taskId
+      ? assignment.tasks.find((item) => item.id === taskId)
+      : assignment.tasks.find((item) => item.order_num === taskOrder);
+    if (!task) return;
     const attachmentRefs = parseThreadAttachmentRefs(attachmentValue);
 
     const tempUserId = `temp-user-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
@@ -994,26 +1044,27 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
       role: 'user',
       content,
       image_url: serializeThreadAttachmentRefs(attachmentRefs),
-      task_order: taskOrder,
+      task_id: task.id,
+      task_order: task.order_num,
       created_at: new Date().toISOString(),
       message_kind: sendMode,
       message_delivery_status: 'sending',
     };
 
     setMessages((prev) => [...prev, userMessage]);
-    const contextMessages = buildContextMessages(taskOrder, content);
-    trackGuidedHomeworkEvent('guided_send_click', { assignmentId: assignment.id, taskOrder, sendMode });
+    const contextMessages = buildContextMessages(task.order_num, task.id, content);
+    trackGuidedHomeworkEvent('guided_send_click', { assignmentId: assignment.id, taskOrder: task.order_num, sendMode });
 
     try {
-      await persistMessage(tempUserId, 'user', content, taskOrder, sendMode, attachmentRefs);
+      await persistMessage(tempUserId, 'user', content, task.order_num, sendMode, task.id, attachmentRefs);
     } catch (error) {
       patchMessage(tempUserId, { message_delivery_status: 'failed' });
       toast.error('Не удалось отправить сообщение. Нажмите "Повторить".');
       return;
     }
 
-    await requestAssistantReply(taskOrder, sendMode, contextMessages, attachmentRefs);
-  }, [assignment.id, buildContextMessages, patchMessage, persistMessage, requestAssistantReply, threadId]);
+    await requestAssistantReply(task.order_num, sendMode, contextMessages, attachmentRefs);
+  }, [assignment.id, assignment.tasks, buildContextMessages, patchMessage, persistMessage, requestAssistantReply, threadId]);
 
   const handleHint = useCallback(async () => {
     if (!threadId || controlsDisabled || !isViewingActiveTask) return;
@@ -1025,7 +1076,7 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
 
     setIsRequestingHint(true);
     try {
-      const response: RequestHintResponse = await requestHint(threadId, currentTaskOrder);
+      const response: RequestHintResponse = await requestHint(threadId, currentTaskOrder, currentTask?.id);
 
       // Sync full thread from response (includes saved messages)
       syncThreadDataOnly(response.thread);
@@ -1057,7 +1108,7 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
     } finally {
       setIsRequestingHint(false);
     }
-  }, [assignment.id, controlsDisabled, currentTaskOrder, isViewingActiveTask, queryClient, syncThreadDataOnly, threadId]);
+  }, [assignment.id, controlsDisabled, currentTask?.id, currentTaskOrder, isViewingActiveTask, queryClient, syncThreadDataOnly, threadId]);
 
   const handleRetryMessage = useCallback((messageId: string) => {
     const message = messagesRef.current.find((item) => item.id === messageId);
@@ -1076,15 +1127,25 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
       setMessages((prev) => prev.filter((item) => item.id !== messageId));
       // For question mode: safe to retry (idempotent streaming).
       // File was already uploaded — pass storage ref directly, not File objects.
-      if (message.message_kind === 'question') {
-        void retryWithStorageRef(message.content, 'question', message.task_order ?? currentTaskOrder, storedAttachmentValue);
-      } else {
-        // For answer/hint: re-invoke the endpoint (user explicitly chose to retry)
-        if (message.message_kind === 'answer') {
-          void handleCheckAnswer(message.content, parseThreadAttachmentRefs(storedAttachmentValue));
-        } else if (message.message_kind === 'hint_request') {
-          void handleHint();
-        }
+        if (message.message_kind === 'question') {
+          void retryWithStorageRef(
+            message.content,
+            'question',
+            message.task_order ?? currentTaskOrder,
+            message.task_id,
+            storedAttachmentValue,
+          );
+        } else {
+          // For answer/hint: re-invoke the endpoint (user explicitly chose to retry)
+          if (message.message_kind === 'answer') {
+            void handleCheckAnswer(
+              message.content,
+              parseThreadAttachmentRefs(storedAttachmentValue),
+              { taskId: message.task_id, taskOrder: message.task_order },
+            );
+          } else if (message.message_kind === 'hint_request') {
+            void handleHint();
+          }
       }
       return;
     }
@@ -1098,6 +1159,7 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
       message.content,
       message.task_order ?? activeTaskOrder,
       message.message_kind ?? 'ai_reply',
+      message.task_id,
     )
       .then((saved) => {
         patchMessage(messageId, { id: saved.id, message_delivery_status: 'sent' });
@@ -1162,7 +1224,7 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
 
     // Exclude backend transition messages (role='system') — they don't count as bootstrap
     const hasAnyTaskMessages = messages.some(
-      (message) => message.task_order === taskOrder && message.role !== 'system',
+      (message) => matchMessageToTask(message, currentTask) && message.role !== 'system',
     );
     if (hasAnyTaskMessages) {
       bootstrapStartedRef.current.add(key);
@@ -1225,7 +1287,7 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
 
       // Persist intro to DB so it's not regenerated on every page load
       try {
-        await saveThreadMessage(threadId!, 'assistant', introText, taskOrder, 'system');
+        await saveThreadMessage(threadId!, 'assistant', introText, taskOrder, 'system', currentTask.id);
         // Refetch thread to get the persisted message with a real DB id
         void queryClient.invalidateQueries({ queryKey: ['student', 'homework', 'thread', assignment.id] });
       } catch (e) {
@@ -1243,6 +1305,7 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
               role: 'assistant',
               content: introText,
               image_url: null,
+              task_id: currentTask.id,
               task_order: taskOrder,
               created_at: new Date().toISOString(),
               message_kind: 'system',
@@ -1254,7 +1317,7 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
     };
 
     void runBootstrap();
-  }, [assignment, currentTask, examType, isCheckingAnswer, isRequestingHint, isStreaming, isThreadLoading, messages, queryClient, threadId, threadStatus]);
+  }, [assignment, currentTask, examType, isCheckingAnswer, isRequestingHint, isStreaming, isThreadLoading, matchMessageToTask, messages, queryClient, threadId, threadStatus]);
 
   // Loading state
   if (isThreadLoading) {

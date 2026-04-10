@@ -407,15 +407,15 @@ export async function getStudentThreadByAssignment(
   if (!sa) return null;
 
   const selectWithKind = `
-      id, status, current_task_order, created_at, updated_at,
+      id, status, current_task_order, current_task_id, created_at, updated_at,
       student_assignment_id,
-      homework_tutor_thread_messages(id, role, content, image_url, task_order, message_kind, created_at),
+      homework_tutor_thread_messages(id, role, content, image_url, task_id, task_order, message_kind, created_at),
       homework_tutor_task_states(id, task_id, status, attempts, best_score, available_score, earned_score, wrong_answer_count, hint_count)
     `;
   const selectLegacy = `
-      id, status, current_task_order, created_at, updated_at,
+      id, status, current_task_order, current_task_id, created_at, updated_at,
       student_assignment_id,
-      homework_tutor_thread_messages(id, role, content, image_url, task_order, created_at),
+      homework_tutor_thread_messages(id, role, content, image_url, task_id, task_order, created_at),
       homework_tutor_task_states(id, task_id, status, attempts, best_score)
     `;
 
@@ -504,6 +504,7 @@ export async function saveThreadMessage(
   content: string,
   taskOrder?: number,
   messageKind?: GuidedMessageKind,
+  taskId?: string,
   attachmentRefs?: string[],
 ): Promise<{ id: string }> {
   const normalizedAttachmentRefs = (attachmentRefs ?? []).map((ref) => ref.trim()).filter(Boolean);
@@ -516,6 +517,7 @@ export async function saveThreadMessage(
         content,
         role,
         task_order: taskOrder,
+        task_id: taskId,
         message_kind: messageKind,
         image_url: serializedAttachments,
         image_urls: normalizedAttachmentRefs.length > 0 ? normalizedAttachmentRefs : undefined,
@@ -548,6 +550,7 @@ export async function checkAnswer(
   threadId: string,
   answer: string,
   taskOrder?: number,
+  taskId?: string,
   attachmentRefs?: string[],
 ): Promise<CheckAnswerResponse> {
   const normalizedAttachmentRefs = (attachmentRefs ?? []).map((ref) => ref.trim()).filter(Boolean);
@@ -559,6 +562,7 @@ export async function checkAnswer(
       body: JSON.stringify({
         answer,
         ...(taskOrder != null && { task_order: taskOrder }),
+        ...(taskId != null && { task_id: taskId }),
         ...(serializedAttachments && { image_url: serializedAttachments }),
         ...(normalizedAttachmentRefs.length > 0 && { image_urls: normalizedAttachmentRefs }),
       }),
@@ -573,12 +577,16 @@ export async function checkAnswer(
 export async function requestHint(
   threadId: string,
   taskOrder?: number,
+  taskId?: string,
 ): Promise<RequestHintResponse> {
   return requestStudentHomeworkApi<RequestHintResponse>(
     `/threads/${encodeURIComponent(threadId)}/hint`,
     {
       method: 'POST',
-      body: JSON.stringify(taskOrder != null ? { task_order: taskOrder } : {}),
+      body: JSON.stringify({
+        ...(taskOrder != null ? { task_order: taskOrder } : {}),
+        ...(taskId != null ? { task_id: taskId } : {}),
+      }),
     },
   );
 }

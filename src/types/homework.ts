@@ -114,6 +114,7 @@ export interface HomeworkThread {
   student_assignment_id: string;
   status: ThreadStatus;
   current_task_order: number;
+  current_task_id?: string | null;
   created_at: string;
   updated_at: string;
   last_student_message_at?: string | null;
@@ -128,6 +129,7 @@ export interface HomeworkThreadMessage {
   content: string;
   image_url: string | null;
   task_order: number | null;
+  task_id?: string | null;
   created_at: string;
   message_kind?: GuidedMessageKind;
   message_delivery_status?: MessageDeliveryStatus;
@@ -161,6 +163,7 @@ export interface CheckAnswerResponse {
   hint_count: number;
   task_completed: boolean;
   next_task_order: number | null;
+  next_task_id?: string | null;
   thread_completed: boolean;
   total_tasks: number;
   thread: HomeworkThread;
