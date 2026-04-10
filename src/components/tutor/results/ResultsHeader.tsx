@@ -7,6 +7,7 @@ import {
   UserMinus,
   AlertTriangle,
   Clock,
+  Loader2,
 } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -53,12 +54,15 @@ export const ResultsHeader = memo(function ResultsHeader({
 }: ResultsHeaderProps) {
   const perStudent = results?.per_student ?? [];
   const submitted = perStudent.filter((s) => s.submitted).length;
-  const notStarted = Math.max(0, totalStudents - submitted);
+  // In-progress = not submitted but has messages (total_time_minutes !== null).
+  // Not-started = not submitted and no thread at all.
+  const inProgress = perStudent.filter(
+    (s) => !s.submitted && s.total_time_minutes != null,
+  ).length;
+  const notStarted = Math.max(0, totalStudents - submitted - inProgress);
   // Backend computes `needs_attention` only for submitted students (low score
-  // or hint overuse). Non-submitted students always get `false` there, so
-  // "Требует внимания" in the header must also count them — otherwise the
-  // metric disagrees with the action block below, which renders one row per
-  // not-started student. No double-counting: not-started ∩ needs_attention = ∅.
+  // or hint overuse). "Требует внимания" = not-started + scores-based attention.
+  // In-progress students are NOT counted here — they are actively working.
   const attentionFromScores = perStudent.filter((s) => s.needs_attention).length;
   const needsAttention = notStarted + attentionFromScores;
 
@@ -127,13 +131,20 @@ export const ResultsHeader = memo(function ResultsHeader({
         </div>
 
         {/* Row 2: metric strip */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 md:gap-6 pt-4 md:pt-5 border-t border-slate-200">
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-4 md:gap-5 pt-4 md:pt-5 border-t border-slate-200">
           <Metric
             icon={Users}
             label="Сдали"
             value={`${submitted}/${totalStudents}`}
           />
           <Metric icon={Award} label="Средний балл" value={avgScoreLabel} />
+          {inProgress > 0 ? (
+            <Metric
+              icon={Loader2}
+              label="В процессе"
+              value={String(inProgress)}
+            />
+          ) : null}
           <Metric
             icon={UserMinus}
             label="Не приступали"

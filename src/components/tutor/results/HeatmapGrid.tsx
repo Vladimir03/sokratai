@@ -263,15 +263,18 @@ const HeatmapRow = memo(function HeatmapRow({
           Three additive columns: Балл / Подсказки / Время.
           - First (Балл) carries `border-l-2` to visually separate task cells
             from the totals block.
-          - Status-aware rendering per spec AC-2/AC-3/AC-4 + UX decision Q1
-            (in_progress shows «—» for score+hints to avoid the literal "0/Y"
-            being indistinguishable from not_started).
+          - Status-aware rendering: completed → full data, in_progress → partial
+            data in muted style, not_started → em-dash.
           - text-sm (14px) on every cell — task guardrail. */}
 
       {/* Балл */}
       <td className="border-b border-l-2 border-slate-200 px-3 py-2 align-middle text-right text-sm tabular-nums">
         {displayStatus === 'completed' && totalMax > 0 ? (
           <span className="font-semibold text-slate-900">
+            {formatScore(totalScore)}/{formatScore(totalMax)}
+          </span>
+        ) : displayStatus === 'in_progress' && totalMax > 0 ? (
+          <span className="text-slate-500">
             {formatScore(totalScore)}/{formatScore(totalMax)}
           </span>
         ) : (
@@ -281,7 +284,7 @@ const HeatmapRow = memo(function HeatmapRow({
 
       {/* Подсказки */}
       <td className="border-b border-slate-200 px-2 py-2 align-middle text-right text-sm">
-        {displayStatus === 'completed' ? (
+        {displayStatus === 'completed' || displayStatus === 'in_progress' ? (
           showHintOveruse ? (
             <span
               title={`Подсказок: ${hintTotal}`}
@@ -291,7 +294,10 @@ const HeatmapRow = memo(function HeatmapRow({
               {hintTotal}
             </span>
           ) : (
-            <span className="text-slate-500 tabular-nums">{hintTotal}</span>
+            <span className={cn(
+              'tabular-nums',
+              displayStatus === 'completed' ? 'text-slate-500' : 'text-slate-400',
+            )}>{hintTotal}</span>
           )
         ) : (
           <span className="text-slate-400">—</span>

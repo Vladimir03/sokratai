@@ -473,13 +473,19 @@ interface TaskStateScoreFields {
 
 /**
  * Compute the final score for a single task state with the priority chain
- * tutor_score_override → ai_score → earned_score → status fallback. Used by
+ * tutor_score_override → earned_score → ai_score → status fallback. Used by
  * both per-student and per-task aggregations so the shapes stay consistent.
+ *
+ * earned_score takes priority over ai_score because it reflects hint/wrong-
+ * answer degradation — the same value the student sees on their results
+ * screen. ai_score is the AI's raw evaluation BEFORE degradation and is
+ * kept as a supplementary field for the tutor's "AI: X/Y" display in the
+ * edit-score dialog.
  */
 function computeFinalScore(ts: TaskStateScoreFields, maxScore: number): number {
   if (ts.tutor_score_override != null) return Number(ts.tutor_score_override);
-  if (ts.ai_score != null) return Number(ts.ai_score);
   if (ts.earned_score != null) return Number(ts.earned_score);
+  if (ts.ai_score != null) return Number(ts.ai_score);
   if (ts.status === "completed") return maxScore;
   return 0;
 }
@@ -1144,6 +1150,8 @@ async function handleUpdateAssignment(
         }
       }
     }
+
+    await syncThreadCursorOrdersForAssignment(db, assignmentId);
   }
 
   console.log("homework_api_request_success", {
@@ -2110,24 +2118,42 @@ async function handleGetResults(
   if (studentAssignments && studentAssignments.length > 0) {
     const saIds = studentAssignments.map((sa) => sa.id);
 
-    const { data: completedThreads } = await db
+    // ─── Fetch ALL threads (any status) for both score aggregation and time ──
+    // Previously only completed threads were fetched, which caused in-progress
+    // students to appear with empty scores in tutor results (Bug 2 fix).
+    const { data: allThreads } = await db
       .from("homework_tutor_threads")
-      .select("id, student_assignment_id")
-      .in("student_assignment_id", saIds)
-      .eq("status", "completed");
+      .select("id, student_assignment_id, status")
+      .in("student_assignment_id", saIds);
 
-    // student_id → aggregate accumulator (built only for submitted students).
+    // Split into completed (for submitted=true aggregates and summary stats)
+    // and active (for partial progress display in heatmap).
+    const completedThreadIds: string[] = [];
+    const activeThreadIds: string[] = [];
+    const threadStatusById: Record<string, string> = {};
+    for (const t of allThreads ?? []) {
+      threadStatusById[t.id] = t.status as string;
+      if (t.status === "completed") {
+        completedThreadIds.push(t.id);
+      } else {
+        activeThreadIds.push(t.id);
+      }
+    }
+
+    // student_id → aggregate accumulator (built only for completed-thread students).
     const studentAcc: Record<string, { final: number; max: number; hints: number }> = {};
+    // student_id → partial accumulator (built for active-thread students with partial progress).
+    const activeStudentAcc: Record<string, { final: number; hints: number }> = {};
 
-    if (completedThreads && completedThreads.length > 0) {
-      const threadIds = completedThreads.map((t) => t.id);
+    const allThreadIdsForStates = [...completedThreadIds, ...activeThreadIds];
 
+    if (allThreadIdsForStates.length > 0) {
       const { data: allTaskStates } = await db
         .from("homework_tutor_task_states")
         .select(
           "thread_id, task_id, earned_score, status, ai_score, tutor_score_override, hint_count, attempts",
         )
-        .in("thread_id", threadIds);
+        .in("thread_id", allThreadIdsForStates);
 
       // Group task states by thread
       const statesByThread: Record<string, TaskStateScoreFields[]> = {};
@@ -2137,9 +2163,10 @@ async function handleGetResults(
         statesByThread[row.thread_id]!.push(row);
       }
 
-      for (const thread of completedThreads) {
+      for (const thread of allThreads ?? []) {
         const states = statesByThread[thread.id] ?? [];
-        const studentId = studentBySa[thread.student_assignment_id];
+        const studentId = studentBySa[thread.student_assignment_id as string];
+        const isCompleted = threadStatusById[thread.id] === "completed";
 
         let threadFinal = 0;
         let threadMaxTotal = 0;
@@ -2148,6 +2175,23 @@ async function handleGetResults(
         for (const ts of states) {
           const taskInfo = taskMap[ts.task_id];
           const maxScore = taskInfo?.max_score ?? 1;
+
+          // For active threads, skip task_states that the student hasn't
+          // actually solved. provisionGuidedThread pre-creates ALL task_states
+          // as status="active", so including them would produce false-zero red
+          // cells in the heatmap and inflate aggregates.
+          //
+          // Product decision: "partial = only individually-completed tasks".
+          // In-progress tasks (with intermediate ai_score / hint_count from
+          // INCORRECT/ON_TRACK attempts) are excluded because earned_score is
+          // still null and the outcome is undetermined. This means tutor-side
+          // hint_total and score aggregates for in-progress students reflect
+          // only their solved tasks, not ongoing interaction. If the product
+          // later wants "partial = all current interaction", remove this guard
+          // and handle the null-earned_score display on the frontend.
+          const isTaskCompleted = ts.status === "completed";
+          if (!isCompleted && !isTaskCompleted) continue;
+
           const finalScore = computeFinalScore(ts, maxScore);
           const hintCount = Number(ts.hint_count ?? 0);
 
@@ -2157,6 +2201,10 @@ async function handleGetResults(
 
           // Per-cell scores for the heatmap. Keyed by (student_id, task_id),
           // last-write-wins if the same student somehow has multiple threads.
+          // Built for BOTH completed and active threads so partial progress
+          // renders colored cells in the heatmap. For active threads, only
+          // individually-completed tasks appear — unsolved tasks stay null
+          // (grey dash in the frontend).
           if (studentId && taskInfo) {
             if (!taskScoresByStudent[studentId]) {
               taskScoresByStudent[studentId] = {};
@@ -2177,8 +2225,9 @@ async function handleGetResults(
             };
           }
 
-          if (taskInfo) {
-            // Aggregate for perTask using the same final-score helper.
+          // Per-task aggregates — only count completed threads for summary stats
+          // (avg_score, correct_rate) to keep them meaningful.
+          if (taskInfo && isCompleted) {
             if (!guidedTaskScores[ts.task_id]) {
               guidedTaskScores[ts.task_id] = { scoreSum: 0, scoreCount: 0, correctCount: 0, total: 0 };
             }
@@ -2193,43 +2242,46 @@ async function handleGetResults(
           }
         }
 
-        if (threadMaxTotal > 0) {
-          const pct = (threadFinal / threadMaxTotal) * 100;
-          totalScoreSum += pct;
-          totalScoreCount++;
+        if (isCompleted) {
+          // Summary stats: only completed threads count for avg_score / distribution.
+          if (threadMaxTotal > 0) {
+            const pct = (threadFinal / threadMaxTotal) * 100;
+            totalScoreSum += pct;
+            totalScoreCount++;
 
-          if (pct < 25) distribution["0-24"]++;
-          else if (pct < 50) distribution["25-49"]++;
-          else if (pct < 75) distribution["50-74"]++;
-          else distribution["75-100"]++;
-        }
-
-        if (studentId) {
-          // Multiple completed threads per student should not happen, but if
-          // they do, accumulate so we still return one entry per student.
-          if (!studentAcc[studentId]) {
-            studentAcc[studentId] = { final: 0, max: 0, hints: 0 };
+            if (pct < 25) distribution["0-24"]++;
+            else if (pct < 50) distribution["25-49"]++;
+            else if (pct < 75) distribution["50-74"]++;
+            else distribution["75-100"]++;
           }
-          studentAcc[studentId].final += threadFinal;
-          studentAcc[studentId].max += threadMaxTotal;
-          studentAcc[studentId].hints += threadHints;
+
+          if (studentId) {
+            // Multiple completed threads per student should not happen, but if
+            // they do, accumulate so we still return one entry per student.
+            if (!studentAcc[studentId]) {
+              studentAcc[studentId] = { final: 0, max: 0, hints: 0 };
+            }
+            studentAcc[studentId].final += threadFinal;
+            studentAcc[studentId].max += threadMaxTotal;
+            studentAcc[studentId].hints += threadHints;
+          }
+        } else if (studentId && !studentAcc[studentId]) {
+          // Active thread — accumulate partial progress only if the student
+          // does NOT already have a completed thread (completed takes priority).
+          if (!activeStudentAcc[studentId]) {
+            activeStudentAcc[studentId] = { final: 0, hints: 0 };
+          }
+          activeStudentAcc[studentId].final += threadFinal;
+          activeStudentAcc[studentId].hints += threadHints;
         }
       }
     }
 
     // ─── Wall-clock time aggregation (homework-student-totals AC-9) ──────────
-    // Fetch ALL threads (any status — completed, active, abandoned) to populate
-    // total_time_minutes for both submitted and in-progress students. This is
-    // ONE round-trip independent of student count; the second round-trip below
-    // (homework_tutor_thread_messages) uses the existing
-    // idx_thread_messages_thread index on (thread_id, created_at).
-    const { data: allThreads } = await db
-      .from("homework_tutor_threads")
-      .select("id, student_assignment_id")
-      .in("student_assignment_id", saIds);
-
+    // Reuses the already-fetched allThreads (any status) to populate
+    // total_time_minutes for both submitted and in-progress students.
     const timeByStudent: Record<string, { first: string; last: string }> = {};
-    const allThreadIds = (allThreads ?? []).map((t) => t.id);
+    const allThreadIds = (allThreads ?? []).map((t: { id: string }) => t.id);
 
     if (allThreadIds.length > 0) {
       const { data: msgRows } = await db
@@ -2272,23 +2324,28 @@ async function handleGetResults(
     // the assignment). Guard: empty assignment → 0/0 (frontend renders «—»).
     const totalMaxForAll = assignmentMaxScoreTotal;
 
-    // Build per_student in the same order as student_assignments. Students
-    // without a completed thread → submitted=false, scores=0, max=assignment
-    // total (so the frontend can still render a sensible "0 / N").
+    // Build per_student in the same order as student_assignments.
+    // Three-way: completed thread → submitted:true, active thread →
+    // submitted:false with partial data, no thread → submitted:false empty.
     for (const sa of studentAssignments) {
       const acc = studentAcc[sa.student_id];
+      const activeAcc = activeStudentAcc[sa.student_id];
       const totalTimeMinutes = computeTotalMinutes(timeByStudent[sa.student_id]);
+
+      // Heatmap cell data — shared between completed and active students.
+      const cellMap = taskScoresByStudent[sa.student_id] ?? {};
+      const taskScores = Object.entries(cellMap).map(([task_id, cell]) => ({
+        task_id,
+        final_score: cell.final_score,
+        hint_count: cell.hint_count,
+        has_override: cell.has_override,
+        ai_score: cell.ai_score,
+      }));
+
       if (acc) {
+        // Completed thread: submitted=true, full aggregates.
         const lowScore = acc.max > 0 && acc.final < 0.3 * acc.max;
         const overuse = acc.hints >= hintOveruseThreshold;
-        const cellMap = taskScoresByStudent[sa.student_id] ?? {};
-        const taskScores = Object.entries(cellMap).map(([task_id, cell]) => ({
-          task_id,
-          final_score: cell.final_score,
-          hint_count: cell.hint_count,
-          has_override: cell.has_override,
-          ai_score: cell.ai_score,
-        }));
         perStudent.push({
           student_id: sa.student_id,
           submitted: true,
@@ -2301,7 +2358,26 @@ async function handleGetResults(
           total_max: totalMaxForAll,
           total_time_minutes: totalTimeMinutes,
         });
+      } else if (activeAcc) {
+        // Active thread with partial progress: submitted=false (frontend
+        // derives in_progress from total_time_minutes !== null), but task_scores
+        // and aggregates are populated so the heatmap and totals columns
+        // show real partial data instead of blank dashes.
+        const partialScore = Math.round(activeAcc.final * 100) / 100;
+        perStudent.push({
+          student_id: sa.student_id,
+          submitted: false,
+          final_score_total: partialScore,
+          max_score_total: assignmentMaxScoreTotal,
+          hint_total: activeAcc.hints,
+          needs_attention: false,
+          task_scores: taskScores,
+          total_score: partialScore,
+          total_max: totalMaxForAll,
+          total_time_minutes: totalTimeMinutes,
+        });
       } else {
+        // No thread at all: not started.
         perStudent.push({
           student_id: sa.student_id,
           submitted: false,
@@ -3043,10 +3119,81 @@ async function createSignedStorageUrl(
   return data.signedUrl;
 }
 
+interface GuidedTaskIdentityRow {
+  id: string;
+  order_num: number;
+  max_score?: number | null;
+}
+
+function resolveTaskReference(
+  tasks: GuidedTaskIdentityRow[],
+  options: {
+    taskId?: string | null;
+    taskOrder?: number | null;
+    fallbackTaskId?: string | null;
+    fallbackTaskOrder?: number | null;
+  },
+): GuidedTaskIdentityRow | null {
+  const orderedCandidates = [
+    options.taskId && isUUID(options.taskId) ? tasks.find((task) => task.id === options.taskId) ?? null : null,
+    typeof options.taskOrder === "number" ? tasks.find((task) => task.order_num === options.taskOrder) ?? null : null,
+    options.fallbackTaskId && isUUID(options.fallbackTaskId)
+      ? tasks.find((task) => task.id === options.fallbackTaskId) ?? null
+      : null,
+    typeof options.fallbackTaskOrder === "number"
+      ? tasks.find((task) => task.order_num === options.fallbackTaskOrder) ?? null
+      : null,
+  ];
+
+  return orderedCandidates.find((task): task is GuidedTaskIdentityRow => Boolean(task)) ?? null;
+}
+
+async function syncThreadCursorOrdersForAssignment(
+  db: SupabaseClient,
+  assignmentId: string,
+): Promise<void> {
+  const { data: studentAssignments, error: saErr } = await db
+    .from("homework_tutor_student_assignments")
+    .select("id")
+    .eq("assignment_id", assignmentId);
+  if (saErr || !studentAssignments || studentAssignments.length === 0) return;
+
+  const studentAssignmentIds = studentAssignments.map((row) => row.id as string);
+  const { data: threads, error: threadErr } = await db
+    .from("homework_tutor_threads")
+    .select("id, current_task_id, current_task_order")
+    .in("student_assignment_id", studentAssignmentIds)
+    .not("current_task_id", "is", null);
+  if (threadErr || !threads || threads.length === 0) return;
+
+  const { data: tasks, error: taskErr } = await db
+    .from("homework_tutor_tasks")
+    .select("id, order_num")
+    .eq("assignment_id", assignmentId);
+  if (taskErr || !tasks) return;
+
+  const orderByTaskId = new Map(tasks.map((task) => [task.id as string, task.order_num as number]));
+  for (const thread of threads) {
+    const taskId = thread.current_task_id as string | null;
+    if (!taskId) continue;
+    const nextOrder = orderByTaskId.get(taskId);
+    if (typeof nextOrder !== "number" || nextOrder === thread.current_task_order) continue;
+
+    await db
+      .from("homework_tutor_threads")
+      .update({
+        current_task_order: nextOrder,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", thread.id);
+  }
+}
+
 async function loadLatestStudentImageUrlsForTask(
   db: SupabaseClient,
   threadId: string,
   taskOrder: number,
+  taskId: string,
   userId: string,
   assignmentId: string,
 ): Promise<string[]> {
@@ -3055,7 +3202,7 @@ async function loadLatestStudentImageUrlsForTask(
     .select("image_url")
     .eq("thread_id", threadId)
     .eq("role", "user")
-    .eq("task_order", taskOrder)
+    .eq("task_id", taskId)
     .not("image_url", "is", null)
     .order("created_at", { ascending: false })
     .limit(1)
@@ -3769,12 +3916,37 @@ async function handlePostThreadMessage(
     : [];
   if (attachmentRefs instanceof Response) return attachmentRefs;
   const serializedAttachments = serializeThreadAttachmentRefs(attachmentRefs);
-  const taskOrder = typeof b.task_order === "number" ? b.task_order : (thread.current_task_order as number);
+  const requestedTaskOrder = typeof b.task_order === "number" ? b.task_order : undefined;
+  const requestedTaskId = isUUID(b.task_id) ? b.task_id as string : undefined;
   const messageKindRaw = isString(b.message_kind) ? (b.message_kind as string).trim() : "";
   const validMessageKinds = new Set(["answer", "hint_request", "question", "ai_reply", "system"]);
   const messageKind = validMessageKinds.has(messageKindRaw)
     ? messageKindRaw
     : (role === "assistant" ? "ai_reply" : "answer");
+
+  const { data: assignmentTasks, error: assignmentTasksError } = await db
+    .from("homework_tutor_tasks")
+    .select("id, order_num")
+    .eq("assignment_id", studentAssignment.assignment_id)
+    .order("order_num", { ascending: true });
+  if (assignmentTasksError || !assignmentTasks) {
+    return jsonError(cors, 500, "DB_ERROR", "Failed to resolve task reference");
+  }
+
+  const resolvedTask = resolveTaskReference(
+    assignmentTasks as GuidedTaskIdentityRow[],
+    {
+      taskId: requestedTaskId,
+      taskOrder: requestedTaskOrder,
+      fallbackTaskId: typeof thread.current_task_id === "string" ? thread.current_task_id as string : null,
+      fallbackTaskOrder: thread.current_task_order as number,
+    },
+  );
+  if (!resolvedTask) {
+    return jsonError(cors, 400, "VALIDATION", "Invalid task reference");
+  }
+  const taskOrder = resolvedTask.order_num;
+  const taskId = resolvedTask.id;
 
   // Integrity check: assistant messages can only follow a user message
   // Exception: bootstrap intro messages (message_kind='system') can be first in thread
@@ -3798,6 +3970,7 @@ async function handlePostThreadMessage(
     role,
     content: b.content,
     image_url: serializedAttachments,
+    task_id: taskId,
     task_order: taskOrder,
     message_kind: messageKind,
   };
@@ -3806,6 +3979,7 @@ async function handlePostThreadMessage(
     role,
     content: b.content,
     image_url: serializedAttachments,
+    task_id: taskId,
     task_order: taskOrder,
   };
 
@@ -3815,14 +3989,14 @@ async function handlePostThreadMessage(
   const withKindResult = await db
     .from("homework_tutor_thread_messages")
     .insert(payloadWithKind)
-    .select("id, role, content, image_url, task_order, created_at")
+    .select("id, role, content, image_url, task_id, task_order, created_at")
     .single();
 
   if (withKindResult.error && isMissingColumnError(withKindResult.error.message, "message_kind")) {
     const legacyResult = await db
       .from("homework_tutor_thread_messages")
       .insert(payloadLegacy)
-      .select("id, role, content, image_url, task_order, created_at")
+      .select("id, role, content, image_url, task_id, task_order, created_at")
       .single();
     savedMsg = legacyResult.data as Record<string, unknown> | null;
     insertErr = legacyResult.error;
@@ -3916,9 +4090,9 @@ async function handleAdvanceTask(
 // ─── Helper: fetch full thread with nested data ─────────────────────────────
 
 const THREAD_SELECT = `
-  id, status, current_task_order, created_at, updated_at,
+  id, status, current_task_order, current_task_id, created_at, updated_at,
   student_assignment_id, last_student_message_at, last_tutor_message_at,
-  homework_tutor_thread_messages(id, role, content, image_url, task_order, message_kind, created_at, author_user_id, visible_to_student),
+  homework_tutor_thread_messages(id, role, content, image_url, task_id, task_order, message_kind, created_at, author_user_id, visible_to_student),
   homework_tutor_task_states(id, task_id, status, attempts, best_score, available_score, earned_score, wrong_answer_count, hint_count, ai_score, ai_score_comment)
 `;
 
@@ -4008,7 +4182,12 @@ async function provisionGuidedThread(
   const { data: thread, error: threadErr } = await db
     .from("homework_tutor_threads")
     .upsert(
-      { student_assignment_id: studentAssignmentId, status: "active", current_task_order: 1 },
+      {
+        student_assignment_id: studentAssignmentId,
+        status: "active",
+        current_task_order: 1,
+        current_task_id: tasks[0]?.id ?? null,
+      },
       { onConflict: "student_assignment_id", ignoreDuplicates: true },
     )
     .select("id")
@@ -4051,6 +4230,7 @@ async function provisionGuidedThread(
 
 interface AdvanceResult {
   nextOrder: number | null;
+  nextTaskId: string | null;
   threadCompleted: boolean;
 }
 
@@ -4084,12 +4264,15 @@ async function performTaskAdvance(
     (order) => order !== currentOrder && stateByOrder.get(order)?.status === "active",
   );
   const nextOrder = remainingActiveOrders.length > 0 ? remainingActiveOrders[0] : null;
+  const nextState = nextOrder !== null ? stateByOrder.get(nextOrder) : null;
+  const nextTaskId = typeof nextState?.task_id === "string" ? nextState.task_id as string : null;
 
   if (nextOrder !== null) {
     // Update thread current_task_order
     await db
       .from("homework_tutor_threads")
       .update({
+        current_task_id: nextTaskId,
         current_task_order: nextOrder,
         updated_at: new Date().toISOString(),
       })
@@ -4102,16 +4285,18 @@ async function performTaskAdvance(
         thread_id: threadId,
         role: "system",
         content: `Задача ${currentOrder} выполнена! Переходим к задаче ${nextOrder}.`,
+        task_id: nextTaskId,
         task_order: nextOrder,
         message_kind: "system",
       });
 
-    return { nextOrder, threadCompleted: false };
+    return { nextOrder, nextTaskId, threadCompleted: false };
   } else {
     // All tasks completed
     await db
       .from("homework_tutor_threads")
       .update({
+        current_task_id: null,
         status: "completed",
         updated_at: new Date().toISOString(),
       })
@@ -4123,11 +4308,12 @@ async function performTaskAdvance(
         thread_id: threadId,
         role: "system",
         content: "Все задачи выполнены! 🎉",
+        task_id: typeof currentState.task_id === "string" ? currentState.task_id as string : null,
         task_order: currentOrder,
         message_kind: "system",
       });
 
-    return { nextOrder: null, threadCompleted: true };
+    return { nextOrder: null, nextTaskId: null, threadCompleted: true };
   }
 }
 
@@ -4138,6 +4324,7 @@ async function loadAdvanceContext(
   threadId: string,
   thread: Record<string, unknown>,
   overrideTaskOrder?: number,
+  overrideTaskId?: string,
 ): Promise<{
   allStates: Record<string, unknown>[];
   stateByOrder: Map<number, Record<string, unknown>>;
@@ -4173,8 +4360,19 @@ async function loadAdvanceContext(
     allStates.map((s: Record<string, unknown>) => [taskOrderMap.get(s.task_id as string) ?? 0, s]),
   );
 
-  const currentOrder = overrideTaskOrder ?? (thread.current_task_order as number);
-  const currentState = stateByOrder.get(currentOrder);
+  const currentTask = resolveTaskReference(
+    tasks as GuidedTaskIdentityRow[],
+    {
+      taskId: overrideTaskId,
+      taskOrder: overrideTaskOrder,
+      fallbackTaskId: typeof thread.current_task_id === "string" ? thread.current_task_id as string : null,
+      fallbackTaskOrder: thread.current_task_order as number,
+    },
+  );
+  if (!currentTask) return null;
+
+  const currentOrder = currentTask.order_num;
+  const currentState = allStates.find((state) => state.task_id === currentTask.id);
   if (!currentState || currentState.status !== "active") return null;
 
   const sortedOrders = tasks
@@ -4207,12 +4405,13 @@ async function handleCheckAnswer(
     return jsonError(cors, 400, "VALIDATION", "answer is required");
   }
   const requestedTaskOrder = typeof b.task_order === "number" ? b.task_order : undefined;
+  const requestedTaskId = isUUID(b.task_id) ? b.task_id as string : undefined;
   const attachmentRefs = extractStudentThreadAttachmentRefs(b, userId, studentAssignment.assignment_id, cors);
   if (attachmentRefs instanceof Response) return attachmentRefs;
   const serializedAttachments = serializeThreadAttachmentRefs(attachmentRefs);
 
   // Load advance context
-  const ctx = await loadAdvanceContext(db, threadId, thread, requestedTaskOrder);
+  const ctx = await loadAdvanceContext(db, threadId, thread, requestedTaskOrder, requestedTaskId);
   if (!ctx) {
     return jsonError(cors, 400, "NO_ACTIVE_TASK", "No active task to check");
   }
@@ -4246,7 +4445,7 @@ async function handleCheckAnswer(
     .from("homework_tutor_thread_messages")
     .select("role, content, visible_to_student, message_kind")
     .eq("thread_id", threadId)
-    .eq("task_order", currentOrder)
+    .eq("task_id", currentState.task_id as string)
     .order("created_at", { ascending: true })
     .limit(15);
 
@@ -4263,11 +4462,12 @@ async function handleCheckAnswer(
       thread_id: threadId,
       role: "user",
       content: answer,
+      task_id: currentState.task_id as string,
       task_order: currentOrder,
       message_kind: "answer",
       ...(serializedAttachments && { image_url: serializedAttachments }),
     })
-    .select("id, role, content, image_url, task_order, message_kind, created_at, author_user_id, visible_to_student")
+    .select("id, role, content, image_url, task_id, task_order, message_kind, created_at, author_user_id, visible_to_student")
     .single();
 
   if (saveUserAnswerError || !savedUserAnswerMessage) {
@@ -4291,6 +4491,7 @@ async function handleCheckAnswer(
     db,
     threadId,
     currentOrder,
+    currentState.task_id as string,
     userId,
     studentAssignment.assignment_id,
   );
@@ -4344,6 +4545,7 @@ async function handleCheckAnswer(
     thread_id: threadId,
     role: "assistant",
     content: result.feedback,
+    task_id: currentState.task_id as string,
     task_order: currentOrder,
     message_kind: "ai_reply",
   });
@@ -4383,6 +4585,7 @@ async function handleCheckAnswer(
       hint_count: (currentState.hint_count as number) ?? 0,
       task_completed: true,
       next_task_order: advanceResult.nextOrder,
+      next_task_id: advanceResult.nextTaskId,
       thread_completed: advanceResult.threadCompleted,
       total_tasks: totalTasks,
     };
@@ -4404,6 +4607,7 @@ async function handleCheckAnswer(
       hint_count: (currentState.hint_count as number) ?? 0,
       task_completed: false,
       next_task_order: null,
+      next_task_id: null,
       thread_completed: false,
       total_tasks: totalTasks,
     };
@@ -4446,6 +4650,7 @@ async function handleCheckAnswer(
       hint_count: newHintCount,
       task_completed: false,
       next_task_order: null,
+      next_task_id: null,
       thread_completed: false,
       total_tasks: totalTasks,
     };
@@ -4479,6 +4684,7 @@ async function handleCheckAnswer(
       hint_count: newHintCount,
       task_completed: false,
       next_task_order: null,
+      next_task_id: null,
       thread_completed: false,
       total_tasks: totalTasks,
     };
@@ -4535,7 +4741,7 @@ async function handleRequestHint(
 
   const b = (body && typeof body === "object") ? body as Record<string, unknown> : {};
   const requestedTaskOrder = typeof b.task_order === "number" ? b.task_order : undefined;
-  const currentOrder = requestedTaskOrder ?? (thread.current_task_order as number);
+  const requestedTaskId = isUUID(b.task_id) ? b.task_id as string : undefined;
 
   // Get task_state for the requested task order
   const { data: allStates } = await db
@@ -4544,20 +4750,27 @@ async function handleRequestHint(
     .eq("thread_id", threadId);
 
   // Find the task state matching the requested order
-  const { data: saData } = await db
-    .from("homework_tutor_student_assignments")
-    .select("assignment_id")
-    .eq("id", thread.student_assignment_id)
-    .single();
-
   const { data: tasks } = await db
     .from("homework_tutor_tasks")
     .select("id, order_num")
-    .eq("assignment_id", saData?.assignment_id)
+    .eq("assignment_id", studentAssignment.assignment_id)
     .order("order_num", { ascending: true });
 
-  const taskForOrder = tasks?.find((t: { order_num: number }) => t.order_num === currentOrder);
-  const activeState = allStates?.find((s: Record<string, unknown>) => s.task_id === taskForOrder?.id);
+  const resolvedTask = resolveTaskReference(
+    (tasks ?? []) as GuidedTaskIdentityRow[],
+    {
+      taskId: requestedTaskId,
+      taskOrder: requestedTaskOrder,
+      fallbackTaskId: typeof thread.current_task_id === "string" ? thread.current_task_id as string : null,
+      fallbackTaskOrder: thread.current_task_order as number,
+    },
+  );
+  if (!resolvedTask) {
+    return jsonError(cors, 400, "VALIDATION", "Invalid task reference");
+  }
+
+  const currentOrder = resolvedTask.order_num;
+  const activeState = allStates?.find((s: Record<string, unknown>) => s.task_id === resolvedTask.id);
 
   if (!activeState || activeState.status !== "active") {
     return jsonError(cors, 400, "NO_ACTIVE_TASK", "No active task for hint");
@@ -4578,7 +4791,7 @@ async function handleRequestHint(
   const { data: assignment } = await db
     .from("homework_tutor_assignments")
     .select("subject")
-    .eq("id", saData?.assignment_id)
+    .eq("id", studentAssignment.assignment_id)
     .single();
 
   // Load conversation history
@@ -4586,7 +4799,7 @@ async function handleRequestHint(
     .from("homework_tutor_thread_messages")
     .select("role, content, visible_to_student, message_kind")
     .eq("thread_id", threadId)
-    .eq("task_order", currentOrder)
+    .eq("task_id", task.id)
     .order("created_at", { ascending: true })
     .limit(15);
 
@@ -4595,6 +4808,7 @@ async function handleRequestHint(
     thread_id: threadId,
     role: "user",
     content: "Подсказка",
+    task_id: task.id,
     task_order: currentOrder,
     message_kind: "hint_request",
   });
@@ -4611,6 +4825,7 @@ async function handleRequestHint(
     db,
     threadId,
     currentOrder,
+    task.id,
     userId,
     studentAssignment.assignment_id,
   );
@@ -4622,7 +4837,7 @@ async function handleRequestHint(
     studentImageUrls,
     taskOcrText,
     taskId: task.id ?? null,
-    assignmentId: studentAssignment.assignment_id ?? saData?.assignment_id ?? null,
+    assignmentId: studentAssignment.assignment_id ?? null,
     correctAnswer: task.correct_answer,
     subject: assignment?.subject ?? "math",
     conversationHistory: recentMessages ?? [],
@@ -4635,6 +4850,7 @@ async function handleRequestHint(
     thread_id: threadId,
     role: "assistant",
     content: hintResult.hint,
+    task_id: task.id,
     task_order: currentOrder,
     message_kind: "ai_reply",
   });
@@ -4773,7 +4989,7 @@ async function handleTutorPostMessage(
   // Find thread
   const { data: thread } = await db
     .from("homework_tutor_threads")
-    .select("id, status, current_task_order")
+    .select("id, status, current_task_order, current_task_id")
     .eq("student_assignment_id", sa.id)
     .maybeSingle();
 
@@ -4788,10 +5004,33 @@ async function handleTutorPostMessage(
   }
   const content = (b.content as string).trim();
   const visibleToStudent = b.visible_to_student !== false; // default true
-  const taskOrder = typeof b.task_order === "number"
-    ? b.task_order
-    : (thread.current_task_order as number);
+  const requestedTaskOrder = typeof b.task_order === "number" ? b.task_order : undefined;
+  const requestedTaskId = isUUID(b.task_id) ? b.task_id as string : undefined;
   const imageUrl = typeof b.image_url === "string" && b.image_url.trim() ? b.image_url.trim() : null;
+
+  const { data: assignmentTasks, error: assignmentTasksError } = await db
+    .from("homework_tutor_tasks")
+    .select("id, order_num")
+    .eq("assignment_id", assignmentId)
+    .order("order_num", { ascending: true });
+  if (assignmentTasksError || !assignmentTasks) {
+    return jsonError(cors, 500, "DB_ERROR", "Failed to resolve task reference");
+  }
+
+  const resolvedTask = resolveTaskReference(
+    assignmentTasks as GuidedTaskIdentityRow[],
+    {
+      taskId: requestedTaskId,
+      taskOrder: requestedTaskOrder,
+      fallbackTaskId: typeof thread.current_task_id === "string" ? thread.current_task_id as string : null,
+      fallbackTaskOrder: thread.current_task_order as number,
+    },
+  );
+  if (!resolvedTask) {
+    return jsonError(cors, 400, "VALIDATION", "Invalid task reference");
+  }
+  const taskOrder = resolvedTask.order_num;
+  const taskId = resolvedTask.id;
 
   // Insert message with role = 'tutor'
   const { data: msg, error: msgErr } = await db
@@ -4801,6 +5040,7 @@ async function handleTutorPostMessage(
       role: "tutor",
       content,
       image_url: imageUrl,
+      task_id: taskId,
       task_order: taskOrder,
       message_kind: visibleToStudent ? "tutor_message" : "tutor_note",
       visible_to_student: visibleToStudent,

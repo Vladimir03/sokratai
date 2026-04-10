@@ -504,13 +504,19 @@ export interface TutorHomeworkResultsPerStudent {
   /**
    * Per-task breakdown for the heatmap grid (Results v2 TASK-5).
    *
-   * Only tasks with an existing `homework_tutor_task_states` row for this
-   * student appear in the array — absence means "не приступал к этой задаче"
-   * and the frontend renders a grey cell with an em-dash. `final_score`
-   * follows the same priority chain as `final_score_total`
-   * (`tutor_score_override → ai_score → earned_score → status fallback`).
+   * Only **individually completed** task_states appear in the array — absence
+   * means "не приступал к этой задаче" and the frontend renders a grey cell
+   * with an em-dash. For active (in-progress) threads, only tasks the student
+   * has actually solved are included; precreated "active" stubs are omitted.
    *
-   * For not-submitted students this is always `[]`.
+   * `final_score` follows the priority chain
+   * `tutor_score_override → earned_score → ai_score → status fallback`
+   * (same as `computeFinalScore` on the backend). `earned_score` takes
+   * precedence over `ai_score` so the tutor sees the same hint-degraded
+   * score as the student.
+   *
+   * For not-started students (no thread) this is always `[]`.
+   * For in-progress students, it contains only their solved tasks.
    */
   task_scores: {
     task_id: string;
@@ -527,12 +533,15 @@ export interface TutorHomeworkResultsPerStudent {
   }[];
 
   /**
-   * Σ final_score across all completed-thread task_states for this student,
-   * computed via the same `computeFinalScore` priority chain as
-   * `final_score_total` (no formula duplication). Always 0 for not-submitted
-   * students. 0 if `total_max === 0` (empty assignment guard).
+   * Σ final_score across task_states for this student, computed via
+   * `computeFinalScore` (`tutor_score_override → earned_score → ai_score →
+   * status fallback`). For submitted students: sum over completed thread.
+   * For in-progress students: sum over individually-completed tasks only.
+   * 0 for not-started students. 0 if `total_max === 0` (empty assignment).
    *
-   * Source: `homework-student-totals` spec AC-9 / P0-1.
+   * Known gap: when a tutor sets `tutor_score_override`, this value reflects
+   * the override, but the student-side UI still shows `earned_score`. Full
+   * unification of override visibility is a separate slice.
    */
   total_score: number;
 
@@ -678,6 +687,7 @@ export async function postTutorThreadMessage(
   options?: {
     visible_to_student?: boolean;
     task_order?: number;
+    task_id?: string;
     image_url?: string;
   },
 ): Promise<{ id: string; created_at: string }> {
@@ -689,6 +699,7 @@ export async function postTutorThreadMessage(
         content,
         visible_to_student: options?.visible_to_student ?? true,
         task_order: options?.task_order,
+        task_id: options?.task_id,
         image_url: options?.image_url,
       }),
     },

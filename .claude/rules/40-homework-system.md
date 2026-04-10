@@ -73,11 +73,12 @@
 - Route `/tutor/homework/:id/results` оставлен как `<Navigate to="/tutor/homework/:id" replace>` (local helper `RedirectHomeworkResultsToDetail` в `App.tsx`) — backward compat для старых Telegram/push уведомлений
 - `ResultsHeader` получил optional `rightSlot?: ReactNode` + `backTo?: string`. Detail передаёт `rightSlot={<DetailActions status=... />}` — внутри status badge («Черновик»/«Активное»/«Завершено») + «Редактировать» + «Удалить ДЗ». На мобиле кнопки = icon-only (`hidden md:inline` для текста)
 - Секция «Задачи» в Detail — **collapsible**, свёрнута по умолчанию (`useState(false)`). Раскрытие по клику на заголовок с chevron
-- **Semantic invariant: метрика «Требует внимания»** в шапке = `notStarted + per_student.filter(s => s.needs_attention).length`. Backend считает `needs_attention` только для сдавших (`final_score < 0.3 × max_score` OR `hint_total >= ceil(tasks.length * 0.6)`) и явно ставит `false` для не сдавших. Поэтому frontend **обязан** прибавлять `notStarted` — иначе метрика в шапке не согласуется с action block ниже (который рендерит один danger-пункт на каждого не сдавшего)
+- **Semantic invariant: метрика «Требует внимания»** в шапке = `notStarted + per_student.filter(s => s.needs_attention).length`. Backend считает `needs_attention` для сдавших (`final_score < 0.3 × max_score` OR `hint_total >= ceil(tasks.length * 0.6)`) и явно ставит `false` для не сдавших и in-progress. Frontend **обязан** прибавлять `notStarted` — иначе метрика в шапке не согласуется с action block. In-progress студенты выделены в отдельную метрику «В процессе» в `ResultsHeader` и отдельную секцию в `ResultsActionBlock`
 - Условия попадания в «Требует внимания» (логическое ИЛИ):
-  1. Не приступал (нет completed thread) — `notStarted` на frontend
+  1. Не приступал (нет thread вообще) — `notStarted` на frontend
   2. Сдал с `final_score < 30% max_score` — `lowScore` в backend
   3. Сдал + `hint_total >= ceil(tasks.length * 0.6)` — `overuse` в backend
+- **In-progress студенты НЕ входят в «Требует внимания»** — они отображаются отдельно (метрика «В процессе» + своя секция в action block)
 - Query key unification: Detail использует `['tutor','homework','detail', id]` для assignment query, `['tutor','homework','results', id]` для results query. `TutorHomeworkResults` раньше использовал `['tutor','homework','assignment', id]` — этот ключ **больше не используется**, не копировать в новый код
 - `hintTotalByStudent: Map<string, number>` строится **внутри** `HeatmapGrid` из `results.per_student` (прежде в Detail) — чип «Много подсказок» рендерится рядом с delivery badge при `hintTotal >= hintOveruseThreshold(taskCount)`
 - Defensive guards обязательны: `results.per_student ?? []` в telemetry useEffect, `perStudent ?? []` + `assignedStudents ?? []` в `ResultsActionBlock.useMemo`, `per_student ?? []` в `HeatmapGrid` useMemo — backend может транзиентно вернуть response без `per_student` поля
@@ -103,7 +104,7 @@ Audit/normalize/optimize/harden pass на `/tutor/homework` и `/tutor/homework/
 
 `handleGetResults` возвращает в каждом `per_student` четыре additive-поля для правых колонок HeatmapGrid (фича `homework-student-totals`):
 
-- `total_score: number` — Σ `final_score` через **существующий** `computeFinalScore(ts, maxScore)`. Не дублировать формулу. `0` для не сдавших и при `total_max === 0`.
+- `total_score: number` — Σ `final_score` через **существующий** `computeFinalScore(ts, maxScore)`. Приоритет: `tutor_score_override → earned_score → ai_score → status fallback`. Не дублировать формулу. Для in-progress студентов — партиальная сумма по individually-completed задачам. `0` для не приступавших и при `total_max === 0`.
 - `total_max: number` — `assignmentMaxScoreTotal`, считается один раз вне цикла per_student. Одинаков для всех учеников данного ДЗ. `0` только если у ДЗ нет задач.
 - `hint_total: number` — уже существовал, оставлен как есть (= `acc.hints`).
 - `total_time_minutes: number | null` — wall-clock минуты между min/max `created_at` по всем тредам ученика **любого статуса** (completed И in-progress). `Math.max(1, round(diff_ms/60000))`. `null` если нет thread/messages. Фронт использует связку `submitted` + `total_time_minutes` для 3-state рендеринга (`{N} мин` / `— в процессе` / `—`).
@@ -150,7 +151,7 @@ Audit/normalize/optimize/harden pass на `/tutor/homework` и `/tutor/homework/
 
 **Чип «Много подсказок» в sticky name column удалён.** Единственный визуальный сигнал hint overuse теперь — amber chip в колонке «Подсказки». Это single source of truth, не дублируется
 
-**Backend-gap (UX-отклонение от spec AC-4):** для `in_progress` студентов Балл и Подсказки показывают `—`, а не текущие агрегаты. Причина: backend (`handleGetResults`) возвращает `total_score=0`, `hint_total=0` для `submitted=false` — литеральный `0/14` неотличим от `not_started`. Исправление — P1, одновременно с backend-апгрейдом на партиальные агрегаты для in-progress. При изменении backend frontend должен обновить ветку `displayStatus === 'in_progress'` в `HeatmapRow`
+**Partial aggregates for in-progress (2026-04-10):** backend теперь fetches ALL threads (не только completed), populates `task_scores` для active threads (только individually-completed задачи), и строит партиальные агрегаты (`total_score`, `hint_total`) для in-progress студентов. Frontend показывает частичные баллы для in-progress студентов. Метрика «В процессе» выделена в отдельную карточку в `ResultsHeader`
 
 Спека: `docs/delivery/features/homework-student-totals/spec.md` (P0-2 ✅ Done 2026-04-08).
 
@@ -161,7 +162,7 @@ Audit/normalize/optimize/harden pass на `/tutor/homework` и `/tutor/homework/
 **Backend extension (Phase 2 prerequisite, в одном PR с TASK-5):**
 - `handleGetResults` (`supabase/functions/homework-api/index.ts`) теперь возвращает в каждом `per_student` поле `task_scores: { task_id; final_score; hint_count }[]`
 - Сборка через `taskScoresByStudent: Record<student_id, Record<task_id, ...>>` в основном цикле task_states — `final_score` идёт через тот же `computeFinalScore(ts, maxScore)` что и агрегаты, не дублировать формулу
-- Для `submitted=false` студентов → `task_scores: []`. Отсутствие task_id в массиве = «не приступал» = серая клетка с em-dash на фронте
+- Для `not_started` студентов (нет thread) → `task_scores: []`. Для `in_progress` студентов → `task_scores` содержит individually-completed задачи (не все). Отсутствие task_id в массиве = «не приступал к задаче» = серая клетка с em-dash на фронте
 - Тип в `src/lib/tutorHomeworkApi.ts` → `TutorHomeworkResultsPerStudent.task_scores` — additive поле, остальные не трогали
 
 **Цвета клеток (AC-2, single source of truth `getCellStyle`):**
@@ -453,12 +454,12 @@ Audit/normalize/optimize/harden pass на `/tutor/homework` и `/tutor/homework/
 - `_topicHint` — soft warning (non-blocking): ключи с суффиксом `Hint` не считаются blocking errors
 - Поле «Тема» в L0 (контейнере), НЕ в `HWExpandedParams`
 
-### Тренажёр формул — Formula Rounds (Phase 1a, 2026-04-05)
+### Тренажёр формул — Formula Rounds (standalone pivot, 2026-04-08)
 
-Новый homework-артефакт: ученик проходит раунд из 10 заданий по формулам (3-5 минут, 3 жизни).
+Phase 1 пивотится из homework-embedded preview в standalone public trainer `/trainer`. Backend groundwork для pivot уже реализован, но frontend route / cleanup preview-flow ещё идут отдельными TASK-ами. Источник требований: `docs/delivery/features/formula-round-phase-1/spec.md`.
 
 **Архитектура:**
-- **Formula engine — client-side** (`src/lib/formulaEngine/`). Нет AI-вызовов, нет edge functions. Генерация заданий из статической базы 12 формул кинематики. При добавлении разделов (динамика, etc.) — формулы переедут в DB
+- **Formula engine — client-side** (`src/lib/formulaEngine/`). Нет AI-вызовов. Генерация заданий из статической базы 12 формул кинематики. При добавлении разделов (динамика, etc.) — формулы переедут в DB
 - **Три типа заданий** по слоям знания (GDD §4.1, §4.5, §4.8):
   - Layer 3: `TrueOrFalseCard` — формула верна/неверна (мутации из `MUTATION_LIBRARY`)
   - Layer 2: `BuildFormulaCard` — собери формулу из токенов (числитель/знаменатель)
@@ -470,16 +471,45 @@ Audit/normalize/optimize/harden pass на `/tutor/homework` и `/tutor/homework/
 - **Все карточки возвращают raw answer**, correctness определяется ТОЛЬКО в `FormulaRoundScreen.handleAnswer` (single source of truth). НЕ ПЕРЕНОСИТЬ проверку обратно в карточки
 - Дистракторы: `relatedFormulas` first → sameSection backfill (GDD §6.4). НЕ shuffle(merged)
 
-**Фазы:**
-- **Phase 1a** (текущая): student-facing round UI + DB + formula engine. Ученик заходит по `/homework/:id/round/:roundId`
-- **Phase 1b** (отдельная spec): tutor assignment UI в TutorHomeworkCreate + tutor visibility в TutorHomeworkDetail/Results + homework completion integration
+**Уже реализовано в backend groundwork (2026-04-08):**
+- Миграция `supabase/migrations/20260408160000_trainer_standalone_schema.sql`:
+  - делает `student_id` nullable,
+  - добавляет `session_id`, `source`, `ip_hash`,
+  - создаёт partial index `idx_formula_round_results_trainer_recent`,
+  - добавляет RLS policy `trainer_results_no_anon_read`,
+  - дополнительно делает `round_id` nullable из-за реальной schema drift.
+- Публичная edge function `supabase/functions/trainer-submit/index.ts`:
+  - без JWT-check и без чтения `Authorization`,
+  - использует `service_role`,
+  - валидирует payload,
+  - считает `ip_hash = sha256(ip + TRAINER_IP_SALT)`,
+  - rate-limit'ит по таблице `formula_round_results`.
+
+**Schema drift, который обязаны учитывать следующие агенты:**
+- В текущем репо таблица `formula_round_results` использует `student_id` и `round_id`, а не `user_id` / `formula_round_id`.
+- В текущем репо сохраняется `duration_seconds`, не `duration_ms`.
+- Не предполагать существование колонок `homework_assignment_id`, `formula_round_id`, `client_started_at` в `formula_round_results`, пока новая миграция явно их не добавит.
+
+**Текущие фазы:**
+- **Phase 1 standalone** (в работе): `/trainer`, без auth, анонимная сессия, запись результата в `formula_round_results` через `trainer-submit`
+
+**TASK-3 screens migration ✅ Done (2026-04-08):**
+- `FormulaRoundScreen` props = `{ questions: FormulaQuestion[]; onComplete: (result: RoundResult) => void; onExit: () => void }`. Не принимает `roundConfig`, не держит `lives` state, не показывает section-label в header. Back button (Lucide `ArrowLeft`, 44×44, `touchAction: manipulation`, `aria-label="Выйти из раунда"`) слева от `RoundProgress`. Timing — `performance.now()` на mount и per-question, монотонно.
+- `RoundProgress` props = `{ current: number; total: number }`. Hearts полностью удалены (нет `Heart` import, нет `lives`/`maxLives` props). Counter — `text-base` (16px) для iOS Safari.
+- `RoundResultScreen` props = `{ result: RoundResult; onRetryWrong: () => void; onExit: () => void }`. Lives row / `MAX_LIVES` / `Heart` import удалены. Две CTA: «Пройти ещё раз» (primary, `bg-accent`, только при `weakFormulas.length > 0`, вызывает `onRetryWrong`) + «Назад» (вызывает `onExit`, full-width когда `weakFormulas.length === 0`). Weak-formulas rendering не тронут — AC-4 не регрессировал.
+- `RoundResult` type extended (не replaced): добавлено required поле `durationMs: number` рядом с существующим `durationSeconds`. `buildResult` в `FormulaRoundScreen` populate оба; `livesRemaining: 0`, `completed: true` теперь hardcoded. `durationSeconds` остаётся в type до TASK-5 cleanup (нужен `formulaRoundApi.ts`).
+- `FeedbackOverlay` переиспользован 1:1 без правок — `livesLost={0}` триггерит `!isCorrect && livesLost > 0` guard и heart badge не рендерится.
+- `handleAnswer` структурно не тронут — correctness checking остаётся single source of truth в `FormulaRoundScreen` (см. инвариант выше). Карточки по-прежнему возвращают raw answer.
+- `src/pages/StudentFormulaRound.tsx` получил минимальный compat patch (3 строки) чтобы prod build остался зелёным после смены сигнатур: `roundConfig` prop убран, `onRetryErrors → onRetryWrong`, `onClose → onExit`. **Файл целиком удалит TASK-5** вместе с `formulaRoundApi.ts`, `useFormulaRound.ts`, preview auth bypass и route `/homework/:id/round/:roundId`. Новый код **не должен** импортировать эти legacy-модули.
+- Следующий агент, делающий **TASK-4** (TrainerPage state machine), должен реализовать landing→round→result и передать в `FormulaRoundScreen` / `RoundResultScreen` только те props, которые они теперь принимают. `onNewRound` / `onChangeTopic` из оригинальной спек-цепочки state machine на уровне компонентов **не существуют** — обёртка над ними реализуется целиком внутри `TrainerPage` через `onExit` (возврат на landing) и условный re-generation раунда.
+- **Phase 1b** (future work, после standalone validation): tutor assignment UI в TutorHomeworkCreate + tutor visibility в TutorHomeworkDetail/Results + homework completion integration
 
 **DB таблицы:**
 - `formula_rounds` — конфигурация раунда (привязана к assignment, section, lives, question count)
-- `formula_round_results` — результаты прохождения (score, answers JSONB, weak_formulas JSONB)
-- RLS: student видит свои rounds/results. `tutor_read_results` policy **существует** (для Phase 1b), но tutor UI пока не реализован
+- `formula_round_results` — результаты прохождения; для trainer pivot уже используются `source`, `session_id`, `ip_hash`
+- RLS: student видит свои rounds/results. Для standalone trainer добавлена policy `trainer_results_no_anon_read`; tutor read policy сохраняется для future Phase 1b
 
-**Seed + preview QA path (2026-04-05):**
+**Legacy preview / seed notes:**
 - `supabase/seed/formula-round-seed.sql` — каноничный dev seed для formula rounds
 - Seed создаёт:
   - `test-tutor`
@@ -489,14 +519,9 @@ Audit/normalize/optimize/harden pass на `/tutor/homework` и `/tutor/homework/
   - 5 записей в `homework_tutor_student_assignments`
 - Все UUID в seed фиксированные. НЕ заменять на `gen_random_uuid()` — прямые ссылки должны оставаться воспроизводимыми
 - Password для seed students: `FormulaRound123!`
-- `StudentFormulaRound.tsx` поддерживает preview/dev-only auto-login по query param `?student=<seed_uuid>`
-- Этот bypass допустим **только** на:
-  - `localhost`
-  - `*.lovableproject.com`
-  - `*.lovable.app`, кроме `sokratai.lovable.app`
-- На production host (`sokratai.ru`, `sokratai.lovable.app`) query param `student` не должен открывать round без обычной auth session
+- Старый preview QA path через `StudentFormulaRound.tsx` и `?student=<seed_uuid>` считается legacy и не должен расширяться для standalone trainer. Для QA текущего pivot ориентир = `/trainer` + `trainer-submit`, не preview bypass.
 
-**Phase 1b tutor UI guardrails (обязательно для следующей реализации):**
+**Phase 1b tutor UI guardrails (future work — после Phase 1 standalone validation):**
 - НЕ создавать новый top-level tutor route ради formula rounds
 - Встраивать formula rounds только в существующие tutor surfaces:
   - `TutorHomeworkCreate.tsx` — assignment-time configuration
@@ -513,12 +538,11 @@ Audit/normalize/optimize/harden pass на `/tutor/homework` и `/tutor/homework/
 - `src/lib/formulaEngine/types.ts` — `FormulaQuestion`, `BuildFormulaAnswer`, `RoundResult`
 - `src/components/homework/formula-round/FormulaRoundScreen.tsx` — основной экран раунда (fullscreen, correctness checking)
 - `src/components/homework/formula-round/RoundResultScreen.tsx` — итоговый экран (score, weak formulas, retry)
-- `src/pages/StudentFormulaRound.tsx` — page component, route `/homework/:id/round/:roundId`
-- `src/hooks/useFormulaRound.ts` — React Query hooks
-- `src/lib/formulaRoundApi.ts` — API для сохранения результатов
-- `supabase/migrations/20260406_formula_rounds.sql` — миграция
+- `supabase/functions/trainer-submit/index.ts` — public submit endpoint for standalone trainer
+- `supabase/migrations/20260405083400_b315170e-7b05-4d42-941d-eb08b678cf2f.sql` — базовая preview schema
+- `supabase/migrations/20260408160000_trainer_standalone_schema.sql` — standalone trainer adjustments
 
-**Спека:** `docs/delivery/features/formula-rounds/spec.md`
+**Спека:** `docs/delivery/features/formula-round-phase-1/spec.md`
 **GDD (source of truth для gameplay):** `docs/SokratAI_physics_game-design-document.md`
 
 ### Reorder задач в конструкторе ДЗ (2026-03-19)
