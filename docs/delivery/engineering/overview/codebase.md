@@ -92,7 +92,7 @@ All pages are lazy-loaded via `React.lazy()` + `<Suspense>` in `App.tsx`.
 | `/homework` | `StudentHomework` | AuthGuard | Student homework list (tutor-assigned) |
 | `/homework/:id` | `StudentHomeworkDetail` | AuthGuard | Assignment detail + guided chat |
 | `/progress` | `Progress` | AuthGuard | Progress tracking |
-| `/profile` | `Profile` | AuthGuard | User profile |
+| `/profile` | `Profile` | AuthGuard | User profile. Contains the `Premium (dev)` toggle only for explicit demo accounts: `VladimirKam` and `Георгий` |
 | `/miniapp` | `MiniApp` | No | Telegram Mini App entry |
 | `/miniapp/solution/:id` | `MiniAppSolution` | No | Solution viewer |
 | `/admin` | `Admin` | AdminGuard | Admin dashboard |
@@ -156,7 +156,7 @@ All tutor pages are wrapped in `<TutorGuard>` (inside each page or layout). The 
 | `tutorQueryOptions.ts` | Shared React Query config for tutor queries: timeout 10s, 5 retries, staleTime 60s, gcTime 600s, refetchOnWindowFocus |
 | `useTutorHomework.ts` | Tutor homework hooks |
 | `useTutorAccess.ts` | **Exception**: uses `getUser()` for Navigation role check only. Do not copy this pattern. |
-| `useSubscription.ts` | Student subscription state |
+| `useSubscription.ts` | Student subscription state. Source of truth for premium/trial/free UI state; `/profile` adds a separate UI-only allowlist for the demo accounts `VladimirKam` and `Георгий` |
 | `usePractice.ts` | Student practice hooks |
 | `useDiagnostic.ts` | Student diagnostic hooks |
 | `useAdminAccess.ts` | Admin access check |

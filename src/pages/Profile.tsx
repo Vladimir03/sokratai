@@ -29,6 +29,8 @@ interface UserStats {
 }
 
 const BOT_NAME = "sokratai_ru_bot";
+const PREMIUM_DEV_USERNAMES = new Set(["VladimirKam", "Георгий"]);
+
 const pluralizeDays = (days: number) => {
   const mod10 = days % 10;
   const mod100 = days % 100;
@@ -53,6 +55,7 @@ const Profile = () => {
   const [showPaymentSuccess, setShowPaymentSuccess] = useState(false);
   const [isPremiumConfirmed, setIsPremiumConfirmed] = useState(false);
   const [searchParams] = useSearchParams();
+  const canTogglePremiumDev = profile?.username ? PREMIUM_DEV_USERNAMES.has(profile.username) : false;
 
   // #region agent log helpers
   const dbg = (hypothesisId: string, location: string, message: string, data: Record<string, unknown>) => {
@@ -442,8 +445,8 @@ const Profile = () => {
                         Оформить Premium
                       </Button>
                     )}
-                    {/* Dev toggle: Premium for VladimirKam only */}
-                    {profile?.username === 'VladimirKam' && (
+                    {/* Dev toggle for explicit demo accounts only */}
+                    {canTogglePremiumDev && (
                       <div className="flex items-center gap-2">
                         <Crown className="w-4 h-4 text-amber-500" />
                         <span className="text-sm text-muted-foreground">Premium (dev)</span>
