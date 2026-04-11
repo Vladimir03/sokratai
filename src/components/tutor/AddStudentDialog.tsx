@@ -282,7 +282,7 @@ export function AddStudentDialog({
             {inviteCode ? (
               <>
                 <div className="flex justify-center p-4 bg-white rounded-lg">
-                  <QRCode value={inviteTelegramLink} size={180} />
+                  <QRCode value={inviteWebLink} size={180} />
                 </div>
                 
                 <div className="text-center">

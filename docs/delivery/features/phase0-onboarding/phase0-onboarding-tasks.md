@@ -607,6 +607,7 @@ Telegram          [____________]  ← теперь опциональное
 - [x] Подсказка «Рекомендуем email» видна
 - [x] `font-size ≥ 16px` на input (iOS)
 - [x] При submit: передаём email в `manualAddTutorStudent()`
+- [x] Во вкладке `По ссылке` QR-код ведёт на тот же web invite URL `/invite/:code`, что и кнопка `Копировать ссылку`
 
 ---
 

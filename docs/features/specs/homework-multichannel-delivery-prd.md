@@ -176,6 +176,7 @@ Acceptance criteria:
 - [x] Новое поле: `email` (type="email", `text-base` для iOS). Хотя бы одно из `email` / `telegram_username` заполнено
 - [x] Email validation: regex `^[^\s@]+@[^\s@]+\.[^\s@]+$` на frontend + backend
 - [x] Подсказка: «Рекомендуем указать email — Telegram может быть недоступен»
+- [x] Во вкладке `По ссылке` QR-код и кнопка `Копировать ссылку` используют один и тот же web invite URL `https://sokratai.ru/invite/:code`
 - [x] При добавлении по email: edge function ищет существующий профиль через `auth.admin.getUserByEmail()` (indexed lookup)
 - [x] Если не найден → `admin.createUser({ email, email_confirm: true, password: random })` — auto-confirmed placeholder
 - [x] Если найден → использует его id, создаёт `tutor_students` link без дубликата
