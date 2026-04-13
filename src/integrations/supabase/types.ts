@@ -3100,14 +3100,6 @@ export type Database = {
           student_id: string
         }[]
       }
-      get_students_contact_info: {
-        Args: { student_ids: string[] }
-        Returns: {
-          has_real_email: boolean
-          login_email: string | null
-          student_id: string
-        }[]
-      }
       get_subscription_status: {
         Args: { p_user_id: string }
         Returns: {
