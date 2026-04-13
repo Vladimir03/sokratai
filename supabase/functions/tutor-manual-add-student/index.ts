@@ -12,8 +12,8 @@ function normalizeUsername(value: string): string {
   return value.trim().replace(/^@/, "").toLowerCase();
 }
 
-function generateFourDigitPassword(): string {
-  return Math.floor(1000 + Math.random() * 9000).toString();
+function generatePassword(): string {
+  return Math.floor(100000 + Math.random() * 900000).toString();
 }
 
 Deno.serve(async (req) => {
@@ -122,7 +122,7 @@ Deno.serve(async (req) => {
         );
       }
 
-      const newPassword = generateFourDigitPassword();
+      const newPassword = generatePassword();
       const { error: passwordUpdateError } = await supabaseAdmin.auth.admin.updateUserById(studentId, {
         password: newPassword,
       });
@@ -251,7 +251,7 @@ Deno.serve(async (req) => {
     // Step 3: Create user if not found
     if (!studentId) {
       const userEmail = email || `manual_${crypto.randomUUID()}@temp.sokratai.ru`;
-      const randomPassword = generateFourDigitPassword();
+      const randomPassword = generatePassword();
       isNewUser = true;
       loginEmail = userEmail;
       plainPassword = randomPassword;

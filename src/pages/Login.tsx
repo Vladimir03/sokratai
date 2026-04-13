@@ -11,7 +11,7 @@ import { claimPendingInvite } from "@/lib/inviteApi";
 
 const loginSchema = z.object({
   email: z.string().trim().email({ message: "Неверный формат email" }).max(255),
-  password: z.string().min(4, { message: "Минимум 4 символа" }),
+  password: z.string().min(6, { message: "Минимум 6 символов" }),
 });
 
 const Login = () => {
