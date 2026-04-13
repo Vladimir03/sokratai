@@ -1809,6 +1809,7 @@ export type Database = {
           id: string
           last_diagnostic_at: string | null
           last_diagnostic_score: number | null
+          last_sign_in_at: string | null
           last_streak_update: string | null
           learning_goal: string | null
           onboarding_completed: boolean | null
@@ -1830,6 +1831,7 @@ export type Database = {
           id: string
           last_diagnostic_at?: string | null
           last_diagnostic_score?: number | null
+          last_sign_in_at?: string | null
           last_streak_update?: string | null
           learning_goal?: string | null
           onboarding_completed?: boolean | null
@@ -1851,6 +1853,7 @@ export type Database = {
           id?: string
           last_diagnostic_at?: string | null
           last_diagnostic_score?: number | null
+          last_sign_in_at?: string | null
           last_streak_update?: string | null
           learning_goal?: string | null
           onboarding_completed?: boolean | null
@@ -3088,6 +3091,13 @@ export type Database = {
           student_name: string
           tutor_id: string
           tutor_telegram_id: string
+        }[]
+      }
+      get_students_real_email_flags: {
+        Args: { student_ids: string[] }
+        Returns: {
+          has_real_email: boolean
+          student_id: string
         }[]
       }
       get_subscription_status: {
