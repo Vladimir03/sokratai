@@ -14,3 +14,30 @@ export const supabase = createClient<Database>(SUPABASE_URL, SUPABASE_PUBLISHABL
     autoRefreshToken: true,
   }
 });
+
+/**
+ * Extract user-friendly error message from auth errors.
+ * Converts raw "Failed to fetch" into actionable Russian message
+ * and logs diagnostic info for debugging.
+ */
+export function getAuthErrorMessage(error: unknown, fallback: string): string {
+  const message =
+    error instanceof Error
+      ? error.message
+      : typeof error === 'string'
+        ? error
+        : String(error ?? '');
+
+  if (message.toLowerCase().includes('fetch')) {
+    console.error('[Auth] Network error:', {
+      message,
+      online: typeof navigator !== 'undefined' ? navigator.onLine : 'N/A',
+      userAgent: typeof navigator !== 'undefined' ? navigator.userAgent : 'N/A',
+      supabaseUrl: SUPABASE_URL,
+      origin: typeof window !== 'undefined' ? window.location.origin : 'N/A',
+    });
+    return 'Ошибка сети. Проверьте подключение к интернету и попробуйте снова.';
+  }
+
+  return message || fallback;
+}

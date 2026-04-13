@@ -71,10 +71,19 @@ export interface TutorStudentWithProfile extends TutorStudent {
     telegram_user_id: number | null;
     grade: number | null;
     learning_goal?: string | null;
+    last_sign_in_at?: string | null;
   };
   pending_amount?: number;
   overdue_amount?: number;
   debt_amount?: number;
+  /** From profiles.last_sign_in_at (synced from auth.users via trigger) */
+  last_sign_in_at?: string | null;
+  /** Email is real (not @temp.sokratai.ru). Resolved via RPC get_students_real_email_flags */
+  has_real_email?: boolean;
+  /** profiles.telegram_user_id IS NOT NULL — bot is linked */
+  has_telegram_bot?: boolean;
+  /** profiles.telegram_username IS NOT NULL AND != '' */
+  has_telegram_username?: boolean;
 }
 
 // Для создания связи
@@ -107,6 +116,19 @@ export interface ManualAddTutorStudentResponse {
   tutor_student_id: string;
   student_id: string;
   created: boolean;
+  existing?: boolean;
+  login_email?: string;
+  plain_password?: string;
+}
+
+export interface ResetStudentPasswordInput {
+  student_id: string;
+}
+
+export interface ResetStudentPasswordResponse {
+  student_id: string;
+  login_email: string;
+  plain_password: string;
 }
 
 export interface UpdateTutorStudentProfileInput {

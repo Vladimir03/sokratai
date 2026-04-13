@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import QRCode from 'react-qr-code';
 import {
   Dialog,
@@ -27,8 +28,9 @@ import {
 } from '@/components/ui/accordion';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Switch } from '@/components/ui/switch';
-import { Copy, ExternalLink, Check, Loader2, Link, UserPlus } from 'lucide-react';
+import { Copy, Check, Link, UserPlus } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
+import { StudentCredentialsModal } from '@/components/tutor/StudentCredentialsModal';
 import { manualAddTutorStudent } from '@/lib/tutors';
 import type { ManualAddTutorStudentInput, TutorGroup } from '@/types/tutor';
 
@@ -45,12 +47,17 @@ interface AddStudentDialogProps {
   onManualAdded: (tutorStudentId: string) => void;
 }
 
+type StudentCredentialsData = {
+  studentName: string;
+  loginEmail: string;
+  plainPassword: string;
+};
+
 export function AddStudentDialog({
   open,
   onOpenChange,
   inviteCode,
   inviteWebLink,
-  inviteTelegramLink,
   miniGroupsEnabled,
   groups,
   onCreateGroup,
@@ -58,8 +65,11 @@ export function AddStudentDialog({
   onManualAdded,
 }: AddStudentDialogProps) {
   const { toast } = useToast();
+  const queryClient = useQueryClient();
   const [copied, setCopied] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [credentialsData, setCredentialsData] = useState<StudentCredentialsData | null>(null);
+  const [pendingTutorStudentId, setPendingTutorStudentId] = useState<string | null>(null);
 
   // Learning goal preset state
   const [learningGoalPreset, setLearningGoalPreset] = useState<string>('');
@@ -110,8 +120,32 @@ export function AddStudentDialog({
   const handleDialogOpenChange = (nextOpen: boolean) => {
     if (!nextOpen) {
       resetManualForm();
+      setCredentialsData(null);
+      setPendingTutorStudentId(null);
     }
     onOpenChange(nextOpen);
+  };
+
+  const finalizeManualAdd = (tutorStudentId: string) => {
+    void queryClient.invalidateQueries({ queryKey: ['tutor', 'students'] });
+    setCredentialsData(null);
+    setPendingTutorStudentId(null);
+    resetManualForm();
+    onOpenChange(false);
+    onManualAdded(tutorStudentId);
+  };
+
+  const handleCredentialsModalOpenChange = (nextOpen: boolean) => {
+    if (nextOpen) {
+      return;
+    }
+
+    if (pendingTutorStudentId) {
+      finalizeManualAdd(pendingTutorStudentId);
+      return;
+    }
+
+    setCredentialsData(null);
   };
 
   const handleCopyLink = async () => {
@@ -130,10 +164,6 @@ export function AddStudentDialog({
         variant: 'destructive',
       });
     }
-  };
-
-  const handleOpenTelegram = () => {
-    window.open(inviteTelegramLink, '_blank');
   };
 
   const handleCreateMiniGroup = async () => {
@@ -216,6 +246,7 @@ export function AddStudentDialog({
 
     setIsSubmitting(true);
     try {
+      const studentName = formData.name.trim();
       const response = await manualAddTutorStudent({
         ...formData,
         learning_goal: learningGoal,
@@ -235,18 +266,32 @@ export function AddStudentDialog({
         }
       }
 
-      toast({
-        title: 'Ученик добавлен',
-        description: membershipSyncFailed
-          ? `${formData.name} добавлен. Привязку к группе повторите в профиле ученика.`
-          : `${formData.name} успешно добавлен`,
-        variant: membershipSyncFailed ? 'destructive' : 'default',
+      if (response.existing) {
+        toast({
+          title: 'Ученик уже зарегистрирован',
+        });
+        finalizeManualAdd(response.tutor_student_id);
+        return;
+      }
+
+      if (!response.login_email || !response.plain_password) {
+        throw new Error('Не удалось получить данные для входа ученика');
+      }
+
+      if (membershipSyncFailed) {
+        toast({
+          title: 'Ученик добавлен',
+          description: `${studentName} добавлен. Привязку к группе повторите в профиле ученика.`,
+          variant: 'destructive',
+        });
+      }
+
+      setPendingTutorStudentId(response.tutor_student_id);
+      setCredentialsData({
+        studentName,
+        loginEmail: response.login_email,
+        plainPassword: response.plain_password,
       });
-
-      resetManualForm();
-
-      onOpenChange(false);
-      onManualAdded(response.tutor_student_id);
     } catch (error) {
       toast({
         title: 'Ошибка',
@@ -259,8 +304,9 @@ export function AddStudentDialog({
   };
 
   return (
-    <Dialog open={open} onOpenChange={handleDialogOpenChange}>
-      <DialogContent className="sm:max-w-2xl">
+    <>
+      <Dialog open={open} onOpenChange={handleDialogOpenChange}>
+        <DialogContent className="sm:max-w-2xl">
         <DialogHeader>
           <DialogTitle>Добавить ученика</DialogTitle>
         </DialogHeader>
@@ -376,7 +422,7 @@ export function AddStudentDialog({
                       value={learningGoalPreset || undefined}
                       onValueChange={(value) => setLearningGoalPreset(value)}
                     >
-                      <SelectTrigger>
+                      <SelectTrigger className="text-base">
                         <SelectValue placeholder="Выберите цель" />
                       </SelectTrigger>
                       <SelectContent>
@@ -456,7 +502,7 @@ export function AddStudentDialog({
                                 value={selectedGroupId || undefined}
                                 onValueChange={(value) => setSelectedGroupId(value)}
                               >
-                                <SelectTrigger>
+                                <SelectTrigger className="text-base">
                                   <SelectValue placeholder="Выберите мини-группу" />
                                 </SelectTrigger>
                                 <SelectContent>
@@ -545,7 +591,7 @@ export function AddStudentDialog({
                               )
                             }
                           >
-                            <SelectTrigger>
+                            <SelectTrigger className="text-base">
                               <SelectValue placeholder="Не выбран" />
                             </SelectTrigger>
                             <SelectContent>
@@ -617,6 +663,7 @@ export function AddStudentDialog({
                           }
                           placeholder="Дополнительные детали о ученике"
                           rows={3}
+                          className="text-base"
                         />
                       </div>
                     </AccordionContent>
@@ -627,7 +674,7 @@ export function AddStudentDialog({
                   <Button
                     type="button"
                     variant="ghost"
-                    onClick={() => onOpenChange(false)}
+                    onClick={() => handleDialogOpenChange(false)}
                     disabled={isSubmitting}
                   >
                     Отмена
@@ -639,8 +686,19 @@ export function AddStudentDialog({
               </form>
             </ScrollArea>
           </TabsContent>
-        </Tabs>
-      </DialogContent>
-    </Dialog>
+          </Tabs>
+        </DialogContent>
+      </Dialog>
+
+      {credentialsData && (
+        <StudentCredentialsModal
+          open={Boolean(credentialsData)}
+          onOpenChange={handleCredentialsModalOpenChange}
+          studentName={credentialsData.studentName}
+          loginEmail={credentialsData.loginEmail}
+          plainPassword={credentialsData.plainPassword}
+        />
+      )}
+    </>
   );
 }

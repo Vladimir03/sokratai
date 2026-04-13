@@ -12,6 +12,10 @@ function normalizeUsername(value: string): string {
   return value.trim().replace(/^@/, "").toLowerCase();
 }
 
+function generateFourDigitPassword(): string {
+  return Math.floor(1000 + Math.random() * 9000).toString();
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -48,38 +52,11 @@ Deno.serve(async (req) => {
     }
 
     const body = await req.json();
+    const action = typeof body.action === "string" ? body.action : "manual-add-student";
     const name = typeof body.name === "string" ? body.name.trim() : "";
     const telegramUsernameRaw = typeof body.telegram_username === "string" ? body.telegram_username : "";
     const emailRaw = typeof body.email === "string" ? body.email.trim().toLowerCase() : "";
     const learningGoalRaw = typeof body.learning_goal === "string" ? body.learning_goal : "";
-
-    if (!name) {
-      return new Response(
-        JSON.stringify({ error: "Name is required" }),
-        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } },
-      );
-    }
-
-    if (!telegramUsernameRaw.trim() && !emailRaw) {
-      return new Response(
-        JSON.stringify({ error: "Email or Telegram username is required" }),
-        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } },
-      );
-    }
-
-    if (emailRaw && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailRaw)) {
-      return new Response(
-        JSON.stringify({ error: "Invalid email format" }),
-        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } },
-      );
-    }
-
-    if (!learningGoalRaw.trim()) {
-      return new Response(
-        JSON.stringify({ error: "Learning goal is required" }),
-        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } },
-      );
-    }
 
     const telegramUsername = telegramUsernameRaw.trim() ? normalizeUsername(telegramUsernameRaw) : "";
     const email = emailRaw;
@@ -103,9 +80,105 @@ Deno.serve(async (req) => {
       );
     }
 
+    if (action === "reset-student-password") {
+      const studentId = typeof body.student_id === "string" ? body.student_id.trim() : "";
+
+      if (!studentId) {
+        return new Response(
+          JSON.stringify({ error: "student_id is required" }),
+          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+        );
+      }
+
+      const { data: tutorStudentLink, error: tutorStudentError } = await supabaseAdmin
+        .from("tutor_students")
+        .select("student_id")
+        .eq("tutor_id", tutor.id)
+        .eq("student_id", studentId)
+        .maybeSingle();
+
+      if (tutorStudentError) {
+        console.error("Failed to verify tutor student ownership:", tutorStudentError);
+        return new Response(
+          JSON.stringify({ error: "Failed to verify student ownership" }),
+          { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+        );
+      }
+
+      if (!tutorStudentLink) {
+        return new Response(
+          JSON.stringify({ error: "Student not found or access denied" }),
+          { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+        );
+      }
+
+      const { data: authUserData, error: authUserError } = await supabaseAdmin.auth.admin.getUserById(studentId);
+      const authLoginEmail = authUserData?.user?.email ?? "";
+      if (authUserError || !authLoginEmail) {
+        console.error("Failed to resolve student auth user:", authUserError);
+        return new Response(
+          JSON.stringify({ error: "Failed to resolve student login" }),
+          { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+        );
+      }
+
+      const newPassword = generateFourDigitPassword();
+      const { error: passwordUpdateError } = await supabaseAdmin.auth.admin.updateUserById(studentId, {
+        password: newPassword,
+      });
+
+      if (passwordUpdateError) {
+        console.error("Failed to reset student password:", passwordUpdateError);
+        return new Response(
+          JSON.stringify({ error: "Failed to reset student password" }),
+          { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+        );
+      }
+
+      return new Response(
+        JSON.stringify({
+          student_id: studentId,
+          login_email: authLoginEmail,
+          plain_password: newPassword,
+        }),
+        { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      );
+    }
+
+    if (!name) {
+      return new Response(
+        JSON.stringify({ error: "Name is required" }),
+        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      );
+    }
+
+    if (!telegramUsernameRaw.trim() && !emailRaw) {
+      return new Response(
+        JSON.stringify({ error: "Email or Telegram username is required" }),
+        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      );
+    }
+
+    if (emailRaw && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailRaw)) {
+      return new Response(
+        JSON.stringify({ error: "Invalid email format" }),
+        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      );
+    }
+
+    if (!learningGoal) {
+      return new Response(
+        JSON.stringify({ error: "Learning goal is required" }),
+        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      );
+    }
+
     let studentId: string | null = null;
     let profileRegistrationSource: string | null = null;
     let existingTelegramUserId: number | null = null;
+    let isNewUser = false;
+    let loginEmail = "";
+    let plainPassword = "";
 
     // Step 1: Try to find existing user by email (priority) or telegram
     if (email) {
@@ -115,6 +188,7 @@ Deno.serve(async (req) => {
 
       if (!authUserError && authUserData?.user) {
         studentId = authUserData.user.id;
+        loginEmail = authUserData.user.email ?? email;
         const { data: emailProfile } = await supabaseAdmin
           .from("profiles")
           .select("id, registration_source, telegram_user_id, username")
@@ -143,6 +217,11 @@ Deno.serve(async (req) => {
         studentId = existingProfile.id;
         profileRegistrationSource = existingProfile.registration_source ?? null;
         existingTelegramUserId = existingProfile.telegram_user_id ?? null;
+        // Resolve login email from auth.users for telegram-found users
+        const { data: authUserByTg } = await supabaseAdmin.auth.admin.getUserById(existingProfile.id);
+        if (authUserByTg?.user?.email) {
+          loginEmail = authUserByTg.user.email;
+        }
       }
     }
 
@@ -172,7 +251,10 @@ Deno.serve(async (req) => {
     // Step 3: Create user if not found
     if (!studentId) {
       const userEmail = email || `manual_${crypto.randomUUID()}@temp.sokratai.ru`;
-      const randomPassword = crypto.randomUUID() + crypto.randomUUID();
+      const randomPassword = generateFourDigitPassword();
+      isNewUser = true;
+      loginEmail = userEmail;
+      plainPassword = randomPassword;
 
       const { data: authData, error: authError } = await supabaseAdmin.auth.admin.createUser({
         email: userEmail,
@@ -299,8 +381,15 @@ Deno.serve(async (req) => {
           .eq("id", existingLink.id);
       }
 
+      const existingResponse: Record<string, unknown> = {
+        tutor_student_id: existingLink.id,
+        student_id: studentId,
+        created: false,
+        existing: true,
+        login_email: loginEmail,
+      };
       return new Response(
-        JSON.stringify({ tutor_student_id: existingLink.id, student_id: studentId, created: false }),
+        JSON.stringify(existingResponse),
         { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
       );
     }
@@ -321,8 +410,18 @@ Deno.serve(async (req) => {
           .eq("student_id", studentId)
           .single();
         if (raceLink) {
+          const raceResponse: Record<string, unknown> = {
+            tutor_student_id: raceLink.id,
+            student_id: studentId,
+            created: false,
+            existing: true,
+            login_email: loginEmail,
+          };
+          if (isNewUser && plainPassword) {
+            raceResponse.plain_password = plainPassword;
+          }
           return new Response(
-            JSON.stringify({ tutor_student_id: raceLink.id, student_id: studentId, created: false }),
+            JSON.stringify(raceResponse),
             { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
           );
         }
@@ -334,8 +433,17 @@ Deno.serve(async (req) => {
       );
     }
 
+    const successResponse: Record<string, unknown> = {
+      tutor_student_id: tutorStudent.id,
+      student_id: studentId,
+      created: true,
+      login_email: loginEmail,
+    };
+    if (isNewUser && plainPassword) {
+      successResponse.plain_password = plainPassword;
+    }
     return new Response(
-      JSON.stringify({ tutor_student_id: tutorStudent.id, student_id: studentId, created: true }),
+      JSON.stringify(successResponse),
       { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
     );
   } catch (error) {

@@ -9,6 +9,8 @@ import type {
   CreateTutorStudentInput,
   ManualAddTutorStudentInput,
   ManualAddTutorStudentResponse,
+  ResetStudentPasswordInput,
+  ResetStudentPasswordResponse,
   UpdateTutorStudentProfileInput,
   UpdateTutorStudentProfileResponse,
   UpdateTutorStudentInput,
@@ -42,7 +44,8 @@ const STUDENT_PROFILE_SELECT = `
     username,
     telegram_username,
     telegram_user_id,
-    grade
+    grade,
+    last_sign_in_at
   )
 `;
 
@@ -54,7 +57,8 @@ const STUDENT_PROFILE_DETAIL_SELECT = `
     telegram_username,
     telegram_user_id,
     grade,
-    learning_goal
+    learning_goal,
+    last_sign_in_at
   )
 `;
 
@@ -154,6 +158,48 @@ export async function updateTutor(
 }
 
 /**
+ * Batch-resolve has_real_email via RPC (SECURITY DEFINER reads auth.users).
+ */
+async function getStudentsRealEmailFlags(
+  studentIds: string[]
+): Promise<Map<string, boolean>> {
+  const map = new Map<string, boolean>();
+  if (studentIds.length === 0) return map;
+
+  const { data, error } = await supabase.rpc('get_students_real_email_flags', {
+    student_ids: studentIds,
+  });
+
+  if (error) {
+    console.error('Error fetching email flags:', error);
+    return map;
+  }
+
+  for (const row of data ?? []) {
+    map.set(row.student_id, row.has_real_email);
+  }
+  return map;
+}
+
+/**
+ * Enrich students with activation + channel flags.
+ */
+function enrichWithChannelFlags(
+  students: TutorStudentWithProfile[],
+  emailFlags: Map<string, boolean>
+): TutorStudentWithProfile[] {
+  return students.map((s) => ({
+    ...s,
+    last_sign_in_at: s.profiles?.last_sign_in_at ?? null,
+    has_real_email: emailFlags.get(s.student_id) ?? false,
+    has_telegram_bot: s.profiles?.telegram_user_id != null,
+    has_telegram_username:
+      s.profiles?.telegram_username != null &&
+      s.profiles.telegram_username !== '',
+  }));
+}
+
+/**
  * Получить список учеников репетитора
  */
 export async function getTutorStudents(): Promise<TutorStudentWithProfile[]> {
@@ -172,8 +218,16 @@ export async function getTutorStudents(): Promise<TutorStudentWithProfile[]> {
   }
 
   const students = (data ?? []) as TutorStudentWithProfile[];
-  const debtMap = await getTutorStudentsDebtMap();
-  return enrichWithDebt(students, debtMap);
+
+  // Parallel: debt map + email flags
+  const studentIds = students.map((s) => s.student_id);
+  const [debtMap, emailFlags] = await Promise.all([
+    getTutorStudentsDebtMap(),
+    getStudentsRealEmailFlags(studentIds),
+  ]);
+
+  const withDebt = enrichWithDebt(students, debtMap);
+  return enrichWithChannelFlags(withDebt, emailFlags);
 }
 
 /**
@@ -419,6 +473,31 @@ export async function manualAddTutorStudent(
 }
 
 /**
+ * Сбросить пароль ученика и вернуть новые данные для входа.
+ */
+export async function resetStudentPassword(
+  input: ResetStudentPasswordInput,
+): Promise<ResetStudentPasswordResponse> {
+  const { data, error } = await supabase.functions.invoke("tutor-manual-add-student", {
+    body: {
+      action: "reset-student-password",
+      ...input,
+    },
+  });
+
+  if (error) {
+    console.error("Error resetting student password:", error, "data:", data);
+    const detail =
+      (data && typeof data === "object" && typeof (data as any).error === "string")
+        ? (data as any).error
+        : error.message || "Не удалось сбросить пароль ученика";
+    throw new Error(detail);
+  }
+
+  return data as ResetStudentPasswordResponse;
+}
+
+/**
  * Обновить профиль ученика (через edge function)
  */
 export async function updateTutorStudentProfile(
@@ -453,8 +532,14 @@ export async function getTutorStudent(
     return null;
   }
 
-  const debtMap = await getTutorStudentsDebtMap();
-  return enrichWithDebt([data as TutorStudentWithProfile], debtMap)[0];
+  const student = data as TutorStudentWithProfile;
+  const [debtMap, emailFlags] = await Promise.all([
+    getTutorStudentsDebtMap(),
+    getStudentsRealEmailFlags([student.student_id]),
+  ]);
+
+  const withDebt = enrichWithDebt([student], debtMap);
+  return enrichWithChannelFlags(withDebt, emailFlags)[0];
 }
 
 async function getTutorStudentsDebtMap(): Promise<Map<string, TutorStudentDebtRow>> {

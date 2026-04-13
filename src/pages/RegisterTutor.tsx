@@ -3,7 +3,7 @@ import { useNavigate, Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { supabase } from "@/lib/supabaseClient";
+import { supabase, getAuthErrorMessage } from "@/lib/supabaseClient";
 import { toast } from "sonner";
 import { z } from "zod";
 import { GraduationCap } from "lucide-react";
@@ -115,7 +115,7 @@ const RegisterTutor = () => {
       navigate("/tutor/dashboard");
     } catch (error: any) {
       console.error("Registration error:", error);
-      toast.error(error.message || "Ошибка регистрации");
+      toast.error(getAuthErrorMessage(error, "Ошибка регистрации"));
     } finally {
       setLoading(false);
     }

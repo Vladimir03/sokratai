@@ -3,7 +3,7 @@ import { useNavigate, Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { supabase } from "@/lib/supabaseClient";
+import { supabase, getAuthErrorMessage } from "@/lib/supabaseClient";
 import { toast } from "sonner";
 import { z } from "zod";
 import TelegramLoginButton from "@/components/TelegramLoginButton";
@@ -85,7 +85,7 @@ const Login = () => {
       toast.success("Успешный вход!");
       navigate("/chat");
     } catch (error: any) {
-      toast.error(error.message || "Ошибка входа");
+      toast.error(getAuthErrorMessage(error, "Ошибка входа"));
     } finally {
       setLoading(false);
     }

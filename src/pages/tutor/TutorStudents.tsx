@@ -17,6 +17,7 @@ import { TutorLayout } from '@/components/tutor/TutorLayout';
 import { TutorDataStatus } from '@/components/tutor/TutorDataStatus';
 import { StudentCard } from '@/components/tutor/StudentCard';
 import { AddStudentDialog } from '@/components/tutor/AddStudentDialog';
+import { StudentCredentialsModal } from '@/components/tutor/StudentCredentialsModal';
 import { 
   StudentsToolbar, 
   type SortField, 
@@ -33,6 +34,7 @@ import { useTutorStudents, useTutor, useTutorGroups, useTutorGroupMemberships } 
 import {
   createTutorGroup,
   deactivateTutorGroupMembership,
+  resetStudentPassword,
   setTutorMiniGroupsEnabled,
   upsertTutorGroupMembership,
 } from '@/lib/tutors';
@@ -49,6 +51,12 @@ type StudentWithExtras = TutorStudentWithProfile & {
   last_activity_at?: string | null;
   mini_group: TutorGroup | null;
   mini_group_membership: TutorGroupMembership | null;
+};
+
+type StudentCredentialsData = {
+  studentName: string;
+  loginEmail: string;
+  plainPassword: string;
 };
 
 function TutorStudentsContent() {
@@ -103,6 +111,8 @@ function TutorStudentsContent() {
   });
   const [page, setPage] = useState(1);
   const [inviteModalOpen, setInviteModalOpen] = useState(false);
+  const [credentialsData, setCredentialsData] = useState<StudentCredentialsData | null>(null);
+  const [resettingStudentId, setResettingStudentId] = useState<string | null>(null);
   const initialLoading = loading && students.length === 0 && !error;
   const hasErrors = Boolean(error || tutorError || (miniGroupsEnabled && (groupsError || membershipsError)));
   const isPageFetching = isFetching || tutorIsFetching || (miniGroupsEnabled && (groupsIsFetching || membershipsIsFetching));
@@ -341,6 +351,43 @@ function TutorStudentsContent() {
     }
   }, [miniGroupsEnabled, refetch, refetchGroups, refetchMemberships, refetchTutor]);
 
+  const handleCredentialsModalOpenChange = useCallback((nextOpen: boolean) => {
+    if (!nextOpen) {
+      setCredentialsData(null);
+    }
+  }, []);
+
+  const handleResetStudentPassword = useCallback(
+    async (student: StudentWithExtras) => {
+      if (resettingStudentId) {
+        return;
+      }
+
+      setResettingStudentId(student.student_id);
+      try {
+        const response = await resetStudentPassword({
+          student_id: student.student_id,
+        });
+
+        setCredentialsData({
+          studentName: student.profiles?.username || 'Ученик',
+          loginEmail: response.login_email,
+          plainPassword: response.plain_password,
+        });
+        toast.success('Пароль сброшен');
+      } catch (resetError) {
+        toast.error(
+          resetError instanceof Error
+            ? resetError.message
+            : 'Не удалось сбросить пароль ученика'
+        );
+      } finally {
+        setResettingStudentId(null);
+      }
+    },
+    [resettingStudentId]
+  );
+
   // Render pagination
   const renderPagination = () => {
     if (totalPages <= 1) return null;
@@ -495,6 +542,10 @@ function TutorStudentsContent() {
                     key={student.id}
                     student={student}
                     groupLabel={miniGroupsEnabled ? (student.mini_group?.short_name || student.mini_group?.name || null) : null}
+                    onCredentialsClick={() => {
+                      void handleResetStudentPassword(student);
+                    }}
+                    isResettingCredentials={resettingStudentId === student.student_id}
                     onClick={() => handleOpenStudent(student.id)}
                   />
                 ))}
@@ -506,6 +557,16 @@ function TutorStudentsContent() {
           </>
         )}
       </div>
+
+      {credentialsData && (
+        <StudentCredentialsModal
+          open={Boolean(credentialsData)}
+          onOpenChange={handleCredentialsModalOpenChange}
+          studentName={credentialsData.studentName}
+          loginEmail={credentialsData.loginEmail}
+          plainPassword={credentialsData.plainPassword}
+        />
+      )}
     </TutorLayout>
   );
 }

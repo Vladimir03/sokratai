@@ -3,7 +3,7 @@ import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { supabase } from "@/lib/supabaseClient";
+import { supabase, getAuthErrorMessage } from "@/lib/supabaseClient";
 import { toast } from "sonner";
 import { z } from "zod";
 import { ArrowLeft } from "lucide-react";
@@ -38,7 +38,7 @@ const ForgotPassword = () => {
       setSent(true);
       toast.success("Письмо отправлено!");
     } catch (error: any) {
-      toast.error(error.message || "Ошибка отправки");
+      toast.error(getAuthErrorMessage(error, "Ошибка отправки"));
     } finally {
       setLoading(false);
     }
