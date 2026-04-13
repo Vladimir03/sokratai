@@ -92,7 +92,7 @@ All pages are lazy-loaded via `React.lazy()` + `<Suspense>` in `App.tsx`.
 | `/homework` | `StudentHomework` | AuthGuard | Student homework list (tutor-assigned) |
 | `/homework/:id` | `StudentHomeworkDetail` | AuthGuard | Assignment detail + guided chat |
 | `/progress` | `Progress` | AuthGuard | Progress tracking |
-| `/profile` | `Profile` | AuthGuard | User profile. Contains the `Premium (dev)` toggle only for explicit demo accounts: `VladimirKam` and `Георгий` |
+| `/profile` | `Profile` | AuthGuard | User profile. Contains the `Premium (dev)` toggle only for explicit demo accounts (`VladimirKam`, `Георгий`), Telegram linking, and student self-service login data management (update email / password) |
 | `/miniapp` | `MiniApp` | No | Telegram Mini App entry |
 | `/miniapp/solution/:id` | `MiniAppSolution` | No | Solution viewer |
 | `/admin` | `Admin` | AdminGuard | Admin dashboard |
@@ -249,6 +249,7 @@ All tutor queries follow the pattern `['tutor', entity, ...params]`:
 | `payment-reminder` | -- | Scheduled payment reminders |
 | `assign-tutor-role` | -- | Assigns tutor role to user |
 | `tutor-manual-add-student` | -- | Tutor adds student manually |
+| `student-account` | verify | Student self-service account management: update login email / password |
 | `tutor-update-student` | -- | Tutor updates student data |
 | `notify-booking` | -- | Booking notification |
 | `yookassa-create-payment` | verify | Creates YooKassa payment |

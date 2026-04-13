@@ -1,6 +1,6 @@
 # Feature Spec: Registration & Onboarding Redesign
 
-**Версия:** v0.2
+**Версия:** v0.3
 **Дата:** 2026-04-13
 **Автор:** Vladimir + Claude
 **Статус:** implemented (Sprint 1)
@@ -36,7 +36,7 @@
 
 Редизайн регистрации и онбординга для SokratAI по модели ProgressMe: репетитор добавляет ученика → система генерирует читаемый 4-значный пароль → репетитор видит модалку «Данные для входа» с кнопкой «Скопировать для отправки» → вставляет в Telegram ученику → ученик входит за 10 секунд.
 
-Дополнительно: репетитор видит на карточке ученика статус активации (вошёл / не входил) и привязанные каналы связи (Telegram, Email), чтобы понимать кому нужно напомнить о регистрации и через какой канал доходят уведомления о ДЗ.
+Дополнительно: репетитор видит на карточке ученика статус активации (вошёл / не входил) и привязанные каналы связи (Telegram, Email), чтобы понимать кому нужно напомнить о регистрации и через какой канал доходят уведомления о ДЗ. После первого входа ученик может в своём профиле заменить временный email на реальный, подключить Telegram и сменить пароль, а кабинет репетитора подтягивает эти изменения из актуальных auth-данных.
 
 ---
 
@@ -104,13 +104,17 @@
 - Welcome-экран при первом входе ученика
 - Авто-email с данными для входа (кнопка «Отпр. на почту»)
 - Кнопка «Сбросить пароль» в профиле ученика (tutor-side)
+- Self-service управление входными данными ученика в `/profile`:
+  - смена temp-email на реальный email
+  - смена пароля
+  - видимый статус привязанного Telegram
 
 **Out of scope:**
 - Batch-добавление учеников (batch form)
 - Роль «Родитель»
 - SSO / SAML
 - Telegram OAuth восстановление (заблокирован в РФ)
-- Смена пароля самим учеником (P3)
+- Email confirmation / double opt-in для учеников, добавленных репетитором
 
 ---
 
@@ -188,13 +192,20 @@ CREATE TRIGGER trg_sync_last_sign_in
 
 **`handleGetStudents` (или отдельный endpoint) — расширение response:**
 - `last_sign_in_at: string | null` — из `profiles.last_sign_in_at`
+- `login_email: string | null` — текущий `auth.users.email`
 - `has_real_email: boolean` — `email NOT LIKE '%@temp.sokratai.ru'`
 - `has_telegram_bot: boolean` — `profiles.telegram_user_id IS NOT NULL`
 - `has_telegram_username: boolean` — `profiles.telegram_username IS NOT NULL AND != ''`
 
+**Новый endpoint `student-account`:**
+- `action: "update-email"` — меняет email текущего ученика через `auth.admin.updateUserById`, подтверждает его без email confirmation и возвращает `{ email, has_real_email }`
+- `action: "update-password"` — меняет пароль текущего ученика и возвращает `{ success: true }`
+- доступ только для аутентифицированного текущего пользователя (`verify_jwt = true`)
+
 ### Миграции
 
 1. `YYYYMMDDHHMMSS_add_last_sign_in_to_profiles.sql` — колонка + триггер + backfill существующих из `auth.users`
+2. `20260413170000_get_students_contact_info.sql` — SECURITY DEFINER RPC, который батчево читает `auth.users.email` для tutor-side карточек и профиля ученика
 
 ---
 

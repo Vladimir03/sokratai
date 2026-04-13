@@ -2,7 +2,7 @@
 
 **Спека:** `docs/delivery/features/registration-onboarding/spec.md`
 **Дата:** 2026-04-13
-**Статус:** Sprint 1 completed
+**Статус:** Sprint 1 completed, Sprint 2 partially completed
 
 ---
 
@@ -219,15 +219,45 @@ UI правила из design system:
 **Files**: `src/components/tutor/AddStudentDialog.tsx`
 **AC**: (P1)
 
+### TASK-12: Self-service account management в профиле ученика
+
+**Job**: S1-0, R1-3
+**Agent**: Codex / Claude Code
+**Статус**: completed
+**Files**:
+- `src/pages/Profile.tsx`
+- `src/lib/supabaseClient.ts`
+- `supabase/functions/student-account/index.ts`
+- `supabase/migrations/20260413170000_get_students_contact_info.sql`
+- `src/lib/tutors.ts`
+- `src/components/tutor/StudentCard.tsx`
+- `src/pages/tutor/TutorStudentProfile.tsx`
+- `src/types/tutor.ts`
+- `src/integrations/supabase/types.ts`
+- `supabase/config.toml`
+
+Что реализовано:
+1. В `/profile` добавлен блок `Данные для входа`
+2. Ученик может заменить temp-email на реальный email
+3. Ученик может сменить пароль (минимум 4 символа)
+4. Ошибки edge function читаются из response body и показываются в toast
+5. Репетитор видит актуальный `login_email` на карточке ученика и в детальном профиле
+6. Tutor-side email больше не определяется только как boolean flag — подтягивается реальный `auth.users.email` через RPC `get_students_contact_info`
+
+Валидация:
+- `npm run build` — PASS
+- `npm run smoke-check` — PASS
+- `npm run lint` — repo-wide baseline FAIL, feature-level blockers не обнаружены
+
 ---
 
 ## Sprint 3: «Полировка» (P2)
 
-### TASK-12: Welcome-экран при первом входе
+### TASK-13: Welcome-экран при первом входе
 
-### TASK-13: Авто-email с данными для входа
+### TASK-14: Авто-email с данными для входа
 
-### TASK-14: Кнопка «Сбросить пароль» в профиле ученика (tutor-side)
+### TASK-15: Кнопка «Сбросить пароль» в профиле ученика (tutor-side)
 
 ---
 
