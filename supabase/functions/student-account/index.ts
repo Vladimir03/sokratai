@@ -68,17 +68,7 @@ Deno.serve(async (req) => {
         });
       }
 
-      const { data: existingUserData, error: existingUserError } =
-        await (supabaseAdmin.auth.admin as unknown as {
-          getUserByEmail: (email: string) => Promise<{
-            data: { user?: { id: string } | null };
-            error: { message?: string } | null;
-          }>;
-        }).getUserByEmail(nextEmail);
-
-      if (!existingUserError && existingUserData?.user && existingUserData.user.id !== user.id) {
-        return jsonResponse(409, { error: "Этот email уже используется" });
-      }
+      // Duplicate-email check removed: updateUserById will return an error if email is taken.
 
       const { data: updatedUserData, error: updateEmailError } = await supabaseAdmin.auth.admin.updateUserById(
         user.id,
@@ -103,8 +93,8 @@ Deno.serve(async (req) => {
     if (action === "update-password") {
       const nextPassword = typeof body.password === "string" ? body.password : "";
 
-      if (nextPassword.length < 4) {
-        return jsonResponse(400, { error: "Пароль должен содержать минимум 4 символа" });
+      if (nextPassword.length < 6) {
+        return jsonResponse(400, { error: "Пароль должен содержать минимум 6 символов" });
       }
 
       const { error: updatePasswordError } = await supabaseAdmin.auth.admin.updateUserById(user.id, {
