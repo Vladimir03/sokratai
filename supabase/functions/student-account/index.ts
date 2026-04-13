@@ -93,8 +93,8 @@ Deno.serve(async (req) => {
     if (action === "update-password") {
       const nextPassword = typeof body.password === "string" ? body.password : "";
 
-      if (nextPassword.length < 4) {
-        return jsonResponse(400, { error: "Пароль должен содержать минимум 4 символа" });
+      if (nextPassword.length < 6) {
+        return jsonResponse(400, { error: "Пароль должен содержать минимум 6 символов" });
       }
 
       const { error: updatePasswordError } = await supabaseAdmin.auth.admin.updateUserById(user.id, {
