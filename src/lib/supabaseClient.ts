@@ -41,3 +41,56 @@ export function getAuthErrorMessage(error: unknown, fallback: string): string {
 
   return message || fallback;
 }
+
+type FunctionsErrorContext = {
+  status?: number;
+  json?: () => Promise<unknown>;
+  text?: () => Promise<string>;
+};
+
+function readErrorMessageFromPayload(payload: unknown): string | null {
+  if (!payload || typeof payload !== 'object') {
+    return null;
+  }
+
+  if ('error' in payload && typeof payload.error === 'string' && payload.error.trim()) {
+    return payload.error;
+  }
+
+  if ('message' in payload && typeof payload.message === 'string' && payload.message.trim()) {
+    return payload.message;
+  }
+
+  return null;
+}
+
+export async function getFunctionsErrorMessage(error: unknown, fallback: string): Promise<string> {
+  if (error && typeof error === 'object' && 'context' in error) {
+    const context = (error as { context?: FunctionsErrorContext }).context;
+
+    if (context?.json) {
+      try {
+        const payload = await context.json();
+        const payloadMessage = readErrorMessageFromPayload(payload);
+        if (payloadMessage) {
+          return payloadMessage;
+        }
+      } catch {
+        // Fall through to other parsers.
+      }
+    }
+
+    if (context?.text) {
+      try {
+        const text = await context.text();
+        if (text.trim()) {
+          return text;
+        }
+      } catch {
+        // Fall through to generic error parsing.
+      }
+    }
+  }
+
+  return getAuthErrorMessage(error, fallback);
+}

@@ -612,7 +612,41 @@ function TutorStudentProfileContent() {
                     />
                   </div>
                 </div>
-                
+
+                <div className="grid gap-3 md:grid-cols-2">
+                  <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+                    <p className="text-xs font-medium uppercase tracking-wide text-slate-500">
+                      Email для входа
+                    </p>
+                    <p className="mt-1 break-all text-sm text-slate-900">
+                      {student.login_email || 'Не указан'}
+                    </p>
+                    <p className="mt-1 text-xs text-slate-500">
+                      {student.has_real_email
+                        ? 'Ученик уже указал реальный email в своём профиле.'
+                        : 'Пока используется временный технический email.'}
+                    </p>
+                  </div>
+
+                  <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+                    <p className="text-xs font-medium uppercase tracking-wide text-slate-500">
+                      Telegram
+                    </p>
+                    <p className="mt-1 text-sm text-slate-900">
+                      {student.profiles?.telegram_username
+                        ? `@${student.profiles.telegram_username}`
+                        : student.profiles?.telegram_user_id
+                          ? 'Подключён'
+                          : 'Не подключён'}
+                    </p>
+                    <p className="mt-1 text-xs text-slate-500">
+                      {student.profiles?.telegram_user_id
+                        ? 'Бот привязан, ученик может работать через Telegram.'
+                        : 'Когда ученик свяжет Telegram в профиле, статус обновится здесь.'}
+                    </p>
+                  </div>
+                </div>
+                 
                 <div className="flex justify-end">
                   <Button onClick={handleSave} disabled={isSaving}>
                     <Save className="h-4 w-4 mr-2" />

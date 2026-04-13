@@ -78,7 +78,9 @@ export interface TutorStudentWithProfile extends TutorStudent {
   debt_amount?: number;
   /** From profiles.last_sign_in_at (synced from auth.users via trigger) */
   last_sign_in_at?: string | null;
-  /** Email is real (not @temp.sokratai.ru). Resolved via RPC get_students_real_email_flags */
+  /** Current auth.users.email, resolved via SECURITY DEFINER RPC */
+  login_email?: string | null;
+  /** Email is real (not @temp.sokratai.ru). Resolved via RPC get_students_contact_info */
   has_real_email?: boolean;
   /** profiles.telegram_user_id IS NOT NULL — bot is linked */
   has_telegram_bot?: boolean;

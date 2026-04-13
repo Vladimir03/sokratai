@@ -37,6 +37,12 @@ type TutorStudentDebtRow = {
   debt_amount: number;
 };
 
+type StudentContactInfoRow = {
+  student_id: string;
+  login_email: string | null;
+  has_real_email: boolean;
+};
+
 const STUDENT_PROFILE_SELECT = `
   *,
   profiles (
@@ -158,25 +164,25 @@ export async function updateTutor(
 }
 
 /**
- * Batch-resolve has_real_email via RPC (SECURITY DEFINER reads auth.users).
+ * Batch-resolve student login email + has_real_email via RPC (SECURITY DEFINER reads auth.users).
  */
-async function getStudentsRealEmailFlags(
+async function getStudentsContactInfo(
   studentIds: string[]
-): Promise<Map<string, boolean>> {
-  const map = new Map<string, boolean>();
+): Promise<Map<string, StudentContactInfoRow>> {
+  const map = new Map<string, StudentContactInfoRow>();
   if (studentIds.length === 0) return map;
 
-  const { data, error } = await supabase.rpc('get_students_real_email_flags', {
+  const { data, error } = await supabase.rpc('get_students_contact_info', {
     student_ids: studentIds,
   });
 
   if (error) {
-    console.error('Error fetching email flags:', error);
+    console.error('Error fetching student contact info:', error);
     return map;
   }
 
   for (const row of data ?? []) {
-    map.set(row.student_id, row.has_real_email);
+    map.set(row.student_id, row);
   }
   return map;
 }
@@ -186,12 +192,13 @@ async function getStudentsRealEmailFlags(
  */
 function enrichWithChannelFlags(
   students: TutorStudentWithProfile[],
-  emailFlags: Map<string, boolean>
+  contactInfo: Map<string, StudentContactInfoRow>
 ): TutorStudentWithProfile[] {
   return students.map((s) => ({
     ...s,
     last_sign_in_at: s.profiles?.last_sign_in_at ?? null,
-    has_real_email: emailFlags.get(s.student_id) ?? false,
+    login_email: contactInfo.get(s.student_id)?.login_email ?? null,
+    has_real_email: contactInfo.get(s.student_id)?.has_real_email ?? false,
     has_telegram_bot: s.profiles?.telegram_user_id != null,
     has_telegram_username:
       s.profiles?.telegram_username != null &&
@@ -221,13 +228,13 @@ export async function getTutorStudents(): Promise<TutorStudentWithProfile[]> {
 
   // Parallel: debt map + email flags
   const studentIds = students.map((s) => s.student_id);
-  const [debtMap, emailFlags] = await Promise.all([
+  const [debtMap, contactInfo] = await Promise.all([
     getTutorStudentsDebtMap(),
-    getStudentsRealEmailFlags(studentIds),
+    getStudentsContactInfo(studentIds),
   ]);
 
   const withDebt = enrichWithDebt(students, debtMap);
-  return enrichWithChannelFlags(withDebt, emailFlags);
+  return enrichWithChannelFlags(withDebt, contactInfo);
 }
 
 /**
@@ -533,13 +540,13 @@ export async function getTutorStudent(
   }
 
   const student = data as TutorStudentWithProfile;
-  const [debtMap, emailFlags] = await Promise.all([
+  const [debtMap, contactInfo] = await Promise.all([
     getTutorStudentsDebtMap(),
-    getStudentsRealEmailFlags([student.student_id]),
+    getStudentsContactInfo([student.student_id]),
   ]);
 
   const withDebt = enrichWithDebt([student], debtMap);
-  return enrichWithChannelFlags(withDebt, emailFlags)[0];
+  return enrichWithChannelFlags(withDebt, contactInfo)[0];
 }
 
 async function getTutorStudentsDebtMap(): Promise<Map<string, TutorStudentDebtRow>> {

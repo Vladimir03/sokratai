@@ -58,6 +58,7 @@ export const StudentCard = memo(function StudentCard({
 
   // Channel flags
   const hasRealEmail = student.has_real_email ?? false;
+  const loginEmail = student.login_email?.trim() ?? '';
   const hasTelegramBot = student.has_telegram_bot ?? false;
   const hasTelegramUsername = student.has_telegram_username ?? false;
   const telegramUsername = student.profiles?.telegram_username;
@@ -140,7 +141,7 @@ export const StudentCard = memo(function StudentCard({
               <Mail className="h-4 w-4 text-slate-400" aria-hidden="true" />
               {hasRealEmail ? (
                 <>
-                  <span className="text-slate-700 truncate">Email</span>
+                  <span className="text-slate-700 truncate">{loginEmail}</span>
                   <CheckCircle className="h-3.5 w-3.5 text-accent shrink-0" aria-hidden="true" />
                 </>
               ) : (

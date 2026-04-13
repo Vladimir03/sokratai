@@ -3,10 +3,10 @@ import { Switch } from "@/components/ui/switch";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { supabase } from "@/lib/supabaseClient";
+import { getAuthErrorMessage, getFunctionsErrorMessage, supabase } from "@/lib/supabaseClient";
 import { toast } from "sonner";
 import AuthGuard from "@/components/AuthGuard";
-import { User, Zap, Target, Trophy, Edit, Send, CheckCircle, Loader2, Crown, Gift, CreditCard } from "lucide-react";
+import { User, Zap, Target, Trophy, Edit, Send, CheckCircle, Loader2, Crown, Gift, CreditCard, Mail, KeyRound, ShieldCheck } from "lucide-react";
 import { z } from "zod";
 import { PageContent } from "@/components/PageContent";
 import { useSubscription } from "@/hooks/useSubscription";
@@ -49,6 +49,12 @@ const Profile = () => {
   const pollingRef = useRef<NodeJS.Timeout | null>(null);
   const [editing, setEditing] = useState(false);
   const [newUsername, setNewUsername] = useState("");
+  const [authEmail, setAuthEmail] = useState("");
+  const [newEmail, setNewEmail] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [savingEmail, setSavingEmail] = useState(false);
+  const [savingPassword, setSavingPassword] = useState(false);
   const [userId, setUserId] = useState<string | undefined>(undefined);
   const subscription = useSubscription(userId);
   const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
@@ -56,6 +62,7 @@ const Profile = () => {
   const [isPremiumConfirmed, setIsPremiumConfirmed] = useState(false);
   const [searchParams] = useSearchParams();
   const canTogglePremiumDev = profile?.username ? PREMIUM_DEV_USERNAMES.has(profile.username) : false;
+  const hasRealEmail = authEmail.length > 0 && !authEmail.endsWith("@temp.sokratai.ru");
 
   // #region agent log helpers
   const dbg = (hypothesisId: string, location: string, message: string, data: Record<string, unknown>) => {
@@ -141,6 +148,8 @@ const Profile = () => {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
       setUserId(user.id);
+      setAuthEmail(user.email ?? "");
+      setNewEmail(user.email ?? "");
 
       // Fetch profile
       const { data: profileData, error: profileError } = await supabase
@@ -165,8 +174,8 @@ const Profile = () => {
       setProfile(profileData);
       setStats(statsData || { total_xp: 0, level: 1, current_streak: 0 });
       setNewUsername(profileData.username);
-    } catch (error: any) {
-      toast.error(error.message);
+    } catch (error: unknown) {
+      toast.error(getAuthErrorMessage(error, "Не удалось загрузить профиль"));
     } finally {
       setLoading(false);
     }
@@ -245,9 +254,9 @@ const Profile = () => {
         }
       }, 5000);
 
-    } catch (error: any) {
+    } catch (error: unknown) {
       setLinkingTelegram(false);
-      toast.error(error.message || "Ошибка при создании ссылки");
+      toast.error(getAuthErrorMessage(error, "Ошибка при создании ссылки"));
     }
   };
 
@@ -322,8 +331,91 @@ const Profile = () => {
       toast.success("Имя обновлено!");
       setProfile(prev => prev ? { ...prev, username: validatedUsername } : null);
       setEditing(false);
-    } catch (error: any) {
-      toast.error(error.message);
+    } catch (error: unknown) {
+      toast.error(getAuthErrorMessage(error, "Не удалось обновить имя"));
+    }
+  };
+
+  const handleUpdateEmail = async () => {
+    const normalizedEmail = newEmail.trim().toLowerCase();
+
+    const emailSchema = z.string().trim().email({ message: "Введите корректный email" });
+    const validationResult = emailSchema.safeParse(normalizedEmail);
+
+    if (!validationResult.success) {
+      toast.error(validationResult.error.errors[0]?.message ?? "Введите корректный email");
+      return;
+    }
+
+    if (normalizedEmail === authEmail.trim().toLowerCase()) {
+      toast.success("Этот email уже используется для входа");
+      return;
+    }
+
+    try {
+      setSavingEmail(true);
+
+      const { data, error } = await supabase.functions.invoke("student-account", {
+        body: {
+          action: "update-email",
+          email: normalizedEmail,
+        },
+      });
+
+      if (error) {
+        throw error;
+      }
+
+      const updatedEmail = typeof data?.email === "string" ? data.email : normalizedEmail;
+      setAuthEmail(updatedEmail);
+      setNewEmail("");
+      await supabase.auth.refreshSession();
+
+      toast.success("Email обновлён");
+    } catch (error: unknown) {
+      toast.error(await getFunctionsErrorMessage(error, "Не удалось обновить email"));
+    } finally {
+      setSavingEmail(false);
+    }
+  };
+
+  const handleUpdatePassword = async () => {
+    const passwordSchema = z.string().min(4, { message: "Минимум 4 символа" }).max(72, {
+      message: "Максимум 72 символа",
+    });
+
+    const validationResult = passwordSchema.safeParse(newPassword);
+    if (!validationResult.success) {
+      toast.error(validationResult.error.errors[0]?.message ?? "Проверьте пароль");
+      return;
+    }
+
+    if (newPassword !== confirmPassword) {
+      toast.error("Пароли не совпадают");
+      return;
+    }
+
+    try {
+      setSavingPassword(true);
+
+      const { error } = await supabase.functions.invoke("student-account", {
+        body: {
+          action: "update-password",
+          password: newPassword,
+        },
+      });
+
+      if (error) {
+        throw error;
+      }
+
+      setNewPassword("");
+      setConfirmPassword("");
+      toast.success("Пароль обновлён");
+    } catch (error: unknown) {
+      toast.error(await getFunctionsErrorMessage(error, "Не удалось обновить пароль"));
+    } finally {
+      setSavingPassword(false);
     }
   };
 
@@ -479,6 +571,112 @@ const Profile = () => {
             </CardContent>
           </Card>
 
+          <Card className="shadow-elegant border border-muted">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2 text-lg">
+                <ShieldCheck className="w-5 h-5 text-primary" />
+                Данные для входа
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-6">
+              <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                <div className="flex items-start gap-3">
+                  <Mail className="mt-0.5 h-5 w-5 text-slate-500" />
+                  <div className="min-w-0 space-y-1">
+                    <p className="text-sm font-medium text-slate-900">Текущий email для входа</p>
+                    <p className="break-all text-sm text-slate-700">
+                      {authEmail || "Email пока не задан"}
+                    </p>
+                    <p className="text-xs text-slate-500">
+                      Репетитор увидит этот email у себя в кабинете после обновления списка учеников.
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="grid gap-6 lg:grid-cols-2">
+                <div className="space-y-3">
+                  <div>
+                    <h3 className="font-medium text-foreground">Заменить email</h3>
+                    <p className="text-sm text-muted-foreground">
+                      {hasRealEmail
+                        ? "Можно поменять email на любой удобный адрес."
+                        : "Сейчас у вас временный технический email. Замените его на свой настоящий адрес."}
+                    </p>
+                  </div>
+                  <div className="space-y-2">
+                    <Input
+                      type="email"
+                      value={newEmail}
+                      onChange={(e) => setNewEmail(e.target.value)}
+                      placeholder="you@example.com"
+                      autoComplete="email"
+                    />
+                    <Button
+                      type="button"
+                      onClick={handleUpdateEmail}
+                      disabled={savingEmail}
+                      className="touch-manipulation"
+                    >
+                      {savingEmail ? (
+                        <>
+                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                          Сохраняем...
+                        </>
+                      ) : (
+                        "Сохранить email"
+                      )}
+                    </Button>
+                  </div>
+                </div>
+
+                <div className="space-y-3">
+                  <div>
+                    <h3 className="font-medium text-foreground">Изменить пароль</h3>
+                    <p className="text-sm text-muted-foreground">
+                      Новый пароль должен содержать минимум 4 символа.
+                    </p>
+                  </div>
+                  <div className="space-y-2">
+                    <Input
+                      type="password"
+                      value={newPassword}
+                      onChange={(e) => setNewPassword(e.target.value)}
+                      placeholder="Новый пароль"
+                      autoComplete="new-password"
+                    />
+                    <Input
+                      type="password"
+                      value={confirmPassword}
+                      onChange={(e) => setConfirmPassword(e.target.value)}
+                      placeholder="Повторите пароль"
+                      autoComplete="new-password"
+                    />
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={handleUpdatePassword}
+                      disabled={savingPassword}
+                      className="touch-manipulation"
+                    >
+                      {savingPassword ? (
+                        <>
+                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                          Обновляем...
+                        </>
+                      ) : (
+                        <>
+                          <KeyRound className="mr-2 h-4 w-4" />
+                          Сменить пароль
+                        </>
+                      )}
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
           {/* Telegram Connection Status */}
           <Card className="shadow-elegant">
             <CardHeader>
@@ -549,7 +747,7 @@ const Profile = () => {
                     Telegram не подключён
                   </div>
                   <p className="text-sm text-muted-foreground mb-4">
-                    Свяжите аккаунт, чтобы отправлять задачи через Telegram
+                    Свяжите аккаунт, чтобы отправлять задачи через Telegram. После этого репетитор увидит, что Telegram подключён.
                   </p>
                   <Button onClick={handleLinkTelegram} className="bg-socrat-telegram hover:bg-socrat-telegram-dark">
                     <Send className="w-4 h-4 mr-2" />

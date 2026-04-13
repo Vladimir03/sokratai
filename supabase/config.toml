@@ -72,3 +72,6 @@ verify_jwt = true
 [functions.push-subscribe]
 verify_jwt = true
 
+[functions.student-account]
+verify_jwt = true
+
