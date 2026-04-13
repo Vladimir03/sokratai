@@ -3093,18 +3093,18 @@ export type Database = {
           tutor_telegram_id: string
         }[]
       }
-      get_students_real_email_flags: {
-        Args: { student_ids: string[] }
-        Returns: {
-          has_real_email: boolean
-          student_id: string
-        }[]
-      }
       get_students_contact_info: {
         Args: { student_ids: string[] }
         Returns: {
           has_real_email: boolean
-          login_email: string | null
+          login_email: string
+          student_id: string
+        }[]
+      }
+      get_students_real_email_flags: {
+        Args: { student_ids: string[] }
+        Returns: {
+          has_real_email: boolean
           student_id: string
         }[]
       }
