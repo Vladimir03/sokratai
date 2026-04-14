@@ -17,17 +17,17 @@ interface ReauthenticationEmailProps {
 }
 
 export const ReauthenticationEmail = ({ token }: ReauthenticationEmailProps) => (
-  <Html lang="en" dir="ltr">
+  <Html lang="ru" dir="ltr">
     <Head />
-    <Preview>Your verification code</Preview>
+    <Preview>Код подтверждения</Preview>
     <Body style={main}>
       <Container style={container}>
-        <Heading style={h1}>Confirm reauthentication</Heading>
-        <Text style={text}>Use the code below to confirm your identity:</Text>
+        <Text style={logo}>Сократ</Text>
+        <Heading style={h1}>Код подтверждения</Heading>
+        <Text style={text}>Используйте код ниже для подтверждения:</Text>
         <Text style={codeStyle}>{token}</Text>
         <Text style={footer}>
-          This code will expire shortly. If you didn't request this, you can
-          safely ignore this email.
+          Код действует ограниченное время. Если вы не запрашивали его, проигнорируйте это письмо.
         </Text>
       </Container>
     </Body>
@@ -36,25 +36,35 @@ export const ReauthenticationEmail = ({ token }: ReauthenticationEmailProps) => 
 
 export default ReauthenticationEmail
 
-const main = { backgroundColor: '#ffffff', fontFamily: 'Arial, sans-serif' }
-const container = { padding: '20px 25px' }
+const main = { backgroundColor: '#ffffff', fontFamily: "'Inter', Arial, sans-serif" }
+const container = { padding: '40px 25px' }
+const logo = {
+  fontSize: '20px',
+  fontWeight: 'bold' as const,
+  color: 'hsl(231, 36%, 29%)',
+  margin: '0 0 24px',
+  textAlign: 'center' as const,
+}
 const h1 = {
   fontSize: '22px',
   fontWeight: 'bold' as const,
-  color: '#000000',
+  color: 'hsl(220, 15%, 11%)',
   margin: '0 0 20px',
+  textAlign: 'center' as const,
 }
 const text = {
   fontSize: '14px',
-  color: '#55575d',
-  lineHeight: '1.5',
+  color: 'hsl(215, 16%, 47%)',
+  lineHeight: '1.6',
   margin: '0 0 25px',
 }
 const codeStyle = {
   fontFamily: 'Courier, monospace',
-  fontSize: '22px',
+  fontSize: '28px',
   fontWeight: 'bold' as const,
-  color: '#000000',
+  color: 'hsl(231, 36%, 29%)',
   margin: '0 0 30px',
+  textAlign: 'center' as const,
+  letterSpacing: '4px',
 }
 const footer = { fontSize: '12px', color: '#999999', margin: '30px 0 0' }
