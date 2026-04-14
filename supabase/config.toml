@@ -1,77 +1,55 @@
 project_id = "vrsseotrfmsxpbciyqzc"
 
-[functions.chat]
-verify_jwt = false
-
-[functions.telegram-bot]
-verify_jwt = false
-
-[functions.setup-telegram-webhook]
-verify_jwt = false
-
-[functions.telegram-auth]
-verify_jwt = false
-
-[functions.get-solution]
-verify_jwt = false
-
-[functions.check-solutions]
-verify_jwt = false
-
-[functions.telegram-login-token]
-verify_jwt = false
-
-[functions.telegram-broadcast]
-verify_jwt = false
-
-[functions.telegram-scheduled-reminder]
-verify_jwt = false
-
-[functions.telegram-scheduled-broadcast]
-verify_jwt = false
-
-[functions.trainer-submit]
-verify_jwt = false
-
-[functions.yookassa-create-payment]
-verify_jwt = true
-
-[functions.yookassa-webhook]
-verify_jwt = false
-
-[functions.assign-tutor-role]
-verify_jwt = false
-
-[functions.admin-analytics]
-verify_jwt = false
-
-[functions.telegram-webapp-recent-solutions]
-verify_jwt = false
-
-[functions.payment-reminder]
-verify_jwt = false
-
-[functions.tutor-manual-add-student]
-verify_jwt = true
-
-[functions.tutor-update-student]
-verify_jwt = true
-
-[functions.homework-api]
-verify_jwt = true
-
-[functions.homework-reminder]
-verify_jwt = false
-
-[functions.claim-invite]
-verify_jwt = true
-
-[functions.process-email-queue]
-verify_jwt = true
-
-[functions.push-subscribe]
-verify_jwt = true
-
-[functions.student-account]
-verify_jwt = true
-
+[functions]
+  [functions.admin-analytics]
+    verify_jwt = false
+  [functions.assign-tutor-role]
+    verify_jwt = false
+  [functions.auth-email-hook]
+    verify_jwt = false
+  [functions.chat]
+    verify_jwt = false
+  [functions.check-solutions]
+    verify_jwt = false
+  [functions.claim-invite]
+    verify_jwt = true
+  [functions.get-solution]
+    verify_jwt = false
+  [functions.homework-api]
+    verify_jwt = true
+  [functions.homework-reminder]
+    verify_jwt = false
+  [functions.payment-reminder]
+    verify_jwt = false
+  [functions.process-email-queue]
+    verify_jwt = true
+  [functions.push-subscribe]
+    verify_jwt = true
+  [functions.setup-telegram-webhook]
+    verify_jwt = false
+  [functions.student-account]
+    verify_jwt = true
+  [functions.telegram-auth]
+    verify_jwt = false
+  [functions.telegram-bot]
+    verify_jwt = false
+  [functions.telegram-broadcast]
+    verify_jwt = false
+  [functions.telegram-login-token]
+    verify_jwt = false
+  [functions.telegram-scheduled-broadcast]
+    verify_jwt = false
+  [functions.telegram-scheduled-reminder]
+    verify_jwt = false
+  [functions.telegram-webapp-recent-solutions]
+    verify_jwt = false
+  [functions.trainer-submit]
+    verify_jwt = false
+  [functions.tutor-manual-add-student]
+    verify_jwt = true
+  [functions.tutor-update-student]
+    verify_jwt = true
+  [functions.yookassa-create-payment]
+    verify_jwt = true
+  [functions.yookassa-webhook]
+    verify_jwt = false
