@@ -3,9 +3,9 @@ import { ChevronDown, ChevronRight, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { useImageUpload } from '@/hooks/useImageUpload';
 import { useUpdateTask, useSubtopics, useTopics } from '@/hooks/useKnowledgeBase';
+import { MAX_TASK_IMAGES } from '@/lib/attachmentRefs';
 import {
   deleteKBTaskImage,
-  MAX_TASK_IMAGES,
   parseAttachmentUrls,
   serializeAttachmentUrls,
   uploadKBTaskImage,

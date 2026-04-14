@@ -34,7 +34,7 @@ TASK-14 (QA) — после merge всех TASK-3..TASK-13.
 
 ---
 
-## TASK-1: Shared attachment-refs helpers
+## TASK-1: Shared attachment-refs helpers ✅ Done (2026-04-14)
 
 **Job:** R4-1
 **Agent:** Claude Code

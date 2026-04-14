@@ -49,49 +49,7 @@ export function parseStorageRef(
 
 // ─── Multi-image helpers ─────────────────────────────────────────────────────
 
-/** Max images allowed per KB task (UI-enforced limit). */
-export const MAX_TASK_IMAGES = 5;
-
-/**
- * Parse `attachment_url` field which may be:
- *  - null / undefined / "" → []
- *  - single storage ref string → [ref]
- *  - JSON array of refs → string[]
- */
-export function parseAttachmentUrls(
-  value: string | null | undefined,
-): string[] {
-  if (!value || typeof value !== 'string') return [];
-  const trimmed = value.trim();
-  if (!trimmed) return [];
-
-  if (trimmed.startsWith('[')) {
-    try {
-      const parsed: unknown = JSON.parse(trimmed);
-      if (Array.isArray(parsed)) {
-        return parsed.filter(
-          (s): s is string => typeof s === 'string' && s.trim().length > 0,
-        );
-      }
-    } catch {
-      // malformed JSON — fall through to single-value
-    }
-  }
-
-  return [trimmed];
-}
-
-/**
- * Serialize an array of storage refs back to the `attachment_url` field.
- *  - [] → null
- *  - [ref] → ref (single string, backward-compatible)
- *  - [ref1, ref2, …] → JSON array string
- */
-export function serializeAttachmentUrls(refs: string[]): string | null {
-  if (refs.length === 0) return null;
-  if (refs.length === 1) return refs[0];
-  return JSON.stringify(refs);
-}
+export { parseAttachmentUrls, serializeAttachmentUrls } from './attachmentRefs';
 
 function generateFileExt(file: File): string {
   const ext = file.name.split('.').pop()?.toLowerCase();

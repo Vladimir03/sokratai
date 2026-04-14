@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
+import { MAX_TASK_IMAGES } from '@/lib/attachmentRefs';
 import {
   getKBImageSignedUrl,
-  MAX_TASK_IMAGES,
   validateImageFile,
 } from '@/lib/kbApi';
 

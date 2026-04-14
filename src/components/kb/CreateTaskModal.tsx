@@ -4,9 +4,9 @@ import { toast } from 'sonner';
 import { useFolderTree } from '@/hooks/useFolders';
 import { useImageUpload } from '@/hooks/useImageUpload';
 import { useCreateTask, useSubtopics, useTopics } from '@/hooks/useKnowledgeBase';
+import { MAX_TASK_IMAGES } from '@/lib/attachmentRefs';
 import {
   deleteKBTaskImage,
-  MAX_TASK_IMAGES,
   serializeAttachmentUrls,
   uploadKBTaskImage,
 } from '@/lib/kbApi';

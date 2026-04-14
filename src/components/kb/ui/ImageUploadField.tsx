@@ -1,5 +1,5 @@
 import { ImagePlus, X } from 'lucide-react';
-import { MAX_TASK_IMAGES } from '@/lib/kbApi';
+import { MAX_TASK_IMAGES } from '@/lib/attachmentRefs';
 import { cn } from '@/lib/utils';
 import type { UseImageUploadReturn } from '@/hooks/useImageUpload';
 

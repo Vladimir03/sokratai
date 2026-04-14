@@ -556,7 +556,8 @@ CREATE INDEX idx_topics_exam ON kb_topics(exam);
 - `NULL` -> у задачи нет изображений
 - single image -> `storage://kb-attachments/...`
 - multi-image -> JSON array string с `storage://` refs
-- каноничные helpers: `parseAttachmentUrls()` / `serializeAttachmentUrls()` в `src/lib/kbApi.ts`
+- каноничные helpers: `parseAttachmentUrls()` / `serializeAttachmentUrls()` в `src/lib/attachmentRefs.ts`
+- `src/lib/kbApi.ts` оставляет re-export этих helpers только для backward compat
 - current max = `5` images per task (UI-enforced)
 
 **Solution attachment contract (implemented 2026-03-14):**

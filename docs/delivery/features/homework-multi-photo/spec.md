@@ -421,7 +421,7 @@ npm run lint && npm run build && npm run smoke-check
 
 > Переносятся в `homework-multi-photo-tasks.md` после approve спека.
 
-- [ ] **TASK-1:** Создать `src/lib/attachmentRefs.ts` + `supabase/functions/_shared/attachment-refs.ts` (вынести `parseAttachmentUrls` / `serializeAttachmentUrls` + константы `MAX_TASK_IMAGES = 5`, `MAX_RUBRIC_IMAGES = 3`). `kbApi.ts` → re-export для совместимости.
+- [x] **TASK-1:** Создать `src/lib/attachmentRefs.ts` + `supabase/functions/_shared/attachment-refs.ts` (вынести `parseAttachmentUrls` / `serializeAttachmentUrls` + константы `MAX_TASK_IMAGES = 5`, `MAX_RUBRIC_IMAGES = 3`). `kbApi.ts` → re-export для совместимости. Выполнено 2026-04-14.
 - [x] **TASK-2:** Миграция `20260414120000_homework_rubric_images.sql` (ADD COLUMN `rubric_image_urls TEXT NULL` + COMMENT-ы на обе колонки). Выполнено 2026-04-14.
 - [ ] **TASK-3:** `HWTaskCard.tsx` — галерея условия (до 5 фото); превью + удаление + кнопка `+` с дизейблом по лимиту; `touch-action: manipulation`; блок «Критерии проверки» с textarea + галерея (до 3).
 - [ ] **TASK-4:** `HWTasksSection.tsx` — KB-импорт через `parseAttachmentUrls(task.attachment_url).slice(0, 5)`; `task_image_path` сохраняется как dual-format (single или JSON-array); toast при срезании.
