@@ -55,6 +55,8 @@ const Profile = () => {
   const [confirmPassword, setConfirmPassword] = useState("");
   const [savingEmail, setSavingEmail] = useState(false);
   const [savingPassword, setSavingPassword] = useState(false);
+  const [newTelegramUsername, setNewTelegramUsername] = useState("");
+  const [savingTelegram, setSavingTelegram] = useState(false);
   const [userId, setUserId] = useState<string | undefined>(undefined);
   const subscription = useSubscription(userId);
   const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
@@ -419,6 +421,39 @@ const Profile = () => {
     }
   };
 
+  const handleUpdateTelegram = async () => {
+    const normalized = newTelegramUsername.replace(/^@/, "").trim();
+    if (!normalized) {
+      toast.error("Введите Telegram username");
+      return;
+    }
+    if (!/^[a-zA-Z0-9_]{5,32}$/.test(normalized)) {
+      toast.error("Неверный формат username (5-32 символа, только латиница, цифры и _)");
+      return;
+    }
+    setSavingTelegram(true);
+    try {
+      const { data, error } = await supabase.functions.invoke("student-account", {
+        body: { action: "update-telegram", telegram_username: normalized },
+      });
+      if (error) {
+        toast.error(await getFunctionsErrorMessage(error, "Ошибка обновления Telegram"));
+        return;
+      }
+      if (data?.error) {
+        toast.error(data.error);
+        return;
+      }
+      setProfile((prev) => prev ? { ...prev, telegram_username: data.telegram_username } : prev);
+      setNewTelegramUsername("");
+      toast.success("Telegram username обновлён");
+    } catch (err) {
+      toast.error("Не удалось обновить Telegram username");
+    } finally {
+      setSavingTelegram(false);
+    }
+  };
+
   if (loading) {
     return (
       <AuthGuard>
@@ -755,6 +790,37 @@ const Profile = () => {
                   </Button>
                 </div>
               )}
+
+              {/* Telegram username edit */}
+              <div className="mt-4 space-y-2">
+                <label className="text-sm font-medium">Telegram username</label>
+                <div className="flex gap-2">
+                  <div className="relative flex-1">
+                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground text-sm">@</span>
+                    <Input
+                      value={newTelegramUsername}
+                      onChange={(e) => setNewTelegramUsername(e.target.value)}
+                      placeholder={profile?.telegram_username || "username"}
+                      className="pl-7"
+                    />
+                  </div>
+                  <Button
+                    variant="outline"
+                    onClick={handleUpdateTelegram}
+                    disabled={savingTelegram || !newTelegramUsername.replace(/^@/, "").trim()}
+                    className="touch-manipulation"
+                  >
+                    {savingTelegram ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      "Сохранить"
+                    )}
+                  </Button>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Укажите ваш Telegram username, чтобы репетитор мог отправлять вам задания
+                </p>
+              </div>
               {profile?.registration_source && (
                 <div className="mt-3 text-xs text-muted-foreground">
                   Источник регистрации: {
