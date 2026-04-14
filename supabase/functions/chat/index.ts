@@ -1095,9 +1095,10 @@ async function processAIRequest(
     };
   }));
 
-  const adminSupabase = createClient(
+  const adminSupabase = createClient<any>(
     Deno.env.get("SUPABASE_URL") ?? "",
     Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "",
+    { auth: { persistSession: false, autoRefreshToken: false } },
   );
   let taskPromptImageDataUrls: string[] = [];
   const studentPromptImageDataUrls: string[] = [];
@@ -1135,7 +1136,7 @@ async function processAIRequest(
     let imageCounter = 1;
     for (const [index, dataUrl] of studentPromptImageDataUrls.entries()) {
       promptAttachments.push({
-        label: !taskPromptImageDataUrl && studentPromptImageDataUrls.length === 1
+        label: taskPromptImageDataUrls.length === 0 && studentPromptImageDataUrls.length === 1
           ? "Изображение выше — рукописное решение ученика."
           : `Изображение ${imageCounter} — решение ученика${studentPromptImageDataUrls.length > 1 ? `, файл ${index + 1}` : ""}.`,
         dataUrl,

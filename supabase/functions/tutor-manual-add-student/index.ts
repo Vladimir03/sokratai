@@ -182,17 +182,20 @@ Deno.serve(async (req) => {
 
     // Step 1: Try to find existing user by email (priority) or telegram
     if (email) {
-      // Cast to any — getUserByEmail exists at runtime but not in bundled types
-      const { data: authUserData, error: authUserError } =
-        await (supabaseAdmin.auth.admin as any).getUserByEmail(email);
+      const { data: listData } = await supabaseAdmin.auth.admin.listUsers({
+        filter: `email.eq.${email}`,
+        page: 1,
+        perPage: 1,
+      });
+      const foundUser = listData?.users?.[0] ?? null;
 
-      if (!authUserError && authUserData?.user) {
-        studentId = authUserData.user.id;
-        loginEmail = authUserData.user.email ?? email;
+      if (foundUser) {
+        studentId = foundUser.id;
+        loginEmail = foundUser.email ?? email;
         const { data: emailProfile } = await supabaseAdmin
           .from("profiles")
           .select("id, registration_source, telegram_user_id, username")
-          .eq("id", authUserData.user.id)
+          .eq("id", foundUser.id)
           .maybeSingle();
         if (emailProfile) {
           profileRegistrationSource = emailProfile.registration_source ?? null;
@@ -267,10 +270,14 @@ Deno.serve(async (req) => {
         if (authError?.message?.includes("already been registered")) {
           console.log("Auth user already exists for email:", userEmail);
           // Retrieve by exact email lookup (race: user registered between our check and create)
-          const { data: raceUser } =
-            await (supabaseAdmin.auth.admin as any).getUserByEmail(userEmail);
-          if (raceUser?.user) {
-            studentId = raceUser.user.id;
+          const { data: raceListData } = await supabaseAdmin.auth.admin.listUsers({
+            filter: `email.eq.${userEmail}`,
+            page: 1,
+            perPage: 1,
+          });
+          const raceUser = raceListData?.users?.[0] ?? null;
+          if (raceUser) {
+            studentId = raceUser.id;
             profileRegistrationSource = "manual";
           }
         }
