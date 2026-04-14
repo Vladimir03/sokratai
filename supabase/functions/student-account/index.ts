@@ -90,6 +90,31 @@ Deno.serve(async (req) => {
       });
     }
 
+    if (action === "update-telegram") {
+      const raw = typeof body.telegram_username === "string" ? body.telegram_username.trim() : "";
+      const normalized = raw.replace(/^@/, "").trim();
+
+      if (!normalized) {
+        return jsonResponse(400, { error: "Telegram username is required" });
+      }
+
+      if (!/^[a-zA-Z0-9_]{5,32}$/.test(normalized)) {
+        return jsonResponse(400, { error: "Неверный формат username (5-32 символа, только латиница, цифры и _)" });
+      }
+
+      const { error: updateTgError } = await supabaseAdmin
+        .from("profiles")
+        .update({ telegram_username: normalized })
+        .eq("id", user.id);
+
+      if (updateTgError) {
+        console.error("student-account update-telegram error:", updateTgError);
+        return jsonResponse(500, { error: updateTgError.message || "Failed to update telegram username" });
+      }
+
+      return jsonResponse(200, { telegram_username: normalized });
+    }
+
     if (action === "update-password") {
       const nextPassword = typeof body.password === "string" ? body.password : "";
 

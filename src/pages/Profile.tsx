@@ -55,6 +55,8 @@ const Profile = () => {
   const [confirmPassword, setConfirmPassword] = useState("");
   const [savingEmail, setSavingEmail] = useState(false);
   const [savingPassword, setSavingPassword] = useState(false);
+  const [newTelegramUsername, setNewTelegramUsername] = useState("");
+  const [savingTelegram, setSavingTelegram] = useState(false);
   const [userId, setUserId] = useState<string | undefined>(undefined);
   const subscription = useSubscription(userId);
   const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
