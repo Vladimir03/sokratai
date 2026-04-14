@@ -291,18 +291,23 @@ async function authenticateUser(
   cors: Record<string, string>,
 ): Promise<AuthResult | Response> {
   const authHeader = req.headers.get("Authorization");
-  if (!authHeader) {
+  if (!authHeader?.startsWith("Bearer ")) {
     return jsonError(cors, 401, "UNAUTHORIZED", "Missing Authorization header");
   }
-  const userClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
-    auth: { persistSession: false },
+  const token = authHeader.replace("Bearer ", "");
+  const verifier = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+    auth: { persistSession: false, autoRefreshToken: false },
     global: { headers: { Authorization: authHeader } },
   });
-  const { data: { user }, error } = await userClient.auth.getUser();
-  if (error || !user) {
+  const { data, error } = await verifier.auth.getClaims(token);
+  if (error || !data?.claims?.sub) {
+    console.error("homework_api_auth_failed", {
+      error: error?.message,
+      hasToken: !!token,
+    });
     return jsonError(cors, 401, "UNAUTHORIZED", "Invalid or expired token");
   }
-  return { userId: user.id };
+  return { userId: data.claims.sub as string };
 }
 
 async function getTutorOrThrow(
