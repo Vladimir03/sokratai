@@ -294,16 +294,23 @@ async function authenticateUser(
   if (!authHeader?.startsWith("Bearer ")) {
     return jsonError(cors, 401, "UNAUTHORIZED", "Missing Authorization header");
   }
-  const jwt = authHeader.slice(7);
-  const adminClient = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
-    auth: { persistSession: false, autoRefreshToken: false },
+  // Use GoTrue API directly to validate token — avoids SDK session issues
+  const resp = await fetch(`${SUPABASE_URL}/auth/v1/user`, {
+    headers: {
+      Authorization: authHeader,
+      apikey: SUPABASE_ANON_KEY,
+    },
   });
-  const { data: { user }, error } = await adminClient.auth.getUser(jwt);
-  if (error || !user) {
+  if (!resp.ok) {
+    const body = await resp.text().catch(() => "");
     console.error("homework_api_auth_failed", {
-      error: error?.message,
-      hasToken: !!jwt,
+      status: resp.status,
+      body: body.slice(0, 200),
     });
+    return jsonError(cors, 401, "UNAUTHORIZED", "Invalid or expired token");
+  }
+  const user = await resp.json();
+  if (!user?.id) {
     return jsonError(cors, 401, "UNAUTHORIZED", "Invalid or expired token");
   }
   return { userId: user.id };
