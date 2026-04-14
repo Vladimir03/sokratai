@@ -16,7 +16,7 @@ project_id = "vrsseotrfmsxpbciyqzc"
   [functions.get-solution]
     verify_jwt = false
   [functions.homework-api]
-    verify_jwt = true
+    verify_jwt = false
   [functions.homework-reminder]
     verify_jwt = false
   [functions.payment-reminder]

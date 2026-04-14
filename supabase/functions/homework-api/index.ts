@@ -291,15 +291,26 @@ async function authenticateUser(
   cors: Record<string, string>,
 ): Promise<AuthResult | Response> {
   const authHeader = req.headers.get("Authorization");
-  if (!authHeader) {
+  if (!authHeader?.startsWith("Bearer ")) {
     return jsonError(cors, 401, "UNAUTHORIZED", "Missing Authorization header");
   }
-  const userClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
-    auth: { persistSession: false },
-    global: { headers: { Authorization: authHeader } },
+  // Use GoTrue API directly to validate token — avoids SDK session issues
+  const resp = await fetch(`${SUPABASE_URL}/auth/v1/user`, {
+    headers: {
+      Authorization: authHeader,
+      apikey: SUPABASE_ANON_KEY,
+    },
   });
-  const { data: { user }, error } = await userClient.auth.getUser();
-  if (error || !user) {
+  if (!resp.ok) {
+    const body = await resp.text().catch(() => "");
+    console.error("homework_api_auth_failed", {
+      status: resp.status,
+      body: body.slice(0, 200),
+    });
+    return jsonError(cors, 401, "UNAUTHORIZED", "Invalid or expired token");
+  }
+  const user = await resp.json();
+  if (!user?.id) {
     return jsonError(cors, 401, "UNAUTHORIZED", "Invalid or expired token");
   }
   return { userId: user.id };
