@@ -437,7 +437,7 @@ const Profile = () => {
         body: { action: "update-telegram", telegram_username: normalized },
       });
       if (error) {
-        toast.error(getFunctionsErrorMessage(error, "Ошибка обновления Telegram"));
+        toast.error(await getFunctionsErrorMessage(error, "Ошибка обновления Telegram"));
         return;
       }
       if (data?.error) {
