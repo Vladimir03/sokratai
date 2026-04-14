@@ -205,7 +205,7 @@ TASK-14 (QA) — после merge всех TASK-3..TASK-13.
 
 ---
 
-## TASK-12: TutorHomeworkDetail — multi-photo задачи + рубрика
+## TASK-12: TutorHomeworkDetail — multi-photo задачи + рубрика ✅ Done (2026-04-14)
 
 **Job:** R4-2
 **Agent:** Claude Code
@@ -215,9 +215,11 @@ TASK-14 (QA) — после merge всех TASK-3..TASK-13.
 
 **Описание:** `TaskImagePreview` (`:145`) расширить до массива. Принимает `taskImageUrl: string | null`, парсит через `parseAttachmentUrls`, рендерит ряд thumbnails с тем же click-to-zoom Dialog (можно reuse компонент из TASK-10 если вынести в `src/components/homework/shared/`). Новая секция «Критерии проверки» в карточке задачи: `rubric_text` через `MathText` + ряд thumbnails `rubric_image_urls` (через batch endpoint TASK-7 для tutor). Видимость: tutor-only (rubric никогда не утекает в Detail для student).
 
+**Статус выполнения:** `TutorHomeworkDetail.tsx` переведён на shared `PhotoGallery` в `src/components/homework/shared/PhotoGallery.tsx`. `TaskImagePreview` теперь читает dual-format через `parseAttachmentUrls`, использует batch endpoint `/assignments/:id/tasks/:taskId/images` и сохраняет backward compat: `0 → null`, `1 → single zoom dialog`, `2+ → ряд миниатюр + carousel`. В карточке задачи добавлена tutor-only секция «Критерии проверки»: `rubric_text` рендерится через `MathText`, `rubric_image_urls` резолвятся через `/assignments/:id/tasks/:taskId/rubric-images`. Для compile-safe detail contract в `src/lib/tutorHomeworkApi.ts` добавлено additive поле `rubric_image_urls`.
+
 ---
 
-## TASK-13: GuidedThreadViewer — multi-photo task context
+## TASK-13: GuidedThreadViewer — multi-photo task context ✅ Done (2026-04-14)
 
 **Job:** R4-2
 **Agent:** Claude Code
@@ -226,6 +228,8 @@ TASK-14 (QA) — после merge всех TASK-3..TASK-13.
 **AC:** AC-9
 
 **Описание:** `TaskContextImage` (`:59`) расширить до `TaskContextGallery` — тот же визуал что student-side TaskConditionGallery (TASK-10). Lif logic: парсинг `task.task_image_url` через `parseAttachmentUrls`, batch resolver query с key `['tutor', 'homework', 'task-images-preview', assignmentId, taskId]` (другой prefix чем student, отдельный cache scope). Reuse fullscreen carousel компонент из TASK-10.
+
+**Статус выполнения:** в `GuidedThreadViewer.tsx` `TaskContextImage` заменён на `TaskContextGallery`, который использует `parseAttachmentUrls(taskImageUrl)` + tutor cache key `['tutor', 'homework', 'task-images-preview', assignmentId, taskId]` + batch endpoint `/assignments/:id/tasks/:taskId/images`. Визуал и fullscreen carousel переиспользуются из shared `PhotoGallery`, а `key={selectedTask.id}` сохранён — Dialog закрывается при смене задачи, realtime/collapsible invariants не нарушены.
 
 ---
 

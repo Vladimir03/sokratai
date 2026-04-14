@@ -6,14 +6,7 @@ import { Badge } from '@/components/ui/badge';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
 import { Skeleton } from '@/components/ui/skeleton';
-import { ChevronDown, ChevronUp, Loader2, Paperclip, Send, X, ZoomIn } from 'lucide-react';
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogDescription,
-} from '@/components/ui/dialog';
+import { ChevronDown, ChevronUp, Loader2, Paperclip, Send, X } from 'lucide-react';
 import { MathText } from '@/components/kb/ui/MathText';
 import { parseISO } from 'date-fns';
 import { toast } from 'sonner';
@@ -21,7 +14,7 @@ import {
   getTutorStudentGuidedThread,
   postTutorThreadMessage,
   getHomeworkImageSignedUrl,
-  getTaskImageSignedUrl,
+  getTutorTaskImagesSignedUrls,
   mergeThreadMessage,
   uploadTutorHomeworkTaskImage,
   type TutorStudentGuidedThreadResponse,
@@ -33,8 +26,10 @@ import {
   TUTOR_GC_TIME_MS,
 } from '@/hooks/tutorQueryOptions';
 import { ThreadAttachments } from '@/components/homework/ThreadAttachments';
+import { PhotoGallery } from '@/components/homework/shared/PhotoGallery';
 import { supabase } from '@/lib/supabaseClient';
 import type { Database } from '@/integrations/supabase/types';
+import { parseAttachmentUrls } from '@/lib/attachmentRefs';
 
 const STICKY_BOTTOM_THRESHOLD_PX = 100;
 
@@ -52,42 +47,39 @@ const TASK_STATUS_LABELS: Record<string, string> = {
   skipped: 'Пропущена',
 };
 
-// ─── Task condition image with click-to-zoom ───────────────────────────────
-// Mirrors TaskImagePreview in TutorHomeworkDetail.tsx. Reuses the exact
-// React Query key so a tutor who opened the assignment detail gets a warm
-// cache hit when they later open the thread viewer for the same task.
-function TaskContextImage({
+// ─── Task condition gallery with click-to-zoom ─────────────────────────────
+function TaskContextGallery({
   assignmentId,
   taskId,
-  taskOrder,
   taskImageUrl,
 }: {
   assignmentId: string;
   taskId: string;
-  taskOrder: number;
   taskImageUrl: string | null;
 }) {
-  const [open, setOpen] = useState(false);
-  const isExternal = Boolean(taskImageUrl && /^https?:\/\//i.test(taskImageUrl));
+  const refs = useMemo(() => parseAttachmentUrls(taskImageUrl), [taskImageUrl]);
+  const hasExternalOnly = refs.length > 0 && refs.every((ref) => /^(https?:\/\/|data:)/i.test(ref));
 
-  const imageQuery = useQuery<string | null>({
-    queryKey: ['tutor', 'homework', 'task-image-preview', assignmentId, taskId],
-    queryFn: () => getTaskImageSignedUrl(assignmentId, taskId),
-    enabled: Boolean(taskImageUrl) && !isExternal,
+  const imageQuery = useQuery<string[]>({
+    queryKey: ['tutor', 'homework', 'task-images-preview', assignmentId, taskId],
+    queryFn: () => getTutorTaskImagesSignedUrls(assignmentId, taskId),
+    enabled: refs.length > 0 && !hasExternalOnly,
     staleTime: TUTOR_STALE_TIME_MS,
     gcTime: TUTOR_GC_TIME_MS,
     retry: 1,
   });
 
-  if (!taskImageUrl) return null;
-
-  const resolvedUrl = isExternal ? taskImageUrl : (imageQuery.data ?? null);
+  if (refs.length === 0) return null;
 
   if (imageQuery.isLoading) {
     return <Skeleton className="mt-2 h-24 w-40 rounded-md" />;
   }
 
-  if (!resolvedUrl) {
+  const resolvedUrls = imageQuery.data && imageQuery.data.length > 0
+    ? imageQuery.data
+    : refs.filter((ref) => /^(https?:\/\/|data:)/i.test(ref));
+
+  if (resolvedUrls.length === 0) {
     return (
       <p className="mt-2 text-xs text-muted-foreground">
         Фото задачи недоступно
@@ -96,39 +88,14 @@ function TaskContextImage({
   }
 
   return (
-    <>
-      <button
-        type="button"
-        onClick={() => setOpen(true)}
-        aria-label={`Открыть фото условия задачи №${taskOrder}`}
-        title="Открыть фото задачи"
-        className="group relative mt-2 inline-block rounded-md border bg-background p-1 hover:opacity-90 transition-opacity touch-manipulation"
-      >
-        <img
-          src={resolvedUrl}
-          alt={`Фото условия задачи №${taskOrder}`}
-          className="h-24 w-auto max-w-[220px] rounded-sm object-cover"
-          loading="lazy"
-        />
-        <span className="absolute right-1 top-1 inline-flex items-center gap-1 rounded-md bg-background/90 px-1.5 py-0.5 text-[10px] opacity-0 transition-opacity group-hover:opacity-100">
-          <ZoomIn className="h-3 w-3" />
-          Увеличить
-        </span>
-      </button>
-      <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className="max-w-4xl p-4">
-          <DialogHeader>
-            <DialogTitle>Условие задачи №{taskOrder}</DialogTitle>
-            <DialogDescription>Изображение условия задачи</DialogDescription>
-          </DialogHeader>
-          <img
-            src={resolvedUrl}
-            alt={`Фото условия задачи №${taskOrder}`}
-            className="max-h-[75vh] w-full rounded-md object-contain"
-          />
-        </DialogContent>
-      </Dialog>
-    </>
+    <PhotoGallery
+      images={resolvedUrls}
+      dialogTitle="Фото задачи"
+      dialogDescription="Изображения условия задачи"
+      imageAltPrefix="Фото условия задачи"
+      singleThumbnailClassName="h-24 w-auto max-w-[220px] rounded-sm object-cover"
+      multiThumbnailClassName="h-24 w-[120px] rounded-md border border-slate-200 bg-white object-contain"
+    />
   );
 }
 
@@ -429,11 +396,10 @@ export function GuidedThreadViewer({
                         text={selectedTask.task_text}
                         className="whitespace-pre-wrap leading-relaxed break-words"
                       />
-                      <TaskContextImage
+                      <TaskContextGallery
                         key={selectedTask.id}
                         assignmentId={assignmentId}
                         taskId={selectedTask.id}
-                        taskOrder={selectedTask.order_num}
                         taskImageUrl={selectedTask.task_image_url}
                       />
                     </div>

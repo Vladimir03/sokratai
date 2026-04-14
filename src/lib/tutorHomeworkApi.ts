@@ -478,6 +478,7 @@ export interface TutorHomeworkAssignmentDetails {
     task_image_url: string | null;
     correct_answer: string | null;
     rubric_text: string | null;
+    rubric_image_urls?: string | null;
     max_score: number;
     check_format?: 'short_answer' | 'detailed_solution';
   }[];
@@ -765,6 +766,38 @@ export async function getTaskImageSignedUrl(
     return result.url ?? null;
   } catch {
     return null;
+  }
+}
+
+export async function getTutorTaskImagesSignedUrls(
+  assignmentId: string,
+  taskId: string,
+): Promise<string[]> {
+  try {
+    const result = await requestHomeworkApi<{ signed_urls?: unknown }>(
+      `/assignments/${encodeURIComponent(assignmentId)}/tasks/${encodeURIComponent(taskId)}/images`,
+    );
+    return Array.isArray(result.signed_urls)
+      ? result.signed_urls.filter((value): value is string => typeof value === 'string' && value.length > 0)
+      : [];
+  } catch {
+    return [];
+  }
+}
+
+export async function getTutorRubricImagesSignedUrls(
+  assignmentId: string,
+  taskId: string,
+): Promise<string[]> {
+  try {
+    const result = await requestHomeworkApi<{ signed_urls?: unknown }>(
+      `/assignments/${encodeURIComponent(assignmentId)}/tasks/${encodeURIComponent(taskId)}/rubric-images`,
+    );
+    return Array.isArray(result.signed_urls)
+      ? result.signed_urls.filter((value): value is string => typeof value === 'string' && value.length > 0)
+      : [];
+  } catch {
+    return [];
   }
 }
 

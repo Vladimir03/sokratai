@@ -1,7 +1,7 @@
 import { useState, useCallback, useEffect, useId, useMemo, useRef } from 'react';
 import { Link, useParams, useNavigate } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { ChevronDown, Paperclip, ExternalLink, Edit, Trash2, ZoomIn } from 'lucide-react';
+import { ChevronDown, Paperclip, ExternalLink, Edit, Trash2 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -17,7 +17,8 @@ import { HeatmapGrid } from '@/components/tutor/results/HeatmapGrid';
 import { StudentDrillDown } from '@/components/tutor/results/StudentDrillDown';
 import {
   getTutorHomeworkAssignment,
-  getTaskImageSignedUrl,
+  getTutorTaskImagesSignedUrls,
+  getTutorRubricImagesSignedUrls,
   getMaterialSignedUrl,
   getTutorHomeworkResults,
   deleteTutorHomeworkAssignment,
@@ -28,7 +29,9 @@ import {
 } from '@/lib/tutorHomeworkApi';
 import { HOMEWORK_STATUS_CONFIG } from '@/lib/homeworkStatus';
 import { trackGuidedHomeworkEvent } from '@/lib/homeworkTelemetry';
+import { parseAttachmentUrls } from '@/lib/attachmentRefs';
 import { MathText } from '@/components/kb/ui/MathText';
+import { PhotoGallery } from '@/components/homework/shared/PhotoGallery';
 import {
   createTutorRetry,
   TUTOR_STALE_TIME_MS,
@@ -129,6 +132,19 @@ function TasksList({ details }: { details: TutorHomeworkAssignmentDetails }) {
             <div className="flex-1 min-w-0">
               <MathText text={task.task_text} className="text-sm leading-relaxed whitespace-pre-wrap break-words" />
               <TaskImagePreview assignmentId={details.assignment.id} taskId={task.id} taskImageUrl={task.task_image_url} />
+              {(task.rubric_text || task.rubric_image_urls) && (
+                <div className="mt-3 space-y-2 rounded-md border border-slate-200 bg-background/70 p-3">
+                  <p className="text-sm font-semibold">Критерии проверки</p>
+                  {task.rubric_text ? (
+                    <MathText text={task.rubric_text} className="text-sm leading-relaxed whitespace-pre-wrap break-words" />
+                  ) : null}
+                  <RubricImagePreview
+                    assignmentId={details.assignment.id}
+                    taskId={task.id}
+                    rubricImageUrls={task.rubric_image_urls ?? null}
+                  />
+                </div>
+              )}
               <div className="flex items-center gap-3 mt-1.5 text-xs text-muted-foreground tabular-nums">
                 <span>Макс. баллов: {task.max_score}</span>
                 {task.correct_answer && <span>Ответ: <MathText text={task.correct_answer} as="span" className="font-mono" /></span>}
@@ -143,27 +159,29 @@ function TasksList({ details }: { details: TutorHomeworkAssignmentDetails }) {
 }
 
 function TaskImagePreview({ assignmentId, taskId, taskImageUrl }: { assignmentId: string; taskId: string; taskImageUrl: string | null }) {
-  const [open, setOpen] = useState(false);
-  const isExternal = Boolean(taskImageUrl && /^https?:\/\//i.test(taskImageUrl));
+  const refs = useMemo(() => parseAttachmentUrls(taskImageUrl), [taskImageUrl]);
+  const hasExternalOnly = refs.length > 0 && refs.every((ref) => /^(https?:\/\/|data:)/i.test(ref));
 
-  const imageQuery = useQuery<string | null>({
-    queryKey: ['tutor', 'homework', 'task-image-preview', assignmentId, taskId],
-    queryFn: () => getTaskImageSignedUrl(assignmentId, taskId),
-    enabled: Boolean(taskImageUrl) && !isExternal,
+  const imageQuery = useQuery<string[]>({
+    queryKey: ['tutor', 'homework', 'task-images', assignmentId, taskId],
+    queryFn: () => getTutorTaskImagesSignedUrls(assignmentId, taskId),
+    enabled: refs.length > 0 && !hasExternalOnly,
     staleTime: TUTOR_STALE_TIME_MS,
     gcTime: TUTOR_GC_TIME_MS,
     retry: 1,
   });
 
-  if (!taskImageUrl) return null;
-
-  const resolvedUrl = isExternal ? taskImageUrl : (imageQuery.data ?? null);
+  if (refs.length === 0) return null;
 
   if (imageQuery.isLoading) {
     return <Skeleton className="mt-2 h-24 w-40 rounded-md" />;
   }
 
-  if (!resolvedUrl) {
+  const resolvedUrls = imageQuery.data && imageQuery.data.length > 0
+    ? imageQuery.data
+    : refs.filter((ref) => /^(https?:\/\/|data:)/i.test(ref));
+
+  if (resolvedUrls.length === 0) {
     return (
       <p className="mt-2 text-xs text-muted-foreground">
         Фото задачи недоступно
@@ -172,42 +190,63 @@ function TaskImagePreview({ assignmentId, taskId, taskImageUrl }: { assignmentId
   }
 
   return (
-    <>
-      <button
-        type="button"
-        onClick={() => setOpen(true)}
-        className="group relative mt-2 inline-block rounded-md border bg-background p-1 hover:opacity-90 transition-opacity focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1"
-        title="Открыть фото задачи"
-        aria-label="Открыть фото задачи во весь экран"
-      >
-        <img
-          src={resolvedUrl}
-          alt="Фото задачи"
-          className="h-24 w-auto max-w-[220px] rounded-sm object-cover"
-          loading="lazy"
-        />
-        <span
-          aria-hidden="true"
-          className="absolute right-1 top-1 inline-flex items-center gap-1 rounded-md bg-background/90 px-1.5 py-0.5 text-[10px] opacity-0 transition-opacity group-hover:opacity-100"
-        >
-          <ZoomIn className="h-3 w-3" />
-          Увеличить
-        </span>
-      </button>
-      <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className="max-w-4xl p-4">
-          <DialogHeader>
-            <DialogTitle>Фото задачи</DialogTitle>
-            <DialogDescription>Изображение условия задачи</DialogDescription>
-          </DialogHeader>
-          <img
-            src={resolvedUrl}
-            alt="Фото задачи"
-            className="max-h-[75vh] w-full rounded-md object-contain"
-          />
-        </DialogContent>
-      </Dialog>
-    </>
+    <PhotoGallery
+      images={resolvedUrls}
+      dialogTitle="Фото задачи"
+      dialogDescription="Изображение условия задачи"
+      imageAltPrefix="Фото задачи"
+    />
+  );
+}
+
+function RubricImagePreview({
+  assignmentId,
+  taskId,
+  rubricImageUrls,
+}: {
+  assignmentId: string;
+  taskId: string;
+  rubricImageUrls: string | null;
+}) {
+  const refs = useMemo(() => parseAttachmentUrls(rubricImageUrls), [rubricImageUrls]);
+  const hasExternalOnly = refs.length > 0 && refs.every((ref) => /^(https?:\/\/|data:)/i.test(ref));
+
+  const imageQuery = useQuery<string[]>({
+    queryKey: ['tutor', 'homework', 'rubric-images', assignmentId, taskId],
+    queryFn: () => getTutorRubricImagesSignedUrls(assignmentId, taskId),
+    enabled: refs.length > 0 && !hasExternalOnly,
+    staleTime: TUTOR_STALE_TIME_MS,
+    gcTime: TUTOR_GC_TIME_MS,
+    retry: 1,
+  });
+
+  if (refs.length === 0) return null;
+
+  if (imageQuery.isLoading) {
+    return <Skeleton className="h-24 w-40 rounded-md" />;
+  }
+
+  const resolvedUrls = imageQuery.data && imageQuery.data.length > 0
+    ? imageQuery.data
+    : refs.filter((ref) => /^(https?:\/\/|data:)/i.test(ref));
+
+  if (resolvedUrls.length === 0) {
+    return (
+      <p className="text-xs text-muted-foreground">
+        Фото критериев недоступны
+      </p>
+    );
+  }
+
+  return (
+    <PhotoGallery
+      images={resolvedUrls}
+      dialogTitle="Фото критериев проверки"
+      dialogDescription="Изображения рубрики для проверки задачи"
+      imageAltPrefix="Фото критериев"
+      singleThumbnailClassName="h-24 w-auto max-w-[220px] rounded-sm object-contain"
+      multiThumbnailClassName="h-24 w-[120px] rounded-md border border-slate-200 bg-white object-contain"
+    />
   );
 }
 

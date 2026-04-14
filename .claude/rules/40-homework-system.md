@@ -37,7 +37,7 @@
 - KB-импорт (`HWTasksSection.kbTaskToDraftTask`) сохраняет до 5 фото из `attachment_url`; если > 5 — `toast.info('Из БЗ импортировано 5 из N фото')`. Snapshot-механика (`kb_snapshot_*`) не тронута.
 - Рубрика видна ТОЛЬКО репетитору — `getStudentAssignment` не возвращает `rubric_image_urls` (RLS в TASK-6 backend).
 - Миграция: `supabase/migrations/20260414120000_homework_rubric_images.sql` (additive `ADD COLUMN IF NOT EXISTS rubric_image_urls TEXT NULL` + COMMENT'ы). Legacy single-ref задачи работают без data migration.
-- Frontend status: TASK-3 (HWTaskCard gallery), TASK-4 (KB-импорт), TASK-5 (TutorHomeworkCreate 3 точки записи), TASK-10 (student `TaskConditionGallery` + fullscreen carousel), TASK-11 (student batch signed-URL hook), TASK-8/9 (AI multimodal arrays) — ✅ done. TutorHomeworkDetail/GuidedThreadViewer отображение (TASK-12/13) — pending.
+- Frontend status: TASK-3 (HWTaskCard gallery), TASK-4 (KB-импорт), TASK-5 (TutorHomeworkCreate 3 точки записи), TASK-10 (student `TaskConditionGallery` + fullscreen carousel), TASK-11 (student batch signed-URL hook), TASK-8/9 (AI multimodal arrays), TASK-12 (TutorHomeworkDetail multi-photo + rubric section), TASK-13 (GuidedThreadViewer multi-photo task context) — ✅ done.
 
 Спека: `docs/delivery/features/homework-multi-photo/spec.md`.
 
@@ -264,9 +264,10 @@ Audit/normalize/optimize/harden pass на `/tutor/homework` и `/tutor/homework/
 - Collapsible-блок «Условие задачи #N» рендерится в `GuidedThreadViewer.tsx` между row фильтров и контейнером сообщений — только при `taskFilter !== 'all'`
 - Локальный state `isTaskContextExpanded` (default `true`), сбрасывается в `true` при смене `taskFilter`
 - `task_text` рендерится через `MathText`; `max-h-[200px] overflow-y-auto` предотвращает переполнение при длинных условиях
-- Изображение условия — локальный sub-компонент `TaskContextImage` (module-scope в `GuidedThreadViewer.tsx`): миниатюра + hover-badge `ZoomIn` + Radix `Dialog` с `max-h-[75vh] object-contain`
-- Query key для signed URL: `['tutor', 'homework', 'task-image-preview', assignmentId, taskId]` — тот же, что в `TaskImagePreview` в `TutorHomeworkDetail.tsx`; даёт warm cache hit при переходе Detail → Results
-- `key={selectedTask.id}` на `TaskContextImage` — remount при переключении задачи закрывает открытый Dialog
+- Изображение условия — `TaskContextGallery` (module-scope в `GuidedThreadViewer.tsx`): dual-format `task_image_url` читается через `parseAttachmentUrls`, batch signed URLs идут через tutor-friendly endpoint `/assignments/:id/tasks/:taskId/images`
+- `TaskContextGallery` использует tutor-only cache key `['tutor', 'homework', 'task-images-preview', assignmentId, taskId]` — отдельный cache scope от student hooks, без пересечения query space
+- При 1 фото — single-thumbnail zoom-dialog; при 2+ — ряд миниатюр + fullscreen carousel с counter и стрелками, визуально совпадающий со student-side `TaskConditionGallery`
+- `key={selectedTask.id}` на `TaskContextGallery` — remount при переключении задачи закрывает открытый Dialog и сохраняет E8/E9 invariant
 - Не трогать `ThreadAttachments` и `GuidedChatMessage` (student-side) — изолировано в tutor-домене
 - Спека: `docs/delivery/features/thread-viewer-task-context/spec.md`
 
