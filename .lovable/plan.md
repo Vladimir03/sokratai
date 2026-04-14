@@ -1,36 +1,41 @@
 
 
-## Plan: Add Telegram username change in student profile
+## Plan: Fix build errors in 3 edge functions
 
-### Problem
-Students cannot change their Telegram username from the profile page. If a tutor entered a Telegram username for the student, the student should be able to update it themselves.
+### Critical issue (user-facing)
+`tutor-manual-add-student` crashes with `getUserByEmail is not a function`. This blocks tutors from adding students.
+
+### Root cause
+`supabaseAdmin.auth.admin.getUserByEmail()` doesn't exist in the Supabase JS client. The correct approach is `listUsers` with email filter.
 
 ### Changes
 
-#### 1. Add `update-telegram` action to `supabase/functions/student-account/index.ts`
+#### 1. Fix `supabase/functions/tutor-manual-add-student/index.ts`
+Replace both `getUserByEmail(email)` calls (lines 187 and 271) with:
+```typescript
+const { data: listData } = await supabaseAdmin.auth.admin.listUsers({
+  filter: `email.eq.${email}`,
+  page: 1, perPage: 1,
+});
+const foundUser = listData?.users?.[0] ?? null;
+```
 
-New action that updates `profiles.telegram_username` for the authenticated user:
-- Accepts `{ action: "update-telegram", telegram_username: string }`
-- Normalizes the username (strips `@`, trims whitespace)
-- Validates format (alphanumeric + underscores, 5-32 chars per Telegram rules)
-- Updates `profiles.telegram_username` via service_role client
-- Returns the updated username
+#### 2. Fix `supabase/functions/chat/index.ts`
+- **Line 1107**: Fix type error — add explicit typing to `adminSupabase` creation: `createClient(url, key, { auth: { persistSession: false, autoRefreshToken: false } })`
+- **Line 1138**: Fix typo `taskPromptImageDataUrl` → `taskPromptImageDataUrls.length > 0`
 
-#### 2. Update `src/pages/Profile.tsx` — add Telegram username edit UI
+#### 3. Fix `supabase/functions/process-email-queue/index.ts`
+- **Line 57**: Change `ReturnType<typeof createClient>` to `any` to fix SupabaseClient generic mismatch
+- **Lines 159, 164**: Add explicit types for `msg` and `id` parameters
+- Remaining type errors on lines 214/221/330 are the same `moveToDlq` signature issue, fixed by the `any` param type
 
-In the Telegram card (lines 680-768), add an editable field for `telegram_username`:
-- When Telegram is connected (has `telegram_user_id`): show current username with an edit option below it
-- When Telegram is NOT connected: show an input to set/change the telegram username, plus the existing "Связать Telegram" button
-
-The UI will mirror the email change pattern:
-- Input field for new Telegram username (with `@` prefix hint)
-- "Сохранить" button that calls `student-account` with `action: "update-telegram"`
-- Success updates the local profile state
-
-#### 3. Redeploy `student-account` edge function
+#### 4. Redeploy all 3 functions
+- `tutor-manual-add-student` (critical — blocks student registration)
+- `chat`
+- `process-email-queue`
 
 ### Technical details
-- The `telegram_username` lives in `profiles` table (public schema), not in `auth.users`
-- The edge function uses `service_role` to bypass RLS on profiles
-- No migration needed — `profiles.telegram_username` column already exists
+- `getUserByEmail` was never a public method in `@supabase/supabase-js` v2 — the `(as any)` cast hid the compile error but it fails at runtime
+- The `listUsers` API with filter is the correct replacement
+- The chat/process-email-queue type errors are generic inference mismatches from recent SDK updates — using `any` for the admin client param is safe in edge functions
 
