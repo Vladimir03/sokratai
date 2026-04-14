@@ -294,15 +294,15 @@ async function authenticateUser(
   if (!authHeader?.startsWith("Bearer ")) {
     return jsonError(cors, 401, "UNAUTHORIZED", "Missing Authorization header");
   }
-  const userClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+  const jwt = authHeader.slice(7);
+  const adminClient = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
     auth: { persistSession: false, autoRefreshToken: false },
-    global: { headers: { Authorization: authHeader } },
   });
-  const { data: { user }, error } = await userClient.auth.getUser();
+  const { data: { user }, error } = await adminClient.auth.getUser(jwt);
   if (error || !user) {
     console.error("homework_api_auth_failed", {
       error: error?.message,
-      hasToken: !!authHeader,
+      hasToken: !!jwt,
     });
     return jsonError(cors, 401, "UNAUTHORIZED", "Invalid or expired token");
   }
