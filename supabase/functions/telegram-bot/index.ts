@@ -25,7 +25,9 @@ const SITE_BASE_URL = "https://sokratai.ru";
 const TELEGRAM_HISTORY_LIMIT = 8; // max messages to send to AI from Telegram
 const TELEGRAM_CHAT_TIMEOUT_MS = 55_000; // 55s timeout for AI chat call
 
-const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
+  auth: { persistSession: false, autoRefreshToken: false }
+});
 
 /**
  * Compact chat history for Telegram AI calls:
