@@ -55,12 +55,24 @@ export interface DraftTask {
   id?: string;
   localId: string;
   task_text: string;
+  /**
+   * Storage refs для фото условия задачи.
+   * Dual-format — single storage ref ИЛИ JSON-array через `@/lib/attachmentRefs`.
+   * Используй `parseAttachmentUrls` / `serializeAttachmentUrls` для чтения/записи.
+   * Лимит — `MAX_TASK_IMAGES` (5).
+   */
   task_image_path: string | null;
   task_image_name: string | null;
   task_image_preview_url: string | null;
   task_image_used_fallback: boolean;
   correct_answer: string;
   rubric_text: string;
+  /**
+   * Storage refs для фото критериев проверки (рубрики).
+   * Dual-format — single storage ref ИЛИ JSON-array через `@/lib/attachmentRefs`.
+   * Лимит — `MAX_RUBRIC_IMAGES` (3). Видимость: только репетитор.
+   */
+  rubric_image_paths: string | null;
   max_score: number;
   uploading: boolean;
   /** KB provenance — set when task added from Knowledge Base picker */
@@ -118,6 +130,7 @@ export function createEmptyTask(): DraftTask {
     task_image_used_fallback: false,
     correct_answer: '',
     rubric_text: '',
+    rubric_image_paths: null,
     max_score: 1,
     uploading: false,
     check_format: 'short_answer',

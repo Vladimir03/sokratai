@@ -4,7 +4,12 @@ import { Plus, Library } from 'lucide-react';
 import { toast } from 'sonner';
 import { deleteTutorHomeworkTaskImage } from '@/lib/tutorHomeworkApi';
 import type { KBTask } from '@/types/kb';
-import { parseAttachmentUrls, getKBImageSignedUrl } from '@/lib/kbApi';
+import { getKBImageSignedUrl } from '@/lib/kbApi';
+import {
+  parseAttachmentUrls,
+  serializeAttachmentUrls,
+  MAX_TASK_IMAGES,
+} from '@/lib/attachmentRefs';
 import { KBPickerSheet } from '@/components/tutor/KBPickerSheet';
 import { HWTaskCard } from './HWTaskCard';
 import { type DraftTask, createEmptyTask, generateUUID, revokeObjectUrl } from './types';
@@ -24,30 +29,50 @@ function mapAnswerFormatToCheckFormat(af: string | null): 'short_answer' | 'deta
 }
 
 // Job: Быстро добавить задачу из базы в черновик ДЗ
-function kbTaskToDraftTask(task: KBTask): DraftTask {
-  const attachmentRef = parseAttachmentUrls(task.attachment_url)[0] ?? null;
+/**
+ * Возвращает `{ draft, truncatedFrom }`. `truncatedFrom` установлен в исходное
+ * число фото, если KB-задача имела больше `MAX_TASK_IMAGES` — вызывающая сторона
+ * решает, показать toast или нет (spec §3 «KB-импорт»).
+ */
+function kbTaskToDraftTask(
+  task: KBTask,
+): { draft: DraftTask; truncatedFrom: number | null } {
+  const refs = parseAttachmentUrls(task.attachment_url);
+  const slicedRefs = refs.slice(0, MAX_TASK_IMAGES);
+  const taskImagePath = serializeAttachmentUrls(slicedRefs);
+  const firstRef = slicedRefs[0] ?? null;
+  const truncatedFrom = refs.length > MAX_TASK_IMAGES ? refs.length : null;
+
   const checkFormat: 'short_answer' | 'detailed_solution' =
     (task.check_format === 'short_answer' || task.check_format === 'detailed_solution' ? task.check_format : null)
     ?? mapAnswerFormatToCheckFormat(task.answer_format)
     ?? inferCheckFormat(task.kim_number);
+
   return {
-    localId: generateUUID(),
-    task_text: task.text,
-    task_image_path: attachmentRef,
-    task_image_name: attachmentRef?.split('/').pop() ?? null,
-    task_image_preview_url: null,
-    task_image_used_fallback: false,
-    correct_answer: task.answer ?? '',
-    rubric_text: '',
-    max_score: task.primary_score ?? 1,
-    uploading: false,
-    check_format: checkFormat,
-    kb_task_id: task.id,
-    kb_source: task.owner_id ? 'my' : 'socrat',
-    kb_snapshot_text: task.text,
-    kb_snapshot_answer: task.answer ?? null,
-    kb_snapshot_solution: task.solution ?? null,
-    kb_attachment_url: attachmentRef,
+    draft: {
+      localId: generateUUID(),
+      task_text: task.text,
+      task_image_path: taskImagePath,
+      // Legacy single-photo metadata — заполняем из первого ref'а для backward compat
+      // (остальные фото рендерятся через parseAttachmentUrls(task_image_path) в HWTaskCard).
+      task_image_name: firstRef?.split('/').pop() ?? null,
+      task_image_preview_url: null,
+      task_image_used_fallback: false,
+      correct_answer: task.answer ?? '',
+      rubric_text: '',
+      rubric_image_paths: null,
+      max_score: task.primary_score ?? 1,
+      uploading: false,
+      check_format: checkFormat,
+      kb_task_id: task.id,
+      kb_source: task.owner_id ? 'my' : 'socrat',
+      kb_snapshot_text: task.text,
+      kb_snapshot_answer: task.answer ?? null,
+      kb_snapshot_solution: task.solution ?? null,
+      // Провенанс: сохраняем тот же dual-format snapshot, что и в task_image_path.
+      kb_attachment_url: taskImagePath,
+    },
+    truncatedFrom,
   };
 }
 
@@ -88,16 +113,30 @@ export function HWTasksSection({
 
   const handleAddFromKB = useCallback(
     async (kbTasks: KBTask[]) => {
-      const newDrafts = kbTasks
+      const converted = kbTasks
         .filter((t) => !tasks.some((d) => d.kb_task_id === t.id))
         .map(kbTaskToDraftTask);
-      if (newDrafts.length === 0) return;
+      if (converted.length === 0) return;
 
-      // Resolve signed URLs for KB attachments
+      const newDrafts = converted.map((c) => c.draft);
+
+      // Surface truncation per task (spec §3 «KB-импорт»: импортируем первые 5
+      // и показываем toast `Из БЗ импортировано 5 из N фото`).
+      for (const { truncatedFrom } of converted) {
+        if (truncatedFrom !== null) {
+          toast.info(
+            `Из БЗ импортировано ${MAX_TASK_IMAGES} из ${truncatedFrom} фото`,
+          );
+        }
+      }
+
+      // Resolve signed URL for the first KB attachment (превью в legacy-слоте).
+      // Остальные фото резолвятся внутри HWTaskCard на рендере галереи.
       await Promise.all(
         newDrafts.map(async (draft) => {
-          if (draft.task_image_path) {
-            const url = await getKBImageSignedUrl(draft.task_image_path);
+          const firstRef = parseAttachmentUrls(draft.task_image_path)[0];
+          if (firstRef) {
+            const url = await getKBImageSignedUrl(firstRef);
             if (url) draft.task_image_preview_url = url;
           }
         }),

@@ -467,9 +467,10 @@ function TutorHomeworkCreateContent() {
         const apiTasks: CreateAssignmentTask[] = tasks.map((t, i) => ({
           order_num: i + 1,
           task_text: t.task_text.trim() || '[Задача на фото]',
-          task_image_url: t.task_image_path || t.kb_attachment_url || null,
+          task_image_url: t.task_image_path ?? null,
           correct_answer: t.correct_answer.trim() || null,
           rubric_text: t.rubric_text.trim() || null,
+          rubric_image_urls: t.rubric_image_paths ?? null,
           max_score: t.max_score,
           check_format: t.check_format,
         }));
@@ -599,9 +600,10 @@ function TutorHomeworkCreateContent() {
             subject: meta.subject as ModernHomeworkSubject,
             tasks_json: tasks.map((t) => ({
               task_text: t.task_text.trim(),
-              task_image_url: t.task_image_path || t.kb_attachment_url || null,
+              task_image_url: t.task_image_path ?? null,
               correct_answer: t.correct_answer.trim() || null,
               rubric_text: t.rubric_text.trim() || null,
+              rubric_image_urls: t.rubric_image_paths ?? null,
               max_score: t.max_score,
             })),
           });
@@ -695,9 +697,10 @@ function TutorHomeworkCreateContent() {
         ...(t.id ? { id: t.id } : {}),
         order_num: i + 1,
         task_text: t.task_text.trim() || '[Задача на фото]',
-        task_image_url: t.task_image_path || t.kb_attachment_url || null,
+        task_image_url: t.task_image_path ?? null,
         correct_answer: t.correct_answer.trim() || null,
         rubric_text: t.rubric_text.trim() || null,
+        rubric_image_urls: t.rubric_image_paths ?? null,
         max_score: t.max_score,
         check_format: t.check_format,
       }));

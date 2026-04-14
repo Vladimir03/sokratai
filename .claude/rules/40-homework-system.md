@@ -24,6 +24,23 @@
 - `subject: 'physics'` — предмет по умолчанию (целевой сегмент: репетиторы физики ЕГЭ/ОГЭ)
 - Если репетитор меняет предмет — открыть L1 («Расширенные параметры»)
 
+### Multi-photo на задачу и рубрику (2026-04-14, frontend TASK-3..5)
+
+`homework_tutor_tasks.task_image_url` и `homework_tutor_tasks.rubric_image_urls` — оба dual-format TEXT поля. Значение либо single `storage://...` ref (legacy + когда одно фото), либо JSON-array `["storage://...", ...]` (2+ фото). Чтение/запись через `parseAttachmentUrls` / `serializeAttachmentUrls` из `@/lib/attachmentRefs` (и Deno-клон `supabase/functions/_shared/attachment-refs.ts`).
+
+**Лимиты (hard):** условие ≤ `MAX_TASK_IMAGES = 5`, рубрика ≤ `MAX_RUBRIC_IMAGES = 3`.
+
+**Правила:**
+- Не парсить JSON вручную. Не читать поле напрямую как строку, предполагая single-ref — всегда через helper.
+- `DraftTask` в конструкторе держит `task_image_path: string | null` и `rubric_image_paths: string | null` — оба в том же dual-format.
+- `TutorHomeworkCreate.tsx` не комбинирует `task_image_path || kb_attachment_url` в body — только `task_image_path ?? null`. `kb_attachment_url` остаётся в DraftTask как провенанс, не отправляется.
+- KB-импорт (`HWTasksSection.kbTaskToDraftTask`) сохраняет до 5 фото из `attachment_url`; если > 5 — `toast.info('Из БЗ импортировано 5 из N фото')`. Snapshot-механика (`kb_snapshot_*`) не тронута.
+- Рубрика видна ТОЛЬКО репетитору — `getStudentAssignment` не возвращает `rubric_image_urls` (RLS в TASK-6 backend).
+- Миграция: `supabase/migrations/20260414120000_homework_rubric_images.sql` (additive `ADD COLUMN IF NOT EXISTS rubric_image_urls TEXT NULL` + COMMENT'ы). Legacy single-ref задачи работают без data migration.
+- Frontend status: TASK-3 (HWTaskCard gallery), TASK-4 (KB-импорт), TASK-5 (TutorHomeworkCreate 3 точки записи) — ✅ done. Student-side gallery (TASK-10), AI multimodal arrays (TASK-8/9), TutorHomeworkDetail/GuidedThreadViewer отображение (TASK-12/13) — pending.
+
+Спека: `docs/delivery/features/homework-multi-photo/spec.md`.
+
 ### Формат проверки задач (`check_format`, Phase 1, 2026-04-01)
 
 Колонка `check_format` в `homework_tutor_tasks` определяет как AI проверяет ответ ученика в guided chat.

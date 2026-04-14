@@ -45,9 +45,18 @@ export interface TutorHomeworkAssignmentListItem {
 export interface CreateAssignmentTask {
   order_num?: number;
   task_text: string;
+  /**
+   * Storage refs для фото условия. Dual-format — single ref ИЛИ JSON-array.
+   * Лимит 5. См. `@/lib/attachmentRefs`.
+   */
   task_image_url?: string | null;
   correct_answer?: string | null;
   rubric_text?: string | null;
+  /**
+   * Storage refs для фото критериев (рубрики). Dual-format. Лимит 3.
+   * Видимость только репетитор (бэк не возвращает в getStudentAssignment).
+   */
+  rubric_image_urls?: string | null;
   max_score?: number;
   check_format?: 'short_answer' | 'detailed_solution';
 }
@@ -69,9 +78,12 @@ export interface CreateAssignmentPayload {
 
 export interface HomeworkTemplateTask {
   task_text: string;
+  /** Dual-format — см. `@/lib/attachmentRefs`. Лимит 5. */
   task_image_url?: string | null;
   correct_answer?: string | null;
   rubric_text?: string | null;
+  /** Dual-format — см. `@/lib/attachmentRefs`. Лимит 3. */
+  rubric_image_urls?: string | null;
   max_score?: number;
 }
 
@@ -856,10 +868,13 @@ export interface UpdateAssignmentTask {
   id?: string;
   task_text: string;
   order_num?: number;
+  /** Dual-format — см. `@/lib/attachmentRefs`. Лимит 5. */
   task_image_url?: string | null;
   correct_answer?: string | null;
   max_score?: number;
   rubric_text?: string | null;
+  /** Dual-format — см. `@/lib/attachmentRefs`. Лимит 3. Tutor-only. */
+  rubric_image_urls?: string | null;
   check_format?: 'short_answer' | 'detailed_solution';
 }
 
