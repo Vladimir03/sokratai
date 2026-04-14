@@ -1030,6 +1030,7 @@ export type Database = {
           max_score: number
           ocr_text: string | null
           order_num: number
+          rubric_image_urls: string | null
           rubric_text: string | null
           solution_steps: string | null
           task_image_url: string | null
@@ -1043,6 +1044,7 @@ export type Database = {
           max_score?: number
           ocr_text?: string | null
           order_num: number
+          rubric_image_urls?: string | null
           rubric_text?: string | null
           solution_steps?: string | null
           task_image_url?: string | null
@@ -1056,6 +1058,7 @@ export type Database = {
           max_score?: number
           ocr_text?: string | null
           order_num?: number
+          rubric_image_urls?: string | null
           rubric_text?: string | null
           solution_steps?: string | null
           task_image_url?: string | null
