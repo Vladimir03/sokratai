@@ -99,6 +99,20 @@ HomeworkThread, HomeworkThreadMessage, HomeworkTaskState
 5. On stream done, assistant message saved via `saveThreadMessage()`.
 6. "Zadacha vypolnena" button appears after >= 1 AI reply -> calls `advanceTask()`.
 
+### Shared `/chat` guardrail (2026-04-14)
+
+The shared `supabase/functions/chat` system prompt now enforces an anti-batching rule for the general `/chat` runtime:
+
+- one AI response may fully handle at most **2 tasks**
+- if a student sends 3+ tasks in one message, AI must solve only the first 1-2 or ask the student to choose any 2
+- the refusal must be framed as pedagogy ("лучше разберём 1-2 задачи качественно"), not as a cold paywall
+
+Why this matters:
+
+- free users have a daily `/chat` message cap, so batching 5-10 tasks into one request was an easy cost leak
+- guided homework currently reuses the same `/functions/v1/chat` transport for some flows, so shared prompt guardrails should be documented explicitly
+- the product goal is to preserve a supportive tone while reducing Gemini cost per free session
+
 ### AI Context
 
 ```
@@ -323,6 +337,8 @@ The guided-homework AI paths were hardened to fix real student-facing failures o
 2. **Hybrid AI orchestration**: client drives the conversation (saves messages, streams from `/functions/v1/chat`), edge function handles persistence and state. This avoids duplicating SSE streaming code in homework-api.
 
 3. **Shared chat endpoint**: guided homework currently uses the same `/functions/v1/chat` as general chat. This means it consumes the same daily limits. Decoupling is planned for Phase 5.
+
+4. **Shared anti-batching guardrail**: as of 2026-04-14, the default `supabase/functions/chat` system prompt limits one response to at most 2 tasks. This protects the free `/chat` plan from "solve the whole sheet in one message" behavior while keeping the response supportive.
 
 4. **message_kind backward compatibility**: optional field with try-with/try-without insert pattern. Allows deployment without requiring immediate migration.
 

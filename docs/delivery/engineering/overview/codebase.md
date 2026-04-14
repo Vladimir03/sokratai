@@ -233,7 +233,7 @@ All tutor queries follow the pattern `['tutor', entity, ...params]`:
 | Function | Description |
 |----------|-------------|
 | `telegram-bot` | Telegram bot: homework flow, payment callbacks, practice/diagnostic |
-| `chat` | AI chat backend |
+| `chat` | AI chat backend. Default system prompt lives in `supabase/functions/chat/index.ts`; free `/chat` is capped both by daily messages and by a prompt rule of max 2 tasks per AI response. |
 | `setup-telegram-webhook` | Telegram webhook registration |
 | `telegram-auth` | Telegram auth verification |
 | `telegram-login-token` | Telegram login token generation |
