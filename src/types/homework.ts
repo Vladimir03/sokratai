@@ -1,26 +1,33 @@
-// Предметы сгруппированы по типу: технические (приоритет), гуманитарные, естественные
-export const SUBJECTS = [
-  // 🔬 Технические (приоритет)
-  { id: 'algebra', name: 'Алгебра', emoji: '📈', category: 'technical' },
-  { id: 'geometry', name: 'Геометрия', emoji: '📐', category: 'technical' },
-  { id: 'physics', name: 'Физика', emoji: '⚛️', category: 'technical' },
-  { id: 'informatics', name: 'Информатика', emoji: '💻', category: 'technical' },
+export interface HomeworkSubjectConfig {
+  id: string;
+  name: string;
+  category: 'technical' | 'humanities' | 'natural' | 'other';
+}
 
-  // 📚 Гуманитарные
-  { id: 'russian', name: 'Русский язык', emoji: '📖', category: 'humanities' },
-  { id: 'literature', name: 'Литература', emoji: '📗', category: 'humanities' },
-  { id: 'history', name: 'История', emoji: '📜', category: 'humanities' },
-  { id: 'social', name: 'Обществознание', emoji: '⚖️', category: 'humanities' },
-  { id: 'english', name: 'Английский язык', emoji: '🇬🇧', category: 'humanities' },
-  { id: 'french', name: 'Французский язык', emoji: '🇫🇷', category: 'humanities' },
+// Предметы сгруппированы по типу: технические (приоритет), гуманитарные,
+// естественные. Каноничный modern-набор для create/select flows.
+export const SUBJECTS: HomeworkSubjectConfig[] = [
+  // Технические (приоритет)
+  { id: 'maths', name: 'Математика', category: 'technical' },
+  { id: 'physics', name: 'Физика', category: 'technical' },
+  { id: 'informatics', name: 'Информатика', category: 'technical' },
 
-  // 🧬 Естественные
-  { id: 'chemistry', name: 'Химия', emoji: '🧪', category: 'natural' },
-  { id: 'biology', name: 'Биология', emoji: '🧬', category: 'natural' },
-  { id: 'geography', name: 'География', emoji: '🌍', category: 'natural' },
+  // Гуманитарные
+  { id: 'russian', name: 'Русский язык', category: 'humanities' },
+  { id: 'literature', name: 'Литература', category: 'humanities' },
+  { id: 'history', name: 'История', category: 'humanities' },
+  { id: 'social', name: 'Обществознание', category: 'humanities' },
+  { id: 'english', name: 'Английский язык', category: 'humanities' },
+  { id: 'french', name: 'Французский язык', category: 'humanities' },
+  { id: 'spanish', name: 'Испанский язык', category: 'humanities' },
+
+  // Естественные
+  { id: 'chemistry', name: 'Химия', category: 'natural' },
+  { id: 'biology', name: 'Биология', category: 'natural' },
+  { id: 'geography', name: 'География', category: 'natural' },
 
   // Другое
-  { id: 'other', name: 'Другое', emoji: '📝', category: 'other' }
+  { id: 'other', name: 'Другое', category: 'other' },
 ];
 
 /** Quick id→name lookup derived from SUBJECTS */
@@ -36,9 +43,9 @@ export const SUBJECT_NAME_MAP: Record<string, string> = Object.fromEntries(
 const LEGACY_SUBJECT_LABELS: Record<string, string> = {
   math: 'Математика',
   rus: 'Русский язык',
-  french: 'Французский язык',
-  chemistry: 'Химия',
   cs: 'Информатика',
+  algebra: 'Алгебра',
+  geometry: 'Геометрия',
 };
 
 /** Get human-readable Russian subject name; falls back to raw id */

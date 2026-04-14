@@ -4,7 +4,24 @@ import type { HomeworkThread } from '@/types/homework';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
-export type HomeworkSubject = 'math' | 'physics' | 'history' | 'social' | 'english' | 'cs' | 'french' | 'chemistry';
+export type ModernHomeworkSubject =
+  | 'maths'
+  | 'physics'
+  | 'informatics'
+  | 'russian'
+  | 'literature'
+  | 'history'
+  | 'social'
+  | 'english'
+  | 'french'
+  | 'chemistry'
+  | 'biology'
+  | 'geography'
+  | 'spanish'
+  | 'other';
+
+export type LegacyHomeworkSubject = 'math' | 'cs' | 'rus' | 'algebra' | 'geometry';
+export type HomeworkSubject = ModernHomeworkSubject | LegacyHomeworkSubject;
 export type HomeworkAssignmentStatus = 'draft' | 'active' | 'closed';
 export type HomeworkAssignmentsFilter = 'all' | 'active' | 'closed';
 
@@ -37,7 +54,7 @@ export interface CreateAssignmentTask {
 
 export interface CreateAssignmentPayload {
   title: string;
-  subject: HomeworkSubject;
+  subject: ModernHomeworkSubject;
   topic?: string | null;
   description?: string | null;
   deadline?: string | null;
@@ -80,7 +97,7 @@ export interface HomeworkTemplate {
 
 export interface CreateTemplatePayload {
   title: string;
-  subject: HomeworkSubject;
+  subject: ModernHomeworkSubject;
   topic?: string | null;
   tags?: string[];
   tasks_json: HomeworkTemplateTask[];

@@ -2,18 +2,10 @@
 import { useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import { useNavigate, useSearchParams, useParams } from 'react-router-dom';
 import { useQueryClient, useQuery } from '@tanstack/react-query';
-import { format, parseISO } from 'date-fns';
-import { ru } from 'date-fns/locale';
+import { parseISO } from 'date-fns';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
 import { ArrowLeft, Loader2, ChevronDown, ChevronUp, AlertCircle, Save } from 'lucide-react';
 import { toast } from 'sonner';
 import TutorGuard from '@/components/TutorGuard';
@@ -33,12 +25,14 @@ import {
   createTutorHomeworkTemplate,
   getHomeworkImageSignedUrl,
   type HomeworkSubject,
+  type ModernHomeworkSubject,
   type CreateAssignmentTask,
   type UpdateAssignmentTask,
   type HomeworkTemplateListItem,
 } from '@/lib/tutorHomeworkApi';
 import { getTutorInviteWebLink } from '@/utils/telegramLinks';
 import { supabase } from '@/lib/supabaseClient';
+import { getSubjectLabel } from '@/types/homework';
 
 // ─── Extracted components ────────────────────────────────────────────────────
 import {
@@ -93,17 +87,10 @@ function TutorHomeworkCreateContent() {
   const [meta, setMeta] = useState<MetaState>({
     title: '',
     subject: 'physics',
-    topic: '',
     deadline: '',
     disable_ai_bootstrap: true,
     exam_type: 'ege',
   });
-
-  // Auto-generated title: «ДЗ {topic} {dd.MM}» — used when manual title is empty
-  const autoTitle = useMemo(() => {
-    const dateStr = format(new Date(), 'dd.MM', { locale: ru });
-    return meta.topic.trim() ? `ДЗ ${meta.topic.trim()} ${dateStr}` : `ДЗ ${dateStr}`;
-  }, [meta.topic]);
 
   // ── Tasks ──
   const [tasks, setTasks] = useState<DraftTask[]>([createEmptyTask()]);
@@ -180,7 +167,6 @@ function TutorHomeworkCreateContent() {
     setMeta({
       title: a.title,
       subject: a.subject,
-      topic: a.topic ?? '',
       deadline: a.deadline ? toLocalDatetimeString(a.deadline) : '',
       disable_ai_bootstrap: a.disable_ai_bootstrap ?? false,
       exam_type: (a.exam_type as 'ege' | 'oge') ?? 'ege',
@@ -237,7 +223,6 @@ function TutorHomeworkCreateContent() {
       meta: {
         title: a.title,
         subject: a.subject,
-        topic: a.topic ?? '',
         deadline: a.deadline ? toLocalDatetimeString(a.deadline) : '',
         disable_ai_bootstrap: a.disable_ai_bootstrap ?? false,
         exam_type: (a.exam_type as 'ege' | 'oge') ?? 'ege',
@@ -283,7 +268,6 @@ function TutorHomeworkCreateContent() {
           ...m,
           title: tpl.title,
           subject: tpl.subject,
-          topic: tpl.topic ?? '',
         }));
         setTasks(
           tpl.tasks_json.map((t) => ({
@@ -315,7 +299,6 @@ function TutorHomeworkCreateContent() {
         ...m,
         title: full.title,
         subject: full.subject,
-        topic: full.topic ?? '',
       }));
       setTasks(
         full.tasks_json.map((t) => ({
@@ -346,7 +329,6 @@ function TutorHomeworkCreateContent() {
       const metaDirty =
         meta.title !== snap.meta.title ||
         meta.subject !== snap.meta.subject ||
-        meta.topic !== snap.meta.topic ||
         meta.deadline !== snap.meta.deadline ||
         (meta.disable_ai_bootstrap ?? false) !== (snap.meta.disable_ai_bootstrap ?? false) ||
         (meta.exam_type ?? 'ege') !== (snap.meta.exam_type ?? 'ege');
@@ -363,7 +345,6 @@ function TutorHomeworkCreateContent() {
     const metaDirty =
       meta.title.trim().length > 0 ||
       (meta.subject !== '' && meta.subject !== 'physics') ||
-      meta.topic.trim().length > 0 ||
       meta.deadline.trim().length > 0 ||
       !(meta.disable_ai_bootstrap ?? true);
 
@@ -400,10 +381,9 @@ function TutorHomeworkCreateContent() {
   const validateAll = useCallback((): boolean => {
     const errs: Record<string, string> = {};
 
-    // Meta: subject required, title auto-generated if empty
+    // Meta: title and subject required
+    if (!meta.title.trim()) errs.title = 'Укажите название';
     if (!meta.subject) errs.subject = 'Выберите предмет';
-    // Soft warning: topic empty → auto-title is generic, KB picker has no hint
-    if (!meta.topic.trim()) errs._topicHint = 'Укажите тему — название ДЗ и поиск в базе будут точнее';
 
     // Tasks
     if (tasks.length === 0) {
@@ -430,9 +410,31 @@ function TutorHomeworkCreateContent() {
     }
 
     setErrors(errs);
-    // Hint keys (e.g. _topicHint) are non-blocking soft warnings
-    const blockingErrors = Object.keys(errs).filter((k) => !k.endsWith('Hint'));
-    return blockingErrors.length === 0;
+
+    // First-error scroll target: title → subject → tasks → students.
+    // Schedule after state flush so the error message is in the DOM and the
+    // input has its border-red applied; getElementById is Safari-safe.
+    const firstErrorId = errs.title
+      ? 'hw-title'
+      : errs.subject
+        ? 'hw-subject'
+        : errs._tasks
+          ? 'hw-tasks-section'
+          : errs._students
+            ? 'hw-recipients-section'
+            : null;
+    if (firstErrorId) {
+      setTimeout(() => {
+        const el = document.getElementById(firstErrorId);
+        if (!el) return;
+        el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+        if (firstErrorId === 'hw-title') {
+          (el as HTMLInputElement).focus({ preventScroll: true });
+        }
+      }, 0);
+    }
+
+    return Object.keys(errs).length === 0;
   }, [meta, tasks, selectedStudentIds]);
 
   // ── Navigation ──
@@ -455,8 +457,8 @@ function TutorHomeworkCreateContent() {
     const isRetry = createdAssignmentIdRef.current !== null;
     let assignmentId = createdAssignmentIdRef.current;
 
-    // Resolve title: manual override or auto-generated
-    const resolvedTitle = meta.title.trim() || autoTitle;
+    // Title is required (validated above) — use trimmed value as-is.
+    const resolvedTitle = meta.title.trim();
 
     try {
       // Phase 1: create (skip if already created)
@@ -474,8 +476,7 @@ function TutorHomeworkCreateContent() {
 
         const result = await createTutorHomeworkAssignment({
           title: resolvedTitle,
-          subject: meta.subject as HomeworkSubject,
-          topic: meta.topic.trim() || null,
+          subject: meta.subject as ModernHomeworkSubject,
           deadline: meta.deadline
             ? parseISO(meta.deadline).toISOString()
             : null,
@@ -595,8 +596,7 @@ function TutorHomeworkCreateContent() {
         try {
           await createTutorHomeworkTemplate({
             title: resolvedTitle,
-            subject: meta.subject as HomeworkSubject,
-            topic: meta.topic.trim() || null,
+            subject: meta.subject as ModernHomeworkSubject,
             tasks_json: tasks.map((t) => ({
               task_text: t.task_text.trim(),
               task_image_url: t.task_image_path || t.kb_attachment_url || null,
@@ -644,7 +644,6 @@ function TutorHomeworkCreateContent() {
       setSuccessResult({
         assignmentId,
         title: resolvedTitle,
-        topic: meta.topic.trim(),
         taskCount: tasks.length,
         assignedCount: assignResult.added,
         groupName,
@@ -664,7 +663,6 @@ function TutorHomeworkCreateContent() {
     }
   }, [
     validateAll,
-    autoTitle,
     tasks,
     meta,
     selectedStudentIds,
@@ -687,7 +685,7 @@ function TutorHomeworkCreateContent() {
   const handleEditSubmit = useCallback(async () => {
     if (!editId || !validateAll()) return;
 
-    const resolvedTitle = meta.title.trim() || autoTitle;
+    const resolvedTitle = meta.title.trim();
 
     try {
       setSubmitPhase('saving');
@@ -707,7 +705,6 @@ function TutorHomeworkCreateContent() {
       await updateTutorHomeworkAssignment(editId, {
         title: resolvedTitle,
         subject: meta.subject as HomeworkSubject,
-        topic: meta.topic.trim() || null,
         deadline: meta.deadline ? parseISO(meta.deadline).toISOString() : null,
         disable_ai_bootstrap: meta.disable_ai_bootstrap ?? false,
         exam_type: meta.exam_type ?? 'ege',
@@ -782,7 +779,7 @@ function TutorHomeworkCreateContent() {
         toast.error(`Ошибка: ${message}`);
       }
     }
-  }, [editId, validateAll, autoTitle, tasks, meta, materials, selectedStudentIds, existingAssignment, queryClient, navigate]);
+  }, [editId, validateAll, tasks, meta, materials, selectedStudentIds, existingAssignment, queryClient, navigate]);
 
   // ── "Создать ещё" — reset form, preserve group selection ──
 
@@ -807,7 +804,7 @@ function TutorHomeworkCreateContent() {
       setSelectedStudentIds(new Set());
     }
 
-    setMeta({ title: '', subject: 'physics', topic: '', deadline: '', disable_ai_bootstrap: true, exam_type: 'ege' });
+    setMeta({ title: '', subject: 'physics', deadline: '', disable_ai_bootstrap: true, exam_type: 'ege' });
     setTasks([createEmptyTask()]);
     setMaterials([]);
     setNotifyEnabled(true);
@@ -822,6 +819,8 @@ function TutorHomeworkCreateContent() {
   }, [assignMode, selectedGroupId, memberships, tutorStudents]);
 
   const isSubmitting = submitPhase !== 'idle' && submitPhase !== 'done';
+  const hasLegacySelectedSubject =
+    meta.subject !== '' && !SUBJECTS.some((subject) => subject.value === meta.subject);
 
   const submitLabel = (() => {
     switch (submitPhase) {
@@ -927,64 +926,81 @@ function TutorHomeworkCreateContent() {
 
         {/* ── L0: Always visible ── */}
 
-        {/* Topic + Subject + Exam type (L0 — always visible) */}
-        <section className="space-y-4">
+        {/* Title (L0 — required) */}
+        <section className="space-y-2">
+          <Label htmlFor="hw-title">Название *</Label>
+          <Input
+            id="hw-title"
+            placeholder="Например: Кинематика — контрольная 15.04"
+            value={meta.title}
+            onChange={(e) => setMeta({ ...meta, title: e.target.value })}
+            className={`text-base ${errors.title ? 'border-red-500 focus-visible:ring-red-500' : ''}`}
+            aria-invalid={errors.title ? 'true' : undefined}
+            aria-describedby={errors.title ? 'hw-title-error' : undefined}
+          />
+          {errors.title && (
+            <p id="hw-title-error" className="text-sm text-red-500">{errors.title}</p>
+          )}
+        </section>
+
+        {/* Subject + Exam type (L0 — required) */}
+        <section className="grid gap-4 md:grid-cols-2">
           <div className="space-y-2">
-            <Label htmlFor="hw-topic">Тема</Label>
-            <Input
-              id="hw-topic"
-              placeholder="Кинематика, законы Ньютона..."
-              value={meta.topic}
-              onChange={(e) => setMeta({ ...meta, topic: e.target.value })}
-              className="text-base"
-            />
-            {errors._topicHint && !meta.topic.trim() && (
-              <p className="text-xs text-amber-600">{errors._topicHint}</p>
-            )}
+            <Label htmlFor="hw-subject">Предмет *</Label>
+            <select
+              id="hw-subject"
+              value={meta.subject}
+              onChange={(e) => setMeta({ ...meta, subject: e.target.value as HomeworkSubject })}
+              className="w-full rounded-md border border-slate-200 bg-white px-3 py-2"
+              style={{ fontSize: '16px', touchAction: 'manipulation' }}
+              aria-invalid={errors.subject ? 'true' : undefined}
+            >
+              {hasLegacySelectedSubject && (
+                <option value={meta.subject}>
+                  {getSubjectLabel(meta.subject)} (legacy)
+                </option>
+              )}
+              {SUBJECTS.map((subject) => (
+                <option key={subject.value} value={subject.value}>
+                  {subject.label}
+                </option>
+              ))}
+            </select>
+            {errors.subject && <p className="text-sm text-red-500">{errors.subject}</p>}
           </div>
 
-          <div className="grid gap-4 md:grid-cols-2">
-            <div className="space-y-2">
-              <Label htmlFor="hw-subject">Предмет *</Label>
-              <Select
-                value={meta.subject}
-                onValueChange={(v) => setMeta({ ...meta, subject: v as HomeworkSubject })}
-              >
-                <SelectTrigger id="hw-subject" className="text-base">
-                  <SelectValue placeholder="Выберите предмет" />
-                </SelectTrigger>
-                <SelectContent>
-                  {SUBJECTS.map((s) => (
-                    <SelectItem key={s.value} value={s.value}>
-                      {s.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              {errors.subject && <p className="text-sm text-destructive">{errors.subject}</p>}
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="hw-exam-type">Тип экзамена</Label>
-              <select
-                id="hw-exam-type"
-                value={meta.exam_type ?? 'ege'}
-                onChange={(e) => setMeta({ ...meta, exam_type: e.target.value as 'ege' | 'oge' })}
-                className="w-full border border-slate-200 rounded-md px-3 py-2 bg-white"
-                style={{ fontSize: '16px', touchAction: 'manipulation' }}
-              >
-                <option value="ege">ЕГЭ</option>
-                <option value="oge">ОГЭ</option>
-              </select>
-              <p className="text-xs text-muted-foreground">
-                Выберите сразу, чтобы ученик видел корректные формулировки в чате с AI.
-              </p>
-            </div>
+          <div className="space-y-2">
+            <Label htmlFor="hw-exam-type">Тип экзамена</Label>
+            <select
+              id="hw-exam-type"
+              value={meta.exam_type ?? 'ege'}
+              onChange={(e) => setMeta({ ...meta, exam_type: e.target.value as 'ege' | 'oge' })}
+              className="w-full border border-slate-200 rounded-md px-3 py-2 bg-white"
+              style={{ fontSize: '16px', touchAction: 'manipulation' }}
+            >
+              <option value="ege">ЕГЭ</option>
+              <option value="oge">ОГЭ</option>
+            </select>
+            <p className="text-xs text-muted-foreground">
+              Выберите сразу, чтобы ученик видел корректные формулировки в чате с AI.
+            </p>
           </div>
         </section>
 
+        {/* Deadline (L0 — optional) */}
+        <section className="space-y-2">
+          <Label htmlFor="hw-deadline">Дедлайн (необязательно)</Label>
+          <Input
+            id="hw-deadline"
+            type="datetime-local"
+            value={meta.deadline}
+            onChange={(e) => setMeta({ ...meta, deadline: e.target.value })}
+            className="text-base"
+          />
+        </section>
+
         {/* Recipients (L0) */}
-        <section>
+        <section id="hw-recipients-section">
           <h2 className="text-lg font-semibold mb-3">Кому назначить</h2>
           <HWAssignSection
             selectedIds={selectedStudentIds}
@@ -1008,13 +1024,13 @@ function TutorHomeworkCreateContent() {
         </section>
 
         {/* Tasks (L0) */}
-        <section>
+        <section id="hw-tasks-section">
           <h2 className="text-lg font-semibold mb-3">Задачи</h2>
           <HWTasksSection
             tasks={tasks}
             onChange={setTasks}
             errors={errors}
-            topicHint={meta.topic}
+            topicHint={meta.title}
             disableExistingTaskRemove={isEditMode && hasSubmissions}
             disableTaskAdd={isEditMode && hasSubmissions}
             onDeferImageDelete={isEditMode ? handleDeferImageDelete : undefined}
@@ -1032,8 +1048,13 @@ function TutorHomeworkCreateContent() {
           >
             {showAdvanced ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
             {showAdvanced ? 'Скрыть параметры' : 'Расширенные параметры'}
-            {/* Dot indicator: show when L1 has user data but collapsed */}
-            {!showAdvanced && (meta.title.trim() || meta.deadline.trim() || !(meta.disable_ai_bootstrap ?? true) || materials.length > 0) && (
+            {/*
+              Dot indicator: show only when L1 itself has non-default content.
+              Title / Subject / Deadline live on L0 now — they no longer drive
+              the dot. Default for disable_ai_bootstrap is true (toggle OFF);
+              the dot lights when the tutor has flipped it ON (=== false).
+            */}
+            {!showAdvanced && (materials.length > 0 || meta.disable_ai_bootstrap === false) && (
               <span className="inline-block w-2 h-2 rounded-full bg-primary" />
             )}
           </button>
@@ -1047,8 +1068,6 @@ function TutorHomeworkCreateContent() {
                 <HWExpandedParams
                   meta={meta}
                   onChange={setMeta}
-                  errors={errors}
-                  autoTitle={autoTitle}
                 />
 
                 <HWMaterialsSection

@@ -1,4 +1,3 @@
-import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import type { MetaState } from './types';
@@ -6,46 +5,16 @@ import type { MetaState } from './types';
 export interface HWExpandedParamsProps {
   meta: MetaState;
   onChange: (m: MetaState) => void;
-  errors: Record<string, string>;
-  /** Auto-generated title shown as placeholder when manual title is empty */
-  autoTitle?: string;
 }
 
 /**
- * L1 (collapsible) meta fields: title, deadline, AI bootstrap toggle.
- * Topic + Subject + exam type are rendered in L0 by the container (always visible).
+ * L1 (collapsible) advanced toggles. After 2026-04-14 layout reshuffle, only
+ * AI-bootstrap toggle lives here — Title, Subject, Deadline moved to L0.
+ * Materials block is rendered as a sibling section by the container.
  */
-export function HWExpandedParams({ meta, onChange, errors, autoTitle }: HWExpandedParamsProps) {
+export function HWExpandedParams({ meta, onChange }: HWExpandedParamsProps) {
   return (
     <div className="space-y-5">
-      <div className="space-y-2">
-        <Label htmlFor="hw-title">Название</Label>
-        <Input
-          id="hw-title"
-          placeholder={autoTitle || 'Квадратные уравнения'}
-          value={meta.title}
-          onChange={(e) => onChange({ ...meta, title: e.target.value })}
-          className="text-base"
-        />
-        {!meta.title.trim() && autoTitle && (
-          <p className="text-xs text-muted-foreground">
-            Будет использовано: {autoTitle}
-          </p>
-        )}
-        {errors.title && <p className="text-sm text-destructive">{errors.title}</p>}
-      </div>
-
-      <div className="space-y-2">
-        <Label htmlFor="hw-deadline">Дедлайн (необязательно)</Label>
-        <Input
-          id="hw-deadline"
-          type="datetime-local"
-          value={meta.deadline}
-          onChange={(e) => onChange({ ...meta, deadline: e.target.value })}
-          className="text-base"
-        />
-      </div>
-
       <div className="flex items-center justify-between p-4 bg-muted/50 rounded-lg">
         <div>
           <Label htmlFor="ai-bootstrap" className="text-sm font-medium">

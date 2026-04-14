@@ -11,7 +11,8 @@ import {
 import { Library } from 'lucide-react';
 import { useTutorHomeworkTemplates } from '@/hooks/useTutorHomework';
 import type { HomeworkSubject, HomeworkTemplateListItem } from '@/lib/tutorHomeworkApi';
-import { SUBJECTS, SUBJECT_LABELS_MAP } from './types';
+import { getSubjectLabel } from '@/types/homework';
+import { SUBJECTS } from './types';
 
 export interface HWTemplatePickerProps {
   onSelect: (template: HomeworkTemplateListItem) => void;
@@ -56,7 +57,7 @@ export function HWTemplatePicker({ onSelect }: HWTemplatePickerProps) {
                     : 'border-muted-foreground/30 text-muted-foreground hover:border-primary/50'
                 }`}
               >
-                {s === 'all' ? 'Все' : (SUBJECT_LABELS_MAP[s] ?? s)}
+                {s === 'all' ? 'Все' : getSubjectLabel(s)}
               </button>
             ))}
           </div>
@@ -78,7 +79,7 @@ export function HWTemplatePicker({ onSelect }: HWTemplatePickerProps) {
                 >
                   <p className="text-sm font-medium">{tpl.title}</p>
                   <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                    <span>{SUBJECT_LABELS_MAP[tpl.subject] ?? tpl.subject}</span>
+                    <span>{getSubjectLabel(tpl.subject)}</span>
                     {tpl.topic && <span>· {tpl.topic}</span>}
                     {tpl.task_count != null && <span>· {tpl.task_count} задач</span>}
                   </div>

@@ -20,7 +20,16 @@ const VAPID_PUBLIC_KEY = Deno.env.get("VAPID_PUBLIC_KEY") ?? "";
 const VAPID_PRIVATE_KEY = Deno.env.get("VAPID_PRIVATE_KEY") ?? "";
 const VAPID_SUBJECT = Deno.env.get("VAPID_SUBJECT") ?? "mailto:support@sokratai.ru";
 
-const VALID_SUBJECTS = ["math", "physics", "history", "social", "english", "cs", "french", "chemistry"] as const;
+const VALID_SUBJECTS_CREATE = [
+  "maths", "physics", "informatics",
+  "russian", "literature", "history", "social",
+  "english", "french", "chemistry", "biology",
+  "geography", "spanish", "other",
+] as const;
+const VALID_SUBJECTS_UPDATE = [
+  ...VALID_SUBJECTS_CREATE,
+  "math", "cs", "rus", "algebra", "geometry",
+] as const;
 const VALID_STATUSES = ["draft", "active", "closed"] as const;
 const VALID_STATUS_FILTERS = ["draft", "active", "closed", "all"] as const;
 const VALID_CHECK_FORMATS = ["short_answer", "detailed_solution"] as const;
@@ -344,8 +353,8 @@ async function handleCreateAssignment(
   if (!isNonEmptyString(b.title)) {
     return jsonError(cors, 400, "VALIDATION", "title is required (non-empty string)");
   }
-  if (!isNonEmptyString(b.subject) || !(VALID_SUBJECTS as readonly string[]).includes(b.subject)) {
-    return jsonError(cors, 400, "VALIDATION", `subject must be one of: ${VALID_SUBJECTS.join(", ")}`);
+  if (!isNonEmptyString(b.subject) || !(VALID_SUBJECTS_CREATE as readonly string[]).includes(b.subject)) {
+    return jsonError(cors, 400, "VALIDATION", `subject must be one of: ${VALID_SUBJECTS_CREATE.join(", ")}`);
   }
   if (b.topic !== undefined && b.topic !== null && !isString(b.topic)) {
     return jsonError(cors, 400, "VALIDATION", "topic must be a string or null");
@@ -857,8 +866,8 @@ async function handleUpdateAssignment(
     patch.title = (b.title as string).trim();
   }
   if (b.subject !== undefined) {
-    if (!isNonEmptyString(b.subject) || !(VALID_SUBJECTS as readonly string[]).includes(b.subject)) {
-      return jsonError(cors, 400, "VALIDATION", `subject must be one of: ${VALID_SUBJECTS.join(", ")}`);
+    if (!isNonEmptyString(b.subject) || !(VALID_SUBJECTS_UPDATE as readonly string[]).includes(b.subject)) {
+      return jsonError(cors, 400, "VALIDATION", `subject must be one of: ${VALID_SUBJECTS_UPDATE.join(", ")}`);
     }
     patch.subject = b.subject;
   }
@@ -2584,8 +2593,8 @@ async function handleListTemplates(
   cors: Record<string, string>,
 ): Promise<Response> {
   const subject = searchParams.get("subject");
-  if (subject && !(VALID_SUBJECTS as readonly string[]).includes(subject)) {
-    return jsonError(cors, 400, "VALIDATION", `subject must be one of: ${VALID_SUBJECTS.join(", ")}`);
+  if (subject && !(VALID_SUBJECTS_UPDATE as readonly string[]).includes(subject)) {
+    return jsonError(cors, 400, "VALIDATION", `subject must be one of: ${VALID_SUBJECTS_UPDATE.join(", ")}`);
   }
 
   let query = db
@@ -2633,8 +2642,8 @@ async function handleCreateTemplate(
   if (!isNonEmptyString(b.title)) {
     return jsonError(cors, 400, "VALIDATION", "title is required");
   }
-  if (!isNonEmptyString(b.subject) || !(VALID_SUBJECTS as readonly string[]).includes(b.subject)) {
-    return jsonError(cors, 400, "VALIDATION", `subject must be one of: ${VALID_SUBJECTS.join(", ")}`);
+  if (!isNonEmptyString(b.subject) || !(VALID_SUBJECTS_CREATE as readonly string[]).includes(b.subject)) {
+    return jsonError(cors, 400, "VALIDATION", `subject must be one of: ${VALID_SUBJECTS_CREATE.join(", ")}`);
   }
   if (!Array.isArray(b.tasks_json)) {
     return jsonError(cors, 400, "VALIDATION", "tasks_json must be an array");

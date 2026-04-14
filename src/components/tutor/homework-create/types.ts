@@ -1,23 +1,17 @@
-import type { HomeworkSubject, MaterialType } from '@/lib/tutorHomeworkApi';
+import type {
+  HomeworkSubject,
+  ModernHomeworkSubject,
+  MaterialType,
+} from '@/lib/tutorHomeworkApi';
+import { SUBJECTS as CANONICAL_SUBJECTS } from '@/types/homework';
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
-export const SUBJECTS: { value: HomeworkSubject; label: string }[] = [
-  { value: 'math', label: 'Математика' },
-  { value: 'physics', label: 'Физика' },
-  { value: 'history', label: 'История' },
-  { value: 'social', label: 'Обществознание' },
-  { value: 'english', label: 'Английский' },
-  { value: 'cs', label: 'Информатика' },
-  { value: 'french', label: 'Французский' },
-  { value: 'chemistry', label: 'Химия' },
-];
-
-export const SUBJECT_LABELS_MAP: Record<string, string> = {
-  math: 'Математика', physics: 'Физика', history: 'История',
-  social: 'Обществознание', english: 'Английский', cs: 'Информатика',
-  french: 'Французский', chemistry: 'Химия',
-};
+export const SUBJECTS: { value: ModernHomeworkSubject; label: string }[] =
+  CANONICAL_SUBJECTS.map((subject) => ({
+    value: subject.id as ModernHomeworkSubject,
+    label: subject.name,
+  }));
 
 export const MAX_IMAGE_SIZE_BYTES = 10 * 1024 * 1024;
 export const IMAGE_REQUIREMENTS_HINT = 'Форматы: JPG, PNG, WEBP, GIF. Размер до 10 МБ.';
@@ -45,7 +39,6 @@ export interface StudentDeliveryStatus {
 export interface SubmitSuccessResult {
   assignmentId: string;
   title: string;
-  topic: string;
   taskCount: number;
   assignedCount: number;
   /** Filled when assignMode === 'group' */
@@ -99,7 +92,6 @@ export interface DraftMaterial {
 export interface MetaState {
   title: string;
   subject: HomeworkSubject | "";
-  topic: string;
   deadline: string;
   disable_ai_bootstrap?: boolean;
   exam_type?: 'ege' | 'oge';

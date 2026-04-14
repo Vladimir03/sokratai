@@ -118,9 +118,6 @@ export function HWSubmitSuccess({ result, onCreateAnother }: HWSubmitSuccessProp
 
           {/* Meta pills */}
           <div className="flex flex-wrap gap-2">
-            {result.topic && (
-              <Badge variant="secondary">{result.topic}</Badge>
-            )}
             {result.groupName ? (
               <Badge variant="secondary">{result.groupName}</Badge>
             ) : (

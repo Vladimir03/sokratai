@@ -10,42 +10,23 @@ import { TutorLayout } from '@/components/tutor/TutorLayout';
 import { TutorDataStatus } from '@/components/tutor/TutorDataStatus';
 import { useTutorHomeworkTemplates } from '@/hooks/useTutorHomework';
 import { deleteTutorHomeworkTemplate } from '@/lib/tutorHomeworkApi';
-import type { HomeworkSubject, HomeworkTemplateListItem } from '@/lib/tutorHomeworkApi';
+import type {
+  HomeworkSubject,
+  HomeworkTemplateListItem,
+  ModernHomeworkSubject,
+} from '@/lib/tutorHomeworkApi';
 import { useToast } from '@/hooks/use-toast';
 import { useQueryClient } from '@tanstack/react-query';
+import { getSubjectLabel, SUBJECTS as MODERN_SUBJECTS } from '@/types/homework';
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
-const SUBJECT_LABELS: Record<HomeworkSubject, string> = {
-  math: 'Математика',
-  physics: 'Физика',
-  history: 'История',
-  social: 'Обществознание',
-  english: 'Английский',
-  cs: 'Информатика',
-  french: 'Французский',
-  chemistry: 'Химия',
-};
-
-const SUBJECT_EMOJI: Record<HomeworkSubject, string> = {
-  math: '📐',
-  physics: '⚡',
-  history: '📜',
-  social: '🏛️',
-  english: '🇬🇧',
-  cs: '💻',
-  french: '🇫🇷',
-  chemistry: '🧪',
-};
-
-const SUBJECT_FILTERS: { value: HomeworkSubject | 'all'; label: string }[] = [
+const SUBJECT_FILTERS: { value: ModernHomeworkSubject | 'all'; label: string }[] = [
   { value: 'all', label: 'Все' },
-  { value: 'math', label: 'Математика' },
-  { value: 'physics', label: 'Физика' },
-  { value: 'history', label: 'История' },
-  { value: 'social', label: 'Обществознание' },
-  { value: 'english', label: 'Английский' },
-  { value: 'cs', label: 'Информатика' },
+  ...MODERN_SUBJECTS.map((subject) => ({
+    value: subject.id as ModernHomeworkSubject,
+    label: subject.name,
+  })),
 ];
 
 // ─── Template Card ────────────────────────────────────────────────────────────
@@ -58,17 +39,13 @@ function TemplateCard({
   onDelete: (id: string) => void;
 }) {
   const navigate = useNavigate();
-  const subjectEmoji = SUBJECT_EMOJI[template.subject] ?? '📖';
-  const subjectLabel = SUBJECT_LABELS[template.subject] ?? template.subject;
+  const subjectLabel = getSubjectLabel(template.subject);
 
   return (
     <Card className="transition-all hover:shadow-md">
       <CardContent className="p-4 space-y-3">
         <div className="flex items-center justify-between gap-2">
-          <span className="text-sm text-muted-foreground flex items-center gap-1.5">
-            <span>{subjectEmoji}</span>
-            {subjectLabel}
-          </span>
+          <span className="text-sm text-muted-foreground">{subjectLabel}</span>
           <Badge variant="outline" className="text-xs">
             {template.task_count ?? 0} {(template.task_count ?? 0) === 1 ? 'задача' : 'задач'}
           </Badge>
@@ -115,7 +92,7 @@ function TemplateCard({
 // ─── Main content ─────────────────────────────────────────────────────────────
 
 function TutorHomeworkTemplatesContent() {
-  const [subjectFilter, setSubjectFilter] = useState<HomeworkSubject | 'all'>('all');
+  const [subjectFilter, setSubjectFilter] = useState<ModernHomeworkSubject | 'all'>('all');
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
