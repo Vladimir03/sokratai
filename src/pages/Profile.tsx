@@ -790,6 +790,37 @@ const Profile = () => {
                   </Button>
                 </div>
               )}
+
+              {/* Telegram username edit */}
+              <div className="mt-4 space-y-2">
+                <label className="text-sm font-medium">Telegram username</label>
+                <div className="flex gap-2">
+                  <div className="relative flex-1">
+                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground text-sm">@</span>
+                    <Input
+                      value={newTelegramUsername}
+                      onChange={(e) => setNewTelegramUsername(e.target.value)}
+                      placeholder={profile?.telegram_username || "username"}
+                      className="pl-7"
+                    />
+                  </div>
+                  <Button
+                    variant="outline"
+                    onClick={handleUpdateTelegram}
+                    disabled={savingTelegram || !newTelegramUsername.replace(/^@/, "").trim()}
+                    className="touch-manipulation"
+                  >
+                    {savingTelegram ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      "Сохранить"
+                    )}
+                  </Button>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Укажите ваш Telegram username, чтобы репетитор мог отправлять вам задания
+                </p>
+              </div>
               {profile?.registration_source && (
                 <div className="mt-3 text-xs text-muted-foreground">
                   Источник регистрации: {
