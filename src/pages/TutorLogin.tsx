@@ -126,6 +126,11 @@ const TutorLogin = () => {
                 disabled={loading}
               />
             </div>
+            <div className="flex justify-end">
+              <Link to="/forgot-password" className="text-xs text-muted-foreground hover:underline">
+                Забыли пароль?
+              </Link>
+            </div>
             <Button
               type="submit"
               className="w-full"
