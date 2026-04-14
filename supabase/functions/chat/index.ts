@@ -1,6 +1,7 @@
 import "https://deno.land/x/xhr@0.1.0/mod.ts";
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "npm:@supabase/supabase-js@2";
+import { MAX_TASK_IMAGES_FOR_AI, parseAttachmentUrls } from "../_shared/attachment-refs.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -17,8 +18,8 @@ interface ChatRequestBody {
   messages: any[];
   systemPrompt?: string;
   taskContext?: string;
-  /** Signed HTTP URL of a homework task image — injected as multimodal image_url part */
-  taskImageUrl?: string;
+  /** Homework task image refs; resolved into multimodal image_url parts on the server */
+  taskImageUrls?: string[];
   /** Signed HTTP URL of the latest student solution image — injected as multimodal image_url part */
   studentImageUrl?: string;
   /** Signed HTTP URLs of the latest student solution images */
@@ -128,6 +129,90 @@ function isValidImageUrl(url: string): boolean {
     console.error("[SECURITY] Invalid URL format:", url, error);
     return false;
   }
+}
+
+function parseStorageRef(
+  value: string | null | undefined,
+  defaultBucket = "homework-task-images",
+): { bucket: string; objectPath: string } | null {
+  if (!value || typeof value !== "string") return null;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+
+  if (trimmed.startsWith("storage://")) {
+    const raw = trimmed.slice("storage://".length);
+    const slashIdx = raw.indexOf("/");
+    if (slashIdx <= 0 || slashIdx === raw.length - 1) {
+      return null;
+    }
+    return {
+      bucket: raw.slice(0, slashIdx),
+      objectPath: raw.slice(slashIdx + 1).replace(/^\/+/, "").trim(),
+    };
+  }
+
+  return {
+    bucket: defaultBucket,
+    objectPath: trimmed.replace(/^\/+/, "").trim(),
+  };
+}
+
+async function resolveTaskImageUrlsForAI(
+  db: ReturnType<typeof createClient>,
+  taskImageUrls: string[] | string | null | undefined,
+): Promise<string[]> {
+  const normalizedRefs = Array.isArray(taskImageUrls)
+    ? taskImageUrls
+    : parseAttachmentUrls(taskImageUrls);
+  const refs = normalizedRefs
+    .filter((value): value is string => typeof value === "string" && value.trim().length > 0)
+    .slice(0, MAX_TASK_IMAGES_FOR_AI);
+
+  if (refs.length === 0) return [];
+
+  const resolvedUrls = await Promise.all(refs.map(async (ref) => {
+    const trimmed = ref.trim();
+
+    if (trimmed.startsWith("data:")) {
+      return trimmed;
+    }
+
+    if (/^https?:\/\//i.test(trimmed)) {
+      if (!isValidImageUrl(trimmed)) {
+        console.error("[SECURITY] Rejected invalid task image URL");
+        return null;
+      }
+      return await fetchImageAsBase64DataUrl(trimmed);
+    }
+
+    const parsed = parseStorageRef(trimmed);
+    if (!parsed?.bucket || !parsed.objectPath) {
+      console.error("resolveTaskImageUrlsForAI: failed to parse storage ref");
+      return null;
+    }
+
+    const { data, error } = await db.storage
+      .from(parsed.bucket)
+      .createSignedUrl(parsed.objectPath, 3600);
+
+    if (error || !data?.signedUrl) {
+      console.error("resolveTaskImageUrlsForAI: failed to create signed URL", {
+        bucket: parsed.bucket,
+        objectPath: parsed.objectPath,
+        error: error?.message,
+      });
+      return null;
+    }
+
+    if (!isValidImageUrl(data.signedUrl)) {
+      console.error("[SECURITY] Rejected generated task image signed URL");
+      return null;
+    }
+
+    return await fetchImageAsBase64DataUrl(data.signedUrl);
+  }));
+
+  return resolvedUrls.filter((value): value is string => Boolean(value));
 }
 
 interface ChatPromptImageAttachment {
@@ -805,7 +890,7 @@ serve(async (req) => {
       
       userId = body.userId;
       
-      const { messages, systemPrompt, taskContext, taskImageUrl, studentImageUrl, studentImageUrls, chatId } = body;
+      const { messages, systemPrompt, taskContext, taskImageUrls, studentImageUrl, studentImageUrls, chatId } = body;
       const responseProfile = normalizeResponseProfile(body.responseProfile);
       const responseMode = normalizeResponseMode(body.responseMode);
       const maxChars = normalizeMaxChars(body.maxChars);
@@ -831,7 +916,7 @@ serve(async (req) => {
         messages,
         systemPrompt,
         taskContext,
-        taskImageUrl,
+        taskImageUrls,
         studentImageUrl,
         studentImageUrls,
         chatId,
@@ -860,7 +945,7 @@ serve(async (req) => {
       userId = user.id;
 
       const body = await req.json() as ChatRequestBody;
-      const { messages, systemPrompt, taskContext, taskImageUrl, studentImageUrl, studentImageUrls, chatId } = body;
+      const { messages, systemPrompt, taskContext, taskImageUrls, studentImageUrl, studentImageUrls, chatId } = body;
       const latestUserMessage = Array.isArray(messages)
         ? [...messages].reverse().find((message) => message?.role === "user")
         : null;
@@ -894,7 +979,7 @@ serve(async (req) => {
         messages,
         systemPrompt,
         taskContext,
-        taskImageUrl,
+        taskImageUrls,
         studentImageUrl,
         studentImageUrls,
         chatId,
@@ -918,7 +1003,7 @@ async function processAIRequest(
   messages: any[],
   systemPrompt?: string,
   taskContext?: string,
-  taskImageUrl?: string,
+  taskImageUrls?: string[],
   studentImageUrl?: string,
   studentImageUrls?: string[],
   chatId?: string,
@@ -1010,22 +1095,18 @@ async function processAIRequest(
     };
   }));
 
-  let taskPromptImageDataUrl: string | null = null;
+  const adminSupabase = createClient(
+    Deno.env.get("SUPABASE_URL") ?? "",
+    Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "",
+  );
+  let taskPromptImageDataUrls: string[] = [];
   const studentPromptImageDataUrls: string[] = [];
 
-  console.log("📷 taskImageUrl received:", taskImageUrl ? "present" : "absent");
-  if (taskImageUrl && typeof taskImageUrl === "string") {
-    if (isValidImageUrl(taskImageUrl)) {
-      const base64DataUrl = await fetchImageAsBase64DataUrl(taskImageUrl);
-      if (base64DataUrl) {
-        taskPromptImageDataUrl = base64DataUrl;
-      } else {
-        console.error("📷 Failed to download task image, proceeding without it");
-      }
-    } else {
-      console.error('[SECURITY] Rejected invalid taskImageUrl');
-    }
-  }
+  console.log("📷 taskImageUrls received:", Array.isArray(taskImageUrls) ? taskImageUrls.length : 0);
+  taskPromptImageDataUrls = await resolveTaskImageUrlsForAI(
+    adminSupabase,
+    (taskImageUrls ?? []).slice(0, MAX_TASK_IMAGES_FOR_AI),
+  );
 
   const normalizedStudentImageUrls = (Array.isArray(studentImageUrls) && studentImageUrls.length > 0
     ? studentImageUrls
@@ -1062,12 +1143,12 @@ async function processAIRequest(
       imageCounter += 1;
     }
   }
-  if (taskPromptImageDataUrl) {
+  for (const [index, dataUrl] of taskPromptImageDataUrls.entries()) {
     promptAttachments.push({
-      label: studentPromptImageDataUrls.length > 0
-        ? `Изображение ${studentPromptImageDataUrls.length + 1} — условие задачи. Используй его для сверки с решением ученика.`
+      label: studentPromptImageDataUrls.length > 0 || taskPromptImageDataUrls.length > 1
+        ? `Изображение ${studentPromptImageDataUrls.length + index + 1} — условие задачи${taskPromptImageDataUrls.length > 1 ? `, файл ${index + 1}` : ""}. Используй его для сверки с решением ученика.`
         : "Изображение выше — условие задачи.",
-      dataUrl: taskPromptImageDataUrl,
+      dataUrl,
     });
   }
 

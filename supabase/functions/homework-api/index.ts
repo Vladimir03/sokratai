@@ -9,6 +9,11 @@ import {
   sendHomeworkNotificationEmail,
   sendHomeworkTutorMessageEmail,
 } from "../_shared/email-sender.ts";
+import {
+  MAX_RUBRIC_IMAGES,
+  MAX_TASK_IMAGES,
+  parseAttachmentUrls,
+} from "../_shared/attachment-refs.ts";
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
@@ -156,6 +161,25 @@ function isMissingColumnError(message: string, column: string): boolean {
     lower.includes("schema cache") ||
     (lower.includes("column") && lower.includes("does not exist"))
   );
+}
+
+function validateAttachmentRefLimit(
+  cors: Record<string, string>,
+  value: unknown,
+  maxCount: number,
+  fieldPath: string,
+): Response | null {
+  if (value === undefined || value === null || !isString(value)) return null;
+  const refs = parseAttachmentUrls(value);
+  if (refs.length > maxCount) {
+    return jsonError(
+      cors,
+      400,
+      "VALIDATION",
+      `${fieldPath} exceeds maximum of ${maxCount} images`,
+    );
+  }
+  return null;
 }
 
 function hasUnsafeObjectPath(path: string): boolean {
@@ -388,6 +412,20 @@ async function handleCreateAssignment(
     if (t.check_format !== undefined && t.check_format !== null && !(VALID_CHECK_FORMATS as readonly string[]).includes(t.check_format)) {
       return jsonError(cors, 400, "VALIDATION", `tasks[${i}].check_format must be one of: ${VALID_CHECK_FORMATS.join(", ")}`);
     }
+    const taskImageLimitError = validateAttachmentRefLimit(
+      cors,
+      t.task_image_url,
+      MAX_TASK_IMAGES,
+      `tasks[${i}].task_image_url`,
+    );
+    if (taskImageLimitError) return taskImageLimitError;
+    const rubricImageLimitError = validateAttachmentRefLimit(
+      cors,
+      t.rubric_image_urls,
+      MAX_RUBRIC_IMAGES,
+      `tasks[${i}].rubric_image_urls`,
+    );
+    if (rubricImageLimitError) return rubricImageLimitError;
   }
 
   const { data: assignment, error: assignErr } = await db
@@ -419,6 +457,7 @@ async function handleCreateAssignment(
     correct_answer: isNonEmptyString(t.correct_answer) ? (t.correct_answer as string).trim() : null,
     max_score: isPositiveInt(t.max_score) ? t.max_score : 1,
     rubric_text: isNonEmptyString(t.rubric_text) ? (t.rubric_text as string).trim() : null,
+    rubric_image_urls: isNonEmptyString(t.rubric_image_urls) ? (t.rubric_image_urls as string).trim() : null,
     check_format: (VALID_CHECK_FORMATS as readonly string[]).includes(t.check_format as string) ? t.check_format : "short_answer",
   }));
 
@@ -681,7 +720,7 @@ async function handleGetAssignment(
 
   const { data: tasks } = await db
     .from("homework_tutor_tasks")
-    .select("id, order_num, task_text, task_image_url, correct_answer, max_score, rubric_text, check_format")
+    .select("id, order_num, task_text, task_image_url, correct_answer, max_score, rubric_text, rubric_image_urls, check_format")
     .eq("assignment_id", assignmentId)
     .order("order_num", { ascending: true });
 
@@ -929,6 +968,20 @@ async function handleUpdateAssignment(
       if (t.check_format !== undefined && t.check_format !== null && !(VALID_CHECK_FORMATS as readonly string[]).includes(t.check_format)) {
         return jsonError(cors, 400, "VALIDATION", `tasks[${i}].check_format must be one of: ${VALID_CHECK_FORMATS.join(", ")}`);
       }
+      const taskImageLimitError = validateAttachmentRefLimit(
+        cors,
+        t.task_image_url,
+        MAX_TASK_IMAGES,
+        `tasks[${i}].task_image_url`,
+      );
+      if (taskImageLimitError) return taskImageLimitError;
+      const rubricImageLimitError = validateAttachmentRefLimit(
+        cors,
+        t.rubric_image_urls,
+        MAX_RUBRIC_IMAGES,
+        `tasks[${i}].rubric_image_urls`,
+      );
+      if (rubricImageLimitError) return rubricImageLimitError;
     }
 
     // Detect if any student has interacted with the assignment via guided threads.
@@ -1033,6 +1086,9 @@ async function handleUpdateAssignment(
         if (t.rubric_text !== undefined) {
           updateFields.rubric_text = isNonEmptyString(t.rubric_text) ? (t.rubric_text as string).trim() : null;
         }
+        if (t.rubric_image_urls !== undefined) {
+          updateFields.rubric_image_urls = isNonEmptyString(t.rubric_image_urls) ? (t.rubric_image_urls as string).trim() : null;
+        }
         if (t.check_format !== undefined) {
           updateFields.check_format = (VALID_CHECK_FORMATS as readonly string[]).includes(t.check_format as string) ? t.check_format : "short_answer";
         }
@@ -1065,6 +1121,7 @@ async function handleUpdateAssignment(
           correct_answer: isNonEmptyString(t.correct_answer) ? (t.correct_answer as string).trim() : null,
           max_score: isPositiveInt(t.max_score) ? t.max_score : 1,
           rubric_text: isNonEmptyString(t.rubric_text) ? (t.rubric_text as string).trim() : null,
+          rubric_image_urls: isNonEmptyString(t.rubric_image_urls) ? (t.rubric_image_urls as string).trim() : null,
           check_format: (VALID_CHECK_FORMATS as readonly string[]).includes(t.check_format as string) ? t.check_format : "short_answer",
         };
         const { error } = await db
@@ -1099,6 +1156,7 @@ async function handleUpdateAssignment(
               correct_answer: isNonEmptyString(t.correct_answer) ? (t.correct_answer as string).trim() : null,
               max_score: isPositiveInt(t.max_score) ? t.max_score : 1,
               rubric_text: isNonEmptyString(t.rubric_text) ? (t.rubric_text as string).trim() : null,
+              rubric_image_urls: isNonEmptyString(t.rubric_image_urls) ? (t.rubric_image_urls as string).trim() : null,
               check_format: (VALID_CHECK_FORMATS as readonly string[]).includes(t.check_format as string) ? t.check_format : "short_answer",
             })
             .select("id")
@@ -3128,6 +3186,55 @@ async function createSignedStorageUrl(
   return data.signedUrl;
 }
 
+async function getReadableAssignmentOrThrow(
+  db: SupabaseClient,
+  assignmentId: string,
+  userId: string,
+  cors: Record<string, string>,
+): Promise<{ id: string; tutor_id: string } | Response> {
+  if (!isUUID(assignmentId)) {
+    return jsonError(cors, 400, "INVALID_ID", "Invalid assignment ID format");
+  }
+
+  const { data: assignment } = await db
+    .from("homework_tutor_assignments")
+    .select("id, tutor_id")
+    .eq("id", assignmentId)
+    .maybeSingle();
+
+  if (!assignment) {
+    return jsonError(cors, 404, "NOT_FOUND", "Assignment not found");
+  }
+
+  if (assignment.tutor_id === userId) {
+    return assignment;
+  }
+
+  const { data: studentAssignment } = await db
+    .from("homework_tutor_student_assignments")
+    .select("id")
+    .eq("assignment_id", assignmentId)
+    .eq("student_id", userId)
+    .maybeSingle();
+
+  if (!studentAssignment) {
+    return jsonError(cors, 403, "FORBIDDEN", "Not authorized to access this assignment");
+  }
+
+  return assignment;
+}
+
+async function createSignedStorageUrls(
+  db: SupabaseClient,
+  refs: string[],
+  defaultBucket: string,
+): Promise<string[]> {
+  const signedUrls = await Promise.all(
+    refs.map((ref) => createSignedStorageUrl(db, ref, defaultBucket)),
+  );
+  return signedUrls.filter((value): value is string => Boolean(value));
+}
+
 interface GuidedTaskIdentityRow {
   id: string;
   order_num: number;
@@ -3353,6 +3460,20 @@ async function resolveTaskImageUrlForAI(
   return `data:${mime};base64,${arrayBufferToBase64(buf)}`;
 }
 
+async function resolveTaskImageUrlsForAI(
+  db: SupabaseClient,
+  imageRefsValue: string | null | undefined,
+): Promise<string[]> {
+  const imageRefs = parseAttachmentUrls(imageRefsValue);
+  if (imageRefs.length === 0) return [];
+
+  const resolvedUrls = await Promise.all(
+    imageRefs.map((imageRef) => resolveTaskImageUrlForAI(db, imageRef)),
+  );
+
+  return resolvedUrls.filter((value): value is string => Boolean(value));
+}
+
 async function ensureTaskOcrText(
   _db: SupabaseClient,
   task: { id: string; task_image_url: string | null; ocr_text?: string | null },
@@ -3376,38 +3497,12 @@ async function handleTaskImageSignedUrl(
   taskId: string,
   cors: Record<string, string>,
 ): Promise<Response> {
-  if (!isUUID(assignmentId)) {
-    return jsonError(cors, 400, "INVALID_ID", "Invalid assignment ID format");
-  }
   if (!isUUID(taskId)) {
     return jsonError(cors, 400, "INVALID_ID", "Invalid task ID format");
   }
 
-  // Access check: tutor who owns the assignment OR student assigned to it
-  const { data: assignment } = await db
-    .from("homework_tutor_assignments")
-    .select("id, tutor_id")
-    .eq("id", assignmentId)
-    .maybeSingle();
-
-  if (!assignment) {
-    return jsonError(cors, 404, "NOT_FOUND", "Assignment not found");
-  }
-
-  const isTutor = assignment.tutor_id === userId;
-  if (!isTutor) {
-    // Check if user is an assigned student
-    const { data: studentAssignment } = await db
-      .from("homework_tutor_student_assignments")
-      .select("id")
-      .eq("assignment_id", assignmentId)
-      .eq("student_id", userId)
-      .maybeSingle();
-
-    if (!studentAssignment) {
-      return jsonError(cors, 403, "FORBIDDEN", "Not authorized to access this assignment");
-    }
-  }
+  const assignmentOrErr = await getReadableAssignmentOrThrow(db, assignmentId, userId, cors);
+  if (assignmentOrErr instanceof Response) return assignmentOrErr;
 
   // Get task image URL
   const { data: task } = await db
@@ -3459,6 +3554,104 @@ async function handleTaskImageSignedUrl(
   }
 
   return jsonOk(cors, { url: signedData.signedUrl });
+}
+
+async function handleTaskImagesSignedUrls(
+  db: SupabaseClient,
+  userId: string,
+  assignmentId: string,
+  taskId: string,
+  cors: Record<string, string>,
+): Promise<Response> {
+  if (!isUUID(taskId)) {
+    return jsonError(cors, 400, "INVALID_ID", "Invalid task ID format");
+  }
+
+  const assignmentOrErr = await getReadableAssignmentOrThrow(db, assignmentId, userId, cors);
+  if (assignmentOrErr instanceof Response) return assignmentOrErr;
+
+  const { data: task } = await db
+    .from("homework_tutor_tasks")
+    .select("id, task_image_url")
+    .eq("id", taskId)
+    .eq("assignment_id", assignmentId)
+    .maybeSingle();
+
+  if (!task) {
+    return jsonError(cors, 404, "NOT_FOUND", "Task not found");
+  }
+
+  const refs = parseAttachmentUrls(task.task_image_url);
+  if (refs.length === 0) {
+    console.log("homework_api_request_success", {
+      route: "GET /assignments/:id/tasks/:taskId/images",
+      user_id: userId,
+      assignment_id: assignmentId,
+      task_id: taskId,
+      signed_url_count: 0,
+    });
+    return jsonOk(cors, { signed_urls: [] });
+  }
+
+  const signedUrls = await createSignedStorageUrls(db, refs, "homework-task-images");
+
+  console.log("homework_api_request_success", {
+    route: "GET /assignments/:id/tasks/:taskId/images",
+    user_id: userId,
+    assignment_id: assignmentId,
+    task_id: taskId,
+    signed_url_count: signedUrls.length,
+  });
+  return jsonOk(cors, { signed_urls: signedUrls });
+}
+
+async function handleRubricImagesSignedUrls(
+  db: SupabaseClient,
+  tutorUserId: string,
+  assignmentId: string,
+  taskId: string,
+  cors: Record<string, string>,
+): Promise<Response> {
+  if (!isUUID(taskId)) {
+    return jsonError(cors, 400, "INVALID_ID", "Invalid task ID format");
+  }
+
+  const assignmentOrErr = await getOwnedAssignmentOrThrow(db, assignmentId, tutorUserId, cors);
+  if (assignmentOrErr instanceof Response) return assignmentOrErr;
+
+  const { data: task } = await db
+    .from("homework_tutor_tasks")
+    .select("id, rubric_image_urls")
+    .eq("id", taskId)
+    .eq("assignment_id", assignmentId)
+    .maybeSingle();
+
+  if (!task) {
+    return jsonError(cors, 404, "NOT_FOUND", "Task not found");
+  }
+
+  const refs = parseAttachmentUrls(task.rubric_image_urls);
+  if (refs.length === 0) {
+    console.log("homework_api_request_success", {
+      route: "GET /assignments/:id/tasks/:taskId/rubric-images",
+      tutor_id: tutorUserId,
+      assignment_id: assignmentId,
+      task_id: taskId,
+      signed_url_count: 0,
+    });
+    return jsonOk(cors, { signed_urls: [] });
+  }
+
+  const signedUrls = await createSignedStorageUrls(db, refs, "homework-task-images");
+
+  console.log("homework_api_request_success", {
+    route: "GET /assignments/:id/tasks/:taskId/rubric-images",
+    tutor_id: tutorUserId,
+    assignment_id: assignmentId,
+    task_id: taskId,
+    signed_url_count: signedUrls.length,
+  });
+  return jsonOk(cors, { signed_urls: signedUrls });
 }
 
 // ─── Formula round endpoints (student) ──────────────────────────────────────
@@ -4435,7 +4628,7 @@ async function handleCheckAnswer(
   // Load the full task (with correct_answer, rubric)
   const { data: task } = await db
     .from("homework_tutor_tasks")
-    .select("id, order_num, task_text, task_image_url, ocr_text, correct_answer, rubric_text, max_score, check_format")
+    .select("id, order_num, task_text, task_image_url, ocr_text, correct_answer, rubric_text, rubric_image_urls, max_score, check_format")
     .eq("id", currentState.task_id)
     .single();
 
@@ -4498,28 +4691,32 @@ async function handleCheckAnswer(
     .update({ last_student_message_at: new Date().toISOString() })
     .eq("id", threadId);
 
-  // Resolve task image into an AI-compatible data URL and latest student image into a signed URL
-  const taskImageSignedUrl = await resolveTaskImageUrlForAI(db, task.task_image_url);
-  const taskOcrText = await ensureTaskOcrText(db, task, assignment.subject ?? "math");
-  const studentImageUrls = await loadLatestStudentImageUrlsForTask(
-    db,
-    threadId,
-    currentOrder,
-    currentState.task_id as string,
-    userId,
-    studentAssignment.assignment_id,
-  );
+  // Resolve task/rubric images into AI-compatible data URLs and latest student image into signed URLs
+  const [taskImageUrls, rubricImageUrls, taskOcrText, studentImageUrls] = await Promise.all([
+    resolveTaskImageUrlsForAI(db, task.task_image_url),
+    resolveTaskImageUrlsForAI(db, task.rubric_image_urls),
+    ensureTaskOcrText(db, task, assignment.subject ?? "math"),
+    loadLatestStudentImageUrlsForTask(
+      db,
+      threadId,
+      currentOrder,
+      currentState.task_id as string,
+      userId,
+      studentAssignment.assignment_id,
+    ),
+  ]);
 
   // Call AI evaluation
   const totalTasks = tasks.length;
   const result = await evaluateStudentAnswer({
     studentAnswer: answer,
     taskText: task.task_text ?? "",
-    taskImageUrl: taskImageSignedUrl,
+    taskImageUrls,
     studentImageUrls,
     taskOcrText,
     correctAnswer: task.correct_answer,
     rubricText: task.rubric_text,
+    rubricImageUrls,
     subject: assignment.subject ?? "math",
     conversationHistory: recentMessages ?? [],
     wrongAnswerCount: (currentState.wrong_answer_count as number) ?? 0,
@@ -4832,22 +5029,24 @@ async function handleRequestHint(
     .update({ last_student_message_at: new Date().toISOString() })
     .eq("id", threadId);
 
-  // Resolve task image into an AI-compatible data URL and latest student image into a signed URL
-  const hintTaskImageUrl = await resolveTaskImageUrlForAI(db, task.task_image_url);
-  const taskOcrText = await ensureTaskOcrText(db, task, assignment?.subject ?? "math");
-  const studentImageUrls = await loadLatestStudentImageUrlsForTask(
-    db,
-    threadId,
-    currentOrder,
-    task.id,
-    userId,
-    studentAssignment.assignment_id,
-  );
+  // Resolve task images into AI-compatible data URLs and latest student image into signed URLs
+  const [taskImageUrls, taskOcrText, studentImageUrls] = await Promise.all([
+    resolveTaskImageUrlsForAI(db, task.task_image_url),
+    ensureTaskOcrText(db, task, assignment?.subject ?? "math"),
+    loadLatestStudentImageUrlsForTask(
+      db,
+      threadId,
+      currentOrder,
+      task.id,
+      userId,
+      studentAssignment.assignment_id,
+    ),
+  ]);
 
   // Call AI for hint
   const hintResult = await generateHint({
     taskText: task.task_text ?? "",
-    taskImageUrl: hintTaskImageUrl,
+    taskImageUrls,
     studentImageUrls,
     taskOcrText,
     taskId: task.id ?? null,
@@ -5149,6 +5348,11 @@ Deno.serve(async (req: Request): Promise<Response> => {
       return await handleTaskImageSignedUrl(db, userId, seg[1], seg[3], cors);
     }
 
+    // GET /assignments/:id/tasks/:taskId/images (tutor + student)
+    if (seg.length === 5 && seg[0] === "assignments" && seg[2] === "tasks" && seg[4] === "images" && route.method === "GET") {
+      return await handleTaskImagesSignedUrls(db, userId, seg[1], seg[3], cors);
+    }
+
     // GET /formula-rounds/:roundId (student endpoint)
     if (seg.length === 2 && seg[0] === "formula-rounds" && route.method === "GET") {
       return await handleGetFormulaRound(db, userId, seg[1], cors);
@@ -5183,6 +5387,11 @@ Deno.serve(async (req: Request): Promise<Response> => {
     // GET /assignments/:id
     if (seg.length === 2 && seg[0] === "assignments" && route.method === "GET") {
       return await handleGetAssignment(db, userId, seg[1], cors);
+    }
+
+    // GET /assignments/:id/tasks/:taskId/rubric-images (tutor only)
+    if (seg.length === 5 && seg[0] === "assignments" && seg[2] === "tasks" && seg[4] === "rubric-images" && route.method === "GET") {
+      return await handleRubricImagesSignedUrls(db, userId, seg[1], seg[3], cors);
     }
 
     // GET /assignments/:id/students/:studentId/thread

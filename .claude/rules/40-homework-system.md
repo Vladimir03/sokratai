@@ -319,10 +319,16 @@ Audit/normalize/optimize/harden pass на `/tutor/homework` и `/tutor/homework/
 4. **НИКОГДА** не вставлять `storage://` или raw URL как текст в промпт — AI его не увидит
 
 **Четыре пути к AI в guided chat** (все должны передавать изображение корректно):
-- `answer` → `handleCheckAnswer` → `evaluateStudentAnswer` в `guided_ai.ts` (task image resolved в `index.ts`, latest student image resolved в signed URL и inline-ится в `guided_ai.ts`)
-- `hint` → `handleRequestHint` → `generateHint` в `guided_ai.ts` (task image resolved в `index.ts`, latest student image resolved в signed URL и inline-ится в `guided_ai.ts`)
-- `question` → `streamChat()` → `/functions/v1/chat` (resolved на фронтенде, передаются `taskImageUrl` и optional `studentImageUrls`, затем backend inline-ит их в base64/data URL)
-- `bootstrap` → `streamChat()` → `/functions/v1/chat` (resolved на фронтенде, передаётся только `taskImageUrl`; student image на intro не передаётся по дизайну)
+- `answer` → `handleCheckAnswer` → `evaluateStudentAnswer` в `guided_ai.ts` (в backend task читается как dual-format, резолвится в `taskImageUrls: string[]`; rubric отдельно как `rubricImageUrls?: string[]`; latest student images идут отдельным массивом и inline-ятся в `guided_ai.ts`)
+- `hint` → `handleRequestHint` → `generateHint` в `guided_ai.ts` (task читается как dual-format и передаётся как `taskImageUrls: string[]`; rubric в hint не передаётся; latest student images идут отдельным массивом)
+- `question` → `streamChat()` → `/functions/v1/chat` (frontend передаёт `taskImageUrls: string[]`, backend режет до `MAX_TASK_IMAGES_FOR_AI`, резолвит каждый ref и inline-ит в base64/data URL; `studentImageUrls` остаётся отдельным массивом)
+- `bootstrap` → `streamChat()` → `/functions/v1/chat` (frontend передаёт только `taskImageUrls: string[]`; student image на intro не передаётся по дизайну)
+
+**Dual-format invariant для homework images:**
+- `task_image_url` и `rubric_image_urls` в БД хранятся как TEXT: single `storage://...` ref ИЛИ JSON-array refs
+- frontend всегда читает через `parseAttachmentUrls` из `@/lib/attachmentRefs`
+- backend edge functions читают через `_shared/attachment-refs.ts`
+- в AI-path не передавать raw `storage://` как текст; сначала резолвить ref → signed URL / `data:` URL
 
 При добавлении нового пути к AI с изображениями — проверить ВСЕ вызывающие точки, не только основную.
 

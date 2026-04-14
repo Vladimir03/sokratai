@@ -26,8 +26,8 @@ export interface StreamChatOptions {
   messages: StreamChatMessage[];
   systemPrompt?: string;
   taskContext?: string;
-  /** Signed HTTP URL for a task image; injected as multimodal image_url part on the server */
-  taskImageUrl?: string;
+  /** Storage refs for task images; server resolves them into multimodal image_url parts */
+  taskImageUrls?: string[];
   /** Signed HTTP URL for the latest student solution image; kept for backward compatibility */
   studentImageUrl?: string;
   /** Signed HTTP URLs for the latest student solution attachments */
@@ -49,7 +49,7 @@ export async function streamChat({
   messages,
   systemPrompt,
   taskContext,
-  taskImageUrl,
+  taskImageUrls,
   studentImageUrl,
   studentImageUrls,
   onDelta,
@@ -91,7 +91,7 @@ export async function streamChat({
           messages,
           systemPrompt,
           taskContext,
-          taskImageUrl: taskImageUrl || undefined,
+          taskImageUrls: taskImageUrls?.length ? taskImageUrls : undefined,
           studentImageUrl: normalizedStudentImageUrls[0] || undefined,
           studentImageUrls: normalizedStudentImageUrls.length > 0 ? normalizedStudentImageUrls : undefined,
         }),

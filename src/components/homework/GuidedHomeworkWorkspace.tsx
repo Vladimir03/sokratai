@@ -64,6 +64,7 @@ import {
 } from '@/lib/homeworkThreadAttachments';
 import { streamChat, StreamChatError } from '@/lib/streamChat';
 import { trackGuidedHomeworkEvent } from '@/lib/homeworkTelemetry';
+import { parseAttachmentUrls } from '@/lib/attachmentRefs';
 
 const MAX_CONTEXT_MESSAGES = 15;
 type SendMode = Extract<GuidedMessageKind, 'answer' | 'hint_request' | 'question'> | 'bootstrap';
@@ -120,7 +121,8 @@ function buildTaskContext(
   const trimmedText = currentTask.task_text.trim();
   const isPlaceholder = /^\[.*\]$/.test(trimmedText);
   const isMinimalText = trimmedText.length <= 20 || isPlaceholder;
-  const hasImage = Boolean(currentTask.task_image_url);
+  const taskImageUrls = parseAttachmentUrls(currentTask.task_image_url);
+  const hasImage = taskImageUrls.length > 0;
 
   const parts = [
     `Задание: "${assignment.title}" по предмету ${getSubjectLabel(assignment.subject)}.`,
@@ -654,10 +656,8 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
     setIsStreaming(true);
     setStreamingContent('');
 
-    const [resolvedTaskImageUrl, resolvedStudentImageUrls] = await Promise.all([
-      task.task_image_url
-        ? getStudentTaskImageSignedUrlViaBackend(assignment.id, task.id)
-        : Promise.resolve(null),
+    const [taskImageUrls, resolvedStudentImageUrls] = await Promise.all([
+      Promise.resolve(parseAttachmentUrls(task.task_image_url)),
       resolveLatestStudentImageUrls(taskOrder, task.id, latestUserAttachmentRefs),
     ]);
 
@@ -675,7 +675,7 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
           hasStudentImage: resolvedStudentImageUrls.length > 0,
           examType,
         }),
-        taskImageUrl: resolvedTaskImageUrl ?? undefined,
+        taskImageUrls,
         studentImageUrls: resolvedStudentImageUrls,
         onDelta: (delta) => {
           fullContent += delta;
@@ -1243,14 +1243,7 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
       setIsStreaming(true);
       setStreamingContent('');
 
-      // Resolve task image to signed URL for AI (if task has image)
-      let bootstrapImageUrl: string | undefined;
-      if (currentTask.task_image_url) {
-        const signedUrl = await getStudentTaskImageSignedUrlViaBackend(
-          assignment.id, currentTask.id,
-        );
-        if (signedUrl) bootstrapImageUrl = signedUrl;
-      }
+      const taskImageUrls = parseAttachmentUrls(currentTask.task_image_url);
 
       let content = '';
       try {
@@ -1269,7 +1262,7 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
           taskContext: buildTaskContext(assignment, currentTask, assignment.tasks.length, 'bootstrap', {
             examType,
           }),
-          taskImageUrl: bootstrapImageUrl,
+          taskImageUrls,
           onDelta: (delta) => {
             content += delta;
             setStreamingContent(content);

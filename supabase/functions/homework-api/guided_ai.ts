@@ -14,6 +14,7 @@ import {
   type LovableMessageContent,
   type LovableTextPart,
 } from "./ai_shared.ts";
+import { MAX_TASK_IMAGES_FOR_AI } from "../_shared/attachment-refs.ts";
 
 // ─── Constants ──────────────────────────────────────────────────────────────
 
@@ -126,11 +127,12 @@ export interface GuidedHintResult {
 export interface EvaluateStudentAnswerParams {
   studentAnswer: string;
   taskText: string;
-  taskImageUrl: string | null;
+  taskImageUrls: string[];
   studentImageUrls?: string[] | null;
   taskOcrText?: string | null;
   correctAnswer: string | null;
   rubricText: string | null;
+  rubricImageUrls?: string[] | null;
   subject: string;
   conversationHistory: GuidedConversationHistoryMessage[];
   wrongAnswerCount: number;
@@ -142,7 +144,7 @@ export interface EvaluateStudentAnswerParams {
 
 export interface GenerateHintParams {
   taskText: string;
-  taskImageUrl: string | null;
+  taskImageUrls: string[];
   studentImageUrls?: string[] | null;
   taskOcrText?: string | null;
   taskId?: string | null;
@@ -255,6 +257,14 @@ function buildValidatedFallbackHint(taskContext: { taskText?: string | null; has
   }
 
   return "Какая физическая величина является искомой в этой задаче и какой закон поможет её найти по известным данным?";
+}
+
+function buildRubricGuidance(rubricText: string | null, hasRubricImages: boolean): string {
+  if (!rubricText && !hasRubricImages) return "";
+  if (hasRubricImages) {
+    return "Изображения после rubric_text — критерии проверки от репетитора, проверяй по ним.";
+  }
+  return "";
 }
 
 function sanitizeHintText(rawHint: unknown, correctAnswer: string | null): string {
@@ -793,8 +803,11 @@ function getLatestStudentMessage(conversationHistory: GuidedConversationHistoryM
 function buildCheckPrompt(params: EvaluateStudentAnswerParams): LovableMessage[] {
   const correctAnswerValue = clampPromptText(params.correctAnswer) || "[нет эталонного ответа — оцени по смыслу]";
   const rubricLine = params.rubricText ? `Критерии оценки: ${clampPromptText(params.rubricText)}` : "";
-
-  const hasTaskImage = !!params.taskImageUrl;
+  const rubricGuidance = buildRubricGuidance(params.rubricText, Boolean(params.rubricImageUrls?.length));
+  const taskImageUrls = (params.taskImageUrls ?? []).filter(Boolean);
+  const rubricImageUrls = (params.rubricImageUrls ?? []).filter(Boolean);
+  const hasTaskImage = taskImageUrls.length > 0;
+  const hasRubricImages = rubricImageUrls.length > 0;
   const studentImageUrls = (params.studentImageUrls ?? []).filter(Boolean);
   const studentImageCount = studentImageUrls.length;
   const hasStudentImage = studentImageCount > 0;
@@ -821,6 +834,8 @@ function buildCheckPrompt(params: EvaluateStudentAnswerParams): LovableMessage[]
       : "",
     `Эталонный ответ: ${correctAnswerValue}`,
     rubricLine,
+    rubricGuidance,
+    hasRubricImages ? "К задаче также приложены изображения с критериями проверки от репетитора — учитывай их при оценке." : "",
     "",
     `Максимальный балл по задаче: ${params.maxScore}.`,
     `Статистика: ${params.wrongAnswerCount} неверных попыток, ${params.hintCount} подсказок.`,
@@ -905,16 +920,27 @@ function buildCheckPrompt(params: EvaluateStudentAnswerParams): LovableMessage[]
     }
   }
 
-  if (hasTaskImage) {
+  for (const [index, imageUrl] of taskImageUrls.entries()) {
     userContent.push({
       type: "text",
-      text: hasStudentImage
-        ? `Изображение ${studentImageCount + 1} — условие задачи. Используй его для сверки с решением ученика.`
+      text: hasStudentImage || taskImageUrls.length > 1
+        ? `Изображение ${studentImageCount + index + 1} — условие задачи${taskImageUrls.length > 1 ? `, файл ${index + 1}` : ""}. Используй его для сверки с решением ученика.`
         : "Изображение выше — условие задачи.",
     });
     userContent.push({
       type: "image_url",
-      image_url: { url: params.taskImageUrl as string },
+      image_url: { url: imageUrl },
+    });
+  }
+
+  for (const [index, imageUrl] of rubricImageUrls.entries()) {
+    userContent.push({
+      type: "text",
+      text: `Изображение ${studentImageCount + taskImageUrls.length + index + 1} — критерии проверки от репетитора${rubricImageUrls.length > 1 ? `, файл ${index + 1}` : ""}.`,
+    });
+    userContent.push({
+      type: "image_url",
+      image_url: { url: imageUrl },
     });
   }
 
@@ -932,7 +958,8 @@ function buildCheckPrompt(params: EvaluateStudentAnswerParams): LovableMessage[]
 }
 
 function buildHintPrompt(params: GenerateHintParams): LovableMessage[] {
-  const hasTaskImage = !!params.taskImageUrl;
+  const taskImageUrls = (params.taskImageUrls ?? []).filter(Boolean);
+  const hasTaskImage = taskImageUrls.length > 0;
   const studentImageUrls = (params.studentImageUrls ?? []).filter(Boolean);
   const studentImageCount = studentImageUrls.length;
   const hasStudentImage = studentImageCount > 0;
@@ -1030,16 +1057,16 @@ function buildHintPrompt(params: GenerateHintParams): LovableMessage[] {
     }
   }
 
-  if (hasTaskImage) {
+  for (const [index, imageUrl] of taskImageUrls.entries()) {
     userContent.push({
       type: "text",
-      text: hasStudentImage
-        ? `Изображение ${studentImageCount + 1} — условие задачи. Используй его для сверки с решением ученика.`
+      text: hasStudentImage || taskImageUrls.length > 1
+        ? `Изображение ${studentImageCount + index + 1} — условие задачи${taskImageUrls.length > 1 ? `, файл ${index + 1}` : ""}. Используй его для сверки с решением ученика.`
         : "Изображение выше — условие задачи.",
     });
     userContent.push({
       type: "image_url",
-      image_url: { url: params.taskImageUrl as string },
+      image_url: { url: imageUrl },
     });
   }
 
@@ -1088,13 +1115,15 @@ export async function evaluateStudentAnswer(
   }
 
   try {
-    const [taskImageUrl, studentImageUrls] = await Promise.all([
-      inlinePromptImageUrl(params.taskImageUrl),
+    const [taskImageUrls, rubricImageUrls, studentImageUrls] = await Promise.all([
+      inlinePromptImageUrls(params.taskImageUrls.slice(0, MAX_TASK_IMAGES_FOR_AI)),
+      inlinePromptImageUrls((params.rubricImageUrls ?? []).slice(0, MAX_TASK_IMAGES_FOR_AI)),
       inlinePromptImageUrls(params.studentImageUrls),
     ]);
     const messages = buildCheckPrompt({
       ...params,
-      taskImageUrl,
+      taskImageUrls,
+      rubricImageUrls,
       studentImageUrls,
     });
     const parsed = await callLovableJson(messages, "guided_check");
@@ -1147,14 +1176,14 @@ export async function generateHint(
   };
 
   try {
-    const [taskImageUrl, studentImageUrls] = await Promise.all([
-      inlinePromptImageUrl(params.taskImageUrl),
+    const [taskImageUrls, studentImageUrls] = await Promise.all([
+      inlinePromptImageUrls(params.taskImageUrls.slice(0, MAX_TASK_IMAGES_FOR_AI)),
       inlinePromptImageUrls(params.studentImageUrls),
     ]);
-    resolvedTaskImageUrl = taskImageUrl;
+    resolvedTaskImageUrl = taskImageUrls[0] ?? null;
     const messages = buildHintPrompt({
       ...params,
-      taskImageUrl,
+      taskImageUrls,
       studentImageUrls,
     });
     const parsed = await callLovableJson(messages, "guided_hint");

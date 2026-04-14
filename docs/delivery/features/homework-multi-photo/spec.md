@@ -428,14 +428,14 @@ npm run lint && npm run build && npm run smoke-check
 - [ ] **TASK-5:** `TutorHomeworkCreate.tsx` — обновить три точки записи (create/update/secondary) — передавать `task_image_path` как есть (уже dual-format) + `rubric_image_urls`.
 - [ ] **TASK-6:** Backend create/update/duplicate валидация + select: количество ≤ 5 / ≤ 3 через `parseAttachmentUrls`; включить `rubric_image_urls` в `GET /assignments/:id` select.
 - [ ] **TASK-7:** Новые endpoints: `GET /assignments/:id/tasks/:taskId/images` (student+tutor), `GET /assignments/:id/tasks/:taskId/rubric-images` (tutor-only с 403 для student).
-- [ ] **TASK-8:** `guided_ai.ts` — `taskImageUrls: string[]` + `rubricImageUrls?: string[]` (для check); `Promise.all(inlinePromptImageUrl)`; multimodal content array. Обновить все use sites (`evaluateStudentAnswer`, `generateHint`).
-- [ ] **TASK-9:** `chat/index.ts` — `taskImageUrls: string[]` в body shape; `resolveTaskImageUrlsForAI(db, value)` возвращает `string[]`; `buildTaskContext` (frontend) передаёт массив.
+- [x] **TASK-8:** `guided_ai.ts` — `taskImageUrls: string[]` + `rubricImageUrls?: string[]` (для check); `Promise.all(inlinePromptImageUrl)`; multimodal content array. Обновить все use sites (`evaluateStudentAnswer`, `generateHint`). Выполнено 2026-04-14.
+- [x] **TASK-9:** `chat/index.ts` — `taskImageUrls: string[]` в body shape; `resolveTaskImageUrlsForAI(db, value)` возвращает `string[]`; `buildTaskContext` (frontend) передаёт массив. Выполнено 2026-04-14.
 - [ ] **TASK-10:** `GuidedHomeworkWorkspace.tsx` — заменить `TaskConditionImage` на `TaskConditionGallery`: horizontal row миниатюр + Radix Dialog с carousel (counter `N/M`, стрелки, swipe через touch handlers, `key={selectedTask.id}` для remount при смене задачи).
 - [ ] **TASK-11:** `studentHomeworkApi.ts` — новый `getStudentTaskImagesSignedUrlsViaBackend(assignmentId, taskId)` → возвращает `string[]`; query key `['student','homework','guided-task-images', assignmentId, taskId]`.
 - [ ] **TASK-12:** `TutorHomeworkDetail.tsx` — `TaskImagePreview` расширить до массива (в details page видно все фото); новая секция «Критерии проверки» с фото рубрики под `rubric_text`.
 - [ ] **TASK-13:** `GuidedThreadViewer.tsx` — `TaskContextImage` расширить до `TaskContextGallery` (reuse логика student-side compontент'a, один визуал).
 - [ ] **TASK-14:** QA — прогнать все 10 AC на Chrome desktop + iOS Safari + Android Chrome; специально проверить AC-7 (backward compat) на реальной legacy-задаче.
-- [ ] **TASK-15:** Обновить `.claude/rules/40-homework-system.md` секцию «Передача изображений задач в AI» — заменить `taskImageUrl: string | null` на `taskImageUrls: string[]`, упомянуть `rubricImageUrls`, добавить dual-format rule.
+- [x] **TASK-15:** Обновить `.claude/rules/40-homework-system.md` секцию «Передача изображений задач в AI» — заменить `taskImageUrl: string | null` на `taskImageUrls: string[]`, упомянуть `rubricImageUrls`, добавить dual-format rule. Выполнено 2026-04-14.
 
 ---
 

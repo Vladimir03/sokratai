@@ -61,7 +61,7 @@ TASK-14 (QA) — после merge всех TASK-3..TASK-13.
 
 ---
 
-## TASK-3: HWTaskCard — галереи условия и рубрики
+## TASK-3: HWTaskCard — галереи условия и рубрики ✅ Done (2026-04-14)
 
 **Job:** R4-1, R4-2
 **Agent:** Claude Code
@@ -72,9 +72,11 @@ TASK-14 (QA) — после merge всех TASK-3..TASK-13.
 
 **Описание:** галерея условия (горизонтальный ряд миниатюр 80×80 + кнопка `+`, дизейбл на лимите 5). Hover/всегда-на-mobile X для удаления. Блок «Критерии проверки»: textarea + галерея до 3 фото. Lucide `Plus`/`X`. `touch-action: manipulation` на кнопках. `loading="lazy"` на миниатюрах. Использует `parseAttachmentUrls`/`serializeAttachmentUrls` из `@/lib/attachmentRefs` (TASK-1). `DraftTask` получает `rubric_image_paths: string | null` (dual-format).
 
+**Статус выполнения:** `DraftTask.rubric_image_paths` добавлен + JSDoc на `task_image_path`. `HWTaskCard.tsx` полностью переписан: memoized `PhotoThumbnail`/`AddPhotoButton`, общий `PhotoGallery` reused для задачи и рубрики. Blob-URL cleanup через `blobUrlsRef: Set<string>` + `useEffect([])`. Multi-upload через `Promise.all(uploadTutorHomeworkTaskImage)`. Ctrl+V paste appendит в `task_image_path` (не replace). `accept="image/*,.heic,.heif" multiple`.
+
 ---
 
-## TASK-4: HWTasksSection — KB-импорт сохраняет до 5 фото
+## TASK-4: HWTasksSection — KB-импорт сохраняет до 5 фото ✅ Done (2026-04-14)
 
 **Job:** R4-1
 **Agent:** Claude Code
@@ -84,17 +86,22 @@ TASK-14 (QA) — после merge всех TASK-3..TASK-13.
 
 **Описание:** в `HWTasksSection.tsx:28` (KB-импорт) вместо `parseAttachmentUrls(task.attachment_url)[0]` использовать `parseAttachmentUrls(task.attachment_url).slice(0, MAX_TASK_IMAGES)`. Сериализовать обратно в dual-format через `serializeAttachmentUrls`. Если у KB-задачи > 5 фото — `toast.info('Из БЗ импортировано 5 из N фото')`. `task_image_path` на DraftTask становится dual-format (single ИЛИ JSON-array string). Не ломать существующий импорт single-фото KB-задач.
 
+**Статус выполнения:** `kbTaskToDraftTask` теперь возвращает `{ draft, truncatedFrom }` вместо голого DraftTask — вызывающий `handleAddFromKB` решает emit'ить toast.info про truncation или нет. `task_image_path` и `kb_attachment_url` заполняются одним `serializeAttachmentUrls(slicedRefs)` (dual-format preserved для провенанса). Snapshot-механика (`kb_snapshot_text`/`answer`/`solution`) не тронута. Signed URL preview резолвится только для первого ref'а (legacy-слот); остальные фото рендерятся галереей из TASK-3. Импорт `parseAttachmentUrls` теперь из `@/lib/attachmentRefs` (не через kbApi re-export).
+
 ---
 
-## TASK-5: TutorHomeworkCreate — три точки записи
+## TASK-5: TutorHomeworkCreate — три точки записи ✅ Done (2026-04-14)
 
 **Job:** R4-1, R4-2
 **Agent:** Claude Code
 **Files:**
 - `src/pages/tutor/TutorHomeworkCreate.tsx`
+- `src/lib/tutorHomeworkApi.ts` (type-only sync с TASK-6)
 **AC:** AC-1, AC-2, AC-7
 
 **Описание:** актуальные строки на HEAD `e57cada` — `:470, :602, :698`. Pattern сейчас: `task_image_url: t.task_image_path || t.kb_attachment_url || null`. Привести к `task_image_url: t.task_image_path ?? null` (state уже хранит dual-format после TASK-3+4). Добавить `rubric_image_urls: t.rubric_image_paths ?? null` в каждую точку. Существующая логика валидации `validateAll` (TutorHomeworkCreate.tsx:381) не трогается — лимиты проверяет HWTaskCard и backend.
+
+**Статус выполнения:** три pattern-replaces + три новые строки `rubric_image_urls` в `handleSubmit` (POST), save-as-template `tasks_json`, `handleEditSubmit` (PUT). Дополнительно additive-расширение трёх request-интерфейсов (`CreateAssignmentTask`, `UpdateAssignmentTask`, `HomeworkTemplateTask`) в `tutorHomeworkApi.ts` полем `rubric_image_urls?: string | null` — обязательно для compile-safety с TASK-6 backend; все расширения optional, не ломают существующие вызовы.
 
 ---
 
@@ -149,6 +156,8 @@ TASK-14 (QA) — после merge всех TASK-3..TASK-13.
 - Promt addition: `buildRubricGuidance(rubricText, hasRubricImages)` — если `rubricImageUrls.length > 0`, инструкция «изображения после rubric_text — это критерии проверки от репетитора».
 - Guard `MAX_TASK_IMAGES_FOR_AI = 5` (slice на этом уровне; UI лимит уже 5, это double-protection).
 
+**Статус:** ✅ Done (2026-04-14)
+
 ---
 
 ## TASK-9: chat/index.ts — taskImageUrls для question + bootstrap
@@ -161,6 +170,8 @@ TASK-14 (QA) — после merge всех TASK-3..TASK-13.
 **AC:** AC-5
 
 **Описание:** `taskImageUrl: string | null` → `taskImageUrls: string[]` в request body shape. `resolveTaskImageUrlForAI` → `resolveTaskImageUrlsForAI(db, dualFormatValue) → string[]` (парсит через shared helper, резолвит signed URL для каждого ref в `Promise.all`, inline-ит base64). Frontend `buildTaskContext()` в `GuidedHomeworkWorkspace.tsx`: `taskImageUrls = parseAttachmentUrls(task.task_image_url)`. Не трогать `studentImageUrls` — это другой массив (вложения ученика в сообщение).
+
+**Статус:** ✅ Done (2026-04-14)
 
 ---
 
