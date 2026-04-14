@@ -297,17 +297,16 @@ async function authenticateUser(
   const token = authHeader.replace("Bearer ", "");
   const verifier = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
     auth: { persistSession: false, autoRefreshToken: false },
-    global: { headers: { Authorization: authHeader } },
   });
-  const { data, error } = await verifier.auth.getClaims(token);
-  if (error || !data?.claims?.sub) {
+  const { data: { user }, error } = await verifier.auth.getUser(token);
+  if (error || !user) {
     console.error("homework_api_auth_failed", {
       error: error?.message,
       hasToken: !!token,
     });
     return jsonError(cors, 401, "UNAUTHORIZED", "Invalid or expired token");
   }
-  return { userId: data.claims.sub as string };
+  return { userId: user.id };
 }
 
 async function getTutorOrThrow(
