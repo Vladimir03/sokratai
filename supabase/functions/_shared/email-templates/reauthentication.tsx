@@ -23,12 +23,11 @@ export const ReauthenticationEmail = ({ token }: ReauthenticationEmailProps) => 
     <Body style={main}>
       <Container style={container}>
         <Text style={logo}>Сократ</Text>
-        <Heading style={h1}>Подтверждение личности</Heading>
+        <Heading style={h1}>Код подтверждения</Heading>
         <Text style={text}>Используйте код ниже для подтверждения:</Text>
         <Text style={codeStyle}>{token}</Text>
         <Text style={footer}>
-          Код действует ограниченное время. Если вы не запрашивали этот код,
-          просто проигнорируйте это письмо.
+          Код действует ограниченное время. Если вы не запрашивали его, проигнорируйте это письмо.
         </Text>
       </Container>
     </Body>

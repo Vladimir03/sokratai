@@ -9,7 +9,6 @@ import {
   Head,
   Heading,
   Html,
-  Link,
   Preview,
   Text,
 } from 'npm:@react-email/components@0.0.22'
@@ -29,24 +28,19 @@ export const EmailChangeEmail = ({
 }: EmailChangeEmailProps) => (
   <Html lang="ru" dir="ltr">
     <Head />
-    <Preview>Подтвердите смену email в {siteName}</Preview>
+    <Preview>Подтвердите смену email — {siteName}</Preview>
     <Body style={main}>
       <Container style={container}>
         <Text style={logo}>Сократ</Text>
-        <Heading style={h1}>Смена email</Heading>
+        <Heading style={h1}>Подтвердите смену email</Heading>
         <Text style={text}>
-          Вы запросили смену email в {siteName} с{' '}
-          <Link href={`mailto:${email}`} style={link}>{email}</Link> на{' '}
-          <Link href={`mailto:${newEmail}`} style={link}>{newEmail}</Link>.
-        </Text>
-        <Text style={text}>
-          Нажмите кнопку ниже, чтобы подтвердить:
+          Вы запросили смену email с {email} на {newEmail}. Нажмите кнопку ниже для подтверждения:
         </Text>
         <Button style={button} href={confirmationUrl}>
           Подтвердить смену email
         </Button>
         <Text style={footer}>
-          Если вы не запрашивали смену email, немедленно проверьте безопасность вашего аккаунта.
+          Если вы не запрашивали эту смену, немедленно защитите свой аккаунт.
         </Text>
       </Container>
     </Body>
@@ -77,7 +71,6 @@ const text = {
   lineHeight: '1.6',
   margin: '0 0 25px',
 }
-const link = { color: 'inherit', textDecoration: 'underline' }
 const button = {
   backgroundColor: 'hsl(231, 36%, 29%)',
   color: '#ffffff',

@@ -24,11 +24,11 @@ export const MagicLinkEmail = ({
 }: MagicLinkEmailProps) => (
   <Html lang="ru" dir="ltr">
     <Head />
-    <Preview>Ссылка для входа в {siteName}</Preview>
+    <Preview>Ссылка для входа — {siteName}</Preview>
     <Body style={main}>
       <Container style={container}>
         <Text style={logo}>Сократ</Text>
-        <Heading style={h1}>Войти в аккаунт</Heading>
+        <Heading style={h1}>Ссылка для входа</Heading>
         <Text style={text}>
           Нажмите кнопку ниже, чтобы войти в {siteName}. Ссылка действует ограниченное время.
         </Text>

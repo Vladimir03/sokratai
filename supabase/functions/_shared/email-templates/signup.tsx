@@ -28,14 +28,13 @@ export const SignupEmail = ({
 }: SignupEmailProps) => (
   <Html lang="ru" dir="ltr">
     <Head />
-    <Preview>Подтвердите email для {siteName}</Preview>
+    <Preview>Подтвердите email — {siteName}</Preview>
     <Body style={main}>
       <Container style={container}>
         <Text style={logo}>Сократ</Text>
         <Heading style={h1}>Подтвердите email</Heading>
         <Text style={text}>
-          Спасибо за регистрацию в {siteName}! Подтвердите ваш email ({recipient}),
-          нажав на кнопку ниже:
+          Спасибо за регистрацию в {siteName}! Подтвердите ваш email ({recipient}), нажав кнопку ниже:
         </Text>
         <Button style={button} href={confirmationUrl}>
           Подтвердить email

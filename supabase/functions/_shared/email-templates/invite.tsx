@@ -26,20 +26,19 @@ export const InviteEmail = ({
 }: InviteEmailProps) => (
   <Html lang="ru" dir="ltr">
     <Head />
-    <Preview>Приглашение в {siteName}</Preview>
+    <Preview>Вас пригласили в {siteName}</Preview>
     <Body style={main}>
       <Container style={container}>
         <Text style={logo}>Сократ</Text>
         <Heading style={h1}>Вас пригласили</Heading>
         <Text style={text}>
-          Вас пригласили присоединиться к {siteName}. Нажмите кнопку ниже,
-          чтобы принять приглашение и создать аккаунт.
+          Вас пригласили присоединиться к {siteName}. Нажмите кнопку ниже, чтобы принять приглашение.
         </Text>
         <Button style={button} href={confirmationUrl}>
           Принять приглашение
         </Button>
         <Text style={footer}>
-          Если вы не ожидали это приглашение, просто проигнорируйте это письмо.
+          Если вы не ожидали приглашения, просто проигнорируйте это письмо.
         </Text>
       </Container>
     </Body>
