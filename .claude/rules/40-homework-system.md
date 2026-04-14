@@ -37,7 +37,7 @@
 - KB-импорт (`HWTasksSection.kbTaskToDraftTask`) сохраняет до 5 фото из `attachment_url`; если > 5 — `toast.info('Из БЗ импортировано 5 из N фото')`. Snapshot-механика (`kb_snapshot_*`) не тронута.
 - Рубрика видна ТОЛЬКО репетитору — `getStudentAssignment` не возвращает `rubric_image_urls` (RLS в TASK-6 backend).
 - Миграция: `supabase/migrations/20260414120000_homework_rubric_images.sql` (additive `ADD COLUMN IF NOT EXISTS rubric_image_urls TEXT NULL` + COMMENT'ы). Legacy single-ref задачи работают без data migration.
-- Frontend status: TASK-3 (HWTaskCard gallery), TASK-4 (KB-импорт), TASK-5 (TutorHomeworkCreate 3 точки записи) — ✅ done. Student-side gallery (TASK-10), AI multimodal arrays (TASK-8/9), TutorHomeworkDetail/GuidedThreadViewer отображение (TASK-12/13) — pending.
+- Frontend status: TASK-3 (HWTaskCard gallery), TASK-4 (KB-импорт), TASK-5 (TutorHomeworkCreate 3 точки записи), TASK-10 (student `TaskConditionGallery` + fullscreen carousel), TASK-11 (student batch signed-URL hook), TASK-8/9 (AI multimodal arrays) — ✅ done. TutorHomeworkDetail/GuidedThreadViewer отображение (TASK-12/13) — pending.
 
 Спека: `docs/delivery/features/homework-multi-photo/spec.md`.
 

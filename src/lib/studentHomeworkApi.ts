@@ -376,6 +376,53 @@ export async function getStudentTaskImageSignedUrlViaBackend(
   }
 }
 
+export async function getStudentTaskImagesSignedUrlsViaBackend(
+  assignmentId: string,
+  taskId: string,
+): Promise<string[]> {
+  const { data: sessionData } = await supabase.auth.getSession();
+  const token = sessionData?.session?.access_token;
+
+  if (!token) {
+    throw new StudentHomeworkApiError('Нет активной сессии');
+  }
+
+  const response = await fetch(
+    `${SUPABASE_URL}/functions/v1/homework-api/assignments/${encodeURIComponent(assignmentId)}/tasks/${encodeURIComponent(taskId)}/images`,
+    {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+        apikey: SUPABASE_KEY,
+      },
+    },
+  );
+
+  if (response.status === 404) {
+    return [];
+  }
+
+  if (!response.ok) {
+    let message = `HTTP ${response.status}`;
+    try {
+      const body = await response.json();
+      const errorMessage = body?.error?.message;
+      if (typeof errorMessage === 'string' && errorMessage.trim().length > 0) {
+        message = errorMessage;
+      }
+    } catch {
+      // ignore parse errors
+    }
+    throw new StudentHomeworkApiError(message);
+  }
+
+  const result = await response.json() as { signed_urls?: unknown };
+  return Array.isArray(result?.signed_urls)
+    ? result.signed_urls.filter((url): url is string => typeof url === 'string' && url.trim().length > 0)
+    : [];
+}
+
 export async function getStudentHomeworkThread(
   threadId: string,
 ): Promise<HomeworkThread> {

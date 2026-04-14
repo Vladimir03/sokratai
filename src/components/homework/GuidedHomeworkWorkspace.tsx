@@ -3,7 +3,7 @@
  * Students solve tasks one by one in an interactive chat with AI.
  */
 
-import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { lazy, memo, Suspense, type TouchEvent as ReactTouchEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
@@ -16,7 +16,7 @@ import {
   ChevronRight,
   Lightbulb,
   Loader2,
-  ZoomIn,
+  X,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -46,11 +46,10 @@ import type {
   TaskStateStatus,
 } from '@/types/homework';
 import { getSubjectLabel } from '@/types/homework';
-import { useStudentThread } from '@/hooks/useStudentHomework';
+import { useStudentTaskImagesSignedUrls, useStudentThread } from '@/hooks/useStudentHomework';
 import {
   checkAnswer,
   getStudentTaskImageSignedUrl,
-  getStudentTaskImageSignedUrlViaBackend,
   requestHint,
   saveThreadMessage,
   uploadStudentThreadImage,
@@ -252,77 +251,257 @@ function MaterialLink({
   );
 }
 
-function TaskConditionImage({
+const SWIPE_THRESHOLD_PX = 50;
+const TAP_THRESHOLD_MS = 50;
+
+const TaskConditionThumbnail = memo(function TaskConditionThumbnail({
+  src,
+  index,
+  onOpen,
+}: {
+  src: string;
+  index: number;
+  onOpen: (index: number) => void;
+}) {
+  const touchStartXRef = useRef<number | null>(null);
+  const shouldIgnoreClickRef = useRef(false);
+
+  const handleTouchStart = useCallback((event: ReactTouchEvent<HTMLButtonElement>) => {
+    touchStartXRef.current = event.touches[0]?.clientX ?? null;
+    shouldIgnoreClickRef.current = false;
+  }, []);
+
+  const handleTouchMove = useCallback((event: ReactTouchEvent<HTMLButtonElement>) => {
+    if (touchStartXRef.current == null) return;
+    const currentX = event.touches[0]?.clientX ?? touchStartXRef.current;
+    if (Math.abs(currentX - touchStartXRef.current) > 12) {
+      shouldIgnoreClickRef.current = true;
+    }
+  }, []);
+
+  const handleTouchEnd = useCallback(() => {
+    touchStartXRef.current = null;
+  }, []);
+
+  const handleClick = useCallback(() => {
+    if (shouldIgnoreClickRef.current) {
+      shouldIgnoreClickRef.current = false;
+      return;
+    }
+    onOpen(index);
+  }, [index, onOpen]);
+
+  return (
+    <button
+      type="button"
+      onClick={handleClick}
+      onTouchStart={handleTouchStart}
+      onTouchMove={handleTouchMove}
+      onTouchEnd={handleTouchEnd}
+      aria-label={`Открыть фото ${index + 1} во весь экран`}
+      className="shrink-0 rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/20 focus-visible:ring-offset-2"
+    >
+      <img
+        src={src}
+        alt={`Фото условия ${index + 1}`}
+        loading="lazy"
+        className="h-32 w-[120px] rounded-md border border-slate-200 object-contain bg-white"
+      />
+    </button>
+  );
+});
+
+const FullscreenImage = memo(function FullscreenImage({
+  src,
+  index,
+}: {
+  src: string;
+  index: number;
+}) {
+  return (
+    <img
+      src={src}
+      alt={`Фото условия ${index + 1}`}
+      loading="lazy"
+      className="mx-auto max-h-[75vh] w-full object-contain"
+    />
+  );
+});
+
+const TaskConditionGallery = memo(function TaskConditionGallery({
   assignmentId,
   taskId,
-  taskOrder,
   taskImageUrl,
 }: {
   assignmentId: string;
   taskId: string;
-  taskOrder: number;
   taskImageUrl: string | null;
 }) {
-  const [open, setOpen] = useState(false);
-  const isExternal = Boolean(taskImageUrl && /^https?:\/\//i.test(taskImageUrl));
-
-  const imageQuery = useQuery<string | null>({
-    queryKey: ['student', 'homework', 'guided-task-image', assignmentId, taskId],
-    queryFn: () => getStudentTaskImageSignedUrlViaBackend(assignmentId, taskId),
-    enabled: Boolean(taskImageUrl) && !isExternal,
-    staleTime: 30 * 60 * 1000,
-    gcTime: 60 * 60 * 1000,
-    retry: 1,
+  const refs = useMemo(() => parseAttachmentUrls(taskImageUrl), [taskImageUrl]);
+  const [openIndex, setOpenIndex] = useState<number | null>(null);
+  const touchStartXRef = useRef<number | null>(null);
+  const touchStartAtRef = useRef<number | null>(null);
+  const { data: signedUrls = [], isLoading } = useStudentTaskImagesSignedUrls(assignmentId, taskId, {
+    enabled: refs.length > 0,
   });
 
-  if (!taskImageUrl) return null;
+  const resolvedUrls = useMemo(() => {
+    if (signedUrls.length > 0) return signedUrls;
+    return refs.filter((ref) => /^(https?:\/\/|data:)/i.test(ref));
+  }, [refs, signedUrls]);
 
-  const resolvedUrl = isExternal
-    ? taskImageUrl
-    : (imageQuery.data ?? null);
+  const canGoPrev = openIndex !== null && openIndex > 0;
+  const canGoNext = openIndex !== null && openIndex < resolvedUrls.length - 1;
 
-  if (imageQuery.isLoading) {
+  const goPrev = useCallback(() => {
+    setOpenIndex((current) => {
+      if (current == null || current <= 0) return current;
+      return current - 1;
+    });
+  }, []);
+
+  const goNext = useCallback(() => {
+    setOpenIndex((current) => {
+      if (current == null || current >= resolvedUrls.length - 1) return current;
+      return current + 1;
+    });
+  }, [resolvedUrls.length]);
+
+  useEffect(() => {
+    if (openIndex === null) return undefined;
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'ArrowLeft') {
+        event.preventDefault();
+        goPrev();
+      } else if (event.key === 'ArrowRight') {
+        event.preventDefault();
+        goNext();
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [goNext, goPrev, openIndex]);
+
+  useEffect(() => {
+    if (openIndex == null) return;
+    if (resolvedUrls.length === 0) {
+      setOpenIndex(null);
+      return;
+    }
+    if (openIndex >= resolvedUrls.length) {
+      setOpenIndex(resolvedUrls.length - 1);
+    }
+  }, [openIndex, resolvedUrls.length]);
+
+  const handleViewerTouchStart = useCallback((event: ReactTouchEvent<HTMLDivElement>) => {
+    touchStartXRef.current = event.touches[0]?.clientX ?? null;
+    touchStartAtRef.current = Date.now();
+  }, []);
+
+  const handleViewerTouchEnd = useCallback((event: ReactTouchEvent<HTMLDivElement>) => {
+    if (touchStartXRef.current == null) return;
+    const touchEndX = event.changedTouches[0]?.clientX ?? touchStartXRef.current;
+    const deltaX = touchEndX - touchStartXRef.current;
+    const durationMs = touchStartAtRef.current == null ? Infinity : Date.now() - touchStartAtRef.current;
+
+    touchStartXRef.current = null;
+    touchStartAtRef.current = null;
+
+    if (durationMs < TAP_THRESHOLD_MS || Math.abs(deltaX) < SWIPE_THRESHOLD_PX) {
+      return;
+    }
+
+    if (deltaX < 0) {
+      goNext();
+    } else {
+      goPrev();
+    }
+  }, [goNext, goPrev]);
+
+  if (refs.length === 0) return null;
+
+  if (isLoading && resolvedUrls.length === 0) {
     return <p className="text-xs text-muted-foreground">Загрузка фото условия...</p>;
   }
 
-  if (!resolvedUrl) {
-    return <p className="text-xs text-muted-foreground">Фото условия недоступно</p>;
+  if (resolvedUrls.length === 0) {
+    return <p className="text-xs text-muted-foreground">Фото условия недоступны</p>;
   }
 
   return (
     <>
-      <button
-        type="button"
-        onClick={() => setOpen(true)}
-        className="group relative inline-flex max-w-[320px] rounded-lg border bg-background p-1 text-left"
-      >
-        <img
-          src={resolvedUrl}
-          alt={`Условие задачи ${taskOrder}`}
-          className="max-h-44 w-full rounded-md object-contain"
-          loading="lazy"
-        />
-        <span className="absolute right-2 top-2 inline-flex items-center gap-1 rounded-md bg-background/90 px-2 py-1 text-[11px] opacity-0 transition-opacity group-hover:opacity-100">
-          <ZoomIn className="h-3 w-3" />
-          Увеличить
-        </span>
-      </button>
-      <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className="max-w-4xl p-4">
-          <DialogHeader>
-            <DialogTitle>Задача {taskOrder}</DialogTitle>
-            <DialogDescription>Изображение условия</DialogDescription>
+      <div className="flex gap-2 overflow-x-auto touch-pan-x pb-1">
+        {resolvedUrls.map((url, index) => (
+          <TaskConditionThumbnail key={`${taskId}-${index}`} src={url} index={index} onOpen={setOpenIndex} />
+        ))}
+      </div>
+      <Dialog open={openIndex !== null} onOpenChange={(isOpen) => setOpenIndex(isOpen ? openIndex : null)}>
+        <DialogContent className="max-w-5xl rounded-xl border-slate-200 p-0 [&>button]:hidden">
+          <DialogHeader className="sr-only">
+            <DialogTitle>Фото условия</DialogTitle>
+            <DialogDescription>Просмотр изображений задачи во весь экран</DialogDescription>
           </DialogHeader>
-          <img
-            src={resolvedUrl}
-            alt={`Условие задачи ${taskOrder}`}
-            className="max-h-[75vh] w-full rounded-md object-contain"
-          />
+          <div
+            className="relative overflow-hidden rounded-xl bg-white px-4 py-12 sm:px-6"
+            onTouchStart={handleViewerTouchStart}
+            onTouchEnd={handleViewerTouchEnd}
+          >
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              onClick={() => setOpenIndex(null)}
+              aria-label="Закрыть просмотр фото"
+              className="absolute right-3 top-3 z-10 h-11 w-11 rounded-full text-slate-500 hover:text-slate-700"
+            >
+              <X className="h-5 w-5" />
+            </Button>
+
+            {resolvedUrls.length > 1 && openIndex !== null && (
+              <>
+                <div className="absolute right-16 top-5 z-10 rounded-full bg-white/90 px-3 py-1 text-sm font-medium text-slate-700 shadow-sm">
+                  {openIndex + 1}/{resolvedUrls.length}
+                </div>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  onClick={goPrev}
+                  disabled={!canGoPrev}
+                  aria-label="Предыдущее фото"
+                  className="absolute left-3 top-1/2 z-10 h-11 w-11 -translate-y-1/2 rounded-full text-slate-600 hover:text-slate-900"
+                >
+                  <ChevronLeft className="h-5 w-5" />
+                </Button>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  onClick={goNext}
+                  disabled={!canGoNext}
+                  aria-label="Следующее фото"
+                  className="absolute right-3 top-1/2 z-10 h-11 w-11 -translate-y-1/2 rounded-full text-slate-600 hover:text-slate-900"
+                >
+                  <ChevronRight className="h-5 w-5" />
+                </Button>
+              </>
+            )}
+
+            {openIndex !== null && resolvedUrls[openIndex] && (
+              <FullscreenImage src={resolvedUrls[openIndex]} index={openIndex} />
+            )}
+          </div>
         </DialogContent>
       </Dialog>
     </>
   );
-}
+});
+
+TaskConditionThumbnail.displayName = 'TaskConditionThumbnail';
+FullscreenImage.displayName = 'FullscreenImage';
+TaskConditionGallery.displayName = 'TaskConditionGallery';
 
 function toDeliveryStatus(value?: MessageDeliveryStatus): MessageDeliveryStatus {
   if (value === 'sending' || value === 'failed') return value;
@@ -1458,10 +1637,10 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
 
 
               <div className="mt-2">
-                <TaskConditionImage
+                <TaskConditionGallery
+                  key={currentTask.id}
                   assignmentId={assignment.id}
                   taskId={currentTask.id}
-                  taskOrder={currentTask.order_num}
                   taskImageUrl={currentTask.task_image_url}
                 />
               </div>

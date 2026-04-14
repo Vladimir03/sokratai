@@ -175,7 +175,7 @@ TASK-14 (QA) — после merge всех TASK-3..TASK-13.
 
 ---
 
-## TASK-10: TaskConditionGallery + fullscreen carousel
+## TASK-10: TaskConditionGallery + fullscreen carousel ✅ Done (2026-04-14)
 
 **Job:** S1-2
 **Agent:** Claude Code
@@ -192,7 +192,7 @@ TASK-14 (QA) — после merge всех TASK-3..TASK-13.
 
 ---
 
-## TASK-11: studentHomeworkApi — batch signed-URL resolver
+## TASK-11: studentHomeworkApi — batch signed-URL resolver ✅ Done (2026-04-14)
 
 **Job:** S1-2
 **Agent:** Claude Code

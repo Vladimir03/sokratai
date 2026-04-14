@@ -50,7 +50,7 @@
 
 Хранение — в уже существующем TEXT-поле `task_image_url` и новом TEXT-поле `rubric_image_urls`, через тот же dual-format паттерн (single storage ref ИЛИ JSON-массив refs), который уже работает в KB-модуле (`parseAttachmentUrls` / `serializeAttachmentUrls` в `src/lib/kbApi.ts`). Это означает **ноль миграций данных** для существующих ДЗ — старые строки со single-ref продолжают читаться как одноэлементный массив.
 
-Конструктор (`HWTaskCard.tsx`) получает галерею с превью, кнопкой «Добавить фото» (до лимита), drag-reorder, удалением. Student-side guided chat (`GuidedHomeworkWorkspace.tsx`) отрисовывает каждое фото отдельной миниатюрой в ряд с общим zoom-dialog (индекс + стрелки prev/next). Все 4 AI-пути (`answer`, `hint`, `question`, `bootstrap`) получают массив signed+inlined images вместо одного. KB-импорт больше не сплющивает `kb_attachment_url` JSON-массив в первое фото — сохраняет все до лимита.
+Конструктор (`HWTaskCard.tsx`) получает галерею с превью, кнопкой «Добавить фото» (до лимита), drag-reorder, удалением. Student-side guided chat (`GuidedHomeworkWorkspace.tsx`) отрисовывает каждое фото отдельной миниатюрой в ряд с общим zoom-dialog / fullscreen carousel (индекс + стрелки prev/next + swipe на mobile). Все 4 AI-пути (`answer`, `hint`, `question`, `bootstrap`) получают массив signed+inlined images вместо одного. KB-импорт больше не сплющивает `kb_attachment_url` JSON-массив в первое фото — сохраняет все до лимита.
 
 ---
 
@@ -152,7 +152,7 @@
 - `guided_ai.ts` — `taskImageUrls: string[]`, `Promise.all` inline, multimodal content array.
 - `chat/index.ts` — `taskImageUrls: string[]`, передача в Lovable multimodal.
 - `GuidedHomeworkWorkspace.tsx` — галерея в collapsible «Условие задачи», fullscreen carousel, swipe на mobile.
-- `studentHomeworkApi.ts` — select `task_image_url`, signed URL resolver для массива.
+- `studentHomeworkApi.ts` + `useStudentHomework.ts` — batch signed URL resolver и React Query hook для массива.
 - `TutorHomeworkDetail.tsx` — отображение массива фото задачи + секция «Критерии проверки» с фото рубрики (tutor-only).
 - `GuidedThreadViewer.tsx` — `TaskContextImage` расширить до массива (tutor смотрит ученический тред, должен видеть все фото задачи).
 
