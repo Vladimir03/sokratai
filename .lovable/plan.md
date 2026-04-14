@@ -1,46 +1,23 @@
 
 
-## Plan: Fix student-account edge function — email update error
+## Plan: Activate auth-email-hook for password reset emails
 
 ### Problem
-`supabaseAdmin.auth.admin.getUserByEmail()` does not exist in supabase-js v2. Logs confirm: `TypeError: supabaseAdmin.auth.admin.getUserByEmail is not a function`.
+The `auth-email-hook` edge function exists and is deployed, the email domain is verified, and the queue infrastructure is working — but the hook is **not activated** as Supabase Auth's send-email hook. Evidence:
+- No recovery events appear in `auth-email-hook` logs (only boot/shutdown)
+- No `recovery` entries in `email_send_log`
+- The signup confirmation email arrived with `[Test]` prefix — this is the default Supabase template, not our custom one
 
-### Changes
+The hook was deployed but the activation step (which connects it to Supabase Auth's email pipeline) was never completed.
 
-#### 1. Fix `supabase/functions/student-account/index.ts`
+### Fix
 
-Replace the broken `getUserByEmail` call (lines 71-77) with `listUsers` which is available in the SDK:
+1. **Re-scaffold auth email templates** — this triggers the activation workflow that registers `auth-email-hook` as Supabase Auth's send-email hook
+2. **Redeploy `auth-email-hook`** — ensures the latest code is live and completes the activation
+3. **Verify** — request a password reset and check that the recovery event appears in logs and `email_send_log`
 
-```typescript
-const { data: listData, error: listError } = await supabaseAdmin.auth.admin.listUsers({
-  page: 1,
-  perPage: 1,
-});
-```
+No code changes needed — just re-running the scaffold + deploy to trigger the activation pipeline.
 
-Actually, `listUsers` doesn't filter by email. The correct approach: skip the duplicate check entirely and let `updateUserById` handle it — Supabase Auth will return an error if the email is already taken by another user. This simplifies the code and eliminates the broken call.
-
-Remove lines 71-81 (the entire `getUserByEmail` block). The `updateUserById` call on line 83 will naturally fail with a descriptive error if the email is already in use.
-
-Also fix line 107: change password min length message from "4 символа" to "6 символов" and the check from `< 4` to `< 6`.
-
-#### 2. Redeploy `student-account`
-
-### Also: fix `get_students_contact_info` type mismatch (console error)
-
-The console logs show: `Returned type character varying(255) does not match expected type text in column 2`. The function returns `au.email` (which is `varchar(255)` in auth.users) but declares return type `text`. Fix with a migration:
-
-```sql
-CREATE OR REPLACE FUNCTION public.get_students_contact_info(student_ids uuid[])
-RETURNS TABLE(student_id uuid, login_email text, has_real_email boolean)
-LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, auth AS $$
-BEGIN
-  RETURN QUERY
-  SELECT au.id, au.email::text, (au.email IS NOT NULL AND au.email NOT LIKE '%@temp.sokratai.ru')
-  FROM auth.users au WHERE au.id = ANY(student_ids);
-END;
-$$;
-```
-
-Add `::text` cast to `au.email`.
+### Expected result
+After activation, both signup confirmation AND password reset emails will be sent through our custom branded templates via the email queue, arriving from `noreply@sokratai.ru`.
 
