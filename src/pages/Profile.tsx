@@ -421,6 +421,39 @@ const Profile = () => {
     }
   };
 
+  const handleUpdateTelegram = async () => {
+    const normalized = newTelegramUsername.replace(/^@/, "").trim();
+    if (!normalized) {
+      toast.error("Введите Telegram username");
+      return;
+    }
+    if (!/^[a-zA-Z0-9_]{5,32}$/.test(normalized)) {
+      toast.error("Неверный формат username (5-32 символа, только латиница, цифры и _)");
+      return;
+    }
+    setSavingTelegram(true);
+    try {
+      const { data, error } = await supabase.functions.invoke("student-account", {
+        body: { action: "update-telegram", telegram_username: normalized },
+      });
+      if (error) {
+        toast.error(getFunctionsErrorMessage(error, "Ошибка обновления Telegram"));
+        return;
+      }
+      if (data?.error) {
+        toast.error(data.error);
+        return;
+      }
+      setProfile((prev) => prev ? { ...prev, telegram_username: data.telegram_username } : prev);
+      setNewTelegramUsername("");
+      toast.success("Telegram username обновлён");
+    } catch (err) {
+      toast.error("Не удалось обновить Telegram username");
+    } finally {
+      setSavingTelegram(false);
+    }
+  };
+
   if (loading) {
     return (
       <AuthGuard>
