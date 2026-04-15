@@ -314,7 +314,7 @@ export async function getStudentAssignment(assignmentId: string): Promise<Studen
 
   const { data: assignment, error: assignmentError } = await supabase
     .from('homework_tutor_assignments')
-    .select('id, title, subject, exam_type, topic, description, deadline, status, disable_ai_bootstrap, created_at')
+    .select('id, title, subject, exam_type, topic, description, deadline, status, disable_ai_bootstrap, created_at, tutor_id')
     .eq('id', assignmentId)
     .single();
 
@@ -322,27 +322,57 @@ export async function getStudentAssignment(assignmentId: string): Promise<Studen
     throw new StudentHomeworkApiError(assignmentError?.message ?? 'Задание не найдено');
   }
 
-  const { data: tasks, error: tasksError } = await supabase
-    .from('homework_tutor_tasks')
-    .select('id, assignment_id, order_num, task_text, task_image_url, max_score, check_format')
-    .eq('assignment_id', assignmentId)
-    .order('order_num', { ascending: true });
+  const [{ data: tasks, error: tasksError }, { data: materials, error: materialsError }] =
+    await Promise.all([
+      supabase
+        .from('homework_tutor_tasks')
+        .select('id, assignment_id, order_num, task_text, task_image_url, max_score, check_format')
+        .eq('assignment_id', assignmentId)
+        .order('order_num', { ascending: true }),
+      supabase
+        .from('homework_tutor_materials')
+        .select('id, assignment_id, type, title, storage_ref, url, created_at')
+        .eq('assignment_id', assignmentId)
+        .order('created_at', { ascending: true }),
+    ]);
 
   if (tasksError) throw new StudentHomeworkApiError(tasksError.message);
-
-  const { data: materials, error: materialsError } = await supabase
-    .from('homework_tutor_materials')
-    .select('id, assignment_id, type, title, storage_ref, url, created_at')
-    .eq('assignment_id', assignmentId)
-    .order('created_at', { ascending: true });
-
   if (materialsError) throw new StudentHomeworkApiError(materialsError.message);
+
+  // Resolve student display name for AI system prompts.
+  // Priority: tutor_students.display_name → profiles.username (non-auto-generated) → null.
+  // Both queries are best-effort: RLS may deny tutor_students read; we catch gracefully.
+  let studentDisplayName: string | null = null;
+  try {
+    const tutorId = (assignment as any).tutor_id as string | undefined;
+    const [tsResult, profResult] = await Promise.all([
+      tutorId
+        ? supabase
+          .from('tutor_students')
+          .select('display_name')
+          .eq('tutor_id', tutorId)
+          .eq('student_id', studentId)
+          .maybeSingle()
+        : Promise.resolve({ data: null }),
+      supabase.from('profiles').select('username').eq('id', studentId).maybeSingle(),
+    ]);
+    const curated = (tsResult.data as any)?.display_name?.trim() ?? '';
+    const username = (profResult.data as any)?.username?.trim() ?? '';
+    if (curated) {
+      studentDisplayName = curated;
+    } else if (username && !/^(telegram_|user_)\d+$/i.test(username)) {
+      studentDisplayName = username;
+    }
+  } catch {
+    // Non-critical — AI will use neutral forms if name is unavailable
+  }
 
   const result = {
     ...(assignment as any),
     updated_at: (assignment as any).created_at,
     tasks: (tasks ?? []) as StudentHomeworkAssignmentDetails['tasks'],
     materials: (materials ?? []) as StudentHomeworkAssignmentDetails['materials'],
+    studentDisplayName,
   } as unknown as StudentHomeworkAssignmentDetails;
   return result;
 }

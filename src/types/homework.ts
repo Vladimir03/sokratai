@@ -101,6 +101,12 @@ export interface StudentHomeworkAssignmentDetails {
   updated_at: string;
   tasks: StudentHomeworkTask[];
   materials: StudentHomeworkMaterial[];
+  /**
+   * Resolved student display name for AI system prompts.
+   * Priority: tutor_students.display_name → profiles.username (non-auto-generated) → null.
+   * Null means AI uses neutral/generic forms.
+   */
+  studentDisplayName?: string | null;
 }
 
 // ─── Guided Homework Chat types ─────────────────────────────────────────────

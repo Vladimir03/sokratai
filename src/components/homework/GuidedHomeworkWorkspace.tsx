@@ -145,6 +145,19 @@ function buildTaskContext(
   return parts.filter(Boolean).join('\n');
 }
 
+function buildStudentNameGuidance(studentName: string | null | undefined): string {
+  const trimmed = typeof studentName === 'string' ? studentName.trim() : '';
+  if (!trimmed) return '';
+  return [
+    '',
+    `Имя ученика: ${trimmed}.`,
+    '- Обращайся по имени время от времени (не в каждом сообщении, чтобы не звучало навязчиво).',
+    '- Используй грамматически правильный род глаголов и прилагательных, исходя из имени',
+    '  (например, «ты подставила» для Юлия, «ты решил» для Николай).',
+    '- Если имя иностранное или нейтральное и пол неочевиден — используй нейтральные формы.',
+  ].join('\n');
+}
+
 function buildGuidedSystemPrompt(
   sendMode: SendMode,
   options?: {
@@ -152,10 +165,12 @@ function buildGuidedSystemPrompt(
     isBootstrap?: boolean;
     checkFormat?: 'short_answer' | 'detailed_solution';
     examType?: 'ege' | 'oge';
+    studentName?: string | null;
   },
 ): string {
   const hasStudentImage = Boolean(options?.hasStudentImage);
   const examTypeLabel = options?.examType === 'oge' ? 'ОГЭ' : 'ЕГЭ';
+  const studentNameGuidance = buildStudentNameGuidance(options?.studentName);
 
   const baseRules = [
     'Ты AI-ассистент внутри guided homework chat для одной текущей задачи.',
@@ -186,7 +201,7 @@ function buildGuidedSystemPrompt(
         `Мотивируй это подготовкой к ${examTypeLabel} — на экзамене за голый ответ без решения ставят 0.`,
       );
     }
-    return bootstrapRules.join('\n');
+    return bootstrapRules.join('\n') + studentNameGuidance;
   }
 
   const modeRules =
@@ -209,7 +224,7 @@ function buildGuidedSystemPrompt(
           'Если изображение не содержит решения по текущей задаче, явно сообщи об этом.',
         ];
 
-  return [...baseRules, ...modeRules].join('\n');
+  return [...baseRules, ...modeRules].join('\n') + studentNameGuidance;
 }
 
 function MaterialLink({
@@ -849,6 +864,7 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
         systemPrompt: buildGuidedSystemPrompt(sendMode, {
           hasStudentImage: resolvedStudentImageUrls.length > 0,
           examType,
+          studentName: assignment.studentDisplayName,
         }),
         taskContext: buildTaskContext(assignment, task, assignment.tasks.length, sendMode, {
           hasStudentImage: resolvedStudentImageUrls.length > 0,
@@ -1437,6 +1453,7 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
             isBootstrap: true,
             checkFormat: currentTask.check_format,
             examType,
+            studentName: assignment.studentDisplayName,
           }),
           taskContext: buildTaskContext(assignment, currentTask, assignment.tasks.length, 'bootstrap', {
             examType,
