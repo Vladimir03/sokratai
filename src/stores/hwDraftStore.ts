@@ -35,6 +35,7 @@ export const useHWDraftStore = create<HWDraftStore>()(
           source: task.owner_id ? 'my' : 'socrat',
           subtopic: subtopicName ?? '',
           topicName: topicName ?? '',
+          sourceLabel: task.source_label ?? null,
         };
 
         set((state) => ({ tasks: [...state.tasks, draftTask] }));

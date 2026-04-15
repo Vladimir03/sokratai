@@ -586,3 +586,4 @@ Phase 1 пивотится из homework-embedded preview в standalone public t
 - `HWTaskCard.tsx` — props: `onMoveUp`, `onMoveDown`, `isFirst`, `isLast`. Кнопки `ChevronUp`/`ChevronDown`
 - **Backend**: `hw_reorder_tasks(assignment_id, task_order_jsonb)` — PL/pgSQL, `SECURITY DEFINER`, атомарная транзакция
 - **Порядок операций в PUT /assignments/:id**: reorder RPC → field updates → insert → delete
+- **KB provenance sync (2026-04-15)**: `hw_reorder_tasks` также атомарно пересчитывает `homework_kb_tasks.sort_order` по pre-mutation snapshot, иначе после reorder `handleGetAssignment` отрисовывает `kb_source_label` / `kb_snapshot_solution` на чужой задаче (tutor-only surface, не student leak). Join остаётся `sort_order ↔ order_num - 1`; если добавляешь новый write-path на `homework_tutor_tasks.order_num` мимо RPC — синхронизируй `homework_kb_tasks.sort_order` вручную. Миграция: `20260415120000_hw_reorder_tasks_sync_kb.sql`

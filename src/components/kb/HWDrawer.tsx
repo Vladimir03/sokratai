@@ -79,6 +79,14 @@ const DraftTaskRow = memo(function DraftTaskRow({
             {task.subtopic ? (
               <span className="text-[11px] text-slate-400">{task.subtopic}</span>
             ) : null}
+            {task.sourceLabel ? (
+              <span
+                className="max-w-[180px] truncate text-[10px] text-slate-400"
+                title={task.sourceLabel}
+              >
+                {task.sourceLabel}
+              </span>
+            ) : null}
             {task.snapshotEdited ? (
               <span className="rounded-full bg-socrat-accent-light px-1.5 py-0.5 text-[9px] font-semibold text-socrat-accent">
                 изменено

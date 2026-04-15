@@ -2,7 +2,7 @@
 
 **Spec:** `docs/delivery/features/kb-hw-flow-polish/spec.md`
 **Дата:** 2026-04-15
-**Статус:** P0 implemented after review fixes; P1 remains pending.
+**Статус:** P0 implemented; P1 TASK-10 done (HWDrawer sourceLabel), TASK-7..9/11/12 remain pending. Post-review fix: provenance join sync in `hw_reorder_tasks` (2026-04-15, migration `20260415120000_hw_reorder_tasks_sync_kb.sql`).
 
 ---
 
@@ -20,7 +20,7 @@
 - TASK-7: backend extend `GET /assignments/:id` полями `kb_snapshot_solution`, `kb_snapshot_solution_image_refs`, `kb_source_label`
 - TASK-8: `DraftTask` type + `kbTaskToDraftTask` + edit-mode маппинг новых полей
 - TASK-9: `HWTaskCard` — read-only блок «Эталонное решение» в `RubricField` + `source_label` в шапке
-- TASK-10: `HWDrawer` карточка — `source_label` tutor-only badge
+- TASK-10: `HWDrawer` карточка — `source_label` tutor-only badge ✅
 - TASK-11: `TutorHomeworkCreate` — дефолт `disable_ai_bootstrap = true` в edit-mode + template-apply
 - TASK-12: P1 QA (student runtime не видит `kb_snapshot_solution`, response `getStudentAssignment` не содержит новых полей)
 

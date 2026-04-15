@@ -178,6 +178,7 @@ export interface HWDraftTask {
   source: 'socrat' | 'my';
   subtopic: string;
   topicName: string;
+  sourceLabel?: string | null;
 }
 
 /** Row from homework_kb_tasks table */

@@ -273,6 +273,18 @@ npm run lint && npm run build && npm run smoke-check
 5. KB задача с `solution` и `source_label` → в `HWTaskCard` видны в нужных местах, у ученика `StudentHomeworkTask` — нет ✅.
 6. Старое ДЗ в edit-mode → toggle AI-вступление OFF ✅.
 
+### Post-review fix (2026-04-15) — KB provenance join sync
+
+QA-ревью P1 нашло data-correctness баг: `handleGetAssignment` мапит KB-провенанс (`kb_source_label`, `kb_snapshot_solution`, `kb_snapshot_solution_image_refs`) через `homework_kb_tasks.sort_order ↔ homework_tutor_tasks.order_num - 1`. RPC `hw_reorder_tasks` меняла только `order_num`, поэтому после любого tutor-reorder провенанс отрисовывался на **чужой** задаче. Не student-isolation leak (всё tutor-only surface), но tutor видел неверный source/solution.
+
+**Фикс:** миграция `supabase/migrations/20260415120000_hw_reorder_tasks_sync_kb.sql` добавляет в `hw_reorder_tasks` pre-mutation snapshot `(task_id, old_order, new_order)` и Phase 3 — атомарный `UPDATE homework_kb_tasks SET sort_order = s.new_order - 1 WHERE sort_order = s.old_order - 1`. Схема не трогается. Write paths не трогаются. Edge function не трогается.
+
+**Must-fix перед merge в main** (из ревью, не покрытые кодом):
+1. Live browser verification S1..S5 (student `/student/homework/:id` network + guided chat).
+2. Supabase function_logs — проверить AI-промпт для hint/check не содержит `kb_snapshot_solution`.
+3. Role-based access — student JWT на `GET /assignments/:id` должен возвращать 403 (RLS/handler guard).
+4. T1 spec-clarification с PM: нужна ли отрисовка `source_label` + `solution` в `TutorHomeworkDetail` (сейчас только в Create/Drawer).
+
 ---
 
 ## 8. Risks & Open Questions
