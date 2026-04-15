@@ -46,6 +46,13 @@ export interface TutorStudent {
   id: string;
   tutor_id: string;
   student_id: string;
+  /**
+   * Tutor-curated display name for the student. Primary source for AI-prompt
+   * student name and tutor UI overrides. Nullable — falls back to
+   * profiles.username at read time (see resolveStudentDisplayName in
+   * supabase/functions/homework-api/index.ts).
+   */
+  display_name: string | null;
   target_score: number | null;
   start_score: number | null;
   current_score: number | null;
@@ -154,6 +161,11 @@ export interface UpdateTutorStudentProfileResponse {
 
 // Для обновления
 export interface UpdateTutorStudentInput {
+  /**
+   * Tutor-curated display name. Pass empty string / null to clear and fall
+   * back to profiles.username at read time.
+   */
+  display_name?: string | null;
   target_score?: number;
   current_score?: number;
   notes?: string;

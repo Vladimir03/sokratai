@@ -140,6 +140,14 @@ export interface EvaluateStudentAnswerParams {
   availableScore: number;
   maxScore: number;
   checkFormat?: "short_answer" | "detailed_solution";
+  /**
+   * Tutor-curated student display name. When present, AI is instructed to
+   * use it occasionally and apply grammatically correct gender forms based
+   * on the name. Null / empty → AI falls back to gender-neutral forms.
+   * Source: homework-api resolveStudentDisplayName (tutor_students.display_name
+   * → profiles.username, skipping auto-generated placeholders).
+   */
+  studentName?: string | null;
 }
 
 export interface GenerateHintParams {
@@ -154,6 +162,8 @@ export interface GenerateHintParams {
   conversationHistory: GuidedConversationHistoryMessage[];
   wrongAnswerCount: number;
   hintCount: number;
+  /** See EvaluateStudentAnswerParams.studentName */
+  studentName?: string | null;
 }
 
 // ─── Score computation ──────────────────────────────────────────────────────
@@ -771,6 +781,29 @@ function buildAiScoreGuidance(
   ].join("\n");
 }
 
+/**
+ * Student-name & gender guidance for AI prompts.
+ *
+ * Returns a short instruction block that tells the model the student's
+ * display name and asks it to use grammatically correct gender forms
+ * (Russian) based on the name (e.g. "ты подставила" for Юлия, "ты решил"
+ * for Николай). Returns empty string when no name is available — in that
+ * case the prompt stays unchanged and the model uses neutral forms.
+ *
+ * Called by buildCheckPrompt and buildHintPrompt.
+ */
+function buildStudentNameGuidance(studentName: string | null | undefined): string {
+  const trimmed = typeof studentName === "string" ? studentName.trim() : "";
+  if (!trimmed) return "";
+  return [
+    "",
+    `Имя ученика: ${trimmed}.`,
+    "- Обращайся по имени время от времени (не в каждом сообщении, чтобы не звучало навязчиво).",
+    "- Используй грамматически правильный род глаголов и прилагательных, исходя из имени (например, «ты подставила» / «ты молодец» для женских имён вроде Юлия, Анна; «ты подставил» / «ты молодец» для мужских имён вроде Николай, Иван).",
+    "- Если имя иностранное или нейтральное и пол неочевиден — используй нейтральные формы (например, «ты справился/справилась» или безличные конструкции).",
+  ].join("\n");
+}
+
 function isImageDescriptionRequest(text: string): boolean {
   return /(что\s+(?:ты\s+)?видишь|что\s+на|опиши|что\s+изображен|что\s+изображено).*(?:картинк|изображени|фото|скрин)/i.test(text);
 }
@@ -816,6 +849,7 @@ function buildCheckPrompt(params: EvaluateStudentAnswerParams): LovableMessage[]
   const graphGroundingGuidance = buildGraphGroundingGuidance(params.taskOcrText, hasTaskImage);
   const checkFormatGuidance = buildCheckFormatGuidance(params.checkFormat, params.studentAnswer);
   const aiScoreGuidance = buildAiScoreGuidance(params.checkFormat, params.maxScore);
+  const studentNameGuidance = buildStudentNameGuidance(params.studentName);
 
   const systemContent = [
     "Ты проверяешь ответ ученика на задачу по домашнему заданию.",
@@ -870,6 +904,7 @@ function buildCheckPrompt(params: EvaluateStudentAnswerParams): LovableMessage[]
     aiScoreGuidance,
     answerTypeGuidance,
     checkFormatGuidance,
+    studentNameGuidance,
   ].filter(Boolean).join("\n");
 
   const messages: LovableMessage[] = [
@@ -1004,6 +1039,7 @@ function buildHintPrompt(params: GenerateHintParams): LovableMessage[] {
     params.correctAnswer ? `Правильный ответ (НЕ раскрывай ученику!): ${clampPromptText(params.correctAnswer)}` : "",
     "",
     `Статистика: ${params.wrongAnswerCount} неверных попыток, ${params.hintCount} подсказок.`,
+    buildStudentNameGuidance(params.studentName),
     "",
     "Верни ТОЛЬКО валидный JSON без markdown-обёрток:",
     '{"hint":"..."}',

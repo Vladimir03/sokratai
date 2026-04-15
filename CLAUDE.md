@@ -215,6 +215,16 @@ For architecture overview see: docs/delivery/engineering/architecture/README.md
 - Канонический список (19 значений): `maths, physics, informatics, russian, literature, history, social, english, french, spanish, chemistry, biology, geography, other` + legacy `math, cs, rus, algebra, geometry`
 - Фикс: `supabase/migrations/20260414150000_unify_homework_subject_check.sql`
 
+### 8. Имя ученика в AI-промпте guided chat (2026-04-14)
+- `tutor_students.display_name` (TEXT NULL) — tutor-owned поле, primary source для имени ученика в AI-промпте. Fallback — `profiles.username`, если он не автогенеренный
+- Автогенеренные username-ы отфильтровываются regex `/^(telegram_|user_)\d+$/i` → AI работает с нейтральными формами
+- Helper `resolveStudentDisplayName(db, studentAssignmentId)` в `supabase/functions/homework-api/index.ts` резолвит цепочку: `tutor_students.display_name → profiles.username (non-auto) → null`
+- `buildStudentNameGuidance(studentName)` в `guided_ai.ts` добавляет секцию в системный промпт: имя + инструкция по роду (Gemini 2.5 сам определяет род по русскому имени)
+- Подключено в `handleCheckAnswer` и `handleRequestHint` — имя передаётся в `evaluateStudentAnswer` / `generateHint`
+- Frontend: `TutorStudentProfile.tsx` — поле «Как обращаться в AI-чате» (Input с placeholder «Например, Юля»)
+- Миграция: `supabase/migrations/20260414160000_add_tutor_students_display_name.sql`
+- **Не** менять `profiles.username` из кабинета репетитора — это самоидентификация ученика. Только `tutor_students.display_name`
+
 ## Известные хрупкие области
 
 1. **Chat.tsx** (2000+ строк) — очень сложный компонент

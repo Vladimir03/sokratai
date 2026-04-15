@@ -3485,6 +3485,75 @@ async function resolveTaskImageUrlsForAI(
   return resolvedUrls.filter((value): value is string => Boolean(value));
 }
 
+/**
+ * Resolve a tutor-curated display name for the student behind a given
+ * `homework_tutor_student_assignments.id`. Used to inject the student's
+ * name into AI prompts so the model uses the correct Russian gender form.
+ *
+ * Resolution order:
+ *   1. tutor_students.display_name (tutor-owned override for the student)
+ *   2. profiles.username (the login-visible display name)
+ *   3. null — when only an auto-generated placeholder like
+ *      "telegram_776836955" or "user_123" is available (AI should fall
+ *      back to gender-neutral forms instead of addressing the student by
+ *      a machine-generated id).
+ *
+ * All queries use the `SupabaseClient` passed in (service_role inside the
+ * edge function), so RLS is bypassed for the lookup.
+ */
+async function resolveStudentDisplayName(
+  db: SupabaseClient,
+  studentAssignmentId: string,
+): Promise<string | null> {
+  try {
+    const { data: sa } = await db
+      .from("homework_tutor_student_assignments")
+      .select("student_id, assignment_id")
+      .eq("id", studentAssignmentId)
+      .maybeSingle();
+    const studentId = sa?.student_id as string | undefined;
+    const assignmentId = sa?.assignment_id as string | undefined;
+    if (!studentId || !assignmentId) return null;
+
+    const { data: assn } = await db
+      .from("homework_tutor_assignments")
+      .select("tutor_id")
+      .eq("id", assignmentId)
+      .maybeSingle();
+    const tutorId = assn?.tutor_id as string | undefined;
+
+    // Primary: tutor-curated display name
+    if (tutorId) {
+      const { data: ts } = await db
+        .from("tutor_students")
+        .select("display_name")
+        .eq("tutor_id", tutorId)
+        .eq("student_id", studentId)
+        .maybeSingle();
+      const curated = typeof ts?.display_name === "string" ? ts.display_name.trim() : "";
+      if (curated) return curated;
+    }
+
+    // Fallback: profiles.username, unless it's an auto-generated placeholder
+    const { data: prof } = await db
+      .from("profiles")
+      .select("username")
+      .eq("id", studentId)
+      .maybeSingle();
+    const username = typeof prof?.username === "string" ? prof.username.trim() : "";
+    if (!username) return null;
+    if (/^(telegram_|user_)\d+$/i.test(username)) return null;
+    return username;
+  } catch (err) {
+    // Non-fatal: AI should still work without a name.
+    console.warn("resolve_student_display_name_failed", {
+      studentAssignmentId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return null;
+  }
+}
+
 async function ensureTaskOcrText(
   _db: SupabaseClient,
   task: { id: string; task_image_url: string | null; ocr_text?: string | null },
@@ -4702,8 +4771,9 @@ async function handleCheckAnswer(
     .update({ last_student_message_at: new Date().toISOString() })
     .eq("id", threadId);
 
-  // Resolve task/rubric images into AI-compatible data URLs and latest student image into signed URLs
-  const [taskImageUrls, rubricImageUrls, taskOcrText, studentImageUrls] = await Promise.all([
+  // Resolve task/rubric images into AI-compatible data URLs, latest student
+  // image into signed URLs, and tutor-curated student display name.
+  const [taskImageUrls, rubricImageUrls, taskOcrText, studentImageUrls, studentName] = await Promise.all([
     resolveTaskImageUrlsForAI(db, task.task_image_url),
     resolveTaskImageUrlsForAI(db, task.rubric_image_urls),
     ensureTaskOcrText(db, task, assignment.subject ?? "math"),
@@ -4715,6 +4785,7 @@ async function handleCheckAnswer(
       userId,
       studentAssignment.assignment_id,
     ),
+    resolveStudentDisplayName(db, studentAssignment.id),
   ]);
 
   // Call AI evaluation
@@ -4735,6 +4806,7 @@ async function handleCheckAnswer(
     availableScore: currentAvailableScore,
     maxScore: task.max_score ?? 1,
     checkFormat: task.check_format ?? undefined,
+    studentName,
   });
 
   // Safety guard: without correct_answer, only trust high-confidence CORRECT
@@ -5040,8 +5112,9 @@ async function handleRequestHint(
     .update({ last_student_message_at: new Date().toISOString() })
     .eq("id", threadId);
 
-  // Resolve task images into AI-compatible data URLs and latest student image into signed URLs
-  const [taskImageUrls, taskOcrText, studentImageUrls] = await Promise.all([
+  // Resolve task images into AI-compatible data URLs, latest student image
+  // into signed URLs, and tutor-curated student display name.
+  const [taskImageUrls, taskOcrText, studentImageUrls, studentName] = await Promise.all([
     resolveTaskImageUrlsForAI(db, task.task_image_url),
     ensureTaskOcrText(db, task, assignment?.subject ?? "math"),
     loadLatestStudentImageUrlsForTask(
@@ -5052,6 +5125,7 @@ async function handleRequestHint(
       userId,
       studentAssignment.assignment_id,
     ),
+    resolveStudentDisplayName(db, studentAssignment.id),
   ]);
 
   // Call AI for hint
@@ -5067,6 +5141,7 @@ async function handleRequestHint(
     conversationHistory: recentMessages ?? [],
     wrongAnswerCount: (activeState.wrong_answer_count as number) ?? 0,
     hintCount: (activeState.hint_count as number) ?? 0,
+    studentName,
   });
 
   // Save hint reply

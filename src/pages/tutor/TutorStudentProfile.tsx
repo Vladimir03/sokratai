@@ -122,6 +122,7 @@ function TutorStudentProfileContent() {
   const [editFormInitialized, setEditFormInitialized] = useState(false);
 
   const [editName, setEditName] = useState('');
+  const [editDisplayName, setEditDisplayName] = useState('');
   const [editTelegram, setEditTelegram] = useState('');
   const [editLearningGoalPreset, setEditLearningGoalPreset] = useState('');
   const [editLearningGoalOther, setEditLearningGoalOther] = useState('');
@@ -166,6 +167,7 @@ function TutorStudentProfileContent() {
     const isPreset = presetOptions.includes(learningGoal);
 
     setEditName(student.profiles?.username || '');
+    setEditDisplayName(student.display_name || '');
     setEditTelegram(student.profiles?.telegram_username || '');
     setEditLearningGoalPreset(isPreset ? learningGoal : learningGoal ? 'other' : '');
     setEditLearningGoalOther(isPreset ? '' : learningGoal);
@@ -304,6 +306,8 @@ function TutorStudentProfileContent() {
     const parsedEditRate = editHourlyRate ? parseInt(editHourlyRate, 10) * 100 : null;
     const finalEditRate = parsedEditRate !== null && !isNaN(parsedEditRate) ? parsedEditRate : null;
 
+    const normalizedDisplayName = editDisplayName.trim();
+
     setIsUpdatingStudent(true);
     try {
       await updateTutorStudentProfile({
@@ -320,6 +324,15 @@ function TutorStudentProfileContent() {
         hourly_rate_cents: finalEditRate,
         notes: normalizedNotes,
       });
+      // display_name живёт на tutor_students (tutor-owned override),
+      // поэтому пишется отдельно, прямо через updateTutorStudent (без
+      // edge function tutor-update-student, который трогает profiles).
+      const nextDisplayName = normalizedDisplayName || null;
+      if ((student?.display_name ?? null) !== nextDisplayName) {
+        await updateTutorStudent(tutorStudentId, {
+          display_name: nextDisplayName,
+        });
+      }
       applyTutorStudentPatchToCache(queryClient, {
         tutorStudentId,
         studentId: student?.student_id,
@@ -387,11 +400,13 @@ function TutorStudentProfileContent() {
     editSelectedGroupId,
     editParentContact,
     editNotes,
+    editDisplayName,
     miniGroupsEnabled,
     queryClient,
     refetchMemberships,
     refetchStudent,
     student?.student_id,
+    student?.display_name,
   ]);
   
   // Загрузка
@@ -837,6 +852,19 @@ function TutorStudentProfileContent() {
                       placeholder="Например, Лера"
                       required
                     />
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="editDisplayName">Как обращаться в AI-чате</Label>
+                    <Input
+                      id="editDisplayName"
+                      value={editDisplayName}
+                      onChange={(e) => setEditDisplayName(e.target.value)}
+                      placeholder="Например, Юля"
+                    />
+                    <p className="text-xs text-slate-500">
+                      Необязательно. Если указано, AI будет обращаться к ученику именно так и использовать правильный грамматический род. Если пусто — используется имя ученика слева.
+                    </p>
                   </div>
 
                   <div className="space-y-2">
