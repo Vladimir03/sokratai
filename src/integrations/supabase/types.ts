@@ -2616,6 +2616,7 @@ export type Database = {
         Row: {
           created_at: string | null
           current_score: number | null
+          display_name: string | null
           exam_type: string | null
           hourly_rate_cents: number | null
           id: string
@@ -2635,6 +2636,7 @@ export type Database = {
         Insert: {
           created_at?: string | null
           current_score?: number | null
+          display_name?: string | null
           exam_type?: string | null
           hourly_rate_cents?: number | null
           id?: string
@@ -2654,6 +2656,7 @@ export type Database = {
         Update: {
           created_at?: string | null
           current_score?: number | null
+          display_name?: string | null
           exam_type?: string | null
           hourly_rate_cents?: number | null
           id?: string
