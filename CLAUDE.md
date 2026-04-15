@@ -215,15 +215,38 @@ For architecture overview see: docs/delivery/engineering/architecture/README.md
 - Канонический список (19 значений): `maths, physics, informatics, russian, literature, history, social, english, french, spanish, chemistry, biology, geography, other` + legacy `math, cs, rus, algebra, geometry`
 - Фикс: `supabase/migrations/20260414150000_unify_homework_subject_check.sql`
 
-### 8. Имя ученика в AI-промпте guided chat (2026-04-14)
-- `tutor_students.display_name` (TEXT NULL) — tutor-owned поле, primary source для имени ученика в AI-промпте. Fallback — `profiles.username`, если он не автогенеренный
-- Автогенеренные username-ы отфильтровываются regex `/^(telegram_|user_)\d+$/i` → AI работает с нейтральными формами
-- Helper `resolveStudentDisplayName(db, studentAssignmentId)` в `supabase/functions/homework-api/index.ts` резолвит цепочку: `tutor_students.display_name → profiles.username (non-auto) → null`
-- `buildStudentNameGuidance(studentName)` в `guided_ai.ts` добавляет секцию в системный промпт: имя + инструкция по роду (Gemini 2.5 сам определяет род по русскому имени)
-- Подключено в `handleCheckAnswer` и `handleRequestHint` — имя передаётся в `evaluateStudentAnswer` / `generateHint`
-- Frontend: `TutorStudentProfile.tsx` — поле «Как обращаться в AI-чате» (Input с placeholder «Например, Юля»)
+### 8. Имя ученика в AI-промпте — все три пути (2026-04-14/15)
+
+Все три пути общения ученика с AI получают имя и используют правильный грамматический род.
+
+**Источники имени (приоритет):**
+- `tutor_students.display_name` — tutor-owned поле, primary source (ДЗ-пути)
+- `profiles.username` — fallback, если не автогенеренный
+- Автогенеренные username-ы отфильтровываются regex `/^(telegram_|user_)\d+$/i` → AI работает в нейтральной форме
+
+**Путь 1 — «Ответ к задаче» (ДЗ, edge function `homework-api`):**
+- `resolveStudentDisplayName(db, studentAssignmentId)` в `supabase/functions/homework-api/index.ts` резолвит: `tutor_students.display_name → profiles.username (non-auto) → null`
+- Подключено в `handleCheckAnswer` и `handleRequestHint` → `evaluateStudentAnswer` / `generateHint`
+- `buildStudentNameGuidance(studentName)` в `guided_ai.ts` добавляет секцию в системный промпт
+
+**Путь 2 — «Обсудить шаг с AI» и bootstrap (ДЗ, edge function `chat`):**
+- Системный промпт строится на фронтенде (`buildGuidedSystemPrompt` в `GuidedHomeworkWorkspace.tsx`)
+- `getStudentAssignment` в `studentHomeworkApi.ts` резолвит `studentDisplayName` (те же два источника параллельно)
+- Передаётся в `buildGuidedSystemPrompt(..., { studentName })` → в оба `streamChat` вызова
+
+**Путь 3 — обычный чат `/chat` (edge function `chat`):**
+- `Chat.tsx` при загрузке делает `useQuery ['user-profile-name']` → `profiles.username` (без tutor context)
+- Передаётся как `studentName` в тело запроса к `/functions/v1/chat`
+- `chat/index.ts` **добавляет** суффикс к `effectiveSystemPrompt` (не заменяет `SYSTEM_PROMPT`)
+
+**Frontend tutor UI:**
+- `TutorStudentProfile.tsx` — поле «Как обращаться в AI-чате» (Input, placeholder «Например, Юля»)
 - Миграция: `supabase/migrations/20260414160000_add_tutor_students_display_name.sql`
-- **Не** менять `profiles.username` из кабинета репетитора — это самоидентификация ученика. Только `tutor_students.display_name`
+
+**Инварианты:**
+- **Не** менять `profiles.username` из кабинета репетитора — это самоидентификация ученика
+- Пути 1/2 используют `tutor_students.display_name` первым; путь 3 — только `profiles.username` (нет tutor context)
+- Все пути возвращают `null` при автогенеренных именах → AI работает без имени, нейтрально
 
 ## Известные хрупкие области
 
