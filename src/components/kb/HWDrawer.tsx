@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { BookOpen, Image, Pencil, Plus, X } from 'lucide-react';
+import { memo, useMemo, useState } from 'react';
+import { BookOpen, Pencil, Plus, X } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
@@ -12,9 +12,178 @@ import {
 import { MathText } from '@/components/kb/ui/MathText';
 import { SourceBadge } from '@/components/kb/ui/SourceBadge';
 import { cn } from '@/lib/utils';
-import { parseAttachmentUrls } from '@/lib/kbApi';
+import {
+  MAX_TASK_IMAGES,
+  parseAttachmentUrls,
+  serializeAttachmentUrls,
+} from '@/lib/attachmentRefs';
+import { useKBImagesSignedUrls } from '@/hooks/useKBImagesSignedUrls';
 import { useHWDraftStore, useHWTaskCount } from '@/stores/hwDraftStore';
 import { supabase } from '@/lib/supabaseClient';
+import type { HWDraftTask } from '@/types/kb';
+
+interface DraftTaskRowProps {
+  task: HWDraftTask;
+  index: number;
+  isEditing: boolean;
+  editText: string;
+  editAnswer: string;
+  onEditTextChange: (value: string) => void;
+  onEditAnswerChange: (value: string) => void;
+  onStartEdit: () => void;
+  onCancelEdit: () => void;
+  onSaveEdit: () => void;
+  onRemove: () => void;
+}
+
+const DraftTaskRow = memo(function DraftTaskRow({
+  task,
+  index,
+  isEditing,
+  editText,
+  editAnswer,
+  onEditTextChange,
+  onEditAnswerChange,
+  onStartEdit,
+  onCancelEdit,
+  onSaveEdit,
+  onRemove,
+}: DraftTaskRowProps) {
+  const imageRefs = useMemo(
+    () => parseAttachmentUrls(task.attachmentSnapshot),
+    [task.attachmentSnapshot],
+  );
+  const firstRef = imageRefs[0] ?? null;
+  const refsForHook = useMemo(() => (firstRef ? [firstRef] : []), [firstRef]);
+  const { urls, isLoading } = useKBImagesSignedUrls(refsForHook);
+  const firstUrl = firstRef ? urls[firstRef] : undefined;
+  const extraCount = Math.max(0, imageRefs.length - 1);
+
+  return (
+    <div
+      className={cn(
+        'rounded-xl border bg-white p-3.5',
+        isEditing ? 'border-socrat-primary/40' : 'border-socrat-border',
+      )}
+    >
+      <div className="flex items-start gap-3">
+        {/* Number */}
+        <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-lg bg-socrat-primary-light text-xs font-bold text-socrat-primary">
+          {index + 1}
+        </div>
+
+        {/* Content */}
+        <div className="min-w-0 flex-1">
+          <div className="mb-1.5 flex flex-wrap items-center gap-1.5">
+            <SourceBadge source={task.source} />
+            {task.subtopic ? (
+              <span className="text-[11px] text-slate-400">{task.subtopic}</span>
+            ) : null}
+            {task.snapshotEdited ? (
+              <span className="rounded-full bg-socrat-accent-light px-1.5 py-0.5 text-[9px] font-semibold text-socrat-accent">
+                изменено
+              </span>
+            ) : null}
+          </div>
+
+          {!isEditing ? (
+            <>
+              <MathText
+                text={task.textSnapshot}
+                className="line-clamp-3 text-xs leading-relaxed text-slate-700"
+              />
+              {firstRef ? (
+                <div className="relative mt-2">
+                  {firstUrl ? (
+                    <img
+                      src={firstUrl}
+                      alt="Вложение к задаче"
+                      loading="lazy"
+                      className="w-full max-h-48 rounded-xl border border-gray-200 bg-gray-50 object-contain"
+                    />
+                  ) : isLoading ? (
+                    <div className="h-24 w-full animate-pulse rounded-xl border border-gray-200 bg-gray-100" />
+                  ) : null}
+                  {firstUrl && extraCount > 0 ? (
+                    <span className="absolute right-2 top-2 rounded-full bg-black/60 px-2 py-0.5 text-[10px] font-semibold text-white">
+                      +{extraCount} фото
+                    </span>
+                  ) : null}
+                </div>
+              ) : null}
+            </>
+          ) : (
+            <div className="mt-1 flex flex-col gap-2">
+              <div>
+                <label className="mb-1 block text-[11px] text-slate-500">
+                  Условие
+                </label>
+                <textarea
+                  value={editText}
+                  onChange={(e) => onEditTextChange(e.target.value)}
+                  rows={4}
+                  className="w-full resize-y rounded-lg border border-socrat-primary/30 px-2.5 py-2 text-base leading-relaxed text-slate-900 focus:border-socrat-primary focus:outline-none"
+                />
+              </div>
+              <div>
+                <label className="mb-1 block text-[11px] text-slate-500">
+                  Ответ
+                </label>
+                <input
+                  value={editAnswer}
+                  onChange={(e) => onEditAnswerChange(e.target.value)}
+                  className="w-full rounded-lg border border-socrat-border px-2.5 py-1.5 font-mono text-base text-slate-900 focus:border-socrat-primary focus:outline-none"
+                />
+              </div>
+              <div className="flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={onCancelEdit}
+                  className="rounded-md border border-socrat-border px-3 py-1.5 text-xs text-slate-500 transition-colors hover:bg-slate-50"
+                >
+                  Отмена
+                </button>
+                <button
+                  type="button"
+                  onClick={onSaveEdit}
+                  className="rounded-md bg-socrat-primary px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-socrat-primary-dark"
+                >
+                  Сохранить
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Actions */}
+        <div className="flex shrink-0 gap-1">
+          {!isEditing ? (
+            <button
+              type="button"
+              onClick={onStartEdit}
+              aria-label="Редактировать условие"
+              title="Редактировать условие"
+              className="rounded-md p-1 text-slate-400 transition-colors hover:text-socrat-primary"
+            >
+              <Pencil className="h-3.5 w-3.5" />
+            </button>
+          ) : null}
+          <button
+            type="button"
+            onClick={onRemove}
+            aria-label="Убрать из ДЗ"
+            title="Убрать из ДЗ"
+            className="rounded-md p-1 text-slate-400 transition-colors hover:text-red-500"
+          >
+            <X className="h-3.5 w-3.5" />
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+});
+
+DraftTaskRow.displayName = 'DraftTaskRow';
 
 export function HWDrawer({
   open,
@@ -76,14 +245,21 @@ export function HWDrawer({
       }
 
       // 1) Create homework_tutor_tasks so the student runtime can see these tasks
-      const tutorTasks = tasks.map((task, index) => ({
-        assignment_id: hw.id,
-        task_text: task.textSnapshot,
-        task_image_url: parseAttachmentUrls(task.attachmentSnapshot)[0] ?? null,
-        correct_answer: task.answerSnapshot ?? null,
-        solution_steps: task.solutionSnapshot ?? null,
-        order_num: index + 1,
-      }));
+      const tutorTasks = tasks.map((task, index) => {
+        const taskImageRefs = parseAttachmentUrls(task.attachmentSnapshot).slice(
+          0,
+          MAX_TASK_IMAGES,
+        );
+
+        return {
+          assignment_id: hw.id,
+          task_text: task.textSnapshot,
+          task_image_url: serializeAttachmentUrls(taskImageRefs),
+          correct_answer: task.answerSnapshot ?? null,
+          solution_steps: task.solutionSnapshot ?? null,
+          order_num: index + 1,
+        };
+      });
 
       const { error: tasksError } = await supabase
         .from('homework_tutor_tasks')
@@ -157,7 +333,7 @@ export function HWDrawer({
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent
         side="right"
-        className="flex w-[420px] max-w-[90vw] flex-col gap-0 bg-socrat-surface p-0 sm:max-w-[420px]"
+        className="flex w-[75vw] !max-w-none flex-col gap-0 bg-socrat-surface p-0 sm:max-w-none"
       >
         <SheetTitle className="sr-only">Домашнее задание</SheetTitle>
         <SheetDescription className="sr-only">
@@ -189,123 +365,22 @@ export function HWDrawer({
           ) : (
             <div className="flex flex-col gap-2.5">
               {tasks.map((task, index) => (
-                <div
+                <DraftTaskRow
                   key={task.taskId}
-                  className={cn(
-                    'rounded-xl border bg-white p-3.5',
-                    editingId === task.taskId
-                      ? 'border-socrat-primary/40'
-                      : 'border-socrat-border',
-                  )}
-                >
-                  <div className="flex items-start gap-3">
-                    {/* Number */}
-                    <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-lg bg-socrat-primary-light text-xs font-bold text-socrat-primary">
-                      {index + 1}
-                    </div>
-
-                    {/* Content */}
-                    <div className="min-w-0 flex-1">
-                      <div className="mb-1.5 flex flex-wrap items-center gap-1.5">
-                        <SourceBadge source={task.source} />
-                        {task.subtopic ? (
-                          <span className="text-[11px] text-slate-400">
-                            {task.subtopic}
-                          </span>
-                        ) : null}
-                        {task.attachmentSnapshot ? (() => {
-                          const imgCount = parseAttachmentUrls(task.attachmentSnapshot).length;
-                          return (
-                            <span className="inline-flex items-center gap-0.5">
-                              <Image className="h-3 w-3 text-slate-400" />
-                              {imgCount > 1 && (
-                                <span className="text-[10px] text-slate-400">{imgCount}</span>
-                              )}
-                            </span>
-                          );
-                        })() : null}
-                        {task.snapshotEdited ? (
-                          <span className="rounded-full bg-socrat-accent-light px-1.5 py-0.5 text-[9px] font-semibold text-socrat-accent">
-                            изменено
-                          </span>
-                        ) : null}
-                      </div>
-
-                      {editingId !== task.taskId ? (
-                        <MathText
-                          text={task.textSnapshot}
-                          className="line-clamp-2 text-xs leading-relaxed text-slate-700"
-                        />
-                      ) : (
-                        <div className="mt-1 flex flex-col gap-2">
-                          <div>
-                            <label className="mb-1 block text-[11px] text-slate-500">
-                              Условие
-                            </label>
-                            <textarea
-                              value={editText}
-                              onChange={(e) => setEditText(e.target.value)}
-                              rows={4}
-                              className="w-full resize-y rounded-lg border border-socrat-primary/30 px-2.5 py-2 text-base leading-relaxed text-slate-900 focus:border-socrat-primary focus:outline-none"
-                            />
-                          </div>
-                          <div>
-                            <label className="mb-1 block text-[11px] text-slate-500">
-                              Ответ
-                            </label>
-                            <input
-                              value={editAnswer}
-                              onChange={(e) => setEditAnswer(e.target.value)}
-                              className="w-full rounded-lg border border-socrat-border px-2.5 py-1.5 font-mono text-base text-slate-900 focus:border-socrat-primary focus:outline-none"
-                            />
-                          </div>
-                          <div className="flex justify-end gap-2">
-                            <button
-                              type="button"
-                              onClick={cancelEdit}
-                              className="rounded-md border border-socrat-border px-3 py-1.5 text-xs text-slate-500 transition-colors hover:bg-slate-50"
-                            >
-                              Отмена
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => saveEdit(task.taskId)}
-                              className="rounded-md bg-socrat-primary px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-socrat-primary-dark"
-                            >
-                              Сохранить
-                            </button>
-                          </div>
-                        </div>
-                      )}
-                    </div>
-
-                    {/* Actions */}
-                    <div className="flex shrink-0 gap-1">
-                      {editingId !== task.taskId ? (
-                        <button
-                          type="button"
-                          onClick={() =>
-                            startEdit(
-                              task.taskId,
-                              task.textSnapshot,
-                              task.answerSnapshot,
-                            )
-                          }
-                          className="rounded-md p-1 text-slate-400 transition-colors hover:text-socrat-primary"
-                        >
-                          <Pencil className="h-3.5 w-3.5" />
-                        </button>
-                      ) : null}
-                      <button
-                        type="button"
-                        onClick={() => removeTask(task.taskId)}
-                        className="rounded-md p-1 text-slate-400 transition-colors hover:text-red-500"
-                      >
-                        <X className="h-3.5 w-3.5" />
-                      </button>
-                    </div>
-                  </div>
-                </div>
+                  task={task}
+                  index={index}
+                  isEditing={editingId === task.taskId}
+                  editText={editText}
+                  editAnswer={editAnswer}
+                  onEditTextChange={setEditText}
+                  onEditAnswerChange={setEditAnswer}
+                  onStartEdit={() =>
+                    startEdit(task.taskId, task.textSnapshot, task.answerSnapshot)
+                  }
+                  onCancelEdit={cancelEdit}
+                  onSaveEdit={() => saveEdit(task.taskId)}
+                  onRemove={() => removeTask(task.taskId)}
+                />
               ))}
             </div>
           )}

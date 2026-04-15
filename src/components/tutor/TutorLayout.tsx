@@ -25,7 +25,6 @@ import {
 import { supabase } from '@/lib/supabaseClient';
 import { toast } from 'sonner';
 import { useNavigate } from 'react-router-dom';
-import { useHWTaskCount } from '@/stores/hwDraftStore';
 
 interface TutorLayoutProps {
   children: ReactNode;
@@ -64,7 +63,6 @@ const mobileMoreItems = [
 export function TutorLayout({ children }: TutorLayoutProps) {
   const location = useLocation();
   const navigate = useNavigate();
-  const hwTaskCount = useHWTaskCount();
   const [mobileMoreOpen, setMobileMoreOpen] = useState(false);
 
   useEffect(() => {
@@ -122,7 +120,6 @@ export function TutorLayout({ children }: TutorLayoutProps) {
           <nav className="hidden md:flex items-center gap-1">
             {desktopPrimaryItems.map(item => {
               const active = isActive(item.href);
-              const showHWBadge = item.href === '/tutor/homework' && hwTaskCount > 0;
               return (
                 <Link key={item.href} to={item.href}>
                   <Button
@@ -132,11 +129,6 @@ export function TutorLayout({ children }: TutorLayoutProps) {
                   >
                     <item.icon className="h-4 w-4" />
                     {item.label}
-                    {showHWBadge ? (
-                      <span className="ml-1 inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-socrat-primary px-1.5 text-[10px] font-bold text-white">
-                        {hwTaskCount}
-                      </span>
-                    ) : null}
                   </Button>
                 </Link>
               );
@@ -180,7 +172,6 @@ export function TutorLayout({ children }: TutorLayoutProps) {
         <div className="flex justify-around py-2">
           {mobilePrimaryItems.map(item => {
             const active = isActive(item.href);
-            const showHWBadge = item.href === '/tutor/homework' && hwTaskCount > 0;
             return (
               <Link
                 key={item.href}
@@ -192,11 +183,6 @@ export function TutorLayout({ children }: TutorLayoutProps) {
               >
                 <item.icon className="h-5 w-5" />
                 {item.label}
-                {showHWBadge ? (
-                  <span className="absolute -top-0.5 right-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-socrat-primary px-1 text-[9px] font-bold text-white">
-                    {hwTaskCount}
-                  </span>
-                ) : null}
               </Link>
             );
           })}

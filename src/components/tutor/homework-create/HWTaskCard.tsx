@@ -1,4 +1,4 @@
-import { memo, useState, useRef, useCallback, useEffect } from 'react';
+import { memo, useState, useRef, useCallback, useEffect, useMemo } from 'react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -18,6 +18,8 @@ import {
   uploadTutorHomeworkTaskImage,
   deleteTutorHomeworkTaskImage,
 } from '@/lib/tutorHomeworkApi';
+import { FullscreenImageCarousel } from '@/components/homework/shared/FullscreenImageCarousel';
+import { useKBImagesSignedUrls } from '@/hooks/useKBImagesSignedUrls';
 import {
   parseAttachmentUrls,
   serializeAttachmentUrls,
@@ -35,25 +37,41 @@ interface PhotoThumbnailProps {
   storageRef: string;
   /** Optional blob preview URL (set only for photos uploaded in current session) */
   previewUrl: string | null;
+  /** Optional signed URL for persisted KB/edit-mode photos. */
+  resolvedUrl?: string | null;
   index: number;
   onRemove: (index: number) => void;
+  onOpenZoom: (index: number) => void;
 }
 
 const PhotoThumbnail = memo(function PhotoThumbnail({
   storageRef: _storageRef,
   previewUrl,
+  resolvedUrl,
   index,
   onRemove,
+  onOpenZoom,
 }: PhotoThumbnailProps) {
+  const imageUrl = previewUrl ?? resolvedUrl ?? null;
+
   return (
     <div className="relative group">
-      {previewUrl ? (
-        <img
-          src={previewUrl}
-          alt={`Фото ${index + 1}`}
-          loading="lazy"
-          className="w-20 h-20 object-cover rounded-md border border-slate-200 bg-slate-50"
-        />
+      {imageUrl ? (
+        <button
+          type="button"
+          onClick={() => onOpenZoom(index)}
+          aria-label={`Увеличить фото ${index + 1}`}
+          title={`Увеличить фото ${index + 1}`}
+          style={{ touchAction: 'manipulation' }}
+          className="block rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2"
+        >
+          <img
+            src={imageUrl}
+            alt={`Фото ${index + 1}`}
+            loading="lazy"
+            className="w-20 h-20 object-cover rounded-md border border-slate-200 bg-slate-50"
+          />
+        </button>
       ) : (
         <div className="w-20 h-20 rounded-md border border-slate-200 bg-slate-50 flex items-center justify-center">
           <ImageIcon className="h-5 w-5 text-slate-400" aria-hidden="true" />
@@ -61,7 +79,10 @@ const PhotoThumbnail = memo(function PhotoThumbnail({
       )}
       <button
         type="button"
-        onClick={() => onRemove(index)}
+        onClick={(event) => {
+          event.stopPropagation();
+          onRemove(index);
+        }}
         aria-label={`Удалить фото ${index + 1}`}
         title={`Удалить фото ${index + 1}`}
         style={{ touchAction: 'manipulation' }}
@@ -124,8 +145,11 @@ interface PhotoGalleryProps {
   isUploading: boolean;
   /** Local blob preview URLs, keyed by storage ref. */
   previewUrls: Record<string, string>;
+  /** Signed URLs for persisted storage refs, keyed by storage ref. */
+  resolvedUrls: Record<string, string>;
   onAddFiles: (files: File[]) => void;
   onRemove: (index: number) => void;
+  onOpenZoom: (index: number) => void;
 }
 
 function PhotoGallery({
@@ -134,8 +158,10 @@ function PhotoGallery({
   refs,
   isUploading,
   previewUrls,
+  resolvedUrls,
   onAddFiles,
   onRemove,
+  onOpenZoom,
 }: PhotoGalleryProps) {
   const inputRef = useRef<HTMLInputElement>(null);
   const atLimit = refs.length >= max;
@@ -161,8 +187,10 @@ function PhotoGallery({
             key={ref}
             storageRef={ref}
             previewUrl={previewUrls[ref] ?? null}
+            resolvedUrl={resolvedUrls[ref] ?? null}
             index={index}
             onRemove={onRemove}
+            onOpenZoom={onOpenZoom}
           />
         ))}
         <AddPhotoButton
@@ -193,8 +221,10 @@ interface RubricFieldProps {
   rubricRefs: string[];
   isUploading: boolean;
   previewUrls: Record<string, string>;
+  resolvedUrls: Record<string, string>;
   onAddRubricFiles: (files: File[]) => void;
   onRemoveRubricPhoto: (index: number) => void;
+  onOpenRubricZoom: (index: number) => void;
 }
 
 function RubricField({
@@ -203,8 +233,10 @@ function RubricField({
   rubricRefs,
   isUploading,
   previewUrls,
+  resolvedUrls,
   onAddRubricFiles,
   onRemoveRubricPhoto,
+  onOpenRubricZoom,
 }: RubricFieldProps) {
   const [open, setOpen] = useState(Boolean(value) || rubricRefs.length > 0);
   return (
@@ -231,8 +263,10 @@ function RubricField({
             refs={rubricRefs}
             isUploading={isUploading}
             previewUrls={previewUrls}
+            resolvedUrls={resolvedUrls}
             onAddFiles={onAddRubricFiles}
             onRemove={onRemoveRubricPhoto}
+            onOpenZoom={onOpenRubricZoom}
           />
         </div>
       )}
@@ -268,14 +302,67 @@ export function HWTaskCard({
   isFirst,
   isLast,
 }: HWTaskCardProps) {
-  const taskRefs = parseAttachmentUrls(task.task_image_path);
-  const rubricRefs = parseAttachmentUrls(task.rubric_image_paths);
+  const taskRefs = useMemo(() => parseAttachmentUrls(task.task_image_path), [task.task_image_path]);
+  const rubricRefs = useMemo(() => parseAttachmentUrls(task.rubric_image_paths), [task.rubric_image_paths]);
 
   // Local blob preview URLs keyed by storage ref (only for this-session uploads).
-  // Edit-mode loads show ImageIcon placeholder — gallery signed-URL resolver is out of scope (P1).
   const [previewUrls, setPreviewUrls] = useState<Record<string, string>>({});
+  const [zoom, setZoom] = useState<{ gallery: 'task' | 'rubric'; index: number } | null>(null);
   // Ref mirrors created blob URLs so unmount cleanup sees the latest set (closure over [] would be stale).
   const blobUrlsRef = useRef<Set<string>>(new Set());
+  const { urls: resolvedTaskUrls } = useKBImagesSignedUrls(taskRefs, { enabled: taskRefs.length > 0 });
+  const { urls: resolvedRubricUrls } = useKBImagesSignedUrls(rubricRefs, { enabled: rubricRefs.length > 0 });
+  const taskZoomItems = useMemo(
+    () =>
+      taskRefs
+        .map((ref) => ({
+          ref,
+          url: previewUrls[ref] ?? resolvedTaskUrls[ref] ?? null,
+        }))
+        .filter((item): item is { ref: string; url: string } => Boolean(item.url)),
+    [previewUrls, resolvedTaskUrls, taskRefs],
+  );
+  const rubricZoomItems = useMemo(
+    () =>
+      rubricRefs
+        .map((ref) => ({
+          ref,
+          url: previewUrls[ref] ?? resolvedRubricUrls[ref] ?? null,
+        }))
+        .filter((item): item is { ref: string; url: string } => Boolean(item.url)),
+    [previewUrls, resolvedRubricUrls, rubricRefs],
+  );
+  const taskZoomImages = useMemo(
+    () => taskZoomItems.map((item) => item.url),
+    [taskZoomItems],
+  );
+  const rubricZoomImages = useMemo(
+    () => rubricZoomItems.map((item) => item.url),
+    [rubricZoomItems],
+  );
+  const zoomImages = zoom?.gallery === 'rubric' ? rubricZoomImages : taskZoomImages;
+
+  const openTaskZoom = useCallback(
+    (refIndex: number) => {
+      const ref = taskRefs[refIndex];
+      const imageIndex = taskZoomItems.findIndex((item) => item.ref === ref);
+      if (imageIndex >= 0) {
+        setZoom({ gallery: 'task', index: imageIndex });
+      }
+    },
+    [taskRefs, taskZoomItems],
+  );
+
+  const openRubricZoom = useCallback(
+    (refIndex: number) => {
+      const ref = rubricRefs[refIndex];
+      const imageIndex = rubricZoomItems.findIndex((item) => item.ref === ref);
+      if (imageIndex >= 0) {
+        setZoom({ gallery: 'rubric', index: imageIndex });
+      }
+    },
+    [rubricRefs, rubricZoomItems],
+  );
 
   useEffect(() => {
     const urls = blobUrlsRef.current;
@@ -290,7 +377,14 @@ export function HWTaskCard({
       files: File[],
       max: number,
       existingRefs: string[],
-    ): Promise<{ newRefs: string[]; newPreviews: Record<string, string>; anyFallback: boolean } | null> => {
+      onPreviewReady?: (tempRefs: string[], tempPreviews: Record<string, string>) => void,
+      onPreviewError?: (tempRefs: string[]) => void,
+    ): Promise<{
+      newRefs: string[];
+      newPreviews: Record<string, string>;
+      tempRefs: string[];
+      anyFallback: boolean;
+    } | null> => {
       const remaining = max - existingRefs.length;
       if (remaining <= 0) {
         toast.warning(`Можно прикрепить максимум ${max} фото`);
@@ -313,7 +407,13 @@ export function HWTaskCard({
       if (!validFiles.length) return null;
 
       const blobUrls = validFiles.map((f) => URL.createObjectURL(f));
+      const tempRefs = [...blobUrls];
+      const tempPreviews = tempRefs.reduce<Record<string, string>>((acc, ref, index) => {
+        acc[ref] = blobUrls[index];
+        return acc;
+      }, {});
       blobUrls.forEach((u) => blobUrlsRef.current.add(u));
+      onPreviewReady?.(tempRefs, tempPreviews);
       try {
         const results = await Promise.all(validFiles.map((f) => uploadTutorHomeworkTaskImage(f)));
         const newRefs = results.map((r) => r.storageRef);
@@ -322,12 +422,13 @@ export function HWTaskCard({
           newPreviews[ref] = blobUrls[i];
         });
         const anyFallback = results.some((r) => r.usedFallback);
-        return { newRefs, newPreviews, anyFallback };
+        return { newRefs, newPreviews, tempRefs, anyFallback };
       } catch (err) {
         blobUrls.forEach((u) => {
           revokeObjectUrl(u);
           blobUrlsRef.current.delete(u);
         });
+        onPreviewError?.(tempRefs);
         toast.error(
           `Ошибка загрузки: ${err instanceof Error ? err.message : 'неизвестная ошибка'}. Попробуйте ещё раз.`,
         );
@@ -345,13 +446,41 @@ export function HWTaskCard({
       }
       const currentRefs = parseAttachmentUrls(task.task_image_path);
       onUpdate({ ...task, uploading: true });
-      const result = await uploadFiles(files, MAX_TASK_IMAGES, currentRefs);
+      const result = await uploadFiles(
+        files,
+        MAX_TASK_IMAGES,
+        currentRefs,
+        (tempRefs, tempPreviews) => {
+          const optimisticRefs = [...currentRefs, ...tempRefs].slice(0, MAX_TASK_IMAGES);
+          setPreviewUrls((prev) => ({ ...prev, ...tempPreviews }));
+          onUpdate({
+            ...task,
+            task_image_path: serializeAttachmentUrls(optimisticRefs),
+            uploading: true,
+          });
+        },
+        (tempRefs) => {
+          setPreviewUrls((prev) => {
+            const next = { ...prev };
+            tempRefs.forEach((ref) => {
+              delete next[ref];
+            });
+            return next;
+          });
+        },
+      );
       if (!result) {
         onUpdate({ ...task, uploading: false });
         return;
       }
       const combined = [...currentRefs, ...result.newRefs].slice(0, MAX_TASK_IMAGES);
-      setPreviewUrls((prev) => ({ ...prev, ...result.newPreviews }));
+      setPreviewUrls((prev) => {
+        const next = { ...prev, ...result.newPreviews };
+        result.tempRefs.forEach((ref) => {
+          delete next[ref];
+        });
+        return next;
+      });
       onUpdate({
         ...task,
         task_image_path: serializeAttachmentUrls(combined),
@@ -377,13 +506,41 @@ export function HWTaskCard({
       }
       const currentRefs = parseAttachmentUrls(task.rubric_image_paths);
       onUpdate({ ...task, uploading: true });
-      const result = await uploadFiles(files, MAX_RUBRIC_IMAGES, currentRefs);
+      const result = await uploadFiles(
+        files,
+        MAX_RUBRIC_IMAGES,
+        currentRefs,
+        (tempRefs, tempPreviews) => {
+          const optimisticRefs = [...currentRefs, ...tempRefs].slice(0, MAX_RUBRIC_IMAGES);
+          setPreviewUrls((prev) => ({ ...prev, ...tempPreviews }));
+          onUpdate({
+            ...task,
+            rubric_image_paths: serializeAttachmentUrls(optimisticRefs),
+            uploading: true,
+          });
+        },
+        (tempRefs) => {
+          setPreviewUrls((prev) => {
+            const next = { ...prev };
+            tempRefs.forEach((ref) => {
+              delete next[ref];
+            });
+            return next;
+          });
+        },
+      );
       if (!result) {
         onUpdate({ ...task, uploading: false });
         return;
       }
       const combined = [...currentRefs, ...result.newRefs].slice(0, MAX_RUBRIC_IMAGES);
-      setPreviewUrls((prev) => ({ ...prev, ...result.newPreviews }));
+      setPreviewUrls((prev) => {
+        const next = { ...prev, ...result.newPreviews };
+        result.tempRefs.forEach((ref) => {
+          delete next[ref];
+        });
+        return next;
+      });
       onUpdate({
         ...task,
         rubric_image_paths: serializeAttachmentUrls(combined),
@@ -519,8 +676,10 @@ export function HWTaskCard({
           refs={taskRefs}
           isUploading={task.uploading}
           previewUrls={previewUrls}
+          resolvedUrls={resolvedTaskUrls}
           onAddFiles={addTaskPhotos}
           onRemove={removeTaskPhoto}
+          onOpenZoom={openTaskZoom}
         />
         <p className="text-xs text-muted-foreground">{IMAGE_REQUIREMENTS_HINT}</p>
 
@@ -583,8 +742,10 @@ export function HWTaskCard({
           rubricRefs={rubricRefs}
           isUploading={task.uploading}
           previewUrls={previewUrls}
+          resolvedUrls={resolvedRubricUrls}
           onAddRubricFiles={addRubricPhotos}
           onRemoveRubricPhoto={removeRubricPhoto}
+          onOpenRubricZoom={openRubricZoom}
         />
 
         <Button
@@ -596,6 +757,14 @@ export function HWTaskCard({
           <Dices className="h-4 w-4" />
           Вариации
         </Button>
+        <FullscreenImageCarousel
+          images={zoomImages}
+          openIndex={zoom?.index ?? null}
+          onClose={() => setZoom(null)}
+          onNavigate={(nextIndex) => setZoom((current) => (current ? { ...current, index: nextIndex } : current))}
+          ariaTitle={zoom?.gallery === 'rubric' ? 'Фото критериев' : 'Фото условия'}
+          ariaDescription="Просмотр изображений задачи во весь экран"
+        />
       </CardContent>
     </Card>
   );
