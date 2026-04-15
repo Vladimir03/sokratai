@@ -183,11 +183,10 @@ Deno.serve(async (req) => {
     // Step 1: Try to find existing user by email (priority) or telegram
     if (email) {
       const { data: listData } = await supabaseAdmin.auth.admin.listUsers({
-        filter: `email.eq.${email}`,
         page: 1,
-        perPage: 1,
+        perPage: 1000,
       });
-      const foundUser = listData?.users?.[0] ?? null;
+      const foundUser = listData?.users?.find((u: any) => u.email === email) ?? null;
 
       if (foundUser) {
         studentId = foundUser.id;
@@ -271,11 +270,10 @@ Deno.serve(async (req) => {
           console.log("Auth user already exists for email:", userEmail);
           // Retrieve by exact email lookup (race: user registered between our check and create)
           const { data: raceListData } = await supabaseAdmin.auth.admin.listUsers({
-            filter: `email.eq.${userEmail}`,
             page: 1,
-            perPage: 1,
+            perPage: 1000,
           });
-          const raceUser = raceListData?.users?.[0] ?? null;
+          const raceUser = raceListData?.users?.find((u: any) => u.email === userEmail) ?? null;
           if (raceUser) {
             studentId = raceUser.id;
             profileRegistrationSource = "manual";

@@ -1105,7 +1105,7 @@ async function processAIRequest(
 
   console.log("📷 taskImageUrls received:", Array.isArray(taskImageUrls) ? taskImageUrls.length : 0);
   taskPromptImageDataUrls = await resolveTaskImageUrlsForAI(
-    adminSupabase,
+    adminSupabase as any,
     (taskImageUrls ?? []).slice(0, MAX_TASK_IMAGES_FOR_AI),
   );
 
