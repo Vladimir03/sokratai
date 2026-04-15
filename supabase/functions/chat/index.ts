@@ -29,6 +29,12 @@ interface ChatRequestBody {
   responseProfile?: ResponseProfile;
   responseMode?: ResponseMode;
   maxChars?: number;
+  /**
+   * Student display name for AI system prompt gender/name guidance.
+   * Appended to effectiveSystemPrompt (does NOT replace SYSTEM_PROMPT).
+   * Filtered on the frontend: auto-generated names (telegram_*, user_*) are excluded.
+   */
+  studentName?: string;
 }
 
 // SECURITY: Allowed domains for image fetching to prevent SSRF attacks
@@ -889,8 +895,8 @@ serve(async (req) => {
       }
       
       userId = body.userId;
-      
-      const { messages, systemPrompt, taskContext, taskImageUrls, studentImageUrl, studentImageUrls, chatId } = body;
+
+      const { messages, systemPrompt, taskContext, taskImageUrls, studentImageUrl, studentImageUrls, chatId, studentName } = body;
       const responseProfile = normalizeResponseProfile(body.responseProfile);
       const responseMode = normalizeResponseMode(body.responseMode);
       const maxChars = normalizeMaxChars(body.maxChars);
@@ -924,6 +930,7 @@ serve(async (req) => {
         responseMode,
         maxChars,
         req,
+        studentName,
       );
     } else {
       const supabase = createClient(Deno.env.get("SUPABASE_URL") ?? "", Deno.env.get("SUPABASE_ANON_KEY") ?? "", {
@@ -945,7 +952,7 @@ serve(async (req) => {
       userId = user.id;
 
       const body = await req.json() as ChatRequestBody;
-      const { messages, systemPrompt, taskContext, taskImageUrls, studentImageUrl, studentImageUrls, chatId } = body;
+      const { messages, systemPrompt, taskContext, taskImageUrls, studentImageUrl, studentImageUrls, chatId, studentName } = body;
       const latestUserMessage = Array.isArray(messages)
         ? [...messages].reverse().find((message) => message?.role === "user")
         : null;
@@ -987,6 +994,7 @@ serve(async (req) => {
         responseMode,
         maxChars,
         req,
+        studentName,
       );
     }
   } catch (error) {
@@ -1011,6 +1019,7 @@ async function processAIRequest(
   responseMode: ResponseMode = "dialog",
   maxChars?: number,
   req?: Request,
+  studentName?: string,
 ) {
   const corsHeaders = {
     "Access-Control-Allow-Origin": "*",
@@ -1178,6 +1187,23 @@ async function processAIRequest(
 
   if (taskContext) {
     effectiveSystemPrompt = `${effectiveSystemPrompt}\n\n📋 КОНТЕКСТ ЗАДАЧИ:\n${taskContext}\n\nИспользуй ИМЕННО эту задачу в своих ответах. НЕ придумывай другие задачи!`;
+  }
+
+  // Append student name guidance — does NOT replace SYSTEM_PROMPT, only adds a suffix.
+  // Frontend sends non-null studentName only when profiles.username is a real name (not auto-generated).
+  if (studentName && typeof studentName === "string") {
+    const trimmedName = studentName.trim();
+    if (trimmedName && trimmedName.length <= 100) {
+      const nameGuidance = [
+        "",
+        `Имя ученика: ${trimmedName}.`,
+        "- Обращайся по имени время от времени (не в каждом сообщении, чтобы не звучало навязчиво).",
+        "- Используй правильный грамматический род глаголов и прилагательных, исходя из имени",
+        "  (например, «ты подставила» для Юлия, «ты решил» для Николай).",
+        "- Если имя иностранное или нейтральное и пол неочевиден — используй нейтральные формы.",
+      ].join("\n");
+      effectiveSystemPrompt = effectiveSystemPrompt + nameGuidance;
+    }
   }
 
   if (responseProfile === "telegram_compact") {

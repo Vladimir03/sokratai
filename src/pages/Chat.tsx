@@ -172,6 +172,25 @@ export default function Chat() {
     }
   });
 
+  // Resolve student display name for AI system prompt gender/name guidance.
+  // Uses profiles.username; auto-generated placeholders (telegram_*, user_*) are excluded → null.
+  const { data: studentDisplayName } = useQuery<string | null>({
+    queryKey: ['user-profile-name', user?.id],
+    queryFn: async () => {
+      if (!user?.id) return null;
+      const { data } = await supabase
+        .from('profiles')
+        .select('username')
+        .eq('id', user.id)
+        .maybeSingle();
+      const username = (data as any)?.username?.trim() ?? '';
+      if (!username || /^(telegram_|user_)\d+$/i.test(username)) return null;
+      return username;
+    },
+    enabled: Boolean(user?.id),
+    staleTime: 10 * 60 * 1000, // 10 min — name changes rarely
+  });
+
   // Subscription and message limits
   const subscription = useSubscription(user?.id);
 
@@ -935,7 +954,7 @@ export default function Chat() {
             "Content-Type": "application/json",
             Authorization: `Bearer ${session.access_token}`,
           },
-          body: JSON.stringify({ messages, taskContext, chatId }),
+          body: JSON.stringify({ messages, taskContext, chatId, studentName: studentDisplayName ?? undefined }),
           signal: controller.signal,
         });
 
