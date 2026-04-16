@@ -353,16 +353,16 @@ function TutorHomeworkCreateContent() {
   }, [isEditMode, existingAssignment]);
 
   // Store initial state snapshot for unsaved-changes comparison in edit mode
-  const editInitialSnapshotRef = useRef<{
+  const [editInitialSnapshot, setEditInitialSnapshot] = useState<{
     meta: MetaState;
     taskSignature: string;
     studentIds: string;
     materialSignature: string;
   } | null>(null);
   useEffect(() => {
-    if (!isEditMode || !existingAssignment || editInitialSnapshotRef.current) return;
+    if (!isEditMode || !existingAssignment || editInitialSnapshot) return;
     const a = existingAssignment.assignment;
-    editInitialSnapshotRef.current = {
+    setEditInitialSnapshot({
       meta: {
         title: a.title,
         subject: a.subject,
@@ -373,13 +373,13 @@ function TutorHomeworkCreateContent() {
       taskSignature: buildTaskSignature(existingAssignment.tasks),
       studentIds: existingAssignment.assigned_students.map((s) => s.student_id).sort().join(','),
       materialSignature: buildMaterialSignature(existingAssignment.materials),
-    };
-  }, [isEditMode, existingAssignment]);
+    });
+  }, [isEditMode, existingAssignment, editInitialSnapshot]);
 
   // Reset refs when editId changes (navigation between different edit pages)
   useEffect(() => {
     editPrefilledRef.current = false;
-    editInitialSnapshotRef.current = null;
+    setEditInitialSnapshot(null);
     deferredImageDeletesRef.current = [];
   }, [editId]);
 
@@ -394,7 +394,7 @@ function TutorHomeworkCreateContent() {
 
   const editDiffState = useMemo(() => {
     if (!isEditMode) return null;
-    const snap = editInitialSnapshotRef.current;
+    const snap = editInitialSnapshot;
     if (!snap) return null;
 
     const metaDirty =
@@ -436,7 +436,7 @@ function TutorHomeworkCreateContent() {
       removedExistingStudentIds,
       unsupportedStudentRemoval: removedExistingStudentIds.length > 0,
     };
-  }, [isEditMode, meta, tasks, materials, selectedStudentIds, editExistingStudentIds]);
+  }, [isEditMode, meta, tasks, materials, selectedStudentIds, editExistingStudentIds, editInitialSnapshot]);
 
   // ── Auto-load template from ?template_id query param ──
   const templateId = searchParams.get('template_id');
