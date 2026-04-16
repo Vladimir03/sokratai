@@ -69,6 +69,8 @@ function kbTaskToDraftTask(
       kb_snapshot_text: task.text,
       kb_snapshot_answer: task.answer ?? null,
       kb_snapshot_solution: task.solution ?? null,
+      kb_snapshot_solution_image_refs: task.solution_attachment_url ?? null,
+      kb_source_label: task.source_label ?? null,
       // Провенанс: сохраняем тот же dual-format snapshot, что и в task_image_path.
       kb_attachment_url: taskImagePath,
     },

@@ -2,7 +2,9 @@
 
 **Spec:** `docs/delivery/features/kb-hw-flow-polish/spec.md`
 **Дата:** 2026-04-15
-**Статус:** P0 implemented; P1 TASK-10 done (HWDrawer sourceLabel), TASK-7..9/11/12 remain pending. Post-review fix: provenance join sync in `hw_reorder_tasks` (2026-04-15, migration `20260415120000_hw_reorder_tasks_sync_kb.sql`).
+**Статус:** P0 implemented; P1 implemented. Post-review fixes shipped:
+- provenance join sync in `hw_reorder_tasks` (2026-04-15, migration `20260415120000_hw_reorder_tasks_sync_kb.sql`)
+- tutor edit-flow stabilization + targeted notify + KB provenance round-trip on edit (2026-04-16)
 
 ---
 
@@ -17,12 +19,20 @@
 - TASK-6: P0 smoke + manual QA (Chrome desktop, Safari iOS) automated partial ✅ / manual pending Lovable preview
 
 **P1 релиз** — 6 задач, 1–2 дня после P0:
-- TASK-7: backend extend `GET /assignments/:id` полями `kb_snapshot_solution`, `kb_snapshot_solution_image_refs`, `kb_source_label`
-- TASK-8: `DraftTask` type + `kbTaskToDraftTask` + edit-mode маппинг новых полей
-- TASK-9: `HWTaskCard` — read-only блок «Эталонное решение» в `RubricField` + `source_label` в шапке
+- TASK-7: backend extend `GET /assignments/:id` полями `kb_snapshot_solution`, `kb_snapshot_solution_image_refs`, `kb_source_label` + KB round-trip fields for edit sync (`kb_task_id`, `kb_snapshot_text`, `kb_snapshot_answer`, `kb_snapshot_edited`) ✅
+- TASK-8: `DraftTask` type + `kbTaskToDraftTask` + edit-mode маппинг новых полей ✅
+- TASK-9: `HWTaskCard` — read-only блок «Эталонное решение» в `RubricField` + `source_label` в шапке ✅
 - TASK-10: `HWDrawer` карточка — `source_label` tutor-only badge ✅
-- TASK-11: `TutorHomeworkCreate` — дефолт `disable_ai_bootstrap = true` в edit-mode + template-apply
-- TASK-12: P1 QA (student runtime не видит `kb_snapshot_solution`, response `getStudentAssignment` не содержит новых полей)
+- TASK-11: `TutorHomeworkCreate` — дефолт `disable_ai_bootstrap = true` в edit-mode + template-apply ✅
+- TASK-12: P1 QA (student runtime не видит `kb_snapshot_solution`, response `getStudentAssignment` не содержит новых полей) automated/targeted ✅; live manual remains pending
+
+**Post-P1 hardening (implemented 2026-04-16):**
+- edit-mode сохраняет только dirty sections (`metaDirty`, `tasksDirty`, `materialsDirty`, `newStudentsDirty`)
+- `PUT /assignments/:id` не получает `tasks`, если задачи не менялись
+- `POST /assignments/:id/notify` поддерживает optional `student_ids`
+- append-only edit-mode для уже назначенных учеников
+- `TASK_REORDER_FAILED` surfaced to UI + cleanup of temp inserted tasks
+- KB provenance survives edit-save and task reorder
 
 **Dependency graph:**
 - TASK-1 → standalone, ship первым

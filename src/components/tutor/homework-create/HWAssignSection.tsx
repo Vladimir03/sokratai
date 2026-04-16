@@ -72,6 +72,19 @@ export function HWAssignSection({
     isRecovering,
     failureCount,
   } = useTutorStudents();
+  const lockedStudentIds = existingStudentIds ?? new Set<string>();
+  const hasLockedStudents = lockedStudentIds.size > 0;
+  const preserveLockedSelection = useCallback(
+    (nextSelection: Set<string>) => {
+      if (!hasLockedStudents) return nextSelection;
+      const next = new Set(nextSelection);
+      for (const id of lockedStudentIds) {
+        next.add(id);
+      }
+      return next;
+    },
+    [hasLockedStudents, lockedStudentIds],
+  );
 
   const handleToggle = useCallback(
     (studentId: string) => {
@@ -81,18 +94,18 @@ export function HWAssignSection({
       } else {
         next.add(studentId);
       }
-      onChangeSelected(next);
+      onChangeSelected(preserveLockedSelection(next));
     },
-    [selectedIds, onChangeSelected],
+    [selectedIds, onChangeSelected, preserveLockedSelection],
   );
 
   const handleSelectAll = useCallback(() => {
-    onChangeSelected(new Set(students.map((s) => s.student_id)));
-  }, [students, onChangeSelected]);
+    onChangeSelected(preserveLockedSelection(new Set(students.map((s) => s.student_id))));
+  }, [students, onChangeSelected, preserveLockedSelection]);
 
   const handleDeselectAll = useCallback(() => {
-    onChangeSelected(new Set());
-  }, [onChangeSelected]);
+    onChangeSelected(preserveLockedSelection(new Set()));
+  }, [onChangeSelected, preserveLockedSelection]);
 
   const filteredStudents = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
@@ -167,7 +180,7 @@ export function HWAssignSection({
               Выбрать всех
             </Button>
             <Button variant="outline" size="sm" onClick={handleDeselectAll}>
-              Снять всех
+              {hasLockedStudents ? 'Снять новых' : 'Снять всех'}
             </Button>
           </div>
         </div>
@@ -264,6 +277,17 @@ export function HWAssignSection({
               );
             })}
           </div>
+        )}
+
+        {hasLockedStudents && (
+          <Card className="border-primary/20 bg-primary/5">
+            <CardContent className="pt-4 space-y-1">
+              <p className="text-sm font-medium">Уже назначенные ученики останутся в этом ДЗ</p>
+              <p className="text-xs text-muted-foreground">
+                В этой итерации можно только добавлять новых учеников. После сохранения им ДЗ отправится автоматически.
+              </p>
+            </CardContent>
+          </Card>
         )}
 
         <p className="text-xs text-muted-foreground">

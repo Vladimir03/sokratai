@@ -172,6 +172,8 @@ Update assignment metadata and/or replace tasks list.
 { "ok": true }
 ```
 
+If task reordering fails, API returns `500 TASK_REORDER_FAILED` so the tutor UI can show a specific retry message.
+
 ---
 
 ### 5. POST /assignments/:id/assign
@@ -219,12 +221,14 @@ Send Telegram notifications to assigned students who haven't been notified yet.
 **Request:**
 ```json
 {
-  "message_template": "Custom message text (optional)"
+  "message_template": "Custom message text (optional)",
+  "student_ids": ["uuid-1", "uuid-2"]
 }
 ```
 
 **Behavior:**
 - Only sends to students with `notified=false`.
+- If `student_ids` is provided, only those assigned students are considered for delivery.
 - Uses `TELEGRAM_BOT_TOKEN` to call Telegram Bot API directly.
 - Chat id resolution:
   - primary: `profiles.telegram_user_id`

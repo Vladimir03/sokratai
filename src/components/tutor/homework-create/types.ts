@@ -81,6 +81,11 @@ export interface DraftTask {
   kb_snapshot_text?: string;
   kb_snapshot_answer?: string | null;
   kb_snapshot_solution?: string | null;
+  kb_snapshot_edited?: boolean;
+  /** KB solution images. Dual-format storage refs; UI-only projection, not saved to homework_tutor_tasks. */
+  kb_snapshot_solution_image_refs?: string | null;
+  /** Tutor-only KB source label; UI-only projection, not saved to homework_tutor_tasks. */
+  kb_source_label?: string | null;
   /** Original KB attachment URL (storage:// or https://). Not usable as task_image_path directly. */
   kb_attachment_url?: string | null;
   check_format: 'short_answer' | 'detailed_solution';

@@ -29,6 +29,7 @@ import {
   type CreateAssignmentTask,
   type UpdateAssignmentTask,
   type HomeworkTemplateListItem,
+  HomeworkApiError,
 } from '@/lib/tutorHomeworkApi';
 import { getTutorInviteWebLink } from '@/utils/telegramLinks';
 import { supabase } from '@/lib/supabaseClient';
@@ -61,6 +62,127 @@ function toLocalDatetimeString(isoString: string): string {
   const d = parseISO(isoString);
   const pad = (n: number) => String(n).padStart(2, '0');
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+function buildTaskSignature(tasks: Array<{
+  id?: string | null;
+  order_num?: number | null;
+  task_text?: string | null;
+  task_image_url?: string | null;
+  task_image_path?: string | null;
+  correct_answer?: string | null;
+  rubric_text?: string | null;
+  rubric_image_urls?: string | null;
+  rubric_image_paths?: string | null;
+  max_score?: number | null;
+  check_format?: string | null;
+}>): string {
+  return JSON.stringify(
+    tasks.map((task, index) => ({
+      index,
+      id: task.id ?? null,
+      order_num: task.order_num ?? index + 1,
+      task_text: task.task_text ?? '',
+      task_image_url: task.task_image_url ?? task.task_image_path ?? null,
+      correct_answer: task.correct_answer ?? null,
+      rubric_text: task.rubric_text ?? null,
+      rubric_image_urls: task.rubric_image_urls ?? task.rubric_image_paths ?? null,
+      max_score: task.max_score ?? 1,
+      check_format: task.check_format ?? 'short_answer',
+    })),
+  );
+}
+
+function buildMaterialSignature(materials: Array<{
+  id?: string | null;
+  localId?: string | null;
+  type?: string | null;
+  title?: string | null;
+  url?: string | null;
+  file?: File | null;
+}>): string {
+  return JSON.stringify(
+    materials.map((material, index) => ({
+      index,
+      id: material.id ?? null,
+      localId: material.localId ?? null,
+      type: material.type ?? null,
+      title: material.title ?? '',
+      url: material.url ?? '',
+      file_name: material.file?.name ?? null,
+    })),
+  );
+}
+
+function hasKbLinkDraft(task: DraftTask): boolean {
+  return (
+    task.kb_task_id !== undefined ||
+    task.kb_snapshot_text !== undefined ||
+    task.kb_snapshot_answer !== undefined ||
+    task.kb_snapshot_solution !== undefined ||
+    task.kb_snapshot_edited !== undefined ||
+    task.kb_snapshot_solution_image_refs !== undefined ||
+    task.kb_source_label !== undefined
+  );
+}
+
+async function syncHomeworkKbLinks(
+  assignmentId: string,
+  draftTasks: DraftTask[],
+): Promise<void> {
+  const { error: deleteErr } = await supabase
+    .from('homework_kb_tasks')
+    .delete()
+    .eq('homework_id', assignmentId);
+
+  if (deleteErr) {
+    throw deleteErr;
+  }
+
+  const links = draftTasks
+    .map((task, index) => ({ task, index }))
+    .filter(({ task }) => hasKbLinkDraft(task))
+    .map(({ task, index }) => ({
+      homework_id: assignmentId,
+      task_id: task.kb_task_id ?? null,
+      sort_order: index,
+      task_text_snapshot: task.kb_snapshot_text ?? task.task_text,
+      task_answer_snapshot: task.kb_snapshot_answer ?? null,
+      task_solution_snapshot: task.kb_snapshot_solution ?? null,
+      snapshot_edited:
+        task.kb_snapshot_edited ??
+        (
+          task.task_text !== (task.kb_snapshot_text ?? '') ||
+          (task.correct_answer.trim() || null) !== (task.kb_snapshot_answer ?? null)
+        ),
+    }));
+
+  if (links.length === 0) return;
+
+  const { error: insertErr } = await supabase
+    .from('homework_kb_tasks')
+    .insert(links);
+
+  if (!insertErr) return;
+
+  if (insertErr.code !== '23503') {
+    throw insertErr;
+  }
+
+  for (const link of links) {
+    const { error: singleErr } = await supabase
+      .from('homework_kb_tasks')
+      .insert(link);
+
+    if (singleErr?.code === '23503') {
+      const { error: fallbackErr } = await supabase
+        .from('homework_kb_tasks')
+        .insert({ ...link, task_id: null });
+      if (fallbackErr) throw fallbackErr;
+    } else if (singleErr) {
+      throw singleErr;
+    }
+  }
 }
 
 // ─── Main Single-Page Constructor ───────────────────────────────────────────
@@ -123,22 +245,6 @@ function TutorHomeworkCreateContent() {
     tasksRef.current = tasks;
   }, [tasks]);
 
-  useEffect(() => {
-    if (assignMode !== 'group' || !selectedGroupId) return;
-
-    const memberTutorStudentIds = new Set(
-      memberships
-        .filter((m) => m.tutor_group_id === selectedGroupId && m.is_active)
-        .map((m) => m.tutor_student_id),
-    );
-
-    const mappedStudentIds = tutorStudents
-      .filter((s) => memberTutorStudentIds.has(s.id))
-      .map((s) => s.student_id);
-
-    setSelectedStudentIds(new Set(mappedStudentIds));
-  }, [assignMode, selectedGroupId, memberships, tutorStudents]);
-
   useEffect(
     () => () => {
       for (const task of tasksRef.current) {
@@ -156,6 +262,30 @@ function TutorHomeworkCreateContent() {
     staleTime: 30_000,
   });
   const existingAssignment = editQuery.data;
+  const editExistingStudentIds = useMemo(
+    () => new Set(existingAssignment?.assigned_students.map((s) => s.student_id) ?? []),
+    [existingAssignment],
+  );
+
+  useEffect(() => {
+    if (assignMode !== 'group' || !selectedGroupId) return;
+
+    const memberTutorStudentIds = new Set(
+      memberships
+        .filter((m) => m.tutor_group_id === selectedGroupId && m.is_active)
+        .map((m) => m.tutor_student_id),
+    );
+
+    const mappedStudentIds = tutorStudents
+      .filter((s) => memberTutorStudentIds.has(s.id))
+      .map((s) => s.student_id);
+
+    setSelectedStudentIds(
+      isEditMode
+        ? new Set([...editExistingStudentIds, ...mappedStudentIds])
+        : new Set(mappedStudentIds),
+    );
+  }, [assignMode, selectedGroupId, memberships, tutorStudents, isEditMode, editExistingStudentIds]);
 
   // Track whether we already prefilled to avoid re-running on refetch
   const editPrefilledRef = useRef(false);
@@ -168,7 +298,7 @@ function TutorHomeworkCreateContent() {
       title: a.title,
       subject: a.subject,
       deadline: a.deadline ? toLocalDatetimeString(a.deadline) : '',
-      disable_ai_bootstrap: a.disable_ai_bootstrap ?? false,
+      disable_ai_bootstrap: a.disable_ai_bootstrap ?? true,
       exam_type: (a.exam_type as 'ege' | 'oge') ?? 'ege',
     });
 
@@ -182,8 +312,16 @@ function TutorHomeworkCreateContent() {
         task_image_path: t.task_image_url,
         correct_answer: t.correct_answer ?? '',
         rubric_text: t.rubric_text ?? '',
+        rubric_image_paths: t.rubric_image_urls ?? null,
         max_score: t.max_score,
         check_format: t.check_format ?? 'short_answer',
+        kb_task_id: t.kb_task_id ?? undefined,
+        kb_snapshot_text: t.kb_snapshot_text ?? undefined,
+        kb_snapshot_answer: t.kb_snapshot_answer ?? undefined,
+        kb_snapshot_solution: t.kb_snapshot_solution ?? undefined,
+        kb_snapshot_edited: t.kb_snapshot_edited ?? undefined,
+        kb_snapshot_solution_image_refs: t.kb_snapshot_solution_image_refs ?? undefined,
+        kb_source_label: t.kb_source_label ?? undefined,
       }));
 
     setTasks(newTasks);
@@ -215,7 +353,12 @@ function TutorHomeworkCreateContent() {
   }, [isEditMode, existingAssignment]);
 
   // Store initial state snapshot for unsaved-changes comparison in edit mode
-  const editInitialSnapshotRef = useRef<{ meta: MetaState; taskTexts: string; studentIds: string; materialIds: string } | null>(null);
+  const editInitialSnapshotRef = useRef<{
+    meta: MetaState;
+    taskSignature: string;
+    studentIds: string;
+    materialSignature: string;
+  } | null>(null);
   useEffect(() => {
     if (!isEditMode || !existingAssignment || editInitialSnapshotRef.current) return;
     const a = existingAssignment.assignment;
@@ -224,12 +367,12 @@ function TutorHomeworkCreateContent() {
         title: a.title,
         subject: a.subject,
         deadline: a.deadline ? toLocalDatetimeString(a.deadline) : '',
-        disable_ai_bootstrap: a.disable_ai_bootstrap ?? false,
+        disable_ai_bootstrap: a.disable_ai_bootstrap ?? true,
         exam_type: (a.exam_type as 'ege' | 'oge') ?? 'ege',
       },
-      taskTexts: existingAssignment.tasks.map((t) => `${t.id}|${t.task_text}|${t.correct_answer ?? ''}|${t.rubric_text ?? ''}|${t.task_image_url ?? ''}|${t.max_score}`).join(';;'),
+      taskSignature: buildTaskSignature(existingAssignment.tasks),
       studentIds: existingAssignment.assigned_students.map((s) => s.student_id).sort().join(','),
-      materialIds: existingAssignment.materials.map((m) => m.id).sort().join(','),
+      materialSignature: buildMaterialSignature(existingAssignment.materials),
     };
   }, [isEditMode, existingAssignment]);
 
@@ -249,11 +392,51 @@ function TutorHomeworkCreateContent() {
     existingAssignment?.submissions_summary?.has_interactions === true
     || (existingAssignment?.submissions_summary?.total ?? 0) > 0;
 
-  // Set of student IDs already assigned — used to lock checkboxes in edit mode
-  const editExistingStudentIds = useMemo(
-    () => new Set(existingAssignment?.assigned_students.map((s) => s.student_id) ?? []),
-    [existingAssignment],
-  );
+  const editDiffState = useMemo(() => {
+    if (!isEditMode) return null;
+    const snap = editInitialSnapshotRef.current;
+    if (!snap) return null;
+
+    const metaDirty =
+      meta.title !== snap.meta.title ||
+      meta.subject !== snap.meta.subject ||
+      meta.deadline !== snap.meta.deadline ||
+      (meta.disable_ai_bootstrap ?? true) !== (snap.meta.disable_ai_bootstrap ?? true) ||
+      (meta.exam_type ?? 'ege') !== (snap.meta.exam_type ?? 'ege');
+
+    const tasksDirty = buildTaskSignature(
+      tasks.map((task, index) => ({
+        id: task.id ?? null,
+        order_num: index + 1,
+        task_text: task.task_text,
+        task_image_path: task.task_image_path,
+        correct_answer: task.correct_answer,
+        rubric_text: task.rubric_text,
+        rubric_image_paths: task.rubric_image_paths,
+        max_score: task.max_score,
+        check_format: task.check_format,
+      })),
+    ) !== snap.taskSignature;
+
+    const materialsDirty = buildMaterialSignature(materials) !== snap.materialSignature;
+
+    const newStudentIds = [...selectedStudentIds]
+      .filter((id) => !editExistingStudentIds.has(id))
+      .sort();
+    const removedExistingStudentIds = [...editExistingStudentIds]
+      .filter((id) => !selectedStudentIds.has(id))
+      .sort();
+
+    return {
+      metaDirty,
+      tasksDirty,
+      materialsDirty,
+      newStudentIds,
+      newStudentsDirty: newStudentIds.length > 0,
+      removedExistingStudentIds,
+      unsupportedStudentRemoval: removedExistingStudentIds.length > 0,
+    };
+  }, [isEditMode, meta, tasks, materials, selectedStudentIds, editExistingStudentIds]);
 
   // ── Auto-load template from ?template_id query param ──
   const templateId = searchParams.get('template_id');
@@ -324,21 +507,14 @@ function TutorHomeworkCreateContent() {
 
     // Edit mode: compare against initial snapshot
     if (isEditMode) {
-      const snap = editInitialSnapshotRef.current;
-      if (!snap) return false; // not yet loaded
-      const metaDirty =
-        meta.title !== snap.meta.title ||
-        meta.subject !== snap.meta.subject ||
-        meta.deadline !== snap.meta.deadline ||
-        (meta.disable_ai_bootstrap ?? false) !== (snap.meta.disable_ai_bootstrap ?? false) ||
-        (meta.exam_type ?? 'ege') !== (snap.meta.exam_type ?? 'ege');
-      const currentTaskTexts = tasks.map((t) => `${t.id ?? ''}|${t.task_text}|${t.correct_answer}|${t.rubric_text}|${t.task_image_path ?? ''}|${t.max_score}`).join(';;');
-      const tasksDirty = currentTaskTexts !== snap.taskTexts;
-      const currentStudentIds = [...selectedStudentIds].sort().join(',');
-      const studentsDirty = currentStudentIds !== snap.studentIds;
-      const currentMaterialIds = materials.map((m) => m.id ?? m.localId).sort().join(',');
-      const materialsDirty = currentMaterialIds !== snap.materialIds;
-      return metaDirty || tasksDirty || studentsDirty || materialsDirty;
+      if (!editDiffState) return false; // not yet loaded
+      return (
+        editDiffState.metaDirty ||
+        editDiffState.tasksDirty ||
+        editDiffState.materialsDirty ||
+        editDiffState.newStudentsDirty ||
+        editDiffState.unsupportedStudentRemoval
+      );
     }
 
     // Create mode: compare against defaults
@@ -364,7 +540,7 @@ function TutorHomeworkCreateContent() {
       notifyTemplate.trim().length > 0;
 
     return metaDirty || tasksDirty || assignDirty;
-  }, [meta, tasks, selectedStudentIds, notifyEnabled, notifyTemplate, submitPhase, isEditMode, materials]);
+  }, [meta, tasks, selectedStudentIds, notifyEnabled, notifyTemplate, submitPhase, isEditMode, materials, editDiffState]);
 
   useEffect(() => {
     if (!hasUnsavedChanges) return;
@@ -483,7 +659,7 @@ function TutorHomeworkCreateContent() {
             : null,
           tasks: apiTasks,
           group_id: assignMode === 'group' && selectedGroupId ? selectedGroupId : null,
-          disable_ai_bootstrap: meta.disable_ai_bootstrap ?? false,
+          disable_ai_bootstrap: meta.disable_ai_bootstrap ?? true,
           exam_type: meta.exam_type ?? 'ege',
         });
         assignmentId = result.assignment_id;
@@ -514,43 +690,9 @@ function TutorHomeworkCreateContent() {
       }
 
       // Phase 1.7: link KB tasks (non-blocking)
-      const kbLinkedTasks = tasks.filter((t) => t.kb_task_id);
-      if (kbLinkedTasks.length > 0 && assignmentId) {
+      if (assignmentId) {
         try {
-          const links = kbLinkedTasks.map((t) => ({
-            homework_id: assignmentId!,
-            task_id: t.kb_task_id!,
-            sort_order: tasks.indexOf(t),
-            task_text_snapshot: t.task_text,
-            task_answer_snapshot: t.correct_answer.trim() || null,
-            task_solution_snapshot: t.kb_snapshot_solution ?? null,
-            snapshot_edited:
-              t.task_text !== (t.kb_snapshot_text ?? '') ||
-              (t.correct_answer.trim() || null) !== (t.kb_snapshot_answer ?? null),
-          }));
-          const { error: kbErr } = await supabase
-            .from('homework_kb_tasks')
-            .insert(links);
-          if (kbErr) {
-            if (kbErr.code === '23503') {
-              for (const link of links) {
-                const { error: singleErr } = await supabase
-                  .from('homework_kb_tasks')
-                  .insert(link);
-                if (singleErr?.code === '23503') {
-                  await supabase
-                    .from('homework_kb_tasks')
-                    .insert({ ...link, task_id: null });
-                } else if (singleErr) {
-                  console.warn('homework_kb_tasks per-link insert failed', singleErr);
-                  toast.warning('Связь с базой знаний не сохранена');
-                }
-              }
-            } else {
-              console.warn('homework_kb_tasks insert failed', kbErr);
-              toast.warning('Связь с базой знаний не сохранена');
-            }
-          }
+          await syncHomeworkKbLinks(assignmentId, tasks);
         } catch (kbLinkErr) {
           console.warn('homework_kb_tasks linking error', kbLinkErr);
           toast.warning('Связь с базой знаний не сохранена');
@@ -577,7 +719,7 @@ function TutorHomeworkCreateContent() {
         try {
           notifyResult = await notifyTutorHomeworkStudents(
             assignmentId,
-            notifyTemplate.trim() || undefined,
+            { messageTemplate: notifyTemplate.trim() || undefined },
           );
         } catch (notifyErr) {
           console.warn('homework_notify_error', notifyErr);
@@ -686,36 +828,87 @@ function TutorHomeworkCreateContent() {
 
   const handleEditSubmit = useCallback(async () => {
     if (!editId || !validateAll()) return;
+    if (!existingAssignment) {
+      toast.error('ДЗ ещё загружается. Попробуйте сохранить через пару секунд.');
+      return;
+    }
+    if (!editDiffState) {
+      toast.error('Не удалось определить изменения. Обновите страницу и попробуйте ещё раз.');
+      return;
+    }
+    if (editDiffState.unsupportedStudentRemoval) {
+      toast.error('В этой версии нельзя снимать уже назначенных учеников с существующего ДЗ.');
+      return;
+    }
+    if (
+      !editDiffState.metaDirty &&
+      !editDiffState.tasksDirty &&
+      !editDiffState.materialsDirty &&
+      !editDiffState.newStudentsDirty
+    ) {
+      toast.info('Нет изменений для сохранения.');
+      return;
+    }
 
     const resolvedTitle = meta.title.trim();
 
     try {
-      setSubmitPhase('saving');
+      let notifyResult: {
+        sent: number;
+        failed: number;
+        failed_student_ids: string[];
+        failed_by_reason?: Record<string, string>;
+      } | null = null;
+      let notifyRequestFailed = false;
 
-      // Build tasks array for PUT (backend handles diff via id presence)
-      const apiTasks: UpdateAssignmentTask[] = tasks.map((t, i) => ({
-        ...(t.id ? { id: t.id } : {}),
-        order_num: i + 1,
-        task_text: t.task_text.trim() || '[Задача на фото]',
-        task_image_url: t.task_image_path ?? null,
-        correct_answer: t.correct_answer.trim() || null,
-        rubric_text: t.rubric_text.trim() || null,
-        rubric_image_urls: t.rubric_image_paths ?? null,
-        max_score: t.max_score,
-        check_format: t.check_format,
-      }));
+      if (editDiffState.metaDirty || editDiffState.tasksDirty) {
+        setSubmitPhase('saving');
+        const patch: {
+          title?: string;
+          subject?: string;
+          deadline?: string | null;
+          disable_ai_bootstrap?: boolean;
+          exam_type?: 'ege' | 'oge';
+          tasks?: UpdateAssignmentTask[];
+        } = {};
 
-      await updateTutorHomeworkAssignment(editId, {
-        title: resolvedTitle,
-        subject: meta.subject as HomeworkSubject,
-        deadline: meta.deadline ? parseISO(meta.deadline).toISOString() : null,
-        disable_ai_bootstrap: meta.disable_ai_bootstrap ?? false,
-        exam_type: meta.exam_type ?? 'ege',
-        tasks: apiTasks,
-      });
+        if (editDiffState.metaDirty) {
+          patch.title = resolvedTitle;
+          patch.subject = meta.subject as HomeworkSubject;
+          patch.deadline = meta.deadline ? parseISO(meta.deadline).toISOString() : null;
+          patch.disable_ai_bootstrap = meta.disable_ai_bootstrap ?? true;
+          patch.exam_type = meta.exam_type ?? 'ege';
+        }
+
+        if (editDiffState.tasksDirty) {
+          patch.tasks = tasks.map((t, i) => ({
+            ...(t.id ? { id: t.id } : {}),
+            order_num: i + 1,
+            task_text: t.task_text.trim() || '[Задача на фото]',
+            task_image_url: t.task_image_path ?? null,
+            correct_answer: t.correct_answer.trim() || null,
+            rubric_text: t.rubric_text.trim() || null,
+            rubric_image_urls: t.rubric_image_paths ?? null,
+            max_score: t.max_score,
+            check_format: t.check_format,
+          }));
+        }
+
+        await updateTutorHomeworkAssignment(editId, patch);
+      }
+
+      if (editDiffState.tasksDirty && !hasSubmissions) {
+        try {
+          await syncHomeworkKbLinks(editId, tasks);
+        } catch (kbLinkErr) {
+          console.warn('homework_kb_tasks edit sync failed', kbLinkErr);
+          toast.warning('Связь с базой знаний обновилась не полностью.');
+        }
+      }
 
       // Material diff: add new, delete removed
-      if (existingAssignment) {
+      if (editDiffState.materialsDirty) {
+        setSubmitPhase('saving');
         const existingMaterialIds = new Set(existingAssignment.materials.map((m) => m.id));
         const currentMaterialIds = new Set(materials.filter((m) => m.id).map((m) => m.id!));
 
@@ -750,12 +943,20 @@ function TutorHomeworkCreateContent() {
             toast.warning(`Не удалось добавить материал «${mat.title}»`);
           }
         }
+      }
 
-        // Add new students (append-only)
-        const existingStudentIds = new Set(existingAssignment.assigned_students.map((s) => s.student_id));
-        const newStudentIds = [...selectedStudentIds].filter((id) => !existingStudentIds.has(id));
-        if (newStudentIds.length > 0) {
-          await assignTutorHomeworkStudents(editId, newStudentIds);
+      if (editDiffState.newStudentsDirty) {
+        setSubmitPhase('assigning');
+        await assignTutorHomeworkStudents(editId, editDiffState.newStudentIds);
+
+        setSubmitPhase('notifying');
+        try {
+          notifyResult = await notifyTutorHomeworkStudents(editId, {
+            studentIds: editDiffState.newStudentIds,
+          });
+        } catch (notifyErr) {
+          notifyRequestFailed = true;
+          console.warn('homework_notify_new_students_failed', notifyErr);
         }
       }
 
@@ -770,19 +971,25 @@ function TutorHomeworkCreateContent() {
       void queryClient.invalidateQueries({ queryKey: ['tutor', 'homework', 'assignments'] });
       void queryClient.invalidateQueries({ queryKey: ['tutor', 'homework', 'detail', editId] });
       toast.success('Изменения сохранены');
+      if (notifyRequestFailed) {
+        toast.warning('Новых учеников добавили, но автоматически отправить ДЗ не удалось.');
+      } else if ((notifyResult?.failed ?? 0) > 0) {
+        toast.warning('Новых учеников добавили, но уведомления отправились не всем.');
+      }
       navigate(`/tutor/homework/${editId}`);
     } catch (err) {
       setSubmitPhase('idle');
       const message = err instanceof Error ? err.message : 'Неизвестная ошибка';
 
-      // Handle DESTRUCTIVE_CHANGE specifically
-      if (message.includes('DESTRUCTIVE_CHANGE') || message.includes('Cannot add or remove tasks')) {
+      if (err instanceof HomeworkApiError && err.code === 'TASK_REORDER_FAILED') {
+        toast.error('Не удалось сохранить порядок задач. Попробуйте ещё раз.');
+      } else if (err instanceof HomeworkApiError && err.code === 'DESTRUCTIVE_CHANGE') {
         toast.error('Нельзя добавлять или удалять задачи — ученики уже отправили ответы. Можно только редактировать существующие задачи.');
       } else {
         toast.error(`Ошибка: ${message}`);
       }
     }
-  }, [editId, validateAll, tasks, meta, materials, selectedStudentIds, existingAssignment, queryClient, navigate]);
+  }, [editId, validateAll, existingAssignment, editDiffState, hasSubmissions, meta, materials, navigate, queryClient, tasks]);
 
   // ── "Создать ещё" — reset form, preserve group selection ──
 
@@ -838,7 +1045,11 @@ function TutorHomeworkCreateContent() {
       case 'notifying':
         return 'Отправляем уведомления...';
       default:
-        if (isEditMode) return 'Сохранить изменения';
+        if (isEditMode) {
+          return editDiffState?.newStudentsDirty
+            ? 'Сохранить и отправить новым'
+            : 'Сохранить изменения';
+        }
         return notifyEnabled ? 'Отправить ДЗ' : 'Создать ДЗ';
     }
   })();

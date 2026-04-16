@@ -20,6 +20,7 @@ import {
 } from '@/lib/tutorHomeworkApi';
 import { FullscreenImageCarousel } from '@/components/homework/shared/FullscreenImageCarousel';
 import { useKBImagesSignedUrls } from '@/hooks/useKBImagesSignedUrls';
+import { MathText } from '@/components/kb/ui/MathText';
 import {
   parseAttachmentUrls,
   serializeAttachmentUrls,
@@ -219,6 +220,8 @@ interface RubricFieldProps {
   value: string;
   onChange: (v: string) => void;
   rubricRefs: string[];
+  kbSnapshotSolution?: string | null;
+  kbSnapshotSolutionImageRefs?: string | null;
   isUploading: boolean;
   previewUrls: Record<string, string>;
   resolvedUrls: Record<string, string>;
@@ -231,6 +234,8 @@ function RubricField({
   value,
   onChange,
   rubricRefs,
+  kbSnapshotSolution,
+  kbSnapshotSolutionImageRefs,
   isUploading,
   previewUrls,
   resolvedUrls,
@@ -239,6 +244,12 @@ function RubricField({
   onOpenRubricZoom,
 }: RubricFieldProps) {
   const [open, setOpen] = useState(Boolean(value) || rubricRefs.length > 0);
+  const solutionImageRefs = useMemo(
+    () => parseAttachmentUrls(kbSnapshotSolutionImageRefs),
+    [kbSnapshotSolutionImageRefs],
+  );
+  const hasReferenceSolution = Boolean(kbSnapshotSolution) || solutionImageRefs.length > 0;
+
   return (
     <div className="space-y-2">
       <button
@@ -268,11 +279,100 @@ function RubricField({
             onRemove={onRemoveRubricPhoto}
             onOpenZoom={onOpenRubricZoom}
           />
+          {hasReferenceSolution && (
+            <div className="rounded-xl bg-socrat-surface px-3.5 py-3">
+              <div className="mb-2 text-[11px] font-medium uppercase tracking-[0.12em] text-slate-500">
+                Эталонное решение (из БЗ)
+              </div>
+              {kbSnapshotSolution && (
+                <MathText
+                  text={kbSnapshotSolution}
+                  className="whitespace-pre-wrap text-sm leading-relaxed text-slate-700"
+                />
+              )}
+              {solutionImageRefs.length > 0 && (
+                <ReferenceSolutionPhotos refs={solutionImageRefs} className="mt-2" />
+              )}
+            </div>
+          )}
         </div>
       )}
     </div>
   );
 }
+
+// ─── Read-only KB reference solution photos ──────────────────────────────────
+
+interface ReferenceSolutionPhotosProps {
+  refs: string[];
+  className?: string;
+}
+
+const ReferenceSolutionPhotos = memo(function ReferenceSolutionPhotos({
+  refs,
+  className,
+}: ReferenceSolutionPhotosProps) {
+  const [zoomIndex, setZoomIndex] = useState<number | null>(null);
+  const { urls, isLoading } = useKBImagesSignedUrls(refs, { enabled: refs.length > 0 });
+  const imageUrls = useMemo(
+    () => refs.map((ref) => urls[ref]).filter((url): url is string => Boolean(url)),
+    [refs, urls],
+  );
+
+  if (isLoading) {
+    return (
+      <div className={`flex flex-wrap gap-2 ${className ?? ''}`}>
+        {refs.map((ref) => (
+          <div
+            key={ref}
+            className="h-20 w-20 animate-pulse rounded-md border border-slate-200 bg-white/60"
+          />
+        ))}
+      </div>
+    );
+  }
+
+  if (imageUrls.length === 0) {
+    return (
+      <div className={`flex h-20 items-center justify-center rounded-xl bg-white/60 text-xs text-slate-400 ${className ?? ''}`}>
+        Не удалось загрузить фото решения
+      </div>
+    );
+  }
+
+  return (
+    <div className={className}>
+      <div className="flex flex-wrap gap-2" style={{ touchAction: 'pan-x' }}>
+        {imageUrls.map((url, index) => (
+          <button
+            key={url}
+            type="button"
+            onClick={() => setZoomIndex(index)}
+            aria-label={`Открыть фото решения ${index + 1}`}
+            title={`Открыть фото решения ${index + 1}`}
+            style={{ touchAction: 'manipulation' }}
+            className="rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2"
+          >
+            <img
+              src={url}
+              alt={`Эталонное решение фото ${index + 1}`}
+              loading="lazy"
+              className="h-20 w-20 rounded-md border border-slate-200 bg-slate-50 object-cover"
+            />
+          </button>
+        ))}
+      </div>
+      <FullscreenImageCarousel
+        images={imageUrls}
+        openIndex={zoomIndex}
+        onClose={() => setZoomIndex(null)}
+        onNavigate={setZoomIndex}
+        ariaTitle="Эталонное решение (из БЗ)"
+        ariaDescription="Просмотр фото эталонного решения во весь экран"
+      />
+    </div>
+  );
+});
 
 // ─── Task card ────────────────────────────────────────────────────────────────
 
@@ -650,6 +750,14 @@ export function HWTaskCard({
             {task.kb_source && (
               <SourceBadge source={task.kb_source} />
             )}
+            {task.kb_source_label && (
+              <span
+                className="max-w-[240px] truncate text-xs text-muted-foreground"
+                title={task.kb_source_label}
+              >
+                {task.kb_source_label}
+              </span>
+            )}
           </div>
           {canRemove && (
             <Button variant="ghost" size="sm" onClick={onRemove}>
@@ -740,6 +848,8 @@ export function HWTaskCard({
           value={task.rubric_text}
           onChange={(v) => onUpdate({ ...task, rubric_text: v })}
           rubricRefs={rubricRefs}
+          kbSnapshotSolution={task.kb_snapshot_solution}
+          kbSnapshotSolutionImageRefs={task.kb_snapshot_solution_image_refs}
           isUploading={task.uploading}
           previewUrls={previewUrls}
           resolvedUrls={resolvedRubricUrls}

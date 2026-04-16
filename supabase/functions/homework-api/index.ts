@@ -112,6 +112,19 @@ function jsonError(
   });
 }
 
+function jsonTaskReorderFailed(
+  cors: Record<string, string>,
+  details?: unknown,
+): Response {
+  return jsonError(
+    cors,
+    500,
+    "TASK_REORDER_FAILED",
+    "Failed to reorder tasks",
+    details,
+  );
+}
+
 // ─── Helpers: Validation ─────────────────────────────────────────────────────
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -180,6 +193,28 @@ function validateAttachmentRefLimit(
     );
   }
   return null;
+}
+
+async function cleanupInsertedTasksAfterFailedReorder(
+  db: SupabaseClient,
+  assignmentId: string,
+  taskIds: string[],
+): Promise<void> {
+  if (taskIds.length === 0) return;
+
+  const { error } = await db
+    .from("homework_tutor_tasks")
+    .delete()
+    .eq("assignment_id", assignmentId)
+    .in("id", taskIds);
+
+  if (error) {
+    console.error("homework_api_task_reorder_cleanup_failed", {
+      assignment_id: assignmentId,
+      inserted_task_ids: taskIds,
+      error: error.message,
+    });
+  }
 }
 
 function hasUnsafeObjectPath(path: string): boolean {
@@ -735,6 +770,64 @@ async function handleGetAssignment(
     .eq("assignment_id", assignmentId)
     .order("order_num", { ascending: true });
 
+  const { data: kbTaskLinks } = await db
+    .from("homework_kb_tasks")
+    .select(`
+      task_id,
+      sort_order,
+      task_text_snapshot,
+      task_answer_snapshot,
+      task_solution_snapshot,
+      snapshot_edited,
+      kb_tasks (
+        solution_attachment_url,
+        source_label
+      )
+    `)
+    .eq("homework_id", assignmentId);
+
+  const kbProvenanceBySortOrder = new Map<number, {
+    kb_task_id: string | null;
+    kb_snapshot_text: string | null;
+    kb_snapshot_answer: string | null;
+    kb_snapshot_solution: string | null;
+    kb_snapshot_edited: boolean;
+    kb_snapshot_solution_image_refs: string | null;
+    kb_source_label: string | null;
+  }>();
+
+  for (const link of kbTaskLinks ?? []) {
+    if (typeof link.sort_order !== "number") continue;
+    const kbTask = Array.isArray(link.kb_tasks) ? link.kb_tasks[0] : link.kb_tasks;
+    kbProvenanceBySortOrder.set(link.sort_order, {
+      kb_task_id: typeof link.task_id === "string" ? link.task_id : null,
+      kb_snapshot_text: link.task_text_snapshot ?? null,
+      kb_snapshot_answer: link.task_answer_snapshot ?? null,
+      kb_snapshot_solution: link.task_solution_snapshot ?? null,
+      kb_snapshot_edited: link.snapshot_edited === true,
+      kb_snapshot_solution_image_refs: kbTask?.solution_attachment_url ?? null,
+      kb_source_label: kbTask?.source_label ?? null,
+    });
+  }
+
+  const tasksWithKbProvenance = (tasks ?? []).map((task) => {
+    const sortOrder = Number(task.order_num ?? 0) - 1;
+    const provenance = kbProvenanceBySortOrder.get(sortOrder);
+    if (!provenance) {
+      return task;
+    }
+    return {
+      ...task,
+      kb_task_id: provenance.kb_task_id,
+      kb_snapshot_text: provenance.kb_snapshot_text,
+      kb_snapshot_answer: provenance.kb_snapshot_answer,
+      kb_snapshot_solution: provenance.kb_snapshot_solution,
+      kb_snapshot_edited: provenance.kb_snapshot_edited,
+      kb_snapshot_solution_image_refs: provenance.kb_snapshot_solution_image_refs,
+      kb_source_label: provenance.kb_source_label,
+    };
+  });
+
   const { data: studentAssignments } = await db
     .from("homework_tutor_student_assignments")
     .select("id, student_id, notified, notified_at, delivery_status, delivery_error_code")
@@ -886,7 +979,7 @@ async function handleGetAssignment(
 
   return jsonOk(cors, {
     assignment,
-    tasks: tasks ?? [],
+    tasks: tasksWithKbProvenance,
     assigned_students: assignedStudents,
     materials: materials ?? [],
     submissions_summary: submissionsSummary,
@@ -1075,8 +1168,17 @@ async function handleUpdateAssignment(
           p_task_order: taskOrder,
         });
         if (reorderErr) {
-          console.error("homework_api_request_error", { route: "PUT /assignments/:id tasks reorder", error: reorderErr.message });
-          return jsonError(cors, 500, "DB_ERROR", "Failed to reorder tasks");
+          console.error("homework_api_task_reorder_failed", {
+            route: "PUT /assignments/:id",
+            assignment_id: assignmentId,
+            stage: "update_existing_with_submissions",
+            error: reorderErr.message,
+            task_order_size: taskOrder.length,
+          });
+          return jsonTaskReorderFailed(cors, {
+            stage: "update_existing_with_submissions",
+            reason: reorderErr.message,
+          });
         }
       }
       // Update task fields (order_num already set atomically above)
@@ -1119,34 +1221,10 @@ async function handleUpdateAssignment(
       const toInsert = normalizedIncomingTasks.filter((t) => !t.existingId);
       const toDeleteIds = [...existingIds].filter((id) => !incomingIds.has(id));
 
-      // Order: update existing fields → insert new at temp orders → atomic final reorder → delete removed.
-      // This lets a tutor replace a removed task with a new one at the same visible position.
+      // Order: insert new at temp orders → atomic final reorder → update existing fields → delete removed.
+      // This keeps reorder failures free of partial field writes on existing tasks.
 
-      // 1. Update existing task fields without touching order_num.
-      for (let i = 0; i < toUpdate.length; i++) {
-        const entry = toUpdate[i];
-        const t = entry.task;
-        const updateFields: Record<string, unknown> = {
-          task_text: isNonEmptyString(t.task_text) ? (t.task_text as string).trim() : "[Задача на фото]",
-          task_image_url: isNonEmptyString(t.task_image_url) ? (t.task_image_url as string).trim() : null,
-          correct_answer: isNonEmptyString(t.correct_answer) ? (t.correct_answer as string).trim() : null,
-          max_score: isPositiveInt(t.max_score) ? t.max_score : 1,
-          rubric_text: isNonEmptyString(t.rubric_text) ? (t.rubric_text as string).trim() : null,
-          rubric_image_urls: isNonEmptyString(t.rubric_image_urls) ? (t.rubric_image_urls as string).trim() : null,
-          check_format: (VALID_CHECK_FORMATS as readonly string[]).includes(t.check_format as string) ? t.check_format : "short_answer",
-        };
-        const { error } = await db
-          .from("homework_tutor_tasks")
-          .update(updateFields)
-          .eq("id", entry.existingId as string)
-          .eq("assignment_id", assignmentId);
-        if (error) {
-          console.error("homework_api_request_error", { route: "PUT /assignments/:id tasks update", error: error.message });
-          return jsonError(cors, 500, "DB_ERROR", "Failed to update task fields");
-        }
-      }
-
-      // 2. Insert new tasks at temporary high order_num values to avoid UNIQUE conflicts.
+      // 1. Insert new tasks at temporary high order_num values to avoid UNIQUE conflicts.
       const tempOrderBase =
         Math.max(
           maxCurrentOrder,
@@ -1181,7 +1259,7 @@ async function handleUpdateAssignment(
         }
       }
 
-      // 3. Final atomic reorder:
+      // 2. Final atomic reorder:
       // kept tasks get their final desired order, removed tasks are parked at the tail,
       // then the actual delete happens last.
       const insertedIdQueue = [...insertedTaskIds];
@@ -1193,7 +1271,18 @@ async function handleUpdateAssignment(
         return insertedId ? { id: insertedId, order_num: entry.desiredOrder } : null;
       });
       if (keptTaskOrder.some((entry) => entry === null)) {
-        return jsonError(cors, 500, "DB_ERROR", "Failed to map inserted tasks for reorder");
+        await cleanupInsertedTasksAfterFailedReorder(db, assignmentId, insertedTaskIds);
+        console.error("homework_api_task_reorder_failed", {
+          route: "PUT /assignments/:id",
+          assignment_id: assignmentId,
+          stage: "map_inserted_tasks_for_reorder",
+          inserted_task_ids: insertedTaskIds,
+          error: "missing inserted task mapping",
+        });
+        return jsonTaskReorderFailed(cors, {
+          stage: "map_inserted_tasks_for_reorder",
+          reason: "missing inserted task mapping",
+        });
       }
       const parkingBase = tempOrderBase + toInsert.length;
       const parkingTaskOrder = toDeleteIds.map((id, index) => ({
@@ -1210,8 +1299,44 @@ async function handleUpdateAssignment(
           p_task_order: reorderPayload,
         });
         if (reorderErr) {
-          console.error("homework_api_request_error", { route: "PUT /assignments/:id tasks reorder", error: reorderErr.message });
-          return jsonError(cors, 500, "DB_ERROR", "Failed to reorder tasks");
+          await cleanupInsertedTasksAfterFailedReorder(db, assignmentId, insertedTaskIds);
+          console.error("homework_api_task_reorder_failed", {
+            route: "PUT /assignments/:id",
+            assignment_id: assignmentId,
+            stage: "replace_tasks_without_submissions",
+            inserted_task_ids: insertedTaskIds,
+            error: reorderErr.message,
+            task_order_size: reorderPayload.length,
+          });
+          return jsonTaskReorderFailed(cors, {
+            stage: "replace_tasks_without_submissions",
+            reason: reorderErr.message,
+          });
+        }
+      }
+
+      // 3. Update existing task fields only after reorder succeeds, so a
+      // failed reorder never persists a half-applied edit state.
+      for (let i = 0; i < toUpdate.length; i++) {
+        const entry = toUpdate[i];
+        const t = entry.task;
+        const updateFields: Record<string, unknown> = {
+          task_text: isNonEmptyString(t.task_text) ? (t.task_text as string).trim() : "[Задача на фото]",
+          task_image_url: isNonEmptyString(t.task_image_url) ? (t.task_image_url as string).trim() : null,
+          correct_answer: isNonEmptyString(t.correct_answer) ? (t.correct_answer as string).trim() : null,
+          max_score: isPositiveInt(t.max_score) ? t.max_score : 1,
+          rubric_text: isNonEmptyString(t.rubric_text) ? (t.rubric_text as string).trim() : null,
+          rubric_image_urls: isNonEmptyString(t.rubric_image_urls) ? (t.rubric_image_urls as string).trim() : null,
+          check_format: (VALID_CHECK_FORMATS as readonly string[]).includes(t.check_format as string) ? t.check_format : "short_answer",
+        };
+        const { error } = await db
+          .from("homework_tutor_tasks")
+          .update(updateFields)
+          .eq("id", entry.existingId as string)
+          .eq("assignment_id", assignmentId);
+        if (error) {
+          console.error("homework_api_request_error", { route: "PUT /assignments/:id tasks update", error: error.message });
+          return jsonError(cors, 500, "DB_ERROR", "Failed to update task fields");
         }
       }
 
@@ -1439,12 +1564,57 @@ async function handleNotifyStudents(
   const messageTemplate = isNonEmptyString(b.message_template)
     ? (b.message_template as string).trim()
     : null;
+  let requestedStudentIds: string[] | null = null;
+  if (b.student_ids !== undefined) {
+    if (!Array.isArray(b.student_ids)) {
+      return jsonError(cors, 400, "VALIDATION", "student_ids must be an array of UUIDs");
+    }
+    const invalidStudentIds = b.student_ids.filter((studentId) => !isUUID(studentId));
+    if (invalidStudentIds.length > 0) {
+      return jsonError(cors, 400, "VALIDATION", "student_ids must be an array of UUIDs", {
+        invalid_student_ids: invalidStudentIds,
+      });
+    }
+    requestedStudentIds = Array.from(new Set(b.student_ids as string[]));
+  }
 
-  const { data: pendingStudents } = await db
+  const { data: studentAssignments, error: studentAssignmentsError } = await db
     .from("homework_tutor_student_assignments")
-    .select("student_id")
-    .eq("assignment_id", assignmentId)
-    .eq("notified", false);
+    .select("student_id, notified")
+    .eq("assignment_id", assignmentId);
+
+  if (studentAssignmentsError) {
+    console.error("homework_api_request_error", {
+      route: "POST /assignments/:id/notify",
+      assignment_id: assignmentId,
+      error: studentAssignmentsError.message,
+    });
+    return jsonError(cors, 500, "DB_ERROR", "Failed to load assigned students");
+  }
+
+  const assignedStudentIds = new Set(
+    (studentAssignments ?? []).map((studentAssignment) => studentAssignment.student_id as string),
+  );
+
+  if (requestedStudentIds) {
+    const invalidStudentIds = requestedStudentIds.filter((studentId) => !assignedStudentIds.has(studentId));
+    if (invalidStudentIds.length > 0) {
+      return jsonError(
+        cors,
+        400,
+        "INVALID_STUDENTS",
+        "Some student_ids are not assigned to this homework",
+        { invalid_student_ids: invalidStudentIds },
+      );
+    }
+  }
+
+  const requestedStudentIdSet = requestedStudentIds ? new Set(requestedStudentIds) : null;
+  const pendingStudents = (studentAssignments ?? []).filter((studentAssignment) => {
+    if (studentAssignment.notified) return false;
+    if (!requestedStudentIdSet) return true;
+    return requestedStudentIdSet.has(studentAssignment.student_id as string);
+  });
 
   if (!pendingStudents || pendingStudents.length === 0) {
     return jsonOk(cors, { sent: 0, failed: 0, failed_student_ids: [], failed_by_reason: {} });

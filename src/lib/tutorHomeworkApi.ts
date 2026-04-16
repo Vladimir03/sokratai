@@ -275,15 +275,23 @@ export async function assignTutorHomeworkStudents(
 
 export async function notifyTutorHomeworkStudents(
   assignmentId: string,
-  messageTemplate?: string,
+  options?: {
+    messageTemplate?: string;
+    studentIds?: string[];
+  },
 ): Promise<NotifyStudentsResponse> {
+  const body: Record<string, unknown> = {};
+  if (options?.messageTemplate) {
+    body.message_template = options.messageTemplate;
+  }
+  if (options?.studentIds && options.studentIds.length > 0) {
+    body.student_ids = options.studentIds;
+  }
   return requestHomeworkApi<NotifyStudentsResponse>(
     `/assignments/${encodeURIComponent(assignmentId)}/notify`,
     {
       method: 'POST',
-      body: JSON.stringify(
-        messageTemplate ? { message_template: messageTemplate } : {},
-      ),
+      body: JSON.stringify(body),
     },
   );
 }
@@ -481,6 +489,13 @@ export interface TutorHomeworkAssignmentDetails {
     rubric_image_urls?: string | null;
     max_score: number;
     check_format?: 'short_answer' | 'detailed_solution';
+    kb_task_id?: string | null;
+    kb_snapshot_text?: string | null;
+    kb_snapshot_answer?: string | null;
+    kb_snapshot_solution?: string | null;
+    kb_snapshot_edited?: boolean;
+    kb_snapshot_solution_image_refs?: string | null;
+    kb_source_label?: string | null;
   }[];
   assigned_students: {
     student_id: string;
