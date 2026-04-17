@@ -24,6 +24,45 @@
 - `subject: 'physics'` — предмет по умолчанию (целевой сегмент: репетиторы физики ЕГЭ/ОГЭ)
 - Если репетитор меняет предмет — открыть L1 («Расширенные параметры»)
 
+### Эталонное решение для AI и anti-leak (2026-04-18)
+
+`homework_tutor_tasks.solution_text` + `homework_tutor_tasks.solution_image_urls` — единое tutor-only поле «Решение для AI». Видно AI на **всех 3 путях** (check / hint / chat) как референс для Сократовского ведения ученика. НИКОГДА не возвращается ученику. Миграция: `supabase/migrations/20260418120000_add_homework_task_solution.sql`. Лимит фото — `MAX_SOLUTION_IMAGES = 5`.
+
+**DB контракт:**
+- `solution_text TEXT NULL` — текст эталона
+- `solution_image_urls TEXT NULL` — dual-format (single ref ИЛИ JSON-array), как `rubric_image_urls` / `task_image_url`. Читать только через `parseAttachmentUrls` / `serializeAttachmentUrls`
+
+**Student leak invariant (КРИТИЧНО):**
+- `handleGetStudentAssignment` в `homework-api/index.ts` НЕ селектит `solution_*` и `rubric_*` — это проверяется ревью при любом расширении student endpoints
+- `StudentHomeworkTask` тип в `src/types/homework.ts` и `studentHomeworkApi.ts` НЕ содержат этих полей (compile-time гарантия)
+
+**AI inject points:**
+- `handleCheckAnswer` SELECT включает `solution_text, solution_image_urls`, передаёт в `evaluateStudentAnswer` → `buildCheckPrompt`
+- `handleRequestHint` SELECT включает `solution_*` + `rubric_*` (до 2026-04-18 rubric в hint ИГНОРИРОВАЛСЯ — регресс закрыт), передаёт в `generateHint` → `buildHintPrompt`
+- `/chat` edge function (`chat/index.ts`) — принимает `guidedHomeworkAssignmentId + guidedHomeworkTaskId` в body; service-role фетчит `solution_*` после верификации `homework_tutor_student_assignments`. Клиент (`streamChat` в `GuidedHomeworkWorkspace.tsx`) НЕ передаёт текст/фото решения напрямую
+
+**Anti-spoiler защита:**
+- `getGeneratedHintCheck(hint, solutionText, taskText)` в `guided_ai.ts`: extractSignificantTokens из solution минус task givens; reject при совпадении → existing Е10 retry-once → fallback. Telemetry `hint_solution_leak_rejected`
+- `evaluateStudentAnswer` применяет тот же leak-check к `feedback` и `ai_score_comment`. **Retry — cosmetic rewrite**: сохраняет `verdict` / `confidence` / `error_type` / `ai_score` от первого result, свапает только `feedback` + `ai_score_comment` от retry. Grading остаётся детерминированным — не менять без осознанного решения
+- `/chat` guided path — buffered (не streamed): весь ответ собирается server-side, leak-детектор, fallback-сообщение при утечке. Обычные /chat (без guided context) стримятся как раньше
+
+**Image-only anti-leak gate (v3):**
+- Константа `SOLUTION_TEXT_ANCHOR_MIN_CHARS = 20` во всех 3 путях
+- Если `solution_text.trim().length < 20` — `solution_image_urls` **ДРОПАЮТСЯ** и не прикладываются к AI-промпту. Причина: leak-детектор работает только по тексту; тривиальный anchor не даёт токенов для матчинга. Image-only эталон может быть экстрактирован через «transcribe image» jailbreak
+- Telemetry: `guided_check_solution_images_dropped_no_text`, `guided_hint_solution_images_dropped_no_text`, `guided_chat_solution_images_dropped_no_text`
+- Продуктово: репетитор должен написать хотя бы короткий текстовый summary (≥ 20 симв), если хочет чтобы AI видел фото эталона
+
+**KB-мост:**
+- `kbTaskToDraftTask` копирует `kb.solution → draft.solution_text`, `kb.solution_attachment_url → draft.solution_image_paths` с truncation до `MAX_SOLUTION_IMAGES`
+- Возвращает `{ draft, truncatedFrom, solutionTruncatedFrom }` — два отдельных toast для фото условия и фото решения
+
+**Templates round-trip:**
+- `HomeworkTemplateTask` содержит `solution_text`, `solution_image_urls`, `rubric_image_urls`
+- Save: `templateTasksJson` в `handleCreateAssignment` (`homework-api/index.ts`). Load: оба места в `TutorHomeworkCreate.tsx` (URL-param + picker sheet)
+- Если добавляется новое поле, видное AI, — синхронно обновить тип + оба load path'а + save path, иначе template round-trip теряет данные
+
+**Спека:** `C:\Users\kamch\.claude\plans\wild-swinging-nova.md`
+
 ### Multi-photo на задачу и рубрику (2026-04-14, frontend TASK-3..5)
 
 `homework_tutor_tasks.task_image_url` и `homework_tutor_tasks.rubric_image_urls` — оба dual-format TEXT поля. Значение либо single `storage://...` ref (legacy + когда одно фото), либо JSON-array `["storage://...", ...]` (2+ фото). Чтение/запись через `parseAttachmentUrls` / `serializeAttachmentUrls` из `@/lib/attachmentRefs` (и Deno-клон `supabase/functions/_shared/attachment-refs.ts`).

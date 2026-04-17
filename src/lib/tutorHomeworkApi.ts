@@ -57,6 +57,16 @@ export interface CreateAssignmentTask {
    * Видимость только репетитор (бэк не возвращает в getStudentAssignment).
    */
   rubric_image_urls?: string | null;
+  /**
+   * Эталонное решение от репетитора (текст). Единое поле "Решение для AI":
+   * видно AI на check/hint/chat, НИКОГДА не возвращается ученику.
+   */
+  solution_text?: string | null;
+  /**
+   * Storage refs для фото эталонного решения. Dual-format. Лимит `MAX_SOLUTION_IMAGES` (5).
+   * Видимость: только репетитор + AI-промпт.
+   */
+  solution_image_urls?: string | null;
   max_score?: number;
   check_format?: 'short_answer' | 'detailed_solution';
 }
@@ -84,6 +94,10 @@ export interface HomeworkTemplateTask {
   rubric_text?: string | null;
   /** Dual-format — см. `@/lib/attachmentRefs`. Лимит 3. */
   rubric_image_urls?: string | null;
+  /** Эталонное решение от репетитора (текст). Видно AI на check/hint/chat. */
+  solution_text?: string | null;
+  /** Dual-format — см. `@/lib/attachmentRefs`. Лимит 5. */
+  solution_image_urls?: string | null;
   max_score?: number;
 }
 
@@ -487,6 +501,10 @@ export interface TutorHomeworkAssignmentDetails {
     correct_answer: string | null;
     rubric_text: string | null;
     rubric_image_urls?: string | null;
+    /** Эталонное решение (текст). Только tutor-surface; student-API не возвращает. */
+    solution_text?: string | null;
+    /** Эталонное решение (фото). Dual-format. Только tutor-surface. */
+    solution_image_urls?: string | null;
     max_score: number;
     check_format?: 'short_answer' | 'detailed_solution';
     kb_task_id?: string | null;
@@ -923,6 +941,10 @@ export interface UpdateAssignmentTask {
   rubric_text?: string | null;
   /** Dual-format — см. `@/lib/attachmentRefs`. Лимит 3. Tutor-only. */
   rubric_image_urls?: string | null;
+  /** Эталонное решение (текст). Tutor-only, видно AI на check/hint/chat. */
+  solution_text?: string | null;
+  /** Dual-format — см. `@/lib/attachmentRefs`. Лимит 5. Tutor-only. */
+  solution_image_urls?: string | null;
   check_format?: 'short_answer' | 'detailed_solution';
 }
 

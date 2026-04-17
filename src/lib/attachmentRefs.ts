@@ -11,6 +11,9 @@ export const MAX_TASK_IMAGES = 5;
 /** Max images allowed per homework rubric. */
 export const MAX_RUBRIC_IMAGES = 3;
 
+/** Max images allowed per homework task reference solution (tutor-only, AI-visible). */
+export const MAX_SOLUTION_IMAGES = 5;
+
 /**
  * Parse `attachment_url`-style fields which may be:
  *  - null / undefined / "" → []

@@ -872,6 +872,9 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
         }),
         taskImageUrls,
         studentImageUrls: resolvedStudentImageUrls,
+        // Server fetches tutor's reference solution via service-role (never exposed to student).
+        guidedHomeworkAssignmentId: assignment.id,
+        guidedHomeworkTaskId: task.id,
         onDelta: (delta) => {
           fullContent += delta;
           setStreamingContent(fullContent);
@@ -1459,6 +1462,8 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
             examType,
           }),
           taskImageUrls,
+          guidedHomeworkAssignmentId: assignment.id,
+          guidedHomeworkTaskId: currentTask.id,
           onDelta: (delta) => {
             content += delta;
             setStreamingContent(content);

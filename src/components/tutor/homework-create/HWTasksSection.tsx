@@ -9,6 +9,7 @@ import {
   parseAttachmentUrls,
   serializeAttachmentUrls,
   MAX_TASK_IMAGES,
+  MAX_SOLUTION_IMAGES,
 } from '@/lib/attachmentRefs';
 import { KBPickerSheet } from '@/components/tutor/KBPickerSheet';
 import { HWTaskCard } from './HWTaskCard';
@@ -36,12 +37,20 @@ function mapAnswerFormatToCheckFormat(af: string | null): 'short_answer' | 'deta
  */
 function kbTaskToDraftTask(
   task: KBTask,
-): { draft: DraftTask; truncatedFrom: number | null } {
+): { draft: DraftTask; truncatedFrom: number | null; solutionTruncatedFrom: number | null } {
   const refs = parseAttachmentUrls(task.attachment_url);
   const slicedRefs = refs.slice(0, MAX_TASK_IMAGES);
   const taskImagePath = serializeAttachmentUrls(slicedRefs);
   const firstRef = slicedRefs[0] ?? null;
   const truncatedFrom = refs.length > MAX_TASK_IMAGES ? refs.length : null;
+
+  // Solution images from KB — symmetric truncation to MAX_SOLUTION_IMAGES (5).
+  // Without this, import silently accepts >5 photos and save fails at backend
+  // validation (plan wild-swinging-nova.md P1-5 fix).
+  const solutionRefs = parseAttachmentUrls(task.solution_attachment_url);
+  const slicedSolutionRefs = solutionRefs.slice(0, MAX_SOLUTION_IMAGES);
+  const solutionImagePaths = serializeAttachmentUrls(slicedSolutionRefs);
+  const solutionTruncatedFrom = solutionRefs.length > MAX_SOLUTION_IMAGES ? solutionRefs.length : null;
 
   const checkFormat: 'short_answer' | 'detailed_solution' =
     (task.check_format === 'short_answer' || task.check_format === 'detailed_solution' ? task.check_format : null)
@@ -61,6 +70,11 @@ function kbTaskToDraftTask(
       correct_answer: task.answer ?? '',
       rubric_text: '',
       rubric_image_paths: null,
+      // KB solution → auto-fill "Эталонное решение для AI" (P0 + KB-мост, 2026-04-18).
+      // До этой итерации kb_snapshot_solution* теряли данные между draft и backend;
+      // теперь копируем в solution_* и они сохраняются в homework_tutor_tasks.
+      solution_text: task.solution ?? '',
+      solution_image_paths: solutionImagePaths,
       max_score: task.primary_score ?? 1,
       uploading: false,
       check_format: checkFormat,
@@ -75,6 +89,7 @@ function kbTaskToDraftTask(
       kb_attachment_url: taskImagePath,
     },
     truncatedFrom,
+    solutionTruncatedFrom,
   };
 }
 
@@ -122,12 +137,18 @@ export function HWTasksSection({
 
       const newDrafts = converted.map((c) => c.draft);
 
-      // Surface truncation per task (spec §3 «KB-импорт»: импортируем первые 5
-      // и показываем toast `Из БЗ импортировано 5 из N фото`).
-      for (const { truncatedFrom } of converted) {
+      // Surface truncation per task (spec §3 «KB-импорт»: импортируем первые N
+      // и показываем toast `Из БЗ импортировано N из M фото`). Separately for
+      // condition photos and reference-solution photos (plan wild-swinging-nova.md P1-5).
+      for (const { truncatedFrom, solutionTruncatedFrom } of converted) {
         if (truncatedFrom !== null) {
           toast.info(
-            `Из БЗ импортировано ${MAX_TASK_IMAGES} из ${truncatedFrom} фото`,
+            `Из БЗ импортировано ${MAX_TASK_IMAGES} из ${truncatedFrom} фото условия`,
+          );
+        }
+        if (solutionTruncatedFrom !== null) {
+          toast.info(
+            `Из БЗ импортировано ${MAX_SOLUTION_IMAGES} из ${solutionTruncatedFrom} фото решения`,
           );
         }
       }

@@ -133,6 +133,14 @@ export interface EvaluateStudentAnswerParams {
   correctAnswer: string | null;
   rubricText: string | null;
   rubricImageUrls?: string[] | null;
+  /**
+   * Эталонное решение репетитора (текст). Единое поле "Решение для AI" —
+   * используется как reference для сверки логики ученика. См. plan wild-swinging-nova.md.
+   * НИКОГДА не цитируется дословно (anti-spoiler контракт в промпте).
+   */
+  solutionText?: string | null;
+  /** Эталонное решение (фото). До 5. Inline-ятся в base64 через inlinePromptImageUrls. */
+  solutionImageUrls?: string[] | null;
   subject: string;
   conversationHistory: GuidedConversationHistoryMessage[];
   wrongAnswerCount: number;
@@ -158,6 +166,14 @@ export interface GenerateHintParams {
   taskId?: string | null;
   assignmentId?: string | null;
   correctAnswer: string | null;
+  /** Критерии оценки репетитора (текст). Опциональное усиление. */
+  rubricText?: string | null;
+  /** Рубрика (фото). Опционально. */
+  rubricImageUrls?: string[] | null;
+  /** Эталонное решение репетитора (текст). См. EvaluateStudentAnswerParams.solutionText. */
+  solutionText?: string | null;
+  /** Эталонное решение (фото). */
+  solutionImageUrls?: string[] | null;
   subject: string;
   conversationHistory: GuidedConversationHistoryMessage[];
   wrongAnswerCount: number;
@@ -293,12 +309,126 @@ function sanitizeHintText(rawHint: unknown, correctAnswer: string | null): strin
   return softTruncate(hint, MAX_FEEDBACK_LENGTH);
 }
 
-function getGeneratedHintCheck(text: string): { ok: boolean; reason?: string } {
+const SOLUTION_LEAK_STOPWORDS = new Set([
+  "равно", "тогда", "поэтому", "значит", "задача", "решение", "формула",
+  "потому", "таким", "образом", "отсюда", "следовательно",
+  "это", "так", "как", "что", "тут", "или", "если", "тогда.",
+]);
+
+const OPERATOR_REGEX = /[=+\-*/^<>≤≥≠·×]/u;
+
+/**
+ * Extract a list of "significant" tokens from a piece of physics/math text.
+ * Used both for the tutor's reference solution (leak source) and the task text
+ * (to subtract givens that already legitimately appear in student-facing output).
+ *
+ * Heuristics:
+ *  - Numeric literals ≥ 3 digits (100, 0.15, 2.5e-3) — these are specific task
+ *    values that identify a spoiler.
+ *  - Any operator-containing token (F=ma, U=IR, v²/r) regardless of length —
+ *    short formulas are the highest-value spoilers.
+ *  - Longer tokens (≥ 5 non-space chars) containing a digit or Latin letter
+ *    (catches expressions like `sqrt(2gh)`, `omega*t`).
+ */
+function extractSignificantTokens(text: string): Set<string> {
+  const cleaned = text
+    .replace(/[`]/g, " ")
+    // Preserve operator-attached tokens by not splitting on `=`, `+`, etc.
+    .split(/[\s,;.!?()[\]{}«»"]+/u)
+    .filter(Boolean);
+
+  const tokens = new Set<string>();
+
+  for (const rawToken of cleaned) {
+    const token = rawToken.toLowerCase();
+    if (SOLUTION_LEAK_STOPWORDS.has(token)) continue;
+
+    // Numeric literal (including simple fractions / decimals / exponents)
+    if (/^-?\d+([.,]\d+)?([eE]-?\d+)?$/u.test(token) && token.replace(/[^\d]/g, "").length >= 3) {
+      tokens.add(token);
+      continue;
+    }
+
+    const nonSpaceLen = token.replace(/\s/g, "").length;
+    const hasOperator = OPERATOR_REGEX.test(token);
+    const hasDigitOrLatin = /[\dA-Za-z]/.test(token);
+
+    // Short tokens WITH an operator are high-signal spoilers (F=ma, U=IR, p=mv).
+    // Skip bare single operators (len < 3).
+    if (hasOperator && nonSpaceLen >= 3) {
+      tokens.add(token);
+      continue;
+    }
+
+    // Long tokens without operators: only flag if they look technical.
+    if (nonSpaceLen >= 5 && hasDigitOrLatin) {
+      tokens.add(token);
+    }
+  }
+
+  return tokens;
+}
+
+/**
+ * Compute tokens that appear in the solution but NOT in the task text itself —
+ * these are the spoiler-worthy additions the student shouldn't see verbatim.
+ * Task-given numbers (e.g. `m=100 kg` in the problem) should not be flagged.
+ */
+function extractSolutionLeakTokens(
+  solutionText: string,
+  taskText?: string | null,
+): string[] {
+  const solutionTokens = extractSignificantTokens(solutionText);
+  if (solutionTokens.size === 0) return [];
+
+  if (taskText && taskText.trim()) {
+    const taskTokens = extractSignificantTokens(taskText);
+    for (const t of taskTokens) {
+      solutionTokens.delete(t);
+    }
+  }
+
+  return [...solutionTokens];
+}
+
+function outputContainsSolutionLeak(
+  output: string,
+  solutionText: string | null | undefined,
+  taskText?: string | null,
+): boolean {
+  if (!solutionText || !solutionText.trim()) return false;
+  const tokens = extractSolutionLeakTokens(solutionText, taskText);
+  if (tokens.length === 0) return false;
+  const outputLower = output.toLowerCase();
+  for (const token of tokens) {
+    if (token.length < 3) continue;
+    if (outputLower.includes(token)) return true;
+  }
+  return false;
+}
+
+function getGeneratedHintCheck(
+  text: string,
+  solutionText?: string | null,
+  taskText?: string | null,
+): { ok: boolean; reason?: string } {
   if (!text.trim()) {
     return { ok: false, reason: "empty_after_sanitize" };
   }
 
-  return validateHintContent(text);
+  const contentCheck = validateHintContent(text);
+  if (!contentCheck.ok) {
+    return contentCheck;
+  }
+
+  // Anti-spoiler (Sokratai 2026-04-18, plan wild-swinging-nova.md):
+  // reject hints that cite numbers/formulas from the tutor's reference solution
+  // that are NOT already in the task statement (task givens stay allowed).
+  if (outputContainsSolutionLeak(text, solutionText, taskText)) {
+    return { ok: false, reason: "solution_leak" };
+  }
+
+  return { ok: true };
 }
 
 function reasonToHumanMessage(reason: string | undefined): string {
@@ -306,6 +436,7 @@ function reasonToHumanMessage(reason: string | undefined): string {
   if (reason.startsWith("forbidden:")) return "ты использовал запрещённую шаблонную фразу";
   if (reason === "too_short") return "подсказка получилась слишком короткой";
   if (reason === "empty_after_sanitize") return "подсказка оказалась пустой или содержала правильный ответ";
+  if (reason === "solution_leak") return "ты процитировал числа или формулы из эталонного решения — этого делать нельзя";
   return "нарушен формат подсказки";
 }
 
@@ -839,8 +970,11 @@ function buildCheckPrompt(params: EvaluateStudentAnswerParams): LovableMessage[]
   const rubricGuidance = buildRubricGuidance(params.rubricText, Boolean(params.rubricImageUrls?.length));
   const taskImageUrls = (params.taskImageUrls ?? []).filter(Boolean);
   const rubricImageUrls = (params.rubricImageUrls ?? []).filter(Boolean);
+  const solutionImageUrls = (params.solutionImageUrls ?? []).filter(Boolean);
   const hasTaskImage = taskImageUrls.length > 0;
   const hasRubricImages = rubricImageUrls.length > 0;
+  const hasSolutionImages = solutionImageUrls.length > 0;
+  const hasSolutionText = Boolean(params.solutionText && params.solutionText.trim().length > 0);
   const studentImageUrls = (params.studentImageUrls ?? []).filter(Boolean);
   const studentImageCount = studentImageUrls.length;
   const hasStudentImage = studentImageCount > 0;
@@ -870,6 +1004,15 @@ function buildCheckPrompt(params: EvaluateStudentAnswerParams): LovableMessage[]
     rubricLine,
     rubricGuidance,
     hasRubricImages ? "К задаче также приложены изображения с критериями проверки от репетитора — учитывай их при оценке." : "",
+    hasSolutionText
+      ? `Эталонное решение репетитора (для твоей сверки, НЕ цитируй дословно ученику): ${clampPromptText(params.solutionText)}`
+      : "",
+    hasSolutionImages
+      ? "К задаче приложены фото эталонного решения репетитора — используй их для сверки логики, но НЕ показывай решение ученику дословно."
+      : "",
+    (hasSolutionText || hasSolutionImages)
+      ? "ВАЖНО (anti-spoiler): эталон репетитора = референс для проверки. В feedback можешь опираться на него, но НЕ пересказывай шаги решения — ученик должен дойти сам."
+      : "",
     "",
     `Максимальный балл по задаче: ${params.maxScore}.`,
     `Статистика: ${params.wrongAnswerCount} неверных попыток, ${params.hintCount} подсказок.`,
@@ -979,6 +1122,18 @@ function buildCheckPrompt(params: EvaluateStudentAnswerParams): LovableMessage[]
     });
   }
 
+  const solutionOffset = studentImageCount + taskImageUrls.length + rubricImageUrls.length;
+  for (const [index, imageUrl] of solutionImageUrls.entries()) {
+    userContent.push({
+      type: "text",
+      text: `Изображение ${solutionOffset + index + 1} — эталонное решение от репетитора${solutionImageUrls.length > 1 ? `, файл ${index + 1}` : ""}. Используй для сверки, но НЕ цитируй дословно.`,
+    });
+    userContent.push({
+      type: "image_url",
+      image_url: { url: imageUrl },
+    });
+  }
+
   userContent.push({
     type: "text",
     text: `Текстовый ответ ученика: ${clampPromptText(params.studentAnswer)}`,
@@ -998,6 +1153,12 @@ function buildHintPrompt(params: GenerateHintParams): LovableMessage[] {
   const studentImageUrls = (params.studentImageUrls ?? []).filter(Boolean);
   const studentImageCount = studentImageUrls.length;
   const hasStudentImage = studentImageCount > 0;
+  const rubricImageUrls = (params.rubricImageUrls ?? []).filter(Boolean);
+  const hasRubricImages = rubricImageUrls.length > 0;
+  const solutionImageUrls = (params.solutionImageUrls ?? []).filter(Boolean);
+  const hasSolutionImages = solutionImageUrls.length > 0;
+  const hasSolutionText = Boolean(params.solutionText && params.solutionText.trim().length > 0);
+  const hasTutorReference = hasSolutionText || hasSolutionImages;
   const graphGroundingGuidance = buildGraphGroundingGuidance(params.taskOcrText, hasTaskImage);
   const taskContext = [
     clampPromptText(params.taskText) || "[текст задачи отсутствует, опирайся на изображение задачи]",
@@ -1037,6 +1198,23 @@ function buildHintPrompt(params: GenerateHintParams): LovableMessage[] {
       ? "КРИТИЧНО: сначала внимательно изучи решение ученика на приложенном изображении. Если на нём нет шага решения по текущей задаче, прямо сообщи об этом и попроси прислать релевантное решение."
       : "",
     params.correctAnswer ? `Правильный ответ (НЕ раскрывай ученику!): ${clampPromptText(params.correctAnswer)}` : "",
+    params.rubricText ? `Критерии проверки от репетитора: ${clampPromptText(params.rubricText)}` : "",
+    hasRubricImages ? "К задаче приложены фото критериев проверки — учитывай их при формулировании подсказки." : "",
+    hasSolutionText
+      ? `ЭТАЛОННОЕ РЕШЕНИЕ РЕПЕТИТОРА (только для твоей сверки): ${clampPromptText(params.solutionText)}`
+      : "",
+    hasSolutionImages
+      ? "К задаче приложены фото эталонного решения репетитора — используй их только для сверки логики подсказки."
+      : "",
+    hasTutorReference
+      ? [
+          "АНТИ-СПОЙЛЕР (КРИТИЧНО): эталонное решение дано тебе ТОЛЬКО для сверки.",
+          " - НЕ цитируй формулы из решения дословно, если ученик ещё не дошёл до этого шага.",
+          " - НЕ называй численные подстановки или финальные выражения из решения.",
+          " - НЕ пересказывай ход решения.",
+          " - Работай Сократовским методом: один наводящий вопрос к ключевой величине/закону.",
+        ].join("\n")
+      : "",
     "",
     `Статистика: ${params.wrongAnswerCount} неверных попыток, ${params.hintCount} подсказок.`,
     buildStudentNameGuidance(params.studentName),
@@ -1106,6 +1284,30 @@ function buildHintPrompt(params: GenerateHintParams): LovableMessage[] {
     });
   }
 
+  const hintRubricOffset = studentImageCount + taskImageUrls.length;
+  for (const [index, imageUrl] of rubricImageUrls.entries()) {
+    userContent.push({
+      type: "text",
+      text: `Изображение ${hintRubricOffset + index + 1} — критерии проверки от репетитора${rubricImageUrls.length > 1 ? `, файл ${index + 1}` : ""}.`,
+    });
+    userContent.push({
+      type: "image_url",
+      image_url: { url: imageUrl },
+    });
+  }
+
+  const hintSolutionOffset = hintRubricOffset + rubricImageUrls.length;
+  for (const [index, imageUrl] of solutionImageUrls.entries()) {
+    userContent.push({
+      type: "text",
+      text: `Изображение ${hintSolutionOffset + index + 1} — эталонное решение от репетитора${solutionImageUrls.length > 1 ? `, файл ${index + 1}` : ""}. Используй для сверки логики подсказки, НЕ цитируй дословно ученику.`,
+    });
+    userContent.push({
+      type: "image_url",
+      image_url: { url: imageUrl },
+    });
+  }
+
   userContent.push({
     type: "text",
     text: hasStudentImage
@@ -1150,20 +1352,41 @@ export async function evaluateStudentAnswer(
     }
   }
 
+  // Anti-leak invariant (plan wild-swinging-nova.md P0-1 v3):
+  // Attach solution_image_urls only when solution_text is a MEANINGFUL anchor
+  // for the leak detector. A trivially short anchor (e.g. "см. фото") produces
+  // almost no tokens and leaves images effectively unprotected against
+  // transcription jailbreaks. Minimum 20 chars guarantees non-trivial coverage.
+  const SOLUTION_TEXT_ANCHOR_MIN_CHARS = 20;
+  const solutionTextTrimmed = params.solutionText?.trim() ?? "";
+  const allowSolutionImagesForCheck = solutionTextTrimmed.length >= SOLUTION_TEXT_ANCHOR_MIN_CHARS;
+  const effectiveSolutionImageRefs = allowSolutionImagesForCheck
+    ? (params.solutionImageUrls ?? [])
+    : [];
+  if (!allowSolutionImagesForCheck && (params.solutionImageUrls?.length ?? 0) > 0) {
+    console.warn(JSON.stringify({
+      event: "guided_check_solution_images_dropped_no_text",
+      subject: params.subject,
+      text_len: solutionTextTrimmed.length,
+    }));
+  }
+
   try {
-    const [taskImageUrls, rubricImageUrls, studentImageUrls] = await Promise.all([
+    const [taskImageUrls, rubricImageUrls, solutionImageUrls, studentImageUrls] = await Promise.all([
       inlinePromptImageUrls(params.taskImageUrls.slice(0, MAX_TASK_IMAGES_FOR_AI)),
       inlinePromptImageUrls((params.rubricImageUrls ?? []).slice(0, MAX_TASK_IMAGES_FOR_AI)),
+      inlinePromptImageUrls(effectiveSolutionImageRefs.slice(0, MAX_TASK_IMAGES_FOR_AI)),
       inlinePromptImageUrls(params.studentImageUrls),
     ]);
     const messages = buildCheckPrompt({
       ...params,
       taskImageUrls,
       rubricImageUrls,
+      solutionImageUrls,
       studentImageUrls,
     });
     const parsed = await callLovableJson(messages, "guided_check");
-    const result = sanitizeCheckResult(parsed, params.correctAnswer, {
+    let result = sanitizeCheckResult(parsed, params.correctAnswer, {
       checkFormat: params.checkFormat,
       maxScore: params.maxScore,
     });
@@ -1173,6 +1396,85 @@ export async function evaluateStudentAnswer(
         subject: params.subject,
         failure_reason: result.failure_reason ?? "invalid_json",
       });
+    }
+
+    // Anti-spoiler on feedback: retry once with explicit anti-leak instruction
+    // if the AI cited numbers/formulas from the reference solution in user-visible
+    // feedback or ai_score_comment. Mirrors the hint path's getGeneratedHintCheck flow.
+    // See plan wild-swinging-nova.md (P0-2 fix).
+    if (
+      result.verdict !== "CHECK_FAILED"
+      && (params.solutionText || (params.solutionImageUrls?.length ?? 0) > 0)
+    ) {
+      const feedbackLeaks = outputContainsSolutionLeak(result.feedback ?? "", params.solutionText, params.taskText);
+      const commentLeaks = outputContainsSolutionLeak(result.ai_score_comment ?? "", params.solutionText, params.taskText);
+      if (feedbackLeaks || commentLeaks) {
+        console.warn(JSON.stringify({
+          event: "check_solution_leak_rejected",
+          subject: params.subject,
+          retry: 1,
+          feedback_leak: feedbackLeaks,
+          comment_leak: commentLeaks,
+        }));
+
+        const retryMessages: LovableMessage[] = [...messages, {
+          role: "user",
+          content:
+            "Предыдущая версия feedback/ai_score_comment цитировала числа или формулы из эталонного решения репетитора. " +
+            "Перепиши так, чтобы оставить вердикт и краткое направление без цитирования конкретных чисел или выражений из эталона. " +
+            "Верни тот же JSON без markdown-обёрток.",
+        }];
+        try {
+          const retryParsed = await callLovableJson(retryMessages, "guided_check");
+          const retryResult = sanitizeCheckResult(retryParsed, params.correctAnswer, {
+            checkFormat: params.checkFormat,
+            maxScore: params.maxScore,
+          });
+          const retryFeedbackLeaks = outputContainsSolutionLeak(retryResult.feedback ?? "", params.solutionText, params.taskText);
+          const retryCommentLeaks = outputContainsSolutionLeak(retryResult.ai_score_comment ?? "", params.solutionText, params.taskText);
+          // Grading invariant (plan wild-swinging-nova.md P1-2 fix):
+          // the leak-retry is a cosmetic rewrite — it MUST NOT change scoring.
+          // Keep verdict/confidence/error_type/ai_score from the first valid
+          // `result`, only swap sanitized feedback/ai_score_comment from retry.
+          // Otherwise a rewrite could flip CORRECT→ON_TRACK or shift ai_score
+          // for the same student answer, which makes grading nondeterministic.
+          if (retryResult.verdict !== "CHECK_FAILED" && !retryFeedbackLeaks && !retryCommentLeaks) {
+            result = {
+              ...result,
+              feedback: retryResult.feedback,
+              ai_score_comment: retryResult.ai_score_comment,
+            };
+          } else {
+            console.warn(JSON.stringify({
+              event: "check_solution_leak_rejected",
+              subject: params.subject,
+              retry: 2,
+              feedback_leak: retryFeedbackLeaks,
+              comment_leak: retryCommentLeaks,
+            }));
+            // Scrub feedback / comment to a safe fallback; keep verdict + ai_score.
+            result = {
+              ...result,
+              feedback: feedbackLeaks
+                ? "Проверил — давай разберём шаг за шагом. Назови величину, с которой начнёшь, и я направлю дальше."
+                : result.feedback,
+              ai_score_comment: commentLeaks ? null : result.ai_score_comment,
+            };
+          }
+        } catch (retryErr) {
+          console.warn("guided_check_leak_retry_error", {
+            error: retryErr instanceof Error ? retryErr.message : String(retryErr),
+          });
+          // Same scrubbing fallback as when retry still leaks.
+          result = {
+            ...result,
+            feedback: feedbackLeaks
+              ? "Проверил — давай разберём шаг за шагом. Назови величину, с которой начнёшь, и я направлю дальше."
+              : result.feedback,
+            ai_score_comment: commentLeaks ? null : result.ai_score_comment,
+          };
+        }
+      }
     }
 
     console.log("guided_check_success", {
@@ -1211,20 +1513,42 @@ export async function generateHint(
     assignment_id: params.assignmentId ?? null,
   };
 
+  // P0-1 v3: require a meaningful text anchor (≥ 20 chars) before attaching
+  // solution images — a shorter anchor leaves the leak detector with no tokens
+  // to match against, so image transcription jailbreaks go undetected.
+  const SOLUTION_TEXT_ANCHOR_MIN_CHARS_HINT = 20;
+  const solutionTextTrimmedHint = params.solutionText?.trim() ?? "";
+  const allowSolutionImagesForHint =
+    solutionTextTrimmedHint.length >= SOLUTION_TEXT_ANCHOR_MIN_CHARS_HINT;
+  const effectiveSolutionImageRefsForHint = allowSolutionImagesForHint
+    ? (params.solutionImageUrls ?? [])
+    : [];
+  if (!allowSolutionImagesForHint && (params.solutionImageUrls?.length ?? 0) > 0) {
+    console.warn(JSON.stringify({
+      event: "guided_hint_solution_images_dropped_no_text",
+      text_len: solutionTextTrimmedHint.length,
+      ...telemetryMeta,
+    }));
+  }
+
   try {
-    const [taskImageUrls, studentImageUrls] = await Promise.all([
+    const [taskImageUrls, rubricImageUrls, solutionImageUrls, studentImageUrls] = await Promise.all([
       inlinePromptImageUrls(params.taskImageUrls.slice(0, MAX_TASK_IMAGES_FOR_AI)),
+      inlinePromptImageUrls((params.rubricImageUrls ?? []).slice(0, MAX_TASK_IMAGES_FOR_AI)),
+      inlinePromptImageUrls(effectiveSolutionImageRefsForHint.slice(0, MAX_TASK_IMAGES_FOR_AI)),
       inlinePromptImageUrls(params.studentImageUrls),
     ]);
     resolvedTaskImageUrl = taskImageUrls[0] ?? null;
     const messages = buildHintPrompt({
       ...params,
       taskImageUrls,
+      rubricImageUrls,
+      solutionImageUrls,
       studentImageUrls,
     });
     const parsed = await callLovableJson(messages, "guided_hint");
     const firstHint = sanitizeHintText(parsed.hint, params.correctAnswer);
-    const firstCheck = getGeneratedHintCheck(firstHint);
+    const firstCheck = getGeneratedHintCheck(firstHint, params.solutionText, params.taskText);
 
     if (firstCheck.ok) {
       console.log("guided_hint_success", { hint_length: firstHint.length, attempt: 1 });
@@ -1232,7 +1556,7 @@ export async function generateHint(
     }
 
     console.warn(JSON.stringify({
-      event: "hint_rejected",
+      event: firstCheck.reason === "solution_leak" ? "hint_solution_leak_rejected" : "hint_rejected",
       reason: firstCheck.reason ?? null,
       retry: 1,
       ...telemetryMeta,
@@ -1250,12 +1574,12 @@ export async function generateHint(
       content:
         `Предыдущая версия подсказки не подходит: ${reasonToHumanMessage(firstCheck.reason)}. ` +
         "Перепиши подсказку так, чтобы она явно упоминала конкретную физическую величину или закон из этой задачи. " +
-        "1-3 предложения, без общих фраз и без правильного ответа.",
+        "1-3 предложения, без общих фраз, без правильного ответа и без дословного цитирования эталонного решения.",
     });
 
     const retryParsed = await callLovableJson(retryMessages, "guided_hint");
     const secondHint = sanitizeHintText(retryParsed.hint, params.correctAnswer);
-    const secondCheck = getGeneratedHintCheck(secondHint);
+    const secondCheck = getGeneratedHintCheck(secondHint, params.solutionText, params.taskText);
 
     if (secondCheck.ok) {
       console.log("guided_hint_success", { hint_length: secondHint.length, attempt: 2 });
@@ -1263,7 +1587,7 @@ export async function generateHint(
     }
 
     console.warn(JSON.stringify({
-      event: "hint_rejected",
+      event: secondCheck.reason === "solution_leak" ? "hint_solution_leak_rejected" : "hint_rejected",
       reason: secondCheck.reason ?? null,
       retry: 2,
       ...telemetryMeta,

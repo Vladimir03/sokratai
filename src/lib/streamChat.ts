@@ -32,6 +32,14 @@ export interface StreamChatOptions {
   studentImageUrl?: string;
   /** Signed HTTP URLs for the latest student solution attachments */
   studentImageUrls?: string[];
+  /**
+   * Guided homework context — when present, the /chat endpoint fetches
+   * tutor's reference solution (solution_text + solution_image_urls) server-side
+   * using service-role, after verifying the student has access to the assignment.
+   * Student-side API never exposes these refs directly.
+   */
+  guidedHomeworkAssignmentId?: string;
+  guidedHomeworkTaskId?: string;
   onDelta: (text: string) => void;
   onDone: () => void;
   onError?: (error: Error) => void;
@@ -52,6 +60,8 @@ export async function streamChat({
   taskImageUrls,
   studentImageUrl,
   studentImageUrls,
+  guidedHomeworkAssignmentId,
+  guidedHomeworkTaskId,
   onDelta,
   onDone,
   onError,
@@ -94,6 +104,8 @@ export async function streamChat({
           taskImageUrls: taskImageUrls?.length ? taskImageUrls : undefined,
           studentImageUrl: normalizedStudentImageUrls[0] || undefined,
           studentImageUrls: normalizedStudentImageUrls.length > 0 ? normalizedStudentImageUrls : undefined,
+          guidedHomeworkAssignmentId: guidedHomeworkAssignmentId || undefined,
+          guidedHomeworkTaskId: guidedHomeworkTaskId || undefined,
         }),
         signal: controller.signal,
       });

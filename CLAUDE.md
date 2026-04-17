@@ -248,6 +248,47 @@ For architecture overview see: docs/delivery/engineering/architecture/README.md
 - Пути 1/2 используют `tutor_students.display_name` первым; путь 3 — только `profiles.username` (нет tutor context)
 - Все пути возвращают `null` при автогенеренных именах → AI работает без имени, нейтрально
 
+### 9. Эталонное решение репетитора для AI — solution_* + anti-leak (2026-04-18)
+
+Репетитор может прикрепить эталонное решение к задаче (текст + до 5 фото). AI видит его на всех 3 путях (check / hint / chat) как референс, **НИКОГДА не цитирует дословно** ученику.
+
+**DB (homework_tutor_tasks):**
+- `solution_text TEXT NULL` — текст эталона
+- `solution_image_urls TEXT NULL` — dual-format refs, лимит `MAX_SOLUTION_IMAGES = 5`
+- Миграция: `supabase/migrations/20260418120000_add_homework_task_solution.sql`
+
+**Student leak protection (КРИТИЧНО):**
+- `handleGetStudentAssignment` в `homework-api/index.ts` НИКОГДА не селектит `solution_text` / `solution_image_urls` / `rubric_text` / `rubric_image_urls`
+- `StudentHomeworkTask` тип и `studentHomeworkApi.ts` НЕ содержат этих полей — приложи compile-time гарантию
+- Все новые student-endpoints должны аналогично исключать эти поля из SELECT
+
+**AI-инжекция (3 пути):**
+- `handleCheckAnswer` → `evaluateStudentAnswer` → `buildCheckPrompt` (guided_ai.ts)
+- `handleRequestHint` → `generateHint` → `buildHintPrompt` (guided_ai.ts)
+- `/chat` (edge function `chat/index.ts`) — фетчит solution server-side через `service_role` после верификации `homework_tutor_student_assignments`. Клиент (`streamChat` в `GuidedHomeworkWorkspace.tsx`) шлёт только `guidedHomeworkAssignmentId + guidedHomeworkTaskId`; текст/фото решения клиентом не передаются
+
+**Anti-spoiler контракт:**
+- В system prompt всех 3 путей — блок «эталон только для сверки, НЕ цитируй, работай Сократовским методом»
+- `getGeneratedHintCheck(hint, solutionText, taskText)` — leak-детектор в `guided_ai.ts`: извлекает значимые токены из эталона минус токены задачи (task givens не спойлер), отклоняет вывод при совпадении → retry-once → fallback
+- `evaluateStudentAnswer` применяет тот же leak-check к `feedback` и `ai_score_comment`. **Важно: retry — cosmetic rewrite**: сохраняет `verdict`/`confidence`/`error_type`/`ai_score` от первого result, свапает только `feedback` + `ai_score_comment` от retry. Grading detreministic
+- `/chat` с guided context — buffered path: полный ответ собирается server-side, leak-детектор, fallback-сообщение при утечке. Обычные /chat запросы (не guided) стримятся как раньше
+
+**Image-only anti-leak gate (v3, критично):**
+- Константа `SOLUTION_TEXT_ANCHOR_MIN_CHARS = 20` во всех 3 путях (`chat/index.ts`, `guided_ai.ts::evaluateStudentAnswer`, `guided_ai.ts::generateHint`)
+- Если `solution_text.trim().length < 20` — `solution_image_urls` **ДРОПАЮТСЯ** и не прикладываются к промпту. Причина: leak-детектор работает только по тексту; тривиальный anchor («см. фото», 8 символов) не даёт токенов для матчинга, и фото-эталон может быть экстрактирован через «transcribe the attached image» jailbreak
+- Telemetry события: `guided_check_solution_images_dropped_no_text`, `guided_hint_solution_images_dropped_no_text`, `guided_chat_solution_images_dropped_no_text`
+- Продуктовый контракт: репетитор хочет, чтобы AI видел фото решения → должен написать хотя бы короткий (но ≥ 20 символов) текстовый summary решения
+
+**KB-мост:**
+- `kbTaskToDraftTask` в `HWTasksSection.tsx` копирует `kb.solution → solution_text`, `kb.solution_attachment_url → solution_image_paths` (с truncation до `MAX_SOLUTION_IMAGES`)
+- Raise separate toast при truncation для условия и для решения
+
+**Templates:**
+- `HomeworkTemplateTask` в `tutorHomeworkApi.ts` содержит `solution_text`, `solution_image_urls`, `rubric_image_urls`
+- Save (`templateTasksJson` в `homework-api/index.ts::handleCreateAssignment`) и load (оба path'а в `TutorHomeworkCreate.tsx`) переносят все 3 поля. **Не обрывать** эти цепочки — иначе template round-trip будет терять данные AI-контекста
+
+**Плановый документ:** `C:\Users\kamch\.claude\plans\wild-swinging-nova.md`
+
 ## Известные хрупкие области
 
 1. **Chat.tsx** (2000+ строк) — очень сложный компонент

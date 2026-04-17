@@ -35,6 +35,15 @@ interface ChatRequestBody {
    * Filtered on the frontend: auto-generated names (telegram_*, user_*) are excluded.
    */
   studentName?: string;
+  /**
+   * Guided homework context (student-side request). When present, the /chat
+   * endpoint fetches tutor's reference solution server-side using service-role
+   * (after verifying the student is assigned to this homework), and injects
+   * solution_text + solution_image_urls into the system prompt with an
+   * anti-spoiler contract. Student-side API never exposes these refs directly.
+   */
+  guidedHomeworkAssignmentId?: string;
+  guidedHomeworkTaskId?: string;
 }
 
 // SECURITY: Allowed domains for image fetching to prevent SSRF attacks
@@ -161,6 +170,66 @@ function parseStorageRef(
     bucket: defaultBucket,
     objectPath: trimmed.replace(/^\/+/, "").trim(),
   };
+}
+
+// ─── Solution leak detector (mirrors guided_ai.ts extractSolutionLeakTokens) ──
+// Used to scrub /chat responses that would expose the tutor's reference solution
+// to an assigned student via jailbreak-style prompts. See plan wild-swinging-nova.md (P0-1).
+
+const SOLUTION_LEAK_STOPWORDS_CHAT = new Set([
+  "равно", "тогда", "поэтому", "значит", "задача", "решение", "формула",
+  "потому", "таким", "образом", "отсюда", "следовательно",
+  "это", "так", "как", "что", "тут", "или", "если", "тогда.",
+]);
+
+function extractSignificantTokensForLeak(text: string): Set<string> {
+  const cleaned = text
+    .replace(/[`]/g, " ")
+    .split(/[\s,;.!?()[\]{}«»"]+/u)
+    .filter(Boolean);
+  const tokens = new Set<string>();
+  for (const rawToken of cleaned) {
+    const token = rawToken.toLowerCase();
+    if (SOLUTION_LEAK_STOPWORDS_CHAT.has(token)) continue;
+
+    if (/^-?\d+([.,]\d+)?([eE]-?\d+)?$/u.test(token) && token.replace(/[^\d]/g, "").length >= 3) {
+      tokens.add(token);
+      continue;
+    }
+
+    const nonSpaceLen = token.replace(/\s/g, "").length;
+    const hasOperator = /[=+\-*/^<>≤≥≠·×]/u.test(token);
+    const hasDigitOrLatin = /[\dA-Za-z]/.test(token);
+    if (hasOperator && nonSpaceLen >= 3) {
+      tokens.add(token);
+      continue;
+    }
+    if (nonSpaceLen >= 5 && hasDigitOrLatin) {
+      tokens.add(token);
+    }
+  }
+  return tokens;
+}
+
+function containsSolutionLeak(
+  output: string,
+  solutionText: string | null,
+  taskText: string | null,
+): boolean {
+  if (!output || !solutionText || !solutionText.trim()) return false;
+  const solutionTokens = extractSignificantTokensForLeak(solutionText);
+  if (solutionTokens.size === 0) return false;
+  if (taskText && taskText.trim()) {
+    for (const t of extractSignificantTokensForLeak(taskText)) {
+      solutionTokens.delete(t);
+    }
+  }
+  const lower = output.toLowerCase();
+  for (const token of solutionTokens) {
+    if (token.length < 3) continue;
+    if (lower.includes(token)) return true;
+  }
+  return false;
 }
 
 async function resolveTaskImageUrlsForAI(
@@ -896,7 +965,7 @@ serve(async (req) => {
       
       userId = body.userId;
 
-      const { messages, systemPrompt, taskContext, taskImageUrls, studentImageUrl, studentImageUrls, chatId, studentName } = body;
+      const { messages, systemPrompt, taskContext, taskImageUrls, studentImageUrl, studentImageUrls, chatId, studentName, guidedHomeworkAssignmentId, guidedHomeworkTaskId } = body;
       const responseProfile = normalizeResponseProfile(body.responseProfile);
       const responseMode = normalizeResponseMode(body.responseMode);
       const maxChars = normalizeMaxChars(body.maxChars);
@@ -931,6 +1000,8 @@ serve(async (req) => {
         maxChars,
         req,
         studentName,
+        guidedHomeworkAssignmentId,
+        guidedHomeworkTaskId,
       );
     } else {
       const supabase = createClient(Deno.env.get("SUPABASE_URL") ?? "", Deno.env.get("SUPABASE_ANON_KEY") ?? "", {
@@ -952,7 +1023,7 @@ serve(async (req) => {
       userId = user.id;
 
       const body = await req.json() as ChatRequestBody;
-      const { messages, systemPrompt, taskContext, taskImageUrls, studentImageUrl, studentImageUrls, chatId, studentName } = body;
+      const { messages, systemPrompt, taskContext, taskImageUrls, studentImageUrl, studentImageUrls, chatId, studentName, guidedHomeworkAssignmentId, guidedHomeworkTaskId } = body;
       const latestUserMessage = Array.isArray(messages)
         ? [...messages].reverse().find((message) => message?.role === "user")
         : null;
@@ -995,6 +1066,8 @@ serve(async (req) => {
         maxChars,
         req,
         studentName,
+        guidedHomeworkAssignmentId,
+        guidedHomeworkTaskId,
       );
     }
   } catch (error) {
@@ -1020,6 +1093,8 @@ async function processAIRequest(
   maxChars?: number,
   req?: Request,
   studentName?: string,
+  guidedHomeworkAssignmentId?: string,
+  guidedHomeworkTaskId?: string,
 ) {
   const corsHeaders = {
     "Access-Control-Allow-Origin": "*",
@@ -1109,6 +1184,94 @@ async function processAIRequest(
     Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "",
     { auth: { persistSession: false, autoRefreshToken: false } },
   );
+
+  // Fetch tutor's reference solution server-side for guided homework context.
+  // Student-side API never exposes solution_text / solution_image_urls directly —
+  // we verify here that `userId` is assigned to this homework before loading.
+  // See plan wild-swinging-nova.md (2026-04-18).
+  let tutorSolutionText: string | null = null;
+  let tutorSolutionImageDataUrls: string[] = [];
+  if (guidedHomeworkAssignmentId && guidedHomeworkTaskId) {
+    try {
+      const { data: assignmentRow, error: assignmentErr } = await adminSupabase
+        .from("homework_tutor_student_assignments")
+        .select("assignment_id")
+        .eq("assignment_id", guidedHomeworkAssignmentId)
+        .eq("student_id", userId)
+        .maybeSingle();
+      if (assignmentErr) {
+        // DB/RLS failure — log as operational issue, do not pretend this was an access denial.
+        console.warn("guided_chat_solution_db_error", {
+          stage: "assignment_lookup",
+          assignment_id: guidedHomeworkAssignmentId,
+          user_id: userId,
+          error: assignmentErr.message,
+        });
+      } else if (!assignmentRow) {
+        // True access denial — student is not assigned to this homework.
+        console.warn("guided_chat_solution_access_denied", {
+          assignment_id: guidedHomeworkAssignmentId,
+          user_id: userId,
+        });
+      } else {
+        const { data: taskRow, error: taskErr } = await adminSupabase
+          .from("homework_tutor_tasks")
+          .select("id, solution_text, solution_image_urls")
+          .eq("id", guidedHomeworkTaskId)
+          .eq("assignment_id", guidedHomeworkAssignmentId)
+          .maybeSingle();
+        if (taskErr) {
+          console.warn("guided_chat_solution_db_error", {
+            stage: "task_lookup",
+            assignment_id: guidedHomeworkAssignmentId,
+            task_id: guidedHomeworkTaskId,
+            error: taskErr.message,
+          });
+        } else if (!taskRow) {
+          console.warn("guided_chat_solution_task_not_found", {
+            assignment_id: guidedHomeworkAssignmentId,
+            task_id: guidedHomeworkTaskId,
+          });
+        } else {
+          if (typeof taskRow.solution_text === "string" && taskRow.solution_text.trim().length > 0) {
+            tutorSolutionText = taskRow.solution_text.trim();
+          }
+          // P0-1 v3 (plan wild-swinging-nova.md): attach solution images only
+          // when solution_text is a MEANINGFUL anchor for the leak detector.
+          // Rationale: our detector extracts tokens from solution_text; an anchor
+          // of a few characters (e.g. "см. фото") produces almost no tokens and
+          // leaves image content effectively unprotected against transcription
+          // jailbreaks. Minimum 20 chars guarantees non-trivial token coverage.
+          const SOLUTION_TEXT_ANCHOR_MIN_CHARS = 20;
+          const hasAnchoringText =
+            tutorSolutionText !== null && tutorSolutionText.length >= SOLUTION_TEXT_ANCHOR_MIN_CHARS;
+          const solutionRefs = parseAttachmentUrls(taskRow.solution_image_urls as string | null | undefined);
+          if (solutionRefs.length > 0) {
+            if (hasAnchoringText) {
+              tutorSolutionImageDataUrls = await resolveTaskImageUrlsForAI(
+                adminSupabase as any,
+                solutionRefs.slice(0, MAX_TASK_IMAGES_FOR_AI),
+              );
+            } else {
+              console.warn(JSON.stringify({
+                event: "guided_chat_solution_images_dropped_no_text",
+                assignment_id: guidedHomeworkAssignmentId,
+                task_id: guidedHomeworkTaskId,
+                text_len: tutorSolutionText?.length ?? 0,
+              }));
+            }
+          }
+        }
+      }
+    } catch (err) {
+      console.warn("guided_chat_solution_fetch_failed", {
+        assignment_id: guidedHomeworkAssignmentId,
+        task_id: guidedHomeworkTaskId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
   let taskPromptImageDataUrls: string[] = [];
   const studentPromptImageDataUrls: string[] = [];
 
@@ -1162,6 +1325,14 @@ async function processAIRequest(
     });
   }
 
+  const solutionOffset = studentPromptImageDataUrls.length + taskPromptImageDataUrls.length;
+  for (const [index, dataUrl] of tutorSolutionImageDataUrls.entries()) {
+    promptAttachments.push({
+      label: `Изображение ${solutionOffset + index + 1} — эталонное решение от репетитора${tutorSolutionImageDataUrls.length > 1 ? `, файл ${index + 1}` : ""}. Используй для сверки, но НЕ цитируй дословно ученику.`,
+      dataUrl,
+    });
+  }
+
   injectHomeworkImagesIntoLastUserMessage(transformedMessages, promptAttachments);
 
   // Используем Lovable AI Gateway напрямую
@@ -1187,6 +1358,23 @@ async function processAIRequest(
 
   if (taskContext) {
     effectiveSystemPrompt = `${effectiveSystemPrompt}\n\n📋 КОНТЕКСТ ЗАДАЧИ:\n${taskContext}\n\nИспользуй ИМЕННО эту задачу в своих ответах. НЕ придумывай другие задачи!`;
+  }
+
+  // Inject tutor's reference solution with anti-spoiler contract (guided homework only).
+  const hasTutorSolution = tutorSolutionText !== null || tutorSolutionImageDataUrls.length > 0;
+  if (hasTutorSolution) {
+    const solutionBlock = [
+      "",
+      "📎 ЭТАЛОННОЕ РЕШЕНИЕ РЕПЕТИТОРА (только для твоей сверки):",
+      tutorSolutionText ? tutorSolutionText : "[текст решения на прикреплённых фото выше]",
+      "",
+      "АНТИ-СПОЙЛЕР (КРИТИЧНО):",
+      " - НЕ цитируй формулы из решения дословно, если ученик ещё не дошёл до этого шага.",
+      " - НЕ называй численные подстановки или финальные выражения из решения.",
+      " - НЕ пересказывай ход решения ученику.",
+      " - Работай Сократовским методом: один наводящий вопрос к следующему микрошагу, опираясь на логику эталона.",
+    ].join("\n");
+    effectiveSystemPrompt = `${effectiveSystemPrompt}\n${solutionBlock}`;
   }
 
   // Append student name guidance — does NOT replace SYSTEM_PROMPT, only adds a suffix.
@@ -1277,33 +1465,87 @@ async function processAIRequest(
   const reader = response.body!.getReader();
   const writer = writable.getWriter();
   const decoder = new TextDecoder();
+  const textEncoder = new TextEncoder();
 
   let usageData: any = null;
 
+  // P0-1 fix (plan wild-swinging-nova.md): when tutor reference solution is
+  // loaded for a guided homework request, buffer the full response server-side
+  // and validate against solution-leak BEFORE forwarding any tokens to the
+  // student. This prevents jailbreak prompts from extracting the tutor solution
+  // via /chat (system-prompt anti-spoiler instructions are not an access boundary).
+  const guardedAgainstSolutionLeak = hasTutorSolution;
+
   (async () => {
     try {
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        const chunk = decoder.decode(value, { stream: true });
-        const lines = chunk.split("\n");
-
-        for (const line of lines) {
-          if (line.startsWith("data: ") && !line.includes("[DONE]")) {
+      if (guardedAgainstSolutionLeak) {
+        // ── Buffered path: collect the whole AI output, check for leaks, then
+        //    emit the result (or a safe fallback) as one streamed SSE event. ──
+        let fullText = "";
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          const chunk = decoder.decode(value, { stream: true });
+          for (const rawLine of chunk.split("\n")) {
+            const line = rawLine.trim();
+            if (!line.startsWith("data: ")) continue;
+            const payload = line.slice(6).trim();
+            if (payload === "[DONE]") continue;
             try {
-              const jsonStr = line.slice(6).trim();
-              const parsed = JSON.parse(jsonStr);
-              if (parsed.usage) {
-                usageData = parsed.usage;
-              }
+              const parsed = JSON.parse(payload);
+              if (parsed.usage) usageData = parsed.usage;
+              const delta = parsed.choices?.[0]?.delta?.content;
+              if (typeof delta === "string") fullText += delta;
             } catch {
-              // Ignore parsing errors
+              // Ignore malformed SSE payloads; do NOT forward raw chunks here.
             }
           }
         }
 
-        await writer.write(value);
+        let emittedText = fullText.trim();
+        const leakHit = containsSolutionLeak(emittedText, tutorSolutionText, taskContext ?? null);
+        if (leakHit) {
+          console.warn(JSON.stringify({
+            event: "chat_solution_leak_rejected",
+            assignment_id: guidedHomeworkAssignmentId ?? null,
+            task_id: guidedHomeworkTaskId ?? null,
+            user_id: userId,
+          }));
+          emittedText = "Давай двигаться шаг за шагом — с какой величины из условия ты начнёшь? Назови её, и я направлю к следующему шагу.";
+        }
+
+        // Emit the validated text as a single delta + [DONE], matching the
+        // SSE contract that streamChat on the client expects.
+        const safeChunk = JSON.stringify({
+          choices: [{ delta: { content: emittedText }, index: 0 }],
+        });
+        await writer.write(textEncoder.encode(`data: ${safeChunk}\n\n`));
+        await writer.write(textEncoder.encode("data: [DONE]\n\n"));
+      } else {
+        // ── Pass-through streaming path (original behavior). ──
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          const chunk = decoder.decode(value, { stream: true });
+          const lines = chunk.split("\n");
+
+          for (const line of lines) {
+            if (line.startsWith("data: ") && !line.includes("[DONE]")) {
+              try {
+                const jsonStr = line.slice(6).trim();
+                const parsed = JSON.parse(jsonStr);
+                if (parsed.usage) {
+                  usageData = parsed.usage;
+                }
+              } catch {
+                // Ignore parsing errors
+              }
+            }
+          }
+
+          await writer.write(value);
+        }
       }
 
       if (usageData) {

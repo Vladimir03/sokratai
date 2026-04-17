@@ -20,12 +20,12 @@ import {
 } from '@/lib/tutorHomeworkApi';
 import { FullscreenImageCarousel } from '@/components/homework/shared/FullscreenImageCarousel';
 import { useKBImagesSignedUrls } from '@/hooks/useKBImagesSignedUrls';
-import { MathText } from '@/components/kb/ui/MathText';
 import {
   parseAttachmentUrls,
   serializeAttachmentUrls,
   MAX_TASK_IMAGES,
   MAX_RUBRIC_IMAGES,
+  MAX_SOLUTION_IMAGES,
 } from '@/lib/attachmentRefs';
 
 import { SourceBadge } from '@/components/kb/ui/SourceBadge';
@@ -214,14 +214,85 @@ function PhotoGallery({
   );
 }
 
-// ─── Rubric field (collapsible) ───────────────────────────────────────────────
+// ─── Reference solution field (collapsible, primary AI source) ───────────────
+
+interface SolutionFieldProps {
+  value: string;
+  onChange: (v: string) => void;
+  solutionRefs: string[];
+  fromKB: boolean;
+  isUploading: boolean;
+  previewUrls: Record<string, string>;
+  resolvedUrls: Record<string, string>;
+  onAddSolutionFiles: (files: File[]) => void;
+  onRemoveSolutionPhoto: (index: number) => void;
+  onOpenSolutionZoom: (index: number) => void;
+}
+
+function SolutionField({
+  value,
+  onChange,
+  solutionRefs,
+  fromKB,
+  isUploading,
+  previewUrls,
+  resolvedUrls,
+  onAddSolutionFiles,
+  onRemoveSolutionPhoto,
+  onOpenSolutionZoom,
+}: SolutionFieldProps) {
+  // Open by default when there's content (including KB-imported) — репетитор должен видеть, что AI получит эталон.
+  const [open, setOpen] = useState(Boolean(value) || solutionRefs.length > 0);
+
+  return (
+    <div className="space-y-2">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="flex items-center gap-1 text-xs font-medium text-slate-600 hover:text-foreground transition-colors"
+      >
+        {open ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+        Эталонное решение (увидит AI)
+        {fromKB && (
+          <span className="ml-1 rounded-full bg-socrat-folder-bg px-1.5 py-0.5 text-[10px] font-normal text-socrat-folder">
+            из БЗ
+          </span>
+        )}
+      </button>
+      {open && (
+        <div className="space-y-3">
+          <p className="text-xs text-muted-foreground">
+            AI будет опираться на решение при подсказках и проверке, но не покажет его ученику. Можно редактировать свободно.
+          </p>
+          <textarea
+            className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-base ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 min-h-[80px] resize-y"
+            placeholder="Пошаговое решение, ключевые формулы, ответ с размерностями..."
+            value={value}
+            onChange={(e) => onChange(e.target.value)}
+          />
+          <PhotoGallery
+            label={`Фото решения (до ${MAX_SOLUTION_IMAGES})`}
+            max={MAX_SOLUTION_IMAGES}
+            refs={solutionRefs}
+            isUploading={isUploading}
+            previewUrls={previewUrls}
+            resolvedUrls={resolvedUrls}
+            onAddFiles={onAddSolutionFiles}
+            onRemove={onRemoveSolutionPhoto}
+            onOpenZoom={onOpenSolutionZoom}
+          />
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Rubric field (collapsible, optional grading criteria) ───────────────────
 
 interface RubricFieldProps {
   value: string;
   onChange: (v: string) => void;
   rubricRefs: string[];
-  kbSnapshotSolution?: string | null;
-  kbSnapshotSolutionImageRefs?: string | null;
   isUploading: boolean;
   previewUrls: Record<string, string>;
   resolvedUrls: Record<string, string>;
@@ -234,8 +305,6 @@ function RubricField({
   value,
   onChange,
   rubricRefs,
-  kbSnapshotSolution,
-  kbSnapshotSolutionImageRefs,
   isUploading,
   previewUrls,
   resolvedUrls,
@@ -244,11 +313,6 @@ function RubricField({
   onOpenRubricZoom,
 }: RubricFieldProps) {
   const [open, setOpen] = useState(Boolean(value) || rubricRefs.length > 0);
-  const solutionImageRefs = useMemo(
-    () => parseAttachmentUrls(kbSnapshotSolutionImageRefs),
-    [kbSnapshotSolutionImageRefs],
-  );
-  const hasReferenceSolution = Boolean(kbSnapshotSolution) || solutionImageRefs.length > 0;
 
   return (
     <div className="space-y-2">
@@ -258,10 +322,13 @@ function RubricField({
         className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
       >
         {open ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
-        Критерии проверки
+        Критерии оценки (опционально)
       </button>
       {open && (
         <div className="space-y-3">
+          <p className="text-xs text-muted-foreground">
+            Как начислять баллы. Используется AI при проверке ответа.
+          </p>
           <textarea
             className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-base ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 min-h-[60px] resize-y"
             placeholder="Полное решение: 2 балла, только ответ: 1 балл, ошибка в знаке: минус 1 балл..."
@@ -279,100 +346,11 @@ function RubricField({
             onRemove={onRemoveRubricPhoto}
             onOpenZoom={onOpenRubricZoom}
           />
-          {hasReferenceSolution && (
-            <div className="rounded-xl bg-socrat-surface px-3.5 py-3">
-              <div className="mb-2 text-[11px] font-medium uppercase tracking-[0.12em] text-slate-500">
-                Эталонное решение (из БЗ)
-              </div>
-              {kbSnapshotSolution && (
-                <MathText
-                  text={kbSnapshotSolution}
-                  className="whitespace-pre-wrap text-sm leading-relaxed text-slate-700"
-                />
-              )}
-              {solutionImageRefs.length > 0 && (
-                <ReferenceSolutionPhotos refs={solutionImageRefs} className="mt-2" />
-              )}
-            </div>
-          )}
         </div>
       )}
     </div>
   );
 }
-
-// ─── Read-only KB reference solution photos ──────────────────────────────────
-
-interface ReferenceSolutionPhotosProps {
-  refs: string[];
-  className?: string;
-}
-
-const ReferenceSolutionPhotos = memo(function ReferenceSolutionPhotos({
-  refs,
-  className,
-}: ReferenceSolutionPhotosProps) {
-  const [zoomIndex, setZoomIndex] = useState<number | null>(null);
-  const { urls, isLoading } = useKBImagesSignedUrls(refs, { enabled: refs.length > 0 });
-  const imageUrls = useMemo(
-    () => refs.map((ref) => urls[ref]).filter((url): url is string => Boolean(url)),
-    [refs, urls],
-  );
-
-  if (isLoading) {
-    return (
-      <div className={`flex flex-wrap gap-2 ${className ?? ''}`}>
-        {refs.map((ref) => (
-          <div
-            key={ref}
-            className="h-20 w-20 animate-pulse rounded-md border border-slate-200 bg-white/60"
-          />
-        ))}
-      </div>
-    );
-  }
-
-  if (imageUrls.length === 0) {
-    return (
-      <div className={`flex h-20 items-center justify-center rounded-xl bg-white/60 text-xs text-slate-400 ${className ?? ''}`}>
-        Не удалось загрузить фото решения
-      </div>
-    );
-  }
-
-  return (
-    <div className={className}>
-      <div className="flex flex-wrap gap-2" style={{ touchAction: 'pan-x' }}>
-        {imageUrls.map((url, index) => (
-          <button
-            key={url}
-            type="button"
-            onClick={() => setZoomIndex(index)}
-            aria-label={`Открыть фото решения ${index + 1}`}
-            title={`Открыть фото решения ${index + 1}`}
-            style={{ touchAction: 'manipulation' }}
-            className="rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2"
-          >
-            <img
-              src={url}
-              alt={`Эталонное решение фото ${index + 1}`}
-              loading="lazy"
-              className="h-20 w-20 rounded-md border border-slate-200 bg-slate-50 object-cover"
-            />
-          </button>
-        ))}
-      </div>
-      <FullscreenImageCarousel
-        images={imageUrls}
-        openIndex={zoomIndex}
-        onClose={() => setZoomIndex(null)}
-        onNavigate={setZoomIndex}
-        ariaTitle="Эталонное решение (из БЗ)"
-        ariaDescription="Просмотр фото эталонного решения во весь экран"
-      />
-    </div>
-  );
-});
 
 // ─── Task card ────────────────────────────────────────────────────────────────
 
@@ -404,14 +382,16 @@ export function HWTaskCard({
 }: HWTaskCardProps) {
   const taskRefs = useMemo(() => parseAttachmentUrls(task.task_image_path), [task.task_image_path]);
   const rubricRefs = useMemo(() => parseAttachmentUrls(task.rubric_image_paths), [task.rubric_image_paths]);
+  const solutionRefs = useMemo(() => parseAttachmentUrls(task.solution_image_paths), [task.solution_image_paths]);
 
   // Local blob preview URLs keyed by storage ref (only for this-session uploads).
   const [previewUrls, setPreviewUrls] = useState<Record<string, string>>({});
-  const [zoom, setZoom] = useState<{ gallery: 'task' | 'rubric'; index: number } | null>(null);
+  const [zoom, setZoom] = useState<{ gallery: 'task' | 'rubric' | 'solution'; index: number } | null>(null);
   // Ref mirrors created blob URLs so unmount cleanup sees the latest set (closure over [] would be stale).
   const blobUrlsRef = useRef<Set<string>>(new Set());
   const { urls: resolvedTaskUrls } = useKBImagesSignedUrls(taskRefs, { enabled: taskRefs.length > 0 });
   const { urls: resolvedRubricUrls } = useKBImagesSignedUrls(rubricRefs, { enabled: rubricRefs.length > 0 });
+  const { urls: resolvedSolutionUrls } = useKBImagesSignedUrls(solutionRefs, { enabled: solutionRefs.length > 0 });
   const taskZoomItems = useMemo(
     () =>
       taskRefs
@@ -432,6 +412,16 @@ export function HWTaskCard({
         .filter((item): item is { ref: string; url: string } => Boolean(item.url)),
     [previewUrls, resolvedRubricUrls, rubricRefs],
   );
+  const solutionZoomItems = useMemo(
+    () =>
+      solutionRefs
+        .map((ref) => ({
+          ref,
+          url: previewUrls[ref] ?? resolvedSolutionUrls[ref] ?? null,
+        }))
+        .filter((item): item is { ref: string; url: string } => Boolean(item.url)),
+    [previewUrls, resolvedSolutionUrls, solutionRefs],
+  );
   const taskZoomImages = useMemo(
     () => taskZoomItems.map((item) => item.url),
     [taskZoomItems],
@@ -440,7 +430,16 @@ export function HWTaskCard({
     () => rubricZoomItems.map((item) => item.url),
     [rubricZoomItems],
   );
-  const zoomImages = zoom?.gallery === 'rubric' ? rubricZoomImages : taskZoomImages;
+  const solutionZoomImages = useMemo(
+    () => solutionZoomItems.map((item) => item.url),
+    [solutionZoomItems],
+  );
+  const zoomImages =
+    zoom?.gallery === 'solution'
+      ? solutionZoomImages
+      : zoom?.gallery === 'rubric'
+      ? rubricZoomImages
+      : taskZoomImages;
 
   const openTaskZoom = useCallback(
     (refIndex: number) => {
@@ -462,6 +461,17 @@ export function HWTaskCard({
       }
     },
     [rubricRefs, rubricZoomItems],
+  );
+
+  const openSolutionZoom = useCallback(
+    (refIndex: number) => {
+      const ref = solutionRefs[refIndex];
+      const imageIndex = solutionZoomItems.findIndex((item) => item.ref === ref);
+      if (imageIndex >= 0) {
+        setZoom({ gallery: 'solution', index: imageIndex });
+      }
+    },
+    [solutionRefs, solutionZoomItems],
   );
 
   useEffect(() => {
@@ -658,9 +668,74 @@ export function HWTaskCard({
     [task, onUpdate, uploadFiles],
   );
 
+  const addSolutionPhotos = useCallback(
+    async (files: File[]) => {
+      if (task.uploading) {
+        toast.warning('Дождись завершения текущей загрузки.');
+        return;
+      }
+      const currentRefs = parseAttachmentUrls(task.solution_image_paths);
+      onUpdate({ ...task, uploading: true });
+      const result = await uploadFiles(
+        files,
+        MAX_SOLUTION_IMAGES,
+        currentRefs,
+        (tempRefs, tempPreviews) => {
+          const optimisticRefs = [...currentRefs, ...tempRefs].slice(0, MAX_SOLUTION_IMAGES);
+          setPreviewUrls((prev) => ({ ...prev, ...tempPreviews }));
+          onUpdate({
+            ...task,
+            solution_image_paths: serializeAttachmentUrls(optimisticRefs),
+            uploading: true,
+          });
+        },
+        (tempRefs) => {
+          setPreviewUrls((prev) => {
+            const next = { ...prev };
+            tempRefs.forEach((ref) => {
+              delete next[ref];
+            });
+            return next;
+          });
+        },
+      );
+      if (!result) {
+        onUpdate({ ...task, uploading: false });
+        return;
+      }
+      const combined = [...currentRefs, ...result.newRefs].slice(0, MAX_SOLUTION_IMAGES);
+      setPreviewUrls((prev) => {
+        const next = { ...prev, ...result.newPreviews };
+        result.tempRefs.forEach((ref) => {
+          delete next[ref];
+        });
+        return next;
+      });
+      onUpdate({
+        ...task,
+        solution_image_paths: serializeAttachmentUrls(combined),
+        uploading: false,
+      });
+      toast.success(
+        result.newRefs.length === 1
+          ? 'Изображение загружено'
+          : `Загружено изображений: ${result.newRefs.length}`,
+      );
+      if (result.anyFallback) {
+        toast.warning('Основной bucket недоступен, использован резервный канал загрузки.');
+      }
+    },
+    [task, onUpdate, uploadFiles],
+  );
+
   const removePhoto = useCallback(
-    (target: 'task' | 'rubric', idx: number) => {
-      const field = target === 'task' ? 'task_image_path' : 'rubric_image_paths';
+    (target: 'task' | 'rubric' | 'solution', idx: number) => {
+      const field =
+        target === 'task'
+          ? 'task_image_path'
+          : target === 'rubric'
+          ? 'rubric_image_paths'
+          : 'solution_image_paths';
       const refs = parseAttachmentUrls(task[field]);
       const removedRef = refs[idx];
       if (!removedRef) return;
@@ -694,6 +769,10 @@ export function HWTaskCard({
   );
   const removeRubricPhoto = useCallback(
     (idx: number) => removePhoto('rubric', idx),
+    [removePhoto],
+  );
+  const removeSolutionPhoto = useCallback(
+    (idx: number) => removePhoto('solution', idx),
     [removePhoto],
   );
 
@@ -844,12 +923,23 @@ export function HWTaskCard({
           </p>
         </div>
 
+        <SolutionField
+          value={task.solution_text}
+          onChange={(v) => onUpdate({ ...task, solution_text: v })}
+          solutionRefs={solutionRefs}
+          fromKB={Boolean(task.kb_task_id)}
+          isUploading={task.uploading}
+          previewUrls={previewUrls}
+          resolvedUrls={resolvedSolutionUrls}
+          onAddSolutionFiles={addSolutionPhotos}
+          onRemoveSolutionPhoto={removeSolutionPhoto}
+          onOpenSolutionZoom={openSolutionZoom}
+        />
+
         <RubricField
           value={task.rubric_text}
           onChange={(v) => onUpdate({ ...task, rubric_text: v })}
           rubricRefs={rubricRefs}
-          kbSnapshotSolution={task.kb_snapshot_solution}
-          kbSnapshotSolutionImageRefs={task.kb_snapshot_solution_image_refs}
           isUploading={task.uploading}
           previewUrls={previewUrls}
           resolvedUrls={resolvedRubricUrls}
@@ -872,7 +962,13 @@ export function HWTaskCard({
           openIndex={zoom?.index ?? null}
           onClose={() => setZoom(null)}
           onNavigate={(nextIndex) => setZoom((current) => (current ? { ...current, index: nextIndex } : current))}
-          ariaTitle={zoom?.gallery === 'rubric' ? 'Фото критериев' : 'Фото условия'}
+          ariaTitle={
+            zoom?.gallery === 'solution'
+              ? 'Фото эталонного решения'
+              : zoom?.gallery === 'rubric'
+              ? 'Фото критериев'
+              : 'Фото условия'
+          }
           ariaDescription="Просмотр изображений задачи во весь экран"
         />
       </CardContent>

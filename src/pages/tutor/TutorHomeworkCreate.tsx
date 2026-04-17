@@ -75,6 +75,9 @@ function buildTaskSignature(tasks: Array<{
   rubric_text?: string | null;
   rubric_image_urls?: string | null;
   rubric_image_paths?: string | null;
+  solution_text?: string | null;
+  solution_image_urls?: string | null;
+  solution_image_paths?: string | null;
   max_score?: number | null;
   check_format?: string | null;
 }>): string {
@@ -88,6 +91,8 @@ function buildTaskSignature(tasks: Array<{
       correct_answer: task.correct_answer ?? null,
       rubric_text: task.rubric_text ?? null,
       rubric_image_urls: task.rubric_image_urls ?? task.rubric_image_paths ?? null,
+      solution_text: task.solution_text ?? null,
+      solution_image_urls: task.solution_image_urls ?? task.solution_image_paths ?? null,
       max_score: task.max_score ?? 1,
       check_format: task.check_format ?? 'short_answer',
     })),
@@ -170,6 +175,8 @@ function buildEditDiffState(params: {
       correct_answer: task.correct_answer,
       rubric_text: task.rubric_text,
       rubric_image_paths: task.rubric_image_paths,
+      solution_text: task.solution_text,
+      solution_image_paths: task.solution_image_paths,
       max_score: task.max_score,
       check_format: task.check_format,
     })),
@@ -413,6 +420,8 @@ function TutorHomeworkCreateContent() {
         correct_answer: t.correct_answer ?? '',
         rubric_text: t.rubric_text ?? '',
         rubric_image_paths: t.rubric_image_urls ?? null,
+        solution_text: t.solution_text ?? '',
+        solution_image_paths: t.solution_image_urls ?? null,
         max_score: t.max_score,
         check_format: t.check_format ?? 'short_answer',
         kb_task_id: t.kb_task_id ?? undefined,
@@ -497,6 +506,9 @@ function TutorHomeworkCreateContent() {
             task_image_path: t.task_image_url ?? null,
             correct_answer: t.correct_answer ?? '',
             rubric_text: t.rubric_text ?? '',
+            rubric_image_paths: t.rubric_image_urls ?? null,
+            solution_text: t.solution_text ?? '',
+            solution_image_paths: t.solution_image_urls ?? null,
             max_score: t.max_score ?? 1,
           })),
         );
@@ -528,6 +540,9 @@ function TutorHomeworkCreateContent() {
           task_image_path: t.task_image_url ?? null,
           correct_answer: t.correct_answer ?? '',
           rubric_text: t.rubric_text ?? '',
+          rubric_image_paths: t.rubric_image_urls ?? null,
+          solution_text: t.solution_text ?? '',
+          solution_image_paths: t.solution_image_urls ?? null,
           max_score: t.max_score ?? 1,
         })),
       );
@@ -686,6 +701,8 @@ function TutorHomeworkCreateContent() {
           correct_answer: t.correct_answer.trim() || null,
           rubric_text: t.rubric_text.trim() || null,
           rubric_image_urls: t.rubric_image_paths ?? null,
+          solution_text: t.solution_text.trim() || null,
+          solution_image_urls: t.solution_image_paths ?? null,
           max_score: t.max_score,
           check_format: t.check_format,
         }));
@@ -785,6 +802,8 @@ function TutorHomeworkCreateContent() {
               correct_answer: t.correct_answer.trim() || null,
               rubric_text: t.rubric_text.trim() || null,
               rubric_image_urls: t.rubric_image_paths ?? null,
+              solution_text: t.solution_text.trim() || null,
+              solution_image_urls: t.solution_image_paths ?? null,
               max_score: t.max_score,
             })),
           });
@@ -928,6 +947,8 @@ function TutorHomeworkCreateContent() {
             correct_answer: t.correct_answer.trim() || null,
             rubric_text: t.rubric_text.trim() || null,
             rubric_image_urls: t.rubric_image_paths ?? null,
+            solution_text: t.solution_text.trim() || null,
+            solution_image_urls: t.solution_image_paths ?? null,
             max_score: t.max_score,
             check_format: t.check_format,
           }));

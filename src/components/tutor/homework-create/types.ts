@@ -73,6 +73,18 @@ export interface DraftTask {
    * Лимит — `MAX_RUBRIC_IMAGES` (3). Видимость: только репетитор.
    */
   rubric_image_paths: string | null;
+  /**
+   * Эталонное решение репетитора (текст). Единое поле "Решение для AI":
+   * AI видит его на путях check/hint/chat как референс для Сократовского ведения.
+   * НИКОГДА не отдаётся ученику. Может быть заполнено автоматически при импорте из KB.
+   */
+  solution_text: string;
+  /**
+   * Фото эталонного решения.
+   * Dual-format — single storage ref ИЛИ JSON-array через `@/lib/attachmentRefs`.
+   * Лимит — `MAX_SOLUTION_IMAGES` (5). Видимость: только репетитор + AI-промпт.
+   */
+  solution_image_paths: string | null;
   max_score: number;
   uploading: boolean;
   /** KB provenance — set when task added from Knowledge Base picker */
@@ -136,6 +148,8 @@ export function createEmptyTask(): DraftTask {
     correct_answer: '',
     rubric_text: '',
     rubric_image_paths: null,
+    solution_text: '',
+    solution_image_paths: null,
     max_score: 1,
     uploading: false,
     check_format: 'short_answer',

@@ -11,6 +11,7 @@ import {
 } from "../_shared/email-sender.ts";
 import {
   MAX_RUBRIC_IMAGES,
+  MAX_SOLUTION_IMAGES,
   MAX_TASK_IMAGES,
   parseAttachmentUrls,
 } from "../_shared/attachment-refs.ts";
@@ -472,6 +473,13 @@ async function handleCreateAssignment(
       `tasks[${i}].rubric_image_urls`,
     );
     if (rubricImageLimitError) return rubricImageLimitError;
+    const solutionImageLimitError = validateAttachmentRefLimit(
+      cors,
+      t.solution_image_urls,
+      MAX_SOLUTION_IMAGES,
+      `tasks[${i}].solution_image_urls`,
+    );
+    if (solutionImageLimitError) return solutionImageLimitError;
   }
 
   const { data: assignment, error: assignErr } = await db
@@ -504,6 +512,8 @@ async function handleCreateAssignment(
     max_score: isPositiveInt(t.max_score) ? t.max_score : 1,
     rubric_text: isNonEmptyString(t.rubric_text) ? (t.rubric_text as string).trim() : null,
     rubric_image_urls: isNonEmptyString(t.rubric_image_urls) ? (t.rubric_image_urls as string).trim() : null,
+    solution_text: isNonEmptyString(t.solution_text) ? (t.solution_text as string).trim() : null,
+    solution_image_urls: isNonEmptyString(t.solution_image_urls) ? (t.solution_image_urls as string).trim() : null,
     check_format: (VALID_CHECK_FORMATS as readonly string[]).includes(t.check_format as string) ? t.check_format : "short_answer",
   }));
 
@@ -525,6 +535,9 @@ async function handleCreateAssignment(
       correct_answer: t.correct_answer,
       max_score: t.max_score,
       rubric_text: t.rubric_text,
+      rubric_image_urls: t.rubric_image_urls,
+      solution_text: t.solution_text,
+      solution_image_urls: t.solution_image_urls,
     }));
     const { error: templateErr } = await db
       .from("homework_tutor_templates")
@@ -766,7 +779,7 @@ async function handleGetAssignment(
 
   const { data: tasks } = await db
     .from("homework_tutor_tasks")
-    .select("id, order_num, task_text, task_image_url, correct_answer, max_score, rubric_text, rubric_image_urls, check_format")
+    .select("id, order_num, task_text, task_image_url, correct_answer, max_score, rubric_text, rubric_image_urls, solution_text, solution_image_urls, check_format")
     .eq("assignment_id", assignmentId)
     .order("order_num", { ascending: true });
 
@@ -1086,6 +1099,13 @@ async function handleUpdateAssignment(
         `tasks[${i}].rubric_image_urls`,
       );
       if (rubricImageLimitError) return rubricImageLimitError;
+      const solutionImageLimitError = validateAttachmentRefLimit(
+        cors,
+        t.solution_image_urls,
+        MAX_SOLUTION_IMAGES,
+        `tasks[${i}].solution_image_urls`,
+      );
+      if (solutionImageLimitError) return solutionImageLimitError;
     }
 
     // Detect if any student has interacted with the assignment via guided threads.
@@ -1202,6 +1222,12 @@ async function handleUpdateAssignment(
         if (t.rubric_image_urls !== undefined) {
           updateFields.rubric_image_urls = isNonEmptyString(t.rubric_image_urls) ? (t.rubric_image_urls as string).trim() : null;
         }
+        if (t.solution_text !== undefined) {
+          updateFields.solution_text = isNonEmptyString(t.solution_text) ? (t.solution_text as string).trim() : null;
+        }
+        if (t.solution_image_urls !== undefined) {
+          updateFields.solution_image_urls = isNonEmptyString(t.solution_image_urls) ? (t.solution_image_urls as string).trim() : null;
+        }
         if (t.check_format !== undefined) {
           updateFields.check_format = (VALID_CHECK_FORMATS as readonly string[]).includes(t.check_format as string) ? t.check_format : "short_answer";
         }
@@ -1246,6 +1272,8 @@ async function handleUpdateAssignment(
               max_score: isPositiveInt(t.max_score) ? t.max_score : 1,
               rubric_text: isNonEmptyString(t.rubric_text) ? (t.rubric_text as string).trim() : null,
               rubric_image_urls: isNonEmptyString(t.rubric_image_urls) ? (t.rubric_image_urls as string).trim() : null,
+              solution_text: isNonEmptyString(t.solution_text) ? (t.solution_text as string).trim() : null,
+              solution_image_urls: isNonEmptyString(t.solution_image_urls) ? (t.solution_image_urls as string).trim() : null,
               check_format: (VALID_CHECK_FORMATS as readonly string[]).includes(t.check_format as string) ? t.check_format : "short_answer",
             })
             .select("id")
@@ -1327,6 +1355,8 @@ async function handleUpdateAssignment(
           max_score: isPositiveInt(t.max_score) ? t.max_score : 1,
           rubric_text: isNonEmptyString(t.rubric_text) ? (t.rubric_text as string).trim() : null,
           rubric_image_urls: isNonEmptyString(t.rubric_image_urls) ? (t.rubric_image_urls as string).trim() : null,
+          solution_text: isNonEmptyString(t.solution_text) ? (t.solution_text as string).trim() : null,
+          solution_image_urls: isNonEmptyString(t.solution_image_urls) ? (t.solution_image_urls as string).trim() : null,
           check_format: (VALID_CHECK_FORMATS as readonly string[]).includes(t.check_format as string) ? t.check_format : "short_answer",
         };
         const { error } = await db
@@ -4875,10 +4905,10 @@ async function handleCheckAnswer(
 
   const { currentState, currentOrder, stateByOrder, sortedOrders, tasks } = ctx;
 
-  // Load the full task (with correct_answer, rubric)
+  // Load the full task (with correct_answer, rubric, reference solution)
   const { data: task } = await db
     .from("homework_tutor_tasks")
-    .select("id, order_num, task_text, task_image_url, ocr_text, correct_answer, rubric_text, rubric_image_urls, max_score, check_format")
+    .select("id, order_num, task_text, task_image_url, ocr_text, correct_answer, rubric_text, rubric_image_urls, solution_text, solution_image_urls, max_score, check_format")
     .eq("id", currentState.task_id)
     .single();
 
@@ -4943,9 +4973,10 @@ async function handleCheckAnswer(
 
   // Resolve task/rubric images into AI-compatible data URLs, latest student
   // image into signed URLs, and tutor-curated student display name.
-  const [taskImageUrls, rubricImageUrls, taskOcrText, studentImageUrls, studentName] = await Promise.all([
+  const [taskImageUrls, rubricImageUrls, solutionImageUrls, taskOcrText, studentImageUrls, studentName] = await Promise.all([
     resolveTaskImageUrlsForAI(db, task.task_image_url),
     resolveTaskImageUrlsForAI(db, task.rubric_image_urls),
+    resolveTaskImageUrlsForAI(db, task.solution_image_urls),
     ensureTaskOcrText(db, task, assignment.subject ?? "math"),
     loadLatestStudentImageUrlsForTask(
       db,
@@ -4969,6 +5000,8 @@ async function handleCheckAnswer(
     correctAnswer: task.correct_answer,
     rubricText: task.rubric_text,
     rubricImageUrls,
+    solutionText: task.solution_text,
+    solutionImageUrls,
     subject: assignment.subject ?? "math",
     conversationHistory: recentMessages ?? [],
     wrongAnswerCount: (currentState.wrong_answer_count as number) ?? 0,
@@ -5240,10 +5273,12 @@ async function handleRequestHint(
     return jsonError(cors, 400, "NO_ACTIVE_TASK", "No active task for hint");
   }
 
-  // Load task
+  // Load task (include rubric + reference solution so hint has full tutor context).
+  // Before 2026-04-18, rubric_* and solution_* were missing from hint path — AI gave
+  // generic hints that ignored tutor logic. See plan: wild-swinging-nova.md.
   const { data: task } = await db
     .from("homework_tutor_tasks")
-    .select("id, order_num, task_text, task_image_url, ocr_text, correct_answer, max_score")
+    .select("id, order_num, task_text, task_image_url, ocr_text, correct_answer, rubric_text, rubric_image_urls, solution_text, solution_image_urls, max_score")
     .eq("id", activeState.task_id)
     .single();
 
@@ -5282,10 +5317,12 @@ async function handleRequestHint(
     .update({ last_student_message_at: new Date().toISOString() })
     .eq("id", threadId);
 
-  // Resolve task images into AI-compatible data URLs, latest student image
-  // into signed URLs, and tutor-curated student display name.
-  const [taskImageUrls, taskOcrText, studentImageUrls, studentName] = await Promise.all([
+  // Resolve task/rubric/solution images into AI-compatible data URLs, latest
+  // student image into signed URLs, and tutor-curated student display name.
+  const [taskImageUrls, rubricImageUrls, solutionImageUrls, taskOcrText, studentImageUrls, studentName] = await Promise.all([
     resolveTaskImageUrlsForAI(db, task.task_image_url),
+    resolveTaskImageUrlsForAI(db, task.rubric_image_urls),
+    resolveTaskImageUrlsForAI(db, task.solution_image_urls),
     ensureTaskOcrText(db, task, assignment?.subject ?? "math"),
     loadLatestStudentImageUrlsForTask(
       db,
@@ -5307,6 +5344,10 @@ async function handleRequestHint(
     taskId: task.id ?? null,
     assignmentId: studentAssignment.assignment_id ?? null,
     correctAnswer: task.correct_answer,
+    rubricText: task.rubric_text,
+    rubricImageUrls,
+    solutionText: task.solution_text,
+    solutionImageUrls,
     subject: assignment?.subject ?? "math",
     conversationHistory: recentMessages ?? [],
     wrongAnswerCount: (activeState.wrong_answer_count as number) ?? 0,
