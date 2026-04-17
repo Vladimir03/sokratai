@@ -106,7 +106,6 @@ function buildMaterialSignature(materials: Array<{
     materials.map((material, index) => ({
       index,
       id: material.id ?? null,
-      localId: material.localId ?? null,
       type: material.type ?? null,
       title: material.title ?? '',
       url: material.url ?? '',
@@ -349,6 +348,7 @@ function TutorHomeworkCreateContent() {
     [existingAssignment],
   );
   const [editInitialSnapshot, setEditInitialSnapshot] = useState<EditSnapshot | null>(null);
+  const isEditSnapshotReady = !isEditMode || editInitialSnapshot !== null;
 
   useEffect(() => {
     if (assignMode !== 'group' || !selectedGroupId) return;
@@ -454,7 +454,7 @@ function TutorHomeworkCreateContent() {
 
   const editDiffState = useMemo(() => {
     if (!isEditMode) return null;
-    const snap = editInitialSnapshot ?? (existingAssignment ? buildEditSnapshot(existingAssignment) : null);
+    const snap = editInitialSnapshot;
     if (!snap) return null;
     return buildEditDiffState({
       snapshot: snap,
@@ -464,7 +464,7 @@ function TutorHomeworkCreateContent() {
       selectedStudentIds,
       editExistingStudentIds,
     });
-  }, [isEditMode, existingAssignment, meta, tasks, materials, selectedStudentIds, editExistingStudentIds, editInitialSnapshot]);
+  }, [isEditMode, meta, tasks, materials, selectedStudentIds, editExistingStudentIds, editInitialSnapshot]);
 
   // ── Auto-load template from ?template_id query param ──
   const templateId = searchParams.get('template_id');
@@ -535,6 +535,7 @@ function TutorHomeworkCreateContent() {
 
     // Edit mode: compare against initial snapshot
     if (isEditMode) {
+      if (!isEditSnapshotReady) return false;
       if (!editDiffState) return false; // not yet loaded
       return (
         editDiffState.metaDirty ||
@@ -568,7 +569,7 @@ function TutorHomeworkCreateContent() {
       notifyTemplate.trim().length > 0;
 
     return metaDirty || tasksDirty || assignDirty;
-  }, [meta, tasks, selectedStudentIds, notifyEnabled, notifyTemplate, submitPhase, isEditMode, materials, editDiffState]);
+  }, [meta, tasks, selectedStudentIds, notifyEnabled, notifyTemplate, submitPhase, isEditMode, materials, editDiffState, isEditSnapshotReady]);
 
   useEffect(() => {
     if (!hasUnsavedChanges) return;
@@ -860,8 +861,8 @@ function TutorHomeworkCreateContent() {
       toast.error('ДЗ ещё загружается. Попробуйте сохранить через пару секунд.');
       return;
     }
-    if (!editDiffState) {
-      toast.error('Не удалось определить изменения. Обновите страницу и попробуйте ещё раз.');
+    if (!isEditSnapshotReady || !editDiffState) {
+      toast.error('ДЗ ещё подготавливается. Попробуйте сохранить через секунду.');
       return;
     }
     if (editDiffState.unsupportedStudentRemoval) {
@@ -1017,7 +1018,7 @@ function TutorHomeworkCreateContent() {
         toast.error(`Ошибка: ${message}`);
       }
     }
-  }, [editId, validateAll, existingAssignment, editDiffState, hasSubmissions, meta, materials, navigate, queryClient, tasks]);
+  }, [editId, validateAll, existingAssignment, editDiffState, hasSubmissions, isEditSnapshotReady, meta, materials, navigate, queryClient, tasks]);
 
   // ── "Создать ещё" — reset form, preserve group selection ──
 
@@ -1061,6 +1062,9 @@ function TutorHomeworkCreateContent() {
     meta.subject !== '' && !SUBJECTS.some((subject) => subject.value === meta.subject);
 
   const submitLabel = (() => {
+    if (isEditMode && !isEditSnapshotReady) {
+      return 'Подготавливаем...';
+    }
     switch (submitPhase) {
       case 'saving':
         return 'Сохраняем...';
@@ -1325,6 +1329,7 @@ function TutorHomeworkCreateContent() {
         <HWActionBar
           onSubmit={isEditMode ? handleEditSubmit : handleSubmit}
           isSubmitting={isSubmitting}
+          isSubmitDisabled={isSubmitting || (isEditMode && !isEditSnapshotReady)}
           submitPhase={submitPhase}
           submitLabel={submitLabel}
           notifyEnabled={notifyEnabled}
