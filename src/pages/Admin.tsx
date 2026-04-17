@@ -210,6 +210,10 @@ const Admin = () => {
               <BarChart3 className="w-4 h-4" />
               Аналитика
             </TabsTrigger>
+            <TabsTrigger value="business" className="flex items-center gap-2">
+              <Target className="w-4 h-4" />
+              Бизнес
+            </TabsTrigger>
             <TabsTrigger value="crm" className="flex items-center gap-2">
               <MessageSquare className="w-4 h-4" />
               CRM
