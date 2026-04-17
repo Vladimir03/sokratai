@@ -35,6 +35,7 @@ interface BusinessData {
     totals: { startedThreads: number; meaningfulThreads: number };
   } | null;
   atRiskTutors: AtRiskTutor[];
+  allTutors: TutorRow[];
   crmSummary: {
     willingToPay: { yes: number; maybe: number; no: number; unknown: number };
     riskStatus: { healthy: number; watch: number; at_risk: number };
