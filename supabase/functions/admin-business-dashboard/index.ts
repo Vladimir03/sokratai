@@ -204,6 +204,7 @@ serve(async (req) => {
           window: { startDate: startDateStr, endDate: endDateStr },
           metrics: null,
           atRiskTutors: [],
+          allTutors: [],
           crmSummary: {
             willingToPay: { yes: 0, maybe: 0, no: 0, unknown: 0 },
             riskStatus: { healthy: 0, watch: 0, at_risk: 0 },
