@@ -18,7 +18,8 @@ import { AdminPayments } from "@/components/admin/AdminPayments";
 import { AdminHomeworkChats } from "@/components/admin/AdminHomeworkChats";
 import { AdminSegmentsChart, SegmentsData } from "@/components/admin/AdminSegmentsChart";
 import { AdminTopUsers, TopUser } from "@/components/admin/AdminTopUsers";
-import { ArrowLeft, RefreshCw, Shield, CalendarIcon, BarChart3, MessageSquare, CreditCard, BookOpen } from "lucide-react";
+import { ArrowLeft, RefreshCw, Shield, CalendarIcon, BarChart3, MessageSquare, CreditCard, BookOpen, Target } from "lucide-react";
+import { BusinessDashboard } from "@/components/admin/business/BusinessDashboard";
 import { cn } from "@/lib/utils";
 
 interface CohortRetentionData {
@@ -209,6 +210,10 @@ const Admin = () => {
               <BarChart3 className="w-4 h-4" />
               Аналитика
             </TabsTrigger>
+            <TabsTrigger value="business" className="flex items-center gap-2">
+              <Target className="w-4 h-4" />
+              Бизнес
+            </TabsTrigger>
             <TabsTrigger value="crm" className="flex items-center gap-2">
               <MessageSquare className="w-4 h-4" />
               CRM
@@ -287,6 +292,10 @@ const Admin = () => {
                 <AdminFunnelChart funnel={analytics.funnel} />
               </div>
             ) : null}
+          </TabsContent>
+
+          <TabsContent value="business">
+            <BusinessDashboard />
           </TabsContent>
 
           <TabsContent value="crm">

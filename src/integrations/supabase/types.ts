@@ -2530,6 +2530,39 @@ export type Database = {
           },
         ]
       }
+      tutor_pilot_crm: {
+        Row: {
+          is_pilot: boolean
+          key_pain: string | null
+          notes: string | null
+          risk_status: string
+          tutor_user_id: string
+          updated_at: string
+          updated_by: string | null
+          willing_to_pay: string
+        }
+        Insert: {
+          is_pilot?: boolean
+          key_pain?: string | null
+          notes?: string | null
+          risk_status?: string
+          tutor_user_id: string
+          updated_at?: string
+          updated_by?: string | null
+          willing_to_pay?: string
+        }
+        Update: {
+          is_pilot?: boolean
+          key_pain?: string | null
+          notes?: string | null
+          risk_status?: string
+          tutor_user_id?: string
+          updated_at?: string
+          updated_by?: string | null
+          willing_to_pay?: string
+        }
+        Relationships: []
+      }
       tutor_reminder_settings: {
         Row: {
           created_at: string | null
