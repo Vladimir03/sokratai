@@ -29,6 +29,7 @@ import {
   type CreateAssignmentTask,
   type UpdateAssignmentTask,
   type HomeworkTemplateListItem,
+  type TutorHomeworkAssignmentDetails,
   HomeworkApiError,
 } from '@/lib/tutorHomeworkApi';
 import { getTutorInviteWebLink } from '@/utils/telegramLinks';
@@ -112,6 +113,87 @@ function buildMaterialSignature(materials: Array<{
       file_name: material.file?.name ?? null,
     })),
   );
+}
+
+type EditSnapshot = {
+  meta: MetaState;
+  taskSignature: string;
+  studentIds: string;
+  materialSignature: string;
+};
+
+function buildEditSnapshot(assignment: TutorHomeworkAssignmentDetails): EditSnapshot {
+  const a = assignment.assignment;
+  return {
+    meta: {
+      title: a.title,
+      subject: a.subject,
+      deadline: a.deadline ? toLocalDatetimeString(a.deadline) : '',
+      disable_ai_bootstrap: a.disable_ai_bootstrap ?? true,
+      exam_type: (a.exam_type as 'ege' | 'oge') ?? 'ege',
+    },
+    taskSignature: buildTaskSignature(assignment.tasks),
+    studentIds: assignment.assigned_students.map((s) => s.student_id).sort().join(','),
+    materialSignature: buildMaterialSignature(assignment.materials),
+  };
+}
+
+function buildEditDiffState(params: {
+  snapshot: EditSnapshot;
+  meta: MetaState;
+  tasks: DraftTask[];
+  materials: DraftMaterial[];
+  selectedStudentIds: Set<string>;
+  editExistingStudentIds: Set<string>;
+}) {
+  const {
+    snapshot,
+    meta,
+    tasks,
+    materials,
+    selectedStudentIds,
+    editExistingStudentIds,
+  } = params;
+
+  const metaDirty =
+    meta.title !== snapshot.meta.title ||
+    meta.subject !== snapshot.meta.subject ||
+    meta.deadline !== snapshot.meta.deadline ||
+    (meta.disable_ai_bootstrap ?? true) !== (snapshot.meta.disable_ai_bootstrap ?? true) ||
+    (meta.exam_type ?? 'ege') !== (snapshot.meta.exam_type ?? 'ege');
+
+  const tasksDirty = buildTaskSignature(
+    tasks.map((task, index) => ({
+      id: task.id ?? null,
+      order_num: index + 1,
+      task_text: task.task_text,
+      task_image_path: task.task_image_path,
+      correct_answer: task.correct_answer,
+      rubric_text: task.rubric_text,
+      rubric_image_paths: task.rubric_image_paths,
+      max_score: task.max_score,
+      check_format: task.check_format,
+    })),
+  ) !== snapshot.taskSignature;
+
+  const materialsDirty = buildMaterialSignature(materials) !== snapshot.materialSignature;
+
+  const newStudentIds = [...selectedStudentIds]
+    .filter((id) => !editExistingStudentIds.has(id))
+    .sort();
+  const removedExistingStudentIds = [...editExistingStudentIds]
+    .filter((id) => !selectedStudentIds.has(id))
+    .sort();
+
+  return {
+    metaDirty,
+    tasksDirty,
+    materialsDirty,
+    newStudentIds,
+    newStudentsDirty: newStudentIds.length > 0,
+    removedExistingStudentIds,
+    unsupportedStudentRemoval: removedExistingStudentIds.length > 0,
+  };
 }
 
 function hasKbLinkDraft(task: DraftTask): boolean {
@@ -266,6 +348,7 @@ function TutorHomeworkCreateContent() {
     () => new Set(existingAssignment?.assigned_students.map((s) => s.student_id) ?? []),
     [existingAssignment],
   );
+  const [editInitialSnapshot, setEditInitialSnapshot] = useState<EditSnapshot | null>(null);
 
   useEffect(() => {
     if (assignMode !== 'group' || !selectedGroupId) return;
@@ -350,31 +433,8 @@ function TutorHomeworkCreateContent() {
 
     const assignedIds = existingAssignment.assigned_students.map((s) => s.student_id);
     setSelectedStudentIds(new Set(assignedIds));
+    setEditInitialSnapshot(buildEditSnapshot(existingAssignment));
   }, [isEditMode, existingAssignment]);
-
-  // Store initial state snapshot for unsaved-changes comparison in edit mode
-  const [editInitialSnapshot, setEditInitialSnapshot] = useState<{
-    meta: MetaState;
-    taskSignature: string;
-    studentIds: string;
-    materialSignature: string;
-  } | null>(null);
-  useEffect(() => {
-    if (!isEditMode || !existingAssignment || editInitialSnapshot) return;
-    const a = existingAssignment.assignment;
-    setEditInitialSnapshot({
-      meta: {
-        title: a.title,
-        subject: a.subject,
-        deadline: a.deadline ? toLocalDatetimeString(a.deadline) : '',
-        disable_ai_bootstrap: a.disable_ai_bootstrap ?? true,
-        exam_type: (a.exam_type as 'ege' | 'oge') ?? 'ege',
-      },
-      taskSignature: buildTaskSignature(existingAssignment.tasks),
-      studentIds: existingAssignment.assigned_students.map((s) => s.student_id).sort().join(','),
-      materialSignature: buildMaterialSignature(existingAssignment.materials),
-    });
-  }, [isEditMode, existingAssignment, editInitialSnapshot]);
 
   // Reset refs when editId changes (navigation between different edit pages)
   useEffect(() => {
@@ -394,49 +454,17 @@ function TutorHomeworkCreateContent() {
 
   const editDiffState = useMemo(() => {
     if (!isEditMode) return null;
-    const snap = editInitialSnapshot;
+    const snap = editInitialSnapshot ?? (existingAssignment ? buildEditSnapshot(existingAssignment) : null);
     if (!snap) return null;
-
-    const metaDirty =
-      meta.title !== snap.meta.title ||
-      meta.subject !== snap.meta.subject ||
-      meta.deadline !== snap.meta.deadline ||
-      (meta.disable_ai_bootstrap ?? true) !== (snap.meta.disable_ai_bootstrap ?? true) ||
-      (meta.exam_type ?? 'ege') !== (snap.meta.exam_type ?? 'ege');
-
-    const tasksDirty = buildTaskSignature(
-      tasks.map((task, index) => ({
-        id: task.id ?? null,
-        order_num: index + 1,
-        task_text: task.task_text,
-        task_image_path: task.task_image_path,
-        correct_answer: task.correct_answer,
-        rubric_text: task.rubric_text,
-        rubric_image_paths: task.rubric_image_paths,
-        max_score: task.max_score,
-        check_format: task.check_format,
-      })),
-    ) !== snap.taskSignature;
-
-    const materialsDirty = buildMaterialSignature(materials) !== snap.materialSignature;
-
-    const newStudentIds = [...selectedStudentIds]
-      .filter((id) => !editExistingStudentIds.has(id))
-      .sort();
-    const removedExistingStudentIds = [...editExistingStudentIds]
-      .filter((id) => !selectedStudentIds.has(id))
-      .sort();
-
-    return {
-      metaDirty,
-      tasksDirty,
-      materialsDirty,
-      newStudentIds,
-      newStudentsDirty: newStudentIds.length > 0,
-      removedExistingStudentIds,
-      unsupportedStudentRemoval: removedExistingStudentIds.length > 0,
-    };
-  }, [isEditMode, meta, tasks, materials, selectedStudentIds, editExistingStudentIds, editInitialSnapshot]);
+    return buildEditDiffState({
+      snapshot: snap,
+      meta,
+      tasks,
+      materials,
+      selectedStudentIds,
+      editExistingStudentIds,
+    });
+  }, [isEditMode, existingAssignment, meta, tasks, materials, selectedStudentIds, editExistingStudentIds, editInitialSnapshot]);
 
   // ── Auto-load template from ?template_id query param ──
   const templateId = searchParams.get('template_id');
