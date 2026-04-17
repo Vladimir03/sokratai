@@ -183,7 +183,7 @@ export const BusinessDashboard = () => {
           {/* Verdict */}
           <VerdictCard level={data.verdict.level} reason={data.verdict.reason} />
 
-          {/* Row 1: headline */}
+          {/* Row 1: headline — clickable filters for All Tutors table below */}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
             <BusinessMetricCard
               title="Repeat Value Tutors (NSM)"
@@ -191,6 +191,8 @@ export const BusinessDashboard = () => {
               sub={`${pct(m.repeatValueTutors.share)} от когорты (${m.cohortSize})`}
               tone={m.repeatValueTutors.share >= 0.5 ? "good" : m.repeatValueTutors.share >= 0.25 ? "warn" : "bad"}
               tooltip="Главная NSM. Репетитор считается Repeat Value, если за период был активен ≥ 2 разных дня И имеет ≥ 3 значимых тредов учеников. Прямая метрика."
+              onClick={() => toggleFilter("repeatValue")}
+              active={metricFilter === "repeatValue"}
             />
             <BusinessMetricCard
               title="Готовы платить"
@@ -198,6 +200,8 @@ export const BusinessDashboard = () => {
               sub={`yes: ${pct(m.willingToPay.yesShare)} · yes+maybe: ${pct(m.willingToPay.yesMaybeShare)}`}
               tone={m.willingToPay.yesShare >= 0.2 ? "good" : "warn"}
               tooltip="Доля репетиторов с ручным тегом willing_to_pay = yes (и yes+maybe). Заполняется вручную через диалог редактирования. Manual CRM tag."
+              onClick={() => toggleFilter("willingYes")}
+              active={metricFilter === "willingYes"}
             />
             <BusinessMetricCard
               title="В зоне риска"
@@ -205,6 +209,8 @@ export const BusinessDashboard = () => {
               sub={`${pct(m.atRiskTutors.share)} от когорты`}
               tone={m.atRiskTutors.share >= 0.5 ? "bad" : m.atRiskTutors.share >= 0.25 ? "warn" : "good"}
               tooltip="Репетитор в риске если: < 2 активных дней ИЛИ < 2 значимых тредов за период ИЛИ ручной тег risk_status = at_risk."
+              onClick={() => toggleFilter("atRisk")}
+              active={metricFilter === "atRisk"}
             />
             <BusinessMetricCard
               title="Tutor Revisit Rate"
@@ -212,10 +218,12 @@ export const BusinessDashboard = () => {
               sub="≥ 2 активных дней / все"
               tone={m.tutorRevisitRate >= 0.5 ? "good" : m.tutorRevisitRate >= 0.3 ? "warn" : "bad"}
               tooltip="Доля репетиторов когорты, у которых был активен хотя бы 1 ученик минимум в 2 разных дня за период. Прямая метрика."
+              onClick={() => toggleFilter("revisit")}
+              active={metricFilter === "revisit"}
             />
           </div>
 
-          {/* Row 2: usage quality */}
+          {/* Row 2: usage quality (informational only, not clickable) */}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
             <BusinessMetricCard
               title="Знач. тредов / репетитор"
@@ -246,6 +254,14 @@ export const BusinessDashboard = () => {
               tooltip="Количество уникальных учеников, у которых был хотя бы 1 started thread за период. Прямая метрика."
             />
           </div>
+
+          {/* All tutors with metric-membership filter */}
+          <AllTutorsTable
+            tutors={data.allTutors ?? []}
+            filter={metricFilter}
+            onClearFilter={() => setMetricFilter(null)}
+            onEdit={openEdit}
+          />
 
           {/* At-risk table */}
           <AtRiskTutorsTable tutors={data.atRiskTutors} onEdit={openEdit} />
