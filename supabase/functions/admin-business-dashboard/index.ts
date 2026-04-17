@@ -204,6 +204,7 @@ serve(async (req) => {
           window: { startDate: startDateStr, endDate: endDateStr },
           metrics: null,
           atRiskTutors: [],
+          allTutors: [],
           crmSummary: {
             willingToPay: { yes: 0, maybe: 0, no: 0, unknown: 0 },
             riskStatus: { healthy: 0, watch: 0, at_risk: 0 },
@@ -450,6 +451,46 @@ serve(async (req) => {
 
     const atRiskCount = atRiskTutors.length;
 
+    // ===== Full tutor list with metric-membership flags =====
+    const allTutors = tutorAggs
+      .map((a) => {
+        const crm = crmMap.get(a.tutorId);
+        const willingToPay = (crm?.willing_to_pay ?? "unknown") as WillingToPay;
+        const riskStatus = (crm?.risk_status ?? "healthy") as RiskStatus;
+        const isRepeatValue = a.activeDays.size >= 2 && a.meaningfulThreads.size >= 3;
+        const isWillingYes = willingToPay === "yes";
+        const isAtRisk =
+          a.activeDays.size < 2 ||
+          a.meaningfulThreads.size < 2 ||
+          riskStatus === "at_risk";
+        const isRevisit = a.activeDays.size >= 2;
+        return {
+          tutorId: a.tutorId,
+          username: a.username,
+          subjects: Array.from(a.subjects),
+          activeDays7d: a.activeDays.size,
+          meaningfulThreads7d: a.meaningfulThreads.size,
+          startedThreads7d: a.startedThreads.size,
+          studentsReached7d: a.studentsReached.size,
+          willingToPay,
+          riskStatus,
+          keyPain: crm?.key_pain ?? null,
+          flags: {
+            repeatValue: isRepeatValue,
+            willingYes: isWillingYes,
+            atRisk: isAtRisk,
+            revisit: isRevisit,
+          },
+        };
+      })
+      .sort((a, b) => {
+        // Best signal first: repeat value tutors on top, then by meaningful threads desc
+        if (a.flags.repeatValue !== b.flags.repeatValue) {
+          return a.flags.repeatValue ? -1 : 1;
+        }
+        return b.meaningfulThreads7d - a.meaningfulThreads7d;
+      });
+
     const verdict = computeVerdict({
       repeatValueRate,
       willingYesShare,
@@ -488,6 +529,7 @@ serve(async (req) => {
           totals: { startedThreads: totalStarted, meaningfulThreads: totalMeaningful },
         },
         atRiskTutors,
+        allTutors,
         crmSummary: { willingToPay: willingCount, riskStatus: riskCount },
         verdict,
       }),
@@ -543,6 +585,7 @@ function emptyMetricsResponse(
         totals: { startedThreads: 0, meaningfulThreads: 0 },
       },
       atRiskTutors: [],
+      allTutors: [],
       crmSummary: { willingToPay: willingCount, riskStatus: riskCount },
       verdict: { level: "low" as const, reason: "Нет активности в выбранном окне" },
     }),
