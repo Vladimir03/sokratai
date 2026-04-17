@@ -10,12 +10,12 @@ import {
   sendHomeworkTutorMessageEmail,
 } from "../_shared/email-sender.ts";
 import {
+  MAX_GUIDED_CHAT_ATTACHMENTS,
   MAX_RUBRIC_IMAGES,
   MAX_SOLUTION_IMAGES,
   MAX_TASK_IMAGES,
   parseAttachmentUrls,
 } from "../_shared/attachment-refs.ts";
-import { MAX_GUIDED_CHAT_ATTACHMENTS } from "../../../src/lib/homeworkThreadAttachments.ts";
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 

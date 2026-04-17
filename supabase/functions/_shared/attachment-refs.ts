@@ -18,6 +18,19 @@ export const MAX_SOLUTION_IMAGES = 5;
 export const MAX_TASK_IMAGES_FOR_AI = 5;
 
 /**
+ * Max files a student may attach to a single guided chat message.
+ * Server-side mirror of MAX_GUIDED_CHAT_ATTACHMENTS in src/lib/homeworkThreadAttachments.ts.
+ * Keep in sync.
+ */
+export const MAX_GUIDED_CHAT_ATTACHMENTS = 5;
+
+/**
+ * Canonical AI-side limit for student images per guided message that flow into AI prompts.
+ * Server-side mirror of MAX_GUIDED_CHAT_IMAGES_FOR_AI in src/lib/homeworkThreadAttachments.ts.
+ */
+export const MAX_GUIDED_CHAT_IMAGES_FOR_AI = 5;
+
+/**
  * Parse `attachment_url`-style fields which may be:
  *  - null / undefined / "" → []
  *  - single storage ref string → [ref]

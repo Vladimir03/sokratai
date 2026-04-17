@@ -1,8 +1,11 @@
 import "https://deno.land/x/xhr@0.1.0/mod.ts";
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "npm:@supabase/supabase-js@2";
-import { MAX_TASK_IMAGES_FOR_AI, parseAttachmentUrls } from "../_shared/attachment-refs.ts";
-import { MAX_GUIDED_CHAT_IMAGES_FOR_AI } from "../../../src/lib/homeworkThreadAttachments.ts";
+import {
+  MAX_GUIDED_CHAT_IMAGES_FOR_AI,
+  MAX_TASK_IMAGES_FOR_AI,
+  parseAttachmentUrls,
+} from "../_shared/attachment-refs.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
