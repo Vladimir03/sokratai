@@ -1,7 +1,7 @@
 import { getFormulaById, getRelatedFormulas } from './formulas';
+import { BUILD_RECIPES, SUPPORTED_BUILD_FORMULA_IDS, type BuildRecipe } from './recipes.generated';
+import { MUTATION_LIBRARY } from './mutations.generated';
 import type { Formula, FormulaQuestion, RoundConfig, WeakFormula } from './types';
-
-type MutationType = 'swap_fraction' | 'drop_coefficient' | 'wrong_power' | 'swap_variable';
 
 interface RoundDistribution {
   trueOrFalse: number;
@@ -9,19 +9,7 @@ interface RoundDistribution {
   situationToFormula: number;
 }
 
-interface FormulaMutation {
-  type: MutationType;
-  latex: string;
-  hint: string;
-}
-
-interface BuildRecipe {
-  displayFormula: string;
-  numeratorTokens: string[];
-  denominatorTokens: string[];
-}
-
-const SUPPORTED_BUILD_FORMULA_IDS = new Set([
+const _LEGACY_SUPPORTED_BUILD_FORMULA_IDS = new Set([
   'kin.01',
   'kin.02',
   'kin.07',

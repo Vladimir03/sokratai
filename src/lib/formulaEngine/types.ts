@@ -9,6 +9,8 @@ export interface Proportionality {
   inverse: string[];
 }
 
+export type ExamTag = 'ЕГЭ' | 'ОГЭ' | 'ЕГЭ+ОГЭ';
+
 export interface Formula {
   id: string;
   section: string;
@@ -26,6 +28,8 @@ export interface Formula {
   commonMistakes: string[];
   relatedFormulas: string[];
   difficulty: 1 | 2 | 3;
+  /** ЕГЭ / ОГЭ / ЕГЭ+ОГЭ filter metadata, sourced from the «Экзамен» column. */
+  exam?: ExamTag;
 }
 
 export type QuestionType = 'true_or_false' | 'build_formula' | 'situation_to_formula';
