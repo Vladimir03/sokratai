@@ -56,6 +56,10 @@ export const BusinessDashboard = () => {
     to: new Date(),
   });
   const [editTarget, setEditTarget] = useState<TutorTagsValues | null>(null);
+  const [metricFilter, setMetricFilter] = useState<MetricFilter>(null);
+
+  const toggleFilter = (f: Exclude<MetricFilter, null>) =>
+    setMetricFilter((cur) => (cur === f ? null : f));
 
   const fetchData = useCallback(async () => {
     setLoading(true);
