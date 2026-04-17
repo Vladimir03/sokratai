@@ -528,6 +528,7 @@ serve(async (req) => {
           totals: { startedThreads: totalStarted, meaningfulThreads: totalMeaningful },
         },
         atRiskTutors,
+        allTutors,
         crmSummary: { willingToPay: willingCount, riskStatus: riskCount },
         verdict,
       }),
