@@ -167,6 +167,25 @@ For architecture overview see: docs/delivery/engineering/architecture/README.md
 
 ## КРИТИЧЕСКИЕ ПРАВИЛА
 
+### 0. Новая колонка/поле в БД — ОБЯЗАТЕЛЬНО сгрепать ВСЕ write-sites (2026-04-18)
+
+Когда добавляешь новую колонку в таблицу (или новое поле в payload/type, видимое для AI или критичное для UX), перед заявлением «готово» **ОБЯЗАТЕЛЬНО** найди все места, где в эту таблицу пишут. В репо есть несколько таблиц с **множественными независимыми write-path** — и легко пропустить второй:
+
+- **`homework_tutor_tasks`** (критично для этого урока):
+  - Path A: `supabase/functions/homework-api/index.ts` → `handleCreateAssignment` + `handleUpdateAssignment` (3 insert/update блока)
+  - Path B: `src/components/kb/HWDrawer.tsx` — **напрямую** `supabase.from('homework_tutor_tasks').insert(...)` из клиента, минуя edge function. Источник данных — `HWDraftTask` из `hwDraftStore` (Zustand + localStorage), заполняемый кнопкой «В ДЗ» на KB-карточке задачи
+  - Path C (если появится — добавь в список): любой новый client-side insert
+- **`homework_tutor_thread_messages`** — guided chat messages. Проверяй все message-insert-сайты при изменении схемы (task_id invariant, см. rule 40)
+- **`kb_tasks`** — modifications через триггеры (Source→Copy, kb moderation v2), см. rule 50
+- **`profiles`** — синхронизация ролей, display_name
+
+**Алгоритм проверки** (выполнять перед commit):
+1. `grep -rn "from('TABLE_NAME')\.insert\|from('TABLE_NAME')\.update\|into TABLE_NAME" src/ supabase/`
+2. Для каждого match убедиться, что новое поле пишется/читается
+3. Для type-driven payloads: grep имя типа (например `CreateAssignmentTask`, `HWDraftTask`) — найти все construct-sites
+
+**Симптом пропуска:** «feature работает через один flow, но не через другой» (как было с HWDrawer + solution_text — коммит `f454f6e`). Отсюда же правило: fix → ВСЕГДА проверь вторичные пути.
+
 ### 1. Форматирование дат и валюты
 - Канонический источник: **`src/lib/formatters.ts`** — функции форматирования дат, валюты, прогресса
 - Всегда используй `parseISO` из `date-fns` для разбора строк дат (не `new Date(string)` — ломается в Safari)

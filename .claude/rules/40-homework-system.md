@@ -8,6 +8,27 @@
 - Legacy student-only (`homework_sets`, `homework_tasks`, `homework_chat_messages`) — удалена миграцией `20260310110000_drop_legacy_homework.sql`
 - Classic mode (photo upload + OCR) — удалён миграцией `20260406120000_drop_classic_homework.sql`. Колонка `workflow_mode` и таблицы `homework_tutor_submissions`/`homework_tutor_submission_items` дропнуты
 
+### Двойной write-path в `homework_tutor_tasks` — КРИТИЧНО при добавлении новых колонок (2026-04-18)
+
+В репо есть **ДВА независимых места**, которые инсертят строки в `homework_tutor_tasks`. При добавлении новой колонки / нового поля в AI-prompt / любом cross-cutting изменении — надо править **ОБА**, иначе feature работает через один flow и молча ломается через другой.
+
+| Путь | Entry point | Источник данных | Kто пишет в БД |
+|---|---|---|---|
+| **A — через edge function** | Кнопка «+ из БЗ» в конструкторе ДЗ (`TutorHomeworkCreate.tsx`) → `KBPickerSheet` → `HWTasksSection.handleAddFromKB` → `kbTaskToDraftTask` | `DraftTask[]` local state | `POST /assignments` в `homework-api/index.ts::handleCreateAssignment` / `handleUpdateAssignment` |
+| **B — напрямую из клиента** | Кнопка «В ДЗ» на карточке задачи в БЗ (`src/components/kb/TaskCard.tsx` → `onAddToHW`) → `hwDraftStore.addTask` (Zustand, persisted to `sokrat-hw-draft` в localStorage) → UI корзины `HWDrawer` | `HWDraftTask[]` из Zustand | **Прямой** `supabase.from('homework_tutor_assignments').insert(...)` + `supabase.from('homework_tutor_tasks').insert(...)` в `HWDrawer.tsx` |
+
+**Типы-носители (правь ВСЕ при изменениях):**
+- Path A: `DraftTask` (`src/components/tutor/homework-create/types.ts`) + `CreateAssignmentTask` / `UpdateAssignmentTask` (`src/lib/tutorHomeworkApi.ts`) + `KBTask` конвертер (`HWTasksSection.kbTaskToDraftTask`)
+- Path B: `HWDraftTask` (`src/types/kb.ts`) + `hwDraftStore.addTask` (`src/stores/hwDraftStore.ts`) + прямой INSERT в `HWDrawer.tsx`
+
+**Симптом пропуска:** fix работает в конструкторе ДЗ, но ДЗ, созданные через «В ДЗ» с KB-карточки, оказываются с NULL в новой колонке. Именно это случилось с `solution_text` в коммите `adcdc12` и было исправлено в `f454f6e` (path B был пропущен).
+
+**Перед мержем PR, меняющим homework_tutor_tasks, проверь:**
+1. `grep -rn "from('homework_tutor_tasks')\\.insert\\|from('homework_tutor_tasks')\\.update" src/ supabase/`
+2. Оба пути пишут новое поле
+3. `HWDraftTask` + `DraftTask` содержат новое поле (если оно должно переноситься через корзину и конструктор)
+4. `handleGetStudentAssignment` (student-side API) НЕ селектит поля, которые должны оставаться tutor-only
+
 ### Task identity — canonical source of truth (2026-04-10)
 
 `task_id` (UUID FK to `homework_tutor_tasks.id`) — единственный immutable identity для привязки сообщений, AI-контекста и state к задаче. `task_order` — display/sort field, может меняться при reorder.
