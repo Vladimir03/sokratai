@@ -200,6 +200,11 @@ const AssignmentCard = memo(function AssignmentCard({ item }: { item: TutorHomew
               <TooltipTrigger asChild>
                 <span
                   className="flex items-center gap-1"
+                  title={
+                    typeof item.started_count === 'number'
+                      ? `Сдали ${item.submitted_count}, приступили ${item.started_count}, всего ${item.assigned_count}`
+                      : `Сдали ${item.submitted_count} из ${item.assigned_count}`
+                  }
                   aria-label={`Сдали ${item.submitted_count}${
                     typeof item.started_count === 'number'
                       ? `, приступили ${item.started_count}`

@@ -11,6 +11,22 @@ const PDF_EXTENSIONS = new Set(['pdf']);
  * Server-side mirror: MAX_THREAD_ATTACHMENTS в supabase/functions/homework-api/index.ts.
  */
 export const MAX_GUIDED_CHAT_ATTACHMENTS = 5;
+/**
+ * Hard per-file limit for guided chat attachments.
+ * Kept at 5 MB so the same image is small enough for the AI paths that inline
+ * student photos into multimodal prompts.
+ */
+export const MAX_GUIDED_CHAT_ATTACHMENT_FILE_BYTES = 5 * 1024 * 1024;
+/**
+ * Soft total budget for all attachments in a single guided chat message.
+ * Lets students send up to 5 smaller pages, but blocks very heavy bundles.
+ */
+export const MAX_GUIDED_CHAT_ATTACHMENT_TOTAL_BYTES = 15 * 1024 * 1024;
+/**
+ * Canonical AI-side limit for how many student images from one guided message
+ * are passed into /chat, /check and /hint.
+ */
+export const MAX_GUIDED_CHAT_IMAGES_FOR_AI = 5;
 
 function normalizeRefs(refs: string[]): string[] {
   return refs

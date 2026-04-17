@@ -15,6 +15,7 @@ import {
   type LovableTextPart,
 } from "./ai_shared.ts";
 import { MAX_TASK_IMAGES_FOR_AI } from "../_shared/attachment-refs.ts";
+import { MAX_GUIDED_CHAT_IMAGES_FOR_AI } from "../../../src/lib/homeworkThreadAttachments.ts";
 
 // ─── Constants ──────────────────────────────────────────────────────────────
 
@@ -1376,7 +1377,7 @@ export async function evaluateStudentAnswer(
       inlinePromptImageUrls(params.taskImageUrls.slice(0, MAX_TASK_IMAGES_FOR_AI)),
       inlinePromptImageUrls((params.rubricImageUrls ?? []).slice(0, MAX_TASK_IMAGES_FOR_AI)),
       inlinePromptImageUrls(effectiveSolutionImageRefs.slice(0, MAX_TASK_IMAGES_FOR_AI)),
-      inlinePromptImageUrls(params.studentImageUrls),
+      inlinePromptImageUrls((params.studentImageUrls ?? []).slice(0, MAX_GUIDED_CHAT_IMAGES_FOR_AI)),
     ]);
     const messages = buildCheckPrompt({
       ...params,
@@ -1536,7 +1537,7 @@ export async function generateHint(
       inlinePromptImageUrls(params.taskImageUrls.slice(0, MAX_TASK_IMAGES_FOR_AI)),
       inlinePromptImageUrls((params.rubricImageUrls ?? []).slice(0, MAX_TASK_IMAGES_FOR_AI)),
       inlinePromptImageUrls(effectiveSolutionImageRefsForHint.slice(0, MAX_TASK_IMAGES_FOR_AI)),
-      inlinePromptImageUrls(params.studentImageUrls),
+      inlinePromptImageUrls((params.studentImageUrls ?? []).slice(0, MAX_GUIDED_CHAT_IMAGES_FOR_AI)),
     ]);
     resolvedTaskImageUrl = taskImageUrls[0] ?? null;
     const messages = buildHintPrompt({

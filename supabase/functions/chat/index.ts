@@ -2,6 +2,7 @@ import "https://deno.land/x/xhr@0.1.0/mod.ts";
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { MAX_TASK_IMAGES_FOR_AI, parseAttachmentUrls } from "../_shared/attachment-refs.ts";
+import { MAX_GUIDED_CHAT_IMAGES_FOR_AI } from "../../../src/lib/homeworkThreadAttachments.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -1286,7 +1287,7 @@ async function processAIRequest(
     : (studentImageUrl ? [studentImageUrl] : [])
   )
     .filter((url): url is string => typeof url === "string" && url.trim().length > 0)
-    .slice(0, 3);
+    .slice(0, MAX_GUIDED_CHAT_IMAGES_FOR_AI);
 
   console.log("📷 studentImageUrls received:", normalizedStudentImageUrls.length);
   for (const url of normalizedStudentImageUrls) {

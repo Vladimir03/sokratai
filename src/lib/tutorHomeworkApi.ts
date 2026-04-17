@@ -36,7 +36,8 @@ export interface TutorHomeworkAssignmentListItem {
   assigned_count: number;
   submitted_count: number;
   /**
-   * Кол-во учеников, приступивших к ДЗ (есть хотя бы один guided chat thread).
+   * Кол-во учеников, приступивших к ДЗ (есть хотя бы одно user-сообщение
+   * в guided chat thread). Не считается по самому факту provisioned thread.
    * Включает и сдавших, и в процессе. Для отображения «submitted(started)/total»
    * на карточке ДЗ. Optional — backend может не вернуть при старых клиентах.
    */

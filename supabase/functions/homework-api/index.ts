@@ -15,6 +15,7 @@ import {
   MAX_TASK_IMAGES,
   parseAttachmentUrls,
 } from "../_shared/attachment-refs.ts";
+import { MAX_GUIDED_CHAT_ATTACHMENTS } from "../../../src/lib/homeworkThreadAttachments.ts";
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
@@ -129,10 +130,7 @@ function jsonTaskReorderFailed(
 // ─── Helpers: Validation ─────────────────────────────────────────────────────
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-// Mirrors MAX_GUIDED_CHAT_ATTACHMENTS in src/lib/homeworkThreadAttachments.ts.
-// Raised 3 → 5 on 2026-04-18 для задач с развёрнутым решением
-// (плакировано: detailed_solution часто требует нескольких страниц).
-const MAX_THREAD_ATTACHMENTS = 5;
+const MAX_THREAD_ATTACHMENTS = MAX_GUIDED_CHAT_ATTACHMENTS;
 const THREAD_IMAGE_EXTENSIONS = new Set(["jpg", "jpeg", "png", "webp", "heic", "heif", "gif", "bmp"]);
 const THREAD_ATTACHMENT_EXTENSIONS = new Set([...THREAD_IMAGE_EXTENSIONS, "pdf"]);
 const THREAD_ATTACHMENT_BUCKETS = new Set(["homework-submissions", "homework-images"]);
@@ -261,6 +259,46 @@ function parseStoredThreadAttachmentRefs(value: unknown): string[] {
   }
 
   return [trimmed];
+}
+
+async function cleanupThreadAttachmentRefs(
+  db: SupabaseClient,
+  rawRefs: unknown[],
+): Promise<void> {
+  const refs = normalizeThreadAttachmentRefs(
+    rawRefs.flatMap((value) => parseStoredThreadAttachmentRefs(value)),
+  ).filter((ref) => ref.startsWith("storage://"));
+
+  if (refs.length === 0) return;
+
+  const pathsByBucket = new Map<string, Set<string>>();
+  for (const ref of refs) {
+    const parsed = parseStorageRef(ref, "homework-submissions");
+    if (!parsed?.bucket || !parsed.objectPath) continue;
+    if (!THREAD_ATTACHMENT_BUCKETS.has(parsed.bucket)) continue;
+
+    let bucketPaths = pathsByBucket.get(parsed.bucket);
+    if (!bucketPaths) {
+      bucketPaths = new Set<string>();
+      pathsByBucket.set(parsed.bucket, bucketPaths);
+    }
+    bucketPaths.add(parsed.objectPath);
+  }
+
+  for (const [bucket, objectPaths] of pathsByBucket.entries()) {
+    const paths = Array.from(objectPaths);
+    for (let i = 0; i < paths.length; i += 100) {
+      const batch = paths.slice(i, i + 100);
+      const { error } = await db.storage.from(bucket).remove(batch);
+      if (error) {
+        console.warn("homework_api_thread_attachments_cleanup_failed", {
+          bucket,
+          count: batch.length,
+          error: error.message,
+        });
+      }
+    }
+  }
 }
 
 function serializeThreadAttachmentRefs(refs: string[]): string | null {
@@ -675,38 +713,55 @@ async function handleListAssignments(
   const scoreMap: Record<string, { sum: number; count: number }> = {};
   let totalMaxByAssignment: Record<string, number> = {};
 
-  // "Started" count = distinct student_assignment_id with at least one thread
-  // (student opened the guided chat, regardless of status). Shown on tutor
-  // homework cards as the middle number in "submitted(started)/total".
-  // See plan wild-swinging-nova.md — tutor homework list card stats (2026-04-18).
+  // "Started" count = distinct student_assignment_id with at least one user
+  // message. Threads are provisioned eagerly at assign-time, so thread existence
+  // alone would overcount and make started_count ~= assigned_count.
   if (allSaIds.length > 0) {
-    const { data: startedThreads } = await db
+    const { data: allThreads } = await db
       .from("homework_tutor_threads")
-      .select("student_assignment_id")
+      .select("id, student_assignment_id, status")
       .in("student_assignment_id", allSaIds);
 
-    if (startedThreads && startedThreads.length > 0) {
-      const saSeen = new Set<string>();
-      for (const row of startedThreads) {
-        const saId = row.student_assignment_id as string;
-        if (saSeen.has(saId)) continue;
-        saSeen.add(saId);
-        const aId = saIdToAssignment[saId];
-        if (aId) {
-          startedMap[aId] = (startedMap[aId] ?? 0) + 1;
+    const threadIdToAssignment: Record<string, string> = {};
+    const completedThreads: Array<{ id: string; student_assignment_id: string }> = [];
+    const allThreadIds: string[] = [];
+
+    for (const thread of allThreads ?? []) {
+      const threadId = thread.id as string;
+      const studentAssignmentId = thread.student_assignment_id as string;
+      const assignmentId = saIdToAssignment[studentAssignmentId];
+      if (!assignmentId) continue;
+
+      threadIdToAssignment[threadId] = assignmentId;
+      allThreadIds.push(threadId);
+
+      if (thread.status === "completed") {
+        submittedMap[assignmentId] = (submittedMap[assignmentId] ?? 0) + 1;
+        completedThreads.push({
+          id: threadId,
+          student_assignment_id: studentAssignmentId,
+        });
+      }
+    }
+
+    if (allThreadIds.length > 0) {
+      const { data: startedMessages } = await db
+        .from("homework_tutor_thread_messages")
+        .select("thread_id")
+        .in("thread_id", allThreadIds)
+        .eq("role", "user");
+
+      const startedThreadIds = new Set<string>();
+      for (const row of startedMessages ?? []) {
+        const threadId = row.thread_id as string;
+        if (!threadId || startedThreadIds.has(threadId)) continue;
+        startedThreadIds.add(threadId);
+        const assignmentId = threadIdToAssignment[threadId];
+        if (assignmentId) {
+          startedMap[assignmentId] = (startedMap[assignmentId] ?? 0) + 1;
         }
       }
     }
-  }
-
-  // Guided chat: count completed threads as "submissions" for stats
-  if (allSaIds.length > 0) {
-    // Get completed threads
-    const { data: completedThreads } = await db
-      .from("homework_tutor_threads")
-      .select("id, student_assignment_id")
-      .in("student_assignment_id", allSaIds)
-      .eq("status", "completed");
 
     if (completedThreads && completedThreads.length > 0) {
       const threadIds = completedThreads.map((t) => t.id);
@@ -750,8 +805,6 @@ async function handleListAssignments(
       for (const thread of completedThreads) {
         const aId = saIdToAssignment[thread.student_assignment_id];
         if (!aId) continue;
-
-        submittedMap[aId] = (submittedMap[aId] ?? 0) + 1;
 
         const scores = threadScores[thread.id];
         if (scores && scores.maxTotal > 0) {
@@ -3066,6 +3119,7 @@ async function handleDeleteAssignment(
   const studentAssignmentIds = (studentAssignmentRows ?? []).map((row) => row.id);
 
   let threadIds: string[] = [];
+  let threadAttachmentValues: unknown[] = [];
   if (studentAssignmentIds.length > 0) {
     const { data: threadRows, error: threadRowsError } = await db
       .from("homework_tutor_threads")
@@ -3080,12 +3134,27 @@ async function handleDeleteAssignment(
     threadIds = (threadRows ?? []).map((row) => row.id);
   }
 
+  if (threadIds.length > 0) {
+    const { data: threadMessages, error: threadMessagesError } = await db
+      .from("homework_tutor_thread_messages")
+      .select("image_url")
+      .in("thread_id", threadIds)
+      .not("image_url", "is", null);
+    if (threadMessagesError) {
+      console.error("homework_api_request_error", { route: "DELETE /assignments/:id", error: threadMessagesError.message });
+      return jsonError(cors, 500, "DB_ERROR", "Failed to delete assignment");
+    }
+    threadAttachmentValues = (threadMessages ?? []).map((row) => row.image_url);
+  }
+
   const deleteByAssignment = async (table: string) => {
     const { error } = await db.from(table).delete().eq("assignment_id", assignmentId);
     if (error) throw error;
   };
 
   try {
+    await cleanupThreadAttachmentRefs(db, threadAttachmentValues);
+
     if (threadIds.length > 0) {
       const { error: deleteThreadMessagesError } = await db
         .from("homework_tutor_thread_messages")
@@ -4540,6 +4609,14 @@ async function handlePostThreadMessage(
         })
         .eq("id", activeState.id);
     }
+
+    await db
+      .from("homework_tutor_threads")
+      .update({
+        last_student_message_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", threadId);
   }
 
   return jsonOk(cors, {

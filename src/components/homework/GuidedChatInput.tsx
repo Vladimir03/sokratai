@@ -11,7 +11,11 @@ import { Button } from '@/components/ui/button';
 import { CheckCircle2, FileText, Loader2, MessageCircle, Mic, MicOff, Paperclip, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
-import { MAX_GUIDED_CHAT_ATTACHMENTS } from '@/lib/homeworkThreadAttachments';
+import {
+  MAX_GUIDED_CHAT_ATTACHMENTS,
+  MAX_GUIDED_CHAT_ATTACHMENT_FILE_BYTES,
+  MAX_GUIDED_CHAT_ATTACHMENT_TOTAL_BYTES,
+} from '@/lib/homeworkThreadAttachments';
 import { useVoiceRecorder } from '@/hooks/useVoiceRecorder';
 import { transcribeThreadVoice } from '@/lib/studentHomeworkApi';
 
@@ -23,7 +27,7 @@ const ALLOWED_TYPES = [
   'image/webp',
   'application/pdf',
 ];
-const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10 MB
+const MAX_FILE_SIZE = MAX_GUIDED_CHAT_ATTACHMENT_FILE_BYTES;
 const MAX_FILES = MAX_GUIDED_CHAT_ATTACHMENTS;
 const MAX_VOICE_RECORDING_SECONDS = 120;
 
@@ -33,6 +37,10 @@ function formatFileSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} Б`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} КБ`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} МБ`;
+}
+
+function getTotalAttachmentBytes(files: Array<Pick<File, 'size'>>): number {
+  return files.reduce((sum, file) => sum + file.size, 0);
 }
 
 function formatVoiceDuration(seconds: number): string {
@@ -456,6 +464,7 @@ const GuidedChatInput = memo(
         if (!fileList) return;
 
         let availableSlots = MAX_FILES - attachedFiles.length;
+        let totalBytes = getTotalAttachmentBytes(attachedFiles);
         for (let i = 0; i < fileList.length; i++) {
           const file = fileList[i];
 
@@ -470,17 +479,25 @@ const GuidedChatInput = memo(
           }
 
           if (file.size > MAX_FILE_SIZE) {
-            toast.error('Файл слишком большой. Максимум 10 МБ');
+            toast.error(`Файл слишком большой. Максимум ${formatFileSize(MAX_FILE_SIZE)}`);
+            continue;
+          }
+
+          if (totalBytes + file.size > MAX_GUIDED_CHAT_ATTACHMENT_TOTAL_BYTES) {
+            toast.error(
+              `Суммарный размер вложений не должен превышать ${formatFileSize(MAX_GUIDED_CHAT_ATTACHMENT_TOTAL_BYTES)}`,
+            );
             continue;
           }
 
           onFileSelect(file);
+          totalBytes += file.size;
           availableSlots -= 1;
         }
 
         e.target.value = '';
       },
-      [attachedFiles.length, onFileSelect],
+      [attachedFiles, onFileSelect],
     );
 
     const attachDisabled = controlsDisabled || isRecording || isTranscribingVoice;
@@ -524,14 +541,22 @@ const GuidedChatInput = memo(
 
         if (imageFile.size > MAX_FILE_SIZE) {
           e.preventDefault();
-          toast.error('Файл слишком большой. Максимум 10 МБ');
+          toast.error(`Файл слишком большой. Максимум ${formatFileSize(MAX_FILE_SIZE)}`);
+          return;
+        }
+
+        if (getTotalAttachmentBytes(attachedFiles) + imageFile.size > MAX_GUIDED_CHAT_ATTACHMENT_TOTAL_BYTES) {
+          e.preventDefault();
+          toast.error(
+            `Суммарный размер вложений не должен превышать ${formatFileSize(MAX_GUIDED_CHAT_ATTACHMENT_TOTAL_BYTES)}`,
+          );
           return;
         }
 
         e.preventDefault();
         onFileSelect(imageFile);
       },
-      [attachDisabled, attachedFiles.length, onFileSelect],
+      [attachDisabled, attachedFiles, onFileSelect],
     );
 
     // --- Placeholders ---

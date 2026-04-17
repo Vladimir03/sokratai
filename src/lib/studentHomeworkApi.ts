@@ -8,7 +8,10 @@ import type {
   CheckAnswerResponse,
   RequestHintResponse,
 } from '@/types/homework';
-import { serializeThreadAttachmentRefs } from '@/lib/homeworkThreadAttachments';
+import {
+  MAX_GUIDED_CHAT_ATTACHMENT_FILE_BYTES,
+  serializeThreadAttachmentRefs,
+} from '@/lib/homeworkThreadAttachments';
 
 const HOMEWORK_IMAGES_BUCKET = 'homework-images';
 const HOMEWORK_SUBMISSIONS_BUCKET = 'homework-submissions';
@@ -529,6 +532,10 @@ export async function uploadStudentThreadImage(
   _threadId: string,
   taskOrder: number,
 ): Promise<string> {
+  if (file.size > MAX_GUIDED_CHAT_ATTACHMENT_FILE_BYTES) {
+    throw new StudentHomeworkApiError('Файл слишком большой. Максимум 5 МБ');
+  }
+
   const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
   if (sessionError) {
     throw new StudentHomeworkApiError(sessionError.message);
