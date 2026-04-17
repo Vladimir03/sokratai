@@ -294,6 +294,10 @@ const Admin = () => {
             ) : null}
           </TabsContent>
 
+          <TabsContent value="business">
+            <BusinessDashboard />
+          </TabsContent>
+
           <TabsContent value="crm">
             <AdminCRM />
           </TabsContent>
