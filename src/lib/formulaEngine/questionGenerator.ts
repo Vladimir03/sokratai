@@ -9,29 +9,9 @@ interface RoundDistribution {
   situationToFormula: number;
 }
 
-const _LEGACY_SUPPORTED_BUILD_FORMULA_IDS = new Set([
-  'kin.01',
-  'kin.02',
-  'kin.07',
-  'kin.08',
-  'kin.09',
-  'kin.10',
-  'kin.11',
-  'kin.12',
-  'dyn.01',
-  'dyn.02',
-  'dyn.03',
-  'dyn.04',
-  'dyn.06',
-  'cons.01',
-  'cons.03',
-  'cons.04',
-  'cons.06',
-  'cons.07',
-  'hydro.01',
-  'hydro.03',
-  'hydro.04',
-]);
+// Build-recipe support is auto-derived: any formula that has a row in
+// BUILD_RECIPES (sourced from the Google Sheet) is eligible for build cards.
+
 
 const CONTEXT_DEPENDENT_TRUE_FALSE_IDS = new Set([
   'cons.05',
