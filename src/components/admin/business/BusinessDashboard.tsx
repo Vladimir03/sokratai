@@ -84,7 +84,7 @@ export const BusinessDashboard = () => {
     fetchData();
   }, [fetchData]);
 
-  const openEdit = (t: AtRiskTutor) => {
+  const openEdit = (t: AtRiskTutor | TutorRow) => {
     setEditTarget({
       tutorId: t.tutorId,
       username: t.username,
