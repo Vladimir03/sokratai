@@ -14,6 +14,7 @@ import { SourceBadge } from '@/components/kb/ui/SourceBadge';
 import { cn } from '@/lib/utils';
 import {
   MAX_TASK_IMAGES,
+  MAX_SOLUTION_IMAGES,
   parseAttachmentUrls,
   serializeAttachmentUrls,
 } from '@/lib/attachmentRefs';
@@ -252,11 +253,20 @@ export function HWDrawer({
         return;
       }
 
-      // 1) Create homework_tutor_tasks so the student runtime can see these tasks
+      // 1) Create homework_tutor_tasks so the student runtime can see these tasks.
+      // Reference solution (text + images) is carried from KB snapshot into
+      // solution_text / solution_image_urls so AI gets tutor reference on all
+      // guided-chat paths. Before 2026-04-18 HWDrawer wrote the stale column
+      // `solution_steps` and dropped solution images entirely — see plan
+      // wild-swinging-nova.md.
       const tutorTasks = tasks.map((task, index) => {
         const taskImageRefs = parseAttachmentUrls(task.attachmentSnapshot).slice(
           0,
           MAX_TASK_IMAGES,
+        );
+        const solutionImageRefs = parseAttachmentUrls(task.solutionAttachmentSnapshot).slice(
+          0,
+          MAX_SOLUTION_IMAGES,
         );
 
         return {
@@ -264,7 +274,8 @@ export function HWDrawer({
           task_text: task.textSnapshot,
           task_image_url: serializeAttachmentUrls(taskImageRefs),
           correct_answer: task.answerSnapshot ?? null,
-          solution_steps: task.solutionSnapshot ?? null,
+          solution_text: task.solutionSnapshot ?? null,
+          solution_image_urls: serializeAttachmentUrls(solutionImageRefs),
           order_num: index + 1,
         };
       });

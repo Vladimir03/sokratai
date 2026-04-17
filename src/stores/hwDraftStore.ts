@@ -31,6 +31,9 @@ export const useHWDraftStore = create<HWDraftStore>()(
           answerSnapshot: task.answer ?? null,
           solutionSnapshot: task.solution ?? null,
           attachmentSnapshot: task.attachment_url ?? null,
+          // Carry KB solution images snapshot so HWDrawer can persist them
+          // into homework_tutor_tasks.solution_image_urls (plan wild-swinging-nova.md).
+          solutionAttachmentSnapshot: task.solution_attachment_url ?? null,
           snapshotEdited: false,
           source: task.owner_id ? 'my' : 'socrat',
           subtopic: subtopicName ?? '',

@@ -174,6 +174,12 @@ export interface HWDraftTask {
   answerSnapshot: string | null;
   solutionSnapshot: string | null;
   attachmentSnapshot: string | null;
+  /**
+   * Dual-format storage refs для фото эталонного решения (KB solution_attachment_url).
+   * Переносится в `homework_tutor_tasks.solution_image_urls` при финализации ДЗ
+   * через HWDrawer. См. plan wild-swinging-nova.md (2026-04-18).
+   */
+  solutionAttachmentSnapshot: string | null;
   snapshotEdited: boolean;
   source: 'socrat' | 'my';
   subtopic: string;
