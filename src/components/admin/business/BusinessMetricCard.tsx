@@ -11,9 +11,11 @@ interface Props {
   tooltip: string;
   isProxy?: boolean;
   tone?: "default" | "good" | "warn" | "bad";
+  onClick?: () => void;
+  active?: boolean;
 }
 
-export const BusinessMetricCard = ({ title, value, sub, tooltip, isProxy, tone = "default" }: Props) => {
+export const BusinessMetricCard = ({ title, value, sub, tooltip, isProxy, tone = "default", onClick, active }: Props) => {
   const toneClass = {
     default: "",
     good: "border-emerald-200 bg-emerald-50/50",
@@ -21,15 +23,42 @@ export const BusinessMetricCard = ({ title, value, sub, tooltip, isProxy, tone =
     bad: "border-rose-200 bg-rose-50/50",
   }[tone];
 
+  const clickable = typeof onClick === "function";
+
   return (
-    <Card className={cn("h-full", toneClass)} animate={false}>
+    <Card
+      className={cn(
+        "h-full transition-all",
+        toneClass,
+        clickable && "cursor-pointer hover:shadow-md hover:-translate-y-0.5",
+        active && "ring-2 ring-primary ring-offset-2",
+      )}
+      animate={false}
+      onClick={onClick}
+      role={clickable ? "button" : undefined}
+      tabIndex={clickable ? 0 : undefined}
+      onKeyDown={
+        clickable
+          ? (e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                onClick?.();
+              }
+            }
+          : undefined
+      }
+    >
       <CardContent className="p-4 flex flex-col h-full">
         <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground mb-2">
           <span className="font-medium uppercase tracking-wide">{title}</span>
           <TooltipProvider>
             <Tooltip>
               <TooltipTrigger asChild>
-                <button type="button" className="opacity-60 hover:opacity-100">
+                <button
+                  type="button"
+                  className="opacity-60 hover:opacity-100"
+                  onClick={(e) => e.stopPropagation()}
+                >
                   <Info className="w-3.5 h-3.5" />
                 </button>
               </TooltipTrigger>
@@ -46,7 +75,13 @@ export const BusinessMetricCard = ({ title, value, sub, tooltip, isProxy, tone =
             proxy
           </div>
         )}
+        {clickable && !active && (
+          <div className="mt-2 text-[10px] uppercase tracking-wide text-primary/70 self-start">
+            кликни → фильтр
+          </div>
+        )}
       </CardContent>
     </Card>
   );
 };
+
