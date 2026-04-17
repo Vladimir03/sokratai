@@ -14,8 +14,10 @@ import {
   type LovableMessageContent,
   type LovableTextPart,
 } from "./ai_shared.ts";
-import { MAX_TASK_IMAGES_FOR_AI } from "../_shared/attachment-refs.ts";
-import { MAX_GUIDED_CHAT_IMAGES_FOR_AI } from "../../../src/lib/homeworkThreadAttachments.ts";
+import {
+  MAX_GUIDED_CHAT_IMAGES_FOR_AI,
+  MAX_TASK_IMAGES_FOR_AI,
+} from "../_shared/attachment-refs.ts";
 
 // ─── Constants ──────────────────────────────────────────────────────────────
 
