@@ -10,6 +10,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Badge } from '@/components/ui/badge';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { Plus, BookOpen, Users, BarChart3, Clock, CheckCircle2, WifiOff, Library, Inbox } from 'lucide-react';
 import TutorGuard from '@/components/TutorGuard';
 import { TutorLayout } from '@/components/tutor/TutorLayout';
@@ -192,15 +193,37 @@ const AssignmentCard = memo(function AssignmentCard({ item }: { item: TutorHomew
               `tabular-nums` keeps counts/scores on a fixed grid so they
               don't visually jitter while scrolling the list. */}
           <div className="flex items-center gap-3 text-sm text-muted-foreground tabular-nums pt-2 flex-wrap">
-            {/* Progress */}
-            <span
-              className="flex items-center gap-1"
-              title="Сдали / Назначено"
-              aria-label={`Сдали ${item.submitted_count} из ${item.assigned_count}`}
-            >
-              <Users className="h-3.5 w-3.5" aria-hidden="true" />
-              {item.submitted_count}/{item.assigned_count}
-            </span>
+            {/* Progress: submitted(started)/total — hover tooltip explains three numbers.
+                `started_count` is optional for backward compat; show bracket only when
+                backend provided a value AND there is progress beyond submissions. */}
+            <Tooltip delayDuration={150}>
+              <TooltipTrigger asChild>
+                <span
+                  className="flex items-center gap-1"
+                  aria-label={`Сдали ${item.submitted_count}${
+                    typeof item.started_count === 'number'
+                      ? `, приступили ${item.started_count}`
+                      : ''
+                  }, всего ${item.assigned_count}`}
+                >
+                  <Users className="h-3.5 w-3.5" aria-hidden="true" />
+                  {item.submitted_count}
+                  {typeof item.started_count === 'number' && item.started_count > item.submitted_count && (
+                    <span className="text-muted-foreground/70">({item.started_count})</span>
+                  )}
+                  /{item.assigned_count}
+                </span>
+              </TooltipTrigger>
+              <TooltipContent side="top" className="max-w-[240px]">
+                <ul className="space-y-0.5 text-xs leading-relaxed">
+                  <li><span className="font-semibold">{item.submitted_count}</span> — сдали ДЗ</li>
+                  {typeof item.started_count === 'number' && (
+                    <li><span className="font-semibold">({item.started_count})</span> — приступили к ДЗ</li>
+                  )}
+                  <li><span className="font-semibold">{item.assigned_count}</span> — всего учеников</li>
+                </ul>
+              </TooltipContent>
+            </Tooltip>
 
             {/* Delivered */}
             {(item.delivered_count ?? 0) > 0 && (

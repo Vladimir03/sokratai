@@ -129,7 +129,10 @@ function jsonTaskReorderFailed(
 // ─── Helpers: Validation ─────────────────────────────────────────────────────
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const MAX_THREAD_ATTACHMENTS = 3;
+// Mirrors MAX_GUIDED_CHAT_ATTACHMENTS in src/lib/homeworkThreadAttachments.ts.
+// Raised 3 → 5 on 2026-04-18 для задач с развёрнутым решением
+// (плакировано: detailed_solution часто требует нескольких страниц).
+const MAX_THREAD_ATTACHMENTS = 5;
 const THREAD_IMAGE_EXTENSIONS = new Set(["jpg", "jpeg", "png", "webp", "heic", "heif", "gif", "bmp"]);
 const THREAD_ATTACHMENT_EXTENSIONS = new Set([...THREAD_IMAGE_EXTENSIONS, "pdf"]);
 const THREAD_ATTACHMENT_BUCKETS = new Set(["homework-submissions", "homework-images"]);
@@ -668,8 +671,33 @@ async function handleListAssignments(
   }
 
   const submittedMap: Record<string, number> = {};
+  const startedMap: Record<string, number> = {};
   const scoreMap: Record<string, { sum: number; count: number }> = {};
   let totalMaxByAssignment: Record<string, number> = {};
+
+  // "Started" count = distinct student_assignment_id with at least one thread
+  // (student opened the guided chat, regardless of status). Shown on tutor
+  // homework cards as the middle number in "submitted(started)/total".
+  // See plan wild-swinging-nova.md — tutor homework list card stats (2026-04-18).
+  if (allSaIds.length > 0) {
+    const { data: startedThreads } = await db
+      .from("homework_tutor_threads")
+      .select("student_assignment_id")
+      .in("student_assignment_id", allSaIds);
+
+    if (startedThreads && startedThreads.length > 0) {
+      const saSeen = new Set<string>();
+      for (const row of startedThreads) {
+        const saId = row.student_assignment_id as string;
+        if (saSeen.has(saId)) continue;
+        saSeen.add(saId);
+        const aId = saIdToAssignment[saId];
+        if (aId) {
+          startedMap[aId] = (startedMap[aId] ?? 0) + 1;
+        }
+      }
+    }
+  }
 
   // Guided chat: count completed threads as "submissions" for stats
   if (allSaIds.length > 0) {
@@ -748,6 +776,7 @@ async function handleListAssignments(
     created_at: a.created_at,
     assigned_count: assignedMap[a.id] ?? 0,
     submitted_count: submittedMap[a.id] ?? 0,
+    started_count: startedMap[a.id] ?? 0,
     delivered_count: deliveredMap[a.id] ?? 0,
     not_connected_count: notConnectedMap[a.id] ?? 0,
     // Absolute average score (e.g. 3.2 out of 5). Use max_score_total for display.

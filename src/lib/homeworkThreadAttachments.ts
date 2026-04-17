@@ -3,7 +3,14 @@ const STORAGE_REF_PREFIX = 'storage://';
 const IMAGE_EXTENSIONS = new Set(['jpg', 'jpeg', 'png', 'webp', 'heic', 'heif', 'gif', 'bmp']);
 const PDF_EXTENSIONS = new Set(['pdf']);
 
-export const MAX_GUIDED_CHAT_ATTACHMENTS = 3;
+/**
+ * Max files a student may attach to a single guided chat message.
+ * Raised 3 → 5 on 2026-04-18: тестирование показало, что при задачах
+ * с развёрнутым решением (check_format='detailed_solution') ученику
+ * часто нужно приложить несколько страниц рукописного решения.
+ * Server-side mirror: MAX_THREAD_ATTACHMENTS в supabase/functions/homework-api/index.ts.
+ */
+export const MAX_GUIDED_CHAT_ATTACHMENTS = 5;
 
 function normalizeRefs(refs: string[]): string[] {
   return refs

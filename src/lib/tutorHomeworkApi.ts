@@ -35,6 +35,12 @@ export interface TutorHomeworkAssignmentListItem {
   created_at: string;
   assigned_count: number;
   submitted_count: number;
+  /**
+   * Кол-во учеников, приступивших к ДЗ (есть хотя бы один guided chat thread).
+   * Включает и сдавших, и в процессе. Для отображения «submitted(started)/total»
+   * на карточке ДЗ. Optional — backend может не вернуть при старых клиентах.
+   */
+  started_count?: number;
   avg_score: number | null;
   /** Sum of max_score for all tasks in this assignment. Used to display "X/Y" format. */
   max_score_total?: number | null;
