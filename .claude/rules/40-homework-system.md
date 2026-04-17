@@ -490,6 +490,24 @@ Audit/normalize/optimize/harden pass на `/tutor/homework` и `/tutor/homework/
 - `_topicHint` — soft warning (non-blocking): ключи с суффиксом `Hint` не считаются blocking errors
 - Поле «Тема» в L0 (контейнере), НЕ в `HWExpandedParams`
 
+### Edit-mode: порядок useEffect'ов prefill/reset (2026-04-17)
+
+`TutorHomeworkCreate.tsx` имеет два связанных useEffect для edit-mode:
+1. **Reset** (`[editId]`): сбрасывает `editPrefilledRef`, `editInitialSnapshot`, `deferredImageDeletesRef`
+2. **Prefill** (`[isEditMode, existingAssignment]`): заполняет форму из `existingAssignment` и ставит `editInitialSnapshot`
+
+**КРИТИЧНО: reset должен быть объявлен РАНЬШЕ prefill** (строки ~373 vs ~395). Оба эффекта фаерятся на mount в порядке деклараций. Если reset пойдёт после prefill, он затрёт только что установленный snapshot в том же commit-cycle (React батчит setState из эффектов; последний `setEditInitialSnapshot` выигрывает).
+
+**Симптом при нарушении:** на типичном flow `/tutor/homework/:id → /edit` в пределах `staleTime: 30s` (react-query кеш уже содержит данные) `editInitialSnapshot` остаётся `null` навсегда → `isEditSnapshotReady=false` → кнопка «Сохранить» залипает на «Подготавливаем…» до полного refresh страницы.
+
+**Архитектура edit-diff state:**
+- `editInitialSnapshot: EditSnapshot | null` — snapshot на момент загрузки (мета, taskSignature, studentIds, materialSignature)
+- `isEditSnapshotReady = !isEditMode || editInitialSnapshot !== null` — гейт для submit button и `hasUnsavedChanges`
+- `editDiffState` — `useMemo` над snapshot + live form state; возвращает `null` пока snapshot не готов
+- `buildMaterialSignature` НЕ должна включать `localId` (client-side UUID) — иначе `materialsDirty` будет всегда `true` после prefill, ломая `hasUnsavedChanges` и triggering beforeunload на выходе без реальных изменений
+- `isSubmitDisabled = isSubmitting || (isEditMode && !isEditSnapshotReady)` передаётся в `HWActionBar`
+- `submitLabel` показывает `'Подготавливаем...'` пока `isEditSnapshotReady=false`
+
 ### Тренажёр формул — Formula Rounds (standalone pivot, 2026-04-08)
 
 Phase 1 пивотится из homework-embedded preview в standalone public trainer `/trainer`. Backend groundwork для pivot уже реализован, но frontend route / cleanup preview-flow ещё идут отдельными TASK-ами. Источник требований: `docs/delivery/features/formula-round-phase-1/spec.md`.

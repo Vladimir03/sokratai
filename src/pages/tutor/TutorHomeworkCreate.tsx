@@ -372,6 +372,23 @@ function TutorHomeworkCreateContent() {
 
   // Track whether we already prefilled to avoid re-running on refetch
   const editPrefilledRef = useRef(false);
+
+  // Reset prefill ref + snapshot + deferred deletes when editId changes
+  // (navigation between different edit pages).
+  //
+  // MUST be declared BEFORE the prefill effect below. Both effects fire on
+  // mount in declaration order. If reset ran AFTER prefill, it would clobber
+  // the freshly-set snapshot in the same commit cycle (React batches state
+  // updates from effects; last setEditInitialSnapshot wins) — leaving
+  // isEditSnapshotReady=false forever whenever existingAssignment is already
+  // in the react-query cache (typical flow: detail → edit within staleTime).
+  // Result: button stuck on "Подготавливаем..." until full page refresh.
+  useEffect(() => {
+    editPrefilledRef.current = false;
+    setEditInitialSnapshot(null);
+    deferredImageDeletesRef.current = [];
+  }, [editId]);
+
   useEffect(() => {
     if (!isEditMode || !existingAssignment || editPrefilledRef.current) return;
     editPrefilledRef.current = true;
@@ -435,13 +452,6 @@ function TutorHomeworkCreateContent() {
     setSelectedStudentIds(new Set(assignedIds));
     setEditInitialSnapshot(buildEditSnapshot(existingAssignment));
   }, [isEditMode, existingAssignment]);
-
-  // Reset refs when editId changes (navigation between different edit pages)
-  useEffect(() => {
-    editPrefilledRef.current = false;
-    setEditInitialSnapshot(null);
-    deferredImageDeletesRef.current = [];
-  }, [editId]);
 
   // Lock task add/remove as soon as any student has interacted with the
   // assignment (guided thread has at least one user message), not only when
