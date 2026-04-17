@@ -1032,7 +1032,9 @@ export type Database = {
           order_num: number
           rubric_image_urls: string | null
           rubric_text: string | null
+          solution_image_urls: string | null
           solution_steps: string | null
+          solution_text: string | null
           task_image_url: string | null
           task_text: string
         }
@@ -1046,7 +1048,9 @@ export type Database = {
           order_num: number
           rubric_image_urls?: string | null
           rubric_text?: string | null
+          solution_image_urls?: string | null
           solution_steps?: string | null
+          solution_text?: string | null
           task_image_url?: string | null
           task_text: string
         }
@@ -1060,7 +1064,9 @@ export type Database = {
           order_num?: number
           rubric_image_urls?: string | null
           rubric_text?: string | null
+          solution_image_urls?: string | null
           solution_steps?: string | null
+          solution_text?: string | null
           task_image_url?: string | null
           task_text?: string
         }
