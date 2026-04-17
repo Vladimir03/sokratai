@@ -1,107 +1,97 @@
 
 
-## Product Discovery Dashboard — Plan
+## Plan: импорт каталога формул механики из Google Sheet
 
-### Goal
-Add a 6th tab "Открытия" (Product Discovery) in `/admin` answering: *"Где продукт создаёт прогресс, а где требует доработки?"* Operational focus: help tutor see in the morning where to intervene.
+### Что меняется и почему
+Источник истины — лист «Механика» Google Sheet. В нём 40 строк со статусами `ready`/`review` (включая новые **kin.13–kin.22** — вращение по окружности). Код сейчас содержит 35 формул, причём у части `ready`-строк рецепты/мутации в коде и в таблице **расходятся** (например `dyn.01`, `hydro.04`). По п.3 ТЗ таблица побеждает — мы перегенерируем каталог из CSV, а не дописываем вручную.
 
-### Architecture
+### Подход: одноразовый build-time импорт, без runtime-зависимости от Google
+Не делаем live-fetch из Google в runtime (это дополнительная failure-зона и нарушение существующей архитектуры). Делаем so:
 
-**1. New tab in `Admin.tsx`** — icon `Lightbulb` or `Compass`, between "Бизнес" and "CRM". No changes to other tabs.
+1. Скачиваем CSV листа «Механика» через `?format=csv&gid=1229966212`.
+2. Запускаем одноразовый Node-скрипт `scripts/import-formula-sheet.mjs`, который:
+   - фильтрует строки по статусу `ready` / `review`;
+   - парсит все 17 продуктовых колонок;
+   - снимает **только** внешние `$…$` у `Формула (LaTeX)`, не трогая внутренний LaTeX;
+   - генерирует три файла:
+     - `src/lib/formulaEngine/formulas.generated.ts` — массивы `Formula[]` по разделам;
+     - `src/lib/formulaEngine/recipes.generated.ts` — `BUILD_RECIPES` + `SUPPORTED_BUILD_FORMULA_IDS`;
+     - `src/lib/formulaEngine/mutations.generated.ts` — `MUTATION_LIBRARY`.
+3. Скрипт коммитим вместе со сгенерированными файлами. Пересборка тренажёра при будущих обновлениях таблицы = `node scripts/import-formula-sheet.mjs`.
 
-**2. New edge function `admin-product-discovery`**
-- Same auth pattern as `admin-business-dashboard` (JWT + `is_admin` RPC).
-- POST body: `{ startDate, endDate, tutorId?: string }`.
-- Returns single response shape with all 11 metrics + morning review queue + pattern buckets pre-computed.
-- Isolated from `admin-analytics` and `admin-business-dashboard` — different unit of analysis (thread, not tutor).
+Каталог формул в `formulas.ts` заменяем на re-export из `formulas.generated.ts`, разбитый по существующим экспортам (`kinematicsFormulas`, `dynamicsFormulas`, `conservationFormulas`, `staticsFormulas`, `hydrostaticsFormulas`, `mechanicsFormulas`). Сигнатуры `Formula`, `BuildRecipe`, `Mutation` **не меняем** — UI тренажёра ничего не замечает.
 
-**3. No new DB tables, no migrations** — purely additive read-only computation from existing `homework_tutor_*` tables.
+### Минимальное расширение типа `Formula`
+В таблице есть колонка «Экзамен» (`ЕГЭ` / `ОГЭ` / `ЕГЭ+ОГЭ`). По п.10 ТЗ — добавляем ровно одно опциональное поле:
 
-### Metric definitions (computed server-side)
-
-Unit of analysis: **student_assignment thread** (`homework_tutor_threads`).
-
-- **Started thread** = thread with ≥1 message where `role='user'` AND (`message_kind` IN `('answer','hint_request','question')` OR `message_kind IS NULL` for legacy data, EXCLUDING `message_kind='system'`).
-- **Meaningful thread** = started thread with ANY: (a) `status='completed'`, (b) ≥1 task_state with `status='completed'`, (c) any task_state with `attempts>0` OR `hint_count>0`.
-- **Tutor intervention** = thread has ≥1 message with `role='tutor'` AND `visible_to_student=true`. Labeled "proxy".
-- **First student action timestamp** = MIN created_at where role=user AND non-system message_kind.
-- **First meaningful timestamp** = earliest of: thread completed_at, first task_state completion, first attempt/hint event (use `task_states.updated_at` as proxy if no event log).
-- **Needs attention** rules (any of):
-  - started ≥24h ago AND no meaningful progress
-  - hint_count ≥3 across all task_states AND no completed task
-  - has tutor_message visible_to_student=true (already required help)
-  - sum(attempts) ≥5 across task_states AND no completed task
-
-### Pattern buckets (top 3 each)
-
-**Success buckets** (computed over meaningful threads):
-1. Completed without tutor intervention
-2. Meaningful with 1–2 hints total
-3. Completed after hint usage
-
-**Failure buckets** (computed over started threads):
-1. Started but no meaningful progress
-2. High hint usage (≥3) without completion
-3. Repeated attempts (≥5) without completion
-
-Return as `{ label, count, share }[]` sorted desc.
-
-### Morning Review Queue (operational)
-
-Compact table data: top 30 needs_attention threads in window, with:
-`thread_id, tutor_name, student_name, assignment_title, status, last_student_activity, total_hints, total_attempts, tutor_intervened, attention_reason[]`.
-
-### Frontend structure
-
-New folder `src/components/admin/discovery/`:
-- `ProductDiscoveryDashboard.tsx` — container, fetches + state
-- `DiscoveryMetricCard.tsx` — reusable card with title, value, sub, info-tooltip, optional "proxy" badge
-- `MorningReviewQueue.tsx` — compact scannable table
-- `PatternBuckets.tsx` — two side-by-side cards (success / failure) with top-3 lists
-
-Reuse existing: `Card`, `Tooltip`, `Table`, `Badge` from `@/components/ui`.
-
-Layout (top → bottom):
-```text
-[Header: Product Discovery + subtitle + date picker + tutor filter + "system data only" note]
-[Row 1: Meaningful Progress Rate (NSM, larger) | Started Thread Rate | Thread Completion Rate | Needs Attention Rate]
-[Row 2: Partial Useful Progress | Autonomous Progress (proxy) | Tutor Intervention Rate (proxy) | Median Time to Meaningful]
-[Row 3: Morning Review Queue count card + period delta]
-[Row 4: Top Successful Patterns | Top Failure Patterns]
-[Bottom: Threads Requiring Morning Review table — compact, scrollable]
+```ts
+exam?: 'ЕГЭ' | 'ОГЭ' | 'ЕГЭ+ОГЭ';
 ```
 
-Every metric card has info `Tooltip` explaining: definition + formula + direct/proxy.
+Это уважает «ID → exam tag/filter metadata» из маппинга, не ломает существующий код (поле опциональное), и оставляет дверь для будущего фильтра ЕГЭ/ОГЭ в `TrainerPage` без новой архитектуры. **Никаких других новых полей не добавляем.**
 
-### Files
+### Маппинг колонок (ровно как в ТЗ)
 
-**New:**
-- `supabase/functions/admin-product-discovery/index.ts`
-- `src/components/admin/discovery/ProductDiscoveryDashboard.tsx`
-- `src/components/admin/discovery/DiscoveryMetricCard.tsx`
-- `src/components/admin/discovery/MorningReviewQueue.tsx`
-- `src/components/admin/discovery/PatternBuckets.tsx`
+| Sheet | Code |
+|---|---|
+| `ID` | `formula.id` |
+| `Экзамен` | `formula.exam` (новое опциональное) |
+| `Раздел` | (используется для bucketing по массивам) |
+| `Тема` (+`Подтема`) | `formula.section` = «Кинематика»/…; `formula.topic` = `Тема — Подтема` |
+| `Название формулы` | `formula.name` |
+| `Подсказка для сборки` | `formula.buildTitle` |
+| `Формула (LaTeX)` | `formula.formula` (с снятыми внешними `$`) |
+| `Формула (текст)` | `formula.formulaPlain` |
+| `Переменные` | `formula.variables[]` (parser: `symbol — name (unit)` построчно) |
+| `Физический смысл` | `formula.physicalMeaning` |
+| `Зависимости` | `formula.proportionality.{direct,inverse}` (parser: `прямая:`/`обратная:`) |
+| `Размерности` | `formula.dimensions` |
+| `Откуда выводится` | `formula.derivedFrom` |
+| `Когда применять` | `formula.whenToUse[]` (split по `\n`, strip `•`) |
+| `Частые ошибки` | `formula.commonMistakes[]` |
+| `Связанные формулы` | `formula.relatedFormulas[]` (split по `,`) |
+| `Сложность` | `formula.difficulty` (1/2/3) |
+| `Мутации Layer 3` | `MUTATION_LIBRARY[id]` (parser: построчно `type; latex; hint`) |
+| `Рецепт сборки` | `BUILD_RECIPES[id]` (parser: `numerator: … \| denominator: …`) |
 
-**Modified (minimal):**
-- `src/pages/Admin.tsx` — add 6th tab "Открытия"
-- `supabase/config.toml` — register new function
+Раздел в `formula.section` нормализуем по карте `{Кинематика, Динамика, Законы сохранения, Статика, Гидростатика}` — ровно как сейчас в коде, чтобы `getEligiblePool` и `TrainerPage` фильтры продолжали работать.
 
-### Out of scope (explicit)
-- No subject breakdown.
-- No manual CRM tags.
-- No Product Verdict block.
-- No Business Dashboard changes.
-- No new DB tables/migrations.
-- No vanity metrics (total users, total messages).
-- No charts beyond simple cards + one compact table.
+`SUPPORTED_BUILD_FORMULA_IDS` собираем автоматически: ID попадает в set, если в его строке заполнена колонка «Рецепт сборки». Это снимает ручную поддержку списка.
 
-### Risks & mitigations
-- **`message_kind` may be null on legacy messages** → use the same fallback as Business Dashboard: `role='user' AND (message_kind IS NULL OR message_kind != 'system')`.
-- **No event log for "first meaningful moment"** → use `task_states.updated_at` as proxy for first-completion-or-progress event. Median computed in Postgres with `percentile_cont(0.5)`.
-- **Large thread counts** → cap morning review queue to top 30 by recency × severity score; metric aggregates use `count(*)` directly.
-- **Tutor filter empty state** → if tutor has no threads in window, show "Нет данных за период" inside cards (not error).
+### KaTeX и кириллица — без регрессий
+- Рендер уже идёт через `MathText` (KaTeX + remark-math, `throwOnError: false`, lazy-load). Кириллица в индексах нормализуется существующей `normalizeMathToken` (`v_{\\text{ср}}` и т.д.) — **сохраняем эту нормализацию**, применяем её и к токенам новых формул при импорте.
+- Внешние `$…$` снимаем только если строка одновременно начинается на `$` и заканчивается на `$` (regex с anchors); внутренние `$` и сам LaTeX не трогаем.
+- Поддержку `___LINEBREAK___` placeholder добавляем как helper в `MathText` **только для полей, где есть `\n`** (физический смысл / частые ошибки / when-to-use). Сами LaTeX-строки в листе однострочные, переносы там не встречаются — гарантия не ломаемости подтверждена. Но helper будет на случай будущих многострочных пояснений.
 
-### Validation
-- `npm run lint && npm run build && npm run smoke-check`
-- Manual: `/admin` → "Открытия" tab → verify all 8 metric cards, both pattern blocks, morning review table render with real data; tooltips show; tutor filter narrows results.
+### Файлы
+
+**Новые:**
+- `scripts/import-formula-sheet.mjs` — Node-скрипт импорта (CSV-парсер на стандартной библиотеке, никаких новых deps).
+- `scripts/data/mechanika-source.csv` — снапшот листа на момент импорта (для воспроизводимости и ревью diff'ов).
+- `src/lib/formulaEngine/formulas.generated.ts` — авто-сгенерированный каталог.
+- `src/lib/formulaEngine/recipes.generated.ts` — авто-сгенерированные `BUILD_RECIPES` + `SUPPORTED_BUILD_FORMULA_IDS`.
+- `src/lib/formulaEngine/mutations.generated.ts` — авто-сгенерированный `MUTATION_LIBRARY`.
+
+**Изменяются (минимально):**
+- `src/lib/formulaEngine/formulas.ts` — заменяем длинные литералы на re-export из `formulas.generated.ts`. Карта `formulasById` и `getFormulaById`/`getRelatedFormulas` остаются.
+- `src/lib/formulaEngine/types.ts` — добавляется одно опциональное поле `exam?: 'ЕГЭ' | 'ОГЭ' | 'ЕГЭ+ОГЭ'`.
+- `src/lib/formulaEngine/questionGenerator.ts` — `BUILD_RECIPES`, `MUTATION_LIBRARY`, `SUPPORTED_BUILD_FORMULA_IDS` импортируются из generated-файлов вместо литералов. Логика `generateBuildFormula` / `generateTrueOrFalse` / `generateSituationToFormula` **не меняется**.
+- `src/components/kb/ui/MathText.tsx` — добавляется небольшой preprocess `\n → <br>` через `___LINEBREAK___` placeholder, чтобы не интерферировать с remark-math.
+
+**Не трогаем:**
+- Игровая механика: `FormulaRoundScreen`, `RoundResultScreen`, `BuildFormulaCard`, `SituationCard`, `TrueOrFalseCard` — без правок (контракт `Formula`/`FormulaQuestion` сохраняется).
+- `TrainerPage.tsx` — секции/раунды/жизни/распределение карточек остаются как есть; новые формулы автоматически попадают в `kinematicsFormulas` / `mechanicsFormulas`.
+- Никаких изменений в `formulaEngine/index.ts` (он реэкспортирует те же массивы).
+
+### Что подтверждаем после имплементации
+- 40 формул в каталоге (12 + 10 + 6 + 7 + 1 + 4 = 40), `kin.13`–`kin.22` появились в `kinematicsFormulas`.
+- Расхождения `ready`-строк (`dyn.01`, `hydro.04` рецепты) теперь соответствуют таблице.
+- `npm run lint && npm run build && npm run smoke-check` зелёные.
+- Ручной smoke `/trainer` → раздел «Кинематика»: попадаются вопросы по новым формулам вращения, build/true-false/situation карточки рендерятся, кириллица в `v_{ср}` и `a_{цс}` корректна.
+
+### Что остаётся за рамками
+- Не делаем live-pull из Google в runtime — только build-time снапшот.
+- Не подключаем новый UI-фильтр «ЕГЭ/ОГЭ»: поле `exam` пишется, но фильтр в `TrainerPage` появится отдельной задачей.
+- Не трогаем `draft`-строки (145 шт) — по ТЗ берём только `ready`/`review`.
+- Не меняем форматы `BuildRecipe`/`Mutation`/`Formula` сверх одного опционального `exam`.
 
