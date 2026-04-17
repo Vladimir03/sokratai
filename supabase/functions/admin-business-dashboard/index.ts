@@ -584,6 +584,7 @@ function emptyMetricsResponse(
         totals: { startedThreads: 0, meaningfulThreads: 0 },
       },
       atRiskTutors: [],
+      allTutors: [],
       crmSummary: { willingToPay: willingCount, riskStatus: riskCount },
       verdict: { level: "low" as const, reason: "Нет активности в выбранном окне" },
     }),
