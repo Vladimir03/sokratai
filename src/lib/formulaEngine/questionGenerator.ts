@@ -50,9 +50,7 @@ function unwrapMath(latex: string | undefined): string | null {
 }
 
 function normalizeMathToken(token: string): string {
-  return token
-    .replace(/_\{([А-Яа-яЁё]+)\}/gu, '_{\\text{$1}}')
-    .replace(/_([А-Яа-яЁё]+)/gu, '_{\\text{$1}}');
+  return token.trim();
 }
 
 function shuffle<T>(items: T[]): T[] {

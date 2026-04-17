@@ -6,7 +6,26 @@
       "Bash(echo \"exit: $?\")",
       "Bash(git push:*)",
       "Bash(git add:*)",
-      "Bash(git commit:*)"
+      "Bash(git commit:*)",
+      "Bash(git stash:*)",
+      "Bash(grep -A 3 \"GuidedThreadViewer.tsx$\")",
+      "Bash(wc -l /c/Users/kamch/sokratai/src/lib/formulaEngine/*.ts /c/Users/kamch/sokratai/src/components/homework/formula-round/*.tsx)",
+      "Bash(git rebase:*)",
+      "Bash(git fetch:*)",
+      "Bash(xargs grep:*)",
+      "Bash(grep -r \"bucket\" /c/Users/kamch/sokratai/supabase/migrations/*.sql)",
+      "Bash(grep -l \"CREATE TABLE.*profiles\\\\|ALTER TABLE profiles\" /c/Users/kamch/sokratai/supabase/migrations/*.sql)",
+      "Bash(xargs cat:*)",
+      "Bash(grep \"INSERT INTO storage.buckets\" /c/Users/kamch/sokratai/supabase/migrations/*.sql -A 2)",
+      "Bash(find /c/Users/kamch/sokratai/supabase/migrations -name \"*.sql\" -exec grep -l \"author_user_id\" {} \\\\;)",
+      "Bash(grep \"is_tutor\\\\|isTutor\" /c/Users/kamch/sokratai/supabase/migrations/*.sql -l)",
+      "Bash(grep -r \"avatarImage\\\\|photo_url\" /c/Users/kamch/sokratai/supabase/migrations/*.sql -i)",
+      "Bash(grep \"has_role\\\\|public.is_tutor\" /c/Users/kamch/sokratai/supabase/migrations/*.sql -l)",
+      "Bash(grep -rn \"getTutorStudentGuidedThread\\\\|getStudentThread\" /c/Users/kamch/sokratai/src/lib/*.ts)",
+      "Bash(npx tsc:*)",
+      "Bash(grep -E \"\\(HWDrawer|hwDraftStore|types[\\\\\\\\\\\\\\\\/]kb\\)\")",
+      "Bash(xargs -I{} sh -c 'grep -l \"homework_kb_tasks\" \"supabase/migrations/{}\" 2>/dev/null && echo \"---{}---\"')",
+      "Bash(npm run *)"
     ]
   }
 }

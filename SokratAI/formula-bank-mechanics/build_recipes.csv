@@ -1,0 +1,26 @@
+formula_id,left_side,numerator_tokens_json,denominator_tokens_json
+kin_avg_speed_v_ege_oge,v_{ср},"[""S""]","[""t""]"
+kin_uniform_coord_x_t,x(t),"[""x_0"", ""+"", ""v_x"", ""\\cdot"", ""t""]",[]
+kin_uniaccel_coord_x_t,x(t),"[""x_0"", ""+"", ""v_{0x}"", ""\\cdot"", ""t"", ""+"", ""a_x"", ""\\cdot"", ""t^2""]","[""2""]"
+kin_uniaccel_velocity,v_x,"[""v_{0x}"", ""+"", ""a_x"", ""\\cdot"", ""t""]",[]
+kin_uniaccel_no_time,v^2-v_0^2,"[""2"", ""\\cdot"", ""a"", ""\\cdot"", ""S""]",[]
+kin_accel_definition,a,"[""v"", ""-"", ""v_0""]","[""t""]"
+kin_circular_linear_speed,v,"[""2"", ""\\pi"", ""R""]","[""T""]"
+kin_circular_omega_T,\omega,"[""2"", ""\\pi""]","[""T""]"
+kin_centripetal_v2_R,a_ц,"[""v^2""]","[""R""]"
+kin_centripetal_omega2_R,a_ц,"[""\\omega^2"", ""\\cdot"", ""R""]",[]
+dyn_newton_2nd,F,"[""m"", ""\\cdot"", ""a""]",[]
+dyn_friction,F_{тр},"[""\\mu"", ""\\cdot"", ""N""]",[]
+dyn_hookes_law,F,"[""k"", ""\\cdot"", ""\\Delta l""]",[]
+dyn_universal_gravitation,F,"[""G"", ""\\cdot"", ""m_1"", ""\\cdot"", ""m_2""]","[""R^2""]"
+dyn_gravity,F_{тяж},"[""m"", ""\\cdot"", ""g""]",[]
+cons_momentum_def,p,"[""m"", ""\\cdot"", ""v""]",[]
+cons_work,A,"[""F"", ""\\cdot"", ""s"", ""\\cdot"", ""\\cos\\alpha""]",[]
+cons_power,N,"[""A""]","[""t""]"
+cons_kinetic_energy,E_к,"[""m"", ""\\cdot"", ""v^2""]","[""2""]"
+cons_potential_gravity,E_п,"[""m"", ""\\cdot"", ""g"", ""\\cdot"", ""h""]",[]
+stat_moment,M,"[""F"", ""\\cdot"", ""l""]",[]
+hydro_density,\rho,"[""m""]","[""V""]"
+hydro_pressure_general,p,"[""F""]","[""S""]"
+hydro_pressure_liquid,p,"[""\\rho"", ""\\cdot"", ""g"", ""\\cdot"", ""h""]",[]
+hydro_archimedes,F_А,"[""\\rho"", ""\\cdot"", ""g"", ""\\cdot"", ""V""]",[]

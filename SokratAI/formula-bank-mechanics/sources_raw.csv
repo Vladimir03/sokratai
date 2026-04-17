@@ -1,0 +1,33 @@
+formula_id,teacher,source_ref,original_latex,original_notation
+kin_avg_speed_v_ege_oge,elena,ОГЭ_1 №1,v_{ср}=\dfrac{S}{t},"lat v, S, t"
+kin_avg_speed_v_ege_oge,egor,xlsx folder 2,\upsilon_{ср}=\dfrac{S}{t},greek υ
+kin_uniform_coord_x_t,elena,ОГЭ_1 №2,x(t)=x_0+v_x t,lat
+kin_uniaccel_coord_x_t,elena,ОГЭ_1 №3,x(t)=x_0+v_{0x}t+a_xt^2/2,lat
+kin_uniaccel_velocity,elena,ОГЭ_1 №5,v_x=v_{0x}+a_xt,lat
+kin_uniaccel_no_time,elena,ОГЭ_1 №7,v^2-v_0^2=2aS,lat
+kin_accel_definition,elena,ОГЭ_1 №6,a=(v-v_0)/t,lat
+kin_circular_linear_speed,elena,ОГЭ_1 №8,v=2\pi R/T,lat
+kin_circular_omega_T,elena,ОГЭ_1 №9,\omega=2\pi/T,lat
+kin_centripetal_v2_R,elena,ОГЭ_1 №10,a_ц=v^2/R,lat
+kin_centripetal_omega2_R,elena,ОГЭ_1 №11,a_ц=\omega^2 R,lat
+dyn_newton_2nd,elena,ОГЭ_2 №14,F=ma,lat
+dyn_newton_2nd,egor,folder 17,F=ma,lat
+dyn_newton_3rd,elena,ОГЭ_2 №15,F_{12}=-F_{21},lat
+dyn_friction,elena,ОГЭ_2 №16,F_{тр}=\mu N,lat
+dyn_hookes_law,elena,ОГЭ_2 №17,F=k\Delta l,lat
+dyn_universal_gravitation,elena,ОГЭ_2 №18,F=Gm_1m_2/R^2,lat
+dyn_gravity,elena,ОГЭ_2 №19,F=mg,lat
+cons_momentum_def,elena,ОГЭ_2 №21,p=mv,lat
+cons_momentum_conservation,elena,ОГЭ_2 №22,m_1 v_1+m_2 v_2=\mathrm{const},lat
+cons_work,elena,ОГЭ_2 №23,A=Fs\cos\alpha,lat
+cons_power,elena,ОГЭ_2 №24,N=A/t,lat
+cons_kinetic_energy,elena,ОГЭ_2 №26,E_k=mv^2/2,lat k
+cons_kinetic_energy,egor,folder 22,E_{кин}=\dfrac{mv^2}{2},cyr кин
+cons_potential_gravity,elena,ОГЭ_2 №27,E_p=mgh,lat p
+cons_potential_gravity,egor,folder 22,E_{пот}=mgh,cyr пот
+cons_mech_energy,elena,ОГЭ_2 №28,E=E_k+E_p=const,lat
+stat_moment,elena,ОГЭ_2 №29,M=Fl,lat
+hydro_density,elena,ОГЭ_2 №13,\rho=m/V,lat
+hydro_pressure_general,elena,ОГЭ_2 №31,p=F/S,lat
+hydro_pressure_liquid,elena,ОГЭ_2 №32,p=\rho g h,lat
+hydro_archimedes,elena,ОГЭ_2 №33,F_{Арх}=\rho g V,lat

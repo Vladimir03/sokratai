@@ -106,6 +106,7 @@ List tutor's assignments with aggregate stats.
     "status": "active",
     "created_at": "2026-02-16T10:00:00Z",
     "assigned_count": 5,
+    "started_count": 4,
     "submitted_count": 3,
     "avg_score": 72.5
   }
@@ -115,6 +116,7 @@ List tutor's assignments with aggregate stats.
 | Field | Notes |
 |---|---|
 | `assigned_count` | Number of students assigned |
+| `started_count` | Optional. Number of students who sent at least one `user` message in the guided thread. May be absent on an older backend during rolling deploys |
 | `submitted_count` | Students whose guided thread reached status `submitted` or `completed` |
 | `avg_score` | Average `(total_score/total_max_score)*100` across guided threads, null if no scores |
 

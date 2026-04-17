@@ -15,7 +15,7 @@
 
 **Фича:** добавить мультимодальный ввод (текст + изображение/PDF) в `GuidedChatInput` и провести изображение через весь pipeline: загрузка → хранение → отображение → передача в AI.
 
-**Статус на 2026-03-20:** все фазы (Phase 1–5) реализованы для end-to-end image flow. Полный pipeline: выбор/вставка 1-3 файлов → preview → upload в Storage → persist refs в `image_url` → отображение в чате и у репетитора → передача изображений в AI (`answer`, `hint`, `question`). Clipboard paste работает через `clipboardData.files` + `items` fallback (Safari/Firefox). Mobile camera доступна через native file picker. PDF поддержан в upload/storage/rendering, но в AI path пока передаются только изображения.
+**Статус на 2026-04-17:** все фазы (Phase 1–5) реализованы для end-to-end image flow. Актуальный pipeline: выбор/вставка до 5 файлов → preview → upload в Storage → persist refs в `image_url` → отображение в чате и у репетитора → передача изображений в AI (`answer`, `hint`, `question`). Clipboard paste работает через `clipboardData.files` + `items` fallback (Safari/Firefox). Mobile camera доступна через native file picker. PDF поддержан в upload/storage/rendering, но в AI path передаются только изображения.
 
 ---
 
@@ -42,7 +42,7 @@ Wedge: «быстро собрать ДЗ и новую практику по т
 
 ## 3. Goals
 
-1. Ученик может прикрепить 1-3 изображения (JPG, PNG, HEIC) или PDF к сообщению в guided chat
+1. Ученик может прикрепить 1-5 изображений (JPG, PNG, HEIC) или PDF к сообщению в guided chat
 2. Фото отображается в чате как кликабельный thumbnail (с zoom)
 3. Репетитор видит вложения ученика в GuidedThreadViewer
 4. AI получает фото ученика при проверке ответа (`answer` mode) и при обсуждении (`question` mode)
@@ -73,7 +73,7 @@ Wedge: «быстро собрать ДЗ и новую практику по т
 | Storage bucket `homework-submissions` | ✅ Есть | RLS: студент может загружать в `{student_id}/...` |
 | `uploadStudentHomeworkFiles()` | ✅ Есть | Загрузка в `homework-submissions`, возвращает `storage://...` ref |
 | `getStudentTaskImageSignedUrl()` | ✅ Есть | Резолвит `storage://` → signed HTTP URL |
-| `ThreadAttachments` в `GuidedChatMessage` | ✅ Есть | Рендерит 1-3 attachment refs из `message.image_url` через signed URL |
+| `ThreadAttachments` в `GuidedChatMessage` | ✅ Есть | Рендерит до 5 attachment refs из `message.image_url` через signed URL |
 | `image_url` column в `homework_tutor_thread_messages` | ✅ Есть | Хранит single `storage://...` ref или JSON array refs |
 | Tutor upload + display (GuidedThreadViewer) | ✅ Есть | `uploadTutorHomeworkTaskImage()` + `handleSendMessage()` |
 | Передача task image в AI | ✅ Есть | `storage://` → signed URL → multimodal API |
@@ -265,9 +265,11 @@ Student selects file
 
 | Параметр | Значение | Причина |
 |----------|----------|---------|
-| Max file size | 10 МБ | Consistent with tutor upload limit |
+| Max file size | 5 МБ | Защита mobile upload и prompt payload |
+| Soft total per message | 15 МБ | Не даём одному сообщению раздувать upload/prompt budget |
 | Formats | JPG, JPEG, PNG, HEIC, WebP, PDF | HEIC = iPhone default |
-| Max attachments per message | 3 | Multi-page solutions |
+| Max attachments per message | 5 | Multi-page solutions |
+| Max student images passed to AI | 5 | Одинаковый лимит в `chat` / `check` / `hint` |
 | Storage bucket | `homework-submissions` | Уже существует, RLS настроен |
 | Signed URL TTL | 1 час | Consistent with existing URLs |
 
@@ -285,7 +287,7 @@ Student selects file
 - [x] Backend валидирует student attachment refs по bucket + student-scoped path
 
 ### P0 (Must Have)
-- [x] Ученик может прикрепить 1-3 изображения/PDF к сообщению в guided chat
+- [x] Ученик может прикрепить 1-5 изображения/PDF к сообщению в guided chat
 - [x] Превью вложения показывается над полем ввода
 - [x] Ученик может удалить вложение до отправки
 - [x] Вложение отправляется с текстом или без текста
@@ -297,7 +299,8 @@ Student selects file
 - [x] AI получает фото ученика при проверке ответа
 - [x] AI получает фото ученика при обсуждении (question mode)
 - [x] AI получает фото ученика при hint mode
-- [x] File size > 10 МБ → error toast
+- [x] File size > 5 МБ → error toast
+- [x] Суммарный размер вложений > 15 МБ → error toast
 - [x] Unsupported format → error toast
 
 ### P1 (Should Have)

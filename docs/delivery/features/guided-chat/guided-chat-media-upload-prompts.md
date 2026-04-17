@@ -253,7 +253,7 @@ Phase 2 = Frontend: UI загрузки в GuidedChatInput + превью + work
 3. Layout / responsive:
    - Structural breakpoints: md: для grid/flex layout, НЕ sm:?
    - Кнопка 📎 touch-friendly (min 44x44 tap area)?
-   - Preview не ломает layout при 1-3 вложениях?
+   - Preview не ломает layout при 1-5 вложениях?
 
 4. State management:
    - Race guard включает isUploading?
@@ -262,10 +262,10 @@ Phase 2 = Frontend: UI загрузки в GuidedChatInput + превью + work
    - Сообщение без текста + с файлом корректно обрабатывается?
 
 5. Error handling:
-   - File size > 10 МБ → toast error?
+   - File size > 5 МБ → toast error?
    - Unsupported format → toast error?
    - Upload failure → toast + не ломает state?
-   - 3+ файлов → toast error?
+   - 6+ файлов → toast error?
 
 6. GuidedHomeworkWorkspace complexity:
    - Файл уже 1189 строк. Изменения минимальны?
@@ -739,7 +739,7 @@ End-to-end checklist:
    - GuidedChatMessage рендерит и старые, и новые сообщения?
 
 8. Acceptance criteria (из PRD):
-   - [ ] 1-3 изображения к сообщению
+   - [ ] 1-5 изображений к сообщению
    - [ ] Превью с удалением
    - [ ] Clipboard paste (Ctrl+V)
    - [ ] Camera на мобильном

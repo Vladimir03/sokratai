@@ -19,7 +19,7 @@
 | Е7 | Парсер скриншотов + перерисовка | R4-3 | **WAIT** | P3 | XL |
 | Е8 | Условие задачи в thread viewer | R1-4, R2-3 | **GO** | P2 | S |
 | Е9 | Realtime thread viewer (live обновление) | R2-3 | **✅ DONE** | **P0** | S |
-| Е10 | Hint quality: запрет «перечитай условие» | S1-1, S1-2, R1-3 | **✅ DONE** | **P0** | S |
+| Е10 | Hint quality: запрет «перечитай условие» | S1-1, S1-2, R1-3 | **✅ DONE**| **P0** | S |
 | Е11 | LLM cost optimization (bootstrap/hint/history) | R1-3 (unit economics) | **GO** | P1 | M |
 | Е12 | Persona presets репетитора (3 dropdown) | R1-2, R1-3 | **GO** | P2 | M |
 | Ж1 | Банк задач ЕГЭ по физике | R4-1, R4-3, S1 | **GO** | P1 | L |
@@ -31,21 +31,24 @@
 Контекст: 3 репетитора в бесплатном пилоте, платный запуск 15 апреля (2000 ₽/мес), цель — 30+ репетиторов. Live-blocker с realtime в thread viewer уже закрыт, остаётся добить качество hint-ов и срезать LLM-косты до монетизации.
 
 **День 1–2 (6–7 апр) — Pilot blockers:**
-1. **Е10 (P0)** — hint quality + запрет «перечитай условие» — **✅ DONE** (`FORBIDDEN_HINT_PHRASES` + validator + retry-once + fallback + telemetry + smoke canary)
+1. **Е10 (P0)** — hint quality + запрет «перечитай условие» (промпт-патч + 3-ступенчатая лестница). Деплой сегодня же через прямой patch в `guided_ai.ts` - **✅ DONE**
 2. **Е9 (P0)** — realtime thread viewer через Supabase Realtime на `homework_tutor_thread_messages` — **✅ DONE**
 
 **День 3–5 (8–10 апр) — Усиление core value:**
+
 3. **Е11 (P1)** — LLM cost optimization: bootstrap caching, history window trimming, system prompt compression, cheaper model для bootstrap/hint. Параллельно с Е10
 4. **Ж2 (P1)** — статистика по ДЗ в формате ЕГЭ (баллы, номера КИМ, динамика ученика)
 5. **Е3 (P1)** — уведомление о регистрации ученика
 
 **День 6–8 (11–13 апр) — Pre-launch polish:**
+
 6. **Ж1 (P1)** — банк задач ЕГЭ, ручное наполнение KB модераторами (Егор+Женя)
 7. **Е12 (P2)** — persona presets: 3 dropdown (глубина / стиль / предпочтительный метод), без free-form prompt
 8. **Е8 (P2)** — условие задачи в GuidedThreadViewer (быстрый win)
 9. **Е5 (P2)** — смена папки в KB (XS, при оказии)
 
 **После 15 апр — paid pilot:**
+
 10. **Е6 (P2)** — AI промпты физики ЕГЭ (research-intensive, отдельный спринт)
 11. **В1 (P2, Phase 1b)** — formula round как homework-linked block (кинематика + tutor assignment)
 12. **Е7 (P3)** — парсер скриншотов (post-pilot)
@@ -73,13 +76,6 @@
 **Статус live-проверки Е9:**
 - Realtime в guided thread viewer подтверждён вручную: ученик пишет с телефона, репетитор видит новые сообщения без `F5`
 
-**Статус live-проверки Е10:**
-- В `guided_ai.ts` внедрён flow `generate -> validate -> 1 retry -> fallback` без циклов и без шаблонных hint-ов
-- Literal фраза *«Попробуй перечитать условие задачи и выделить ключевые данные»* теперь режется validator'ом
-- Добавлен deterministic fallback: если gateway/model вернули мусор дважды, ученик всё равно получает task-specific hint
-- Добавлена telemetry без PII: `hint_rejected` и `hint_fallback_used`
-- Добавлен smoke canary: regression-проверка на live pilot phrase, чтобы баг не вернулся незаметно
-
 **Новые внутренние тикеты (Vladimir, 2026-04-06):**
 - **Е11** — LLM cost reduction обязателен перед монетизацией (30–50% экономии через bootstrap cache + history trim + cheap model для hint/bootstrap)
 - **Е12** — persona presets без free-form prompt (prompt-injection safety): 3 dropdown (глубина объяснения / стиль / предпочтительный метод решения)
@@ -88,4 +84,3 @@
 
 - **В1** — Phase 1 зафиксирована как homework-linked formula round; отдельно остаётся решить UX-точку входа внутри student homework surface и глубину tutor analytics в v1
 - **Е12** — финальный набор опций в 3 dropdown; собрать от Егора и Жени до 13 апр
-- **Е10** — синхронизировать docs (`spec.md`, `tasks.md`, `prompt-patch.md`) с финальной реализацией и отдельно решить, должен ли fallback уменьшать `hint_count`

@@ -1,0 +1,1661 @@
+{
+  "version": "1.0",
+  "generated": "2026-04-08",
+  "section": "mechanics",
+  "count": 28,
+  "formulas": [
+    {
+      "id": "kin_avg_speed_v_ege_oge",
+      "canonical_latex": "v_{ср}=\\dfrac{S}{t}",
+      "human_name": "Средняя скорость",
+      "target_variable": "v",
+      "section": "mechanics",
+      "topic": "kinematics",
+      "subtopic": "uniform_motion",
+      "exam": "BOTH",
+      "difficulty": "basic",
+      "quality_status": "clean",
+      "canonical_choice_reason": "FIPI notation; solved for v; fraction form",
+      "explanation_short": "Средняя скорость — пройденный путь, делённый на время.",
+      "why_wrong_short": "Перепутал путь и время или забыл деление.",
+      "thinking_hint": "Что делится на что: путь на время или время на путь?",
+      "aliases": [
+        {
+          "alias_latex": "v=\\dfrac{S}{t}",
+          "note": "без индекса ср",
+          "source": "egor"
+        },
+        {
+          "alias_latex": "\\upsilon_{ср}=\\dfrac{S}{t}",
+          "note": "греч. υ",
+          "source": "egor"
+        },
+        {
+          "alias_latex": "S=v t",
+          "note": "solved for S",
+          "source": "derived"
+        }
+      ],
+      "build_recipe": {
+        "left": "v_{ср}",
+        "numerator_tokens": [
+          "S"
+        ],
+        "denominator_tokens": [
+          "t"
+        ]
+      },
+      "question_copy": {
+        "situation_ru": "Автомобиль проехал путь S за время t. Как найти его среднюю скорость?",
+        "build_prompt_ru": "Собери формулу средней скорости из знаков S и t.",
+        "tf_prompt_ru": "Верно ли, что средняя скорость равна S делить на t?"
+      },
+      "mutations": [
+        {
+          "mutated_latex": "v_{ср}=\\dfrac{t}{S}",
+          "error_type": "structure",
+          "why_wrong_short": "Путь и время поменяны местами."
+        },
+        {
+          "mutated_latex": "v_{ср}=S\\cdot t",
+          "error_type": "build",
+          "why_wrong_short": "Должно быть деление, а не произведение."
+        },
+        {
+          "mutated_latex": "v_{ср}=\\dfrac{S}{2t}",
+          "error_type": "recognition",
+          "why_wrong_short": "Лишний множитель 2 в знаменателе."
+        }
+      ],
+      "sources_raw": [
+        {
+          "teacher": "elena",
+          "source_ref": "ОГЭ_1 №1",
+          "original_latex": "v_{ср}=\\dfrac{S}{t}",
+          "original_notation": "lat v, S, t"
+        },
+        {
+          "teacher": "egor",
+          "source_ref": "xlsx folder 2",
+          "original_latex": "\\upsilon_{ср}=\\dfrac{S}{t}",
+          "original_notation": "greek υ"
+        }
+      ]
+    },
+    {
+      "id": "kin_uniform_coord_x_t",
+      "canonical_latex": "x(t)=x_0+v_x t",
+      "human_name": "Координата при равномерном движении",
+      "target_variable": "x",
+      "section": "mechanics",
+      "topic": "kinematics",
+      "subtopic": "uniform_motion",
+      "exam": "BOTH",
+      "difficulty": "core",
+      "quality_status": "clean",
+      "canonical_choice_reason": "FIPI codifier form",
+      "explanation_short": "Координата линейно растёт от начальной на v_x·t.",
+      "why_wrong_short": "Забыл начальную координату или знак скорости.",
+      "thinking_hint": "Что прибавляется к x₀ — скорость или скорость·время?",
+      "aliases": [
+        {
+          "alias_latex": "x=x_0+v t",
+          "note": "без индекса",
+          "source": "egor"
+        }
+      ],
+      "build_recipe": {
+        "left": "x(t)",
+        "numerator_tokens": [
+          "x_0",
+          "+",
+          "v_x",
+          "\\cdot",
+          "t"
+        ],
+        "denominator_tokens": []
+      },
+      "question_copy": {
+        "situation_ru": "Тело стартует из x₀ со скоростью v_x по оси X. Формула координаты?",
+        "build_prompt_ru": "Собери формулу x(t).",
+        "tf_prompt_ru": "Верно ли, что x(t)=x₀+v_x·t?"
+      },
+      "mutations": [
+        {
+          "mutated_latex": "x(t)=x_0+v_x",
+          "error_type": "build",
+          "why_wrong_short": "Потеряно умножение на t."
+        },
+        {
+          "mutated_latex": "x(t)=x_0-v_x t",
+          "error_type": "structure",
+          "why_wrong_short": "Неверный знак скорости для движения в положит. направлении."
+        },
+        {
+          "mutated_latex": "x(t)=v_x t",
+          "error_type": "recognition",
+          "why_wrong_short": "Потеряна начальная координата."
+        }
+      ],
+      "sources_raw": [
+        {
+          "teacher": "elena",
+          "source_ref": "ОГЭ_1 №2",
+          "original_latex": "x(t)=x_0+v_x t",
+          "original_notation": "lat"
+        }
+      ]
+    },
+    {
+      "id": "kin_uniaccel_coord_x_t",
+      "canonical_latex": "x(t)=x_0+v_{0x} t+\\dfrac{a_x t^2}{2}",
+      "human_name": "Координата при равноускоренном движении",
+      "target_variable": "x",
+      "section": "mechanics",
+      "topic": "kinematics",
+      "subtopic": "uniformly_accelerated",
+      "exam": "BOTH",
+      "difficulty": "core",
+      "quality_status": "clean",
+      "canonical_choice_reason": "FIPI codifier; with 1/2",
+      "explanation_short": "Добавляем к равномерному вклад ускорения ½·a·t².",
+      "why_wrong_short": "Забыл делить на 2 или потерял t².",
+      "thinking_hint": "Какая степень t стоит у ускорения?",
+      "aliases": [
+        {
+          "alias_latex": "x=x_0+v_0 t+\\tfrac{1}{2}a t^2",
+          "note": "без индексов",
+          "source": "egor"
+        }
+      ],
+      "build_recipe": {
+        "left": "x(t)",
+        "numerator_tokens": [
+          "x_0",
+          "+",
+          "v_{0x}",
+          "\\cdot",
+          "t",
+          "+",
+          "a_x",
+          "\\cdot",
+          "t^2"
+        ],
+        "denominator_tokens": [
+          "2"
+        ]
+      },
+      "question_copy": {
+        "situation_ru": "Тело движется с постоянным ускорением a_x. Как записать x(t)?",
+        "build_prompt_ru": "Собери формулу координаты при равноускоренном движении.",
+        "tf_prompt_ru": "Верно ли, что x(t)=x₀+v₀ₓt+a_xt²/2?"
+      },
+      "mutations": [
+        {
+          "mutated_latex": "x(t)=x_0+v_{0x} t+a_x t^2",
+          "error_type": "build",
+          "why_wrong_short": "Забыли делить на 2."
+        },
+        {
+          "mutated_latex": "x(t)=x_0+v_{0x} t+\\dfrac{a_x t}{2}",
+          "error_type": "structure",
+          "why_wrong_short": "У ускорения должно стоять t² а не t."
+        },
+        {
+          "mutated_latex": "x(t)=x_0+\\dfrac{a_x t^2}{2}",
+          "error_type": "recognition",
+          "why_wrong_short": "Потерян член v₀ₓ·t."
+        }
+      ],
+      "sources_raw": [
+        {
+          "teacher": "elena",
+          "source_ref": "ОГЭ_1 №3",
+          "original_latex": "x(t)=x_0+v_{0x}t+a_xt^2/2",
+          "original_notation": "lat"
+        }
+      ]
+    },
+    {
+      "id": "kin_uniaccel_velocity",
+      "canonical_latex": "v_x=v_{0x}+a_x t",
+      "human_name": "Скорость при равноускоренном движении",
+      "target_variable": "v",
+      "section": "mechanics",
+      "topic": "kinematics",
+      "subtopic": "uniformly_accelerated",
+      "exam": "BOTH",
+      "difficulty": "basic",
+      "quality_status": "clean",
+      "canonical_choice_reason": "FIPI codifier",
+      "explanation_short": "Скорость растёт линейно со временем.",
+      "why_wrong_short": "Забыл начальную скорость или степень t.",
+      "thinking_hint": "Какая степень t у ускорения в формуле скорости?",
+      "aliases": [
+        {
+          "alias_latex": "v=v_0+a t",
+          "note": "без индексов",
+          "source": "egor"
+        }
+      ],
+      "build_recipe": {
+        "left": "v_x",
+        "numerator_tokens": [
+          "v_{0x}",
+          "+",
+          "a_x",
+          "\\cdot",
+          "t"
+        ],
+        "denominator_tokens": []
+      },
+      "question_copy": {
+        "situation_ru": "Тело с начальной скоростью v₀ₓ получает ускорение a_x. Формула v(t)?",
+        "build_prompt_ru": "Собери формулу скорости.",
+        "tf_prompt_ru": "Верно ли, что v_x=v₀ₓ+a_x·t?"
+      },
+      "mutations": [
+        {
+          "mutated_latex": "v_x=v_{0x}+a_x t^2",
+          "error_type": "structure",
+          "why_wrong_short": "У ускорения не должно быть t²."
+        },
+        {
+          "mutated_latex": "v_x=a_x t",
+          "error_type": "recognition",
+          "why_wrong_short": "Потеряна начальная скорость."
+        }
+      ],
+      "sources_raw": [
+        {
+          "teacher": "elena",
+          "source_ref": "ОГЭ_1 №5",
+          "original_latex": "v_x=v_{0x}+a_xt",
+          "original_notation": "lat"
+        }
+      ]
+    },
+    {
+      "id": "kin_uniaccel_no_time",
+      "canonical_latex": "v^2-v_0^2=2aS",
+      "human_name": "Связь скорости и пути без времени",
+      "target_variable": "v",
+      "section": "mechanics",
+      "topic": "kinematics",
+      "subtopic": "uniformly_accelerated",
+      "exam": "BOTH",
+      "difficulty": "core",
+      "quality_status": "clean",
+      "canonical_choice_reason": "standard form",
+      "explanation_short": "Квадраты скоростей связаны с 2aS.",
+      "why_wrong_short": "Забыл множитель 2 или возведение в квадрат.",
+      "thinking_hint": "В формуле без времени скорости стоят в какой степени?",
+      "aliases": [
+        {
+          "alias_latex": "v^2=v_0^2+2aS",
+          "note": "решено для v²",
+          "source": "derived"
+        }
+      ],
+      "build_recipe": {
+        "left": "v^2-v_0^2",
+        "numerator_tokens": [
+          "2",
+          "\\cdot",
+          "a",
+          "\\cdot",
+          "S"
+        ],
+        "denominator_tokens": []
+      },
+      "question_copy": {
+        "situation_ru": "Нужно связать конечную скорость и путь без времени. Какая формула?",
+        "build_prompt_ru": "Собери формулу связи скоростей и пути.",
+        "tf_prompt_ru": "Верно ли, что v²−v₀²=2aS?"
+      },
+      "mutations": [
+        {
+          "mutated_latex": "v-v_0=2aS",
+          "error_type": "structure",
+          "why_wrong_short": "Потеряны квадраты скоростей."
+        },
+        {
+          "mutated_latex": "v^2-v_0^2=aS",
+          "error_type": "build",
+          "why_wrong_short": "Потерян множитель 2."
+        }
+      ],
+      "sources_raw": [
+        {
+          "teacher": "elena",
+          "source_ref": "ОГЭ_1 №7",
+          "original_latex": "v^2-v_0^2=2aS",
+          "original_notation": "lat"
+        }
+      ]
+    },
+    {
+      "id": "kin_accel_definition",
+      "canonical_latex": "a=\\dfrac{v-v_0}{t}",
+      "human_name": "Ускорение",
+      "target_variable": "a",
+      "section": "mechanics",
+      "topic": "kinematics",
+      "subtopic": "uniformly_accelerated",
+      "exam": "BOTH",
+      "difficulty": "basic",
+      "quality_status": "clean",
+      "canonical_choice_reason": "definition form",
+      "explanation_short": "Ускорение — изменение скорости за время.",
+      "why_wrong_short": "Перепутал числитель и знаменатель.",
+      "thinking_hint": "Что делится на время?",
+      "aliases": [
+        {
+          "alias_latex": "a=\\dfrac{\\Delta v}{\\Delta t}",
+          "note": "через Δ",
+          "source": "derived"
+        }
+      ],
+      "build_recipe": {
+        "left": "a",
+        "numerator_tokens": [
+          "v",
+          "-",
+          "v_0"
+        ],
+        "denominator_tokens": [
+          "t"
+        ]
+      },
+      "question_copy": {
+        "situation_ru": "Скорость изменилась с v₀ до v за время t. Найти ускорение.",
+        "build_prompt_ru": "Собери формулу ускорения.",
+        "tf_prompt_ru": "Верно ли, что a=(v−v₀)/t?"
+      },
+      "mutations": [
+        {
+          "mutated_latex": "a=\\dfrac{t}{v-v_0}",
+          "error_type": "structure",
+          "why_wrong_short": "Числитель и знаменатель поменяны."
+        },
+        {
+          "mutated_latex": "a=(v-v_0)\\cdot t",
+          "error_type": "build",
+          "why_wrong_short": "Должно быть деление, а не умножение."
+        }
+      ],
+      "sources_raw": [
+        {
+          "teacher": "elena",
+          "source_ref": "ОГЭ_1 №6",
+          "original_latex": "a=(v-v_0)/t",
+          "original_notation": "lat"
+        }
+      ]
+    },
+    {
+      "id": "kin_circular_linear_speed",
+      "canonical_latex": "v=\\dfrac{2\\pi R}{T}",
+      "human_name": "Линейная скорость по окружности",
+      "target_variable": "v",
+      "section": "mechanics",
+      "topic": "kinematics",
+      "subtopic": "circular_motion",
+      "exam": "BOTH",
+      "difficulty": "core",
+      "quality_status": "clean",
+      "canonical_choice_reason": "FIPI form with T",
+      "explanation_short": "За период проходится длина окружности 2πR.",
+      "why_wrong_short": "Забыл π или радиус.",
+      "thinking_hint": "Сколько тело проходит за один период?",
+      "aliases": [
+        {
+          "alias_latex": "v=\\omega R",
+          "note": "через ω",
+          "source": "derived"
+        }
+      ],
+      "build_recipe": {
+        "left": "v",
+        "numerator_tokens": [
+          "2",
+          "\\pi",
+          "R"
+        ],
+        "denominator_tokens": [
+          "T"
+        ]
+      },
+      "question_copy": {
+        "situation_ru": "Тело движется по окружности радиуса R с периодом T. Найти линейную скорость.",
+        "build_prompt_ru": "Собери формулу линейной скорости.",
+        "tf_prompt_ru": "Верно ли, что v=2πR/T?"
+      },
+      "mutations": [
+        {
+          "mutated_latex": "v=\\dfrac{\\pi R}{T}",
+          "error_type": "build",
+          "why_wrong_short": "Потерян множитель 2."
+        },
+        {
+          "mutated_latex": "v=\\dfrac{2\\pi R^2}{T}",
+          "error_type": "recognition",
+          "why_wrong_short": "Радиус в квадрате не нужен."
+        },
+        {
+          "mutated_latex": "v=\\dfrac{T}{2\\pi R}",
+          "error_type": "structure",
+          "why_wrong_short": "Числитель и знаменатель перепутаны."
+        }
+      ],
+      "sources_raw": [
+        {
+          "teacher": "elena",
+          "source_ref": "ОГЭ_1 №8",
+          "original_latex": "v=2\\pi R/T",
+          "original_notation": "lat"
+        }
+      ]
+    },
+    {
+      "id": "kin_circular_omega_T",
+      "canonical_latex": "\\omega=\\dfrac{2\\pi}{T}",
+      "human_name": "Угловая скорость через период",
+      "target_variable": "omega",
+      "section": "mechanics",
+      "topic": "kinematics",
+      "subtopic": "circular_motion",
+      "exam": "BOTH",
+      "difficulty": "basic",
+      "quality_status": "clean",
+      "canonical_choice_reason": "standard",
+      "explanation_short": "За период проходится угол 2π.",
+      "why_wrong_short": "Забыл 2π или перепутал T и ω.",
+      "thinking_hint": "Какой угол проходится за период?",
+      "aliases": [
+        {
+          "alias_latex": "\\omega=2\\pi\\nu",
+          "note": "через частоту",
+          "source": "derived"
+        }
+      ],
+      "build_recipe": {
+        "left": "\\omega",
+        "numerator_tokens": [
+          "2",
+          "\\pi"
+        ],
+        "denominator_tokens": [
+          "T"
+        ]
+      },
+      "question_copy": {
+        "situation_ru": "Период вращения T. Найти угловую скорость.",
+        "build_prompt_ru": "Собери формулу угловой скорости через период.",
+        "tf_prompt_ru": "Верно ли, что ω=2π/T?"
+      },
+      "mutations": [
+        {
+          "mutated_latex": "\\omega=\\dfrac{\\pi}{T}",
+          "error_type": "build",
+          "why_wrong_short": "Потерян 2."
+        },
+        {
+          "mutated_latex": "\\omega=\\dfrac{T}{2\\pi}",
+          "error_type": "structure",
+          "why_wrong_short": "Числитель и знаменатель перепутаны."
+        }
+      ],
+      "sources_raw": [
+        {
+          "teacher": "elena",
+          "source_ref": "ОГЭ_1 №9",
+          "original_latex": "\\omega=2\\pi/T",
+          "original_notation": "lat"
+        }
+      ]
+    },
+    {
+      "id": "kin_centripetal_v2_R",
+      "canonical_latex": "a_ц=\\dfrac{v^2}{R}",
+      "human_name": "Центростремительное ускорение (через v)",
+      "target_variable": "a",
+      "section": "mechanics",
+      "topic": "kinematics",
+      "subtopic": "circular_motion",
+      "exam": "BOTH",
+      "difficulty": "core",
+      "quality_status": "clean",
+      "canonical_choice_reason": "FIPI codifier; through linear velocity",
+      "explanation_short": "Ускорение направлено к центру, величина v²/R.",
+      "why_wrong_short": "Потерял квадрат скорости или перепутал R и v².",
+      "thinking_hint": "В какой степени стоит скорость?",
+      "aliases": [
+        {
+          "alias_latex": "a=\\dfrac{v^2}{R}",
+          "note": "без индекса",
+          "source": "egor"
+        }
+      ],
+      "build_recipe": {
+        "left": "a_ц",
+        "numerator_tokens": [
+          "v^2"
+        ],
+        "denominator_tokens": [
+          "R"
+        ]
+      },
+      "question_copy": {
+        "situation_ru": "Тело движется по окружности радиуса R со скоростью v. Центростремительное ускорение?",
+        "build_prompt_ru": "Собери формулу центростремительного ускорения через v.",
+        "tf_prompt_ru": "Верно ли, что a_ц=v²/R?"
+      },
+      "mutations": [
+        {
+          "mutated_latex": "a_ц=\\dfrac{v}{R}",
+          "error_type": "structure",
+          "why_wrong_short": "Потерян квадрат скорости."
+        },
+        {
+          "mutated_latex": "a_ц=\\dfrac{v^2}{R^2}",
+          "error_type": "build",
+          "why_wrong_short": "Радиус не должен быть в квадрате."
+        }
+      ],
+      "sources_raw": [
+        {
+          "teacher": "elena",
+          "source_ref": "ОГЭ_1 №10",
+          "original_latex": "a_ц=v^2/R",
+          "original_notation": "lat"
+        }
+      ]
+    },
+    {
+      "id": "kin_centripetal_omega2_R",
+      "canonical_latex": "a_ц=\\omega^2 R",
+      "human_name": "Центростремительное ускорение (через ω)",
+      "target_variable": "a",
+      "section": "mechanics",
+      "topic": "kinematics",
+      "subtopic": "circular_motion",
+      "exam": "BOTH",
+      "difficulty": "core",
+      "quality_status": "clean",
+      "canonical_choice_reason": "alternate FIPI form",
+      "explanation_short": "Выражение через угловую скорость.",
+      "why_wrong_short": "Потерял квадрат угловой скорости.",
+      "thinking_hint": "В какой степени стоит ω?",
+      "aliases": [],
+      "build_recipe": {
+        "left": "a_ц",
+        "numerator_tokens": [
+          "\\omega^2",
+          "\\cdot",
+          "R"
+        ],
+        "denominator_tokens": []
+      },
+      "question_copy": {
+        "situation_ru": "Тело вращается с угловой скоростью ω на радиусе R. a_ц?",
+        "build_prompt_ru": "Собери формулу a_ц через ω.",
+        "tf_prompt_ru": "Верно ли, что a_ц=ω²R?"
+      },
+      "mutations": [
+        {
+          "mutated_latex": "a_ц=\\omega R",
+          "error_type": "structure",
+          "why_wrong_short": "Потерян квадрат ω."
+        },
+        {
+          "mutated_latex": "a_ц=\\omega^2/R",
+          "error_type": "build",
+          "why_wrong_short": "Должно быть произведение, а не деление."
+        }
+      ],
+      "sources_raw": [
+        {
+          "teacher": "elena",
+          "source_ref": "ОГЭ_1 №11",
+          "original_latex": "a_ц=\\omega^2 R",
+          "original_notation": "lat"
+        }
+      ]
+    },
+    {
+      "id": "dyn_newton_2nd",
+      "canonical_latex": "F=ma",
+      "human_name": "Второй закон Ньютона",
+      "target_variable": "F",
+      "section": "mechanics",
+      "topic": "dynamics",
+      "subtopic": "newton_laws",
+      "exam": "BOTH",
+      "difficulty": "basic",
+      "quality_status": "clean",
+      "canonical_choice_reason": "FIPI codifier",
+      "explanation_short": "Равнодействующая сила равна произведению массы на ускорение.",
+      "why_wrong_short": "Перепутал произведение и деление или порядок.",
+      "thinking_hint": "Что умножается, чтобы получить силу?",
+      "aliases": [
+        {
+          "alias_latex": "\\vec F=m\\vec a",
+          "note": "векторная",
+          "source": "egor"
+        },
+        {
+          "alias_latex": "a=\\dfrac{F}{m}",
+          "note": "solved for a",
+          "source": "derived"
+        }
+      ],
+      "build_recipe": {
+        "left": "F",
+        "numerator_tokens": [
+          "m",
+          "\\cdot",
+          "a"
+        ],
+        "denominator_tokens": []
+      },
+      "question_copy": {
+        "situation_ru": "Тело массой m движется с ускорением a. Найти равнодействующую силу.",
+        "build_prompt_ru": "Собери формулу второго закона Ньютона.",
+        "tf_prompt_ru": "Верно ли, что F=ma?"
+      },
+      "mutations": [
+        {
+          "mutated_latex": "F=\\dfrac{m}{a}",
+          "error_type": "structure",
+          "why_wrong_short": "Должно быть произведение, а не деление."
+        },
+        {
+          "mutated_latex": "F=m+a",
+          "error_type": "build",
+          "why_wrong_short": "Должно быть произведение, а не сумма."
+        }
+      ],
+      "sources_raw": [
+        {
+          "teacher": "elena",
+          "source_ref": "ОГЭ_2 №14",
+          "original_latex": "F=ma",
+          "original_notation": "lat"
+        },
+        {
+          "teacher": "egor",
+          "source_ref": "folder 17",
+          "original_latex": "F=ma",
+          "original_notation": "lat"
+        }
+      ]
+    },
+    {
+      "id": "dyn_newton_3rd",
+      "canonical_latex": "\\vec F_{12}=-\\vec F_{21}",
+      "human_name": "Третий закон Ньютона",
+      "target_variable": null,
+      "section": "mechanics",
+      "topic": "dynamics",
+      "subtopic": "newton_laws",
+      "exam": "BOTH",
+      "difficulty": "basic",
+      "quality_status": "clean",
+      "canonical_choice_reason": "standard vector form",
+      "explanation_short": "Силы действия и противодействия равны по модулю и противоположны.",
+      "why_wrong_short": "Забыл знак минус.",
+      "thinking_hint": "Какой знак у противодействия?",
+      "aliases": [
+        {
+          "alias_latex": "F_{12}=-F_{21}",
+          "note": "скалярная",
+          "source": "elena"
+        }
+      ],
+      "build_recipe": null,
+      "question_copy": {
+        "situation_ru": "Как связаны силы действия и противодействия?",
+        "build_prompt_ru": null,
+        "tf_prompt_ru": "Верно ли, что F_{12}=−F_{21}?"
+      },
+      "mutations": [
+        {
+          "mutated_latex": "F_{12}=F_{21}",
+          "error_type": "structure",
+          "why_wrong_short": "Забыт знак минус."
+        },
+        {
+          "mutated_latex": "F_{12}=2F_{21}",
+          "error_type": "recognition",
+          "why_wrong_short": "Силы равны по модулю."
+        }
+      ],
+      "sources_raw": [
+        {
+          "teacher": "elena",
+          "source_ref": "ОГЭ_2 №15",
+          "original_latex": "F_{12}=-F_{21}",
+          "original_notation": "lat"
+        }
+      ]
+    },
+    {
+      "id": "dyn_friction",
+      "canonical_latex": "F_{тр}=\\mu N",
+      "human_name": "Сила трения скольжения",
+      "target_variable": "F",
+      "section": "mechanics",
+      "topic": "dynamics",
+      "subtopic": "friction",
+      "exam": "BOTH",
+      "difficulty": "basic",
+      "quality_status": "clean",
+      "canonical_choice_reason": "standard",
+      "explanation_short": "Сила трения пропорциональна нормальной реакции.",
+      "why_wrong_short": "Перепутал μ и N местами или знак.",
+      "thinking_hint": "На что умножается коэффициент трения?",
+      "aliases": [
+        {
+          "alias_latex": "F_{тр}=\\mu F_N",
+          "note": "через F_N",
+          "source": "egor"
+        }
+      ],
+      "build_recipe": {
+        "left": "F_{тр}",
+        "numerator_tokens": [
+          "\\mu",
+          "\\cdot",
+          "N"
+        ],
+        "denominator_tokens": []
+      },
+      "question_copy": {
+        "situation_ru": "Брусок давит на поверхность с нормальной реакцией N, коэффициент трения μ. Сила трения?",
+        "build_prompt_ru": "Собери формулу силы трения.",
+        "tf_prompt_ru": "Верно ли, что F_тр=μN?"
+      },
+      "mutations": [
+        {
+          "mutated_latex": "F_{тр}=\\dfrac{\\mu}{N}",
+          "error_type": "structure",
+          "why_wrong_short": "Должно быть произведение."
+        },
+        {
+          "mutated_latex": "F_{тр}=\\mu+N",
+          "error_type": "build",
+          "why_wrong_short": "Должно быть произведение."
+        }
+      ],
+      "sources_raw": [
+        {
+          "teacher": "elena",
+          "source_ref": "ОГЭ_2 №16",
+          "original_latex": "F_{тр}=\\mu N",
+          "original_notation": "lat"
+        }
+      ]
+    },
+    {
+      "id": "dyn_hookes_law",
+      "canonical_latex": "F=k\\Delta l",
+      "human_name": "Закон Гука",
+      "target_variable": "F",
+      "section": "mechanics",
+      "topic": "dynamics",
+      "subtopic": "elastic_force",
+      "exam": "BOTH",
+      "difficulty": "basic",
+      "quality_status": "clean",
+      "canonical_choice_reason": "FIPI codifier",
+      "explanation_short": "Сила упругости пропорциональна удлинению.",
+      "why_wrong_short": "Забыл Δ или перепутал k и Δl.",
+      "thinking_hint": "На что умножается жёсткость?",
+      "aliases": [
+        {
+          "alias_latex": "F_{упр}=k x",
+          "note": "через x",
+          "source": "egor"
+        }
+      ],
+      "build_recipe": {
+        "left": "F",
+        "numerator_tokens": [
+          "k",
+          "\\cdot",
+          "\\Delta l"
+        ],
+        "denominator_tokens": []
+      },
+      "question_copy": {
+        "situation_ru": "Пружина с жёсткостью k растянута на Δl. Сила упругости?",
+        "build_prompt_ru": "Собери формулу закона Гука.",
+        "tf_prompt_ru": "Верно ли, что F=kΔl?"
+      },
+      "mutations": [
+        {
+          "mutated_latex": "F=\\dfrac{k}{\\Delta l}",
+          "error_type": "structure",
+          "why_wrong_short": "Должно быть произведение."
+        },
+        {
+          "mutated_latex": "F=k\\Delta l^2",
+          "error_type": "build",
+          "why_wrong_short": "Δl в первой степени."
+        }
+      ],
+      "sources_raw": [
+        {
+          "teacher": "elena",
+          "source_ref": "ОГЭ_2 №17",
+          "original_latex": "F=k\\Delta l",
+          "original_notation": "lat"
+        }
+      ]
+    },
+    {
+      "id": "dyn_universal_gravitation",
+      "canonical_latex": "F=G\\dfrac{m_1 m_2}{R^2}",
+      "human_name": "Закон всемирного тяготения",
+      "target_variable": "F",
+      "section": "mechanics",
+      "topic": "dynamics",
+      "subtopic": "gravitation",
+      "exam": "BOTH",
+      "difficulty": "core",
+      "quality_status": "clean",
+      "canonical_choice_reason": "FIPI codifier",
+      "explanation_short": "Сила пропорциональна произведению масс и обратно пропорциональна квадрату расстояния.",
+      "why_wrong_short": "Забыл квадрат расстояния.",
+      "thinking_hint": "В какой степени стоит расстояние?",
+      "aliases": [],
+      "build_recipe": {
+        "left": "F",
+        "numerator_tokens": [
+          "G",
+          "\\cdot",
+          "m_1",
+          "\\cdot",
+          "m_2"
+        ],
+        "denominator_tokens": [
+          "R^2"
+        ]
+      },
+      "question_copy": {
+        "situation_ru": "Два тела массами m₁ и m₂ на расстоянии R. Сила притяжения?",
+        "build_prompt_ru": "Собери формулу всемирного тяготения.",
+        "tf_prompt_ru": "Верно ли, что F=Gm₁m₂/R²?"
+      },
+      "mutations": [
+        {
+          "mutated_latex": "F=G\\dfrac{m_1 m_2}{R}",
+          "error_type": "structure",
+          "why_wrong_short": "R должно быть в квадрате."
+        },
+        {
+          "mutated_latex": "F=G\\dfrac{m_1+m_2}{R^2}",
+          "error_type": "build",
+          "why_wrong_short": "Должно быть произведение масс."
+        }
+      ],
+      "sources_raw": [
+        {
+          "teacher": "elena",
+          "source_ref": "ОГЭ_2 №18",
+          "original_latex": "F=Gm_1m_2/R^2",
+          "original_notation": "lat"
+        }
+      ]
+    },
+    {
+      "id": "dyn_gravity",
+      "canonical_latex": "F_{тяж}=mg",
+      "human_name": "Сила тяжести",
+      "target_variable": "F",
+      "section": "mechanics",
+      "topic": "dynamics",
+      "subtopic": "gravitation",
+      "exam": "BOTH",
+      "difficulty": "basic",
+      "quality_status": "clean",
+      "canonical_choice_reason": "FIPI codifier",
+      "explanation_short": "Сила тяжести пропорциональна массе.",
+      "why_wrong_short": "Перепутал m и g или забыл множитель.",
+      "thinking_hint": "На что умножается масса?",
+      "aliases": [
+        {
+          "alias_latex": "P=mg",
+          "note": "вес в покое",
+          "source": "derived"
+        }
+      ],
+      "build_recipe": {
+        "left": "F_{тяж}",
+        "numerator_tokens": [
+          "m",
+          "\\cdot",
+          "g"
+        ],
+        "denominator_tokens": []
+      },
+      "question_copy": {
+        "situation_ru": "Тело массой m у поверхности Земли. Сила тяжести?",
+        "build_prompt_ru": "Собери формулу силы тяжести.",
+        "tf_prompt_ru": "Верно ли, что F_тяж=mg?"
+      },
+      "mutations": [
+        {
+          "mutated_latex": "F_{тяж}=\\dfrac{m}{g}",
+          "error_type": "structure",
+          "why_wrong_short": "Должно быть произведение."
+        },
+        {
+          "mutated_latex": "F_{тяж}=m+g",
+          "error_type": "build",
+          "why_wrong_short": "Должно быть произведение."
+        }
+      ],
+      "sources_raw": [
+        {
+          "teacher": "elena",
+          "source_ref": "ОГЭ_2 №19",
+          "original_latex": "F=mg",
+          "original_notation": "lat"
+        }
+      ]
+    },
+    {
+      "id": "cons_momentum_def",
+      "canonical_latex": "p=mv",
+      "human_name": "Импульс тела",
+      "target_variable": "p",
+      "section": "mechanics",
+      "topic": "conservation_laws",
+      "subtopic": "momentum",
+      "exam": "BOTH",
+      "difficulty": "basic",
+      "quality_status": "clean",
+      "canonical_choice_reason": "FIPI codifier",
+      "explanation_short": "Импульс — произведение массы на скорость.",
+      "why_wrong_short": "Перепутал m и v или степень.",
+      "thinking_hint": "На что умножается масса?",
+      "aliases": [
+        {
+          "alias_latex": "\\vec p=m\\vec v",
+          "note": "векторная",
+          "source": "egor"
+        }
+      ],
+      "build_recipe": {
+        "left": "p",
+        "numerator_tokens": [
+          "m",
+          "\\cdot",
+          "v"
+        ],
+        "denominator_tokens": []
+      },
+      "question_copy": {
+        "situation_ru": "Тело массой m движется со скоростью v. Найти импульс.",
+        "build_prompt_ru": "Собери формулу импульса.",
+        "tf_prompt_ru": "Верно ли, что p=mv?"
+      },
+      "mutations": [
+        {
+          "mutated_latex": "p=mv^2",
+          "error_type": "build",
+          "why_wrong_short": "Скорость в первой степени."
+        },
+        {
+          "mutated_latex": "p=\\dfrac{m}{v}",
+          "error_type": "structure",
+          "why_wrong_short": "Должно быть произведение."
+        }
+      ],
+      "sources_raw": [
+        {
+          "teacher": "elena",
+          "source_ref": "ОГЭ_2 №21",
+          "original_latex": "p=mv",
+          "original_notation": "lat"
+        }
+      ]
+    },
+    {
+      "id": "cons_momentum_conservation",
+      "canonical_latex": "m_1 v_1+m_2 v_2=m_1 v_1'+m_2 v_2'",
+      "human_name": "Закон сохранения импульса (2 тела)",
+      "target_variable": null,
+      "section": "mechanics",
+      "topic": "conservation_laws",
+      "subtopic": "momentum",
+      "exam": "BOTH",
+      "difficulty": "core",
+      "quality_status": "clean",
+      "canonical_choice_reason": "full form with primes",
+      "explanation_short": "Сумма импульсов до равна сумме после.",
+      "why_wrong_short": "Забыл одно из тел или знак проекции.",
+      "thinking_hint": "Что сохраняется в замкнутой системе?",
+      "aliases": [
+        {
+          "alias_latex": "\\sum m_i v_i=\\mathrm{const}",
+          "note": "общая форма",
+          "source": "elena"
+        }
+      ],
+      "build_recipe": null,
+      "question_copy": {
+        "situation_ru": "Два тела взаимодействуют без внешних сил. Какой закон применяется?",
+        "build_prompt_ru": null,
+        "tf_prompt_ru": "Верно ли, что суммарный импульс до равен суммарному после?"
+      },
+      "mutations": [
+        {
+          "mutated_latex": "m_1 v_1=m_2 v_2",
+          "error_type": "recognition",
+          "why_wrong_short": "Это не закон сохранения, а частный случай."
+        },
+        {
+          "mutated_latex": "m_1 v_1+m_2 v_2=0",
+          "error_type": "structure",
+          "why_wrong_short": "Справа должна быть сумма после взаимодействия."
+        }
+      ],
+      "sources_raw": [
+        {
+          "teacher": "elena",
+          "source_ref": "ОГЭ_2 №22",
+          "original_latex": "m_1 v_1+m_2 v_2=\\mathrm{const}",
+          "original_notation": "lat"
+        }
+      ]
+    },
+    {
+      "id": "cons_work",
+      "canonical_latex": "A=Fs\\cos\\alpha",
+      "human_name": "Механическая работа",
+      "target_variable": "A",
+      "section": "mechanics",
+      "topic": "conservation_laws",
+      "subtopic": "work_power",
+      "exam": "BOTH",
+      "difficulty": "core",
+      "quality_status": "clean",
+      "canonical_choice_reason": "FIPI codifier",
+      "explanation_short": "Работа = сила · перемещение · косинус угла.",
+      "why_wrong_short": "Забыл cos α или перепутал знак.",
+      "thinking_hint": "Что учитывает cos α?",
+      "aliases": [
+        {
+          "alias_latex": "A=F\\cdot s",
+          "note": "частный случай α=0",
+          "source": "derived"
+        }
+      ],
+      "build_recipe": {
+        "left": "A",
+        "numerator_tokens": [
+          "F",
+          "\\cdot",
+          "s",
+          "\\cdot",
+          "\\cos\\alpha"
+        ],
+        "denominator_tokens": []
+      },
+      "question_copy": {
+        "situation_ru": "Сила F под углом α к перемещению s. Найти работу.",
+        "build_prompt_ru": "Собери формулу механической работы.",
+        "tf_prompt_ru": "Верно ли, что A=Fs·cos α?"
+      },
+      "mutations": [
+        {
+          "mutated_latex": "A=Fs\\sin\\alpha",
+          "error_type": "recognition",
+          "why_wrong_short": "Должен быть cos, а не sin."
+        },
+        {
+          "mutated_latex": "A=\\dfrac{F}{s}\\cos\\alpha",
+          "error_type": "structure",
+          "why_wrong_short": "Должно быть произведение F и s."
+        }
+      ],
+      "sources_raw": [
+        {
+          "teacher": "elena",
+          "source_ref": "ОГЭ_2 №23",
+          "original_latex": "A=Fs\\cos\\alpha",
+          "original_notation": "lat"
+        }
+      ]
+    },
+    {
+      "id": "cons_power",
+      "canonical_latex": "N=\\dfrac{A}{t}",
+      "human_name": "Механическая мощность",
+      "target_variable": "N",
+      "section": "mechanics",
+      "topic": "conservation_laws",
+      "subtopic": "work_power",
+      "exam": "BOTH",
+      "difficulty": "basic",
+      "quality_status": "clean",
+      "canonical_choice_reason": "definition form",
+      "explanation_short": "Мощность — работа, совершённая за единицу времени.",
+      "why_wrong_short": "Перепутал работу и время.",
+      "thinking_hint": "Что делится на время?",
+      "aliases": [
+        {
+          "alias_latex": "P=\\dfrac{A}{t}",
+          "note": "с символом P",
+          "source": "egor"
+        },
+        {
+          "alias_latex": "N=Fv",
+          "note": "через силу и скорость",
+          "source": "derived"
+        }
+      ],
+      "build_recipe": {
+        "left": "N",
+        "numerator_tokens": [
+          "A"
+        ],
+        "denominator_tokens": [
+          "t"
+        ]
+      },
+      "question_copy": {
+        "situation_ru": "За время t совершена работа A. Найти мощность.",
+        "build_prompt_ru": "Собери формулу мощности.",
+        "tf_prompt_ru": "Верно ли, что N=A/t?"
+      },
+      "mutations": [
+        {
+          "mutated_latex": "N=\\dfrac{t}{A}",
+          "error_type": "structure",
+          "why_wrong_short": "Числитель и знаменатель перепутаны."
+        },
+        {
+          "mutated_latex": "N=A\\cdot t",
+          "error_type": "build",
+          "why_wrong_short": "Должно быть деление."
+        }
+      ],
+      "sources_raw": [
+        {
+          "teacher": "elena",
+          "source_ref": "ОГЭ_2 №24",
+          "original_latex": "N=A/t",
+          "original_notation": "lat"
+        }
+      ]
+    },
+    {
+      "id": "cons_kinetic_energy",
+      "canonical_latex": "E_к=\\dfrac{mv^2}{2}",
+      "human_name": "Кинетическая энергия",
+      "target_variable": "E",
+      "section": "mechanics",
+      "topic": "conservation_laws",
+      "subtopic": "energy",
+      "exam": "BOTH",
+      "difficulty": "basic",
+      "quality_status": "auto_resolved",
+      "canonical_choice_reason": "Elena: E_k, Egor: E_кин — canonical = E_к (latin subscript merged to cyrillic к per FIPI)",
+      "explanation_short": "Половина произведения массы на квадрат скорости.",
+      "why_wrong_short": "Забыл делить на 2 или квадрат скорости.",
+      "thinking_hint": "В какой степени стоит скорость?",
+      "aliases": [
+        {
+          "alias_latex": "E_k=\\dfrac{mv^2}{2}",
+          "note": "латинский индекс",
+          "source": "elena"
+        },
+        {
+          "alias_latex": "E_{кин}=\\dfrac{mv^2}{2}",
+          "note": "полный индекс",
+          "source": "egor"
+        },
+        {
+          "alias_latex": "E_к=\\dfrac{p^2}{2m}",
+          "note": "через импульс",
+          "source": "derived"
+        }
+      ],
+      "build_recipe": {
+        "left": "E_к",
+        "numerator_tokens": [
+          "m",
+          "\\cdot",
+          "v^2"
+        ],
+        "denominator_tokens": [
+          "2"
+        ]
+      },
+      "question_copy": {
+        "situation_ru": "Тело массой m движется со скоростью v. Найти кинетическую энергию.",
+        "build_prompt_ru": "Собери формулу кинетической энергии.",
+        "tf_prompt_ru": "Верно ли, что E_к=mv²/2?"
+      },
+      "mutations": [
+        {
+          "mutated_latex": "E_к=\\dfrac{mv}{2}",
+          "error_type": "structure",
+          "why_wrong_short": "Скорость должна быть в квадрате."
+        },
+        {
+          "mutated_latex": "E_к=mv^2",
+          "error_type": "build",
+          "why_wrong_short": "Забыто деление на 2."
+        },
+        {
+          "mutated_latex": "E_к=\\dfrac{m^2 v}{2}",
+          "error_type": "recognition",
+          "why_wrong_short": "В квадрате стоит скорость, а не масса."
+        }
+      ],
+      "sources_raw": [
+        {
+          "teacher": "elena",
+          "source_ref": "ОГЭ_2 №26",
+          "original_latex": "E_k=mv^2/2",
+          "original_notation": "lat k"
+        },
+        {
+          "teacher": "egor",
+          "source_ref": "folder 22",
+          "original_latex": "E_{кин}=\\dfrac{mv^2}{2}",
+          "original_notation": "cyr кин"
+        }
+      ]
+    },
+    {
+      "id": "cons_potential_gravity",
+      "canonical_latex": "E_п=mgh",
+      "human_name": "Потенциальная энергия в поле тяжести",
+      "target_variable": "E",
+      "section": "mechanics",
+      "topic": "conservation_laws",
+      "subtopic": "energy",
+      "exam": "BOTH",
+      "difficulty": "basic",
+      "quality_status": "auto_resolved",
+      "canonical_choice_reason": "Elena: E_p, Egor: E_пот — canonical = E_п",
+      "explanation_short": "Масса на g и на высоту.",
+      "why_wrong_short": "Забыл g или высоту.",
+      "thinking_hint": "Что перемножается: m, g, h или только часть?",
+      "aliases": [
+        {
+          "alias_latex": "E_p=mgh",
+          "note": "латинский индекс",
+          "source": "elena"
+        },
+        {
+          "alias_latex": "E_{пот}=mgh",
+          "note": "полный индекс",
+          "source": "egor"
+        }
+      ],
+      "build_recipe": {
+        "left": "E_п",
+        "numerator_tokens": [
+          "m",
+          "\\cdot",
+          "g",
+          "\\cdot",
+          "h"
+        ],
+        "denominator_tokens": []
+      },
+      "question_copy": {
+        "situation_ru": "Тело массой m на высоте h над Землёй. Найти потенциальную энергию.",
+        "build_prompt_ru": "Собери формулу потенциальной энергии.",
+        "tf_prompt_ru": "Верно ли, что E_п=mgh?"
+      },
+      "mutations": [
+        {
+          "mutated_latex": "E_п=mg+h",
+          "error_type": "build",
+          "why_wrong_short": "Должно быть произведение."
+        },
+        {
+          "mutated_latex": "E_п=\\dfrac{mg}{h}",
+          "error_type": "structure",
+          "why_wrong_short": "Должно быть произведение, а не деление."
+        }
+      ],
+      "sources_raw": [
+        {
+          "teacher": "elena",
+          "source_ref": "ОГЭ_2 №27",
+          "original_latex": "E_p=mgh",
+          "original_notation": "lat p"
+        },
+        {
+          "teacher": "egor",
+          "source_ref": "folder 22",
+          "original_latex": "E_{пот}=mgh",
+          "original_notation": "cyr пот"
+        }
+      ]
+    },
+    {
+      "id": "cons_mech_energy",
+      "canonical_latex": "E=E_к+E_п=\\mathrm{const}",
+      "human_name": "Закон сохранения механической энергии",
+      "target_variable": null,
+      "section": "mechanics",
+      "topic": "conservation_laws",
+      "subtopic": "energy",
+      "exam": "BOTH",
+      "difficulty": "core",
+      "quality_status": "clean",
+      "canonical_choice_reason": "merged form",
+      "explanation_short": "В замкнутой консервативной системе сумма кин. и пот. энергий сохраняется.",
+      "why_wrong_short": "Забыл одно из слагаемых.",
+      "thinking_hint": "Что сохраняется — отдельные энергии или их сумма?",
+      "aliases": [],
+      "build_recipe": null,
+      "question_copy": {
+        "situation_ru": "Свободное движение в поле тяжести без трения. Какая величина сохраняется?",
+        "build_prompt_ru": null,
+        "tf_prompt_ru": "Верно ли, что E_к+E_п=const?"
+      },
+      "mutations": [
+        {
+          "mutated_latex": "E_к=E_п",
+          "error_type": "recognition",
+          "why_wrong_short": "Сохраняется сумма, а не равенство энергий."
+        },
+        {
+          "mutated_latex": "E_к\\cdot E_п=\\mathrm{const}",
+          "error_type": "structure",
+          "why_wrong_short": "Сохраняется сумма, не произведение."
+        }
+      ],
+      "sources_raw": [
+        {
+          "teacher": "elena",
+          "source_ref": "ОГЭ_2 №28",
+          "original_latex": "E=E_k+E_p=const",
+          "original_notation": "lat"
+        }
+      ]
+    },
+    {
+      "id": "stat_moment",
+      "canonical_latex": "M=Fl",
+      "human_name": "Момент силы",
+      "target_variable": "M",
+      "section": "mechanics",
+      "topic": "statics",
+      "subtopic": "moment",
+      "exam": "BOTH",
+      "difficulty": "basic",
+      "quality_status": "clean",
+      "canonical_choice_reason": "FIPI",
+      "explanation_short": "Момент силы — сила на плечо.",
+      "why_wrong_short": "Перепутал плечо с чем-то другим.",
+      "thinking_hint": "Что умножается на силу?",
+      "aliases": [
+        {
+          "alias_latex": "M=F\\cdot d",
+          "note": "с d",
+          "source": "egor"
+        }
+      ],
+      "build_recipe": {
+        "left": "M",
+        "numerator_tokens": [
+          "F",
+          "\\cdot",
+          "l"
+        ],
+        "denominator_tokens": []
+      },
+      "question_copy": {
+        "situation_ru": "Сила F действует на плечо l. Найти момент силы.",
+        "build_prompt_ru": "Собери формулу момента силы.",
+        "tf_prompt_ru": "Верно ли, что M=Fl?"
+      },
+      "mutations": [
+        {
+          "mutated_latex": "M=\\dfrac{F}{l}",
+          "error_type": "structure",
+          "why_wrong_short": "Должно быть произведение."
+        },
+        {
+          "mutated_latex": "M=F+l",
+          "error_type": "build",
+          "why_wrong_short": "Должно быть произведение."
+        }
+      ],
+      "sources_raw": [
+        {
+          "teacher": "elena",
+          "source_ref": "ОГЭ_2 №29",
+          "original_latex": "M=Fl",
+          "original_notation": "lat"
+        }
+      ]
+    },
+    {
+      "id": "hydro_density",
+      "canonical_latex": "\\rho=\\dfrac{m}{V}",
+      "human_name": "Плотность",
+      "target_variable": "rho",
+      "section": "mechanics",
+      "topic": "hydrostatics",
+      "subtopic": "density",
+      "exam": "BOTH",
+      "difficulty": "basic",
+      "quality_status": "clean",
+      "canonical_choice_reason": "definition",
+      "explanation_short": "Плотность — масса на единицу объёма.",
+      "why_wrong_short": "Перепутал m и V.",
+      "thinking_hint": "Что делится на что?",
+      "aliases": [],
+      "build_recipe": {
+        "left": "\\rho",
+        "numerator_tokens": [
+          "m"
+        ],
+        "denominator_tokens": [
+          "V"
+        ]
+      },
+      "question_copy": {
+        "situation_ru": "Тело массой m занимает объём V. Найти плотность.",
+        "build_prompt_ru": "Собери формулу плотности.",
+        "tf_prompt_ru": "Верно ли, что ρ=m/V?"
+      },
+      "mutations": [
+        {
+          "mutated_latex": "\\rho=\\dfrac{V}{m}",
+          "error_type": "structure",
+          "why_wrong_short": "Числитель и знаменатель перепутаны."
+        },
+        {
+          "mutated_latex": "\\rho=m\\cdot V",
+          "error_type": "build",
+          "why_wrong_short": "Должно быть деление."
+        }
+      ],
+      "sources_raw": [
+        {
+          "teacher": "elena",
+          "source_ref": "ОГЭ_2 №13",
+          "original_latex": "\\rho=m/V",
+          "original_notation": "lat"
+        }
+      ]
+    },
+    {
+      "id": "hydro_pressure_general",
+      "canonical_latex": "p=\\dfrac{F}{S}",
+      "human_name": "Давление (общая формула)",
+      "target_variable": "p",
+      "section": "mechanics",
+      "topic": "hydrostatics",
+      "subtopic": "pressure",
+      "exam": "BOTH",
+      "difficulty": "basic",
+      "quality_status": "clean",
+      "canonical_choice_reason": "definition",
+      "explanation_short": "Давление — сила на площадь.",
+      "why_wrong_short": "Перепутал F и S.",
+      "thinking_hint": "Что в числителе — сила или площадь?",
+      "aliases": [],
+      "build_recipe": {
+        "left": "p",
+        "numerator_tokens": [
+          "F"
+        ],
+        "denominator_tokens": [
+          "S"
+        ]
+      },
+      "question_copy": {
+        "situation_ru": "Сила F действует на площадь S. Найти давление.",
+        "build_prompt_ru": "Собери формулу давления.",
+        "tf_prompt_ru": "Верно ли, что p=F/S?"
+      },
+      "mutations": [
+        {
+          "mutated_latex": "p=\\dfrac{S}{F}",
+          "error_type": "structure",
+          "why_wrong_short": "Числитель и знаменатель перепутаны."
+        },
+        {
+          "mutated_latex": "p=F\\cdot S",
+          "error_type": "build",
+          "why_wrong_short": "Должно быть деление."
+        }
+      ],
+      "sources_raw": [
+        {
+          "teacher": "elena",
+          "source_ref": "ОГЭ_2 №31",
+          "original_latex": "p=F/S",
+          "original_notation": "lat"
+        }
+      ]
+    },
+    {
+      "id": "hydro_pressure_liquid",
+      "canonical_latex": "p=\\rho g h",
+      "human_name": "Давление столба жидкости",
+      "target_variable": "p",
+      "section": "mechanics",
+      "topic": "hydrostatics",
+      "subtopic": "pressure",
+      "exam": "BOTH",
+      "difficulty": "core",
+      "quality_status": "clean",
+      "canonical_choice_reason": "FIPI codifier",
+      "explanation_short": "Давление жидкости на глубине h.",
+      "why_wrong_short": "Забыл плотность или g.",
+      "thinking_hint": "Что перемножается?",
+      "aliases": [],
+      "build_recipe": {
+        "left": "p",
+        "numerator_tokens": [
+          "\\rho",
+          "\\cdot",
+          "g",
+          "\\cdot",
+          "h"
+        ],
+        "denominator_tokens": []
+      },
+      "question_copy": {
+        "situation_ru": "Жидкость плотностью ρ, глубина h. Найти давление столба.",
+        "build_prompt_ru": "Собери формулу давления столба жидкости.",
+        "tf_prompt_ru": "Верно ли, что p=ρgh?"
+      },
+      "mutations": [
+        {
+          "mutated_latex": "p=\\rho+g h",
+          "error_type": "build",
+          "why_wrong_short": "Должно быть произведение трёх величин."
+        },
+        {
+          "mutated_latex": "p=\\dfrac{\\rho g}{h}",
+          "error_type": "structure",
+          "why_wrong_short": "h должна быть в числителе."
+        }
+      ],
+      "sources_raw": [
+        {
+          "teacher": "elena",
+          "source_ref": "ОГЭ_2 №32",
+          "original_latex": "p=\\rho g h",
+          "original_notation": "lat"
+        }
+      ]
+    },
+    {
+      "id": "hydro_archimedes",
+      "canonical_latex": "F_А=\\rho g V",
+      "human_name": "Сила Архимеда",
+      "target_variable": "F",
+      "section": "mechanics",
+      "topic": "hydrostatics",
+      "subtopic": "archimedes",
+      "exam": "BOTH",
+      "difficulty": "core",
+      "quality_status": "clean",
+      "canonical_choice_reason": "FIPI codifier",
+      "explanation_short": "Сила Архимеда равна весу вытесненной жидкости.",
+      "why_wrong_short": "Забыл плотность жидкости или объём.",
+      "thinking_hint": "Чья это плотность — тела или жидкости?",
+      "aliases": [
+        {
+          "alias_latex": "F_{Арх}=\\rho_{ж} g V",
+          "note": "подробный индекс",
+          "source": "elena"
+        }
+      ],
+      "build_recipe": {
+        "left": "F_А",
+        "numerator_tokens": [
+          "\\rho",
+          "\\cdot",
+          "g",
+          "\\cdot",
+          "V"
+        ],
+        "denominator_tokens": []
+      },
+      "question_copy": {
+        "situation_ru": "Тело объёма V погружено в жидкость плотностью ρ. Найти силу Архимеда.",
+        "build_prompt_ru": "Собери формулу силы Архимеда.",
+        "tf_prompt_ru": "Верно ли, что F_А=ρgV?"
+      },
+      "mutations": [
+        {
+          "mutated_latex": "F_А=\\rho g V^2",
+          "error_type": "build",
+          "why_wrong_short": "Объём в первой степени."
+        },
+        {
+          "mutated_latex": "F_А=\\dfrac{\\rho g}{V}",
+          "error_type": "structure",
+          "why_wrong_short": "V должен быть в произведении."
+        }
+      ],
+      "sources_raw": [
+        {
+          "teacher": "elena",
+          "source_ref": "ОГЭ_2 №33",
+          "original_latex": "F_{Арх}=\\rho g V",
+          "original_notation": "lat"
+        }
+      ]
+    }
+  ]
+}

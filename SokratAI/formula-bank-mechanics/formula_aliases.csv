@@ -1,0 +1,30 @@
+formula_id,alias_latex,note,source
+kin_avg_speed_v_ege_oge,v=\dfrac{S}{t},без индекса ср,egor
+kin_avg_speed_v_ege_oge,\upsilon_{ср}=\dfrac{S}{t},греч. υ,egor
+kin_avg_speed_v_ege_oge,S=v t,solved for S,derived
+kin_uniform_coord_x_t,x=x_0+v t,без индекса,egor
+kin_uniaccel_coord_x_t,x=x_0+v_0 t+\tfrac{1}{2}a t^2,без индексов,egor
+kin_uniaccel_velocity,v=v_0+a t,без индексов,egor
+kin_uniaccel_no_time,v^2=v_0^2+2aS,решено для v²,derived
+kin_accel_definition,a=\dfrac{\Delta v}{\Delta t},через Δ,derived
+kin_circular_linear_speed,v=\omega R,через ω,derived
+kin_circular_omega_T,\omega=2\pi\nu,через частоту,derived
+kin_centripetal_v2_R,a=\dfrac{v^2}{R},без индекса,egor
+dyn_newton_2nd,\vec F=m\vec a,векторная,egor
+dyn_newton_2nd,a=\dfrac{F}{m},solved for a,derived
+dyn_newton_3rd,F_{12}=-F_{21},скалярная,elena
+dyn_friction,F_{тр}=\mu F_N,через F_N,egor
+dyn_hookes_law,F_{упр}=k x,через x,egor
+dyn_gravity,P=mg,вес в покое,derived
+cons_momentum_def,\vec p=m\vec v,векторная,egor
+cons_momentum_conservation,\sum m_i v_i=\mathrm{const},общая форма,elena
+cons_work,A=F\cdot s,частный случай α=0,derived
+cons_power,P=\dfrac{A}{t},с символом P,egor
+cons_power,N=Fv,через силу и скорость,derived
+cons_kinetic_energy,E_k=\dfrac{mv^2}{2},латинский индекс,elena
+cons_kinetic_energy,E_{кин}=\dfrac{mv^2}{2},полный индекс,egor
+cons_kinetic_energy,E_к=\dfrac{p^2}{2m},через импульс,derived
+cons_potential_gravity,E_p=mgh,латинский индекс,elena
+cons_potential_gravity,E_{пот}=mgh,полный индекс,egor
+stat_moment,M=F\cdot d,с d,egor
+hydro_archimedes,F_{Арх}=\rho_{ж} g V,подробный индекс,elena
