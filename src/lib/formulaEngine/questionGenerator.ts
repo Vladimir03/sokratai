@@ -1,7 +1,21 @@
 import { getFormulaById, getRelatedFormulas } from './formulas';
 import { BUILD_RECIPES, SUPPORTED_BUILD_FORMULA_IDS, type BuildRecipe } from './recipes.generated';
 import { MUTATION_LIBRARY } from './mutations.generated';
+import {
+  EGOR_BUILD_RECIPES,
+  EGOR_SUPPORTED_BUILD_FORMULA_IDS,
+  EGOR_MUTATION_LIBRARY,
+} from './egorFormulas';
 import type { Formula, FormulaQuestion, RoundConfig, WeakFormula } from './types';
+
+// v1 (trainer "simple mode") — формулы Егора имеют `_e` суффикс.
+// Каталог их recipes/mutations параллелен v2. Для v1 мы также отключаем
+// SituationCard: раунд строится только из TrueOrFalse (layer 3) и
+// BuildFormula (layer 2), чтобы снизить когнитивную нагрузку на ученика
+// нулевого уровня.
+function isEgorFormulaId(id: string): boolean {
+  return id.endsWith('_e');
+}
 
 interface RoundDistribution {
   trueOrFalse: number;
@@ -115,6 +129,14 @@ function selectDistribution(questionCount: number): RoundDistribution {
   };
 }
 
+function selectV1Distribution(questionCount: number): RoundDistribution {
+  // v1 режим: только TrueOrFalse (layer 3) и BuildFormula (layer 2), без
+  // SituationCard. Делим примерно пополам с округлением вверх для build.
+  const buildFormula = Math.max(1, Math.ceil(questionCount / 2));
+  const trueOrFalse = Math.max(1, questionCount - buildFormula);
+  return { trueOrFalse, buildFormula, situationToFormula: 0 };
+}
+
 function pickFormulas(pool: Formula[], count: number): Formula[] {
   if (pool.length === 0 || count <= 0) {
     return [];
@@ -135,7 +157,9 @@ function pickFormulas(pool: Formula[], count: number): Formula[] {
 }
 
 function getBuildRecipe(formula: Formula): BuildRecipe {
-  const recipe = BUILD_RECIPES[formula.id] ?? {
+  const sourceRecipe =
+    (isEgorFormulaId(formula.id) ? EGOR_BUILD_RECIPES[formula.id] : BUILD_RECIPES[formula.id]) ?? null;
+  const recipe = sourceRecipe ?? {
     displayFormula: formula.formula,
     numeratorTokens: formula.variables.map((variable) => variable.symbol),
     denominatorTokens: [],
@@ -149,6 +173,9 @@ function getBuildRecipe(formula: Formula): BuildRecipe {
 }
 
 function supportsBuildQuestion(formula: Formula): boolean {
+  if (isEgorFormulaId(formula.id)) {
+    return EGOR_SUPPORTED_BUILD_FORMULA_IDS.has(formula.id);
+  }
   return SUPPORTED_BUILD_FORMULA_IDS.has(formula.id);
 }
 
@@ -267,9 +294,13 @@ function joinLines(lines: string[]): string {
     .join('\n');
 }
 
+function getMutationsFor(formulaId: string) {
+  return (isEgorFormulaId(formulaId) ? EGOR_MUTATION_LIBRARY[formulaId] : MUTATION_LIBRARY[formulaId]) ?? [];
+}
+
 export function generateTrueOrFalse(formula: Formula): FormulaQuestion {
   const showCorrectFormula = Math.random() >= 0.5;
-  const mutation = showCorrectFormula ? undefined : pickRandomOrUndefined(MUTATION_LIBRARY[formula.id] ?? []);
+  const mutation = showCorrectFormula ? undefined : pickRandomOrUndefined(getMutationsFor(formula.id));
 
   return {
     id: createQuestionId('true_or_false', formula.id),
@@ -377,7 +408,7 @@ export function generateFeedbackPayload(question: FormulaQuestion, isCorrect: bo
 
   // Incorrect answer feedback
   if (question.layer === 3) {
-    const mutation = MUTATION_LIBRARY[formula.id]?.find((m) => m.type === question.mutationType);
+    const mutation = getMutationsFor(formula.id).find((m) => m.type === question.mutationType);
     return {
       canonicalLatex,
       questionLatex,
@@ -488,7 +519,10 @@ function buildRoundQuestions(formulas: Formula[], distribution: RoundDistributio
 export function generateRound(config: RoundConfig): FormulaQuestion[] {
   const pool = getEligiblePool(config);
   const formulas = pickFormulas(pool, config.questionCount);
-  const distribution = selectDistribution(config.questionCount);
+  const distribution =
+    config.mode === 'v1'
+      ? selectV1Distribution(config.questionCount)
+      : selectDistribution(config.questionCount);
 
   return buildRoundQuestions(formulas, distribution, pool);
 }
@@ -503,7 +537,10 @@ export function generateRetryRound(weakFormulas: WeakFormula[], config: RoundCon
   }
 
   const formulas = pickFormulas(pool, config.questionCount);
-  const distribution = selectDistribution(config.questionCount);
+  const distribution =
+    config.mode === 'v1'
+      ? selectV1Distribution(config.questionCount)
+      : selectDistribution(config.questionCount);
 
   return buildRoundQuestions(formulas, distribution, eligiblePool);
 }

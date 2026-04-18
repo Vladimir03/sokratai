@@ -5,6 +5,7 @@ export {
   staticsFormulas,
   hydrostaticsFormulas,
   mechanicsFormulas,
+  egorFormulas,
   getFormulaById,
   getRelatedFormulas,
 } from './formulas';

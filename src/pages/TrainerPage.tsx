@@ -11,6 +11,7 @@ import {
   staticsFormulas,
   hydrostaticsFormulas,
   mechanicsFormulas,
+  egorFormulas,
   type FormulaQuestion,
   type RoundConfig,
   type RoundResult,
@@ -27,7 +28,14 @@ import {
 import { trackTrainerEvent } from '@/lib/trainerGamification/telemetry';
 
 type TrainerPageState = 'intro' | 'running' | 'result';
-type SectionType = 'mechanics' | 'kinematics' | 'dynamics' | 'conservation' | 'statics' | 'hydrostatics';
+type SectionType =
+  | 'mechanics'
+  | 'kinematics'
+  | 'dynamics'
+  | 'conservation'
+  | 'statics'
+  | 'hydrostatics'
+  | 'egor-v1';
 
 const SECTION_TO_GAMIFICATION_KEY: Record<SectionType, SectionKey> = {
   mechanics: 'all',
@@ -36,37 +44,53 @@ const SECTION_TO_GAMIFICATION_KEY: Record<SectionType, SectionKey> = {
   conservation: 'conservation',
   statics: 'statics',
   hydrostatics: 'hydrostatics',
+  'egor-v1': 'egor-v1',
 };
 
-const SECTION_POOLS: Record<SectionType, { formulas: typeof kinematicsFormulas; label: string }> = {
+type SectionPool = {
+  formulas: typeof kinematicsFormulas;
+  label: string;
+  mode?: 'v1' | 'v2';
+};
+
+const SECTION_POOLS: Record<SectionType, SectionPool> = {
   mechanics: { formulas: mechanicsFormulas, label: 'Вся механика' },
   kinematics: { formulas: kinematicsFormulas, label: 'Кинематика' },
   dynamics: { formulas: dynamicsFormulas, label: 'Динамика' },
   conservation: { formulas: conservationFormulas, label: 'Законы сохранения' },
   statics: { formulas: staticsFormulas, label: 'Статика' },
   hydrostatics: { formulas: hydrostaticsFormulas, label: 'Гидростатика' },
+  // v1: упрощённый режим для нулевого уровня. Только 10 формул «Вращение по
+  // окружности» Егора, без SituationCard (только Layer 2 + Layer 3).
+  'egor-v1': {
+    formulas: egorFormulas,
+    label: 'Базовый курс · Вращение',
+    mode: 'v1',
+  },
 };
 
 function createTrainerRound(section: SectionType): FormulaQuestion[] {
-  const pool = SECTION_POOLS[section].formulas;
+  const { formulas: pool, mode } = SECTION_POOLS[section];
   const questionCount = Math.min(10, Math.max(3, pool.length * 3));
   const config: RoundConfig = {
     section,
     questionCount,
     lives: 0,
     formulaPool: pool,
+    mode,
   };
   return generateRound(config);
 }
 
 function createRetryRound(result: RoundResult, section: SectionType): FormulaQuestion[] {
-  const pool = SECTION_POOLS[section].formulas;
+  const { formulas: pool, mode } = SECTION_POOLS[section];
   const questionCount = Math.min(10, Math.max(3, pool.length * 3));
   const config: RoundConfig = {
     section,
     questionCount,
     lives: 0,
     formulaPool: pool,
+    mode,
   };
   const retryQuestions = generateRetryRound(result.weakFormulas, config);
   return retryQuestions.length > 0 ? retryQuestions : createTrainerRound(section);

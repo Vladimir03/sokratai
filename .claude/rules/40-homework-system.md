@@ -646,9 +646,19 @@ Phase 1 пивотится из homework-embedded preview в standalone public t
 - Для Phase 1b использовать уже существующие данные (`formula_rounds`, `formula_round_results`, `tutor_read_results` policy), а не вводить отдельную tutor-only схему
 - Не добавлять generic analytics dashboard без прямой связи с homework result flow
 
+**v1 ветка тренажёра — «Базовый курс · Вращение» (2026-04-18):**
+- Параллельный каталог из 10 формул Егора (`kin.13_e..kin.22_e`) для нулевого уровня. Файл `src/lib/formulaEngine/egorFormulas.ts` (Variant B: hand-craft, **вне** auto-generation pipeline). Экспортирует `egorFormulas`, `EGOR_BUILD_RECIPES`, `EGOR_SUPPORTED_BUILD_FORMULA_IDS`, `EGOR_MUTATION_LIBRARY`
+- v1 НЕ включён в `mechanicsFormulas` (избегаем v2 дубликатов), но входит в `formulasById` lookup
+- `relatedFormulas` v1 указывают **только** внутрь v1 (с `_e` суффиксом). Cross-reference на v2 запрещён
+- `RoundConfig.mode: 'v1' | 'v2'` (default `'v2'`); v1 использует `selectV1Distribution` — только Layer 2 (BuildFormula) + Layer 3 (TrueOrFalse), без SituationCard
+- Детекция каталога — `isEgorFormulaId(id) → id.endsWith('_e')`
+- Gamification: `SectionKey = 'egor-v1'` — отдельный bucket в `bestScoreBySection`. Store version **не бампалась** (`Partial<Record<...>>` forward-compatible)
+- При расширении v1 — добавлять всё в `egorFormulas.ts`, не трогать `formulas.generated.ts`. Новый v1-раздел = ещё один pool с `mode: 'v1'` в `SECTION_POOLS`
+
 **Ключевые файлы:**
-- `src/lib/formulaEngine/formulas.ts` — 12 формул кинематики (статическая база)
-- `src/lib/formulaEngine/questionGenerator.ts` — генерация заданий, мутации, дистракторы, feedback
+- `src/lib/formulaEngine/formulas.ts` — aggregator (v2 каталог + lookup map с v1)
+- `src/lib/formulaEngine/egorFormulas.ts` — v1 каталог (10 формул Егора, recipes, мутации)
+- `src/lib/formulaEngine/questionGenerator.ts` — генерация заданий, мутации, дистракторы, feedback (v1/v2 branch)
 - `src/lib/formulaEngine/types.ts` — `FormulaQuestion`, `BuildFormulaAnswer`, `RoundResult`
 - `src/components/homework/formula-round/FormulaRoundScreen.tsx` — основной экран раунда (fullscreen, correctness checking)
 - `src/components/homework/formula-round/RoundResultScreen.tsx` — итоговый экран (score, weak formulas, retry)

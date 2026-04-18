@@ -59,6 +59,12 @@ export interface RoundConfig {
   questionCount: number;
   lives: number;
   formulaPool: Formula[];
+  /**
+   * Trainer mode. `v1` = simplified Duolingo-style раунд (только Layer 2 +
+   * Layer 3, без SituationCard). По умолчанию `v2` — полный трёхслойный
+   * раунд. Используется только в standalone trainer `/trainer`.
+   */
+  mode?: 'v1' | 'v2';
 }
 
 export interface AnswerRecord {

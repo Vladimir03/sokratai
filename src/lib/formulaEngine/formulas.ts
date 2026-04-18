@@ -10,6 +10,7 @@ import {
   staticsFormulas,
   hydrostaticsFormulas,
 } from './formulas.generated';
+import { egorFormulas } from './egorFormulas';
 
 export {
   kinematicsFormulas,
@@ -17,6 +18,7 @@ export {
   conservationFormulas,
   staticsFormulas,
   hydrostaticsFormulas,
+  egorFormulas,
 };
 
 export const mechanicsFormulas: Formula[] = [
@@ -27,7 +29,10 @@ export const mechanicsFormulas: Formula[] = [
   ...hydrostaticsFormulas,
 ];
 
-const formulasById = new Map(mechanicsFormulas.map((formula) => [formula.id, formula]));
+// v1 (egorFormulas) остаётся параллельной веткой и НЕ включается в mechanicsFormulas,
+// иначе v2 раунды подхватят дубликаты задач. Однако lookup-карта объединена, чтобы
+// `getFormulaById` / `getRelatedFormulas` работали для `_e` ID-шек из v1 раунда.
+const formulasById = new Map([...mechanicsFormulas, ...egorFormulas].map((formula) => [formula.id, formula]));
 
 export function getFormulaById(id: string): Formula | undefined {
   return formulasById.get(id);
