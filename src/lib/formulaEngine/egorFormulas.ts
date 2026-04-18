@@ -42,6 +42,7 @@ export const egorFormulas: Formula[] = [
     relatedFormulas: ['kin.14_e', 'kin.15_e', 'kin.18_e', 'kin.19_e'],
     difficulty: 1,
     exam: 'ЕГЭ',
+    memoryHook: 'Частота — в герцах: сколько оборотов в секунду. Делим число оборотов N на время t.',
   },
   {
     id: 'kin.14_e',
@@ -73,6 +74,7 @@ export const egorFormulas: Formula[] = [
     relatedFormulas: ['kin.13_e', 'kin.15_e', 'kin.16_e', 'kin.19_e'],
     difficulty: 1,
     exam: 'ЕГЭ',
+    memoryHook: 'Период — время одного оборота в секундах. Делим общее время на количество оборотов N.',
   },
   {
     id: 'kin.15_e',
@@ -103,6 +105,7 @@ export const egorFormulas: Formula[] = [
     relatedFormulas: ['kin.13_e', 'kin.14_e', 'kin.19_e'],
     difficulty: 1,
     exam: 'ЕГЭ',
+    memoryHook: 'Период и частота взаимно обратны. Если период растёт — частота падает, и наоборот.',
   },
   {
     id: 'kin.16_e',
@@ -134,6 +137,7 @@ export const egorFormulas: Formula[] = [
     relatedFormulas: ['kin.14_e', 'kin.15_e', 'kin.19_e', 'kin.20_e', 'kin.21_e'],
     difficulty: 2,
     exam: 'ЕГЭ',
+    memoryHook: 'За один оборот точка проходит длину окружности 2πR. Не теряй множитель 2π.',
   },
   {
     id: 'kin.17_e',
@@ -165,6 +169,7 @@ export const egorFormulas: Formula[] = [
     relatedFormulas: ['kin.18_e', 'kin.19_e', 'kin.20_e'],
     difficulty: 2,
     exam: 'ЕГЭ',
+    memoryHook: 'Угол в радианах = длина дуги ÷ радиус. Радиан безразмерен.',
   },
   {
     id: 'kin.18_e',
@@ -196,6 +201,7 @@ export const egorFormulas: Formula[] = [
     relatedFormulas: ['kin.17_e', 'kin.19_e', 'kin.20_e'],
     difficulty: 1,
     exam: 'ЕГЭ',
+    memoryHook: 'Угловая скорость — радианов в секунду. Угол поворота в числителе, время — в знаменателе.',
   },
   {
     id: 'kin.19_e',
@@ -226,6 +232,7 @@ export const egorFormulas: Formula[] = [
     relatedFormulas: ['kin.14_e', 'kin.15_e', 'kin.18_e', 'kin.20_e', 'kin.22_e'],
     difficulty: 2,
     exam: 'ЕГЭ',
+    memoryHook: 'За один оборот тело проходит угол 2π радиан. Не путай с ν = 1/T (там без 2π).',
   },
   {
     id: 'kin.20_e',
@@ -257,6 +264,7 @@ export const egorFormulas: Formula[] = [
     relatedFormulas: ['kin.16_e', 'kin.18_e', 'kin.19_e', 'kin.21_e', 'kin.22_e'],
     difficulty: 2,
     exam: 'ЕГЭ',
+    memoryHook: 'Линейная скорость растёт пропорционально радиусу, без квадрата. R умножается, не делится.',
   },
   {
     id: 'kin.21_e',
@@ -288,6 +296,7 @@ export const egorFormulas: Formula[] = [
     relatedFormulas: ['kin.16_e', 'kin.20_e', 'kin.22_e'],
     difficulty: 2,
     exam: 'ЕГЭ',
+    memoryHook: 'Центростремительное ускорение зависит от КВАДРАТА скорости. Направлено к центру окружности.',
   },
   {
     id: 'kin.22_e',
@@ -319,6 +328,7 @@ export const egorFormulas: Formula[] = [
     relatedFormulas: ['kin.18_e', 'kin.19_e', 'kin.20_e', 'kin.21_e'],
     difficulty: 2,
     exam: 'ЕГЭ',
+    memoryHook: 'a_цс через угловую скорость: КВАДРАТ ω умножить на R. С ростом R при том же ω ускорение растёт.',
   },
 ];
 

@@ -30,6 +30,13 @@ export interface Formula {
   difficulty: 1 | 2 | 3;
   /** ЕГЭ / ОГЭ / ЕГЭ+ОГЭ filter metadata, sourced from the «Экзамен» column. */
   exam?: ExamTag;
+  /**
+   * Короткий якорь для блока «Запомни:» в FeedbackOverlay. Одно-два
+   * предложения, формулируются репетитором (колонка «Запомни» в гугл-таблице
+   * или поле `memoryHook` в `egorFormulas.ts`). Если не задано — fallback на
+   * regex-эвристику в `getLayer1MemoryCue`.
+   */
+  memoryHook?: string;
 }
 
 export type QuestionType = 'true_or_false' | 'build_formula' | 'situation_to_formula';

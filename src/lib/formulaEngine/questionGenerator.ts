@@ -258,6 +258,13 @@ function getProportionalityHint(formula: Formula): string {
 }
 
 function getLayer1MemoryCue(formula: Formula): string {
+  // Приоритет: явный memoryHook от репетитора (Вариант A — см. rule 40
+  // homework-system.md §«Тренажёр формул — memoryHook»). Если не задан —
+  // fallback на regex-эвристику по whenToUse, затем на physicalMeaning.
+  if (formula.memoryHook && formula.memoryHook.trim().length > 0) {
+    return formula.memoryHook.trim();
+  }
+
   if (formula.section !== 'Кинематика') {
     return `Ориентир: ${formula.whenToUse[0] ?? formula.physicalMeaning}`;
   }
