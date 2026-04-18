@@ -378,9 +378,12 @@ export function generateFeedbackPayload(question: FormulaQuestion, isCorrect: bo
   const canonicalLatex = formula.formula;
   const questionLatex = unwrapMath(question.displayFormula);
 
-  // Build userAnswerLatex based on question type and answer (for BOTH correct and incorrect)
+  // Build userAnswerLatex based on question type and answer (for BOTH correct and incorrect).
+  // NB: `if (userAnswer)` was wrong — для TrueOrFalse карточек ответ `false` (неверно)
+  // falsy и раньше проваливался в fallback, из-за чего блок «Твой ответ» показывал
+  // «✓ Собрано верно» вместо «неверно».
   let userAnswerLatex: string | null = null;
-  if (userAnswer) {
+  if (userAnswer !== undefined && userAnswer !== null) {
     if (question.layer === 3) {
       userAnswerLatex = userAnswer === true ? 'верно' : 'неверно';
     } else if (question.layer === 2 && typeof userAnswer === 'object' && 'numerator' in userAnswer) {
