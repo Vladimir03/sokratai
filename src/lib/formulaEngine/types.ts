@@ -89,4 +89,6 @@ export interface RoundResult {
   durationMs: number;
   answers: AnswerRecord[];
   weakFormulas: WeakFormula[];
+  /** Longest streak of consecutive correct answers within this round. */
+  maxCombo: number;
 }

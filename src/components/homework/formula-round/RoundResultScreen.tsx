@@ -1,7 +1,18 @@
-import { memo, Suspense, lazy, useMemo, useState } from 'react';
+import { memo, Suspense, lazy, useCallback, useMemo, useState } from 'react';
 import { AlertTriangle, ChevronDown, ChevronUp } from 'lucide-react';
 import type { RoundResult, Layer } from '@/lib/formulaEngine/types';
 import { mechanicsFormulas } from '@/lib/formulaEngine/formulas';
+import type { AppliedOutcome } from '@/stores/trainerGamificationStore';
+import { XpBreakdown } from './XpBreakdown';
+import { Celebrate, type CelebrateVariant } from './Celebrate';
+
+/** Priority: new-best > perfect > goal. One overlay max per round. */
+function pickCelebrateVariant(outcome: AppliedOutcome): CelebrateVariant | null {
+  if (outcome.isNewBest) return 'new-best';
+  if (outcome.isPerfectRound) return 'perfect';
+  if (outcome.isDailyGoalReached) return 'goal';
+  return null;
+}
 
 const MathText = lazy(() =>
   import('@/components/kb/ui/MathText').then((m) => ({ default: m.MathText })),
@@ -15,24 +26,33 @@ const LAYER_LABELS: Record<Layer, string> = {
 
 interface RoundResultScreenProps {
   result: RoundResult;
+  appliedOutcome: AppliedOutcome;
+  onReplaySame: () => void;
   onRetryWrong: () => void;
   onExit: () => void;
 }
 
 /**
- * Result screen shown after round ends. Displays score, weak formulas
- * with layer descriptions, and retry/exit CTAs.
+ * Result screen shown after round ends. Displays score, XP breakdown,
+ * weak formulas with layer descriptions, and three CTAs.
  *
- * Phase 1 standalone trainer: no lives display. One primary CTA
- * («Пройти ещё раз», only when weakFormulas > 0) + «Назад» per doc 17
- * and design system rules.
+ * Phase 1 standalone trainer + gamification (spec §5.8):
+ * - «Пройти ещё раз» — primary, always visible, replays same question set.
+ * - «Повторить ошибки» — secondary, only when weakFormulas > 0 (XP ×0.5).
+ * - «Назад» — ghost, returns to landing.
  */
 export const RoundResultScreen = memo(function RoundResultScreen({
   result,
+  appliedOutcome,
+  onReplaySame,
   onRetryWrong,
   onExit,
 }: RoundResultScreenProps) {
   const [isExpanded, setIsExpanded] = useState(false);
+  const [celebrateVariant, setCelebrateVariant] = useState<CelebrateVariant | null>(() =>
+    pickCelebrateVariant(appliedOutcome),
+  );
+  const handleCelebrateDone = useCallback(() => setCelebrateVariant(null), []);
   const percentage = Math.round((result.score / result.total) * 100);
 
   const formulaMap = useMemo(() => {
@@ -59,6 +79,9 @@ export const RoundResultScreen = memo(function RoundResultScreen({
 
   return (
     <div className="fixed inset-0 z-50 flex flex-col bg-slate-50">
+      {celebrateVariant !== null && (
+        <Celebrate variant={celebrateVariant} onDone={handleCelebrateDone} />
+      )}
       {/* Scrollable content */}
       <div className="flex-1 overflow-y-auto px-4 py-8">
         <div className="max-w-md mx-auto space-y-6 animate-in fade-in duration-300">
@@ -78,6 +101,14 @@ export const RoundResultScreen = memo(function RoundResultScreen({
               </p>
             </div>
           </div>
+
+          {/* XP breakdown */}
+          <XpBreakdown
+            appliedOutcome={appliedOutcome}
+            correctCount={result.score}
+            totalCount={result.total}
+            bestComboInRound={result.maxCombo}
+          />
 
           {/* Weak formulas list with accordion */}
           {hasWeakFormulas && (
@@ -148,25 +179,31 @@ export const RoundResultScreen = memo(function RoundResultScreen({
         </div>
       </div>
 
-      {/* Bottom action bar */}
+      {/* Bottom action bar — 3 CTAs */}
       <div className="px-4 py-4 bg-white border-t border-slate-200">
-        <div className="max-w-md mx-auto flex gap-3">
+        <div className="max-w-md mx-auto flex flex-col gap-2">
+          <button
+            type="button"
+            onClick={onReplaySame}
+            className="w-full min-h-[44px] py-3 rounded-lg bg-accent text-white font-medium text-base transition-colors hover:bg-accent/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/30"
+            style={{ touchAction: 'manipulation' }}
+          >
+            Пройти ещё раз
+          </button>
           {hasWeakFormulas && (
             <button
               type="button"
               onClick={onRetryWrong}
-              className="flex-1 py-3 rounded-lg bg-accent text-white font-medium text-base transition-colors hover:bg-accent/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/30"
+              className="w-full min-h-[44px] py-3 rounded-lg border border-slate-200 bg-white text-slate-700 font-medium text-base transition-colors hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-300"
               style={{ touchAction: 'manipulation' }}
             >
-              Пройти ещё раз
+              Повторить ошибки
             </button>
           )}
           <button
             type="button"
             onClick={onExit}
-            className={`py-3 rounded-lg border border-slate-200 bg-white text-slate-700 font-medium text-base transition-colors hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-300 ${
-              hasWeakFormulas ? 'flex-1' : 'w-full'
-            }`}
+            className="w-full min-h-[44px] py-3 rounded-lg text-slate-500 font-medium text-base transition-colors hover:text-slate-700 hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-300"
             style={{ touchAction: 'manipulation' }}
           >
             Назад

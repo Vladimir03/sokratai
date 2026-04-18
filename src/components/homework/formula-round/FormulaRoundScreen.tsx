@@ -5,6 +5,7 @@ import { FeedbackOverlay } from './FeedbackOverlay';
 import { TrueOrFalseCard } from './TrueOrFalseCard';
 import { BuildFormulaCard } from './BuildFormulaCard';
 import { SituationCard } from './SituationCard';
+import { ComboIndicator } from './ComboIndicator';
 import { generateFeedback, generateFeedbackPayload } from '@/lib/formulaEngine/questionGenerator';
 import type {
   FormulaQuestion,
@@ -46,6 +47,8 @@ export function FormulaRoundScreen({
   const [lastCorrect, setLastCorrect] = useState<boolean | null>(null);
   const [feedbackPayload, setFeedbackPayload] = useState<FeedbackPayload | null>(null);
   const [selectedAnswer, setSelectedAnswer] = useState<string | boolean | BuildFormulaAnswer | null>(null);
+  const [currentCombo, setCurrentCombo] = useState(0);
+  const [maxComboInRound, setMaxComboInRound] = useState(0);
 
   const startTimeRef = useRef(performance.now());
   const questionStartRef = useRef(performance.now());
@@ -84,9 +87,10 @@ export function FormulaRoundScreen({
         durationMs,
         answers: updatedAnswers,
         weakFormulas,
+        maxCombo: maxComboInRound,
       };
     },
-    [questions.length],
+    [questions.length, maxComboInRound],
   );
 
   const handleAnswer = useCallback(
@@ -129,6 +133,16 @@ export function FormulaRoundScreen({
       const newAnswers = [...answers, record];
       const payload = generateFeedbackPayload(currentQuestion, correct, selectedAnswer);
 
+      // Combo tracking — correctness is already determined above; we only
+      // derive a visual streak from it without touching the source of truth.
+      if (correct) {
+        const nextCombo = currentCombo + 1;
+        setCurrentCombo(nextCombo);
+        if (nextCombo > maxComboInRound) setMaxComboInRound(nextCombo);
+      } else {
+        setCurrentCombo(0);
+      }
+
       setScore(newScore);
       setAnswers(newAnswers);
       setLastCorrect(correct);
@@ -136,7 +150,7 @@ export function FormulaRoundScreen({
       setSelectedAnswer(selectedAnswer);
       setPhase('feedback');
     },
-    [currentQuestion, phase, score, answers],
+    [currentQuestion, phase, score, answers, currentCombo, maxComboInRound],
   );
 
   const handleNext = useCallback(() => {
@@ -181,6 +195,12 @@ export function FormulaRoundScreen({
               total={questions.length}
             />
           </div>
+          {/*
+            key={currentCombo} re-mounts the pill on every increment so the
+            zoom-in keyframe re-triggers. When combo drops below 2 the
+            indicator returns null and disappears.
+          */}
+          <ComboIndicator key={currentCombo} combo={currentCombo} />
         </div>
       </div>
 

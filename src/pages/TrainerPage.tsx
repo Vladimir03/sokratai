@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import { Sparkles } from 'lucide-react';
 import { FormulaRoundScreen, RoundResultScreen } from '@/components/formula-round';
 import { useTrainerSession } from '@/hooks/useTrainerSession';
@@ -16,9 +16,27 @@ import {
   type RoundResult,
 } from '@/lib/formulaEngine';
 import { submitTrainerRound } from '@/lib/trainerApi';
+import { BestScoreCard } from '@/components/homework/formula-round/gamification/BestScoreCard';
+import { StreakCard } from '@/components/homework/formula-round/gamification/StreakCard';
+import { XpCard } from '@/components/homework/formula-round/gamification/XpCard';
+import {
+  useTrainerGamificationStore,
+  type AppliedOutcome,
+  type SectionKey,
+} from '@/stores/trainerGamificationStore';
+import { trackTrainerEvent } from '@/lib/trainerGamification/telemetry';
 
 type TrainerPageState = 'intro' | 'running' | 'result';
 type SectionType = 'mechanics' | 'kinematics' | 'dynamics' | 'conservation' | 'statics' | 'hydrostatics';
+
+const SECTION_TO_GAMIFICATION_KEY: Record<SectionType, SectionKey> = {
+  mechanics: 'all',
+  kinematics: 'kinematics',
+  dynamics: 'dynamics',
+  conservation: 'conservation',
+  statics: 'statics',
+  hydrostatics: 'hydrostatics',
+};
 
 const SECTION_POOLS: Record<SectionType, { formulas: typeof kinematicsFormulas; label: string }> = {
   mechanics: { formulas: mechanicsFormulas, label: 'Вся механика' },
@@ -54,35 +72,119 @@ function createRetryRound(result: RoundResult, section: SectionType): FormulaQue
   return retryQuestions.length > 0 ? retryQuestions : createTrainerRound(section);
 }
 
+// Job: P1 — Top-of-funnel / привлечение учеников через /trainer (standalone demo).
+// Sub-jobs: reason-to-return школьнику ЕГЭ/ОГЭ; демо-артефакт репетитору для sharing.
+// Segment: B2C, школьники 9–11 класс, mobile-first. Wedge: питает funnel, не меняет его.
 export default function TrainerPage() {
   const { sessionId, startedAt } = useTrainerSession();
   const [state, setState] = useState<TrainerPageState>('intro');
   const [selectedSection, setSelectedSection] = useState<SectionType>('mechanics');
   const [questions, setQuestions] = useState<FormulaQuestion[]>([]);
   const [roundResult, setRoundResult] = useState<RoundResult | null>(null);
+  const [appliedOutcome, setAppliedOutcome] = useState<AppliedOutcome | null>(null);
+  const [isRetryMode, setIsRetryMode] = useState(false);
   const [roundKey, setRoundKey] = useState(0);
+  /** Snapshot of the last-started questions set — used by «Пройти ещё раз». */
+  const lastQuestionsRef = useRef<FormulaQuestion[] | null>(null);
+  const totalXp = useTrainerGamificationStore((s) => s.totalXp);
+  const currentStreak = useTrainerGamificationStore((s) => s.currentStreak);
+  const lastPlayedDate = useTrainerGamificationStore((s) => s.lastPlayedDate);
+  const dailyRoundsCount = useTrainerGamificationStore((s) => s.dailyRoundsCount);
+  const bestScoreBySection = useTrainerGamificationStore((s) => s.bestScoreBySection);
+  const applyRoundResult = useTrainerGamificationStore((s) => s.applyRoundResult);
 
   const handleStart = useCallback(() => {
+    const fresh = createTrainerRound(selectedSection);
+    lastQuestionsRef.current = fresh;
     setRoundResult(null);
-    setQuestions(createTrainerRound(selectedSection));
+    setAppliedOutcome(null);
+    setIsRetryMode(false);
+    setQuestions(fresh);
     setRoundKey((currentKey) => currentKey + 1);
     setState('running');
   }, [selectedSection]);
+
+  const handleReplaySame = useCallback(() => {
+    const snapshot = lastQuestionsRef.current;
+    if (!snapshot || snapshot.length === 0) {
+      return;
+    }
+    setRoundResult(null);
+    setAppliedOutcome(null);
+    setIsRetryMode(false);
+    setQuestions(snapshot);
+    setRoundKey((currentKey) => currentKey + 1);
+    setState('running');
+  }, []);
 
   const handleRetryWrong = useCallback(() => {
     if (!roundResult) {
       return;
     }
-
-    setQuestions(createRetryRound(roundResult, selectedSection));
+    const retryQuestions = createRetryRound(roundResult, selectedSection);
+    lastQuestionsRef.current = retryQuestions;
+    setRoundResult(null);
+    setAppliedOutcome(null);
+    setIsRetryMode(true);
+    setQuestions(retryQuestions);
     setRoundKey((currentKey) => currentKey + 1);
     setState('running');
   }, [roundResult, selectedSection]);
 
+  const handleExit = useCallback(() => {
+    setRoundResult(null);
+    setAppliedOutcome(null);
+    setIsRetryMode(false);
+    setState('intro');
+  }, []);
+
   const handleComplete = useCallback(
     (result: RoundResult) => {
+      const sectionKey = SECTION_TO_GAMIFICATION_KEY[selectedSection];
+      const outcome = applyRoundResult({
+        section: sectionKey,
+        correctCount: result.score,
+        totalCount: result.total,
+        bestComboInRound: result.maxCombo,
+        isRetryMode,
+      });
+
       setRoundResult(result);
+      setAppliedOutcome(outcome);
       setState('result');
+
+      // ── Telemetry (spec §5.5) — no PII, no task_text ──────────────────────
+      // trainer_streak_broken fires inside applyRoundResult — do NOT duplicate.
+      trackTrainerEvent('trainer_round_completed', {
+        section: sectionKey,
+        accuracy: result.total > 0 ? result.score / result.total : 0,
+        bestCombo: result.maxCombo,
+        xpEarned: outcome.xpEarned,
+        isNewBest: outcome.isNewBest,
+        isRetry: isRetryMode,
+      });
+
+      if (outcome.streakGained) {
+        trackTrainerEvent('trainer_streak_incremented', {
+          streakBefore: outcome.streakAfter - 1,
+          streakAfter: outcome.streakAfter,
+          dailyRounds: outcome.dailyRoundsCount,
+        });
+      }
+
+      if (outcome.isDailyGoalReached) {
+        trackTrainerEvent('trainer_daily_goal_reached', {
+          streak: outcome.streakAfter,
+          totalXp: useTrainerGamificationStore.getState().totalXp,
+        });
+      }
+
+      if (outcome.isNewBest) {
+        trackTrainerEvent('trainer_new_best', {
+          section: sectionKey,
+          newBest: outcome.xpEarned,
+        });
+      }
 
       void submitTrainerRound({
         session_id: sessionId,
@@ -93,7 +195,7 @@ export default function TrainerPage() {
         client_started_at: startedAt,
       }).catch(() => undefined);
     },
-    [sessionId, startedAt],
+    [applyRoundResult, isRetryMode, selectedSection, sessionId, startedAt],
   );
 
   if (state === 'running' && questions.length > 0) {
@@ -102,17 +204,19 @@ export default function TrainerPage() {
         key={roundKey}
         questions={questions}
         onComplete={handleComplete}
-        onExit={() => setState('intro')}
+        onExit={handleExit}
       />
     );
   }
 
-  if (state === 'result' && roundResult) {
+  if (state === 'result' && roundResult && appliedOutcome) {
     return (
       <RoundResultScreen
         result={roundResult}
+        appliedOutcome={appliedOutcome}
+        onReplaySame={handleReplaySame}
         onRetryWrong={handleRetryWrong}
-        onExit={() => setState('intro')}
+        onExit={handleExit}
       />
     );
   }
@@ -138,6 +242,20 @@ export default function TrainerPage() {
                 </p>
               </div>
             </header>
+
+            <div className="-mx-4 px-4 md:mx-0 md:px-0">
+              <div className="flex gap-4 overflow-x-auto touch-pan-x snap-x snap-mandatory pb-2 md:grid md:grid-cols-3 md:overflow-visible md:pb-0">
+                <StreakCard
+                  currentStreak={currentStreak}
+                  lastPlayedDate={lastPlayedDate}
+                />
+                <XpCard totalXp={totalXp} dailyRoundsCount={dailyRoundsCount} />
+                <BestScoreCard
+                  bestScoreBySection={bestScoreBySection}
+                  initialSection={SECTION_TO_GAMIFICATION_KEY[selectedSection]}
+                />
+              </div>
+            </div>
 
             <div className="space-y-4">
               <div>
@@ -198,6 +316,10 @@ export default function TrainerPage() {
                 Начать раунд
               </button>
             </div>
+
+            <p className="text-xs text-slate-400 text-center mt-8">
+              Прогресс сохраняется в браузере. При смене устройства серия может сброситься.
+            </p>
           </div>
         </section>
       </div>
