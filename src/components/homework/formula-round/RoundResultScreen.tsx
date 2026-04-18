@@ -1,7 +1,7 @@
 import { memo, Suspense, lazy, useCallback, useMemo, useState } from 'react';
 import { AlertTriangle, ChevronDown, ChevronUp } from 'lucide-react';
 import type { RoundResult, Layer } from '@/lib/formulaEngine/types';
-import { mechanicsFormulas } from '@/lib/formulaEngine/formulas';
+import { mechanicsFormulas, egorFormulas } from '@/lib/formulaEngine/formulas';
 import type { AppliedOutcome } from '@/stores/trainerGamificationStore';
 import { XpBreakdown } from './XpBreakdown';
 import { Celebrate, type CelebrateVariant } from './Celebrate';
@@ -57,7 +57,9 @@ export const RoundResultScreen = memo(function RoundResultScreen({
 
   const formulaMap = useMemo(() => {
     const map = new Map<string, { latex: string; title: string }>();
-    for (const f of mechanicsFormulas) {
+    // v2 catalog + v1 (egorFormulas) — weak formula ID может иметь `_e` суффикс,
+    // его формула живёт в параллельной ветке (см. CLAUDE.md §13a).
+    for (const f of [...mechanicsFormulas, ...egorFormulas]) {
       map.set(f.id, {
         latex: f.formula,
         title: f.buildTitle || f.name,
