@@ -17,6 +17,71 @@ function isEgorFormulaId(id: string): boolean {
   return id.endsWith('_e');
 }
 
+/**
+ * Операторные токены в build-recipes. Если recipe содержит `+` или `-`
+ * среди numeratorTokens (или denominatorTokens), correctness-check и
+ * preview-рендер переходят в operator-aware режим:
+ *   - между двумя non-operator токенами — неявное `\\cdot`
+ *   - между оператором и токеном — просто пробел
+ *   - correctness: операторы сравниваются строго по позиции, группы
+ *     между операторами — bag-compare (порядок множителей не важен).
+ */
+export const OPERATOR_TOKENS = new Set(['+', '-']);
+
+export function hasOperators(tokens: string[]): boolean {
+  return tokens.some((t) => OPERATOR_TOKENS.has(t));
+}
+
+/** Разбивает массив токенов на сегменты, разделённые операторами. */
+function splitByOperators(tokens: string[]): Array<{ op: string | null; terms: string[] }> {
+  const segments: Array<{ op: string | null; terms: string[] }> = [{ op: null, terms: [] }];
+  for (const t of tokens) {
+    if (OPERATOR_TOKENS.has(t)) {
+      segments.push({ op: t, terms: [] });
+    } else {
+      segments[segments.length - 1].terms.push(t);
+    }
+  }
+  return segments;
+}
+
+/** Operator-aware equality: operators strict, terms between them — bag-compare. */
+export function areTokenListsEquivalent(a: string[], b: string[]): boolean {
+  const segA = splitByOperators(a);
+  const segB = splitByOperators(b);
+  if (segA.length !== segB.length) return false;
+  for (let i = 0; i < segA.length; i++) {
+    if (segA[i].op !== segB[i].op) return false;
+    const ta = [...segA[i].terms].sort();
+    const tb = [...segB[i].terms].sort();
+    if (ta.length !== tb.length) return false;
+    for (let j = 0; j < ta.length; j++) {
+      if (ta[j] !== tb[j]) return false;
+    }
+  }
+  return true;
+}
+
+/**
+ * Строит LaTeX из массива токенов: между двумя non-operator токенами
+ * вставляется `\\cdot`, операторы окружаются пробелами. Пустой массив
+ * даёт пустую строку.
+ */
+export function joinTokensWithOperators(tokens: string[]): string {
+  if (tokens.length === 0) return '';
+  let result = tokens[0];
+  for (let i = 1; i < tokens.length; i++) {
+    const prev = tokens[i - 1];
+    const curr = tokens[i];
+    if (OPERATOR_TOKENS.has(curr) || OPERATOR_TOKENS.has(prev)) {
+      result += ' ' + curr;
+    } else {
+      result += ' \\cdot ' + curr;
+    }
+  }
+  return result;
+}
+
 interface RoundDistribution {
   trueOrFalse: number;
   buildFormula: number;
@@ -528,8 +593,8 @@ export function generateFeedbackPayload(question: FormulaQuestion, isCorrect: bo
       userAnswerLatex = userAnswer === true ? 'верно' : 'неверно';
     } else if (question.layer === 2 && typeof userAnswer === 'object' && 'numerator' in userAnswer) {
       const { numerator, denominator } = userAnswer;
-      const numStr = numerator.length > 0 ? numerator.join(' \\cdot ') : '';
-      const denStr = denominator.length > 0 ? denominator.join(' \\cdot ') : '';
+      const numStr = joinTokensWithOperators(numerator);
+      const denStr = joinTokensWithOperators(denominator);
       if (denStr && numStr) userAnswerLatex = `\\frac{${numStr}}{${denStr}}`;
       else if (denStr) userAnswerLatex = `\\frac{1}{${denStr}}`;
       else if (numStr) userAnswerLatex = numStr;

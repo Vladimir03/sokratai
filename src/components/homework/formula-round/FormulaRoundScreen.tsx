@@ -6,7 +6,11 @@ import { TrueOrFalseCard } from './TrueOrFalseCard';
 import { BuildFormulaCard } from './BuildFormulaCard';
 import { SituationCard } from './SituationCard';
 import { ComboIndicator } from './ComboIndicator';
-import { generateFeedback, generateFeedbackPayload } from '@/lib/formulaEngine/questionGenerator';
+import {
+  generateFeedback,
+  generateFeedbackPayload,
+  areTokenListsEquivalent,
+} from '@/lib/formulaEngine/questionGenerator';
 import type {
   FormulaQuestion,
   BuildFormulaAnswer,
@@ -106,12 +110,12 @@ export function FormulaRoundScreen({
       } else if (currentQuestion.type === 'build_formula') {
         const answer = selectedAnswer as BuildFormulaAnswer;
         const expected = currentQuestion.correctAnswer as BuildFormulaAnswer;
-        const numOk =
-          answer.numerator.length === expected.numerator.length &&
-          [...answer.numerator].sort().every((v, i) => v === [...expected.numerator].sort()[i]);
-        const denOk =
-          answer.denominator.length === expected.denominator.length &&
-          [...answer.denominator].sort().every((v, i) => v === [...expected.denominator].sort()[i]);
+        // Operator-aware equality: для формул с + / − операторы должны
+        // стоять в правильных позициях, но группы множителей между
+        // операторами по-прежнему порядко-независимы. Для старых bag-only
+        // recipe это сводится к чистому bag-compare.
+        const numOk = areTokenListsEquivalent(answer.numerator, expected.numerator);
+        const denOk = areTokenListsEquivalent(answer.denominator, expected.denominator);
         correct = numOk && denOk;
       } else {
         correct = selectedAnswer === currentQuestion.correctAnswer;

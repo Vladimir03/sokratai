@@ -1,6 +1,7 @@
 import { memo, useState, useMemo, useCallback } from 'react';
 import { MathText } from '@/components/kb/ui/MathText';
 import type { FormulaQuestion, BuildFormulaAnswer } from '@/lib/formulaEngine/types';
+import { joinTokensWithOperators } from '@/lib/formulaEngine/questionGenerator';
 
 interface BuildFormulaCardProps {
   question: FormulaQuestion;
@@ -74,15 +75,13 @@ const BuildFormulaCard = memo(function BuildFormulaCard({
     return `${leftSide.trim()} =`;
   }, [question.displayFormula]);
 
-  // Build LaTeX preview from placed tokens (AC-9)
+  // Build LaTeX preview from placed tokens (AC-9).
+  // Использует joinTokensWithOperators — между операторами (+/−) ставится
+  // пробел, между множителями — неявный `\\cdot`.
   const assembledLatex = useMemo(() => {
     if (numerator.length === 0 && denominator.length === 0) return null;
-    const numStr = numerator.length > 0
-      ? numerator.join(' \\cdot ')
-      : '';
-    const denStr = denominator.length > 0
-      ? denominator.join(' \\cdot ')
-      : '';
+    const numStr = joinTokensWithOperators(numerator);
+    const denStr = joinTokensWithOperators(denominator);
 
     let rightSide = '';
     if (denStr && numStr) {

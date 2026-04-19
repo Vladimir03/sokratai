@@ -773,9 +773,9 @@ export const EGOR_BUILD_RECIPES: Record<string, BuildRecipe> = {
     denominatorTokens: [],
   },
   'kin.24_e': {
-    // Знак минус остаётся в displayFormula; token bag = {g, t}.
+    // Унарный минус — отдельный операторный токен (prefix).
     displayFormula: 'v_y = -gt',
-    numeratorTokens: ['g', 't'],
+    numeratorTokens: ['-', 'g', 't'],
     denominatorTokens: [],
   },
   'kin.25_e': {
@@ -792,12 +792,13 @@ export const EGOR_BUILD_RECIPES: Record<string, BuildRecipe> = {
   'kin.27_e': {
     // Bag-of-terms: +/− структура теряется, recipe тестирует состав.
     displayFormula: 'x = x_0 + v_0 \\cdot t',
-    numeratorTokens: ['x_0', 'v_0', 't'],
+    numeratorTokens: ['x_0', '+', 'v_0', 't'],
     denominatorTokens: [],
   },
   'kin.28_e': {
+    // `-` разделяет y_0 и (g·t²/2). Знаменатель = 2.
     displayFormula: 'y = y_0 - \\frac{g t^2}{2}',
-    numeratorTokens: ['y_0', 'g', 't^2'],
+    numeratorTokens: ['y_0', '-', 'g', 't^2'],
     denominatorTokens: ['2'],
   },
   'kin.31_e': {
@@ -807,17 +808,18 @@ export const EGOR_BUILD_RECIPES: Record<string, BuildRecipe> = {
   },
   'kin.32_e': {
     displayFormula: 'v_y = v_0 \\sin(\\alpha) - gt',
-    numeratorTokens: ['v_0', '\\sin(\\alpha)', 'g', 't'],
+    numeratorTokens: ['v_0', '\sin(\alpha)', '-', 'g', 't'],
     denominatorTokens: [],
   },
   'kin.33_e': {
     displayFormula: 'x = x_0 + v_0 \\cos(\\alpha) \\cdot t',
-    numeratorTokens: ['x_0', 'v_0', '\\cos(\\alpha)', 't'],
+    numeratorTokens: ['x_0', '+', 'v_0', '\cos(\alpha)', 't'],
     denominatorTokens: [],
   },
   'kin.34_e': {
+    // Три сегмента: y_0, (+) v_0 sin(α) t, (−) g t²/2. Знаменатель = 2.
     displayFormula: 'y = y_0 + v_0 \\sin(\\alpha) \\cdot t - \\frac{g t^2}{2}',
-    numeratorTokens: ['y_0', 'v_0', '\\sin(\\alpha)', 't', 'g', 't^2'],
+    numeratorTokens: ['y_0', '+', 'v_0', '\\sin(\\alpha)', 't', '-', 'g', 't^2'],
     denominatorTokens: ['2'],
   },
   'kin.35_e': {
