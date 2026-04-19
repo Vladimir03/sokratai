@@ -63,8 +63,71 @@ function unwrapMath(latex: string | undefined): string | null {
     .replace(/\\\)$/u, '');
 }
 
+/**
+ * Canonical form для токенов в build-pool. Спец-символы (греческие буквы,
+ * π и т.п.) приводятся к LaTeX-escape форме, потому что в recipes мы всегда
+ * используем escape-запись (`\\omega`, `\\phi`, `2\\pi`), а дистракторы из
+ * `variables[].symbol` могут быть Unicode (`ω`, `φ`, `2π`). До этой
+ * нормализации ранее пул мог содержать и `\\omega`, и `ω` одновременно —
+ * визуально один токен, строково разные, → ученик кликает «верный на вид»
+ * но система засчитывает неверно (баг 2026-04-19).
+ */
+const UNICODE_TO_LATEX_TOKEN: Record<string, string> = {
+  // Строчные греческие
+  'α': '\\alpha',
+  'β': '\\beta',
+  'γ': '\\gamma',
+  'δ': '\\delta',
+  'ε': '\\varepsilon',
+  'ζ': '\\zeta',
+  'η': '\\eta',
+  'θ': '\\theta',
+  'ι': '\\iota',
+  'κ': '\\kappa',
+  'λ': '\\lambda',
+  'μ': '\\mu',
+  'ν': '\\nu',
+  'ξ': '\\xi',
+  'π': '\\pi',
+  'ρ': '\\rho',
+  'σ': '\\sigma',
+  'τ': '\\tau',
+  'υ': '\\upsilon',
+  'φ': '\\phi',
+  'χ': '\\chi',
+  'ψ': '\\psi',
+  'ω': '\\omega',
+  // Прописные греческие
+  'Γ': '\\Gamma',
+  'Δ': '\\Delta',
+  'Θ': '\\Theta',
+  'Λ': '\\Lambda',
+  'Ξ': '\\Xi',
+  'Π': '\\Pi',
+  'Σ': '\\Sigma',
+  'Φ': '\\Phi',
+  'Ψ': '\\Psi',
+  'Ω': '\\Omega',
+};
+
+function canonicalizeToken(token: string): string {
+  const trimmed = token.trim();
+  // Точное соответствие односимвольному Unicode → LaTeX escape.
+  if (UNICODE_TO_LATEX_TOKEN[trimmed]) {
+    return UNICODE_TO_LATEX_TOKEN[trimmed];
+  }
+  // Составные вида "2π" → "2\\pi" (частый случай из variables.symbol).
+  let out = trimmed;
+  for (const [uc, latex] of Object.entries(UNICODE_TO_LATEX_TOKEN)) {
+    if (out.includes(uc)) {
+      out = out.split(uc).join(latex);
+    }
+  }
+  return out;
+}
+
 function normalizeMathToken(token: string): string {
-  return token.trim();
+  return canonicalizeToken(token);
 }
 
 function shuffle<T>(items: T[]): T[] {
@@ -173,6 +236,11 @@ function getBuildRecipe(formula: Formula): BuildRecipe {
 }
 
 function supportsBuildQuestion(formula: Formula): boolean {
+  // Репетитор может явно снять формулу с BuildFormula через колонку
+  // «Для сборки/не для сборки». `buildable: false` → только TrueOrFalse.
+  if (formula.buildable === false) {
+    return false;
+  }
   if (isEgorFormulaId(formula.id)) {
     return EGOR_SUPPORTED_BUILD_FORMULA_IDS.has(formula.id);
   }
@@ -306,7 +374,12 @@ function getMutationsFor(formulaId: string) {
 }
 
 export function generateTrueOrFalse(formula: Formula): FormulaQuestion {
-  const showCorrectFormula = Math.random() >= 0.5;
+  // Для «не для сборки» формул (теоретические утверждения / громоздкие
+  // формулы) мутации не генерим — показываем оригинал целиком. Ответ
+  // ВСЕГДА `верно` → правильный. Учитель помечает формулу `buildable: false`
+  // именно потому что хочет закрепить корректную формулировку без искажений.
+  const mutationsAvailable = formula.buildable !== false;
+  const showCorrectFormula = !mutationsAvailable || Math.random() >= 0.5;
   const mutation = showCorrectFormula ? undefined : pickRandomOrUndefined(getMutationsFor(formula.id));
 
   return {
@@ -327,6 +400,7 @@ export function generateBuildFormula(formula: Formula, pool: Formula[] = []): Fo
   const allTokens = [...recipe.numeratorTokens, ...recipe.denominatorTokens];
   const distractorCount = Math.min(3, Math.max(2, formula.relatedFormulas.length > 1 ? 3 : 2));
   const distractors = getDistractorTokens(formula, distractorCount, pool.length > 0 ? pool : [formula]);
+  const options = shuffle(unique([...allTokens, ...distractors]));
 
   return {
     id: createQuestionId('build_formula', formula.id),
@@ -335,10 +409,69 @@ export function generateBuildFormula(formula: Formula, pool: Formula[] = []): Fo
     formulaId: formula.id,
     prompt: formula.buildTitle || formula.name,
     displayFormula: wrapMath(recipe.displayFormula),
-    options: shuffle(unique([...allTokens, ...distractors])),
+    options,
     correctAnswer: { numerator: recipe.numeratorTokens, denominator: recipe.denominatorTokens },
     explanation: `Нужные элементы: ${allTokens.join(', ')}`,
+    tokenLegend: buildTokenLegend(options, formula, pool.length > 0 ? pool : [formula]),
   };
+}
+
+/**
+ * Строит легенду для токенов пула, когда обнаружена case-коллизия
+ * (`T` и `t`, `N` и `n` и т.п.). Label формируется из `Variable.name + unit`
+ * первого попавшегося носителя символа (из самой формулы, затем из её
+ * связанных / из пула). Если коллизий нет — возвращает undefined, чтобы
+ * не раздувать payload и не рендерить пустую плашку.
+ */
+function buildTokenLegend(
+  options: string[],
+  formula: Formula,
+  pool: Formula[],
+): FormulaQuestion['tokenLegend'] {
+  const canonicalOptions = options.map(canonicalizeToken);
+  // Группируем по lowercase — это и есть «одна буква разного регистра».
+  const byLower = new Map<string, string[]>();
+  for (const tok of canonicalOptions) {
+    // Интересуют только однобуквенные или короткие LaTeX-токены с буквой
+    // (`T`, `t`, `N`, `n`, `\\omega`, ...). Пропускаем 1-символьные цифры,
+    // чтобы не ловить ложные коллизии по `1`/`2` и т.п.
+    if (/^\d+$/.test(tok)) continue;
+    const lower = tok.toLowerCase();
+    const list = byLower.get(lower) ?? [];
+    if (!list.includes(tok)) list.push(tok);
+    byLower.set(lower, list);
+  }
+  const collidingTokens: string[] = [];
+  for (const list of byLower.values()) {
+    if (list.length > 1) {
+      for (const tok of list) collidingTokens.push(tok);
+    }
+  }
+  if (collidingTokens.length === 0) return undefined;
+
+  // Ищем label для каждого коллидирующего токена среди variables формулы и пула.
+  const labelMap = new Map<string, string>(); // canonical token → «имя (единица)»
+  const sources: Formula[] = [formula, ...pool];
+  for (const src of sources) {
+    for (const variable of src.variables) {
+      const canonical = canonicalizeToken(variable.symbol);
+      if (!collidingTokens.includes(canonical)) continue;
+      if (labelMap.has(canonical)) continue;
+      const unitPart = variable.unit ? ` (${variable.unit})` : '';
+      labelMap.set(canonical, `${variable.name}${unitPart}`);
+    }
+  }
+  // Собираем финальный массив в порядке первого появления в options.
+  const seen = new Set<string>();
+  const legend: Array<{ token: string; label: string }> = [];
+  for (const tok of canonicalOptions) {
+    if (!collidingTokens.includes(tok) || seen.has(tok)) continue;
+    seen.add(tok);
+    const label = labelMap.get(tok);
+    if (!label) continue;
+    legend.push({ token: tok, label });
+  }
+  return legend.length > 0 ? legend : undefined;
 }
 
 export function generateSituationToFormula(formula: Formula, pool: Formula[]): FormulaQuestion {

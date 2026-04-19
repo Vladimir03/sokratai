@@ -43,6 +43,7 @@ export const egorFormulas: Formula[] = [
     difficulty: 1,
     exam: 'ЕГЭ',
     memoryHook: 'Частота — в герцах: сколько оборотов в секунду. Делим число оборотов N на время t.',
+    buildable: true,
   },
   {
     id: 'kin.14_e',
@@ -75,6 +76,7 @@ export const egorFormulas: Formula[] = [
     difficulty: 1,
     exam: 'ЕГЭ',
     memoryHook: 'Период — время одного оборота в секундах. Делим общее время на количество оборотов N.',
+    buildable: true,
   },
   {
     id: 'kin.15_e',
@@ -106,6 +108,7 @@ export const egorFormulas: Formula[] = [
     difficulty: 1,
     exam: 'ЕГЭ',
     memoryHook: 'Период и частота взаимно обратны. Если период растёт — частота падает, и наоборот.',
+    buildable: true,
   },
   {
     id: 'kin.16_e',
@@ -138,6 +141,7 @@ export const egorFormulas: Formula[] = [
     difficulty: 2,
     exam: 'ЕГЭ',
     memoryHook: 'За один оборот точка проходит длину окружности 2πR. Не теряй множитель 2π.',
+    buildable: true,
   },
   {
     id: 'kin.17_e',
@@ -170,6 +174,7 @@ export const egorFormulas: Formula[] = [
     difficulty: 2,
     exam: 'ЕГЭ',
     memoryHook: 'Угол в радианах = длина дуги ÷ радиус. Радиан безразмерен.',
+    buildable: true,
   },
   {
     id: 'kin.18_e',
@@ -202,6 +207,7 @@ export const egorFormulas: Formula[] = [
     difficulty: 1,
     exam: 'ЕГЭ',
     memoryHook: 'Угловая скорость — радианов в секунду. Угол поворота в числителе, время — в знаменателе.',
+    buildable: true,
   },
   {
     id: 'kin.19_e',
@@ -233,6 +239,7 @@ export const egorFormulas: Formula[] = [
     difficulty: 2,
     exam: 'ЕГЭ',
     memoryHook: 'За один оборот тело проходит угол 2π радиан. Не путай с ν = 1/T (там без 2π).',
+    buildable: true,
   },
   {
     id: 'kin.20_e',
@@ -265,6 +272,7 @@ export const egorFormulas: Formula[] = [
     difficulty: 2,
     exam: 'ЕГЭ',
     memoryHook: 'Линейная скорость растёт пропорционально радиусу, без квадрата. R умножается, не делится.',
+    buildable: true,
   },
   {
     id: 'kin.21_e',
@@ -297,6 +305,7 @@ export const egorFormulas: Formula[] = [
     difficulty: 2,
     exam: 'ЕГЭ',
     memoryHook: 'Центростремительное ускорение зависит от КВАДРАТА скорости. Направлено к центру окружности.',
+    buildable: true,
   },
   {
     id: 'kin.22_e',
@@ -329,6 +338,7 @@ export const egorFormulas: Formula[] = [
     difficulty: 2,
     exam: 'ЕГЭ',
     memoryHook: 'a_цс через угловую скорость: КВАДРАТ ω умножить на R. С ростом R при том же ω ускорение растёт.',
+    buildable: true,
   },
 ];
 

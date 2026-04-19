@@ -37,6 +37,17 @@ export interface Formula {
    * regex-эвристику в `getLayer1MemoryCue`.
    */
   memoryHook?: string;
+  /**
+   * Может ли формула участвовать в BuildFormulaCard (Layer 2 — «собери
+   * правую часть»). Источник — колонка «Для сборки/не для сборки» в
+   * гугл-таблице (v1 tab). Теоретические утверждения и громоздкие формулы
+   * помечаются `buildable: false` → идут только в TrueOrFalseCard без
+   * мутации (утверждение целиком верно/неверно).
+   *
+   * Default (undefined) трактуется как `true` — backward-compat для v2
+   * каталога, где колонки ещё нет.
+   */
+  buildable?: boolean;
 }
 
 export type QuestionType = 'true_or_false' | 'build_formula' | 'situation_to_formula';
@@ -59,6 +70,14 @@ export interface FormulaQuestion {
   correctAnswer: string | boolean | string[] | BuildFormulaAnswer;
   explanation: string;
   mutationType?: string;
+  /**
+   * Легенда к токенам пула BuildFormulaCard — используется при case-
+   * ambiguity (в пуле и `T`, и `t`, или `N`/`n` и т.д.), чтобы ученик
+   * не путал одинаковые буквы разного регистра. Каждая запись — токен
+   * + короткое пояснение «имя (единица)». Показывается только когда
+   * реально есть коллизия.
+   */
+  tokenLegend?: Array<{ token: string; label: string }>;
 }
 
 export interface RoundConfig {
