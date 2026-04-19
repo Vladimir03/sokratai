@@ -18,7 +18,9 @@ export type SectionKey =
   | 'hydrostatics'
   // v1 trainer mode (формулы Егора, «Вращение по окружности»). Отдельная
   // корзина best-score, чтобы не смешивать с kinematics v2.
-  | 'egor-v1';
+  | 'egor-v1'
+  // v1 sub-pool «Движение по параболе» (11 формул kin.23-28, 31-35 _e).
+  | 'egor-parabola';
 
 export interface TrainerGamificationState {
   totalXp: number;

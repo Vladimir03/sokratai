@@ -12,6 +12,7 @@ const SECTION_OPTIONS: Array<{ value: SectionKey; label: string }> = [
   { value: 'statics', label: 'Статика' },
   { value: 'hydrostatics', label: 'Гидростатика' },
   { value: 'egor-v1', label: 'Базовый (Вращение)' },
+  { value: 'egor-parabola', label: 'Базовый (Парабола)' },
 ];
 
 export interface BestScoreCardProps {

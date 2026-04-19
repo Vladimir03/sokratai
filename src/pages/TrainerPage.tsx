@@ -35,7 +35,8 @@ type SectionType =
   | 'conservation'
   | 'statics'
   | 'hydrostatics'
-  | 'egor-v1';
+  | 'egor-v1'
+  | 'egor-parabola';
 
 const SECTION_TO_GAMIFICATION_KEY: Record<SectionType, SectionKey> = {
   mechanics: 'all',
@@ -45,6 +46,7 @@ const SECTION_TO_GAMIFICATION_KEY: Record<SectionType, SectionKey> = {
   statics: 'statics',
   hydrostatics: 'hydrostatics',
   'egor-v1': 'egor-v1',
+  'egor-parabola': 'egor-parabola',
 };
 
 type SectionPool = {
@@ -53,6 +55,17 @@ type SectionPool = {
   mode?: 'v1' | 'v2';
 };
 
+// v1 каталог разбит на два sub-pool'а по подтемам. Фильтрация по topic —
+// самый дешёвый способ, пока egorFormulas помещается в один файл. Если v1
+// вырастет и появятся разделы вне кинематики (Электродинамика, МКТ, ...),
+// имеет смысл вынести в отдельные именованные экспорты в egorFormulas.ts.
+const egorRotationFormulas = egorFormulas.filter((f) =>
+  f.topic.toLowerCase().includes('вращение'),
+);
+const egorParabolaFormulas = egorFormulas.filter((f) =>
+  f.topic.toLowerCase().includes('парабол'),
+);
+
 const SECTION_POOLS: Record<SectionType, SectionPool> = {
   mechanics: { formulas: mechanicsFormulas, label: 'Вся механика' },
   kinematics: { formulas: kinematicsFormulas, label: 'Кинематика' },
@@ -60,11 +73,17 @@ const SECTION_POOLS: Record<SectionType, SectionPool> = {
   conservation: { formulas: conservationFormulas, label: 'Законы сохранения' },
   statics: { formulas: staticsFormulas, label: 'Статика' },
   hydrostatics: { formulas: hydrostaticsFormulas, label: 'Гидростатика' },
-  // v1: упрощённый режим для нулевого уровня. Только 10 формул «Вращение по
-  // окружности» Егора, без SituationCard (только Layer 2 + Layer 3).
+  // v1: упрощённые под-темы для нулевого уровня. Только Layer 2 + Layer 3,
+  // без SituationCard. Каждая под-тема — отдельный pool, чтобы ученик мог
+  // тренировать прицельно один блок.
   'egor-v1': {
-    formulas: egorFormulas,
-    label: 'Базовый курс · Вращение',
+    formulas: egorRotationFormulas,
+    label: 'Базовый · Вращение',
+    mode: 'v1',
+  },
+  'egor-parabola': {
+    formulas: egorParabolaFormulas,
+    label: 'Базовый · Парабола',
     mode: 'v1',
   },
 };
