@@ -17,7 +17,7 @@ export const egorFormulas: Formula[] = [
     section: 'Кинематика',
     topic: 'Кинематика — Вращение по окружности',
     name: 'Частота вращения',
-    buildTitle: 'Частота вращения через число оборотов и время',
+    buildTitle: 'Частота вращения $\\nu$ через $N$ и $t$',
     formula: '\\nu=\\frac{N}{t}',
     formulaPlain: 'ν = N / t',
     variables: [
@@ -50,7 +50,7 @@ export const egorFormulas: Formula[] = [
     section: 'Кинематика',
     topic: 'Кинематика — Вращение по окружности',
     name: 'Период вращения',
-    buildTitle: 'Период вращения через время и число оборотов',
+    buildTitle: 'Период вращения $T$ через $t$ и $N$',
     formula: 'T=\\frac{t}{N}',
     formulaPlain: 'T = t / N',
     variables: [
@@ -83,7 +83,7 @@ export const egorFormulas: Formula[] = [
     section: 'Кинематика',
     topic: 'Кинематика — Вращение по окружности',
     name: 'Связь частоты и периода вращения',
-    buildTitle: 'Связь частоты и периода вращения',
+    buildTitle: 'Связь частоты $\\nu$ и периода $T$',
     formula: '\\nu=\\frac{1}{T}',
     formulaPlain: 'ν = 1 / T',
     variables: [
@@ -115,7 +115,7 @@ export const egorFormulas: Formula[] = [
     section: 'Кинематика',
     topic: 'Кинематика — Вращение по окружности',
     name: 'Линейная скорость при вращении',
-    buildTitle: 'Линейная скорость при равномерном вращении',
+    buildTitle: 'Линейная скорость $v$ при равномерном вращении',
     formula: 'v=\\frac{2\\pi R}{T}',
     formulaPlain: 'v = 2πR / T',
     variables: [
@@ -148,7 +148,7 @@ export const egorFormulas: Formula[] = [
     section: 'Кинематика',
     topic: 'Кинематика — Вращение по окружности',
     name: 'Определение угла в радианах',
-    buildTitle: 'Угол в радианах через длину дуги и радиус',
+    buildTitle: 'Угол $\\phi$ в радианах через длину дуги $l$ и радиус $R$',
     formula: '\\phi=\\frac{l}{R}',
     formulaPlain: 'φ = l / R',
     variables: [
@@ -181,7 +181,7 @@ export const egorFormulas: Formula[] = [
     section: 'Кинематика',
     topic: 'Кинематика — Вращение по окружности',
     name: 'Определение угловой скорости',
-    buildTitle: 'Угловая скорость через угол поворота и время',
+    buildTitle: 'Угловая скорость $\\omega$ через угол $\\phi$ и время $t$',
     formula: '\\omega=\\frac{\\phi}{t}',
     formulaPlain: 'ω = φ / t',
     variables: [
@@ -214,7 +214,7 @@ export const egorFormulas: Formula[] = [
     section: 'Кинематика',
     topic: 'Кинематика — Вращение по окружности',
     name: 'Связь угловой скорости и периода вращения',
-    buildTitle: 'Связь угловой скорости и периода вращения',
+    buildTitle: 'Связь $\\omega$ и периода $T$',
     formula: '\\omega=\\frac{2\\pi}{T}',
     formulaPlain: 'ω = 2π / T',
     variables: [
@@ -246,7 +246,7 @@ export const egorFormulas: Formula[] = [
     section: 'Кинематика',
     topic: 'Кинематика — Вращение по окружности',
     name: 'Связь линейной и угловой скорости',
-    buildTitle: 'Связь линейной и угловой скорости',
+    buildTitle: 'Связь линейной $v$ и угловой $\\omega$ скорости',
     formula: 'v=\\omega R',
     formulaPlain: 'v = ωR',
     variables: [
@@ -279,11 +279,11 @@ export const egorFormulas: Formula[] = [
     section: 'Кинематика',
     topic: 'Кинематика — Вращение по окружности',
     name: 'Центростремительное ускорение (через линейную скорость)',
-    buildTitle: 'Центростремительное ускорение через линейную скорость',
+    buildTitle: 'Центростремительное ускорение $a_{\\text{цс}}$ через $v$',
     formula: 'a_{\\text{цс}} = \\frac{v^2}{R}',
     formulaPlain: 'a_цс = v² / R',
     variables: [
-      { symbol: 'a_цс', name: 'центростремительное ускорение', unit: 'м/с²' },
+      { symbol: 'a_{\text{цс}}', name: 'центростремительное ускорение', unit: 'м/с²' },
       { symbol: 'v', name: 'линейная скорость', unit: 'м/с' },
       { symbol: 'R', name: 'радиус окружности', unit: 'м' },
     ],
@@ -312,11 +312,11 @@ export const egorFormulas: Formula[] = [
     section: 'Кинематика',
     topic: 'Кинематика — Вращение по окружности',
     name: 'Центростремительное ускорение (через угловую скорость)',
-    buildTitle: 'Центростремительное ускорение через угловую скорость',
+    buildTitle: 'Центростремительное ускорение $a_{\\text{цс}}$ через $\\omega$',
     formula: 'a_{\\text{цс}}=\\omega^2R',
     formulaPlain: 'a_цс = ω²R',
     variables: [
-      { symbol: 'a_цс', name: 'центростремительное ускорение', unit: 'м/с²' },
+      { symbol: 'a_{\text{цс}}', name: 'центростремительное ускорение', unit: 'м/с²' },
       { symbol: 'ω', name: 'угловая скорость', unit: 'рад/с' },
       { symbol: 'R', name: 'радиус окружности', unit: 'м' },
     ],
@@ -346,7 +346,7 @@ export const egorFormulas: Formula[] = [
     section: 'Кинематика',
     topic: 'Кинематика — Движение по параболе',
     name: 'Проекция скорости на горизонтальную ось (горизонтальный бросок)',
-    buildTitle: 'Горизонтальная скорость при горизонтальном броске',
+    buildTitle: 'Горизонтальная скорость $v_x$ при горизонтальном броске',
     formula: 'v_x = v_0',
     formulaPlain: 'v_x = v_0',
     variables: [
@@ -378,7 +378,7 @@ export const egorFormulas: Formula[] = [
     section: 'Кинематика',
     topic: 'Кинематика — Движение по параболе',
     name: 'Проекция скорости на вертикальную ось (горизонтальный бросок)',
-    buildTitle: 'Вертикальная скорость при горизонтальном броске',
+    buildTitle: 'Вертикальная скорость $v_y$ при горизонтальном броске',
     formula: 'v_y = -gt',
     formulaPlain: 'v_y = -g*t',
     variables: [
@@ -411,7 +411,7 @@ export const egorFormulas: Formula[] = [
     section: 'Кинематика',
     topic: 'Кинематика — Движение по параболе',
     name: 'Полная скорость (горизонтальный бросок или бросок под углом)',
-    buildTitle: 'Полная скорость через проекции',
+    buildTitle: 'Полная скорость $v$ через проекции $v_x$, $v_y$',
     formula: 'v = \\sqrt{v_x^2 + v_y^2}',
     formulaPlain: 'v = sqrt(v_x^2 + v_y^2)',
     variables: [
@@ -444,7 +444,7 @@ export const egorFormulas: Formula[] = [
     section: 'Кинематика',
     topic: 'Кинематика — Движение по параболе',
     name: 'Тангенс угла наклона полной скорости к горизонту',
-    buildTitle: 'Угол наклона полной скорости',
+    buildTitle: 'Угол наклона $\\beta$ полной скорости к горизонту',
     formula: '\\tan(\\beta) = \\frac{|v_y|}{v_x}',
     formulaPlain: 'tan(β) = |v_y| / v_x',
     variables: [
@@ -477,7 +477,7 @@ export const egorFormulas: Formula[] = [
     section: 'Кинематика',
     topic: 'Кинематика — Движение по параболе',
     name: 'Горизонтальная координата от времени (горизонтальный бросок)',
-    buildTitle: 'x(t) при горизонтальном броске',
+    buildTitle: '$x(t)$ при горизонтальном броске',
     formula: 'x = x_0 + v_0 \\cdot t',
     formulaPlain: 'x = x_0 + v_0 * t',
     variables: [
@@ -511,7 +511,7 @@ export const egorFormulas: Formula[] = [
     section: 'Кинематика',
     topic: 'Кинематика — Движение по параболе',
     name: 'Вертикальная координата от времени (горизонтальный бросок)',
-    buildTitle: 'y(t) при горизонтальном броске',
+    buildTitle: '$y(t)$ при горизонтальном броске',
     formula: 'y = y_0 - \\frac{g t^2}{2}',
     formulaPlain: 'y = y_0 - g*t^2 / 2',
     variables: [
@@ -546,7 +546,7 @@ export const egorFormulas: Formula[] = [
     section: 'Кинематика',
     topic: 'Кинематика — Движение по параболе',
     name: 'Проекция скорости на горизонтальную ось (бросок под углом)',
-    buildTitle: 'v_x при броске под углом к горизонту',
+    buildTitle: '$v_x$ при броске под углом к горизонту',
     formula: 'v_x = v_0 \\cos(\\alpha)',
     formulaPlain: 'v_x = v_0 * cos(α)',
     variables: [
@@ -579,7 +579,7 @@ export const egorFormulas: Formula[] = [
     section: 'Кинематика',
     topic: 'Кинематика — Движение по параболе',
     name: 'Проекция скорости на вертикальную ось (бросок под углом)',
-    buildTitle: 'v_y при броске под углом к горизонту',
+    buildTitle: '$v_y$ при броске под углом к горизонту',
     formula: 'v_y = v_0 \\sin(\\alpha) - g t',
     formulaPlain: 'v_y = v_0 * sin(α) - g*t',
     variables: [
@@ -614,7 +614,7 @@ export const egorFormulas: Formula[] = [
     section: 'Кинематика',
     topic: 'Кинематика — Движение по параболе',
     name: 'Горизонтальная координата от времени (бросок под углом)',
-    buildTitle: 'x(t) при броске под углом',
+    buildTitle: '$x(t)$ при броске под углом',
     formula: 'x = x_0 + v_0 \\cos(\\alpha) \\cdot t',
     formulaPlain: 'x = x_0 + v_0 * cos(α) * t',
     variables: [
@@ -649,7 +649,7 @@ export const egorFormulas: Formula[] = [
     section: 'Кинематика',
     topic: 'Кинематика — Движение по параболе',
     name: 'Вертикальная координата от времени (бросок под углом)',
-    buildTitle: 'y(t) при броске под углом',
+    buildTitle: '$y(t)$ при броске под углом',
     formula: 'y = y_0 + v_0 \\sin(\\alpha) \\cdot t - \\frac{g t^2}{2}',
     formulaPlain: 'y = y_0 + v_0 * sin(α) * t - g*t^2 / 2',
     variables: [
@@ -685,11 +685,11 @@ export const egorFormulas: Formula[] = [
     section: 'Кинематика',
     topic: 'Кинематика — Движение по параболе',
     name: 'Скорость в верхней точке траектории (бросок под углом)',
-    buildTitle: 'v в верхней точке параболы',
+    buildTitle: '$v_{\\text{верх}}$ в верхней точке параболы',
     formula: 'v_{\\text{верх}} = v_0 \\cos(\\alpha)',
     formulaPlain: 'v_верх = v_0 * cos(α)',
     variables: [
-      { symbol: 'v_верх', name: 'скорость в верхней точке траектории', unit: 'м/с' },
+      { symbol: 'v_{\text{верх}}', name: 'скорость в верхней точке траектории', unit: 'м/с' },
       { symbol: 'v_0', name: 'модуль начальной скорости', unit: 'м/с' },
       { symbol: 'α', name: 'угол броска к горизонту', unit: 'рад' },
     ],
