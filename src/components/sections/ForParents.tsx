@@ -54,7 +54,7 @@ const ForParents = () => {
               каждая контрольная была стрессом для всей семьи. Теперь она сама садится за уроки и спрашивает у AI, если
               что-то не понятно. Это реально работает!"
             </p>
-            <div className="font-bold" style={{ color: "hsl(231, 36%, 29%)" }}>
+            <div className="font-bold text-primary">
               — Елена, мама ученицы 10 класса
             </div>
             <div className="text-amber-500 mt-2 text-sm font-medium tracking-wider">★ ★ ★ ★ ★</div>

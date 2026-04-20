@@ -34,7 +34,29 @@ AI
 
 # Design System (Canonical)
 
-Подробные правила дизайн-системы: `.claude/rules/90-design-system.md`
+Подробные правила дизайн-системы (внутрипроектные): `.claude/rules/90-design-system.md`
+
+## Design System Handoff (Phase 1 landed 2026-04-20, commit d2d2834)
+
+Canonical cross-kit design system от Claude Design теперь живёт в репо:
+- `SKILL.md` (repo root) — system purpose, mode contract (`data-sokrat-mode`), token hierarchy, anti-drift rules (ten laws), extension checklist, pre-flight checks. Читать **до** любой UI-работы.
+- `docs/design-system/README.md` — folder map + completion status handoff.
+- `src/styles/colors_and_type.css` — **single source of truth** для tokens (`--sokrat-*`), self-hosted `@font-face` (Golos Text 6 weights), mode rules, exam-stream rules, parent overlay rules. Импортится первой строкой в `src/index.css`.
+- `src/fonts/GolosText-*.ttf` — Golos Text 400/500/600/700/800/900 локально.
+- `src/assets/sokrat-logo.png`, `sokrat-chat-icon.png`, `sokrat-hw-banner.png` — canonical brand assets (PNG by design, не SVG).
+
+**Статус фаз:**
+- Phase 1 ✅ additive: файлы + @import + Google Fonts → local (commit `d2d2834`).
+- Phase 2 ⏳ pending: shadcn slot mapping (`--primary` indigo → green, hero gradient indigo → green). Preview patch сгенерирован, не применён. Accent mapping использует compatibility-bridge: `--accent` остаётся зелёным до отдельного semantic cleanup, ochre доступен через `bg-socrat-accent` (tailwind) или `var(--sokrat-ochre-500)`.
+- Phase 3+ ⏳ deferred: mode wrapper (`data-sokrat-mode`), kit port.
+
+**Hard rules (из SKILL.md):**
+- Не дублировать и не шейдовать токены из `colors_and_type.css` — всегда `var(--sokrat-*)`.
+- Новый цвет/шрифт/тень — сначала extend `colors_and_type.css`, потом использовать.
+- Math — только через KaTeX + `FormulaBlock` / `SFormulaBlock` (см. `.claude/rules/90-design-system.md`).
+- Golos Text — единственный sans family. Inter / Roboto / Nyghtserif запрещены.
+
+Внутрипроектный rule-файл `.claude/rules/90-design-system.md` описывает как design-system применяется в конкретных компонентах SokratAI (bg-accent / socrat tokens / anti-patterns). При конфликте (e.g. handoff предписывает `--accent = ochre`, а rule-файл — `bg-accent = green`) — см. SKILL.md §10 Implementation handoff + compatibility bridge в Phase 2 preview.
 
 ---
 
