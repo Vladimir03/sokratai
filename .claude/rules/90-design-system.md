@@ -1,9 +1,29 @@
-# Design System (Canonical)
+# Design System — SokratAI tactical guidance
 
-Source of truth для всех визуальных решений. Агенты (Claude Code, Codex, Cursor, Impeccable) ОБЯЗАНЫ следовать этим правилам при создании и изменении UI.
+## Authority hierarchy (read first)
 
-Полный UX-аудит: `docs/delivery/features/ux-audit/ux-audit-2026-04-02.md`
-Анализ конкурентов: `docs/discovery/research/конкуренты/edtech_competitors_analysis.md`
+Cross-kit canonical design system лежит в корне репо, пришёл из Claude Design handoff (Phase 1 landed 2026-04-20, commit `d2d2834`; palette sync 2026-04-20, commit `0879563`):
+
+1. **`/SKILL.md`** — **authoritative source** для любого **нового** UI-решения. System purpose, mode contract (`data-sokrat-mode`), token hierarchy, anti-drift ten laws, extension checklist, pre-flight checks. **Читать первым** перед любой UI-работой.
+2. **`src/styles/colors_and_type.css`** — single source of truth для tokens (`--sokrat-*`), `@font-face` Golos Text, mode rules, parent overlay. Foundations frozen.
+3. **`docs/design-system/README.md`** — folder map + completion status handoff.
+4. **Этот файл (`.claude/rules/90-design-system.md`)** — **tactical guidance** для SokratAI-specific use cases: как применять handoff в существующих компонентах, какие Tailwind-токены (`bg-accent`, `socrat.*`) mapped к brand green сейчас (compatibility bridge β), anti-patterns, цветовые/типографические гайды для конкретного продукта. **Не источник для новых архитектурных решений.**
+
+### При конфликте
+
+Если гайд в этом файле противоречит SKILL.md — **SKILL.md выигрывает.** Гайд этого файла описывает текущее состояние runtime (Phase 2 compatibility bridge — `bg-accent` остаётся зелёным), которое со временем будет приведено к полной handoff-модели через semantic cleanup passes. Пока такой переход не выполнен, tactical guide остаётся актуален для работы с **существующим** кодом.
+
+Пример активного gap между SKILL.md и этим файлом (2026-04-20):
+- **SKILL.md §10:** `--sokrat-ochre-500 → --accent` (в `colors_and_type.css`)
+- **Этот файл + runtime:** `--accent` остаётся `#1B6B4A` (green) как compatibility bridge; ochre доступен через `bg-socrat-accent` или `var(--sokrat-ochre-500)`
+- **Resolution:** bridge уберётся в Phase 4 semantic cleanup pass (`bg-accent → bg-primary` codemod + swap `--accent` на ochre). До того — следуйте tactical guidance ниже
+
+## Context documents
+
+- Полный UX-аудит: `docs/delivery/features/ux-audit/ux-audit-2026-04-02.md`
+- Анализ конкурентов: `docs/discovery/research/конкуренты/edtech_competitors_analysis.md`
+- Cross-kit handoff manifesto: `/SKILL.md`
+- Foundation tokens: `src/styles/colors_and_type.css`
 
 ## Визуальная идентичность
 
