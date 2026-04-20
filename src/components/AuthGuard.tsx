@@ -75,7 +75,7 @@ const AuthGuard = ({ children }: AuthGuardProps) => {
         onComplete={() => setShowOnboarding(false)}
       />
       <Navigation />
-      <div className="pt-14 pb-20 md:pb-4">
+      <div className="sokrat pt-14 pb-20 md:pb-4" data-sokrat-mode="student">
         {children}
       </div>
     </>

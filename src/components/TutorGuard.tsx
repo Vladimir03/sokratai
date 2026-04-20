@@ -255,7 +255,11 @@ const TutorGuard = ({ children }: TutorGuardProps) => {
     return null;
   }
 
-  return <>{children}</>;
+  return (
+    <div className="sokrat" data-sokrat-mode="tutor">
+      {children}
+    </div>
+  );
 };
 
 export default TutorGuard;
