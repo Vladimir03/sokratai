@@ -1,0 +1,661 @@
+/* ============================================================
+   Сократ AI — Colors & Typography
+   Source of truth for tokens, modes, density, and component rules.
+   Русскоязычный EdTech бренд. Зелёный как доминанта, охра как акцент.
+
+   ── PASS 1 SCOPE ──────────────────────────────────────────────
+   Tokens + rules only. No screens. Three render modes on one
+   system: tutor (desktop-first), student (mobile-first), parent
+   (read-only on the student shell via data-sokrat-mode="parent").
+   ============================================================ */
+
+
+/* ============================================================
+   GOLOS TEXT — canonical brand font (Cyrillic + Latin)
+   Self-hosted from fonts/ (uploaded by brand team).
+   Weights 400, 500, 600, 700, 800, 900.
+   ============================================================ */
+@font-face {
+  font-family: 'Golos Text';
+  src: url('../fonts/GolosText-Regular.ttf') format('truetype');
+  font-weight: 400; font-style: normal; font-display: swap;
+}
+@font-face {
+  font-family: 'Golos Text';
+  src: url('../fonts/GolosText-Medium.ttf') format('truetype');
+  font-weight: 500; font-style: normal; font-display: swap;
+}
+@font-face {
+  font-family: 'Golos Text';
+  src: url('../fonts/GolosText-SemiBold.ttf') format('truetype');
+  font-weight: 600; font-style: normal; font-display: swap;
+}
+@font-face {
+  font-family: 'Golos Text';
+  src: url('../fonts/GolosText-Bold.ttf') format('truetype');
+  font-weight: 700; font-style: normal; font-display: swap;
+}
+@font-face {
+  font-family: 'Golos Text';
+  src: url('../fonts/GolosText-ExtraBold.ttf') format('truetype');
+  font-weight: 800; font-style: normal; font-display: swap;
+}
+@font-face {
+  font-family: 'Golos Text';
+  src: url('../fonts/GolosText-Black.ttf') format('truetype');
+  font-weight: 900; font-style: normal; font-display: swap;
+}
+
+
+:root {
+  /* ============================================================
+     BRAND CORE — locked
+     Green = trust. Ochre = action. Hierarchy is immutable.
+     ============================================================ */
+  --sokrat-green-900: #0f4432;         /* marketing hero bg, darkest */
+  --sokrat-green-800: #145236;         /* primary-dark, hover */
+  --sokrat-green-700: #1B6B4A;         /* PRIMARY — brand, CTAs, focus */
+  --sokrat-green-500: #2a8a63;         /* mid tint */
+  --sokrat-green-200: #9ad3b8;         /* soft emphasis on dark bg */
+  --sokrat-green-100: #E8F5EE;         /* primary-light, ЕГЭ chip bg */
+  --sokrat-green-50:  #f3f9f5;
+
+  --sokrat-ochre-700: #c97424;         /* press state */
+  --sokrat-ochre-500: #E8913A;         /* ACCENT — used sparingly */
+  --sokrat-ochre-200: #f6c38a;
+  --sokrat-ochre-100: #FFF3E6;         /* accent-light, soft chip */
+
+
+  /* ============================================================
+     EXAM STREAM — subtle distinction, green dominates
+     ЕГЭ = full brand green. ОГЭ = indigo TEXT on neutral slate.
+     Indigo is not a second brand — it is a hint, used only here.
+     ============================================================ */
+  --sokrat-ege: var(--sokrat-green-800);
+  --sokrat-ege-bg: var(--sokrat-green-100);
+  --sokrat-oge: #4F46E5;               /* indigo text ONLY, nowhere else */
+  --sokrat-oge-bg: #EEF2F7;            /* neutral slate surface */
+  --sokrat-folder: #4F46E5;
+  --sokrat-folder-bg: #EEF2F7;
+
+
+  /* ============================================================
+     SURFACES — canonical slate foundation
+     ============================================================ */
+  --sokrat-surface:      #F8FAFC;      /* page bg */
+  --sokrat-card:         #FFFFFF;      /* card bg */
+  --sokrat-border:       #E2E8F0;      /* default border */
+  --sokrat-border-light: #EEF2F7;      /* hairline row separators, inset bg */
+
+
+  /* ============================================================
+     FOREGROUND / TEXT — slate scale
+     ============================================================ */
+  --sokrat-fg1:         #0F172A;       /* primary */
+  --sokrat-fg2:         #334155;       /* secondary */
+  --sokrat-fg3:         #64748B;       /* muted / captions */
+  --sokrat-fg-muted:    #94A3B8;       /* placeholder, disabled */
+  --sokrat-fg-on-dark:  #ffffff;
+  --sokrat-fg-on-dark-dim: rgba(255, 255, 255, 0.75);
+
+
+  /* ============================================================
+     SEMANTIC STATE — separate from brand
+     Use these in data contexts (tables, inline validation, toasts).
+     Never use brand green to signal "success" in data.
+     ============================================================ */
+  --sokrat-state-success-fg: #0F7A4A;
+  --sokrat-state-success-bg: #E8F5EE;
+  --sokrat-state-warning-fg: #B15A12;
+  --sokrat-state-warning-bg: #FEF3E6;
+  --sokrat-state-danger-fg:  #B91C1C;
+  --sokrat-state-danger-bg:  #FEE2E2;
+  --sokrat-state-info-fg:    #1D4ED8;
+  --sokrat-state-info-bg:    #E0EBFD;
+
+  /* Legacy aliases — kept for backward compatibility with existing kits.
+     New components MUST use the semantic -fg/-bg pairs above. */
+  --sokrat-success: var(--sokrat-state-success-fg);
+  --sokrat-warning: var(--sokrat-state-warning-fg);
+  --sokrat-danger:  var(--sokrat-state-danger-fg);
+  --sokrat-info:    var(--sokrat-state-info-fg);
+
+
+  /* ============================================================
+     THIRD-PARTY CHANNELS
+     ============================================================ */
+  --sokrat-telegram:      #0088cc;
+  --sokrat-telegram-dark: #006699;
+
+
+  /* ============================================================
+     TYPOGRAPHY — one sans family, one math stack
+     Math uses KaTeX/MathML-rendered output by default. The math
+     token exists as a future escape hatch; no new webfont is
+     loaded in Pass 1.
+     ============================================================ */
+  --sokrat-font-sans:    'Golos Text', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --sokrat-font-display: 'Golos Text', system-ui, -apple-system, sans-serif;
+  --sokrat-font-mono:    'SF Mono', 'JetBrains Mono', 'Fira Code', ui-monospace, monospace;
+  --sokrat-font-math:    'KaTeX_Main', 'Cambria Math', 'Latin Modern Math', serif;
+
+  /* Display scale — marketing surfaces (sokratai.ru) only */
+  --sokrat-fs-display-xl: 64px; --sokrat-lh-display-xl: 1.08;
+  --sokrat-fs-display-lg: 48px; --sokrat-lh-display-lg: 1.1;
+  --sokrat-fs-display-md: 36px; --sokrat-lh-display-md: 1.15;
+
+  /* Body scale */
+  --sokrat-fs-h1: 32px;      --sokrat-lh-h1: 1.2;
+  --sokrat-fs-h2: 24px;      --sokrat-lh-h2: 1.3;
+  --sokrat-fs-h3: 20px;      --sokrat-lh-h3: 1.35;
+  --sokrat-fs-body-lg: 18px; --sokrat-lh-body-lg: 1.55;
+  --sokrat-fs-body: 16px;    --sokrat-lh-body: 1.55;
+  --sokrat-fs-body-sm: 14px; --sokrat-lh-body-sm: 1.5;
+  --sokrat-fs-body-xs: 13px; --sokrat-lh-body-xs: 1.4;   /* table cell */
+  --sokrat-fs-caption: 12px; --sokrat-lh-caption: 1.4;
+  --sokrat-fs-micro: 11px;   --sokrat-lh-micro: 1;       /* table header, eyebrow */
+
+  --sokrat-fw-regular:   400;
+  --sokrat-fw-medium:    500;
+  --sokrat-fw-semibold:  600;
+  --sokrat-fw-bold:      700;
+  --sokrat-fw-extrabold: 800;   /* marketing only */
+  --sokrat-fw-black:     900;   /* marketing only */
+
+
+  /* ============================================================
+     DENSITY — one axis, three levels, allowed-surfaces rule
+     ─ compact       tutor tables, roster, schedule, toolbars
+     ─ comfortable   tutor forms/cards, all student, parent
+     ─ roomy         student hero/empty/celebration, onboarding
+
+     Tutor chrome never goes roomy. Student chrome never goes
+     compact. Tables are always compact. Empty states are
+     always roomy. Mixing compact + roomy on one surface is
+     forbidden.
+     ============================================================ */
+  --sokrat-density-compact-row:      32px;
+  --sokrat-density-compact-pad-y:     6px;
+  --sokrat-density-compact-gap:       8px;
+  --sokrat-density-compact-body:     13px;
+
+  --sokrat-density-comfortable-row:  40px;
+  --sokrat-density-comfortable-pad-y:10px;
+  --sokrat-density-comfortable-gap: 12px;
+  --sokrat-density-comfortable-body:14px;   /* tutor; student overrides to 16 */
+
+  --sokrat-density-roomy-row:        56px;
+  --sokrat-density-roomy-pad-y:     16px;
+  --sokrat-density-roomy-gap:       20px;
+  --sokrat-density-roomy-body:      18px;
+
+
+  /* ============================================================
+     HIT-TARGET POLICY — quarantine 32px to tutor tables
+     ─ xs 32   tutor compact tables/table-level controls ONLY
+     ─ sm 36   tutor form controls (inputs, selects, secondary)
+     ─ md 40   tutor primary actions, tutor default buttons
+     ─ lg 44   student & parent minimum; tutor destructive
+     ─ xl 52   student primary CTA, hero CTAs, celebration
+     ============================================================ */
+  --sokrat-hit-xs: 32px;
+  --sokrat-hit-sm: 36px;
+  --sokrat-hit-md: 40px;
+  --sokrat-hit-lg: 44px;
+  --sokrat-hit-xl: 52px;
+
+
+  /* ============================================================
+     RADIUS
+     ============================================================ */
+  --sokrat-radius-xs:   6px;
+  --sokrat-radius-sm:  10px;
+  --sokrat-radius-md:  14px;
+  --sokrat-radius-lg:  16px;    /* default --radius */
+  --sokrat-radius-xl:  24px;
+  --sokrat-radius-2xl: 32px;
+  --sokrat-radius-full: 9999px;
+
+
+  /* ============================================================
+     SPACING — 4px grid
+     ============================================================ */
+  --sokrat-space-1:   4px;
+  --sokrat-space-2:   8px;
+  --sokrat-space-3:  12px;
+  --sokrat-space-4:  16px;
+  --sokrat-space-5:  20px;
+  --sokrat-space-6:  24px;
+  --sokrat-space-8:  32px;
+  --sokrat-space-10: 40px;
+  --sokrat-space-12: 48px;
+  --sokrat-space-16: 64px;
+  --sokrat-space-20: 80px;
+
+
+  /* ============================================================
+     ELEVATION — slate-tinted, elevation-over-decoration
+     xs     resting card
+     sm     hover/active card, small overlays
+     md     popover, bottom sheet
+     lg     modal
+     xl     fullscreen takeover
+     glow   celebration only (student roomy, never tutor/parent)
+     ============================================================ */
+  --sokrat-shadow-xs: 0 1px 2px rgba(15, 23, 42, 0.05);
+  --sokrat-shadow-sm: 0 2px 6px rgba(15, 23, 42, 0.06);
+  --sokrat-shadow-md: 0 4px 16px rgba(15, 23, 42, 0.08);
+  --sokrat-shadow-lg: 0 10px 28px rgba(15, 23, 42, 0.10);
+  --sokrat-shadow-xl: 0 20px 50px rgba(15, 23, 42, 0.14);
+  --sokrat-shadow-glow: 0 10px 30px rgba(232, 145, 58, 0.25);  /* ochre — celebration only */
+  --sokrat-shadow-elegant: 0 4px 20px rgba(27, 107, 74, 0.08); /* brand-tinted */
+
+
+  /* ============================================================
+     GRADIENTS — marketing hero only
+     Gradients are NOT a reusable product pattern. The only
+     gradient in the system is the hero background. Featured
+     cards use a solid green fill, not a gradient.
+     ============================================================ */
+  --sokrat-gradient-hero:      linear-gradient(135deg, #0f4432 0%, #145236 50%, #1B6B4A 100%);
+  --sokrat-gradient-hero-soft: linear-gradient(160deg, #145236 0%, #1B6B4A 100%);
+
+
+  /* ============================================================
+     MOTION — carried forward from existing kit
+     (Pass 1 does not introduce new motion rules.)
+     ============================================================ */
+  --sokrat-ease-smooth:  cubic-bezier(0.4, 0, 0.2, 1);
+  --sokrat-ease-out-soft: cubic-bezier(0.16, 1, 0.3, 1);
+  --sokrat-dur-fast: 150ms;
+  --sokrat-dur-base: 220ms;
+  --sokrat-dur-slow: 320ms;
+  --sokrat-dur-page: 500ms;
+
+
+  /* ============================================================
+     FOCUS RING — never removed
+     ============================================================ */
+  --sokrat-focus-ring: 0 0 0 3px rgba(27, 107, 74, 0.22);
+  --sokrat-focus-ring-danger: 0 0 0 3px rgba(185, 28, 28, 0.18);
+}
+
+
+/* ============================================================
+   MODE CONTRACT
+   Set at the surface root: data-sokrat-mode="tutor|student|parent".
+   Components read this to pick defaults. A missing attribute
+   falls back to student — the original audience of the kit.
+   ============================================================ */
+
+/* Tutor — desktop-first, compact, professional */
+[data-sokrat-mode="tutor"] {
+  --sokrat-body-size: var(--sokrat-fs-body-sm);   /* 14 */
+  --sokrat-hit-default: var(--sokrat-hit-md);     /* 40 */
+  --sokrat-hit-min:     var(--sokrat-hit-sm);     /* 36 */
+  --sokrat-density-row: var(--sokrat-density-comfortable-row);
+  font-variant-numeric: tabular-nums lining-nums;
+}
+
+/* Student — mobile-first, comfortable, warm */
+[data-sokrat-mode="student"] {
+  --sokrat-body-size: var(--sokrat-fs-body);      /* 16 */
+  --sokrat-hit-default: var(--sokrat-hit-lg);     /* 44 */
+  --sokrat-hit-min:     var(--sokrat-hit-lg);     /* 44 */
+  --sokrat-density-row: var(--sokrat-density-comfortable-row);
+}
+
+/* Parent — inert read-only render on the student shell */
+[data-sokrat-mode="parent"] {
+  --sokrat-body-size: var(--sokrat-fs-body);
+  --sokrat-hit-default: var(--sokrat-hit-lg);
+  --sokrat-hit-min:     var(--sokrat-hit-lg);
+  --sokrat-density-row: var(--sokrat-density-comfortable-row);
+  font-variant-numeric: tabular-nums lining-nums;
+}
+/* Parent: suppress gamification motion + celebration elevation */
+[data-sokrat-mode="parent"] .sokrat-streak,
+[data-sokrat-mode="parent"] .sokrat-xp,
+[data-sokrat-mode="parent"] .sokrat-milestone,
+[data-sokrat-mode="parent"] .sokrat-celebration {
+  animation: none !important;
+  transition: none !important;
+  box-shadow: var(--sokrat-shadow-xs) !important;
+}
+/* Parent: learning CTAs are read-only */
+[data-sokrat-mode="parent"] .sokrat-btn--primary[data-learning],
+[data-sokrat-mode="parent"] .sokrat-btn--accent[data-learning] {
+  pointer-events: none; opacity: 0.55;
+}
+/* Parent: hide gamification-only blocks */
+[data-sokrat-mode="parent"] [data-parent-hide] { display: none !important; }
+
+/* Parent: disable learning CTAs on any element, not just primary/accent buttons.
+   Allowed parent actions (contact tutor, pay, message) do not carry these
+   attributes and remain fully interactive. */
+[data-sokrat-mode="parent"] [data-learning-cta],
+[data-sokrat-mode="parent"] [data-learning] {
+  pointer-events: none !important;
+  opacity: 0.55 !important;
+}
+
+
+/* Density overrides — scope with [data-sokrat-density] on any container */
+[data-sokrat-density="compact"]     { --sokrat-density-row: var(--sokrat-density-compact-row); }
+[data-sokrat-density="comfortable"] { --sokrat-density-row: var(--sokrat-density-comfortable-row); }
+[data-sokrat-density="roomy"]       { --sokrat-density-row: var(--sokrat-density-roomy-row); }
+
+
+/* ============================================================
+   BASE SURFACE STYLES
+   ============================================================ */
+.sokrat {
+  font-family: var(--sokrat-font-sans);
+  color: var(--sokrat-fg1);
+  background: var(--sokrat-surface);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+
+/* ============================================================
+   TYPOGRAPHY RULE-SETS (six contexts)
+   Marketing / Tutor product / Student product / Tables /
+   Captions / Math.  Apply via class OR via cascade from
+   data-sokrat-mode.
+   ============================================================ */
+
+/* ─── MARKETING (sokratai.ru) ───────────────────────────────── */
+.sokrat-marketing h1 {
+  font-family: var(--sokrat-font-display);
+  font-size: var(--sokrat-fs-display-md);
+  line-height: var(--sokrat-lh-display-md);
+  font-weight: var(--sokrat-fw-bold);
+  letter-spacing: -0.01em;
+  color: var(--sokrat-green-800);
+  text-wrap: balance;
+  margin: 0;
+}
+@media (min-width: 768px) {
+  .sokrat-marketing h1 {
+    font-size: var(--sokrat-fs-display-lg);
+    line-height: var(--sokrat-lh-display-lg);
+  }
+}
+.sokrat-marketing h2 {
+  font-size: var(--sokrat-fs-h1);
+  line-height: var(--sokrat-lh-h1);
+  font-weight: var(--sokrat-fw-bold);
+  color: var(--sokrat-green-800);
+  text-wrap: balance;
+  margin: 0;
+}
+.sokrat-marketing .lede {
+  font-size: var(--sokrat-fs-body-lg);
+  line-height: var(--sokrat-lh-body-lg);
+  font-weight: var(--sokrat-fw-medium);
+  color: var(--sokrat-fg2);
+}
+
+/* ─── TUTOR PRODUCT — 14 body, 700 max in chrome ───────────── */
+[data-sokrat-mode="tutor"] h1,
+[data-sokrat-mode="tutor"] .sokrat-h1 {
+  font-size: 24px; line-height: 1.25;
+  font-weight: var(--sokrat-fw-semibold);
+  color: var(--sokrat-fg1);
+  letter-spacing: -0.005em;
+  margin: 0;
+}
+[data-sokrat-mode="tutor"] h2,
+[data-sokrat-mode="tutor"] .sokrat-h2 {
+  font-size: 18px; line-height: 1.3;
+  font-weight: var(--sokrat-fw-semibold);
+  color: var(--sokrat-fg1);
+  margin: 0;
+}
+[data-sokrat-mode="tutor"] .sokrat-card-title {
+  font-size: 15px; line-height: 1.35;
+  font-weight: var(--sokrat-fw-semibold);
+  color: var(--sokrat-fg1);
+}
+[data-sokrat-mode="tutor"] p,
+[data-sokrat-mode="tutor"] .sokrat-body {
+  font-size: 14px; line-height: 1.5;
+  font-weight: var(--sokrat-fw-regular);
+  color: var(--sokrat-fg2);
+  margin: 0;
+}
+[data-sokrat-mode="tutor"] .sokrat-label {
+  font-size: 12px; line-height: 1.4;
+  font-weight: var(--sokrat-fw-medium);
+  color: var(--sokrat-fg3);
+}
+
+/* ─── STUDENT PRODUCT — 16 body, warmer hierarchy ──────────── */
+[data-sokrat-mode="student"] h1,
+[data-sokrat-mode="student"] .sokrat-h1 {
+  font-size: 22px; line-height: 1.25;
+  font-weight: var(--sokrat-fw-bold);
+  color: var(--sokrat-fg1);
+  margin: 0;
+}
+[data-sokrat-mode="student"] h2,
+[data-sokrat-mode="student"] .sokrat-h2 {
+  font-size: 17px; line-height: 1.3;
+  font-weight: var(--sokrat-fw-semibold);
+  color: var(--sokrat-fg1);
+  margin: 0;
+}
+[data-sokrat-mode="student"] .sokrat-card-title {
+  font-size: 16px; line-height: 1.35;
+  font-weight: var(--sokrat-fw-semibold);
+  color: var(--sokrat-fg1);
+}
+[data-sokrat-mode="student"] p,
+[data-sokrat-mode="student"] .sokrat-body {
+  font-size: 16px; line-height: 1.55;
+  color: var(--sokrat-fg2);
+  text-wrap: pretty;
+  margin: 0;
+}
+[data-sokrat-mode="student"] .sokrat-chat-bubble {
+  font-size: 15px; line-height: 1.55;
+  color: var(--sokrat-fg1);
+  text-wrap: pretty;
+}
+[data-sokrat-mode="student"] .sokrat-quick-action {
+  font-size: 13px; line-height: 1;
+  font-weight: var(--sokrat-fw-semibold);
+}
+
+/* ─── TABLES — compact, tabular, hairline separators ───────── */
+.sokrat-table { width: 100%; border-collapse: collapse; background: var(--sokrat-card); }
+.sokrat-table thead th {
+  font-size: var(--sokrat-fs-micro);
+  line-height: var(--sokrat-lh-micro);
+  font-weight: var(--sokrat-fw-semibold);
+  color: var(--sokrat-fg3);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  text-align: left;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--sokrat-border);
+  background: var(--sokrat-card);
+}
+[data-sokrat-mode="tutor"] .sokrat-table thead th { position: sticky; top: 0; z-index: 1; }
+.sokrat-table tbody td {
+  font-size: var(--sokrat-fs-body-xs);
+  line-height: var(--sokrat-lh-body-xs);
+  font-weight: var(--sokrat-fw-regular);
+  color: var(--sokrat-fg1);
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--sokrat-border-light);
+  height: var(--sokrat-density-compact-row);
+  vertical-align: middle;
+}
+.sokrat-table tbody tr:hover td { background: var(--sokrat-surface); }
+.sokrat-table tbody tr[aria-selected="true"] td {
+  background: var(--sokrat-green-100);
+  box-shadow: inset 2px 0 0 0 var(--sokrat-green-700);
+}
+.sokrat-table .is-primary-col { font-weight: var(--sokrat-fw-semibold); }
+.sokrat-table .is-num,
+.sokrat-table th.is-num,
+.sokrat-table td.is-num {
+  text-align: right;
+  font-weight: var(--sokrat-fw-medium);
+  font-variant-numeric: tabular-nums lining-nums;
+}
+
+/* ─── CAPTIONS ─────────────────────────────────────────────── */
+.sokrat small, .sokrat-caption {
+  font-size: var(--sokrat-fs-caption);
+  line-height: var(--sokrat-lh-caption);
+  font-weight: var(--sokrat-fw-regular);
+  color: var(--sokrat-fg3);
+}
+.sokrat-caption--error { color: var(--sokrat-state-danger-fg); }
+
+/* ─── MATH / FORMULAS ──────────────────────────────────────── */
+.sokrat-math-inline {
+  font-family: var(--sokrat-font-math);
+  font-size: 1em;
+  line-height: 1.4;
+  font-variant-numeric: tabular-nums lining-nums;
+}
+.sokrat-math-block {
+  font-family: var(--sokrat-font-math);
+  font-size: 18px;
+  line-height: 1.8;
+  font-variant-numeric: tabular-nums lining-nums;
+  text-align: center;
+  padding: 16px 20px;
+  background: var(--sokrat-surface);
+  border-radius: var(--sokrat-radius-md);
+  /* no border — inset surface only */
+}
+/* Physics units: upright, never italic. */
+.sokrat-math-inline var,
+.sokrat-math-block var,
+.sokrat-unit { font-style: normal; }
+
+.sokrat-num { font-variant-numeric: tabular-nums lining-nums; }
+
+
+/* ============================================================
+   LEGACY TYPOGRAPHY — carried forward so existing UI kits
+   (no data-sokrat-mode) render unchanged. Mode-scoped rules
+   above win because these are gated with :not([data-sokrat-mode]).
+   ============================================================ */
+.sokrat:not([data-sokrat-mode]) h1, .sokrat-h1 {
+  font-family: var(--sokrat-font-display);
+  font-size: var(--sokrat-fs-display-md);
+  line-height: var(--sokrat-lh-display-md);
+  font-weight: var(--sokrat-fw-bold);
+  letter-spacing: -0.01em;
+  color: var(--sokrat-green-800);
+  margin: 0;
+}
+@media (min-width: 768px) {
+  .sokrat:not([data-sokrat-mode]) h1, .sokrat-h1 {
+    font-size: var(--sokrat-fs-display-lg);
+    line-height: var(--sokrat-lh-display-lg);
+  }
+}
+.sokrat:not([data-sokrat-mode]) h2, .sokrat-h2 {
+  font-family: var(--sokrat-font-display);
+  font-size: var(--sokrat-fs-h1);
+  line-height: var(--sokrat-lh-h1);
+  font-weight: var(--sokrat-fw-bold);
+  letter-spacing: -0.005em;
+  color: var(--sokrat-green-800);
+  margin: 0;
+}
+.sokrat:not([data-sokrat-mode]) h3, .sokrat-h3 {
+  font-size: var(--sokrat-fs-h2);
+  line-height: var(--sokrat-lh-h2);
+  font-weight: var(--sokrat-fw-semibold);
+  color: var(--sokrat-fg1);
+  margin: 0;
+}
+.sokrat:not([data-sokrat-mode]) p, .sokrat-p {
+  font-size: var(--sokrat-fs-body);
+  line-height: var(--sokrat-lh-body);
+  color: var(--sokrat-fg2);
+  margin: 0;
+}
+.sokrat code, .sokrat-code {
+  font-family: var(--sokrat-font-mono);
+  font-size: 0.92em;
+  background: var(--sokrat-green-100);
+  color: var(--sokrat-green-800);
+  padding: 2px 6px;
+  border-radius: var(--sokrat-radius-xs);
+}
+
+
+/* ============================================================
+   CHIPS — stream, status, tier, filter, count
+   Chips are labels or filters — never primary actions.
+   ============================================================ */
+.sokrat-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  font-size: var(--sokrat-fs-body-sm);
+  font-weight: var(--sokrat-fw-semibold);
+  border-radius: var(--sokrat-radius-full);
+  line-height: 1;
+  border: 0;
+}
+.sokrat-chip--ege     { background: var(--sokrat-ege-bg); color: var(--sokrat-ege); }
+.sokrat-chip--oge     { background: var(--sokrat-oge-bg); color: var(--sokrat-oge); }
+.sokrat-chip--ochre   { background: var(--sokrat-ochre-100); color: var(--sokrat-ochre-700); }
+.sokrat-chip--neutral { background: var(--sokrat-border-light); color: var(--sokrat-fg2); }
+
+.sokrat-chip--success { background: var(--sokrat-state-success-bg); color: var(--sokrat-state-success-fg); }
+.sokrat-chip--warning { background: var(--sokrat-state-warning-bg); color: var(--sokrat-state-warning-fg); }
+.sokrat-chip--danger  { background: var(--sokrat-state-danger-bg);  color: var(--sokrat-state-danger-fg); }
+.sokrat-chip--info    { background: var(--sokrat-state-info-bg);    color: var(--sokrat-state-info-fg); }
+
+
+/* ============================================================
+   FOCUS RINGS — never removed.
+   Use .sokrat-focusable on any custom interactive element.
+   ============================================================ */
+.sokrat-focusable:focus-visible,
+.sokrat-btn:focus-visible,
+.sokrat-input:focus-visible,
+.sokrat-card--interactive:focus-visible {
+  outline: 2px solid var(--sokrat-green-700);
+  outline-offset: 2px;
+  box-shadow: var(--sokrat-focus-ring);
+}
+
+
+/* ============================================================
+   ANTI-DRIFT — reference list (see README/SKILL for full rules)
+   ─────────────────────────────────────────────────────────────
+    1. No cards inside cards.
+    2. One primary action per screen.
+    3. Ochre is not chrome.
+    4. No purple/indigo gradients. Indigo appears ONLY as ОГЭ
+       chip text on a neutral slate bg.
+    5. No emoji in UI chrome.
+    6. Brand green ≠ success green — use the semantic token.
+    7. Tutor chrome is never roomy.
+    8. Student chrome is never compact.
+    9. Table numbers: tabular-nums, right-aligned, always.
+   10. Math never renders in the sans body font.
+   11. No placeholder-as-label.
+   12. No zebra striping in tables.
+   13. No tabs inside tabs.
+   14. No weights above 700 in product chrome.
+   15. No gradients in product chrome — marketing hero only.
+   16. Focus rings are never removed.
+   17. Bluish-purple backdrops are banned.
+   18. Parent mode is read-only.
+   19. Gamification is student-only.
+   20. Russian by default — no Latin lorem ipsum placeholders.
+   ============================================================ */
