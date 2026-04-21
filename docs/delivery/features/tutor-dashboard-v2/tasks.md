@@ -1,6 +1,6 @@
 # Tasks — Tutor Dashboard v2 (Phase 1)
 
-**Status:** In progress (TASK-1..5 ✅ done, TASK-6 P1 follow-up)
+**Status:** In progress (TASK-1..6 ✅ done, REVIEW pending)
 **Pipeline step:** 5 (TASKS)
 **Owner:** Vladimir
 **Date:** 2026-04-21
@@ -19,7 +19,7 @@
 | TASK-3 | Shared primitives (`Sparkline`, `WeeklyStrip`, `DeltaPill`, `ChatRow`, `SessionBlock`, `SubmissionRowLite`) | ✅ done | P0 | Claude Code | `src/components/tutor/home/primitives/` | AC-8 |
 | TASK-4 | Блоки Dashboard (`HomeHeader`, `HomeCTAs`, `StatStrip`, `TodayBlock`, `ReviewQueueBlock`, `RecentDialogsBlock`, `StudentsActivityBlock`) | ✅ done | P0 | Claude Code | `src/components/tutor/home/*`, `src/lib/ru/pluralize.ts` | AC-1, AC-4, AC-5, AC-6, AC-8 |
 | TASK-5 | Page + routing + cleanup (`TutorHome.tsx`, redirect, delete `TutorDashboard.tsx`, warmup) | ✅ done | P0 | Claude Code | `src/pages/tutor/TutorHome.tsx`, `src/App.tsx`, `src/components/tutor/TutorLayout.tsx` | AC-1, AC-2, AC-7, AC-10 |
-| TASK-6 | P1 polish: Segment sort + row-клики + responsive + iOS Safari | ⏳ P1 | P1 | Claude Code | `src/components/tutor/home/StudentsActivityBlock.tsx`, `RecentDialogsBlock.tsx`, `src/styles/tutor-dashboard.css` | AC-9, AC-12 |
+| TASK-6 | P1 polish: Segment sort + row-клики + responsive + iOS Safari | ✅ done | P1 | Claude Code | `src/components/tutor/home/StudentsActivityBlock.tsx`, `src/styles/tutor-dashboard.css` | AC-9, AC-10, AC-12 |
 | REVIEW | Независимый code-review по AC | ⏳ after TASK-5 | — | Codex | — | все AC |
 
 **Деплой:** TASK-1..5 — один PR, запуск в прод. TASK-6 — follow-up PR через 1–2 дня после первого тутор-feedback.
@@ -559,6 +559,27 @@ npm run smoke-check
 
 Manual: скриншоты `/tutor/home` на 375px / 768px / 1280px; запись видео horizontal scroll в activity-table на iOS. Прикладывается к PR.
 
+### Implementation log (2026-04-21)
+
+Ключевые решения при реализации:
+
+- **Segment control** — inline-компонент `SortSegment` в `StudentsActivityBlock.tsx` (не primitives, не shadcn). Причина: единственный call site; Vite/SWC-парсер не принимает generic JSX-форму (`<Segment<ActivitySortMode>`), поэтому концретный тип без дженерика. Classes: `.t-seg` / `.t-seg__item` из `tutor-dashboard.css` (уже были).
+- **⚠ label** — Lucide `AlertTriangle` 12px + counter N, **не** emoji. Rule 90 anti-pattern #1 «no emoji in UI chrome» — жёстче спеки; handoff-вариант с `⚠` задокументирован в task prompt как альтернатива.
+- **Sort branching** (3 режима):
+  - `attention` (default): attention desc → hwAvgDelta desc → name asc (= AC-9 stable sort, совпадает с P0 behaviour из TASK-4).
+  - `delta`: hwAvgDelta **asc** (самое сильное падение первым) → name asc.
+  - `name`: только `localeCompare('ru')`.
+- **RecentDialogsBlock не меняли** — `ChatRow` уже был native `<button>` с `onClick` + built-in Enter/Space keyboard support. Только `RecentDialogsBlock.tsx` переоткрыт для проверки; правок нет.
+- **Horizontal scroll** — `<div className="t-table-wrap overflow-x-auto touch-pan-x">` + `<table style={{ width: 'max-content', minWidth: '100%' }}>`. `minWidth: 100%` сохраняет десктопный вид (таблица растягивается на ширину контейнера), `max-content` + overflow активирует horizontal scroll на мобиле. Pattern = HeatmapGrid, см. `.claude/rules/80-cross-browser.md`.
+- **Tablet breakpoint** — новый `@media (min-width: 768px) and (max-width: 1023px)` с `.t-stats { grid-template-columns: repeat(2, 1fr) }`. Border pattern 2×2: `.t-stats__cell:nth-child(odd) { border-left: 0 }` + `.t-stats__cell:nth-child(n+3) { border-top }`.
+- **AC-10 hit-target fix (после code review, 2026-04-21)** — `.t-seg__item` изменён с `height: 28px` на `height: 28px; min-height: 40px` + `display: inline-flex; align-items: center` — min-height доминирует, визуальная плашка становится 40×40 per AC-10 («≥ 40px high»). Handoff-density 28px пожертвована в пользу accessibility. Внутри Segment текст остаётся центрирован через inline-flex.
+
+### Известные ограничения
+
+- **Вторая попытка клика по тому же Segment-item не шлёт `onChange`** — текущая реализация оборачивает button в `onClick: () => onChange(item.value)` без проверки `value !== item.value`. Это consistent с handoff и не вредит UX (React setState на тот же value = no-op).
+- **Segment label «⚠ N» отсутствует sort-change когда N=0** — активная tab остаётся видимой, но счётчик 0 без warning цвета. Продуктово ок (студентов с attention нет — нормально).
+- **`.home-activity-table` на супер-широких viewport-ах (>1400px)** — заполняет всю ширину `.t-table-wrap` из-за `min-width: 100%`. Визуально выглядит корректно; альтернатива (чистый `max-content`) дала бы white-space справа.
+
 ---
 
 ## REVIEW — Independent Codex pass
@@ -976,7 +997,7 @@ UX-проверки:
 - [x] TASK-3 ✅ done (2026-04-21)
 - [x] TASK-4 ✅ done (2026-04-21)
 - [x] TASK-5 ✅ done (2026-04-21)
-- [ ] TASK-6 — P1 polish (follow-up PR)
+- [x] TASK-6 ✅ done (2026-04-21)
 - [ ] REVIEW — Codex independent pass
 
 ---

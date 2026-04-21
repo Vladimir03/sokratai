@@ -266,13 +266,19 @@
   border: 0;
   background: transparent;
   cursor: pointer;
+  /* spec.md §AC-10: все interactive цели ≥ 40px. Handoff-density
+     28px заменяем на 40px (min-height доминирует над height: 28px). */
   height: 28px;
+  min-height: 40px;
   padding: 0 12px;
   border-radius: calc(var(--sokrat-radius-sm) - 2px);
   font: inherit;
   font-size: 12px;
   font-weight: 500;
   color: var(--sokrat-fg2);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 .t-seg__item[aria-pressed="true"] {
   background: var(--sokrat-card);
@@ -404,6 +410,22 @@
   gap: 8px;
   padding: 12px;
 }
+
+/* ─── Tablet: 768px–1023px — 2-column stats grid ──────────── */
+@media (min-width: 768px) and (max-width: 1023px) {
+  .t-stats {
+    grid-template-columns: repeat(2, 1fr);
+  }
+  /* 2×2 grid: column-1 cells drop left border; row-2 cells gain top border.
+     Cell 2 and 4 keep the default left border. */
+  .t-stats__cell:nth-child(odd) {
+    border-left: 0;
+  }
+  .t-stats__cell:nth-child(n + 3) {
+    border-top: 1px solid var(--sokrat-border-light);
+  }
+}
+
 
 /* ─── Mobile: <768px single-column layout ─────────────────── */
 @media (max-width: 767px) {

@@ -1,5 +1,5 @@
-import { memo, useMemo, type KeyboardEvent } from 'react';
-import { ChevronRight, UserPlus, Users } from 'lucide-react';
+import { memo, useMemo, useState, type KeyboardEvent, type ReactNode } from 'react';
+import { AlertTriangle, ChevronRight, UserPlus, Users } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
   Sparkline,
@@ -12,12 +12,55 @@ import {
   PLURAL_STUDENTS,
 } from '@/lib/ru/pluralize';
 
+export type ActivitySortMode = 'attention' | 'delta' | 'name';
+
 export interface StudentsActivityBlockProps {
   items: StudentActivity[];
   totalCount: number;
   onOpenStudent: (id: string) => void;
   onOpenAll: () => void;
   onAddStudent?: () => void;
+}
+
+interface SortSegmentItem {
+  value: ActivitySortMode;
+  label: ReactNode;
+  ariaLabel: string;
+}
+
+interface SortSegmentProps {
+  value: ActivitySortMode;
+  onChange: (next: ActivitySortMode) => void;
+  items: SortSegmentItem[];
+  ariaLabel: string;
+}
+
+function SortSegment({
+  value,
+  onChange,
+  items,
+  ariaLabel,
+}: SortSegmentProps) {
+  return (
+    <div className="t-seg" role="group" aria-label={ariaLabel}>
+      {items.map((item) => {
+        const isActive = item.value === value;
+        return (
+          <button
+            key={item.value}
+            type="button"
+            className="t-seg__item"
+            aria-pressed={isActive}
+            aria-label={item.ariaLabel}
+            onClick={() => onChange(item.value)}
+            style={{ touchAction: 'manipulation' }}
+          >
+            {item.label}
+          </button>
+        );
+      })}
+    </div>
+  );
 }
 
 const CELL_LEGEND_COLOR: Record<Exclude<WeeklyCell, 'part' | 'none'>, string> = {
@@ -153,22 +196,36 @@ function StudentsActivityBlockImpl({
   onOpenAll,
   onAddStudent,
 }: StudentsActivityBlockProps) {
+  const [sort, setSort] = useState<ActivitySortMode>('attention');
+
+  const attentionCount = useMemo(
+    () => items.filter((s) => s.attention).length,
+    [items],
+  );
+
   const sorted = useMemo(() => {
     const clone = items.slice();
     clone.sort((a, b) => {
-      // attention desc: true first
-      const aAttention = a.attention ? 0 : 1;
-      const bAttention = b.attention ? 0 : 1;
-      if (aAttention !== bAttention) return aAttention - bAttention;
-      // hwAvgDelta desc: higher delta first (healthier first among non-attention;
-      // among attention students we still surface stabilizing ones first).
-      const deltaDiff = (b.hwAvgDelta ?? 0) - (a.hwAvgDelta ?? 0);
-      if (deltaDiff !== 0) return deltaDiff;
-      // name asc (ru)
+      if (sort === 'attention') {
+        // attention desc: true first
+        const aAttention = a.attention ? 0 : 1;
+        const bAttention = b.attention ? 0 : 1;
+        if (aAttention !== bAttention) return aAttention - bAttention;
+        // hwAvgDelta desc: higher delta first (per spec §AC-9).
+        const deltaDiff = (b.hwAvgDelta ?? 0) - (a.hwAvgDelta ?? 0);
+        if (deltaDiff !== 0) return deltaDiff;
+        return a.name.localeCompare(b.name, 'ru');
+      }
+      if (sort === 'delta') {
+        // hwAvgDelta asc — worst/most declining first.
+        const deltaDiff = (a.hwAvgDelta ?? 0) - (b.hwAvgDelta ?? 0);
+        if (deltaDiff !== 0) return deltaDiff;
+        return a.name.localeCompare(b.name, 'ru');
+      }
       return a.name.localeCompare(b.name, 'ru');
     });
     return clone;
-  }, [items]);
+  }, [items, sort]);
 
   const metaLabel = `за 5 недель · ${totalCount} ${pluralize(totalCount, PLURAL_STUDENTS)}`;
 
@@ -222,8 +279,46 @@ function StudentsActivityBlockImpl({
             display: 'flex',
             alignItems: 'center',
             gap: 10,
+            flexWrap: 'wrap',
           }}
         >
+          <SortSegment
+            value={sort}
+            onChange={setSort}
+            ariaLabel="Сортировка учеников"
+            items={[
+              {
+                value: 'attention',
+                ariaLabel: `Сортировка: требующие внимания (${attentionCount})`,
+                label: (
+                  <span
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 4,
+                    }}
+                  >
+                    <AlertTriangle
+                      size={12}
+                      aria-hidden="true"
+                      style={{ color: 'var(--sokrat-state-warning-fg)' }}
+                    />
+                    {attentionCount}
+                  </span>
+                ),
+              },
+              {
+                value: 'delta',
+                ariaLabel: 'Сортировка: по тренду балла',
+                label: 'По тренду',
+              },
+              {
+                value: 'name',
+                ariaLabel: 'Сортировка: по алфавиту',
+                label: 'А→Я',
+              },
+            ]}
+          />
           <Button
             variant="ghost"
             size="default"
@@ -236,16 +331,24 @@ function StudentsActivityBlockImpl({
         </div>
       </div>
       <hr className="t-divider" />
+      {/* `touch-pan-x` обязателен — иначе row `onClick` может съесть
+          touchstart на iOS и блокировать horizontal swipe (rule 80 +
+          HeatmapGrid pattern). */}
       <div
-        className="t-table-wrap"
+        className="t-table-wrap overflow-x-auto touch-pan-x"
         style={{
           border: 0,
           borderRadius: 0,
-          overflowX: 'auto',
-          touchAction: 'pan-x',
         }}
       >
-        <table className="t-table home-activity-table">
+        {/* `width: max-content` + `min-width: 100%` = на десктопе таблица
+            занимает всю ширину .t-table-wrap, на мобиле — растёт до
+            интринсиковой ширины и активируется horizontal scroll родителя.
+            Идентично HeatmapGrid pattern (rule 80 cross-browser). */}
+        <table
+          className="t-table home-activity-table"
+          style={{ width: 'max-content', minWidth: '100%' }}
+        >
           <thead>
             <tr>
               <th>Ученик</th>
