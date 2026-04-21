@@ -32,7 +32,7 @@ interface TutorLayoutProps {
 
 // Desktop: 5 primary items visible in top bar
 const desktopPrimaryItems = [
-  { href: '/tutor/dashboard', label: 'Главная', icon: LayoutDashboard },
+  { href: '/tutor/home', label: 'Главная', icon: LayoutDashboard },
   { href: '/tutor/schedule', label: 'Расписание', icon: CalendarDays },
   { href: '/tutor/students', label: 'Ученики', icon: Users },
   { href: '/tutor/homework', label: 'Домашки', icon: BookOpen },
@@ -47,7 +47,7 @@ const desktopMoreItems = [
 
 // Mobile: 4 primary items in bottom bar (Ученики moves to overflow)
 const mobilePrimaryItems = [
-  { href: '/tutor/dashboard', label: 'Главная', icon: LayoutDashboard },
+  { href: '/tutor/home', label: 'Главная', icon: LayoutDashboard },
   { href: '/tutor/schedule', label: 'Расписание', icon: CalendarDays },
   { href: '/tutor/homework', label: 'Домашки', icon: BookOpen },
   { href: '/tutor/assistant', label: 'Помощник', icon: Bot },
@@ -77,7 +77,7 @@ export function TutorLayout({ children }: TutorLayoutProps) {
         });
       };
 
-      warmup('TutorDashboard', () => import('@/pages/tutor/TutorDashboard'));
+      warmup('TutorHome', () => import('@/pages/tutor/TutorHome'));
       warmup('TutorSchedule', () => import('@/pages/tutor/TutorSchedule'));
       warmup('TutorStudents', () => import('@/pages/tutor/TutorStudents'));
       warmup('TutorStudentProfile', () => import('@/pages/tutor/TutorStudentProfile'));
@@ -111,7 +111,7 @@ export function TutorLayout({ children }: TutorLayoutProps) {
       <header className="sticky top-0 z-50 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
         <div className="container flex h-14 items-center justify-between px-4">
           {/* Logo */}
-          <Link to="/tutor/dashboard" className="flex items-center gap-2 font-semibold">
+          <Link to="/tutor/home" className="flex items-center gap-2 font-semibold">
             <img src={sokratLogo} alt="Сократ" className="w-7 h-7" />
             <span className="text-slate-800">Сократ AI</span>
           </Link>

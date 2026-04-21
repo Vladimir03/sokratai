@@ -87,7 +87,7 @@ const TutorTelegramLoginButton = ({
 
           setStatus("success");
           toast.success("Успешный вход через Telegram!");
-          navigate("/tutor/dashboard");
+          navigate("/tutor/home");
         } catch (error) {
           console.error("Tutor role check error:", error);
           await supabase.auth.signOut();

@@ -26,7 +26,7 @@ const TutorLogin = () => {
 
       const { data: isTutor } = await supabase.rpc("is_tutor", { _user_id: session.user.id });
       if (isTutor) {
-        navigate("/tutor/dashboard");
+        navigate("/tutor/home");
       } else {
         await supabase.auth.signOut();
       }
@@ -69,7 +69,7 @@ const TutorLogin = () => {
       }
 
       toast.success("Успешный вход!");
-      navigate("/tutor/dashboard");
+      navigate("/tutor/home");
     } catch (error: any) {
       toast.error(getAuthErrorMessage(error, "Ошибка входа"));
     } finally {

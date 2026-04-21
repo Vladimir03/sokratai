@@ -1,6 +1,6 @@
 # Tasks — Tutor Dashboard v2 (Phase 1)
 
-**Status:** In progress (TASK-1..4 ✅ done, TASK-5 next)
+**Status:** In progress (TASK-1..5 ✅ done, TASK-6 P1 follow-up)
 **Pipeline step:** 5 (TASKS)
 **Owner:** Vladimir
 **Date:** 2026-04-21
@@ -18,7 +18,7 @@
 | TASK-2 | Data hooks + aggregator | ✅ done | P0 | Claude Code | `src/hooks/useTutorHomeData.ts` + 4 новых | AC-3, AC-9, AC-11 |
 | TASK-3 | Shared primitives (`Sparkline`, `WeeklyStrip`, `DeltaPill`, `ChatRow`, `SessionBlock`, `SubmissionRowLite`) | ✅ done | P0 | Claude Code | `src/components/tutor/home/primitives/` | AC-8 |
 | TASK-4 | Блоки Dashboard (`HomeHeader`, `HomeCTAs`, `StatStrip`, `TodayBlock`, `ReviewQueueBlock`, `RecentDialogsBlock`, `StudentsActivityBlock`) | ✅ done | P0 | Claude Code | `src/components/tutor/home/*`, `src/lib/ru/pluralize.ts` | AC-1, AC-4, AC-5, AC-6, AC-8 |
-| TASK-5 | Page + routing + cleanup (`TutorHome.tsx`, redirect, delete `TutorDashboard.tsx`, warmup) | ⏳ next | P0 | Claude Code | `src/pages/tutor/TutorHome.tsx`, `src/App.tsx`, `src/components/tutor/TutorLayout.tsx` | AC-1, AC-2, AC-7, AC-10 |
+| TASK-5 | Page + routing + cleanup (`TutorHome.tsx`, redirect, delete `TutorDashboard.tsx`, warmup) | ✅ done | P0 | Claude Code | `src/pages/tutor/TutorHome.tsx`, `src/App.tsx`, `src/components/tutor/TutorLayout.tsx` | AC-1, AC-2, AC-7, AC-10 |
 | TASK-6 | P1 polish: Segment sort + row-клики + responsive + iOS Safari | ⏳ P1 | P1 | Claude Code | `src/components/tutor/home/StudentsActivityBlock.tsx`, `RecentDialogsBlock.tsx`, `src/styles/tutor-dashboard.css` | AC-9, AC-12 |
 | REVIEW | Независимый code-review по AC | ⏳ after TASK-5 | — | Codex | — | все AC |
 
@@ -362,13 +362,41 @@ npm run build
 
 ---
 
-## TASK-5 — Page + routing + cleanup
+## TASK-5 — Page + routing + cleanup · ✅ done (2026-04-21)
 
 **Job:** R4 (вход на главную).
 **Agent:** Claude Code.
 **Files:** `src/pages/tutor/TutorHome.tsx` (новый), `src/App.tsx`, `src/components/tutor/TutorLayout.tsx`, **удалить** `src/pages/tutor/TutorDashboard.tsx`.
 **Acceptance:** AC-1, AC-2, AC-7, AC-10.
 **Depends on:** TASK-1..4.
+
+**Что реально сделано:**
+- `src/pages/tutor/TutorHome.tsx` (new): `<TutorGuard><TutorLayout>` wraps `<div className="sokrat" data-sokrat-mode="tutor">` + 6 блоков в правильном DOM-order (HomeHeader → HomeCTAs → StatStrip → t-grid-2{TodayBlock + ReviewQueueBlock} → RecentDialogsBlock → StudentsActivityBlock). Все данные через `useTutorHomeData()` (TASK-2). Error state — `TutorDataStatus` reuse. Loading — локальный `HomeSkeleton` (3 простых `<Skeleton>` из shadcn, достаточно для standalone routing task; full-parity layout-skeleton не требовался по AC).
+- `src/App.tsx`: lazy import `TutorDashboard` заменён на `TutorHome`. Route `/tutor/home` → `<TutorHome>`. Route `/tutor/dashboard` → `<Navigate to="/tutor/home" replace />`. Добавлен `/tutor` → `<Navigate to="/tutor/home" replace />` для симметрии.
+- `src/components/tutor/TutorLayout.tsx`: warmup `TutorDashboard` → `TutorHome`; `desktopPrimaryItems[0]` + `mobilePrimaryItems[0]` href `/tutor/dashboard` → `/tutor/home`; logo `<Link to="/tutor/dashboard">` → `/tutor/home`. Больше ничего.
+- Navigate-сайты обновлены: `Login.tsx`, `TutorLogin.tsx`, `RegisterTutor.tsx` (+ `emailRedirectTo`), `TelegramLoginButton.tsx`, `TutorTelegramLoginButton.tsx` — все `"/tutor/dashboard"` → `"/tutor/home"`.
+- `src/pages/tutor/TutorDashboard.tsx` удалён.
+
+**Guardrails соблюдены:**
+- `TutorGuard`, `AuthGuard`, `Chat.tsx` не тронуты.
+- В `TutorLayout` изменены ровно три якоря (warmup + первый nav item + logo), остальная структура нетронута.
+- Логотип «Сократ AI» остаётся (пункт 1 заказчика).
+- Поисковая строка не добавлена (пункт 2 заказчика) — handoff-top-bar-search проигнорирован.
+- `grep -rn "tutor/dashboard" src/` → одна строка (redirect в `App.tsx`).
+- `grep -rn "TutorDashboard" src/` → 0 совпадений.
+
+**Validation:**
+- `npm run lint` — зелёный (новых ошибок нет; остаются pre-existing 208 errors по всему репо, не в затронутых файлах).
+- `npm run build` — зелёный, генерирует `TutorHome-*.js` chunk ~41 kB.
+- `npm run smoke-check` — зелёный.
+- Preview на `localhost:8080`:
+  - `/tutor/dashboard` → redirect на `/tutor/home` без flicker ✓
+  - `document.querySelector('[data-sokrat-mode="tutor"]')` не null ✓
+  - DOM-order 6 блоков подтверждён через `.sokrat h2` enumeration ✓
+  - Table rows `role="button" tabindex="0"` (AC-10) ✓
+  - Console errors: 0 ✓
+
+**Follow-ups в TASK-6 (P1):** Segment sort, row-клики «открыть профиль», iOS Safari responsive pass.
 
 ### Что сделать
 
@@ -912,7 +940,7 @@ UX-проверки:
 - [x] TASK-2 ✅ done (2026-04-21)
 - [x] TASK-3 ✅ done (2026-04-21)
 - [x] TASK-4 ✅ done (2026-04-21)
-- [ ] TASK-5 — composition, routing, cleanup (next)
+- [x] TASK-5 ✅ done (2026-04-21)
 - [ ] TASK-6 — P1 polish (follow-up PR)
 - [ ] REVIEW — Codex independent pass
 

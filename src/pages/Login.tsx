@@ -36,7 +36,7 @@ const Login = () => {
       if (session) {
         const { data: isTutor } = await supabase.rpc("is_tutor", { _user_id: session.user.id });
         if (isTutor) {
-          navigate("/tutor/dashboard");
+          navigate("/tutor/home");
         } else {
           navigate("/chat");
         }
@@ -77,7 +77,7 @@ const Login = () => {
 
         if (isTutor) {
           toast.success("Успешный вход!");
-          navigate("/tutor/dashboard");
+          navigate("/tutor/home");
           return;
         }
       }

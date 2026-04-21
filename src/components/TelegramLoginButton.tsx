@@ -74,7 +74,7 @@ const TelegramLoginButton = ({
               }
 
               if (isTutor) {
-                navigate("/tutor/dashboard");
+                navigate("/tutor/home");
               } else {
                 navigate("/chat");
               }

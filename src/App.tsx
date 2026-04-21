@@ -38,7 +38,7 @@ const Practice = lazy(() => import("./pages/Practice"));
 const Diagnostic = lazy(() => import("./pages/Diagnostic"));
 const TrainerPage = lazy(() => import("./pages/TrainerPage"));
 const RegisterTutor = lazy(() => import("./pages/RegisterTutor"));
-const TutorDashboard = lazy(() => import("./pages/tutor/TutorDashboard"));
+const TutorHome = lazy(() => import("./pages/tutor/TutorHome"));
 const TutorSchedule = lazy(() => import("./pages/tutor/TutorSchedule"));
 const TutorStudents = lazy(() => import("./pages/tutor/TutorStudents"));
 const TutorStudentProfile = lazy(() => import("./pages/tutor/TutorStudentProfile"));
@@ -264,13 +264,21 @@ const App = () => (
                 </Suspense>
               } 
             />
-            <Route 
-              path="/tutor/dashboard" 
+            <Route
+              path="/tutor"
+              element={<Navigate to="/tutor/home" replace />}
+            />
+            <Route
+              path="/tutor/home"
               element={
                 <Suspense fallback={<PageLoader />}>
-                  <TutorDashboard />
+                  <TutorHome />
                 </Suspense>
-              } 
+              }
+            />
+            <Route
+              path="/tutor/dashboard"
+              element={<Navigate to="/tutor/home" replace />}
             />
             <Route 
               path="/tutor/schedule" 

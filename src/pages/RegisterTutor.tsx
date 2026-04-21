@@ -49,7 +49,7 @@ const RegisterTutor = () => {
         });
         
         if (isTutor) {
-          navigate("/tutor/dashboard");
+          navigate("/tutor/home");
         }
         // If not a tutor, show registration form
       }
@@ -77,7 +77,7 @@ const RegisterTutor = () => {
           data: {
             username: validation.data.name,
           },
-          emailRedirectTo: `${window.location.origin}/tutor/dashboard`,
+          emailRedirectTo: `${window.location.origin}/tutor/home`,
         },
       });
 
@@ -112,7 +112,7 @@ const RegisterTutor = () => {
       }
 
       toast.success("Регистрация успешна!");
-      navigate("/tutor/dashboard");
+      navigate("/tutor/home");
     } catch (error: any) {
       console.error("Registration error:", error);
       toast.error(getAuthErrorMessage(error, "Ошибка регистрации"));
