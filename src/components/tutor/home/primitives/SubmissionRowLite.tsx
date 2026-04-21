@@ -1,5 +1,10 @@
 import { memo, type KeyboardEvent } from 'react';
-import { ChevronRight } from 'lucide-react';
+import {
+  AlertTriangle,
+  CheckCircle2,
+  ChevronRight,
+  HelpCircle,
+} from 'lucide-react';
 import type { ReviewItem } from '@/hooks/useTutorReviewQueue';
 
 export type { ReviewItem };
@@ -22,19 +27,32 @@ const ANSWER_COLOR: Record<'ok' | 'part' | 'miss', string> = {
   miss: 'var(--sokrat-state-danger-fg)',
 };
 
-function aiChipText(flag: ReviewItem['aiFlag'], warnCount?: number): string {
-  if (flag === 'ok') return 'AI ✓';
-  if (flag === 'warn') {
-    const n = warnCount ?? 0;
-    return n > 0 ? `AI ⚠ ${n}` : 'AI ⚠';
+// Emoji (✓ / ⚠ / ?) запрещены в chip/badge chrome по
+// .claude/rules/90-design-system.md §Anti-patterns #1. Используем Lucide.
+function aiChipDescriptor(flag: ReviewItem['aiFlag']): {
+  Icon: typeof CheckCircle2;
+  className: string;
+  label: string;
+} {
+  if (flag === 'ok') {
+    return {
+      Icon: CheckCircle2,
+      className: 't-chip t-chip--success',
+      label: 'AI подтверждает оценку',
+    };
   }
-  return 'AI ?';
-}
-
-function aiChipClass(flag: ReviewItem['aiFlag']): string {
-  if (flag === 'ok') return 't-chip t-chip--success';
-  if (flag === 'warn') return 't-chip t-chip--warning';
-  return 't-chip t-chip--neutral';
+  if (flag === 'warn') {
+    return {
+      Icon: AlertTriangle,
+      className: 't-chip t-chip--warning',
+      label: 'AI видит проблемы в работе',
+    };
+  }
+  return {
+    Icon: HelpCircle,
+    className: 't-chip t-chip--neutral',
+    label: 'AI не уверен в оценке',
+  };
 }
 
 function SubmissionRowLiteImpl({ sub, onOpen }: SubmissionRowLiteProps) {
@@ -47,6 +65,13 @@ function SubmissionRowLiteImpl({ sub, onOpen }: SubmissionRowLiteProps) {
 
   const avatarRingClass =
     sub.stream === 'ЕГЭ' ? 't-avatar t-avatar--32 t-avatar--ege' : 't-avatar t-avatar--32 t-avatar--oge';
+
+  const aiDescriptor = aiChipDescriptor(sub.aiFlag);
+  const AiIcon = aiDescriptor.Icon;
+  const aiCountSuffix =
+    sub.aiFlag === 'warn' && (sub.aiWarnCount ?? 0) > 0
+      ? ` ${sub.aiWarnCount}`
+      : '';
 
   return (
     <button
@@ -91,7 +116,14 @@ function SubmissionRowLiteImpl({ sub, onOpen }: SubmissionRowLiteProps) {
               />
             ))}
           </span>
-          <span className={aiChipClass(sub.aiFlag)}>{aiChipText(sub.aiFlag, sub.aiWarnCount)}</span>
+          <span
+            className={aiDescriptor.className}
+            aria-label={aiDescriptor.label}
+            title={aiDescriptor.label}
+          >
+            <AiIcon size={12} aria-hidden="true" />
+            AI{aiCountSuffix}
+          </span>
         </span>
       </span>
       <ChevronRight size={16} aria-hidden="true" style={{ color: 'var(--sokrat-fg3)', flex: 'none' }} />

@@ -398,6 +398,41 @@ npm run build
 
 **Follow-ups в TASK-6 (P1):** Segment sort, row-клики «открыть профиль», iOS Safari responsive pass.
 
+### Review fix pass (2026-04-21, после первого PR)
+
+Code review от Codex выявил 5 нарушений spec/rules в первом PR (commit `322f87b`). Все исправлены отдельным fix-коммитом:
+
+1. **AC-3 — Empty states с CTA «Добавить ученика» + hide StudentsActivity при 0 учеников.**
+   - `TodayBlock`, `ReviewQueueBlock`, `RecentDialogsBlock` получили optional prop `onAddStudent?: () => void`. Когда передан — в empty-state рендерится primary green CTA «Добавить ученика» (Lucide `UserPlus`, 40px, `aria-label="Добавить ученика"`).
+   - `TutorHome` пробрасывает `onAddStudent` в эти три блока **только когда `students.length === 0`** (т.е. fully-empty onboarding state per AC-3). Если есть ≥1 ученик — prop `undefined`, CTA не рендерится (в этом случае empty-state блока = «сегодня ничего нет», не «онбординг»).
+   - `TutorHome` теперь **не рендерит** `<StudentsActivityBlock>` когда `students.length === 0` (spec: «Таблица «Активность учеников» скрыта»). Внутренний empty-state у `StudentsActivityBlock` остаётся на случай «есть ученики, но ещё нет activity data» — не удалён, чтобы не ломать edge-case.
+
+2. **AC-10 — Interactive targets ≥ 40px + Russian `aria-label` на ghost-buttons.**
+   - `Button size="sm"` (`h-9` = 36px) заменён на `size="default"` (`h-10` = 40px) во всех 4 header-кнопках `Расписание` / `Все ДЗ` / `Все чаты` / `Все ученики`.
+   - `ChevronRight`-action-button в `StudentsActivityBlock` row переведён на `size="icon"` + `minHeight: 40` + `minWidth: 40` (icon-only button должен быть квадратным hit-target).
+   - Во всех 4 header-кнопках + row-action-button добавлен явный `aria-label` на русском (`Открыть расписание` / `Открыть все домашние задания` / `Открыть все чаты` / `Открыть всех учеников` / `Открыть статистику {name}`).
+
+3. **AC-12 — Mobile layout (<768px).**
+   - `src/styles/tutor-dashboard.css`: добавлен блок `@media (max-width: 767px) { … }` с перестройкой `.home-header` (flex-direction: column), `.home-ctas` (1fr), `.t-grid-2` (1fr), `.t-stats` (1fr + cell border top вместо left), `.t-session-grid` (1fr).
+   - Вынесен inline `gridTemplateColumns: 'repeat(4, 1fr)'` из `TodayBlock.tsx` в класс `.t-session-grid` в CSS — теперь он уважает mobile-медиа-rule.
+   - Проверено в preview: на 375×812 все блоки корректно стакаются в одну колонку.
+
+4. **Rule 80 — Safari-safe таблица активности.**
+   - `.t-table` переведена на `border-collapse: separate` + `border-spacing: 0` (вместо `border-collapse: collapse`).
+   - Снята `position: sticky` с `thead th` — per spec §8.6 sticky для < 200 строк не нужен. Это развязывает известный Safari-bug «sticky + border-collapse → ломается горизонтальный скролл».
+   - Проверено: `table.scrollWidth > wrap.clientWidth` даёт рабочий `overflow-x: auto` с `touch-action: pan-x` на мобиле.
+
+5. **Rule 90 — Emoji в UI chrome запрещены.**
+   - `SubmissionRowLite`: `AI ✓` / `AI ⚠ N` / `AI ?` (Unicode-эмоджи в chip) заменены на Lucide icons + plain «AI» label:
+     - `ok` → `<CheckCircle2> AI` (`t-chip--success`)
+     - `warn` → `<AlertTriangle> AI {N}` (`t-chip--warning`)
+     - `unclear` → `<HelpCircle> AI` (`t-chip--neutral`)
+   - Каждый chip получил `aria-label` / `title` на русском («AI подтверждает оценку» / «AI видит проблемы в работе» / «AI не уверен в оценке») — иконка теперь accessible.
+
+**Scope creep discussion:** во время review возник вопрос про runtime-правки в `Login`/`TutorLogin`/`RegisterTutor`/`TelegramLoginButton`/`TutorTelegramLoginButton`, которые не были в file-list TASK-5. Оставлены как есть — требование промпта «`rg "tutor/dashboard" src/` → одна строка» иначе невыполнимо. Редирект `/tutor/dashboard → /tutor/home` остаётся (backward compat для Telegram-deep-link закладок).
+
+**Validation:** lint/build/smoke-check зелёные; preview верифицирован на desktop (1280×800) и mobile (375×812) viewport-ах.
+
 ### Что сделать
 
 #### 1. `src/pages/tutor/TutorHome.tsx`

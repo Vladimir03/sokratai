@@ -126,13 +126,17 @@ const ActivityRow = memo(function ActivityRow({ student, onOpen }: RowProps) {
         <div className="row-actions">
           <Button
             variant="ghost"
-            size="sm"
+            size="icon"
             aria-label={`Открыть статистику ${student.name}`}
             onClick={(event) => {
               event.stopPropagation();
               onOpen(student.id);
             }}
-            style={{ touchAction: 'manipulation' }}
+            style={{
+              minHeight: 40,
+              minWidth: 40,
+              touchAction: 'manipulation',
+            }}
           >
             <ChevronRight aria-hidden="true" />
           </Button>
@@ -222,8 +226,9 @@ function StudentsActivityBlockImpl({
         >
           <Button
             variant="ghost"
-            size="sm"
+            size="default"
             onClick={onOpenAll}
+            aria-label="Открыть всех учеников"
             style={{ touchAction: 'manipulation' }}
           >
             Все ученики

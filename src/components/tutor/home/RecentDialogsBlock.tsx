@@ -1,5 +1,5 @@
 import { memo } from 'react';
-import { MessagesSquare } from 'lucide-react';
+import { MessagesSquare, UserPlus } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
   ChatRow,
@@ -10,6 +10,8 @@ export interface RecentDialogsBlockProps {
   dialogs: DialogItem[];
   onOpenDialog: (dialog: DialogItem) => void;
   onOpenAll: () => void;
+  /** When present, empty state renders primary CTA «Добавить ученика» (AC-3). */
+  onAddStudent?: () => void;
 }
 
 const MAX_VISIBLE = 5;
@@ -18,6 +20,7 @@ function RecentDialogsBlockImpl({
   dialogs,
   onOpenDialog,
   onOpenAll,
+  onAddStudent,
 }: RecentDialogsBlockProps) {
   const visible = dialogs.slice(0, MAX_VISIBLE);
 
@@ -31,8 +34,9 @@ function RecentDialogsBlockImpl({
         <span style={{ marginLeft: 'auto' }}>
           <Button
             variant="ghost"
-            size="sm"
+            size="default"
             onClick={onOpenAll}
+            aria-label="Открыть все чаты"
             style={{ touchAction: 'manipulation' }}
           >
             Все чаты
@@ -51,6 +55,23 @@ function RecentDialogsBlockImpl({
           <div className="t-empty__body">
             Как только ученик напишет — диалог появится здесь.
           </div>
+          {onAddStudent && (
+            <div className="t-empty__cta">
+              <Button
+                size="default"
+                onClick={onAddStudent}
+                aria-label="Добавить ученика"
+                className="text-white"
+                style={{
+                  background: 'var(--sokrat-green-700)',
+                  touchAction: 'manipulation',
+                }}
+              >
+                <UserPlus aria-hidden="true" />
+                Добавить ученика
+              </Button>
+            </div>
+          )}
         </div>
       ) : (
         <div>

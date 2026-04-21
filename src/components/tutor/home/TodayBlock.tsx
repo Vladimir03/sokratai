@@ -1,5 +1,5 @@
 import { memo } from 'react';
-import { CalendarClock } from 'lucide-react';
+import { CalendarClock, UserPlus } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
   SessionBlock,
@@ -11,6 +11,8 @@ export interface TodayBlockProps {
   sessions: TodaySession[];
   onOpenSchedule: () => void;
   onOpenSession?: (session: TodaySession) => void;
+  /** When present, empty state renders primary CTA «Добавить ученика» (AC-3). */
+  onAddStudent?: () => void;
 }
 
 const MAX_VISIBLE = 4;
@@ -19,6 +21,7 @@ function TodayBlockImpl({
   sessions,
   onOpenSchedule,
   onOpenSession,
+  onAddStudent,
 }: TodayBlockProps) {
   const visible = sessions.slice(0, MAX_VISIBLE);
   const overflow = Math.max(0, sessions.length - MAX_VISIBLE);
@@ -32,8 +35,9 @@ function TodayBlockImpl({
         <span style={{ marginLeft: 'auto' }}>
           <Button
             variant="ghost"
-            size="sm"
+            size="default"
             onClick={onOpenSchedule}
+            aria-label="Открыть расписание"
             style={{ touchAction: 'manipulation' }}
           >
             Расписание
@@ -52,16 +56,26 @@ function TodayBlockImpl({
           <div className="t-empty__body">
             Можно открыть расписание и запланировать новое.
           </div>
+          {onAddStudent && (
+            <div className="t-empty__cta">
+              <Button
+                size="default"
+                onClick={onAddStudent}
+                aria-label="Добавить ученика"
+                className="text-white"
+                style={{
+                  background: 'var(--sokrat-green-700)',
+                  touchAction: 'manipulation',
+                }}
+              >
+                <UserPlus aria-hidden="true" />
+                Добавить ученика
+              </Button>
+            </div>
+          )}
         </div>
       ) : (
-        <div
-          style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(4, 1fr)',
-            gap: 8,
-            padding: 12,
-          }}
-        >
+        <div className="t-session-grid">
           {visible.map((session) => (
             <SessionBlock
               key={session.id}

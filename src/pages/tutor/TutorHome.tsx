@@ -197,6 +197,7 @@ function TutorHomeContent() {
   }, [home]);
 
   const tutorName = tutor?.name?.trim() ?? '';
+  const hasStudents = students.length > 0;
 
   // ─── Render ────────────────────────────────────────────────────────────
   const showSkeleton = home.loading && !home.anySettled;
@@ -252,11 +253,13 @@ function TutorHomeContent() {
                 sessions={home.todayLessons}
                 onOpenSchedule={handleOpenSchedule}
                 onOpenSession={handleOpenSession}
+                onAddStudent={hasStudents ? undefined : handleAddStudent}
               />
               <ReviewQueueBlock
                 items={home.reviewQueue}
                 onOpenAll={handleOpenHomeworkList}
                 onOpenSubmission={handleOpenSubmission}
+                onAddStudent={hasStudents ? undefined : handleAddStudent}
               />
             </div>
 
@@ -264,15 +267,20 @@ function TutorHomeContent() {
               dialogs={home.recentDialogs}
               onOpenDialog={handleOpenDialog}
               onOpenAll={handleOpenHomeworkList}
+              onAddStudent={hasStudents ? undefined : handleAddStudent}
             />
 
-            <StudentsActivityBlock
-              items={home.studentActivity}
-              totalCount={home.studentActivityTotalCount}
-              onOpenStudent={handleOpenStudent}
-              onOpenAll={handleOpenStudentList}
-              onAddStudent={handleAddStudent}
-            />
+            {/* Per spec §AC-3: при 0 учеников таблица «Активность
+                учеников» полностью скрыта (не «пустая секция»). */}
+            {hasStudents && (
+              <StudentsActivityBlock
+                items={home.studentActivity}
+                totalCount={home.studentActivityTotalCount}
+                onOpenStudent={handleOpenStudent}
+                onOpenAll={handleOpenStudentList}
+                onAddStudent={handleAddStudent}
+              />
+            )}
           </>
         )}
       </div>

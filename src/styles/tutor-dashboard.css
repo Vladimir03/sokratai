@@ -86,8 +86,14 @@
   overflow: hidden;
 }
 .t-table {
+  /* border-separate + border-spacing:0 вместо border-collapse — иначе в
+     WebKit / iOS Safari ломается и sticky, и горизонтальный скролл
+     в overflow-x-auto wrapper (см. .claude/rules/80-cross-browser.md).
+     На Dashboard таблицы < 200 строк, sticky thead по spec §8.6 не нужен —
+     просто scroll работает. */
   width: 100%;
-  border-collapse: collapse;
+  border-collapse: separate;
+  border-spacing: 0;
 }
 .t-table thead th {
   font-size: 11px;
@@ -99,9 +105,6 @@
   padding: 10px 12px;
   background: var(--sokrat-card);
   border-bottom: 1px solid var(--sokrat-border);
-  position: sticky;
-  top: 0;
-  z-index: 1;
   white-space: nowrap;
 }
 .t-table thead th.is-num { text-align: right; }
@@ -393,6 +396,44 @@
 
 .home-activity-table tbody td { height: 44px; }
 .home-activity-table tbody tr:hover td { background: var(--sokrat-surface); }
+
+/* ─── Today session grid (responsive 4-col → 1-col) ───────── */
+.t-session-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+  padding: 12px;
+}
+
+/* ─── Mobile: <768px single-column layout ─────────────────── */
+@media (max-width: 767px) {
+  .home-header {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .home-header > div:last-child {
+    flex-wrap: wrap;
+  }
+  .home-ctas {
+    grid-template-columns: 1fr;
+  }
+  .t-grid-2 {
+    grid-template-columns: 1fr;
+  }
+  .t-stats {
+    grid-template-columns: 1fr;
+  }
+  .t-stats__cell {
+    border-left: 0;
+    border-top: 1px solid var(--sokrat-border-light);
+  }
+  .t-stats__cell:first-child {
+    border-top: 0;
+  }
+  .t-session-grid {
+    grid-template-columns: 1fr;
+  }
+}
 
 
 /* ─── Recent chats ────────────────────────────────────────── */

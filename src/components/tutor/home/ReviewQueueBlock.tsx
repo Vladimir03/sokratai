@@ -1,5 +1,5 @@
 import { memo } from 'react';
-import { CheckCircle2 } from 'lucide-react';
+import { CheckCircle2, UserPlus } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
   SubmissionRowLite,
@@ -11,6 +11,8 @@ export interface ReviewQueueBlockProps {
   items: ReviewItem[];
   onOpenAll: () => void;
   onOpenSubmission: (assignmentId: string) => void;
+  /** When present, empty state renders primary CTA «Добавить ученика» (AC-3). */
+  onAddStudent?: () => void;
 }
 
 const MAX_VISIBLE = 4;
@@ -19,6 +21,7 @@ function ReviewQueueBlockImpl({
   items,
   onOpenAll,
   onOpenSubmission,
+  onAddStudent,
 }: ReviewQueueBlockProps) {
   const visible = items.slice(0, MAX_VISIBLE);
   const metaLabel = `${items.length} ${pluralize(items.length, PLURAL_WORKS)}`;
@@ -31,8 +34,9 @@ function ReviewQueueBlockImpl({
         <span style={{ marginLeft: 'auto' }}>
           <Button
             variant="ghost"
-            size="sm"
+            size="default"
             onClick={onOpenAll}
+            aria-label="Открыть все домашние задания"
             style={{ touchAction: 'manipulation' }}
           >
             Все ДЗ
@@ -51,6 +55,23 @@ function ReviewQueueBlockImpl({
           <div className="t-empty__body">
             Новые сдачи появятся здесь сразу после выполнения учеником.
           </div>
+          {onAddStudent && (
+            <div className="t-empty__cta">
+              <Button
+                size="default"
+                onClick={onAddStudent}
+                aria-label="Добавить ученика"
+                className="text-white"
+                style={{
+                  background: 'var(--sokrat-green-700)',
+                  touchAction: 'manipulation',
+                }}
+              >
+                <UserPlus aria-hidden="true" />
+                Добавить ученика
+              </Button>
+            </div>
+          )}
         </div>
       ) : (
         <div>
