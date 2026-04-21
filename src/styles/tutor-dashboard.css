@@ -1,0 +1,471 @@
+/* ============================================================
+   Сократ AI — Tutor Dashboard v2 · helper classes
+   Layered over colors_and_type.css. No new tokens.
+   Scope: Tutor Dashboard (/tutor/home) surfaces wrapped in
+     <div class="sokrat" data-sokrat-mode="tutor">
+
+   Cherry-picked from docs/design-system/handoff-dashboard/tutor-kit/
+   (tokens.css + dashboard-home.css). Phase 2 / non-Dashboard
+   helpers (.t-task, .t-review, .t-payrow, .t-week, .t-studentrow,
+   .t-listrow, .t-app, .t-nav, .t-top, .t-btn, .t-field, .t-tabs,
+   .t-card, .t-group, .t-aicheck, .t-formula, .t-answer, .t-progress,
+   .t-diff, .t-kbd, .t-tip, .t-bulk, .t-toolbar, .t-page-header) are
+   intentionally NOT copied — they live in their own kits or Phase 2.
+
+   Every rule reads only var(--sokrat-*). No hex, no new font-family.
+   ============================================================ */
+
+
+/* ─── Section (generic card-section) ──────────────────────── */
+.t-section {
+  background: var(--sokrat-card);
+  border: 1px solid var(--sokrat-border-light);
+  border-radius: var(--sokrat-radius-md);
+}
+.t-section__header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 16px;
+}
+.t-section__header h2 {
+  font-size: 15px;
+  font-weight: 600;
+  margin: 0;
+  color: var(--sokrat-fg1);
+}
+.t-section__meta {
+  font-size: 12px;
+  color: var(--sokrat-fg3);
+  font-variant-numeric: tabular-nums;
+}
+.t-section__body { padding: 4px 0 8px; }
+
+
+/* ─── Stat strip (single card, hairline cells) ────────────── */
+.t-stats {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  background: var(--sokrat-card);
+  border: 1px solid var(--sokrat-border-light);
+  border-radius: var(--sokrat-radius-md);
+}
+.t-stats__cell {
+  padding: 14px 16px;
+  border-left: 1px solid var(--sokrat-border-light);
+}
+.t-stats__cell:first-child { border-left: 0; }
+.t-stats__label {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--sokrat-fg3);
+  margin-bottom: 4px;
+}
+.t-stats__value {
+  font-size: 22px;
+  font-weight: 600;
+  color: var(--sokrat-fg1);
+  font-variant-numeric: tabular-nums;
+  line-height: 1.2;
+}
+.t-stats__meta {
+  font-size: 12px;
+  color: var(--sokrat-fg3);
+  margin-top: 2px;
+  font-variant-numeric: tabular-nums;
+}
+
+
+/* ─── Data table ──────────────────────────────────────────── */
+.t-table-wrap {
+  background: var(--sokrat-card);
+  border: 1px solid var(--sokrat-border-light);
+  border-radius: var(--sokrat-radius-md);
+  overflow: hidden;
+}
+.t-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+.t-table thead th {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--sokrat-fg3);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  text-align: left;
+  padding: 10px 12px;
+  background: var(--sokrat-card);
+  border-bottom: 1px solid var(--sokrat-border);
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  white-space: nowrap;
+}
+.t-table thead th.is-num { text-align: right; }
+.t-table tbody td {
+  font-size: 13px;
+  color: var(--sokrat-fg1);
+  padding: 6px 12px;
+  height: 32px;
+  border-bottom: 1px solid var(--sokrat-border-light);
+  vertical-align: middle;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.t-table tbody tr:last-child td { border-bottom: 0; }
+.t-table tbody tr:hover td { background: var(--sokrat-surface); }
+.t-table tbody tr[aria-selected="true"] td { background: var(--sokrat-green-100); }
+.t-table tbody tr[aria-selected="true"] td:first-child {
+  box-shadow: inset 2px 0 0 0 var(--sokrat-green-700);
+}
+.t-table .is-num {
+  text-align: right;
+  font-variant-numeric: tabular-nums lining-nums;
+  font-weight: 500;
+}
+.t-table .is-primary { font-weight: 600; }
+.t-table .is-actions { width: 1%; padding-right: 8px; }
+.t-table .is-check   { width: 28px; padding-right: 0; }
+.t-table .row-actions {
+  display: flex;
+  gap: 2px;
+  justify-content: flex-end;
+  opacity: 0;
+  transition: opacity 120ms;
+}
+.t-table tbody tr:hover .row-actions,
+.t-table tbody tr:focus-within .row-actions { opacity: 1; }
+
+
+/* ─── Divider ──────────────────────────────────────────────── */
+.t-divider    { height: 1px; background: var(--sokrat-border-light); border: 0; margin: 0; }
+.t-divider--v { width: 1px; height: 18px; background: var(--sokrat-border); margin: 0 4px; }
+
+
+/* ─── Session (schedule block) ────────────────────────────── */
+.t-session {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 10px;
+  border-radius: var(--sokrat-radius-sm);
+  background: var(--sokrat-green-100);
+  color: var(--sokrat-green-800);
+  border-left: 2px solid var(--sokrat-green-700);
+  min-height: 48px;
+  cursor: pointer;
+}
+.t-session--oge {
+  background: var(--sokrat-oge-bg);
+  color: var(--sokrat-oge);
+  border-left-color: var(--sokrat-oge);
+}
+.t-session--past { opacity: 0.55; }
+.t-session__time {
+  font-size: 11px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+}
+.t-session__title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--sokrat-fg1);
+}
+.t-session__meta {
+  font-size: 12px;
+  color: var(--sokrat-fg3);
+}
+
+
+/* ─── Chips (subset used on Dashboard) ────────────────────── */
+.t-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 9px;
+  border-radius: var(--sokrat-radius-full);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.4;
+}
+.t-chip--ege     { background: var(--sokrat-ege-bg); color: var(--sokrat-ege); }
+.t-chip--oge     { background: var(--sokrat-oge-bg); color: var(--sokrat-oge); }
+.t-chip--neutral { background: var(--sokrat-border-light); color: var(--sokrat-fg2); }
+.t-chip--success { background: var(--sokrat-state-success-bg); color: var(--sokrat-state-success-fg); }
+.t-chip--warning { background: var(--sokrat-state-warning-bg); color: var(--sokrat-state-warning-fg); }
+.t-chip--danger  { background: var(--sokrat-state-danger-bg);  color: var(--sokrat-state-danger-fg); }
+.t-chip--info    { background: var(--sokrat-state-info-bg);    color: var(--sokrat-state-info-fg); }
+.t-chip--count   {
+  background: var(--sokrat-border-light);
+  color: var(--sokrat-fg2);
+  padding: 2px 7px;
+  font-size: 11px;
+}
+
+
+/* ─── StatusDot ────────────────────────────────────────────── */
+.t-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--sokrat-fg1);
+}
+.t-status__dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex: none;
+}
+.t-status--success .t-status__dot { background: var(--sokrat-state-success-fg); }
+.t-status--warning .t-status__dot { background: var(--sokrat-state-warning-fg); }
+.t-status--danger  .t-status__dot { background: var(--sokrat-state-danger-fg); }
+.t-status--info    .t-status__dot { background: var(--sokrat-state-info-fg); }
+.t-status--neutral .t-status__dot {
+  background: var(--sokrat-card);
+  box-shadow: inset 0 0 0 1.5px var(--sokrat-fg-muted);
+}
+
+
+/* ─── Avatar ───────────────────────────────────────────────── */
+.t-avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--sokrat-border-light);
+  color: var(--sokrat-fg2);
+  border-radius: 50%;
+  font-weight: 600;
+  font-size: 12px;
+  flex: none;
+}
+.t-avatar--24 { width: 24px; height: 24px; font-size: 10px; }
+.t-avatar--32 { width: 32px; height: 32px; font-size: 11px; }
+.t-avatar--40 { width: 40px; height: 40px; font-size: 13px; }
+.t-avatar--56 { width: 56px; height: 56px; font-size: 18px; }
+.t-avatar--ege { box-shadow: 0 0 0 2px var(--sokrat-card), 0 0 0 3.5px var(--sokrat-green-700); }
+.t-avatar--oge { box-shadow: 0 0 0 2px var(--sokrat-card), 0 0 0 3.5px var(--sokrat-fg-muted); }
+
+
+/* ─── Segment (filter/toggle) ─────────────────────────────── */
+.t-seg {
+  display: inline-flex;
+  background: var(--sokrat-border-light);
+  border-radius: var(--sokrat-radius-sm);
+  padding: 3px;
+}
+.t-seg__item {
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  height: 28px;
+  padding: 0 12px;
+  border-radius: calc(var(--sokrat-radius-sm) - 2px);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--sokrat-fg2);
+}
+.t-seg__item[aria-pressed="true"] {
+  background: var(--sokrat-card);
+  color: var(--sokrat-fg1);
+  box-shadow: var(--sokrat-shadow-xs);
+}
+.t-seg__item:focus-visible {
+  outline: 2px solid var(--sokrat-green-700);
+  outline-offset: 2px;
+}
+
+
+/* ─── EmptyState ───────────────────────────────────────────── */
+.t-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 48px 24px;
+  text-align: center;
+}
+.t-empty__title { font-size: 15px; font-weight: 600; color: var(--sokrat-fg1); }
+.t-empty__body  { font-size: 13px; color: var(--sokrat-fg3); max-width: 360px; }
+.t-empty__cta   { margin-top: 8px; }
+
+
+/* ─── Utilities ───────────────────────────────────────────── */
+.t-hstack { display: flex; align-items: center; gap: 8px; }
+.t-vstack { display: flex; flex-direction: column; gap: 8px; }
+.t-muted  { color: var(--sokrat-fg3); }
+.t-num    { font-variant-numeric: tabular-nums lining-nums; }
+.t-grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+
+
+/* ============================================================
+   HOME DASHBOARD (v2) · page-specific helpers
+   Copied from docs/design-system/handoff-dashboard/tutor-kit/
+   dashboard-home.css. .home-ctas grid set to repeat(2, 1fr) per
+   spec §5 (третья primary CTA «Добавить ученика» удалена
+   заказчиком; осталось ровно 2 tile).
+   ============================================================ */
+
+.home-header {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+  padding: 4px 0 16px;
+}
+
+.home-ctas {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 12px;
+  margin-bottom: 16px;
+}
+.home-cta {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 16px;
+  background: var(--sokrat-card);
+  border: 1px solid var(--sokrat-border-light);
+  border-radius: var(--sokrat-radius-md);
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+  color: inherit;
+  transition: border-color 120ms, box-shadow 120ms, background 120ms;
+}
+.home-cta:hover {
+  border-color: var(--sokrat-fg-muted);
+  box-shadow: var(--sokrat-shadow-xs);
+}
+.home-cta:focus-visible {
+  outline: 2px solid var(--sokrat-green-700);
+  outline-offset: 2px;
+}
+.home-cta__icon {
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  background: var(--sokrat-surface);
+  display: grid;
+  place-items: center;
+  color: var(--sokrat-fg2);
+  flex: none;
+}
+.home-cta__body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.home-cta__title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--sokrat-fg1);
+}
+.home-cta__sub {
+  font-size: 12px;
+  color: var(--sokrat-fg3);
+}
+
+.home-cta--primary {
+  background: var(--sokrat-green-700);
+  border-color: var(--sokrat-green-700);
+  color: var(--sokrat-fg-on-dark);
+}
+.home-cta--primary .home-cta__icon {
+  background: rgba(255, 255, 255, 0.16);
+  color: var(--sokrat-fg-on-dark);
+}
+.home-cta--primary .home-cta__title { color: var(--sokrat-fg-on-dark); }
+.home-cta--primary .home-cta__sub   { color: var(--sokrat-fg-on-dark-dim); }
+.home-cta--primary:hover {
+  background: var(--sokrat-green-800);
+  border-color: var(--sokrat-green-800);
+}
+
+.home-activity-table tbody td { height: 44px; }
+.home-activity-table tbody tr:hover td { background: var(--sokrat-surface); }
+
+
+/* ─── Recent chats ────────────────────────────────────────── */
+.chat-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 12px 16px;
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid var(--sokrat-border-light);
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+  color: inherit;
+  transition: background 120ms;
+}
+.chat-row:last-child { border-bottom: 0; }
+.chat-row:hover { background: var(--sokrat-surface); }
+.chat-row:focus-visible {
+  outline: 2px solid var(--sokrat-green-700);
+  outline-offset: -2px;
+}
+.chat-row__avatar {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: var(--sokrat-surface);
+  color: var(--sokrat-fg2);
+  display: grid;
+  place-items: center;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  flex: none;
+  border: 1px solid var(--sokrat-border-light);
+}
+.chat-row__body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.chat-row__top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.chat-row__name {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--sokrat-fg1);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 40%;
+}
+.chat-row__time {
+  margin-left: auto;
+  font-size: 12px;
+  color: var(--sokrat-fg3);
+  flex: none;
+}
+.chat-row__preview {
+  font-size: 13px;
+  color: var(--sokrat-fg2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.chat-row__prefix {
+  color: var(--sokrat-fg3);
+}

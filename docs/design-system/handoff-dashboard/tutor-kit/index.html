@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Сократ · Tutor Kit</title>
+
+<!-- Tokens + fonts -->
+<link rel="stylesheet" href="../../colors_and_type.css?v=pass1b" />
+<!-- Tutor helper classes -->
+<link rel="stylesheet" href="tokens.css?v=2" />
+
+<!-- KaTeX (for FormulaBlock / InlineMath) -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" integrity="sha384-nB0miv6/jRmo5UMMR1wu3Gz6NLsoTkbqJghGIsx//Rlm+ZU03BU6SQNC66uf4l5+" crossorigin="anonymous" />
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js" integrity="sha384-7zkQWkzuo3B5mTepMUcHkMB5jZaolc2xDwL6VFqjFALcbeS9Ggm/Yr2r3Dy4lfFg" crossorigin="anonymous"></script>
+
+<!-- Lucide icons -->
+<script src="https://unpkg.com/lucide@0.468.0/dist/umd/lucide.min.js"></script>
+
+<!-- React + Babel -->
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+
+<style>
+  html, body { margin: 0; padding: 0; height: 100%; }
+  body { font-family: var(--sokrat-font); background: var(--sokrat-surface); color: var(--sokrat-fg1); }
+  #root { height: 100%; }
+  /* KaTeX global sizing bring-down to match tutor rhythm */
+  .katex { font-size: 1em; }
+  .katex-display { margin: 0; }
+</style>
+</head>
+<body class="sokrat" data-sokrat-mode="tutor">
+<div id="root"></div>
+
+<!-- Primitives -> Chrome -> Workplace -> Templates -> App -->
+<script type="text/babel" src="primitives.jsx"></script>
+<script type="text/babel" src="chrome.jsx"></script>
+<script type="text/babel" src="workplace.jsx"></script>
+<script type="text/babel" src="templates.jsx"></script>
+
+<script type="text/babel">
+const { useState, useEffect } = React;
+
+const ROUTES = {
+  dashboard:  { crumbs: ["Сократ", "Главная"],                          render: () => <TplDashboard /> },
+  schedule:   { crumbs: ["Сократ", "Расписание"],                       render: () => <ScheduleStub /> },
+  homework:   { crumbs: ["Сократ", "Домашние задания"],                 render: () => <TplHomeworkList /> },
+  homeworkDetail: { crumbs: ["Сократ", "Домашние задания", "Кинематика 1D"], render: () => <TplHomeworkDetail /> },
+  students:   { crumbs: ["Сократ", "Ученики"],                          render: () => <StudentsStub /> },
+  studentProfile: { crumbs: ["Сократ", "Ученики", "Маша Коротаева"],    render: () => <TplStudentProfile /> },
+  groups:     { crumbs: ["Сократ", "Группы"],                           render: () => <GroupsStub /> },
+  taskbank:   { crumbs: ["Сократ", "База задач"],                       render: () => <TplTaskBank /> },
+  mytasks:    { crumbs: ["Сократ", "Мои задачи"],                       render: () => <MyTasksStub /> },
+  payments:   { crumbs: ["Сократ", "Платежи"],                          render: () => <PaymentsStub /> },
+  plans:      { crumbs: ["Сократ", "Тарифы"],                           render: () => <PlansStub /> },
+};
+
+// Navigation key shared with SideNav
+const NAV_KEY_FOR = {
+  dashboard: "dashboard", schedule: "schedule",
+  homework: "homework", homeworkDetail: "homework",
+  students: "students", studentProfile: "students",
+  groups: "groups",
+  taskbank: "taskbank", mytasks: "mytasks",
+  payments: "payments", plans: "plans",
+};
+
+function ScheduleStub() {
+  const week = [
+    { day:0, hour:10, time:"10:00", name:"Маша К.",    topic:"Кинематика",   stream:"ЕГЭ" },
+    { day:1, hour:13, time:"13:00", name:"Лена И.",    topic:"Квадратные",   stream:"ОГЭ" },
+    { day:2, hour:19, time:"19:00", name:"Группа 11А", topic:"Динамика",     stream:"ЕГЭ" },
+    { day:3, hour:11, time:"11:00", name:"Катя М.",    topic:"Тригонометрия",stream:"ЕГЭ" },
+    { day:3, hour:17, time:"17:00", name:"Артём Б.",   topic:"Статика",      stream:"ЕГЭ" },
+    { day:4, hour:15, time:"15:00", name:"Никита О.",  topic:"Дроби",        stream:"ОГЭ" },
+    { day:5, hour:12, time:"12:00", name:"Полина С.",  topic:"Логарифмы",    stream:"ЕГЭ" },
+  ];
+  return (
+    <>
+      <PageHeader title="Расписание" meta="Неделя 10–16 марта · 12 занятий · 2 окна" primary={<Button variant="primary" size="md" icon="plus">Новое занятие</Button>} />
+      <WeekGrid sessions={week} />
+    </>
+  );
+}
+
+function StudentsStub() {
+  const students = [
+    { id:"s1", name:"Маша Коротаева", grade:10, stream:"ЕГЭ", subjects:["физика","математика"], progress:78, lastSession:"11.03 18:00", statusTone:"success", statusLabel:"активна" },
+    { id:"s2", name:"Саша Петров",    grade:11, stream:"ЕГЭ", subjects:["математика"],          progress:54, lastSession:"10.03 17:00", statusTone:"warning", statusLabel:"долг по ДЗ" },
+    { id:"s3", name:"Лена Иванова",   grade:9,  stream:"ОГЭ", subjects:["математика"],          progress:64, lastSession:"12.03 16:00", statusTone:"success", statusLabel:"активна" },
+    { id:"s4", name:"Артём Белов",    grade:11, stream:"ЕГЭ", subjects:["физика"],              progress:41, lastSession:"05.03 19:00", statusTone:"danger",  statusLabel:"просрочено" },
+    { id:"s5", name:"Катя Морозова",  grade:10, stream:"ЕГЭ", subjects:["физика","математика"], progress:92, lastSession:"12.03 17:00", statusTone:"success", statusLabel:"активна" },
+    { id:"s6", name:"Никита Орлов",   grade:9,  stream:"ОГЭ", subjects:["математика"],          progress:33, lastSession:"07.03 15:00", statusTone:"warning", statusLabel:"на проверке" },
+    { id:"s7", name:"Полина Сидорова",grade:11, stream:"ЕГЭ", subjects:["математика"],          progress:71, lastSession:"11.03 20:00", statusTone:"info",    statusLabel:"назначено" },
+    { id:"s8", name:"Данил Киселёв",  grade:10, stream:"ЕГЭ", subjects:["физика"],              progress:58, lastSession:"09.03 18:00", statusTone:"success", statusLabel:"активен" },
+  ];
+  const [sel, setSel] = useState(new Set());
+  return (
+    <>
+      <PageHeader title="Ученики" meta="28 учеников · 21 ЕГЭ · 7 ОГЭ" primary={<Button variant="primary" size="md" icon="user-plus">Добавить ученика</Button>} />
+      <Toolbar>
+        <ToolbarSearch placeholder="Поиск по имени или предмету" />
+        <Chip variant="filter">Поток</Chip>
+        <Chip variant="filter">Предмет</Chip>
+        <Chip variant="filter">Статус</Chip>
+        <span className="t-toolbar__spacer" />
+        <ToolbarViewSwitch value="table" onChange={()=>{}} />
+      </Toolbar>
+      <RosterTable students={students} selection={sel} onSelect={setSel} />
+      <BulkActionBar count={sel.size} onClear={()=>setSel(new Set())}>
+        <Button variant="outline" size="sm" icon="clipboard-plus">Назначить ДЗ</Button>
+        <Button variant="outline" size="sm" icon="users-round">Объединить в группу</Button>
+      </BulkActionBar>
+    </>
+  );
+}
+
+function GroupsStub() {
+  const group = {
+    name: "Группа 11А · физика",
+    stream: "ЕГЭ",
+    note: "Готовятся к пробнику 20 марта. Основной фокус — динамика и статика.",
+    members: [
+      { id:"s1", name:"Маша Коротаева", grade:10, stream:"ЕГЭ", subjects:["физика"], progress:78, lastSession:"11.03", statusTone:"success", statusLabel:"активна" },
+      { id:"s5", name:"Катя Морозова",  grade:10, stream:"ЕГЭ", subjects:["физика"], progress:92, lastSession:"12.03", statusTone:"success", statusLabel:"активна" },
+      { id:"s4", name:"Артём Белов",    grade:11, stream:"ЕГЭ", subjects:["физика"], progress:41, lastSession:"05.03", statusTone:"danger",  statusLabel:"просрочено" },
+      { id:"s8", name:"Данил Киселёв",  grade:10, stream:"ЕГЭ", subjects:["физика"], progress:58, lastSession:"09.03", statusTone:"success", statusLabel:"активен" },
+    ],
+    sharedHomework: [
+      { id:"h1", title:"Кинематика 1D", stream:"ЕГЭ", tasks:8, assigned:4, total:4, due:"12.03", statusTone:"info", statusLabel:"идёт" },
+      { id:"h4", title:"Динамика · Ньютон", stream:"ЕГЭ", tasks:12, assigned:4, total:4, due:"18.03", statusTone:"info", statusLabel:"идёт" },
+    ],
+  };
+  return (
+    <>
+      <PageHeader title="Группы" meta="3 группы · 11 учеников в группах" primary={<Button variant="primary" size="md" icon="plus">Новая группа</Button>} />
+      <GroupPanel group={group} />
+    </>
+  );
+}
+
+function MyTasksStub() {
+  return (
+    <>
+      <PageHeader title="Мои задачи" meta="86 авторских задач" primary={<Button variant="primary" size="md" icon="plus">Создать задачу</Button>} />
+      <div className="t-section">
+        <EmptyState
+          title="Здесь будут только ваши задачи"
+          body="Авторские задачи, созданные вами. Сейчас вы можете скопировать задачи из общей базы и отредактировать их под себя."
+          cta={<Button variant="outline" size="md" icon="library">Открыть базу задач</Button>}
+        />
+      </div>
+    </>
+  );
+}
+
+function PaymentsStub() {
+  const payments = [
+    { id:"p1", name:"Маша Коротаева", plan:"8 занятий / мес",  period:"март 2025", amount:24000, statusTone:"success", statusLabel:"оплачено", action:"Чек" },
+    { id:"p2", name:"Саша Петров",    plan:"4 занятия / мес",  period:"март 2025", amount:12000, statusTone:"warning", statusLabel:"ожидает",  action:"Напомнить" },
+    { id:"p3", name:"Лена Иванова",   plan:"8 занятий / мес",  period:"март 2025", amount:20000, statusTone:"success", statusLabel:"оплачено", action:"Чек" },
+    { id:"p4", name:"Артём Белов",    plan:"4 занятия / мес",  period:"март 2025", amount:12000, statusTone:"danger",  statusLabel:"долг",     action:"Связаться" },
+  ];
+  return (
+    <>
+      <PageHeader title="Платежи" meta="Март 2025 · поступило 148 000 ₽ · ожидается 24 000 ₽" primary={<Button variant="primary" size="md" icon="plus">Выставить счёт</Button>} />
+      <div className="t-stats" style={{marginBottom:16}}>
+        <div className="t-stats__cell"><div className="t-stats__label">Поступило</div><div className="t-stats__value">148 000 ₽</div><div className="t-stats__meta">11 платежей</div></div>
+        <div className="t-stats__cell"><div className="t-stats__label">Ожидается</div><div className="t-stats__value">24 000 ₽</div><div className="t-stats__meta">2 ученика</div></div>
+        <div className="t-stats__cell"><div className="t-stats__label">Долг</div><div className="t-stats__value">12 000 ₽</div><div className="t-stats__meta">1 ученик</div></div>
+        <div className="t-stats__cell"><div className="t-stats__label">Ср. чек / мес</div><div className="t-stats__value">18 500 ₽</div><div className="t-stats__meta">по 28 ученикам</div></div>
+      </div>
+      <section className="t-section">
+        <div className="t-section__header"><h2>Платежи этого месяца</h2><span className="t-section__meta">{payments.length} записей</span></div>
+        <hr className="t-divider" />
+        {payments.map(p => <PaymentRow key={p.id} p={p} />)}
+      </section>
+    </>
+  );
+}
+
+function PlansStub() {
+  return (
+    <>
+      <PageHeader title="Тарифы" meta="Управление пакетами занятий" primary={<Button variant="primary" size="md" icon="plus">Новый тариф</Button>} />
+      <div className="t-grid-3">
+        {[
+          { name:"4 занятия / мес",  price:"12 000 ₽", who:"12 учеников" },
+          { name:"8 занятий / мес",  price:"20 000 ₽", who:"14 учеников" },
+          { name:"Индивидуальный",    price:"по запросу", who:"2 ученика" },
+        ].map(pl => (
+          <div key={pl.name} className="t-card">
+            <div className="t-card__body">
+              <div className="t-card__title" style={{marginBottom:4}}>{pl.name}</div>
+              <div className="t-muted" style={{fontSize:13, marginBottom:10}}>{pl.who}</div>
+              <div className="t-num" style={{fontSize:22, fontWeight:600}}>{pl.price}</div>
+            </div>
+          </div>
+        ))}
+      </div>
+    </>
+  );
+}
+
+function App() {
+  const initial = localStorage.getItem("sokrat.tutor.route") || "dashboard";
+  const [route, setRoute] = useState(ROUTES[initial] ? initial : "dashboard");
+
+  useEffect(() => { localStorage.setItem("sokrat.tutor.route", route); }, [route]);
+
+  // Re-init lucide icons after each route swap (icons mount their own inner SVG; additional new icons appear on the page)
+  useEffect(() => {
+    if (window.lucide && window.lucide.createIcons) {
+      try { window.lucide.createIcons(); } catch(e) {}
+    }
+  }, [route]);
+
+  const r = ROUTES[route] || ROUTES.dashboard;
+  return (
+    <AppFrame
+      side={<SideNav active={NAV_KEY_FOR[route]} onNavigate={(id) => {
+        // Map SideNav IDs to routes. "homework" opens list by default; detail is reachable from the list page in a real app.
+        setRoute(id);
+      }} />}
+      top={<TopBar crumbs={r.crumbs} />}
+    >
+      {r.render()}
+      <DemoRoutePills current={route} onChange={setRoute} />
+    </AppFrame>
+  );
+}
+
+// Small demo helper: lets you jump to detail pages that have no SideNav entry
+function DemoRoutePills({ current, onChange }) {
+  const pills = [
+    { id:"dashboard",       label:"Главная" },
+    { id:"homework",        label:"ДЗ — список" },
+    { id:"homeworkDetail",  label:"ДЗ — детали" },
+    { id:"students",        label:"Ученики" },
+    { id:"studentProfile",  label:"Профиль ученика" },
+    { id:"taskbank",        label:"База задач" },
+    { id:"schedule",        label:"Расписание" },
+    { id:"groups",          label:"Группы" },
+    { id:"payments",        label:"Платежи" },
+  ];
+  return (
+    <div style={{position:"fixed", right:16, bottom:16, zIndex:20, background:"var(--sokrat-card)", border:"1px solid var(--sokrat-border-light)", borderRadius:"var(--sokrat-radius-md)", boxShadow:"var(--sokrat-shadow-md)", padding:"8px 10px", maxWidth:360}}>
+      <div style={{fontSize:11, fontWeight:600, color:"var(--sokrat-fg3)", textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:6}}>Предпросмотр шаблонов</div>
+      <div style={{display:"flex", flexWrap:"wrap", gap:4}}>
+        {pills.map(p => (
+          <button key={p.id}
+            aria-pressed={current === p.id}
+            onClick={()=>onChange(p.id)}
+            className={"t-chip t-chip--filter"}
+            style={{height:28, padding:"0 10px", fontSize:12}}>
+            {p.label}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+const root = ReactDOM.createRoot(document.getElementById("root"));
+root.render(<App />);
+</script>
+</body>
+</html>
