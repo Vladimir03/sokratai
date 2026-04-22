@@ -37,6 +37,14 @@ export interface StudentActivity {
   mockDelta: null;
   attention: boolean;
   attentionReason: string | null;
+  /**
+   * TASK-10: привязка ученика к tutor-group. null = «Без группы».
+   * Fetch через tutor_group_memberships (UNIQUE active per student).
+   * Используется в режиме sort='groups' блока StudentsActivityBlock.
+   */
+  groupId: string | null;
+  groupName: string | null;
+  groupShortName: string | null;
 }
 
 export interface StudentActivityResult {
@@ -147,7 +155,11 @@ async function fetchStudentActivity(): Promise<StudentActivityResult> {
   // Step 1: tutor's students (canonical) + all their assignments in one go.
   // We do NOT paginate here — tutor cohort is <= 28 students in pilot scope,
   // and we cap downstream work by MAX_STUDENTS.
-  const [studentsRes, assignmentsRes] = await Promise.all([
+  // TASK-10: также тянем groups + memberships для режима sort='groups'.
+  // Two extra round-trips добавляют ~50–100 ms и только когда groups
+  // реально нужны (fetch всегда — даже если tutor не использует groups,
+  // query возвращает пустой массив; overhead маргинальный).
+  const [studentsRes, assignmentsRes, groupsRes, membershipsRes] = await Promise.all([
     supabase
       .from('tutor_students')
       .select(`
@@ -165,6 +177,19 @@ async function fetchStudentActivity(): Promise<StudentActivityResult> {
       .from('homework_tutor_assignments')
       .select('id, title, deadline, created_at')
       .eq('tutor_id', tutorUserId),
+    // Groups + memberships — оба ограничены is_active=true. FK на tutor.id.
+    // `as any` cast matches the pattern in src/lib/tutors.ts for these
+    // tables (not yet in the generated Database types).
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (supabase.from('tutor_groups') as any)
+      .select('id, name, short_name')
+      .eq('tutor_id', tutor.id)
+      .eq('is_active', true),
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (supabase.from('tutor_group_memberships') as any)
+      .select('tutor_student_id, tutor_group_id')
+      .eq('tutor_id', tutor.id)
+      .eq('is_active', true),
   ]);
 
   if (studentsRes.error) {
@@ -173,10 +198,31 @@ async function fetchStudentActivity(): Promise<StudentActivityResult> {
   if (assignmentsRes.error) {
     throw new Error(assignmentsRes.error.message ?? 'failed to load assignments');
   }
+  // Groups/memberships errors не блокируют рендер — если упало, fallback
+  // к «Без группы» для всех. Это лучше чем вообще не показать таблицу.
+  if (groupsRes.error) {
+    console.warn('useTutorStudentActivity: failed to load groups', groupsRes.error.message);
+  }
+  if (membershipsRes.error) {
+    console.warn('useTutorStudentActivity: failed to load group memberships', membershipsRes.error.message);
+  }
 
   const students = (studentsRes.data ?? []) as unknown as TutorStudentRow[];
   const totalCount = students.length;
   if (totalCount === 0) return { items: [], totalCount: 0 };
+
+  // TASK-10: groups lookup — tutor_students.id (`s.id`) → group info.
+  // Membership UNIQUE on (tutor_student_id) WHERE is_active=true, так что
+  // per student максимум 1 активная группа.
+  type GroupRow = { id: string; name: string; short_name: string | null };
+  type MembershipRow = { tutor_student_id: string; tutor_group_id: string };
+  const groupsRaw = (groupsRes.data ?? []) as unknown as GroupRow[];
+  const groupById = new Map(groupsRaw.map((g) => [g.id, g]));
+  const groupByStudentId = new Map<string, GroupRow>();
+  for (const m of (membershipsRes.data ?? []) as unknown as MembershipRow[]) {
+    const g = groupById.get(m.tutor_group_id);
+    if (g) groupByStudentId.set(m.tutor_student_id, g);
+  }
 
   const assignments = (assignmentsRes.data ?? []) as AssignmentRow[];
   const assignmentById = new Map(assignments.map((a) => [a.id, a]));
@@ -432,6 +478,8 @@ async function fetchStudentActivity(): Promise<StudentActivityResult> {
       s.profiles?.username?.trim() ||
       'Ученик';
 
+    const group = groupByStudentId.get(s.id) ?? null;
+
     items.push({
       id: s.id,
       name,
@@ -444,6 +492,9 @@ async function fetchStudentActivity(): Promise<StudentActivityResult> {
       mockDelta: null,
       attention,
       attentionReason,
+      groupId: group?.id ?? null,
+      groupName: group?.name ?? null,
+      groupShortName: group?.short_name ?? null,
     });
   }
 

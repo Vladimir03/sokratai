@@ -211,6 +211,20 @@
 
 **Спека:** `docs/delivery/features/tutor-dashboard-v2/phase-1-follow-up-student-activity.md`.
 
+### Group-by-group rendering в StudentsActivityBlock (TASK-10, 2026-04-22)
+
+`StudentsActivityBlock` на `/tutor/home` умеет группировать учеников по `tutor_groups`. Новый режим Segment-sort `'groups'` рендерит interleaved header rows (`role="rowheader"`, `colspan=7`) + student rows в одном `<tbody>`.
+
+**Инварианты:**
+- Default sort = `'groups'` если у репетитора есть хотя бы одна активная группа (`items.some((s) => s.groupId !== null)`). Fallback на `'attention'` когда 0 групп.
+- Группы сортируются alphabetically по `short_name || name` (`localeCompare('ru')`). Секция «Без группы» всегда в конце.
+- `tutor_group_memberships` имеет UNIQUE constraint `(tutor_student_id) WHERE is_active=true` — один активный membership на ученика. Код читает это как `Map<studentId, GroupRow>` (one-to-one). При изменении на multi-group понадобится `Map<studentId, GroupRow[]>` + UI решение про primary group.
+- Fetch groups/memberships errors (RLS / network) не блокируют рендер — hook логгирует warning и продолжает с `groupId=null` для всех → все ученики попадают в «Без группы».
+- `useState` default инициализируется один раз (via lazy initializer). Tutor added/removed группу в другой вкладке — нужен ручной refresh.
+- ActivityRow memoisation сохраняется — `GroupRowsFragment` не применяет `React.memo` (section identity нестабилен между renders), но внутренние `ActivityRow` memoised поштучно.
+
+**Спека:** `docs/delivery/features/tutor-dashboard-v2/phase-1-follow-up-group-by-group.md`.
+
 ### Realtime thread viewer (E9, 2026-04-06)
 - Для live-обновлений треда репетитора таблица `public.homework_tutor_thread_messages` должна быть добавлена в publication `supabase_realtime`
 - Каноничная миграция: `20260406143000_enable_realtime_homework_tutor_thread_messages.sql`

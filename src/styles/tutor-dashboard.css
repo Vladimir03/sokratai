@@ -403,6 +403,23 @@
 .home-activity-table tbody td { height: 44px; }
 .home-activity-table tbody tr:hover td { background: var(--sokrat-surface); }
 
+/* TASK-10: group header row в режиме sort='groups'. Не интерактивная,
+   поэтому no hover / no focus-visible; визуально отличается от student
+   rows чуть более тёмным фоном и компактной высотой. */
+.home-activity-group-header td {
+  height: auto;
+  padding: 10px 12px;
+  background: var(--sokrat-surface);
+  border-top: 1px solid var(--sokrat-border);
+  border-bottom: 1px solid var(--sokrat-border-light);
+}
+.home-activity-group-header:hover td {
+  background: var(--sokrat-surface);
+}
+.home-activity-table tbody > tr:first-child.home-activity-group-header td {
+  border-top: 0;
+}
+
 /* ─── Today session grid (responsive 4-col → 1-col) ───────── */
 .t-session-grid {
   display: grid;

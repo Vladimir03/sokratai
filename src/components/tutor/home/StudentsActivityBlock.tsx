@@ -1,5 +1,5 @@
 import { memo, useMemo, useState, type KeyboardEvent, type ReactNode } from 'react';
-import { AlertTriangle, ChevronRight, UserPlus, Users } from 'lucide-react';
+import { AlertTriangle, ChevronRight, FolderTree, UserPlus, Users } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
   Sparkline,
@@ -12,7 +12,13 @@ import {
   PLURAL_STUDENTS,
 } from '@/lib/ru/pluralize';
 
-export type ActivitySortMode = 'attention' | 'delta' | 'name';
+// TASK-10: добавлен режим 'groups' — группы как заголовки, ученики под ними.
+// Default режим = 'groups' когда у репетитора есть хотя бы одна группа;
+// fallback на 'attention' при отсутствии групп (см. useState инициализацию).
+export type ActivitySortMode = 'groups' | 'attention' | 'delta' | 'name';
+
+const UNASSIGNED_GROUP_LABEL = 'Без группы';
+const UNASSIGNED_GROUP_KEY = '__unassigned__';
 
 export interface StudentsActivityBlockProps {
   items: StudentActivity[];
@@ -189,6 +195,67 @@ const ActivityRow = memo(function ActivityRow({ student, onOpen }: RowProps) {
   );
 });
 
+// TASK-10: фрагмент для группы — header row + student rows. React.memo
+// не применяется намеренно: section передаётся как новый объект из
+// useMemo родителя при каждом ребилде sorted; внутренние ActivityRow
+// уже memoised поштучно. Оборачивать всю группу в memo без стабильного
+// section identity бесполезно.
+function GroupRowsFragment({
+  section,
+  onOpenStudent,
+}: {
+  section: { key: string; label: string; students: StudentActivity[] };
+  onOpenStudent: (id: string) => void;
+}) {
+  return (
+    <>
+      <tr
+        className="home-activity-group-header"
+        role="rowheader"
+        aria-label={`Группа ${section.label}, ${section.students.length} ${pluralize(
+          section.students.length,
+          PLURAL_STUDENTS,
+        )}`}
+      >
+        <td colSpan={7}>
+          <span
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 8,
+              fontSize: 12,
+              fontWeight: 600,
+              textTransform: 'uppercase',
+              letterSpacing: '0.06em',
+              color: 'var(--sokrat-fg2)',
+            }}
+          >
+            <FolderTree
+              size={14}
+              aria-hidden="true"
+              style={{ color: 'var(--sokrat-fg3)' }}
+            />
+            <span>{section.label}</span>
+            <span
+              className="t-chip t-chip--count"
+              style={{ marginLeft: 4, textTransform: 'none', letterSpacing: 0 }}
+            >
+              {section.students.length}
+            </span>
+          </span>
+        </td>
+      </tr>
+      {section.students.map((student) => (
+        <ActivityRow
+          key={student.id}
+          student={student}
+          onOpen={onOpenStudent}
+        />
+      ))}
+    </>
+  );
+}
+
 function StudentsActivityBlockImpl({
   items,
   totalCount,
@@ -196,7 +263,17 @@ function StudentsActivityBlockImpl({
   onOpenAll,
   onAddStudent,
 }: StudentsActivityBlockProps) {
-  const [sort, setSort] = useState<ActivitySortMode>('attention');
+  // TASK-10: default sort = 'groups' если у репетитора есть ≥ 1 group;
+  // иначе fallback на 'attention' (предыдущий default). Инициализируется
+  // один раз при mount. React state не реагирует на изменение items —
+  // если tutor добавит группу в другой вкладке, понадобится рефреш.
+  const hasAnyGroup = useMemo(
+    () => items.some((s) => s.groupId !== null),
+    [items],
+  );
+  const [sort, setSort] = useState<ActivitySortMode>(() =>
+    hasAnyGroup ? 'groups' : 'attention',
+  );
 
   const attentionCount = useMemo(
     () => items.filter((s) => s.attention).length,
@@ -222,10 +299,43 @@ function StudentsActivityBlockImpl({
         if (deltaDiff !== 0) return deltaDiff;
         return a.name.localeCompare(b.name, 'ru');
       }
+      // 'name' and 'groups' both use alphabetical within-scope ordering.
       return a.name.localeCompare(b.name, 'ru');
     });
     return clone;
   }, [items, sort]);
+
+  // Grouping meta: только для режима 'groups'. Строится из `sorted` так что
+  // внутри каждой группы ученики уже отсортированы alphabetically.
+  // Group order — alphabetically by name; «Без группы» в конце.
+  type GroupSection = {
+    key: string;
+    label: string;
+    students: StudentActivity[];
+  };
+  const groupSections: GroupSection[] = useMemo(() => {
+    if (sort !== 'groups') return [];
+    const sectionsByKey = new Map<string, GroupSection>();
+    for (const s of sorted) {
+      const key = s.groupId ?? UNASSIGNED_GROUP_KEY;
+      const label =
+        s.groupShortName?.trim() || s.groupName?.trim() || UNASSIGNED_GROUP_LABEL;
+      const bucket = sectionsByKey.get(key);
+      if (bucket) {
+        bucket.students.push(s);
+      } else {
+        sectionsByKey.set(key, { key, label, students: [s] });
+      }
+    }
+    const all = Array.from(sectionsByKey.values());
+    // Alphabetical by label, but push «Без группы» to the end regardless.
+    all.sort((a, b) => {
+      if (a.key === UNASSIGNED_GROUP_KEY) return 1;
+      if (b.key === UNASSIGNED_GROUP_KEY) return -1;
+      return a.label.localeCompare(b.label, 'ru');
+    });
+    return all;
+  }, [sort, sorted]);
 
   const metaLabel = `за 5 недель · ${totalCount} ${pluralize(totalCount, PLURAL_STUDENTS)}`;
 
@@ -287,6 +397,25 @@ function StudentsActivityBlockImpl({
             onChange={setSort}
             ariaLabel="Сортировка учеников"
             items={[
+              // TASK-10: «Группы» — default когда hasAnyGroup=true. Если у
+              // репетитора нет групп, кнопка всё равно доступна, но
+              // покажет одну секцию «Без группы».
+              {
+                value: 'groups',
+                ariaLabel: 'Сортировка: по группам',
+                label: (
+                  <span
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 4,
+                    }}
+                  >
+                    <FolderTree size={12} aria-hidden="true" />
+                    Группы
+                  </span>
+                ),
+              },
               {
                 value: 'attention',
                 ariaLabel: `Сортировка: требующие внимания (${attentionCount})`,
@@ -361,13 +490,28 @@ function StudentsActivityBlockImpl({
             </tr>
           </thead>
           <tbody>
-            {sorted.map((student) => (
-              <ActivityRow
-                key={student.id}
-                student={student}
-                onOpen={onOpenStudent}
-              />
-            ))}
+            {sort === 'groups' ? (
+              // TASK-10: grouped render — один tbody с interleaved header
+              // rows. HTML-wise это валидно: group-header rows помечены
+              // `role="rowheader"` для скринридеров, colSpan=7 закрывает
+              // все колонки. Student rows рендерятся через memoised
+              // ActivityRow без изменений.
+              groupSections.map((section) => (
+                <GroupRowsFragment
+                  key={`group-${section.key}`}
+                  section={section}
+                  onOpenStudent={onOpenStudent}
+                />
+              ))
+            ) : (
+              sorted.map((student) => (
+                <ActivityRow
+                  key={student.id}
+                  student={student}
+                  onOpen={onOpenStudent}
+                />
+              ))
+            )}
           </tbody>
         </table>
       </div>
