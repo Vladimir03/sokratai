@@ -24,6 +24,7 @@ const ResetPassword = lazy(() => import("./pages/ResetPassword"));
 const Chat = lazy(() => import("./pages/Chat"));
 const StudentHomework = lazy(() => import("./pages/StudentHomework"));
 const StudentHomeworkDetail = lazy(() => import("./pages/StudentHomeworkDetail"));
+const PublicHomeworkShare = lazy(() => import("./pages/PublicHomeworkShare"));
 const Progress = lazy(() => import("./pages/Progress"));
 const Profile = lazy(() => import("./pages/Profile"));
 const MiniApp = lazy(() => import("./pages/MiniApp"));
@@ -163,6 +164,14 @@ const App = () => (
                   <StudentHomeworkDetail />
                 </Suspense>
               } 
+            />
+            <Route
+              path="/p/:slug"
+              element={
+                <Suspense fallback={<PageLoader />}>
+                  <PublicHomeworkShare />
+                </Suspense>
+              }
             />
             <Route 
               path="/practice" 
