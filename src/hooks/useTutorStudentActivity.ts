@@ -46,8 +46,12 @@ export interface StudentActivityResult {
 
 const WEEK_COUNT = 5;
 const TREND_WINDOW = 6;
-const MAX_STUDENTS = 20;
-const ATTENTION_LIMIT = 15;
+// TASK-9: raised from 20 → 30 for pilot cohort headroom (observed tutors
+// with 24+ students were seeing the table truncated at 17 due to the prior
+// 15-attention + 5-fill ceiling). ATTENTION_LIMIT kept as a named constant
+// for clarity but set equal to MAX_STUDENTS — no secondary truncation.
+const MAX_STUDENTS = 30;
+const ATTENTION_LIMIT = 30;
 const INACTIVE_THRESHOLD_DAYS = 7;
 const SCORE_DROP_DELTA = -0.5; // 5-point scale
 

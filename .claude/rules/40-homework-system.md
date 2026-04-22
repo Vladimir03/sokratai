@@ -196,6 +196,21 @@
 
 **Спека:** `docs/delivery/features/tutor-dashboard-v2/phase-1-follow-up-recent-dialogs.md`.
 
+### Tutor RLS policies on guided-chat tables (TASK-9, 2026-04-22)
+
+На таблицах `homework_tutor_threads`, `homework_tutor_thread_messages`, `homework_tutor_task_states` **обязательны** tutor SELECT policies, если tutor-side UI читает их через PostgREST. Базовая миграция `20260306100000_guided_homework_threads.sql:55-80` создала только student policies; tutor-specific policies добавлены отдельными миграциями:
+
+- `thread_messages` — `20260406173000_enable_tutor_realtime_read_homework_thread_messages.sql` (TASK-7 эпоха)
+- `threads` + `task_states` — `20260422130000_add_tutor_select_policies_on_threads_and_task_states.sql` (TASK-9)
+
+**Invariant:** tutor видит threads / task_states только если он owner соответствующего `homework_tutor_assignments` (`tutor_id = auth.uid()`). Все 3 policies используют один JOIN-chain `thread → student_assignment → assignment.tutor_id = auth.uid()`.
+
+**Write-path** (`UPDATE` / `INSERT` / `DELETE`) для tutor остаётся **только через edge function `homework-api`** (service_role обход RLS). Никаких tutor write policies на этих таблицах нет и не должно быть без обоснованной spec.
+
+**Симптом отсутствия policy:** hook возвращает пустой массив, UI показывает ученика как «Неактивен» / empty weekly strip / нулевая статистика. При добавлении новой tutor-analytics surface, которая читает любую guided-chat таблицу через PostgREST, **обязательно** проверять что соответствующая SELECT policy существует.
+
+**Спека:** `docs/delivery/features/tutor-dashboard-v2/phase-1-follow-up-student-activity.md`.
+
 ### Realtime thread viewer (E9, 2026-04-06)
 - Для live-обновлений треда репетитора таблица `public.homework_tutor_thread_messages` должна быть добавлена в publication `supabase_realtime`
 - Каноничная миграция: `20260406143000_enable_realtime_homework_tutor_thread_messages.sql`
