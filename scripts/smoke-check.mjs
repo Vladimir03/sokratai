@@ -262,4 +262,97 @@ if (!validPhysicsHintCheck.ok) {
 ok("content-specific physics hint passes validator");
 
 console.log("");
+console.log("6. AI image bucket whitelist invariant...");
+
+const imageDomainsPath = path.join(rootDir, "supabase", "functions", "_shared", "image-domains.ts");
+if (!fs.existsSync(imageDomainsPath)) {
+  fail("supabase/functions/_shared/image-domains.ts is missing — required as single source of truth for AI image buckets");
+}
+const imageDomainsContent = readText(imageDomainsPath);
+const bucketsBlockMatch = imageDomainsContent.match(
+  /HOMEWORK_AI_BUCKETS\s*=\s*\[([\s\S]*?)\]\s*as\s+const/,
+);
+if (!bucketsBlockMatch) {
+  fail("HOMEWORK_AI_BUCKETS block not found in _shared/image-domains.ts");
+}
+const allowedBuckets = new Set(
+  Array.from(bucketsBlockMatch[1].matchAll(/["']([a-z0-9_-]+)["']/gi)).map((m) => m[1]),
+);
+if (allowedBuckets.size === 0) {
+  fail("HOMEWORK_AI_BUCKETS appears to be empty");
+}
+ok(`whitelist contains ${allowedBuckets.size} bucket(s): ${[...allowedBuckets].join(", ")}`);
+
+// chat/index.ts must consume the shared module rather than redefining its own list
+const chatIndexPath = path.join(rootDir, "supabase", "functions", "chat", "index.ts");
+const chatIndexContent = readText(chatIndexPath);
+if (!/from\s+["']\.\.\/_shared\/image-domains\.ts["']/.test(chatIndexContent)) {
+  fail("chat/index.ts does not import from _shared/image-domains.ts (whitelist drift risk)");
+}
+ok("chat/index.ts imports the shared whitelist");
+
+// Best-effort DB drift check: query distinct buckets actually referenced in
+// homework_tutor_tasks. Requires VITE_SUPABASE_URL + a key with select access.
+// If env is missing or RLS denies, skip with a warning — never block CI.
+const supabaseUrl = process.env.VITE_SUPABASE_URL;
+const supabaseKey =
+  process.env.SUPABASE_SERVICE_ROLE_KEY ||
+  process.env.VITE_SUPABASE_PUBLISHABLE_KEY ||
+  process.env.SUPABASE_ANON_KEY;
+
+if (!supabaseUrl || !supabaseKey) {
+  warn("DB bucket scan skipped (no VITE_SUPABASE_URL / publishable key in env)");
+} else {
+  const STORAGE_RX = /storage:\/\/([a-z0-9_-]+)\//gi;
+  const collectBuckets = (rows, columns) => {
+    const out = new Set();
+    for (const row of rows ?? []) {
+      for (const col of columns) {
+        const value = row?.[col];
+        if (typeof value !== "string") continue;
+        for (const m of value.matchAll(STORAGE_RX)) {
+          out.add(m[1].toLowerCase());
+        }
+      }
+    }
+    return out;
+  };
+
+  const queryUrl = `${supabaseUrl.replace(/\/+$/, "")}/rest/v1/homework_tutor_tasks?select=task_image_url,solution_image_urls,rubric_image_urls&or=(task_image_url.like.storage://*,solution_image_urls.like.storage://*,rubric_image_urls.like.storage://*)&limit=1000`;
+
+  try {
+    const res = await fetch(queryUrl, {
+      headers: {
+        apikey: supabaseKey,
+        Authorization: `Bearer ${supabaseKey}`,
+        Accept: "application/json",
+      },
+    });
+    if (!res.ok) {
+      warn(`DB bucket scan skipped (HTTP ${res.status} — RLS or key without read access)`);
+    } else {
+      const rows = await res.json();
+      const usedBuckets = collectBuckets(Array.isArray(rows) ? rows : [], [
+        "task_image_url",
+        "solution_image_urls",
+        "rubric_image_urls",
+      ]);
+      if (usedBuckets.size === 0) {
+        ok("no storage:// refs found in homework_tutor_tasks (or none readable)");
+      } else {
+        const drift = [...usedBuckets].filter((b) => !allowedBuckets.has(b));
+        if (drift.length > 0) {
+          fail(
+            `bucket drift: ${drift.join(", ")} found in homework_tutor_tasks but missing from HOMEWORK_AI_BUCKETS in _shared/image-domains.ts. Add them or AI will hallucinate on those tasks.`,
+          );
+        }
+        ok(`DB bucket usage matches whitelist (${[...usedBuckets].join(", ")})`);
+      }
+    }
+  } catch (error) {
+    warn(`DB bucket scan skipped (fetch error: ${error instanceof Error ? error.message : String(error)})`);
+  }
+}
+
+console.log("");
 console.log("=== Smoke Check Complete ===");

@@ -29,6 +29,18 @@
 3. `HWDraftTask` + `DraftTask` содержат новое поле (если оно должно переноситься через корзину и конструктор)
 4. `handleGetStudentAssignment` (student-side API) НЕ селектит поля, которые должны оставаться tutor-only
 
+### AI image bucket whitelist invariant (2026-04-22)
+
+Любой Supabase storage bucket, ссылка на который может попасть в `homework_tutor_tasks.task_image_url`, `solution_image_urls` или `rubric_image_urls`, **обязан** быть перечислен в `supabase/functions/_shared/image-domains.ts::HOMEWORK_AI_BUCKETS`. Если bucket отсутствует в whitelist:
+
+- `chat/index.ts::isValidImageUrl` отклонит signed URL → AI получит только текст «[Задача на фото]» → **галлюцинация** (наблюдаемый случай: KB-задача по электростатике из bucket `kb-attachments` → AI описал термодинамику с P-V диаграммой).
+- `homework-api/guided_ai.ts::evaluateStudentAnswer` и `generateHint` теперь **fail closed** при отсутствии резолвленной картинки + placeholder-тексте (`failure_reason: "task_image_missing"`, telemetry `guided_check_task_image_missing` / `guided_hint_task_image_missing` / `guided_chat_task_image_missing`).
+
+**Перед мержем PR, который добавляет новый storage bucket в KB / homework write-path:**
+1. Расширь `HOMEWORK_AI_BUCKETS` в `supabase/functions/_shared/image-domains.ts`.
+2. `npm run smoke-check` — он SELECTит distinct prefixes из `homework_tutor_tasks.{task_image_url,solution_image_urls,rubric_image_urls}` через `storage://([^/]+)/` и падает, если найден bucket вне whitelist.
+3. Передеплой `chat` и `homework-api` (whitelist используется обоими).
+
 ### Task identity — canonical source of truth (2026-04-10)
 
 `task_id` (UUID FK to `homework_tutor_tasks.id`) — единственный immutable identity для привязки сообщений, AI-контекста и state к задаче. `task_order` — display/sort field, может меняться при reorder.

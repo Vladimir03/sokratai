@@ -104,6 +104,7 @@ export type GuidedCheckFailureReason =
   | "invalid_json"
   | "empty_model_response"
   | "image_fetch_failed"
+  | "task_image_missing"
   | "unknown";
 
 interface GuidedConversationHistoryMessage {
@@ -133,6 +134,8 @@ export interface EvaluateStudentAnswerParams {
   taskImageUrls: string[];
   studentImageUrls?: string[] | null;
   taskOcrText?: string | null;
+  taskId?: string | null;
+  assignmentId?: string | null;
   correctAnswer: string | null;
   rubricText: string | null;
   rubricImageUrls?: string[] | null;
@@ -1420,6 +1423,35 @@ export async function evaluateStudentAnswer(
       inlinePromptImageUrls(effectiveSolutionImageRefs.slice(0, MAX_TASK_IMAGES_FOR_AI)),
       inlinePromptImageUrls((params.studentImageUrls ?? []).slice(0, MAX_GUIDED_CHAT_IMAGES_FOR_AI)),
     ]);
+
+    // Anti-hallucination guard (mirrors chat/index.ts): if the task condition
+    // lives only on an image and that image failed to inline, do NOT call the
+    // LLM — it would invent a plausible problem. Fail closed with a friendly
+    // CHECK_FAILED so the wrong_answer/score is preserved.
+    const expectedTaskImageRefs = (params.taskImageUrls ?? []).filter(
+      (u) => typeof u === "string" && u.trim().length > 0,
+    ).length;
+    const taskTextStr = (params.taskText ?? "").trim();
+    const taskTextIsPlaceholder =
+      taskTextStr.length === 0 ||
+      /\[\s*задача\s+на\s+фото\s*\]|\[\s*task\s+on\s+(?:the\s+)?image\s*\]/i.test(taskTextStr);
+    if (expectedTaskImageRefs > 0 && taskImageUrls.length === 0 && taskTextIsPlaceholder) {
+      console.error(JSON.stringify({
+        event: "guided_check_task_image_missing",
+        subject: params.subject,
+        task_id: params.taskId ?? null,
+        assignment_id: params.assignmentId ?? null,
+        expected_images: expectedTaskImageRefs,
+        task_text_len: taskTextStr.length,
+      }));
+      return {
+        ...CHECK_FALLBACK,
+        feedback:
+          "Не удалось загрузить картинку с условием задачи. Это техническая проблема — попробуй ещё раз через минуту. Баллы не списаны.",
+        failure_reason: "task_image_missing",
+      };
+    }
+
     const messages = buildCheckPrompt({
       ...params,
       taskImageUrls,
@@ -1581,6 +1613,35 @@ export async function generateHint(
       inlinePromptImageUrls((params.studentImageUrls ?? []).slice(0, MAX_GUIDED_CHAT_IMAGES_FOR_AI)),
     ]);
     resolvedTaskImageUrl = taskImageUrls[0] ?? null;
+
+    // Anti-hallucination guard: if the task condition lives only on an image
+    // and we failed to inline it, do NOT call the LLM for a hint — it would
+    // invent a plausible problem. Return a deterministic technical message.
+    const expectedTaskImageRefsHint = (params.taskImageUrls ?? []).filter(
+      (u) => typeof u === "string" && u.trim().length > 0,
+    ).length;
+    const taskTextStrHint = (params.taskText ?? "").trim();
+    const taskTextIsPlaceholderHint =
+      taskTextStrHint.length === 0 ||
+      /\[\s*задача\s+на\s+фото\s*\]|\[\s*task\s+on\s+(?:the\s+)?image\s*\]/i.test(taskTextStrHint);
+    if (
+      expectedTaskImageRefsHint > 0 &&
+      taskImageUrls.length === 0 &&
+      taskTextIsPlaceholderHint
+    ) {
+      console.error(JSON.stringify({
+        event: "guided_hint_task_image_missing",
+        subject: params.subject,
+        expected_images: expectedTaskImageRefsHint,
+        task_text_len: taskTextStrHint.length,
+        ...telemetryMeta,
+      }));
+      return {
+        hint:
+          "Не удалось загрузить картинку с условием задачи. Попробуй ещё раз через минуту — это техническая проблема, не твоя ошибка.",
+      };
+    }
+
     const messages = buildHintPrompt({
       ...params,
       taskImageUrls,
