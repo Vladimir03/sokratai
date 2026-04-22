@@ -5,7 +5,7 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, content-type, x-backfill-secret",
 };
 
-const SECRET = Deno.env.get("SCHEDULER_SECRET") ?? "";
+const SECRET = "f7fe650b73c2dcf14a427ddc16407877c1ff1b0011bdf60c";
 
 function b64encode(buf: ArrayBuffer): string {
   const bytes = new Uint8Array(buf);
