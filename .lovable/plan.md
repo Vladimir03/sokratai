@@ -1,125 +1,158 @@
 
 
-## План: трёхуровневый drill-down «Репетиторы → ДЗ → Ученики → Чат» в админке
+## План: Telegram-style счётчик непрочитанных в «Последние диалоги»
 
-### Что делаем
+### Что не так сейчас
+В `ChatRow.tsx` unread = маленькая 6×6 px точка слева от имени. На скрине 2 её действительно почти не видно. Telegram (скрин 1) показывает синий **бейдж со счётчиком** справа, под временем — это сразу считывается и даёт понимание масштаба «пропустил 3 vs 45 сообщений».
 
-Заменяем плоский список переписок во вкладке «ДЗ» (`AdminHomeworkChats.tsx`) на иерархическую навигацию:
+### Целевой UX (по Telegram)
 
 ```text
-Уровень 1: Репетиторы          — кто и насколько активен
-Уровень 2: ДЗ репетитора        — что задано, как идёт
-Уровень 3: Ученики в ДЗ         — кто и где застрял
-Уровень 4: Чат ученика          — существующий AdminHWThreadView (без изменений)
+┌──────────────────────────────────────────────────────────┐
+│ [V] VladimirKam  ЕГЭ AI                          1 ч  >  │
+│     Задача 1 выполнена! Переходим к задаче 2.    ╭──╮    │
+│                                                  │ 3│    │
+│                                                  ╰──╯    │
+└──────────────────────────────────────────────────────────┘
 ```
 
-Навигация через **drill-down с breadcrumbs** (`Репетиторы › Иван › Оптика №25 › Андрей`). Стрелка «назад» дублирует крошки. Глубокая ссылка не нужна — состояние локальное.
+- **Время** — всегда сверху справа (как сейчас).
+- **Бейдж со счётчиком** — снизу справа, под временем, появляется только если `unreadCount > 0`.
+- Счётчик `>99` отображается как `99+`.
+- Имя становится **жирным** (`font-weight: 700`) при наличии непрочитанных — единственный второй визуальный сигнал, как в Telegram.
+- Точка слева от имени **удаляется**.
 
-### Уровень 1: список репетиторов
+### Цвет бейджа
+Используем уже существующий токен `--sokrat-green-700` (фон) + белый текст — соответствует бренду «Сократ AI» (зелёный — это акцент, а не индиго). Это устранит «красную точку, которая выглядит как ошибка» (текущий `--sokrat-state-warning-fg`). Хук на токены design-system, без новых hex.
 
-Карточка/строка на каждого репетитора, у которого есть хотя бы одно ДЗ. Сортировка по последней активности любого ученика (DESC).
+### Backend: считаем `unreadCount` точно
 
-**Что показываем в строке:**
-- Аватар-инициалы + имя/`@telegram_username`
-- 3 чипа метрик: `ДЗ: всего · активных · завершённых`
-- 1 строка: `N учеников · K активны за 7 дней`
-- Справа (right-aligned, как сейчас): «Последняя активность ученика» — имя + превью + относительное время («2ч», «вчера», «3 апр»)
+Сейчас `handleGetRecentDialogs` (`supabase/functions/homework-api/index.ts:5761`) возвращает `unread: boolean`. Нужен `unreadCount: number` — количество **student-сообщений** с `created_at > tutor_last_viewed_at` (или всех student-сообщений, если `tutor_last_viewed_at IS NULL`).
 
-**Поиск:** одна строка ввода — фильтрует по имени репетитора и `@telegram_username`. Без табов — простота важнее сегментов.
+**Изменения в `handleGetRecentDialogs`:**
 
-### Уровень 2: ДЗ выбранного репетитора
+1. Расширить выборку `homework_tutor_thread_messages`:
+   - Уже грузим до `pickedThreadIds.length * 12` сообщений за один batch — этого мало для подсчёта (если ученик прислал 50 сообщений после визита — недосчитаем). Делаем отдельный SELECT count по группам:
+   ```ts
+   // Per-thread unread count: count student messages where created_at > viewed_at.
+   // Один query через .or() с массивом условий per thread тяжело; вместо этого —
+   // n легких COUNT-запросов через Promise.all (n ≤ 5, RECENT_DIALOGS_DISPLAY_LIMIT).
+   const unreadCounts = await Promise.all(
+     pickedThreads.map(async (t) => {
+       const viewedAtIso = t.tutor_last_viewed_at ?? '1970-01-01T00:00:00Z';
+       const { count } = await db
+         .from('homework_tutor_thread_messages')
+         .select('id', { count: 'exact', head: true })
+         .eq('thread_id', t.id)
+         .eq('role', 'user')
+         .neq('visible_to_student', false)
+         .gt('created_at', viewedAtIso);
+       return { threadId: t.id, count: count ?? 0 };
+     }),
+   );
+   ```
+   `n ≤ 5` (`RECENT_DIALOGS_DISPLAY_LIMIT`) — нагрузка приемлема, индекс `(thread_id, created_at)` уже эффективен.
 
-Заголовок: имя репетитора + сводка (всего ДЗ, всего учеников). Список его ДЗ, сортировка по последнему сообщению в любом треде (DESC).
+2. В сборке `items`:
+   ```ts
+   const unreadCount = unreadMap.get(t.id) ?? 0;
+   const unread = unreadCount > 0; // оставляем boolean для backward-compat
+   return { ..., unread, unreadCount, ... };
+   ```
 
-**Что показываем в строке ДЗ:**
-- Заголовок ДЗ + предмет (chip) + `exam_type` (chip ЕГЭ/ОГЭ если есть)
-- Прогресс: `X/Y учеников сдали` + горизонтальный progress-bar
-- 3 микро-чипа: `активны · в процессе · не приступали` (3 числа в одной строке, цветовое кодирование уже есть в системе)
-- Справа: «Последнее сообщение» — имя ученика + превью + время
+3. `RecentDialogItem` (тип) в `src/lib/tutorHomeworkApi.ts` получает `unreadCount: number`.
 
-**Поиск:** по названию ДЗ внутри уровня.
+### Frontend: рендер бейджа
 
-### Уровень 3: ученики в выбранном ДЗ
+**`src/hooks/useTutorRecentDialogs.ts`:**
+- Добавить `unreadCount: number` в `DialogItem`.
+- В `mapItem` пробрасывать `unreadCount: raw.unreadCount ?? 0` (graceful fallback пока не задеплоилась edge-функция).
 
-Заголовок: название ДЗ + статус + summary. Список учеников этого ДЗ.
+**`src/components/tutor/home/primitives/ChatRow.tsx`:**
+- Удалить строку с 6×6 точкой (line ~76–88).
+- Имя: оставить `fontWeight: chat.unread ? 700 : 600` — теперь это вторичный сигнал.
+- В правом столбце (где сейчас только `<ChevronRight>`) — стек: время сверху (мигрирует из `chat-row__top`), счётчик-бейдж снизу.
 
-**Что показываем в строке ученика** (это уже почти текущий `ThreadList`, переиспользуем):
-- Аватар + имя/`@telegram_username`
-- Статус треда (Активен / Завершён / Не приступал)
-- Сообщ. count + относительное время последнего обновления
-- Превью последнего сообщения
+Структура правого столбца:
+```tsx
+<span className="chat-row__meta">
+  <span className="chat-row__time">{chat.at}</span>
+  {chat.unreadCount > 0 && (
+    <span
+      className="chat-row__badge"
+      aria-label={`${chat.unreadCount} непрочитанных сообщений`}
+    >
+      {chat.unreadCount > 99 ? '99+' : chat.unreadCount}
+    </span>
+  )}
+</span>
+<ChevronRight ... />
+```
 
-**Клик** → существующий `AdminHWThreadView` (Уровень 4) без изменений.
+ARIA-метка строки расширяется: вместо «есть непрочитанные» → `${unreadCount} непрочитанных`.
 
-### Уровень 4: чат
+### CSS (`src/styles/tutor-dashboard.css`)
 
-Уже реализован в `AdminHWThreadView`. Только меняем `onBack` → возврат на Уровень 3 с сохранёнными breadcrumbs.
+Дополнить (additive):
+```css
+.chat-row__meta {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+  flex: none;
+}
 
----
+.chat-row__badge {
+  min-width: 20px;
+  height: 20px;
+  padding: 0 7px;
+  border-radius: 10px;
+  background: var(--sokrat-green-700);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 20px;
+  text-align: center;
+  display: inline-block;
+}
+```
 
-### Технические детали
+Время (`.chat-row__time`) уже стилизовано — оставляем как есть, просто переносим из `chat-row__top` в `chat-row__meta`. Из `__top` уходит `chat.at`.
 
-**Новые файлы** (выносим из 515-строчного `AdminHomeworkChats.tsx`):
-- `src/components/admin/homework/AdminHomeworkChats.tsx` — корневой контейнер с breadcrumbs + state machine `{ view: 'tutors' | 'assignments' | 'students' | 'thread', tutorId?, assignmentId?, threadId? }`
-- `src/components/admin/homework/AdminTutorList.tsx` — Уровень 1
-- `src/components/admin/homework/AdminTutorAssignmentList.tsx` — Уровень 2
-- `src/components/admin/homework/AdminAssignmentStudentList.tsx` — Уровень 3
-- `src/components/admin/homework/AdminHomeworkBreadcrumbs.tsx` — крошки (одна для всех уровней)
-- `src/components/admin/homework/AdminHWThreadView.tsx` — Уровень 4 (вырезаем существующий код, без правок)
-- `src/lib/adminHomeworkApi.ts` — все запросы; разбиваем по уровням, чтобы не тащить тяжёлые данные на верхних
+### Что НЕ делаем
 
-**Старый `AdminHomeworkChats.tsx`** — превращается в один re-export, чтобы импорт в `Admin.tsx` не сломался.
-
-**Запросы (минимально, без N+1):**
-
-Уровень 1 — один проход:
-1. `homework_tutor_assignments` → берём `tutor_id`, `id`, `status`
-2. `tutors` (по `user_id IN (...)`) → имя, `telegram_username`
-3. `homework_tutor_student_assignments` (по `assignment_id IN (...)`) → подсчёт учеников per tutor + active за 7 дней (через `notified_at` / `delivery_status` нерелевантно — берём из `homework_tutor_threads.last_student_message_at >= now() - 7d`)
-4. `homework_tutor_threads` — для last activity per tutor берём MAX(`last_student_message_at`) сгруппированно client-side
-5. Превью последнего сообщения per tutor — один запрос `homework_tutor_thread_messages` с `role='user'` order by created_at desc limit ~200, dedup client-side (паттерн уже использован в `useTutorRecentDialogs.ts` — переиспользуем подход)
-
-Уровень 2 — фильтр по `tutor_id`, аналогичный паттерн но в рамках одного репетитора (быстро).
-
-Уровень 3 — фактически текущая логика `fetchThreads`, фильтрованная по `assignment_id`.
-
-**Кэш:** простой `useState` без react-query — соответствует текущему стилю файла (никакой react-query там сейчас нет). Refresh при возврате на уровень не делаем — данные «свежие на момент входа», явная кнопка-иконка «обновить» в шапке breadcrumbs.
-
-**Оптимизация:** на Уровне 1 limit на `homework_tutor_threads` нет, но запросы агрегативные (по `tutor_id`-фильтру через JOIN-карту в JS). При 50 репетиторах × 200 ДЗ × 5 студентов = 50К строк threads — приемлемо для админки, но если в проде уже больше — добавим RPC `admin_homework_tutors_overview()` отдельной итерацией. Сейчас — без RPC, чтобы доставить быстро.
-
-### UX-делайт (умеренно)
-
-- Breadcrumbs: каждый segment кликабелен (откатывает уровень). Текущий segment жирным, без ссылки.
-- Hover на строке репетитора/ДЗ → лёгкий fade `bg-muted/50` (как сейчас в `ThreadList`).
-- Пустые состояния:
-  - Уровень 1: «Пока нет репетиторов с домашками»
-  - Уровень 2: «У этого репетитора нет ДЗ»
-  - Уровень 3: «В этом ДЗ ещё нет назначенных учеников»
-- Skeleton loaders на каждом уровне — те же 5 строк по 16px высоты, как сейчас.
-- Цветовые чипы статусов унифицированы с уже существующими в `AdminHomeworkChats` (зелёный «Активен», серый «Завершён»).
-
-### Что НЕ делаем (вне scope)
-
-- Не меняем `AdminHWThreadView` (внутренний рендер чата) — только `onBack`.
-- Не добавляем графики/heatmap по репетиторам — это отдельная аналитика.
-- Не вводим RPC и индексы — оптимизация после замера на проде.
-- Не добавляем фильтры «активные за 7д / простаивают» — пользователь выбрал минимум (только сортировка + поиск).
-- Не делаем глубокие URL-ссылки (`/admin?tab=hw&tutor=...`) — для пилотной аналитики не критично.
+- Не трогаем `tutor_last_viewed_at` schema/index — уже есть.
+- Не трогаем POST `/threads/:id/viewed-by-tutor` — он уже корректно сбрасывает счётчик при открытии чата.
+- Не вводим realtime-подписку на счётчик — refetch на focus + 30s staleTime достаточно для пилота (согласовано с текущим UX).
+- Не меняем «Все чаты», другие блоки `/tutor/home` или другие экраны.
 
 ### Файлы
 
-**Новые:** 6 файлов в `src/components/admin/homework/` + `src/lib/adminHomeworkApi.ts`.
-
 **Изменяются:**
-- `src/components/admin/AdminHomeworkChats.tsx` → тонкий re-export или удаление + правка импорта в `Admin.tsx`.
-- `src/pages/Admin.tsx` (если импорт нужно обновить).
+- `supabase/functions/homework-api/index.ts` — `handleGetRecentDialogs` + `RecentDialogItem` type (если есть).
+- `src/lib/tutorHomeworkApi.ts` — добавить `unreadCount` в `RecentDialogItem`.
+- `src/hooks/useTutorRecentDialogs.ts` — `unreadCount` в `DialogItem` + `mapItem`.
+- `src/components/tutor/home/primitives/ChatRow.tsx` — удалить точку, добавить бейдж, перенести время.
+- `src/styles/tutor-dashboard.css` — `.chat-row__meta`, `.chat-row__badge`.
 
-**Не трогаем:** `AdminHWThreadView` логика рендера, RLS, edge functions, БД.
+**Не трогаем:**
+- DB-схема, миграции, RLS.
+- POST `/viewed-by-tutor` логика.
+- `RecentDialogsBlock.tsx` (контейнер).
+- Другие потребители `DialogItem`.
+
+### Деплой
+
+1. Деплой edge-функции `homework-api` (новое поле `unreadCount` в response).
+2. Frontend rebuild — `npm run build`.
+3. Никаких новых secrets / migrations.
 
 ### Валидация
 
 1. `npm run lint && npm run build && npm run smoke-check`.
-2. Manual: `/admin → ДЗ` → видим репетиторов; кликаем → видим ДЗ; кликаем → видим учеников; кликаем → существующий чат-вью без регрессий.
-3. Breadcrumbs: клик по «Репетиторы» из чата откатывает на корень, не теряя данных.
-4. Поиск работает на каждом уровне независимо.
+2. На `/tutor/home`: чаты с непрочитанными показывают зелёный бейдж со счётчиком справа под временем + жирное имя. Чаты без непрочитанных — без бейджа, имя обычной плотности.
+3. Открыть чат → вернуться на `/tutor/home` → бейдж исчез (через `invalidateQueries` который уже есть).
+4. Если у студента >99 непрочитанных → отображается `99+`.
+5. Точка слева от имени отсутствует.
 
