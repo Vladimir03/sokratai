@@ -5104,9 +5104,14 @@ async function handleCheckAnswer(
     return jsonError(cors, 500, "DB_ERROR", "Failed to save answer message");
   }
 
-  // Update last_student_message_at
+  // Update last_student_message_at AND thread.updated_at. Consistent with
+  // handleTutorPostMessage — keeps thread.updated_at an honest "last thread
+  // activity" timestamp for downstream consumers (e.g. /recent-dialogs).
   await db.from("homework_tutor_threads")
-    .update({ last_student_message_at: new Date().toISOString() })
+    .update({
+      last_student_message_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    })
     .eq("id", threadId);
 
   // Resolve task/rubric images into AI-compatible data URLs, latest student
@@ -5452,9 +5457,13 @@ async function handleRequestHint(
     message_kind: "hint_request",
   });
 
-  // Update last_student_message_at
+  // Update last_student_message_at AND thread.updated_at (see handleCheckAnswer
+  // for rationale — thread.updated_at остаётся honest "last activity" field).
   await db.from("homework_tutor_threads")
-    .update({ last_student_message_at: new Date().toISOString() })
+    .update({
+      last_student_message_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    })
     .eq("id", threadId);
 
   // Resolve task/rubric/solution images into AI-compatible data URLs, latest
@@ -5735,11 +5744,23 @@ async function handleTutorPostMessage(
 // молча теряют строки при drift RLS. Единый серверный aggregation
 // консистентен с handleGetThread / handleGetResults.
 
-const RECENT_DIALOGS_PREFETCH_LIMIT = 50;
+// Pilot-scale pre-fetch: ≤ 30 tutor students × ≤ few active assignments ≈
+// well under 200 threads. We intentionally skip SQL ORDER BY because no
+// single DB column is reliably bumped on every action — check/hint paths
+// only update last_student_message_at, task-advance only task_states. Sort
+// happens in Deno over the enriched (latestEventAt) set. Cap at 500 as a
+// safety ceiling; a tutor with that many active threads will get RPC-based
+// aggregation in Phase 2 (parking lot).
+const RECENT_DIALOGS_PREFETCH_LIMIT = 500;
 const RECENT_DIALOGS_DISPLAY_LIMIT = 5;
 
 type RecentDialogKind = "task_opened" | "conversation";
-type RecentDialogAuthor = "student" | "tutor" | "ai" | "system";
+// Wire-level lastAuthor is intentionally limited to TASK-7 legacy values so
+// old clients (that don't know kind='task_opened') still render a sensible
+// chip in Case A — 'ai' is closest: it's the bot-driven advance/intro. New
+// clients branch on `kind` and ignore lastAuthor for Case A, rendering
+// system-style «Открыл задачу №N» with a BookOpen icon instead.
+type RecentDialogAuthor = "student" | "tutor" | "ai";
 
 interface RecentDialogItem {
   kind: RecentDialogKind;
@@ -5787,20 +5808,17 @@ async function handleGetRecentDialogs(
   tutorUserId: string,
   cors: Record<string, string>,
 ): Promise<Response> {
-  // 1. Load candidate threads belonging to the tutor. We widen the fetch
-  //    beyond «has student message» so Case A (ученик открыл задачу, но
-  //    не написал) может попасть в выдачу. `last_task_state_at` (macs per
-  //    thread) вычисляется ниже и участвует в latest-event sort.
-  //
-  //    Order by `updated_at` DESC as the initial broad net — любая запись
-  //    в тред (advance, message, status change) обновляет updated_at.
-  //    После агрегации мы пересортируем по honest latestEventAt.
+  // 1. Load ALL candidate threads belonging to the tutor (no SQL ORDER BY).
+  //    Rationale (review fix): `thread.updated_at` не обновляется в
+  //    handleCheckAnswer / handleRequestHint — ordering by it могло бы
+  //    обрезать свежие Case A/B items из top-50 LIMIT. Honest sort по
+  //    latestEventAt делаем в Deno после enrichment. Limit 500 — safety
+  //    cap для pilot (≤ 30 студентов × ≤ 10 ДЗ << 500).
   type ThreadRow = {
     id: string;
     tutor_last_viewed_at: string | null;
     last_student_message_at: string | null;
     current_task_order: number | null;
-    updated_at: string | null;
     student_assignment_id: string;
     homework_tutor_student_assignments: {
       id: string;
@@ -5822,7 +5840,6 @@ async function handleGetRecentDialogs(
       tutor_last_viewed_at,
       last_student_message_at,
       current_task_order,
-      updated_at,
       student_assignment_id,
       homework_tutor_student_assignments!inner (
         id,
@@ -5840,7 +5857,6 @@ async function handleGetRecentDialogs(
       "homework_tutor_student_assignments.homework_tutor_assignments.tutor_id",
       tutorUserId,
     )
-    .order("updated_at", { ascending: false })
     .limit(RECENT_DIALOGS_PREFETCH_LIMIT);
 
   if (threadsError) {
@@ -6088,7 +6104,10 @@ async function handleGetRecentDialogs(
         studentId,
         name,
         stream,
-        lastAuthor: "system",
+        // `'ai'` wire value keeps TASK-7 clients rendering a sensible chip
+        // until they rebuild. New clients branch on `kind`, ignoring author
+        // chip for Case A (see ChatRow.tsx).
+        lastAuthor: "ai",
         unread,
         unreadCount,
         preview,

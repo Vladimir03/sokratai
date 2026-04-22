@@ -51,9 +51,10 @@ function RecentDialogsBlockImpl({
             aria-hidden="true"
             style={{ color: 'var(--sokrat-fg3)' }}
           />
-          <div className="t-empty__title">Пока нет сообщений от учеников</div>
+          <div className="t-empty__title">Пока нет активности учеников</div>
           <div className="t-empty__body">
-            Как только ученик напишет — диалог появится здесь.
+            Как только ученик откроет задачу или напишет в guided chat —
+            событие появится здесь.
           </div>
           {onAddStudent && (
             <div className="t-empty__cta">

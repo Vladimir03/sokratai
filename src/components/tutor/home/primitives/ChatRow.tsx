@@ -16,14 +16,13 @@ function initialsOf(name: string): string {
   return (first + second).toUpperCase();
 }
 
-// TASK-8: `system` used only for kind='task_opened' — ChatRow для этого
-// случая показывает BookOpen icon вместо author-chip, поэтому system-label
-// напрямую не рендерится; оставляем запись для полноты и a11y aria-label.
+// TASK-8: Wire-level lastAuthor is 'student' | 'tutor' | 'ai'. Backend
+// returns 'ai' for kind='task_opened' (see handleGetRecentDialogs) for
+// legacy-safe rendering — new UI ignores it and branches on `kind` below.
 const AUTHOR_LABEL: Record<DialogItem['lastAuthor'], string> = {
   student: 'Ученик',
   tutor: 'Вы',
   ai: 'AI',
-  system: 'Открытие задачи',
 };
 
 // Uses existing .t-chip tokens defined in src/styles/tutor-dashboard.css
@@ -32,7 +31,6 @@ const AUTHOR_CHIP_CLASS: Record<DialogItem['lastAuthor'], string> = {
   student: 't-chip t-chip--warning',
   tutor: 't-chip t-chip--info',
   ai: 't-chip t-chip--neutral',
-  system: 't-chip t-chip--neutral',
 };
 
 function ChatRowImpl({ chat, onOpen }: ChatRowProps) {
@@ -49,8 +47,14 @@ function ChatRowImpl({ chat, onOpen }: ChatRowProps) {
     }
   };
 
+  // TASK-8 unread contract (spec §4 «Unread extended»):
+  //   `chat.unread`      — общий флаг «есть новое событие» (student message
+  //                        ИЛИ task-advance); драйвит визуал (bold name).
+  //   `chat.unreadCount` — численный counter только по student messages;
+  //                        для Case A всегда 0, поэтому badge только при > 0.
   const unreadCount = chat.unreadCount ?? 0;
-  const hasUnread = unreadCount > 0;
+  const hasUnread = Boolean(chat.unread);
+  const showBadge = unreadCount > 0;
   const badgeText = unreadCount > 99 ? '99+' : String(unreadCount);
 
   const ariaParts = [
@@ -58,7 +62,11 @@ function ChatRowImpl({ chat, onOpen }: ChatRowProps) {
     isTaskOpened
       ? `открыл задачу №${chat.taskOrder ?? '?'} в «${chat.hwTitle}»`
       : `последнее сообщение от ${authorLabel}`,
-    hasUnread ? `${unreadCount} непрочитанных сообщений` : null,
+    showBadge
+      ? `${unreadCount} непрочитанных сообщений`
+      : hasUnread
+        ? 'новое событие'
+        : null,
   ].filter(Boolean);
 
   return (
@@ -117,13 +125,27 @@ function ChatRowImpl({ chat, onOpen }: ChatRowProps) {
       </span>
       <span className="chat-row__meta">
         <span className="chat-row__time">{chat.at}</span>
-        {hasUnread ? (
+        {showBadge ? (
           <span
             className="chat-row__badge"
             aria-label={`${unreadCount} непрочитанных сообщений`}
           >
             {badgeText}
           </span>
+        ) : hasUnread ? (
+          // Case A (task-advance без student message): нет числа, но есть
+          // unread-signal — показываем точку вместо counter.
+          <span
+            aria-hidden="true"
+            style={{
+              width: 8,
+              height: 8,
+              borderRadius: '50%',
+              background: 'var(--sokrat-state-warning-fg)',
+              flex: 'none',
+              display: 'inline-block',
+            }}
+          />
         ) : null}
       </span>
       <ChevronRight

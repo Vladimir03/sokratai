@@ -10,6 +10,11 @@
 
 - **v1.0 (TASK-7, 2026-04-22):** edge function handler + unread + deep-link. Блок показывал только треды с student message (единственный case — «переписка»).
 - **v1.1 (TASK-8, 2026-04-22):** расширение до «Последние действия учеников» — добавлен Case A («ученик открыл задачу, но не написал»); блок поднимает через `task_states.updated_at`; `kind` discriminator в payload; ChatRow рендерит system-style «Открыл задачу №N» для Case A.
+- **v1.1.1 (TASK-8 review fixes, 2026-04-22):** по фидбеку Codex:
+  - **BLOCKER fix**: снята зависимость prefetch-ordering от `thread.updated_at` (handleCheckAnswer / handleRequestHint его не бампят → top-50 мог терять свежие items). Теперь fetch без ORDER BY + LIMIT 500 (pilot safety cap), sort по `latestEventAt` в Deno. Belt-and-suspenders: check/hint теперь тоже обновляют `thread.updated_at` (для будущих consumer-ов).
+  - **HIGH fix**: ChatRow драйвит visual unread от `chat.unread`, counter badge только при `unreadCount > 0`. Case A (нет student messages, но есть task-advance) теперь показывает bold name + dot, без числа.
+  - **MEDIUM fix**: wire-level `lastAuthor` для Case A — `'ai'` (ближайший legacy-safe author), не `'system'`. Старые TASK-7 клиенты рендерят разумный chip; новые — branch на `kind` и игнорируют author для Case A. Тип union сужен до `'student' | 'tutor' | 'ai'`.
+  - **LOW fix**: empty-state copy обновлён — «Пока нет активности учеников» + «Как только ученик откроет задачу или напишет в guided chat — событие появится здесь».
 
 ---
 

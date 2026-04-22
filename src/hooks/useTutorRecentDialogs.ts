@@ -37,8 +37,13 @@ export interface DialogItem {
   studentId: string;
   name: string;
   stream: 'ЕГЭ' | 'ОГЭ';
-  /** 'system' только когда kind='task_opened'. */
-  lastAuthor: 'student' | 'tutor' | 'ai' | 'system';
+  /**
+   * Legacy-safe union ('student' | 'tutor' | 'ai'). For kind='task_opened'
+   * backend returns 'ai' on wire — UI branches on `kind` and ignores
+   * lastAuthor in that case (see ChatRow). Keeping narrow union here
+   * protects old TASK-7 code paths that index AUTHOR_LABEL directly.
+   */
+  lastAuthor: 'student' | 'tutor' | 'ai';
   unread: boolean;
   /**
    * Number of unread student messages — Telegram-style counter badge.

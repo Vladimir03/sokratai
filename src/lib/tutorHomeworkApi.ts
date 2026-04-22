@@ -797,8 +797,13 @@ export interface RecentDialogItem {
   studentId: string;
   name: string;
   stream: 'ЕГЭ' | 'ОГЭ';
-  /** 'system' только для kind='task_opened' (AI / engine advance). */
-  lastAuthor: 'student' | 'tutor' | 'ai' | 'system';
+  /**
+   * Wire values: only TASK-7 legacy set ('student' | 'tutor' | 'ai') so old
+   * clients render a sensible chip for Case A (backend returns 'ai' on wire
+   * for kind='task_opened'). New clients branch on `kind` — ChatRow
+   * ignores lastAuthor for Case A and shows BookOpen + «Задача №N» instead.
+   */
+  lastAuthor: 'student' | 'tutor' | 'ai';
   unread: boolean;
   /**
    * Number of student messages with `created_at > tutor_last_viewed_at`.

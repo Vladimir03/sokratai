@@ -186,9 +186,11 @@
 
 **Инварианты:**
 - `latestEventAt = max(last_student_message_at, max(task_states.updated_at per thread))`. Sort all items `latestEventAt DESC` перед dedup by student.
-- `unread = latestEventAt > tutor_last_viewed_at` — task-advance тоже триггерит unread (не только student message).
+- `unread = latestEventAt > tutor_last_viewed_at` — task-advance тоже триггерит unread (не только student message). **Frontend driver для visual state = `chat.unread` boolean** (bold name + dot при Case A); `unreadCount` рендерится только как Telegram-style counter badge при `> 0`.
 - `unreadCount` для Case A всегда 0 (student не писал) — отдельный COUNT query пропускается.
 - Треды без ни одного signal (`latestEventAt === 0`) отбрасываются — provisioned thread без activity репетитору не нужен.
+- **Prefetch ordering**: handler НЕ использует `.order('updated_at')` — student paths (check/hint) не бампили эту колонку, top-50 LIMIT мог терять свежие items. Fetch без ORDER BY + LIMIT 500 (pilot safety cap), sort по `latestEventAt` в Deno. Belt-and-suspenders: `handleCheckAnswer` / `handleRequestHint` теперь тоже обновляют `thread.updated_at` — для будущих consumer-ов, не критично для recent-dialogs.
+- **Wire-level `lastAuthor` backward compat**: union `'student' | 'tutor' | 'ai'`. Для Case A backend возвращает `'ai'` на wire (legacy-safe fallback). Новый UI branch-ит на `kind` и игнорирует `lastAuthor` в Case A, рендерит BookOpen + «Задача №N».
 - Backward compat: старый deploy edge function без `kind` → фронт дефолтит `'conversation'` в `mapItem`.
 - При расширении signal'ов (e.g. «ученик просмотрел материалы») — добавлять в Deno-side aggregate, не в SQL GROUP BY (PostgREST не умеет).
 
