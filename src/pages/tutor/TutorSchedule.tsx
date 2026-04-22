@@ -23,8 +23,6 @@ import { toast } from 'sonner';
 import { supabase } from '@/lib/supabaseClient';
 import { calculateLessonPaymentAmount } from '@/lib/paymentAmount';
 import { formatCurrency } from '@/lib/formatters';
-import TutorGuard from '@/components/TutorGuard';
-import { TutorLayout } from '@/components/tutor/TutorLayout';
 import { TutorDataStatus } from '@/components/tutor/TutorDataStatus';
 import ConfettiBurst from '@/components/ConfettiBurst';
 import { useTutor, useTutorWeeklySlots, useTutorLessons, useTutorStudents, useTutorReminderSettings, useTutorCalendarSettings, useTutorAvailabilityExceptions, useTutorGroups, useTutorGroupMemberships } from '@/hooks/useTutor';
@@ -3662,17 +3660,14 @@ function TutorScheduleContent() {
 
   if (showInitialSkeleton) {
     return (
-      <TutorLayout>
         <div className="space-y-6">
           <Skeleton className="h-10 w-64" />
           <Skeleton className="h-[500px] w-full" />
         </div>
-      </TutorLayout>
     );
   }
 
   return (
-    <TutorLayout>
       <div className="space-y-4">
         <TutorDataStatus
           error={pageError}
@@ -4099,18 +4094,13 @@ function TutorScheduleContent() {
 
         <ConfettiBurst active={showConfetti} onComplete={() => setShowConfetti(false)} />
       </div>
-    </TutorLayout>
   );
 }
 
 // =============================================
-// Export with guard
+// Export
 // =============================================
 
 export default function TutorSchedule() {
-  return (
-    <TutorGuard>
-      <TutorScheduleContent />
-    </TutorGuard>
-  );
+  return <TutorScheduleContent />;
 }

@@ -1,5 +1,6 @@
 @import "./styles/colors_and_type.css";
 @import "./styles/tutor-dashboard.css";
+@import "./styles/tutor-chrome.css";
 
 @tailwind base;
 @tailwind components;

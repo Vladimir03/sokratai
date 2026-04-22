@@ -1,0 +1,310 @@
+/* ============================================================
+   Сократ AI — Tutor Chrome · helper classes (Phase 2a)
+   Layered over colors_and_type.css + tutor-dashboard.css. No new
+   tokens. Tutor-only. Namespace strictly `t-app` / `t-nav` /
+   `t-mobile-*` — does not collide with tutor-dashboard.css
+   (`t-section`, `t-stats`, `t-table`, `t-chip`, `t-seg`, …) nor
+   with shadcn / Tailwind utilities.
+
+   Scope: the AppFrame shell wrapping every /tutor/* route
+     <div class="sokrat t-app" data-sokrat-mode="tutor">
+       <aside class="t-app__rail"> <SideNav /> </aside>
+       <div class="t-mobile-top"> … </div>
+       <aside class="t-mobile-drawer"> <SideNav /> </aside>
+       <div class="t-mobile-backdrop" />
+       <main class="t-app__main"> <Outlet /> </main>
+     </div>
+
+   Every rule reads only var(--sokrat-*). The only literal colour
+   value is the backdrop rgba(15, 23, 42, 0.5) — handoff default,
+   matches slate-900 @ 50% opacity, no semantic token exists for
+   modal scrims in foundations yet.
+
+   Hard breakpoint: 1024px. Desktop-first shell lives ≥ 1024,
+   mobile top-bar + drawer lives < 1024. No intermediate state.
+   ============================================================ */
+
+
+/* ─── AppFrame · grid root ────────────────────────────────── */
+.t-app {
+  display: grid;
+  grid-template-columns: 1fr;
+  min-height: 100vh;
+  background: var(--sokrat-surface);
+  color: var(--sokrat-fg1);
+}
+@media (min-width: 1024px) {
+  .t-app {
+    grid-template-columns: 240px 1fr;
+  }
+}
+
+
+/* ─── Desktop rail · sticky SideNav container ─────────────── */
+.t-app__rail {
+  display: none;
+  background: var(--sokrat-card);
+  border-right: 1px solid var(--sokrat-border-light);
+  overflow-y: auto;
+  height: 100vh;
+  position: sticky;
+  top: 0;
+}
+@media (min-width: 1024px) {
+  .t-app__rail {
+    display: block;
+  }
+}
+
+
+/* ─── Main area · scroll container for <Outlet /> ─────────── */
+.t-app__main {
+  overflow-y: auto;
+  padding: 20px 24px 80px;
+  min-width: 0;
+}
+@media (max-width: 1023px) {
+  .t-app__main {
+    /* clear mobile top bar (56px) + small gutter */
+    padding-top: 72px;
+  }
+}
+
+
+/* ─── SideNav · inner (shared desktop + mobile drawer) ────── */
+.t-nav {
+  padding: 16px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  height: 100%;
+}
+
+.t-nav__brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px 16px;
+}
+.t-nav__brand img {
+  width: 28px;
+  height: 28px;
+  flex: none;
+}
+.t-nav__brand-name {
+  font-weight: 600;
+  font-size: 15px;
+  color: var(--sokrat-fg1);
+}
+
+.t-nav__group-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--sokrat-fg3);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding: 12px 10px 4px;
+}
+
+.t-nav__item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: var(--sokrat-hit-sm);
+  padding: 0 10px;
+  border-radius: var(--sokrat-radius-sm);
+  color: var(--sokrat-fg2);
+  font-size: 14px;
+  font-weight: 500;
+  text-decoration: none;
+  cursor: pointer;
+  user-select: none;
+  background: transparent;
+  border: 0;
+  width: 100%;
+  text-align: left;
+  font-family: inherit;
+  transition:
+    background var(--sokrat-dur-base) var(--sokrat-ease-smooth),
+    color var(--sokrat-dur-base) var(--sokrat-ease-smooth);
+}
+.t-nav__item:hover {
+  background: var(--sokrat-surface);
+  color: var(--sokrat-fg1);
+}
+.t-nav__item:focus-visible {
+  outline: 2px solid var(--sokrat-green-700);
+  outline-offset: 2px;
+  box-shadow: var(--sokrat-focus-ring);
+}
+.t-nav__item--active {
+  background: var(--sokrat-green-100);
+  color: var(--sokrat-green-800);
+  font-weight: 600;
+}
+.t-nav__item--active:hover {
+  background: var(--sokrat-green-100);
+  color: var(--sokrat-green-800);
+}
+.t-nav__item svg {
+  width: 18px;
+  height: 18px;
+  flex: none;
+}
+
+.t-nav__label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.t-nav__count {
+  margin-left: auto;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--sokrat-fg3);
+  font-variant-numeric: tabular-nums;
+  flex: none;
+}
+.t-nav__item--active .t-nav__count {
+  color: var(--sokrat-green-800);
+}
+
+.t-nav__footer {
+  margin-top: auto;
+  padding: 12px 0 4px;
+  border-top: 1px solid var(--sokrat-border-light);
+}
+
+
+/* ─── Mobile top bar · < 1024 ─────────────────────────────── */
+.t-mobile-top {
+  display: none;
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 40;
+  height: 56px;
+  padding: 0 12px;
+  background: var(--sokrat-card);
+  border-bottom: 1px solid var(--sokrat-border-light);
+  align-items: center;
+  gap: 12px;
+}
+@media (max-width: 1023px) {
+  .t-mobile-top {
+    display: flex;
+  }
+}
+
+.t-mobile-top__hamburger,
+.t-mobile-top__logout {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--sokrat-hit-lg);
+  height: var(--sokrat-hit-lg);
+  background: transparent;
+  border: 0;
+  border-radius: var(--sokrat-radius-sm);
+  color: var(--sokrat-fg2);
+  cursor: pointer;
+  flex: none;
+  transition:
+    background var(--sokrat-dur-base) var(--sokrat-ease-smooth),
+    color var(--sokrat-dur-base) var(--sokrat-ease-smooth);
+}
+.t-mobile-top__hamburger:hover,
+.t-mobile-top__logout:hover {
+  background: var(--sokrat-surface);
+  color: var(--sokrat-fg1);
+}
+.t-mobile-top__hamburger:focus-visible,
+.t-mobile-top__logout:focus-visible {
+  outline: 2px solid var(--sokrat-green-700);
+  outline-offset: 2px;
+  box-shadow: var(--sokrat-focus-ring);
+}
+
+.t-mobile-top__logout {
+  margin-left: auto;
+}
+
+.t-mobile-top__brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--sokrat-fg1);
+  text-decoration: none;
+  min-width: 0;
+  min-height: var(--sokrat-hit-lg);
+  padding: 0 6px;
+  border-radius: var(--sokrat-radius-sm);
+}
+.t-mobile-top__brand img {
+  width: 24px;
+  height: 24px;
+  flex: none;
+}
+.t-mobile-top__brand span {
+  font-weight: 600;
+  font-size: 15px;
+  color: var(--sokrat-fg1);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.t-mobile-top__brand:focus-visible {
+  outline: 2px solid var(--sokrat-green-700);
+  outline-offset: 2px;
+  box-shadow: var(--sokrat-focus-ring);
+}
+
+
+/* ─── Mobile drawer · overlay SideNav ─────────────────────── */
+.t-mobile-drawer {
+  position: fixed;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  z-index: 50;
+  width: 280px;
+  max-width: 85vw;
+  background: var(--sokrat-card);
+  border-right: 1px solid var(--sokrat-border-light);
+  transform: translateX(-100%);
+  transition: transform var(--sokrat-dur-base) var(--sokrat-ease-smooth);
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+}
+.t-mobile-drawer--open {
+  transform: translateX(0);
+}
+/* Desktop safety: drawer must never appear at ≥ 1024 even if state leaks. */
+@media (min-width: 1024px) {
+  .t-mobile-drawer,
+  .t-mobile-backdrop {
+    display: none;
+  }
+}
+
+
+/* ─── Mobile backdrop · fade scrim ────────────────────────── */
+.t-mobile-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 45;
+  /* slate-900 @ 50% — handoff default scrim; foundations token TBD */
+  background: rgba(15, 23, 42, 0.5);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--sokrat-dur-base) var(--sokrat-ease-smooth);
+}
+.t-mobile-backdrop--open {
+  opacity: 1;
+  pointer-events: auto;
+}

@@ -11,8 +11,6 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { toast } from 'sonner';
-import TutorGuard from '@/components/TutorGuard';
-import { TutorLayout } from '@/components/tutor/TutorLayout';
 import { TutorDataStatus } from '@/components/tutor/TutorDataStatus';
 import { useTutorPayments, useTutorStudents } from '@/hooks/useTutor';
 import { 
@@ -235,7 +233,6 @@ function TutorPaymentsContent() {
   // Загрузка
   if (initialLoading) {
     return (
-      <TutorLayout>
         <div className="space-y-6">
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <Skeleton className="h-24" />
@@ -244,12 +241,10 @@ function TutorPaymentsContent() {
           </div>
           <Skeleton className="h-64" />
         </div>
-      </TutorLayout>
     );
   }
-  
+
   return (
-    <TutorLayout>
       <div className="space-y-6">
         <TutorDataStatus
           error={error || studentsError}
@@ -480,7 +475,6 @@ function TutorPaymentsContent() {
           payment={selectedPayment}
         />
       </div>
-    </TutorLayout>
   );
 }
 
@@ -702,13 +696,9 @@ function RemindDialog({ open, onOpenChange, payment }: RemindDialogProps) {
 }
 
 // =============================================
-// Экспорт с защитой
+// Экспорт
 // =============================================
 
 export default function TutorPayments() {
-  return (
-    <TutorGuard>
-      <TutorPaymentsContent />
-    </TutorGuard>
-  );
+  return <TutorPaymentsContent />;
 }

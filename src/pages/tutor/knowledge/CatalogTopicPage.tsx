@@ -3,7 +3,6 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { ArrowLeft } from 'lucide-react';
 import { toast } from 'sonner';
 import { useQueryClient } from '@tanstack/react-query';
-import TutorGuard from '@/components/TutorGuard';
 import { CopyToFolderModal } from '@/components/kb/CopyToFolderModal';
 import { KBStatusCard } from '@/components/kb/KBStatusCard';
 import { KnowledgeBaseFrame } from '@/components/kb/KnowledgeBaseFrame';
@@ -13,7 +12,6 @@ import { ExamBadge } from '@/components/kb/ui/ExamBadge';
 import { SourceBadge } from '@/components/kb/ui/SourceBadge';
 import { StatCounter } from '@/components/kb/ui/StatCounter';
 import { TopicChip } from '@/components/kb/ui/TopicChip';
-import { TutorLayout } from '@/components/tutor/TutorLayout';
 import { useCatalogTasks, useCatalogTasksAll, useMaterials, useSubtopics, useTopic } from '@/hooks/useKnowledgeBase';
 import { useIsModerator } from '@/hooks/useIsModerator';
 import { kbModUnpublish, kbModReassign, parseAttachmentUrls } from '@/lib/kbApi';
@@ -95,7 +93,6 @@ function CatalogTopicContent() {
   };
 
   return (
-    <TutorLayout>
       <KnowledgeBaseFrame>
         <div className="space-y-7">
           <KBStatusCard
@@ -199,14 +196,9 @@ function CatalogTopicContent() {
 
         {copyTask ? <CopyToFolderModal task={copyTask} onClose={() => setCopyTask(null)} /> : null}
       </KnowledgeBaseFrame>
-    </TutorLayout>
   );
 }
 
 export default function CatalogTopicPage() {
-  return (
-    <TutorGuard>
-      <CatalogTopicContent />
-    </TutorGuard>
-  );
+  return <CatalogTopicContent />;
 }

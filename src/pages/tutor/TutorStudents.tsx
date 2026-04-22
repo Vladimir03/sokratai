@@ -12,8 +12,6 @@ import {
   PaginationPrevious 
 } from '@/components/ui/pagination';
 import { UserPlus } from 'lucide-react';
-import TutorGuard from '@/components/TutorGuard';
-import { TutorLayout } from '@/components/tutor/TutorLayout';
 import { TutorDataStatus } from '@/components/tutor/TutorDataStatus';
 import { StudentCard } from '@/components/tutor/StudentCard';
 import { AddStudentDialog } from '@/components/tutor/AddStudentDialog';
@@ -443,7 +441,7 @@ function TutorStudentsContent() {
   };
 
   return (
-    <TutorLayout>
+    <>
       <div className="space-y-6">
         <TutorDataStatus
           error={error || tutorError}
@@ -567,14 +565,10 @@ function TutorStudentsContent() {
           plainPassword={credentialsData.plainPassword}
         />
       )}
-    </TutorLayout>
+    </>
   );
 }
 
 export default function TutorStudents() {
-  return (
-    <TutorGuard>
-      <TutorStudentsContent />
-    </TutorGuard>
-  );
+  return <TutorStudentsContent />;
 }

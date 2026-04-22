@@ -2,7 +2,6 @@ import { useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { ChevronRight, Folder, FolderPlus, Pencil, Plus, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
-import TutorGuard from '@/components/TutorGuard';
 import { CreateFolderModal } from '@/components/kb/CreateFolderModal';
 import { CreateTaskModal } from '@/components/kb/CreateTaskModal';
 import { DeleteFolderDialog } from '@/components/kb/DeleteFolderDialog';
@@ -13,7 +12,6 @@ import { RenameFolderModal } from '@/components/kb/RenameFolderModal';
 import { KBStatusCard } from '@/components/kb/KBStatusCard';
 import { KnowledgeBaseFrame } from '@/components/kb/KnowledgeBaseFrame';
 import { TaskCard } from '@/components/kb/TaskCard';
-import { TutorLayout } from '@/components/tutor/TutorLayout';
 import { useDeleteFolder, useFolder } from '@/hooks/useFolders';
 import { useDeleteTask } from '@/hooks/useKnowledgeBase';
 import { useIsModerator } from '@/hooks/useIsModerator';
@@ -53,7 +51,6 @@ function FolderContent() {
   };
 
   return (
-    <TutorLayout>
       <KnowledgeBaseFrame>
         <div className="space-y-7">
           <KBStatusCard error={error} isFetching={isFetching} onRetry={refetch} />
@@ -275,14 +272,9 @@ function FolderContent() {
           />
         ) : null}
       </KnowledgeBaseFrame>
-    </TutorLayout>
   );
 }
 
 export default function FolderPage() {
-  return (
-    <TutorGuard>
-      <FolderContent />
-    </TutorGuard>
-  );
+  return <FolderContent />;
 }

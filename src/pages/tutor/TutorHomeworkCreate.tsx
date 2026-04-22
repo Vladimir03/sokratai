@@ -8,8 +8,6 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { ArrowLeft, Loader2, ChevronDown, ChevronUp, AlertCircle, Save } from 'lucide-react';
 import { toast } from 'sonner';
-import TutorGuard from '@/components/TutorGuard';
-import { TutorLayout } from '@/components/tutor/TutorLayout';
 import { useTutor, useTutorStudents, useTutorGroups, useTutorGroupMemberships } from '@/hooks/useTutor';
 import {
   createTutorHomeworkAssignment,
@@ -1120,19 +1118,16 @@ function TutorHomeworkCreateContent() {
   // ── Inline success state (Phase 4) — create mode only ──
   if (successResult && !isEditMode) {
     return (
-      <TutorLayout>
         <HWSubmitSuccess
           result={successResult}
           onCreateAnother={handleCreateAnother}
         />
-      </TutorLayout>
     );
   }
 
   // ── Edit mode: loading state ──
   if (isEditMode && editQuery.isLoading) {
     return (
-      <TutorLayout>
         <div className="space-y-6 max-w-2xl mx-auto pb-24 md:pb-6">
           <div className="flex items-center gap-3">
             <Button variant="ghost" size="sm" onClick={handleNavigateBack}>
@@ -1145,14 +1140,12 @@ function TutorHomeworkCreateContent() {
             <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
           </div>
         </div>
-      </TutorLayout>
     );
   }
 
   // ── Edit mode: error state ──
   if (isEditMode && editQuery.isError) {
     return (
-      <TutorLayout>
         <div className="space-y-6 max-w-2xl mx-auto pb-24 md:pb-6">
           <div className="flex items-center gap-3">
             <Button variant="ghost" size="sm" onClick={handleNavigateBack}>
@@ -1168,12 +1161,10 @@ function TutorHomeworkCreateContent() {
             </Button>
           </div>
         </div>
-      </TutorLayout>
     );
   }
 
   return (
-    <TutorLayout>
       <div className="space-y-6 max-w-2xl mx-auto pb-24 md:pb-6">
         {/* Header */}
         <div className="flex items-center gap-3">
@@ -1370,16 +1361,11 @@ function TutorHomeworkCreateContent() {
           isEditMode={isEditMode}
         />
       </div>
-    </TutorLayout>
   );
 }
 
-// ─── Export with guard ───────────────────────────────────────────────────────
+// ─── Export ──────────────────────────────────────────────────────────────────
 
 export default function TutorHomeworkCreate() {
-  return (
-    <TutorGuard>
-      <TutorHomeworkCreateContent />
-    </TutorGuard>
-  );
+  return <TutorHomeworkCreateContent />;
 }

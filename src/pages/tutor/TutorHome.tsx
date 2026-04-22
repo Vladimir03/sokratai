@@ -2,8 +2,6 @@ import { useCallback, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { parseISO, subDays } from 'date-fns';
 import { Skeleton } from '@/components/ui/skeleton';
-import TutorGuard from '@/components/TutorGuard';
-import { TutorLayout } from '@/components/tutor/TutorLayout';
 import { TutorDataStatus } from '@/components/tutor/TutorDataStatus';
 import { AddStudentDialog } from '@/components/tutor/AddStudentDialog';
 import {
@@ -209,8 +207,8 @@ function TutorHomeContent() {
   const showSkeleton = home.loading && !home.anySettled;
 
   return (
-    <TutorLayout>
-      <div className="sokrat" data-sokrat-mode="tutor">
+    <>
+      <div>
         <TutorDataStatus
           error={home.error}
           isFetching={isFetching}
@@ -305,14 +303,10 @@ function TutorHomeContent() {
           navigate(`/tutor/students/${tutorStudentId}`);
         }}
       />
-    </TutorLayout>
+    </>
   );
 }
 
 export default function TutorHome() {
-  return (
-    <TutorGuard>
-      <TutorHomeContent />
-    </TutorGuard>
-  );
+  return <TutorHomeContent />;
 }

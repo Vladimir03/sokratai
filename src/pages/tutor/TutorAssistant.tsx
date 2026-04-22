@@ -1,7 +1,5 @@
 import { Bot, RefreshCw, Lightbulb, ClipboardList } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
-import TutorGuard from '@/components/TutorGuard';
-import { TutorLayout } from '@/components/tutor/TutorLayout';
 
 const jobs = [
   {
@@ -23,7 +21,6 @@ const jobs = [
 
 function TutorAssistantContent() {
   return (
-    <TutorLayout>
       <div className="space-y-8">
         {/* Header */}
         <div className="space-y-1">
@@ -63,14 +60,9 @@ function TutorAssistantContent() {
           <p className="mt-1 text-sm">Скоро здесь появятся инструменты для подготовки к урокам</p>
         </div>
       </div>
-    </TutorLayout>
   );
 }
 
 export default function TutorAssistant() {
-  return (
-    <TutorGuard>
-      <TutorAssistantContent />
-    </TutorGuard>
-  );
+  return <TutorAssistantContent />;
 }

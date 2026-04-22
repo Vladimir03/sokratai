@@ -5,8 +5,6 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { ArrowLeft, Trash2, BookOpen } from 'lucide-react';
-import TutorGuard from '@/components/TutorGuard';
-import { TutorLayout } from '@/components/tutor/TutorLayout';
 import { TutorDataStatus } from '@/components/tutor/TutorDataStatus';
 import { useTutorHomeworkTemplates } from '@/hooks/useTutorHomework';
 import { deleteTutorHomeworkTemplate } from '@/lib/tutorHomeworkApi';
@@ -116,7 +114,6 @@ function TutorHomeworkTemplatesContent() {
   const showSkeleton = loading && templates.length === 0 && !error;
 
   return (
-    <TutorLayout>
       <div className="space-y-6">
         {/* Header */}
         <div className="flex items-center justify-between gap-4">
@@ -202,14 +199,9 @@ function TutorHomeworkTemplatesContent() {
           </div>
         )}
       </div>
-    </TutorLayout>
   );
 }
 
 export default function TutorHomeworkTemplates() {
-  return (
-    <TutorGuard>
-      <TutorHomeworkTemplatesContent />
-    </TutorGuard>
-  );
+  return <TutorHomeworkTemplatesContent />;
 }

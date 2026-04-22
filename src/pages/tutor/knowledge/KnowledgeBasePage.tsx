@@ -2,7 +2,6 @@ import { useCallback, useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Folder, FolderPlus, LayoutGrid, Plus } from 'lucide-react';
 import { toast } from 'sonner';
-import TutorGuard from '@/components/TutorGuard';
 import { CreateFolderModal } from '@/components/kb/CreateFolderModal';
 import { CreateTaskModal } from '@/components/kb/CreateTaskModal';
 import { DeleteFolderDialog } from '@/components/kb/DeleteFolderDialog';
@@ -14,7 +13,6 @@ import { RenameFolderModal } from '@/components/kb/RenameFolderModal';
 import { TopicCard } from '@/components/kb/TopicCard';
 import { FilterChips } from '@/components/kb/ui/FilterChips';
 import { KBSearchInput } from '@/components/kb/ui/KBSearchInput';
-import { TutorLayout } from '@/components/tutor/TutorLayout';
 import { useDeleteFolder, useRootFolders } from '@/hooks/useFolders';
 import { useKBSearch } from '@/hooks/useKBSearch';
 import { useTopics } from '@/hooks/useKnowledgeBase';
@@ -32,7 +30,6 @@ function KnowledgeBaseContent() {
   const [searchQuery, setSearchQuery] = useState('');
 
   return (
-    <TutorLayout>
       <KnowledgeBaseFrame>
         <div className="space-y-8">
           <div className="flex gap-1.5 rounded-2xl bg-socrat-border-light p-1.5">
@@ -73,7 +70,6 @@ function KnowledgeBaseContent() {
           )}
         </div>
       </KnowledgeBaseFrame>
-    </TutorLayout>
   );
 }
 
@@ -327,9 +323,5 @@ function MyBaseHome({ onOpenFolder }: MyBaseHomeProps) {
 }
 
 export default function KnowledgeBasePage() {
-  return (
-    <TutorGuard>
-      <KnowledgeBaseContent />
-    </TutorGuard>
-  );
+  return <KnowledgeBaseContent />;
 }

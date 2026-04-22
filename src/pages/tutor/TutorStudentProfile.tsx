@@ -18,8 +18,6 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { toast } from 'sonner';
-import TutorGuard from '@/components/TutorGuard';
-import { TutorLayout } from '@/components/tutor/TutorLayout';
 import { TutorDataStatus } from '@/components/tutor/TutorDataStatus';
 import {
   useTutor,
@@ -412,20 +410,17 @@ function TutorStudentProfileContent() {
   // Загрузка
   if (initialLoading) {
     return (
-      <TutorLayout>
         <div className="space-y-6">
           <Skeleton className="h-8 w-48" />
           <Skeleton className="h-32 w-full" />
           <Skeleton className="h-64 w-full" />
         </div>
-      </TutorLayout>
     );
   }
-  
+
   // Ошибка или не найден
   if (error || !student) {
     return (
-      <TutorLayout>
         <div className="flex flex-col items-center justify-center py-12">
           <p className="text-muted-foreground mb-4">
             {error || 'Ученик не найден'}
@@ -435,7 +430,6 @@ function TutorStudentProfileContent() {
             Назад к списку
           </Button>
         </div>
-      </TutorLayout>
     );
   }
   
@@ -447,7 +441,6 @@ function TutorStudentProfileContent() {
   const paymentStatus = getPaymentStatus(student.paid_until);
   
   return (
-    <TutorLayout>
       <div className="space-y-6">
         <TutorDataStatus
           error={pageError}
@@ -1112,7 +1105,6 @@ function TutorStudentProfileContent() {
           </DialogContent>
         </Dialog>
       </div>
-    </TutorLayout>
   );
 }
 
@@ -1368,9 +1360,5 @@ function getChatTypeLabel(chatType: string): string {
 // =============================================
 
 export default function TutorStudentProfile() {
-  return (
-    <TutorGuard>
-      <TutorStudentProfileContent />
-    </TutorGuard>
-  );
+  return <TutorStudentProfileContent />;
 }

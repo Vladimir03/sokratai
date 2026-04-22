@@ -8,8 +8,6 @@ import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog';
 import { toast } from 'sonner';
-import TutorGuard from '@/components/TutorGuard';
-import { TutorLayout } from '@/components/tutor/TutorLayout';
 import { TutorDataStatus } from '@/components/tutor/TutorDataStatus';
 import { ResultsHeader } from '@/components/tutor/results/ResultsHeader';
 import { ResultsActionBlock } from '@/components/tutor/results/ResultsActionBlock';
@@ -514,7 +512,7 @@ function TutorHomeworkDetailContent() {
   // Edit now handled by /tutor/homework/:id/edit route
 
   return (
-    <TutorLayout>
+    <>
       <div className="space-y-6">
         {/* Error */}
         <TutorDataStatus
@@ -646,16 +644,12 @@ function TutorHomeworkDetailContent() {
       </Dialog>
 
       {/* Edit dialog removed — now handled by /tutor/homework/:id/edit route */}
-    </TutorLayout>
+    </>
   );
 }
 
 // ─── Export ──────────────────────────────────────────────────────────────────
 
 export default function TutorHomeworkDetail() {
-  return (
-    <TutorGuard>
-      <TutorHomeworkDetailContent />
-    </TutorGuard>
-  );
+  return <TutorHomeworkDetailContent />;
 }

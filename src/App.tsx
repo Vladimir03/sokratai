@@ -47,6 +47,9 @@ const TutorHomework = lazy(() => import("./pages/tutor/TutorHomework"));
 const TutorHomeworkCreate = lazy(() => import("./pages/tutor/TutorHomeworkCreate"));
 const TutorHomeworkDetail = lazy(() => import("./pages/tutor/TutorHomeworkDetail"));
 const TutorHomeworkTemplates = lazy(() => import("./pages/tutor/TutorHomeworkTemplates"));
+const AppFrame = lazy(() =>
+  import("./components/tutor/chrome/AppFrame").then((m) => ({ default: m.AppFrame })),
+);
 
 // Redirect legacy /tutor/homework/:id/results links (Telegram reminders,
 // push notifications) to the unified Detail page.
@@ -266,128 +269,30 @@ const App = () => (
             />
             <Route
               path="/tutor"
-              element={<Navigate to="/tutor/home" replace />}
-            />
-            <Route
-              path="/tutor/home"
               element={
                 <Suspense fallback={<PageLoader />}>
-                  <TutorHome />
+                  <AppFrame />
                 </Suspense>
               }
-            />
-            <Route
-              path="/tutor/dashboard"
-              element={<Navigate to="/tutor/home" replace />}
-            />
-            <Route 
-              path="/tutor/schedule" 
-              element={
-                <Suspense fallback={<PageLoader />}>
-                  <TutorSchedule />
-                </Suspense>
-              } 
-            />
-            <Route 
-              path="/tutor/students" 
-              element={
-                <Suspense fallback={<PageLoader />}>
-                  <TutorStudents />
-                </Suspense>
-              } 
-            />
-            <Route 
-              path="/tutor/students/:tutorStudentId" 
-              element={
-                <Suspense fallback={<PageLoader />}>
-                  <TutorStudentProfile />
-                </Suspense>
-              } 
-            />
-            <Route 
-              path="/tutor/payments" 
-              element={
-                <Suspense fallback={<PageLoader />}>
-                  <TutorPayments />
-                </Suspense>
-              } 
-            />
-            <Route 
-              path="/tutor/homework" 
-              element={
-                <Suspense fallback={<PageLoader />}>
-                  <TutorHomework />
-                </Suspense>
-              } 
-            />
-            <Route
-              path="/tutor/homework/templates"
-              element={
-                <Suspense fallback={<PageLoader />}>
-                  <TutorHomeworkTemplates />
-                </Suspense>
-              }
-            />
-            <Route
-              path="/tutor/homework/create"
-              element={
-                <Suspense fallback={<PageLoader />}>
-                  <TutorHomeworkCreate />
-                </Suspense>
-              }
-            />
-            <Route
-              path="/tutor/homework/:id/edit"
-              element={
-                <Suspense fallback={<PageLoader />}>
-                  <TutorHomeworkCreate />
-                </Suspense>
-              }
-            />
-            <Route
-              path="/tutor/homework/:id"
-              element={
-                <Suspense fallback={<PageLoader />}>
-                  <TutorHomeworkDetail />
-                </Suspense>
-              }
-            />
-            <Route
-              path="/tutor/homework/:id/results"
-              element={<RedirectHomeworkResultsToDetail />}
-            />
-            <Route
-              path="/tutor/assistant"
-              element={
-                <Suspense fallback={<PageLoader />}>
-                  <TutorAssistant />
-                </Suspense>
-              }
-            />
-            <Route
-              path="/tutor/knowledge"
-              element={
-                <Suspense fallback={<PageLoader />}>
-                  <KnowledgeBasePage />
-                </Suspense>
-              }
-            />
-            <Route
-              path="/tutor/knowledge/topic/:topicId"
-              element={
-                <Suspense fallback={<PageLoader />}>
-                  <CatalogTopicPage />
-                </Suspense>
-              }
-            />
-            <Route
-              path="/tutor/knowledge/folder/:folderId"
-              element={
-                <Suspense fallback={<PageLoader />}>
-                  <FolderPage />
-                </Suspense>
-              }
-            />
+            >
+              <Route index element={<Navigate to="/tutor/home" replace />} />
+              <Route path="home" element={<TutorHome />} />
+              <Route path="dashboard" element={<Navigate to="/tutor/home" replace />} />
+              <Route path="schedule" element={<TutorSchedule />} />
+              <Route path="students" element={<TutorStudents />} />
+              <Route path="students/:tutorStudentId" element={<TutorStudentProfile />} />
+              <Route path="payments" element={<TutorPayments />} />
+              <Route path="homework/templates" element={<TutorHomeworkTemplates />} />
+              <Route path="homework/create" element={<TutorHomeworkCreate />} />
+              <Route path="homework/:id/edit" element={<TutorHomeworkCreate />} />
+              <Route path="homework/:id/results" element={<RedirectHomeworkResultsToDetail />} />
+              <Route path="homework/:id" element={<TutorHomeworkDetail />} />
+              <Route path="homework" element={<TutorHomework />} />
+              <Route path="assistant" element={<TutorAssistant />} />
+              <Route path="knowledge/topic/:topicId" element={<CatalogTopicPage />} />
+              <Route path="knowledge/folder/:folderId" element={<FolderPage />} />
+              <Route path="knowledge" element={<KnowledgeBasePage />} />
+            </Route>
             <Route 
               path="/book/:bookingLink" 
               element={

@@ -12,8 +12,6 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Badge } from '@/components/ui/badge';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { Plus, BookOpen, Users, BarChart3, Clock, CheckCircle2, WifiOff, Library, Inbox } from 'lucide-react';
-import TutorGuard from '@/components/TutorGuard';
-import { TutorLayout } from '@/components/tutor/TutorLayout';
 import { TutorDataStatus } from '@/components/tutor/TutorDataStatus';
 import { useTutorHomeworkAssignments } from '@/hooks/useTutorHomework';
 import { cn } from '@/lib/utils';
@@ -316,7 +314,6 @@ function TutorHomeworkContent() {
   }, [refetch]);
 
   return (
-    <TutorLayout>
       <div className="space-y-6">
         {/* Header */}
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
@@ -419,16 +416,11 @@ function TutorHomeworkContent() {
           </div>
         ) : null}
       </div>
-    </TutorLayout>
   );
 }
 
-// ─── Export with guard ───────────────────────────────────────────────────────
+// ─── Export ──────────────────────────────────────────────────────────────────
 
 export default function TutorHomework() {
-  return (
-    <TutorGuard>
-      <TutorHomeworkContent />
-    </TutorGuard>
-  );
+  return <TutorHomeworkContent />;
 }
