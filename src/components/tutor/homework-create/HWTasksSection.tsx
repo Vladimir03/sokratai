@@ -1,4 +1,4 @@
-import { useState, useCallback, useMemo } from 'react';
+import { useState, useCallback, useMemo, lazy, Suspense } from 'react';
 import { Button } from '@/components/ui/button';
 import { Plus, Library } from 'lucide-react';
 import { toast } from 'sonner';
@@ -14,6 +14,16 @@ import {
 import { KBPickerSheet } from '@/components/tutor/KBPickerSheet';
 import { HWTaskCard } from './HWTaskCard';
 import { type DraftTask, createEmptyTask, generateUUID, revokeObjectUrl } from './types';
+
+// Lazy-load the Save-to-KB dialog — it's only needed when the tutor actually
+// clicks BookmarkPlus on a task card in edit-mode. Bundle stays slim for the
+// common «create ДЗ from scratch» path (performance.md: heavy dialogs behind
+// React.lazy + Suspense).
+const SaveTasksToKBDialog = lazy(() =>
+  import('@/components/tutor/homework-reuse/SaveTasksToKBDialog').then((m) => ({
+    default: m.SaveTasksToKBDialog,
+  })),
+);
 
 function inferCheckFormat(kimNumber: number | null): 'short_answer' | 'detailed_solution' {
   if (kimNumber && kimNumber >= 21 && kimNumber <= 26) return 'detailed_solution';
@@ -110,6 +120,13 @@ export interface HWTasksSectionProps {
   onDeferImageDelete?: (storagePath: string) => void;
   /** When true, show confirm dialog before removing a task (active HW) */
   confirmOnRemove?: boolean;
+  /**
+   * homework-reuse-v1 TASK-5 (AC-13): enables per-task «Сохранить в базу»
+   * action. Must be the persisted assignment UUID so backend handler can
+   * validate ownership + resolve tasks. When absent (новое ДЗ без id), per-
+   * task BookmarkPlus icon скрывается — dialog требует реальный assignmentId.
+   */
+  assignmentId?: string | null;
 }
 
 export function HWTasksSection({
@@ -121,8 +138,18 @@ export function HWTasksSection({
   disableTaskAdd,
   onDeferImageDelete,
   confirmOnRemove,
+  assignmentId,
 }: HWTasksSectionProps) {
   const [kbPickerOpen, setKbPickerOpen] = useState(false);
+  const [saveToKbTask, setSaveToKbTask] = useState<DraftTask | null>(null);
+
+  const handleRequestSaveToKB = useCallback(
+    (task: DraftTask) => {
+      if (!assignmentId || !task.id) return;
+      setSaveToKbTask(task);
+    },
+    [assignmentId],
+  );
 
   const handleAdd = useCallback(() => {
     onChange([...tasks, createEmptyTask()]);
@@ -239,6 +266,7 @@ export function HWTasksSection({
           onMoveDown={() => handleMove(i, i + 1)}
           isFirst={i === 0}
           isLast={i === tasks.length - 1}
+          onRequestSaveToKB={assignmentId ? handleRequestSaveToKB : undefined}
         />
       ))}
       {disableTaskAdd && (
@@ -268,6 +296,31 @@ export function HWTasksSection({
         addedKbTaskIds={addedKbTaskIds}
         topicHint={topicHint}
       />
+
+      {/* Per-task save-to-KB dialog (homework-reuse-v1 TASK-5, AC-13). Mounted
+       * only while user is interacting — keeps tree light when the feature is
+       * untouched. `already_in_base_hint` uses kb_source='my' as the
+       * optimistic indicator: actual dedup happens backend-side via fingerprint. */}
+      {saveToKbTask && assignmentId ? (
+        <Suspense fallback={null}>
+          <SaveTasksToKBDialog
+            open={saveToKbTask !== null}
+            onOpenChange={(next) => {
+              if (!next) setSaveToKbTask(null);
+            }}
+            assignmentId={assignmentId}
+            mode="single"
+            tasks={[
+              {
+                id: saveToKbTask.id!,
+                order_num: tasks.findIndex((t) => t.localId === saveToKbTask.localId) + 1,
+                task_text: saveToKbTask.task_text,
+                already_in_base_hint: saveToKbTask.kb_source === 'my',
+              },
+            ]}
+          />
+        </Suspense>
+      ) : null}
     </div>
   );
 }

@@ -986,6 +986,53 @@ export async function updateTutorHomeworkTemplate(
   );
 }
 
+// ─── Save tasks to KB (homework-reuse-v1 TASK-5, AC-10..13) ──────────────────
+//
+// Сохраняет одну или несколько задач ДЗ в «Мою базу» репетитора. Backend
+// делает fingerprint dedup через `kb_normalize_fingerprint` (moderation V2),
+// поэтому повторный save одной и той же задачи возвращает `already_in_base=true`
+// вместо дубликата. Рубрика (`rubric_*`) НЕ копируется — AC-12.
+//
+// `folder_id` ИЛИ `new_folder_name` обязательны: второе создаёт папку inline
+// и возвращает её в `created_folder` для обновления UI-селекта.
+
+export interface SaveTasksToKBPayload {
+  task_ids: string[];
+  folder_id?: string | null;
+  new_folder_name?: string | null;
+}
+
+export interface SaveTasksToKBSavedEntry {
+  task_id: string;
+  kb_task_id: string;
+  already_in_base: boolean;
+  folder_id: string;
+  folder_name: string;
+}
+
+export interface SaveTasksToKBResponse {
+  saved: SaveTasksToKBSavedEntry[];
+  skipped: string[];
+  created_folder: { id: string; name: string } | null;
+}
+
+export async function saveTutorHomeworkTasksToKB(
+  assignmentId: string,
+  payload: SaveTasksToKBPayload,
+): Promise<SaveTasksToKBResponse> {
+  const body: Record<string, unknown> = { task_ids: payload.task_ids };
+  if (payload.folder_id) body.folder_id = payload.folder_id;
+  if (payload.new_folder_name) body.new_folder_name = payload.new_folder_name;
+
+  return requestHomeworkApi<SaveTasksToKBResponse>(
+    `/assignments/${encodeURIComponent(assignmentId)}/save-tasks-to-kb`,
+    {
+      method: 'POST',
+      body: JSON.stringify(body),
+    },
+  );
+}
+
 // ─── Materials API ────────────────────────────────────────────────────────────
 
 const HOMEWORK_MATERIALS_BUCKET = 'homework-materials';

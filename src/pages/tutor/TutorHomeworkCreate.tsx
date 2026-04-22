@@ -1511,6 +1511,7 @@ function TutorHomeworkCreateContent() {
             disableTaskAdd={isEditMode && hasSubmissions}
             onDeferImageDelete={isEditMode ? handleDeferImageDelete : undefined}
             confirmOnRemove={isEditMode && existingAssignment?.assignment.status === 'active'}
+            assignmentId={isEditMode ? editId : null}
           />
         </section>
 

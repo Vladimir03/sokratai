@@ -12,6 +12,7 @@ import {
   Plus,
   ChevronDown,
   ChevronUp,
+  BookmarkPlus,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import {
@@ -366,6 +367,14 @@ export interface HWTaskCardProps {
   onMoveDown?: () => void;
   isFirst?: boolean;
   isLast?: boolean;
+  /**
+   * homework-reuse-v1 TASK-5 (AC-13): if provided AND `task.id` is set, render
+   * a BookmarkPlus action that opens the Save-to-KB dialog for this task only.
+   * Parent (HWTasksSection) owns the dialog lifecycle — HWTaskCard does not
+   * know about the KB API. Icon suppressed when task.id is absent (новый draft,
+   * ещё не сохранён в БД — backend handler требует реальный UUID).
+   */
+  onRequestSaveToKB?: (task: DraftTask) => void;
 }
 
 export function HWTaskCard({
@@ -379,6 +388,7 @@ export function HWTaskCard({
   onMoveDown,
   isFirst,
   isLast,
+  onRequestSaveToKB,
 }: HWTaskCardProps) {
   const taskRefs = useMemo(() => parseAttachmentUrls(task.task_image_path), [task.task_image_path]);
   const rubricRefs = useMemo(() => parseAttachmentUrls(task.rubric_image_paths), [task.rubric_image_paths]);
@@ -838,11 +848,33 @@ export function HWTaskCard({
               </span>
             )}
           </div>
-          {canRemove && (
-            <Button variant="ghost" size="sm" onClick={onRemove}>
-              <Trash2 className="h-4 w-4 text-destructive" />
-            </Button>
-          )}
+          <div className="flex items-center gap-1">
+            {onRequestSaveToKB && task.id ? (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => onRequestSaveToKB(task)}
+                aria-label="Сохранить задачу в мою базу"
+                title="Сохранить в мою базу"
+                className="h-8 w-8 p-0"
+                style={{ touchAction: 'manipulation' }}
+              >
+                <BookmarkPlus className="h-4 w-4 text-muted-foreground" />
+              </Button>
+            ) : null}
+            {canRemove && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={onRemove}
+                aria-label="Удалить задачу"
+                title="Удалить задачу"
+                className="h-8 w-8 p-0"
+              >
+                <Trash2 className="h-4 w-4 text-destructive" />
+              </Button>
+            )}
+          </div>
         </div>
 
         <div className="space-y-2">

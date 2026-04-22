@@ -3399,6 +3399,334 @@ async function handleUpdateTemplate(
   return jsonOk(cors, updated);
 }
 
+// ─── Endpoint: POST /assignments/:id/save-tasks-to-kb (homework-reuse-v1 TASK-5) ──
+//
+// Bulk-saves tasks из ДЗ в «Мою базу» репетитора (kb_tasks, owner_id=me).
+// Reuse KB fingerprint dedup: if a task with the same fingerprint already
+// exists in the tutor's base, мы возвращаем её как `already_in_base` вместо
+// создания дубликата. Fingerprint закрывает все три провенанса ровно (KB→my,
+// KB→catalog, ручной ввод) — не надо спец-кейсить `homework_kb_tasks` join.
+//
+// Anti-leak: rubric_text / rubric_image_urls НИКОГДА не копируются в KB
+// (AC-12 — рубрика ДЗ-специфична, не сущность задачи).
+//
+// Spec: docs/delivery/features/homework-reuse-v1/spec.md AC-10..AC-13.
+
+const MAX_SAVE_TO_KB_NEW_FOLDER_NAME_LEN = 120;
+const MAX_SAVE_TO_KB_TASKS_PER_CALL = 50;
+
+async function handleSaveTasksToKB(
+  db: SupabaseClient,
+  tutorUserId: string,
+  assignmentId: string,
+  body: unknown,
+  cors: Record<string, string>,
+): Promise<Response> {
+  // Ownership check на ДЗ — без этого tutor-leak (сохранение чужих задач через URL).
+  const assignmentOrErr = await getOwnedAssignmentOrThrow(db, assignmentId, tutorUserId, cors);
+  if (assignmentOrErr instanceof Response) return assignmentOrErr;
+
+  if (!body || typeof body !== "object") {
+    return jsonError(cors, 400, "INVALID_BODY", "Request body must be a JSON object");
+  }
+  const b = body as Record<string, unknown>;
+
+  if (!Array.isArray(b.task_ids) || b.task_ids.length === 0) {
+    return jsonError(cors, 400, "VALIDATION", "task_ids must be a non-empty array");
+  }
+  if (b.task_ids.length > MAX_SAVE_TO_KB_TASKS_PER_CALL) {
+    return jsonError(
+      cors,
+      400,
+      "VALIDATION",
+      `task_ids length must be ≤ ${MAX_SAVE_TO_KB_TASKS_PER_CALL}`,
+    );
+  }
+  for (const tid of b.task_ids as unknown[]) {
+    if (!isUUID(tid)) {
+      return jsonError(cors, 400, "VALIDATION", "task_ids must contain valid UUIDs");
+    }
+  }
+  const taskIds = Array.from(new Set(b.task_ids as string[]));
+
+  const folderIdIn = b.folder_id;
+  const newFolderNameIn = b.new_folder_name;
+  const hasFolderId = isNonEmptyString(folderIdIn);
+  const hasNewFolderName = isNonEmptyString(newFolderNameIn);
+
+  if (!hasFolderId && !hasNewFolderName) {
+    return jsonError(
+      cors,
+      400,
+      "VALIDATION",
+      "Either folder_id or new_folder_name is required",
+    );
+  }
+  if (hasFolderId && !isUUID(folderIdIn)) {
+    return jsonError(cors, 400, "VALIDATION", "folder_id must be a UUID");
+  }
+  if (
+    hasNewFolderName &&
+    (newFolderNameIn as string).trim().length > MAX_SAVE_TO_KB_NEW_FOLDER_NAME_LEN
+  ) {
+    return jsonError(
+      cors,
+      400,
+      "VALIDATION",
+      `new_folder_name must be ≤ ${MAX_SAVE_TO_KB_NEW_FOLDER_NAME_LEN} chars`,
+    );
+  }
+
+  // Step 1: resolve destination folder — validate existing или create new.
+  let folderId: string;
+  let folderName: string;
+  let createdFolder: { id: string; name: string } | null = null;
+
+  if (hasNewFolderName) {
+    const nameTrimmed = (newFolderNameIn as string).trim();
+    if (!nameTrimmed) {
+      return jsonError(cors, 400, "VALIDATION", "new_folder_name must not be empty");
+    }
+    // Dedup by (owner_id, parent_id=NULL, name) — чтобы клик по «Создать новую
+    // папку» дважды подряд не плодил «Физика» близнецов.
+    const { data: existingFolders, error: existingErr } = await db
+      .from("kb_folders")
+      .select("id, name")
+      .eq("owner_id", tutorUserId)
+      .is("parent_id", null)
+      .ilike("name", nameTrimmed);
+    if (existingErr) {
+      console.error("homework_api_request_error", {
+        route: "POST /assignments/:id/save-tasks-to-kb",
+        error: existingErr.message,
+      });
+      return jsonError(cors, 500, "DB_ERROR", "Failed to check existing folder");
+    }
+    const existing = (existingFolders ?? []).find(
+      (f) =>
+        typeof f.name === "string" &&
+        f.name.trim().toLowerCase() === nameTrimmed.toLowerCase(),
+    );
+    if (existing) {
+      folderId = existing.id as string;
+      folderName = existing.name as string;
+    } else {
+      const { data: inserted, error: folderErr } = await db
+        .from("kb_folders")
+        .insert({
+          owner_id: tutorUserId,
+          parent_id: null,
+          name: nameTrimmed,
+        })
+        .select("id, name")
+        .single();
+      if (folderErr || !inserted) {
+        console.error("homework_api_request_error", {
+          route: "POST /assignments/:id/save-tasks-to-kb",
+          error: folderErr?.message,
+        });
+        return jsonError(cors, 500, "DB_ERROR", "Failed to create folder");
+      }
+      folderId = inserted.id as string;
+      folderName = inserted.name as string;
+      createdFolder = { id: folderId, name: folderName };
+    }
+  } else {
+    // Validate ownership of provided folder_id (service_role обходит RLS).
+    const { data: folderRow, error: folderErr } = await db
+      .from("kb_folders")
+      .select("id, name, owner_id")
+      .eq("id", folderIdIn as string)
+      .maybeSingle();
+    if (folderErr || !folderRow) {
+      return jsonError(cors, 404, "NOT_FOUND", "Folder not found");
+    }
+    if (folderRow.owner_id !== tutorUserId) {
+      return jsonError(cors, 403, "FORBIDDEN", "Folder does not belong to you");
+    }
+    folderId = folderRow.id as string;
+    folderName = folderRow.name as string;
+  }
+
+  // Step 2: fetch requested tasks, enforcing assignment ownership (already
+  // verified выше, но explicit filter по assignment_id — защита от race,
+  // если ДЗ удаляется одновременно с save).
+  const { data: tasks, error: tasksErr } = await db
+    .from("homework_tutor_tasks")
+    .select(
+      "id, order_num, task_text, task_image_url, correct_answer, solution_text, solution_image_urls",
+    )
+    .eq("assignment_id", assignmentId)
+    .in("id", taskIds);
+  if (tasksErr) {
+    console.error("homework_api_request_error", {
+      route: "POST /assignments/:id/save-tasks-to-kb",
+      error: tasksErr.message,
+    });
+    return jsonError(cors, 500, "DB_ERROR", "Failed to load tasks");
+  }
+  const tasksById = new Map<string, Record<string, unknown>>();
+  for (const t of tasks ?? []) {
+    tasksById.set(t.id as string, t as Record<string, unknown>);
+  }
+
+  // Step 3: для каждой задачи либо найти существующую через fingerprint,
+  // либо заинсертить новую в выбранную папку. Fingerprint через rpc, чтобы
+  // не переизобретать md5 (Deno WebCrypto его не отдаёт), и чтобы формула
+  // оставалась идентичной moderation V2.
+  const saved: Array<{
+    task_id: string;
+    kb_task_id: string;
+    already_in_base: boolean;
+    folder_id: string;
+    folder_name: string;
+  }> = [];
+  const skipped: string[] = [];
+
+  for (const taskId of taskIds) {
+    const task = tasksById.get(taskId);
+    if (!task) {
+      skipped.push(taskId);
+      continue;
+    }
+
+    const taskText = isNonEmptyString(task.task_text) ? (task.task_text as string) : "";
+    const correctAnswer = isString(task.correct_answer)
+      ? (task.correct_answer as string)
+      : "";
+    const taskImageUrl = isString(task.task_image_url)
+      ? (task.task_image_url as string)
+      : "";
+    const solutionText = isString(task.solution_text)
+      ? (task.solution_text as string)
+      : null;
+    const solutionImageUrls = isString(task.solution_image_urls)
+      ? (task.solution_image_urls as string)
+      : null;
+
+    const { data: fpData, error: fpErr } = await db.rpc("kb_normalize_fingerprint", {
+      p_text: taskText,
+      p_answer: correctAnswer,
+      p_attachment_url: taskImageUrl,
+    });
+    if (fpErr || typeof fpData !== "string") {
+      console.error("homework_api_request_error", {
+        route: "POST /assignments/:id/save-tasks-to-kb",
+        error: fpErr?.message ?? "fingerprint_rpc_returned_non_string",
+        task_id: taskId,
+      });
+      skipped.push(taskId);
+      continue;
+    }
+    const fingerprint = fpData as string;
+
+    const { data: existing, error: existingErr } = await db
+      .from("kb_tasks")
+      .select("id, folder_id")
+      .eq("owner_id", tutorUserId)
+      .eq("fingerprint", fingerprint)
+      .limit(1)
+      .maybeSingle();
+    if (existingErr) {
+      console.error("homework_api_request_error", {
+        route: "POST /assignments/:id/save-tasks-to-kb",
+        error: existingErr.message,
+        task_id: taskId,
+      });
+      skipped.push(taskId);
+      continue;
+    }
+    if (existing) {
+      // Resolve folder label, если существующая задача лежит в другой папке.
+      // Если у неё folder_id IS NULL (orphaned, редкий случай) — показываем
+      // выбранную папку назначения как fallback для UI.
+      let existingFolderId = (existing.folder_id as string | null) ?? folderId;
+      let existingFolderName = folderName;
+      if (existing.folder_id && existing.folder_id !== folderId) {
+        const { data: existingFolder } = await db
+          .from("kb_folders")
+          .select("id, name")
+          .eq("id", existing.folder_id as string)
+          .maybeSingle();
+        if (existingFolder) {
+          existingFolderId = existingFolder.id as string;
+          existingFolderName = existingFolder.name as string;
+        }
+      }
+      saved.push({
+        task_id: taskId,
+        kb_task_id: existing.id as string,
+        already_in_base: true,
+        folder_id: existingFolderId,
+        folder_name: existingFolderName,
+      });
+      continue;
+    }
+
+    // AC-12: копируем task_text, task_image_url, correct_answer, solution_text,
+    // solution_image_urls. НЕ копируем rubric_*. `fingerprint` сохраняем
+    // явно — чтобы при повторном save того же содержимого из другого ДЗ
+    // уйти в already_in_base (вне зависимости от жизненного цикла ДЗ).
+    const { data: inserted, error: insertErr } = await db
+      .from("kb_tasks")
+      .insert({
+        owner_id: tutorUserId,
+        folder_id: folderId,
+        topic_id: null,
+        subtopic_id: null,
+        source_label: "my",
+        text: taskText,
+        answer: correctAnswer || null,
+        solution: solutionText,
+        answer_format: null,
+        attachment_url: taskImageUrl || null,
+        solution_attachment_url: solutionImageUrls,
+        fingerprint,
+      })
+      .select("id")
+      .single();
+    if (insertErr || !inserted) {
+      console.error("homework_api_request_error", {
+        route: "POST /assignments/:id/save-tasks-to-kb",
+        error: insertErr?.message,
+        task_id: taskId,
+      });
+      skipped.push(taskId);
+      continue;
+    }
+
+    saved.push({
+      task_id: taskId,
+      kb_task_id: inserted.id as string,
+      already_in_base: false,
+      folder_id: folderId,
+      folder_name: folderName,
+    });
+  }
+
+  // task_ids, которых нет в загруженных tasks (чужое ДЗ / удалённая задача),
+  // тоже попадают в skipped — нижняя граница на случай пропуска выше.
+  for (const taskId of taskIds) {
+    if (!tasksById.has(taskId) && !skipped.includes(taskId)) {
+      skipped.push(taskId);
+    }
+  }
+
+  console.log("homework_api_request_success", {
+    route: "POST /assignments/:id/save-tasks-to-kb",
+    tutor_id: tutorUserId,
+    assignment_id: assignmentId,
+    saved_count: saved.length,
+    skipped_count: skipped.length,
+    already_in_base_count: saved.filter((s) => s.already_in_base).length,
+  });
+  return jsonOk(cors, {
+    saved,
+    skipped,
+    created_folder: createdFolder,
+  });
+}
+
 // ─── Homework share links (homework-reuse-v1 TASK-7) ─────────────────────────
 //
 // Tutor управляет публичными read-only ссылками /p/:slug на своё ДЗ.
@@ -6939,6 +7267,17 @@ Deno.serve(async (req: Request): Promise<Response> => {
     ) {
       const body = await parseJsonBody(req);
       return await handleCreateTemplateFromAssignment(db, userId, seg[1], body, cors);
+    }
+
+    // POST /assignments/:id/save-tasks-to-kb (homework-reuse-v1 TASK-5, AC-10..13)
+    if (
+      seg.length === 3 &&
+      seg[0] === "assignments" &&
+      seg[2] === "save-tasks-to-kb" &&
+      route.method === "POST"
+    ) {
+      const body = await parseJsonBody(req);
+      return await handleSaveTasksToKB(db, userId, seg[1], body, cors);
     }
 
     // POST /assignments/:id/share-links (homework-reuse-v1 TASK-7)

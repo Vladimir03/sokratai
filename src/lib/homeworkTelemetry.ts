@@ -47,7 +47,13 @@ type GuidedTelemetryEvent =
   // homework-reuse-v1 TASK-6 — template snapshot post-factum (AC-14).
   // Fired exactly once on successful POST /assignments/:id/save-as-template.
   // Payload PII-free: ids + toggles only.
-  | 'homework_saved_as_template_post_factum';
+  | 'homework_saved_as_template_post_factum'
+  // homework-reuse-v1 TASK-5 — save tasks to «Мою базу» (KB).
+  // Bulk = dialog from Actions menu; per-task = BookmarkPlus on HWTaskCard.
+  // Both fire exactly once on successful POST /assignments/:id/save-tasks-to-kb.
+  // PII-free: ids + counts + booleans only (no task_text, no folder_name).
+  | 'homework_saved_to_kb'
+  | 'homework_saved_to_kb_per_task';
 
 type GuidedTelemetryValue =
   | string
@@ -143,6 +149,29 @@ interface HomeworkSavedAsTemplatePostFactumPayload
   includeAiSettings: boolean;
 }
 
+// homework-reuse-v1 TASK-5 — bulk save of homework tasks to «Мою базу».
+// PII-free: ids + counts only. `skippedCount` covers both backend-rejected
+// (e.g. missing task) и уже-существующих. `alreadyInBaseCount` даёт сигнал
+// retention (повторный save через месяц — пустой либо «всё уже в базе»).
+interface HomeworkSavedToKBPayload
+  extends Record<string, string | number | boolean | null | undefined> {
+  assignmentId: string;
+  tasksCount: number;
+  folderId: string;
+  createdFolder: boolean;
+  alreadyInBaseCount: number;
+  skippedCount: number;
+}
+
+interface HomeworkSavedToKBPerTaskPayload
+  extends Record<string, string | number | boolean | null | undefined> {
+  assignmentId: string;
+  taskId: string;
+  folderId: string;
+  createdFolder: boolean;
+  alreadyInBase: boolean;
+}
+
 interface DataLayerWindow extends Window {
   dataLayer?: Array<Record<string, unknown>>;
   gtag?: (...args: unknown[]) => void;
@@ -167,6 +196,8 @@ export function trackGuidedHomeworkEvent(event: 'homework_preview_opened', paylo
 export function trackGuidedHomeworkEvent(event: 'homework_preview_printed', payload: HomeworkPreviewPrintedPayload): void;
 export function trackGuidedHomeworkEvent(event: 'homework_preview_copied_text', payload: HomeworkPreviewCopiedTextPayload): void;
 export function trackGuidedHomeworkEvent(event: 'homework_saved_as_template_post_factum', payload: HomeworkSavedAsTemplatePostFactumPayload): void;
+export function trackGuidedHomeworkEvent(event: 'homework_saved_to_kb', payload: HomeworkSavedToKBPayload): void;
+export function trackGuidedHomeworkEvent(event: 'homework_saved_to_kb_per_task', payload: HomeworkSavedToKBPerTaskPayload): void;
 export function trackGuidedHomeworkEvent(event: GuidedTelemetryEvent, payload?: GuidedTelemetryPayload): void;
 export function trackGuidedHomeworkEvent(
   event: GuidedTelemetryEvent,
