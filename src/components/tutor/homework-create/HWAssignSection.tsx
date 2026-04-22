@@ -286,12 +286,39 @@ export function HWAssignSection({
 
   const handleCopyInviteLink = useCallback(async () => {
     if (!inviteWebLink) return;
-    try {
-      await navigator.clipboard.writeText(inviteWebLink);
+    // Primary: Async Clipboard API (requires secure context — HTTPS или
+    // localhost). Fallback: legacy document.execCommand('copy') через
+    // скрытый textarea — нужен для http preview и Safari < 15.4. Паттерн
+    // зеркалит ShareLinkDialog.tsx и TutorHomeworkPreview.tsx, rule 80.
+    let copied = false;
+    if (typeof navigator !== 'undefined' && navigator.clipboard && window.isSecureContext) {
+      try {
+        await navigator.clipboard.writeText(inviteWebLink);
+        copied = true;
+      } catch {
+        copied = false;
+      }
+    }
+    if (!copied) {
+      try {
+        const textarea = document.createElement('textarea');
+        textarea.value = inviteWebLink;
+        textarea.setAttribute('readonly', '');
+        textarea.style.position = 'absolute';
+        textarea.style.left = '-9999px';
+        document.body.appendChild(textarea);
+        textarea.select();
+        copied = document.execCommand('copy');
+        document.body.removeChild(textarea);
+      } catch {
+        copied = false;
+      }
+    }
+    if (copied) {
       setInviteCopied(true);
       toast.success('Ссылка приглашения скопирована');
       setTimeout(() => setInviteCopied(false), 2000);
-    } catch {
+    } else {
       toast.error('Не удалось скопировать ссылку приглашения');
     }
   }, [inviteWebLink]);

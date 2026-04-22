@@ -16,6 +16,13 @@ const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const SHARE_LINK_SLUG_RE = /^[a-z0-9]{8}$/i;
 
+// Base columns that are ALWAYS safe for public consumption. `correct_answer`
+// добавляется динамически только при show_answers, `solution_text` +
+// `solution_image_urls` — только при show_solutions (.claude/rules/
+// 40-homework-system.md §«Public share endpoint / Anti-leak»). rubric_* и
+// student linkage никогда не селектятся — отсутствуют в whitelist by design.
+const PUBLIC_TASK_BASE_COLUMNS = "id, order_num, task_text, max_score, check_format, task_image_url";
+
 type SupabaseClient = ReturnType<typeof createClient>;
 
 type TaskRow = {
@@ -24,10 +31,11 @@ type TaskRow = {
   task_text: string;
   max_score: number;
   check_format: "short_answer" | "detailed_solution" | null;
-  correct_answer: string | null;
   task_image_url: string | null;
-  solution_text: string | null;
-  solution_image_urls: string | null;
+  // Следующие поля есть в строке ТОЛЬКО когда соответствующий флаг == true.
+  correct_answer?: string | null;
+  solution_text?: string | null;
+  solution_image_urls?: string | null;
 };
 
 function jsonResponse(body: unknown, status = 200): Response {
@@ -47,6 +55,22 @@ function parseRoute(req: Request): { slug: string | null } {
   return { slug: null };
 }
 
+// Path traversal guard — копия паттерна из homework-api/index.ts:222. Rule 40
+// требует оба: parseStorageRef + hasUnsafeObjectPath. Без guard'а
+// tutor-controlled task_image_url теоретически может содержать `..` / `\0` /
+// backslash и попытаться обойти bucket scoping Supabase SDK. Defense-in-depth.
+function hasUnsafeObjectPath(path: string): boolean {
+  return path
+    .split("/")
+    .map((segment) => segment.trim())
+    .filter(Boolean)
+    .some((segment) => (
+      segment === ".." ||
+      segment.includes("\\") ||
+      segment.includes("\0")
+    ));
+}
+
 function parseStorageRef(
   value: string | null | undefined,
   defaultBucket: string,
@@ -60,13 +84,17 @@ function parseStorageRef(
     const rest = trimmed.slice("storage://".length);
     const slashIdx = rest.indexOf("/");
     if (slashIdx <= 0 || slashIdx === rest.length - 1) return null;
+    const objectPath = rest.slice(slashIdx + 1).replace(/^\/+/, "");
+    if (hasUnsafeObjectPath(objectPath)) return null;
     return {
       bucket: rest.slice(0, slashIdx),
-      objectPath: rest.slice(slashIdx + 1).replace(/^\/+/, ""),
+      objectPath,
     };
   }
 
-  return { bucket: defaultBucket, objectPath: trimmed.replace(/^\/+/, "") };
+  const objectPath = trimmed.replace(/^\/+/, "");
+  if (hasUnsafeObjectPath(objectPath)) return null;
+  return { bucket: defaultBucket, objectPath };
 }
 
 async function createSignedStorageUrls(
@@ -162,9 +190,17 @@ Deno.serve(async (req) => {
       return jsonResponse({ error: "Homework not found", code: "not_found" }, 404);
     }
 
+    // Column-whitelisted SELECT: correct_answer / solution_* попадают в
+    // строки ТОЛЬКО при соответствующем флаге (rule 40). Response-side
+    // scrubbing — слабее, чем column omission: при column omission поля
+    // никогда не живут в памяти процесса, не попадают в логи / crash dumps.
+    const selectColumns = [PUBLIC_TASK_BASE_COLUMNS];
+    if (shareLink.show_answers) selectColumns.push("correct_answer");
+    if (shareLink.show_solutions) selectColumns.push("solution_text", "solution_image_urls");
+
     const { data: taskRows, error: tasksError } = await db
       .from("homework_tutor_tasks")
-      .select("id, order_num, task_text, max_score, check_format, correct_answer, task_image_url, solution_text, solution_image_urls")
+      .select(selectColumns.join(", "))
       .eq("assignment_id", shareLink.assignment_id)
       .order("order_num", { ascending: true });
 
@@ -182,7 +218,7 @@ Deno.serve(async (req) => {
       const solutionImageUrls = shareLink.show_solutions
         ? await createSignedStorageUrls(
           db,
-          parseAttachmentUrls(task.solution_image_urls),
+          parseAttachmentUrls(task.solution_image_urls ?? null),
           "homework-task-images",
         )
         : [];
@@ -195,8 +231,8 @@ Deno.serve(async (req) => {
         kim_number: null,
         check_format: task.check_format,
         task_image_urls: taskImageUrls,
-        correct_answer: shareLink.show_answers ? task.correct_answer : null,
-        solution_text: shareLink.show_solutions ? task.solution_text : null,
+        correct_answer: shareLink.show_answers ? (task.correct_answer ?? null) : null,
+        solution_text: shareLink.show_solutions ? (task.solution_text ?? null) : null,
         solution_image_urls: solutionImageUrls,
       };
     }));

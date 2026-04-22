@@ -16,10 +16,10 @@
 
 | TASK | Status | Commit | Notes |
 |---|---|---|---|
-| TASK-1 | ✅ Done | — | Migrations landed (`homework_share_links`, `source_group_id`) |
+| TASK-1 | ✅ Done | — | Migrations landed (`homework_share_links`, `source_group_id`). Post-review: удалён Lovable-автогенеренный дубль `20260422162320_4777021b-…sql`, канонические файлы `20260422160000_*` + `20260422160100_*` остаются единственным источником. |
 | TASK-2 | ✅ Done | `1fb5222` | Assistant nav hidden + redirect + telemetry |
 | TASK-3 | ✅ Done | `43e45f2` | Tutor preview + print CSS + copy-to-Telegram |
-| TASK-4 | ✅ Done | — | Public `/p/:slug` endpoint + page |
+| TASK-4 | ✅ Done | — | Public `/p/:slug` endpoint + page. Post-review hardening: (a) column-whitelisted SELECT — `correct_answer` / `solution_text` / `solution_image_urls` попадают в SELECT ТОЛЬКО при соответствующем флаге (ранее селектились всегда, скрытие было только на response-side), (b) добавлен `hasUnsafeObjectPath` guard в локальный `parseStorageRef` (rule 40 §Public share endpoint), (c) CTA «Открыть в Сократе» в `PublicHomeworkShare.tsx` теперь conditional на `supabase.auth.getSession()`, ведёт на `/tutor/home`. |
 | TASK-5 | ✅ Done | `0c653b4` | `SaveTasksToKBDialog` + `handleSaveTasksToKB` + per-task `BookmarkPlus` in edit-mode |
 | TASK-6 | ✅ Done | `0590a3f` | `SaveAsTemplateDialog` + `handleCreateTemplateFromAssignment` + `PATCH /templates/:id` |
 | TASK-7 | ✅ Done | — | `ShareLinkDialog` + slug generation + CRUD |

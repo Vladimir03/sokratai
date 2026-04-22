@@ -6,6 +6,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Button } from '@/components/ui/button';
 import { HomeworkPreviewContent } from '@/components/tutor/homework-reuse/HomeworkPreviewContent';
 import { fetchPublicHomeworkShare } from '@/lib/publicShareApi';
+import { supabase } from '@/integrations/supabase/client';
 
 import '@/styles/homework-preview-print.css';
 
@@ -40,6 +41,21 @@ export default function PublicHomeworkShare() {
     staleTime: 60_000,
     retry: 1,
   });
+
+  // CTA «Открыть в Сократе» — отображается ТОЛЬКО если у viewer'а уже есть
+  // session. Rule 40 §Public share endpoint: «optional CTA при наличии
+  // session». Для logged-out родителя — ссылка бесполезна и visual noise;
+  // для tutor'а на чужом preview — возвращает в кабинет.
+  const sessionQuery = useQuery({
+    queryKey: ['public-homework-share', 'session'],
+    queryFn: async () => {
+      const { data } = await supabase.auth.getSession();
+      return data.session !== null;
+    },
+    staleTime: Infinity,
+    retry: false,
+  });
+  const hasSession = sessionQuery.data === true;
 
   if (query.isLoading) {
     return (
@@ -103,9 +119,11 @@ export default function PublicHomeworkShare() {
             <GraduationCap className="h-5 w-5 flex-none text-primary" aria-hidden="true" />
             <span className="truncate text-sm font-semibold">Сократ AI</span>
           </div>
-          <Button asChild size="sm" variant="outline" className="min-h-[40px]">
-            <a href="/login">Открыть в Сократе</a>
-          </Button>
+          {hasSession ? (
+            <Button asChild size="sm" variant="outline" className="min-h-[40px]">
+              <a href="/tutor/home">Открыть в Сократе</a>
+            </Button>
+          ) : null}
         </div>
       </header>
 
