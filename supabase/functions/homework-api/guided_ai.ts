@@ -1613,6 +1613,35 @@ export async function generateHint(
       inlinePromptImageUrls((params.studentImageUrls ?? []).slice(0, MAX_GUIDED_CHAT_IMAGES_FOR_AI)),
     ]);
     resolvedTaskImageUrl = taskImageUrls[0] ?? null;
+
+    // Anti-hallucination guard: if the task condition lives only on an image
+    // and we failed to inline it, do NOT call the LLM for a hint — it would
+    // invent a plausible problem. Return a deterministic technical message.
+    const expectedTaskImageRefsHint = (params.taskImageUrls ?? []).filter(
+      (u) => typeof u === "string" && u.trim().length > 0,
+    ).length;
+    const taskTextStrHint = (params.taskText ?? "").trim();
+    const taskTextIsPlaceholderHint =
+      taskTextStrHint.length === 0 ||
+      /\[\s*задача\s+на\s+фото\s*\]|\[\s*task\s+on\s+(?:the\s+)?image\s*\]/i.test(taskTextStrHint);
+    if (
+      expectedTaskImageRefsHint > 0 &&
+      taskImageUrls.length === 0 &&
+      taskTextIsPlaceholderHint
+    ) {
+      console.error(JSON.stringify({
+        event: "guided_hint_task_image_missing",
+        subject: params.subject,
+        expected_images: expectedTaskImageRefsHint,
+        task_text_len: taskTextStrHint.length,
+        ...telemetryMeta,
+      }));
+      return {
+        hint:
+          "Не удалось загрузить картинку с условием задачи. Попробуй ещё раз через минуту — это техническая проблема, не твоя ошибка.",
+      };
+    }
+
     const messages = buildHintPrompt({
       ...params,
       taskImageUrls,
