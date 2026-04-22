@@ -177,6 +177,21 @@
 - `/tutor/homework/:hwId?student=:sid` → `TutorHomeworkDetail` через `useSearchParams` сидирует `expandedStudentId`, scroll to `Card ref={drillDownRef}` один раз per id+student pair.
 - Manual collapse сохраняется — scroll-sentinel не re-scroll'ит на последующих mount-ах того же URL.
 
+**TASK-8 extension — Case A / Case B split (2026-04-22):**
+
+Блок переименован в «Последние действия учеников». Payload расширен `kind` discriminator:
+
+- `kind='task_opened'` — ученик перешёл на задачу, но не писал по ней. Signal: `max(homework_tutor_task_states.updated_at) per thread > last_student_message_at` (или student не писал вовсе). Bootstrap AI intro **не** считается за переписку per product решению. Preview = `Открыл задачу №N`, `lastAuthor='system'`, `taskOrder = thread.current_task_order`.
+- `kind='conversation'` — идёт переписка. Signal: `last_student_message_at ≥ max(task_states.updated_at)`. Preview = content latest visible message. Поведение TASK-7 без изменений.
+
+**Инварианты:**
+- `latestEventAt = max(last_student_message_at, max(task_states.updated_at per thread))`. Sort all items `latestEventAt DESC` перед dedup by student.
+- `unread = latestEventAt > tutor_last_viewed_at` — task-advance тоже триггерит unread (не только student message).
+- `unreadCount` для Case A всегда 0 (student не писал) — отдельный COUNT query пропускается.
+- Треды без ни одного signal (`latestEventAt === 0`) отбрасываются — provisioned thread без activity репетитору не нужен.
+- Backward compat: старый deploy edge function без `kind` → фронт дефолтит `'conversation'` в `mapItem`.
+- При расширении signal'ов (e.g. «ученик просмотрел материалы») — добавлять в Deno-side aggregate, не в SQL GROUP BY (PostgREST не умеет).
+
 **Спека:** `docs/delivery/features/tutor-dashboard-v2/phase-1-follow-up-recent-dialogs.md`.
 
 ### Realtime thread viewer (E9, 2026-04-06)

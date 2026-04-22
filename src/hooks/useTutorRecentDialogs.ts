@@ -4,6 +4,7 @@ import { differenceInHours, format, parseISO } from 'date-fns';
 import {
   getTutorRecentDialogs,
   type RecentDialogItem,
+  type RecentDialogKind,
 } from '@/lib/tutorHomeworkApi';
 import {
   createTutorRetry,
@@ -25,18 +26,29 @@ import {
  * here so ChatRow can render without re-parsing.
  */
 export interface DialogItem {
+  /**
+   * TASK-8 discriminator:
+   *   - 'task_opened'  — ученик перешёл на задачу, но не писал по ней;
+   *                      ChatRow рендерит italic «Открыл задачу №N».
+   *   - 'conversation' — идёт переписка; preview = текст последнего сообщения.
+   * Default 'conversation' если edge function не вернул поле (backward compat).
+   */
+  kind: RecentDialogKind;
   studentId: string;
   name: string;
   stream: 'ЕГЭ' | 'ОГЭ';
-  lastAuthor: 'student' | 'tutor' | 'ai';
+  /** 'system' только когда kind='task_opened'. */
+  lastAuthor: 'student' | 'tutor' | 'ai' | 'system';
   unread: boolean;
   /**
    * Number of unread student messages — Telegram-style counter badge.
-   * 0 when caught up. Falls back to 0 when older edge-function deploys
-   * don't include the field in the response.
+   * 0 when caught up или kind='task_opened' (student не писал). Falls
+   * back to 0 when older edge-function deploys don't include the field.
    */
   unreadCount: number;
   preview: string;
+  /** Номер задачи (1-based) для kind='task_opened'. */
+  taskOrder?: number;
   at: string;
   hwId: string;
   hwTitle: string;
@@ -65,6 +77,7 @@ function formatRelativeShort(tsIso: string): string {
 
 function mapItem(raw: RecentDialogItem): DialogItem {
   return {
+    kind: raw.kind ?? 'conversation',
     studentId: raw.studentId,
     name: raw.name,
     stream: raw.stream,
@@ -72,6 +85,7 @@ function mapItem(raw: RecentDialogItem): DialogItem {
     unread: raw.unread,
     unreadCount: raw.unreadCount ?? 0,
     preview: raw.preview,
+    taskOrder: raw.taskOrder,
     at: formatRelativeShort(raw.at),
     hwId: raw.hwId,
     hwTitle: raw.hwTitle,

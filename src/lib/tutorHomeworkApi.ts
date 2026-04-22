@@ -776,23 +776,39 @@ export async function postTutorThreadMessage(
   );
 }
 
-// ─── Recent dialogs + unread tracking (TASK-7 follow-up) ─────────────────────
+// ─── Recent dialogs + unread tracking (TASK-7, extended in TASK-8) ───────────
+
+/**
+ * TASK-8: `kind` discriminator split:
+ *   - 'task_opened'  — ученик открыл / перешёл на задачу, но ещё не писал
+ *                      ответ. Frontend рендерит system-style «Открыл задачу
+ *                      №N» (italic + BookOpen icon).
+ *   - 'conversation' — идёт переписка: student/tutor/AI message. Preview —
+ *                      содержимое последнего сообщения.
+ *
+ * Старые deploy-ы edge function могут не вернуть `kind` — в этом случае
+ * хук трактует строку как `conversation` (backward compat).
+ */
+export type RecentDialogKind = 'task_opened' | 'conversation';
 
 export interface RecentDialogItem {
+  /** Discriminator — см. `RecentDialogKind`. Optional for backward compat. */
+  kind?: RecentDialogKind;
   studentId: string;
   name: string;
   stream: 'ЕГЭ' | 'ОГЭ';
-  lastAuthor: 'student' | 'tutor' | 'ai';
+  /** 'system' только для kind='task_opened' (AI / engine advance). */
+  lastAuthor: 'student' | 'tutor' | 'ai' | 'system';
   unread: boolean;
   /**
    * Number of student messages with `created_at > tutor_last_viewed_at`.
-   * 0 when there are no unread messages. Used by the «Последние диалоги»
-   * block on /tutor/home to render a Telegram-style counter badge.
-   * Optional in transit for backward compat with older edge function deploys
-   * (frontend hooks default missing values to 0).
+   * 0 when there are no unread messages, включая все Case A (ученик
+   * ничего не писал). Используется для Telegram-style badge на /tutor/home.
    */
   unreadCount: number;
   preview: string;
+  /** Номер задачи для kind='task_opened' (1-based). Undefined в Case B. */
+  taskOrder?: number;
   at: string;
   hwId: string;
   hwTitle: string;

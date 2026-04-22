@@ -1,5 +1,5 @@
 import { memo, type KeyboardEvent } from 'react';
-import { ChevronRight } from 'lucide-react';
+import { BookOpen, ChevronRight } from 'lucide-react';
 import type { DialogItem } from '@/hooks/useTutorRecentDialogs';
 
 export type { DialogItem };
@@ -16,10 +16,14 @@ function initialsOf(name: string): string {
   return (first + second).toUpperCase();
 }
 
+// TASK-8: `system` used only for kind='task_opened' — ChatRow для этого
+// случая показывает BookOpen icon вместо author-chip, поэтому system-label
+// напрямую не рендерится; оставляем запись для полноты и a11y aria-label.
 const AUTHOR_LABEL: Record<DialogItem['lastAuthor'], string> = {
   student: 'Ученик',
   tutor: 'Вы',
   ai: 'AI',
+  system: 'Открытие задачи',
 };
 
 // Uses existing .t-chip tokens defined in src/styles/tutor-dashboard.css
@@ -28,6 +32,7 @@ const AUTHOR_CHIP_CLASS: Record<DialogItem['lastAuthor'], string> = {
   student: 't-chip t-chip--warning',
   tutor: 't-chip t-chip--info',
   ai: 't-chip t-chip--neutral',
+  system: 't-chip t-chip--neutral',
 };
 
 function ChatRowImpl({ chat, onOpen }: ChatRowProps) {
@@ -35,6 +40,7 @@ function ChatRowImpl({ chat, onOpen }: ChatRowProps) {
     chat.stream === 'ЕГЭ' ? 't-chip t-chip--ege' : 't-chip t-chip--oge';
   const authorLabel = AUTHOR_LABEL[chat.lastAuthor];
   const authorChipClass = AUTHOR_CHIP_CLASS[chat.lastAuthor];
+  const isTaskOpened = chat.kind === 'task_opened';
 
   const handleKeyDown = (event: KeyboardEvent<HTMLButtonElement>) => {
     if (event.key === 'Enter' || event.key === ' ') {
@@ -49,7 +55,9 @@ function ChatRowImpl({ chat, onOpen }: ChatRowProps) {
 
   const ariaParts = [
     `Открыть диалог с ${chat.name}`,
-    `последнее сообщение от ${authorLabel}`,
+    isTaskOpened
+      ? `открыл задачу №${chat.taskOrder ?? '?'} в «${chat.hwTitle}»`
+      : `последнее сообщение от ${authorLabel}`,
     hasUnread ? `${unreadCount} непрочитанных сообщений` : null,
   ].filter(Boolean);
 
@@ -59,7 +67,11 @@ function ChatRowImpl({ chat, onOpen }: ChatRowProps) {
       className="chat-row"
       onClick={() => onOpen(chat)}
       onKeyDown={handleKeyDown}
-      title={`Открыть ДЗ «${chat.hwTitle}» с чатом ученика`}
+      title={
+        isTaskOpened
+          ? `Перейти в ДЗ «${chat.hwTitle}» — задача №${chat.taskOrder ?? '?'}`
+          : `Открыть ДЗ «${chat.hwTitle}» с чатом ученика`
+      }
       aria-label={ariaParts.join(', ')}
       style={{ touchAction: 'manipulation' }}
     >
@@ -75,9 +87,33 @@ function ChatRowImpl({ chat, onOpen }: ChatRowProps) {
             {chat.name}
           </span>
           <span className={streamChipClass}>{chat.stream}</span>
-          <span className={authorChipClass}>{authorLabel}</span>
+          {isTaskOpened ? (
+            // Case A: system-style маркер «перешёл на задачу». BookOpen icon
+            // + нейтральная chip с номером задачи. Читается как «событие»,
+            // не «сообщение в чате» — убирает визуальный шум Author-chip.
+            <span
+              className="t-chip t-chip--neutral"
+              style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}
+              aria-hidden="true"
+            >
+              <BookOpen size={12} />
+              Задача №{chat.taskOrder ?? '?'}
+            </span>
+          ) : (
+            <span className={authorChipClass}>{authorLabel}</span>
+          )}
         </span>
-        <span className="chat-row__preview">{chat.preview}</span>
+        <span
+          className="chat-row__preview"
+          style={{
+            fontStyle: isTaskOpened ? 'italic' : undefined,
+            color: isTaskOpened ? 'var(--sokrat-fg3)' : undefined,
+          }}
+        >
+          {isTaskOpened
+            ? `Открыл задачу №${chat.taskOrder ?? '?'} в «${chat.hwTitle}»`
+            : chat.preview}
+        </span>
       </span>
       <span className="chat-row__meta">
         <span className="chat-row__time">{chat.at}</span>

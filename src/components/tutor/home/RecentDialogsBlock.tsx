@@ -27,9 +27,9 @@ function RecentDialogsBlockImpl({
   return (
     <section className="t-section" style={{ marginBottom: 16 }}>
       <div className="t-section__header">
-        <h2>Последние диалоги</h2>
+        <h2>Последние действия учеников</h2>
         <span className="t-section__meta">
-          сортировка по времени последнего сообщения
+          переписка и открытие задач, сортировка по последнему событию
         </span>
         <span style={{ marginLeft: 'auto' }}>
           <Button

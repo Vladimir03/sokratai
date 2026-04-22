@@ -1,6 +1,6 @@
 # Tasks — Tutor Dashboard v2 (Phase 1)
 
-**Status:** In progress (TASK-1..7 ✅ done, REVIEW pending)
+**Status:** In progress (TASK-1..8 ✅ done, REVIEW pending)
 **Pipeline step:** 5 (TASKS)
 **Owner:** Vladimir
 **Date:** 2026-04-21
@@ -21,6 +21,7 @@
 | TASK-5 | Page + routing + cleanup (`TutorHome.tsx`, redirect, delete `TutorDashboard.tsx`, warmup) | ✅ done | P0 | Claude Code | `src/pages/tutor/TutorHome.tsx`, `src/App.tsx`, `src/components/tutor/TutorLayout.tsx` | AC-1, AC-2, AC-7, AC-10 |
 | TASK-6 | P1 polish: Segment sort + row-клики + responsive + iOS Safari | ✅ done | P1 | Claude Code | `src/components/tutor/home/StudentsActivityBlock.tsx`, `src/styles/tutor-dashboard.css` | AC-9, AC-10, AC-12 |
 | TASK-7 | «Последние диалоги» fix: edge function + unread + deep-link | ✅ done | P1 | Claude Code | migration + `homework-api/index.ts`, `useTutorRecentDialogs.ts`, `ChatRow.tsx`, `TutorHome.tsx`, `TutorHomeworkDetail.tsx`, `GuidedThreadViewer.tsx`, `tutorHomeworkApi.ts` | AC-R1..AC-R8 (см. `phase-1-follow-up-recent-dialogs.md`) |
+| TASK-8 | «Последние действия учеников»: Case A (task opened) + Case B (conversation), kind discriminator | ✅ done | P1 | Claude Code | `homework-api/index.ts::handleGetRecentDialogs`, `useTutorRecentDialogs.ts`, `tutorHomeworkApi.ts`, `ChatRow.tsx`, `RecentDialogsBlock.tsx` | AC-R9..AC-R13 |
 | REVIEW | Независимый code-review по AC | ⏳ after TASK-5 | — | Codex | — | все AC |
 
 **Деплой:** TASK-1..5 — один PR, запуск в прод. TASK-6 — follow-up PR через 1–2 дня после первого тутор-feedback.
@@ -1000,6 +1001,7 @@ UX-проверки:
 - [x] TASK-5 ✅ done (2026-04-21)
 - [x] TASK-6 ✅ done (2026-04-21)
 - [x] TASK-7 ✅ done (2026-04-22) — see `phase-1-follow-up-recent-dialogs.md`
+- [x] TASK-8 ✅ done (2026-04-22) — Case A (task_opened) + Case B (conversation) split
 - [ ] REVIEW — Codex independent pass
 
 ---

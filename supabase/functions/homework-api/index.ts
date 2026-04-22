@@ -5715,28 +5715,43 @@ async function handleTutorPostMessage(
 
 // ─── Endpoint: GET /recent-dialogs (tutor) ───────────────────────────────────
 //
-// Powers the «Последние диалоги» block on /tutor/home. Returns up to
-// `RECENT_DIALOGS_DISPLAY_LIMIT` latest threads for the tutor, deduped by
-// student_id (one student = one row per spec).
+// Powers the «Последние действия учеников» block on /tutor/home. Returns up
+// to `RECENT_DIALOGS_DISPLAY_LIMIT` latest events per tutor, deduped by
+// student_id (one student = one row).
 //
-// Why this handler exists: the previous PostgREST-based
-// `useTutorRecentDialogs` hook relied on a 3-level nested `.eq(...)` filter
-// that silently returned 0 rows whenever RLS / embed semantics shifted.
-// Moving the query server-side (service_role) matches the pattern used by
-// handleGetThread / handleGetResults — one consistent architecture for all
-// tutor-facing surfaces.
+// Each item carries a `kind` discriminator:
+//   - 'task_opened'  — ученик открыл / перешёл на задачу, но ещё не написал
+//                      ответ по ней. Signal: max(task_states.updated_at)
+//                      превышает last_student_message_at (или student не
+//                      писал вовсе). Preview рендерится на фронте как
+//                      system-style «Открыл задачу №N» (italic + icon).
+//   - 'conversation' — идёт переписка: student/tutor/AI message. Preview —
+//                      содержимое последнего сообщения.
+//
+// Items sorted by `latestEventAt` DESC (самое свежее действие сверху),
+// независимо от kind.
+//
+// Why service_role: PostgREST nested embed filters через 3 уровня JOIN
+// молча теряют строки при drift RLS. Единый серверный aggregation
+// консистентен с handleGetThread / handleGetResults.
 
 const RECENT_DIALOGS_PREFETCH_LIMIT = 50;
 const RECENT_DIALOGS_DISPLAY_LIMIT = 5;
 
+type RecentDialogKind = "task_opened" | "conversation";
+type RecentDialogAuthor = "student" | "tutor" | "ai" | "system";
+
 interface RecentDialogItem {
+  kind: RecentDialogKind;
   studentId: string;
   name: string;
   stream: "ЕГЭ" | "ОГЭ";
-  lastAuthor: "student" | "tutor" | "ai";
+  lastAuthor: RecentDialogAuthor;
   unread: boolean;
   unreadCount: number;
   preview: string;
+  /** For kind='task_opened' — номер задачи (1-based), для UI «Открыл задачу №N». */
+  taskOrder?: number;
   at: string; // ISO timestamp — frontend formats it with date-fns
   hwId: string;
   hwTitle: string;
@@ -5761,18 +5776,31 @@ function buildPreviewForDialog(
   return "(вложение)";
 }
 
+function parseIsoToMillis(iso: string | null | undefined): number {
+  if (!iso) return 0;
+  const ts = new Date(iso).getTime();
+  return Number.isFinite(ts) ? ts : 0;
+}
+
 async function handleGetRecentDialogs(
   db: SupabaseClient,
   tutorUserId: string,
   cors: Record<string, string>,
 ): Promise<Response> {
-  // 1. Load candidate threads — those belonging to the tutor and with at
-  //    least one student message. Server-side nested join works reliably
-  //    here because we use service_role and build the chain explicitly.
+  // 1. Load candidate threads belonging to the tutor. We widen the fetch
+  //    beyond «has student message» so Case A (ученик открыл задачу, но
+  //    не написал) может попасть в выдачу. `last_task_state_at` (macs per
+  //    thread) вычисляется ниже и участвует в latest-event sort.
+  //
+  //    Order by `updated_at` DESC as the initial broad net — любая запись
+  //    в тред (advance, message, status change) обновляет updated_at.
+  //    После агрегации мы пересортируем по honest latestEventAt.
   type ThreadRow = {
     id: string;
     tutor_last_viewed_at: string | null;
     last_student_message_at: string | null;
+    current_task_order: number | null;
+    updated_at: string | null;
     student_assignment_id: string;
     homework_tutor_student_assignments: {
       id: string;
@@ -5793,6 +5821,8 @@ async function handleGetRecentDialogs(
       id,
       tutor_last_viewed_at,
       last_student_message_at,
+      current_task_order,
+      updated_at,
       student_assignment_id,
       homework_tutor_student_assignments!inner (
         id,
@@ -5806,12 +5836,11 @@ async function handleGetRecentDialogs(
         )
       )
     `)
-    .not("last_student_message_at", "is", null)
     .eq(
       "homework_tutor_student_assignments.homework_tutor_assignments.tutor_id",
       tutorUserId,
     )
-    .order("last_student_message_at", { ascending: false })
+    .order("updated_at", { ascending: false })
     .limit(RECENT_DIALOGS_PREFETCH_LIMIT);
 
   if (threadsError) {
@@ -5822,22 +5851,98 @@ async function handleGetRecentDialogs(
   const threads = (threadsData ?? []) as unknown as ThreadRow[];
   if (threads.length === 0) return jsonOk(cors, { items: [] });
 
-  // 2. Dedup by student_id — threads already sorted by last_student_message_at DESC,
-  //    so the first occurrence per student is their latest active thread.
+  // 2. Batch-fetch MAX(task_states.updated_at) per thread. task_states rows
+  //    обновляются при advance (locked→active, active→completed) и при
+  //    attempts++ — это signal для Case A «ученик перешёл на задачу».
+  //    PostgREST не умеет GROUP BY — фильтруем всё in Deno.
+  type TaskStateRow = {
+    thread_id: string;
+    updated_at: string;
+  };
+  const allThreadIds = threads.map((t) => t.id);
+  const { data: taskStatesData, error: taskStatesError } = await db
+    .from("homework_tutor_task_states")
+    .select("thread_id, updated_at")
+    .in("thread_id", allThreadIds)
+    .order("updated_at", { ascending: false });
+
+  if (taskStatesError) {
+    console.error("recent_dialogs_task_states_error", {
+      error: taskStatesError.message,
+    });
+    // Non-fatal: продолжаем без task_state signal, блок покажет только Case B
+  }
+
+  const maxTaskStateAtByThread = new Map<string, string>();
+  for (const row of (taskStatesData ?? []) as unknown as TaskStateRow[]) {
+    // First occurrence per thread_id (array sorted DESC) — это max.
+    if (!maxTaskStateAtByThread.has(row.thread_id)) {
+      maxTaskStateAtByThread.set(row.thread_id, row.updated_at);
+    }
+  }
+
+  // 3. Для каждого thread compute latestEventAt (max между
+  //    last_student_message_at и max task_state updated_at). Треды без
+  //    ни одного signal (ни student message, ни task_state) отбрасываем —
+  //    provisioned thread без activity репетитору не интересен.
+  type EnrichedThread = {
+    row: ThreadRow;
+    latestEventAtMs: number;
+    latestEventAtIso: string;
+    lastStudentMessageAtMs: number;
+    lastTaskStateAtMs: number;
+    kind: RecentDialogKind;
+  };
+
+  const enrichedAll: EnrichedThread[] = [];
+  for (const row of threads) {
+    const lastStudentMessageAtMs = parseIsoToMillis(row.last_student_message_at);
+    const lastTaskStateAtMs = parseIsoToMillis(
+      maxTaskStateAtByThread.get(row.id) ?? null,
+    );
+    const latestEventAtMs = Math.max(lastStudentMessageAtMs, lastTaskStateAtMs);
+    if (latestEventAtMs === 0) continue; // никаких signal'ов — пропускаем
+
+    const latestEventAtIso = new Date(latestEventAtMs).toISOString();
+    // Case A: task-advance timestamp строго новее последнего user-message,
+    //          либо user никогда не писал. Bootstrap AI intro не считается
+    //          за переписку per product решению.
+    const kind: RecentDialogKind =
+      lastStudentMessageAtMs === 0 || lastTaskStateAtMs > lastStudentMessageAtMs
+        ? "task_opened"
+        : "conversation";
+
+    enrichedAll.push({
+      row,
+      latestEventAtMs,
+      latestEventAtIso,
+      lastStudentMessageAtMs,
+      lastTaskStateAtMs,
+      kind,
+    });
+  }
+
+  if (enrichedAll.length === 0) return jsonOk(cors, { items: [] });
+
+  // 4. Sort by latestEventAt DESC, затем dedup by student_id — первое
+  //    вхождение на ученика = его самый свежий thread.
+  enrichedAll.sort((a, b) => b.latestEventAtMs - a.latestEventAtMs);
+
   const seenStudents = new Set<string>();
-  const pickedThreads: ThreadRow[] = [];
-  for (const t of threads) {
-    const sa = t.homework_tutor_student_assignments;
+  const picked: EnrichedThread[] = [];
+  for (const e of enrichedAll) {
+    const sa = e.row.homework_tutor_student_assignments;
     const studentId = sa?.student_id;
     if (!studentId) continue;
     if (seenStudents.has(studentId)) continue;
     seenStudents.add(studentId);
-    pickedThreads.push(t);
-    if (pickedThreads.length >= RECENT_DIALOGS_DISPLAY_LIMIT) break;
+    picked.push(e);
+    if (picked.length >= RECENT_DIALOGS_DISPLAY_LIMIT) break;
   }
 
-  if (pickedThreads.length === 0) return jsonOk(cors, { items: [] });
+  if (picked.length === 0) return jsonOk(cors, { items: [] });
 
+  const pickedThreads = picked.map((e) => e.row);
   const pickedThreadIds = pickedThreads.map((t) => t.id);
   const pickedStudentIds = Array.from(
     new Set(
@@ -5847,10 +5952,10 @@ async function handleGetRecentDialogs(
     ),
   );
 
-  // 3. Fetch the latest message per picked thread — a single batch query.
-  //    We pull all messages across picked threads then keep the newest per
-  //    thread_id in-memory. visible_to_student=false (hidden tutor notes)
-  //    are excluded — they don't count as "dialog activity" for tutor UX.
+  // 5. Fetch the latest message per picked thread for Case B preview.
+  //    Case A rows не нуждаются в message content (UI рендерит system-style
+  //    «Открыл задачу №N»), но мы всё равно загружаем messages — если
+  //    threshold зазор очень маленький, имеем fallback и lastAuthor.
   type MessageRow = {
     id: string;
     thread_id: string;
@@ -5908,40 +6013,45 @@ async function handleGetRecentDialogs(
     }
   }
 
-  // 5. Assemble response.
+  // 6. Assemble response.
   const STREAM_LABEL: Record<string, "ЕГЭ" | "ОГЭ"> = {
     ege: "ЕГЭ",
     oge: "ОГЭ",
   };
 
-  // 5a. Per-thread unread count: number of student messages (role='user',
-  //     visible_to_student != false) with created_at > tutor_last_viewed_at.
-  //     n ≤ RECENT_DIALOGS_DISPLAY_LIMIT (5) so the parallel COUNT queries
-  //     are cheap; the (thread_id, created_at) index handles them well.
+  // 6a. Per-thread unread count: number of student messages (role='user',
+  //     visible_to_student != false) с created_at > tutor_last_viewed_at.
+  //     Только для Case B — в Case A student не писал, unreadCount=0 по
+  //     определению. Один COUNT query на thread, всего ≤ 5 — дёшево благодаря
+  //     index (thread_id, created_at).
   const unreadCounts = await Promise.all(
-    pickedThreads.map(async (t) => {
-      const viewedAtIso = t.tutor_last_viewed_at ?? "1970-01-01T00:00:00Z";
+    picked.map(async (e) => {
+      if (e.kind === "task_opened") {
+        return { threadId: e.row.id, count: 0 };
+      }
+      const viewedAtIso = e.row.tutor_last_viewed_at ?? "1970-01-01T00:00:00Z";
       const { count, error } = await db
         .from("homework_tutor_thread_messages")
         .select("id", { count: "exact", head: true })
-        .eq("thread_id", t.id)
+        .eq("thread_id", e.row.id)
         .eq("role", "user")
         .neq("visible_to_student", false)
         .gt("created_at", viewedAtIso);
       if (error) {
         console.error("recent_dialogs_unread_count_error", {
-          thread_id: t.id,
+          thread_id: e.row.id,
           error: error.message,
         });
-        return { threadId: t.id, count: 0 };
+        return { threadId: e.row.id, count: 0 };
       }
-      return { threadId: t.id, count: count ?? 0 };
+      return { threadId: e.row.id, count: count ?? 0 };
     }),
   );
   const unreadMap = new Map<string, number>();
   for (const u of unreadCounts) unreadMap.set(u.threadId, u.count);
 
-  const items: RecentDialogItem[] = pickedThreads.map((t) => {
+  const items: RecentDialogItem[] = picked.map((e) => {
+    const t = e.row;
     const sa = t.homework_tutor_student_assignments;
     const assignment = sa.homework_tutor_assignments;
     const studentId = sa.student_id;
@@ -5956,19 +6066,46 @@ async function handleGetRecentDialogs(
       student?.profiles?.username?.trim() ||
       "Ученик";
 
-    const lastAuthor = authorFromMessage(latest?.role);
-    const preview = buildPreviewForDialog(
-      latest?.content,
-      latest?.image_url,
-    );
-    const at = latest?.created_at ?? t.last_student_message_at ?? new Date().toISOString();
-
-    // Unread counter — Telegram-style badge on /tutor/home.
-    // `unread` boolean kept for backward-compat with any old client builds.
+    // Unread triggers off latestEventAt — task-advance тоже считается за
+    // «новое событие» для репетитора. GuidedThreadViewer на mount
+    // выставляет tutor_last_viewed_at = NOW() → sweep очищается.
+    const tutorViewedAtMs = parseIsoToMillis(t.tutor_last_viewed_at);
+    const unread = e.latestEventAtMs > tutorViewedAtMs;
     const unreadCount = unreadMap.get(t.id) ?? 0;
-    const unread = unreadCount > 0;
+
+    if (e.kind === "task_opened") {
+      // Номер задачи для UI берём из thread.current_task_order (резолв
+      // через current_task_id → tasks.order_num — overhead на отдельный
+      // JOIN, а current_task_order поддерживается синхронно всеми handlers).
+      const taskOrder = typeof t.current_task_order === "number"
+        ? t.current_task_order
+        : 1;
+      // Preview-текст для frontend fallback (если старый клиент не
+      // понимает `kind`, он покажет хотя бы осмысленную строку).
+      const preview = `Открыл задачу №${taskOrder}`;
+      return {
+        kind: "task_opened",
+        studentId,
+        name,
+        stream,
+        lastAuthor: "system",
+        unread,
+        unreadCount,
+        preview,
+        taskOrder,
+        at: e.latestEventAtIso,
+        hwId: assignment.id,
+        hwTitle: assignment.title ?? "Без названия",
+      };
+    }
+
+    // Case B — обычная переписка, preview из latest visible message.
+    const lastAuthor = authorFromMessage(latest?.role);
+    const preview = buildPreviewForDialog(latest?.content, latest?.image_url);
+    const at = latest?.created_at ?? e.latestEventAtIso;
 
     return {
+      kind: "conversation",
       studentId,
       name,
       stream,

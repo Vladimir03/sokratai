@@ -1,10 +1,15 @@
-# Follow-up: «Последние диалоги» — fix empty state + deep-link + unread
+# Follow-up: «Последние действия учеников» — edge function + unread + deep-link + kind split
 
-**Version:** v1.0
+**Version:** v1.1 (TASK-8 extension)
 **Date:** 2026-04-22
 **Parent:** [tutor-dashboard-v2/spec.md](./spec.md) (Phase 1)
 **Status:** approved
-**Task:** TASK-7 (follow-up after TASK-6 landed on 2026-04-21)
+**Tasks:** TASK-7 (base), TASK-8 (Case A / Case B split)
+
+## Changelog
+
+- **v1.0 (TASK-7, 2026-04-22):** edge function handler + unread + deep-link. Блок показывал только треды с student message (единственный case — «переписка»).
+- **v1.1 (TASK-8, 2026-04-22):** расширение до «Последние действия учеников» — добавлен Case A («ученик открыл задачу, но не написал»); блок поднимает через `task_states.updated_at`; `kind` discriminator в payload; ChatRow рендерит system-style «Открыл задачу №N» для Case A.
 
 ---
 
@@ -179,16 +184,90 @@ navigate(`/tutor/homework/${dialog.hwId}?student=${encodeURIComponent(dialog.stu
 
 ---
 
-## 4. Acceptance Criteria
+## 4. TASK-8 — Case A / Case B split
 
-- **AC-R1** ✅ На `/tutor/home` блок «Последние диалоги» показывает строки для учеников, которые написали в guided chat.
+### Определение
+
+Для каждого thread tutor'а вычисляем:
+
+```ts
+const lastStudentMessageAtMs = parseIso(thread.last_student_message_at);
+const lastTaskStateAtMs      = max(task_states.updated_at) per thread;
+const latestEventAtMs        = max(lastStudentMessageAtMs, lastTaskStateAtMs);
+
+const kind: RecentDialogKind =
+  lastStudentMessageAtMs === 0 || lastTaskStateAtMs > lastStudentMessageAtMs
+    ? 'task_opened'    // Case A
+    : 'conversation';  // Case B
+```
+
+Треды без signals (`latestEventAtMs === 0`) отбрасываются — provisioned thread без activity неинтересен.
+
+### Case A — `task_opened`
+
+- **Signal:** `max(homework_tutor_task_states.updated_at)` per thread превышает `last_student_message_at` **или** ученик не писал вовсе.
+- **Покрывает:** первое открытие задачи (task_state `locked → active`), advance на следующую после решения предыдущей. Bootstrap AI intro **не** обнуляет сигнал (per product решению).
+- **Payload:**
+  ```ts
+  {
+    kind: 'task_opened',
+    lastAuthor: 'system',
+    preview: 'Открыл задачу №N',
+    taskOrder: N,                   // из thread.current_task_order
+    at: latestEventAtMs (ISO),
+    ...
+  }
+  ```
+- **Frontend render (ChatRow):** Lucide `BookOpen` (12px) + «Задача №N» в `.t-chip--neutral`; preview-строка italic, цвет `var(--sokrat-fg3)`.
+
+### Case B — `conversation`
+
+- **Signal:** есть student message и он новее `max(task_states.updated_at)`.
+- **Preview:** содержимое последнего видимого message (текущее TASK-7 поведение).
+- **Frontend render:** без изменений — author chip (Ученик/Вы/AI) + content preview.
+
+### Sort order
+
+Все items вместе по `latestEventAt DESC`, dedup by `student_id` (один ученик = latest thread). Case A и B перемешаны — приоритет по времени.
+
+### Unread (extended)
+
+- Было: `unread = last_student_message_at > tutor_last_viewed_at`.
+- Стало: `unread = latestEventAt > tutor_last_viewed_at` — task-advance тоже считается за «новое событие» для тьютора.
+- `unreadCount` (Telegram-style counter badge) остаётся = число student messages после visit; для Case A всегда `0` (student не писал).
+
+### Performance
+
+- Добавлен batch-fetch `homework_tutor_task_states` WHERE `thread_id IN (50 ids)` — 1 query, ordered DESC, JS-side group by thread. Index `idx_task_states_thread` (из базовой миграции `20260306100000`) обеспечивает O(log n) lookup.
+- Initial thread fetch: `updated_at DESC` как broad net (любая запись обновляет поле) + post-sort по honest `latestEventAt`.
+
+### Backward compat
+
+- Старые deploy-ы edge function не возвращают `kind` / `taskOrder` — фронтенд-хук `mapItem` ставит `kind: 'conversation'` по умолчанию. ChatRow в этом случае рендерит как TASK-7.
+- RecentDialogItem `kind?: RecentDialogKind` — optional в transit, required в runtime DialogItem.
+
+---
+
+## 5. Acceptance Criteria
+
+### TASK-7 (base)
+
+- **AC-R1** ✅ На `/tutor/home` блок показывает строки для учеников, которые написали в guided chat.
 - **AC-R2** ✅ Каждая строка имеет автор-метку (`Ученик` / `AI` / `Вы`).
-- **AC-R3** ✅ Unread-индикатор (жёлтая точка + bold name) активен если `last_student_message_at > tutor_last_viewed_at`.
-- **AC-R4** ✅ Клик по ChatRow → `/tutor/homework/:hwId?student=:sid` → страница Detail auto-раскрывает «Разбор ученика» и скроллит к нему.
-- **AC-R5** ✅ После mount `GuidedThreadViewer` `tutor_last_viewed_at` обновляется; на возвращении на `/tutor/home` unread-индикатор сброшен.
+- **AC-R3** ✅ Unread-индикатор активен если `last_student_message_at > tutor_last_viewed_at`.
+- **AC-R4** ✅ Клик по ChatRow → `/tutor/homework/:hwId?student=:sid` → Detail auto-раскрывает «Разбор ученика».
+- **AC-R5** ✅ После mount `GuidedThreadViewer` `tutor_last_viewed_at` обновляется; на возвращении на `/tutor/home` unread сброшен.
 - **AC-R6** ✅ Один ученик = одна строка (dedup by student_id).
 - **AC-R7** ✅ Edge function использует service_role (RLS bypass), консистентно с `handleGetThread`.
-- **AC-R8** ✅ Миграция additive — `tutor_last_viewed_at IS NULL` обрабатывается как "never viewed" → все existing threads с сообщениями ученика помечаются unread до первого визита.
+- **AC-R8** ✅ Миграция additive — `tutor_last_viewed_at IS NULL` ≡ unread.
+
+### TASK-8 (Case A / Case B)
+
+- **AC-R9** ✅ Ученик открыл задачу и не писал по ней → строка с `kind='task_opened'` + italic «Открыл задачу №N».
+- **AC-R10** ✅ Если ученик написал после task-advance → `kind='conversation'`, preview = latest message content.
+- **AC-R11** ✅ Sort order = `latestEventAt` DESC; Case A и B перемешаны.
+- **AC-R12** ✅ Bootstrap AI intro не обнуляет Case A (signal — `task_states.updated_at`, не message content).
+- **AC-R13** ✅ Клик по Case A row → тот же deep-link `/tutor/homework/:hwId?student=:sid`.
 
 ---
 
