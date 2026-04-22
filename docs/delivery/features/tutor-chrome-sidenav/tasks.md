@@ -19,7 +19,7 @@
 | TASK-2 | Chrome components + hooks | ✅ done 2026-04-22 | P0 | Claude Code | `src/components/tutor/chrome/*`, `src/hooks/useFocusTrap.ts`, `src/hooks/useTutorChromeCounters.ts` | AC-1, AC-3..AC-9, AC-11, AC-12 |
 | TASK-3 | Route-group migration + strip `TutorLayout` из всех страниц + перенос `TutorGuard` + **удалить** `TutorLayout.tsx` | ✅ done 2026-04-22 | P0 | Claude Code | `src/App.tsx`, все 13 tutor pages, **delete** `src/components/tutor/TutorLayout.tsx` | AC-1, AC-2, AC-6, AC-10, AC-13, AC-14 |
 | REVIEW | Codex aggregate review TASK-1..3 → CONDITIONAL PASS; follow-up fixes (`inert` on closed drawer + Space activation) landed 2026-04-22 | ✅ done 2026-04-22 | — | Codex + Claude Code | `MobileDrawer.tsx`, `SideNav.tsx` | AC-11 |
-| TASK-4 | P1 polish: mobile swipe gesture + body scroll lock iOS-compat + counter tooltip + link prefetch | ⏳ todo | P1 | Claude Code | `MobileDrawer.tsx`, `SideNav.tsx`, `src/styles/tutor-chrome.css` | AC-15 |
+| TASK-4 | P1 polish: mobile swipe gesture + body scroll lock iOS-compat + counter tooltip + link prefetch | ✅ done 2026-04-22 | P1 | Claude Code | `src/hooks/useBodyScrollLock.ts` (new), `MobileDrawer.tsx`, `SideNav.tsx`, `useTutorChromeCounters.ts`, `src/styles/tutor-chrome.css` | AC-15 |
 
 **Деплой:**
 - **TASK-1..3 = один PR, atomic** (нельзя деплоить партиально — партиальный state = broken tutor UI).

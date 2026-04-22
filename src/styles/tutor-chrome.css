@@ -280,6 +280,10 @@
   display: flex;
   flex-direction: column;
   overflow-y: auto;
+  /* Allow vertical scroll inside drawer content; horizontal swipes are routed
+     to JS for swipe-to-close (TASK-4 §2). pan-x here would disable vertical
+     scroll and break long nav menus on small phones. */
+  touch-action: pan-y;
 }
 .t-mobile-drawer--open {
   transform: translateX(0);

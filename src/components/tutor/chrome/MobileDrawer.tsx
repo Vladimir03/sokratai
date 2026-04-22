@@ -1,6 +1,10 @@
 import { useEffect, useRef } from 'react';
 import { SideNav } from '@/components/tutor/chrome/SideNav';
+import { useBodyScrollLock } from '@/hooks/useBodyScrollLock';
 import { useFocusTrap } from '@/hooks/useFocusTrap';
+
+// Swipe-left threshold (px) before we close. Matches tasks.md TASK-4 §2 (40px).
+const SWIPE_CLOSE_DELTA_PX = 40;
 
 export interface MobileDrawerProps {
   open: boolean;
@@ -12,6 +16,11 @@ export function MobileDrawer({ open, onClose }: MobileDrawerProps) {
   const lastFocusedRef = useRef<HTMLElement | null>(null);
 
   useFocusTrap(drawerRef, open);
+
+  // iOS-safe body scroll lock: pins <body> via position:fixed + top:-scrollY
+  // and restores scroll position on release. Replaces the old P0 inline
+  // overflow:hidden (which leaked rubber-band scroll on iOS Safari).
+  useBodyScrollLock(open);
 
   // Save/restore focus around the open→close cycle
   useEffect(() => {
@@ -36,15 +45,57 @@ export function MobileDrawer({ open, onClose }: MobileDrawerProps) {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [open, onClose]);
 
-  // Basic body scroll lock (desktop + Android). iOS-safe variant → TASK-4.
+  // Swipe-left-to-close (native touch events, no gesture libs per performance §2).
+  // Listens globally while open so either the drawer itself or the backdrop can
+  // receive the gesture. We guard on "primarily horizontal" so vertical scroll
+  // inside the drawer content is not misread as a close gesture.
   useEffect(() => {
     if (!open) return;
-    const previous = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
-    return () => {
-      document.body.style.overflow = previous;
+
+    let startX = 0;
+    let startY = 0;
+    let currentX = 0;
+    let currentY = 0;
+    let tracking = false;
+
+    const onTouchStart = (event: TouchEvent) => {
+      const touch = event.touches[0];
+      if (!touch) return;
+      startX = touch.clientX;
+      startY = touch.clientY;
+      currentX = startX;
+      currentY = startY;
+      tracking = true;
     };
-  }, [open]);
+    const onTouchMove = (event: TouchEvent) => {
+      if (!tracking) return;
+      const touch = event.touches[0];
+      if (!touch) return;
+      currentX = touch.clientX;
+      currentY = touch.clientY;
+    };
+    const onTouchEnd = () => {
+      if (!tracking) return;
+      tracking = false;
+      const deltaX = currentX - startX;
+      const deltaY = currentY - startY;
+      const primarilyHorizontal = Math.abs(deltaX) > Math.abs(deltaY);
+      if (primarilyHorizontal && deltaX <= -SWIPE_CLOSE_DELTA_PX) {
+        onClose();
+      }
+    };
+
+    window.addEventListener('touchstart', onTouchStart, { passive: true });
+    window.addEventListener('touchmove', onTouchMove, { passive: true });
+    window.addEventListener('touchend', onTouchEnd);
+    window.addEventListener('touchcancel', onTouchEnd);
+    return () => {
+      window.removeEventListener('touchstart', onTouchStart);
+      window.removeEventListener('touchmove', onTouchMove);
+      window.removeEventListener('touchend', onTouchEnd);
+      window.removeEventListener('touchcancel', onTouchEnd);
+    };
+  }, [open, onClose]);
 
   // Remove closed drawer from Tab order (AC-11: mobile — только когда drawer открыт).
   // `inert` on the container strips focusability of all descendants in one shot.

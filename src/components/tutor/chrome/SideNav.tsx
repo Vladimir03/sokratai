@@ -71,15 +71,49 @@ const NAV_GROUPS: readonly NavGroupDef[] = [
   },
 ];
 
+// Hover/focus prefetch map (TASK-4 §5). Replaces the old TutorLayout
+// setTimeout(300) warmup that fired for every tutor session on mount.
+// Now chunks are fetched lazily when a user intends to navigate (hover or
+// keyboard focus). Dynamic `import()` is idempotent — the second call for the
+// same chunk is a no-op, so repeat hovers don't re-download.
+const PREFETCH_MAP: Record<string, () => Promise<unknown>> = {
+  '/tutor/home': () => import('@/pages/tutor/TutorHome'),
+  '/tutor/schedule': () => import('@/pages/tutor/TutorSchedule'),
+  '/tutor/homework': () => import('@/pages/tutor/TutorHomework'),
+  '/tutor/students': () => import('@/pages/tutor/TutorStudents'),
+  '/tutor/knowledge': () => import('@/pages/tutor/knowledge/KnowledgeBasePage'),
+  '/tutor/assistant': () => import('@/pages/tutor/TutorAssistant'),
+  '/tutor/payments': () => import('@/pages/tutor/TutorPayments'),
+};
+
 function formatCounter(value: number | null | undefined): string {
   if (value === null || value === undefined) return '—';
   return String(value);
+}
+
+function formatCounterTooltip(
+  counterKey: CounterKey | undefined,
+  counters: TutorChromeCounters,
+): string | undefined {
+  if (!counterKey) return undefined;
+  if (counterKey === 'activeHomework') {
+    const { activeHomework, totalHomework } = counters;
+    if (activeHomework === null || totalHomework === null) return undefined;
+    return `${activeHomework} активных ДЗ из ${totalHomework} всего`;
+  }
+  if (counterKey === 'activeStudents') {
+    const { activeStudents, totalStudents } = counters;
+    if (activeStudents === null || totalStudents === null) return undefined;
+    return `${activeStudents} активных учеников из ${totalStudents}`;
+  }
+  return undefined;
 }
 
 interface NavItemProps {
   item: NavItemDef;
   isActive: boolean;
   counterValue: number | null | undefined;
+  tooltip: string | undefined;
   onNavigate?: () => void;
 }
 
@@ -87,6 +121,7 @@ const NavItem = memo(function NavItem({
   item,
   isActive,
   counterValue,
+  tooltip,
   onNavigate,
 }: NavItemProps) {
   const Icon = item.icon;
@@ -99,13 +134,28 @@ const NavItem = memo(function NavItem({
       event.currentTarget.click();
     }
   };
+  // Hover/focus prefetch (TASK-4 §5). Swallow errors — warmup is best-effort
+  // and must not surface to the user or block initial paint.
+  const handlePrefetch = () => {
+    const loader = PREFETCH_MAP[item.href];
+    if (!loader) return;
+    void loader().catch((err) => {
+      console.warn('tutor_nav_prefetch_failed', {
+        href: item.href,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    });
+  };
   return (
     <Link
       to={item.href}
       className={`t-nav__item${isActive ? ' t-nav__item--active' : ''}`}
       aria-current={isActive ? 'page' : undefined}
+      title={tooltip}
       onClick={onNavigate}
       onKeyDown={handleKeyDown}
+      onMouseEnter={handlePrefetch}
+      onFocus={handlePrefetch}
     >
       <Icon aria-hidden="true" />
       <span className="t-nav__label">{item.label}</span>
@@ -157,6 +207,7 @@ export function SideNav({ isMobile = false, onNavigate }: SideNavProps) {
               item={item}
               isActive={isItemActive(item.href)}
               counterValue={item.counter ? counters[item.counter] : undefined}
+              tooltip={formatCounterTooltip(item.counter, counters)}
               onNavigate={isMobile ? onNavigate : undefined}
             />
           ))}
