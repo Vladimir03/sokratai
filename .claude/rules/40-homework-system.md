@@ -386,6 +386,119 @@ Audit/normalize/optimize/harden pass на `/tutor/homework` и `/tutor/homework/
 - Push-канал **вне скоупа P0** (отложен в P1) — в UI только Telegram + Email
 - Telemetry `telegram_reminder_sent_from_results` принимает `channel: res.channel` из ответа (не из выбранной tab — backend может fallback'нуться в auto-режиме)
 
+### Homework share links / public `/p/:slug` (homework-reuse-v1 TASK-7, 2026-04-22)
+
+`homework_share_links` (migration `20260422160000_homework_share_links.sql`, TASK-1) — множественные read-only ссылки на одно ДЗ с флагами `show_answers` / `show_solutions` / `expires_at`. Tutor-side CRUD в `homework-api/index.ts`; публичное чтение — отдельный edge function `public-homework-share` под `service_role` (TASK-4, scope не трогать отсюда).
+
+**Tutor API контракт (`homework-api`, три новых route'а):**
+- `POST /assignments/:id/share-links` — body `{ show_answers, show_solutions, expires_in_days? }`. `expires_in_days` validated positive int ≤ 365. Slug генерится через `crypto.randomUUID().replace(/-/g, "").slice(0, 8).toLowerCase()` в `generateShareLinkSlug()`, retry на UNIQUE collision ≤ 3. Ownership — `getOwnedAssignmentOrThrow` (assignment.tutor_id = auth.uid()). Response `{ slug, url, show_answers, show_solutions, expires_at, created_at }` где `url = getShareLinkAppBaseUrl() + /p/ + slug`.
+- `GET /assignments/:id/share-links` — только свои ссылки на это ДЗ (фильтр `created_by = tutorUserId`), сортировка `created_at DESC`, `{ items }` wrapper.
+- `DELETE /share-links/:slug` — ownership-check через фильтр `.eq('created_by', tutorUserId)` в DELETE. `.select('slug')` после delete: если 0 строк → 404 (покрывает и «не найдено», и «не твой» — **не** раскрываем существование чужих slug'ов третьему тутору, знающему формат).
+
+**Инварианты:**
+- Slug regex `/^[a-z0-9]{8}$/i` (константа `SHARE_LINK_SLUG_RE`) валидируется в DELETE **до** DB-запроса. Public endpoint TASK-4 обязан применить тот же regex на свою сторону независимо.
+- `getShareLinkAppBaseUrl()` читает `PUBLIC_APP_URL` env (обязателен в prod), fallback `https://sokratai.lovable.app`. Используется и в create response, и в list items — URL генерится **серверно**, фронт не склеивает.
+- Публичное чтение **НЕ через RLS** tutor-side — только RLS policy `Tutors manage own share links` защищает authenticated PostgREST доступ. Публичный endpoint использует `service_role`, обходит RLS.
+- Несколько ссылок на одно ДЗ **разрешены намеренно** — родителю без ответов, коллеге с ответами, пропустившему ученику с expiry. Не пытайся дедуплицировать по `assignment_id + created_by`.
+
+**Frontend (`ShareLinkDialog.tsx`):**
+- Radix Dialog. Функции API — `createHomeworkShareLink` / `listHomeworkShareLinks` / `deleteHomeworkShareLink` в `tutorHomeworkApi.ts`. Query key `['tutor','homework','share-links', assignmentId]`.
+- Toggle «Истекает через 30 дней» — один option (не селект дней), продуктово фиксирован. При off → `expires_in_days` не отправляется (никогда не истекает).
+- Clipboard: primary path `navigator.clipboard.writeText` с guard `window.isSecureContext`. Fallback — legacy `document.execCommand('copy')` через hidden textarea (required для http preview / Safari < 15.4). **Не удалять fallback** — ломает копирование в preview-окружениях.
+- Telemetry `homework_share_link_created` fires **один раз** в `handleCreate` success branch. Typed PII-free payload `{ assignmentId, showAnswers, showSolutions, hasExpiry }` — **без slug, без url** (slug = bearer-токен, не клади в tracker).
+
+**Не путать с:** `homework_tutor_student_assignments` (persistent per-student assignment). `homework_share_links.slug` — отдельный public bearer-token, не FK к ученику, не раскрывает кто решал.
+
+**Wiring:** Dialog сейчас открывается только программно. Связка с Actions-меню на `TutorHomeworkDetail` — в TASK-10. До TASK-10 через `ShareLinkDialog` из кода нет entry point в UI.
+
+### Public share endpoint `/p/:slug` (homework-reuse-v1 TASK-4, 2026-04-22)
+
+Edge function `supabase/functions/public-homework-share/index.ts` отдаёт read-only snapshot ДЗ по slug'у из `homework_share_links`. **Единственный публичный endpoint**, который трогает `homework_tutor_*` таблицы — для него действует отдельный anti-leak контракт. Frontend — `src/pages/PublicHomeworkShare.tsx` на route `/p/:slug` **вне AppFrame группы** (App.tsx), sibling к `/invite/:inviteCode`.
+
+**Endpoint контракт:**
+- `GET /share/:slug` — **без JWT**. Deno уровень достаёт slug через regex `/\/share\/([^/?#]+)$/` на `URL.pathname` (поддерживает и pretty-path, и прямой `/public-homework-share/share/:slug`).
+- CORS `Access-Control-Allow-Origin: *` + `GET, OPTIONS`. Preflight возвращает пустой 200.
+- `service_role` client с `auth.persistSession: false`. RLS обходится намеренно.
+- Slug regex `/^[a-z0-9]{8}$/i` (`SLUG_RE`) **обязательно до DB-запроса** → `invalid_slug` 400. Тот же regex должен совпадать с tutor-side TASK-7 `SHARE_LINK_SLUG_RE`; **если кто-то меняет длину/формат слага в TASK-7 — синхронно обновить здесь**, иначе public endpoint отбросит валидные свежесозданные ссылки.
+
+**Anti-leak — column-whitelisted SELECT (КРИТИЧНО):**
+- `homework_tutor_assignments`: **только** `id, title`. Не селектить `notes_for_student`, `tutor_id`, `status`, `disable_ai_bootstrap`. Если в будущем понадобится поле — расширяй whitelist осознанно, не `select("*")`.
+- `homework_tutor_tasks`: базовый whitelist — `id, order_num, task_text, task_image_url, max_score, kim_number, check_format`.
+- `correct_answer` добавляется в SELECT **только** при `show_answers === true`. Иначе вообще не селектится (не просто скрывается на сериализации — отсутствует в памяти процесса).
+- `solution_text, solution_image_urls` — аналогично, только при `show_solutions === true`.
+- `rubric_text`, `rubric_image_urls` — **никогда** не селектятся (вне зависимости от флагов). Это tutor-only invariant из `.claude/rules/40-homework-system.md` §«Эталонное решение для AI и anti-leak».
+- `homework_tutor_student_assignments` и имена учеников — **никогда не JOIN-ятся**. Public страница не раскрывает кто решал ДЗ.
+
+**Expiry поведение:**
+- Если `expires_at !== null && Date.parse(expires_at) < Date.now()` → response `{ expired: true }` с 200 OK. Не 410 Gone и не 404 — frontend различает «истекло» (семантический UX) vs «не найдено».
+- Not-found slug → 404 `{ error: "not_found" }`.
+
+**Signed URLs:**
+- TTL = 3600s (`SIGNED_URL_TTL_SEC`). Re-issued на каждый запрос.
+- `parseAttachmentUrls` из `supabase/functions/_shared/attachment-refs.ts` — единственный путь к dual-format `storage://...` полям. Не парсить JSON вручную.
+- Локальный `parseStorageRef` (копия паттерна из `homework-api/index.ts`) + `hasUnsafeObjectPath` защищают от path traversal. Default bucket для task и solution images — `homework-task-images`.
+- Failures `createSignedUrl` **роняются silent** (картинка исчезает из массива) — не ломают всю страницу ради одной битой ссылки.
+
+**Telemetry:**
+- `homework_share_link_visited` — **server-side only**, анонимно. Логируется как `console.warn(JSON.stringify({ event, slug, timestamp }))`. Fire только после успешной (не expired) сборки response. Без user_id, без IP, без User-Agent — slug и так достаточно для корреляции. TASK-11 может позже обернуть это в proper telemetry_events INSERT.
+
+**Frontend контракт (`PublicHomeworkShare.tsx`):**
+- Route `/p/:slug` mounted **вне AppFrame** — никакого TutorGuard. Header = logo «Сократ AI» + optional CTA «Открыть в Сократе» (показывается если `supabase.auth.getSession()` вернул session; логично для tutor'а на чужом preview, безвредно для залогиненого student'а — TutorGuard внутри отпинает).
+- API клиент `src/lib/publicShareApi.ts::fetchPublicHomeworkShare(slug)` возвращает discriminated union: `{status: 'ok', data}` / `'expired'` / `'not_found'` / `'invalid_slug'` / `'error'`. 5-state UI в одном `useMemo`.
+- Task rendering **inline** в этой странице (не shared). Когда TASK-3 положит `HomeworkPreviewContent` — вынесем сюда через тот же компонент, но сейчас не создавай его в TASK-4 scope (см. «Не путать» ниже).
+- `MathText` загружается через `React.lazy` + Suspense с plain-text fallback (LaTeX весит ~400KB gzipped).
+- Все `<img>` с `loading="lazy"` (правило performance.md). Click-to-zoom через Radix Dialog (один common `ZoomableImage` компонент).
+
+**Не путать с:**
+- TASK-3 `HomeworkPreviewContent` — shared component для tutor preview `/tutor/homework/:id/preview` и public `/p/:slug`. На момент TASK-4 ещё не существует; rendering inline в `PublicHomeworkShare.tsx`, но контрактно совместим.
+- tutor-side `GET /assignments/:id/share-links` — возвращает `url: PUBLIC_APP_URL + '/p/' + slug`, т.е. именно эту страницу. Если меняется маршрут `/p/:slug` — синхронно проверь tutor-side URL генерацию в TASK-7 и memory `project_homework_reuse_v1.md`.
+
+**При расширении endpoint:**
+1. Никогда не SELECT *. Whitelist колонок остаётся жёстким.
+2. Любое новое поле в `homework_tutor_tasks`, видимое публично, требует явного решения: tutor-only / show_answers-gated / show_solutions-gated / всегда-видимое. Default = tutor-only (не раскрывать).
+3. Не добавлять JOIN'ы на студент-таблицы. Если нужна «кто решал» статистика — это отдельный tutor-side endpoint, не public.
+4. При добавлении нового storage bucket — проверь, что `createSignedUrl` путь резолвится (default bucket `homework-task-images` может не покрыть).
+
+### Homework preview surface — `/tutor/homework/:id/preview` + shared `/p/:slug` (homework-reuse-v1 TASK-3, 2026-04-22)
+
+Tutor-only route `/tutor/homework/:id/preview` (внутри AppFrame) — читаемое представление всех задач одним scroll'ом с optional ответами/решениями, native `window.print()`, copy-to-Telegram. Реализовано через **stateless shared component**, чтобы public `/p/:slug` (TASK-4, отдельная секция выше) переиспользовал без изменений.
+
+**Архитектура (shared component contract):**
+- `src/components/tutor/homework-reuse/HomeworkPreviewContent.tsx` — **pure, stateless**, без data-fetching, auth-context или зависимостей от `TutorHomeworkDetail`. Props: `{ title, tasks: HomeworkPreviewTask[], showAnswers, showSolutions }`. Экспортируемый тип `HomeworkPreviewTask` wire-format совместим с `PublicShareTask` в [`src/lib/publicShareApi.ts`](../../src/lib/publicShareApi.ts) — те же поля в том же порядке.
+- `src/pages/tutor/TutorHomeworkPreview.tsx` — tutor wrapper: React Query (`['tutor','homework','detail', id]`), batched signed-URL resolution, toolbar, toggles, telemetry.
+- `src/pages/PublicHomeworkShare.tsx` (TASK-4) — public wrapper: URL'ы уже signed из edge function, передаёт тот же компонент.
+- **Не создавать dependency** обратно от `HomeworkPreviewContent` на что-либо tutor-specific. Новый функционал (e.g. «похожие задачи», «оценить гармоничность» — Sprint 2+) должен оборачивать компонент, а не расширять его props для tutor-only полей.
+
+**Anti-leak инварианты (параллель с TASK-4 public contract):**
+- `HomeworkPreviewTask` тип **НЕ содержит** `rubric_text` / `rubric_image_urls` — compile-time гарантия, что рубрика не попадает ни в tutor preview, ни в public `/p/:slug`. Рубрика остаётся tutor-only для Detail / Edit surfaces. При расширении типа соблюдать: любое поле должно быть безопасно для публичного показа — tutor-side оборачивание «поверх» не защищает.
+- `showAnswers` / `showSolutions` дефолт **OFF** на tutor toolbar и в `ShareLinkDialog` (TASK-7). Safe default — репетитор должен осознанно включить.
+- `solution_text` / `solution_image_urls` рендерятся **только** при `showSolutions=true` И при наличии контента. Пустые solution-блоки не рендерятся (нет пустой секции «Решение»).
+
+**Image resolution (две стратегии для одного компонента):**
+- **Tutor path:** `TutorHomeworkPreview` батчит все `task_image_url` и `solution_image_urls` refs через [`useKBImagesSignedUrls`](../../src/hooks/useKBImagesSignedUrls.ts) (тот же pattern, что edit-mode [`HWTaskCard`](../../src/components/tutor/homework-create/HWTaskCard.tsx)). Один вызов на gallery type с дедупом по ref. **НЕ** использовать per-task `getTutorTaskImagesSignedUrls` — это N запросов вместо 1. Результат — `Record<ref, url>`, из которого `useMemo` собирает `HomeworkPreviewTask[]`.
+- **Public path:** edge function `public-homework-share` подписывает URL'ы через `service_role` и возвращает готовые `string[]`. Клиент ничего не резолвит.
+- `HomeworkPreviewContent` всегда получает массивы **готовых direct/signed URL'ов** — не знает о `storage://` refs. `PhotoGallery` из [`src/components/homework/shared/PhotoGallery.tsx`](../../src/components/homework/shared/PhotoGallery.tsx) рендерит thumbnails + fullscreen Dialog с swipe + arrow keys + counter.
+
+**Print CSS — delivery contract (Safari-safe, см. `.claude/rules/80-cross-browser.md`):**
+- `src/styles/homework-preview-print.css` — **linked stylesheet** через `import '@/styles/homework-preview-print.css'` в tsx (Vite emits external `<link>`). **НЕ** встраивать `@media print` через inline `<style>` тег, генерируемый runtime — Safari/WebKit исторически не учитывает такие правила при `window.print()`.
+- Правила: hide `.sokrat .t-app__rail` + `.sokrat .t-app__mobile-topbar` + `.preview-toolbar`; `.sokrat.t-app { display: block }` для сброса grid; каждая задача `.preview-task { break-inside: avoid; page-break-inside: avoid }`; `@page { margin: 1.5cm }` для PDF.
+- KaTeX-rendered HTML сохраняется как есть — формулы печатаются нативно без трансформаций.
+
+**Copy-to-Telegram (AC-5):**
+- Helper `buildTelegramCopyText` в `TutorHomeworkPreview.tsx`: формат `№N. <stripLatex(task_text)>` + `[см. рисунок]` если картинки есть + `Ответ: <stripLatex(correct_answer)>` если `showAnswers=true`. `stripLatex` из [`src/components/kb/ui/stripLatex.ts`](../../src/components/kb/ui/stripLatex.ts) — reuse, не дублировать.
+- `copyTextToClipboard` — primary `navigator.clipboard.writeText` с guard `window.isSecureContext`; fallback на `document.execCommand('copy')` через hidden textarea (required для http preview / Safari < 15.4). Та же pattern, что в [`ShareLinkDialog`](../../src/components/tutor/homework-reuse/ShareLinkDialog.tsx) (TASK-7). **Не удалять fallback.**
+
+**Design deviations от спек-wireframe:**
+- Заголовок карточки в спеке: `Задача №N · ЕГЭ №M · X баллов`. На tutor path `kim_number: null` всегда — `homework_tutor_tasks` не имеет `kim_number` колонки. Public endpoint может заполнить через `kb_task_id` provenance → `kb_tasks.kim_number`. Компонент рендерит `· ЕГЭ №M` только при `kim_number != null`. Добавление `kim_number` в tutor API — отдельная фича (не в scope TASK-3).
+- Share button в tutor toolbar — stub `toast.info('Диалог ...')` до TASK-10 integration. TASK-10 свяжет его с `ShareLinkDialog` из TASK-7.
+
+**Telemetry (PII-free, только id + counts + boolean):**
+- `homework_preview_opened` — fire-once-per-mount через `useRef<string | null>` sentinel по `assignmentId`. **Не** на каждый refetch. Payload `{ assignmentId, tasksCount }`.
+- `homework_preview_printed` — в click handler Print, **до** `window.print()` через `requestAnimationFrame` (чтобы telemetry успела emit'нуться до блокировки main thread print dialog'ом). Payload `{ assignmentId, tasksCount }`.
+- `homework_preview_copied_text` — после успешного `copyTextToClipboard`. Payload `{ assignmentId, tasksCount, withAnswers }`. `withAnswers` = state toggle в момент копирования — не конфигурация в момент open.
+
+**Общий принцип при расширении:** если понадобится preview от шаблона (`homework_tutor_templates.tasks_json`) или от результата (Results v2) — соберите `HomeworkPreviewTask[]` из нужного источника и отрендерите `HomeworkPreviewContent` без изменений. Компонент не знает об источнике данных.
+
 ### Fallback для legacy subject ids (2026-04-07)
 - `src/types/homework.ts` — `LEGACY_SUBJECT_LABELS: Record<string, string>` для устаревших ключей предметов (`math` → `Математика`, `rus` → `Русский язык`). Применяется в `getSubjectLabel()` как второй fallback после `SUBJECT_NAME_MAP`
 - Существующие ДЗ с `subject: 'math'` (до разделения на `algebra`/`geometry`) теперь рендерятся с русским лейблом, не с raw english id
@@ -460,6 +573,7 @@ Audit/normalize/optimize/harden pass на `/tutor/homework` и `/tutor/homework/
 - `homework_tutor_task_states` — прогресс по задачам в guided mode
 - `homework_tutor_templates` — шаблоны заданий
 - `homework_tutor_materials` — материалы к заданиям (PDF, images, links)
+- `homework_share_links` — публичные read-only ссылки `/p/:slug` на ДЗ (homework-reuse-v1 TASK-1/TASK-7, 2026-04-22). Множественные ссылки на одно ДЗ разрешены. Tutor CRUD через `homework-api` (см. правило «Homework share links / public /p/:slug»). Публичное чтение — отдельный edge function `public-homework-share` под `service_role`
 
 ### Важно
 - Система попыток (attempts) **удалена** — ученик может пересдавать без ограничений
