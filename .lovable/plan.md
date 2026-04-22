@@ -1,98 +1,125 @@
 
 
-## Анализ
+## План: трёхуровневый drill-down «Репетиторы → ДЗ → Ученики → Чат» в админке
 
-### Почему скрин 3 (автопроверка не сработала) всё ещё есть
+### Что делаем
 
-Логи (timestamp `2026-04-22T04:00:42Z`) подтверждают: gateway отвечает **HTTP 400 «Unsupported MIME type: image/svg+xml»**. Прошлый фикс SVG-skip был добавлен в `inlinePromptImageUrl` (`guided_ai.ts`), но реальный путь, который используется в `evaluateStudentAnswer`/`generateHint`, — это **другая функция**: `resolveTaskImageUrlForAI` в `homework-api/index.ts` (строки 3711–3770). Она:
-1. Парсит `storage://kb-attachments/demidova2025/z1_25.svg`
-2. Делает `db.storage.from('kb-attachments').download('demidova2025/z1_25.svg')`
-3. Берёт `blob.type` (= `image/svg+xml`)
-4. Без проверки склеивает `data:image/svg+xml;base64,...` и шлёт в gateway → 400
+Заменяем плоский список переписок во вкладке «ДЗ» (`AdminHomeworkChats.tsx`) на иерархическую навигацию:
 
-То есть **прошлый PR трогал не тот путь**. Чёрный путь без SVG-skip остаётся.
+```text
+Уровень 1: Репетиторы          — кто и насколько активен
+Уровень 2: ДЗ репетитора        — что задано, как идёт
+Уровень 3: Ученики в ДЗ         — кто и где застрял
+Уровень 4: Чат ученика          — существующий AdminHWThreadView (без изменений)
+```
 
-### Почему скрин 2 (AI отвечает не по графику в режиме «Обсудить»)
+Навигация через **drill-down с breadcrumbs** (`Репетиторы › Иван › Оптика №25 › Андрей`). Стрелка «назад» дублирует крошки. Глубокая ссылка не нужна — состояние локальное.
 
-В `chat/index.ts` SVG-skip есть и работает корректно: `fetchImageAsBase64DataUrl` дропает SVG и возвращает `null`. Это значит, что в режиме «Обсудить» **AI вообще не получает картинку графика**. Он генерирует объяснение на основе только текста условия («модуль перемещения за время от t₁=0 до t₂=6»), фантазирует фигуры («треугольник с 0 до 4 секунд») и даёт неверный план разбора.
+### Уровень 1: список репетиторов
 
-### Масштаб: 56 SVG-задач в KB
+Карточка/строка на каждого репетитора, у которого есть хотя бы одно ДЗ. Сортировка по последней активности любого ученика (DESC).
 
-Это не единичный баг, а целый класс контента (Демидова 2025 — 56 SVG в KB, 7 уже в активных ДЗ). Ответ на вопрос 3 определяет архитектуру: **stable raster путь обязателен**.
+**Что показываем в строке:**
+- Аватар-инициалы + имя/`@telegram_username`
+- 3 чипа метрик: `ДЗ: всего · активных · завершённых`
+- 1 строка: `N учеников · K активны за 7 дней`
+- Справа (right-aligned, как сейчас): «Последняя активность ученика» — имя + превью + относительное время («2ч», «вчера», «3 апр»)
 
-### Ответ на вопрос 3 (что выбрать стратегически)
+**Поиск:** одна строка ввода — фильтрует по имени репетитора и `@telegram_username`. Без табов — простота важнее сегментов.
 
-Multimodal Gemini-flash для физических графиков на словах звучит круто, на деле для SVG ломается на уровне gateway, для растровых картинок в 30–40% случаев галлюцинирует значения по осям (см. правило `guided-chat-vision-logic` в .claude/rules — мы уже наступали на это). Для **репетиторского пилота** (job: «утром получить чёткий разбор где вмешаться») стабильность важнее.
+### Уровень 2: ДЗ выбранного репетитора
 
-**Рекомендация: гибрид с приоритетом на rasterization + tutor-side OCR/text.**
-1. **Server-side**: `kb-attachments` SVG → растрировать в PNG один раз при upload или lazy on-demand, кэшировать. AI всегда видит PNG, multimodal работает как ожидается.
-2. **Tutor-side**: добавить колонку «текст с картинки» (OCR/ручной перенос — чисел с осей, подписей) в KB-задаче и в `homework_tutor_tasks.ocr_text`. Этот текст уходит в промпт как «опора» (паттерн `buildGraphGroundingGuidance` уже есть). Для критичных ЕГЭ-задач это убирает галлюцинации.
-3. Multimodal-картинку оставляем как complement, не основной канал.
+Заголовок: имя репетитора + сводка (всего ДЗ, всего учеников). Список его ДЗ, сортировка по последнему сообщению в любом треде (DESC).
 
-Для **первого шага сейчас** делаем минимум: фикс SVG-skip на верном пути + ручное rerasterization 56 SVG в PNG как один-time backfill. План tutor-side OCR-поля — в отдельную итерацию.
+**Что показываем в строке ДЗ:**
+- Заголовок ДЗ + предмет (chip) + `exam_type` (chip ЕГЭ/ОГЭ если есть)
+- Прогресс: `X/Y учеников сдали` + горизонтальный progress-bar
+- 3 микро-чипа: `активны · в процессе · не приступали` (3 числа в одной строке, цветовое кодирование уже есть в системе)
+- Справа: «Последнее сообщение» — имя ученика + превью + время
 
----
+**Поиск:** по названию ДЗ внутри уровня.
 
-## Что меняем сейчас
+### Уровень 3: ученики в выбранном ДЗ
 
-### 1. Real fix: SVG-skip в `resolveTaskImageUrlForAI` (`homework-api/index.ts`, ~3711)
+Заголовок: название ДЗ + статус + summary. Список учеников этого ДЗ.
 
-После `db.storage.download()` — **до** того как склеивать data-URL, проверить:
-- `blob.type` matches `image/svg+xml`
-- расширение objectPath `.svg`
-- magic bytes (`<?xml` / `<svg`)
+**Что показываем в строке ученика** (это уже почти текущий `ThreadList`, переиспользуем):
+- Аватар + имя/`@telegram_username`
+- Статус треда (Активен / Завершён / Не приступал)
+- Сообщ. count + относительное время последнего обновления
+- Превью последнего сообщения
 
-При срабатывании логировать `homework_api_inline_image_skipped { reason: "unsupported_svg" }` и возвращать `null`. Auto-check тогда падает не в gateway 400, а отрабатывает на `correct_answer` через deterministic short-answer match (для `15 м` vs `30` правильно вернёт INCORRECT с осмысленным фидбеком).
+**Клик** → существующий `AdminHWThreadView` (Уровень 4) без изменений.
 
-### 2. Backfill: rasterize 56 SVG → PNG
+### Уровень 4: чат
 
-Один-time скрипт через `code--exec`:
-1. Скачивает все 56 SVG из bucket `kb-attachments`
-2. Растрирует через `nix run nixpkgs#librsvg -- rsvg-convert` (или resvg) → PNG @ 1200×800, белый фон
-3. Загружает PNG обратно как `demidova2025/z1_25.png` рядом
-4. Обновляет `kb_tasks.attachment_url` и **уже скопированные** `homework_tutor_tasks.task_image_url` (UPDATE по join)
-
-После backfill автопроверка для 7 ДЗ-задач + любые новые копии работают через нормальный multimodal.
-
-### 3. Tutor-side контракт «PNG only» для KB-аплоада
-
-В `KBPickerSheet`/upload path — когда репетитор загружает SVG, рендерим тёплый toast «SVG не поддерживается AI-проверкой, конвертируйте в PNG/JPG». Не блокируем, но предупреждаем. Это additive UX-валидация, чтобы новые SVG не появлялись.
-
-### 4. Telemetry / лог-улучшение
-
-`resolveTaskImageUrlForAI` сейчас не логирует успешный путь. Добавить `console.info('homework_api_inline_image_resolved', { mime, bytes, source })` для будущей диагностики.
+Уже реализован в `AdminHWThreadView`. Только меняем `onBack` → возврат на Уровень 3 с сохранёнными breadcrumbs.
 
 ---
 
-## Что НЕ меняем
+### Технические детали
 
-- `inlinePromptImageUrl` в `guided_ai.ts` уже защищена — оставляем (дублирующая защита для редких HTTP-веток).
-- `chat/index.ts::fetchImageAsBase64DataUrl` уже корректно дропает SVG — поведение «AI без картинки» правильное для текущего стека; после backfill PNG картинка вернётся в чат.
-- Не делаем live SVG→PNG конверсию в edge function (Deno без `resvg-wasm` пакета — это отдельная инфраструктура; backfill+upload-validation покрывают 99%).
-- Не вводим OCR-поле в этой итерации (отдельная плановая работа на tutor side).
+**Новые файлы** (выносим из 515-строчного `AdminHomeworkChats.tsx`):
+- `src/components/admin/homework/AdminHomeworkChats.tsx` — корневой контейнер с breadcrumbs + state machine `{ view: 'tutors' | 'assignments' | 'students' | 'thread', tutorId?, assignmentId?, threadId? }`
+- `src/components/admin/homework/AdminTutorList.tsx` — Уровень 1
+- `src/components/admin/homework/AdminTutorAssignmentList.tsx` — Уровень 2
+- `src/components/admin/homework/AdminAssignmentStudentList.tsx` — Уровень 3
+- `src/components/admin/homework/AdminHomeworkBreadcrumbs.tsx` — крошки (одна для всех уровней)
+- `src/components/admin/homework/AdminHWThreadView.tsx` — Уровень 4 (вырезаем существующий код, без правок)
+- `src/lib/adminHomeworkApi.ts` — все запросы; разбиваем по уровням, чтобы не тащить тяжёлые данные на верхних
 
----
+**Старый `AdminHomeworkChats.tsx`** — превращается в один re-export, чтобы импорт в `Admin.tsx` не сломался.
 
-## Файлы
+**Запросы (минимально, без N+1):**
+
+Уровень 1 — один проход:
+1. `homework_tutor_assignments` → берём `tutor_id`, `id`, `status`
+2. `tutors` (по `user_id IN (...)`) → имя, `telegram_username`
+3. `homework_tutor_student_assignments` (по `assignment_id IN (...)`) → подсчёт учеников per tutor + active за 7 дней (через `notified_at` / `delivery_status` нерелевантно — берём из `homework_tutor_threads.last_student_message_at >= now() - 7d`)
+4. `homework_tutor_threads` — для last activity per tutor берём MAX(`last_student_message_at`) сгруппированно client-side
+5. Превью последнего сообщения per tutor — один запрос `homework_tutor_thread_messages` с `role='user'` order by created_at desc limit ~200, dedup client-side (паттерн уже использован в `useTutorRecentDialogs.ts` — переиспользуем подход)
+
+Уровень 2 — фильтр по `tutor_id`, аналогичный паттерн но в рамках одного репетитора (быстро).
+
+Уровень 3 — фактически текущая логика `fetchThreads`, фильтрованная по `assignment_id`.
+
+**Кэш:** простой `useState` без react-query — соответствует текущему стилю файла (никакой react-query там сейчас нет). Refresh при возврате на уровень не делаем — данные «свежие на момент входа», явная кнопка-иконка «обновить» в шапке breadcrumbs.
+
+**Оптимизация:** на Уровне 1 limit на `homework_tutor_threads` нет, но запросы агрегативные (по `tutor_id`-фильтру через JOIN-карту в JS). При 50 репетиторах × 200 ДЗ × 5 студентов = 50К строк threads — приемлемо для админки, но если в проде уже больше — добавим RPC `admin_homework_tutors_overview()` отдельной итерацией. Сейчас — без RPC, чтобы доставить быстро.
+
+### UX-делайт (умеренно)
+
+- Breadcrumbs: каждый segment кликабелен (откатывает уровень). Текущий segment жирным, без ссылки.
+- Hover на строке репетитора/ДЗ → лёгкий fade `bg-muted/50` (как сейчас в `ThreadList`).
+- Пустые состояния:
+  - Уровень 1: «Пока нет репетиторов с домашками»
+  - Уровень 2: «У этого репетитора нет ДЗ»
+  - Уровень 3: «В этом ДЗ ещё нет назначенных учеников»
+- Skeleton loaders на каждом уровне — те же 5 строк по 16px высоты, как сейчас.
+- Цветовые чипы статусов унифицированы с уже существующими в `AdminHomeworkChats` (зелёный «Активен», серый «Завершён»).
+
+### Что НЕ делаем (вне scope)
+
+- Не меняем `AdminHWThreadView` (внутренний рендер чата) — только `onBack`.
+- Не добавляем графики/heatmap по репетиторам — это отдельная аналитика.
+- Не вводим RPC и индексы — оптимизация после замера на проде.
+- Не добавляем фильтры «активные за 7д / простаивают» — пользователь выбрал минимум (только сортировка + поиск).
+- Не делаем глубокие URL-ссылки (`/admin?tab=hw&tutor=...`) — для пилотной аналитики не критично.
+
+### Файлы
+
+**Новые:** 6 файлов в `src/components/admin/homework/` + `src/lib/adminHomeworkApi.ts`.
 
 **Изменяются:**
-- `supabase/functions/homework-api/index.ts` — SVG-skip + лог в `resolveTaskImageUrlForAI` (~30 строк additive).
-- `src/components/kb/...` — toast-предупреждение при upload SVG (точное место найду в default mode; кандидат — `KBTaskForm` или соответствующий drawer).
+- `src/components/admin/AdminHomeworkChats.tsx` → тонкий re-export или удаление + правка импорта в `Admin.tsx`.
+- `src/pages/Admin.tsx` (если импорт нужно обновить).
 
-**Один-time скрипты (не коммитятся):**
-- `/tmp/rasterize_svg.sh` — bash + rsvg-convert для backfill 56 файлов.
-- SQL-миграция rename atttachment_url для затронутых записей (`UPDATE kb_tasks SET attachment_url = REPLACE(attachment_url, '.svg', '.png') WHERE attachment_url LIKE '%.svg'` после успешного upload PNG).
+**Не трогаем:** `AdminHWThreadView` логика рендера, RLS, edge functions, БД.
 
----
+### Валидация
 
-## Валидация
-
-1. После SVG-skip фикса: повторить «Ответ к задаче: 30» в `/homework/41b09b81-bbff-454c-b5c8-b4c56dff9299` → автопроверка вернёт **INCORRECT** с осмысленным фидбеком (не «не сработала»).
-2. После backfill: режим «Обсудить» → AI описывает реальный график (ступенька 10 → −5, не «треугольник»).
-3. `npm run lint && npm run build && npm run smoke-check`.
-4. Лог `homework_api_inline_image_skipped { reason: "unsupported_svg" }` появляется ровно на тех задачах, где SVG ещё не растрирован.
-
-## Стратегический ответ (вопрос 3)
-
-**Самое стабильное:** server-side rasterization + опциональный tutor-side OCR-текст ключевых данных + multimodal как дополнительный канал. Ставка только на multimodal без растеризации = ловим SVG-400, ловим галлюцинации по осям, ловим скрытые форматы. Ставка только на tutor-side OCR = много ручной работы и исключает задачи, где визуал важнее чисел (схемы, векторы). Гибрид даёт максимум и закрывает edge-cases.
+1. `npm run lint && npm run build && npm run smoke-check`.
+2. Manual: `/admin → ДЗ` → видим репетиторов; кликаем → видим ДЗ; кликаем → видим учеников; кликаем → существующий чат-вью без регрессий.
+3. Breadcrumbs: клик по «Репетиторы» из чата откатывает на корень, не теряя данных.
+4. Поиск работает на каждом уровне независимо.
 
