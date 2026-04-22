@@ -134,6 +134,8 @@ export interface EvaluateStudentAnswerParams {
   taskImageUrls: string[];
   studentImageUrls?: string[] | null;
   taskOcrText?: string | null;
+  taskId?: string | null;
+  assignmentId?: string | null;
   correctAnswer: string | null;
   rubricText: string | null;
   rubricImageUrls?: string[] | null;
