@@ -5135,6 +5135,8 @@ async function handleCheckAnswer(
     taskImageUrls,
     studentImageUrls,
     taskOcrText,
+    taskId: task.id ?? null,
+    assignmentId: studentAssignment.assignment_id ?? null,
     correctAnswer: task.correct_answer,
     rubricText: task.rubric_text,
     rubricImageUrls,
