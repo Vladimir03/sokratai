@@ -51,12 +51,13 @@ interface ChatRequestBody {
 }
 
 // SECURITY: Allowed domains for image fetching to prevent SSRF attacks
-const ALLOWED_IMAGE_DOMAINS = [
-  `${Deno.env.get("SUPABASE_URL")}/storage/v1/object/sign/chat-images/`,
-  `${Deno.env.get("SUPABASE_URL")}/storage/v1/object/sign/homework-task-images/`,
-  `${Deno.env.get("SUPABASE_URL")}/storage/v1/object/sign/homework-submissions/`,
-  `${Deno.env.get("SUPABASE_URL")}/storage/v1/object/sign/homework-images/`,
-];
+// Imported from _shared/image-domains.ts so chat / homework-api / future AI
+// callers stay in sync. Adding a bucket to any homework write-path requires
+// extending HOMEWORK_AI_BUCKETS there — see rule 40 invariant.
+import { buildAllowedSignedUrlPrefixes } from "../_shared/image-domains.ts";
+const ALLOWED_IMAGE_DOMAINS = buildAllowedSignedUrlPrefixes(
+  Deno.env.get("SUPABASE_URL") ?? "",
+);
 
 /** Max image size (5 MB raw ≈ 6.7 MB base64) to stay within gateway body limits. */
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
