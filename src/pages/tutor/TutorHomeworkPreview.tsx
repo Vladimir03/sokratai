@@ -245,7 +245,7 @@ function TutorHomeworkPreviewContent() {
     return (
       <div className="mx-auto max-w-[800px] px-4 py-10 text-center">
         <p className="mb-4 text-base text-red-600">
-          {toTutorErrorMessage(detailsQuery.error)}
+          {toTutorErrorMessage('Не удалось загрузить предпросмотр ДЗ', detailsQuery.error)}
         </p>
         <Button onClick={handleBack} variant="outline">
           <ArrowLeft className="mr-2 h-4 w-4" />
