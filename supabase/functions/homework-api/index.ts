@@ -5733,6 +5733,7 @@ interface RecentDialogItem {
   stream: "ЕГЭ" | "ОГЭ";
   lastAuthor: "student" | "tutor" | "ai";
   unread: boolean;
+  unreadCount: number;
   preview: string;
   at: string; // ISO timestamp — frontend formats it with date-fns
   hwId: string;

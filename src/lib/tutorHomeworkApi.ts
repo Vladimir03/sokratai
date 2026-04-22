@@ -784,6 +784,14 @@ export interface RecentDialogItem {
   stream: 'ЕГЭ' | 'ОГЭ';
   lastAuthor: 'student' | 'tutor' | 'ai';
   unread: boolean;
+  /**
+   * Number of student messages with `created_at > tutor_last_viewed_at`.
+   * 0 when there are no unread messages. Used by the «Последние диалоги»
+   * block on /tutor/home to render a Telegram-style counter badge.
+   * Optional in transit for backward compat with older edge function deploys
+   * (frontend hooks default missing values to 0).
+   */
+  unreadCount: number;
   preview: string;
   at: string;
   hwId: string;
