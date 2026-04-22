@@ -12,6 +12,27 @@
 
 **Важно:** TASK-1 и TASK-2 — unblockers, должны идти первыми. TASK-3 / TASK-5 / TASK-8 — параллельные рабочие треки (preview / reuse / groups). TASK-10 — integration. TASK-11 / TASK-12 — в конце.
 
+## Status (2026-04-22)
+
+| TASK | Status | Commit | Notes |
+|---|---|---|---|
+| TASK-1 | ✅ Done | — | Migrations landed (`homework_share_links`, `source_group_id`) |
+| TASK-2 | ✅ Done | `1fb5222` | Assistant nav hidden + redirect + telemetry |
+| TASK-3 | ✅ Done | `43e45f2` | Tutor preview + print CSS + copy-to-Telegram |
+| TASK-4 | ✅ Done | — | Public `/p/:slug` endpoint + page |
+| TASK-5 | ✅ Done | `0c653b4` | `SaveTasksToKBDialog` + `handleSaveTasksToKB` + per-task `BookmarkPlus` in edit-mode |
+| TASK-6 | ✅ Done | `0590a3f` | `SaveAsTemplateDialog` + `handleCreateTemplateFromAssignment` + `PATCH /templates/:id` |
+| TASK-7 | ✅ Done | — | `ShareLinkDialog` + slug generation + CRUD |
+| TASK-8 | ✅ Done | `ead0a05` | `HWAssignSection` tabs + `source_group_id` write |
+| TASK-9 | ✅ Done | `f55537c` | Filter `?group_id=` + `source_group_*` on list items + group badge |
+| TASK-10 | ⏳ Pending | — | Actions menu wiring on `TutorHomeworkDetail` (glue for preview / share / save-kb / save-template dialogs) |
+| TASK-11 | ⏳ Pending | — | Telemetry audit across all 11 events |
+| TASK-12 | ⏳ Pending | — | QA pass (cross-browser + print + public share + groups + KB dedup) |
+
+**Известные open gaps (Sprint 2+ или отдельные spawn-задачи):**
+- `homework_tutor_templates.subject` CHECK не синхронизирован с canonical subject ids — см. `.claude/rules/40-homework-system.md` §«Save-as-template post-factum» → «Known schema drift». Миграция заспавнена.
+- TASK-10 должен будет: (a) смонтировать `SaveTasksToKBDialog` в bulk-mode с `tasks` из assignment detail response; (b) смонтировать `SaveAsTemplateDialog`; (c) смонтировать `ShareLinkDialog`; (d) entry в preview через `navigate`.
+
 ---
 
 ## Phase 1 — Infrastructure & Cleanup (1 день)
