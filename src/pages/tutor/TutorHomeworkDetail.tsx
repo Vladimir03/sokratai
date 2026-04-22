@@ -1,12 +1,29 @@
-import { useState, useCallback, useEffect, useId, useMemo, useRef } from 'react';
+import { lazy, Suspense, useState, useCallback, useEffect, useId, useMemo, useRef } from 'react';
 import { Link, useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { ChevronDown, Paperclip, ExternalLink, Edit, Trash2 } from 'lucide-react';
+import {
+  BookmarkPlus,
+  ChevronDown,
+  Edit,
+  ExternalLink,
+  Eye,
+  FileText,
+  MoreHorizontal,
+  Paperclip,
+  Share2,
+  Trash2,
+} from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { toast } from 'sonner';
 import { TutorDataStatus } from '@/components/tutor/TutorDataStatus';
 import { ResultsHeader } from '@/components/tutor/results/ResultsHeader';
@@ -63,10 +80,18 @@ function DetailActions({
   status,
   assignmentId,
   onDelete,
+  onOpenPreview,
+  onOpenShare,
+  onOpenSaveToKB,
+  onOpenSaveAsTemplate,
 }: {
   status: HomeworkAssignmentStatus;
   assignmentId: string;
   onDelete: () => void;
+  onOpenPreview: () => void;
+  onOpenShare: () => void;
+  onOpenSaveToKB: () => void;
+  onOpenSaveAsTemplate: () => void;
 }) {
   const cfg = HOMEWORK_STATUS_CONFIG[status];
   return (
@@ -80,6 +105,36 @@ function DetailActions({
           <span className="hidden md:inline">Редактировать</span>
         </Link>
       </Button>
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button
+            variant="outline"
+            size="sm"
+            aria-label="Ещё действия"
+            title="Ещё действия"
+          >
+            <MoreHorizontal className="h-4 w-4" aria-hidden="true" />
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" className="w-56">
+          <DropdownMenuItem onSelect={onOpenPreview}>
+            <Eye className="h-4 w-4 mr-2" aria-hidden="true" />
+            Открыть preview
+          </DropdownMenuItem>
+          <DropdownMenuItem onSelect={onOpenShare}>
+            <Share2 className="h-4 w-4 mr-2" aria-hidden="true" />
+            Поделиться ссылкой
+          </DropdownMenuItem>
+          <DropdownMenuItem onSelect={onOpenSaveToKB}>
+            <BookmarkPlus className="h-4 w-4 mr-2" aria-hidden="true" />
+            Сохранить задачи в базу
+          </DropdownMenuItem>
+          <DropdownMenuItem onSelect={onOpenSaveAsTemplate}>
+            <FileText className="h-4 w-4 mr-2" aria-hidden="true" />
+            Сохранить как шаблон
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
       <Button variant="destructive" size="sm" onClick={onDelete}>
         <Trash2 className="h-4 w-4 md:mr-2" />
         <span className="hidden md:inline">Удалить ДЗ</span>
@@ -87,6 +142,24 @@ function DetailActions({
     </>
   );
 }
+
+// Lazy-loaded reuse dialogs. Mounted conditionally (open=true) so their
+// React Query hooks don't run until the tutor actually opens the menu item.
+const ShareLinkDialog = lazy(() =>
+  import('@/components/tutor/homework-reuse/ShareLinkDialog').then((m) => ({
+    default: m.ShareLinkDialog,
+  })),
+);
+const SaveTasksToKBDialog = lazy(() =>
+  import('@/components/tutor/homework-reuse/SaveTasksToKBDialog').then((m) => ({
+    default: m.SaveTasksToKBDialog,
+  })),
+);
+const SaveAsTemplateDialog = lazy(() =>
+  import('@/components/tutor/homework-reuse/SaveAsTemplateDialog').then((m) => ({
+    default: m.SaveAsTemplateDialog,
+  })),
+);
 
 // ─── Tasks List ──────────────────────────────────────────────────────────────
 
@@ -494,6 +567,34 @@ function TutorHomeworkDetailContent() {
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
 
+  // ─── Reuse dialogs (TASK-10, homework-reuse-v1) ─────────────────────────────
+  // Each dialog is mounted conditionally so its fetches/hooks don't fire
+  // until the tutor explicitly opens the menu item. Closing sets back to
+  // `false` → dialog unmounts, releasing any query subscriptions.
+  const [shareDialogOpen, setShareDialogOpen] = useState(false);
+  const [saveKBDialogOpen, setSaveKBDialogOpen] = useState(false);
+  const [saveTemplateDialogOpen, setSaveTemplateDialogOpen] = useState(false);
+
+  const handleOpenPreview = useCallback(() => {
+    if (!id) return;
+    navigate(`/tutor/homework/${id}/preview`);
+  }, [id, navigate]);
+
+  // Build the KB save payload once per details change. SaveTasksToKBDialog
+  // expects a minimal shape ({id, order_num, task_text, already_in_base_hint}).
+  // `already_in_base_hint` reflects provenance (kb_source_label === 'my')
+  // so the dialog can flag «уже в базе» inline before the backend dedup.
+  const saveKBTasks = useMemo(
+    () =>
+      (details?.tasks ?? []).map((t) => ({
+        id: t.id,
+        order_num: t.order_num,
+        task_text: t.task_text,
+        already_in_base_hint: t.kb_source_label === 'my',
+      })),
+    [details],
+  );
+
   const handleDelete = useCallback(async () => {
     if (!id) return;
     setIsDeleting(true);
@@ -536,6 +637,10 @@ function TutorHomeworkDetailContent() {
                 status={details.assignment.status as HomeworkAssignmentStatus}
                 assignmentId={details.assignment.id}
                 onDelete={() => setDeleteOpen(true)}
+                onOpenPreview={handleOpenPreview}
+                onOpenShare={() => setShareDialogOpen(true)}
+                onOpenSaveToKB={() => setSaveKBDialogOpen(true)}
+                onOpenSaveAsTemplate={() => setSaveTemplateDialogOpen(true)}
               />
             ) : null
           }
@@ -644,6 +749,44 @@ function TutorHomeworkDetailContent() {
       </Dialog>
 
       {/* Edit dialog removed — now handled by /tutor/homework/:id/edit route */}
+
+      {/* TASK-10 reuse dialogs — lazy-loaded, mounted only while open so
+          their internal React Query subscriptions stay dormant otherwise. */}
+      {shareDialogOpen && details?.assignment ? (
+        <Suspense fallback={null}>
+          <ShareLinkDialog
+            open={shareDialogOpen}
+            onOpenChange={setShareDialogOpen}
+            assignmentId={details.assignment.id}
+            assignmentTitle={details.assignment.title}
+          />
+        </Suspense>
+      ) : null}
+
+      {saveKBDialogOpen && details?.assignment ? (
+        <Suspense fallback={null}>
+          <SaveTasksToKBDialog
+            open={saveKBDialogOpen}
+            onOpenChange={setSaveKBDialogOpen}
+            assignmentId={details.assignment.id}
+            tasks={saveKBTasks}
+            mode="bulk"
+          />
+        </Suspense>
+      ) : null}
+
+      {saveTemplateDialogOpen && details?.assignment ? (
+        <Suspense fallback={null}>
+          <SaveAsTemplateDialog
+            open={saveTemplateDialogOpen}
+            onOpenChange={setSaveTemplateDialogOpen}
+            assignmentId={details.assignment.id}
+            assignmentTitle={details.assignment.title}
+            assignmentSubject={details.assignment.subject}
+            assignmentTopic={details.assignment.topic}
+          />
+        </Suspense>
+      ) : null}
     </>
   );
 }
