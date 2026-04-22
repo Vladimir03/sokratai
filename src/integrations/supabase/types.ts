@@ -720,6 +720,44 @@ export type Database = {
         }
         Relationships: []
       }
+      homework_share_links: {
+        Row: {
+          assignment_id: string
+          created_at: string
+          created_by: string
+          expires_at: string | null
+          show_answers: boolean
+          show_solutions: boolean
+          slug: string
+        }
+        Insert: {
+          assignment_id: string
+          created_at?: string
+          created_by: string
+          expires_at?: string | null
+          show_answers?: boolean
+          show_solutions?: boolean
+          slug: string
+        }
+        Update: {
+          assignment_id?: string
+          created_at?: string
+          created_by?: string
+          expires_at?: string | null
+          show_answers?: boolean
+          show_solutions?: boolean
+          slug?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "homework_share_links_assignment_id_fkey"
+            columns: ["assignment_id"]
+            isOneToOne: false
+            referencedRelation: "homework_tutor_assignments"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       homework_tasks: {
         Row: {
           ai_analysis: Json | null
@@ -774,6 +812,7 @@ export type Database = {
           group_id: string | null
           id: string
           max_attempts: number
+          source_group_id: string | null
           status: string
           subject: string
           title: string
@@ -789,6 +828,7 @@ export type Database = {
           group_id?: string | null
           id?: string
           max_attempts?: number
+          source_group_id?: string | null
           status?: string
           subject: string
           title: string
@@ -804,6 +844,7 @@ export type Database = {
           group_id?: string | null
           id?: string
           max_attempts?: number
+          source_group_id?: string | null
           status?: string
           subject?: string
           title?: string
@@ -814,6 +855,13 @@ export type Database = {
           {
             foreignKeyName: "homework_tutor_assignments_group_id_fkey"
             columns: ["group_id"]
+            isOneToOne: false
+            referencedRelation: "tutor_groups"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "homework_tutor_assignments_source_group_id_fkey"
+            columns: ["source_group_id"]
             isOneToOne: false
             referencedRelation: "tutor_groups"
             referencedColumns: ["id"]

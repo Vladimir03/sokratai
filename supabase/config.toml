@@ -27,6 +27,8 @@ project_id = "vrsseotrfmsxpbciyqzc"
     verify_jwt = false
   [functions.process-email-queue]
     verify_jwt = true
+  [functions.public-homework-share]
+    verify_jwt = false
   [functions.push-subscribe]
     verify_jwt = true
   [functions.setup-telegram-webhook]
