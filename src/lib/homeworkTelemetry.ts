@@ -31,6 +31,7 @@ type GuidedTelemetryEvent =
   | 'drill_down_expanded'
   | 'manual_score_override_saved'
   | 'homework_assign_group'
+  | 'homework_filter_by_group'
   // homework-reuse-v1 TASK-2 — bookmark traffic signal for /tutor/assistant
   // redirect. TASK-11 will extend the event surface with typed payloads for
   // the full reuse-v1 telemetry set.
@@ -105,6 +106,10 @@ interface HomeworkAssignGroupPayload extends Record<string, GuidedTelemetryValue
   group_id: string | null;
   student_count: number;
   is_multi_group: boolean;
+}
+
+interface HomeworkFilterByGroupPayload extends Record<string, GuidedTelemetryValue> {
+  group_id: string | null;
 }
 
 // homework-reuse-v1 TASK-7 — share link created. PII-free (no slug, no url).
@@ -191,6 +196,7 @@ export function trackGuidedHomeworkEvent(event: 'drill_down_expanded', payload: 
 export function trackGuidedHomeworkEvent(event: 'manual_score_override_saved', payload: ManualScoreOverrideSavedPayload): void;
 export function trackGuidedHomeworkEvent(event: 'telegram_reminder_sent_from_results', payload: TelegramReminderSentPayload): void;
 export function trackGuidedHomeworkEvent(event: 'homework_assign_group', payload: HomeworkAssignGroupPayload): void;
+export function trackGuidedHomeworkEvent(event: 'homework_filter_by_group', payload: HomeworkFilterByGroupPayload): void;
 export function trackGuidedHomeworkEvent(event: 'homework_share_link_created', payload: HomeworkShareLinkCreatedPayload): void;
 export function trackGuidedHomeworkEvent(event: 'homework_preview_opened', payload: HomeworkPreviewOpenedPayload): void;
 export function trackGuidedHomeworkEvent(event: 'homework_preview_printed', payload: HomeworkPreviewPrintedPayload): void;

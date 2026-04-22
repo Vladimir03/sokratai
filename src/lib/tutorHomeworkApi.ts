@@ -33,6 +33,9 @@ export interface TutorHomeworkAssignmentListItem {
   deadline: string | null;
   status: HomeworkAssignmentStatus;
   created_at: string;
+  source_group_id: string | null;
+  source_group_name: string | null;
+  source_group_color: string | null;
   assigned_count: number;
   submitted_count: number;
   /**
@@ -265,10 +268,18 @@ async function requestHomeworkApi<T>(
 // ─── Public API functions ────────────────────────────────────────────────────
 
 export async function listTutorHomeworkAssignments(
-  filter: HomeworkAssignmentsFilter = 'all',
+  options: {
+    filter?: HomeworkAssignmentsFilter;
+    group_id?: string | null;
+  } = {},
 ): Promise<TutorHomeworkAssignmentListItem[]> {
+  const params = new URLSearchParams();
+  params.set('status', options.filter ?? 'all');
+  if (options.group_id) {
+    params.set('group_id', options.group_id);
+  }
   return requestHomeworkApi<TutorHomeworkAssignmentListItem[]>(
-    `/assignments?status=${encodeURIComponent(filter)}`,
+    `/assignments?${params.toString()}`,
   );
 }
 

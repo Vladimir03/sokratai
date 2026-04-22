@@ -19,17 +19,33 @@ import {
   withTutorTimeout,
 } from '@/hooks/tutorQueryOptions';
 
-export function useTutorHomeworkAssignments(filter: HomeworkAssignmentsFilter = 'all') {
+export function useTutorHomeworkAssignments(params: {
+  filter?: HomeworkAssignmentsFilter;
+  groupId?: string | null;
+  sortKey?: string;
+} = {}) {
+  const {
+    filter = 'all',
+    groupId = null,
+    sortKey = 'created_desc',
+  } = params;
   const queryKey = useMemo(
-    () => ['tutor', 'homework', 'assignments', filter] as const,
-    [filter],
+    () => ['tutor', 'homework', 'assignments', {
+      filter,
+      group_id: groupId,
+      sort: sortKey,
+    }] as const,
+    [filter, groupId, sortKey],
   );
   const queryKeyText = useMemo(() => tutorQueryKeyToString(queryKey), [queryKey]);
 
   const query = useQuery<TutorHomeworkAssignmentListItem[], unknown>({
     queryKey,
     queryFn: () =>
-      withTutorTimeout(queryKey, listTutorHomeworkAssignments(filter)),
+      withTutorTimeout(queryKey, listTutorHomeworkAssignments({
+        filter,
+        group_id: groupId,
+      })),
     staleTime: TUTOR_STALE_TIME_MS,
     gcTime: TUTOR_GC_TIME_MS,
     retry: createTutorRetry(queryKey),
@@ -112,4 +128,3 @@ export function useTutorHomeworkTemplates(subject?: HomeworkSubject) {
     isFetching: query.isFetching,
   };
 }
-

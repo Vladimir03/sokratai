@@ -703,14 +703,22 @@ async function handleListAssignments(
     return jsonError(cors, 400, "VALIDATION", `status must be one of: ${VALID_STATUS_FILTERS.join(", ")}`);
   }
 
+  const groupFilter = searchParams.get("group_id");
+  if (groupFilter && !isUUID(groupFilter)) {
+    return jsonError(cors, 400, "VALIDATION", "group_id must be a UUID");
+  }
+
   let query = db
     .from("homework_tutor_assignments")
-    .select("id, title, subject, topic, deadline, status, created_at")
+    .select("id, title, subject, topic, deadline, status, created_at, source_group_id")
     .eq("tutor_id", tutorUserId)
     .order("created_at", { ascending: false });
 
   if (statusFilter !== "all") {
     query = query.eq("status", statusFilter);
+  }
+  if (groupFilter) {
+    query = query.eq("source_group_id", groupFilter);
   }
 
   const { data: assignments, error } = await query;
@@ -724,6 +732,27 @@ async function handleListAssignments(
   }
 
   const assignmentIds = assignments.map((a) => a.id);
+  const sourceGroupIds = [...new Set(
+    assignments
+      .map((assignment) => assignment.source_group_id)
+      .filter((groupId): groupId is string => typeof groupId === "string" && groupId.length > 0),
+  )];
+
+  const groupMetaById: Record<string, { name: string | null; color: string | null }> = {};
+  if (sourceGroupIds.length > 0) {
+    const { data: groups } = await db
+      .from("tutor_groups")
+      .select("id, name, short_name, color")
+      .eq("tutor_id", tutorUserId)
+      .in("id", sourceGroupIds);
+
+    for (const group of groups ?? []) {
+      groupMetaById[group.id] = {
+        name: group.short_name?.trim() || group.name ?? null,
+        color: group.color ?? null,
+      };
+    }
+  }
 
   const { data: assignedCounts } = await db
     .from("homework_tutor_student_assignments")
@@ -866,6 +895,9 @@ async function handleListAssignments(
     deadline: a.deadline,
     status: a.status,
     created_at: a.created_at,
+    source_group_id: a.source_group_id ?? null,
+    source_group_name: groupMetaById[a.source_group_id ?? ""]?.name ?? null,
+    source_group_color: groupMetaById[a.source_group_id ?? ""]?.color ?? null,
     assigned_count: assignedMap[a.id] ?? 0,
     submitted_count: submittedMap[a.id] ?? 0,
     started_count: startedMap[a.id] ?? 0,

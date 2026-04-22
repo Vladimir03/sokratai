@@ -1,4 +1,4 @@
-import { memo, useState, useCallback, useMemo } from 'react';
+import { memo, useState, useCallback, useMemo, useEffect, type CSSProperties } from 'react';
 import { Link } from 'react-router-dom';
 import { parseISO } from 'date-fns';
 import {
@@ -14,6 +14,8 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { Plus, BookOpen, Users, BarChart3, Clock, CheckCircle2, WifiOff, Library, Inbox } from 'lucide-react';
 import { TutorDataStatus } from '@/components/tutor/TutorDataStatus';
 import { useTutorHomeworkAssignments } from '@/hooks/useTutorHomework';
+import { useTutor, useTutorGroups } from '@/hooks/useTutor';
+import { trackGuidedHomeworkEvent } from '@/lib/homeworkTelemetry';
 import { cn } from '@/lib/utils';
 import { getSubjectLabel } from '@/types/homework';
 import { HOMEWORK_STATUS_CONFIG, formatHomeworkScore } from '@/lib/homeworkStatus';
@@ -105,8 +107,14 @@ function HomeworkListSkeleton() {
 
 // ─── Empty state ─────────────────────────────────────────────────────────────
 
-function EmptyState({ filter }: { filter: HomeworkAssignmentsFilter }) {
-  const isFiltered = filter !== 'all';
+function EmptyState({
+  filter,
+  hasGroupFilter,
+}: {
+  filter: HomeworkAssignmentsFilter;
+  hasGroupFilter: boolean;
+}) {
+  const isFiltered = filter !== 'all' || hasGroupFilter;
   return (
     <Card className="bg-muted/30 group">
       <CardContent className="flex flex-col items-center text-center gap-5 py-12">
@@ -137,6 +145,30 @@ function EmptyState({ filter }: { filter: HomeworkAssignmentsFilter }) {
   );
 }
 
+function toHexWithAlpha(color: string, alphaHex: string): string | null {
+  const trimmed = color.trim();
+  if (/^#[0-9a-f]{6}$/i.test(trimmed)) {
+    return `${trimmed}${alphaHex}`;
+  }
+  if (/^#[0-9a-f]{3}$/i.test(trimmed)) {
+    const expanded = `#${trimmed[1]}${trimmed[1]}${trimmed[2]}${trimmed[2]}${trimmed[3]}${trimmed[3]}`;
+    return `${expanded}${alphaHex}`;
+  }
+  return null;
+}
+
+function getGroupBadgeStyle(color: string | null): CSSProperties | undefined {
+  const trimmed = color?.trim();
+  if (!trimmed) return undefined;
+
+  const backgroundColor = toHexWithAlpha(trimmed, '1A');
+  return {
+    color: trimmed,
+    borderColor: trimmed,
+    ...(backgroundColor ? { backgroundColor } : {}),
+  };
+}
+
 // ─── Assignment Card ─────────────────────────────────────────────────────────
 
 // Memoised list-item per `.claude/rules/performance.md` ("List-item компоненты
@@ -153,6 +185,8 @@ const AssignmentCard = memo(function AssignmentCard({ item }: { item: TutorHomew
   // type is narrower than the runtime values that actually live in the DB,
   // so cast to `string` for the lookup.
   const subjectLabel = getSubjectLabel(item.subject as unknown as string);
+  const showGroupBadge = Boolean(item.source_group_id && item.source_group_name);
+  const groupBadgeStyle = getGroupBadgeStyle(item.source_group_color);
 
   return (
     <Link to={`/tutor/homework/${item.id}`} className="block">
@@ -163,9 +197,26 @@ const AssignmentCard = memo(function AssignmentCard({ item }: { item: TutorHomew
         <CardContent className="p-4 space-y-3">
           {/* Header: subject (eyebrow) + status */}
           <div className="flex items-center justify-between gap-2">
-            <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-              {subjectLabel}
-            </span>
+            <div className="flex min-w-0 flex-wrap items-center gap-2">
+              <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+                {subjectLabel}
+              </span>
+              {showGroupBadge && (
+                <Badge
+                  variant="outline"
+                  className={cn(
+                    'gap-1 border text-[11px] font-medium',
+                    groupBadgeStyle
+                      ? 'bg-transparent'
+                      : 'border-slate-200 bg-slate-50 text-slate-600',
+                  )}
+                  style={groupBadgeStyle}
+                >
+                  <Users className="h-3 w-3" aria-hidden="true" />
+                  {`Группа ${item.source_group_name}`}
+                </Badge>
+              )}
+            </div>
             <Badge
               variant="outline"
               className={statusCfg.className}
@@ -290,6 +341,10 @@ const AssignmentCard = memo(function AssignmentCard({ item }: { item: TutorHomew
 function TutorHomeworkContent() {
   const [filter, setFilter] = useState<HomeworkAssignmentsFilter>('all');
   const [sortKey, setSortKey] = useState<HomeworkSortKey>('created_desc');
+  const [groupId, setGroupId] = useState<string | null>(null);
+  const { tutor } = useTutor();
+  const miniGroupsEnabled = Boolean(tutor?.mini_groups_enabled);
+  const { groups, loading: groupsLoading } = useTutorGroups(miniGroupsEnabled);
 
   const {
     assignments,
@@ -299,7 +354,19 @@ function TutorHomeworkContent() {
     isFetching,
     isRecovering,
     failureCount,
-  } = useTutorHomeworkAssignments(filter);
+  } = useTutorHomeworkAssignments({
+    filter,
+    groupId,
+    sortKey,
+  });
+
+  const showGroupFilter = miniGroupsEnabled && groups.length > 0;
+
+  useEffect(() => {
+    if (groupsLoading || !groupId) return;
+    if (groups.some((group) => group.id === groupId)) return;
+    setGroupId(null);
+  }, [groups, groupsLoading, groupId]);
 
   const sortedAssignments = useMemo(
     () => sortAssignments(assignments, sortKey),
@@ -312,6 +379,14 @@ function TutorHomeworkContent() {
   const handleRetry = useCallback(() => {
     refetch();
   }, [refetch]);
+
+  const handleGroupFilterChange = useCallback((nextValue: string) => {
+    const nextGroupId = nextValue === 'all' ? null : nextValue;
+    setGroupId(nextGroupId);
+    trackGuidedHomeworkEvent('homework_filter_by_group', {
+      group_id: nextGroupId,
+    });
+  }, []);
 
   return (
       <div className="space-y-6">
@@ -364,11 +439,11 @@ function TutorHomeworkContent() {
             not `role="tablist"`. `min-h-[44px]` for iOS HIG touch target.
             Sort select stays at 16px on every viewport per
             `.claude/rules/80-cross-browser.md` (iOS auto-zoom prevention). */}
-        <div className="flex items-center justify-between gap-4">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
           <div
             role="group"
             aria-label="Фильтр домашних заданий по статусу"
-            className="flex gap-1 border-b"
+            className="flex gap-1 border-b overflow-x-auto"
           >
             {FILTER_TABS.map((tab) => {
               const isActive = filter === tab.value;
@@ -391,23 +466,40 @@ function TutorHomeworkContent() {
               );
             })}
           </div>
-          <select
-            value={sortKey}
-            onChange={(e) => setSortKey(e.target.value as HomeworkSortKey)}
-            aria-label="Сортировка домашних заданий"
-            className="min-h-[44px] rounded-lg border border-input bg-background px-3 py-1.5 text-base focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1"
-          >
-            {SORT_OPTIONS.map((opt) => (
-              <option key={opt.value} value={opt.value}>{opt.label}</option>
-            ))}
-          </select>
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+            {showGroupFilter && (
+              <select
+                value={groupId ?? 'all'}
+                onChange={(e) => handleGroupFilterChange(e.target.value)}
+                aria-label="Фильтр домашних заданий по группе"
+                className="min-h-[44px] w-full rounded-lg border border-input bg-background px-3 py-1.5 text-base focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 sm:w-auto"
+              >
+                <option value="all">Все группы</option>
+                {groups.map((group) => (
+                  <option key={group.id} value={group.id}>
+                    {group.short_name?.trim() || group.name}
+                  </option>
+                ))}
+              </select>
+            )}
+            <select
+              value={sortKey}
+              onChange={(e) => setSortKey(e.target.value as HomeworkSortKey)}
+              aria-label="Сортировка домашних заданий"
+              className="min-h-[44px] w-full rounded-lg border border-input bg-background px-3 py-1.5 text-base focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 sm:w-auto"
+            >
+              {SORT_OPTIONS.map((opt) => (
+                <option key={opt.value} value={opt.value}>{opt.label}</option>
+              ))}
+            </select>
+          </div>
         </div>
 
         {/* Content */}
         {showSkeleton ? (
           <HomeworkListSkeleton />
         ) : !hasData && !error ? (
-          <EmptyState filter={filter} />
+          <EmptyState filter={filter} hasGroupFilter={groupId !== null} />
         ) : hasData ? (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {sortedAssignments.map((item) => (
