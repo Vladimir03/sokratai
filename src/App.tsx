@@ -46,6 +46,7 @@ const TutorPayments = lazy(() => import("./pages/tutor/TutorPayments"));
 const TutorHomework = lazy(() => import("./pages/tutor/TutorHomework"));
 const TutorHomeworkCreate = lazy(() => import("./pages/tutor/TutorHomeworkCreate"));
 const TutorHomeworkDetail = lazy(() => import("./pages/tutor/TutorHomeworkDetail"));
+const TutorHomeworkPreview = lazy(() => import("./pages/tutor/TutorHomeworkPreview"));
 const TutorHomeworkTemplates = lazy(() => import("./pages/tutor/TutorHomeworkTemplates"));
 const AppFrame = lazy(() =>
   import("./components/tutor/chrome/AppFrame").then((m) => ({ default: m.AppFrame })),
@@ -285,6 +286,7 @@ const App = () => (
               <Route path="homework/templates" element={<TutorHomeworkTemplates />} />
               <Route path="homework/create" element={<TutorHomeworkCreate />} />
               <Route path="homework/:id/edit" element={<TutorHomeworkCreate />} />
+              <Route path="homework/:id/preview" element={<TutorHomeworkPreview />} />
               <Route path="homework/:id/results" element={<RedirectHomeworkResultsToDetail />} />
               <Route path="homework/:id" element={<TutorHomeworkDetail />} />
               <Route path="homework" element={<TutorHomework />} />

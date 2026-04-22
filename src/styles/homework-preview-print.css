@@ -1,0 +1,60 @@
+/**
+ * homework-reuse-v1 TASK-3 — Print-specific CSS for tutor-only preview at
+ * /tutor/homework/:id/preview (and later the public /p/:slug page wired by
+ * TASK-4 through the shared HomeworkPreviewContent component).
+ *
+ * Delivered as a linked stylesheet (imported once from each consuming page
+ * via Vite's CSS graph) rather than as an inline <style> tag — Safari
+ * historically mishandles @media print inside dynamically-inserted <style>
+ * tags triggered by window.print(). See .claude/rules/80-cross-browser.md.
+ */
+
+@media print {
+  /* Hide tutor chrome — sidebar rail, mobile top bar, preview toolbar,
+   * page chrome shouldn't bleed into the printed artifact. */
+  .sokrat .t-app__rail,
+  .sokrat .t-app__mobile-topbar,
+  .preview-toolbar {
+    display: none !important;
+  }
+
+  /* Let main column take full width without the SideNav grid column. */
+  .sokrat.t-app {
+    display: block !important;
+    grid-template-columns: none !important;
+  }
+
+  .sokrat .t-app__main,
+  .preview-page {
+    padding: 0 !important;
+    background: #ffffff !important;
+  }
+
+  /* Each task — keep together on the same page when possible. */
+  .preview-task {
+    break-inside: avoid;
+    page-break-inside: avoid;
+    border-color: #000 !important;
+    box-shadow: none !important;
+    background: #ffffff !important;
+  }
+
+  /* Image containers — let images render at natural size up to page width,
+   * cap scanned photos so they do not dominate a printed page. */
+  .preview-task-images img {
+    max-height: 360px !important;
+    max-width: 100% !important;
+    object-fit: contain !important;
+  }
+
+  /* Links — show URLs? — keep suppressed for clean homework handout. */
+  a[href] {
+    text-decoration: none !important;
+    color: inherit !important;
+  }
+
+  /* Reasonable default page margins for PDF export. */
+  @page {
+    margin: 1.5cm;
+  }
+}
