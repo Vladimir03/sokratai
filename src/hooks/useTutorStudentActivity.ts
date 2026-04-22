@@ -516,10 +516,11 @@ async function fetchStudentActivity(): Promise<StudentActivityResult> {
 const QUERY_KEY = ['tutor', 'home', 'student-activity'] as const;
 
 /**
- * Fetches up to 20 students' activity snapshots via a single batched queryFn
- * (~5 parallel supabase queries). Spec §5 originally mentioned useQueries per
+ * Fetches up to MAX_STUDENTS (30 since TASK-9) students' activity snapshots
+ * via a single batched queryFn (~5 parallel supabase queries + 2 group
+ * queries since TASK-10). Spec §5 originally mentioned useQueries per
  * student, but batching is strictly less network-heavy and keeps cache
- * invariants simpler. If latency regresses beyond 1.5s at ~20 students we
+ * invariants simpler. If latency regresses beyond 1.5s at ~30 students we
  * should lift this into a `tutor_home_student_activity()` RPC (Phase 2).
  */
 export function useTutorStudentActivity() {

@@ -405,18 +405,29 @@
 
 /* TASK-10: group header row в режиме sort='groups'. Не интерактивная,
    поэтому no hover / no focus-visible; визуально отличается от student
-   rows чуть более тёмным фоном и компактной высотой. */
-.home-activity-group-header td {
+   rows чуть более тёмным фоном и компактной высотой.
+
+   Review fix: cell — `<th scope="colgroup">` (а не `<td>`), поэтому
+   селекторы таргетят `th`. Reset default `<th>` behaviour from
+   `.t-table thead th` (которое делает uppercase 11px letter-spacing) —
+   тут уже inline-style на span, font-weight/text-align override явно. */
+.home-activity-group-header th {
   height: auto;
   padding: 10px 12px;
   background: var(--sokrat-surface);
   border-top: 1px solid var(--sokrat-border);
   border-bottom: 1px solid var(--sokrat-border-light);
+  text-align: left;
+  font-weight: 400;
+  text-transform: none;
+  letter-spacing: normal;
+  color: inherit;
+  white-space: normal;
 }
-.home-activity-group-header:hover td {
+.home-activity-group-header:hover th {
   background: var(--sokrat-surface);
 }
-.home-activity-table tbody > tr:first-child.home-activity-group-header td {
+.home-activity-table tbody > tr:first-child.home-activity-group-header th {
   border-top: 0;
 }
 

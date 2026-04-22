@@ -1,4 +1,4 @@
-import { memo, useMemo, useState, type KeyboardEvent, type ReactNode } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import { AlertTriangle, ChevronRight, FolderTree, UserPlus, Users } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
@@ -207,17 +207,21 @@ function GroupRowsFragment({
   section: { key: string; label: string; students: StudentActivity[] };
   onOpenStudent: (id: string) => void;
 }) {
+  // Review fix: `rowheader` — ARIA cell role, не row role. Переделали
+  // под корректную table-semantic: `<th scope="colgroup" colSpan={7}>`
+  // описывает ближайшую группу строк-учеников. aria-label на `<tr>`
+  // (default role='row') поднимает announce когда screen reader
+  // перепрыгивает по строкам, не погружаясь в cell.
   return (
     <>
       <tr
         className="home-activity-group-header"
-        role="rowheader"
         aria-label={`Группа ${section.label}, ${section.students.length} ${pluralize(
           section.students.length,
           PLURAL_STUDENTS,
         )}`}
       >
-        <td colSpan={7}>
+        <th colSpan={7} scope="colgroup">
           <span
             style={{
               display: 'inline-flex',
@@ -243,7 +247,7 @@ function GroupRowsFragment({
               {section.students.length}
             </span>
           </span>
-        </td>
+        </th>
       </tr>
       {section.students.map((student) => (
         <ActivityRow
@@ -263,17 +267,35 @@ function StudentsActivityBlockImpl({
   onOpenAll,
   onAddStudent,
 }: StudentsActivityBlockProps) {
-  // TASK-10: default sort = 'groups' если у репетитора есть ≥ 1 group;
-  // иначе fallback на 'attention' (предыдущий default). Инициализируется
-  // один раз при mount. React state не реагирует на изменение items —
-  // если tutor добавит группу в другой вкладке, понадобится рефреш.
+  // TASK-10: default sort = 'groups' когда у репетитора есть ≥ 1 group.
+  //
+  // Cold-load race (review fix, 2026-04-22): Home page рендерит блок как
+  // только `anySettled=true` — это часто момент когда useTutorStudents
+  // уже вернул студентов, а useTutorStudentActivity ещё стрим-ит данные.
+  // items приходит пустым первый раз → useState инициализация выставит
+  // 'attention'. Когда activity fetch settle-ит, hasAnyGroup становится
+  // true, но sort уже зафиксирован в 'attention'. Fix — promote 'groups'
+  // один раз после первого non-empty payload, пока tutor сам не кликнет
+  // Segment (user intent overrides default).
   const hasAnyGroup = useMemo(
     () => items.some((s) => s.groupId !== null),
     [items],
   );
-  const [sort, setSort] = useState<ActivitySortMode>(() =>
-    hasAnyGroup ? 'groups' : 'attention',
-  );
+  const [sort, setSort] = useState<ActivitySortMode>('attention');
+  const userChangedSortRef = useRef(false);
+  const autoPromotedRef = useRef(false);
+  useEffect(() => {
+    if (userChangedSortRef.current) return;
+    if (autoPromotedRef.current) return;
+    if (!hasAnyGroup) return;
+    autoPromotedRef.current = true;
+    setSort('groups');
+  }, [hasAnyGroup]);
+
+  const handleSortChange = useCallback((next: ActivitySortMode) => {
+    userChangedSortRef.current = true;
+    setSort(next);
+  }, []);
 
   const attentionCount = useMemo(
     () => items.filter((s) => s.attention).length,
@@ -394,7 +416,7 @@ function StudentsActivityBlockImpl({
         >
           <SortSegment
             value={sort}
-            onChange={setSort}
+            onChange={handleSortChange}
             ariaLabel="Сортировка учеников"
             items={[
               // TASK-10: «Группы» — default когда hasAnyGroup=true. Если у
