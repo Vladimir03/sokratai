@@ -210,7 +210,7 @@ Deno.serve(async (req) => {
       return jsonResponse({ error: "Failed to load tasks" }, 500);
     }
 
-    const tasks = await Promise.all(((taskRows ?? []) as TaskRow[]).map(async (task) => {
+    const tasks = await Promise.all(((taskRows ?? []) as unknown as TaskRow[]).map(async (task) => {
       const taskImageUrls = await createSignedStorageUrls(
         db,
         parseAttachmentUrls(task.task_image_url),
