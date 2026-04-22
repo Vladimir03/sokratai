@@ -3225,7 +3225,7 @@ async function handleCreateTemplateFromAssignment(
     .select(
       "id, order_num, task_text, task_image_url, correct_answer, max_score, " +
         "rubric_text, rubric_image_urls, solution_text, solution_image_urls, " +
-        "check_format, kb_task_id",
+        "check_format",
     )
     .eq("assignment_id", assignmentId)
     .order("order_num", { ascending: true });
@@ -3253,7 +3253,6 @@ async function handleCreateTemplateFromAssignment(
     rubric_text: string | null;
     rubric_image_urls: string | null;
     check_format: string | null;
-    kb_task_id: string | null;
   }>).map((t) => {
     const base: Record<string, unknown> = {
       task_text: t.task_text ?? "",
@@ -3270,10 +3269,6 @@ async function handleCreateTemplateFromAssignment(
     // шаблона применился runtime default.
     if (includeAiSettings && isNonEmptyString(t.check_format)) {
       base.check_format = t.check_format;
-    }
-    // Provenance — AC-15. Only inline optional pointer; NULL kb_task_id → omit.
-    if (isUUID(t.kb_task_id)) {
-      base.source_kb_task_id = t.kb_task_id;
     }
     return base;
   });
