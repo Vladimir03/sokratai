@@ -104,6 +104,7 @@ export type GuidedCheckFailureReason =
   | "invalid_json"
   | "empty_model_response"
   | "image_fetch_failed"
+  | "task_image_missing"
   | "unknown";
 
 interface GuidedConversationHistoryMessage {
