@@ -3087,6 +3087,193 @@ async function handleDeleteTemplate(
   return jsonOk(cors, { ok: true });
 }
 
+// ─── Homework share links (homework-reuse-v1 TASK-7) ─────────────────────────
+//
+// Tutor управляет публичными read-only ссылками /p/:slug на своё ДЗ.
+// Публичное чтение — через отдельный edge function `public-homework-share`
+// (TASK-4) под service_role. Эти три handler'а — tutor-only.
+
+const SHARE_LINK_SLUG_RE = /^[a-z0-9]{8}$/i;
+const SHARE_LINK_SLUG_MAX_RETRIES = 3;
+const SHARE_LINK_EXPIRY_MAX_DAYS = 365;
+
+function generateShareLinkSlug(): string {
+  // base36-ish 8 chars via hex slice of UUID: low-effort but >2.8T namespace.
+  // RFC 4122 UUIDs are strong-enough random — no need for extra entropy.
+  return crypto.randomUUID().replace(/-/g, "").slice(0, 8).toLowerCase();
+}
+
+function getShareLinkAppBaseUrl(): string {
+  return (
+    Deno.env.get("PUBLIC_APP_URL")?.trim().replace(/\/$/, "") ??
+    "https://sokratai.lovable.app"
+  );
+}
+
+async function handleCreateShareLink(
+  db: SupabaseClient,
+  tutorUserId: string,
+  assignmentId: string,
+  body: unknown,
+  cors: Record<string, string>,
+): Promise<Response> {
+  const assignmentOrErr = await getOwnedAssignmentOrThrow(db, assignmentId, tutorUserId, cors);
+  if (assignmentOrErr instanceof Response) return assignmentOrErr;
+
+  if (!body || typeof body !== "object") {
+    return jsonError(cors, 400, "INVALID_BODY", "Request body must be a JSON object");
+  }
+  const b = body as Record<string, unknown>;
+
+  if (!isBoolean(b.show_answers)) {
+    return jsonError(cors, 400, "VALIDATION", "show_answers must be a boolean");
+  }
+  if (!isBoolean(b.show_solutions)) {
+    return jsonError(cors, 400, "VALIDATION", "show_solutions must be a boolean");
+  }
+
+  let expiresAtIso: string | null = null;
+  if (b.expires_in_days !== undefined && b.expires_in_days !== null) {
+    if (!isPositiveInt(b.expires_in_days) || b.expires_in_days > SHARE_LINK_EXPIRY_MAX_DAYS) {
+      return jsonError(
+        cors,
+        400,
+        "VALIDATION",
+        `expires_in_days must be a positive integer ≤ ${SHARE_LINK_EXPIRY_MAX_DAYS}`,
+      );
+    }
+    const expiresAt = new Date(Date.now() + (b.expires_in_days as number) * 24 * 60 * 60 * 1000);
+    expiresAtIso = expiresAt.toISOString();
+  }
+
+  // Slug collision retry — UNIQUE constraint violation → retry ≤3 раз.
+  for (let attempt = 0; attempt < SHARE_LINK_SLUG_MAX_RETRIES; attempt++) {
+    const slug = generateShareLinkSlug();
+    const { data, error } = await db
+      .from("homework_share_links")
+      .insert({
+        slug,
+        assignment_id: assignmentId,
+        show_answers: b.show_answers,
+        show_solutions: b.show_solutions,
+        expires_at: expiresAtIso,
+        created_by: tutorUserId,
+      })
+      .select("slug, show_answers, show_solutions, expires_at, created_at")
+      .single();
+
+    if (!error && data) {
+      const url = `${getShareLinkAppBaseUrl()}/p/${data.slug}`;
+      return jsonOk(
+        cors,
+        {
+          slug: data.slug,
+          url,
+          show_answers: data.show_answers,
+          show_solutions: data.show_solutions,
+          expires_at: data.expires_at,
+          created_at: data.created_at,
+        },
+        201,
+      );
+    }
+
+    const message = (error?.message ?? "").toLowerCase();
+    const isUniqueViolation =
+      message.includes("duplicate key") ||
+      message.includes("unique constraint") ||
+      (error as unknown as { code?: string })?.code === "23505";
+
+    if (!isUniqueViolation) {
+      console.error("homework_api_request_error", {
+        route: "POST /assignments/:id/share-links",
+        error: error?.message,
+      });
+      return jsonError(cors, 500, "DB_ERROR", "Failed to create share link");
+    }
+    // else — loop another slug
+  }
+
+  console.error("homework_api_request_error", {
+    route: "POST /assignments/:id/share-links",
+    error: "slug_collision_exhausted",
+  });
+  return jsonError(cors, 500, "DB_ERROR", "Failed to generate unique share link");
+}
+
+async function handleListShareLinks(
+  db: SupabaseClient,
+  tutorUserId: string,
+  assignmentId: string,
+  cors: Record<string, string>,
+): Promise<Response> {
+  const assignmentOrErr = await getOwnedAssignmentOrThrow(db, assignmentId, tutorUserId, cors);
+  if (assignmentOrErr instanceof Response) return assignmentOrErr;
+
+  const { data, error } = await db
+    .from("homework_share_links")
+    .select("slug, show_answers, show_solutions, expires_at, created_at")
+    .eq("assignment_id", assignmentId)
+    .eq("created_by", tutorUserId)
+    .order("created_at", { ascending: false });
+
+  if (error) {
+    console.error("homework_api_request_error", {
+      route: "GET /assignments/:id/share-links",
+      error: error.message,
+    });
+    return jsonError(cors, 500, "DB_ERROR", "Failed to list share links");
+  }
+
+  const base = getShareLinkAppBaseUrl();
+  const items = (data ?? []).map((row) => ({
+    slug: row.slug,
+    url: `${base}/p/${row.slug}`,
+    show_answers: row.show_answers,
+    show_solutions: row.show_solutions,
+    expires_at: row.expires_at,
+    created_at: row.created_at,
+  }));
+
+  return jsonOk(cors, { items });
+}
+
+async function handleDeleteShareLink(
+  db: SupabaseClient,
+  tutorUserId: string,
+  slug: string,
+  cors: Record<string, string>,
+): Promise<Response> {
+  if (!SHARE_LINK_SLUG_RE.test(slug)) {
+    return jsonError(cors, 400, "VALIDATION", "Invalid slug format");
+  }
+
+  // Ownership-check via created_by in the DELETE filter — bypasses any row the
+  // tutor doesn't own. `.select()` after delete returns the removed rows so we
+  // can disambiguate "not found" from "not yours" → both map to 404 (don't
+  // leak existence of other tutors' slugs).
+  const { data, error } = await db
+    .from("homework_share_links")
+    .delete()
+    .eq("slug", slug.toLowerCase())
+    .eq("created_by", tutorUserId)
+    .select("slug");
+
+  if (error) {
+    console.error("homework_api_request_error", {
+      route: "DELETE /share-links/:slug",
+      error: error.message,
+    });
+    return jsonError(cors, 500, "DB_ERROR", "Failed to delete share link");
+  }
+
+  if (!data || data.length === 0) {
+    return jsonError(cors, 404, "NOT_FOUND", "Share link not found");
+  }
+
+  return jsonOk(cors, { ok: true });
+}
+
 // ─── Endpoint: DELETE /assignments/:id ─────────────────────────────────────
 
 async function handleDeleteAssignment(
@@ -6423,6 +6610,22 @@ Deno.serve(async (req: Request): Promise<Response> => {
     // DELETE /templates/:id
     if (seg.length === 2 && seg[0] === "templates" && route.method === "DELETE") {
       return await handleDeleteTemplate(db, userId, seg[1], cors);
+    }
+
+    // POST /assignments/:id/share-links (homework-reuse-v1 TASK-7)
+    if (seg.length === 3 && seg[0] === "assignments" && seg[2] === "share-links" && route.method === "POST") {
+      const body = await parseJsonBody(req);
+      return await handleCreateShareLink(db, userId, seg[1], body, cors);
+    }
+
+    // GET /assignments/:id/share-links
+    if (seg.length === 3 && seg[0] === "assignments" && seg[2] === "share-links" && route.method === "GET") {
+      return await handleListShareLinks(db, userId, seg[1], cors);
+    }
+
+    // DELETE /share-links/:slug
+    if (seg.length === 2 && seg[0] === "share-links" && route.method === "DELETE") {
+      return await handleDeleteShareLink(db, userId, seg[1], cors);
     }
 
     return jsonError(cors, 404, "NOT_FOUND", `Route not found: ${route.method} /${seg.join("/")}`);

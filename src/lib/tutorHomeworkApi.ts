@@ -1042,3 +1042,52 @@ export async function deleteTutorHomeworkAssignment(
     { method: 'DELETE' },
   );
 }
+
+// ─── Homework share links (homework-reuse-v1 TASK-7) ─────────────────────────
+//
+// Public read-only links /p/:slug. Multiple links per assignment allowed
+// (родителю без ответов, коллеге с ответами, пропустившему ученику
+// с истечением — разные записи). Server-side slug generation + UNIQUE
+// collision retry. See docs/delivery/features/homework-reuse-v1/spec.md §5.
+
+export interface HomeworkShareLink {
+  slug: string;
+  url: string;
+  show_answers: boolean;
+  show_solutions: boolean;
+  expires_at: string | null;
+  created_at: string;
+}
+
+export interface CreateShareLinkPayload {
+  show_answers: boolean;
+  show_solutions: boolean;
+  /** Integer days until expiry. Omit for never-expiring link. */
+  expires_in_days?: number;
+}
+
+export async function createHomeworkShareLink(
+  assignmentId: string,
+  payload: CreateShareLinkPayload,
+): Promise<HomeworkShareLink> {
+  return requestHomeworkApi<HomeworkShareLink>(
+    `/assignments/${encodeURIComponent(assignmentId)}/share-links`,
+    { method: 'POST', body: JSON.stringify(payload) },
+  );
+}
+
+export async function listHomeworkShareLinks(
+  assignmentId: string,
+): Promise<HomeworkShareLink[]> {
+  const resp = await requestHomeworkApi<{ items: HomeworkShareLink[] }>(
+    `/assignments/${encodeURIComponent(assignmentId)}/share-links`,
+  );
+  return resp.items ?? [];
+}
+
+export async function deleteHomeworkShareLink(slug: string): Promise<void> {
+  await requestHomeworkApi<{ ok: true }>(
+    `/share-links/${encodeURIComponent(slug)}`,
+    { method: 'DELETE' },
+  );
+}

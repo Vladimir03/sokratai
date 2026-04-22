@@ -29,7 +29,10 @@ type GuidedTelemetryEvent =
   | 'results_v2_opened'
   | 'telegram_reminder_sent_from_results'
   | 'drill_down_expanded'
-  | 'manual_score_override_saved';
+  | 'manual_score_override_saved'
+  // homework-reuse-v1 TASK-7 — share link created by tutor.
+  // Payload intentionally minimal: no slug (PII-adjacent for leak trackers).
+  | 'homework_share_link_created';
 
 type GuidedTelemetryPayload = Record<string, string | number | boolean | null | undefined>;
 
@@ -67,6 +70,15 @@ interface TelegramReminderSentPayload extends Record<string, string | number | b
   channel?: string;
 }
 
+// homework-reuse-v1 TASK-7 — share link created. PII-free (no slug, no url).
+interface HomeworkShareLinkCreatedPayload
+  extends Record<string, string | number | boolean | null | undefined> {
+  assignmentId: string;
+  showAnswers: boolean;
+  showSolutions: boolean;
+  hasExpiry: boolean;
+}
+
 interface DataLayerWindow extends Window {
   dataLayer?: Array<Record<string, unknown>>;
   gtag?: (...args: unknown[]) => void;
@@ -85,6 +97,7 @@ export function trackGuidedHomeworkEvent(event: 'results_v2_opened', payload: Re
 export function trackGuidedHomeworkEvent(event: 'drill_down_expanded', payload: DrillDownExpandedPayload): void;
 export function trackGuidedHomeworkEvent(event: 'manual_score_override_saved', payload: ManualScoreOverrideSavedPayload): void;
 export function trackGuidedHomeworkEvent(event: 'telegram_reminder_sent_from_results', payload: TelegramReminderSentPayload): void;
+export function trackGuidedHomeworkEvent(event: 'homework_share_link_created', payload: HomeworkShareLinkCreatedPayload): void;
 export function trackGuidedHomeworkEvent(event: GuidedTelemetryEvent, payload?: GuidedTelemetryPayload): void;
 export function trackGuidedHomeworkEvent(
   event: GuidedTelemetryEvent,
