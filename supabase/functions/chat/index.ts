@@ -1322,6 +1322,46 @@ async function processAIRequest(
     (taskImageUrls ?? []).slice(0, MAX_TASK_IMAGES_FOR_AI),
   );
 
+  // Anti-hallucination guard: if the task condition is on an image AND that
+  // image failed to resolve (whitelist miss, signed-URL error, fetch failure),
+  // the AI would otherwise see only a placeholder like "[Задача на фото]" and
+  // invent a plausible problem (observed: KB electrostatics → guessed
+  // thermodynamics). Fail closed instead — return a clear technical-error
+  // message and skip the LLM call entirely. No fake ai_reply persists.
+  const expectedTaskImagesForGuard = (taskImageUrls ?? []).filter(
+    (u) => typeof u === "string" && u.trim().length > 0,
+  ).length;
+  const resolvedTaskImagesForGuard = taskPromptImageDataUrls.length;
+  const taskTextStrForGuard = (taskContext ?? "").trim();
+  const taskTextIsPlaceholderForGuard =
+    taskTextStrForGuard.length === 0 ||
+    /\[\s*задача\s+на\s+фото\s*\]|\[\s*task\s+on\s+(?:the\s+)?image\s*\]/i.test(taskTextStrForGuard);
+  if (
+    expectedTaskImagesForGuard > 0 &&
+    resolvedTaskImagesForGuard === 0 &&
+    taskTextIsPlaceholderForGuard
+  ) {
+    console.error(JSON.stringify({
+      event: "guided_chat_task_image_missing",
+      assignment_id: guidedHomeworkAssignmentId ?? null,
+      task_id: guidedHomeworkTaskId ?? null,
+      expected_images: expectedTaskImagesForGuard,
+      resolved_images: resolvedTaskImagesForGuard,
+      task_text_len: taskTextStrForGuard.length,
+    }));
+    return new Response(
+      JSON.stringify({
+        error:
+          "Не удалось загрузить картинку с условием задачи. Это техническая проблема — попробуйте ещё раз через минуту, или перешлите условие текстом. Мы уже залогировали инцидент.",
+        code: "task_image_missing",
+      }),
+      {
+        status: 502,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      },
+    );
+  }
+
   const normalizedStudentImageUrls = (Array.isArray(studentImageUrls) && studentImageUrls.length > 0
     ? studentImageUrls
     : (studentImageUrl ? [studentImageUrl] : [])
