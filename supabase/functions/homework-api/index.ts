@@ -3137,6 +3137,268 @@ async function handleDeleteTemplate(
   return jsonOk(cors, { ok: true });
 }
 
+// ─── Endpoint: POST /assignments/:id/save-as-template ────────────────────────
+//
+// homework-reuse-v1 TASK-6 (AC-14, AC-15).
+//
+// Создаёт template snapshot из существующего ДЗ пост-фактум (Recognition over
+// Recall, принцип 3 doc 16). Отличается от `POST /templates`:
+//   - не требует передачи `tasks_json` от клиента — читает задачи с ownership
+//     check через `assignment_id` → `homework_tutor_tasks`;
+//   - принимает toggle'ы `include_rubric` / `include_ai_settings` для
+//     гранулярного контроля над тем, что попадает в snapshot.
+//
+// `include_materials` на уровне schema пока noop (шаблоны не хранят materials,
+// они живут в `homework_tutor_materials` отдельно per assignment). Флаг
+// принимается для forward-compat API контракта + checkbox disabled в UI.
+//
+// Существующий checkbox «Сохранить как шаблон» в `HWActionBar` при создании
+// ДЗ остаётся независимым путём (AC-16) — эти два пути не конфликтуют, так
+// как создают разные строки с разным `created_at`.
+async function handleCreateTemplateFromAssignment(
+  db: SupabaseClient,
+  tutorUserId: string,
+  assignmentId: string,
+  body: unknown,
+  cors: Record<string, string>,
+): Promise<Response> {
+  const assignmentOrErr = await getOwnedAssignmentOrThrow(db, assignmentId, tutorUserId, cors);
+  if (assignmentOrErr instanceof Response) return assignmentOrErr;
+  const assignment = assignmentOrErr as Record<string, unknown>;
+
+  if (!body || typeof body !== "object") {
+    return jsonError(cors, 400, "INVALID_BODY", "Request body must be a JSON object");
+  }
+  const b = body as Record<string, unknown>;
+
+  if (!isNonEmptyString(b.title)) {
+    return jsonError(cors, 400, "VALIDATION", "title is required (non-empty string)");
+  }
+  if (b.tags !== undefined && !Array.isArray(b.tags)) {
+    return jsonError(cors, 400, "VALIDATION", "tags must be an array of strings");
+  }
+  if (!isBoolean(b.include_rubric)) {
+    return jsonError(cors, 400, "VALIDATION", "include_rubric must be a boolean");
+  }
+  if (!isBoolean(b.include_materials)) {
+    return jsonError(cors, 400, "VALIDATION", "include_materials must be a boolean");
+  }
+  if (!isBoolean(b.include_ai_settings)) {
+    return jsonError(cors, 400, "VALIDATION", "include_ai_settings must be a boolean");
+  }
+
+  // Read all tasks for this assignment. Ownership уже проверен выше.
+  const { data: taskRows, error: tasksErr } = await db
+    .from("homework_tutor_tasks")
+    .select(
+      "id, order_num, task_text, task_image_url, correct_answer, max_score, " +
+        "rubric_text, rubric_image_urls, solution_text, solution_image_urls, " +
+        "check_format, kb_task_id",
+    )
+    .eq("assignment_id", assignmentId)
+    .order("order_num", { ascending: true });
+
+  if (tasksErr) {
+    console.error("homework_api_request_error", {
+      route: "POST /assignments/:id/save-as-template",
+      error: tasksErr.message,
+    });
+    return jsonError(cors, 500, "DB_ERROR", "Failed to load tasks");
+  }
+
+  const includeRubric = b.include_rubric === true;
+  const includeAiSettings = b.include_ai_settings === true;
+
+  // Build tasks_json[]. Additive per-task `source_kb_task_id` (AC-15) — provenance
+  // для будущего Sprint 2+ sync-feature. Backward compatible внутри JSONB.
+  const tasksJson = (taskRows ?? []).map((t) => {
+    const base: Record<string, unknown> = {
+      task_text: t.task_text ?? "",
+      task_image_url: t.task_image_url ?? null,
+      correct_answer: t.correct_answer ?? null,
+      max_score: typeof t.max_score === "number" ? t.max_score : 1,
+      solution_text: t.solution_text ?? null,
+      solution_image_urls: t.solution_image_urls ?? null,
+      // include_rubric=false → rubric поля зануляются в snapshot
+      rubric_text: includeRubric ? (t.rubric_text ?? null) : null,
+      rubric_image_urls: includeRubric ? (t.rubric_image_urls ?? null) : null,
+    };
+    // include_ai_settings=false → опускаем `check_format`, чтобы при использовании
+    // шаблона применился runtime default.
+    if (includeAiSettings && isNonEmptyString(t.check_format)) {
+      base.check_format = t.check_format;
+    }
+    // Provenance — AC-15. Only inline optional pointer; NULL kb_task_id → omit.
+    if (isUUID(t.kb_task_id)) {
+      base.source_kb_task_id = t.kb_task_id;
+    }
+    return base;
+  });
+
+  // Sanitize tags — whitelist only string values, trim, drop empties, dedupe.
+  const tagsRaw = Array.isArray(b.tags) ? b.tags : [];
+  const tagSet = new Set<string>();
+  for (const t of tagsRaw) {
+    if (!isString(t)) continue;
+    const trimmed = t.trim();
+    if (!trimmed) continue;
+    tagSet.add(trimmed);
+  }
+  const tags = Array.from(tagSet);
+
+  const { data: inserted, error: insertErr } = await db
+    .from("homework_tutor_templates")
+    .insert({
+      tutor_id: tutorUserId,
+      title: (b.title as string).trim(),
+      subject: assignment.subject as string,
+      topic: isNonEmptyString(assignment.topic) ? (assignment.topic as string).trim() : null,
+      tags,
+      tasks_json: tasksJson,
+    })
+    .select("id, title, subject, topic, tags, tasks_json, created_at")
+    .single();
+
+  if (insertErr || !inserted) {
+    console.error("homework_api_request_error", {
+      route: "POST /assignments/:id/save-as-template",
+      error: insertErr?.message,
+    });
+    return jsonError(cors, 500, "DB_ERROR", "Failed to create template");
+  }
+
+  // NOTE: include_materials — no schema support yet. Templates don't own
+  // materials (they live in `homework_tutor_materials` per-assignment).
+  // Flag accepted for API forward-compat and UI honesty (disabled switch with
+  // tooltip) per spec §Phase 3 TASK-6 «Что делаем».
+  if (b.include_materials === true) {
+    console.info("homework_api_template_materials_noop", {
+      assignment_id: assignmentId,
+      template_id: inserted.id,
+    });
+  }
+
+  return jsonOk(cors, inserted, 201);
+}
+
+// ─── Endpoint: PATCH /templates/:id ──────────────────────────────────────────
+//
+// homework-reuse-v1 TASK-6 (AC-17).
+//
+// Обновляет ТОЛЬКО метаданные шаблона — `title`, `tags`, `topic`. Жёсткий
+// whitelist: попытка передать `tasks_json` / `subject` / `tasks` / любое
+// другое поле → 400. Если бы silent-ignore — клиент мог случайно отправить
+// stale `tasks_json` из кеша и затереть валидные задачи шаблона.
+//
+// Редактирование задач шаблона вынесено в Sprint 2+ (требует отдельного
+// dialog с task picker и более аккуратного provenance тракинга).
+const UPDATE_TEMPLATE_ALLOWED_KEYS = new Set(["title", "tags", "topic"]);
+
+async function handleUpdateTemplate(
+  db: SupabaseClient,
+  tutorUserId: string,
+  templateId: string,
+  body: unknown,
+  cors: Record<string, string>,
+): Promise<Response> {
+  if (!isUUID(templateId)) {
+    return jsonError(cors, 400, "INVALID_ID", "Invalid template ID format");
+  }
+
+  if (!body || typeof body !== "object") {
+    return jsonError(cors, 400, "INVALID_BODY", "Request body must be a JSON object");
+  }
+  const b = body as Record<string, unknown>;
+
+  // Whitelist-check. Любое "лишнее" поле отклоняем жёстко — mismatch интерфейса
+  // означает, что клиент устарел (или злонамерен).
+  for (const key of Object.keys(b)) {
+    if (!UPDATE_TEMPLATE_ALLOWED_KEYS.has(key)) {
+      return jsonError(
+        cors,
+        400,
+        "VALIDATION",
+        "Only title, tags, topic can be updated",
+      );
+    }
+  }
+
+  // Ownership check → 404/403 differentiated (не leak'аем существование чужих).
+  const { data: existing, error: existingErr } = await db
+    .from("homework_tutor_templates")
+    .select("id, tutor_id")
+    .eq("id", templateId)
+    .maybeSingle();
+
+  if (existingErr) {
+    console.error("homework_api_request_error", {
+      route: "PATCH /templates/:id",
+      error: existingErr.message,
+    });
+    return jsonError(cors, 500, "DB_ERROR", "Failed to load template");
+  }
+  if (!existing) {
+    return jsonError(cors, 404, "NOT_FOUND", "Template not found");
+  }
+  if (existing.tutor_id !== tutorUserId) {
+    return jsonError(cors, 403, "FORBIDDEN", "Template does not belong to you");
+  }
+
+  const patch: Record<string, unknown> = {};
+
+  if ("title" in b) {
+    if (!isNonEmptyString(b.title)) {
+      return jsonError(cors, 400, "VALIDATION", "title must be a non-empty string");
+    }
+    patch.title = (b.title as string).trim();
+  }
+  if ("tags" in b) {
+    if (!Array.isArray(b.tags)) {
+      return jsonError(cors, 400, "VALIDATION", "tags must be an array of strings");
+    }
+    const tagSet = new Set<string>();
+    for (const t of b.tags) {
+      if (!isString(t)) continue;
+      const trimmed = t.trim();
+      if (!trimmed) continue;
+      tagSet.add(trimmed);
+    }
+    patch.tags = Array.from(tagSet);
+  }
+  if ("topic" in b) {
+    if (b.topic === null) {
+      patch.topic = null;
+    } else if (isString(b.topic)) {
+      const trimmed = (b.topic as string).trim();
+      patch.topic = trimmed.length > 0 ? trimmed : null;
+    } else {
+      return jsonError(cors, 400, "VALIDATION", "topic must be a string or null");
+    }
+  }
+
+  if (Object.keys(patch).length === 0) {
+    return jsonError(cors, 400, "VALIDATION", "Nothing to update");
+  }
+
+  const { data: updated, error: updateErr } = await db
+    .from("homework_tutor_templates")
+    .update(patch)
+    .eq("id", templateId)
+    .eq("tutor_id", tutorUserId)
+    .select("id, title, subject, topic, tags, tasks_json, created_at")
+    .single();
+
+  if (updateErr || !updated) {
+    console.error("homework_api_request_error", {
+      route: "PATCH /templates/:id",
+      error: updateErr?.message,
+    });
+    return jsonError(cors, 500, "DB_ERROR", "Failed to update template");
+  }
+
+  return jsonOk(cors, updated);
+}
+
 // ─── Homework share links (homework-reuse-v1 TASK-7) ─────────────────────────
 //
 // Tutor управляет публичными read-only ссылками /p/:slug на своё ДЗ.
@@ -6657,9 +6919,26 @@ Deno.serve(async (req: Request): Promise<Response> => {
       return await handleGetTemplate(db, userId, seg[1], cors);
     }
 
+    // PATCH /templates/:id (homework-reuse-v1 TASK-6, AC-17)
+    if (seg.length === 2 && seg[0] === "templates" && route.method === "PATCH") {
+      const body = await parseJsonBody(req);
+      return await handleUpdateTemplate(db, userId, seg[1], body, cors);
+    }
+
     // DELETE /templates/:id
     if (seg.length === 2 && seg[0] === "templates" && route.method === "DELETE") {
       return await handleDeleteTemplate(db, userId, seg[1], cors);
+    }
+
+    // POST /assignments/:id/save-as-template (homework-reuse-v1 TASK-6, AC-14)
+    if (
+      seg.length === 3 &&
+      seg[0] === "assignments" &&
+      seg[2] === "save-as-template" &&
+      route.method === "POST"
+    ) {
+      const body = await parseJsonBody(req);
+      return await handleCreateTemplateFromAssignment(db, userId, seg[1], body, cors);
     }
 
     // POST /assignments/:id/share-links (homework-reuse-v1 TASK-7)

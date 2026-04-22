@@ -43,7 +43,11 @@ type GuidedTelemetryEvent =
   // refetch does not re-emit.
   | 'homework_preview_opened'
   | 'homework_preview_printed'
-  | 'homework_preview_copied_text';
+  | 'homework_preview_copied_text'
+  // homework-reuse-v1 TASK-6 — template snapshot post-factum (AC-14).
+  // Fired exactly once on successful POST /assignments/:id/save-as-template.
+  // Payload PII-free: ids + toggles only.
+  | 'homework_saved_as_template_post_factum';
 
 type GuidedTelemetryValue =
   | string
@@ -127,6 +131,18 @@ interface HomeworkPreviewCopiedTextPayload
   withAnswers: boolean;
 }
 
+// homework-reuse-v1 TASK-6 — post-factum template snapshot from detail page.
+// PII-free: ids + toggle flags only. `include_materials` intentionally omitted
+// (currently noop at schema level — flag accepted by API but doesn't change
+// the stored snapshot, so tracking its state would mislead retention analysis).
+interface HomeworkSavedAsTemplatePostFactumPayload
+  extends Record<string, string | number | boolean | null | undefined> {
+  assignmentId: string;
+  templateId: string;
+  includeRubric: boolean;
+  includeAiSettings: boolean;
+}
+
 interface DataLayerWindow extends Window {
   dataLayer?: Array<Record<string, unknown>>;
   gtag?: (...args: unknown[]) => void;
@@ -150,6 +166,7 @@ export function trackGuidedHomeworkEvent(event: 'homework_share_link_created', p
 export function trackGuidedHomeworkEvent(event: 'homework_preview_opened', payload: HomeworkPreviewOpenedPayload): void;
 export function trackGuidedHomeworkEvent(event: 'homework_preview_printed', payload: HomeworkPreviewPrintedPayload): void;
 export function trackGuidedHomeworkEvent(event: 'homework_preview_copied_text', payload: HomeworkPreviewCopiedTextPayload): void;
+export function trackGuidedHomeworkEvent(event: 'homework_saved_as_template_post_factum', payload: HomeworkSavedAsTemplatePostFactumPayload): void;
 export function trackGuidedHomeworkEvent(event: GuidedTelemetryEvent, payload?: GuidedTelemetryPayload): void;
 export function trackGuidedHomeworkEvent(
   event: GuidedTelemetryEvent,

@@ -930,6 +930,62 @@ export async function deleteTutorHomeworkTemplate(id: string): Promise<void> {
   });
 }
 
+// ─── Save-as-template post-factum (homework-reuse-v1 TASK-6, AC-14/15/17) ────
+//
+// Two endpoints separate from the HWActionBar checkbox path (which still uses
+// `POST /assignments` with `save_as_template: true` — AC-16):
+//
+//   1. `createTemplateFromAssignment` — pulls tasks server-side for a given
+//      assignment (ownership-checked) and writes a template snapshot. Granular
+//      include_rubric / include_ai_settings toggles. `include_materials` is
+//      currently a noop at schema level — flag accepted for forward-compat,
+//      UI disables the switch with explanatory tooltip.
+//
+//   2. `updateTutorHomeworkTemplate` — PATCH metadata only (title / tags /
+//      topic). Any other key (tasks_json / subject) → 400 hard error to
+//      prevent stale client state from overwriting valid template tasks.
+//      Editing tasks is intentionally out of scope for Sprint 1.
+
+export interface CreateTemplateFromAssignmentPayload {
+  title: string;
+  tags: string[];
+  include_rubric: boolean;
+  include_materials: boolean;
+  include_ai_settings: boolean;
+}
+
+export async function createTemplateFromAssignment(
+  assignmentId: string,
+  payload: CreateTemplateFromAssignmentPayload,
+): Promise<HomeworkTemplate> {
+  return requestHomeworkApi<HomeworkTemplate>(
+    `/assignments/${encodeURIComponent(assignmentId)}/save-as-template`,
+    {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    },
+  );
+}
+
+export interface UpdateTemplatePayload {
+  title?: string;
+  tags?: string[];
+  topic?: string | null;
+}
+
+export async function updateTutorHomeworkTemplate(
+  templateId: string,
+  payload: UpdateTemplatePayload,
+): Promise<HomeworkTemplate> {
+  return requestHomeworkApi<HomeworkTemplate>(
+    `/templates/${encodeURIComponent(templateId)}`,
+    {
+      method: 'PATCH',
+      body: JSON.stringify(payload),
+    },
+  );
+}
+
 // ─── Materials API ────────────────────────────────────────────────────────────
 
 const HOMEWORK_MATERIALS_BUCKET = 'homework-materials';
