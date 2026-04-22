@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect, useId, useMemo, useRef } from 'react';
-import { Link, useParams, useNavigate } from 'react-router-dom';
+import { Link, useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { ChevronDown, Paperclip, ExternalLink, Edit, Trash2 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -342,10 +342,19 @@ function TutorHomeworkDetailContent() {
     : null;
   const isLoading = detailsQuery.isLoading;
 
+  // Deep-link support: /tutor/homework/:id?student=:sid auto-opens «Разбор
+  // ученика» on the requested student. Used by the «Последние диалоги»
+  // block on /tutor/home (TASK-7 follow-up). Only seeded once per id+sid
+  // pair so the tutor can still collapse manually without re-expansion.
+  const [searchParams] = useSearchParams();
+  const initialStudentId = searchParams.get('student');
+
   // Currently-expanded student in HeatmapGrid. When set, a separate
   // "Разбор ученика" section renders below the grid with StudentDrillDown.
   // Only one student can be expanded at a time (AC-3).
-  const [expandedStudentId, setExpandedStudentId] = useState<string | null>(null);
+  const [expandedStudentId, setExpandedStudentId] = useState<string | null>(
+    initialStudentId,
+  );
   // TASK-6 (AC-4): task id selected from a HeatmapGrid cell click. Gets passed
   // to StudentDrillDown as `initialTaskId` — child syncs its local state when
   // this changes, so a cell click on an already-expanded student just moves
@@ -353,11 +362,30 @@ function TutorHomeworkDetailContent() {
   const [drillDownTaskId, setDrillDownTaskId] = useState<string | null>(null);
 
   // Reset expanded state whenever we navigate to a different assignment so
-  // stale selections don't leak across pages.
+  // stale selections don't leak across pages. If the new URL carries
+  // `?student=` — seed the expansion from it; otherwise start collapsed.
   useEffect(() => {
-    setExpandedStudentId(null);
+    setExpandedStudentId(initialStudentId);
     setDrillDownTaskId(null);
-  }, [id]);
+  }, [id, initialStudentId]);
+
+  // Scroll the drill-down Card into view when we auto-expand from the URL.
+  // We only scroll once per `id+initialStudentId` pair — otherwise
+  // unrelated refetches or collapse/expand cycles would yank the viewport.
+  const drillDownRef = useRef<HTMLDivElement | null>(null);
+  const scrolledForRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!initialStudentId || !id) return;
+    const pairKey = `${id}|${initialStudentId}`;
+    if (scrolledForRef.current === pairKey) return;
+    // Wait a frame so the Card is mounted after `details` resolves.
+    if (!drillDownRef.current) return;
+    drillDownRef.current.scrollIntoView({
+      block: 'start',
+      behavior: 'smooth',
+    });
+    scrolledForRef.current = pairKey;
+  }, [id, initialStudentId, expandedStudentId]);
 
   const handleToggleExpand = useCallback((studentId: string) => {
     setExpandedStudentId((prev) => {
@@ -564,22 +592,24 @@ function TutorHomeworkDetailContent() {
                 this section renders once below the grid. TaskMiniCard row +
                 GuidedThreadViewer filtered by the selected task (TASK-6). */}
             {expandedStudent ? (
-              <Card animate={false}>
-                <CardHeader>
-                  <CardTitle className="text-lg">
-                    Разбор ученика: {expandedStudent.name || 'Без имени'}
-                  </CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <StudentDrillDown
-                    assignmentId={details.assignment.id}
-                    studentId={expandedStudent.student_id}
-                    tasks={details.tasks}
-                    perStudent={expandedPerStudent}
-                    initialTaskId={drillDownTaskId}
-                  />
-                </CardContent>
-              </Card>
+              <div ref={drillDownRef}>
+                <Card animate={false}>
+                  <CardHeader>
+                    <CardTitle className="text-lg">
+                      Разбор ученика: {expandedStudent.name || 'Без имени'}
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <StudentDrillDown
+                      assignmentId={details.assignment.id}
+                      studentId={expandedStudent.student_id}
+                      tasks={details.tasks}
+                      perStudent={expandedPerStudent}
+                      initialTaskId={drillDownTaskId}
+                    />
+                  </CardContent>
+                </Card>
+              </div>
             ) : null}
           </>
         ) : null}

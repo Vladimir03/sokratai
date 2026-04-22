@@ -776,6 +776,36 @@ export async function postTutorThreadMessage(
   );
 }
 
+// ─── Recent dialogs + unread tracking (TASK-7 follow-up) ─────────────────────
+
+export interface RecentDialogItem {
+  studentId: string;
+  name: string;
+  stream: 'ЕГЭ' | 'ОГЭ';
+  lastAuthor: 'student' | 'tutor' | 'ai';
+  unread: boolean;
+  preview: string;
+  at: string;
+  hwId: string;
+  hwTitle: string;
+}
+
+export async function getTutorRecentDialogs(): Promise<RecentDialogItem[]> {
+  const resp = await requestHomeworkApi<{ items: RecentDialogItem[] }>(
+    '/recent-dialogs',
+  );
+  return resp.items ?? [];
+}
+
+export async function markThreadViewedByTutor(
+  threadId: string,
+): Promise<{ ok: true; viewed_at: string }> {
+  return requestHomeworkApi<{ ok: true; viewed_at: string }>(
+    `/threads/${encodeURIComponent(threadId)}/viewed-by-tutor`,
+    { method: 'POST' },
+  );
+}
+
 export async function getHomeworkImageSignedUrl(
   storageRefOrPath: string,
   options?: {

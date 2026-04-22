@@ -177,7 +177,12 @@ function TutorHomeContent() {
 
   const handleOpenDialog = useCallback(
     (dialog: DialogItem) => {
-      navigate(`/tutor/homework/${dialog.hwId}`);
+      // Deep-link into the assignment with the drill-down pre-expanded on
+      // the clicked student. TutorHomeworkDetail reads `?student=` and
+      // auto-opens the «Разбор ученика» section.
+      navigate(
+        `/tutor/homework/${dialog.hwId}?student=${encodeURIComponent(dialog.studentId)}`,
+      );
     },
     [navigate],
   );

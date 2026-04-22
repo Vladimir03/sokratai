@@ -15,6 +15,7 @@ import {
   postTutorThreadMessage,
   getHomeworkImageSignedUrl,
   getTutorTaskImagesSignedUrls,
+  markThreadViewedByTutor,
   mergeThreadMessage,
   uploadTutorHomeworkTaskImage,
   type TutorStudentGuidedThreadResponse,
@@ -224,6 +225,32 @@ export function GuidedThreadViewer({
     return () => {
       void channel.unsubscribe();
     };
+  }, [enabled, threadId, queryClient]);
+
+  // Fire-and-forget: mark the thread as viewed by the tutor so the
+  // «Последние диалоги» block on /tutor/home clears the unread indicator.
+  // We invalidate the recent-dialogs query on success so navigating back
+  // to /tutor/home shows the freshly-cleared state without a hard reload.
+  // One call per thread mount — once viewed, `tutor_last_viewed_at` is
+  // bumped and subsequent visits keep the existing timestamp until a new
+  // student message arrives.
+  const markedViewedForRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!enabled || !threadId) return;
+    if (markedViewedForRef.current === threadId) return;
+    markedViewedForRef.current = threadId;
+    void markThreadViewedByTutor(threadId)
+      .then(() => {
+        void queryClient.invalidateQueries({
+          queryKey: ['tutor', 'home', 'recent-dialogs'],
+        });
+      })
+      .catch((err) => {
+        // Non-critical — a failed mark doesn't break the viewer. Next
+        // mount will retry (ref is keyed by threadId, not global).
+        console.warn('mark_thread_viewed_failed', err);
+        markedViewedForRef.current = null;
+      });
   }, [enabled, threadId, queryClient]);
 
   const taskStatusById = useMemo(

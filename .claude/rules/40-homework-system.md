@@ -146,6 +146,27 @@
 - `supabase/functions/homework-api/` — Edge function CRUD (8 маршрутов)
 - `supabase/functions/homework-reminder/` — напоминания о ДЗ (cron)
 
+### «Последние диалоги» + tutor_last_viewed_at (2026-04-22, TASK-7)
+
+Блок `RecentDialogsBlock` на `/tutor/home` берёт данные из **edge function** `GET /recent-dialogs` (`homework-api/index.ts::handleGetRecentDialogs`), не через PostgREST. Это намеренно: PostgREST nested `.eq()` через 3 уровня JOIN молча возвращал 0 строк при drift RLS / embed semantics; service_role обходит и консистентен с `handleGetThread`.
+
+**Инварианты:**
+- `homework_tutor_threads.tutor_last_viewed_at TIMESTAMPTZ NULL` (миграция `20260422120000_add_tutor_last_viewed_at_to_homework_threads.sql`) — timestamp последнего открытия треда репетитором.
+- `NULL` трактуется как "никогда не открыт" = `unread=true`. Это intentional для всех pre-migration threads с сообщениями ученика.
+- `unread = last_student_message_at > (tutor_last_viewed_at ?? 0)`. Comparison на стороне edge function, не на фронте.
+- `POST /threads/:id/viewed-by-tutor` (`handleMarkThreadViewed`) обновляет `tutor_last_viewed_at`. Ownership-check: `thread → student_assignment → assignment.tutor_id === auth.uid()`.
+- `GuidedThreadViewer` при mount вызывает `markThreadViewedByTutor(threadId)` fire-and-forget + invalidates `['tutor','home','recent-dialogs']`. Реф-sentinel — одна сеть-сессия на mount.
+- Partial index `idx_homework_tutor_threads_student_message_desc` (student_assignment_id, last_student_message_at DESC) поддерживает aggregation-запрос.
+- Dedup by `student_id` в Deno — PostgREST не имеет `DISTINCT ON`. Первое вхождение по `last_student_message_at DESC` = latest thread ученика.
+- `visible_to_student=false` сообщения (hidden tutor notes) **исключаются** из latest-message lookup — они не "dialog activity".
+- `lastAuthor` derivation: `role='user' → 'student'`, `role='tutor' → 'tutor'`, `role='assistant'|'system' → 'ai'`.
+
+**Deep-link contract:**
+- `/tutor/homework/:hwId?student=:sid` → `TutorHomeworkDetail` через `useSearchParams` сидирует `expandedStudentId`, scroll to `Card ref={drillDownRef}` один раз per id+student pair.
+- Manual collapse сохраняется — scroll-sentinel не re-scroll'ит на последующих mount-ах того же URL.
+
+**Спека:** `docs/delivery/features/tutor-dashboard-v2/phase-1-follow-up-recent-dialogs.md`.
+
 ### Realtime thread viewer (E9, 2026-04-06)
 - Для live-обновлений треда репетитора таблица `public.homework_tutor_thread_messages` должна быть добавлена в publication `supabase_realtime`
 - Каноничная миграция: `20260406143000_enable_realtime_homework_tutor_thread_messages.sql`

@@ -16,9 +16,25 @@ function initialsOf(name: string): string {
   return (first + second).toUpperCase();
 }
 
+const AUTHOR_LABEL: Record<DialogItem['lastAuthor'], string> = {
+  student: 'Ученик',
+  tutor: 'Вы',
+  ai: 'AI',
+};
+
+// Uses existing .t-chip tokens defined in src/styles/tutor-dashboard.css
+// (rule 90 design system — no new colours, no hex).
+const AUTHOR_CHIP_CLASS: Record<DialogItem['lastAuthor'], string> = {
+  student: 't-chip t-chip--warning',
+  tutor: 't-chip t-chip--info',
+  ai: 't-chip t-chip--neutral',
+};
+
 function ChatRowImpl({ chat, onOpen }: ChatRowProps) {
-  const isMe = chat.from === 'me';
-  const chipClass = chat.stream === 'ЕГЭ' ? 't-chip t-chip--ege' : 't-chip t-chip--oge';
+  const streamChipClass =
+    chat.stream === 'ЕГЭ' ? 't-chip t-chip--ege' : 't-chip t-chip--oge';
+  const authorLabel = AUTHOR_LABEL[chat.lastAuthor];
+  const authorChipClass = AUTHOR_CHIP_CLASS[chat.lastAuthor];
 
   const handleKeyDown = (event: KeyboardEvent<HTMLButtonElement>) => {
     if (event.key === 'Enter' || event.key === ' ') {
@@ -27,6 +43,12 @@ function ChatRowImpl({ chat, onOpen }: ChatRowProps) {
     }
   };
 
+  const ariaParts = [
+    `Открыть диалог с ${chat.name}`,
+    `последнее сообщение от ${authorLabel}`,
+    chat.unread ? 'есть непрочитанные' : null,
+  ].filter(Boolean);
+
   return (
     <button
       type="button"
@@ -34,7 +56,7 @@ function ChatRowImpl({ chat, onOpen }: ChatRowProps) {
       onClick={() => onOpen(chat)}
       onKeyDown={handleKeyDown}
       title={`Открыть ДЗ «${chat.hwTitle}» с чатом ученика`}
-      aria-label={`Открыть диалог с ${chat.name}`}
+      aria-label={ariaParts.join(', ')}
       style={{ touchAction: 'manipulation' }}
     >
       <span className="chat-row__avatar" aria-hidden="true">
@@ -42,16 +64,36 @@ function ChatRowImpl({ chat, onOpen }: ChatRowProps) {
       </span>
       <span className="chat-row__body">
         <span className="chat-row__top">
-          <span className="chat-row__name">{chat.name}</span>
-          <span className={chipClass}>{chat.stream}</span>
+          {chat.unread ? (
+            <span
+              aria-hidden="true"
+              style={{
+                width: 6,
+                height: 6,
+                borderRadius: '50%',
+                background: 'var(--sokrat-state-warning-fg)',
+                flex: 'none',
+                display: 'inline-block',
+              }}
+            />
+          ) : null}
+          <span
+            className="chat-row__name"
+            style={{ fontWeight: chat.unread ? 700 : 600 }}
+          >
+            {chat.name}
+          </span>
+          <span className={streamChipClass}>{chat.stream}</span>
+          <span className={authorChipClass}>{authorLabel}</span>
           <span className="chat-row__time">{chat.at}</span>
         </span>
-        <span className="chat-row__preview">
-          {isMe ? <span className="chat-row__prefix">Вы: </span> : null}
-          {chat.preview}
-        </span>
+        <span className="chat-row__preview">{chat.preview}</span>
       </span>
-      <ChevronRight size={16} aria-hidden="true" style={{ color: 'var(--sokrat-fg3)', flex: 'none' }} />
+      <ChevronRight
+        size={16}
+        aria-hidden="true"
+        style={{ color: 'var(--sokrat-fg3)', flex: 'none' }}
+      />
     </button>
   );
 }

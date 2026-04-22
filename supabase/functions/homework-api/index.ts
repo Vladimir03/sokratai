@@ -5711,6 +5711,313 @@ async function handleTutorPostMessage(
   return jsonOk(cors, { id: msg.id, created_at: msg.created_at }, 201);
 }
 
+// ─── Endpoint: GET /recent-dialogs (tutor) ───────────────────────────────────
+//
+// Powers the «Последние диалоги» block on /tutor/home. Returns up to
+// `RECENT_DIALOGS_DISPLAY_LIMIT` latest threads for the tutor, deduped by
+// student_id (one student = one row per spec).
+//
+// Why this handler exists: the previous PostgREST-based
+// `useTutorRecentDialogs` hook relied on a 3-level nested `.eq(...)` filter
+// that silently returned 0 rows whenever RLS / embed semantics shifted.
+// Moving the query server-side (service_role) matches the pattern used by
+// handleGetThread / handleGetResults — one consistent architecture for all
+// tutor-facing surfaces.
+
+const RECENT_DIALOGS_PREFETCH_LIMIT = 50;
+const RECENT_DIALOGS_DISPLAY_LIMIT = 5;
+
+interface RecentDialogItem {
+  studentId: string;
+  name: string;
+  stream: "ЕГЭ" | "ОГЭ";
+  lastAuthor: "student" | "tutor" | "ai";
+  unread: boolean;
+  preview: string;
+  at: string; // ISO timestamp — frontend formats it with date-fns
+  hwId: string;
+  hwTitle: string;
+}
+
+function authorFromMessage(role: string | null | undefined): "student" | "tutor" | "ai" {
+  if (role === "user") return "student";
+  if (role === "tutor") return "tutor";
+  return "ai"; // assistant | system | anything unknown defaults to AI
+}
+
+function buildPreviewForDialog(
+  content: string | null | undefined,
+  imageUrl: string | null | undefined,
+): string {
+  const raw = (content ?? "").trim();
+  const LIMIT = 80;
+  if (raw.length > 0) {
+    return raw.length > LIMIT ? `${raw.slice(0, LIMIT).trimEnd()}…` : raw;
+  }
+  if (imageUrl) return "(фото)";
+  return "(вложение)";
+}
+
+async function handleGetRecentDialogs(
+  db: SupabaseClient,
+  tutorUserId: string,
+  cors: Record<string, string>,
+): Promise<Response> {
+  // 1. Load candidate threads — those belonging to the tutor and with at
+  //    least one student message. Server-side nested join works reliably
+  //    here because we use service_role and build the chain explicitly.
+  type ThreadRow = {
+    id: string;
+    tutor_last_viewed_at: string | null;
+    last_student_message_at: string | null;
+    student_assignment_id: string;
+    homework_tutor_student_assignments: {
+      id: string;
+      student_id: string;
+      assignment_id: string;
+      homework_tutor_assignments: {
+        id: string;
+        title: string | null;
+        tutor_id: string;
+        exam_type: string | null;
+      };
+    };
+  };
+
+  const { data: threadsData, error: threadsError } = await db
+    .from("homework_tutor_threads")
+    .select(`
+      id,
+      tutor_last_viewed_at,
+      last_student_message_at,
+      student_assignment_id,
+      homework_tutor_student_assignments!inner (
+        id,
+        student_id,
+        assignment_id,
+        homework_tutor_assignments!inner (
+          id,
+          title,
+          tutor_id,
+          exam_type
+        )
+      )
+    `)
+    .not("last_student_message_at", "is", null)
+    .eq(
+      "homework_tutor_student_assignments.homework_tutor_assignments.tutor_id",
+      tutorUserId,
+    )
+    .order("last_student_message_at", { ascending: false })
+    .limit(RECENT_DIALOGS_PREFETCH_LIMIT);
+
+  if (threadsError) {
+    console.error("recent_dialogs_threads_error", { error: threadsError.message });
+    return jsonError(cors, 500, "DB_ERROR", "Failed to load recent dialogs");
+  }
+
+  const threads = (threadsData ?? []) as unknown as ThreadRow[];
+  if (threads.length === 0) return jsonOk(cors, { items: [] });
+
+  // 2. Dedup by student_id — threads already sorted by last_student_message_at DESC,
+  //    so the first occurrence per student is their latest active thread.
+  const seenStudents = new Set<string>();
+  const pickedThreads: ThreadRow[] = [];
+  for (const t of threads) {
+    const sa = t.homework_tutor_student_assignments;
+    const studentId = sa?.student_id;
+    if (!studentId) continue;
+    if (seenStudents.has(studentId)) continue;
+    seenStudents.add(studentId);
+    pickedThreads.push(t);
+    if (pickedThreads.length >= RECENT_DIALOGS_DISPLAY_LIMIT) break;
+  }
+
+  if (pickedThreads.length === 0) return jsonOk(cors, { items: [] });
+
+  const pickedThreadIds = pickedThreads.map((t) => t.id);
+  const pickedStudentIds = Array.from(
+    new Set(
+      pickedThreads.map(
+        (t) => t.homework_tutor_student_assignments.student_id,
+      ),
+    ),
+  );
+
+  // 3. Fetch the latest message per picked thread — a single batch query.
+  //    We pull all messages across picked threads then keep the newest per
+  //    thread_id in-memory. visible_to_student=false (hidden tutor notes)
+  //    are excluded — they don't count as "dialog activity" for tutor UX.
+  type MessageRow = {
+    id: string;
+    thread_id: string;
+    role: string | null;
+    content: string | null;
+    image_url: string | null;
+    created_at: string;
+    visible_to_student: boolean | null;
+  };
+  const { data: messagesData, error: messagesError } = await db
+    .from("homework_tutor_thread_messages")
+    .select("id, thread_id, role, content, image_url, created_at, visible_to_student")
+    .in("thread_id", pickedThreadIds)
+    .order("created_at", { ascending: false })
+    .limit(pickedThreadIds.length * 12); // enough headroom to find a visible message per thread
+
+  if (messagesError) {
+    console.error("recent_dialogs_messages_error", { error: messagesError.message });
+    return jsonError(cors, 500, "DB_ERROR", "Failed to load latest messages");
+  }
+
+  const messages = (messagesData ?? []) as unknown as MessageRow[];
+  const latestByThread = new Map<string, MessageRow>();
+  for (const m of messages) {
+    if (m.visible_to_student === false) continue; // skip hidden tutor notes
+    if (!latestByThread.has(m.thread_id)) {
+      latestByThread.set(m.thread_id, m);
+    }
+  }
+
+  // 4. Resolve student names via tutor_students (display_name) + profiles.username fallback.
+  //    tutor_students.tutor_id references public.tutors.id (not auth.uid) — we need
+  //    the tutor row id here. Reuse the standard lookup.
+  const { data: tutorRow } = await db
+    .from("tutors")
+    .select("id")
+    .eq("user_id", tutorUserId)
+    .maybeSingle();
+
+  type StudentRow = {
+    student_id: string;
+    display_name: string | null;
+    exam_type: string | null;
+    profiles: { username: string | null } | null;
+  };
+  const studentMap = new Map<string, StudentRow>();
+  if (tutorRow?.id) {
+    const { data: studentsData } = await db
+      .from("tutor_students")
+      .select("student_id, display_name, exam_type, profiles ( username )")
+      .eq("tutor_id", tutorRow.id)
+      .in("student_id", pickedStudentIds);
+    for (const s of (studentsData ?? []) as unknown as StudentRow[]) {
+      studentMap.set(s.student_id, s);
+    }
+  }
+
+  // 5. Assemble response.
+  const STREAM_LABEL: Record<string, "ЕГЭ" | "ОГЭ"> = {
+    ege: "ЕГЭ",
+    oge: "ОГЭ",
+  };
+
+  const items: RecentDialogItem[] = pickedThreads.map((t) => {
+    const sa = t.homework_tutor_student_assignments;
+    const assignment = sa.homework_tutor_assignments;
+    const studentId = sa.student_id;
+    const student = studentMap.get(studentId);
+    const latest = latestByThread.get(t.id);
+
+    const streamKey =
+      (assignment.exam_type ?? student?.exam_type ?? "").toLowerCase();
+    const stream = STREAM_LABEL[streamKey] ?? "ЕГЭ";
+    const name =
+      student?.display_name?.trim() ||
+      student?.profiles?.username?.trim() ||
+      "Ученик";
+
+    const lastAuthor = authorFromMessage(latest?.role);
+    const preview = buildPreviewForDialog(
+      latest?.content,
+      latest?.image_url,
+    );
+    const at = latest?.created_at ?? t.last_student_message_at ?? new Date().toISOString();
+
+    // Unread = new student activity since the tutor's last visit.
+    // NULL tutor_last_viewed_at (never opened) treated as "unread".
+    const viewedAt = t.tutor_last_viewed_at
+      ? new Date(t.tutor_last_viewed_at).getTime()
+      : 0;
+    const studentAt = t.last_student_message_at
+      ? new Date(t.last_student_message_at).getTime()
+      : 0;
+    const unread = studentAt > viewedAt;
+
+    return {
+      studentId,
+      name,
+      stream,
+      lastAuthor,
+      unread,
+      preview,
+      at,
+      hwId: assignment.id,
+      hwTitle: assignment.title ?? "Без названия",
+    };
+  });
+
+  return jsonOk(cors, { items });
+}
+
+// ─── Endpoint: POST /threads/:id/viewed-by-tutor (tutor) ─────────────────────
+//
+// Marks a thread as "seen" by the tutor — clears the unread indicator on
+// /tutor/home. Called fire-and-forget from GuidedThreadViewer when it mounts
+// for a specific tutor+student+assignment.
+
+async function handleMarkThreadViewed(
+  db: SupabaseClient,
+  tutorUserId: string,
+  threadId: string,
+  cors: Record<string, string>,
+): Promise<Response> {
+  if (!isUUID(threadId)) {
+    return jsonError(cors, 400, "VALIDATION", "Invalid thread ID");
+  }
+
+  // Verify ownership: thread → student_assignment → assignment.tutor_id == tutorUserId.
+  type OwnershipRow = {
+    id: string;
+    homework_tutor_student_assignments: {
+      homework_tutor_assignments: { tutor_id: string | null } | null;
+    } | null;
+  };
+  const { data: ownership, error: ownershipError } = await db
+    .from("homework_tutor_threads")
+    .select(`
+      id,
+      homework_tutor_student_assignments!inner (
+        homework_tutor_assignments!inner ( tutor_id )
+      )
+    `)
+    .eq("id", threadId)
+    .maybeSingle();
+
+  if (ownershipError) {
+    return jsonError(cors, 500, "DB_ERROR", "Failed to verify thread ownership");
+  }
+  const ownershipRow = ownership as unknown as OwnershipRow | null;
+  const ownerTutorId =
+    ownershipRow?.homework_tutor_student_assignments
+      ?.homework_tutor_assignments?.tutor_id ?? null;
+  if (!ownershipRow || ownerTutorId !== tutorUserId) {
+    return jsonError(cors, 403, "FORBIDDEN", "Thread does not belong to you");
+  }
+
+  const nowIso = new Date().toISOString();
+  const { error: updateError } = await db
+    .from("homework_tutor_threads")
+    .update({ tutor_last_viewed_at: nowIso })
+    .eq("id", threadId);
+
+  if (updateError) {
+    console.error("mark_thread_viewed_error", { error: updateError.message });
+    return jsonError(cors, 500, "DB_ERROR", "Failed to mark thread as viewed");
+  }
+
+  return jsonOk(cors, { ok: true, viewed_at: nowIso });
+}
+
 // ─── Main Handler ────────────────────────────────────────────────────────────
 
 Deno.serve(async (req: Request): Promise<Response> => {
@@ -5773,6 +6080,11 @@ Deno.serve(async (req: Request): Promise<Response> => {
       return await handleRequestHint(db, userId, seg[1], body, cors);
     }
 
+    // POST /threads/:id/viewed-by-tutor (tutor endpoint — TASK-7 follow-up)
+    if (seg.length === 3 && seg[0] === "threads" && seg[2] === "viewed-by-tutor" && route.method === "POST") {
+      return await handleMarkThreadViewed(db, userId, seg[1], cors);
+    }
+
     // GET /assignments/:id/student (student endpoint)
     if (seg.length === 3 && seg[0] === "assignments" && seg[2] === "student" && route.method === "GET") {
       return await handleGetStudentAssignment(db, userId, seg[1], cors);
@@ -5807,6 +6119,11 @@ Deno.serve(async (req: Request): Promise<Response> => {
     const tutorResult = await getTutorOrThrow(db, userId, cors);
     if (tutorResult instanceof Response) return tutorResult;
     const tutor = tutorResult;
+
+    // GET /recent-dialogs (tutor — TASK-7 follow-up)
+    if (seg.length === 1 && seg[0] === "recent-dialogs" && route.method === "GET") {
+      return await handleGetRecentDialogs(db, userId, cors);
+    }
 
     // POST /assignments
     if (seg.length === 1 && seg[0] === "assignments" && route.method === "POST") {
