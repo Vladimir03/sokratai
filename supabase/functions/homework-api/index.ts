@@ -432,6 +432,35 @@ async function getOwnedAssignmentOrThrow(
   return data as Record<string, unknown>;
 }
 
+async function validateOwnedSourceGroupId(
+  db: SupabaseClient,
+  tutorId: string,
+  sourceGroupId: unknown,
+  cors: Record<string, string>,
+): Promise<string | null | undefined | Response> {
+  if (sourceGroupId === undefined) return undefined;
+  if (sourceGroupId === null) return null;
+  if (!isUUID(sourceGroupId)) {
+    return jsonError(cors, 400, "VALIDATION", "source_group_id must be a UUID or null");
+  }
+
+  const { data, error } = await db
+    .from("tutor_groups")
+    .select("id")
+    .eq("id", sourceGroupId)
+    .eq("tutor_id", tutorId)
+    .maybeSingle();
+
+  if (error) {
+    return jsonError(cors, 500, "DB_ERROR", "Failed to validate source group");
+  }
+  if (!data) {
+    return jsonError(cors, 403, "FORBIDDEN", "source_group_id does not belong to you");
+  }
+
+  return sourceGroupId as string;
+}
+
 // ─── Routing ─────────────────────────────────────────────────────────────────
 
 interface RouteMatch {
@@ -454,6 +483,7 @@ function parseRoute(req: Request): RouteMatch {
 async function handleCreateAssignment(
   db: SupabaseClient,
   tutorUserId: string,
+  tutorId: string,
   body: unknown,
   cors: Record<string, string>,
 ): Promise<Response> {
@@ -523,6 +553,14 @@ async function handleCreateAssignment(
     if (solutionImageLimitError) return solutionImageLimitError;
   }
 
+  const sourceGroupIdOrErr = await validateOwnedSourceGroupId(
+    db,
+    tutorId,
+    b.source_group_id,
+    cors,
+  );
+  if (sourceGroupIdOrErr instanceof Response) return sourceGroupIdOrErr;
+
   const { data: assignment, error: assignErr } = await db
     .from("homework_tutor_assignments")
     .insert({
@@ -535,6 +573,7 @@ async function handleCreateAssignment(
       status: "draft",
       exam_type: (VALID_EXAM_TYPES as readonly string[]).includes(b.exam_type as string) ? b.exam_type : "ege",
       disable_ai_bootstrap: b.disable_ai_bootstrap === true,
+      source_group_id: sourceGroupIdOrErr ?? null,
     })
     .select("id")
     .single();
@@ -1086,6 +1125,7 @@ async function handleGetAssignment(
 async function handleUpdateAssignment(
   db: SupabaseClient,
   tutorUserId: string,
+  tutorId: string,
   assignmentId: string,
   body: unknown,
   cors: Record<string, string>,
@@ -1132,6 +1172,16 @@ async function handleUpdateAssignment(
   }
   if (b.disable_ai_bootstrap !== undefined) {
     patch.disable_ai_bootstrap = b.disable_ai_bootstrap === true;
+  }
+  if (b.source_group_id !== undefined) {
+    const sourceGroupIdOrErr = await validateOwnedSourceGroupId(
+      db,
+      tutorId,
+      b.source_group_id,
+      cors,
+    );
+    if (sourceGroupIdOrErr instanceof Response) return sourceGroupIdOrErr;
+    patch.source_group_id = sourceGroupIdOrErr ?? null;
   }
 
   if (Object.keys(patch).length > 0) {
@@ -6497,7 +6547,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
     // POST /assignments
     if (seg.length === 1 && seg[0] === "assignments" && route.method === "POST") {
       const body = await parseJsonBody(req);
-      return await handleCreateAssignment(db, userId, body, cors);
+      return await handleCreateAssignment(db, userId, tutor.id, body, cors);
     }
 
     // GET /assignments
@@ -6531,7 +6581,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
     // PUT /assignments/:id
     if (seg.length === 2 && seg[0] === "assignments" && route.method === "PUT") {
       const body = await parseJsonBody(req);
-      return await handleUpdateAssignment(db, userId, seg[1], body, cors);
+      return await handleUpdateAssignment(db, userId, tutor.id, seg[1], body, cors);
     }
 
     // DELETE /assignments/:id

@@ -86,6 +86,7 @@ export interface CreateAssignmentPayload {
   deadline?: string | null;
   tasks: CreateAssignmentTask[];
   group_id?: string | null;
+  source_group_id?: string | null;
   save_as_template?: boolean;
   disable_ai_bootstrap?: boolean;
   exam_type?: 'ege' | 'oge';
@@ -498,6 +499,7 @@ export interface TutorHomeworkAssignmentDetails {
     status: HomeworkAssignmentStatus;
     disable_ai_bootstrap?: boolean;
     exam_type?: 'ege' | 'oge';
+    source_group_id?: string | null;
     created_at: string;
   };
   tasks: {
@@ -1025,6 +1027,7 @@ export async function updateTutorHomeworkAssignment(
     status?: string;
     disable_ai_bootstrap?: boolean;
     exam_type?: 'ege' | 'oge';
+    source_group_id?: string | null;
     tasks?: UpdateAssignmentTask[];
   },
 ): Promise<void> {

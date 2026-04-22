@@ -1,4 +1,4 @@
-import { useState, useCallback, useMemo } from 'react';
+import { useState, useCallback, useEffect, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -8,37 +8,131 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Switch } from '@/components/ui/switch';
 import { Badge } from '@/components/ui/badge';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
-import { Copy, Search, Check, ExternalLink } from 'lucide-react';
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Copy, Search, Check, ExternalLink, Users, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { useTutorStudents } from '@/hooks/useTutor';
 import { TutorDataStatus } from '@/components/tutor/TutorDataStatus';
+import type { TutorGroupWithMembers } from '@/hooks/useTutorGroups';
+
+type AssignTab = 'groups' | 'students';
+
+function setsEqual<T>(left: Set<T>, right: Set<T>): boolean {
+  if (left.size !== right.size) return false;
+  for (const value of left) {
+    if (!right.has(value)) return false;
+  }
+  return true;
+}
+
+function buildGroupUnionStudentIds(
+  groups: TutorGroupWithMembers[],
+  selectedGroupIds: Set<string>,
+  studentIdByTutorStudentId: Map<string, string>,
+): Set<string> {
+  const result = new Set<string>();
+  for (const group of groups) {
+    if (!selectedGroupIds.has(group.id)) continue;
+    for (const member of group.members) {
+      if (!member.is_active) continue;
+      const studentId = studentIdByTutorStudentId.get(member.tutor_student_id);
+      if (studentId) {
+        result.add(studentId);
+      }
+    }
+  }
+  return result;
+}
+
+function normalizeGroupSelection(params: {
+  groups: TutorGroupWithMembers[];
+  selectedGroupIds: Set<string>;
+  manuallyRemovedIds: Set<string>;
+  manuallyAddedIds: Set<string>;
+  studentIdByTutorStudentId: Map<string, string>;
+}) {
+  const {
+    groups,
+    selectedGroupIds,
+    manuallyRemovedIds,
+    manuallyAddedIds,
+    studentIdByTutorStudentId,
+  } = params;
+
+  const groupUnion = buildGroupUnionStudentIds(
+    groups,
+    selectedGroupIds,
+    studentIdByTutorStudentId,
+  );
+
+  const normalizedRemoved = new Set(
+    [...manuallyRemovedIds].filter((studentId) => groupUnion.has(studentId)),
+  );
+  const normalizedAdded = new Set(
+    [...manuallyAddedIds].filter((studentId) => !groupUnion.has(studentId)),
+  );
+
+  const resolved = new Set(groupUnion);
+  for (const studentId of normalizedRemoved) {
+    resolved.delete(studentId);
+  }
+  for (const studentId of normalizedAdded) {
+    resolved.add(studentId);
+  }
+
+  return {
+    groupUnion,
+    normalizedRemoved,
+    normalizedAdded,
+    resolved,
+  };
+}
+
+function getStudentDisplayName(student: {
+  display_name: string | null;
+  student_id: string;
+  profiles?: {
+    username?: string | null;
+    telegram_username?: string | null;
+  } | null;
+}): string {
+  if (student.display_name?.trim()) return student.display_name.trim();
+  if (student.profiles?.username?.trim()) return student.profiles.username.trim();
+  if (student.profiles?.telegram_username?.trim()) {
+    return `@${student.profiles.telegram_username.replace(/^@/, '')}`;
+  }
+  return student.student_id;
+}
 
 export interface HWAssignSectionProps {
   selectedIds: Set<string>;
-  onChangeSelected: (s: Set<string>) => void;
+  onChangeSelected: (selection: Set<string>) => void;
   notifyEnabled: boolean;
-  onNotifyChange: (v: boolean) => void;
+  onNotifyChange: (value: boolean) => void;
   notifyTemplate: string;
-  onTemplateChange: (v: string) => void;
+  onTemplateChange: (value: string) => void;
   errors: Record<string, string>;
-  assignMode: 'student' | 'group';
-  onAssignModeChange: (mode: 'student' | 'group') => void;
-  selectedGroupId: string;
-  onGroupIdChange: (groupId: string) => void;
-  groups: Array<{ id: string; name: string }>;
+  miniGroupsEnabled: boolean;
+  assignTab: AssignTab;
+  onAssignTabChange: (tab: AssignTab) => void;
+  onSelectionInteraction?: () => void;
+  groups: TutorGroupWithMembers[];
+  groupsLoading?: boolean;
+  groupsError?: string | null;
+  onGroupsRetry?: () => void;
+  groupsIsFetching?: boolean;
+  groupsIsRecovering?: boolean;
+  groupsFailureCount?: number;
+  selectedGroupIds: Set<string>;
+  onSelectedGroupIdsChange: (groupIds: Set<string>) => void;
+  manuallyRemovedIds: Set<string>;
+  onManuallyRemovedIdsChange: (studentIds: Set<string>) => void;
+  manuallyAddedIds: Set<string>;
+  onManuallyAddedIdsChange: (studentIds: Set<string>) => void;
   inviteWebLink: string;
   studentLoginLink: string;
   studentSignupLink: string;
-  /** IDs of students already assigned (edit mode) — these cannot be unchecked */
   existingStudentIds?: Set<string>;
-  /** Hide notify section entirely (edit mode) */
   hideNotify?: boolean;
 }
 
@@ -50,11 +144,23 @@ export function HWAssignSection({
   notifyTemplate,
   onTemplateChange,
   errors,
-  assignMode,
-  onAssignModeChange,
-  selectedGroupId,
-  onGroupIdChange,
+  miniGroupsEnabled,
+  assignTab,
+  onAssignTabChange,
+  onSelectionInteraction,
   groups,
+  groupsLoading = false,
+  groupsError = null,
+  onGroupsRetry,
+  groupsIsFetching = false,
+  groupsIsRecovering = false,
+  groupsFailureCount = 0,
+  selectedGroupIds,
+  onSelectedGroupIdsChange,
+  manuallyRemovedIds,
+  onManuallyRemovedIdsChange,
+  manuallyAddedIds,
+  onManuallyAddedIdsChange,
   inviteWebLink,
   studentLoginLink,
   studentSignupLink,
@@ -72,8 +178,13 @@ export function HWAssignSection({
     isRecovering,
     failureCount,
   } = useTutorStudents();
-  const lockedStudentIds = existingStudentIds ?? new Set<string>();
+
+  const lockedStudentIds = useMemo(
+    () => existingStudentIds ?? new Set<string>(),
+    [existingStudentIds],
+  );
   const hasLockedStudents = lockedStudentIds.size > 0;
+
   const preserveLockedSelection = useCallback(
     (nextSelection: Set<string>) => {
       if (!hasLockedStudents) return nextSelection;
@@ -86,56 +197,89 @@ export function HWAssignSection({
     [hasLockedStudents, lockedStudentIds],
   );
 
-  const handleToggle = useCallback(
-    (studentId: string) => {
-      const next = new Set(selectedIds);
-      if (next.has(studentId)) {
-        next.delete(studentId);
-      } else {
-        next.add(studentId);
-      }
-      onChangeSelected(preserveLockedSelection(next));
-    },
-    [selectedIds, onChangeSelected, preserveLockedSelection],
+  const studentIdByTutorStudentId = useMemo(() => {
+    const next = new Map<string, string>();
+    for (const student of students) {
+      next.set(student.id, student.student_id);
+    }
+    return next;
+  }, [students]);
+
+  const groupSelection = useMemo(
+    () =>
+      normalizeGroupSelection({
+        groups,
+        selectedGroupIds,
+        manuallyRemovedIds,
+        manuallyAddedIds,
+        studentIdByTutorStudentId,
+      }),
+    [
+      groups,
+      selectedGroupIds,
+      manuallyRemovedIds,
+      manuallyAddedIds,
+      studentIdByTutorStudentId,
+    ],
   );
 
-  const handleSelectAll = useCallback(() => {
-    onChangeSelected(preserveLockedSelection(new Set(students.map((s) => s.student_id))));
-  }, [students, onChangeSelected, preserveLockedSelection]);
+  useEffect(() => {
+    if (!miniGroupsEnabled || selectedGroupIds.size === 0) return;
 
-  const handleDeselectAll = useCallback(() => {
-    onChangeSelected(preserveLockedSelection(new Set()));
-  }, [onChangeSelected, preserveLockedSelection]);
+    if (!setsEqual(groupSelection.normalizedRemoved, manuallyRemovedIds)) {
+      onManuallyRemovedIdsChange(groupSelection.normalizedRemoved);
+    }
+    if (!setsEqual(groupSelection.normalizedAdded, manuallyAddedIds)) {
+      onManuallyAddedIdsChange(groupSelection.normalizedAdded);
+    }
+
+    const nextSelection = preserveLockedSelection(groupSelection.resolved);
+    if (!setsEqual(nextSelection, selectedIds)) {
+      onChangeSelected(nextSelection);
+    }
+  }, [
+    miniGroupsEnabled,
+    selectedGroupIds,
+    groupSelection,
+    manuallyRemovedIds,
+    manuallyAddedIds,
+    onManuallyRemovedIdsChange,
+    onManuallyAddedIdsChange,
+    preserveLockedSelection,
+    selectedIds,
+    onChangeSelected,
+  ]);
 
   const filteredStudents = useMemo(() => {
-    const q = searchQuery.trim().toLowerCase();
-    if (!q) return students;
-    return students.filter((s) => {
-      const name = (s.profiles?.username ?? '').toLowerCase();
-      const tg = (s.profiles?.telegram_username ?? '').toLowerCase();
-      return name.includes(q) || tg.includes(q);
+    const query = searchQuery.trim().toLowerCase();
+    if (!query) return students;
+
+    return students.filter((student) => {
+      const name = getStudentDisplayName(student).toLowerCase();
+      const telegram = (student.profiles?.telegram_username ?? '').toLowerCase();
+      return name.includes(query) || telegram.includes(query);
     });
   }, [students, searchQuery]);
+
+  const selectedStudents = useMemo(
+    () => students.filter((student) => selectedIds.has(student.student_id)),
+    [students, selectedIds],
+  );
 
   const selectedWithoutTelegramStudents = useMemo(
     () =>
       students.filter(
-        (s) => selectedIds.has(s.student_id) && !s.profiles?.telegram_user_id,
+        (student) =>
+          selectedIds.has(student.student_id) && !student.profiles?.telegram_user_id,
       ),
     [students, selectedIds],
   );
-
-  const selectedWithoutTelegram = selectedWithoutTelegramStudents.length;
 
   const selectedWithoutTelegramPreview = useMemo(() => {
     if (selectedWithoutTelegramStudents.length === 0) return '';
     const names = selectedWithoutTelegramStudents
       .slice(0, 3)
-      .map(
-        (s) =>
-          s.profiles?.username ||
-          (s.profiles?.telegram_username ? `@${s.profiles.telegram_username}` : s.student_id),
-      );
+      .map((student) => getStudentDisplayName(student));
     const suffix = selectedWithoutTelegramStudents.length > 3 ? '...' : '';
     return `${names.join(', ')}${suffix}`;
   }, [selectedWithoutTelegramStudents]);
@@ -152,30 +296,353 @@ export function HWAssignSection({
     }
   }, [inviteWebLink]);
 
+  const commitGroupSelection = useCallback(
+    (
+      nextSelectedGroupIds: Set<string>,
+      nextManuallyRemovedIds: Set<string>,
+      nextManuallyAddedIds: Set<string>,
+    ) => {
+      const nextSelection = normalizeGroupSelection({
+        groups,
+        selectedGroupIds: nextSelectedGroupIds,
+        manuallyRemovedIds: nextManuallyRemovedIds,
+        manuallyAddedIds: nextManuallyAddedIds,
+        studentIdByTutorStudentId,
+      });
+
+      onSelectedGroupIdsChange(nextSelectedGroupIds);
+      onManuallyRemovedIdsChange(nextSelection.normalizedRemoved);
+      onManuallyAddedIdsChange(nextSelection.normalizedAdded);
+      onChangeSelected(preserveLockedSelection(nextSelection.resolved));
+    },
+    [
+      groups,
+      onSelectedGroupIdsChange,
+      onManuallyRemovedIdsChange,
+      onManuallyAddedIdsChange,
+      onChangeSelected,
+      preserveLockedSelection,
+      studentIdByTutorStudentId,
+    ],
+  );
+
+  const handleGroupToggle = useCallback(
+    (groupId: string) => {
+      onSelectionInteraction?.();
+
+      const nextSelectedGroupIds = new Set(selectedGroupIds);
+      if (nextSelectedGroupIds.has(groupId)) {
+        nextSelectedGroupIds.delete(groupId);
+      } else {
+        nextSelectedGroupIds.add(groupId);
+      }
+
+      const nextGroupUnion = buildGroupUnionStudentIds(
+        groups,
+        nextSelectedGroupIds,
+        studentIdByTutorStudentId,
+      );
+
+      const nextManuallyRemovedIds =
+        selectedGroupIds.size === 0
+          ? new Set<string>()
+          : new Set(manuallyRemovedIds);
+      const nextManuallyAddedIds =
+        selectedGroupIds.size === 0
+          ? new Set(
+              [...selectedIds].filter(
+                (studentId) => !nextGroupUnion.has(studentId),
+              ),
+            )
+          : new Set(manuallyAddedIds);
+
+      commitGroupSelection(
+        nextSelectedGroupIds,
+        nextManuallyRemovedIds,
+        nextManuallyAddedIds,
+      );
+    },
+    [
+      selectedGroupIds,
+      groups,
+      studentIdByTutorStudentId,
+      manuallyRemovedIds,
+      manuallyAddedIds,
+      selectedIds,
+      onSelectionInteraction,
+      commitGroupSelection,
+    ],
+  );
+
+  const handleStudentToggle = useCallback(
+    (studentId: string) => {
+      if (selectedGroupIds.size === 0) {
+        onSelectionInteraction?.();
+        const nextSelection = new Set(selectedIds);
+        if (nextSelection.has(studentId)) {
+          nextSelection.delete(studentId);
+        } else {
+          nextSelection.add(studentId);
+        }
+        onChangeSelected(preserveLockedSelection(nextSelection));
+        return;
+      }
+
+      const nextManuallyRemovedIds = new Set(groupSelection.normalizedRemoved);
+      const nextManuallyAddedIds = new Set(groupSelection.normalizedAdded);
+      const isGroupStudent = groupSelection.groupUnion.has(studentId);
+      const isSelected = selectedIds.has(studentId);
+
+      onSelectionInteraction?.();
+
+      if (isGroupStudent) {
+        if (isSelected) {
+          nextManuallyRemovedIds.add(studentId);
+        } else {
+          nextManuallyRemovedIds.delete(studentId);
+        }
+      } else if (isSelected) {
+        nextManuallyAddedIds.delete(studentId);
+      } else {
+        nextManuallyAddedIds.add(studentId);
+      }
+
+      commitGroupSelection(
+        new Set(selectedGroupIds),
+        nextManuallyRemovedIds,
+        nextManuallyAddedIds,
+      );
+    },
+    [
+      selectedGroupIds,
+      selectedIds,
+      onChangeSelected,
+      preserveLockedSelection,
+      groupSelection,
+      onSelectionInteraction,
+      commitGroupSelection,
+    ],
+  );
+
+  const handleSelectAll = useCallback(() => {
+    if (selectedGroupIds.size === 0) {
+      onSelectionInteraction?.();
+      onChangeSelected(
+        preserveLockedSelection(new Set(students.map((student) => student.student_id))),
+      );
+      return;
+    }
+
+    onSelectionInteraction?.();
+
+    const nextManuallyAddedIds = new Set(
+      students
+        .map((student) => student.student_id)
+        .filter((studentId) => !groupSelection.groupUnion.has(studentId)),
+    );
+
+    commitGroupSelection(
+      new Set(selectedGroupIds),
+      new Set<string>(),
+      nextManuallyAddedIds,
+    );
+  }, [
+    selectedGroupIds,
+    onChangeSelected,
+    preserveLockedSelection,
+    students,
+    groupSelection.groupUnion,
+    onSelectionInteraction,
+    commitGroupSelection,
+  ]);
+
+  const handleDeselectAll = useCallback(() => {
+    if (selectedGroupIds.size === 0) {
+      onSelectionInteraction?.();
+      onChangeSelected(preserveLockedSelection(new Set()));
+      return;
+    }
+
+    onSelectionInteraction?.();
+
+    const nextManuallyRemovedIds = new Set(
+      [...groupSelection.groupUnion].filter((studentId) => !lockedStudentIds.has(studentId)),
+    );
+
+    commitGroupSelection(
+      new Set(selectedGroupIds),
+      nextManuallyRemovedIds,
+      new Set<string>(),
+    );
+  }, [
+    selectedGroupIds,
+    onChangeSelected,
+    preserveLockedSelection,
+    groupSelection.groupUnion,
+    lockedStudentIds,
+    onSelectionInteraction,
+    commitGroupSelection,
+  ]);
+
+  const handleRemoveSelectedStudent = useCallback(
+    (studentId: string) => {
+      if (lockedStudentIds.has(studentId)) return;
+      handleStudentToggle(studentId);
+    },
+    [lockedStudentIds, handleStudentToggle],
+  );
+
+  const selectedGroupCards = useMemo(
+    () => groups.filter((group) => selectedGroupIds.has(group.id)),
+    [groups, selectedGroupIds],
+  );
+
+  const hasManualGroupAdjustments =
+    manuallyRemovedIds.size > 0 || manuallyAddedIds.size > 0;
+
   return (
     <div className="space-y-6">
-      <div className="space-y-2">
-        <div className="flex gap-2">
-          <Button type="button" variant={assignMode === 'student' ? 'default' : 'outline'} size="sm" onClick={() => onAssignModeChange('student')}>Ученик</Button>
-          <Button type="button" variant={assignMode === 'group' ? 'default' : 'outline'} size="sm" onClick={() => onAssignModeChange('group')}>Группа</Button>
-        </div>
-        {assignMode === 'group' && (
-          <Select value={selectedGroupId || undefined} onValueChange={onGroupIdChange}>
-            <SelectTrigger><SelectValue placeholder="Выберите группу" /></SelectTrigger>
-            <SelectContent>
-              {groups.map((g) => (
-                <SelectItem key={g.id} value={g.id}>{g.name}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        )}
-      </div>
+      {miniGroupsEnabled ? (
+        <Tabs
+          value={assignTab}
+          onValueChange={(value) => onAssignTabChange(value as AssignTab)}
+          className="space-y-4"
+        >
+          <TabsList className="grid w-full grid-cols-2">
+            <TabsTrigger value="groups">Группы</TabsTrigger>
+            <TabsTrigger value="students">Ученики</TabsTrigger>
+          </TabsList>
 
-      {/* Student list */}
+          {assignTab === 'groups' && (
+            <div className="space-y-4">
+              <TutorDataStatus
+                error={groupsError}
+                isFetching={groupsIsFetching}
+                isRecovering={groupsIsRecovering}
+                failureCount={groupsFailureCount}
+                onRetry={onGroupsRetry ?? (() => {})}
+              />
+
+              {groupsLoading && groups.length === 0 ? (
+                <div className="grid gap-3">
+                  {[1, 2].map((index) => (
+                    <Skeleton key={index} className="h-20 rounded-xl" />
+                  ))}
+                </div>
+              ) : groups.length === 0 ? (
+                <Card className="bg-muted/30">
+                  <CardContent className="py-6 text-sm text-muted-foreground">
+                    Активных групп пока нет. Можно продолжить через вкладку «Ученики».
+                  </CardContent>
+                </Card>
+              ) : (
+                <div className="grid gap-3">
+                  {groups.map((group) => {
+                    const activeMemberCount = group.members.filter((member) => member.is_active).length;
+                    const isSelected = selectedGroupIds.has(group.id);
+                    return (
+                      <button
+                        key={group.id}
+                        type="button"
+                        onClick={() => handleGroupToggle(group.id)}
+                        className={`w-full rounded-xl border px-4 py-3 text-left transition-colors ${
+                          isSelected
+                            ? 'border-accent bg-accent/5'
+                            : 'border-slate-200 bg-white hover:border-slate-300 hover:bg-slate-50'
+                        }`}
+                      >
+                        <div className="flex items-center gap-3">
+                          <span
+                            className="h-3 w-3 shrink-0 rounded-full border border-slate-200"
+                            style={{
+                              backgroundColor:
+                                group.color?.trim() || 'var(--accent)',
+                            }}
+                            aria-hidden="true"
+                          />
+                          <Users className="h-4 w-4 shrink-0 text-slate-500" />
+                          <div className="min-w-0 flex-1">
+                            <p className="truncate text-sm font-medium">
+                              {group.short_name?.trim() || group.name}
+                            </p>
+                            <p className="text-xs text-muted-foreground">
+                              {activeMemberCount} ученик(ов)
+                            </p>
+                          </div>
+                          {isSelected && (
+                            <Badge variant="secondary" className="shrink-0">
+                              Выбрано
+                            </Badge>
+                          )}
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+
+              {selectedGroupCards.length > 0 && (
+                <Card className="border-slate-200">
+                  <CardContent className="space-y-3 pt-4">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Label className="text-base">Выбранные группы</Label>
+                      {selectedGroupCards.map((group) => (
+                        <Badge key={group.id} variant="secondary">
+                          {group.short_name?.trim() || group.name}
+                        </Badge>
+                      ))}
+                    </div>
+
+                    <div className="space-y-2">
+                      <p className="text-sm font-medium">
+                        Выбранные ученики: {selectedStudents.length}
+                      </p>
+                      <div className="flex flex-wrap gap-2">
+                        {selectedStudents.map((student) => {
+                          const isLocked = lockedStudentIds.has(student.student_id);
+                          return (
+                            <span
+                              key={student.student_id}
+                              className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs"
+                            >
+                              <span>{getStudentDisplayName(student)}</span>
+                              {!isLocked && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleRemoveSelectedStudent(student.student_id)}
+                                  className="rounded-full p-0.5 text-slate-500 transition-colors hover:bg-slate-200 hover:text-slate-700"
+                                  aria-label={`Убрать ${getStudentDisplayName(student)}`}
+                                >
+                                  <X className="h-3 w-3" />
+                                </button>
+                              )}
+                            </span>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    <p className="text-xs text-muted-foreground">
+                      Можно убрать отдельных учеников или добавить других на вкладке «Ученики».
+                    </p>
+
+                    {hasManualGroupAdjustments && (
+                      <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+                        Состав изменён вручную. Связь с группой не сохранится в метаданных ДЗ.
+                      </p>
+                    )}
+                  </CardContent>
+                </Card>
+              )}
+            </div>
+          )}
+        </Tabs>
+      ) : null}
+
       <div className="space-y-3">
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between gap-3">
           <Label className="text-base">Ученики</Label>
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
             <Button variant="outline" size="sm" onClick={handleSelectAll}>
               Выбрать всех
             </Button>
@@ -199,11 +666,11 @@ export function HWAssignSection({
 
         {!loading && students.length > 0 && (
           <div className="relative">
-            <Search className="h-4 w-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
             <Input
               placeholder="Поиск по имени или @username"
               value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
+              onChange={(event) => setSearchQuery(event.target.value)}
               className="pl-9 text-base"
             />
           </div>
@@ -211,8 +678,8 @@ export function HWAssignSection({
 
         {loading && !students.length ? (
           <div className="space-y-2">
-            {[1, 2, 3].map((i) => (
-              <Skeleton key={i} className="h-12" />
+            {[1, 2, 3].map((index) => (
+              <Skeleton key={index} className="h-12" />
             ))}
           </div>
         ) : students.length === 0 ? (
@@ -235,38 +702,48 @@ export function HWAssignSection({
             </CardContent>
           </Card>
         ) : (
-          <div className="space-y-1 max-h-[360px] overflow-y-auto rounded-md border p-1">
-            {filteredStudents.map((s) => {
-              const checked = selectedIds.has(s.student_id);
-              const name = s.profiles?.username || 'Без имени';
-              const isTelegramConnected = Boolean(s.profiles?.telegram_user_id);
+          <div className="max-h-[360px] space-y-1 overflow-y-auto rounded-md border p-1">
+            {filteredStudents.map((student) => {
+              const checked = selectedIds.has(student.student_id);
+              const displayName = getStudentDisplayName(student);
+              const isTelegramConnected = Boolean(student.profiles?.telegram_user_id);
               const statusLabel =
-                s.status === 'active'
+                student.status === 'active'
                   ? null
-                  : s.status === 'paused'
-                  ? 'На паузе'
-                  : 'Завершён';
-              const isLocked = existingStudentIds?.has(s.student_id) ?? false;
+                  : student.status === 'paused'
+                    ? 'На паузе'
+                    : 'Завершён';
+              const isLocked = existingStudentIds?.has(student.student_id) ?? false;
+
               return (
                 <label
-                  key={s.student_id}
-                  className={`flex items-center gap-3 p-2.5 rounded-md transition-colors ${isLocked ? 'opacity-70 cursor-default' : 'cursor-pointer hover:bg-muted/50'}`}
+                  key={student.student_id}
+                  className={`flex items-center gap-3 rounded-md p-2.5 transition-colors ${
+                    isLocked
+                      ? 'cursor-default opacity-70'
+                      : 'cursor-pointer hover:bg-muted/50'
+                  }`}
                 >
                   <Checkbox
                     checked={checked}
-                    onCheckedChange={() => handleToggle(s.student_id)}
+                    onCheckedChange={() => handleStudentToggle(student.student_id)}
                     disabled={isLocked}
                   />
                   <div className="min-w-0 flex-1">
-                    <p className="text-sm font-medium truncate">{name}</p>
-                    {s.profiles?.telegram_username && (
-                      <p className="text-xs text-muted-foreground truncate">
-                        @{s.profiles.telegram_username}
+                    <p className="truncate text-sm font-medium">{displayName}</p>
+                    {student.profiles?.telegram_username && (
+                      <p className="truncate text-xs text-muted-foreground">
+                        @{student.profiles.telegram_username}
                       </p>
                     )}
                   </div>
-                  <Badge variant={isTelegramConnected ? 'default' : 'secondary'} className="text-xs">
-                    {isTelegramConnected ? 'Telegram подключен' : 'Telegram не подключен'}
+                  <Badge
+                    variant={isTelegramConnected ? 'default' : 'secondary'}
+                    className="text-xs"
+                  >
+                    {isTelegramConnected
+                      ? 'Telegram подключен'
+                      : 'Telegram не подключен'}
                   </Badge>
                   {statusLabel && (
                     <Badge variant="secondary" className="text-xs">
@@ -281,25 +758,29 @@ export function HWAssignSection({
 
         {hasLockedStudents && (
           <Card className="border-primary/20 bg-primary/5">
-            <CardContent className="pt-4 space-y-1">
-              <p className="text-sm font-medium">Уже назначенные ученики останутся в этом ДЗ</p>
+            <CardContent className="space-y-1 pt-4">
+              <p className="text-sm font-medium">
+                Уже назначенные ученики останутся в этом ДЗ
+              </p>
               <p className="text-xs text-muted-foreground">
-                В этой итерации можно только добавлять новых учеников. После сохранения им ДЗ отправится автоматически.
+                В этой итерации можно только добавлять новых учеников. После сохранения
+                им ДЗ отправится автоматически.
               </p>
             </CardContent>
           </Card>
         )}
 
         <p className="text-xs text-muted-foreground">
-          Выбрано: {selectedIds.size} из {students.length}. Без Telegram: {selectedWithoutTelegram}
+          Выбрано: {selectedIds.size} из {students.length}. Без Telegram:{' '}
+          {selectedWithoutTelegramStudents.length}
         </p>
 
-        {selectedWithoutTelegram > 0 && (
+        {selectedWithoutTelegramStudents.length > 0 && (
           <Card className="border-amber-500/40 bg-amber-50/40">
-            <CardContent className="pt-4 space-y-3">
+            <CardContent className="space-y-3 pt-4">
               <p className="text-sm">
-                У {selectedWithoutTelegram} ученик(ов) нет Telegram-связки. ДЗ будет назначено в кабинет на сайте,
-                но Telegram-уведомление не отправится.
+                У {selectedWithoutTelegramStudents.length} ученик(ов) нет Telegram-связки.
+                ДЗ будет назначено в кабинет на сайте, но Telegram-уведомление не отправится.
               </p>
               {selectedWithoutTelegramPreview && (
                 <p className="text-xs text-muted-foreground">
@@ -310,25 +791,29 @@ export function HWAssignSection({
                 <Button size="sm" variant="outline" asChild>
                   <a href={studentLoginLink} target="_blank" rel="noreferrer">
                     Вход ученика
-                    <ExternalLink className="h-3.5 w-3.5 ml-1" />
+                    <ExternalLink className="ml-1 h-3.5 w-3.5" />
                   </a>
                 </Button>
                 <Button size="sm" variant="outline" asChild>
                   <a href={studentSignupLink} target="_blank" rel="noreferrer">
                     Регистрация ученика
-                    <ExternalLink className="h-3.5 w-3.5 ml-1" />
+                    <ExternalLink className="ml-1 h-3.5 w-3.5" />
                   </a>
                 </Button>
                 {inviteWebLink && (
                   <>
                     <Button size="sm" variant="outline" onClick={handleCopyInviteLink}>
-                      {inviteCopied ? <Check className="h-3.5 w-3.5 mr-1" /> : <Copy className="h-3.5 w-3.5 mr-1" />}
+                      {inviteCopied ? (
+                        <Check className="mr-1 h-3.5 w-3.5" />
+                      ) : (
+                        <Copy className="mr-1 h-3.5 w-3.5" />
+                      )}
                       {inviteCopied ? 'Скопировано' : 'Копировать инвайт'}
                     </Button>
                     <Button size="sm" variant="outline" asChild>
                       <a href={inviteWebLink} target="_blank" rel="noreferrer">
                         Страница приглашения
-                        <ExternalLink className="h-3.5 w-3.5 ml-1" />
+                        <ExternalLink className="ml-1 h-3.5 w-3.5" />
                       </a>
                     </Button>
                   </>
@@ -339,11 +824,10 @@ export function HWAssignSection({
         )}
       </div>
 
-      {/* Notify toggle — hidden in edit mode */}
       {!hideNotify && (
         <div className="space-y-3 border-t pt-4">
           <div className="flex items-center justify-between">
-            <Label htmlFor="notify-toggle" className="text-base cursor-pointer">
+            <Label htmlFor="notify-toggle" className="cursor-pointer text-base">
               Отправить уведомления в Telegram
             </Label>
             <Switch
@@ -359,10 +843,10 @@ export function HWAssignSection({
               </Label>
               <textarea
                 id="notify-template"
-                className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-base ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 min-h-[60px] resize-y"
+                className="min-h-[60px] w-full resize-y rounded-md border border-input bg-background px-3 py-2 text-base ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
                 placeholder="Новая домашка! Открой ссылку выше, чтобы начать."
                 value={notifyTemplate}
-                onChange={(e) => onTemplateChange(e.target.value)}
+                onChange={(event) => onTemplateChange(event.target.value)}
               />
             </div>
           )}

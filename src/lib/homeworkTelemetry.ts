@@ -30,6 +30,7 @@ type GuidedTelemetryEvent =
   | 'telegram_reminder_sent_from_results'
   | 'drill_down_expanded'
   | 'manual_score_override_saved'
+  | 'homework_assign_group'
   // homework-reuse-v1 TASK-7 — share link created by tutor.
   // Payload intentionally minimal: no slug (PII-adjacent for leak trackers).
   | 'homework_share_link_created'
@@ -40,7 +41,16 @@ type GuidedTelemetryEvent =
   | 'homework_preview_printed'
   | 'homework_preview_copied_text';
 
-type GuidedTelemetryPayload = Record<string, string | number | boolean | null | undefined>;
+type GuidedTelemetryValue =
+  | string
+  | number
+  | boolean
+  | null
+  | undefined
+  | readonly string[]
+  | readonly number[];
+
+type GuidedTelemetryPayload = Record<string, GuidedTelemetryValue>;
 
 // ─── AC-10 typed payloads (no PII — ids + numbers only) ──────────────────────
 // Each interface extends GuidedTelemetryPayload so it is assignable to the
@@ -74,6 +84,13 @@ interface TelegramReminderSentPayload extends Record<string, string | number | b
   kind: 'remind' | 'praise';
   /** Actual channel used; may differ from tab selection when backend auto-cascades. */
   channel?: string;
+}
+
+interface HomeworkAssignGroupPayload extends Record<string, GuidedTelemetryValue> {
+  group_ids: readonly string[];
+  group_id: string | null;
+  student_count: number;
+  is_multi_group: boolean;
 }
 
 // homework-reuse-v1 TASK-7 — share link created. PII-free (no slug, no url).
@@ -124,6 +141,7 @@ export function trackGuidedHomeworkEvent(event: 'results_v2_opened', payload: Re
 export function trackGuidedHomeworkEvent(event: 'drill_down_expanded', payload: DrillDownExpandedPayload): void;
 export function trackGuidedHomeworkEvent(event: 'manual_score_override_saved', payload: ManualScoreOverrideSavedPayload): void;
 export function trackGuidedHomeworkEvent(event: 'telegram_reminder_sent_from_results', payload: TelegramReminderSentPayload): void;
+export function trackGuidedHomeworkEvent(event: 'homework_assign_group', payload: HomeworkAssignGroupPayload): void;
 export function trackGuidedHomeworkEvent(event: 'homework_share_link_created', payload: HomeworkShareLinkCreatedPayload): void;
 export function trackGuidedHomeworkEvent(event: 'homework_preview_opened', payload: HomeworkPreviewOpenedPayload): void;
 export function trackGuidedHomeworkEvent(event: 'homework_preview_printed', payload: HomeworkPreviewPrintedPayload): void;

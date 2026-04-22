@@ -6,9 +6,9 @@ import { parseISO } from 'date-fns';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { ArrowLeft, Loader2, ChevronDown, ChevronUp, AlertCircle, Save } from 'lucide-react';
+import { ArrowLeft, Loader2, ChevronDown, ChevronUp, AlertCircle } from 'lucide-react';
 import { toast } from 'sonner';
-import { useTutor, useTutorStudents, useTutorGroups, useTutorGroupMemberships } from '@/hooks/useTutor';
+import { useTutor, useTutorStudents, useTutorGroups } from '@/hooks/useTutor';
 import {
   createTutorHomeworkAssignment,
   assignTutorHomeworkStudents,
@@ -33,6 +33,7 @@ import {
 import { getTutorInviteWebLink } from '@/utils/telegramLinks';
 import { supabase } from '@/lib/supabaseClient';
 import { getSubjectLabel } from '@/types/homework';
+import { trackGuidedHomeworkEvent } from '@/lib/homeworkTelemetry';
 
 // ─── Extracted components ────────────────────────────────────────────────────
 import {
@@ -117,11 +118,50 @@ function buildMaterialSignature(materials: Array<{
   );
 }
 
+function differenceSet(source: Set<string>, excluded: Set<string>): Set<string> {
+  const next = new Set<string>();
+  for (const value of source) {
+    if (!excluded.has(value)) {
+      next.add(value);
+    }
+  }
+  return next;
+}
+
+function buildGroupMemberStudentIdsMap(
+  groups: Array<{
+    id: string;
+    members: Array<{ tutor_student_id: string; is_active: boolean }>;
+  }>,
+  tutorStudents: Array<{ id: string; student_id: string }>,
+): Map<string, Set<string>> {
+  const studentIdByTutorStudentId = new Map<string, string>();
+  for (const student of tutorStudents) {
+    studentIdByTutorStudentId.set(student.id, student.student_id);
+  }
+
+  const result = new Map<string, Set<string>>();
+  for (const group of groups) {
+    const memberStudentIds = new Set<string>();
+    for (const member of group.members) {
+      if (!member.is_active) continue;
+      const studentId = studentIdByTutorStudentId.get(member.tutor_student_id);
+      if (studentId) {
+        memberStudentIds.add(studentId);
+      }
+    }
+    result.set(group.id, memberStudentIds);
+  }
+
+  return result;
+}
+
 type EditSnapshot = {
   meta: MetaState;
   taskSignature: string;
   studentIds: string;
   materialSignature: string;
+  sourceGroupId: string | null;
 };
 
 function buildEditSnapshot(assignment: TutorHomeworkAssignmentDetails): EditSnapshot {
@@ -137,6 +177,7 @@ function buildEditSnapshot(assignment: TutorHomeworkAssignmentDetails): EditSnap
     taskSignature: buildTaskSignature(assignment.tasks),
     studentIds: assignment.assigned_students.map((s) => s.student_id).sort().join(','),
     materialSignature: buildMaterialSignature(assignment.materials),
+    sourceGroupId: assignment.assignment.source_group_id ?? null,
   };
 }
 
@@ -147,6 +188,7 @@ function buildEditDiffState(params: {
   materials: DraftMaterial[];
   selectedStudentIds: Set<string>;
   editExistingStudentIds: Set<string>;
+  sourceGroupId: string | null;
 }) {
   const {
     snapshot,
@@ -155,6 +197,7 @@ function buildEditDiffState(params: {
     materials,
     selectedStudentIds,
     editExistingStudentIds,
+    sourceGroupId,
   } = params;
 
   const metaDirty =
@@ -181,6 +224,7 @@ function buildEditDiffState(params: {
   ) !== snapshot.taskSignature;
 
   const materialsDirty = buildMaterialSignature(materials) !== snapshot.materialSignature;
+  const sourceGroupDirty = sourceGroupId !== snapshot.sourceGroupId;
 
   const newStudentIds = [...selectedStudentIds]
     .filter((id) => !editExistingStudentIds.has(id))
@@ -193,6 +237,7 @@ function buildEditDiffState(params: {
     metaDirty,
     tasksDirty,
     materialsDirty,
+    sourceGroupDirty,
     newStudentIds,
     newStudentsDirty: newStudentIds.length > 0,
     removedExistingStudentIds,
@@ -279,11 +324,18 @@ function TutorHomeworkCreateContent() {
   const [searchParams] = useSearchParams();
   const { id: editId } = useParams<{ id?: string }>();
   const isEditMode = !!editId;
-  const { tutor } = useTutor();
-  const { students: tutorStudents } = useTutorStudents();
-  // Always fetch groups — no step gating in single-page layout
-  const { groups } = useTutorGroups(true);
-  const { memberships } = useTutorGroupMemberships(true);
+  const { tutor, loading: tutorLoading } = useTutor();
+  const { students: tutorStudents, loading: tutorStudentsLoading } = useTutorStudents();
+  const miniGroupsEnabled = Boolean(tutor?.mini_groups_enabled);
+  const {
+    groups,
+    loading: groupsLoading,
+    error: groupsError,
+    refetch: refetchGroups,
+    isFetching: groupsIsFetching,
+    isRecovering: groupsIsRecovering,
+    failureCount: groupsFailureCount,
+  } = useTutorGroups(miniGroupsEnabled);
   const inviteWebLink = tutor?.invite_code ? getTutorInviteWebLink(tutor.invite_code) : '';
   const appOrigin = typeof window !== 'undefined' ? window.location.origin : 'https://sokratai.ru';
   const studentLoginLink = `${appOrigin}/login`;
@@ -315,8 +367,11 @@ function TutorHomeworkCreateContent() {
   const [selectedStudentIds, setSelectedStudentIds] = useState<Set<string>>(
     new Set(),
   );
-  const [assignMode, setAssignMode] = useState<'student' | 'group'>('student');
-  const [selectedGroupId, setSelectedGroupId] = useState<string>('');
+  const [assignTab, setAssignTab] = useState<'groups' | 'students'>('students');
+  const [selectedGroupIds, setSelectedGroupIds] = useState<Set<string>>(new Set());
+  const [manuallyRemovedStudentIds, setManuallyRemovedStudentIds] = useState<Set<string>>(new Set());
+  const [manuallyAddedStudentIds, setManuallyAddedStudentIds] = useState<Set<string>>(new Set());
+  const [groupSelectionDirty, setGroupSelectionDirty] = useState(false);
   const [notifyEnabled, setNotifyEnabled] = useState(true);
   const [notifyTemplate, setNotifyTemplate] = useState('');
   const [saveAsTemplate, setSaveAsTemplate] = useState(false);
@@ -326,6 +381,57 @@ function TutorHomeworkCreateContent() {
   const createdAssignmentIdRef = useRef<string | null>(null);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [successResult, setSuccessResult] = useState<SubmitSuccessResult | null>(null);
+  const assignTabInitializedRef = useRef(false);
+  const editGroupPrefilledRef = useRef(false);
+
+  // ── Edit mode: fetch existing assignment ──
+  const editQuery = useQuery({
+    queryKey: ['tutor', 'homework', 'detail', editId],
+    queryFn: () => getTutorHomeworkAssignment(editId!),
+    enabled: isEditMode,
+    staleTime: 30_000,
+  });
+  const existingAssignment = editQuery.data;
+
+  const groupMemberStudentIdsByGroupId = useMemo(
+    () => buildGroupMemberStudentIdsMap(groups, tutorStudents),
+    [groups, tutorStudents],
+  );
+
+  const sourceGroupId = useMemo(() => {
+    if (isEditMode && !groupSelectionDirty) {
+      return existingAssignment?.assignment.source_group_id ?? null;
+    }
+    if (
+      selectedGroupIds.size !== 1 ||
+      manuallyRemovedStudentIds.size > 0 ||
+      manuallyAddedStudentIds.size > 0
+    ) {
+      return null;
+    }
+    return Array.from(selectedGroupIds)[0] ?? null;
+  }, [
+    isEditMode,
+    groupSelectionDirty,
+    existingAssignment,
+    selectedGroupIds,
+    manuallyRemovedStudentIds,
+    manuallyAddedStudentIds,
+  ]);
+
+  const selectedGroupIdsList = useMemo(
+    () => Array.from(selectedGroupIds),
+    [selectedGroupIds],
+  );
+
+  const handleAssignTabChange = useCallback((nextTab: 'groups' | 'students') => {
+    assignTabInitializedRef.current = true;
+    setAssignTab(nextTab);
+  }, []);
+
+  const handleAssignSelectionInteraction = useCallback(() => {
+    setGroupSelectionDirty(true);
+  }, []);
 
   useEffect(() => {
     tasksRef.current = tasks;
@@ -340,40 +446,27 @@ function TutorHomeworkCreateContent() {
     [],
   );
 
-  // ── Edit mode: fetch existing assignment ──
-  const editQuery = useQuery({
-    queryKey: ['tutor', 'homework', 'detail', editId],
-    queryFn: () => getTutorHomeworkAssignment(editId!),
-    enabled: isEditMode,
-    staleTime: 30_000,
-  });
-  const existingAssignment = editQuery.data;
+  useEffect(() => {
+    if (tutorLoading) return;
+
+    if (!miniGroupsEnabled) {
+      if (assignTab !== 'students') {
+        setAssignTab('students');
+      }
+      return;
+    }
+
+    if (assignTabInitializedRef.current || groupsLoading) return;
+    setAssignTab(groups.length > 0 ? 'groups' : 'students');
+    assignTabInitializedRef.current = true;
+  }, [tutorLoading, miniGroupsEnabled, groupsLoading, groups.length, assignTab]);
+
   const editExistingStudentIds = useMemo(
     () => new Set(existingAssignment?.assigned_students.map((s) => s.student_id) ?? []),
     [existingAssignment],
   );
   const [editInitialSnapshot, setEditInitialSnapshot] = useState<EditSnapshot | null>(null);
   const isEditSnapshotReady = !isEditMode || editInitialSnapshot !== null;
-
-  useEffect(() => {
-    if (assignMode !== 'group' || !selectedGroupId) return;
-
-    const memberTutorStudentIds = new Set(
-      memberships
-        .filter((m) => m.tutor_group_id === selectedGroupId && m.is_active)
-        .map((m) => m.tutor_student_id),
-    );
-
-    const mappedStudentIds = tutorStudents
-      .filter((s) => memberTutorStudentIds.has(s.id))
-      .map((s) => s.student_id);
-
-    setSelectedStudentIds(
-      isEditMode
-        ? new Set([...editExistingStudentIds, ...mappedStudentIds])
-        : new Set(mappedStudentIds),
-    );
-  }, [assignMode, selectedGroupId, memberships, tutorStudents, isEditMode, editExistingStudentIds]);
 
   // Track whether we already prefilled to avoid re-running on refetch
   const editPrefilledRef = useRef(false);
@@ -390,8 +483,14 @@ function TutorHomeworkCreateContent() {
   // Result: button stuck on "Подготавливаем..." until full page refresh.
   useEffect(() => {
     editPrefilledRef.current = false;
+    editGroupPrefilledRef.current = false;
+    assignTabInitializedRef.current = false;
+    setGroupSelectionDirty(false);
     setEditInitialSnapshot(null);
     deferredImageDeletesRef.current = [];
+    setSelectedGroupIds(new Set());
+    setManuallyRemovedStudentIds(new Set());
+    setManuallyAddedStudentIds(new Set());
   }, [editId]);
 
   useEffect(() => {
@@ -457,8 +556,38 @@ function TutorHomeworkCreateContent() {
 
     const assignedIds = existingAssignment.assigned_students.map((s) => s.student_id);
     setSelectedStudentIds(new Set(assignedIds));
+    setSelectedGroupIds(new Set());
+    setManuallyRemovedStudentIds(new Set());
+    setManuallyAddedStudentIds(new Set());
     setEditInitialSnapshot(buildEditSnapshot(existingAssignment));
   }, [isEditMode, existingAssignment]);
+
+  useEffect(() => {
+    if (!isEditMode || !existingAssignment || editGroupPrefilledRef.current) return;
+    const existingSourceGroupId = existingAssignment.assignment.source_group_id ?? null;
+    if (!existingSourceGroupId) return;
+    if (!miniGroupsEnabled || groupsLoading || tutorStudentsLoading) return;
+
+    const assignedIds = new Set(
+      existingAssignment.assigned_students.map((student) => student.student_id),
+    );
+    const groupStudentIds =
+      groupMemberStudentIdsByGroupId.get(existingSourceGroupId) ?? new Set<string>();
+
+    assignTabInitializedRef.current = true;
+    editGroupPrefilledRef.current = true;
+    setAssignTab('groups');
+    setSelectedGroupIds(new Set([existingSourceGroupId]));
+    setManuallyRemovedStudentIds(differenceSet(groupStudentIds, assignedIds));
+    setManuallyAddedStudentIds(differenceSet(assignedIds, groupStudentIds));
+  }, [
+    isEditMode,
+    existingAssignment,
+    miniGroupsEnabled,
+    groupsLoading,
+    tutorStudentsLoading,
+    groupMemberStudentIdsByGroupId,
+  ]);
 
   // Lock task add/remove as soon as any student has interacted with the
   // assignment (guided thread has at least one user message), not only when
@@ -480,8 +609,18 @@ function TutorHomeworkCreateContent() {
       materials,
       selectedStudentIds,
       editExistingStudentIds,
+      sourceGroupId,
     });
-  }, [isEditMode, meta, tasks, materials, selectedStudentIds, editExistingStudentIds, editInitialSnapshot]);
+  }, [
+    isEditMode,
+    meta,
+    tasks,
+    materials,
+    selectedStudentIds,
+    editExistingStudentIds,
+    editInitialSnapshot,
+    sourceGroupId,
+  ]);
 
   // ── Auto-load template from ?template_id query param ──
   const templateId = searchParams.get('template_id');
@@ -564,6 +703,7 @@ function TutorHomeworkCreateContent() {
         editDiffState.metaDirty ||
         editDiffState.tasksDirty ||
         editDiffState.materialsDirty ||
+        editDiffState.sourceGroupDirty ||
         editDiffState.newStudentsDirty ||
         editDiffState.unsupportedStudentRemoval
       );
@@ -588,11 +728,27 @@ function TutorHomeworkCreateContent() {
 
     const assignDirty =
       selectedStudentIds.size > 0 ||
+      selectedGroupIds.size > 0 ||
+      manuallyRemovedStudentIds.size > 0 ||
+      manuallyAddedStudentIds.size > 0 ||
       notifyEnabled !== true ||
       notifyTemplate.trim().length > 0;
 
     return metaDirty || tasksDirty || assignDirty;
-  }, [meta, tasks, selectedStudentIds, notifyEnabled, notifyTemplate, submitPhase, isEditMode, materials, editDiffState, isEditSnapshotReady]);
+  }, [
+    meta,
+    tasks,
+    selectedStudentIds,
+    selectedGroupIds,
+    manuallyRemovedStudentIds,
+    manuallyAddedStudentIds,
+    notifyEnabled,
+    notifyTemplate,
+    submitPhase,
+    isEditMode,
+    editDiffState,
+    isEditSnapshotReady,
+  ]);
 
   useEffect(() => {
     if (!hasUnsavedChanges) return;
@@ -712,12 +868,16 @@ function TutorHomeworkCreateContent() {
             ? parseISO(meta.deadline).toISOString()
             : null,
           tasks: apiTasks,
-          group_id: assignMode === 'group' && selectedGroupId ? selectedGroupId : null,
+          source_group_id: sourceGroupId,
           disable_ai_bootstrap: meta.disable_ai_bootstrap ?? true,
           exam_type: meta.exam_type ?? 'ege',
         });
         assignmentId = result.assignment_id;
         createdAssignmentIdRef.current = assignmentId;
+      } else {
+        await updateTutorHomeworkAssignment(assignmentId, {
+          source_group_id: sourceGroupId,
+        });
       }
 
       // Phase 1.5: add materials
@@ -758,7 +918,7 @@ function TutorHomeworkCreateContent() {
       const assignResult = await assignTutorHomeworkStudents(
         assignmentId,
         [...selectedStudentIds],
-        assignMode === 'group' && selectedGroupId ? selectedGroupId : null,
+        null,
       );
 
       // Phase 3: notify (optional)
@@ -837,9 +997,18 @@ function TutorHomeworkCreateContent() {
       });
 
       const groupName =
-        assignMode === 'group' && selectedGroupId
-          ? groups.find((g) => g.id === selectedGroupId)?.name
+        selectedGroupIdsList.length === 1 && sourceGroupId
+          ? groups.find((g) => g.id === sourceGroupId)?.name
           : undefined;
+
+      if (selectedGroupIdsList.length > 0) {
+        trackGuidedHomeworkEvent('homework_assign_group', {
+          group_ids: selectedGroupIdsList,
+          group_id: sourceGroupId,
+          student_count: selectedStudentIds.size,
+          is_multi_group: selectedGroupIdsList.length > 1,
+        });
+      }
 
       setSuccessResult({
         assignmentId,
@@ -867,14 +1036,13 @@ function TutorHomeworkCreateContent() {
     meta,
     selectedStudentIds,
     tutorStudents,
-    assignMode,
-    selectedGroupId,
+    sourceGroupId,
+    selectedGroupIdsList,
     groups,
     notifyEnabled,
     notifyTemplate,
     materials,
     saveAsTemplate,
-    navigate,
     queryClient,
     inviteWebLink,
     studentLoginLink,
@@ -900,6 +1068,7 @@ function TutorHomeworkCreateContent() {
       !editDiffState.metaDirty &&
       !editDiffState.tasksDirty &&
       !editDiffState.materialsDirty &&
+      !editDiffState.sourceGroupDirty &&
       !editDiffState.newStudentsDirty
     ) {
       toast.info('Нет изменений для сохранения.');
@@ -917,7 +1086,11 @@ function TutorHomeworkCreateContent() {
       } | null = null;
       let notifyRequestFailed = false;
 
-      if (editDiffState.metaDirty || editDiffState.tasksDirty) {
+      if (
+        editDiffState.metaDirty ||
+        editDiffState.tasksDirty ||
+        editDiffState.sourceGroupDirty
+      ) {
         setSubmitPhase('saving');
         const patch: {
           title?: string;
@@ -925,6 +1098,7 @@ function TutorHomeworkCreateContent() {
           deadline?: string | null;
           disable_ai_bootstrap?: boolean;
           exam_type?: 'ege' | 'oge';
+          source_group_id?: string | null;
           tasks?: UpdateAssignmentTask[];
         } = {};
 
@@ -950,6 +1124,10 @@ function TutorHomeworkCreateContent() {
             max_score: t.max_score,
             check_format: t.check_format,
           }));
+        }
+
+        if (editDiffState.sourceGroupDirty) {
+          patch.source_group_id = sourceGroupId;
         }
 
         await updateTutorHomeworkAssignment(editId, patch);
@@ -1028,6 +1206,14 @@ function TutorHomeworkCreateContent() {
       setSubmitPhase('done');
       void queryClient.invalidateQueries({ queryKey: ['tutor', 'homework', 'assignments'] });
       void queryClient.invalidateQueries({ queryKey: ['tutor', 'homework', 'detail', editId] });
+      if (selectedGroupIdsList.length > 0) {
+        trackGuidedHomeworkEvent('homework_assign_group', {
+          group_ids: selectedGroupIdsList,
+          group_id: sourceGroupId,
+          student_count: selectedStudentIds.size,
+          is_multi_group: selectedGroupIdsList.length > 1,
+        });
+      }
       toast.success('Изменения сохранены');
       if (notifyRequestFailed) {
         toast.warning('Новых учеников добавили, но автоматически отправить ДЗ не удалось.');
@@ -1047,7 +1233,22 @@ function TutorHomeworkCreateContent() {
         toast.error(`Ошибка: ${message}`);
       }
     }
-  }, [editId, validateAll, existingAssignment, editDiffState, hasSubmissions, isEditSnapshotReady, meta, materials, navigate, queryClient, tasks]);
+  }, [
+    editId,
+    validateAll,
+    existingAssignment,
+    editDiffState,
+    hasSubmissions,
+    isEditSnapshotReady,
+    meta,
+    materials,
+    navigate,
+    queryClient,
+    sourceGroupId,
+    selectedGroupIdsList,
+    selectedStudentIds,
+    tasks,
+  ]);
 
   // ── "Создать ещё" — reset form, preserve group selection ──
 
@@ -1057,19 +1258,14 @@ function TutorHomeworkCreateContent() {
       revokeObjectUrl(task.task_image_preview_url);
     }
 
-    // If group mode, recompute student IDs directly (effect won't re-fire — deps unchanged)
-    if (assignMode === 'group' && selectedGroupId) {
-      const memberTutorStudentIds = new Set(
-        memberships
-          .filter((m) => m.tutor_group_id === selectedGroupId && m.is_active)
-          .map((m) => m.tutor_student_id),
-      );
-      const mappedStudentIds = tutorStudents
-        .filter((s) => memberTutorStudentIds.has(s.id))
-        .map((s) => s.student_id);
-      setSelectedStudentIds(new Set(mappedStudentIds));
-    } else {
+    if (!miniGroupsEnabled || selectedGroupIds.size === 0) {
       setSelectedStudentIds(new Set());
+      setSelectedGroupIds(new Set());
+      setManuallyRemovedStudentIds(new Set());
+      setManuallyAddedStudentIds(new Set());
+      assignTabInitializedRef.current = false;
+    } else {
+      assignTabInitializedRef.current = true;
     }
 
     setMeta({ title: '', subject: 'physics', deadline: '', disable_ai_bootstrap: true, exam_type: 'ege' });
@@ -1080,11 +1276,11 @@ function TutorHomeworkCreateContent() {
     setSaveAsTemplate(false);
     setSubmitPhase('idle');
     createdAssignmentIdRef.current = null;
+    setGroupSelectionDirty(false);
     setErrors({});
     setSuccessResult(null);
     setShowAdvanced(false);
-    // assignMode and selectedGroupId intentionally preserved
-  }, [assignMode, selectedGroupId, memberships, tutorStudents]);
+  }, [miniGroupsEnabled, selectedGroupIds]);
 
   const isSubmitting = submitPhase !== 'idle' && submitPhase !== 'done';
   const hasLegacySelectedSubject =
@@ -1278,11 +1474,23 @@ function TutorHomeworkCreateContent() {
             notifyTemplate={notifyTemplate}
             onTemplateChange={setNotifyTemplate}
             errors={errors}
-            assignMode={assignMode}
-            onAssignModeChange={setAssignMode}
-            selectedGroupId={selectedGroupId}
-            onGroupIdChange={setSelectedGroupId}
-            groups={groups.map((g) => ({ id: g.id, name: g.name }))}
+            miniGroupsEnabled={miniGroupsEnabled}
+            assignTab={assignTab}
+            onAssignTabChange={handleAssignTabChange}
+            onSelectionInteraction={handleAssignSelectionInteraction}
+            groups={groups}
+            groupsLoading={groupsLoading}
+            groupsError={groupsError}
+            onGroupsRetry={refetchGroups}
+            groupsIsFetching={groupsIsFetching}
+            groupsIsRecovering={groupsIsRecovering}
+            groupsFailureCount={groupsFailureCount}
+            selectedGroupIds={selectedGroupIds}
+            onSelectedGroupIdsChange={setSelectedGroupIds}
+            manuallyRemovedIds={manuallyRemovedStudentIds}
+            onManuallyRemovedIdsChange={setManuallyRemovedStudentIds}
+            manuallyAddedIds={manuallyAddedStudentIds}
+            onManuallyAddedIdsChange={setManuallyAddedStudentIds}
             inviteWebLink={inviteWebLink}
             studentLoginLink={studentLoginLink}
             studentSignupLink={studentSignupLink}

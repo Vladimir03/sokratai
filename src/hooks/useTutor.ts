@@ -2,7 +2,6 @@ import { useEffect, useMemo, useRef } from 'react';
 import { useInfiniteQuery, useQuery, type InfiniteData } from '@tanstack/react-query';
 import {
   getCurrentTutor,
-  getTutorGroups,
   getTutorGroupMemberships,
   getTutorStudents,
   getTutorStudent,
@@ -32,7 +31,6 @@ import {
 } from '@/hooks/tutorQueryOptions';
 import type {
   Tutor,
-  TutorGroup,
   TutorGroupMembership,
   TutorStudentWithProfile,
   MockExam,
@@ -47,6 +45,7 @@ import type {
   TutorPublicInfo,
   BookingSlot,
 } from '@/types/tutor';
+import { useTutorGroups as useTutorGroupsWithMembers } from '@/hooks/useTutorGroups';
 
 type TutorQueryKey = readonly unknown[];
 
@@ -179,25 +178,7 @@ export function useTutorStudents() {
 }
 
 export function useTutorGroups(enabled = true) {
-  const queryKey = useMemo(() => ['tutor', 'groups'] as const, []);
-  const result = useTutorQuery<TutorGroup[]>({
-    queryKey,
-    queryFn: () => getTutorGroups(true),
-    defaultValue: [],
-    errorMessage: 'Не удалось загрузить мини-группы',
-    enabled,
-    hasData: (data) => data !== undefined,
-  });
-
-  return {
-    groups: result.data,
-    loading: result.loading,
-    error: result.error,
-    refetch: result.refetch,
-    isFetching: result.isFetching,
-    isRecovering: result.isRecovering,
-    failureCount: result.failureCount,
-  };
+  return useTutorGroupsWithMembers(enabled);
 }
 
 export function useTutorGroupMemberships(enabled = true) {
