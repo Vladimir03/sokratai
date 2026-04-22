@@ -31,6 +31,10 @@ type GuidedTelemetryEvent =
   | 'drill_down_expanded'
   | 'manual_score_override_saved'
   | 'homework_assign_group'
+  // homework-reuse-v1 TASK-2 — bookmark traffic signal for /tutor/assistant
+  // redirect. TASK-11 will extend the event surface with typed payloads for
+  // the full reuse-v1 telemetry set.
+  | 'tutor_assistant_route_hit'
   // homework-reuse-v1 TASK-7 — share link created by tutor.
   // Payload intentionally minimal: no slug (PII-adjacent for leak trackers).
   | 'homework_share_link_created'

@@ -6,7 +6,6 @@ import {
   BookOpen,
   Users,
   Library,
-  Bot,
   CreditCard,
   LogOut,
   LucideIcon,
@@ -62,7 +61,6 @@ const NAV_GROUPS: readonly NavGroupDef[] = [
     label: 'Материалы',
     items: [
       { href: '/tutor/knowledge', icon: Library, label: 'База знаний' },
-      { href: '/tutor/assistant', icon: Bot, label: 'Помощник' },
     ],
   },
   {
@@ -82,7 +80,6 @@ const PREFETCH_MAP: Record<string, () => Promise<unknown>> = {
   '/tutor/homework': () => import('@/pages/tutor/TutorHomework'),
   '/tutor/students': () => import('@/pages/tutor/TutorStudents'),
   '/tutor/knowledge': () => import('@/pages/tutor/knowledge/KnowledgeBasePage'),
-  '/tutor/assistant': () => import('@/pages/tutor/TutorAssistant'),
   '/tutor/payments': () => import('@/pages/tutor/TutorPayments'),
 };
 

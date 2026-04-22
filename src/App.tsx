@@ -59,7 +59,7 @@ function RedirectHomeworkResultsToDetail() {
   const { id } = useParams<{ id: string }>();
   return <Navigate to={`/tutor/homework/${id ?? ''}`} replace />;
 }
-const TutorAssistant = lazy(() => import("./pages/tutor/TutorAssistant"));
+const RedirectTutorAssistant = lazy(() => import("./pages/RedirectTutorAssistant"));
 const KnowledgeBasePage = lazy(() => import("./pages/tutor/knowledge/KnowledgeBasePage"));
 const CatalogTopicPage = lazy(() => import("./pages/tutor/knowledge/CatalogTopicPage"));
 const FolderPage = lazy(() => import("./pages/tutor/knowledge/FolderPage"));
@@ -299,7 +299,7 @@ const App = () => (
               <Route path="homework/:id/results" element={<RedirectHomeworkResultsToDetail />} />
               <Route path="homework/:id" element={<TutorHomeworkDetail />} />
               <Route path="homework" element={<TutorHomework />} />
-              <Route path="assistant" element={<TutorAssistant />} />
+              <Route path="assistant" element={<RedirectTutorAssistant />} />
               <Route path="knowledge/topic/:topicId" element={<CatalogTopicPage />} />
               <Route path="knowledge/folder/:folderId" element={<FolderPage />} />
               <Route path="knowledge" element={<KnowledgeBasePage />} />
@@ -312,13 +312,13 @@ const App = () => (
                 </Suspense>
               } 
             />
-            <Route 
+            <Route
               path="/invite/:inviteCode"
               element={
                 <Suspense fallback={<PageLoader />}>
                   <InvitePage />
                 </Suspense>
-              } 
+              }
             />
             <Route
               path="*"
