@@ -525,6 +525,23 @@ async function inlinePromptImageUrl(imageUrl: string | null | undefined): Promis
     return null;
   }
 
+  // Skip SVGs by URL extension before fetching — Gemini multimodal
+  // only supports raster formats (PNG/JPG/WEBP/GIF). SVGs cause HTTP 400
+  // from the gateway and break auto-check. AI falls back to task text.
+  try {
+    const parsedUrl = new URL(trimmed);
+    if (/\.svg(\?|$)/i.test(parsedUrl.pathname)) {
+      console.warn("guided_ai_inline_image_skipped", {
+        reason: "unsupported_svg",
+        source: "url_extension",
+        preview: trimmed.slice(0, 120),
+      });
+      return null;
+    }
+  } catch {
+    // URL parsing failed — let the fetch path handle it
+  }
+
   try {
     const response = await fetch(trimmed);
     if (!response.ok) {
@@ -545,6 +562,28 @@ async function inlinePromptImageUrl(imageUrl: string | null | undefined): Promis
     }
 
     const mime = response.headers.get("content-type") || "image/jpeg";
+
+    // Detect SVG via content-type or magic bytes (catches SVGs served
+    // without .svg extension or behind signed URLs with rewritten paths).
+    const isSvgMime = /image\/svg\+?xml/i.test(mime);
+    let isSvgMagic = false;
+    if (!isSvgMime) {
+      const sniffLen = Math.min(buffer.byteLength, 256);
+      const head = new TextDecoder("utf-8", { fatal: false }).decode(
+        new Uint8Array(buffer, 0, sniffLen),
+      );
+      isSvgMagic = /^\s*(?:<\?xml[^>]*\?>\s*)?<svg[\s>]/i.test(head);
+    }
+    if (isSvgMime || isSvgMagic) {
+      console.warn("guided_ai_inline_image_skipped", {
+        reason: "unsupported_svg",
+        source: isSvgMime ? "content_type" : "magic_bytes",
+        mime,
+        preview: trimmed.slice(0, 120),
+      });
+      return null;
+    }
+
     return `data:${mime};base64,${arrayBufferToBase64(buffer)}`;
   } catch (error) {
     console.error("guided_ai_inline_image_failed", {

@@ -84,6 +84,21 @@ const ALLOWED_VOICE_MIME_TYPES = new Set([
  */
 async function fetchImageAsBase64DataUrl(url: string): Promise<string | null> {
   try {
+    // Skip SVGs by URL extension before fetching — Gemini multimodal
+    // only supports raster formats. SVGs cause HTTP 400 from the gateway.
+    try {
+      const parsedUrl = new URL(url);
+      if (/\.svg(\?|$)/i.test(parsedUrl.pathname)) {
+        console.warn("fetchImageAsBase64DataUrl: skipped unsupported SVG", {
+          source: "url_extension",
+          url: url.slice(0, 120),
+        });
+        return null;
+      }
+    } catch {
+      // URL parsing failed — let the fetch path handle it
+    }
+
     const resp = await fetch(url);
     if (!resp.ok) {
       console.error("fetchImageAsBase64DataUrl: HTTP error", { url: url.slice(0, 120), status: resp.status });
@@ -99,6 +114,27 @@ async function fetchImageAsBase64DataUrl(url: string): Promise<string | null> {
       return null;
     }
     const mime = resp.headers.get("content-type") || "image/jpeg";
+
+    // Detect SVG via content-type or magic bytes (catches SVGs served
+    // without .svg extension or behind signed URLs with rewritten paths).
+    const isSvgMime = /image\/svg\+?xml/i.test(mime);
+    let isSvgMagic = false;
+    if (!isSvgMime) {
+      const sniffLen = Math.min(buf.byteLength, 256);
+      const head = new TextDecoder("utf-8", { fatal: false }).decode(
+        new Uint8Array(buf, 0, sniffLen),
+      );
+      isSvgMagic = /^\s*(?:<\?xml[^>]*\?>\s*)?<svg[\s>]/i.test(head);
+    }
+    if (isSvgMime || isSvgMagic) {
+      console.warn("fetchImageAsBase64DataUrl: skipped unsupported SVG", {
+        source: isSvgMime ? "content_type" : "magic_bytes",
+        mime,
+        url: url.slice(0, 120),
+      });
+      return null;
+    }
+
     // Convert in 32KB chunks to avoid stack overflow on large images
     const bytes = new Uint8Array(buf);
     const CHUNK = 0x8000;

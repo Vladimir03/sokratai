@@ -15,7 +15,8 @@ import {
   RecentDialogsBlock,
   StudentsActivityBlock,
 } from '@/components/tutor/home';
-import type { DialogItem, TodaySession } from '@/components/tutor/home';
+import type { DialogItem } from '@/components/tutor/home/primitives/ChatRow';
+import type { TodaySession } from '@/components/tutor/home/primitives/SessionBlock';
 import { useTutor, useTutorStudents, useTutorPayments } from '@/hooks/useTutor';
 import { useTutorHomeData } from '@/hooks/useTutorHomeData';
 import {
