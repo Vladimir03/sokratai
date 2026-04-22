@@ -1,158 +1,139 @@
 
 
-## План: Telegram-style счётчик непрочитанных в «Последние диалоги»
+## Проблема (root cause)
 
-### Что не так сейчас
-В `ChatRow.tsx` unread = маленькая 6×6 px точка слева от имени. На скрине 2 её действительно почти не видно. Telegram (скрин 1) показывает синий **бейдж со счётчиком** справа, под временем — это сразу считывается и даёт понимание масштаба «пропустил 3 vs 45 сообщений».
+В чате `/homework/bc68b233-...` задача 1 имеет:
+- `task_text = "[Задача на фото]"` (placeholder)
+- `task_image_url = storage://kb-attachments/.../60c649be-9f7c-4dc6-adcd-401fda538dab.png` (электростатика)
 
-### Целевой UX (по Telegram)
+AI ответил про **термодинамику с P-V диаграммой и 40 кДж** — это чистая галлюцинация. Найдено в логах edge function `chat`:
 
-```text
-┌──────────────────────────────────────────────────────────┐
-│ [V] VladimirKam  ЕГЭ AI                          1 ч  >  │
-│     Задача 1 выполнена! Переходим к задаче 2.    ╭──╮    │
-│                                                  │ 3│    │
-│                                                  ╰──╯    │
-└──────────────────────────────────────────────────────────┘
+```
+2026-04-22T05:47:14Z WARNING [SECURITY] Blocked unauthorized domain: vrsseotrfmsxpbciyqzc.supabase.co
+2026-04-22T05:47:14Z ERROR   [SECURITY] Rejected generated task image signed URL
 ```
 
-- **Время** — всегда сверху справа (как сейчас).
-- **Бейдж со счётчиком** — снизу справа, под временем, появляется только если `unreadCount > 0`.
-- Счётчик `>99` отображается как `99+`.
-- Имя становится **жирным** (`font-weight: 700`) при наличии непрочитанных — единственный второй визуальный сигнал, как в Telegram.
-- Точка слева от имени **удаляется**.
+В `supabase/functions/chat/index.ts` whitelist `ALLOWED_IMAGE_DOMAINS` (строки 53-59) разрешает только 4 бакета:
+`chat-images`, `homework-task-images`, `homework-submissions`, `homework-images`.
 
-### Цвет бейджа
-Используем уже существующий токен `--sokrat-green-700` (фон) + белый текст — соответствует бренду «Сократ AI» (зелёный — это акцент, а не индиго). Это устранит «красную точку, которая выглядит как ошибка» (текущий `--sokrat-state-warning-fg`). Хук на токены design-system, без новых hex.
+**`kb-attachments` отсутствует.** Когда KB-задача попадает в ДЗ через «В ДЗ», `task_image_url` остаётся `storage://kb-attachments/...`. `resolveTaskImageUrlsForAI` создаёт signed URL → `isValidImageUrl` отклоняет домен → `fetchImageAsBase64DataUrl` возвращает `null` → AI получает только текст «`Условие: [Задача на фото]`» + «ВАЖНО: условие на картинке» **без картинки** → Gemini выдумывает правдоподобную физическую задачу (один из самых частых сценариев → галлюцинирует термодинамику).
 
-### Backend: считаем `unreadCount` точно
+То же самое будет повторяться **для любого нового бакета** или нового write-path KB→ДЗ. Это архитектурная дыра, не разовый баг.
 
-Сейчас `handleGetRecentDialogs` (`supabase/functions/homework-api/index.ts:5761`) возвращает `unread: boolean`. Нужен `unreadCount: number` — количество **student-сообщений** с `created_at > tutor_last_viewed_at` (или всех student-сообщений, если `tutor_last_viewed_at IS NULL`).
+---
 
-**Изменения в `handleGetRecentDialogs`:**
+## Архитектурное решение (3 слоя защиты)
 
-1. Расширить выборку `homework_tutor_thread_messages`:
-   - Уже грузим до `pickedThreadIds.length * 12` сообщений за один batch — этого мало для подсчёта (если ученик прислал 50 сообщений после визита — недосчитаем). Делаем отдельный SELECT count по группам:
+### Слой 1 — Fix immediate: whitelist `kb-attachments` в `/chat`
+
+`supabase/functions/chat/index.ts`, `ALLOWED_IMAGE_DOMAINS`:
+
+```ts
+const ALLOWED_IMAGE_DOMAINS = [
+  `${SUPABASE_URL}/storage/v1/object/sign/chat-images/`,
+  `${SUPABASE_URL}/storage/v1/object/sign/homework-task-images/`,
+  `${SUPABASE_URL}/storage/v1/object/sign/homework-submissions/`,
+  `${SUPABASE_URL}/storage/v1/object/sign/homework-images/`,
+  `${SUPABASE_URL}/storage/v1/object/sign/homework-materials/`,  // NEW
+  `${SUPABASE_URL}/storage/v1/object/sign/kb-attachments/`,      // NEW — KB→ДЗ flow
+];
+```
+
+Это разблокирует AI на электростатику немедленно.
+
+### Слой 2 — Defense in depth: единый whitelist + предохранитель
+
+Проблема: whitelist существует **только в `/chat`**, в `homework-api` (`vision_checker`, `guided_ai`) — другая логика. Это рассинхронизировано.
+
+1. **Один источник истины** — выносим whitelist в `supabase/functions/_shared/image-domains.ts`:
    ```ts
-   // Per-thread unread count: count student messages where created_at > viewed_at.
-   // Один query через .or() с массивом условий per thread тяжело; вместо этого —
-   // n легких COUNT-запросов через Promise.all (n ≤ 5, RECENT_DIALOGS_DISPLAY_LIMIT).
-   const unreadCounts = await Promise.all(
-     pickedThreads.map(async (t) => {
-       const viewedAtIso = t.tutor_last_viewed_at ?? '1970-01-01T00:00:00Z';
-       const { count } = await db
-         .from('homework_tutor_thread_messages')
-         .select('id', { count: 'exact', head: true })
-         .eq('thread_id', t.id)
-         .eq('role', 'user')
-         .neq('visible_to_student', false)
-         .gt('created_at', viewedAtIso);
-       return { threadId: t.id, count: count ?? 0 };
-     }),
-   );
+   export const HOMEWORK_AI_BUCKETS = [
+     "chat-images", "homework-task-images", "homework-submissions",
+     "homework-images", "homework-materials", "kb-attachments",
+   ] as const;
+   export function isAllowedSignedUrl(url: string): boolean { ... }
    ```
-   `n ≤ 5` (`RECENT_DIALOGS_DISPLAY_LIMIT`) — нагрузка приемлема, индекс `(thread_id, created_at)` уже эффективен.
+   Импортирует и `chat/index.ts`, и любая будущая функция, работающая с AI-картинками.
 
-2. В сборке `items`:
+2. **Предохранитель: блокировать ответ AI, если картинка УСЛОВИЯ ожидалась, но не дошла.** Сейчас сервер молча отдаёт «голый» промпт — AI галлюцинирует. Делаем явно:
+
+   В `chat/index.ts` после `resolveTaskImageUrlsForAI` добавляем:
    ```ts
-   const unreadCount = unreadMap.get(t.id) ?? 0;
-   const unread = unreadCount > 0; // оставляем boolean для backward-compat
-   return { ..., unread, unreadCount, ... };
+   const expectedTaskImages = (taskImageUrls ?? []).length;
+   const resolvedTaskImages = taskPromptImageDataUrls.length;
+   const taskTextIsPlaceholder = !taskContext ||
+     /\[задача на фото\]|\[task on (the )?image\]/i.test(taskContext);
+
+   if (expectedTaskImages > 0 && resolvedTaskImages === 0 && taskTextIsPlaceholder) {
+     // Картинка задачи требовалась, но не доехала. Без неё условия нет вообще.
+     // Не запускаем AI вслепую — возвращаем понятное сообщение.
+     return safeStreamErrorResponse(
+       "Не удалось загрузить картинку с условием задачи. " +
+       "Это техническая проблема — попробуйте ещё раз через минуту, или " +
+       "перешлите условие текстом. Мы уже залогировали инцидент.",
+       { telemetry: "guided_chat_task_image_missing", assignmentId, taskId }
+     );
+   }
    ```
+   Тот же гейт в `evaluateStudentAnswer` и `generateHint` (`homework-api/guided_ai.ts`) — если картинка ожидалась и текст-плейсхолдер, не зовём LLM, возвращаем пользовательское сообщение «не вижу условия, перепришлите».
 
-3. `RecentDialogItem` (тип) в `src/lib/tutorHomeworkApi.ts` получает `unreadCount: number`.
+3. **Telemetry на проблему**: события `guided_chat_task_image_missing`, `guided_check_task_image_missing`, `guided_hint_task_image_missing` → видны в логах для мониторинга.
 
-### Frontend: рендер бейджа
+### Слой 3 — Anti-regression: новый bucket в KB не валит AI
 
-**`src/hooks/useTutorRecentDialogs.ts`:**
-- Добавить `unreadCount: number` в `DialogItem`.
-- В `mapItem` пробрасывать `unreadCount: raw.unreadCount ?? 0` (graceful fallback пока не задеплоилась edge-функция).
+Корневая причина — write-path KB→ДЗ кладёт `storage://kb-attachments/...` в `homework_tutor_tasks.task_image_url`, но потребитель `/chat` не знает про этот bucket. Делаем два шага:
 
-**`src/components/tutor/home/primitives/ChatRow.tsx`:**
-- Удалить строку с 6×6 точкой (line ~76–88).
-- Имя: оставить `fontWeight: chat.unread ? 700 : 600` — теперь это вторичный сигнал.
-- В правом столбце (где сейчас только `<ChevronRight>`) — стек: время сверху (мигрирует из `chat-row__top`), счётчик-бейдж снизу.
+1. **Документ-инвариант** в `.claude/rules/40-homework-system.md` (одна короткая секция): «Любой bucket, который может попасть в `homework_tutor_tasks.task_image_url` или `solution_image_urls`, **обязан** быть в `_shared/image-domains.ts::HOMEWORK_AI_BUCKETS`. Чек-лист добавлен в pre-commit раздел rule 40.»
 
-Структура правого столбца:
-```tsx
-<span className="chat-row__meta">
-  <span className="chat-row__time">{chat.at}</span>
-  {chat.unreadCount > 0 && (
-    <span
-      className="chat-row__badge"
-      aria-label={`${chat.unreadCount} непрочитанных сообщений`}
-    >
-      {chat.unreadCount > 99 ? '99+' : chat.unreadCount}
-    </span>
-  )}
-</span>
-<ChevronRight ... />
-```
+2. **Smoke-тест** в `scripts/smoke-check.mjs`: SELECT distinct prefix из `task_image_url`/`solution_image_urls`/`rubric_image_urls`/`task_image_url` через `storage://([^/]+)/`. Любой bucket, не входящий в `HOMEWORK_AI_BUCKETS`, → smoke-check fail с явным сообщением «bucket X в БД, но не в whitelist — добавьте в `_shared/image-domains.ts`». CI ловит до прода.
 
-ARIA-метка строки расширяется: вместо «есть непрочитанные» → `${unreadCount} непрочитанных`.
+---
 
-### CSS (`src/styles/tutor-dashboard.css`)
+## UX для ученика (что увидит, если что-то ломается)
 
-Дополнить (additive):
-```css
-.chat-row__meta {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 4px;
-  flex: none;
-}
+Сейчас: AI отвечает уверенно про несуществующую задачу. Ученик доверяет, тратит время, попадает в тупик.
 
-.chat-row__badge {
-  min-width: 20px;
-  height: 20px;
-  padding: 0 7px;
-  border-radius: 10px;
-  background: var(--sokrat-green-700);
-  color: #fff;
-  font-size: 12px;
-  font-weight: 700;
-  line-height: 20px;
-  text-align: center;
-  display: inline-block;
-}
-```
+После фикса:
+- **Норма (99% случаев)**: картинка резолвится → AI видит электростатику → даёт корректный заход.
+- **Деградация**: картинка реально не доехала (сеть/storage outage) → ученик видит явное «не удалось загрузить условие, попробуйте ещё раз через минуту» вместо галлюцинации. Кнопка «Повторить» рядом — ретрай шага без потери истории. Никакой ai_reply при missing image не сохраняется в БД.
 
-Время (`.chat-row__time`) уже стилизовано — оставляем как есть, просто переносим из `chat-row__top` в `chat-row__meta`. Из `__top` уходит `chat.at`.
+---
 
-### Что НЕ делаем
+## Ответ на вопрос «лучше OCR на стороне репетитора или multimodal у ученика?»
 
-- Не трогаем `tutor_last_viewed_at` schema/index — уже есть.
-- Не трогаем POST `/threads/:id/viewed-by-tutor` — он уже корректно сбрасывает счётчик при открытии чата.
-- Не вводим realtime-подписку на счётчик — refetch на focus + 30s staleTime достаточно для пилота (согласовано с текущим UX).
-- Не меняем «Все чаты», другие блоки `/tutor/home` или другие экраны.
+**Гибрид (multimodal + опциональный server-side OCR fallback)**, не выбор-один-из-двух:
 
-### Файлы
+- **Multimodal Gemini остаётся primary** — он держит схемы, графики, векторы, рукописный текст одновременно; OCR это потеряет.
+- **Server-side OCR кэш** (`homework_tutor_tasks.ocr_text` колонка уже есть) запускается background-jobом при создании задачи KB→ДЗ. Если multimodal путь падает (как сейчас с whitelist) — fallback в текстовый промпт с OCR-условием. Это **второй слой anti-hallucination**, не замена.
+- **Tutor-side OCR ввод** — отдельно: репетитору при создании KB-задачи показываем превью авто-OCR и даём поле «Уточнить ключевые данные» (например, «потенциалы 1 ГВ и 1.5 ГВ, заряд −1 нКл»). Эти данные склеиваются в `task_text` и страхуют от любой проблемы с картинкой.
+
+Это **уже опционально** — задачи без поправок репетитора всё равно работают через multimodal. Но даёт нулевой риск галлюцинаций на критических ДЗ.
+
+Этот гибрид я предлагаю **отдельной итерацией** после фикса whitelist + предохранителя. Сейчас в скоупе — слои 1-3 выше.
+
+---
+
+## Файлы
 
 **Изменяются:**
-- `supabase/functions/homework-api/index.ts` — `handleGetRecentDialogs` + `RecentDialogItem` type (если есть).
-- `src/lib/tutorHomeworkApi.ts` — добавить `unreadCount` в `RecentDialogItem`.
-- `src/hooks/useTutorRecentDialogs.ts` — `unreadCount` в `DialogItem` + `mapItem`.
-- `src/components/tutor/home/primitives/ChatRow.tsx` — удалить точку, добавить бейдж, перенести время.
-- `src/styles/tutor-dashboard.css` — `.chat-row__meta`, `.chat-row__badge`.
+- `supabase/functions/chat/index.ts` — whitelist + image-missing guard.
+- `supabase/functions/homework-api/guided_ai.ts` — image-missing guard в `evaluateStudentAnswer` и `generateHint` (fail closed, не зовём LLM).
+- `supabase/functions/_shared/image-domains.ts` — **новый**, single source of truth.
+- `scripts/smoke-check.mjs` — новая проверка bucket-список vs whitelist.
+- `.claude/rules/40-homework-system.md` — секция «AI image bucket whitelist invariant» + памятка.
 
-**Не трогаем:**
-- DB-схема, миграции, RLS.
-- POST `/viewed-by-tutor` логика.
-- `RecentDialogsBlock.tsx` (контейнер).
-- Другие потребители `DialogItem`.
+**Не трогаем:** DB-схема, RLS, KB write-path (`HWDrawer.tsx`), фронтенд `GuidedHomeworkWorkspace.tsx`, существующие edge functions кроме `chat` и `homework-api/guided_ai.ts`.
 
-### Деплой
+## Деплой
 
-1. Деплой edge-функции `homework-api` (новое поле `unreadCount` в response).
-2. Frontend rebuild — `npm run build`.
-3. Никаких новых secrets / migrations.
+1. Apply changes → deploy `chat` и `homework-api`.
+2. `npm run smoke-check && npm run build`.
+3. Никаких миграций, секретов, VAPID-ключей.
 
-### Валидация
+## Валидация
 
-1. `npm run lint && npm run build && npm run smoke-check`.
-2. На `/tutor/home`: чаты с непрочитанными показывают зелёный бейдж со счётчиком справа под временем + жирное имя. Чаты без непрочитанных — без бейджа, имя обычной плотности.
-3. Открыть чат → вернуться на `/tutor/home` → бейдж исчез (через `invalidateQueries` который уже есть).
-4. Если у студента >99 непрочитанных → отображается `99+`.
-5. Точка слева от имени отсутствует.
+1. Открыть `/homework/bc68b233-...`, нажать «Шаг решения» → AI описывает **электростатику** (2 точки, потенциалы 1 ГВ и 1.5 ГВ, заряд -1 нКл), **не термодинамику**.
+2. Логов `[SECURITY] Blocked unauthorized domain: ...kb-attachments` больше нет.
+3. Симулировать «картинка не доехала» (временно сломать parseStorageRef) → ученик видит «не удалось загрузить условие», AI **не вызывается**, `homework_tutor_thread_messages` не получает фейковый ai_reply.
+4. `npm run smoke-check` падает, если в БД есть bucket вне whitelist.
 
