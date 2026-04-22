@@ -185,6 +185,14 @@ export async function callLovableJson(
       return extractJsonObject(rawContent);
     } catch (error) {
       const canRetry = shouldRetry(error) && attempt < MAX_RETRIES;
+      if (error instanceof HttpStatusError) {
+        // Surface gateway error body so multimodal failures (e.g. SVG rejection,
+        // model-side validation errors) become diagnosable in telemetry.
+        console.warn(`${telemetryTag}_http_error`, {
+          status: error.status,
+          body_preview: error.responseText.slice(0, 500),
+        });
+      }
       if (canRetry) {
         const errorMessage = error instanceof Error ? error.message : "unknown error";
         console.warn(`${telemetryTag}_retry`, {

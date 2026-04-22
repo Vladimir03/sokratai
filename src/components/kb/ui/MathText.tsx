@@ -62,7 +62,7 @@ function renderMixedLatexToHtml(text: string): string {
     })
     .join('');
 
-  return renderedHtml.replaceAll(LINEBREAK_PLACEHOLDER, '<br />');
+  return renderedHtml.split(LINEBREAK_PLACEHOLDER).join('<br />');
 }
 
 const MathTextInner = memo(function MathTextInner({ text, className, as: Tag = 'div' }: MathTextProps) {
