@@ -3243,7 +3243,7 @@ async function handleCreateTemplateFromAssignment(
 
   // Build tasks_json[]. Additive per-task `source_kb_task_id` (AC-15) — provenance
   // для будущего Sprint 2+ sync-feature. Backward compatible внутри JSONB.
-  const tasksJson = ((taskRows ?? []) as Array<{
+  const tasksJson = ((taskRows ?? []) as unknown as Array<{
     task_text: string | null;
     task_image_url: string | null;
     correct_answer: string | null;
