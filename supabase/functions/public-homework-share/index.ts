@@ -1,4 +1,5 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
+import type { SupabaseClient as SupabaseClientType } from "npm:@supabase/supabase-js@2";
 import { parseAttachmentUrls } from "../_shared/attachment-refs.ts";
 
 const corsHeaders = {
@@ -23,7 +24,7 @@ const SHARE_LINK_SLUG_RE = /^[a-z0-9]{8}$/i;
 // student linkage никогда не селектятся — отсутствуют в whitelist by design.
 const PUBLIC_TASK_BASE_COLUMNS = "id, order_num, task_text, max_score, check_format, task_image_url";
 
-type SupabaseClient = ReturnType<typeof createClient>;
+type SupabaseClient = SupabaseClientType<any, any, any>;
 
 type TaskRow = {
   id: string;
@@ -209,7 +210,7 @@ Deno.serve(async (req) => {
       return jsonResponse({ error: "Failed to load tasks" }, 500);
     }
 
-    const tasks = await Promise.all((taskRows ?? []).map(async (task: TaskRow) => {
+    const tasks = await Promise.all(((taskRows ?? []) as unknown as TaskRow[]).map(async (task) => {
       const taskImageUrls = await createSignedStorageUrls(
         db,
         parseAttachmentUrls(task.task_image_url),
