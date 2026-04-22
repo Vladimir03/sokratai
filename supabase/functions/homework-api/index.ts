@@ -3766,6 +3766,38 @@ async function resolveTaskImageUrlForAI(
   }
 
   const mime = blob.type || "image/jpeg";
+
+  // Skip SVG: Lovable AI Gateway / Gemini multimodal does not support image/svg+xml
+  // and rejects it with HTTP 400 "Unsupported MIME type". Fall back to text-only AI
+  // (deterministic short-answer match still works via correct_answer).
+  const lowerPath = objectPath.toLowerCase();
+  let isSvg = mime === "image/svg+xml" || lowerPath.endsWith(".svg");
+  if (!isSvg && buf.byteLength >= 5) {
+    const head = new TextDecoder("utf-8", { fatal: false })
+      .decode(new Uint8Array(buf, 0, Math.min(buf.byteLength, 256)))
+      .trimStart()
+      .toLowerCase();
+    if (head.startsWith("<?xml") || head.startsWith("<svg")) {
+      isSvg = true;
+    }
+  }
+  if (isSvg) {
+    console.warn("homework_api_inline_image_skipped", {
+      reason: "unsupported_svg",
+      bucket,
+      objectPath,
+      mime,
+      bytes: buf.byteLength,
+    });
+    return null;
+  }
+
+  console.info("homework_api_inline_image_resolved", {
+    bucket,
+    objectPath,
+    mime,
+    bytes: buf.byteLength,
+  });
   return `data:${mime};base64,${arrayBufferToBase64(buf)}`;
 }
 
