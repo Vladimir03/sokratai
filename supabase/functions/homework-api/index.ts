@@ -748,7 +748,7 @@ async function handleListAssignments(
 
     for (const group of groups ?? []) {
       groupMetaById[group.id] = {
-        name: group.short_name?.trim() || group.name ?? null,
+        name: (group.short_name?.trim() || group.name) ?? null,
         color: group.color ?? null,
       };
     }
@@ -3243,7 +3243,18 @@ async function handleCreateTemplateFromAssignment(
 
   // Build tasks_json[]. Additive per-task `source_kb_task_id` (AC-15) — provenance
   // для будущего Sprint 2+ sync-feature. Backward compatible внутри JSONB.
-  const tasksJson = (taskRows ?? []).map((t) => {
+  const tasksJson = ((taskRows ?? []) as Array<{
+    task_text: string | null;
+    task_image_url: string | null;
+    correct_answer: string | null;
+    max_score: number | null;
+    solution_text: string | null;
+    solution_image_urls: string | null;
+    rubric_text: string | null;
+    rubric_image_urls: string | null;
+    check_format: string | null;
+    kb_task_id: string | null;
+  }>).map((t) => {
     const base: Record<string, unknown> = {
       task_text: t.task_text ?? "",
       task_image_url: t.task_image_url ?? null,
