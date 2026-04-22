@@ -532,3 +532,30 @@
 .chat-row__prefix {
   color: var(--sokrat-fg3);
 }
+
+/* Right-aligned meta column (time on top, unread badge below).
+   Telegram-style — the badge appears only when unreadCount > 0. */
+.chat-row__meta {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+  flex: none;
+  margin-left: auto;
+}
+.chat-row__meta .chat-row__time {
+  margin-left: 0;
+}
+.chat-row__badge {
+  min-width: 20px;
+  height: 20px;
+  padding: 0 7px;
+  border-radius: 10px;
+  background: var(--sokrat-green-700);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 20px;
+  text-align: center;
+  display: inline-block;
+}

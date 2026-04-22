@@ -30,6 +30,12 @@ export interface DialogItem {
   stream: 'ЕГЭ' | 'ОГЭ';
   lastAuthor: 'student' | 'tutor' | 'ai';
   unread: boolean;
+  /**
+   * Number of unread student messages — Telegram-style counter badge.
+   * 0 when caught up. Falls back to 0 when older edge-function deploys
+   * don't include the field in the response.
+   */
+  unreadCount: number;
   preview: string;
   at: string;
   hwId: string;
@@ -64,6 +70,7 @@ function mapItem(raw: RecentDialogItem): DialogItem {
     stream: raw.stream,
     lastAuthor: raw.lastAuthor,
     unread: raw.unread,
+    unreadCount: raw.unreadCount ?? 0,
     preview: raw.preview,
     at: formatRelativeShort(raw.at),
     hwId: raw.hwId,
