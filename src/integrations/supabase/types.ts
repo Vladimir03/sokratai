@@ -1180,6 +1180,7 @@ export type Database = {
           last_tutor_message_at: string | null
           status: string
           student_assignment_id: string
+          tutor_last_viewed_at: string | null
           updated_at: string
         }
         Insert: {
@@ -1191,6 +1192,7 @@ export type Database = {
           last_tutor_message_at?: string | null
           status?: string
           student_assignment_id: string
+          tutor_last_viewed_at?: string | null
           updated_at?: string
         }
         Update: {
@@ -1202,6 +1204,7 @@ export type Database = {
           last_tutor_message_at?: string | null
           status?: string
           student_assignment_id?: string
+          tutor_last_viewed_at?: string | null
           updated_at?: string
         }
         Relationships: [
