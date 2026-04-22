@@ -43,10 +43,14 @@ function ChatRowImpl({ chat, onOpen }: ChatRowProps) {
     }
   };
 
+  const unreadCount = chat.unreadCount ?? 0;
+  const hasUnread = unreadCount > 0;
+  const badgeText = unreadCount > 99 ? '99+' : String(unreadCount);
+
   const ariaParts = [
     `Открыть диалог с ${chat.name}`,
     `последнее сообщение от ${authorLabel}`,
-    chat.unread ? 'есть непрочитанные' : null,
+    hasUnread ? `${unreadCount} непрочитанных сообщений` : null,
   ].filter(Boolean);
 
   return (
@@ -64,30 +68,27 @@ function ChatRowImpl({ chat, onOpen }: ChatRowProps) {
       </span>
       <span className="chat-row__body">
         <span className="chat-row__top">
-          {chat.unread ? (
-            <span
-              aria-hidden="true"
-              style={{
-                width: 6,
-                height: 6,
-                borderRadius: '50%',
-                background: 'var(--sokrat-state-warning-fg)',
-                flex: 'none',
-                display: 'inline-block',
-              }}
-            />
-          ) : null}
           <span
             className="chat-row__name"
-            style={{ fontWeight: chat.unread ? 700 : 600 }}
+            style={{ fontWeight: hasUnread ? 700 : 600 }}
           >
             {chat.name}
           </span>
           <span className={streamChipClass}>{chat.stream}</span>
           <span className={authorChipClass}>{authorLabel}</span>
-          <span className="chat-row__time">{chat.at}</span>
         </span>
         <span className="chat-row__preview">{chat.preview}</span>
+      </span>
+      <span className="chat-row__meta">
+        <span className="chat-row__time">{chat.at}</span>
+        {hasUnread ? (
+          <span
+            className="chat-row__badge"
+            aria-label={`${unreadCount} непрочитанных сообщений`}
+          >
+            {badgeText}
+          </span>
+        ) : null}
       </span>
       <ChevronRight
         size={16}

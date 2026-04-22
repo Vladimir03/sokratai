@@ -5733,6 +5733,7 @@ interface RecentDialogItem {
   stream: "ЕГЭ" | "ОГЭ";
   lastAuthor: "student" | "tutor" | "ai";
   unread: boolean;
+  unreadCount: number;
   preview: string;
   at: string; // ISO timestamp — frontend formats it with date-fns
   hwId: string;
@@ -5911,6 +5912,33 @@ async function handleGetRecentDialogs(
     oge: "ОГЭ",
   };
 
+  // 5a. Per-thread unread count: number of student messages (role='user',
+  //     visible_to_student != false) with created_at > tutor_last_viewed_at.
+  //     n ≤ RECENT_DIALOGS_DISPLAY_LIMIT (5) so the parallel COUNT queries
+  //     are cheap; the (thread_id, created_at) index handles them well.
+  const unreadCounts = await Promise.all(
+    pickedThreads.map(async (t) => {
+      const viewedAtIso = t.tutor_last_viewed_at ?? "1970-01-01T00:00:00Z";
+      const { count, error } = await db
+        .from("homework_tutor_thread_messages")
+        .select("id", { count: "exact", head: true })
+        .eq("thread_id", t.id)
+        .eq("role", "user")
+        .neq("visible_to_student", false)
+        .gt("created_at", viewedAtIso);
+      if (error) {
+        console.error("recent_dialogs_unread_count_error", {
+          thread_id: t.id,
+          error: error.message,
+        });
+        return { threadId: t.id, count: 0 };
+      }
+      return { threadId: t.id, count: count ?? 0 };
+    }),
+  );
+  const unreadMap = new Map<string, number>();
+  for (const u of unreadCounts) unreadMap.set(u.threadId, u.count);
+
   const items: RecentDialogItem[] = pickedThreads.map((t) => {
     const sa = t.homework_tutor_student_assignments;
     const assignment = sa.homework_tutor_assignments;
@@ -5933,15 +5961,10 @@ async function handleGetRecentDialogs(
     );
     const at = latest?.created_at ?? t.last_student_message_at ?? new Date().toISOString();
 
-    // Unread = new student activity since the tutor's last visit.
-    // NULL tutor_last_viewed_at (never opened) treated as "unread".
-    const viewedAt = t.tutor_last_viewed_at
-      ? new Date(t.tutor_last_viewed_at).getTime()
-      : 0;
-    const studentAt = t.last_student_message_at
-      ? new Date(t.last_student_message_at).getTime()
-      : 0;
-    const unread = studentAt > viewedAt;
+    // Unread counter — Telegram-style badge on /tutor/home.
+    // `unread` boolean kept for backward-compat with any old client builds.
+    const unreadCount = unreadMap.get(t.id) ?? 0;
+    const unread = unreadCount > 0;
 
     return {
       studentId,
@@ -5949,6 +5972,7 @@ async function handleGetRecentDialogs(
       stream,
       lastAuthor,
       unread,
+      unreadCount,
       preview,
       at,
       hwId: assignment.id,
