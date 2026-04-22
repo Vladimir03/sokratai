@@ -1,3 +1,40 @@
+/**
+ * Homework telemetry event registry.
+ *
+ * Two surface groups share this module:
+ *   1. Guided chat / results v2 — original per-session / per-interaction events.
+ *   2. homework-reuse-v1 (TASK-11) — preview, save-to-KB, template post-factum,
+ *      share-links, group-assign, `/tutor/assistant` redirect. Invariants below.
+ *
+ * ─── homework-reuse-v1 AC-23 event taxonomy ────────────────────────────────
+ * All 11 events are PII-free: ids + counts + booleans only. No task_text,
+ * student_name, email, folder_name, title, or slug-derived identifiers in
+ * client payloads (slug is a bearer token — never clone into a tracker).
+ *
+ * | Event                                     | Fire site                                                       | Fire-once guarantee                   |
+ * |-------------------------------------------|-----------------------------------------------------------------|---------------------------------------|
+ * | homework_preview_opened                   | `src/pages/tutor/TutorHomeworkPreview.tsx` (mount effect)       | `openedTrackedRef` per assignmentId   |
+ * | homework_preview_printed                  | `TutorHomeworkPreview.tsx` (Print click)                        | onClick only, pre-`window.print()`    |
+ * | homework_preview_copied_text              | `TutorHomeworkPreview.tsx` (Copy click)                         | onClick after successful clipboard    |
+ * | homework_saved_to_kb                      | `src/components/tutor/homework-reuse/SaveTasksToKBDialog.tsx`   | bulk-mode success branch              |
+ * | homework_saved_to_kb_per_task             | `SaveTasksToKBDialog.tsx`                                       | single-mode success branch            |
+ * | homework_saved_as_template_post_factum    | `src/components/tutor/homework-reuse/SaveAsTemplateDialog.tsx`  | create-success branch                 |
+ * | homework_share_link_created               | `src/components/tutor/homework-reuse/ShareLinkDialog.tsx`       | create-success branch (no slug!)      |
+ * | homework_share_link_visited               | `supabase/functions/public-homework-share/index.ts` (server)    | only after non-expired response built |
+ * | homework_assign_group                     | `src/pages/tutor/TutorHomeworkCreate.tsx` (both submit branches)| one fire per submit branch            |
+ * | homework_filter_by_group                  | `src/pages/tutor/TutorHomework.tsx` (onChange callback)         | onChange only                         |
+ * | tutor_assistant_route_hit                 | `src/pages/RedirectTutorAssistant.tsx` (mount effect)           | `firedRef` sentinel                   |
+ *
+ * When adding new events to this surface:
+ *   1. Keep payloads PII-free — if you need a name, use an id.
+ *   2. Fire-once in effect-sites requires a useRef sentinel. Re-fetches and
+ *      React-Query invalidations must NOT multiply emissions.
+ *   3. Public endpoints log via `console.info(JSON.stringify(...))` — avoid
+ *      pushing to dataLayer without a user context; backend ingestion is a
+ *      different channel.
+ *   4. Update this table. Grep-verify with `trackGuidedHomeworkEvent\('<name>'`.
+ */
+
 type GuidedTelemetryEvent =
   | 'guided_send'
   | 'guided_send_click'
@@ -30,29 +67,20 @@ type GuidedTelemetryEvent =
   | 'telegram_reminder_sent_from_results'
   | 'drill_down_expanded'
   | 'manual_score_override_saved'
+  // ─── homework-reuse-v1 surface (TASK-11 taxonomy — see module header) ────
+  // Grouped block so any reviewer of AC-23 can verify the full 11-event set
+  // in one place. Typed overloads below enforce payload shape per event.
+  // The 11th event (`homework_share_link_visited`) is server-side in
+  // `supabase/functions/public-homework-share/index.ts` and intentionally
+  // absent from this client-side union.
   | 'homework_assign_group'
   | 'homework_filter_by_group'
-  // homework-reuse-v1 TASK-2 — bookmark traffic signal for /tutor/assistant
-  // redirect. TASK-11 will extend the event surface with typed payloads for
-  // the full reuse-v1 telemetry set.
   | 'tutor_assistant_route_hit'
-  // homework-reuse-v1 TASK-7 — share link created by tutor.
-  // Payload intentionally minimal: no slug (PII-adjacent for leak trackers).
   | 'homework_share_link_created'
-  // homework-reuse-v1 TASK-3 — tutor-only preview at /tutor/homework/:id/preview.
-  // `opened` fires once per (assignmentId, mount) via a useRef sentinel so
-  // refetch does not re-emit.
   | 'homework_preview_opened'
   | 'homework_preview_printed'
   | 'homework_preview_copied_text'
-  // homework-reuse-v1 TASK-6 — template snapshot post-factum (AC-14).
-  // Fired exactly once on successful POST /assignments/:id/save-as-template.
-  // Payload PII-free: ids + toggles only.
   | 'homework_saved_as_template_post_factum'
-  // homework-reuse-v1 TASK-5 — save tasks to «Мою базу» (KB).
-  // Bulk = dialog from Actions menu; per-task = BookmarkPlus on HWTaskCard.
-  // Both fire exactly once on successful POST /assignments/:id/save-tasks-to-kb.
-  // PII-free: ids + counts + booleans only (no task_text, no folder_name).
   | 'homework_saved_to_kb'
   | 'homework_saved_to_kb_per_task';
 

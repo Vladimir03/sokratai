@@ -25,8 +25,8 @@
 | TASK-7 | ✅ Done | — | `ShareLinkDialog` + slug generation + CRUD |
 | TASK-8 | ✅ Done | `ead0a05` | `HWAssignSection` tabs + `source_group_id` write |
 | TASK-9 | ✅ Done | `f55537c` | Filter `?group_id=` + `source_group_*` on list items + group badge |
-| TASK-10 | ⏳ Pending | — | Actions menu wiring on `TutorHomeworkDetail` (glue for preview / share / save-kb / save-template dialogs) |
-| TASK-11 | ⏳ Pending | — | Telemetry audit across all 11 events |
+| TASK-10 | ✅ Done | `dd1a536` | Actions dropdown (`[⋯]`) on `TutorHomeworkDetail` → preview / share / save-kb / save-template, all lazy + Suspense + conditional mount |
+| TASK-11 | ✅ Done | — | All 11 events already wired in TASK-2..10; taxonomy + fire-once invariants consolidated in module header of `homeworkTelemetry.ts`. Audit: PII-free payloads (ids + counts + booleans only), fire-once via `useRef` sentinels (`openedTrackedRef`, `firedRef`) for effect-sites, onClick/onChange for handler-sites. `homework_share_link_visited` server-side in `public-homework-share` edge function (slug-only). Stale «TASK-11 will extend» comment cleaned up. |
 | TASK-12 | ⏳ Pending | — | QA pass (cross-browser + print + public share + groups + KB dedup) |
 
 **Известные open gaps (Sprint 2+ или отдельные spawn-задачи):**
