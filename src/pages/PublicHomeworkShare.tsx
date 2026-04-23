@@ -6,7 +6,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Button } from '@/components/ui/button';
 import { HomeworkPreviewContent } from '@/components/tutor/homework-reuse/HomeworkPreviewContent';
 import { fetchPublicHomeworkShare } from '@/lib/publicShareApi';
-import { supabase } from '@/integrations/supabase/client';
+import { supabase } from '@/lib/supabaseClient';
 
 import '@/styles/homework-preview-print.css';
 
