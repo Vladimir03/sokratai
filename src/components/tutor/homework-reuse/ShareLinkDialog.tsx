@@ -187,7 +187,7 @@ export function ShareLinkDialog({
             Поделиться ссылкой
           </DialogTitle>
           <DialogDescription>
-            Публичная read-only ссылка на ДЗ «{assignmentTitle}». Можно создать
+            Публичная ссылка (только для просмотра) на ДЗ «{assignmentTitle}». Можно создать
             несколько ссылок с разными настройками.
           </DialogDescription>
         </DialogHeader>
@@ -206,7 +206,7 @@ export function ShareLinkDialog({
               <ToggleRow
                 id="share-show-answers"
                 label="С ответами"
-                description="Включит correct_answer в публичную страницу"
+                description="Показывает правильные ответы в публичной ссылке"
                 checked={showAnswers}
                 onCheckedChange={setShowAnswers}
                 disabled={creating}

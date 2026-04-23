@@ -581,15 +581,19 @@ function TutorHomeworkDetailContent() {
   }, [id, navigate]);
 
   // Build the KB save payload once per details change. SaveTasksToKBDialog
-  // expects a minimal shape ({id, order_num, task_text, already_in_base_hint}).
-  // `already_in_base_hint` reflects provenance (kb_source_label === 'my')
-  // so the dialog can flag «уже в базе» inline before the backend dedup.
+  // expects a minimal shape ({id, order_num, task_text, task_image_url,
+  // already_in_base_hint}). `task_image_url` используется dialog'ом для
+  // thumbnail'а через useKBImagesSignedUrls — dual-format ref передаётся
+  // as-is, парсится внутри dialog. `already_in_base_hint` reflects provenance
+  // (kb_source_label === 'my') so the dialog can flag «уже в базе» inline
+  // before the backend dedup.
   const saveKBTasks = useMemo(
     () =>
       (details?.tasks ?? []).map((t) => ({
         id: t.id,
         order_num: t.order_num,
         task_text: t.task_text,
+        task_image_url: t.task_image_url ?? null,
         already_in_base_hint: t.kb_source_label === 'my',
       })),
     [details],

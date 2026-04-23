@@ -30,7 +30,7 @@ export function KnowledgeBaseFrame({
           </div>
           <div className="min-w-0">
             <h1 className="font-display text-[2rem] font-semibold leading-none tracking-[-0.03em] text-slate-900 sm:text-[2.1rem]">
-              База знаний
+              База задач
             </h1>
           </div>
         </div>

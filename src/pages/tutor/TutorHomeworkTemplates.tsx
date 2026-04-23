@@ -1,13 +1,14 @@
-import { useState, useCallback } from 'react';
+import { memo, useEffect, useRef, useState, useCallback } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
-import { ArrowLeft, Trash2, BookOpen } from 'lucide-react';
+import { ArrowLeft, Trash2, BookOpen, Loader2 } from 'lucide-react';
 import { TutorDataStatus } from '@/components/tutor/TutorDataStatus';
 import { useTutorHomeworkTemplates } from '@/hooks/useTutorHomework';
-import { deleteTutorHomeworkTemplate } from '@/lib/tutorHomeworkApi';
+import { deleteTutorHomeworkTemplate, updateTutorHomeworkTemplate } from '@/lib/tutorHomeworkApi';
 import type {
   HomeworkSubject,
   HomeworkTemplateListItem,
@@ -29,7 +30,7 @@ const SUBJECT_FILTERS: { value: ModernHomeworkSubject | 'all'; label: string }[]
 
 // ─── Template Card ────────────────────────────────────────────────────────────
 
-function TemplateCard({
+function TemplateCardImpl({
   template,
   onDelete,
 }: {
@@ -37,7 +38,67 @@ function TemplateCard({
   onDelete: (id: string) => void;
 }) {
   const navigate = useNavigate();
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
   const subjectLabel = getSubjectLabel(template.subject);
+
+  // Inline rename — click по заголовку → <Input>, Enter сохраняет, Escape
+  // отменяет, blur тоже сохраняет. API (`updateTutorHomeworkTemplate`) имеет
+  // жёсткий whitelist `title/tags/topic` на backend'е, поэтому отправляем
+  // ТОЛЬКО { title }. iOS Safari 16px rule — Input класс `text-base`.
+  const [isEditing, setIsEditing] = useState(false);
+  const [draftTitle, setDraftTitle] = useState(template.title);
+  const [saving, setSaving] = useState(false);
+  const inputRef = useRef<HTMLInputElement | null>(null);
+  // In-flight guard — защита от двойного PATCH при Enter+blur. При Enter
+  // handler ставит saving=true → React перерисовывает Input с disabled=true →
+  // браузер блюрит disabled-input → onBlur fires `commitRename` ещё раз. Без
+  // ref-guard'а второй вызов пройдёт до commit'а state (`saving=true` не
+  // закоммичен в тот же тик) и улетит второй PATCH. useRef читается
+  // синхронно, useState — нет.
+  const commitInFlightRef = useRef(false);
+
+  useEffect(() => {
+    if (isEditing) {
+      setDraftTitle(template.title);
+      // requestAnimationFrame — Input может быть не смонтирован на мгновение.
+      const id = requestAnimationFrame(() => {
+        inputRef.current?.focus();
+        inputRef.current?.select();
+      });
+      return () => cancelAnimationFrame(id);
+    }
+  }, [isEditing, template.title]);
+
+  const commitRename = useCallback(async () => {
+    if (commitInFlightRef.current) return;
+    const trimmed = draftTitle.trim();
+    if (!trimmed || trimmed === template.title) {
+      setIsEditing(false);
+      setDraftTitle(template.title);
+      return;
+    }
+    commitInFlightRef.current = true;
+    setSaving(true);
+    try {
+      await updateTutorHomeworkTemplate(template.id, { title: trimmed });
+      toast({ title: 'Название шаблона обновлено' });
+      await queryClient.invalidateQueries({ queryKey: ['tutor', 'homework', 'templates'] });
+      setIsEditing(false);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Не удалось обновить название';
+      toast({ title: message, variant: 'destructive' });
+      // Оставляем в edit-mode для retry — не сбрасываем draft.
+    } finally {
+      commitInFlightRef.current = false;
+      setSaving(false);
+    }
+  }, [draftTitle, template.id, template.title, toast, queryClient]);
+
+  const cancelRename = useCallback(() => {
+    setDraftTitle(template.title);
+    setIsEditing(false);
+  }, [template.title]);
 
   return (
     <Card className="transition-all hover:shadow-md">
@@ -49,7 +110,48 @@ function TemplateCard({
           </Badge>
         </div>
 
-        <h3 className="font-semibold text-base leading-tight line-clamp-2">{template.title}</h3>
+        {isEditing ? (
+          <div className="flex items-center gap-2">
+            <Input
+              ref={inputRef}
+              value={draftTitle}
+              onChange={(e) => setDraftTitle(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault();
+                  commitRename();
+                } else if (e.key === 'Escape') {
+                  e.preventDefault();
+                  cancelRename();
+                }
+              }}
+              onBlur={commitRename}
+              disabled={saving}
+              maxLength={200}
+              className="text-base min-h-[44px]"
+              aria-label="Название шаблона"
+            />
+            {saving ? (
+              <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" aria-hidden="true" />
+            ) : null}
+          </div>
+        ) : (
+          <h3
+            role="button"
+            tabIndex={0}
+            title="Нажмите, чтобы переименовать"
+            onClick={() => setIsEditing(true)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                setIsEditing(true);
+              }
+            }}
+            className="font-semibold text-base leading-tight line-clamp-2 cursor-text rounded-sm hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+          >
+            {template.title}
+          </h3>
+        )}
 
         {template.topic && (
           <p className="text-sm text-muted-foreground line-clamp-1">{template.topic}</p>
@@ -70,6 +172,7 @@ function TemplateCard({
             size="sm"
             className="flex-1"
             onClick={() => navigate(`/tutor/homework/create?template_id=${template.id}`)}
+            disabled={saving}
           >
             Использовать
           </Button>
@@ -78,6 +181,8 @@ function TemplateCard({
             variant="ghost"
             className="text-destructive hover:text-destructive hover:bg-destructive/10"
             onClick={() => onDelete(template.id)}
+            disabled={saving}
+            aria-label="Удалить шаблон"
           >
             <Trash2 className="h-3.5 w-3.5" />
           </Button>
@@ -86,6 +191,13 @@ function TemplateCard({
     </Card>
   );
 }
+
+// List-item в grid шаблонов — per .claude/rules/performance.md обёрнут в
+// React.memo, чтобы unrelated re-renders parent'а (например смена
+// subjectFilter) не инвалидировали неизменные карточки. Локальное edit-state
+// (isEditing/draftTitle/saving) живёт внутри — типинг в одной карточке не
+// требует ре-рендера соседей в любом случае.
+const TemplateCard = memo(TemplateCardImpl);
 
 // ─── Main content ─────────────────────────────────────────────────────────────
 

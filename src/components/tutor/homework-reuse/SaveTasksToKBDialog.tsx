@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { BookmarkPlus, Check, ChevronDown, Folder, FolderPlus, Loader2 } from 'lucide-react';
+import { BookmarkPlus, Check, ChevronDown, Folder, FolderPlus, ImageOff, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
@@ -11,6 +11,8 @@ import { cn } from '@/lib/utils';
 import { stripLatex } from '@/components/kb/ui/stripLatex';
 import { useRootFolders } from '@/hooks/useFolders';
 import { useIsMobile } from '@/hooks/use-mobile';
+import { parseAttachmentUrls } from '@/lib/attachmentRefs';
+import { useKBImagesSignedUrls } from '@/hooks/useKBImagesSignedUrls';
 import {
   saveTutorHomeworkTasksToKB,
   type SaveTasksToKBResponse,
@@ -45,6 +47,12 @@ export interface SaveTasksToKBDialogTask {
   id: string;
   order_num: number;
   task_text: string;
+  /**
+   * Dual-format storage ref для условия задачи — single `storage://...` ИЛИ
+   * JSON-array `["storage://..."]`. Парсится через `parseAttachmentUrls`.
+   * Отображается в list item thumbnail'ом (паттерн `PickerTaskCard`).
+   */
+  task_image_url?: string | null;
   /**
    * Optional UI hint — рендерит label «уже в базе» рядом с задачей, когда
    * мы уже знаем (из provenance), что эта задача пришла из моей базы. Не
@@ -107,6 +115,17 @@ export function SaveTasksToKBDialog({
   const [newFolderMode, setNewFolderMode] = useState(false);
   const [newFolderName, setNewFolderName] = useState('');
   const [submitting, setSubmitting] = useState(false);
+
+  // Batch storage refs из ВСЕХ задач в одном `useKBImagesSignedUrls` вызове
+  // (hook дедупит refs, поэтому повторяющиеся storage:// не удваивают
+  // запросы). Per-task hook создал бы N queries при 10+ задачах — см.
+  // .claude/rules/performance.md §N+1.
+  const taskImageRefs = useMemo(() => {
+    return tasks.flatMap((t) => parseAttachmentUrls(t.task_image_url ?? null));
+  }, [tasks]);
+  const { urls: taskImageUrlMap } = useKBImagesSignedUrls(taskImageRefs, {
+    enabled: open && taskImageRefs.length > 0,
+  });
 
   // Reset transient state when dialog opens (no bleed between invocations).
   useEffect(() => {
@@ -247,8 +266,8 @@ export function SaveTasksToKBDialog({
             {mode === 'single' ? 'Сохранить задачу в базу' : 'Сохранить задачи в базу'}
           </SheetTitle>
           <p className="text-xs text-slate-500">
-            Рубрика и критерии оценки не переносятся в базу — они остаются только
-            на этом ДЗ.
+            В базу сохраняются условие, ответ и решение. Рубрика этого ДЗ остаётся
+            у ДЗ и не переносится в задачу.
           </p>
         </SheetHeader>
 
@@ -369,6 +388,9 @@ export function SaveTasksToKBDialog({
             <ul className="space-y-1.5" role="list">
               {tasks.map((task) => {
                 const isSelected = selectedIds.has(task.id);
+                const imageRefs = parseAttachmentUrls(task.task_image_url ?? null);
+                const firstUrl = imageRefs.length > 0 ? taskImageUrlMap[imageRefs[0]] : undefined;
+                const extraCount = imageRefs.length > 1 ? imageRefs.length - 1 : 0;
                 return (
                   <li key={task.id}>
                     <label
@@ -403,6 +425,32 @@ export function SaveTasksToKBDialog({
                           {isSelected ? <Check className="h-3.5 w-3.5" /> : null}
                         </button>
                       ) : null}
+
+                      {/* Thumbnail: signed URL первого фото или placeholder.
+                        * Паттерн — PickerTaskCard (KBPickerSheet.tsx:43-100).
+                        * `loading="lazy"` обязательно per rule performance.md. */}
+                      <div className="relative mt-0.5 h-12 w-12 shrink-0 overflow-hidden rounded-md border border-slate-200 bg-slate-100">
+                        {firstUrl ? (
+                          <img
+                            src={firstUrl}
+                            alt=""
+                            loading="lazy"
+                            className="h-full w-full object-cover"
+                          />
+                        ) : (
+                          <div className="flex h-full w-full items-center justify-center text-slate-400" aria-hidden="true">
+                            <ImageOff className="h-5 w-5" />
+                          </div>
+                        )}
+                        {extraCount > 0 ? (
+                          <span
+                            className="absolute bottom-0.5 right-0.5 rounded bg-slate-900/70 px-1 py-px text-[10px] font-medium leading-none text-white"
+                            aria-label={`Ещё ${extraCount} фото`}
+                          >
+                            +{extraCount}
+                          </span>
+                        ) : null}
+                      </div>
 
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center gap-1.5">

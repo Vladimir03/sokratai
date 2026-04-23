@@ -315,6 +315,7 @@ export function HWTasksSection({
                 id: saveToKbTask.id!,
                 order_num: tasks.findIndex((t) => t.localId === saveToKbTask.localId) + 1,
                 task_text: saveToKbTask.task_text,
+                task_image_url: saveToKbTask.task_image_path ?? null,
                 already_in_base_hint: saveToKbTask.kb_source === 'my',
               },
             ]}

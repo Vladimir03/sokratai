@@ -60,7 +60,7 @@ const NAV_GROUPS: readonly NavGroupDef[] = [
   {
     label: 'Материалы',
     items: [
-      { href: '/tutor/knowledge', icon: Library, label: 'База знаний' },
+      { href: '/tutor/knowledge', icon: Library, label: 'База задач' },
     ],
   },
   {

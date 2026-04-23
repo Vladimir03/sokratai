@@ -610,7 +610,7 @@ export function KBPickerSheet({
         <SheetHeader className="border-b px-4 pb-3 pt-4">
           <SheetTitle className="flex items-center gap-2 text-base">
             <Library className="h-4.5 w-4.5 text-socrat-primary" />
-            База знаний
+            База задач
           </SheetTitle>
 
           {/* Tabs */}

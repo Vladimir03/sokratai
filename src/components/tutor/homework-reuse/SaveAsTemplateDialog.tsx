@@ -282,7 +282,7 @@ export function SaveAsTemplateDialog({
             <ToggleRow
               id="template-include-rubric"
               label="Включить рубрику"
-              description="Проверочные критерии для AI (rubric_text, фото рубрики)"
+              description="Проверочные критерии для AI (текст и фото рубрики)"
               checked={includeRubric}
               onCheckedChange={setIncludeRubric}
               disabled={submitting}
@@ -301,7 +301,7 @@ export function SaveAsTemplateDialog({
             <ToggleRow
               id="template-include-ai-settings"
               label="Включить настройки AI"
-              description="disable_ai_bootstrap, check_format per task"
+              description="Запрет AI-вступления и формат проверки для каждой задачи"
               checked={includeAiSettings}
               onCheckedChange={setIncludeAiSettings}
               disabled={submitting}

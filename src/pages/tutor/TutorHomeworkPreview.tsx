@@ -6,7 +6,7 @@
  * - [← Назад] → /tutor/homework/:id (AC-1)
  * - [Печать / PDF] → native window.print() (AC-4)
  * - [Копировать текст] → Telegram-friendly format via stripLatex (AC-5)
- * - [Поделиться ссылкой] → ShareLinkDialog stub (TASK-7 will wire)
+ * - [Поделиться ссылкой] → ShareLinkDialog (lazy + Suspense + conditional mount)
  * - С ответами / С решениями toggles, default OFF (AC-3)
  *
  * Image refs are resolved to signed URLs via `useKBImagesSignedUrls` which
@@ -16,7 +16,7 @@
  * function). `HomeworkPreviewContent` stays stateless.
  */
 
-import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
+import { Suspense, lazy, useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { toast } from 'sonner';
@@ -46,6 +46,14 @@ import {
 } from '@/components/tutor/homework-reuse/HomeworkPreviewContent';
 
 import '@/styles/homework-preview-print.css';
+
+// Lazy + conditional mount: dialog грузится только при первом открытии,
+// паттерн зеркалит TutorHomeworkDetail.tsx (TASK-10 Actions-меню).
+const ShareLinkDialog = lazy(() =>
+  import('@/components/tutor/homework-reuse/ShareLinkDialog').then((m) => ({
+    default: m.ShareLinkDialog,
+  })),
+);
 
 function buildTelegramCopyText(
   title: string,
@@ -216,11 +224,12 @@ function TutorHomeworkPreviewContent() {
     }
   }, [details, id, previewTasks, showAnswers]);
 
-  const handleShareStub = useCallback(() => {
-    // ShareLinkDialog wiring lands in TASK-7. For TASK-3 we keep the button
-    // visible in the toolbar (AC-3) but surface a neutral notice so clicks
-    // are not silently dropped.
-    toast.info('Диалог «Поделиться ссылкой» появится в следующей итерации');
+  // ShareLinkDialog integration (post-review follow-up). Использует тот же
+  // ShareLinkDialog, что Actions-меню на TutorHomeworkDetail (TASK-10), —
+  // единая точка входа в share-links CRUD из двух surfaces.
+  const [shareDialogOpen, setShareDialogOpen] = useState(false);
+  const handleOpenShare = useCallback(() => {
+    setShareDialogOpen(true);
   }, []);
 
   if (!id) {
@@ -295,7 +304,7 @@ function TutorHomeworkPreviewContent() {
           <Button
             variant="outline"
             size="sm"
-            onClick={handleShareStub}
+            onClick={handleOpenShare}
             className="min-h-[44px]"
             aria-label="Поделиться ссылкой"
           >
@@ -340,6 +349,17 @@ function TutorHomeworkPreviewContent() {
         showAnswers={showAnswers}
         showSolutions={showSolutions}
       />
+
+      {shareDialogOpen && details?.assignment ? (
+        <Suspense fallback={null}>
+          <ShareLinkDialog
+            open={shareDialogOpen}
+            onOpenChange={setShareDialogOpen}
+            assignmentId={details.assignment.id}
+            assignmentTitle={details.assignment.title}
+          />
+        </Suspense>
+      ) : null}
     </div>
   );
 }
