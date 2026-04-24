@@ -1,6 +1,8 @@
 import type { ReactNode } from "react";
 import { Link } from "react-router-dom";
 
+import { trackTutorLandingGoal } from "@/lib/tutorLandingAnalytics";
+
 type Tier = {
   id: string;
   label: string;
@@ -470,7 +472,15 @@ function PricingCard({ tier }: { tier: Tier }) {
           {tier.cta.label}
         </a>
       ) : (
-        <Link to={tier.cta.href} className={ctaClass}>
+        <Link
+          to={tier.cta.href}
+          onClick={
+            tier.id === "ai-start"
+              ? () => trackTutorLandingGoal("tutor_landing_cta_pricing")
+              : undefined
+          }
+          className={ctaClass}
+        >
           {tier.cta.label}
         </Link>
       )}

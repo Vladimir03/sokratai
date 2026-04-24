@@ -10,6 +10,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { useDocumentMeta } from "@/lib/useDocumentMeta";
 
 // Lazy load sections
 const SpecialOffer = lazy(() => import("@/components/sections/SpecialOffer"));
@@ -26,6 +27,20 @@ const ForParents = lazy(() => import("@/components/sections/ForParents"));
 const Footer = lazy(() => import("@/components/sections/Footer"));
 
 const Index = () => {
+  useDocumentMeta({
+    title: "Сократ — AI-помощник для подготовки к ЕГЭ и ОГЭ",
+    description:
+      "Готовься к ЕГЭ и ОГЭ по физике и математике с AI-помощником 24/7",
+    canonical: "https://sokratai.ru/students",
+    ogTitle: "Сократ — AI-помощник для подготовки к ЕГЭ и ОГЭ",
+    ogDescription:
+      "Готовься к ЕГЭ и ОГЭ по физике и математике с AI-помощником 24/7",
+    ogImage: "https://lovable.dev/opengraph-image-p98pqg.png",
+    ogUrl: "https://sokratai.ru/students",
+    ogType: "website",
+    ogSiteName: "Сократ",
+  });
+
   return (
     <div className="min-h-screen">
       {/* Special Offer Banner */}

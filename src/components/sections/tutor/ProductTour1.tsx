@@ -1,5 +1,7 @@
 import { TrendingUp } from "lucide-react";
 
+import { trackTutorLandingGoal } from "@/lib/tutorLandingAnalytics";
+
 import ProductTour from "./ProductTour";
 
 export default function ProductTour1() {
@@ -38,6 +40,7 @@ export default function ProductTour1() {
       inlineCTA={{
         label: "Попробовать за 200 ₽ →",
         href: "/signup?ref=tutor-landing&tier=ai-start",
+        onClick: () => trackTutorLandingGoal("tutor_landing_cta_tour1"),
       }}
       videoPlaceholderText="AI-проверка ДЗ + сократовский диалог"
       videoPlaceholderCaption="Видео 25 сек — добавится после записи"

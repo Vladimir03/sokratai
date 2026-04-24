@@ -108,6 +108,7 @@ export default function ProductTour({
           {inlineCTA && (
             <Link
               to={inlineCTA.href}
+              onClick={inlineCTA.onClick}
               className="inline-flex items-center font-semibold border-b border-transparent transition-colors hover:border-b-[color:var(--sokrat-green-700)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--sokrat-green-700)]/60 focus-visible:ring-offset-2"
               style={{ color: "var(--sokrat-green-700)" }}
             >

@@ -1,6 +1,14 @@
 import { lazy, Suspense } from "react";
 import AudienceRibbon from "@/components/sections/tutor/AudienceRibbon";
 import TutorLandingHeader from "@/components/sections/tutor/TutorLandingHeader";
+import { useDocumentMeta } from "@/lib/useDocumentMeta";
+
+const TUTOR_LANDING_TITLE =
+  "Сократ AI для репетиторов · Проверка ДЗ за 40 минут + сократовский AI-чат для учеников";
+const TUTOR_LANDING_DESCRIPTION =
+  "AI-проверка рукописных ДЗ по физике, математике, информатике. Сократовский диалог с учеником — не списывает у ChatGPT. Оплаты и расписание — бесплатно. От 200 ₽ в первый месяц.";
+const TUTOR_LANDING_OG_IMAGE =
+  "https://pub-bb2e103a32db4e198524a2e9ed8f35b4.r2.dev/c99bddc8-b1d7-407d-b578-ed6c55dd9e30/id-preview-7731bc3f--5fbe4a32-1baf-47b0-8f47-83e3060cf929.lovable.app-1777019278659.png";
 
 const Hero = lazy(() => import("@/components/sections/tutor/Hero"));
 const TrustStrip = lazy(() => import("@/components/sections/tutor/TrustStrip"));
@@ -16,6 +24,19 @@ const FinalCTA = lazy(() => import("@/components/sections/tutor/FinalCTA"));
 const Footer = lazy(() => import("@/components/sections/tutor/Footer"));
 
 export default function Index() {
+  useDocumentMeta({
+    title: TUTOR_LANDING_TITLE,
+    description: TUTOR_LANDING_DESCRIPTION,
+    canonical: "https://sokratai.ru/",
+    ogTitle:
+      "Сократ AI для репетиторов — инструмент репетитора. От репетитора.",
+    ogDescription: TUTOR_LANDING_DESCRIPTION,
+    ogImage: TUTOR_LANDING_OG_IMAGE,
+    ogUrl: "https://sokratai.ru/",
+    ogType: "website",
+    ogSiteName: "Сократ AI",
+  });
+
   return (
     <div className="sokrat sokrat-marketing min-h-screen">
       <AudienceRibbon />

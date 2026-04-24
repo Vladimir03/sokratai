@@ -9,6 +9,7 @@ export interface ProductTourBullet {
 export interface ProductTourInlineCTA {
   label: string;
   href: string;
+  onClick?: () => void;
 }
 
 export interface ProductTourBadge {

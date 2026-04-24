@@ -1,6 +1,7 @@
 import { Link } from "react-router-dom";
 
 import { Button } from "@/components/ui/button";
+import { trackTutorLandingGoal } from "@/lib/tutorLandingAnalytics";
 
 const TELEGRAM_CHANNEL_URL = "https://t.me/sokrat_rep";
 const SIGNUP_URL = "/signup?ref=tutor-landing&tier=ai-start";
@@ -92,7 +93,12 @@ export default function Hero() {
               backgroundColor: "var(--sokrat-green-700)",
             }}
           >
-            <Link to={SIGNUP_URL}>Попробовать за 200&nbsp;₽ в первый месяц</Link>
+            <Link
+              to={SIGNUP_URL}
+              onClick={() => trackTutorLandingGoal("tutor_landing_cta_hero")}
+            >
+              Попробовать за 200&nbsp;₽ в первый месяц
+            </Link>
           </Button>
 
           <Button
@@ -109,6 +115,9 @@ export default function Hero() {
               href={TELEGRAM_CHANNEL_URL}
               target="_blank"
               rel="noopener noreferrer"
+              onClick={() =>
+                trackTutorLandingGoal("tutor_landing_tg_channel_click")
+              }
             >
               Канал Егора →
             </a>

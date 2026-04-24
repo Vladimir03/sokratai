@@ -1,5 +1,7 @@
 import { Play } from "lucide-react";
 
+import { trackTutorLandingGoal } from "@/lib/tutorLandingAnalytics";
+
 type Founder = {
   name: string;
   initials: string;
@@ -194,6 +196,9 @@ function FounderCard({ founder }: { founder: Founder }) {
           href={founder.cta.href}
           target={founder.cta.external ? "_blank" : undefined}
           rel={founder.cta.external ? "noopener noreferrer" : undefined}
+          onClick={() =>
+            trackTutorLandingGoal("tutor_landing_tg_channel_click")
+          }
           className="self-start inline-flex items-center gap-1 px-4 py-2 rounded-md border-2 text-sm font-semibold transition-colors hover:bg-[color:var(--sokrat-green-50)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2"
           style={{
             color: "var(--sokrat-green-700)",
