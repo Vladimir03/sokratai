@@ -1,5 +1,12 @@
 export const TUTOR_TIMEOUT_MS = 10000;
 export const TUTOR_MAX_RETRIES = 5; // 5 retries + first attempt = 6 total attempts
+/**
+ * Для сетевых сбоев (Failed to fetch / ERR_CONNECTION_RESET) длинная цепочка
+ * ретраев бесполезна и создаёт у пользователя ложное ощущение, что «сервер
+ * восстанавливается 5 минут». Для таких ошибок ограничиваемся одной
+ * повторной попыткой и сразу показываем честное сообщение.
+ */
+export const TUTOR_NETWORK_MAX_RETRIES = 1;
 export const TUTOR_RETRY_BASE_DELAY_MS = 500;
 export const TUTOR_RETRY_MAX_DELAY_MS = 5000;
 export const TUTOR_STALE_TIME_MS = 60000;
@@ -53,12 +60,52 @@ function isNonRetryableError(error: unknown): boolean {
   return msg.includes("not found") || msg.includes("not_found");
 }
 
+/**
+ * Признак того, что запрос упал из-за сетевой ошибки уровня браузера
+ * (DNS / TCP reset / CORS / отсутствие сети), а не из-за самого backend.
+ * В таких случаях backend, скорее всего, жив, но текущая сеть пользователя
+ * не может до него достучаться — типичный кейс блокировок у российских
+ * провайдеров без VPN.
+ */
+export function isTutorNetworkError(error: unknown): boolean {
+  const msg = toErrorMessage(error).toLowerCase();
+  return (
+    msg.includes("failed to fetch") ||
+    msg.includes("networkerror") ||
+    msg.includes("network error") ||
+    msg.includes("err_connection") ||
+    msg.includes("err_network") ||
+    msg.includes("load failed") // Safari fetch error wording
+  );
+}
+
 export function createTutorRetry(queryKey: TutorQueryKey) {
   const key = tutorQueryKeyToString(queryKey);
 
   return (failureCount: number, error: unknown): boolean => {
     if (isNonRetryableError(error)) {
       console.warn("tutor_query_no_retry_not_found", { queryKey: key, error: toErrorMessage(error) });
+      return false;
+    }
+
+    // Network-level errors почти никогда не лечатся ретраями — это
+    // блокировка/сброс на сетевом пути. Делаем максимум 1 повторную
+    // попытку и быстро отдаём ошибку наверх, чтобы UI показал
+    // правильное сообщение и не висел в «восстановлении».
+    if (isTutorNetworkError(error)) {
+      if (failureCount <= TUTOR_NETWORK_MAX_RETRIES) {
+        console.warn("tutor_query_network_retry", {
+          queryKey: key,
+          failureCount,
+          error: toErrorMessage(error),
+        });
+        return true;
+      }
+      console.error("tutor_query_network_failed", {
+        queryKey: key,
+        failureCount,
+        error: toErrorMessage(error),
+      });
       return false;
     }
 
@@ -98,8 +145,8 @@ export function toTutorErrorMessage(defaultMessage: string, error: unknown): str
     return `${defaultMessage} (истекло время ожидания ответа)`;
   }
 
-  if (message.includes("failed to fetch") || message.includes("network")) {
-    return `${defaultMessage} (проблема с сетью)`;
+  if (isTutorNetworkError(error)) {
+    return "Не получается подключиться к серверу из вашей сети. Часто помогает мобильный интернет или включённый VPN.";
   }
 
   return defaultMessage;

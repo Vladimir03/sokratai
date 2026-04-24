@@ -11,6 +11,23 @@ interface TutorDataStatusProps {
   className?: string;
 }
 
+/**
+ * Эвристика: похоже ли сообщение об ошибке на сетевую проблему уровня
+ * браузера (Failed to fetch / ERR_CONNECTION_RESET / блокировка домена
+ * провайдером). В таком кейсе показываем не «восстанавливаем соединение»,
+ * а честный текст с подсказкой про мобильный интернет / VPN.
+ */
+function isLikelyNetworkBlockMessage(message: string): boolean {
+  const m = message.toLowerCase();
+  return (
+    m.includes('подключ') ||
+    m.includes('сет') ||
+    m.includes('failed to fetch') ||
+    m.includes('err_connection') ||
+    m.includes('network')
+  );
+}
+
 export function TutorDataStatus({
   error,
   isFetching = false,
@@ -21,6 +38,42 @@ export function TutorDataStatus({
 }: TutorDataStatusProps) {
   if (!error && !isRecovering) {
     return null;
+  }
+
+  const networkBlock = !!error && isLikelyNetworkBlockMessage(error);
+
+  // Network-блок: показываем понятное сообщение и actionable-подсказки,
+  // не пугаем пользователя бесконечным «восстанавливаем соединение».
+  if (networkBlock) {
+    return (
+      <Alert className={className} variant="destructive">
+        <WifiOff className="h-4 w-4" />
+        <AlertDescription className="flex flex-col gap-3">
+          <div className="text-sm space-y-1">
+            <p className="font-medium">Не получается подключиться к серверу</p>
+            <p className="text-muted-foreground">
+              Проблема с доступом из вашей сети. Это не ошибка кабинета — сервер работает.
+            </p>
+            <ul className="list-disc pl-5 text-muted-foreground">
+              <li>Попробуйте мобильный интернет (раздать с телефона)</li>
+              <li>Включите VPN, если он у вас настроен</li>
+              <li>Попробуйте другой браузер (Chrome / Firefox)</li>
+            </ul>
+          </div>
+          {onRetry && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={onRetry}
+              className="gap-2 self-start"
+            >
+              <RefreshCw className="h-4 w-4" />
+              Повторить
+            </Button>
+          )}
+        </AlertDescription>
+      </Alert>
+    );
   }
 
   return (
