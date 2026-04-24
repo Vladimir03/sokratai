@@ -46,6 +46,21 @@ export default function Hero() {
       `}</style>
 
       <div className="relative mx-auto max-w-[800px] px-6 md:px-8 py-[80px] pb-[56px] md:py-[120px] md:pb-[80px] text-left">
+        <span
+          className="mb-5 inline-flex items-center gap-1.5 rounded-full px-3.5 py-1.5 text-[11px] font-bold uppercase tracking-[0.08em]"
+          style={{
+            backgroundColor: "var(--sokrat-green-100)",
+            color: "var(--sokrat-green-800)",
+          }}
+        >
+          <span
+            aria-hidden="true"
+            className="h-1.5 w-1.5 rounded-full"
+            style={{ backgroundColor: "var(--sokrat-green-700)" }}
+          />
+          Для репетиторов физики · математики · информатики
+        </span>
+
         <h1 id="tutor-hero-headline">
           Инструмент репетитора. От&nbsp;репетитора.
         </h1>

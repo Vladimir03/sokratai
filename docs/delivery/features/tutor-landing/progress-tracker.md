@@ -142,6 +142,25 @@ Dropped из original plan: Claude Design, Higgsfield для product-tour (см.
 
 ---
 
+### 🔄 Iteration 4.5 — Audience routing UX polish (2026-04-25)
+
+**Status:** ✅ COMPLETED 2026-04-25 (TASK-13)
+**Context:** Vladimir reviewed hero UX after tasks 1-8 completed, identified wrong-audience bounce risk (школьники/родители не видят ясный exit-path за 3-секундный scan). Research EduTech best practices → гибрид 3 patterns.
+
+Что добавлено:
+- [x] `preview.html` — top AudienceRibbon bar над header + Hero pre-H1 badge
+- [x] `tasks.md` — TASK-13 (Type C polish) + copy-paste prompt для Claude Code
+- [x] Claude Code выполняет TASK-13 на feature branch — создаёт `AudienceRibbon.tsx`, обновляет `Index.tsx` + `Hero.tsx`
+
+**Rationale (3 паттерна одновременно):**
+1. **Top ribbon** — Pattern 1 (LinkedIn Pro → Personal, Uber Rider → Driver). Non-dismissible, subtle green-50 bg, immediate exit path для wrong audience.
+2. **Hero pre-H1 badge** — Pattern 4 (Linear, Stripe, Notion). Pill-chip «Для репетиторов физики · математики · информатики» confirms audience сразу над H1.
+3. **Header audience-switch** (existing) — остаётся как sticky fallback (3rd layer).
+
+3 layer защиты от wrong-audience bounce без размывания tutor primary focus.
+
+---
+
 ### 🔮 V2 pricing roadmap (future, после launch V1)
 
 **Разблокировать pricing psychology при расширении:**
@@ -266,6 +285,8 @@ Dropped из original plan: Claude Design, Higgsfield для product-tour (см.
 - **2026-04-24** — **TASK-2 done**: создана директория `src/components/sections/tutor/` с 13 stub-компонентами (`TutorLandingHeader`, `Hero`, `TrustStrip`, `Pain`, `ProductTour` + `ProductTour1/2/3`, `FreemiumBridge`, `SocialProof`, `FAQ`, `Pricing`, `FinalCTA`, `Footer`) + `tourData.ts`. `src/pages/Index.tsx` переписан: shell с `<div className="sokrat sokrat-marketing min-h-screen">`, все 11 content-секций через `React.lazy` + `Suspense` со skeleton fallback в approximate IA heights (Hero 640, TrustStrip 96, Pain 450, Tours 560/480/480, Freemium 440, SocialProof 600, FAQ 520, Pricing 560, FinalCTA 360, Footer 240). **Нет** `data-sokrat-mode` — marketing surface per SKILL.md §3. TutorLandingHeader намеренно eager (не lazy) — above-the-fold sticky. Section anchors (`id="hero"`, `id="product-tour"` на Tour2, `id="social-proof"`, `id="faq"`, `id="pricing"`) проставлены на stub'ах для scroll-nav из TASK-3. Lint + build — PASS.
 
 - **2026-04-24** — **TASK-3 done**: `TutorLandingHeader.tsx` собран на базе паттерна `StudentLanding.tsx`. Sticky header h=64px, `.container` layout: logo (`sokrat-logo.png` 32×32 + «Сократ AI») → scroll-anchor nav (5 items: Главная / Возможности → `#product-tour` / Цены / Кейсы → `#social-proof` / FAQ) → desktop-only audience switcher «Для учеников →» к `/students` → Login dropdown (Я ученик / Я репетитор; на мобиле добавляется mobile-only item «Для учеников и родителей →» после `DropdownMenuSeparator`). Active section detection — `IntersectionObserver` с `rootMargin: "-40% 0px -55% 0px"` (lightweight, без scroll listeners); `aria-current="location"` на активном item. Mobile (<768): brand text hidden (`hidden sm:inline`), audience switcher hidden (`hidden md:inline-flex`), nav scrolls horizontally через `overflow-x-auto scrollbar-hide`. Runtime preview verified: desktop 1280→ header 65px (h-16 + 1px border) с visible brand, mobile 375→ nav 396px scrollWidth > 227px clientWidth = горизонтальный скролл работает. Focus rings на логотипе/nav items/audience switcher. Lint + build — PASS.
+
+- **2026-04-25** — **TASK-13 done**: audience routing UX polish. Новый компонент `src/components/sections/tutor/AudienceRibbon.tsx` = non-dismissible top-ribbon c `role="complementary" aria-label="Переключатель аудитории"`, bg `--sokrat-green-50`, border-bottom 1px `--sokrat-green-100`, текст «Вы ученик или родитель? → Перейти на страницу для школьников →» → `/students` link (font-semibold green-800 → green-700 on hover + underline). `Index.tsx` теперь монтирует `<AudienceRibbon />` **выше** `<TutorLandingHeader />` (eager, not lazy — above-the-fold). `Hero.tsx` получил pre-H1 pill-badge: green-100 bg / green-800 text / 11px bold uppercase tracking-[0.08em], с 1.5×1.5 green-700 dot + «Для репетиторов физики · математики · информатики», mb-5 от H1. Header audience-switcher «Для учеников →» **не тронут** — остаётся как sticky fallback (3rd layer). Runtime verified: desktop 1280 → ribbon rgb(243,249,245) bg с rgb(232,245,238) border-bottom, ribbon link href=`/students`, ribbon before header in DOM order; hero badge rgb(232,245,238) bg / rgb(20,82,54) text / 11px / uppercase / tracking 0.88px; header audience switcher present display:flex. Mobile: ribbon flex-wrap на очень узких viewport'ах (≤375 px iPhone SE — 2 строки high ≈ 58px; от 390 px и шире — одна строка ≈ 39px). Lint + build — PASS.
 
 - **2026-04-24** — **TASK-8 done**: `FreemiumBridge.tsx`. Bg `--sokrat-green-50` (`#f3f9f5`) + 1px top/bottom borders `--sokrat-green-100` = visual break от Tour #3 (bg card white). Padding 56/96 (`py-14 md:py-24`). Ochre-chip «БЕСПЛАТНО НАВСЕГДА» — `display: inline-block` сверху контента; H2 «Оплаты и расписание — базовая платформа бесплатно» (`margin-bottom: 16px`); lede `max-w-[720px]`, `margin-bottom: 48/24`. 3 mini-cards в `<ul>`-grid (1-col mobile gap-3 → 3-col desktop gap-6), bg `--sokrat-card`, border `--sokrat-border`, radius 14px, padding 24px. Card title h3 18px/600 `--sokrat-green-800`, body 14px/1.55 `--sokrat-fg2` (через scoped `.sokrat.sokrat-marketing .freemium-card-*`). Card 1 содержит inline `<code>/pay</code>` с bg `--sokrat-green-100` + color `--sokrat-green-800` + mono font 12px + radius 4px. Video placeholder: 16:10, max-w 680px center, radius-xl shadow-md, gradient green-50→100, Play-icon + «Оплаты + расписание» + «Видео 15 сек…». Closing line 15px/500 `--sokrat-fg2` center. Ochre используется **ТОЛЬКО** в chip — остальная секция green/surface-only. Runtime verified: desktop 1280 → bg rgb(243,249,245), border rgb(232,245,238), chip ochre-100/700, 3-col grid, h3 18px green-800, code mono green-100/800; mobile 375 → 1-col, py 56/56. Copy verbatim. Lint + build — PASS.
 

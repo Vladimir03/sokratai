@@ -1,4 +1,5 @@
 import { lazy, Suspense } from "react";
+import AudienceRibbon from "@/components/sections/tutor/AudienceRibbon";
 import TutorLandingHeader from "@/components/sections/tutor/TutorLandingHeader";
 
 const Hero = lazy(() => import("@/components/sections/tutor/Hero"));
@@ -17,6 +18,7 @@ const Footer = lazy(() => import("@/components/sections/tutor/Footer"));
 export default function Index() {
   return (
     <div className="sokrat sokrat-marketing min-h-screen">
+      <AudienceRibbon />
       <TutorLandingHeader />
       <main>
         <Suspense fallback={<div className="h-[640px] animate-pulse bg-slate-100" />}>
