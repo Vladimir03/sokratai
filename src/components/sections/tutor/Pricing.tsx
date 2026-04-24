@@ -176,7 +176,7 @@ export default function Pricing() {
           letter-spacing: 0.08em;
           text-transform: uppercase;
           background: var(--sokrat-ochre-500);
-          color: #fff;
+          color: var(--sokrat-fg-on-dark);
           border-radius: var(--sokrat-radius-full);
           white-space: nowrap;
         }
@@ -236,7 +236,7 @@ export default function Pricing() {
           display: inline-block;
           padding: 3px 9px;
           background: var(--sokrat-ochre-500);
-          color: #fff;
+          color: var(--sokrat-fg-on-dark);
           border-radius: 6px;
           font-size: 13px;
           font-weight: 800;
@@ -307,7 +307,7 @@ export default function Pricing() {
         }
         .sokrat.sokrat-marketing .pp-cta--primary {
           background: var(--sokrat-green-700);
-          color: #fff;
+          color: var(--sokrat-fg-on-dark);
         }
         .sokrat.sokrat-marketing .pp-cta--primary:hover { background: var(--sokrat-green-800); }
         .sokrat.sokrat-marketing .pp-cta--secondary {

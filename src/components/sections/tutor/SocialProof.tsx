@@ -277,33 +277,55 @@ function CaseVideoCard({ videoSrc }: { videoSrc?: string }) {
 }
 
 function CasePlaceholderCard() {
+  // Honesty invariant (trust ladder, copy-deck §7 rationale): this card is
+  // a mock-up of a future case, not a real testimonial. It MUST be visually
+  // distinguishable from Case #1 (real video testimonial) so visitors aren't
+  // deceived. Signals: dashed border + "ПРИМЕР" chip + muted regalia/quote.
   return (
     <article
-      className="flex flex-col gap-3 rounded-[14px] p-5"
+      className="relative flex flex-col gap-3 rounded-[14px] p-5"
       style={{
         backgroundColor: "var(--sokrat-card)",
-        border: "1px solid var(--sokrat-border)",
+        border: "2px dashed var(--sokrat-border)",
       }}
     >
+      <span
+        className="self-start inline-block rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.08em]"
+        style={{
+          backgroundColor: "var(--sokrat-border-light)",
+          color: "var(--sokrat-fg3)",
+        }}
+      >
+        Пример будущего кейса
+      </span>
       <div
-        aria-label="Фото: Михаил К."
+        aria-label="Фото-placeholder"
         className="flex h-[72px] w-[72px] items-center justify-center self-start rounded-[10px] font-extrabold text-white"
         style={{
           background:
             "linear-gradient(135deg, var(--sokrat-green-200) 0%, var(--sokrat-green-500) 100%)",
           fontSize: 24,
+          opacity: 0.7,
         }}
       >
         МК
       </div>
-      <div className="sp-case-name">Михаил К.</div>
+      <div className="sp-case-name" style={{ opacity: 0.85 }}>
+        Михаил К.
+      </div>
       <div className="sp-case-regalia">
         Репетитор математики ОГЭ и ЕГЭ · 5 лет опыта · Санкт-Петербург
       </div>
-      <blockquote className="sp-case-quote">
+      <blockquote className="sp-case-quote" style={{ opacity: 0.85 }}>
         «Собираю ДЗ за 10 минут из базы + своих задач. AI-генерация похожих
         экономит минут 30 на подготовку каждого урока.»
       </blockquote>
+      <p
+        className="text-[11px]"
+        style={{ color: "var(--sokrat-fg3)", lineHeight: 1.4 }}
+      >
+        Так будет выглядеть реальный кейс. Заменим после запуска пилота.
+      </p>
     </article>
   );
 }

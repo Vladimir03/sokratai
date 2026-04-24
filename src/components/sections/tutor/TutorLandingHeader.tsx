@@ -67,7 +67,7 @@ export default function TutorLandingHeader() {
         {/* Scroll-anchor nav */}
         <nav
           aria-label="Разделы страницы"
-          className="flex-1 min-w-0 overflow-x-auto scrollbar-hide"
+          className="flex-1 min-w-0 overflow-x-auto scrollbar-hide touch-pan-x"
         >
           <ul className="flex items-center gap-1 min-w-max md:justify-center">
             {ANCHORS.map((a) => {
@@ -78,7 +78,7 @@ export default function TutorLandingHeader() {
                   <a
                     href={a.href}
                     aria-current={isActive ? "location" : undefined}
-                    className={`px-3 py-2 rounded-md text-sm font-medium whitespace-nowrap transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/60 ${
+                    className={`inline-flex items-center min-h-[44px] px-3 py-2 rounded-md text-sm font-medium whitespace-nowrap transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/60 ${
                       isActive
                         ? "text-accent underline underline-offset-4"
                         : "text-slate-600 hover:text-accent hover:bg-slate-50"

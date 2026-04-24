@@ -12,7 +12,7 @@ export default function FinalCTA() {
       {/* Scoped overrides — marketing-global h2 forces green-800, we need white */}
       <style>{`
         .sokrat.sokrat-marketing .final-cta-h2 {
-          color: #fff;
+          color: var(--sokrat-fg-on-dark);
         }
       `}</style>
 
@@ -39,7 +39,7 @@ export default function FinalCTA() {
             onClick={() => trackTutorLandingGoal("tutor_landing_cta_final")}
             className="inline-flex items-center justify-center rounded-lg px-6 text-base font-semibold transition-colors hover:bg-[color:var(--sokrat-green-50)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 w-full sm:w-auto"
             style={{
-              backgroundColor: "#fff",
+              backgroundColor: "var(--sokrat-fg-on-dark)",
               color: "var(--sokrat-green-800)",
               minHeight: 52,
             }}
@@ -56,7 +56,8 @@ export default function FinalCTA() {
             }
             className="inline-flex items-center justify-center rounded-lg px-6 text-base font-semibold border-2 bg-transparent transition-colors hover:bg-[rgba(255,255,255,0.1)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 w-full sm:w-auto"
             style={{
-              color: "#fff",
+              color: "var(--sokrat-fg-on-dark)",
+              // rgba — translucent border overlay (not a brand color); no token for white 40% opacity
               borderColor: "rgba(255, 255, 255, 0.4)",
               minHeight: 52,
             }}
