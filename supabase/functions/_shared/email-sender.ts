@@ -50,7 +50,7 @@ const TEMP_EMAIL_SUFFIX = '@temp.sokratai.ru';
 function getAppUrl(): string {
   return (
     Deno.env.get('PUBLIC_APP_URL')?.trim().replace(/\/$/, '') ??
-    'https://sokratai.lovable.app'
+    'https://sokratai.ru'
   );
 }
 
