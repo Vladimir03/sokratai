@@ -1911,7 +1911,7 @@ async function handleNotifyStudents(
     .single();
   const tutorName = (tutorProfile?.display_name as string) || "Репетитор";
 
-  const appUrl = Deno.env.get("PUBLIC_APP_URL")?.trim().replace(/\/$/, "") ?? "https://sokratai.lovable.app";
+  const appUrl = Deno.env.get("PUBLIC_APP_URL")?.trim().replace(/\/$/, "") ?? "https://sokratai.ru";
   const homeworkUrl = `${appUrl}/homework/${assignmentId}`;
   const defaultMessage = `📚 Новое домашнее задание: <b>${escapeHtmlEntities(assignment.title as string)}</b>\n\nПредмет: ${escapeHtmlEntities(assignment.subject as string)}\n<a href="${escapeHtmlEntities(homeworkUrl)}">Открыть ДЗ</a>`;
   const tgText = messageTemplate ?? defaultMessage;
@@ -2333,7 +2333,7 @@ async function handleRemindStudent(
     try {
       const appUrl =
         Deno.env.get("PUBLIC_APP_URL")?.trim().replace(/\/$/, "") ??
-        "https://sokratai.lovable.app";
+        "https://sokratai.ru";
       const homeworkUrl = `${appUrl}/homework/${assignmentId}`;
       const textWithLink =
         `${escapeHtmlEntities(message)}\n\n<a href="${escapeHtmlEntities(homeworkUrl)}">Открыть ДЗ</a>`;
@@ -2437,7 +2437,7 @@ async function handleRemindStudent(
 
     const appUrl =
       Deno.env.get("PUBLIC_APP_URL")?.trim().replace(/\/$/, "") ??
-      "https://sokratai.lovable.app";
+      "https://sokratai.ru";
     const homeworkUrl = `${appUrl}/homework/${assignmentId}`;
 
     const emailResult = await sendHomeworkTutorMessageEmail(
@@ -3784,7 +3784,7 @@ function generateShareLinkSlug(): string {
 function getShareLinkAppBaseUrl(): string {
   return (
     Deno.env.get("PUBLIC_APP_URL")?.trim().replace(/\/$/, "") ??
-    "https://sokratai.lovable.app"
+    "https://sokratai.ru"
   );
 }
 
