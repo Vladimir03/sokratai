@@ -1,3 +1,36 @@
+import { Clock } from "lucide-react";
+
+import ProductTour from "./ProductTour";
+
 export default function ProductTour2() {
-  return <section id="product-tour">ProductTour2 placeholder</section>;
+  return (
+    <ProductTour
+      id="product-tour"
+      badge={{ Icon: Clock, label: "За 5 минут вместо 40" }}
+      headline={<>ДЗ из базы за пять минут</>}
+      lede="Задачи с привязкой к кодификатору ФИПИ + ваш архив + AI-генерация похожих. Отправка ученикам — одной кнопкой по всем каналам."
+      bullets={[
+        {
+          title: "База задач + ваш архив",
+          body:
+            "Задачи из Решу-ЕГЭ, сборников Демидовой, ФИПИ-демоверсий. Плюс ваш архив — импортируем из папок на диске. Все задачи с тегами: тема, номер задания ЕГЭ/ОГЭ, сложность.",
+        },
+        {
+          title: "AI-генерация похожих задач",
+          body:
+            "Увидели задачу, удачную на уроке? Одним кликом Сократ AI генерирует 3 варианта с той же физикой, но другими числами. Единицы измерения корректны — мы проверили на 100+ задачах.",
+        },
+        {
+          title: "Отправка по всем каналам",
+          body:
+            "Telegram-бот, email, web, push — Сократ AI выбирает доступный канал автоматически. Даже если у ученика Telegram не открывается, откроется ссылка в браузере с тем же интерфейсом.",
+        },
+      ]}
+      videoPlaceholderText="Конструктор ДЗ"
+      videoPlaceholderCaption="Видео 20 сек — добавится после записи"
+      videoSrc={undefined}
+      zigzag="text-right"
+      backgroundSurface
+    />
+  );
 }
