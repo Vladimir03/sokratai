@@ -70,7 +70,7 @@ async function runReminders(): Promise<ReminderResult> {
     by_channel: { push: 0, telegram: 0, email: 0 },
   };
   const now = new Date();
-  const appUrl = Deno.env.get("PUBLIC_APP_URL")?.trim().replace(/\/$/, "") ?? "https://sokratai.lovable.app";
+  const appUrl = Deno.env.get("PUBLIC_APP_URL")?.trim().replace(/\/$/, "") ?? "https://sokratai.ru";
 
   // Find active assignments with a deadline
   const { data: assignments, error: assErr } = await db
@@ -261,7 +261,7 @@ async function runReminders(): Promise<ReminderResult> {
 
       // Step 2: Try Telegram
       if (!delivered && hasTelegram) {
-        const appUrl = Deno.env.get("PUBLIC_APP_URL") || "https://sokratai.lovable.app";
+        const appUrl = Deno.env.get("PUBLIC_APP_URL") || "https://sokratai.ru";
         const hwLink = `${appUrl}/student/homework`;
         const text = `${emoji} <b>Напоминание о домашке!</b>\n\n«${assignment.title}» нужно сдать через <b>${hoursLabel}</b>.\n\n<a href="${hwLink}">Открыть домашку</a>`;
         const ok = await sendTelegramMessage(chatId!, text);
