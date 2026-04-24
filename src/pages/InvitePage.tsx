@@ -227,7 +227,7 @@ export default function InvitePage() {
             <CardDescription>{error || 'Репетитор не найден'}</CardDescription>
           </CardHeader>
           <CardContent>
-            <Link to="/">
+            <Link to="/students">
               <Button variant="outline" style={{ touchAction: 'manipulation' }}>
                 <ArrowLeft className="h-4 w-4 mr-2" />
                 На главную

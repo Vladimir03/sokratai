@@ -13,6 +13,7 @@ const AnalyticsTracker = lazy(() => import("@/components/AnalyticsTracker"));
 
 // Lazy load Index page too - it's the landing page but still benefits from code splitting
 const Index = lazy(() => import("./pages/Index"));
+const StudentLanding = lazy(() => import("./pages/StudentLanding"));
 
 
 // Lazy load all pages for optimal code splitting
@@ -93,16 +94,25 @@ const App = () => (
               <AnalyticsTracker />
             </Suspense>
             <Routes>
-              <Route 
-                path="/" 
+              <Route
+                path="/"
                 element={
                   <Suspense fallback={<PageLoader />}>
                     <Index />
                   </Suspense>
-                } 
+                }
               />
-            <Route 
-              path="/login" 
+            <Route
+              path="/students"
+              element={
+                <Suspense fallback={<PageLoader />}>
+                  <StudentLanding />
+                </Suspense>
+              }
+            />
+            <Route path="/tutors" element={<Navigate to="/" replace />} />
+            <Route
+              path="/login"
               element={
                 <Suspense fallback={<PageLoader />}>
                   <Login />

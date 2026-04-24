@@ -173,7 +173,7 @@ export default function BookLesson() {
             <p className="text-muted-foreground mb-6">
               Проверьте правильность ссылки или обратитесь к вашему репетитору
             </p>
-            <Button variant="outline" onClick={() => navigate('/')}>
+            <Button variant="outline" onClick={() => navigate('/students')}>
               На главную
             </Button>
           </CardContent>
