@@ -2,6 +2,49 @@
 @import "./styles/tutor-dashboard.css";
 @import "./styles/tutor-chrome.css";
 
+/* ============================================================
+   Phase 3 — mode wrapper typography neutralizer.
+
+   colors_and_type.css foundations set raw-element typography inside
+   [data-sokrat-mode="tutor|student|parent"] subtrees. Existing app
+   components were built before the mode contract and rely on Tailwind
+   utilities + inherited body typography. Activating mode wrappers at
+   guard level would otherwise restyle every raw <p>, <h1>, <h2>, <h3>
+   at once — a broad typography regression.
+
+   This neutralizer targets ONLY truly-raw elements (no class attribute):
+   - <p>text</p> inherits body typography (no visible shift)
+   - <p className="text-sm …">text</p> is unaffected here; foundation
+     rules continue to apply to classed elements by specificity, matching
+     the handoff contract
+   - .sokrat-body / .sokrat-h1 / .sokrat-h2 / .sokrat-h3 opt-in classes
+     stay fully active (they carry a class → excluded here)
+   - Parent overlay rules ([data-learning-cta], [data-parent-hide],
+     .sokrat-btn--primary[data-learning]) are attribute/class-scoped
+     and untouched
+   - Mode-scoped CSS custom properties (--sokrat-body-size,
+     --sokrat-hit-default, tabular-nums) remain active
+
+   Specificity note: `.sokrat[data-sokrat-mode] p:not([class])` = (0,3,1);
+   beats foundation `[data-sokrat-mode="tutor"] p` (0,1,1). Tailwind
+   utilities (0,1,0) apply to classed elements only — `:not([class])`
+   excludes them, no conflict.
+
+   Remove this block once components migrate to .sokrat-body /
+   .sokrat-h1 / .sokrat-h2 class-based opt-in per handoff.
+   ============================================================ */
+.sokrat[data-sokrat-mode] p:not([class]),
+.sokrat[data-sokrat-mode] h1:not([class]),
+.sokrat[data-sokrat-mode] h2:not([class]),
+.sokrat[data-sokrat-mode] h3:not([class]) {
+  font-size: inherit;
+  font-weight: inherit;
+  line-height: inherit;
+  color: inherit;
+  letter-spacing: inherit;
+  margin: 0;
+}
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
