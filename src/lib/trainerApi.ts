@@ -14,10 +14,8 @@ export type SubmitTrainerRoundResult =
 export async function submitTrainerRound(
   payload: SubmitTrainerRoundPayload,
 ): Promise<SubmitTrainerRoundResult> {
-  const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-  if (!supabaseUrl) {
-    return { ok: false, reason: 'network' };
-  }
+  // HARDCODED — see src/lib/supabaseClient.ts for rationale (RU bypass, ignore Lovable auto-env).
+  const supabaseUrl = 'https://api.sokratai.ru';
 
   const controller = new AbortController();
   const timeoutId = window.setTimeout(() => {

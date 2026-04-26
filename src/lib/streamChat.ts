@@ -5,8 +5,8 @@
 
 import { supabase } from '@/lib/supabaseClient';
 
-const SUPABASE_URL =
-  import.meta.env.VITE_SUPABASE_URL || 'https://api.sokratai.ru';
+// HARDCODED — see src/lib/supabaseClient.ts for rationale (RU bypass, ignore Lovable auto-env).
+const SUPABASE_URL = 'https://api.sokratai.ru';
 
 export class StreamChatError extends Error {
   code: string;

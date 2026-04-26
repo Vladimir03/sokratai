@@ -226,8 +226,8 @@ const Profile = () => {
           });
           
           // Use fetch directly for GET request with query params.
-          // api.sokratai.ru proxy bypasses RU ISP blocks on *.supabase.co.
-          const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || "https://api.sokratai.ru";
+          // HARDCODED proxy URL — see src/lib/supabaseClient.ts for rationale (RU bypass).
+          const supabaseUrl = "https://api.sokratai.ru";
           const checkUrl = `${supabaseUrl}/functions/v1/telegram-login-token?token=${token}`;
           
           const res = await fetch(checkUrl, {

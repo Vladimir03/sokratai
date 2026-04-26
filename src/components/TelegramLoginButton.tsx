@@ -7,10 +7,8 @@ import { toast } from "sonner";
 import { isIOS } from "@/hooks/use-mobile";
 import { claimPendingInvite } from "@/lib/inviteApi";
 
-// Resolves to api.sokratai.ru proxy in prod (bypasses RU ISP blocks on *.supabase.co).
-// Source of truth — VITE_SUPABASE_URL env var; fallback for Lovable preview.
-const SUPABASE_URL =
-  import.meta.env.VITE_SUPABASE_URL || "https://api.sokratai.ru";
+// HARDCODED — see src/lib/supabaseClient.ts for rationale (RU bypass, ignore Lovable auto-env).
+const SUPABASE_URL = "https://api.sokratai.ru";
 
 const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
