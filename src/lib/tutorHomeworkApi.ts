@@ -221,7 +221,7 @@ export class HomeworkApiError extends Error {
 // ─── Base request helper ─────────────────────────────────────────────────────
 
 const SUPABASE_URL =
-  import.meta.env.VITE_SUPABASE_URL || 'https://vrsseotrfmsxpbciyqzc.supabase.co';
+  import.meta.env.VITE_SUPABASE_URL || 'https://api.sokratai.ru';
 
 const SUPABASE_KEY =
   import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY ||

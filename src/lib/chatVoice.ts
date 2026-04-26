@@ -1,7 +1,7 @@
 import { supabase } from "@/lib/supabaseClient";
 
 const SUPABASE_URL =
-  import.meta.env.VITE_SUPABASE_URL || "https://vrsseotrfmsxpbciyqzc.supabase.co";
+  import.meta.env.VITE_SUPABASE_URL || "https://api.sokratai.ru";
 
 const CHAT_VOICE_URL = `${SUPABASE_URL}/functions/v1/chat/transcribe-voice`;
 

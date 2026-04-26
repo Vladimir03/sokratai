@@ -923,8 +923,8 @@ export default function Chat() {
     chatId?: string;
     retries?: number;
   }) {
-    // Use safe base URL with fallback
-    const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || "https://vrsseotrfmsxpbciyqzc.supabase.co";
+    // Use safe base URL with fallback. api.sokratai.ru proxy bypasses RU ISP blocks on *.supabase.co.
+    const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || "https://api.sokratai.ru";
     const CHAT_URL = `${supabaseUrl}/functions/v1/chat`;
 
     for (let attempt = 0; attempt < retries; attempt++) {

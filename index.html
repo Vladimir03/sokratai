@@ -17,8 +17,10 @@
     
     <!-- Golos Text — self-hosted via @font-face in src/styles/colors_and_type.css (6 weights 400-900) -->
 
-    <!-- Resource hints for faster loading - prioritize critical resources -->
-    <link rel="preconnect" href="https://vrsseotrfmsxpbciyqzc.supabase.co" crossorigin>
+    <!-- Resource hints for faster loading - prioritize critical resources.
+         api.sokratai.ru is the Cloudflare Worker reverse-proxy on top of Supabase
+         (vrsseotrfmsxpbciyqzc.supabase.co) — required to bypass RU ISP blocks on *.supabase.co. -->
+    <link rel="preconnect" href="https://api.sokratai.ru" crossorigin>
     <link rel="dns-prefetch" href="https://mc.yandex.ru">
     
     <!-- Preload critical entry point for faster Speed Index -->

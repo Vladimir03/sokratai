@@ -32,6 +32,65 @@ AI
 
 ---
 
+# Network & Infrastructure (КРИТИЧНО — RU bypass, 2026-04-26)
+
+Российские провайдеры блокируют все поддомены `*.supabase.co`. Чтобы приложение работало у пользователей в РФ, **весь Supabase-трафик идёт через Cloudflare Worker reverse proxy** на собственном поддомене `api.sokratai.ru`.
+
+```
+sokratai.ru (Lovable, через Cloudflare DNS only)
+    │ frontend bundle — не блокируется
+    ▼
+api.sokratai.ru (Cloudflare Worker — proxied)
+    │ Cloudflare anycast IP — не блокируется RU ISP
+    ▼
+vrsseotrfmsxpbciyqzc.supabase.co (Supabase Auth, REST, Storage, Realtime, Edge Functions)
+```
+
+**Полная архитектура и история миграции:** `docs/delivery/engineering/architecture/cloudflare-proxy.md`. Канонический Worker code: `docs/delivery/engineering/architecture/cloudflare-proxy-worker.js`.
+
+## Hard rules для нового кода
+
+- **Single source of truth** для Supabase URL = `import.meta.env.VITE_SUPABASE_URL`.
+- В preview-окружении допустим fallback `import.meta.env.VITE_SUPABASE_URL || 'https://api.sokratai.ru'`.
+- **ЗАПРЕЩЕНО** в любом виде:
+  - хардкод `https://vrsseotrfmsxpbciyqzc.supabase.co` в строке;
+  - конструкция `https://${PROJECT_ID}.supabase.co/...` или `https://${PROJECT_ID}.functions.supabase.co/...`;
+  - использование `VITE_SUPABASE_PROJECT_ID` для построения URL — переменная больше не источник истины для домена.
+
+## Pre-merge check
+
+Перед любым PR, добавляющим HTTP-запрос к Supabase, грепнуть staged changes:
+
+```bash
+git diff --staged | grep -E "supabase\.co|supabase\.in"
+```
+
+Любое совпадение, кроме комментариев или fallback-строк с `api.sokratai.ru`, — блокер для merge.
+
+## Env vars (Lovable Cloud)
+
+| Переменная | Значение в production | Назначение |
+|---|---|---|
+| `VITE_SUPABASE_URL` | `https://api.sokratai.ru` | Канонический Supabase endpoint для клиента |
+| `VITE_SUPABASE_PUBLISHABLE_KEY` | `eyJhbGci...` (anon JWT) | API-ключ Supabase (anon role) |
+
+`VITE_SUPABASE_PROJECT_ID` больше **не используется** клиентским кодом (был удалён в Phase 2A, 2026-04-26). Если в env остался — можно удалить.
+
+## Storage signed URLs
+
+Когда `VITE_SUPABASE_URL = https://api.sokratai.ru`, Supabase Storage возвращает signed URLs в формате `https://api.sokratai.ru/storage/v1/object/sign/<bucket>/<path>?token=...`. JWT валидируется по project signing key, а не по hostname — работает через прокси без изменений.
+
+## Откат
+
+Worst case: критичная регрессия в проде из-за прокси. Шаги:
+
+1. В Lovable env: `VITE_SUPABASE_URL` → обратно на `https://vrsseotrfmsxpbciyqzc.supabase.co`.
+2. Lovable Redeploy (1-3 минуты).
+3. Прод вернётся в pre-2026-04-26 состояние. RU пользователи снова не смогут зайти; не-RU работают как раньше.
+4. Worker и Cloudflare DNS-зону **не трогать** — это независимая инфраструктура для повторной активации.
+
+---
+
 # Design System (Canonical)
 
 Подробные правила дизайн-системы (внутрипроектные): `.claude/rules/90-design-system.md`

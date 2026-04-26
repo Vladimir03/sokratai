@@ -6,6 +6,11 @@ import { Send, Loader2, CheckCircle, RefreshCw, ExternalLink } from "lucide-reac
 import { toast } from "sonner";
 import { isIOS } from "@/hooks/use-mobile";
 
+// Resolves to api.sokratai.ru proxy in prod (bypasses RU ISP blocks on *.supabase.co).
+// Source of truth — VITE_SUPABASE_URL env var; fallback for Lovable preview.
+const SUPABASE_URL =
+  import.meta.env.VITE_SUPABASE_URL || "https://api.sokratai.ru";
+
 const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
 interface TutorTelegramLoginButtonProps {
@@ -35,7 +40,7 @@ const TutorTelegramLoginButton = ({
     if (manual) setChecking(true);
     try {
       const response = await fetch(
-        `https://vrsseotrfmsxpbciyqzc.supabase.co/functions/v1/telegram-login-token?token=${token}`,
+        `${SUPABASE_URL}/functions/v1/telegram-login-token?token=${token}`,
         { method: "GET" }
       );
       
@@ -173,8 +178,8 @@ const TutorTelegramLoginButton = ({
 
     try {
       const response = await fetch(
-        "https://vrsseotrfmsxpbciyqzc.supabase.co/functions/v1/telegram-login-token?action=create",
-        { 
+        `${SUPABASE_URL}/functions/v1/telegram-login-token?action=create`,
+        {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ intended_role: "tutor" })

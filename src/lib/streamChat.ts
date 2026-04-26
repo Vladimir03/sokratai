@@ -6,7 +6,7 @@
 import { supabase } from '@/lib/supabaseClient';
 
 const SUPABASE_URL =
-  import.meta.env.VITE_SUPABASE_URL || 'https://vrsseotrfmsxpbciyqzc.supabase.co';
+  import.meta.env.VITE_SUPABASE_URL || 'https://api.sokratai.ru';
 
 export class StreamChatError extends Error {
   code: string;
