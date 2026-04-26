@@ -12,7 +12,7 @@ import { YA_METRIKA_ID, YA_METRIKA_ENABLED } from '@/config/analytics';
 // Расширение типов для window.ym
 declare global {
   interface Window {
-    ym: ((id: number, action: string, ...args: unknown[]) => void) | undefined;
+    ym?: (id: number, action: string, ...args: unknown[]) => void;
   }
 }
 
