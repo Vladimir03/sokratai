@@ -225,9 +225,10 @@ const Profile = () => {
             body: null,
           });
           
-          // Use fetch directly for GET request with query params
-          const projectId = import.meta.env.VITE_SUPABASE_PROJECT_ID || "vrsseotrfmsxpbciyqzc";
-          const checkUrl = `https://${projectId}.supabase.co/functions/v1/telegram-login-token?token=${token}`;
+          // Use fetch directly for GET request with query params.
+          // api.sokratai.ru proxy bypasses RU ISP blocks on *.supabase.co.
+          const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || "https://api.sokratai.ru";
+          const checkUrl = `${supabaseUrl}/functions/v1/telegram-login-token?token=${token}`;
           
           const res = await fetch(checkUrl, {
             headers: {

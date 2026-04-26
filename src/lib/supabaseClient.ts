@@ -1,9 +1,11 @@
 import { createClient } from '@supabase/supabase-js';
 import type { Database } from '@/integrations/supabase/types';
 
-// Fallback values for Lovable preview environment where env vars may be undefined
-const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || 
-  'https://vrsseotrfmsxpbciyqzc.supabase.co';
+// Fallback values for Lovable preview environment where env vars may be undefined.
+// Fallback now points to the api.sokratai.ru Cloudflare Worker proxy which forwards
+// to vrsseotrfmsxpbciyqzc.supabase.co — bypasses RU ISP blocks on *.supabase.co.
+const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL ||
+  'https://api.sokratai.ru';
 const SUPABASE_PUBLISHABLE_KEY = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY || 
   'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZyc3Nlb3RyZm1zeHBiY2l5cXpjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTk0MjEzMDYsImV4cCI6MjA3NDk5NzMwNn0.fDleU99ULnIvtbiJqlKtgaabZzIWqqw6gZLWQOFAcKw';
 

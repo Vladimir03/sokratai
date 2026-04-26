@@ -15,6 +15,7 @@ This list is for AI agents to avoid accidental high-blast-radius changes.
 | Telegram bot edge function | `supabase/functions/telegram-bot/**` | Webhook-driven runtime; command/callback regressions are user-visible. | `npm run build`, `node scripts/supabase-drift-check.mjs` | Treat command/callback contracts as stable by default. |
 | Supabase config/deploy policy | `supabase/config.toml`, `.github/workflows/deploy-supabase-functions.yml` | JWT/deploy drift creates silent auth and release mismatches. | `node scripts/supabase-drift-check.mjs` | Any JWT policy change requires explicit owner decision. |
 | Migrations | `supabase/migrations/**` | Direct schema impact and rollback risk. | `npm run build`, `npm run typecheck` | Separate PR track; do not edit in process/doc-only tasks. |
+| Cloudflare proxy infra | `docs/delivery/engineering/architecture/cloudflare-proxy*.{md,js}`, any code referencing `VITE_SUPABASE_URL` | Worker reverse-proxy is the only path Supabase API works for RU users. Breaking it locks out the entire RU segment simultaneously (auth, ДЗ, guided chat). | `npm run build`, `npm run smoke-check`; manual `curl https://api.sokratai.ru/__health` post-deploy | Worker code lives in Cloudflare Dashboard — repo file is canonical mirror. Sync both when changing. Test changes on `*.workers.dev` URL before promoting to `api.sokratai.ru`. |
 
 ## Safe Navigation Protocol
 

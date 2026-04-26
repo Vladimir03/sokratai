@@ -1,267 +1,84 @@
 import { lazy, Suspense } from "react";
-import sokratChatIcon from "@/assets/sokrat-chat-icon.png";
-import { Link } from "react-router-dom";
-import { Button } from "@/components/ui/button";
-import { telegramLinks } from "@/utils/telegramLinks";
-import { Send, Globe, LogIn, ChevronDown, BookOpen, GraduationCap } from "lucide-react";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
+import AudienceRibbon from "@/components/sections/tutor/AudienceRibbon";
+import TutorLandingHeader from "@/components/sections/tutor/TutorLandingHeader";
+import { useDocumentMeta } from "@/lib/useDocumentMeta";
 
-// Lazy load sections
-const SpecialOffer = lazy(() => import("@/components/sections/SpecialOffer"));
-const ValueProposition = lazy(() => import("@/components/sections/ValueProposition"));
-const AhaMoments = lazy(() => import("@/components/sections/AhaMoments"));
-const Empathy = lazy(() => import("@/components/sections/Empathy"));
-const HowItWorks = lazy(() => import("@/components/sections/HowItWorks"));
-const Results = lazy(() => import("@/components/sections/Results"));
-const Testimonials = lazy(() => import("@/components/sections/Testimonials"));
-const Comparison = lazy(() => import("@/components/sections/Comparison"));
-const Pricing = lazy(() => import("@/components/sections/Pricing"));
-const FAQ = lazy(() => import("@/components/sections/FAQ"));
-const ForParents = lazy(() => import("@/components/sections/ForParents"));
-const Footer = lazy(() => import("@/components/sections/Footer"));
+const TUTOR_LANDING_TITLE =
+  "Сократ AI для репетиторов · Проверка ДЗ за 40 минут + сократовский AI-чат для учеников";
+const TUTOR_LANDING_DESCRIPTION =
+  "AI-проверка рукописных ДЗ по физике, математике, информатике. Сократовский диалог с учеником — не списывает у ChatGPT. Оплаты и расписание — бесплатно. От 200 ₽ в первый месяц.";
+const TUTOR_LANDING_OG_IMAGE =
+  "https://pub-bb2e103a32db4e198524a2e9ed8f35b4.r2.dev/c99bddc8-b1d7-407d-b578-ed6c55dd9e30/id-preview-7731bc3f--5fbe4a32-1baf-47b0-8f47-83e3060cf929.lovable.app-1777019278659.png";
 
-const Index = () => {
+const Hero = lazy(() => import("@/components/sections/tutor/Hero"));
+const TrustStrip = lazy(() => import("@/components/sections/tutor/TrustStrip"));
+const Pain = lazy(() => import("@/components/sections/tutor/Pain"));
+const ProductTour1 = lazy(() => import("@/components/sections/tutor/ProductTour1"));
+const ProductTour2 = lazy(() => import("@/components/sections/tutor/ProductTour2"));
+const ProductTour3 = lazy(() => import("@/components/sections/tutor/ProductTour3"));
+const FreemiumBridge = lazy(() => import("@/components/sections/tutor/FreemiumBridge"));
+const SocialProof = lazy(() => import("@/components/sections/tutor/SocialProof"));
+const FAQ = lazy(() => import("@/components/sections/tutor/FAQ"));
+const Pricing = lazy(() => import("@/components/sections/tutor/Pricing"));
+const FinalCTA = lazy(() => import("@/components/sections/tutor/FinalCTA"));
+const Footer = lazy(() => import("@/components/sections/tutor/Footer"));
+
+export default function Index() {
+  useDocumentMeta({
+    title: TUTOR_LANDING_TITLE,
+    description: TUTOR_LANDING_DESCRIPTION,
+    canonical: "https://sokratai.ru/",
+    ogTitle:
+      "Сократ AI для репетиторов — инструмент репетитора. От репетитора.",
+    ogDescription: TUTOR_LANDING_DESCRIPTION,
+    ogImage: TUTOR_LANDING_OG_IMAGE,
+    ogUrl: "https://sokratai.ru/",
+    ogType: "website",
+    ogSiteName: "Сократ AI",
+  });
+
   return (
-    <div className="min-h-screen">
-      {/* Special Offer Banner */}
-      {/* Special Offer Banner - temporarily hidden
-      <Suspense fallback={<div className="h-16 bg-muted animate-pulse" />}>
-        <SpecialOffer />
-      </Suspense>
-      */}
-
-      {/* Navigation Tabs */}
-      <nav className="sticky top-0 z-50 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 border-b">
-        <div className="container mx-auto flex items-center justify-between">
-          <div className="flex overflow-x-auto scrollbar-hide">
-            <a
-              href="#hero"
-              className="px-4 py-3 text-sm font-medium whitespace-nowrap hover:text-primary transition-colors"
-            >
-              Главная
-            </a>
-            <a
-              href="#benefits"
-              className="px-4 py-3 text-sm font-medium whitespace-nowrap hover:text-primary transition-colors"
-            >
-              Преимущества
-            </a>
-            <a
-              href="#how-it-works"
-              className="px-4 py-3 text-sm font-medium whitespace-nowrap hover:text-primary transition-colors"
-            >
-              Как работает
-            </a>
-            <a
-              href="#results"
-              className="px-4 py-3 text-sm font-medium whitespace-nowrap hover:text-primary transition-colors"
-            >
-              Результаты
-            </a>
-            <a
-              href="#testimonials"
-              className="px-4 py-3 text-sm font-medium whitespace-nowrap hover:text-primary transition-colors"
-            >
-              Отзывы
-            </a>
-            <a
-              href="#pricing"
-              className="px-4 py-3 text-sm font-medium whitespace-nowrap hover:text-primary transition-colors"
-            >
-              Цены
-            </a>
-            <a
-              href="#faq"
-              className="px-4 py-3 text-sm font-medium whitespace-nowrap hover:text-primary transition-colors"
-            >
-              FAQ
-            </a>
-            <a
-              href="#for-parents"
-              className="px-4 py-3 text-sm font-medium whitespace-nowrap hover:text-primary transition-colors"
-            >
-              Для родителей
-            </a>
-          </div>
-          
-          {/* Login Dropdown */}
-          <div className="flex-shrink-0 px-2">
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="ghost" size="sm" className="gap-1">
-                  <LogIn className="w-4 h-4" />
-                  <span className="hidden sm:inline">Войти</span>
-                  <ChevronDown className="w-3 h-3" />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-48">
-                <DropdownMenuItem asChild>
-                  <Link to="/login" className="flex items-center gap-2 cursor-pointer">
-                    <BookOpen className="w-4 h-4" />
-                    Я ученик
-                  </Link>
-                </DropdownMenuItem>
-                <DropdownMenuItem asChild>
-                  <Link to="/tutor/login" className="flex items-center gap-2 cursor-pointer">
-                    <GraduationCap className="w-4 h-4" />
-                    Я репетитор
-                  </Link>
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-          </div>
-        </div>
-      </nav>
-
-      {/* Hero Section */}
-      <section id="hero" className="relative overflow-hidden bg-gradient-hero py-16 px-4 md:py-24">
-        <div className="container mx-auto relative z-10">
-          <div className="flex flex-col items-start max-w-4xl">
-            {/* Logo and brand */}
-            <div className="flex items-center gap-6 mb-8">
-              <img src={sokratChatIcon} alt="Сократ" className="w-20 h-20 md:w-24 md:h-24 flex-shrink-0" />
-              <div className="flex flex-col">
-                <h2 className="text-3xl md:text-4xl font-bold text-primary-foreground">Сократ AI</h2>
-              </div>
-            </div>
-
-            {/* Main headline */}
-            <h1
-              className="text-3xl md:text-5xl font-bold text-primary-foreground mb-6 leading-tight"
-            >
-              AI-помощник по школьным предметам, который учит тебя думать и понимать самостоятельно
-            </h1>
-
-            {/* Subheadline */}
-            <p className="text-lg md:text-xl text-primary-foreground/90 mb-8 max-w-2xl">
-              Для тех, кто готовится к ОГЭ/ЕГЭ и хочет понимать предметы, а не просто списывать. Математика, физика, информатика — в приоритете
-            </p>
-
-            {/* CTA Buttons - Platform Choice */}
-            <div className="flex flex-col sm:flex-row gap-4 mb-4">
-              {/* Primary - Web (main product) */}
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button
-                    size="lg"
-                    className="bg-accent hover:bg-accent/90 text-accent-foreground shadow-glow text-base md:text-lg px-8 py-6 rounded-2xl font-semibold transition-colors w-full sm:w-auto"
-                  >
-                    <Globe className="w-5 h-5 mr-2" />
-                    Открыть в браузере
-                    <ChevronDown className="w-4 h-4 ml-2" />
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="center" className="w-56">
-                  <DropdownMenuItem asChild>
-                    <Link to="/chat" className="flex items-center gap-2 cursor-pointer">
-                      <BookOpen className="w-4 h-4" />
-                      Я ученик
-                    </Link>
-                  </DropdownMenuItem>
-                  <DropdownMenuItem asChild>
-                    <Link to="/tutor/login" className="flex items-center gap-2 cursor-pointer">
-                      <GraduationCap className="w-4 h-4" />
-                      Я репетитор
-                    </Link>
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
-
-              {/* Secondary - Telegram */}
-              <a
-                href={telegramLinks.headerTry}
-                target="_blank"
-                rel="noopener noreferrer"
-              >
-                <Button
-                  size="lg"
-                  className="bg-white/10 backdrop-blur-sm border-2 border-white/30 text-white hover:bg-white/20 text-base md:text-lg px-8 py-6 rounded-2xl font-semibold transition-colors w-full sm:w-auto"
-                >
-                  <Send className="w-5 h-5 mr-2" />
-                  Открыть в Telegram
-                </Button>
-              </a>
-            </div>
-
-            {/* Platform hints */}
-            <p className="text-sm text-primary-foreground/70 flex flex-wrap gap-x-3 gap-y-1">
-              <span>Веб-кабинет — основная платформа</span>
-              <span className="hidden sm:inline">•</span>
-              <span>Telegram — для быстрых вопросов</span>
-            </p>
-          </div>
-        </div>
-
-        {/* Subtle decorative gradient overlays */}
-        <div className="absolute top-0 right-0 w-96 h-96 bg-accent/10 rounded-full blur-3xl opacity-30" />
-        <div className="absolute bottom-0 left-0 w-96 h-96 bg-primary-glow/10 rounded-full blur-3xl opacity-20" />
-      </section>
-
-      {/* Lazy load all sections */}
-      <div id="benefits">
-        <Suspense fallback={<div className="py-20 bg-muted animate-pulse" style={{ height: "400px" }} />}>
-          <ValueProposition />
+    <div className="sokrat sokrat-marketing min-h-screen">
+      <AudienceRibbon />
+      <TutorLandingHeader />
+      <main>
+        <Suspense fallback={<div className="h-[640px] animate-pulse bg-slate-100" />}>
+          <Hero />
         </Suspense>
-
-        <Suspense fallback={<div className="py-20 animate-pulse" style={{ height: "500px" }} />}>
-          <AhaMoments />
+        <Suspense fallback={<div className="h-[96px] bg-slate-100" />}>
+          <TrustStrip />
         </Suspense>
-
-        <Suspense fallback={<div className="py-20 animate-pulse" style={{ height: "300px" }} />}>
-          <Empathy />
+        <Suspense fallback={<div className="h-[450px] animate-pulse bg-slate-100" />}>
+          <Pain />
         </Suspense>
-      </div>
-
-      <div id="how-it-works">
-        <Suspense fallback={<div className="py-20 animate-pulse" style={{ height: "500px" }} />}>
-          <HowItWorks />
+        <Suspense fallback={<div className="h-[560px] animate-pulse bg-slate-100" />}>
+          <ProductTour1 />
         </Suspense>
-      </div>
-
-      <div id="results">
-        <Suspense fallback={<div className="py-20 bg-muted animate-pulse" style={{ height: "400px" }} />}>
-          <Results />
+        <Suspense fallback={<div className="h-[480px] animate-pulse bg-slate-100" />}>
+          <ProductTour2 />
         </Suspense>
-      </div>
-
-      <div id="testimonials">
-        <Suspense fallback={<div className="py-20 animate-pulse" style={{ height: "500px" }} />}>
-          <Testimonials />
+        <Suspense fallback={<div className="h-[480px] animate-pulse bg-slate-100" />}>
+          <ProductTour3 />
         </Suspense>
-      </div>
-
-      <Suspense fallback={<div className="py-20 bg-muted animate-pulse" style={{ height: "600px" }} />}>
-        <Comparison />
-      </Suspense>
-
-      <div id="pricing">
-        <Suspense fallback={<div className="py-20 animate-pulse" style={{ height: "700px" }} />}>
-          <Pricing />
+        <Suspense fallback={<div className="h-[440px] animate-pulse bg-slate-100" />}>
+          <FreemiumBridge />
         </Suspense>
-      </div>
-
-      <div id="faq">
-        <Suspense fallback={<div className="py-20 bg-muted animate-pulse" style={{ height: "400px" }} />}>
+        <Suspense fallback={<div className="h-[600px] animate-pulse bg-slate-100" />}>
+          <SocialProof />
+        </Suspense>
+        <Suspense fallback={<div className="h-[520px] animate-pulse bg-slate-100" />}>
           <FAQ />
         </Suspense>
-      </div>
-
-      <div id="for-parents">
-        <Suspense fallback={<div className="py-20 animate-pulse" style={{ height: "500px" }} />}>
-          <ForParents />
+        <Suspense fallback={<div className="h-[560px] animate-pulse bg-slate-100" />}>
+          <Pricing />
         </Suspense>
-      </div>
-
-      <Suspense fallback={<div className="py-20 bg-muted animate-pulse" style={{ height: "300px" }} />}>
+        <Suspense fallback={<div className="h-[360px] animate-pulse bg-slate-100" />}>
+          <FinalCTA />
+        </Suspense>
+      </main>
+      <Suspense fallback={<div className="h-[240px] bg-slate-100" />}>
         <Footer />
       </Suspense>
     </div>
   );
-};
-
-export default Index;
+}

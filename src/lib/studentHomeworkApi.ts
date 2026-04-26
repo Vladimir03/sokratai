@@ -18,7 +18,7 @@ const HOMEWORK_SUBMISSIONS_BUCKET = 'homework-submissions';
 const HOMEWORK_TASK_IMAGES_BUCKET = 'homework-task-images';
 const STORAGE_REF_PREFIX = 'storage://';
 const SUPABASE_URL =
-  import.meta.env.VITE_SUPABASE_URL || 'https://vrsseotrfmsxpbciyqzc.supabase.co';
+  import.meta.env.VITE_SUPABASE_URL || 'https://api.sokratai.ru';
 const SUPABASE_KEY =
   import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY ||
   'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZyc3Nlb3RyZm1zeHBiY2l5cXpjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTk0MjEzMDYsImV4cCI6MjA3NDk5NzMwNn0.fDleU99ULnIvtbiJqlKtgaabZzIWqqw6gZLWQOFAcKw';

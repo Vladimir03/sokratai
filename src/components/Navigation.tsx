@@ -32,7 +32,7 @@ const Navigation = () => {
     <nav className="fixed top-0 left-0 right-0 z-50 bg-card/80 backdrop-blur-md border-b border-border">
       <div className="container mx-auto px-4 h-14 flex items-center gap-3">
         {/* Logo — home link */}
-        <Link to="/" className="flex items-center gap-2 group shrink-0">
+        <Link to="/students" className="flex items-center gap-2 group shrink-0">
           <img src={sokratLogo} alt="Сократ" className="w-8 h-8" />
           <span className="font-semibold text-lg text-slate-800 hidden md:inline">
             Сократ AI

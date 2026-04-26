@@ -1,7 +1,10 @@
 import type { HomeworkPreviewTask } from '@/components/tutor/homework-reuse/HomeworkPreviewContent';
 
-const PROJECT_ID = import.meta.env.VITE_SUPABASE_PROJECT_ID || 'vrsseotrfmsxpbciyqzc';
-const FUNCTIONS_BASE_URL = `https://${PROJECT_ID}.supabase.co/functions/v1`;
+// Resolves to api.sokratai.ru proxy in prod (bypasses RU ISP blocks on *.supabase.co).
+// Source of truth — VITE_SUPABASE_URL env var; fallback for Lovable preview.
+const SUPABASE_URL =
+  import.meta.env.VITE_SUPABASE_URL || 'https://api.sokratai.ru';
+const FUNCTIONS_BASE_URL = `${SUPABASE_URL}/functions/v1`;
 const SHARE_LINK_SLUG_RE = /^[a-z0-9]{8}$/i;
 
 export type PublicShareResult =
