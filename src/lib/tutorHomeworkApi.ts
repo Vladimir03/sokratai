@@ -220,8 +220,8 @@ export class HomeworkApiError extends Error {
 
 // ─── Base request helper ─────────────────────────────────────────────────────
 
-const SUPABASE_URL =
-  import.meta.env.VITE_SUPABASE_URL || 'https://api.sokratai.ru';
+// HARDCODED — see src/lib/supabaseClient.ts for rationale (RU bypass, ignore Lovable auto-env).
+const SUPABASE_URL = 'https://api.sokratai.ru';
 
 const SUPABASE_KEY =
   import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY ||

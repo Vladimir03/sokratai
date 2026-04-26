@@ -50,12 +50,19 @@ vrsseotrfmsxpbciyqzc.supabase.co (Supabase Auth, REST, Storage, Realtime, Edge F
 
 ## Hard rules для нового кода
 
-- **Single source of truth** для Supabase URL = `import.meta.env.VITE_SUPABASE_URL`.
-- В preview-окружении допустим fallback `import.meta.env.VITE_SUPABASE_URL || 'https://api.sokratai.ru'`.
+- **Single source of truth** для Supabase URL = жёсткая строка `'https://api.sokratai.ru'` в коде клиента (см. `src/lib/supabaseClient.ts`).
+- **НЕ полагаться** на `import.meta.env.VITE_SUPABASE_URL` — Lovable Cloud автоматически выставляет её в `https://vrsseotrfmsxpbciyqzc.supabase.co` (прямой домен, заблокирован в РФ) и **не даёт** механизма переопределения. Любой код, читающий эту переменную как источник истины для домена, гарантированно сломается у RU-пользователей.
+- Для нового кода, делающего HTTP-запрос к Supabase: либо использовать `supabase` клиент из `@/lib/supabaseClient` (рекомендуется), либо хардкодить строку:
+  ```ts
+  // HARDCODED — see src/lib/supabaseClient.ts for rationale (RU bypass, ignore Lovable auto-env).
+  const SUPABASE_URL = 'https://api.sokratai.ru';
+  ```
 - **ЗАПРЕЩЕНО** в любом виде:
   - хардкод `https://vrsseotrfmsxpbciyqzc.supabase.co` в строке;
   - конструкция `https://${PROJECT_ID}.supabase.co/...` или `https://${PROJECT_ID}.functions.supabase.co/...`;
-  - использование `VITE_SUPABASE_PROJECT_ID` для построения URL — переменная больше не источник истины для домена.
+  - использование `VITE_SUPABASE_PROJECT_ID` для построения URL;
+  - паттерн `import.meta.env.VITE_SUPABASE_URL || '...'` — fallback никогда не сработает в проде, env всегда определена;
+  - прямой импорт `@/integrations/supabase/client` (auto-generated, читает env, ведёт на прямой домен). Только `@/lib/supabaseClient`.
 
 ## Pre-merge check
 
@@ -71,8 +78,10 @@ git diff --staged | grep -E "supabase\.co|supabase\.in"
 
 | Переменная | Значение в production | Назначение |
 |---|---|---|
-| `VITE_SUPABASE_URL` | `https://api.sokratai.ru` | Канонический Supabase endpoint для клиента |
-| `VITE_SUPABASE_PUBLISHABLE_KEY` | `eyJhbGci...` (anon JWT) | API-ключ Supabase (anon role) |
+| `VITE_SUPABASE_URL` | `https://vrsseotrfmsxpbciyqzc.supabase.co` (auto-managed Lovable, **игнорируется** клиентским кодом) | Lovable Cloud API integration metadata |
+| `VITE_SUPABASE_PUBLISHABLE_KEY` | `eyJhbGci...` (anon JWT) | API-ключ Supabase (anon role) — **используется**, валиден для proxy |
+
+⚠️ **`VITE_SUPABASE_URL` остаётся равной прямому домену** — это Lovable-авто-managed переменная, у нас нет инструмента её переопределить. Клиентский код намеренно её игнорирует и хардкодит `https://api.sokratai.ru`. Если когда-нибудь Lovable откроет управление этой переменной — можно вернуться к env-aware подходу через однократный refactor.
 
 `VITE_SUPABASE_PROJECT_ID` больше **не используется** клиентским кодом (был удалён в Phase 2A, 2026-04-26). Если в env остался — можно удалить.
 
@@ -84,8 +93,8 @@ git diff --staged | grep -E "supabase\.co|supabase\.in"
 
 Worst case: критичная регрессия в проде из-за прокси. Шаги:
 
-1. В Lovable env: `VITE_SUPABASE_URL` → обратно на `https://vrsseotrfmsxpbciyqzc.supabase.co`.
-2. Lovable Redeploy (1-3 минуты).
+1. В `src/lib/supabaseClient.ts` (и остальных 9 файлах со строкой `'https://api.sokratai.ru'`): заменить хардкод обратно на `'https://vrsseotrfmsxpbciyqzc.supabase.co'`. Можно через один git revert коммита миграции.
+2. Push → Lovable Redeploy (1-3 минуты).
 3. Прод вернётся в pre-2026-04-26 состояние. RU пользователи снова не смогут зайти; не-RU работают как раньше.
 4. Worker и Cloudflare DNS-зону **не трогать** — это независимая инфраструктура для повторной активации.
 

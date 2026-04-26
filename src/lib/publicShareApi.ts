@@ -1,9 +1,7 @@
 import type { HomeworkPreviewTask } from '@/components/tutor/homework-reuse/HomeworkPreviewContent';
 
-// Resolves to api.sokratai.ru proxy in prod (bypasses RU ISP blocks on *.supabase.co).
-// Source of truth — VITE_SUPABASE_URL env var; fallback for Lovable preview.
-const SUPABASE_URL =
-  import.meta.env.VITE_SUPABASE_URL || 'https://api.sokratai.ru';
+// HARDCODED — see src/lib/supabaseClient.ts for rationale (RU bypass, ignore Lovable auto-env).
+const SUPABASE_URL = 'https://api.sokratai.ru';
 const FUNCTIONS_BASE_URL = `${SUPABASE_URL}/functions/v1`;
 const SHARE_LINK_SLUG_RE = /^[a-z0-9]{8}$/i;
 

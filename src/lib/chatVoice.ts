@@ -1,7 +1,7 @@
 import { supabase } from "@/lib/supabaseClient";
 
-const SUPABASE_URL =
-  import.meta.env.VITE_SUPABASE_URL || "https://api.sokratai.ru";
+// HARDCODED — see src/lib/supabaseClient.ts for rationale (RU bypass, ignore Lovable auto-env).
+const SUPABASE_URL = "https://api.sokratai.ru";
 
 const CHAT_VOICE_URL = `${SUPABASE_URL}/functions/v1/chat/transcribe-voice`;
 
