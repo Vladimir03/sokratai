@@ -135,7 +135,7 @@ const THREAD_IMAGE_EXTENSIONS = new Set(["jpg", "jpeg", "png", "webp", "heic", "
 const THREAD_ATTACHMENT_EXTENSIONS = new Set([...THREAD_IMAGE_EXTENSIONS, "pdf"]);
 const THREAD_ATTACHMENT_BUCKETS = new Set(["homework-submissions", "homework-images"]);
 const MAX_VOICE_BYTES = 10 * 1024 * 1024;
-const VOICE_TRANSCRIPTION_MODEL = "whisper-large-v3";
+const VOICE_TRANSCRIPTION_MODEL = "whisper-large-v3-turbo";
 const ALLOWED_VOICE_MIME_TYPES = new Set([
   "audio/webm",
   "audio/mp4",
@@ -5318,9 +5318,9 @@ async function handleTranscribeThreadVoice(
     return jsonError(cors, 400, "VOICE_UNSUPPORTED_FORMAT", "Неподдерживаемый формат голосового сообщения");
   }
 
-  const lemonfoxApiKey = Deno.env.get("LEMONFOX_API_KEY");
-  if (!lemonfoxApiKey) {
-    console.error("LEMONFOX_API_KEY is not configured for homework voice transcription");
+  const groqApiKey = Deno.env.get("GROQ_API_KEY");
+  if (!groqApiKey) {
+    console.error("GROQ_API_KEY is not configured for homework voice transcription");
     return jsonError(cors, 503, "VOICE_UNAVAILABLE", "Расшифровка голосовых временно недоступна");
   }
 
@@ -5337,10 +5337,10 @@ async function handleTranscribeThreadVoice(
     size: file.size,
   });
 
-  const transcriptionRes = await fetch("https://api.lemonfox.ai/v1/audio/transcriptions", {
+  const transcriptionRes = await fetch("https://api.groq.com/openai/v1/audio/transcriptions", {
     method: "POST",
     headers: {
-      Authorization: `Bearer ${lemonfoxApiKey}`,
+      Authorization: `Bearer ${groqApiKey}`,
     },
     body: outboundForm,
   });
