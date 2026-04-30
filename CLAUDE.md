@@ -407,7 +407,7 @@ For architecture overview see: docs/delivery/engineering/architecture/README.md
 5. **UI-компоненты** (`button.tsx`, `card.tsx`, `badge.tsx`) — используются ВЕЗДЕ
 6. **Telegram Auth Flow** — цепочка: `TelegramLoginButton` → `telegram-login-token` → `telegram-bot/handleWebLogin` → `getOrCreateProfile`
 7. **Tutor Role Assignment** — через `assign-tutor-role` (email) или `telegram-bot` (Telegram)
-8. **Voice messages in Telegram bot** — `telegram-bot/index.ts` обрабатывает `update.message.voice`, скачивает OGG через Telegram API и расшифровывает через Lemonfox Whisper-compatible API перед передачей текста в `handleTextMessage`
+8. **Voice messages in Telegram bot** — `telegram-bot/index.ts` обрабатывает `update.message.voice`, скачивает OGG через Telegram API и расшифровывает через Groq Whisper API (`whisper-large-v3-turbo`, OpenAI-compatible) перед передачей текста в `handleTextMessage`
 10. **Telegram bot reliability** — все вызовы AI идут через `fetchChatWithTimeout` (retry + timeout). `sendTypingLoop` ловит ошибки внутри. Все message routing ветки отвечают пользователю. `mergeConsecutiveUserMessages` обрезает склеенные сообщения до 8000 символов (`MAX_MESSAGE_LENGTH` в chat = 10000). Подробности: `.claude/rules/60-telegram-bot.md`
 9. **Voice messages in Student web chat** — `ChatInput.tsx` + `useVoiceRecorder.ts` + `chatVoice.ts` + `chat/index.ts` образуют один pipeline: запись через `MediaRecorder`, серверная расшифровка и только потом ручная отправка в чат
 11. **FormulaRoundScreen** — correctness checking centralized в `handleAnswer`. Карточки (TrueOrFalseCard, BuildFormulaCard, SituationCard) возвращают raw answer, НЕ boolean correctness. `BuildFormulaAnswer` = `{ numerator, denominator }`, не flat array. Подробности: `.claude/rules/40-homework-system.md`
@@ -439,9 +439,9 @@ For architecture overview see: docs/delivery/engineering/architecture/README.md
 
 ## Голосовые сообщения в Telegram-боте
 
-- Бот расшифровывает голосовые сообщения пользователей через Lemonfox API (OpenAI-compatible Whisper).
-- Flow: пользователь отправляет voice → бот показывает typing indicator → `handleVoiceMessage()` скачивает OGG через Telegram `getFile` API → OGG отправляется в Lemonfox (`POST https://api.lemonfox.ai/v1/audio/transcriptions`, `model: 'whisper-large-v3'`, `language: 'ru'`) → бот отправляет превью расшифровки → текст передаётся в `handleTextMessage()` как обычное сообщение.
-- Нет `ffmpeg`: Supabase Edge Functions не имеют системных бинарников, поэтому OGG/Opus отправляется в Lemonfox напрямую.
+- Бот расшифровывает голосовые сообщения пользователей через Groq Whisper API (OpenAI-compatible). Миграция с Lemonfox → Groq выполнена 2026-04-30, причина: free tier (~7200 сек/день) и более низкая latency. Env var: `GROQ_API_KEY` (Supabase Edge Function secret), модель `whisper-large-v3-turbo`. Те же три edge function используют Groq (см. ниже).
+- Flow: пользователь отправляет voice → бот показывает typing indicator → `handleVoiceMessage()` скачивает OGG через Telegram `getFile` API → OGG отправляется в Groq (`POST https://api.groq.com/openai/v1/audio/transcriptions`, `model: 'whisper-large-v3-turbo'`, `language: 'ru'`) → бот отправляет превью расшифровки → текст передаётся в `handleTextMessage()` как обычное сообщение.
+- Нет `ffmpeg`: Supabase Edge Functions не имеют системных бинарников, поэтому OGG/Opus отправляется в Groq напрямую.
 - Для multipart upload используется `FormData` с `new Blob([audioBuffer], { type: "audio/ogg" })` и filename `voice.ogg`.
 - Во время расшифровки бот поддерживает typing loop через `sendChatAction('typing')` каждые ~4 секунды.
 - Dispatch на голосовые сооб�

@@ -5880,31 +5880,31 @@ async function handleVoiceMessage(
     }
     const audioBuffer = await fileRes.arrayBuffer();
 
-    // 3. Send to Lemonfox API for transcription
-    const LEMONFOX_API_KEY = Deno.env.get("LEMONFOX_API_KEY");
-    if (!LEMONFOX_API_KEY) {
+    // 3. Send to Groq Whisper API for transcription (OpenAI-compatible)
+    const GROQ_API_KEY = Deno.env.get("GROQ_API_KEY");
+    if (!GROQ_API_KEY) {
       stopSignal.stop = true;
-      console.error("LEMONFOX_API_KEY is not configured");
+      console.error("GROQ_API_KEY is not configured");
       await sendTelegramMessage(telegramUserId, "❌ Расшифровка голосовых временно недоступна.");
       return;
     }
 
     const formData = new FormData();
     formData.append("file", new Blob([audioBuffer], { type: voice.mime_type || "audio/ogg" }), "voice.ogg");
-    formData.append("model", "whisper-large-v3");
+    formData.append("model", "whisper-large-v3-turbo");
     formData.append("language", "ru");
 
-    const transcribeRes = await fetch("https://api.lemonfox.ai/v1/audio/transcriptions", {
+    const transcribeRes = await fetch("https://api.groq.com/openai/v1/audio/transcriptions", {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${LEMONFOX_API_KEY}`,
+        Authorization: `Bearer ${GROQ_API_KEY}`,
       },
       body: formData,
     });
 
     if (!transcribeRes.ok) {
       const errText = await transcribeRes.text().catch(() => "unknown");
-      console.error("Lemonfox transcription failed:", { status: transcribeRes.status, body: errText });
+      console.error("Groq transcription failed:", { status: transcribeRes.status, body: errText });
       stopSignal.stop = true;
       await sendTelegramMessage(telegramUserId, "❌ Не удалось расшифровать голосовое сообщение. Попробуй отправить текстом.");
       return;

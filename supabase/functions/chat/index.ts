@@ -62,7 +62,7 @@ const ALLOWED_IMAGE_DOMAINS = buildAllowedSignedUrlPrefixes(
 /** Max image size (5 MB raw ≈ 6.7 MB base64) to stay within gateway body limits. */
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 const MAX_VOICE_BYTES = 10 * 1024 * 1024;
-const VOICE_TRANSCRIPTION_MODEL = "whisper-large-v3";
+const VOICE_TRANSCRIPTION_MODEL = "whisper-large-v3-turbo";
 const ALLOWED_VOICE_MIME_TYPES = new Set([
   "audio/webm",
   "audio/mp4",
@@ -890,9 +890,9 @@ async function transcribeVoiceMessage(req: Request, userId: string, adminSupabas
     );
   }
 
-  const lemonfoxApiKey = Deno.env.get("LEMONFOX_API_KEY");
-  if (!lemonfoxApiKey) {
-    console.error("LEMONFOX_API_KEY is not configured for voice transcription");
+  const groqApiKey = Deno.env.get("GROQ_API_KEY");
+  if (!groqApiKey) {
+    console.error("GROQ_API_KEY is not configured for voice transcription");
     return new Response(JSON.stringify({ error: "Расшифровка голосовых временно недоступна" }), {
       status: 503,
       headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -911,10 +911,10 @@ async function transcribeVoiceMessage(req: Request, userId: string, adminSupabas
     size: file.size,
   });
 
-  const transcriptionRes = await fetch("https://api.lemonfox.ai/v1/audio/transcriptions", {
+  const transcriptionRes = await fetch("https://api.groq.com/openai/v1/audio/transcriptions", {
     method: "POST",
     headers: {
-      Authorization: `Bearer ${lemonfoxApiKey}`,
+      Authorization: `Bearer ${groqApiKey}`,
     },
     body: outboundForm,
   });
