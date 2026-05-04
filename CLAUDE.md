@@ -32,33 +32,85 @@ AI
 
 ---
 
-# Network & Infrastructure (КРИТИЧНО — RU bypass, 2026-04-26)
+# Network & Infrastructure (КРИТИЧНО — RU bypass, 2026-05-03 Phase B)
 
-Российские провайдеры блокируют все поддомены `*.supabase.co`. Чтобы приложение работало у пользователей в РФ, **весь Supabase-трафик идёт через Cloudflare Worker reverse proxy** на собственном поддомене `api.sokratai.ru`.
+Российские провайдеры блокируют как поддомены `*.supabase.co`, так и интермиттентно — Cloudflare/Lovable CDN edge'ы. Поэтому **весь production-трафик SokratAI обслуживается с собственного российского VPS в Москве** (Selectel, IP `185.161.65.182`). Один сервер раздаёт фронтенд и проксирует API на Supabase.
 
 ```
-sokratai.ru (Lovable, через Cloudflare DNS only)
-    │ frontend bundle — не блокируется
-    ▼
-api.sokratai.ru (Cloudflare Worker — proxied)
-    │ Cloudflare anycast IP — не блокируется RU ISP
-    ▼
-vrsseotrfmsxpbciyqzc.supabase.co (Supabase Auth, REST, Storage, Realtime, Edge Functions)
+sokratai.ru (Selectel VPS Moscow, nginx)
+    │ frontend — раздаётся как статика из /var/www/sokratai/
+    │ обновляется командой `deploy-sokratai` (см. ниже)
+    │
+    │ Cloudflare DNS only (серое облако) → A 185.161.65.182
+    │ Lovable Cloud НЕ обслуживает прод-домен sokratai.ru
+    │ Lovable preview остаётся на sokratai.lovable.app (для dev/QA)
+api.sokratai.ru (Selectel VPS Moscow, тот же nginx, reverse proxy)
+    │ /__health → локальный JSON
+    │ /* → vrsseotrfmsxpbciyqzc.supabase.co (Auth, REST, Storage, Realtime, Edge Functions)
+    │
+    │ Cloudflare DNS only → A 185.161.65.182
+vrsseotrfmsxpbciyqzc.supabase.co (Supabase, без изменений)
+    │ DB, Auth, Edge Functions — деплоятся через Lovable Cloud при push в GitHub
+    │ Прокси-сервер только пересылает HTTP, ничего не меняет в backend
 ```
 
-**Полная архитектура и история миграции:** `docs/delivery/engineering/architecture/cloudflare-proxy.md`. Канонический Worker code: `docs/delivery/engineering/architecture/cloudflare-proxy-worker.js`.
+**История миграции:**
+- **Phase A (2026-04-26):** Cloudflare Worker `api.sokratai.ru` как reverse proxy на Supabase. Помогло частично, но Worker через CF edge ARN/Stockholm имел интермиттентные обрывы для RU-провайдеров (Ростелеком/Краснодар).
+- **Phase B (2026-05-03):** мигрировали на собственный Selectel VPS Москва. Стабильность 100% для RU-пользователей. Cloudflare Worker оставлен в задеактивированном виде как fallback. Lovable Cloud переведён в режим preview-only (`sokratai.lovable.app`).
+- **Patch B+1 (2026-05-03, commit dc39116):** signed URLs от Supabase Storage теперь rewrite'ятся в edge functions на `api.sokratai.ru` host (см. `_shared/proxy-url.ts`). Без этого фото задач не грузились у RU-юзеров (signed URL вёл прямо на supabase.co host'ом).
+
+## VPS — критичные параметры
+
+| Параметр | Значение |
+|---|---|
+| Hostname | `sokratai` |
+| IPv4 | `185.161.65.182` |
+| Регион | Москва (ru-7a) |
+| Provider | Selectel Cloud |
+| Tariff | Shared Line, 1 vCPU 50% / 1 GB RAM / 10 GB SSD |
+| Cost | ~922 ₽/мес (server + Floating IP) |
+| OS | Ubuntu 24.04 LTS |
+| nginx | 1.24 |
+| SSL | Let's Encrypt via certbot DNS-01 (Cloudflare API), auto-renewal `certbot.timer` |
+| SSH | port 22, **только publickey** (password disabled), fail2ban active |
+| Firewall | UFW: только 22/80/443 inbound |
+| Swap | 2 GB (для npm run build) |
+
+## Production Deploy Procedure
+
+⚠️ **КРИТИЧЕСКОЕ ПРАВИЛО ДЛЯ AI АГЕНТОВ:** Lovable Cloud **больше не обновляет прод-домен** `sokratai.ru` автоматически. После любого изменения, затрагивающего frontend bundle, прод-пользователи **не увидят** изменения, пока не выполнен ручной deploy.
+
+Подробное правило-триггер для AI: `.claude/rules/95-production-deploy.md`. Любой агент, делающий frontend-изменения, **обязан** добавить в финальное сообщение блок «🚀 Deploy needed».
+
+**Команда для деплоя** (на VPS):
+
+```bash
+ssh -i "$HOME\.ssh\sokratai_proxy" root@185.161.65.182
+deploy-sokratai
+```
+
+Скрипт `/usr/local/bin/deploy-sokratai` выполняет: `git pull` → `npm ci` → `npm run build` → копирование `dist/` в `/var/www/sokratai/` → `nginx reload` → healthcheck. Занимает 2-5 минут.
+
+**Когда deploy НЕ нужен:**
+- Изменения только в `supabase/migrations/**` или `supabase/functions/**` — Lovable Cloud сам деплоит на Supabase, прокси транзитом передаёт запросы.
+- Изменения только в `docs/**`, `.claude/**`, `CLAUDE.md`, `README.md`, `scripts/**` (dev-only).
+
+**Когда deploy НУЖЕН:**
+- Любые изменения в `src/**`, `index.html`, `package.json`, `vite.config.ts`, `tailwind.config.ts`, `public/**`.
+- Обновление env-переменных, влияющих на VITE_* (на VPS нужен .env с актуальным значением).
 
 ## Hard rules для нового кода
 
 - **Single source of truth** для Supabase URL = жёсткая строка `'https://api.sokratai.ru'` в коде клиента (см. `src/lib/supabaseClient.ts`).
-- **НЕ полагаться** на `import.meta.env.VITE_SUPABASE_URL` — Lovable Cloud автоматически выставляет её в `https://vrsseotrfmsxpbciyqzc.supabase.co` (прямой домен, заблокирован в РФ) и **не даёт** механизма переопределения. Любой код, читающий эту переменную как источник истины для домена, гарантированно сломается у RU-пользователей.
+- **НЕ полагаться** на `import.meta.env.VITE_SUPABASE_URL` — Lovable Cloud автоматически выставляет её в `https://vrsseotrfmsxpbciyqzc.supabase.co` (прямой домен, заблокирован в РФ) и **не даёт** механизма переопределения.
 - Для нового кода, делающего HTTP-запрос к Supabase: либо использовать `supabase` клиент из `@/lib/supabaseClient` (рекомендуется), либо хардкодить строку:
   ```ts
   // HARDCODED — see src/lib/supabaseClient.ts for rationale (RU bypass, ignore Lovable auto-env).
   const SUPABASE_URL = 'https://api.sokratai.ru';
   ```
+- В **edge functions**, генерирующих signed URLs для browser clients (через `client.storage.from(...).createSignedUrl(...)`), **обязательно** оборачивать возвращаемые URL helper'ом `rewriteToProxy()` из `supabase/functions/_shared/proxy-url.ts`. Без этого signed URL вернётся с host'ом `vrsseotrfmsxpbciyqzc.supabase.co` → браузер RU-юзера упрётся в блокировку.
 - **ЗАПРЕЩЕНО** в любом виде:
-  - хардкод `https://vrsseotrfmsxpbciyqzc.supabase.co` в строке;
+  - хардкод `https://vrsseotrfmsxpbciyqzc.supabase.co` в строке клиентского кода;
   - конструкция `https://${PROJECT_ID}.supabase.co/...` или `https://${PROJECT_ID}.functions.supabase.co/...`;
   - использование `VITE_SUPABASE_PROJECT_ID` для построения URL;
   - паттерн `import.meta.env.VITE_SUPABASE_URL || '...'` — fallback никогда не сработает в проде, env всегда определена;
@@ -72,7 +124,7 @@ vrsseotrfmsxpbciyqzc.supabase.co (Supabase Auth, REST, Storage, Realtime, Edge F
 git diff --staged | grep -E "supabase\.co|supabase\.in"
 ```
 
-Любое совпадение, кроме комментариев или fallback-строк с `api.sokratai.ru`, — блокер для merge.
+Любое совпадение, кроме комментариев или fallback-строк с `api.sokratai.ru`, — блокер для merge. Для edge functions, возвращающих signed URLs клиенту — убедиться что они обёрнуты в `rewriteToProxy()`.
 
 ## Env vars (Lovable Cloud)
 
@@ -81,22 +133,59 @@ git diff --staged | grep -E "supabase\.co|supabase\.in"
 | `VITE_SUPABASE_URL` | `https://vrsseotrfmsxpbciyqzc.supabase.co` (auto-managed Lovable, **игнорируется** клиентским кодом) | Lovable Cloud API integration metadata |
 | `VITE_SUPABASE_PUBLISHABLE_KEY` | `eyJhbGci...` (anon JWT) | API-ключ Supabase (anon role) — **используется**, валиден для proxy |
 
-⚠️ **`VITE_SUPABASE_URL` остаётся равной прямому домену** — это Lovable-авто-managed переменная, у нас нет инструмента её переопределить. Клиентский код намеренно её игнорирует и хардкодит `https://api.sokratai.ru`. Если когда-нибудь Lovable откроет управление этой переменной — можно вернуться к env-aware подходу через однократный refactor.
+⚠️ **`VITE_SUPABASE_URL` остаётся равной прямому домену** — это Lovable-авто-managed переменная, у нас нет инструмента её переопределить. Клиентский код намеренно её игнорирует и хардкодит `https://api.sokratai.ru`.
 
-`VITE_SUPABASE_PROJECT_ID` больше **не используется** клиентским кодом (был удалён в Phase 2A, 2026-04-26). Если в env остался — можно удалить.
+`VITE_SUPABASE_PROJECT_ID` больше **не используется** клиентским кодом (был удалён в Phase 2A, 2026-04-26).
 
-## Storage signed URLs
+## Storage signed URLs (Patch B+1)
 
-Когда `VITE_SUPABASE_URL = https://api.sokratai.ru`, Supabase Storage возвращает signed URLs в формате `https://api.sokratai.ru/storage/v1/object/sign/<bucket>/<path>?token=...`. JWT валидируется по project signing key, а не по hostname — работает через прокси без изменений.
+Signed URLs от Supabase Storage генерируются edge functions через server-side SDK. SDK использует internal env `SUPABASE_URL = vrsseotrfmsxpbciyqzc.supabase.co` (Supabase auto-injects, мы не можем переопределить на стороне edge function без потери производительности — server-to-server queries должны идти localhost'ом).
+
+**Решение (commit dc39116):** в edge functions, возвращающих signed URLs клиенту, оборачиваем URL helper'ом `rewriteToProxy()` из `supabase/functions/_shared/proxy-url.ts`. Helper заменяет хост на `api.sokratai.ru`. JWT-токен подписан project signing key, не привязан к хосту — через прокси работает.
+
+**Места применения** (как пример паттерна):
+- `supabase/functions/homework-api/index.ts` — 3 callsite (materials/signed-url, createSignedStorageUrl helper, tasks/image-url)
+- `supabase/functions/public-homework-share/index.ts` — 1 callsite (createSignedStorageUrls)
+
+**НЕ оборачиваем в edge functions, где signed URL используется server-to-server:**
+- `supabase/functions/chat/index.ts` — fetches signed URL server-side для конвертации в base64 (для AI). Browser не задействован, RU блокировки не применяются.
+- `supabase/functions/telegram-bot/index.ts` — фото отдаются через Telegram CDN (Telegram сам кеширует), не напрямую с supabase.co.
 
 ## Откат
 
-Worst case: критичная регрессия в проде из-за прокси. Шаги:
+Два уровня отката, в зависимости от типа сбоя.
 
-1. В `src/lib/supabaseClient.ts` (и остальных 9 файлах со строкой `'https://api.sokratai.ru'`): заменить хардкод обратно на `'https://vrsseotrfmsxpbciyqzc.supabase.co'`. Можно через один git revert коммита миграции.
-2. Push → Lovable Redeploy (1-3 минуты).
-3. Прод вернётся в pre-2026-04-26 состояние. RU пользователи снова не смогут зайти; не-RU работают как раньше.
-4. Worker и Cloudflare DNS-зону **не трогать** — это независимая инфраструктура для повторной активации.
+### Откат frontend deploy (если новый build сломал прод)
+
+На VPS:
+
+```bash
+ssh -i "$HOME\.ssh\sokratai_proxy" root@185.161.65.182
+cd /opt/sokratai
+git log --oneline | head -5  # выбрать предыдущий рабочий коммит
+git checkout <hash>
+NODE_OPTIONS="--max-old-space-size=2048" npm ci
+NODE_OPTIONS="--max-old-space-size=2048" npm run build
+cp -r dist/* /var/www/sokratai/
+systemctl reload nginx
+```
+
+Прод откатывается к указанному коммиту за ~3 минуты.
+
+### Откат всей инфраструктуры (если VPS лежит)
+
+Worst case: Selectel VPS не отвечает или сильно деградировал. Возврат на старую инфру (Lovable Cloud для frontend, Cloudflare Worker для backend):
+
+1. **DNS в Cloudflare:**
+   - `A sokratai.ru` обратно на `185.158.133.1` (Lovable IP) — DNS only
+   - `A api.sokratai.ru` удалить
+2. **Worker `sokratai-supabase-proxy`** в Cloudflare — добавить обратно Custom Domain `api.sokratai.ru` (Workers & Pages → Settings → Domains & Routes → Add).
+3. Распространение DNS — 1-5 минут.
+4. Прод вернётся в Phase A состояние (sokratai.ru на Lovable, api.sokratai.ru через CF Worker). RU пользователи получат обратно интермиттентные обрывы, но не-RU работают.
+
+⚠️ Code (хардкод `https://api.sokratai.ru` в `src/lib/supabaseClient.ts` и 9 других файлах) **трогать не надо** — он совместим с обоими вариантами проксирования.
+
+VPS Selectel остаётся жив параллельно — после восстановления можно вернуться обратно сменой DNS.
 
 ---
 
@@ -254,6 +343,7 @@ For architecture overview see: docs/delivery/engineering/architecture/README.md
 | `70-notifications.md` | Push, email, cascade delivery, VAPID, profiles.email |
 | `80-cross-browser.md` | Safari/iOS rules, forbidden patterns, build targets |
 | `90-design-system.md` | Цветовая палитра, типографика, spacing, компоненты, anti-patterns |
+| `95-production-deploy.md` | **КРИТИЧНО**: когда требуется `deploy-sokratai` после frontend-изменений (Selectel VPS, Phase B 2026-05-03) |
 
 ## КРИТИЧЕСКИЕ ПРАВИЛА
 
