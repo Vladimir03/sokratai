@@ -60,9 +60,10 @@ interface ChatRequestBody {
 // because after Phase B migration (CLAUDE.md "# Network & Infrastructure"),
 // frontend stores proxy URLs in DB but server-side fetches still go direct.
 import { buildAllowedSignedUrlPrefixes } from "../_shared/image-domains.ts";
+import { SUPABASE_PROXY_URL } from "../_shared/proxy-url.ts";
 const ALLOWED_IMAGE_DOMAINS = buildAllowedSignedUrlPrefixes([
   Deno.env.get("SUPABASE_URL") ?? "",
-  "https://api.sokratai.ru",
+  SUPABASE_PROXY_URL,
 ]);
 
 /** Max image size (5 MB raw ≈ 6.7 MB base64) to stay within gateway body limits. */

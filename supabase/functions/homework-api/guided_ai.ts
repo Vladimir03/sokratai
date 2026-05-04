@@ -18,7 +18,7 @@ import {
   MAX_GUIDED_CHAT_IMAGES_FOR_AI,
   MAX_TASK_IMAGES_FOR_AI,
 } from "../_shared/attachment-refs.ts";
-import { rewriteToDirect } from "../_shared/proxy-url.ts";
+import { rewriteToDirect, SUPABASE_PROXY_URL } from "../_shared/proxy-url.ts";
 
 // ─── Constants ──────────────────────────────────────────────────────────────
 
@@ -513,10 +513,9 @@ function isAllowedSignedStorageUrl(url: string): boolean {
   // because after Phase B migration, frontend stores proxy URLs in DB but
   // server-side fetches may convert them back to direct for performance.
   const supabaseUrl = Deno.env.get("SUPABASE_URL");
-  const proxyUrl = "https://api.sokratai.ru";
   return Boolean(
     (supabaseUrl && url.startsWith(`${supabaseUrl}/storage/v1/object/sign/`)) ||
-    url.startsWith(`${proxyUrl}/storage/v1/object/sign/`),
+    url.startsWith(`${SUPABASE_PROXY_URL}/storage/v1/object/sign/`),
   );
 }
 
