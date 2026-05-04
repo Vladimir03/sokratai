@@ -41,6 +41,17 @@
 2. `npm run smoke-check` — он SELECTит distinct prefixes из `homework_tutor_tasks.{task_image_url,solution_image_urls,rubric_image_urls}` через `storage://([^/]+)/` и падает, если найден bucket вне whitelist.
 3. Передеплой `chat` и `homework-api` (whitelist используется обоими).
 
+**Patch B+2 dual-host validator invariant (2026-05-04, PR #107/#108):** signed URLs от Supabase Storage могут попадать в БД с **обоими** host'ами — direct `*.supabase.co` (legacy + server-side SDK) и `api.sokratai.ru` (после `rewriteToProxy()` в edge function вернувшей URL клиенту, который потом сохранил его обратно — типичный flow для `homework_tutor_thread_messages.image_url`). Все 4 validator'а (`chat::isValidImageUrl` через `ALLOWED_IMAGE_DOMAINS`, `guided_ai::isAllowedSignedStorageUrl`, `homework-api/index::getLatestStudentImageUrls`, shared `image-domains::isAllowedSignedUrl`) **обязаны** принимать оба host'а через OR. JWT-токен подписан project signing key, не зависит от хоста — оба URL равноценны для Supabase Storage при resolve.
+
+При добавлении нового signed-URL validator'а:
+- Импортировать `SUPABASE_PROXY_URL` из `_shared/proxy-url.ts` (single source of truth)
+- Использовать паттерн: `(supabaseUrl && url.startsWith(${supabaseUrl}/storage/v1/object/sign/)) || url.startsWith(${SUPABASE_PROXY_URL}/storage/v1/object/sign/)`
+- Direct path всегда **первым** в OR (legacy и server-side SDK URLs более частый кейс)
+- НЕ удалять direct path при добавлении proxy — оба нужны
+- Для server-side `fetch()` на validated URL — оборачивать в `rewriteToDirect()` из `_shared/proxy-url.ts` (экономит 200-400ms на server-to-server fetch)
+
+Симптом нарушения инварианта: AI говорит «ты прислал только фотографию условия задачи, но твоего решения здесь нет» при наличии user-uploaded photo (наблюдаемый случай: Egor 2026-05-04 после Phase B → PR #107 fix).
+
 ### Task identity — canonical source of truth (2026-04-10)
 
 `task_id` (UUID FK to `homework_tutor_tasks.id`) — единственный immutable identity для привязки сообщений, AI-контекста и state к задаче. `task_order` — display/sort field, может меняться при reorder.

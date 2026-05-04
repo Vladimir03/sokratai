@@ -58,6 +58,7 @@ vrsseotrfmsxpbciyqzc.supabase.co (Supabase, без изменений)
 - **Phase A (2026-04-26):** Cloudflare Worker `api.sokratai.ru` как reverse proxy на Supabase. Помогло частично, но Worker через CF edge ARN/Stockholm имел интермиттентные обрывы для RU-провайдеров (Ростелеком/Краснодар).
 - **Phase B (2026-05-03):** мигрировали на собственный Selectel VPS Москва. Стабильность 100% для RU-пользователей. Cloudflare Worker оставлен в задеактивированном виде как fallback. Lovable Cloud переведён в режим preview-only (`sokratai.lovable.app`).
 - **Patch B+1 (2026-05-03, commit dc39116):** signed URLs от Supabase Storage теперь rewrite'ятся в edge functions на `api.sokratai.ru` host (см. `_shared/proxy-url.ts`). Без этого фото задач не грузились у RU-юзеров (signed URL вёл прямо на supabase.co host'ом).
+- **Patch B+2 (2026-05-04, PR #107 + #108):** edge function image validators расширены чтобы принимать **оба** хоста (`api.sokratai.ru` + direct `*.supabase.co`). Без этого student photos из `homework_tutor_thread_messages.image_url` (хранятся с proxy host после B+1) отвергались как `external_https_url` → AI отвечал «ты прислал только условие задачи, решения нет». Также добавлен mirror helper `rewriteToDirect()` в `_shared/proxy-url.ts` — server-to-server fetches в edge functions идут direct, экономя 200-400ms US→RU→US roundtrip. Single source of truth для proxy host: `SUPABASE_PROXY_URL` const из `_shared/proxy-url.ts`.
 
 ## VPS — критичные параметры
 
@@ -109,6 +110,9 @@ deploy-sokratai
   const SUPABASE_URL = 'https://api.sokratai.ru';
   ```
 - В **edge functions**, генерирующих signed URLs для browser clients (через `client.storage.from(...).createSignedUrl(...)`), **обязательно** оборачивать возвращаемые URL helper'ом `rewriteToProxy()` из `supabase/functions/_shared/proxy-url.ts`. Без этого signed URL вернётся с host'ом `vrsseotrfmsxpbciyqzc.supabase.co` → браузер RU-юзера упрётся в блокировку.
+- В **edge functions, валидирующих signed URLs прочитанные из БД** (Patch B+2 invariant), validator **обязан** принимать **оба** host: direct (`Deno.env.get("SUPABASE_URL")`) И proxy (`SUPABASE_PROXY_URL` из `_shared/proxy-url.ts`). Без этого URL'ы сохранённые с proxy host (e.g. `homework_tutor_thread_messages.image_url` после `rewriteToProxy()`) будут отвергнуты как `external_https_url`. Канонический паттерн: `(supabaseUrl && url.startsWith(${supabaseUrl}/storage/v1/object/sign/)) || url.startsWith(${SUPABASE_PROXY_URL}/storage/v1/object/sign/)`.
+- В **edge functions, делающих server-side `fetch()` на signed URL** (e.g. `inlinePromptImageUrl` в `guided_ai.ts`), оборачивать URL в `rewriteToDirect()` из `_shared/proxy-url.ts` перед fetch'ем. Server-to-server fetches идут US→US, конвертация в direct host экономит 200-400ms US→RU→US roundtrip.
+- **НЕ хардкодить** `"https://api.sokratai.ru"` в новом коде edge functions. Импортировать `SUPABASE_PROXY_URL` (full URL) или `SUPABASE_PROXY_HOST` (hostname only) из `_shared/proxy-url.ts`.
 - **ЗАПРЕЩЕНО** в любом виде:
   - хардкод `https://vrsseotrfmsxpbciyqzc.supabase.co` в строке клиентского кода;
   - конструкция `https://${PROJECT_ID}.supabase.co/...` или `https://${PROJECT_ID}.functions.supabase.co/...`;
@@ -137,17 +141,29 @@ git diff --staged | grep -E "supabase\.co|supabase\.in"
 
 `VITE_SUPABASE_PROJECT_ID` больше **не используется** клиентским кодом (был удалён в Phase 2A, 2026-04-26).
 
-## Storage signed URLs (Patch B+1)
+## Storage signed URLs (Patch B+1 / B+2)
 
 Signed URLs от Supabase Storage генерируются edge functions через server-side SDK. SDK использует internal env `SUPABASE_URL = vrsseotrfmsxpbciyqzc.supabase.co` (Supabase auto-injects, мы не можем переопределить на стороне edge function без потери производительности — server-to-server queries должны идти localhost'ом).
 
-**Решение (commit dc39116):** в edge functions, возвращающих signed URLs клиенту, оборачиваем URL helper'ом `rewriteToProxy()` из `supabase/functions/_shared/proxy-url.ts`. Helper заменяет хост на `api.sokratai.ru`. JWT-токен подписан project signing key, не привязан к хосту — через прокси работает.
+**Outbound (browser-facing) — `rewriteToProxy` (B+1, commit dc39116):** в edge functions, возвращающих signed URLs клиенту, оборачиваем URL helper'ом `rewriteToProxy()` из `supabase/functions/_shared/proxy-url.ts`. Helper заменяет хост на `api.sokratai.ru`. JWT-токен подписан project signing key, не привязан к хосту — через прокси работает.
 
-**Места применения** (как пример паттерна):
+**Inbound (validator, B+2, PR #107):** signed URLs, попавшие в БД с proxy host'ом (`homework_tutor_thread_messages.image_url`, например), затем читаются обратно в edge functions для AI. Validators обязаны принимать **оба** host'а через OR: `(supabaseUrl && url.startsWith(${supabaseUrl}/storage/v1/object/sign/)) || url.startsWith(${SUPABASE_PROXY_URL}/storage/v1/object/sign/)`. Direct path не удалять — legacy DB rows и server-side SDK URLs продолжают использовать direct host.
+
+**Server-side fetch — `rewriteToDirect` (B+2, PR #107):** перед `fetch()` в edge function на signed URL, оборачиваем helper'ом `rewriteToDirect()` из того же `_shared/proxy-url.ts`. Конвертирует `api.sokratai.ru` обратно в direct host для US→US fetch без Moscow roundtrip (-200..400ms). Безопасно: server fetches не упираются в RU ISP блокировки.
+
+**Single source of truth для proxy host (B+2 hardening, PR #108):** `SUPABASE_PROXY_HOST` (hostname only) и `SUPABASE_PROXY_URL` (full URL with `https://`) экспортируются из `_shared/proxy-url.ts`. Не хардкодить `"https://api.sokratai.ru"` в новом коде — импортировать константу.
+
+**Места применения `rewriteToProxy` (browser-facing):**
 - `supabase/functions/homework-api/index.ts` — 3 callsite (materials/signed-url, createSignedStorageUrl helper, tasks/image-url)
 - `supabase/functions/public-homework-share/index.ts` — 1 callsite (createSignedStorageUrls)
 
-**НЕ оборачиваем в edge functions, где signed URL используется server-to-server:**
+**Места применения dual-host validators (B+2):**
+- `supabase/functions/chat/index.ts:isValidImageUrl` — через `ALLOWED_IMAGE_DOMAINS` массив с обоими хостами
+- `supabase/functions/homework-api/guided_ai.ts:isAllowedSignedStorageUrl` — OR обоих host префиксов
+- `supabase/functions/homework-api/index.ts:getLatestStudentImageUrls` — inline OR обоих хостов
+- `supabase/functions/_shared/image-domains.ts:buildAllowedSignedUrlPrefixes` — принимает `string | string[]`
+
+**НЕ оборачиваем в `rewriteToProxy` в edge functions, где signed URL используется server-to-server:**
 - `supabase/functions/chat/index.ts` — fetches signed URL server-side для конвертации в base64 (для AI). Browser не задействован, RU блокировки не применяются.
 - `supabase/functions/telegram-bot/index.ts` — фото отдаются через Telegram CDN (Telegram сам кеширует), не напрямую с supabase.co.
 
