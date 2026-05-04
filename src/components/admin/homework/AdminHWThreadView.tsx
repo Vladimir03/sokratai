@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { format, parseISO } from "date-fns";
 import { ru } from "date-fns/locale";
-import { supabase } from "@/lib/supabaseClient";
+import { fetchThreadDetails } from "@/lib/adminHomeworkApi";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -66,21 +66,10 @@ export function AdminHWThreadView({ thread }: { thread: AdminThreadHeader }) {
     (async () => {
       setIsLoading(true);
       try {
-        const [msgsRes, statesRes] = await Promise.all([
-          supabase
-            .from("homework_tutor_thread_messages")
-            .select("id, role, content, created_at, message_kind, visible_to_student, image_url, task_order, author_user_id")
-            .eq("thread_id", thread.id)
-            .order("created_at", { ascending: true }),
-          supabase
-            .from("homework_tutor_task_states")
-            .select("id, status, hint_count, wrong_answer_count, earned_score, available_score, task_id")
-            .eq("thread_id", thread.id),
-        ]);
-        if (msgsRes.error) throw msgsRes.error;
+        const { messages: msgs, taskStates: states } = await fetchThreadDetails(thread.id);
         if (!cancelled) {
-          setMessages(msgsRes.data || []);
-          setTaskStates(statesRes.data || []);
+          setMessages(msgs || []);
+          setTaskStates(states || []);
         }
       } catch (err) {
         console.error("Error loading thread data:", err);
