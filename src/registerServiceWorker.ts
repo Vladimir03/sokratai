@@ -1,10 +1,16 @@
 import { checkSwKillSwitch } from '@/lib/swKillSwitch';
 
 // Phase B (2026-05-03): sokratai.ru = production self-hosted on Selectel VPS Moscow.
-// sokratai.lovable.app = preview/dev. Both register SW; non-prod hosts unregister.
+// sokratai.lovable.app and preview--sokratai.lovable.app = Lovable preview/staging.
+// Both prod and preview register SW; non-prod hosts (localhost / branch-deploy) unregister.
 // www.sokratai.ru kept defensively in case apex redirect is missing on nginx.
 // See CLAUDE.md "# Network & Infrastructure" for full architecture.
-const PROD_HOSTS = ['sokratai.ru', 'www.sokratai.ru', 'sokratai.lovable.app'];
+const PROD_HOSTS = [
+  'sokratai.ru',
+  'www.sokratai.ru',
+  'sokratai.lovable.app',
+  'preview--sokratai.lovable.app',
+];
 
 function isProductionHost(): boolean {
   return PROD_HOSTS.includes(window.location.hostname);
