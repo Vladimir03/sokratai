@@ -64,8 +64,26 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // Skip API requests (let them fail naturally with proper error handling)
-  if (event.request.url.includes('/functions/') || 
+  // Phase B (2026-05-03): Host-based bypass for API/data hosts — SECURITY-CRITICAL.
+  // API responses contain per-user data (auth tokens, homework, signed URLs) and
+  // MUST NEVER be cached by SW — otherwise one user's data may leak to another
+  // via shared Cache Storage. Host-based check covers ALL paths under each host
+  // (/auth, /rest, /storage, /functions, /realtime) in one shot.
+  // - api.sokratai.ru = Selectel VPS reverse proxy → Supabase (added in Phase B).
+  //   Path-based fallback below would miss /storage/* (signed URLs, Patch B+1)
+  //   and /realtime/*.
+  // - *.supabase.co = direct Supabase host (defensive; RU prod routes through api.sokratai.ru).
+  // - mc.yandex.ru = analytics tracking pixels.
+  // See docs/delivery/features/service-worker-prod/spec.md §5 + §7 AC-5/AC-6.
+  const reqUrl = event.request.url;
+  if (reqUrl.includes('://api.sokratai.ru/') ||
+      reqUrl.includes('.supabase.co') ||
+      reqUrl.includes('mc.yandex.ru')) {
+    return;
+  }
+
+  // Defense-in-depth: same-origin API mounts (legacy path-based heuristics).
+  if (event.request.url.includes('/functions/') ||
       event.request.url.includes('supabase.co') ||
       event.request.url.includes('/rest/') ||
       event.request.url.includes('/auth/')) {
