@@ -41,82 +41,12 @@ export const AdminCRM = () => {
   const fetchChats = async () => {
     setIsLoading(true);
     try {
-      // Получаем все чаты
-      const { data: chatsData, error: chatsError } = await supabase
-        .from("chats")
-        .select("id, title, chat_type, last_message_at, created_at, updated_at, user_id");
-
-      if (chatsError) throw chatsError;
-
-      if (!chatsData || chatsData.length === 0) {
-        setChats([]);
-        return;
-      }
-
-      const chatIds = chatsData.map((c) => c.id);
-
-      // Получаем все сообщения с датами для подсчёта и определения последнего сообщения
-      const { data: allMessages, error: messagesError } = await supabase
-        .from("chat_messages")
-        .select("chat_id, created_at, role")
-        .in("chat_id", chatIds)
-        .order("created_at", { ascending: false });
-
-      if (messagesError) throw messagesError;
-
-      // Считаем сообщения и находим последнее сообщение для каждого чата
-      const countMap: Record<string, number> = {};
-      const lastMessageMap: Record<string, string> = {};
-
-      allMessages?.forEach((m) => {
-        if (m.chat_id) {
-          // Считаем только пользовательские сообщения
-          if (m.role === "user") {
-            countMap[m.chat_id] = (countMap[m.chat_id] || 0) + 1;
-          }
-          // Запоминаем дату последнего сообщения (любого)
-          if (!lastMessageMap[m.chat_id] && m.created_at) {
-            lastMessageMap[m.chat_id] = m.created_at;
-          }
-        }
+      const { data, error } = await supabase.functions.invoke("admin-crm", {
+        body: { action: "list" },
       });
-
-      // Фильтруем чаты где есть хотя бы 1 сообщение от пользователя
-      const chatsWithMessages = chatsData.filter(
-        (c) => countMap[c.id] && countMap[c.id] >= 1
-      );
-
-      // Получаем уникальные user_id
-      const userIds = [...new Set(chatsWithMessages.map((c) => c.user_id))];
-
-      // Получаем профили
-      const { data: profiles, error: profilesError } = await supabase
-        .from("profiles")
-        .select("id, username, telegram_username, grade")
-        .in("id", userIds);
-
-      if (profilesError) throw profilesError;
-
-      // Создаём карту профилей
-      const profilesMap: Record<string, typeof profiles[0]> = {};
-      profiles?.forEach((p) => {
-        profilesMap[p.id] = p;
-      });
-
-      // Собираем финальный результат
-      const result: ChatWithUser[] = chatsWithMessages.map((chat) => ({
-        ...chat,
-        message_count: countMap[chat.id] || 0,
-        actual_last_message: lastMessageMap[chat.id] || chat.updated_at,
-        user: profilesMap[chat.user_id] || null,
-      }));
-
-      // Сортируем по реальной дате последнего сообщения
-      result.sort((a, b) => 
-        new Date(b.actual_last_message).getTime() - new Date(a.actual_last_message).getTime()
-      );
-
-      setChats(result);
+      if (error) throw error;
+      if (data?.error) throw new Error(data.error);
+      setChats((data?.chats as ChatWithUser[]) || []);
     } catch (err) {
       console.error("Error fetching chats:", err);
     } finally {

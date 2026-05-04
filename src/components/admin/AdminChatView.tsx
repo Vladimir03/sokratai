@@ -44,28 +44,12 @@ export const AdminChatView = ({
   const fetchMessages = async () => {
     setIsLoading(true);
     try {
-      const { data, error } = await supabase
-        .from("chat_messages")
-        .select("id, role, content, created_at, image_url, image_path")
-        .eq("chat_id", chatId)
-        .order("created_at", { ascending: true });
-
+      const { data, error } = await supabase.functions.invoke("admin-crm", {
+        body: { action: "messages", chatId },
+      });
       if (error) throw error;
-
-      // Generate fresh signed URLs for images
-      const messagesWithSignedUrls = await Promise.all(
-        (data || []).map(async (msg) => {
-          if (msg.image_path) {
-            const { data: signedData } = await supabase.storage
-              .from("chat-images")
-              .createSignedUrl(msg.image_path, 3600); // 1 hour
-            return { ...msg, signedImageUrl: signedData?.signedUrl || null };
-          }
-          return { ...msg, signedImageUrl: null };
-        })
-      );
-
-      setMessages(messagesWithSignedUrls);
+      if (data?.error) throw new Error(data.error);
+      setMessages((data?.messages as Message[]) || []);
     } catch (err) {
       console.error("Error fetching messages:", err);
     } finally {

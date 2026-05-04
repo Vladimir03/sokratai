@@ -1,66 +1,84 @@
-## Что происходит сейчас
-Проблема уже достаточно локализована: это не «медленный сервер», а сетевой сбой на пути к backend-домену у части пользователей из РФ.
+## Что сломано
 
-Подтверждения:
-- На скриншотах браузера видны `ERR_CONNECTION_RESET` и `Failed to fetch`.
-- Падают и запросы к ДЗ, и обычные запросы кабинета репетитора, значит ломается не одна страница, а доступ к backend в целом.
-- Логи backend показывают, что когда запрос доходит, `GET /assignments` отвечает быстро (сотни миллисекунд), то есть сервер не висит 5 минут.
-- Провайдер: Ростелеком, Москва. VPN проблему обходит. Это очень похоже на блокировку/сброс соединения на домене backend у части российских сетей.
+Во вкладках **CRM** и **ДЗ** в `/admin` пусто, в консоли сыпется `TypeError: Failed to fetch` от запросов через `api.sokratai.ru`.
 
-## Что спросить у репетитора дополнительно
-Критического минимума уже достаточно, но для подтверждения масштаба стоит собрать ещё 3 вещи:
-1. Работает ли с мобильного интернета без VPN.
-2. Работает ли у коллег на других провайдерах без VPN.
-3. Открывается ли кабинет целиком плохо, или только разделы репетитора/ДЗ.
+Причина одна и та же:
 
-Это не нужно, чтобы понять класс проблемы; это нужно, чтобы оценить охват и приоритет rollout.
+- `src/components/admin/AdminCRM.tsx` — напрямую делает `supabase.from('chats').select(...)`, потом `chat_messages`, потом `profiles` из браузера.
+- `src/lib/adminHomeworkApi.ts` (используется `AdminHomeworkChats` → `AdminTutorList` / `AdminTutorAssignmentList` / …) — то же самое: 5–7 последовательных SELECT-ов из `homework_tutor_assignments`, `homework_tutor_student_assignments`, `homework_tutor_thread_messages`, `tutors`, `profiles` из браузера.
 
-## План исправления
-1. Сразу убрать ложное ощущение «сервер восстанавливается 5 минут».
-   - Для сетевых ошибок типа `Failed to fetch` / `ERR_CONNECTION_RESET` перестать делать длинную цепочку ретраев.
-   - Показывать честное сообщение: проблема доступа к backend из текущей сети, а не «восстановление соединения».
-   - Добавить короткие действия в UI: «Попробовать снова», «Попробовать мобильный интернет», «Включить VPN».
+Два независимых эффекта от этого:
 
-2. Выявить все tutor-пути, которые ходят напрямую в backend-домен.
-   - Проверить вызовы через клиент БД и вызовы edge functions.
-   - Зафиксировать все критические поверхности: ДЗ, ученики, счётчики в боковом меню, домашняя страница, платежи.
+1. **RLS режет данные.** Эти таблицы защищены RLS на уровне «свои данные» (студент видит свои чаты, репетитор — своих учеников). У админа нет policy «вижу всё», поэтому ответы возвращаются пустыми или частичными → «Чаты не найдены», «Нет активности».
+2. **`Failed to fetch` через прокси.** Запрос вида `chat_messages?chat_id=in.(...очень длинный список UUID)` улетает в URL, проходит через Cloudflare/Selectel прокси, и на больших объёмах роняется (длина URL, таймаут, лимит 1000 строк PostgREST). Отсюда красные ошибки в консоли.
 
-3. Убрать зависимость от проблемного домена для веб-клиента.
-   - Перевести web-клиент на first-party backend-домен вида `api.sokratai.ru`.
-   - Через него проксировать нужные backend-маршруты: auth, rest, functions, storage.
-   - После этого обновить клиентскую конфигурацию, чтобы tutor-кабинет больше не ходил на текущий внешний backend-домен напрямую.
+При этом вкладка **Аналитика** работает — потому что она уже ходит через edge function `admin-analytics` с `service_role` (см. паттерн в `supabase/functions/admin-analytics/index.ts`: проверка `is_admin` RPC + второй клиент на service key).
 
-4. После переключения — проверить все критические tutor-сценарии.
-   - Список ДЗ
-   - Список учеников
-   - Главная репетитора
-   - Загрузка материалов/изображений
-   - Авторизация и активная сессия
+## Решение
 
-## Технические детали
-Затронутые места, уже подтверждённые по коду:
-- `src/lib/tutorHomeworkApi.ts` — прямой fetch в `/functions/v1/homework-api`
-- `src/lib/supabaseClient.ts` — базовый клиент backend
-- `src/lib/tutors.ts` — прямые запросы к `tutor_students`, RPC и другим tutor-данным
-- `src/hooks/useTutor.ts` — общая retry/timeout-логика tutor-запросов
-- `src/hooks/useTutorChromeCounters.ts` — счётчики в tutor chrome
-- `src/pages/tutor/TutorHomework.tsx`, `TutorHome.tsx` и другие tutor-экраны — показывают текущее misleading-сообщение
+Полностью повторить паттерн `admin-analytics` для CRM и ДЗ. Никаких костылей с RLS-policy «admin sees all» — это менее безопасно и труднее аудитить. Edge function проверяет admin-роль один раз и затем читает что нужно service-role клиентом.
 
-Предлагаемый порядок rollout:
+### 1. Новая edge function `admin-crm`
+
+`supabase/functions/admin-crm/index.ts`. Один POST-эндпоинт, тело: `{ search?: string, limit?: number, offset?: number }`.
+
+Делает на сервере (service-role, bypass RLS):
+
+- Берёт все `chats` за разумное окно (по умолчанию последние 90 дней по `updated_at`, `limit` 500 — хватит для UI).
+- Одним запросом читает агрегаты по `chat_messages`: `count(*) filter (role='user')`, `max(created_at)` через RPC или `select chat_id, role, created_at` с серверной агрегацией.
+- Подтягивает `profiles` (`username`, `telegram_username`, `grade`) одним IN-запросом.
+- Возвращает уже готовый JSON в формате `ChatWithUser[]`, который сейчас ожидает `AdminCRM`.
+
+Также добавить `GET /messages?chatId=...` (или второй action в том же body) — для `AdminChatView`, чтобы и просмотр конкретной переписки шёл через service-role и не упирался в RLS.
+
+### 2. Новая edge function `admin-homework`
+
+`supabase/functions/admin-homework/index.ts`. Один эндпоинт с router-полем `action` в body, чтобы не плодить функции:
+
+- `action: "tutors"` → возвращает `TutorOverview[]` (то, что сейчас собирает `fetchTutorsOverview` — но за один проход, на сервере, без N+1 round-trip через прокси).
+- `action: "assignments", tutorId` → `AssignmentOverview[]`.
+- `action: "students", assignmentId` → `AssignmentStudentRow[]`.
+- `action: "thread", threadId` → сообщения треда + хедер (для `AdminHWThreadView`).
+
+Каждый action: проверка `is_admin` (общий хелпер в начале файла), затем чтение через service-role клиент.
+
+### 3. Переписать клиент
+
+- `src/components/admin/AdminCRM.tsx`: убрать прямые `supabase.from(...)` запросы, заменить на `supabase.functions.invoke('admin-crm', { body: { search } })`. Типы `ChatWithUser` оставить, ответ функции уже в этом формате.
+- `src/lib/adminHomeworkApi.ts`: четыре функции (`fetchTutorsOverview`, `fetchAssignmentsForTutor`, `fetchStudentsForAssignment`, `fetchThreadMessages`) превратить в тонкие обёртки вокруг `supabase.functions.invoke('admin-homework', { body: { action, ... } })`. Возвращаемые типы не меняются — компоненты `AdminTutorList`/`AdminTutorAssignmentList`/`AdminAssignmentStudentList`/`AdminHWThreadView` править не нужно.
+- `AdminChatView` (просмотр конкретного чата) — тоже перевести на `admin-crm` action `messages`.
+
+### 4. Безопасность
+
+- Обе функции **обязательно** проверяют `is_admin(auth.uid())` через service-role клиент **до** любых чтений. Без этого получится, что любой залогиненный пользователь сможет читать чужие чаты.
+- Никаких изменений в RLS-policy таблиц `chats`, `chat_messages`, `homework_tutor_*` — текущие ограничения для обычных пользователей остаются как есть.
+- Функции деплоятся с `verify_jwt = true` (default).
+
+### 5. Никаких изменений инфры
+
+Frontend bundle меняется → потребуется `deploy-sokratai` на VPS после мержа (правило `.claude/rules/95-production-deploy.md`). Edge functions деплоятся автоматически Lovable Cloud при push.
+
+## Что НЕ трогаем
+
+- `supabase/functions/admin-analytics/index.ts`, `admin-business-dashboard`, `admin-product-discovery` — они работают.
+- `AdminPayments` — отдельная вкладка, не упоминалась как сломанная (если там тоже direct-SELECT, можно отдельной итерацией).
+- RLS-policy на таблицах чатов и ДЗ — оставляем «вижу свои».
+- `src/lib/supabaseClient.ts`, прокси-конфигурация, `_shared/proxy-url.ts` — не относятся к проблеме.
+
+## Технические детали для реализации
+
 ```text
-Phase 1: UX hotfix
-  - сократить/отключить бессмысленные retry на network reset
-  - показать понятную ошибку
+supabase/functions/
+  admin-crm/
+    index.ts          ← list chats + get messages (service-role, is_admin gate)
+  admin-homework/
+    index.ts          ← router: tutors | assignments | students | thread
 
-Phase 2: инфраструктурный фикс
-  - first-party backend domain на sokratai.ru
-  - переключение web-клиента на новый домен
-
-Phase 3: проверка
-  - tutor flows без VPN из РФ
+src/components/admin/AdminCRM.tsx           ← invoke('admin-crm')
+src/components/admin/AdminChatView.tsx      ← invoke('admin-crm', {action:'messages'})
+src/lib/adminHomeworkApi.ts                 ← invoke('admin-homework', {action})
 ```
 
-## Ожидаемый результат
-- Репетитор сразу видит понятную причину, а не 5-минутное «восстанавливаем соединение».
-- Основной web-трафик tutor-кабинета идёт через домен `sokratai.ru`, который не должен так же массово сбрасываться у российских провайдеров.
-- Кабинет репетитора и ДЗ начинают работать без VPN у пользователей на Ростелекоме и похожих сетях.
+Шаблон auth-блока берём 1-в-1 из `supabase/functions/admin-analytics/index.ts` (lines 1–55): bearer → `getUser` → `rpc('is_admin')` → 403 либо service-role чтения.
+
+После мержа: `deploy-sokratai` на VPS (frontend изменился).
