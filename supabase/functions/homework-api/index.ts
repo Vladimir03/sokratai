@@ -4524,11 +4524,13 @@ async function loadLatestStudentImageUrlsForTask(
       return null;
     }
     if (imageRef.startsWith("https://")) {
+      // Accept both direct supabase.co AND api.sokratai.ru proxy hosts.
+      // After Phase B migration frontend stores proxy URLs in DB.
       const supabaseUrl = Deno.env.get("SUPABASE_URL");
-      const isAllowedSignedUrl = Boolean(
-        supabaseUrl &&
-        imageRef.startsWith(`${supabaseUrl}/storage/v1/object/sign/`),
-      );
+      const proxyUrl = "https://api.sokratai.ru";
+      const isAllowedSignedUrl =
+        (supabaseUrl && imageRef.startsWith(`${supabaseUrl}/storage/v1/object/sign/`)) ||
+        imageRef.startsWith(`${proxyUrl}/storage/v1/object/sign/`);
       if (isAllowedSignedUrl) {
         return imageRef;
       }

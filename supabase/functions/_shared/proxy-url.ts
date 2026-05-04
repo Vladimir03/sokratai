@@ -27,3 +27,21 @@ export function rewriteToProxy<T>(value: T): T {
   if (!value.includes(SUPABASE_DIRECT)) return value;
   return value.replaceAll(SUPABASE_DIRECT, SUPABASE_PROXY) as T;
 }
+
+/**
+ * Reverse of rewriteToProxy: converts api.sokratai.ru host back to the direct
+ * Supabase project domain. Use BEFORE server-side fetch() inside edge functions
+ * to avoid the unnecessary US -> RU -> US roundtrip.
+ *
+ * Edge functions run inside Supabase USA. Going through our Selectel proxy in
+ * Moscow adds 200-400ms latency without security benefit (server-to-server
+ * fetches don't hit RU ISP blocks).
+ *
+ * Both hosts produce valid signed URLs because the JWT token is bound to the
+ * project signing key, not to the hostname.
+ */
+export function rewriteToDirect<T extends string | null | undefined>(value: T): T {
+  if (!value || typeof value !== "string") return value;
+  if (!value.includes(SUPABASE_PROXY)) return value;
+  return value.replaceAll(SUPABASE_PROXY, SUPABASE_DIRECT) as T;
+}

@@ -54,10 +54,16 @@ interface ChatRequestBody {
 // Imported from _shared/image-domains.ts so chat / homework-api / future AI
 // callers stay in sync. Adding a bucket to any homework write-path requires
 // extending HOMEWORK_AI_BUCKETS there — see rule 40 invariant.
+//
+// Both direct (vrsseotrfmsxpbciyqzc.supabase.co) and proxy (api.sokratai.ru)
+// signed URLs are valid — same JWT signing key. Validate against both hosts
+// because after Phase B migration (CLAUDE.md "# Network & Infrastructure"),
+// frontend stores proxy URLs in DB but server-side fetches still go direct.
 import { buildAllowedSignedUrlPrefixes } from "../_shared/image-domains.ts";
-const ALLOWED_IMAGE_DOMAINS = buildAllowedSignedUrlPrefixes(
+const ALLOWED_IMAGE_DOMAINS = buildAllowedSignedUrlPrefixes([
   Deno.env.get("SUPABASE_URL") ?? "",
-);
+  "https://api.sokratai.ru",
+]);
 
 /** Max image size (5 MB raw ≈ 6.7 MB base64) to stay within gateway body limits. */
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024;

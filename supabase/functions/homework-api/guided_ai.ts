@@ -18,6 +18,7 @@ import {
   MAX_GUIDED_CHAT_IMAGES_FOR_AI,
   MAX_TASK_IMAGES_FOR_AI,
 } from "../_shared/attachment-refs.ts";
+import { rewriteToDirect } from "../_shared/proxy-url.ts";
 
 // ─── Constants ──────────────────────────────────────────────────────────────
 
@@ -507,10 +508,15 @@ function arrayBufferToBase64(buffer: ArrayBuffer): string {
 }
 
 function isAllowedSignedStorageUrl(url: string): boolean {
+  // Both direct (vrsseotrfmsxpbciyqzc.supabase.co) and proxy (api.sokratai.ru)
+  // signed URLs are valid — same JWT signing key. Validate against both hosts
+  // because after Phase B migration, frontend stores proxy URLs in DB but
+  // server-side fetches may convert them back to direct for performance.
   const supabaseUrl = Deno.env.get("SUPABASE_URL");
+  const proxyUrl = "https://api.sokratai.ru";
   return Boolean(
-    supabaseUrl &&
-    url.startsWith(`${supabaseUrl}/storage/v1/object/sign/`),
+    (supabaseUrl && url.startsWith(`${supabaseUrl}/storage/v1/object/sign/`)) ||
+    url.startsWith(`${proxyUrl}/storage/v1/object/sign/`),
   );
 }
 
@@ -546,7 +552,10 @@ async function inlinePromptImageUrl(imageUrl: string | null | undefined): Promis
   }
 
   try {
-    const response = await fetch(trimmed);
+    // Server-to-server fetch: convert proxy URL to direct for lower latency.
+    // Both URLs work (same JWT), but direct skips US -> RU -> US roundtrip.
+    const fetchUrl = rewriteToDirect(trimmed);
+    const response = await fetch(fetchUrl);
     if (!response.ok) {
       console.error("guided_ai_inline_image_failed", {
         status: response.status,
