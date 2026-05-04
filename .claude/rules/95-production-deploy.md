@@ -131,4 +131,5 @@ systemctl reload nginx
 В планах (tech debt):
 
 - **GitHub Actions auto-deploy** — после push на main, GitHub runner билдит и rsync-ит на VPS, deploy-sokratai становится не нужен. Когда это случится — это правило перепишется на «push в main = автодеплой».
-- **Service Worker для sokratai.ru** — сейчас отключён (см. `src/registerServiceWorker.ts` — registers только на `sokratai.lovable.app`). Когда SW заработает на нашем хостинге, повторные визиты будут моментальными.
+- **Version manifest для emergency force-update** — `dist/version.json` + client-side `versionCheck.ts` + force-reload banner при mismatch с `minSupportedVersion`. Spec: `docs/delivery/features/service-worker-prod/spec.md` §5 + TASK-6/7 (P1, deferred). Пока что emergency recovery через `?sw=off` kill-switch (P0, live с 2026-05-04, см. `src/lib/swKillSwitch.ts`).
+- **Tutor-side push opt-in UI** — `<PushOptInBanner>` смонтирован только на student'ах (`src/pages/StudentHomework.tsx`). Для tutor'ов push subscription пока возможен только вручную через DevTools console. Когда добавится tutor opt-in surface — push на ДЗ от ученика начнёт реально работать end-to-end (R1-3 в Job Graph).
