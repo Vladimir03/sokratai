@@ -16,7 +16,7 @@ import {
   MAX_TASK_IMAGES,
   parseAttachmentUrls,
 } from "../_shared/attachment-refs.ts";
-import { rewriteToProxy } from "../_shared/proxy-url.ts";
+import { rewriteToProxy, SUPABASE_PROXY_URL } from "../_shared/proxy-url.ts";
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
@@ -4527,10 +4527,9 @@ async function loadLatestStudentImageUrlsForTask(
       // Accept both direct supabase.co AND api.sokratai.ru proxy hosts.
       // After Phase B migration frontend stores proxy URLs in DB.
       const supabaseUrl = Deno.env.get("SUPABASE_URL");
-      const proxyUrl = "https://api.sokratai.ru";
       const isAllowedSignedUrl =
         (supabaseUrl && imageRef.startsWith(`${supabaseUrl}/storage/v1/object/sign/`)) ||
-        imageRef.startsWith(`${proxyUrl}/storage/v1/object/sign/`);
+        imageRef.startsWith(`${SUPABASE_PROXY_URL}/storage/v1/object/sign/`);
       if (isAllowedSignedUrl) {
         return imageRef;
       }
