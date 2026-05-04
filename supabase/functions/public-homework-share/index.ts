@@ -1,6 +1,7 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
 import type { SupabaseClient as SupabaseClientType } from "npm:@supabase/supabase-js@2";
 import { parseAttachmentUrls } from "../_shared/attachment-refs.ts";
+import { rewriteToProxy } from "../_shared/proxy-url.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -127,7 +128,7 @@ async function createSignedStorageUrls(
       continue;
     }
 
-    urls.push(data.signedUrl);
+    urls.push(rewriteToProxy(data.signedUrl));
   }
 
   return urls;

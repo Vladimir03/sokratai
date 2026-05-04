@@ -16,6 +16,7 @@ import {
   MAX_TASK_IMAGES,
   parseAttachmentUrls,
 } from "../_shared/attachment-refs.ts";
+import { rewriteToProxy } from "../_shared/proxy-url.ts";
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
@@ -4233,7 +4234,7 @@ async function handleMaterialSignedUrl(
     return jsonError(cors, 500, "STORAGE_ERROR", "Failed to generate signed URL");
   }
 
-  return jsonOk(cors, { url: signedData.signedUrl });
+  return jsonOk(cors, { url: rewriteToProxy(signedData.signedUrl) });
 }
 
 function parseStorageRef(
@@ -4357,7 +4358,7 @@ async function createSignedStorageUrl(
     return null;
   }
 
-  return data.signedUrl;
+  return rewriteToProxy(data.signedUrl);
 }
 
 async function getReadableAssignmentOrThrow(
@@ -4828,7 +4829,7 @@ async function handleTaskImageSignedUrl(
     return jsonError(cors, 500, "STORAGE_ERROR", "Failed to generate signed URL");
   }
 
-  return jsonOk(cors, { url: signedData.signedUrl });
+  return jsonOk(cors, { url: rewriteToProxy(signedData.signedUrl) });
 }
 
 async function handleTaskImagesSignedUrls(
