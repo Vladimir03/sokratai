@@ -1,8 +1,13 @@
-/** Strict allow-list: SW runs ONLY on the published production domain. */
-const PROD_HOSTNAME = 'sokratai.lovable.app';
+import { checkSwKillSwitch } from '@/lib/swKillSwitch';
+
+// Phase B (2026-05-03): sokratai.ru = production self-hosted on Selectel VPS Moscow.
+// sokratai.lovable.app = preview/dev. Both register SW; non-prod hosts unregister.
+// www.sokratai.ru kept defensively in case apex redirect is missing on nginx.
+// See CLAUDE.md "# Network & Infrastructure" for full architecture.
+const PROD_HOSTS = ['sokratai.ru', 'www.sokratai.ru', 'sokratai.lovable.app'];
 
 function isProductionHost(): boolean {
-  return window.location.hostname === PROD_HOSTNAME;
+  return PROD_HOSTS.includes(window.location.hostname);
 }
 
 /**
@@ -27,8 +32,15 @@ async function forceCleanup() {
   }
 }
 
-export const registerServiceWorker = () => {
+export const registerServiceWorker = async (): Promise<void> => {
   if (!('serviceWorker' in navigator)) return;
+
+  // Kill-switch FIRST — before host check or registration. If `?sw=off` is in URL,
+  // checkSwKillSwitch() unregisters all SWs, clears caches, and reloads the page
+  // without the param (returns true). On reload param is gone → fall through to normal flow.
+  if (await checkSwKillSwitch()) {
+    return;
+  }
 
   // Non-prod: force unregister + clear caches, never register
   if (!isProductionHost()) {
