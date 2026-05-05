@@ -1,4 +1,5 @@
-import { Play } from "lucide-react";
+import { Play, Maximize2, X } from "lucide-react";
+import { useState, useEffect } from "react";
 
 import { trackTutorLandingGoal } from "@/lib/tutorLandingAnalytics";
 import founderEgorImg from "@/assets/founder-egor.png";
@@ -221,6 +222,22 @@ function CaseEgorCard() {
   // as third-party social proof (the student noticed the AI tools Егор is
   // building — that's exactly Сократ AI). Two images live in
   // `public/marketing/tutor-landing/` so they ship as static assets.
+  const [zoomed, setZoomed] = useState(false);
+
+  useEffect(() => {
+    if (!zoomed) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setZoomed(false);
+    };
+    document.addEventListener("keydown", onKey);
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      document.body.style.overflow = prev;
+    };
+  }, [zoomed]);
+
   return (
     <article
       className="relative flex flex-col gap-3 rounded-[14px] p-5"
