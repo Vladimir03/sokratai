@@ -1,29 +1,19 @@
 import { Play } from "lucide-react";
 
 import { trackTutorLandingGoal } from "@/lib/tutorLandingAnalytics";
+import founderEgorImg from "@/assets/founder-egor.png";
+import founderVladimirImg from "@/assets/founder-vladimir.png";
 
 type Founder = {
   name: string;
-  initials: string;
-  credentials: string[];
-  quote: string;
-  photoSrc?: string;
+  imageSrc: string;
   cta?: { label: string; href: string; external: boolean };
 };
 
 const FOUNDERS: Founder[] = [
   {
     name: "Егор Блинов",
-    initials: "ЕБ",
-    credentials: [
-      "Преподаватель МФТИ",
-      "Готовит к ЕГЭ по физике с 2016 (10 лет)",
-      "Дважды 100 баллов ЕГЭ по физике — лично",
-      "Основатель онлайн-школы Razveday.ru",
-    ],
-    quote:
-      "«Я — репетитор в прошлом и в настоящем. Сократ AI мы строим так, чтобы он закрывал мои ночные проверки ДЗ — не мою методику. AI здесь не вместо меня, а со мной.»",
-    photoSrc: undefined,
+    imageSrc: founderEgorImg,
     cta: {
       label: "Канал Егора →",
       href: "https://t.me/sokrat_rep",
@@ -32,16 +22,7 @@ const FOUNDERS: Founder[] = [
   },
   {
     name: "Владимир Камчаткин",
-    initials: "ВК",
-    credentials: [
-      "Основатель Сократ AI",
-      "МФТИ",
-      "Фоксфорд",
-      "Т-Образование",
-    ],
-    quote:
-      "«Я пять лет строил продукты для онлайн-школ и репетиторов. Главный урок: платформы, которые хотят заменить репетитора, проигрывают. Платформы, которые усиливают его, — выигрывают.»",
-    photoSrc: undefined,
+    imageSrc: founderVladimirImg,
   },
 ];
 
@@ -132,82 +113,40 @@ export default function SocialProof() {
   );
 }
 
-function FounderPhoto({
-  name,
-  initials,
-  photoSrc,
-}: {
-  name: string;
-  initials: string;
-  photoSrc?: string;
-}) {
-  const dimension = 120;
-  if (photoSrc) {
-    return (
-      <img
-        src={photoSrc}
-        alt={`Фото: ${name}`}
-        width={dimension}
-        height={dimension}
-        loading="lazy"
-        className="h-[120px] w-[120px] object-cover rounded-[14px]"
-      />
-    );
-  }
-  return (
-    <div
-      aria-label={`Фото: ${name}`}
-      className="flex h-[120px] w-[120px] items-center justify-center rounded-[14px] font-extrabold text-white"
-      style={{
-        background:
-          "linear-gradient(135deg, var(--sokrat-green-200) 0%, var(--sokrat-green-500) 100%)",
-        fontSize: 36,
-      }}
-    >
-      {initials}
-    </div>
-  );
-}
-
 function FounderCard({ founder }: { founder: Founder }) {
   return (
     <article
-      className="flex flex-col gap-4 rounded-[18px] p-6"
+      className="flex flex-col gap-4 rounded-[18px] overflow-hidden"
       style={{
         backgroundColor: "var(--sokrat-card)",
         border: "1px solid var(--sokrat-border)",
       }}
     >
-      <FounderPhoto
-        name={founder.name}
-        initials={founder.initials}
-        photoSrc={founder.photoSrc}
+      <img
+        src={founder.imageSrc}
+        alt={`${founder.name} — Сократ AI`}
+        loading="lazy"
+        className="block w-full h-auto"
+        style={{ aspectRatio: "1 / 1", objectFit: "cover" }}
       />
-      <div className="sp-founder-name">{founder.name}</div>
-      <ul className="sp-founder-credentials flex flex-col gap-1 list-none p-0 m-0">
-        {founder.credentials.map((line) => (
-          <li key={line}>
-            <span>{line}</span>
-          </li>
-        ))}
-      </ul>
-      <blockquote className="sp-founder-quote">{founder.quote}</blockquote>
       {founder.cta && (
-        <a
-          href={founder.cta.href}
-          target={founder.cta.external ? "_blank" : undefined}
-          rel={founder.cta.external ? "noopener noreferrer" : undefined}
-          onClick={() =>
-            trackTutorLandingGoal("tutor_landing_tg_channel_click")
-          }
-          className="self-start inline-flex items-center gap-1 px-4 py-2 rounded-md border-2 text-sm font-semibold transition-colors hover:bg-[color:var(--sokrat-green-50)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2"
-          style={{
-            color: "var(--sokrat-green-700)",
-            borderColor: "var(--sokrat-green-700)",
-          }}
-        >
-          {founder.cta.label}
-        </a>
+        <div className="px-6 pb-6">
+          <a
+            href={founder.cta.href}
+            target={founder.cta.external ? "_blank" : undefined}
+            rel={founder.cta.external ? "noopener noreferrer" : undefined}
+            onClick={() =>
+              trackTutorLandingGoal("tutor_landing_tg_channel_click")
+            }
+            className="self-start inline-flex items-center gap-1 px-4 py-2 rounded-md border-2 text-sm font-semibold transition-colors hover:bg-[color:var(--sokrat-green-50)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2"
+            style={{
+              color: "var(--sokrat-green-700)",
+              borderColor: "var(--sokrat-green-700)",
+            }}
+          >
+            {founder.cta.label}
+          </a>
+        </div>
       )}
     </article>
   );
