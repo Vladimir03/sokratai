@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { lovable } from "@/integrations/lovable";
+import { supabase } from "@/lib/supabaseClient";
 import { stashPendingConsent, type ConsentSource } from "@/lib/consent";
 import { toast } from "sonner";
 
@@ -32,19 +32,21 @@ export default function GoogleAuthButton({
       // Stash consent intent BEFORE redirect — applied on SIGNED_IN return.
       stashPendingConsent(consentSource);
 
-      const result = await lovable.auth.signInWithOAuth("google", {
-        redirect_uri: `${window.location.origin}${redirectPath}`,
-        extraParams: { prompt: "select_account" },
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider: "google",
+        options: {
+          redirectTo: `${window.location.origin}${redirectPath}`,
+          queryParams: { prompt: "select_account" },
+        },
       });
 
-      if (result.error) {
+      if (error) {
         toast.error("Не удалось войти через Google. Попробуйте ещё раз.");
-        console.error("[google-auth] error", result.error);
+        console.error("[google-auth] error", error);
         setLoading(false);
         return;
       }
-      // On `result.redirected` — browser navigates to Google, no further action.
-      // On success without redirect — onAuthStateChange in caller handles next steps.
+      // Browser will redirect to Google — onAuthStateChange in caller handles return.
     } catch (e) {
       console.error("[google-auth] threw", e);
       toast.error("Не удалось войти через Google.");
