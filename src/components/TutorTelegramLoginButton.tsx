@@ -41,7 +41,10 @@ const TutorTelegramLoginButton = ({
       );
       
       const data = await response.json();
-      console.log("Token check response:", data);
+      console.log(
+        "[telegram-login] poll response:",
+        { status: data.status, hasSession: !!data.session, user_id: data.user_id, intended_role: data.intended_role, manual },
+      );
 
       if (data.status === "verified" && data.session) {
         // Step 1: install session locally. setSession is sync-ish (writes to
@@ -113,8 +116,28 @@ const TutorTelegramLoginButton = ({
         return true;
       }
 
+      // `used` = token was verified but already consumed (likely by a previous
+      // poll on this same screen). The earlier consumption either succeeded
+      // and navigated, or failed silently. Either way, this token is dead —
+      // bring user back to idle so they can start fresh, instead of leaving
+      // them stuck on "Ожидание подтверждения".
+      if (data.status === "used") {
+        console.warn("[telegram-login] token state=used (already consumed) — resetting to idle");
+        if (manual) {
+          toast.info("Этот вход уже завершён. Если не попали внутрь — войдите заново.");
+        }
+        setLoading(false);
+        setStatus("idle");
+        setCurrentToken(null);
+        return true;
+      }
+
+      // status === "pending" → bot hasn't confirmed yet. On manual check
+      // explain clearly what to do next so the user doesn't sit waiting.
       if (manual) {
-        toast.info("Ожидаем подтверждение в Telegram...");
+        toast.info(
+          "Откройте Telegram и нажмите Старт в боте. Если не помогает — кликните «Открыть Telegram снова».",
+        );
       }
 
       return false;
