@@ -1,4 +1,5 @@
-import { Play } from "lucide-react";
+import { Play, Maximize2, X } from "lucide-react";
+import { useState, useEffect } from "react";
 
 import { trackTutorLandingGoal } from "@/lib/tutorLandingAnalytics";
 import founderEgorImg from "@/assets/founder-egor.png";
@@ -221,6 +222,22 @@ function CaseEgorCard() {
   // as third-party social proof (the student noticed the AI tools Егор is
   // building — that's exactly Сократ AI). Two images live in
   // `public/marketing/tutor-landing/` so they ship as static assets.
+  const [zoomed, setZoomed] = useState(false);
+
+  useEffect(() => {
+    if (!zoomed) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setZoomed(false);
+    };
+    document.addEventListener("keydown", onKey);
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      document.body.style.overflow = prev;
+    };
+  }, [zoomed]);
+
   return (
     <article
       className="relative flex flex-col gap-3 rounded-[14px] p-5"
@@ -262,16 +279,33 @@ function CaseEgorCard() {
       </blockquote>
 
       <figure className="mt-1 flex flex-col gap-2">
-        <img
-          src="/marketing/tutor-landing/egor-student-feedback.jpg"
-          alt="Сообщение ученицы Егору в Telegram: «А вы случайно не преподаёте математику подготовка к ЕГЭ? Просто мне очень нравится, как вы преподносите материал, какие плюшки в виде сайтов, ИИ вы делаете…»"
-          loading="lazy"
-          className="w-full rounded-[10px]"
-          style={{
-            border: "1px solid var(--sokrat-border)",
-            backgroundColor: "var(--sokrat-card)",
-          }}
-        />
+        <div className="relative">
+          <img
+            src="/marketing/tutor-landing/egor-student-feedback.jpg"
+            alt="Сообщение ученицы Егору в Telegram: «А вы случайно не преподаёте математику подготовка к ЕГЭ? Просто мне очень нравится, как вы преподносите материал, какие плюшки в виде сайтов, ИИ вы делаете…»"
+            loading="lazy"
+            className="w-full rounded-[10px] cursor-zoom-in"
+            style={{
+              border: "1px solid var(--sokrat-border)",
+              backgroundColor: "var(--sokrat-card)",
+            }}
+            onClick={() => setZoomed(true)}
+          />
+          <button
+            type="button"
+            onClick={() => setZoomed(true)}
+            aria-label="Увеличить сообщение ученицы"
+            className="absolute top-2 right-2 inline-flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-semibold shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-2"
+            style={{
+              backgroundColor: "rgba(255,255,255,0.95)",
+              color: "var(--sokrat-green-800)",
+              border: "1px solid var(--sokrat-border)",
+            }}
+          >
+            <Maximize2 className="h-3 w-3" aria-hidden="true" />
+            Увеличить
+          </button>
+        </div>
         <figcaption
           className="text-[11px] leading-[1.4] text-center"
           style={{ color: "var(--sokrat-fg3)" }}
@@ -279,6 +313,32 @@ function CaseEgorCard() {
           Сообщение ученицы Егору, май 2026
         </figcaption>
       </figure>
+
+      {zoomed && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="Сообщение ученицы Егору — увеличенный вид"
+          onClick={() => setZoomed(false)}
+          className="fixed inset-0 z-[100] flex items-center justify-center p-4 md:p-8"
+          style={{ backgroundColor: "rgba(0,0,0,0.85)" }}
+        >
+          <button
+            type="button"
+            onClick={() => setZoomed(false)}
+            aria-label="Закрыть"
+            className="absolute top-4 right-4 inline-flex h-10 w-10 items-center justify-center rounded-full bg-white/95 text-slate-900 shadow-md hover:bg-white focus-visible:outline-none focus-visible:ring-2"
+          >
+            <X className="h-5 w-5" aria-hidden="true" />
+          </button>
+          <img
+            src="/marketing/tutor-landing/egor-student-feedback.jpg"
+            alt="Сообщение ученицы Егору в Telegram — увеличенный вид"
+            className="max-h-[90vh] max-w-[95vw] rounded-lg object-contain"
+            onClick={(e) => e.stopPropagation()}
+          />
+        </div>
+      )}
     </article>
   );
 }
