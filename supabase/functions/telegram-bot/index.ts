@@ -1244,13 +1244,31 @@ async function handleWebLogin(telegramUserId: number, telegramUsername: string |
       }
     }
 
-    // Update token with session data
+    // Update token with session data.
+    //
+    // CRITICAL: must use a SEPARATE admin client, not the shared `supabase`
+    // singleton above. Reason: the shared client called `auth.verifyOtp(...)`
+    // earlier in this function to mint a session for the tutor. supabase-js
+    // sets that session in-memory on the client, so subsequent
+    // `supabase.from(...)` requests get the USER's JWT in the Authorization
+    // header — not service_role. Migration 20260319191057 dropped the
+    // "Service role full access" RLS policy on telegram_login_tokens,
+    // assuming service_role would always bypass RLS. With the user JWT
+    // bleeding through, the UPDATE silently affects 0 rows (no policy
+    // permits authenticated UPDATE), bot logs success, sends ✅, but
+    // frontend polling never resolves.
+    //
+    // Fresh client = clean service_role context = RLS bypass guaranteed.
+    const tokenWriter = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
+      auth: { persistSession: false, autoRefreshToken: false },
+    });
+
     const sessionData = {
       access_token: session.access_token,
       refresh_token: session.refresh_token,
     };
 
-    const { data: updatedRows, error: updateError } = await supabase
+    const { data: updatedRows, error: updateError } = await tokenWriter
       .from("telegram_login_tokens")
       .update({
         telegram_user_id: telegramUserId,
@@ -1277,7 +1295,7 @@ async function handleWebLogin(telegramUserId: number, telegramUsername: string |
     }
 
     if (!updatedRows || updatedRows.length === 0) {
-      console.error("CRITICAL: token update affected 0 rows", {
+      console.error("CRITICAL: token update affected 0 rows (RLS blocked?)", {
         token_id: tokenData.id,
         client_id: tokenData.client_id,
       });
@@ -1300,8 +1318,9 @@ async function handleWebLogin(telegramUserId: number, telegramUsername: string |
     // with the same client_id (browser-local UUID) so frontend's polling
     // resolves regardless of which sibling Telegram actually delivered.
     // Safe: client_id is browser-scoped; only pending tokens are touched.
+    // Uses tokenWriter (clean service_role) for the same RLS reason as above.
     if (tokenData.client_id) {
-      const { data: absorbed, error: absorbError } = await supabase
+      const { data: absorbed, error: absorbError } = await tokenWriter
         .from("telegram_login_tokens")
         .update({
           telegram_user_id: telegramUserId,
