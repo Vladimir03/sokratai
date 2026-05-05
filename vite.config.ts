@@ -44,10 +44,11 @@ export default defineConfig(({ mode }) => ({
           ],
           // Supabase - loaded on auth pages
           'supabase': ['@supabase/supabase-js'],
-          // Math/LaTeX - loaded only on Chat/student pages
-          'math-rendering': ['katex', 'react-katex', 'react-markdown'],
-          // Charts - loaded only on admin/analytics pages
-          'charts': ['recharts'],
+          // NOTE: katex/react-katex/react-markdown and recharts are intentionally
+          // NOT in manualChunks. Forcing them into named chunks made Rollup hoist
+          // them eagerly into the landing page's preload graph (~265KB wasted JS,
+          // ~600ms main-thread on the landing). Letting Rollup auto-split keeps
+          // them inside the lazy route chunks that actually use them.
         },
         // Optimize chunk names
         chunkFileNames: 'assets/[name]-[hash].js',
