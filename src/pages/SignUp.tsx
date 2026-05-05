@@ -278,13 +278,41 @@ const SignUp = () => {
           gap: 10px;
           margin: 8px 0 20px;
         }
+        /* Custom-rendered checkbox so the green-bordered square is always visible (browser accent-color was rendering invisible on some setups). Filled green + white tick when checked. */
         .tst-checkbox {
+          appearance: none;
+          -webkit-appearance: none;
           margin-top: 2px;
-          width: 18px;
-          height: 18px;
-          accent-color: var(--sokrat-green-700);
+          width: 22px;
+          height: 22px;
           flex-shrink: 0;
+          background: #fff;
+          border: 2px solid var(--sokrat-green-700);
+          border-radius: 4px;
+          cursor: pointer;
+          position: relative;
+          transition: background-color 150ms;
           touch-action: manipulation;
+        }
+        .tst-checkbox:checked {
+          background-color: var(--sokrat-green-700);
+        }
+        .tst-checkbox:checked::after {
+          content: "";
+          position: absolute;
+          inset: 0;
+          background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='white' stroke-width='2.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3 8.5l3.5 3.5L13 5'/%3E%3C/svg%3E");
+          background-repeat: no-repeat;
+          background-position: center;
+          background-size: 14px 14px;
+        }
+        .tst-checkbox:focus-visible {
+          outline: 2px solid var(--sokrat-green-700);
+          outline-offset: 2px;
+        }
+        .tst-checkbox:disabled {
+          opacity: 0.5;
+          cursor: not-allowed;
         }
         .tst-checkbox-label {
           font-size: 13px;
@@ -489,7 +517,7 @@ const SignUp = () => {
               }}
               aria-disabled={!consent}
             >
-              <TelegramLoginButton />
+              <TelegramLoginButton className="w-full" />
             </div>
             <GoogleAuthButton
               redirectPath="/chat"
