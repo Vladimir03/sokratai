@@ -234,14 +234,6 @@ const RegisterTutor = () => {
                 disabled={loading}
               />
             </div>
-            <Button 
-              type="submit" 
-              className="w-full" 
-              disabled={loading || !consent}
-            >
-              {loading ? "Регистрация..." : "Зарегистрироваться"}
-            </Button>
-
             <div className="flex items-start gap-2">
               <input
                 id="register-tutor-consent"
@@ -276,6 +268,13 @@ const RegisterTutor = () => {
                 </a>
               </label>
             </div>
+            <Button 
+              type="submit" 
+              className="w-full" 
+              disabled={loading || !consent}
+            >
+              {loading ? "Регистрация..." : "Зарегистрироваться"}
+            </Button>
           </form>
 
           <div className="space-y-3 text-center text-sm">
