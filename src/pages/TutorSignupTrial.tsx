@@ -766,7 +766,7 @@ export default function TutorSignupTrial() {
               }}
               aria-disabled={!oauthEnabled}
             >
-              <TutorTelegramLoginButton />
+              <TutorTelegramLoginButton className="w-full" />
             </div>
             <p className="tst-tg-hint">
               Войдите через Telegram (нужен VPN, если заблокирован)
