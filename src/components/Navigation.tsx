@@ -39,8 +39,11 @@ const Navigation = () => {
           </span>
         </Link>
 
-        {/* Tabs — scrollable on mobile, flex on desktop */}
-        <div className="flex-1 overflow-x-auto scrollbar-hide min-w-0">
+        {/* Tabs — scrollable on mobile, flex on desktop.
+            touch-pan-x: per .claude/rules/80-cross-browser.md, scrollable
+            containers with clickable children need explicit touch-action
+            to keep horizontal swipe working on iOS Safari. */}
+        <div className="flex-1 overflow-x-auto scrollbar-hide min-w-0 touch-pan-x">
           <div className="flex items-center gap-1 md:gap-2 min-w-max">
             {navItems.map((item) => {
               const Icon = item.icon;

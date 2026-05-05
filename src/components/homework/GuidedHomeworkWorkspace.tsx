@@ -571,6 +571,30 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
     [assignment.tasks],
   );
 
+  // Stable tutor identity object so GuidedChatMessage's memo() short-circuits
+  // across refetches/streaming/state changes. React Query has structural
+  // sharing, but anchoring the dependency list to the three primitive fields
+  // makes the contract explicit (AC-10: no avatar flicker on scroll).
+  // Anchored to primitive fields so the memoized object stays stable across
+  // refetches that change the wrapping thread/tutor_profile reference but
+  // not the values inside. Including `thread?.tutor_profile` in deps would
+  // defeat AC-10 (avatar would flicker on every refetch).
+  /* eslint-disable react-hooks/exhaustive-deps */
+  const tutorProfile = useMemo(() => {
+    const profile = thread?.tutor_profile;
+    if (!profile) return null;
+    return {
+      display_name: profile.display_name,
+      avatar_url: profile.avatar_url,
+      gender: profile.gender,
+    };
+  }, [
+    thread?.tutor_profile?.display_name,
+    thread?.tutor_profile?.avatar_url,
+    thread?.tutor_profile?.gender,
+  ]);
+  /* eslint-enable react-hooks/exhaustive-deps */
+
   const matchMessageToTask = useCallback((
     message: HomeworkThreadMessage,
     task: StudentHomeworkAssignmentDetails['tasks'][number] | null | undefined,
@@ -1706,6 +1730,9 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
             key={msg.id}
             message={msg}
             onRetry={handleRetryMessage}
+            tutorDisplayName={tutorProfile?.display_name}
+            tutorAvatarUrl={tutorProfile?.avatar_url}
+            tutorGender={tutorProfile?.gender}
           />
         ))}
 

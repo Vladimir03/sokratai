@@ -1,0 +1,1369 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Sokrat AI · Профиль репетитора · Макет</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Golos+Text:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  /* ─────────────────────────────────────────────────────────────
+     Design tokens — выровнено с src/styles/colors_and_type.css
+     (tutor mode: data-sokrat-mode="tutor", body 14, hit 40)
+     ───────────────────────────────────────────────────────────── */
+  :root{
+    --sokrat-green-900:#0f4432;
+    --sokrat-green-800:#145236;
+    --sokrat-green-700:#1B6B4A;
+    --sokrat-green-500:#2a8a63;
+    --sokrat-green-200:#9ad3b8;
+    --sokrat-green-100:#E8F5EE;
+    --sokrat-green-50: #f3f9f5;
+
+    --sokrat-ochre-700:#c97424;
+    --sokrat-ochre-500:#E8913A;
+    --sokrat-ochre-100:#FFF3E6;
+
+    --sokrat-surface:#F8FAFC;
+    --sokrat-card:#FFFFFF;
+    --sokrat-border:#E2E8F0;
+    --sokrat-border-light:#EEF2F7;
+
+    --sokrat-fg1:#0F172A;
+    --sokrat-fg2:#334155;
+    --sokrat-fg3:#64748B;
+    --sokrat-fg-muted:#94A3B8;
+
+    --sokrat-state-success-fg:#0F7A4A;
+    --sokrat-state-success-bg:#E8F5EE;
+    --sokrat-state-warning-fg:#B15A12;
+    --sokrat-state-warning-bg:#FEF3E6;
+    --sokrat-state-danger-fg:#B91C1C;
+    --sokrat-state-danger-bg:#FEE2E2;
+    --sokrat-state-info-fg:#1D4ED8;
+    --sokrat-state-info-bg:#E0EBFD;
+
+    --sokrat-telegram:#0088cc;
+
+    --sokrat-shadow-xs:0 1px 2px rgba(15,23,42,.05);
+    --sokrat-shadow-sm:0 2px 6px rgba(15,23,42,.06);
+    --sokrat-shadow-md:0 4px 16px rgba(15,23,42,.08);
+    --sokrat-shadow-lg:0 10px 28px rgba(15,23,42,.10);
+    --sokrat-focus-ring:0 0 0 3px rgba(27,107,74,.22);
+
+    --sokrat-radius-xs:6px;
+    --sokrat-radius-sm:10px;
+    --sokrat-radius-md:14px;
+    --sokrat-radius-lg:16px;
+    --sokrat-radius-xl:24px;
+    --sokrat-radius-full:9999px;
+
+    --bg:#EEF2EF;
+  }
+
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0}
+  body{
+    background:var(--bg);
+    font-family:'Golos Text',system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;
+    color:var(--sokrat-fg1);
+    -webkit-font-smoothing:antialiased;
+    -moz-osx-font-smoothing:grayscale;
+    line-height:1.5;
+    font-variant-numeric:tabular-nums lining-nums;
+  }
+  button{font-family:inherit}
+
+  /* ─────────────────────────────────────────────────────────────
+     Doc shell (wraps each surface for QA/review)
+     ───────────────────────────────────────────────────────────── */
+  .doc-header{
+    background:#0F172A;color:#fff;
+    padding:28px 32px;
+    display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:16px;
+  }
+  .doc-header h1{margin:0;font-size:22px;font-weight:700;letter-spacing:-.01em}
+  .doc-header .meta{font-size:13px;color:#94A3B8}
+  .doc-nav{
+    background:#1E293B;color:#CBD5E1;
+    padding:12px 32px;display:flex;gap:16px;flex-wrap:wrap;font-size:13px;
+    position:sticky;top:0;z-index:50;
+    border-bottom:1px solid #334155;
+  }
+  .doc-nav a{
+    color:#CBD5E1;text-decoration:none;padding:6px 10px;border-radius:6px;
+    transition:background .15s,color .15s;
+  }
+  .doc-nav a:hover{background:#334155;color:#fff}
+
+  .surface{max-width:1280px;margin:48px auto 0;padding:0 24px}
+  .surface-label{display:flex;align-items:baseline;gap:14px;margin-bottom:14px;flex-wrap:wrap}
+  .surface-label .num{
+    background:var(--sokrat-green-700);color:#fff;
+    padding:4px 10px;border-radius:var(--sokrat-radius-full);
+    font-size:12px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;
+  }
+  .surface-label h2{margin:0;font-size:22px;font-weight:700;color:var(--sokrat-green-800)}
+  .surface-label .sub{color:var(--sokrat-fg3);font-size:14px}
+  .surface-note{
+    background:var(--sokrat-state-warning-bg);
+    border-left:4px solid var(--sokrat-ochre-500);
+    padding:14px 18px;border-radius:0 8px 8px 0;
+    margin-bottom:24px;color:#5D4007;font-size:13px;line-height:1.6;
+  }
+  .surface-note strong{color:#3F2A04}
+  .canvas{
+    background:var(--sokrat-card);
+    border:1px solid var(--sokrat-border);
+    border-radius:var(--sokrat-radius-xl);
+    overflow:hidden;
+    box-shadow:var(--sokrat-shadow-md);
+  }
+
+  /* ─────────────────────────────────────────────────────────────
+     1) ChromE: Tutor cabinet — sidenav + topbar + content
+     ───────────────────────────────────────────────────────────── */
+  .cabinet{
+    display:grid;
+    grid-template-columns:248px 1fr;
+    min-height:780px;
+    background:#F1F5F9;
+  }
+
+  /* Sidenav */
+  .t-nav{
+    background:#FFFFFF;
+    border-right:1px solid var(--sokrat-border);
+    display:flex;flex-direction:column;
+    padding:18px 12px 16px;
+  }
+  .t-nav__brand{
+    display:flex;align-items:center;gap:10px;
+    padding:6px 10px 18px;
+  }
+  .t-nav__brand-mark{
+    width:32px;height:32px;border-radius:8px;
+    background:linear-gradient(135deg,#1B6B4A 0%,#145236 100%);
+    color:#fff;display:flex;align-items:center;justify-content:center;
+    font-weight:700;font-size:14px;letter-spacing:.02em;
+  }
+  .t-nav__brand-name{font-size:15px;font-weight:600;color:var(--sokrat-fg1)}
+  .t-nav__group-label{
+    font-size:11px;color:var(--sokrat-fg-muted);
+    text-transform:uppercase;letter-spacing:.08em;
+    padding:14px 10px 6px;font-weight:600;
+  }
+  .t-nav__item{
+    display:flex;align-items:center;gap:10px;
+    padding:8px 10px;
+    border-radius:8px;
+    color:var(--sokrat-fg2);font-size:14px;
+    text-decoration:none;cursor:pointer;
+    transition:background .15s,color .15s;
+    margin-bottom:1px;
+  }
+  .t-nav__item:hover{background:var(--sokrat-border-light);color:var(--sokrat-fg1)}
+  .t-nav__item--active{
+    background:var(--sokrat-green-100);
+    color:var(--sokrat-green-800);
+    font-weight:600;
+  }
+  .t-nav__item svg{width:16px;height:16px;flex-shrink:0}
+  .t-nav__count{
+    margin-left:auto;
+    font-size:11px;font-weight:600;
+    color:var(--sokrat-fg3);
+    background:var(--sokrat-border-light);
+    padding:2px 7px;border-radius:9999px;
+  }
+  .t-nav__item--active .t-nav__count{
+    background:rgba(27,107,74,.12);color:var(--sokrat-green-800);
+  }
+  .t-nav__footer{margin-top:auto;padding-top:12px;border-top:1px solid var(--sokrat-border-light)}
+  .t-nav__footer .t-nav__item{color:var(--sokrat-fg3)}
+
+  /* Topbar */
+  .t-topbar{
+    background:#FFFFFF;
+    border-bottom:1px solid var(--sokrat-border);
+    height:56px;
+    display:flex;align-items:center;
+    padding:0 24px;
+    gap:16px;
+  }
+  .t-topbar__crumbs{
+    font-size:13px;color:var(--sokrat-fg3);
+    display:flex;align-items:center;gap:8px;
+  }
+  .t-topbar__crumbs strong{color:var(--sokrat-fg1);font-weight:600}
+  .t-topbar__crumbs .sep{color:var(--sokrat-fg-muted)}
+  .t-topbar__spacer{flex:1}
+  .t-topbar__avatar-btn{
+    width:36px;height:36px;border-radius:9999px;
+    border:2px solid var(--sokrat-green-700);
+    cursor:pointer;
+    background:transparent;padding:0;
+    display:flex;align-items:center;justify-content:center;
+    transition:box-shadow .15s,transform .12s;
+    overflow:hidden;
+  }
+  .t-topbar__avatar-btn:hover{box-shadow:var(--sokrat-focus-ring)}
+  .t-topbar__avatar-btn:active{transform:scale(.96)}
+
+  .t-topbar__hint-callout{
+    position:absolute;
+    background:#0F172A;color:#fff;
+    font-size:12px;font-weight:500;
+    padding:6px 10px;border-radius:8px;
+    top:64px;right:24px;
+    box-shadow:var(--sokrat-shadow-md);
+  }
+  .t-topbar__hint-callout::before{
+    content:"";position:absolute;top:-5px;right:18px;
+    width:10px;height:10px;background:#0F172A;
+    transform:rotate(45deg);
+  }
+
+  /* Profile content */
+  .t-content{
+    padding:32px 32px 64px;
+    background:#F1F5F9;
+    overflow-y:auto;
+  }
+  .t-content__container{
+    max-width:720px;margin:0 auto;
+    display:flex;flex-direction:column;gap:20px;
+  }
+  .t-page-h{
+    font-size:22px;font-weight:600;letter-spacing:-.005em;
+    color:var(--sokrat-fg1);margin:0 0 4px;
+  }
+  .t-page-sub{
+    font-size:13px;color:var(--sokrat-fg3);margin:0 0 12px;
+  }
+
+  /* Card */
+  .card{
+    background:var(--sokrat-card);
+    border:1px solid var(--sokrat-border);
+    border-radius:var(--sokrat-radius-md);
+    padding:24px;
+    box-shadow:var(--sokrat-shadow-xs);
+  }
+  .card__header{
+    display:flex;align-items:center;gap:10px;
+    margin-bottom:16px;
+  }
+  .card__header svg{width:18px;height:18px;color:var(--sokrat-green-700)}
+  .card__title{
+    font-size:15px;font-weight:600;color:var(--sokrat-fg1);
+    margin:0;
+  }
+  .card__hint{
+    font-size:13px;color:var(--sokrat-fg3);
+    margin:0 0 20px;
+  }
+
+  /* Identity row */
+  .identity{
+    display:grid;
+    grid-template-columns:140px 1fr;
+    gap:24px;
+    align-items:start;
+  }
+  .avatar-block{display:flex;flex-direction:column;align-items:center;gap:10px}
+  .avatar-xl{
+    width:120px;height:120px;border-radius:9999px;
+    overflow:hidden;
+    background:var(--sokrat-green-100);
+    display:flex;align-items:center;justify-content:center;
+    border:1px solid var(--sokrat-border);
+  }
+  .avatar-xl svg{width:100%;height:100%;display:block}
+  .avatar-actions{display:flex;flex-direction:column;gap:6px;width:100%}
+
+  .form-row{display:flex;flex-direction:column;gap:6px}
+  .form-row + .form-row{margin-top:14px}
+  .form-label{
+    font-size:12px;font-weight:600;color:var(--sokrat-fg3);
+    text-transform:uppercase;letter-spacing:.04em;
+  }
+  .form-input{
+    height:40px;padding:0 12px;
+    border:1px solid var(--sokrat-border);
+    border-radius:var(--sokrat-radius-xs);
+    font-size:16px; /* iOS zoom guard */
+    font-family:inherit;color:var(--sokrat-fg1);
+    background:#FFFFFF;
+    transition:border-color .15s,box-shadow .15s;
+    width:100%;
+  }
+  .form-input:focus{outline:none;border-color:var(--sokrat-green-700);box-shadow:var(--sokrat-focus-ring)}
+  .form-help{font-size:12px;color:var(--sokrat-fg3)}
+
+  /* Radio (gender) */
+  .radio-group{display:flex;gap:8px;margin-top:4px}
+  .radio-pill{
+    display:flex;align-items:center;gap:8px;
+    padding:8px 14px;height:40px;
+    border:1px solid var(--sokrat-border);
+    border-radius:var(--sokrat-radius-full);
+    font-size:14px;color:var(--sokrat-fg2);
+    background:#FFFFFF;cursor:pointer;
+    transition:all .15s;
+  }
+  .radio-pill:hover{border-color:var(--sokrat-green-500);color:var(--sokrat-fg1)}
+  .radio-pill[aria-checked="true"]{
+    background:var(--sokrat-green-100);
+    color:var(--sokrat-green-800);
+    border-color:var(--sokrat-green-700);
+    font-weight:600;
+  }
+  .radio-pill svg{width:14px;height:14px}
+
+  /* Buttons */
+  .btn{
+    display:inline-flex;align-items:center;justify-content:center;gap:8px;
+    height:40px;padding:0 16px;
+    border-radius:var(--sokrat-radius-xs);
+    font-family:inherit;font-size:14px;font-weight:600;
+    cursor:pointer;border:1px solid transparent;
+    transition:background .15s,box-shadow .15s,color .15s;
+    text-decoration:none;
+  }
+  .btn svg{width:14px;height:14px}
+  .btn--primary{background:var(--sokrat-green-700);color:#fff;border-color:var(--sokrat-green-700)}
+  .btn--primary:hover{background:var(--sokrat-green-800);border-color:var(--sokrat-green-800)}
+  .btn--ghost{background:transparent;color:var(--sokrat-fg2);border-color:var(--sokrat-border)}
+  .btn--ghost:hover{background:var(--sokrat-border-light);color:var(--sokrat-fg1)}
+  .btn--danger{background:transparent;color:var(--sokrat-state-danger-fg);border-color:transparent}
+  .btn--danger:hover{background:var(--sokrat-state-danger-bg)}
+  .btn--sm{height:32px;padding:0 12px;font-size:13px}
+  .btn--block{width:100%}
+  .btn[disabled]{opacity:.5;pointer-events:none}
+
+  /* Subjects multi-select */
+  .chips{display:flex;flex-wrap:wrap;gap:8px}
+  .chip-toggle{
+    display:inline-flex;align-items:center;gap:6px;
+    height:36px;padding:0 14px;
+    border:1px solid var(--sokrat-border);
+    border-radius:var(--sokrat-radius-full);
+    background:#FFFFFF;color:var(--sokrat-fg2);
+    font-family:inherit;font-size:14px;font-weight:500;
+    cursor:pointer;
+    transition:all .15s;
+  }
+  .chip-toggle:hover{border-color:var(--sokrat-green-500);color:var(--sokrat-fg1)}
+  .chip-toggle[aria-pressed="true"]{
+    background:var(--sokrat-green-700);color:#FFFFFF;
+    border-color:var(--sokrat-green-700);font-weight:600;
+  }
+  .chip-toggle[aria-pressed="true"] .check{display:inline-flex}
+  .chip-toggle .check{display:none;width:14px;height:14px}
+
+  /* Read-only / linked rows */
+  .row-linked{
+    display:flex;align-items:center;gap:12px;
+    padding:14px 16px;
+    background:var(--sokrat-border-light);
+    border-radius:var(--sokrat-radius-sm);
+  }
+  .row-linked__icon{
+    width:36px;height:36px;border-radius:9999px;
+    background:#FFFFFF;border:1px solid var(--sokrat-border);
+    display:flex;align-items:center;justify-content:center;
+    flex-shrink:0;
+  }
+  .row-linked__icon svg{width:18px;height:18px}
+  .row-linked__body{flex:1;min-width:0}
+  .row-linked__label{font-size:12px;color:var(--sokrat-fg3);font-weight:600;text-transform:uppercase;letter-spacing:.04em}
+  .row-linked__value{font-size:14px;color:var(--sokrat-fg1);font-weight:500;margin-top:2px;word-break:break-all}
+  .row-linked__badge{
+    font-size:12px;font-weight:600;
+    padding:4px 10px;border-radius:9999px;
+    background:var(--sokrat-state-success-bg);color:var(--sokrat-state-success-fg);
+    white-space:nowrap;
+  }
+  .row-linked__badge--muted{background:var(--sokrat-border);color:var(--sokrat-fg3)}
+
+  /* Tutor save bar (sticky) */
+  .save-bar{
+    background:var(--sokrat-card);
+    border:1px solid var(--sokrat-border);
+    border-radius:var(--sokrat-radius-md);
+    padding:14px 20px;
+    display:flex;align-items:center;justify-content:space-between;
+    gap:14px;
+    box-shadow:var(--sokrat-shadow-sm);
+  }
+  .save-bar__status{font-size:13px;color:var(--sokrat-fg3);display:flex;align-items:center;gap:8px}
+  .save-bar__status .dot{
+    width:8px;height:8px;border-radius:9999px;
+    background:var(--sokrat-ochre-500);
+  }
+  .save-bar__actions{display:flex;gap:10px}
+
+  /* ─────────────────────────────────────────────────────────────
+     2) Avatar fallback variants (4 cases)
+     ───────────────────────────────────────────────────────────── */
+  .variants{
+    display:grid;
+    grid-template-columns:repeat(4,1fr);
+    gap:0;
+  }
+  .variant{
+    padding:32px 24px;
+    border-right:1px solid var(--sokrat-border-light);
+    display:flex;flex-direction:column;align-items:center;gap:14px;
+    text-align:center;
+  }
+  .variant:last-child{border-right:none}
+  .variant__avatar{width:96px;height:96px;border-radius:9999px;overflow:hidden;background:var(--sokrat-border-light);display:flex;align-items:center;justify-content:center;flex-shrink:0}
+  .variant__avatar svg{width:100%;height:100%}
+  .variant__title{
+    font-size:14px;font-weight:600;color:var(--sokrat-fg1);
+    margin:0;
+  }
+  .variant__cond{
+    font-size:12px;color:var(--sokrat-fg3);font-family:'SF Mono',ui-monospace,monospace;
+    background:var(--sokrat-border-light);
+    padding:3px 8px;border-radius:6px;
+  }
+  .variant__hint{font-size:12px;color:var(--sokrat-fg3);max-width:160px}
+
+  /* ─────────────────────────────────────────────────────────────
+     3) Wedge effect — guided chat before / after
+     ───────────────────────────────────────────────────────────── */
+  .wedge{
+    display:grid;
+    grid-template-columns:1fr 1fr;
+    gap:0;
+  }
+  .wedge__col{padding:28px 28px 32px}
+  .wedge__col--before{border-right:1px dashed var(--sokrat-border)}
+  .wedge__col--after{background:var(--sokrat-green-50)}
+  .wedge__head{
+    display:flex;align-items:center;gap:8px;
+    margin-bottom:16px;
+  }
+  .wedge__pill{
+    font-size:11px;font-weight:700;
+    padding:3px 10px;border-radius:9999px;
+    text-transform:uppercase;letter-spacing:.05em;
+  }
+  .wedge__pill--before{background:var(--sokrat-state-warning-bg);color:var(--sokrat-state-warning-fg)}
+  .wedge__pill--after{background:var(--sokrat-state-success-bg);color:var(--sokrat-state-success-fg)}
+  .wedge__h{font-size:14px;font-weight:600;color:var(--sokrat-fg1);margin:0}
+
+  /* Phone-ish wrapper */
+  .phone{
+    background:#FFFFFF;
+    border:1px solid var(--sokrat-border);
+    border-radius:18px;
+    box-shadow:var(--sokrat-shadow-sm);
+    padding:14px;
+    display:flex;flex-direction:column;gap:8px;
+  }
+  .phone__topic{
+    font-size:13px;color:var(--sokrat-fg3);
+    border-bottom:1px solid var(--sokrat-border-light);
+    padding:0 4px 10px;
+    display:flex;align-items:center;gap:8px;
+  }
+  .phone__topic strong{color:var(--sokrat-fg1);font-weight:600}
+
+  /* Chat bubbles */
+  .msg{display:flex;gap:8px;align-items:flex-end;margin-top:6px}
+  .msg--user{justify-content:flex-end}
+  .msg__avatar{width:32px;height:32px;border-radius:9999px;overflow:hidden;flex-shrink:0;background:var(--sokrat-border-light);display:flex;align-items:center;justify-content:center}
+  .msg__avatar svg{width:100%;height:100%}
+  .msg__col{display:flex;flex-direction:column;max-width:78%}
+  .msg__name{
+    font-size:11px;font-weight:600;color:var(--sokrat-fg2);
+    margin:0 0 3px 4px;
+    max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+  }
+  .bubble{
+    padding:10px 14px;
+    border-radius:16px;
+    font-size:14px;line-height:1.45;
+    color:var(--sokrat-fg1);
+  }
+  .bubble--ai{background:#F1F5F9;border-bottom-left-radius:6px}
+  .bubble--ai-eyebrow{
+    font-size:10px;font-weight:600;color:var(--sokrat-fg3);
+    text-transform:uppercase;letter-spacing:.06em;
+    margin-bottom:4px;display:block;
+  }
+  .bubble--tutor{background:var(--sokrat-green-100);border-bottom-left-radius:6px;color:var(--sokrat-green-900)}
+  .bubble--tutor-eyebrow-old{
+    font-size:10px;font-weight:600;color:var(--sokrat-green-700);
+    text-transform:uppercase;letter-spacing:.06em;
+    margin-bottom:4px;display:block;
+  }
+  .bubble--user{background:var(--sokrat-green-700);color:#fff;border-bottom-right-radius:6px}
+  .msg__time{font-size:10px;color:var(--sokrat-fg-muted);margin:3px 8px 0;text-align:left}
+  .msg--user .msg__time{text-align:right}
+
+  .wedge__cap{
+    margin-top:14px;padding:10px 12px;
+    background:#FFFFFF;border:1px solid var(--sokrat-border);
+    border-radius:var(--sokrat-radius-sm);
+    font-size:12px;color:var(--sokrat-fg2);
+  }
+  .wedge__cap strong{color:var(--sokrat-fg1)}
+
+  /* ─────────────────────────────────────────────────────────────
+     4) State + meta footer
+     ───────────────────────────────────────────────────────────── */
+  .surface-meta{
+    margin:48px auto 64px;
+    max-width:1200px;padding:0 24px;
+    color:var(--sokrat-fg3);font-size:12px;
+    display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px;
+  }
+
+  /* ─────────────────────────────────────────────────────────────
+     4) S4 — Three states of «Безопасность» (× Google OAuth)
+     ───────────────────────────────────────────────────────────── */
+  .sec-states{
+    display:grid;
+    grid-template-columns:repeat(3,1fr);
+    gap:0;
+  }
+  .sec-states__col{
+    padding:24px;
+    border-right:1px solid var(--sokrat-border-light);
+    display:flex;flex-direction:column;gap:14px;
+    background:var(--sokrat-card);
+  }
+  .sec-states__col:last-child{border-right:none}
+  .sec-state-tag{
+    display:inline-flex;align-items:center;gap:6px;
+    font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;
+    padding:4px 10px;border-radius:9999px;
+    align-self:flex-start;
+  }
+  .sec-state-tag--a{background:var(--sokrat-state-info-bg);color:var(--sokrat-state-info-fg)}
+  .sec-state-tag--b{background:#FEF1E0;color:#A35C1A}
+  .sec-state-tag--c{background:var(--sokrat-state-success-bg);color:var(--sokrat-state-success-fg)}
+  .sec-state-h{font-size:15px;font-weight:600;color:var(--sokrat-fg1);margin:0}
+  .sec-state-cap{font-size:12px;color:var(--sokrat-fg3);margin:0 0 8px}
+
+  /* Mini-card inside each column to mimic the real "Безопасность" card */
+  .sec-card{
+    background:var(--sokrat-card);
+    border:1px solid var(--sokrat-border);
+    border-radius:var(--sokrat-radius-md);
+    padding:18px;
+    display:flex;flex-direction:column;gap:10px;
+    box-shadow:var(--sokrat-shadow-xs);
+  }
+  .sec-card__title{
+    display:flex;align-items:center;gap:8px;
+    font-size:14px;font-weight:600;color:var(--sokrat-fg1);
+    margin:0 0 4px;
+  }
+  .sec-card__title svg{width:16px;height:16px;color:var(--sokrat-green-700)}
+  .sec-row{
+    display:flex;align-items:center;gap:10px;
+    padding:10px 12px;
+    background:var(--sokrat-border-light);
+    border-radius:var(--sokrat-radius-sm);
+  }
+  .sec-row__icon{
+    width:28px;height:28px;border-radius:9999px;
+    background:#FFFFFF;border:1px solid var(--sokrat-border);
+    display:flex;align-items:center;justify-content:center;flex-shrink:0;
+  }
+  .sec-row__icon svg{width:14px;height:14px;color:var(--sokrat-fg2)}
+  .sec-row__icon--google{background:#FFFFFF;border-color:#E2E8F0}
+  .sec-row__body{flex:1;min-width:0}
+  .sec-row__label{font-size:10px;color:var(--sokrat-fg3);font-weight:600;text-transform:uppercase;letter-spacing:.04em}
+  .sec-row__value{font-size:13px;color:var(--sokrat-fg1);font-weight:500;margin-top:1px;word-break:break-all;line-height:1.3}
+  .sec-row__action{flex-shrink:0}
+  .sec-row .pill-google{
+    display:inline-flex;align-items:center;gap:5px;
+    font-size:11px;font-weight:600;
+    padding:3px 8px;border-radius:9999px;
+    background:#F1F5F9;color:var(--sokrat-fg2);
+    border:1px solid var(--sokrat-border);
+  }
+  .sec-row .pill-google svg{width:11px;height:11px}
+
+  .sec-cta-set-pwd{
+    display:flex;align-items:center;gap:8px;
+    padding:10px 12px;border-radius:var(--sokrat-radius-sm);
+    background:var(--sokrat-state-warning-bg);
+    color:var(--sokrat-state-warning-fg);
+    font-size:12px;line-height:1.4;
+  }
+  .sec-cta-set-pwd svg{flex-shrink:0;width:14px;height:14px}
+  .sec-cta-set-pwd a{color:inherit;font-weight:600;text-decoration:underline;cursor:pointer}
+
+  .btn--xs{height:28px;padding:0 10px;font-size:12px;border-radius:6px}
+  .btn--unlink{color:var(--sokrat-state-danger-fg);border-color:var(--sokrat-border)}
+  .btn--unlink:hover{background:var(--sokrat-state-danger-bg);border-color:var(--sokrat-state-danger-fg)}
+
+  .login-strip{
+    margin-top:auto;
+    background:var(--sokrat-green-50);
+    border:1px dashed var(--sokrat-green-200);
+    border-radius:var(--sokrat-radius-sm);
+    padding:10px 12px;
+    font-size:12px;color:var(--sokrat-green-800);
+    line-height:1.5;
+  }
+  .login-strip strong{color:var(--sokrat-green-900);font-weight:700}
+
+  /* Mobile collapse — макет horizontal-scroll'ится, не ломая разметку */
+  @media (max-width:880px){
+    .cabinet{grid-template-columns:1fr}
+    .t-nav{display:none}
+    .identity{grid-template-columns:1fr;justify-items:center}
+    .variants{grid-template-columns:repeat(2,1fr)}
+    .wedge{grid-template-columns:1fr}
+    .wedge__col--before{border-right:none;border-bottom:1px dashed var(--sokrat-border)}
+    .sec-states{grid-template-columns:1fr}
+    .sec-states__col{border-right:none;border-bottom:1px solid var(--sokrat-border-light)}
+    .sec-states__col:last-child{border-bottom:none}
+  }
+</style>
+</head>
+<body>
+
+<header class="doc-header">
+  <div>
+    <h1>Профиль репетитора · дизайн-макет</h1>
+    <div class="meta">spec.md v0.1 · фазы P0 + P1 · контекст: кабинет репетитора</div>
+  </div>
+  <div class="meta">tutor mode · Golos Text · brand green #1B6B4A</div>
+</header>
+
+<nav class="doc-nav">
+  <a href="#s1">1 · Кабинет + страница профиля</a>
+  <a href="#s2">2 · Аватар: 4 fallback-состояния</a>
+  <a href="#s3">3 · Wedge-эффект в guided chat</a>
+  <a href="#s4">4 · «Безопасность» × Google OAuth</a>
+</nav>
+
+<!-- ════════════════════════════════════════════════════════════
+     SURFACE 1 — Кабинет с открытой страницей профиля
+     ════════════════════════════════════════════════════════════ -->
+<section id="s1" class="surface">
+  <div class="surface-label">
+    <span class="num">S1</span>
+    <h2>Страница /tutor/profile в контексте кабинета</h2>
+    <span class="sub">desktop · 1280×780 · все секции из spec §6</span>
+  </div>
+  <div class="surface-note">
+    <strong>Точка входа (v0.3 fix):</strong> кликабельный аватар живёт в tutor AppFrame chrome — desktop в <code>SideNav</code> footer над «Выйти», mobile в <code>MobileTopBar</code> между brand и logout (показано на схеме). Это canonical chrome для tutor routes. <em>Не путать с</em> <code>Navigation.tsx</code> (student chrome, видна только на /chat, /homework и др.). Fallback — placeholder по полу или инициалы. <strong>Страница</strong> — единый scroll, секции 1→5: Identity → Subjects → Email → Password → Telegram. Все CTA <code>min-h-[40px]</code> (tutor mode), все input <code>16px</code> для iOS Safari.
+  </div>
+
+  <div class="canvas" data-sokrat-mode="tutor">
+    <div class="cabinet">
+      <!-- ── Sidenav ── -->
+      <aside class="t-nav" aria-label="Разделы">
+        <div class="t-nav__brand">
+          <div class="t-nav__brand-mark">С</div>
+          <span class="t-nav__brand-name">Сократ AI</span>
+        </div>
+
+        <div class="t-nav__group-label">Работа</div>
+        <a class="t-nav__item" href="#">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="9"/><rect x="14" y="3" width="7" height="5"/><rect x="14" y="12" width="7" height="9"/><rect x="3" y="16" width="7" height="5"/></svg>
+          <span>Главная</span>
+        </a>
+        <a class="t-nav__item" href="#">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>
+          <span>Расписание</span>
+        </a>
+        <a class="t-nav__item" href="#">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>
+          <span>Домашние задания</span>
+          <span class="t-nav__count">7</span>
+        </a>
+
+        <div class="t-nav__group-label">Ученики</div>
+        <a class="t-nav__item" href="#">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+          <span>Все ученики</span>
+          <span class="t-nav__count">12</span>
+        </a>
+
+        <div class="t-nav__group-label">Материалы</div>
+        <a class="t-nav__item" href="#">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2zM22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>
+          <span>База задач</span>
+        </a>
+
+        <div class="t-nav__group-label">Финансы</div>
+        <a class="t-nav__item" href="#">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="5" width="20" height="14" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/></svg>
+          <span>Оплаты</span>
+        </a>
+
+        <div class="t-nav__footer">
+          <a class="t-nav__item" href="#">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+            <span>Выйти</span>
+          </a>
+        </div>
+      </aside>
+
+      <!-- ── Topbar + content ── -->
+      <div style="display:flex;flex-direction:column;min-width:0">
+        <div class="t-topbar" style="position:relative">
+          <div class="t-topbar__crumbs">
+            <span>Кабинет</span><span class="sep">/</span><strong>Профиль</strong>
+          </div>
+          <div class="t-topbar__spacer"></div>
+          <button class="t-topbar__avatar-btn" aria-label="Открыть профиль" title="Профиль">
+            <!-- Stylised portrait avatar -->
+            <svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+              <defs>
+                <radialGradient id="vk-bg" cx="0.5" cy="0.4" r="0.7">
+                  <stop offset="0%" stop-color="#9ad3b8"/>
+                  <stop offset="100%" stop-color="#1B6B4A"/>
+                </radialGradient>
+              </defs>
+              <rect width="64" height="64" fill="url(#vk-bg)"/>
+              <circle cx="32" cy="25" r="11" fill="#fff" opacity=".95"/>
+              <path d="M10 64 C 10 46, 22 40, 32 40 C 42 40, 54 46, 54 64 Z" fill="#fff" opacity=".95"/>
+            </svg>
+          </button>
+          <div class="t-topbar__hint-callout">кликабельный аватар → /tutor/profile</div>
+        </div>
+
+        <div class="t-content">
+          <div class="t-content__container">
+
+            <!-- Page heading -->
+            <div>
+              <h1 class="t-page-h">Профиль</h1>
+              <p class="t-page-sub">Имя и фото видны ученикам в чате с домашним заданием.</p>
+            </div>
+
+            <!-- ─────── Section 1: Identity ─────── -->
+            <div class="card">
+              <div class="card__header">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+                <h3 class="card__title">Кто вы для учеников</h3>
+              </div>
+
+              <div class="identity">
+                <div class="avatar-block">
+                  <div class="avatar-xl" aria-hidden="true">
+                    <svg viewBox="0 0 120 120" xmlns="http://www.w3.org/2000/svg">
+                      <defs>
+                        <radialGradient id="vk-avatar" cx="0.5" cy="0.35" r="0.75">
+                          <stop offset="0%" stop-color="#B6E8C9"/>
+                          <stop offset="60%" stop-color="#2a8a63"/>
+                          <stop offset="100%" stop-color="#0f4432"/>
+                        </radialGradient>
+                      </defs>
+                      <rect width="120" height="120" fill="url(#vk-avatar)"/>
+                      <circle cx="60" cy="48" r="20" fill="#fff" opacity=".96"/>
+                      <path d="M18 120 C 18 86, 40 76, 60 76 C 80 76, 102 86, 102 120 Z" fill="#fff" opacity=".96"/>
+                    </svg>
+                  </div>
+                  <div class="avatar-actions">
+                    <button class="btn btn--primary btn--sm btn--block">
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
+                      Загрузить фото
+                    </button>
+                    <button class="btn btn--danger btn--sm btn--block">
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>
+                      Удалить
+                    </button>
+                  </div>
+                </div>
+
+                <div>
+                  <div class="form-row">
+                    <label class="form-label" for="tutor-name">Имя для учеников</label>
+                    <input id="tutor-name" class="form-input" type="text" value="Вадим Коршунов" />
+                    <span class="form-help">Видно ученикам в чате домашнего задания. Можно с отчеством.</span>
+                  </div>
+
+                  <div class="form-row">
+                    <label class="form-label">Пол</label>
+                    <div class="radio-group" role="radiogroup" aria-label="Пол">
+                      <button class="radio-pill" role="radio" aria-checked="true">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="10" cy="14" r="6"/><path d="M14 10l5-5M19 5h-5M19 5v5"/></svg>
+                        Мужской
+                      </button>
+                      <button class="radio-pill" role="radio" aria-checked="false">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="9" r="6"/><path d="M12 15v7M9 19h6"/></svg>
+                        Женский
+                      </button>
+                      <button class="radio-pill" role="radio" aria-checked="false">Не указан</button>
+                    </div>
+                    <span class="form-help">Влияет только на placeholder-аватар, если фото не загружено.</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- ─────── Section 2: Subjects ─────── -->
+            <div class="card">
+              <div class="card__header">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2zM22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>
+                <h3 class="card__title">Предметы, которые я преподаю</h3>
+              </div>
+              <p class="card__hint">Выбранные предметы используются как дефолт при создании ДЗ. Можно несколько.</p>
+
+              <div class="chips" role="group" aria-label="Предметы">
+                <button class="chip-toggle" aria-pressed="true">
+                  <svg class="check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+                  Физика
+                </button>
+                <button class="chip-toggle" aria-pressed="true">
+                  <svg class="check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+                  Математика
+                </button>
+                <button class="chip-toggle" aria-pressed="false">Информатика</button>
+                <button class="chip-toggle" aria-pressed="false">Химия</button>
+                <button class="chip-toggle" aria-pressed="false">Биология</button>
+                <button class="chip-toggle" aria-pressed="false">Русский язык</button>
+                <button class="chip-toggle" aria-pressed="false">История</button>
+                <button class="chip-toggle" aria-pressed="false">Обществознание</button>
+                <button class="chip-toggle" aria-pressed="false">Английский</button>
+              </div>
+            </div>
+
+            <!-- ─────── Section 3: Email ─────── -->
+            <div class="card">
+              <div class="card__header">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
+                <h3 class="card__title">Безопасность</h3>
+              </div>
+              <p class="card__hint">Email и пароль — для входа в кабинет. Изменения вступают в силу сразу.</p>
+
+              <div class="row-linked" style="margin-bottom:12px">
+                <div class="row-linked__icon" style="color:var(--sokrat-fg2)">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
+                </div>
+                <div class="row-linked__body">
+                  <div class="row-linked__label">Email</div>
+                  <div class="row-linked__value">vadim.korshunov@example.com</div>
+                </div>
+                <button class="btn btn--ghost btn--sm">Изменить</button>
+              </div>
+
+              <div class="row-linked">
+                <div class="row-linked__icon" style="color:var(--sokrat-fg2)">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+                </div>
+                <div class="row-linked__body">
+                  <div class="row-linked__label">Пароль</div>
+                  <div class="row-linked__value" style="letter-spacing:.2em">••••••••</div>
+                </div>
+                <button class="btn btn--ghost btn--sm">Изменить пароль</button>
+              </div>
+            </div>
+
+            <!-- ─────── Section 4: Telegram ─────── -->
+            <div class="card">
+              <div class="card__header">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>
+                <h3 class="card__title">Telegram</h3>
+              </div>
+
+              <div class="row-linked">
+                <div class="row-linked__icon" style="color:var(--sokrat-telegram);background:#E0F4FB;border-color:#BFE3F1">
+                  <svg viewBox="0 0 24 24" fill="currentColor"><path d="M9.78 18.65l.28-4.23 7.68-6.92c.34-.31-.07-.46-.52-.19L7.74 13.3 3.64 12c-.88-.25-.89-.86.2-1.3l15.97-6.16c.73-.33 1.43.18 1.15 1.3l-2.72 12.81c-.19.91-.74 1.13-1.5.71L12.6 16.3l-1.99 1.93c-.23.23-.42.42-.83.42z"/></svg>
+                </div>
+                <div class="row-linked__body">
+                  <div class="row-linked__label">Аккаунт</div>
+                  <div class="row-linked__value">@vadim_korshunov</div>
+                </div>
+                <span class="row-linked__badge">Привязан</span>
+              </div>
+              <p class="card__hint" style="margin:14px 0 0">Telegram используется для уведомлений ученикам и для входа через «Войти через Telegram». Сменить аккаунт можно через повторный вход.</p>
+            </div>
+
+            <!-- ─────── Save bar ─────── -->
+            <div class="save-bar">
+              <div class="save-bar__status">
+                <span class="dot"></span>
+                Несохранённые изменения · имя, 1 предмет
+              </div>
+              <div class="save-bar__actions">
+                <button class="btn btn--ghost">Отменить</button>
+                <button class="btn btn--primary">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+                  Сохранить
+                </button>
+              </div>
+            </div>
+
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ════════════════════════════════════════════════════════════
+     SURFACE 2 — 4 fallback-состояния аватара
+     ════════════════════════════════════════════════════════════ -->
+<section id="s2" class="surface">
+  <div class="surface-label">
+    <span class="num">S2</span>
+    <h2>Аватар: 4 состояния fallback (UserAvatar)</h2>
+    <span class="sub">spec §6 AC-6 · одна логика, четыре результата</span>
+  </div>
+  <div class="surface-note">
+    <strong>Каскад:</strong> <code>avatar_url</code> → SVG-силуэт по <code>gender</code> → инициалы имени на <code>bg-accent</code> → анонимная заглушка. Используется одинаково в Navigation, на /tutor/profile, в guided chat и в будущем в GuidedThreadViewer (Phase 5).
+  </div>
+
+  <div class="canvas">
+    <div class="variants">
+
+      <!-- 1: Real photo (uploaded) -->
+      <div class="variant">
+        <div class="variant__avatar">
+          <svg viewBox="0 0 96 96" xmlns="http://www.w3.org/2000/svg">
+            <defs>
+              <radialGradient id="ph-1" cx="0.5" cy="0.35" r="0.75">
+                <stop offset="0%" stop-color="#B6E8C9"/>
+                <stop offset="60%" stop-color="#2a8a63"/>
+                <stop offset="100%" stop-color="#0f4432"/>
+              </radialGradient>
+            </defs>
+            <rect width="96" height="96" fill="url(#ph-1)"/>
+            <circle cx="48" cy="38" r="16" fill="#fff" opacity=".96"/>
+            <path d="M14 96 C 14 68, 32 60, 48 60 C 64 60, 82 68, 82 96 Z" fill="#fff" opacity=".96"/>
+          </svg>
+        </div>
+        <p class="variant__title">Загружено фото</p>
+        <span class="variant__cond">avatar_url ≠ null</span>
+        <p class="variant__hint">Сжатое JPEG 512×512 из storage bucket <code>avatars</code>.</p>
+      </div>
+
+      <!-- 2: Female placeholder -->
+      <div class="variant">
+        <div class="variant__avatar" style="background:#FFF3E6">
+          <svg viewBox="0 0 96 96" xmlns="http://www.w3.org/2000/svg">
+            <rect width="96" height="96" fill="#FFF3E6"/>
+            <!-- head -->
+            <ellipse cx="48" cy="38" rx="14" ry="16" fill="#E8913A" opacity=".85"/>
+            <!-- hair -->
+            <path d="M30 38 C 30 22, 66 22, 66 38 C 66 32, 60 28, 48 28 C 36 28, 30 32, 30 38 Z" fill="#A35C1A"/>
+            <path d="M28 40 C 26 50, 30 56, 32 56 L 30 38 Z" fill="#A35C1A"/>
+            <path d="M68 40 C 70 50, 66 56, 64 56 L 66 38 Z" fill="#A35C1A"/>
+            <!-- shoulders -->
+            <path d="M16 96 C 16 72, 30 60, 48 60 C 66 60, 80 72, 80 96 Z" fill="#E8913A" opacity=".85"/>
+          </svg>
+        </div>
+        <p class="variant__title">Силуэт (женский)</p>
+        <span class="variant__cond">gender = 'female'</span>
+        <p class="variant__hint">Статичный SVG <code>/public/avatar-placeholder-female.svg</code>.</p>
+      </div>
+
+      <!-- 3: Male placeholder -->
+      <div class="variant">
+        <div class="variant__avatar" style="background:#E8F5EE">
+          <svg viewBox="0 0 96 96" xmlns="http://www.w3.org/2000/svg">
+            <rect width="96" height="96" fill="#E8F5EE"/>
+            <!-- head -->
+            <circle cx="48" cy="38" r="14" fill="#1B6B4A" opacity=".85"/>
+            <!-- hair -->
+            <path d="M34 30 C 34 22, 62 22, 62 30 L 60 36 C 60 30, 36 30, 36 36 Z" fill="#0f4432"/>
+            <!-- shoulders -->
+            <path d="M16 96 C 16 72, 30 60, 48 60 C 66 60, 80 72, 80 96 Z" fill="#1B6B4A" opacity=".85"/>
+          </svg>
+        </div>
+        <p class="variant__title">Силуэт (мужской)</p>
+        <span class="variant__cond">gender = 'male'</span>
+        <p class="variant__hint">Статичный SVG <code>/public/avatar-placeholder-male.svg</code>.</p>
+      </div>
+
+      <!-- 4: Initials -->
+      <div class="variant">
+        <div class="variant__avatar" style="background:var(--sokrat-green-700);color:#fff">
+          <span style="font-size:34px;font-weight:700;letter-spacing:.02em">ВК</span>
+        </div>
+        <p class="variant__title">Инициалы имени</p>
+        <span class="variant__cond">gender = null + no photo</span>
+        <p class="variant__hint">Первые буквы <code>name</code> на бренд-зелёном.</p>
+      </div>
+
+    </div>
+  </div>
+</section>
+
+<!-- ════════════════════════════════════════════════════════════
+     SURFACE 3 — Wedge effect: guided chat
+     ════════════════════════════════════════════════════════════ -->
+<section id="s3" class="surface">
+  <div class="surface-label">
+    <span class="num">S3</span>
+    <h2>Wedge-эффект: голос репетитора в guided chat ученика</h2>
+    <span class="sub">spec §6 AC-4 · GuidedChatMessage.tsx · сейчас vs. после</span>
+  </div>
+  <div class="surface-note">
+    <strong>Главный продуктовый эффект</strong> фичи — ученик мгновенно отличает «своего Вадима» от голосов AI. Сравнение слева (как сейчас, обезличенный label «РЕПЕТИТОР») и справа (Telegram-style identity: аватар 32×32 + имя над пузырём).
+  </div>
+
+  <div class="canvas">
+    <div class="wedge">
+
+      <!-- BEFORE -->
+      <div class="wedge__col wedge__col--before">
+        <div class="wedge__head">
+          <span class="wedge__pill wedge__pill--before">Сейчас</span>
+          <h3 class="wedge__h">«Кто мне это написал?»</h3>
+        </div>
+
+        <div class="phone">
+          <div class="phone__topic">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>
+            ДЗ № 14 · <strong>Задача 3</strong> · Кинематика
+          </div>
+
+          <div class="msg">
+            <div class="msg__avatar" style="background:var(--sokrat-green-100);color:var(--sokrat-green-800)">
+              <span style="font-size:12px;font-weight:700">AI</span>
+            </div>
+            <div class="msg__col">
+              <div class="bubble bubble--ai">
+                <span class="bubble--ai-eyebrow">Введение</span>
+                Разберём задачу про равноускоренное движение. С чего начнём?
+              </div>
+            </div>
+          </div>
+
+          <div class="msg msg--user">
+            <div class="msg__col">
+              <div class="bubble bubble--user">Я бы выписал данные, но не уверен с ускорением.</div>
+            </div>
+          </div>
+
+          <div class="msg">
+            <div class="msg__col" style="margin-left:0">
+              <div class="bubble bubble--tutor">
+                <span class="bubble--tutor-eyebrow-old">Репетитор</span>
+                Ускорение направлено противоположно скорости — там минус, помнишь, как вчера разбирали?
+              </div>
+            </div>
+          </div>
+
+          <div class="msg">
+            <div class="msg__avatar" style="background:var(--sokrat-green-100);color:var(--sokrat-green-800)">
+              <span style="font-size:12px;font-weight:700">AI</span>
+            </div>
+            <div class="msg__col">
+              <div class="bubble bubble--ai">
+                <span class="bubble--ai-eyebrow">Подсказка</span>
+                Запиши уравнение перемещения с учётом знака ускорения.
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="wedge__cap">
+          <strong>Проблема:</strong> сообщения от человека и от AI визуально слабо различаются — оба blocky-eyebrow, оба без лица. Ученик перечитывает шапку каждый раз.
+        </div>
+      </div>
+
+      <!-- AFTER -->
+      <div class="wedge__col wedge__col--after">
+        <div class="wedge__head">
+          <span class="wedge__pill wedge__pill--after">После</span>
+          <h3 class="wedge__h">«Это от моего Вадима»</h3>
+        </div>
+
+        <div class="phone">
+          <div class="phone__topic">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>
+            ДЗ № 14 · <strong>Задача 3</strong> · Кинематика
+          </div>
+
+          <div class="msg">
+            <div class="msg__avatar" style="background:var(--sokrat-green-100);color:var(--sokrat-green-800)">
+              <span style="font-size:12px;font-weight:700">AI</span>
+            </div>
+            <div class="msg__col">
+              <div class="bubble bubble--ai">
+                <span class="bubble--ai-eyebrow">Введение</span>
+                Разберём задачу про равноускоренное движение. С чего начнём?
+              </div>
+            </div>
+          </div>
+
+          <div class="msg msg--user">
+            <div class="msg__col">
+              <div class="bubble bubble--user">Я бы выписал данные, но не уверен с ускорением.</div>
+            </div>
+          </div>
+
+          <div class="msg">
+            <div class="msg__avatar">
+              <svg viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
+                <defs>
+                  <radialGradient id="vk-chat" cx="0.5" cy="0.35" r="0.75">
+                    <stop offset="0%" stop-color="#B6E8C9"/>
+                    <stop offset="100%" stop-color="#1B6B4A"/>
+                  </radialGradient>
+                </defs>
+                <rect width="32" height="32" fill="url(#vk-chat)"/>
+                <circle cx="16" cy="13" r="6" fill="#fff" opacity=".96"/>
+                <path d="M5 32 C 5 23, 11 20, 16 20 C 21 20, 27 23, 27 32 Z" fill="#fff" opacity=".96"/>
+              </svg>
+            </div>
+            <div class="msg__col">
+              <p class="msg__name">Вадим Коршунов</p>
+              <div class="bubble bubble--tutor">
+                Ускорение направлено противоположно скорости — там минус, помнишь, как вчера разбирали?
+              </div>
+            </div>
+          </div>
+
+          <div class="msg">
+            <div class="msg__avatar" style="background:var(--sokrat-green-100);color:var(--sokrat-green-800)">
+              <span style="font-size:12px;font-weight:700">AI</span>
+            </div>
+            <div class="msg__col">
+              <div class="bubble bubble--ai">
+                <span class="bubble--ai-eyebrow">Подсказка</span>
+                Запиши уравнение перемещения с учётом знака ускорения.
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="wedge__cap">
+          <strong>Эффект:</strong> голос репетитора получает «лицо». При 5+ учениках в семье / разных репетиторах — мгновенный визуальный якорь. Telegram-style идентичность, к которой ученик уже привык.
+        </div>
+      </div>
+
+    </div>
+  </div>
+</section>
+
+<!-- ════════════════════════════════════════════════════════════
+     SURFACE 4 — «Безопасность» × Google OAuth (3 состояния)
+     ════════════════════════════════════════════════════════════ -->
+<section id="s4" class="surface">
+  <div class="surface-label">
+    <span class="num">S4</span>
+    <h2>Секция «Безопасность» × 3 способа входа</h2>
+    <span class="sub">spec §6 · добавлено 2026-04-15 (Google OAuth в scope) · AC-11/12/13</span>
+  </div>
+  <div class="surface-note">
+    <strong>Контракт:</strong> секция «Безопасность» рендерится в одном из 3 состояний на основе <code>auth.identities</code> у пользователя. <strong>A</strong> — классика (email + password), <strong>B</strong> — пришёл через «Войти через Google» (пароля нет, но есть soft-CTA «Установить пароль»), <strong>C</strong> — оба способа привязаны (mixed). Email read-only для всех вариантов где есть Google identity (email-источник истины — Google).
+  </div>
+
+  <div class="canvas">
+    <div class="sec-states">
+
+      <!-- ── A: Email + Password (классика) ── -->
+      <div class="sec-states__col">
+        <span class="sec-state-tag sec-state-tag--a">A · Email + Password</span>
+        <h3 class="sec-state-h">Зарегистрировался по email</h3>
+        <p class="sec-state-cap">Default flow. Sign-up форма с email + пароль. Telegram и Google — дополнительные опции.</p>
+
+        <div class="sec-card">
+          <h4 class="sec-card__title">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
+            Безопасность
+          </h4>
+
+          <div class="sec-row">
+            <div class="sec-row__icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
+            </div>
+            <div class="sec-row__body">
+              <div class="sec-row__label">Email</div>
+              <div class="sec-row__value">vadim.korshunov@example.com</div>
+            </div>
+            <button class="btn btn--ghost btn--xs sec-row__action">Изменить</button>
+          </div>
+
+          <div class="sec-row">
+            <div class="sec-row__icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+            </div>
+            <div class="sec-row__body">
+              <div class="sec-row__label">Пароль</div>
+              <div class="sec-row__value" style="letter-spacing:.2em">••••••••</div>
+            </div>
+            <button class="btn btn--ghost btn--xs sec-row__action">Изменить</button>
+          </div>
+        </div>
+
+        <h4 class="sec-card__title" style="margin-top:6px">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="16" r="1"/><rect x="3" y="10" width="18" height="12" rx="2"/><path d="M7 10V7a5 5 0 0 1 10 0v3"/></svg>
+          Способы входа
+        </h4>
+
+        <div class="sec-card" style="padding:14px;gap:8px">
+          <div class="sec-row">
+            <div class="sec-row__icon" style="background:#E0F4FB;border-color:#BFE3F1">
+              <svg viewBox="0 0 24 24" fill="#0088cc"><path d="M9.78 18.65l.28-4.23 7.68-6.92c.34-.31-.07-.46-.52-.19L7.74 13.3 3.64 12c-.88-.25-.89-.86.2-1.3l15.97-6.16c.73-.33 1.43.18 1.15 1.3l-2.72 12.81c-.19.91-.74 1.13-1.5.71L12.6 16.3l-1.99 1.93c-.23.23-.42.42-.83.42z"/></svg>
+            </div>
+            <div class="sec-row__body">
+              <div class="sec-row__value">Telegram · @vadim_korshunov</div>
+            </div>
+            <span class="row-linked__badge">Привязан</span>
+          </div>
+          <div class="sec-row" style="background:transparent;border:1px dashed var(--sokrat-border);padding:10px 12px">
+            <div class="sec-row__icon sec-row__icon--google">
+              <svg viewBox="0 0 24 24" width="14" height="14"><path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 0 1-2.2 3.32v2.76h3.56c2.08-1.92 3.28-4.74 3.28-8.09z"/><path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.56-2.76c-.99.66-2.25 1.05-3.72 1.05-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84A11 11 0 0 0 12 23z"/><path fill="#FBBC05" d="M5.84 14.1A6.6 6.6 0 0 1 5.5 12c0-.73.13-1.44.34-2.1V7.07H2.18A11 11 0 0 0 1 12c0 1.78.43 3.46 1.18 4.94l3.66-2.84z"/><path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.83C6.71 7.31 9.14 5.38 12 5.38z"/></svg>
+            </div>
+            <div class="sec-row__body">
+              <div class="sec-row__value">Google</div>
+            </div>
+            <button class="btn btn--ghost btn--xs sec-row__action">Привязать</button>
+          </div>
+        </div>
+
+        <div class="login-strip">
+          На <strong>/login</strong> доступны: email-форма + кнопки <strong>«Войти через Google»</strong> и <strong>«Войти через Telegram»</strong>.
+        </div>
+      </div>
+
+      <!-- ── B: Google-only ── -->
+      <div class="sec-states__col" style="background:#FBFAF6">
+        <span class="sec-state-tag sec-state-tag--b">B · Только Google</span>
+        <h3 class="sec-state-h">Зашёл через Google</h3>
+        <p class="sec-state-cap">Sign-up через «Войти через Google» одним кликом. Email подтянулся из Google, пароль не задан.</p>
+
+        <div class="sec-card">
+          <h4 class="sec-card__title">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
+            Безопасность
+          </h4>
+
+          <div class="sec-row">
+            <div class="sec-row__icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
+            </div>
+            <div class="sec-row__body">
+              <div class="sec-row__label">Email · управляется Google</div>
+              <div class="sec-row__value">vadim.korshunov@gmail.com</div>
+            </div>
+            <span class="pill-google sec-row__action">
+              <svg viewBox="0 0 24 24" width="11" height="11"><path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 0 1-2.2 3.32v2.76h3.56c2.08-1.92 3.28-4.74 3.28-8.09z"/><path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.56-2.76c-.99.66-2.25 1.05-3.72 1.05-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84A11 11 0 0 0 12 23z"/><path fill="#FBBC05" d="M5.84 14.1A6.6 6.6 0 0 1 5.5 12c0-.73.13-1.44.34-2.1V7.07H2.18A11 11 0 0 0 1 12c0 1.78.43 3.46 1.18 4.94l3.66-2.84z"/><path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.83C6.71 7.31 9.14 5.38 12 5.38z"/></svg>
+              Google
+            </span>
+          </div>
+
+          <div class="sec-cta-set-pwd">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+            <span>Пароль не задан. Без него ты сможешь войти только через Google. <a>Установить пароль →</a></span>
+          </div>
+        </div>
+
+        <h4 class="sec-card__title" style="margin-top:6px">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="16" r="1"/><rect x="3" y="10" width="18" height="12" rx="2"/><path d="M7 10V7a5 5 0 0 1 10 0v3"/></svg>
+          Способы входа
+        </h4>
+
+        <div class="sec-card" style="padding:14px;gap:8px">
+          <div class="sec-row">
+            <div class="sec-row__icon sec-row__icon--google">
+              <svg viewBox="0 0 24 24" width="14" height="14"><path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 0 1-2.2 3.32v2.76h3.56c2.08-1.92 3.28-4.74 3.28-8.09z"/><path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.56-2.76c-.99.66-2.25 1.05-3.72 1.05-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84A11 11 0 0 0 12 23z"/><path fill="#FBBC05" d="M5.84 14.1A6.6 6.6 0 0 1 5.5 12c0-.73.13-1.44.34-2.1V7.07H2.18A11 11 0 0 0 1 12c0 1.78.43 3.46 1.18 4.94l3.66-2.84z"/><path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.83C6.71 7.31 9.14 5.38 12 5.38z"/></svg>
+            </div>
+            <div class="sec-row__body">
+              <div class="sec-row__value">Google · vadim.korshunov@gmail.com</div>
+            </div>
+            <span class="row-linked__badge">Привязан</span>
+          </div>
+          <div class="sec-row" style="background:transparent;border:1px dashed var(--sokrat-border);padding:10px 12px">
+            <div class="sec-row__icon" style="background:#E0F4FB;border-color:#BFE3F1">
+              <svg viewBox="0 0 24 24" fill="#0088cc"><path d="M9.78 18.65l.28-4.23 7.68-6.92c.34-.31-.07-.46-.52-.19L7.74 13.3 3.64 12c-.88-.25-.89-.86.2-1.3l15.97-6.16c.73-.33 1.43.18 1.15 1.3l-2.72 12.81c-.19.91-.74 1.13-1.5.71L12.6 16.3l-1.99 1.93c-.23.23-.42.42-.83.42z"/></svg>
+            </div>
+            <div class="sec-row__body">
+              <div class="sec-row__value">Telegram</div>
+            </div>
+            <button class="btn btn--ghost btn--xs sec-row__action">Привязать</button>
+          </div>
+        </div>
+
+        <div class="login-strip">
+          Кнопка <strong>«Отвязать Google»</strong> <em>заблокирована</em>, пока не установлен пароль ИЛИ не привязан Telegram. Иначе пользователь потеряет вход.
+        </div>
+      </div>
+
+      <!-- ── C: Mixed (email/pwd + Google) ── -->
+      <div class="sec-states__col">
+        <span class="sec-state-tag sec-state-tag--c">C · Mixed</span>
+        <h3 class="sec-state-h">Email + Google привязаны</h3>
+        <p class="sec-state-cap">Завёл аккаунт по email, потом привязал Google «для удобного входа». Может войти любым способом.</p>
+
+        <div class="sec-card">
+          <h4 class="sec-card__title">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
+            Безопасность
+          </h4>
+
+          <div class="sec-row">
+            <div class="sec-row__icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
+            </div>
+            <div class="sec-row__body">
+              <div class="sec-row__label">Email</div>
+              <div class="sec-row__value">vadim.korshunov@example.com</div>
+            </div>
+            <button class="btn btn--ghost btn--xs sec-row__action">Изменить</button>
+          </div>
+
+          <div class="sec-row">
+            <div class="sec-row__icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+            </div>
+            <div class="sec-row__body">
+              <div class="sec-row__label">Пароль</div>
+              <div class="sec-row__value" style="letter-spacing:.2em">••••••••</div>
+            </div>
+            <button class="btn btn--ghost btn--xs sec-row__action">Изменить</button>
+          </div>
+        </div>
+
+        <h4 class="sec-card__title" style="margin-top:6px">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="16" r="1"/><rect x="3" y="10" width="18" height="12" rx="2"/><path d="M7 10V7a5 5 0 0 1 10 0v3"/></svg>
+          Способы входа
+        </h4>
+
+        <div class="sec-card" style="padding:14px;gap:8px">
+          <div class="sec-row">
+            <div class="sec-row__icon sec-row__icon--google">
+              <svg viewBox="0 0 24 24" width="14" height="14"><path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 0 1-2.2 3.32v2.76h3.56c2.08-1.92 3.28-4.74 3.28-8.09z"/><path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.56-2.76c-.99.66-2.25 1.05-3.72 1.05-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84A11 11 0 0 0 12 23z"/><path fill="#FBBC05" d="M5.84 14.1A6.6 6.6 0 0 1 5.5 12c0-.73.13-1.44.34-2.1V7.07H2.18A11 11 0 0 0 1 12c0 1.78.43 3.46 1.18 4.94l3.66-2.84z"/><path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.83C6.71 7.31 9.14 5.38 12 5.38z"/></svg>
+            </div>
+            <div class="sec-row__body">
+              <div class="sec-row__value">Google · vadim.korshunov@gmail.com</div>
+            </div>
+            <button class="btn btn--ghost btn--xs btn--unlink sec-row__action">Отвязать</button>
+          </div>
+          <div class="sec-row">
+            <div class="sec-row__icon" style="background:#E0F4FB;border-color:#BFE3F1">
+              <svg viewBox="0 0 24 24" fill="#0088cc"><path d="M9.78 18.65l.28-4.23 7.68-6.92c.34-.31-.07-.46-.52-.19L7.74 13.3 3.64 12c-.88-.25-.89-.86.2-1.3l15.97-6.16c.73-.33 1.43.18 1.15 1.3l-2.72 12.81c-.19.91-.74 1.13-1.5.71L12.6 16.3l-1.99 1.93c-.23.23-.42.42-.83.42z"/></svg>
+            </div>
+            <div class="sec-row__body">
+              <div class="sec-row__value">Telegram · @vadim_korshunov</div>
+            </div>
+            <span class="row-linked__badge">Привязан</span>
+          </div>
+        </div>
+
+        <div class="login-strip">
+          Кнопка <strong>«Отвязать»</strong> доступна на любом провайдере, потому что у пользователя остаётся ≥ 1 другой способ входа.
+        </div>
+      </div>
+
+    </div>
+  </div>
+</section>
+
+<div class="surface-meta">
+  <div>Макет — single source of truth для дизайн-ревью. Production-код придёт фазами P0 → P1 → Phase 3 (TG prefill) → Phase 4 (Google OAuth).</div>
+  <div>Tokens: <code>colors_and_type.css</code> · Mode: <code>data-sokrat-mode="tutor"</code></div>
+</div>
+
+</body>
+</html>

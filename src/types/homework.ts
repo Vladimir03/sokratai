@@ -115,12 +115,19 @@ export type ThreadStatus = 'active' | 'completed' | 'abandoned';
 export type TaskStateStatus = 'locked' | 'active' | 'completed' | 'skipped';
 export type GuidedMessageKind = 'answer' | 'hint_request' | 'question' | 'bootstrap' | 'ai_reply' | 'system' | 'check_result' | 'hint_reply' | 'tutor_message' | 'tutor_note';
 export type MessageDeliveryStatus = 'sending' | 'sent' | 'failed';
+export type TutorProfileGender = 'male' | 'female';
 export type GuidedHomeworkUiStatus =
   | 'awaiting_answer'
   | 'streaming_ai'
   | 'checking_answer'
   | 'requesting_hint'
   | 'send_error';
+
+export interface HomeworkTutorProfile {
+  display_name: string;
+  avatar_url: string | null;
+  gender: TutorProfileGender | null;
+}
 
 export interface HomeworkThread {
   id: string;
@@ -134,6 +141,7 @@ export interface HomeworkThread {
   last_tutor_message_at?: string | null;
   homework_tutor_thread_messages: HomeworkThreadMessage[];
   homework_tutor_task_states: HomeworkTaskState[];
+  tutor_profile?: HomeworkTutorProfile | null;
 }
 
 export interface HomeworkThreadMessage {

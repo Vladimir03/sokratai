@@ -68,14 +68,6 @@ function translateSupabaseError(message: string): string {
   return message;
 }
 
-function isMissingThreadMessageKindColumnError(message: string): boolean {
-  const lower = message.toLowerCase();
-  return lower.includes('message_kind') && (
-    lower.includes('schema cache') ||
-    (lower.includes('column') && lower.includes('does not exist'))
-  );
-}
-
 async function requestStudentHomeworkApi<T>(
   path: string,
   options: RequestInit = {},
@@ -471,55 +463,18 @@ export async function getStudentHomeworkThread(
 export async function getStudentThreadByAssignment(
   assignmentId: string,
 ): Promise<HomeworkThread | null> {
-  const { data: { session } } = await supabase.auth.getSession();
-  if (!session) throw new StudentHomeworkApiError('Пользователь не авторизован');
-  const studentId = session.user.id;
-
-  // Find student_assignment_id
-  const { data: sa, error: saErr } = await supabase
-    .from('homework_tutor_student_assignments')
-    .select('id')
-    .eq('assignment_id', assignmentId)
-    .eq('student_id', studentId)
-    .maybeSingle();
-
-  if (saErr) throw new StudentHomeworkApiError(saErr.message);
-  if (!sa) return null;
-
-  const selectWithKind = `
-      id, status, current_task_order, current_task_id, created_at, updated_at,
-      student_assignment_id,
-      homework_tutor_thread_messages(id, role, content, image_url, task_id, task_order, message_kind, created_at),
-      homework_tutor_task_states(id, task_id, status, attempts, best_score, available_score, earned_score, wrong_answer_count, hint_count)
-    `;
-  const selectLegacy = `
-      id, status, current_task_order, current_task_id, created_at, updated_at,
-      student_assignment_id,
-      homework_tutor_thread_messages(id, role, content, image_url, task_id, task_order, created_at),
-      homework_tutor_task_states(id, task_id, status, attempts, best_score)
-    `;
-
-  // Query thread with nested messages and task_states (RLS allows SELECT for own threads)
-  const withKindResult = await (supabase
-    .from('homework_tutor_threads' as any)
-    .select(selectWithKind)
-    .eq('student_assignment_id', sa.id)
-    .order('created_at', { referencedTable: 'homework_tutor_thread_messages', ascending: true })
-    .maybeSingle() as any);
-
-  if (withKindResult.error && isMissingThreadMessageKindColumnError(withKindResult.error.message)) {
-    const legacyResult = await (supabase
-      .from('homework_tutor_threads' as any)
-      .select(selectLegacy)
-      .eq('student_assignment_id', sa.id)
-      .order('created_at', { referencedTable: 'homework_tutor_thread_messages', ascending: true })
-      .maybeSingle() as any);
-    if (legacyResult.error) throw new StudentHomeworkApiError(legacyResult.error.message);
-    return legacyResult.data as unknown as HomeworkThread | null;
-  }
-
-  if (withKindResult.error) throw new StudentHomeworkApiError(withKindResult.error.message);
-  return withKindResult.data as unknown as HomeworkThread | null;
+  // Routes through the edge function so the response includes tutor_profile
+  // (display_name + avatar_url + gender) computed server-side via JOIN on
+  // assignment.tutor_id → tutors. Direct PostgREST SELECT cannot compute
+  // this — see ChatGPT-5.5 review BLOCKER 1 and the rationale comment in
+  // homework-api/index.ts::fetchStudentThread.
+  //
+  // Endpoint also lazy-provisions the thread if it doesn't exist yet
+  // (matches handleCheckAnswer / handleRequestHint behavior).
+  return await requestStudentHomeworkApi<HomeworkThread | null>(
+    `/assignments/${encodeURIComponent(assignmentId)}/thread`,
+    { method: 'GET' },
+  );
 }
 
 /**

@@ -1,0 +1,7 @@
+<svg width="512" height="512" viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Женский силуэт">
+  <circle cx="256" cy="256" r="256" fill="#F7F6F3"/>
+  <path d="M176 221C172 203 174 181 184 162C198 133 225 114 256 114C287 114 314 133 328 162C338 181 340 203 336 221C324 201 305 188 285 181C267 175 245 175 227 181C207 188 188 201 176 221Z" fill="#E2E8F0" stroke="#64748B" stroke-width="20" stroke-linejoin="round"/>
+  <circle cx="256" cy="196" r="68" fill="#E2E8F0" stroke="#64748B" stroke-width="20"/>
+  <path d="M112 424C132 372 177 334 229 324C247 320 265 320 283 324C335 334 380 372 400 424C408 444 393 464 372 464H140C119 464 104 444 112 424Z" fill="#E2E8F0" stroke="#64748B" stroke-width="20" stroke-linejoin="round"/>
+  <path d="M166 401C195 381 225 371 256 371C287 371 317 381 346 401" stroke="#64748B" stroke-width="20" stroke-linecap="round"/>
+</svg>

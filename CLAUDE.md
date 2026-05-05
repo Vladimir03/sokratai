@@ -458,10 +458,46 @@ For architecture overview see: docs/delivery/engineering/architecture/README.md
 - `TutorStudentProfile.tsx` — поле «Как обращаться в AI-чате» (Input, placeholder «Например, Юля»)
 - Миграция: `supabase/migrations/20260414160000_add_tutor_students_display_name.sql`
 
-**Инварианты:**
-- **Не** менять `profiles.username` из кабинета репетитора — это самоидентификация ученика
-- Пути 1/2 используют `tutor_students.display_name` первым; путь 3 — только `profiles.username` (нет tutor context)
-- Все пути возвращают `null` при автогенеренных именах → AI работает без имени, нейтрально
+### 8a. Tutor Profile — identity, аватары, storage (2026-05-05, v0.3 post-review)
+
+Фича `docs/delivery/features/tutor-profile/spec.md` (v0.3) добавляет профиль репетитора и Telegram-style identity в guided homework chat. Важный schema nuance: `homework_tutor_assignments.tutor_id` хранит `auth.users.id` репетитора, а не `public.tutors.id`; профиль читается через `tutors.user_id`.
+
+**Storage / RLS / data:**
+- Storage bucket `avatars` public-read; write path convention `avatars/<user_id>/<uuid>.<ext>`, owner write restricted by first folder = `auth.uid()` (migration `20260506150000_tutor_profile_infrastructure.sql`).
+- Колонки `profiles.avatar_url`, `profiles.gender`, `tutors.gender` (`'male'|'female'|null`) добавлены в той же миграции.
+- **`tutors` RLS:** только узкая SELECT policy `auth.uid() = user_id` (self-read). **Cross-user reads ЗАПРЕЩЕНЫ через PostgREST** — только через service_role в edge function с column-whitelist. Broad `USING (true)` policy была откачена миграцией `20260506180000_revert_tutors_broad_select.sql` после ChatGPT-5.5 review (cross-tenant leak: `telegram_id`, `booking_link`, `invite_code`, `bio` утекали всем authenticated).
+
+**Client API + hooks:**
+- `tutorProfileApi` в `src/lib/tutorProfileApi.ts` — единственный путь для tutor self-read/write. Hot-path user id через `getSession()`, никогда `getUser()`.
+- React Query key — строго `['tutor','profile']` (см. `.claude/rules/performance.md` §2c).
+- `useTutorProfile()` / `useUpsertTutorProfile()` / `useUploadAvatar()` / `useRemoveAvatar()` в `src/hooks/useTutorProfile.ts`.
+- `tutorProfileApi.uploadAvatar` делает client-side compress (≤ 2 МБ 512×512 JPEG) + UPDATE `tutors.avatar_url` + best-effort cleanup старого blob через regex-парсинг public URL.
+
+**UserAvatar fallback (`src/components/common/UserAvatar.tsx`):**
+- Каскад: `avatarUrl` → gender SVG (`/avatar-placeholder-male.svg` или `/avatar-placeholder-female.svg`) → инициалы из `displayName` (с фолбэком «Пользователь» → «П», гарантированно непустое).
+- **Использует Radix Avatar primitive** из `src/components/ui/avatar.tsx`; не вставлять прямой `<img>` в новых callsite, иначе broken URL не провалится в fallback.
+- Placeholder SVG: 512×512, фон `#F7F6F3`, силуэт `#E2E8F0`/`#64748B`, без лиц/emoji.
+- `loading="lazy"` встроен в `AvatarImage`.
+
+**Avatar entry point — ТОЛЬКО в AppFrame chrome (v0.3 fix):**
+- **Desktop:** `src/components/tutor/chrome/SideNav.tsx::ProfileNavItem` в `t-nav__footer` над «Выйти». Avatar 16×16 (slot-sized под Lucide).
+- **Mobile:** `src/components/tutor/chrome/MobileTopBar.tsx` — Link 44×44 между brand и logout.
+- **НЕ добавлять в `src/components/Navigation.tsx`** — это student chrome (за AuthGuard на `/chat`/`/homework`/`/progress`/`/profile`), tutor его не видит. Изначальная спека ошибочно указывала Navigation.tsx; v0.3 исправлено.
+- `useTutorProfile()` mounted внутри AppFrame (уже TutorGuard'ed) → query не fire'ит для не-tutor.
+
+**Guided chat tutor identity (TASK-7..10):**
+- `resolveTutorProfileForAssignment(db, assignmentId)` (`homework-api/index.ts`) резолвит `assignment.tutor_id` → `tutors.user_id` → `name + avatar_url + gender`. Если `tutors.name` пустой или строки нет, fallback на `profiles.username`. Email не возвращается, не логируется.
+- `fetchStudentThread(db, threadId)` enriched с `tutor_profile` — все 4 callsite (handleGetThread / handleAdvanceTask / handleCheckAnswer / handleRequestHint) автоматически получают identity. **Не привязывать tutor_profile к response per-handler** — это привело к BLOCKER 1 при code-review (check/hint потеряли identity, ученик видел legacy «Репетитор» после answer).
+- Студенческий thread fetch — через **edge function endpoint** `GET /functions/v1/homework-api/assignments/:id/thread` (lazy-provisions thread + attaches tutor_profile). Прямой PostgREST SELECT не может computed `tutor_profile` (см. ChatGPT-5.5 BLOCKER 1).
+- Клиентский тип — `HomeworkThread.tutor_profile?: HomeworkTutorProfile | null` в `src/types/homework.ts`. Это thread-level поле, **per-message contract не менять**.
+- `GuidedChatMessage` (TASK-9) рендерит avatar+name только когда parent передаёт `tutorDisplayName !== undefined || tutorAvatarUrl !== undefined`; иначе legacy «Репетитор» pill (backward compat для unmigrated callsite, например GuidedThreadViewer на tutor стороне).
+- `GuidedHomeworkWorkspace` (TASK-10) обёртывает `tutor_profile` в `useMemo` по 3 примитивам (display_name/avatar_url/gender) с явным `eslint-disable react-hooks/exhaustive-deps` block-comment — прибавление wrapping ref'а в deps сломало бы AC-10 (avatar flicker'ил бы на каждом refetch'е после check/hint).
+
+**AvatarUpload guard'ы (`src/components/tutor/profile/AvatarUpload.tsx`):**
+- Pixel cap `MAX_INPUT_MEGAPIXELS = 64` (≈ 8000×8000) **до** `drawImage` — защита от decompression bomb (10 МБ JPEG может декодироваться в сотни МБ pixel buffer и подвесить iOS Safari).
+- Quality ladder `[0.9, 0.7, 0.5]` walking до ≤ 2 МБ; иначе toast «Не удалось сжать».
+- Канвас оборачивается в try/catch (Safari может throw SecurityError на EXIF-rotated edge cases).
+- `URL.createObjectURL` парится с `revokeObjectURL` в effect cleanup и при rollback'е upload'а.
 
 ### 9. Эталонное решение репетитора для AI — solution_* + anti-leak (2026-04-18)
 

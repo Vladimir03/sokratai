@@ -9,6 +9,7 @@ import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
 import { AlertTriangle, RotateCcw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { UserAvatar } from '@/components/common/UserAvatar';
 import { getStudentTaskImageSignedUrl } from '@/lib/studentHomeworkApi';
 import type { GuidedMessageKind, MessageDeliveryStatus } from '@/types/homework';
 import { preprocessLatex } from '@/components/kb/ui/preprocessLatex';
@@ -30,6 +31,12 @@ interface GuidedChatMessageProps {
   message: GuidedMessageData;
   isStreaming?: boolean;
   onRetry?: (messageId: string) => void;
+  // Tutor identity (resolved at thread level, see TASK-7/8). Optional —
+  // legacy callsites without these props render the old "Репетитор" label
+  // without an avatar (see isTutor branch fallback).
+  tutorDisplayName?: string;
+  tutorAvatarUrl?: string | null;
+  tutorGender?: 'male' | 'female' | null;
 }
 
 function formatTime(isoString?: string): string {
@@ -51,7 +58,14 @@ function formatMessageKind(kind: GuidedMessageKind | undefined): string | null {
   return null;
 }
 
-const GuidedChatMessage = memo(({ message, isStreaming, onRetry }: GuidedChatMessageProps) => {
+const GuidedChatMessage = memo(({
+  message,
+  isStreaming,
+  onRetry,
+  tutorDisplayName,
+  tutorAvatarUrl,
+  tutorGender,
+}: GuidedChatMessageProps) => {
   const [katexLoaded, setKatexLoaded] = useState(false);
   const hasMath = message.content.includes('$') || message.content.includes('\\(') || message.content.includes('\\[');
 
@@ -155,34 +169,74 @@ const GuidedChatMessage = memo(({ message, isStreaming, onRetry }: GuidedChatMes
   }
 
   if (isTutor) {
-    return (
-      <div className="flex justify-start mb-3">
-        <div className="max-w-[85%] rounded-2xl px-4 py-2.5 bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 rounded-bl-md">
-          <p className="text-[10px] mb-1 uppercase tracking-wide text-emerald-700 dark:text-emerald-400 font-medium">
-            Репетитор
-          </p>
-          <div className="text-sm">
-            <Suspense fallback={<p className="whitespace-pre-wrap break-words">{displayContent}</p>}>
-              <ReactMarkdown
-                remarkPlugins={[remarkGfm, remarkMath]}
-                rehypePlugins={hasMath && katexLoaded ? [rehypeKatex] : []}
-                components={markdownComponents}
-              >
-                {displayContent}
-              </ReactMarkdown>
-            </Suspense>
-            {message.image_url && (
-              <ThreadAttachments
-                attachmentValue={message.image_url}
-                resolveSignedUrl={getStudentTaskImageSignedUrl}
-              />
-            )}
+    // Telegram-style identity (avatar + name above bubble) when the parent
+    // resolved the tutor's profile (TASK-7/8). Fallback to the legacy
+    // "Репетитор" pill inside the bubble for older callsites that don't pass
+    // the new props — keeps backward compat for any unmigrated mount points.
+    const hasTutorIdentity =
+      tutorDisplayName !== undefined || tutorAvatarUrl !== undefined;
+
+    const bubbleBody = (
+      <div className="text-sm">
+        <Suspense fallback={<p className="whitespace-pre-wrap break-words">{displayContent}</p>}>
+          <ReactMarkdown
+            remarkPlugins={[remarkGfm, remarkMath]}
+            rehypePlugins={hasMath && katexLoaded ? [rehypeKatex] : []}
+            components={markdownComponents}
+          >
+            {displayContent}
+          </ReactMarkdown>
+        </Suspense>
+        {message.image_url && (
+          <ThreadAttachments
+            attachmentValue={message.image_url}
+            resolveSignedUrl={getStudentTaskImageSignedUrl}
+          />
+        )}
+      </div>
+    );
+
+    const timestamp = message.created_at ? (
+      <div className="text-[10px] mt-1 text-emerald-600/60 dark:text-emerald-400/60">
+        {formatTime(message.created_at)}
+      </div>
+    ) : null;
+
+    if (!hasTutorIdentity) {
+      // Legacy callsite — no tutor profile resolved upstream. Preserve
+      // the original presentation exactly so unmigrated screens don't
+      // visually regress.
+      return (
+        <div className="flex justify-start mb-3">
+          <div className="max-w-[85%] rounded-2xl px-4 py-2.5 bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 rounded-bl-md">
+            <p className="text-[10px] mb-1 uppercase tracking-wide text-emerald-700 dark:text-emerald-400 font-medium">
+              Репетитор
+            </p>
+            {bubbleBody}
+            {timestamp}
           </div>
-          {message.created_at && (
-            <div className="text-[10px] mt-1 text-emerald-600/60 dark:text-emerald-400/60">
-              {formatTime(message.created_at)}
-            </div>
-          )}
+        </div>
+      );
+    }
+
+    const tutorLabel = tutorDisplayName?.trim() || 'Репетитор';
+
+    return (
+      <div className="flex items-start gap-2 justify-start mb-3">
+        <UserAvatar
+          size="sm"
+          avatarUrl={tutorAvatarUrl}
+          gender={tutorGender}
+          name={tutorDisplayName}
+        />
+        <div className="flex flex-col max-w-[85%] min-w-0">
+          <div className="text-xs font-semibold text-slate-700 truncate max-w-[200px]">
+            {tutorLabel}
+          </div>
+          <div className="mt-1 rounded-2xl px-4 py-2.5 bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 rounded-bl-md">
+            {bubbleBody}
+            {timestamp}
+          </div>
         </div>
       </div>
     );

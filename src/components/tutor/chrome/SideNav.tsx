@@ -17,6 +17,8 @@ import {
   useTutorChromeCounters,
   type TutorChromeCounters,
 } from '@/hooks/useTutorChromeCounters';
+import { UserAvatar } from '@/components/common/UserAvatar';
+import { useTutorProfile } from '@/hooks/useTutorProfile';
 
 type CounterKey = keyof TutorChromeCounters;
 
@@ -212,6 +214,7 @@ export function SideNav({ isMobile = false, onNavigate }: SideNavProps) {
       ))}
 
       <div className="t-nav__footer">
+        <ProfileNavItem onNavigate={isMobile ? onNavigate : undefined} />
         <button
           type="button"
           className="t-nav__item"
@@ -224,3 +227,41 @@ export function SideNav({ isMobile = false, onNavigate }: SideNavProps) {
     </nav>
   );
 }
+
+interface ProfileNavItemProps {
+  onNavigate?: () => void;
+}
+
+// Avatar+name entry point in the tutor chrome footer (canonical placement
+// per ChatGPT-5.5 review BLOCKER 3 — Navigation.tsx is student chrome and
+// invisible inside /tutor/* AppFrame). Uses UserAvatar (TASK-3) which itself
+// falls back to gender SVG → initials when no photo is set.
+const ProfileNavItem = memo(function ProfileNavItem({ onNavigate }: ProfileNavItemProps) {
+  const location = useLocation();
+  const { data: profile } = useTutorProfile();
+  const isActive = location.pathname === '/tutor/profile' || location.pathname.startsWith('/tutor/profile/');
+  const displayName = profile?.name?.trim() || 'Профиль';
+
+  return (
+    <Link
+      to="/tutor/profile"
+      className={`t-nav__item${isActive ? ' t-nav__item--active' : ''}`}
+      aria-current={isActive ? 'page' : undefined}
+      title={profile?.name ? `Профиль · ${profile.name}` : 'Профиль'}
+      onClick={onNavigate}
+    >
+      {/* Wrapper sized like a Lucide icon slot (16px) so layout matches
+          surrounding NavItems exactly. */}
+      <span className="inline-flex h-4 w-4 shrink-0 items-center justify-center" aria-hidden="true">
+        <UserAvatar
+          size="sm"
+          avatarUrl={profile?.avatar_url ?? null}
+          gender={profile?.gender ?? null}
+          name={profile?.name}
+          className="h-4 w-4 text-[8px]"
+        />
+      </span>
+      <span className="t-nav__label truncate">{displayName}</span>
+    </Link>
+  );
+});

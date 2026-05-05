@@ -1,7 +1,8 @@
 # Tasks: Tutor Profile (Аватар, Имя, Предметы) + Telegram-style Identity в Guided Chat
 
-**Spec:** [spec.md](./spec.md)
-**Дата нарезки:** 2026-04-15
+**Spec:** [spec.md](./spec.md) (v0.2)
+**Mockup:** [mockup.html](./mockup.html) (S1–S4)
+**Дата нарезки:** 2026-04-15 · обновлено 2026-05-05 (Phase 4 Google OAuth)
 **Автор:** Vladimir Kamchatkin × Claude
 
 ---
@@ -29,6 +30,13 @@ Phase 2 (P1): Security + Subjects
 Phase 3 (P1): Telegram photo auto-prefill
 ├── TASK-14 Edge fn tutor-telegram-avatar-prefill [Claude Code]      deps: Phase 1
 └── TASK-15 TelegramLoginButton integration       [Claude Code]      deps: TASK-14
+
+Phase 4 (P1): Google OAuth (added v0.2)
+├── TASK-16 Google provider config (devops)        [Vladimir]         deps: Phase 2
+├── TASK-17 GoogleSignInButton + Login/SignUp wire [Claude Code]      deps: TASK-16
+├── TASK-18 useUserIdentities + 3-state Security   [Claude Code]      deps: TASK-12, TASK-17
+└── TASK-19 LoginProvidersSection + tutor-account  [Claude Code]      deps: TASK-18
+        actions (set-password-google-only, unlink-identity)
 ```
 
 Codex review после каждой фазы (`npm run lint && npm run build && npm run smoke-check` предварительно зелёный).
@@ -86,6 +94,7 @@ Codex review после каждой фазы (`npm run lint && npm run build &&
 **Agent:** Claude Code
 **Files:** `src/components/common/UserAvatar.tsx` (новый), `public/avatar-placeholder-male.svg`, `public/avatar-placeholder-female.svg`
 **AC:** AC-6
+**Status:** ✅ Done — `UserAvatar` создан на Radix Avatar, SVG placeholders добавлены в `public/`, `npm run build` проходит; `npm run lint` блокируется существующим repo-wide lint debt.
 
 **Что делает:**
 - `UserAvatar` props: `{ name?: string; avatarUrl?: string | null; gender?: 'male' | 'female' | null; size?: 'sm' | 'md' | 'lg'; className?: string }`. Размеры: `sm=32px`, `md=48px`, `lg=120px`.
@@ -155,21 +164,36 @@ Codex review после каждой фазы (`npm run lint && npm run build &&
 
 ---
 
-### TASK-6: Navigation avatar
+### TASK-6: Tutor chrome avatar (SideNav + MobileTopBar) [v0.3 fix]
 
 **Job:** P1.3
 **Agent:** Claude Code
-**Files:** `src/components/Navigation.tsx` (модифицировать)
-**AC:** AC-1
+**Files:** `src/components/tutor/chrome/SideNav.tsx` + `src/components/tutor/chrome/MobileTopBar.tsx` (модифицировать)
+**AC:** AC-1a
 
-**Что делает:**
-- Справа, **перед** существующей кнопкой LogOut, добавить clickable `UserAvatar size="sm"` для tutors.
-- Условие рендера: `useTutorAccess` возвращает `isTutor === true`.
-- onClick → `navigate('/tutor/profile')`.
-- `aria-label="Открыть профиль"` + `title="Профиль"`.
-- Данные — `useTutorProfile` (query key `['tutor','profile']`).
-- Если query pending — placeholder пустой круг `bg-slate-100` (без skeleton-bounce, per design system — no framer-motion).
-- Если `profile === null` — fallback по `gender=null` → инициалы `username` из `profiles`.
+**Что делает (после v0.3 review fix — было ошибочно `Navigation.tsx`):**
+
+**SideNav.tsx (desktop chrome):**
+- Memo'd `ProfileNavItem` компонент в том же файле.
+- Использует `t-nav__item` класс (тот же что у NavItem).
+- Avatar 16×16 (slot-sized под Lucide, через `inline-flex h-4 w-4` обёртку и `className="h-4 w-4 text-[8px]"` на UserAvatar).
+- Рендерится в `t-nav__footer` **над** logout button.
+- `useLocation` для active state (`pathname.startsWith('/tutor/profile')`).
+- `useTutorProfile()` для name+avatar+gender.
+- Tooltip `Профиль · {tutors.name}` если name есть, иначе просто «Профиль».
+
+**MobileTopBar.tsx (mobile chrome):**
+- `<Link to="/tutor/profile">` между brand и logout.
+- 44×44 wrapper (`min-h-[44px] min-w-[44px] inline-flex items-center justify-center rounded-full focus-visible:ring`) вокруг 32×32 UserAvatar (size="sm").
+- `useTutorProfile()` тот же hook.
+- aria-label «Открыть профиль» + tooltip с именем.
+
+**Guardrails:**
+- НЕ модифицировать `src/components/Navigation.tsx` для feature-scope (это student chrome, tutor его не видит внутри `/tutor/*` AppFrame).
+- `useTutorProfile()` mounted внутри AppFrame, AppFrame уже TutorGuard'ed → хук не fire'ит для не-tutor.
+- Не ломать existing layout (`t-nav__footer` order, `t-mobile-top` flex row).
+- Не перекидывать avatar в dropdown-menu (scope OUT).
+- НЕ создавать дублированный entry point — один компонент в каждом chrome (desktop + mobile).
 
 **Guardrails:**
 - Не ломать existing layout (логотип + tabs + logout в одну строку h-14).
@@ -184,11 +208,12 @@ Codex review после каждой фазы (`npm run lint && npm run build &&
 **Agent:** Claude Code
 **Files:** `supabase/functions/homework-api/index.ts` (модифицировать)
 **AC:** AC-4, AC-5
+**Status:** ✅ Done — `handleGetThread` возвращает top-level `tutor_profile`; per-message контракт не менялся. Local deploy/curl не выполнены: `supabase` CLI не установлен локально.
 
 **Что делает:**
 - В `handleGetThread` (student variant) — после основного SELECT тред:
-  1. `SELECT tutor_user_id FROM homework_tutor_assignments WHERE id = <assignment_id>`.
-  2. `SELECT name, avatar_url, gender FROM tutors WHERE user_id = <tutor_user_id>`.
+  1. `SELECT tutor_id FROM homework_tutor_assignments WHERE id = <assignment_id>` (фактическая схема: `tutor_id` здесь = `auth.users.id`, не `tutors.id`).
+  2. `SELECT name, avatar_url, gender FROM tutors WHERE user_id = <tutor_id>`.
   3. Собрать `tutor_profile: { display_name, avatar_url, gender }`.
   4. Fallback: если ряда в `tutors` нет → `display_name = profiles.username` (существующий резолвер), `avatar_url = null`, `gender = null`.
 - Расширить response JSON: верхнеуровневое поле `tutor_profile`.
@@ -208,6 +233,7 @@ Codex review после каждой фазы (`npm run lint && npm run build &&
 **Agent:** Claude Code
 **Files:** `src/lib/studentHomeworkApi.ts` (модифицировать), `src/types/homework.ts` (модифицировать)
 **AC:** AC-4, AC-5
+**Status:** ✅ Done — `HomeworkThread` получил optional `tutor_profile`; `getThread`/student homework thread path type-safe прокидывает backend field, legacy response без поля не падает; direct SELECT messages теперь забирает `author_user_id`.
 
 **Что делает:**
 - Расширить тип `StudentThreadResponse` (или как он назван): добавить `tutor_profile?: { display_name: string; avatar_url: string | null; gender: 'male' | 'female' | null } | null`.
@@ -374,6 +400,152 @@ Codex review после каждой фазы (`npm run lint && npm run build &&
 - `TelegramLoginButton.tsx` помечен как high-risk в CLAUDE.md — scope минимален, только добавить async call после существующей логики, ничего не удалять.
 - Если `photo_url` отсутствует — просто skip, без ошибки.
 - Тост показывать ровно один раз (не при каждом логине).
+
+---
+
+## Phase 4 (P1) — Google OAuth (added v0.2)
+
+### TASK-16: Google провайдер в Supabase Dashboard + Google Cloud Console
+
+**Job:** P1.3
+**Agent:** Vladimir (devops, не код)
+**Files:** — (только конфигурация)
+**AC:** AC-11 (prerequisite)
+
+**Что делает:**
+
+1. **Google Cloud Console** ([console.cloud.google.com](https://console.cloud.google.com/)):
+   - Создать проект «SokratAI» (или использовать существующий).
+   - APIs & Services → OAuth consent screen → External, заполнить app name «Сократ AI», support email, logo (png 120×120 из `src/assets/sokrat-logo.png`).
+   - Scopes: `email`, `profile`, `openid` (default OAuth scopes, ничего больше).
+   - APIs & Services → Credentials → Create OAuth 2.0 Client ID → Web application.
+   - Authorized JavaScript origins: `https://sokratai.ru`, `https://sokratai.lovable.app`, `http://localhost:8080` (dev).
+   - Authorized redirect URIs: `https://vrsseotrfmsxpbciyqzc.supabase.co/auth/v1/callback` **обязательно** (Supabase auth-callback URL — не наш custom domain).
+   - Сохранить `client_id` + `client_secret`.
+
+2. **Supabase Dashboard** ([supabase.com](https://supabase.com/dashboard)):
+   - Authentication → Providers → Google → Enable.
+   - Вставить `client_id` + `client_secret`.
+   - Сохранить.
+
+3. **Документировать в CLAUDE.md** (отдельным PR после Phase 4 merge): секция «OAuth providers» — Google enabled, как ротировать credentials.
+
+**Guardrails:**
+- НЕ коммитить `client_id` / `client_secret` в репо.
+- НЕ использовать одни и те же credentials для prod и dev — выпустить два отдельных OAuth client.
+- Test scope = `openid email profile`. НЕ запрашивать calendar / drive / etc. — у нас нет use-case'а и это пугает на consent screen.
+
+**Validation:**
+- На `/login` после Phase 4 deploy — кнопка «Войти через Google» → click → redirect на `accounts.google.com` → success → возврат на `/auth/callback` → авторизованная сессия.
+- В Supabase Dashboard → Authentication → Users — новый user с identity `provider = google`.
+
+---
+
+### TASK-17: GoogleSignInButton + интеграция в Login/SignUp + AuthCallback
+
+**Job:** P1.3
+**Agent:** Claude Code
+**Files:** `src/components/auth/GoogleSignInButton.tsx` (новый), `src/pages/Login.tsx` (модифицировать), `src/pages/SignUp.tsx` (модифицировать), `src/pages/AuthCallback.tsx` (создать или модифицировать если уже есть)
+**AC:** AC-11
+
+**Что делает:**
+
+- `GoogleSignInButton.tsx`:
+  - Кнопка с inline SVG Google brand-icon (4 цвета: #4285F4, #34A853, #FBBC05, #EA4335) + label «Войти через Google».
+  - `min-h-[44px]`, `bg-white border-slate-200`, `hover:bg-slate-50`, `text-slate-700 font-medium`.
+  - onClick → `supabase.auth.signInWithOAuth({ provider: 'google', options: { redirectTo: \`${window.location.origin}/auth/callback\` } })`.
+  - Loading state — spinner + disabled пока redirect не произошёл.
+
+- `Login.tsx` / `SignUp.tsx`:
+  - Под существующей email-формой добавить разделитель «или» + `<GoogleSignInButton />` + (если уже есть) `<TelegramLoginButton />`.
+  - Не трогать существующую email-логику.
+
+- `AuthCallback.tsx`:
+  - Если файл уже есть — добавить `claimPendingInvite()` после `getSession()` если ещё не вызывается.
+  - Если нет — создать страницу + route `/auth/callback` в `App.tsx`. Логика: дождаться `supabase.auth.getSession()` → `claimPendingInvite()` (см. `src/lib/inviteApi.ts`) → redirect на `/tutor/home` если tutor, иначе `/students`.
+
+**Guardrails:**
+- НЕ дублировать `signInWithOAuth` логику в нескольких местах — только в кнопке.
+- НЕ показывать `error_description` напрямую из Google (может содержать sensitive) — generic toast «Не удалось войти через Google».
+- Login.tsx и SignUp.tsx не help-risk file (Login.tsx может быть таковым — проверить grep'ом по CLAUDE.md, при необходимости minimal touch).
+
+**Validation:**
+- `npm run lint && npm run build`.
+- Localhost dev: на `/login` кнопка работает, redirect на Google (нужен TASK-16 сделанным с localhost в Authorized origins).
+
+---
+
+### TASK-18: useUserIdentities hook + 3-state SecuritySection
+
+**Job:** P1.3
+**Agent:** Claude Code
+**Files:** `src/hooks/useUserIdentities.ts` (новый), `src/components/tutor/profile/SecuritySection.tsx` (модифицировать)
+**AC:** AC-11, AC-13
+
+**Что делает:**
+
+- `useUserIdentities.ts`:
+  - `useQuery` с key `['auth','identities']`, queryFn вызывает `supabase.auth.getUserIdentities()`.
+  - Возвращает `{ identities: Identity[], hasEmailPassword: boolean, hasGoogle: boolean, hasTelegram: boolean, isLoading, error }`.
+  - `hasEmailPassword` = `identities.some(i => i.provider === 'email')`.
+  - `hasGoogle` = `identities.some(i => i.provider === 'google')`.
+  - `hasTelegram` = `identities.some(i => i.provider === 'telegram')` (если Telegram вообще регистрируется как identity — иначе fallback на `profiles.telegram_user_id`).
+  - staleTime 60 сек.
+
+- `SecuritySection.tsx` (расширение из TASK-12):
+  - Считать состояние: A = `hasEmailPassword && !hasGoogle`, B = `!hasEmailPassword && hasGoogle`, C = `hasEmailPassword && hasGoogle` (на практике редко, но возможен D = только Telegram — обрабатывать как A без password ряда).
+  - **A:** прежний UI (email row editable + password row editable). Уже сделан в TASK-12.
+  - **B:** email row read-only с pill «Google» (mockup S4-B). Заменить password row на amber-полоску с inline CTA «Установить пароль» → раскрывает new+confirm form → submit через `tutor-account` action `set-password-google-only` (TASK-19).
+  - **C:** как A (оба ряда editable). Email editable, но email change приведёт к расхождению с Google — добавить confirm dialog «Email изменится на твой, но при следующем входе через Google он перепишется обратно. Точно изменить?».
+  - Loading-state useUserIdentities → show skeleton всей секции «Безопасность».
+
+**Guardrails:**
+- НЕ дублировать логику резолва identities — только через hook.
+- В состоянии B password ряд **полностью отсутствует** в DOM (не просто disabled) — иначе скринридер прочитает пустое поле.
+- НЕ инвалидировать `['auth','identities']` после `setPassword` сам по себе — это не меняет identities в Supabase. Инвалидировать после `linkIdentity` / `unlinkIdentity` (TASK-19).
+
+**Validation:**
+- `npm run lint && npm run build`.
+- Manual: создать user через Google → /tutor/profile → SecuritySection в состоянии B. Установить пароль → состояние C.
+- Створки в DevTools: `await supabase.auth.getUserIdentities()` — увидеть массив.
+
+---
+
+### TASK-19: LoginProvidersSection + tutor-account новые actions (set-password-google-only, unlink-identity)
+
+**Job:** P1.3
+**Agent:** Claude Code
+**Files:** `src/components/tutor/profile/LoginProvidersSection.tsx` (новый), `src/pages/tutor/TutorProfile.tsx` (модифицировать — подключить), `supabase/functions/tutor-account/index.ts` (модифицировать — добавить 2 actions)
+**AC:** AC-12, AC-13
+
+**Что делает:**
+
+- `LoginProvidersSection.tsx`:
+  - Использует `useUserIdentities` (TASK-18).
+  - Список из 2 provider-row (mockup S4): Google + Telegram. Каждая row — иконка + label + статус («Привязан» badge ИЛИ кнопка «Привязать»).
+  - **Привязан + есть ≥ 1 другой identity (или password) → кнопка «Отвязать»** (red ghost, btn--xs btn--unlink). Click → confirm dialog «Отвязать Google? Ты сможешь войти только через {другой способ}». Submit → `supabase.functions.invoke('tutor-account', { body: { action: 'unlink-identity', provider: 'google' } })` → invalidate `['auth','identities']`.
+  - **Привязан + last identity → «Отвязать» disabled** с tooltip «Сначала установи пароль или привяжи другой способ входа». Без вызова сервера.
+  - **Не привязан → кнопка «Привязать»**. Click → `supabase.auth.linkIdentity({ provider: 'google' })`. Supabase обработает редирект → возврат на `/auth/callback` → invalidate `['auth','identities']`.
+
+- `tutor-account/index.ts`:
+  - Action `set-password-google-only`: валидация `body.password.length >= 8`, проверить через `supabaseAdmin.auth.admin.getUserById(user.id)` что `identities.find(i => i.provider === 'email')` отсутствует (иначе 400 `PASSWORD_ALREADY_SET` — пусть пользуется обычным `update-password`). Затем `auth.admin.updateUserById(user.id, { password })`.
+  - Action `unlink-identity`: body `{ provider: 'google' | 'telegram' }`. Fetch user identities → если после удаления провайдера остаётся `identities.length === 0` ИЛИ (`hasOnlyEmail = identities.length === 1 && identities[0].provider === 'email'` И password не задан) → return 400 `LAST_IDENTITY` с message «Установи пароль или привяжи другой способ входа». Иначе `supabaseAdmin.auth.admin.deleteIdentity(targetIdentity.id)` (Supabase admin API).
+  - В обоих actions сохранить tutor role check (`has_role`).
+
+- `TutorProfile.tsx`:
+  - Подключить `<LoginProvidersSection />` под `<SecuritySection />`.
+
+**Guardrails:**
+- **Двойной last-identity guard** обязателен: UI и server. Обход одного должен быть пойман другим.
+- НЕ удалять identity напрямую с клиента — только через edge function.
+- НЕ логировать `provider`-specific токены / refresh tokens.
+- При `unlink-identity` success — toast «Google отвязан» + invalidate `['auth','identities']` чтобы UI обновился.
+- `linkIdentity` для Google инициирует OAuth-redirect — пользователь уйдёт со страницы профиля. Сохранить return-path в localStorage чтобы вернуться после `/auth/callback`.
+
+**Validation:**
+- `npm run lint && npm run build`.
+- Manual flow: A → user добавляет Google (Привязать) → C → user отвязывает Google (Отвязать) → A. Затем: A → user отвязывает Telegram (если был) → проверить что пытается отвязать password identity (если только она остаётся) → блокируется.
+- Edge case: B (только Google) → попытка unlink Google через DevTools-fetch напрямую → 400 `LAST_IDENTITY` от server.
 
 ---
 
@@ -709,8 +881,8 @@ End block + self-check: не сломана ли student-навигация.
 
 Реализация:
 1. После основного SELECT thread + messages — получить assignment_id (он уже известен из запроса).
-2. SELECT tutor_user_id FROM homework_tutor_assignments WHERE id = <assignment_id>. (если уже тянется с тредом — не делать повторный запрос).
-3. SELECT name, avatar_url, gender FROM tutors WHERE user_id = <tutor_user_id> (service role).
+2. SELECT tutor_id FROM homework_tutor_assignments WHERE id = <assignment_id>. В текущей production-схеме `homework_tutor_assignments.tutor_id` хранит `auth.users.id` репетитора, не `tutors.id`. (Если уже тянется с тредом — не делать повторный запрос.)
+3. SELECT name, avatar_url, gender FROM tutors WHERE user_id = <tutor_id> (service role).
 4. Собрать tutor_profile: {
      display_name: tutors.name || fallback-from-profiles-username || null,
      avatar_url: tutors.avatar_url || null,
@@ -719,7 +891,7 @@ End block + self-check: не сломана ли student-навигация.
    Если display_name резолвится в null и username тоже null → tutor_profile = null.
 5. Добавить в top-level response: { ...existing, tutor_profile }.
 
-Fallback для display_name: если tutors ряда нет → SELECT username FROM profiles WHERE id = tutor_user_id.
+Fallback для display_name: если tutors ряда нет → SELECT username FROM profiles WHERE id = tutor_id.
 
 Acceptance Criteria: AC-4, AC-5.
 
@@ -1044,17 +1216,222 @@ Validation:
 End block + self-check: не сломан ли student-login flow, не сломан ли логин tutor без photo_url.
 ```
 
+### Prompt TASK-17: GoogleSignInButton + Login/SignUp + AuthCallback
+
+```
+Твоя роль: senior product-minded full-stack engineer в проекте SokratAI.
+
+Контекст: Phase 4 фичи tutor-profile добавляет Google OAuth как альтернативу email+password. Это P1 — не блокирует Phase 1-3.
+
+Прочитай:
+- docs/delivery/features/tutor-profile/spec.md (v0.2, особенно §3 п.5 про OAuth flow + §6 описание секций)
+- docs/delivery/features/tutor-profile/mockup.html surface S4 (3 состояния «Безопасность»)
+- src/pages/Login.tsx, src/pages/SignUp.tsx (полностью — понять как сейчас выглядит email-форма)
+- src/components/TelegramLoginButton.tsx (полностью — подсмотреть паттерн post-login claim invite)
+- src/lib/inviteApi.ts (claimPendingInvite — понадобится в AuthCallback)
+- CLAUDE.md (секция «Web invite flow» — Telegram заблокирован в РФ, важно не сломать)
+- .claude/rules/90-design-system.md (кнопки, spacing)
+
+Задача:
+1. Создать src/components/auth/GoogleSignInButton.tsx.
+2. Подключить в src/pages/Login.tsx и src/pages/SignUp.tsx (под существующей email-формой).
+3. Создать или модифицировать src/pages/AuthCallback.tsx для обработки OAuth redirect.
+
+GoogleSignInButton.tsx:
+- Inline Google brand SVG (4 цвета: #4285F4 / #34A853 / #FBBC05 / #EA4335) + label «Войти через Google».
+- min-h-[44px], bg-white border border-slate-200, hover:bg-slate-50, text-slate-700 font-medium, w-full, rounded-md, gap-3, flex items-center justify-center.
+- onClick → supabase.auth.signInWithOAuth({ provider: 'google', options: { redirectTo: `${window.location.origin}/auth/callback` } }).
+- Loading state — disabled + spinner справа от лейбла.
+- Перед redirect сохранить window.location.pathname в localStorage 'oauth_return_to' (если ≠ /login и ≠ /signup) для возврата после callback.
+
+Login.tsx / SignUp.tsx:
+- Найти существующий submit-блок email-формы.
+- ПОД ним добавить divider («или» с двумя hr) + <GoogleSignInButton /> + <TelegramLoginButton /> (если последний уже есть, не дублировать).
+- НЕ менять существующую email-логику.
+- Если Login.tsx помечен как high-risk в CLAUDE.md — touch минимально, только append блок.
+
+AuthCallback.tsx:
+- Если файл уже существует — добавить (если нет) claimPendingInvite() после getSession().
+- Если нет — создать страницу + зарегистрировать route /auth/callback в App.tsx (без TutorGuard / AuthGuard, route публичный).
+- Логика mount:
+  1. Дождаться supabase.auth.getSession() (poll до 5 сек, потом fail).
+  2. Если session.user → call claimPendingInvite() (best-effort, ignore error).
+  3. Прочитать localStorage 'oauth_return_to' → удалить ключ.
+  4. Если return-path есть и не пустой → navigate(return-path).
+  5. Иначе useTutorAccess (или прямо select из profiles) → if isTutor → navigate('/tutor/home'), else navigate('/students').
+- UI: централированный spinner + текст «Завершаем вход…».
+
+Acceptance Criteria: AC-11.
+
+Guardrails:
+- НЕ показывать error_description от Google напрямую (может содержать sensitive). Generic toast «Не удалось войти через Google. Попробуй снова или выбери другой способ.».
+- НЕ дублировать signInWithOAuth логику в нескольких местах — только в кнопке.
+- НЕ ломать существующий Telegram flow (web-invite через РФ-bypass).
+- redirectTo обязательно с window.location.origin (не hardcode prod-URL — иначе сломает dev и Lovable preview).
+- AuthGuard / TutorGuard не модифицировать.
+
+Validation:
+- npm run lint && npm run build.
+- Localhost dev: на /login появилась Google-кнопка (визуально соответствует mockup S4 login-strip).
+- Прежде чем тестировать живой OAuth — убедиться что TASK-16 сделана Vladimir'ом (provider настроен в Supabase + Google Cloud Console authorized origin = localhost:8080).
+
+End block: changed files, summary, validation output, self-check (Login/SignUp не сломаны, Telegram flow не задет, AuthGuard не тронут).
+```
+
+### Prompt TASK-18: useUserIdentities hook + 3-state SecuritySection
+
+```
+Твоя роль: senior product-minded full-stack engineer в проекте SokratAI.
+
+Контекст: Phase 4 — расширяем существующую SecuritySection (TASK-12) на 3 состояния по типу identity. user без password (Google-only) видит другой UI.
+
+Прочитай:
+- docs/delivery/features/tutor-profile/spec.md v0.2 (§6 п.3 — 3 состояния A/B/C)
+- docs/delivery/features/tutor-profile/mockup.html surface S4 (визуальный референс)
+- src/components/tutor/profile/SecuritySection.tsx (существующая реализация TASK-12 — состояние A)
+- src/lib/supabaseClient.ts (canonical client)
+- TASK-17 output (Login flow с Google — context для understanding identities)
+- CLAUDE.md performance.md §2c (query key конвенция)
+
+Задача:
+1. Создать src/hooks/useUserIdentities.ts.
+2. Расширить src/components/tutor/profile/SecuritySection.tsx — добавить branch'и B и C.
+
+useUserIdentities.ts:
+- useQuery с key ['auth','identities'] (новый scope, не tutor — это auth-domain).
+- queryFn: const { data, error } = await supabase.auth.getUserIdentities(); если error → throw; вернуть data.identities ?? [].
+- Возвращает:
+  {
+    identities: UserIdentity[],
+    hasEmailPassword: boolean,  // identities.some(i => i.provider === 'email')
+    hasGoogle: boolean,
+    hasTelegram: boolean,
+    isLoading,
+    error
+  }
+- staleTime: 60_000 (60 сек — identity редко меняется).
+
+SecuritySection.tsx (расширение):
+- В начале компонента: const { hasEmailPassword, hasGoogle, isLoading: identitiesLoading } = useUserIdentities();
+- Loading-state — skeleton всей секции (простые серые блоки h-10 — без bounce, см. performance.md).
+- Branch:
+  - **A (hasEmailPassword && !hasGoogle):** прежний UI без изменений.
+  - **B (!hasEmailPassword && hasGoogle):**
+    - Email row: read-only с inline pill «Google» справа (mockup S4-B: pill-google class style). Без кнопки «Изменить».
+    - НЕТ password row (полностью убрать из DOM, не рендерить).
+    - Под email row: amber-полоска с Lucide AlertTriangle + текст «Пароль не задан. Без него ты сможешь войти только через Google.» + ссылка-cta «Установить пароль →» (open inline form).
+    - Inline set-password form: 2 поля (new + confirm), validation length>=8 + match. Submit вызывает supabase.functions.invoke('tutor-account', { body: { action: 'set-password-google-only', password } }). На success → toast «Пароль установлен» + invalidate ['auth','identities'].
+  - **C (hasEmailPassword && hasGoogle):**
+    - Как A, оба ряда editable.
+    - При submit email change в C — confirm dialog «Email изменится на твой, но при следующем входе через Google он перепишется обратно. Точно изменить?». На confirm — обычный update-email flow.
+
+Acceptance Criteria: AC-11 (state B рендерится корректно), AC-13 (set-password перевод B→C).
+
+Guardrails:
+- НЕ дублировать identity-резолвинг — только через useUserIdentities.
+- В B password ряд НЕ рендерится в DOM (не disabled, не hidden) — иначе AT прочитает пустое поле.
+- Tutor role check уже встроен в tutor-account (TASK-11) — не дублировать на клиенте.
+- НЕ инвалидировать ['auth','identities'] после простого setPassword (это не меняет identities). Инвалидировать после link/unlink (TASK-19).
+- text-base (16px) на input — iOS Safari guard.
+- Никаких emoji, Lucide icons (AlertTriangle, KeyRound, Mail).
+
+Validation:
+- npm run lint && npm run build.
+- Manual flow:
+  - Login через Google (TASK-17) → /tutor/profile → SecuritySection в state B (без password row, есть amber CTA).
+  - Click «Установить пароль» → ввод 8+ симв → save → state переходит в C (password row появился, toast).
+  - Logout → login через email + новый пароль → работает.
+- DevTools console: await supabase.auth.getUserIdentities() — увидеть identities array.
+
+End block.
+```
+
+### Prompt TASK-19: LoginProvidersSection + tutor-account новые actions
+
+```
+Твоя роль: senior product-minded full-stack engineer в проекте SokratAI.
+
+Контекст: Phase 4 финальная задача — UI для link/unlink провайдеров + расширение edge function tutor-account. КРИТИЧНО: last-identity guard в двух местах (UI + server) чтобы пользователь не остался без способа войти.
+
+Прочитай:
+- docs/delivery/features/tutor-profile/spec.md v0.2 (§3 «Google identity — без новой DB-таблицы» + «Last-identity guard» + §6 п.4 + §8 риски OAuth)
+- docs/delivery/features/tutor-profile/mockup.html surface S4 (LoginProviders ряды в каждой колонке + login-strip с правилом блокировки unlink)
+- supabase/functions/tutor-account/index.ts (TASK-11 — текущая реализация, добавляем 2 новых action)
+- src/components/tutor/profile/SecuritySection.tsx (TASK-18 — рядом с ним рендерится новая LoginProvidersSection)
+- TASK-18 output (useUserIdentities)
+- CLAUDE.md «Web invite flow» (Telegram identity — особый flow, не Supabase native OAuth)
+
+Задача:
+1. Создать src/components/tutor/profile/LoginProvidersSection.tsx.
+2. Подключить в src/pages/tutor/TutorProfile.tsx под SecuritySection.
+3. Расширить supabase/functions/tutor-account/index.ts — 2 новых action.
+
+LoginProvidersSection.tsx:
+- Использует useUserIdentities (TASK-18) + (опционально) запрос на profiles.telegram_user_id для Telegram-fallback (если Telegram не регистрируется как Supabase identity).
+- Header: «Способы входа» (Lucide ShieldCheck иконка + 14px font-semibold).
+- 2 row'а в порядке: Google, Telegram.
+- Каждая row (использовать тот же sec-row CSS pattern что в mockup S4):
+  - Иконка provider'а (Google brand SVG / Telegram blue).
+  - Provider name + (если привязан) email/username справа.
+  - **Привязан + (identities.length >= 2 OR hasEmailPassword)** → кнопка «Отвязать» (red ghost, btn--xs btn--unlink). Confirm dialog «Отвязать {Google|Telegram}? Ты сможешь войти только через {другой способ}». Submit → supabase.functions.invoke('tutor-account', { body: { action: 'unlink-identity', provider } }). На success → toast + invalidate ['auth','identities'].
+  - **Привязан + last identity** → кнопка «Отвязать» disabled с tooltip «Сначала установи пароль или привяжи другой способ входа.». Без вызова сервера.
+  - **Не привязан** → кнопка «Привязать» (ghost). Click для Google → supabase.auth.linkIdentity({ provider: 'google' }) → Supabase сам редиректит → /auth/callback → возврат и invalidate. Click для Telegram → TBD (Telegram link использует существующий TelegramLoginButton flow — оставить TODO с явным комментарием на спеку Phase 5).
+
+tutor-account/index.ts (расширение):
+- Action 'set-password-google-only':
+  - Валидация: body.password.length >= 8.
+  - Получить user через user-context client (не admin) — `supabase.auth.getUser()`.
+  - Через supabaseAdmin: `auth.admin.getUserById(user.id)` → identities → если найдена identity с provider='email' → return 400 `{ error: 'PASSWORD_ALREADY_SET' }` (используй обычный update-password).
+  - Иначе `supabaseAdmin.auth.admin.updateUserById(user.id, { password })`.
+  - Return { success: true }.
+- Action 'unlink-identity':
+  - Body: { provider: 'google' | 'telegram' }.
+  - Получить identities через admin.getUserById(user.id).
+  - Найти target identity (по provider). Если нет → 404 `{ error: 'IDENTITY_NOT_FOUND' }`.
+  - Считать `remaining = identities.filter(i => i.id !== target.id)`.
+  - Если remaining.length === 0 → 400 `{ error: 'LAST_IDENTITY' }` с message «Установи пароль или привяжи другой способ входа».
+  - Если remaining.length === 1 && remaining[0].provider === 'email' && password не задан (проверить через identities — у email identity должен быть identity_data.email_verified или просто наличие — Supabase создаёт email identity только при наличии password) → 400 `LAST_IDENTITY`.
+  - Иначе `supabaseAdmin.auth.admin.deleteIdentity({ user_id, identity_id: target.id })` (точное имя метода — проверить в supabase-js docs, может потребоваться обертка через REST).
+  - Return { success: true }.
+- Tutor role check — сохранить (как в существующих actions).
+
+TutorProfile.tsx:
+- Импортировать LoginProvidersSection и подключить под <SecuritySection /> (внутри max-w-2xl контейнера).
+
+Acceptance Criteria: AC-12, AC-13.
+
+Guardrails:
+- **Двойной last-identity guard обязателен**: UI кнопка disabled + server 400. Обход одного должен ловиться вторым. Test это явно.
+- НЕ удалять identity напрямую через unlinkIdentity на клиенте — только через edge function (защита от обхода клиентского guard).
+- НЕ логировать provider tokens, refresh tokens, identity IDs.
+- При linkIdentity для Google — пользователь уйдёт со страницы. Сохранить '/tutor/profile' в localStorage 'oauth_return_to' (см. TASK-17 паттерн).
+- На Telegram «Привязать» — TODO comment + ссылка на Phase 5 спеку для linking flow (вне scope этого TASK).
+- Confirm dialogs — Radix Dialog (использовать существующий src/components/ui/dialog.tsx).
+
+Validation:
+- npm run lint && npm run build.
+- Manual flows:
+  - State A (only email/pwd) → Привязать Google → C → Отвязать Google → A.
+  - State B (only Google) → попытка отвязать Google в UI → кнопка disabled, tooltip.
+  - State B → попытка вызвать unlink-identity напрямую через DevTools fetch → 400 LAST_IDENTITY.
+  - State C → отвязать Google → A.
+- supabase functions deploy tutor-account (после изменений).
+
+End block + self-check: двойной guard работает (UI + server), Telegram TODO явно отмечено.
+```
+
 ---
 
-## Definition of Done (для всей фичи Phase 1-3)
+## Definition of Done (для всей фичи Phase 1-4)
 
-1. ✅ Все TASK-1 .. TASK-15 выполнены
-2. ✅ Все 10 AC из spec.md проходят
+1. ✅ Все TASK-1 .. TASK-19 выполнены
+2. ✅ Все 13 AC из spec.md (v0.2) проходят (AC-1..10 для Phase 1-3, AC-11..13 для Phase 4)
 3. ✅ `npm run lint && npm run build && npm run smoke-check` зелёные после каждой задачи
 4. ✅ Codex review каждой фазы (separate session, read spec + AC + git diff) → PASS / CONDITIONAL PASS
 5. ✅ Manual smoke: Windows+Chrome, iPhone+Safari, macOS+Safari
 6. ✅ Egor pilot feedback после Phase 1 (неделя 1 after deploy)
-7. ✅ CLAUDE.md обновлён с правилами для будущих агентов (ключевой рецепт для tutor profile)
+7. ✅ Phase 4 smoke: новый OAuth-tutor через Google login → видит SecuritySection state B → устанавливает пароль → переход в C → может отвязать Google и войти через email
+8. ✅ CLAUDE.md обновлён с правилами для будущих агентов (ключевой рецепт для tutor profile + OAuth identity flow)
 
 ---
 
@@ -1065,3 +1442,4 @@ End block + self-check: не сломан ли student-login flow, не слом
 - **Phase 1:** добавить секцию в CLAUDE.md "Tutor Profile — identity, аватары, storage" (как работают placeholders, RLS, query key).
 - **Phase 2:** добавить краткое упоминание tutor-account в секции "Edge functions".
 - **Phase 3:** упомянуть Telegram auto-prefill flow + риск ротации TG URL в CLAUDE.md.
+- **Phase 4:** добавить секцию "OAuth identity flow" в CLAUDE.md: useUserIdentities hook (key `['auth','identities']`), 3 состояния SecuritySection (A/B/C), last-identity guard в двух местах (UI + edge function), процедура ротации Google client_secret. Также упомянуть `oauth_return_to` localStorage паттерн.

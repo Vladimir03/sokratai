@@ -4682,6 +4682,71 @@ async function resolveTaskImageUrlsForAI(
   return resolvedUrls.filter((value): value is string => Boolean(value));
 }
 
+type TutorThreadProfile = {
+  display_name: string;
+  avatar_url: string | null;
+  gender: "male" | "female" | null;
+};
+
+async function resolveTutorProfileForAssignment(
+  db: SupabaseClient,
+  assignmentId: string,
+): Promise<TutorThreadProfile | null> {
+  try {
+    const { data: assignment } = await db
+      .from("homework_tutor_assignments")
+      .select("tutor_id")
+      .eq("id", assignmentId)
+      .maybeSingle();
+    const tutorUserId = typeof assignment?.tutor_id === "string"
+      ? assignment.tutor_id
+      : null;
+    if (!tutorUserId) return null;
+
+    const { data: tutor } = await db
+      .from("tutors")
+      .select("name, avatar_url, gender")
+      .eq("user_id", tutorUserId)
+      .maybeSingle();
+
+    const tutorName = typeof tutor?.name === "string" ? tutor.name.trim() : "";
+    const avatarUrl = typeof tutor?.avatar_url === "string" && tutor.avatar_url.trim()
+      ? tutor.avatar_url.trim()
+      : null;
+    const gender = tutor?.gender === "male" || tutor?.gender === "female"
+      ? tutor.gender
+      : null;
+
+    if (tutorName) {
+      return {
+        display_name: tutorName,
+        avatar_url: avatarUrl,
+        gender,
+      };
+    }
+
+    const { data: profile } = await db
+      .from("profiles")
+      .select("username")
+      .eq("id", tutorUserId)
+      .maybeSingle();
+    const username = typeof profile?.username === "string" ? profile.username.trim() : "";
+    if (!username) return null;
+
+    return {
+      display_name: username,
+      avatar_url: avatarUrl,
+      gender,
+    };
+  } catch (err) {
+    console.warn("resolve_tutor_profile_failed", {
+      assignmentId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return null;
+  }
+}
+
 /**
  * Resolve a tutor-curated display name for the student behind a given
  * `homework_tutor_student_assignments.id`. Used to inject the student's
@@ -5167,13 +5232,77 @@ async function handleGetThread(
     return jsonError(cors, 500, "DB_ERROR", "Failed to load tasks for thread");
   }
 
+  const tutorProfile = await resolveTutorProfileForAssignment(db, sa.assignment_id);
+
   // Filter out hidden tutor notes (service-role bypasses RLS)
   return jsonOk(cors, {
     ...stripStudentSensitiveTaskStateFields(
       stripHiddenMessages(thread as Record<string, unknown>),
     ),
     tasks: tasks ?? [],
+    tutor_profile: tutorProfile,
   });
+}
+
+// ─── Endpoint: GET /assignments/:id/thread (student) ────────────────────────
+//
+// Resolves student's guided thread by assignment_id (with lazy provisioning
+// if the thread doesn't exist yet) and returns it with tutor_profile attached
+// (via fetchStudentThread). This is the canonical way for the student client
+// to load a thread — direct PostgREST SELECT cannot compute tutor_profile.
+// Routed before /assignments/:id/student in the dispatcher so the more-specific
+// path matches first.
+async function handleGetStudentThreadByAssignment(
+  db: SupabaseClient,
+  userId: string,
+  assignmentId: string,
+  cors: Record<string, string>,
+): Promise<Response> {
+  if (!isUUID(assignmentId)) {
+    return jsonError(cors, 400, "VALIDATION", "Invalid assignment ID");
+  }
+
+  // Ownership check + resolve SA id for thread lookup.
+  const { data: sa, error: saError } = await db
+    .from("homework_tutor_student_assignments")
+    .select("id")
+    .eq("assignment_id", assignmentId)
+    .eq("student_id", userId)
+    .maybeSingle();
+  if (saError) {
+    return jsonError(cors, 500, "DB_ERROR", "Failed to verify student assignment");
+  }
+  if (!sa) {
+    // Don't 200-with-null — that would mask "not assigned to you" as
+    // "no thread yet". 404 is honest.
+    return jsonError(cors, 404, "NOT_FOUND", "Assignment not found");
+  }
+
+  // Find thread by student_assignment_id.
+  const { data: existingThread, error: threadError } = await db
+    .from("homework_tutor_threads")
+    .select("id")
+    .eq("student_assignment_id", sa.id)
+    .maybeSingle();
+  if (threadError) {
+    return jsonError(cors, 500, "DB_ERROR", "Failed to load thread");
+  }
+
+  let threadId: string | null = typeof existingThread?.id === "string" ? existingThread.id : null;
+  // Lazy provision (matches handleCheckAnswer / handleRequestHint behavior).
+  if (!threadId) {
+    const provisioned = await provisionGuidedThread(db, assignmentId, sa.id);
+    threadId = typeof provisioned?.id === "string" ? provisioned.id : null;
+  }
+  if (!threadId) {
+    // Genuine 200-null: assignment exists, student is owner, but no tasks
+    // yet so provisioning skipped. Client treats null as "no thread, no
+    // messages to render" same as before the refactor.
+    return jsonOk(cors, null);
+  }
+
+  const studentThread = await fetchStudentThread(db, threadId);
+  return jsonOk(cors, studentThread);
 }
 
 // ─── Endpoint: GET /assignments/:id/student (student) ────────────────────────
@@ -5637,15 +5766,47 @@ async function fetchFullThread(
   return data as Record<string, unknown> | null;
 }
 
-/** Fetch thread for student: filters out hidden tutor notes. */
+/**
+ * Fetch thread for student: filters out hidden tutor notes AND attaches
+ * `tutor_profile` (display_name + avatar_url + gender) so guided-chat
+ * messages can render the tutor's identity without an extra round-trip
+ * from the client.
+ *
+ * Cost: 2 additional point-lookups (sa by PK + tutors by user_id, both
+ * < 5 ms) per fetch. Acceptable because guided-chat is interaction-paced,
+ * not hot-throughput.
+ *
+ * Why here (vs. per-handler): keeps every consumer
+ * (handleGetThread / handleCheckAnswer / handleRequestHint / handleAdvanceTask)
+ * in sync. Adding an attach helper at the handler level invited regressions
+ * — see ChatGPT-5.5 review BLOCKER 1, where check/hint responses lacked
+ * tutor_profile and the client lost identity after every answer.
+ */
 async function fetchStudentThread(
   db: SupabaseClient,
   threadId: string,
 ): Promise<Record<string, unknown> | null> {
   const thread = await fetchFullThread(db, threadId);
-  return thread
-    ? stripStudentSensitiveTaskStateFields(stripHiddenMessages(thread))
+  if (!thread) return null;
+  const stripped = stripStudentSensitiveTaskStateFields(stripHiddenMessages(thread));
+
+  const studentAssignmentId = typeof stripped.student_assignment_id === "string"
+    ? stripped.student_assignment_id
     : null;
+  let tutorProfile: TutorThreadProfile | null = null;
+  if (studentAssignmentId) {
+    const { data: sa } = await db
+      .from("homework_tutor_student_assignments")
+      .select("assignment_id")
+      .eq("id", studentAssignmentId)
+      .maybeSingle();
+    const assignmentId = typeof sa?.assignment_id === "string" ? sa.assignment_id : null;
+    if (assignmentId) {
+      tutorProfile = await resolveTutorProfileForAssignment(db, assignmentId);
+    }
+  }
+
+  return { ...stripped, tutor_profile: tutorProfile };
 }
 
 // ─── Helper: lazy thread provisioning for guided_chat ───────────────────────
@@ -7132,6 +7293,11 @@ Deno.serve(async (req: Request): Promise<Response> => {
     // POST /threads/:id/viewed-by-tutor (tutor endpoint — TASK-7 follow-up)
     if (seg.length === 3 && seg[0] === "threads" && seg[2] === "viewed-by-tutor" && route.method === "POST") {
       return await handleMarkThreadViewed(db, userId, seg[1], cors);
+    }
+
+    // GET /assignments/:id/thread (student endpoint — thread + tutor_profile)
+    if (seg.length === 3 && seg[0] === "assignments" && seg[2] === "thread" && route.method === "GET") {
+      return await handleGetStudentThreadByAssignment(db, userId, seg[1], cors);
     }
 
     // GET /assignments/:id/student (student endpoint)

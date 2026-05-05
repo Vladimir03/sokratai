@@ -1,0 +1,35 @@
+-- =============================================================================
+-- Migration: Revert broad SELECT policy on tutors (Phase 1 fix per code review)
+-- Spec:  docs/delivery/features/tutor-profile/spec.md (v0.2)
+-- Tasks: docs/delivery/features/tutor-profile/tasks.md TASK-1 (post-review fix)
+-- Review: ChatGPT-5.5 BLOCKER 2 — gratuitous attack surface (cross-tenant leak)
+-- =============================================================================
+-- Why:
+--   Migration 20260506150000 added "Authenticated can view tutor profiles"
+--   with USING (true). This was added on the assumption that students would
+--   need direct PostgREST access to read tutor identity for guided chat.
+--   In reality:
+--     1. handleGetThread (supabase/functions/homework-api/index.ts:7160)
+--        uses SUPABASE_SERVICE_ROLE_KEY and bypasses RLS entirely.
+--     2. The edge function column-whitelists (name, avatar_url, gender) —
+--        no other fields ever leave the server.
+--     3. Phase 1 client routes thread fetch through the edge function
+--        (post-review fix: getStudentThreadByAssignment now calls
+--        GET /functions/v1/homework-api/threads/:id).
+--   Therefore the broad policy adds no functional value but exposes the
+--   ENTIRE tutors row to any authenticated user — including telegram_id,
+--   booking_link, invite_code, bio, mini_groups_enabled.
+--
+-- What this does:
+--   - DROP IF EXISTS the broad SELECT policy.
+--   - Existing policies remain untouched:
+--       * "Tutors can view own profile"           USING (auth.uid() = user_id)
+--       * "Anyone can view tutor by booking_link" USING (booking_link IS NOT NULL)
+--       * "Anyone can view tutor by invite_code"  USING (invite_code IS NOT NULL)
+--   - Tutor's self-read for /tutor/profile (TASK-2 useTutorProfile) keeps
+--     working through the narrow auth.uid() = user_id policy.
+--   - Storage bucket 'avatars' and policies, profiles.avatar_url/gender,
+--     tutors.gender, tutors_user_id_unique constraint — all kept as-is.
+-- =============================================================================
+
+DROP POLICY IF EXISTS "Authenticated can view tutor profiles" ON public.tutors;
