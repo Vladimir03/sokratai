@@ -17,10 +17,10 @@
     
     <!-- Golos Text — self-hosted via @font-face in src/styles/colors_and_type.css (6 weights 400-900) -->
 
-    <!-- Resource hints for faster loading - prioritize critical resources.
-         api.sokratai.ru is the Cloudflare Worker reverse-proxy on top of Supabase
-         (vrsseotrfmsxpbciyqzc.supabase.co) — required to bypass RU ISP blocks on *.supabase.co. -->
-    <link rel="preconnect" href="https://api.sokratai.ru" crossorigin>
+    <!-- Resource hints. api.sokratai.ru preconnect removed from landing — landing
+         doesn't call API; preconnect there wasted a TCP/TLS slot (Lighthouse warning).
+         Routes that need it (e.g. /chat, /tutor) open connection on first fetch. -->
+    <link rel="dns-prefetch" href="https://api.sokratai.ru">
     <link rel="dns-prefetch" href="https://mc.yandex.ru">
     
     <!-- Preload critical entry point for faster Speed Index -->
