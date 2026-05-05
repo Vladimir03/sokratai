@@ -415,6 +415,12 @@ export default function TutorSignupTrial() {
           accent-color: var(--sokrat-green-700);
           flex-shrink: 0;
           touch-action: manipulation;
+          appearance: auto;
+          -webkit-appearance: checkbox;
+          border: 2px solid var(--sokrat-green-700);
+          border-radius: 4px;
+          background: #fff;
+          cursor: pointer;
         }
         .tst-checkbox-label {
           font-size: 13px;
