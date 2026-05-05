@@ -105,7 +105,7 @@ export default function SocialProof() {
         {/* Cases */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4 md:gap-5">
           <CaseVideoCard videoSrc={TESTIMONIAL_VIDEO_SRC} />
-          <CasePlaceholderCard />
+          <CaseEgorCard />
           <CaseYourCaseCard />
         </div>
       </div>
@@ -215,56 +215,70 @@ function CaseVideoCard({ videoSrc }: { videoSrc?: string }) {
   );
 }
 
-function CasePlaceholderCard() {
-  // Honesty invariant (trust ladder, copy-deck §7 rationale): this card is
-  // a mock-up of a future case, not a real testimonial. It MUST be visually
-  // distinguishable from Case #1 (real video testimonial) so visitors aren't
-  // deceived. Signals: dashed border + "ПРИМЕР" chip + muted regalia/quote.
+function CaseEgorCard() {
+  // Real practitioner case: Егор Б. uses Сократ AI with his own physics
+  // students. Companion student-feedback screenshot below the quote acts
+  // as third-party social proof (the student noticed the AI tools Егор is
+  // building — that's exactly Сократ AI). Two images live in
+  // `public/marketing/tutor-landing/` so they ship as static assets.
   return (
     <article
       className="relative flex flex-col gap-3 rounded-[14px] p-5"
       style={{
         backgroundColor: "var(--sokrat-card)",
-        border: "2px dashed var(--sokrat-border)",
+        border: "1px solid var(--sokrat-border)",
       }}
     >
       <span
         className="self-start inline-block rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.08em]"
         style={{
-          backgroundColor: "var(--sokrat-border-light)",
-          color: "var(--sokrat-fg3)",
+          backgroundColor: "var(--sokrat-green-100)",
+          color: "var(--sokrat-green-800)",
         }}
       >
-        Пример будущего кейса
+        Реальный кейс
       </span>
-      <div
-        aria-label="Фото-placeholder"
-        className="flex h-[72px] w-[72px] items-center justify-center self-start rounded-[10px] font-extrabold text-white"
+
+      <img
+        src="/marketing/tutor-landing/egor-portrait.jpg"
+        alt="Егор Блинов — фото"
+        width={88}
+        height={88}
+        loading="lazy"
+        className="h-[88px] w-[88px] self-start rounded-[12px] object-cover"
         style={{
-          background:
-            "linear-gradient(135deg, var(--sokrat-green-200) 0%, var(--sokrat-green-500) 100%)",
-          fontSize: 24,
-          opacity: 0.7,
+          backgroundColor: "var(--sokrat-green-100)",
+          border: "1px solid var(--sokrat-border)",
         }}
-      >
-        МК
-      </div>
-      <div className="sp-case-name" style={{ opacity: 0.85 }}>
-        Михаил К.
-      </div>
+      />
+
+      <div className="sp-case-name">Егор Блинов</div>
       <div className="sp-case-regalia">
-        Репетитор математики ОГЭ и ЕГЭ · 5 лет опыта · Санкт-Петербург
+        Репетитор физики ОГЭ, ЕГЭ и&nbsp;олимпиады · 10&nbsp;лет опыта
       </div>
-      <blockquote className="sp-case-quote" style={{ opacity: 0.85 }}>
-        «Собираю ДЗ за 10 минут из базы + своих задач. AI-генерация похожих
-        экономит минут 30 на подготовку каждого урока.»
+      <blockquote className="sp-case-quote">
+        «Собираю ДЗ за 5&nbsp;минут из базы + своих задач. AI-проверка ДЗ
+        экономит 2&nbsp;часа на группу школьников каждую неделю.»
       </blockquote>
-      <p
-        className="text-[11px]"
-        style={{ color: "var(--sokrat-fg3)", lineHeight: 1.4 }}
-      >
-        Так будет выглядеть реальный кейс. Заменим после запуска пилота.
-      </p>
+
+      <figure className="mt-1 flex flex-col gap-2">
+        <img
+          src="/marketing/tutor-landing/egor-student-feedback.jpg"
+          alt="Сообщение ученицы Егору в Telegram: «А вы случайно не преподаёте математику подготовка к ЕГЭ? Просто мне очень нравится, как вы преподносите материал, какие плюшки в виде сайтов, ИИ вы делаете…»"
+          loading="lazy"
+          className="w-full rounded-[10px]"
+          style={{
+            border: "1px solid var(--sokrat-border)",
+            backgroundColor: "var(--sokrat-card)",
+          }}
+        />
+        <figcaption
+          className="text-[11px] leading-[1.4] text-center"
+          style={{ color: "var(--sokrat-fg3)" }}
+        >
+          Сообщение ученицы Егору, май 2026
+        </figcaption>
+      </figure>
     </article>
   );
 }
