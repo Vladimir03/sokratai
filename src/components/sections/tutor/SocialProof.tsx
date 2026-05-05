@@ -268,10 +268,7 @@ function CaseVideoCard({ videoSrc }: { videoSrc?: string }) {
       <div className="sp-case-regalia">
         Руководитель онлайн-курса подготовки к ЕГЭ и ОГЭ по биологии
       </div>
-      <p
-        className="text-[11px]"
-        style={{ color: "var(--sokrat-fg3)", lineHeight: 1.4, marginTop: 4 }}
-      >
+      <p className="sp-case-disclaimer">
         Отзыв снят, когда Сократ AI работал как Telegram-бот. С 2025 платформа
         переехала на sokratai.ru.
       </p>
