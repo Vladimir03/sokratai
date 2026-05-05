@@ -366,6 +366,10 @@
    ============================================================ */
 
 /* ─── MARKETING (sokratai.ru) ───────────────────────────────── */
+/* Margin intentionally omitted here — see :where()-wrapped reset at end of
+   typography rule-sets below. Components use Tailwind `mb-*`/`mt-*` utilities
+   for stacking gaps (heading→body), and the low-specificity reset lets those
+   utilities win without per-component inline overrides. */
 .sokrat-marketing h1 {
   font-family: var(--sokrat-font-display);
   font-size: var(--sokrat-fs-display-md);
@@ -374,7 +378,6 @@
   letter-spacing: -0.01em;
   color: var(--sokrat-green-800);
   text-wrap: balance;
-  margin: 0;
 }
 @media (min-width: 768px) {
   .sokrat-marketing h1 {
@@ -388,7 +391,6 @@
   font-weight: var(--sokrat-fw-bold);
   color: var(--sokrat-green-800);
   text-wrap: balance;
-  margin: 0;
 }
 .sokrat-marketing .lede {
   font-size: var(--sokrat-fs-body-lg);
@@ -554,7 +556,6 @@
   font-weight: var(--sokrat-fw-bold);
   letter-spacing: -0.01em;
   color: var(--sokrat-green-800);
-  margin: 0;
 }
 @media (min-width: 768px) {
   .sokrat:not([data-sokrat-mode]) h1, .sokrat-h1 {
@@ -569,19 +570,30 @@
   font-weight: var(--sokrat-fw-bold);
   letter-spacing: -0.005em;
   color: var(--sokrat-green-800);
-  margin: 0;
 }
 .sokrat:not([data-sokrat-mode]) h3, .sokrat-h3 {
   font-size: var(--sokrat-fs-h2);
   line-height: var(--sokrat-lh-h2);
   font-weight: var(--sokrat-fw-semibold);
   color: var(--sokrat-fg1);
-  margin: 0;
 }
 .sokrat:not([data-sokrat-mode]) p, .sokrat-p {
   font-size: var(--sokrat-fs-body);
   line-height: var(--sokrat-lh-body);
   color: var(--sokrat-fg2);
+}
+
+/* Margin reset wrapped in :where() — specificity drops to 0 so component-level
+   Tailwind utility classes (mb-*, mt-*) win and stack heading→body correctly.
+   Without this wrapping, the global rule (specificity 0,2,1) silently overrode
+   `.mb-4` / `.mt-6` (0,1,0), causing every landing section to render with
+   collapsed gaps between heading and body. */
+:where(
+  .sokrat:not([data-sokrat-mode]) h1, .sokrat-h1,
+  .sokrat:not([data-sokrat-mode]) h2, .sokrat-h2,
+  .sokrat:not([data-sokrat-mode]) h3, .sokrat-h3,
+  .sokrat:not([data-sokrat-mode]) p, .sokrat-p
+) {
   margin: 0;
 }
 .sokrat code, .sokrat-code {

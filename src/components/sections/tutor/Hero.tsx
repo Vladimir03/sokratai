@@ -63,22 +63,13 @@ export default function Hero() {
           🎁 Новое: 7 дней пробного периода без карты
         </span>
 
-        {/*
-          Inline marginBottom/marginTop required because global
-          `.sokrat:not([data-sokrat-mode]) h1/p { margin: 0 }` (specificity 0,2,1)
-          overrides Tailwind utility classes (0,1,0). Without inline overrides
-          H1 → lede → byline collapse with zero gap.
-        */}
-        <h1
-          id="tutor-hero-headline"
-          style={{ marginBottom: "1.75rem" }}
-        >
-          Инструмент репетитора. От&nbsp;репетитора.
+        <h1 id="tutor-hero-headline" className="mb-7">
+          Инструмент репетитора&nbsp;— от&nbsp;репетитора
         </h1>
 
         <p
-          className="lede"
-          style={{ color: "var(--sokrat-fg1)", marginBottom: "1.25rem" }}
+          className="lede mb-5"
+          style={{ color: "var(--sokrat-fg1)" }}
         >
           AI проверяет рукописные ДЗ по физике, математике и информатике. Ведёт
           ученика сократовским диалогом вместо готового ответа. Собирает ДЗ из

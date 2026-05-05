@@ -19,13 +19,13 @@ export default function FinalCTA() {
       <div className="mx-auto max-w-[720px] px-4 md:px-8">
         <h2
           id="final-cta-heading"
-          className="final-cta-h2 mb-4"
+          className="final-cta-h2 mb-6 md:mb-7"
         >
-          Готовы перестать проверять до полуночи?
+          Готовы перестать проверять до&nbsp;полуночи?
         </h2>
 
         <p
-          className="lede mx-auto mb-8 max-w-[640px]"
+          className="lede mx-auto mb-10 max-w-[640px]"
           style={{ color: "rgba(255, 255, 255, 0.9)" }}
         >
           Попробуйте Сократ AI 7&nbsp;дней бесплатно — без карты. Понравится —

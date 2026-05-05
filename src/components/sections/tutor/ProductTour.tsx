@@ -75,11 +75,11 @@ export default function ProductTour({
         <div className={textOrderClass}>
           {badge && <TourBadge badge={badge} />}
 
-          <h2 className="mb-4">{headline}</h2>
+          <h2 className="mb-5 md:mb-6">{headline}</h2>
 
-          <p className="lede mb-6">{lede}</p>
+          <p className="lede mb-7 md:mb-8">{lede}</p>
 
-          <ul className="mb-8 flex flex-col gap-4 md:gap-5">
+          <ul className="mb-8 flex flex-col gap-5 md:gap-6">
             {bullets.map((bullet) => (
               <li key={bullet.title} className="flex gap-3">
                 <span
@@ -89,7 +89,7 @@ export default function ProductTour({
                 />
                 <div className="flex-1">
                   <h3
-                    className="tour-bullet-title mb-1"
+                    className="tour-bullet-title mb-2"
                     style={{ color: "var(--sokrat-fg1)" }}
                   >
                     {bullet.title}

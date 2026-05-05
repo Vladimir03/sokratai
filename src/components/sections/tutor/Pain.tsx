@@ -66,13 +66,9 @@ export default function Pain() {
               key={card.title}
               className="pain-card rounded-[14px] p-5 md:p-7 border border-[color:var(--sokrat-border)] bg-[color:var(--sokrat-card)] transition-[border-color,box-shadow] duration-200 hover:border-[color:var(--sokrat-green-200)] hover:shadow-sm"
             >
-              {/* Inline marginBottom — global `.sokrat:not([data-sokrat-mode]) h3 { margin: 0 }` overrides Tailwind utilities. */}
               <h3
-                className="pain-card-title font-semibold"
-                style={{
-                  color: "var(--sokrat-fg1)",
-                  marginBottom: "0.875rem",
-                }}
+                className="pain-card-title font-semibold mb-3"
+                style={{ color: "var(--sokrat-fg1)" }}
               >
                 {card.title}
               </h3>

@@ -86,11 +86,11 @@ export default function FreemiumBridge() {
           Бесплатно навсегда
         </span>
 
-        <h2 id="freemium-heading" className="mb-4">
+        <h2 id="freemium-heading" className="mb-5 md:mb-6">
           Оплаты и расписание — базовая платформа бесплатно
         </h2>
 
-        <p className="lede mb-6 md:mb-12 max-w-[720px]">
+        <p className="lede mb-8 md:mb-12 max-w-[720px]">
           Учёт оплат, расписание уроков, карточки учеников с историей — всё
           бесплатно и навсегда, без скрытых платежей. AI-проверку ДЗ и
           сократовский диалог добавите позже, когда готовы — отдельной
@@ -107,13 +107,7 @@ export default function FreemiumBridge() {
                 borderColor: "var(--sokrat-border)",
               }}
             >
-              {/* Inline marginBottom — global `.sokrat:not([data-sokrat-mode]) h3 { margin: 0 }` overrides Tailwind. */}
-              <h3
-                className="freemium-card-title"
-                style={{ marginBottom: "0.875rem" }}
-              >
-                {card.title}
-              </h3>
+              <h3 className="freemium-card-title mb-3">{card.title}</h3>
               <p className="freemium-card-body">{card.body}</p>
             </li>
           ))}
