@@ -2,8 +2,8 @@ import { Play, Maximize2, X } from "lucide-react";
 import { useState, useEffect } from "react";
 
 import { trackTutorLandingGoal } from "@/lib/tutorLandingAnalytics";
-import founderEgorImg from "@/assets/founder-egor.png";
-import founderVladimirImg from "@/assets/founder-vladimir.png";
+import founderEgorImg from "@/assets/founder-egor.webp";
+import founderVladimirImg from "@/assets/founder-vladimir.webp";
 
 type Founder = {
   name: string;
