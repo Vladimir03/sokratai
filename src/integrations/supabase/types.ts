@@ -1861,6 +1861,7 @@ export type Database = {
       }
       profiles: {
         Row: {
+          avatar_url: string | null
           consent_accepted_at: string | null
           consent_source: string | null
           consent_version: string | null
@@ -1868,6 +1869,7 @@ export type Database = {
           current_streak: number | null
           diagnostic_completed: boolean | null
           difficult_subject: string | null
+          gender: string | null
           grade: number | null
           id: string
           last_diagnostic_at: string | null
@@ -1887,6 +1889,7 @@ export type Database = {
           username: string
         }
         Insert: {
+          avatar_url?: string | null
           consent_accepted_at?: string | null
           consent_source?: string | null
           consent_version?: string | null
@@ -1894,6 +1897,7 @@ export type Database = {
           current_streak?: number | null
           diagnostic_completed?: boolean | null
           difficult_subject?: string | null
+          gender?: string | null
           grade?: number | null
           id: string
           last_diagnostic_at?: string | null
@@ -1913,6 +1917,7 @@ export type Database = {
           username: string
         }
         Update: {
+          avatar_url?: string | null
           consent_accepted_at?: string | null
           consent_source?: string | null
           consent_version?: string | null
@@ -1920,6 +1925,7 @@ export type Database = {
           current_streak?: number | null
           diagnostic_completed?: boolean | null
           difficult_subject?: string | null
+          gender?: string | null
           grade?: number | null
           id?: string
           last_diagnostic_at?: string | null
@@ -2842,6 +2848,7 @@ export type Database = {
           bio: string | null
           booking_link: string | null
           created_at: string | null
+          gender: string | null
           id: string
           invite_code: string | null
           mini_groups_enabled: boolean
@@ -2857,6 +2864,7 @@ export type Database = {
           bio?: string | null
           booking_link?: string | null
           created_at?: string | null
+          gender?: string | null
           id?: string
           invite_code?: string | null
           mini_groups_enabled?: boolean
@@ -2872,6 +2880,7 @@ export type Database = {
           bio?: string | null
           booking_link?: string | null
           created_at?: string | null
+          gender?: string | null
           id?: string
           invite_code?: string | null
           mini_groups_enabled?: boolean
