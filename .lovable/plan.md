@@ -1,95 +1,88 @@
-# План: быстрая авторизация и фиксация согласия
 
-## Часть 1. Способы быстрой регистрации для РФ
+## Диагноз
 
-### Что уже есть
-- Email + пароль
-- Telegram Login (через `TutorTelegramLoginButton` / `TelegramLoginButton`) — уже основной «быстрый» способ для РФ, работает без VPN через бота `@sokrat_rep_bot`
+Обе проблемы — следствие того, что фронтенд раздаётся с **собственного VPS** (`sokratai.ru` → Selectel Moscow), а не с Lovable Cloud. OAuth-инфраструктура и сессии Supabase ведут себя иначе, чем в preview.
 
-### Что добавляем
-**1) Google OAuth (через Lovable Cloud — managed)**
-- Самый частый запрос. В РФ работает у большинства пользователей (Google Accounts не блокируется на уровне ISP, в отличие от части сервисов Google).
-- Используем нативную интеграцию Lovable Cloud: вызов `lovable.auth.signInWithOAuth("google", { redirect_uri: ... })`. API ключи не нужны — Cloud управляет credentials.
-- Кнопка появляется и на `/signup` (студент), и на `/signup?ref=tutor-landing&trial=7` (репетитор-trial), и на `/register-tutor`.
+### Проблема 1 — Google → 404
 
-**2) VK ID (рекомендация для РФ как доп.)**
-- В Lovable Cloud / Supabase **нативно НЕ поддерживается** (только Google, Apple, SAML SSO нативно). Чтобы добавить VK ID, нужно либо:
-  - (a) подключить внешний Supabase и настроить через Custom OAuth provider — это серьёзная переделка инфраструктуры,
-  - (b) реализовать VK ID Web SDK на фронте + кастомная edge-функция, которая обменивает VK access_token на сессию Supabase через `signInWithIdToken`. Это ~2-3 дня работы + регистрация приложения в VK ID Console.
-- **Рекомендация:** в этой итерации **не делаем VK ID** (большой объём + риски), а ставим Google + усиливаем существующий Telegram login. Если конверсия Google окажется низкой — возвращаемся к VK отдельной задачей.
+URL `https://sokratai.ru/~oauth/initiate?...` ловит 404 страницу React Router.
 
-**Что НЕ добавляем и почему:**
-- Apple Sign In — для РФ-аудитории низкий охват среди репетиторов, основной flow — desktop Chrome.
-- Yandex ID — нативно не поддерживается, та же история что и VK.
-- Сбер ID / Mail.ru — нативно не поддерживается.
+Причина: путь `/~oauth/*` обслуживается **прокси-воркером Lovable** на их CDN. У нас на VPS такого роута нет — nginx отдаёт запрос Vite-бандлу как обычную SPA-навигацию, а в React Router нет маршрута `/~oauth/initiate`, поэтому показывается NotFound.
 
-### Где разместить кнопки
-На обеих страницах (`SignUp.tsx` и `TutorSignupTrial.tsx`):
-1. Google (новая кнопка, primary social)
-2. Telegram (уже есть, остаётся)
-3. Email + пароль (форма ниже под разделителем «или»)
+Проще говоря: `lovable.auth.signInWithOAuth("google", ...)` рассчитан на хостинг внутри `*.lovable.app` или Lovable-managed custom domain, где воркер перехватывает `/~oauth/initiate` и `/~oauth/callback`. На своём VPS перехватывать некому.
 
-Порядок: социальные сверху → разделитель → email-форма. Это стандарт и снижает трение.
+### Проблема 2 — Telegram → бот подтвердил, но сайт не пускает
 
-### Технические детали (Google)
-- Lovable Cloud сам управляет Google OAuth — никаких ключей у пользователя не запрашиваем.
-- На странице используется `lovable.auth.signInWithOAuth("google", { redirect_uri: window.location.origin + "/tutor/home" })` (для tutor-trial) и `redirect_uri: ".../chat"` (для студента).
-- После редиректа `onAuthStateChange` в `TutorSignupTrial` уже ловит `SIGNED_IN` и применяет `applyTrialMarker` + `assign-tutor-role` нужно вызвать после OAuth-возврата (для tutor flow) — добавим в обработчик `SIGNED_IN`, если у пользователя ещё нет tutor-роли.
-- Для студенческого `SignUp.tsx` — после возврата делаем `claimPendingInvite()` и редирект на `/chat`.
+В Telegram пишет «Авторизация подтверждена», а на странице остаётся «Ожидание подтверждения». Скорее всего одна из двух причин (или обе):
 
-## Часть 2. Чекбокс «Я согласен…» с фиксацией в БД
+1. **Polling упирается в CORS/прокси-таймаут.** Кнопка дёргает `https://api.sokratai.ru/functions/v1/telegram-login-token?token=...` каждые 2 сек напрямую через `fetch` (минуя `supabase.functions.invoke`). Если воркер/nginx режут `OPTIONS` preflight или GET без `apikey`, запрос фейлится.
+2. **Edge function `telegram-login-token` помечает токен как `verified` только после того как `telegram-bot` получил `/start login_<token>` через webhook.** Webhook идёт на `https://vrsseotrfmsxpbciyqzc.supabase.co/functions/v1/telegram-bot` напрямую (Telegram → Supabase, минуя VPS). Это должно работать. Но если в логах функции `telegram-login-token` GET-запрос возвращает `pending` несмотря на бот-подтверждение — значит токен в БД не апдейтится из бота.
 
-### Текущее состояние
-В `TutorSignupTrial.tsx`:
-- Поле `oferta` уже существует в state и схеме (`z.literal(true)`), но **в JSX чекбокса нет** — стоит дефолт `useState(true)`, т.е. согласие считается данным автоматически. Это юридически слабо.
+Нужно проверить логи обеих функций на проде.
 
-### Что меняем
-**Frontend (TutorSignupTrial.tsx):**
-- Меняем дефолт `useState(false)`.
-- Рендерим реальный `<input type="checkbox">` с лейблом «Я согласен с [публичной офертой] и [политикой конфиденциальности]» и ссылками на `/offer` и `/privacy-policy` (открываются в новой вкладке).
-- Кнопка submit `disabled` пока `oferta !== true`.
-- Текст ошибки рядом, если пользователь снял галку.
+---
 
-**Frontend (SignUp.tsx — студенческий):**
-- Добавляем такое же поле `consent`, чекбокс и валидацию.
+## План действий
 
-**База данных — миграция:**
-Добавляем в `profiles`:
+### Шаг 1 — Проверить логи на Supabase, чтобы подтвердить причину Telegram-бага
+
+* `supabase--edge_function_logs(function_name: "telegram-login-token")` — посмотреть свежие GET-запросы и их ответы.
+* `supabase--edge_function_logs(function_name: "telegram-bot")` — найти обработку `/start login_<token>` и убедиться, что апдейт токена в БД проходит успешно.
+* Параллельно проверить через `browser--navigate_to_url` страницу `/signup?ref=tutor-landing&trial=7`, нажать «Войти через Telegram», и в `browser--list_network_requests` увидеть, что реально возвращает `telegram-login-token?token=...`.
+
+### Шаг 2 — Починить Telegram-кнопку (минимально-рискованный фикс)
+
+В зависимости от того, что покажут логи:
+
+* Если GET-запрос к `telegram-login-token` фейлится с CORS — добавить `apikey`-заголовок к polling fetch (как делает Supabase SDK), либо переключить кнопку на `supabase.functions.invoke('telegram-login-token', ...)`.
+* Если функция возвращает `pending`, хотя бот подтвердил — починить запись в БД на стороне `telegram-bot/handleWebLogin` (проверить, что `intended_role: "tutor"` корректно проставляет роль и не ломает upsert статуса токена).
+* Дополнительно: уменьшить `delays` после установки сессии — сейчас 5 ретраев `is_tutor` с задержками до 3с, а свежесозданная роль через триггер уже доступна через ~500мс.
+
+### Шаг 3 — Починить Google OAuth для VPS-хостинга
+
+Тут два пути, нужно выбрать с вами:
+
+**Вариант A (рекомендую) — Native Supabase Google OAuth, без Lovable broker**
+
+Заменить `lovable.auth.signInWithOAuth("google", ...)` на `supabase.auth.signInWithOAuth({ provider: 'google', options: { redirectTo: 'https://sokratai.ru/tutor/home' } })`. Это:
+
+* Работает с любого хоста, OAuth-callback идёт на `https://api.sokratai.ru/auth/v1/callback` (наш прокси на Supabase Auth) — никакого `/~oauth/*` не нужно.
+* Требует один раз настроить Google Cloud Console: добавить `https://api.sokratai.ru/auth/v1/callback` в Authorized Redirect URIs существующего OAuth Client.
+* Требует включить Google provider в Supabase Auth (Lovable Cloud → Users → Auth Settings → Google) с теми же Client ID / Secret.
+
+Файлы под правки:
+* `src/components/GoogleAuthButton.tsx` — заменить `lovable.auth.signInWithOAuth` на `supabase.auth.signInWithOAuth`.
+* Удалить импорт `@/integrations/lovable` из этого компонента.
+* Сохранить логику стэшинга consent перед редиректом.
+
+**Вариант B — оставить Lovable broker**
+
+Поднять отдельный nginx reverse-proxy для путей `/~oauth/initiate` и `/~oauth/callback` на VPS, форвардить их на `https://oauth.lovable.app/...`. Это сложнее, привязывает прод к доступности Lovable proxy и не даёт никаких плюсов для конечного пользователя. Не рекомендую.
+
+### Шаг 4 — Деплой
+
+После правок кода:
+
+```powershell
+ssh -i "$HOME\.ssh\sokratai_proxy" root@185.161.65.182 "deploy-sokratai"
 ```
-consent_accepted_at      timestamptz NULL
-consent_version          text NULL          -- например 'v1-2026-05'
-consent_source           text NULL          -- 'web-signup-tutor' | 'web-signup-student' | 'google-oauth' | 'telegram-oauth'
-```
-Индекса не нужно. NULL для существующих профилей (legacy — отдельная задача дать им принять при следующем входе, но сейчас вне scope).
 
-**Запись согласия:**
-- После успешного `auth.signUp` (email-flow) — делаем `update profiles set consent_accepted_at=now(), consent_version='v1-2026-05', consent_source=...`.
-- Для Google/Telegram OAuth — пользователь должен поставить галочку **до** клика по социальной кнопке. Если галка снята — кнопки disabled. После возврата с OAuth в `onAuthStateChange(SIGNED_IN)` пишем согласие в БД (флаг хранится в `sessionStorage` между редиректами, ключ `pending_consent_v1` с timestamp+source, читается и удаляется после записи).
+И проверить в браузере на `sokratai.ru/signup?ref=tutor-landing&trial=7`:
+1. Кнопка «Продолжить с Google» → редирект на Google → callback → `/tutor/home`.
+2. Кнопка «Войти через Telegram» → бот → возврат на сайт → автоматический заход в `/tutor/home`.
 
-**Edge function НЕ нужна** — RLS «Users can update their own profile» уже разрешает пользователю писать в свою строку.
+---
 
-### Текстовка чекбокса
-> ☐ Я согласен с [публичной офертой](/offer) и [политикой конфиденциальности](/privacy-policy)
+## Что я НЕ буду трогать
 
-Без галочки — кнопки регистрации (все три: Email, Google, Telegram) серые и неактивны.
+* `src/integrations/supabase/client.ts`, `src/integrations/supabase/types.ts`, `src/integrations/lovable/index.ts` — auto-generated.
+* `src/components/AuthGuard.tsx`, `src/components/TutorGuard.tsx` — high-risk.
+* Backend OAuth-настройки Supabase Auth (Google provider) — это Вы делаете в дашборде, либо я подскажу точный шаг.
 
-## Файлы, которые изменим
+---
 
-**Создаём:**
-- `supabase/migrations/<timestamp>_add_profile_consent_columns.sql`
+## Решение, которое нужно от Вас
 
-**Редактируем:**
-- `src/pages/TutorSignupTrial.tsx` — рендер чекбокса, дефолт `false`, gating всех CTA, запись в БД, новая Google-кнопка
-- `src/pages/SignUp.tsx` — добавляем чекбокс согласия + Google-кнопка
-- `src/pages/RegisterTutor.tsx` — добавляем Google-кнопку (там форма для существующих flow)
+Подтвердите **Вариант A** для Google OAuth (нативный Supabase, требует один раз добавить redirect URI в Google Cloud Console и Client ID/Secret в Supabase Auth Settings). Если у Вас уже настроен свой Google OAuth Client в Lovable Cloud (BYOK) — те же креды просто переиспользуются. Если используется managed Lovable — нужно будет создать собственный OAuth Client в Google Cloud (5 минут, я дам пошаговую инструкцию после подтверждения).
 
-**Не трогаем:**
-- `TelegramLoginButton`, `TutorTelegramLoginButton` — внутренности; только обернём вызов проверкой согласия на стороне страницы
-- `src/integrations/supabase/client.ts`, `src/lib/supabaseClient.ts` — auto/hardcoded, не редактируем
-- Edge functions
-
-## Вопрос на согласование
-1. Подтверди, что **VK ID** в этой итерации **не делаем** (только Google + текущий Telegram).
-2. Подтверди, что согласие **обязательно** (CTA disabled без галки), а не «по умолчанию принято».
-
-После подтверждения переключаюсь в режим имплементации.
+После подтверждения я сразу приступаю к шагам 1→2→3→4.
