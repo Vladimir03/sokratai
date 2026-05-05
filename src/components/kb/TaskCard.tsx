@@ -240,33 +240,24 @@ export const TaskCard = memo(function TaskCard({
         />
       </div>
 
-      {/* Zone 2: Content — text selectable, click toggles only if no selection */}
+      {/* Zone 2: Content — text selectable, click toggles only if no selection.
+          Hero-image layout (Vladimir's call: «как в красивых задачниках»):
+          картинка ВСЕГДА сверху и full-width, текст — под картинкой. Текст
+          в collapsed-режиме clamp'ится 4 строками (раньше было 2 — слишком
+          мало для понимания сути). Image-only задачи скрывают текстовый
+          блок (поле text пустое). */}
       <div
         onClick={handleContentClick}
         className="cursor-pointer select-text px-4 pb-2 pt-2 md:px-5"
       >
-        {/* Task text — render with MathText (Phase 1), hide for image-only tasks */}
-        {!isImageOnly && task.text ? (
-          <MathText
-            text={task.text}
-            className={cn(
-              'text-[13px] leading-[1.58] text-slate-900 md:text-sm',
-              !isExpanded && 'line-clamp-2',
-            )}
-          />
-        ) : null}
-
-        {/* Collapsed image preview (Phase 2: hero-image) */}
-        {!isExpanded && attachmentRefs.length > 0 ? (
-          <div className="mt-2">
+        {/* Hero image / image strip — at the top of content zone */}
+        {attachmentRefs.length > 0 ? (
+          <div className={cn(!isExpanded && 'mb-3')}>
             {collapsedLoading ? (
-              <div className={cn(
-                'animate-pulse rounded-xl bg-socrat-surface',
-                isImageOnly ? 'h-48 md:h-64 w-full' : 'h-28 w-full max-w-[200px]',
-              )} />
+              <div className="h-48 w-full animate-pulse rounded-xl bg-socrat-surface md:h-64" />
             ) : collapsedUrls.length > 0 ? (
-              // Mode A: Image-only → hero image
-              isImageOnly ? (
+              attachmentRefs.length === 1 ? (
+                // Single attachment — hero image, full width.
                 <img
                   src={collapsedUrls[0]}
                   alt="Фото условия"
@@ -274,37 +265,50 @@ export const TaskCard = memo(function TaskCard({
                   decoding="async"
                   className="max-h-48 w-full rounded-xl border border-socrat-border object-contain md:max-h-64"
                 />
-              ) : attachmentRefs.length === 1 ? (
-                // Mode B: Text + 1 photo → larger thumbnail
-                <img
-                  src={collapsedUrls[0]}
-                  alt="Фото условия"
-                  loading="lazy"
-                  decoding="async"
-                  className="max-h-40 max-w-full rounded-xl border border-socrat-border object-contain"
-                />
               ) : (
-                // Mode C: Text + multiple photos → horizontal strip
-                <div className="flex snap-x snap-mandatory gap-2 overflow-x-auto">
-                  {collapsedUrls.map((url, i) => (
-                    <img
-                      key={i}
-                      src={url}
-                      alt={`Фото ${i + 1}`}
-                      loading="lazy"
-                      decoding="async"
-                      className="h-28 flex-shrink-0 snap-start rounded-lg border border-socrat-border object-contain"
-                    />
-                  ))}
-                  {attachmentRefs.length > collapsedImageCount ? (
-                    <div className="flex h-28 w-20 flex-shrink-0 items-center justify-center rounded-lg bg-socrat-surface text-xs text-slate-400">
-                      +{attachmentRefs.length - collapsedImageCount}
+                // Multiple attachments — first one as hero, rest as strip below.
+                <div className="flex flex-col gap-2">
+                  <img
+                    src={collapsedUrls[0]}
+                    alt="Фото условия"
+                    loading="lazy"
+                    decoding="async"
+                    className="max-h-48 w-full rounded-xl border border-socrat-border object-contain md:max-h-64"
+                  />
+                  {!isExpanded ? (
+                    <div className="flex snap-x snap-mandatory gap-2 overflow-x-auto">
+                      {collapsedUrls.slice(1).map((url, i) => (
+                        <img
+                          key={i + 1}
+                          src={url}
+                          alt={`Фото ${i + 2}`}
+                          loading="lazy"
+                          decoding="async"
+                          className="h-20 flex-shrink-0 snap-start rounded-lg border border-socrat-border object-contain"
+                        />
+                      ))}
+                      {attachmentRefs.length > collapsedImageCount ? (
+                        <div className="flex h-20 w-16 flex-shrink-0 items-center justify-center rounded-lg bg-socrat-surface text-xs text-slate-400">
+                          +{attachmentRefs.length - collapsedImageCount}
+                        </div>
+                      ) : null}
                     </div>
                   ) : null}
                 </div>
               )
             ) : null}
           </div>
+        ) : null}
+
+        {/* Task text — render with MathText (Phase 1), hide for image-only tasks */}
+        {!isImageOnly && task.text ? (
+          <MathText
+            text={task.text}
+            className={cn(
+              'text-[13px] leading-[1.58] text-slate-900 md:text-sm',
+              !isExpanded && 'line-clamp-4',
+            )}
+          />
         ) : null}
 
         {/* Expanded: full image gallery */}
