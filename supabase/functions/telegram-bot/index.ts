@@ -1250,7 +1250,7 @@ async function handleWebLogin(telegramUserId: number, telegramUsername: string |
       refresh_token: session.refresh_token,
     };
 
-    await supabase
+    const { data: updatedRows, error: updateError } = await supabase
       .from("telegram_login_tokens")
       .update({
         telegram_user_id: telegramUserId,
@@ -1259,9 +1259,39 @@ async function handleWebLogin(telegramUserId: number, telegramUsername: string |
         verified_at: new Date().toISOString(),
         session_data: sessionData,
       })
-      .eq("id", tokenData.id);
+      .eq("id", tokenData.id)
+      .select("id, client_id");
 
-    console.log("Token verified successfully");
+    if (updateError) {
+      console.error("CRITICAL: token update failed", {
+        token_id: tokenData.id,
+        client_id: tokenData.client_id,
+        error: updateError.message,
+        details: updateError.details,
+      });
+      await sendTelegramMessage(
+        telegramUserId,
+        "❌ Не удалось завершить вход. Попробуйте ещё раз с сайта.",
+      );
+      return;
+    }
+
+    if (!updatedRows || updatedRows.length === 0) {
+      console.error("CRITICAL: token update affected 0 rows", {
+        token_id: tokenData.id,
+        client_id: tokenData.client_id,
+      });
+      await sendTelegramMessage(
+        telegramUserId,
+        "❌ Не удалось завершить вход. Попробуйте ещё раз с сайта.",
+      );
+      return;
+    }
+
+    console.log("Token verified successfully", {
+      token_id: tokenData.id,
+      client_id: tokenData.client_id,
+    });
 
     // ABSORB: when Telegram clients (especially mobile) re-use a CACHED
     // deep-link param across separate t.me?start=... clicks, the bot keeps
