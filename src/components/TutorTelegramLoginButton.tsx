@@ -38,8 +38,8 @@ const TutorTelegramLoginButton = ({
     if (manual) setChecking(true);
     try {
       const response = await fetch(
-        `${SUPABASE_URL}/functions/v1/telegram-login-token?token=${token}`,
-        { method: "GET" }
+        `${SUPABASE_URL}/functions/v1/telegram-login-token?token=${token}&_=${Date.now()}`,
+        { method: "GET", cache: "no-store" }
       );
       
       const data = await response.json();
