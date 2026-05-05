@@ -14,7 +14,7 @@ interface TutorTelegramLoginButtonProps {
   className?: string;
 }
 
-const TutorTelegramLoginButton = ({ 
+const TutorTelegramLoginButton = ({
   botName = "sokratai_ru_bot",
   className
 }: TutorTelegramLoginButtonProps) => {
@@ -23,13 +23,27 @@ const TutorTelegramLoginButton = ({
   const [status, setStatus] = useState<"idle" | "waiting" | "success">("idle");
   const [currentToken, setCurrentToken] = useState<string | null>(null);
   const [checking, setChecking] = useState(false);
+  // Stale-token signal: when polling has been pending for > STALE_AFTER_MS we
+  // assume user pressed /start in Telegram for an OLDER token (typical: they
+  // clicked "Войти через Telegram" twice; bot's ✅ confirmation came for
+  // token T1, polling now waits on token T2). Promote «Открыть Telegram снова»
+  // visually + show actionable copy.
+  const [staleHint, setStaleHint] = useState(false);
   const pollingRef = useRef<number | null>(null);
+  const staleTimerRef = useRef<number | null>(null);
+
+  const STALE_AFTER_MS = 12_000;
 
   const stopPolling = useCallback(() => {
     if (pollingRef.current) {
       clearInterval(pollingRef.current);
       pollingRef.current = null;
     }
+    if (staleTimerRef.current) {
+      clearTimeout(staleTimerRef.current);
+      staleTimerRef.current = null;
+    }
+    setStaleHint(false);
   }, []);
 
   const checkToken = useCallback(async (token: string, manual = false): Promise<boolean> => {
@@ -167,9 +181,18 @@ const TutorTelegramLoginButton = ({
     let attempts = 0;
     const maxAttempts = 150;
 
+    // After STALE_AFTER_MS without verification, surface a hint that /start
+    // wasn't received for THIS token (likely sent for an older one).
+    setStaleHint(false);
+    if (staleTimerRef.current) clearTimeout(staleTimerRef.current);
+    staleTimerRef.current = window.setTimeout(() => {
+      console.warn("[telegram-login] still pending after 12s — likely stale-token scenario");
+      setStaleHint(true);
+    }, STALE_AFTER_MS);
+
     pollingRef.current = window.setInterval(async () => {
       attempts++;
-      
+
       if (attempts >= maxAttempts) {
         stopPolling();
         setLoading(false);
@@ -251,16 +274,54 @@ const TutorTelegramLoginButton = ({
           <Loader2 className="w-5 h-5 mr-2 animate-spin" />
           Ожидание подтверждения...
         </Button>
-        
-        <div className="text-sm text-muted-foreground text-center space-y-1">
-          <p>1. Нажмите «Старт» в Telegram боте</p>
-          <p>2. Вернитесь сюда</p>
-        </div>
-        
+
+        {staleHint ? (
+          <div
+            className="rounded-md border-2 px-3 py-2.5 text-sm text-center max-w-xs"
+            style={{
+              backgroundColor: "#FEF3C7",
+              borderColor: "#F59E0B",
+              color: "#78350F",
+            }}
+          >
+            <p className="font-semibold mb-1">Бот не получил команду /start для этого входа</p>
+            <p className="text-xs">
+              Если в Telegram уже было «✅ Авторизация подтверждена» — это для прошлой попытки.
+              Кликните кнопку ниже и нажмите «Старт» ещё раз.
+            </p>
+          </div>
+        ) : (
+          <div className="text-sm text-muted-foreground text-center space-y-1">
+            <p>1. Нажмите «Старт» в Telegram-боте</p>
+            <p>2. Вернитесь сюда</p>
+          </div>
+        )}
+
         <div className="flex flex-col gap-2 w-full max-w-xs">
-          <Button 
-            variant="outline" 
-            size="sm" 
+          {staleHint ? (
+            <Button
+              size="sm"
+              onClick={() => currentToken && openTelegram(currentToken)}
+              className="w-full bg-socrat-telegram hover:bg-socrat-telegram-dark text-white"
+            >
+              <ExternalLink className="w-4 h-4 mr-2" />
+              Открыть Telegram и нажать «Старт»
+            </Button>
+          ) : (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => currentToken && openTelegram(currentToken)}
+              className="w-full"
+            >
+              <ExternalLink className="w-4 h-4 mr-2" />
+              Открыть Telegram снова
+            </Button>
+          )}
+
+          <Button
+            variant="outline"
+            size="sm"
             onClick={() => currentToken && checkToken(currentToken, true)}
             disabled={checking}
             className="w-full"
@@ -272,20 +333,10 @@ const TutorTelegramLoginButton = ({
             )}
             Проверить статус
           </Button>
-          
-          <Button 
-            variant="ghost" 
-            size="sm" 
-            onClick={() => currentToken && openTelegram(currentToken)}
-            className="w-full text-muted-foreground"
-          >
-            <ExternalLink className="w-4 h-4 mr-2" />
-            Открыть Telegram снова
-          </Button>
-          
-          <Button 
-            variant="ghost" 
-            size="sm" 
+
+          <Button
+            variant="ghost"
+            size="sm"
             onClick={handleCancel}
             className="w-full text-muted-foreground"
           >
