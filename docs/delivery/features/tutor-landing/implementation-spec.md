@@ -13,6 +13,7 @@
 ## 0. Pre-flight — что уже есть
 
 **Design artifacts (не трогать, только консумить):**
+
 - `docs/delivery/features/tutor-landing/preview.html` — single-file HTML-макет, source-of-truth для layout/styles
 - `docs/delivery/features/tutor-landing/copy-deck.md` — финальный копи всех секций (v5)
 - `docs/delivery/features/tutor-landing/information-architecture.md` — section map, grid, CTA strategy
@@ -22,6 +23,7 @@
 - `src/styles/colors_and_type.css` — токены (single source of truth)
 
 **Existing code to reuse:**
+
 - `src/assets/sokrat-logo.png` — brand logo (заменяет «С» placeholder в preview)
 - `src/assets/sokrat-chat-icon.png` — icon альтернатива
 - `src/pages/Index.tsx` — current student landing (переименовываем)
@@ -36,10 +38,12 @@
 ### 1.1 Routing rearrangement
 
 **До:**
+
 - `/` → Index.tsx (student landing)
 - `/tutor/*` → tutor product routes
 
 **После:**
+
 - `/` → **TutorLanding.tsx** (NEW — из preview.html)
 - `/students` → **StudentLanding.tsx** (RENAMED from Index.tsx)
 - `/tutors` → 301 redirect на `/` (backward compat, была раньше ссылка в брифах)
@@ -56,6 +60,7 @@
 ### 1.3 High-risk files (edit only if task explicitly requires)
 
 Из `.claude/rules/10-safe-change-policy.md`:
+
 - `src/components/AuthGuard.tsx`
 - `src/components/TutorGuard.tsx`
 - `src/pages/Chat.tsx`
@@ -79,11 +84,13 @@
 **Scope:** переименовать `Index.tsx` → `StudentLanding.tsx`, добавить route skeleton для будущего TutorLanding, настроить redirect `/tutors` → `/`.
 
 **Files:**
+
 - `src/pages/Index.tsx` → `src/pages/StudentLanding.tsx` (rename, content без изменений)
 - `src/pages/Index.tsx` (NEW) — пустой stub-компонент с `return <div>Tutor Landing — implementation pending</div>` (filled в task 2)
 - `src/App.tsx` — update routes
 
 **App.tsx route changes:**
+
 ```tsx
 <Route path="/" element={<Index />} />  // теперь TutorLanding stub
 <Route path="/students" element={<StudentLanding />} />  // NEW
@@ -92,6 +99,7 @@
 ```
 
 **Acceptance criteria:**
+
 - [ ] `sokratai.ru/students` отображает текущий student landing (полный работает)
 - [ ] `sokratai.ru/tutors` редиректит на `sokratai.ru/`
 - [ ] `sokratai.ru/` показывает stub (temporary; filled в task 2)
@@ -100,6 +108,7 @@
 - [ ] Все существующие user flows (login, homework, chat) работают
 
 **Code review:**
+
 - Нет ли осиротевших `import`-ов от Index.tsx → убедиться что все reference обновлены
 - `<Navigate replace>` используется для SEO (301 vs 302) — проверить
 - Все внутренние ссылки «на главную» в codebase (`<Link to="/">`) — переосмыслить: они теперь ведут на tutor landing, не на student. В tutor-продукт-флоу, возможно, это ок; в student-флоу — возможно, нужно `<Link to="/students">`. Поискать `to="/"` и оценить case-by-case.
@@ -111,10 +120,12 @@
 **Scope:** создать главный `TutorLanding` компонент (теперь он Index.tsx), lazy-load sections в правильном порядке, wrap в mode-class, smoke render.
 
 **Files:**
+
 - `src/pages/Index.tsx` — fill the stub with full TutorLanding
 - `src/components/sections/tutor/` — создать директорию (пустую пока — sections fill в следующих tasks)
 
 **Shell code структура (TutorLanding.tsx):**
+
 ```tsx
 import { lazy, Suspense } from "react";
 import TutorLandingHeader from "@/components/sections/tutor/TutorLandingHeader";
@@ -144,12 +155,14 @@ const TutorLanding = () => (
 **Important:** `<div className="sokrat sokrat-marketing">` обязательно — foundations CSS keyed off this class (см. SKILL.md §3). **Нет `data-sokrat-mode`** — marketing surface, не product.
 
 **Acceptance criteria:**
+
 - [ ] `sokratai.ru/` рендерит layout c placeholder-компонентами для каждой секции (секции — `<section>Hero placeholder</section>` и т.д.)
 - [ ] Lazy boundaries работают — no-JS fallback показывает skeleton
 - [ ] Class `sokrat sokrat-marketing` присутствует на root div
 - [ ] Lighthouse performance > 85 на пустом shell (меньше means что-то блокирует)
 
 **Code review:**
+
 - Section order **строго** по `information-architecture.md` §2 section-map
 - Suspense boundaries gracefully — skeleton heights реалистичные (uses approximate from IA)
 - Нет ошибок React-hydration в консоли
@@ -161,20 +174,24 @@ const TutorLanding = () => (
 **Scope:** адаптировать header из preview.html + учесть audience-switch + интегрировать scroll-anchor nav по образу текущего student Index.tsx.
 
 **Files:**
+
 - `src/components/sections/tutor/TutorLandingHeader.tsx` (NEW)
 
 **Structure (desktop row):**
+
 ```
 [Logo: sokrat-logo.png + "Сократ AI"]  [Главная · Возможности · Цены · Кейсы · FAQ]  [Для учеников →] [Войти ▼]
 ```
 
 **Components to use:**
+
 - `sokrat-logo.png` из `src/assets/`
 - `<Link>` from react-router-dom для `/students`
 - `<DropdownMenu>` shadcn для Login — копируй точно из current Index.tsx (разветвление "Я ученик / Я репетитор")
 - Tailwind classes + `--sokrat-*` tokens
 
 **Scroll-anchor items:**
+
 ```tsx
 const anchors = [
   { href: "#hero", label: "Главная" },
@@ -188,16 +205,19 @@ const anchors = [
 **Sticky behavior:** `sticky top-0 z-50 bg-background/95 backdrop-blur-md border-b border-border` (copy from current Index.tsx nav).
 
 **Mobile (< 768px):**
+
 - Scroll-anchors — horizontal scrollable row (как в current Index.tsx — `overflow-x-auto scrollbar-hide`)
 - «Для учеников →» link — перенести в Login dropdown или бургер-меню
 - Login dropdown остаётся
 
 **Audience switcher «Для учеников →»:**
+
 - Small ghost-style link с иконкой (GraduationCap or BookOpen)
 - Ведёт на `/students`
 - Desktop: inline в header перед Login; Mobile: внутри Login dropdown как отдельный item
 
 **Acceptance criteria:**
+
 - [ ] Desktop header рендерится как single-row 64 px
 - [ ] Scroll-anchors скроллят до соответствующих sections с smooth behavior
 - [ ] Logo ведёт на `/` (self-refresh)
@@ -208,6 +228,7 @@ const anchors = [
 - [ ] A11y: focus ring на всех links, `aria-current="location"` на active tab
 
 **Code review:**
+
 - Copy EXACTLY login-dropdown pattern из current Index.tsx — не writing from scratch
 - Logo `<img>` has `alt="Сократ AI"` и proper width/height (Lighthouse CLS)
 - `backdrop-filter` с `-webkit-` prefix (autoprefixer сделает, проверить в build output)
@@ -219,25 +240,29 @@ const anchors = [
 **Scope:** hero-секция с H1 «Инструмент репетитора. От репетитора.», двухуровневый lede, CTA pair, trust-line.
 
 **Files:**
+
 - `src/components/sections/tutor/Hero.tsx` (NEW)
 
 **Content source:** `copy-deck.md` §«Section 1 — Hero»
 
 **Key elements:**
+
 - H1: «Инструмент репетитора. От репетитора.» с `<br>` между предложениями на desktop
 - Lede-1 (большой lede): product description (3 sentence)
 - Lede-2 (small credentials): founders с регалиями
 - CTA primary: «Попробовать за 200 ₽ в первый месяц» → `/signup?ref=tutor-landing&tier=ai-start`
-- CTA secondary (ghost): «Канал Егора →» → `https://t.me/sokrat_rep` (external, target="_blank" rel="noopener")
+- CTA secondary (ghost): «Канал Егора →» → `https://t.me/sokrat_rep` (external, target="\_blank" rel="noopener")
 - Trust-line: 3 ✓-buckets
 
 **Design requirements:**
+
 - Background: radial gradients + subtle hero-shift animation (как в preview.html)
 - `@media (prefers-reduced-motion: reduce)` — disable animation
 - max-width: 800 px, centered
 - Padding: 120px top / 80px bottom desktop; 80/56 mobile
 
 **Acceptance criteria:**
+
 - [ ] Hero рендерится с полным copy'ем из copy-deck
 - [ ] CTA-кнопки используют shadcn `<Button>` с соответствующими классами
 - [ ] Primary CTA bg socrat-green-700, white text, min-height 52px
@@ -246,6 +271,7 @@ const anchors = [
 - [ ] Mobile: CTA stack вертикально, full-width
 
 **Code review:**
+
 - Никаких inline `hex` цветов — только Tailwind или CSS variables
 - H1 имеет `text-wrap: balance` или `<br>` для line-break control
 - Внешние ссылки имеют `rel="noopener"` security
@@ -258,11 +284,13 @@ const anchors = [
 **Scope:** compact hairline-strip между Hero и Pain с 4 authority-pills.
 
 **Files:**
+
 - `src/components/sections/tutor/TrustStrip.tsx` (NEW)
 
 **Content source:** `copy-deck.md` §«Section 1.5 — Trust-strip»
 
 **4 pills (values):**
+
 1. `GraduationCap` + «10 лет» + «опыта Егора Блинова»
 2. `Trophy` + «2×100» + «баллов ЕГЭ лично у Егора»
 3. `BookOpen` + «ФИПИ» + «привязка ко всему кодификатору»
@@ -271,10 +299,12 @@ const anchors = [
 **Icons:** `lucide-react` (not inline SVG — используем стандартную library).
 
 **Layout:**
+
 - Desktop: 4-col grid 1fr, gap 32 px
 - Mobile: 2×2 grid, gap 20×12 px
 
 **Acceptance criteria:**
+
 - [ ] 4 pills равномерно distributed
 - [ ] Icons 24×24 (desktop) / 20×20 (mobile), color socrat-green-700
 - [ ] Values — 20px bold desktop / 16px mobile
@@ -283,6 +313,7 @@ const anchors = [
 - [ ] Background сlightly отличается от Hero (surface color) — signals visual break
 
 **Code review:**
+
 - Lucide icons импортированы individually (`import { GraduationCap } from "lucide-react"`) для tree-shaking
 - Нет абсолютных sizes в style — только Tailwind classes
 
@@ -293,6 +324,7 @@ const anchors = [
 **Scope:** «Знакомая картина?» 2×2 pain-cards с живыми сценами.
 
 **Files:**
+
 - `src/components/sections/tutor/Pain.tsx` (NEW)
 
 **Content source:** `copy-deck.md` §«Section 2 — Pain»
@@ -300,10 +332,12 @@ const anchors = [
 **4 cards:** 23:00/12 работ · Кто прислал? · Ученик в ChatGPT · Как у него дела?
 
 **Layout:**
+
 - Desktop: 2×2 grid, gap 16 px, max-width 960 px
 - Mobile: 1-col stack, gap 12 px
 
 **Card styling:**
+
 - Background: `--sokrat-card` white
 - Border: 1px `--sokrat-border`
 - Radius: `--sokrat-radius-md`
@@ -311,6 +345,7 @@ const anchors = [
 - Hover: border → socrat-green-200 + shadow-sm (subtle)
 
 **Acceptance criteria:**
+
 - [ ] 4 cards с exact copy из copy-deck
 - [ ] Card-title 18px semibold / 16px mobile
 - [ ] Card-body 15px fg2 / 14px mobile, line-height 1.6
@@ -319,6 +354,7 @@ const anchors = [
 - [ ] Section bg: surface (F8FAFC); contrasts с Hero и Tour #1
 
 **Code review:**
+
 - Russian typography: «curly quotes» not "straight quotes"
 - H2 центрирован; cards — grid aligned
 - Hover states используют Tailwind `hover:`
@@ -330,6 +366,7 @@ const anchors = [
 **Scope:** создать reusable ProductTour template, использовать 3 раза с different props (Tour #1 flagship / #2 Конструктор ДЗ / #3 Отчёт родителю).
 
 **Files:**
+
 - `src/components/sections/tutor/ProductTour.tsx` (NEW) — generic template
 - `src/components/sections/tutor/ProductTour1.tsx` — Tour #1 instance
 - `src/components/sections/tutor/ProductTour2.tsx` — Tour #2 instance
@@ -338,6 +375,7 @@ const anchors = [
 **Alternative pattern:** одна `ProductTour` компонент + data-file `tourData.ts`; использовать 3 раза с props. Предпочтительно для maintainability.
 
 **Template props:**
+
 ```ts
 interface ProductTourProps {
   id: string;  // для scroll-anchor
@@ -361,6 +399,7 @@ interface ProductTourProps {
 **Tour #3 props:** H2 «Отчёт родителю — пока вы спите», 3 bullets (Карта тем, Динамика, Каналы доставки), text-left, card bg.
 
 **Video slot:**
+
 ```tsx
 {videoSrc ? (
   <video src={videoSrc} autoPlay loop muted playsInline poster={poster} />
@@ -372,6 +411,7 @@ interface ProductTourProps {
 **Content source:** `copy-deck.md` §«Section 3, 4, 5»
 
 **Acceptance criteria:**
+
 - [ ] 3 Tour sections рендерятся в правильном порядке
 - [ ] Zigzag layout работает (alternating text-left → text-right → text-left)
 - [ ] Mobile: всегда text-top, video-bottom (или наоборот — обсудить в review)
@@ -383,6 +423,7 @@ interface ProductTourProps {
 - [ ] Tour #2 имеет `id="product-tour"` (для scroll-anchor из header)
 
 **Code review:**
+
 - ProductTour template — DRY (не дублировать layout в 3 instances)
 - Video `<video>` tag имеет `playsInline` обязательно (iOS Safari)
 - Все bullets используют одинаковую структуру (title + body), не diverge
@@ -394,11 +435,13 @@ interface ProductTourProps {
 **Scope:** sec 6 с chip «БЕСПЛАТНО НАВСЕГДА», 3 mini-cards + video placeholder.
 
 **Files:**
+
 - `src/components/sections/tutor/FreemiumBridge.tsx` (NEW)
 
 **Content source:** `copy-deck.md` §«Section 6 — Freemium bridge»
 
 **Key elements:**
+
 - Chip top-left: «БЕСПЛАТНО НАВСЕГДА» (ochre-100 bg, ochre-700 text, uppercase, tracking 0.08em)
 - H2: «Оплаты и расписание — базовая платформа бесплатно»
 - Lede: 2 предложения про free-forever
@@ -407,11 +450,13 @@ interface ProductTourProps {
 - Closing line: «AI-слой подключается опционально — от 200 ₽ в первый месяц. Без него базовая платформа остаётся.»
 
 **Design requirements:**
+
 - Section bg: `--sokrat-green-50` (#f3f9f5) — **критично** для визуального перелома
 - Border top + bottom: 1px `--sokrat-green-100`
 - `/pay` код внутри card #1 — inline `<code>` style green-100 bg, green-800 text, font-mono
 
 **Acceptance criteria:**
+
 - [ ] Bg `--sokrat-green-50` — сразу отличается от предыдущей Tour #3
 - [ ] Chip виден над H2
 - [ ] 3 mini-cards в row на desktop, stack на mobile
@@ -419,6 +464,7 @@ interface ProductTourProps {
 - [ ] Video placeholder max-width 680 px, center
 
 **Code review:**
+
 - Только здесь (+ trust-strip chip + pricing trial) используется ochre — не распространять на другие секции
 - H2 color `--sokrat-green-800` (не brand green) — consistent с SKILL.md rule
 
@@ -429,29 +475,34 @@ interface ProductTourProps {
 **Scope:** founders cards × 2 + 3 case cards (1 video testimonial + 1 placeholder + 1 «Ваш кейс?»).
 
 **Files:**
+
 - `src/components/sections/tutor/SocialProof.tsx` (NEW)
 
 **Content source:** `copy-deck.md` §«Section 7»
 
 **Founders:**
+
 - **Егор Блинов** — 4 credentials + 3-line quote + CTA «Канал Егора →» (TG external)
 - **Владимир Камчаткин** — 4 credentials + 3-line quote, no CTA
 
 **Founder photos:**
+
 - Egor: placeholder initials «ЕБ» (240×240 в green gradient bg) — replace with actual photo when available
 - Vladimir: placeholder «ВК» — replace
 - Placeholder path: `/marketing/tutor-landing/founder-egor.jpg` и `/marketing/tutor-landing/founder-vladimir.jpg`
 - **Handoff:** если файлы не существуют, оставить initials fallback
 
 **Cases:**
+
 - Case #1 (VIDEO): placeholder-block с play-overlay + «Видео-отзыв ждём от Егора»; video-slot ожидает `public/marketing/tutor-landing/testimonial-client-egor.mp4`
 - Case #2: «Михаил К.» placeholder с инициалами «МК»
 - Case #3: «Ваш кейс?» card с 2 CTA (TG primary + email secondary)
 
 **Disclaimer под Case #1:**
-«Отзыв снят, когда Сократ AI работал как Telegram-бот. С 2025 платформа переехала на sokratai.ru.»
+«Отзыв снят, когда Сократ AI работал как Telegram-бот. С 2026 платформа переехала на sokratai.ru.»
 
 **Acceptance criteria:**
+
 - [ ] 2 founder cards equal-width desktop, stack mobile
 - [ ] Founder quote styled as blockquote с border-left socrat-green-200
 - [ ] Case #1 video-placeholder aspect-ratio 3:4 portrait (portrait video mobile-shot)
@@ -459,6 +510,7 @@ interface ProductTourProps {
 - [ ] Когда MP4 доступен в `public/marketing/tutor-landing/testimonial-client-egor.mp4` — `<video>` автоматически заменяет placeholder (conditional render)
 
 **Code review:**
+
 - Placeholder-логика elegantly handles missing video/photo (no broken icons)
 - Disclaimer small-print но readable (11px, fg3)
 
@@ -469,17 +521,20 @@ interface ProductTourProps {
 **Scope:** FAQ accordion + Pricing table с 5 tier cards + ROI box.
 
 **Files:**
+
 - `src/components/sections/tutor/FAQ.tsx` (NEW)
 - `src/components/sections/tutor/Pricing.tsx` (NEW)
 
 **Content source:** `copy-deck.md` §«Section 8 + 9»
 
 **FAQ:**
+
 - 5 Q/A items через **native `<details>`/`<summary>`** (не Radix Accordion — native лучше для A11y + no-JS fallback)
 - Custom chevron rotation с CSS `transform: rotate(90deg)` на `[open]`
 - Max-width 800 px
 
 **Pricing:**
+
 - 5 tier cards: БЕСПЛАТНО · AI-СТАРТ (highlighted) · AI-ПЛЮС · AI-ПРО · AI-КОМАНДА
 - Grid: 5 col desktop (1200 max), 2 col при < 1200, 1 col при < 640
 - TRIAL (AI-СТАРТ) highlighted: border-2 socrat-green-700, scale(1.02), popular chip
@@ -491,6 +546,7 @@ interface ProductTourProps {
 - ROI box под таблицей: `--sokrat-green-50` container, title «ОКУПАЕМОСТЬ ПЕРВОЙ НЕДЕЛЕЙ», 3 ✓-lines с bold цифрами («1,5–2 тысячи рублей», «4,5–6 тысяч в месяц», «первой неделей»)
 
 **Acceptance criteria:**
+
 - [ ] FAQ работает без JS (native `<details>`)
 - [ ] Chevron rotation smooth 200 ms
 - [ ] Pricing grid responsive по 3 breakpoints (5/2/1 col)
@@ -500,6 +556,7 @@ interface ProductTourProps {
 - [ ] ROI numbers точные: 1,5–2K / 4,5–6K / первой неделей
 
 **Code review:**
+
 - FAQ `id="faq"` для scroll-anchor
 - Pricing `id="pricing"` для scroll-anchor
 - Social-proof `id="social-proof"` — убедиться в task 9 (проверить cross-section)
@@ -512,12 +569,14 @@ interface ProductTourProps {
 **Scope:** финальная conversion-секция + footer с 3 колонками + payment badges + social icons.
 
 **Files:**
+
 - `src/components/sections/tutor/FinalCTA.tsx` (NEW)
 - `src/components/sections/tutor/Footer.tsx` (NEW)
 
 **Content source:** `copy-deck.md` §«Section 10 + 11»
 
 **FinalCTA:**
+
 - BG: `--sokrat-gradient-hero-soft`
 - H2 white: «Готовы перестать проверять до полуночи?»
 - Lede white with 90% opacity
@@ -525,6 +584,7 @@ interface ProductTourProps {
 - Center-aligned, max-width 720 px
 
 **Footer:**
+
 - BG: `--sokrat-green-900` (#0f4432) dark
 - Top row: Logo + social icons (Telegram icon → `https://t.me/sokrat_rep`)
 - 3 columns:
@@ -558,6 +618,7 @@ interface ProductTourProps {
 **Важно для compliance:** если V1 launch включает активную оплату (кнопка «Попробовать за 200 ₽» ведёт на реальный checkout) — Оферта **обязательна до первого рубля** (см. `progress-tracker.md` compliance-workstream). Если «Попробовать» ведёт только на регистрацию/waiting list без payment — можно отложить legal docs до first paying user.
 
 **Acceptance criteria:**
+
 - [ ] FinalCTA h2 white, readable contrast
 - [ ] Footer 3 колонки equal width desktop, stack mobile
 - [ ] Все URL из Appendix D copy-deck wired корректно
@@ -565,6 +626,7 @@ interface ProductTourProps {
 - [ ] Copyright в конце footer
 
 **Code review:**
+
 - Социальные иконки имеют `aria-label`
 - Все external links — `target="_blank" rel="noopener"`
 - Нет hard-coded `#1B6B4A` — use `bg-socrat-green-900` (Tailwind + config) или `var(--sokrat-green-900)` inline
@@ -576,21 +638,25 @@ interface ProductTourProps {
 **Scope:** финальная интеграция — meta tags, canonical, OG image, analytics events, smoke tests.
 
 **Files:**
+
 - `index.html` — add dynamic meta title/description switching (или use react-helmet-async если уже installed)
 - `src/pages/Index.tsx` — добавить Helmet meta block
 - `src/pages/StudentLanding.tsx` — аналогично
 - `src/lib/telemetry.ts` (if exists) — добавить events
 
 **Meta для TutorLanding:**
+
 - Title: «Сократ AI для репетиторов · Проверка ДЗ за 40 минут + сократовский AI-чат для учеников»
 - Description: «AI-проверка рукописных ДЗ по физике, математике, информатике. Сократовский диалог с учеником — не списывает у ChatGPT. Оплаты и расписание — бесплатно. От 200 ₽ в первый месяц.»
 - OG image: **reuse existing** `https://pub-bb2e103a32db4e198524a2e9ed8f35b4.r2.dev/c99bddc8-b1d7-407d-b578-ed6c55dd9e30/id-preview-7731bc3f--5fbe4a32-1baf-47b0-8f47-83e3060cf929.lovable.app-1777019278659.png` (текущий OG из student landing — согласовано 2026-04-24 «пока как сейчас работает», кастомная tutor-specific OG в V2 roadmap)
 - Canonical: `https://sokratai.ru/`
 
 **Meta для StudentLanding:**
+
 - Keep existing title/description (но canonical теперь `https://sokratai.ru/students`)
 
 **Analytics events (Yandex Metrika уже в проекте — см. index.html):**
+
 ```ts
 window.ym?.(105827612, "reachGoal", "tutor_landing_cta_hero");
 window.ym?.(105827612, "reachGoal", "tutor_landing_cta_pricing");
@@ -599,6 +665,7 @@ window.ym?.(105827612, "reachGoal", "tutor_landing_tg_channel_click");
 ```
 
 **Smoke tests:**
+
 - `npm run smoke-check` должен pass (из `20-commands-and-validation.md`)
 - Отдельные checks:
   - `/` возвращает `<html>` с H1 «Инструмент репетитора»
@@ -606,6 +673,7 @@ window.ym?.(105827612, "reachGoal", "tutor_landing_tg_channel_click");
   - `/tutors` redirects to `/`
 
 **Acceptance criteria:**
+
 - [ ] Meta tags корректно подтягиваются для обеих страниц (View Source проверка)
 - [ ] Canonical URL правильный на каждой странице
 - [ ] Yandex Metrika tracking events работают (test в browser console)
@@ -613,6 +681,7 @@ window.ym?.(105827612, "reachGoal", "tutor_landing_tg_channel_click");
 - [ ] Lighthouse: Performance > 85, A11y > 95, SEO > 95
 
 **Code review:**
+
 - React-helmet-async (or native document.title setters) не конфликтует между routes
 - Analytics events PII-free (не трекать email/phone/name)
 - OG image 1200×630 поствляется отдельно (deferred — может быть static placeholder пока)
@@ -624,11 +693,13 @@ window.ym?.(105827612, "reachGoal", "tutor_landing_tg_channel_click");
 **Scope:** добавлен post-hoc на основе Vladimir review после tasks 1–8. Wrong-audience bounce risk: школьники/родители на `/` за 3 сек scan могут не заметить audience-switch в header → уходят с лендинга.
 
 **Files:**
+
 - `src/components/sections/tutor/AudienceRibbon.tsx` (NEW) — non-dismissible ribbon над header, bg `--sokrat-green-50`, «Вы ученик или родитель? → Перейти на страницу для школьников» → `/students`.
 - `src/pages/Index.tsx` — mount `<AudienceRibbon />` eager выше `<TutorLandingHeader />`.
 - `src/components/sections/tutor/Hero.tsx` — pre-H1 pill-badge «● Для репетиторов физики · математики · информатики» (green-100 bg, green-800 text, 11px uppercase tracking 0.08em).
 
 **3-layer audience-routing guard:**
+
 1. AudienceRibbon (Pattern 1: LinkedIn Pro ↔ Personal) — top of page.
 2. Hero pre-H1 badge (Pattern 4: Linear / Stripe / Notion) — confirms audience.
 3. Header «Для учеников →» (existing) — sticky fallback.
@@ -636,6 +707,7 @@ window.ym?.(105827612, "reachGoal", "tutor_landing_tg_channel_click");
 **Не scope creep — visually reinforces tutor primary focus**, не добавляет student-targeted content. IA «11 content sections + header + footer» нестрого нарушена (ribbon — 12-й chrome element), зафиксировано.
 
 **Acceptance:**
+
 - [x] AC-20: Ribbon visible над header с link на `/students`.
 - [x] AC-21: Hero pre-H1 pill-badge visible, green-100 bg.
 - [x] AC-22: Mobile responsive — flex-wrap на 375 px.
@@ -716,6 +788,7 @@ window.ym?.(105827612, "reachGoal", "tutor_landing_tg_channel_click");
 ## 6. Testing protocol
 
 **Manual QA pass (Владимир perform после task 12):**
+
 - Desktop Chrome / Firefox / Safari (macOS): все секции рендерятся, все ссылки работают
 - Mobile Safari iOS (iPhone): responsive, touch targets ≥ 44px, no horizontal scroll
 - Mobile Chrome Android: responsive
@@ -724,6 +797,7 @@ window.ym?.(105827612, "reachGoal", "tutor_landing_tg_channel_click");
 - Screen reader (NVDA/VoiceOver): H-структура правильная (один H1), aria-labels
 
 **Automated checks:**
+
 - `npm run lint` — zero new warnings
 - `npm run build` — success
 - `npm run smoke-check` — pass
@@ -737,8 +811,8 @@ window.ym?.(105827612, "reachGoal", "tutor_landing_tg_channel_click");
 Это текст, который Владимир дает Claude Code как starting instruction:
 
 ```
-Read docs/delivery/features/tutor-landing/implementation-spec.md. 
-Create a task list from the 12 tasks in §2. 
+Read docs/delivery/features/tutor-landing/implementation-spec.md.
+Create a task list from the 12 tasks in §2.
 For each task, generate a detailed implementation prompt that includes:
 1. Exact file paths to create/modify
 2. Copy from copy-deck.md verbatim (no rewording)
