@@ -426,6 +426,90 @@ const SignUp = () => {
             Начни готовиться к ЕГЭ и ОГЭ с AI-репетитором. Бесплатно.
           </p>
 
+          {/* Consent FIRST — gates OAuth + email submit. Surfacing it at the
+              top makes the gating obvious instead of buried below the form. */}
+          <div className="tst-checkbox-row">
+            <input
+              id="signup-consent"
+              type="checkbox"
+              checked={consent}
+              onChange={(e) => {
+                setConsent(e.target.checked);
+                if (touched.consent) {
+                  validateField({
+                    email,
+                    password,
+                    username,
+                    consent: e.target.checked,
+                  });
+                }
+              }}
+              onBlur={() => handleBlur("consent")}
+              disabled={loading}
+              className="tst-checkbox"
+              aria-invalid={Boolean(showError("consent"))}
+            />
+            <label className="tst-checkbox-label" htmlFor="signup-consent">
+              Я согласен с{" "}
+              <a href="/offer" target="_blank" rel="noopener noreferrer">
+                публичной офертой
+              </a>{" "}
+              и{" "}
+              <a
+                href="/privacy-policy"
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                политикой конфиденциальности
+              </a>
+            </label>
+          </div>
+          {showError("consent") && (
+            <span
+              className="tst-error"
+              style={{ display: "block", marginTop: -12, marginBottom: 12 }}
+            >
+              {errors.consent}
+            </span>
+          )}
+
+          {/* OAuth — Telegram + Google, both gated by consent */}
+          <div className="flex flex-col gap-3" style={{ marginBottom: 8 }}>
+            <div
+              onClickCapture={(e) => {
+                if (!handleTelegramGate()) {
+                  e.preventDefault();
+                  e.stopPropagation();
+                }
+              }}
+              style={{
+                width: "100%",
+                opacity: consent ? 1 : 0.5,
+                pointerEvents: consent ? "auto" : "none",
+              }}
+              aria-disabled={!consent}
+            >
+              <TelegramLoginButton />
+            </div>
+            <GoogleAuthButton
+              redirectPath="/chat"
+              consentSource="google-oauth-student"
+              enabled={consent}
+            />
+            {!consent && (
+              <p className="tst-tg-hint" style={{ color: "var(--sokrat-fg3)" }}>
+                Отметьте согласие выше, чтобы войти через Telegram или Google
+              </p>
+            )}
+            {consent && (
+              <p className="tst-tg-hint">
+                Telegram: нужен VPN, если заблокирован
+              </p>
+            )}
+          </div>
+
+          <div className="tst-divider">или по email</div>
+
           <form onSubmit={handleSignUp} noValidate>
             <div className="tst-field">
               <label className="tst-label" htmlFor="signup-username">
@@ -556,51 +640,6 @@ const SignUp = () => {
               )}
             </div>
 
-            <div className="tst-checkbox-row">
-              <input
-                id="signup-consent"
-                type="checkbox"
-                checked={consent}
-                onChange={(e) => {
-                  setConsent(e.target.checked);
-                  if (touched.consent) {
-                    validateField({
-                      email,
-                      password,
-                      username,
-                      consent: e.target.checked,
-                    });
-                  }
-                }}
-                onBlur={() => handleBlur("consent")}
-                disabled={loading}
-                className="tst-checkbox"
-                aria-invalid={Boolean(showError("consent"))}
-              />
-              <label className="tst-checkbox-label" htmlFor="signup-consent">
-                Я согласен с{" "}
-                <a href="/offer" target="_blank" rel="noopener noreferrer">
-                  публичной офертой
-                </a>{" "}
-                и{" "}
-                <a
-                  href="/privacy-policy"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                >
-                  политикой конфиденциальности
-                </a>
-              </label>
-            </div>
-            {showError("consent") && (
-              <span
-                className="tst-error"
-                style={{ display: "block", marginTop: -12, marginBottom: 12 }}
-              >
-                {errors.consent}
-              </span>
-            )}
-
             <button
               type="submit"
               className="tst-cta"
@@ -609,44 +648,6 @@ const SignUp = () => {
               {loading ? "Регистрация..." : "Создать аккаунт"}
             </button>
           </form>
-
-          <div className="tst-divider">или</div>
-
-          <div className="flex flex-col gap-3">
-            <GoogleAuthButton
-              redirectPath="/chat"
-              consentSource="google-oauth-student"
-              enabled={consent}
-            />
-
-            <div className="tst-tg-wrap">
-              <div
-                className="w-full"
-                onClickCapture={(e) => {
-                  if (!handleTelegramGate()) {
-                    e.preventDefault();
-                    e.stopPropagation();
-                  }
-                }}
-                style={{
-                  width: "100%",
-                  opacity: consent ? 1 : 0.5,
-                  pointerEvents: consent ? "auto" : "none",
-                }}
-                aria-disabled={!consent}
-              >
-                <TelegramLoginButton />
-              </div>
-              <p className="tst-tg-hint">
-                Войдите через Telegram (нужен VPN, если заблокирован)
-              </p>
-              {!consent && (
-                <p className="tst-tg-hint">
-                  Отметьте согласие, чтобы войти через Google или Telegram
-                </p>
-              )}
-            </div>
-          </div>
 
           <p className="tst-login-link">
             Уже есть аккаунт? <Link to="/login">Войти</Link>

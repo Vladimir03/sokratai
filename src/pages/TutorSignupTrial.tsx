@@ -565,6 +565,94 @@ export default function TutorSignupTrial() {
             Без карты. Через 7 дней спросим, продолжать ли — не списываем сами.
           </p>
 
+          {/*
+            Consent FIRST — user must check it before OAuth becomes active.
+            Surfacing it at the top makes the gating obvious; the alternative
+            (consent buried below the email form) led to confused «почему
+            Google не нажимается?» reports.
+          */}
+          <div className="tst-checkbox-row">
+            <input
+              id="tst-oferta"
+              type="checkbox"
+              checked={oferta}
+              onChange={(e) => {
+                setOferta(e.target.checked);
+                if (touched.oferta) {
+                  validateField({
+                    email,
+                    password,
+                    subject,
+                    oferta: e.target.checked,
+                  });
+                }
+              }}
+              onBlur={() => handleBlur("oferta")}
+              disabled={loading}
+              className="tst-checkbox"
+              aria-invalid={Boolean(showError("oferta"))}
+            />
+            <label className="tst-checkbox-label" htmlFor="tst-oferta">
+              Я согласен с{" "}
+              <a href="/offer" target="_blank" rel="noopener noreferrer">
+                публичной офертой
+              </a>{" "}
+              и{" "}
+              <a
+                href="/privacy-policy"
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                политикой конфиденциальности
+              </a>
+            </label>
+          </div>
+          {showError("oferta") && (
+            <span
+              className="tst-error"
+              style={{ display: "block", marginTop: -12, marginBottom: 12 }}
+            >
+              {errors.oferta}
+            </span>
+          )}
+
+          {/* OAuth — Telegram + Google, both gated by consent */}
+          <div className="flex flex-col gap-3" style={{ marginBottom: 8 }}>
+            <div
+              onClickCapture={(e) => {
+                if (!handleTelegramGate()) {
+                  e.preventDefault();
+                  e.stopPropagation();
+                }
+              }}
+              style={{
+                width: "100%",
+                opacity: oauthEnabled ? 1 : 0.5,
+                pointerEvents: oauthEnabled ? "auto" : "none",
+              }}
+              aria-disabled={!oauthEnabled}
+            >
+              <TutorTelegramLoginButton className="w-full" />
+            </div>
+            <GoogleAuthButton
+              redirectPath="/tutor/home"
+              consentSource="google-oauth-tutor"
+              enabled={oauthEnabled}
+            />
+            {!oferta && (
+              <p className="tst-tg-hint" style={{ color: "var(--sokrat-fg3)" }}>
+                Отметьте согласие выше, чтобы войти через Telegram или Google
+              </p>
+            )}
+            {oferta && (
+              <p className="tst-tg-hint">
+                Telegram: нужен VPN, если заблокирован
+              </p>
+            )}
+          </div>
+
+          <div className="tst-divider">или по email</div>
+
           <form onSubmit={handleSubmit} noValidate>
             <div className="tst-field">
               <label className="tst-label" htmlFor="tst-email">
@@ -675,51 +763,6 @@ export default function TutorSignupTrial() {
               </select>
             </div>
 
-            <div className="tst-checkbox-row">
-              <input
-                id="tst-oferta"
-                type="checkbox"
-                checked={oferta}
-                onChange={(e) => {
-                  setOferta(e.target.checked);
-                  if (touched.oferta) {
-                    validateField({
-                      email,
-                      password,
-                      subject,
-                      oferta: e.target.checked,
-                    });
-                  }
-                }}
-                onBlur={() => handleBlur("oferta")}
-                disabled={loading}
-                className="tst-checkbox"
-                aria-invalid={Boolean(showError("oferta"))}
-              />
-              <label className="tst-checkbox-label" htmlFor="tst-oferta">
-                Я согласен с{" "}
-                <a href="/offer" target="_blank" rel="noopener noreferrer">
-                  публичной офертой
-                </a>{" "}
-                и{" "}
-                <a
-                  href="/privacy-policy"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                >
-                  политикой конфиденциальности
-                </a>
-              </label>
-            </div>
-            {showError("oferta") && (
-              <span
-                className="tst-error"
-                style={{ display: "block", marginTop: -12, marginBottom: 12 }}
-              >
-                {errors.oferta}
-              </span>
-            )}
-
             <button
               type="submit"
               className="tst-cta"
@@ -732,46 +775,6 @@ export default function TutorSignupTrial() {
                   : "Создать аккаунт"}
             </button>
           </form>
-
-          <div className="tst-divider">или</div>
-
-          <div style={{ marginBottom: 16 }}>
-            <GoogleAuthButton
-              redirectPath="/tutor/home"
-              consentSource="google-oauth-tutor"
-              enabled={oauthEnabled}
-            />
-            {!oferta && (
-              <p
-                className="tst-tg-hint"
-                style={{ marginTop: 6, color: "var(--sokrat-fg3)" }}
-              >
-                Отметьте согласие, чтобы войти через Google или Telegram
-              </p>
-            )}
-          </div>
-
-          <div className="tst-tg-wrap">
-            <div
-              onClickCapture={(e) => {
-                if (!handleTelegramGate()) {
-                  e.preventDefault();
-                  e.stopPropagation();
-                }
-              }}
-              style={{
-                width: "100%",
-                opacity: oauthEnabled ? 1 : 0.5,
-                pointerEvents: oauthEnabled ? "auto" : "none",
-              }}
-              aria-disabled={!oauthEnabled}
-            >
-              <TutorTelegramLoginButton className="w-full" />
-            </div>
-            <p className="tst-tg-hint">
-              Войдите через Telegram (нужен VPN, если заблокирован)
-            </p>
-          </div>
 
           <p className="tst-login-link">
             Уже есть аккаунт? <Link to="/login">Войти</Link>
