@@ -7,6 +7,8 @@ import { supabase, getAuthErrorMessage } from "@/lib/supabaseClient";
 import { toast } from "sonner";
 import { z } from "zod";
 import TutorTelegramLoginButton from "@/components/TutorTelegramLoginButton";
+import GoogleAuthButton from "@/components/GoogleAuthButton";
+import { applyPendingConsent } from "@/lib/consent";
 
 const loginSchema = z.object({
   email: z.string().trim().email({ message: "Неверный формат email" }).max(255),
@@ -34,6 +36,16 @@ const TutorLogin = () => {
 
     checkSession();
   }, [navigate]);
+
+  // Apply consent stashed before Google OAuth redirect (first-login case).
+  useEffect(() => {
+    const { data } = supabase.auth.onAuthStateChange((event, session) => {
+      if (event === "SIGNED_IN" && session?.user.id) {
+        void applyPendingConsent(session.user.id);
+      }
+    });
+    return () => data.subscription.unsubscribe();
+  }, []);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -87,11 +99,15 @@ const TutorLogin = () => {
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">
-          <div className="flex flex-col items-center">
-            <p className="text-sm text-muted-foreground mb-3">
-              Быстрый вход через Telegram
+          <div className="flex flex-col items-center gap-3">
+            <p className="text-sm text-muted-foreground">
+              Быстрый вход
             </p>
             <TutorTelegramLoginButton className="w-full" />
+            <GoogleAuthButton
+              redirectPath="/tutor/home"
+              consentSource="google-oauth-tutor"
+            />
           </div>
 
           <div className="relative">

@@ -7,7 +7,9 @@ import { supabase, getAuthErrorMessage } from "@/lib/supabaseClient";
 import { toast } from "sonner";
 import { z } from "zod";
 import TelegramLoginButton from "@/components/TelegramLoginButton";
+import GoogleAuthButton from "@/components/GoogleAuthButton";
 import { claimPendingInvite } from "@/lib/inviteApi";
+import { applyPendingConsent } from "@/lib/consent";
 
 const loginSchema = z.object({
   email: z.string().trim().email({ message: "Неверный формат email" }).max(255),
@@ -44,6 +46,16 @@ const Login = () => {
     };
     checkSession();
   }, [navigate]);
+
+  // Apply consent stashed before Google OAuth redirect (first-login case).
+  useEffect(() => {
+    const { data } = supabase.auth.onAuthStateChange((event, session) => {
+      if (event === "SIGNED_IN" && session?.user.id) {
+        void applyPendingConsent(session.user.id);
+      }
+    });
+    return () => data.subscription.unsubscribe();
+  }, []);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -161,9 +173,14 @@ const Login = () => {
             </div>
           </div>
 
-          {/* Telegram Login - Secondary */}
-          <div className="flex flex-col items-center">
+          {/* OAuth options — Google + Telegram */}
+          <div className="flex flex-col items-stretch gap-3">
+            <GoogleAuthButton
+              redirectPath="/chat"
+              consentSource="google-oauth-student"
+            />
             <div
+              className="flex flex-col items-center"
               onClick={() => {
                 // Reset on each click: clear previous timer + hide stale hint
                 if (telegramTimeoutRef.current) {
@@ -177,15 +194,15 @@ const Login = () => {
               }}
             >
               <TelegramLoginButton />
-            </div>
-            <p className="text-xs text-muted-foreground mt-2">
-              Или войдите через Telegram (нужен VPN)
-            </p>
-            {showTelegramHint && (
-              <p className="text-xs text-amber-600 mt-1">
-                Telegram может быть недоступен. Попробуйте войти по email&nbsp;↑
+              <p className="text-xs text-muted-foreground mt-2">
+                Или войдите через Telegram (нужен VPN)
               </p>
-            )}
+              {showTelegramHint && (
+                <p className="text-xs text-amber-600 mt-1">
+                  Telegram может быть недоступен. Попробуйте войти по email&nbsp;↑
+                </p>
+              )}
+            </div>
           </div>
         </CardContent>
       </Card>
