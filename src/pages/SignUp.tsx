@@ -8,6 +8,12 @@ import { toast } from "sonner";
 import { z } from "zod";
 import TelegramLoginButton from "@/components/TelegramLoginButton";
 import { claimPendingInvite } from "@/lib/inviteApi";
+import GoogleAuthButton from "@/components/GoogleAuthButton";
+import {
+  applyPendingConsent,
+  recordConsent,
+  stashPendingConsent,
+} from "@/lib/consent";
 
 const signupSchema = z.object({
   email: z.string().trim().email({ message: "Неверный формат email" }).max(255),
@@ -27,6 +33,7 @@ const SignUp = () => {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [username, setUsername] = useState("");
+  const [consent, setConsent] = useState(false);
   const [loading, setLoading] = useState(false);
 
   // Redirect authenticated users to chat
@@ -40,8 +47,22 @@ const SignUp = () => {
     checkSession();
   }, [navigate]);
 
+  // Apply consent stashed before OAuth redirect (Google / Telegram).
+  useEffect(() => {
+    const { data } = supabase.auth.onAuthStateChange((event, session) => {
+      if (event === "SIGNED_IN" && session?.user.id) {
+        void applyPendingConsent(session.user.id);
+      }
+    });
+    return () => data.subscription.unsubscribe();
+  }, []);
+
   const handleSignUp = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!consent) {
+      toast.error("Сначала отметьте согласие с офертой и политикой");
+      return;
+    }
     setLoading(true);
 
     try {
@@ -64,6 +85,10 @@ const SignUp = () => {
       });
 
       if (error) throw error;
+
+      if (data.user) {
+        await recordConsent(data.user.id, "web-signup-student");
+      }
 
       // Only claim if session is established (no email confirmation pending)
       if (data.session) {
@@ -126,10 +151,44 @@ const SignUp = () => {
                 disabled={loading}
               />
             </div>
+            <div className="flex items-start gap-2">
+              <input
+                id="signup-consent"
+                type="checkbox"
+                checked={consent}
+                onChange={(e) => setConsent(e.target.checked)}
+                disabled={loading}
+                className="mt-1 h-4 w-4 cursor-pointer accent-primary"
+                style={{ touchAction: "manipulation" }}
+              />
+              <label
+                htmlFor="signup-consent"
+                className="text-sm text-muted-foreground leading-snug cursor-pointer"
+              >
+                Я согласен с{" "}
+                <a
+                  href="/offer"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-primary hover:underline"
+                >
+                  публичной офертой
+                </a>{" "}
+                и{" "}
+                <a
+                  href="/privacy-policy"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-primary hover:underline"
+                >
+                  политикой конфиденциальности
+                </a>
+              </label>
+            </div>
             <Button
               type="submit"
               className="w-full"
-              disabled={loading}
+              disabled={loading || !consent}
             >
               {loading ? "Регистрация..." : "Зарегистрироваться по email"}
             </Button>
@@ -153,12 +212,42 @@ const SignUp = () => {
             </div>
           </div>
 
+          {/* Google OAuth */}
+          <GoogleAuthButton
+            redirectPath="/chat"
+            consentSource="google-oauth-student"
+            enabled={consent}
+          />
+
           {/* Telegram Login - Secondary */}
           <div className="flex flex-col items-center">
-            <TelegramLoginButton />
+            <div
+              onClickCapture={(e) => {
+                if (!consent) {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  toast.error("Сначала отметьте согласие с офертой и политикой");
+                  return;
+                }
+                stashPendingConsent("telegram-oauth-student");
+              }}
+              style={{
+                width: "100%",
+                opacity: consent ? 1 : 0.5,
+                pointerEvents: consent ? "auto" : "none",
+              }}
+              aria-disabled={!consent}
+            >
+              <TelegramLoginButton />
+            </div>
             <p className="text-xs text-muted-foreground mt-2">
               Или зарегистрируйтесь через Telegram (нужен VPN)
             </p>
+            {!consent && (
+              <p className="text-xs text-muted-foreground mt-1">
+                Отметьте согласие, чтобы войти через Google или Telegram
+              </p>
+            )}
           </div>
         </CardContent>
       </Card>
