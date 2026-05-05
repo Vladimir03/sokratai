@@ -28,15 +28,17 @@ export default function FinalCTA() {
           className="lede mx-auto mb-8 max-w-[640px]"
           style={{ color: "rgba(255, 255, 255, 0.9)" }}
         >
-          Попробуйте Сократ AI за 200 ₽ в первый месяц. Отмена в один клик — в
-          любой момент, без объяснений. Базовая платформа (оплаты, расписание)
-          остаётся бесплатной в любом случае.
+          Попробуйте Сократ AI 7&nbsp;дней бесплатно — без карты. Понравится —
+          продолжите за 200&nbsp;₽ первый месяц. Не понравится — базовая
+          платформа всё равно останется бесплатной.
         </p>
 
         <div className="flex flex-col sm:flex-row justify-center gap-3">
           <Link
-            to="/signup?ref=tutor-landing&tier=ai-start"
-            onClick={() => trackTutorLandingGoal("tutor_landing_cta_final")}
+            to="/signup?ref=tutor-landing&trial=7"
+            onClick={() =>
+              trackTutorLandingGoal("tutor_landing_cta_trial_final")
+            }
             className="inline-flex items-center justify-center rounded-lg px-6 text-base font-semibold transition-colors hover:bg-[color:var(--sokrat-green-50)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 w-full sm:w-auto"
             style={{
               backgroundColor: "var(--sokrat-fg-on-dark)",
@@ -44,7 +46,7 @@ export default function FinalCTA() {
               minHeight: 52,
             }}
           >
-            Попробовать за 200&nbsp;₽
+            🎁 7&nbsp;дней бесплатно
           </Link>
 
           <a

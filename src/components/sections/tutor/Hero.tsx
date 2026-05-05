@@ -4,7 +4,8 @@ import { Button } from "@/components/ui/button";
 import { trackTutorLandingGoal } from "@/lib/tutorLandingAnalytics";
 
 const TELEGRAM_CHANNEL_URL = "https://t.me/sokrat_rep";
-const SIGNUP_URL = "/signup?ref=tutor-landing&tier=ai-start";
+const SIGNUP_URL = "/signup?ref=tutor-landing&trial=7";
+const TG_BLUE = "#229ED9";
 
 export default function Hero() {
   return (
@@ -56,10 +57,10 @@ export default function Hero() {
         >
           <span
             aria-hidden="true"
-            className="h-1.5 w-1.5 rounded-full"
+            className="h-1.5 w-1.5 rounded-full animate-pulse"
             style={{ backgroundColor: "var(--sokrat-green-700)" }}
           />
-          Для репетиторов физики · математики · информатики
+          🎁 Новое: 7 дней пробного периода без карты
         </span>
 
         <h1 id="tutor-hero-headline">
@@ -95,20 +96,28 @@ export default function Hero() {
           >
             <Link
               to={SIGNUP_URL}
-              onClick={() => trackTutorLandingGoal("tutor_landing_cta_hero")}
+              onClick={() =>
+                trackTutorLandingGoal("tutor_landing_cta_trial_hero")
+              }
             >
-              Попробовать за 200&nbsp;₽ в первый месяц
+              🎁 Попробовать 7&nbsp;дней бесплатно
             </Link>
           </Button>
 
+          {/*
+            Secondary CTA — outline TG-blue. Filled solid would compete visually
+            with the primary green CTA above (UX-doc 16/17: «Один primary CTA на
+            экран»). Outline keeps brand recognition (TG-blue) without claiming
+            primary visual weight.
+          */}
           <Button
             asChild
             variant="outline"
             size="lg"
-            className="min-h-[52px] rounded-lg border-2 bg-transparent px-6 text-base font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 w-full sm:w-auto"
+            className="min-h-[52px] rounded-lg border-2 bg-transparent px-6 text-base font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 w-full sm:w-auto"
             style={{
-              borderColor: "var(--sokrat-green-700)",
-              color: "var(--sokrat-green-700)",
+              borderColor: TG_BLUE,
+              color: TG_BLUE,
             }}
           >
             <a
@@ -130,17 +139,76 @@ export default function Hero() {
         >
           <li className="flex items-center gap-1.5">
             <CheckMark />
-            200&nbsp;₽ — первый месяц полного доступа
+            Без карты
+          </li>
+          <li className="flex items-center gap-1.5">
+            <CheckMark />
+            Полный AI-доступ
+          </li>
+          <li className="flex items-center gap-1.5">
+            <CheckMark />
+            Потом 200&nbsp;₽ — первый месяц
           </li>
           <li className="flex items-center gap-1.5">
             <CheckMark />
             Отмена в один клик
           </li>
-          <li className="flex items-center gap-1.5">
-            <CheckMark />
-            Оплаты и расписание бесплатно навсегда
-          </li>
         </ul>
+
+        {/*
+          Compare «Было / Стало» — colors via tokens with hex fallbacks.
+          --sokrat-danger-* / --sokrat-green-* may not yet exist in colors_and_type.css;
+          fallbacks keep contrast ratio AA-passing until the design-system pass adds them.
+        */}
+        <div className="mt-8 grid grid-cols-1 md:grid-cols-2 gap-3">
+          <div
+            className="rounded-lg border p-4 md:p-5"
+            style={{
+              borderColor: "var(--sokrat-danger-200, #FCA5A5)",
+              backgroundColor: "var(--sokrat-danger-50, #FEF2F2)",
+            }}
+          >
+            <div
+              className="mb-2 text-[11px] font-bold uppercase tracking-[0.08em]"
+              style={{ color: "var(--sokrat-danger-700, #B91C1C)" }}
+            >
+              Было
+            </div>
+            <p
+              className="text-[14px] leading-[1.55]"
+              style={{ color: "var(--sokrat-fg1)" }}
+            >
+              <s style={{ color: "var(--sokrat-danger-700, #B91C1C)" }}>
+                200&nbsp;₽
+              </s>{" "}
+              Сразу платите в первый месяц. Не понимаете, подходит&nbsp;ли —
+              но карту привязали.
+            </p>
+          </div>
+
+          <div
+            className="rounded-lg border p-4 md:p-5"
+            style={{
+              borderColor: "var(--sokrat-green-300, #86EFAC)",
+              backgroundColor: "var(--sokrat-green-50, #F0FDF4)",
+            }}
+          >
+            <div
+              className="mb-2 text-[11px] font-bold uppercase tracking-[0.08em]"
+              style={{ color: "var(--sokrat-green-800, #166534)" }}
+            >
+              Стало
+            </div>
+            <p
+              className="text-[14px] leading-[1.55]"
+              style={{ color: "var(--sokrat-fg1)" }}
+            >
+              <strong>7&nbsp;дней бесплатно — без карты.</strong>{" "}
+              Понравится — продолжите за 200&nbsp;₽. Нет — базовая платформа
+              (оплаты, расписание) останется.
+            </p>
+          </div>
+        </div>
       </div>
     </section>
   );

@@ -20,6 +20,7 @@ const StudentLanding = lazy(() => import("./pages/StudentLanding"));
 const Login = lazy(() => import("./pages/Login"));
 const TutorLogin = lazy(() => import("./pages/TutorLogin"));
 const SignUp = lazy(() => import("./pages/SignUp"));
+const SignupRouter = lazy(() => import("./pages/SignupRouter"));
 const ForgotPassword = lazy(() => import("./pages/ForgotPassword"));
 const ResetPassword = lazy(() => import("./pages/ResetPassword"));
 const Chat = lazy(() => import("./pages/Chat"));
@@ -127,13 +128,13 @@ const App = () => (
                 </Suspense>
               }
             />
-            <Route 
-              path="/signup" 
+            <Route
+              path="/signup"
               element={
                 <Suspense fallback={<PageLoader />}>
-                  <SignUp />
+                  <SignupRouter />
                 </Suspense>
-              } 
+              }
             />
             <Route 
               path="/forgot-password" 

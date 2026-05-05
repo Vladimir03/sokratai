@@ -7,11 +7,16 @@ declare global {
 const COUNTER_ID = 105827612;
 
 export type TutorLandingGoal =
-  | "tutor_landing_cta_hero"
-  | "tutor_landing_cta_tour1"
-  | "tutor_landing_cta_pricing"
-  | "tutor_landing_cta_final"
-  | "tutor_landing_tg_channel_click";
+  | "tutor_landing_cta_hero" // existing
+  | "tutor_landing_cta_tour1" // existing
+  | "tutor_landing_cta_pricing" // existing
+  | "tutor_landing_cta_final" // existing
+  | "tutor_landing_tg_channel_click" // existing
+  | "tutor_landing_cta_trial_hero" // P0 — Hero CTA
+  | "tutor_landing_cta_trial_pricing" // P0 — Pricing AI-старт CTA
+  | "tutor_landing_cta_trial_final" // P0 — FinalCTA
+  | "tutor_landing_trial_signup_started" // P0 — TutorSignupTrial mount
+  | "tutor_landing_trial_signup_completed"; // P0 — успешный signup
 
 export function trackTutorLandingGoal(goal: TutorLandingGoal) {
   try {

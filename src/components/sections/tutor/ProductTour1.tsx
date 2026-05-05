@@ -38,8 +38,8 @@ export default function ProductTour1() {
         },
       ]}
       inlineCTA={{
-        label: "Попробовать за 200 ₽ →",
-        href: "/signup?ref=tutor-landing&tier=ai-start",
+        label: "🎁 Попробовать 7 дней бесплатно →",
+        href: "/signup?ref=tutor-landing&trial=7",
         onClick: () => trackTutorLandingGoal("tutor_landing_cta_tour1"),
       }}
       videoPlaceholderText="AI-проверка ДЗ + сократовский диалог"
