@@ -9,8 +9,6 @@ import { isIOS } from "@/hooks/use-mobile";
 // HARDCODED — see src/lib/supabaseClient.ts for rationale (RU bypass, ignore Lovable auto-env).
 const SUPABASE_URL = "https://api.sokratai.ru";
 
-const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
-
 interface TutorTelegramLoginButtonProps {
   botName?: string;
   className?: string;
@@ -46,60 +44,64 @@ const TutorTelegramLoginButton = ({
       console.log("Token check response:", data);
 
       if (data.status === "verified" && data.session) {
+        // Step 1: install session locally. setSession is sync-ish (writes to
+        // localStorage + auto-refresh schedule); no network call here.
         await supabase.auth.setSession({
           access_token: data.session.access_token,
           refresh_token: data.session.refresh_token,
         });
 
-        try {
-          const { data: { user } } = await supabase.auth.getUser();
-          if (!user) {
-            await supabase.auth.signOut();
-            setLoading(false);
-            setStatus("idle");
-            setCurrentToken(null);
-            toast.error("Не удалось получить пользователя. Попробуйте войти снова.");
-            return true;
-          }
+        // Use server-provided user_id — avoid extra network round-trip via
+        // supabase.auth.getUser() (which hits /auth/v1/user through the RU
+        // proxy and adds latency / failure surface).
+        const userId: string | undefined = data.user_id;
+        console.log("[telegram-login] session installed, user_id:", userId);
 
-          let isTutor = false;
-          const delays = [500, 1000, 1500, 2000, 3000];
-          for (let attempt = 0; attempt < delays.length; attempt++) {
-            const { data: roleData, error } = await supabase.rpc("is_tutor", { _user_id: user.id });
-            if (!error && roleData) {
-              isTutor = true;
-              break;
+        // Step 2: best-effort is_tutor probe. Bot's `handleWebLogin` ALREADY
+        // assigned the tutor role server-side (when `intended_role: "tutor"`
+        // was set on the token). This is a single safety check, NOT a retry
+        // loop — if it returns false we fall back to client-side
+        // assign-tutor-role once and continue regardless. We DO NOT signOut
+        // on failure: TutorGuard at /tutor/home will catch a truly missing
+        // role and redirect to /register-tutor, which is a graceful next
+        // step (not a dead-end like signOut + toast).
+        if (userId) {
+          try {
+            const { data: isTutor, error: rpcError } = await supabase.rpc(
+              "is_tutor",
+              { _user_id: userId },
+            );
+            if (rpcError) {
+              console.warn("[telegram-login] is_tutor RPC error:", rpcError.message);
             }
-
-            console.log(`is_tutor check attempt ${attempt + 1}/${delays.length}: ${roleData}, error: ${error?.message}`);
-            await wait(delays[attempt]);
+            if (!isTutor) {
+              console.warn(
+                "[telegram-login] is_tutor=false after bot's role assignment; trying client-side fallback",
+              );
+              const { error: assignError } = await supabase.functions.invoke(
+                "assign-tutor-role",
+                { body: { user_id: userId } },
+              );
+              if (assignError) {
+                // 400 expected for users created > 5 min ago. Bot should have
+                // assigned the role already; if it didn't, TutorGuard handles.
+                console.warn(
+                  "[telegram-login] assign-tutor-role fallback returned error:",
+                  assignError.message,
+                );
+              }
+            }
+          } catch (probeError) {
+            // Network / unexpected error — log and continue. We've got a
+            // valid session; let the user reach /tutor/home and let
+            // TutorGuard sort out the role.
+            console.warn("[telegram-login] role probe threw:", probeError);
           }
-
-          if (!isTutor) {
-            console.error("auth_event:telegram_role_missing", {
-              flow: "tutor_telegram_login",
-              user_id: user.id,
-            });
-            await supabase.auth.signOut();
-            setLoading(false);
-            setStatus("idle");
-            setCurrentToken(null);
-            toast.error("Не удалось подтвердить роль репетитора. Попробуйте снова.");
-            return true;
-          }
-
-          setStatus("success");
-          toast.success("Успешный вход через Telegram!");
-          navigate("/tutor/home");
-        } catch (error) {
-          console.error("Tutor role check error:", error);
-          await supabase.auth.signOut();
-          setLoading(false);
-          setStatus("idle");
-          setCurrentToken(null);
-          toast.error("Ошибка проверки роли репетитора. Попробуйте снова.");
         }
 
+        setStatus("success");
+        toast.success("Успешный вход через Telegram!");
+        navigate("/tutor/home");
         return true;
       }
 
