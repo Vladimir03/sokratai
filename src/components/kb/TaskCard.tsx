@@ -15,6 +15,12 @@ interface TaskCardProps {
   inHW?: boolean;
   isModerator?: boolean;
   subtopicName?: string;
+  /**
+   * If provided, the «КИМ № N» badge becomes a clickable button — clicking
+   * it requests the parent page to filter the task list by that KIM number.
+   * Click stops propagation so it doesn't toggle the card.
+   */
+  onKimClick?: (kimNumber: number) => void;
   onToggle: () => void;
   onAddToHW?: () => void;
   onCopyToFolder?: () => void;
@@ -36,6 +42,7 @@ export const TaskCard = memo(function TaskCard({
   inHW = false,
   isModerator = false,
   subtopicName,
+  onKimClick,
   onToggle,
   onAddToHW,
   onCopyToFolder,
@@ -211,7 +218,21 @@ export const TaskCard = memo(function TaskCard({
             <span className="text-[11px] font-medium text-slate-500">{subtopicName}</span>
           ) : null}
           {task.kim_number ? (
-            <span className="text-[11px] font-medium text-slate-500">КИМ № {task.kim_number}</span>
+            onKimClick ? (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onKimClick(task.kim_number!);
+                }}
+                className="-mx-1 rounded px-1 py-0.5 text-[11px] font-medium text-slate-500 transition-colors hover:bg-socrat-surface hover:text-socrat-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-socrat-primary/40"
+                title={`Показать только КИМ № ${task.kim_number}`}
+              >
+                КИМ № {task.kim_number}
+              </button>
+            ) : (
+              <span className="text-[11px] font-medium text-slate-500">КИМ № {task.kim_number}</span>
+            )
           ) : null}
           {isHiddenDuplicate ? (
             <span className="inline-flex items-center gap-1 rounded-md bg-red-50 px-1.5 py-0.5 text-[10px] font-semibold text-red-600">

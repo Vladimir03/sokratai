@@ -1,6 +1,6 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { ChevronRight, Folder, FolderPlus, Pencil, Plus, Trash2 } from 'lucide-react';
+import { ChevronRight, Folder, FolderPlus, Pencil, Plus, Trash2, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { CreateFolderModal } from '@/components/kb/CreateFolderModal';
 import { CreateTaskModal } from '@/components/kb/CreateTaskModal';
@@ -31,6 +31,13 @@ function FolderContent() {
   const [movingTask, setMovingTask] = useState<KBTask | null>(null);
   const [renamingFolder, setRenamingFolder] = useState<{ id: string; name: string } | null>(null);
   const [deletingFolder, setDeletingFolder] = useState<{ id: string; name: string } | null>(null);
+  const [kimFilter, setKimFilter] = useState<number | null>(null);
+
+  // Tasks filtered by clicked-on KIM badge. `null` shows all.
+  const visibleTasks = useMemo(
+    () => (kimFilter === null ? tasks : tasks.filter((t) => t.kim_number === kimFilter)),
+    [tasks, kimFilter],
+  );
   const { addTask, hasTask } = useHWDraftStore();
   const deleteTask = useDeleteTask();
   const deleteFolder = useDeleteFolder();
@@ -169,11 +176,40 @@ function FolderContent() {
 
               {tasks.length > 0 ? (
                 <section>
-                  <div className="mb-3 text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
-                    Задачи
+                  <div className="mb-3 flex flex-wrap items-center gap-2">
+                    <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+                      Задачи
+                    </div>
+                    {kimFilter !== null ? (
+                      <button
+                        type="button"
+                        onClick={() => setKimFilter(null)}
+                        className="inline-flex items-center gap-1 rounded-full bg-socrat-primary/10 px-2.5 py-1 text-[11px] font-semibold text-socrat-primary transition-colors hover:bg-socrat-primary/20"
+                      >
+                        КИМ № {kimFilter}
+                        <X className="h-3 w-3" />
+                      </button>
+                    ) : null}
+                    {kimFilter !== null && visibleTasks.length !== tasks.length ? (
+                      <span className="text-[11px] text-slate-400">
+                        {visibleTasks.length} из {tasks.length}
+                      </span>
+                    ) : null}
                   </div>
+                  {visibleTasks.length === 0 && kimFilter !== null ? (
+                    <div className="rounded-[18px] border border-dashed border-socrat-border bg-white/60 px-5 py-8 text-center text-sm text-slate-500">
+                      Задач с КИМ № {kimFilter} в этой папке нет.{' '}
+                      <button
+                        type="button"
+                        onClick={() => setKimFilter(null)}
+                        className="font-semibold text-socrat-primary hover:underline"
+                      >
+                        Сбросить фильтр
+                      </button>
+                    </div>
+                  ) : null}
                   <div className="flex flex-col gap-3">
-                    {tasks.map((task) => (
+                    {visibleTasks.map((task) => (
                       <TaskCard
                         key={task.id}
                         task={task}
@@ -181,6 +217,7 @@ function FolderContent() {
                         inHW={hasTask(task.id)}
                         isModerator={isModerator}
                         isExpanded={expandedTaskId === task.id}
+                        onKimClick={(kim) => setKimFilter(kim)}
                         onToggle={() => setExpandedTaskId(expandedTaskId === task.id ? null : task.id)}
                         onAddToHW={() => handleAddToHW(task)}
                         onMoveToFolder={() => setMovingTask(task)}

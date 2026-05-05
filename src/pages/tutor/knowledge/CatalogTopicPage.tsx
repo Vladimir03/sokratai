@@ -1,6 +1,6 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { ArrowLeft } from 'lucide-react';
+import { ArrowLeft, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { useQueryClient } from '@tanstack/react-query';
 import { CopyToFolderModal } from '@/components/kb/CopyToFolderModal';
@@ -41,8 +41,15 @@ function CatalogTopicContent() {
 
   const [expandedTaskId, setExpandedTaskId] = useState<string | null>(null);
   const [copyTask, setCopyTask] = useState<KBTask | null>(null);
+  const [kimFilter, setKimFilter] = useState<number | null>(null);
   const { addTask, hasTask } = useHWDraftStore();
   const queryClient = useQueryClient();
+
+  // Tasks filtered by clicked-on KIM badge. `null` shows all.
+  const visibleTasks = useMemo(
+    () => (kimFilter === null ? tasks : tasks.filter((t) => t.kim_number === kimFilter)),
+    [tasks, kimFilter],
+  );
 
   const handleUnpublish = useCallback(
     async (task: KBTask) => {
@@ -146,7 +153,24 @@ function CatalogTopicContent() {
           ) : null}
 
           <section>
-            <h3 className="mb-3 text-lg font-semibold text-slate-900">Задачи</h3>
+            <div className="mb-3 flex flex-wrap items-center gap-3">
+              <h3 className="text-lg font-semibold text-slate-900">Задачи</h3>
+              {kimFilter !== null ? (
+                <button
+                  type="button"
+                  onClick={() => setKimFilter(null)}
+                  className="inline-flex items-center gap-1 rounded-full bg-socrat-primary/10 px-2.5 py-1 text-[11px] font-semibold text-socrat-primary transition-colors hover:bg-socrat-primary/20"
+                >
+                  КИМ № {kimFilter}
+                  <X className="h-3 w-3" />
+                </button>
+              ) : null}
+              {kimFilter !== null && visibleTasks.length !== tasks.length ? (
+                <span className="text-[11px] text-slate-400">
+                  {visibleTasks.length} из {tasks.length}
+                </span>
+              ) : null}
+            </div>
 
             {tasksLoading ? (
               <div className="space-y-3">
@@ -162,8 +186,21 @@ function CatalogTopicContent() {
               </div>
             ) : null}
 
+            {!tasksLoading && visibleTasks.length === 0 && kimFilter !== null ? (
+              <div className="rounded-[22px] border border-dashed border-socrat-border bg-white/70 px-5 py-8 text-center text-sm text-slate-500">
+                В этой теме нет задач с КИМ № {kimFilter}.{' '}
+                <button
+                  type="button"
+                  onClick={() => setKimFilter(null)}
+                  className="font-semibold text-socrat-primary hover:underline"
+                >
+                  Сбросить фильтр
+                </button>
+              </div>
+            ) : null}
+
             <div className="flex flex-col gap-3">
-              {tasks.map((task) => (
+              {visibleTasks.map((task) => (
                 <TaskCard
                   key={task.id}
                   task={task}
@@ -172,6 +209,7 @@ function CatalogTopicContent() {
                   isModerator={isModerator}
                   subtopicName={subtopics.find((subtopic) => subtopic.id === task.subtopic_id)?.name}
                   isExpanded={expandedTaskId === task.id}
+                  onKimClick={(kim) => setKimFilter(kim)}
                   onToggle={() => setExpandedTaskId(expandedTaskId === task.id ? null : task.id)}
                   onCopyToFolder={() => setCopyTask(task)}
                   onAddToHW={() => handleAddToHW(task)}
