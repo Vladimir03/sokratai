@@ -155,60 +155,6 @@ export default function Hero() {
           </li>
         </ul>
 
-        {/*
-          Compare «Было / Стало» — colors via tokens with hex fallbacks.
-          --sokrat-danger-* / --sokrat-green-* may not yet exist in colors_and_type.css;
-          fallbacks keep contrast ratio AA-passing until the design-system pass adds them.
-        */}
-        <div className="mt-8 grid grid-cols-1 md:grid-cols-2 gap-3">
-          <div
-            className="rounded-lg border p-4 md:p-5"
-            style={{
-              borderColor: "var(--sokrat-danger-200, #FCA5A5)",
-              backgroundColor: "var(--sokrat-danger-50, #FEF2F2)",
-            }}
-          >
-            <div
-              className="mb-2 text-[11px] font-bold uppercase tracking-[0.08em]"
-              style={{ color: "var(--sokrat-danger-700, #B91C1C)" }}
-            >
-              Было
-            </div>
-            <p
-              className="text-[14px] leading-[1.55]"
-              style={{ color: "var(--sokrat-fg1)" }}
-            >
-              <s style={{ color: "var(--sokrat-danger-700, #B91C1C)" }}>
-                200&nbsp;₽
-              </s>{" "}
-              Сразу платите в первый месяц. Не понимаете, подходит&nbsp;ли —
-              но карту привязали.
-            </p>
-          </div>
-
-          <div
-            className="rounded-lg border p-4 md:p-5"
-            style={{
-              borderColor: "var(--sokrat-green-300, #86EFAC)",
-              backgroundColor: "var(--sokrat-green-50, #F0FDF4)",
-            }}
-          >
-            <div
-              className="mb-2 text-[11px] font-bold uppercase tracking-[0.08em]"
-              style={{ color: "var(--sokrat-green-800, #166534)" }}
-            >
-              Стало
-            </div>
-            <p
-              className="text-[14px] leading-[1.55]"
-              style={{ color: "var(--sokrat-fg1)" }}
-            >
-              <strong>7&nbsp;дней бесплатно — без карты.</strong>{" "}
-              Понравится — продолжите за 200&nbsp;₽. Нет — базовая платформа
-              (оплаты, расписание) останется.
-            </p>
-          </div>
-        </div>
       </div>
     </section>
   );
