@@ -2000,6 +2000,7 @@ export type Database = {
       telegram_login_tokens: {
         Row: {
           action_type: string | null
+          client_id: string | null
           created_at: string | null
           expires_at: string | null
           id: string
@@ -2013,6 +2014,7 @@ export type Database = {
         }
         Insert: {
           action_type?: string | null
+          client_id?: string | null
           created_at?: string | null
           expires_at?: string | null
           id?: string
@@ -2026,6 +2028,7 @@ export type Database = {
         }
         Update: {
           action_type?: string | null
+          client_id?: string | null
           created_at?: string | null
           expires_at?: string | null
           id?: string
