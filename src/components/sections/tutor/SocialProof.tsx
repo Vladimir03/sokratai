@@ -45,7 +45,8 @@ const FOUNDERS: Founder[] = [
   },
 ];
 
-const TESTIMONIAL_VIDEO_SRC: string | undefined = undefined;
+const TESTIMONIAL_VIDEO_SRC: string | undefined =
+  "/marketing/tutor-landing/testimonial-maria-knyazeva.mp4";
 
 export default function SocialProof() {
   return (
@@ -232,11 +233,9 @@ function CaseVideoCard({ videoSrc }: { videoSrc?: string }) {
         {videoSrc ? (
           <video
             src={videoSrc}
-            autoPlay
-            loop
-            muted
+            controls
+            preload="metadata"
             playsInline
-            poster="/marketing/tutor-landing/testimonial-poster.jpg"
             className="h-full w-full object-cover"
           />
         ) : (
@@ -265,13 +264,10 @@ function CaseVideoCard({ videoSrc }: { videoSrc?: string }) {
           </>
         )}
       </div>
+      <div className="sp-case-name">Мария Князева</div>
       <div className="sp-case-regalia">
-        Ученица Егора Блинова · Готовилась к ЕГЭ по физике · 2024
+        Руководитель онлайн-курса подготовки к ЕГЭ и ОГЭ по биологии
       </div>
-      <p className="sp-case-disclaimer">
-        Отзыв снят, когда Сократ AI работал как Telegram-бот. С 2025 платформа
-        переехала на sokratai.ru.
-      </p>
     </article>
   );
 }
