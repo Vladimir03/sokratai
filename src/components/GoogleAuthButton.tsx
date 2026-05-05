@@ -1,14 +1,34 @@
 import { useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
-import { createLovableAuth } from "@lovable.dev/cloud-auth-js";
 import { stashPendingConsent, type ConsentSource } from "@/lib/consent";
 import { toast } from "sonner";
 
-const LOVABLE_PROJECT_ID = "5fbe4a32-1baf-47b0-8f47-83e3060cf929";
-
-const lovableAuth = createLovableAuth({
-  oauthBrokerUrl: "https://oauth.lovable.app/initiate",
-});
+/**
+ * Native Supabase OAuth flow — bypasses `oauth.lovable.app` broker.
+ *
+ * History: the auto-generated Lovable component used `createLovableAuth({
+ * oauthBrokerUrl: "https://oauth.lovable.app/initiate" })`. From RU networks
+ * without VPN that endpoint returns 403 Forbidden (Cloudflare edge filtering)
+ * — exactly the same RU-bypass class of issue we solved for `*.supabase.co`
+ * by routing through our own Selectel Moscow VPS at `api.sokratai.ru`.
+ *
+ * `supabase.auth.signInWithOAuth({ provider: "google" })` constructs a URL
+ * like `${SUPABASE_URL}/auth/v1/authorize?provider=google&redirect_to=...`.
+ * Our `supabase` client is hardcoded to `https://api.sokratai.ru`
+ * (see `src/lib/supabaseClient.ts`), so the OAuth init hits the proxy and
+ * RU users complete the flow without VPN.
+ *
+ * Required ops setup (one-time, on Vladimir's side):
+ *   - Google Cloud Console → OAuth client → Authorized redirect URIs:
+ *     add `https://api.sokratai.ru/auth/v1/callback`
+ *   - Supabase Dashboard → Authentication → URL Configuration:
+ *     Site URL = `https://sokratai.ru`
+ *     Additional Redirect URLs include:
+ *       `https://sokratai.ru/**`
+ *       `https://sokratai.lovable.app/**`
+ *   - Supabase Dashboard → Authentication → Providers → Google: enabled +
+ *     correct Client ID / Client Secret.
+ */
 
 interface GoogleAuthButtonProps {
   /** Where to send the user after Google returns. Absolute origin is added automatically. */
@@ -39,27 +59,25 @@ export default function GoogleAuthButton({
       // Stash consent intent BEFORE redirect — applied on SIGNED_IN return.
       stashPendingConsent(consentSource);
 
-      const result = await lovableAuth.signInWithOAuth("google", {
-        redirect_uri: `${window.location.origin}${redirectPath}`,
-        extraParams: {
-          project_id: LOVABLE_PROJECT_ID,
-          prompt: "select_account",
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider: "google",
+        options: {
+          redirectTo: `${window.location.origin}${redirectPath}`,
+          queryParams: { prompt: "select_account" },
         },
       });
 
-      if (result.error) {
+      if (error) {
         toast.error("Не удалось войти через Google. Попробуйте ещё раз.");
-        console.error("[google-auth] error", result.error);
+        console.error("[google-auth] error", error);
         setLoading(false);
         return;
       }
 
-      if (result.redirected) {
-        return;
-      }
-
-      await supabase.auth.setSession(result.tokens);
-      // onAuthStateChange in caller handles the signed-in state.
+      // signInWithOAuth navigates the page to /auth/v1/authorize → Google →
+      // back to redirectTo. supabase-js auto-detects tokens in URL hash on
+      // return (`detectSessionInUrl: true` is the default). No setSession
+      // call needed in this component.
     } catch (e) {
       console.error("[google-auth] threw", e);
       toast.error("Не удалось войти через Google.");
