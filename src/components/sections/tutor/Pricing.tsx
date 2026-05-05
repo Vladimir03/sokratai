@@ -260,7 +260,6 @@ export default function Pricing() {
           font-weight: 800;
           letter-spacing: 0.02em;
           line-height: 1.2;
-          box-shadow: 0 2px 6px rgba(232, 145, 58, 0.35);
         }
         .sokrat.sokrat-marketing .pp-savings-caption {
           font-size: 13px;
@@ -303,10 +302,10 @@ export default function Pricing() {
           flex-wrap: wrap;
         }
         .sokrat.sokrat-marketing .pp-stack-big {
-          font-size: 32px;
+          font-size: 28px;
           font-weight: 700;
-          color: var(--sokrat-ochre-700);
-          line-height: 1;
+          color: var(--sokrat-fg1);
+          line-height: 1.1;
         }
         .sokrat.sokrat-marketing .pp-stack-big-caption {
           font-size: 12px;

@@ -47,9 +47,9 @@ export default function Hero() {
         }
       `}</style>
 
-      <div className="relative mx-auto max-w-[800px] px-6 md:px-8 py-[80px] pb-[56px] md:py-[120px] md:pb-[80px] text-left">
+      <div className="relative mx-auto max-w-[800px] px-6 md:px-8 pt-[48px] pb-[56px] md:pt-[72px] md:pb-[80px] text-left">
         <span
-          className="mb-5 inline-flex items-center gap-1.5 rounded-full px-3.5 py-1.5 text-[11px] font-bold uppercase tracking-[0.08em]"
+          className="mb-6 inline-flex items-center gap-1.5 rounded-full px-3.5 py-1.5 text-[11px] font-bold uppercase tracking-[0.08em]"
           style={{
             backgroundColor: "var(--sokrat-green-100)",
             color: "var(--sokrat-green-800)",
@@ -63,13 +63,22 @@ export default function Hero() {
           🎁 Новое: 7 дней пробного периода без карты
         </span>
 
-        <h1 id="tutor-hero-headline">
+        {/*
+          Inline marginBottom/marginTop required because global
+          `.sokrat:not([data-sokrat-mode]) h1/p { margin: 0 }` (specificity 0,2,1)
+          overrides Tailwind utility classes (0,1,0). Without inline overrides
+          H1 → lede → byline collapse with zero gap.
+        */}
+        <h1
+          id="tutor-hero-headline"
+          style={{ marginBottom: "1.75rem" }}
+        >
           Инструмент репетитора. От&nbsp;репетитора.
         </h1>
 
         <p
-          className="lede mt-6"
-          style={{ color: "var(--sokrat-fg1)" }}
+          className="lede"
+          style={{ color: "var(--sokrat-fg1)", marginBottom: "1.25rem" }}
         >
           AI проверяет рукописные ДЗ по физике, математике и информатике. Ведёт
           ученика сократовским диалогом вместо готового ответа. Собирает ДЗ из
@@ -77,7 +86,7 @@ export default function Hero() {
         </p>
 
         <p
-          className="mt-4 text-[15px] leading-[1.6]"
+          className="text-[15px] leading-[1.6]"
           style={{ color: "var(--sokrat-fg3)" }}
         >
           Создатели — Егор Блинов (преподаватель МФТИ, дважды 100-балльник ЕГЭ,

@@ -107,7 +107,13 @@ export default function FreemiumBridge() {
                 borderColor: "var(--sokrat-border)",
               }}
             >
-              <h3 className="freemium-card-title mb-3">{card.title}</h3>
+              {/* Inline marginBottom — global `.sokrat:not([data-sokrat-mode]) h3 { margin: 0 }` overrides Tailwind. */}
+              <h3
+                className="freemium-card-title"
+                style={{ marginBottom: "0.875rem" }}
+              >
+                {card.title}
+              </h3>
               <p className="freemium-card-body">{card.body}</p>
             </li>
           ))}
