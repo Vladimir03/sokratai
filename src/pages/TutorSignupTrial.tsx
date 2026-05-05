@@ -8,6 +8,12 @@ import { supabase, getAuthErrorMessage } from "@/lib/supabaseClient";
 import { claimPendingInvite } from "@/lib/inviteApi";
 import { trackTutorLandingGoal } from "@/lib/tutorLandingAnalytics";
 import TutorTelegramLoginButton from "@/components/TutorTelegramLoginButton";
+import GoogleAuthButton from "@/components/GoogleAuthButton";
+import {
+  applyPendingConsent,
+  recordConsent,
+  stashPendingConsent,
+} from "@/lib/consent";
 
 // Job: B0.1 «Активироваться, не вкладываясь» — repackages signup as a 7-day,
 // no-card trial so a new tutor can reach P0.1 (own first AI-checked homework).
@@ -64,7 +70,7 @@ export default function TutorSignupTrial() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [subject, setSubject] = useState<SubjectValue>("physics");
-  const [oferta, setOferta] = useState(true);
+  const [oferta, setOferta] = useState(false);
   const [loading, setLoading] = useState(false);
   const [errors, setErrors] = useState<FieldErrors>({});
   const [touched, setTouched] = useState<Record<keyof FieldErrors, boolean>>({
@@ -132,6 +138,22 @@ export default function TutorSignupTrial() {
   useEffect(() => {
     const { data } = supabase.auth.onAuthStateChange((event, session) => {
       if (event === "SIGNED_IN" && session?.user.id) {
+        const userId = session.user.id;
+        // Apply consent stashed before OAuth redirect (Google / Telegram).
+        void applyPendingConsent(userId);
+        // Ensure tutor role is assigned for OAuth returns (email flow does this inline).
+        void supabase
+          .rpc("is_tutor", { _user_id: userId })
+          .then(({ data: isTutor }) => {
+            if (isTutor) return;
+            return supabase.functions
+              .invoke("assign-tutor-role", { body: { user_id: userId } })
+              .then(({ error }) => {
+                if (error) {
+                  console.warn("[trial-flow] OAuth role assignment failed", error);
+                }
+              });
+          });
         void applyTrialMarker(session.user.id).then((ok) => {
           if (ok) {
             trackTutorLandingGoal("tutor_landing_trial_signup_completed");
@@ -241,6 +263,9 @@ export default function TutorSignupTrial() {
 
       const markerOk = await applyTrialMarker(data.user.id);
 
+      // Persist consent for email-flow signup (OAuth handled via stash + onAuthStateChange).
+      await recordConsent(data.user.id, "web-signup-tutor");
+
       // Goal fires only when role assignment AND marker apply both succeeded.
       // (Marker apply returns true also when ?trial=7 absent — non-trial signup
       // through this surface still counts as completed conversion.)
@@ -263,6 +288,18 @@ export default function TutorSignupTrial() {
 
   const showError = (field: keyof FieldErrors) =>
     touched[field] && errors[field];
+
+  const oauthEnabled = oferta;
+  const handleTelegramGate = () => {
+    if (!oferta) {
+      toast.error("Сначала отметьте согласие с офертой и политикой");
+      setTouched((t) => ({ ...t, oferta: true }));
+      validateField({ email, password, subject, oferta: false });
+      return false;
+    }
+    stashPendingConsent("telegram-oauth-tutor");
+    return true;
+  };
 
   const inputBaseStyle = {
     fontSize: 16,
@@ -677,7 +714,11 @@ export default function TutorSignupTrial() {
               </span>
             )}
 
-            <button type="submit" className="tst-cta" disabled={loading}>
+            <button
+              type="submit"
+              className="tst-cta"
+              disabled={loading || !oferta}
+            >
               {loading
                 ? "Создаём аккаунт..."
                 : isTrialIntent
@@ -688,8 +729,39 @@ export default function TutorSignupTrial() {
 
           <div className="tst-divider">или</div>
 
+          <div style={{ marginBottom: 16 }}>
+            <GoogleAuthButton
+              redirectPath="/tutor/home"
+              consentSource="google-oauth-tutor"
+              enabled={oauthEnabled}
+            />
+            {!oferta && (
+              <p
+                className="tst-tg-hint"
+                style={{ marginTop: 6, color: "var(--sokrat-fg3)" }}
+              >
+                Отметьте согласие, чтобы войти через Google или Telegram
+              </p>
+            )}
+          </div>
+
           <div className="tst-tg-wrap">
-            <TutorTelegramLoginButton />
+            <div
+              onClickCapture={(e) => {
+                if (!handleTelegramGate()) {
+                  e.preventDefault();
+                  e.stopPropagation();
+                }
+              }}
+              style={{
+                width: "100%",
+                opacity: oauthEnabled ? 1 : 0.5,
+                pointerEvents: oauthEnabled ? "auto" : "none",
+              }}
+              aria-disabled={!oauthEnabled}
+            >
+              <TutorTelegramLoginButton />
+            </div>
             <p className="tst-tg-hint">
               Войдите через Telegram (нужен VPN, если заблокирован)
             </p>

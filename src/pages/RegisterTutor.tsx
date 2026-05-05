@@ -8,6 +8,12 @@ import { toast } from "sonner";
 import { z } from "zod";
 import { GraduationCap } from "lucide-react";
 import TutorTelegramLoginButton from "@/components/TutorTelegramLoginButton";
+import GoogleAuthButton from "@/components/GoogleAuthButton";
+import {
+  applyPendingConsent,
+  recordConsent,
+  stashPendingConsent,
+} from "@/lib/consent";
 
 const registerSchema = z.object({
   name: z.string()
@@ -36,6 +42,7 @@ const RegisterTutor = () => {
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [consent, setConsent] = useState(false);
   const [loading, setLoading] = useState(false);
 
   // Redirect only if user is already a tutor
@@ -57,8 +64,22 @@ const RegisterTutor = () => {
     checkSession();
   }, [navigate]);
 
+  // Apply consent stashed before OAuth redirect.
+  useEffect(() => {
+    const { data } = supabase.auth.onAuthStateChange((event, session) => {
+      if (event === "SIGNED_IN" && session?.user.id) {
+        void applyPendingConsent(session.user.id);
+      }
+    });
+    return () => data.subscription.unsubscribe();
+  }, []);
+
   const handleRegister = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!consent) {
+      toast.error("Сначала отметьте согласие с офертой и политикой");
+      return;
+    }
     setLoading(true);
 
     try {
@@ -111,6 +132,8 @@ const RegisterTutor = () => {
         return;
       }
 
+      await recordConsent(authData.user.id, "web-signup-tutor");
+
       toast.success("Регистрация успешна!");
       navigate("/tutor/home");
     } catch (error: any) {
@@ -140,7 +163,32 @@ const RegisterTutor = () => {
             <p className="text-sm text-muted-foreground mb-3">
               Быстрая регистрация через Telegram
             </p>
-            <TutorTelegramLoginButton className="w-full" />
+            <div
+              className="w-full"
+              onClickCapture={(e) => {
+                if (!consent) {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  toast.error("Сначала отметьте согласие с офертой и политикой");
+                  return;
+                }
+                stashPendingConsent("telegram-oauth-tutor");
+              }}
+              style={{
+                opacity: consent ? 1 : 0.5,
+                pointerEvents: consent ? "auto" : "none",
+              }}
+              aria-disabled={!consent}
+            >
+              <TutorTelegramLoginButton className="w-full" />
+            </div>
+            <div className="w-full mt-3">
+              <GoogleAuthButton
+                redirectPath="/tutor/home"
+                consentSource="google-oauth-tutor"
+                enabled={consent}
+              />
+            </div>
           </div>
 
           <div className="relative">
@@ -186,10 +234,44 @@ const RegisterTutor = () => {
                 disabled={loading}
               />
             </div>
+            <div className="flex items-start gap-2">
+              <input
+                id="register-tutor-consent"
+                type="checkbox"
+                checked={consent}
+                onChange={(e) => setConsent(e.target.checked)}
+                disabled={loading}
+                className="mt-1 h-4 w-4 cursor-pointer accent-primary"
+                style={{ touchAction: "manipulation" }}
+              />
+              <label
+                htmlFor="register-tutor-consent"
+                className="text-sm text-muted-foreground leading-snug cursor-pointer"
+              >
+                Я согласен с{" "}
+                <a
+                  href="/offer"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-primary hover:underline"
+                >
+                  публичной офертой
+                </a>{" "}
+                и{" "}
+                <a
+                  href="/privacy-policy"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-primary hover:underline"
+                >
+                  политикой конфиденциальности
+                </a>
+              </label>
+            </div>
             <Button 
               type="submit" 
               className="w-full" 
-              disabled={loading}
+              disabled={loading || !consent}
             >
               {loading ? "Регистрация..." : "Зарегистрироваться"}
             </Button>
