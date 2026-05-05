@@ -1861,6 +1861,9 @@ export type Database = {
       }
       profiles: {
         Row: {
+          consent_accepted_at: string | null
+          consent_source: string | null
+          consent_version: string | null
           created_at: string | null
           current_streak: number | null
           diagnostic_completed: boolean | null
@@ -1880,9 +1883,13 @@ export type Database = {
           telegram_user_id: number | null
           telegram_username: string | null
           trial_ends_at: string | null
+          trial_started_at: string | null
           username: string
         }
         Insert: {
+          consent_accepted_at?: string | null
+          consent_source?: string | null
+          consent_version?: string | null
           created_at?: string | null
           current_streak?: number | null
           diagnostic_completed?: boolean | null
@@ -1902,9 +1909,13 @@ export type Database = {
           telegram_user_id?: number | null
           telegram_username?: string | null
           trial_ends_at?: string | null
+          trial_started_at?: string | null
           username: string
         }
         Update: {
+          consent_accepted_at?: string | null
+          consent_source?: string | null
+          consent_version?: string | null
           created_at?: string | null
           current_streak?: number | null
           diagnostic_completed?: boolean | null
@@ -1924,6 +1935,7 @@ export type Database = {
           telegram_user_id?: number | null
           telegram_username?: string | null
           trial_ends_at?: string | null
+          trial_started_at?: string | null
           username?: string
         }
         Relationships: []

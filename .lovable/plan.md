@@ -1,84 +1,95 @@
-## Что сломано
+# План: быстрая авторизация и фиксация согласия
 
-Во вкладках **CRM** и **ДЗ** в `/admin` пусто, в консоли сыпется `TypeError: Failed to fetch` от запросов через `api.sokratai.ru`.
+## Часть 1. Способы быстрой регистрации для РФ
 
-Причина одна и та же:
+### Что уже есть
+- Email + пароль
+- Telegram Login (через `TutorTelegramLoginButton` / `TelegramLoginButton`) — уже основной «быстрый» способ для РФ, работает без VPN через бота `@sokrat_rep_bot`
 
-- `src/components/admin/AdminCRM.tsx` — напрямую делает `supabase.from('chats').select(...)`, потом `chat_messages`, потом `profiles` из браузера.
-- `src/lib/adminHomeworkApi.ts` (используется `AdminHomeworkChats` → `AdminTutorList` / `AdminTutorAssignmentList` / …) — то же самое: 5–7 последовательных SELECT-ов из `homework_tutor_assignments`, `homework_tutor_student_assignments`, `homework_tutor_thread_messages`, `tutors`, `profiles` из браузера.
+### Что добавляем
+**1) Google OAuth (через Lovable Cloud — managed)**
+- Самый частый запрос. В РФ работает у большинства пользователей (Google Accounts не блокируется на уровне ISP, в отличие от части сервисов Google).
+- Используем нативную интеграцию Lovable Cloud: вызов `lovable.auth.signInWithOAuth("google", { redirect_uri: ... })`. API ключи не нужны — Cloud управляет credentials.
+- Кнопка появляется и на `/signup` (студент), и на `/signup?ref=tutor-landing&trial=7` (репетитор-trial), и на `/register-tutor`.
 
-Два независимых эффекта от этого:
+**2) VK ID (рекомендация для РФ как доп.)**
+- В Lovable Cloud / Supabase **нативно НЕ поддерживается** (только Google, Apple, SAML SSO нативно). Чтобы добавить VK ID, нужно либо:
+  - (a) подключить внешний Supabase и настроить через Custom OAuth provider — это серьёзная переделка инфраструктуры,
+  - (b) реализовать VK ID Web SDK на фронте + кастомная edge-функция, которая обменивает VK access_token на сессию Supabase через `signInWithIdToken`. Это ~2-3 дня работы + регистрация приложения в VK ID Console.
+- **Рекомендация:** в этой итерации **не делаем VK ID** (большой объём + риски), а ставим Google + усиливаем существующий Telegram login. Если конверсия Google окажется низкой — возвращаемся к VK отдельной задачей.
 
-1. **RLS режет данные.** Эти таблицы защищены RLS на уровне «свои данные» (студент видит свои чаты, репетитор — своих учеников). У админа нет policy «вижу всё», поэтому ответы возвращаются пустыми или частичными → «Чаты не найдены», «Нет активности».
-2. **`Failed to fetch` через прокси.** Запрос вида `chat_messages?chat_id=in.(...очень длинный список UUID)` улетает в URL, проходит через Cloudflare/Selectel прокси, и на больших объёмах роняется (длина URL, таймаут, лимит 1000 строк PostgREST). Отсюда красные ошибки в консоли.
+**Что НЕ добавляем и почему:**
+- Apple Sign In — для РФ-аудитории низкий охват среди репетиторов, основной flow — desktop Chrome.
+- Yandex ID — нативно не поддерживается, та же история что и VK.
+- Сбер ID / Mail.ru — нативно не поддерживается.
 
-При этом вкладка **Аналитика** работает — потому что она уже ходит через edge function `admin-analytics` с `service_role` (см. паттерн в `supabase/functions/admin-analytics/index.ts`: проверка `is_admin` RPC + второй клиент на service key).
+### Где разместить кнопки
+На обеих страницах (`SignUp.tsx` и `TutorSignupTrial.tsx`):
+1. Google (новая кнопка, primary social)
+2. Telegram (уже есть, остаётся)
+3. Email + пароль (форма ниже под разделителем «или»)
 
-## Решение
+Порядок: социальные сверху → разделитель → email-форма. Это стандарт и снижает трение.
 
-Полностью повторить паттерн `admin-analytics` для CRM и ДЗ. Никаких костылей с RLS-policy «admin sees all» — это менее безопасно и труднее аудитить. Edge function проверяет admin-роль один раз и затем читает что нужно service-role клиентом.
+### Технические детали (Google)
+- Lovable Cloud сам управляет Google OAuth — никаких ключей у пользователя не запрашиваем.
+- На странице используется `lovable.auth.signInWithOAuth("google", { redirect_uri: window.location.origin + "/tutor/home" })` (для tutor-trial) и `redirect_uri: ".../chat"` (для студента).
+- После редиректа `onAuthStateChange` в `TutorSignupTrial` уже ловит `SIGNED_IN` и применяет `applyTrialMarker` + `assign-tutor-role` нужно вызвать после OAuth-возврата (для tutor flow) — добавим в обработчик `SIGNED_IN`, если у пользователя ещё нет tutor-роли.
+- Для студенческого `SignUp.tsx` — после возврата делаем `claimPendingInvite()` и редирект на `/chat`.
 
-### 1. Новая edge function `admin-crm`
+## Часть 2. Чекбокс «Я согласен…» с фиксацией в БД
 
-`supabase/functions/admin-crm/index.ts`. Один POST-эндпоинт, тело: `{ search?: string, limit?: number, offset?: number }`.
+### Текущее состояние
+В `TutorSignupTrial.tsx`:
+- Поле `oferta` уже существует в state и схеме (`z.literal(true)`), но **в JSX чекбокса нет** — стоит дефолт `useState(true)`, т.е. согласие считается данным автоматически. Это юридически слабо.
 
-Делает на сервере (service-role, bypass RLS):
+### Что меняем
+**Frontend (TutorSignupTrial.tsx):**
+- Меняем дефолт `useState(false)`.
+- Рендерим реальный `<input type="checkbox">` с лейблом «Я согласен с [публичной офертой] и [политикой конфиденциальности]» и ссылками на `/offer` и `/privacy-policy` (открываются в новой вкладке).
+- Кнопка submit `disabled` пока `oferta !== true`.
+- Текст ошибки рядом, если пользователь снял галку.
 
-- Берёт все `chats` за разумное окно (по умолчанию последние 90 дней по `updated_at`, `limit` 500 — хватит для UI).
-- Одним запросом читает агрегаты по `chat_messages`: `count(*) filter (role='user')`, `max(created_at)` через RPC или `select chat_id, role, created_at` с серверной агрегацией.
-- Подтягивает `profiles` (`username`, `telegram_username`, `grade`) одним IN-запросом.
-- Возвращает уже готовый JSON в формате `ChatWithUser[]`, который сейчас ожидает `AdminCRM`.
+**Frontend (SignUp.tsx — студенческий):**
+- Добавляем такое же поле `consent`, чекбокс и валидацию.
 
-Также добавить `GET /messages?chatId=...` (или второй action в том же body) — для `AdminChatView`, чтобы и просмотр конкретной переписки шёл через service-role и не упирался в RLS.
-
-### 2. Новая edge function `admin-homework`
-
-`supabase/functions/admin-homework/index.ts`. Один эндпоинт с router-полем `action` в body, чтобы не плодить функции:
-
-- `action: "tutors"` → возвращает `TutorOverview[]` (то, что сейчас собирает `fetchTutorsOverview` — но за один проход, на сервере, без N+1 round-trip через прокси).
-- `action: "assignments", tutorId` → `AssignmentOverview[]`.
-- `action: "students", assignmentId` → `AssignmentStudentRow[]`.
-- `action: "thread", threadId` → сообщения треда + хедер (для `AdminHWThreadView`).
-
-Каждый action: проверка `is_admin` (общий хелпер в начале файла), затем чтение через service-role клиент.
-
-### 3. Переписать клиент
-
-- `src/components/admin/AdminCRM.tsx`: убрать прямые `supabase.from(...)` запросы, заменить на `supabase.functions.invoke('admin-crm', { body: { search } })`. Типы `ChatWithUser` оставить, ответ функции уже в этом формате.
-- `src/lib/adminHomeworkApi.ts`: четыре функции (`fetchTutorsOverview`, `fetchAssignmentsForTutor`, `fetchStudentsForAssignment`, `fetchThreadMessages`) превратить в тонкие обёртки вокруг `supabase.functions.invoke('admin-homework', { body: { action, ... } })`. Возвращаемые типы не меняются — компоненты `AdminTutorList`/`AdminTutorAssignmentList`/`AdminAssignmentStudentList`/`AdminHWThreadView` править не нужно.
-- `AdminChatView` (просмотр конкретного чата) — тоже перевести на `admin-crm` action `messages`.
-
-### 4. Безопасность
-
-- Обе функции **обязательно** проверяют `is_admin(auth.uid())` через service-role клиент **до** любых чтений. Без этого получится, что любой залогиненный пользователь сможет читать чужие чаты.
-- Никаких изменений в RLS-policy таблиц `chats`, `chat_messages`, `homework_tutor_*` — текущие ограничения для обычных пользователей остаются как есть.
-- Функции деплоятся с `verify_jwt = true` (default).
-
-### 5. Никаких изменений инфры
-
-Frontend bundle меняется → потребуется `deploy-sokratai` на VPS после мержа (правило `.claude/rules/95-production-deploy.md`). Edge functions деплоятся автоматически Lovable Cloud при push.
-
-## Что НЕ трогаем
-
-- `supabase/functions/admin-analytics/index.ts`, `admin-business-dashboard`, `admin-product-discovery` — они работают.
-- `AdminPayments` — отдельная вкладка, не упоминалась как сломанная (если там тоже direct-SELECT, можно отдельной итерацией).
-- RLS-policy на таблицах чатов и ДЗ — оставляем «вижу свои».
-- `src/lib/supabaseClient.ts`, прокси-конфигурация, `_shared/proxy-url.ts` — не относятся к проблеме.
-
-## Технические детали для реализации
-
-```text
-supabase/functions/
-  admin-crm/
-    index.ts          ← list chats + get messages (service-role, is_admin gate)
-  admin-homework/
-    index.ts          ← router: tutors | assignments | students | thread
-
-src/components/admin/AdminCRM.tsx           ← invoke('admin-crm')
-src/components/admin/AdminChatView.tsx      ← invoke('admin-crm', {action:'messages'})
-src/lib/adminHomeworkApi.ts                 ← invoke('admin-homework', {action})
+**База данных — миграция:**
+Добавляем в `profiles`:
 ```
+consent_accepted_at      timestamptz NULL
+consent_version          text NULL          -- например 'v1-2026-05'
+consent_source           text NULL          -- 'web-signup-tutor' | 'web-signup-student' | 'google-oauth' | 'telegram-oauth'
+```
+Индекса не нужно. NULL для существующих профилей (legacy — отдельная задача дать им принять при следующем входе, но сейчас вне scope).
 
-Шаблон auth-блока берём 1-в-1 из `supabase/functions/admin-analytics/index.ts` (lines 1–55): bearer → `getUser` → `rpc('is_admin')` → 403 либо service-role чтения.
+**Запись согласия:**
+- После успешного `auth.signUp` (email-flow) — делаем `update profiles set consent_accepted_at=now(), consent_version='v1-2026-05', consent_source=...`.
+- Для Google/Telegram OAuth — пользователь должен поставить галочку **до** клика по социальной кнопке. Если галка снята — кнопки disabled. После возврата с OAuth в `onAuthStateChange(SIGNED_IN)` пишем согласие в БД (флаг хранится в `sessionStorage` между редиректами, ключ `pending_consent_v1` с timestamp+source, читается и удаляется после записи).
 
-После мержа: `deploy-sokratai` на VPS (frontend изменился).
+**Edge function НЕ нужна** — RLS «Users can update their own profile» уже разрешает пользователю писать в свою строку.
+
+### Текстовка чекбокса
+> ☐ Я согласен с [публичной офертой](/offer) и [политикой конфиденциальности](/privacy-policy)
+
+Без галочки — кнопки регистрации (все три: Email, Google, Telegram) серые и неактивны.
+
+## Файлы, которые изменим
+
+**Создаём:**
+- `supabase/migrations/<timestamp>_add_profile_consent_columns.sql`
+
+**Редактируем:**
+- `src/pages/TutorSignupTrial.tsx` — рендер чекбокса, дефолт `false`, gating всех CTA, запись в БД, новая Google-кнопка
+- `src/pages/SignUp.tsx` — добавляем чекбокс согласия + Google-кнопка
+- `src/pages/RegisterTutor.tsx` — добавляем Google-кнопку (там форма для существующих flow)
+
+**Не трогаем:**
+- `TelegramLoginButton`, `TutorTelegramLoginButton` — внутренности; только обернём вызов проверкой согласия на стороне страницы
+- `src/integrations/supabase/client.ts`, `src/lib/supabaseClient.ts` — auto/hardcoded, не редактируем
+- Edge functions
+
+## Вопрос на согласование
+1. Подтверди, что **VK ID** в этой итерации **не делаем** (только Google + текущий Telegram).
+2. Подтверди, что согласие **обязательно** (CTA disabled без галки), а не «по умолчанию принято».
+
+После подтверждения переключаюсь в режим имплементации.
