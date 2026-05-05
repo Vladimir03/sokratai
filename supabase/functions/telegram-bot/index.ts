@@ -1245,6 +1245,11 @@ async function handleWebLogin(telegramUserId: number, telegramUsername: string |
     }
 
     // Update token with session data
+    const sessionData = {
+      access_token: session.access_token,
+      refresh_token: session.refresh_token,
+    };
+
     await supabase
       .from("telegram_login_tokens")
       .update({
@@ -1252,14 +1257,45 @@ async function handleWebLogin(telegramUserId: number, telegramUsername: string |
         user_id: profile.id,
         status: "verified",
         verified_at: new Date().toISOString(),
-        session_data: {
-          access_token: session.access_token,
-          refresh_token: session.refresh_token,
-        },
+        session_data: sessionData,
       })
       .eq("id", tokenData.id);
 
     console.log("Token verified successfully");
+
+    // ABSORB: when Telegram clients (especially mobile) re-use a CACHED
+    // deep-link param across separate t.me?start=... clicks, the bot keeps
+    // processing an OLDER token while the user's browser polls the LATEST
+    // one — the page hangs forever. Mark verified all OTHER pending tokens
+    // with the same client_id (browser-local UUID) so frontend's polling
+    // resolves regardless of which sibling Telegram actually delivered.
+    // Safe: client_id is browser-scoped; only pending tokens are touched.
+    if (tokenData.client_id) {
+      const { data: absorbed, error: absorbError } = await supabase
+        .from("telegram_login_tokens")
+        .update({
+          telegram_user_id: telegramUserId,
+          user_id: profile.id,
+          status: "verified",
+          verified_at: new Date().toISOString(),
+          session_data: sessionData,
+        })
+        .eq("client_id", tokenData.client_id)
+        .eq("status", "pending")
+        .neq("id", tokenData.id)
+        .select("id");
+
+      if (absorbError) {
+        console.error("Absorb sibling tokens failed:", absorbError);
+      } else if (absorbed && absorbed.length > 0) {
+        console.log(
+          "Absorbed sibling tokens for client_id",
+          tokenData.client_id,
+          "count:",
+          absorbed.length,
+        );
+      }
+    }
 
     await sendTelegramMessage(telegramUserId, `✅ Авторизация подтверждена!
 

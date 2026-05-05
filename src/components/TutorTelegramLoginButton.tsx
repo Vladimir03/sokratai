@@ -81,6 +81,30 @@ function clearStoredTokens() {
   }
 }
 
+/**
+ * Browser-local UUID. Sent on every token-create POST so the bot can absorb
+ * sibling pending tokens after verifying any one of them — solves the
+ * Telegram-cached-deep-link bug where Mobile Telegram re-sends an OLDER
+ * /start param even after page generates a fresh token.
+ */
+const CLIENT_ID_KEY = "sokrat_tg_client_id";
+
+function getOrCreateClientId(): string {
+  if (typeof window === "undefined") return "ssr";
+  try {
+    const existing = localStorage.getItem(CLIENT_ID_KEY);
+    if (existing && existing.length >= 16) return existing;
+    const fresh =
+      typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+        ? crypto.randomUUID()
+        : `tgcid-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+    localStorage.setItem(CLIENT_ID_KEY, fresh);
+    return fresh;
+  } catch {
+    return `tgcid-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+  }
+}
+
 interface TutorTelegramLoginButtonProps {
   botName?: string;
   className?: string;
@@ -289,12 +313,16 @@ const TutorTelegramLoginButton = ({
     setStatus("waiting");
 
     try {
+      const clientId = getOrCreateClientId();
       const response = await fetch(
         `${SUPABASE_URL}/functions/v1/telegram-login-token?action=create`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ intended_role: "tutor" })
+          body: JSON.stringify({
+            intended_role: "tutor",
+            client_id: clientId,
+          })
         }
       );
 

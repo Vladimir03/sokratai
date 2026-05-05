@@ -37,20 +37,33 @@ Deno.serve(async (req) => {
       let actionType = "login";
       let userId = null;
       let intendedRole = null;
+      let clientId = null;
 
-      // Try to parse body for action type, user_id, and intended_role
+      // Try to parse body for action type, user_id, intended_role, client_id
       try {
         const body = await req.json();
         actionType = body.action || "login";
         userId = body.user_id || null;
         intendedRole = body.intended_role || null;
-        console.log("Creating token with action:", actionType, "user_id:", userId, "intended_role:", intendedRole);
+        clientId = typeof body.client_id === "string" && body.client_id.length > 0
+          ? body.client_id.slice(0, 64) // length-cap as defensive measure
+          : null;
+        console.log(
+          "Creating token with action:",
+          actionType,
+          "user_id:",
+          userId,
+          "intended_role:",
+          intendedRole,
+          "client_id:",
+          clientId,
+        );
       } catch {
         console.log("No body or invalid JSON, defaulting to login action");
       }
-      
+
       const token = generateToken();
-      
+
       const { data, error } = await supabase
         .from("telegram_login_tokens")
         .insert({
@@ -59,6 +72,7 @@ Deno.serve(async (req) => {
           action_type: actionType,
           user_id: userId, // Store user_id for link actions
           intended_role: intendedRole, // Store intended role for tutor registration
+          client_id: clientId, // Browser-local UUID for stale-token absorb
           expires_at: new Date(Date.now() + 5 * 60 * 1000).toISOString(), // 5 minutes
         })
         .select()
