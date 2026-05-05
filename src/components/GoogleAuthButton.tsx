@@ -1,34 +1,41 @@
 import { useState } from "react";
-import { supabase } from "@/lib/supabaseClient";
 import { stashPendingConsent, type ConsentSource } from "@/lib/consent";
 import { toast } from "sonner";
 
 /**
- * Native Supabase OAuth flow — bypasses `oauth.lovable.app` broker.
+ * Custom Google OAuth flow (RU-bypass) — talks to our own edge functions
+ * `oauth-google-init` + `oauth-google-callback` on `api.sokratai.ru`,
+ * NOT to `oauth.lovable.app` and NOT to Supabase's native
+ * `auth.signInWithOAuth({ provider: "google" })`.
  *
- * History: the auto-generated Lovable component used `createLovableAuth({
- * oauthBrokerUrl: "https://oauth.lovable.app/initiate" })`. From RU networks
- * without VPN that endpoint returns 403 Forbidden (Cloudflare edge filtering)
- * — exactly the same RU-bypass class of issue we solved for `*.supabase.co`
- * by routing through our own Selectel Moscow VPS at `api.sokratai.ru`.
+ * History of this component:
+ *   v1: createLovableAuth({ oauthBrokerUrl: "https://oauth.lovable.app/initiate" })
+ *       → 403 Forbidden from Cloudflare edge for RU IPs without VPN.
+ *   v2: supabase.auth.signInWithOAuth({ provider: "google" })
+ *       → fixes oauth.lovable.app block, but Supabase forces redirect_uri
+ *         to `<project>.supabase.co/auth/v1/callback` (RU-blocked) → after
+ *         Google consent the browser couldn't reach Supabase's callback.
+ *   v3 (this): GET https://api.sokratai.ru/functions/v1/oauth-google-init
+ *       → 302 to Google with redirect_uri=api.sokratai.ru/.../callback
+ *       → Google → user → Google → 302 to api.sokratai.ru/.../callback
+ *       → edge function exchanges code, mints Supabase session via magic-link
+ *         + verifyOtp pattern, redirects to redirectTo with tokens in URL
+ *         hash. supabase-js auto-detects (`detectSessionInUrl: true`).
+ *       Both legs are RU-friendly: user-facing traffic stays on Selectel
+ *       Moscow proxy; server-to-server token exchange runs from edge
+ *       function host, no RU blockage at all.
  *
- * `supabase.auth.signInWithOAuth({ provider: "google" })` constructs a URL
- * like `${SUPABASE_URL}/auth/v1/authorize?provider=google&redirect_to=...`.
- * Our `supabase` client is hardcoded to `https://api.sokratai.ru`
- * (see `src/lib/supabaseClient.ts`), so the OAuth init hits the proxy and
- * RU users complete the flow without VPN.
- *
- * Required ops setup (one-time, on Vladimir's side):
- *   - Google Cloud Console → OAuth client → Authorized redirect URIs:
- *     add `https://api.sokratai.ru/auth/v1/callback`
- *   - Supabase Dashboard → Authentication → URL Configuration:
- *     Site URL = `https://sokratai.ru`
- *     Additional Redirect URLs include:
- *       `https://sokratai.ru/**`
- *       `https://sokratai.lovable.app/**`
- *   - Supabase Dashboard → Authentication → Providers → Google: enabled +
- *     correct Client ID / Client Secret.
+ * Required ops setup:
+ *   - Google Cloud Console → OAuth client (Web application) → Authorised
+ *     redirect URIs: `https://api.sokratai.ru/functions/v1/oauth-google-callback`
+ *   - Supabase Edge Function secrets:
+ *       GOOGLE_OAUTH_CLIENT_ID
+ *       GOOGLE_OAUTH_CLIENT_SECRET
+ *       OAUTH_STATE_SECRET   (any 32+ char random string)
  */
+
+const OAUTH_INIT_URL =
+  "https://api.sokratai.ru/functions/v1/oauth-google-init";
 
 interface GoogleAuthButtonProps {
   /** Where to send the user after Google returns. Absolute origin is added automatically. */
@@ -52,32 +59,22 @@ export default function GoogleAuthButton({
 }: GoogleAuthButtonProps) {
   const [loading, setLoading] = useState(false);
 
-  const handleClick = async () => {
+  const handleClick = () => {
     if (!enabled || loading) return;
     setLoading(true);
     try {
       // Stash consent intent BEFORE redirect — applied on SIGNED_IN return.
       stashPendingConsent(consentSource);
 
-      const { error } = await supabase.auth.signInWithOAuth({
-        provider: "google",
-        options: {
-          redirectTo: `${window.location.origin}${redirectPath}`,
-          queryParams: { prompt: "select_account" },
-        },
-      });
+      // Build absolute redirectTo so the edge function's allow-list check
+      // can validate the origin (sokratai.ru / sokratai.lovable.app /
+      // localhost only — open-redirect protection).
+      const absoluteRedirectTo = `${window.location.origin}${redirectPath}`;
+      const initUrl = new URL(OAUTH_INIT_URL);
+      initUrl.searchParams.set("redirectTo", absoluteRedirectTo);
 
-      if (error) {
-        toast.error("Не удалось войти через Google. Попробуйте ещё раз.");
-        console.error("[google-auth] error", error);
-        setLoading(false);
-        return;
-      }
-
-      // signInWithOAuth navigates the page to /auth/v1/authorize → Google →
-      // back to redirectTo. supabase-js auto-detects tokens in URL hash on
-      // return (`detectSessionInUrl: true` is the default). No setSession
-      // call needed in this component.
+      window.location.href = initUrl.toString();
+      // Page will navigate; nothing else to do here.
     } catch (e) {
       console.error("[google-auth] threw", e);
       toast.error("Не удалось войти через Google.");
