@@ -13,6 +13,7 @@ export default function ProductTour({
   videoPlaceholderText,
   videoPlaceholderCaption,
   videoSrc,
+  videoSlot,
   zigzag,
   backgroundSurface,
 }: ProductTourProps) {
@@ -119,11 +120,13 @@ export default function ProductTour({
 
         {/* Video column */}
         <div className={videoOrderClass}>
-          <TourVideo
-            videoSrc={videoSrc}
-            placeholderText={videoPlaceholderText}
-            placeholderCaption={videoPlaceholderCaption}
-          />
+          {videoSlot ?? (
+            <TourVideo
+              videoSrc={videoSrc}
+              placeholderText={videoPlaceholderText}
+              placeholderCaption={videoPlaceholderCaption}
+            />
+          )}
         </div>
       </div>
     </section>

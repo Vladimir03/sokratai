@@ -27,6 +27,7 @@ export interface ProductTourProps {
   videoPlaceholderText: string;
   videoPlaceholderCaption: string;
   videoSrc?: string;
+  videoSlot?: ReactNode;
   zigzag: "text-left" | "text-right";
   backgroundSurface?: boolean;
 }

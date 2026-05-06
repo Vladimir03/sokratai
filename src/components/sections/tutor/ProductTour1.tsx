@@ -3,6 +3,7 @@ import { TrendingUp } from "lucide-react";
 import { trackTutorLandingGoal } from "@/lib/tutorLandingAnalytics";
 
 import ProductTour from "./ProductTour";
+import Tour1Video from "./Tour1Video";
 
 export default function ProductTour1() {
   return (
@@ -45,6 +46,7 @@ export default function ProductTour1() {
       videoPlaceholderText="AI-проверка ДЗ + сократовский диалог"
       videoPlaceholderCaption="Видео 25 сек — добавится после записи"
       videoSrc={undefined}
+      videoSlot={<Tour1Video />}
       zigzag="text-left"
     />
   );
