@@ -168,6 +168,76 @@ Deno.serve(async (req) => {
       return jsonResponse(200, { success: true });
     }
 
+    // Unlinks a Supabase auth identity (currently only `google`). Telegram is
+    // a custom flow in this project and is NOT registered as a Supabase
+    // identity — unlinking Telegram is out of scope here (Phase 5 spec).
+    //
+    // Last-identity guard (server-side mirror of the UI guard):
+    //   - if removing the target leaves user with 0 Supabase identities AND
+    //     no Telegram fallback (`profiles.telegram_user_id IS NULL`), reject
+    //     with 400 LAST_IDENTITY so the user is never locked out.
+    //   - `email` identity in Supabase exists iff a password is set, so
+    //     `remaining = [email]` is always enough to log in.
+    if (action === "unlink-identity") {
+      const provider = typeof body.provider === "string" ? body.provider : "";
+      if (provider !== "google") {
+        return jsonResponse(400, { error: "Provider not supported", code: "UNSUPPORTED_PROVIDER" });
+      }
+
+      const { data: getUserData, error: getUserError } = await supabaseAdmin.auth.admin
+        .getUserById(user.id);
+      if (getUserError || !getUserData?.user) {
+        console.error("tutor-account unlink-identity get-user error:", {
+          user_id: user.id,
+          error: getUserError,
+        });
+        return jsonResponse(500, { error: "Failed to load identities" });
+      }
+
+      const identities = getUserData.user.identities ?? [];
+      const targetIdentity = identities.find((i) => i.provider === provider);
+      if (!targetIdentity) {
+        return jsonResponse(404, { error: "IDENTITY_NOT_FOUND" });
+      }
+
+      const remaining = identities.filter((i) => i.identity_id !== targetIdentity.identity_id);
+      let hasOtherLoginMethod = remaining.length > 0;
+
+      // If no other Supabase identity remains, check the Telegram custom-flow
+      // fallback before rejecting. Telegram-linked users can still log in via
+      // bot deep-link even without any Supabase identity.
+      if (!hasOtherLoginMethod) {
+        const { data: profileRow } = await supabaseAdmin
+          .from("profiles")
+          .select("telegram_user_id")
+          .eq("id", user.id)
+          .maybeSingle();
+        hasOtherLoginMethod = Boolean(profileRow?.telegram_user_id);
+      }
+
+      if (!hasOtherLoginMethod) {
+        return jsonResponse(400, {
+          error: "Установи пароль или привяжи другой способ входа.",
+          code: "LAST_IDENTITY",
+        });
+      }
+
+      const { error: deleteError } = await supabaseAdmin.auth.admin.deleteIdentity(
+        targetIdentity,
+      );
+      if (deleteError) {
+        // Don't log targetIdentity (contains identity_id) — guardrail.
+        console.error("tutor-account unlink-identity delete error:", {
+          user_id: user.id,
+          provider,
+          error_message: deleteError.message,
+        });
+        return jsonResponse(500, { error: deleteError.message || "Failed to unlink identity" });
+      }
+
+      return jsonResponse(200, { success: true });
+    }
+
     return jsonResponse(400, { error: "Unknown action" });
   } catch (error) {
     console.error("tutor-account unhandled error:", error);

@@ -37,9 +37,10 @@ Phase 4 (P1): Google OAuth (added v0.2; v0.4 — aligned with shipped RU-bypass 
 ├── TASK-18 useUserIdentities + 3-state Security    [Claude]     ✅ Done (incl. partial
 │                                                                  TASK-19 backend:
 │                                                                  set-password-google-only)
-└── TASK-19 LoginProvidersSection + remaining actions [Claude]    pending (unlink-identity
-        (unlink-identity, ⚠️ RU-bypass linkIdentity)                + LoginProvidersSection
-                                                                    UI + RU-bypass link path)
+└── TASK-19 LoginProvidersSection + unlink-identity [Claude]     ✅ Done partial (UI + unlink
+                                                                    server). ⚠️ Google link
+                                                                    для RU + Telegram link/unlink
+                                                                    остаются deferred.
 ```
 
 Codex review после каждой фазы (`npm run lint && npm run build && npm run smoke-check` предварительно зелёный).
@@ -508,6 +509,13 @@ Codex review после каждой фазы (`npm run lint && npm run build &&
 **Agent:** Claude Code
 **Files:** `src/components/tutor/profile/LoginProvidersSection.tsx` (новый), `src/pages/tutor/TutorProfile.tsx` (модифицировать — подключить), `supabase/functions/tutor-account/index.ts` (модифицировать — добавить 2 actions)
 **AC:** AC-12, AC-13
+**Status:** ✅ Done частично (2026-05-06) — `LoginProvidersSection.tsx` создан, подключён в `TutorProfile.tsx` под `SecuritySection`. `tutor-account` action `unlink-identity` добавлен (только provider=`google`; Telegram → 400 `UNSUPPORTED_PROVIDER`). Двойной last-identity guard работает: UI дизейблит «Отвязать» когда `totalLoginMethods <= 1 && !hasEmailPassword`, server повторно валидирует через `getUserById` + filter remaining + Telegram fallback check (`profiles.telegram_user_id`) → 400 `LAST_IDENTITY` если всё пусто. `set-password-google-only` уже шипнут в TASK-18.
+
+**⚠️ Известные ограничения** (deferred work — не fail'ит шипление, но AC-12 не пройдёт для RU-репетиторов до фикса):
+1. **Google link для RU users** — `supabase.auth.linkIdentity({provider:'google'})` форсит redirect_uri `<project>.supabase.co/auth/v1/callback`, заблокированный в РФ. Кнопка «Привязать Google» работает только для non-RU юзеров. Custom RU-bypass: расширить `oauth-google-init` принимать `mode=link&user_id=<auth.uid()>` (защищённый JWT), `oauth-google-callback` — вместо magic-link verifyOtp вызывать `supabaseAdmin.auth.admin.updateUserById(...)` с обновлением identities, либо использовать новый Supabase admin endpoint для linking. Без этого link для RU-репетиторов ломается на Supabase callback.
+2. **Telegram link/unlink** — рендерится disabled с TODO tooltip «Скоро будет доступно». Telegram в этом проекте не Supabase identity; linking требует переноса логики `TelegramLoginButton` в profile-context (новый deep-link return path); unlinking требует решения по очистке `profiles.telegram_user_id` + bot-side state. Phase 5 spec.
+
+**Что делает:**
 
 **Что делает:**
 

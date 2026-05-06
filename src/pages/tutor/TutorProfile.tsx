@@ -4,6 +4,7 @@ import { toast } from 'sonner';
 
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
+import { LoginProvidersSection } from '@/components/tutor/profile/LoginProvidersSection';
 import { SecuritySection } from '@/components/tutor/profile/SecuritySection';
 import { SubjectsMultiSelect } from '@/components/tutor/profile/SubjectsMultiSelect';
 import { TutorIdentitySection } from '@/components/tutor/profile/TutorIdentitySection';
@@ -50,6 +51,8 @@ export default function TutorProfile() {
           <TutorSubjectsSection profile={profile} />
 
           <SecuritySection />
+
+          <LoginProvidersSection />
         </div>
       )}
     </div>

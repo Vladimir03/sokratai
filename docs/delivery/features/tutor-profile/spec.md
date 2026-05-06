@@ -531,7 +531,7 @@ Manual smoke (обязательно):
 - [x] TASK-16: Google credentials в Google Cloud Console + secrets в Supabase Edge Functions (`GOOGLE_OAUTH_CLIENT_ID`/`_SECRET`/`OAUTH_STATE_SECRET`); Authorized redirect URI = `api.sokratai.ru/.../oauth-google-callback` (НЕ Supabase native callback). Provider в Supabase Dashboard остаётся **disabled** — мы его не используем.
 - [x] TASK-17: `GoogleAuthButton.tsx` (custom RU-bypass) интегрирован в `Login.tsx`, `SignUp.tsx`, `TutorLogin.tsx`, `TutorSignupTrial.tsx`, `RegisterTutor.tsx`. Edge functions `oauth-google-init` + `oauth-google-callback` задеплоены. `AuthCallback.tsx` **не создан и не требуется** (см. v0.4 changelog).
 - [x] TASK-18: `useUserIdentities` хук + 3-state `SecuritySection` (A/B/C) + amber-CTA «Установить пароль» (включает small TASK-19 bleed-in: `set-password-google-only` action в `tutor-account` для AC-13 testability).
-- [ ] TASK-19: `LoginProvidersSection` + link/unlink (через `tutor-account` для last-identity guard) + остаток `tutor-account` (`unlink-identity` action). ⚠️ Link path требует RU-bypass расширения `oauth-google-init` (mode=link) — см. tasks.md TASK-19 detail. `set-password-google-only` уже сделан в TASK-18.
+- [x] TASK-19: `LoginProvidersSection` + `tutor-account` action `unlink-identity` (двойной last-identity guard: UI + server c Telegram fallback check). ⚠️ Google link для RU-юзеров и Telegram link/unlink remain deferred — см. tasks.md TASK-19 «Известные ограничения».
 
 ---
 
