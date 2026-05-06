@@ -51,6 +51,8 @@ project_id = "vrsseotrfmsxpbciyqzc"
     verify_jwt = false
   [functions.trainer-submit]
     verify_jwt = false
+  [functions.tutor-account]
+    verify_jwt = true
   [functions.tutor-manual-add-student]
     verify_jwt = true
   [functions.tutor-update-student]

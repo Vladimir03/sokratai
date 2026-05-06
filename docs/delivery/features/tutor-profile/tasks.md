@@ -296,8 +296,9 @@ Codex review после каждой фазы (`npm run lint && npm run build &&
 
 **Job:** P1.3
 **Agent:** Claude Code
-**Files:** `supabase/functions/tutor-account/index.ts` (новый)
+**Files:** `supabase/functions/tutor-account/index.ts` (новый), `supabase/config.toml` (добавлен `[functions.tutor-account] verify_jwt = true`), `.github/workflows/deploy-supabase-functions.yml` (добавлен `supabase functions deploy tutor-account`)
 **AC:** AC-2, AC-3
+**Status:** ✅ Done (2026-05-06) — `tutor-account` зеркалит `student-account`, добавлен role-check через RPC `is_tutor(_user_id)` после JWT auth (non-tutor → 403). `update-email` (regex strict, `email_confirm: true`) и `update-password` (min 8 chars). Не логирует email/password. Lint clean, build green. Code review (ChatGPT-5.5) пройден после фикса BLOCKER 2 (config.toml + workflow).
 
 **Что делает:** зеркалит `supabase/functions/student-account/index.ts`. Actions:
 - `update-email` — `supabaseAdmin.auth.admin.updateUserById(user.id, { email, email_confirm: true })`.
@@ -317,6 +318,7 @@ Codex review после каждой фазы (`npm run lint && npm run build &&
 **Agent:** Claude Code
 **Files:** `src/components/tutor/profile/SecuritySection.tsx` (новый), `src/pages/tutor/TutorProfile.tsx` (модифицировать — подключить секцию)
 **AC:** AC-2, AC-3
+**Status:** ✅ Done (2026-05-06) — Email row (read-only display + inline form), Password row (collapsed → 2-input form, ≥ 8 chars + match), Telegram row read-only (`@username` из `profiles.telegram_username`). Wrapped-error guard (`data?.error`) добавлен в оба submit'а после code review (BLOCKER 1). `text-base` 16px на input, `min-h-[44px]` на всё, `autoComplete="new-password"` на password. После `update-email` — `await supabase.auth.refreshSession()` до toast.
 
 **Что делает:**
 - Email: current из `session.user.email` (read-only) + кнопка «Изменить» → inline form с Input (type=email) + Сохранить. Submit через `supabase.functions.invoke('tutor-account', { body: { action: 'update-email', email } })`.
@@ -337,7 +339,8 @@ Codex review после каждой фазы (`npm run lint && npm run build &&
 **Job:** P1.3
 **Agent:** Claude Code
 **Files:** `src/components/tutor/profile/SubjectsMultiSelect.tsx` (новый), `src/pages/tutor/TutorProfile.tsx` (модифицировать)
-**AC:** —
+**AC:** AC-1b
+**Status:** ✅ Done (2026-05-06) — multi-select chips из `SUBJECTS`, `aria-pressed`, keyboard Enter/Space, `min-h-[44px]`. `toggleSubject` теперь канонизирует output по порядку `SUBJECTS` каталога (BLOCKER 3 фикс — save-order детерминированный, не toggle-history-зависимый). `serializeSubjects` в `TutorProfile.tsx` тоже sort'ит по canonical order для стабильного dirty-check. AC-1b в spec уточнён: canonical id для математики — `maths` (не `math`); save производит `['maths','physics']` regardless of click order.
 
 **Что делает:**
 - Компонент: label «Предметы, которые я преподаю» + ряд чипов из `SUBJECTS` (из `src/types/homework.ts`).

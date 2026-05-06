@@ -41,6 +41,7 @@ jobs:
           supabase functions deploy homework-api
           supabase functions deploy push-subscribe
           supabase functions deploy homework-reminder --no-verify-jwt
+          supabase functions deploy tutor-account
           supabase functions deploy tutor-manual-add-student
           supabase functions deploy tutor-update-student
           supabase functions deploy oauth-google-init --no-verify-jwt

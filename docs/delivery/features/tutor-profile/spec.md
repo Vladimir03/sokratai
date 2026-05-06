@@ -7,6 +7,7 @@
 
 ## Changelog
 
+- **v0.3.1 (2026-05-06, post Phase 2 review)** — AC-1b clarification после ChatGPT-5.5 review TASK-11..13: canonical subject id для математики — `maths` (не `math`); save-order теперь явно canonical-по-SUBJECTS-каталогу (не toggle-history). Соответствует `SubjectsMultiSelect.toggleSubject` + `serializeSubjects` в `TutorProfile.tsx`. Добавлен `tutor-account` в `supabase/config.toml` (`verify_jwt = true`) и в GitHub deploy workflow. Добавлен wrapped-error guard (`data?.error`) на оба submit'а в `SecuritySection`.
 - **v0.3 (2026-05-05, post Phase 1 review)** — три fix'а после ChatGPT-5.5 review:
   1. **AC-1 split:** AC-1a (Phase 1: имя + gender + аватар + UPSERT 200 + аватар в tutor chrome) и AC-1b (Phase 2: + multi-select предметов в той же форме). Subjects больше не часть Phase 1 minimum.
   2. **Avatar entry point:** канонически живёт в AppFrame chrome (`SideNav` desktop + `MobileTopBar` mobile), не в `Navigation.tsx` (это student chrome — невидим внутри `/tutor/*` AppFrame). Обновлён §6 + mockup S1.
@@ -354,7 +355,7 @@ CREATE POLICY "avatars_delete_own" ON storage.objects
 ## Acceptance Criteria (testable)
 
 - **AC-1a (Phase 1):** Репетитор, залогиненный впервые, переходит на `/tutor/profile`, видит форму с пустым именем и placeholder-аватаром. Сохраняет имя «Вадим Коршунов», задаёт пол (или оставляет «не указано»), загружает файл JPEG 3 МБ. Файл сжимается клиентом до ≤ 2 МБ 512×512. `UPSERT tutors` возвращает 200. Аватар появляется **в tutor chrome** (`SideNav` footer на desktop + `MobileTopBar` справа на mobile) после refetch — без дополнительных действий.
-- **AC-1b (Phase 2):** В той же форме `/tutor/profile` доступна секция «Предметы, которые я преподаю» — multi-select из `SUBJECTS` через TASK-13 `SubjectsMultiSelect`. Репетитор toggle'ит «Физика» + «Математика» → save → `tutors.subjects = ['physics','math']`. Дефолтный предмет в `TutorHomeworkCreate` соответствует первому выбранному.
+- **AC-1b (Phase 2):** В той же форме `/tutor/profile` доступна секция «Предметы, которые я преподаю» — multi-select из `SUBJECTS` через TASK-13 `SubjectsMultiSelect`. Репетитор toggle'ит «Физика» + «Математика» → save → `tutors.subjects = ['maths','physics']` (canonical-order по `SUBJECTS` списку: `maths` идёт первым в каталоге, не в порядке клика). Canonical id для математики — `maths`, не `math` (см. `src/types/homework.ts:11`); legacy `math` обрабатывается отдельно через `LEGACY_SUBJECT_LABELS`. Дефолтный предмет в `TutorHomeworkCreate` соответствует первому выбранному.
 - **AC-2:** Репетитор меняет email с `old@example.com` на `new@example.com`. Edge function `tutor-account` action=`update-email` возвращает 200. В `auth.users` поле `email` обновлено. Новое письмо verification **не** отправляется (`email_confirm: true`, зеркалим student-account).
 - **AC-3:** Репетитор меняет пароль на строку длиной 8+ символов. Логин с новым паролем работает, старый — возвращает 401.
 - **AC-4:** Ученик, открывающий guided-homework-чат, видит сообщения с `role: 'tutor'` с аватаром и именем репетитора слева/сверху (как в Telegram на скрине в тикете). Для AI-сообщений аватара нет, label прежний. Для legacy-тредов без `tutor_profile` в response — fallback «Репетитор» без аватара, UI не падает.

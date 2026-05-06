@@ -1,6 +1,15 @@
+import { useEffect, useMemo, useState } from 'react';
+import { Loader2 } from 'lucide-react';
+import { toast } from 'sonner';
+
+import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
+import { SecuritySection } from '@/components/tutor/profile/SecuritySection';
+import { SubjectsMultiSelect } from '@/components/tutor/profile/SubjectsMultiSelect';
 import { TutorIdentitySection } from '@/components/tutor/profile/TutorIdentitySection';
-import { useTutorProfile } from '@/hooks/useTutorProfile';
+import { useTutorProfile, useUpsertTutorProfile } from '@/hooks/useTutorProfile';
+import type { TutorProfile as TutorProfileModel } from '@/lib/tutorProfileApi';
+import { SUBJECTS } from '@/types/homework';
 
 /**
  * /tutor/profile — single page combining all profile sections.
@@ -13,12 +22,13 @@ import { useTutorProfile } from '@/hooks/useTutorProfile';
  * intentionally does NOT re-wrap any of that — it just exports its content.
  *
  * Sections render top-to-bottom in spec order:
- *   1. Identity   (TASK-5, this commit)
- *   2. Subjects   (TASK-13, placeholder below)
- *   3. Security   (TASK-12, placeholder below)
+ *   1. Identity   (TASK-5)
+ *   2. Subjects   (TASK-13)
+ *   3. Security   (TASK-12 — email/password rows, Telegram read-only)
  */
 export default function TutorProfile() {
   const profileQuery = useTutorProfile();
+  const profile = profileQuery.data ?? null;
 
   return (
     <div className="mx-auto w-full max-w-2xl px-4 py-8">
@@ -35,23 +45,97 @@ export default function TutorProfile() {
         <ProfileError message={(profileQuery.error as Error)?.message ?? 'Не удалось загрузить профиль'} />
       ) : (
         <div className="flex flex-col gap-4">
-          <TutorIdentitySection profile={profileQuery.data ?? null} />
+          <TutorIdentitySection profile={profile} />
 
-          {/*
-            TODO TASK-13: <SubjectsMultiSelect /> — secondary section using
-            the same useUpsertTutorProfile mutation. Will read profile?.subjects
-            and write back via upsert with name/gender unchanged.
-          */}
+          <TutorSubjectsSection profile={profile} />
 
-          {/*
-            TODO TASK-12: <SecuritySection /> — email + password rows backed
-            by the new tutor-account edge function. Phase 4 (TASK-18) will
-            extend it into a 3-state Email/Password/Google branch.
-          */}
+          <SecuritySection />
         </div>
       )}
     </div>
   );
+}
+
+interface TutorSubjectsSectionProps {
+  profile: TutorProfileModel | null;
+}
+
+function TutorSubjectsSection({ profile }: TutorSubjectsSectionProps) {
+  const upsertMutation = useUpsertTutorProfile();
+  const savedSubjectsKey = useMemo(
+    () => serializeSubjects(profile?.subjects ?? []),
+    [profile?.subjects],
+  );
+  const savedSubjects = useMemo(() => parseSubjects(savedSubjectsKey), [savedSubjectsKey]);
+  const [subjectsDraft, setSubjectsDraft] = useState<string[]>(savedSubjects);
+
+  useEffect(() => {
+    setSubjectsDraft(savedSubjects);
+  }, [savedSubjects]);
+
+  const draftSubjectsKey = useMemo(() => serializeSubjects(subjectsDraft), [subjectsDraft]);
+  const isDirty = draftSubjectsKey !== savedSubjectsKey;
+  const isSaving = upsertMutation.isPending;
+  const canSubmit = isDirty && !isSaving;
+
+  const handleSaveSubjects = async () => {
+    if (!canSubmit) return;
+
+    const savedName = profile?.name?.trim() ?? '';
+    if (!savedName) {
+      toast.error('Сначала заполните имя и сохраните профиль');
+      return;
+    }
+
+    try {
+      await upsertMutation.mutateAsync({
+        name: savedName,
+        gender: profile?.gender ?? null,
+        subjects: subjectsDraft,
+      });
+      toast.success('Предметы сохранены');
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Не удалось сохранить предметы';
+      toast.error(message);
+    }
+  };
+
+  return (
+    <section aria-label="Предметы" className="rounded-lg border border-border bg-card p-4 sm:p-6">
+      <SubjectsMultiSelect value={subjectsDraft} onChange={setSubjectsDraft} />
+
+      <div className="mt-5 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-end">
+        <Button
+          type="button"
+          disabled={!canSubmit}
+          onClick={handleSaveSubjects}
+          className="min-h-[44px] gap-2 bg-accent text-white hover:bg-accent/90 sm:min-w-[160px]"
+        >
+          {isSaving && <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />}
+          Сохранить
+        </Button>
+      </div>
+    </section>
+  );
+}
+
+// Canonical-order serialization keeps the dirty-check stable regardless of
+// how subjects are stored in `tutors.subjects` (DB array order is not
+// guaranteed to match SUBJECTS list order). Pair this with the matching
+// canonicalization inside SubjectsMultiSelect.toggleSubject.
+function serializeSubjects(subjects: string[]): string {
+  const set = new Set(subjects);
+  const canonical = SUBJECTS.filter((subject) => set.has(subject.id)).map(
+    (subject) => subject.id,
+  );
+  return JSON.stringify(canonical);
+}
+
+function parseSubjects(subjectsKey: string): string[] {
+  const parsed = JSON.parse(subjectsKey) as unknown;
+  return Array.isArray(parsed)
+    ? parsed.filter((subject): subject is string => typeof subject === 'string')
+    : [];
 }
 
 function ProfileSkeleton() {
