@@ -27,9 +27,9 @@ Phase 2 (P1): Security + Subjects
 ├── TASK-12 SecuritySection (email + password)   [Claude Code]       deps: TASK-11
 └── TASK-13 SubjectsMultiSelect + integration    [Claude Code]       deps: TASK-2, TASK-5
 
-Phase 3 (P1): Telegram photo auto-prefill
-├── TASK-14 Edge fn tutor-telegram-avatar-prefill [Claude Code]      deps: Phase 1
-└── TASK-15 TelegramLoginButton integration       [Claude Code]      deps: TASK-14
+Phase 3 (P1): Telegram avatar auto-prefill
+├── TASK-14 Bot-side prefill in telegram-bot      [Claude Code]      deps: Phase 1
+└── TASK-15 TelegramLoginButton no-op             [Claude Code]      deps: TASK-14
 
 Phase 4 (P1): Google OAuth (added v0.2)
 ├── TASK-16 Google provider config (devops)        [Vladimir]         deps: Phase 2
@@ -357,52 +357,49 @@ Codex review после каждой фазы (`npm run lint && npm run build &&
 
 ## Phase 3 (P1)
 
-### TASK-14: Edge function tutor-telegram-avatar-prefill
+### TASK-14: Bot-side Telegram avatar prefill
 
 **Job:** P1.3, P2.2
 **Agent:** Claude Code
-**Files:** `supabase/functions/tutor-telegram-avatar-prefill/index.ts` (новый)
+**Files:** `supabase/functions/telegram-bot/index.ts` (high-risk, минимальный diff)
 **AC:** AC-7
+**Status:** Implemented 2026-05-06 via bot-side architecture review fix.
 
 **Что делает:**
-- `POST` body `{ telegram_photo_url: string }`.
-- Проверки:
-  1. Tutor role (`has_role`).
-  2. `SELECT avatar_url FROM tutors WHERE user_id = auth.uid()` — если не NULL → return 200 `{ skipped: true }` (идемпотентность).
+- Выполняется после успешного `handleWebLogin` для tutor.
+- Проверяет `SELECT avatar_url FROM tutors WHERE user_id = <profile.id>` — если не NULL → skip (идемпотентность).
 - Flow:
-  1. `fetch(telegram_photo_url)` с таймаутом 10 сек.
-  2. Если 4xx/5xx или timeout → return 200 `{ skipped: true, reason: 'tg_fetch_failed' }` (не fail'ить login).
-  3. Конвертировать в JPEG через `Deno.build.os` + sharp / Image API (или переиспользовать canvas-compatible wasm-библиотеку уже в проекте). Если нет — просто сохранить как есть (TG обычно даёт JPEG).
-  4. Size check: ≤ 2 МБ. Иначе downscale (если нет compression возможности — save as-is, наш `public` bucket примет до 2 МБ).
-  5. Upload в `avatars/<user_id>/<uuid>.jpg` через service role.
-  6. `UPDATE tutors.avatar_url = <path>`.
+  1. `getUserProfilePhotos(user_id, limit=1)` через Bot API.
+  2. `getFile(file_id)` через Bot API.
+  3. `fetch https://api.telegram.org/file/bot<TOKEN>/<file_path>` server-side с таймаутом 10 сек.
+  4. Если 4xx/5xx/timeout/no-photo/non-image/>2MB → silent skip (не fail'ить login).
+  5. Upload в `avatars/<user_id>/<uuid>.<ext>` через service role.
+  6. `UPDATE tutors SET avatar_url = <public_url> WHERE user_id = <profile.id> AND avatar_url IS NULL`.
 
 **Guardrails:**
-- НИКОГДА не сохранять Telegram URL напрямую — только наш storage path.
-- Graceful на любой фейл (не ломать логин).
-- Не логировать `telegram_photo_url` в console (privacy).
+- НИКОГДА не сохранять Telegram URL / Bot API file URL напрямую — только наш storage URL.
+- НЕ передавать Bot API file URL или bot token через browser/client.
+- Graceful на любой фейл (не ломать login).
+- Не логировать Telegram URL / file path / bot token.
 - Timeout на fetch обязателен.
 
 ---
 
-### TASK-15: TelegramLoginButton integration + toast consent
+### TASK-15: TelegramLoginButton integration
 
 **Job:** P1.3, P2.2
 **Agent:** Claude Code
 **Files:** `src/components/TelegramLoginButton.tsx` (модифицировать)
 **AC:** AC-7
+**Status:** Completed 2026-05-06 as no-op; client-side `photo_url` plumbing intentionally removed.
 
 **Что делает:**
-- После успешного login + `is_tutor === true`:
-  1. Проверить `tutors.avatar_url` (через getSession + select).
-  2. Если NULL и TG widget вернул `photo_url` → invoke `tutor-telegram-avatar-prefill`.
-  3. Если response `skipped === false && success === true` → показать toast: «Твоё фото из Telegram использовано как аватар. Изменить в профиле → `/tutor/profile`».
-- НЕ блокировать redirect на tutor dashboard ожиданием prefill — запускать async с `.catch(() => {})`.
+- No-op после architecture review: bot deep-link flow не имеет `photo_url` на клиенте.
+- `TelegramLoginButton.tsx` не должен вызывать avatar prefill endpoint. Avatar prefill выполняется server-side в TASK-14.
 
 **Guardrails:**
-- `TelegramLoginButton.tsx` помечен как high-risk в CLAUDE.md — scope минимален, только добавить async call после существующей логики, ничего не удалять.
-- Если `photo_url` отсутствует — просто skip, без ошибки.
-- Тост показывать ровно один раз (не при каждом логине).
+- `TelegramLoginButton.tsx` помечен как high-risk в CLAUDE.md — не трогать без отдельной необходимости.
+- Student-login flow и tutor-login без Telegram фото не должны измениться.
 
 ---
 
@@ -1135,50 +1132,49 @@ Validation:
 End block.
 ```
 
-### Prompt TASK-14: Edge function tutor-telegram-avatar-prefill
+### Prompt TASK-14: Bot-side Telegram avatar prefill
 
 ```
 Твоя роль: senior product-minded full-stack engineer в проекте SokratAI.
 
 Прочитай:
 - docs/delivery/features/tutor-profile/spec.md (секция 8 Risks — Telegram URL риски!)
-- supabase/functions/tutor-account/index.ts (TASK-11 — паттерн)
 - supabase/functions/telegram-bot/index.ts (паттерн fetch Telegram файлов через bot API)
 
-Задача: создать supabase/functions/tutor-telegram-avatar-prefill/index.ts.
+Задача: добавить bot-side auto-prefill аватара в supabase/functions/telegram-bot/index.ts::handleWebLogin.
 
-Flow (все через service role):
-1. Auth check: user.id из JWT. Если не tutor (is_tutor RPC) → 403.
-2. Body validation: { telegram_photo_url: string } — должен быть https, hostname t.me или telegram.org (whitelist).
-3. SELECT avatar_url FROM tutors WHERE user_id = auth.uid(). Если NOT NULL → return 200 { skipped: true, reason: 'already_set' }.
-4. Fetch telegram_photo_url с AbortController timeout 10 сек.
-   - НЕ сохранять URL ни в каком виде, кроме временной переменной.
-   - На ошибку (4xx/5xx/timeout) → return 200 { skipped: true, reason: 'tg_fetch_failed' } (не 500 — не ломаем login).
-5. Получить ArrayBuffer, contentType. Если contentType не image/* → skip.
-6. Size check: если > 2 МБ → skip (compression в Deno без sharp сложна — принимаем как parking lot).
-7. Generate path: avatars/<user_id>/<uuid>.jpg (suffix из contentType если не jpeg).
-8. storage.from('avatars').upload(path, blob, { contentType, upsert: false }).
-9. Получить public URL.
-10. UPDATE tutors SET avatar_url = <public_url> WHERE user_id = auth.uid() AND avatar_url IS NULL (race-safe WHERE).
-11. Return 200 { success: true, avatar_url }.
+Flow:
+1. После успешного web-login token update и success-message вызвать helper `prefillTutorAvatarFromTelegram(telegramUserId, profile.id)`.
+2. Helper через service role читает `SELECT avatar_url FROM tutors WHERE user_id = profile.id`. Если строки нет или avatar_url NOT NULL → silent skip.
+3. Через Bot API:
+   - `getUserProfilePhotos(user_id, limit=1)`.
+   - выбрать крупнейший `PhotoSize` ≤ 2 МБ, если есть `file_size`.
+   - `getFile(file_id)`.
+4. Скачать `https://api.telegram.org/file/bot<TOKEN>/<file_path>` server-side с AbortController timeout 10 сек.
+5. Если 4xx/5xx/timeout/non-image/>2MB → silent skip (не ломаем login).
+6. Upload в bucket `avatars` path `<user_id>/<uuid>.<ext>` через service role.
+7. Получить public URL, rewrite через `rewriteToProxy`.
+8. `UPDATE tutors SET avatar_url = <public_url> WHERE user_id = profile.id AND avatar_url IS NULL` (race-safe WHERE).
+9. На success отправить одноразовое Telegram message: `Твоё фото из Telegram использовано как аватар. Изменить или удалить можно в профиле: https://sokratai.ru/tutor/profile`.
 
 Acceptance Criteria: AC-7.
 
 Guardrails:
-- НИКОГДА не сохранять telegram_photo_url в БД.
+- НИКОГДА не сохранять Telegram URL / Bot API file URL в БД.
+- НЕ передавать Bot API URL или bot token через browser/client.
 - Timeout на fetch обязательно.
-- НЕ логировать telegram_photo_url.
-- Whitelist hostname — защита от SSRF.
+- НЕ логировать Telegram URL / file_path / bot token.
 - Не ломать login flow ни на какой ошибке.
 
 Validation:
-- supabase functions deploy tutor-telegram-avatar-prefill.
-- curl --data '{"telegram_photo_url":"https://t.me/..."}' — пройти авторизацию и убедиться в UPDATE.
+- Deploy `telegram-bot`.
+- Dev: залогиниться как новый tutor через Telegram → avatar появляется в профиле + bot-message.
+- Повторный login того же tutor → avatar не переписывается, bot-message не повторяется.
 
 End block.
 ```
 
-### Prompt TASK-15: TelegramLoginButton integration + toast consent
+### Prompt TASK-15: TelegramLoginButton no-op
 
 ```
 Твоя роль: senior product-minded full-stack engineer в проекте SokratAI.
@@ -1187,36 +1183,28 @@ End block.
 
 Прочитай:
 - src/components/TelegramLoginButton.tsx (полностью)
-- TASK-14 output (tutor-telegram-avatar-prefill endpoint)
-- docs/delivery/features/tutor-profile/spec.md (секция 8 Risks — privacy toast)
+- TASK-14 output (bot-side avatar prefill)
+- docs/delivery/features/tutor-profile/spec.md (AC-7)
 
-Задача: добавить async вызов tutor-telegram-avatar-prefill после успешного login если user — tutor и у него нет avatar.
+Задача: не добавлять client-side avatar prefill.
 
-Изменения:
-1. После существующего `is_tutor === true` флоу (который redirect'ит на tutor dashboard):
-   - Если TG widget вернул photo_url И user — tutor:
-     - async fetch('/functions/v1/tutor-telegram-avatar-prefill', { method: 'POST', body: JSON.stringify({ telegram_photo_url: photo_url }), headers: { authorization } }).
-     - .then(res => res.ok && res.json())
-     - Если response.success === true → toast.info('Твоё фото из Telegram использовано как аватар. Изменить можно в профиле.', { action: { label: 'Профиль', onClick: () => navigate('/tutor/profile') } }).
-     - На ошибку или skipped — ничего (silent).
-   - Вызов НЕ БЛОКИРУЕТ redirect — параллельно.
-
-2. Использовать try-catch с .catch(() => {}) — никакая ошибка не должна сломать login.
+Reason:
+- SokratAI использует bot deep-link login, не Telegram Login Widget.
+- `photo_url` не существует в client response.
+- Avatar prefill выполняется server-side в `telegram-bot::handleWebLogin`.
 
 Acceptance Criteria: AC-7.
 
 Guardrails:
-- НЕ трогать existing login logic (только добавить блок).
-- НЕ await выполнения prefill перед redirect.
-- Toast показывать только на success (не на skipped/error).
-- photo_url НЕ логировать.
+- НЕ трогать existing login logic.
+- НЕ добавлять `photo_url` plumbing.
+- НЕ передавать Bot API URL/token в client.
 
 Validation:
 - npm run lint && npm run build.
-- Dev: залогиниться как новый tutor через Telegram → avatar появляется в профиле + toast.
-- Повторный login того же tutor → toast НЕ показывается (skipped: already_set).
+- Self-check: student-login flow не сломан; tutor login без Telegram photo не сломан.
 
-End block + self-check: не сломан ли student-login flow, не сломан ли логин tutor без photo_url.
+End block.
 ```
 
 ### Prompt TASK-17: GoogleSignInButton + Login/SignUp + AuthCallback

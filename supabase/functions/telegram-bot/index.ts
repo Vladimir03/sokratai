@@ -1,4 +1,5 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
+import { rewriteToProxy } from "../_shared/proxy-url.ts";
 
 function calculateLessonPaymentAmount(
   durationMin: number,
@@ -24,10 +25,17 @@ const TELEGRAM_MESSAGE_MAX_LENGTH = 4000;
 const SITE_BASE_URL = "https://sokratai.ru";
 const TELEGRAM_HISTORY_LIMIT = 8; // max messages to send to AI from Telegram
 const TELEGRAM_CHAT_TIMEOUT_MS = 55_000; // 55s timeout for AI chat call
+const TELEGRAM_AVATAR_FETCH_TIMEOUT_MS = 10_000;
+const TELEGRAM_AVATAR_MAX_BYTES = 2 * 1024 * 1024;
+const AVATARS_BUCKET = "avatars";
 
-const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
-  auth: { persistSession: false, autoRefreshToken: false }
-});
+function createServiceRoleClient() {
+  return createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
+    auth: { persistSession: false, autoRefreshToken: false }
+  });
+}
+
+const supabase = createServiceRoleClient();
 
 /**
  * Compact chat history for Telegram AI calls:
@@ -1081,6 +1089,229 @@ async function updateOnboardingState(
   }
 }
 
+type TelegramPhotoSize = {
+  file_id: string;
+  file_unique_id?: string;
+  width: number;
+  height: number;
+  file_size?: number;
+};
+
+type TelegramProfilePhotosResponse = {
+  ok: boolean;
+  result?: {
+    total_count?: number;
+    photos?: TelegramPhotoSize[][];
+  };
+};
+
+type TelegramGetFileResponse = {
+  ok: boolean;
+  result?: {
+    file_path?: string;
+  };
+};
+
+type TutorAvatarPrefillResult = "success" | "skipped";
+
+function parseContentLength(value: string | null): number | null {
+  if (!value) return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
+}
+
+function normalizeImageContentType(value: string | null): string | null {
+  if (!value) return null;
+  const normalized = value.split(";")[0].trim().toLowerCase();
+  return normalized.startsWith("image/") ? normalized : null;
+}
+
+function avatarExtensionForContentType(contentType: string): string {
+  if (contentType === "image/png") return "png";
+  if (contentType === "image/webp") return "webp";
+  if (contentType === "image/gif") return "gif";
+  return "jpg";
+}
+
+function selectTelegramAvatarCandidate(photos: TelegramPhotoSize[][] | undefined): TelegramPhotoSize | null {
+  const latestPhotoSet = photos?.[0];
+  if (!latestPhotoSet || latestPhotoSet.length === 0) return null;
+
+  const bySizeDesc = [...latestPhotoSet].sort((a, b) => {
+    const aSize = a.file_size ?? a.width * a.height;
+    const bSize = b.file_size ?? b.width * b.height;
+    return bSize - aSize;
+  });
+
+  return bySizeDesc.find((photo) => !photo.file_size || photo.file_size <= TELEGRAM_AVATAR_MAX_BYTES) ?? null;
+}
+
+async function fetchTelegramJson<T>(method: string, body: Record<string, unknown>): Promise<T | null> {
+  const botToken = TELEGRAM_BOT_TOKEN;
+  if (!botToken) return null;
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), TELEGRAM_AVATAR_FETCH_TIMEOUT_MS);
+
+  try {
+    const response = await fetch(`https://api.telegram.org/bot${botToken}/${method}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    });
+
+    if (!response.ok) return null;
+    return await response.json() as T;
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
+async function fetchTelegramAvatarFile(
+  filePath: string,
+): Promise<{ buffer: ArrayBuffer; contentType: string } | null> {
+  const botToken = TELEGRAM_BOT_TOKEN;
+  if (!botToken) return null;
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), TELEGRAM_AVATAR_FETCH_TIMEOUT_MS);
+
+  try {
+    const response = await fetch(`https://api.telegram.org/file/bot${botToken}/${filePath}`, {
+      signal: controller.signal,
+    });
+
+    if (!response.ok) return null;
+
+    const contentType = normalizeImageContentType(response.headers.get("content-type"));
+    if (!contentType) return null;
+
+    const contentLength = parseContentLength(response.headers.get("content-length"));
+    if (contentLength !== null && contentLength > TELEGRAM_AVATAR_MAX_BYTES) return null;
+
+    const buffer = await response.arrayBuffer();
+    if (buffer.byteLength > TELEGRAM_AVATAR_MAX_BYTES) return null;
+
+    return { buffer, contentType };
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
+async function cleanupTutorAvatarUpload(
+  userId: string,
+  objectPath: string,
+  storageClient = createServiceRoleClient(),
+) {
+  const { error } = await storageClient.storage.from(AVATARS_BUCKET).remove([objectPath]);
+  if (error) {
+    console.warn("Tutor telegram avatar cleanup failed", {
+      user_id: userId,
+      error: error.message,
+    });
+  }
+}
+
+async function prefillTutorAvatarFromTelegram(
+  telegramUserId: number,
+  userId: string,
+): Promise<TutorAvatarPrefillResult> {
+  try {
+    const avatarWriter = createServiceRoleClient();
+
+    const { data: tutor, error: tutorError } = await avatarWriter
+      .from("tutors")
+      .select("avatar_url")
+      .eq("user_id", userId)
+      .maybeSingle();
+
+    if (tutorError) {
+      console.warn("Tutor telegram avatar prefill skipped: tutor lookup failed", {
+        user_id: userId,
+        error: tutorError.message,
+      });
+      return "skipped";
+    }
+
+    if (!tutor || tutor.avatar_url) return "skipped";
+
+    const profilePhotos = await fetchTelegramJson<TelegramProfilePhotosResponse>(
+      "getUserProfilePhotos",
+      { user_id: telegramUserId, limit: 1 },
+    );
+    if (!profilePhotos?.ok) return "skipped";
+
+    const photo = selectTelegramAvatarCandidate(profilePhotos.result?.photos);
+    if (!photo) return "skipped";
+
+    const fileInfo = await fetchTelegramJson<TelegramGetFileResponse>(
+      "getFile",
+      { file_id: photo.file_id },
+    );
+    const filePath = fileInfo?.ok ? fileInfo.result?.file_path : null;
+    if (!filePath) return "skipped";
+
+    const avatarFile = await fetchTelegramAvatarFile(filePath);
+    if (!avatarFile) return "skipped";
+
+    const extension = avatarExtensionForContentType(avatarFile.contentType);
+    const objectPath = `${userId}/${crypto.randomUUID()}.${extension}`;
+    const avatarBlob = new Blob([avatarFile.buffer], { type: avatarFile.contentType });
+
+    const { error: uploadError } = await avatarWriter.storage
+      .from(AVATARS_BUCKET)
+      .upload(objectPath, avatarBlob, {
+        contentType: avatarFile.contentType,
+        cacheControl: "3600",
+        upsert: false,
+      });
+
+    if (uploadError) {
+      console.warn("Tutor telegram avatar upload failed", {
+        user_id: userId,
+        error: uploadError.message,
+      });
+      return "skipped";
+    }
+
+    const { data: publicUrlData } = avatarWriter.storage.from(AVATARS_BUCKET).getPublicUrl(objectPath);
+    const publicUrl = rewriteToProxy(publicUrlData.publicUrl);
+
+    const { data: updatedTutor, error: updateError } = await avatarWriter
+      .from("tutors")
+      .update({ avatar_url: publicUrl })
+      .eq("user_id", userId)
+      .is("avatar_url", null)
+      .select("avatar_url")
+      .maybeSingle();
+
+    if (updateError || !updatedTutor) {
+      await cleanupTutorAvatarUpload(userId, objectPath, avatarWriter);
+      if (updateError) {
+        console.warn("Tutor telegram avatar update failed", {
+          user_id: userId,
+          error: updateError.message,
+        });
+      }
+      return "skipped";
+    }
+
+    console.log("Tutor telegram avatar prefilled", { user_id: userId });
+    return "success";
+  } catch (error) {
+    console.warn("Tutor telegram avatar prefill skipped unexpectedly", {
+      user_id: userId,
+      error: error instanceof Error ? error.name : typeof error,
+    });
+    return "skipped";
+  }
+}
+
 async function handleWebLogin(telegramUserId: number, telegramUsername: string | undefined, token: string) {
   console.log("handleWebLogin:", { telegramUserId, token });
 
@@ -1259,9 +1490,7 @@ async function handleWebLogin(telegramUserId: number, telegramUsername: string |
     // frontend polling never resolves.
     //
     // Fresh client = clean service_role context = RLS bypass guaranteed.
-    const tokenWriter = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
-      auth: { persistSession: false, autoRefreshToken: false },
-    });
+    const tokenWriter = createServiceRoleClient();
 
     const sessionData = {
       access_token: session.access_token,
@@ -1349,6 +1578,23 @@ async function handleWebLogin(telegramUserId: number, telegramUsername: string |
     await sendTelegramMessage(telegramUserId, `✅ Авторизация подтверждена!
 
 Вернитесь в браузер — вход произойдёт автоматически.`);
+
+    if (tokenData.intended_role === "tutor") {
+      const avatarPrefillResult = await prefillTutorAvatarFromTelegram(telegramUserId, profile.id);
+      if (avatarPrefillResult === "success") {
+        try {
+          await sendTelegramMessage(
+            telegramUserId,
+            "Твоё фото из Telegram использовано как аватар. Изменить или удалить можно в профиле: https://sokratai.ru/tutor/profile",
+          );
+        } catch (notifyError) {
+          console.warn("Tutor telegram avatar notification failed", {
+            user_id: profile.id,
+            error: notifyError instanceof Error ? notifyError.name : typeof notifyError,
+          });
+        }
+      }
+    }
 
   } catch (error) {
     console.error("Web login error:", error);

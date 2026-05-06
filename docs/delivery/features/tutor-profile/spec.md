@@ -88,7 +88,7 @@ Backend переиспользует существующую таблицу `tu
 
 3. **Аватар + имя в student guided chat** — в `GuidedChatMessage.tsx` для сообщений с `role: 'tutor'` слева рендерится круглый аватар 32×32, сверху пузыря — имя (truncate в одну строку). Данные приходят thread-level полем `tutor_profile: { display_name, avatar_url, gender }` из `handleGetThread` (student variant).
 
-4. **Telegram photo_url auto-prefill** — на первом логине репетитора через `TelegramLoginButton`, если Telegram присылает `photo_url` И `tutors.avatar_url IS NULL`, бэкенд **скачивает** фото в наш storage (не сохраняет TG-URL напрямую — см. Risks) и пишет путь. Happens once.
+4. **Telegram avatar auto-prefill** — на первом tutor deep-link логине через Telegram bot, если `tutors.avatar_url IS NULL`, backend через Bot API получает профильное фото, **скачивает** его в наш storage (не сохраняет TG URL/file URL напрямую — см. Risks) и пишет путь. Happens once.
 
 5. **Google OAuth (Phase 4)** — кнопка «Войти через Google» на `/login` и `/signup`. Использует встроенный Supabase Auth (`signInWithOAuth({ provider: 'google' })`). Уже залогиненный user может **привязать** Google identity из профиля (`linkIdentity`) или **отвязать** (`unlinkIdentity`) при условии что у него остаётся ≥ 1 другой способ входа (email+password ИЛИ Telegram). Секция «Безопасность» рендерит одно из 3 состояний:
    - **A · Email + Password** — классика, пароль editable.
@@ -123,7 +123,7 @@ Backend переиспользует существующую таблицу `tu
 - Клик-аватар в tutor AppFrame chrome (`SideNav.tsx::ProfileNavItem` desktop + `MobileTopBar.tsx` mobile) — v0.3 fix.
 - Резолв `tutor_profile` в `handleGetThread` (student variant) + расширение student `getThread` SELECT + типов.
 - Рендер аватара + имени в `GuidedChatMessage.tsx` (student-side).
-- Telegram photo_url auto-prefill в `TelegramLoginButton` flow (при первом tutor-логине, если аватар пуст).
+- Telegram avatar auto-prefill в `telegram-bot::handleWebLogin` flow (при первом tutor-логине, если аватар пуст).
 - **Google OAuth (Phase 4):** провайдер настроен в Supabase Dashboard; `GoogleSignInButton` на `/login` и `/signup`; `useUserIdentities` хук; `SecuritySection` рендерит 3 состояния (A/B/C); link/unlink Google identity из профиля; «Установить пароль» CTA для Google-only.
 
 **Out of scope (Phase 5 — отдельная спека):**
@@ -189,8 +189,7 @@ Backend переиспользует существующую таблицу `tu
 - `src/lib/studentHomeworkApi.ts` — `getThread`/student homework thread path возвращает optional `tutor_profile`; direct SELECT messages включает `author_user_id`
 - `src/types/homework.ts` — тип `HomeworkThread` расширяется полем `tutor_profile?: { display_name: string; avatar_url: string | null; gender: 'male' | 'female' | null } | null`
 - `supabase/functions/homework-api/index.ts` — `handleGetThread` (student variant) резолвит tutor profile, добавляет в response
-- `src/components/TelegramLoginButton.tsx` — на первом tutor-логине вызывает новую edge function `tutor-telegram-avatar-prefill` (если пользователь — tutor и `avatar_url IS NULL` и Telegram прислал `photo_url`)
-- `supabase/functions/tutor-telegram-avatar-prefill/index.ts` — новый endpoint: скачивает TG photo, конвертирует в JPEG 512×512, заливает в bucket, пишет `tutors.avatar_url`
+- `supabase/functions/telegram-bot/index.ts` — после успешного web-login для tutor получает профильное фото через Bot API (`getUserProfilePhotos` → `getFile`), скачивает bytes server-side, заливает в bucket, race-safe пишет `tutors.avatar_url`
 - `src/pages/Login.tsx` (Phase 4) — добавить `<GoogleSignInButton />` рядом с email-формой и `<TelegramLoginButton />`
 - `src/pages/SignUp.tsx` (Phase 4) — то же
 - `src/pages/AuthCallback.tsx` (Phase 4) — обработка OAuth redirect (если ещё не существует — создать). Вызывает `claimPendingInvite()` для invite-flow совместимости
@@ -261,10 +260,10 @@ CREATE POLICY "avatars_delete_own" ON storage.objects
 - Unlinking: проксируется через edge function `tutor-account` (см. выше) для last-identity guard. **НЕ вызывать `unlinkIdentity` напрямую с клиента** — клиентский guard может быть обойдён через DevTools.
 - Provider config: в Supabase Dashboard → Authentication → Providers → Google. `client_id` + `client_secret` из Google Cloud Console (OAuth 2.0 credentials). Authorized redirect URI = `https://<project>.supabase.co/auth/v1/callback`. Не код-задача — task для Vladimir/devops перед merge Phase 4.
 
-**Edge function `tutor-telegram-avatar-prefill`**:
-- `POST /functions/v1/tutor-telegram-avatar-prefill` body `{ telegram_photo_url: string }`
-- Вызывается ровно один раз из `TelegramLoginButton` если `isTutor && !currentAvatarUrl && photo_url`.
-- Скачивает, конвертирует, заливает, обновляет `tutors.avatar_url`. Идемпотентность: если `avatar_url` уже не NULL — ничего не делает.
+**Telegram bot-side avatar prefill**:
+- Выполняется внутри `supabase/functions/telegram-bot/index.ts::handleWebLogin` после успешной верификации web-login token.
+- Для tutor с `tutors.avatar_url IS NULL` вызывает Bot API `getUserProfilePhotos` → `getFile`, скачивает файл server-side с timeout 10 сек.
+- Не передаёт Telegram photo URL / Bot API file URL в браузер и не сохраняет его в БД. Идемпотентность: если `avatar_url` уже не NULL — ничего не делает.
 
 **Изменение `handleGetThread` (student variant)** в `supabase/functions/homework-api/index.ts`:
 - После основного SELECT треда — получить `homework_tutor_assignments.tutor_id` по `assignment_id` (фактическая схема: это `auth.users.id` репетитора), затем `SELECT name, avatar_url, gender FROM tutors WHERE user_id = <assignment.tutor_id>`
@@ -361,7 +360,7 @@ CREATE POLICY "avatars_delete_own" ON storage.objects
 - **AC-4:** Ученик, открывающий guided-homework-чат, видит сообщения с `role: 'tutor'` с аватаром и именем репетитора слева/сверху (как в Telegram на скрине в тикете). Для AI-сообщений аватара нет, label прежний. Для legacy-тредов без `tutor_profile` в response — fallback «Репетитор» без аватара, UI не падает.
 - **AC-5:** `GET /assignments/:id/threads/...` (student variant) возвращает JSON с верхнеуровневым полем `tutor_profile: { display_name: string, avatar_url: string | null, gender: 'male'|'female'|null } | null`. Поле присутствует даже если у репетитора нет строки в `tutors` (значение `null`).
 - **AC-6:** Репетитор **без аватара** с `gender: 'female'` отображается в student-чате как круглый SVG-женский силуэт (не инициалы). Репетитор **без аватара** и **без gender** — инициалы имени на `bg-accent`.
-- **AC-7:** Репетитор заходит через `TelegramLoginButton`. Telegram возвращает `photo_url`. Если `tutors.avatar_url IS NULL`, бэкенд скачивает TG-фото, сохраняет в `avatars/<user_id>/<uuid>.jpg`, пишет ссылку в `tutors.avatar_url`. Повторный логин с уже заполненным `avatar_url` — **не переписывает** его.
+- **AC-7:** Репетитор заходит через `TelegramLoginButton` / bot deep-link login. Если у Telegram user есть профильное фото и `tutors.avatar_url IS NULL`, `telegram-bot::handleWebLogin` server-side скачивает TG-фото через Bot API, сохраняет в `avatars/<user_id>/<uuid>.<ext>`, пишет ссылку в `tutors.avatar_url`. Повторный логин с уже заполненным `avatar_url` — **не переписывает** его.
 - **AC-8:** `npm run lint && npm run build && npm run smoke-check` — зелёный pipeline. В console (DevTools) нет ошибок при открытии `/tutor/profile` и guided-чата.
 - **AC-9:** На iOS Safari (протестировать на реальном устройстве или BrowserStack): загрузка аватара не приводит к auto-zoom на input; горизонтальный скролл guided-чата не блокируется.
 - **AC-10:** Ученик, у которого тред с **двумя задачами и активным guided-чатом**, видит все сообщения репетитора с одним и тем же аватаром и именем (не flicker при прокрутке).
@@ -386,7 +385,7 @@ CREATE POLICY "avatars_delete_own" ON storage.objects
 - **P1-1** — Edge function `tutor-account` (email/password) + UI секции.
 - **P1-2** — Subjects multi-select (без этого дефолт «физика» в TutorHomeworkCreate продолжает работать).
 - **P1-3** — Clickable avatar в `Navigation.tsx` для tutor (can be сделано сразу в P0, если остаётся время).
-- **P1-4** — Telegram photo_url auto-prefill при первом логине.
+- **P1-4** — Telegram avatar auto-prefill при первом tutor deep-link логине.
 - **P1-5** — Gender placeholder SVG + выбор пола в UI.
 - **P1-6 (Phase 4)** — Google OAuth: Supabase provider config + `GoogleSignInButton` на `/login`+`/signup` + `useUserIdentities` хук + 3-state `SecuritySection` + link/unlink через `tutor-account` (AC-11/12/13).
 
@@ -412,7 +411,7 @@ CREATE POLICY "avatars_delete_own" ON storage.objects
 
 ### Phase 3 — Telegram Photo Prefill (P1)
 
-**Scope:** edge function `tutor-telegram-avatar-prefill` + интеграция в `TelegramLoginButton` (AC-7).
+**Scope:** bot-side prefill в `supabase/functions/telegram-bot/index.ts::handleWebLogin` (AC-7).
 
 **Условие старта:** Phase 1 в prod, есть хотя бы 1 новый tutor-логин через Telegram за неделю (проверить можно до/после деплоя).
 
@@ -465,10 +464,10 @@ Manual smoke (обязательно):
 
 | Риск | Вероятность | Impact | Митигация |
 |---|---|---|---|
-| **Telegram photo_url протухает** — TG ротирует file_id и URL возвращает 404 через сутки–неделю | Высокая | Сломанный аватар у репетиторов | НИКОГДА не сохранять TG URL напрямую. Скачиваем файл в наш `avatars` storage при первом auth и пишем наш путь. TG URL живёт только во время `fetch` в edge function |
-| **Telegram photo_url отсутствует** — зависит от privacy-настроек профиля в Telegram | Средняя | Auto-prefill не сработает | Фича optional — fallback на gender placeholder. Не крэшим flow |
-| **CORS при fetch TG photo из браузера** | Высокая | Нельзя скачать на фронте | Все скачивания — через edge function с service role (server-to-server, нет CORS) |
-| **Приватность: пользователь не хотел, чтобы его TG photo использовалась** | Средняя | Жалоба | Показываем одноразовый toast после auto-prefill: «Твоё фото из Telegram использовано как аватар. Изменить в профиле.» Даём явную кнопку «Удалить» в профиле |
+| **Telegram Bot API file URL протухает** — TG ротирует `file_path`, URL возвращает 404 через сутки–неделю | Высокая | Сломанный аватар у репетиторов | НИКОГДА не сохранять TG URL напрямую. Скачиваем файл в наш `avatars` storage при первом auth и пишем наш public URL. Bot API URL живёт только во время server-side `fetch` |
+| **Telegram профильное фото отсутствует** — зависит от privacy-настроек профиля в Telegram | Средняя | Auto-prefill не сработает | Фича optional — fallback на gender placeholder. Не крэшим flow |
+| **CORS / client exposure при fetch TG photo из браузера** | Высокая | Нельзя скачать на фронте + риск утечки bot token | Все скачивания — внутри `telegram-bot` server-side через Bot API; браузер не получает TG URL/file URL |
+| **Приватность: пользователь не хотел, чтобы его TG photo использовалась** | Средняя | Жалоба | После успешного auto-prefill бот отправляет одноразовое сообщение: «Твоё фото из Telegram использовано как аватар. Изменить или удалить можно в профиле.» Даём явную кнопку «Удалить» в профиле |
 | **Неатомарность**: `avatars` upload → `tutors.avatar_url` UPDATE fail → orphan файл | Низкая | Мусор в storage | После UPDATE `tutors.avatar_url` SUCCESS удаляем старый файл (не fail'им фичу при ошибке удаления) |
 | **iOS Safari: canvas toBlob JPEG quality** — различия в сжатии между платформами | Низкая | Фото > 2 МБ после compress | Если `blob.size > 2*1024*1024` → retry с quality 0.7, затем 0.5. Если всё ещё > 2 МБ — показать ошибку пользователю |
 | **RLS `tutors SELECT to authenticated`** — любой залогиненный может запросить все имена/аватары репетиторов | Средняя | Privacy leak (имена публичные, не emails) | Приемлемо: имена и фото публичные по дизайну (видны ученикам). Email/gender **не** возвращаются в `tutor_profile` endpoint — только `display_name`, `avatar_url`, `gender` (если будем отдавать). Можно позже сузить до «только tutors, к которым я связан» через view с JOIN на tutor_students |
@@ -520,8 +519,8 @@ Manual smoke (обязательно):
 
 ### Phase 3 (P1)
 
-- [ ] TASK-14: Edge function `tutor-telegram-avatar-prefill`
-- [ ] TASK-15: Интеграция в `TelegramLoginButton` + toast consent
+- [x] TASK-14: Bot-side Telegram avatar prefill в `telegram-bot::handleWebLogin`
+- [x] TASK-15: `TelegramLoginButton` no-op after architecture review
 
 ### Phase 4 (P1) — Google OAuth (добавлено v0.2)
 
