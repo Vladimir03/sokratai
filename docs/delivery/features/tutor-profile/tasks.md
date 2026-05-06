@@ -34,9 +34,12 @@ Phase 3 (P1): Telegram avatar auto-prefill
 Phase 4 (P1): Google OAuth (added v0.2; v0.4 — aligned with shipped RU-bypass flow)
 ├── TASK-16 Google provider config (devops)         [Vladimir]   ✅ Done (custom RU-bypass)
 ├── TASK-17 GoogleAuthButton + Login/SignUp wire    [Claude]     ✅ Done (5 entry points)
-├── TASK-18 useUserIdentities + 3-state Security    [Claude]     pending (deps: TASK-12, TASK-17)
-└── TASK-19 LoginProvidersSection + tutor-account   [Claude]     pending (⚠️ link path
-        actions (set-password-google-only, unlink-identity)               needs RU-bypass)
+├── TASK-18 useUserIdentities + 3-state Security    [Claude]     ✅ Done (incl. partial
+│                                                                  TASK-19 backend:
+│                                                                  set-password-google-only)
+└── TASK-19 LoginProvidersSection + remaining actions [Claude]    pending (unlink-identity
+        (unlink-identity, ⚠️ RU-bypass linkIdentity)                + LoginProvidersSection
+                                                                    UI + RU-bypass link path)
 ```
 
 Codex review после каждой фазы (`npm run lint && npm run build && npm run smoke-check` предварительно зелёный).
@@ -466,8 +469,9 @@ Codex review после каждой фазы (`npm run lint && npm run build &&
 
 **Job:** P1.3
 **Agent:** Claude Code
-**Files:** `src/hooks/useUserIdentities.ts` (новый), `src/components/tutor/profile/SecuritySection.tsx` (модифицировать)
+**Files:** `src/hooks/useUserIdentities.ts` (новый), `src/components/tutor/profile/SecuritySection.tsx` (модифицировать), `supabase/functions/tutor-account/index.ts` (small TASK-19 bleed-in: добавлен action `set-password-google-only`)
 **AC:** AC-11, AC-13
+**Status:** ✅ Done (2026-05-06) — `useUserIdentities` (`['auth','identities']`, staleTime 60s) читает `supabase.auth.getUserIdentities()` и резолвит `hasEmailPassword/hasGoogle/hasTelegram`. `SecuritySection` теперь branch'ит на 3 state'а: A (email-only — прежний UI), B (google-only — Email row read-only с inline Google pill, password row **удалён из DOM**, amber CTA «Установить пароль» с inline 2-input form), C (mixed — как A + `window.confirm` warning перед email change что Google перепишет email обратно). Loading state — три серых блока `h-10` без animate. State B → C transition: `set-password-google-only` action в `tutor-account` валидирует ≥8 chars, проверяет что `email` identity ещё нет (иначе 400 `PASSWORD_ALREADY_SET`), вызывает `admin.updateUserById({password})`, что создаёт `email` identity server-side. После success — `invalidateQueries(['auth','identities'])` → секция перерисовывается в C. Telegram row не зависит от auth state (Telegram — кастомный flow, не Supabase identity, см. v0.4 §3 п.5).
 
 **Что делает:**
 
@@ -515,9 +519,9 @@ Codex review после каждой фазы (`npm run lint && npm run build &&
   - **Не привязан → кнопка «Привязать»**. ⚠️ **RU-bypass для link** (см. TASK-17 Status): `supabase.auth.linkIdentity({ provider: 'google' })` форсит native `<project>.supabase.co/auth/v1/callback` который заблокирован в РФ. Реализатору нужно расширить `oauth-google-init` принимать `mode=link&user_id=<auth.uid()>` (защищённый JWT-токеном), а `oauth-google-callback` — вместо magic-link verifyOtp вызывать `supabaseAdmin.auth.admin.updateUserById(user_id, { user_metadata: ... })` или эквивалент привязки идентичности. Иначе link/unlink будет ломаться у RU-репетиторов. Возврат на профиль через `redirectTo=/tutor/profile`, локальный invalidate `['auth','identities']` по `onAuthStateChange("SIGNED_IN")` или page-mount refetch.
 
 - `tutor-account/index.ts`:
-  - Action `set-password-google-only`: валидация `body.password.length >= 8`, проверить через `supabaseAdmin.auth.admin.getUserById(user.id)` что `identities.find(i => i.provider === 'email')` отсутствует (иначе 400 `PASSWORD_ALREADY_SET` — пусть пользуется обычным `update-password`). Затем `auth.admin.updateUserById(user.id, { password })`.
-  - Action `unlink-identity`: body `{ provider: 'google' | 'telegram' }`. Fetch user identities → если после удаления провайдера остаётся `identities.length === 0` ИЛИ (`hasOnlyEmail = identities.length === 1 && identities[0].provider === 'email'` И password не задан) → return 400 `LAST_IDENTITY` с message «Установи пароль или привяжи другой способ входа». Иначе `supabaseAdmin.auth.admin.deleteIdentity(targetIdentity.id)` (Supabase admin API).
-  - В обоих actions сохранить tutor role check (`has_role`).
+  - ✅ Action `set-password-google-only` — **уже добавлен в TASK-18** (валидация ≥ 8 chars + check что `email` identity отсутствует через `auth.admin.getUserById` → 400 `PASSWORD_ALREADY_SET` если есть, иначе `auth.admin.updateUserById({password})` создаёт identity server-side).
+  - ⏳ Action `unlink-identity` — **остаётся для этого таска**: body `{ provider: 'google' | 'telegram' }`. Fetch user identities → если после удаления провайдера остаётся `identities.length === 0` ИЛИ (`hasOnlyEmail = identities.length === 1 && identities[0].provider === 'email'` И password не задан) → return 400 `LAST_IDENTITY` с message «Установи пароль или привяжи другой способ входа». Иначе `supabaseAdmin.auth.admin.deleteIdentity(targetIdentity.id)` (Supabase admin API).
+  - Tutor role check (`is_tutor` RPC) уже встроен в edge function — наследуется обоими actions.
 
 - `TutorProfile.tsx`:
   - Подключить `<LoginProvidersSection />` под `<SecuritySection />`.

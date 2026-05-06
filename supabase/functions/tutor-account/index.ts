@@ -121,6 +121,53 @@ Deno.serve(async (req) => {
       return jsonResponse(200, { success: true });
     }
 
+    // Google-only users (signed up via OAuth, no `email` identity yet) need a
+    // separate path to set their first password. Calling `update-password` for
+    // them would also work, but we want a strict guard: if the user already
+    // has an email identity, surface a clearer error so the client can route
+    // them to the regular «Изменить пароль» action instead of silently
+    // overwriting an existing password.
+    if (action === "set-password-google-only") {
+      const nextPassword = typeof body.password === "string" ? body.password : "";
+
+      if (nextPassword.length < 8) {
+        return jsonResponse(400, { error: "Пароль должен содержать минимум 8 символов" });
+      }
+
+      const { data: getUserData, error: getUserError } = await supabaseAdmin.auth.admin
+        .getUserById(user.id);
+      if (getUserError || !getUserData?.user) {
+        console.error("tutor-account set-password-google-only get-user error:", {
+          user_id: user.id,
+          error: getUserError,
+        });
+        return jsonResponse(500, { error: "Failed to verify identities" });
+      }
+
+      const identities = getUserData.user.identities ?? [];
+      const hasEmailIdentity = identities.some((identity) => identity.provider === "email");
+      if (hasEmailIdentity) {
+        return jsonResponse(400, {
+          error: "Пароль уже задан. Используй «Изменить пароль».",
+          code: "PASSWORD_ALREADY_SET",
+        });
+      }
+
+      const { error: setPasswordError } = await supabaseAdmin.auth.admin.updateUserById(user.id, {
+        password: nextPassword,
+      });
+
+      if (setPasswordError) {
+        console.error("tutor-account set-password-google-only error:", {
+          user_id: user.id,
+          error: setPasswordError,
+        });
+        return jsonResponse(500, { error: setPasswordError.message || "Failed to set password" });
+      }
+
+      return jsonResponse(200, { success: true });
+    }
+
     return jsonResponse(400, { error: "Unknown action" });
   } catch (error) {
     console.error("tutor-account unhandled error:", error);
