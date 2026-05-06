@@ -169,6 +169,105 @@ Dropped из original plan: Claude Design, Higgsfield для product-tour (см.
 
 ---
 
+### 🎬 Iteration 4.9 — Lovable prompt + poster для Tour #1 video (2026-04-26)
+
+**Status:** READY for Lovable execution
+
+Что сделано:
+- ✅ `tour-1-poster.jpg` (141 KB) — extracted from sec 17 v3 video, показывает handwritten physics + green «И рукописные тоже» badge — maximum curiosity-trigger
+- ✅ `tour-1-poster-alt.jpg` (131 KB) — alt poster (heatmap dashboard frame sec 1.5)
+- ✅ `lovable-prompt-tour-1-video.md` — full Lovable prompt с TypeScript React component + performance rationale + test plan
+
+Prompt strategy:
+- **Click-to-play** (NOT autoplay-on-scroll) — protects mobile 3G users from 2.4 MB unwanted download
+- **Lazy poster** loading="lazy" decoding="async" — instant first paint
+- **Aspect-ratio container** prevents CLS
+- **−94% initial download** vs straight `<video>` (141 KB poster vs 2.4 MB MP4)
+- **Лayer переключение** через React state — `<img>` для poster, `<video>` после click
+- **Lucide Play icon** + white circle + dark backdrop for visual appeal
+- **Caption «Смотреть как AI проверяет ДЗ — 32 сек»** — sets expectation
+
+Pending:
+- [ ] Vladimir copy-paste'ит prompt в Lovable
+- [ ] Lovable создаёт component, тестирует Network tab confirmation (only poster requested initially)
+- [ ] PR review, merge на main, Lovable auto-deploy
+
+---
+
+### 🎬 Iteration 4.8 — Tour #1 screencast v3 (2026-04-26 fix)
+
+**Status:** COMPLETED — v3 устранила 2 issue из Vladimir review
+
+Фиксы:
+- ✅ **Overlay timing:** «И пишет фидбек в твоём стиле» теперь sec 25-27.5 над AI textual response («Молодец!»), вместо sec 23.7-25.5 над handwritten work itself
+- ✅ **Чёрная полоса справа:** `crop=1920:1030:0:0` на все segments удалил 280px right padding из source 2200×1030 (Mac browser screen recording артефакт)
+- ✅ **Narrative arc** добавлен: handwritten reveal (seg 4) → AI находит ошибку (seg 5) → AI хвалит (seg 6)
+
+Output v3:
+- 32.08 sec (vs 30 sec v1)
+- 1920×1030 (vs 1920×898 v1)
+- 2.4 MB (vs 1.8 MB v1)
+- 7 segments (vs 6), 8 overlays (same count)
+
+`public/marketing/tutor-landing/tour-1-ai-check.mp4` — replaced
+
+---
+
+### 🎬 Iteration 4.7 — Tour #1 screencast edited (2026-04-26)
+
+**Status:** COMPLETED — first landing-grade video готов
+
+Что произошло:
+- Vladimir прислал raw screencast Егора (116 sec, 7.5 MB, 2200×1030)
+- Я в sandbox через ffmpeg сделал first edit pass — `tour-1-ai-check.mp4` (30 sec, 1.84 MB, 1920×898)
+- 6 cut-segments + 8 text-overlays (Cyrillic via DejaVu Sans Bold)
+- Compression 116→30 sec (3.9×); source coverage 40% (60% cut as idle/transitions)
+- Higgsfield дропнут (research показал — нужен MCP не listed в registry; всё равно для editing screencasts не подходит — только для V2 hero motion)
+
+Reusable workflow создан:
+- [x] `scripts/edit-screencast.sh` — bash script читает spec.md → ffmpeg pipeline → MP4
+- [x] `screencast-edit-spec-template.md` — template для каждого нового screencast
+- [x] `screencast-edit-spec-tour-1.md` — actual spec used для Tour #1 (reproducibility)
+- [x] `public/marketing/tutor-landing/tour-1-ai-check.mp4` — ready-to-deploy
+
+Pending (other 3 videos):
+- [ ] Раз Егор запишет raw screencast Tour #2 (Конструктор ДЗ) → Vladimir копирует template → fills timecodes → script runs
+- [ ] Same для Tour #3 (Отчёт родителю) и Freemium (Оплаты + расписание)
+
+Known V1 limitations:
+- ❌ Cursor highlight отсутствует (deferred V2 — Егор re-records через ScreenStudio)
+- ❌ Zoom-in эффекты на ключевые UI states (manual в CapCut V2)
+- ✅ Cuts + speed + overlays = 80% landing-grade quality
+
+---
+
+### 🎬 Iteration 4.6 — Video specs update (2026-04-25)
+
+**Status:** Specs обновлены, ожидают video files от Егора + Vladimir editing pass
+
+Что произошло:
+- Егор записал raw screencast Tour #1 (2 flow: краткий ответ + рукописная проверка с классификацией ошибок)
+- Vladimir отметил: 25 sec мало для двух сценариев + cursor highlight нужен
+
+Решения:
+- [x] **Tour #1 budget extended:** 25 → 30-35 sec (`implementation-spec.md` §8.1)
+- [x] **Audio strategy финализирована:** muted autoplay + text overlays для всех V1 — industry standard (Khanmigo, Linear, Notion, Figma) подтверждено research
+- [x] **Background music отвергнута** — не используется в топ-EduTech
+- [x] **Voice-over Егора отложен** в V2 как click-to-play deep video в hero
+- [x] **Editing tooling рекомендован:** ScreenStudio (Mac, $89) или CapCut Desktop (free)
+
+Pending:
+- [ ] Vladimir пришлёт raw screencast в чат (small chunks) для frame-by-frame review
+- [ ] Editing pass (cuts + cursor highlight + text overlays + crop)
+- [ ] Final 4 video files в `public/marketing/tutor-landing/`:
+  - `tour-1-ai-check.mp4` (30-35 sec) — flagship
+  - `tour-2-builder.mp4` (15-20 sec)
+  - `tour-3-report.mp4` (15-20 sec)
+  - `freemium.mp4` (15-20 sec)
+  - `testimonial-client-egor.mp4` (Case #1, portrait 3:4) — отдельно от Vladimir/Егор
+
+---
+
 ### 🔮 V2 pricing roadmap (future, после launch V1)
 
 **Разблокировать pricing psychology при расширении:**

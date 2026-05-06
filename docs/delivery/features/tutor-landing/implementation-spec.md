@@ -863,6 +863,54 @@ When all 12 tasks complete, create a PR to main.
 
 ---
 
+## 8.1 Video specs update (2026-04-25)
+
+После того как Егор записал raw screencast (2 flow в Tour #1: краткий ответ + рукописная проверка), и Vladimir отметил что 25 sec мало для двух сценариев — пересмотрены video specs.
+
+**Time budget per video slot:**
+
+| Slot | Старый budget | Новый budget | Reason |
+|---|---|---|---|
+| Tour #1 (AI-проверка + сократовский диалог) | 25 sec | **30-35 sec** | 2 сценария (краткий + рукопись) + classification visualization; EduTech benchmark Skyeng/Linear/Notion держат hero-tour до 60 sec |
+| Tour #2 (Конструктор ДЗ) | 20 sec | 15-20 sec (как было) | Простой UI flow |
+| Tour #3 (Отчёт родителю) | 15 sec | 15-20 sec | Простой UI flow |
+| Freemium (Оплаты + расписание) | 15 sec | 15-20 sec | Простой UI flow |
+
+**Audio strategy (research-based, 2026-04-25):**
+
+После research топ-EduTech (Khanmigo, Learn Your Way, Фоксфорд, Умскул, 100балльный) + SaaS benchmarks (Linear, Notion, Figma, Stripe):
+
+- **Все V1 product-tour videos: muted autoplay + text overlays**. Industry standard. Topовые EduTech не используют voice-over в landing autoplay.
+- **Background music: НЕ используем**. Cognitive load + browser policy + visitor context.
+- **Text overlays** на key actions (Golos Text Bold, белый на rgba(15,23,42,0.7) backdrop) заменяют озвучку — глаз ловит за 1-2 сек.
+- **Subtitles** обязательны для Case #1 video testimonial (если есть речь).
+- **V2 roadmap:** voice-over Егора как secondary click-to-play video в hero — strong peer-to-peer trust signal, но НЕ в autoplay.
+
+**Editing workflow recommendation:**
+- **Cursor highlight** обязательно для всех screencasts — ScreenStudio (Mac, $89) или CapCut Desktop (free, Mac+Win).
+- **Aggressive cuts** — убрать idle/loading/mouse-traveling moments.
+- **Speed-up** 1.5-2× в неважных middle-секциях.
+- **Crop / zoom-in** на key UI элементы, не показывать весь экран.
+- **Text-overlay templates** для consistency across 4 videos:
+  - Section opener (sec 0-2): большой title в socrat-green-700 chip
+  - Key action callouts (sec X-Y): нижняя треть, white bg-rgba(15,23,42,0.7)
+  - Closing (sec last 2): outcome metric («20 работ за 40 минут»)
+
+**Video specs для каждого screencast:**
+
+```
+Format: MP4 H.264
+Resolution: 1440×900 (16:10) или 1920×1080 (16:9) — desktop native
+Aspect ratio: 16:10 для Tour #1/#2/#3/Freemium; 3:4 portrait для Case #1
+Size: ≤ 2 MB per video (web-friendly)
+Frame rate: 30 fps (стандарт)
+Audio track: MUTED (отсутствует или silent)
+Loop: seamless (начало и конец совпадают визуально)
+playsInline: обязательно (iOS Safari)
+```
+
+---
+
 ## 9. Changelog
 
 - **2026-04-24** — initial spec created после согласования с Владимиром routing/header/pipeline decisions
@@ -871,3 +919,9 @@ When all 12 tasks complete, create a PR to main.
   - OG image — reuse existing student-landing Lovable URL в V1, custom tutor OG в V2
   - Legal docs (Политика/Соглашение/Оферта) появятся после launch V1; до того — mailto fallback на `volodyakamchatkin@gmail.com` с pre-filled subjects
   - Vladimir фото загружает отдельно после launch; Claude Code использует initials «ВК» placeholder в V1
+- **2026-04-25** — Video specs update (§8.1):
+  - Tour #1 video budget extended 25 → 30-35 sec (для 2 flow Егора)
+  - Audio strategy финализирована: muted autoplay + text overlays для всех V1 (industry standard, research топ-EduTech)
+  - No background music
+  - Editing tooling рекомендации: ScreenStudio (Mac) или CapCut Desktop (free, кросс-платформа)
+  - Voice-over Егора отложен в V2 как click-to-play deep video

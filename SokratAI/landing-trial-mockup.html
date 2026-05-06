@@ -1,0 +1,1148 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Sokrat AI · Trial-флоу · Макеты</title>
+<style>
+  :root {
+    --sokrat-green-50:#F0FAF4;
+    --sokrat-green-100:#DCF5E5;
+    --sokrat-green-200:#B6E8C9;
+    --sokrat-green-700:#1B6B4A;
+    --sokrat-green-800:#125239;
+    --sokrat-ochre-100:#FEF1DE;
+    --sokrat-ochre-500:#E8913A;
+    --sokrat-ochre-700:#A35C1A;
+    --sokrat-fg1:#0F172A;
+    --sokrat-fg2:#475569;
+    --sokrat-fg3:#64748B;
+    --sokrat-fg-on-dark:#FFFFFF;
+    --sokrat-card:#FFFFFF;
+    --sokrat-surface:#F7F6F3;
+    --sokrat-border:#E2E8F0;
+    --sokrat-radius-sm:6px;
+    --sokrat-radius-lg:14px;
+    --sokrat-radius-xl:20px;
+    --sokrat-radius-full:9999px;
+    --sokrat-shadow-sm:0 1px 3px rgba(15,23,42,.06), 0 1px 2px rgba(15,23,42,.04);
+    --sokrat-shadow-md:0 8px 24px rgba(15,23,42,.08), 0 2px 4px rgba(15,23,42,.04);
+    --sokrat-shadow-elegant:0 16px 48px rgba(15,23,42,.10);
+    --bg:#F1F5F4;
+  }
+
+  *{box-sizing:border-box;-webkit-text-size-adjust:100%}
+  body{
+    margin:0; background:var(--bg);
+    font-family:'Golos Text', system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    color:var(--sokrat-fg1); line-height:1.55;
+  }
+  a{color:inherit}
+
+  /* ───── Doc shell ───── */
+  .doc-header{
+    background:#0F172A;
+    color:#fff;
+    padding:28px 32px;
+    display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:16px;
+  }
+  .doc-header h1{
+    margin:0; font-size:22px; font-weight:700; letter-spacing:-.01em;
+  }
+  .doc-header .meta{
+    font-size:13px; color:#94A3B8;
+  }
+  .doc-nav{
+    background:#1E293B; color:#CBD5E1;
+    padding:12px 32px; display:flex; gap:18px; flex-wrap:wrap; font-size:13px;
+    position:sticky; top:0; z-index:10;
+    border-bottom:1px solid #334155;
+  }
+  .doc-nav a{
+    color:#CBD5E1; text-decoration:none; padding:6px 10px; border-radius:6px;
+    transition:background .15s, color .15s;
+  }
+  .doc-nav a:hover{ background:#334155; color:#fff }
+  .doc-nav .lbl{ color:#64748B; font-size:11px; text-transform:uppercase; letter-spacing:.06em; padding:6px 0 }
+
+  .surface{
+    max-width:1200px; margin:48px auto 0; padding:0 24px;
+  }
+  .surface-label{
+    display:flex; align-items:baseline; gap:14px; margin-bottom:14px; flex-wrap:wrap;
+  }
+  .surface-label .num{
+    background:var(--sokrat-green-700); color:#fff;
+    padding:4px 10px; border-radius:var(--sokrat-radius-full); font-size:12px; font-weight:700;
+    letter-spacing:.06em; text-transform:uppercase;
+  }
+  .surface-label h2{
+    margin:0; font-size:24px; font-weight:700; color:var(--sokrat-green-800);
+  }
+  .surface-label .sub{
+    color:var(--sokrat-fg3); font-size:14px;
+  }
+  .surface-note{
+    background:#FFF8E1; border-left:4px solid var(--sokrat-ochre-500);
+    padding:14px 18px; border-radius:0 8px 8px 0;
+    margin-bottom:24px; color:#5D4007; font-size:13px; line-height:1.6;
+  }
+  .surface-note strong{ color:#3F2A04 }
+
+  .canvas{
+    background:var(--sokrat-card); border:1px solid var(--sokrat-border);
+    border-radius:var(--sokrat-radius-xl); overflow:hidden;
+    box-shadow:var(--sokrat-shadow-md);
+  }
+
+  h1,h2,h3,h4{ font-family:inherit; letter-spacing:-.01em }
+
+  /* ───────────── 1. HERO ───────────── */
+  .hero{
+    background:
+      radial-gradient(ellipse at top left, var(--sokrat-green-50) 0%, transparent 60%),
+      radial-gradient(ellipse at bottom right, var(--sokrat-green-100) 0%, transparent 60%),
+      var(--sokrat-surface);
+    padding:56px 48px 48px;
+  }
+  .hero-chip{
+    display:inline-flex; align-items:center; gap:8px;
+    background:var(--sokrat-ochre-100); color:var(--sokrat-ochre-700);
+    padding:6px 12px; border-radius:var(--sokrat-radius-full);
+    font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.08em;
+    margin-bottom:18px;
+  }
+  .hero-chip .dot{
+    width:6px; height:6px; border-radius:50%; background:var(--sokrat-ochre-500);
+    animation:pulse 1.6s ease-in-out infinite;
+  }
+  @keyframes pulse{ 0%,100%{opacity:1} 50%{opacity:.4} }
+  .hero h1{
+    margin:0 0 20px; font-size:clamp(28px, 4vw, 42px); line-height:1.15; font-weight:700;
+    color:var(--sokrat-green-800); max-width:780px;
+  }
+  .hero p.lede{
+    margin:0 0 16px; font-size:17px; line-height:1.6; color:var(--sokrat-fg2);
+    max-width:680px;
+  }
+  .hero p.byline{
+    margin:0 0 30px; font-size:14px; line-height:1.6; color:var(--sokrat-fg3);
+    max-width:680px;
+  }
+  .hero-ctas{ display:flex; gap:12px; flex-wrap:wrap; margin-bottom:18px }
+  .btn{
+    display:inline-flex; align-items:center; justify-content:center; gap:8px;
+    min-height:52px; padding:0 24px; border-radius:10px; font-weight:600; font-size:16px;
+    text-decoration:none; cursor:pointer; transition:transform .12s, box-shadow .12s, background-color .15s;
+    border:none; font-family:inherit;
+  }
+  .btn-primary{
+    background:var(--sokrat-green-700); color:#fff;
+    box-shadow:0 4px 14px rgba(27,107,74,.25);
+  }
+  .btn-primary:hover{ background:var(--sokrat-green-800); transform:translateY(-1px); box-shadow:0 6px 18px rgba(27,107,74,.32) }
+  .btn-secondary{
+    background:transparent; color:var(--sokrat-green-700);
+    border:2px solid var(--sokrat-green-700);
+  }
+  .btn-secondary:hover{ background:var(--sokrat-green-50) }
+  .btn-tg{
+    background:#229ED9; color:#fff;
+    box-shadow:0 4px 14px rgba(34,158,217,.28);
+  }
+  .btn-tg:hover{ background:#1A87BB; transform:translateY(-1px) }
+
+  .hero-trust{
+    display:flex; gap:18px; flex-wrap:wrap; font-size:14px; color:var(--sokrat-fg3);
+    padding-top:6px;
+  }
+  .hero-trust li{ list-style:none; display:flex; align-items:center; gap:6px }
+  .hero-trust .check{ color:var(--sokrat-green-700); font-weight:700 }
+
+  /* compare callout: before/after */
+  .hero-compare{
+    margin-top:32px;
+    display:grid; grid-template-columns:1fr 1fr; gap:16px;
+  }
+  .hero-compare > div{
+    border-radius:var(--sokrat-radius-lg); padding:18px 20px; font-size:13px;
+  }
+  .hero-compare .was{
+    background:#FEE2E2; border:1px solid #FCA5A5; color:#991B1B;
+  }
+  .hero-compare .was b{ display:block; font-size:11px; text-transform:uppercase; letter-spacing:.06em; margin-bottom:8px; opacity:.7 }
+  .hero-compare .was s{ color:#7F1D1D; opacity:.7 }
+  .hero-compare .now{
+    background:var(--sokrat-green-50); border:1px solid var(--sokrat-green-200); color:var(--sokrat-green-800);
+  }
+  .hero-compare .now b{ display:block; font-size:11px; text-transform:uppercase; letter-spacing:.06em; margin-bottom:8px; color:var(--sokrat-green-700); opacity:.85 }
+  .hero-compare .now strong{ font-size:15px; color:var(--sokrat-green-800) }
+
+  /* ───────────── 2. PRICING ───────────── */
+  .pricing{
+    background:var(--sokrat-card);
+    padding:56px 32px;
+  }
+  .pricing-head{
+    text-align:center; margin-bottom:36px;
+  }
+  .pricing-head h2{
+    margin:0 0 10px; font-size:30px; font-weight:700; color:var(--sokrat-green-800);
+  }
+  .pricing-head p{
+    margin:0; color:var(--sokrat-fg3); font-size:15px;
+  }
+  .pricing-grid{
+    display:grid; grid-template-columns:repeat(3, 1fr);
+    gap:18px; max-width:1080px; margin:0 auto;
+  }
+  @media (max-width:1024px){ .pricing-grid{grid-template-columns:1fr 1fr} }
+  @media (max-width:680px){ .pricing-grid{grid-template-columns:1fr} }
+  .tier{
+    position:relative; background:var(--sokrat-card); border:1px solid var(--sokrat-border);
+    border-radius:var(--sokrat-radius-lg); padding:24px 22px;
+    display:flex; flex-direction:column; transition:box-shadow .2s;
+  }
+  .tier:hover{ box-shadow:var(--sokrat-shadow-sm) }
+  .tier-highlighted{
+    border:2px solid var(--sokrat-green-700);
+    box-shadow:var(--sokrat-shadow-md);
+    transform:scale(1.02);
+  }
+  .tier-popular{
+    position:absolute; top:-12px; left:50%; transform:translateX(-50%);
+    padding:5px 12px; background:var(--sokrat-ochre-500); color:#fff;
+    border-radius:var(--sokrat-radius-full);
+    font-size:10px; font-weight:700; text-transform:uppercase; letter-spacing:.08em;
+    white-space:nowrap;
+  }
+  .tier-label{
+    font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.06em;
+    color:var(--sokrat-fg3); margin-bottom:14px;
+  }
+  .tier-highlighted .tier-label{ color:var(--sokrat-green-700) }
+
+  .tier-price-stack{
+    margin-bottom:14px;
+  }
+  .tier-price-line{
+    display:flex; align-items:baseline; gap:10px; flex-wrap:wrap; margin-bottom:6px;
+  }
+  .tier-price-old{ text-decoration:line-through; text-decoration-thickness:2px; color:var(--sokrat-fg3); font-size:14px; font-weight:500 }
+  .tier-price-now{ font-size:28px; font-weight:700; color:var(--sokrat-fg1); line-height:1 }
+  .tier-price-now-ochre{ color:var(--sokrat-ochre-700) }
+  .tier-savings{
+    display:inline-block; padding:3px 8px; background:var(--sokrat-ochre-500); color:#fff;
+    border-radius:6px; font-size:12px; font-weight:800; letter-spacing:.02em;
+  }
+  .tier-step{
+    border-left:2px solid var(--sokrat-green-200); padding:6px 0 6px 12px;
+    margin-bottom:6px; font-size:13px; color:var(--sokrat-fg2);
+  }
+  .tier-step b{ color:var(--sokrat-fg1); font-weight:700 }
+
+  .tier-caption{ font-size:12px; color:var(--sokrat-fg3); margin-bottom:16px; min-height:24px }
+  .tier-features{
+    list-style:none; padding:0; margin:0 0 22px; display:flex; flex-direction:column; gap:8px;
+    flex:1;
+  }
+  .tier-features li{
+    font-size:13px; color:var(--sokrat-fg2); line-height:1.45; padding-left:20px; position:relative;
+  }
+  .tier-features li::before{
+    content:"✓"; position:absolute; left:0; top:0; color:var(--sokrat-green-700); font-weight:700;
+  }
+  .tier-cta{
+    display:inline-flex; align-items:center; justify-content:center;
+    min-height:44px; padding:0 16px; border-radius:var(--sokrat-radius-sm);
+    font-size:14px; font-weight:600; text-decoration:none; cursor:pointer;
+    transition:background-color .15s;
+  }
+  .tier-cta-primary{ background:var(--sokrat-green-700); color:#fff }
+  .tier-cta-primary:hover{ background:var(--sokrat-green-800) }
+  .tier-cta-secondary{ background:transparent; color:var(--sokrat-green-700); border:1px solid var(--sokrat-green-200) }
+  .tier-cta-secondary:hover{ background:var(--sokrat-green-50) }
+  .tier-cta-microcopy{
+    margin-top:10px; font-size:11px; color:var(--sokrat-fg3); text-align:center; line-height:1.4;
+  }
+
+  .pricing-fineprint{
+    max-width:680px; margin:32px auto 0; text-align:center;
+    font-size:13px; color:var(--sokrat-fg3); line-height:1.6;
+  }
+  .pricing-extra-row{
+    display:grid; grid-template-columns:1fr 1fr; gap:18px;
+    max-width:1080px; margin:24px auto 0;
+  }
+  @media (max-width:680px){ .pricing-extra-row{grid-template-columns:1fr} }
+  .extra-card{
+    background:var(--sokrat-surface); border:1px solid var(--sokrat-border);
+    border-radius:var(--sokrat-radius-lg); padding:20px;
+    display:flex; align-items:center; gap:16px;
+  }
+  .extra-card .ec-emoji{ font-size:28px; flex-shrink:0 }
+  .extra-card .ec-title{ font-size:14px; font-weight:600; margin-bottom:2px }
+  .extra-card .ec-sub{ font-size:13px; color:var(--sokrat-fg3) }
+  .extra-card a{ color:var(--sokrat-green-700); font-weight:600; text-decoration:none }
+  .extra-card a:hover{ text-decoration:underline }
+
+  /* ───────────── 3. SIGNUP ───────────── */
+  .signup{
+    background:var(--sokrat-surface);
+    padding:48px 32px;
+    display:grid; grid-template-columns:1fr 1fr; gap:32px;
+  }
+  @media (max-width:880px){ .signup{grid-template-columns:1fr} }
+  .signup-form-wrap{
+    background:var(--sokrat-card); border:1px solid var(--sokrat-border);
+    border-radius:var(--sokrat-radius-lg); padding:32px;
+  }
+  .signup-form-wrap h3{
+    margin:0 0 6px; font-size:22px; font-weight:700; color:var(--sokrat-green-800);
+  }
+  .signup-form-wrap .micro{
+    margin:0 0 24px; font-size:14px; color:var(--sokrat-fg3);
+  }
+  .field{
+    display:flex; flex-direction:column; gap:6px; margin-bottom:18px;
+  }
+  .field label{
+    font-size:13px; font-weight:600; color:var(--sokrat-fg2);
+  }
+  .field input, .field select{
+    height:46px; padding:0 14px; border:1px solid var(--sokrat-border);
+    border-radius:8px; font-size:16px; font-family:inherit; background:var(--sokrat-card);
+    transition:border-color .15s, box-shadow .15s;
+  }
+  .field input:focus, .field select:focus{
+    outline:none; border-color:var(--sokrat-green-700);
+    box-shadow:0 0 0 3px rgba(27,107,74,.15);
+  }
+  .checkbox-row{
+    display:flex; align-items:flex-start; gap:10px; margin:12px 0 22px;
+    font-size:13px; color:var(--sokrat-fg2); line-height:1.5;
+  }
+  .checkbox-row input{ margin-top:2px }
+  .checkbox-row a{ color:var(--sokrat-green-700); text-decoration:underline }
+  .signup-cta{
+    width:100%; min-height:52px; background:var(--sokrat-green-700); color:#fff;
+    border:none; border-radius:10px; font-size:16px; font-weight:700; cursor:pointer;
+    transition:background-color .15s;
+  }
+  .signup-cta:hover{ background:var(--sokrat-green-800) }
+  .signup-divider{
+    display:flex; align-items:center; gap:14px; margin:18px 0; color:var(--sokrat-fg3); font-size:12px;
+  }
+  .signup-divider::before, .signup-divider::after{
+    content:""; flex:1; height:1px; background:var(--sokrat-border);
+  }
+  .signup-tg-btn{
+    width:100%; min-height:46px; background:#fff; color:var(--sokrat-fg1);
+    border:1px solid var(--sokrat-border); border-radius:10px; font-size:14px; font-weight:600; cursor:pointer;
+    display:flex; align-items:center; justify-content:center; gap:8px;
+    transition:border-color .15s, background-color .15s;
+    font-family:inherit;
+  }
+  .signup-tg-btn:hover{ border-color:var(--sokrat-green-700); background:var(--sokrat-green-50) }
+  .signup-tg-btn .tg-icon{
+    display:inline-flex; width:20px; height:20px; align-items:center; justify-content:center;
+    background:#229ED9; color:#fff; border-radius:50%; font-size:11px; font-weight:700;
+  }
+
+  .signup-side{
+    padding:8px 0;
+  }
+  .signup-side h4{
+    margin:0 0 14px; font-size:13px; font-weight:700; text-transform:uppercase;
+    letter-spacing:.06em; color:var(--sokrat-green-700);
+  }
+  .signup-side h3{
+    margin:0 0 18px; font-size:22px; font-weight:700; color:var(--sokrat-fg1); line-height:1.3;
+  }
+  .signup-perks{
+    list-style:none; padding:0; margin:0 0 24px;
+    display:flex; flex-direction:column; gap:14px;
+  }
+  .signup-perks li{
+    display:flex; gap:12px; align-items:flex-start; font-size:14px; color:var(--sokrat-fg2); line-height:1.5;
+  }
+  .signup-perks .icon-bg{
+    flex-shrink:0; width:32px; height:32px; border-radius:8px;
+    background:var(--sokrat-green-100); color:var(--sokrat-green-700);
+    display:flex; align-items:center; justify-content:center; font-size:16px; font-weight:700;
+  }
+  .signup-perks b{ color:var(--sokrat-fg1); font-weight:600 }
+
+  .signup-after-trial{
+    background:#fff; border:1px solid var(--sokrat-border);
+    border-radius:var(--sokrat-radius-lg); padding:20px;
+    font-size:13px; color:var(--sokrat-fg2); line-height:1.6;
+  }
+  .signup-after-trial b{ color:var(--sokrat-fg1) }
+  .signup-after-trial .label{
+    display:inline-block; background:var(--sokrat-ochre-100); color:var(--sokrat-ochre-700);
+    padding:3px 8px; border-radius:6px; font-size:11px; font-weight:700; text-transform:uppercase;
+    letter-spacing:.06em; margin-bottom:8px;
+  }
+
+  /* ───────────── 4. IN-APP BANNER ───────────── */
+  .inapp-frame{
+    background:#F8FAFC; padding:32px;
+    border-bottom:1px solid var(--sokrat-border);
+  }
+  .inapp-trial-banner{
+    background:linear-gradient(90deg, var(--sokrat-green-700) 0%, var(--sokrat-green-800) 100%);
+    color:#fff; padding:14px 24px;
+    display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:16px;
+    border-radius:10px;
+  }
+  .inapp-trial-banner .gift{ font-size:22px }
+  .inapp-trial-banner .text{ flex:1; min-width:200px; font-size:14px; line-height:1.4 }
+  .inapp-trial-banner .text b{ font-weight:700 }
+  .inapp-trial-banner .progress{
+    flex-shrink:0; min-width:140px;
+  }
+  .inapp-trial-banner .progress-bar{
+    height:6px; background:rgba(255,255,255,.25); border-radius:99px; overflow:hidden;
+    margin-bottom:4px;
+  }
+  .inapp-trial-banner .progress-fill{
+    height:100%; background:#fff; width:71%;
+  }
+  .inapp-trial-banner .progress-label{ font-size:11px; opacity:.85 }
+  .inapp-trial-banner .cta{
+    background:#fff; color:var(--sokrat-green-800);
+    padding:8px 16px; border-radius:8px; font-size:13px; font-weight:600;
+    text-decoration:none; cursor:pointer;
+  }
+  .inapp-trial-banner .cta:hover{ background:var(--sokrat-green-50) }
+
+  .inapp-mock-content{
+    margin-top:24px; padding:24px;
+    background:#fff; border:1px dashed var(--sokrat-border); border-radius:10px;
+    color:var(--sokrat-fg3); font-size:13px; text-align:center;
+  }
+
+  /* ───────────── 5. EXPIRATION MODAL ───────────── */
+  .expir-bg{
+    background:#0F172A; padding:48px;
+    display:flex; align-items:center; justify-content:center;
+    min-height:540px;
+    background-image:
+      radial-gradient(circle at 25% 20%, rgba(27,107,74,.18) 0%, transparent 50%),
+      radial-gradient(circle at 75% 80%, rgba(232,145,58,.12) 0%, transparent 50%);
+  }
+  .expir-modal{
+    width:100%; max-width:540px;
+    background:var(--sokrat-card); border-radius:var(--sokrat-radius-xl);
+    padding:32px;
+    box-shadow:var(--sokrat-shadow-elegant);
+  }
+  .expir-modal .badge{
+    display:inline-block; padding:4px 10px; background:var(--sokrat-ochre-100);
+    color:var(--sokrat-ochre-700); border-radius:var(--sokrat-radius-full);
+    font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.06em;
+    margin-bottom:14px;
+  }
+  .expir-modal h3{
+    margin:0 0 8px; font-size:22px; font-weight:700; color:var(--sokrat-green-800);
+  }
+  .expir-modal p.sub{
+    margin:0 0 22px; font-size:14px; color:var(--sokrat-fg3); line-height:1.5;
+  }
+  .expir-stats{
+    display:grid; grid-template-columns:repeat(3, 1fr); gap:10px;
+    margin-bottom:22px;
+  }
+  .stat{
+    background:var(--sokrat-green-50); border:1px solid var(--sokrat-green-100);
+    border-radius:10px; padding:14px 12px; text-align:center;
+  }
+  .stat .num{
+    font-size:24px; font-weight:700; color:var(--sokrat-green-800); line-height:1; margin-bottom:4px;
+  }
+  .stat .lbl{
+    font-size:11px; color:var(--sokrat-fg3); line-height:1.3;
+  }
+  .expir-pricing-card{
+    background:#FEF3E1; border:2px solid var(--sokrat-ochre-500);
+    border-radius:var(--sokrat-radius-lg); padding:18px 20px;
+    margin-bottom:14px;
+    display:flex; align-items:center; justify-content:space-between; gap:16px; flex-wrap:wrap;
+  }
+  .expir-pricing-card .price-line{
+    flex:1; min-width:200px;
+  }
+  .expir-pricing-card .price-line .small{
+    font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.06em;
+    color:var(--sokrat-ochre-700); margin-bottom:4px;
+  }
+  .expir-pricing-card .price-line .big{
+    font-size:26px; font-weight:700; color:var(--sokrat-fg1); line-height:1; margin-bottom:4px;
+  }
+  .expir-pricing-card .price-line .big s{ color:var(--sokrat-fg3); opacity:.7; font-size:18px; margin-right:6px }
+  .expir-pricing-card .price-line .micro{
+    font-size:12px; color:var(--sokrat-fg3);
+  }
+  .expir-pricing-card .cta{
+    background:var(--sokrat-green-700); color:#fff;
+    min-height:46px; padding:0 22px; border-radius:8px;
+    font-size:14px; font-weight:700; text-decoration:none;
+    display:inline-flex; align-items:center; justify-content:center; flex-shrink:0;
+  }
+  .expir-pricing-card .cta:hover{ background:var(--sokrat-green-800) }
+  .expir-secondary{
+    width:100%; background:transparent; color:var(--sokrat-fg2);
+    border:1px solid var(--sokrat-border); border-radius:8px;
+    min-height:42px; padding:0 16px; font-size:13px; font-weight:500; cursor:pointer; font-family:inherit;
+  }
+  .expir-secondary:hover{ background:var(--sokrat-surface) }
+  .expir-fine{
+    margin:14px 0 0; font-size:11px; color:var(--sokrat-fg3); text-align:center;
+  }
+
+  /* ───────────── 6. TG WELCOME ───────────── */
+  .tg-frame{
+    background:#17212B; padding:48px;
+    display:flex; align-items:flex-start; justify-content:center;
+  }
+  .tg-phone{
+    width:380px; max-width:100%;
+    background:#0E1621; border-radius:24px;
+    overflow:hidden; box-shadow:0 24px 64px rgba(0,0,0,.4);
+    border:1px solid #2A3441;
+  }
+  .tg-header{
+    background:#17212B; padding:14px 16px;
+    display:flex; align-items:center; gap:12px;
+    border-bottom:1px solid #1F2C39;
+  }
+  .tg-avatar{
+    width:40px; height:40px; border-radius:50%;
+    background:linear-gradient(135deg,var(--sokrat-green-700), var(--sokrat-green-800));
+    display:flex; align-items:center; justify-content:center; color:#fff; font-weight:700; font-size:14px;
+    flex-shrink:0;
+  }
+  .tg-title{ color:#fff; font-size:14px; font-weight:600 }
+  .tg-status{ color:#7B8893; font-size:11px }
+  .tg-body{
+    padding:14px 12px;
+    display:flex; flex-direction:column; gap:8px;
+    background:#0E1621;
+    min-height:480px;
+  }
+  .tg-msg{
+    background:#182533; color:#E5E5E5;
+    padding:10px 12px; border-radius:14px 14px 14px 4px;
+    max-width:85%; font-size:13px; line-height:1.5;
+    align-self:flex-start;
+  }
+  .tg-msg .bot-name{ color:var(--sokrat-green-200); font-size:11px; font-weight:600; margin-bottom:4px }
+  .tg-msg em{ color:#7B8893; font-style:italic }
+  .tg-msg .meta{ color:#7B8893; font-size:10px; margin-top:6px; text-align:right }
+  .tg-buttons{
+    display:flex; flex-direction:column; gap:5px; margin-top:8px;
+    align-self:stretch; max-width:85%;
+  }
+  .tg-btn{
+    background:#2A6B4A; color:#fff;
+    padding:10px; border-radius:8px;
+    text-align:center; font-size:13px; font-weight:500; cursor:pointer;
+    transition:background-color .15s;
+  }
+  .tg-btn:hover{ background:#1B6B4A }
+  .tg-btn.outline{
+    background:#1F2C39; color:#9FCFB8; border:1px solid #2A6B4A;
+  }
+  .tg-btn.outline:hover{ background:#243240 }
+
+  /* ───────────── 7. FLOW DIAGRAM ───────────── */
+  .flow{
+    padding:48px 32px; background:var(--sokrat-card);
+  }
+  .flow-grid{
+    display:grid; grid-template-columns:repeat(7, 1fr); gap:8px; max-width:1100px; margin:0 auto;
+    align-items:stretch;
+  }
+  @media (max-width:1024px){ .flow-grid{grid-template-columns:repeat(3, 1fr)} }
+  @media (max-width:580px){ .flow-grid{grid-template-columns:1fr} }
+  .flow-step{
+    background:var(--sokrat-surface); border:1px solid var(--sokrat-border);
+    border-radius:10px; padding:14px 12px;
+    font-size:12px; line-height:1.45; color:var(--sokrat-fg2);
+    display:flex; flex-direction:column; gap:6px;
+  }
+  .flow-step.gate{ background:var(--sokrat-ochre-100); border-color:var(--sokrat-ochre-500) }
+  .flow-step.success{ background:var(--sokrat-green-50); border-color:var(--sokrat-green-200) }
+  .flow-step .day{
+    font-size:10px; font-weight:700; text-transform:uppercase; letter-spacing:.06em;
+    color:var(--sokrat-green-700);
+  }
+  .flow-step.gate .day{ color:var(--sokrat-ochre-700) }
+  .flow-step .title{
+    font-size:13px; font-weight:600; color:var(--sokrat-fg1);
+  }
+  .flow-step .channel{
+    display:inline-block; background:#fff; border:1px solid var(--sokrat-border);
+    padding:1px 6px; border-radius:99px; font-size:10px; color:var(--sokrat-fg3);
+    margin-right:4px; margin-top:4px;
+  }
+  .flow-key{
+    display:flex; gap:14px; flex-wrap:wrap; justify-content:center;
+    margin-top:24px; font-size:12px; color:var(--sokrat-fg3);
+  }
+  .flow-key span::before{
+    content:""; display:inline-block; width:10px; height:10px; border-radius:50%; margin-right:6px;
+    vertical-align:middle;
+  }
+  .flow-key .k1::before{ background:var(--sokrat-surface); border:1px solid var(--sokrat-border) }
+  .flow-key .k2::before{ background:var(--sokrat-ochre-100); border:1px solid var(--sokrat-ochre-500) }
+  .flow-key .k3::before{ background:var(--sokrat-green-50); border:1px solid var(--sokrat-green-200) }
+
+  /* ───────────── Footer ───────────── */
+  .doc-footer{
+    margin-top:48px; padding:32px;
+    background:#1E293B; color:#94A3B8;
+    text-align:center; font-size:13px; line-height:1.6;
+  }
+  .doc-footer a{ color:#CBD5E1; text-decoration:underline }
+  .doc-footer .small{ font-size:11px; opacity:.7; margin-top:8px }
+</style>
+</head>
+<body>
+
+<div class="doc-header">
+  <div>
+    <h1>Sokrat AI · Trial-флоу для репетиторов</h1>
+    <div class="meta">Макеты к лендингу sokratai.ru — 7 дней бесплатно → 200 ₽ → стандартные тарифы</div>
+  </div>
+  <div class="meta">Май 2026</div>
+</div>
+
+<nav class="doc-nav">
+  <span class="lbl">Surfaces:</span>
+  <a href="#s1">1. Hero</a>
+  <a href="#s2">2. Pricing</a>
+  <a href="#s3">3. Signup</a>
+  <a href="#s4">4. In-app banner</a>
+  <a href="#s5">5. Day-7 modal</a>
+  <a href="#s6">6. TG welcome</a>
+  <a href="#s7">7. Flow diagram</a>
+</nav>
+
+<!-- ═══════════════════ 1. HERO ═══════════════════ -->
+<section class="surface" id="s1">
+  <div class="surface-label">
+    <span class="num">Surface 1</span>
+    <h2>Hero — обновлённый</h2>
+    <span class="sub">Замена на src/components/sections/tutor/Hero.tsx</span>
+  </div>
+  <div class="surface-note">
+    <strong>Что меняется vs текущая версия:</strong> primary CTA стал «7 дней бесплатно» (вместо «Попробовать за 200 ₽»). 200 ₽ переехал ниже в trust-ribbon как «следующий шаг», а не первое препятствие. Добавлен compare-блок «было/стало» — он закрывает сомнение «это что, реально free?». Telegram-кнопка стилизована под фирменный TG-blue, чтобы её сразу узнавали.
+  </div>
+  <div class="canvas">
+    <section class="hero">
+      <span class="hero-chip">
+        <span class="dot"></span>
+        Новое: 7 дней пробного периода без карты
+      </span>
+
+      <h1>Инструмент репетитора. От&nbsp;репетитора.</h1>
+
+      <p class="lede">
+        AI проверяет рукописные ДЗ по физике, математике и информатике. Ведёт ученика
+        сократовским диалогом вместо готового ответа. Собирает ДЗ из вашей базы за 5 минут.
+      </p>
+      <p class="byline">
+        Создатели — Егор Блинов (преподаватель МФТИ, дважды 100-балльник ЕГЭ, основатель
+        онлайн-школы Razveday.ru) и Владимир Камчаткин (МФТИ, Фоксфорд, Т-Образование).
+      </p>
+
+      <div class="hero-ctas">
+        <a class="btn btn-primary" href="#s3">
+          🎁&nbsp;&nbsp;Попробовать 7 дней бесплатно
+        </a>
+        <a class="btn btn-tg" href="#s6">
+          Канал Егора&nbsp;&nbsp;→
+        </a>
+      </div>
+
+      <ul class="hero-trust">
+        <li><span class="check">✓</span> Без карты</li>
+        <li><span class="check">✓</span> Полный AI-доступ</li>
+        <li><span class="check">✓</span> Потом 200 ₽ — первый месяц</li>
+        <li><span class="check">✓</span> Отмена в один клик</li>
+      </ul>
+
+      <div class="hero-compare">
+        <div class="was">
+          <b>Было</b>
+          Сразу платите <s>200 ₽</s> в первый месяц.<br/>
+          Не понимаете, подходит ли — но карту привязали.
+        </div>
+        <div class="now">
+          <b>Стало</b>
+          <strong>7 дней бесплатно — без карты.</strong><br/>
+          Понравится — продолжите за 200 ₽ на месяц. Нет — базовая платформа (оплаты, расписание) останется.
+        </div>
+      </div>
+    </section>
+  </div>
+</section>
+
+<!-- ═══════════════════ 2. PRICING ═══════════════════ -->
+<section class="surface" id="s2">
+  <div class="surface-label">
+    <span class="num">Surface 2</span>
+    <h2>Pricing — упрощён до 3 главных карточек</h2>
+    <span class="sub">Замена на src/components/sections/tutor/Pricing.tsx</span>
+  </div>
+  <div class="surface-note">
+    <strong>Что меняется:</strong> текущие 5 карточек слиты в 3 главных + 2 дополнительных. Карточка «AI-старт» теперь рассказывает <em>всю воронку</em> — trial → 200 ₽ → 1000 ₽/мес — последовательно, как лестница, чтобы пользователь видел весь путь сразу. Карточки «AI-плюс» и «AI-про» убраны из хайлайта (они нужны для тех, у кого &gt; 10 учеников; новички должны сразу видеть trial).
+  </div>
+  <div class="canvas">
+    <section class="pricing">
+      <div class="pricing-head">
+        <h2>Начните бесплатно. Масштабируйтесь — когда AI окупит себя.</h2>
+        <p>Базовая платформа (оплаты, расписание, профили) всегда бесплатна. AI-проверка ДЗ — отдельной подпиской.</p>
+      </div>
+
+      <div class="pricing-grid">
+
+        <!-- 1. Free -->
+        <article class="tier">
+          <div class="tier-label">Бесплатно</div>
+          <div class="tier-price-stack">
+            <div class="tier-price-line">
+              <span class="tier-price-now">0 ₽</span>
+            </div>
+            <div class="tier-caption">навсегда, без карты</div>
+          </div>
+          <ul class="tier-features">
+            <li>Оплаты учеников + команда <code style="background:var(--sokrat-green-100); color:var(--sokrat-green-800); padding:1px 5px; border-radius:4px; font-size:12px; font-family:ui-monospace,Menlo,monospace">/pay</code> в Telegram</li>
+            <li>Расписание + автонапоминания</li>
+            <li>Профили учеников, группы, история</li>
+            <li>Заметки для себя</li>
+          </ul>
+          <a href="#s3" class="tier-cta tier-cta-secondary">Начать бесплатно</a>
+          <div class="tier-cta-microcopy">Без AI. Без карты.</div>
+        </article>
+
+        <!-- 2. AI-Trial -->
+        <article class="tier tier-highlighted">
+          <span class="tier-popular">7 дней бесплатно</span>
+          <div class="tier-label">AI-старт</div>
+
+          <div class="tier-price-stack">
+            <div class="tier-step"><b>Сегодня:</b> 0 ₽ — 7 дней полного AI-доступа</div>
+            <div class="tier-price-line">
+              <span class="tier-price-old">1 000 ₽/мес</span>
+              <span class="tier-savings">−80%</span>
+            </div>
+            <div class="tier-price-line">
+              <span class="tier-price-now tier-price-now-ochre">200 ₽</span>
+            </div>
+            <div class="tier-caption">первый месяц после trial — экономия 800 ₽</div>
+            <div class="tier-step"><b>Со 2-го месяца:</b> от 1 000 ₽/мес <span style="opacity:.7">по числу учеников</span></div>
+          </div>
+
+          <ul class="tier-features">
+            <li>Всё из «Бесплатно»</li>
+            <li>AI-проверка рукописных ДЗ</li>
+            <li>Сократовский AI-диалог с учениками</li>
+            <li>Конструктор ДЗ с привязкой к ФИПИ</li>
+            <li>Отчёты родителям</li>
+          </ul>
+          <a href="#s3" class="tier-cta tier-cta-primary">🎁&nbsp;&nbsp;Начать пробный — без карты</a>
+          <div class="tier-cta-microcopy">Через 7 дней спросим, продолжать ли. Не списываем сами.</div>
+        </article>
+
+        <!-- 3. AI-team -->
+        <article class="tier">
+          <div class="tier-label">AI-команда</div>
+          <div class="tier-price-stack">
+            <div class="tier-price-line">
+              <span class="tier-price-now">от 3 000 ₽</span>
+              <span style="font-size:14px; color:var(--sokrat-fg3); font-weight:400">/мес</span>
+            </div>
+            <div class="tier-caption">для онлайн-школ и репетиторов 20+ учеников</div>
+          </div>
+          <ul class="tier-features">
+            <li>20+ учеников на AI-слое</li>
+            <li>Группы и команды репетиторов в одном аккаунте</li>
+            <li>White-label для онлайн-школ</li>
+            <li>Персональный онбординг команды</li>
+            <li>Приоритетная поддержка</li>
+          </ul>
+          <a href="https://t.me/Analyst_Vladimir" target="_blank" rel="noopener" class="tier-cta tier-cta-secondary">Связаться</a>
+          <div class="tier-cta-microcopy">Договорная цена + расширенная поддержка</div>
+        </article>
+
+      </div>
+
+      <!-- second row: in-between tiers as compact cards -->
+      <div class="pricing-extra-row">
+        <div class="extra-card">
+          <div class="ec-emoji">🔟</div>
+          <div>
+            <div class="ec-title">До 10 учеников на AI?</div>
+            <div class="ec-sub">Со 2-го месяца — <b>1 000 ₽/мес</b> · <a href="#s2">подробнее →</a></div>
+          </div>
+        </div>
+        <div class="extra-card">
+          <div class="ec-emoji">2️⃣0️⃣</div>
+          <div>
+            <div class="ec-title">До 20 учеников на AI?</div>
+            <div class="ec-sub">Со 2-го месяца — <b>2 000 ₽/мес</b> · <a href="#s2">подробнее →</a></div>
+          </div>
+        </div>
+      </div>
+
+      <p class="pricing-fineprint">
+        Trial без карты — мы не списываем автоматически. Через 7 дней покажем, что вы получили,
+        и спросим, продолжать ли. Если нет — AI-слой выключится, базовая платформа останется.
+      </p>
+    </section>
+  </div>
+</section>
+
+<!-- ═══════════════════ 3. SIGNUP ═══════════════════ -->
+<section class="surface" id="s3">
+  <div class="surface-label">
+    <span class="num">Surface 3</span>
+    <h2>Signup — единая страница trial-регистрации</h2>
+    <span class="sub">Новый компонент: src/pages/TutorSignupTrial.tsx → /signup?ref=tutor-landing&trial=7</span>
+  </div>
+  <div class="surface-note">
+    <strong>Что важно:</strong> single-page форма, никаких step-by-step. Email + пароль <em>или</em> Telegram OAuth (он уже работает в проекте — переиспользовать <code>TelegramLoginButton</code>). Поле «что преподаёте?» — для onboarding, не для гейтинга. Карту НЕ просим. Справа — короткий список «что вы получите за 7 дней» + блок «что после 7 дней». Закрывает страх auto-charge.
+  </div>
+  <div class="canvas">
+    <section class="signup">
+      <!-- form -->
+      <div class="signup-form-wrap">
+        <h3>Начать 7 дней бесплатно</h3>
+        <p class="micro">Без карты. Полный доступ к AI-проверке ДЗ и сократовскому чату.</p>
+
+        <div class="field">
+          <label for="email">Email</label>
+          <input id="email" type="email" placeholder="ваш@email.ru" />
+        </div>
+
+        <div class="field">
+          <label for="password">Придумайте пароль</label>
+          <input id="password" type="password" placeholder="Минимум 8 символов" />
+        </div>
+
+        <div class="field">
+          <label for="subject">Что преподаёте?</label>
+          <select id="subject">
+            <option>Физика</option>
+            <option>Математика</option>
+            <option>Информатика</option>
+            <option>Несколько предметов</option>
+            <option>Другое</option>
+          </select>
+        </div>
+
+        <div class="checkbox-row">
+          <input type="checkbox" id="oferta" checked />
+          <label for="oferta">Согласен с <a href="#">офертой</a> и <a href="#">политикой обработки данных</a></label>
+        </div>
+
+        <button class="signup-cta">Начать 7 дней бесплатно</button>
+
+        <div class="signup-divider">или</div>
+
+        <button class="signup-tg-btn">
+          <span class="tg-icon">TG</span>
+          Войти через Telegram
+        </button>
+      </div>
+
+      <!-- side -->
+      <aside class="signup-side">
+        <h4>Что включено в trial</h4>
+        <h3>Полный AI-доступ — как у платных тарифов. Никаких лимитов.</h3>
+
+        <ul class="signup-perks">
+          <li>
+            <span class="icon-bg">📷</span>
+            <span><b>AI-проверка рукописных ДЗ</b> · фотографируете решение ученика — AI находит ошибки и пишет, где именно сбился ход решения.</span>
+          </li>
+          <li>
+            <span class="icon-bg">💬</span>
+            <span><b>Сократовский AI-чат для учеников</b> · ученик решает с AI — AI задаёт наводящие вопросы, не выдаёт ответ. Списать у ChatGPT не получится.</span>
+          </li>
+          <li>
+            <span class="icon-bg">🧰</span>
+            <span><b>Конструктор ДЗ из базы 1 200+ задач</b> · собираете подборку под тему за 5 минут. Привязка к номерам ФИПИ.</span>
+          </li>
+          <li>
+            <span class="icon-bg">📊</span>
+            <span><b>Отчёты родителям</b> · еженедельные дайджесты автоматически — в Telegram или email родителям.</span>
+          </li>
+        </ul>
+
+        <div class="signup-after-trial">
+          <span class="label">После 7 дней</span>
+          <p style="margin:0">
+            Покажем, что вы получили: <b>сколько ДЗ AI проверил, сколько часов сэкономили</b>. И спросим: продолжить за <b>200 ₽ первый месяц</b>? Нет — базовая платформа (оплаты, расписание, профили) останется бесплатной.
+          </p>
+          <p style="margin:10px 0 0; color:var(--sokrat-fg3); font-size:12px">
+            Никаких автосписаний. Карту вы привязываете только если соглашаетесь продолжить.
+          </p>
+        </div>
+      </aside>
+    </section>
+  </div>
+</section>
+
+<!-- ═══════════════════ 4. IN-APP BANNER ═══════════════════ -->
+<section class="surface" id="s4">
+  <div class="surface-label">
+    <span class="num">Surface 4</span>
+    <h2>In-app banner во время trial</h2>
+    <span class="sub">Новый компонент: src/components/tutor/TrialCountdownBanner.tsx — top-bar в AppFrame на день 1–6</span>
+  </div>
+  <div class="surface-note">
+    <strong>Что важно:</strong> ненавязчивая полоска сверху в кабинете репетитора (внутри <code>AppFrame</code>). Показывает оставшееся время + один CTA «посмотреть тариф». Прогресс-бар добавляет ощущение «время идёт». Не показываем после оплаты или после downgrade на free. На день 7 заменяется на модалку (Surface 5).
+  </div>
+  <div class="canvas">
+    <section class="inapp-frame">
+      <div class="inapp-trial-banner">
+        <span class="gift">🎁</span>
+        <div class="text">
+          <b>Trial: осталось 5 из 7 дней.</b><br/>
+          Создано 12 ДЗ, AI проверил 47 работ — экономия примерно 4 часа.
+        </div>
+        <div class="progress">
+          <div class="progress-bar"><div class="progress-fill"></div></div>
+          <div class="progress-label">2 дня прошло · 5 осталось</div>
+        </div>
+        <a href="#s5" class="cta">Посмотреть тариф</a>
+      </div>
+
+      <div class="inapp-mock-content">
+        ↓ дальше — обычная страница «Главная» репетитора (обзор учеников, ДЗ, расписание) ↓
+      </div>
+    </section>
+  </div>
+</section>
+
+<!-- ═══════════════════ 5. EXPIRATION MODAL ═══════════════════ -->
+<section class="surface" id="s5">
+  <div class="surface-label">
+    <span class="num">Surface 5</span>
+    <h2>Day 7 — конверсионная модалка</h2>
+    <span class="sub">Новый компонент: src/components/tutor/TrialExpiredDialog.tsx — Radix Dialog с blocking overlay</span>
+  </div>
+  <div class="surface-note">
+    <strong>Что важно:</strong> показывается ровно 1 раз — при первом входе после истечения trial. Сначала <em>summary value</em> («сколько ДЗ AI проверил, сколько часов сэкономлено»), потом оффер. Это эмоциональный пик: репетитор видит, что AI РЕАЛЬНО сэкономил его время — и сильно проще соглашается. Кнопка «Остаться на бесплатной» <strong>не</strong> CTA-confidence — серая, без активного hover, чтобы не конкурировала с primary.
+  </div>
+  <div class="canvas">
+    <section class="expir-bg">
+      <div class="expir-modal">
+        <span class="badge">7 дней пройдены</span>
+        <h3>Спасибо, что попробовали!</h3>
+        <p class="sub">Вот что вы получили за trial:</p>
+
+        <div class="expir-stats">
+          <div class="stat">
+            <div class="num">23</div>
+            <div class="lbl">ДЗ создано</div>
+          </div>
+          <div class="stat">
+            <div class="num">94</div>
+            <div class="lbl">работ проверил AI</div>
+          </div>
+          <div class="stat">
+            <div class="num">~6 ч</div>
+            <div class="lbl">сэкономлено</div>
+          </div>
+        </div>
+
+        <div class="expir-pricing-card">
+          <div class="price-line">
+            <div class="small">Продолжить за</div>
+            <div class="big"><s>1 000 ₽</s>200 ₽</div>
+            <div class="micro">первый месяц · потом 1 000 ₽/мес · отмена в один клик</div>
+          </div>
+          <a href="#" class="cta">Продолжить за 200 ₽&nbsp;&nbsp;→</a>
+        </div>
+
+        <button class="expir-secondary">
+          Остаться на бесплатной (только оплаты + расписание)
+        </button>
+
+        <p class="expir-fine">
+          Передумаете — вернёте AI в один клик в настройках. Базовая платформа в любом случае останется бесплатной.
+        </p>
+      </div>
+    </section>
+  </div>
+</section>
+
+<!-- ═══════════════════ 6. TG WELCOME ═══════════════════ -->
+<section class="surface" id="s6">
+  <div class="surface-label">
+    <span class="num">Surface 6</span>
+    <h2>Telegram-канал — низкокоммитментный путь для скептиков</h2>
+    <span class="sub">Что репетитор видит, кликнув на «Канал Егора →» с лендинга</span>
+  </div>
+  <div class="surface-note">
+    <strong>Зачем это нужно:</strong> часть репетиторов <em>не готова</em> регистрироваться сразу — нужен прогрев через контент. ТГ-канал = warmup. Welcome-сообщение от бота даёт три пути: «попробовать в кабинете», «пост о методе», «вопрос Егору». Это конвертирует часть TG-аудитории в trial без посредничества лендинга.
+    <br/><br/>
+    <strong>Реализация:</strong> сейчас «Канал Егора» — просто ссылка <code>t.me/sokrat_rep</code>. Добавить welcome-bot с inline-кнопками в <code>supabase/functions/telegram-bot/index.ts</code>: при <code>/start</code> от unidentified user без существующей сессии — отправлять welcome-серию. Pinned post в самом канале — отдельная задача для Егора.
+  </div>
+  <div class="canvas">
+    <section class="tg-frame">
+      <div class="tg-phone">
+        <div class="tg-header">
+          <div class="tg-avatar">СА</div>
+          <div>
+            <div class="tg-title">Сократ AI · Бот для репетиторов</div>
+            <div class="tg-status">бот · в сети</div>
+          </div>
+        </div>
+        <div class="tg-body">
+          <div class="tg-msg">
+            <div class="bot-name">Сократ AI</div>
+            Привет! 👋 Ты по ссылке с <em>sokratai.ru</em>?<br/><br/>
+            Я — бот Сократа AI. Помогаю репетиторам автоматизировать проверку ДЗ и вести учеников сократовским методом.
+            <div class="meta">14:23</div>
+          </div>
+
+          <div class="tg-msg">
+            <div class="bot-name">Сократ AI</div>
+            Что хочешь сделать?
+            <div class="meta">14:23</div>
+          </div>
+
+          <div class="tg-buttons">
+            <div class="tg-btn">🎁&nbsp;&nbsp;Попробовать бесплатно — 7 дней</div>
+            <div class="tg-btn outline">📚 Прочитать, как работает метод (3 поста)</div>
+            <div class="tg-btn outline">❓ Задать вопрос Егору лично</div>
+          </div>
+
+          <div class="tg-msg" style="margin-top:14px">
+            <div class="bot-name">Сократ AI</div>
+            Если хочешь сначала просто почитать — листай канал. Закреплённые посты:
+            <br/>1. <em>Зачем репетитору AI и почему ChatGPT не помогает</em>
+            <br/>2. <em>Как мы сделали так, что AI не выдаёт ответы</em>
+            <br/>3. <em>Кейсы: как репетиторы экономят 4–6 часов в неделю</em>
+            <div class="meta">14:23</div>
+          </div>
+        </div>
+      </div>
+    </section>
+  </div>
+</section>
+
+<!-- ═══════════════════ 7. FLOW DIAGRAM ═══════════════════ -->
+<section class="surface" id="s7">
+  <div class="surface-label">
+    <span class="num">Surface 7</span>
+    <h2>End-to-end flow — touchpoints от лендинга до конверсии</h2>
+    <span class="sub">Каждый блок — UX-поверхность с владельцем; стрелка = автоматический переход</span>
+  </div>
+  <div class="surface-note">
+    <strong>Как читать:</strong> зелёные блоки — <em>положительный путь</em> (репетитор продолжает); жёлтые — <em>гейты</em> (требуют решения); серые — <em>состояния</em>. Cron-напоминалки внутри trial-периода обеспечивают, что репетитор не забудет про продукт. Email + push + TG (если он привязан) каскадом.
+  </div>
+  <div class="canvas">
+    <section class="flow">
+      <div class="flow-grid">
+        <div class="flow-step success">
+          <div class="day">Day 0</div>
+          <div class="title">Лендинг → клик «7 дней бесплатно»</div>
+          <span class="channel">web</span>
+        </div>
+        <div class="flow-step success">
+          <div class="day">Day 0 · Signup</div>
+          <div class="title">Email + пароль (или TG OAuth)</div>
+          <span class="channel">single-page form</span>
+        </div>
+        <div class="flow-step success">
+          <div class="day">Day 0 · Welcome</div>
+          <div class="title">Onboarding tour: «Создай первое ДЗ за 3 минуты»</div>
+          <span class="channel">in-app</span>
+          <span class="channel">email</span>
+        </div>
+        <div class="flow-step">
+          <div class="day">Day 1</div>
+          <div class="title">Push: «Создал ли первое ДЗ?»</div>
+          <span class="channel">push</span>
+          <span class="channel">email fallback</span>
+        </div>
+        <div class="flow-step">
+          <div class="day">Day 3</div>
+          <div class="title">Email: «Кейс репетитора Егора Ш.»</div>
+          <span class="channel">email</span>
+        </div>
+        <div class="flow-step">
+          <div class="day">Day 5</div>
+          <div class="title">Email: «Осталось 2 дня — что попробовать ещё»</div>
+          <span class="channel">email</span>
+          <span class="channel">push</span>
+        </div>
+        <div class="flow-step gate">
+          <div class="day">Day 7 · GATE</div>
+          <div class="title">Модалка: «Trial завершён · продолжить за 200 ₽?»</div>
+          <span class="channel">in-app</span>
+          <span class="channel">email</span>
+        </div>
+
+        <!-- second row -->
+        <div class="flow-step success">
+          <div class="day">Yes · ЮKassa</div>
+          <div class="title">Оплата 200 ₽</div>
+          <span class="channel">payment</span>
+        </div>
+        <div class="flow-step success">
+          <div class="day">Day 8 · Activated</div>
+          <div class="title">AI остаётся на месяц · цена дальше — по числу учеников</div>
+          <span class="channel">in-app</span>
+        </div>
+        <div class="flow-step success">
+          <div class="day">Day 30+</div>
+          <div class="title">Месяц закончился → autocharge по тарифу OR отмена в клик</div>
+          <span class="channel">payment</span>
+        </div>
+        <div class="flow-step">
+          <div class="day">Day 7 · No</div>
+          <div class="title">AI выключается. Базовая платформа остаётся.</div>
+          <span class="channel">in-app downgrade</span>
+        </div>
+        <div class="flow-step">
+          <div class="day">Day 14</div>
+          <div class="title">Email: «Ваши N учеников ждут AI-проверки — вернуться за 200 ₽?»</div>
+          <span class="channel">email</span>
+        </div>
+        <div class="flow-step">
+          <div class="day">Day 30</div>
+          <div class="title">Email: финальный nudge + кейс «как X репетиторов вернулись»</div>
+          <span class="channel">email</span>
+        </div>
+        <div class="flow-step">
+          <div class="day">Quiet</div>
+          <div class="title">Юзер на free-tier. Не спамим. Видит «Активировать AI» в кабинете.</div>
+          <span class="channel">in-app passive</span>
+        </div>
+      </div>
+
+      <div class="flow-key">
+        <span class="k1">Состояние / nudge</span>
+        <span class="k2">Гейт / решение</span>
+        <span class="k3">Положительный путь</span>
+      </div>
+    </section>
+  </div>
+</section>
+
+<div class="doc-footer">
+  Макеты к Trial-флоу для лендинга <a href="https://sokratai.ru/">sokratai.ru</a>.<br/>
+  Дополнительно: см. <code>trial-flow-recommendations.md</code> рядом с этим файлом — там вопросы к Vladimir и список конкретных файлов на изменение.
+  <div class="small">Дизайн-токены и шрифт (Golos Text) приближены к боевым; в репо они приходят из <code>src/styles/colors_and_type.css</code>.</div>
+</div>
+
+</body>
+</html>
