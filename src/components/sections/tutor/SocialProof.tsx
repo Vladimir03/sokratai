@@ -282,7 +282,7 @@ function CaseEgorCard() {
         <div className="relative">
           <img
             src="/marketing/tutor-landing/egor-student-feedback.jpg"
-            alt="Сообщение ученицы Егору в Telegram: «А вы случайно не преподаёте математику подготовка к ЕГЭ? Просто мне очень нравится, как вы преподносите материал, какие плюшки в виде сайтов, ИИ вы делаете…»"
+            alt="Сообщение ученика Егору в Telegram: «А вы случайно не преподаёте математику подготовка к ЕГЭ? Просто мне очень нравится, как вы преподносите материал, какие плюшки в виде сайтов, ИИ вы делаете…»"
             loading="lazy"
             className="w-full rounded-[10px] cursor-zoom-in"
             style={{
@@ -294,7 +294,7 @@ function CaseEgorCard() {
           <button
             type="button"
             onClick={() => setZoomed(true)}
-            aria-label="Увеличить сообщение ученицы"
+            aria-label="Увеличить сообщение ученика"
             className="absolute top-2 right-2 inline-flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-semibold shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-2"
             style={{
               backgroundColor: "rgba(255,255,255,0.95)",
@@ -310,15 +310,35 @@ function CaseEgorCard() {
           className="text-[11px] leading-[1.4] text-center"
           style={{ color: "var(--sokrat-fg3)" }}
         >
-          Сообщение ученицы Егору, май 2026
+          Сообщение ученика Егору, май 2026
         </figcaption>
+        {/*
+          Inline fontSize — global `.sokrat:not([data-sokrat-mode]) p` rule
+          has higher specificity than Tailwind `text-[13px]`/`sm:text-sm`
+          and would force 16px otherwise. Inline style wins the cascade.
+        */}
+        <p
+          className="mt-3 leading-[1.55]"
+          style={{
+            color: "var(--sokrat-fg2)",
+            fontSize: "13px",
+          }}
+        >
+          Раньше репетитор продавал час времени. Теперь Егор продаёт результат
+          и AI-инструменты, которые ученики видят, обсуждают и рекомендуют
+          друзьям. Один ученик с физики приходит за математикой, потом
+          спрашивает про русский, потом приводит знакомых — потому что
+          «у&nbsp;Егора есть плюшки». Сократ AI — это не инструмент проверки
+          ДЗ. Это то, что превращает каждого твоего ученика в канал
+          привлечения новых.
+        </p>
       </figure>
 
       {zoomed && (
         <div
           role="dialog"
           aria-modal="true"
-          aria-label="Сообщение ученицы Егору — увеличенный вид"
+          aria-label="Сообщение ученика Егору — увеличенный вид"
           onClick={() => setZoomed(false)}
           className="fixed inset-0 z-[100] flex items-center justify-center p-4 md:p-8"
           style={{ backgroundColor: "rgba(0,0,0,0.85)" }}
@@ -333,7 +353,7 @@ function CaseEgorCard() {
           </button>
           <img
             src="/marketing/tutor-landing/egor-student-feedback.jpg"
-            alt="Сообщение ученицы Егору в Telegram — увеличенный вид"
+            alt="Сообщение ученика Егору в Telegram — увеличенный вид"
             className="max-h-[90vh] max-w-[95vw] rounded-lg object-contain"
             onClick={(e) => e.stopPropagation()}
           />
