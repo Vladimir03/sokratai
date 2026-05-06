@@ -31,12 +31,12 @@ Phase 3 (P1): Telegram avatar auto-prefill
 ├── TASK-14 Bot-side prefill in telegram-bot      [Claude Code]      deps: Phase 1
 └── TASK-15 TelegramLoginButton no-op             [Claude Code]      deps: TASK-14
 
-Phase 4 (P1): Google OAuth (added v0.2)
-├── TASK-16 Google provider config (devops)        [Vladimir]         deps: Phase 2
-├── TASK-17 GoogleSignInButton + Login/SignUp wire [Claude Code]      deps: TASK-16
-├── TASK-18 useUserIdentities + 3-state Security   [Claude Code]      deps: TASK-12, TASK-17
-└── TASK-19 LoginProvidersSection + tutor-account  [Claude Code]      deps: TASK-18
-        actions (set-password-google-only, unlink-identity)
+Phase 4 (P1): Google OAuth (added v0.2; v0.4 — aligned with shipped RU-bypass flow)
+├── TASK-16 Google provider config (devops)         [Vladimir]   ✅ Done (custom RU-bypass)
+├── TASK-17 GoogleAuthButton + Login/SignUp wire    [Claude]     ✅ Done (5 entry points)
+├── TASK-18 useUserIdentities + 3-state Security    [Claude]     pending (deps: TASK-12, TASK-17)
+└── TASK-19 LoginProvidersSection + tutor-account   [Claude]     pending (⚠️ link path
+        actions (set-password-google-only, unlink-identity)               needs RU-bypass)
 ```
 
 Codex review после каждой фазы (`npm run lint && npm run build && npm run smoke-check` предварительно зелёный).
@@ -411,6 +411,7 @@ Codex review после каждой фазы (`npm run lint && npm run build &&
 **Agent:** Vladimir (devops, не код)
 **Files:** — (только конфигурация)
 **AC:** AC-11 (prerequisite)
+**Status:** ✅ Done (предшествовало этой спеке) — реализовано через **custom RU-bypass flow**, не через Supabase native `signInWithOAuth`. Authorized redirect URI в Google Cloud Console = `https://api.sokratai.ru/functions/v1/oauth-google-callback` (НЕ `vrsseotrfmsxpbciyqzc.supabase.co/auth/v1/callback`, который заблокирован в РФ). Supabase Dashboard → Authentication → Providers → Google остаётся **disabled** — мы его не используем; OAuth2 client_id/secret переданы непосредственно в edge function как secrets `GOOGLE_OAUTH_CLIENT_ID` + `GOOGLE_OAUTH_CLIENT_SECRET` + `OAUTH_STATE_SECRET`. См. документацию в шапке `src/components/GoogleAuthButton.tsx` (история v1→v2→v3).
 
 **Что делает:**
 
@@ -441,37 +442,23 @@ Codex review после каждой фазы (`npm run lint && npm run build &&
 
 ---
 
-### TASK-17: GoogleSignInButton + интеграция в Login/SignUp + AuthCallback
+### TASK-17: GoogleAuthButton + интеграция в Login/SignUp/TutorLogin/TutorSignupTrial/RegisterTutor
 
 **Job:** P1.3
 **Agent:** Claude Code
-**Files:** `src/components/auth/GoogleSignInButton.tsx` (новый), `src/pages/Login.tsx` (модифицировать), `src/pages/SignUp.tsx` (модифицировать), `src/pages/AuthCallback.tsx` (создать или модифицировать если уже есть)
+**Files:** `src/components/GoogleAuthButton.tsx` (создан), `src/pages/Login.tsx`, `src/pages/SignUp.tsx`, `src/pages/TutorLogin.tsx`, `src/pages/TutorSignupTrial.tsx`, `src/pages/RegisterTutor.tsx` (все интегрированы)
 **AC:** AC-11
+**Status:** ✅ Done (предшествовало этой спеке) — реализовано как **`GoogleAuthButton.tsx`** (custom RU-bypass), а не как `GoogleSignInButton.tsx` с native `signInWithOAuth`, как было ошибочно описано в исходной формулировке таска. Реальная архитектура:
 
-**Что делает:**
+- **Кнопка:** `src/components/GoogleAuthButton.tsx`. Inline 4-цветный Google SVG, `min-h-[48px]` (`style={{minHeight:48}}`), `touch-action: manipulation`, props `redirectPath` (куда вернуться после OAuth) + `consentSource` (тэг для consent record) + `enabled` (gated by consent checkbox). НЕ использует `supabase.auth.signInWithOAuth` — вместо этого редиректит на `https://api.sokratai.ru/functions/v1/oauth-google-init?redirectTo=${origin}${redirectPath}`.
+- **Edge functions:** `oauth-google-init` (302 на Google с `redirect_uri=api.sokratai.ru/.../oauth-google-callback`) и `oauth-google-callback` (server-side code→token exchange + magic-link verifyOtp + 302 обратно на `redirectPath` с access_token/refresh_token в URL hash). Обе зарегистрированы в `supabase/config.toml` и `.github/workflows/deploy-supabase-functions.yml`.
+- **Никакого `/auth/callback` React-route не нужно** — `oauth-google-callback` возвращает токены прямо в hash целевой страницы, supabase-js auto-detects через `detectSessionInUrl: true`. Каждая landing page (`Login.tsx`, `SignUp.tsx` и т.д.) уже подписана на `onAuthStateChange("SIGNED_IN")` для consent apply + redirect.
+- **Consent integration:** `stashPendingConsent(consentSource)` перед redirect; `applyPendingConsent(user.id)` в `onAuthStateChange("SIGNED_IN")` mount-effect каждой page.
+- **Интеграции (все заработали):** Login (`/chat`), SignUp (`/chat`), TutorLogin (`/tutor/home`), TutorSignupTrial (`/tutor/home`), RegisterTutor.
 
-- `GoogleSignInButton.tsx`:
-  - Кнопка с inline SVG Google brand-icon (4 цвета: #4285F4, #34A853, #FBBC05, #EA4335) + label «Войти через Google».
-  - `min-h-[44px]`, `bg-white border-slate-200`, `hover:bg-slate-50`, `text-slate-700 font-medium`.
-  - onClick → `supabase.auth.signInWithOAuth({ provider: 'google', options: { redirectTo: \`${window.location.origin}/auth/callback\` } })`.
-  - Loading state — spinner + disabled пока redirect не произошёл.
+**Почему отклонились от исходного описания:** native `supabase.auth.signInWithOAuth({ provider: 'google' })` форсит `redirect_uri = vrsseotrfmsxpbciyqzc.supabase.co/auth/v1/callback`, который заблокирован у RU-провайдеров (см. CLAUDE.md «Network & Infrastructure»). История переходов задокументирована в `GoogleAuthButton.tsx:11–35` (v1: `oauth.lovable.app` → 403 для RU; v2: native Supabase OAuth → RU-блок callback'а; v3: текущий custom flow).
 
-- `Login.tsx` / `SignUp.tsx`:
-  - Под существующей email-формой добавить разделитель «или» + `<GoogleSignInButton />` + (если уже есть) `<TelegramLoginButton />`.
-  - Не трогать существующую email-логику.
-
-- `AuthCallback.tsx`:
-  - Если файл уже есть — добавить `claimPendingInvite()` после `getSession()` если ещё не вызывается.
-  - Если нет — создать страницу + route `/auth/callback` в `App.tsx`. Логика: дождаться `supabase.auth.getSession()` → `claimPendingInvite()` (см. `src/lib/inviteApi.ts`) → redirect на `/tutor/home` если tutor, иначе `/students`.
-
-**Guardrails:**
-- НЕ дублировать `signInWithOAuth` логику в нескольких местах — только в кнопке.
-- НЕ показывать `error_description` напрямую из Google (может содержать sensitive) — generic toast «Не удалось войти через Google».
-- Login.tsx и SignUp.tsx не help-risk file (Login.tsx может быть таковым — проверить grep'ом по CLAUDE.md, при необходимости minimal touch).
-
-**Validation:**
-- `npm run lint && npm run build`.
-- Localhost dev: на `/login` кнопка работает, redirect на Google (нужен TASK-16 сделанным с localhost в Authorized origins).
+**Validation выполнен:** работает в prod на `sokratai.ru` для всех 5 entry points; новые users видны в `auth.users` с identity `provider=google`.
 
 ---
 
@@ -525,7 +512,7 @@ Codex review после каждой фазы (`npm run lint && npm run build &&
   - Список из 2 provider-row (mockup S4): Google + Telegram. Каждая row — иконка + label + статус («Привязан» badge ИЛИ кнопка «Привязать»).
   - **Привязан + есть ≥ 1 другой identity (или password) → кнопка «Отвязать»** (red ghost, btn--xs btn--unlink). Click → confirm dialog «Отвязать Google? Ты сможешь войти только через {другой способ}». Submit → `supabase.functions.invoke('tutor-account', { body: { action: 'unlink-identity', provider: 'google' } })` → invalidate `['auth','identities']`.
   - **Привязан + last identity → «Отвязать» disabled** с tooltip «Сначала установи пароль или привяжи другой способ входа». Без вызова сервера.
-  - **Не привязан → кнопка «Привязать»**. Click → `supabase.auth.linkIdentity({ provider: 'google' })`. Supabase обработает редирект → возврат на `/auth/callback` → invalidate `['auth','identities']`.
+  - **Не привязан → кнопка «Привязать»**. ⚠️ **RU-bypass для link** (см. TASK-17 Status): `supabase.auth.linkIdentity({ provider: 'google' })` форсит native `<project>.supabase.co/auth/v1/callback` который заблокирован в РФ. Реализатору нужно расширить `oauth-google-init` принимать `mode=link&user_id=<auth.uid()>` (защищённый JWT-токеном), а `oauth-google-callback` — вместо magic-link verifyOtp вызывать `supabaseAdmin.auth.admin.updateUserById(user_id, { user_metadata: ... })` или эквивалент привязки идентичности. Иначе link/unlink будет ломаться у RU-репетиторов. Возврат на профиль через `redirectTo=/tutor/profile`, локальный invalidate `['auth','identities']` по `onAuthStateChange("SIGNED_IN")` или page-mount refetch.
 
 - `tutor-account/index.ts`:
   - Action `set-password-google-only`: валидация `body.password.length >= 8`, проверить через `supabaseAdmin.auth.admin.getUserById(user.id)` что `identities.find(i => i.provider === 'email')` отсутствует (иначе 400 `PASSWORD_ALREADY_SET` — пусть пользуется обычным `update-password`). Затем `auth.admin.updateUserById(user.id, { password })`.
