@@ -1,6 +1,7 @@
 import { Clock } from "lucide-react";
 
 import ProductTour from "./ProductTour";
+import Tour2Video from "./Tour2Video";
 
 export default function ProductTour2() {
   return (
@@ -29,6 +30,7 @@ export default function ProductTour2() {
       videoPlaceholderText="Конструктор ДЗ"
       videoPlaceholderCaption="Видео 20 сек — добавится после записи"
       videoSrc={undefined}
+      videoSlot={<Tour2Video />}
       zigzag="text-right"
       backgroundSurface
     />
