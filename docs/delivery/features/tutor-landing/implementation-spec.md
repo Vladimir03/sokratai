@@ -398,6 +398,8 @@ interface ProductTourProps {
 
 **Tour #3 props:** H2 «Отчёт родителю — пока вы спите», 3 bullets (Карта тем, Динамика, Каналы доставки), text-left, card bg.
 
+**Tour #3 — concept mockup variant (V1, 2026-05-07):** фича в продукте ещё не реализована, поэтому вместо `videoSrc` используется `videoSlot={<Tour3ConceptMockup />}` с static PNG `public/marketing/tutor-landing/tour-3-concept.png` + caption-overlay «Концепт. Узнай первым в канале Егора →». Bullets переведены в **future tense** («будет видеть» / «получит» / «закроет»), inlineCTA ведёт на `https://t.me/sokrat_rep` для сбора пре-сейл-лидов. Когда фича выйдет в прод — заменить компонент на `Tour3Video` (по паттерну Tour #1/#2) и вернуть bullets в present tense. См. `progress-tracker.md` § Iteration 5.1 + `lovable-prompt-tour-3-concept.md` + `chatgpt-image-prompt-tour-3-concept.md` (опциональный premium-апгрейд через ChatGPT Image 2.0).
+
 **Video slot:**
 
 ```tsx

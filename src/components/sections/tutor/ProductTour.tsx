@@ -3,6 +3,12 @@ import { Play } from "lucide-react";
 
 import type { ProductTourProps } from "./tourData";
 
+// External hrefs (mailto:, https://t.me/..., etc.) must use <a> instead of
+// react-router <Link>, which expects a relative path.
+function isExternalHref(href: string): boolean {
+  return /^(https?:|mailto:|tel:)/i.test(href);
+}
+
 export default function ProductTour({
   id,
   badge,
@@ -107,14 +113,27 @@ export default function ProductTour({
           </ul>
 
           {inlineCTA && (
-            <Link
-              to={inlineCTA.href}
-              onClick={inlineCTA.onClick}
-              className="inline-flex items-center font-semibold border-b border-transparent transition-colors hover:border-b-[color:var(--sokrat-green-700)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--sokrat-green-700)]/60 focus-visible:ring-offset-2"
-              style={{ color: "var(--sokrat-green-700)" }}
-            >
-              {inlineCTA.label}
-            </Link>
+            isExternalHref(inlineCTA.href) ? (
+              <a
+                href={inlineCTA.href}
+                target="_blank"
+                rel="noopener noreferrer"
+                onClick={inlineCTA.onClick}
+                className="inline-flex items-center font-semibold border-b border-transparent transition-colors hover:border-b-[color:var(--sokrat-green-700)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--sokrat-green-700)]/60 focus-visible:ring-offset-2"
+                style={{ color: "var(--sokrat-green-700)" }}
+              >
+                {inlineCTA.label}
+              </a>
+            ) : (
+              <Link
+                to={inlineCTA.href}
+                onClick={inlineCTA.onClick}
+                className="inline-flex items-center font-semibold border-b border-transparent transition-colors hover:border-b-[color:var(--sokrat-green-700)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--sokrat-green-700)]/60 focus-visible:ring-offset-2"
+                style={{ color: "var(--sokrat-green-700)" }}
+              >
+                {inlineCTA.label}
+              </Link>
+            )
           )}
         </div>
 

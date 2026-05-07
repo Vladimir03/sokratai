@@ -169,6 +169,39 @@ Dropped из original plan: Claude Design, Higgsfield для product-tour (см.
 
 ---
 
+### 🎨 Iteration 5.1 — Tour #3 «Отчёт родителю» concept mockup (2026-05-07)
+
+**Status:** READY for deploy (committed locally, pending push + `deploy-sokratai`)
+
+Контекст: фича «Отчёт родителю» **в продукте ещё не реализована** → screencast записать невозможно, но удалять блок на лендинге не хочется (ключевой value-prop для буферного сегмента «родитель платит, репетитор продаёт»). Решение — concept mockup + честная плашка «В разработке» + CTA в TG-канал Егора для сбора пре-сейл-лидов.
+
+Что сделано:
+- ✅ `public/marketing/tutor-landing/tour-3-concept.png` (1920×1200, 110 KB) — design-grade Pillow-mockup PDF-style отчёта. 6 polish-улучшений: subtle dot-grid background, multi-layer drop shadows, gradient fill под линией графика, hand-drawn Lucide-style иконки (Trophy/TrendingUp/Target) на KPI-плитках, border-radius 16px, vertical gradient на header. Brand tokens соблюдены (`#1B6B4A` green, `#E8913A` ochre).
+- ✅ `outputs/generate_tour3_mockup.py` — Pillow-скрипт для регенерации мокапа (если нужно сменить имя репетитора, числа, темы — за 30 секунд новая версия). Source-of-truth для мокапа.
+- ✅ `src/components/sections/tutor/Tour3ConceptMockup.tsx` — stateless React-компонент со static `<img loading="lazy">` + caption-overlay «Концепт. Узнай первым в канале Егора →»
+- ✅ `src/components/sections/tutor/ProductTour3.tsx` — переведён в **future tense** во всех bullets («будет видеть» / «получит» / «закроет»), inlineCTA на `https://t.me/sokrat_rep` с reuse существующего `tutor_landing_tg_channel_click` goal, `videoSlot={<Tour3ConceptMockup />}`
+- ✅ `src/components/sections/tutor/ProductTour.tsx` — добавлен `isExternalHref()` helper + branching `<a target="_blank">` vs `<Link>` для inlineCTA. Без этого react-router сломал бы внешний TG-link. Tour #1 inlineCTA на `/signup?...` продолжает работать через `<Link>` (regression-safe).
+- ✅ `docs/delivery/features/tutor-landing/lovable-prompt-tour-3-concept.md` — Lovable-промпт для альтернативного deploy через Lovable chat (если push в GitHub не сработал)
+- ✅ `docs/delivery/features/tutor-landing/chatgpt-image-prompt-tour-3-concept.md` — premium-апгрейд через ChatGPT Image 2.0 (опционально, для V1.1 polish после launch)
+
+Validation:
+- `npx eslint src/components/sections/tutor/{ProductTour,ProductTour3,Tour3ConceptMockup}.tsx` — EXIT 0
+- `npx tsc --noEmit -p tsconfig.app.json` — EXIT 0 (no errors на изменённых файлах)
+
+Pending:
+- [ ] git push + Lovable preview auto-sync
+- [ ] `deploy-sokratai` на VPS для прода `sokratai.ru`
+- [ ] (Optional V1.1) Vladimir прогоняет ChatGPT Image 2.0 промпт для премиум-апгрейда мокапа
+
+Когда фича выйдет в прод (V2):
+- Заменить `Tour3ConceptMockup` на `Tour3Video` (по паттерну Tour #1/#2)
+- Записать скринкаст через `scripts/edit-screencast.sh` + `screencast-edit-spec-tour-3.md`
+- Убрать `В РАЗРАБОТКЕ` chip из мокапа (regenerate via Pillow или просто заменить PNG на screenshot)
+- Перевести bullets в `ProductTour3.tsx` обратно в present tense
+- inlineCTA из «Узнай первым в канале Егора» в `/signup?...` (или оставить TG-канал как secondary)
+
+---
+
 ### 🎬 Iteration 4.9 — Lovable prompt + poster для Tour #1 video (2026-04-26)
 
 **Status:** READY for Lovable execution
@@ -356,6 +389,8 @@ Pending:
 ---
 
 ## Update log
+
+- **2026-05-07** — **Iter 5.1 done: Tour #3 concept mockup landed** (committed, pending push). Pillow-generated 1920×1200 PNG (110 KB) с 6 polish-улучшениями (drop shadows, gradient chart fill, Lucide-icon glyphs, dot-grid texture, radius 16px, header gradient). Future tense во всех bullets `ProductTour3.tsx`, inlineCTA на `t.me/sokrat_rep` с reuse `tutor_landing_tg_channel_click` goal. `ProductTour.tsx` патч: `isExternalHref()` helper + branching `<a target="_blank">` vs `<Link>` для inlineCTA — без этого react-router сломал бы внешний TG-link. Tour #1 inlineCTA `/signup?...` через `<Link>` остался intact (regression-safe). Также созданы: lovable-prompt-tour-3-concept.md (alt-deploy через Lovable chat) и chatgpt-image-prompt-tour-3-concept.md (опциональный V1.1 premium-апгрейд через ChatGPT Image 2.0). Pillow-скрипт регенерации сохранён в `outputs/` для будущих правок (имя репетитора / числа / темы за 30 секунд).
 
 - **2026-04-24** — проект начат, iter 1 завершён (positioning-brief v2), iter 2 начат
 - **2026-04-24** — подтверждена архитектура `/tutors`, Hero Candidate B с Егором+Владимиром, freemium pricing
