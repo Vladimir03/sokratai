@@ -1,7 +1,6 @@
 import { Clock } from "lucide-react";
 
 import ProductTour from "./ProductTour";
-import Tour2Video from "./Tour2Video";
 
 export default function ProductTour2() {
   return (
@@ -14,7 +13,7 @@ export default function ProductTour2() {
         {
           title: "База задач + ваш архив",
           body:
-            "Задачи из сборников Демидовой, ФИПИ-демоверсий. Плюс ваш архив — импортируем из папок на диске. Все задачи с тегами: тема, номер задания ЕГЭ/ОГЭ, сложность.",
+            "Задачи из сборников Демидовой, ФИПИ-демоверсий и других открытых каталогов. Плюс ваш архив — импортируем из папок на диске. Все задачи с тегами: тема, номер задания ЕГЭ/ОГЭ, сложность.",
         },
         {
           title: "AI-генерация похожих задач",
@@ -30,7 +29,6 @@ export default function ProductTour2() {
       videoPlaceholderText="Конструктор ДЗ"
       videoPlaceholderCaption="Видео 20 сек — добавится после записи"
       videoSrc={undefined}
-      videoSlot={<Tour2Video />}
       zigzag="text-right"
       backgroundSurface
     />
