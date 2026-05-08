@@ -106,6 +106,13 @@ export interface MockExamAssignmentListItem extends MockExamAssignment {
   attempts_submitted: number;
   attempts_awaiting_review: number;
   attempts_approved: number;
+  /**
+   * Назначен но student не открывал (status='in_progress' AND started_at IS NULL).
+   * Backend (mock-exam-tutor-api list handler) отделяет этот case от настоящего
+   * «в процессе» (started_at IS NOT NULL), чтобы UI правильно показывал
+   * «Не приступали» vs «В процессе».
+   */
+  attempts_not_started: number;
 }
 
 /**

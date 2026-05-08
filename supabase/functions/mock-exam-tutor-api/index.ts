@@ -698,14 +698,18 @@ async function handleListAssignments(
   }
 
   const assignmentIds = rows.map((r) => r.id as string);
-  const counts: Record<string, { total: number; submitted: number; awaiting: number; approved: number }> = {};
+  // Counters: total / submitted (in AI check) / awaiting (tutor review) /
+  // approved (final) / not_started (assigned but student never opened —
+  // status='in_progress' AND started_at IS NULL).
+  // «in_progress real» = total - submitted - awaiting - approved - not_started.
+  const counts: Record<string, { total: number; submitted: number; awaiting: number; approved: number; not_started: number }> = {};
   for (const id of assignmentIds) {
-    counts[id] = { total: 0, submitted: 0, awaiting: 0, approved: 0 };
+    counts[id] = { total: 0, submitted: 0, awaiting: 0, approved: 0, not_started: 0 };
   }
   if (assignmentIds.length > 0) {
     const { data: attempts } = await db
       .from("mock_exam_attempts")
-      .select("assignment_id, status")
+      .select("assignment_id, status, started_at")
       .in("assignment_id", assignmentIds);
     for (const a of attempts ?? []) {
       const aid = a.assignment_id as string;
@@ -713,14 +717,15 @@ async function handleListAssignments(
       if (!bucket) continue;
       bucket.total += 1;
       if (a.status === "submitted" || a.status === "ai_checking") bucket.submitted += 1;
-      if (a.status === "awaiting_review") bucket.awaiting += 1;
-      if (a.status === "approved" || a.status === "manually_entered") bucket.approved += 1;
+      else if (a.status === "awaiting_review") bucket.awaiting += 1;
+      else if (a.status === "approved" || a.status === "manually_entered") bucket.approved += 1;
+      else if (a.status === "in_progress" && a.started_at === null) bucket.not_started += 1;
     }
   }
 
   const items = rows.map((r) => {
     const variant = r.variant_id ? variantsById[r.variant_id as string] : null;
-    const c = counts[r.id as string] ?? { total: 0, submitted: 0, awaiting: 0, approved: 0 };
+    const c = counts[r.id as string] ?? { total: 0, submitted: 0, awaiting: 0, approved: 0, not_started: 0 };
     return {
       id: r.id,
       variant_id: r.variant_id,
@@ -737,6 +742,7 @@ async function handleListAssignments(
       attempts_submitted: c.submitted,
       attempts_awaiting_review: c.awaiting,
       attempts_approved: c.approved,
+      attempts_not_started: c.not_started,
     };
   });
 

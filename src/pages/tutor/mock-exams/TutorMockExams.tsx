@@ -214,9 +214,15 @@ const AssignmentCard = memo(function AssignmentCard({
   const modeLabel = MODE_LABEL[item.mode];
   const deadlineStr = formatDeadline(item.deadline);
 
-  // Derived: «в процессе» = total - already submitted (still working).
+  // Derived: «в процессе» = total - submitted - awaiting - approved - not_started.
+  // Backend разделяет not_started (assigned, status='in_progress' AND started_at
+  // IS NULL) от настоящего in_progress (student открыл и решает).
   const inProgress = Math.max(
-    item.attempts_total - item.attempts_submitted,
+    item.attempts_total
+      - item.attempts_submitted
+      - item.attempts_awaiting_review
+      - item.attempts_approved
+      - item.attempts_not_started,
     0,
   );
 
