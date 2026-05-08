@@ -1,32 +1,31 @@
-## Plan: Tour #2 video + copy fix
+## Проблема
 
-### 1. Copy uploaded assets to public folder
-- `user-uploads://tour-2-builder.mp4` → `public/marketing/tutor-landing/tour-2-builder.mp4`
-- `user-uploads://tour-2-poster.jpg` → `public/marketing/tutor-landing/tour-2-poster.jpg`
+На `/tutor/mock-exams` и при сабмите формы создания пробника появляется toast «Failed to fetch» и в консоли — `tutor_query_network_failed` для `tutor:mock-exams:assignments`.
 
-### 2. Create `src/components/sections/tutor/Tour2Video.tsx`
-Parallel to existing `Tour1Video.tsx` (keep Tour #1 untouched per request — no extraction refactor). Identical visual treatment with different src/poster/caption/aria-label/alt:
-- Container `aspect-video` (16:9) instead of `1920/1030`
-- Caption: «Смотреть как собрать ДЗ за 5 минут — 25 сек»
-- aria-label: «Воспроизвести видео: Конструктор ДЗ»
-- alt: «Превью: Конструктор ДЗ — задачи + AI-генерация за 5 минут»
-- Click-to-play, `preload="none"` (only mounted after click), poster `loading="lazy"` + `decoding="async"`
-- Tokens: `var(--sokrat-shadow-md)`, `var(--sokrat-radius-xl)`, `var(--sokrat-green-700)`
+Прямой curl в `https://api.sokratai.ru/functions/v1/mock-exam-tutor-api/assignments` возвращает:
 
-### 3. Edit `src/components/sections/tutor/ProductTour2.tsx`
-- Import `Tour2Video`
-- Add `videoSlot={<Tour2Video />}` to `<ProductTour ...>` props (mirrors how `ProductTour1` wires `Tour1Video`)
-- Keep all existing copy (headline, badge, bullets) — except bullet edit below
-- In bullet "База задач + ваш архив": remove «Решу-ЕГЭ,» from the body text. New body:
-  > «Задачи из сборников Демидовой, ФИПИ-демоверсий. Плюс ваш архив — импортируем из папок на диске. Все задачи с тегами: тема, номер задания ЕГЭ/ОГЭ, сложность.»
+```text
+HTTP 404
+{"code":"NOT_FOUND","message":"Requested function was not found"}
+```
 
-### 4. No other changes
-- `Tour1Video.tsx`, `ProductTour.tsx`, `tourData.ts` untouched
-- No new shared `LazyVideo` extraction (per "do NOT change Tour #1" guidance)
+Все четыре функции пробников (`mock-exam-tutor-api`, `mock-exam-student-api`, `mock-exam-public`, `mock-exam-grade`) присутствуют в репо, но **не задеплоены** в Supabase project `vrsseotrfmsxpbciyqzc`. Из-за 404 без CORS-заголовков браузер репортит ошибку как «Failed to fetch».
 
-### Validation
-- Network tab: first load fetches `tour-2-poster.jpg` only; MP4 only after click
-- Tour #1 continues to work unchanged
+## План
 
-### Deploy note
-🚀 Deploy needed — frontend changes to `src/**` and `public/**`. After merge, run `deploy-sokratai` on the Selectel VPS so production `sokratai.ru` picks up the new video, poster, and copy edit. Lovable preview will reflect changes immediately.
+1. Задеплоить через `supabase--deploy_edge_functions` четыре функции:
+   - `mock-exam-tutor-api`
+   - `mock-exam-student-api`
+   - `mock-exam-public`
+   - `mock-exam-grade`
+2. Верифицировать деплой curl-запросом к `/mock-exam-tutor-api/assignments` (ожидаем 401 без Bearer вместо 404).
+3. Сообщить пользователю обновить страницу `/tutor/mock-exams` — список и форма создания должны заработать.
+
+## Что НЕ трогаем
+
+- Код фронтенда и edge functions — только деплой.
+- Никаких миграций БД (TASK-1..7 миграции уже применены, иначе функции бы возвращали 500, а не 404).
+
+## Деплой sokratai.ru
+
+Не требуется — изменений в `src/**` нет.
