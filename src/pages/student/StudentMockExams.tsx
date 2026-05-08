@@ -150,7 +150,9 @@ export default function StudentMockExams() {
 
       if (cancelled) return;
       if (fetchError) {
-        setError(fetchError.message);
+        // eslint-disable-next-line no-console
+        console.error('[StudentMockExams] fetch error:', fetchError);
+        setError(`${fetchError.code ?? 'error'}: ${fetchError.message}`);
       } else {
         setAttempts((data as unknown as AttemptRow[]) ?? []);
       }
@@ -196,7 +198,10 @@ export default function StudentMockExams() {
           {error && !loading && (
             <Card className="border-rose-200 bg-rose-50">
               <CardContent className="p-4 text-sm text-rose-900">
-                Не удалось загрузить пробники. Попробуй обновить страницу.
+                <div>Не удалось загрузить пробники. Попробуй обновить страницу.</div>
+                <div className="mt-2 font-mono text-xs text-rose-700 break-all">
+                  {error}
+                </div>
               </CardContent>
             </Card>
           )}
