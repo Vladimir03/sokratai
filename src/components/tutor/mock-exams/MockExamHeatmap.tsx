@@ -64,8 +64,14 @@ type AttemptDisplayStatus =
 
 function deriveDisplayStatus(
   status: MockExamAttemptStatus,
+  startedAt: string | null,
 ): AttemptDisplayStatus {
-  if (status === 'in_progress') return 'in_progress';
+  // Backend creates mock_exam_attempts с status='in_progress' при assignment,
+  // но started_at = NULL пока student не открыл /student/mock-exams/:id.
+  // Реальный «в процессе» = status='in_progress' AND started_at IS NOT NULL.
+  if (status === 'in_progress') {
+    return startedAt === null ? 'not_started' : 'in_progress';
+  }
   if (status === 'submitted' || status === 'ai_checking') return 'submitted';
   if (status === 'awaiting_review') return 'awaiting_review';
   if (status === 'approved') return 'approved';
@@ -153,7 +159,7 @@ const HeatmapRow = memo(function HeatmapRow({
   totalMax,
   onSelect,
 }: HeatmapRowProps) {
-  const display = deriveDisplayStatus(attempt.status);
+  const display = deriveDisplayStatus(attempt.status, attempt.started_at);
   const chip = STATUS_CHIP[display];
 
   // Phase 1: всё task-cells = empty (cell-empty). Per-task hydration → Phase 2.

@@ -26,6 +26,7 @@ const ResetPassword = lazy(() => import("./pages/ResetPassword"));
 const Chat = lazy(() => import("./pages/Chat"));
 const StudentHomework = lazy(() => import("./pages/StudentHomework"));
 const StudentHomeworkDetail = lazy(() => import("./pages/StudentHomeworkDetail"));
+const StudentMockExams = lazy(() => import("./pages/student/StudentMockExams"));
 const StudentMockExam = lazy(() => import("./pages/student/StudentMockExam"));
 const StudentMockExamResult = lazy(() => import("./pages/student/StudentMockExamResult"));
 const PublicHomeworkShare = lazy(() => import("./pages/PublicHomeworkShare"));
@@ -184,6 +185,14 @@ const App = () => (
                   <StudentHomeworkDetail />
                 </Suspense>
               } 
+            />
+            <Route
+              path="/student/mock-exams"
+              element={
+                <Suspense fallback={<PageLoader />}>
+                  <StudentMockExams />
+                </Suspense>
+              }
             />
             <Route
               path="/student/mock-exams/:id/result"

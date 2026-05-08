@@ -82,7 +82,7 @@ const VARIANT_LIBRARY = [
   {
     id: '36cebc45-e2e8-5603-a753-01c818bba131',
     title: 'Тренировочный 1 (физика ЕГЭ-2026)',
-    attribution: 'Источник: репетитор Егор Иванов',
+    attribution: 'Источник: репетитор Егор Блинов',
     meta: '26 заданий · макс. 45 баллов · 3 ч 55 мин',
     isAvailable: true,
     badge: { label: 'Рекомендуем', className: 'bg-accent/10 text-accent' },

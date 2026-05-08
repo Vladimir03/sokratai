@@ -79,7 +79,7 @@ function deriveKpi(detail: MockExamAssignmentDetail): KpiSnapshot {
   const attempts = detail.attempts ?? [];
   let approved = 0;
   let inProgress = 0;
-  const notStarted = 0;
+  let notStarted = 0;
   let awaitingReview = 0;
   let part1Sum = 0;
   let part1Count = 0;
@@ -87,18 +87,18 @@ function deriveKpi(detail: MockExamAssignmentDetail): KpiSnapshot {
   for (const a of attempts) {
     if (a.status === 'approved' || a.status === 'manually_entered') {
       approved += 1;
-    }
-    if (a.status === 'in_progress') {
-      inProgress += 1;
-    }
-    if (a.status === 'awaiting_review' || a.status === 'submitted' || a.status === 'ai_checking') {
+    } else if (a.status === 'in_progress') {
+      // Backend создаёт mock_exam_attempts с status='in_progress' при assignment,
+      // но started_at = NULL пока student не открыл /student/mock-exams/:id.
+      // Real «в процессе» = status='in_progress' AND started_at IS NOT NULL.
+      if (a.started_at === null) {
+        notStarted += 1;
+      } else {
+        inProgress += 1;
+      }
+    } else if (a.status === 'awaiting_review' || a.status === 'submitted' || a.status === 'ai_checking') {
       awaitingReview += 1;
     }
-    // not_started в текущей схеме отсутствует как explicit статус — backend
-    // создаёт mock_exam_attempts только при start. До этого — в списке нет
-    // строки. Phase 1 Backend семантика: notStarted = 0 пока attempt не создан.
-    // Если в будущем добавим `pending` rows для assigned-but-not-started, тут
-    // надо будет считать.
     if (a.total_part1_score !== null) {
       part1Sum += a.total_part1_score;
       part1Count += 1;

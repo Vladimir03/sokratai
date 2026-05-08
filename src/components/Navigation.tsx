@@ -1,6 +1,6 @@
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
-import { MessageSquare, TrendingUp, User, LogOut, Backpack, Target } from "lucide-react";
+import { MessageSquare, TrendingUp, User, LogOut, Backpack, Target, ClipboardCheck } from "lucide-react";
 import { supabase } from "@/lib/supabaseClient";
 import { toast } from "sonner";
 import sokratLogo from "@/assets/sokrat-logo.png";
@@ -11,6 +11,7 @@ const Navigation = () => {
 
   const navItems = [
     { path: "/homework", icon: Backpack, label: "Домашка" },
+    { path: "/student/mock-exams", icon: ClipboardCheck, label: "Пробники" },
     { path: "/chat", icon: MessageSquare, label: "Чат" },
     { path: "/practice", icon: Target, label: "Тренажёр" },
     { path: "/progress", icon: TrendingUp, label: "Прогресс" },
