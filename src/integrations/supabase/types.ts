@@ -3658,6 +3658,10 @@ export type Database = {
         Returns: boolean
       }
       is_kb_homework_tutor: { Args: { _homework_id: string }; Returns: boolean }
+      is_student_assigned_to_mock_exam: {
+        Args: { _assignment_id: string }
+        Returns: boolean
+      }
       is_tutor: { Args: { _user_id: string }; Returns: boolean }
       is_tutor_of_student: { Args: { _student_id: string }; Returns: boolean }
       kb_folder_owned_by: {
