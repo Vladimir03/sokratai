@@ -1674,6 +1674,369 @@ export type Database = {
         }
         Relationships: []
       }
+      mock_exam_anonymous_leads: {
+        Row: {
+          attempt_id: string
+          consent_at: string
+          contact_type: string
+          created_at: string
+          id: string
+          lead_contact: string
+          lead_name: string
+          tutor_id: string
+        }
+        Insert: {
+          attempt_id: string
+          consent_at: string
+          contact_type: string
+          created_at?: string
+          id?: string
+          lead_contact: string
+          lead_name: string
+          tutor_id: string
+        }
+        Update: {
+          attempt_id?: string
+          consent_at?: string
+          contact_type?: string
+          created_at?: string
+          id?: string
+          lead_contact?: string
+          lead_name?: string
+          tutor_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "mock_exam_anonymous_leads_attempt_id_fkey"
+            columns: ["attempt_id"]
+            isOneToOne: false
+            referencedRelation: "mock_exam_attempts"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      mock_exam_assignments: {
+        Row: {
+          created_at: string
+          deadline: string | null
+          id: string
+          mode: string
+          status: string
+          title: string
+          tutor_id: string
+          variant_id: string | null
+          variant_title: string | null
+        }
+        Insert: {
+          created_at?: string
+          deadline?: string | null
+          id?: string
+          mode: string
+          status?: string
+          title: string
+          tutor_id: string
+          variant_id?: string | null
+          variant_title?: string | null
+        }
+        Update: {
+          created_at?: string
+          deadline?: string | null
+          id?: string
+          mode?: string
+          status?: string
+          title?: string
+          tutor_id?: string
+          variant_id?: string | null
+          variant_title?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "mock_exam_assignments_variant_id_fkey"
+            columns: ["variant_id"]
+            isOneToOne: false
+            referencedRelation: "mock_exam_variants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      mock_exam_attempt_part1_answers: {
+        Row: {
+          attempt_id: string
+          earned_score: number | null
+          kim_number: number
+          student_answer: string | null
+          updated_at: string
+        }
+        Insert: {
+          attempt_id: string
+          earned_score?: number | null
+          kim_number: number
+          student_answer?: string | null
+          updated_at?: string
+        }
+        Update: {
+          attempt_id?: string
+          earned_score?: number | null
+          kim_number?: number
+          student_answer?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "mock_exam_attempt_part1_answers_attempt_id_fkey"
+            columns: ["attempt_id"]
+            isOneToOne: false
+            referencedRelation: "mock_exam_attempts"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      mock_exam_attempt_part2_solutions: {
+        Row: {
+          ai_draft_json: Json | null
+          attempt_id: string
+          kim_number: number
+          photo_url: string | null
+          status: string
+          tutor_comment: string | null
+          tutor_score: number | null
+          updated_at: string
+        }
+        Insert: {
+          ai_draft_json?: Json | null
+          attempt_id: string
+          kim_number: number
+          photo_url?: string | null
+          status?: string
+          tutor_comment?: string | null
+          tutor_score?: number | null
+          updated_at?: string
+        }
+        Update: {
+          ai_draft_json?: Json | null
+          attempt_id?: string
+          kim_number?: number
+          photo_url?: string | null
+          status?: string
+          tutor_comment?: string | null
+          tutor_score?: number | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "mock_exam_attempt_part2_solutions_attempt_id_fkey"
+            columns: ["attempt_id"]
+            isOneToOne: false
+            referencedRelation: "mock_exam_attempts"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      mock_exam_attempts: {
+        Row: {
+          anonymous_id: string | null
+          assignment_id: string
+          blank_photo_url: string | null
+          created_at: string
+          id: string
+          manual_comment: string | null
+          manual_entered_date: string | null
+          started_at: string | null
+          status: string
+          student_id: string | null
+          submitted_at: string | null
+          total_part1_score: number | null
+          total_part2_score: number | null
+          total_score: number | null
+          total_time_minutes: number | null
+        }
+        Insert: {
+          anonymous_id?: string | null
+          assignment_id: string
+          blank_photo_url?: string | null
+          created_at?: string
+          id?: string
+          manual_comment?: string | null
+          manual_entered_date?: string | null
+          started_at?: string | null
+          status?: string
+          student_id?: string | null
+          submitted_at?: string | null
+          total_part1_score?: number | null
+          total_part2_score?: number | null
+          total_score?: number | null
+          total_time_minutes?: number | null
+        }
+        Update: {
+          anonymous_id?: string | null
+          assignment_id?: string
+          blank_photo_url?: string | null
+          created_at?: string
+          id?: string
+          manual_comment?: string | null
+          manual_entered_date?: string | null
+          started_at?: string | null
+          status?: string
+          student_id?: string | null
+          submitted_at?: string | null
+          total_part1_score?: number | null
+          total_part2_score?: number | null
+          total_score?: number | null
+          total_time_minutes?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "mock_exam_attempts_assignment_id_fkey"
+            columns: ["assignment_id"]
+            isOneToOne: false
+            referencedRelation: "mock_exam_assignments"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      mock_exam_public_links: {
+        Row: {
+          attempt_id: string | null
+          created_at: string
+          expires_at: string | null
+          mock_exam_id: string | null
+          scope: string
+          slug: string
+          tutor_id: string
+        }
+        Insert: {
+          attempt_id?: string | null
+          created_at?: string
+          expires_at?: string | null
+          mock_exam_id?: string | null
+          scope: string
+          slug: string
+          tutor_id: string
+        }
+        Update: {
+          attempt_id?: string | null
+          created_at?: string
+          expires_at?: string | null
+          mock_exam_id?: string | null
+          scope?: string
+          slug?: string
+          tutor_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "mock_exam_public_links_attempt_id_fkey"
+            columns: ["attempt_id"]
+            isOneToOne: false
+            referencedRelation: "mock_exam_attempts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "mock_exam_public_links_mock_exam_id_fkey"
+            columns: ["mock_exam_id"]
+            isOneToOne: false
+            referencedRelation: "mock_exam_assignments"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      mock_exam_variant_tasks: {
+        Row: {
+          check_mode: string | null
+          correct_answer: string | null
+          id: string
+          kim_number: number
+          max_score: number
+          order_num: number
+          part: number
+          solution_text: string | null
+          task_image_url: string | null
+          task_text: string
+          topic: string | null
+          variant_id: string
+        }
+        Insert: {
+          check_mode?: string | null
+          correct_answer?: string | null
+          id?: string
+          kim_number: number
+          max_score: number
+          order_num: number
+          part: number
+          solution_text?: string | null
+          task_image_url?: string | null
+          task_text: string
+          topic?: string | null
+          variant_id: string
+        }
+        Update: {
+          check_mode?: string | null
+          correct_answer?: string | null
+          id?: string
+          kim_number?: number
+          max_score?: number
+          order_num?: number
+          part?: number
+          solution_text?: string | null
+          task_image_url?: string | null
+          task_text?: string
+          topic?: string | null
+          variant_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "mock_exam_variant_tasks_variant_id_fkey"
+            columns: ["variant_id"]
+            isOneToOne: false
+            referencedRelation: "mock_exam_variants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      mock_exam_variants: {
+        Row: {
+          created_at: string
+          created_by: string
+          duration_minutes: number
+          exam_type: string
+          id: string
+          part1_max: number
+          part2_max: number
+          source: string
+          source_attribution: string | null
+          task_count: number
+          title: string
+          total_max_score: number
+        }
+        Insert: {
+          created_at?: string
+          created_by: string
+          duration_minutes: number
+          exam_type?: string
+          id?: string
+          part1_max: number
+          part2_max: number
+          source: string
+          source_attribution?: string | null
+          task_count: number
+          title: string
+          total_max_score: number
+        }
+        Update: {
+          created_at?: string
+          created_by?: string
+          duration_minutes?: number
+          exam_type?: string
+          id?: string
+          part1_max?: number
+          part2_max?: number
+          source?: string
+          source_attribution?: string | null
+          task_count?: number
+          title?: string
+          total_max_score?: number
+        }
+        Relationships: []
+      }
       onboarding_analytics: {
         Row: {
           completed_at: string | null
@@ -2848,6 +3211,7 @@ export type Database = {
           bio: string | null
           booking_link: string | null
           created_at: string | null
+          feature_mock_exams_enabled: boolean
           gender: string | null
           id: string
           invite_code: string | null
@@ -2864,6 +3228,7 @@ export type Database = {
           bio?: string | null
           booking_link?: string | null
           created_at?: string | null
+          feature_mock_exams_enabled?: boolean
           gender?: string | null
           id?: string
           invite_code?: string | null
@@ -2880,6 +3245,7 @@ export type Database = {
           bio?: string | null
           booking_link?: string | null
           created_at?: string | null
+          feature_mock_exams_enabled?: boolean
           gender?: string | null
           id?: string
           invite_code?: string | null
