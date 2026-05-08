@@ -164,11 +164,25 @@ export default function StudentMockExams() {
   }, []);
 
   const handleClick = (row: AttemptRow) => {
+    // Routes /student/mock-exams/:id and /:id/result expect ASSIGNMENT id,
+    // not attempt id (StudentMockExam.tsx → getStudentMockExam(assignmentId)
+    // calls /student/:assignmentId on the edge function). Backend имеет
+    // defensive fallback и принимает attempt_id тоже, но primary contract —
+    // assignment_id, не отступаем от него на фронте.
+    const assignmentId = row.assignment_id;
+    if (!assignmentId) {
+      // eslint-disable-next-line no-console
+      console.error(
+        '[StudentMockExams] assignment_id missing on row, falling back to attempt id:',
+        row,
+      );
+    }
+    const target = assignmentId ?? row.id;
     const status = deriveStatus(row);
     if (status === 'approved') {
-      navigate(`/student/mock-exams/${row.id}/result`);
+      navigate(`/student/mock-exams/${target}/result`);
     } else {
-      navigate(`/student/mock-exams/${row.id}`);
+      navigate(`/student/mock-exams/${target}`);
     }
   };
 

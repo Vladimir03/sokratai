@@ -353,22 +353,68 @@ function parseRoute(req: Request): RouteMatch {
 async function handleGetStudentAssignment(
   db: SupabaseClient,
   studentUserId: string,
-  assignmentId: string,
+  rawId: string,
   cors: Record<string, string>,
 ): Promise<Response> {
-  if (!isUUID(assignmentId)) {
+  if (!isUUID(rawId)) {
     return jsonError(cors, 400, "INVALID_ID", "Invalid assignment ID");
   }
 
-  // Verify student has an attempt for this assignment.
-  const { data: attempt, error: attemptErr } = await db
-    .from("mock_exam_attempts")
-    .select("id, status, started_at, submitted_at, blank_photo_url, total_part1_score, total_part2_score, total_score")
-    .eq("assignment_id", assignmentId)
-    .eq("student_id", studentUserId)
-    .maybeSingle();
-  if (attemptErr) return jsonError(cors, 500, "DB_ERROR", "Failed to load attempt");
-  if (!attempt) return jsonError(cors, 404, "NOT_FOUND", "Assignment not found");
+  // Defensive lookup — `rawId` ОБЫЧНО assignment_id (стандартный contract),
+  // но если фронт передал attempt_id (e.g. cached bundle до FIX-5,
+  // bookmarked URL, ручная вставка пути) — резолвим и его. Это защищает
+  // ученика от ошибки «Assignment not found» при stale browser cache.
+  // Любая попытка (по assignment_id или по attempt_id) обязательно делает
+  // ownership check `student_id = auth.uid()` — ученик не сможет открыть
+  // чужой пробник.
+  let attempt: Record<string, unknown> | null = null;
+  {
+    const byAssignment = await db
+      .from("mock_exam_attempts")
+      .select("id, assignment_id, status, started_at, submitted_at, blank_photo_url, total_part1_score, total_part2_score, total_score")
+      .eq("assignment_id", rawId)
+      .eq("student_id", studentUserId)
+      .maybeSingle();
+    if (byAssignment.error) {
+      return jsonError(cors, 500, "DB_ERROR", "Failed to load attempt");
+    }
+    attempt = byAssignment.data;
+  }
+  if (!attempt) {
+    // Fallback: пытаемся как attempt_id.
+    const byAttemptId = await db
+      .from("mock_exam_attempts")
+      .select("id, assignment_id, status, started_at, submitted_at, blank_photo_url, total_part1_score, total_part2_score, total_score")
+      .eq("id", rawId)
+      .eq("student_id", studentUserId)
+      .maybeSingle();
+    if (byAttemptId.error) {
+      return jsonError(cors, 500, "DB_ERROR", "Failed to load attempt");
+    }
+    attempt = byAttemptId.data;
+    if (attempt) {
+      console.warn("mock_exam_student_assignment_id_fallback_attempt_id", {
+        student_id: studentUserId,
+        passed_id: rawId,
+        resolved_assignment_id: attempt.assignment_id,
+      });
+    }
+  }
+  if (!attempt) {
+    console.warn("mock_exam_student_assignment_not_found", {
+      student_id: studentUserId,
+      passed_id: rawId,
+    });
+    return jsonError(
+      cors,
+      404,
+      "NOT_FOUND",
+      "Пробник не найден или не назначен этому ученику",
+      { passed_id: rawId },
+    );
+  }
+
+  const assignmentId = attempt.assignment_id as string;
 
   const { data: assignment, error: assignmentErr } = await db
     .from("mock_exam_assignments")
@@ -484,26 +530,55 @@ async function handleGetStudentAssignment(
 async function handleGetResult(
   db: SupabaseClient,
   studentUserId: string,
-  assignmentId: string,
+  rawId: string,
   cors: Record<string, string>,
 ): Promise<Response> {
-  if (!isUUID(assignmentId)) {
+  if (!isUUID(rawId)) {
     return jsonError(cors, 400, "INVALID_ID", "Invalid assignment ID");
   }
 
-  // Auth ownership: load attempt by assignment + student.
-  const { data: attempt, error: attemptErr } = await db
-    .from("mock_exam_attempts")
-    .select(
-      "id, assignment_id, status, started_at, submitted_at, " +
-        "total_time_minutes, blank_photo_url, total_part1_score, " +
-        "total_part2_score, total_score, manual_entered_date, manual_comment",
-    )
-    .eq("assignment_id", assignmentId)
-    .eq("student_id", studentUserId)
-    .maybeSingle();
-  if (attemptErr) return jsonError(cors, 500, "DB_ERROR", "Failed to load attempt");
-  if (!attempt) return jsonError(cors, 404, "NOT_FOUND", "Assignment not found");
+  // Auth ownership: load attempt by assignment_id (primary) или attempt_id
+  // (fallback для stale frontend bundle / bookmarked URL). См. defensive
+  // logic в handleGetStudentAssignment выше.
+  const SELECT_COLS =
+    "id, assignment_id, status, started_at, submitted_at, " +
+    "total_time_minutes, blank_photo_url, total_part1_score, " +
+    "total_part2_score, total_score, manual_entered_date, manual_comment";
+  let attempt: Record<string, unknown> | null = null;
+  {
+    const byAssignment = await db
+      .from("mock_exam_attempts")
+      .select(SELECT_COLS)
+      .eq("assignment_id", rawId)
+      .eq("student_id", studentUserId)
+      .maybeSingle();
+    if (byAssignment.error) {
+      return jsonError(cors, 500, "DB_ERROR", "Failed to load attempt");
+    }
+    attempt = byAssignment.data;
+  }
+  if (!attempt) {
+    const byAttemptId = await db
+      .from("mock_exam_attempts")
+      .select(SELECT_COLS)
+      .eq("id", rawId)
+      .eq("student_id", studentUserId)
+      .maybeSingle();
+    if (byAttemptId.error) {
+      return jsonError(cors, 500, "DB_ERROR", "Failed to load attempt");
+    }
+    attempt = byAttemptId.data;
+  }
+  if (!attempt) {
+    return jsonError(
+      cors,
+      404,
+      "NOT_FOUND",
+      "Пробник не найден или не назначен этому ученику",
+      { passed_id: rawId },
+    );
+  }
+  const assignmentId = attempt.assignment_id as string;
 
   // Block in_progress — result page is post-submit only.
   if (attempt.status === "in_progress") {

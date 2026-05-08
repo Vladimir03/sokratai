@@ -24,6 +24,7 @@ import { toast } from 'sonner';
 import {
   ArrowLeft,
   Check,
+  Eye,
   GraduationCap,
   Link2,
   Loader2,
@@ -37,6 +38,8 @@ import { Label } from '@/components/ui/label';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Skeleton } from '@/components/ui/skeleton';
 import { MockExamFeatureGate } from './MockExamFeatureGate';
+import { MockExamVariantPreviewSheet } from '@/components/tutor/mock-exams/MockExamVariantPreviewSheet';
+import { LeadLinkSuccessDialog } from '@/components/tutor/mock-exams/LeadLinkSuccessDialog';
 import {
   createMockExamAssignment,
   createMockExamInviteLink,
@@ -184,6 +187,7 @@ interface VariantCardProps {
   badge: string;
   isAvailable: boolean;
   isSelected: boolean;
+  onPreview?: () => void;
 }
 
 const VariantCard = memo(function VariantCard({
@@ -193,6 +197,7 @@ const VariantCard = memo(function VariantCard({
   badge,
   isAvailable,
   isSelected,
+  onPreview,
 }: VariantCardProps) {
   return (
     <div
@@ -242,6 +247,20 @@ const VariantCard = memo(function VariantCard({
           </div>
           <p className="text-xs text-muted-foreground mt-1">{attribution}</p>
           <p className="text-xs text-muted-foreground/80 mt-0.5">{meta}</p>
+          {isAvailable && onPreview ? (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onPreview();
+              }}
+              className="mt-2 inline-flex min-h-9 touch-manipulation items-center gap-1.5 rounded-md border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-700 transition-colors hover:border-accent/40 hover:text-accent dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200"
+              aria-label="Посмотреть условия задач этого варианта"
+            >
+              <Eye className="h-3.5 w-3.5" aria-hidden="true" />
+              Посмотреть условия задач
+            </button>
+          ) : null}
         </div>
         {isSelected && isAvailable && (
           <div
@@ -421,6 +440,18 @@ function TutorMockExamCreateContent() {
 
   const [isSubmitting, setIsSubmitting] = useState(false);
 
+  // FIX-2: variant preview drawer.
+  const [previewVariantId, setPreviewVariantId] = useState<string | null>(null);
+
+  // FIX-4a: lead-link success dialog. После создания пробника+invite-link мы
+  // навигируем на detail только когда репетитор закроет модалку (или нажмёт
+  // «Перейти к пробнику»). До этого модалка показывает ссылку и copy button.
+  const [leadLink, setLeadLink] = useState<{
+    url: string;
+    assignmentId: string;
+    studentCount: number;
+  } | null>(null);
+
   // Index: tutor_student_id → student_id (auth.users.id).
   // Backend API expects student_id (auth.users.id), but groups reference
   // tutor_student_id. Resolve via this map.
@@ -520,18 +551,23 @@ function TutorMockExamCreateContent() {
         `Пробник назначен ${studentCount} ${pluralStudents(studentCount)}`,
       );
 
-      // Optional lead-link.
+      // Optional lead-link. При успехе вместо toast'а показываем модалку с
+      // явной ссылкой + copy button + объяснением — она НЕ автоматически
+      // редиректит на detail, чтобы репетитор успел скопировать ссылку и
+      // отправить её родителю/ученику. Закрытие модалки → navigate.
       if (createLeadLink) {
         try {
           const link = await createMockExamInviteLink(assignmentId, {});
-          await tryCopyLink(link.url);
-          toast.success('Lead-ссылка скопирована в буфер обмена', {
-            description: link.url,
-            duration: 6000,
-          });
+          // Best-effort copy в буфер: модалка всё равно показывает ссылку,
+          // если writeText заблокирован браузером.
+          void tryCopyLink(link.url);
+          setLeadLink({ url: link.url, assignmentId, studentCount });
+          // НЕ navigate — это сделает onClose модалки.
+          return;
         } catch (err) {
           const msg = err instanceof Error ? err.message : 'Не удалось создать lead-ссылку';
-          toast.error(`Lead-ссылка не создана: ${msg}`);
+          toast.error(`Публичная ссылка не создана: ${msg}`);
+          // Fallback: навигируем на detail без модалки — пробник уже создан.
         }
       }
 
@@ -596,11 +632,16 @@ function TutorMockExamCreateContent() {
               badge={variant.badge}
               isAvailable={variant.isAvailable}
               isSelected={variantId === variant.id}
+              onPreview={
+                variant.isAvailable
+                  ? () => setPreviewVariantId(variant.id)
+                  : undefined
+              }
             />
           ))}
         </div>
         <p className="text-xs text-muted-foreground/80 pt-1">
-          В Phase 2 здесь появится «Из моей базы знаний» и «Создать вручную»
+          Скоро здесь появятся «Из моей базы знаний» и «Создать вручную».
         </p>
       </StepSection>
 
@@ -770,6 +811,31 @@ function TutorMockExamCreateContent() {
             : 'Выбери учеников'}
         </Button>
       </div>
+
+      {/* FIX-2 — variant preview drawer. */}
+      <MockExamVariantPreviewSheet
+        open={previewVariantId !== null}
+        onOpenChange={(next) => {
+          if (!next) setPreviewVariantId(null);
+        }}
+        variantId={previewVariantId}
+      />
+
+      {/* FIX-4a — lead-link success dialog. */}
+      <LeadLinkSuccessDialog
+        open={leadLink !== null}
+        url={leadLink?.url ?? ''}
+        studentCount={leadLink?.studentCount ?? 0}
+        onClose={() => {
+          const target = leadLink;
+          setLeadLink(null);
+          if (target) {
+            navigate(`/tutor/mock-exams/${target.assignmentId}`, {
+              replace: true,
+            });
+          }
+        }}
+      />
     </div>
   );
 }

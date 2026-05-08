@@ -39,7 +39,7 @@ INSERT INTO public.mock_exam_variants (
   'Тренировочный вариант 1 (физика ЕГЭ-2026)',
   'ege_physics',
   'tutor',
-  'Источник: репетитор Егор Иванов',
+  'Источник: репетитор Егор Блинов',
   235,  -- 3ч 55мин
   45,   -- 28 (Часть 1) + 17 (Часть 2), verified against source docx criteria
   28,

@@ -25,7 +25,11 @@
       "Bash(npx tsc:*)",
       "Bash(grep -E \"\\(HWDrawer|hwDraftStore|types[\\\\\\\\\\\\\\\\/]kb\\)\")",
       "Bash(xargs -I{} sh -c 'grep -l \"homework_kb_tasks\" \"supabase/migrations/{}\" 2>/dev/null && echo \"---{}---\"')",
-      "Bash(npm run *)"
+      "Bash(npm run *)",
+      "Bash(echo \"---EXIT: $?---\")",
+      "Bash(gh pr create --title 'docs\\(infra\\): Phase B Selectel VPS deploy procedure' --body ' *)",
+      "Bash(git -C C:/Users/kamch/sokratai log -3 --oneline)",
+      "Bash(git -C C:/Users/kamch/sokratai push origin main)"
     ]
   }
 }

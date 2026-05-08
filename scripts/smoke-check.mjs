@@ -59,6 +59,14 @@ function requireContains(filePath, snippet, failMessage, okMessage) {
   ok(okMessage);
 }
 
+function requireMatches(filePath, pattern, failMessage, okMessage) {
+  const content = readText(filePath);
+  if (!pattern.test(content)) {
+    fail(failMessage);
+  }
+  ok(okMessage);
+}
+
 function requireNotContains(filePath, snippet, failMessage, okMessage) {
   const content = readText(filePath);
   if (content.includes(snippet)) {
@@ -219,9 +227,9 @@ requireContains(
   "student login links tutors to /tutor/login",
 );
 
-requireContains(
+requireMatches(
   path.join(rootDir, "src", "components", "TutorTelegramLoginButton.tsx"),
-  'JSON.stringify({ intended_role: "tutor" })',
+  /intended_role:\s*["']tutor["']/,
   "TutorTelegramLoginButton is missing intended_role=tutor",
   "TutorTelegramLoginButton sends intended_role=tutor",
 );

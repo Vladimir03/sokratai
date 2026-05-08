@@ -8,6 +8,7 @@
 //   POST   /attempts/:id/approve-task                — approve один Часть-2 task
 //   POST   /attempts/:id/approve-all                 — все 6 закрыты + status → approved
 //   POST   /assignments/:id/invite-link              — 8-char slug → mock_exam_public_links
+//   GET    /assignments/:id/invite-links             — список ссылок (FIX-4b)
 //
 // Spec: docs/delivery/features/mock-exams-v1/spec.md §5 API
 // Migration: supabase/migrations/20260508120000_mock_exams_v1_schema.sql
@@ -1287,6 +1288,67 @@ async function handleCreateInviteLink(
   return jsonError(cors, 500, "DB_ERROR", "Slug collision exhausted");
 }
 
+// ────────────────────────────────────────────────────────────────────────────
+// Endpoint: GET /assignments/:id/invite-links
+//
+// FIX-4b — история публичных ссылок в кабинете репетитора. Список всех
+// scope='invite' ссылок, созданных репетитором для assignment'а. Сортировка
+// created_at DESC (свежие сверху).
+//
+// Anti-leak invariants (mirror handleCreateInviteLink + homework-reuse-v1
+// share-links pattern):
+//   • Column whitelist: slug, expires_at, created_at, scope. tutor_id уже
+//     проверен через ownership (ниже), не возвращаем. attempt_id опускаем —
+//     для scope='invite' он null, для parent_result понадобится отдельный
+//     producer (см. CLAUDE.md §10).
+//   • URL builds server-side через getAppBaseUrl() — клиент не склеивает.
+//   • Filter `tutor_id = tutorUserId` дублирует ownership-check (defense in
+//     depth — shared mock_exam_id с другим tutor'ом теоретически невозможен
+//     из-за RLS на assignments, но дешевле чем не дублировать).
+// ────────────────────────────────────────────────────────────────────────────
+
+async function handleListInviteLinks(
+  db: SupabaseClient,
+  tutorUserId: string,
+  assignmentId: string,
+  cors: Record<string, string>,
+): Promise<Response> {
+  const assignmentOrErr = await getOwnedAssignmentOrThrow(
+    db,
+    assignmentId,
+    tutorUserId,
+    cors,
+  );
+  if (assignmentOrErr instanceof Response) return assignmentOrErr;
+
+  const { data, error } = await db
+    .from("mock_exam_public_links")
+    .select("slug, scope, expires_at, created_at")
+    .eq("mock_exam_id", assignmentId)
+    .eq("tutor_id", tutorUserId)
+    .eq("scope", "invite")
+    .order("created_at", { ascending: false });
+
+  if (error) {
+    console.error("mock_exam_invite_links_list_failed", {
+      error: error.message,
+    });
+    return jsonError(cors, 500, "DB_ERROR", "Failed to list invite links");
+  }
+
+  const baseUrl = getAppBaseUrl();
+  const items = (data ?? []).map((row) => ({
+    slug: row.slug,
+    url: `${baseUrl}/p/mock-invite/${row.slug}`,
+    scope: row.scope,
+    assignment_id: assignmentId,
+    expires_at: row.expires_at,
+    created_at: row.created_at,
+  }));
+
+  return jsonOk(cors, { items });
+}
+
 // ─── Server ──────────────────────────────────────────────────────────────────
 
 Deno.serve(async (req: Request): Promise<Response> => {
@@ -1341,6 +1403,14 @@ Deno.serve(async (req: Request): Promise<Response> => {
     ) {
       const body = await parseJsonBody(req);
       return await handleCreateInviteLink(db, userId, seg[1], body, cors);
+    }
+
+    // GET /assignments/:id/invite-links — FIX-4b история ссылок
+    if (
+      seg.length === 3 && seg[0] === "assignments" &&
+      seg[2] === "invite-links" && route.method === "GET"
+    ) {
+      return await handleListInviteLinks(db, userId, seg[1], cors);
     }
 
     // GET /attempts/:id

@@ -138,3 +138,18 @@ export async function createMockExamInviteLink(
     { method: 'POST', body: JSON.stringify(payload) },
   );
 }
+
+/**
+ * FIX-4b — список публичных invite-links для assignment'а. Сортировка
+ * created_at DESC. Используется в TutorMockExamDetail (секция «Публичные
+ * ссылки»). Backend column-whitelist: slug, scope, expires_at, created_at,
+ * URL генерируется server-side через PUBLIC_APP_URL.
+ */
+export async function listMockExamInviteLinks(
+  assignmentId: string,
+): Promise<MockExamInviteLink[]> {
+  const resp = await requestTutorMockExamApi<{ items: MockExamInviteLink[] }>(
+    `/assignments/${encodeURIComponent(assignmentId)}/invite-links`,
+  );
+  return resp.items ?? [];
+}

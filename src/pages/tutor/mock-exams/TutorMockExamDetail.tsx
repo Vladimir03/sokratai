@@ -27,6 +27,7 @@ import { TutorDataStatus } from '@/components/tutor/TutorDataStatus';
 import { MockExamFeatureGate } from './MockExamFeatureGate';
 import { useMockExamAssignment } from '@/hooks/useMockExamAssignment';
 import { MockExamHeatmap } from '@/components/tutor/mock-exams/MockExamHeatmap';
+import { MockExamInviteLinksSection } from '@/components/tutor/mock-exams/MockExamInviteLinksSection';
 import { formatDeadline } from '@/lib/homeworkDeadline';
 import { cn } from '@/lib/utils';
 import type {
@@ -233,8 +234,8 @@ function AiDraftBanner({ awaitingCount }: { awaitingCount: number }) {
         </p>
         <p className="text-sm text-amber-800 dark:text-amber-300/90 leading-relaxed">
           Ученики и родители НЕ видят их до твоего подтверждения. Кликни на ученика,
-          чтобы открыть проверку. Анонимные лиды (Phase 1) — обязательная ручная
-          проверка каждого пункта.
+          чтобы открыть проверку. Анонимных лидов — обязательно проверь каждое
+          задание вручную.
         </p>
       </div>
     </div>
@@ -413,6 +414,11 @@ function TutorMockExamDetailContent() {
       {/* AI draft warning banner — only when есть awaiting_review attempts. */}
       <AiDraftBanner awaitingCount={kpi?.awaitingReview ?? 0} />
 
+      {/* FIX-4b — публичные ссылки (lead-gen). Скрыто на manual_entry. */}
+      {id ? (
+        <MockExamInviteLinksSection assignmentId={id} mode={detail.mode} />
+      ) : null}
+
       {/* Empty-state hint когда attempt'ов нет (assigned but no starts yet). */}
       {detail.attempts.length === 0 ? (
         <div
@@ -434,12 +440,11 @@ function TutorMockExamDetailContent() {
         </div>
       ) : null}
 
-      {/* Phase 1 reminder for QA / future iteration:
-          Per-task hydration (cell-by-cell colored scores) — Phase 2.
+      {/* Per-task hydration (cell-by-cell colored scores) — следующая итерация.
           Тут только привычный AI-черновик банер + structural heatmap. */}
       <p className="text-xs text-slate-400 text-center pt-4 flex items-center justify-center gap-1.5">
         <Sparkles className="h-3 w-3" aria-hidden="true" />
-        Phase 1: цветные клетки 1–26 появятся после заполнения данных
+        Цветные клетки 1–26 появятся после прохождения учениками
       </p>
     </div>
   );

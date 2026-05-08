@@ -1,0 +1,828 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Сократ · Пробники ЕГЭ · Макет v2</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Golos+Text:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            'sokrat-accent': '#1B6B4A',
+            'sokrat-accent-dark': '#144F37',
+            'sokrat-accent-light': '#DCFCE7',
+            'sokrat-warning': '#F59E0B',
+            'sokrat-danger': '#EF4444',
+          },
+          fontFamily: {
+            sans: ['"Golos Text"', 'system-ui', '-apple-system', 'sans-serif'],
+          },
+        },
+      },
+    };
+  </script>
+  <style>
+    html, body { font-family: 'Golos Text', system-ui, sans-serif; }
+    body { background: #F8FAFC; color: #0F172A; }
+    .screen { display: none; }
+    .screen.active { display: block; }
+    .cell-correct { background: #DCFCE7; color: #14532D; }
+    .cell-partial { background: #FEF3C7; color: #78350F; }
+    .cell-wrong { background: #FEE2E2; color: #7F1D1D; }
+    .cell-empty { background: #F1F5F9; color: #94A3B8; }
+    .cell-draft { background: #FEF3C7; color: #92400E; border: 1px dashed #D97706; }
+    .cell-low-conf { background: #FFF1F2; color: #9F1239; border: 1px dashed #FB7185; }
+    .scrollable-x { -webkit-overflow-scrolling: touch; touch-action: pan-x; }
+    .heatmap-table { border-collapse: separate; border-spacing: 0; table-layout: fixed; }
+    .heatmap-table td, .heatmap-table th { border-bottom: 1px solid #F1F5F9; }
+    .fade-in { animation: fadeIn 200ms ease; }
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+    .notes-panel { transition: transform 200ms ease; }
+    .notes-panel.collapsed { transform: translateY(calc(100% - 44px)); }
+    button, [role="button"] { touch-action: manipulation; }
+    [aria-current="page"] { font-weight: 600; }
+  </style>
+</head>
+<body>
+
+<!-- ================================================ TOP NAV ================================================ -->
+<header class="bg-white border-b border-slate-200 sticky top-0 z-40">
+  <div class="max-w-7xl mx-auto px-6 h-14 flex items-center justify-between">
+    <div class="flex items-center gap-8">
+      <span class="font-bold text-lg text-slate-900 select-none">Сократ AI</span>
+      <nav class="flex items-center gap-1 text-sm">
+        <a class="px-3 py-1.5 text-slate-500 rounded hover:bg-slate-100 cursor-pointer">Главная</a>
+        <a class="px-3 py-1.5 text-slate-500 rounded hover:bg-slate-100 cursor-pointer">Расписание</a>
+        <a class="px-3 py-1.5 text-slate-500 rounded hover:bg-slate-100 cursor-pointer">ДЗ</a>
+        <a class="px-3 py-1.5 bg-sokrat-accent text-white rounded font-medium cursor-pointer" onclick="go('list')">Пробники</a>
+        <a class="px-3 py-1.5 text-slate-500 rounded hover:bg-slate-100 cursor-pointer">Ученики</a>
+        <a class="px-3 py-1.5 text-slate-500 rounded hover:bg-slate-100 cursor-pointer">База задач</a>
+        <a class="px-3 py-1.5 text-slate-500 rounded hover:bg-slate-100 cursor-pointer">Оплаты</a>
+      </nav>
+    </div>
+    <div class="flex items-center gap-3">
+      <div class="w-8 h-8 rounded-full bg-sokrat-accent text-white flex items-center justify-center text-sm font-semibold">Е</div>
+      <span class="text-sm text-slate-700">Егор</span>
+    </div>
+  </div>
+</header>
+
+<!-- ================================================ SCREEN 1: LIST ================================================ -->
+<section id="list" class="screen active fade-in">
+  <div class="max-w-7xl mx-auto px-6 py-8">
+    <div class="flex items-center justify-between mb-5">
+      <div>
+        <h1 class="text-2xl font-semibold text-slate-900">Пробники</h1>
+        <p class="text-sm text-slate-500 mt-1">Пробные варианты ЕГЭ с автопроверкой Части 1 и AI-черновиком Части 2</p>
+      </div>
+      <button onclick="go('wizard')" class="px-4 py-2 bg-sokrat-accent text-white rounded-md text-sm font-medium hover:bg-sokrat-accent-dark">
+        + Назначить пробник
+      </button>
+    </div>
+
+    <div class="bg-amber-50 border border-amber-200 rounded-lg p-4 mb-6 flex gap-3">
+      <svg class="w-5 h-5 text-amber-600 flex-shrink-0 mt-0.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 9v4M12 17h.01"/><circle cx="12" cy="12" r="10"/></svg>
+      <div>
+        <p class="text-sm font-medium text-amber-900">Бета · ЕГЭ по физике</p>
+        <p class="text-sm text-amber-800 mt-1">Часть 1 (1–20) — автопроверка по критериям ФИПИ. Часть 2 (21–26) — AI-черновик, финальная оценка за тобой. ОГЭ и дополнительные варианты — следующая итерация.</p>
+      </div>
+    </div>
+
+    <div class="space-y-3">
+      <div class="bg-white border border-slate-200 rounded-lg p-5 hover:shadow-md transition-shadow cursor-pointer" onclick="go('results')">
+        <div class="flex items-start justify-between mb-3">
+          <div class="flex-1">
+            <div class="flex items-center gap-2 mb-1">
+              <h3 class="font-semibold text-slate-900 text-lg">Демо ЕГЭ для группы пн/чт + Иван</h3>
+              <span class="px-2 py-0.5 bg-emerald-100 text-emerald-900 text-xs font-medium rounded-full">Активное</span>
+            </div>
+            <p class="text-sm text-slate-500">Тренировочный 1 от Егора · Дедлайн 14 мая · <span class="font-medium text-slate-700">С бланком</span></p>
+          </div>
+          <svg class="w-5 h-5 text-slate-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18l6-6-6-6"/></svg>
+        </div>
+        <div class="grid grid-cols-5 gap-3 pt-3 border-t border-slate-100">
+          <div><div class="text-xs text-slate-500">Учеников</div><div class="text-lg font-semibold text-slate-900 mt-0.5">5</div></div>
+          <div><div class="text-xs text-slate-500">Сдали</div><div class="text-lg font-semibold text-slate-900 mt-0.5">3 <span class="text-sm text-slate-400 font-normal">/ 5</span></div></div>
+          <div><div class="text-xs text-slate-500">В процессе</div><div class="text-lg font-semibold text-amber-600 mt-0.5">1</div></div>
+          <div><div class="text-xs text-slate-500">Средний балл</div><div class="text-lg font-semibold text-sokrat-accent mt-0.5">37 <span class="text-sm text-slate-500 font-normal">/ 54</span></div></div>
+          <div><div class="text-xs text-slate-500">Требует AI-проверки</div><div class="text-lg font-semibold text-amber-700 mt-0.5">2</div></div>
+        </div>
+      </div>
+
+      <div class="bg-white border border-dashed border-slate-300 rounded-lg p-8 text-center">
+        <p class="text-sm text-slate-500">Назначить ещё пробник →</p>
+      </div>
+    </div>
+
+    <div class="mt-10">
+      <h2 class="text-lg font-semibold text-slate-900 mb-3">Готовые варианты в библиотеке</h2>
+      <div class="grid md:grid-cols-2 gap-3">
+        <div class="bg-white border-2 border-sokrat-accent rounded-lg p-4 cursor-pointer" onclick="go('wizard')">
+          <div class="flex items-start gap-3">
+            <div class="w-10 h-10 rounded bg-sokrat-accent-light flex items-center justify-center flex-shrink-0">
+              <svg class="w-5 h-5 text-sokrat-accent" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 10v6M2 10l10-5 10 5-10 5z"/><path d="M6 12v5c3 3 9 3 12 0v-5"/></svg>
+            </div>
+            <div class="flex-1">
+              <div class="flex items-center justify-between mb-1">
+                <h4 class="font-semibold text-slate-900">Тренировочный 1 (физика ЕГЭ-2026)</h4>
+                <span class="px-1.5 py-0.5 bg-sokrat-accent-light text-sokrat-accent text-xs rounded font-medium">Рекомендуем</span>
+              </div>
+              <p class="text-xs text-slate-500 mb-1">Источник: репетитор Егор Иванов</p>
+              <p class="text-xs text-slate-400">26 заданий · макс. 54 балла · 3 ч 55 мин</p>
+            </div>
+          </div>
+        </div>
+        <div class="bg-white border border-slate-200 rounded-lg p-4 opacity-60">
+          <div class="flex items-start gap-3">
+            <div class="w-10 h-10 rounded bg-slate-100 flex items-center justify-center flex-shrink-0">
+              <svg class="w-5 h-5 text-slate-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg>
+            </div>
+            <div class="flex-1">
+              <div class="flex items-center justify-between mb-1">
+                <h4 class="font-semibold text-slate-500">Демоверсия ФИПИ-2026</h4>
+                <span class="px-1.5 py-0.5 bg-slate-100 text-slate-500 text-xs rounded">скоро</span>
+              </div>
+              <p class="text-xs text-slate-400 mb-1">Источник: ФИПИ</p>
+              <p class="text-xs text-slate-400">Добавим после Phase 2</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ================================================ SCREEN 2: WIZARD ================================================ -->
+<section id="wizard" class="screen fade-in">
+  <div class="max-w-4xl mx-auto px-6 py-8">
+    <nav class="flex items-center gap-2 text-sm text-slate-500 mb-4">
+      <a onclick="go('list')" class="hover:text-slate-900 cursor-pointer">Пробники</a>
+      <span>/</span>
+      <span class="text-slate-900">Назначить пробник</span>
+    </nav>
+
+    <h1 class="text-2xl font-semibold text-slate-900 mb-1">Назначить пробник</h1>
+    <p class="text-sm text-slate-500 mb-6">Готовый вариант от Егора · Часть 1 авто, Часть 2 AI-черновик с твоим подтверждением</p>
+
+    <!-- Шаг 1: Вариант -->
+    <div class="bg-white border border-slate-200 rounded-lg p-5 mb-4">
+      <p class="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-3">Шаг 1 · Вариант</p>
+      <div class="border-2 border-sokrat-accent rounded-lg p-4">
+        <div class="flex items-start justify-between mb-2">
+          <div>
+            <h3 class="font-semibold text-slate-900">Тренировочный 1 (физика ЕГЭ-2026)</h3>
+            <p class="text-sm text-slate-500 mt-0.5">Источник: репетитор Егор Иванов · 26 заданий · 54 балла</p>
+          </div>
+          <span class="text-sm text-sokrat-accent font-medium">✓ выбран</span>
+        </div>
+      </div>
+      <p class="text-xs text-slate-400 mt-3">В Phase 2 здесь будет «Из моей базы знаний» и «Создать вручную»</p>
+    </div>
+
+    <!-- Шаг 2: Режим -->
+    <div class="bg-white border border-slate-200 rounded-lg p-5 mb-4">
+      <p class="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-3">Шаг 2 · Режим прохождения</p>
+      <label class="flex items-start gap-3 p-3 rounded-md border-2 border-sokrat-accent bg-sokrat-accent-light/30 cursor-pointer mb-2">
+        <input type="radio" name="mode" checked class="mt-1 w-4 h-4 text-sokrat-accent" />
+        <div class="flex-1">
+          <div class="font-medium text-slate-900 text-sm flex items-center gap-2">
+            С бланком ЕГЭ
+            <span class="px-1.5 py-0.5 bg-sokrat-accent-light text-sokrat-accent text-xs rounded">по умолчанию</span>
+          </div>
+          <div class="text-xs text-slate-600 mt-0.5">Ученик распечатывает PDF бланка, заполняет ручкой и параллельно вводит ответы Части 1 в форму на сайте. <strong>AI авто-проверяет Часть 1, делает черновик Части 2.</strong> Фото бланка хранится как proof. Подходит для тренировки навыка переноса ответов.</div>
+        </div>
+      </label>
+      <label class="flex items-start gap-3 p-3 rounded-md border border-slate-200 hover:border-slate-300 cursor-pointer">
+        <input type="radio" name="mode" class="mt-1 w-4 h-4 text-sokrat-accent" />
+        <div class="flex-1">
+          <div class="font-medium text-slate-900 text-sm">Стандартный (форма)</div>
+          <div class="text-xs text-slate-600 mt-0.5">Ученик заполняет ответы Части 1 в форме на сайте, AI авто-проверяет. Часть 2 — фото решений, <strong>AI делает черновик</strong>. Подходит, если ученик не может распечатать бланк.</div>
+        </div>
+      </label>
+    </div>
+
+    <!-- Шаг 3: Кому -->
+    <div class="bg-white border border-slate-200 rounded-lg p-5 mb-4">
+      <p class="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-3">Шаг 3 · Кому назначить</p>
+      <p class="text-xs text-slate-700 font-medium uppercase tracking-wide mb-2">Группы</p>
+      <label class="flex items-start gap-3 p-2.5 rounded-md hover:bg-slate-50 cursor-pointer">
+        <input type="checkbox" checked class="mt-1 w-4 h-4 rounded text-sokrat-accent" />
+        <div class="flex-1"><div class="font-medium text-slate-900 text-sm">Группа Физика ЕГЭ · пн/чт 18:00</div><div class="text-xs text-slate-500">3 ученика: Анна К., Михаил Р., Ольга С.</div></div>
+      </label>
+      <label class="flex items-start gap-3 p-2.5 rounded-md bg-slate-50 cursor-not-allowed opacity-60">
+        <input type="checkbox" disabled class="mt-1 w-4 h-4" />
+        <div class="flex-1"><div class="font-medium text-slate-500 text-sm">Группа Физика ОГЭ · вт/сб 17:00</div><div class="text-xs text-slate-500">4 ученика · ОГЭ в Phase 3</div></div>
+      </label>
+      <p class="text-xs text-slate-700 font-medium uppercase tracking-wide mt-4 mb-2">Индивидуально</p>
+      <label class="flex items-start gap-3 p-2.5 rounded-md hover:bg-slate-50 cursor-pointer">
+        <input type="checkbox" checked class="mt-1 w-4 h-4 rounded text-sokrat-accent" />
+        <div class="flex-1"><div class="font-medium text-slate-900 text-sm">Иван Петров</div><div class="text-xs text-slate-500">11 класс · сильный</div></div>
+      </label>
+      <label class="flex items-start gap-3 p-2.5 rounded-md hover:bg-slate-50 cursor-pointer">
+        <input type="checkbox" checked class="mt-1 w-4 h-4 rounded text-sokrat-accent" />
+        <div class="flex-1"><div class="font-medium text-slate-900 text-sm">Дмитрий Семёнов</div><div class="text-xs text-slate-500">11 класс · средний</div></div>
+      </label>
+      <div class="mt-3 pt-3 border-t border-slate-100 text-xs">Выбрано: <span class="font-semibold text-slate-900">5 учеников</span></div>
+    </div>
+
+    <!-- Шаг 4: Параметры -->
+    <div class="bg-white border border-slate-200 rounded-lg p-5 mb-6">
+      <p class="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-3">Шаг 4 · Дедлайн</p>
+      <input type="text" value="14 мая 2026, 23:59" class="w-full md:w-80 px-3 py-2 border border-slate-200 rounded-md text-base focus:ring-2 focus:ring-sokrat-accent/20 focus:border-sokrat-accent" />
+      <p class="text-xs text-slate-500 mt-1.5">Стандартный пробник занимает 3 ч 55 мин</p>
+    </div>
+
+    <!-- Lead-gen optional -->
+    <div class="bg-white border-2 border-dashed border-slate-300 rounded-lg p-5 mb-6">
+      <div class="flex items-start gap-3">
+        <svg class="w-5 h-5 text-slate-500 flex-shrink-0 mt-0.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
+        <div class="flex-1">
+          <p class="font-medium text-slate-900 text-sm mb-1">Опционально · Создать публичную ссылку для лидов</p>
+          <p class="text-xs text-slate-600 mb-3">Anonymous родители/ученики смогут пройти этот пробник без регистрации. Часть 1 они увидят сразу, Часть 2 — после твоего подтверждения. Ты получишь их контакт.</p>
+          <button onclick="go('public-invite')" class="text-sm text-sokrat-accent font-medium hover:underline">Сгенерировать lead-link →</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="flex items-center justify-between">
+      <button onclick="go('list')" class="px-4 py-2 text-sm text-slate-700 border border-slate-200 rounded-md hover:bg-slate-50">Назад</button>
+      <button onclick="go('results')" class="px-6 py-2.5 bg-sokrat-accent text-white rounded-md text-sm font-medium hover:bg-sokrat-accent-dark">Назначить пробник 5 ученикам</button>
+    </div>
+  </div>
+</section>
+
+<!-- ================================================ SCREEN 3: RESULTS (HEATMAP) ================================================ -->
+<section id="results" class="screen fade-in">
+  <div class="max-w-7xl mx-auto px-6 py-8">
+    <nav class="flex items-center gap-2 text-sm text-slate-500 mb-3">
+      <a onclick="go('list')" class="hover:text-slate-900 cursor-pointer">Пробники</a>
+      <span>/</span>
+      <span class="text-slate-900">Демо ЕГЭ для группы пн/чт + Иван</span>
+    </nav>
+
+    <div class="flex items-start justify-between mb-5">
+      <div>
+        <div class="flex items-center gap-2 mb-1">
+          <h1 class="text-2xl font-semibold text-slate-900">Демо ЕГЭ для группы пн/чт + Иван</h1>
+          <span class="px-2 py-0.5 bg-emerald-100 text-emerald-900 text-xs font-medium rounded-full">Активное</span>
+        </div>
+        <p class="text-sm text-slate-500">Тренировочный 1 от Егора · Дедлайн 14 мая · <span class="font-medium">С бланком</span> · 5 учеников</p>
+      </div>
+      <div class="flex items-center gap-2">
+        <button class="px-3 py-1.5 text-sm text-slate-700 border border-slate-200 rounded-md hover:bg-slate-50">Напомнить всем</button>
+        <button class="px-3 py-1.5 text-sm text-slate-700 border border-slate-200 rounded-md hover:bg-slate-50">Ссылка для родителей</button>
+        <button class="px-3 py-1.5 text-sm text-slate-700 border border-slate-200 rounded-md hover:bg-slate-50">Экспорт</button>
+      </div>
+    </div>
+
+    <div class="grid grid-cols-5 gap-3 mb-6">
+      <div class="bg-white border border-slate-200 rounded-lg p-4"><div class="text-xs text-slate-500">Сдали</div><div class="text-2xl font-semibold text-slate-900 mt-1">3 <span class="text-sm text-slate-400 font-normal">/ 5</span></div></div>
+      <div class="bg-white border border-slate-200 rounded-lg p-4"><div class="text-xs text-slate-500">В процессе</div><div class="text-2xl font-semibold text-amber-600 mt-1">1</div></div>
+      <div class="bg-white border border-slate-200 rounded-lg p-4"><div class="text-xs text-slate-500">Не приступали</div><div class="text-2xl font-semibold text-slate-900 mt-1">1</div></div>
+      <div class="bg-white border border-slate-200 rounded-lg p-4"><div class="text-xs text-slate-500">Средний первичный</div><div class="text-2xl font-semibold text-sokrat-accent mt-1">37 <span class="text-sm text-slate-500 font-normal">/ 54</span></div></div>
+      <div class="bg-amber-50 border border-amber-200 rounded-lg p-4"><div class="text-xs text-amber-800">Требует AI-проверки</div><div class="text-2xl font-semibold text-amber-700 mt-1">2 ученика</div></div>
+    </div>
+
+    <div class="bg-white border border-slate-200 rounded-lg overflow-hidden mb-6">
+      <div class="px-5 py-3 border-b border-slate-100 flex items-center justify-between flex-wrap gap-2">
+        <h2 class="font-semibold text-slate-900">Результаты по ученикам</h2>
+        <div class="flex items-center gap-3 text-xs text-slate-500 flex-wrap">
+          <span class="flex items-center gap-1.5"><span class="w-3 h-3 rounded cell-correct"></span> верно</span>
+          <span class="flex items-center gap-1.5"><span class="w-3 h-3 rounded cell-partial"></span> частично</span>
+          <span class="flex items-center gap-1.5"><span class="w-3 h-3 rounded cell-wrong"></span> неверно</span>
+          <span class="flex items-center gap-1.5"><span class="w-3 h-3 rounded cell-draft"></span> AI-черновик</span>
+          <span class="flex items-center gap-1.5"><span class="w-3 h-3 rounded cell-low-conf"></span> AI не уверен</span>
+          <span class="flex items-center gap-1.5"><span class="w-3 h-3 rounded cell-empty"></span> —</span>
+        </div>
+      </div>
+
+      <div class="overflow-x-auto scrollable-x">
+        <table class="heatmap-table text-sm" style="width: max-content;">
+          <colgroup>
+            <col style="width: 220px;">
+            <col span="20" style="width: 34px;">
+            <col style="width: 12px;">
+            <col span="6" style="width: 46px;">
+            <col style="width: 80px;">
+            <col style="width: 80px;">
+            <col style="width: 80px;">
+          </colgroup>
+          <thead>
+            <tr class="bg-slate-50 text-xs text-slate-500">
+              <th class="sticky left-0 bg-slate-50 px-4 py-2 text-left z-10">Ученик</th>
+              <th colspan="20" class="px-2 py-1.5 text-center" style="font-weight: 600;">Часть 1 (1–20) · авто</th>
+              <th class="bg-slate-50"></th>
+              <th colspan="6" class="px-2 py-1.5 text-center" style="font-weight: 600;">Часть 2 (21–26) · AI-черновик</th>
+              <th class="px-2 py-1.5 text-right">Часть 1</th>
+              <th class="px-2 py-1.5 text-right">Часть 2</th>
+              <th class="px-2 py-1.5 text-right border-l-2 border-slate-200">Итого</th>
+            </tr>
+            <tr class="text-xs text-slate-400">
+              <th class="sticky left-0 bg-white px-4 py-1 text-left z-10"></th>
+              <th class="text-center py-1">1</th><th class="text-center py-1">2</th><th class="text-center py-1">3</th><th class="text-center py-1">4</th><th class="text-center py-1">5</th>
+              <th class="text-center py-1">6</th><th class="text-center py-1">7</th><th class="text-center py-1">8</th><th class="text-center py-1">9</th><th class="text-center py-1">10</th>
+              <th class="text-center py-1">11</th><th class="text-center py-1">12</th><th class="text-center py-1">13</th><th class="text-center py-1">14</th><th class="text-center py-1">15</th>
+              <th class="text-center py-1">16</th><th class="text-center py-1">17</th><th class="text-center py-1">18</th><th class="text-center py-1">19</th><th class="text-center py-1">20</th>
+              <th></th>
+              <th class="text-center py-1">21</th><th class="text-center py-1">22</th><th class="text-center py-1">23</th><th class="text-center py-1">24</th><th class="text-center py-1">25</th><th class="text-center py-1">26</th>
+              <th></th><th></th><th></th>
+            </tr>
+          </thead>
+          <tbody id="heatmap-body"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="bg-amber-50 border border-amber-200 rounded-lg p-4 flex gap-3">
+      <svg class="w-5 h-5 text-amber-600 flex-shrink-0 mt-0.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>
+      <div>
+        <p class="text-sm font-medium text-amber-900">Часть 2: оценки AI — это черновик</p>
+        <p class="text-sm text-amber-800 mt-1">Ученики и родители НЕ видят их до твоего подтверждения. Кликни на ученика чтобы открыть проверку. Анонимные лиды (Phase 1) — обязательная ручная проверка каждого пункта.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ================================================ SCREEN 4: REVIEW ================================================ -->
+<section id="review" class="screen fade-in">
+  <div class="max-w-6xl mx-auto px-6 py-8">
+    <nav class="flex items-center gap-2 text-sm text-slate-500 mb-3">
+      <a onclick="go('list')" class="hover:text-slate-900 cursor-pointer">Пробники</a>
+      <span>/</span>
+      <a onclick="go('results')" class="hover:text-slate-900 cursor-pointer">Демо ЕГЭ</a>
+      <span>/</span>
+      <span class="text-slate-900">Анна Кузнецова</span>
+    </nav>
+
+    <div class="flex items-start justify-between mb-5">
+      <div>
+        <div class="flex items-center gap-3 mb-1">
+          <div class="w-10 h-10 rounded-full bg-sokrat-accent text-white flex items-center justify-center font-semibold">А</div>
+          <div>
+            <h1 class="text-xl font-semibold text-slate-900">Анна Кузнецова</h1>
+            <p class="text-sm text-slate-500">Группа пн/чт · сдала за <span class="font-medium">2ч 15мин</span></p>
+          </div>
+        </div>
+      </div>
+      <div class="text-right">
+        <div class="text-xs text-slate-500">Первичный балл (черновик)</div>
+        <div class="text-3xl font-semibold text-sokrat-accent">41 <span class="text-lg text-slate-500 font-normal">/ 54</span></div>
+        <div class="text-xs text-slate-500 mt-0.5">Часть 1: 23/25 · Часть 2: 18/29 (черновик)</div>
+      </div>
+    </div>
+
+    <!-- Часть 1 summary -->
+    <div class="bg-emerald-50 border border-emerald-200 rounded-lg p-3 text-sm text-emerald-900 mb-4">
+      <strong>Часть 1: 23 из 25 баллов</strong> (auto-проверено по бланку) — верно 19 из 20 заданий, 1 задача с частичным баллом. <a class="underline hover:no-underline cursor-pointer">показать таблицу →</a>
+    </div>
+
+    <!-- Часть 2 cards -->
+    <div class="bg-amber-50 border border-amber-200 rounded-lg p-3 text-sm text-amber-900 mb-4">
+      <strong>Часть 2: AI-черновик 18 из 29</strong>. Подтверди или скорректируй каждое задание. Без подтверждения ученик и родитель ничего не увидят.
+    </div>
+
+    <h2 class="text-lg font-semibold text-slate-900 mb-3">Часть 2 (6 заданий)</h2>
+    <div class="space-y-3 mb-4">
+      <!-- Task 21 -->
+      <div class="bg-white border border-slate-200 rounded-lg overflow-hidden">
+        <div class="px-5 py-3 bg-slate-50 border-b border-slate-100 flex items-center justify-between flex-wrap gap-2">
+          <div class="flex items-center gap-3">
+            <span class="px-2 py-0.5 bg-amber-100 text-amber-900 text-xs font-semibold rounded">№21 · Качественная</span>
+            <span class="text-sm text-slate-500">макс. 3 балла</span>
+            <span class="text-xs text-amber-700 font-medium flex items-center gap-1">
+              <svg class="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 9v4M12 17h.01"/><circle cx="12" cy="12" r="10"/></svg>
+              AI колеблется
+            </span>
+          </div>
+          <div class="text-sm text-slate-500">AI предлагает: <strong class="text-slate-900">2 / 3</strong></div>
+        </div>
+        <div class="p-5 space-y-3">
+          <div>
+            <p class="text-xs text-slate-500 mb-1">Условие</p>
+            <p class="text-sm text-slate-800">В два одинаковых сосуда налили воду. В первый положили лёд, во второй — лёд, покрытый чёрной краской. Сосуды поместили на солнце. В каком сосуде лёд растает быстрее? Поясните.</p>
+          </div>
+          <div>
+            <p class="text-xs text-slate-500 mb-1">Решение ученика</p>
+            <div class="bg-slate-50 border border-slate-100 rounded p-3 text-sm text-slate-700">Во втором. Чёрная краска поглощает излучение лучше, поэтому лёд нагревается быстрее.</div>
+          </div>
+          <div>
+            <p class="text-xs text-slate-500 mb-2">AI-оценка по 4 элементам ФИПИ</p>
+            <div class="grid grid-cols-2 gap-2">
+              <div class="flex items-start gap-2 p-2 bg-emerald-50 border border-emerald-100 rounded text-sm"><span class="text-emerald-600 font-bold">✓</span><div><strong>I.</strong> Верный ответ</div></div>
+              <div class="flex items-start gap-2 p-2 bg-emerald-50 border border-emerald-100 rounded text-sm"><span class="text-emerald-600 font-bold">✓</span><div><strong>II.</strong> Одно физическое явление</div></div>
+              <div class="flex items-start gap-2 p-2 bg-red-50 border border-red-100 rounded text-sm col-span-2"><span class="text-red-600 font-bold">✗</span><div><strong>III.</strong> Не указано второе явление (теплопередача от чёрной краски ко льду)</div></div>
+            </div>
+          </div>
+          <div class="text-sm text-slate-700 border-l-2 border-amber-300 pl-3 py-1">Ученик правильно определил ответ и одно явление. По блок-схеме №21 это 2 балла. Для 3 не хватает второго явления. Сомневаюсь — проверь сам.</div>
+          <div class="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
+            <button class="px-3 py-1.5 text-sm text-slate-700 border border-slate-200 rounded-md hover:bg-slate-50">Изменить балл</button>
+            <button class="px-4 py-1.5 text-sm bg-sokrat-accent text-white rounded-md hover:bg-sokrat-accent-dark">Подтвердить: 2 / 3</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Task 24: full -->
+      <div class="bg-white border border-slate-200 rounded-lg overflow-hidden">
+        <div class="px-5 py-3 bg-slate-50 border-b border-slate-100 flex items-center justify-between flex-wrap gap-2">
+          <div class="flex items-center gap-3">
+            <span class="px-2 py-0.5 bg-amber-100 text-amber-900 text-xs font-semibold rounded">№24 · Расчётная</span>
+            <span class="text-sm text-slate-500">макс. 2 балла</span>
+            <span class="text-xs text-emerald-700 font-medium flex items-center gap-1">
+              <svg class="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M5 13l4 4L19 7"/></svg>
+              AI уверен
+            </span>
+          </div>
+          <div class="text-sm text-slate-500">AI предлагает: <strong class="text-slate-900">2 / 2</strong></div>
+        </div>
+        <div class="p-5 space-y-3">
+          <div>
+            <p class="text-xs text-slate-500 mb-1">Условие</p>
+            <p class="text-sm text-slate-800">Идеальный одноатомный газ в количестве 2 моль изобарически нагрели на 50 К. Найдите работу газа.</p>
+          </div>
+          <div>
+            <p class="text-xs text-slate-500 mb-1">Решение ученика (фото)</p>
+            <div class="bg-slate-50 border border-slate-100 rounded p-3 text-sm text-slate-700 font-mono whitespace-pre">A = νRΔT
+A = 2·8,31·50 = 831 Дж
+Ответ: A ≈ 831 Дж</div>
+          </div>
+          <div class="grid grid-cols-2 gap-2">
+            <div class="flex items-center gap-2 p-2 bg-emerald-50 border border-emerald-100 rounded text-sm"><span class="text-emerald-600 font-bold">✓</span><div><strong>I.</strong> Закон записан</div></div>
+            <div class="flex items-center gap-2 p-2 bg-emerald-50 border border-emerald-100 rounded text-sm"><span class="text-emerald-600 font-bold">✓</span><div><strong>II.</strong> Обозначения</div></div>
+            <div class="flex items-center gap-2 p-2 bg-emerald-50 border border-emerald-100 rounded text-sm"><span class="text-emerald-600 font-bold">✓</span><div><strong>III.</strong> Расчёт</div></div>
+            <div class="flex items-center gap-2 p-2 bg-emerald-50 border border-emerald-100 rounded text-sm"><span class="text-emerald-600 font-bold">✓</span><div><strong>IV.</strong> Ответ + единицы</div></div>
+          </div>
+          <div class="text-sm text-slate-700 border-l-2 border-emerald-300 pl-3 py-1">Полное решение, всё корректно по методичке ФИПИ. Можно подтвердить.</div>
+          <div class="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
+            <button class="px-3 py-1.5 text-sm text-slate-700 border border-slate-200 rounded-md hover:bg-slate-50">Изменить</button>
+            <button class="px-4 py-1.5 text-sm bg-sokrat-accent text-white rounded-md hover:bg-sokrat-accent-dark">Подтвердить: 2 / 2</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Task 25: low confidence -->
+      <div class="bg-white border-2 border-rose-300 rounded-lg overflow-hidden">
+        <div class="px-5 py-3 bg-rose-50 border-b border-rose-200 flex items-center justify-between flex-wrap gap-2">
+          <div class="flex items-center gap-3">
+            <span class="px-2 py-0.5 bg-rose-200 text-rose-900 text-xs font-semibold rounded">№25 · Расчётная</span>
+            <span class="text-sm text-rose-800">макс. 2 балла</span>
+            <span class="text-xs text-rose-700 font-medium flex items-center gap-1">
+              <svg class="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M6 18L18 6M6 6l12 12"/></svg>
+              AI не смог распознать
+            </span>
+          </div>
+          <div class="text-sm text-rose-800">Требует твоего внимания</div>
+        </div>
+        <div class="p-5 space-y-3">
+          <div class="bg-rose-50 border border-rose-200 rounded p-3 flex items-center gap-3">
+            <svg class="w-5 h-5 text-rose-600 flex-shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 2l20 20"/><path d="M21 15V5a2 2 0 0 0-2-2H8.83"/><path d="M5 5v14a2 2 0 0 0 2 2h12.17"/></svg>
+            <div class="text-sm text-rose-900">Фото неразборчиво — открой оригинал и поставь оценку самостоятельно.</div>
+          </div>
+          <div class="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
+            <button class="px-3 py-1.5 text-sm text-slate-700 border border-slate-200 rounded-md hover:bg-slate-50">Открыть фото</button>
+            <button class="px-3 py-1.5 text-sm text-slate-700 border border-slate-200 rounded-md hover:bg-slate-50">Запросить переснимку</button>
+            <button class="px-4 py-1.5 text-sm bg-amber-500 text-white rounded-md hover:bg-amber-600">Поставить вручную</button>
+          </div>
+        </div>
+      </div>
+
+      <button class="w-full py-3 text-sm text-slate-500 hover:text-slate-900 border border-dashed border-slate-300 rounded-lg">Показать ещё 3 задания (22, 23, 26)</button>
+    </div>
+
+    <!-- Sticky-feel footer -->
+    <div class="bg-slate-50 border-2 border-slate-200 rounded-lg p-4 flex items-center justify-between flex-wrap gap-3">
+      <div class="text-sm">
+        <div class="font-medium text-slate-900">Подтверждено: 4 / 6 заданий</div>
+        <div class="text-slate-500 text-xs mt-0.5">После подтверждения всех — Анна и её родители получат результат</div>
+      </div>
+      <button class="px-6 py-2.5 bg-sokrat-accent text-white rounded-md text-sm font-medium hover:bg-sokrat-accent-dark">Подтвердить и отправить</button>
+    </div>
+  </div>
+</section>
+
+<!-- ================================================ SCREEN 5: STUDENT EXAM ================================================ -->
+<section id="student-exam" class="screen fade-in">
+  <div class="max-w-4xl mx-auto px-6 py-8">
+    <div class="bg-white border border-slate-200 rounded-lg p-5 mb-4">
+      <div class="flex items-center justify-between mb-2">
+        <h1 class="text-xl font-semibold text-slate-900">Тренировочный 1 · Физика ЕГЭ-2026</h1>
+        <div class="flex items-center gap-2 text-sm">
+          <svg class="w-4 h-4 text-amber-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
+          <span class="font-mono text-amber-700 font-medium">2:42:15</span>
+        </div>
+      </div>
+      <p class="text-sm text-slate-500">Источник: Егор Иванов · Часть 1: 13/20 · Часть 2: 2/6 фото загружено</p>
+    </div>
+
+    <div class="bg-amber-50 border border-amber-200 rounded-lg p-4 mb-4">
+      <p class="text-sm text-amber-900"><strong>Режим: С бланком.</strong> Распечатай <a class="underline hover:no-underline cursor-pointer">PDF официального бланка ФИПИ</a>, заполни ручкой, потом сфотографируй и загрузи в форму. Решения Части 2 — отдельные фото на задачу.</p>
+    </div>
+
+    <!-- Sample task -->
+    <div class="bg-white border border-slate-200 rounded-lg p-5 mb-3">
+      <div class="flex items-center justify-between mb-2">
+        <span class="px-2 py-0.5 bg-slate-100 text-slate-700 text-xs font-semibold rounded">№1 · Кинематика</span>
+        <span class="text-xs text-slate-500">1 балл</span>
+      </div>
+      <p class="text-sm text-slate-800 mb-4">Тело движется равноускоренно с ускорением 2 м/с². Через какое время скорость тела изменится на 10 м/с?</p>
+      <input type="text" value="5" class="w-32 px-3 py-2 border border-slate-200 rounded-md text-base font-mono focus:ring-2 focus:ring-sokrat-accent/20 focus:border-sokrat-accent" />
+      <span class="text-sm text-slate-500 ml-2">с</span>
+    </div>
+
+    <div class="bg-white border border-slate-200 rounded-lg p-5 mb-3">
+      <div class="flex items-center justify-between mb-2">
+        <span class="px-2 py-0.5 bg-amber-100 text-amber-900 text-xs font-semibold rounded">№21 · Качественная</span>
+        <span class="text-xs text-slate-500">3 балла · развёрнутое решение</span>
+      </div>
+      <p class="text-sm text-slate-800 mb-4">В два одинаковых сосуда налили воду одинаковой массы. В первый сосуд положили кусочек льда, во второй — такой же кусочек, но покрытый чёрной краской...</p>
+      <div class="border-2 border-dashed border-slate-300 rounded-lg p-4 text-center">
+        <p class="text-sm text-slate-500 mb-2">Фото решения</p>
+        <button class="px-4 py-2 bg-slate-100 text-slate-700 rounded-md text-sm">Загрузить фото</button>
+        <p class="text-xs text-slate-400 mt-2">JPG/PNG · до 10 МБ · 1 фото на задачу</p>
+      </div>
+    </div>
+
+    <button class="w-full py-3 text-sm text-slate-500 hover:text-slate-900 border border-dashed border-slate-300 rounded-lg mb-6">Показать ещё 24 задания</button>
+
+    <div class="sticky bottom-0 bg-white border-t border-slate-200 -mx-6 px-6 py-4 flex items-center justify-between">
+      <div class="text-sm text-slate-500">Часть 1: <strong class="text-slate-900">13/20</strong> · Часть 2: <strong class="text-slate-900">2/6 фото</strong></div>
+      <button onclick="go('student-result')" class="px-6 py-2.5 bg-sokrat-accent text-white rounded-md text-sm font-medium hover:bg-sokrat-accent-dark">Сдать работу</button>
+    </div>
+  </div>
+</section>
+
+<!-- ================================================ SCREEN 6: STUDENT RESULT ================================================ -->
+<section id="student-result" class="screen fade-in">
+  <div class="max-w-3xl mx-auto px-6 py-8">
+    <p class="text-xs text-slate-500 mb-1 uppercase tracking-wide">Результат пробника</p>
+    <h1 class="text-2xl font-semibold text-slate-900 mb-1">Тренировочный 1 · Физика ЕГЭ</h1>
+    <p class="text-sm text-slate-500 mb-6">Сдан 8 мая · 2ч 15мин</p>
+
+    <!-- Часть 1 — сразу -->
+    <div class="bg-white border border-slate-200 rounded-lg p-5 mb-3">
+      <div class="flex items-center justify-between mb-2">
+        <h2 class="font-semibold text-slate-900">Часть 1 · авто-проверка</h2>
+        <span class="px-2 py-0.5 bg-emerald-100 text-emerald-900 text-xs font-medium rounded">Готово</span>
+      </div>
+      <div class="text-3xl font-semibold text-sokrat-accent mb-3">23 <span class="text-lg text-slate-500 font-normal">/ 25</span></div>
+      <a class="text-sm text-sokrat-accent underline hover:no-underline cursor-pointer">показать таблицу 20 задач →</a>
+    </div>
+
+    <!-- Часть 2 — pending -->
+    <div class="bg-white border-2 border-amber-300 rounded-lg p-5 mb-3">
+      <div class="flex items-center justify-between mb-2">
+        <h2 class="font-semibold text-slate-900">Часть 2 · ждёт проверки репетитора</h2>
+        <span class="px-2 py-0.5 bg-amber-100 text-amber-900 text-xs font-medium rounded">В обработке</span>
+      </div>
+      <p class="text-sm text-slate-700 mb-3">AI составил черновик оценки твоих решений 21–26. Репетитор Егор сейчас его проверяет — результат придёт в Telegram в течение 24 часов.</p>
+      <div class="flex items-center gap-2 text-xs text-slate-500">
+        <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
+        <span>Обычно занимает 6-24 часа</span>
+      </div>
+    </div>
+
+    <!-- Final summary placeholder -->
+    <div class="bg-slate-100 rounded-lg p-5 text-center text-sm text-slate-500">
+      После проверки репетитора здесь появится итоговый балл (Часть 1 + Часть 2), сравнение со шкалой ЕГЭ и комментарий репетитора.
+    </div>
+
+    <p class="text-xs text-slate-400 text-center mt-6">Демо-предпросмотр: контракт «Часть 1 сразу, Часть 2 после approval»</p>
+  </div>
+</section>
+
+<!-- ================================================ SCREEN 7: PUBLIC INVITE ================================================ -->
+<section id="public-invite" class="screen fade-in">
+  <div class="min-h-screen bg-slate-50">
+    <div class="max-w-2xl mx-auto px-6 py-12">
+      <!-- Tutor card -->
+      <div class="bg-white border border-slate-200 rounded-lg p-6 mb-6">
+        <div class="flex items-start gap-4">
+          <div class="w-16 h-16 rounded-full bg-sokrat-accent text-white flex items-center justify-center text-2xl font-semibold flex-shrink-0">Е</div>
+          <div class="flex-1">
+            <div class="flex items-center gap-2 mb-1">
+              <svg class="w-3 h-3 text-slate-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 10v6M2 10l10-5 10 5-10 5z"/><path d="M6 12v5c3 3 9 3 12 0v-5"/></svg>
+              <span class="text-xs text-slate-500 uppercase tracking-wide">Репетитор</span>
+            </div>
+            <h2 class="text-lg font-semibold text-slate-900">Егор Иванов</h2>
+            <p class="text-sm text-slate-500">Физика ЕГЭ · 5 лет опыта · 95% средний балл учеников</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="bg-white border border-slate-200 rounded-lg p-6 mb-6">
+        <h1 class="text-2xl font-semibold text-slate-900 mb-2">Бесплатный диагностический пробник по физике</h1>
+        <p class="text-sm text-slate-700 mb-4">Тренировочный вариант ЕГЭ-2026. После сдачи Часть 1 (1–20) проверится автоматически и ты увидишь баллы сразу. Часть 2 (21–26) Егор лично проверит и пришлёт разбор в течение 24 часов.</p>
+        <div class="grid grid-cols-3 gap-3 my-5 pt-4 border-t border-slate-100 text-sm">
+          <div><div class="text-xs text-slate-500">Время</div><div class="font-medium">3 ч 55 мин</div></div>
+          <div><div class="text-xs text-slate-500">Заданий</div><div class="font-medium">26</div></div>
+          <div><div class="text-xs text-slate-500">Стоимость</div><div class="font-medium text-emerald-700">Бесплатно</div></div>
+        </div>
+        <p class="text-xs text-slate-500 mb-5">Для прохождения нужны фото бланка ответов (Часть 1) и решений Части 2. PDF бланка дадим перед стартом.</p>
+
+        <div class="bg-slate-50 rounded-lg p-3 mb-4">
+          <p class="text-xs font-medium text-slate-700 mb-2">Чтобы получить результат, оставь контакт:</p>
+          <div class="space-y-2">
+            <input type="text" placeholder="Имя ребёнка" class="w-full px-3 py-2 border border-slate-200 rounded-md text-base focus:ring-2 focus:ring-sokrat-accent/20 focus:border-sokrat-accent" />
+            <input type="text" placeholder="Telegram или email" class="w-full px-3 py-2 border border-slate-200 rounded-md text-base focus:ring-2 focus:ring-sokrat-accent/20 focus:border-sokrat-accent" />
+            <label class="flex items-start gap-2 text-xs text-slate-600">
+              <input type="checkbox" class="mt-0.5" />
+              <span>Согласен(на) на обработку персональных данных. <a class="underline cursor-pointer">Политика</a>.</span>
+            </label>
+          </div>
+        </div>
+
+        <button onclick="go('student-exam')" class="w-full py-3 bg-sokrat-accent text-white rounded-md text-base font-medium hover:bg-sokrat-accent-dark">Начать пробник</button>
+      </div>
+
+      <p class="text-center text-xs text-slate-500">Через платформу <strong class="text-slate-700">Сократ AI</strong> · диагностика без надзора, не школьный экзамен</p>
+    </div>
+  </div>
+</section>
+
+<!-- ================================================ SCREEN 8: PUBLIC RESULT (PARENT) ================================================ -->
+<section id="public-result" class="screen fade-in">
+  <div class="min-h-screen bg-slate-50">
+    <div class="max-w-2xl mx-auto px-6 py-8">
+      <p class="text-xs text-slate-500 mb-2 uppercase tracking-wide">Результат пробника ЕГЭ по физике</p>
+      <h1 class="text-2xl font-semibold text-slate-900 mb-1">Анна Кузнецова</h1>
+      <p class="text-sm text-slate-500 mb-6">Сдан 8 мая 2026 · проверил репетитор Егор Иванов</p>
+
+      <div class="bg-white border border-slate-200 rounded-lg p-6 text-center mb-4">
+        <div class="text-xs text-slate-500 uppercase tracking-wide mb-2">Первичный балл</div>
+        <div class="text-6xl font-semibold text-sokrat-accent mb-2">41 <span class="text-3xl text-slate-500 font-normal">/ 54</span></div>
+        <div class="text-sm text-slate-500 mb-4">Тестовый балл (предварительно): ~73 / 100</div>
+
+        <div class="my-5">
+          <div class="h-3 rounded-full bg-slate-100 overflow-hidden relative">
+            <div class="h-full bg-emerald-500 rounded-full" style="width: 76%;"></div>
+          </div>
+          <div class="flex justify-between text-xs text-slate-400 mt-1.5">
+            <span>0</span>
+            <span class="text-amber-600">22 порог</span>
+            <span class="text-emerald-700">36 «хорошо»</span>
+            <span>54</span>
+          </div>
+        </div>
+
+        <div class="flex justify-center gap-6 text-sm">
+          <div><div class="text-xs text-slate-500">Часть 1</div><div class="font-semibold text-slate-900">23 / 25</div></div>
+          <div><div class="text-xs text-slate-500">Часть 2</div><div class="font-semibold text-slate-900">18 / 29</div></div>
+        </div>
+      </div>
+
+      <div class="bg-emerald-50 border border-emerald-200 rounded-lg p-5 mb-4 text-sm text-emerald-900">
+        <p class="font-semibold mb-1">Комментарий репетитора Егора</p>
+        <p>Анна уверенно справилась с механикой и МКТ. В электростатике есть пробел — не написала второе физическое явление в качественной задаче №21. Это типичная недоработка, которую можно подтянуть за 2-3 занятия.</p>
+      </div>
+
+      <div class="bg-white border border-slate-200 rounded-lg p-5 mb-6">
+        <div class="flex items-start gap-4 mb-4">
+          <div class="w-12 h-12 rounded-full bg-sokrat-accent text-white flex items-center justify-center text-lg font-semibold flex-shrink-0">Е</div>
+          <div class="flex-1">
+            <div class="text-xs text-slate-500 uppercase tracking-wide">Репетитор</div>
+            <h3 class="font-semibold text-slate-900">Егор Иванов</h3>
+            <p class="text-sm text-slate-500">Готов разобрать результат и составить план</p>
+          </div>
+        </div>
+        <button class="w-full py-3 bg-sokrat-accent text-white rounded-md text-base font-medium hover:bg-sokrat-accent-dark">
+          Связаться с Егором в Telegram
+        </button>
+      </div>
+
+      <p class="text-center text-xs text-slate-500">Через платформу <strong>Сократ AI</strong> · тестовый балл предварительный, окончательная шкала — после ЕГЭ-2026</p>
+    </div>
+  </div>
+</section>
+
+<!-- ================================================ NOTES PANEL ================================================ -->
+<div id="notes" class="notes-panel collapsed fixed bottom-0 right-4 w-96 bg-white border border-slate-200 rounded-t-lg shadow-lg z-50" style="max-height: 80vh;">
+  <button onclick="toggleNotes()" class="w-full h-11 flex items-center justify-between px-4 border-b border-slate-100 hover:bg-slate-50 rounded-t-lg">
+    <span class="text-sm font-medium text-slate-900">Вопросы Егору (8)</span>
+    <svg id="notes-caret" class="w-4 h-4 text-slate-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 15l-6-6-6 6"/></svg>
+  </button>
+  <div class="p-4 space-y-3 overflow-y-auto" style="max-height: calc(80vh - 44px);">
+    <div class="text-xs text-slate-700"><div class="font-medium mb-0.5">1. Бланк-режим default — соответствует?</div><div class="text-slate-500">При назначении пробника по умолчанию выбран «С бланком» (тренировка переноса ответов). «Стандартный» (форма) — для тех, у кого нет принтера. Норм?</div></div>
+    <div class="text-xs text-slate-700"><div class="font-medium mb-0.5">2. Heatmap — 26 клеток в строку, скролл</div><div class="text-slate-500">Часть 1 (20) и Часть 2 (6) с разделителем. Колонки: Балл за Ч1, Балл за Ч2, Итого. Ок или нужен переключатель таб?</div></div>
+    <div class="text-xs text-slate-700"><div class="font-medium mb-0.5">3. AI-черновик с 4 элементами I-IV</div><div class="text-slate-500">Каждое part-2 задание показывает галочки/крестики по критериям ФИПИ. Достаточно или нужна привязка к строкам решения?</div></div>
+    <div class="text-xs text-slate-700"><div class="font-medium mb-0.5">4. Confidence-флаги — high / medium / low / unreadable</div><div class="text-slate-500">AI честно говорит когда не уверен (амбер) или не смог распознать (красный). Это снижает риск или раздражает?</div></div>
+    <div class="text-xs text-slate-700"><div class="font-medium mb-0.5">5. Контракт «Часть 1 сразу, Часть 2 после approval»</div><div class="text-slate-500">На экране ученика после Submit — Часть 1 видна сразу с баллом, Часть 2 — амбер «ждёт проверки». Wow-эффект достаточный?</div></div>
+    <div class="text-xs text-slate-700"><div class="font-medium mb-0.5">6. Lead-gen public link — анонимный родитель</div><div class="text-slate-500">Карточка с tutor identity сверху + большая кнопка «Начать». Lead capture (имя + Telegram) перед Submit. Звучит правильно для конверсии?</div></div>
+    <div class="text-xs text-slate-700"><div class="font-medium mb-0.5">7. Parent share-link с прогресс-баром по шкале ЕГЭ</div><div class="text-slate-500">Большой балл + бенчмарк-полоса (22-36-54) + комментарий репетитора + CTA в Telegram. Что показалось бы лишним/недостающим тебе как репетитору?</div></div>
+    <div class="text-xs text-slate-700"><div class="font-medium mb-0.5">8. Время сдачи как cheating-сигнал</div><div class="text-slate-500">В review surface отображается «сдала за 2ч 15мин». Если &lt; 2ч — амбер плашка «подозрительно быстро». Полезный сигнал?</div></div>
+  </div>
+</div>
+
+<!-- ================================================ NAVIGATION HINT ================================================ -->
+<div id="nav-hint" class="fixed top-20 left-4 bg-slate-900 text-white text-xs px-3 py-2 rounded-md shadow-lg z-50 flex items-center gap-2">
+  <span>Перейти к экрану:</span>
+  <select onchange="go(this.value)" class="bg-slate-800 border border-slate-700 rounded px-2 py-1 text-xs">
+    <option value="list">1. Список</option>
+    <option value="wizard">2. Назначение</option>
+    <option value="results">3. Результаты + heatmap</option>
+    <option value="review">4. Review surface</option>
+    <option value="student-exam">5. Сдача (ученик)</option>
+    <option value="student-result">6. Результат ученика</option>
+    <option value="public-invite">7. Public invite (лид)</option>
+    <option value="public-result">8. Parent share-link</option>
+  </select>
+  <button onclick="this.parentElement.style.display='none'" class="text-slate-400 hover:text-white ml-1">×</button>
+</div>
+
+<script>
+  function go(screenId) {
+    document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+    document.getElementById(screenId).classList.add('active');
+    window.scrollTo(0, 0);
+    if (history.replaceState) history.replaceState(null, '', '#' + screenId);
+    const sel = document.querySelector('#nav-hint select');
+    if (sel) sel.value = screenId;
+  }
+  function toggleNotes() {
+    const p = document.getElementById('notes');
+    const c = document.getElementById('notes-caret');
+    p.classList.toggle('collapsed');
+    c.style.transform = p.classList.contains('collapsed') ? 'rotate(0deg)' : 'rotate(180deg)';
+  }
+
+  // Restore from URL hash on load
+  const hash = window.location.hash.replace('#', '');
+  if (hash && document.getElementById(hash)) go(hash);
+
+  // Generate heatmap
+  (function () {
+    const students = [
+      { name: 'Иван Петров', meta: 'индивидуально · 1ч 50мин',
+        p1: [1,1,1,1,2,2,1,1,1,1,1,1,1,1,2,2,1,1,1,1],
+        p1max: [1,1,1,1,2,2,1,1,1,1,1,1,1,1,2,2,1,1,1,1],
+        p2: [{s:3,m:3,c:'h'},{s:2,m:2,c:'h'},{s:2,m:2,c:'h'},{s:3,m:3,c:'h'},{s:3,m:3,c:'h'},{s:3,m:3,c:'h'}],
+        status: 'awaiting' },
+      { name: 'Анна Кузнецова', meta: 'группа пн/чт · 2ч 15мин',
+        p1: [1,1,1,1,1,2,1,1,1,1,1,0,1,1,2,2,1,1,1,1],
+        p1max: [1,1,1,1,2,2,1,1,1,1,1,1,1,1,2,2,1,1,1,1],
+        p2: [{s:2,m:3,c:'m'},{s:2,m:2,c:'h'},{s:1,m:2,c:'m'},{s:2,m:2,c:'h'},{s:null,m:2,c:'l'},{s:5,m:18,c:'m'}],
+        status: 'awaiting' },
+      { name: 'Михаил Романов', meta: 'группа пн/чт · 2ч 40мин',
+        p1: [1,1,0,1,1,2,1,1,1,0,1,1,1,1,2,2,1,1,1,1],
+        p1max: [1,1,1,1,2,2,1,1,1,1,1,1,1,1,2,2,1,1,1,1],
+        p2: [{s:1,m:3,c:'m'},{s:1,m:2,c:'h'},{s:2,m:2,c:'h'},{s:1,m:2,c:'h'},{s:2,m:2,c:'h'},{s:7,m:18,c:'h'}],
+        status: 'approved' },
+      { name: 'Ольга Соколова', meta: 'группа пн/чт · в процессе',
+        p1: null, p1max: null, p2: null, status: 'progress' },
+      { name: 'Дмитрий Семёнов', meta: 'индивидуально · не приступал',
+        p1: null, p1max: null, p2: null, status: 'not_started' }
+    ];
+    const body = document.getElementById('heatmap-body');
+    body.innerHTML = students.map((s, idx) => {
+      const cursor = (s.status === 'awaiting' || s.status === 'approved') ? 'cursor-pointer' : '';
+      const onClick = s.name === 'Анна Кузнецова' ? `onclick="go('review')"` : '';
+
+      let p1Cells, p2Cells, p1Score, p2Score, total, statusCell;
+      if (!s.p1) {
+        p1Cells = Array(20).fill('<td class="text-center py-1 cell-empty" style="font-size:10px;">—</td>').join('');
+        p2Cells = Array(6).fill('<td class="text-center py-1 cell-empty" style="font-size:10px;">—</td>').join('');
+        p1Score = '—'; p2Score = '—';
+        statusCell = s.status === 'progress' ? '<span class="text-amber-600">в процессе</span>' : '<span class="text-slate-400">не приступал</span>';
+      } else {
+        p1Cells = s.p1.map((sc, i) => {
+          const max = s.p1max[i];
+          let cls = sc === max ? 'cell-correct' : sc > 0 ? 'cell-partial' : 'cell-wrong';
+          return `<td class="text-center py-1 ${cls}" style="font-size:10px; font-weight:600;">${sc}</td>`;
+        }).join('');
+        p2Cells = s.p2.map(p => {
+          const cls = p.c === 'l' ? 'cell-low-conf' : 'cell-draft';
+          const display = p.s === null ? '?' : `${p.s}/${p.m}`;
+          return `<td class="text-center py-1 ${cls}" style="font-size:10px; font-weight:600;">${display}</td>`;
+        }).join('');
+        const p1Sum = s.p1.reduce((a,b)=>a+b,0);
+        const p1Max = s.p1max.reduce((a,b)=>a+b,0);
+        const p2Sum = s.p2.reduce((a,p)=>a+(p.s??0),0);
+        p1Score = `${p1Sum}/${p1Max}`;
+        p2Score = `<span class="text-amber-700 font-semibold">${p2Sum}/29</span>`;
+        const totalSum = p1Sum + p2Sum;
+        statusCell = s.status === 'approved'
+          ? `<span class="font-semibold text-slate-900">${totalSum}/54</span>`
+          : `<span class="text-amber-700 font-medium" title="Ожидает подтверждения">${totalSum}/54*</span>`;
+      }
+
+      return `<tr class="${cursor} hover:bg-slate-50" ${onClick}>
+        <td class="sticky left-0 bg-white hover:bg-slate-50 px-4 py-2.5 z-10">
+          <div class="font-medium text-slate-900">${s.name}</div>
+          <div class="text-xs text-slate-500">${s.meta}</div>
+        </td>
+        ${p1Cells}
+        <td class="bg-slate-50"></td>
+        ${p2Cells}
+        <td class="px-2 py-1 text-right text-sm font-semibold text-slate-900">${p1Score}</td>
+        <td class="px-2 py-1 text-right text-sm">${p2Score}</td>
+        <td class="px-2 py-1 text-right text-sm border-l-2 border-slate-200">${statusCell}</td>
+      </tr>`;
+    }).join('');
+  })();
+</script>
+
+</body>
+</html>

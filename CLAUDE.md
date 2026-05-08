@@ -540,6 +540,303 @@ For architecture overview see: docs/delivery/engineering/architecture/README.md
 
 **Плановый документ:** `C:\Users\kamch\.claude\plans\wild-swinging-nova.md`
 
+### 10. Mock Exams v1 — public anonymous endpoint (2026-05-07, TASK-6)
+
+`supabase/functions/mock-exam-public/index.ts` — единственный публичный endpoint mock-exams-v1 (3 route'а: `GET /share/mock-invite/:slug`, `POST /share/mock-invite/:slug/start`, `GET /share/mock-result/:slug`). Без JWT, под `service_role` (обходит RLS намеренно — RLS защищает только authenticated PostgREST). При расширении / правке этого файла соблюдать инварианты ниже.
+
+**Anti-leak — column whitelist на SELECT (КРИТИЧНО):**
+- **`tutors` (tutor card)** — единственный source через `loadTutorCard()`: `name, avatar_url, bio, subjects`. **Никогда** не добавлять в публичный payload: `telegram_id`, `telegram_username`, `booking_link`, `id`, `user_id`, `email`. Email живёт только в `auth.users` и не должен query'иться вовсе. Если CTA «связаться с репетитором» потребует контакт — server-side notification flow (push/telegram tutor'у), не client-side raw поле.
+- **`mock_exam_assignments`** — `id, title, mode, status, variant_id` (+ `variant_title` для parent_result). `tutor_id` уже резолвлен из `mock_exam_public_links`, не re-emit'ить в payload.
+- **`mock_exam_variant_tasks` для invite read** — `id, kim_number, part, order_num, task_text, task_image_url, check_mode, max_score`. **Никогда** `correct_answer` или `solution_text` (anonymous student не должен видеть ответы до прохождения).
+- **`mock_exam_variant_tasks` для parent result read** — `correct_answer` + `solution_text` доступны только когда `attempt.status === 'approved'` (post-tutor-approval). Для `manually_entered` — нет per-task разбора, только totals.
+
+**Status gates (AC-7):**
+- Parent result: `attempt.status` ∈ {`approved`, `manually_entered`} → 200 с разбором / totals. Иначе → **403** `{error: 'not_ready', status}`.
+- Invite read/start: `assignment.status === 'active'` И `mode !== 'manual_entry'` И `variant_id !== null`. Иначе → **410** `{error: 'not_available'}`.
+- Slug regex `/^[a-z0-9]{8}$/i` — **до DB query** (защита от enumeration). Mismatch → 400 `invalid_slug`.
+- `expires_at < now()` → **410** `{expired: true, error: 'expired'}`.
+
+**Anonymous attempt + lead atomicity (AC-6):**
+- Generate `anonymous_id = crypto.randomUUID()` server-side. Insert attempt → если успешно, insert lead. **При ошибке lead insert — manual rollback** attempt'а через `.delete()` (PostgREST не поддерживает транзакции; rollback best-effort для избежания сирот).
+- `consent_at = new Date().toISOString()` server-controlled. Client-supplied timestamps **не доверяем** (audit trail integrity). Body shape: `{ consent: true }` или `{ consent_at: true | ISO }` — оба формы суть «дал согласие сейчас», server всегда пишет `now()`.
+
+**Storage / signed URLs:**
+- 4 bucket-а созданы миграцией `20260508120100_mock_exams_storage_buckets.sql` (TASK-2): `mock-exam-variant-tasks` (private, default fallback в `parseStorageRef`, картинки задач варианта), `mock-exam-blanks` (private, фото заполненного бланка ученика — TASK-12 path `{studentId}/{attemptId}/blank-{uuid}.ext`), `mock-exam-part2-photos` (private, фото решений Части 2 — TASK-12 path `{studentId}/{attemptId}/{kim}/{uuid}.ext`), `mock-exam-blank-templates` (public, PDF templates ФИПИ). `parseStorageRef` извлекает bucket из `storage://bucket/path` ref'а; bare paths падают на default.
+- Path-traversal guard `hasUnsafeObjectPath` rejects `..`, `\`, `\0` сегменты до `createSignedUrl` (defense-in-depth).
+- Все client-facing signed URLs обёрнуты в `rewriteToProxy()` из `_shared/proxy-url.ts` — RU bypass.
+
+**Telemetry — server-side only, PII-free:**
+- События: `mock_exam_invite_visited`, `mock_exam_invite_visited_expired`, `mock_exam_invite_started` (с `contact_type` only), `mock_exam_invite_start_expired`, `mock_exam_result_visited` (с `status`), `mock_exam_result_visited_not_ready` (с `status`), `mock_exam_result_visited_expired`.
+- Slug — единственный correlation key. **Никогда** не логировать `lead_name`, `lead_contact`, IP, user_id, телеметрия чистая для compliance/audit.
+
+**Wire-level routing:** Endpoint URL = `https://api.sokratai.ru/functions/v1/mock-exam-public/share/...`. Frontend route `/p/mock-invite/:slug` (TASK-14 `PublicMockInvite.tsx`) — это **страница приложения**, не API path. Не путать.
+
+**Producer для parent_result links — пока не существует.** TASK-3 `mock-exam-tutor-api` создаёт только `scope='invite'` ссылки. Когда понадобится parent share после approval — добавить отдельный handler (e.g. `POST /attempts/:id/parent-share-link`) в `mock-exam-tutor-api` с тем же 8-char slug + retry-on-collision паттерном. Endpoint `mock-exam-public` уже умеет читать `scope='parent_result'` — ждёт producer'а.
+
+**Спека:** `docs/delivery/features/mock-exams-v1/spec.md` (Section 3 + AC-6/AC-7).
+
+### 11. Mock Exams v1 — seed Тренировочного варианта 1 (2026-05-07, TASK-2)
+
+`supabase/seed/mock_exams_variant_1.sql` — каноничный seed для Phase 1 пилота. 1 variant + 26 tasks (KIM 1-20 Часть 1 с auto-check, 21-26 Часть 2 с manual approval). Сгенерирован из `Тр_вариант 1.docx` Егора через 3-step pipeline в `scripts/`.
+
+**Pipeline (один источник правды для содержания варианта):**
+
+```
+Тр_вариант 1.docx (IP Егора, не в репо)
+   │ scripts/parse-mock-exam-docx.py     — bootstrapping only: docx → paragraphs+tables+rels
+   ▼
+parsed.json (raw, не в репо)
+   │ scripts/structure-mock-exam.py      — bootstrapping only: anomaly fix, answer-key, Part 2
+   ▼
+docs/.../source/variant1-tasks.json    ← MANUALLY REVIEWED против docx (2026-05-07)
+docs/.../source/variant1-review.md     ← synced с tasks.json
+   │ scripts/build-mock-exam-seed.py    — канонический генератор: uuid5 + dual-format refs + idempotent
+   ▼
+supabase/seed/mock_exams_variant_1.sql ← committed, applies via Lovable Cloud
+```
+
+`scripts/enhance-mock-exam-with-latex.py` — **deprecated stub** (помечен 2026-05-07). Использовался как initial LaTeX-каркас, но содержал wrong assumptions для KIM 17 (β-распад вместо α-распад) и KIM 23 (R=12 вместо R=8). **Не запускать** — перепишет проверенные значения. При правках содержания варианта править `variant1-tasks.json` напрямую и регенерировать seed.
+
+**При правках содержания варианта** (Егор находит баг в условии задачи, ответ не совпадает, нужно дописать LaTeX): править `variant1-tasks.json`, **НЕ** seed.sql напрямую. Затем регенерировать seed: `python scripts/build-mock-exam-seed.py docs/.../variant1-tasks.json supabase/seed/mock_exams_variant_1.sql`. UUIDs детерминированы (uuid5 от namespace `00000000-0000-0000-0000-000000005ec0`) — re-running генератора с теми же входами даёт идентичный SQL.
+
+**Hard invariants seed.sql:**
+- Variant UUID: `36cebc45-e2e8-5603-a753-01c818bba131` (фиксированный, не менять)
+- 27 INSERTs (1 variant + 26 tasks), все `ON CONFLICT (id) DO NOTHING` — idempotent
+- `task_image_url` использует **dual-format** convention из rule 40 (single ref vs JSON-array string), как `homework_tutor_tasks` — не отступать от паттерна
+- Storage refs всегда полные `storage://mock-exam-variant-tasks/variant1/imageN.png` — `parseStorageRef` правильно извлечёт bucket
+- `check_mode` distribution: 10 strict, 4 multi_choice, 4 ordered, 1 pair, 1 task20, 6 manual (см. `_CHECK_MODE_BY_KIM` в `scripts/build-mock-exam-seed.py`)
+- `correct_answer` для Части 1 строкой, как ввёл бы ученик (e.g. `'225'`, `'2,70,1'`, `'34'`)
+- `solution_text` для Части 2 — multi-step «Возможное решение» от Егора, для tutor view (НЕ для student до approval)
+
+**Известные limitations парсинга** (закрыто 2026-05-07 ручной сверкой Vladimir с docx):
+- OMML/WMF math: всего 6 m:oMath блоков в docx, остальные формулы — embedded EMF/WMF picture-objects. После manual review LaTeX дописан напрямую в `variant1-tasks.json`. Inline-formula images (image5/12/13/14/23/24, warning icon image25) **исключены** из task images; только 13 файлов идут в Storage.
+- Layout anomaly tasks 4/7 (маркер kim ПОСЛЕ тела) — подтверждён, исправлен в tasks.json
+- KIM 6 содержал утечку KIM 7 — очищен
+- KIM 14 — восстановлена таблица (parser потерял табличные данные)
+- KIM 16: правильное `^{234}_{90}\mathrm{Th}` + `\beta^-`-распад
+- KIM 17: правильное `\alpha`-распад `^{212}_{83}\mathrm{Bi}` (не β!)
+- KIM 23: R=8 Ом, ответ 2 Ом (verified против docx)
+- KIM 19 checker: обновлён под `pair`-формат с погрешностью
+- Score totals: **45 = 28 (Часть 1) + 17 (Часть 2)** — verified против docx criteria
+- WMF/EMF не рендерятся в браузере → **11 из 13** upload-файлов требуют PNG-конвертации (см. `docs/delivery/features/mock-exams-v1/source/storage-upload-checklist.md`)
+
+**`created_by` placeholder в seed:** строка `(SELECT id FROM auth.users ORDER BY created_at LIMIT 1)` — заменить на UUID Егора перед merge ИЛИ оставить и обновить миграцией позже. RLS policy на `mock_exam_variants` не имеет write rule для authenticated, так что variant создаётся только через service_role (seed apply под service_role, ОК).
+
+**Per-tutor feature flag rollout:** после seed apply Vladimir выполняет `UPDATE public.tutors SET feature_mock_exams_enabled = true WHERE user_id = '<egor_uuid>'`. Через 3-4 часа QA — повторить для оставшихся 3 пилотных tutors (см. spec §3.5).
+
+**Validation после apply:**
+```sql
+SELECT COUNT(*) FROM public.mock_exam_variant_tasks WHERE variant_id = '36cebc45-e2e8-5603-a753-01c818bba131';  -- = 26 (AC-3)
+SELECT COUNT(*) FROM public.mock_exam_variant_tasks WHERE variant_id = '36cebc45-e2e8-5603-a753-01c818bba131' AND part = 1 AND correct_answer IS NOT NULL;  -- = 20
+SELECT COUNT(*) FROM public.mock_exam_variant_tasks WHERE variant_id = '36cebc45-e2e8-5603-a753-01c818bba131' AND part = 2 AND solution_text IS NOT NULL;  -- = 6
+```
+
+**При расширении на Тренировочные 2-4** (Phase 2): пайплайн переиспользуем — три скрипта parametric, всё что нужно — placeholder в `VARIANT_KEY` + новый `task_uuid` namespace + новый seed файл `mock_exams_variant_N.sql`. Не переписывать парсер.
+
+**Спека:** `docs/delivery/features/mock-exams-v1/spec.md` §5 (Data Model) + tasks.md TASK-2.
+
+### 12. Mock Exams v1 — AI Part 2 grader (2026-05-07, TASK-5)
+
+`supabase/functions/mock-exam-grade/index.ts` — background job, который вызывается fire-and-forget из student submit handler (`mock-exam-student-api`) после `status='submitted'`. Делает черновики оценок для всех Часть 2 задач (KIM 21-26 для ЕГЭ физики) по упрощённому ФИПИ-промпту Phase 1. **AI никогда не публикует ученику** — это product invariant; tutor approval через `mock-exam-tutor-api` остаётся mandatory.
+
+**Files:**
+- `supabase/functions/mock-exam-grade/index.ts` — handler + Lovable Gateway client (mirrors `homework-api/ai_shared.ts::callLovableJson` inline, чтобы не было cross-function imports между sibling edge functions)
+- `supabase/functions/_shared/mock-exam-prompts.ts` — pure prompt builder + sanitizer + fallback factory. Re-declares `LovableMessage`/`LovableTextPart`/`LovableImagePart` локально (mirror `homework-api/ai_shared.ts`) чтобы `_shared/` остался свободен от cross-function dependencies.
+
+**Phase 1 promprt simplification** (см. spec.md §5 + product-strategy.md §5):
+- 4 элемента ФИПИ I-IV для №22-26: I (закон), II (обозначения), III (расчёт + подстановка), IV (ответ + единицы). `suggested_score` = число выполненных элементов 0..max_score.
+- Спец-правило для №21: 3-балльная качественная задача с собственной 0..3 рубрикой; sanitizer всегда форсит `elements_check = all-false` + добавляет flag `kim21_qualitative`. Tutor UI должен скрывать I-IV чекбоксы и рендерить qualitative rubric.
+- **Полный 208-стр методический разбор — Phase 2.** В Phase 1 prompt намеренно простой; ловим базовые ошибки + флагуем неоднозначные кейсы для tutor.
+
+**Frozen JSON output shape** (см. `MockExamPart2Draft` type):
+```ts
+{
+  suggested_score: number | null,
+  confidence: 'low' | 'medium' | 'high',
+  elements_check: { I: bool, II: bool, III: bool, IV: bool },
+  comment_for_tutor: string,    // ≤ 600 chars
+  flags: string[]               // ≤ 6 entries, snake_case, ≤ 32 chars each
+}
+```
+`MockExamPart2Draft` тип также экспортируется из `src/types/mockExam.ts` (frontend wire-compatible). При расширении полей — синхронно править оба файла.
+
+**Anti-leak invariants (КРИТИЧНО, защищают product invariant «AI никогда не публикует ученику»):**
+1. **Endpoint response NEVER содержит `ai_draft_json` / `suggested_score` / draft contents** — только counters (`drafts_persisted`, `fallback_count`, `total_latency_ms`, `tutor_notified`). Caller (`mock-exam-student-api/handleSubmit` fire-and-forget) не должен relay payload к ученику.
+2. **`solution_text` из `mock_exam_variant_tasks`** идёт **только** в system prompt server-side. Никогда не возвращается в response handler этого endpoint.
+3. **Student RLS на `mock_exam_attempt_part2_solutions`** разрешает SELECT — это TASK-13 (`StudentMockExamResult`) обязан фильтровать `ai_draft_json` из response. mock-exam-grade пишет только в БД.
+4. **`isAllowedSignedStorageUrl`** (mirror `homework-api/guided_ai.ts`) принимает оба host'а: direct (`vrsseotrfmsxpbciyqzc.supabase.co`) и proxy (`api.sokratai.ru`). Дублирующий paranoid SSRF guard.
+
+**Auth контракт (два пути):**
+- `Authorization: Bearer <SERVICE_ROLE>` — internal fire-and-forget из student submit handler. Service-role bypass'ит ownership check.
+- `Authorization: Bearer <user JWT>` — fallback для manual re-trigger; ownership через `attempt.student_id === user OR assignment.tutor_id === user`.
+
+**State machine guards (CAS-protected):**
+- `submitted` → CAS-update в `ai_checking` (CAS guard `WHERE status='submitted'` защищает от concurrent runners)
+- `ai_checking` → process → CAS-update в `awaiting_review` (только из `ai_checking`/`submitted` чтобы не клобберить concurrent tutor approve flow)
+- `approved` / `manually_entered` → 409 ALREADY_APPROVED / MANUAL_ENTRY
+- `in_progress` → 400 NOT_SUBMITTED
+- Re-run на `awaiting_review` идемпотентен; tutor-approved строки (`tutor_approved`/`tutor_modified` в `mock_exam_attempt_part2_solutions`) **не перезаписываются** — обновляется только `ai_draft_json` field.
+
+**Latency budget (AC-4 < 90s для 6 задач):**
+- 6 Часть 2 задач параллельно через `Promise.all`. Lovable timeout 35s + 1 retry на 5xx → bound ≈ 35s typical, 70s worst-case.
+- Server-to-server fetch на signed URLs обёрнут в `rewriteToDirect()` из `_shared/proxy-url.ts` (US→US, экономит 200-400ms vs Selectel proxy roundtrip).
+- Image inline в base64 обязателен — Lovable Gateway не скачивает remote images сам (см. CLAUDE.md «Network & Infrastructure»).
+
+**Photo handling:**
+- `photo_url` парсится через `parsePhotoUrls` (dual-format: single ref OR JSON array, как `homework_tutor_tasks.task_image_url`). Локальный helper, не дёргать `parseAttachmentUrls` из `_shared/attachment-refs.ts` — там семантика гомерки, а здесь mock_exam.
+- Если `photo_url IS NULL` → fallback `no_photo`, `flags: ['photo_missing']`, score=null.
+- Если refs есть, но inline всех failed → fallback `image_inline_failed`, `flags: ['photo_unreadable']`. **Fail closed**, не зовём AI с пустым телом.
+- Sanitizer: если AI возвращает любой `photo_*` flag → forced `suggested_score=null`, `confidence='low'` (даже если AI поставил score).
+
+**Fallback drafts (when AI fails):** `buildFallbackDraft(reason, params)` — типизированные fallbacks для `timeout` / `invalid_json` / `gateway_error` / `no_photo` / `image_inline_failed`. Tutor видит `confidence='low'` + объяснительный flag + comment «оцени вручную». Score=null всегда.
+
+**Tutor notify:** best-effort Web Push на `assignment.tutor_id` с deep-link `/tutor/mock-exams/attempts/:id/review`. VAPID env missing → silent skip; не блокирует response. Telegram/email leg отложены (нет mock-exam-specific email template).
+
+**Wire-level URL:** `https://api.sokratai.ru/functions/v1/mock-exam-grade` (POST). Body: `{ "attempt_id": "<uuid>" }`.
+
+**При расширении grader'а** (Phase 2 — полный 208-стр промпт):
+1. Расширь `buildCriteriaBlock()` в `_shared/mock-exam-prompts.ts` — там single source of truth для prompt logic.
+2. **Не меняй JSON output shape** без синхронной правки `src/types/mockExam.ts::MockExamPart2Draft` + `mock-exam-tutor-api/handleGetAttempt` (читает `ai_draft_json` из БД для review surface).
+3. Если добавляешь новые fallback reasons — расширь `MockExamFallbackReason` union в обоих файлах + `flagsByReason`/`commentByReason` mappings.
+4. Lovable model swap (e.g. `google/gemini-3-flash-preview` → новый): синхронно обнови константу в `homework-api/ai_shared.ts` для консистентности AI-домена.
+
+**Validation после deploy:** см. spec.md §7 «Validation» + tasks.md TASK-5. Smoke: `curl -X POST $SUPABASE_URL/functions/v1/mock-exam-grade -H "Authorization: Bearer $SERVICE_ROLE" -d '{"attempt_id":"<uuid>"}'` → response `{ part2_task_count: 6, drafts_persisted: 6, total_latency_ms: <90000 }`.
+
+**Спека:** `docs/delivery/features/mock-exams-v1/spec.md` §5 + AC-4 + product-strategy.md §5.
+
+### 13. Mock Exams v1 — tutor heatmap detail (2026-05-07, TASK-10)
+
+`src/pages/tutor/mock-exams/TutorMockExamDetail.tsx` — overview-страница пробника на route `/tutor/mock-exams/:id`. Header (breadcrumb + title + status badge) + 5 KPI cards (Сдали / В процессе / Не приступали / Средний первичный / Требует AI-проверки) + heatmap students × tasks 1–26 + amber AI-черновик банер. Click row → `/tutor/mock-exams/:id/review/:studentId` (TASK-11).
+
+**Files:**
+- `src/pages/tutor/mock-exams/TutorMockExamDetail.tsx` — page (overview + KPI + heatmap mount)
+- `src/components/tutor/mock-exams/MockExamHeatmap.tsx` — таблица 5×26 + Часть 1/2 разделитель + 3 итоговые колонки (Часть 1 / Часть 2 / Итого)
+- `src/components/tutor/mock-exams/mockHeatmapStyles.ts` — single source of truth для cell colors (cell-correct / cell-partial / cell-wrong / cell-empty / cell-draft / cell-low-conf), exports `getMockCellStyle`, `getMockTotalsStyle`, `MOCK_CELL_LEGEND`. **Не дублировать** color helper — импортировать отсюда (как `heatmapStyles.ts` для homework results)
+- `src/hooks/useMockExamAssignment.ts` — React Query hook, key `['tutor','mock-exams','assignment', id]`
+
+**КРИТИЧНО для iOS Safari** (.claude/rules/80-cross-browser.md, mirror `HeatmapGrid.tsx`):
+- `border-separate border-spacing-0` + `<colgroup>` фиксированных ширин: `border-collapse` ломает `position: sticky` на `<td>`/`<th>` в WebKit.
+- `width: max-content` + `tableLayout: 'fixed'`: иначе table-layout сжимает столбцы под container и `overflow-x-auto` никогда не активируется.
+- `touch-pan-x` на wrapping `<div>`: row onClick может съесть touchstart на iOS и заблокировать horizontal swipe.
+- `React.memo` на `HeatmapRow` + `HeatmapCell`: 5×27 ≈ 135 ячеек, без memo expand/collapse лагает.
+
+**Layout (`<colgroup>`):** 220px sticky name + 20×34px (Часть 1) + 12px spacer + 6×46px (Часть 2) + 80px×3 (totals). Total table width = `220 + 20·34 + 12 + 6·46 + 3·80 = 1428px`.
+
+**Phase 1 ограничение per-task hydration:** `mock-exam-tutor-api::handleGetAssignment` возвращает только attempt-level totals (`total_part1_score`, `total_part2_score`, `total_score`, `status`). Per-task scores (cell-by-cell colored values) **не hydrate'ятся** — все 26 task-клеток рендерятся как `cell-empty`. Часть 2 для `awaiting_review`/`submitted` форсится в `cell-draft` для визуального сигнала. Полная per-task hydration — Phase 2 (потребует extension `handleGetAssignment` или отдельный batch-endpoint, mirror `getResults` для homework). Структура heatmap'а готова к hydration без рефакторинга.
+
+**part1_max / part2_max heuristic:** detail payload не содержит explicit `part1_max` / `part2_max` (только `total_max_score`). Код hardcode'ит ЕГЭ физика = 28 (Часть 1) + 17 (Часть 2) = 45. Когда backend начнёт возвращать explicit поля — заменить на `detail.part1_max` / `detail.part2_max`.
+
+**Sort priority в `MockExamHeatmap`:** `awaiting_review (0) → submitted (1) → in_progress (2) → approved (3) → manually_entered (4) → not_started (5)`. Внутри одного приоритета — alphabetical по `student_display_name` (RU locale).
+
+**Anonymous attempts (lead):** для attempt без `student_id` row clickable и navigate'ит на `:studentId = anonymous_id`. TutorMockExamReview (TASK-11) разрулит через тот же match.
+
+**Спека:** `docs/delivery/features/mock-exams-v1/spec.md` AC-5 + tasks.md TASK-10 + product-nuances.md (mockup Screen 3).
+
+### 14. Mock Exams v1 — tutor review surface (2026-05-07, TASK-11)
+
+`src/pages/tutor/mock-exams/TutorMockExamReview.tsx` — главная value-proposition surface продукта: tutor approves/корректирует AI Часть 2 черновик. Route `/tutor/mock-exams/:id/review/:studentId`. Контракт «AI never publishes to student» — формальный product invariant: пока tutor не нажмёт «Подтвердить и отправить», ученик и родители ничего не видят.
+
+**Files:**
+- `src/pages/tutor/mock-exams/TutorMockExamReview.tsx` — page
+- `src/hooks/useMockExamAttempt.ts` — React Query hook, key `['tutor','mock-exams','attempt', id]`
+
+**Resolution `:studentId` → attemptId:**
+- URL convention `:studentId` — это `student_id` (auth.users.id) для авторизованных учеников ИЛИ `anonymous_id` для лидов
+- Page сначала загружает assignment через `useMockExamAssignment(:id)`, затем match'ит attempt по `student_id === param || anonymous_id === param` и берёт `attempt.id` для `useMockExamAttempt(attemptId)`
+- Mismatch → empty-state «Попытка не найдена»
+
+**Per-task approve flow:**
+- Каждая Часть 2 карточка имеет два action'а: «Подтвердить: {ai_suggested}/{max}» (quick-approve preselect AI suggestion) и «Изменить балл» (Pencil → modal с input 0..max + comment textarea)
+- POST `/attempts/:id/approve-task` с `{ kim_number, score, comment? }`. Backend ставит `status = 'tutor_modified'` если `tutor_score !== ai_draft.suggested_score` ИЛИ непустой comment, иначе `'tutor_approved'`
+- На success: invalidate `['tutor','mock-exams','attempt', id]` + toast «Задача №N подтверждена»
+
+**Global approve flow (nuance #9):**
+- Sticky-feel footer counter «Подтверждено: N/6 заданий» + button «Подтвердить и отправить»
+- Button **disabled пока N !== 6** — нельзя пропустить ни одну задачу. AlertDialog подтверждение перед POST `/attempts/:id/approve-all`
+- AlertDialog message: «После этого ученик и родители получат результат: первичный балл X из Y. Перепроверка возможна — ты сможешь скорректировать любую задачу позже.»
+- На success: invalidate attempt + assignment + assignments list, toast с delivery channel (push/telegram/email), navigate back на `/tutor/mock-exams/:id` через 800ms
+
+**Anonymous lead bar (nuance #2 — КРИТИЧНО):**
+- `isAnonymous(attempt) === true` (нет `student_id`, есть `anonymous_id`) → footer показывает amber «Анонимный лид» chip + текст «Bulk-approve недоступен. Проверь каждый пункт вручную.»
+- Per-task approve работает как обычно. Global approve тот же путь, но контракт «делать медленно» — UI не предоставляет shortcut'ов
+- Telemetry override rate должна быть отдельная для anonymous vs existing (Phase 2)
+
+**Reasoning visibility (nuance #1):**
+- Каждая Часть 2 карточка рендерит `ai_draft.elements_check` как 4 чипса I/II/III/IV (I — Закон / II — Обозначения / III — Расчёт + подстановка / IV — Ответ + единицы) с Lucide Check (passed) / X (failed) — **никогда emoji**
+- AI `comment_for_tutor` рендерится через lazy `MathText` (LaTeX-aware) с amber border-l-2
+- Confidence chip: high → emerald `CheckCircle2 + AI уверен`, medium → amber `AlertCircle + AI колеблется`, low → rose `AlertCircle + AI не уверен`
+
+**Low-confidence + photo unreadable (nuance #5):**
+- `confidence === 'low'` ИЛИ `ai_draft === null` → карточка рендерится с `border-2 border-rose-300` + rose header + явный rose alert «**AI не смог распознать.** Открой фото и поставь оценку самостоятельно»
+- `photo_url === null` → отдельный alert «Фото решения не загружено или нечитаемо. Запроси переснимку у ученика в Telegram или поставь оценку вручную»
+
+**№21 (kim21_qualitative flag):**
+- Sanitizer в `mock-exam-grade` форсит `elements_check = all-false` + flag `kim21_qualitative` для №21
+- UI **скрывает** I/II/III/IV чипсы для таких карточек, рендерит amber hint «№21 — качественная задача с собственной 0..3 рубрикой (см. блок-схему ФИПИ)»
+- Score override modal остаётся доступен (0..3)
+
+**Read-only states:**
+- `attempt.status === 'approved'` или `'manually_entered'` → footer заменяется на emerald «Работа подтверждена и отправлена. Ученик и родители уже видят результат». Per-task action row (Изменить / Подтвердить) скрыт во всех карточках
+- Это intentional terminal state. Phase 2 может разрешить «re-grade» — отдельная фича
+
+**Score override read-only (nuance #3):**
+- `tutor_score` отображается только в header карточки («Подтверждено: 2/3») и в фокусной dialog. Inline editing **запрещён** — всегда через explicit «Изменить балл» modal. Это защищает от accidental edit при scroll/focus
+- Modal содержит `<input type="number" min={0} max={maxScore}>` (`text-base` 16px для iOS) + `<textarea>` для comment + конфирм «Подтвердить: N / M»
+
+**LaTeX rendering:**
+- `MathText` импортируется через `React.lazy()` (KaTeX весит ~400KB). `<Suspense>` fallback = plain text
+- Применяется к: `solution.task_text` (условие задачи), `ai_draft.comment_for_tutor` (AI обоснование), `solution.tutor_comment` (tutor комментарий, если был)
+
+**Cross-cutting:**
+- Все Inputs `text-base` (16px) — iOS Safari auto-zoom prevention
+- `loading="lazy"` на `<img>` фото решения; click → открывается в новой вкладке (target="_blank")
+- Lucide-иконки везде, **без emoji** в card chrome / actions / status (rule 90-design-system.md)
+- shadcn Card / Button / Badge / Dialog / AlertDialog (rule 90)
+
+**Спека:** `docs/delivery/features/mock-exams-v1/spec.md` AC-5 + tasks.md TASK-11 + product-nuances.md #1, #2, #3, #5, #9 (mockup Screen 4).
+
+### 15. Mock Exams v1 — student result surface (2026-05-07, TASK-13)
+
+`src/pages/student/StudentMockExamResult.tsx` — student-side result page на route `/student/mock-exams/:id/result`. Реализует contract «Часть 1 immediate, Часть 2 only after tutor approval» — формальный product invariant из spec §3 (p.107). Backend endpoint `GET /student/:assignmentId/result` (`mock-exam-student-api/index.ts::handleGetResult`) построен как **state-aware reveal** с column-whitelisted SELECT.
+
+**Files:**
+- `supabase/functions/mock-exam-student-api/index.ts` — `handleGetResult` + новый route `GET /student/:assignmentId/result`
+- `src/lib/studentMockExamApi.ts` — `getStudentMockExamResult()` + types `StudentMockExamResultView`, `StudentMockExamResultPart1Answer`, `StudentMockExamResultPart2Solution`, `StudentMockExamResultTutor`
+- `src/hooks/useStudentMockExamResult.ts` — React Query hook
+- `src/pages/student/StudentMockExamResult.tsx` — page
+
+**Anti-leak invariants (КРИТИЧНО, защищают product invariant):**
+1. **`ai_draft_json` НИКОГДА не возвращается** ученику — endpoint вообще не SELECT'ит это поле. Tutor-only artifact (мог отличаться от final approved score). Это инвариант параллелен TASK-5 grader (CLAUDE.md §12) — там endpoint response никогда не содержит `ai_draft_json`/`suggested_score`/draft contents; здесь он не возвращается клиенту даже когда tutor approve состоялся.
+2. **`correct_answer`** revealed только post-submit (`status !== 'in_progress'`). Pre-submit endpoint вообще не отвечает (см. §3 ниже).
+3. **`tutor_score` / `tutor_comment` / `solution_text` / `task_text` (Часть 2)** revealed только при `status === 'approved'`. Conditional SELECT на стороне backend: `isApproved ? "...tutor_score, tutor_comment..." : "kim_number, photo_url, status"`. Не «всегда select + отфильтровать на сериализации» — поля отсутствуют в памяти процесса до approval.
+4. **Tutor card whitelist** — только `name, avatar_url`. **Никогда** `telegram_id` / `telegram_username` / `booking_link` / `email`. Mirror `mock-exam-public::loadTutorCard` whitelist но более узкий (`bio` / `subjects` опущены — student уже знает своего репетитора).
+
+**Status gate (409 NOT_SUBMITTED):**
+- `status === 'in_progress'` → 409 `{error: {code: 'NOT_SUBMITTED'}}`. Frontend hook (`useStudentMockExamResult.isStillInProgress`) детектит код и в `useEffect` redirect'ит на `/student/mock-exams/:id` (taking surface). Это защита: result page не должен mounted'ся на активном экзамене (даже если ученик manually вбил URL).
+- `status === 'manually_entered'` → render отдельной `ManualEntryView` с totals + `manual_comment`, БЕЗ per-task разбора. По дизайну: manual entry = backfill прошлого пробника без AI/tasks.
+
+**State machine UI** (page renders by `attempt.status`):
+- `submitted | ai_checking | awaiting_review` → Часть 1 reveal (big score + collapsible 20-row table) + amber Часть 2 pending card («Репетитор Х сейчас проверяет — результат придёт в Telegram в течение 24ч») + grey placeholder для финального summary.
+- `approved` → Часть 1 reveal + Часть 2 reveal (per-task cards с условием + photo ученика + tutor comment + collapsible эталон) + final summary с большим первичным баллом + бенчмарк-полоса (anchors 40% порог / 66% хорошо).
+- `manually_entered` → `ManualEntryView` (totals + manual_comment).
+- `in_progress` → 409 → redirect.
+
+**React Query invalidation на push trigger:**
+- Query key `['student','mock-exam','result', assignmentId]`, stale time 30s, gc 5m.
+- `refetchOnWindowFocus: true` + `refetchOnReconnect: true` — при approval tutor пушит на `assignment.tutor_id` push notification со deep-link на result page. Ученик кликает push → window regains focus → query refetches → новый `approved` status surface'ится без race conditions и без realtime подписок.
+- `retry` дискриминирует deterministic state errors (404 / 409 / 401) от network errors — не ретраит первые.
+
+**Manual entry vs approved (UX deviation):**
+- Manual entry — отдельный render path (`ManualEntryView`), не reuse approved code path. Причина: для manual entry per-task records нет (`part1_answers` / `part2_solutions` пусты по дизайну backend), totals — единственный источник. Approved path требует non-empty arrays для valuable rendering.
+
+**При расширении endpoint:**
+1. Никогда не SELECT *. Whitelist колонок остаётся жёстким.
+2. Любое новое поле в `mock_exam_variant_tasks` или `mock_exam_attempt_part2_solutions`, видимое student'у, требует явного решения: pre-submit (нельзя — anti-leak), post-submit (Часть 1 only), post-approval (Часть 2 only). Default = post-approval (paranoid).
+3. `ai_draft_json` — никогда. Если когда-то понадобится показать AI-rationale ученику — это отдельная product decision + spec, не silent extension.
+4. При добавлении нового storage bucket для `task_image_url` или `solution_image_urls` — `resolveSignedUrl` использует `parseStorageRef` (bucket из ref'а), новые bucket'ы работают автоматически. Path-traversal guard уже есть.
+
+**Спека:** `docs/delivery/features/mock-exams-v1/spec.md` AC-5 + tasks.md TASK-13 (mockup Screen 6).
+
 ## Известные хрупкие области
 
 1. **Chat.tsx** (2000+ строк) — очень сложный компонент
