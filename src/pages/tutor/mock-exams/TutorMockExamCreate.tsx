@@ -1,0 +1,785 @@
+// Mock Exams v1 — TASK-9: tutor create wizard.
+//
+// Job: R1 (быстро назначить пробник за <2 минуты).
+// AC-1: assignment + N attempts created в БД.
+// Spec: docs/delivery/features/mock-exams-v1/spec.md §3 (бланк-режим default)
+// Mockup: SokratAI/docs/delivery/features/mock-exams-v1/mockup.html (Screen 2)
+//
+// Single-page wizard, 4 шага:
+//   1. Вариант — Тренировочный 1 selected by default (Phase 1: 1 variant only)
+//   2. Режим — blank / form (radio)
+//   3. Кому — groups + individuals (checkboxes)
+//   4. Параметры — title + deadline (datetime-local) + опц. lead-link
+//
+// Анти-патерны исключены (см. .claude/rules/90-design-system.md):
+//   • Lucide icons only (нет emoji)
+//   • shadcn Card / Button / Badge / Input / Label / Checkbox
+//   • text-base (16px) на all inputs (iOS Safari auto-zoom prevention)
+//   • Mobile-responsive (375px+): action bar collapses, recipient list scrolls
+
+import { memo, useCallback, useMemo, useState } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
+import { parseISO, isValid } from 'date-fns';
+import { toast } from 'sonner';
+import {
+  ArrowLeft,
+  Check,
+  GraduationCap,
+  Link2,
+  Loader2,
+  Users,
+} from 'lucide-react';
+import { Card, CardContent } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Skeleton } from '@/components/ui/skeleton';
+import { MockExamFeatureGate } from './MockExamFeatureGate';
+import {
+  createMockExamAssignment,
+  createMockExamInviteLink,
+  MockExamApiError,
+} from '@/lib/mockExamApi';
+import { useTutorStudents, useTutor, useTutorGroups } from '@/hooks/useTutor';
+import type { TutorStudentWithProfile } from '@/types/tutor';
+import type { MockExamMode } from '@/types/mockExam';
+import { cn } from '@/lib/utils';
+
+// ─── Variant catalogue (Phase 1: hardcoded) ──────────────────────────────────
+// Источник: supabase/seed/mock_exams_variant_1.sql §1. variant_id фиксирован
+// uuid5 namespace `00000000-0000-0000-0000-000000005ec0`. Когда ландят
+// ещё варианты — заменить на API fetch.
+
+const VARIANT_LIBRARY = [
+  {
+    id: '36cebc45-e2e8-5603-a753-01c818bba131',
+    title: 'Тренировочный 1 (физика ЕГЭ-2026)',
+    attribution: 'Источник: репетитор Егор Иванов',
+    meta: '26 заданий · макс. 45 баллов · 3 ч 55 мин',
+    isAvailable: true,
+    badge: 'Рекомендуем',
+  },
+  {
+    id: 'fipi-demo-2026-placeholder',
+    title: 'Демоверсия ФИПИ-2026',
+    attribution: 'Источник: ФИПИ',
+    meta: 'Добавим после Phase 2',
+    isAvailable: false,
+    badge: 'скоро',
+  },
+] as const;
+
+const DEFAULT_VARIANT_ID = VARIANT_LIBRARY[0].id;
+const DEFAULT_TITLE = 'Пробник Тренировочный 1';
+const DURATION_HINT = 'Стандартный пробник занимает 3 ч 55 мин';
+
+// ─── Mode options ────────────────────────────────────────────────────────────
+
+interface ModeOption {
+  value: Exclude<MockExamMode, 'manual_entry'>;
+  label: string;
+  description: string;
+  isDefault?: boolean;
+}
+
+const MODE_OPTIONS: ModeOption[] = [
+  {
+    value: 'blank',
+    label: 'С бланком ЕГЭ',
+    description:
+      'Ученик распечатывает PDF бланка, заполняет ручкой и параллельно вводит ответы Части 1 в форму на сайте. AI авто-проверяет Часть 1, делает черновик Части 2. Фото бланка хранится как proof.',
+    isDefault: true,
+  },
+  {
+    value: 'form',
+    label: 'Стандартный (форма)',
+    description:
+      'Ученик заполняет ответы Части 1 в форме на сайте, AI авто-проверяет. Часть 2 — фото решений, AI делает черновик. Подходит, если ученик не может распечатать бланк.',
+  },
+];
+
+// ─── Helpers ────────────────────────────────────────────────────────────────
+
+function getStudentDisplayName(student: TutorStudentWithProfile): string {
+  return (
+    student.display_name?.trim() ||
+    student.profiles?.username?.trim() ||
+    'Ученик'
+  );
+}
+
+function getStudentSubline(student: TutorStudentWithProfile): string {
+  const grade = student.profiles?.grade ? `${student.profiles.grade} класс` : '';
+  const examType = student.exam_type === 'ege' ? 'ЕГЭ' : student.exam_type === 'oge' ? 'ОГЭ' : '';
+  return [grade, examType].filter(Boolean).join(' · ');
+}
+
+/**
+ * Parse the datetime-local string into ISO 8601 (UTC).
+ * Returns null if value is empty (no deadline) or unparseable.
+ * Throws human-readable error if past — caller surfaces via toast.
+ */
+function parseDeadlineInput(value: string): string | null {
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+
+  // datetime-local gives 'YYYY-MM-DDTHH:mm' — parseISO handles it.
+  const parsed = parseISO(trimmed);
+  if (!isValid(parsed)) {
+    throw new Error('Неверный формат даты. Пример: 2026-05-14 23:59');
+  }
+  if (parsed.getTime() < Date.now()) {
+    throw new Error('Дедлайн в прошлом — выбери будущую дату');
+  }
+  return parsed.toISOString();
+}
+
+function pluralStudents(count: number): string {
+  const mod10 = count % 10;
+  const mod100 = count % 100;
+  if (mod10 === 1 && mod100 !== 11) return 'ученику';
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 10 || mod100 >= 20)) return 'ученикам';
+  return 'ученикам';
+}
+
+async function tryCopyLink(url: string): Promise<void> {
+  // Primary: Async Clipboard API (requires secure context — HTTPS or localhost).
+  // Fallback: legacy document.execCommand('copy') через скрытый textarea —
+  // нужен для http preview и Safari < 15.4. См. .claude/rules/80-cross-browser.md.
+  if (
+    typeof navigator !== 'undefined' &&
+    navigator.clipboard &&
+    window.isSecureContext
+  ) {
+    try {
+      await navigator.clipboard.writeText(url);
+      return;
+    } catch {
+      // fall through to legacy fallback
+    }
+  }
+  try {
+    const textarea = document.createElement('textarea');
+    textarea.value = url;
+    textarea.setAttribute('readonly', '');
+    textarea.style.position = 'absolute';
+    textarea.style.left = '-9999px';
+    document.body.appendChild(textarea);
+    textarea.select();
+    document.execCommand('copy');
+    document.body.removeChild(textarea);
+  } catch {
+    // best-effort — user can copy from toast description manually
+  }
+}
+
+// ─── Variant card (step 1) ───────────────────────────────────────────────────
+
+interface VariantCardProps {
+  title: string;
+  attribution: string;
+  meta: string;
+  badge: string;
+  isAvailable: boolean;
+  isSelected: boolean;
+}
+
+const VariantCard = memo(function VariantCard({
+  title,
+  attribution,
+  meta,
+  badge,
+  isAvailable,
+  isSelected,
+}: VariantCardProps) {
+  return (
+    <div
+      className={cn(
+        'rounded-lg border-2 p-4 transition-[border-color,background-color] duration-200 ease-out',
+        isSelected && isAvailable && 'border-accent bg-accent/5',
+        !isSelected && isAvailable && 'border-slate-200 hover:border-slate-300 cursor-pointer',
+        !isAvailable && 'border-slate-200 opacity-60 cursor-not-allowed',
+      )}
+      aria-disabled={!isAvailable || undefined}
+    >
+      <div className="flex items-start gap-3">
+        <div
+          className={cn(
+            'h-10 w-10 rounded-md flex items-center justify-center flex-shrink-0',
+            isSelected && isAvailable
+              ? 'bg-accent text-white'
+              : 'bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400',
+          )}
+          aria-hidden="true"
+        >
+          <GraduationCap className="h-5 w-5" />
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-start justify-between gap-2 flex-wrap">
+            <h3
+              className={cn(
+                'font-semibold text-base leading-snug',
+                isAvailable
+                  ? 'text-slate-900 dark:text-slate-100'
+                  : 'text-slate-500 dark:text-slate-400',
+              )}
+            >
+              {title}
+            </h3>
+            <Badge
+              variant="outline"
+              className={cn(
+                'text-[10px] uppercase tracking-wide font-medium border-transparent',
+                isAvailable
+                  ? 'bg-accent/10 text-accent'
+                  : 'bg-slate-100 text-slate-500',
+              )}
+            >
+              {badge}
+            </Badge>
+          </div>
+          <p className="text-xs text-muted-foreground mt-1">{attribution}</p>
+          <p className="text-xs text-muted-foreground/80 mt-0.5">{meta}</p>
+        </div>
+        {isSelected && isAvailable && (
+          <div
+            className="text-accent flex-shrink-0"
+            aria-label="Выбран"
+            title="Выбран"
+          >
+            <Check className="h-5 w-5" aria-hidden="true" />
+          </div>
+        )}
+      </div>
+    </div>
+  );
+});
+
+// ─── Step section wrapper ────────────────────────────────────────────────────
+
+interface StepSectionProps {
+  index: number;
+  title: string;
+  children: React.ReactNode;
+}
+
+function StepSection({ index, title, children }: StepSectionProps) {
+  return (
+    <Card animate={false}>
+      <CardContent className="p-5 space-y-3">
+        <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+          Шаг {index} · {title}
+        </p>
+        {children}
+      </CardContent>
+    </Card>
+  );
+}
+
+// ─── Mode option (step 2) ────────────────────────────────────────────────────
+
+interface ModeRadioProps {
+  option: ModeOption;
+  isSelected: boolean;
+  onSelect: (value: ModeOption['value']) => void;
+}
+
+const ModeRadio = memo(function ModeRadio({
+  option,
+  isSelected,
+  onSelect,
+}: ModeRadioProps) {
+  const inputId = `mode-${option.value}`;
+  return (
+    <label
+      htmlFor={inputId}
+      className={cn(
+        'flex items-start gap-3 p-3 rounded-md border-2 cursor-pointer transition-[border-color,background-color] duration-200 ease-out',
+        isSelected
+          ? 'border-accent bg-accent/5'
+          : 'border-slate-200 hover:border-slate-300 dark:border-slate-700 dark:hover:border-slate-600',
+      )}
+    >
+      <input
+        id={inputId}
+        type="radio"
+        name="mock-exam-mode"
+        value={option.value}
+        checked={isSelected}
+        onChange={() => onSelect(option.value)}
+        className="mt-1 h-4 w-4 accent-accent flex-shrink-0"
+      />
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="font-medium text-sm text-slate-900 dark:text-slate-100">
+            {option.label}
+          </span>
+          {option.isDefault && (
+            <Badge
+              variant="outline"
+              className="bg-accent/10 text-accent border-transparent text-[10px] uppercase tracking-wide font-medium"
+            >
+              по умолчанию
+            </Badge>
+          )}
+        </div>
+        <p className="text-xs text-muted-foreground mt-1 leading-relaxed">
+          {option.description}
+        </p>
+      </div>
+    </label>
+  );
+});
+
+// ─── Recipient row (step 3) ──────────────────────────────────────────────────
+
+interface RecipientRowProps {
+  id: string;
+  primary: string;
+  secondary?: string;
+  isSelected: boolean;
+  isDisabled?: boolean;
+  onToggle: (id: string, next: boolean) => void;
+}
+
+const RecipientRow = memo(function RecipientRow({
+  id,
+  primary,
+  secondary,
+  isSelected,
+  isDisabled,
+  onToggle,
+}: RecipientRowProps) {
+  const checkboxId = `recipient-${id}`;
+  return (
+    <label
+      htmlFor={checkboxId}
+      className={cn(
+        'flex items-start gap-3 p-2.5 rounded-md transition-colors duration-150',
+        isDisabled
+          ? 'bg-slate-50 dark:bg-slate-900 opacity-60 cursor-not-allowed'
+          : 'hover:bg-slate-50 dark:hover:bg-slate-900 cursor-pointer',
+      )}
+    >
+      <Checkbox
+        id={checkboxId}
+        checked={isSelected}
+        disabled={isDisabled}
+        onCheckedChange={(checked) =>
+          onToggle(id, checked === true)
+        }
+        className="mt-1"
+      />
+      <div className="flex-1 min-w-0">
+        <div
+          className={cn(
+            'font-medium text-sm',
+            isDisabled
+              ? 'text-slate-500 dark:text-slate-400'
+              : 'text-slate-900 dark:text-slate-100',
+          )}
+        >
+          {primary}
+        </div>
+        {secondary && (
+          <div className="text-xs text-muted-foreground">{secondary}</div>
+        )}
+      </div>
+    </label>
+  );
+});
+
+// ─── Main wizard content ─────────────────────────────────────────────────────
+
+function TutorMockExamCreateContent() {
+  const navigate = useNavigate();
+
+  const { tutor } = useTutor();
+  const miniGroupsEnabled = Boolean(tutor?.mini_groups_enabled);
+  const { students, loading: studentsLoading } = useTutorStudents();
+  const { groups, loading: groupsLoading } = useTutorGroups(miniGroupsEnabled);
+
+  const [variantId] = useState(DEFAULT_VARIANT_ID);
+  const [mode, setMode] = useState<Exclude<MockExamMode, 'manual_entry'>>(
+    'blank',
+  );
+  const [title, setTitle] = useState(DEFAULT_TITLE);
+  const [deadlineInput, setDeadlineInput] = useState('');
+  const [createLeadLink, setCreateLeadLink] = useState(false);
+
+  // Selected group ids (UI). Toggling a group expands/collapses its
+  // active members in `selectedStudentIds`. Individual students can also
+  // be toggled directly.
+  const [selectedGroupIds, setSelectedGroupIds] = useState<Set<string>>(
+    new Set(),
+  );
+  const [selectedStudentIds, setSelectedStudentIds] = useState<Set<string>>(
+    new Set(),
+  );
+
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // Index: tutor_student_id → student_id (auth.users.id).
+  // Backend API expects student_id (auth.users.id), but groups reference
+  // tutor_student_id. Resolve via this map.
+  const studentIdByTutorStudentId = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const s of students) {
+      map.set(s.id, s.student_id);
+    }
+    return map;
+  }, [students]);
+
+  const activeStudents = useMemo(
+    () => students.filter((s) => s.status === 'active'),
+    [students],
+  );
+
+  // ─── Group toggle: expands/collapses members ─────────────────────────────
+
+  const handleGroupToggle = useCallback(
+    (groupId: string, next: boolean) => {
+      setSelectedGroupIds((prev) => {
+        const updated = new Set(prev);
+        if (next) updated.add(groupId);
+        else updated.delete(groupId);
+        return updated;
+      });
+
+      const group = groups.find((g) => g.id === groupId);
+      if (!group) return;
+
+      const memberStudentIds = group.members
+        .filter((m) => m.is_active)
+        .map((m) => studentIdByTutorStudentId.get(m.tutor_student_id))
+        .filter((sid): sid is string => Boolean(sid));
+
+      setSelectedStudentIds((prev) => {
+        const updated = new Set(prev);
+        if (next) {
+          memberStudentIds.forEach((sid) => updated.add(sid));
+        } else {
+          memberStudentIds.forEach((sid) => updated.delete(sid));
+        }
+        return updated;
+      });
+    },
+    [groups, studentIdByTutorStudentId],
+  );
+
+  const handleStudentToggle = useCallback(
+    (studentId: string, next: boolean) => {
+      setSelectedStudentIds((prev) => {
+        const updated = new Set(prev);
+        if (next) updated.add(studentId);
+        else updated.delete(studentId);
+        return updated;
+      });
+    },
+    [],
+  );
+
+  // ─── Submit ──────────────────────────────────────────────────────────────
+
+  const trimmedTitle = title.trim();
+  const studentIds = useMemo(() => Array.from(selectedStudentIds), [selectedStudentIds]);
+
+  const isValidForSubmit =
+    !isSubmitting &&
+    trimmedTitle.length > 0 &&
+    studentIds.length > 0 &&
+    Boolean(variantId);
+
+  const handleSubmit = useCallback(async () => {
+    if (!isValidForSubmit) return;
+
+    let deadlineIso: string | null = null;
+    try {
+      deadlineIso = parseDeadlineInput(deadlineInput);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Неверный дедлайн');
+      return;
+    }
+
+    setIsSubmitting(true);
+    try {
+      const created = await createMockExamAssignment({
+        variant_id: variantId,
+        title: trimmedTitle,
+        mode,
+        deadline: deadlineIso,
+        student_ids: studentIds,
+      });
+
+      const assignmentId = created.assignment_id;
+      const studentCount = created.attempts_created ?? studentIds.length;
+
+      toast.success(
+        `Пробник назначен ${studentCount} ${pluralStudents(studentCount)}`,
+      );
+
+      // Optional lead-link.
+      if (createLeadLink) {
+        try {
+          const link = await createMockExamInviteLink(assignmentId, {});
+          await tryCopyLink(link.url);
+          toast.success('Lead-ссылка скопирована в буфер обмена', {
+            description: link.url,
+            duration: 6000,
+          });
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : 'Не удалось создать lead-ссылку';
+          toast.error(`Lead-ссылка не создана: ${msg}`);
+        }
+      }
+
+      navigate(`/tutor/mock-exams/${assignmentId}`, { replace: true });
+    } catch (err) {
+      const msg =
+        err instanceof MockExamApiError
+          ? err.message
+          : err instanceof Error
+          ? err.message
+          : 'Не удалось назначить пробник';
+      toast.error(msg);
+      setIsSubmitting(false);
+    }
+  }, [
+    isValidForSubmit,
+    deadlineInput,
+    variantId,
+    trimmedTitle,
+    mode,
+    studentIds,
+    createLeadLink,
+    navigate,
+  ]);
+
+  // ─── Render ───────────────────────────────────────────────────────────────
+
+  return (
+    <div className="max-w-4xl mx-auto space-y-4">
+      {/* Breadcrumb */}
+      <nav
+        className="flex items-center gap-2 text-sm text-muted-foreground"
+        aria-label="Хлебные крошки"
+      >
+        <Link
+          to="/tutor/mock-exams"
+          className="inline-flex items-center gap-1 hover:text-foreground transition-colors"
+        >
+          <ArrowLeft className="h-3.5 w-3.5" aria-hidden="true" />
+          Пробники
+        </Link>
+        <span aria-hidden="true">/</span>
+        <span className="text-foreground">Назначить пробник</span>
+      </nav>
+
+      <div>
+        <h1 className="text-2xl font-semibold tracking-tight">Назначить пробник</h1>
+        <p className="text-sm text-muted-foreground mt-1.5">
+          Готовый вариант от Егора · Часть 1 авто, Часть 2 AI-черновик с твоим подтверждением
+        </p>
+      </div>
+
+      {/* Шаг 1 — Вариант */}
+      <StepSection index={1} title="Вариант">
+        <div className="space-y-2">
+          {VARIANT_LIBRARY.map((variant) => (
+            <VariantCard
+              key={variant.id}
+              title={variant.title}
+              attribution={variant.attribution}
+              meta={variant.meta}
+              badge={variant.badge}
+              isAvailable={variant.isAvailable}
+              isSelected={variantId === variant.id}
+            />
+          ))}
+        </div>
+        <p className="text-xs text-muted-foreground/80 pt-1">
+          В Phase 2 здесь появится «Из моей базы знаний» и «Создать вручную»
+        </p>
+      </StepSection>
+
+      {/* Шаг 2 — Режим */}
+      <StepSection index={2} title="Режим прохождения">
+        <div className="space-y-2">
+          {MODE_OPTIONS.map((option) => (
+            <ModeRadio
+              key={option.value}
+              option={option}
+              isSelected={mode === option.value}
+              onSelect={setMode}
+            />
+          ))}
+        </div>
+      </StepSection>
+
+      {/* Шаг 3 — Кому назначить */}
+      <StepSection index={3} title="Кому назначить">
+        {studentsLoading || (miniGroupsEnabled && groupsLoading) ? (
+          <div className="space-y-2">
+            <Skeleton className="h-12 w-full" />
+            <Skeleton className="h-12 w-full" />
+            <Skeleton className="h-12 w-full" />
+          </div>
+        ) : (
+          <div className="space-y-3">
+            {miniGroupsEnabled && groups.length > 0 && (
+              <div className="space-y-1">
+                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                  Группы
+                </p>
+                {groups.map((group) => {
+                  const activeMembers = group.members.filter((m) => m.is_active);
+                  return (
+                    <RecipientRow
+                      key={group.id}
+                      id={group.id}
+                      primary={group.short_name?.trim() || group.name}
+                      secondary={`${activeMembers.length} ${pluralStudents(activeMembers.length)}`}
+                      isSelected={selectedGroupIds.has(group.id)}
+                      onToggle={handleGroupToggle}
+                    />
+                  );
+                })}
+              </div>
+            )}
+
+            <div className="space-y-1">
+              <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                Индивидуально
+              </p>
+              {activeStudents.length === 0 ? (
+                <p className="text-sm text-muted-foreground py-2">
+                  Нет активных учеников. Сначала добавь ученика на странице «Ученики».
+                </p>
+              ) : (
+                <div className="max-h-72 overflow-y-auto rounded-md border border-slate-100 dark:border-slate-800 p-1">
+                  {activeStudents.map((student) => (
+                    <RecipientRow
+                      key={student.student_id}
+                      id={student.student_id}
+                      primary={getStudentDisplayName(student)}
+                      secondary={getStudentSubline(student) || undefined}
+                      isSelected={selectedStudentIds.has(student.student_id)}
+                      onToggle={handleStudentToggle}
+                    />
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div className="pt-2 border-t border-slate-100 dark:border-slate-800 flex items-center gap-1.5 text-sm text-muted-foreground">
+              <Users className="h-3.5 w-3.5" aria-hidden="true" />
+              Выбрано:{' '}
+              <span className="font-semibold text-foreground tabular-nums">
+                {studentIds.length} {pluralStudents(studentIds.length)}
+              </span>
+            </div>
+          </div>
+        )}
+      </StepSection>
+
+      {/* Шаг 4 — Параметры (название + дедлайн) */}
+      <StepSection index={4} title="Название и дедлайн">
+        <div className="space-y-4">
+          <div className="space-y-1.5">
+            <Label htmlFor="mock-exam-title">Название</Label>
+            <Input
+              id="mock-exam-title"
+              type="text"
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              placeholder="Например: Пробник для группы пн/чт"
+              maxLength={200}
+              className="text-base"
+            />
+            <p className="text-xs text-muted-foreground">
+              Видят ученики и репетитор в списке пробников.
+            </p>
+          </div>
+
+          <div className="space-y-1.5">
+            <Label htmlFor="mock-exam-deadline">Дедлайн (опционально)</Label>
+            <Input
+              id="mock-exam-deadline"
+              type="datetime-local"
+              value={deadlineInput}
+              onChange={(e) => setDeadlineInput(e.target.value)}
+              className="text-base sm:max-w-xs"
+            />
+            <p className="text-xs text-muted-foreground">{DURATION_HINT}</p>
+          </div>
+        </div>
+      </StepSection>
+
+      {/* Опц. lead-link */}
+      <Card animate={false} className="border-2 border-dashed border-slate-300 dark:border-slate-700">
+        <CardContent className="p-5">
+          <label
+            htmlFor="mock-exam-lead-link"
+            className="flex items-start gap-3 cursor-pointer"
+          >
+            <Checkbox
+              id="mock-exam-lead-link"
+              checked={createLeadLink}
+              onCheckedChange={(checked) => setCreateLeadLink(checked === true)}
+              className="mt-1"
+            />
+            <div className="flex-1 min-w-0 space-y-1">
+              <div className="flex items-center gap-2 flex-wrap">
+                <Link2 className="h-4 w-4 text-accent" aria-hidden="true" />
+                <span className="font-medium text-sm text-slate-900 dark:text-slate-100">
+                  Опционально · Создать публичную ссылку для лидов
+                </span>
+              </div>
+              <p className="text-xs text-muted-foreground leading-relaxed">
+                Anonymous родители/ученики смогут пройти этот пробник без регистрации.
+                Часть 1 они увидят сразу, Часть 2 — после твоего подтверждения. Ты получишь их контакт.
+                Ссылка скопируется в буфер обмена после создания пробника.
+              </p>
+            </div>
+          </label>
+        </CardContent>
+      </Card>
+
+      {/* Action bar */}
+      <div className="flex flex-col-reverse sm:flex-row sm:items-center sm:justify-between gap-3 sticky bottom-0 -mx-4 sm:mx-0 px-4 sm:px-0 py-3 bg-background sm:bg-transparent border-t sm:border-0 z-10">
+        <Button variant="outline" asChild>
+          <Link to="/tutor/mock-exams">
+            <ArrowLeft className="h-4 w-4 mr-2" aria-hidden="true" />
+            Назад
+          </Link>
+        </Button>
+        <Button
+          onClick={handleSubmit}
+          disabled={!isValidForSubmit}
+          className="min-w-[200px]"
+        >
+          {isSubmitting ? (
+            <Loader2 className="h-4 w-4 mr-2 animate-spin" aria-hidden="true" />
+          ) : null}
+          {isSubmitting
+            ? 'Назначаем…'
+            : studentIds.length > 0
+            ? `Назначить пробник ${studentIds.length} ${pluralStudents(studentIds.length)}`
+            : 'Выбери учеников'}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+// ─── Export ──────────────────────────────────────────────────────────────────
+
+export default function TutorMockExamCreate() {
+  return (
+    <MockExamFeatureGate>
+      <TutorMockExamCreateContent />
+    </MockExamFeatureGate>
+  );
+}

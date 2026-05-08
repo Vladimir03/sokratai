@@ -723,7 +723,12 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
   }, [assignment.tasks, activeTaskOrder, taskStates]);
 
   const visibleMessages = useMemo(
-    () => messages.filter((message) => matchMessageToTask(message, currentTask)),
+    // Hide internal task-transition system messages ("Задача N выполнена! Переходим к задаче M.",
+    // "Все задачи выполнены! 🎉"). UI-only filter — DB rows kept for audit; AI conversation
+    // history already filters them server-side (guided_ai.ts) and pre-send (line ~812 streamChat).
+    () => messages
+      .filter((message) => message.role !== 'system')
+      .filter((message) => matchMessageToTask(message, currentTask)),
     [currentTask, matchMessageToTask, messages],
   );
 

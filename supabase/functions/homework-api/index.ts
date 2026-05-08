@@ -7025,6 +7025,11 @@ async function handleGetRecentDialogs(
   const latestByThread = new Map<string, MessageRow>();
   for (const m of messages) {
     if (m.visible_to_student === false) continue; // skip hidden tutor notes
+    // Skip internal task-transition system messages ("Задача N выполнена! Переходим...",
+    // "Все задачи выполнены! 🎉"). They are UI noise — would otherwise surface as the
+    // preview line on /tutor/home «Последние действия учеников» right after a student
+    // completes the last task. The actual conversation reply is what tutor needs to see.
+    if (m.role === "system") continue;
     if (!latestByThread.has(m.thread_id)) {
       latestByThread.set(m.thread_id, m);
     }

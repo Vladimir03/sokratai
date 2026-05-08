@@ -276,9 +276,14 @@ export function GuidedThreadViewer({
 
   const filteredMessages = useMemo(() => {
     const allMessages = threadQuery.data?.thread.homework_tutor_thread_messages ?? [];
-    if (taskFilter === 'all') return allMessages;
+    // Hide internal task-transition system messages ("Задача N выполнена! Переходим к задаче M.",
+    // "Все задачи выполнены! 🎉"). They were UI noise — task progress is already visible on the
+    // TaskStepper and heatmap. Bootstrap intros (role='assistant' + message_kind='system') keep
+    // their "Введение" badge — they have actual content. Audit trail stays in DB.
+    const visibleMessages = allMessages.filter((message) => message.role !== 'system');
+    if (taskFilter === 'all') return visibleMessages;
     const task = selectedTask ?? threadQuery.data?.tasks.find((item) => item.order_num === taskFilter) ?? null;
-    return allMessages.filter((message) => {
+    return visibleMessages.filter((message) => {
       if (!task) return false;
       // Prefer immutable task_id; fall back to task_order only for pre-migration messages
       if (message.task_id) return message.task_id === task.id;

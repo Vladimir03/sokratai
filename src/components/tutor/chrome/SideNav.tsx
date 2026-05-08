@@ -1,9 +1,10 @@
-import { memo, useCallback } from 'react';
+import { memo, useCallback, useMemo } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import {
   LayoutDashboard,
   CalendarDays,
   BookOpen,
+  ClipboardCheck,
   Users,
   Library,
   CreditCard,
@@ -19,6 +20,7 @@ import {
 } from '@/hooks/useTutorChromeCounters';
 import { UserAvatar } from '@/components/common/UserAvatar';
 import { useTutorProfile } from '@/hooks/useTutorProfile';
+import { useTutorMockExamsFeatureFlag } from '@/hooks/useTutorMockExamsFeatureFlag';
 
 type CounterKey = keyof TutorChromeCounters;
 
@@ -71,6 +73,12 @@ const NAV_GROUPS: readonly NavGroupDef[] = [
   },
 ];
 
+const MOCK_EXAMS_NAV_ITEM: NavItemDef = {
+  href: '/tutor/mock-exams',
+  icon: ClipboardCheck,
+  label: 'Пробники',
+};
+
 // Hover/focus prefetch map (TASK-4 §5). Replaces the old TutorLayout
 // setTimeout(300) warmup that fired for every tutor session on mount.
 // Now chunks are fetched lazily when a user intends to navigate (hover or
@@ -80,6 +88,7 @@ const PREFETCH_MAP: Record<string, () => Promise<unknown>> = {
   '/tutor/home': () => import('@/pages/tutor/TutorHome'),
   '/tutor/schedule': () => import('@/pages/tutor/TutorSchedule'),
   '/tutor/homework': () => import('@/pages/tutor/TutorHomework'),
+  '/tutor/mock-exams': () => import('@/pages/tutor/mock-exams/TutorMockExams'),
   '/tutor/students': () => import('@/pages/tutor/TutorStudents'),
   '/tutor/knowledge': () => import('@/pages/tutor/knowledge/KnowledgeBasePage'),
   '/tutor/payments': () => import('@/pages/tutor/TutorPayments'),
@@ -174,6 +183,23 @@ export function SideNav({ isMobile = false, onNavigate }: SideNavProps) {
   const location = useLocation();
   const navigate = useNavigate();
   const counters = useTutorChromeCounters();
+  const { data: mockExamsEnabled } = useTutorMockExamsFeatureFlag();
+  const navGroups = useMemo<readonly NavGroupDef[]>(() => {
+    if (mockExamsEnabled !== true) {
+      return NAV_GROUPS;
+    }
+
+    return NAV_GROUPS.map((group) => {
+      if (group.label !== 'Работа') {
+        return group;
+      }
+
+      return {
+        ...group,
+        items: [...group.items, MOCK_EXAMS_NAV_ITEM],
+      };
+    });
+  }, [mockExamsEnabled]);
 
   const handleLogout = useCallback(async () => {
     await supabase.auth.signOut();
@@ -191,7 +217,7 @@ export function SideNav({ isMobile = false, onNavigate }: SideNavProps) {
         <span className="t-nav__brand-name">Сократ AI</span>
       </div>
 
-      {NAV_GROUPS.map((group) => (
+      {navGroups.map((group) => (
         <div key={group.label}>
           <div
             className="t-nav__group-label"

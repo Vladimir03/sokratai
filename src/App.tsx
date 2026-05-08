@@ -26,7 +26,11 @@ const ResetPassword = lazy(() => import("./pages/ResetPassword"));
 const Chat = lazy(() => import("./pages/Chat"));
 const StudentHomework = lazy(() => import("./pages/StudentHomework"));
 const StudentHomeworkDetail = lazy(() => import("./pages/StudentHomeworkDetail"));
+const StudentMockExam = lazy(() => import("./pages/student/StudentMockExam"));
+const StudentMockExamResult = lazy(() => import("./pages/student/StudentMockExamResult"));
 const PublicHomeworkShare = lazy(() => import("./pages/PublicHomeworkShare"));
+const PublicMockInvite = lazy(() => import("./pages/PublicMockInvite"));
+const PublicMockResult = lazy(() => import("./pages/PublicMockResult"));
 const Progress = lazy(() => import("./pages/Progress"));
 const Profile = lazy(() => import("./pages/Profile"));
 const MiniApp = lazy(() => import("./pages/MiniApp"));
@@ -51,6 +55,10 @@ const TutorHomeworkCreate = lazy(() => import("./pages/tutor/TutorHomeworkCreate
 const TutorHomeworkDetail = lazy(() => import("./pages/tutor/TutorHomeworkDetail"));
 const TutorHomeworkPreview = lazy(() => import("./pages/tutor/TutorHomeworkPreview"));
 const TutorHomeworkTemplates = lazy(() => import("./pages/tutor/TutorHomeworkTemplates"));
+const TutorMockExams = lazy(() => import("./pages/tutor/mock-exams/TutorMockExams"));
+const TutorMockExamCreate = lazy(() => import("./pages/tutor/mock-exams/TutorMockExamCreate"));
+const TutorMockExamDetail = lazy(() => import("./pages/tutor/mock-exams/TutorMockExamDetail"));
+const TutorMockExamReview = lazy(() => import("./pages/tutor/mock-exams/TutorMockExamReview"));
 const TutorProfile = lazy(() => import("./pages/tutor/TutorProfile"));
 const AppFrame = lazy(() =>
   import("./components/tutor/chrome/AppFrame").then((m) => ({ default: m.AppFrame })),
@@ -176,6 +184,38 @@ const App = () => (
                   <StudentHomeworkDetail />
                 </Suspense>
               } 
+            />
+            <Route
+              path="/student/mock-exams/:id/result"
+              element={
+                <Suspense fallback={<PageLoader />}>
+                  <StudentMockExamResult />
+                </Suspense>
+              }
+            />
+            <Route
+              path="/student/mock-exams/:id"
+              element={
+                <Suspense fallback={<PageLoader />}>
+                  <StudentMockExam />
+                </Suspense>
+              }
+            />
+            <Route
+              path="/p/mock-invite/:slug"
+              element={
+                <Suspense fallback={<PageLoader />}>
+                  <PublicMockInvite />
+                </Suspense>
+              }
+            />
+            <Route
+              path="/p/mock-result/:slug"
+              element={
+                <Suspense fallback={<PageLoader />}>
+                  <PublicMockResult />
+                </Suspense>
+              }
             />
             <Route
               path="/p/:slug"
@@ -312,6 +352,10 @@ const App = () => (
               <Route path="homework/:id/results" element={<RedirectHomeworkResultsToDetail />} />
               <Route path="homework/:id" element={<TutorHomeworkDetail />} />
               <Route path="homework" element={<TutorHomework />} />
+              <Route path="mock-exams/new" element={<TutorMockExamCreate />} />
+              <Route path="mock-exams/:id/review/:studentId" element={<TutorMockExamReview />} />
+              <Route path="mock-exams/:id" element={<TutorMockExamDetail />} />
+              <Route path="mock-exams" element={<TutorMockExams />} />
               <Route path="assistant" element={<RedirectTutorAssistant />} />
               <Route path="knowledge/topic/:topicId" element={<CatalogTopicPage />} />
               <Route path="knowledge/folder/:folderId" element={<FolderPage />} />
