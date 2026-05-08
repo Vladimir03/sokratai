@@ -19,6 +19,30 @@ export interface TaskStepItem {
   status: TaskStateStatus;
   earned_score?: number | null;
   max_score?: number;
+  /**
+   * AI's raw evaluated score before any degradation. Shown in the tooltip
+   * alongside `tutor_score_override` so the student sees both values when
+   * the tutor has manually overridden the score (per UX answer C — full
+   * grading transparency on the student side).
+   */
+  ai_score?: number | null;
+  /**
+   * Tutor's manual override (final score visible to the student). When
+   * present, displayed as the primary "Балл репетитора" line in the tooltip.
+   */
+  tutor_score_override?: number | null;
+  /** Public comment from the tutor to the student. Visible to student. */
+  tutor_score_override_comment?: string | null;
+  /**
+   * Resolved final score = override → earned_score → ai_score → status fallback.
+   * Mirrors `computeFinalScore` on the backend. Built by the parent so the
+   * stepper doesn't need to duplicate the priority chain.
+   */
+  final_score?: number | null;
+}
+
+function formatScore(value: number): string {
+  return value.toFixed(1).replace(/\.0$/, '');
 }
 
 interface TaskStepperProps {
@@ -127,9 +151,33 @@ const TaskStepper = memo(({ tasks, currentTaskOrder, onTaskClick, celebratingTas
                 <TooltipContent side="bottom" className="max-w-[260px] text-xs">
                   <div className="font-medium">Задача {task.order_num}</div>
                   <div className="text-muted-foreground mb-1">{STATUS_LABELS[task.status]}</div>
-                  {task.status === 'completed' && task.earned_score != null && task.max_score != null && (
-                    <div className="text-muted-foreground mb-1">
-                      Баллы: {task.earned_score} / {task.max_score}
+                  {task.status === 'completed' && task.max_score != null && (
+                    <div className="mb-1 space-y-0.5">
+                      {task.tutor_score_override != null ? (
+                        <>
+                          <div className="text-foreground font-medium">
+                            Балл репетитора: {formatScore(task.tutor_score_override)} / {task.max_score}
+                          </div>
+                          {task.ai_score != null && Number(task.ai_score) !== Number(task.tutor_score_override) ? (
+                            <div className="text-muted-foreground">
+                              AI: {formatScore(Number(task.ai_score))} / {task.max_score}
+                            </div>
+                          ) : null}
+                          {task.tutor_score_override_comment ? (
+                            <div className="mt-1 rounded-sm bg-muted/40 px-2 py-1 text-foreground">
+                              {task.tutor_score_override_comment}
+                            </div>
+                          ) : null}
+                        </>
+                      ) : task.final_score != null ? (
+                        <div className="text-muted-foreground">
+                          Балл: {formatScore(task.final_score)} / {task.max_score}
+                        </div>
+                      ) : task.earned_score != null ? (
+                        <div className="text-muted-foreground">
+                          Балл: {formatScore(Number(task.earned_score))} / {task.max_score}
+                        </div>
+                      ) : null}
                     </div>
                   )}
                   <div className="max-w-[220px] break-words">{task.task_text}</div>

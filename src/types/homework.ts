@@ -170,6 +170,33 @@ export interface HomeworkTaskState {
   earned_score?: number | null;
   wrong_answer_count?: number;
   hint_count?: number;
+  /**
+   * AI's raw evaluated score (NOT degraded by hints/wrong attempts).
+   * `final_score = COALESCE(tutor_score_override, earned_score, ai_score)`.
+   * Surfaced to both tutor (EditScoreDialog) and student (dual-score block
+   * in completed view) — student sees both AI and tutor values when override
+   * is set so trust in grading remains transparent.
+   */
+  ai_score?: number | null;
+  /**
+   * AI's commentary about its own score. **Tutor-only** — server strips this
+   * field from student responses via `stripStudentSensitiveTaskStateFields`.
+   * Used by `EditScoreDialog` to show AI's reasoning when the tutor decides
+   * whether to override. Never render this on student-facing surfaces.
+   */
+  ai_score_comment?: string | null;
+  /**
+   * Tutor's manual override (single source of truth for the displayed final
+   * score when present). null = no override. Visible to student.
+   */
+  tutor_score_override?: number | null;
+  /**
+   * Public comment from the tutor explaining the override. Visible to student
+   * — never put internal tutor notes here, they belong in `tutor_note` messages.
+   */
+  tutor_score_override_comment?: string | null;
+  /** ISO timestamp when the override was last written. Visible to student. */
+  tutor_score_override_at?: string | null;
 }
 
 // Phase 3: API response types

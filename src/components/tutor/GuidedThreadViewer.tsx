@@ -6,7 +6,7 @@ import { Badge } from '@/components/ui/badge';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
 import { Skeleton } from '@/components/ui/skeleton';
-import { ChevronDown, ChevronUp, Loader2, Paperclip, Send, X } from 'lucide-react';
+import { ChevronDown, ChevronUp, Loader2, Paperclip, Pencil, Send, X } from 'lucide-react';
 import { MathText } from '@/components/kb/ui/MathText';
 import { parseISO } from 'date-fns';
 import { toast } from 'sonner';
@@ -28,6 +28,7 @@ import {
 } from '@/hooks/tutorQueryOptions';
 import { ThreadAttachments } from '@/components/homework/ThreadAttachments';
 import { PhotoGallery } from '@/components/homework/shared/PhotoGallery';
+import { EditScoreDialog } from '@/components/tutor/results/EditScoreDialog';
 import { supabase } from '@/lib/supabaseClient';
 import type { Database } from '@/integrations/supabase/types';
 import { parseAttachmentUrls } from '@/lib/attachmentRefs';
@@ -136,6 +137,7 @@ export function GuidedThreadViewer({
   // Job: Видеть прогресс ученика по ДЗ без дёрганий во время занятия.
   const [taskFilter, setTaskFilter] = useState<number | 'all'>(initialTaskFilter);
   const [isTaskContextExpanded, setIsTaskContextExpanded] = useState(true);
+  const [isEditScoreOpen, setIsEditScoreOpen] = useState(false);
   const [messageText, setMessageText] = useState('');
   const [hiddenNote, setHiddenNote] = useState(false);
   const [isSending, setIsSending] = useState(false);
@@ -269,9 +271,34 @@ export function GuidedThreadViewer({
     return threadQuery.data?.tasks.find((task) => task.order_num === taskFilter) ?? null;
   }, [taskFilter, threadQuery.data?.tasks]);
 
+  // task_state for the currently selected task. Used to compute the score
+  // badge + drive the "Изменить балл" button. Mirrors `computeFinalScore` on
+  // the backend — keep the priority chain in sync.
+  const selectedTaskState = useMemo(() => {
+    if (!selectedTask) return null;
+    return taskStatusById.get(selectedTask.id) ?? null;
+  }, [selectedTask, taskStatusById]);
+
+  const selectedTaskFinalScore = useMemo<number | null>(() => {
+    if (!selectedTask || !selectedTaskState) return null;
+    if (selectedTaskState.tutor_score_override != null) return Number(selectedTaskState.tutor_score_override);
+    if (selectedTaskState.earned_score != null) return Number(selectedTaskState.earned_score);
+    if (selectedTaskState.ai_score != null) return Number(selectedTaskState.ai_score);
+    if (selectedTaskState.status === 'completed') return selectedTask.max_score;
+    return null;
+  }, [selectedTask, selectedTaskState]);
+
+  const canEditScore = selectedTask !== null && selectedTaskState !== null;
+
   // Раскрываем блок при каждой смене задачи — иначе репетитор «теряет» условие.
   useEffect(() => {
     setIsTaskContextExpanded(true);
+  }, [taskFilter]);
+
+  // Close the score dialog when the user switches the active task — avoids
+  // a dialog that references a stale task surviving filter changes.
+  useEffect(() => {
+    setIsEditScoreOpen(false);
   }, [taskFilter]);
 
   const filteredMessages = useMemo(() => {
@@ -422,6 +449,47 @@ export function GuidedThreadViewer({
                       )}
                     </Button>
                   </div>
+
+                  {/* Score row + edit-score entry point. Visible regardless of
+                      condition-collapse state so tutor can change the score
+                      without expanding the task body. Shows AI raw score
+                      separately when it differs from final (degradation /
+                      override) so the spread is explicit. */}
+                  {canEditScore && (
+                    <div className="flex flex-wrap items-center gap-2 border-t border-slate-100 pt-2">
+                      <span className="text-slate-700">
+                        Балл:{' '}
+                        <span className="font-semibold">
+                          {selectedTaskFinalScore != null
+                            ? `${selectedTaskFinalScore}/${selectedTask.max_score}`
+                            : '—'}
+                        </span>
+                      </span>
+                      {selectedTaskState?.ai_score != null
+                        && selectedTaskFinalScore !== Number(selectedTaskState.ai_score) ? (
+                        <span className="text-slate-500">
+                          AI: {Number(selectedTaskState.ai_score)}/{selectedTask.max_score}
+                        </span>
+                      ) : null}
+                      {selectedTaskState?.tutor_score_override != null ? (
+                        <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-medium text-slate-700">
+                          <Pencil className="h-3 w-3" />
+                          ручная правка
+                        </span>
+                      ) : null}
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="ml-auto h-7 px-2 text-xs touch-manipulation"
+                        onClick={() => setIsEditScoreOpen(true)}
+                        aria-label={`Изменить балл задачи №${selectedTask.order_num}`}
+                      >
+                        <Pencil className="h-3 w-3 md:mr-1" />
+                        <span className="hidden md:inline">Изменить балл</span>
+                      </Button>
+                    </div>
+                  )}
+
                   {isTaskContextExpanded && (
                     <div className="max-h-[200px] overflow-y-auto space-y-2">
                       <MathText
@@ -560,6 +628,29 @@ export function GuidedThreadViewer({
               </div>
             </>
           )}
+
+      {/* Edit-score dialog mounted at the viewer level so it works for both
+          the standalone <Card> wrapper (Detail page direct viewer) and the
+          hideOuterCard mode (StudentDrillDown). Closes on task switch and
+          on save success — see the cleanup useEffect above. */}
+      {selectedTask && canEditScore ? (
+        <EditScoreDialog
+          open={isEditScoreOpen}
+          onOpenChange={setIsEditScoreOpen}
+          assignmentId={assignmentId}
+          studentId={studentId}
+          task={{
+            id: selectedTask.id,
+            order_num: selectedTask.order_num,
+            max_score: selectedTask.max_score,
+          }}
+          aiScore={selectedTaskState?.ai_score ?? null}
+          aiScoreComment={selectedTaskState?.ai_score_comment ?? null}
+          finalScore={selectedTaskFinalScore}
+          currentOverride={selectedTaskState?.tutor_score_override ?? null}
+          currentComment={selectedTaskState?.tutor_score_override_comment ?? null}
+        />
+      ) : null}
     </div>
   );
 

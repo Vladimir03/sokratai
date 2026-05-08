@@ -378,6 +378,50 @@ Audit/normalize/optimize/harden pass на `/tutor/homework` и `/tutor/homework/
 - Lightbulb-иконка на клетке при `hint_count >= 1`, title tooltip `Балл: X/Y · подсказок: Z`, footer row с avg per task, правая колонка row с total — P0-3 full, не AC-2 minimum
 - KIM number в заголовке колонки — нет `kim_number` в `homework_tutor_tasks`, требует расширения схемы
 
+### Manual score override — post-pilot fix + entry points (2026-05-08)
+
+После пилота вылез баг: репетитор не мог поставить балл, равный AI-оценке, при наличии earned_score-деградации (см. AC-5a в `docs/delivery/features/homework-results-v2/spec.md`). Параллельно добавлены primary entry point в GuidedThreadViewer и dual-score visibility для ученика.
+
+**EditScoreDialog инварианты (`src/components/tutor/results/EditScoreDialog.tsx`):**
+- Префилл `valueText = currentOverride ?? finalScore ?? aiScore ?? 0`. **НЕ** `aiScore` first — иначе при `currentOverride=null && aiScore=1 && earned_score=0.8` диалог префилит `1`, и попытка сохранить `1` блокируется, хотя это создаёт реальный override.
+- `isUnchanged` сравнивает только с **`currentOverride`** (когда override-а нет, любое сохранение — создание новой строки, не no-op).
+- Заголовок-блок: `Текущий балл: X/Y (AI: Z/Y, снижено на Δ за подсказки/неверные попытки)` — explicit спред между AI raw и displayed final. AI-комментарий (`ai_score_comment`) рендерится отдельной строкой когда есть.
+- Props (additive): `finalScore: number | null`, `aiScoreComment: string | null` (tutor-only).
+
+**`THREAD_SELECT` invariant (`supabase/functions/homework-api/index.ts`):**
+- Включает `tutor_score_override, tutor_score_override_comment, tutor_score_override_at` (для override visibility ученику и туторy).
+- Включает `ai_score, ai_score_comment` (для tutor edit dialog).
+- `stripStudentSensitiveTaskStateFields` удаляет **только** `ai_score_comment` (tutor-only). Все три override-поля идут к ученику намеренно (UX: ученик видит обе оценки при правке).
+
+**`handleGetResults.task_scores[*]` shape (extended 2026-05-08):**
+```ts
+{
+  task_id: string; final_score: number; hint_count: number; has_override: boolean;
+  ai_score: number | null;             // raw AI (NOT degraded earned_score)
+  ai_score_comment: string | null;     // tutor-only — exposed via results endpoint
+  tutor_score_override: number | null;
+  tutor_score_override_comment: string | null;
+}
+```
+Не сужать `ai_score` через `?? earned_score` — нужен raw AI score для дисплея «AI: Z/Y» в диалоге.
+
+**Entry points для EditScoreDialog (два, оба обязательны):**
+1. **Primary — `GuidedThreadViewer`**: под header'ом «Условие задачи #N» строка `Балл: X/Y · AI: Z/Y · [chip ручная правка] · [Pencil] Изменить балл`. Естественный workflow: тутор читает переписку → не согласен с AI → жмёт «Изменить балл». Рендерится только когда `selectedTask !== null` и task_state существует. На мобиле кнопка icon-only (`md:inline` для текста).
+2. **Secondary — `TaskMiniCard` Pencil**: 12px иконка в правом-нижнем углу мини-карточки в drill-down (как было).
+
+Оба mount'ят один `EditScoreDialog`, передают тот же набор props.
+
+**Student dual-score visibility (UX answer C, 2026-05-08):**
+- `HomeworkTaskState` тип расширен `ai_score`, `ai_score_comment` (tutor-only — strip helper удаляет), `tutor_score_override`, `tutor_score_override_comment`, `tutor_score_override_at`.
+- `TaskStepper` tooltip: при override → `Балл репетитора: X/Y` (главное) + `AI: Z/Y` + публичный комментарий в плашке. Без override → `Балл: X/Y` (resolved final_score, не raw earned_score).
+- `GuidedHomeworkWorkspace` completed view:
+  - Итог считается через **`final_score` sum** (через mirror `computeFinalScore`), не `earned_score`. Иначе после override итоги ученика и тутора расходятся.
+  - Секция «Правки репетитора» рендерится при `tasksWithOverride.length > 0` — per-task разбор для мобильных пользователей (tooltip недоступен).
+
+**При расширении в будущем:**
+- Если добавляешь новый source балла (e.g. `peer_score` в групповом ДЗ) — расширяй `computeFinalScore` priority chain в backend, и синхронно mirror'ь в client-side helpers (`taskStepItems` builder в `GuidedHomeworkWorkspace`, `selectedTaskFinalScore` в `GuidedThreadViewer`). НЕ дублируй формулу больше чем нужно — три mirror'а уже на грани.
+- Если добавляешь новое tutor-only поле в task_state — добавляй в `stripStudentSensitiveTaskStateFields`, иначе утечёт ученику через guided thread endpoints.
+
 ### Drill-down (Results v2 TASK-6, 2026-04-07)
 
 - `src/components/tutor/results/heatmapStyles.ts` — single source of truth для `getCellStyle` + `formatScore`. Вынесено из `HeatmapGrid.tsx` — react-refresh/only-export-components предупреждение при экспорте non-component из component file. **НЕ дублировать** color/format helpers — импортировать отсюда.

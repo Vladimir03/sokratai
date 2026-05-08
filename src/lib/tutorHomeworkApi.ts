@@ -611,8 +611,19 @@ export interface TutorHomeworkResultsPerStudent {
      * (Homework Results v2 P0-5). `final_score` already reflects the override.
      */
     has_override?: boolean;
-    /** Original AI-evaluated score, independent of tutor override. */
+    /**
+     * AI's raw evaluated score (NOT degraded by hints / wrong attempts).
+     * Used by `EditScoreDialog` to render "AI: X/Y" alongside the current
+     * `final_score` so the tutor sees the spread (hint/error degradation
+     * or tutor override). `null` means AI hasn't evaluated this task yet.
+     */
     ai_score?: number | null;
+    /** AI's commentary about the score (when present). Tutor-facing only. */
+    ai_score_comment?: string | null;
+    /** Tutor's manual override value, separate from final_score. */
+    tutor_score_override?: number | null;
+    /** Tutor's comment attached to the override (visible to student). */
+    tutor_score_override_comment?: string | null;
   }[];
 
   /**

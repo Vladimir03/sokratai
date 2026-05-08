@@ -423,6 +423,7 @@ For architecture overview see: docs/delivery/engineering/architecture/README.md
 - `getCellStyle` + `formatScore` — вынесены в `src/components/tutor/results/heatmapStyles.ts` (избегает react-refresh warning). **НЕ дублировать** эти helpers — импортировать из heatmapStyles.ts
 - `GuidedThreadViewer` props (additive): `initialTaskFilter?: number | 'all'`, `hideTaskFilter?: boolean`. `hideTaskFilter=true` в `StudentDrillDown` скрывает дублирующий pill-ряд
 - TASK-3 (header), TASK-4 (action block), TASK-5 (heatmap), TASK-6 (drill-down), TASK-7 (edit-score modal) ✅ done. TASK-8..9 (telemetry audit + QA) — отдельные итерации
+- **TASK-7 post-pilot fix (2026-05-08):** «Сохранить» больше не залипает когда тутор вводит балл, равный AI (`isUnchanged` сравнивает только с `currentOverride`, префилл идёт от `finalScore`, не от `aiScore`). Primary entry point — кнопка `[Pencil] Изменить балл` в `GuidedThreadViewer` под условием задачи. Ученик видит обе оценки (`Балл репетитора` + `AI`) + публичный комментарий тутора при override. Спека: `docs/delivery/features/homework-results-v2/spec.md` AC-5a/b/c. Контракты: `.claude/rules/40-homework-system.md` → секция «Manual score override — post-pilot fix + entry points»
 
 ### 7. Subject CHECK constraint — синхронизация с SUBJECTS (2026-04-14)
 - При добавлении нового предмета в `SUBJECTS` (`src/types/homework.ts`) или `VALID_SUBJECTS_CREATE` (`supabase/functions/homework-api/index.ts`) **ОБЯЗАТЕЛЬНО** добавить миграцию, обновляющую constraint `homework_tutor_assignments_subject_check`

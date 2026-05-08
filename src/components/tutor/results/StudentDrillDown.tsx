@@ -40,12 +40,21 @@ export function StudentDrillDown({
     setSelectedTaskId(initialTaskId);
   }, [initialTaskId]);
 
-  // taskId → { order_num, score, hint_count, max_score } lookup so mini-cards
-  // can show the right colors without passing props dozens of levels deep.
+  // taskId → { order_num, score, hint_count, max_score, ai_*, override_* }
+  // lookup so mini-cards (and EditScoreDialog when opened) get all the data
+  // without an extra round-trip. perStudent.task_scores is the single source.
   const taskMeta = useMemo(() => {
     const scoresById = new Map<
       string,
-      { final_score: number; hint_count: number; has_override: boolean; ai_score: number | null }
+      {
+        final_score: number;
+        hint_count: number;
+        has_override: boolean;
+        ai_score: number | null;
+        ai_score_comment: string | null;
+        tutor_score_override: number | null;
+        tutor_score_override_comment: string | null;
+      }
     >();
     for (const ts of perStudent?.task_scores ?? []) {
       scoresById.set(ts.task_id, {
@@ -53,6 +62,9 @@ export function StudentDrillDown({
         hint_count: ts.hint_count,
         has_override: ts.has_override ?? false,
         ai_score: ts.ai_score ?? null,
+        ai_score_comment: ts.ai_score_comment ?? null,
+        tutor_score_override: ts.tutor_score_override ?? null,
+        tutor_score_override_comment: ts.tutor_score_override_comment ?? null,
       });
     }
     return tasks.map((task) => {
@@ -65,6 +77,9 @@ export function StudentDrillDown({
         hint_count: cell ? cell.hint_count : 0,
         has_override: cell?.has_override ?? false,
         ai_score: cell?.ai_score ?? null,
+        ai_score_comment: cell?.ai_score_comment ?? null,
+        tutor_score_override: cell?.tutor_score_override ?? null,
+        tutor_score_override_comment: cell?.tutor_score_override_comment ?? null,
       };
     });
   }, [tasks, perStudent]);
@@ -133,11 +148,11 @@ export function StudentDrillDown({
             order_num: editingTask.order_num,
             max_score: editingTask.max_score,
           }}
-          // When override is set, results endpoint returns final_score but
-          // not ai_score separately — show "—" rather than misleading value.
           aiScore={editingTask.ai_score}
-          currentOverride={editingTask.has_override ? editingTask.score : null}
-          currentComment={null}
+          aiScoreComment={editingTask.ai_score_comment}
+          finalScore={editingTask.score}
+          currentOverride={editingTask.tutor_score_override}
+          currentComment={editingTask.tutor_score_override_comment}
         />
       ) : null}
 

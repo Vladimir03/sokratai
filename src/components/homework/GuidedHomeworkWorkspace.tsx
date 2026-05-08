@@ -677,17 +677,34 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
     };
   }, []);
 
-  // Build task stepper items
+  // Build task stepper items. We resolve `final_score` here (mirrors backend
+  // `computeFinalScore` priority chain) so the stepper / tooltip and the
+  // completed-view total agree on the same number when the tutor has
+  // overridden the score.
   const taskStepItems: TaskStepItem[] = useMemo(() => {
     const stateByTaskId = new Map(taskStates.map((ts) => [ts.task_id, ts]));
     return assignment.tasks.map((task) => {
       const state = stateByTaskId.get(task.id);
+      let finalScore: number | null = null;
+      if (state?.tutor_score_override != null) {
+        finalScore = Number(state.tutor_score_override);
+      } else if (state?.earned_score != null) {
+        finalScore = Number(state.earned_score);
+      } else if (state?.ai_score != null) {
+        finalScore = Number(state.ai_score);
+      } else if (state?.status === 'completed') {
+        finalScore = task.max_score;
+      }
       return {
         order_num: task.order_num,
         task_text: task.task_text,
         status: (state?.status ?? 'locked') as TaskStateStatus,
         earned_score: state?.earned_score,
         max_score: task.max_score,
+        ai_score: state?.ai_score ?? null,
+        tutor_score_override: state?.tutor_score_override ?? null,
+        tutor_score_override_comment: state?.tutor_score_override_comment ?? null,
+        final_score: finalScore,
       };
     });
   }, [assignment.tasks, taskStates]);
@@ -1592,8 +1609,13 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
   // Completed state
   if (threadStatus === 'completed' && showCompletedView) {
     const completedCount = taskStates.filter((s) => s.status === 'completed').length;
-    const totalEarned = taskStates.reduce((sum, s) => sum + (s.earned_score ?? 0), 0);
+    // Use final_score (override → earned_score → ai_score) so the displayed
+    // total matches what the tutor sees on Results v2 and what the override
+    // value actually is. taskStepItems already resolved this priority chain.
+    const totalFinal = taskStepItems.reduce((sum, t) => sum + (t.final_score ?? 0), 0);
     const totalMax = assignment.tasks.reduce((sum, t) => sum + t.max_score, 0);
+    const formatScoreValue = (v: number) => v.toFixed(1).replace(/\.0$/, '');
+    const tasksWithOverride = taskStepItems.filter((t) => t.tutor_score_override != null);
     return (
       <div className="flex-1 flex flex-col">
         {/* Header */}
@@ -1609,8 +1631,8 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
           </div>
         </div>
 
-        <div className="flex-1 flex items-center justify-center p-4">
-          <Card className="max-w-md w-full">
+        <div className="flex-1 overflow-y-auto p-4">
+          <Card className="mx-auto max-w-md w-full">
             <CardHeader className="text-center">
               <CheckCircle2 className="w-12 h-12 text-green-500 mx-auto mb-2" />
               <CardTitle>Все задачи домашки сданы</CardTitle>
@@ -1621,13 +1643,48 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
               </p>
               {totalMax > 0 && (
                 <p className="text-sm font-medium">
-                  Итого: {totalEarned} / {totalMax} баллов
+                  Итого: {formatScoreValue(totalFinal)} / {totalMax} баллов
                 </p>
               )}
               <TaskStepper
                 tasks={taskStepItems}
                 currentTaskOrder={currentTaskOrder}
               />
+
+              {/* Per-task transparency: when the tutor manually adjusted the
+                  score for any task, surface the AI vs tutor values + comment
+                  inline so the student isn't dependent on a hover tooltip. */}
+              {tasksWithOverride.length > 0 && (
+                <div className="text-left space-y-2 rounded-md border border-slate-200 bg-slate-50 p-3">
+                  <p className="text-xs font-medium text-slate-700">Правки репетитора</p>
+                  <ul className="space-y-2 text-xs">
+                    {tasksWithOverride.map((t) => (
+                      <li key={t.order_num} className="space-y-0.5">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="font-medium text-slate-900">Задача №{t.order_num}</span>
+                          <span className="text-slate-700">
+                            <span className="font-semibold">
+                              {formatScoreValue(Number(t.tutor_score_override))}
+                            </span>
+                            {' / '}{t.max_score}
+                          </span>
+                        </div>
+                        {t.ai_score != null && Number(t.ai_score) !== Number(t.tutor_score_override) ? (
+                          <div className="text-slate-500">
+                            AI оценил: {formatScoreValue(Number(t.ai_score))} / {t.max_score}
+                          </div>
+                        ) : null}
+                        {t.tutor_score_override_comment ? (
+                          <div className="rounded-sm bg-white px-2 py-1 text-slate-700 border border-slate-200">
+                            {t.tutor_score_override_comment}
+                          </div>
+                        ) : null}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
               <Button onClick={() => navigate('/homework')} className="w-full">
                 Назад к заданиям
               </Button>

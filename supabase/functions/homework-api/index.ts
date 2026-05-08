@@ -2535,17 +2535,37 @@ async function handleGetResults(
     max_score_total: number;
     hint_total: number;
     needs_attention: boolean;
-    task_scores: { task_id: string; final_score: number; hint_count: number; has_override: boolean }[];
+    task_scores: {
+      task_id: string;
+      final_score: number;
+      hint_count: number;
+      has_override: boolean;
+      ai_score: number | null;
+      ai_score_comment: string | null;
+      tutor_score_override: number | null;
+      tutor_score_override_comment: string | null;
+    }[];
     total_score: number;
     total_max: number;
     total_time_minutes: number | null;
   }[] = [];
 
-  // student_id → task_id → { final_score, hint_count, has_override }. Built
-  // alongside the aggregate accumulator so the per_student heatmap cells and
-  // the totals use the same computeFinalScore priority chain. Only submitted
-  // students get an entry — not-submitted students receive `task_scores: []`.
-  const taskScoresByStudent: Record<string, Record<string, { final_score: number; hint_count: number; has_override: boolean; ai_score: number | null }>> = {};
+  // student_id → task_id → { final_score, hint_count, has_override, ... }.
+  // Built alongside the aggregate accumulator so the per_student heatmap cells
+  // and the totals use the same computeFinalScore priority chain. Only
+  // submitted students get an entry — not-submitted students receive
+  // `task_scores: []`. ai_score / ai_score_comment / tutor_score_override*
+  // are surfaced to the EditScoreDialog so the tutor sees AI's raw view +
+  // current override + previous comment without an extra round-trip.
+  const taskScoresByStudent: Record<string, Record<string, {
+    final_score: number;
+    hint_count: number;
+    has_override: boolean;
+    ai_score: number | null;
+    ai_score_comment: string | null;
+    tutor_score_override: number | null;
+    tutor_score_override_comment: string | null;
+  }>> = {};
 
   const { data: studentAssignments } = await db
     .from("homework_tutor_student_assignments")
@@ -2594,7 +2614,7 @@ async function handleGetResults(
       const { data: allTaskStates } = await db
         .from("homework_tutor_task_states")
         .select(
-          "thread_id, task_id, earned_score, status, ai_score, tutor_score_override, hint_count, attempts",
+          "thread_id, task_id, earned_score, status, ai_score, ai_score_comment, tutor_score_override, tutor_score_override_comment, hint_count, attempts",
         )
         .in("thread_id", allThreadIdsForStates);
 
@@ -2652,19 +2672,32 @@ async function handleGetResults(
             if (!taskScoresByStudent[studentId]) {
               taskScoresByStudent[studentId] = {};
             }
-            // Compute the score that would apply WITHOUT the tutor override,
-            // so the edit dialog can show "AI: X/Y" even when an override exists.
-            const scoreWithoutOverride =
-              ts.ai_score != null ? Math.round(Number(ts.ai_score) * 100) / 100
-              : ts.earned_score != null ? Math.round(Number(ts.earned_score) * 100) / 100
-              : ts.status === "completed" ? maxScore
-              : 0;
+            // Expose AI's raw score (NOT degraded earned_score). The edit
+            // dialog header shows "Текущий балл: X/Y (AI: Z/Y, снижено …)"
+            // — the spread between final_score (= max(override, earned, ai))
+            // and ai_score reveals hint/wrong-answer degradation. ai_score
+            // null = AI hasn't evaluated yet.
+            const aiScoreRounded = ts.ai_score != null
+              ? Math.round(Number(ts.ai_score) * 100) / 100
+              : null;
+            const overrideRounded = ts.tutor_score_override != null
+              ? Math.round(Number(ts.tutor_score_override) * 100) / 100
+              : null;
+            const aiCommentRaw = (ts as { ai_score_comment?: string | null }).ai_score_comment;
+            const overrideCommentRaw = (ts as { tutor_score_override_comment?: string | null }).tutor_score_override_comment;
 
             taskScoresByStudent[studentId][ts.task_id] = {
               final_score: Math.round(finalScore * 100) / 100,
               hint_count: hintCount,
               has_override: ts.tutor_score_override != null,
-              ai_score: scoreWithoutOverride,
+              ai_score: aiScoreRounded,
+              ai_score_comment: typeof aiCommentRaw === "string" && aiCommentRaw.trim().length > 0
+                ? aiCommentRaw
+                : null,
+              tutor_score_override: overrideRounded,
+              tutor_score_override_comment: typeof overrideCommentRaw === "string" && overrideCommentRaw.trim().length > 0
+                ? overrideCommentRaw
+                : null,
             };
           }
 
@@ -2783,6 +2816,9 @@ async function handleGetResults(
         hint_count: cell.hint_count,
         has_override: cell.has_override,
         ai_score: cell.ai_score,
+        ai_score_comment: cell.ai_score_comment,
+        tutor_score_override: cell.tutor_score_override,
+        tutor_score_override_comment: cell.tutor_score_override_comment,
       }));
 
       if (acc) {
@@ -5714,7 +5750,7 @@ const THREAD_SELECT = `
   id, status, current_task_order, current_task_id, created_at, updated_at,
   student_assignment_id, last_student_message_at, last_tutor_message_at,
   homework_tutor_thread_messages(id, role, content, image_url, task_id, task_order, message_kind, created_at, author_user_id, visible_to_student),
-  homework_tutor_task_states(id, task_id, status, attempts, best_score, available_score, earned_score, wrong_answer_count, hint_count, ai_score, ai_score_comment)
+  homework_tutor_task_states(id, task_id, status, attempts, best_score, available_score, earned_score, wrong_answer_count, hint_count, ai_score, ai_score_comment, tutor_score_override, tutor_score_override_comment, tutor_score_override_at)
 `;
 
 /**
