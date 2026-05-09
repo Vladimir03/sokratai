@@ -10,6 +10,8 @@
 
 Code review для **каждой** задачи проводит **Codex** независимо (без контекста автора), см. финальный промпт ревьюера.
 
+**Rollout strategy:** новый screen выкатывается в прод **сразу всем mobile-юзерам** (viewport ≤768px). Без feature flag, без opt-in пилота — пользователь выбрал phased по device, не по cohort. Tablet/desktop остаются на existing `GuidedHomeworkWorkspace` до Phase 3 (отдельная спека). Rollback при критическом баге = `git revert <hash> && deploy-sokratai` (~3 мин).
+
 ---
 
 ## Phase 1 — DB foundation (~1 час)
@@ -25,24 +27,13 @@ Code review для **каждой** задачи проводит **Codex** не
 - **Guardrails:** additive only, нет DROP/RENAME. Backfill идемпотентен (`WHERE task_kind IS NULL`). Existing tutor конструктор ДЗ продолжает работать без изменений (новые задачи получают default `'extended'`). Migration номер `20260509120000` — следующий после `20260508130000_fix_mock_exams_rls_recursion.sql`.
 - **Validation:** dry-run на staging. После apply: `SELECT task_kind, count(*) FROM homework_tutor_tasks GROUP BY task_kind` — все строки classified.
 
-### TASK-2 — Миграция `feature_new_homework_chat` flag в `profiles`
-
-- **Job:** S1 (вся фича — за flag'ом)
-- **AC:** AC-1.
-- **Agent:** Claude Code.
-- **Files:**
-  - `supabase/migrations/20260509120100_add_feature_new_homework_chat_flag.sql` (новый)
-- **Что делаем:** `ALTER TABLE profiles ADD COLUMN feature_new_homework_chat boolean NOT NULL DEFAULT false;` + COMMENT с описанием pilot purpose.
-- **Guardrails:** additive, default `false` — никто не меняет поведение существующих учеников. Никаких RLS-изменений (existing self-read policy уже покрывает новое поле).
-- **Validation:** apply migration → `SELECT count(*) FROM profiles WHERE feature_new_homework_chat IS NULL` = 0.
-
-### TASK-3 — Миграция `submission_payload` JSONB + extend `message_kind` enum
+### TASK-2 — Миграция `submission_payload` JSONB + extend `message_kind` enum
 
 - **Job:** S1-2.
 - **AC:** AC-1, AC-5 (формат submission'а).
 - **Agent:** Claude Code.
 - **Files:**
-  - `supabase/migrations/20260509120200_add_submission_payload_to_thread_messages.sql` (новый)
+  - `supabase/migrations/20260509120100_add_submission_payload_to_thread_messages.sql` (новый)
 - **Что делаем:**
   ```sql
   ALTER TABLE homework_tutor_thread_messages
@@ -69,7 +60,7 @@ Code review для **каждой** задачи проводит **Codex** не
 
 ## Phase 2 — Backend (~2.5 часа)
 
-### TASK-4 — Backend `GET /student/problem/:hwId/:taskId`
+### TASK-3 — Backend `GET /student/problem/:hwId/:taskId`
 
 - **Job:** S1-1 (получить помощь когда застрял).
 - **AC:** AC-3, AC-4 (ProblemContext data shape).
@@ -95,7 +86,7 @@ Code review для **каждой** задачи проводит **Codex** не
   - RLS: namespace student-only, ownership через homework_tutor_student_assignments (тот же паттерн что existing handleGetStudentAssignment)
 - **Validation:** `npm run lint && npm run build && npm run smoke-check`. Manual: curl с student JWT → 200 + правильный shape; curl с другим student → 403; curl на несуществующий taskId → 404.
 
-### TASK-5 — Backend `POST /student/problem/:hwId/:taskId/submission`
+### TASK-4 — Backend `POST /student/problem/:hwId/:taskId/submission`
 
 - **Job:** S1-2.
 - **AC:** AC-5 (validation), AC-6 (verdict mapping), AC-7 (after CORRECT behaviour), AC-8 (telemetry hook server-side optional).
@@ -135,7 +126,7 @@ Code review для **каждой** задачи проводит **Codex** не
 
 ## Phase 3 — Frontend foundation (~1.5 часа)
 
-### TASK-6 — Frontend hooks + types + API client
+### TASK-5 — Frontend hooks + types + API client
 
 - **Job:** S1-1, S1-2.
 - **AC:** AC-3, AC-4 (data shape used by UI).
@@ -154,7 +145,7 @@ Code review для **каждой** задачи проводит **Codex** не
   - Все типы additive — `StudentHomeworkTask.task_kind` optional для backward compat
 - **Validation:** `npm run build` зелёный, types correct. Manual через DevTools React Query DevTools (если установлен).
 
-### TASK-7 — Frontend SubmitSheet (real component) + PhotoStrip + VerdictOverlay
+### TASK-6 — Frontend SubmitSheet (real component) + PhotoStrip + VerdictOverlay
 
 - **Job:** S1-2, S1-3 (понять где ошибся через verdict overlay).
 - **AC:** AC-5, AC-6.
@@ -195,7 +186,7 @@ Code review для **каждой** задачи проводит **Codex** не
   - Render внутри SubmitSheet z-stack (single focus context)
   - `role="status" aria-live="polite"` для loading, `aria-live="assertive"` для verdict
 - **Guardrails:**
-  - shadcn Sheet (для focus trap) — уже использовали в SubmitSheetStub
+  - shadcn Sheet primitive (focus-trap)
   - PhotoStrip touch-pan-x для iOS swipe (см. `.claude/rules/80-cross-browser.md`)
   - 16px text-size на input/textarea (iOS no auto-zoom)
   - `loading="lazy"` на photo thumbnails
@@ -205,9 +196,9 @@ Code review для **каждой** задачи проводит **Codex** не
 
 ---
 
-## Phase 4 — Wiring + feature flag (~1.5 часа)
+## Phase 4 — Wiring (~1.5 часа)
 
-### TASK-8 — Hookup `HomeworkProblem.tsx` — replace mock на real data
+### TASK-7 — Hookup `HomeworkProblem.tsx` — replace mock на real data
 
 - **Job:** S1-1, S1-2.
 - **AC:** AC-4, AC-7.
@@ -238,59 +229,72 @@ Code review для **каждой** задачи проводит **Codex** не
   - Mock fixtures файл удалить — больше не testbench (по `.claude/rules/40-homework-system.md` правилу о canonical sources)
 - **Validation:** `npm run lint && npm run build`. Manual: открыть на staging → задача загружается → SubmitSheet работает → verdict реальный.
 
-### TASK-9 — Feature flag wrapper в `StudentHomeworkDetail`
+### TASK-8 — Viewport-based redirect в `StudentHomeworkDetail`
 
-- **Job:** safety rollout.
+- **Job:** mobile-first rollout.
 - **AC:** AC-2.
 - **Agent:** Claude Code.
 - **Files:**
   - `src/pages/StudentHomeworkDetail.tsx` — modify task-click handler
-  - `src/hooks/useFeatureFlag.ts` (новый, mini-hook) — `useFeatureNewHomeworkChat()` reads `profile.feature_new_homework_chat` через existing useStudentProfile hook (или новый `useProfileSelf` если нет)
-  - `src/hooks/useViewportSize.ts` (новый, mini-hook) — `useIsMobile()` returns `window.innerWidth <= 768`, listens resize events
+  - `src/hooks/useIsMobile.ts` (новый, mini-hook) — `useIsMobile()` returns `window.innerWidth <= 768`, listens resize events
 - **Что делаем:**
-  1. В `StudentHomeworkDetail` — где сейчас клик на задачу открывает inline GuidedHomeworkWorkspace, добавить wrapper:
+  1. Создать `src/hooks/useIsMobile.ts`:
+     ```ts
+     export function useIsMobile(): boolean {
+       const [isMobile, setIsMobile] = useState(() =>
+         typeof window !== 'undefined' && window.matchMedia('(max-width: 768px)').matches
+       );
+       useEffect(() => {
+         const mql = window.matchMedia('(max-width: 768px)');
+         const handler = (e: MediaQueryListEvent) => setIsMobile(e.matches);
+         mql.addEventListener('change', handler);
+         return () => mql.removeEventListener('change', handler);
+       }, []);
+       return isMobile;
+     }
+     ```
+  2. В `StudentHomeworkDetail` — где сейчас клик на задачу открывает inline GuidedHomeworkWorkspace, добавить wrapper:
      ```tsx
      const isMobile = useIsMobile();
-     const enabled = useFeatureNewHomeworkChat();
      const onTaskClick = (taskId: string) => {
-       if (isMobile && enabled) {
+       if (isMobile) {
          navigate(`/student/homework/${hwId}/problem/${taskId}`);
        } else {
-         // existing inline behavior
-         setSelectedTaskOrder(taskOrder);
+         setSelectedTaskOrder(taskOrder); // existing inline behavior
        }
      };
      ```
-  2. `useFeatureNewHomeworkChat`: `const profile = useUserProfile()` → return `profile?.feature_new_homework_chat === true`
-  3. `useIsMobile`: useEffect → `window.matchMedia('(max-width: 768px)')` listener, return boolean
 - **Guardrails:**
-  - Default fallback (`false` flag OR desktop) → ничего не меняется visually
+  - Без feature flag — все mobile-юзера сразу на новом screen (per spec rollout strategy)
+  - Default fallback (`>768px viewport`) → ничего не меняется visually
   - Resize re-evaluates: ученик повернул iPad в landscape → может уйти на desktop; портрет → mobile. Acceptable.
-  - Не блокировать render первоначальный — useState initial `null` → render как `false` пока profile load → потом перевычислить
-- **Validation:** `npm run smoke-check`. Manual: enable flag для test user → mobile DevTools → клик на задачу → новый screen; desktop → старый inline behavior.
+  - SSR-safe initial state (`typeof window !== 'undefined'` guard)
+  - Никаких других изменений в StudentHomeworkDetail кроме onClick logic
+- **Validation:** `npm run smoke-check`. Manual: mobile DevTools → клик на задачу → новый screen; desktop → старый inline behavior; resize в pre-existing tab → следующий клик задачи respects новый viewport.
 
-### TASK-10 — Documentation: CLAUDE.md + rules
+### TASK-9 — Documentation: CLAUDE.md + rules
 
 - **Job:** project hygiene (single source of truth).
 - **AC:** N/A (мета-задача, но требуется per `.claude/rules/00-read-first.md`).
 - **Agent:** Claude Code.
 - **Files:**
-  - `.claude/rules/40-homework-system.md` — добавить секцию «Student Homework Problem Screen — feature flag + submission contract» с invariants
+  - `.claude/rules/40-homework-system.md` — добавить секцию «Student Homework Problem Screen — viewport routing + submission contract» с invariants
   - `CLAUDE.md` — pointer на новую секцию rule 40
-  - `docs/delivery/features/student-homework-problem-screen/spec.md` — статус `draft` → `implemented` (после TASK-11 review pass)
+  - `docs/delivery/features/student-homework-problem-screen/spec.md` — статус `draft` → `implemented` (после TASK-10 review pass)
 - **Что делаем:**
 
   Новая секция в `.claude/rules/40-homework-system.md` (после существующей «Hint quality» или в конец):
 
   ```markdown
-  ### Student Homework Problem Screen — feature flag + submission contract (2026-05-09)
+  ### Student Homework Problem Screen — viewport routing + submission contract (2026-05-09)
 
-  Новая mobile-first поверхность student-side ДЗ за feature-flag'ом `profiles.feature_new_homework_chat boolean default false`. Phase 1 = mobile only (≤768px viewport); desktop fallback на existing GuidedHomeworkWorkspace до Phase 3.
+  Новая mobile-first поверхность student-side ДЗ. Phase 1 = mobile only (≤768px viewport); desktop fallback на existing GuidedHomeworkWorkspace до Phase 3.
 
   **Routing invariants:**
   - Route `/student/homework/:hwId/problem/:taskId` (новый screen)
-  - Route `/homework/:id` (старый GuidedHomeworkWorkspace) — остаётся для desktop И не-flagged students
-  - `StudentHomeworkDetail` task-click handler делает feature-flag check + viewport check; редиректит ТОЛЬКО при обоих true
+  - Route `/homework/:id` (старый GuidedHomeworkWorkspace) — остаётся для desktop+tablet
+  - `StudentHomeworkDetail` task-click handler делает viewport check через `useIsMobile()` (`window.innerWidth <= 768`); редиректит на новый screen ТОЛЬКО при mobile viewport
+  - **Без feature flag** — mobile-юзера сразу все на новом screen. Rollback при критическом баге = `git revert <hash> && deploy-sokratai` (~3 мин)
 
   **Submission storage invariants:**
   - SubmitSheet submissions пишутся в существующую таблицу `homework_tutor_thread_messages` с `message_kind='submission'`
@@ -319,7 +323,7 @@ Code review для **каждой** задачи проводит **Codex** не
   - Phase 1 (этот rule): mobile + chat + ProblemContext + SubmitSheet с reuse `handleCheckAnswer`
   - Phase 2 (отдельная спека): real Gemini OCR pipeline + 4 verdict states + voice + autosave
   - Phase 3 (отдельная спека): tablet + desktop split layouts
-  - Phase 4 (отдельная спека): cutover — удалить flag, redirect old route, удалить GuidedHomeworkWorkspace
+  - Phase 4 (отдельная спека): cutover — удалить viewport check, redirect old route, удалить GuidedHomeworkWorkspace
 
   **Спека:** `docs/delivery/features/student-homework-problem-screen/spec.md`.
   ```
@@ -327,7 +331,7 @@ Code review для **каждой** задачи проводит **Codex** не
   В `CLAUDE.md` добавить bullet в существующую секцию rules после rule 8a:
 
   ```markdown
-  16. **Student Homework Problem Screen — Phase 1 mobile (2026-05-09)** — новая student-side поверхность ДЗ за feature flag `profiles.feature_new_homework_chat`. Mobile-only (≤768px). Submission через `message_kind='submission'` + `submission_payload` JSONB. Reuse `handleCheckAnswer` для grading. Hybrid first-completed-wins с existing chat. Контракты: `.claude/rules/40-homework-system.md` → секция «Student Homework Problem Screen — feature flag + submission contract». Спека: `docs/delivery/features/student-homework-problem-screen/spec.md`
+  16. **Student Homework Problem Screen — Phase 1 mobile (2026-05-09)** — новая student-side поверхность ДЗ для mobile (≤768px) viewport. Mobile-only без feature flag. Submission через `message_kind='submission'` + `submission_payload` JSONB. Reuse `handleCheckAnswer` для grading. Hybrid first-completed-wins с existing chat. Контракты: `.claude/rules/40-homework-system.md` → секция «Student Homework Problem Screen — viewport routing + submission contract». Спека: `docs/delivery/features/student-homework-problem-screen/spec.md`
   ```
 - **Guardrails:** не дублировать существующие правила. Не убирать существующий контент. Дата в формате `2026-MM-DD`.
 - **Validation:** прочитать обновлённые секции, убедиться что внутренние ссылки рабочие (`./` относительные пути корректны).
@@ -336,7 +340,7 @@ Code review для **каждой** задачи проводит **Codex** не
 
 ## Phase 5 — Review + QA (~1.5 часа)
 
-### TASK-11 — Code review pass (Codex independent session)
+### TASK-10 — Code review pass (Codex independent session)
 
 - **Job:** quality gate.
 - **AC:** AC-1..AC-11 (review проверяет все).
@@ -357,7 +361,7 @@ Code review для **каждой** задачи проводит **Codex** не
   - Job alignment: новый screen усиливает S1 (вся целевая job)?
   - UX drift: respect `.claude/rules/90-design-system.md` (tokens, lucide, no framer-motion)?
   - Scope creep: только Phase 1 (mobile + reuse handleCheckAnswer)? Photo OCR / verdict states-расширение / tablet НЕ примешаны?
-  - AC-1..AC-11 выполнены через cross-check: миграции применены, endpoint shape соответствует §5, feature flag работает symmetrically (mobile + flag → новый, остальное → старый)?
+  - AC-1..AC-11 выполнены через cross-check
   - Anti-leak invariants: handleGetStudentProblem не возвращает `solution_text/rubric_*/ai_score_comment`?
   - Performance: React.memo на массиве сообщений? lazy MathText?
   - Safari/iOS: `100dvh`, 16px input, touch-pan-x на photo strip?
@@ -366,28 +370,57 @@ Code review для **каждой** задачи проводит **Codex** не
 - **Guardrails:** Codex не пишет код, только review document. Findings — файл `docs/delivery/features/student-homework-problem-screen/codex-review.md`.
 - **Validation:** review file существует, статус `PASS` или fixes applied + re-review до `PASS`.
 
-### TASK-12 — Manual QA on staging + enable flag для 5 пилотных учеников
+### TASK-11 — Manual QA on staging → deploy в прод
 
-- **Job:** pilot rollout.
+- **Job:** prod rollout без feature flag — все mobile-юзера одновременно.
 - **AC:** AC-2 (regression), AC-4..AC-7 (happy path), AC-10 (mobile UX).
 - **Agent:** Vladimir (manual).
 - **Files:**
-  - SQL ad-hoc для enable flag: `UPDATE profiles SET feature_new_homework_chat=true WHERE id IN (...) ;` для 5 пилотных учеников Егора
+  - QA report: `docs/delivery/features/student-homework-problem-screen/qa-report.md` (новый)
 - **Что делаем:**
-  1. Verify все 3 миграции применились на staging
+
+  **Pre-deploy QA на staging (обязательная gate перед prod):**
+  1. Verify все 2 миграции применились на staging: `SELECT count(*) FROM homework_tutor_tasks WHERE task_kind IS NULL` = 0
   2. Verify `npm run smoke-check` зелёный
-  3. Pick 5 пилотных учеников (Егор подскажет — самые активные)
-  4. Включить flag SQL
-  5. Test cases (на iPhone SE / Android Chrome):
-     - Open existing assignment → click task → verify navigate на новый screen
-     - Submit numeric+photo для extended task → verify verdict overlay → click «Следующая» → navigate
-     - Submit invalid (missing photo для extended) → verify validation error
-     - Open на desktop (>768px) → verify regression: GuidedHomeworkWorkspace inline (фолбэк)
-     - Disable flag SQL для 1 ученика → verify fallback на старый flow
-  6. Сообщить Егору что 5 учеников теперь на новом UI; собирать feedback неделю
-  7. Если PASS на всех 5 — расширить на 50 учеников через bulk `UPDATE profiles SET ... WHERE id IN (...)`
-- **Guardrails:** Phase 1 не выкатывается на ВСЕХ — только на 5 → 50 → all через explicit SQL. Никакого автоматического enable.
-- **Validation:** test report — markdown в `docs/delivery/features/student-homework-problem-screen/qa-report.md` с PASS/FAIL по каждому test case + список feedback от пилотных учеников.
+  3. Test cases на iPhone SE 375×667 (Chrome DevTools mobile mode):
+     - [ ] **TC-1:** Open `/homework/<existing_assignment_id>` → click on first task → expect navigate to `/student/homework/.../problem/...`
+     - [ ] **TC-2:** Verify topbar (Задача N/M · Subject + ДЗ title)
+     - [ ] **TC-3:** Verify ProblemContext default expanded для пустого thread, collapsed при наличии messages
+     - [ ] **TC-4:** Type message в chat input → AI отвечает (existing chat работает)
+     - [ ] **TC-5:** Open SubmitSheet → upload 1 фото via camera input → enter numeric "1.4" → submit → expect verdict overlay
+     - [ ] **TC-6:** After CORRECT verdict → click «Следующая задача →» → navigate на следующую
+     - [ ] **TC-7:** Try submit с missing photo для extended task → expect validation error
+     - [ ] **TC-8:** Open на desktop (1280px DevTools) → expect old inline GuidedHomeworkWorkspace (regression)
+     - [ ] **TC-9:** Resize tab из desktop → mobile (через DevTools) → следующий клик задачи → expect новый screen (resize listener works)
+     - [ ] **TC-10:** Open в Safari iOS (real device если возможно) → проверить 100dvh, swipe, no auto-zoom
+  4. Любой FAIL → revert deploy на staging, fix, re-test
+  5. Все PASS → переход к prod deploy
+
+  **Prod deploy (после staging PASS):**
+  1. `ssh -i "$HOME\.ssh\sokratai_proxy" root@185.161.65.182`
+  2. `deploy-sokratai`
+  3. Дождаться `✅ Deploy complete` (~2-5 мин)
+  4. Проверить `https://sokratai.ru/` → smoke (открыть `/homework/<id>` на mobile DevTools, кликнуть задачу)
+  5. Сообщить Егору о выкатке, попросить понаблюдать первые 2 часа на пилотных учениках
+
+  **Post-deploy monitoring (первые 24ч):**
+  - Lovable Cloud logs / Supabase logs — error rate
+  - Telemetry events `student_problem_screen_opened` / `student_submission_sent` — appear?
+  - Telegram чат с Егором — feedback от учеников
+
+  **Rollback при критическом баге:**
+  ```bash
+  ssh root@185.161.65.182
+  cd /opt/sokratai
+  git log --oneline | head -5  # find previous working commit
+  git checkout <prev_hash>
+  NODE_OPTIONS="--max-old-space-size=2048" npm ci
+  NODE_OPTIONS="--max-old-space-size=2048" npm run build
+  cp -r dist/* /var/www/sokratai/
+  systemctl reload nginx
+  ```
+- **Guardrails:** **Не deploy'ить если хоть один TC FAIL на staging.** Edge function (homework-api с новыми handlers) Lovable Cloud задеплоит сам после push в main. Frontend — только через `deploy-sokratai`.
+- **Validation:** qa-report.md status `PASS` + post-deploy smoke green + ≥7 дней stability с error rate < 1%.
 
 ---
 
@@ -443,30 +476,6 @@ Mandatory end block в твоём ответе:
 ```
 Твоя роль: senior full-stack engineer в SokratAI.
 
-Контекст: Phase 1 student homework problem screen за feature flag.
-
-Прочитай:
-1. docs/delivery/features/student-homework-problem-screen/spec.md
-2. .claude/rules/40-homework-system.md
-
-Задача:
-Создай миграцию `supabase/migrations/20260509120100_add_feature_new_homework_chat_flag.sql`:
-- ALTER TABLE profiles ADD COLUMN feature_new_homework_chat boolean NOT NULL DEFAULT false;
-- COMMENT с описанием pilot purpose
-- Idempotent
-
-AC: после migration все existing profiles имеют flag=false; никаких permission errors.
-
-Guardrails: additive, default false, никаких RLS изменений.
-
-Mandatory end block: changed files, summary, validation, docs-to-update, self-check.
-```
-
-### TASK-3 prompt (Claude Code)
-
-```
-Твоя роль: senior full-stack engineer в SokratAI.
-
 Контекст: Phase 1 student homework problem screen — submission через `message_kind='submission'` + `submission_payload JSONB`.
 
 Прочитай:
@@ -475,7 +484,7 @@ Mandatory end block: changed files, summary, validation, docs-to-update, self-ch
 3. supabase/migrations/20260306100000_guided_homework_threads.sql (existing CHECK constraint на message_kind)
 
 Задача:
-Создай миграцию `supabase/migrations/20260509120200_add_submission_payload_to_thread_messages.sql`:
+Создай миграцию `supabase/migrations/20260509120100_add_submission_payload_to_thread_messages.sql`:
 
 1. ALTER TABLE homework_tutor_thread_messages ADD COLUMN IF NOT EXISTS submission_payload JSONB NULL;
 2. COMMENT ON COLUMN ... ('For message_kind=submission: structured JSON {numeric: string, photos: string[], text: string, voice_ref?: string|null}.');
@@ -495,7 +504,7 @@ Guardrails:
 Mandatory end block: changed files, summary, validation (включая INSERT тест каждого kind), docs-to-update, self-check.
 ```
 
-### TASK-4 prompt (Claude Code)
+### TASK-3 prompt (Claude Code)
 
 ```
 Твоя роль: senior backend engineer в SokratAI.
@@ -551,7 +560,7 @@ Guardrails:
 Mandatory end block: changed files (с line ranges), summary, validation (curl examples с staging JWT), docs-to-update, self-check.
 ```
 
-### TASK-5 prompt (Claude Code)
+### TASK-4 prompt (Claude Code)
 
 ```
 Твоя роль: senior backend engineer в SokratAI.
@@ -569,7 +578,7 @@ Mandatory end block: changed files (с line ranges), summary, validation (curl e
 
 1. Новый handler `async function handleStudentSubmission(db, userId, hwId, taskId, body, cors)`:
    - Validate body shape {numeric: string, photos: string[], text: string} — 400 INVALID_BODY если не соответствует
-   - Verify ownership (как в TASK-4)
+   - Verify ownership (как в TASK-3)
    - Load task (только for task_kind, max_score, check_format, task_text, task_image_url)
    - Validate task_kind requirements:
      - 'numeric': numeric.trim() обязателен
@@ -608,12 +617,12 @@ Guardrails:
 Mandatory end block: changed files, summary, validation (manual curl examples), docs-to-update, self-check.
 ```
 
-### TASK-6 prompt (Claude Code)
+### TASK-5 prompt (Claude Code)
 
 ```
 Твоя роль: senior frontend engineer в SokratAI (React + TypeScript + React Query + shadcn-ui + Tailwind).
 
-Контекст: Phase 1 student homework problem screen — frontend hooks + types. Backend endpoints из TASK-4 + TASK-5 готовы.
+Контекст: Phase 1 student homework problem screen — frontend hooks + types. Backend endpoints из TASK-3 + TASK-4 готовы.
 
 Прочитай:
 1. docs/delivery/features/student-homework-problem-screen/spec.md (§5 API, §3 Solution)
@@ -649,7 +658,7 @@ Mandatory end block: changed files, summary, validation (manual curl examples), 
 
 AC:
 - Types compile (npm run build green)
-- React Query keys строго ['student','problem', ...] (per .claude/rules/performance.md §2c)
+- React Query keys строго ['student', 'problem', ...] (per .claude/rules/performance.md §2c)
 - Mutation invalidates правильные keys
 - StudentHomeworkTask.task_kind optional (backward compat)
 
@@ -661,7 +670,7 @@ Guardrails:
 Mandatory end block: changed files, summary, validation (npm run build + lint), docs-to-update, self-check.
 ```
 
-### TASK-7 prompt (Claude Code)
+### TASK-6 prompt (Claude Code)
 
 ```
 Твоя роль: senior frontend engineer в SokratAI (React 18 + TypeScript + shadcn-ui + Tailwind).
@@ -743,12 +752,12 @@ Guardrails:
 Mandatory end block: changed files, summary, validation (lint + build, manual on staging), docs-to-update, self-check.
 ```
 
-### TASK-8 prompt (Claude Code)
+### TASK-7 prompt (Claude Code)
 
 ```
 Твоя роль: senior frontend engineer в SokratAI.
 
-Контекст: Phase 1 student homework problem screen. Hooks (TASK-6) + SubmitSheet (TASK-7) готовы. Replace mock в HomeworkProblem.tsx на real data.
+Контекст: Phase 1 student homework problem screen. Hooks (TASK-5) + SubmitSheet (TASK-6) готовы. Replace mock в HomeworkProblem.tsx на real data.
 
 Прочитай:
 1. docs/delivery/features/student-homework-problem-screen/spec.md (AC-4, AC-7)
@@ -793,35 +802,47 @@ Guardrails:
 Mandatory end block: changed files (включая deleted fixtures.ts), summary, validation, docs-to-update, self-check.
 ```
 
-### TASK-9 prompt (Claude Code)
+### TASK-8 prompt (Claude Code)
 
 ```
 Твоя роль: senior frontend engineer в SokratAI.
 
-Контекст: Phase 1 feature flag rollout. New screen активируется только при mobile + feature_new_homework_chat=true.
+Контекст: Phase 1 mobile-only rollout. New screen активируется ВСЕГДА на mobile viewport (≤768px) — без feature flag. Desktop fallback на existing GuidedHomeworkWorkspace.
 
 Прочитай:
 1. docs/delivery/features/student-homework-problem-screen/spec.md (AC-2)
 2. src/pages/StudentHomeworkDetail.tsx (existing inline GuidedHomeworkWorkspace flow)
 
 Задача:
-1. Создай src/hooks/useFeatureNewHomeworkChat.ts:
-   - useQuery {queryKey: ['student','profile','feature-flags'], queryFn: () => fetch profile.feature_new_homework_chat}
-   - return boolean (default false during loading)
+1. Создай src/hooks/useIsMobile.ts:
+   ```ts
+   import { useEffect, useState } from 'react';
 
-2. Создай src/hooks/useIsMobile.ts:
-   - useEffect → window.matchMedia('(max-width: 768px)') listener
-   - State: isMobile (default читается из innerWidth at mount)
-   - Return boolean
+   export function useIsMobile(): boolean {
+     const [isMobile, setIsMobile] = useState(() =>
+       typeof window !== 'undefined'
+         ? window.matchMedia('(max-width: 768px)').matches
+         : false
+     );
+     useEffect(() => {
+       if (typeof window === 'undefined') return;
+       const mql = window.matchMedia('(max-width: 768px)');
+       const handler = (e: MediaQueryListEvent) => setIsMobile(e.matches);
+       mql.addEventListener('change', handler);
+       return () => mql.removeEventListener('change', handler);
+     }, []);
+     return isMobile;
+   }
+   ```
 
-3. Modify src/pages/StudentHomeworkDetail.tsx:
-   - Import оба hook
-   - В onTaskClick handler (где сейчас открывается inline GuidedHomeworkWorkspace):
-     ```
+2. Modify src/pages/StudentHomeworkDetail.tsx:
+   - Import useIsMobile + useNavigate
+   - В onTaskClick handler (где сейчас открывается inline GuidedHomeworkWorkspace), добавить wrapper:
+     ```tsx
      const isMobile = useIsMobile();
-     const enabled = useFeatureNewHomeworkChat();
+     const navigate = useNavigate();
      const onTaskClick = (taskId: string) => {
-       if (isMobile && enabled) {
+       if (isMobile) {
          navigate(`/student/homework/${hwId}/problem/${taskId}`);
        } else {
          setSelectedTaskOrder(taskOrder); // existing
@@ -831,12 +852,12 @@ Mandatory end block: changed files (включая deleted fixtures.ts), summary
    - Никаких других изменений
 
 AC:
-- mobile + flag=true → navigate to new screen
-- desktop → existing inline behavior (regression check)
-- flag=false → existing inline behavior
+- mobile (≤768px) → navigate to new screen
+- desktop (>768px) → existing inline behavior (regression check)
+- Resize listener активный — поворот iPad mini в портрет на следующем клике задачи переводит на новый screen
 
 Guardrails:
-- useFeatureNewHomeworkChat: SQL fetch profile.feature_new_homework_chat — reuse existing user profile API если есть, иначе новый minimal endpoint в supabase.from('profiles')
+- Без feature flag — все mobile-юзера сразу на новом screen (per spec rollout strategy)
 - useIsMobile: SSR-safe (initial state читается через `typeof window !== 'undefined'` guard)
 - Никаких других изменений в StudentHomeworkDetail кроме onClick logic
 - Resize event пересчитывает (ученик повернул iPad)
@@ -844,32 +865,32 @@ Guardrails:
 Mandatory end block: changed files, summary, validation (manual mobile vs desktop test), docs-to-update, self-check.
 ```
 
-### TASK-10 prompt (Claude Code)
+### TASK-9 prompt (Claude Code)
 
 ```
 Твоя роль: technical writer для SokratAI internal documentation.
 
-Контекст: Phase 1 завершён (TASKS 1-9 done). Документация требует обновления.
+Контекст: Phase 1 завершён (TASKS 1-8 done). Документация требует обновления.
 
 Прочитай:
 1. docs/delivery/features/student-homework-problem-screen/spec.md
-2. docs/delivery/features/student-homework-problem-screen/tasks.md (контекст для TASK-10)
+2. docs/delivery/features/student-homework-problem-screen/tasks.md (контекст для TASK-9)
 3. .claude/rules/40-homework-system.md (для format reference)
 4. CLAUDE.md (для format)
 
 Задача:
-1. Дополни .claude/rules/40-homework-system.md новой секцией «Student Homework Problem Screen — feature flag + submission contract (2026-05-09)»:
-   - Routing invariants
+1. Дополни .claude/rules/40-homework-system.md новой секцией «Student Homework Problem Screen — viewport routing + submission contract (2026-05-09)»:
+   - Routing invariants (mobile ≤768px, без feature flag)
    - Submission storage invariants
    - Grading invariants (hybrid first-completed-wins)
    - task_kind invariant
    - Hint behavior — без cap'а 3
    - Phase split (Phase 1 / 2 / 3 / 4)
-   Полный контент — см. tasks.md TASK-10 раздел.
+   Полный контент — см. tasks.md TASK-9 раздел.
 
 2. Дополни CLAUDE.md новый rule (после rule 8a) — pointer на новую секцию rules/40 + краткое описание.
 
-3. Обнови spec.md статус: draft → implemented (после TASK-11 PASS).
+3. Обнови spec.md статус: draft → implemented (после TASK-10 PASS).
 
 AC:
 - .claude/rules/40-homework-system.md содержит новую секцию (existing content не удалён)
@@ -884,7 +905,7 @@ Guardrails:
 Mandatory end block: changed files, summary, validation (read обновлённые файлы для smoke), self-check.
 ```
 
-### TASK-11 prompt (Codex — independent reviewer)
+### TASK-10 prompt (Codex — independent reviewer)
 
 ```
 Ты — независимый ревьюер SokratAI. Контекст автора (Claude Code) тебе недоступен.
@@ -894,7 +915,7 @@ Mandatory end block: changed files, summary, validation (read обновлённ
 2. Прочитай docs/discovery/product/tutor-ai-agents/16-ux-principles-for-tutor-product-sokrat.md
 3. Прочитай docs/discovery/product/tutor-ai-agents/17-ui-patterns-and-component-rules-sokrat.md
 4. Прочитай docs/delivery/features/student-homework-problem-screen/spec.md (вся спека)
-5. Прочитай docs/delivery/features/student-homework-problem-screen/tasks.md (TASKS 1-10)
+5. Прочитай docs/delivery/features/student-homework-problem-screen/tasks.md (TASKS 1-9)
 6. Посмотри git diff против origin/main для всех затронутых файлов
 
 ПРОВЕРЬ:
@@ -914,10 +935,11 @@ Mandatory end block: changed files, summary, validation (read обновлённ
 **Scope creep:**
 - Только Phase 1 (mobile + reuse handleCheckAnswer)?
 - Photo OCR / 4-state verdict / tablet/desktop НЕ примешаны?
+- Без feature flag (per user decision — viewport-only routing)?
 
 **AC выполнены:**
-- AC-1: 3 миграции применяются + backfill корректен?
-- AC-2: feature flag + viewport check симметричен?
+- AC-1: 2 миграции применяются + backfill корректен?
+- AC-2: viewport check работает (mobile → new screen, desktop → old)?
 - AC-3: GET /student/problem не leak'ает solution_text/rubric_*/ai_score_comment?
 - AC-4: ProblemContext default-collapsed логика для пустого/непустого thread?
 - AC-5: SubmitSheet validation per task_kind?
@@ -935,6 +957,10 @@ Mandatory end block: changed files, summary, validation (read обновлённ
 - React Query keys строго ['student','problem', ...]?
 - Lazy KaTeX через MathText?
 
+**Risk awareness:**
+- Понятно ли что rollback path = git revert + deploy-sokratai (без feature flag)?
+- Manual QA на staging — обязательная gate перед prod deploy?
+
 ФОРМАТ:
 Создай файл `docs/delivery/features/student-homework-problem-screen/codex-review.md` с заголовком:
 - Status: PASS / CONDITIONAL PASS / FAIL
@@ -944,44 +970,69 @@ Mandatory end block: changed files, summary, validation (read обновлённ
 При CONDITIONAL PASS / FAIL — Claude Code применит fixes → re-review.
 ```
 
-### TASK-12 prompt (Vladimir — manual QA)
+### TASK-11 prompt (Vladimir — manual QA + prod deploy)
 
 ```
-Manual QA на staging для Phase 1 student homework problem screen.
+Manual QA на staging для Phase 1 student homework problem screen + prod deploy без feature flag.
 
 Pre-conditions:
-- Все миграции (TASK 1-3) применены на staging
-- Backend deploy (TASK 4-5) прошёл
-- Frontend deploy (TASK 6-9) прошёл — Lovable preview обновился
-- Codex review (TASK-11) PASS
+- Все миграции (TASK 1-2) применены на staging
+- Backend deploy (TASK 3-4) прошёл (Lovable Cloud)
+- Frontend deploy (TASK 5-8) прошёл — Lovable preview обновился
+- Codex review (TASK-10) PASS
 
-Setup:
-1. На staging выбери 5 пилотных учеников Егора (попроси у Егора список самых активных)
-2. SQL: UPDATE profiles SET feature_new_homework_chat=true WHERE id IN (...);
-3. Verify SELECT count(*) FROM profiles WHERE feature_new_homework_chat=true; = 5
+**Pre-deploy QA на staging (обязательная gate перед prod):**
 
-Test cases (на iPhone SE 375×667 viewport DevTools):
+Verify:
+1. SELECT count(*) FROM homework_tutor_tasks WHERE task_kind IS NULL = 0
+2. npm run smoke-check зелёный
 
-[ ] TC-1: Open /homework/<existing_assignment_id> as test student → click on first task → expect navigate to `/student/homework/.../problem/...`
+Test cases на iPhone SE 375×667 viewport (DevTools mobile mode):
+
+[ ] TC-1: Open /homework/<existing_assignment_id> → click on first task → expect navigate to `/student/homework/.../problem/...`
 [ ] TC-2: Verify topbar (Задача N/M · Subject + ДЗ title)
-[ ] TC-3: Verify ProblemContext default expanded для пустого thread
+[ ] TC-3: Verify ProblemContext default expanded для пустого thread, collapsed при наличии messages
 [ ] TC-4: Type message в chat input → AI отвечает (existing chat работает)
 [ ] TC-5: Open SubmitSheet → upload 1 фото via camera input → enter numeric "1.4" → submit → expect verdict overlay
 [ ] TC-6: After CORRECT verdict → click «Следующая задача →» → navigate на следующую
 [ ] TC-7: Try submit с missing photo для extended task → expect validation error
-[ ] TC-8: Disable flag для 1 ученика SQL → reload → expect inline GuidedHomeworkWorkspace (regression)
-[ ] TC-9: Open на desktop (1280px DevTools) → expect old inline GuidedHomeworkWorkspace (regression)
+[ ] TC-8: Open на desktop (1280px DevTools) → expect old inline GuidedHomeworkWorkspace (regression)
+[ ] TC-9: Resize tab из desktop → mobile → следующий клик задачи → expect новый screen
 [ ] TC-10: Open в Safari iOS (real device если возможно) → проверить 100dvh, swipe, no auto-zoom
 
-Создай файл docs/delivery/features/student-homework-problem-screen/qa-report.md:
-- Status: PASS / FAIL
-- Test cases с PASS/FAIL/notes
-- Skip-list: что не протестировал и почему
-- Feedback от пилотных учеников (после ≥7 дней): список цитат + classification confirms/contradicts
+Любой FAIL → revert deploy на staging, fix, re-test.
 
-После PASS:
-1. Расширить flag на 50 учеников через bulk SQL
-2. Через 7 дней stability — рассмотреть Phase 2 spec start
+**Prod deploy (после staging PASS):**
+
+ssh -i "$HOME\.ssh\sokratai_proxy" root@185.161.65.182
+deploy-sokratai
+
+Дождаться ✅ Deploy complete (~2-5 мин).
+
+Smoke на проде: открыть https://sokratai.ru/homework/<id> на mobile DevTools → клик задачи → новый screen работает.
+
+Сообщить Егору о выкатке. Попросить понаблюдать первые 2 часа на пилотных учениках.
+
+**Post-deploy monitoring (первые 24ч):**
+- Lovable Cloud / Supabase logs — error rate
+- Telemetry events в window.dataLayer
+- Telegram чат с Егором
+
+**Rollback при критическом баге:**
+ssh root@185.161.65.182
+cd /opt/sokratai
+git log --oneline | head -5
+git checkout <prev_hash>
+NODE_OPTIONS="--max-old-space-size=2048" npm ci
+NODE_OPTIONS="--max-old-space-size=2048" npm run build
+cp -r dist/* /var/www/sokratai/
+systemctl reload nginx
+
+Создай qa-report.md:
+- Pre-deploy QA: TC-1..TC-10 PASS/FAIL
+- Prod deploy: timestamp, hash
+- Post-deploy monitoring: первые 24ч feedback
+- Issues найденные после deploy (если есть)
 ```
 
 ### Финальный (универсальный) review-промпт для любого TASK
@@ -1002,23 +1053,23 @@ Test cases (на iPhone SE 375×667 viewport DevTools):
 - Status: PASS / CONDITIONAL PASS / FAIL
 - Дельта vs предыдущий review
 
-При PASS → TASK-12 (Vladimir manual QA) может стартовать.
+При PASS → TASK-11 (Vladimir manual QA + prod deploy) может стартовать.
 ```
 
 ---
 
 ## Definition of Done (per Pipeline Шаг 6)
 
-После прохождения всех TASK 1-12:
+После прохождения всех TASK 1-11:
 
 1. ✓ Job/scenario linkage: S1-1, S1-2, S1-3
 2. ✓ Wedge linkage: B2B-1 + B2C-1 wedge усиление
 3. ✓ Feature spec: spec.md
-4. ✓ Claude Code implementation: TASK 1-10
-5. ✓ Codex review: TASK-11 PASS
-6. ✓ Feedback incorporated: TASK-12 manual QA
-7. ✓ No UX/UI-canon breakage: tokens + lucide + shadcn проверено в TASK-11
+4. ✓ Claude Code implementation: TASK 1-9
+5. ✓ Codex review: TASK-10 PASS
+6. ✓ Manual QA + prod deploy: TASK-11 (Vladimir)
+7. ✓ No UX/UI-canon breakage: tokens + lucide + shadcn проверено в TASK-10
 8. ✓ Success signal defined: leading + lagging metrics в spec §7
 9. ✓ Pilot metrics mapped: см. spec §7 «Связь с pilot KPI»
 
-После DoD: deploy-sokratai на VPS + flag enable для 5 пилотных учеников.
+После DoD: post-deploy monitoring 24ч + еженедельный review pilot signals (Шаг 7 Pipeline).

@@ -47,7 +47,7 @@
 1. **Сократический диалог с AI** через чат (existing infrastructure — guided chat + Сократ AI идентичность). Каждое user-сообщение AI оценивает (`evaluateStudentAnswer`); при CORRECT задача засчитывается incremental.
 2. **Single-shot сдача решения** через `<SubmitSheet>` — числовой ответ + фото решения от руки (multi-page PhotoStrip) + опциональный текст. AI проверяет synthesizing answer = numeric + text + photos через тот же `handleCheckAnswer` pipeline. Первый из двух путей закрывший задачу = winning result.
 
-Mobile-only Phase 1, выкатывается через feature flag `profiles.feature_new_homework_chat` для пилотного подмножества учеников. Tablet (Phase 2) и Desktop (Phase 3) — отдельными спеками после feedback от Phase 1.
+Mobile-only Phase 1, **выкатывается сразу всем mobile-юзерам** (viewport ≤768px). Desktop/tablet продолжают использовать existing `GuidedHomeworkWorkspace` до Phase 3 (fallback по viewport-детекции, не по profile flag). Tablet/Desktop — отдельными спеками после feedback от mobile rollout.
 
 ---
 
@@ -92,14 +92,14 @@ Phase 1 = Mobile только. Tablet/Desktop fallback на старый `/homew
 
 ### Ключевые решения
 
-- **Coexistence через feature flag.** `profiles.feature_new_homework_chat boolean default false`. Пилот опт-ин: 5 учеников (Егор включит SQL'ом) → feedback неделю → 50 → all. Старый workspace остаётся fallback при `flag=false` ИЛИ viewport > 768px.
+- **Viewport-based routing — без feature flag.** Mobile (`≤768px`) → новый screen для **всех**. Tablet/Desktop (`>768px`) → existing `GuidedHomeworkWorkspace` (fallback до Phase 3). **Никакой profile.feature_new_homework_chat колонки**: пользователь явно выбрал «mobile сразу всем» вместо staged pilot. Risk: при критическом баге rollback только через `git revert` + `deploy-sokratai` (~3 мин), нет easy SQL-toggle. Принимаем этот trade-off ради скорости попадания UX в руки реальных учеников.
 - **Hybrid grading «first-completed wins».** Чат incremental (`handleCheckAnswer` ставит status='completed' при CORRECT, как сейчас в GuidedHomeworkWorkspace) **И** SubmitSheet single-shot (synthesizes answer = `Числовой ответ: ${numeric}\n${text}` + photos[] как image_url, вызывает тот же `handleCheckAnswer`). После status='completed' SubmitSheet primary CTA меняется на «Следующая задача →».
 - **Hint behavior — без cap'а.** Существующая %-деградация `available_score` сохраняется (per текущему backend). UI показывает «Подсказок: N» без 3-cap. **Не** реализуем round-numbers версию из дизайна.
 - **`task_kind` enum миграция.** Новая колонка `homework_tutor_tasks.task_kind enum('numeric'|'extended'|'proof')` с backfill от `check_format`: `short_answer→numeric`, `detailed_solution→extended`. `proof` — manual mark тутором (Phase 2 tutor UI).
 - **Submission storage — расширяем thread_messages.** Не создаём новую таблицу. Добавляем `message_kind='submission'` enum value + `submission_payload JSONB` колонку в `homework_tutor_thread_messages`. Reuse RLS, image_url infrastructure, чат-поток показывает submission как специальный bubble.
 - **AI grading — reuse `evaluateStudentAnswer`** для submissions в Phase 1. Photo OCR + 4 verdict states (`no-work` / `step-error` / `unclear`) — Phase 2, отдельная спека про grading pipeline.
 - **Отдельный `ProblemChatMessage` от `GuidedChatMessage`.** Pixel-perfect от дизайна (kicker «СОКРАТ» uppercase, bubble border-1 light, max-w 86%). Существующий `GuidedChatMessage` (production-flow для tutor viewer) не трогается.
-- **Mobile-first feature-flag matching.** Frontend `StudentHomeworkDetail` при клике на задачу проверяет: если `profile.feature_new_homework_chat=true` И viewport<=768px → navigate(`/student/homework/:hwId/problem/:taskId`). Иначе → existing GuidedHomeworkWorkspace inline (как сейчас).
+- **Mobile detection через `useIsMobile()` hook.** Frontend `StudentHomeworkDetail` при клике на задачу проверяет viewport: `window.innerWidth <= 768` → navigate(`/student/homework/:hwId/problem/:taskId`). Иначе → existing GuidedHomeworkWorkspace inline. Resize listener — если ученик повернул iPad в портрет (становится mobile) при следующем клике на задачу пойдёт уже на новый screen. Acceptable.
 
 ### Scope
 
@@ -109,7 +109,7 @@ Phase 1 = Mobile только. Tablet/Desktop fallback на старый `/homew
 - Topbar + ProblemContext (peek/expanded) + ChatThread + ComposerMobile + SubmitSheet
 - SubmitSheet с PhotoStrip (camera+gallery, multi-page), numeric input + unit, optional text, **submit button с реальным backend** (через `handleCheckAnswer` synthesis)
 - Verdict overlay 3 состояния: `correct` (зелёная карточка с XP/streak), `incorrect-with-hint` (используем CORRECT/INCORRECT/ON_TRACK маппинг), `error` (network/AI fallback)
-- Migrations: `task_kind`, `feature_new_homework_chat`, `submission_payload + message_kind extend`
+- Migrations: `task_kind`, `submission_payload + message_kind extend` (всего 2, не 3)
 - Backend: новые endpoints `GET /student/problem/:hwId/:taskId`, `POST /student/problem/:hwId/:taskId/submission`
 - Frontend hooks: `useStudentProblemTask`, `useSubmitSolution`, реальные React Query keys
 - Feature flag wrapper в `StudentHomeworkDetail`
@@ -136,7 +136,7 @@ Phase 1 = Mobile только. Tablet/Desktop fallback на старый `/homew
 - Phase 2 backend grading pipeline: Gemini 3 Flash OCR + verdict states
 - Phase 2 voice + autosave
 - Phase 3 tablet/desktop split layouts (`student-problem-chat-multi-device.md`)
-- Phase 4 cutover: удалить `feature_new_homework_chat` flag, redirect `/homework/:id` → новый screen, удалить `GuidedHomeworkWorkspace`
+- Phase 4 cutover: redirect `/homework/:id` → новый screen для desktop тоже, удалить `GuidedHomeworkWorkspace`
 
 ---
 
@@ -156,7 +156,7 @@ Phase 1 = Mobile только. Tablet/Desktop fallback на старый `/homew
 
 ### Репетитор (secondary)
 
-> **Когда** я смотрю результаты ДЗ ученика на пилоте feature flag, **я хочу** что бы submission через SubmitSheet попадал в `homework_tutor_thread_messages` как специальное сообщение `message_kind='submission'`, **чтобы** видеть его в `GuidedThreadViewer` рядом с обычными ответами, без новой UI-поверхности.
+> **Когда** мой ученик отправляет решение через SubmitSheet с фото от руки, **я хочу** что бы submission попадал в `homework_tutor_thread_messages` как специальное сообщение `message_kind='submission'`, **чтобы** видеть его в `GuidedThreadViewer` рядом с обычными ответами, без новой UI-поверхности.
 
 ### Родитель (indirect)
 
@@ -168,10 +168,9 @@ Phase 1 = Mobile только. Tablet/Desktop fallback на старый `/homew
 
 ### Затрагиваемые файлы
 
-**Migrations (3):**
+**Migrations (2):**
 - `supabase/migrations/20260509120000_add_task_kind_to_homework_tasks.sql` — добавить колонку + backfill
-- `supabase/migrations/20260509120100_add_feature_new_homework_chat_flag.sql` — `profiles.feature_new_homework_chat boolean default false`
-- `supabase/migrations/20260509120200_add_submission_payload_to_thread_messages.sql` — `submission_payload JSONB nullable` + extend `message_kind` enum с `'submission'`
+- `supabase/migrations/20260509120100_add_submission_payload_to_thread_messages.sql` — `submission_payload JSONB nullable` + extend `message_kind` enum с `'submission'`
 
 **Backend (`supabase/functions/homework-api/index.ts`):**
 - Новый handler `handleGetStudentProblem(db, userId, hwId, taskId)` — возвращает single-task response с `{assignment, task, thread, student}` shape
@@ -188,14 +187,14 @@ Phase 1 = Mobile только. Tablet/Desktop fallback на старый `/homew
 - Новый: `src/lib/studentProblemApi.ts` — fetch helpers для GET/POST endpoints
 - Новый: `src/hooks/useStudentProblemTask.ts` (React Query)
 - Новый: `src/hooks/useSubmitSolution.ts` (mutation)
-- Modified: `src/pages/StudentHomeworkDetail.tsx` — feature flag wrapper в onClick handler задачи (redirect on mobile + flag=true)
+- Modified: `src/pages/StudentHomeworkDetail.tsx` — viewport-based redirect в onClick handler задачи (через `useIsMobile()` hook)
 - Modified: `src/types/homework.ts` — `task_kind` field в `StudentHomeworkTask`
 - Modified: `src/lib/studentHomeworkApi.ts` — extend SELECT для `task_kind`
 
 **Docs:**
 - `docs/delivery/features/student-homework-problem-screen/spec.md` (этот файл)
 - `docs/delivery/features/student-homework-problem-screen/tasks.md` (Step 5)
-- `.claude/rules/40-homework-system.md` — добавить секцию «Student Homework Problem Screen — feature flag + submission contract»
+- `.claude/rules/40-homework-system.md` — добавить секцию «Student Homework Problem Screen — viewport routing + submission contract»
 - `CLAUDE.md` rule — pointer к новой секции
 
 ### Data Model (изменения)
@@ -218,14 +217,6 @@ UPDATE homework_tutor_tasks
 ALTER TABLE homework_tutor_tasks
   ALTER COLUMN task_kind SET NOT NULL,
   ALTER COLUMN task_kind SET DEFAULT 'extended';
-```
-
-**`profiles`:**
-```sql
-ALTER TABLE profiles
-  ADD COLUMN feature_new_homework_chat boolean NOT NULL DEFAULT false;
-COMMENT ON COLUMN profiles.feature_new_homework_chat IS
-  'Pilot feature flag for new mobile-first homework problem screen. Phase 1 default off; tutor manually opts students in via SQL.';
 ```
 
 **`homework_tutor_thread_messages`:**
@@ -313,11 +304,10 @@ Behaviour:
 
 ```
 20260509120000  add_task_kind_to_homework_tasks
-20260509120100  add_feature_new_homework_chat_flag
-20260509120200  add_submission_payload_to_thread_messages
+20260509120100  add_submission_payload_to_thread_messages
 ```
 
-Все 3 — additive, idempotent (`IF NOT EXISTS` где можно), backward-compatible. Старый GuidedHomeworkWorkspace продолжает работать без изменений.
+Обе — additive, idempotent (`IF NOT EXISTS` где можно), backward-compatible. Старый GuidedHomeworkWorkspace продолжает работать без изменений.
 
 ---
 
@@ -351,8 +341,8 @@ Behaviour:
 
 ### Acceptance Criteria (testable, all P0 unless marked)
 
-- **AC-1 (P0):** Миграции `20260509120000`, `20260509120100`, `20260509120200` применяются на staging без ошибок. После применения: 100% существующих `homework_tutor_tasks` имеют `task_kind` (через backfill `short_answer→numeric, detailed_solution→extended`). Все существующие профили имеют `feature_new_homework_chat = false`.
-- **AC-2 (P0):** При `profile.feature_new_homework_chat=true` И viewport `<= 768px` И клике на задачу в `StudentHomeworkDetail` → navigate на `/student/homework/:hwId/problem/:taskId`. При `flag=false` ИЛИ viewport > 768px → existing inline GuidedHomeworkWorkspace без изменений (regression test).
+- **AC-1 (P0):** Миграции `20260509120000`, `20260509120100` применяются на staging без ошибок. После применения: 100% существующих `homework_tutor_tasks` имеют `task_kind` (через backfill `short_answer→numeric, detailed_solution→extended`).
+- **AC-2 (P0):** При viewport `<= 768px` И клике на задачу в `StudentHomeworkDetail` → navigate на `/student/homework/:hwId/problem/:taskId` (для **всех** учеников без opt-in). При viewport > 768px → existing inline GuidedHomeworkWorkspace без изменений (regression test). Resize listener активный — поворот iPad mini в портрет на следующем клике задачи переводит на новый screen.
 - **AC-3 (P0):** Endpoint `GET /student/problem/:hwId/:taskId` возвращает 200 OK для assigned student с правильным shape (см. §5 API). Возвращает 403 для не-assigned student. Возвращает 404 если task не существует. Не leak'ает tutor-only поля (`solution_text`, `rubric_*`) — проверяется на staging через response body grep.
 - **AC-4 (P0):** На route `/student/homework/:hwId/problem/:taskId`:
   - Topbar показывает «ЗАДАЧА N/M · {subject}» eyebrow + ДЗ title
@@ -402,14 +392,16 @@ Behaviour:
 npm run lint && npm run build && npm run smoke-check
 ```
 
-Manual QA на staging:
-1. Включить flag для тест-ученика: `UPDATE profiles SET feature_new_homework_chat=true WHERE id='<test_user_id>'`
-2. Открыть `/homework/<existing_assignment_id>` на iPhone (DevTools mobile mode 375×667)
-3. Кликнуть на задачу → ожидание: redirect на `/student/homework/.../problem/...`
-4. Verify все AC-4 elements присутствуют
-5. Открыть SubmitSheet → ввести numeric + добавить 1 фото → submit → ожидание verdict overlay
-6. Кликнуть «Следующая задача» → navigate на следующую (или backlist если последняя)
-7. Открыть на desktop (>768px) → ожидание: feature flag bypass, GuidedHomeworkWorkspace inline (regression)
+Manual QA на staging (до prod deploy):
+1. Открыть `/homework/<existing_assignment_id>` на тест-аккаунте на iPhone (DevTools mobile mode 375×667)
+2. Кликнуть на задачу → ожидание: redirect на `/student/homework/.../problem/...`
+3. Verify все AC-4 elements присутствуют
+4. Открыть SubmitSheet → ввести numeric + добавить 1 фото → submit → ожидание verdict overlay
+5. Кликнуть «Следующая задача» → navigate на следующую (или backlist если последняя)
+6. Открыть на desktop (>768px) → ожидание: GuidedHomeworkWorkspace inline (regression на старый flow)
+7. Тот же тест-аккаунт повернуть iPad в портрет (≤768px) → клик задачи → новый screen; обратно landscape (>768px) → старый flow
+
+После PASS на staging — `deploy-sokratai` на VPS → live для **всех** mobile-юзеров одновременно. Rollback при критическом баге = `git revert <hash>` + `deploy-sokratai` (~3 мин).
 
 ---
 
@@ -423,6 +415,7 @@ Manual QA на staging:
 | Feature flag не покрыт всеми callsite'ами для редиректа (например, открытие задачи из Telegram deep link) | Низкая | В Phase 1 enable flag только через explicit SQL для известных пилотных учеников; они открывают задачи только через UI клики, не deep link. Phase 4 cutover уберёт необходимость |
 | `task_kind='proof'` UI скрывает numeric input, но backend не проверяет → tutor поставил `proof` через SQL, ученик отправил через `numeric=null` | Низкая | Backend AC-5 validation: для `proof` numeric ignored, photos[] required; для `extended` numeric+photos оба required |
 | Backend `handleCheckAnswer` для submission не различает обычный chat-answer и submission в `evaluateStudentAnswer` промпте | Средняя | Phase 1: synthesized answer достаточно текстуально явный («Числовой ответ: X\n${text}»), AI normally реагирует. Phase 2 spec: явный hint в промпте про submission semantics |
+| **Критический баг в новом screen → ВСЕ mobile-юзера сразу страдают** (нет feature flag для SQL-toggle rollback) | Средняя | (1) Manual QA на staging до deploy — обязательная gate (TASK-11). (2) Rollback путь: `git revert <hash> && deploy-sokratai` (~3 мин). (3) Codex independent review (TASK-10) до prod deploy. (4) Phase 1 architectural simplicity (reuse handleCheckAnswer, no new grading pipeline) — снижает surface area для багов. (5) Старый GuidedHomeworkWorkspace остаётся в коде до Phase 4 — частичный rollback (на desktop) автоматический через viewport check |
 
 ### Открытые вопросы (все non-blocking для Phase 1)
 
@@ -443,19 +436,18 @@ Manual QA на staging:
 Краткий план (порядок выполнения):
 
 1. **TASK-1: Миграция `task_kind`** (Claude Code, ~30 мин)
-2. **TASK-2: Миграция `feature_new_homework_chat` flag** (Claude Code, ~15 мин)
-3. **TASK-3: Миграция `submission_payload` + extend `message_kind`** (Claude Code, ~30 мин)
-4. **TASK-4: Backend `GET /student/problem/:hwId/:taskId`** (Claude Code, ~1 час)
-5. **TASK-5: Backend `POST /student/problem/:hwId/:taskId/submission`** (Claude Code, ~1.5 часа — синтез answer + AI grading + message_kind=submission insert)
-6. **TASK-6: Frontend hooks + types** (Claude Code, ~45 мин — `useStudentProblemTask`, `useSubmitSolution`, `studentProblemApi`, `task_kind` в типах)
-7. **TASK-7: Frontend SubmitSheet с PhotoStrip + VerdictOverlay** (Claude Code, ~3 часа — самая большая task)
-8. **TASK-8: Hookup HomeworkProblem.tsx — replace mock на real data** (Claude Code, ~1 час)
-9. **TASK-9: Feature flag wrapper в StudentHomeworkDetail** (Claude Code, ~30 мин)
-10. **TASK-10: Documentation: CLAUDE.md rule + .claude/rules/40-homework-system.md секция** (Claude Code, ~30 мин)
-11. **TASK-11: Code review pass (Codex independent session)** (Codex, ~30 мин — review против AC-1..11)
-12. **TASK-12: Manual QA on staging + enable flag для 5 пилотных учеников** (Vladimir, ~1 час)
+2. **TASK-2: Миграция `submission_payload` + extend `message_kind`** (Claude Code, ~30 мин)
+3. **TASK-3: Backend `GET /student/problem/:hwId/:taskId`** (Claude Code, ~1 час)
+4. **TASK-4: Backend `POST /student/problem/:hwId/:taskId/submission`** (Claude Code, ~1.5 часа — синтез answer + AI grading + message_kind=submission insert)
+5. **TASK-5: Frontend hooks + types** (Claude Code, ~45 мин — `useStudentProblemTask`, `useSubmitSolution`, `studentProblemApi`, `task_kind` в типах)
+6. **TASK-6: Frontend SubmitSheet с PhotoStrip + VerdictOverlay** (Claude Code, ~3 часа — самая большая task)
+7. **TASK-7: Hookup HomeworkProblem.tsx — replace mock на real data** (Claude Code, ~1 час)
+8. **TASK-8: Viewport-based redirect в StudentHomeworkDetail** (Claude Code, ~20 мин — только `useIsMobile()` hook)
+9. **TASK-9: Documentation: CLAUDE.md rule + .claude/rules/40-homework-system.md секция** (Claude Code, ~30 мин)
+10. **TASK-10: Code review pass (Codex independent session)** (Codex, ~30 мин — review против AC-1..11)
+11. **TASK-11: Manual QA on staging → deploy-sokratai в прод** (Vladimir, ~1 час QA + 5 мин deploy)
 
-**Total ETA:** ~10-11 часов работы (без QA), ~1.5 day с code review + manual QA.
+**Total ETA:** ~9-10 часов работы (без QA), ~1.3 day с code review + manual QA + prod deploy.
 
 ---
 
@@ -481,7 +473,7 @@ Manual QA на staging:
 
 **Phase 3 (отдельная спека `student-homework-problem-multi-device.md`):** Tablet (Layout 2) + Desktop (Layout 3) с split-pane. Hint ladder UI блок. Math-keyboard в composer. Старт после Phase 2 stable.
 
-**Phase 4 cutover (отдельная спека `student-homework-problem-cutover.md`):** удалить `feature_new_homework_chat` flag, redirect `/homework/:id` → новый screen, удалить `GuidedHomeworkWorkspace.tsx` + связанные mock fixtures. Старт после ≥80% positive pilot signals.
+**Phase 4 cutover (отдельная спека `student-homework-problem-cutover.md`):** удалить `useIsMobile()` viewport check (новый screen для всех viewport'ов), redirect `/homework/:id` → новый screen, удалить `GuidedHomeworkWorkspace.tsx` + связанные mock fixtures. Старт после Phase 3 (tablet+desktop) stable ≥7 дней.
 
 ---
 
