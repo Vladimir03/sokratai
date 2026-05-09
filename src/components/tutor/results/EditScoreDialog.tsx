@@ -97,7 +97,11 @@ export function EditScoreDialog({
     if (Number.isNaN(numericValue)) return 'Введите число';
     if (numericValue < 0) return 'Минимум 0';
     if (numericValue > task.max_score) return `Максимум ${task.max_score}`;
-    if (Math.round(numericValue * 2) !== numericValue * 2) return 'Шаг 0.5';
+    // Step 0.1 (post-pilot 2026-05-09 — parity with AI prompt). Tolerance
+    // 1e-9 защищает от floating-point junk типа `1.7 * 10 = 16.999...` в
+    // некоторых JS-движках.
+    const scaled = numericValue * 10;
+    if (Math.abs(scaled - Math.round(scaled)) > 1e-9) return 'Шаг 0.1';
     return null;
   }, [numericValue, task.max_score]);
 
@@ -211,7 +215,7 @@ export function EditScoreDialog({
               id="edit-score-value"
               type="number"
               inputMode="decimal"
-              step={0.5}
+              step={0.1}
               min={0}
               max={task.max_score}
               value={valueText}
@@ -222,7 +226,7 @@ export function EditScoreDialog({
             <p className="text-xs text-slate-500">
               {validationError
                 ? validationError
-                : `0..${task.max_score}, шаг 0.5`}
+                : `0..${task.max_score}, шаг 0.1`}
             </p>
           </div>
 

@@ -2639,21 +2639,23 @@ async function handleGetResults(
           const taskInfo = taskMap[ts.task_id];
           const maxScore = taskInfo?.max_score ?? 1;
 
-          // For active threads, skip task_states that the student hasn't
-          // actually solved. provisionGuidedThread pre-creates ALL task_states
-          // as status="active", so including them would produce false-zero red
-          // cells in the heatmap and inflate aggregates.
-          //
-          // Product decision: "partial = only individually-completed tasks".
-          // In-progress tasks (with intermediate ai_score / hint_count from
-          // INCORRECT/ON_TRACK attempts) are excluded because earned_score is
-          // still null and the outcome is undetermined. This means tutor-side
-          // hint_total and score aggregates for in-progress students reflect
-          // only their solved tasks, not ongoing interaction. If the product
-          // later wants "partial = all current interaction", remove this guard
-          // and handle the null-earned_score display on the frontend.
+          // Cell-inclusion invariant (post-pilot 2026-05-09):
+          // task_state попадает в cellMap И в accumulator при ЛЮБОМ
+          // scoring-сигнале, не только при status='completed'. Это покрывает:
+          //   - status='completed' (полностью решённые задачи — historical)
+          //   - tutor_score_override≠null (явная ручная правка репетитора —
+          //     даже на active task без AI-оценки)
+          //   - ai_score≠null (AI частично оценил ON_TRACK / INCORRECT —
+          //     это полезный сигнал для tutor'а, без него override=null+AI=0.5
+          //     раньше скрывался от heatmap, что путало пилот)
+          // provisionGuidedThread-stub строки (status='active' БЕЗ override
+          // и БЕЗ ai_score) остаются исключёнными — этим избегаем false-zero
+          // ячеек на ещё не тронутых задачах. Полный контракт см. в
+          // .claude/rules/40-homework-system.md → «Heatmap cell inclusion».
           const isTaskCompleted = ts.status === "completed";
-          if (!isCompleted && !isTaskCompleted) continue;
+          const hasOverride = ts.tutor_score_override != null;
+          const hasAiScore = ts.ai_score != null;
+          if (!isCompleted && !isTaskCompleted && !hasOverride && !hasAiScore) continue;
 
           const finalScore = computeFinalScore(ts, maxScore);
           const hintCount = Number(ts.hint_count ?? 0);
@@ -2954,8 +2956,12 @@ async function handleSetTutorScoreOverride(
     if (rawOverride < 0 || rawOverride > maxScore) {
       return jsonError(cors, 400, "VALIDATION", `tutor_score_override must be in [0, ${maxScore}]`);
     }
-    if (Math.round(rawOverride * 2) !== rawOverride * 2) {
-      return jsonError(cors, 400, "VALIDATION", "tutor_score_override must be a multiple of 0.5");
+    // Step parity 0.1 (post-pilot 2026-05-09) — tutor и AI используют один шаг.
+    // Tolerance 1e-9 защищает от floating-point junk типа `1.7 * 10 = 16.999...`
+    // в некоторых JS-движках.
+    const scaled = rawOverride * 10;
+    if (Math.abs(scaled - Math.round(scaled)) > 1e-9) {
+      return jsonError(cors, 400, "VALIDATION", "tutor_score_override must be a multiple of 0.1");
     }
     overrideValue = rawOverride;
   } else {

@@ -422,6 +422,32 @@ Audit/normalize/optimize/harden pass на `/tutor/homework` и `/tutor/homework/
 - Если добавляешь новый source балла (e.g. `peer_score` в групповом ДЗ) — расширяй `computeFinalScore` priority chain в backend, и синхронно mirror'ь в client-side helpers (`taskStepItems` builder в `GuidedHomeworkWorkspace`, `selectedTaskFinalScore` в `GuidedThreadViewer`). НЕ дублируй формулу больше чем нужно — три mirror'а уже на грани.
 - Если добавляешь новое tutor-only поле в task_state — добавляй в `stripStudentSensitiveTaskStateFields`, иначе утечёт ученику через guided thread endpoints.
 
+**Heatmap cell inclusion invariant (post-pilot 2026-05-09):**
+- task_state попадает в `taskScoresByStudent` cellMap И в accumulator `studentAcc/activeStudentAcc.{final,max,hints}` при ЛЮБОМ scoring-сигнале:
+  - `task_state.status === 'completed'` (исторический контракт)
+  - `tutor_score_override !== null` (явная ручная правка — даже на active task без AI-оценки)
+  - `ai_score !== null` (AI частично оценил ON_TRACK / INCORRECT — partial AI scores на незавершённых задачах теперь видны в heatmap)
+- Skip-условие: thread активен И ни один сигнал не присутствует (`provisionGuidedThread`-stub строки со `status='active'` БЕЗ override и БЕЗ ai_score). Это защищает от false-zero ячеек на нетронутых задачах.
+- Side effect, который нужно учесть при изменениях: aggregate `acc.final` и `acc.max` для in-progress students теперь включают partial AI scores. `lowScore = acc.max > 0 && acc.final < 0.3 * acc.max` — semantically остаётся консистентным (числитель и знаменатель расширяются согласованно).
+- Симптом нарушения инварианта: override сохранён в БД (видно через `GET /threads/...` или прямым SQL), но клетка в `HeatmapGrid` или `TaskMiniCard` показывает «—». Грепнуть `if (!isCompleted && !isTaskCompleted` в `homework-api/index.ts` — должно быть полное условие с `&& !hasOverride && !hasAiScore`.
+
+**Score step invariant (post-pilot 2026-05-09):**
+- `tutor_score_override` И `ai_score` валидируются как multiples of **0.1** с tolerance `1e-9` (защита от floating-point junk типа `1.7 * 10 = 16.999...`).
+- Validator pattern (используется и в frontend, и в backend):
+  ```ts
+  const scaled = value * 10;
+  if (Math.abs(scaled - Math.round(scaled)) > 1e-9) return error('multiple of 0.1');
+  ```
+- AI prompt в `buildAiScoreGuidance` (`guided_ai.ts`) запрашивает шаг 0.1 у модели.
+- DB precision уже `numeric(5,2)` (миграция `20260408120000`) — поддерживает 0.1 без изменений.
+- Backward compat: старые 0.5-стэппед записи остаются валидными (0.5 ∈ multiples of 0.1). Не нужна data-миграция.
+- 5 точек, которые **обязаны** оставаться в синхроне при будущих изменениях шага:
+  1. `supabase/functions/homework-api/index.ts::handleSetTutorScoreOverride` validator
+  2. `supabase/functions/homework-api/guided_ai.ts::buildAiScoreGuidance` prompt text
+  3. `src/components/tutor/results/EditScoreDialog.tsx` validator (`validationError` useMemo)
+  4. `src/components/tutor/results/EditScoreDialog.tsx` `<input step={0.1}>`
+  5. `src/components/tutor/results/EditScoreDialog.tsx` hint text `0..N, шаг 0.1`
+
 ### Drill-down (Results v2 TASK-6, 2026-04-07)
 
 - `src/components/tutor/results/heatmapStyles.ts` — single source of truth для `getCellStyle` + `formatScore`. Вынесено из `HeatmapGrid.tsx` — react-refresh/only-export-components предупреждение при экспорте non-component из component file. **НЕ дублировать** color/format helpers — импортировать отсюда.
