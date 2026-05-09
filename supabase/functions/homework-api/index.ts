@@ -4826,7 +4826,13 @@ async function resolveStudentDisplayName(
       .maybeSingle();
     const tutorId = assn?.tutor_id as string | undefined;
 
-    // Primary: tutor-curated display name
+    // Priority chain (canonical, used by AI prompt + tutor UI):
+    //   1. tutor_students.display_name (tutor-curated)
+    //   2. profiles.full_name (real-name fallback — may be set by user during signup)
+    //   3. profiles.username (filtered against auto-generated placeholders)
+    //   4. null (caller renders "Ученик" or AI uses neutral form)
+
+    // 1. Tutor-curated display name
     if (tutorId) {
       const { data: ts } = await db
         .from("tutor_students")
@@ -4838,12 +4844,14 @@ async function resolveStudentDisplayName(
       if (curated) return curated;
     }
 
-    // Fallback: profiles.username, unless it's an auto-generated placeholder
+    // 2 + 3. profiles.full_name → profiles.username (filtered)
     const { data: prof } = await db
       .from("profiles")
-      .select("username")
+      .select("full_name, username")
       .eq("id", studentId)
       .maybeSingle();
+    const fullName = typeof prof?.full_name === "string" ? prof.full_name.trim() : "";
+    if (fullName) return fullName;
     const username = typeof prof?.username === "string" ? prof.username.trim() : "";
     if (!username) return null;
     if (/^(telegram_|user_)\d+$/i.test(username)) return null;
@@ -6679,10 +6687,32 @@ async function handleGetTutorStudentThread(
     .eq("id", studentId)
     .maybeSingle();
 
+  // Resolve tutor identity (avatar + name + gender) and student display_name
+  // in parallel — both are point-lookups and the viewer needs them upfront for
+  // the chat-bubble UI (Telegram-style identity above each message). Mirrors
+  // `fetchStudentThread` (line ~5847) so tutor and student threads have
+  // symmetric `tutor_profile` shape. resolveStudentDisplayName follows the
+  // canonical priority chain (tutor_students.display_name → profiles.full_name
+  // → profiles.username filtered → null) — same source AI prompts use.
+  const [tutorProfile, studentDisplayName] = await Promise.all([
+    resolveTutorProfileForAssignment(db, assignmentId),
+    resolveStudentDisplayName(db, studentAssignment.id),
+  ]);
+
+  const threadWithTutorProfile = {
+    ...(thread as Record<string, unknown>),
+    tutor_profile: tutorProfile,
+  };
+
   return jsonOk(cors, {
-    thread,
+    thread: threadWithTutorProfile,
     tasks: tasks ?? [],
-    student: profile ?? { id: studentId, full_name: null, username: null },
+    student: {
+      id: profile?.id ?? studentId,
+      full_name: profile?.full_name ?? null,
+      username: profile?.username ?? null,
+      display_name: studentDisplayName,
+    },
   });
 }
 

@@ -722,6 +722,14 @@ export interface TutorStudentGuidedThreadResponse {
     id: string;
     full_name: string | null;
     username: string | null;
+    /**
+     * Resolved display name for the tutor-facing chat UI. Backend follows
+     * the canonical priority chain (`tutor_students.display_name →
+     * profiles.full_name → profiles.username filtered → null`) — same one
+     * AI prompts use. Optional so frontend stays defensive against an
+     * older edge function deploy that hasn't shipped this field yet.
+     */
+    display_name?: string | null;
   };
 }
 

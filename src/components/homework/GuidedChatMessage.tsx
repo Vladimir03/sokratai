@@ -7,7 +7,7 @@ import { memo, lazy, Suspense, useEffect, useState, useMemo } from 'react';
 import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
-import { AlertTriangle, RotateCcw } from 'lucide-react';
+import { AlertTriangle, EyeOff, RotateCcw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { UserAvatar } from '@/components/common/UserAvatar';
 import { getStudentTaskImageSignedUrl } from '@/lib/studentHomeworkApi';
@@ -37,11 +37,56 @@ interface GuidedChatMessageProps {
   tutorDisplayName?: string;
   tutorAvatarUrl?: string | null;
   tutorGender?: 'male' | 'female' | null;
+  /**
+   * Whose viewpoint this message is rendered from.
+   * - 'student' (default): student-side workspace. tutor=left with identity,
+   *   user=right (own messages, no identity), assistant=left muted.
+   * - 'tutor': tutor-side viewer. tutor=right with identity (own messages),
+   *   user=left with student identity (avatar+name), assistant=left muted.
+   */
+  perspective?: 'student' | 'tutor';
+  /**
+   * Student identity props — only consumed when `perspective='tutor'`. The
+   * student's profile picture isn't part of the schema yet, so the typical
+   * value is `studentAvatarUrl=null, studentGender=null` and `UserAvatar`
+   * falls back to initials extracted from `studentDisplayName`.
+   */
+  studentDisplayName?: string;
+  studentAvatarUrl?: string | null;
+  studentGender?: 'male' | 'female' | null;
+  /**
+   * Optional small "Задача N" label shown above the bubble. Used by the
+   * tutor viewer when the task filter is "all" so it's clear which task a
+   * given message belongs to. Pass null/undefined to hide.
+   */
+  taskMarker?: string | null;
+  /**
+   * If true, render an "Скрыто от ученика" amber pill alongside the
+   * timestamp. Tutor-only; student perspective ignores this prop.
+   */
+  hiddenFromStudent?: boolean;
+  /**
+   * Custom resolver for `image_url` storage refs. Defaults to the student-
+   * scoped resolver (works for student-side workspace and for student-
+   * uploaded images). Tutor viewer passes a tutor-scoped resolver because
+   * tutor uploads land in a different bucket (`homework-images`).
+   */
+  imageResolver?: (ref: string) => Promise<string | null>;
+  /**
+   * If true, message timestamps render as full `DD.MM.YYYY, HH:MM:SS`
+   * (date + time). Default — time only (`HH:MM`). Used by the tutor viewer
+   * because messages can be days/weeks old; student workspace shows
+   * time-only since the student is in the live conversation.
+   */
+  showDateInTimestamp?: boolean;
 }
 
-function formatTime(isoString?: string): string {
+function formatTime(isoString?: string, showDate?: boolean): string {
   if (!isoString) return '';
   const date = new Date(isoString);
+  if (showDate) {
+    return date.toLocaleString('ru-RU');
+  }
   return date.toLocaleTimeString('ru-RU', {
     hour: '2-digit',
     minute: '2-digit',
@@ -65,7 +110,16 @@ const GuidedChatMessage = memo(({
   tutorDisplayName,
   tutorAvatarUrl,
   tutorGender,
+  perspective = 'student',
+  studentDisplayName,
+  studentAvatarUrl = null,
+  studentGender = null,
+  taskMarker,
+  hiddenFromStudent,
+  imageResolver,
+  showDateInTimestamp,
 }: GuidedChatMessageProps) => {
+  const resolveImageRef = imageResolver ?? getStudentTaskImageSignedUrl;
   const [katexLoaded, setKatexLoaded] = useState(false);
   const hasMath = message.content.includes('$') || message.content.includes('\\(') || message.content.includes('\\[');
 
@@ -85,62 +139,74 @@ const GuidedChatMessage = memo(({
   const isUser = message.role === 'user';
   const isSystem = message.role === 'system';
   const isTutor = message.role === 'tutor';
+  const isTutorPerspective = perspective === 'tutor';
   const kindLabel = formatMessageKind(message.message_kind);
   const isFailed = message.message_delivery_status === 'failed';
   const isSending = message.message_delivery_status === 'sending';
 
   const markdownComponents = useMemo(
     () => ({
+      // For user-role bubbles, the inverted text colors only apply on the
+      // student perspective (own messages = primary bg). On tutor perspective
+      // user bubbles are muted, so plain text colors fit.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       p: ({ node, ...props }: any) => (
         <p
           className={`mb-3 leading-relaxed last:mb-0 break-words whitespace-pre-wrap ${
-            isUser ? 'text-primary-foreground' : ''
+            isUser && !isTutorPerspective ? 'text-primary-foreground' : ''
           }`}
           {...props}
         />
       ),
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       strong: ({ node, ...props }: any) => (
         <strong
-          className={`font-bold ${isUser ? 'text-primary-foreground' : 'text-primary'}`}
+          className={`font-bold ${isUser && !isTutorPerspective ? 'text-primary-foreground' : 'text-primary'}`}
           {...props}
         />
       ),
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       ul: ({ node, ...props }: any) => (
         <ul className="list-disc ml-4 mb-3 space-y-1" {...props} />
       ),
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       ol: ({ node, ...props }: any) => (
         <ol className="list-decimal ml-4 mb-3 space-y-2" {...props} />
       ),
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       li: ({ node, ...props }: any) => (
         <li
-          className={`ml-2 break-words ${isUser ? 'text-primary-foreground' : ''}`}
+          className={`ml-2 break-words ${isUser && !isTutorPerspective ? 'text-primary-foreground' : ''}`}
           {...props}
         />
       ),
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       h3: ({ node, ...props }: any) => (
         <h3
           className={`font-bold text-lg mt-4 mb-2 break-words ${
-            isUser ? 'text-primary-foreground' : ''
+            isUser && !isTutorPerspective ? 'text-primary-foreground' : ''
           }`}
           {...props}
         />
       ),
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       pre: ({ node, children, ...props }: any) => (
         <pre
           className={`p-3 rounded-lg overflow-x-auto my-3 ${
-            isUser ? 'bg-primary-foreground/20 text-primary-foreground' : 'bg-muted'
+            isUser && !isTutorPerspective ? 'bg-primary-foreground/20 text-primary-foreground' : 'bg-muted'
           }`}
           {...props}
         >
           {children}
         </pre>
       ),
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       code: ({ node, inline, className, children, ...props }: any) => {
         if (inline) {
           return (
             <code
               className={`px-1.5 py-0.5 rounded text-sm break-words ${
-                isUser ? 'bg-primary-foreground/20 text-primary-foreground' : 'bg-muted'
+                isUser && !isTutorPerspective ? 'bg-primary-foreground/20 text-primary-foreground' : 'bg-muted'
               }`}
               {...props}
             >
@@ -155,7 +221,7 @@ const GuidedChatMessage = memo(({
         );
       },
     }),
-    [isUser],
+    [isUser, isTutorPerspective],
   );
 
   if (isSystem) {
@@ -168,11 +234,13 @@ const GuidedChatMessage = memo(({
     );
   }
 
+  // ─── Tutor message (role='tutor') ───────────────────────────────────────
+  // perspective='student': aligned-left with avatar+name above bubble (Telegram-
+  //   style) when tutor identity is provided. Legacy fallback otherwise.
+  // perspective='tutor':   aligned-right with avatar+name above bubble (Telegram-
+  //   "you" style). Same emerald palette for visual continuity with the student
+  //   side, since the message is from the tutor either way.
   if (isTutor) {
-    // Telegram-style identity (avatar + name above bubble) when the parent
-    // resolved the tutor's profile (TASK-7/8). Fallback to the legacy
-    // "Репетитор" pill inside the bubble for older callsites that don't pass
-    // the new props — keeps backward compat for any unmigrated mount points.
     const hasTutorIdentity =
       tutorDisplayName !== undefined || tutorAvatarUrl !== undefined;
 
@@ -190,30 +258,41 @@ const GuidedChatMessage = memo(({
         {message.image_url && (
           <ThreadAttachments
             attachmentValue={message.image_url}
-            resolveSignedUrl={getStudentTaskImageSignedUrl}
+            resolveSignedUrl={resolveImageRef}
           />
         )}
       </div>
     );
 
-    const timestamp = message.created_at ? (
-      <div className="text-[10px] mt-1 text-emerald-600/60 dark:text-emerald-400/60">
-        {formatTime(message.created_at)}
+    const timestampRow = message.created_at || hiddenFromStudent ? (
+      <div className="flex items-center gap-2 mt-1 text-[10px] text-emerald-600/60 dark:text-emerald-400/60">
+        {message.created_at ? <span>{formatTime(message.created_at, showDateInTimestamp)}</span> : null}
+        {hiddenFromStudent ? (
+          <span className="inline-flex items-center gap-0.5 rounded-sm bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-800 dark:bg-amber-900/30 dark:text-amber-300">
+            <EyeOff className="h-3 w-3" />
+            Скрыто
+          </span>
+        ) : null}
       </div>
     ) : null;
 
     if (!hasTutorIdentity) {
-      // Legacy callsite — no tutor profile resolved upstream. Preserve
-      // the original presentation exactly so unmigrated screens don't
-      // visually regress.
+      // Legacy callsite — preserve the original presentation exactly.
       return (
-        <div className="flex justify-start mb-3">
-          <div className="max-w-[85%] rounded-2xl px-4 py-2.5 bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 rounded-bl-md">
+        <div className={`flex ${isTutorPerspective ? 'justify-end' : 'justify-start'} mb-3`}>
+          <div className={`max-w-[85%] rounded-2xl px-4 py-2.5 bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 ${
+            isTutorPerspective ? 'rounded-br-md' : 'rounded-bl-md'
+          }`}>
+            {taskMarker ? (
+              <p className="text-[10px] mb-1 uppercase tracking-wide text-emerald-700/70 dark:text-emerald-400/70 font-medium">
+                {taskMarker}
+              </p>
+            ) : null}
             <p className="text-[10px] mb-1 uppercase tracking-wide text-emerald-700 dark:text-emerald-400 font-medium">
               Репетитор
             </p>
             {bubbleBody}
-            {timestamp}
+            {timestampRow}
           </div>
         </div>
       );
@@ -222,7 +301,7 @@ const GuidedChatMessage = memo(({
     const tutorLabel = tutorDisplayName?.trim() || 'Репетитор';
 
     return (
-      <div className="flex items-start gap-2 justify-start mb-3">
+      <div className={`flex items-start gap-2 ${isTutorPerspective ? 'flex-row-reverse justify-start' : 'justify-start'} mb-3`}>
         <UserAvatar
           size="sm"
           avatarUrl={tutorAvatarUrl}
@@ -230,18 +309,92 @@ const GuidedChatMessage = memo(({
           name={tutorDisplayName}
         />
         <div className="flex flex-col max-w-[85%] min-w-0">
-          <div className="text-xs font-semibold text-slate-700 truncate max-w-[200px]">
+          <div className={`text-xs font-semibold text-slate-700 dark:text-slate-300 truncate max-w-[200px] ${
+            isTutorPerspective ? 'self-end' : ''
+          }`}>
             {tutorLabel}
           </div>
-          <div className="mt-1 rounded-2xl px-4 py-2.5 bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 rounded-bl-md">
+          {taskMarker ? (
+            <div className={`text-[10px] mt-0.5 text-muted-foreground ${isTutorPerspective ? 'self-end' : ''}`}>
+              {taskMarker}
+            </div>
+          ) : null}
+          <div className={`mt-1 rounded-2xl px-4 py-2.5 bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 ${
+            isTutorPerspective ? 'rounded-br-md' : 'rounded-bl-md'
+          }`}>
             {bubbleBody}
-            {timestamp}
+            {timestampRow}
           </div>
         </div>
       </div>
     );
   }
 
+  // ─── User message (role='user', the student) ────────────────────────────
+  // perspective='student' (default): aligned-right, primary bg, no identity
+  //   (it's "you" — the user looking at their own messages).
+  // perspective='tutor': aligned-left with student avatar+name above bubble
+  //   (Telegram-style — tutor is reading the student's messages).
+  if (isUser && isTutorPerspective) {
+    const studentLabel = studentDisplayName?.trim() || 'Ученик';
+    const userBubbleBody = (
+      <div className="text-sm">
+        {kindLabel && (
+          <p className="text-[10px] mb-1 uppercase tracking-wide text-muted-foreground">
+            {kindLabel}
+          </p>
+        )}
+        <Suspense
+          fallback={<p className="whitespace-pre-wrap break-words">{displayContent}</p>}
+        >
+          <ReactMarkdown
+            remarkPlugins={[remarkGfm, remarkMath]}
+            rehypePlugins={hasMath && katexLoaded ? [rehypeKatex] : []}
+            components={markdownComponents}
+          >
+            {displayContent}
+          </ReactMarkdown>
+        </Suspense>
+        {message.image_url && (
+          <ThreadAttachments
+            attachmentValue={message.image_url}
+            resolveSignedUrl={resolveImageRef}
+          />
+        )}
+      </div>
+    );
+
+    return (
+      <div className="flex items-start gap-2 justify-start mb-3">
+        <UserAvatar
+          size="sm"
+          avatarUrl={studentAvatarUrl}
+          gender={studentGender}
+          name={studentDisplayName}
+        />
+        <div className="flex flex-col max-w-[85%] min-w-0">
+          <div className="text-xs font-semibold text-slate-700 dark:text-slate-300 truncate max-w-[200px]">
+            {studentLabel}
+          </div>
+          {taskMarker ? (
+            <div className="text-[10px] mt-0.5 text-muted-foreground">
+              {taskMarker}
+            </div>
+          ) : null}
+          <div className="mt-1 rounded-2xl px-4 py-2.5 bg-muted rounded-bl-md">
+            {userBubbleBody}
+            {message.created_at && (
+              <div className="text-[10px] mt-1 text-muted-foreground">
+                {formatTime(message.created_at, showDateInTimestamp)}
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ─── Default branch: assistant (AI) OR user-on-student-perspective ──────
   return (
     <div className={`flex ${isUser ? 'justify-end' : 'justify-start'} mb-3`}>
       <div
@@ -251,6 +404,13 @@ const GuidedChatMessage = memo(({
             : 'bg-muted rounded-bl-md'
         }`}
       >
+        {taskMarker ? (
+          <p className={`text-[10px] mb-1 uppercase tracking-wide ${
+            isUser ? 'text-primary-foreground/80' : 'text-muted-foreground'
+          }`}>
+            {taskMarker}
+          </p>
+        ) : null}
         <div className="text-sm">
           {kindLabel && (
             <p
@@ -277,7 +437,7 @@ const GuidedChatMessage = memo(({
           {message.image_url && (
             <ThreadAttachments
               attachmentValue={message.image_url}
-              resolveSignedUrl={getStudentTaskImageSignedUrl}
+              resolveSignedUrl={resolveImageRef}
             />
           )}
           {isStreaming && (
@@ -290,7 +450,7 @@ const GuidedChatMessage = memo(({
               isUser ? 'text-primary-foreground/60' : 'text-muted-foreground'
             }`}
           >
-            {formatTime(message.created_at)}
+            {formatTime(message.created_at, showDateInTimestamp)}
           </div>
         )}
         {isSending && (

@@ -236,6 +236,35 @@
 
 **Спека:** `docs/delivery/features/tutor-dashboard-v2/phase-1-follow-up-group-by-group.md`.
 
+### GuidedChatMessage perspective contract (2026-05-09)
+
+`src/components/homework/GuidedChatMessage.tsx` — **shared** message renderer для обеих сторон guided chat. Компонент мемоизирован (`memo()`); все props кроме `message` опциональны и имеют backward-compatible defaults. После 2026-05-09 этот компонент рендерит и студенческий `GuidedHomeworkWorkspace`, и тутор-side `GuidedThreadViewer` (раньше тутор-side имел собственный inline-рендеринг с бейджами).
+
+**Three invariants (МУСТ при любых изменениях):**
+
+1. **`perspective='student'` (default) backward-compat.** Все callsite-ы без `perspective` prop'а должны рендерить ровно как до 2026-05-09 — это student-side `GuidedHomeworkWorkspace`. Никаких визуальных регрессий: tutor=left с avatar+name (Telegram-style identity), user=right primary bg без identity (это «я» — сам ученик), assistant=left muted. Если что-то меняется в student-side рендеринге — обновляй и spec, и student callsite одновременно.
+
+2. **`perspective='tutor'` orientation — mirror flip.**
+   - `tutor` role → **right**, primary palette (emerald, как student-side bubble), avatar+name над bubble справа (Telegram-«ты»). 
+   - `user` role (студент) → **left**, muted bubble, **с** avatar+name над bubble (Telegram-style identity для ученика).
+   - `assistant` (AI) → **left**, без identity (третья сторона для обоих perspective).
+   - Шесть props контролируют tutor-side: `studentDisplayName`, `studentAvatarUrl`, `studentGender`, `taskMarker`, `hiddenFromStudent`, `imageResolver`. Все опциональны, но **обязаны** работать вместе — нельзя передать `studentDisplayName` без `studentAvatarUrl=null` (UserAvatar fallback'ит на инициалы).
+
+3. **Identity props chain — single source of truth.**
+   - `tutor_profile` (имя/аватар/gender репетитора) — берётся из `thread.tutor_profile`. Backend атачит через **существующий** `resolveTutorProfileForAssignment(db, assignmentId)` (`homework-api/index.ts:4733`). Не дублировать резолвер ни на frontend, ни на backend.
+   - `student.display_name` — backend резолвит через **существующий** `resolveStudentDisplayName(db, studentAssignmentId)` (`homework-api/index.ts:4808`). Каскад: `tutor_students.display_name → profiles.full_name → profiles.username (filtered) → null`. Эту же функцию использует AI prompt path (`handleCheckAnswer` / `handleRequestHint`) — изменения каскада влияют на обе поверхности.
+   - Frontend defensive fallback в `GuidedThreadViewer`: `student.display_name ?? student.full_name ?? student.username (filtered) ?? "Ученик"`. Защищает на момент когда frontend bundle deployed, а edge function ещё нет.
+
+**Image resolver per-perspective:** tutor uploads landed в bucket `homework-images`, student-side uploads — в `homework-task-images`. `GuidedChatMessage` принимает `imageResolver?: (ref) => Promise<string | null>` prop, default = `getStudentTaskImageSignedUrl` (student bucket). Tutor viewer передаёт `(ref) => getHomeworkImageSignedUrl(ref, { defaultBucket: 'homework-images' })`. Если добавляется новый bucket для homework media — обнови оба callsite.
+
+**Timestamp format per-perspective:** student-side показывает только время (`HH:MM`) — диалог идёт в реальном времени. Tutor-side показывает дату+время через prop `showDateInTimestamp` — сообщения могут быть из давних тредов. Не убирать без отдельного UX-решения.
+
+**Files:**
+- `src/components/homework/GuidedChatMessage.tsx` — компонент
+- `src/components/homework/GuidedHomeworkWorkspace.tsx` — student callsite (`perspective='student'`)
+- `src/components/tutor/GuidedThreadViewer.tsx` — tutor callsite (`perspective='tutor'` + 6 props)
+- `supabase/functions/homework-api/index.ts::handleGetTutorStudentThread` — backend атачит `tutor_profile` к thread + резолвит `student.display_name`
+
 ### Realtime thread viewer (E9, 2026-04-06)
 - Для live-обновлений треда репетитора таблица `public.homework_tutor_thread_messages` должна быть добавлена в publication `supabase_realtime`
 - Каноничная миграция: `20260406143000_enable_realtime_homework_tutor_thread_messages.sql`

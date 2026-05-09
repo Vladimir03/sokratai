@@ -2,13 +2,11 @@ import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
 import { Skeleton } from '@/components/ui/skeleton';
 import { ChevronDown, ChevronUp, Loader2, Paperclip, Pencil, Send, X } from 'lucide-react';
 import { MathText } from '@/components/kb/ui/MathText';
-import { parseISO } from 'date-fns';
 import { toast } from 'sonner';
 import {
   getTutorStudentGuidedThread,
@@ -26,21 +24,14 @@ import {
   TUTOR_STALE_TIME_MS,
   TUTOR_GC_TIME_MS,
 } from '@/hooks/tutorQueryOptions';
-import { ThreadAttachments } from '@/components/homework/ThreadAttachments';
 import { PhotoGallery } from '@/components/homework/shared/PhotoGallery';
+import GuidedChatMessage from '@/components/homework/GuidedChatMessage';
 import { EditScoreDialog } from '@/components/tutor/results/EditScoreDialog';
 import { supabase } from '@/lib/supabaseClient';
 import type { Database } from '@/integrations/supabase/types';
 import { parseAttachmentUrls } from '@/lib/attachmentRefs';
 
 const STICKY_BOTTOM_THRESHOLD_PX = 100;
-
-const ROLE_LABELS: Record<string, string> = {
-  user: 'Ученик',
-  assistant: 'AI',
-  system: 'Система',
-  tutor: 'Репетитор',
-};
 
 const TASK_STATUS_LABELS: Record<string, string> = {
   locked: 'Закрыта',
@@ -264,6 +255,52 @@ export function GuidedThreadViewer({
   const taskOrderById = useMemo(
     () => new Map((threadQuery.data?.tasks ?? []).map((task) => [task.id, task.order_num])),
     [threadQuery.data?.tasks],
+  );
+
+  // Tutor identity for the chat-bubble UI (avatar + name above each tutor
+  // message). Backend attaches `tutor_profile` to thread response — see
+  // `handleGetTutorStudentThread`. We default to `display_name=undefined`
+  // (not empty string) so GuidedChatMessage keeps the legacy «Репетитор»
+  // pill if backend hasn't shipped tutor_profile yet (defensive).
+  const tutorIdentity = useMemo(() => {
+    const profile = threadQuery.data?.thread.tutor_profile ?? null;
+    return {
+      displayName: profile?.display_name?.trim() || undefined,
+      avatarUrl: profile?.avatar_url ?? null,
+      gender: profile?.gender ?? null,
+    };
+  }, [threadQuery.data?.thread.tutor_profile]);
+
+  // Student display label for the tutor-side viewer. Backend resolves the
+  // canonical priority (`tutor_students.display_name → profiles.full_name →
+  // profiles.username filtered → null`) into `student.display_name`. Frontend
+  // falls back through `full_name → username → "Ученик"` defensively in case
+  // the backend deploy lags behind the frontend bundle.
+  const studentDisplayLabel = useMemo(() => {
+    const student = threadQuery.data?.student;
+    const candidates = [
+      student?.display_name,
+      student?.full_name,
+      student?.username,
+    ];
+    for (const candidate of candidates) {
+      if (typeof candidate !== 'string') continue;
+      const trimmed = candidate.trim();
+      if (!trimmed) continue;
+      // Skip auto-generated usernames defensively (backend already filters
+      // them, but a pre-migration deploy could leak `telegram_12345`).
+      if (/^(telegram_|user_)\d+$/i.test(trimmed)) continue;
+      return trimmed;
+    }
+    return 'Ученик';
+  }, [threadQuery.data?.student]);
+
+  // Tutor uploads land in the `homework-images` bucket; tutor-side signed-URL
+  // requests must use the tutor-scoped resolver. Memoized so GuidedChatMessage
+  // memo() doesn't refetch URLs on every render.
+  const tutorImageResolver = useCallback(
+    (ref: string) => getHomeworkImageSignedUrl(ref, { defaultBucket: 'homework-images' }),
+    [],
   );
 
   const selectedTask = useMemo(() => {
@@ -509,52 +546,46 @@ export function GuidedThreadViewer({
 
               <div
                 ref={scrollContainerRef}
-                className="rounded-md border bg-background p-2 max-h-[320px] overflow-y-auto space-y-2"
+                className="rounded-md border bg-background p-3 max-h-[320px] overflow-y-auto"
               >
                 {filteredMessages.length === 0 ? (
                   <p className="text-xs text-muted-foreground">Сообщений по этому фильтру пока нет.</p>
                 ) : (
-                  filteredMessages.map((message) => (
-                    <div key={message.id} className="rounded-md border p-2 text-xs space-y-1">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <Badge variant={
-                          message.role === 'tutor' ? 'default' :
-                          message.role === 'assistant' ? 'secondary' : 'outline'
-                        }>
-                          {ROLE_LABELS[message.role] ?? message.role}
-                        </Badge>
-                        {message.message_kind === 'system' && message.role === 'assistant' && (
-                          <Badge variant="outline" className="text-[10px] bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-900/20 dark:text-blue-400 dark:border-blue-800">
-                            Введение
-                          </Badge>
-                        )}
-                        {message.visible_to_student === false && (
-                          <Badge variant="outline" className="text-[10px] bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-900/20 dark:text-amber-400 dark:border-amber-800">
-                            Скрыто от ученика
-                          </Badge>
-                        )}
-                        <span className="text-muted-foreground ml-auto">
-                          {(() => {
-                            const displayOrder = message.task_id
-                              ? taskOrderById.get(message.task_id) ?? message.task_order
-                              : message.task_order;
-                            return displayOrder ? `Задача ${displayOrder}` : '';
-                          })()}
-                        </span>
-                        <span className="text-muted-foreground">
-                          {parseISO(message.created_at).toLocaleString('ru-RU')}
-                        </span>
-                      </div>
-                      <MathText text={message.content} className="whitespace-pre-wrap leading-relaxed break-words" />
-                      {message.image_url && (
-                        <ThreadAttachments
-                          attachmentValue={message.image_url}
-                          resolveSignedUrl={(ref) => getHomeworkImageSignedUrl(ref, { defaultBucket: 'homework-images' })}
-                          compact
-                        />
-                      )}
-                    </div>
-                  ))
+                  filteredMessages.map((message) => {
+                    // Resolve task marker only when filter is "all" — otherwise
+                    // a single-task filter is implicit context, marker would
+                    // duplicate the «Условие задачи #N» block above.
+                    const displayOrder = taskFilter === 'all'
+                      ? (message.task_id
+                          ? taskOrderById.get(message.task_id) ?? message.task_order
+                          : message.task_order)
+                      : null;
+                    const taskMarker = displayOrder ? `Задача ${displayOrder}` : null;
+                    return (
+                      <GuidedChatMessage
+                        key={message.id}
+                        message={{
+                          id: message.id,
+                          role: message.role,
+                          content: message.content,
+                          image_url: message.image_url ?? null,
+                          created_at: message.created_at,
+                          message_kind: message.message_kind,
+                        }}
+                        perspective="tutor"
+                        tutorDisplayName={tutorIdentity.displayName}
+                        tutorAvatarUrl={tutorIdentity.avatarUrl}
+                        tutorGender={tutorIdentity.gender}
+                        studentDisplayName={studentDisplayLabel}
+                        studentAvatarUrl={null}
+                        studentGender={null}
+                        taskMarker={taskMarker}
+                        hiddenFromStudent={message.visible_to_student === false}
+                        imageResolver={tutorImageResolver}
+                        showDateInTimestamp
+                      />
+                    );
+                  })
                 )}
               </div>
 

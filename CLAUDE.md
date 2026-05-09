@@ -436,13 +436,14 @@ For architecture overview see: docs/delivery/engineering/architecture/README.md
 
 Все три пути общения ученика с AI получают имя и используют правильный грамматический род.
 
-**Источники имени (приоритет):**
+**Источники имени (приоритет, 2026-05-09 расширено):**
 - `tutor_students.display_name` — tutor-owned поле, primary source (ДЗ-пути)
+- `profiles.full_name` — real-name fallback (может быть set'нут пользователем при signup)
 - `profiles.username` — fallback, если не автогенеренный
-- Автогенеренные username-ы отфильтровываются regex `/^(telegram_|user_)\d+$/i` → AI работает в нейтральной форме
+- Автогенеренные username-ы отфильтровываются regex `/^(telegram_|user_)\d+$/i` → AI работает в нейтральной форме (`full_name` фильтр НЕ применяется — там реальное имя)
 
 **Путь 1 — «Ответ к задаче» (ДЗ, edge function `homework-api`):**
-- `resolveStudentDisplayName(db, studentAssignmentId)` в `supabase/functions/homework-api/index.ts` резолвит: `tutor_students.display_name → profiles.username (non-auto) → null`
+- `resolveStudentDisplayName(db, studentAssignmentId)` в `supabase/functions/homework-api/index.ts` резолвит: `tutor_students.display_name → profiles.full_name → profiles.username (non-auto) → null`. Эта же функция используется в `handleGetTutorStudentThread` для tutor-side chat-bubble identity (см. правило `40-homework-system.md` → «GuidedChatMessage perspective contract»)
 - Подключено в `handleCheckAnswer` и `handleRequestHint` → `evaluateStudentAnswer` / `generateHint`
 - `buildStudentNameGuidance(studentName)` в `guided_ai.ts` добавляет секцию в системный промпт
 
