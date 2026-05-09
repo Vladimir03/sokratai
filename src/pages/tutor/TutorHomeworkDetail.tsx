@@ -710,6 +710,7 @@ function TutorHomeworkDetailContent() {
                     <StudentDrillDown
                       assignmentId={details.assignment.id}
                       studentId={expandedStudent.student_id}
+                      studentName={expandedStudent.name}
                       tasks={details.tasks}
                       perStudent={expandedPerStudent}
                       initialTaskId={drillDownTaskId}

@@ -10,6 +10,13 @@ import rehypeKatex from 'rehype-katex';
 import { AlertTriangle, EyeOff, RotateCcw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { UserAvatar } from '@/components/common/UserAvatar';
+import sokratChatIcon from '@/assets/sokrat-chat-icon.png';
+
+// Brand identity for AI messages. Single source of truth — when the product
+// renames the AI persona or swaps the icon, change here and both student-side
+// and tutor-side surfaces update consistently.
+const AI_DISPLAY_NAME = 'Сократ AI';
+const AI_AVATAR_URL: string = sokratChatIcon;
 import { getStudentTaskImageSignedUrl } from '@/lib/studentHomeworkApi';
 import type { GuidedMessageKind, MessageDeliveryStatus } from '@/types/homework';
 import { preprocessLatex } from '@/components/kb/ui/preprocessLatex';
@@ -394,7 +401,90 @@ const GuidedChatMessage = memo(({
     );
   }
 
-  // ─── Default branch: assistant (AI) OR user-on-student-perspective ──────
+  // ─── Assistant message (role='assistant', the AI) ───────────────────────
+  // Both perspectives render the AI with brand identity (Sokrat icon +
+  // «Сократ AI» caption above bubble) so the conversation reads as a clear
+  // three-party exchange (student/tutor/AI) regardless of who's looking.
+  if (message.role === 'assistant') {
+    return (
+      <div className="flex items-start gap-2 justify-start mb-3">
+        <UserAvatar
+          size="sm"
+          avatarUrl={AI_AVATAR_URL}
+          name={AI_DISPLAY_NAME}
+        />
+        <div className="flex flex-col max-w-[85%] min-w-0">
+          <div className="text-xs font-semibold text-slate-700 dark:text-slate-300 truncate max-w-[200px]">
+            {AI_DISPLAY_NAME}
+          </div>
+          {taskMarker ? (
+            <div className="text-[10px] mt-0.5 text-muted-foreground">
+              {taskMarker}
+            </div>
+          ) : null}
+          <div className="mt-1 rounded-2xl px-4 py-2.5 bg-muted rounded-bl-md">
+            <div className="text-sm">
+              {kindLabel && (
+                <p className="text-[10px] mb-1 uppercase tracking-wide text-muted-foreground">
+                  {kindLabel}
+                </p>
+              )}
+              <Suspense
+                fallback={
+                  <p className="whitespace-pre-wrap break-words">{displayContent}</p>
+                }
+              >
+                <ReactMarkdown
+                  remarkPlugins={[remarkGfm, remarkMath]}
+                  rehypePlugins={hasMath && katexLoaded ? [rehypeKatex] : []}
+                  components={markdownComponents}
+                >
+                  {displayContent}
+                </ReactMarkdown>
+              </Suspense>
+              {message.image_url && (
+                <ThreadAttachments
+                  attachmentValue={message.image_url}
+                  resolveSignedUrl={resolveImageRef}
+                />
+              )}
+              {isStreaming && (
+                <span className="inline-block w-1.5 h-4 bg-current animate-pulse ml-0.5 align-text-bottom" />
+              )}
+            </div>
+            {message.created_at && (
+              <div className="text-[10px] mt-1 text-muted-foreground">
+                {formatTime(message.created_at, showDateInTimestamp)}
+              </div>
+            )}
+            {isFailed && (
+              <div className="mt-2 flex items-center gap-2">
+                <span className="inline-flex items-center gap-1 text-[10px] text-destructive">
+                  <AlertTriangle className="h-3 w-3" />
+                  Не отправлено
+                </span>
+                {message.id && onRetry && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-6 px-2 text-[10px]"
+                    onClick={() => onRetry(message.id!)}
+                  >
+                    <RotateCcw className="h-3 w-3 mr-1" />
+                    Повторить
+                  </Button>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ─── User message on student perspective (own messages, "you") ──────────
+  // Right-aligned, primary palette, no identity rendered (user is looking
+  // at their own bubble — no need for self-attribution).
   return (
     <div className={`flex ${isUser ? 'justify-end' : 'justify-start'} mb-3`}>
       <div

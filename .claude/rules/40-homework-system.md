@@ -245,9 +245,9 @@
 1. **`perspective='student'` (default) backward-compat.** Все callsite-ы без `perspective` prop'а должны рендерить ровно как до 2026-05-09 — это student-side `GuidedHomeworkWorkspace`. Никаких визуальных регрессий: tutor=left с avatar+name (Telegram-style identity), user=right primary bg без identity (это «я» — сам ученик), assistant=left muted. Если что-то меняется в student-side рендеринге — обновляй и spec, и student callsite одновременно.
 
 2. **`perspective='tutor'` orientation — mirror flip.**
-   - `tutor` role → **right**, primary palette (emerald, как student-side bubble), avatar+name над bubble справа (Telegram-«ты»). 
+   - `tutor` role → **right**, primary palette (emerald, как student-side bubble), avatar+name над bubble справа (Telegram-«ты»).
    - `user` role (студент) → **left**, muted bubble, **с** avatar+name над bubble (Telegram-style identity для ученика).
-   - `assistant` (AI) → **left**, без identity (третья сторона для обоих perspective).
+   - `assistant` (AI) → **left**, **с** AI identity (см. инвариант 4 ниже) — Sokrat icon + «Сократ AI».
    - Шесть props контролируют tutor-side: `studentDisplayName`, `studentAvatarUrl`, `studentGender`, `taskMarker`, `hiddenFromStudent`, `imageResolver`. Все опциональны, но **обязаны** работать вместе — нельзя передать `studentDisplayName` без `studentAvatarUrl=null` (UserAvatar fallback'ит на инициалы).
 
 3. **Identity props chain — single source of truth.**
@@ -256,6 +256,10 @@
    - Frontend defensive fallback в `GuidedThreadViewer`: `student.display_name ?? student.full_name ?? student.username (filtered) ?? "Ученик"`. Защищает на момент когда frontend bundle deployed, а edge function ещё нет.
 
 **Image resolver per-perspective:** tutor uploads landed в bucket `homework-images`, student-side uploads — в `homework-task-images`. `GuidedChatMessage` принимает `imageResolver?: (ref) => Promise<string | null>` prop, default = `getStudentTaskImageSignedUrl` (student bucket). Tutor viewer передаёт `(ref) => getHomeworkImageSignedUrl(ref, { defaultBucket: 'homework-images' })`. Если добавляется новый bucket для homework media — обнови оба callsite.
+
+**Invariant 4 — AI identity (2026-05-09):** `role='assistant'` сообщения рендерятся с brand-identity на **обеих** сторонах (`perspective='student'` и `perspective='tutor'`). Avatar = `src/assets/sokrat-chat-icon.png` (импортируется через Vite, single source of truth — константа `AI_AVATAR_URL` в файле `GuidedChatMessage.tsx`). Display name = `'Сократ AI'` (константа `AI_DISPLAY_NAME` в том же файле). Layout: avatar слева, имя над muted bubble (Telegram-style), bubble остаётся muted без primary palette. При rebrand'е AI persona — менять только две константы. Не передавать tutorAvatarUrl/tutorDisplayName props для `role='assistant'` сообщений — они игнорируются, идентичность assistant не конфигурируется через props по дизайну (brand consistency).
+
+**Student name override (2026-05-09):** `GuidedThreadViewer` принимает опциональный `studentNameOverride?: string | null` — имя ученика, уже резолвлёное родителем (например `TutorHomeworkDetail.details.assigned_students[*].name`). Когда передано, **wins over** `student.display_name` из своего fetch'а. Это deploy-independent fix: имя появляется мгновенно, не требует redeploy edge function. Каскад в `studentDisplayLabel` useMemo: `studentNameOverride → student.display_name → student.full_name → student.username (filtered) → "Ученик"`.
 
 **Timestamp format per-perspective:** student-side показывает только время (`HH:MM`) — диалог идёт в реальном времени. Tutor-side показывает дату+время через prop `showDateInTimestamp` — сообщения могут быть из давних тредов. Не убирать без отдельного UX-решения.
 

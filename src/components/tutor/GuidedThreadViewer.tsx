@@ -97,6 +97,7 @@ function TaskContextGallery({
 export function GuidedThreadViewer({
   assignmentId,
   studentId,
+  studentNameOverride,
   enabled = true,
   initialTaskFilter = 'all',
   hideTaskFilter = false,
@@ -104,6 +105,16 @@ export function GuidedThreadViewer({
 }: {
   assignmentId: string;
   studentId: string;
+  /**
+   * Optional student display name resolved by the parent (e.g.
+   * TutorHomeworkDetail uses `details.assigned_students[*].name` which is
+   * already resolved server-side). When provided, it wins over the viewer's
+   * own `student.display_name` from the thread fetch — handy for showing
+   * the right name instantly without waiting on the inner query, and
+   * keeps the UI consistent with the parent's «Разбор ученика: X» header
+   * even if the edge function hasn't redeployed with display_name yet.
+   */
+  studentNameOverride?: string | null;
   /** Controls whether the thread query fires. Parent should pass false when viewer is collapsed. */
   enabled?: boolean;
   /**
@@ -271,12 +282,19 @@ export function GuidedThreadViewer({
     };
   }, [threadQuery.data?.thread.tutor_profile]);
 
-  // Student display label for the tutor-side viewer. Backend resolves the
-  // canonical priority (`tutor_students.display_name → profiles.full_name →
-  // profiles.username filtered → null`) into `student.display_name`. Frontend
-  // falls back through `full_name → username → "Ученик"` defensively in case
-  // the backend deploy lags behind the frontend bundle.
+  // Student display label for the tutor-side viewer. Priority:
+  //   1. `studentNameOverride` from the parent (already resolved by parent's
+  //      query, e.g. `TutorHomeworkDetail.details.assigned_students[*].name`).
+  //      Wins because it's instant and stays in sync with the parent's
+  //      «Разбор ученика: X» header.
+  //   2. Backend `student.display_name` (resolved via `resolveStudentDisplayName`).
+  //   3. Defensive fallback chain: `full_name → username (filtered) → "Ученик"`
+  //      so the UI degrades gracefully when the edge function deploy lags
+  //      behind the frontend bundle.
   const studentDisplayLabel = useMemo(() => {
+    const overrideTrimmed = studentNameOverride?.trim();
+    if (overrideTrimmed) return overrideTrimmed;
+
     const student = threadQuery.data?.student;
     const candidates = [
       student?.display_name,
@@ -293,7 +311,7 @@ export function GuidedThreadViewer({
       return trimmed;
     }
     return 'Ученик';
-  }, [threadQuery.data?.student]);
+  }, [studentNameOverride, threadQuery.data?.student]);
 
   // Tutor uploads land in the `homework-images` bucket; tutor-side signed-URL
   // requests must use the tutor-scoped resolver. Memoized so GuidedChatMessage

@@ -18,6 +18,14 @@ import type {
 interface StudentDrillDownProps {
   assignmentId: string;
   studentId: string;
+  /**
+   * Resolved student display name from the parent (TutorHomeworkDetail) —
+   * comes from `details.assigned_students[*].name` which is already resolved
+   * server-side via the canonical priority chain. Passing it down avoids
+   * waiting on the viewer's own thread fetch and works even if the
+   * homework-api edge function deploy lags behind the frontend bundle.
+   */
+  studentName?: string | null;
   tasks: TutorHomeworkAssignmentDetails['tasks'];
   perStudent: TutorHomeworkResultsPerStudent | null;
   /** Task selected from a HeatmapGrid cell click. `null` = show all tasks. */
@@ -27,6 +35,7 @@ interface StudentDrillDownProps {
 export function StudentDrillDown({
   assignmentId,
   studentId,
+  studentName,
   tasks,
   perStudent,
   initialTaskId,
@@ -164,6 +173,7 @@ export function StudentDrillDown({
           key={selectedTaskId ?? 'all'}
           assignmentId={assignmentId}
           studentId={studentId}
+          studentNameOverride={studentName ?? null}
           enabled={true}
           initialTaskFilter={selectedTaskOrder}
           hideTaskFilter={true}
