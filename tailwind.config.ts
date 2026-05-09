@@ -131,10 +131,26 @@ export default {
             height: "0",
           },
         },
+        // Used by `TypingDots` on the student homework-problem chat —
+        // three dots pulse with staggered delays. Per design handoff
+        // `.ch-typing` keyframe spec.
+        "homework-typing-dot": {
+          "0%, 60%, 100%": { opacity: "0.3", transform: "translateY(0)" },
+          "30%": { opacity: "1", transform: "translateY(-3px)" },
+        },
+        // Bottom-sheet slide-up for SubmitSheetStub (Phase 1) and the real
+        // SubmitSheet (Phase 2). Mirrors design `.subm-sheet` keyframe.
+        "homework-sheet-slide-up": {
+          from: { transform: "translateY(100%)" },
+          to: { transform: "translateY(0)" },
+        },
       },
       animation: {
         "accordion-down": "accordion-down 0.2s ease-out",
         "accordion-up": "accordion-up 0.2s ease-out",
+        "homework-typing-dot": "homework-typing-dot 1.2s infinite ease-in-out",
+        "homework-sheet-slide-up":
+          "homework-sheet-slide-up 280ms cubic-bezier(0.2,0.8,0.2,1)",
       },
     },
   },

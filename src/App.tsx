@@ -26,6 +26,11 @@ const ResetPassword = lazy(() => import("./pages/ResetPassword"));
 const Chat = lazy(() => import("./pages/Chat"));
 const StudentHomework = lazy(() => import("./pages/StudentHomework"));
 const StudentHomeworkDetail = lazy(() => import("./pages/StudentHomeworkDetail"));
+// Phase 1 design-validation screen for the new student homework problem
+// chat. Mock-only data, no auth wrapping (intentional — see page docblock).
+// When Phase 2 wires real backend, this will move under AuthGuard or a
+// new full-bleed student layout.
+const HomeworkProblem = lazy(() => import("./pages/student/HomeworkProblem"));
 const StudentMockExams = lazy(() => import("./pages/student/StudentMockExams"));
 const StudentMockExam = lazy(() => import("./pages/student/StudentMockExam"));
 const StudentMockExamResult = lazy(() => import("./pages/student/StudentMockExamResult"));
@@ -178,13 +183,25 @@ const App = () => (
                 </Suspense>
               } 
             />
-            <Route 
-              path="/homework/:id" 
+            <Route
+              path="/homework/:id"
               element={
                 <Suspense fallback={<PageLoader />}>
                   <StudentHomeworkDetail />
                 </Suspense>
-              } 
+              }
+            />
+            {/* Phase 1 design-validation route for the new homework chat
+                screen. Mock-only data — see HomeworkProblem.tsx docblock.
+                Full-bleed mobile layout (no global Navigation), so this
+                stays outside AuthGuard for now. */}
+            <Route
+              path="/student/homework/:hwId/problem/:taskId"
+              element={
+                <Suspense fallback={<PageLoader />}>
+                  <HomeworkProblem />
+                </Suspense>
+              }
             />
             <Route
               path="/student/mock-exams"
