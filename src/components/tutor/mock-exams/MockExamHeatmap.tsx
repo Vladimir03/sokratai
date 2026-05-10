@@ -319,8 +319,8 @@ export function MockExamHeatmap({
       not_started: 5,
     };
     return [...attempts].sort((a, b) => {
-      const pa = priority[deriveDisplayStatus(a.status)];
-      const pb = priority[deriveDisplayStatus(b.status)];
+      const pa = priority[deriveDisplayStatus(a.status, a.started_at)];
+      const pb = priority[deriveDisplayStatus(b.status, b.started_at)];
       if (pa !== pb) return pa - pb;
       return (a.student_display_name ?? '').localeCompare(
         b.student_display_name ?? '',

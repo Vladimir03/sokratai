@@ -297,7 +297,7 @@ export async function listStudentAssignments(): Promise<StudentHomeworkAssignmen
         topic: assignment.topic,
         description: assignment.description,
         deadline: assignment.deadline,
-        status: assignment.status,
+        status: assignment.status as StudentHomeworkAssignment['status'],
         latest_submission_status,
         created_at: assignment.created_at,
       } satisfies StudentHomeworkAssignment;
