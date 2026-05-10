@@ -75,6 +75,15 @@ export interface StudentHomeworkTask {
   task_image_url: string | null;
   max_score: number;
   check_format: 'short_answer' | 'detailed_solution';
+  /**
+   * Phase 1 student homework problem screen task type. Drives SubmitSheet UI:
+   *   - `numeric`   — numeric input only (photos ignored)
+   *   - `extended`  — numeric + photo[]≥1 required (default if undefined)
+   *   - `proof`     — photo[]≥1 only (numeric ignored)
+   * Optional for backward compatibility with code that doesn't read this field.
+   * Spec: docs/delivery/features/student-homework-problem-screen/spec.md §5.
+   */
+  task_kind?: 'numeric' | 'extended' | 'proof';
 }
 
 export interface StudentHomeworkMaterial {
@@ -113,7 +122,43 @@ export interface StudentHomeworkAssignmentDetails {
 
 export type ThreadStatus = 'active' | 'completed' | 'abandoned';
 export type TaskStateStatus = 'locked' | 'active' | 'completed' | 'skipped';
-export type GuidedMessageKind = 'answer' | 'hint_request' | 'question' | 'bootstrap' | 'ai_reply' | 'system' | 'check_result' | 'hint_reply' | 'tutor_message' | 'tutor_note';
+export type GuidedMessageKind =
+  | 'answer'
+  | 'hint_request'
+  | 'question'
+  | 'bootstrap'
+  | 'ai_reply'
+  | 'system'
+  | 'check_result'
+  | 'hint_reply'
+  | 'tutor_message'
+  | 'tutor_note'
+  /**
+   * Phase 1 student homework problem screen single-shot submission. Backend
+   * stores it with `submission_payload` JSONB — see migration
+   * `20260509120100_add_submission_payload_to_thread_messages.sql` (extended
+   * CHECK constraint) + rule
+   * `.claude/rules/40-homework-system.md` § «Student Homework Problem Screen
+   * — single-task surface + submission contract» for the structured contract.
+   */
+  | 'submission';
+
+/**
+ * Structured payload for `message_kind='submission'` rows. Stored in
+ * `homework_tutor_thread_messages.submission_payload` JSONB. **Strictly**
+ * structured — никаких raw user-input полей, которые render'ятся как HTML
+ * (anti-leak invariant из rule §40).
+ */
+export interface HomeworkSubmissionPayload {
+  /** Canonical "1.4" or "1,4" — backend normalises locale-specific commas. */
+  numeric: string;
+  /** `storage://...` refs after upload via `uploadStudentThreadImage`. */
+  photos: string[];
+  /** Optional reasoning. Empty string is acceptable. */
+  text: string;
+  /** Phase 2 voice recorder hook. Phase 1 always null/undefined. */
+  voice_ref?: string | null;
+}
 export type MessageDeliveryStatus = 'sending' | 'sent' | 'failed';
 export type TutorProfileGender = 'male' | 'female';
 export type GuidedHomeworkUiStatus =
@@ -156,6 +201,13 @@ export interface HomeworkThreadMessage {
   message_delivery_status?: MessageDeliveryStatus;
   author_user_id?: string | null;
   visible_to_student?: boolean;
+  /**
+   * Populated only for `message_kind='submission'` rows. Echoed back through
+   * the canonical `THREAD_SELECT` server-side. `null`/`undefined` for all
+   * other message kinds. Anti-leak: structured object only — see
+   * `HomeworkSubmissionPayload`.
+   */
+  submission_payload?: HomeworkSubmissionPayload | null;
 }
 
 export interface HomeworkTaskState {

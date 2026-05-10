@@ -160,3 +160,14 @@ Emoji допустимы ТОЛЬКО в:
 5. **Debug info в production** — метрики скорости, «Раздел в разработке»
 6. **Multiple primary CTA** — один primary per screen
 7. **Inconsistent nav** — разный стиль nav для tutor и student
+
+## Документированные исключения (waivers)
+
+Эти отступления одобрены явно и не должны попадать под автоматический ревью как «нарушения design system».
+
+| Surface | Что нарушено | Waiver rationale | Owner / дата |
+|---|---|---|---|
+| `src/components/student/homework-problem/SubmitSheet.tsx` использует `@radix-ui/react-dialog` напрямую вместо локального `src/components/ui/sheet.tsx` | UI-паттерн «shadcn primitives» (Sheet) | Локальный shadcn `Sheet` `bottom` variant имеет иную animation timing и не даёт pixel-perfect grab-handle / `max-h: 92dvh` / `rounded-t-[22px]` обработку из дизайн-handoff'а. Underlying primitive — тот же Radix Dialog, на котором построен shadcn Sheet, поэтому **focus-trap + body-scroll-lock + outside-click + Esc** работают идентично. Безопасностно и a11y-эквивалентно; экспозиция отличается только стилями. | Vladimir / 2026-05-09 (codex re-review #4) |
+| `src/components/student/homework-problem/VerdictOverlay.tsx` (emerald/amber/rose) + `src/components/student/homework-problem/ProblemContext.tsx` warn-banner (amber) + `HeatmapGrid` cell colors | Цветовая палитра — non-Sokrat Tailwind tokens для статусных индикаторов | `emerald-*` / `amber-*` / `rose-*` уже **de-facto status semantic** в репо: `HeatmapGrid.heatmapStyles.ts`, `mockHeatmapStyles.ts`, `ResultsActionBlock` все используют эти семейства для correct/partial/wrong cell colors. Это формирует кросс-приложение visual contract «зелёное = правильно / жёлтое = в процессе / красное = ошибка», который ученики/тьюторы уже распознают. Когда (и если) появится отдельный semantic-token mapping (`--socrat-status-correct/partial/incorrect`), нужен глобальный refactor pass — не выборочный в новых компонентах. | Vladimir / 2026-05-09 (codex re-review #4) |
+
+При расширении этих waiver-ов (новый компонент использует тот же паттерн): добавить запись в эту таблицу с rationale и датой. Без записи — нарушение остаётся нарушением, ревью блокирует merge.

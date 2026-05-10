@@ -7,9 +7,24 @@ import OnboardingModal from "./OnboardingModal";
 
 interface AuthGuardProps {
   children: React.ReactNode;
+  /**
+   * When `true`, skip the global `<Navigation />` chrome and the surrounding
+   * `pt-14 pb-20` padding wrapper. The student `HomeworkProblem` mobile
+   * screen owns its own full-bleed (`100dvh`) layout — wrapping it in the
+   * default chrome eats the topbar and adds dead space at the bottom.
+   *
+   * Auth check (redirect to `/login` if no session) and the onboarding
+   * modal continue to fire — only chrome rendering is opted out.
+   *
+   * Codex re-review #3 (2026-05-09): the `/student/homework/:hwId/problem/
+   * :taskId` route was previously mounted outside any auth guard, so a
+   * direct unauthenticated URL got the page's generic "Не удалось загрузить
+   * задачу" instead of the standard auth redirect.
+   */
+  fullBleed?: boolean;
 }
 
-const AuthGuard = ({ children }: AuthGuardProps) => {
+const AuthGuard = ({ children, fullBleed = false }: AuthGuardProps) => {
   const navigate = useNavigate();
   const [loading, setLoading] = useState(true);
   const [showOnboarding, setShowOnboarding] = useState(false);
@@ -64,6 +79,19 @@ const AuthGuard = ({ children }: AuthGuardProps) => {
           <p className="text-muted-foreground">Загрузка...</p>
         </div>
       </div>
+    );
+  }
+
+  if (fullBleed) {
+    return (
+      <>
+        <OnboardingModal
+          open={showOnboarding}
+          userId={userId}
+          onComplete={() => setShowOnboarding(false)}
+        />
+        {children}
+      </>
     );
   }
 

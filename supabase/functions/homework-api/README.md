@@ -413,6 +413,150 @@ Prompt context for discussion now mirrors `/check` and `/hint` more closely:
 
 ---
 
+## Student Homework Problem Screen Endpoints (Phase 1, 2026-05-09)
+
+Endpoints used by the new mobile-first homework problem screen
+(`/student/homework/:hwId/problem/:taskId`). Spec:
+`docs/delivery/features/student-homework-problem-screen/spec.md`. Mobile
+(`viewport ≤ 768px`) only at Phase 1 — desktop/tablet continue to use
+the existing `/homework/:id` workspace (`GuidedHomeworkWorkspace`).
+
+### GET /student/problem/:hwId/:taskId
+
+Single-task surface. Returns assignment meta, the target task, sibling
+task count, computed task score, hint count, current thread (with
+tutor identity attached), and student display name in **one** round
+trip.
+
+**Auth:** student JWT.
+
+**Response (200):**
+```json
+{
+  "assignment": {
+    "id": "uuid",
+    "title": "string",
+    "subject": "physics",
+    "deadline": "2026-05-12" ,
+    "status": "active"
+  },
+  "task": {
+    "id": "uuid",
+    "order_num": 3,
+    "task_text": "string",
+    "task_image_url": "storage://homework-task-images/...",
+    "max_score": 1,
+    "check_format": "short_answer",
+    "task_kind": "numeric"
+  },
+  "task_total": 8,
+  "task_score": 0.7,
+  "thread": { "...": "fetchStudentThread shape (tutor_profile attached, ai_score_comment + hidden notes stripped)" },
+  "student": { "id": "uuid", "display_name": "Юля" },
+  "hints_used": 1
+}
+```
+
+**Error responses:**
+- `400 INVALID_ID` — `hwId` или `taskId` не UUID.
+- `404 NOT_FOUND` — student не assigned на это assignment (404, не 403 — keeps existence private; mirrors `handleGetStudentAssignment`).
+- `404 TASK_NOT_FOUND` — `taskId` не принадлежит этому assignment.
+- `500 DB_ERROR` — DB failure.
+
+**Anti-leak invariants:**
+- Tasks SELECT whitelist: `id, order_num, task_text, task_image_url, max_score, check_format, task_kind`. **Никогда** не возвращает `solution_text`, `solution_image_urls`, `rubric_text`, `rubric_image_urls`.
+- Assignment SELECT whitelist: `id, title, subject, deadline, status`. Не возвращает `notes_for_student`, `tutor_id`, `disable_ai_bootstrap`.
+- Thread hydrated через `fetchStudentThread` — `ai_score_comment` strip'нут (`stripStudentSensitiveTaskStateFields`), hidden tutor notes (`visible_to_student=false`) отфильтрованы. `tutor_profile` (display_name + avatar_url + gender) attached.
+
+**Lazy thread provisioning:** если `homework_tutor_threads` row отсутствует (freshly assigned student), endpoint вызывает `provisionGuidedThread` сам — first-open работает без 500.
+
+### POST /student/problem/:hwId/:taskId/submission
+
+Single-shot submit для нового screen. Synthesizes a single answer string
+out of structured payload + runs **the same** AI grading pipeline as
+`POST /threads/:id/check` via the shared `runStudentAnswerGrading`
+helper. No duplicate grading logic, no special submission semantics in
+the AI prompt at Phase 1 (Phase 2 owns OCR + 4-verdict pipeline).
+
+**Auth:** student JWT (ownership через `homework_tutor_student_assignments`).
+
+**Request:**
+```json
+{
+  "numeric": "1.4",
+  "photos": ["storage://homework-submissions/<userId>/<assignmentId>/threads/3/<file>.jpg"],
+  "text": "Применил второй закон Ньютона, F=ma..."
+}
+```
+- `numeric: string` (required type — empty string allowed, server normalizes/checks per task_kind).
+- `photos: string[]` — `storage://` refs uploaded заранее через standard student photo flow.
+- `text: string` (required type — empty string OK).
+
+**task_kind requirements (server-side enforced):**
+
+| `task_kind` | Required body fields |
+|---|---|
+| `numeric` | `numeric.trim()` ≠ "" |
+| `extended` (default) | `numeric.trim()` ≠ "" AND `photos.length ≥ 1` |
+| `proof` | `photos.length ≥ 1` (numeric ignored) |
+
+Returns `400 VALIDATION` with the specific missing field if not satisfied.
+
+**Behavior:**
+1. Validate body shape + ownership + photo refs (Patch B+2 / SSRF / bucket whitelist через canonical `extractStudentThreadAttachmentRefs`).
+2. Lazy-provision thread if missing.
+3. Synthesize `answerText`:
+   - For `proof`: `text.trim()` или `(см. фото решения)` placeholder.
+   - For `numeric` / `extended`: `Числовой ответ: ${numeric.trim()}` + optional `text.trim()` separated by `\n`.
+4. Insert user message with `message_kind="submission"`, `submission_payload={numeric, photos, text}` (JSONB), `image_url=serializeThreadAttachmentRefs(photos)` (dual-format string).
+5. Update `thread.last_student_message_at` + `thread.updated_at`.
+6. Run shared `runStudentAnswerGrading` helper with `feedbackKind="check_result"` — AI feedback message inserted with `message_kind="check_result"` (semantically distinct verdict bubble vs ongoing chat `ai_reply`).
+7. Return `CheckAnswerResponse` shape + freshly-fetched thread (с submission row + AI feedback + updated task_state + tutor_profile attached, ai_score_comment + hidden notes stripped).
+
+**Response (200):** Same shape as `POST /threads/:id/check`:
+```json
+{
+  "verdict": "CORRECT",
+  "feedback": "Верно! Это правильный итоговый ответ.",
+  "ai_score": 1,
+  "ai_score_comment": null,
+  "earned_score": 1,
+  "available_score": 1,
+  "max_score": 1,
+  "wrong_answer_count": 0,
+  "hint_count": 0,
+  "task_completed": true,
+  "next_task_order": 4,
+  "next_task_id": "uuid",
+  "thread_completed": false,
+  "total_tasks": 8,
+  "thread": { "...": "fetchStudentThread shape" }
+}
+```
+
+**Error responses:**
+- `400 INVALID_ID` — `hwId` или `taskId` не UUID.
+- `400 INVALID_BODY` — body не объект, или `numeric`/`text` не string, или `photos` не массив строк.
+- `400 VALIDATION` — task_kind requirements не выполнены.
+- `400 INVALID_ATTACHMENT_REF` — photo ref invalid (вне student namespace, чужой bucket, unsafe path).
+- `400 TOO_MANY_ATTACHMENTS` — больше `MAX_THREAD_ATTACHMENTS` (3) photos.
+- `400 ALREADY_COMPLETED` — thread.status='completed'.
+- `400 NO_ACTIVE_TASK` — target task already completed.
+- `404 NOT_FOUND` — student не assigned.
+- `404 TASK_NOT_FOUND` — taskId не в этом assignment.
+- `500 DB_ERROR` — DB failure / submission insert failure.
+
+**Anti-leak invariants:**
+- `submission_payload` echoed back через `THREAD_SELECT` — raw client input (`storage://` refs, не resolved signed URLs).
+- AI grading uses `solution_text` / `solution_image_urls` / `rubric_*` (server-side через helper), но эти поля **никогда** не попадают в response.
+- `evaluateStudentAnswer` не получает submission-specific prompt hints в Phase 1 — Phase 2 owns OCR + 4-verdict pipeline (отдельная спека).
+
+**Shared helper:** `runStudentAnswerGrading(args)` — single source of truth для AI grading + state-machine. `handleCheckAnswer` (chat) и `handleStudentSubmission` оба вызывают его, отличаются только `feedbackKind` ("ai_reply" vs "check_result"). При изменении grading logic правь helper, не callers.
+
+**THREAD_SELECT extension (2026-05-09):** добавлен `submission_payload` в nested message select — submission rows доходят до клиента через `fetchStudentThread` без потерь.
+
+---
+
 ## Environment Variables
 
 | Variable | Required | Description |
@@ -440,7 +584,7 @@ Structured logs emitted:
 - `homework_tutor_tasks` — individual tasks within assignments
 - `homework_tutor_student_assignments` — student-to-assignment links with notification status
 - `homework_tutor_threads` — guided chat thread per student assignment
-- `homework_tutor_thread_messages` — messages in guided chat threads
+- `homework_tutor_thread_messages` — messages in guided chat threads (`message_kind` enum: `answer`, `hint_request`, `question`, `bootstrap`, `ai_reply`, `system`, `check_result`, `hint_reply`, `tutor_message`, `tutor_note`, `submission`; `submission_payload jsonb` for `message_kind='submission'` rows — `{numeric, photos[], text, voice_ref?}`)
 - `homework_tutor_task_states` — per-task guided progress (status, scores, attempts)
 - `tutors` — tutor profile lookup
 - `tutor_students` — verifying student ownership

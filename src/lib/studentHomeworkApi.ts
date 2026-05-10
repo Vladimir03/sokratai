@@ -68,7 +68,7 @@ function translateSupabaseError(message: string): string {
   return message;
 }
 
-async function requestStudentHomeworkApi<T>(
+export async function requestStudentHomeworkApi<T>(
   path: string,
   options: RequestInit = {},
 ): Promise<T> {
@@ -249,12 +249,26 @@ export async function listStudentAssignments(): Promise<StudentHomeworkAssignmen
     throw new StudentHomeworkApiError(error.message);
   }
 
-  const assignmentRows = (data ?? []).filter((row: any) => {
+  type AssignmentJoinRow = {
+    id: string;
+    assignment_id: string;
+    homework_tutor_assignments: {
+      id: string;
+      title: string;
+      subject: string;
+      topic: string | null;
+      description: string | null;
+      deadline: string | null;
+      status: string;
+      created_at: string;
+    };
+  };
+  const assignmentRows = ((data ?? []) as AssignmentJoinRow[]).filter((row) => {
     const status = row?.homework_tutor_assignments?.status;
     return status === 'active' || status === 'closed';
   });
 
-  const studentAssignmentIds = assignmentRows.map((row: any) => row.id as string);
+  const studentAssignmentIds = assignmentRows.map((row) => row.id);
 
   const threadMap = new Map<string, { status: string }>();
   if (studentAssignmentIds.length > 0) {
@@ -269,7 +283,7 @@ export async function listStudentAssignments(): Promise<StudentHomeworkAssignmen
   }
 
   return assignmentRows
-    .map((row: any) => {
+    .map((row) => {
       const assignment = row.homework_tutor_assignments;
       const thread = threadMap.get(row.id);
       const latest_submission_status = thread
@@ -321,7 +335,15 @@ export async function getStudentAssignment(assignmentId: string): Promise<Studen
     await Promise.all([
       supabase
         .from('homework_tutor_tasks')
-        .select('id, assignment_id, order_num, task_text, task_image_url, max_score, check_format')
+        // task_kind added 2026-05-09 (Phase 1 student problem screen).
+        // Legacy /homework/:id route still uses this fetch + the desktop
+        // GuidedHomeworkWorkspace; without task_kind in the SELECT, any
+        // future task_kind-aware UI on that path silently sees `undefined`
+        // and defaults to `extended`. Anti-leak: solution_*/rubric_*
+        // deliberately excluded — student-facing endpoint.
+        .select(
+          'id, assignment_id, order_num, task_text, task_image_url, max_score, check_format, task_kind',
+        )
         .eq('assignment_id', assignmentId)
         .order('order_num', { ascending: true }),
       supabase
@@ -339,7 +361,9 @@ export async function getStudentAssignment(assignmentId: string): Promise<Studen
   // Both queries are best-effort: RLS may deny tutor_students read; we catch gracefully.
   let studentDisplayName: string | null = null;
   try {
-    const tutorId = (assignment as any).tutor_id as string | undefined;
+    const assignmentRecord = assignment as Record<string, unknown>;
+    const tutorId =
+      typeof assignmentRecord.tutor_id === 'string' ? assignmentRecord.tutor_id : undefined;
     const [tsResult, profResult] = await Promise.all([
       tutorId
         ? supabase
@@ -351,8 +375,10 @@ export async function getStudentAssignment(assignmentId: string): Promise<Studen
         : Promise.resolve({ data: null }),
       supabase.from('profiles').select('username').eq('id', studentId).maybeSingle(),
     ]);
-    const curated = (tsResult.data as any)?.display_name?.trim() ?? '';
-    const username = (profResult.data as any)?.username?.trim() ?? '';
+    const tsData = tsResult.data as { display_name?: string | null } | null;
+    const profData = profResult.data as { username?: string | null } | null;
+    const curated = tsData?.display_name?.trim() ?? '';
+    const username = profData?.username?.trim() ?? '';
     if (curated) {
       studentDisplayName = curated;
     } else if (username && !/^(telegram_|user_)\d+$/i.test(username)) {
@@ -362,9 +388,10 @@ export async function getStudentAssignment(assignmentId: string): Promise<Studen
     // Non-critical — AI will use neutral forms if name is unavailable
   }
 
+  const assignmentRecord = assignment as Record<string, unknown>;
   const result = {
-    ...(assignment as any),
-    updated_at: (assignment as any).created_at,
+    ...assignmentRecord,
+    updated_at: assignmentRecord.created_at,
     tasks: (tasks ?? []) as StudentHomeworkAssignmentDetails['tasks'],
     materials: (materials ?? []) as StudentHomeworkAssignmentDetails['materials'],
     studentDisplayName,

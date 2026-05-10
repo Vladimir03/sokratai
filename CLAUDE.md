@@ -840,6 +840,42 @@ SELECT COUNT(*) FROM public.mock_exam_variant_tasks WHERE variant_id = '36cebc45
 
 **Спека:** `docs/delivery/features/mock-exams-v1/spec.md` AC-5 + tasks.md TASK-13 (mockup Screen 6).
 
+### 16. Student Homework Problem Screen — single-task surface + submission contract (Phase 1, 2026-05-09)
+
+Phase 1 mobile-first student-side homework problem screen. Mobile (`viewport ≤768px`) на route `/student/homework/:hwId/problem/:taskId`; desktop/tablet продолжают использовать existing `GuidedHomeworkWorkspace` до Phase 4 cutover. **Без feature flag** — раскатка сразу всем mobile-юзерам. Полный контракт (handlers / migrations / anti-leak / shared helper / viewport routing) в `.claude/rules/40-homework-system.md` → секция «Student Homework Problem Screen — single-task surface + submission contract».
+
+**Migrations (2):**
+- `20260509120000_add_task_kind_to_homework_tasks.sql` — `homework_tutor_tasks.task_kind text NOT NULL DEFAULT 'extended' CHECK IN ('numeric','extended','proof')` + backfill из `check_format`.
+- `20260509120100_add_submission_payload_to_thread_messages.sql` — `homework_tutor_thread_messages.submission_payload jsonb NULL` + расширенный CHECK на `message_kind` (NULL OR IN 11 значений включая `'submission'`).
+
+**Endpoints (2):**
+- `GET /student/problem/:hwId/:taskId` (`handleGetStudentProblem`) — single-task surface. Whitelist на assignment + tasks SELECT'ах (НЕ `solution_*` / `rubric_*`). Lazy thread provisioning. `task_score` через existing `computeFinalScore`.
+- `POST /student/problem/:hwId/:taskId/submission` (`handleStudentSubmission`) — single-shot submit. Body `{numeric, photos[], text}`. task_kind requirements server-side. Photo refs validated через canonical `extractStudentThreadAttachmentRefs` (Patch B+2 / SSRF / bucket whitelist). Insert submission message (kind='submission' + submission_payload JSONB) + reuse `runStudentAnswerGrading` shared helper (feedbackKind='check_result').
+
+**Single source of truth для AI grading (КРИТИЧНО):**
+
+`runStudentAnswerGrading` извлечён 2026-05-09 из `handleCheckAnswer`. Owns: image/OCR/student-name resolution → `evaluateStudentAnswer` → confidence guard → effective ai_score → AI feedback message insert (caller-controlled `feedbackKind`) → verdict branching + state update + `performTaskAdvance`. **Both** `handleCheckAnswer` (chat: `feedbackKind='ai_reply'`) **и** `handleStudentSubmission` (submission: `feedbackKind='check_result'`) используют его. Не дублировать grading logic — при изменении правь helper, не callers.
+
+**Anti-leak invariants (mirror правил §9):**
+1. `submission_payload` echoed back через `THREAD_SELECT` — raw client input (`storage://` refs, не resolved signed URLs).
+2. Tasks SELECT в новом endpoint'е НЕ включает `solution_text` / `solution_image_urls` / `rubric_text` / `rubric_image_urls` (compile-time гарантия в response shape).
+3. `submission_payload` JSONB — **только** structured object `{numeric: string, photos: string[], text: string, voice_ref?: string|null}`. Никаких raw user-input полей которые render'ятся как HTML.
+4. `evaluateStudentAnswer` без submission-specific prompt hints в Phase 1 — Phase 2 owns OCR + 4-verdict pipeline (отдельная спека).
+
+**THREAD_SELECT extended (2026-05-09):** добавлен `submission_payload` в nested message select. При добавлении нового nullable поля в messages, видимого ученику — расширять `THREAD_SELECT` явно, не `select("*")`.
+
+**Старая `/homework/:id` сurface остаётся** (GuidedHomeworkWorkspace) — для desktop/tablet и как fallback. Phase 4 cutover (отдельная спека) удалит viewport branch + старый workspace.
+
+**Hybrid first-completed-wins (TASK-8, 2026-05-09):** чат incremental (`handleCheckAnswer` через каждое user-сообщение) И SubmitSheet single-shot (`POST /student/problem/.../submission`) пишут в одно `task_state`. Whichever path первым выставит `status='completed'` — фиксирует score; второй после completion = 409-style ignore + SubmitSheet CTA меняется на «Следующая задача →».
+
+**Hint cap = none (намеренно):** существующая `available_score` %-degradation в `handleRequestHint` сохраняется. Дизайн-handoff'ный mock «Подсказка 1/3» **не реализуется** в Phase 1 — UI показывает counter «Подсказок: N» без cap'а.
+
+**Viewport routing hook:** Phase 1 routing использует **новый** `@/hooks/useIsMobile.ts` (inclusive `(max-width: 768px)`, SSR-safe initial state). Legacy `@/hooks/use-mobile.tsx::useIsMobile` (exclusive `<768`, undefined initial) **не подходит** для problem-screen routing — оставлен только для chrome callsite'ов (`MobileTopBar`, etc.). Канонический gate для нового screen — только новый hook.
+
+**Phase split + rollout summary:** Phase 2 (Gemini OCR + 4 verdicts + voice + autosave) / Phase 3 (tablet + desktop) / Phase 4 (cutover, удалить `GuidedHomeworkWorkspace`) — каждая отдельной спекой. Полный rollout-summary + Phase split table + hook canonicalization → `.claude/rules/40-homework-system.md` → секция «Student Homework Problem Screen — viewport routing + submission contract (2026-05-09)» (в дополнение к существующей детальной секции «single-task surface + submission contract»).
+
+**Спека:** `docs/delivery/features/student-homework-problem-screen/spec.md` (Phase 1, AC-1..AC-11).
+
 ## Известные хрупкие области
 
 1. **Chat.tsx** (2000+ строк) — очень сложный компонент

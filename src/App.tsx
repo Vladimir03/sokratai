@@ -2,6 +2,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route, Navigate, useParams } from "react-router-dom";
 import { lazy, Suspense } from "react";
 import ErrorBoundary from "@/components/ErrorBoundary";
+import AuthGuard from "@/components/AuthGuard";
 
 // Lazy load UI providers to reduce initial bundle
 const LazyToaster = lazy(() => import("@/components/ui/toaster").then(m => ({ default: m.Toaster })));
@@ -26,10 +27,11 @@ const ResetPassword = lazy(() => import("./pages/ResetPassword"));
 const Chat = lazy(() => import("./pages/Chat"));
 const StudentHomework = lazy(() => import("./pages/StudentHomework"));
 const StudentHomeworkDetail = lazy(() => import("./pages/StudentHomeworkDetail"));
-// Phase 1 design-validation screen for the new student homework problem
-// chat. Mock-only data, no auth wrapping (intentional — see page docblock).
-// When Phase 2 wires real backend, this will move under AuthGuard or a
-// new full-bleed student layout.
+// Phase 1 student homework problem screen — production data via
+// `useStudentProblemTask`. Mounted under <AuthGuard fullBleed> below so
+// the mobile-first 100dvh layout is preserved while still requiring a
+// session. Updated 2026-05-09 (codex re-review #3) — was previously
+// mock-only and outside AuthGuard during TASK-7 mock validation.
 const HomeworkProblem = lazy(() => import("./pages/student/HomeworkProblem"));
 const StudentMockExams = lazy(() => import("./pages/student/StudentMockExams"));
 const StudentMockExam = lazy(() => import("./pages/student/StudentMockExam"));
@@ -191,16 +193,22 @@ const App = () => (
                 </Suspense>
               }
             />
-            {/* Phase 1 design-validation route for the new homework chat
-                screen. Mock-only data — see HomeworkProblem.tsx docblock.
-                Full-bleed mobile layout (no global Navigation), so this
-                stays outside AuthGuard for now. */}
+            {/* Phase 1 student homework problem screen — production data
+                via `useStudentProblemTask`. Auth-gated with `fullBleed`
+                (skips global Navigation chrome) so the mobile-first
+                100dvh layout is preserved while still redirecting
+                unauthenticated direct loads to /login. Codex re-review #3
+                (2026-05-09): previously mounted outside AuthGuard, which
+                let direct URL probes surface the page's generic API
+                error instead of the standard auth redirect. */}
             <Route
               path="/student/homework/:hwId/problem/:taskId"
               element={
-                <Suspense fallback={<PageLoader />}>
-                  <HomeworkProblem />
-                </Suspense>
+                <AuthGuard fullBleed>
+                  <Suspense fallback={<PageLoader />}>
+                    <HomeworkProblem />
+                  </Suspense>
+                </AuthGuard>
               }
             />
             <Route

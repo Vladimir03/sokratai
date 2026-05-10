@@ -48,7 +48,13 @@ export function StepIndicator({ total, currentNo, doneIndices }: StepIndicatorPr
                 isDone &&
                   'bg-socrat-primary text-white border-[1.5px] border-socrat-primary',
                 isCurrent &&
-                  'bg-socrat-primary-light text-socrat-primary-dark border-2 border-socrat-primary shadow-[0_0_0_3px_rgba(27,107,74,0.15)]',
+                  // Token-based focus ring instead of hardcoded rgba.
+                  // `ring-socrat-primary/15` resolves to brand green @ 15%
+                  // through Tailwind's color-with-opacity syntax — same
+                  // visual as the previous rgba(27,107,74,0.15) but routes
+                  // through the design-system token (per .claude/rules/
+                  // 90-design-system.md anti-pattern «Hard-coded hex»).
+                  'bg-socrat-primary-light text-socrat-primary-dark border-2 border-socrat-primary ring-[3px] ring-socrat-primary/15',
                 !isDone && !isCurrent &&
                   'bg-white text-slate-500 border-[1.5px] border-slate-300',
               ].filter(Boolean).join(' ')}

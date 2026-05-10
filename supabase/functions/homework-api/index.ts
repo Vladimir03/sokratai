@@ -5419,6 +5419,174 @@ async function handleGetStudentAssignment(
   });
 }
 
+// ─── Endpoint: GET /student/problem/:hwId/:taskId (student) ─────────────────
+//
+// Single-task surface for the Phase 1 student-side homework problem screen
+// (`/student/homework/:hwId/problem/:taskId`). Returns the task in question
+// + its surrounding context (assignment meta, sibling task count, current
+// thread + tutor identity, computed score + hint count, student display name)
+// in a single round-trip, so the new mobile screen does not need to chain
+// `/assignments/:id/student` + `/assignments/:id/thread` + per-task lookups.
+//
+// Anti-leak invariants (mirror rule 40-homework-system.md "Эталонное решение
+// для AI и anti-leak" + CLAUDE.md rule 9):
+//   - SELECT on `homework_tutor_assignments` whitelists meta only — no
+//     `notes_for_student` / `tutor_id` / `disable_ai_bootstrap` leak.
+//   - SELECT on `homework_tutor_tasks` excludes `solution_text`,
+//     `solution_image_urls`, `rubric_text`, `rubric_image_urls`. These remain
+//     tutor-only artifacts.
+//   - Thread is fetched via `fetchStudentThread`, which already strips
+//     `ai_score_comment` from each task_state and filters out hidden tutor
+//     notes (visible_to_student=false). `tutor_profile` attached server-side
+//     to keep guided-chat identity consistent across student surfaces.
+//   - Ownership: 404 (not 403) when the student is not assigned, matching
+//     `handleGetStudentAssignment`. Hides existence of someone else's ДЗ.
+//
+// Storage refs returned as-is (`storage://...`); the client resolves signed
+// URLs through the existing tutor + student image endpoints. No `rewriteToProxy`
+// touch here — Patch B+2 dual-host validator kicks in only when validating
+// already-resolved URLs in AI paths.
+async function handleGetStudentProblem(
+  db: SupabaseClient,
+  userId: string,
+  hwId: string,
+  taskId: string,
+  cors: Record<string, string>,
+): Promise<Response> {
+  // 1. Validate UUIDs (cheap; before any DB hit).
+  if (!isUUID(hwId) || !isUUID(taskId)) {
+    return jsonError(cors, 400, "INVALID_ID", "Invalid hwId or taskId");
+  }
+
+  // 2. Ownership check — assigned-student gate.
+  //    404 (not 403) keeps existence private; same pattern as
+  //    handleGetStudentAssignment.
+  const { data: sa, error: saError } = await db
+    .from("homework_tutor_student_assignments")
+    .select("id")
+    .eq("assignment_id", hwId)
+    .eq("student_id", userId)
+    .maybeSingle();
+  if (saError) {
+    return jsonError(cors, 500, "DB_ERROR", "Failed to verify student assignment");
+  }
+  if (!sa) {
+    return jsonError(cors, 404, "NOT_FOUND", "Assignment not found");
+  }
+  const studentAssignmentId = sa.id as string;
+
+  // 3. Assignment meta (whitelist — no leak fields).
+  const { data: assignment, error: assignmentError } = await db
+    .from("homework_tutor_assignments")
+    .select("id, title, subject, deadline, status")
+    .eq("id", hwId)
+    .single();
+  if (assignmentError || !assignment) {
+    return jsonError(cors, 404, "NOT_FOUND", "Assignment not found");
+  }
+
+  // 4. Tasks (column whitelist — student-safe fields only).
+  //    Sorting by order_num so task_total ordering matches the step indicator.
+  const { data: tasksRaw, error: tasksError } = await db
+    .from("homework_tutor_tasks")
+    .select("id, order_num, task_text, task_image_url, max_score, check_format, task_kind")
+    .eq("assignment_id", hwId)
+    .order("order_num", { ascending: true });
+  if (tasksError) {
+    return jsonError(cors, 500, "DB_ERROR", "Failed to load tasks");
+  }
+  const tasks = tasksRaw ?? [];
+
+  // 5. Target task lookup. 404 distinct from assignment-NOT_FOUND so the
+  //    client can surface "task moved/deleted" vs "you don't have access".
+  const targetTask = tasks.find((t) => typeof t?.id === "string" && t.id === taskId);
+  if (!targetTask) {
+    return jsonError(cors, 404, "TASK_NOT_FOUND", "Task not found in assignment");
+  }
+
+  // 6. Resolve thread id with lazy provisioning.
+  //    Mirrors handleGetStudentThreadByAssignment: a freshly-assigned student
+  //    may not have a thread row yet on first open of the new screen. We
+  //    refuse to error in that case — provisionGuidedThread is idempotent.
+  const { data: existingThread, error: threadLookupError } = await db
+    .from("homework_tutor_threads")
+    .select("id")
+    .eq("student_assignment_id", studentAssignmentId)
+    .maybeSingle();
+  if (threadLookupError) {
+    return jsonError(cors, 500, "DB_ERROR", "Failed to load thread");
+  }
+  let threadId: string | null = typeof existingThread?.id === "string"
+    ? existingThread.id
+    : null;
+  if (!threadId) {
+    const provisioned = await provisionGuidedThread(db, hwId, studentAssignmentId);
+    threadId = typeof provisioned?.id === "string" ? provisioned.id : null;
+  }
+
+  // 7. Hydrate thread for the student.
+  //    fetchStudentThread = fetchFullThread + stripHiddenMessages
+  //                       + stripStudentSensitiveTaskStateFields
+  //                       + tutor_profile (resolveTutorProfileForAssignment).
+  //    Single canonical path — do not duplicate the strip logic here.
+  const thread = threadId ? await fetchStudentThread(db, threadId) : null;
+
+  // 8. task_score + hints_used for the target task only.
+  //    Walks the already-fetched task_states from `thread` instead of a
+  //    second SELECT — keeps hot-path round-trip count low.
+  let taskScore = 0;
+  let hintsUsed = 0;
+  if (thread) {
+    const taskStates = Array.isArray(thread.homework_tutor_task_states)
+      ? (thread.homework_tutor_task_states as Record<string, unknown>[])
+      : [];
+    const targetState = taskStates.find(
+      (ts) => typeof ts?.task_id === "string" && ts.task_id === taskId,
+    );
+    if (targetState) {
+      taskScore = computeFinalScore(
+        targetState as unknown as TaskStateScoreFields,
+        Number(targetTask.max_score) || 0,
+      );
+      const hc = targetState.hint_count;
+      hintsUsed = typeof hc === "number" ? hc : 0;
+    }
+  }
+
+  // 9. Student display name — same canonical chain as the AI prompt path
+  //    (tutor_students.display_name → profiles.full_name → profiles.username
+  //    minus auto-generated placeholders). The new screen renders "Привет,
+  //    {name}!" so the chat identity stays in sync with the AI greeting.
+  const displayName = await resolveStudentDisplayName(db, studentAssignmentId);
+
+  return jsonOk(cors, {
+    assignment: {
+      id: assignment.id,
+      title: assignment.title,
+      subject: assignment.subject,
+      deadline: assignment.deadline,
+      status: assignment.status,
+    },
+    task: {
+      id: targetTask.id,
+      order_num: targetTask.order_num,
+      task_text: targetTask.task_text,
+      task_image_url: targetTask.task_image_url,
+      max_score: targetTask.max_score,
+      check_format: targetTask.check_format,
+      task_kind: targetTask.task_kind,
+    },
+    task_total: tasks.length,
+    task_score: taskScore,
+    thread,
+    student: {
+      id: userId,
+      display_name: displayName,
+    },
+    hints_used: hintsUsed,
+  });
+}
+
 // ─── Endpoint: POST /threads/:id/messages (student) ─────────────────────────
 
 async function verifyThreadOwnership(
@@ -5763,7 +5931,7 @@ async function handleAdvanceTask(
 const THREAD_SELECT = `
   id, status, current_task_order, current_task_id, created_at, updated_at,
   student_assignment_id, last_student_message_at, last_tutor_message_at,
-  homework_tutor_thread_messages(id, role, content, image_url, task_id, task_order, message_kind, created_at, author_user_id, visible_to_student),
+  homework_tutor_thread_messages(id, role, content, image_url, task_id, task_order, message_kind, submission_payload, created_at, author_user_id, visible_to_student),
   homework_tutor_task_states(id, task_id, status, attempts, best_score, available_score, earned_score, wrong_answer_count, hint_count, ai_score, ai_score_comment, tutor_score_override, tutor_score_override_comment, tutor_score_override_at)
 `;
 
@@ -6087,110 +6255,76 @@ async function loadAdvanceContext(
 
 // ─── Endpoint: POST /threads/:id/check (student — Phase 3) ─────────────────
 
-async function handleCheckAnswer(
-  db: SupabaseClient,
-  userId: string,
-  threadId: string,
-  body: unknown,
-  cors: Record<string, string>,
-): Promise<Response> {
-  const ownershipResult = await verifyThreadOwnership(db, threadId, userId, cors);
-  if (ownershipResult instanceof Response) return ownershipResult;
-  const { thread, studentAssignment } = ownershipResult;
-
-  if (thread.status === "completed") {
-    return jsonError(cors, 400, "ALREADY_COMPLETED", "Thread is already completed");
-  }
-
-  const b = (body && typeof body === "object") ? body as Record<string, unknown> : {};
-  const answer = typeof b.answer === "string" ? b.answer.trim() : "";
-  if (!answer) {
-    return jsonError(cors, 400, "VALIDATION", "answer is required");
-  }
-  const requestedTaskOrder = typeof b.task_order === "number" ? b.task_order : undefined;
-  const requestedTaskId = isUUID(b.task_id) ? b.task_id as string : undefined;
-  const attachmentRefs = extractStudentThreadAttachmentRefs(b, userId, studentAssignment.assignment_id, cors);
-  if (attachmentRefs instanceof Response) return attachmentRefs;
-  const serializedAttachments = serializeThreadAttachmentRefs(attachmentRefs);
-
-  // Load advance context
-  const ctx = await loadAdvanceContext(db, threadId, thread, requestedTaskOrder, requestedTaskId);
-  if (!ctx) {
-    return jsonError(cors, 400, "NO_ACTIVE_TASK", "No active task to check");
-  }
-
+// ─── Helper: shared AI grading + state-machine update ──────────────────────
+//
+// Extracted from handleCheckAnswer so handleStudentSubmission (Phase 1
+// student-side problem screen) can reuse the same grading logic without
+// duplicating ~150 lines of verdict branching. Caller is responsible for:
+//   1. Ownership / advance-context / task / assignment / recentMessages loads
+//   2. Inserting the user's message (kind="answer" for chat,
+//      kind="submission" for the new submit-sheet)
+//   3. Updating thread.last_student_message_at + thread.updated_at
+//   4. Final fetchStudentThread + user-message merge for the response
+//
+// This helper does:
+//   A. Resolve task images / ocr / latest student image / student name (parallel)
+//   B. evaluateStudentAnswer + confidence guard + effective ai_score derivation
+//   C. Insert AI feedback message (caller-controlled message_kind:
+//      "ai_reply" for chat answer, "check_result" for explicit submission)
+//   D. Branch on verdict → update task_state → optionally performTaskAdvance
+//   E. Build and return CheckAnswerResponse-shaped responseData
+//
+// Does NOT touch the user message row, thread timestamps, or the final
+// thread refetch — those vary per caller and stay in the caller.
+async function runStudentAnswerGrading(args: {
+  db: SupabaseClient;
+  threadId: string;
+  userId: string;
+  studentAssignment: { id: string; assignment_id: string; student_id: string };
+  ctx: NonNullable<Awaited<ReturnType<typeof loadAdvanceContext>>>;
+  task: {
+    id: string;
+    order_num: number;
+    task_text: string | null;
+    task_image_url: string | null;
+    ocr_text: string | null;
+    correct_answer: string | null;
+    rubric_text: string | null;
+    rubric_image_urls: string | null;
+    solution_text: string | null;
+    solution_image_urls: string | null;
+    max_score: number | null;
+    check_format: string | null;
+  };
+  assignment: { subject: string | null };
+  studentAnswer: string;
+  recentMessages: Array<{
+    role?: string | null;
+    content?: string | null;
+    visible_to_student?: boolean | null;
+    message_kind?: string | null;
+  }>;
+  feedbackKind: "ai_reply" | "check_result";
+}): Promise<Record<string, unknown>> {
+  const {
+    db,
+    threadId,
+    userId,
+    studentAssignment,
+    ctx,
+    task,
+    assignment,
+    studentAnswer,
+    recentMessages,
+    feedbackKind,
+  } = args;
   const { currentState, currentOrder, stateByOrder, sortedOrders, tasks } = ctx;
-
-  // Load the full task (with correct_answer, rubric, reference solution)
-  const { data: task } = await db
-    .from("homework_tutor_tasks")
-    .select("id, order_num, task_text, task_image_url, ocr_text, correct_answer, rubric_text, rubric_image_urls, solution_text, solution_image_urls, max_score, check_format")
-    .eq("id", currentState.task_id)
-    .single();
-
-  if (!task) {
-    return jsonError(cors, 500, "DB_ERROR", "Task not found");
-  }
-
-  // Load assignment for subject
-  const { data: assignment } = await db
-    .from("homework_tutor_assignments")
-    .select("subject")
-    .eq("id", ctx.sa.assignment_id)
-    .single();
-
-  if (!assignment) {
-    return jsonError(cors, 500, "DB_ERROR", "Assignment not found");
-  }
-
-  // Load conversation history (last 15 messages for current task)
-  const { data: recentMessages } = await db
-    .from("homework_tutor_thread_messages")
-    .select("role, content, visible_to_student, message_kind")
-    .eq("thread_id", threadId)
-    .eq("task_id", currentState.task_id as string)
-    .order("created_at", { ascending: true })
-    .limit(15);
 
   // Initialize available_score if null (backward compat for old threads)
   const currentAvailableScore: number =
     currentState.available_score != null
       ? Number(currentState.available_score)
       : (task.max_score ?? 1);
-
-  // Save user answer message (with optional student image attachment)
-  const { data: savedUserAnswerMessage, error: saveUserAnswerError } = await db
-    .from("homework_tutor_thread_messages")
-    .insert({
-      thread_id: threadId,
-      role: "user",
-      content: answer,
-      task_id: currentState.task_id as string,
-      task_order: currentOrder,
-      message_kind: "answer",
-      ...(serializedAttachments && { image_url: serializedAttachments }),
-    })
-    .select("id, role, content, image_url, task_id, task_order, message_kind, created_at, author_user_id, visible_to_student")
-    .single();
-
-  if (saveUserAnswerError || !savedUserAnswerMessage) {
-    console.error("homework_api_check_answer_insert_failed", {
-      threadId,
-      currentOrder,
-      error: saveUserAnswerError?.message,
-    });
-    return jsonError(cors, 500, "DB_ERROR", "Failed to save answer message");
-  }
-
-  // Update last_student_message_at AND thread.updated_at. Consistent with
-  // handleTutorPostMessage — keeps thread.updated_at an honest "last thread
-  // activity" timestamp for downstream consumers (e.g. /recent-dialogs).
-  await db.from("homework_tutor_threads")
-    .update({
-      last_student_message_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    })
-    .eq("id", threadId);
 
   // Resolve task/rubric images into AI-compatible data URLs, latest student
   // image into signed URLs, and tutor-curated student display name.
@@ -6213,7 +6347,7 @@ async function handleCheckAnswer(
   // Call AI evaluation
   const totalTasks = tasks.length;
   const result = await evaluateStudentAnswer({
-    studentAnswer: answer,
+    studentAnswer,
     taskText: task.task_text ?? "",
     taskImageUrls,
     studentImageUrls,
@@ -6226,12 +6360,19 @@ async function handleCheckAnswer(
     solutionText: task.solution_text,
     solutionImageUrls,
     subject: assignment.subject ?? "math",
-    conversationHistory: recentMessages ?? [],
+    conversationHistory: (recentMessages ?? []).map((m) => ({
+      role: typeof m.role === "string" ? m.role : "",
+      content: typeof m.content === "string" ? m.content : "",
+      visible_to_student: typeof m.visible_to_student === "boolean" ? m.visible_to_student : undefined,
+      message_kind: typeof m.message_kind === "string" ? m.message_kind : null,
+    })),
     wrongAnswerCount: (currentState.wrong_answer_count as number) ?? 0,
     hintCount: (currentState.hint_count as number) ?? 0,
     availableScore: currentAvailableScore,
     maxScore: task.max_score ?? 1,
-    checkFormat: task.check_format ?? undefined,
+    checkFormat: (task.check_format === "short_answer" || task.check_format === "detailed_solution")
+      ? task.check_format
+      : undefined,
     studentName,
   });
 
@@ -6260,14 +6401,16 @@ async function handleCheckAnswer(
         "Решение пока не дотягивает до полного зачёта по критериям, поэтому балл не максимальный."
       : null;
 
-  // Save AI feedback message
+  // Save AI feedback message (caller-controlled kind: ai_reply for chat,
+  // check_result for explicit submission so the submission flow gets a
+  // semantically distinct verdict bubble).
   await db.from("homework_tutor_thread_messages").insert({
     thread_id: threadId,
     role: "assistant",
     content: result.feedback,
     task_id: currentState.task_id as string,
     task_order: currentOrder,
-    message_kind: "ai_reply",
+    message_kind: feedbackKind,
   });
 
   let responseData: Record<string, unknown>;
@@ -6410,6 +6553,136 @@ async function handleCheckAnswer(
     };
   }
 
+  return responseData;
+}
+
+async function handleCheckAnswer(
+  db: SupabaseClient,
+  userId: string,
+  threadId: string,
+  body: unknown,
+  cors: Record<string, string>,
+): Promise<Response> {
+  const ownershipResult = await verifyThreadOwnership(db, threadId, userId, cors);
+  if (ownershipResult instanceof Response) return ownershipResult;
+  const { thread, studentAssignment } = ownershipResult;
+
+  if (thread.status === "completed") {
+    return jsonError(cors, 400, "ALREADY_COMPLETED", "Thread is already completed");
+  }
+
+  const b = (body && typeof body === "object") ? body as Record<string, unknown> : {};
+  const answer = typeof b.answer === "string" ? b.answer.trim() : "";
+  if (!answer) {
+    return jsonError(cors, 400, "VALIDATION", "answer is required");
+  }
+  const requestedTaskOrder = typeof b.task_order === "number" ? b.task_order : undefined;
+  const requestedTaskId = isUUID(b.task_id) ? b.task_id as string : undefined;
+  const attachmentRefs = extractStudentThreadAttachmentRefs(b, userId, studentAssignment.assignment_id, cors);
+  if (attachmentRefs instanceof Response) return attachmentRefs;
+  const serializedAttachments = serializeThreadAttachmentRefs(attachmentRefs);
+
+  // Load advance context
+  const ctx = await loadAdvanceContext(db, threadId, thread, requestedTaskOrder, requestedTaskId);
+  if (!ctx) {
+    return jsonError(cors, 400, "NO_ACTIVE_TASK", "No active task to check");
+  }
+
+  const { currentState, currentOrder, stateByOrder, sortedOrders, tasks } = ctx;
+
+  // Load the full task (with correct_answer, rubric, reference solution)
+  const { data: task } = await db
+    .from("homework_tutor_tasks")
+    .select("id, order_num, task_text, task_image_url, ocr_text, correct_answer, rubric_text, rubric_image_urls, solution_text, solution_image_urls, max_score, check_format")
+    .eq("id", currentState.task_id)
+    .single();
+
+  if (!task) {
+    return jsonError(cors, 500, "DB_ERROR", "Task not found");
+  }
+
+  // Load assignment for subject
+  const { data: assignment } = await db
+    .from("homework_tutor_assignments")
+    .select("subject")
+    .eq("id", ctx.sa.assignment_id)
+    .single();
+
+  if (!assignment) {
+    return jsonError(cors, 500, "DB_ERROR", "Assignment not found");
+  }
+
+  // Load conversation history (last 15 messages for current task)
+  const { data: recentMessages } = await db
+    .from("homework_tutor_thread_messages")
+    .select("role, content, visible_to_student, message_kind")
+    .eq("thread_id", threadId)
+    .eq("task_id", currentState.task_id as string)
+    .order("created_at", { ascending: true })
+    .limit(15);
+
+  // Initialize available_score if null (backward compat for old threads)
+  const currentAvailableScore: number =
+    currentState.available_score != null
+      ? Number(currentState.available_score)
+      : (task.max_score ?? 1);
+
+  // Save user answer message (with optional student image attachment)
+  const { data: savedUserAnswerMessage, error: saveUserAnswerError } = await db
+    .from("homework_tutor_thread_messages")
+    .insert({
+      thread_id: threadId,
+      role: "user",
+      content: answer,
+      task_id: currentState.task_id as string,
+      task_order: currentOrder,
+      message_kind: "answer",
+      ...(serializedAttachments && { image_url: serializedAttachments }),
+    })
+    .select("id, role, content, image_url, task_id, task_order, message_kind, created_at, author_user_id, visible_to_student")
+    .single();
+
+  if (saveUserAnswerError || !savedUserAnswerMessage) {
+    console.error("homework_api_check_answer_insert_failed", {
+      threadId,
+      currentOrder,
+      error: saveUserAnswerError?.message,
+    });
+    return jsonError(cors, 500, "DB_ERROR", "Failed to save answer message");
+  }
+
+  // Update last_student_message_at AND thread.updated_at. Consistent with
+  // handleTutorPostMessage — keeps thread.updated_at an honest "last thread
+  // activity" timestamp for downstream consumers (e.g. /recent-dialogs).
+  await db.from("homework_tutor_threads")
+    .update({
+      last_student_message_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", threadId);
+
+  // Run AI grading + state-machine update via the shared helper.
+  // The chat path uses message_kind="ai_reply" for the feedback bubble; the
+  // student-side submit-sheet path (handleStudentSubmission) passes
+  // "check_result" instead.
+  const responseData = await runStudentAnswerGrading({
+    db,
+    threadId,
+    userId,
+    studentAssignment,
+    ctx,
+    task,
+    assignment,
+    studentAnswer: answer,
+    recentMessages: (recentMessages ?? []) as Array<{
+      role?: string | null;
+      content?: string | null;
+      visible_to_student?: boolean | null;
+      message_kind?: string | null;
+    }>,
+    feedbackKind: "ai_reply",
+  });
+
   // Return updated thread (student-facing: filter hidden notes)
   const updatedThread = await fetchStudentThread(db, threadId);
   if (
@@ -6439,6 +6712,299 @@ async function handleCheckAnswer(
       });
     }
   }
+  return jsonOk(cors, { ...responseData, thread: updatedThread });
+}
+
+// ─── Endpoint: POST /student/problem/:hwId/:taskId/submission (student) ─────
+//
+// Single-shot solution submit for the Phase 1 student-side problem screen.
+// Body shape: { numeric, photos[], text }. Caller owns photo upload first
+// (existing storage pattern `homework-submissions/{userId}/{assignmentId}/threads/...`);
+// this handler validates refs through the shared
+// `extractStudentThreadAttachmentRefs` helper.
+//
+// Synthesizes a single answer string out of the structured payload and runs
+// the SAME grading pipeline as the chat-path /threads/:id/check via
+// `runStudentAnswerGrading` — no duplicate AI grading logic, no special
+// submission semantics in the prompt (Phase 2 owns OCR + dedicated
+// 4-verdict pipeline per spec.md "Out of scope").
+//
+// Difference from chat-path:
+//   - User message kind = "submission" (not "answer")
+//   - User message stores the structured payload in `submission_payload`
+//     (JSONB) so the new screen can re-render the submitted block without
+//     re-parsing free-form `content`.
+//   - AI feedback message kind = "check_result" — semantically distinct
+//     verdict bubble for explicit submissions (vs ongoing dialog).
+//
+// Anti-leak: `submission_payload` returned to the client through the
+// thread refetch is exactly what the client sent (numeric/photos/text
+// raw refs) — no signed-URL resolution. Photos remain `storage://` refs;
+// the client resolves signed URLs via the existing image endpoints.
+async function handleStudentSubmission(
+  db: SupabaseClient,
+  userId: string,
+  hwId: string,
+  taskId: string,
+  body: unknown,
+  cors: Record<string, string>,
+): Promise<Response> {
+  // 1. Validate path UUIDs.
+  if (!isUUID(hwId) || !isUUID(taskId)) {
+    return jsonError(cors, 400, "INVALID_ID", "Invalid hwId or taskId");
+  }
+
+  // 2. Body shape validation.
+  if (!body || typeof body !== "object") {
+    return jsonError(cors, 400, "INVALID_BODY", "Expected JSON body");
+  }
+  const b = body as Record<string, unknown>;
+  if (typeof b.numeric !== "string") {
+    return jsonError(cors, 400, "INVALID_BODY", "numeric must be a string");
+  }
+  if (typeof b.text !== "string") {
+    return jsonError(cors, 400, "INVALID_BODY", "text must be a string");
+  }
+  if (!Array.isArray(b.photos) || !b.photos.every((p) => typeof p === "string")) {
+    return jsonError(cors, 400, "INVALID_BODY", "photos must be an array of strings");
+  }
+  const numericRaw = b.numeric as string;
+  const textRaw = b.text as string;
+  const photosRaw = b.photos as string[];
+
+  // 3. Ownership check (mirror handleGetStudentProblem). 404 — keep
+  //    existence private from non-assigned students.
+  const { data: sa, error: saError } = await db
+    .from("homework_tutor_student_assignments")
+    .select("id, assignment_id, student_id")
+    .eq("assignment_id", hwId)
+    .eq("student_id", userId)
+    .maybeSingle();
+  if (saError) {
+    return jsonError(cors, 500, "DB_ERROR", "Failed to verify student assignment");
+  }
+  if (!sa) {
+    return jsonError(cors, 404, "NOT_FOUND", "Assignment not found");
+  }
+  const studentAssignment = sa as { id: string; assignment_id: string; student_id: string };
+
+  // 4. Validate photo refs through the canonical student-side validator.
+  //    Same Patch B+2 / SSRF / bucket whitelist guards as handleCheckAnswer.
+  //    Reuses the existing `image_urls`-shaped extractor by adapting the
+  //    body for the canonical helper.
+  const refsResult = extractStudentThreadAttachmentRefs(
+    { image_urls: photosRaw } as Record<string, unknown>,
+    userId,
+    hwId,
+    cors,
+  );
+  if (refsResult instanceof Response) return refsResult;
+  const photoRefs = refsResult;
+
+  // 5. Load target task (full SELECT — grading needs solution/rubric).
+  const { data: task, error: taskError } = await db
+    .from("homework_tutor_tasks")
+    .select("id, assignment_id, order_num, task_text, task_image_url, ocr_text, correct_answer, rubric_text, rubric_image_urls, solution_text, solution_image_urls, max_score, check_format, task_kind")
+    .eq("id", taskId)
+    .maybeSingle();
+  if (taskError) {
+    return jsonError(cors, 500, "DB_ERROR", "Failed to load task");
+  }
+  if (!task || task.assignment_id !== hwId) {
+    return jsonError(cors, 404, "TASK_NOT_FOUND", "Task not found in assignment");
+  }
+  const taskKind = (task.task_kind as string) ?? "extended";
+  const numericTrim = numericRaw.trim();
+  const textTrim = textRaw.trim();
+
+  // 6. task_kind requirements.
+  //    - 'numeric'  → numeric required, photos optional, text optional
+  //    - 'extended' → numeric + at least one photo required
+  //    - 'proof'    → at least one photo required, numeric ignored
+  if (taskKind === "numeric") {
+    if (!numericTrim) {
+      return jsonError(cors, 400, "VALIDATION", "numeric is required for numeric task");
+    }
+  } else if (taskKind === "extended") {
+    if (!numericTrim) {
+      return jsonError(cors, 400, "VALIDATION", "numeric is required for extended task");
+    }
+    if (photoRefs.length < 1) {
+      return jsonError(cors, 400, "VALIDATION", "At least one photo is required for extended task");
+    }
+  } else if (taskKind === "proof") {
+    if (photoRefs.length < 1) {
+      return jsonError(cors, 400, "VALIDATION", "At least one photo is required for proof task");
+    }
+  } else {
+    // Defensive: unknown task_kind — treat like 'extended' to avoid
+    // silently accepting empty submissions.
+    if (!numericTrim || photoRefs.length < 1) {
+      return jsonError(cors, 400, "VALIDATION", "numeric and at least one photo are required");
+    }
+  }
+
+  // 7. Resolve thread (lazy provision if missing).
+  const { data: existingThread, error: threadLookupError } = await db
+    .from("homework_tutor_threads")
+    .select("id, status, current_task_order, current_task_id, student_assignment_id")
+    .eq("student_assignment_id", studentAssignment.id)
+    .maybeSingle();
+  if (threadLookupError) {
+    return jsonError(cors, 500, "DB_ERROR", "Failed to load thread");
+  }
+  let threadRow: Record<string, unknown> | null = existingThread
+    ? (existingThread as Record<string, unknown>)
+    : null;
+  if (!threadRow) {
+    const provisioned = await provisionGuidedThread(db, hwId, studentAssignment.id);
+    if (provisioned) threadRow = provisioned;
+  }
+  if (!threadRow || typeof threadRow.id !== "string") {
+    return jsonError(cors, 500, "DB_ERROR", "Failed to provision thread");
+  }
+  const threadId = threadRow.id as string;
+  if (threadRow.status === "completed") {
+    return jsonError(cors, 400, "ALREADY_COMPLETED", "Thread is already completed");
+  }
+
+  // 8. Advance context — uses taskId as override so we grade the task the
+  //    student actually submitted, not whatever the thread cursor says.
+  const ctx = await loadAdvanceContext(db, threadId, threadRow, undefined, taskId);
+  if (!ctx) {
+    return jsonError(cors, 400, "NO_ACTIVE_TASK", "No active task to submit");
+  }
+  const { currentState, currentOrder } = ctx;
+
+  // 9. Assignment subject (for AI prompts).
+  const { data: assignment, error: assignmentError } = await db
+    .from("homework_tutor_assignments")
+    .select("subject")
+    .eq("id", hwId)
+    .single();
+  if (assignmentError || !assignment) {
+    return jsonError(cors, 500, "DB_ERROR", "Assignment not found");
+  }
+
+  // 10. Conversation history for the target task (last 15 messages).
+  const { data: recentMessages } = await db
+    .from("homework_tutor_thread_messages")
+    .select("role, content, visible_to_student, message_kind")
+    .eq("thread_id", threadId)
+    .eq("task_id", taskId)
+    .order("created_at", { ascending: true })
+    .limit(15);
+
+  // 11. Synthesize answer string.
+  //     For proof: photos are the "answer" (no numeric). For numeric/extended:
+  //     numeric is the formal answer, optional text is reasoning.
+  const lines: string[] = [];
+  if (taskKind !== "proof" && numericTrim) {
+    lines.push(`Числовой ответ: ${numericTrim}`);
+  }
+  if (textTrim) {
+    lines.push(textTrim);
+  }
+  const answerText = lines.length > 0
+    ? lines.join("\n")
+    : "(см. фото решения)";
+
+  // 12. Insert submission message FIRST so the thread refetch at the
+  //     end captures it (and the AI feedback inserted by the helper).
+  //     `submission_payload` is JSONB — strictly the structured object
+  //     {numeric, photos, text}; we never store free-form fields that
+  //     the client would render as HTML.
+  const serializedAttachments = serializeThreadAttachmentRefs(photoRefs);
+  const { data: savedSubmissionMessage, error: saveSubmissionError } = await db
+    .from("homework_tutor_thread_messages")
+    .insert({
+      thread_id: threadId,
+      role: "user",
+      content: answerText,
+      task_id: taskId,
+      task_order: currentOrder,
+      message_kind: "submission",
+      submission_payload: {
+        numeric: numericRaw,
+        photos: photoRefs,
+        text: textRaw,
+      },
+      ...(serializedAttachments && { image_url: serializedAttachments }),
+    })
+    .select("id, role, content, image_url, task_id, task_order, message_kind, submission_payload, created_at, author_user_id, visible_to_student")
+    .single();
+  if (saveSubmissionError || !savedSubmissionMessage) {
+    console.error("homework_api_submission_insert_failed", {
+      threadId,
+      hwId,
+      taskId,
+      error: saveSubmissionError?.message,
+    });
+    return jsonError(cors, 500, "DB_ERROR", "Failed to save submission message");
+  }
+
+  // 13. Update thread timestamps (mirror handleCheckAnswer).
+  await db.from("homework_tutor_threads")
+    .update({
+      last_student_message_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", threadId);
+
+  // 14. Run shared grading helper. feedbackKind="check_result" so the
+  //     verdict bubble is semantically distinct from an ongoing dialog
+  //     ai_reply.
+  const responseData = await runStudentAnswerGrading({
+    db,
+    threadId,
+    userId,
+    studentAssignment,
+    ctx,
+    task,
+    assignment,
+    studentAnswer: answerText,
+    recentMessages: (recentMessages ?? []) as Array<{
+      role?: string | null;
+      content?: string | null;
+      visible_to_student?: boolean | null;
+      message_kind?: string | null;
+    }>,
+    feedbackKind: "check_result",
+  });
+
+  // 15. Return the same shape as handleCheckAnswer + the freshly-fetched
+  //     thread (which already includes the submission message + AI feedback
+  //     + updated task_state, all stripped of tutor-only fields by
+  //     fetchStudentThread).
+  const updatedThread = await fetchStudentThread(db, threadId);
+  if (
+    updatedThread &&
+    Array.isArray(updatedThread.homework_tutor_thread_messages)
+  ) {
+    const existingIndex = updatedThread.homework_tutor_thread_messages.findIndex(
+      (message) => message.id === savedSubmissionMessage.id,
+    );
+
+    if (existingIndex >= 0) {
+      const existingMessage = updatedThread.homework_tutor_thread_messages[existingIndex];
+      if (!existingMessage.image_url && savedSubmissionMessage.image_url) {
+        updatedThread.homework_tutor_thread_messages[existingIndex] = {
+          ...existingMessage,
+          image_url: savedSubmissionMessage.image_url,
+        };
+      }
+    } else {
+      updatedThread.homework_tutor_thread_messages = [
+        ...updatedThread.homework_tutor_thread_messages,
+        savedSubmissionMessage as Record<string, unknown>,
+      ].sort((a, b) => {
+        const aTime = typeof a.created_at === "string" ? Date.parse(a.created_at) : 0;
+        const bTime = typeof b.created_at === "string" ? Date.parse(b.created_at) : 0;
+        return aTime - bTime;
+      });
+    }
+  }
+
   return jsonOk(cors, { ...responseData, thread: updatedThread });
 }
 
@@ -7380,6 +7946,32 @@ Deno.serve(async (req: Request): Promise<Response> => {
     // GET /assignments/:id/student (student endpoint)
     if (seg.length === 3 && seg[0] === "assignments" && seg[2] === "student" && route.method === "GET") {
       return await handleGetStudentAssignment(db, userId, seg[1], cors);
+    }
+
+    // GET /student/problem/:hwId/:taskId
+    // (Phase 1 student-side problem screen — single-task surface.
+    //  Spec: docs/delivery/features/student-homework-problem-screen/spec.md §5)
+    if (
+      seg.length === 4 &&
+      seg[0] === "student" &&
+      seg[1] === "problem" &&
+      route.method === "GET"
+    ) {
+      return await handleGetStudentProblem(db, userId, seg[2], seg[3], cors);
+    }
+
+    // POST /student/problem/:hwId/:taskId/submission
+    // (Phase 1 student-side problem screen — single-shot submit.
+    //  Spec: docs/delivery/features/student-homework-problem-screen/spec.md §5)
+    if (
+      seg.length === 5 &&
+      seg[0] === "student" &&
+      seg[1] === "problem" &&
+      seg[4] === "submission" &&
+      route.method === "POST"
+    ) {
+      const submissionBody = await parseJsonBody(req);
+      return await handleStudentSubmission(db, userId, seg[2], seg[3], submissionBody, cors);
     }
 
     // GET /assignments/:id/tasks/:taskId/image-url (tutor + student)

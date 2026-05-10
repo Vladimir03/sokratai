@@ -1,0 +1,39 @@
+# Status: FAIL
+
+Re-review after Claude Code fixes, against the current working tree diff from `origin/main`.
+
+Findings:
+1. **[blocker] S1-1 chat is still not implemented against the current spec.** The spec still says "Сократический диалог с AI" where every user chat message is evaluated by `evaluateStudentAnswer` (`docs/delivery/features/student-homework-problem-screen/spec.md:47`), and manual TC-4 still expects "Type message в chat input -> AI отвечает" (`docs/delivery/features/student-homework-problem-screen/tasks.md:389`). The implementation now preserves the draft, but `src/pages/student/HomeworkProblem.tsx:166` only shows a Phase-2 toast and never sends/persists the message. Since `src/components/student/homework-problem/ComposerMobile.tsx:93` still renders an active "Спроси Сократа" chat row with a send button, this is not a working S1-1 path. Either wire it to the existing guided chat/check path, or make an explicit human-owned Phase-1 scope change to submit-only and remove/disable the chat send affordance.
+2. **[major] `CHECK_FAILED` still has no retry path, so AC-6 is only partially fixed.** `src/components/student/homework-problem/VerdictOverlay.tsx:87` maps `CHECK_FAILED` to `error`, but the normal verdict branch in `src/components/student/homework-problem/SubmitSheet.tsx:438` does not pass `onRetry`; retry is only supplied for thrown mutation errors at `src/components/student/homework-problem/SubmitSheet.tsx:448`. A successful server response with `verdict: 'CHECK_FAILED'` therefore shows only "Закрыть", despite AC-6's error retry requirement (`docs/delivery/features/student-homework-problem-screen/spec.md:360`).
+3. **[major] The real problem route is still outside auth guarding and is documented as mock-only.** `src/App.tsx:194` still says the route is "Mock-only data" and "outside AuthGuard", while `src/App.tsx:202` mounts the now-real `HomeworkProblem` directly. A direct/reloaded unauthenticated URL gets the problem screen's generic API error instead of the normal auth redirect, and the stale comments hide that this is now production data. Use a full-bleed student auth wrapper or another auth gate that preserves the no-global-navigation layout.
+4. **[major] UX/UI canon exceptions remain unresolved and one claimed rgba fix is incomplete.** `src/components/student/homework-problem/SubmitSheet.tsx:2` still bypasses the local shadcn Sheet and uses Radix Dialog directly; that may be an acceptable exception, but it is not the requested shadcn primitive check. The hard-coded shadow `rgba(27,107,74,0.25)` still exists at `src/components/student/homework-problem/SubmitSheet.tsx:424`, and status colors remain non-Sokrat tokens in `src/components/student/homework-problem/VerdictOverlay.tsx:98` plus the amber banner at `src/components/student/homework-problem/ProblemContext.tsx:190`. If these are intentional product/design exceptions, they need an explicit owner waiver; otherwise the token-system finding is not closed.
+5. **[major] Acceptance docs are now internally inconsistent after the spec edits.** `docs/delivery/features/student-homework-problem-screen/spec.md:346` changed non-assigned access to 404, but `docs/delivery/features/student-homework-problem-screen/tasks.md:87` and `docs/delivery/features/student-homework-problem-screen/tasks.md:733` still require 403. `spec.md:376` changed AC-11 to build + smoke-check + delta lint, but task validation blocks still say `npm run lint && npm run build` (`tasks.md:195`, `tasks.md:230`). I agree 404 can be the right privacy invariant, and delta-lint can be a sane release policy, but those are human-owner acceptance changes, not code fixes. Make the docs consistent and record the owner decision.
+6. **[minor] Active Phase-2 icon buttons are still no-op UI.** `src/components/student/homework-problem/ComposerMobile.tsx:95` renders paperclip and `src/components/student/homework-problem/ComposerMobile.tsx:121` renders mic, but neither has a handler, disabled state, or Phase-2 disclosure. If chat attachments/voice are deferred, avoid live-looking dead controls.
+7. **[minor] `git diff --check origin/main` fails on trailing whitespace in `CLAUDE.md`.** The failures are in the newly added `CLAUDE.md:843` through `CLAUDE.md:878` block. This is a small hygiene fix, but it is cheap and should be cleaned before handoff.
+
+Required fixes:
+1. Decide, explicitly, whether Phase 1 includes working Socratic chat. If yes, wire `ComposerMobile` send to the existing guided chat/check pipeline. If no, update spec/tasks as a human-owned scope decision and remove/disable the chat send UI so students are not invited into a non-working path.
+2. Pass a retry handler for `verdict === 'CHECK_FAILED'` as well as thrown network/5xx errors, preserving the same numeric/photos/text state.
+3. Protect `/student/homework/:hwId/problem/:taskId` with an auth gate that preserves the full-bleed mobile layout, and update the stale `App.tsx` mock-only comments.
+4. Either replace the remaining hard-coded color/shadow and Sheet bypass with canon-compliant primitives/tokens, or add an explicit documented design-system waiver approved by the owner.
+5. Reconcile `spec.md`, `tasks.md`, `.claude/rules/40-homework-system.md`, and `CLAUDE.md` on 404-vs-403 and lint policy. Do not leave contradictory ACs.
+6. Disable or give explicit "Phase 2" feedback for no-op paperclip/mic controls.
+7. Remove trailing whitespace from the newly added `CLAUDE.md` block.
+
+Resolved since previous review:
+- Current-task message filtering is now implemented with `task_id` and legacy `task_order` fallback (`src/pages/student/HomeworkProblem.tsx:74`).
+- Empty current-task threads now render a system divider (`src/pages/student/HomeworkProblem.tsx:317`).
+- Mobile routing no longer auto-opens task #1; it uses `onTaskClickOverride` (`src/pages/StudentHomeworkDetail.tsx:41`, `src/components/homework/GuidedHomeworkWorkspace.tsx:1444`).
+- Main task body now renders through lazy `MathText` (`src/components/student/homework-problem/ProblemContext.tsx:126`).
+- Numeric input switched to text + `inputMode="decimal"` and normalizes comma to dot on send (`src/components/student/homework-problem/SubmitSheet.tsx:19`, `src/components/student/homework-problem/SubmitSheet.tsx:332`).
+- Type drift for `task_kind`, `submission`, and `submission_payload` is fixed (`src/lib/studentHomeworkApi.ts:330`, `src/types/homework.ts:125`, `src/types/homework.ts:192`).
+- The false "Черновик сохранён" label was removed from the visible footer copy.
+
+Checks:
+- **Job alignment:** S1-2/S1-3 are much closer after SubmitSheet, verdict, and type fixes. S1-1 still fails the current spec because chat does not answer.
+- **Product invariants:** The explicit SubmitSheet action path is good. The active chat composer is still a non-working draft-only path unless Phase 1 is formally narrowed.
+- **Scope creep:** No Photo OCR, no 4-state grading pipeline, no tablet/desktop cutover, and no feature flag were added.
+- **Anti-leak:** `handleGetStudentProblem` still uses student-safe task/assignment whitelists; `solution_*`, `rubric_*`, and `ai_score_comment` are not selected in the student endpoint.
+- **Performance:** React Query key remains `['student','problem', hwId, taskId]`; chat message rendering remains memoized; task condition now uses lazy `MathText`.
+- **Validation run by Codex:** `npx eslint <touched files>` exits 1 with 8 `no-explicit-any` errors in `src/lib/studentHomeworkApi.ts` that are outside the changed hunk. `npm run build` fails inside the sandbox with Vite config access denied, then passes after escalation. `npm run smoke-check` passes with non-blocking warnings. `git diff --check origin/main` fails on new trailing whitespace in `CLAUDE.md`.
+- **Risk awareness:** Rollback + staging QA gates are documented, but prod deploy should remain blocked until the blocker and major findings above are resolved or explicitly waived by the human owner.

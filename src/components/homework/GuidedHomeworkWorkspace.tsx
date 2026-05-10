@@ -70,6 +70,17 @@ type SendMode = Extract<GuidedMessageKind, 'answer' | 'hint_request' | 'question
 
 interface GuidedHomeworkWorkspaceProps {
   assignment: StudentHomeworkAssignmentDetails;
+  /**
+   * Optional intercept for `TaskStepper` clicks. When provided AND it
+   * returns `true`, the workspace skips its own `switchToTask` and the
+   * parent owns the click (e.g. navigate to a per-task screen on mobile).
+   * Returning `false` keeps the legacy in-place switch.
+   *
+   * Used by `StudentHomeworkDetail` on mobile (≤768px) to route task
+   * clicks to `/student/homework/:hwId/problem/:taskId` instead of
+   * switching inline. See codex review finding #3 + spec AC-2.
+   */
+  onTaskClickOverride?: (orderNum: number, taskId: string) => boolean;
 }
 
 const UI_STATUS_META: Record<GuidedHomeworkUiStatus, { label: string; badgeClass: string }> = {
@@ -523,7 +534,10 @@ function toDeliveryStatus(value?: MessageDeliveryStatus): MessageDeliveryStatus 
   return 'sent';
 }
 
-export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWorkspaceProps) {
+export default function GuidedHomeworkWorkspace({
+  assignment,
+  onTaskClickOverride,
+}: GuidedHomeworkWorkspaceProps) {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -1431,8 +1445,16 @@ export default function GuidedHomeworkWorkspace({ assignment }: GuidedHomeworkWo
     if (!visitedTaskOrders.has(orderNum)) return;
     if (isStreaming || isCheckingAnswer || isRequestingHint || isUploading) return;
     if (celebratingTaskOrder !== null) return;
+    // Mobile routing override (codex finding #3): the parent
+    // (StudentHomeworkDetail) decides if a task click should navigate to
+    // the per-task screen instead of switching inline. We resolve the
+    // task by its order_num to pass the canonical UUID to the override.
+    if (onTaskClickOverride) {
+      const target = assignment.tasks.find((t) => t.order_num === orderNum);
+      if (target && onTaskClickOverride(orderNum, target.id)) return;
+    }
     switchToTask(orderNum);
-  }, [visitedTaskOrders, isStreaming, isCheckingAnswer, isRequestingHint, isUploading, celebratingTaskOrder, switchToTask]);
+  }, [visitedTaskOrders, isStreaming, isCheckingAnswer, isRequestingHint, isUploading, celebratingTaskOrder, switchToTask, onTaskClickOverride, assignment.tasks]);
 
   const handleGoPrev = useCallback(() => {
     if (previousTaskOrder === null) return;

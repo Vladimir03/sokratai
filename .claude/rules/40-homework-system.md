@@ -107,6 +107,87 @@
 
 **Спека:** `C:\Users\kamch\.claude\plans\wild-swinging-nova.md`
 
+### Student Homework Problem Screen — single-task surface + submission contract (Phase 1, 2026-05-09)
+
+Phase 1 student-side mobile-first homework problem screen использует **два новых student endpoint'а** в `supabase/functions/homework-api/index.ts`. Старая `/homework/:id` поверхность (`GuidedHomeworkWorkspace`) остаётся для desktop/tablet (viewport > 768px). Mobile (≤768px) переходит на новый screen `/student/homework/:hwId/problem/:taskId`. Спека: `docs/delivery/features/student-homework-problem-screen/spec.md`.
+
+**Migrations (2):**
+- `20260509120000_add_task_kind_to_homework_tasks.sql` — колонка `homework_tutor_tasks.task_kind text NOT NULL DEFAULT 'extended' CHECK IN ('numeric','extended','proof')` + backfill (`short_answer→numeric`, `detailed_solution→extended`).
+- `20260509120100_add_submission_payload_to_thread_messages.sql` — `homework_tutor_thread_messages.submission_payload jsonb NULL` + extended CHECK constraint на `message_kind` (NULL OR IN 11 значений включая `'submission'`).
+
+**Endpoint 1 — `GET /student/problem/:hwId/:taskId`** (`handleGetStudentProblem`):
+
+Single-task surface: возвращает в **одном** round-trip всё, что нужно новому screen — `{assignment, task, task_total, task_score, thread, student, hints_used}`. Не chain'ить через `/assignments/:id/student` + `/assignments/:id/thread` + per-task lookups.
+
+- **Ownership** через `homework_tutor_student_assignments` — 404 `NOT_FOUND` для не-assigned (не 403 — keeps existence private; mirrors `handleGetStudentAssignment`).
+- **Lazy thread provisioning** через `provisionGuidedThread` если thread row не существует — first-open после assign работает.
+- **Whitelist на каждом SELECT'е**:
+  - `homework_tutor_assignments`: `id, title, subject, deadline, status` (никаких `notes_for_student` / `tutor_id` / `disable_ai_bootstrap` leak).
+  - `homework_tutor_tasks`: `id, order_num, task_text, task_image_url, max_score, check_format, task_kind` — `solution_*` / `rubric_*` ИСКЛЮЧЕНЫ.
+- **Thread hydration**: только через `fetchStudentThread(threadId)` — единая каноничная точка, которая strip'ит `ai_score_comment` (через `stripStudentSensitiveTaskStateFields`) + hidden tutor notes (`stripHiddenMessages`) + атачит `tutor_profile`. Не дублировать strip-логику в новом коде.
+- `task_score` через `computeFinalScore(target_state, max_score)` — единый chain `tutor_score_override → earned_score → ai_score → status`.
+
+**Endpoint 2 — `POST /student/problem/:hwId/:taskId/submission`** (`handleStudentSubmission`):
+
+Single-shot submit для нового screen. Body `{numeric: string, photos: string[], text: string}` — `numeric` / `text` обязательно строки, `photos` массив `storage://...` refs.
+
+**task_kind requirements (server-side enforced):**
+- `numeric` → `numeric.trim()` обязателен; photos игнорируются
+- `extended` → `numeric.trim()` И `photos.length ≥ 1`
+- `proof` → `photos.length ≥ 1`; numeric игнорируется
+
+400 `VALIDATION` с конкретным missing field. Defensive default для unknown task_kind = treat как extended.
+
+**Photo refs validation** через canonical `extractStudentThreadAttachmentRefs` — Patch B+2 / SSRF / bucket whitelist (`THREAD_ATTACHMENT_BUCKETS = {"homework-submissions", "homework-images"}`) / per-student namespace check (`{userId}/{assignmentId}/threads/...`). 400 `INVALID_ATTACHMENT_REF` иначе.
+
+**answerText synthesis** (то, что AI видит как «ответ ученика»):
+```ts
+const lines = [];
+if (taskKind !== 'proof' && numeric.trim()) lines.push(`Числовой ответ: ${numeric.trim()}`);
+if (text.trim()) lines.push(text.trim());
+const answerText = lines.length > 0 ? lines.join('\n') : '(см. фото решения)';
+```
+
+**Submission row** в `homework_tutor_thread_messages`:
+- `role: "user"`, `message_kind: "submission"`
+- `content: answerText` (synthesized)
+- `image_url: serializeThreadAttachmentRefs(photos)` (dual-format string)
+- `submission_payload: {numeric, photos, text}` (JSONB) — **строго** structured object, **никаких** raw user-input полей которые render'ятся как HTML
+- `task_id`, `task_order: ctx.currentOrder`
+
+**AI feedback row** использует `message_kind: "check_result"` (отличается от chat-path `ai_reply`) — semantically distinct verdict bubble для explicit submission.
+
+**Shared helper `runStudentAnswerGrading` (single source of truth для AI grading):**
+
+Извлечён из `handleCheckAnswer` 2026-05-09. Owns: image/OCR/student-name resolution → `evaluateStudentAnswer` → confidence guard → effective `ai_score` derivation → AI feedback message insert (`feedbackKind` параметр) → verdict branching + state update + `performTaskAdvance`. Both `handleCheckAnswer` (`feedbackKind='ai_reply'`) and `handleStudentSubmission` (`feedbackKind='check_result'`) используют его. **Не дублировать grading logic**: при изменении state-machine / AI-call правь helper, callers только differ в pre/post setup и user-message kind.
+
+**Anti-leak invariants (КРИТИЧНО):**
+1. `submission_payload` echoed back через `THREAD_SELECT` — это raw client input (`storage://` refs, не resolved signed URLs). Никакой URL transformation внутри.
+2. `evaluateStudentAnswer` НЕ получает submission-specific hints в Phase 1 prompt — Phase 2 owns OCR + 4-verdict pipeline (см. spec §3 "Out of scope").
+3. Никакой новой submissions-таблицы (legacy `homework_tutor_submissions` была удалена `20260406120000_drop_classic_homework.sql`, не возрождать).
+4. `handleStudentSubmission` SELECT на `homework_tutor_tasks` включает `solution_text, solution_image_urls, rubric_*` (для grading), но эти поля НЕ возвращаются клиенту — они идут только в `evaluateStudentAnswer` сервер-сайд через helper.
+
+**THREAD_SELECT extension (2026-05-09):**
+
+Добавлен `submission_payload` в nested message select:
+```
+homework_tutor_thread_messages(id, role, content, image_url, task_id, task_order, message_kind, submission_payload, created_at, author_user_id, visible_to_student)
+```
+Submission rows доходят до клиента через `fetchStudentThread` без потерь. При добавлении нового nullable поля в messages, видимого ученику — расширять `THREAD_SELECT` явно (не `select("*")`).
+
+**Viewport routing (frontend):**
+
+`StudentHomeworkDetail` через `useIsMobile()` hook (`window.innerWidth ≤ 768`) делает navigate на `/student/homework/:hwId/problem/:taskId`; иначе inline `GuidedHomeworkWorkspace`. **Без feature flag** — раскатка сразу всем mobile-юзерам. Rollback при критическом баге = `git revert <hash> && deploy-sokratai` (~3 мин). Старый `GuidedHomeworkWorkspace` остаётся в коде до Phase 4 cutover (отдельная спека).
+
+**При расширении endpoint'а:**
+1. Никакого `select("*")` на `homework_tutor_tasks` или `homework_tutor_assignments` — column whitelist остаётся жёстким.
+2. Новое поле в `homework_tutor_tasks`, видимое ученику → явное решение: tutor-only (default, paranoid) / student-visible (требует обоснования).
+3. Новое поле в submission_payload JSONB (например `voice_ref` Phase 2) — синхронно расширять frontend type (`src/lib/studentProblemApi.ts`) + spec §5.
+4. Новый bucket для photo refs → расширять `THREAD_ATTACHMENT_BUCKETS` И smoke-check грепа `homework_tutor_thread_messages.image_url` для запрещённых хостов.
+5. Phase 2 grading pipeline (Gemini OCR + 4 verdict states) — это отдельная спека `student-homework-problem-grading-pipeline.md`. Шить новый prompt/verdict в `evaluateStudentAnswer` без отдельной spec **ЗАПРЕЩЕНО** — это «AI = draft + action» инвариант.
+
+**Спека:** `docs/delivery/features/student-homework-problem-screen/spec.md` (Phase 1, AC-1..AC-11).
+
 ### Multi-photo на задачу и рубрику (2026-04-14, frontend TASK-3..5)
 
 `homework_tutor_tasks.task_image_url` и `homework_tutor_tasks.rubric_image_urls` — оба dual-format TEXT поля. Значение либо single `storage://...` ref (legacy + когда одно фото), либо JSON-array `["storage://...", ...]` (2+ фото). Чтение/запись через `parseAttachmentUrls` / `serializeAttachmentUrls` из `@/lib/attachmentRefs` (и Deno-клон `supabase/functions/_shared/attachment-refs.ts`).
@@ -1066,3 +1147,63 @@ Phase 1 пивотится из homework-embedded preview в standalone public t
 - **Backend**: `hw_reorder_tasks(assignment_id, task_order_jsonb)` — PL/pgSQL, `SECURITY DEFINER`, атомарная транзакция
 - **Порядок операций в PUT /assignments/:id**: reorder RPC → field updates → insert → delete
 - **KB provenance sync (2026-04-15)**: `hw_reorder_tasks` также атомарно пересчитывает `homework_kb_tasks.sort_order` по pre-mutation snapshot, иначе после reorder `handleGetAssignment` отрисовывает `kb_source_label` / `kb_snapshot_solution` на чужой задаче (tutor-only surface, не student leak). Join остаётся `sort_order ↔ order_num - 1`; если добавляешь новый write-path на `homework_tutor_tasks.order_num` мимо RPC — синхронизируй `homework_kb_tasks.sort_order` вручную. Миграция: `20260415120000_hw_reorder_tasks_sync_kb.sql`
+
+### Student Homework Problem Screen — viewport routing + submission contract (2026-05-09)
+
+Phase 1 rollout-summary section. **Endpoint / migration / handler / shared-helper / anti-leak детали** — не дублируем здесь, см. секцию выше «Student Homework Problem Screen — single-task surface + submission contract (Phase 1, 2026-05-09)» (≈line 110). Эта секция покрывает только rollout invariants, которые не вписывались в endpoint-spec и нужны при будущих изменениях flow'а.
+
+**Routing invariants (mobile ≤768px, без feature flag, revised 2026-05-09 post codex review #3):**
+
+- Новый screen на route `/student/homework/:hwId/problem/:taskId` (зарегистрирован в `App.tsx` через TASK-7).
+- Старая `/homework/:id` поверхность (`GuidedHomeworkWorkspace`) остаётся для desktop / tablet (>768px) до Phase 4 cutover.
+- `StudentHomeworkDetail` использует **новый** hook `@/hooks/useIsMobile.ts` (НЕ legacy `@/hooks/use-mobile.tsx`):
+  - Inclusive `(max-width: 768px)` (matches AC-2; legacy `<768` exclusive — не подходит).
+  - SSR-safe initial state через lazy `useState` initializer + `typeof window !== 'undefined'` guard — первый paint никогда не показывает desktop layout mobile-юзеру.
+  - `matchMedia('change')` listener реактивен на iPad rotation landscape→portrait — следующий клик задачи в степпере уходит уже в новый routing branch.
+- **Routing implementation = `onTaskClickOverride` prop, НЕ auto-redirect**: `StudentHomeworkDetail` монтирует `GuidedHomeworkWorkspace` на обоих viewport'ах и передаёт callback `(orderNum, taskId) => boolean`. Workspace внутри своего `handleTaskClick` сначала вызывает override — если возвращает `true`, workspace **пропускает** свой `switchToTask`. На mobile override делает `navigate('/student/homework/${hwId}/problem/${taskId}')` и возвращает `true`; на desktop — возвращает `false` и legacy in-place switch работает как раньше.
+- **Почему НЕ auto-redirect на `tasks[0].id`** (первоначальная TASK-8 реализация, отозвана 2026-05-09): forced ученика всегда в задачу #1 при заходе на `/homework/:id` на mobile, не давая выбрать конкретную задачу. AC-2 wording — «при клике на задачу» — означает явный per-task pick через степпер.
+- **Без feature flag.** Раскатка сразу всем mobile-юзерам. Rollback при критическом баге = `git revert <hash> && deploy-sokratai` (~3 мин per `.claude/rules/95-production-deploy.md`). Старый workspace остаётся в коде до Phase 4 — desktop fallback автоматический через override returning `false`.
+- **При расширении routing**: новые student-side surfaces, которые хотят intercept'ить task picks, должны принимать тот же `onTaskClickOverride` prop сигнатуру (consistent across the codebase) — не дублировать через локальный listener в каждом компоненте.
+
+**Submission storage invariants (rollout-level summary):**
+
+- Submissions пишутся в **существующую** `homework_tutor_thread_messages` с `message_kind='submission'`. **Не возрождать** legacy `homework_tutor_submissions` (была дропнута миграцией `20260406120000_drop_classic_homework.sql`).
+- `submission_payload JSONB` shape — строго structured object `{numeric, photos[], text, voice_ref?}`. Подробная shape + AI-feedback contract — в детальной секции выше.
+- `image_url` параллельно заполняется serialized photos refs — это требование backward-compat с tutor `GuidedThreadViewer` и существующим chat display (там нет нового submission renderer).
+
+**Grading invariants (hybrid first-completed-wins):**
+
+- **Чат incremental:** каждое user-сообщение → `handleCheckAnswer` → если `verdict='CORRECT'`, `task_state.status='completed'`.
+- **SubmitSheet single-shot:** через `POST /student/problem/:hwId/:taskId/submission` → backend синтезирует answer + reuse того же `runStudentAnswerGrading` helper (Phase 1 — без отдельного grading pipeline).
+- **Whichever path first** выставляет `task_state.status='completed'` — фиксирует score. Второй путь после completion → 409-style ignore (SubmitSheet primary CTA меняется на «Следующая задача →»).
+- Phase 2 (отдельная спека) добавляет explicit OCR pipeline + 4 verdict states. Шить дополнительный prompt/verdict в `evaluateStudentAnswer` без отдельной spec **ЗАПРЕЩЕНО** — это «AI = draft + action» инвариант.
+
+**`task_kind` invariant:**
+
+- `homework_tutor_tasks.task_kind enum('numeric'|'extended'|'proof')`, NOT NULL DEFAULT `'extended'` (миграция `20260509120000`).
+- Backfill: `check_format='short_answer' → 'numeric'`, `check_format='detailed_solution' → 'extended'`. `'proof'` — manual mark тутором (Phase 2 tutor UI).
+- Server-side validation в `handleStudentSubmission` (детальная секция выше): `numeric` requires `numeric.trim()`, `extended` requires `numeric.trim()` И `photos≥1`, `proof` requires `photos≥1`.
+- Defensive default для unknown task_kind = treat как `extended`.
+
+**Hint behavior — без cap'а 3:**
+
+- Существующая `available_score` %-degradation в `handleRequestHint` сохраняется. UI показывает «Подсказок: N» **без** жёсткого 3-cap.
+- Дизайн-handoff содержит mock «Подсказка 1/3» — это был визуальный mock, мы **намеренно не реализуем** cap. Phase 1 не меняет hint backend logic.
+- Если когда-то понадобится cap — отдельная спека (продуктовое решение, не cosmetic UI change).
+
+**Phase split:**
+
+| Phase | Scope | Spec |
+|---|---|---|
+| 1 (этот rule, ✅ TASKS 1–8 done 2026-05-09) | Mobile ≤768px + chat + ProblemContext + SubmitSheet с reuse `handleCheckAnswer` | `docs/delivery/features/student-homework-problem-screen/spec.md` |
+| 2 (deferred) | Real Gemini OCR pipeline + 4 verdict states (`no-work` / `step-error` / `unclear`) + voice recorder + autosave drafts + tutor `task_kind` selector в `TutorHomeworkCreate` | TBD — `student-homework-problem-grading-pipeline.md` |
+| 3 (deferred) | Tablet (Layout 2) + Desktop (Layout 3) split layouts. Hint ladder UI block. Math-keyboard в composer | TBD — `student-homework-problem-multi-device.md` |
+| 4 (deferred) | Cutover: удалить `useIsMobile` viewport check, redirect `/homework/:id` → новый screen для всех viewport'ов, удалить `GuidedHomeworkWorkspace.tsx` | TBD — `student-homework-problem-cutover.md` |
+
+**При расширении Phase 1 / при добавлении новых student-side endpoint'ов:**
+1. Соблюдать column-whitelist invariant (см. детальную секцию).
+2. `useIsMobile` hook — единственная точка viewport-detection для problem-screen routing. Не дублировать `window.innerWidth` checks по компонентам.
+3. Новые routes под `/student/homework/:hwId/...` мониторят то же 404-`NOT_FOUND` semantic для не-assigned (не 403 — keeps existence private).
+4. **Не путать** с легаси `/homework/:id` route — он остаётся за desktop fallback'ом до Phase 4.
+
+**Спека:** `docs/delivery/features/student-homework-problem-screen/spec.md` (Phase 1, AC-1..AC-11).

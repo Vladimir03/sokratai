@@ -3,7 +3,7 @@
 **Версия:** v0.1
 **Дата:** 2026-05-09
 **Автор:** Vladimir Kamchatkin (с дизайном от Claude Design)
-**Статус:** draft
+**Статус:** implemented (Phase 1, 2026-05-09 — TASKS 1–8 ✅; TASK-10 review + TASK-11 prod deploy pending)
 **Feature folder:** `docs/delivery/features/student-homework-problem-screen/`
 **Связанные документы:**
 - Дизайн-handoff: `docs/design_handoff_homework_chat/README.md` + `student-problem-chat.jsx` + скриншоты mobile/tablet/desktop
@@ -42,10 +42,11 @@
 
 ## 1. Summary
 
-Новый mobile-first экран решения **одной** задачи внутри ДЗ для ученика. Экран совмещает две активности:
+Новый mobile-first экран решения **одной** задачи внутри ДЗ для ученика.
 
-1. **Сократический диалог с AI** через чат (existing infrastructure — guided chat + Сократ AI идентичность). Каждое user-сообщение AI оценивает (`evaluateStudentAnswer`); при CORRECT задача засчитывается incremental.
-2. **Single-shot сдача решения** через `<SubmitSheet>` — числовой ответ + фото решения от руки (multi-page PhotoStrip) + опциональный текст. AI проверяет synthesizing answer = numeric + text + photos через тот же `handleCheckAnswer` pipeline. Первый из двух путей закрывший задачу = winning result.
+**Phase 1 scope (revised 2026-05-09 после codex re-review):** **single-shot сдача решения** через `<SubmitSheet>` — числовой ответ + фото решения от руки (multi-page PhotoStrip) + опциональный текст. AI проверяет synthesizing answer = numeric + text + photos через тот же `handleCheckAnswer` pipeline. Sticky composer показывает только primary CTA «Сдать решение задачи» (после CORRECT — flip на «Следующая задача →»). **Чат-row скрыт** (`ComposerMobile chatDisabled`).
+
+**Сократический диалог с AI через чат** (paperclip / mic / text input в композере с every user message → `evaluateStudentAnswer`) **deferred to Phase 2** — это требует `saveThreadMessage` + `/chat` SSE wiring которого нет в Phase 1, и без него composer был silent-drop hazard (codex review #1 finding). Тред продолжает рендериться и показывает существующие сообщения (если ученик начал решать задачу через legacy desktop поверхность ранее), но новые student messages создаются только через SubmitSheet (`message_kind='submission'`).
 
 Mobile-only Phase 1, **выкатывается сразу всем mobile-юзерам** (viewport ≤768px). Desktop/tablet продолжают использовать existing `GuidedHomeworkWorkspace` до Phase 3 (fallback по viewport-детекции, не по profile flag). Tablet/Desktop — отдельными спеками после feedback от mobile rollout.
 
@@ -120,6 +121,7 @@ Phase 1 = Mobile только. Tablet/Desktop fallback на старый `/homew
 
 **Out of scope (deferred):**
 
+- **Сократический chat composer (paperclip / mic / text input в нижнем ряду композера) → Phase 2.** Композер в Phase 1 показывает **только** primary CTA + completed-state CTA. Чат-row скрыт через `<ComposerMobile chatDisabled />`. Причина: wiring chat send требует `saveThreadMessage` + `/chat` SSE, которого нет в Phase 1; без него composer был silent-drop hazard (codex review #1 / re-review #1).
 - Voice recorder в SubmitSheet → Phase 2
 - Autosave (PATCH/GET draft-submission) → Phase 2
 - 4-step grading pipeline с Gemini OCR (no-work / step-error / unclear) → Phase 2 separate spec
@@ -342,13 +344,14 @@ Behaviour:
 ### Acceptance Criteria (testable, all P0 unless marked)
 
 - **AC-1 (P0):** Миграции `20260509120000`, `20260509120100` применяются на staging без ошибок. После применения: 100% существующих `homework_tutor_tasks` имеют `task_kind` (через backfill `short_answer→numeric, detailed_solution→extended`).
-- **AC-2 (P0):** При viewport `<= 768px` И клике на задачу в `StudentHomeworkDetail` → navigate на `/student/homework/:hwId/problem/:taskId` (для **всех** учеников без opt-in). При viewport > 768px → existing inline GuidedHomeworkWorkspace без изменений (regression test). Resize listener активный — поворот iPad mini в портрет на следующем клике задачи переводит на новый screen.
-- **AC-3 (P0):** Endpoint `GET /student/problem/:hwId/:taskId` возвращает 200 OK для assigned student с правильным shape (см. §5 API). Возвращает 403 для не-assigned student. Возвращает 404 если task не существует. Не leak'ает tutor-only поля (`solution_text`, `rubric_*`) — проверяется на staging через response body grep.
+- **AC-2 (P0):** При viewport `<= 768px` И клике на задачу в `TaskStepper` (mounted внутри `GuidedHomeworkWorkspace` через `StudentHomeworkDetail`) → navigate на `/student/homework/:hwId/problem/:taskId` (для **всех** учеников без opt-in). При viewport > 768px → existing inline switch без изменений (regression test). Реализуется через `onTaskClickOverride` prop в `GuidedHomeworkWorkspace` — workspace мoнтируется на обоих viewport'ах, parent decides what happens on click. Resize listener активный (`useIsMobile` + `matchMedia('change')`) — поворот iPad mini в портрет на следующем клике задачи переводит на новый screen. *(Revision 2026-05-09: первоначальная реализация делала auto-redirect на `tasks[0].id` при mount; codex review #3 указал что это не позволяет ученику выбрать задачу. Перешли на task-click интерсепт.)*
+- **AC-3 (P0):** Endpoint `GET /student/problem/:hwId/:taskId` возвращает 200 OK для assigned student с правильным shape (см. §5 API). Возвращает **404 `NOT_FOUND`** для не-assigned student — privacy invariant: не раскрываем существование чужих ДЗ через status-code differential (mirrors `handleGetStudentAssignment`, `handleGetStudentThreadByAssignment`, `mock-exam-public::loadTutorCard`). Возвращает **404 `TASK_NOT_FOUND`** если задача не принадлежит указанному ДЗ. Не leak'ает tutor-only поля (`solution_text`, `solution_image_urls`, `rubric_text`, `rubric_image_urls`, `ai_score_comment`) — проверяется на staging через response body grep. *(Revision 2026-05-09: status code corrected from 403 → 404 per established student-endpoint privacy invariant; original draft wording was inconsistent with sibling endpoints. Codex review finding #6.)*
 - **AC-4 (P0):** На route `/student/homework/:hwId/problem/:taskId`:
+  - Route защищён auth gate (codex re-review #3 fix 2026-05-09): прямой URL без сессии редиректит на login, mobile full-bleed layout сохраняется (без global navigation chrome). Реализация — `<AuthGuard hideNavigation>` (или эквивалент) обёртывает route в `App.tsx`.
   - Topbar показывает «ЗАДАЧА N/M · {subject}» eyebrow + ДЗ title
   - ProblemContext по умолчанию **expanded** если thread пустой (`messages.length === 0`), **collapsed** если есть сообщения. Step-indicator корректен (done = task_states.status='completed' среди других задач, current = эта задача).
-  - ChatThread рендерит system divider + AI bubbles (Сократ avatar + kicker «СОКРАТ») + user bubbles (справа, серым). Задача с пустым thread → только system divider, ученик начинает диалог.
-  - ComposerMobile primary CTA «Сдать решение задачи» → открывает SubmitSheet
+  - ChatThread фильтрует messages по `task_id === task.id` (legacy fallback `task_order === task.order_num`). Рендерит AI bubbles (Сократ avatar + kicker «СОКРАТ») + user bubbles (справа, серым) для существующих сообщений. Задача с пустым current-task thread → system divider «Начни решать задачу» + sticky CTA в композере.
+  - ComposerMobile primary CTA «Сдать решение задачи» → открывает SubmitSheet. **Чат-row скрыт** в Phase 1 (`chatDisabled={true}`) — sub-row paperclip/mic/text-input/send появятся в Phase 2 одновременно с реальным wiring `saveThreadMessage` + `/chat` SSE.
 - **AC-5 (P0):** SubmitSheet:
   - Numeric input принимает запятую и точку («1,4» и «1.4» — обе валидны), unit suffix из task data
   - PhotoStrip: 1 + N тайлов 96×124 px, click → native `<input type="file" accept="image/*" capture="environment" multiple>`. После выбора → upload через existing `uploadStudentThreadImage` → ref в `photos[]`. Удаление через ✕ кнопку
@@ -373,7 +376,7 @@ Behaviour:
   - SubmitSheet `max-h: 92%` оставляет видимый scrim сверху
   - PhotoStrip horizontal scroll работает + iOS swipe не съедается row-onClick (используем `touch-action: manipulation` где нужно)
   - KaTeX в условии задачи не overflow (max-w-full + break-words)
-- **AC-11 (P0):** `npm run lint && npm run build && npm run smoke-check` — все три зелёные. Lint baseline +0 на затронутых файлах.
+- **AC-11 (P0):** `npm run build && npm run smoke-check` — оба зелёные. **Lint: delta-only baseline** — `npm run lint` имеет ~709 pre-existing problems в репо (см. `.claude/rules/95-production-deploy.md` § «Будущие улучшения»); AC-11 требует **+0 errors на файлах, затронутых этой фичей** (Phase 1 frontend code в `src/components/student/homework-problem/`, `src/pages/student/HomeworkProblem.tsx`, `src/pages/StudentHomeworkDetail.tsx`, `src/lib/studentProblemApi.ts`, `src/lib/studentHomeworkApi.ts`, `src/hooks/useStudentProblemTask.ts`, `src/hooks/useSubmitSolution.ts`, `src/hooks/useIsMobile.ts`, `src/types/homework.ts`). Полный `npm run lint` зелёным **не требуется** для Phase 1 ship — это отдельная техническая задача (см. follow-up). *(Revision 2026-05-09: clarified delta-only scoping per codex review finding #10 — global lint baseline предшествует TASK-1 и не блокирует Phase 1 rollout.)*
 
 ### Связь с pilot KPI
 

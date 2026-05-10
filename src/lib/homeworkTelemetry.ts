@@ -24,6 +24,10 @@
  * | homework_assign_group                     | `src/pages/tutor/TutorHomeworkCreate.tsx` (both submit branches)| one fire per submit branch            |
  * | homework_filter_by_group                  | `src/pages/tutor/TutorHomework.tsx` (onChange callback)         | onChange only                         |
  * | tutor_assistant_route_hit                 | `src/pages/RedirectTutorAssistant.tsx` (mount effect)           | `firedRef` sentinel                   |
+ * | student_problem_screen_opened             | `src/pages/student/HomeworkProblem.tsx` (mount effect)          | `openedKeyRef` per `${hwId}:${taskId}` |
+ * | student_submitsheet_opened                | `HomeworkProblem.tsx` (CTA onClick)                             | onClick only                          |
+ * | student_submission_sent                   | `HomeworkProblem.tsx` (SubmitSheet `onSubmitted` precursor)     | one fire per submission attempt       |
+ * | student_submission_verdict                | `HomeworkProblem.tsx` (SubmitSheet `onSubmitted` callback)      | one fire per verdict response         |
  *
  * When adding new events to this surface:
  *   1. Keep payloads PII-free — if you need a name, use an id.
@@ -82,7 +86,19 @@ type GuidedTelemetryEvent =
   | 'homework_preview_copied_text'
   | 'homework_saved_as_template_post_factum'
   | 'homework_saved_to_kb'
-  | 'homework_saved_to_kb_per_task';
+  | 'homework_saved_to_kb_per_task'
+  // ─── student-homework-problem-screen Phase 1 (AC-8) ──────────────────────
+  // Mobile-first single-task surface. Four events PII-free:
+  //   - student_problem_screen_opened : useEffect once per (hwId, taskId)
+  //   - student_submitsheet_opened    : onClick of the «Сдать решение» CTA
+  //   - student_submission_sent       : at submit (before verdict)
+  //   - student_submission_verdict    : on verdict response
+  // Fire-once-per-key for `_opened` is enforced via a useRef sentinel on
+  // `${hwId}:${taskId}` so React Query refetches don't multiply emissions.
+  | 'student_problem_screen_opened'
+  | 'student_submitsheet_opened'
+  | 'student_submission_sent'
+  | 'student_submission_verdict';
 
 type GuidedTelemetryValue =
   | string
@@ -205,6 +221,51 @@ interface HomeworkSavedToKBPerTaskPayload
   alreadyInBase: boolean;
 }
 
+// ─── student-homework-problem-screen Phase 1 typed payloads ────────────────
+// Strict shape — ids, counts, verdict literal only. **No** task_text, no
+// student_name, no email, no photo storage refs (refs leak path structure).
+// `numericLength` is a coarse-grained signal of "how much did the student
+// type" — useful for retention without exposing the actual answer.
+
+interface StudentProblemScreenOpenedPayload
+  extends Record<string, string | number | boolean | null | undefined> {
+  assignmentId: string;
+  taskId: string;
+  /** 1-based position; helps segment by «first task vs. later». */
+  taskNo: number;
+  taskKind: 'numeric' | 'extended' | 'proof';
+}
+
+interface StudentSubmitSheetOpenedPayload
+  extends Record<string, string | number | boolean | null | undefined> {
+  assignmentId: string;
+  taskId: string;
+  /** Whether a draft existed when the sheet opened (autosave is Phase 2 — */
+  /* in Phase 1 always false). Reserved for forward-compat. */
+  hadDraft: boolean;
+}
+
+interface StudentSubmissionSentPayload
+  extends Record<string, string | number | boolean | null | undefined> {
+  assignmentId: string;
+  taskId: string;
+  hasPhotos: boolean;
+  photoCount: number;
+  hasText: boolean;
+  /** Length of the trimmed numeric input — never the value itself. */
+  numericLength: number;
+}
+
+interface StudentSubmissionVerdictPayload
+  extends Record<string, string | number | boolean | null | undefined> {
+  assignmentId: string;
+  taskId: string;
+  verdict: 'CORRECT' | 'INCORRECT' | 'ON_TRACK' | 'CHECK_FAILED';
+  /** earned_score from `CheckAnswerResponse`. null when CHECK_FAILED. */
+  aiScore: number | null;
+  maxScore: number;
+}
+
 interface DataLayerWindow extends Window {
   dataLayer?: Array<Record<string, unknown>>;
   gtag?: (...args: unknown[]) => void;
@@ -232,6 +293,10 @@ export function trackGuidedHomeworkEvent(event: 'homework_preview_copied_text', 
 export function trackGuidedHomeworkEvent(event: 'homework_saved_as_template_post_factum', payload: HomeworkSavedAsTemplatePostFactumPayload): void;
 export function trackGuidedHomeworkEvent(event: 'homework_saved_to_kb', payload: HomeworkSavedToKBPayload): void;
 export function trackGuidedHomeworkEvent(event: 'homework_saved_to_kb_per_task', payload: HomeworkSavedToKBPerTaskPayload): void;
+export function trackGuidedHomeworkEvent(event: 'student_problem_screen_opened', payload: StudentProblemScreenOpenedPayload): void;
+export function trackGuidedHomeworkEvent(event: 'student_submitsheet_opened', payload: StudentSubmitSheetOpenedPayload): void;
+export function trackGuidedHomeworkEvent(event: 'student_submission_sent', payload: StudentSubmissionSentPayload): void;
+export function trackGuidedHomeworkEvent(event: 'student_submission_verdict', payload: StudentSubmissionVerdictPayload): void;
 export function trackGuidedHomeworkEvent(event: GuidedTelemetryEvent, payload?: GuidedTelemetryPayload): void;
 export function trackGuidedHomeworkEvent(
   event: GuidedTelemetryEvent,
