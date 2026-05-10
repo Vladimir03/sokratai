@@ -445,21 +445,30 @@ export function SubmitSheet({
     setSubmitError(null);
   };
 
-  /** Re-run mutation with the same payload — input state is unchanged. */
+  /**
+   * «Попробовать снова» from network/AI submitError overlay.
+   * Preview-QA #5 fix (2026-05-10): student wants to RETURN TO THE FORM
+   * to edit numeric/photos/text, not blindly re-fire the same payload
+   * that already failed. Just close the overlay; SubmitSheet stays open
+   * with the form populated. If the student wants to re-fire without
+   * changes, they tap the primary «Отправить на проверку» button again.
+   */
   const handleErrorRetry = () => {
     setSubmitError(null);
-    void handleSubmit();
   };
 
   /**
-   * Retry from a successful-but-failed verdict (`CHECK_FAILED` or zero-score
-   * `INCORRECT`) — the server reply landed but AI couldn't evaluate
-   * deterministically. State (numeric/photos/text) is preserved; just clear
-   * the verdict and replay. Codex re-review #2.
+   * «Попробовать снова» from CHECK_FAILED / zero-score INCORRECT verdict.
+   * Preview-QA #5 fix (2026-05-10): student expects this to RETURN TO
+   * THE FORM (not blindly re-fire the same incorrect payload). The form
+   * stays mounted with numeric/photos/text populated — student edits
+   * what's wrong, then taps primary «Отправить на проверку» again.
+   * Re-firing the exact same payload that the AI already marked
+   * incorrect would just produce the same verdict — pointless waste of
+   * student attention.
    */
   const handleVerdictRetry = () => {
     setVerdict(null);
-    void handleSubmit();
   };
 
   // ─── Voice section (Q11 from preview QA #1, 2026-05-10) ───────────────────

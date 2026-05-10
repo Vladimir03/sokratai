@@ -16,6 +16,8 @@ import { toast } from 'sonner';
 import { ProblemContext, type ProblemContextTask } from '@/components/student/homework-problem/ProblemContext';
 import { SubmitSheet } from '@/components/student/homework-problem/SubmitSheet';
 import GuidedChatMessage, { type GuidedMessageData } from '@/components/homework/GuidedChatMessage';
+import { TypingDots } from '@/components/student/homework-problem/TypingDots';
+import sokratChatIcon from '@/assets/sokrat-chat-icon.png';
 import { useStudentProblemTask } from '@/hooks/useStudentProblemTask';
 import { useStudentAssignment } from '@/hooks/useStudentHomework';
 import { useVoiceRecorder } from '@/hooks/useVoiceRecorder';
@@ -451,13 +453,58 @@ export default function HomeworkProblem() {
       taskId: data.task.id,
       hintCountBefore: hintCount,
     });
+    // Preview-QA #5 (2026-05-10): instant optimistic feedback —
+    // U1 user bubble «Подсказка» (matches backend persisted text) +
+    // U3 typing dots placeholder bubble (TypingDots in muted Сократ
+    // bubble). Both temp ids; on backend response → invalidate refetch
+    // → persisted hint_request + hint_reply messages land, optimistic
+    // ones get deduped by id-based reconciliation (replaced after
+    // saveThreadMessage returns persisted id, OR cleaned up via U5
+    // rollback on failure).
+    const userTempId = `temp-hint-user-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+    const typingTempId = `temp-hint-typing-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+    setOptimisticMessages((prev) => [
+      ...prev,
+      {
+        id: userTempId,
+        role: 'user',
+        content: 'Подсказка',
+        image_url: null,
+        created_at: new Date().toISOString(),
+        message_kind: 'hint_request',
+        message_delivery_status: 'sending',
+      },
+      {
+        id: typingTempId,
+        role: 'assistant',
+        // Sentinel content — UI render path replaces this bubble's body
+        // with `<TypingDots />` (see chat thread render below).
+        content: '__typing__',
+        image_url: null,
+        created_at: new Date().toISOString(),
+        message_kind: 'ai_reply',
+        message_delivery_status: 'sending',
+      },
+    ]);
     try {
       await requestHintApi(threadId, data.task.order_num, data.task.id);
       // Refetch — new hint_reply bubble + new available_score lands.
       await queryClient.invalidateQueries({ queryKey: ['student', 'problem', hwId, taskId] });
+      // U5 cleanup: drop both temp bubbles. Backend persisted equivalents
+      // arrive via refetch; id-based dedup would skip them anyway since
+      // temp ids never match persisted ids, but explicit removal here
+      // avoids relying on dedup heuristics for ephemeral typing dots.
+      setOptimisticMessages((prev) =>
+        prev.filter((m) => m.id !== userTempId && m.id !== typingTempId),
+      );
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Не удалось получить подсказку';
       toast.error(msg);
+      // U5 default: clean rollback — remove both optimistic bubbles so
+      // the student can retry by tapping 💡 again from a clean state.
+      setOptimisticMessages((prev) =>
+        prev.filter((m) => m.id !== userTempId && m.id !== typingTempId),
+      );
     } finally {
       setIsRequestingHint(false);
     }
@@ -700,13 +747,42 @@ export default function HomeworkProblem() {
           </div>
         ) : (
           <>
-            {messages.map((m) => (
-              <GuidedChatMessage
-                key={m.id ?? `${m.role}-${m.created_at}`}
-                message={m}
-                perspective="student"
-              />
-            ))}
+            {messages.map((m) => {
+              // U2 typing-dots sentinel: messages with content='__typing__'
+              // render as a Сократ-branded bubble with TypingDots instead
+              // of the literal text. Used by hint flow + (future) chat
+              // pre-stream interlude. Layout mirrors GuidedChatMessage
+              // assistant variant: avatar (sokrat-chat-icon) + kicker
+              // «СОКРАТ» + muted bubble.
+              if (m.role === 'assistant' && m.content === '__typing__') {
+                return (
+                  <div key={m.id} className="flex items-start gap-2">
+                    <img
+                      src={sokratChatIcon}
+                      alt=""
+                      aria-hidden="true"
+                      loading="lazy"
+                      className="h-9 w-9 rounded-full shrink-0 border border-socrat-border-light bg-white"
+                    />
+                    <div className="flex flex-col gap-1 min-w-0">
+                      <span className="text-[10px] font-bold uppercase tracking-[0.08em] text-socrat-primary">
+                        Сократ
+                      </span>
+                      <div className="bg-socrat-primary-light/60 border border-socrat-primary/15 rounded-[14px] rounded-tl-md px-3.5 py-2.5 max-w-[86%]">
+                        <TypingDots />
+                      </div>
+                    </div>
+                  </div>
+                );
+              }
+              return (
+                <GuidedChatMessage
+                  key={m.id ?? `${m.role}-${m.created_at}`}
+                  message={m}
+                  perspective="student"
+                />
+              );
+            })}
             {streamingText ? (
               <GuidedChatMessage
                 key="streaming-preview"
@@ -721,6 +797,27 @@ export default function HomeworkProblem() {
                 perspective="student"
                 isStreaming
               />
+            ) : isStreaming ? (
+              // Pre-stream interlude (between request fire and first delta):
+              // show typing dots to telegraph «AI думает». Otherwise
+              // there's a 1-2s blank gap with no feedback.
+              <div className="flex items-start gap-2">
+                <img
+                  src={sokratChatIcon}
+                  alt=""
+                  aria-hidden="true"
+                  loading="lazy"
+                  className="h-9 w-9 rounded-full shrink-0 border border-socrat-border-light bg-white"
+                />
+                <div className="flex flex-col gap-1 min-w-0">
+                  <span className="text-[10px] font-bold uppercase tracking-[0.08em] text-socrat-primary">
+                    Сократ
+                  </span>
+                  <div className="bg-socrat-primary-light/60 border border-socrat-primary/15 rounded-[14px] rounded-tl-md px-3.5 py-2.5 max-w-[86%]">
+                    <TypingDots />
+                  </div>
+                </div>
+              </div>
             ) : null}
           </>
         )}
