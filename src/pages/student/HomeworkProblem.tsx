@@ -573,8 +573,14 @@ export default function HomeworkProblem() {
   // ─── ProblemContext task adapter (B2 hybrid score) ────────────────────────
   const problemContextTask = useMemo<ProblemContextTask | null>(() => {
     if (!data) return null;
+    // Preview-QA #4 fix (2026-05-10): include the CURRENT task in
+    // `doneIndices` if it's completed. Previously we excluded it on the
+    // theory «current circle should show ring, not check» — but that
+    // hid the «solved» state from the student. Now `StepIndicator`
+    // owns the rendering: a circle that's both done AND current shows
+    // green-filled with check + outer ring (telegraphs both states).
     const doneIndices = taskStates
-      .filter((s) => s.status === 'completed' && s.task_id !== data.task.id)
+      .filter((s) => s.status === 'completed')
       .map((s) => s.task_order);
     return {
       task_id: data.task.id,

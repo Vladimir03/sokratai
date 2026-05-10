@@ -52,20 +52,38 @@ export function StepIndicator({
         const isDone = doneSet.has(taskNo);
         const isCurrent = taskNo === currentNo;
         const isLast = i === total - 1;
+        // Four mutually-exclusive style branches (preview-QA #4 fix
+        // 2026-05-10). Previously isDone + isCurrent combined into a
+        // visual mush because Tailwind merged conflicting bg/text
+        // classes; now we pick a single full set per state.
+        // - done+current: green filled + white check + outer ring
+        //   (telegraphs «решена И сейчас на ней»)
+        // - done only:    green filled + white check
+        // - current only: green-light bg + dark text + ring
+        // - default:      white bg + slate text
+        let stateClasses: string;
+        if (isDone && isCurrent) {
+          stateClasses =
+            'bg-socrat-primary text-white border-2 border-socrat-primary ring-[3px] ring-socrat-primary/15';
+        } else if (isDone) {
+          stateClasses =
+            'bg-socrat-primary text-white border-[1.5px] border-socrat-primary';
+        } else if (isCurrent) {
+          // Token-based focus ring instead of hardcoded rgba.
+          // `ring-socrat-primary/15` resolves to brand green @ 15%
+          // through Tailwind's color-with-opacity syntax (per
+          // .claude/rules/90-design-system.md anti-pattern
+          // «Hard-coded hex»).
+          stateClasses =
+            'bg-socrat-primary-light text-socrat-primary-dark border-2 border-socrat-primary ring-[3px] ring-socrat-primary/15';
+        } else {
+          stateClasses =
+            'bg-white text-slate-500 border-[1.5px] border-slate-300';
+        }
+
         const circleClass = [
           'grid h-[26px] w-[26px] place-items-center rounded-full text-[12px] font-bold tabular-nums shrink-0',
-          isDone &&
-            'bg-socrat-primary text-white border-[1.5px] border-socrat-primary',
-          isCurrent &&
-            // Token-based focus ring instead of hardcoded rgba.
-            // `ring-socrat-primary/15` resolves to brand green @ 15%
-            // through Tailwind's color-with-opacity syntax — same
-            // visual as the previous rgba(27,107,74,0.15) but routes
-            // through the design-system token (per .claude/rules/
-            // 90-design-system.md anti-pattern «Hard-coded hex»).
-            'bg-socrat-primary-light text-socrat-primary-dark border-2 border-socrat-primary ring-[3px] ring-socrat-primary/15',
-          !isDone && !isCurrent &&
-            'bg-white text-slate-500 border-[1.5px] border-slate-300',
+          stateClasses,
           isInteractive && !isCurrent &&
             'cursor-pointer hover:border-socrat-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-socrat-primary/40 transition-colors touch-manipulation',
         ]
@@ -73,7 +91,13 @@ export function StepIndicator({
           .join(' ');
 
         const ariaLabel = `Задача ${taskNo}${
-          isCurrent ? ' (текущая)' : isDone ? ' (выполнена)' : ''
+          isDone && isCurrent
+            ? ' (выполнена, текущая)'
+            : isCurrent
+            ? ' (текущая)'
+            : isDone
+            ? ' (выполнена)'
+            : ''
         }`;
 
         // Two render paths: interactive (clickable button) when parent
