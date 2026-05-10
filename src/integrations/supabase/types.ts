@@ -1084,6 +1084,7 @@ export type Database = {
           solution_steps: string | null
           solution_text: string | null
           task_image_url: string | null
+          task_kind: string
           task_text: string
         }
         Insert: {
@@ -1100,6 +1101,7 @@ export type Database = {
           solution_steps?: string | null
           solution_text?: string | null
           task_image_url?: string | null
+          task_kind?: string
           task_text: string
         }
         Update: {
@@ -1116,6 +1118,7 @@ export type Database = {
           solution_steps?: string | null
           solution_text?: string | null
           task_image_url?: string | null
+          task_kind?: string
           task_text?: string
         }
         Relationships: [
@@ -1170,6 +1173,7 @@ export type Database = {
           image_url: string | null
           message_kind: string | null
           role: string
+          submission_payload: Json | null
           task_id: string | null
           task_order: number | null
           thread_id: string
@@ -1183,6 +1187,7 @@ export type Database = {
           image_url?: string | null
           message_kind?: string | null
           role: string
+          submission_payload?: Json | null
           task_id?: string | null
           task_order?: number | null
           thread_id: string
@@ -1196,6 +1201,7 @@ export type Database = {
           image_url?: string | null
           message_kind?: string | null
           role?: string
+          submission_payload?: Json | null
           task_id?: string | null
           task_order?: number | null
           thread_id?: string
