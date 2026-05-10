@@ -235,6 +235,30 @@ export default function HomeworkProblem() {
     return data.task.max_score;
   }, [data, isCurrentCompleted, currentTaskState]);
 
+  // ─── Tutor identity for chat bubbles (preview-QA #7, 2026-05-10) ──────────
+  // Сообщения от репетитора в чате должны показывать имя + аватар (или
+  // инициалы fallback). `data.thread.tutor_profile` уже резолвится
+  // backend'ом через `resolveTutorProfileForAssignment` (homework-api).
+  // Mirror стабильного memo pattern из `GuidedHomeworkWorkspace` —
+  // anchored на 3 примитивных поля чтобы `GuidedChatMessage.memo()`
+  // short-circuits при refetch'ах когда identity не менялась (это нужно
+  // чтобы аватар не мерцал при каждом message persist).
+  /* eslint-disable react-hooks/exhaustive-deps */
+  const tutorProfile = useMemo(() => {
+    const profile = data?.thread?.tutor_profile;
+    if (!profile) return null;
+    return {
+      display_name: profile.display_name,
+      avatar_url: profile.avatar_url,
+      gender: profile.gender,
+    };
+  }, [
+    data?.thread?.tutor_profile?.display_name,
+    data?.thread?.tutor_profile?.avatar_url,
+    data?.thread?.tutor_profile?.gender,
+  ]);
+  /* eslint-enable react-hooks/exhaustive-deps */
+
   // ─── Resolve student image refs to signed URLs (codex #2 major #2) ────────
   const resolveStudentImageUrls = useCallback(
     async (refs: string[]): Promise<string[]> => {
@@ -893,6 +917,9 @@ export default function HomeworkProblem() {
                   key={m.id ?? `${m.role}-${m.created_at}`}
                   message={m}
                   perspective="student"
+                  tutorDisplayName={tutorProfile?.display_name}
+                  tutorAvatarUrl={tutorProfile?.avatar_url}
+                  tutorGender={tutorProfile?.gender}
                 />
               );
             })}
