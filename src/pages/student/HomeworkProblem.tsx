@@ -48,7 +48,7 @@ import { parseAttachmentUrls } from '@/lib/attachmentRefs';
  *
  * **Scope (Phase 1.1 revision 2026-05-10 — codex review #2 fixes + hints UI):**
  * - Mobile (≤768px). Tablet/Desktop — Phase 3.
- * - Topbar (back arrow → /student/homework + eyebrow + title).
+ * - Topbar (back arrow → /homework — список ДЗ ученика — + eyebrow + title).
  * - ProblemContext (peek/expanded) с clickable StepIndicator. Step click
  *   resolves taskId через `useStudentAssignment(hwId)` canonical tasks
  *   array (codex re-review #2 minor #7 — task_states могут быть partial
@@ -552,13 +552,19 @@ export default function HomeworkProblem() {
     (override?: { nextTaskId?: string | null }) => {
       const target = override?.nextTaskId ?? nextTaskId;
       if (!hwId) {
-        navigate('/student/homework');
+        // Список ДЗ ученика на route `/homework` (StudentHomework.tsx),
+        // не `/student/homework` (которого нет — давало 404 в preview QA).
+        navigate('/homework');
         return;
       }
       if (target) {
         navigate(`/student/homework/${hwId}/problem/${target}`);
       } else {
-        navigate('/student/homework');
+        // Все задачи решены → возврат к detail-странице ДЗ. Mobile логика
+        // в `StudentHomeworkDetail` сама либо снова редиректит на новый
+        // screen (если есть открытая задача), либо показывает loader. Для
+        // десктопа это inline GuidedHomeworkWorkspace.
+        navigate(`/homework/${hwId}`);
       }
     },
     [hwId, navigate, nextTaskId],
@@ -635,11 +641,13 @@ export default function HomeworkProblem() {
 
   return (
     <div className="flex h-[100dvh] w-full flex-col bg-socrat-surface">
-      {/* Topbar — back → /student/homework (Q2) */}
+      {/* Topbar — back → /homework (Q2; preview-QA #3 fix 2026-05-10:
+          было `/student/homework` → 404, потому что список ДЗ ученика
+          живёт на route `/homework` через StudentHomework.tsx). */}
       <header className="flex items-center gap-2 px-3 py-2 bg-white border-b border-socrat-border-light shrink-0">
         <button
           type="button"
-          onClick={() => navigate('/student/homework')}
+          onClick={() => navigate('/homework')}
           aria-label="К списку ДЗ"
           className="grid place-items-center w-10 h-10 rounded-full text-slate-700 hover:bg-socrat-surface hover:text-slate-900 shrink-0 touch-manipulation"
         >
