@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import * as DialogPrimitive from '@radix-ui/react-dialog';
 import { Loader2, Mic, MicOff, Send, X } from 'lucide-react';
+import { toast } from 'sonner';
 import { useSubmitSolution } from '@/hooks/useSubmitSolution';
 import { useVoiceRecorder } from '@/hooks/useVoiceRecorder';
 import { transcribeThreadVoice } from '@/lib/studentHomeworkApi';
@@ -65,6 +66,18 @@ interface SubmitSheetProps {
   task: SubmitSheetTask;
   hwId: string;
   taskId: string;
+  /**
+   * Real `homework_tutor_threads.id` for this assignment. Used by the
+   * Section 4 voice transcribe endpoint (`/threads/:threadId/transcribe-voice`).
+   * Codex re-review #1 (major #3) fix: previously we passed `taskId` as a
+   * synthetic thread id — backend rejects with «Thread not found» because
+   * a task UUID is not a thread UUID. Parent (`HomeworkProblem`) resolves
+   * this from `data.thread.id`.
+   *
+   * `null`/`undefined` → voice section is disabled with a "недоступно"
+   * hint (rare race when the thread hasn't lazy-provisioned yet).
+   */
+  threadId?: string | null;
   /**
    * Called once the verdict overlay is dismissed. Parent navigates / refetches.
    *  - `(verdict, score, max, response)` signature lets the parent telemetry-emit
@@ -131,6 +144,7 @@ export function SubmitSheet({
   task,
   hwId,
   taskId,
+  threadId,
   onSubmitted,
   onSubmitStart,
 }: SubmitSheetProps) {
@@ -202,32 +216,94 @@ export function SubmitSheet({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, draftKey]);
 
-  // Periodic autosave (every 5s while sheet is open). Skip if nothing
-  // changed since the last serialized snapshot to avoid useless writes.
+  // Periodic autosave (every 5s while sheet is open).
+  // Synchronous fallback `persistDraftNow` (defined below) is also called
+  // at submit-click time so a fast tap never loses the draft (codex
+  // re-review #1 blocker fix).
   useEffect(() => {
     if (!open) return;
     const interval = window.setInterval(() => {
       const snapshot = JSON.stringify({ numeric, photos, text });
       if (snapshot === lastSerializedRef.current) return;
-      // Don't persist a fully-empty draft (avoids localStorage litter).
-      if (!numeric && photos.length === 0 && !text) {
-        window.localStorage.removeItem(draftKey);
-        lastSerializedRef.current = snapshot;
-        setLastAutosaveAt(null);
-        return;
-      }
-      const now = Date.now();
-      const draft: SubmitSheetDraft = { numeric, photos, text, savedAt: now };
-      try {
-        window.localStorage.setItem(draftKey, JSON.stringify(draft));
-        lastSerializedRef.current = snapshot;
-        setLastAutosaveAt(now);
-      } catch {
-        // Quota exceeded etc. — silent fail (draft is best-effort).
-      }
+      persistDraftNow({ numeric, photos, text });
     }, AUTOSAVE_INTERVAL_MS);
     return () => window.clearInterval(interval);
+    // persistDraftNow is identity-stable (defined inline below); safe to omit.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, draftKey, numeric, photos, text]);
+
+  /**
+   * Synchronous persist of the current `{numeric, photos, text}` snapshot.
+   * Used by:
+   *   - autosave interval (5s tick)
+   *   - submit click (codex re-review #1 fix: draft was lost when submit
+   *     happened before first 5s tick)
+   *   - `handleVerdictContinue` for non-CORRECT verdicts (preserve work
+   *     for retry)
+   *
+   * Bounded cleanup on QuotaExceededError: prune all `submitsheet-draft-*`
+   * keys older than 7 days, then retry the write once. Avoids «Lost
+   * autosave with no visible signal» (codex re-review #1 minor #8).
+   */
+  const persistDraftNow = (
+    snap: { numeric: string; photos: string[]; text: string },
+  ) => {
+    const isEmpty = !snap.numeric && snap.photos.length === 0 && !snap.text;
+    if (isEmpty) {
+      try {
+        window.localStorage.removeItem(draftKey);
+      } catch { /* noop */ }
+      lastSerializedRef.current = JSON.stringify(snap);
+      setLastAutosaveAt(null);
+      return;
+    }
+    const now = Date.now();
+    const draft: SubmitSheetDraft = { ...snap, savedAt: now };
+    const payload = JSON.stringify(draft);
+    const tryWrite = () => {
+      window.localStorage.setItem(draftKey, payload);
+      lastSerializedRef.current = JSON.stringify(snap);
+      setLastAutosaveAt(now);
+    };
+    try {
+      tryWrite();
+    } catch (err) {
+      // Bounded cleanup of stale drafts (older than 7 days) then retry.
+      const isQuotaError =
+        err instanceof Error &&
+        (err.name === 'QuotaExceededError' ||
+          err.name === 'NS_ERROR_DOM_QUOTA_REACHED');
+      if (isQuotaError) {
+        const sevenDaysMs = 7 * 24 * 60 * 60 * 1000;
+        const cutoff = now - sevenDaysMs;
+        try {
+          for (let i = window.localStorage.length - 1; i >= 0; i -= 1) {
+            const key = window.localStorage.key(i);
+            if (!key || !key.startsWith(DRAFT_STORAGE_PREFIX)) continue;
+            if (key === draftKey) continue;
+            const raw = window.localStorage.getItem(key);
+            if (!raw) continue;
+            try {
+              const parsed = JSON.parse(raw) as Partial<SubmitSheetDraft>;
+              if (
+                typeof parsed?.savedAt !== 'number' ||
+                parsed.savedAt < cutoff
+              ) {
+                window.localStorage.removeItem(key);
+              }
+            } catch {
+              window.localStorage.removeItem(key);
+            }
+          }
+          tryWrite();
+        } catch {
+          // Still failing — surface so the student can save manually.
+          toast.error('Не удаётся сохранить черновик локально. Закончи задачу одной попыткой.');
+        }
+      }
+      // Non-quota errors: silent (draft is best-effort).
+    }
+  };
 
   // Caption «Черновик сохранён · N сек назад» — recompute every 10s while
   // the sheet is mounted so the timestamp doesn't go stale visually.
@@ -285,6 +361,12 @@ export function SubmitSheet({
 
   const handleSubmit = async () => {
     if (submitDisabled) return;
+    // Codex re-review #1 (blocker) fix: persist the current draft
+    // synchronously before any submit work. Previously a student tapping
+    // submit before the first 5s autosave tick would lose all input on a
+    // partial/error verdict + close. Now the draft is always on disk by
+    // the time the mutation starts.
+    persistDraftNow({ numeric, photos, text });
     // Normalise comma → dot for the wire payload (codex finding #8).
     // Original user input stays in the `numeric` state so the retry path
     // re-displays exactly what the student typed.
@@ -331,7 +413,15 @@ export function SubmitSheet({
     if (!verdict) return;
     const earned = verdict.earned_score ?? 0;
     onSubmitted(verdict.verdict, earned, verdict.max_score, verdict);
-    if (verdict.verdict === 'CORRECT') clearAutosaveDraft();
+    if (verdict.verdict === 'CORRECT') {
+      clearAutosaveDraft();
+    } else {
+      // Non-CORRECT close — preserve the draft synchronously so the
+      // student can retry from the same input on next reopen (codex
+      // re-review #1 blocker fix). The 5s autosave tick is too slow for
+      // a fast partial→close flow.
+      persistDraftNow({ numeric, photos, text });
+    }
     setVerdict(null);
     onClose();
   };
@@ -340,7 +430,11 @@ export function SubmitSheet({
     if (!verdict) return;
     const earned = verdict.earned_score ?? 0;
     onSubmitted(verdict.verdict, earned, verdict.max_score, verdict);
-    if (verdict.verdict === 'CORRECT') clearAutosaveDraft();
+    if (verdict.verdict === 'CORRECT') {
+      clearAutosaveDraft();
+    } else {
+      persistDraftNow({ numeric, photos, text });
+    }
     setVerdict(null);
     onClose();
   };
@@ -377,21 +471,22 @@ export function SubmitSheet({
    * to the section-3 text input. Phase 1 stores no audio blob; voice is
    * pure speech-to-text (per spec contract `voice_ref` stays null/undef).
    *
-   * Threading through `transcribeThreadVoice` (Groq Whisper). The endpoint
-   * needs a thread id — we don't have one in SubmitSheet directly because
-   * the sheet is task-scoped, not thread-scoped. Workaround: pass the
-   * `taskId` as a synthetic thread id; backend resolves the student's
-   * actual thread by ownership. (If this turns out to be wrong, parent
-   * can pass `threadId` as an additional prop in a follow-up.)
+   * Uses the real `threadId` prop (codex re-review #1 fix) — the
+   * transcribe endpoint is `/threads/:threadId/transcribe-voice` and
+   * needs a real `homework_tutor_threads.id`, not a task UUID.
    */
   const handleVoiceClick = async () => {
+    if (!threadId) {
+      toast.error('Голосовой ввод временно недоступен. Попробуй обновить страницу.');
+      return;
+    }
     if (voiceRecorder.isRecording) {
       const result = await voiceRecorder.stopRecording();
       if (!result) return;
       setIsTranscribing(true);
       try {
         const { text: transcript } = await transcribeThreadVoice(
-          taskId,
+          threadId,
           result.blob,
           result.fileName,
         );

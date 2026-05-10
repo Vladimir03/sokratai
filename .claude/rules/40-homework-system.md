@@ -1169,11 +1169,12 @@ Phase 1 rollout-summary section. **Endpoint / migration / handler / shared-helpe
 - `submission_payload JSONB` shape — строго structured object `{numeric, photos[], text, voice_ref?}`. Подробная shape + AI-feedback contract — в детальной секции выше.
 - `image_url` параллельно заполняется serialized photos refs — это требование backward-compat с tutor `GuidedThreadViewer` и существующим chat display (там нет нового submission renderer).
 
-**Grading invariants (hybrid first-completed-wins):**
+**Grading invariants (hybrid first-completed-wins, Phase 1.x revision 2026-05-10 после preview QA + codex re-review #2):**
 
-- **Чат incremental:** каждое user-сообщение → `handleCheckAnswer` → если `verdict='CORRECT'`, `task_state.status='completed'`.
-- **SubmitSheet single-shot:** через `POST /student/problem/:hwId/:taskId/submission` → backend синтезирует answer + reuse того же `runStudentAnswerGrading` helper (Phase 1 — без отдельного grading pipeline).
-- **Whichever path first** выставляет `task_state.status='completed'` — фиксирует score. Второй путь после completion → 409-style ignore (SubmitSheet primary CTA меняется на «Следующая задача →»).
+- **Mobile chat = discussion only.** Каждое user-сообщение → `streamChat` `/chat` endpoint с `guidedHomeworkAssignmentId + guidedHomeworkTaskId` (server-side fetches tutor's reference solution). Persist через `saveThreadMessage(..., 'question', taskId)`. AI reply persist'ится с `'ai_reply'`. **`handleCheckAnswer` НЕ вызывается из chat path.** Чат не закрывает задачу.
+- **SubmitSheet single-shot — единственный путь triggering grading на mobile:** через `POST /student/problem/:hwId/:taskId/submission` → backend синтезирует answer + reuse `runStudentAnswerGrading` helper. AI verdict закрывает задачу при CORRECT.
+- **Hybrid first-completed-wins** означает: если `task_state.status='completed'` уже стоит (например через legacy desktop `GuidedHomeworkWorkspace` answer-input), новый mobile UI это видит и блокирует повторное закрытие — primary CTA сразу «Следующая задача →», SubmitSheet не открывает submission flow. Score фиксируется тем path, который первым выставил completed.
+- **Hint path:** `POST /threads/:id/hint` (`requestHint` API) — degrades `available_score` через %-rules, добавляет `hint_reply` AI bubble в чат. Не закрывает задачу. Без cap'а — sticky продуктовое решение Phase 1 (B5).
 - Phase 2 (отдельная спека) добавляет explicit OCR pipeline + 4 verdict states. Шить дополнительный prompt/verdict в `evaluateStudentAnswer` без отдельной spec **ЗАПРЕЩЕНО** — это «AI = draft + action» инвариант.
 
 **`task_kind` invariant:**

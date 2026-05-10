@@ -39,11 +39,20 @@ export default function StudentHomeworkDetail() {
   // Thread fetched only on mobile so we can resolve `current_task_id`
   // before redirecting. Disabled on desktop — the legacy workspace owns
   // its own thread query.
-  const { data: thread } = useStudentThread(isMobile ? assignmentId : '');
+  const {
+    data: thread,
+    isPending: isThreadPending,
+    isFetching: isThreadFetching,
+  } = useStudentThread(isMobile ? assignmentId : '');
 
   useEffect(() => {
     if (!isMobile) return;
     if (!assignmentId) return;
+    // Codex re-review #1 (major #4) fix: gate redirect on thread query
+    // resolution so we don't race past `current_task_id` and fall through
+    // to `tasks[0]` — the exact «always task #1» failure mode that v0.2
+    // was meant to avoid.
+    if (isThreadPending || isThreadFetching) return;
     const tasks = data?.tasks ?? [];
     if (tasks.length === 0) return;
 
@@ -67,7 +76,15 @@ export default function StudentHomeworkDetail() {
     navigate(`/student/homework/${assignmentId}/problem/${targetTaskId}`, {
       replace: true,
     });
-  }, [isMobile, data, thread, assignmentId, navigate]);
+  }, [
+    isMobile,
+    data,
+    thread,
+    assignmentId,
+    navigate,
+    isThreadPending,
+    isThreadFetching,
+  ]);
 
   if (isLoading || !data) {
     return (

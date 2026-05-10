@@ -1,4 +1,4 @@
-import { ChevronDown, ChevronUp, Info } from 'lucide-react';
+import { ChevronDown, ChevronUp, Info, Lightbulb } from 'lucide-react';
 import { lazy, Suspense } from 'react';
 import { StepIndicator } from './StepIndicator';
 import { TaskImagesGallery } from './TaskImagesGallery';
@@ -6,6 +6,16 @@ import { TaskImagesGallery } from './TaskImagesGallery';
 const MathText = lazy(() =>
   import('@/components/kb/ui/MathText').then((m) => ({ default: m.MathText })),
 );
+
+/**
+ * Format score for the chip — drop trailing zeroes (1.5 → "1.5", 2.0 →
+ * "2", 0.333… → "0.33"). Mirrors the convention from heatmap helpers.
+ */
+function formatScoreNumber(n: number): string {
+  if (!Number.isFinite(n)) return '—';
+  if (Number.isInteger(n)) return String(n);
+  return Math.round(n * 100) / 100 + '';
+}
 
 /**
  * Shape consumed by ProblemContext. Canonical home for the type — kept
@@ -25,10 +35,27 @@ export interface ProblemContextTask {
   task_no: number;
   /** Total tasks in the assignment — for step indicator + caption. */
   task_total: number;
-  /** Computed final score for this task (override > earned > ai > status). */
+  /**
+   * Score chip value (B2 hybrid, 2026-05-10):
+   *   - while `score_state='active'` → expected `available_score` (live,
+   *     degrades on hint/wrong)
+   *   - while `score_state='completed'` → final earned (override > earned
+   *     > ai > status)
+   * Parent (`HomeworkProblem`) computes the hybrid value and passes it.
+   */
   task_score: number;
   /** Max score for this task. */
   task_score_max: number;
+  /**
+   * Active vs completed task — drives chip styling. `'completed'` makes
+   * the score green to telegraph «зафиксировано». Default `'active'`.
+   */
+  score_state?: 'active' | 'completed';
+  /**
+   * Hint counter (B3, 2026-05-10): visible in the chip area only when
+   * `> 0` so an unused state stays clean. From `task_state.hint_count`.
+   */
+  hint_count?: number;
   /** Drives the warn-banner copy at the bottom of expanded view. */
   task_kind: 'numeric' | 'extended' | 'proof';
   /** Plain task text (may contain inline `$…$` KaTeX). */
@@ -110,16 +137,43 @@ export function ProblemContext({
       />
 
       <div className="flex items-center justify-between gap-2 flex-wrap">
-        <div className="flex items-baseline gap-2.5">
+        <div className="flex items-baseline gap-2.5 flex-wrap">
           <span
             id={headerId}
             className="text-[13px] font-semibold text-slate-700"
           >
             Задача {task.task_no} из {task.task_total}
           </span>
-          <span className="text-[13px] font-bold text-socrat-primary tabular-nums">
-            {task.task_score} / {task.task_score_max} баллов
+          {/* Score chip — hybrid (B2):
+                - active: показываем available_score (live)
+                - completed: финальный earned (зелёный, фиксированный) */}
+          <span
+            className={[
+              'text-[13px] font-bold tabular-nums',
+              task.score_state === 'completed'
+                ? 'text-emerald-700'
+                : 'text-socrat-primary',
+            ].join(' ')}
+            aria-label={
+              task.score_state === 'completed'
+                ? `Финальный балл: ${task.task_score} из ${task.task_score_max}`
+                : `Доступно баллов: ${task.task_score} из ${task.task_score_max}`
+            }
+          >
+            {formatScoreNumber(task.task_score)} / {task.task_score_max}{' '}
+            {task.score_state === 'completed' ? 'баллов' : 'баллов'}
           </span>
+          {/* Hint counter (B3) — visible only when > 0 to keep clean state. */}
+          {(task.hint_count ?? 0) > 0 ? (
+            <span
+              className="inline-flex items-center gap-1 text-[11px] font-semibold text-amber-700 bg-amber-50 border border-amber-200 rounded-full px-2 py-0.5 tabular-nums"
+              title="Запрошено подсказок"
+              aria-label={`Запрошено подсказок: ${task.hint_count}`}
+            >
+              <Lightbulb className="h-3 w-3" aria-hidden="true" />
+              {task.hint_count}
+            </span>
+          ) : null}
         </div>
         <button
           type="button"

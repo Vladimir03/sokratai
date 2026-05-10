@@ -1,12 +1,23 @@
 import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
-import { ChevronLeft, Loader2, Mic, Paperclip, RefreshCw, Send, X, MicOff } from 'lucide-react';
+import {
+  ChevronLeft,
+  Lightbulb,
+  Loader2,
+  Mic,
+  MicOff,
+  Paperclip,
+  RefreshCw,
+  Send,
+  X,
+} from 'lucide-react';
 import { toast } from 'sonner';
 import { ProblemContext, type ProblemContextTask } from '@/components/student/homework-problem/ProblemContext';
 import { SubmitSheet } from '@/components/student/homework-problem/SubmitSheet';
 import GuidedChatMessage, { type GuidedMessageData } from '@/components/homework/GuidedChatMessage';
 import { useStudentProblemTask } from '@/hooks/useStudentProblemTask';
+import { useStudentAssignment } from '@/hooks/useStudentHomework';
 import { useVoiceRecorder } from '@/hooks/useVoiceRecorder';
 import { trackGuidedHomeworkEvent } from '@/lib/homeworkTelemetry';
 import { getSubjectLabel } from '@/types/homework';
@@ -20,6 +31,8 @@ import {
   saveThreadMessage,
   uploadStudentThreadImage,
   transcribeThreadVoice,
+  requestHint as requestHintApi,
+  getStudentTaskImageSignedUrl,
 } from '@/lib/studentHomeworkApi';
 import {
   serializeThreadAttachmentRefs,
@@ -28,49 +41,44 @@ import {
 import { parseAttachmentUrls } from '@/lib/attachmentRefs';
 
 /**
- * Student homework-problem screen — Phase 1.x (mobile, post preview-QA #1).
+ * Student homework-problem screen — Phase 1.1 (mobile, post preview-QA #2).
  *
  * Дизайн: `docs/design_handoff_homework_chat/README.md`
  * Spec: `docs/delivery/features/student-homework-problem-screen/spec.md`
  *
- * **Scope (Phase 1.x revision 2026-05-10 после preview QA #1):**
- * - Layout 1 — mobile (≤768px). Tablet (Layout 2) и Desktop (Layout 3) —
- *   Phase 3 separately.
- * - Topbar (back arrow → /student/homework + eyebrow + title)
- * - ProblemContext (peek by default when there are messages, expanded when
- *   the thread is empty — per AC-4) + clickable StepIndicator (free-order
- *   navigation between tasks via URL change)
- * - ChatThread (re-uses `GuidedChatMessage` with `perspective='student'`
- *   for full brand identity — Сократ avatar + kicker)
+ * **Scope (Phase 1.1 revision 2026-05-10 — codex review #2 fixes + hints UI):**
+ * - Mobile (≤768px). Tablet/Desktop — Phase 3.
+ * - Topbar (back arrow → /student/homework + eyebrow + title).
+ * - ProblemContext (peek/expanded) с clickable StepIndicator. Step click
+ *   resolves taskId через `useStudentAssignment(hwId)` canonical tasks
+ *   array (codex re-review #2 minor #7 — task_states могут быть partial
+ *   при post-start tutor edits).
+ * - ChatThread через `GuidedChatMessage` (perspective='student'). Optimistic
+ *   bubbles переименовываются в persisted ids после `saveThreadMessage` —
+ *   deterministic dedup, no setTimeout race (codex re-review #2 major #5).
  * - Functional chat composer:
- *     • Text → `streamChat` to `/chat` endpoint with guided context
- *       (assignment_id + task_id) — AI reply streamed inline, then
- *       persisted via `saveThreadMessage`. Discussion path only (Q3 from
- *       preview QA #1) — never closes the task.
- *     • Paperclip → `uploadStudentThreadImage` (homework-submissions bucket)
- *       — attachments included with the user message (`image_url` ref).
- *     • Mic → `useVoiceRecorder` + `transcribeThreadVoice` (Groq Whisper);
- *       transcript is *appended* to the input — student can edit before
- *       sending (Q5).
- * - ComposerMobile primary CTA «Сдать решение задачи» (after CORRECT —
- *   flips to «Следующая задача →»; AC-7)
- * - SubmitSheet — single-shot submission with PhotoStrip + numeric/text
- *   inputs + VerdictOverlay (z-stack inside the sheet body) — единственный
- *   путь triggering `handleCheckAnswer`. SubmitSheet closes the task on
- *   CORRECT verdict; chat is discussion-only.
+ *     • Text → `streamChat` `/chat` endpoint с **полным контекстом**:
+ *       `taskContext` + resolved `studentImageUrls` (from current
+ *       attachments). Codex re-review #2 major #2: AI без taskContext
+ *       не понимал условие, без studentImageUrls не видел фото.
+ *     • Paperclip → `uploadStudentThreadImage` → ref в local state.
+ *     • Mic + 💡 Hint group: collapsed default = Lightbulb icon; tap →
+ *       expand to [💡 + 🎤] horizontal pair; user picks. Hint click →
+ *       `requestHint` API → AI hint bubble lands as `'hint_reply'`,
+ *       available_score degrades (B1 + B6 + B7 product decisions).
+ * - ComposerMobile primary CTA «Сдать решение задачи» — flips на
+ *   «Следующая задача →» после CORRECT.
+ * - SubmitSheet — единственный путь triggering `handleCheckAnswer`. Chat
+ *   path = discussion only (Q3).
+ * - **Hybrid first-completed-wins (Q4):** если task уже completed
+ *   (например через legacy desktop), CTA сразу «Следующая задача».
  *
- * **Hybrid first-completed-wins:** if a task is already
- * `task_state.status='completed'` (e.g. closed via the legacy desktop
- * `GuidedHomeworkWorkspace` answer-input), this page surfaces it via the
- * «Следующая задача →» CTA instead of allowing a second submission.
- * Score is fixed by whichever path closed the task first.
- *
- * **Telemetry (AC-8):** four PII-free events emitted via
- * `trackGuidedHomeworkEvent`:
- *   - `student_problem_screen_opened` (mount, fire-once per `hwId:taskId`)
- *   - `student_submitsheet_opened`     (CTA onClick)
- *   - `student_submission_sent`        (SubmitSheet `onSubmitStart`)
- *   - `student_submission_verdict`     (SubmitSheet `onSubmitted`)
+ * **Telemetry (AC-8 + new):**
+ *   - `student_problem_screen_opened`
+ *   - `student_submitsheet_opened`
+ *   - `student_submission_sent`
+ *   - `student_submission_verdict`
+ *   - `student_hint_requested` (new in Phase 1.1)
  */
 export default function HomeworkProblem() {
   const { hwId, taskId } = useParams<{ hwId: string; taskId: string }>();
@@ -86,16 +94,14 @@ export default function HomeworkProblem() {
     isFetching,
   } = useStudentProblemTask(hwId, taskId);
 
+  // Codex re-review #2 minor #7 fix: canonical task list для step nav
+  // resolution. `useStudentAssignment` is already cached if user came
+  // from /homework/<id>; otherwise one extra round trip — acceptable.
+  const { data: assignmentDetails } = useStudentAssignment(hwId ?? '');
+
   const threadId = data?.thread?.id ?? null;
 
   // ─── Map raw thread messages → GuidedMessageData[] ────────────────────────
-  // - Filter by current task via `task_id` (canonical match per
-  //   `.claude/rules/40-homework-system.md` § «Task identity»). Codex
-  //   review #2: rendering all assignment messages bled sibling-task
-  //   conversations into the current task view, breaking AC-4 + S1 UX.
-  //   Fallback for legacy pre-2026-04-10 messages with `task_id IS NULL`:
-  //   match by `task_order === data.task.order_num`.
-  // - `visible_to_student=false` filtered (tutor-only notes).
   const persistedMessages = useMemo<HomeworkThreadMessage[]>(() => {
     const raw = data?.thread?.homework_tutor_thread_messages ?? [];
     const currentTaskId = data?.task.id;
@@ -109,10 +115,12 @@ export default function HomeworkProblem() {
       });
   }, [data?.thread?.homework_tutor_thread_messages, data?.task.id, data?.task.order_num]);
 
-  // ─── Local optimistic messages + streaming AI preview ─────────────────────
-  // User message + AI reply land here optimistically before persistence;
-  // refetch resolves the canonical thread state. Streaming text is rendered
-  // as a non-persisted assistant bubble until streamChat onDone.
+  // ─── Optimistic messages + streaming preview ──────────────────────────────
+  // Codex re-review #2 major #5 fix: deterministic dedup. After
+  // `saveThreadMessage` returns the persisted id, we update the temp
+  // message with that id. On refetch, the persisted thread contains the
+  // same id and we drop the optimistic via `persistedIds.has(temp.id)`.
+  // No setTimeout race; failed messages stay visible until user retries.
   const [optimisticMessages, setOptimisticMessages] = useState<GuidedMessageData[]>([]);
   const [streamingText, setStreamingText] = useState('');
   const [isStreaming, setIsStreaming] = useState(false);
@@ -128,13 +136,15 @@ export default function HomeworkProblem() {
       message_kind: m.message_kind,
       message_delivery_status: m.message_delivery_status,
     }));
-    return [...persistedView, ...optimisticMessages];
+    const persistedIds = new Set(persistedView.map((m) => m.id));
+    // Drop optimistic that's already persisted (id-based reconciliation).
+    const visibleOptimistic = optimisticMessages.filter(
+      (m) => !m.id || !persistedIds.has(m.id),
+    );
+    return [...persistedView, ...visibleOptimistic];
   }, [persistedMessages, optimisticMessages]);
 
-  // Default-collapsed logic: peek when there are messages, expanded when
-  // the thread is empty (AC-4). One-shot init — user manual toggles win
-  // over data updates afterwards. Reset key includes `taskId` so navigating
-  // to a sibling task re-evaluates the default for the new thread.
+  // Default-collapsed: peek when there are messages, expanded when empty.
   const initialCollapsed = persistedMessages.length > 0;
   const [contextCollapsed, setContextCollapsed] = useState(initialCollapsed);
   const lastInitTaskKeyRef = useRef<string | null>(null);
@@ -144,11 +154,11 @@ export default function HomeworkProblem() {
     if (data == null) return;
     lastInitTaskKeyRef.current = key;
     setContextCollapsed(persistedMessages.length > 0);
-    // Reset chat state when navigating between tasks.
     setOptimisticMessages([]);
     setStreamingText('');
     setChatDraft('');
     setAttachmentRefs([]);
+    setMicHintExpanded(false);
   }, [data, hwId, taskId, persistedMessages.length]);
 
   const [chatDraft, setChatDraft] = useState('');
@@ -184,6 +194,63 @@ export default function HomeworkProblem() {
     return `Задача ${data.task.order_num} / ${data.task_total} · ${subjectLabel}`;
   }, [data]);
 
+  // ─── Score chip values (B2 hybrid) ────────────────────────────────────────
+  // While task is `active` → show `available_score` (live: degrades after
+  // hint requests + wrong attempts). After `completed` → show resolved
+  // final score (override > earned > ai > status). The chip state is
+  // owned by `ProblemContext` via the `task_score` prop, but the value
+  // it uses depends on the current task_state status.
+  const taskStates: HomeworkTaskState[] = useMemo(
+    () => data?.thread?.homework_tutor_task_states ?? [],
+    [data?.thread?.homework_tutor_task_states],
+  );
+  const currentTaskState = useMemo(
+    () => taskStates.find((s) => s.task_id === data?.task.id) ?? null,
+    [taskStates, data?.task.id],
+  );
+  const isCurrentCompleted = currentTaskState?.status === 'completed';
+  const hintCount = currentTaskState?.hint_count ?? 0;
+
+  /**
+   * Score chip value (B2 product decision):
+   *   - `active` → `available_score` (live, degrades on hint/wrong)
+   *   - `completed` → final earned (data.task_score from backend chain)
+   * Backend `data.task_score` already runs through `computeFinalScore`
+   * (override > earned > ai > status), so for completed tasks it's
+   * authoritative. For active tasks we prefer `available_score` from
+   * task_state when present, falling back to data.task_score.
+   */
+  const liveScore = useMemo(() => {
+    if (!data) return 0;
+    if (isCurrentCompleted) return data.task_score;
+    if (currentTaskState?.available_score != null) {
+      return currentTaskState.available_score;
+    }
+    return data.task.max_score;
+  }, [data, isCurrentCompleted, currentTaskState]);
+
+  // ─── Resolve student image refs to signed URLs (codex #2 major #2) ────────
+  const resolveStudentImageUrls = useCallback(
+    async (refs: string[]): Promise<string[]> => {
+      if (refs.length === 0) return [];
+      const resolved = await Promise.all(
+        refs.map((ref) => getStudentTaskImageSignedUrl(ref).catch(() => null)),
+      );
+      return resolved.filter((url): url is string => typeof url === 'string' && url.length > 0);
+    },
+    [],
+  );
+
+  // ─── Build task context for AI prompt (codex #2 major #2) ─────────────────
+  const buildTaskContextString = useCallback(() => {
+    if (!data) return undefined;
+    const lines = [
+      `Условие задачи ${data.task.order_num} из ${data.task_total} (${getSubjectLabel(data.assignment.subject)}):`,
+      data.task.task_text,
+    ];
+    return lines.join('\n');
+  }, [data]);
+
   // ─── Chat send: discussion through /chat endpoint (Q3) ────────────────────
   const handleChatSend = useCallback(async () => {
     if (!data || !threadId) return;
@@ -194,7 +261,6 @@ export default function HomeworkProblem() {
     const taskOrder = data.task.order_num;
     const targetTaskId = data.task.id;
     const userTempId = `temp-user-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
-    const assistantTempId = `temp-assistant-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
     const content = trimmed || buildGuidedAttachmentPlaceholder(attachmentRefs.length);
     const attachmentSerialized = serializeThreadAttachmentRefs(attachmentRefs);
     const refsForRequest = [...attachmentRefs];
@@ -215,10 +281,10 @@ export default function HomeworkProblem() {
     setChatDraft('');
     setAttachmentRefs([]);
 
-    // Persist user message (best-effort; on failure we still continue to
-    // streamChat — server-side `/chat` doesn't depend on this row).
+    // Persist user message; capture persisted id for deterministic dedup.
+    let persistedUserId: string | null = null;
     try {
-      await saveThreadMessage(
+      const saved = await saveThreadMessage(
         threadId,
         'user',
         content,
@@ -227,10 +293,18 @@ export default function HomeworkProblem() {
         targetTaskId,
         refsForRequest,
       );
+      persistedUserId = saved.id;
+      // Replace temp id with persisted id so the next refetch dedupes.
+      setOptimisticMessages((prev) =>
+        prev.map((m) =>
+          m.id === userTempId
+            ? { ...m, id: saved.id, message_delivery_status: 'sent' as const }
+            : m,
+        ),
+      );
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Не удалось сохранить сообщение';
       toast.error(msg);
-      // Mark the bubble as failed; user can re-type if they want.
       setOptimisticMessages((prev) =>
         prev.map((m) =>
           m.id === userTempId
@@ -241,27 +315,29 @@ export default function HomeworkProblem() {
       return;
     }
 
-    // Build context for streamChat: persisted + this new user message.
+    // Build context for streamChat — codex #2 major #2 fix.
     const contextMessages = [
       ...persistedMessages.map((m) => ({ role: m.role, content: m.content })),
       { role: 'user', content },
     ];
     const taskImageRefs = parseAttachmentUrls(data.task.task_image_url);
+    const studentImageUrls = await resolveStudentImageUrls(refsForRequest);
+    const taskContext = buildTaskContextString();
 
     setIsStreaming(true);
     setStreamingText('');
     let fullContent = '';
     let streamErrorHandled = false;
+    const assistantTempId = `temp-assistant-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
 
     try {
       await streamChat({
         messages: contextMessages,
-        // /chat endpoint already has SYSTEM_PROMPT; we just provide guided
-        // homework context so it fetches the tutor's reference solution
-        // server-side (anti-leak: never exposed to the client).
+        taskContext,
+        taskImageUrls: taskImageRefs,
+        studentImageUrls: studentImageUrls.length > 0 ? studentImageUrls : undefined,
         guidedHomeworkAssignmentId: data.assignment.id,
         guidedHomeworkTaskId: data.task.id,
-        taskImageUrls: taskImageRefs,
         onDelta: (delta) => {
           fullContent += delta;
           setStreamingText(fullContent);
@@ -284,7 +360,6 @@ export default function HomeworkProblem() {
       });
 
       const assistantText = fullContent.trim() || 'Принято. Продолжаем разбор задачи.';
-      // Optimistic assistant bubble.
       setOptimisticMessages((prev) => [
         ...prev,
         {
@@ -299,9 +374,9 @@ export default function HomeworkProblem() {
       ]);
       setStreamingText('');
 
-      // Persist assistant message.
+      // Persist assistant; replace temp id on success.
       try {
-        await saveThreadMessage(
+        const savedAssistant = await saveThreadMessage(
           threadId,
           'assistant',
           assistantText,
@@ -309,8 +384,15 @@ export default function HomeworkProblem() {
           'ai_reply',
           targetTaskId,
         );
-      } catch (err) {
-        toast.error('Ответ AI получен, но не сохранен.');
+        setOptimisticMessages((prev) =>
+          prev.map((m) =>
+            m.id === assistantTempId
+              ? { ...m, id: savedAssistant.id, message_delivery_status: 'sent' as const }
+              : m,
+          ),
+        );
+      } catch {
+        toast.error('Ответ AI получен, но не сохранён.');
         setOptimisticMessages((prev) =>
           prev.map((m) =>
             m.id === assistantTempId
@@ -320,16 +402,10 @@ export default function HomeworkProblem() {
         );
       }
 
-      // Refetch canonical thread (clears optimistic state when persisted
-      // rows show up).
-      queryClient.invalidateQueries({ queryKey: ['student', 'problem', hwId, taskId] });
-      // Drop optimistic bubbles after a short delay so refetch has a
-      // chance to populate persisted rows. If invalidation lands first
-      // the new persisted messages will be merged with the optimistic
-      // ones (same content but different ids) — visual de-dup is by id.
-      setTimeout(() => {
-        setOptimisticMessages([]);
-      }, 800);
+      // Refetch canonical thread; dedup is id-based via persistedIds Set.
+      // We do NOT clear optimistic en-masse — failed bubbles stay visible
+      // for user retry, succeeded bubbles dedupe naturally.
+      void queryClient.invalidateQueries({ queryKey: ['student', 'problem', hwId, taskId] });
     } catch (err) {
       if (!streamErrorHandled) {
         toast.error(err instanceof Error ? err.message : 'Не удалось получить ответ');
@@ -348,11 +424,44 @@ export default function HomeworkProblem() {
     queryClient,
     hwId,
     taskId,
+    resolveStudentImageUrls,
+    buildTaskContextString,
   ]);
 
-  // ─── Voice input (Q5): record → transcribe → append to chat draft ─────────
+  // ─── Mic + Hint group (B1 — expandable) ───────────────────────────────────
+  // Default collapsed: 💡 Lightbulb only. Tap → expand to [💡, 🎤] pair;
+  // pick one → action fires + collapse. Mic state during recording stays
+  // expanded so user can stop the recording.
+  const [micHintExpanded, setMicHintExpanded] = useState(false);
   const recorder = useVoiceRecorder();
   const [isTranscribing, setIsTranscribing] = useState(false);
+  const [isRequestingHint, setIsRequestingHint] = useState(false);
+
+  const handleHintClick = useCallback(async () => {
+    if (!data || !threadId) return;
+    if (isCurrentCompleted) {
+      toast.message('Задача уже сдана. Подсказка не нужна.');
+      return;
+    }
+    if (isRequestingHint) return;
+    setMicHintExpanded(false);
+    setIsRequestingHint(true);
+    trackGuidedHomeworkEvent('student_hint_requested', {
+      assignmentId: data.assignment.id,
+      taskId: data.task.id,
+      hintCountBefore: hintCount,
+    });
+    try {
+      await requestHintApi(threadId, data.task.order_num, data.task.id);
+      // Refetch — new hint_reply bubble + new available_score lands.
+      await queryClient.invalidateQueries({ queryKey: ['student', 'problem', hwId, taskId] });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Не удалось получить подсказку';
+      toast.error(msg);
+    } finally {
+      setIsRequestingHint(false);
+    }
+  }, [data, threadId, isCurrentCompleted, isRequestingHint, hintCount, queryClient, hwId, taskId]);
 
   const handleMicClick = useCallback(async () => {
     if (!threadId) return;
@@ -366,12 +475,12 @@ export default function HomeworkProblem() {
           result.blob,
           result.fileName,
         );
-        // Append (don't replace) so a previously typed prefix is preserved.
         setChatDraft((prev) => (prev.trim() ? `${prev} ${text}` : text));
       } catch (err) {
         toast.error(err instanceof Error ? err.message : 'Не удалось распознать речь');
       } finally {
         setIsTranscribing(false);
+        setMicHintExpanded(false);
       }
     } else {
       if (!recorder.isSupported) {
@@ -405,30 +514,31 @@ export default function HomeworkProblem() {
     }
   }, [data, threadId]);
 
-  // ─── Step navigation (Q7, Q8): click on stepper → navigate ────────────────
+  // ─── Step navigation (Q7, Q8 + codex #7): canonical tasks list ────────────
   const handleStepClick = useCallback(
     (taskNo: number) => {
       if (!data || !hwId) return;
-      if (taskNo === data.task.order_num) return; // no-op on current
-      const target = data.thread?.homework_tutor_task_states?.find(
-        (s) => s.task_order === taskNo,
+      if (taskNo === data.task.order_num) return;
+      // Codex re-review #2 minor #7 fix: resolve via canonical assignment
+      // tasks array (assignmentDetails.tasks), not task_states (which can
+      // be partial when tutor adds tasks post-start).
+      const targetTask = assignmentDetails?.tasks?.find(
+        (t) => t.order_num === taskNo,
       );
-      if (!target?.task_id) return;
-      navigate(`/student/homework/${hwId}/problem/${target.task_id}`);
+      if (!targetTask?.id) {
+        // Fallback: try task_states (lazy-provisioned).
+        const fallbackState = data.thread?.homework_tutor_task_states?.find(
+          (s) => s.task_order === taskNo,
+        );
+        if (fallbackState?.task_id) {
+          navigate(`/student/homework/${hwId}/problem/${fallbackState.task_id}`);
+        }
+        return;
+      }
+      navigate(`/student/homework/${hwId}/problem/${targetTask.id}`);
     },
-    [data, hwId, navigate],
+    [data, hwId, navigate, assignmentDetails],
   );
-
-  // ─── Current-task completion + next-task lookup (AC-7) ─────────────────────
-  const taskStates: HomeworkTaskState[] = useMemo(
-    () => data?.thread?.homework_tutor_task_states ?? [],
-    [data?.thread?.homework_tutor_task_states],
-  );
-  const currentTaskState = useMemo(
-    () => taskStates.find((s) => s.task_id === data?.task.id) ?? null,
-    [taskStates, data?.task.id],
-  );
-  const isCurrentCompleted = currentTaskState?.status === 'completed';
 
   const nextTaskId = useMemo(() => {
     if (!data) return null;
@@ -454,7 +564,7 @@ export default function HomeworkProblem() {
     [hwId, navigate, nextTaskId],
   );
 
-  // ─── ProblemContext task adapter ──────────────────────────────────────────
+  // ─── ProblemContext task adapter (B2 hybrid score) ────────────────────────
   const problemContextTask = useMemo<ProblemContextTask | null>(() => {
     if (!data) return null;
     const doneIndices = taskStates
@@ -464,14 +574,16 @@ export default function HomeworkProblem() {
       task_id: data.task.id,
       task_no: data.task.order_num,
       task_total: data.task_total,
-      task_score: data.task_score,
+      task_score: liveScore, // B2 hybrid: available_score (active) → earned (completed)
       task_score_max: data.task.max_score,
       task_kind: data.task.task_kind,
       body: data.task.task_text,
       image_url: data.task.task_image_url,
       done_task_indices: doneIndices,
+      hint_count: hintCount,
+      score_state: isCurrentCompleted ? 'completed' : 'active',
     };
-  }, [data, taskStates]);
+  }, [data, taskStates, liveScore, hintCount, isCurrentCompleted]);
 
   // ─── Loading + error states ──────────────────────────────────────────────
   if (isPending || (!data && isFetching)) {
@@ -523,7 +635,7 @@ export default function HomeworkProblem() {
 
   return (
     <div className="flex h-[100dvh] w-full flex-col bg-socrat-surface">
-      {/* Topbar (mobile) — back → /student/homework (Q2) */}
+      {/* Topbar — back → /student/homework (Q2) */}
       <header className="flex items-center gap-2 px-3 py-2 bg-white border-b border-socrat-border-light shrink-0">
         <button
           type="button"
@@ -665,7 +777,7 @@ export default function HomeworkProblem() {
           </div>
         ) : null}
 
-        {/* Chat row — paperclip + input + mic + send */}
+        {/* Chat row — paperclip + input + hint/mic group + send */}
         <div className="flex items-center gap-1">
           <input
             ref={fileInputRef}
@@ -705,23 +817,66 @@ export default function HomeworkProblem() {
             aria-label="Сообщение Сократу"
             style={{ fontSize: '16px' }}
           />
-          <button
-            type="button"
-            aria-label={recorder.isRecording ? 'Остановить запись' : 'Записать голосом'}
-            disabled={isStreaming || isTranscribing}
-            onClick={handleMicClick}
-            className={`grid place-items-center w-9 h-10 rounded-[10px] shrink-0 touch-manipulation transition-colors disabled:opacity-50 ${
-              recorder.isRecording
-                ? 'bg-rose-50 text-rose-600 hover:bg-rose-100'
-                : 'text-slate-500 hover:bg-socrat-surface hover:text-slate-900'
-            }`}
-          >
-            {recorder.isRecording ? (
-              <MicOff className="h-[18px] w-[18px]" aria-hidden="true" />
-            ) : (
-              <Mic className="h-[18px] w-[18px]" aria-hidden="true" />
-            )}
-          </button>
+
+          {/* Hint + Mic expandable group (B1).
+              Default collapsed: shows 💡 (Lightbulb). Tap → expand to
+              [💡, 🎤] horizontal pair. Tap inside expanded:
+                - 💡 → requestHint API (hint_reply bubble lands in chat)
+                - 🎤 → startRecording (during recording stays expanded
+                       with MicOff icon for stop). After both actions
+                       group collapses back. */}
+          {micHintExpanded || recorder.isRecording ? (
+            <>
+              <button
+                type="button"
+                aria-label="Запросить подсказку"
+                disabled={
+                  isStreaming ||
+                  isTranscribing ||
+                  isRequestingHint ||
+                  isCurrentCompleted ||
+                  recorder.isRecording
+                }
+                onClick={handleHintClick}
+                className="grid place-items-center w-9 h-10 rounded-[10px] text-amber-600 hover:bg-amber-50 hover:text-amber-700 shrink-0 touch-manipulation transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {isRequestingHint ? (
+                  <Loader2 className="h-[18px] w-[18px] animate-spin" aria-hidden="true" />
+                ) : (
+                  <Lightbulb className="h-[18px] w-[18px]" aria-hidden="true" />
+                )}
+              </button>
+              <button
+                type="button"
+                aria-label={recorder.isRecording ? 'Остановить запись' : 'Записать голосом'}
+                disabled={isStreaming || isTranscribing}
+                onClick={handleMicClick}
+                className={`grid place-items-center w-9 h-10 rounded-[10px] shrink-0 touch-manipulation transition-colors disabled:opacity-50 ${
+                  recorder.isRecording
+                    ? 'bg-rose-50 text-rose-600 hover:bg-rose-100'
+                    : 'text-slate-500 hover:bg-socrat-surface hover:text-slate-900'
+                }`}
+              >
+                {recorder.isRecording ? (
+                  <MicOff className="h-[18px] w-[18px]" aria-hidden="true" />
+                ) : (
+                  <Mic className="h-[18px] w-[18px]" aria-hidden="true" />
+                )}
+              </button>
+            </>
+          ) : (
+            <button
+              type="button"
+              aria-label="Подсказка или голос"
+              aria-expanded={false}
+              disabled={isStreaming || isTranscribing}
+              onClick={() => setMicHintExpanded(true)}
+              className="grid place-items-center w-9 h-10 rounded-[10px] text-amber-600 hover:bg-amber-50 hover:text-amber-700 shrink-0 touch-manipulation transition-colors disabled:opacity-50"
+            >
+              <Lightbulb className="h-[18px] w-[18px]" aria-hidden="true" />
+            </button>
+          )}
+
           <button
             type="button"
             aria-label="Отправить"
@@ -743,6 +898,7 @@ export default function HomeworkProblem() {
         onClose={() => setSubmitOpen(false)}
         hwId={hwId ?? data.assignment.id}
         taskId={taskId ?? data.task.id}
+        threadId={threadId}
         task={{
           id: data.task.id,
           order_num: data.task.order_num,
@@ -750,7 +906,7 @@ export default function HomeworkProblem() {
           max_score: data.task.max_score,
           task_kind: data.task.task_kind,
           homework_title: data.assignment.title,
-          current_score: data.task_score,
+          current_score: liveScore,
         }}
         onSubmitStart={(payload) => {
           trackGuidedHomeworkEvent('student_submission_sent', {
