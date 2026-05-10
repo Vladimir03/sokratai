@@ -14,19 +14,23 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { ProblemContext, type ProblemContextTask } from '@/components/student/homework-problem/ProblemContext';
-import { SubmitSheet } from '@/components/student/homework-problem/SubmitSheet';
+import {
+  SubmitSheet,
+  type SubmitSheetSubmissionPayload,
+} from '@/components/student/homework-problem/SubmitSheet';
+import { clearSubmitSheetDraft } from '@/components/student/homework-problem/submitSheetInternal';
 import GuidedChatMessage, { type GuidedMessageData } from '@/components/homework/GuidedChatMessage';
 import { TypingDots } from '@/components/student/homework-problem/TypingDots';
 import sokratChatIcon from '@/assets/sokrat-chat-icon.png';
 import { useStudentProblemTask } from '@/hooks/useStudentProblemTask';
 import { useStudentAssignment } from '@/hooks/useStudentHomework';
+import { useSubmitSolution } from '@/hooks/useSubmitSolution';
 import { useVoiceRecorder } from '@/hooks/useVoiceRecorder';
 import { trackGuidedHomeworkEvent } from '@/lib/homeworkTelemetry';
 import { getSubjectLabel } from '@/types/homework';
 import type {
   HomeworkThreadMessage,
   HomeworkTaskState,
-  CheckAnswerResponse,
 } from '@/types/homework';
 import { streamChat, StreamChatError } from '@/lib/streamChat';
 import {
@@ -595,6 +599,115 @@ export default function HomeworkProblem() {
     return sorted[currentIdx + 1]?.task_id ?? null;
   }, [data, taskStates]);
 
+  // ─── Submission flow (preview-QA #6, 2026-05-10) ─────────────────────────
+  // Phase 1.2 рефакторинг: ответ ученика + AI verdict теперь живут в чате,
+  // не в отдельном overlay. SubmitSheet просто collects inputs + closes;
+  // parent owns mutation + optimistic + dedup + navigation.
+  //
+  // Flow:
+  //   1. SubmitSheet calls onSubmit({numeric, photos, text}) and closes
+  //   2. Parent inserts optimistic submission user bubble (kind='submission')
+  //      + typing dots placeholder, mutation.mutateAsync() in background
+  //   3. On success: refetch persists submission + AI feedback
+  //      (kind='check_result') bubbles → temp messages cleaned up.
+  //      Если verdict=CORRECT → clear localStorage draft. Студент видит
+  //      success bubble и может tap «Следующая задача» CTA когда готов.
+  //   4. On error: toast + remove temp messages. Autosave preserves form.
+  const submitMutation = useSubmitSolution(
+    hwId ?? data?.assignment.id ?? '',
+    taskId ?? data?.task.id ?? '',
+  );
+
+  const handleSubmissionSubmit = useCallback(
+    async (payload: SubmitSheetSubmissionPayload) => {
+      if (!data) return;
+      // Synthesize optimistic user bubble content — mirrors backend
+      // `handleStudentSubmission::answerText` formula (rule §40):
+      //   numeric → «Числовой ответ: X»
+      //   text    → appended on next line
+      //   нет того и того → «(см. фото решения)»
+      const lines: string[] = [];
+      if (data.task.task_kind !== 'proof' && payload.numeric.trim()) {
+        lines.push(`Числовой ответ: ${payload.numeric.trim()}`);
+      }
+      if (payload.text.trim()) lines.push(payload.text.trim());
+      const synthesizedContent =
+        lines.length > 0 ? lines.join('\n') : '(см. фото решения)';
+      const attachmentSerialized = serializeThreadAttachmentRefs(payload.photos);
+
+      const userTempId = `temp-submission-user-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+      const typingTempId = `temp-submission-typing-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+
+      setOptimisticMessages((prev) => [
+        ...prev,
+        {
+          id: userTempId,
+          role: 'user',
+          content: synthesizedContent,
+          image_url: attachmentSerialized,
+          created_at: new Date().toISOString(),
+          message_kind: 'submission',
+          message_delivery_status: 'sending',
+        },
+        {
+          id: typingTempId,
+          role: 'assistant',
+          content: '__typing__',
+          image_url: null,
+          created_at: new Date().toISOString(),
+          message_kind: 'check_result',
+          message_delivery_status: 'sending',
+        },
+      ]);
+
+      trackGuidedHomeworkEvent('student_submission_sent', {
+        assignmentId: data.assignment.id,
+        taskId: data.task.id,
+        hasPhotos: payload.photos.length > 0,
+        photoCount: payload.photos.length,
+        hasText: payload.text.length > 0,
+        numericLength: payload.numeric.length,
+      });
+
+      try {
+        const response = await submitMutation.mutateAsync(payload);
+        trackGuidedHomeworkEvent('student_submission_verdict', {
+          assignmentId: data.assignment.id,
+          taskId: data.task.id,
+          verdict: response.verdict,
+          aiScore: response.earned_score ?? 0,
+          maxScore: response.max_score,
+        });
+
+        // Remove optimistic temp messages — persisted submission +
+        // check_result land via React Query refetch (useSubmitSolution
+        // already invalidated the targeted query inside its onSuccess).
+        setOptimisticMessages((prev) =>
+          prev.filter((m) => m.id !== userTempId && m.id !== typingTempId),
+        );
+
+        // CORRECT verdict — clear autosave draft (студент закрыл задачу,
+        // черновик больше не нужен). Не auto-navigate'им: студент должен
+        // увидеть success-фидбек в чате; primary CTA сам flip'нется на
+        // «Следующая задача» через `isCurrentCompleted` derive после
+        // refetch.
+        if (response.verdict === 'CORRECT') {
+          clearSubmitSheetDraft(taskId ?? data.task.id);
+        }
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : 'Не удалось отправить решение';
+        toast.error(msg);
+        // Clean rollback both optimistic bubbles. Autosave preserves
+        // form contents so студент может re-open SubmitSheet, поправить
+        // и попробовать снова.
+        setOptimisticMessages((prev) =>
+          prev.filter((m) => m.id !== userTempId && m.id !== typingTempId),
+        );
+      }
+    },
+    [data, submitMutation, taskId],
+  );
+
   const navigateAfterCorrect = useCallback(
     (override?: { nextTaskId?: string | null }) => {
       const target = override?.nextTaskId ?? nextTaskId;
@@ -1019,27 +1132,7 @@ export default function HomeworkProblem() {
           homework_title: data.assignment.title,
           current_score: liveScore,
         }}
-        onSubmitStart={(payload) => {
-          trackGuidedHomeworkEvent('student_submission_sent', {
-            assignmentId: data.assignment.id,
-            taskId: data.task.id,
-            ...payload,
-          });
-        }}
-        onSubmitted={(verdict, score, max, response: CheckAnswerResponse) => {
-          trackGuidedHomeworkEvent('student_submission_verdict', {
-            assignmentId: data.assignment.id,
-            taskId: data.task.id,
-            verdict,
-            aiScore: score,
-            maxScore: max,
-          });
-          if (verdict === 'CORRECT') {
-            navigateAfterCorrect({
-              nextTaskId: response.next_task_id ?? null,
-            });
-          }
-        }}
+        onSubmit={handleSubmissionSubmit}
       />
     </div>
   );

@@ -2,37 +2,20 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import * as DialogPrimitive from '@radix-ui/react-dialog';
 import { Loader2, Mic, MicOff, Send, X } from 'lucide-react';
 import { toast } from 'sonner';
-import { useSubmitSolution } from '@/hooks/useSubmitSolution';
 import { useVoiceRecorder } from '@/hooks/useVoiceRecorder';
 import { transcribeThreadVoice } from '@/lib/studentHomeworkApi';
 import { PhotoStrip } from './PhotoStrip';
-import { VerdictOverlay } from './VerdictOverlay';
-import type { CheckAnswerResponse } from '@/types/homework';
-
-const AUTOSAVE_INTERVAL_MS = 5_000;
-const DRAFT_STORAGE_PREFIX = 'submitsheet-draft-';
-
-/**
- * localStorage shape — `{numeric, photos, text}` matches `SubmitSolutionPayload`
- * minus the wire-side normalisation. `savedAt` is server-clock-independent
- * timestamp for the «Черновик сохранён · X сек назад» footer caption.
- */
-interface SubmitSheetDraft {
-  numeric: string;
-  photos: string[];
-  text: string;
-  savedAt: number;
-}
+import {
+  AUTOSAVE_INTERVAL_MS,
+  getSubmitSheetDraftKey,
+  type SubmitSheetDraftSnapshot,
+} from './submitSheetInternal';
 
 /**
- * Normalise a user-typed numeric string for the wire payload: comma → dot,
- * collapse internal whitespace. We deliberately preserve the original
- * string for `submission_payload.numeric` echo back / tutor view (audit
- * trail) — only the wire send is normalised so the AI prompt + strict
- * equality fallbacks see canonical "1.4". `<input inputMode="decimal">`
- * already accepts both Russian and English locale separators reliably
- * (unlike `<input type="number">`, which is browser-locale-dependent and
- * silently drops comma input in many configurations — codex finding #8).
+ * Normalise a user-typed numeric string for the wire payload: comma → dot.
+ * Original `numeric` is preserved in component state so the retry path
+ * re-displays exactly what the student typed; only the parent-bound
+ * payload gets the dot form.
  */
 function normaliseNumericForWire(raw: string): string {
   return raw.trim().replace(/,/g, '.');
@@ -40,14 +23,23 @@ function normaliseNumericForWire(raw: string): string {
 
 export type SubmitSheetTaskKind = 'numeric' | 'extended' | 'proof';
 
+export interface SubmitSheetSubmissionPayload {
+  /** Canonical "1.4" form (comma → dot already applied). */
+  numeric: string;
+  /** `storage://...` refs after upload. */
+  photos: string[];
+  /** Optional reasoning. Empty string is OK. */
+  text: string;
+}
+
 interface SubmitSheetTask {
   /** UUID of the task. */
   id: string;
-  /** 1-based position within the assignment — used in storage paths + header. */
+  /** 1-based position within the assignment — for header «Сдать задачу N из M». */
   order_num: number;
-  /** Total tasks in the assignment — for header «Сдать задачу N из M». */
+  /** Total tasks in the assignment. */
   task_total?: number;
-  /** Max score for this task (display + step counter). */
+  /** Max score for this task. */
   max_score: number;
   /** Drives required-field semantics. */
   task_kind: SubmitSheetTaskKind;
@@ -61,46 +53,32 @@ interface SubmitSheetTask {
 
 interface SubmitSheetProps {
   open: boolean;
-  /** Close request — parent should ignore while `verdict` is being shown if it wants strict gating; this component already prevents close mid-submit. */
+  /** Parent decides what happens on close. */
   onClose: () => void;
   task: SubmitSheetTask;
   hwId: string;
   taskId: string;
   /**
-   * Real `homework_tutor_threads.id` for this assignment. Used by the
-   * Section 4 voice transcribe endpoint (`/threads/:threadId/transcribe-voice`).
-   * Codex re-review #1 (major #3) fix: previously we passed `taskId` as a
-   * synthetic thread id — backend rejects with «Thread not found» because
-   * a task UUID is not a thread UUID. Parent (`HomeworkProblem`) resolves
-   * this from `data.thread.id`.
-   *
-   * `null`/`undefined` → voice section is disabled with a "недоступно"
-   * hint (rare race when the thread hasn't lazy-provisioned yet).
+   * Real `homework_tutor_threads.id`. Used by Section 4 voice transcribe
+   * (`/threads/:threadId/transcribe-voice`). `null`/`undefined` → voice
+   * section disabled with a "недоступно" hint.
    */
   threadId?: string | null;
   /**
-   * Called once the verdict overlay is dismissed. Parent navigates / refetches.
-   *  - `(verdict, score, max, response)` signature lets the parent telemetry-emit
-   *    or auto-advance.
+   * Phase 1.2 refactor (preview-QA #6, 2026-05-10): SubmitSheet больше не
+   * владеет mutation + verdict overlay. Студент тапает «Отправить» —
+   * sheet немедленно закрывается, parent (`HomeworkProblem`) запускает
+   * `submitSolution` mutation в background и владеет:
+   *   - optimistic submission user bubble + typing dots в чате
+   *   - persisted submission + AI feedback bubbles после refetch
+   *   - localStorage draft clearance (на CORRECT verdict)
+   *   - navigation на следующую задачу
+   *
+   * SubmitSheet просто собирает inputs + persistDraftNow + onSubmit.
+   * Это закрывает preview-QA #6 запрос «всё в чат, отдельный verdict
+   * overlay удалить».
    */
-  onSubmitted: (
-    verdict: CheckAnswerResponse['verdict'],
-    score: number,
-    max: number,
-    response: CheckAnswerResponse,
-  ) => void;
-  /**
-   * Fires once per submit click, BEFORE the mutation resolves. Used by the
-   * parent for the `student_submission_sent` telemetry event so we capture
-   * intent even if the request times out / fails. Payload is PII-free —
-   * `numericLength` is the trimmed length, never the value.
-   */
-  onSubmitStart?: (payload: {
-    hasPhotos: boolean;
-    photoCount: number;
-    hasText: boolean;
-    numericLength: number;
-  }) => void;
+  onSubmit: (payload: SubmitSheetSubmissionPayload) => void;
 }
 
 const HINT_BY_KIND: Record<SubmitSheetTaskKind, string> = {
@@ -113,76 +91,52 @@ const HINT_BY_KIND: Record<SubmitSheetTaskKind, string> = {
 const NUMERIC = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 2 });
 
 /**
- * Bottom-sheet form for the single-shot homework solution.
+ * Bottom-sheet form для single-shot homework submission.
  *
- * Built on `@radix-ui/react-dialog` primitives directly (instead of
- * `src/components/ui/sheet.tsx`) — the shadcn `Sheet` `bottom` variant has
- * a different animation and lacks the pixel-perfect grab-handle / max-h /
- * rounded-top treatment from the design handoff. Radix gives us focus
- * trap, escape handling, body scroll-lock, and outside click for free
- * (matches the AC «shadcn Sheet primitive (focus-trap)»).
+ * Phase 1.2 (preview-QA #6, 2026-05-10) — крупный refactor:
+ *   - **Удалён `<VerdictOverlay>`**: ответ ученика + AI-проверка теперь
+ *     показываются прямо в чате (parent rendered). Это даёт ученику
+ *     полную историю работы с задачей в одном месте + репетитор видит
+ *     ту же историю через `GuidedThreadViewer`.
+ *   - **Удалена `useSubmitSolution` mutation**: parent владеет mutation
+ *     + optimistic flow + navigation после Phase 1.2.
+ *   - **Удалены submitError / verdict states + соответствующие handlers**:
+ *     SubmitSheet больше не отображает результат проверки.
+ *   - **Сохранены**: form state (numeric/photos/text), autosave (5s
+ *     localStorage tick + sync persist на submit), Voice Section 4 (Q11),
+ *     comma normalisation, voice recorder.
  *
- * Sections rendered conditionally on `task.task_kind`:
- *   1. Numeric answer — render unless `proof`.
- *   2. Photo strip — render for `extended` and `proof`.
- *   3. Optional text reasoning — always available.
- *   4. Voice — Phase 2.
- *
- * Submit-button enablement matches `task_kind` requirements exactly so the
- * server-side validator never has to reject; client + backend agree on the
- * rules (anti-double-source-of-truth: kept only in `kindReady`).
- *
- * Verdict overlay is mounted into the sheet body's z-stack rather than as
- * a separate Dialog — single focus context (per spec §6 + the user's
- * instruction "VerdictOverlay не fixed модал — рендерится внутри SubmitSheet
- * body conditional"). Submission state stays in local React state until
- * verdict closes — resilient to accidental refresh / navigation.
+ * Built on `@radix-ui/react-dialog` directly (waiver в
+ * `.claude/rules/90-design-system.md` — design-pixel-perfect grab-handle
+ * + max-h + rounded-top from handoff). Underlying primitive identical
+ * to shadcn Sheet wrapper.
  */
 export function SubmitSheet({
   open,
   onClose,
   task,
-  hwId,
+  hwId: _hwId,
   taskId,
   threadId,
-  onSubmitted,
-  onSubmitStart,
+  onSubmit,
 }: SubmitSheetProps) {
   const [numeric, setNumeric] = useState('');
   const [photos, setPhotos] = useState<string[]>([]);
   const [text, setText] = useState('');
-  const [verdict, setVerdict] = useState<CheckAnswerResponse | null>(null);
-  /**
-   * Network/AI failure state — distinct from a successful but `INCORRECT`
-   * verdict. When set, VerdictOverlay renders in `error` mode with a real
-   * retry CTA. Submission inputs (numeric/photos/text) stay populated so
-   * the retry replays the original payload (AC-6 + codex finding #7).
-   */
-  const [submitError, setSubmitError] = useState<string | null>(null);
 
-  const submitMutation = useSubmitSolution(hwId, taskId);
-  const isSubmitting = submitMutation.isPending;
-
-  // ─── Autosave (Q12, 2026-05-10) ──────────────────────────────────────────
-  // Persist a draft to localStorage every AUTOSAVE_INTERVAL_MS while the
-  // sheet is open. Restore on (re)open for the same task. Footer caption
-  // tracks the last-saved time so the student knows the draft is real.
-  const draftKey = `${DRAFT_STORAGE_PREFIX}${taskId}`;
+  // ─── Autosave (Q12, preserved through Phase 1.2 refactor) ────────────────
+  const draftKey = getSubmitSheetDraftKey(taskId);
   const [lastAutosaveAt, setLastAutosaveAt] = useState<number | null>(null);
   const lastSerializedRef = useRef<string>('');
 
   // Restore from localStorage on open; otherwise reset to blank.
   useEffect(() => {
     if (!open) return;
-    setVerdict(null);
-    setSubmitError(null);
-    submitMutation.reset();
-
     let restored = false;
     try {
       const raw = window.localStorage.getItem(draftKey);
       if (raw) {
-        const parsed = JSON.parse(raw) as Partial<SubmitSheetDraft>;
+        const parsed = JSON.parse(raw) as Partial<SubmitSheetDraftSnapshot>;
         if (
           parsed &&
           typeof parsed.numeric === 'string' &&
@@ -203,7 +157,7 @@ export function SubmitSheet({
         }
       }
     } catch {
-      // Corrupted draft — drop and start clean.
+      /* corrupted draft — drop and start clean */
     }
     if (!restored) {
       setNumeric('');
@@ -212,38 +166,16 @@ export function SubmitSheet({
       lastSerializedRef.current = '';
       setLastAutosaveAt(null);
     }
-    // submitMutation.reset is identity-stable per react-query; safe to omit.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, draftKey]);
-
-  // Periodic autosave (every 5s while sheet is open).
-  // Synchronous fallback `persistDraftNow` (defined below) is also called
-  // at submit-click time so a fast tap never loses the draft (codex
-  // re-review #1 blocker fix).
-  useEffect(() => {
-    if (!open) return;
-    const interval = window.setInterval(() => {
-      const snapshot = JSON.stringify({ numeric, photos, text });
-      if (snapshot === lastSerializedRef.current) return;
-      persistDraftNow({ numeric, photos, text });
-    }, AUTOSAVE_INTERVAL_MS);
-    return () => window.clearInterval(interval);
-    // persistDraftNow is identity-stable (defined inline below); safe to omit.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, draftKey, numeric, photos, text]);
 
   /**
    * Synchronous persist of the current `{numeric, photos, text}` snapshot.
    * Used by:
    *   - autosave interval (5s tick)
-   *   - submit click (codex re-review #1 fix: draft was lost when submit
+   *   - submit click (codex re-review #1: draft was lost when submit
    *     happened before first 5s tick)
-   *   - `handleVerdictContinue` for non-CORRECT verdicts (preserve work
-   *     for retry)
-   *
    * Bounded cleanup on QuotaExceededError: prune all `submitsheet-draft-*`
-   * keys older than 7 days, then retry the write once. Avoids «Lost
-   * autosave with no visible signal» (codex re-review #1 minor #8).
+   * keys older than 7 days, then retry the write once.
    */
   const persistDraftNow = (
     snap: { numeric: string; photos: string[]; text: string },
@@ -258,7 +190,7 @@ export function SubmitSheet({
       return;
     }
     const now = Date.now();
-    const draft: SubmitSheetDraft = { ...snap, savedAt: now };
+    const draft: SubmitSheetDraftSnapshot = { ...snap, savedAt: now };
     const payload = JSON.stringify(draft);
     const tryWrite = () => {
       window.localStorage.setItem(draftKey, payload);
@@ -268,7 +200,6 @@ export function SubmitSheet({
     try {
       tryWrite();
     } catch (err) {
-      // Bounded cleanup of stale drafts (older than 7 days) then retry.
       const isQuotaError =
         err instanceof Error &&
         (err.name === 'QuotaExceededError' ||
@@ -279,12 +210,12 @@ export function SubmitSheet({
         try {
           for (let i = window.localStorage.length - 1; i >= 0; i -= 1) {
             const key = window.localStorage.key(i);
-            if (!key || !key.startsWith(DRAFT_STORAGE_PREFIX)) continue;
+            if (!key || !key.startsWith('submitsheet-draft-')) continue;
             if (key === draftKey) continue;
             const raw = window.localStorage.getItem(key);
             if (!raw) continue;
             try {
-              const parsed = JSON.parse(raw) as Partial<SubmitSheetDraft>;
+              const parsed = JSON.parse(raw) as Partial<SubmitSheetDraftSnapshot>;
               if (
                 typeof parsed?.savedAt !== 'number' ||
                 parsed.savedAt < cutoff
@@ -297,16 +228,26 @@ export function SubmitSheet({
           }
           tryWrite();
         } catch {
-          // Still failing — surface so the student can save manually.
           toast.error('Не удаётся сохранить черновик локально. Закончи задачу одной попыткой.');
         }
       }
-      // Non-quota errors: silent (draft is best-effort).
     }
   };
 
-  // Caption «Черновик сохранён · N сек назад» — recompute every 10s while
-  // the sheet is mounted so the timestamp doesn't go stale visually.
+  // Periodic autosave (every 5s while sheet is open).
+  useEffect(() => {
+    if (!open) return;
+    const interval = window.setInterval(() => {
+      const snapshot = JSON.stringify({ numeric, photos, text });
+      if (snapshot === lastSerializedRef.current) return;
+      persistDraftNow({ numeric, photos, text });
+    }, AUTOSAVE_INTERVAL_MS);
+    return () => window.clearInterval(interval);
+    // persistDraftNow is identity-stable.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, draftKey, numeric, photos, text]);
+
+  // Caption «Черновик сохранён · N сек назад» — recompute every 10s.
   const [autosaveCaptionTick, setAutosaveCaptionTick] = useState(0);
   useEffect(() => {
     if (!open || !lastAutosaveAt) return;
@@ -317,7 +258,6 @@ export function SubmitSheet({
   }, [open, lastAutosaveAt]);
   const autosaveCaption = useMemo(() => {
     if (!lastAutosaveAt) return '';
-    // touch tick so memo re-runs on caption refresh
     void autosaveCaptionTick;
     const ageSec = Math.max(0, Math.round((Date.now() - lastAutosaveAt) / 1000));
     if (ageSec < 5) return 'Черновик сохранён · только что';
@@ -345,7 +285,7 @@ export function SubmitSheet({
     }
   }, [numeric, photos.length, task.task_kind]);
 
-  const submitDisabled = !kindReady || isSubmitting;
+  const submitDisabled = !kindReady;
 
   const titleText = task.task_total
     ? `Сдать задачу ${task.order_num} из ${task.task_total}`
@@ -359,131 +299,27 @@ export function SubmitSheet({
     return parts.join(' · ');
   }, [task.homework_title, task.current_score, task.max_score]);
 
-  const handleSubmit = async () => {
+  /**
+   * Phase 1.2 submit: persist draft → fire onSubmit → close sheet.
+   * Parent owns mutation + optimistic + navigation. SubmitSheet does NOT
+   * await mutation — sheet closes synchronously so the student
+   * immediately sees their submission landing in the chat.
+   */
+  const handleSubmit = () => {
     if (submitDisabled) return;
-    // Codex re-review #1 (blocker) fix: persist the current draft
-    // synchronously before any submit work. Previously a student tapping
-    // submit before the first 5s autosave tick would lose all input on a
-    // partial/error verdict + close. Now the draft is always on disk by
-    // the time the mutation starts.
     persistDraftNow({ numeric, photos, text });
-    // Normalise comma → dot for the wire payload (codex finding #8).
-    // Original user input stays in the `numeric` state so the retry path
-    // re-displays exactly what the student typed.
-    const wireNumeric = normaliseNumericForWire(numeric);
-    const trimmedText = text.trim();
-    onSubmitStart?.({
-      hasPhotos: photos.length > 0,
-      photoCount: photos.length,
-      hasText: trimmedText.length > 0,
-      numericLength: wireNumeric.length,
+    onSubmit({
+      numeric: normaliseNumericForWire(numeric),
+      photos,
+      text: text.trim(),
     });
-    setSubmitError(null);
-    try {
-      const response = await submitMutation.mutateAsync({
-        numeric: wireNumeric,
-        photos,
-        text: trimmedText,
-      });
-      // Keep submitted data in state until verdict is dismissed — protects
-      // the «Переснять решение» path: re-opening doesn't lose context.
-      setVerdict(response);
-    } catch (err) {
-      // Network / timeout / 5xx — surface as the error verdict overlay with
-      // explicit retry. State (numeric/photos/text) is preserved so the
-      // retry replays the original payload (AC-6 + codex finding #7).
-      const msg = err instanceof Error ? err.message : 'Не удалось отправить решение';
-      setSubmitError(msg);
-    }
-  };
-
-  /** Helper: drop autosaved draft on CORRECT verdict (prevents stale
-   *  draft from showing up on the next homework if same taskId reused). */
-  const clearAutosaveDraft = () => {
-    try {
-      window.localStorage.removeItem(draftKey);
-    } catch {
-      /* noop */
-    }
-    setLastAutosaveAt(null);
-    lastSerializedRef.current = '';
-  };
-
-  const handleVerdictContinue = () => {
-    if (!verdict) return;
-    const earned = verdict.earned_score ?? 0;
-    onSubmitted(verdict.verdict, earned, verdict.max_score, verdict);
-    if (verdict.verdict === 'CORRECT') {
-      clearAutosaveDraft();
-    } else {
-      // Non-CORRECT close — preserve the draft synchronously so the
-      // student can retry from the same input on next reopen (codex
-      // re-review #1 blocker fix). The 5s autosave tick is too slow for
-      // a fast partial→close flow.
-      persistDraftNow({ numeric, photos, text });
-    }
-    setVerdict(null);
     onClose();
   };
 
-  const handleVerdictNext = () => {
-    if (!verdict) return;
-    const earned = verdict.earned_score ?? 0;
-    onSubmitted(verdict.verdict, earned, verdict.max_score, verdict);
-    if (verdict.verdict === 'CORRECT') {
-      clearAutosaveDraft();
-    } else {
-      persistDraftNow({ numeric, photos, text });
-    }
-    setVerdict(null);
-    onClose();
-  };
-
-  /** Dismiss the error overlay without closing the sheet — student can
-   *  amend the form (e.g. add another photo) and submit again. */
-  const handleErrorDismiss = () => {
-    setSubmitError(null);
-  };
-
-  /**
-   * «Попробовать снова» from network/AI submitError overlay.
-   * Preview-QA #5 fix (2026-05-10): student wants to RETURN TO THE FORM
-   * to edit numeric/photos/text, not blindly re-fire the same payload
-   * that already failed. Just close the overlay; SubmitSheet stays open
-   * with the form populated. If the student wants to re-fire without
-   * changes, they tap the primary «Отправить на проверку» button again.
-   */
-  const handleErrorRetry = () => {
-    setSubmitError(null);
-  };
-
-  /**
-   * «Попробовать снова» from CHECK_FAILED / zero-score INCORRECT verdict.
-   * Preview-QA #5 fix (2026-05-10): student expects this to RETURN TO
-   * THE FORM (not blindly re-fire the same incorrect payload). The form
-   * stays mounted with numeric/photos/text populated — student edits
-   * what's wrong, then taps primary «Отправить на проверку» again.
-   * Re-firing the exact same payload that the AI already marked
-   * incorrect would just produce the same verdict — pointless waste of
-   * student attention.
-   */
-  const handleVerdictRetry = () => {
-    setVerdict(null);
-  };
-
-  // ─── Voice section (Q11 from preview QA #1, 2026-05-10) ───────────────────
+  // ─── Voice section (Q11) ─────────────────────────────────────────────────
   const voiceRecorder = useVoiceRecorder();
   const [isTranscribing, setIsTranscribing] = useState(false);
 
-  /**
-   * Mic button handler — start/stop recording, then transcribe and append
-   * to the section-3 text input. Phase 1 stores no audio blob; voice is
-   * pure speech-to-text (per spec contract `voice_ref` stays null/undef).
-   *
-   * Uses the real `threadId` prop (codex re-review #1 fix) — the
-   * transcribe endpoint is `/threads/:threadId/transcribe-voice` and
-   * needs a real `homework_tutor_threads.id`, not a task UUID.
-   */
   const handleVoiceClick = async () => {
     if (!threadId) {
       toast.error('Голосовой ввод временно недоступен. Попробуй обновить страницу.');
@@ -499,12 +335,9 @@ export function SubmitSheet({
           result.blob,
           result.fileName,
         );
-        // Append to existing section-3 text rather than replace, so a
-        // student who already typed something doesn't lose it.
         setText((prev) => (prev.trim() ? `${prev}\n${transcript}` : transcript));
       } catch (err) {
-        const msg = err instanceof Error ? err.message : 'Не удалось распознать речь';
-        setSubmitError(msg);
+        toast.error(err instanceof Error ? err.message : 'Не удалось распознать речь');
       } finally {
         setIsTranscribing(false);
       }
@@ -514,29 +347,8 @@ export function SubmitSheet({
     }
   };
 
-  // Block close (Esc / outside click) while uploading or submitting. Once
-  // verdict shows the user must explicitly tap a CTA so we don't lose the
-  // achievement card. Error overlay also blocks accidental dismiss — the
-  // student should explicitly choose Retry vs Close.
-  const handleOpenChange = (next: boolean) => {
-    if (next) return;
-    if (isSubmitting) return;
-    if (verdict) {
-      handleVerdictContinue();
-      return;
-    }
-    if (submitError) {
-      // Treat backdrop click while error is showing as «Закрыть» — drop
-      // state. Explicit user choice; mirrors VerdictOverlay's onContinue.
-      handleErrorDismiss();
-      onClose();
-      return;
-    }
-    onClose();
-  };
-
   return (
-    <DialogPrimitive.Root open={open} onOpenChange={handleOpenChange}>
+    <DialogPrimitive.Root open={open} onOpenChange={(next) => { if (!next) onClose(); }}>
       <DialogPrimitive.Portal>
         <DialogPrimitive.Overlay
           className="fixed inset-0 z-50 bg-slate-900/55 backdrop-blur-sm data-[state=open]:animate-in data-[state=open]:fade-in data-[state=closed]:animate-out data-[state=closed]:fade-out duration-200"
@@ -545,7 +357,7 @@ export function SubmitSheet({
           aria-describedby={undefined}
           className="fixed inset-x-0 bottom-0 z-50 flex flex-col mx-auto w-full max-w-2xl max-h-[92dvh] bg-white rounded-t-[22px] overflow-hidden shadow-xl outline-none focus-visible:outline-none animate-homework-sheet-slide-up"
         >
-          {/* Grab handle (mobile affordance) */}
+          {/* Grab handle */}
           <span
             className="block w-10 h-1 rounded-sm bg-slate-300 mx-auto mt-2 mb-1 shrink-0"
             aria-hidden="true"
@@ -562,14 +374,13 @@ export function SubmitSheet({
             <DialogPrimitive.Close
               type="button"
               aria-label="Закрыть"
-              disabled={isSubmitting}
-              className="grid place-items-center w-9 h-9 rounded-full bg-socrat-surface hover:bg-socrat-border-light text-slate-700 shrink-0 touch-manipulation disabled:opacity-50 disabled:cursor-not-allowed"
+              className="grid place-items-center w-9 h-9 rounded-full bg-socrat-surface hover:bg-socrat-border-light text-slate-700 shrink-0 touch-manipulation"
             >
               <X className="h-5 w-5" aria-hidden="true" />
             </DialogPrimitive.Close>
           </div>
 
-          {/* Body — relative parent for the verdict z-stack */}
+          {/* Body */}
           <div className="relative flex-1 min-h-0 flex flex-col">
             <div className="flex-1 overflow-y-auto px-4 pt-4 pb-5 [-webkit-overflow-scrolling:touch] flex flex-col gap-5">
               {/* Hint banner */}
@@ -593,16 +404,6 @@ export function SubmitSheet({
                     </span>
                   </div>
                   <div className="flex items-center gap-2">
-                    {/*
-                      type="text" + inputMode="decimal" instead of
-                      type="number": codex finding #8 — `<input type="number">`
-                      rejects/normalises comma input inconsistently across
-                      browsers (Chrome rejects "1,4", Firefox-RU accepts,
-                      Safari-EN strips silently). text + inputMode shows the
-                      decimal keypad on mobile and lets us own the parse via
-                      `normaliseNumericForWire`. `pattern` accepts numbers
-                      with optional sign + comma OR dot — rejects free text.
-                    */}
                     <input
                       type="text"
                       inputMode="decimal"
@@ -611,10 +412,8 @@ export function SubmitSheet({
                       value={numeric}
                       onChange={(e) => setNumeric(e.target.value)}
                       placeholder="например, 1,4"
-                      disabled={isSubmitting}
-                      // 16px font-size — prevent iOS Safari auto-zoom on focus.
                       style={{ fontSize: '16px' }}
-                      className="flex-1 h-11 min-w-0 px-3 bg-white border-[1.5px] border-socrat-border rounded-[10px] font-semibold text-slate-900 outline-none focus-visible:border-socrat-primary focus-visible:ring-2 focus-visible:ring-socrat-primary/20 disabled:opacity-50 touch-manipulation"
+                      className="flex-1 h-11 min-w-0 px-3 bg-white border-[1.5px] border-socrat-border rounded-[10px] font-semibold text-slate-900 outline-none focus-visible:border-socrat-primary focus-visible:ring-2 focus-visible:ring-socrat-primary/20 touch-manipulation"
                       aria-label="Числовой ответ"
                     />
                     {task.answer_unit ? (
@@ -644,9 +443,8 @@ export function SubmitSheet({
                     photos={photos}
                     onAdd={(ref) => setPhotos((prev) => [...prev, ref])}
                     onRemove={(ref) => setPhotos((prev) => prev.filter((p) => p !== ref))}
-                    hwId={hwId}
+                    hwId={_hwId}
                     taskOrder={task.order_num}
-                    disabled={isSubmitting}
                   />
                   <p className="text-[11px] text-socrat-muted leading-relaxed">
                     Можно несколько страниц — добавляй по одной. ИИ распознаёт формулы и проверит ход решения.
@@ -672,20 +470,13 @@ export function SubmitSheet({
                   onChange={(e) => setText(e.target.value)}
                   placeholder="Если хочешь — поясни ход решения текстом"
                   rows={3}
-                  disabled={isSubmitting}
-                  // 16px to prevent iOS auto-zoom (matches numeric input).
                   style={{ fontSize: '16px' }}
-                  className="w-full min-h-[88px] px-3 py-2.5 bg-white border-[1.5px] border-socrat-border rounded-[10px] text-slate-900 leading-relaxed outline-none focus-visible:border-socrat-primary focus-visible:ring-2 focus-visible:ring-socrat-primary/20 disabled:opacity-50 resize-y touch-manipulation"
+                  className="w-full min-h-[88px] px-3 py-2.5 bg-white border-[1.5px] border-socrat-border rounded-[10px] text-slate-900 leading-relaxed outline-none focus-visible:border-socrat-primary focus-visible:ring-2 focus-visible:ring-socrat-primary/20 resize-y touch-manipulation"
                   aria-label="Дополнительное пояснение"
                 />
               </section>
 
-              {/* Section 4 — Voice (Q11 from preview QA #1, 2026-05-10).
-                  Speech-to-text helper: запись через MediaRecorder →
-                  транскрипция через Groq Whisper → транскрипт ДОБАВЛЯЕТСЯ
-                  к существующему тексту в section 3 (visible, editable).
-                  No `voice_ref` server-side: this is a UX shortcut for
-                  long text, not an audio attachment. */}
+              {/* Section 4 — Voice (Q11) */}
               <section className="flex flex-col gap-2">
                 <div className="flex items-center gap-2">
                   <span className="grid place-items-center w-[22px] h-[22px] rounded-full bg-socrat-primary-light text-socrat-primary text-xs font-bold">
@@ -701,7 +492,7 @@ export function SubmitSheet({
                 <button
                   type="button"
                   onClick={handleVoiceClick}
-                  disabled={isSubmitting || !voiceRecorder.isSupported || isTranscribing}
+                  disabled={!voiceRecorder.isSupported || isTranscribing}
                   className={`inline-flex items-center justify-center gap-1.5 h-11 px-4 rounded-[10px] text-sm font-semibold touch-manipulation transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
                     voiceRecorder.isRecording
                       ? 'bg-rose-50 text-rose-700 border border-rose-200 hover:bg-rose-100'
@@ -733,85 +524,21 @@ export function SubmitSheet({
               </section>
             </div>
 
-            {/* Footer
-                NB: «Черновик сохранён» label removed (codex finding #13) —
-                Phase 1 has no autosave (spec §3 «Out of scope»). Showing
-                a saved-status while there's no persistence misled students
-                into thinking their answer was safe across reloads. Phase 2
-                will land real autosave + restore the label tied to it. */}
+            {/* Footer */}
             <div className="flex items-center justify-between gap-2.5 px-3.5 py-3 border-t border-socrat-border-light bg-white shrink-0">
               <span className="text-[11px] text-socrat-muted">
-                {isSubmitting
-                  ? 'Распознаём и проверяем…'
-                  : autosaveCaption || ' '}
+                {autosaveCaption || ' '}
               </span>
               <button
                 type="button"
                 onClick={handleSubmit}
                 disabled={submitDisabled}
-                // Shadow uses Tailwind's color-with-opacity syntax against
-                // the brand token instead of hardcoded rgba (codex re-review
-                // #4 fix). `shadow-socrat-primary/25` resolves to brand
-                // green at 25% opacity through the design system —
-                // visually identical to the previous
-                // shadow-[0_4px_14px_rgba(27,107,74,0.25)] but routed
-                // through the token. Opacity-aware shadow util ships with
-                // tailwindcss-animate / Tailwind v3.3+.
                 className="inline-flex items-center gap-1.5 h-11 px-4 rounded-[12px] bg-socrat-primary hover:bg-socrat-primary-dark text-white text-sm font-bold shadow-lg shadow-socrat-primary/25 disabled:opacity-45 disabled:cursor-not-allowed disabled:shadow-none touch-manipulation transition-colors"
               >
-                {isSubmitting ? (
-                  <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
-                ) : (
-                  <Send className="h-4 w-4" aria-hidden="true" />
-                )}
+                <Send className="h-4 w-4" aria-hidden="true" />
                 Отправить на проверку
               </button>
             </div>
-
-            {/* Verdict overlay — z-stacked over the sheet body, single
-                focus context. Error mode preserves form state + offers a
-                real retry CTA (AC-6 + codex finding #7).
-                A successful response with `verdict='CHECK_FAILED'` ALSO
-                deserves a retry path (codex re-review #2): the AI couldn't
-                evaluate the submission deterministically (network blip /
-                rate-limit / model parse fail). State is unchanged, so we
-                can replay the same payload. We also pass `onRetry` for
-                `INCORRECT && earned_score === 0` because that's the
-                second branch where VerdictOverlay derives `mode='error'`
-                and the student likely wants to add another photo / fix
-                comma input — without retry they'd close + lose state. */}
-            {verdict ? (
-              <VerdictOverlay
-                verdict={verdict.verdict}
-                aiScore={verdict.earned_score}
-                maxScore={verdict.max_score}
-                feedback={verdict.feedback}
-                onContinue={handleVerdictContinue}
-                onNext={handleVerdictNext}
-                hasNext={Boolean(verdict.next_task_id || verdict.next_task_order)}
-                onRetry={
-                  verdict.verdict === 'CHECK_FAILED' ||
-                  (verdict.verdict === 'INCORRECT' &&
-                    (verdict.earned_score ?? 0) === 0)
-                    ? handleVerdictRetry
-                    : undefined
-                }
-              />
-            ) : submitError ? (
-              <VerdictOverlay
-                mode="error"
-                titleOverride="Не удалось отправить решение"
-                aiScore={null}
-                maxScore={task.max_score}
-                feedback={submitError}
-                onContinue={() => {
-                  handleErrorDismiss();
-                  onClose();
-                }}
-                onNext={handleErrorDismiss}
-                onRetry={handleErrorRetry}
-              />
-            ) : null}
           </div>
         </DialogPrimitive.Content>
       </DialogPrimitive.Portal>

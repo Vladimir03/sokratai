@@ -107,6 +107,15 @@ function formatMessageKind(kind: GuidedMessageKind | undefined): string | null {
   if (kind === 'hint_request') return 'Подсказка';
   if (kind === 'question') return 'Шаг решения';
   if (kind === 'answer') return 'Ответ';
+  // Phase 1.2 (preview-QA #6, 2026-05-10): submission user message
+  // bubble label. Backend storage of single-shot SubmitSheet sends
+  // через handleStudentSubmission. Один и тот же label виден на обеих
+  // perspective'ах — student sees own «Решение к задаче» bubble + tutor
+  // sees same через GuidedThreadViewer.
+  if (kind === 'submission') return 'Решение к задаче';
+  // AI verdict for submission — distinct label so student differentiates
+  // formal verdict (`check_result`) vs casual chat reply (`ai_reply`).
+  if (kind === 'check_result') return 'Проверка решения';
   return null;
 }
 
