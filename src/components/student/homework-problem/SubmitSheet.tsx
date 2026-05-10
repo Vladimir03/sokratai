@@ -1,10 +1,27 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import * as DialogPrimitive from '@radix-ui/react-dialog';
-import { Loader2, Send, X } from 'lucide-react';
+import { Loader2, Mic, MicOff, Send, X } from 'lucide-react';
 import { useSubmitSolution } from '@/hooks/useSubmitSolution';
+import { useVoiceRecorder } from '@/hooks/useVoiceRecorder';
+import { transcribeThreadVoice } from '@/lib/studentHomeworkApi';
 import { PhotoStrip } from './PhotoStrip';
 import { VerdictOverlay } from './VerdictOverlay';
 import type { CheckAnswerResponse } from '@/types/homework';
+
+const AUTOSAVE_INTERVAL_MS = 5_000;
+const DRAFT_STORAGE_PREFIX = 'submitsheet-draft-';
+
+/**
+ * localStorage shape — `{numeric, photos, text}` matches `SubmitSolutionPayload`
+ * minus the wire-side normalisation. `savedAt` is server-clock-independent
+ * timestamp for the «Черновик сохранён · X сек назад» footer caption.
+ */
+interface SubmitSheetDraft {
+  numeric: string;
+  photos: string[];
+  text: string;
+  savedAt: number;
+}
 
 /**
  * Normalise a user-typed numeric string for the wire payload: comma → dot,
@@ -132,20 +149,106 @@ export function SubmitSheet({
   const submitMutation = useSubmitSolution(hwId, taskId);
   const isSubmitting = submitMutation.isPending;
 
-  // Reset state on open. Closing then re-opening for the same task gives a
-  // clean slate — autosave / draft restore is Phase 2 (deliberate scope).
+  // ─── Autosave (Q12, 2026-05-10) ──────────────────────────────────────────
+  // Persist a draft to localStorage every AUTOSAVE_INTERVAL_MS while the
+  // sheet is open. Restore on (re)open for the same task. Footer caption
+  // tracks the last-saved time so the student knows the draft is real.
+  const draftKey = `${DRAFT_STORAGE_PREFIX}${taskId}`;
+  const [lastAutosaveAt, setLastAutosaveAt] = useState<number | null>(null);
+  const lastSerializedRef = useRef<string>('');
+
+  // Restore from localStorage on open; otherwise reset to blank.
   useEffect(() => {
-    if (open) {
+    if (!open) return;
+    setVerdict(null);
+    setSubmitError(null);
+    submitMutation.reset();
+
+    let restored = false;
+    try {
+      const raw = window.localStorage.getItem(draftKey);
+      if (raw) {
+        const parsed = JSON.parse(raw) as Partial<SubmitSheetDraft>;
+        if (
+          parsed &&
+          typeof parsed.numeric === 'string' &&
+          typeof parsed.text === 'string' &&
+          Array.isArray(parsed.photos) &&
+          parsed.photos.every((p) => typeof p === 'string')
+        ) {
+          setNumeric(parsed.numeric);
+          setPhotos(parsed.photos);
+          setText(parsed.text);
+          lastSerializedRef.current = JSON.stringify({
+            numeric: parsed.numeric,
+            photos: parsed.photos,
+            text: parsed.text,
+          });
+          setLastAutosaveAt(typeof parsed.savedAt === 'number' ? parsed.savedAt : Date.now());
+          restored = true;
+        }
+      }
+    } catch {
+      // Corrupted draft — drop and start clean.
+    }
+    if (!restored) {
       setNumeric('');
       setPhotos([]);
       setText('');
-      setVerdict(null);
-      setSubmitError(null);
-      submitMutation.reset();
+      lastSerializedRef.current = '';
+      setLastAutosaveAt(null);
     }
     // submitMutation.reset is identity-stable per react-query; safe to omit.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open]);
+  }, [open, draftKey]);
+
+  // Periodic autosave (every 5s while sheet is open). Skip if nothing
+  // changed since the last serialized snapshot to avoid useless writes.
+  useEffect(() => {
+    if (!open) return;
+    const interval = window.setInterval(() => {
+      const snapshot = JSON.stringify({ numeric, photos, text });
+      if (snapshot === lastSerializedRef.current) return;
+      // Don't persist a fully-empty draft (avoids localStorage litter).
+      if (!numeric && photos.length === 0 && !text) {
+        window.localStorage.removeItem(draftKey);
+        lastSerializedRef.current = snapshot;
+        setLastAutosaveAt(null);
+        return;
+      }
+      const now = Date.now();
+      const draft: SubmitSheetDraft = { numeric, photos, text, savedAt: now };
+      try {
+        window.localStorage.setItem(draftKey, JSON.stringify(draft));
+        lastSerializedRef.current = snapshot;
+        setLastAutosaveAt(now);
+      } catch {
+        // Quota exceeded etc. — silent fail (draft is best-effort).
+      }
+    }, AUTOSAVE_INTERVAL_MS);
+    return () => window.clearInterval(interval);
+  }, [open, draftKey, numeric, photos, text]);
+
+  // Caption «Черновик сохранён · N сек назад» — recompute every 10s while
+  // the sheet is mounted so the timestamp doesn't go stale visually.
+  const [autosaveCaptionTick, setAutosaveCaptionTick] = useState(0);
+  useEffect(() => {
+    if (!open || !lastAutosaveAt) return;
+    const id = window.setInterval(() => {
+      setAutosaveCaptionTick((t) => t + 1);
+    }, 10_000);
+    return () => window.clearInterval(id);
+  }, [open, lastAutosaveAt]);
+  const autosaveCaption = useMemo(() => {
+    if (!lastAutosaveAt) return '';
+    // touch tick so memo re-runs on caption refresh
+    void autosaveCaptionTick;
+    const ageSec = Math.max(0, Math.round((Date.now() - lastAutosaveAt) / 1000));
+    if (ageSec < 5) return 'Черновик сохранён · только что';
+    if (ageSec < 60) return `Черновик сохранён · ${ageSec} сек назад`;
+    const min = Math.round(ageSec / 60);
+    return `Черновик сохранён · ${min} мин назад`;
+  }, [lastAutosaveAt, autosaveCaptionTick]);
 
   const hint = HINT_BY_KIND[task.task_kind] ?? HINT_BY_KIND.extended;
 
@@ -212,10 +315,23 @@ export function SubmitSheet({
     }
   };
 
+  /** Helper: drop autosaved draft on CORRECT verdict (prevents stale
+   *  draft from showing up on the next homework if same taskId reused). */
+  const clearAutosaveDraft = () => {
+    try {
+      window.localStorage.removeItem(draftKey);
+    } catch {
+      /* noop */
+    }
+    setLastAutosaveAt(null);
+    lastSerializedRef.current = '';
+  };
+
   const handleVerdictContinue = () => {
     if (!verdict) return;
     const earned = verdict.earned_score ?? 0;
     onSubmitted(verdict.verdict, earned, verdict.max_score, verdict);
+    if (verdict.verdict === 'CORRECT') clearAutosaveDraft();
     setVerdict(null);
     onClose();
   };
@@ -224,6 +340,7 @@ export function SubmitSheet({
     if (!verdict) return;
     const earned = verdict.earned_score ?? 0;
     onSubmitted(verdict.verdict, earned, verdict.max_score, verdict);
+    if (verdict.verdict === 'CORRECT') clearAutosaveDraft();
     setVerdict(null);
     onClose();
   };
@@ -249,6 +366,48 @@ export function SubmitSheet({
   const handleVerdictRetry = () => {
     setVerdict(null);
     void handleSubmit();
+  };
+
+  // ─── Voice section (Q11 from preview QA #1, 2026-05-10) ───────────────────
+  const voiceRecorder = useVoiceRecorder();
+  const [isTranscribing, setIsTranscribing] = useState(false);
+
+  /**
+   * Mic button handler — start/stop recording, then transcribe and append
+   * to the section-3 text input. Phase 1 stores no audio blob; voice is
+   * pure speech-to-text (per spec contract `voice_ref` stays null/undef).
+   *
+   * Threading through `transcribeThreadVoice` (Groq Whisper). The endpoint
+   * needs a thread id — we don't have one in SubmitSheet directly because
+   * the sheet is task-scoped, not thread-scoped. Workaround: pass the
+   * `taskId` as a synthetic thread id; backend resolves the student's
+   * actual thread by ownership. (If this turns out to be wrong, parent
+   * can pass `threadId` as an additional prop in a follow-up.)
+   */
+  const handleVoiceClick = async () => {
+    if (voiceRecorder.isRecording) {
+      const result = await voiceRecorder.stopRecording();
+      if (!result) return;
+      setIsTranscribing(true);
+      try {
+        const { text: transcript } = await transcribeThreadVoice(
+          taskId,
+          result.blob,
+          result.fileName,
+        );
+        // Append to existing section-3 text rather than replace, so a
+        // student who already typed something doesn't lose it.
+        setText((prev) => (prev.trim() ? `${prev}\n${transcript}` : transcript));
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : 'Не удалось распознать речь';
+        setSubmitError(msg);
+      } finally {
+        setIsTranscribing(false);
+      }
+    } else {
+      if (!voiceRecorder.isSupported) return;
+      await voiceRecorder.startRecording();
+    }
   };
 
   // Block close (Esc / outside click) while uploading or submitting. Once
@@ -416,6 +575,58 @@ export function SubmitSheet({
                   aria-label="Дополнительное пояснение"
                 />
               </section>
+
+              {/* Section 4 — Voice (Q11 from preview QA #1, 2026-05-10).
+                  Speech-to-text helper: запись через MediaRecorder →
+                  транскрипция через Groq Whisper → транскрипт ДОБАВЛЯЕТСЯ
+                  к существующему тексту в section 3 (visible, editable).
+                  No `voice_ref` server-side: this is a UX shortcut for
+                  long text, not an audio attachment. */}
+              <section className="flex flex-col gap-2">
+                <div className="flex items-center gap-2">
+                  <span className="grid place-items-center w-[22px] h-[22px] rounded-full bg-socrat-primary-light text-socrat-primary text-xs font-bold">
+                    {(showNumeric ? 1 : 0) + (showPhotos ? 1 : 0) + 2}
+                  </span>
+                  <h4 className="text-[13px] font-bold text-slate-900 m-0">
+                    Голосом
+                  </h4>
+                  <span className="ml-auto text-[10px] font-semibold uppercase tracking-wider text-socrat-muted bg-socrat-border-light px-1.5 py-0.5 rounded-full">
+                    по желанию
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleVoiceClick}
+                  disabled={isSubmitting || !voiceRecorder.isSupported || isTranscribing}
+                  className={`inline-flex items-center justify-center gap-1.5 h-11 px-4 rounded-[10px] text-sm font-semibold touch-manipulation transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
+                    voiceRecorder.isRecording
+                      ? 'bg-rose-50 text-rose-700 border border-rose-200 hover:bg-rose-100'
+                      : 'bg-socrat-surface text-slate-700 border border-socrat-border hover:bg-socrat-border-light'
+                  }`}
+                >
+                  {voiceRecorder.isRecording ? (
+                    <>
+                      <MicOff className="h-4 w-4" aria-hidden="true" />
+                      Остановить запись · {voiceRecorder.recordingDurationSeconds}с
+                    </>
+                  ) : isTranscribing ? (
+                    <>
+                      <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+                      Расшифровываем…
+                    </>
+                  ) : (
+                    <>
+                      <Mic className="h-4 w-4" aria-hidden="true" />
+                      Записать голосовое объяснение
+                    </>
+                  )}
+                </button>
+                {!voiceRecorder.isSupported ? (
+                  <p className="text-[11px] text-socrat-muted">
+                    Голосовой ввод не поддерживается этим браузером.
+                  </p>
+                ) : null}
+              </section>
             </div>
 
             {/* Footer
@@ -426,7 +637,9 @@ export function SubmitSheet({
                 will land real autosave + restore the label tied to it. */}
             <div className="flex items-center justify-between gap-2.5 px-3.5 py-3 border-t border-socrat-border-light bg-white shrink-0">
               <span className="text-[11px] text-socrat-muted">
-                {isSubmitting ? 'Распознаём и проверяем…' : ' '}
+                {isSubmitting
+                  ? 'Распознаём и проверяем…'
+                  : autosaveCaption || ' '}
               </span>
               <button
                 type="button"

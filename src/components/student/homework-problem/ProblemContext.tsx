@@ -1,6 +1,7 @@
 import { ChevronDown, ChevronUp, Info } from 'lucide-react';
 import { lazy, Suspense } from 'react';
 import { StepIndicator } from './StepIndicator';
+import { TaskImagesGallery } from './TaskImagesGallery';
 
 const MathText = lazy(() =>
   import('@/components/kb/ui/MathText').then((m) => ({ default: m.MathText })),
@@ -32,6 +33,12 @@ export interface ProblemContextTask {
   task_kind: 'numeric' | 'extended' | 'proof';
   /** Plain task text (may contain inline `$…$` KaTeX). */
   body: string;
+  /**
+   * Dual-format `task_image_url` (single `storage://...` ref OR JSON-array).
+   * Resolved through `parseAttachmentUrls` inside `TaskImagesGallery`.
+   * Phase 1.x preview-QA #1 fix (Q9, 2026-05-10).
+   */
+  image_url?: string | null;
   /** Optional emphasised question line (separate `<p>` in expanded view). */
   question?: string;
   /** Optional structured "Дано" rows. */
@@ -48,6 +55,19 @@ interface ProblemContextProps {
   onToggle: () => void;
   /** Compact = mobile peek mode (smaller padding/radii). */
   compact?: boolean;
+  /**
+   * Required when `task.image_url` is non-null — used as the cache key for
+   * the batched signed-URL endpoint (`useStudentTaskImagesSignedUrls`) +
+   * the per-student namespace check on the backend.
+   */
+  assignmentId?: string;
+  /**
+   * Step-indicator click handler. When provided, the row of circles
+   * becomes interactive (mobile auto-redirect Q7 — clicking a step
+   * navigates to that task's per-task screen). When omitted, the
+   * stepper stays read-only (legacy callsite or read-only previews).
+   */
+  onStepClick?: (taskNo: number) => void;
 }
 
 /**
@@ -69,6 +89,8 @@ export function ProblemContext({
   collapsed,
   onToggle,
   compact = false,
+  assignmentId,
+  onStepClick,
 }: ProblemContextProps) {
   const headerId = `problem-context-${task.task_id}`;
   const panelId = `problem-context-panel-${task.task_id}`;
@@ -84,6 +106,7 @@ export function ProblemContext({
         total={task.task_total}
         currentNo={task.task_no}
         doneIndices={task.done_task_indices}
+        onStepClick={onStepClick}
       />
 
       <div className="flex items-center justify-between gap-2 flex-wrap">
@@ -132,6 +155,17 @@ export function ProblemContext({
               <MathText text={task.body} className="block whitespace-pre-wrap" />
             </Suspense>
           </div>
+
+          {/* Task images gallery — multi-photo (≤5), under body so the text
+              stays the leading element. Q9 + Q10 from preview QA #1
+              (2026-05-10). Renders nothing when image_url is null/empty. */}
+          {task.image_url && assignmentId ? (
+            <TaskImagesGallery
+              assignmentId={assignmentId}
+              taskId={task.task_id}
+              taskImageUrl={task.image_url}
+            />
+          ) : null}
 
           {/* Question — emphasized, dark green. Optional: real API doesn't
               currently return a parsed question separately from `body`. */}

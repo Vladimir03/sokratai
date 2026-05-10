@@ -1,8 +1,8 @@
-import { lazy, Suspense, useCallback } from 'react';
+import { lazy, Suspense, useEffect } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import AuthGuard from '@/components/AuthGuard';
 import { PageContent } from '@/components/PageContent';
-import { useStudentAssignment } from '@/hooks/useStudentHomework';
+import { useStudentAssignment, useStudentThread } from '@/hooks/useStudentHomework';
 import { useIsMobile } from '@/hooks/useIsMobile';
 
 const GuidedHomeworkWorkspace = lazy(() => import('@/components/homework/GuidedHomeworkWorkspace'));
@@ -10,18 +10,25 @@ const GuidedHomeworkWorkspace = lazy(() => import('@/components/homework/GuidedH
 /**
  * Student homework assignment detail.
  *
- * **Mobile vs desktop routing (Phase 1 rollout, codex review revision
- * 2026-05-09):** rather than auto-redirecting on mount (which forced
- * mobile users into task #1 regardless of which task they wanted), we
- * mount the legacy `GuidedHomeworkWorkspace` on **all** viewports and
- * intercept its `TaskStepper` clicks via the new `onTaskClickOverride`
- * prop. On mobile, a click on any task in the stepper navigates to the
- * per-task screen at `/student/homework/:hwId/problem/:taskId`; on
- * desktop, the override returns `false` and the workspace switches
- * inline (legacy behavior preserved).
+ * **Mobile vs desktop routing (Phase 1.x rollout, revised 2026-05-10 after
+ * preview QA #1):** on mobile (`useIsMobile()` ≤768px) the page redirects
+ * immediately to the new per-task screen. On desktop we mount the legacy
+ * `GuidedHomeworkWorkspace` inline.
+ *
+ * The redirect target uses a smart fallback chain so the student lands on
+ * the most actionable task — never «just task #1» blindly:
+ *   1. Current task from the existing thread (`thread.current_task_id`).
+ *   2. First task whose `task_state.status !== 'completed'`.
+ *   3. First task in the assignment (`tasks[0].id`).
+ *
+ * Rationale: the previous click-intercept flow (codex re-review #3 fix)
+ * confused students who landed on the legacy stepper and didn't realise
+ * they had to tap a circle to enter the new UI. With auto-redirect we get
+ * the new screen on every mobile open; per-task switching inside the new
+ * screen happens via the new HomeworkProblem step indicator (Q7).
  *
  * Spec: `docs/delivery/features/student-homework-problem-screen/spec.md`
- * AC-2; codex review finding #3.
+ * AC-2 (revision 2026-05-10).
  */
 export default function StudentHomeworkDetail() {
   const { id } = useParams<{ id: string }>();
@@ -29,24 +36,38 @@ export default function StudentHomeworkDetail() {
   const isMobile = useIsMobile();
   const navigate = useNavigate();
   const { data, isLoading, error } = useStudentAssignment(assignmentId);
+  // Thread fetched only on mobile so we can resolve `current_task_id`
+  // before redirecting. Disabled on desktop — the legacy workspace owns
+  // its own thread query.
+  const { data: thread } = useStudentThread(isMobile ? assignmentId : '');
 
-  /**
-   * Returns `true` when the workspace should skip its in-place task
-   * switch. On mobile we navigate to the per-task screen; on desktop
-   * (or when assignmentId is missing) we let the workspace handle it.
-   * `useIsMobile` is reactive to viewport resize, so an iPad rotation
-   * landscape→portrait flips the override on the next click — matches
-   * spec AC-2 «следующем клике задачи».
-   */
-  const handleTaskClickOverride = useCallback(
-    (_orderNum: number, taskId: string): boolean => {
-      if (!isMobile) return false;
-      if (!assignmentId) return false;
-      navigate(`/student/homework/${assignmentId}/problem/${taskId}`);
-      return true;
-    },
-    [isMobile, assignmentId, navigate],
-  );
+  useEffect(() => {
+    if (!isMobile) return;
+    if (!assignmentId) return;
+    const tasks = data?.tasks ?? [];
+    if (tasks.length === 0) return;
+
+    // Fallback chain: current → first-not-completed → first.
+    let targetTaskId: string | undefined;
+    if (thread?.current_task_id) {
+      const exists = tasks.find((t) => t.id === thread.current_task_id);
+      if (exists) targetTaskId = exists.id;
+    }
+    if (!targetTaskId) {
+      const states = thread?.homework_tutor_task_states ?? [];
+      const firstUnfinished = tasks.find((t) => {
+        const s = states.find((st) => st.task_id === t.id);
+        return !s || s.status !== 'completed';
+      });
+      if (firstUnfinished) targetTaskId = firstUnfinished.id;
+    }
+    if (!targetTaskId) {
+      targetTaskId = tasks[0].id;
+    }
+    navigate(`/student/homework/${assignmentId}/problem/${targetTaskId}`, {
+      replace: true,
+    });
+  }, [isMobile, data, thread, assignmentId, navigate]);
 
   if (isLoading || !data) {
     return (
@@ -61,10 +82,18 @@ export default function StudentHomeworkDetail() {
     );
   }
 
-  // Guided chat workspace.
-  // AuthGuard provides <Navigation /> (fixed, h=4rem) and wraps children in pt-16 pb-20.
-  // We use a fixed-position overlay starting below the nav bar to escape the padding
-  // wrapper entirely, preventing scrollIntoView from scrolling parent containers.
+  if (isMobile) {
+    return (
+      <AuthGuard>
+        <PageContent>
+          <main className="container mx-auto px-4 pb-8">
+            <p className="text-muted-foreground">Открываем задачу...</p>
+          </main>
+        </PageContent>
+      </AuthGuard>
+    );
+  }
+
   return (
     <AuthGuard>
       <div className="fixed inset-x-0 bottom-0 z-40 bg-background flex flex-col overflow-hidden top-14">
@@ -75,10 +104,7 @@ export default function StudentHomeworkDetail() {
             </div>
           }
         >
-          <GuidedHomeworkWorkspace
-            assignment={data}
-            onTaskClickOverride={handleTaskClickOverride}
-          />
+          <GuidedHomeworkWorkspace assignment={data} />
         </Suspense>
       </div>
     </AuthGuard>

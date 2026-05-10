@@ -1,9 +1,9 @@
 # Student Homework Problem Screen — Spec
 
-**Версия:** v0.1
-**Дата:** 2026-05-09
+**Версия:** v0.2 (Phase 1.x revision after preview QA #1)
+**Дата:** 2026-05-09 (v0.1) → 2026-05-10 (v0.2 scope expansion)
 **Автор:** Vladimir Kamchatkin (с дизайном от Claude Design)
-**Статус:** implemented (Phase 1, 2026-05-09 — TASKS 1–8 ✅; TASK-10 review + TASK-11 prod deploy pending)
+**Статус:** implemented (Phase 1.x, 2026-05-10 — full chat + voice + step nav + autosave + task images)
 **Feature folder:** `docs/delivery/features/student-homework-problem-screen/`
 **Связанные документы:**
 - Дизайн-handoff: `docs/design_handoff_homework_chat/README.md` + `student-problem-chat.jsx` + скриншоты mobile/tablet/desktop
@@ -44,9 +44,15 @@
 
 Новый mobile-first экран решения **одной** задачи внутри ДЗ для ученика.
 
-**Phase 1 scope (revised 2026-05-09 после codex re-review):** **single-shot сдача решения** через `<SubmitSheet>` — числовой ответ + фото решения от руки (multi-page PhotoStrip) + опциональный текст. AI проверяет synthesizing answer = numeric + text + photos через тот же `handleCheckAnswer` pipeline. Sticky composer показывает только primary CTA «Сдать решение задачи» (после CORRECT — flip на «Следующая задача →»). **Чат-row скрыт** (`ComposerMobile chatDisabled`).
+**Phase 1.x scope (revised 2026-05-10 после preview QA #1 — расширение из submit-only):**
 
-**Сократический диалог с AI через чат** (paperclip / mic / text input в композере с every user message → `evaluateStudentAnswer`) **deferred to Phase 2** — это требует `saveThreadMessage` + `/chat` SSE wiring которого нет в Phase 1, и без него composer был silent-drop hazard (codex review #1 finding). Тред продолжает рендериться и показывает существующие сообщения (если ученик начал решать задачу через legacy desktop поверхность ранее), но новые student messages создаются только через SubmitSheet (`message_kind='submission'`).
+1. **Сократический диалог с AI через чат** (через существующий `/chat` endpoint streaming): paperclip + mic + text input в композере; каждое user-сообщение через `streamChat()` с `guidedHomeworkAssignmentId + guidedHomeworkTaskId` (server-side fetches tutor's reference solution через service-role). User messages persist'ятся через `saveThreadMessage(threadId, 'user', ..., 'question', taskId)`. AI reply persist'ится с `message_kind='ai_reply'`. **Чат — discussion-only**: не вызывает `handleCheckAnswer`, не закрывает задачу.
+2. **Single-shot сдача решения** через `<SubmitSheet>` — числовой ответ + фото решения от руки + опциональный текст + voice-to-text (Q11). AI проверяет synthesizing answer = numeric + text + photos через `handleCheckAnswer` pipeline. **SubmitSheet — единственный путь** triggering `handleCheckAnswer` на mobile. После CORRECT — primary CTA flip на «Следующая задача →».
+3. **Hybrid first-completed-wins (Q4):** если задача уже `task_state.status='completed'` (через legacy desktop `GuidedHomeworkWorkspace` answer-input, например), новый mobile UI это видит и блокирует повторное закрытие — primary CTA сразу «Следующая задача →», SubmitSheet не открывает submission flow.
+
+**Mobile auto-redirect (Q1):** `StudentHomeworkDetail` на mobile (`useIsMobile()` ≤768px) делает useEffect-redirect на `/student/homework/<hwId>/problem/<targetTaskId>` сразу после load с smart fallback chain: `thread.current_task_id` → first not-completed → `tasks[0].id`. Это revert от click-intercept TASK-8 (codex re-review #3) после preview QA выявившей UX gap.
+
+**Step navigation внутри HomeworkProblem (Q7):** клик по любой цифре в `StepIndicator` → `navigate('/student/homework/<hwId>/problem/<task[i].id>')`. URL = source of truth. Free order — все клики разрешены (mirror legacy «Свободный порядок задач» rule).
 
 Mobile-only Phase 1, **выкатывается сразу всем mobile-юзерам** (viewport ≤768px). Desktop/tablet продолжают использовать existing `GuidedHomeworkWorkspace` до Phase 3 (fallback по viewport-детекции, не по profile flag). Tablet/Desktop — отдельными спеками после feedback от mobile rollout.
 
@@ -121,17 +127,23 @@ Phase 1 = Mobile только. Tablet/Desktop fallback на старый `/homew
 
 **Out of scope (deferred):**
 
-- **Сократический chat composer (paperclip / mic / text input в нижнем ряду композера) → Phase 2.** Композер в Phase 1 показывает **только** primary CTA + completed-state CTA. Чат-row скрыт через `<ComposerMobile chatDisabled />`. Причина: wiring chat send требует `saveThreadMessage` + `/chat` SSE, которого нет в Phase 1; без него composer был silent-drop hazard (codex review #1 / re-review #1).
-- Voice recorder в SubmitSheet → Phase 2
-- Autosave (PATCH/GET draft-submission) → Phase 2
 - 4-step grading pipeline с Gemini OCR (no-work / step-error / unclear) → Phase 2 separate spec
 - Tablet (Layout 2) + Desktop (Layout 3) → Phase 3 (`student-homework-problem-screen-multi-device.md`)
 - Tutor UI — task_kind selector в TutorHomeworkCreate → Phase 2
 - Hint cap = 3 (per UX answer — keeping no cap)
 - Hint-ladder UI блок (только desktop, Phase 3)
 - Math-keyboard «Σ Формула» (только desktop, Phase 3)
+- Server-side autosave через PATCH endpoint → Phase 2 (Phase 1.x использует localStorage)
+- Voice as first-class audio attachment (`voice_ref` в `submission_payload`) → Phase 2 (Phase 1.x = speech-to-text shortcut в text-поле)
 - IndexedDB offline → P2 follow-up
 - A/B test new vs old guided chat → P2 (только после Phase 1 stable)
+
+**Reverted from Phase 1.0 deferral (now back in scope, 2026-05-10):**
+
+- Сократический chat composer (paperclip + mic + text input) — теперь функциональный через `/chat` endpoint streaming (codex review #1 originally flagged dead chat affordance; v0.2 wires it to real backend instead of removing it).
+- Voice recorder в SubmitSheet (Q11) — speech-to-text helper только.
+- Autosave (Q12) — localStorage-based.
+- Step indicator clicks (Q7) — внутри новой mobile screen.
 
 **Later (Phase 2/3):**
 
@@ -344,19 +356,31 @@ Behaviour:
 ### Acceptance Criteria (testable, all P0 unless marked)
 
 - **AC-1 (P0):** Миграции `20260509120000`, `20260509120100` применяются на staging без ошибок. После применения: 100% существующих `homework_tutor_tasks` имеют `task_kind` (через backfill `short_answer→numeric, detailed_solution→extended`).
-- **AC-2 (P0):** При viewport `<= 768px` И клике на задачу в `TaskStepper` (mounted внутри `GuidedHomeworkWorkspace` через `StudentHomeworkDetail`) → navigate на `/student/homework/:hwId/problem/:taskId` (для **всех** учеников без opt-in). При viewport > 768px → existing inline switch без изменений (regression test). Реализуется через `onTaskClickOverride` prop в `GuidedHomeworkWorkspace` — workspace мoнтируется на обоих viewport'ах, parent decides what happens on click. Resize listener активный (`useIsMobile` + `matchMedia('change')`) — поворот iPad mini в портрет на следующем клике задачи переводит на новый screen. *(Revision 2026-05-09: первоначальная реализация делала auto-redirect на `tasks[0].id` при mount; codex review #3 указал что это не позволяет ученику выбрать задачу. Перешли на task-click интерсепт.)*
+- **AC-2 (P0):** При viewport `<= 768px` `StudentHomeworkDetail` делает auto-redirect на `/student/homework/:hwId/problem/:targetTaskId` через `useEffect` после загрузки `useStudentAssignment + useStudentThread`. **Smart fallback chain (Q1):** `thread.current_task_id` → первая задача без `task_state.status='completed'` → `tasks[0].id`. При viewport > 768px → existing inline `GuidedHomeworkWorkspace` без изменений (regression test). Resize listener активный (`useIsMobile` + `matchMedia('change')`). *(Revision 2026-05-10: вернулись к auto-redirect после preview QA #1 — click-intercept (codex re-review #3) confused students who didn't realise they had to tap a circle to enter the new UI. Smart fallback на current task решает «всегда task #1» concern, который изначально мотивировал отказ от auto-redirect.)*
 - **AC-3 (P0):** Endpoint `GET /student/problem/:hwId/:taskId` возвращает 200 OK для assigned student с правильным shape (см. §5 API). Возвращает **404 `NOT_FOUND`** для не-assigned student — privacy invariant: не раскрываем существование чужих ДЗ через status-code differential (mirrors `handleGetStudentAssignment`, `handleGetStudentThreadByAssignment`, `mock-exam-public::loadTutorCard`). Возвращает **404 `TASK_NOT_FOUND`** если задача не принадлежит указанному ДЗ. Не leak'ает tutor-only поля (`solution_text`, `solution_image_urls`, `rubric_text`, `rubric_image_urls`, `ai_score_comment`) — проверяется на staging через response body grep. *(Revision 2026-05-09: status code corrected from 403 → 404 per established student-endpoint privacy invariant; original draft wording was inconsistent with sibling endpoints. Codex review finding #6.)*
 - **AC-4 (P0):** На route `/student/homework/:hwId/problem/:taskId`:
   - Route защищён auth gate (codex re-review #3 fix 2026-05-09): прямой URL без сессии редиректит на login, mobile full-bleed layout сохраняется (без global navigation chrome). Реализация — `<AuthGuard hideNavigation>` (или эквивалент) обёртывает route в `App.tsx`.
   - Topbar показывает «ЗАДАЧА N/M · {subject}» eyebrow + ДЗ title
   - ProblemContext по умолчанию **expanded** если thread пустой (`messages.length === 0`), **collapsed** если есть сообщения. Step-indicator корректен (done = task_states.status='completed' среди других задач, current = эта задача).
-  - ChatThread фильтрует messages по `task_id === task.id` (legacy fallback `task_order === task.order_num`). Рендерит AI bubbles (Сократ avatar + kicker «СОКРАТ») + user bubbles (справа, серым) для существующих сообщений. Задача с пустым current-task thread → system divider «Начни решать задачу» + sticky CTA в композере.
-  - ComposerMobile primary CTA «Сдать решение задачи» → открывает SubmitSheet. **Чат-row скрыт** в Phase 1 (`chatDisabled={true}`) — sub-row paperclip/mic/text-input/send появятся в Phase 2 одновременно с реальным wiring `saveThreadMessage` + `/chat` SSE.
+  - ChatThread фильтрует messages по `task_id === task.id` (legacy fallback `task_order === task.order_num`). Рендерит через **`GuidedChatMessage`** (Q13 reuse) с `perspective='student'` — brand Сократ identity (avatar + «СОКРАТ» kicker + muted-зелёный bubble), MathText, image attachments. Задача с пустым current-task thread → system divider «Начни решать задачу».
+  - **Functional chat composer (Phase 1.x, Q3+Q5+Q6):** primary CTA «Сдать решение задачи» (открывает SubmitSheet) + chat row paperclip/mic/text/send.
+    - **Chat send (Q3):** через `streamChat()` `/chat` endpoint streaming с `guidedHomeworkAssignmentId + guidedHomeworkTaskId`. User message persists через `saveThreadMessage(..., 'question', taskId)`. AI reply persists с `'ai_reply'`. **Discussion-only — не закрывает задачу.**
+    - **Voice (Q5):** mic кнопка → `useVoiceRecorder.startRecording()` → on stop → `transcribeThreadVoice(threadId, blob)` (Groq Whisper) → транскрипт *append'ится* к существующему input (preserves user-typed prefix). Editable перед отправкой.
+    - **Paperclip (Q6):** file input → `uploadStudentThreadImage` (homework-submissions bucket) → ref в local state, отправляется с user message.
+- **AC-4a (P0, new in v0.2):** Task images gallery в `ProblemContext` expanded view рендерит multi-photo (до 5) через batched signed-URL endpoint (`useStudentTaskImagesSignedUrls`). Click на thumbnail → fullscreen Dialog с keyboard arrow nav + counter. Если `task_image_url` null → секция не рендерится. Q9 + Q10 from preview QA #1.
+- **AC-4b (P0, new in v0.2):** Click на любую цифру в `StepIndicator` (внутри `HomeworkProblem`) → `navigate('/student/homework/<hwId>/problem/<task[i].id>')`. Free order — все задачи кликабельны (mirror legacy «Свободный порядок» rule). Click на текущую задачу — no-op. Q7 + Q8 from preview QA #1.
+- **AC-4c (P0, new in v0.2):** Top-bar back arrow → `navigate('/student/homework')` (список ДЗ ученика). Q2 from preview QA #1.
+- **AC-4d (P0, new in v0.2):** Functional chat composer:
+  - **Text send:** caret в input → type → Enter / send button → user bubble lands optimistic, persists через `saveThreadMessage('user', ..., 'question', taskId)`, затем `streamChat()` через `/chat` endpoint. AI reply streams inline (preview bubble), затем persists с `'ai_reply'`.
+  - **Voice (Q5):** mic кнопка toggle: idle → click → recording (red MicOff icon + duration counter в placeholder); recording → click stop → transcribe → транскрипт **appended** к существующему input.
+  - **Paperclip (Q6):** click → native file picker → upload → preview pill «Фото · ✕» над input. Send включает refs в `image_url`.
 - **AC-5 (P0):** SubmitSheet:
   - Numeric input принимает запятую и точку («1,4» и «1.4» — обе валидны), unit suffix из task data
   - PhotoStrip: 1 + N тайлов 96×124 px, click → native `<input type="file" accept="image/*" capture="environment" multiple>`. После выбора → upload через existing `uploadStudentThreadImage` → ref в `photos[]`. Удаление через ✕ кнопку
   - Submit button **disabled** пока не выполнены `task_kind`-specific требования (see §5 POST submission)
   - При submit → POST с `{numeric, photos, text}` → backend grading → response → VerdictOverlay
+  - **Section 4 — Voice (Q11, new in v0.2):** mic кнопка → `useVoiceRecorder.startRecording()` → recording state визуально (red MicOff + counter «Xc») → click stop → `transcribeThreadVoice(taskId, blob)` (Groq Whisper) → транскрипт **appended** к section-3 textarea с `\n` separator (preserves user-typed prefix). Phase 1.x stores no audio blob; voice = pure speech-to-text. `voice_ref` в `submission_payload` всегда `null`.
+  - **Autosave (Q12, new in v0.2):** при изменении `numeric/photos/text` каждые 5s → `localStorage.setItem('submitsheet-draft-<taskId>', JSON.stringify(draft))`. Footer caption «Черновик сохранён · X сек назад» обновляется live (recompute every 10s). On open — restore from localStorage if exists. On CORRECT verdict — `localStorage.removeItem(draftKey)` clears draft. На partial / error verdicts — draft preserved для retry.
 - **AC-6 (P0):** VerdictOverlay реагирует на 3 состояния:
   - `correct` (verdict==CORRECT): зелёная карточка «Правильно! N/M баллов», CTA «Следующая задача →» (или «Назад к ДЗ» если это последняя). При тапе CTA — navigate
   - `partial`/`incorrect` (verdict==ON_TRACK или INCORRECT): жёлтая/красная карточка с feedback от AI, CTA «Продолжить решать» (закрывает overlay, возвращает в чат с новым AI message)

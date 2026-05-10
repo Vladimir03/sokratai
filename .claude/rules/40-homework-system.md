@@ -1152,18 +1152,16 @@ Phase 1 пивотится из homework-embedded preview в standalone public t
 
 Phase 1 rollout-summary section. **Endpoint / migration / handler / shared-helper / anti-leak детали** — не дублируем здесь, см. секцию выше «Student Homework Problem Screen — single-task surface + submission contract (Phase 1, 2026-05-09)» (≈line 110). Эта секция покрывает только rollout invariants, которые не вписывались в endpoint-spec и нужны при будущих изменениях flow'а.
 
-**Routing invariants (mobile ≤768px, без feature flag, revised 2026-05-09 post codex review #3):**
+**Routing invariants (mobile ≤768px, без feature flag, revised 2026-05-10 после preview QA #1):**
 
-- Новый screen на route `/student/homework/:hwId/problem/:taskId` (зарегистрирован в `App.tsx` через TASK-7).
+- Новый screen на route `/student/homework/:hwId/problem/:taskId` (зарегистрирован в `App.tsx`, обёрнут в `<AuthGuard fullBleed>`).
 - Старая `/homework/:id` поверхность (`GuidedHomeworkWorkspace`) остаётся для desktop / tablet (>768px) до Phase 4 cutover.
-- `StudentHomeworkDetail` использует **новый** hook `@/hooks/useIsMobile.ts` (НЕ legacy `@/hooks/use-mobile.tsx`):
-  - Inclusive `(max-width: 768px)` (matches AC-2; legacy `<768` exclusive — не подходит).
-  - SSR-safe initial state через lazy `useState` initializer + `typeof window !== 'undefined'` guard — первый paint никогда не показывает desktop layout mobile-юзеру.
-  - `matchMedia('change')` listener реактивен на iPad rotation landscape→portrait — следующий клик задачи в степпере уходит уже в новый routing branch.
-- **Routing implementation = `onTaskClickOverride` prop, НЕ auto-redirect**: `StudentHomeworkDetail` монтирует `GuidedHomeworkWorkspace` на обоих viewport'ах и передаёт callback `(orderNum, taskId) => boolean`. Workspace внутри своего `handleTaskClick` сначала вызывает override — если возвращает `true`, workspace **пропускает** свой `switchToTask`. На mobile override делает `navigate('/student/homework/${hwId}/problem/${taskId}')` и возвращает `true`; на desktop — возвращает `false` и legacy in-place switch работает как раньше.
-- **Почему НЕ auto-redirect на `tasks[0].id`** (первоначальная TASK-8 реализация, отозвана 2026-05-09): forced ученика всегда в задачу #1 при заходе на `/homework/:id` на mobile, не давая выбрать конкретную задачу. AC-2 wording — «при клике на задачу» — означает явный per-task pick через степпер.
-- **Без feature flag.** Раскатка сразу всем mobile-юзерам. Rollback при критическом баге = `git revert <hash> && deploy-sokratai` (~3 мин per `.claude/rules/95-production-deploy.md`). Старый workspace остаётся в коде до Phase 4 — desktop fallback автоматический через override returning `false`.
-- **При расширении routing**: новые student-side surfaces, которые хотят intercept'ить task picks, должны принимать тот же `onTaskClickOverride` prop сигнатуру (consistent across the codebase) — не дублировать через локальный listener в каждом компоненте.
+- `StudentHomeworkDetail` использует hook `@/hooks/useIsMobile.ts` (inclusive `(max-width: 768px)`, SSR-safe, `matchMedia('change')` reactive — НЕ legacy `@/hooks/use-mobile.tsx`).
+- **Routing implementation = `useEffect` auto-redirect on mobile, smart fallback chain:** `thread.current_task_id` → first task without `task_state.status='completed'` → `tasks[0].id`. На mobile `StudentHomeworkDetail` НЕ монтирует `GuidedHomeworkWorkspace` — useEffect редиректит на per-task screen после resolve `useStudentAssignment` + `useStudentThread`.
+- **History note (2026-05-09 → 2026-05-10):** TASK-8 первоначально делал auto-redirect на `tasks[0].id`. Codex re-review #3 указал что это не давало выбрать конкретную задачу — switched to click-intercept через `onTaskClickOverride`. Preview QA #1 (2026-05-10) показал что click-intercept confused students who didn't realise they had to tap a circle to enter the new UI — вернулись к auto-redirect, но с **smart fallback на `current_task_id`** (решает «всегда task #1» concern). `onTaskClickOverride` prop в `GuidedHomeworkWorkspace` оставлен для будущих consumers, на mobile не используется.
+- **Step navigation внутри HomeworkProblem (Q7):** клик по любой цифре в `StepIndicator` → `navigate('/student/homework/<hwId>/problem/<task[i].id>')`. URL = source of truth. Free order разрешён (все клики кликабельны, mirror legacy «Свободный порядок задач»).
+- **Без feature flag.** Раскатка сразу всем mobile-юзерам. Rollback = `git revert <hash> && deploy-sokratai` (~3 мин).
+- **При расширении routing**: новые student-side surfaces, mobile auto-redirect — стандарт. `useStudentThread` обязателен для resolve `current_task_id` до redirect (иначе ученик отправляется в `tasks[0]` всегда, что мы только что починили).
 
 **Submission storage invariants (rollout-level summary):**
 
