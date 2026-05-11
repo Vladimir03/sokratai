@@ -956,7 +956,7 @@ export default function HomeworkProblem() {
 
   return (
     <div
-      className="flex w-full flex-col bg-socrat-surface"
+      className="flex w-full flex-col bg-socrat-surface overflow-hidden"
       style={{ height: vvHeight }}
     >
       {/* Topbar — back → /homework (Q2; preview-QA #3 fix 2026-05-10:
@@ -998,7 +998,7 @@ export default function HomeworkProblem() {
       {/* Chat thread — flex-1 with scroll */}
       <div
         ref={chatScrollRef}
-        className="flex-1 min-h-0 overflow-y-auto flex flex-col gap-3 px-3.5 pt-2 pb-3.5 [-webkit-overflow-scrolling:touch] [&::-webkit-scrollbar]:hidden"
+        className="flex-1 min-h-0 overflow-y-auto flex flex-col gap-3 px-3.5 pt-2 pb-3.5 [-webkit-overflow-scrolling:touch] [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden"
       >
         {messages.length === 0 && !streamingText ? (
           <div
