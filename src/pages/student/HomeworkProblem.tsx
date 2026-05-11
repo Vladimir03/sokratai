@@ -118,6 +118,24 @@ export default function HomeworkProblem() {
 
   const threadId = data?.thread?.id ?? null;
 
+  // Lock html/body overflow while the problem screen is mounted —
+  // prevents an outer page-level scrollbar on mobile when
+  // visualViewport briefly reports a height larger than the actual
+  // window (preview iframe / address-bar transitions). Restored on
+  // unmount so other routes (e.g. /homework list) keep scrolling.
+  useEffect(() => {
+    const html = document.documentElement;
+    const body = document.body;
+    const prevHtml = html.style.overflow;
+    const prevBody = body.style.overflow;
+    html.style.overflow = 'hidden';
+    body.style.overflow = 'hidden';
+    return () => {
+      html.style.overflow = prevHtml;
+      body.style.overflow = prevBody;
+    };
+  }, []);
+
   // ─── Map raw thread messages → GuidedMessageData[] ────────────────────────
   const persistedMessages = useMemo<HomeworkThreadMessage[]>(() => {
     const raw = data?.thread?.homework_tutor_thread_messages ?? [];
