@@ -19,12 +19,14 @@ import {
   type SubmitSheetSubmissionPayload,
 } from '@/components/student/homework-problem/SubmitSheet';
 import { clearSubmitSheetDraft } from '@/components/student/homework-problem/submitSheetInternal';
+import { NumericAnswerComposer } from '@/components/student/homework-problem/NumericAnswerComposer';
 import GuidedChatMessage, { type GuidedMessageData } from '@/components/homework/GuidedChatMessage';
 import { TypingDots } from '@/components/student/homework-problem/TypingDots';
 import sokratChatIcon from '@/assets/sokrat-chat-icon.png';
 import { useStudentProblemTask } from '@/hooks/useStudentProblemTask';
 import { useStudentAssignment } from '@/hooks/useStudentHomework';
 import { useSubmitSolution } from '@/hooks/useSubmitSolution';
+import { useVisualViewportHeight } from '@/hooks/useVisualViewportHeight';
 import { useVoiceRecorder } from '@/hooks/useVoiceRecorder';
 import { trackGuidedHomeworkEvent } from '@/lib/homeworkTelemetry';
 import { getSubjectLabel } from '@/types/homework';
@@ -38,6 +40,7 @@ import {
   uploadStudentThreadImage,
   transcribeThreadVoice,
   requestHint as requestHintApi,
+  checkAnswer as checkAnswerApi,
   getStudentTaskImageSignedUrl,
 } from '@/lib/studentHomeworkApi';
 import {
@@ -104,6 +107,14 @@ export default function HomeworkProblem() {
   // resolution. `useStudentAssignment` is already cached if user came
   // from /homework/<id>; otherwise one extra round trip — acceptable.
   const { data: assignmentDetails } = useStudentAssignment(hwId ?? '');
+
+  // Preview-QA #8 (2026-05-11) fix: mobile Chrome `100dvh` doesn't
+  // recompute reliably after virtual keyboard hide → third-of-screen
+  // white strip below the composer. visualViewport-driven inline height
+  // keeps the root container exactly equal to the visible viewport
+  // (and adjusts on keyboard open/close + orientation + address-bar
+  // toggle). Fallback `'100dvh'` for SSR / non-supporting browsers.
+  const vvHeight = useVisualViewportHeight();
 
   const threadId = data?.thread?.id ?? null;
 
@@ -732,6 +743,98 @@ export default function HomeworkProblem() {
     [data, submitMutation, taskId],
   );
 
+  // ─── Inline numeric answer flow (Phase 1.3, preview-QA #8 2026-05-11) ────
+  // Для `task_kind='numeric'` ученик пишет ответ в small inline green field
+  // (см. `NumericAnswerComposer`). Submit триггерит `checkAnswer` API (тот
+  // же legacy desktop flow → handleCheckAnswer → AI verdict → может close
+  // task на CORRECT). Pattern mirror'ит handleSubmissionSubmit но через
+  // другой API — `checkAnswer` вместо `submitSolution`.
+  const [answerDraft, setAnswerDraft] = useState('');
+  const [isInlineAnswerSubmitting, setIsInlineAnswerSubmitting] = useState(false);
+
+  const handleInlineAnswerSubmit = useCallback(async () => {
+    if (!data || !threadId) return;
+    const trimmed = answerDraft.trim();
+    if (!trimmed || isInlineAnswerSubmitting || isStreaming) return;
+
+    const taskOrder = data.task.order_num;
+    const targetTaskId = data.task.id;
+    const userTempId = `temp-answer-user-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+    const typingTempId = `temp-answer-typing-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+
+    setOptimisticMessages((prev) => [
+      ...prev,
+      {
+        id: userTempId,
+        role: 'user',
+        content: trimmed,
+        image_url: null,
+        created_at: new Date().toISOString(),
+        message_kind: 'answer',
+        message_delivery_status: 'sending',
+      },
+      {
+        id: typingTempId,
+        role: 'assistant',
+        content: '__typing__',
+        image_url: null,
+        created_at: new Date().toISOString(),
+        message_kind: 'check_result',
+        message_delivery_status: 'sending',
+      },
+    ]);
+    setAnswerDraft('');
+    setIsInlineAnswerSubmitting(true);
+
+    trackGuidedHomeworkEvent('student_submission_sent', {
+      assignmentId: data.assignment.id,
+      taskId: data.task.id,
+      hasPhotos: false,
+      photoCount: 0,
+      hasText: false,
+      numericLength: trimmed.length,
+    });
+
+    try {
+      const response = await checkAnswerApi(threadId, trimmed, taskOrder, targetTaskId);
+      trackGuidedHomeworkEvent('student_submission_verdict', {
+        assignmentId: data.assignment.id,
+        taskId: data.task.id,
+        verdict: response.verdict,
+        aiScore: response.earned_score ?? 0,
+        maxScore: response.max_score,
+      });
+      // Refetch invalidate → persisted answer + check_result bubbles
+      // land. Optimistic cleanup explicit (temp ids never match
+      // persisted ids).
+      await queryClient.invalidateQueries({
+        queryKey: ['student', 'problem', hwId, taskId],
+      });
+      setOptimisticMessages((prev) =>
+        prev.filter((m) => m.id !== userTempId && m.id !== typingTempId),
+      );
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Не удалось проверить ответ';
+      toast.error(msg);
+      // Restore the draft so student doesn't lose input on retry.
+      setAnswerDraft(trimmed);
+      setOptimisticMessages((prev) =>
+        prev.filter((m) => m.id !== userTempId && m.id !== typingTempId),
+      );
+    } finally {
+      setIsInlineAnswerSubmitting(false);
+    }
+  }, [
+    data,
+    threadId,
+    answerDraft,
+    isInlineAnswerSubmitting,
+    isStreaming,
+    queryClient,
+    hwId,
+    taskId,
+  ]);
+
   const navigateAfterCorrect = useCallback(
     (override?: { nextTaskId?: string | null }) => {
       const target = override?.nextTaskId ?? nextTaskId;
@@ -785,7 +888,8 @@ export default function HomeworkProblem() {
   if (isPending || (!data && isFetching)) {
     return (
       <div
-        className="flex h-[100dvh] w-full items-center justify-center bg-socrat-surface"
+        className="flex w-full items-center justify-center bg-socrat-surface"
+        style={{ height: vvHeight }}
         role="status"
         aria-live="polite"
         aria-label="Загружаем задачу"
@@ -804,7 +908,10 @@ export default function HomeworkProblem() {
         ? error.message
         : 'Проверь интернет-соединение и попробуй ещё раз.';
     return (
-      <div className="flex h-[100dvh] w-full items-center justify-center bg-socrat-surface px-4">
+      <div
+        className="flex w-full items-center justify-center bg-socrat-surface px-4"
+        style={{ height: vvHeight }}
+      >
         <div className="w-full max-w-sm bg-white border border-socrat-border-light rounded-2xl p-6 flex flex-col items-center gap-3 shadow-sm">
           <h2 className="text-base font-bold text-slate-900 m-0">
             Не удалось загрузить задачу
@@ -830,7 +937,10 @@ export default function HomeworkProblem() {
     (chatDraft.trim().length > 0 || attachmentRefs.length > 0);
 
   return (
-    <div className="flex h-[100dvh] w-full flex-col bg-socrat-surface">
+    <div
+      className="flex w-full flex-col bg-socrat-surface"
+      style={{ height: vvHeight }}
+    >
       {/* Topbar — back → /homework (Q2; preview-QA #3 fix 2026-05-10:
           было `/student/homework` → 404, потому что список ДЗ ученика
           живёт на route `/homework` через StudentHomework.tsx). */}
@@ -963,9 +1073,45 @@ export default function HomeworkProblem() {
         )}
       </div>
 
-      {/* Composer */}
+      {/* Composer — branches by task_kind (Phase 1.3, preview-QA #8
+          2026-05-11):
+            - 'numeric' → inline NumericAnswerComposer (green answer
+              field + collapsible discussion). Большая «Сдать решение
+              задачи» CTA удалена для numeric — inline answer = formal
+              submission через checkAnswer API.
+            - 'extended' / 'proof' → existing big-CTA composer (открывает
+              SubmitSheet для photo + numeric + text + voice).
+       */}
+      {data.task.task_kind === 'numeric' ? (
+        <NumericAnswerComposer
+          answerDraft={answerDraft}
+          onAnswerDraftChange={setAnswerDraft}
+          onSendAnswer={handleInlineAnswerSubmit}
+          discussionDraft={chatDraft}
+          onDiscussionDraftChange={setChatDraft}
+          onSendDiscussion={handleChatSend}
+          onHintClick={handleHintClick}
+          isRequestingHint={isRequestingHint}
+          onMicClick={handleMicClick}
+          micRecording={recorder.isRecording}
+          micDurationSec={recorder.recordingDurationSeconds}
+          micSupported={recorder.isSupported}
+          isTranscribing={isTranscribing}
+          onPaperclipClick={() => fileInputRef.current?.click()}
+          attachmentRefs={attachmentRefs}
+          onRemoveAttachment={(ref) =>
+            setAttachmentRefs((prev) => prev.filter((r) => r !== ref))
+          }
+          isUploadingAttachment={isUploadingAttachment}
+          isStreaming={isStreaming}
+          isAnswerSubmitting={isInlineAnswerSubmitting}
+          isCurrentCompleted={isCurrentCompleted}
+          hasNextTask={Boolean(nextTaskId)}
+          onNavigateNext={() => navigateAfterCorrect()}
+        />
+      ) : (
       <div className="flex flex-col gap-2 bg-white border-t border-socrat-border-light px-2.5 pt-2 pb-2.5 shrink-0">
-        {/* Primary CTA */}
+        {/* Primary CTA — extended / proof: открывает SubmitSheet */}
         <button
           type="button"
           onClick={() => {
@@ -1143,6 +1289,7 @@ export default function HomeworkProblem() {
           </button>
         </div>
       </div>
+      )}
 
       <SubmitSheet
         open={submitOpen}

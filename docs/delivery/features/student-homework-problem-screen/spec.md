@@ -376,11 +376,19 @@ Behaviour:
   - **Text send:** caret в input → type → Enter / send button → user bubble lands optimistic, persists через `saveThreadMessage('user', ..., 'question', taskId)`, затем `streamChat()` через `/chat` endpoint. AI reply streams inline (preview bubble), затем persists с `'ai_reply'`.
   - **Voice (Q5):** mic кнопка toggle: idle → click → recording (red MicOff icon + duration counter в placeholder); recording → click stop → transcribe → транскрипт **appended** к существующему input.
   - **Paperclip (Q6):** click → native file picker → upload → preview pill «Фото · ✕» над input. Send включает refs в `image_url`.
-- **AC-5 (P0):** SubmitSheet:
-  - Numeric input принимает запятую и точку («1,4» и «1.4» — обе валидны), unit suffix из task data
-  - PhotoStrip: 1 + N тайлов 96×124 px, click → native `<input type="file" accept="image/*" capture="environment" multiple>`. После выбора → upload через existing `uploadStudentThreadImage` → ref в `photos[]`. Удаление через ✕ кнопку
-  - Submit button **disabled** пока не выполнены `task_kind`-specific требования (see §5 POST submission)
-  - При submit → POST с `{numeric, photos, text}` → backend grading → response → VerdictOverlay
+- **AC-5 (P0):** SubmitSheet (Phase 1.3 revision 2026-05-11 — preview-QA #8 reorder + relax):
+  - Section order для `extended` / `proof`: **Photos первой** (Section 1), **Numeric второй** (Section 2 — только для extended/numeric, скрыт для proof). Labels: «Решение фото или скриншот» (photos), «Ответ» (numeric). Для `numeric` task_kind SubmitSheet не открывается — inline composer вместо него (см. AC-12).
+  - Numeric badge dynamic: `extended` + `photos.length === 0` → «обязательно» (rose); `extended` + `photos.length ≥ 1` → «по желанию» (slate); `numeric` task_kind (если sheet когда-нибудь откроется) → «обязательно».
+  - Numeric input принимает запятую и точку («1,4» и «1.4» — обе валидны), unit suffix из task data.
+  - PhotoStrip: 1 + N тайлов 96×124 px, click → native `<input type="file" accept="image/*" capture="environment" multiple>`. После выбора → upload через existing `uploadStudentThreadImage` → ref в `photos[]`. Удаление через ✕ кнопку.
+  - Submit button **disabled** пока не выполнены `task_kind`-specific требования: `extended` теперь требует **только photos≥1** (numeric optional, preview-QA #8 relax — backend `handleStudentSubmission` соответствует). `proof` требует photos≥1. `numeric` требует numeric trim'нутый (но открывать sheet для numeric task_kind не нужно).
+  - При submit → POST `/student/problem/.../submission` с `{numeric, photos, text}` → SubmitSheet **закрывается мгновенно**; submission landing в чате как `message_kind='submission'` bubble + AI verdict как `'check_result'` bubble (Phase 1.2 contract).
+- **AC-12 (P0, new in v0.3 preview-QA #8 2026-05-11):** Для `task_kind='numeric'` SubmitSheet **не используется**. Composer показывает inline `NumericAnswerComposer`:
+  - Row 1: 💡 hint + green-bordered input «Ответ...» + send (primary green). Tap send → `checkAnswer` API (legacy `handleCheckAnswer` flow) → optimistic user bubble (`message_kind='answer'`) + typing dots → AI verdict в чате с `'check_result'` / `'ai_reply'` kind. На CORRECT → primary CTA flip на «Следующая задача» (через `isCurrentCompleted` derive).
+  - Row 2: «Обсудить шаг с AI ▼» toggle (collapsed by default).
+  - Row 3 (collapsible): 📎 + input «Спроси Сократа...» + 🎤 mic + send (slate). Discussion = `/chat` discussion (не закрывает задачу — Phase 1.2 contract).
+  - Большая «Сдать решение задачи» CTA **удалена** для `numeric` — 1 клик = ответ = formal submission. Это самое популярное действие на numeric задачах.
+- **AC-13 (P0, new in v0.3 preview-QA #8 2026-05-11):** Mobile viewport white-strip bug fix. Root container HomeworkProblem использует `style={{ height: useVisualViewportHeight() }}` вместо `h-[100dvh]` Tailwind class. Hook слушает `visualViewport.resize/scroll` events чтобы корректно отрабатывать virtual keyboard open/close и mobile address-bar toggle. Fallback `'100dvh'` для SSR / non-supporting browsers.
   - **Section 4 — Voice (Q11, new in v0.2):** mic кнопка → `useVoiceRecorder.startRecording()` → recording state визуально (red MicOff + counter «Xc») → click stop → `transcribeThreadVoice(taskId, blob)` (Groq Whisper) → транскрипт **appended** к section-3 textarea с `\n` separator (preserves user-typed prefix). Phase 1.x stores no audio blob; voice = pure speech-to-text. `voice_ref` в `submission_payload` всегда `null`.
   - **Autosave (Q12, new in v0.2):** при изменении `numeric/photos/text` каждые 5s → `localStorage.setItem('submitsheet-draft-<taskId>', JSON.stringify(draft))`. Footer caption «Черновик сохранён · X сек назад» обновляется live (recompute every 10s). On open — restore from localStorage if exists. On CORRECT verdict — `localStorage.removeItem(draftKey)` clears draft. На partial / error verdicts — draft preserved для retry.
 - **AC-6 (P0):** VerdictOverlay реагирует на 3 состояния:

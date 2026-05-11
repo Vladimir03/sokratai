@@ -271,6 +271,12 @@ export function SubmitSheet({
   const showNumeric = task.task_kind !== 'proof';
   const showPhotos = task.task_kind === 'extended' || task.task_kind === 'proof';
 
+  // Preview-QA #8 (2026-05-11) relax: для extended ученик может submit
+  // ТОЛЬКО с фото (numeric становится «по желанию» когда photos.length>=1).
+  // Backend `handleStudentSubmission` extended-branch тоже relax'нут.
+  const numericRequired =
+    task.task_kind === 'extended' ? photos.length === 0 : task.task_kind === 'numeric';
+
   const kindReady = useMemo(() => {
     const numericOk = numeric.trim().length > 0;
     const photoOk = photos.length >= 1;
@@ -281,7 +287,8 @@ export function SubmitSheet({
         return photoOk;
       case 'extended':
       default:
-        return numericOk && photoOk;
+        // Preview-QA #8: photo enough — numeric optional with photo
+        return photoOk;
     }
   }, [numeric, photos.length, task.task_kind]);
 
@@ -389,51 +396,20 @@ export function SubmitSheet({
                 <span>{hint}</span>
               </div>
 
-              {/* Section 1 — Numeric */}
-              {showNumeric && (
+              {/* Preview-QA #8 (2026-05-11) reorder: Photos first (section
+                  1) → Numeric second (section 2). Relabel + dynamic
+                  «обязательно/по желанию» badge для numeric в extended
+                  ветке. */}
+
+              {/* Section 1 — Photos (extended + proof) */}
+              {showPhotos && (
                 <section className="flex flex-col gap-2">
                   <div className="flex items-center gap-2">
                     <span className="grid place-items-center w-[22px] h-[22px] rounded-full bg-socrat-primary-light text-socrat-primary text-xs font-bold">
                       1
                     </span>
                     <h4 className="text-[13px] font-bold text-slate-900 m-0">
-                      Числовой ответ
-                    </h4>
-                    <span className="ml-auto text-[10px] font-bold uppercase tracking-wider text-rose-700 bg-rose-50 px-1.5 py-0.5 rounded-full">
-                      обязательно
-                    </span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <input
-                      type="text"
-                      inputMode="decimal"
-                      pattern="^-?\\d*[.,]?\\d*$"
-                      autoComplete="off"
-                      value={numeric}
-                      onChange={(e) => setNumeric(e.target.value)}
-                      placeholder="например, 1,4"
-                      style={{ fontSize: '16px' }}
-                      className="flex-1 h-11 min-w-0 px-3 bg-white border-[1.5px] border-socrat-border rounded-[10px] font-semibold text-slate-900 outline-none focus-visible:border-socrat-primary focus-visible:ring-2 focus-visible:ring-socrat-primary/20 touch-manipulation"
-                      aria-label="Числовой ответ"
-                    />
-                    {task.answer_unit ? (
-                      <span className="text-sm font-semibold text-slate-600 px-1 shrink-0">
-                        {task.answer_unit}
-                      </span>
-                    ) : null}
-                  </div>
-                </section>
-              )}
-
-              {/* Section 2 — Photos */}
-              {showPhotos && (
-                <section className="flex flex-col gap-2">
-                  <div className="flex items-center gap-2">
-                    <span className="grid place-items-center w-[22px] h-[22px] rounded-full bg-socrat-primary-light text-socrat-primary text-xs font-bold">
-                      {showNumeric ? 2 : 1}
-                    </span>
-                    <h4 className="text-[13px] font-bold text-slate-900 m-0">
-                      Фото решения от руки
+                      Решение фото или скриншот
                     </h4>
                     <span className="ml-auto text-[10px] font-bold uppercase tracking-wider text-rose-700 bg-rose-50 px-1.5 py-0.5 rounded-full">
                       обязательно
@@ -449,6 +425,49 @@ export function SubmitSheet({
                   <p className="text-[11px] text-socrat-muted leading-relaxed">
                     Можно несколько страниц — добавляй по одной. ИИ распознаёт формулы и проверит ход решения.
                   </p>
+                </section>
+              )}
+
+              {/* Section 2 — Numeric (extended after photos; numeric-only
+                  case still renders here as 1, no photos shown). */}
+              {showNumeric && (
+                <section className="flex flex-col gap-2">
+                  <div className="flex items-center gap-2">
+                    <span className="grid place-items-center w-[22px] h-[22px] rounded-full bg-socrat-primary-light text-socrat-primary text-xs font-bold">
+                      {showPhotos ? 2 : 1}
+                    </span>
+                    <h4 className="text-[13px] font-bold text-slate-900 m-0">
+                      Ответ
+                    </h4>
+                    {numericRequired ? (
+                      <span className="ml-auto text-[10px] font-bold uppercase tracking-wider text-rose-700 bg-rose-50 px-1.5 py-0.5 rounded-full">
+                        обязательно
+                      </span>
+                    ) : (
+                      <span className="ml-auto text-[10px] font-semibold uppercase tracking-wider text-socrat-muted bg-socrat-border-light px-1.5 py-0.5 rounded-full">
+                        по желанию
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="text"
+                      inputMode="decimal"
+                      pattern="^-?\\d*[.,]?\\d*$"
+                      autoComplete="off"
+                      value={numeric}
+                      onChange={(e) => setNumeric(e.target.value)}
+                      placeholder="например, 1,4"
+                      style={{ fontSize: '16px' }}
+                      className="flex-1 h-11 min-w-0 px-3 bg-white border-[1.5px] border-socrat-border rounded-[10px] font-semibold text-slate-900 outline-none focus-visible:border-socrat-primary focus-visible:ring-2 focus-visible:ring-socrat-primary/20 touch-manipulation"
+                      aria-label="Ответ"
+                    />
+                    {task.answer_unit ? (
+                      <span className="text-sm font-semibold text-slate-600 px-1 shrink-0">
+                        {task.answer_unit}
+                      </span>
+                    ) : null}
+                  </div>
                 </section>
               )}
 
