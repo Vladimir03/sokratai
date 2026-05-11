@@ -6819,28 +6819,33 @@ async function handleStudentSubmission(
 
   // 6. task_kind requirements.
   //    - 'numeric'  → numeric required, photos optional, text optional
-  //    - 'extended' → at least one photo required; numeric OPTIONAL
-  //                   (preview-QA #8 relax 2026-05-11: backend matches
-  //                    frontend «по желанию» badge when photos≥1)
+  //    - 'extended' → at least one photo OR text required; numeric optional
+  //                   (preview-QA #9 relax 2026-05-11: photo OR text — iPad
+  //                    ученики пишут решение в редакторе без фото; numeric
+  //                    остаётся «по желанию»)
   //    - 'proof'    → at least one photo required, numeric ignored
   if (taskKind === "numeric") {
     if (!numericTrim) {
       return jsonError(cors, 400, "VALIDATION", "numeric is required for numeric task");
     }
   } else if (taskKind === "extended") {
-    if (photoRefs.length < 1) {
-      return jsonError(cors, 400, "VALIDATION", "At least one photo is required for extended task");
+    if (photoRefs.length < 1 && !textTrim) {
+      return jsonError(
+        cors,
+        400,
+        "VALIDATION",
+        "At least one photo OR text is required for extended task",
+      );
     }
-    // numeric теперь optional: студент может submit photo-only.
   } else if (taskKind === "proof") {
     if (photoRefs.length < 1) {
       return jsonError(cors, 400, "VALIDATION", "At least one photo is required for proof task");
     }
   } else {
-    // Defensive: unknown task_kind — treat like 'extended' (photos
-    // required, numeric optional). Same relax as the named branch.
-    if (photoRefs.length < 1) {
-      return jsonError(cors, 400, "VALIDATION", "At least one photo is required");
+    // Defensive: unknown task_kind — treat like 'extended' (photo OR text
+    // required). Same relax as the named branch.
+    if (photoRefs.length < 1 && !textTrim) {
+      return jsonError(cors, 400, "VALIDATION", "At least one photo or text is required");
     }
   }
 

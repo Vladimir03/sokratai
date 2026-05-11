@@ -151,11 +151,16 @@ export function PhotoStrip({
 
   return (
     <div className="flex flex-col gap-2">
+      {/* Preview-QA #9 (2026-05-11): `capture="environment"` убрано —
+          форсит mobile camera и не работает для iPad-учеников, у которых
+          решение уже в галерее (скриншоты, фото с другого устройства).
+          Без capture → iOS Safari показывает native sheet
+          «Сфотографировать / Выбрать из галереи / Выбрать файл», Android
+          даёт похожий picker. Native OS UX, 0 доп кода. */}
       <input
         ref={fileInputRef}
         type="file"
         accept="image/*"
-        capture="environment"
         multiple
         className="hidden"
         onChange={onChange}

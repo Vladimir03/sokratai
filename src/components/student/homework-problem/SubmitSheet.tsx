@@ -83,8 +83,11 @@ interface SubmitSheetProps {
 
 const HINT_BY_KIND: Record<SubmitSheetTaskKind, string> = {
   numeric: 'Достаточно числового ответа.',
+  // Preview-QA #9 (2026-05-11): photo OR text — student можно writev решение
+  // текстом (e.g. iPad ученик) или прикрепить фото / скриншот. Ответ —
+  // optional. Без хода = 0 баллов.
   extended:
-    'Развёрнутое решение: нужны и ответ, и фото с ходом решения. Без хода — 0 баллов.',
+    'Покажи ход решения — фото или текст. Ответ по желанию.',
   proof: 'Доказательство — нужны фото с подробным выводом.',
 };
 
@@ -271,15 +274,16 @@ export function SubmitSheet({
   const showNumeric = task.task_kind !== 'proof';
   const showPhotos = task.task_kind === 'extended' || task.task_kind === 'proof';
 
-  // Preview-QA #8 (2026-05-11) relax: для extended ученик может submit
-  // ТОЛЬКО с фото (numeric становится «по желанию» когда photos.length>=1).
-  // Backend `handleStudentSubmission` extended-branch тоже relax'нут.
+  // Preview-QA #9 (2026-05-11): для extended numeric «по желанию»
+  // ВСЕГДА (не только при photos≥1). Учеников не должно блокировать
+  // отсутствие numeric — фото с ходом решения достаточно.
   const numericRequired =
-    task.task_kind === 'extended' ? photos.length === 0 : task.task_kind === 'numeric';
+    task.task_kind === 'numeric';
 
   const kindReady = useMemo(() => {
-    const numericOk = numeric.trim().length > 0;
     const photoOk = photos.length >= 1;
+    const textOk = text.trim().length > 0;
+    const numericOk = numeric.trim().length > 0;
     switch (task.task_kind) {
       case 'numeric':
         return numericOk;
@@ -287,10 +291,11 @@ export function SubmitSheet({
         return photoOk;
       case 'extended':
       default:
-        // Preview-QA #8: photo enough — numeric optional with photo
-        return photoOk;
+        // Preview-QA #9 (2026-05-11): photo OR text — допускаем
+        // text-only решение (iPad ученики пишут в редакторе).
+        return photoOk || textOk;
     }
-  }, [numeric, photos.length, task.task_kind]);
+  }, [numeric, photos.length, task.task_kind, text]);
 
   const submitDisabled = !kindReady;
 
@@ -396,12 +401,12 @@ export function SubmitSheet({
                 <span>{hint}</span>
               </div>
 
-              {/* Preview-QA #8 (2026-05-11) reorder: Photos first (section
-                  1) → Numeric second (section 2). Relabel + dynamic
-                  «обязательно/по желанию» badge для numeric в extended
-                  ветке. */}
-
-              {/* Section 1 — Photos (extended + proof) */}
+              {/* Preview-QA #9 (2026-05-11): объединили photos + text
+                  в одну Section 1 «Решение». Учеников не должно блокировать
+                  принуждение к фото (iPad-ученики пишут текстом). Voice
+                  Section 3 транскрибирует в эту же textarea — text/photo
+                  альтернативны, можно one или other (или both).
+                  Section 1 — Решение (photo + textarea combined) */}
               {showPhotos && (
                 <section className="flex flex-col gap-2">
                   <div className="flex items-center gap-2">
@@ -409,7 +414,7 @@ export function SubmitSheet({
                       1
                     </span>
                     <h4 className="text-[13px] font-bold text-slate-900 m-0">
-                      Решение фото или скриншот
+                      Решение (фото или текст)
                     </h4>
                     <span className="ml-auto text-[10px] font-bold uppercase tracking-wider text-rose-700 bg-rose-50 px-1.5 py-0.5 rounded-full">
                       обязательно
@@ -423,13 +428,26 @@ export function SubmitSheet({
                     taskOrder={task.order_num}
                   />
                   <p className="text-[11px] text-socrat-muted leading-relaxed">
-                    Можно несколько страниц — добавляй по одной. ИИ распознаёт формулы и проверит ход решения.
+                    Можно несколько фото / скриншотов или написать решение
+                    текстом. Можно одно из двух или оба.
                   </p>
+                  <textarea
+                    value={text}
+                    onChange={(e) => setText(e.target.value)}
+                    placeholder="Или напиши решение здесь текстом…"
+                    rows={3}
+                    style={{ fontSize: '16px' }}
+                    className="w-full min-h-[88px] px-3 py-2.5 bg-white border-[1.5px] border-socrat-border rounded-[10px] text-slate-900 leading-relaxed outline-none focus-visible:border-socrat-primary focus-visible:ring-2 focus-visible:ring-socrat-primary/20 resize-y touch-manipulation"
+                    aria-label="Решение текстом"
+                  />
                 </section>
               )}
 
-              {/* Section 2 — Numeric (extended after photos; numeric-only
-                  case still renders here as 1, no photos shown). */}
+              {/* Section 2 — Ответ (numeric).
+                  Для `numeric` task_kind sheet обычно не открывается
+                  (используется inline NumericAnswerComposer); но если он
+                  открыт — numeric обязателен. Для `extended` numeric ВСЕГДА
+                  «по желанию» (preview-QA #9 relax). */}
               {showNumeric && (
                 <section className="flex flex-col gap-2">
                   <div className="flex items-center gap-2">
@@ -471,35 +489,12 @@ export function SubmitSheet({
                 </section>
               )}
 
-              {/* Section 3 — Optional text */}
+              {/* Section 3 — Voice (Q11). Транскрипция appended в textarea
+                  Section 1 (merged solution field). */}
               <section className="flex flex-col gap-2">
                 <div className="flex items-center gap-2">
                   <span className="grid place-items-center w-[22px] h-[22px] rounded-full bg-socrat-primary-light text-socrat-primary text-xs font-bold">
                     {(showNumeric ? 1 : 0) + (showPhotos ? 1 : 0) + 1}
-                  </span>
-                  <h4 className="text-[13px] font-bold text-slate-900 m-0">
-                    Дополнить текстом
-                  </h4>
-                  <span className="ml-auto text-[10px] font-semibold uppercase tracking-wider text-socrat-muted bg-socrat-border-light px-1.5 py-0.5 rounded-full">
-                    по желанию
-                  </span>
-                </div>
-                <textarea
-                  value={text}
-                  onChange={(e) => setText(e.target.value)}
-                  placeholder="Если хочешь — поясни ход решения текстом"
-                  rows={3}
-                  style={{ fontSize: '16px' }}
-                  className="w-full min-h-[88px] px-3 py-2.5 bg-white border-[1.5px] border-socrat-border rounded-[10px] text-slate-900 leading-relaxed outline-none focus-visible:border-socrat-primary focus-visible:ring-2 focus-visible:ring-socrat-primary/20 resize-y touch-manipulation"
-                  aria-label="Дополнительное пояснение"
-                />
-              </section>
-
-              {/* Section 4 — Voice (Q11) */}
-              <section className="flex flex-col gap-2">
-                <div className="flex items-center gap-2">
-                  <span className="grid place-items-center w-[22px] h-[22px] rounded-full bg-socrat-primary-light text-socrat-primary text-xs font-bold">
-                    {(showNumeric ? 1 : 0) + (showPhotos ? 1 : 0) + 2}
                   </span>
                   <h4 className="text-[13px] font-bold text-slate-900 m-0">
                     Голосом

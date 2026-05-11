@@ -43,10 +43,7 @@ import {
   checkAnswer as checkAnswerApi,
   getStudentTaskImageSignedUrl,
 } from '@/lib/studentHomeworkApi';
-import {
-  serializeThreadAttachmentRefs,
-  buildGuidedAttachmentPlaceholder,
-} from '@/lib/homeworkThreadAttachments';
+import { serializeThreadAttachmentRefs } from '@/lib/homeworkThreadAttachments';
 import { parseAttachmentUrls } from '@/lib/attachmentRefs';
 
 /**
@@ -320,7 +317,15 @@ export default function HomeworkProblem() {
     const taskOrder = data.task.order_num;
     const targetTaskId = data.task.id;
     const userTempId = `temp-user-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
-    const content = trimmed || buildGuidedAttachmentPlaceholder(attachmentRefs.length);
+    // Preview-QA #9 fix (2026-05-11): inline placeholder builder.
+    // Раньше вызывали buildGuidedAttachmentPlaceholder(attachmentRefs.length)
+    // — но та функция ожидает Array<{name,type}>, не number → .map throws
+    // TypeError → send silently не работает когда фото есть без текста.
+    const content =
+      trimmed ||
+      (attachmentRefs.length === 1
+        ? '(фото)'
+        : `(фото x${attachmentRefs.length})`);
     const attachmentSerialized = serializeThreadAttachmentRefs(attachmentRefs);
     const refsForRequest = [...attachmentRefs];
 
@@ -1091,6 +1096,20 @@ export default function HomeworkProblem() {
         )}
       </div>
 
+      {/* Hidden file input для discussion attachment.
+          Preview-QA #9 (2026-05-11) fix: input был mounted ТОЛЬКО внутри
+          extended/proof composer branch. Для numeric task'и paperclip
+          в NumericAnswerComposer тапался, но fileInputRef.current был
+          undefined → no-op. Выносим input ВЫШЕ conditional чтобы он был
+          mounted всегда — ref активен для обеих веток composer. */}
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="image/*,.pdf"
+        className="hidden"
+        onChange={(e) => handleFileSelected(e.target.files?.[0])}
+      />
+
       {/* Composer — branches by task_kind (Phase 1.3, preview-QA #8
           2026-05-11):
             - 'numeric' → inline NumericAnswerComposer (green answer
@@ -1192,15 +1211,10 @@ export default function HomeworkProblem() {
           </div>
         ) : null}
 
-        {/* Chat row — paperclip + input + hint/mic group + send */}
+        {/* Chat row — paperclip + input + hint/mic group + send.
+            NB: hidden file input живёт выше conditional (preview-QA #9),
+            оба composer'а используют один и тот же fileInputRef. */}
         <div className="flex items-center gap-1">
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept="image/*,.pdf"
-            className="hidden"
-            onChange={(e) => handleFileSelected(e.target.files?.[0])}
-          />
           <button
             type="button"
             aria-label="Прикрепить фото"

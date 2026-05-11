@@ -133,7 +133,7 @@ Single-shot submit для нового screen. Body `{numeric: string, photos: s
 
 **task_kind requirements (server-side enforced):**
 - `numeric` → `numeric.trim()` обязателен; photos игнорируются
-- `extended` → `photos.length ≥ 1`; numeric **optional** (preview-QA #8 relax 2026-05-11 — frontend «Ответ» badge становится «по желанию» при наличии фото, backend `handleStudentSubmission` extended-branch соответствует)
+- `extended` → **photo OR text** (хотя бы одно); numeric **always optional** (preview-QA #9 relax 2026-05-11 — iPad-ученики пишут решение в редакторе без фото; numeric ответ остаётся «по желанию» даже без фото). Backend `handleStudentSubmission` extended-branch соответствует: `photoRefs.length >= 1 || textTrim.length > 0`.
 - `proof` → `photos.length ≥ 1`; numeric игнорируется
 
 400 `VALIDATION` с конкретным missing field. Defensive default для unknown task_kind = treat как extended.
@@ -1181,7 +1181,7 @@ Phase 1 rollout-summary section. **Endpoint / migration / handler / shared-helpe
 
 - `homework_tutor_tasks.task_kind enum('numeric'|'extended'|'proof')`, NOT NULL DEFAULT `'extended'` (миграция `20260509120000`).
 - Backfill: `check_format='short_answer' → 'numeric'`, `check_format='detailed_solution' → 'extended'`. `'proof'` — manual mark тутором (Phase 2 tutor UI).
-- Server-side validation в `handleStudentSubmission` (детальная секция выше): `numeric` requires `numeric.trim()`, `extended` requires `photos≥1` (numeric optional после preview-QA #8 relax 2026-05-11), `proof` requires `photos≥1`.
+- Server-side validation в `handleStudentSubmission` (детальная секция выше): `numeric` requires `numeric.trim()`; `extended` requires `photos.length ≥ 1 OR text.trim().length > 0` (preview-QA #9 relax 2026-05-11 — photo OR text); `proof` requires `photos.length ≥ 1`.
 - Defensive default для unknown task_kind = treat как `extended`.
 
 **Hint behavior — без cap'а 3:**

@@ -376,13 +376,21 @@ Behaviour:
   - **Text send:** caret в input → type → Enter / send button → user bubble lands optimistic, persists через `saveThreadMessage('user', ..., 'question', taskId)`, затем `streamChat()` через `/chat` endpoint. AI reply streams inline (preview bubble), затем persists с `'ai_reply'`.
   - **Voice (Q5):** mic кнопка toggle: idle → click → recording (red MicOff icon + duration counter в placeholder); recording → click stop → transcribe → транскрипт **appended** к существующему input.
   - **Paperclip (Q6):** click → native file picker → upload → preview pill «Фото · ✕» над input. Send включает refs в `image_url`.
-- **AC-5 (P0):** SubmitSheet (Phase 1.3 revision 2026-05-11 — preview-QA #8 reorder + relax):
-  - Section order для `extended` / `proof`: **Photos первой** (Section 1), **Numeric второй** (Section 2 — только для extended/numeric, скрыт для proof). Labels: «Решение фото или скриншот» (photos), «Ответ» (numeric). Для `numeric` task_kind SubmitSheet не открывается — inline composer вместо него (см. AC-12).
-  - Numeric badge dynamic: `extended` + `photos.length === 0` → «обязательно» (rose); `extended` + `photos.length ≥ 1` → «по желанию» (slate); `numeric` task_kind (если sheet когда-нибудь откроется) → «обязательно».
-  - Numeric input принимает запятую и точку («1,4» и «1.4» — обе валидны), unit suffix из task data.
-  - PhotoStrip: 1 + N тайлов 96×124 px, click → native `<input type="file" accept="image/*" capture="environment" multiple>`. После выбора → upload через existing `uploadStudentThreadImage` → ref в `photos[]`. Удаление через ✕ кнопку.
-  - Submit button **disabled** пока не выполнены `task_kind`-specific требования: `extended` теперь требует **только photos≥1** (numeric optional, preview-QA #8 relax — backend `handleStudentSubmission` соответствует). `proof` требует photos≥1. `numeric` требует numeric trim'нутый (но открывать sheet для numeric task_kind не нужно).
+- **AC-5 (P0):** SubmitSheet (Phase 1.4 revision 2026-05-11 — preview-QA #9 merged + photo-OR-text):
+  - **Section structure для extended/proof (3 секции):**
+    - Section 1 «Решение (фото или текст)» — combined: PhotoStrip + textarea. PhotoStrip упрощённый: `<input type="file" accept="image/*" multiple>` (БЕЗ `capture` attribute — iOS Safari показывает native sheet «Сфотографировать / Из галереи / Файл»; iPad-ученики могут загружать скриншоты решения). Textarea рядом для text-only решений (iPad scenario). Voice (Section 3) транскрибируется в эту textarea.
+    - Section 2 «Ответ» (numeric) — только для extended/numeric task_kind. Для `extended` badge ВСЕГДА «по желанию» (preview-QA #9 relax — student может submit без numeric ответа); для `numeric` task_kind badge «обязательно» (но `numeric` task используют inline composer, не sheet — см. AC-12).
+    - Section 3 «Голосом» — speech-to-text helper appends в Section 1 textarea.
+  - Hint banner text для extended: «Покажи ход решения — фото или текст. Ответ по желанию.»
+  - Numeric input принимает запятую и точку («1,4» и «1.4»), unit suffix из task data.
+  - Submit button **disabled** пока не выполнены `task_kind`-specific требования:
+    - `numeric`: `numeric.trim().length > 0`
+    - `extended`: **photo OR text** (preview-QA #9 relax — iPad-ученики пишут решение в редакторе; backend `handleStudentSubmission` соответствует)
+    - `proof`: `photos.length ≥ 1`
   - При submit → POST `/student/problem/.../submission` с `{numeric, photos, text}` → SubmitSheet **закрывается мгновенно**; submission landing в чате как `message_kind='submission'` bubble + AI verdict как `'check_result'` bubble (Phase 1.2 contract).
+- **AC-5a (P0, new 2026-05-11 preview-QA #9):** Photo attachment в chat-send (discussion path):
+  - File input `<input type="file" ref={fileInputRef}>` mounted **вне** composer conditional branch (HomeworkProblem.tsx) — было mounted только в extended-composer, что блокировало paperclip в `NumericAnswerComposer` (numeric task `fileInputRef.current` был `undefined` → click no-op).
+  - Chat-send с photo БЕЗ text работает: inline placeholder `(фото)` / `(фото x${N})` синтезируется в `handleChatSend`. Раньше вызывали `buildGuidedAttachmentPlaceholder(attachmentRefs.length)` — функция expects `Array<{name,type}>`, не number → `.map` throws TypeError → send silently dropped.
 - **AC-12 (P0, new in v0.3 preview-QA #8 2026-05-11):** Для `task_kind='numeric'` SubmitSheet **не используется**. Composer показывает inline `NumericAnswerComposer`:
   - Row 1: 💡 hint + green-bordered input «Ответ...» + send (primary green). Tap send → `checkAnswer` API (legacy `handleCheckAnswer` flow) → optimistic user bubble (`message_kind='answer'`) + typing dots → AI verdict в чате с `'check_result'` / `'ai_reply'` kind. На CORRECT → primary CTA flip на «Следующая задача» (через `isCurrentCompleted` derive).
   - Row 2: «Обсудить шаг с AI ▼» toggle (collapsed by default).

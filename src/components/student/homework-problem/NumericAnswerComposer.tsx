@@ -233,7 +233,7 @@ export function NumericAnswerComposer({
           <button
             type="button"
             aria-label="Прикрепить фото"
-            disabled={isUploadingAttachment || isStreaming || !discussionExpanded}
+            disabled={isUploadingAttachment || isStreaming}
             onClick={onPaperclipClick}
             className="grid place-items-center w-9 h-10 rounded-[10px] text-slate-500 hover:bg-socrat-surface hover:text-slate-900 shrink-0 touch-manipulation disabled:opacity-50"
           >
