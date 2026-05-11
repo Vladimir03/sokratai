@@ -88,17 +88,19 @@ type GuidedTelemetryEvent =
   | 'homework_saved_to_kb'
   | 'homework_saved_to_kb_per_task'
   // ─── student-homework-problem-screen Phase 1 (AC-8) ──────────────────────
-  // Mobile-first single-task surface. Four events PII-free:
+  // Mobile-first single-task surface. Five events PII-free:
   //   - student_problem_screen_opened : useEffect once per (hwId, taskId)
   //   - student_submitsheet_opened    : onClick of the «Сдать решение» CTA
   //   - student_submission_sent       : at submit (before verdict)
   //   - student_submission_verdict    : on verdict response
+  //   - student_hint_requested        : Phase 1.1 — tap on 💡 hint button
   // Fire-once-per-key for `_opened` is enforced via a useRef sentinel on
   // `${hwId}:${taskId}` so React Query refetches don't multiply emissions.
   | 'student_problem_screen_opened'
   | 'student_submitsheet_opened'
   | 'student_submission_sent'
-  | 'student_submission_verdict';
+  | 'student_submission_verdict'
+  | 'student_hint_requested';
 
 type GuidedTelemetryValue =
   | string
@@ -266,6 +268,18 @@ interface StudentSubmissionVerdictPayload
   maxScore: number;
 }
 
+/**
+ * Phase 1.1 — student tapped 💡 hint button. Fires before optimistic
+ * bubble insertion (codex review #7 typed registry fix).
+ */
+interface StudentHintRequestedPayload
+  extends Record<string, string | number | boolean | null | undefined> {
+  assignmentId: string;
+  taskId: string;
+  /** Hint counter BEFORE this request (post-request += 1 happens server-side). */
+  hintCountBefore: number;
+}
+
 interface DataLayerWindow extends Window {
   dataLayer?: Array<Record<string, unknown>>;
   gtag?: (...args: unknown[]) => void;
@@ -297,6 +311,7 @@ export function trackGuidedHomeworkEvent(event: 'student_problem_screen_opened',
 export function trackGuidedHomeworkEvent(event: 'student_submitsheet_opened', payload: StudentSubmitSheetOpenedPayload): void;
 export function trackGuidedHomeworkEvent(event: 'student_submission_sent', payload: StudentSubmissionSentPayload): void;
 export function trackGuidedHomeworkEvent(event: 'student_submission_verdict', payload: StudentSubmissionVerdictPayload): void;
+export function trackGuidedHomeworkEvent(event: 'student_hint_requested', payload: StudentHintRequestedPayload): void;
 export function trackGuidedHomeworkEvent(event: GuidedTelemetryEvent, payload?: GuidedTelemetryPayload): void;
 export function trackGuidedHomeworkEvent(
   event: GuidedTelemetryEvent,

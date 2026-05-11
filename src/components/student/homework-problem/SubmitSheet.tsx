@@ -88,7 +88,10 @@ const HINT_BY_KIND: Record<SubmitSheetTaskKind, string> = {
   // optional. Без хода = 0 баллов.
   extended:
     'Покажи ход решения — фото или текст. Ответ по желанию.',
-  proof: 'Доказательство — нужны фото с подробным выводом.',
+  // Preview-QA #10 (2026-05-11): proof relax (как extended без numeric).
+  // Поддерживает use cases ОГЭ описания + теоретические определения, где
+  // text-only вывод допустим.
+  proof: 'Доказательство: пришли фото или напиши вывод текстом.',
 };
 
 const NUMERIC = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 2 });
@@ -288,7 +291,10 @@ export function SubmitSheet({
       case 'numeric':
         return numericOk;
       case 'proof':
-        return photoOk;
+        // Preview-QA #10 (2026-05-11): proof relax — photo OR text
+        // (mirror extended branch, без numeric). Numeric ignored для
+        // proof в любом случае (задача-доказательство = без числа).
+        return photoOk || textOk;
       case 'extended':
       default:
         // Preview-QA #9 (2026-05-11): photo OR text — допускаем

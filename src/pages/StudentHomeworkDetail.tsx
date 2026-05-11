@@ -56,6 +56,25 @@ export default function StudentHomeworkDetail() {
     const tasks = data?.tasks ?? [];
     if (tasks.length === 0) return;
 
+    // Preview-QA #10 (2026-05-11) fix: all-completed early exit.
+    // Codex review #3: студент завершил все задачи → HomeworkProblem
+    // navigate'ит на `/homework/:hwId` → этот useEffect раньше falls
+    // through на `tasks[0]` → reopens task 1 решённого ДЗ. Теперь:
+    // если все задачи completed → redirect на список ДЗ (`/homework`)
+    // вместо повторного открытия problem screen.
+    const states = thread?.homework_tutor_task_states ?? [];
+    const allCompleted =
+      thread?.status === 'completed' ||
+      (tasks.length > 0 &&
+        tasks.every((t) => {
+          const s = states.find((st) => st.task_id === t.id);
+          return s?.status === 'completed';
+        }));
+    if (allCompleted) {
+      navigate('/homework', { replace: true });
+      return;
+    }
+
     // Fallback chain: current → first-not-completed → first.
     let targetTaskId: string | undefined;
     if (thread?.current_task_id) {
@@ -63,7 +82,6 @@ export default function StudentHomeworkDetail() {
       if (exists) targetTaskId = exists.id;
     }
     if (!targetTaskId) {
-      const states = thread?.homework_tutor_task_states ?? [];
       const firstUnfinished = tasks.find((t) => {
         const s = states.find((st) => st.task_id === t.id);
         return !s || s.status !== 'completed';

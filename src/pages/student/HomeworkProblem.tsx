@@ -18,7 +18,10 @@ import {
   SubmitSheet,
   type SubmitSheetSubmissionPayload,
 } from '@/components/student/homework-problem/SubmitSheet';
-import { clearSubmitSheetDraft } from '@/components/student/homework-problem/submitSheetInternal';
+import {
+  clearSubmitSheetDraft,
+  getSubmitSheetDraftKey,
+} from '@/components/student/homework-problem/submitSheetInternal';
 import { NumericAnswerComposer } from '@/components/student/homework-problem/NumericAnswerComposer';
 import GuidedChatMessage, { type GuidedMessageData } from '@/components/homework/GuidedChatMessage';
 import { TypingDots } from '@/components/student/homework-problem/TypingDots';
@@ -870,11 +873,12 @@ export default function HomeworkProblem() {
       if (target) {
         navigate(`/student/homework/${hwId}/problem/${target}`);
       } else {
-        // Все задачи решены → возврат к detail-странице ДЗ. Mobile логика
-        // в `StudentHomeworkDetail` сама либо снова редиректит на новый
-        // screen (если есть открытая задача), либо показывает loader. Для
-        // десктопа это inline GuidedHomeworkWorkspace.
-        navigate(`/homework/${hwId}`);
+        // Preview-QA #10 (2026-05-11) fix: codex review #3. Все задачи
+        // решены → возврат на список ДЗ `/homework` (НЕ `/homework/:hwId`
+        // — StudentHomeworkDetail на mobile теперь сам редиректит туда
+        // при all-completed, но идём напрямую чтобы не было mount/unmount
+        // bounce через detail page).
+        navigate('/homework');
       }
     },
     [hwId, navigate, nextTaskId],
@@ -1036,7 +1040,7 @@ export default function HomeworkProblem() {
                     />
                     <div className="flex flex-col gap-1 min-w-0">
                       <span className="text-[10px] font-bold uppercase tracking-[0.08em] text-socrat-primary">
-                        Сократ
+                        Сократ AI
                       </span>
                       <div className="bg-socrat-primary-light/60 border border-socrat-primary/15 rounded-[14px] rounded-tl-md px-3.5 py-2.5 max-w-[86%]">
                         <TypingDots />
@@ -1084,7 +1088,7 @@ export default function HomeworkProblem() {
                 />
                 <div className="flex flex-col gap-1 min-w-0">
                   <span className="text-[10px] font-bold uppercase tracking-[0.08em] text-socrat-primary">
-                    Сократ
+                    Сократ AI
                   </span>
                   <div className="bg-socrat-primary-light/60 border border-socrat-primary/15 rounded-[14px] rounded-tl-md px-3.5 py-2.5 max-w-[86%]">
                     <TypingDots />
@@ -1156,10 +1160,17 @@ export default function HomeworkProblem() {
               navigateAfterCorrect();
               return;
             }
+            // Preview-QA #10 (2026-05-11) codex review #7 fix: real
+            // hadDraft instead of hardcoded false. Reads localStorage
+            // directly (cheap) — autosave-aware retention signal.
+            const draftKey = getSubmitSheetDraftKey(taskId ?? data.task.id);
+            const hadDraft =
+              typeof window !== 'undefined' &&
+              Boolean(window.localStorage.getItem(draftKey));
             trackGuidedHomeworkEvent('student_submitsheet_opened', {
               assignmentId: data.assignment.id,
               taskId: data.task.id,
-              hadDraft: false,
+              hadDraft,
             });
             setSubmitOpen(true);
           }}

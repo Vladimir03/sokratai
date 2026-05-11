@@ -133,7 +133,8 @@ Single-shot submit для нового screen. Body `{numeric: string, photos: s
 
 **task_kind requirements (server-side enforced):**
 - `numeric` → `numeric.trim()` обязателен; photos игнорируются
-- `extended` → **photo OR text** (хотя бы одно); numeric **always optional** (preview-QA #9 relax 2026-05-11 — iPad-ученики пишут решение в редакторе без фото; numeric ответ остаётся «по желанию» даже без фото). Backend `handleStudentSubmission` extended-branch соответствует: `photoRefs.length >= 1 || textTrim.length > 0`.
+- `extended` → **photo OR text** (хотя бы одно); numeric **always optional** (preview-QA #9 relax 2026-05-11). Backend: `photoRefs.length >= 1 || textTrim.length > 0`.
+- `proof` → **photo OR text** (хотя бы одно); numeric **hidden + ignored** (preview-QA #10 relax 2026-05-11 — proof = задача без числового ответа, но фото и/или text вывод допустимы; mirror extended без numeric). Backend: `photoRefs.length >= 1 || textTrim.length > 0`.
 - `proof` → `photos.length ≥ 1`; numeric игнорируется
 
 400 `VALIDATION` с конкретным missing field. Defensive default для unknown task_kind = treat как extended.
@@ -174,6 +175,18 @@ const answerText = lines.length > 0 ? lines.join('\n') : '(см. фото реш
 homework_tutor_thread_messages(id, role, content, image_url, task_id, task_order, message_kind, submission_payload, created_at, author_user_id, visible_to_student)
 ```
 Submission rows доходят до клиента через `fetchStudentThread` без потерь. При добавлении нового nullable поля в messages, видимого ученику — расширять `THREAD_SELECT` явно (не `select("*")`).
+
+**THREAD_SELECT task_states invariant (codex review #2 fix, preview-QA #10 2026-05-11):**
+
+`homework_tutor_task_states(...)` subselect **обязан** включать `task_order` field. Без него frontend (`HomeworkProblem.tsx`) который:
+- сортирует states по `task_order` для `nextTaskId`
+- маппит `task_order` для done circles в `StepIndicator`
+
+получает `undefined` runtime values: `NaN` в sort, empty array в done indices. Симптом: completed circles рендерятся белыми, «Следующая задача» target random. Канонический select:
+```
+homework_tutor_task_states(id, task_id, task_order, status, attempts, best_score, available_score, earned_score, wrong_answer_count, hint_count, ai_score, ai_score_comment, tutor_score_override, tutor_score_override_comment, tutor_score_override_at)
+```
+Не убирать `task_order` без проверки всех frontend consumers.
 
 **Viewport routing (frontend):**
 
@@ -1172,6 +1185,7 @@ Phase 1 rollout-summary section. **Endpoint / migration / handler / shared-helpe
 **Grading invariants (hybrid first-completed-wins, Phase 1.x revision 2026-05-10 после preview QA + codex re-review #2):**
 
 - **Mobile chat = discussion only.** Каждое user-сообщение → `streamChat` `/chat` endpoint с `guidedHomeworkAssignmentId + guidedHomeworkTaskId` (server-side fetches tutor's reference solution). Persist через `saveThreadMessage(..., 'question', taskId)`. AI reply persist'ится с `'ai_reply'`. **`handleCheckAnswer` НЕ вызывается из chat path.** Чат не закрывает задачу.
+- **Scoring-neutral discussion invariant** (codex review #1 fix, preview-QA #10 2026-05-11): `saveThreadMessage` backend handler инкрементит `task_states.attempts` **ТОЛЬКО** для `role='user' && message_kind === 'answer'` (legacy answer-input path). Все остальные user kinds (`'question'`, `'hint_request'`, `'submission'`, etc.) — scoring-neutral. Без этого guard'а discussion chat в mobile UI силенциально снижал `available_score` через ON_TRACK degradation в `runStudentAnswerGrading`. `SCORING_MESSAGE_KINDS` константа в backend = canonical source of truth — расширять её только при осознанном решении добавить новый path к scoring.
 - **SubmitSheet single-shot — единственный путь triggering grading на mobile:** через `POST /student/problem/:hwId/:taskId/submission` → backend синтезирует answer + reuse `runStudentAnswerGrading` helper. AI verdict закрывает задачу при CORRECT.
 - **Hybrid first-completed-wins** означает: если `task_state.status='completed'` уже стоит (например через legacy desktop `GuidedHomeworkWorkspace` answer-input), новый mobile UI это видит и блокирует повторное закрытие — primary CTA сразу «Следующая задача →», SubmitSheet не открывает submission flow. Score фиксируется тем path, который первым выставил completed.
 - **Hint path:** `POST /threads/:id/hint` (`requestHint` API) — degrades `available_score` через %-rules, добавляет `hint_reply` AI bubble в чат. Не закрывает задачу. Без cap'а — sticky продуктовое решение Phase 1 (B5).
@@ -1181,7 +1195,7 @@ Phase 1 rollout-summary section. **Endpoint / migration / handler / shared-helpe
 
 - `homework_tutor_tasks.task_kind enum('numeric'|'extended'|'proof')`, NOT NULL DEFAULT `'extended'` (миграция `20260509120000`).
 - Backfill: `check_format='short_answer' → 'numeric'`, `check_format='detailed_solution' → 'extended'`. `'proof'` — manual mark тутором (Phase 2 tutor UI).
-- Server-side validation в `handleStudentSubmission` (детальная секция выше): `numeric` requires `numeric.trim()`; `extended` requires `photos.length ≥ 1 OR text.trim().length > 0` (preview-QA #9 relax 2026-05-11 — photo OR text); `proof` requires `photos.length ≥ 1`.
+- Server-side validation в `handleStudentSubmission` (детальная секция выше): `numeric` requires `numeric.trim()`; `extended` requires `photos.length ≥ 1 OR text.trim().length > 0` (preview-QA #9 relax 2026-05-11 — photo OR text); `proof` requires `photos.length ≥ 1 OR text.trim().length > 0` (preview-QA #10 relax 2026-05-11 — mirror extended, без numeric).
 - Defensive default для unknown task_kind = treat как `extended`.
 
 **Hint behavior — без cap'а 3:**

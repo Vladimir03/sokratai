@@ -5836,8 +5836,24 @@ async function handlePostThreadMessage(
     return jsonError(cors, 500, "DB_ERROR", "Failed to save message");
   }
 
-  // If user message, increment attempts on the current active task_state
-  if (role === "user") {
+  // Codex review fix #1 (preview-QA #10, 2026-05-11): discussion
+  // messages должны быть scoring-neutral. Раньше ВСЕ user messages
+  // инкрементили attempts → discussion chat в mobile UI силенциально
+  // снижал available_score через ON_TRACK degradation в
+  // runStudentAnswerGrading. Теперь attempts инкрементятся ТОЛЬКО для
+  // legacy answer-input path (`message_kind='answer'`); chat path
+  // (`'question'`, `'hint_request'`, etc.) — scoring-neutral.
+  // SubmitSheet submissions используют отдельный API (handleStudentSubmission
+  // → runStudentAnswerGrading) и не идут через эту функцию.
+  // last_student_message_at обновляем ВСЕГДА для tutor «recent dialogs»
+  // surface (не зависит от scoring).
+  const SCORING_MESSAGE_KINDS = new Set(["answer"]);
+  const isScoringAttempt =
+    role === "user" &&
+    typeof messageKind === "string" &&
+    SCORING_MESSAGE_KINDS.has(messageKind);
+
+  if (isScoringAttempt) {
     const { data: activeState } = await db
       .from("homework_tutor_task_states")
       .select("id, attempts")
@@ -5855,7 +5871,9 @@ async function handlePostThreadMessage(
         })
         .eq("id", activeState.id);
     }
+  }
 
+  if (role === "user") {
     await db
       .from("homework_tutor_threads")
       .update({
@@ -5932,7 +5950,7 @@ const THREAD_SELECT = `
   id, status, current_task_order, current_task_id, created_at, updated_at,
   student_assignment_id, last_student_message_at, last_tutor_message_at,
   homework_tutor_thread_messages(id, role, content, image_url, task_id, task_order, message_kind, submission_payload, created_at, author_user_id, visible_to_student),
-  homework_tutor_task_states(id, task_id, status, attempts, best_score, available_score, earned_score, wrong_answer_count, hint_count, ai_score, ai_score_comment, tutor_score_override, tutor_score_override_comment, tutor_score_override_at)
+  homework_tutor_task_states(id, task_id, task_order, status, attempts, best_score, available_score, earned_score, wrong_answer_count, hint_count, ai_score, ai_score_comment, tutor_score_override, tutor_score_override_comment, tutor_score_override_at)
 `;
 
 /**
@@ -6838,8 +6856,18 @@ async function handleStudentSubmission(
       );
     }
   } else if (taskKind === "proof") {
-    if (photoRefs.length < 1) {
-      return jsonError(cors, 400, "VALIDATION", "At least one photo is required for proof task");
+    // Preview-QA #10 (2026-05-11): proof relax — photo OR text. До
+    // codex review был strict photos-only; Vladimir выбрал loose
+    // вариант (как extended без numeric) для поддержки use cases:
+    // ОГЭ описания + теоретические определения, где text-only решение
+    // допустимо. Numeric ignored (proof = задача без числового ответа).
+    if (photoRefs.length < 1 && !textTrim) {
+      return jsonError(
+        cors,
+        400,
+        "VALIDATION",
+        "At least one photo OR text is required for proof task",
+      );
     }
   } else {
     // Defensive: unknown task_kind — treat like 'extended' (photo OR text

@@ -83,16 +83,14 @@ const AuthGuard = ({ children, fullBleed = false }: AuthGuardProps) => {
   }
 
   if (fullBleed) {
-    return (
-      <>
-        <OnboardingModal
-          open={showOnboarding}
-          userId={userId}
-          onComplete={() => setShowOnboarding(false)}
-        />
-        {children}
-      </>
-    );
+    // Preview-QA #10 (2026-05-11): suppress OnboardingModal на fullBleed
+    // routes. Vladimir's product decision — «не блокировать ученика
+    // onboarding modal: если переходит в ДЗ, пусть сразу решает».
+    // Mobile homework problem screen — student-first UX, onboarding
+    // не должен gate'ить эту поверхность. Если onboarding критичен —
+    // Phase 2 добавит soft prompt после первого submission или
+    // tutor-side enforcement.
+    return <>{children}</>;
   }
 
   return (
