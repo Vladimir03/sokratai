@@ -213,7 +213,17 @@ export interface HomeworkThreadMessage {
 export interface HomeworkTaskState {
   id: string;
   task_id: string;
-  task_order: number;
+  /**
+   * Preview-QA #11 (2026-05-11) hotfix: `task_order` НЕ существует
+   * в `homework_tutor_task_states` DB schema. Поле было ошибочно
+   * объявлено как required во frontend type, что давало undefined в
+   * runtime (раньше backend silently dropped). Phase 1.5 codex fix
+   * #2 пытался добавить task_order в THREAD_SELECT, но PostgREST
+   * вернул 500 → student/tutor stuck loading. Откат: type теперь
+   * optional, frontend резолвит order_num через
+   * `assignmentDetails.tasks[task_id].order_num` lookup.
+   */
+  task_order?: number;
   status: TaskStateStatus;
   attempts: number;
   best_score: number | null;

@@ -176,17 +176,18 @@ homework_tutor_thread_messages(id, role, content, image_url, task_id, task_order
 ```
 Submission rows доходят до клиента через `fetchStudentThread` без потерь. При добавлении нового nullable поля в messages, видимого ученику — расширять `THREAD_SELECT` явно (не `select("*")`).
 
-**THREAD_SELECT task_states invariant (codex review #2 fix, preview-QA #10 2026-05-11):**
+**THREAD_SELECT task_states invariant (preview-QA #11 hotfix, 2026-05-11 — ROLLED BACK):**
 
-`homework_tutor_task_states(...)` subselect **обязан** включать `task_order` field. Без него frontend (`HomeworkProblem.tsx`) который:
-- сортирует states по `task_order` для `nextTaskId`
-- маппит `task_order` для done circles в `StepIndicator`
+⚠️ **НЕ добавлять `task_order` в `homework_tutor_task_states(...)` subselect** — в этой таблице такой колонки **нет** в DB schema (`homework_tutor_task_states` имеет только `id, thread_id, task_id, status, attempts, best_score, scoring fields...`, см. migration `20260306100000_guided_homework_threads.sql`).
 
-получает `undefined` runtime values: `NaN` в sort, empty array в done indices. Симптом: completed circles рендерятся белыми, «Следующая задача» target random. Канонический select:
+Phase 1.5 codex fix #2 ошибочно добавил `task_order` в subselect → PostgREST возвращал 500 на любой THREAD_SELECT → student/tutor видели stuck loading + empty chat thread. **Hotfix** в Phase 1.5.1: subselect возвращён к виду:
 ```
-homework_tutor_task_states(id, task_id, task_order, status, attempts, best_score, available_score, earned_score, wrong_answer_count, hint_count, ai_score, ai_score_comment, tutor_score_override, tutor_score_override_comment, tutor_score_override_at)
+homework_tutor_task_states(id, task_id, status, attempts, best_score, available_score, earned_score, wrong_answer_count, hint_count, ai_score, ai_score_comment, tutor_score_override, tutor_score_override_comment, tutor_score_override_at)
 ```
-Не убирать `task_order` без проверки всех frontend consumers.
+
+**Frontend контракт для resolution `task_order` из task_state:** через lookup в `assignmentDetails.tasks[].order_num` по `task_id` (mirror legacy `GuidedHomeworkWorkspace` pattern: `taskById.get(s.task_id)?.order_num`). НЕ читать `s.task_order` напрямую — всегда `undefined`. `HomeworkTaskState.task_order` теперь optional в TypeScript type.
+
+Если в будущем понадобится `task_order` на task_state row directly — добавлять колонку через DB migration, не через select alias.
 
 **Viewport routing (frontend):**
 

@@ -239,6 +239,30 @@ export default function HomeworkProblem() {
     () => data?.thread?.homework_tutor_task_states ?? [],
     [data?.thread?.homework_tutor_task_states],
   );
+
+  // Preview-QA #11 (2026-05-11) hotfix: `task_states.task_order` НЕ
+  // существует в DB schema — codex review #2 «add task_order to
+  // THREAD_SELECT» fix был incorrect, поломал thread fetch для всех
+  // (PostgREST 500 → student empty chat + tutor stuck loading).
+  // Resolve task_order через assignmentDetails.tasks lookup by task_id
+  // (mirror legacy GuidedHomeworkWorkspace pattern: `taskById.get(s.task_id)?.order_num`).
+  const taskByIdMap = useMemo(() => {
+    const map = new Map<string, number>();
+    (assignmentDetails?.tasks ?? []).forEach((t) => {
+      if (t.id && typeof t.order_num === 'number') {
+        map.set(t.id, t.order_num);
+      }
+    });
+    return map;
+  }, [assignmentDetails?.tasks]);
+
+  /** Resolve task_order для task_state через assignment tasks lookup. */
+  const orderForState = useCallback(
+    (state: HomeworkTaskState): number | undefined => {
+      return taskByIdMap.get(state.task_id);
+    },
+    [taskByIdMap],
+  );
   const currentTaskState = useMemo(
     () => taskStates.find((s) => s.task_id === data?.task.id) ?? null,
     [taskStates, data?.task.id],
@@ -639,8 +663,10 @@ export default function HomeworkProblem() {
       );
       if (!targetTask?.id) {
         // Fallback: try task_states (lazy-provisioned).
+        // Preview-QA #11 hotfix: task_states.task_order не существует
+        // в DB → resolve через taskByIdMap (assignmentDetails.tasks).
         const fallbackState = data.thread?.homework_tutor_task_states?.find(
-          (s) => s.task_order === taskNo,
+          (s) => orderForState(s) === taskNo,
         );
         if (fallbackState?.task_id) {
           navigate(`/student/homework/${hwId}/problem/${fallbackState.task_id}`);
@@ -654,11 +680,15 @@ export default function HomeworkProblem() {
 
   const nextTaskId = useMemo(() => {
     if (!data) return null;
-    const sorted = [...taskStates].sort((a, b) => a.task_order - b.task_order);
-    const currentIdx = sorted.findIndex((s) => s.task_id === data.task.id);
+    // Preview-QA #11 hotfix: sort напрямую по assignmentDetails.tasks
+    // (canonical order_num), не по task_states (нет task_order в schema).
+    const sortedTasks = [...(assignmentDetails?.tasks ?? [])].sort(
+      (a, b) => a.order_num - b.order_num,
+    );
+    const currentIdx = sortedTasks.findIndex((t) => t.id === data.task.id);
     if (currentIdx < 0) return null;
-    return sorted[currentIdx + 1]?.task_id ?? null;
-  }, [data, taskStates]);
+    return sortedTasks[currentIdx + 1]?.id ?? null;
+  }, [data, assignmentDetails]);
 
   // ─── Submission flow (preview-QA #6, 2026-05-10) ─────────────────────────
   // Phase 1.2 рефакторинг: ответ ученика + AI verdict теперь живут в чате,
@@ -893,9 +923,12 @@ export default function HomeworkProblem() {
     // hid the «solved» state from the student. Now `StepIndicator`
     // owns the rendering: a circle that's both done AND current shows
     // green-filled with check + outer ring (telegraphs both states).
+    // Preview-QA #11 hotfix: resolve order_num через taskByIdMap, не
+    // через `s.task_order` (которое undefined в новом thread response).
     const doneIndices = taskStates
       .filter((s) => s.status === 'completed')
-      .map((s) => s.task_order);
+      .map((s) => orderForState(s))
+      .filter((n): n is number => typeof n === 'number');
     return {
       task_id: data.task.id,
       task_no: data.task.order_num,
