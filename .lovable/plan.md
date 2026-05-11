@@ -1,31 +1,31 @@
-## Проблема
+## Что не так
 
-На `/tutor/mock-exams` и при сабмите формы создания пробника появляется toast «Failed to fetch» и в консоли — `tutor_query_network_failed` для `tutor:mock-exams:assignments`.
+На мобильном экране задачи (`/student/homework/:hwId/problem/:taskId`) справа виден вертикальный ползунок скролла во всю высоту экрана. На мобиле этого быть не должно: чат внутри карточки уже скроллится сам, а наружный скролл страницы создаёт ощущение «сломанного» layout-а и подъезжает поверх контента.
 
-Прямой curl в `https://api.sokratai.ru/functions/v1/mock-exam-tutor-api/assignments` возвращает:
+## Причины (две, обе нужно закрыть)
 
-```text
-HTTP 404
-{"code":"NOT_FOUND","message":"Requested function was not found"}
-```
+1. **Скрытие скроллбара только для WebKit.** Внутренний чат `flex-1 overflow-y-auto` в `src/pages/student/HomeworkProblem.tsx` использует `[&::-webkit-scrollbar]:hidden`. Это прячет ползунок только в Chrome/Safari, но не во всех движках (включая превью Lovable, где иногда виден системный ползунок). Для Firefox/новых Chromium нужен ещё `scrollbar-width: none` и для старых Edge — `-ms-overflow-style: none`.
+2. **Страница может скроллиться целиком.** Корневой `<div>` экрана задаёт высоту через `style={{ height: vvHeight }}`, но `<html>`/`<body>` остаются со стандартным `overflow: auto`. Если браузер на мгновение возвращает `visualViewport.height` чуть больше реального окна (это бывает в превью + при свернутой клавиатуре), появляется именно «глобальный» ползунок справа во всю высоту — то, что видно на скриншотах.
 
-Все четыре функции пробников (`mock-exam-tutor-api`, `mock-exam-student-api`, `mock-exam-public`, `mock-exam-grade`) присутствуют в репо, но **не задеплоены** в Supabase project `vrsseotrfmsxpbciyqzc`. Из-за 404 без CORS-заголовков браузер репортит ошибку как «Failed to fetch».
+## Что сделать
 
-## План
+### 1. `src/pages/student/HomeworkProblem.tsx`
+- На внутреннем чат-контейнере (строка 983) добавить кросс-браузерное скрытие ползунка к существующему WebKit-варианту:
+  - класс `[scrollbar-width:none]` (Firefox / новые Chromium)
+  - класс `[-ms-overflow-style:none]` (старый Edge / IE-наследие)
+  - оставить уже существующий `[&::-webkit-scrollbar]:hidden`
+- На корневом `<div>` экрана (строка 940) добавить `overflow-hidden` — на случай если visualViewport вернёт высоту больше реальной, контент не «выпрыгнет» наружу и не вызовет body-скролл.
 
-1. Задеплоить через `supabase--deploy_edge_functions` четыре функции:
-   - `mock-exam-tutor-api`
-   - `mock-exam-student-api`
-   - `mock-exam-public`
-   - `mock-exam-grade`
-2. Верифицировать деплой curl-запросом к `/mock-exam-tutor-api/assignments` (ожидаем 401 без Bearer вместо 404).
-3. Сообщить пользователю обновить страницу `/tutor/mock-exams` — список и форма создания должны заработать.
+### 2. Залочить скролл `<html>`/`<body>` пока экран задачи смонтирован
+В `HomeworkProblem.tsx` добавить `useEffect`, который на mount ставит `document.documentElement.style.overflow = 'hidden'` + `document.body.style.overflow = 'hidden'`, а на unmount — восстанавливает прежние значения. Это гарантирует, что глобального ползунка не будет ни в одном браузере, ни в превью Lovable, ни в реальном мобильном Chrome/Safari при перетягивании address-bar. Применяется только к этому экрану — другие страницы (список ДЗ, лендинг) продолжат скроллиться как обычно.
 
-## Что НЕ трогаем
+### Что НЕ трогаем
+- `useVisualViewportHeight.ts` — логика расчёта высоты под клавиатуру осталась корректной (preview-QA #8 fix).
+- `ProblemContext`, `NumericAnswerComposer`, `ComposerMobile`, `SubmitSheet` — у них своих скролл-контейнеров нет, проблема не там.
+- Desktop / tablet чат `GuidedHomeworkWorkspace` — затрагиваются только мобильный экран `/student/homework/:hwId/problem/:taskId`.
 
-- Код фронтенда и edge functions — только деплой.
-- Никаких миграций БД (TASK-1..7 миграции уже применены, иначе функции бы возвращали 500, а не 404).
-
-## Деплой sokratai.ru
-
-Не требуется — изменений в `src/**` нет.
+## Smoke-проверка после применения
+1. Mobile (≤768px), `/student/homework/<hwId>/problem/<taskId>`: справа ползунка нет ни при свёрнутом, ни при развёрнутом ProblemContext, ни при длинной ленте сообщений.
+2. Чат внутри карточки скроллится свайпом, как раньше; авто-скролл к низу при новых сообщениях работает.
+3. Открытие/закрытие виртуальной клавиатуры → composer стоит внизу, белой полосы и ползунка нет.
+4. Возврат на `/homework` → у списка ДЗ страничный скролл снова работает (значит body-overflow корректно восстановлен).

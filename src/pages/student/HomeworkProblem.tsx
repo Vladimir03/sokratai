@@ -118,6 +118,24 @@ export default function HomeworkProblem() {
 
   const threadId = data?.thread?.id ?? null;
 
+  // Lock html/body overflow while the problem screen is mounted —
+  // prevents an outer page-level scrollbar on mobile when
+  // visualViewport briefly reports a height larger than the actual
+  // window (preview iframe / address-bar transitions). Restored on
+  // unmount so other routes (e.g. /homework list) keep scrolling.
+  useEffect(() => {
+    const html = document.documentElement;
+    const body = document.body;
+    const prevHtml = html.style.overflow;
+    const prevBody = body.style.overflow;
+    html.style.overflow = 'hidden';
+    body.style.overflow = 'hidden';
+    return () => {
+      html.style.overflow = prevHtml;
+      body.style.overflow = prevBody;
+    };
+  }, []);
+
   // ─── Map raw thread messages → GuidedMessageData[] ────────────────────────
   const persistedMessages = useMemo<HomeworkThreadMessage[]>(() => {
     const raw = data?.thread?.homework_tutor_thread_messages ?? [];
@@ -938,7 +956,7 @@ export default function HomeworkProblem() {
 
   return (
     <div
-      className="flex w-full flex-col bg-socrat-surface"
+      className="flex w-full flex-col bg-socrat-surface overflow-hidden"
       style={{ height: vvHeight }}
     >
       {/* Topbar — back → /homework (Q2; preview-QA #3 fix 2026-05-10:
@@ -980,7 +998,7 @@ export default function HomeworkProblem() {
       {/* Chat thread — flex-1 with scroll */}
       <div
         ref={chatScrollRef}
-        className="flex-1 min-h-0 overflow-y-auto flex flex-col gap-3 px-3.5 pt-2 pb-3.5 [-webkit-overflow-scrolling:touch] [&::-webkit-scrollbar]:hidden"
+        className="flex-1 min-h-0 overflow-y-auto flex flex-col gap-3 px-3.5 pt-2 pb-3.5 [-webkit-overflow-scrolling:touch] [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden"
       >
         {messages.length === 0 && !streamingText ? (
           <div
