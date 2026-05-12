@@ -1,19 +1,15 @@
-import { lazy, Suspense, useEffect } from 'react';
+import { useEffect } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import AuthGuard from '@/components/AuthGuard';
 import { PageContent } from '@/components/PageContent';
 import { useStudentAssignment, useStudentThread } from '@/hooks/useStudentHomework';
-import { useIsMobile } from '@/hooks/useIsMobile';
-
-const GuidedHomeworkWorkspace = lazy(() => import('@/components/homework/GuidedHomeworkWorkspace'));
 
 /**
- * Student homework assignment detail.
+ * Student homework assignment detail — redirect-only route.
  *
- * **Mobile vs desktop routing (Phase 1.x rollout, revised 2026-05-10 after
- * preview QA #1):** on mobile (`useIsMobile()` ≤768px) the page redirects
- * immediately to the new per-task screen. On desktop we mount the legacy
- * `GuidedHomeworkWorkspace` inline.
+ * **Phase 3 routing (2026-05-12):** auto-redirect on ALL viewports. Phase 1
+ * gated this behind `useIsMobile()`; Phase 3 unifies tablet + desktop onto
+ * the same per-task screen (`/student/homework/:hwId/problem/:taskId`).
  *
  * The redirect target uses a smart fallback chain so the student lands on
  * the most actionable task — never «just task #1» blindly:
@@ -21,47 +17,55 @@ const GuidedHomeworkWorkspace = lazy(() => import('@/components/homework/GuidedH
  *   2. First task whose `task_state.status !== 'completed'`.
  *   3. First task in the assignment (`tasks[0].id`).
  *
- * Rationale: the previous click-intercept flow (codex re-review #3 fix)
- * confused students who landed on the legacy stepper and didn't realise
- * they had to tap a circle to enter the new UI. With auto-redirect we get
- * the new screen on every mobile open; per-task switching inside the new
- * screen happens via the new HomeworkProblem step indicator (Q7).
+ * Phase 4 cutover (separate spec) will physically delete the legacy
+ * `GuidedHomeworkWorkspace` inline rendering, after Phase 3 ships and
+ * stabilises. Until then, this component intentionally has no inline
+ * fallback branch. Edge cases:
+ *   - tasks list empty (after data fetch): redirect to `/homework` so
+ *     the user has a real escape path (codex re-review fix 2026-05-12).
+ *   - all tasks completed: redirect to `/homework` (preview-QA #10).
+ *   - data still loading: render the loading placeholder below; the
+ *     useEffect re-fires when data arrives.
  *
  * Spec: `docs/delivery/features/student-homework-problem-screen/spec.md`
- * AC-2 (revision 2026-05-10).
+ * AC-2 + Phase 3 plan `~/.claude/plans/toasty-weaving-meerkat.md`.
  */
 export default function StudentHomeworkDetail() {
   const { id } = useParams<{ id: string }>();
   const assignmentId = id ?? '';
-  const isMobile = useIsMobile();
   const navigate = useNavigate();
   const { data, isLoading, error } = useStudentAssignment(assignmentId);
-  // Thread fetched only on mobile so we can resolve `current_task_id`
-  // before redirecting. Disabled on desktop — the legacy workspace owns
-  // its own thread query.
+  // Thread fetched for ALL viewports so we can resolve `current_task_id`
+  // before redirecting. Codex re-review #1 (major #4) fix preserved: gate
+  // redirect on thread query resolution to avoid race past current_task_id
+  // and falling through to tasks[0] — the «always task #1» failure mode.
   const {
     data: thread,
     isPending: isThreadPending,
     isFetching: isThreadFetching,
-  } = useStudentThread(isMobile ? assignmentId : '');
+  } = useStudentThread(assignmentId);
 
   useEffect(() => {
-    if (!isMobile) return;
     if (!assignmentId) return;
-    // Codex re-review #1 (major #4) fix: gate redirect on thread query
-    // resolution so we don't race past `current_task_id` and fall through
-    // to `tasks[0]` — the exact «always task #1» failure mode that v0.2
-    // was meant to avoid.
     if (isThreadPending || isThreadFetching) return;
     const tasks = data?.tasks ?? [];
-    if (tasks.length === 0) return;
+    // Codex re-review (2026-05-12): after Phase 3 this route is redirect-only.
+    // An assignment with zero tasks would park the user on "Открываем
+    // задачу..." forever — the screen has no escape path. Redirect back to
+    // the list (which renders an empty-state for assignments without tasks).
+    if (tasks.length === 0) {
+      if (data != null) {
+        navigate('/homework', { replace: true });
+      }
+      // Still loading data: no-op, useEffect will re-fire when data arrives.
+      return;
+    }
 
     // Preview-QA #10 (2026-05-11) fix: all-completed early exit.
-    // Codex review #3: студент завершил все задачи → HomeworkProblem
-    // navigate'ит на `/homework/:hwId` → этот useEffect раньше falls
-    // through на `tasks[0]` → reopens task 1 решённого ДЗ. Теперь:
-    // если все задачи completed → redirect на список ДЗ (`/homework`)
-    // вместо повторного открытия problem screen.
+    // Студент завершил все задачи → HomeworkProblem navigate'ит на
+    // `/homework/:hwId` → этот useEffect раньше falls through на
+    // `tasks[0]` → reopens task 1 решённого ДЗ. Теперь:
+    // если все задачи completed → redirect на список ДЗ (`/homework`).
     const states = thread?.homework_tutor_task_states ?? [];
     const allCompleted =
       thread?.status === 'completed' ||
@@ -95,7 +99,6 @@ export default function StudentHomeworkDetail() {
       replace: true,
     });
   }, [
-    isMobile,
     data,
     thread,
     assignmentId,
@@ -104,44 +107,17 @@ export default function StudentHomeworkDetail() {
     isThreadFetching,
   ]);
 
-  if (isLoading || !data) {
-    return (
-      <AuthGuard>
-        <PageContent>
-          <main className="container mx-auto px-4 pb-8">
-            {isLoading && <p className="text-muted-foreground">Загрузка...</p>}
-            {error && <p className="text-destructive">Не удалось загрузить задание</p>}
-          </main>
-        </PageContent>
-      </AuthGuard>
-    );
-  }
-
-  if (isMobile) {
-    return (
-      <AuthGuard>
-        <PageContent>
-          <main className="container mx-auto px-4 pb-8">
-            <p className="text-muted-foreground">Открываем задачу...</p>
-          </main>
-        </PageContent>
-      </AuthGuard>
-    );
-  }
-
   return (
     <AuthGuard>
-      <div className="fixed inset-x-0 bottom-0 z-40 bg-background flex flex-col overflow-hidden top-14">
-        <Suspense
-          fallback={
-            <div className="flex-1 flex items-center justify-center text-muted-foreground">
-              Загрузка...
-            </div>
-          }
-        >
-          <GuidedHomeworkWorkspace assignment={data} />
-        </Suspense>
-      </div>
+      <PageContent>
+        <main className="container mx-auto px-4 pb-8">
+          {isLoading && <p className="text-muted-foreground">Загрузка...</p>}
+          {error && <p className="text-destructive">Не удалось загрузить задание</p>}
+          {!isLoading && !error && data && (
+            <p className="text-muted-foreground">Открываем задачу...</p>
+          )}
+        </main>
+      </PageContent>
     </AuthGuard>
   );
 }

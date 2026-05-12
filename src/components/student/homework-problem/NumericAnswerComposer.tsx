@@ -43,6 +43,13 @@ interface NumericAnswerComposerProps {
   isCurrentCompleted: boolean;
   hasNextTask: boolean;
   onNavigateNext: () => void;
+  /**
+   * Hide the collapsible discussion row + its toggle. Phase 3 (2026-05-12):
+   * on tablet/desktop the right column already has a full chat composer
+   * below this answer row — duplicating discussion here is redundant.
+   * Mobile (default `false`) keeps the toggle for compact UX.
+   */
+  hideDiscussion?: boolean;
 }
 
 /**
@@ -91,6 +98,7 @@ export function NumericAnswerComposer({
   isCurrentCompleted,
   hasNextTask,
   onNavigateNext,
+  hideDiscussion = false,
 }: NumericAnswerComposerProps) {
   const [discussionExpanded, setDiscussionExpanded] = useState(false);
 
@@ -179,30 +187,35 @@ export function NumericAnswerComposer({
         </button>
       </div>
 
-      {/* Row 2 — Discussion toggle (small, collapsed by default) */}
-      <button
-        type="button"
-        onClick={() => setDiscussionExpanded((v) => !v)}
-        aria-expanded={discussionExpanded}
-        aria-controls="numeric-discussion-row"
-        className="inline-flex items-center justify-center gap-1.5 self-start text-[11px] font-semibold text-socrat-muted hover:text-slate-900 touch-manipulation py-1 px-2 rounded-md transition-colors"
-      >
-        {discussionExpanded ? 'Свернуть обсуждение' : 'Обсудить шаг с AI'}
-        {discussionExpanded ? (
-          <ChevronUp className="h-3 w-3" aria-hidden="true" />
-        ) : (
-          <ChevronDown className="h-3 w-3" aria-hidden="true" />
-        )}
-      </button>
+      {/* Row 2 — Discussion toggle (small, collapsed by default).
+          Phase 3: на tablet/desktop discussion идёт через chat composer
+          в правой колонке, поэтому toggle + collapsible field прячутся
+          через `hideDiscussion` prop. */}
+      {!hideDiscussion ? (
+        <>
+          <button
+            type="button"
+            onClick={() => setDiscussionExpanded((v) => !v)}
+            aria-expanded={discussionExpanded}
+            aria-controls="numeric-discussion-row"
+            className="inline-flex items-center justify-center gap-1.5 self-start text-[11px] font-semibold text-socrat-muted hover:text-slate-900 touch-manipulation py-1 px-2 rounded-md transition-colors"
+          >
+            {discussionExpanded ? 'Свернуть обсуждение' : 'Обсудить шаг с AI'}
+            {discussionExpanded ? (
+              <ChevronUp className="h-3 w-3" aria-hidden="true" />
+            ) : (
+              <ChevronDown className="h-3 w-3" aria-hidden="true" />
+            )}
+          </button>
 
-      {/* Row 3 — Discussion field (collapsible) */}
-      <div
-        id="numeric-discussion-row"
-        className={`flex flex-col gap-2 overflow-hidden transition-[max-height] duration-200 ${
-          discussionExpanded ? 'max-h-96' : 'max-h-0'
-        }`}
-        aria-hidden={!discussionExpanded}
-      >
+          {/* Row 3 — Discussion field (collapsible) */}
+          <div
+            id="numeric-discussion-row"
+            className={`flex flex-col gap-2 overflow-hidden transition-[max-height] duration-200 ${
+              discussionExpanded ? 'max-h-96' : 'max-h-0'
+            }`}
+            aria-hidden={!discussionExpanded}
+          >
         {attachmentRefs.length > 0 ? (
           <div className="flex items-center gap-1.5 flex-wrap">
             {attachmentRefs.map((ref) => (
@@ -295,6 +308,8 @@ export function NumericAnswerComposer({
           </button>
         </div>
       </div>
+        </>
+      ) : null}
     </div>
   );
 }

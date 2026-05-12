@@ -95,6 +95,13 @@ interface ProblemContextProps {
    * stepper stays read-only (legacy callsite or read-only previews).
    */
   onStepClick?: (taskNo: number) => void;
+  /**
+   * Hide the «Показать задачу / Свернуть» toggle button. Phase 3
+   * (2026-05-12): on tablet/desktop the ProblemContext lives in the left
+   * sidebar and is always expanded — collapsing makes no sense there.
+   * Mobile (default `false`) keeps the toggle for peek/expand UX.
+   */
+  hideToggle?: boolean;
 }
 
 /**
@@ -118,6 +125,7 @@ export function ProblemContext({
   compact = false,
   assignmentId,
   onStepClick,
+  hideToggle = false,
 }: ProblemContextProps) {
   const headerId = `problem-context-${task.task_id}`;
   const panelId = `problem-context-panel-${task.task_id}`;
@@ -175,20 +183,22 @@ export function ProblemContext({
             </span>
           ) : null}
         </div>
-        <button
-          type="button"
-          onClick={onToggle}
-          className="inline-flex items-center gap-1 px-1.5 py-1 text-xs font-semibold text-slate-500 hover:text-slate-900 transition-colors touch-manipulation"
-          aria-expanded={!collapsed}
-          aria-controls={panelId}
-        >
-          {collapsed ? 'Показать задачу' : 'Свернуть'}
-          {collapsed ? (
-            <ChevronDown className="h-3.5 w-3.5" aria-hidden="true" />
-          ) : (
-            <ChevronUp className="h-3.5 w-3.5" aria-hidden="true" />
-          )}
-        </button>
+        {!hideToggle ? (
+          <button
+            type="button"
+            onClick={onToggle}
+            className="inline-flex items-center gap-1 px-1.5 py-1 text-xs font-semibold text-slate-500 hover:text-slate-900 transition-colors touch-manipulation"
+            aria-expanded={!collapsed}
+            aria-controls={panelId}
+          >
+            {collapsed ? 'Показать задачу' : 'Свернуть'}
+            {collapsed ? (
+              <ChevronDown className="h-3.5 w-3.5" aria-hidden="true" />
+            ) : (
+              <ChevronUp className="h-3.5 w-3.5" aria-hidden="true" />
+            )}
+          </button>
+        ) : null}
       </div>
 
       {!collapsed ? (

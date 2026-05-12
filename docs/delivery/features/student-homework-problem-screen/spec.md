@@ -516,15 +516,15 @@ Manual QA на staging (до prod deploy):
 
 ## Phase split (фичу нельзя сделать одной спекой)
 
-Эта спека = **Phase 1 only**: mobile + chat + ProblemContext + SubmitSheet с reuse `handleCheckAnswer`. Phase 2/3 — отдельные спеки со своими scope/AC/деплоем.
+Эта спека = **Phase 1 only**: mobile + chat + ProblemContext + SubmitSheet с reuse `handleCheckAnswer`. Phase 2/3/4 — отдельные спеки со своими scope/AC/деплоем.
 
-**Phase 1 (this spec):** P0 = AC-1..AC-8, AC-11; P1 = AC-9, AC-10. Все в одном PR. ETA 1.5-2 дня.
+**Phase 1 (this spec, ✅ landed 2026-05-09 + Phase 1.x preview QA fixes):** P0 = AC-1..AC-8, AC-11; P1 = AC-9, AC-10. Все в одном PR.
 
-**Phase 2 (отдельная спека `student-homework-problem-grading-pipeline.md`):** real Gemini OCR + 4 verdict states (correct / no-work / step-error / unclear) + voice recorder + autosave drafts + tutor task_kind selector в TutorHomeworkCreate. Старт после feedback от Phase 1 пилота (≥7 дней stability).
+**Phase 2 (отдельная спека `student-homework-problem-grading-pipeline.md`, deferred):** real Gemini OCR + 4 verdict states (correct / no-work / step-error / unclear) + voice recorder + autosave drafts + tutor task_kind selector в TutorHomeworkCreate. Старт после feedback от Phase 1 пилота (≥7 дней stability).
 
-**Phase 3 (отдельная спека `student-homework-problem-multi-device.md`):** Tablet (Layout 2) + Desktop (Layout 3) с split-pane. Hint ladder UI блок. Math-keyboard в composer. Старт после Phase 2 stable.
+**Phase 3 (plan-only spec `~/.claude/plans/toasty-weaving-meerkat.md`, ✅ landed 2026-05-12):** Tablet (769–1279) + Desktop (≥1280) split-pane. Math keyboard popover (LaTeX/Unicode templates). `AuthGuard fullBleed='below-xl'` mode для desktop global nav. Universal redirect в `StudentHomeworkDetail` (`useIsMobile()` gate удалён — все viewport'ы редиректят на новый screen). Hint ladder card в левой колонке desktop — **отложен** (отдельная спека). Hint cap **no cap** на всех viewport'ах (Phase 1 B5 invariant сохранён). 4-state verdict overlay — Phase 2 grading spec. Полный контракт в `.claude/rules/40-homework-system.md` → секция «Student Homework Problem Screen — Phase 3 split layouts (2026-05-12)».
 
-**Phase 4 cutover (отдельная спека `student-homework-problem-cutover.md`):** удалить `useIsMobile()` viewport check (новый screen для всех viewport'ов), redirect `/homework/:id` → новый screen, удалить `GuidedHomeworkWorkspace.tsx` + связанные mock fixtures. Старт после Phase 3 (tablet+desktop) stable ≥7 дней.
+**Phase 4 cutover (отдельная спека `student-homework-problem-cutover.md`, partially landed):** Phase 3 уже включил universal redirect (часть scope Phase 4 landed раньше). Осталось: физически удалить `GuidedHomeworkWorkspace.tsx`, `GuidedChatInput.tsx`, `TaskStepper.tsx` (после Phase 3 stable ≥7 дней) + grep tutor-side `GuidedThreadViewer` callsite'ы, если есть пересечения.
 
 ---
 

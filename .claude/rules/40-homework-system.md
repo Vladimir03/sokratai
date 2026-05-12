@@ -1209,15 +1209,122 @@ Phase 1 rollout-summary section. **Endpoint / migration / handler / shared-helpe
 
 | Phase | Scope | Spec |
 |---|---|---|
-| 1 (этот rule, ✅ TASKS 1–8 done 2026-05-09) | Mobile ≤768px + chat + ProblemContext + SubmitSheet с reuse `handleCheckAnswer` | `docs/delivery/features/student-homework-problem-screen/spec.md` |
+| 1 (✅ TASKS 1–8 done 2026-05-09) | Mobile ≤768px + chat + ProblemContext + SubmitSheet с reuse `handleCheckAnswer` | `docs/delivery/features/student-homework-problem-screen/spec.md` |
 | 2 (deferred) | Real Gemini OCR pipeline + 4 verdict states (`no-work` / `step-error` / `unclear`) + voice recorder + autosave drafts + tutor `task_kind` selector в `TutorHomeworkCreate` | TBD — `student-homework-problem-grading-pipeline.md` |
-| 3 (deferred) | Tablet (Layout 2) + Desktop (Layout 3) split layouts. Hint ladder UI block. Math-keyboard в composer | TBD — `student-homework-problem-multi-device.md` |
-| 4 (deferred) | Cutover: удалить `useIsMobile` viewport check, redirect `/homework/:id` → новый screen для всех viewport'ов, удалить `GuidedHomeworkWorkspace.tsx` | TBD — `student-homework-problem-cutover.md` |
+| 3 (✅ done 2026-05-12) | Tablet (769–1279) + Desktop (≥1280) split layouts. Math keyboard popover. **Hint ladder UI block отложен** (отдельная спека). Phase 4 cutover **частично** залендился — student-side `GuidedHomeworkWorkspace` рендеринг отключён, файл оставлен для Phase 4 cleanup. | См. секцию «Phase 3 split layouts» ниже + plan `~/.claude/plans/toasty-weaving-meerkat.md` |
+| 4 (partially landed 2026-05-12 / cleanup deferred) | Phase 3 уже включил universal redirect в `StudentHomeworkDetail` (mobile + tablet + desktop). Осталось: физически удалить `GuidedHomeworkWorkspace.tsx`, `GuidedChatInput.tsx`, `TaskStepper.tsx` после Phase 3 stable. | TBD — `student-homework-problem-cutover.md` |
 
 **При расширении Phase 1 / при добавлении новых student-side endpoint'ов:**
 1. Соблюдать column-whitelist invariant (см. детальную секцию).
-2. `useIsMobile` hook — единственная точка viewport-detection для problem-screen routing. Не дублировать `window.innerWidth` checks по компонентам.
+2. `useIsMobile` hook — canonical для problem-screen routing + viewport-зависимых prop adaptations (e.g. `NumericAnswerComposer.hideDiscussion`). Не дублировать `window.innerWidth` checks по компонентам. CSS-responsive классы (`md:`, `xl:`) предпочтительнее для чисто визуальных адаптаций.
 3. Новые routes под `/student/homework/:hwId/...` мониторят то же 404-`NOT_FOUND` semantic для не-assigned (не 403 — keeps existence private).
-4. **Не путать** с легаси `/homework/:id` route — он остаётся за desktop fallback'ом до Phase 4.
+4. **Легаси `/homework/:id`** (`StudentHomeworkDetail`) после Phase 3 стал redirect-only route для **всех** viewport'ов. `GuidedHomeworkWorkspace` inline рендеринг удалён со student-side; физическое удаление файла отложено на Phase 4 cleanup spec.
 
 **Спека:** `docs/delivery/features/student-homework-problem-screen/spec.md` (Phase 1, AC-1..AC-11).
+
+### Student Homework Problem Screen — Phase 3 split layouts (2026-05-12)
+
+Phase 3 расширяет mobile-first screen на tablet (769–1279) + desktop (≥1280). Единственный entry point для всех viewport'ов: `/student/homework/:hwId/problem/:taskId`. `StudentHomeworkDetail` стал redirect-only (universal). Spec — отдельная сессия plan `~/.claude/plans/toasty-weaving-meerkat.md` (4 раунда walkthrough с Vladimir 2026-05-12 + 2 раунда ChatGPT-5.5 code review).
+
+**`StudentHomeworkDetail` edge cases (codex re-review fix 2026-05-12):**
+- **Empty tasks** (assignment без задач, после `data` fetched): redirect на `/homework`. Без этого пользователь видел «Открываем задачу...» бесконечно — после Phase 3 route стал redirect-only, fallback inline render удалён.
+- **All-completed:** redirect на `/homework` (preview-QA #10).
+- **Loading state:** placeholder «Загрузка...» / «Открываем задачу...» рендерится пока `data` ещё `null` или `thread` fetching — useEffect re-fires когда data приходит.
+
+**Один компонент, три viewport'а:** `HomeworkProblem.tsx` остаётся единым файлом. Layout branches через Tailwind responsive классы (`md:`, `xl:`) + один JS-уровневый prop branch для `NumericAnswerComposer.hideDiscussion`. Никаких отдельных `MobileHomeworkProblem` / `TabletHomeworkProblem` / `DesktopHomeworkProblem` файлов.
+
+**Breakpoints (canonical):**
+- Mobile: `≤768px` через `useIsMobile()` hook (Phase 1 inclusive `<=` invariant сохранён).
+- Tablet: `769–1279px` через Tailwind `md:` (≥768) минус xl: branches.
+- Desktop: `≥1280px` через Tailwind `xl:` (default Tailwind xl breakpoint).
+
+**AuthGuard responsive fullBleed (`src/components/AuthGuard.tsx`):**
+- Новый prop value `fullBleed='below-xl'` — backward-compat с `boolean`. На `<1280px` рендерится без `<Navigation />` (full-bleed как `fullBleed=true`). На `≥1280px` рендерит `<div className="hidden xl:block"><Navigation /></div>` + `<div className="xl:pt-14">{children}</div>`.
+- Children обязаны учитывать `xl:pt-14` padding-top через CSS-var trick на собственной height: `style={{ '--vv-h': vvHeight } as React.CSSProperties}` + className `h-[var(--vv-h,100vh)] xl:h-[calc(var(--vv-h,100vh)-56px)]`. **Передавать `vvHeight` напрямую** в CSS var — `useVisualViewportHeight()` уже возвращает CSS value string (`'1234px'` или `'100dvh'`). Дописывать `${vvHeight}px` шаблон создаёт invalid `pxpx` (codex re-review fix 2026-05-12).
+- Fallback `100vh` (НЕ `100dvh`) выбран намеренно для Safari 15.0–15.3 compat — наш Vite таргет `safari15` не покрывает `dvh` (стал поддерживаться только с Safari 15.4 в марте 2022). Post-hydration CSS var ресолвится в `${vv.height}px` — реальные пиксели, не зависит от поддержки `dvh`.
+
+**Root container responsive grid (`HomeworkProblem.tsx`):**
+```
+flex flex-col w-full bg-socrat-surface overflow-hidden
+h-[var(--vv-h,100vh)]
+md:grid md:grid-cols-[420px_1fr]
+xl:grid-cols-[460px_1fr] xl:h-[calc(var(--vv-h,100vh)-56px)]
+```
+Mobile: single-column `flex-col`. Tablet: 2-column grid с 420px sidebar. Desktop: 2-column grid с 460px sidebar + total height `var(--vv-h) - 56px` (56px нав).
+
+**Left aside contract (tablet + desktop):**
+- Tablet breadcrumb topbar `md:flex xl:hidden` — back arrow + eyebrow + ДЗ title. Desktop hidden (global `<Navigation />` от AuthGuard выше).
+- Scrollable inner div: `<ProblemContext hideToggle collapsed={false} onToggle={() => undefined}>` — всегда expanded.
+- Sticky bottom footer: `<SubmitCtaBar>` **только** при `task_kind !== 'numeric'`. Numeric tasks используют inline answer field в правой колонке.
+
+**Right column contract:**
+- Mobile-only topbar `md:hidden`.
+- Mobile-only ProblemContext peek `md:hidden` (left aside owns expanded view).
+- Chat thread (`flex-1 min-h-0 overflow-y-auto`) + Tailwind `xl:max-w-3xl xl:mx-auto xl:w-full` (chat bubbles остаются читабельны на 1920×1080+ мониторах).
+- ChatChipRow `hidden md:flex` — tablet+desktop only. Mobile inline hint/mic группа в composer остаётся.
+- NumericAnswerComposer (numeric only): `hideDiscussion={!useIsMobile()}` — на tablet+desktop discussion row + toggle скрыты.
+- **Chat composer row рендерится для (codex re-review fix 2026-05-12):**
+  - Mobile: ТОЛЬКО extended/proof (numeric mobile использует NumericAnswerComposer.Row3 как discussion field).
+  - Tablet/desktop: **ВСЕ task_kinds**, включая numeric. На numeric tablet+ chat composer заменяет hidden discussion row — без него ученик не может задать AI свободный вопрос (это была реальная регрессия первого raft'а Phase 3, поймана reviewer'ом). Условие: `(data.task.task_kind !== 'numeric' || isTabletPlus)`.
+- Mobile-only big-CTA «Сдать решение задачи» в extended/proof composer (`md:hidden` + `task_kind !== 'numeric'` guard). Tablet+desktop CTA в `SubmitCtaBar` левой колонки. Numeric (любой viewport) — submit через inline answer field, big-CTA не рендерится.
+- Inline hint button в extended/proof composer `md:hidden` на tablet+desktop (chip-row выше уже даёт hint). Forced expanded mic group на tablet+ через `micHintExpanded || recorder.isRecording || isTabletPlus`.
+
+**One primary CTA per screen invariant:**
+- Mobile: big-CTA в composer (extended/proof) или inline answer (numeric).
+- Tablet/desktop: `SubmitCtaBar` (extended/proof) или inline `NumericAnswerComposer` answer field (numeric).
+- ChatChipRow **намеренно не дублирует** «Сдать решение» button — только Подсказка (опционально) + Σ Формула slot.
+
+**Chip-row composition (Round 2 walkthrough решение):**
+- Подсказка chip — рендерится только при `showHint=true` (default), parent передаёт `false` для numeric task_kind (hint уже inline в NumericAnswerComposer).
+- Math slot — parent передаёт `<MathQuickPicker trigger={...} />`. Slot pattern (а не `onMathKeyboardClick` callback) нужен чтобы Radix Popover использовал button как positioning anchor — без slot popover открывался бы у `(0,0)` экрана.
+- **«Не понял» chip НЕ реализуется** (Round 2 решение). Не добавлять без отдельной спеки.
+
+**MathQuickPicker контракт:**
+- Phase 3 = простой popover с ~15-18 LaTeX/Unicode templates (`x²`, `\frac{}{}`, греческие, операторы). **Не MathLive** — отложен в Open Question 1 design-handoff.
+- Parent (`HomeworkProblem`) tracks `lastFocusedInputRef` через `onFocusCapture` на right section. Любой `<input>` / `<textarea>` focus event обновляет ref.
+- `insertAtCursor(snippet)` использует `setRangeText(snippet, start, end, 'end')` + manual `dispatchEvent(new Event('input', { bubbles: true }))` (Safari quirk — `setRangeText` не fires `input` events автоматически, React state не обновляется). Try/catch fallback на старых Safari.
+- `onOpenAutoFocus={(e) => e.preventDefault()}` на PopoverContent — keep textarea focus, иначе Radix steals focus и snippet вставляется в position 0.
+
+**SubmitSheet — `sm:max-w-2xl` уже на месте (Phase 1).** Никаких Phase 3 изменений в SubmitSheet.tsx. Mobile (<640px) — full-width bottom-sheet. Tablet+desktop — bottom-centered, max-w-2xl (672px). Animation остаётся `translateY(100% → 0)`.
+
+**ProblemContext.hideToggle (additive prop, default `false`):**
+- При `true` скрывает «Показать задачу / Свернуть» button (Phase 3 always-expanded на tablet/desktop).
+- Mobile (default `false`) — toggle остаётся для peek/expand UX.
+
+**NumericAnswerComposer.hideDiscussion (additive prop, default `false`):**
+- При `true` скрывает Row 2 (toggle button) + Row 3 (collapsible discussion field). Mobile keeps full 3-row layout.
+- На tablet/desktop discussion редundant — chat composer в правой колонке выполняет ту же роль. Без `hideDiscussion` discussion textarea был бы вторым input с теми же event handlers, что путало UX.
+
+**Что переиспользовано без изменений (за исключением additive props выше):**
+- `StepIndicator`, `TaskImagesGallery`, `PhotoStrip`, `TypingDots`, `GuidedChatMessage`.
+- `useStudentProblemTask`, `useStudentAssignment`, `useSubmitSolution`, `useVoiceRecorder`, `useVisualViewportHeight`, `useIsMobile`.
+- API: `studentProblemApi`, `studentHomeworkApi.{requestHint, checkAnswer, saveThreadMessage, uploadStudentThreadImage, transcribeThreadVoice}`, `streamChat`.
+- Backend (`homework-api/index.ts`): не тронут. `handleGetStudentProblem` / `handleStudentSubmission` / `runStudentAnswerGrading` / `THREAD_SELECT` остались Phase 1.
+
+**Файлы Phase 3 (для grep + код-ревью):**
+```
+src/components/AuthGuard.tsx                                          ← fullBleed: boolean | 'below-xl'
+src/App.tsx                                                            ← route: fullBleed="below-xl"
+src/pages/StudentHomeworkDetail.tsx                                    ← redirect-only, universal
+src/pages/student/HomeworkProblem.tsx                                  ← responsive grid + left aside + chip-row + math picker wiring
+src/components/student/homework-problem/ProblemContext.tsx             ← hideToggle prop
+src/components/student/homework-problem/NumericAnswerComposer.tsx      ← hideDiscussion prop
+src/components/student/homework-problem/ChatChipRow.tsx                ← NEW
+src/components/student/homework-problem/SubmitCtaBar.tsx               ← NEW
+src/components/student/homework-problem/MathQuickPicker.tsx            ← NEW
+```
+
+**При расширении Phase 3:**
+1. Новые виды primary CTA (Phase 2 OCR pipeline → 4-verdict overlay etc.) — НЕ добавлять второй primary в правую колонку. SubmitCtaBar остаётся каноническим entry point.
+2. Если понадобится дополнительный chip в ChatChipRow (e.g. «Сбросить чат») — добавлять только через `mathSlot`-style slot, не как hardcoded button. Иначе сломаешь параметризацию.
+3. Hint ladder card в левой колонке desktop — Phase 3 решение **отложить**. Не реализовывать без отдельной спеки. До тех пор hint counter рендерится только в chip-row.
+4. True hint cap (backend `max_hints` колонка в `homework_tutor_tasks`) — Phase 3 решение **no cap везде** (B5 invariant). UI counter остаётся плоским числом, без «N/3» формата.
+5. Phase 4 cleanup spec должен grep'нуть `GuidedHomeworkWorkspace`, `GuidedChatInput`, `TaskStepper` — все три legacy student-side компонента полностью отключены после Phase 3 и могут быть удалены вместе.
+
+**Backward compat & rollback:**
+- Phase 3 backward-compatible с Phase 1 mobile flow (никаких breaking changes на ≤768).
+- Все новые компоненты — additive (новые файлы) или additive props (default-false / backward-compat).
+- `AuthGuard.fullBleed: boolean | 'below-xl'` сохраняет старое поведение для callsite'ов с `fullBleed` или `fullBleed={true}`.
+- Rollback стратегия: `git revert <Phase 3 commits> && deploy-sokratai` (~3 мин).
+
+**Спека:** plan `~/.claude/plans/toasty-weaving-meerkat.md` (4 раунда AskUserQuestion с Vladimir 2026-05-12 + verification checklist).

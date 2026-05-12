@@ -10,6 +10,7 @@ import {
   Paperclip,
   RefreshCw,
   Send,
+  Sigma,
   X,
 } from 'lucide-react';
 import { toast } from 'sonner';
@@ -23,6 +24,9 @@ import {
   getSubmitSheetDraftKey,
 } from '@/components/student/homework-problem/submitSheetInternal';
 import { NumericAnswerComposer } from '@/components/student/homework-problem/NumericAnswerComposer';
+import { ChatChipRow } from '@/components/student/homework-problem/ChatChipRow';
+import { SubmitCtaBar } from '@/components/student/homework-problem/SubmitCtaBar';
+import { MathQuickPicker } from '@/components/student/homework-problem/MathQuickPicker';
 import GuidedChatMessage, { type GuidedMessageData } from '@/components/homework/GuidedChatMessage';
 import { TypingDots } from '@/components/student/homework-problem/TypingDots';
 import sokratChatIcon from '@/assets/sokrat-chat-icon.png';
@@ -31,6 +35,7 @@ import { useStudentAssignment } from '@/hooks/useStudentHomework';
 import { useSubmitSolution } from '@/hooks/useSubmitSolution';
 import { useVisualViewportHeight } from '@/hooks/useVisualViewportHeight';
 import { useVoiceRecorder } from '@/hooks/useVoiceRecorder';
+import { useIsMobile } from '@/hooks/useIsMobile';
 import { trackGuidedHomeworkEvent } from '@/lib/homeworkTelemetry';
 import { getSubjectLabel } from '@/types/homework';
 import type {
@@ -116,6 +121,13 @@ export default function HomeworkProblem() {
   // toggle). Fallback `'100dvh'` for SSR / non-supporting browsers.
   const vvHeight = useVisualViewportHeight();
 
+  // Phase 3 (2026-05-12): tablet/desktop viewport flag for prop-level
+  // adaptations (NumericAnswerComposer.hideDiscussion, etc.). CSS
+  // responsive classes handle most of the layout — this hook only
+  // resolves the rare props that need JS-level branching.
+  const isMobile = useIsMobile();
+  const isTabletPlus = !isMobile;
+
   const threadId = data?.thread?.id ?? null;
 
   // Lock html/body overflow while the problem screen is mounted —
@@ -199,6 +211,43 @@ export default function HomeworkProblem() {
   const [chatDraft, setChatDraft] = useState('');
   const [submitOpen, setSubmitOpen] = useState(false);
   const [attachmentRefs, setAttachmentRefs] = useState<string[]>([]);
+
+  // Phase 3 Commit C: math symbol picker state + last-focused textarea ref.
+  // Tracks the most recently focused <input> / <textarea> inside the
+  // right-column composer so MathQuickPicker can insert a snippet at the
+  // current cursor position when a symbol is clicked.
+  const [mathPickerOpen, setMathPickerOpen] = useState(false);
+  const lastFocusedInputRef = useRef<HTMLInputElement | HTMLTextAreaElement | null>(null);
+  const handleInputFocus = useCallback(
+    (e: React.FocusEvent<HTMLDivElement>) => {
+      const target = e.target;
+      if (
+        target instanceof HTMLInputElement ||
+        target instanceof HTMLTextAreaElement
+      ) {
+        lastFocusedInputRef.current = target;
+      }
+    },
+    [],
+  );
+  const insertMathSnippet = useCallback((snippet: string) => {
+    const el = lastFocusedInputRef.current;
+    if (!el) return;
+    // Some Safari versions don't fire `input` events from setRangeText, so
+    // we dispatch one manually after writing the snippet. This ensures
+    // controlled-component state (React) reflects the inserted text.
+    const start = el.selectionStart ?? el.value.length;
+    const end = el.selectionEnd ?? start;
+    try {
+      el.focus();
+      el.setRangeText(snippet, start, end, 'end');
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+    } catch {
+      // Fallback: append to end if setRangeText throws (very old Safari).
+      el.value = `${el.value}${snippet}`;
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+    }
+  }, []);
 
   // Auto-scroll to bottom on new messages or streaming.
   const chatScrollRef = useRef<HTMLDivElement>(null);
@@ -998,49 +1047,140 @@ export default function HomeworkProblem() {
 
   return (
     <div
-      className="flex w-full flex-col bg-socrat-surface overflow-hidden"
-      style={{ height: vvHeight }}
+      className="
+        flex w-full flex-col bg-socrat-surface overflow-hidden
+        h-[var(--vv-h,100vh)]
+        md:grid md:grid-cols-[420px_1fr]
+        xl:grid-cols-[460px_1fr] xl:h-[calc(var(--vv-h,100vh)-56px)]
+      "
+      style={
+        // useVisualViewportHeight already returns a CSS value string
+        // ('1234px' or '100dvh'). Don't append `px` — that produces
+        // invalid `pxpx` / `100dvhpx`. Pass the string through verbatim.
+        // Fallback `100vh` (in the Tailwind class) covers Safari 15.0-15.3
+        // before our Vite `safari15` target hit `dvh` support (15.4+).
+        { '--vv-h': vvHeight } as React.CSSProperties
+      }
     >
-      {/* Topbar — back → /homework (Q2; preview-QA #3 fix 2026-05-10:
-          было `/student/homework` → 404, потому что список ДЗ ученика
-          живёт на route `/homework` через StudentHomework.tsx). */}
-      <header className="flex items-center gap-2 px-3 py-2 bg-white border-b border-socrat-border-light shrink-0">
-        <button
-          type="button"
-          onClick={() => navigate('/homework')}
-          aria-label="К списку ДЗ"
-          className="grid place-items-center w-10 h-10 rounded-full text-slate-700 hover:bg-socrat-surface hover:text-slate-900 shrink-0 touch-manipulation"
-        >
-          <ChevronLeft className="h-[22px] w-[22px] stroke-2" aria-hidden="true" />
-        </button>
-        <div className="flex-1 min-w-0">
-          <div className="text-[11px] font-bold uppercase tracking-[0.05em] text-socrat-primary truncate">
-            {eyebrow}
+      {/* Left aside — tablet/desktop only.
+          Phase 3 (2026-05-12): split-layout sidebar with breadcrumb (tablet
+          only — desktop ≥xl uses global <Navigation />), full StepIndicator
+          + always-expanded ProblemContext (incl. body, image gallery,
+          warn-banner). Sticky SubmitCtaBar at the bottom (Commit B). */}
+      <aside className="hidden md:flex md:flex-col md:border-r md:border-socrat-border-light md:bg-white md:overflow-hidden">
+        {/* Tablet breadcrumb topbar — hidden on desktop (global nav owns it). */}
+        <header className="md:flex xl:hidden items-center gap-2 px-4 py-3 border-b border-socrat-border-light shrink-0">
+          <button
+            type="button"
+            onClick={() => navigate('/homework')}
+            aria-label="К списку ДЗ"
+            className="grid place-items-center w-10 h-10 rounded-full text-slate-700 hover:bg-socrat-surface hover:text-slate-900 shrink-0 touch-manipulation"
+          >
+            <ChevronLeft className="h-[22px] w-[22px] stroke-2" aria-hidden="true" />
+          </button>
+          <div className="flex-1 min-w-0">
+            <div className="text-[11px] font-bold uppercase tracking-[0.05em] text-socrat-primary truncate">
+              {eyebrow}
+            </div>
+            <h1 className="text-sm font-bold text-slate-900 leading-tight truncate m-0">
+              {data.assignment.title}
+            </h1>
           </div>
-          <h1 className="text-sm font-bold text-slate-900 leading-tight truncate m-0">
-            {data.assignment.title}
-          </h1>
-        </div>
-      </header>
+        </header>
 
-      {/* Problem context (peek/expanded) + clickable step indicator */}
-      {problemContextTask ? (
-        <div className="px-3 pt-3 shrink-0">
-          <ProblemContext
-            task={problemContextTask}
-            collapsed={contextCollapsed}
-            onToggle={() => setContextCollapsed((v) => !v)}
-            compact
-            assignmentId={data.assignment.id}
-            onStepClick={handleStepClick}
-          />
+        {/* Scrollable problem-context area */}
+        <div className="flex-1 min-h-0 overflow-y-auto px-5 py-4 space-y-4">
+          {problemContextTask ? (
+            <ProblemContext
+              task={problemContextTask}
+              collapsed={false}
+              onToggle={() => undefined}
+              hideToggle
+              assignmentId={data.assignment.id}
+              onStepClick={handleStepClick}
+            />
+          ) : null}
         </div>
-      ) : null}
+
+        {/* Sticky bottom CTA — only for extended/proof (numeric uses inline
+            answer field in the right column, not SubmitSheet). One primary
+            CTA per screen — chip-row above the composer does NOT duplicate
+            this button (Round 2 walkthrough invariant). */}
+        {data.task.task_kind !== 'numeric' ? (
+          <SubmitCtaBar
+            onOpen={() => {
+              // Preview-QA #10 (2026-05-11) codex review #7 fix: real
+              // hadDraft instead of hardcoded false.
+              const draftKey = getSubmitSheetDraftKey(taskId ?? data.task.id);
+              const hadDraft =
+                typeof window !== 'undefined' &&
+                Boolean(window.localStorage.getItem(draftKey));
+              trackGuidedHomeworkEvent('student_submitsheet_opened', {
+                assignmentId: data.assignment.id,
+                taskId: data.task.id,
+                hadDraft,
+              });
+              setSubmitOpen(true);
+            }}
+            isCompleted={isCurrentCompleted}
+            hasNextTask={Boolean(nextTaskId)}
+            onNavigateNext={() => navigateAfterCorrect()}
+          />
+        ) : null}
+      </aside>
+
+      {/* Right column wrapper — chat thread + composer.
+          On mobile (single column): everything below (topbar + peek ProblemContext
+          + chat + composer) renders in document flow. On tablet/desktop:
+          grid places this section in col-start-2 next to the aside.
+
+          `onFocusCapture` tracks the last-focused <input>/<textarea> so the
+          `MathQuickPicker` can target the right element for cursor insertion. */}
+      <section
+        className="flex flex-col w-full min-h-0 md:overflow-hidden"
+        onFocusCapture={handleInputFocus}
+      >
+        {/* Mobile-only topbar — hidden at md+ (left aside has its own).
+            Preview-QA #3 fix 2026-05-10: back → /homework (route exists
+            on StudentHomework.tsx); /student/homework is 404. */}
+        <header className="md:hidden flex items-center gap-2 px-3 py-2 bg-white border-b border-socrat-border-light shrink-0">
+          <button
+            type="button"
+            onClick={() => navigate('/homework')}
+            aria-label="К списку ДЗ"
+            className="grid place-items-center w-10 h-10 rounded-full text-slate-700 hover:bg-socrat-surface hover:text-slate-900 shrink-0 touch-manipulation"
+          >
+            <ChevronLeft className="h-[22px] w-[22px] stroke-2" aria-hidden="true" />
+          </button>
+          <div className="flex-1 min-w-0">
+            <div className="text-[11px] font-bold uppercase tracking-[0.05em] text-socrat-primary truncate">
+              {eyebrow}
+            </div>
+            <h1 className="text-sm font-bold text-slate-900 leading-tight truncate m-0">
+              {data.assignment.title}
+            </h1>
+          </div>
+        </header>
+
+        {/* Mobile-only Problem context peek/expanded — hidden at md+
+            (left aside renders an always-expanded copy). */}
+        {problemContextTask ? (
+          <div className="md:hidden px-3 pt-3 shrink-0">
+            <ProblemContext
+              task={problemContextTask}
+              collapsed={contextCollapsed}
+              onToggle={() => setContextCollapsed((v) => !v)}
+              compact
+              assignmentId={data.assignment.id}
+              onStepClick={handleStepClick}
+            />
+          </div>
+        ) : null}
 
       {/* Chat thread — flex-1 with scroll */}
       <div
         ref={chatScrollRef}
-        className="flex-1 min-h-0 overflow-y-auto flex flex-col gap-3 px-3.5 pt-2 pb-3.5 [-webkit-overflow-scrolling:touch] [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden"
+        className="flex-1 min-h-0 overflow-y-auto flex flex-col gap-3 px-3.5 pt-2 pb-3.5 xl:max-w-3xl xl:mx-auto xl:w-full [-webkit-overflow-scrolling:touch] [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden"
       >
         {messages.length === 0 && !streamingText ? (
           <div
@@ -1156,6 +1296,37 @@ export default function HomeworkProblem() {
             - 'extended' / 'proof' → existing big-CTA composer (открывает
               SubmitSheet для photo + numeric + text + voice).
        */}
+      {/* Tablet/desktop chip-row — Подсказка (extended/proof) + Σ Формула.
+          Hidden on mobile (mobile composer has its own inline hint/mic
+          group). The math button is supplied as a slot so MathQuickPicker
+          can use it as the popover anchor (cursor position preserved). */}
+      <ChatChipRow
+        className="hidden md:flex"
+        hintCount={hintCount}
+        isRequestingHint={isRequestingHint}
+        disabled={isStreaming || isCurrentCompleted}
+        onHintClick={handleHintClick}
+        showHint={data.task.task_kind !== 'numeric'}
+        mathSlot={
+          <MathQuickPicker
+            open={mathPickerOpen}
+            onOpenChange={setMathPickerOpen}
+            insertAtCursor={insertMathSnippet}
+            trigger={
+              <button
+                type="button"
+                disabled={isStreaming || isCurrentCompleted}
+                aria-label="Открыть набор математических символов"
+                className="inline-flex items-center gap-1.5 h-9 px-3 rounded-full bg-slate-50 border border-socrat-border-light text-slate-700 text-sm font-semibold hover:bg-slate-100 hover:border-socrat-border touch-manipulation transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <Sigma className="h-[14px] w-[14px]" aria-hidden="true" />
+                <span>Формула</span>
+              </button>
+            }
+          />
+        }
+      />
+
       {data.task.task_kind === 'numeric' ? (
         <NumericAnswerComposer
           answerDraft={answerDraft}
@@ -1182,10 +1353,30 @@ export default function HomeworkProblem() {
           isCurrentCompleted={isCurrentCompleted}
           hasNextTask={Boolean(nextTaskId)}
           onNavigateNext={() => navigateAfterCorrect()}
+          hideDiscussion={isTabletPlus}
         />
-      ) : (
+      ) : null}
+
+      {/* Chat composer row (paperclip + textarea + mic + send).
+          Phase 3 codex re-review fix (2026-05-12): rendered for:
+            - Mobile: only extended/proof (numeric uses NumericAnswerComposer's
+              own 3-row layout including discussion field at the bottom).
+            - Tablet/desktop: ALL task_kinds. On numeric task_kind
+              `NumericAnswerComposer.hideDiscussion=true` strips its Row 2/3 —
+              this composer row replaces the discussion entry point so the
+              student can still ask AI a free-form question on numeric tasks.
+          The big-CTA «Сдать решение задачи» button below is mobile-only and
+          extended/proof-only (numeric submits via inline answer; tablet+
+          uses SubmitCtaBar in the left aside). */}
+      {(data.task.task_kind !== 'numeric' || isTabletPlus) ? (
       <div className="flex flex-col gap-2 bg-white border-t border-socrat-border-light px-2.5 pt-2 pb-2.5 shrink-0">
-        {/* Primary CTA — extended / proof: открывает SubmitSheet */}
+        {/* Primary CTA — mobile-only AND extended/proof-only.
+            - Tablet/desktop: SubmitCtaBar in the left aside owns it
+              (one-primary-CTA-per-screen invariant).
+            - Numeric tablet/desktop: this composer row renders for chat
+              discussion, but submission happens via inline answer field
+              above — no big CTA needed in either case. */}
+        {data.task.task_kind !== 'numeric' ? (
         <button
           type="button"
           onClick={() => {
@@ -1207,7 +1398,7 @@ export default function HomeworkProblem() {
             });
             setSubmitOpen(true);
           }}
-          className="flex items-center gap-2.5 w-full px-3 py-2.5 bg-socrat-primary hover:bg-socrat-primary-dark text-white rounded-[14px] text-left transition-colors touch-manipulation"
+          className="md:hidden flex items-center gap-2.5 w-full px-3 py-2.5 bg-socrat-primary hover:bg-socrat-primary-dark text-white rounded-[14px] text-left transition-colors touch-manipulation"
           aria-label={isCurrentCompleted ? 'Следующая задача' : 'Сдать решение задачи'}
         >
           <span className="grid place-items-center w-7 h-7 rounded-full bg-white/20 shrink-0">
@@ -1226,6 +1417,7 @@ export default function HomeworkProblem() {
             </span>
           </span>
         </button>
+        ) : null}
 
         {/* Attachment previews */}
         {attachmentRefs.length > 0 ? (
@@ -1297,8 +1489,13 @@ export default function HomeworkProblem() {
                 - 💡 → requestHint API (hint_reply bubble lands in chat)
                 - 🎤 → startRecording (during recording stays expanded
                        with MicOff icon for stop). After both actions
-                       group collapses back. */}
-          {micHintExpanded || recorder.isRecording ? (
+                       group collapses back.
+
+              Phase 3 (2026-05-12): on tablet/desktop (`md+`) the hint
+              button is hidden — it's already in the chip-row above the
+              composer. We also force expanded mode so the mic button
+              is always visible (collapsed standalone hint is hidden). */}
+          {micHintExpanded || recorder.isRecording || isTabletPlus ? (
             <>
               <button
                 type="button"
@@ -1311,7 +1508,7 @@ export default function HomeworkProblem() {
                   recorder.isRecording
                 }
                 onClick={handleHintClick}
-                className="grid place-items-center w-9 h-10 rounded-[10px] text-amber-600 hover:bg-amber-50 hover:text-amber-700 shrink-0 touch-manipulation transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                className="md:hidden grid place-items-center w-9 h-10 rounded-[10px] text-amber-600 hover:bg-amber-50 hover:text-amber-700 shrink-0 touch-manipulation transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {isRequestingHint ? (
                   <Loader2 className="h-[18px] w-[18px] animate-spin" aria-hidden="true" />
@@ -1344,7 +1541,7 @@ export default function HomeworkProblem() {
               aria-expanded={false}
               disabled={isStreaming || isTranscribing}
               onClick={() => setMicHintExpanded(true)}
-              className="grid place-items-center w-9 h-10 rounded-[10px] text-amber-600 hover:bg-amber-50 hover:text-amber-700 shrink-0 touch-manipulation transition-colors disabled:opacity-50"
+              className="md:hidden grid place-items-center w-9 h-10 rounded-[10px] text-amber-600 hover:bg-amber-50 hover:text-amber-700 shrink-0 touch-manipulation transition-colors disabled:opacity-50"
             >
               <Lightbulb className="h-[18px] w-[18px]" aria-hidden="true" />
             </button>
@@ -1365,7 +1562,9 @@ export default function HomeworkProblem() {
           </button>
         </div>
       </div>
-      )}
+      ) : null}
+
+      </section>
 
       <SubmitSheet
         open={submitOpen}

@@ -1,7 +1,9 @@
 # Phase 3 handoff: tablet + desktop split layouts
 
-**Дата:** 2026-05-11
-**Цель новой сессии:** реализовать **tablet (834×1100) + desktop (1280×860)** layouts для `/student/homework/:hwId/problem/:taskId`. Mobile (≤768px) уже live в production.
+**Status (2026-05-12):** ✅ **DONE.** Phase 3 залендился в одну сессию (4 раунда walkthrough с Vladimir + commit A/B/C inside single PR). Canonical контракт — `.claude/rules/40-homework-system.md` → секция «Student Homework Problem Screen — Phase 3 split layouts (2026-05-12)». Plan: `~/.claude/plans/toasty-weaving-meerkat.md`. Этот handoff документ оставлен как исторический reference (open questions Q1–Q6 + decision rationale).
+
+**Дата (handoff written):** 2026-05-11
+**Цель сессии:** реализовать **tablet (834×1100) + desktop (1280×860)** layouts для `/student/homework/:hwId/problem/:taskId`. Mobile (≤768px) уже live в production.
 **Дизайн ref:** `docs/design_handoff_homework_chat/README.md` + три mock-screenshot'а (Mobile / Tablet / Desktop) — пользователь покажет, или см. `*.jsx`/screenshots в той же папке.
 
 ---

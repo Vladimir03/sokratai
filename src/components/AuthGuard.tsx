@@ -5,23 +5,37 @@ import { claimPendingInvite } from "@/lib/inviteApi";
 import Navigation from "./Navigation";
 import OnboardingModal from "./OnboardingModal";
 
+/**
+ * `fullBleed` rendering modes:
+ * - `true` — no `<Navigation />`, no padding wrapper at any viewport.
+ *   Mobile-first full-bleed screens (`HomeworkProblem` Phase 1).
+ * - `'below-xl'` — no chrome on `<1280px` (mobile + tablet); regular
+ *   `<Navigation />` + `xl:pt-14` wrapper on `≥1280px` (desktop). Used by
+ *   Phase 3 split-layout where tablet has its own breadcrumb topbar but
+ *   desktop shows the global tabs. Padding-top 56px matches Navigation
+ *   `h-14`; consumer is responsible for height accounting (e.g.
+ *   `xl:h-[calc(var(--vv-h,100vh)-56px)]` — `100vh` fallback chosen over
+ *   `100dvh` for Safari 15.0–15.3 compat; see `HomeworkProblem.tsx`).
+ * - `false` / undefined — default. `<Navigation />` + `pt-14 pb-20` wrapper
+ *   at all viewports.
+ *
+ * Auth check (redirect to `/login` if no session) fires in all modes.
+ * **OnboardingModal is intentionally suppressed in `fullBleed=true` and
+ * `'below-xl'` modes** — these surfaces are student-first homework UX
+ * where blocking onboarding modal interrupts task solving (preview-QA #10
+ * product decision 2026-05-11). Only the default mode (no `fullBleed` /
+ * `false`) renders the modal.
+ *
+ * Codex re-review #3 (2026-05-09): the `/student/homework/:hwId/problem/
+ * :taskId` route was previously mounted outside any auth guard, so a direct
+ * unauthenticated URL got the page's generic "Не удалось загрузить задачу"
+ * instead of the standard auth redirect.
+ */
+type FullBleedScope = boolean | 'below-xl';
+
 interface AuthGuardProps {
   children: React.ReactNode;
-  /**
-   * When `true`, skip the global `<Navigation />` chrome and the surrounding
-   * `pt-14 pb-20` padding wrapper. The student `HomeworkProblem` mobile
-   * screen owns its own full-bleed (`100dvh`) layout — wrapping it in the
-   * default chrome eats the topbar and adds dead space at the bottom.
-   *
-   * Auth check (redirect to `/login` if no session) and the onboarding
-   * modal continue to fire — only chrome rendering is opted out.
-   *
-   * Codex re-review #3 (2026-05-09): the `/student/homework/:hwId/problem/
-   * :taskId` route was previously mounted outside any auth guard, so a
-   * direct unauthenticated URL got the page's generic "Не удалось загрузить
-   * задачу" instead of the standard auth redirect.
-   */
-  fullBleed?: boolean;
+  fullBleed?: FullBleedScope;
 }
 
 const AuthGuard = ({ children, fullBleed = false }: AuthGuardProps) => {
@@ -82,7 +96,7 @@ const AuthGuard = ({ children, fullBleed = false }: AuthGuardProps) => {
     );
   }
 
-  if (fullBleed) {
+  if (fullBleed === true) {
     // Preview-QA #10 (2026-05-11): suppress OnboardingModal на fullBleed
     // routes. Vladimir's product decision — «не блокировать ученика
     // onboarding modal: если переходит в ДЗ, пусть сразу решает».
@@ -91,6 +105,25 @@ const AuthGuard = ({ children, fullBleed = false }: AuthGuardProps) => {
     // Phase 2 добавит soft prompt после первого submission или
     // tutor-side enforcement.
     return <>{children}</>;
+  }
+
+  if (fullBleed === 'below-xl') {
+    // Phase 3 split-layout: tablet (<1280) — full-bleed, desktop (≥1280) —
+    // global `<Navigation />` shown. Same onboarding-suppress rationale as
+    // above (homework is student-first surface). Children handle their own
+    // height accounting (e.g. `h-[var(--vv-h,100dvh)] xl:h-[calc(100dvh-56px)]`)
+    // since `xl:pt-14` only pushes content below the fixed nav, it does
+    // not shrink children's explicit height.
+    return (
+      <>
+        <div className="hidden xl:block">
+          <Navigation />
+        </div>
+        <div className="xl:pt-14">
+          {children}
+        </div>
+      </>
+    );
   }
 
   return (

@@ -204,7 +204,7 @@ const App = () => (
             <Route
               path="/student/homework/:hwId/problem/:taskId"
               element={
-                <AuthGuard fullBleed>
+                <AuthGuard fullBleed="below-xl">
                   <Suspense fallback={<PageLoader />}>
                     <HomeworkProblem />
                   </Suspense>
