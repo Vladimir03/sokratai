@@ -1,12 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Camera, ImageIcon, Loader2, X } from 'lucide-react';
+import { Camera, Loader2, X } from 'lucide-react';
 import { toast } from 'sonner';
 import {
   getStudentTaskImageSignedUrl,
   uploadStudentThreadImage,
   StudentHomeworkApiError,
 } from '@/lib/studentHomeworkApi';
-import { useIsMobile } from '@/hooks/useIsMobile';
 
 const ALLOWED_TYPES = ['image/jpeg', 'image/png', 'image/heic', 'image/heif', 'image/webp'];
 const HEIC_NAME_RX = /\.(heic|heif)$/i;
@@ -36,17 +35,14 @@ interface PhotoStripProps {
  * Tile metrics: 96×124 (96 thumbnail + 28 caption space). Horizontal scroll
  * with `touch-pan-x` so iOS Safari doesn't swallow swipe via row click.
  *
- * Source picker (2026-05-12):
- *   - Strip add-tile (dashed border, camera icon) → `galleryInputRef`
- *     (no `capture` → native OS picker shows camera + gallery + files on
- *     iOS; opens gallery / file browser on Android / desktop).
- *   - **Mobile only** (`useIsMobile`): explicit `[Камера]` + `[Из галереи]`
- *     buttons below the strip. Camera button uses `capture="environment"`
- *     to force rear camera — Android Chrome's native picker doesn't
- *     reliably surface camera as a top-level option for `image/*`, this
- *     gives a consistent cross-platform UX. Per Vladimir 2026-05-12.
- *   - Tablet/desktop: only the strip tile is rendered — explicit source
- *     buttons would be noise (desktop ignores `capture`, no camera UX).
+ * Source picker: strip add-tile triggers a hidden `<input type="file"
+ * accept="image/*" multiple>` WITHOUT `capture`. iOS Safari natively shows
+ * «Photo Library / Take Photo / Choose Files» action sheet; Android Chrome
+ * shows its app picker (camera + gallery + files); desktop opens file
+ * browser. Same pattern as the homework chat composer paperclip — single
+ * input, native OS handles the source choice. Explicit `[Камера]` /
+ * `[Из галереи]` buttons were considered but rolled back 2026-05-12 — they
+ * duplicate what the OS picker already offers and add UI noise.
  *
  * Thumbnails are resolved via `getStudentTaskImageSignedUrl` lazily and
  * cached in component state. We tolerate failed resolves silently — fallback
@@ -62,15 +58,7 @@ export function PhotoStrip({
   threadId = '',
   disabled = false,
 }: PhotoStripProps) {
-  // Two hidden inputs on mobile (2026-05-12): explicit `[Камера]` /
-  // `[Из галереи]` buttons under the strip. Native iOS sheet shows both
-  // options for `accept="image/*"` without capture, but Android Chrome's
-  // picker is inconsistent. Explicit buttons give a discoverable, cross-
-  // platform UX. On tablet/desktop the strip tile uses the gallery input
-  // directly (no capture) — desktop has no camera workflow.
-  const galleryInputRef = useRef<HTMLInputElement>(null);
-  const cameraInputRef = useRef<HTMLInputElement>(null);
-  const isMobile = useIsMobile();
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [thumbUrls, setThumbUrls] = useState<Record<string, string | null>>({});
   const [uploadingCount, setUploadingCount] = useState(0);
 
@@ -151,14 +139,9 @@ export function PhotoStrip({
     [hwId, max, onAdd, photos.length, taskOrder, threadId],
   );
 
-  const handleGalleryClick = useCallback(() => {
+  const handleAddClick = useCallback(() => {
     if (disabled) return;
-    galleryInputRef.current?.click();
-  }, [disabled]);
-
-  const handleCameraClick = useCallback(() => {
-    if (disabled) return;
-    cameraInputRef.current?.click();
+    fileInputRef.current?.click();
   }, [disabled]);
 
   const onChange = useCallback(
@@ -175,31 +158,16 @@ export function PhotoStrip({
 
   return (
     <div className="flex flex-col gap-2">
-      {/* Gallery input — no `capture`. iOS Safari shows native picker
-          («Photo Library / Take Photo / Choose Files»). Android Chrome
-          opens gallery / file browser. Tablet/desktop tile uses this
-          input directly via `handleGalleryClick`. Mobile «Из галереи»
-          button also uses it. */}
+      {/* Single hidden input — no `capture` attribute. iOS Safari shows
+          native action sheet («Photo Library / Take Photo / Choose Files»),
+          Android Chrome shows its app picker (camera + gallery + files),
+          desktop opens file browser. Same pattern as the homework chat
+          composer paperclip — native OS handles source choice. */}
       <input
-        ref={galleryInputRef}
+        ref={fileInputRef}
         type="file"
         accept="image/*"
         multiple
-        className="hidden"
-        onChange={onChange}
-        aria-hidden="true"
-      />
-      {/* Camera input — `capture="environment"` forces rear camera on
-          mobile. Mobile-only — desktop browsers ignore `capture` (no-op).
-          Triggered via the explicit «Камера» button below the strip on
-          mobile (2026-05-12 fix per Vladimir request — Android Chrome
-          native picker doesn't reliably surface camera as an option for
-          `image/*` inputs, explicit button solves cross-platform). */}
-      <input
-        ref={cameraInputRef}
-        type="file"
-        accept="image/*"
-        capture="environment"
         className="hidden"
         onChange={onChange}
         aria-hidden="true"
@@ -269,7 +237,7 @@ export function PhotoStrip({
         {canAddMore && (
           <button
             type="button"
-            onClick={handleGalleryClick}
+            onClick={handleAddClick}
             aria-label={photos.length === 0 ? 'Добавить страницу' : 'Добавить ещё страницу'}
             className="relative flex flex-col items-center justify-center gap-1.5 w-24 h-[124px] shrink-0 rounded-[10px] border-2 border-dashed border-socrat-border bg-white text-socrat-muted hover:border-socrat-primary hover:text-socrat-primary touch-manipulation transition-colors"
           >
@@ -280,35 +248,6 @@ export function PhotoStrip({
           </button>
         )}
       </div>
-
-      {/* Mobile-only explicit source buttons (2026-05-12 per design handoff
-          §PhotoStrip line 197). На iOS native picker `accept="image/*"`
-          уже показывает choice, но Android Chrome не всегда — explicit
-          buttons дают консистентный cross-platform UX. На tablet/desktop
-          кнопки скрыты — там dashed-тайл выше уже открывает picker
-          (desktop камера-input no-op anyway). */}
-      {isMobile && canAddMore ? (
-        <div className="flex gap-2 pt-1">
-          <button
-            type="button"
-            onClick={handleCameraClick}
-            aria-label="Сфотографировать решение камерой"
-            className="flex-1 inline-flex items-center justify-center gap-2 h-11 px-3 rounded-xl bg-white border border-socrat-border text-slate-700 text-sm font-semibold hover:bg-socrat-surface hover:border-socrat-primary hover:text-socrat-primary touch-manipulation transition-colors"
-          >
-            <Camera className="h-4 w-4" aria-hidden="true" />
-            <span>Камера</span>
-          </button>
-          <button
-            type="button"
-            onClick={handleGalleryClick}
-            aria-label="Выбрать фото из галереи"
-            className="flex-1 inline-flex items-center justify-center gap-2 h-11 px-3 rounded-xl bg-white border border-socrat-border text-slate-700 text-sm font-semibold hover:bg-socrat-surface hover:border-socrat-primary hover:text-socrat-primary touch-manipulation transition-colors"
-          >
-            <ImageIcon className="h-4 w-4" aria-hidden="true" />
-            <span>Из галереи</span>
-          </button>
-        </div>
-      ) : null}
     </div>
   );
 }
