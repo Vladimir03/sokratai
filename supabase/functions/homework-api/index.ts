@@ -17,6 +17,7 @@ import {
   parseAttachmentUrls,
 } from "../_shared/attachment-refs.ts";
 import { rewriteToProxy, SUPABASE_PROXY_URL } from "../_shared/proxy-url.ts";
+import { buildLimitReachedResponse, checkAiQuota } from "../_shared/subscription-limits.ts";
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
@@ -6589,6 +6590,24 @@ async function handleCheckAnswer(
     return jsonError(cors, 400, "ALREADY_COMPLETED", "Thread is already completed");
   }
 
+  // AI-quota gate. Free-students with a paying tutor get 50/day (vs 10) in homework context.
+  // Mirrors chat/index.ts — single source of truth is checkAiQuota / get_subscription_status RPC.
+  const quotaResult = await checkAiQuota(userId, db, {
+    incrementUsage: true,
+    context: "homework",
+  });
+  if (!quotaResult.allowed) {
+    console.warn(JSON.stringify({
+      event: "homework_ai_quota_reached",
+      handler: "handleCheckAnswer",
+      userId,
+      limit: quotaResult.limit,
+      messagesUsed: quotaResult.messagesUsed,
+      tutorCanUpgrade: quotaResult.tutorCanUpgrade,
+    }));
+    return buildLimitReachedResponse(quotaResult, cors);
+  }
+
   const b = (body && typeof body === "object") ? body as Record<string, unknown> : {};
   const answer = typeof b.answer === "string" ? b.answer.trim() : "";
   if (!answer) {
@@ -6805,6 +6824,25 @@ async function handleStudentSubmission(
     return jsonError(cors, 404, "NOT_FOUND", "Assignment not found");
   }
   const studentAssignment = sa as { id: string; assignment_id: string; student_id: string };
+
+  // 3a. AI-quota gate (mirror handleCheckAnswer). Free-students with a paying tutor get
+  // 50/day (vs 10) in homework context. Submission triggers runStudentAnswerGrading which
+  // runs evaluateStudentAnswer — same AI cost as chat-path check, so charge accordingly.
+  const quotaResult = await checkAiQuota(userId, db, {
+    incrementUsage: true,
+    context: "homework",
+  });
+  if (!quotaResult.allowed) {
+    console.warn(JSON.stringify({
+      event: "homework_ai_quota_reached",
+      handler: "handleStudentSubmission",
+      userId,
+      limit: quotaResult.limit,
+      messagesUsed: quotaResult.messagesUsed,
+      tutorCanUpgrade: quotaResult.tutorCanUpgrade,
+    }));
+    return buildLimitReachedResponse(quotaResult, cors);
+  }
 
   // 4. Validate photo refs through the canonical student-side validator.
   //    Same Patch B+2 / SSRF / bucket whitelist guards as handleCheckAnswer.
@@ -7056,6 +7094,24 @@ async function handleRequestHint(
 
   if (thread.status === "completed") {
     return jsonError(cors, 400, "ALREADY_COMPLETED", "Thread is already completed");
+  }
+
+  // AI-quota gate (same contract as handleCheckAnswer). Free-students with a paying tutor
+  // get 50/day (vs 10) in homework context.
+  const quotaResult = await checkAiQuota(userId, db, {
+    incrementUsage: true,
+    context: "homework",
+  });
+  if (!quotaResult.allowed) {
+    console.warn(JSON.stringify({
+      event: "homework_ai_quota_reached",
+      handler: "handleRequestHint",
+      userId,
+      limit: quotaResult.limit,
+      messagesUsed: quotaResult.messagesUsed,
+      tutorCanUpgrade: quotaResult.tutorCanUpgrade,
+    }));
+    return buildLimitReachedResponse(quotaResult, cors);
   }
 
   const b = (body && typeof body === "object") ? body as Record<string, unknown> : {};

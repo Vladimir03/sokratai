@@ -840,9 +840,9 @@ SELECT COUNT(*) FROM public.mock_exam_variant_tasks WHERE variant_id = '36cebc45
 
 **Спека:** `docs/delivery/features/mock-exams-v1/spec.md` AC-5 + tasks.md TASK-13 (mockup Screen 6).
 
-### 16. Student Homework Problem Screen — single-task surface + submission contract (Phase 1, 2026-05-09)
+### 16. Student Homework Problem Screen — single-task surface + submission contract (Phase 1, 2026-05-09; Phase 3 landed 2026-05-12)
 
-Phase 1 mobile-first student-side homework problem screen. Mobile (`viewport ≤768px`) на route `/student/homework/:hwId/problem/:taskId`; desktop/tablet продолжают использовать existing `GuidedHomeworkWorkspace` до Phase 4 cutover. **Без feature flag** — раскатка сразу всем mobile-юзерам. Полный контракт (handlers / migrations / anti-leak / shared helper / viewport routing) в `.claude/rules/40-homework-system.md` → секция «Student Homework Problem Screen — single-task surface + submission contract».
+Phase 1 mobile-first student-side homework problem screen. Mobile (`viewport ≤768px`) на route `/student/homework/:hwId/problem/:taskId`. **Phase 3 (2026-05-12, ✅ landed)** расширил screen на tablet (769–1279) + desktop (≥1280) split layout — `StudentHomeworkDetail` стал redirect-only для **всех** viewport'ов (`useIsMobile()` gate удалён), legacy `GuidedHomeworkWorkspace` рендеринг отключён со student-side (физическое удаление файла отложено на Phase 4 cleanup spec). **Без feature flag** — раскатка сразу всем юзерам. Полный контракт (handlers / migrations / anti-leak / shared helper / viewport routing / Phase 3 split layouts) в `.claude/rules/40-homework-system.md` → секции «Student Homework Problem Screen — single-task surface + submission contract» + «Student Homework Problem Screen — Phase 3 split layouts (2026-05-12)».
 
 **Migrations (2):**
 - `20260509120000_add_task_kind_to_homework_tasks.sql` — `homework_tutor_tasks.task_kind text NOT NULL DEFAULT 'extended' CHECK IN ('numeric','extended','proof')` + backfill из `check_format`.
@@ -864,7 +864,7 @@ Phase 1 mobile-first student-side homework problem screen. Mobile (`viewport ≤
 
 **THREAD_SELECT extended (2026-05-09):** добавлен `submission_payload` в nested message select. При добавлении нового nullable поля в messages, видимого ученику — расширять `THREAD_SELECT` явно, не `select("*")`.
 
-**Старая `/homework/:id` сurface остаётся** (GuidedHomeworkWorkspace) — для desktop/tablet и как fallback. Phase 4 cutover (отдельная спека) удалит viewport branch + старый workspace.
+**Старая `/homework/:id` сurface стала redirect-only после Phase 3** (2026-05-12) — для **всех** viewport'ов редирект на `/student/homework/:hwId/problem/:taskId` со smart fallback (current_task_id → first not-completed → tasks[0]). Inline `GuidedHomeworkWorkspace` рендеринг удалён со student-side. Phase 4 cleanup spec физически удалит `GuidedHomeworkWorkspace.tsx` + `GuidedChatInput.tsx` + `TaskStepper.tsx` после Phase 3 stable ≥7 дней.
 
 **Hybrid first-completed-wins (TASK-8, 2026-05-09):** чат incremental (`handleCheckAnswer` через каждое user-сообщение) И SubmitSheet single-shot (`POST /student/problem/.../submission`) пишут в одно `task_state`. Whichever path первым выставит `status='completed'` — фиксирует score; второй после completion = 409-style ignore + SubmitSheet CTA меняется на «Следующая задача →».
 
@@ -872,9 +872,57 @@ Phase 1 mobile-first student-side homework problem screen. Mobile (`viewport ≤
 
 **Viewport routing hook:** Phase 1 routing использует **новый** `@/hooks/useIsMobile.ts` (inclusive `(max-width: 768px)`, SSR-safe initial state). Legacy `@/hooks/use-mobile.tsx::useIsMobile` (exclusive `<768`, undefined initial) **не подходит** для problem-screen routing — оставлен только для chrome callsite'ов (`MobileTopBar`, etc.). Канонический gate для нового screen — только новый hook.
 
-**Phase split + rollout summary:** Phase 2 (Gemini OCR + 4 verdicts + voice + autosave) / Phase 3 (tablet + desktop) / Phase 4 (cutover, удалить `GuidedHomeworkWorkspace`) — каждая отдельной спекой. Полный rollout-summary + Phase split table + hook canonicalization → `.claude/rules/40-homework-system.md` → секция «Student Homework Problem Screen — viewport routing + submission contract (2026-05-09)» (в дополнение к существующей детальной секции «single-task surface + submission contract»).
+**Phase split + rollout summary:**
+- **Phase 1 (mobile)** — ✅ landed 2026-05-09.
+- **Phase 2 (grading pipeline)** — deferred. Gemini OCR + 4 verdicts (`no-work` / `step-error` / `unclear`) + voice recorder в SubmitSheet + autosave drafts + tutor task_kind selector в `TutorHomeworkCreate`. Spec: TBD `student-homework-problem-grading-pipeline.md`.
+- **Phase 3 (tablet + desktop split layouts)** — ✅ landed 2026-05-12. Plan-only spec `~/.claude/plans/toasty-weaving-meerkat.md`. Universal redirect (часть Phase 4 scope landed раньше), `AuthGuard fullBleed='below-xl'`, новые компоненты `ChatChipRow` / `SubmitCtaBar` / `MathQuickPicker`, additive props `ProblemContext.hideToggle` / `NumericAnswerComposer.hideDiscussion`.
+- **Phase 4 (cutover cleanup)** — partial. Universal redirect уже в Phase 3. Осталось: физически удалить `GuidedHomeworkWorkspace.tsx` + `GuidedChatInput.tsx` + `TaskStepper.tsx`. Spec: TBD `student-homework-problem-cutover.md`.
+
+Полный rollout-summary + Phase split table + hook canonicalization → `.claude/rules/40-homework-system.md` → секции «Student Homework Problem Screen — viewport routing + submission contract (2026-05-09)» + «Student Homework Problem Screen — Phase 3 split layouts (2026-05-12)».
 
 **Спека:** `docs/delivery/features/student-homework-problem-screen/spec.md` (Phase 1, AC-1..AC-11).
+
+### 17. AI quota model — context-aware daily limit (2026-05-12)
+
+Дневной лимит AI-сообщений теперь **context-aware**. Free-ученик с хотя бы одним платящим/trial репетитором получает `daily_limit = 50` в homework-контексте; во всех остальных случаях `10`. Premium/trial самого ученика — unlimited (`-1`). Plan: `~/.claude/plans/mutable-dancing-alpaca.md`.
+
+**Single source of truth — RPC `get_subscription_status(p_user_id uuid, p_context text default 'chat')`:**
+- Миграция `20260512120000_ai_quota_for_paid_tutor_students.sql` DROP'ает 1-arg signature и создаёт 2-arg с default `p_context := 'chat'` (backward compat для legacy callers).
+- В `homework` контексте RPC проверяет `tutor_students JOIN tutors JOIN profiles` и возвращает `daily_limit=50` если хотя бы один tutor с `subscription_tier='premium' AND subscription_expires_at > now()` ИЛИ `trial_ends_at > now()`.
+- Возвращает дополнительное поле `tutor_can_upgrade boolean` — `true` когда у студента **есть** тутор, но **ни один не платит**. Marketing nudge для 429 toast.
+- Counter `daily_message_limits` **один на user** — context влияет только на порог, не на bucket. Семантика: free-юзер за день может потратить ≤50 AI-вызовов, из них chat-вне-ДЗ режется на 10, остальные 40 — только в ДЗ.
+
+**Shared helper `supabase/functions/_shared/subscription-limits.ts`:**
+- `checkAiQuota(userId, db, { context, incrementUsage })` — канонический gate. Возвращает `{ allowed, limit, messagesUsed, tutorCanUpgrade, ... }`.
+- `buildLimitReachedResponse(result, corsHeaders)` — 429 response с `tutor_can_upgrade` в payload.
+- Fallback path при RPC failure: читает `profiles` напрямую (без tutor-lookup), возвращает `allowed=true, limit=10` — не блокируем юзеров на RPC outage.
+
+**Где применён guard (все 4 AI-пути в ДЗ):**
+- `chat/index.ts` — 3 call sites (voice line ~798, service-role ~933, authenticated ~991) пробрасывают `context: 'homework'` когда `body.guidedHomeworkAssignmentId` присутствует. Покрывает chat-discuss + bootstrap intro.
+- `homework-api/index.ts::handleCheckAnswer` (line ~6585) — `context: 'homework'`, telemetry `homework_ai_quota_reached`.
+- `homework-api/index.ts::handleRequestHint` (line ~7077) — то же.
+- `homework-api/index.ts::handleStudentSubmission` (line ~6829, Phase 1 mobile) — то же.
+
+**Инвариант для новых AI-путей в `homework-api`:**
+- Любой новый handler, делающий AI-вызов в контексте ДЗ (через `evaluateStudentAnswer` / `generateHint` / прямой `streamChat`), **ОБЯЗАН** вызвать `checkAiQuota(userId, db, { context: 'homework', incrementUsage: true })` **до** AI-call и вернуть `buildLimitReachedResponse(result, cors)` при `!allowed`. Иначе AI-операция обходит лимит (наблюдаемый случай: до 2026-05-12 hint/check работали бесконечно бесплатно).
+- Lovable Gateway requests стоят денег — gate должен резать запрос **до** AI call, не после.
+- Не дублируй RPC-логику в новом коде — импортируй `checkAiQuota` из `_shared/subscription-limits.ts`.
+
+**Frontend — `src/hooks/useSubscription.ts`:**
+- Опциональный параметр `useSubscription(userId, context: 'chat' | 'homework' = 'chat')`. По умолчанию `'chat'` (backward compat). Передавать `'homework'` на homework-screen для корректного отображения 50/день в UI (P1 follow-up, пока не мигрировано).
+- Читает `tutor_can_upgrade` из RPC payload.
+
+**Маркетинг:**
+- В `src/components/sections/tutor/Pricing.tsx` тариф AI-старт содержит буллет «50 AI-сообщений в день для каждого ученика в ДЗ».
+- На 429 в homework контексте для не-платящего тутора фронт может показать nudge «Ваш репетитор может поднять лимит до 50/день в тарифе AI-старт» (использовать `tutor_can_upgrade` из response).
+
+**Ручная активация premium для конкретных тьюторов:**
+- Готовой админ-функции/RPC нет. UPDATE `public.profiles SET subscription_tier='premium', subscription_expires_at='<ISO>'` через Supabase SQL editor.
+- Audit trail (опционально) — INSERT в `public.payments` с `id='manual-<date>-<identifier>'`, `amount` в **DECIMAL рублях** (не копейках), причина в `webhook_data JSONB`. Колонки: `id, user_id, amount, currency, status, subscription_days, subscription_activated_at, subscription_expires_at, webhook_data` (см. миграция `20251222120000_create_payments_table.sql`).
+- Активировано 2026-05-12: Егор Блинов (до 2026-12-31, партнёрский комп), Елена `lenan@inbox.ru` (до 2026-06-06, 3000₽ 50% скидка), Вадим `petrenkovlad576@gmail.com` (до 2026-06-09, 1000₽ 50% скидка).
+
+**Истечение / downgrade:**
+- Cron'а **нет**. После `subscription_expires_at < now()` RPC возвращает `is_premium=false`, но `subscription_tier='premium'` в БД остаётся — это normal state. Юзер фактически free, лимиты применяются. При новой оплате webhook видит «просрочена» и ставит срок от now.
 
 ## Известные хрупкие области
 

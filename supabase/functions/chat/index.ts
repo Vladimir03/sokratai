@@ -6,6 +6,12 @@ import {
   MAX_TASK_IMAGES_FOR_AI,
   parseAttachmentUrls,
 } from "../_shared/attachment-refs.ts";
+import {
+  AiQuotaContext,
+  buildLimitReachedResponse,
+  checkAiQuota,
+  FREE_DAILY_LIMIT as SHARED_FREE_DAILY_LIMIT,
+} from "../_shared/subscription-limits.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -13,7 +19,9 @@ const corsHeaders = {
 };
 
 const MAX_MESSAGE_LENGTH = 10000;
-const FREE_DAILY_LIMIT = 10; // Daily message limit for free users
+// Daily message limit for free users. Canonical value lives in _shared/subscription-limits.ts;
+// re-exported here to avoid breaking any inline references in this large file.
+const FREE_DAILY_LIMIT = SHARED_FREE_DAILY_LIMIT;
 
 type ResponseProfile = "default" | "telegram_compact";
 type ResponseMode = "dialog" | "solution" | "hint" | "explain";
@@ -729,112 +737,21 @@ function getVoiceFilename(mimeType: string, providedName?: string): string {
 
 interface SubscriptionCheckOptions {
   incrementUsage?: boolean;
+  /** 'chat' (default) for free /chat path; 'homework' when guidedHomeworkAssignmentId present (raises free limit 10→50 for students with paying tutor). */
+  context?: AiQuotaContext;
 }
 
 /**
- * Check user subscription, trial status, and daily message limits
- * Priority: Premium > Active Trial > Daily Limits
- * Returns: { allowed: boolean, isPremium: boolean, isTrialActive: boolean, trialEndsAt: string | null, messagesUsed: number, limit: number }
+ * Check user subscription, trial status, and daily message limits.
+ * Thin wrapper around shared helper checkAiQuota in _shared/subscription-limits.ts —
+ * canonical AI-quota logic lives there and is reused by homework-api guards.
  */
 async function checkSubscriptionAndLimits(
   userId: string,
   adminSupabase: any,
   options: SubscriptionCheckOptions = {},
 ) {
-  const shouldIncrementUsage = options.incrementUsage ?? true;
-
-  try {
-    const { data: status, error } = await adminSupabase
-      .rpc('get_subscription_status', { p_user_id: userId })
-      .single();
-
-    if (error || !status) {
-      throw error || new Error('No subscription status returned');
-    }
-
-    const isPremium = Boolean(status.is_premium);
-    const isTrialActive = Boolean(status.is_trial_active);
-    const trialEndsAt = status.trial_ends_at || null;
-    const dailyLimit = status.daily_limit ?? FREE_DAILY_LIMIT;
-    const messagesUsed = status.messages_used ?? 0;
-    const limitReached = Boolean(status.limit_reached);
-
-    if (isPremium) {
-      console.log('✅ Premium user - no message limits');
-      return { allowed: true, isPremium: true, isTrialActive: false, trialEndsAt: null, messagesUsed: 0, limit: -1 };
-    }
-
-    if (isTrialActive) {
-      const daysLeft = status.trial_days_left ?? 0;
-      console.log(`🎁 Trial active - ${daysLeft} days left, no message limits`);
-      return { allowed: true, isPremium: false, isTrialActive: true, trialEndsAt, messagesUsed: 0, limit: -1 };
-    }
-
-    // Free users: enforce daily limit
-    if (limitReached) {
-      console.log(`❌ Daily limit reached: ${messagesUsed}/${dailyLimit}`);
-      return { 
-        allowed: false, 
-        isPremium: false, 
-        isTrialActive: false,
-        trialEndsAt,
-        messagesUsed, 
-        limit: dailyLimit 
-      };
-    }
-
-    if (!shouldIncrementUsage) {
-      console.log(`📊 Limit check passed without increment: ${messagesUsed}/${dailyLimit}`);
-      return {
-        allowed: true,
-        isPremium: false,
-        isTrialActive: false,
-        trialEndsAt,
-        messagesUsed,
-        limit: dailyLimit,
-      };
-    }
-
-    // Increment counter atomically for current day
-    const today = new Date().toISOString().split('T')[0];
-    await adminSupabase.from('daily_message_limits').upsert({
-      user_id: userId,
-      messages_today: messagesUsed + 1,
-      last_reset_date: today
-    }, { onConflict: 'user_id' });
-
-    console.log(`📊 Message count: ${messagesUsed + 1}/${dailyLimit}`);
-    return { allowed: true, isPremium: false, isTrialActive: false, trialEndsAt, messagesUsed: messagesUsed + 1, limit: dailyLimit };
-  } catch (err) {
-    console.error('Error checking subscription via RPC, falling back:', err);
-
-    // Fallback to basic free logic to avoid blocking users
-    const { data: profile, error: profileError } = await adminSupabase
-      .from('profiles')
-      .select('subscription_tier, subscription_expires_at, trial_ends_at')
-      .eq('id', userId)
-      .single();
-
-    if (profileError) {
-      console.error('Fallback profile fetch failed:', profileError);
-      return { allowed: true, isPremium: false, isTrialActive: false, trialEndsAt: null, messagesUsed: 0, limit: FREE_DAILY_LIMIT };
-    }
-
-    const isPremiumFallback = profile?.subscription_tier === 'premium' && 
-      (!profile?.subscription_expires_at || new Date(profile.subscription_expires_at) > new Date());
-
-    if (isPremiumFallback) {
-      return { allowed: true, isPremium: true, isTrialActive: false, trialEndsAt: null, messagesUsed: 0, limit: -1 };
-    }
-
-    const isTrialActiveFallback = profile?.trial_ends_at && new Date(profile.trial_ends_at) > new Date();
-    if (isTrialActiveFallback) {
-      return { allowed: true, isPremium: false, isTrialActive: true, trialEndsAt: profile.trial_ends_at, messagesUsed: 0, limit: -1 };
-    }
-
-    // Minimal free-user enforcement
-    return { allowed: true, isPremium: false, isTrialActive: false, trialEndsAt: profile?.trial_ends_at || null, messagesUsed: 0, limit: FREE_DAILY_LIMIT };
-  }
+  return checkAiQuota(userId, adminSupabase, options);
 }
 
 async function transcribeVoiceMessage(req: Request, userId: string, adminSupabase: any): Promise<Response> {
@@ -878,23 +795,17 @@ async function transcribeVoiceMessage(req: Request, userId: string, adminSupabas
     });
   }
 
-  const { allowed, isPremium, messagesUsed, limit } = await checkSubscriptionAndLimits(
+  // Voice transcription uses 'chat' context — multipart/form-data has no guidedHomework hint,
+  // and rare-enough that nailing context=homework here is out of scope. If a paying tutor's
+  // student hits 10/day on voice alone, that's an edge case (voice rarely used in homework).
+  const quotaResult = await checkAiQuota(
     userId,
     adminSupabase,
-    { incrementUsage: true },
+    { incrementUsage: true, context: "chat" },
   );
 
-  if (!allowed) {
-    return new Response(
-      JSON.stringify({
-        error: "limit_reached",
-        message: `Вы достигли дневного лимита в ${limit} сообщений. Оформите подписку для безлимитного доступа!`,
-        messages_used: messagesUsed,
-        limit,
-        isPremium,
-      }),
-      { status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" } },
-    );
+  if (!quotaResult.allowed) {
+    return buildLimitReachedResponse(quotaResult, corsHeaders);
   }
 
   const groqApiKey = Deno.env.get("GROQ_API_KEY");
@@ -1018,20 +929,18 @@ serve(async (req) => {
       const responseMode = normalizeResponseMode(body.responseMode);
       const maxChars = normalizeMaxChars(body.maxChars);
 
-      // Apply the same limits for Telegram/service callers
-      const { allowed, isPremium, isTrialActive, trialEndsAt, messagesUsed, limit } = await checkSubscriptionAndLimits(userId, adminSupabase);
+      // Apply the same limits for Telegram/service callers. Context = 'homework' when the
+      // caller is talking about a guided homework task (bootstrap intro, discuss step) so
+      // free-students of paying tutors get the 50/day cap instead of 10.
+      const quotaContext: AiQuotaContext = guidedHomeworkAssignmentId ? "homework" : "chat";
+      const quotaResult = await checkSubscriptionAndLimits(
+        userId,
+        adminSupabase,
+        { context: quotaContext },
+      );
 
-      if (!allowed) {
-        return new Response(
-          JSON.stringify({
-            error: "limit_reached",
-            message: `Вы достигли дневного лимита в ${limit} сообщений. Оформите подписку для безлимитного доступа!`,
-            messages_used: messagesUsed,
-            limit,
-            isPremium
-          }),
-          { status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" } },
-        );
+      if (!quotaResult.allowed) {
+        return buildLimitReachedResponse(quotaResult, corsHeaders);
       }
 
       return await processAIRequest(
@@ -1077,24 +986,18 @@ serve(async (req) => {
         : null;
       const shouldIncrementUsage = latestUserMessage?.input_method !== "voice";
 
-      // Check subscription and daily limits
-      const { allowed, isPremium, messagesUsed, limit } = await checkSubscriptionAndLimits(
+      // Check subscription and daily limits. Context = 'homework' when guidedHomeworkAssignmentId
+      // is present (chat-discuss + bootstrap intro inside ДЗ) → free students of paying tutors
+      // get 50/day cap instead of 10. See _shared/subscription-limits.ts.
+      const quotaContext: AiQuotaContext = guidedHomeworkAssignmentId ? "homework" : "chat";
+      const quotaResult = await checkSubscriptionAndLimits(
         userId,
         adminSupabase,
-        { incrementUsage: shouldIncrementUsage },
+        { incrementUsage: shouldIncrementUsage, context: quotaContext },
       );
-      
-      if (!allowed) {
-        return new Response(
-          JSON.stringify({
-            error: "limit_reached",
-            message: `Вы достигли дневного лимита в ${limit} сообщений. Оформите подписку для безлимитного доступа!`,
-            messages_used: messagesUsed,
-            limit: limit,
-            isPremium: false
-          }),
-          { status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" } },
-        );
+
+      if (!quotaResult.allowed) {
+        return buildLimitReachedResponse(quotaResult, corsHeaders);
       }
       const responseProfile = normalizeResponseProfile(body.responseProfile);
       const responseMode = normalizeResponseMode(body.responseMode);

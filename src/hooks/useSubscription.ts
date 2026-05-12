@@ -4,6 +4,8 @@ import { useRef } from 'react';
 
 const FREE_DAILY_LIMIT = 10;
 
+export type SubscriptionContext = 'chat' | 'homework';
+
 interface SubscriptionState {
   isPremium: boolean;
   subscriptionTier: 'free' | 'premium';
@@ -15,9 +17,18 @@ interface SubscriptionState {
   dailyLimit: number;
   isLoading: boolean;
   limitReached: boolean;
+  /** Marketing nudge — student has tutor(s) but none paying. Surface upgrade CTA on 429. */
+  tutorCanUpgrade: boolean;
 }
 
-export function useSubscription(userId: string | undefined) {
+/**
+ * Read-only subscription/quota state for a user.
+ *
+ * @param context - 'chat' (default) for chat-page limit displays; 'homework' for
+ *   homework-screen displays where free-students of paying tutors get a higher daily_limit (50).
+ *   Single source of truth — get_subscription_status RPC. See _shared/subscription-limits.ts.
+ */
+export function useSubscription(userId: string | undefined, context: SubscriptionContext = 'chat') {
   const [state, setState] = useState<SubscriptionState>({
     isPremium: false,
     subscriptionTier: 'free',
@@ -28,7 +39,8 @@ export function useSubscription(userId: string | undefined) {
     messagesUsed: 0,
     dailyLimit: FREE_DAILY_LIMIT,
     isLoading: true,
-    limitReached: false
+    limitReached: false,
+    tutorCanUpgrade: false
   });
   const fetchRef = useRef<() => void>(() => {});
 
@@ -44,7 +56,7 @@ export function useSubscription(userId: string | undefined) {
     try {
       // Single source of truth from Postgres - use type assertion since types are auto-generated
       const { data: status, error } = await supabase
-        .rpc('get_subscription_status' as any, { p_user_id: userId })
+        .rpc('get_subscription_status' as any, { p_user_id: userId, p_context: context })
         .single();
 
       if (error || !status) {
@@ -63,6 +75,7 @@ export function useSubscription(userId: string | undefined) {
         daily_limit: number;
         messages_used: number;
         limit_reached: boolean;
+        tutor_can_upgrade?: boolean;
       };
 
       const isPremium = Boolean(typedStatus.is_premium);
@@ -72,6 +85,7 @@ export function useSubscription(userId: string | undefined) {
       const dailyLimit = typedStatus.daily_limit ?? FREE_DAILY_LIMIT;
       const messagesUsed = typedStatus.messages_used ?? 0;
       const limitReached = Boolean(typedStatus.limit_reached);
+      const tutorCanUpgrade = Boolean(typedStatus.tutor_can_upgrade);
 
       if (isPremium) {
         setState({
@@ -84,7 +98,8 @@ export function useSubscription(userId: string | undefined) {
           messagesUsed: 0,
           dailyLimit: -1,
           isLoading: false,
-          limitReached: false
+          limitReached: false,
+          tutorCanUpgrade: false
         });
         return;
       }
@@ -100,7 +115,8 @@ export function useSubscription(userId: string | undefined) {
           messagesUsed: 0,
           dailyLimit: -1,
           isLoading: false,
-          limitReached: false
+          limitReached: false,
+          tutorCanUpgrade: false
         });
         return;
       }
@@ -115,13 +131,14 @@ export function useSubscription(userId: string | undefined) {
         messagesUsed,
         dailyLimit,
         isLoading: false,
-        limitReached
+        limitReached,
+        tutorCanUpgrade
       });
     } catch (error) {
       console.error('Error in useSubscription:', error);
       setState(prev => ({ ...prev, isLoading: false }));
     }
-  }, [userId]);
+  }, [userId, context]);
 
   // Keep a stable ref to the latest fetch function to avoid recreating intervals
   useEffect(() => {
@@ -158,10 +175,13 @@ export function useSubscription(userId: string | undefined) {
       // Don't increment for premium or trial users
       if (prev.isPremium || prev.isTrialActive) return prev;
       const newCount = prev.messagesUsed + 1;
+      // Use prev.dailyLimit (not FREE_DAILY_LIMIT hardcoded) so optimistic state is correct
+      // for homework context where free students of paying tutors have dailyLimit=50.
+      const limit = prev.dailyLimit > 0 ? prev.dailyLimit : FREE_DAILY_LIMIT;
       return {
         ...prev,
         messagesUsed: newCount,
-        limitReached: newCount >= FREE_DAILY_LIMIT
+        limitReached: newCount >= limit
       };
     });
   }, []);
