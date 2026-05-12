@@ -3601,7 +3601,7 @@ export type Database = {
         }[]
       }
       get_subscription_status: {
-        Args: { p_user_id: string }
+        Args: { p_context?: string; p_user_id: string }
         Returns: {
           daily_limit: number
           is_premium: boolean
@@ -3609,8 +3609,10 @@ export type Database = {
           limit_reached: boolean
           messages_used: number
           subscription_expires_at: string
+          subscription_tier: string
           trial_days_left: number
           trial_ends_at: string
+          tutor_can_upgrade: boolean
         }[]
       }
       get_tutor_pending_payments_by_telegram: {
