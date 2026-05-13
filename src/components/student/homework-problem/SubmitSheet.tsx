@@ -1,9 +1,13 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import * as DialogPrimitive from '@radix-ui/react-dialog';
 import { Loader2, Mic, MicOff, Send, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { useVoiceRecorder } from '@/hooks/useVoiceRecorder';
-import { transcribeThreadVoice } from '@/lib/studentHomeworkApi';
+import {
+  transcribeThreadVoice,
+  uploadStudentThreadImage,
+  StudentHomeworkApiError,
+} from '@/lib/studentHomeworkApi';
 import { PhotoStrip } from './PhotoStrip';
 import {
   AUTOSAVE_INTERVAL_MS,
@@ -129,6 +133,64 @@ export function SubmitSheet({
   const [numeric, setNumeric] = useState('');
   const [photos, setPhotos] = useState<string[]>([]);
   const [text, setText] = useState('');
+  const [isPasteUploading, setIsPasteUploading] = useState(false);
+
+  // ─── Clipboard paste (Phase 3.1 hotfix 2026-05-13, desktop UX) ───────────
+  // Mirror pattern из GuidedChatInput.tsx:507-560 (Phase 5.1, 2026-03-20).
+  // Desktop students часто решают на бумаге → Win+Shift+S / Cmd+Shift+4 →
+  // Ctrl+V в SubmitSheet. Без этого handler'а image paste no-op, user
+  // вынужден сохранять файл и тапать camera-tile. Mobile users редко
+  // используют clipboard, но handler не мешает (e.preventDefault только
+  // для image MIME).
+  //
+  // Dual path: `clipboardData.files` (Chrome / большинство) +
+  // `items.getAsFile()` fallback (Safari desktop, Firefox).
+  // PhotoStrip default max = 5; зеркалим лимит здесь.
+  const PHOTO_LIMIT = 5;
+  const handlePaste = useCallback(
+    async (e: React.ClipboardEvent<HTMLDivElement>) => {
+      if (photos.length >= PHOTO_LIMIT) return;
+      if (isPasteUploading) return;
+
+      let imageFile: File | undefined;
+      const files = Array.from(e.clipboardData.files);
+      imageFile = files.find((f) => f.type.startsWith('image/'));
+      if (!imageFile && e.clipboardData.items) {
+        for (let i = 0; i < e.clipboardData.items.length; i++) {
+          const item = e.clipboardData.items[i];
+          if (item.kind === 'file' && item.type.startsWith('image/')) {
+            imageFile = item.getAsFile() ?? undefined;
+            break;
+          }
+        }
+      }
+      if (!imageFile) return; // text paste — let native textarea handle it
+
+      e.preventDefault();
+      setIsPasteUploading(true);
+      try {
+        const ref = await uploadStudentThreadImage(
+          imageFile,
+          _hwId,
+          threadId ?? '',
+          task.order_num,
+        );
+        setPhotos((prev) => [...prev, ref]);
+        toast.success('Скриншот добавлен');
+      } catch (err) {
+        const msg =
+          err instanceof StudentHomeworkApiError
+            ? err.message
+            : err instanceof Error
+              ? err.message
+              : 'Не удалось загрузить скриншот';
+        toast.error(msg);
+      } finally {
+        setIsPasteUploading(false);
+      }
+    },
+    [photos.length, isPasteUploading, _hwId, threadId, task.order_num],
+  );
 
   // ─── Autosave (Q12, preserved through Phase 1.2 refactor) ────────────────
   const draftKey = getSubmitSheetDraftKey(taskId);
@@ -373,6 +435,7 @@ export function SubmitSheet({
         />
         <DialogPrimitive.Content
           aria-describedby={undefined}
+          onPaste={handlePaste}
           className="fixed inset-x-0 bottom-0 z-50 flex flex-col mx-auto w-full max-w-2xl max-h-[92dvh] bg-white rounded-t-[22px] overflow-hidden shadow-xl outline-none focus-visible:outline-none animate-homework-sheet-slide-up"
         >
           {/* Grab handle */}
@@ -435,12 +498,21 @@ export function SubmitSheet({
                   />
                   <p className="text-[11px] text-socrat-muted leading-relaxed">
                     Можно несколько фото / скриншотов или написать решение
-                    текстом. Можно одно из двух или оба.
+                    текстом. Можно одно из двух или оба. На компьютере можно
+                    вставить скриншот через <kbd className="px-1 py-0.5 rounded border border-socrat-border text-[10px] font-bold bg-white">Ctrl</kbd>
+                    <span aria-hidden="true"> + </span>
+                    <kbd className="px-1 py-0.5 rounded border border-socrat-border text-[10px] font-bold bg-white">V</kbd>
+                    {isPasteUploading ? (
+                      <span className="ml-1.5 inline-flex items-center gap-1 text-socrat-primary">
+                        <Loader2 className="h-3 w-3 animate-spin" aria-hidden="true" />
+                        загружаем…
+                      </span>
+                    ) : null}
                   </p>
                   <textarea
                     value={text}
                     onChange={(e) => setText(e.target.value)}
-                    placeholder="Или напиши решение здесь текстом…"
+                    placeholder="Напиши решение текстом или вставь скриншот (Ctrl+V)…"
                     rows={3}
                     style={{ fontSize: '16px' }}
                     className="w-full min-h-[88px] px-3 py-2.5 bg-white border-[1.5px] border-socrat-border rounded-[10px] text-slate-900 leading-relaxed outline-none focus-visible:border-socrat-primary focus-visible:ring-2 focus-visible:ring-socrat-primary/20 resize-y touch-manipulation"
