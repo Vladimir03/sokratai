@@ -24,8 +24,17 @@ const SUPABASE_KEY =
   'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZyc3Nlb3RyZm1zeHBiY2l5cXpjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTk0MjEzMDYsImV4cCI6MjA3NDk5NzMwNn0.fDleU99ULnIvtbiJqlKtgaabZzIWqqw6gZLWQOFAcKw';
 
 export class StudentHomeworkApiError extends Error {
-  constructor(message: string) {
+  /**
+   * Stable error code for branch-able callers. Currently used for
+   * `SESSION_EXPIRED` (set by `requestStudentHomeworkApi` when a 401 cannot
+   * be recovered via session refresh — caller should show a session-expired
+   * message and rely on `AuthGuard.onAuthStateChange` to redirect to /login).
+   * Free-form for future codes; backward-compat: undefined when not set.
+   */
+  code?: string;
+  constructor(message: string, opts?: { code?: string }) {
     super(message);
+    this.code = opts?.code;
     this.name = 'StudentHomeworkApiError';
   }
 }
@@ -72,22 +81,51 @@ export async function requestStudentHomeworkApi<T>(
   path: string,
   options: RequestInit = {},
 ): Promise<T> {
-  const { data: sessionData } = await supabase.auth.getSession();
-  const token = sessionData?.session?.access_token;
+  // Helper: build + fire the actual fetch using the current cached session
+  // token. Used twice — first attempt, then retry after a refresh.
+  const doFetch = async (): Promise<Response> => {
+    const { data: sessionData } = await supabase.auth.getSession();
+    const token = sessionData?.session?.access_token;
+    if (!token) {
+      throw new StudentHomeworkApiError('Нет активной сессии', {
+        code: 'NO_SESSION',
+      });
+    }
+    return fetch(`${SUPABASE_URL}/functions/v1/homework-api${path}`, {
+      ...options,
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+        apikey: SUPABASE_KEY,
+        ...(options.headers ?? {}),
+      },
+    });
+  };
 
-  if (!token) {
-    throw new StudentHomeworkApiError('Нет активной сессии');
+  let response = await doFetch();
+
+  // 401 → cached access_token expired between the local getSession() read
+  // and the server-side GoTrue validation (autoRefreshToken can fall behind
+  // after device sleep, network blips during background refresh, etc.).
+  // Try a one-shot refreshSession() + retry before surfacing the error.
+  // Bug 2026-05-12: previously this case bubbled up as "Invalid or expired
+  // token" and the user was stuck on the error screen until manual reload.
+  if (response.status === 401) {
+    const { data: refreshData, error: refreshError } =
+      await supabase.auth.refreshSession();
+    if (refreshError || !refreshData?.session) {
+      // Persistent 401 — refresh_token also dead or revoked. Sign out so
+      // AuthGuard's `onAuthStateChange` listener redirects to /login. Throw
+      // with stable code so the UI can show a session-expired hint instead
+      // of the cryptic upstream message.
+      await supabase.auth.signOut().catch(() => undefined);
+      throw new StudentHomeworkApiError(
+        'Сессия истекла. Перенаправляем на вход…',
+        { code: 'SESSION_EXPIRED' },
+      );
+    }
+    response = await doFetch();
   }
-
-  const response = await fetch(`${SUPABASE_URL}/functions/v1/homework-api${path}`, {
-    ...options,
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${token}`,
-      apikey: SUPABASE_KEY,
-      ...(options.headers ?? {}),
-    },
-  });
 
   if (!response.ok) {
     let message = `HTTP ${response.status}`;

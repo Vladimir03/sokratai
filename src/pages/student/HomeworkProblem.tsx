@@ -50,6 +50,7 @@ import {
   requestHint as requestHintApi,
   checkAnswer as checkAnswerApi,
   getStudentTaskImageSignedUrl,
+  StudentHomeworkApiError,
 } from '@/lib/studentHomeworkApi';
 import { serializeThreadAttachmentRefs } from '@/lib/homeworkThreadAttachments';
 import { parseAttachmentUrls } from '@/lib/attachmentRefs';
@@ -1012,6 +1013,11 @@ export default function HomeworkProblem() {
   }
 
   if (isError || !data) {
+    // SESSION_EXPIRED — refresh + retry both failed in requestStudentHomeworkApi.
+    // signOut() already fired → AuthGuard's onAuthStateChange listener
+    // navigates to /login. No retry button (would just 401 again).
+    const isSessionExpired =
+      error instanceof StudentHomeworkApiError && error.code === 'SESSION_EXPIRED';
     const message =
       error instanceof Error
         ? error.message
@@ -1023,17 +1029,28 @@ export default function HomeworkProblem() {
       >
         <div className="w-full max-w-sm bg-white border border-socrat-border-light rounded-2xl p-6 flex flex-col items-center gap-3 shadow-sm">
           <h2 className="text-base font-bold text-slate-900 m-0">
-            Не удалось загрузить задачу
+            {isSessionExpired ? 'Сессия истекла' : 'Не удалось загрузить задачу'}
           </h2>
-          <p className="text-sm text-slate-600 text-center leading-relaxed">{message}</p>
-          <button
-            type="button"
-            onClick={() => refetch()}
-            className="inline-flex items-center gap-1.5 h-11 px-4 rounded-[12px] bg-socrat-primary hover:bg-socrat-primary-dark text-white text-sm font-bold touch-manipulation transition-colors"
-          >
-            <RefreshCw className="h-4 w-4" aria-hidden="true" />
-            Повторить
-          </button>
+          <p className="text-sm text-slate-600 text-center leading-relaxed">
+            {isSessionExpired
+              ? 'Перенаправляем на страницу входа…'
+              : message}
+          </p>
+          {isSessionExpired ? (
+            <Loader2
+              className="h-5 w-5 text-socrat-primary animate-spin"
+              aria-hidden="true"
+            />
+          ) : (
+            <button
+              type="button"
+              onClick={() => refetch()}
+              className="inline-flex items-center gap-1.5 h-11 px-4 rounded-[12px] bg-socrat-primary hover:bg-socrat-primary-dark text-white text-sm font-bold touch-manipulation transition-colors"
+            >
+              <RefreshCw className="h-4 w-4" aria-hidden="true" />
+              Повторить
+            </button>
+          )}
         </div>
       </div>
     );
