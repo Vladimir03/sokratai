@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import type { HWDraftTask, KBTask } from '@/types/kb';
+import { resolveCheckFormatFromKb } from '@/lib/checkFormatHelpers';
 
 interface HWDraftStore {
   tasks: HWDraftTask[];
@@ -34,6 +35,15 @@ export const useHWDraftStore = create<HWDraftStore>()(
           // Carry KB solution images snapshot so HWDrawer can persist them
           // into homework_tutor_tasks.solution_image_urls (plan wild-swinging-nova.md).
           solutionAttachmentSnapshot: task.solution_attachment_url ?? null,
+          // Phase 3.1 hotfix (2026-05-13): freeze check_format so HWDrawer
+          // can write it + task_kind into homework_tutor_tasks. Без этого
+          // HWDrawer-flow создавал задачи с DB-default `task_kind='extended'`
+          // независимо от KB-задачи (student warn banner показывался неверно).
+          checkFormatSnapshot: resolveCheckFormatFromKb({
+            check_format: task.check_format,
+            answer_format: task.answer_format,
+            kim_number: task.kim_number,
+          }),
           snapshotEdited: false,
           source: task.owner_id ? 'my' : 'socrat',
           subtopic: subtopicName ?? '',

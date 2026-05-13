@@ -180,6 +180,17 @@ export interface HWDraftTask {
    * через HWDrawer. См. plan wild-swinging-nova.md (2026-04-18).
    */
   solutionAttachmentSnapshot: string | null;
+  /**
+   * Frozen `check_format` для записи в `homework_tutor_tasks.check_format`
+   * + derived `task_kind` через `deriveTaskKindFromCheckFormat()`. Без этого
+   * HWDrawer-flow создавал ДЗ без формата, и student-side warn banner
+   * показывался некорректно (Phase 3.1 hotfix 2026-05-13).
+   * Resolved at addTask time из KBTask.check_format → answer_format → kim_number.
+   * Optional для backward-compat с pre-fix localStorage drafts —
+   * `undefined` ресолвится в `'short_answer'` на HWDrawer insert side
+   * (safe default для физика ЕГЭ KB задач).
+   */
+  checkFormatSnapshot?: 'short_answer' | 'detailed_solution';
   snapshotEdited: boolean;
   source: 'socrat' | 'my';
   subtopic: string;

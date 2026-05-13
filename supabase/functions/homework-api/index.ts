@@ -43,6 +43,31 @@ const VALID_STATUSES = ["draft", "active", "closed"] as const;
 const VALID_STATUS_FILTERS = ["draft", "active", "closed", "all"] as const;
 const VALID_CHECK_FORMATS = ["short_answer", "detailed_solution"] as const;
 const VALID_EXAM_TYPES = ["ege", "oge"] as const;
+
+/**
+ * Derive `task_kind` (Phase 1 student-screen enum) from `check_format`.
+ *
+ * Mapping (mirrors backfill in migration `20260509120000_add_task_kind_to_homework_tasks.sql`):
+ *   - `short_answer`       → `numeric`
+ *   - `detailed_solution`  → `extended`
+ *   - any other / null     → `extended` (safe DB default)
+ *
+ * Bug 2026-05-12: tutor save paths (`handleCreateAssignment`,
+ * `handleUpdateAssignment`) wrote `check_format` but not `task_kind`, leaving
+ * rows with the DB default `'extended'` even when tutor selected
+ * «Краткий ответ». Frontend `ProblemContext.tsx` reads `task_kind` for the
+ * warn banner → all numeric tasks looked like extended on student-side.
+ *
+ * Call this at EVERY write-path that touches `check_format` so the two
+ * columns stay in sync. Backfill migration `20260513120000` resyncs existing
+ * rows; this helper keeps new writes consistent going forward.
+ */
+function deriveTaskKind(
+  checkFormat: string | null | undefined,
+): "numeric" | "extended" {
+  if (checkFormat === "short_answer") return "numeric";
+  return "extended"; // detailed_solution | unknown | null
+}
 type NotifyFailureReason =
   | "missing_telegram_link" | "telegram_send_failed" | "telegram_send_error"
   | "push_expired" | "push_send_failed"
@@ -597,6 +622,14 @@ async function handleCreateAssignment(
     solution_text: isNonEmptyString(t.solution_text) ? (t.solution_text as string).trim() : null,
     solution_image_urls: isNonEmptyString(t.solution_image_urls) ? (t.solution_image_urls as string).trim() : null,
     check_format: (VALID_CHECK_FORMATS as readonly string[]).includes(t.check_format as string) ? t.check_format : "short_answer",
+    // Phase 3.1 hotfix (2026-05-13): keep `task_kind` in sync with `check_format`
+    // at every write. Without this, the DB default `'extended'` masked the
+    // tutor's «Краткий ответ» choice on student-side.
+    task_kind: deriveTaskKind(
+      (VALID_CHECK_FORMATS as readonly string[]).includes(t.check_format as string)
+        ? (t.check_format as string)
+        : "short_answer",
+    ),
   }));
 
   const { error: tasksErr } = await db
@@ -1395,7 +1428,12 @@ async function handleUpdateAssignment(
           updateFields.solution_image_urls = isNonEmptyString(t.solution_image_urls) ? (t.solution_image_urls as string).trim() : null;
         }
         if (t.check_format !== undefined) {
-          updateFields.check_format = (VALID_CHECK_FORMATS as readonly string[]).includes(t.check_format as string) ? t.check_format : "short_answer";
+          const normalizedCheckFormat = (VALID_CHECK_FORMATS as readonly string[]).includes(t.check_format as string)
+            ? (t.check_format as string)
+            : "short_answer";
+          updateFields.check_format = normalizedCheckFormat;
+          // Phase 3.1 hotfix (2026-05-13): keep task_kind in sync.
+          updateFields.task_kind = deriveTaskKind(normalizedCheckFormat);
         }
 
         const { error } = await db
@@ -1427,6 +1465,9 @@ async function handleUpdateAssignment(
       if (toInsert.length > 0) {
         for (let i = 0; i < toInsert.length; i++) {
           const t = toInsert[i].task;
+          const normalizedCheckFormat = (VALID_CHECK_FORMATS as readonly string[]).includes(t.check_format as string)
+            ? (t.check_format as string)
+            : "short_answer";
           const { data: insertedRow, error } = await db
             .from("homework_tutor_tasks")
             .insert({
@@ -1440,7 +1481,9 @@ async function handleUpdateAssignment(
               rubric_image_urls: isNonEmptyString(t.rubric_image_urls) ? (t.rubric_image_urls as string).trim() : null,
               solution_text: isNonEmptyString(t.solution_text) ? (t.solution_text as string).trim() : null,
               solution_image_urls: isNonEmptyString(t.solution_image_urls) ? (t.solution_image_urls as string).trim() : null,
-              check_format: (VALID_CHECK_FORMATS as readonly string[]).includes(t.check_format as string) ? t.check_format : "short_answer",
+              check_format: normalizedCheckFormat,
+              // Phase 3.1 hotfix (2026-05-13): keep task_kind in sync.
+              task_kind: deriveTaskKind(normalizedCheckFormat),
             })
             .select("id")
             .single();
@@ -1514,6 +1557,9 @@ async function handleUpdateAssignment(
       for (let i = 0; i < toUpdate.length; i++) {
         const entry = toUpdate[i];
         const t = entry.task;
+        const normalizedCheckFormat = (VALID_CHECK_FORMATS as readonly string[]).includes(t.check_format as string)
+          ? (t.check_format as string)
+          : "short_answer";
         const updateFields: Record<string, unknown> = {
           task_text: isNonEmptyString(t.task_text) ? (t.task_text as string).trim() : "[Задача на фото]",
           task_image_url: isNonEmptyString(t.task_image_url) ? (t.task_image_url as string).trim() : null,
@@ -1523,7 +1569,9 @@ async function handleUpdateAssignment(
           rubric_image_urls: isNonEmptyString(t.rubric_image_urls) ? (t.rubric_image_urls as string).trim() : null,
           solution_text: isNonEmptyString(t.solution_text) ? (t.solution_text as string).trim() : null,
           solution_image_urls: isNonEmptyString(t.solution_image_urls) ? (t.solution_image_urls as string).trim() : null,
-          check_format: (VALID_CHECK_FORMATS as readonly string[]).includes(t.check_format as string) ? t.check_format : "short_answer",
+          check_format: normalizedCheckFormat,
+          // Phase 3.1 hotfix (2026-05-13): keep task_kind in sync.
+          task_kind: deriveTaskKind(normalizedCheckFormat),
         };
         const { error } = await db
           .from("homework_tutor_tasks")

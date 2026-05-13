@@ -22,6 +22,7 @@ import { useKBImagesSignedUrls } from '@/hooks/useKBImagesSignedUrls';
 import { useHWDraftStore, useHWTaskCount } from '@/stores/hwDraftStore';
 import { supabase } from '@/lib/supabaseClient';
 import type { HWDraftTask } from '@/types/kb';
+import { deriveTaskKindFromCheckFormat } from '@/lib/checkFormatHelpers';
 
 interface DraftTaskRowProps {
   task: HWDraftTask;
@@ -269,6 +270,14 @@ export function HWDrawer({
           MAX_SOLUTION_IMAGES,
         );
 
+        // Phase 3.1 hotfix (2026-05-13): write check_format + task_kind explicitly.
+        // Раньше эти поля опускались → DB default `task_kind='extended'` применялся
+        // независимо от KB-задачи, что ломало student-side warn banner.
+        // `checkFormatSnapshot` снапшотится в hwDraftStore.addTask из KBTask via
+        // resolveCheckFormatFromKb(); pre-fix localStorage drafts без snapshot
+        // фоллбекают на 'short_answer' (safe default для физика ЕГЭ KB задач).
+        const checkFormat = task.checkFormatSnapshot ?? 'short_answer';
+
         return {
           assignment_id: hw.id,
           task_text: task.textSnapshot,
@@ -277,6 +286,8 @@ export function HWDrawer({
           solution_text: task.solutionSnapshot ?? null,
           solution_image_urls: serializeAttachmentUrls(solutionImageRefs),
           order_num: index + 1,
+          check_format: checkFormat,
+          task_kind: deriveTaskKindFromCheckFormat(checkFormat),
         };
       });
 
