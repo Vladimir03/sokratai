@@ -368,9 +368,10 @@ For architecture overview see: docs/delivery/engineering/architecture/README.md
 Когда добавляешь новую колонку в таблицу (или новое поле в payload/type, видимое для AI или критичное для UX), перед заявлением «готово» **ОБЯЗАТЕЛЬНО** найди все места, где в эту таблицу пишут. В репо есть несколько таблиц с **множественными независимыми write-path** — и легко пропустить второй:
 
 - **`homework_tutor_tasks`** (критично для этого урока):
-  - Path A: `supabase/functions/homework-api/index.ts` → `handleCreateAssignment` + `handleUpdateAssignment` (3 insert/update блока)
+  - Path A: `supabase/functions/homework-api/index.ts` → `handleCreateAssignment` + `handleUpdateAssignment` (**4 insert/update блока** — count подтверждён Phase 3.1 hotfix 2026-05-13: line ~604 create, ~1430 update-with-submissions, ~1490 new-insert-no-submissions, ~1577 update-no-submissions)
   - Path B: `src/components/kb/HWDrawer.tsx` — **напрямую** `supabase.from('homework_tutor_tasks').insert(...)` из клиента, минуя edge function. Источник данных — `HWDraftTask` из `hwDraftStore` (Zustand + localStorage), заполняемый кнопкой «В ДЗ» на KB-карточке задачи
   - Path C (если появится — добавь в список): любой новый client-side insert
+  - **Двойной derive-инвариант** (Phase 3.1 hotfix 2026-05-13): `check_format` и `task_kind` должны писаться **вместе** через `deriveTaskKind(check_format)` (backend) / `deriveTaskKindFromCheckFormat` (frontend, `src/lib/checkFormatHelpers.ts`). Эта связка повторила pattern §0 на новой колонке `task_kind` (миграция `20260509120000`): backend backfill был one-shot `WHERE task_kind IS NULL`, но 4 backend + 1 client write-paths не были обновлены → DB default `'extended'` маскировал tutor выбор «Краткий ответ». Любой будущий write к `check_format` ДОЛЖЕН писать `task_kind` тоже
 - **`homework_tutor_thread_messages`** — guided chat messages. Проверяй все message-insert-сайты при изменении схемы (task_id invariant, см. rule 40)
 - **`kb_tasks`** — modifications через триггеры (Source→Copy, kb moderation v2), см. rule 50
 - **`profiles`** — синхронизация ролей, display_name
@@ -380,7 +381,7 @@ For architecture overview see: docs/delivery/engineering/architecture/README.md
 2. Для каждого match убедиться, что новое поле пишется/читается
 3. Для type-driven payloads: grep имя типа (например `CreateAssignmentTask`, `HWDraftTask`) — найти все construct-sites
 
-**Симптом пропуска:** «feature работает через один flow, но не через другой» (как было с HWDrawer + solution_text — коммит `f454f6e`). Отсюда же правило: fix → ВСЕГДА проверь вторичные пути.
+**Симптом пропуска:** «feature работает через один flow, но не через другой» (как было с HWDrawer + solution_text — коммит `f454f6e`; и с `task_kind` desync — Phase 3.1 hotfix `ca1ed1c` 2026-05-13). Отсюда же правило: fix → ВСЕГДА проверь вторичные пути.
 
 ### 1. Форматирование дат и валюты
 - Канонический источник: **`src/lib/formatters.ts`** — функции форматирования дат, валюты, прогресса
@@ -840,7 +841,7 @@ SELECT COUNT(*) FROM public.mock_exam_variant_tasks WHERE variant_id = '36cebc45
 
 **Спека:** `docs/delivery/features/mock-exams-v1/spec.md` AC-5 + tasks.md TASK-13 (mockup Screen 6).
 
-### 16. Student Homework Problem Screen — single-task surface + submission contract (Phase 1, 2026-05-09; Phase 3 landed 2026-05-12)
+### 16. Student Homework Problem Screen — single-task surface + submission contract (Phase 1, 2026-05-09; Phase 3 landed 2026-05-12; Phase 3.1 hotfixes 2026-05-13)
 
 Phase 1 mobile-first student-side homework problem screen. Mobile (`viewport ≤768px`) на route `/student/homework/:hwId/problem/:taskId`. **Phase 3 (2026-05-12, ✅ landed)** расширил screen на tablet (769–1279) + desktop (≥1280) split layout — `StudentHomeworkDetail` стал redirect-only для **всех** viewport'ов (`useIsMobile()` gate удалён), legacy `GuidedHomeworkWorkspace` рендеринг отключён со student-side (физическое удаление файла отложено на Phase 4 cleanup spec). **Без feature flag** — раскатка сразу всем юзерам. Полный контракт (handlers / migrations / anti-leak / shared helper / viewport routing / Phase 3 split layouts) в `.claude/rules/40-homework-system.md` → секции «Student Homework Problem Screen — single-task surface + submission contract» + «Student Homework Problem Screen — Phase 3 split layouts (2026-05-12)».
 

@@ -1328,3 +1328,72 @@ src/components/student/homework-problem/MathQuickPicker.tsx            ← NEW
 - Rollback стратегия: `git revert <Phase 3 commits> && deploy-sokratai` (~3 мин).
 
 **Спека:** plan `~/.claude/plans/toasty-weaving-meerkat.md` (4 раунда AskUserQuestion с Vladimir 2026-05-12 + verification checklist).
+
+### Student Homework Problem Screen — Phase 3.1 hotfixes (2026-05-13)
+
+Pilot QA после Phase 3 deploy выявил 3 бага. Хотфиксы залендились в одной сессии (commits `c879b29` / `ca1ed1c` / `52681af`). Каждый bug добавляет **production-критичный инвариант**, который future agents должны соблюдать.
+
+**Bug #3 — Graceful 401 handling (commit `c879b29`):**
+
+- **Инвариант:** `requestStudentHomeworkApi` (`src/lib/studentHomeworkApi.ts:71`) — единая точка для всех student-side API вызовов — детектит 401 → вызывает `supabase.auth.refreshSession()` → retry один раз. На persistent 401 (refresh тоже failed) → `supabase.auth.signOut()` → throw `StudentHomeworkApiError` с `code='SESSION_EXPIRED'`. `AuthGuard.onAuthStateChange` listener подхватывает SIGNED_OUT и редиректит на `/login`.
+- **Не добавляй** свой fetch к `/functions/v1/homework-api/...` мимо этого helper'а — теряешь refresh+retry. Все student endpoints (thread, hint, checkAnswer, submission, transcribe, image signed-url, etc.) уже идут через него.
+- `StudentHomeworkApiError.code` — additive optional поле. Stable codes: `NO_SESSION` (null access_token), `SESSION_EXPIRED` (refresh failed). При добавлении новых codes — расширять enum в JSDoc + UI branches.
+- Error UI в `HomeworkProblem.tsx` (`src/pages/student/HomeworkProblem.tsx`) для `SESSION_EXPIRED` показывает «Сессия истекла. Перенаправляем на страницу входа…» + spinner вместо кнопки «Повторить» (refetch бесполезен при broken session — auto-redirect уже идёт).
+
+**Bug #1 — `task_kind` / `check_format` sync (commit `ca1ed1c`):**
+
+- **КРИТИЧЕСКИЙ инвариант:** ЛЮБОЙ write-path к `homework_tutor_tasks`, который трогает `check_format`, ОБЯЗАН также писать `task_kind` через `deriveTaskKind(checkFormat)` (backend) или `deriveTaskKindFromCheckFormat(checkFormat)` (frontend).
+- Без этого DB default `task_kind='extended'` применяется → все «Краткий ответ» (`check_format='short_answer'`) задачи становятся `task_kind='extended'` в БД → `ProblemContext.tsx` рендерит warn banner «Это задача с развёрнутым решением» на ВСЕХ задачах. Это был root cause Bug #1.
+- **Backend `homework-api/index.ts` — 4 write-paths патчены:**
+  1. `handleCreateAssignment` (line ~604) — taskRows insert
+  2. `handleUpdateAssignment` (line ~1430) — in-submissions update path
+  3. `handleUpdateAssignment` (line ~1490) — no-submissions new tasks insert
+  4. `handleUpdateAssignment` (line ~1577) — no-submissions existing tasks update
+- **Frontend HWDrawer** (`src/components/kb/HWDrawer.tsx`) — client-side direct INSERT теперь использует `checkFormatSnapshot` (snapshot из `hwDraftStore.addTask` через `resolveCheckFormatFromKb`) + `deriveTaskKindFromCheckFormat`.
+- **Shared helpers** в `src/lib/checkFormatHelpers.ts`: `mapAnswerFormatToCheckFormat`, `inferCheckFormatFromKim`, `resolveCheckFormatFromKb`, `deriveTaskKindFromCheckFormat`. Mirror backend `deriveTaskKind`. Future client write-paths должны импортировать отсюда, не дублировать.
+- **`HWDraftTask.checkFormatSnapshot`** optional для backward-compat с pre-fix localStorage drafts — undefined → fallback на `'short_answer'` в HWDrawer (safe default для физика ЕГЭ KB задач).
+- Backfill migration `20260513120000_resync_task_kind_from_check_format.sql` исправил existing affected rows. **Не reapply** — она idempotent но не нужна повторно.
+
+**При добавлении нового write-path к `homework_tutor_tasks`:**
+1. Если пишешь `check_format` → **обязательно** добавить `task_kind: deriveTaskKind(check_format)` (backend) или `deriveTaskKindFromCheckFormat(check_format)` (frontend) в тот же payload.
+2. Если пишешь только `task_kind` (без `check_format`) — это допустимо (e.g. seeding tests), но рассмотри — может надо писать оба для consistency.
+3. Smoke check после deploy:
+   ```sql
+   SELECT COUNT(*) FROM homework_tutor_tasks
+    WHERE (check_format='short_answer' AND task_kind!='numeric')
+       OR (check_format='detailed_solution' AND task_kind!='extended');
+   -- Expected: 0
+   ```
+
+**Симптом нарушения инварианта:** репетитор сохранил «Краткий ответ», но ученик видит warn banner «Это задача с развёрнутым решением» + полную SubmitSheet форму вместо inline `NumericAnswerComposer`. Грепнуть write-path который пропустил `task_kind`.
+
+**Bug #2 — SubmitSheet Ctrl+V paste (commit `52681af`):**
+
+- `src/components/student/homework-problem/SubmitSheet.tsx` теперь принимает `onPaste` на `<DialogPrimitive.Content>` через `handlePaste` callback.
+- Dual path: `clipboardData.files` (Chrome / большинство) + `clipboardData.items.getAsFile()` fallback (Safari desktop, Firefox).
+- `e.preventDefault()` **только** когда image MIME найден — text paste работает нативно в textarea.
+- Lock check `photos.length < 5` (зеркалит PhotoStrip default max) + `isPasteUploading` guard.
+- Upload через существующий `uploadStudentThreadImage` → append в `photos` array → toast success/error.
+- UX hint: textarea placeholder «Напиши решение текстом или вставь скриншот (Ctrl+V)…» + inline `<kbd>Ctrl</kbd> + <kbd>V</kbd>` под photo-strip + loader-indicator во время upload.
+- Pattern source: `src/components/homework/GuidedChatInput.tsx:507-560` (Phase 5.1 mobile clipboard paste 2026-03-20).
+- **При расширении paste на другие surfaces:** reuse этот pattern. Текст в `GuidedChatInput` устаревший (студентам уже не показывается после Phase 3), но handler структура — каноническая reference.
+
+**Files touched (Phase 3.1 hotfix grep cheatsheet):**
+```
+Bug #3:
+  src/lib/studentHomeworkApi.ts                       ← requestStudentHomeworkApi refresh+retry + Error.code
+  src/pages/student/HomeworkProblem.tsx               ← SESSION_EXPIRED error UI
+
+Bug #1:
+  supabase/functions/homework-api/index.ts            ← deriveTaskKind + 4 write-paths
+  src/lib/checkFormatHelpers.ts                       ← NEW shared helpers
+  src/types/kb.ts                                     ← HWDraftTask.checkFormatSnapshot
+  src/stores/hwDraftStore.ts                          ← snapshot resolution
+  src/components/kb/HWDrawer.tsx                      ← client INSERT writes both columns
+  supabase/migrations/20260513120000_resync_task_kind_from_check_format.sql  ← backfill (NEW)
+
+Bug #2:
+  src/components/student/homework-problem/SubmitSheet.tsx  ← onPaste handler + textarea hint
+```
+
+**Спека:** plan `~/.claude/plans/toasty-weaving-meerkat.md` (Phase 3.1 hotfix section).
