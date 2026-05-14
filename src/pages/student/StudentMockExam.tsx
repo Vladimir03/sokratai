@@ -526,7 +526,6 @@ function Part1TaskCard({
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
           <span className="rounded bg-slate-100 px-2 py-1 text-sm font-semibold text-slate-700">
             №{task.kim_number}
-            {task.topic ? ` · ${task.topic}` : ''}
           </span>
           <span className="text-sm text-slate-500">{task.max_score} балл{task.max_score === 1 ? '' : 'а'}</span>
         </div>
@@ -601,7 +600,6 @@ function Part2TaskCard({
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
           <span className="rounded bg-amber-100 px-2 py-1 text-sm font-semibold text-amber-900">
             №{task.kim_number}
-            {task.topic ? ` · ${task.topic}` : ''}
           </span>
           <span className="text-sm text-slate-500">{task.max_score} баллов · развёрнутое решение</span>
         </div>

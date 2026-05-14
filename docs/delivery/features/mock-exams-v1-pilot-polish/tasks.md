@@ -237,7 +237,7 @@ function getAnswerHint(mode: MockExamCheckMode | null): string {
 **Agent:** Claude Code
 **Files:** `src/pages/student/StudentMockExam.tsx`
 **AC:** AC-P5
-**Status:** ✅ Done 2026-05-14 (commit pending). `Part1TaskCard:529` + `Part2TaskCard:604` — `{task.topic ? ...}` удалён. Grep `task.topic src/pages/student/` → 0 matches. `MockExamVariantPreviewSheet` (tutor) не тронут. `npx tsc --noEmit` clean. Видимый leak `solution.topic` в `StudentMockExamResult:293` намеренно оставлен (review surface после submit, не taking page, вне AC-P5).
+**Status:** ✅ Done 2026-05-14. `Part1TaskCard` + `Part2TaskCard` — `{task.topic ? ...}` удалён. Grep `task.topic src/pages/student/` → 0 matches. `MockExamVariantPreviewSheet` (tutor) не тронут. `npx tsc --noEmit` clean. Видимый leak `solution.topic` в `StudentMockExamResult:293` намеренно оставлен (review surface после submit, не taking page, вне AC-P5).
 
 ### Контекст
 
