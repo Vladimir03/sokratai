@@ -65,8 +65,11 @@ import { MOCK_EXAM_ASSIGNMENTS_QUERY_KEY } from '@/hooks/useMockExamAssignments'
 import {
   approveMockExamAll,
   approveMockExamTask,
+  finalizeMockExamPart1,
+  setMockExamPart1ManualScore,
   MockExamApiError,
 } from '@/lib/mockExamApi';
+import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
 import { formatMockScore } from '@/components/tutor/mock-exams/mockHeatmapStyles';
 import type {
@@ -262,6 +265,203 @@ const ElementChip = memo(function ElementChip({ label, passed }: ElementChipProp
     </div>
   );
 });
+
+// ─── Part 1 blank-mode manual scoring panel (TASK-11) ───────────────────────
+//
+// Ученик отвечал на Часть 1 на ФИПИ бланке от руки. Auto-check невозможен,
+// tutor вводит earned_score вручную по каждому KIM. Photo бланка показан выше.
+// Auto-save per row через `setMockExamPart1ManualScore`. Финализация total —
+// `finalizeMockExamPart1` (button «Часть 1 проверена» / on-blur от последнего
+// edit'а).
+
+function Part1BlankReviewPanel({ attempt, variantPart1Tasks }: {
+  attempt: MockExamAttemptDetail;
+  variantPart1Tasks: { kim_number: number; max_score: number }[];
+}) {
+  const queryClient = useQueryClient();
+  const blankPhotoUrl = attempt.blank_photo_url ?? null;
+  const fallbackPhotoUrl = attempt.part1_blank_photo_url ?? null;
+
+  // Map existing earned_score by kim_number (from auto-loaded part1_answers).
+  const existingScores = useMemo(() => {
+    const m = new Map<number, number | null>();
+    for (const a of attempt.part1_answers) {
+      m.set(a.kim_number, a.earned_score);
+    }
+    return m;
+  }, [attempt.part1_answers]);
+
+  // Local draft state — позволяет редактировать без блокировки на каждый change.
+  const [drafts, setDrafts] = useState<Record<number, string>>(() => {
+    const initial: Record<number, string> = {};
+    for (const t of variantPart1Tasks) {
+      const v = existingScores.get(t.kim_number);
+      initial[t.kim_number] = v !== null && v !== undefined ? String(v) : '';
+    }
+    return initial;
+  });
+
+  const [savingKim, setSavingKim] = useState<number | null>(null);
+  const [isFinalizing, setIsFinalizing] = useState(false);
+
+  const isReadOnly =
+    attempt.status === 'approved' || attempt.status === 'manually_entered';
+
+  const handleScoreBlur = async (kim: number, maxScore: number) => {
+    const raw = drafts[kim] ?? '';
+    if (raw.trim() === '') return; // пусто — не сохраняем
+    const parsed = Number.parseInt(raw, 10);
+    if (!Number.isFinite(parsed) || parsed < 0 || parsed > maxScore) {
+      toast.error(`Балл для KIM ${kim}: 0..${maxScore}`);
+      // restore previous
+      const prev = existingScores.get(kim);
+      setDrafts((d) => ({ ...d, [kim]: prev !== null && prev !== undefined ? String(prev) : '' }));
+      return;
+    }
+    if (existingScores.get(kim) === parsed) return; // no change
+    setSavingKim(kim);
+    try {
+      await setMockExamPart1ManualScore(attempt.id, {
+        kim_number: kim,
+        earned_score: parsed,
+      });
+      void queryClient.invalidateQueries({
+        queryKey: MOCK_EXAM_ATTEMPT_QUERY_KEY(attempt.id),
+      });
+    } catch (err) {
+      const msg =
+        err instanceof MockExamApiError ? err.message : 'Не удалось сохранить балл';
+      toast.error(msg);
+    } finally {
+      setSavingKim(null);
+    }
+  };
+
+  const handleFinalize = async () => {
+    setIsFinalizing(true);
+    try {
+      const res = await finalizeMockExamPart1(attempt.id);
+      toast.success(`Часть 1 пересчитана: ${res.total_part1_score} баллов`);
+      void queryClient.invalidateQueries({
+        queryKey: MOCK_EXAM_ATTEMPT_QUERY_KEY(attempt.id),
+      });
+    } catch (err) {
+      const msg =
+        err instanceof MockExamApiError ? err.message : 'Не удалось пересчитать';
+      toast.error(msg);
+    } finally {
+      setIsFinalizing(false);
+    }
+  };
+
+  const draftSum = useMemo(() => {
+    let sum = 0;
+    for (const t of variantPart1Tasks) {
+      const v = Number.parseInt(drafts[t.kim_number] ?? '', 10);
+      if (Number.isFinite(v)) sum += v;
+    }
+    return sum;
+  }, [drafts, variantPart1Tasks]);
+  const part1Max = variantPart1Tasks.reduce((a, t) => a + t.max_score, 0);
+
+  return (
+    <Card animate={false} className="border-amber-200 bg-amber-50/40 dark:bg-amber-950/10 dark:border-amber-900">
+      <CardContent className="p-4 sm:p-5 space-y-4">
+        <div className="flex flex-col gap-1">
+          <div className="flex items-center gap-2">
+            <Pencil className="h-4 w-4 text-amber-700 dark:text-amber-300" aria-hidden="true" />
+            <h2 className="text-sm font-semibold text-amber-900 dark:text-amber-200">
+              Часть 1: ручная проверка по ФИПИ-бланку
+            </h2>
+          </div>
+          <p className="text-xs text-amber-800 dark:text-amber-300/90 leading-relaxed">
+            Ученик заполнял бланк от руки (выбран режим «бланк ФИПИ»).
+            Сверь ответы с фото ниже и поставь баллы по каждой задаче 1–20.
+          </p>
+        </div>
+
+        {(blankPhotoUrl || fallbackPhotoUrl) && (
+          <div className="grid gap-3 sm:grid-cols-2">
+            {blankPhotoUrl && (
+              <a href={blankPhotoUrl} target="_blank" rel="noreferrer" className="block">
+                <div className="text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">
+                  ФИПИ-бланк (Часть 1)
+                </div>
+                <img
+                  src={blankPhotoUrl}
+                  alt="ФИПИ бланк"
+                  loading="lazy"
+                  className="w-full rounded-md border border-slate-300 bg-white object-contain max-h-[420px]"
+                />
+              </a>
+            )}
+            {fallbackPhotoUrl && (
+              <a href={fallbackPhotoUrl} target="_blank" rel="noreferrer" className="block">
+                <div className="text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">
+                  Доп. фото Часть 1 (не на бланке)
+                </div>
+                <img
+                  src={fallbackPhotoUrl}
+                  alt="Фото ответов Часть 1"
+                  loading="lazy"
+                  className="w-full rounded-md border border-slate-300 bg-white object-contain max-h-[420px]"
+                />
+              </a>
+            )}
+          </div>
+        )}
+
+        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2">
+          {variantPart1Tasks.map((t) => (
+            <label
+              key={t.kim_number}
+              className="flex flex-col gap-1 p-2 rounded-md bg-white border border-amber-200 dark:bg-slate-900 dark:border-amber-900"
+            >
+              <span className="text-xs font-medium text-slate-700 dark:text-slate-300">
+                KIM {t.kim_number} <span className="text-slate-400">/ {t.max_score}</span>
+              </span>
+              <Input
+                type="number"
+                inputMode="numeric"
+                min={0}
+                max={t.max_score}
+                step={1}
+                disabled={isReadOnly || savingKim === t.kim_number}
+                value={drafts[t.kim_number] ?? ''}
+                onChange={(e) =>
+                  setDrafts((d) => ({ ...d, [t.kim_number]: e.target.value }))
+                }
+                onBlur={() => void handleScoreBlur(t.kim_number, t.max_score)}
+                className="text-base"
+                placeholder="—"
+                aria-label={`Баллы за KIM ${t.kim_number}`}
+              />
+            </label>
+          ))}
+        </div>
+
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-2 border-t border-amber-200">
+          <div className="text-sm text-amber-900 dark:text-amber-200">
+            Сумма draft: <strong>{draftSum}</strong> / {part1Max}
+            {attempt.total_part1_score !== null && (
+              <span className="ml-2 text-amber-700 dark:text-amber-300/80">
+                (сохранено: {attempt.total_part1_score})
+              </span>
+            )}
+          </div>
+          <Button
+            type="button"
+            onClick={handleFinalize}
+            disabled={isReadOnly || isFinalizing}
+            className="bg-amber-600 hover:bg-amber-700 text-white"
+          >
+            {isFinalizing ? 'Пересчитываем…' : 'Часть 1 проверена'}
+          </Button>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
 
 // ─── Part 1 summary card ─────────────────────────────────────────────────────
 
@@ -929,8 +1129,18 @@ function TutorMockExamReviewContent() {
         onRetry={refetchAttempt}
       />
 
-      {/* Часть 1 summary (read-only) */}
-      <Part1SummaryCard attempt={attempt} />
+      {/* Часть 1 — read-only summary (form mode) или manual scoring (blank mode, TASK-11) */}
+      {attempt.answer_method === 'blank' ? (
+        <Part1BlankReviewPanel
+          attempt={attempt}
+          variantPart1Tasks={attempt.part1_answers.map((a) => ({
+            kim_number: a.kim_number,
+            max_score: a.max_score,
+          }))}
+        />
+      ) : (
+        <Part1SummaryCard attempt={attempt} />
+      )}
 
       {/* Часть 2 banner — context for AI draft */}
       {!isAlreadyApproved && part2Solutions.length > 0 ? (

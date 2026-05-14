@@ -421,9 +421,10 @@ function TutorMockExamCreateContent() {
   const { groups, loading: groupsLoading } = useTutorGroups(miniGroupsEnabled);
 
   const [variantId] = useState(DEFAULT_VARIANT_ID);
-  const [mode, setMode] = useState<Exclude<MockExamMode, 'manual_entry'>>(
-    'blank',
-  );
+  // TASK-11: mode чooser скрыт. Default 'form' — пробник создаётся в нейтральном
+  // режиме, ученик выбирает blank/form сам на taking page. Tutor НЕ навязывает.
+  // assignment.mode остаётся в схеме для manual_entry flow + backward compat.
+  const [mode] = useState<Exclude<MockExamMode, 'manual_entry'>>('form');
   const [title, setTitle] = useState(DEFAULT_TITLE);
   const [deadlineInput, setDeadlineInput] = useState('');
   const [createLeadLink, setCreateLeadLink] = useState(false);
@@ -645,19 +646,10 @@ function TutorMockExamCreateContent() {
         </p>
       </StepSection>
 
-      {/* Шаг 2 — Режим */}
-      <StepSection index={2} title="Режим прохождения">
-        <div className="space-y-2">
-          {MODE_OPTIONS.map((option) => (
-            <ModeRadio
-              key={option.value}
-              option={option}
-              isSelected={mode === option.value}
-              onSelect={setMode}
-            />
-          ))}
-        </div>
-      </StepSection>
+      {/* Шаг 2 — Режим прохождения СКРЫТ (TASK-11): ученик выбирает способ ответа
+          сам через AnswerMethodSelectModal на taking page (TASK-10). Tutor больше
+          не навязывает «бланк vs цифровой» при создании. assignment.mode остаётся
+          'form' по умолчанию для backward-compat (см. tutor-bugs-fix-spec.md). */}
 
       {/* Шаг 3 — Кому назначить */}
       <StepSection index={3} title="Кому назначить">

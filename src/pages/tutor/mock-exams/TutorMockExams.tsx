@@ -214,17 +214,29 @@ const AssignmentCard = memo(function AssignmentCard({
   const modeLabel = MODE_LABEL[item.mode];
   const deadlineStr = formatDeadline(item.deadline);
 
-  // Derived: «в процессе» = total - submitted - awaiting - approved - not_started.
-  // Backend разделяет not_started (assigned, status='in_progress' AND started_at
-  // IS NULL) от настоящего in_progress (student открыл и решает).
-  const inProgress = Math.max(
-    item.attempts_total
-      - item.attempts_submitted
-      - item.attempts_awaiting_review
-      - item.attempts_approved
-      - item.attempts_not_started,
-    0,
-  );
+  // TASK-11: backend теперь выдаёт all counters explicitly. Frontend читает
+  // напрямую с `?? 0` fallback. Old subtraction формула рождала NaN при
+  // отсутствии поля в response. Legacy field `attempts_approved` остался
+  // (= approved+manually_entered = «подтверждённые tutor'ом»), но для
+  // отображения «Сдали» теперь используем `attempts_completed_total`
+  // (= submitted+ai_checking+awaiting_review+approved+manually_entered =
+  // «все кто нажал submit»).
+  const total = item.attempts_total ?? 0;
+  const inProgress = item.attempts_in_progress
+    ?? Math.max(
+      total
+        - (item.attempts_submitted ?? 0)
+        - (item.attempts_awaiting_review ?? 0)
+        - (item.attempts_approved ?? 0)
+        - (item.attempts_not_started ?? 0),
+      0,
+    );
+  const completedTotal = item.attempts_completed_total
+    ?? ((item.attempts_submitted ?? 0)
+      + (item.attempts_awaiting_review ?? 0)
+      + (item.attempts_approved ?? 0));
+  const pendingReview = item.attempts_pending_review
+    ?? ((item.attempts_submitted ?? 0) + (item.attempts_awaiting_review ?? 0));
 
   // Variant attribution — for blank/form: variant title. Для manual_entry:
   // variant_title идёт через display_title, source label не нужен.
@@ -298,13 +310,13 @@ const AssignmentCard = memo(function AssignmentCard({
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3 pt-3 border-t border-slate-100 dark:border-slate-800">
             <KpiCell
               label="Учеников"
-              value={String(item.attempts_total)}
+              value={String(total)}
             />
             <KpiCell
               label="Сдали"
-              value={String(item.attempts_approved)}
-              hint={`/ ${item.attempts_total}`}
-              tone={item.attempts_approved > 0 ? 'accent' : 'default'}
+              value={String(completedTotal)}
+              hint={`/ ${total}`}
+              tone={completedTotal > 0 ? 'accent' : 'default'}
             />
             <KpiCell
               label="В процессе"
@@ -313,8 +325,8 @@ const AssignmentCard = memo(function AssignmentCard({
             />
             <KpiCell
               label="Требует проверки"
-              value={String(item.attempts_awaiting_review)}
-              tone={item.attempts_awaiting_review > 0 ? 'amber' : 'default'}
+              value={String(pendingReview)}
+              tone={pendingReview > 0 ? 'amber' : 'default'}
             />
           </div>
         </CardContent>

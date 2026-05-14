@@ -68,37 +68,64 @@ const MODE_LABEL: Record<MockExamMode, string> = {
 
 interface KpiSnapshot {
   total: number;
-  approved: number;
+  /** «Сдали» — все кто нажал submit (TASK-11 semantics). */
+  completedTotal: number;
+  /** finalized = approved + manually_entered. Для tooltip / progress bar. */
+  approvedFinal: number;
   inProgress: number;
   notStarted: number;
+  /** «Требует проверки» — submitted+ai_checking+awaiting_review. */
   awaitingReview: number;
   averagePart1: number | null;
   totalMax: number;
 }
 
 function deriveKpi(detail: MockExamAssignmentDetail): KpiSnapshot {
+  // TASK-11 — prefer backend-computed aggregate (avoids NaN-prone client math).
+  // Fallback на client-side count для backward-compat если бекенд не обновлён.
   const attempts = detail.attempts ?? [];
-  let approved = 0;
+  const agg = detail.aggregate ?? null;
+
+  if (agg) {
+    let part1Sum = 0;
+    let part1Count = 0;
+    for (const a of attempts) {
+      if (a.total_part1_score !== null) {
+        part1Sum += a.total_part1_score;
+        part1Count += 1;
+      }
+    }
+    return {
+      total: agg.attempts_total ?? attempts.length,
+      completedTotal: agg.attempts_completed_total ?? 0,
+      approvedFinal: agg.attempts_approved ?? 0,
+      inProgress: agg.attempts_in_progress ?? 0,
+      notStarted: agg.attempts_not_started ?? 0,
+      awaitingReview: agg.attempts_pending_review ?? 0,
+      averagePart1: part1Count > 0 ? part1Sum / part1Count : null,
+      totalMax: detail.total_max_score ?? 0,
+    };
+  }
+
+  // Fallback: count client-side. Используется ТОЛЬКО при stale backend bundle.
+  let approvedFinal = 0;
+  let submitted = 0;
+  let awaitingReview = 0;
   let inProgress = 0;
   let notStarted = 0;
-  let awaitingReview = 0;
   let part1Sum = 0;
   let part1Count = 0;
 
   for (const a of attempts) {
     if (a.status === 'approved' || a.status === 'manually_entered') {
-      approved += 1;
-    } else if (a.status === 'in_progress') {
-      // Backend создаёт mock_exam_attempts с status='in_progress' при assignment,
-      // но started_at = NULL пока student не открыл /student/mock-exams/:id.
-      // Real «в процессе» = status='in_progress' AND started_at IS NOT NULL.
-      if (a.started_at === null) {
-        notStarted += 1;
-      } else {
-        inProgress += 1;
-      }
-    } else if (a.status === 'awaiting_review' || a.status === 'submitted' || a.status === 'ai_checking') {
+      approvedFinal += 1;
+    } else if (a.status === 'submitted' || a.status === 'ai_checking') {
+      submitted += 1;
+    } else if (a.status === 'awaiting_review') {
       awaitingReview += 1;
+    } else if (a.status === 'in_progress') {
+      if (a.started_at === null) notStarted += 1;
+      else inProgress += 1;
     }
     if (a.total_part1_score !== null) {
       part1Sum += a.total_part1_score;
@@ -110,10 +137,11 @@ function deriveKpi(detail: MockExamAssignmentDetail): KpiSnapshot {
 
   return {
     total: attempts.length,
-    approved,
+    completedTotal: submitted + awaitingReview + approvedFinal,
+    approvedFinal,
     inProgress,
     notStarted,
-    awaitingReview,
+    awaitingReview: submitted + awaitingReview,
     averagePart1,
     totalMax: detail.total_max_score ?? 0,
   };
@@ -166,9 +194,31 @@ function KpiCard({ label, value, hint, tone = 'default' }: KpiCardProps) {
 
 function DetailHeader({ detail }: { detail: MockExamAssignmentDetail }) {
   const statusCfg = STATUS_CONFIG[detail.status];
-  const modeLabel = MODE_LABEL[detail.mode];
   const deadlineStr = formatDeadline(detail.deadline);
   const studentCount = detail.attempts?.length ?? 0;
+
+  // TASK-11: вместо «С бланком» (assignment.mode — устаревший signal,
+  // ученик сам выбирает через TASK-10 modal) показываем агрегат фактических
+  // выборов учеников. manual_entry оставляем — это tutor-only flow.
+  let methodSummary: string | null = null;
+  if (detail.mode === 'manual_entry') {
+    methodSummary = 'Ручной результат';
+  } else if (detail.attempts && detail.attempts.length > 0) {
+    let blankCount = 0;
+    let formCount = 0;
+    let unchosenCount = 0;
+    for (const a of detail.attempts) {
+      const m = a.answer_method;
+      if (m === 'blank') blankCount++;
+      else if (m === 'form') formCount++;
+      else unchosenCount++;
+    }
+    const parts: string[] = [];
+    if (blankCount > 0) parts.push(`Бланк ${blankCount}`);
+    if (formCount > 0) parts.push(`Цифровой ${formCount}`);
+    if (unchosenCount > 0) parts.push(`Не выбрали ${unchosenCount}`);
+    methodSummary = parts.length > 0 ? `Способы: ${parts.join(' · ')}` : null;
+  }
 
   return (
     <div className="space-y-3">
@@ -197,10 +247,14 @@ function DetailHeader({ detail }: { detail: MockExamAssignmentDetail }) {
           <p className="text-sm text-muted-foreground">
             {detail.display_title}
             {deadlineStr ? <> · Дедлайн {deadlineStr}</> : null}
-            <> · </>
-            <span className="font-medium text-slate-700 dark:text-slate-300">
-              {modeLabel}
-            </span>
+            {methodSummary ? (
+              <>
+                <> · </>
+                <span className="font-medium text-slate-700 dark:text-slate-300">
+                  {methodSummary}
+                </span>
+              </>
+            ) : null}
             <> · </>
             {studentCount}{' '}
             {studentCount === 1
@@ -370,9 +424,9 @@ function TutorMockExamDetailContent() {
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-3">
           <KpiCard
             label="Сдали"
-            value={String(kpi.approved)}
+            value={String(kpi.completedTotal)}
             hint={`/ ${kpi.total}`}
-            tone={kpi.approved > 0 ? 'accent' : 'default'}
+            tone={kpi.completedTotal > 0 ? 'accent' : 'default'}
           />
           <KpiCard
             label="В процессе"
@@ -394,7 +448,7 @@ function TutorMockExamDetailContent() {
             tone={kpi.averagePart1 !== null ? 'accent' : 'default'}
           />
           <KpiCard
-            label="Требует AI-проверки"
+            label="Требует проверки"
             value={String(kpi.awaitingReview)}
             hint={kpi.awaitingReview > 0 ? 'учеников' : null}
             tone={kpi.awaitingReview > 0 ? 'amber-warn' : 'default'}

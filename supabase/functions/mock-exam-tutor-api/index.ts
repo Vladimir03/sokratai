@@ -699,13 +699,26 @@ async function handleListAssignments(
   }
 
   const assignmentIds = rows.map((r) => r.id as string);
-  // Counters: total / submitted (in AI check) / awaiting (tutor review) /
-  // approved (final) / not_started (assigned but student never opened —
-  // status='in_progress' AND started_at IS NULL).
-  // «in_progress real» = total - submitted - awaiting - approved - not_started.
-  const counts: Record<string, { total: number; submitted: number; awaiting: number; approved: number; not_started: number }> = {};
+  // Counters (TASK-11 review fix 2026-05-14):
+  //   - total:               all attempt rows
+  //   - in_progress:         status='in_progress' AND started_at IS NOT NULL
+  //   - not_started:         status='in_progress' AND started_at IS NULL
+  //   - submitted:           status IN ('submitted', 'ai_checking')
+  //   - awaiting_review:     status='awaiting_review'
+  //   - approved:            status IN ('approved', 'manually_entered')
+  //   - completed_total:     submitted + awaiting_review + approved (= «Сдали»)
+  //   - pending_review:      submitted + awaiting_review (= «Требует проверки»)
+  // Frontend reads these fields DIRECTLY — no NaN-prone subtraction formula.
+  type Counts = {
+    total: number; in_progress: number; not_started: number;
+    submitted: number; awaiting: number; approved: number;
+  };
+  const counts: Record<string, Counts> = {};
   for (const id of assignmentIds) {
-    counts[id] = { total: 0, submitted: 0, awaiting: 0, approved: 0, not_started: 0 };
+    counts[id] = {
+      total: 0, in_progress: 0, not_started: 0,
+      submitted: 0, awaiting: 0, approved: 0,
+    };
   }
   if (assignmentIds.length > 0) {
     const { data: attempts } = await db
@@ -720,13 +733,21 @@ async function handleListAssignments(
       if (a.status === "submitted" || a.status === "ai_checking") bucket.submitted += 1;
       else if (a.status === "awaiting_review") bucket.awaiting += 1;
       else if (a.status === "approved" || a.status === "manually_entered") bucket.approved += 1;
-      else if (a.status === "in_progress" && a.started_at === null) bucket.not_started += 1;
+      else if (a.status === "in_progress") {
+        if (a.started_at === null) bucket.not_started += 1;
+        else bucket.in_progress += 1;
+      }
     }
   }
 
   const items = rows.map((r) => {
     const variant = r.variant_id ? variantsById[r.variant_id as string] : null;
-    const c = counts[r.id as string] ?? { total: 0, submitted: 0, awaiting: 0, approved: 0, not_started: 0 };
+    const c = counts[r.id as string] ?? {
+      total: 0, in_progress: 0, not_started: 0,
+      submitted: 0, awaiting: 0, approved: 0,
+    };
+    const completedTotal = c.submitted + c.awaiting + c.approved;
+    const pendingReview = c.submitted + c.awaiting;
     return {
       id: r.id,
       variant_id: r.variant_id,
@@ -739,11 +760,16 @@ async function handleListAssignments(
       created_at: r.created_at,
       display_title: r.variant_title ?? variant?.title ?? r.title,
       exam_type: variant?.exam_type ?? null,
+      // Legacy fields (kept for backward compat — old frontend bundles).
       attempts_total: c.total,
       attempts_submitted: c.submitted,
       attempts_awaiting_review: c.awaiting,
       attempts_approved: c.approved,
       attempts_not_started: c.not_started,
+      // New fields (TASK-11) — frontend reads directly, no math.
+      attempts_in_progress: c.in_progress,
+      attempts_completed_total: completedTotal,
+      attempts_pending_review: pendingReview,
     };
   });
 
@@ -779,7 +805,7 @@ async function handleGetAssignment(
     .select(
       "id, assignment_id, student_id, anonymous_id, status, started_at, submitted_at, " +
       "total_time_minutes, total_part1_score, total_part2_score, total_score, " +
-      "manual_entered_date, manual_comment, created_at",
+      "manual_entered_date, manual_comment, created_at, answer_method",
     )
     .eq("assignment_id", assignmentId)
     .order("created_at", { ascending: true });
@@ -807,7 +833,32 @@ async function handleGetAssignment(
     total_score: a.total_score,
     manual_entered_date: a.manual_entered_date,
     manual_comment: a.manual_comment,
+    answer_method: a.answer_method ?? null,
   }));
+
+  // Aggregate counts (TASK-11) — same semantics как в handleGetAssignmentsList.
+  // Frontend читает напрямую, без NaN-prone subtraction.
+  let aggInProgress = 0, aggNotStarted = 0, aggSubmitted = 0,
+    aggAwaiting = 0, aggApproved = 0;
+  for (const a of attempts) {
+    if (a.status === "submitted" || a.status === "ai_checking") aggSubmitted++;
+    else if (a.status === "awaiting_review") aggAwaiting++;
+    else if (a.status === "approved" || a.status === "manually_entered") aggApproved++;
+    else if (a.status === "in_progress") {
+      if (a.started_at === null) aggNotStarted++;
+      else aggInProgress++;
+    }
+  }
+  const aggregate = {
+    attempts_total: attempts.length,
+    attempts_in_progress: aggInProgress,
+    attempts_not_started: aggNotStarted,
+    attempts_submitted: aggSubmitted,
+    attempts_awaiting_review: aggAwaiting,
+    attempts_approved: aggApproved,
+    attempts_completed_total: aggSubmitted + aggAwaiting + aggApproved,
+    attempts_pending_review: aggSubmitted + aggAwaiting,
+  };
 
   return jsonOk(cors, {
     id: assignment.id,
@@ -824,6 +875,7 @@ async function handleGetAssignment(
     duration_minutes: variant?.duration_minutes ?? null,
     total_max_score: variant?.total_max_score ?? null,
     attempts,
+    aggregate,
   });
 }
 
@@ -842,7 +894,7 @@ async function handleGetAttempt(
   const { attempt, assignment } = ownedOrErr;
 
   // Variant-driven canonical task data (text + correct answer + max_score).
-  let variantTasks: Record<number, {
+  const variantTasks: Record<number, {
     task_text: string;
     task_image_url: string | null;
     correct_answer: string | null;
@@ -881,21 +933,35 @@ async function handleGetAttempt(
     }
   }
 
-  // Part 1 answers.
+  // Part 1 answers. Backend выдаёт row на КАЖДЫЙ KIM из variant'a (1..20 для
+  // ЕГЭ физики), даже если ученик не ответил — frontend (review surface)
+  // нуждается в полном списке для manual scoring inputs blank-mode (TASK-11).
+  // Existing answers переопределяют placeholders.
   const { data: part1Rows } = await db
     .from("mock_exam_attempt_part1_answers")
     .select("kim_number, student_answer, earned_score")
     .eq("attempt_id", attemptId)
     .order("kim_number", { ascending: true });
-  const part1Answers = (part1Rows ?? []).map((row) => {
-    const variant = variantTasks[row.kim_number as number];
+  const answersByKim = new Map<number, { student_answer: string | null; earned_score: number | null }>();
+  for (const row of part1Rows ?? []) {
+    answersByKim.set(row.kim_number as number, {
+      student_answer: row.student_answer as string | null,
+      earned_score: row.earned_score as number | null,
+    });
+  }
+  const part1VariantTasks = Object.entries(variantTasks)
+    .filter(([, t]) => t.part === 1)
+    .map(([kimStr, t]) => ({ kim: Number(kimStr), variant: t }))
+    .sort((a, b) => a.kim - b.kim);
+  const part1Answers = part1VariantTasks.map(({ kim, variant }) => {
+    const ans = answersByKim.get(kim);
     return {
-      kim_number: row.kim_number,
-      student_answer: row.student_answer,
-      earned_score: row.earned_score,
-      correct_answer: variant?.correct_answer ?? null,
-      max_score: variant?.max_score ?? 0,
-      check_mode: variant?.check_mode ?? null,
+      kim_number: kim,
+      student_answer: ans?.student_answer ?? null,
+      earned_score: ans?.earned_score ?? null,
+      correct_answer: variant.correct_answer,
+      max_score: variant.max_score,
+      check_mode: variant.check_mode,
     };
   });
 
@@ -925,8 +991,30 @@ async function handleGetAttempt(
     }),
   );
 
-  // Resolve blank photo signed URL (if present).
+  // Resolve photo signed URLs (TASK-10/11).
   const blankPhotoUrl = await resolveSignedUrl(db, attempt.blank_photo_url as string | null);
+  const part1BlankPhotoUrl = await resolveSignedUrl(db, attempt.part1_blank_photo_url as string | null);
+
+  // part2_bulk_photo_urls — dual-format (single ref OR JSON-array string)
+  const part2BulkRefs: string[] = (() => {
+    const raw = attempt.part2_bulk_photo_urls as string | null;
+    if (!raw) return [];
+    const trimmed = raw.trim();
+    if (!trimmed) return [];
+    if (trimmed.startsWith("[")) {
+      try {
+        const parsed = JSON.parse(trimmed);
+        if (Array.isArray(parsed)) {
+          return parsed.filter((x): x is string => typeof x === "string" && x.length > 0);
+        }
+      } catch { /* corrupted → empty */ }
+      return [];
+    }
+    return [trimmed];
+  })();
+  const part2BulkPhotoUrls = (
+    await Promise.all(part2BulkRefs.map((ref) => resolveSignedUrl(db, ref)))
+  ).filter((url): url is string => typeof url === "string");
 
   // Resolve student name.
   let studentDisplayName: string | null = null;
@@ -950,6 +1038,10 @@ async function handleGetAttempt(
     submitted_at: attempt.submitted_at,
     total_time_minutes: attempt.total_time_minutes,
     blank_photo_url: blankPhotoUrl,
+    // NEW (TASK-11): expose per-attempt mode + extended photo fields для review UI.
+    answer_method: attempt.answer_method ?? null,
+    part1_blank_photo_url: part1BlankPhotoUrl,
+    part2_bulk_photo_urls: part2BulkPhotoUrls,
     total_part1_score: attempt.total_part1_score,
     total_part2_score: attempt.total_part2_score,
     total_score: attempt.total_score,
@@ -1211,6 +1303,144 @@ async function handleApproveAll(
 }
 
 // ────────────────────────────────────────────────────────────────────────────
+// Endpoint: POST /attempts/:id/part1-manual-score  (TASK-11)
+// ────────────────────────────────────────────────────────────────────────────
+//
+// Used when student answered Part 1 on ФИПИ бланка от руки (answer_method='blank').
+// Auto-check невозможен — tutor вводит earned_score вручную по каждому KIM,
+// просматривая фото бланка. Upsert per kim_number; финализация суммарного
+// total_part1_score через `/part1-finalize`.
+
+async function handlePart1ManualScore(
+  db: SupabaseClient,
+  tutorUserId: string,
+  attemptId: string,
+  body: unknown,
+  cors: Record<string, string>,
+): Promise<Response> {
+  const ownedOrErr = await getOwnedAttemptOrThrow(db, attemptId, tutorUserId, cors);
+  if (ownedOrErr instanceof Response) return ownedOrErr;
+  const { attempt, assignment } = ownedOrErr;
+
+  if (attempt.status === "approved" || attempt.status === "manually_entered") {
+    return jsonError(cors, 409, "ALREADY_FINALIZED",
+      `Cannot edit Part 1 manual score after status=${attempt.status}`);
+  }
+  if (attempt.status === "in_progress") {
+    return jsonError(cors, 409, "NOT_SUBMITTED",
+      "Cannot grade Part 1 before student submitted the attempt");
+  }
+
+  if (!body || typeof body !== "object") {
+    return jsonError(cors, 400, "INVALID_BODY", "Request body must be a JSON object");
+  }
+  const b = body as Record<string, unknown>;
+  if (!isPositiveInt(b.kim_number)) {
+    return jsonError(cors, 400, "VALIDATION", "kim_number must be a positive integer");
+  }
+  if (!isNonNegativeInt(b.earned_score)) {
+    return jsonError(cors, 400, "VALIDATION", "earned_score must be a non-negative integer");
+  }
+
+  if (!assignment.variant_id) {
+    return jsonError(cors, 400, "INVALID_STATE", "Assignment has no variant");
+  }
+  const { data: variantTask } = await db
+    .from("mock_exam_variant_tasks")
+    .select("part, max_score")
+    .eq("variant_id", assignment.variant_id as string)
+    .eq("kim_number", b.kim_number as number)
+    .maybeSingle();
+  if (!variantTask) {
+    return jsonError(cors, 404, "TASK_NOT_FOUND", "Task with this kim_number not found in variant");
+  }
+  if (variantTask.part !== 1) {
+    return jsonError(cors, 400, "VALIDATION",
+      "part1-manual-score only valid for Часть 1 (part=1)");
+  }
+  if ((b.earned_score as number) > (variantTask.max_score as number)) {
+    return jsonError(cors, 400, "VALIDATION",
+      `earned_score exceeds max_score (${variantTask.max_score})`);
+  }
+
+  const { error: upsertErr } = await db
+    .from("mock_exam_attempt_part1_answers")
+    .upsert(
+      {
+        attempt_id: attemptId,
+        kim_number: b.kim_number,
+        student_answer: null, // student didn't enter digital answer (blank mode)
+        earned_score: b.earned_score,
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: "attempt_id,kim_number" },
+    );
+  if (upsertErr) {
+    console.error("mock_exam_part1_manual_score_failed", { error: upsertErr.message });
+    return jsonError(cors, 500, "DB_ERROR", "Failed to persist manual score");
+  }
+
+  return jsonOk(cors, {
+    ok: true,
+    attempt_id: attemptId,
+    kim_number: b.kim_number,
+    earned_score: b.earned_score,
+  });
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Endpoint: POST /attempts/:id/part1-finalize  (TASK-11)
+// ────────────────────────────────────────────────────────────────────────────
+//
+// Aggregates manually-entered Part 1 scores → updates attempt.total_part1_score.
+// Idempotent; can be called multiple times as tutor edits scores.
+
+async function handlePart1Finalize(
+  db: SupabaseClient,
+  tutorUserId: string,
+  attemptId: string,
+  cors: Record<string, string>,
+): Promise<Response> {
+  const ownedOrErr = await getOwnedAttemptOrThrow(db, attemptId, tutorUserId, cors);
+  if (ownedOrErr instanceof Response) return ownedOrErr;
+  const { attempt } = ownedOrErr;
+
+  if (attempt.status === "approved" || attempt.status === "manually_entered") {
+    return jsonError(cors, 409, "ALREADY_FINALIZED",
+      `Cannot finalize Part 1 after status=${attempt.status}`);
+  }
+  if (attempt.status === "in_progress") {
+    return jsonError(cors, 409, "NOT_SUBMITTED",
+      "Cannot finalize Part 1 before student submitted the attempt");
+  }
+
+  const { data: rows } = await db
+    .from("mock_exam_attempt_part1_answers")
+    .select("earned_score")
+    .eq("attempt_id", attemptId);
+
+  const totalPart1 = (rows ?? []).reduce(
+    (sum, r) => sum + (typeof r.earned_score === "number" ? r.earned_score : 0),
+    0,
+  );
+
+  const { error: updateErr } = await db
+    .from("mock_exam_attempts")
+    .update({ total_part1_score: totalPart1 })
+    .eq("id", attemptId);
+  if (updateErr) {
+    console.error("mock_exam_part1_finalize_failed", { error: updateErr.message });
+    return jsonError(cors, 500, "DB_ERROR", "Failed to finalize Part 1 score");
+  }
+
+  return jsonOk(cors, {
+    ok: true,
+    attempt_id: attemptId,
+    total_part1_score: totalPart1,
+  });
+}
+
+// ────────────────────────────────────────────────────────────────────────────
 // Endpoint: POST /assignments/:id/invite-link
 // ────────────────────────────────────────────────────────────────────────────
 
@@ -1433,6 +1663,23 @@ Deno.serve(async (req: Request): Promise<Response> => {
       seg[2] === "approve-all" && route.method === "POST"
     ) {
       return await handleApproveAll(db, userId, seg[1], cors);
+    }
+
+    // POST /attempts/:id/part1-manual-score  (TASK-11 — blank mode tutor grading)
+    if (
+      seg.length === 3 && seg[0] === "attempts" &&
+      seg[2] === "part1-manual-score" && route.method === "POST"
+    ) {
+      const body = await parseJsonBody(req);
+      return await handlePart1ManualScore(db, userId, seg[1], body, cors);
+    }
+
+    // POST /attempts/:id/part1-finalize  (TASK-11 — aggregate manual scores)
+    if (
+      seg.length === 3 && seg[0] === "attempts" &&
+      seg[2] === "part1-finalize" && route.method === "POST"
+    ) {
+      return await handlePart1Finalize(db, userId, seg[1], cors);
     }
 
     return jsonError(cors, 404, "NOT_FOUND", `Route not found: ${route.method} /${seg.join("/")}`);

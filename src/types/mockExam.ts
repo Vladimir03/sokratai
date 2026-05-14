@@ -127,6 +127,21 @@ export interface MockExamAssignmentListItem extends MockExamAssignment {
    * «Не приступали» vs «В процессе».
    */
   attempts_not_started: number;
+  /**
+   * NEW (TASK-11): status='in_progress' AND started_at IS NOT NULL — реально решает.
+   * Backend выдаёт явно вместо NaN-prone subtraction формулы на фронте.
+   */
+  attempts_in_progress?: number;
+  /**
+   * NEW (TASK-11): «Сдали» = submitted+ai_checking+awaiting_review+approved+manually_entered.
+   * Все кто нажал submit. Используется на list page как primary KPI.
+   */
+  attempts_completed_total?: number;
+  /**
+   * NEW (TASK-11): «Требует проверки» = submitted+ai_checking+awaiting_review.
+   * Сдали, но tutor ещё не подтвердил.
+   */
+  attempts_pending_review?: number;
 }
 
 /**
@@ -140,6 +155,21 @@ export interface MockExamAssignmentDetail extends MockExamAssignment {
   duration_minutes: number | null;
   total_max_score: number | null;
   attempts: MockExamAttemptListItem[];
+  /**
+   * NEW (TASK-11): aggregate counts pre-computed by backend.
+   * Frontend reads напрямую, без NaN-prone subtraction. Optional чтобы старый
+   * client'ский bundle мог продолжать работать с legacy полями.
+   */
+  aggregate?: {
+    attempts_total: number;
+    attempts_in_progress: number;
+    attempts_not_started: number;
+    attempts_submitted: number;
+    attempts_awaiting_review: number;
+    attempts_approved: number;
+    attempts_completed_total: number;
+    attempts_pending_review: number;
+  };
 }
 
 export interface MockExamAttemptListItem {
@@ -157,6 +187,13 @@ export interface MockExamAttemptListItem {
   total_score: number | null;
   manual_entered_date: string | null;
   manual_comment: string | null;
+  /**
+   * NEW (TASK-11): per-attempt answer method (выбран самим учеником в taking modal).
+   * - `'blank'` — фото ФИПИ бланка от руки; tutor оценивает Часть 1 вручную через `/part1-manual-score`
+   * - `'form'` — цифровой ввод; auto-check сделан при submit
+   * - `null` — legacy attempt до миграции 20260514130000, либо ученик ещё не выбрал
+   */
+  answer_method?: MockExamAnswerMethod | null;
 }
 
 // ─── Single-attempt detail (review surface) ──────────────────────────────────
@@ -202,6 +239,17 @@ export interface MockExamAttemptDetail {
   total_time_minutes: number | null;
   /** Browser-facing signed URL of the blank photo (storage://... rewritten). */
   blank_photo_url: string | null;
+  /**
+   * NEW (TASK-11, backend extension needed): per-attempt answer method choice.
+   * `'blank'` → review UI shows blank_photo_url + manual scoring inputs for Part 1.
+   * `'form'` → auto-checked Part 1 read-only display.
+   * `null` → legacy (assume 'form' for backward compat).
+   */
+  answer_method?: MockExamAnswerMethod | null;
+  /** Browser-facing signed URL for fallback Part 1 photo (не на ФИПИ бланке). */
+  part1_blank_photo_url?: string | null;
+  /** Browser-facing signed URLs for bulk Part 2 photos (additive to per-task). */
+  part2_bulk_photo_urls?: string[];
   total_part1_score: number | null;
   total_part2_score: number | null;
   total_score: number | null;

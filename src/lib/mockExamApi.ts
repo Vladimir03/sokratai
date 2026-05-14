@@ -127,6 +127,33 @@ export async function approveMockExamAll(
   );
 }
 
+/**
+ * TASK-11 — tutor вводит earned_score для одного KIM Часть 1 (blank mode flow).
+ * Auto-save per row. Aggregate через `finalizeMockExamPart1`.
+ */
+export async function setMockExamPart1ManualScore(
+  attemptId: string,
+  payload: { kim_number: number; earned_score: number },
+): Promise<{ ok: true; attempt_id: string; kim_number: number; earned_score: number }> {
+  return requestTutorMockExamApi(
+    `/attempts/${encodeURIComponent(attemptId)}/part1-manual-score`,
+    { method: 'POST', body: JSON.stringify(payload) },
+  );
+}
+
+/**
+ * TASK-11 — пересчитать `total_part1_score` после ручной проверки tutor'ом.
+ * Idempotent. Можно вызывать многократно по мере правок.
+ */
+export async function finalizeMockExamPart1(
+  attemptId: string,
+): Promise<{ ok: true; attempt_id: string; total_part1_score: number }> {
+  return requestTutorMockExamApi(
+    `/attempts/${encodeURIComponent(attemptId)}/part1-finalize`,
+    { method: 'POST' },
+  );
+}
+
 // ─── Invite link ─────────────────────────────────────────────────────────────
 
 export async function createMockExamInviteLink(

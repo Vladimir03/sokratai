@@ -1141,6 +1141,26 @@ async function handleSubmitAttempt(
       `Cannot submit attempt with status=${attempt.status}`);
   }
 
+  // Per-attempt answer method (TASK-10/TASK-11). Default fallback 'form' для
+  // legacy attempts без явного выбора (старые pilot rows backfilled из
+  // assignment.mode, но если NULL — считаем form чтобы не блокировать submit).
+  const answerMethod: "blank" | "form" =
+    (attempt.answer_method as "blank" | "form" | null) ?? "form";
+  const shouldAutoCheckPart1 = answerMethod === "form";
+
+  // Blank mode validation: должен быть хотя бы одно фото бланка (ФИПИ или
+  // fallback). Иначе tutor нечего проверять — soft-блокируем submit.
+  if (answerMethod === "blank") {
+    const hasFipiBlank = (attempt.blank_photo_url as string | null) !== null
+      && (attempt.blank_photo_url as string | null) !== "";
+    const hasFallback = (attempt.part1_blank_photo_url as string | null) !== null
+      && (attempt.part1_blank_photo_url as string | null) !== "";
+    if (!hasFipiBlank && !hasFallback) {
+      return jsonError(cors, 400, "NO_BLANK_PHOTO",
+        "В режиме бланка нужно загрузить хотя бы одно фото — ФИПИ-бланк или фото ответов Часть 1.");
+    }
+  }
+
   // Load assignment to find variant.
   const { data: assignment } = await db
     .from("mock_exam_assignments")
@@ -1174,8 +1194,11 @@ async function handleSubmitAttempt(
     part1ByKim[row.kim_number as number] = row.student_answer as string | null;
   }
 
-  // Run deterministic checker per part1 task.
-  let totalPart1 = 0;
+  // Run deterministic checker per part1 task ТОЛЬКО для form-режима.
+  // В blank-режиме ученик отвечал на ФИПИ бланке от руки — auto-check
+  // невозможен (Phase 3 = AI OCR). Tutor поставит баллы вручную через
+  // `/part1-manual-score` endpoint (см. mock-exam-tutor-api).
+  let totalPart1: number | null = 0;
   const part1Updates: Array<{
     attempt_id: string;
     kim_number: number;
@@ -1188,33 +1211,40 @@ async function handleSubmitAttempt(
   const part1Tasks = variantTasks.filter((t) => t.part === 1);
   const part2Tasks = variantTasks.filter((t) => t.part === 2);
 
-  for (const task of part1Tasks) {
-    const studentAns = part1ByKim[task.kim_number as number] ?? null;
-    const result = checkPart1(
-      task.correct_answer as string | null,
-      studentAns,
-      task.check_mode as CheckMode | null,
-      task.max_score as number,
-      task.kim_number as number,
-    );
-    totalPart1 += result.earned;
-    part1Updates.push({
-      attempt_id: attemptId,
-      kim_number: task.kim_number as number,
-      student_answer: studentAns,
-      earned_score: result.earned,
-      updated_at: now,
-    });
-  }
-
-  if (part1Updates.length > 0) {
-    const { error: upsertErr } = await db
-      .from("mock_exam_attempt_part1_answers")
-      .upsert(part1Updates, { onConflict: "attempt_id,kim_number" });
-    if (upsertErr) {
-      console.error("mock_exam_submit_part1_upsert_failed", { error: upsertErr.message });
-      return jsonError(cors, 500, "DB_ERROR", "Failed to persist part1 scores");
+  if (shouldAutoCheckPart1) {
+    for (const task of part1Tasks) {
+      const studentAns = part1ByKim[task.kim_number as number] ?? null;
+      const result = checkPart1(
+        task.correct_answer as string | null,
+        studentAns,
+        task.check_mode as CheckMode | null,
+        task.max_score as number,
+        task.kim_number as number,
+      );
+      totalPart1 += result.earned;
+      part1Updates.push({
+        attempt_id: attemptId,
+        kim_number: task.kim_number as number,
+        student_answer: studentAns,
+        earned_score: result.earned,
+        updated_at: now,
+      });
     }
+
+    if (part1Updates.length > 0) {
+      const { error: upsertErr } = await db
+        .from("mock_exam_attempt_part1_answers")
+        .upsert(part1Updates, { onConflict: "attempt_id,kim_number" });
+      if (upsertErr) {
+        console.error("mock_exam_submit_part1_upsert_failed", { error: upsertErr.message });
+        return jsonError(cors, 500, "DB_ERROR", "Failed to persist part1 scores");
+      }
+    }
+  } else {
+    // Blank-режим: totalPart1 = null означает «требует ручной проверки тутора».
+    // НЕ путать с 0 (auto-check вернул нули). Tutor увидит фото бланка и
+    // введёт баллы по KIM через manual scoring endpoint.
+    totalPart1 = null;
   }
 
   // Ensure pending records exist for every Часть 2 task. Photo refs already
@@ -1298,6 +1328,8 @@ async function handleSubmitAttempt(
     ok: true,
     attempt_id: attemptId,
     status: "ai_checking",
+    answer_method: answerMethod,
+    auto_checked_part1: shouldAutoCheckPart1,
     total_part1_score: totalPart1,
     part1_max: part1Tasks.reduce((acc, t) => acc + (t.max_score as number), 0),
     submitted_at: now,
