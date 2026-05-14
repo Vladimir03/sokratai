@@ -1,0 +1,10 @@
+BEGIN;
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.mock_exam_public_links TO service_role;
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.mock_exam_anonymous_leads TO service_role;
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.mock_exam_variants TO service_role;
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.mock_exam_variant_tasks TO service_role;
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.mock_exam_assignments TO service_role;
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.mock_exam_attempts TO service_role;
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.mock_exam_attempt_part1_answers TO service_role;
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.mock_exam_attempt_part2_solutions TO service_role;
+COMMIT;
