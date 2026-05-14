@@ -268,7 +268,7 @@ export default function StudentMockExams() {
                           {variant && (
                             <p className="text-xs text-slate-500">
                               {variant.task_count} заданий · макс. {variant.total_max_score}{' '}
-                              баллов · {Math.round(variant.duration_minutes / 60)} ч{' '}
+                              баллов · {Math.floor(variant.duration_minutes / 60)} ч{' '}
                               {variant.duration_minutes % 60} мин
                             </p>
                           )}
