@@ -8,7 +8,10 @@
 import { useEffect, useMemo, useRef } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { getMockExamAssignment } from '@/lib/mockExamApi';
-import type { MockExamAssignmentDetail } from '@/types/mockExam';
+import type {
+  MockExamAssignmentDetail,
+  MockExamAttemptStatus,
+} from '@/types/mockExam';
 import {
   createTutorRetry,
   getTutorBackgroundRefetchInterval,
@@ -22,6 +25,28 @@ import {
 
 export const MOCK_EXAM_ASSIGNMENT_QUERY_KEY = (assignmentId: string) =>
   ['tutor', 'mock-exams', 'assignment', assignmentId] as const;
+
+const MOCK_EXAM_DETAIL_POLLING_INTERVAL_MS = 30_000;
+
+// Non-terminal in-flight statuses that warrant active polling so the tutor
+// sees attempts transition (submit → AI grading → awaiting review → approved)
+// without manual refresh. iOS Safari often skips `refetchOnWindowFocus` on
+// in-app tab switches, so polling is the durable signal for AC-P2.
+const POLLING_ATTEMPT_STATUSES: ReadonlySet<MockExamAttemptStatus> = new Set([
+  'submitted',
+  'ai_checking',
+  'awaiting_review',
+]);
+
+function hasPollingActiveAttempts(
+  detail: MockExamAssignmentDetail | undefined,
+): boolean {
+  return Boolean(
+    detail?.attempts?.some((attempt) =>
+      POLLING_ATTEMPT_STATUSES.has(attempt.status),
+    ),
+  );
+}
 
 export function useMockExamAssignment(assignmentId: string | null | undefined) {
   const queryKey = useMemo(
@@ -43,9 +68,11 @@ export function useMockExamAssignment(assignmentId: string | null | undefined) {
     refetchOnReconnect: true,
     refetchInterval: (currentQuery) => {
       const data = currentQuery.state.data;
-      const hasData = Boolean(data);
+      if (hasPollingActiveAttempts(data)) {
+        return MOCK_EXAM_DETAIL_POLLING_INTERVAL_MS;
+      }
       return getTutorBackgroundRefetchInterval(
-        hasData,
+        Boolean(data),
         Boolean(currentQuery.state.error),
       );
     },
@@ -72,6 +99,25 @@ export function useMockExamAssignment(assignmentId: string | null | undefined) {
       lastFailureCountRef.current = 0;
     }
   }, [isRecovering, query.isSuccess, query.failureCount, queryKeyText]);
+
+  // Debug-only: log on transition OFF → ON of the polling window so we can
+  // verify in devtools that conditional 30s polling actually engaged when a
+  // student attempt entered submitted/ai_checking/awaiting_review.
+  const pollingActive = hasPollingActiveAttempts(query.data);
+  const wasPollingActiveRef = useRef(false);
+  useEffect(() => {
+    if (pollingActive && !wasPollingActiveRef.current) {
+      const awaitingCount =
+        query.data?.attempts?.filter((attempt) =>
+          POLLING_ATTEMPT_STATUSES.has(attempt.status),
+        ).length ?? 0;
+      console.info('[mock-exam-detail-polling] active=true', {
+        assignment_id: assignmentId,
+        awaiting_count: awaitingCount,
+      });
+    }
+    wasPollingActiveRef.current = pollingActive;
+  }, [pollingActive, assignmentId, query.data]);
 
   return {
     detail: query.data ?? null,
