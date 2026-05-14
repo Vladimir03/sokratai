@@ -384,8 +384,7 @@ function BlankModeBanner({
               Режим: С бланком
             </div>
             <p>
-              Распечатай PDF официального бланка, заполни ручкой, потом сфотографируй бланк.
-              Ответы части 1 всё равно введи ниже: так проверка будет точной без OCR.
+              Распечатай PDF официального бланка, заполни ручкой, потом сфотографируй бланк и загрузи фото.
             </p>
             <a
               href={BLANK_PDF_URL}
@@ -1110,7 +1109,7 @@ function StudentMockExamWorkspace({ data }: { data: StudentMockExamAssignmentVie
                     </p>
                     <p className="text-xs text-amber-800">
                       До {MAX_BULK_PART2_PHOTOS} фото. Удобно если ты фотографировал один лист с несколькими задачами.
-                      Можно использовать вместе с per-task слотами выше.
+                      Можно использовать вместе со слотами по каждой задаче выше.
                     </p>
                   </div>
                   <span className="rounded-full bg-amber-100 px-2.5 py-0.5 text-xs font-semibold text-amber-900">
