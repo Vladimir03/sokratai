@@ -7,12 +7,15 @@ import {
   CheckCircle2,
   ChevronDown,
   Clock3,
+  Download,
   FileText,
   Image as ImageIcon,
   Loader2,
+  Pencil,
   RotateCcw,
   Save,
   UploadCloud,
+  X,
 } from 'lucide-react';
 import AuthGuard from '@/components/AuthGuard';
 import { PageContent } from '@/components/PageContent';
@@ -30,16 +33,21 @@ import { Input } from '@/components/ui/input';
 import { supabase } from '@/lib/supabaseClient';
 import {
   getStudentMockExam,
+  setMockExamAnswerMethod,
   startMockExamAttempt,
   submitMockExamAttempt,
   uploadMockExamBlankPhoto,
+  uploadMockExamPart1FallbackPhoto,
+  uploadMockExamPart2BulkPhoto,
   uploadMockExamPart2Photo,
   type StudentMockExamAssignmentView,
   type StudentMockExamVariantTask,
 } from '@/lib/studentMockExamApi';
 import { cn } from '@/lib/utils';
 import { useMockExamAutoSave } from '@/components/student/useMockExamAutoSave';
-import type { MockExamCheckMode, MockExamMode } from '@/types/mockExam';
+import type { MockExamAnswerMethod, MockExamCheckMode, MockExamMode } from '@/types/mockExam';
+import { AnswerMethodSelectModal } from '@/components/student/mock-exam/AnswerMethodSelectModal';
+import { useQueryClient } from '@tanstack/react-query';
 
 const MathText = lazy(() =>
   import('@/components/kb/ui/MathText').then((m) => ({ default: m.MathText })),
@@ -656,12 +664,17 @@ function Part2TaskCard({
 
 function StudentMockExamWorkspace({ data }: { data: StudentMockExamAssignmentView }) {
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const [startedAt, setStartedAt] = useState(data.attempt.started_at);
   const [submitOpen, setSubmitOpen] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [blankPhoto, setBlankPhoto] = useState<PhotoState>(() =>
     createEmptyPhoto(data.attempt.blank_photo_url),
+  );
+  // Fallback photo для случая «решал не на ФИПИ бланке» — single slot.
+  const [part1FallbackPhoto, setPart1FallbackPhoto] = useState<PhotoState>(() =>
+    createEmptyPhoto(data.attempt.part1_blank_photo_url),
   );
   const [part2Photos, setPart2Photos] = useState<Record<number, PhotoState>>(() => {
     const initial: Record<number, PhotoState> = {};
@@ -670,6 +683,24 @@ function StudentMockExamWorkspace({ data }: { data: StudentMockExamAssignmentVie
     }
     return initial;
   });
+  // Bulk pack Часть 2 — до 7 фото общим пакетом. URL'ы приходят resolved
+  // signed-URL'ами от backend; локальное состояние держит uploading сторонние
+  // лимиты и errors.
+  const [part2BulkPhotos, setPart2BulkPhotos] = useState<string[]>(
+    () => data.attempt.part2_bulk_photo_urls ?? [],
+  );
+  const [bulkUploadStatus, setBulkUploadStatus] = useState<'idle' | 'uploading' | 'error'>('idle');
+  const [bulkUploadError, setBulkUploadError] = useState<string | null>(null);
+  // Per-attempt answer method choice — null до выбора (modal появится).
+  const [answerMethod, setAnswerMethod] = useState<MockExamAnswerMethod | null>(
+    data.attempt.answer_method ?? null,
+  );
+  const [methodModalOpen, setMethodModalOpen] = useState<boolean>(
+    data.attempt.answer_method === null,
+  );
+  const [methodSwitching, setMethodSwitching] = useState(false);
+  const [methodError, setMethodError] = useState<string | null>(null);
+  const [fallbackOpen, setFallbackOpen] = useState(false);
   const objectUrlsRef = useRef<string[]>([]);
 
   const tasks = useMemo(
@@ -788,6 +819,81 @@ function StudentMockExamWorkspace({ data }: { data: StudentMockExamAssignmentVie
     [part2Photos, uploadPart2],
   );
 
+  const uploadPart1Fallback = useCallback(
+    async (file: File) => {
+      const objectUrl = registerObjectUrl(file);
+      setPart1FallbackPhoto({ url: null, objectUrl, file, status: 'uploading', error: null });
+      try {
+        const result = await uploadMockExamPart1FallbackPhoto(data.attempt.id, file);
+        setPart1FallbackPhoto({
+          url: result.signed_url,
+          objectUrl: result.signed_url ? null : objectUrl,
+          file: null,
+          status: 'saved',
+          error: null,
+        });
+      } catch (err) {
+        setPart1FallbackPhoto((prev) => ({
+          ...prev,
+          file,
+          status: 'error',
+          error: err instanceof Error ? err.message : 'Не удалось загрузить фото',
+        }));
+      }
+    },
+    [data.attempt.id, registerObjectUrl],
+  );
+
+  const retryPart1Fallback = useCallback(() => {
+    if (part1FallbackPhoto.file) void uploadPart1Fallback(part1FallbackPhoto.file);
+  }, [part1FallbackPhoto.file, uploadPart1Fallback]);
+
+  const MAX_BULK_PART2_PHOTOS = 7;
+
+  const uploadPart2Bulk = useCallback(
+    async (file: File) => {
+      if (part2BulkPhotos.length >= MAX_BULK_PART2_PHOTOS) {
+        setBulkUploadError(`Максимум ${MAX_BULK_PART2_PHOTOS} фото в общем пакете`);
+        return;
+      }
+      setBulkUploadStatus('uploading');
+      setBulkUploadError(null);
+      try {
+        const result = await uploadMockExamPart2BulkPhoto(data.attempt.id, file);
+        if (result.signed_url) {
+          setPart2BulkPhotos((prev) => [...prev, result.signed_url as string]);
+        }
+        setBulkUploadStatus('idle');
+      } catch (err) {
+        setBulkUploadStatus('error');
+        setBulkUploadError(err instanceof Error ? err.message : 'Не удалось загрузить фото');
+      }
+    },
+    [data.attempt.id, part2BulkPhotos.length],
+  );
+
+  const handleAnswerMethodSelect = useCallback(
+    async (method: MockExamAnswerMethod) => {
+      setMethodSwitching(true);
+      setMethodError(null);
+      try {
+        await setMockExamAnswerMethod(data.attempt.id, method);
+        setAnswerMethod(method);
+        setMethodModalOpen(false);
+        // Refresh cache so subsequent reads (refetch) get latest server state.
+        queryClient.setQueryData<StudentMockExamAssignmentView>(
+          ['student', 'mock-exam', data.assignment.id],
+          (prev) => (prev ? { ...prev, attempt: { ...prev.attempt, answer_method: method } } : prev),
+        );
+      } catch (err) {
+        setMethodError(err instanceof Error ? err.message : 'Не удалось сохранить выбор');
+      } finally {
+        setMethodSwitching(false);
+      }
+    },
+    [data.attempt.id, data.assignment.id, queryClient],
+  );
+
   const answeredPart1Count = part1Tasks.filter((task) => {
     const value = autosave.answers[task.kim_number];
     return typeof value === 'string' && value.trim().length > 0;
@@ -821,13 +927,25 @@ function StudentMockExamWorkspace({ data }: { data: StudentMockExamAssignmentVie
     }
   };
 
+  const variantPdfUrl = data.variant?.variant_pdf_url ?? null;
+
   return (
     <div className="sokrat min-h-[100dvh] bg-slate-50" data-sokrat-mode="student">
+      <AnswerMethodSelectModal
+        open={methodModalOpen}
+        currentMethod={answerMethod}
+        confirmLabel={answerMethod ? 'Сохранить выбор' : 'Начать пробник'}
+        isSubmitting={methodSwitching}
+        onSelect={handleAnswerMethodSelect}
+        // Если ученик ещё не выбрал — нельзя закрыть. Если открыли через
+        // switcher (answerMethod !== null) — даём Cancel.
+        onCancel={answerMethod ? () => setMethodModalOpen(false) : undefined}
+      />
       <PageContent>
         <main className="mx-auto max-w-5xl px-4 pb-28 pt-6 sm:px-6 sm:pb-32">
           <section className="mb-4 rounded-lg border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
             <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-              <div>
+              <div className="min-w-0">
                 <p className="text-sm font-semibold uppercase text-slate-500">Пробник ЕГЭ по физике</p>
                 <h1 className="mt-1 text-xl font-semibold leading-tight text-slate-900 sm:text-2xl">
                   {getExamTitle(data)}
@@ -836,6 +954,35 @@ function StudentMockExamWorkspace({ data }: { data: StudentMockExamAssignmentVie
                   {getModeLabel(data.assignment.mode)} · {tasks.length} задач · Часть 1: {answeredPart1Count}/
                   {part1Tasks.length} · Часть 2: {uploadedPart2Count}/{part2Tasks.length} фото
                 </p>
+                <div className="mt-3 flex flex-wrap items-center gap-2">
+                  {answerMethod && (
+                    <button
+                      type="button"
+                      onClick={() => setMethodModalOpen(true)}
+                      className="inline-flex min-h-9 touch-manipulation items-center gap-1.5 rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-sm font-medium text-emerald-800 transition-colors hover:border-emerald-300 hover:bg-emerald-100"
+                      aria-label="Сменить способ ответа"
+                    >
+                      {answerMethod === 'blank' ? <Pencil className="h-3.5 w-3.5" /> : <FileText className="h-3.5 w-3.5" />}
+                      <span>Способ: {answerMethod === 'blank' ? 'Бланк ФИПИ' : 'Цифровой'}</span>
+                      <span className="text-emerald-600">·</span>
+                      <span className="text-emerald-700 underline-offset-2 hover:underline">Сменить</span>
+                    </button>
+                  )}
+                  {variantPdfUrl && (
+                    <a
+                      href={variantPdfUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="inline-flex min-h-9 touch-manipulation items-center gap-1.5 rounded-full border border-slate-300 bg-white px-3 py-1 text-sm font-medium text-slate-700 transition-colors hover:border-slate-400 hover:bg-slate-50"
+                    >
+                      <Download className="h-3.5 w-3.5" />
+                      Скачать задачи (PDF)
+                    </a>
+                  )}
+                </div>
+                {methodError && (
+                  <p className="mt-2 text-sm text-rose-700">{methodError}</p>
+                )}
               </div>
               <div className="flex flex-col gap-2 sm:flex-row lg:flex-col xl:flex-row">
                 <TimerBadge startedAt={startedAt} durationMinutes={durationMinutes} />
@@ -850,13 +997,15 @@ function StudentMockExamWorkspace({ data }: { data: StudentMockExamAssignmentVie
           </section>
 
           <div className="space-y-4">
-            <BlankModeBanner
-              mode={data.assignment.mode}
-              blankPhoto={blankPhoto}
-              onFileSelected={(file) => void uploadBlank(file)}
-              onRetry={retryBlank}
-              disabled={isFinal}
-            />
+            {answerMethod === 'blank' && (
+              <BlankModeBanner
+                mode="blank"
+                blankPhoto={blankPhoto}
+                onFileSelected={(file) => void uploadBlank(file)}
+                onRetry={retryBlank}
+                disabled={isFinal}
+              />
+            )}
             <ReferencesPanel />
           </div>
 
@@ -864,13 +1013,17 @@ function StudentMockExamWorkspace({ data }: { data: StudentMockExamAssignmentVie
             <div className="flex flex-wrap items-end justify-between gap-3">
               <div>
                 <h2 className="text-lg font-semibold text-slate-900">Часть 1</h2>
-                <p className="text-sm text-slate-500">Вводи ответы сразу. Каждое изменение сохраняется автоматически.</p>
+                <p className="text-sm text-slate-500">
+                  {answerMethod === 'blank'
+                    ? 'Заполняй на ФИПИ-бланке от руки. Фото загрузишь выше после.'
+                    : 'Вводи ответы сразу. Каждое изменение сохраняется автоматически.'}
+                </p>
               </div>
               <span className="rounded-md bg-slate-100 px-3 py-1 text-sm font-medium text-slate-700">
                 {answeredPart1Count}/{part1Tasks.length}
               </span>
             </div>
-            {part1Tasks.map((task) => (
+            {answerMethod === 'form' && part1Tasks.map((task) => (
               <Part1TaskCard
                 key={task.id}
                 task={task}
@@ -881,6 +1034,48 @@ function StudentMockExamWorkspace({ data }: { data: StudentMockExamAssignmentVie
                 disabled={isFinal}
               />
             ))}
+            {answerMethod === 'blank' && (
+              <Card className="border-emerald-200 bg-emerald-50/50 shadow-none">
+                <CardContent className="p-4 text-sm text-emerald-900">
+                  Цифровые поля скрыты — ответы пишешь на ФИПИ-бланке. Если решал на черновике или в тетради,
+                  ниже можно загрузить отдельное фото своих ответов Часть 1.
+                </CardContent>
+              </Card>
+            )}
+
+            {/* Fallback Часть 1 photo — collapsible, доступен в обоих режимах */}
+            <Card className="border-slate-200 bg-white shadow-none">
+              <button
+                type="button"
+                className="flex w-full min-h-11 touch-manipulation items-center justify-between gap-2 px-4 py-3 text-left"
+                onClick={() => setFallbackOpen((v) => !v)}
+                aria-expanded={fallbackOpen}
+              >
+                <div>
+                  <p className="text-sm font-semibold text-slate-900">
+                    Загрузить фото Части 1 отдельно
+                  </p>
+                  <p className="text-xs text-slate-500">
+                    На случай если решал на черновике / в тетради вместо ФИПИ-бланка
+                  </p>
+                </div>
+                <ChevronDown className={cn('h-5 w-5 text-slate-500 transition-transform', fallbackOpen && 'rotate-180')} />
+              </button>
+              {fallbackOpen && (
+                <div className="border-t border-slate-100 px-4 py-4">
+                  <PhotoUploadBox
+                    kind="blank"
+                    kimNumber={null}
+                    title="Фото ответов Часть 1 (не на ФИПИ бланке)"
+                    state={part1FallbackPhoto}
+                    onFileSelected={(file) => void uploadPart1Fallback(file)}
+                    onRetry={retryPart1Fallback}
+                    disabled={isFinal}
+                    compact
+                  />
+                </div>
+              )}
+            </Card>
           </section>
 
           <section className="mt-8 space-y-3">
@@ -904,6 +1099,79 @@ function StudentMockExamWorkspace({ data }: { data: StudentMockExamAssignmentVie
                 disabled={isFinal}
               />
             ))}
+
+            {/* Bulk pack — до 7 фото общим pack'ом, в дополнение к per-task */}
+            <Card className="border-amber-200 bg-amber-50/50 shadow-none">
+              <CardContent className="p-4 sm:p-5">
+                <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <p className="text-sm font-semibold text-amber-950">
+                      Или загрузи все решения Части 2 одним пакетом
+                    </p>
+                    <p className="text-xs text-amber-800">
+                      До {MAX_BULK_PART2_PHOTOS} фото. Удобно если ты фотографировал один лист с несколькими задачами.
+                      Можно использовать вместе с per-task слотами выше.
+                    </p>
+                  </div>
+                  <span className="rounded-full bg-amber-100 px-2.5 py-0.5 text-xs font-semibold text-amber-900">
+                    {part2BulkPhotos.length}/{MAX_BULK_PART2_PHOTOS}
+                  </span>
+                </div>
+                {part2BulkPhotos.length > 0 && (
+                  <div className="mb-3 grid grid-cols-3 gap-2 sm:grid-cols-4 md:grid-cols-5">
+                    {part2BulkPhotos.map((url, idx) => (
+                      <div
+                        key={url}
+                        className="relative aspect-square overflow-hidden rounded-md border border-amber-200 bg-white"
+                      >
+                        <img
+                          src={url}
+                          alt={`Bulk фото ${idx + 1}`}
+                          className="h-full w-full object-cover"
+                          loading="lazy"
+                        />
+                        <span className="absolute bottom-1 right-1 rounded bg-black/50 px-1.5 py-0.5 text-xs font-semibold text-white">
+                          {idx + 1}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {part2BulkPhotos.length < MAX_BULK_PART2_PHOTOS && (
+                  <div>
+                    <label
+                      htmlFor={`bulk-upload-${data.attempt.id}`}
+                      className={cn(
+                        'inline-flex min-h-11 cursor-pointer touch-manipulation items-center gap-2 rounded-md border border-amber-300 bg-white px-3 py-2 text-sm font-medium text-amber-900 transition-colors hover:bg-amber-50',
+                        (bulkUploadStatus === 'uploading' || isFinal) && 'pointer-events-none opacity-60',
+                      )}
+                    >
+                      {bulkUploadStatus === 'uploading' ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <UploadCloud className="h-4 w-4" />
+                      )}
+                      {bulkUploadStatus === 'uploading' ? 'Загружаем…' : 'Добавить фото в общий пакет'}
+                    </label>
+                    <input
+                      id={`bulk-upload-${data.attempt.id}`}
+                      type="file"
+                      accept="image/*,.pdf"
+                      className="sr-only"
+                      disabled={isFinal || bulkUploadStatus === 'uploading'}
+                      onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        if (file) void uploadPart2Bulk(file);
+                        e.target.value = '';
+                      }}
+                    />
+                  </div>
+                )}
+                {bulkUploadError && (
+                  <p className="mt-2 text-sm text-rose-700">{bulkUploadError}</p>
+                )}
+              </CardContent>
+            </Card>
           </section>
         </main>
 
@@ -940,11 +1208,22 @@ function StudentMockExamWorkspace({ data }: { data: StudentMockExamAssignmentVie
               </DialogDescription>
             </DialogHeader>
             <div className="space-y-2 rounded-md bg-slate-50 p-3 text-sm text-slate-700">
-              <p>Часть 1: {answeredPart1Count} из {part1Tasks.length} ответов.</p>
-              <p>Часть 2: {uploadedPart2Count} из {part2Tasks.length} фото.</p>
-              {data.assignment.mode === 'blank' && (
-                <p>Бланк: {blankPhoto.url ? 'фото загружено' : 'фото пока не загружено'}.</p>
+              <p>
+                Способ: <strong>{answerMethod === 'blank' ? 'Бланк ФИПИ от руки' : answerMethod === 'form' ? 'Цифровой ввод' : 'не выбран'}</strong>.
+              </p>
+              {answerMethod === 'form' && (
+                <p>Часть 1: {answeredPart1Count} из {part1Tasks.length} ответов введено.</p>
               )}
+              {answerMethod === 'blank' && (
+                <p>Часть 1 (ФИПИ бланк): {blankPhoto.url ? 'фото загружено' : 'фото пока не загружено'}.</p>
+              )}
+              {part1FallbackPhoto.url && (
+                <p>Доп. фото Часть 1 (черновик): загружено.</p>
+              )}
+              <p>
+                Часть 2: {uploadedPart2Count} из {part2Tasks.length} per-task фото
+                {part2BulkPhotos.length > 0 && `, плюс ${part2BulkPhotos.length} в общем пакете`}.
+              </p>
               {autosave.pendingCount > 0 && <p>Перед отправкой синхронизирую {autosave.pendingCount} черновик(а).</p>}
               {failedUploadCount > 0 && <p className="text-rose-700">Есть фото с ошибкой загрузки. Их лучше повторить до сдачи.</p>}
             </div>

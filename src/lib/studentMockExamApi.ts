@@ -15,6 +15,7 @@
 import { supabase } from '@/lib/supabaseClient';
 import type {
   MockExamMode,
+  MockExamAnswerMethod,
   MockExamAssignmentStatus,
   MockExamAttemptStatus,
   MockExamPart2SolutionStatus,
@@ -102,6 +103,8 @@ export interface StudentMockExamVariantSummary {
   part1_max: number;
   part2_max: number;
   task_count: number;
+  /** Public URL to PDF with the variant's task list (download for student). */
+  variant_pdf_url: string | null;
 }
 
 export interface StudentMockExamPart1Saved {
@@ -134,7 +137,14 @@ export interface StudentMockExamAssignmentView {
     status: MockExamAttemptStatus;
     started_at: string | null;
     submitted_at: string | null;
+    /** Per-attempt student choice (TASK-10). NULL = student hasn't picked yet → modal. */
+    answer_method: MockExamAnswerMethod | null;
+    /** ФИПИ-бланк photo (signed URL). Used in answer_method='blank' as primary upload. */
     blank_photo_url: string | null;
+    /** Fallback Часть 1 photo (signed URL) — для случая когда ученик не на ФИПИ бланке. */
+    part1_blank_photo_url: string | null;
+    /** Optional bulk Part 2 photos (signed URL array, max 7). Additive to per-task. */
+    part2_bulk_photo_urls: string[];
     total_part1_score: number | null;
     total_part2_score: number | null;
     total_score: number | null;
@@ -155,10 +165,12 @@ export interface AutosaveAnswerResponse {
   saved_at: string;
 }
 
+export type UploadPhotoKind = 'part2' | 'blank' | 'part1_fallback' | 'part2_bulk';
+
 export interface UploadPhotoResponse {
   ok: true;
   attempt_id: string;
-  kind: 'part2' | 'blank';
+  kind: UploadPhotoKind;
   kim_number: number | null;
   storage_ref: string;
   signed_url: string | null;
@@ -300,6 +312,58 @@ export async function uploadMockExamBlankPhoto(
   return requestStudent(`/attempts/${encodeURIComponent(attemptId)}/photo`, {
     method: 'POST',
     body: fd,
+  });
+}
+
+/**
+ * Upload фото Части 1 «не на ФИПИ бланке» — fallback для ученика который
+ * решал на черновике / в тетради. Single photo, перезаписывает предыдущий
+ * на ту же attempt. Backend пишет в `attempts.part1_blank_photo_url`.
+ */
+export async function uploadMockExamPart1FallbackPhoto(
+  attemptId: string,
+  file: File,
+): Promise<UploadPhotoResponse> {
+  const fd = new FormData();
+  fd.append('file', file);
+  fd.append('kind', 'part1_fallback');
+  return requestStudent(`/attempts/${encodeURIComponent(attemptId)}/photo`, {
+    method: 'POST',
+    body: fd,
+  });
+}
+
+/**
+ * Append фото Часть 2 в общий bulk pack (макс 7). Backend re-reads
+ * `attempts.part2_bulk_photo_urls` и атомарно append'ит ref. На 7-м
+ * фото — 409 BULK_LIMIT_REACHED. Не заменяет per-task photos (UI показывает
+ * оба ряда tutor'у в review).
+ */
+export async function uploadMockExamPart2BulkPhoto(
+  attemptId: string,
+  file: File,
+): Promise<UploadPhotoResponse> {
+  const fd = new FormData();
+  fd.append('file', file);
+  fd.append('kind', 'part2_bulk');
+  return requestStudent(`/attempts/${encodeURIComponent(attemptId)}/photo`, {
+    method: 'POST',
+    body: fd,
+  });
+}
+
+/**
+ * Persist student's per-attempt answer method choice. Idempotent. UI may
+ * call repeatedly when user toggles back-and-forth — данные обоих режимов
+ * (Часть 1 inputs + ФИПИ бланк photo) сохраняются параллельно.
+ */
+export async function setMockExamAnswerMethod(
+  attemptId: string,
+  method: MockExamAnswerMethod,
+): Promise<{ ok: true; attempt_id: string; answer_method: MockExamAnswerMethod }> {
+  return requestStudent(`/attempts/${encodeURIComponent(attemptId)}/answer-method`, {
+    method: 'POST',
+    body: JSON.stringify({ method }),
   });
 }
 

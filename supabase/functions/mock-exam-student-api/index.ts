@@ -401,11 +401,15 @@ async function handleGetStudentAssignment(
   // Любая попытка (по assignment_id или по attempt_id) обязательно делает
   // ownership check `student_id = auth.uid()` — ученик не сможет открыть
   // чужой пробник.
+  const ATTEMPT_SELECT =
+    "id, assignment_id, status, started_at, submitted_at, blank_photo_url, " +
+    "part1_blank_photo_url, part2_bulk_photo_urls, answer_method, " +
+    "total_part1_score, total_part2_score, total_score";
   let attempt: Record<string, unknown> | null = null;
   {
     const byAssignment = await db
       .from("mock_exam_attempts")
-      .select("id, assignment_id, status, started_at, submitted_at, blank_photo_url, total_part1_score, total_part2_score, total_score")
+      .select(ATTEMPT_SELECT)
       .eq("assignment_id", rawId)
       .eq("student_id", studentUserId)
       .maybeSingle();
@@ -418,7 +422,7 @@ async function handleGetStudentAssignment(
     // Fallback: пытаемся как attempt_id.
     const byAttemptId = await db
       .from("mock_exam_attempts")
-      .select("id, assignment_id, status, started_at, submitted_at, blank_photo_url, total_part1_score, total_part2_score, total_score")
+      .select(ATTEMPT_SELECT)
       .eq("id", rawId)
       .eq("student_id", studentUserId)
       .maybeSingle();
@@ -464,7 +468,7 @@ async function handleGetStudentAssignment(
   if (assignment.variant_id) {
     const { data: variantRow } = await db
       .from("mock_exam_variants")
-      .select("id, title, exam_type, duration_minutes, total_max_score, part1_max, part2_max, task_count")
+      .select("id, title, exam_type, duration_minutes, total_max_score, part1_max, part2_max, task_count, variant_pdf_url")
       .eq("id", assignment.variant_id as string)
       .maybeSingle();
     variant = variantRow;
@@ -504,6 +508,37 @@ async function handleGetStudentAssignment(
     attempt.blank_photo_url as string | null,
   );
 
+  const part1BlankPhotoSigned = await resolveSignedUrl(
+    db,
+    attempt.part1_blank_photo_url as string | null,
+  );
+
+  // part2_bulk_photo_urls — dual-format (single ref OR JSON-array string).
+  // Match invariant from homework_tutor_tasks.task_image_url (см.
+  // .claude/rules/40-homework-system.md Multi-photo). Returned to client as
+  // resolved signed URL array, never raw storage:// refs.
+  const part2BulkPhotoRefs: string[] = (() => {
+    const raw = attempt.part2_bulk_photo_urls as string | null;
+    if (!raw) return [];
+    const trimmed = raw.trim();
+    if (!trimmed) return [];
+    if (trimmed.startsWith("[")) {
+      try {
+        const parsed = JSON.parse(trimmed);
+        if (Array.isArray(parsed)) {
+          return parsed.filter((x): x is string => typeof x === "string" && x.length > 0);
+        }
+      } catch {
+        // Fall through — corrupted JSON treated as no photos
+      }
+      return [];
+    }
+    return [trimmed];
+  })();
+  const part2BulkPhotoSigned = (
+    await Promise.all(part2BulkPhotoRefs.map((ref) => resolveSignedUrl(db, ref)))
+  ).filter((url): url is string => typeof url === "string");
+
   return jsonOk(cors, {
     assignment: {
       id: assignment.id,
@@ -523,6 +558,7 @@ async function handleGetStudentAssignment(
         part1_max: variant.part1_max,
         part2_max: variant.part2_max,
         task_count: variant.task_count,
+        variant_pdf_url: variant.variant_pdf_url ?? null,
       }
       : null,
     tasks,
@@ -531,7 +567,10 @@ async function handleGetStudentAssignment(
       status: attempt.status,
       started_at: attempt.started_at,
       submitted_at: attempt.submitted_at,
+      answer_method: attempt.answer_method ?? null,
       blank_photo_url: blankPhotoSigned,
+      part1_blank_photo_url: part1BlankPhotoSigned,
+      part2_bulk_photo_urls: part2BulkPhotoSigned,
       total_part1_score: attempt.total_part1_score,
       total_part2_score: attempt.total_part2_score,
       total_score: attempt.total_score,
@@ -947,8 +986,14 @@ async function handleUploadPhoto(
   }
 
   const kind = typeof kindRaw === "string" ? kindRaw : "part2";
-  if (kind !== "part2" && kind !== "blank") {
-    return jsonError(cors, 400, "VALIDATION", "kind must be 'part2' or 'blank'");
+  // kinds:
+  //   'blank'           — фото ФИПИ-бланка → attempt.blank_photo_url (single)
+  //   'part1_fallback'  — фото Часть 1 «не на ФИПИ бланке» → attempt.part1_blank_photo_url (single)
+  //   'part2'           — фото per-task Часть 2 → mock_exam_attempt_part2_solutions.photo_url (per kim)
+  //   'part2_bulk'      — фото общий пак Часть 2 → attempt.part2_bulk_photo_urls (dual-format, до 7)
+  if (kind !== "part2" && kind !== "blank" && kind !== "part1_fallback" && kind !== "part2_bulk") {
+    return jsonError(cors, 400, "VALIDATION",
+      "kind must be 'part2' | 'blank' | 'part1_fallback' | 'part2_bulk'");
   }
 
   const ext = inferExtension(file.type, "jpg");
@@ -961,6 +1006,12 @@ async function handleUploadPhoto(
   if (kind === "blank") {
     bucket = BLANK_PHOTO_BUCKET;
     path = `${studentUserId}/${attemptId}/blank-${fileId}.${ext}`;
+  } else if (kind === "part1_fallback") {
+    bucket = BLANK_PHOTO_BUCKET;
+    path = `${studentUserId}/${attemptId}/part1-fallback-${fileId}.${ext}`;
+  } else if (kind === "part2_bulk") {
+    bucket = PART2_PHOTO_BUCKET;
+    path = `${studentUserId}/${attemptId}/bulk/${fileId}.${ext}`;
   } else {
     if (!kimRaw || typeof kimRaw !== "string" || !/^\d+$/.test(kimRaw)) {
       return jsonError(cors, 400, "VALIDATION", "kim_number is required for kind='part2'");
@@ -987,8 +1038,8 @@ async function handleUploadPhoto(
 
   const ref = toStorageRef(bucket, path);
 
-  // Persist ref into the canonical column. For 'blank' — attempt.blank_photo_url.
-  // For 'part2' — upsert mock_exam_attempt_part2_solutions.photo_url.
+  // Persist ref into the canonical column per kind.
+  const MAX_PART2_BULK_PHOTOS = 7;
   if (kind === "blank") {
     const { error } = await db
       .from("mock_exam_attempts")
@@ -996,6 +1047,50 @@ async function handleUploadPhoto(
       .eq("id", attemptId)
       .eq("student_id", studentUserId);
     if (error) return jsonError(cors, 500, "DB_ERROR", "Failed to persist blank photo");
+  } else if (kind === "part1_fallback") {
+    const { error } = await db
+      .from("mock_exam_attempts")
+      .update({ part1_blank_photo_url: ref })
+      .eq("id", attemptId)
+      .eq("student_id", studentUserId);
+    if (error) return jsonError(cors, 500, "DB_ERROR", "Failed to persist part1 fallback photo");
+  } else if (kind === "part2_bulk") {
+    // Append to existing dual-format refs (max 7). Re-read current value
+    // to avoid stale-write under concurrent uploads.
+    const { data: cur } = await db
+      .from("mock_exam_attempts")
+      .select("part2_bulk_photo_urls")
+      .eq("id", attemptId)
+      .eq("student_id", studentUserId)
+      .maybeSingle();
+    const existing: string[] = (() => {
+      const raw = (cur?.part2_bulk_photo_urls as string | null) ?? null;
+      if (!raw) return [];
+      const trimmed = raw.trim();
+      if (!trimmed) return [];
+      if (trimmed.startsWith("[")) {
+        try {
+          const parsed = JSON.parse(trimmed);
+          if (Array.isArray(parsed)) {
+            return parsed.filter((x): x is string => typeof x === "string" && x.length > 0);
+          }
+        } catch { /* corrupted → treat as empty */ }
+        return [];
+      }
+      return [trimmed];
+    })();
+    if (existing.length >= MAX_PART2_BULK_PHOTOS) {
+      return jsonError(cors, 409, "BULK_LIMIT_REACHED",
+        `Bulk Part 2 photos limit reached (${MAX_PART2_BULK_PHOTOS}). Удали лишнее перед загрузкой.`);
+    }
+    const next = [...existing, ref];
+    const serialized = next.length === 1 ? next[0] : JSON.stringify(next);
+    const { error } = await db
+      .from("mock_exam_attempts")
+      .update({ part2_bulk_photo_urls: serialized })
+      .eq("id", attemptId)
+      .eq("student_id", studentUserId);
+    if (error) return jsonError(cors, 500, "DB_ERROR", "Failed to persist bulk Part 2 photo");
   } else {
     const { error } = await db
       .from("mock_exam_attempt_part2_solutions")
@@ -1209,6 +1304,56 @@ async function handleSubmitAttempt(
   });
 }
 
+// ────────────────────────────────────────────────────────────────────────────
+// POST /attempts/:id/answer-method  — set student's choice (blank | form)
+// ────────────────────────────────────────────────────────────────────────────
+//
+// Per-attempt choice (NOT assignment.mode). Ученик может переключаться в любой
+// момент пока status='in_progress'. Данные обоих режимов сохраняются
+// параллельно — submit берёт по финальному answer_method.
+
+async function handleSetAnswerMethod(
+  db: SupabaseClient,
+  studentUserId: string,
+  attemptId: string,
+  body: unknown,
+  cors: Record<string, string>,
+): Promise<Response> {
+  const ownedOrErr = await getOwnedAttemptOrThrow(db, attemptId, studentUserId, cors);
+  if (ownedOrErr instanceof Response) return ownedOrErr;
+  const attempt = ownedOrErr;
+
+  if (attempt.status !== "in_progress") {
+    return jsonError(cors, 409, "NOT_IN_PROGRESS",
+      `Cannot change answer_method when status=${attempt.status}`);
+  }
+
+  const b = body as Record<string, unknown> | null;
+  const method = b?.method ?? b?.answer_method;
+  if (method !== "blank" && method !== "form") {
+    return jsonError(cors, 400, "VALIDATION", "method must be 'blank' or 'form'");
+  }
+
+  const { error } = await db
+    .from("mock_exam_attempts")
+    .update({ answer_method: method })
+    .eq("id", attemptId)
+    .eq("student_id", studentUserId);
+  if (error) {
+    console.error("mock_exam_set_answer_method_failed", {
+      attempt_id: attemptId,
+      error: error.message,
+    });
+    return jsonError(cors, 500, "DB_ERROR", "Failed to persist answer method");
+  }
+
+  return jsonOk(cors, {
+    ok: true,
+    attempt_id: attemptId,
+    answer_method: method,
+  });
+}
+
 // ─── Server ──────────────────────────────────────────────────────────────────
 
 Deno.serve(async (req: Request): Promise<Response> => {
@@ -1280,6 +1425,15 @@ Deno.serve(async (req: Request): Promise<Response> => {
       seg[2] === "submit" && route.method === "POST"
     ) {
       return await handleSubmitAttempt(db, userId, seg[1], cors);
+    }
+
+    // POST /attempts/:id/answer-method
+    if (
+      seg.length === 3 && seg[0] === "attempts" &&
+      seg[2] === "answer-method" && route.method === "POST"
+    ) {
+      const body = await parseJsonBody(req);
+      return await handleSetAnswerMethod(db, userId, seg[1], body, cors);
     }
 
     return jsonError(cors, 404, "NOT_FOUND",

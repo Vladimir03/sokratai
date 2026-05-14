@@ -10,6 +10,20 @@
 // ─── Enums (string union) ────────────────────────────────────────────────────
 
 export type MockExamMode = 'blank' | 'form' | 'manual_entry';
+
+/**
+ * Per-attempt answer method choice (TASK-10 pilot-polish, 2026-05-14).
+ *
+ * Выбирается **самим учеником** на taking page (modal на первом open'е),
+ * НЕ tutor'ом при создании пробника. NULL = ещё не выбрал.
+ *
+ * - `blank` — Часть 1 ответы на ФИПИ бланке от руки + фото. Часть 1 inputs скрыты.
+ * - `form` — Часть 1 цифровой ввод inputs. BlankModeBanner скрыт.
+ *
+ * Не путать с `MockExamMode` (tutor.assignment.mode) — оно остаётся для tutor info
+ * + `'manual_entry'` flow.
+ */
+export type MockExamAnswerMethod = 'blank' | 'form';
 export type MockExamAssignmentStatus = 'draft' | 'active' | 'closed';
 export type MockExamAttemptStatus =
   | 'in_progress'
