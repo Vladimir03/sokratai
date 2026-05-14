@@ -29,10 +29,23 @@ export const MOCK_EXAM_ASSIGNMENT_QUERY_KEY = (assignmentId: string) =>
 const MOCK_EXAM_DETAIL_POLLING_INTERVAL_MS = 30_000;
 
 // Non-terminal in-flight statuses that warrant active polling so the tutor
-// sees attempts transition (submit → AI grading → awaiting review → approved)
-// without manual refresh. iOS Safari often skips `refetchOnWindowFocus` on
-// in-app tab switches, so polling is the durable signal for AC-P2.
+// sees attempts transition (started → submit → AI grading → awaiting review →
+// approved) without manual refresh. iOS Safari often skips
+// `refetchOnWindowFocus` on in-app tab switches, so polling is the durable
+// signal for AC-P2.
+//
+// `in_progress` is included intentionally (pilot-polish review fix 2026-05-14):
+// if the tutor opens the page while the student is still taking the exam, the
+// initial fetch caches `attempts: [{status: 'in_progress', …}]`. The student
+// then hits «Сдать» → DB attempt becomes 'submitted', but the tutor's cache is
+// stale. Without polling on `in_progress` the tutor wouldn't see the submit
+// until window-focus or manual refresh — direct AC-P2 violation.
+//
+// Terminal statuses (`approved`, `manually_entered`) are NOT here — once an
+// attempt reaches a terminal state we stop polling that row. If all attempts
+// are terminal, polling falls back to `getTutorBackgroundRefetchInterval`.
 const POLLING_ATTEMPT_STATUSES: ReadonlySet<MockExamAttemptStatus> = new Set([
+  'in_progress',
   'submitted',
   'ai_checking',
   'awaiting_review',

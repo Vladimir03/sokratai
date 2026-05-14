@@ -548,7 +548,23 @@ For architecture overview see: docs/delivery/engineering/architecture/README.md
 
 `supabase/functions/mock-exam-public/index.ts` — единственный публичный endpoint mock-exams-v1 (3 route'а: `GET /share/mock-invite/:slug`, `POST /share/mock-invite/:slug/start`, `GET /share/mock-result/:slug`). Без JWT, под `service_role` (обходит RLS намеренно — RLS защищает только authenticated PostgREST). При расширении / правке этого файла соблюдать инварианты ниже.
 
-**Anti-leak — column whitelist на SELECT (КРИТИЧНО):**
+**Anti-leak — state-aware reveal (НЕ путать с homework tutor-only invariant):**
+
+Mock-exams anti-leak — это **state-aware** контракт, не «никогда не отдавать ученику»:
+- **Pre-submit (`in_progress`)** → endpoint вообще не отвечает (409 / 410)
+- **Post-submit, до approval** (`submitted` / `ai_checking` / `awaiting_review`) → reveal только Часть 1 (`correct_answer`, `kim_number`); Часть 2 — totals only
+- **Post-approval** (`approved`) → reveal Часть 2 разбор: `solution_text`, `tutor_score`, `tutor_comment`, `task_text` Часть 2 — это **сам value-proposition** «AI draft + tutor approval → ученик видит финальный разбор»
+- **`ai_draft_json`** — **никогда** не отдаётся ученику (tutor-only artifact, мог отличаться от final approved score)
+
+Это **принципиально отличается** от homework anti-leak invariant (`.claude/rules/40-homework-system.md` → «Эталонное решение для AI и anti-leak»), где `homework_tutor_tasks.solution_text` / `rubric_*` — **tutor-only forever**, ученик никогда не видит ни до, ни после сдачи. Причина разницы: homework — Сократовский guided chat (показать решение = убить ценность); mock-exam — экзаменационный формат с финальным разбором post-approval (показать решение = и есть ценность).
+
+При расширении эндпоинтов / surfaces:
+- Новый mock-exam endpoint → state-aware whitelist (default = paranoid: tutor-only); reveal Часть 2 поля только при явной проверке `attempt.status === 'approved'`
+- Новое поле в `mock_exam_variant_tasks` или `mock_exam_attempt_part2_solutions`, видимое ученику — явное решение: pre-submit (нельзя — anti-leak) / post-submit (Часть 1 only) / post-approval (Часть 2 only). Default = post-approval (paranoid)
+- НЕ переносить homework anti-leak паттерны 1:1 — semantic'и разные
+- См. §15 (StudentMockExamResult endpoint) для каноничного state-aware contract'а
+
+**Column whitelist на SELECT (КРИТИЧНО):**
 - **`tutors` (tutor card)** — единственный source через `loadTutorCard()`: `name, avatar_url, bio, subjects`. **Никогда** не добавлять в публичный payload: `telegram_id`, `telegram_username`, `booking_link`, `id`, `user_id`, `email`. Email живёт только в `auth.users` и не должен query'иться вовсе. Если CTA «связаться с репетитором» потребует контакт — server-side notification flow (push/telegram tutor'у), не client-side raw поле.
 - **`mock_exam_assignments`** — `id, title, mode, status, variant_id` (+ `variant_title` для parent_result). `tutor_id` уже резолвлен из `mock_exam_public_links`, не re-emit'ить в payload.
 - **`mock_exam_variant_tasks` для invite read** — `id, kim_number, part, order_num, task_text, task_image_url, check_mode, max_score`. **Никогда** `correct_answer` или `solution_text` (anonymous student не должен видеть ответы до прохождения).
@@ -815,11 +831,15 @@ SELECT COUNT(*) FROM public.mock_exam_variant_tasks WHERE variant_id = '36cebc45
 - `src/hooks/useStudentMockExamResult.ts` — React Query hook
 - `src/pages/student/StudentMockExamResult.tsx` — page
 
-**Anti-leak invariants (КРИТИЧНО, защищают product invariant):**
+**Anti-leak invariants (КРИТИЧНО, state-aware reveal — НЕ tutor-only forever):**
+
+⚠️ **Прежде чем читать список** — для понимания контракта: mock-exams anti-leak фундаментально **отличается** от homework anti-leak (`.claude/rules/40-homework-system.md` → «Эталонное решение для AI и anti-leak»). Homework: `solution_text` / `rubric_*` — tutor-only **forever**, ученик не видит никогда. Mock-exams: **state-aware** — после `approved` ученик видит Часть 2 разбор, **это и есть value-proposition**. Если будущий code-review reviewer пишет «`solution_text` leak на result page» — он перепутал homework- и mock-exams-семантику. Подтвердить через `attempt.status` gate: pre-approval → нет; post-approval → yes by design. См. §10 для каноничного описания state-aware vs tutor-only различия.
+
 1. **`ai_draft_json` НИКОГДА не возвращается** ученику — endpoint вообще не SELECT'ит это поле. Tutor-only artifact (мог отличаться от final approved score). Это инвариант параллелен TASK-5 grader (CLAUDE.md §12) — там endpoint response никогда не содержит `ai_draft_json`/`suggested_score`/draft contents; здесь он не возвращается клиенту даже когда tutor approve состоялся.
 2. **`correct_answer`** revealed только post-submit (`status !== 'in_progress'`). Pre-submit endpoint вообще не отвечает (см. §3 ниже).
-3. **`tutor_score` / `tutor_comment` / `solution_text` / `task_text` (Часть 2)** revealed только при `status === 'approved'`. Conditional SELECT на стороне backend: `isApproved ? "...tutor_score, tutor_comment..." : "kim_number, photo_url, status"`. Не «всегда select + отфильтровать на сериализации» — поля отсутствуют в памяти процесса до approval.
-4. **Tutor card whitelist** — только `name, avatar_url`. **Никогда** `telegram_id` / `telegram_username` / `booking_link` / `email`. Mirror `mock-exam-public::loadTutorCard` whitelist но более узкий (`bio` / `subjects` опущены — student уже знает своего репетитора).
+3. **`tutor_score` / `tutor_comment` / `solution_text` / `task_text` (Часть 2)** revealed только при `status === 'approved'`. Conditional SELECT на стороне backend: `isApproved ? "...tutor_score, tutor_comment..." : "kim_number, photo_url, status"`. Не «всегда select + отфильтровать на сериализации» — поля отсутствуют в памяти процесса до approval. **Это НАМЕРЕННЫЙ reveal post-approval, не leak** — после tutor approval ученик видит разбор Части 2 (включая `solution_text` от учителя) как финальный value-deliverable.
+4. **`topic` revealed на result page по дизайну** — `Part1AnswerRow` / `Part2SolutionView` рендерят `solution.topic` намеренно (помогает ученику ориентироваться в feedback'е после сдачи). AC-P5 (mock-exams-v1-pilot-polish spec) ограничен **только taking page** (`/student/mock-exams/:id`), result page (`/student/mock-exams/:id/result`) — explicit whitelist. См. tasks.md TASK-5 done-блок: «Видимый leak `solution.topic` в `StudentMockExamResult:293` намеренно оставлен (review surface после submit, не taking page, вне AC-P5)».
+5. **Tutor card whitelist** — только `name, avatar_url`. **Никогда** `telegram_id` / `telegram_username` / `booking_link` / `email`. Mirror `mock-exam-public::loadTutorCard` whitelist но более узкий (`bio` / `subjects` опущены — student уже знает своего репетитора).
 
 **Status gate (409 NOT_SUBMITTED):**
 - `status === 'in_progress'` → 409 `{error: {code: 'NOT_SUBMITTED'}}`. Frontend hook (`useStudentMockExamResult.isStillInProgress`) детектит код и в `useEffect` redirect'ит на `/student/mock-exams/:id` (taking surface). Это защита: result page не должен mounted'ся на активном экзамене (даже если ученик manually вбил URL).

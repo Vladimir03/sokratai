@@ -254,7 +254,8 @@ npm run lint && npm run build && npm run smoke-check
 - **AC-P5 (F5):** В `Part1TaskCard` и `Part2TaskCard` headers (student-side `/student/mock-exams/:id`) не виден текст с темой задачи (`task.topic`). На tutor-side (превью drawer и detail page) — `task.topic` виден.
 - **AC-P6 (F6):** ✅ Landed 2026-05-14 (TASK-6). В 9 задачах Часть 1 (KIM 1, 2, 3, 4, 7, 8, 11, 12, 13) с численным ответом в физических единицах в конце `task_text` явно указано «Ответ дайте в [метрах/ньютонах/литрах/джоулях/амперах/миллиджоулях/микросекундах/ньютонах на метр].» — источник истины: оригинальный docx Егора, где «Ответ: ___ X» строка стояла отдельным параграфом и не была подхвачена парсером. Перевыполнено vs «5 задач» в требовании.
 - **AC-P7 (F7):** ✅ Landed 2026-05-14 (TASK-6). В KIM 6, 10, 15, 17 (все 4 задачи на соответствие в варианте 1) `task_text` содержит markdown-таблицу 2 столбца с заголовками «Физические величины | Их изменения», А/Б слева и 1/2/3 справа. Финальная инструкция совместима с TASK-4 invariant «слитно, не запятой». `MathBlock` в `StudentMockExam.tsx` детектит GFM-table regex и lazy-loadит `MarkdownTaskText` через `react-markdown + remark-gfm + remark-math + rehype-katex` (новый chunk 1.53 KB / 0.69 KB gz; deps уже общие с `miniapp/RichContent.tsx`).
-- **AC-P8 (F8):** Открыть `/p/mock-invite/:slug`, заполнить имя+Telegram+consent, submit → сразу переход на taking surface (без промежуточного экрана «ожидайте одобрения»). Через 1 клик после submit ученик уже видит первую задачу.
+- **AC-P8a (F8 — authenticated lead):** ✅ Landed 2026-05-14 (TASK-7). Authenticated ученик открывает `/p/mock-invite/:slug`, заполняет имя+Telegram+consent, submit → confirm dialog «Готов начать? 4 часа» → клик «Готов начать» → navigate на `/student/mock-exams/:assignment_id` → первая задача видна. Нет промежуточного экрана «ожидайте одобрения Vladimir». **«1 клик после submit + confirm»** — confirm dialog как explicit start gate (олимпиадный UX, не approval gate), не дополнительная задержка.
+- **AC-P8b (F8 — anonymous lead):** ❌ **Deferred to TASK-12 (anonymous mode), вне scope pilot-polish.** Anonymous incognito пользователь после submit+confirm упирается в `AuthGuard` на `/student/mock-exams/:id` → редирект на login → returns flow прерывается. Документировано как known limitation в TASK-7 done-блоке (commit 84a4621). Pre-polish review (Codex, 2026-05-14) подтвердил FAIL для anonymous path; решение product team: оставить deferred до отдельной спеки TASK-12. Wedge P1-2 (lead-gen для репетитора) пилот закрывает через authenticated path — репетитор отправляет invite уже зарегистрированному ученику; full anonymous funnel — Phase 2.
 
 ### Связь с pilot KPI
 
@@ -282,7 +283,7 @@ npm run lint && npm run build && npm run smoke-check
 |---|---|---|
 | F6/F7 re-parse может сломать корректность других задач варианта 1 | Средняя | Не trigger full regen pipeline, точечно править variant1-tasks.json + 1 SQL UPDATE на конкретные task_id; запускать `scripts/build-mock-exam-seed.py` локально + diff проверка |
 | F3 rounding tolerance может ложно засчитать неверный ответ (false positive) | Низкая | Применяем ТОЛЬКО для check_mode='strict' где correct это finite number; round по scale_of_correct (не более), не округлять студента шире чем учителя |
-| F2 polling каждые 30s → нагрузка | Низкая | Применять conditional — только когда есть attempts в `submitted`/`ai_checking`/`awaiting_review`; останавливать polling когда status terminal (approved/manually_entered) |
+| F2 polling каждые 30s → нагрузка | Низкая | Применять conditional — polling активен пока есть attempts в `in_progress`/`submitted`/`ai_checking`/`awaiting_review`; останавливать polling когда status terminal (`approved`/`manually_entered`). **Review fix 2026-05-14:** `in_progress` добавлен в polling statuses — без него tutor открывший страницу пока ученик ещё пишет работу не увидел бы submit'а до window-focus (Codex review FAIL на AC-P2). |
 | F8 «Готов начать» без подтверждения — ученик начнёт случайно и истратит 4ч таймер | Низкая | Сохранить confirm dialog «Тебе будет дано 4 часа. Готов начать?» — это **не** «ожидание Владимира», это олимпиадный confirm. Различие: один self-serve клик ученика vs внешний approval gate |
 
 ### Открытые вопросы
@@ -292,6 +293,24 @@ npm run lint && npm run build && npm run smoke-check
 | Нужен ли feature flag для F3 rounding tolerance (могут быть кейсы где tutor хочет строгое сравнение)? | product (Vladimir) | нет — default ON, в P2 можем добавить per-task `strict_match` toggle |
 | F7 markdown tables — рендерим через MathText (KaTeX не делает таблицы) или через ReactMarkdown? | engineering | нет — текущий MathText уже использует ReactMarkdown с remarkMath, таблицы работают через `remark-gfm` если включить |
 | F6 единицы — добавлять как trailing sentence «Ответ дайте в …» или как metadata-field на task? | product | нет — sentence в task_text (минимум миграция, максимум читаемость для AI) |
+| F8 anonymous lead — full anonymous taking surface (TASK-12) или authenticated-only пилот? | product (Vladimir) | resolved 2026-05-14: pilot-polish закрывает только AC-P8a (authenticated). AC-P8b deferred к TASK-12 anonymous mode — отдельная спека после первых результатов пилота. Wedge P1-2 закрывается через invite уже зарегистрированному ученику. |
+
+### Pre-merge code review (Codex, 2026-05-14)
+
+| AC | Verdict | Действие |
+|---|---|---|
+| AC-P1 (assignment lookup) | PASS | — |
+| AC-P2 (polling) | FAIL → fixed | `in_progress` добавлен в `POLLING_ATTEMPT_STATUSES` ([useMockExamAssignment.ts:35](../../../../src/hooks/useMockExamAssignment.ts:35)) |
+| AC-P3 (rounding) | PASS | — |
+| AC-P4 (hints без запятых) | PASS | — |
+| AC-P5 (topic скрыт на taking page) | PASS | taking page only; result page `solution.topic` намеренно whitelist'нут (см. CLAUDE.md §15 state-aware reveal) |
+| AC-P6 (единицы) | PASS | 9 KIMs |
+| AC-P7 (matching tables) | PASS | KIM 6/10/15/17 |
+| AC-P8a (authenticated lead) | PASS | landed TASK-7 |
+| AC-P8b (anonymous lead) | DEFERRED | TASK-12 anonymous mode, отдельная спека |
+
+**Не-AC обнаружения** (false positives, документация добавлена):
+- «solution_text leak на result page» — это **намеренный state-aware reveal**, не нарушение. Result page показывает Часть 2 разбор только после `attempt.status === 'approved'` (CLAUDE.md §15). Mock-exams anti-leak ≠ homework tutor-only invariant — это разные semantic'и (см. CLAUDE.md §10 cross-reference, добавлено 2026-05-14).
 
 ---
 
