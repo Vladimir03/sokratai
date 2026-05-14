@@ -470,24 +470,47 @@ export async function getStudentTaskImagesSignedUrlsViaBackend(
   assignmentId: string,
   taskId: string,
 ): Promise<string[]> {
-  const { data: sessionData } = await supabase.auth.getSession();
-  const token = sessionData?.session?.access_token;
-
-  if (!token) {
-    throw new StudentHomeworkApiError('Нет активной сессии');
-  }
-
-  const response = await fetch(
-    `${SUPABASE_URL}/functions/v1/homework-api/assignments/${encodeURIComponent(assignmentId)}/tasks/${encodeURIComponent(taskId)}/images`,
-    {
-      method: 'GET',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}`,
-        apikey: SUPABASE_KEY,
+  // Mirror refresh+retry pattern из `requestStudentHomeworkApi` (Phase 3.1
+  // Bug #3 fix). Раньше эта функция имела свой inline fetch без refresh —
+  // при истечении токена в фоне (изображения load'ятся через signed URL
+  // эндпоинт после auth fix endpoint'а), картинки не загружались до тех
+  // пор пока юзер не сделает hard refresh. Phase 3.1 Bug #3 image-tail
+  // hotfix 2026-05-13.
+  const doFetch = async (): Promise<Response> => {
+    const { data: sessionData } = await supabase.auth.getSession();
+    const token = sessionData?.session?.access_token;
+    if (!token) {
+      throw new StudentHomeworkApiError('Нет активной сессии', {
+        code: 'NO_SESSION',
+      });
+    }
+    return fetch(
+      `${SUPABASE_URL}/functions/v1/homework-api/assignments/${encodeURIComponent(assignmentId)}/tasks/${encodeURIComponent(taskId)}/images`,
+      {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+          apikey: SUPABASE_KEY,
+        },
       },
-    },
-  );
+    );
+  };
+
+  let response = await doFetch();
+
+  if (response.status === 401) {
+    const { data: refreshData, error: refreshError } =
+      await supabase.auth.refreshSession();
+    if (refreshError || !refreshData?.session) {
+      await supabase.auth.signOut().catch(() => undefined);
+      throw new StudentHomeworkApiError(
+        'Сессия истекла. Перенаправляем на вход…',
+        { code: 'SESSION_EXPIRED' },
+      );
+    }
+    response = await doFetch();
+  }
 
   if (response.status === 404) {
     return [];

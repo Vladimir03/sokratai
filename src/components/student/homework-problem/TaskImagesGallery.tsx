@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useState } from 'react';
-import { ChevronLeft, ChevronRight, X, ZoomIn } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { ChevronLeft, ChevronRight, ImageOff, RefreshCw, X, ZoomIn } from 'lucide-react';
 import * as DialogPrimitive from '@radix-ui/react-dialog';
+import { useQueryClient } from '@tanstack/react-query';
 import { useStudentTaskImagesSignedUrls } from '@/hooks/useStudentHomework';
 import { parseAttachmentUrls } from '@/lib/attachmentRefs';
 
@@ -46,10 +47,17 @@ export function TaskImagesGallery({
   taskId,
   taskImageUrl,
 }: TaskImagesGalleryProps) {
+  const queryClient = useQueryClient();
   const refs = useMemo(() => parseAttachmentUrls(taskImageUrl), [taskImageUrl]);
   const [openIndex, setOpenIndex] = useState<number | null>(null);
+  // Tracks which thumbnails the browser failed to fetch (404 / 403 / CORS /
+  // expired signed URL). Phase 3.1 Bug #3 image-tail hotfix 2026-05-13:
+  // Полина Николаевна's Mac Chrome showed broken icons with no recovery
+  // path. Now failed thumbnails render as an explicit retry button instead
+  // of relying on the browser's broken-image glyph.
+  const [erroredUrls, setErroredUrls] = useState<Set<string>>(new Set());
 
-  const { data: signedUrls = [], isLoading } = useStudentTaskImagesSignedUrls(
+  const { data: signedUrls = [], isLoading, isFetching } = useStudentTaskImagesSignedUrls(
     assignmentId,
     taskId,
     { enabled: refs.length > 0 },
@@ -61,6 +69,31 @@ export function TaskImagesGallery({
     if (signedUrls.length > 0) return signedUrls;
     return refs.filter((ref) => /^(https?:\/\/|data:)/i.test(ref));
   }, [refs, signedUrls]);
+
+  const handleImageError = useCallback(
+    (url: string) => {
+      // Single retry: log + remember the failed URL. UI swaps the thumbnail
+      // for a retry button. User taps → React Query refetches → fresh
+      // signed URLs (with new tokens) → re-render. Storage signed URL
+      // tokens have a 1h TTL; the React Query cache holds them for 50min
+      // so an idle tab right at the boundary could surface expired URLs.
+      console.warn('[TaskImagesGallery] image failed to load', { url, taskId });
+      setErroredUrls((prev) => {
+        if (prev.has(url)) return prev;
+        const next = new Set(prev);
+        next.add(url);
+        return next;
+      });
+    },
+    [taskId],
+  );
+
+  const handleRetry = useCallback(() => {
+    setErroredUrls(new Set());
+    void queryClient.invalidateQueries({
+      queryKey: ['student', 'homework', 'guided-task-images', assignmentId, taskId],
+    });
+  }, [queryClient, assignmentId, taskId]);
 
   // Keyboard nav inside the fullscreen viewer.
   useEffect(() => {
@@ -107,29 +140,55 @@ export function TaskImagesGallery({
         role="list"
         aria-label="Фото условия задачи"
       >
-        {resolvedUrls.map((url, index) => (
-          <button
-            key={`${taskId}-thumb-${index}`}
-            type="button"
-            role="listitem"
-            onClick={() => setOpenIndex(index)}
-            aria-label={`Открыть фото ${index + 1} из ${resolvedUrls.length}`}
-            className="relative shrink-0 w-24 h-24 rounded-lg overflow-hidden border border-socrat-border-light bg-socrat-surface hover:border-socrat-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-socrat-primary/30 touch-manipulation transition-colors group"
-          >
-            <img
-              src={url}
-              alt={`Фото условия ${index + 1}`}
-              loading="lazy"
-              className="w-full h-full object-cover"
-            />
-            <span
-              aria-hidden="true"
-              className="absolute inset-0 grid place-items-center bg-slate-900/0 group-hover:bg-slate-900/10 transition-colors"
+        {resolvedUrls.map((url, index) => {
+          const isErrored = erroredUrls.has(url);
+          if (isErrored) {
+            return (
+              <button
+                key={`${taskId}-thumb-${index}-error`}
+                type="button"
+                role="listitem"
+                onClick={handleRetry}
+                disabled={isFetching}
+                aria-label={`Не удалось загрузить фото ${index + 1}. Нажми чтобы попробовать снова.`}
+                className="relative shrink-0 w-24 h-24 rounded-lg border border-dashed border-rose-300 bg-rose-50 text-rose-700 grid place-items-center gap-1 px-2 hover:border-rose-400 hover:bg-rose-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-400/40 touch-manipulation transition-colors disabled:opacity-50 disabled:cursor-wait"
+              >
+                {isFetching ? (
+                  <RefreshCw className="h-5 w-5 animate-spin" aria-hidden="true" />
+                ) : (
+                  <ImageOff className="h-5 w-5" aria-hidden="true" />
+                )}
+                <span className="text-[10px] font-semibold leading-tight text-center">
+                  {isFetching ? 'Загружаем…' : 'Не загрузилось'}
+                </span>
+              </button>
+            );
+          }
+          return (
+            <button
+              key={`${taskId}-thumb-${index}`}
+              type="button"
+              role="listitem"
+              onClick={() => setOpenIndex(index)}
+              aria-label={`Открыть фото ${index + 1} из ${resolvedUrls.length}`}
+              className="relative shrink-0 w-24 h-24 rounded-lg overflow-hidden border border-socrat-border-light bg-socrat-surface hover:border-socrat-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-socrat-primary/30 touch-manipulation transition-colors group"
             >
-              <ZoomIn className="h-5 w-5 text-white opacity-0 group-hover:opacity-100 drop-shadow transition-opacity" />
-            </span>
-          </button>
-        ))}
+              <img
+                src={url}
+                alt={`Фото условия ${index + 1}`}
+                loading="lazy"
+                onError={() => handleImageError(url)}
+                className="w-full h-full object-cover"
+              />
+              <span
+                aria-hidden="true"
+                className="absolute inset-0 grid place-items-center bg-slate-900/0 group-hover:bg-slate-900/10 transition-colors"
+              >
+                <ZoomIn className="h-5 w-5 text-white opacity-0 group-hover:opacity-100 drop-shadow transition-opacity" />
+              </span>
+            </button>
+          );
+        })}
       </div>
 
       <DialogPrimitive.Root
@@ -192,11 +251,37 @@ export function TaskImagesGallery({
               ) : null}
 
               {openIndex !== null && resolvedUrls[openIndex] ? (
-                <img
-                  src={resolvedUrls[openIndex]}
-                  alt={`Фото условия ${openIndex + 1}`}
-                  className="block mx-auto max-h-[80dvh] max-w-full w-auto h-auto object-contain"
-                />
+                erroredUrls.has(resolvedUrls[openIndex]) ? (
+                  <div className="grid place-items-center min-h-[40dvh] gap-3 text-rose-700 text-center px-4">
+                    <ImageOff className="h-12 w-12" aria-hidden="true" />
+                    <p className="text-sm font-semibold m-0">
+                      Не удалось загрузить фото
+                    </p>
+                    <p className="text-xs text-slate-600 m-0 max-w-sm">
+                      Возможно, истёк временный токен ссылки. Нажми «Обновить»,
+                      чтобы запросить свежий URL.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={handleRetry}
+                      disabled={isFetching}
+                      className="inline-flex items-center gap-1.5 h-11 px-4 rounded-[12px] bg-socrat-primary hover:bg-socrat-primary-dark text-white text-sm font-bold touch-manipulation transition-colors disabled:opacity-50"
+                    >
+                      <RefreshCw
+                        className={`h-4 w-4 ${isFetching ? 'animate-spin' : ''}`}
+                        aria-hidden="true"
+                      />
+                      Обновить
+                    </button>
+                  </div>
+                ) : (
+                  <img
+                    src={resolvedUrls[openIndex]}
+                    alt={`Фото условия ${openIndex + 1}`}
+                    onError={() => handleImageError(resolvedUrls[openIndex])}
+                    className="block mx-auto max-h-[80dvh] max-w-full w-auto h-auto object-contain"
+                  />
+                )
               ) : null}
             </div>
           </DialogPrimitive.Content>
