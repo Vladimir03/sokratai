@@ -226,6 +226,24 @@ function numbersEqual(expected: number, actual: number): boolean {
   return Math.abs(expected - actual) <= tol;
 }
 
+// F3 (mock-exams-v1-pilot-polish AC-P3) — numeric tolerance for strict mode.
+// Mirror of src/lib/mockExamPart1Checker.ts::numericRoundingMatch /
+// countDecimals. Любое изменение логики — синхронно править оба файла.
+function countDecimals(s: string): number {
+  const m = s.trim().match(/[.,](\d+)/);
+  return m ? m[1].length : 0;
+}
+
+function numericRoundingMatch(student: string, correct: string): boolean | null {
+  const studentNum = normalizeNumber(student);
+  const correctNum = normalizeNumber(correct);
+  if (studentNum === null || correctNum === null) return null;
+  const scale = countDecimals(correct);
+  const factor = 10 ** scale;
+  const studentRounded = Math.round(studentNum * factor) / factor;
+  return Math.abs(studentRounded - correctNum) < 1e-9;
+}
+
 function checkStrict(c: string, s: string): boolean {
   const a = normalizeBasic(c), b = normalizeBasic(s);
   if (!a || !b) return false;
@@ -312,13 +330,29 @@ function checkPart1(
   studentAnswer: string | null | undefined,
   checkMode: CheckMode | null | undefined,
   maxScore: number,
+  kimNumber?: number,
 ): { earned: number; correct: boolean } {
   if (!studentAnswer || !correctAnswer || !checkMode || checkMode === "manual") {
     return { earned: 0, correct: false };
   }
   let ok = false;
   switch (checkMode) {
-    case "strict": ok = checkStrict(correctAnswer, studentAnswer); break;
+    case "strict":
+      ok = checkStrict(correctAnswer, studentAnswer);
+      // F3 fallback: rounding tolerance ONLY for strict.
+      if (!ok) {
+        const rounding = numericRoundingMatch(studentAnswer, correctAnswer);
+        if (rounding === true) {
+          console.info("[mock-exam-checker] numeric_rounding_match", {
+            kim: kimNumber,
+            student: studentAnswer,
+            correct: correctAnswer,
+            scale: countDecimals(correctAnswer),
+          });
+          ok = true;
+        }
+      }
+      break;
     case "ordered": ok = checkOrdered(correctAnswer, studentAnswer); break;
     case "unordered": ok = checkUnordered(correctAnswer, studentAnswer); break;
     case "multi_choice": ok = checkMultiChoice(correctAnswer, studentAnswer); break;
@@ -1066,6 +1100,7 @@ async function handleSubmitAttempt(
       studentAns,
       task.check_mode as CheckMode | null,
       task.max_score as number,
+      task.kim_number as number,
     );
     totalPart1 += result.earned;
     part1Updates.push({

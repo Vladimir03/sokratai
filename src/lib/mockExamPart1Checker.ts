@@ -37,6 +37,8 @@ export interface CheckPart1Input {
   checkMode: MockExamCheckMode;
   /** Максимальный балл задачи (для бинарной проверки берём 0 / max). */
   maxScore: number;
+  /** KIM number (optional) — попадает в telemetry для F3 rounding match. */
+  kimNumber?: number;
 }
 
 export interface CheckPart1Result {
@@ -84,6 +86,42 @@ function numbersEqual(expected: number, actual: number): boolean {
   }
   const tolerance = Math.max(0.01, Math.abs(expected) * 0.01);
   return Math.abs(expected - actual) <= tolerance;
+}
+
+/**
+ * Количество знаков после десятичного разделителя в строке. Учитывает RU
+ * локаль (запятая). "5" → 0, "0.2" → 1, "12,456" → 3.
+ */
+function countDecimals(s: string): number {
+  const m = s.trim().match(/[.,](\d+)/);
+  return m ? m[1].length : 0;
+}
+
+/**
+ * Численная толерантность округления для check_mode='strict' (F3 из
+ * mock-exams-v1-pilot-polish). Когда оба значения парсятся как finite numbers,
+ * округляем студенческий ответ до scale_of_correct и сравниваем точно.
+ *
+ *   correct='0.2',  student='0.216'  → round(0.216, 1) = 0.2  → PASS
+ *   correct='0.2',  student='0.3'    → round(0.3, 1)   = 0.3  → FAIL
+ *   correct='5',    student='5.0001' → round(5.0001, 0)= 5    → PASS
+ *   correct='5',    student='5.5'    → round(5.5, 0)   = 6    → FAIL
+ *   correct='0.2',  student='0,2'    → RU локаль       → PASS
+ *
+ * Returns:
+ *   true  — student после округления равен correct
+ *   false — оба числа, но не совпадают
+ *   null  — хотя бы одно не numeric (caller fallback на строковое сравнение)
+ */
+export function numericRoundingMatch(student: string, correct: string): boolean | null {
+  const studentNum = normalizeNumber(student);
+  const correctNum = normalizeNumber(correct);
+  if (studentNum === null || correctNum === null) return null;
+  // НЕ округляем student шире scale of correct — guardrail из спеки.
+  const scale = countDecimals(correct);
+  const factor = 10 ** scale;
+  const studentRounded = Math.round(studentNum * factor) / factor;
+  return Math.abs(studentRounded - correctNum) < 1e-9;
 }
 
 // ─── Per-mode pure checks ────────────────────────────────────────────────────
@@ -221,7 +259,7 @@ export function checkPair(correct: string, student: string): boolean {
 // ─── Public dispatch ─────────────────────────────────────────────────────────
 
 export function checkPart1Answer(input: CheckPart1Input): CheckPart1Result {
-  const { correctAnswer, studentAnswer, checkMode, maxScore } = input;
+  const { correctAnswer, studentAnswer, checkMode, maxScore, kimNumber } = input;
 
   // No student answer → 0. Manual mode — Часть 2, no auto-check.
   if (
@@ -238,6 +276,22 @@ export function checkPart1Answer(input: CheckPart1Input): CheckPart1Result {
   switch (checkMode) {
     case 'strict':
       isCorrect = checkStrict(correctAnswer, studentAnswer);
+      // F3 fallback (mock-exams-v1-pilot-polish AC-P3): если строковое
+      // сравнение FAIL, пробуем численную толерантность округления.
+      // Применяется ТОЛЬКО для strict mode — не для multi_choice / ordered /
+      // unordered / pair / task20 (там другая семантика).
+      if (!isCorrect) {
+        const rounding = numericRoundingMatch(studentAnswer, correctAnswer);
+        if (rounding === true) {
+          console.info('[mock-exam-checker] numeric_rounding_match', {
+            kim: kimNumber,
+            student: studentAnswer,
+            correct: correctAnswer,
+            scale: countDecimals(correctAnswer),
+          });
+          isCorrect = true;
+        }
+      }
       break;
     case 'ordered':
       isCorrect = checkOrdered(correctAnswer, studentAnswer);
