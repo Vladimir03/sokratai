@@ -11,12 +11,12 @@
 | # | Название | Job | Agent | Файлы | AC | Effort | Зависит от |
 |---|---|---|---|---|---|---|---|
 | 1 | Defensive dual-path lookup в `mock-exam-student-api` | R4, S2 | Claude Code | `supabase/functions/mock-exam-student-api/index.ts`, `src/pages/student/StudentMockExams.tsx` | AC-P1 | S | — (частично сделано) |
-| 2 | Conditional polling в `useMockExamAssignment` | R4-2 | Claude Code | `src/hooks/useMockExamAssignment.ts` | AC-P2 | S | — |
+| 2 | Conditional polling в `useMockExamAssignment` ✅ Done | R4-2 | Claude Code | `src/hooks/useMockExamAssignment.ts` | AC-P2 | S | — |
 | 3 | Numeric rounding tolerance в авточекере Часть 1 | S2-1, R4-2 | Claude Code | `src/lib/mockExamPart1Checker.ts`, `src/lib/__tests__/mockExamPart1Checker.test.ts` | AC-P3 | M | — |
 | 4 | Подсказки без запятых на student-side | S2-1 | Claude Code | `src/pages/student/StudentMockExam.tsx` | AC-P4 | S | — |
 | 5 | Скрыть `task.topic` на student-side card'ах | S2-1, R4-3 | Claude Code | `src/pages/student/StudentMockExam.tsx` | AC-P5 | XS | — |
 | 6 | Re-sync variant 1: единицы + таблицы | R4-3, S2-1 | Claude Code | `docs/delivery/features/mock-exams-v1/source/variant1-tasks.json`, `supabase/seed/mock_exams_variant_1.sql`, `supabase/migrations/20260514120000_resync_mock_exam_variant_1_content.sql` | AC-P6, AC-P7 | M | — |
-| 7 | PublicMockInvite UX без «ожидания Vladimir» | P1-2 (lead-gen) | Claude Code | `src/pages/PublicMockInvite.tsx` | AC-P8 | S | — |
+| 7 | PublicMockInvite UX без «ожидания Vladimir» ✅ Done | P1-2 (lead-gen) | Claude Code | `src/pages/PublicMockInvite.tsx` | AC-P8 | S | — |
 | 8 | Smoke test полного flow | All | Vladimir manual | — | AC-P1..AC-P8 | S | TASK-1..TASK-7 |
 | 9 | Codex review всего релиза | All | Codex | — | All | S | TASK-1..TASK-7 |
 
@@ -61,12 +61,16 @@ Frontend `StudentMockExams.tsx::handleClick` навигирует с `row.assign
 
 ---
 
-## TASK-2: Conditional polling в `useMockExamAssignment`
+## TASK-2: Conditional polling в `useMockExamAssignment` ✅ Done 2026-05-14
 
 **Job:** R4-2 (репетитор видит фактические submitted работы)
 **Agent:** Claude Code
-**Files:** `src/hooks/useMockExamAssignment.ts`
-**AC:** AC-P2
+**Files (landed):**
+- `src/hooks/useMockExamAssignment.ts` — extracted `POLLING_ATTEMPT_STATUSES: ReadonlySet<MockExamAttemptStatus>` ({submitted, ai_checking, awaiting_review}) + helper `hasPollingActiveAttempts(detail)`; conditional `refetchInterval` callback returns `30_000` ms когда non-terminal attempts present, иначе fallback на существующий `getTutorBackgroundRefetchInterval`; добавлен debug `useEffect` с ref-sentinel `wasPollingActiveRef` для one-shot `console.info('[mock-exam-detail-polling] active=true', { assignment_id, awaiting_count })` лога при OFF→ON transition. Сохранены: queryKey, staleTime, gcTime, retry, retryDelay, refetchOnWindowFocus, refetchOnReconnect.
+
+**Validation:** lint clean · tsc clean · UI-preview verification skipped (observation требует real submitted attempt в БД + 30s wait + DevTools network panel — не воспроизводимо в чистом preview без seeded data).
+
+**AC:** AC-P2 — ✅ verified through code path. Polling activates на data-driven predicate; terminal statuses (approved/manually_entered/in_progress) → polling OFF.
 
 ### Контекст
 
@@ -354,12 +358,25 @@ Per CLAUDE.md §11: правка делается через `variant1-tasks.jso
 
 ---
 
-## TASK-7: PublicMockInvite UX без «ожидания Vladimir»
+## TASK-7: PublicMockInvite UX без «ожидания Vladimir» ✅ Done 2026-05-14
 
 **Job:** P1-2 (родитель/потенциальный ученик начинает пробник по ссылке), wedge: lead-gen для репетитора
 **Agent:** Claude Code
-**Files:** `src/pages/PublicMockInvite.tsx`
-**AC:** AC-P8
+**Files (landed):**
+- `src/pages/PublicMockInvite.tsx` — заменил `PostSubmitSuccess` («ждите репетитор свяжется») на `ReadyToStartPanel` + `ConfirmStartDialog`; добавил `useNavigate` + state `confirmOpen`; новый handler chain (success → auto-open dialog → confirm navigates → `/student/mock-exams/:assignment_id`). Заголовочный комментарий обновлён под olympiad UX.
+
+**State machine после фикса:**
+- State A (форма) → submit
+- State B (после success POST) → `ReadyToStartPanel` («Готово, {leadName}! Можно начинать.» + 3-bullet объяснение + CTA «Начать пробник») + auto-open confirm dialog в том же tick'е
+- State C (`ConfirmStartDialog`) → «Готов начать? Тебе будет дано 4 часа.» + кнопки «Позже» (close, ученик остаётся на panel) / «Готов начать» (navigate)
+
+**Anti-text guarantees:** `grep -nE "ожида|одобр|Владимир|approved by|pending|approval|дождит|подтвержд" PublicMockInvite.tsx | grep -v "^\s*[0-9]*:\s*//"` → **0 matches** в JSX-рендеренных строках. Оставшиеся 4 совпадения в комментариях явно документируют отсутствие старой модели.
+
+**Validation:** lint clean · tsc clean · live SPA preview verification: dialog рендерит accessibility snapshot `dialog[name="Готов начать?"]` + paragraph «Тебе будет дано 4 часа на прохождение пробника» + кнопки «Позже» + «Готов начать»; click «Готов начать» → navigate на `/student/mock-exams/:assignment_id` (для anonymous AuthGuard redirect → /login, документированное ограничение TASK-12 anonymous mode).
+
+**Limitation (документированная):** anonymous incognito пользователь при клике «Готов начать» упирается в `AuthGuard` → login → return. Authenticated student'у flow работает как «1 click → видна первая задача». Full anonymous taking surface — TASK-12 anonymous mode (вне scope pilot-polish).
+
+**AC:** AC-P8 — ✅ для authenticated; для anonymous упирается в AuthGuard (separate follow-up).
 
 ### Контекст
 

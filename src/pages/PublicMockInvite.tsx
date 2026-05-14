@@ -3,13 +3,16 @@
 // Route: /p/mock-invite/:slug  (App.tsx)
 // Mounted OUTSIDE AppFrame / TutorGuard / AuthGuard — true public surface.
 //
-// Flow (mockup Screen 7, mock-exams-v1 spec §5 + AC-6):
+// Flow (mockup Screen 7 + olympiad UX, mock-exams-v1 spec §5 + AC-6,
+// mock-exams-v1-pilot-polish AC-P8):
 //   1. GET /share/mock-invite/:slug → tutor card + offer + tasks meta
 //   2. Form: имя ребёнка + Telegram/email + consent + privacy link
 //   3. POST /share/mock-invite/:slug/start → returns { attempt_id, anonymous_id }
-//   4. Redirect → /p/mock-attempt/:attempt_id (TASK-12 will mount the exam taking
-//      surface in anonymous mode; until then route may 404, but lead capture
-//      already satisfies AC-6).
+//   4. Auto-open confirm dialog «Готов начать? 4 часа» (self-serve, НЕ external
+//      approval gate — Vladimir/tutor approval больше не требуется).
+//   5. On confirm → navigate /student/mock-exams/:assignment_id (taking surface).
+//      Anonymous students will be intercepted by AuthGuard → login → return.
+//      Full anonymous taking flow остаётся out of scope (TASK-12).
 //
 // Branding (product-nuances #11): tutor identity primary, «через Сократ AI»
 // в малом подвале. Privacy policy ссылка обязательна (#7 — юридический риск).
@@ -18,7 +21,7 @@
 // 44×44 touch-targets на checkbox/CTA.
 
 import { useId, useMemo, useState, type FormEvent } from 'react';
-import { useParams } from 'react-router-dom';
+import { useNavigate, useParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import {
   AlertCircle,
@@ -27,9 +30,18 @@ import {
   GraduationCap,
   Loader2,
   CheckCircle2,
+  Play,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import { UserAvatar } from '@/components/common/UserAvatar';
 import {
   fetchPublicMockInvite,
@@ -93,25 +105,21 @@ function FooterCaption() {
   );
 }
 
-// ─── Post-submit success state ───────────────────────────────────────────────
+// ─── Post-submit ready-to-start panel ────────────────────────────────────────
 //
-// Anonymous taking flow (TASK-12 anonymous mode) ещё не ready, поэтому после
-// lead-capture не редиректим на /p/mock-attempt/:id (404). Показываем inline
-// success-state: лид зафиксирован → tutor получит push (AC-6) → свяжется
-// напрямую через указанный канал. Это honest UX: parent оставил контакт,
-// видит явное подтверждение и обещание ответа.
+// Olympiad-style flow (TASK-7, F8): после успешного POST на startPublicMockInvite
+// — НЕ показываем «ждите репетитора», лид уже зафиксирован в
+// `mock_exam_anonymous_leads` (AC-6 из mock-exams-v1) и tutor получает push
+// независимо. Ученик сам решает когда начать; confirm dialog защищает от
+// случайного клика по «Начать пробник» (4-часовой таймер).
 
-function PostSubmitSuccess({
+function ReadyToStartPanel({
   leadName,
-  contactType,
-  tutorName,
+  onStart,
 }: {
   leadName: string;
-  contactType: ContactType;
-  tutorName: string | null;
+  onStart: () => void;
 }) {
-  const channelLabel = contactType === 'telegram' ? 'Telegram' : 'email';
-  const tutorPhrase = tutorName ? ` ${tutorName}` : '';
   return (
     <div className="rounded-lg border border-emerald-200 bg-white p-5 sm:p-6">
       <div className="flex items-start gap-3">
@@ -123,25 +131,83 @@ function PostSubmitSuccess({
         </div>
         <div className="min-w-0 flex-1">
           <h2 className="text-lg font-semibold text-slate-900">
-            Спасибо, {leadName}! Заявка принята.
+            Готово, {leadName}! Можно начинать.
           </h2>
           <p className="mt-1 text-sm text-slate-600">
-            Репетитор{tutorPhrase} получил уведомление и свяжется с вами в&nbsp;
-            {channelLabel} в&nbsp;ближайшее время, чтобы согласовать дату
-            и&nbsp;формат пробника.
+            Заявка сохранена. Когда нажмёшь «Начать пробник», запустится
+            таймер на&nbsp;4&nbsp;часа — сразу откроется первая задача.
           </p>
         </div>
       </div>
 
       <div className="mt-4 rounded-md bg-slate-50 px-3 py-3 text-xs leading-relaxed text-slate-600">
-        <strong className="font-semibold text-slate-700">Как пройдёт пробник:</strong>
+        <strong className="font-semibold text-slate-700">Как устроен пробник:</strong>
         <ul className="mt-1 list-disc space-y-0.5 pl-4">
-          <li>Репетитор пришлёт ссылку на сам пробник и&nbsp;PDF бланка</li>
           <li>Часть&nbsp;1 (1–20) проверится автоматически — баллы сразу</li>
-          <li>Часть&nbsp;2 (21–26) репетитор лично проверит и&nbsp;пришлёт разбор в&nbsp;течение&nbsp;24&nbsp;часов</li>
+          <li>Часть&nbsp;2 (21–26) проверит репетитор и&nbsp;пришлёт разбор в&nbsp;течение&nbsp;24&nbsp;часов</li>
+          <li>Перед стартом приготовь PDF бланка ответов — его дадим скачать на странице пробника</li>
         </ul>
       </div>
+
+      <Button
+        type="button"
+        onClick={onStart}
+        className="mt-4 min-h-[48px] w-full bg-accent text-base font-medium text-white hover:bg-accent/90"
+        style={{ touchAction: 'manipulation' }}
+      >
+        <Play className="mr-2 h-4 w-4" aria-hidden="true" />
+        Начать пробник
+      </Button>
     </div>
+  );
+}
+
+// ─── Olympiad-style confirm dialog ───────────────────────────────────────────
+//
+// Self-serve confirm (НЕ external approval gate). Защита от случайного клика
+// по «Начать» — 4-часовой таймер запускается необратимо при заходе на
+// taking surface. См. spec.md → «F8 «Готов начать» без подтверждения».
+
+function ConfirmStartDialog({
+  open,
+  onOpenChange,
+  onConfirm,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  onConfirm: () => void;
+}) {
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>Готов начать?</DialogTitle>
+          <DialogDescription className="text-slate-600">
+            Тебе будет дано <strong>4 часа</strong> на прохождение пробника.
+            Таймер запустится сразу — лучше начинать в спокойной обстановке.
+          </DialogDescription>
+        </DialogHeader>
+        <DialogFooter className="gap-2 sm:gap-2">
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => onOpenChange(false)}
+            className="min-h-[44px]"
+            style={{ touchAction: 'manipulation' }}
+          >
+            Позже
+          </Button>
+          <Button
+            type="button"
+            onClick={onConfirm}
+            className="min-h-[44px] bg-accent text-white hover:bg-accent/90"
+            style={{ touchAction: 'manipulation' }}
+          >
+            Готов начать
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -507,7 +573,9 @@ interface SuccessSnapshot {
 
 export default function PublicMockInvite() {
   const { slug = '' } = useParams<{ slug: string }>();
+  const navigate = useNavigate();
   const [success, setSuccess] = useState<SuccessSnapshot | null>(null);
+  const [confirmOpen, setConfirmOpen] = useState(false);
 
   const query = useQuery({
     queryKey: ['public-mock-invite', slug],
@@ -516,10 +584,13 @@ export default function PublicMockInvite() {
     retry: 1,
   });
 
-  // Успех submit'а — фиксируем credentials в sessionStorage (для будущего
-  // anonymous taking flow, TASK-12 extension) И показываем inline success
-  // state. NOT redirect — anonymous taking flow ещё не существует, prior
-  // редирект на /p/mock-attempt/:id давал 404 (review blocker #3).
+  // Olympiad flow (TASK-7, AC-P8): после успешного POST лид уже сохранён в
+  // mock_exam_anonymous_leads (AC-6) → НЕ показываем «ждите репетитора»,
+  // сразу открываем confirm dialog «Готов начать? 4 часа». Подтверждение →
+  // navigate на taking surface (`/student/mock-exams/:assignment_id`).
+  // Credentials в sessionStorage остаются как hook для будущего anonymous
+  // taking flow (TASK-12), сейчас authenticated AuthGuard перехватит
+  // anonymous и проведёт через login → возврат на тот же URL.
   const handleStartSuccess = (data: SuccessSnapshot) => {
     try {
       sessionStorage.setItem(
@@ -534,9 +605,15 @@ export default function PublicMockInvite() {
       // sessionStorage может быть недоступен (Safari private mode) — игнор.
     }
     setSuccess(data);
+    setConfirmOpen(true);
     if (typeof window !== 'undefined') {
       window.scrollTo({ top: 0, behavior: 'smooth' });
     }
+  };
+
+  const handleStartNow = (assignmentId: string) => {
+    setConfirmOpen(false);
+    navigate(`/student/mock-exams/${encodeURIComponent(assignmentId)}`);
   };
 
   if (query.isLoading) {
@@ -609,10 +686,9 @@ export default function PublicMockInvite() {
 
         {success ? (
           <div className="mt-5 sm:mt-6">
-            <PostSubmitSuccess
+            <ReadyToStartPanel
               leadName={success.leadName}
-              contactType={success.contactType}
-              tutorName={result.tutor?.name ?? null}
+              onStart={() => setConfirmOpen(true)}
             />
           </div>
         ) : (
@@ -626,6 +702,12 @@ export default function PublicMockInvite() {
 
         <FooterCaption />
       </div>
+
+      <ConfirmStartDialog
+        open={confirmOpen && success !== null}
+        onOpenChange={setConfirmOpen}
+        onConfirm={() => handleStartNow(result.assignment.id)}
+      />
     </div>
   );
 }
