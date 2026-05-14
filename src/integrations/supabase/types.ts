@@ -1841,12 +1841,15 @@ export type Database = {
       mock_exam_attempts: {
         Row: {
           anonymous_id: string | null
+          answer_method: string | null
           assignment_id: string
           blank_photo_url: string | null
           created_at: string
           id: string
           manual_comment: string | null
           manual_entered_date: string | null
+          part1_blank_photo_url: string | null
+          part2_bulk_photo_urls: string | null
           started_at: string | null
           status: string
           student_id: string | null
@@ -1858,12 +1861,15 @@ export type Database = {
         }
         Insert: {
           anonymous_id?: string | null
+          answer_method?: string | null
           assignment_id: string
           blank_photo_url?: string | null
           created_at?: string
           id?: string
           manual_comment?: string | null
           manual_entered_date?: string | null
+          part1_blank_photo_url?: string | null
+          part2_bulk_photo_urls?: string | null
           started_at?: string | null
           status?: string
           student_id?: string | null
@@ -1875,12 +1881,15 @@ export type Database = {
         }
         Update: {
           anonymous_id?: string | null
+          answer_method?: string | null
           assignment_id?: string
           blank_photo_url?: string | null
           created_at?: string
           id?: string
           manual_comment?: string | null
           manual_entered_date?: string | null
+          part1_blank_photo_url?: string | null
+          part2_bulk_photo_urls?: string | null
           started_at?: string | null
           status?: string
           student_id?: string | null
@@ -2012,6 +2021,7 @@ export type Database = {
           task_count: number
           title: string
           total_max_score: number
+          variant_pdf_url: string | null
         }
         Insert: {
           created_at?: string
@@ -2026,6 +2036,7 @@ export type Database = {
           task_count: number
           title: string
           total_max_score: number
+          variant_pdf_url?: string | null
         }
         Update: {
           created_at?: string
@@ -2040,6 +2051,7 @@ export type Database = {
           task_count?: number
           title?: string
           total_max_score?: number
+          variant_pdf_url?: string | null
         }
         Relationships: []
       }
