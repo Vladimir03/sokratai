@@ -44,6 +44,14 @@ import type { MockExamCheckMode, MockExamMode } from '@/types/mockExam';
 const MathText = lazy(() =>
   import('@/components/kb/ui/MathText').then((m) => ({ default: m.MathText })),
 );
+// Lazy markdown stack — only loaded when task_text contains a markdown table
+// (KIM 6/10/15/17 на соответствие). KaTeX-only path остаётся через MathText
+// для подавляющего большинства задач — bundle remains lean.
+const MarkdownTableRenderer = lazy(() =>
+  import('@/components/student/mock-exam/MarkdownTaskText').then((m) => ({
+    default: m.MarkdownTaskText,
+  })),
+);
 
 const BLANK_PDF_URL =
   'https://api.sokratai.ru/storage/v1/object/public/mock-exam-blank-templates/ege-physics-2025.pdf';
@@ -98,11 +106,11 @@ function getModeLabel(mode: MockExamMode): string {
 function getAnswerHint(mode: MockExamCheckMode | null): string {
   switch (mode) {
     case 'ordered':
-      return 'Запиши последовательность через запятую: 1,3,2';
+      return 'Запиши последовательность слитно: 132';
     case 'unordered':
-      return 'Можно в любом порядке, через запятую';
+      return 'Можно в любом порядке, слитно: 13';
     case 'multi_choice':
-      return 'Номера вариантов: 13 или 1,3';
+      return 'Номера вариантов слитно: 13';
     case 'task20':
       return 'Ответ без пробелов: например 31';
     case 'pair':
@@ -195,7 +203,21 @@ function useSignedTaskImages(tasks: StudentMockExamVariantTask[]) {
   return imagesByKim;
 }
 
+// Detect a GFM markdown table inside task_text. Matching tasks (KIM 6/10/15/17)
+// after pilot-polish TASK-6 contain a 2-column table with the standard
+// `| header | header |\n|---|---|\n| ... |` structure. For all other tasks we
+// keep the KaTeX-only fast path (MathText), so the markdown bundle stays lazy.
+const MARKDOWN_TABLE_RE = /\n\s*\|.+\|\s*\n\s*\|\s*[:\-| ]+\|\s*\n/;
+
 function MathBlock({ text, className }: { text: string; className?: string }) {
+  const hasMarkdownTable = MARKDOWN_TABLE_RE.test(text);
+  if (hasMarkdownTable) {
+    return (
+      <Suspense fallback={<div className={cn('whitespace-pre-wrap', className)}>{text}</div>}>
+        <MarkdownTableRenderer text={text} className={className} />
+      </Suspense>
+    );
+  }
   return (
     <Suspense fallback={<div className={cn('whitespace-pre-wrap', className)}>{text}</div>}>
       <MathText text={text} className={cn('whitespace-pre-wrap', className)} />

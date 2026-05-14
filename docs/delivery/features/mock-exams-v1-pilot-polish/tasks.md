@@ -15,7 +15,7 @@
 | 3 | Numeric rounding tolerance в авточекере Часть 1 | S2-1, R4-2 | Claude Code | `src/lib/mockExamPart1Checker.ts`, `src/lib/__tests__/mockExamPart1Checker.test.ts` | AC-P3 | M | — |
 | 4 | Подсказки без запятых на student-side | S2-1 | Claude Code | `src/pages/student/StudentMockExam.tsx` | AC-P4 | S | — |
 | 5 | Скрыть `task.topic` на student-side card'ах | S2-1, R4-3 | Claude Code | `src/pages/student/StudentMockExam.tsx` | AC-P5 | XS | — |
-| 6 | Re-sync variant 1: единицы + таблицы | R4-3, S2-1 | Claude Code | `docs/delivery/features/mock-exams-v1/source/variant1-tasks.json`, `supabase/seed/mock_exams_variant_1.sql`, `supabase/migrations/20260514120000_resync_mock_exam_variant_1_content.sql` | AC-P6, AC-P7 | M | — |
+| 6 | Re-sync variant 1: единицы + таблицы ✅ Done | R4-3, S2-1 | Claude Code | `docs/delivery/features/mock-exams-v1/source/variant1-tasks.json`, `supabase/seed/mock_exams_variant_1.sql`, `supabase/migrations/20260514120000_resync_mock_exam_variant_1_content.sql`, `src/pages/student/StudentMockExam.tsx`, `src/components/student/mock-exam/MarkdownTaskText.tsx`, `scripts/build-mock-exam-seed.py` | AC-P6, AC-P7 | M | — |
 | 7 | PublicMockInvite UX без «ожидания Vladimir» ✅ Done | P1-2 (lead-gen) | Claude Code | `src/pages/PublicMockInvite.tsx` | AC-P8 | S | — |
 | 8 | Smoke test полного flow | All | Vladimir manual | — | AC-P1..AC-P8 | S | TASK-1..TASK-7 |
 | 9 | Codex review всего релиза | All | Codex | — | All | S | TASK-1..TASK-7 |
@@ -276,16 +276,45 @@ function getAnswerHint(mode: MockExamCheckMode | null): string {
 
 ---
 
-## TASK-6: Re-sync variant 1: единицы + таблицы
+## TASK-6: Re-sync variant 1: единицы + таблицы ✅ Done 2026-05-14
 
 **Job:** R4-3 (диагностика готовности), S2-1 (тренировка с корректным условием)
 **Agent:** Claude Code (с Python script)
-**Files:**
+**Files (landed):**
+- `docs/delivery/features/mock-exams-v1/source/variant1-tasks.json` — task_text для 13 KIM (9 unit-suffix + 4 markdown-table)
+- `scripts/build-mock-exam-seed.py` — `EGOR_UUID` константа, `created_by` теперь hardcoded в скрипте (фикс drift между генератором и manual-edit seed от 2026-05-08)
+- `supabase/seed/mock_exams_variant_1.sql` — регенерирован детерминированно; UUIDs всех 26 строк не изменились; diff только task_text + attribution comment
+- `supabase/migrations/20260514120000_resync_mock_exam_variant_1_content.sql` — **новый**; 13 idempotent UPDATE'ов by `id` (без `SET updated_at = now()` — такой колонки в `mock_exam_variant_tasks` нет)
+- `src/pages/student/StudentMockExam.tsx` — `MathBlock` распознаёт GFM-table regex (`/\n\s*\|.+\|\s*\n\s*\|\s*[:\-| ]+\|\s*\n/`) и lazy-loadит `MarkdownTaskText` для KIM 6/10/15/17; KaTeX-only fast path сохранён для остальных 22 задач
+- `src/components/student/mock-exam/MarkdownTaskText.tsx` — **новый** lazy компонент: react-markdown + remark-gfm + remark-math + rehype-katex + sokrat-style table компоненты (border-collapse, slate-100 thead, align-top td)
+
+**Конкретные правки:**
+- **Единицы (KIM 1, 2, 3, 4, 7, 8, 11, 12, 13):** добавлена строка «Ответ дайте в [метрах/ньютонах/литрах/джоулях/амперах/миллиджоулях/микросекундах/ньютонах на метр].» в конец `task_text`. Источник истины — оригинальный docx Егора (`Тр_вариант 1.docx`), где строка «Ответ: ___ X» стояла отдельным параграфом и не была подхвачена docx-парсером.
+- **Таблицы соответствия (KIM 6, 10, 15, 17):** 2-колоночная markdown-таблица с заголовками «Физические величины | Их изменения», А/Б слева и 1/2/3 справа. Финальная инструкция: «Запишите в ответ выбранные цифры для каждой физической величины слитно цифрами в порядке А, Б: например 12. Цифры в ответе могут повторяться.» — соблюдает TASK-4 invariant «слитно, не запятой».
+- **Часть 2 (KIM 21-26)** проверен — единицы измерения уже присутствуют в самих формулировках («3 м/с», «18 Вт», «25 °C»). Изменений не требовалось.
+
+**Pipeline parity:** `build-mock-exam-seed.py` теперь продуцирует SQL идентичный production-seed без manual fix'ов. Будущая регенерация — pure deterministic.
+
+**Markdown rendering pattern:** `MathText` (kb/ui) не модифицирован — markdown логика изолирована в новом `MarkdownTaskText.tsx`, lazy-loaded только когда regex детектит GFM-таблицу. Bundle impact: новый chunk = **1.53 KB / 0.69 KB gz** (ReactMarkdown deps уже общие с `miniapp/RichContent.tsx`, no net-add).
+
+**Validation:**
+- `npm run build` ✅ за 42с, errors=0
+- `npm run smoke-check` ✅ all assertions OK
+- `grep -c "Ответ дайте в" supabase/seed/mock_exams_variant_1.sql` → 9
+- `grep -c "| Физические величины |" supabase/seed/mock_exams_variant_1.sql` → 4
+- `grep -c "^UPDATE public.mock_exam_variant_tasks" supabase/migrations/20260514120000_…` → 13
+- `git diff` seed.sql: только task_text + attribution comment; UUIDs всех 26 строк не изменились
+
+**AC:** AC-P6 ✅ (9 KIMs vs 5 требуемых) + AC-P7 ✅ (KIM 6, 10, 15, 17 — все 4 на соответствие в варианте 1)
+
+---
+
+### Историческое описание (планировочный текст до landing'а)
+
+**Files (планировочный список):**
 - `docs/delivery/features/mock-exams-v1/source/variant1-tasks.json` (edit)
 - `supabase/seed/mock_exams_variant_1.sql` (regenerate)
 - `supabase/migrations/20260514120000_resync_mock_exam_variant_1_content.sql` (new)
-
-**AC:** AC-P6, AC-P7
 
 ### Контекст
 

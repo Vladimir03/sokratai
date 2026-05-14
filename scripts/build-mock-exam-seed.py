@@ -51,6 +51,12 @@ NS = uuid.UUID("00000000-0000-0000-0000-000000005ec0")
 VARIANT_KEY = "mock-exam-variant-1-egor-physics-2026"
 VARIANT_ID = str(uuid.uuid5(NS, VARIANT_KEY))
 
+# Egor Blinov (egor.o.blinov@gmail.com) — pilot tutor, owner of variant 1.
+# UUID resolved 2026-05-08 via SQL JOIN auth.users × public.tutors (commit 8185ec3).
+# Hardcoded here so re-generation preserves the canonical owner; if Egor's account
+# is rotated, replace this constant and re-run.
+EGOR_UUID = "a7212758-8cdd-4d7c-8608-4fedcb34d74c"
+
 
 def task_uuid(kim: int) -> str:
     return str(uuid.uuid5(NS, f"mock-exam-variant-1-task-{kim}"))
@@ -144,16 +150,15 @@ def build_sql(tasks_data: dict) -> str:
     lines.append("  'Тренировочный вариант 1 (физика ЕГЭ-2026)',")
     lines.append("  'ege_physics',")
     lines.append("  'tutor',")
-    lines.append("  'Источник: репетитор Егор Иванов',")
+    lines.append("  'Источник: репетитор Егор Иванов',  -- displayed source attribution; docx author signature")
     lines.append("  235,  -- 3ч 55мин")
     lines.append(f"  {total_max},   -- {part1_max} (Часть 1) + {part2_max} (Часть 2), verified against source docx criteria")
     lines.append(f"  {part1_max},")
     lines.append(f"  {part2_max},")
     lines.append("  26,")
-    lines.append("  -- created_by: Vladimir заменит на UUID Егора перед коммитом, либо оставит")
-    lines.append("  -- placeholder если seed применяется ДО создания tutor аккаунта Егора.")
-    lines.append("  -- Безопасный fallback: первый user из auth.users (TODO заменить).")
-    lines.append("  (SELECT id FROM auth.users ORDER BY created_at LIMIT 1)")
+    lines.append("  -- Egor Blinov (egor.o.blinov@gmail.com) — pilot tutor, owner of variant 1.")
+    lines.append("  -- UUID resolved 2026-05-08 via SQL JOIN auth.users × public.tutors.")
+    lines.append(f"  '{EGOR_UUID}'::uuid")
     lines.append(") ON CONFLICT (id) DO NOTHING;")
     lines.append("")
 
