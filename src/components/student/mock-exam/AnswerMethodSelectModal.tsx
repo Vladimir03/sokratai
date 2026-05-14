@@ -120,19 +120,23 @@ export function AnswerMethodSelectModal({
                     : 'border-slate-200 hover:border-emerald-300 hover:bg-emerald-50/30',
                 )}
               >
-                {card.recommended && (
-                  <span className="absolute right-3 top-3 inline-flex items-center gap-1 rounded-full bg-emerald-600 px-2 py-0.5 text-xs font-semibold text-white">
-                    Рекомендуем
-                  </span>
-                )}
-                {isPending && (
-                  <CheckCircle2
-                    className="absolute right-3 top-3 h-5 w-5 text-emerald-600"
-                    aria-hidden
-                  />
-                )}
+                <div className="flex items-start justify-between gap-2">
+                  {card.recommended ? (
+                    <span className="inline-flex items-center gap-1 rounded-full bg-emerald-600 px-2 py-0.5 text-xs font-semibold text-white">
+                      Рекомендуем
+                    </span>
+                  ) : (
+                    <span aria-hidden />
+                  )}
+                  {isPending && (
+                    <CheckCircle2
+                      className="h-5 w-5 flex-shrink-0 text-emerald-600"
+                      aria-hidden
+                    />
+                  )}
+                </div>
                 <div className="flex items-center gap-2">
-                  <Icon className="h-6 w-6 text-emerald-700" aria-hidden />
+                  <Icon className="h-6 w-6 flex-shrink-0 text-emerald-700" aria-hidden />
                   <h3 className="text-base font-semibold text-slate-900">{card.title}</h3>
                 </div>
                 <p className="text-sm text-slate-700 leading-6">{card.description}</p>
