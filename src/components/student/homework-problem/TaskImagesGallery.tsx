@@ -21,26 +21,37 @@ interface TaskImagesGalleryProps {
 }
 
 /**
- * Task condition photo gallery for the Phase 1 student problem screen
+ * Task condition photo gallery for the student problem screen
  * `ProblemContext` expanded view. Mirrors the legacy
  * `TaskConditionGallery` from `GuidedHomeworkWorkspace` (UX parity) but as
- * a standalone exported component — the legacy one is inline-only.
+ * a standalone exported component.
  *
  * **Multi-photo support** (Q10 from preview QA #1, 2026-05-10): up to 5
  * photos per task per `MAX_TASK_IMAGES` invariant in
  * `.claude/rules/40-homework-system.md` § «Multi-photo на задачу и
- * рубрику». Renders all refs as a horizontal scroll-strip of thumbnails;
- * tap a thumbnail → fullscreen Dialog with arrow nav + swipe + counter.
+ * рубрику».
  *
- * Signed URLs are resolved through the existing batched endpoint
- * (`useStudentTaskImagesSignedUrls` → `getStudentTaskImagesSignedUrlsViaBackend`),
- * which already handles dual-format refs server-side. We do NOT call
- * `getStudentTaskImageSignedUrl` per-ref because that would N+1 the
- * Storage signing for multi-photo tasks.
+ * **Responsive layout** (Phase 3.1 follow-up 2026-05-13):
+ *   - Mobile (≤768): horizontal scroll-strip thumbnails 96×96 with
+ *     `object-cover` (cropped). Limited vertical space на mobile +
+ *     ProblemContext peek/expanded UX делает миниатюру + click → fullscreen
+ *     разумным balance.
+ *   - Tablet/desktop (`md:`): vertical stack, full-width photos with
+ *     `object-contain` capped at `max-h-[60vh]`. Sidebar = 420-460px, дать
+ *     фото это пространство значит ученик читает условие in place вместо
+ *     dependence на fullscreen click. Portrait textbook screenshots не
+ *     доминируют sidebar — warn banner остаётся видимым ниже.
+ *   - Both: click any photo → fullscreen Dialog с arrow nav + counter для
+ *     true zoom (мелкие формулы / детали схем).
  *
- * Q9 (preview QA #1): the previous `ProblemContext` body rendering
- * skipped images entirely — students saw text-only conditions even when
- * the task had photos. This component fixes that gap.
+ * **Image-load resilience** (Phase 3.1 Bug #3 image-tail 2026-05-13): each
+ * `<img>` имеет `onError` handler. На failure thumbnail/photo replaced с
+ * dashed-rose retry button → tap → React Query cache invalidate → fresh
+ * signed URLs. Logs failed URL + taskId to `console.warn` для diagnosis.
+ *
+ * Signed URLs resolved through batched endpoint
+ * (`useStudentTaskImagesSignedUrls` → `getStudentTaskImagesSignedUrlsViaBackend`,
+ * which mirrors Phase 3.1 401 refresh+retry pattern).
  */
 export function TaskImagesGallery({
   assignmentId,
@@ -135,8 +146,17 @@ export function TaskImagesGallery({
 
   return (
     <>
+      {/* Responsive layout (Phase 3.1 follow-up 2026-05-13):
+          - Mobile (≤768): horizontal thumb strip 96×96 (object-cover, cropped).
+            Limited vertical space + peek/expanded UX — миниатюра + click для
+            fullscreen reasonable.
+          - Tablet/desktop (md+): vertical stack, full-width images
+            (`object-contain`, natural aspect) capped at `max-h-[60vh]` so
+            portrait textbook screenshots не доминируют sidebar и warn banner
+            остаётся видимым. Click → fullscreen для true zoom.
+          Mobile-first base classes + `md:` overrides — single render tree. */}
       <div
-        className="flex gap-2 overflow-x-auto touch-pan-x pb-1 -mx-1 px-1 [&::-webkit-scrollbar]:hidden"
+        className="flex gap-2 overflow-x-auto touch-pan-x pb-1 -mx-1 px-1 [&::-webkit-scrollbar]:hidden md:flex-col md:gap-3 md:overflow-x-visible md:px-0 md:mx-0 md:pb-0 md:touch-auto"
         role="list"
         aria-label="Фото условия задачи"
       >
@@ -151,14 +171,14 @@ export function TaskImagesGallery({
                 onClick={handleRetry}
                 disabled={isFetching}
                 aria-label={`Не удалось загрузить фото ${index + 1}. Нажми чтобы попробовать снова.`}
-                className="relative shrink-0 w-24 h-24 rounded-lg border border-dashed border-rose-300 bg-rose-50 text-rose-700 grid place-items-center gap-1 px-2 hover:border-rose-400 hover:bg-rose-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-400/40 touch-manipulation transition-colors disabled:opacity-50 disabled:cursor-wait"
+                className="relative shrink-0 w-24 h-24 md:w-full md:h-auto md:aspect-[4/3] md:shrink rounded-lg border border-dashed border-rose-300 bg-rose-50 text-rose-700 grid place-items-center gap-1 px-2 hover:border-rose-400 hover:bg-rose-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-400/40 touch-manipulation transition-colors disabled:opacity-50 disabled:cursor-wait"
               >
                 {isFetching ? (
-                  <RefreshCw className="h-5 w-5 animate-spin" aria-hidden="true" />
+                  <RefreshCw className="h-5 w-5 md:h-7 md:w-7 animate-spin" aria-hidden="true" />
                 ) : (
-                  <ImageOff className="h-5 w-5" aria-hidden="true" />
+                  <ImageOff className="h-5 w-5 md:h-7 md:w-7" aria-hidden="true" />
                 )}
-                <span className="text-[10px] font-semibold leading-tight text-center">
+                <span className="text-[10px] md:text-xs font-semibold leading-tight text-center">
                   {isFetching ? 'Загружаем…' : 'Не загрузилось'}
                 </span>
               </button>
@@ -171,20 +191,20 @@ export function TaskImagesGallery({
               role="listitem"
               onClick={() => setOpenIndex(index)}
               aria-label={`Открыть фото ${index + 1} из ${resolvedUrls.length}`}
-              className="relative shrink-0 w-24 h-24 rounded-lg overflow-hidden border border-socrat-border-light bg-socrat-surface hover:border-socrat-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-socrat-primary/30 touch-manipulation transition-colors group"
+              className="relative shrink-0 w-24 h-24 md:w-full md:h-auto md:shrink rounded-lg overflow-hidden border border-socrat-border-light bg-socrat-surface md:bg-white hover:border-socrat-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-socrat-primary/30 touch-manipulation transition-colors group"
             >
               <img
                 src={url}
                 alt={`Фото условия ${index + 1}`}
                 loading="lazy"
                 onError={() => handleImageError(url)}
-                className="w-full h-full object-cover"
+                className="w-full h-full object-cover md:object-contain md:h-auto md:w-full md:max-h-[60vh]"
               />
               <span
                 aria-hidden="true"
                 className="absolute inset-0 grid place-items-center bg-slate-900/0 group-hover:bg-slate-900/10 transition-colors"
               >
-                <ZoomIn className="h-5 w-5 text-white opacity-0 group-hover:opacity-100 drop-shadow transition-opacity" />
+                <ZoomIn className="h-5 w-5 md:h-7 md:w-7 text-white opacity-0 group-hover:opacity-100 drop-shadow transition-opacity" />
               </span>
             </button>
           );
