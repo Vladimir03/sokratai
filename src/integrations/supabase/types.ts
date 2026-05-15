@@ -1858,6 +1858,7 @@ export type Database = {
           total_part2_score: number | null
           total_score: number | null
           total_time_minutes: number | null
+          updated_at: string
         }
         Insert: {
           anonymous_id?: string | null
@@ -1878,6 +1879,7 @@ export type Database = {
           total_part2_score?: number | null
           total_score?: number | null
           total_time_minutes?: number | null
+          updated_at?: string
         }
         Update: {
           anonymous_id?: string | null
@@ -1898,6 +1900,7 @@ export type Database = {
           total_part2_score?: number | null
           total_score?: number | null
           total_time_minutes?: number | null
+          updated_at?: string
         }
         Relationships: [
           {
