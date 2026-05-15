@@ -96,6 +96,124 @@ const FALLBACK_STOPWORDS = new Set([
   "попробуй",
 ]);
 
+// ─── Subject-aware prompt helpers ───────────────────────────────────────────
+// SUBJECT_LABELS_DENO mirrors SUBJECTS from src/types/homework.ts (Deno cannot
+// import TS from src/). Keep in sync when new subjects land. Fallback = raw id.
+const SUBJECT_LABELS_DENO: Record<string, string> = {
+  maths: "Математика",
+  physics: "Физика",
+  informatics: "Информатика",
+  russian: "Русский язык",
+  literature: "Литература",
+  history: "История",
+  social: "Обществознание",
+  english: "Английский язык",
+  french: "Французский язык",
+  spanish: "Испанский язык",
+  chemistry: "Химия",
+  biology: "Биология",
+  geography: "География",
+  other: "Другое",
+  math: "Математика",
+  rus: "Русский язык",
+  cs: "Информатика",
+  algebra: "Алгебра",
+  geometry: "Геометрия",
+};
+
+function getSubjectLabelDeno(subjectId: string | null | undefined): string {
+  const id = (subjectId ?? "").trim();
+  if (!id) return "школьному предмету";
+  return SUBJECT_LABELS_DENO[id] ?? id;
+}
+
+/**
+ * Subject-aware hint role line. Replaces hardcoded "Ты — физик-наставник".
+ * Used in `buildHintPrompt` system content.
+ */
+function buildHintRoleLine(subjectId: string | null | undefined): string {
+  const label = getSubjectLabelDeno(subjectId);
+  return `Ты — наставник по предмету «${label}». Ученик просит подсказку по задаче из домашнего задания.`;
+}
+
+/**
+ * Subject-aware list of хорошо-направленных терминов/правил для подсказки.
+ * Replaces hardcoded "величина (скорость, ускорение, …) или закон (Ньютон, Ом, …)".
+ */
+function buildHintExamplesLine(subjectId: string | null | undefined): string {
+  switch (subjectId) {
+    case "physics":
+      return "- Упоминай конкретную величину (скорость, ускорение, сила трения, напряжение, …) или закон (Ньютон, Ом, Кирхгоф, …) из ЭТОЙ задачи";
+    case "maths":
+    case "math":
+    case "algebra":
+    case "geometry":
+      return "- Упоминай конкретную формулу, теорему или приём (Виета, разложение, замена переменной, признак подобия, …), применимый к ЭТОЙ задаче";
+    case "russian":
+    case "rus":
+      return "- Упоминай конкретное правило орфографии, пунктуации или морфологии, применимое к ЭТОЙ задаче";
+    case "literature":
+      return "- Упоминай конкретную тему, художественное средство, позицию автора или цитату, относящуюся к ЭТОЙ задаче";
+    case "english":
+    case "french":
+    case "spanish":
+      return "- Упоминай конкретное грамматическое правило, время, конструкцию или элемент лексики, нужный в ЭТОЙ задаче";
+    case "history":
+    case "social":
+      return "- Упоминай конкретное событие, термин или причинно-следственную связь, относящиеся к ЭТОЙ задаче";
+    case "informatics":
+    case "cs":
+      return "- Упоминай конкретный алгоритм, конструкцию языка или приём, применимый в ЭТОЙ задаче";
+    case "chemistry":
+      return "- Упоминай конкретную реакцию, формулу или закон, применимый в ЭТОЙ задаче";
+    case "biology":
+      return "- Упоминай конкретный процесс, термин или систему, описывающие то, о чём ЭТА задача";
+    case "geography":
+      return "- Упоминай конкретный процесс, явление или статистику, относящиеся к ЭТОЙ задаче";
+    default:
+      return "- Опирайся на конкретное правило, приём или ключевую идею, нужную в ЭТОЙ задаче";
+  }
+}
+
+/**
+ * Subject-aware fallback hint когда AI отклонён валидатором. Используется
+ * в `buildFallbackHint` после неудачной keyword-extraction.
+ */
+function buildSubjectFallbackHint(subjectId: string | null | undefined): string {
+  switch (subjectId) {
+    case "physics":
+      return "Какая физическая величина является искомой в этой задаче и какие данные нужны, чтобы её найти?";
+    case "maths":
+    case "math":
+    case "algebra":
+    case "geometry":
+      return "Какая формула, теорема или приём подходит к этому условию и что именно нужно найти?";
+    case "russian":
+    case "rus":
+      return "Какое правило (орфография / пунктуация / морфология) применимо к этому случаю и где в задаче ключевое слово?";
+    case "literature":
+      return "Какая тема, художественное средство или позиция автора помогают раскрыть мысль в этой задаче?";
+    case "english":
+    case "french":
+    case "spanish":
+      return "Какое грамматическое правило, время или конструкция подходят для этого предложения, и какие слова дают подсказку?";
+    case "history":
+    case "social":
+      return "Какое событие, термин или причинно-следственная связь нужны для ответа на этот вопрос?";
+    case "informatics":
+    case "cs":
+      return "Какой алгоритм, конструкция языка или приём подходят к этой задаче, и какие данные ты используешь?";
+    case "chemistry":
+      return "Какая реакция, формула или закон применимы здесь, и какие вещества/величины задействованы?";
+    case "biology":
+      return "Какой процесс, термин или система описывает то, о чём задача, и какие данные для этого нужны?";
+    case "geography":
+      return "Какой процесс, явление или статистические данные помогают ответить на этот вопрос?";
+    default:
+      return "На какую часть условия ты опираешься и какой приём, правило или ключевая идея подходит для этой задачи?";
+  }
+}
+
 // ─── Types ──────────────────────────────────────────────────────────────────
 
 export type GuidedVerdict = "CORRECT" | "INCORRECT" | "ON_TRACK" | "CHECK_FAILED";
@@ -267,29 +385,55 @@ function pickFallbackKeyword(taskText: string): string | null {
 }
 
 export function buildFallbackHint(
-  taskContext: { taskText?: string | null; hasImage?: boolean },
+  taskContext: {
+    taskText?: string | null;
+    hasImage?: boolean;
+    /**
+     * Subject id from `homework_tutor_assignments.subject` (canonical list:
+     * src/types/homework.ts → SUBJECTS). Branches fallback wording so the AI
+     * doesn't tell French / russian students to «name the physical quantity».
+     * Missing/unknown → generic neutral fallback.
+     */
+    subject?: string | null;
+  },
 ): string {
   const taskText = taskContext.taskText ?? "";
+  const subjectId = (taskContext.subject ?? "").trim() || null;
+  const isPhysics = subjectId === "physics";
   const keyword = pickFallbackKeyword(taskText);
 
   if (keyword) {
-    return `Сосредоточься на том, что в задаче фигурирует «${keyword}». Какая физическая величина это описывает и какой закон с ней связан?`;
+    if (isPhysics) {
+      return `Сосредоточься на том, что в задаче фигурирует «${keyword}». Какая физическая величина это описывает и какой закон с ней связан?`;
+    }
+    return `Сосредоточься на том, что в задаче фигурирует «${keyword}». Какое правило, приём или ключевая идея с этим связана?`;
   }
 
   if (!taskText.trim() && taskContext.hasImage) {
-    return "На изображении задачи есть конкретные величины — назови, что именно дано (силы, расстояния, время) и какой закон их связывает.";
+    if (isPhysics) {
+      return "На изображении задачи есть конкретные величины — назови, что именно дано (силы, расстояния, время) и какой закон их связывает.";
+    }
+    return "На изображении задачи есть конкретные элементы условия — назови, что именно ты видишь, и какое правило / приём здесь применимо.";
   }
 
-  return "Какая физическая величина является искомой в этой задаче и какие данные нужны, чтобы её найти?";
+  return buildSubjectFallbackHint(subjectId);
 }
 
-function buildValidatedFallbackHint(taskContext: { taskText?: string | null; hasImage?: boolean }): string {
+function buildValidatedFallbackHint(taskContext: {
+  taskText?: string | null;
+  hasImage?: boolean;
+  subject?: string | null;
+}): string {
   const fallbackHint = buildFallbackHint(taskContext);
   if (validateHintContent(fallbackHint).ok) {
     return fallbackHint;
   }
 
-  return "Какая физическая величина является искомой в этой задаче и какой закон поможет её найти по известным данным?";
+  const subjectId = (taskContext.subject ?? "").trim() || null;
+  if (subjectId === "physics") {
+    return "Какая физическая величина является искомой в этой задаче и какой закон поможет её найти по известным данным?";
+  }
+  return "Какое правило, формула или приём подойдут к этой задаче, и какие данные из условия для этого нужны?";
 }
 
 function buildRubricGuidance(rubricText: string | null, hasRubricImages: boolean): string {
@@ -1222,21 +1366,23 @@ function buildHintPrompt(params: GenerateHintParams): LovableMessage[] {
   const studentLatest = getLatestStudentMessage(params.conversationHistory);
 
   const systemContent = [
-    "Ты — физик-наставник. Ученик просит подсказку по задаче ЕГЭ/ОГЭ.",
+    buildHintRoleLine(params.subject),
+    `Предмет: ${getSubjectLabelDeno(params.subject)}.`,
     "",
     "УРОВЕНЬ ПОДСКАЗКИ: 1/3",
-    "- Level 1 (nudge): одним коротким вопросом направь внимание на ключевую величину или закон",
-    "- Level 2 (hint): назови закон/формулу, которые применимы, но не решай за ученика",
-    "- Level 3 (big hint): покажи формулу с подстановкой, но не вычисляй финальный ответ",
+    "- Level 1 (nudge): одним коротким вопросом направь внимание на ключевое правило, приём или элемент условия",
+    "- Level 2 (hint): назови правило/формулу/приём, которые применимы, но не решай за ученика",
+    "- Level 3 (big hint): покажи подход с частичной подстановкой, но не доводи до финального ответа",
     "",
     "КАТЕГОРИЧЕСКИ ЗАПРЕЩЕНО использовать фразы:",
     ...FORBIDDEN_HINT_PROMPT_LINES.map((line) => `- ${line}`),
-    "- любые общие фразы без привязки к физике этой задачи",
+    "- любые общие фразы без привязки к содержанию этой задачи",
+    `- любые упоминания понятий, законов или правил, не относящихся к предмету «${getSubjectLabelDeno(params.subject)}»`,
     "",
     "ОБЯЗАТЕЛЬНО:",
-    "- Упоминай конкретную величину (скорость, ускорение, сила трения, напряжение, ...) или закон (Ньютон, Ом, Кирхгоф, ...) из ЭТОЙ задачи",
-    "- Если задача на изображении и текст пустой — опиши что видишь и дай подсказку по видимым величинам",
-    "- Если у тебя недостаточно контекста, лучше задай короткий вопрос о конкретной величине, чем используй шаблонную фразу",
+    buildHintExamplesLine(params.subject),
+    "- Если задача на изображении и текст пустой — опиши что видишь и дай подсказку по видимым элементам условия",
+    "- Если у тебя недостаточно контекста, лучше задай короткий вопрос о конкретном элементе условия, чем используй шаблонную фразу",
     "- Длина: 1-3 предложения, без воды",
     "- Сохрани сократический тон Level 1: мягко направь ученика к следующему шагу, а не решай за него",
     "- Не раскрывай правильный ответ ученику",
@@ -1707,6 +1853,7 @@ export async function generateHint(
     const fallbackHint = buildValidatedFallbackHint({
       taskText: params.taskText,
       hasImage: Boolean(resolvedTaskImageUrl),
+      subject: params.subject,
     });
 
     console.warn(JSON.stringify({
@@ -1720,6 +1867,7 @@ export async function generateHint(
     const fallbackHint = buildValidatedFallbackHint({
       taskText: params.taskText,
       hasImage: Boolean(resolvedTaskImageUrl),
+      subject: params.subject,
     });
 
     console.warn(JSON.stringify({

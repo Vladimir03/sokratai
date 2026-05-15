@@ -2,6 +2,7 @@ import { ChevronDown, ChevronUp, Info, Lightbulb } from 'lucide-react';
 import { lazy, Suspense } from 'react';
 import { StepIndicator } from './StepIndicator';
 import { TaskImagesGallery } from './TaskImagesGallery';
+import { isHumanitiesWritingSubject } from '@/lib/subjectHelpers';
 
 const MathText = lazy(() =>
   import('@/components/kb/ui/MathText').then((m) => ({ default: m.MathText })),
@@ -102,6 +103,15 @@ interface ProblemContextProps {
    * Mobile (default `false`) keeps the toggle for peek/expand UX.
    */
   hideToggle?: boolean;
+  /**
+   * Subject id from `homework_tutor_assignments.subject`. When the subject
+   * is a humanities-writing one (french / russian / english / literature /
+   * spanish), the amber `task_kind === 'extended'` banner switches from
+   * physics-flavoured «покажи ход рассуждений» to «Это письменная задача —
+   * напиши развёрнутый ответ с ходом рассуждений». See
+   * `@/lib/subjectHelpers::isHumanitiesWritingSubject`.
+   */
+  subject?: string | null;
 }
 
 /**
@@ -126,6 +136,7 @@ export function ProblemContext({
   assignmentId,
   onStepClick,
   hideToggle = false,
+  subject = null,
 }: ProblemContextProps) {
   const headerId = `problem-context-${task.task_id}`;
   const panelId = `problem-context-panel-${task.task_id}`;
@@ -283,7 +294,9 @@ export function ProblemContext({
             </div>
           ) : null}
 
-          {/* Warn banner — task kind hint */}
+          {/* Warn banner — task kind hint. Humanities writing subjects get a
+              prose-specific wording so French / Russian letter tasks don't
+              read like physics («покажи ход рассуждений» = formula-coded). */}
           {task.task_kind === 'extended' || task.task_kind === 'proof' ? (
             <div className="flex items-center gap-2 px-3 py-2 bg-amber-50 border-l-[3px] border-socrat-accent rounded-r-[8px] text-[12.5px] leading-snug text-amber-900">
               <Info
@@ -292,7 +305,9 @@ export function ProblemContext({
               />
               <span>
                 {task.task_kind === 'extended'
-                  ? 'Это задача с развёрнутым решением — покажи ход рассуждений.'
+                  ? (isHumanitiesWritingSubject(subject)
+                      ? 'Это письменная задача — напиши развёрнутый ответ с ходом рассуждений.'
+                      : 'Это задача с развёрнутым решением — покажи ход рассуждений.')
                   : 'Доказательство — нужны фото с подробным выводом.'}
               </span>
             </div>

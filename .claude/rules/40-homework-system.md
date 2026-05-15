@@ -68,6 +68,52 @@
 - `subject: 'physics'` — предмет по умолчанию (целевой сегмент: репетиторы физики ЕГЭ/ОГЭ)
 - Если репетитор меняет предмет — открыть L1 («Расширенные параметры»)
 
+### Subject AI-promts — все 3 пути (2026-05-15)
+
+Все три AI-пути в guided homework chat (`check` / `hint` / `chat`) обязаны получать `homework_tutor_assignments.subject` и адаптировать system prompt. До этого правила `buildHintPrompt` был hardcoded под физику («Ты — физик-наставник» + Ньютон/Ом/Кирхгоф), `buildFallbackHint` отдавал «Какая физическая величина…», `chat/index.ts SYSTEM_PROMPT` вообще не знал предмет. Симптом — репетитор по французскому языку задал ДЗ на письмо DELF B1, ученик получил от AI «Назови физическую величину».
+
+**Контракт (mirror `Имя ученика в AI-промпте — все три пути` в `CLAUDE.md §8`):**
+
+| Путь | Файл | Subject параметр | Как используется |
+|---|---|---|---|
+| Check | `guided_ai.ts::buildCheckPrompt` | `params.subject` (existed) | `Предмет: ${params.subject}` в systemContent (string `1043`) |
+| Hint | `guided_ai.ts::buildHintPrompt` | `params.subject` (existed, **теперь used**) | `buildHintRoleLine(subject)` + `buildHintExamplesLine(subject)` — switch по предметам |
+| Hint fallback | `guided_ai.ts::buildFallbackHint` + `buildValidatedFallbackHint` | новый optional `subject` в `taskContext` | branch: physics → старая физическая фраза; humanities → грамматика/правила; maths → формулы/теоремы; default → нейтрально |
+| Chat | `chat/index.ts::processAIRequest` | `ChatRequestBody.subject` + **server-side подтверждение** через SELECT `homework_tutor_assignments.subject` | DB value WINS (anti-tamper); subject-aware блок инжектируется в `effectiveSystemPrompt` после base `SYSTEM_PROMPT` |
+
+**Server-side подтверждение (chat path, КРИТИЧНО):**
+- Если `guidedHomeworkAssignmentId` присутствует, `processAIRequest` параллельно (`Promise.all`) с taskRow fetch'ит `homework_tutor_assignments.subject` через service_role. **Серверная значение выигрывает** над client-supplied — защита от tampering (ученик не может подставить `subject='physics'` чтобы получить «физические» подсказки на чужом French ДЗ).
+- Latency overhead = 0 (один Promise.all с уже-существующим taskRow fetch).
+
+**Frontend цепочка — 3 callsite пробрасывают `assignment.subject` в `streamChat` body:**
+- `src/lib/streamChat.ts` — `StreamChatOptions.subject` + body field `subject`.
+- `src/components/homework/GuidedHomeworkWorkspace.tsx` — legacy desktop (main streamChat + bootstrap streamChat).
+- `src/pages/student/HomeworkProblem.tsx` — mobile/Phase 3 single callsite.
+
+**Subject helpers — двойной источник, синхронизация вручную:**
+- **Frontend (TS):** `getSubjectLabel(id)` в `src/types/homework.ts:52`. Используй для UI.
+- **Deno edge functions:** локальные `SUBJECT_LABELS_DENO` + `getSubjectLabelDeno()` дублируются inline **в двух** файлах: `guided_ai.ts` и `chat/index.ts`. Deno cannot import `src/types/homework.ts`. При добавлении нового subject в `SUBJECTS` — синхронно обновить обе Deno-копии, иначе AI получит raw id (`"french"`) вместо человеческого («Французский язык») в system prompt.
+
+**`isHumanitiesWritingSubject` — UX-маркер для humanities-extended (`src/lib/subjectHelpers.ts`):**
+- `true` для `russian / literature / english / french / spanish` (+ legacy `rus`).
+- Применяется в **3 точках UX-адаптации** (только когда `task_kind === 'extended'`):
+  - `ProblemContext.tsx` amber banner: «Это письменная задача — напиши развёрнутый ответ с ходом рассуждений» вместо «покажи ход рассуждений» (физико-математическая формулировка).
+  - `SubmitSheet.tsx`: numeric input row **скрыт** (не показываем «числовой ответ» для письма / эссе). Backend `handleStudentSubmission` уже разрешает `photos.length >= 1 OR text.trim().length > 0` для extended (см. preview-QA #9 relax 2026-05-11) — никаких миграций.
+  - `SubmitCtaBar.tsx` + mobile inline big-CTA в `HomeworkProblem.tsx`: subtitle переключается с «Ответ + фото решения от руки» на «Текст или фото готового решения».
+
+**При добавлении нового AI-пути в guided chat (mirror §«Эталонное решение для AI и anti-leak»):**
+- Если новый prompt-builder в `guided_ai.ts` — **обязательно** принимай `subject: string` в `Params` interface. Хотя бы одна subject-aware строка в systemContent через `getSubjectLabelDeno(params.subject)`. НЕ копируй pattern «Ты — физик-наставник».
+- Если новый endpoint использует `/chat` — добавь `subject` в body (frontend источник: страница с `assignment.subject`); server-side `processAIRequest` сам подтвердит через DB.
+- Если humanities-writing UX расширяется (новый предмет / новый компонент) — расширь `subjectHelpers.ts`, не делай ad-hoc switch'и в компонентах.
+
+**Симптом нарушения:** ученик на ДЗ с `subject != 'physics'` получает от AI ответы про «физическую величину» / «закон» / «формулу Ньютона». Грепнуть:
+```
+grep -nE "buildFallbackHint|buildHintPrompt|streamChat\\(" src/ supabase/functions/
+```
+Каждый call site должен передавать `subject` (либо явно через body, либо через params).
+
+**Спека:** `~/.claude/plans/1-functional-meteor.md`.
+
 ### Эталонное решение для AI и anti-leak (2026-04-18)
 
 `homework_tutor_tasks.solution_text` + `homework_tutor_tasks.solution_image_urls` — единое tutor-only поле «Решение для AI». Видно AI на **всех 3 путях** (check / hint / chat) как референс для Сократовского ведения ученика. НИКОГДА не возвращается ученику. Миграция: `supabase/migrations/20260418120000_add_homework_task_solution.sql`. Лимит фото — `MAX_SOLUTION_IMAGES = 5`.

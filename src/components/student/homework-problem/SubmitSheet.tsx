@@ -8,6 +8,7 @@ import {
   uploadStudentThreadImage,
   StudentHomeworkApiError,
 } from '@/lib/studentHomeworkApi';
+import { isHumanitiesWritingSubject } from '@/lib/subjectHelpers';
 import { PhotoStrip } from './PhotoStrip';
 import {
   AUTOSAVE_INTERVAL_MS,
@@ -69,6 +70,14 @@ interface SubmitSheetProps {
    */
   threadId?: string | null;
   /**
+   * Subject id from `homework_tutor_assignments.subject`. When this is a
+   * humanities-writing subject (french / russian / english / literature /
+   * spanish) AND `task.task_kind === 'extended'`, the numeric input row
+   * disappears and the hint banner switches to письменная-friendly copy.
+   * See `@/lib/subjectHelpers::isHumanitiesWritingSubject`.
+   */
+  subject?: string | null;
+  /**
    * Phase 1.2 refactor (preview-QA #6, 2026-05-10): SubmitSheet больше не
    * владеет mutation + verdict overlay. Студент тапает «Отправить» —
    * sheet немедленно закрывается, parent (`HomeworkProblem`) запускает
@@ -128,8 +137,10 @@ export function SubmitSheet({
   hwId: _hwId,
   taskId,
   threadId,
+  subject = null,
   onSubmit,
 }: SubmitSheetProps) {
+  const isHumanitiesWriting = isHumanitiesWritingSubject(subject);
   const [numeric, setNumeric] = useState('');
   const [photos, setPhotos] = useState<string[]>([]);
   const [text, setText] = useState('');
@@ -334,9 +345,17 @@ export function SubmitSheet({
     return `Черновик сохранён · ${min} мин назад`;
   }, [lastAutosaveAt, autosaveCaptionTick]);
 
-  const hint = HINT_BY_KIND[task.task_kind] ?? HINT_BY_KIND.extended;
+  // Humanities-writing override: для письма / сочинения / essay числовой
+  // ответ бессмысленен, а hint про «ход решения» звучит как физика.
+  // Применяется только к extended (numeric task_kind репетитор всё равно
+  // выбрать не должен для письма, но если выбрал — сохраняем числовой UX).
+  const hint = isHumanitiesWriting && task.task_kind === 'extended'
+    ? 'Покажи готовый текст письма / эссе — фото от руки или набранный текст.'
+    : (HINT_BY_KIND[task.task_kind] ?? HINT_BY_KIND.extended);
 
-  const showNumeric = task.task_kind !== 'proof';
+  const showNumeric =
+    task.task_kind !== 'proof' &&
+    !(isHumanitiesWriting && task.task_kind === 'extended');
   const showPhotos = task.task_kind === 'extended' || task.task_kind === 'proof';
 
   // Preview-QA #9 (2026-05-11): для extended numeric «по желанию»

@@ -38,6 +38,7 @@ import { useVoiceRecorder } from '@/hooks/useVoiceRecorder';
 import { useIsMobile } from '@/hooks/useIsMobile';
 import { trackGuidedHomeworkEvent } from '@/lib/homeworkTelemetry';
 import { getSubjectLabel } from '@/types/homework';
+import { isHumanitiesWritingSubject } from '@/lib/subjectHelpers';
 import type {
   HomeworkThreadMessage,
   HomeworkTaskState,
@@ -479,6 +480,9 @@ export default function HomeworkProblem() {
         studentImageUrls: studentImageUrls.length > 0 ? studentImageUrls : undefined,
         guidedHomeworkAssignmentId: data.assignment.id,
         guidedHomeworkTaskId: data.task.id,
+        // Subject-aware AI: hint/chat respond in-discipline (no «физическая
+        // величина» on French / Russian / English homework).
+        subject: data.assignment.subject,
         onDelta: (delta) => {
           fullContent += delta;
           setStreamingText(fullContent);
@@ -1115,6 +1119,7 @@ export default function HomeworkProblem() {
               hideToggle
               assignmentId={data.assignment.id}
               onStepClick={handleStepClick}
+              subject={data.assignment.subject}
             />
           ) : null}
         </div>
@@ -1142,6 +1147,7 @@ export default function HomeworkProblem() {
             isCompleted={isCurrentCompleted}
             hasNextTask={Boolean(nextTaskId)}
             onNavigateNext={() => navigateAfterCorrect()}
+            subject={data.assignment.subject}
           />
         ) : null}
       </aside>
@@ -1190,6 +1196,7 @@ export default function HomeworkProblem() {
               compact
               assignmentId={data.assignment.id}
               onStepClick={handleStepClick}
+              subject={data.assignment.subject}
             />
           </div>
         ) : null}
@@ -1430,7 +1437,11 @@ export default function HomeworkProblem() {
                 : 'Сдать решение задачи'}
             </span>
             <span className="text-[11px] font-medium text-white/80 truncate">
-              {isCurrentCompleted ? 'Задача сдана' : 'Ответ + фото решения от руки'}
+              {isCurrentCompleted
+                ? 'Задача сдана'
+                : isHumanitiesWritingSubject(data.assignment.subject)
+                  ? 'Текст или фото готового решения'
+                  : 'Ответ + фото решения от руки'}
             </span>
           </span>
         </button>
@@ -1598,6 +1609,7 @@ export default function HomeworkProblem() {
           homework_title: data.assignment.title,
           current_score: liveScore,
         }}
+        subject={data.assignment.subject}
         onSubmit={handleSubmissionSubmit}
       />
     </div>

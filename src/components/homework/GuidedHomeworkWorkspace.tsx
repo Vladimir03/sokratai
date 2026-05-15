@@ -935,6 +935,10 @@ export default function GuidedHomeworkWorkspace({
         // Server fetches tutor's reference solution via service-role (never exposed to student).
         guidedHomeworkAssignmentId: assignment.id,
         guidedHomeworkTaskId: task.id,
+        // Subject-aware AI: keeps hint/chat/bootstrap responses inside the actual
+        // discipline (French homework no longer triggers «физическая величина»).
+        // Server re-fetches and DB value wins — see chat/index.ts processAIRequest.
+        subject: assignment.subject,
         onDelta: (delta) => {
           fullContent += delta;
           setStreamingContent(fullContent);
@@ -1532,6 +1536,9 @@ export default function GuidedHomeworkWorkspace({
           taskImageUrls,
           guidedHomeworkAssignmentId: assignment.id,
           guidedHomeworkTaskId: currentTask.id,
+          // Subject-aware bootstrap: French / Russian / English ДЗ no longer
+          // gets «физик-наставник» intro.
+          subject: assignment.subject,
           onDelta: (delta) => {
             content += delta;
             setStreamingContent(content);

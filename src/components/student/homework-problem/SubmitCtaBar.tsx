@@ -1,4 +1,5 @@
 import { ArrowRight, CheckCircle2, ChevronUp } from 'lucide-react';
+import { isHumanitiesWritingSubject } from '@/lib/subjectHelpers';
 
 interface SubmitCtaBarProps {
   /** Tap → open SubmitSheet. */
@@ -15,6 +16,11 @@ interface SubmitCtaBarProps {
    * surface yet — pass `undefined` for clean state. Wiring deferred.
    */
   draftLabel?: string | null;
+  /**
+   * Subject id — switches subtitle to «Текст или фото готового решения»
+   * для humanities-writing предметов (письмо / эссе / сочинение).
+   */
+  subject?: string | null;
 }
 
 /**
@@ -40,7 +46,11 @@ export function SubmitCtaBar({
   hasNextTask,
   onNavigateNext,
   draftLabel,
+  subject = null,
 }: SubmitCtaBarProps) {
+  const defaultSubtitle = isHumanitiesWritingSubject(subject)
+    ? 'Текст или фото готового решения'
+    : 'Ответ + фото решения от руки';
   if (isCompleted) {
     return (
       <div className="flex items-center justify-between gap-3 px-4 py-3 bg-white border-t border-socrat-border-light shrink-0">
@@ -72,7 +82,7 @@ export function SubmitCtaBar({
           Готов сдать решение?
         </span>
         <span className="text-[12px] font-medium text-slate-500 truncate">
-          {draftLabel ?? 'Ответ + фото решения от руки'}
+          {draftLabel ?? defaultSubtitle}
         </span>
       </div>
       <button

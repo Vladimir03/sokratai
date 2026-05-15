@@ -40,6 +40,15 @@ export interface StreamChatOptions {
    */
   guidedHomeworkAssignmentId?: string;
   guidedHomeworkTaskId?: string;
+  /**
+   * Subject id from `homework_tutor_assignments.subject` (canonical list:
+   * @/types/homework → SUBJECTS). Server-side `/chat` re-fetches subject from
+   * the DB and prefers that value (defence against client tampering); the
+   * client-supplied value lets the server use it without an extra round-trip
+   * when guidedHomeworkAssignmentId is absent (won't happen on guided paths,
+   * but keeps the contract honest).
+   */
+  subject?: string | null;
   onDelta: (text: string) => void;
   onDone: () => void;
   onError?: (error: Error) => void;
@@ -62,6 +71,7 @@ export async function streamChat({
   studentImageUrls,
   guidedHomeworkAssignmentId,
   guidedHomeworkTaskId,
+  subject,
   onDelta,
   onDone,
   onError,
@@ -106,6 +116,7 @@ export async function streamChat({
           studentImageUrls: normalizedStudentImageUrls.length > 0 ? normalizedStudentImageUrls : undefined,
           guidedHomeworkAssignmentId: guidedHomeworkAssignmentId || undefined,
           guidedHomeworkTaskId: guidedHomeworkTaskId || undefined,
+          subject: subject || undefined,
         }),
         signal: controller.signal,
       });

@@ -56,6 +56,15 @@ interface ChatRequestBody {
    */
   guidedHomeworkAssignmentId?: string;
   guidedHomeworkTaskId?: string;
+  /**
+   * Subject id from `homework_tutor_assignments.subject` (canonical list:
+   * src/types/homework.ts → SUBJECTS). When `guidedHomeworkAssignmentId` is
+   * present, the server independently re-fetches subject and prefers the
+   * DB value (defence against client tampering). Used to inject a
+   * subject-aware block into the system prompt so AI doesn't answer
+   * Russian / French / etc. homework with physics-only vocabulary.
+   */
+  subject?: string | null;
 }
 
 // SECURITY: Allowed domains for image fetching to prevent SSRF attacks
@@ -715,6 +724,76 @@ ${maxCharsInstruction}
 ${modeInstructions[mode]}`;
 }
 
+// ─── Subject-aware prompt helpers ───────────────────────────────────────────
+// Mirror of `guided_ai.ts::SUBJECT_LABELS_DENO`. Keep in sync with SUBJECTS
+// from src/types/homework.ts when new subjects land. Fallback = raw id.
+const SUBJECT_LABELS_DENO: Record<string, string> = {
+  maths: "Математика",
+  physics: "Физика",
+  informatics: "Информатика",
+  russian: "Русский язык",
+  literature: "Литература",
+  history: "История",
+  social: "Обществознание",
+  english: "Английский язык",
+  french: "Французский язык",
+  spanish: "Испанский язык",
+  chemistry: "Химия",
+  biology: "Биология",
+  geography: "География",
+  other: "Другое",
+  math: "Математика",
+  rus: "Русский язык",
+  cs: "Информатика",
+  algebra: "Алгебра",
+  geometry: "Геометрия",
+};
+
+function getSubjectLabelDeno(subjectId: string | null | undefined): string {
+  const id = (subjectId ?? "").trim();
+  if (!id) return "школьному предмету";
+  return SUBJECT_LABELS_DENO[id] ?? id;
+}
+
+/**
+ * Inline subject-specific examples for chat-path system prompt.
+ * Used to constrain AI vocabulary to the subject's natural domain.
+ */
+function buildSubjectExamplesLine(subjectId: string | null | undefined): string {
+  switch (subjectId) {
+    case "physics":
+      return "Опирайся на физические величины (скорость, ускорение, сила, напряжение, …) и законы (Ньютон, Ом, Кирхгоф, …).";
+    case "maths":
+    case "math":
+    case "algebra":
+    case "geometry":
+      return "Опирайся на формулы, теоремы и приёмы (Виета, разложение, замена переменной, признаки подобия, …).";
+    case "russian":
+    case "rus":
+      return "Опирайся на правила орфографии, пунктуации и морфологии.";
+    case "literature":
+      return "Опирайся на темы, художественные средства, позиции авторов и цитаты.";
+    case "english":
+    case "french":
+    case "spanish":
+      return "Опирайся на грамматические правила, времена, синтаксические конструкции и лексику этого языка.";
+    case "history":
+    case "social":
+      return "Опирайся на конкретные события, термины, причинно-следственные связи и даты.";
+    case "informatics":
+    case "cs":
+      return "Опирайся на алгоритмы, конструкции языка программирования и приёмы решения.";
+    case "chemistry":
+      return "Опирайся на реакции, формулы веществ и химические законы.";
+    case "biology":
+      return "Опирайся на процессы, термины и системы организма.";
+    case "geography":
+      return "Опирайся на процессы, явления и статистические данные.";
+    default:
+      return "Опирайся на правила, приёмы и ключевые идеи этого предмета.";
+  }
+}
+
 function isAcceptedVoiceMimeType(mimeType: string): boolean {
   if (!mimeType) return false;
 
@@ -924,7 +1003,7 @@ serve(async (req) => {
       
       userId = body.userId;
 
-      const { messages, systemPrompt, taskContext, taskImageUrls, studentImageUrl, studentImageUrls, chatId, studentName, guidedHomeworkAssignmentId, guidedHomeworkTaskId } = body;
+      const { messages, systemPrompt, taskContext, taskImageUrls, studentImageUrl, studentImageUrls, chatId, studentName, guidedHomeworkAssignmentId, guidedHomeworkTaskId, subject } = body;
       const responseProfile = normalizeResponseProfile(body.responseProfile);
       const responseMode = normalizeResponseMode(body.responseMode);
       const maxChars = normalizeMaxChars(body.maxChars);
@@ -959,6 +1038,7 @@ serve(async (req) => {
         studentName,
         guidedHomeworkAssignmentId,
         guidedHomeworkTaskId,
+        subject,
       );
     } else {
       const supabase = createClient(Deno.env.get("SUPABASE_URL") ?? "", Deno.env.get("SUPABASE_ANON_KEY") ?? "", {
@@ -980,7 +1060,7 @@ serve(async (req) => {
       userId = user.id;
 
       const body = await req.json() as ChatRequestBody;
-      const { messages, systemPrompt, taskContext, taskImageUrls, studentImageUrl, studentImageUrls, chatId, studentName, guidedHomeworkAssignmentId, guidedHomeworkTaskId } = body;
+      const { messages, systemPrompt, taskContext, taskImageUrls, studentImageUrl, studentImageUrls, chatId, studentName, guidedHomeworkAssignmentId, guidedHomeworkTaskId, subject } = body;
       const latestUserMessage = Array.isArray(messages)
         ? [...messages].reverse().find((message) => message?.role === "user")
         : null;
@@ -1019,6 +1099,7 @@ serve(async (req) => {
         studentName,
         guidedHomeworkAssignmentId,
         guidedHomeworkTaskId,
+        subject,
       );
     }
   } catch (error) {
@@ -1046,6 +1127,7 @@ async function processAIRequest(
   studentName?: string,
   guidedHomeworkAssignmentId?: string,
   guidedHomeworkTaskId?: string,
+  clientSubject?: string | null,
 ) {
   const corsHeaders = {
     "Access-Control-Allow-Origin": "*",
@@ -1142,6 +1224,11 @@ async function processAIRequest(
   // See plan wild-swinging-nova.md (2026-04-18).
   let tutorSolutionText: string | null = null;
   let tutorSolutionImageDataUrls: string[] = [];
+  // Resolved subject for guided homework context. Defaults to client-supplied value
+  // (safe for non-guided / generic chat). When guidedHomeworkAssignmentId is present,
+  // server-side DB value WINS over client-supplied to defend against tampering — see
+  // plan §«chat/index.ts server-side подтверждение».
+  let resolvedSubject: string | null = (clientSubject ?? "").trim() || null;
   if (guidedHomeworkAssignmentId && guidedHomeworkTaskId) {
     try {
       const { data: assignmentRow, error: assignmentErr } = await adminSupabase
@@ -1165,12 +1252,34 @@ async function processAIRequest(
           user_id: userId,
         });
       } else {
-        const { data: taskRow, error: taskErr } = await adminSupabase
-          .from("homework_tutor_tasks")
-          .select("id, solution_text, solution_image_urls")
-          .eq("id", guidedHomeworkTaskId)
-          .eq("assignment_id", guidedHomeworkAssignmentId)
-          .maybeSingle();
+        // Server-side fetch of canonical assignment.subject — defends against
+        // client tampering. Done in parallel with taskRow fetch to keep latency.
+        const [taskRowResp, assignmentMetaResp] = await Promise.all([
+          adminSupabase
+            .from("homework_tutor_tasks")
+            .select("id, solution_text, solution_image_urls")
+            .eq("id", guidedHomeworkTaskId)
+            .eq("assignment_id", guidedHomeworkAssignmentId)
+            .maybeSingle(),
+          adminSupabase
+            .from("homework_tutor_assignments")
+            .select("subject")
+            .eq("id", guidedHomeworkAssignmentId)
+            .maybeSingle(),
+        ]);
+        const { data: taskRow, error: taskErr } = taskRowResp;
+        if (assignmentMetaResp.error) {
+          console.warn("guided_chat_subject_db_error", {
+            assignment_id: guidedHomeworkAssignmentId,
+            error: assignmentMetaResp.error.message,
+          });
+        } else if (assignmentMetaResp.data && typeof assignmentMetaResp.data.subject === "string") {
+          const dbSubject = assignmentMetaResp.data.subject.trim();
+          if (dbSubject.length > 0) {
+            // Server value wins. If client lied, we silently override.
+            resolvedSubject = dbSubject;
+          }
+        }
         if (taskErr) {
           console.warn("guided_chat_solution_db_error", {
             stage: "task_lookup",
@@ -1346,6 +1455,24 @@ async function processAIRequest(
   console.log("Response shaping:", { responseProfile, responseMode, maxChars: maxChars ?? null });
 
   let effectiveSystemPrompt = systemPrompt || SYSTEM_PROMPT;
+
+  // Subject-aware guided homework block. When `guidedHomeworkAssignmentId` is
+  // present, `resolvedSubject` is server-confirmed (DB value wins over
+  // client-supplied) — see plan §«chat/index.ts server-side подтверждение».
+  // Without this block, generic SYSTEM_PROMPT (focused on physics/maths
+  // vocabulary) caused AI to answer French homework with «физическая величина».
+  if (guidedHomeworkAssignmentId && resolvedSubject) {
+    const subjectLabel = getSubjectLabelDeno(resolvedSubject);
+    const subjectBlock = [
+      "",
+      "=== ТЕКУЩИЙ КОНТЕКСТ ДЗ ===",
+      `Это guided homework chat по предмету «${subjectLabel}».`,
+      `Все подсказки, проверки и разъяснения должны быть строго из области ${subjectLabel}.`,
+      "НЕ упоминай законы, величины, правила или термины из других предметов.",
+      buildSubjectExamplesLine(resolvedSubject),
+    ].join("\n");
+    effectiveSystemPrompt = `${effectiveSystemPrompt}\n${subjectBlock}`;
+  }
 
   if (taskContext) {
     effectiveSystemPrompt = `${effectiveSystemPrompt}\n\n📋 КОНТЕКСТ ЗАДАЧИ:\n${taskContext}\n\nИспользуй ИМЕННО эту задачу в своих ответах. НЕ придумывай другие задачи!`;
