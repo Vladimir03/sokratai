@@ -558,7 +558,9 @@ async function handleGetStudentAssignment(
         part1_max: variant.part1_max,
         part2_max: variant.part2_max,
         task_count: variant.task_count,
-        variant_pdf_url: variant.variant_pdf_url ?? null,
+        variant_pdf_url: variant.variant_pdf_url
+          ? rewriteToProxy(variant.variant_pdf_url as string)
+          : null,
       }
       : null,
     tasks,
