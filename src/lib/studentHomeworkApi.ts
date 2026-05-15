@@ -128,17 +128,15 @@ export async function requestStudentHomeworkApi<T>(
   }
 
   if (!response.ok) {
-    let message = `HTTP ${response.status}`;
+    let body: unknown = null;
     try {
-      const body = await response.json();
-      const errorMessage = body?.error?.message;
-      if (typeof errorMessage === 'string' && errorMessage.trim().length > 0) {
-        message = errorMessage;
-      }
+      body = await response.json();
     } catch {
       // ignore parse errors
     }
-    throw new StudentHomeworkApiError(message);
+    throw new StudentHomeworkApiError(
+      extractApiErrorMessage(body, `HTTP ${response.status}`),
+    );
   }
 
   return response.json() as Promise<T>;
@@ -189,18 +187,15 @@ export async function transcribeThreadVoice(
     );
 
     if (!response.ok) {
-      let message = `HTTP ${response.status}`;
+      let body: unknown = null;
       try {
-        const body = await response.json();
-        const errorMessage = body?.error?.message;
-        if (typeof errorMessage === 'string' && errorMessage.trim().length > 0) {
-          message = errorMessage;
-        }
+        body = await response.json();
       } catch {
         // ignore malformed error body
       }
-
-      throw new StudentHomeworkApiError(message);
+      throw new StudentHomeworkApiError(
+        extractApiErrorMessage(body, `HTTP ${response.status}`),
+      );
     }
 
     const data = await response.json();
@@ -517,17 +512,15 @@ export async function getStudentTaskImagesSignedUrlsViaBackend(
   }
 
   if (!response.ok) {
-    let message = `HTTP ${response.status}`;
+    let body: unknown = null;
     try {
-      const body = await response.json();
-      const errorMessage = body?.error?.message;
-      if (typeof errorMessage === 'string' && errorMessage.trim().length > 0) {
-        message = errorMessage;
-      }
+      body = await response.json();
     } catch {
       // ignore parse errors
     }
-    throw new StudentHomeworkApiError(message);
+    throw new StudentHomeworkApiError(
+      extractApiErrorMessage(body, `HTTP ${response.status}`),
+    );
   }
 
   const result = await response.json() as { signed_urls?: unknown };
