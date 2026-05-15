@@ -33,3 +33,18 @@ export function extractApiErrorMessage(body: unknown, fallback: string): string 
 
   return message;
 }
+
+/**
+ * Extract a stable error code from an edge-function JSON body.
+ * Supports `{ error: { code: "..." } }` and `{ error: "string_code" }` shapes.
+ */
+export function extractApiErrorCode(body: unknown, fallback = 'UNKNOWN'): string {
+  if (!body || typeof body !== 'object') return fallback;
+  const b = body as Record<string, unknown>;
+  if (typeof b.error === 'string' && b.error.trim().length > 0) return b.error;
+  if (b.error && typeof b.error === 'object') {
+    const code = (b.error as Record<string, unknown>).code;
+    if (typeof code === 'string' && code.trim().length > 0) return code;
+  }
+  return fallback;
+}
