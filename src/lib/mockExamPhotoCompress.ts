@@ -59,12 +59,38 @@ export async function compressMockExamPhoto(
     return file;
   }
 
+  // Round 3 review-fix P2 #2 (2026-05-15): HEIC/HEIF graceful fallback.
+  // iPhone Safari native может decode HEIC в `<img>`, но desktop Chrome/
+  // Firefox/Edge — нет. Раньше мы breaking desktop HEIC uploads с error
+  // "JPG, PNG и WebP" ещё до отправки на сервер. Подход:
+  //   1. Try compression (на iPhone Safari работает native).
+  //   2. Catch decode error → pass through original file. Server примет
+  //      (HEIC MIME whitelist'нут в `ALLOWED_PHOTO_MIME`); если файл > 5MB
+  //      server inline cap, AI просто пометит `photo_unreadable` и tutor
+  //      пройдёт review manually — это лучше чем silent client-side breakage.
+  const isHeicLike = /heic|heif/i.test(file.type);
+
   const sourceUrl = URL.createObjectURL(file);
   try {
-    const img = await loadImage(sourceUrl);
+    let img: HTMLImageElement;
+    try {
+      img = await loadImage(sourceUrl);
+    } catch (decodeErr) {
+      if (isHeicLike) {
+        // HEIC decode failure на desktop browsers — pass through original.
+        // Server примет MIME, дальнейшая обработка — tutor's manual review.
+        console.warn('[mockExamPhotoCompress] HEIC decode failed, passing through original', {
+          fileName: file.name,
+          fileSize: file.size,
+        });
+        return file;
+      }
+      throw decodeErr;
+    }
     const naturalW = img.naturalWidth || img.width;
     const naturalH = img.naturalHeight || img.height;
     if (naturalW <= 0 || naturalH <= 0) {
+      if (isHeicLike) return file; // graceful HEIC fallback
       throw new Error('Не удалось прочитать изображение. Попробуй другое.');
     }
     if (naturalW * naturalH > MAX_INPUT_PIXELS) {
@@ -84,12 +110,14 @@ export async function compressMockExamPhoto(
     canvas.height = targetH;
     const ctx = canvas.getContext('2d');
     if (!ctx) {
+      if (isHeicLike) return file; // graceful HEIC fallback
       throw new Error('Браузер не поддерживает обработку изображений.');
     }
 
     try {
       ctx.drawImage(img, 0, 0, naturalW, naturalH, 0, 0, targetW, targetH);
     } catch {
+      if (isHeicLike) return file; // graceful HEIC fallback
       throw new Error('Не удалось обработать изображение. Попробуй другое.');
     }
 
@@ -112,6 +140,7 @@ export async function compressMockExamPhoto(
       }
     }
 
+    if (isHeicLike) return file; // graceful HEIC fallback (no quality fit)
     throw new Error(
       `Не удалось сжать фото до ${(maxBytes / 1024 / 1024).toFixed(0)} МБ. Попробуй другое изображение.`,
     );

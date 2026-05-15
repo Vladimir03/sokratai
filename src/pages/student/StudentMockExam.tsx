@@ -1155,8 +1155,12 @@ function StudentMockExamWorkspace({ data }: { data: StudentMockExamAssignmentVie
             ))}
             {/* В режиме «Бланк ФИПИ» (answerMethod==='blank') цифровые поля СКРЫТЫ —
                 ученик пишет ответы на распечатанном бланке (фото сверху через
-                BlankModeBanner). Auto-check Часть 1 в blank-mode не запускается;
-                tutor вручную выставляет баллы Часть 1 через /part1-manual-score. */}
+                BlankModeBanner). После Phase 6 (2026-05-15) AI auto-OCR Часть 1
+                запускается в `mock-exam-grade::runPart1OCR` на canonical
+                `attempts.blank_photo_url` и pre-fills `mock_exam_attempt_part1_answers`.
+                Tutor видит OCR результаты в `Part1BlankReviewPanel` с amber border
+                для low-confidence cells и при необходимости корректирует через
+                /part1-manual-score. См. CLAUDE.md §22. */}
           </section>
 
           <section className="mt-8 space-y-3">

@@ -1325,7 +1325,7 @@ Phase 6 закрывает основной gap, оставшийся после
 
 **Round 2 fixes (ChatGPT-5.5 review, 2026-05-15):**
 
-После initial Phase 6 коммита `141a5d0` второй проход review поднял 6 P1 findings + 4 P2. Все исправлены в follow-up:
+После initial Phase 6 коммита `141a5d0` второй проход review поднял критичные contract/state-machine findings + P2 UX/perf findings. Все исправлены в follow-up commit `33e5490` (7 файлов, +581 / -73 lines):
 
 1. **`/regrade-part2` теряет ручные dropdown assignments** (главный bug): `handleGrade` теперь использует helper `buildAssignmentFromPersisted(solutionsByKim, allKimNumbers, totalPhotos)` — если хоть одна row имеет non-null `assigned_photo_indices`, **Pass 1 skipped**, используется persisted assignment. Tutor's manual photo→task переmapping no longer overwritten. Fresh attempt (no tutor edits yet) → AI Pass 1 runs as before.
 2. **Stale snapshot tutor preservation race**: upsert заменён на **write-time conditional UPDATE** — `UPDATE ... WHERE NOT IN ('tutor_approved','tutor_modified')`. Если 0 rows affected → SELECT current status и либо INSERT (row missing), либо narrow UPDATE только `ai_draft_json` (tutor approved во время AI call). Telemetry `mock_exam_grade_preserved_tutor_status` при detection.
@@ -1341,13 +1341,39 @@ Phase 6 закрывает основной gap, оставшийся после
 9. **Radix Select iOS sizing**: `h-9 text-xs` → `min-h-[44px] text-base touch-manipulation`. CLAUDE.md `.claude/rules/80-cross-browser.md` Safari auto-zoom + touch target invariants.
 10. **`MockExamPart2Draft.suggested_score` type drift**: `number` → `number | null`. Backend frozen contract уже допускал null (awaiting_regrade / photo_missing). Wire-level alignment.
 
+**Round 2 validation:** `npm run build` green (24.73s), `npm run smoke-check` OK, `npm run lint` clean.
+
 **P3 deferred с явным rationale** (rolled into pre-existing risk gates):
 - RLS table-level на `ai_part1_ocr_json` — mirror existing `ai_draft_json` pattern (CLAUDE.md §10 #5 deferred до post-pilot scale: >50 attempts ИЛИ 5-й tutor).
 - `parseInt("21abc")` → 21 в sanitizer — low risk (Gemini не возвращает trailing chars), nice-to-have fix.
 
 **P2 #3 multi-kim assignment UX** — отложен (требует UX decision Vladimir'а: multi-select vs per-photo checklist). Backend уже поддерживает same index в multiple kims.
 
-**Spec link:** `~/.claude/plans/1-functional-meteor.md` Phase 6 section. Round 2 review (ChatGPT-5.5): commit `141a5d0` (initial) + follow-up commit (round 2 fixes).
+**Spec link:** `~/.claude/plans/1-functional-meteor.md` Phase 6 section. Round 2 review (ChatGPT-5.5): commit `141a5d0` (initial) + follow-up commit `33e5490` (round 2 fixes).
+
+**Round 3 fixes (ChatGPT-5.5 review of 33e5490, 2026-05-15):**
+
+Round 2 коммит поднял 1 **catastrophic P0** + 2 P1 + 2 P2 + 1 P3. Все исправлены.
+
+1. **P0 — `updated_at` колонки не существовало в `mock_exam_attempts`**: Round 2 CAS guard использовал `.update({ updated_at: ... })` + `.select("updated_at")`, но base schema `20260508120000_mock_exams_v1_schema.sql:146` имеет только `created_at`. Production-breaking: DB error на первом call. **Fix:** новая additive миграция `20260515130000_attempt_updated_at.sql` добавляет колонку + `BEFORE UPDATE` trigger чтобы значение обновлялось автоматически на любой UPDATE row (не только в CAS path).
+
+2. **P1 #1 — OCR на wrong column**: Round 2 запускал `runPart1OCR` на `part1_blank_photo_url`, но canonical ФИПИ-бланк хранится в `blank_photo_url` (`mock-exam-student-api/index.ts:856` `kind='blank'` пишет туда). `part1_blank_photo_url` — fallback path «решал не на ФИПИ бланке». Main user flow (blank mode) был полностью broken: OCR не запускался, `INCOMPLETE_PART1` гард блокировал approve. **Fix:** SELECT + `runPart1OCR` теперь идут по `blank_photo_url`. `part1_blank_photo_url` оставлен в схеме как legacy fallback.
+
+3. **P1 #3 — service_role bypass race**: Round 2 разрешил service_role callers пройти fresh `ai_checking` lock. Но `/regrade-part2` дёргает grader как service_role → race с initial fire-and-forget grading от `handleSubmitAttempt`. Tutor нажимает «Перепроверить AI» во время первичного run → два grader'а параллельно. **Fix:**
+   - `/regrade-part2` теперь принимает **только** `awaiting_review` (явная state-machine; submitted/ai_checking → **409 GRADING_IN_PROGRESS**).
+   - В grader убран service_role bypass — все callers идут через единый `STALE_LOCK_AGE_MS=120s` check.
+   - Stale recovery (UPDATE если `updated_at < cutoff`) с atomic CAS через `.select("id")` → конкурент-claim race-safe.
+
+4. **P2 #1 — `anyPersisted` edge case**: Round 2 `buildAssignmentFromPersisted` считал persisted=true только когда есть non-empty `assigned_photo_indices`. Если tutor очищал все привязки в `unassigned` → next regrade видел `anyPersisted=false` → AI Pass 1 запускался заново → tutor's явная очистка перезаписывалась. **Fix:** `anyPersisted=true` когда **ключ `assigned_photo_indices` присутствует** (даже если array `[]`) — signal «tutor touched this row через /assign-part2-photos».
+
+5. **P2 #2 — HEIC compressor breakage**: Round 2 `mockExamPhotoCompress.ts` использовал `<img>` decode, который НЕ работает в desktop Chrome/Firefox/Edge для HEIC → клиентский error «JPG, PNG и WebP» до отправки. iPhone Safari OK (native HEIC). **Fix:** try/catch + `isHeicLike` flag + `return file` pass-through при любом decode/draw failure для HEIC/HEIF MIME. Сервер примет (MIME whitelist'нут); если файл > inline cap — AI помечает `photo_unreadable` для tutor manual review.
+
+6. **P3 — stale comment в `StudentMockExam.tsx:1156`**: было «Auto-check Часть 1 в blank-mode не запускается; tutor вручную выставляет баллы» (pre-Phase-6 контракт). Обновлено на новую Phase 6 семантику (OCR на `blank_photo_url` + pre-fill через `Part1BlankReviewPanel`).
+
+**Migration apply impact:**
+- `20260515130000_attempt_updated_at.sql` — additive, BEFORE UPDATE trigger. Existing rows получают `updated_at = now()` (migration apply time). Stale detection корректно: на момент apply ни один grader не работает (deploy gap), pre-existing `ai_checking` attempts будут treated как stale через 120s — правильно.
+
+**Spec link Round 3:** Migrations `20260515120000_attempt_ai_part1_ocr.sql` + `20260515130000_attempt_updated_at.sql`. Reviewer should confirm APPROVED on round 4 или вернуть оставшиеся findings.
 
 ## Известные хрупкие области
 

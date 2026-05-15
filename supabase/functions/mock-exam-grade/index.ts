@@ -896,9 +896,15 @@ async function runPart1OCR(
 /**
  * Phase 6 (2026-05-15) review-fix #3: reuse tutor-corrected photo assignments
  * from persisted `ai_draft_json.assigned_photo_indices` instead of re-running
- * AI Pass 1. Returns null if NO row has persisted assignment (first-time
- * auto-grade — AI Pass 1 should run). Returns full BulkAssignmentResult if
- * at least one kim has persisted indices (tutor has corrected).
+ * AI Pass 1. Returns null if NO row has the `assigned_photo_indices` key in
+ * its draft (first-time auto-grade — AI Pass 1 should run). Returns full
+ * BulkAssignmentResult if at least one kim has the key persisted (signal
+ * "tutor touched this", даже если все привязки очищены в `unassigned`).
+ *
+ * Round 3 review-fix P2 #1: `anyPersisted` signal должен учитывать просто
+ * **presence of the key**, не non-empty array. Иначе UX-кейс «tutor очистил
+ * все привязки → expects regrade без AI Pass 1» ломается (Pass 1 запустится
+ * и перезатрёт ручную очистку).
  *
  * Validation: indices clamped to [0, totalPhotos). All photos not assigned
  * to any kim → `unassigned` bucket.
@@ -919,6 +925,9 @@ function buildAssignmentFromPersisted(
     const sol = solutionsByKim.get(kim);
     const draft = sol?.ai_draft_json;
     if (draft && typeof draft === "object" && "assigned_photo_indices" in draft) {
+      // Key present → tutor touched this row (через /assign-part2-photos),
+      // даже если value = []. Signal "do not run AI Pass 1".
+      anyPersisted = true;
       const indices = (draft as { assigned_photo_indices?: unknown }).assigned_photo_indices;
       if (Array.isArray(indices)) {
         const cleaned = indices
@@ -926,9 +935,11 @@ function buildAssignmentFromPersisted(
           .filter((idx) => idx >= 0 && idx < totalPhotos);
         result[kim] = cleaned;
         cleaned.forEach((idx) => usedIndices.add(idx));
-        if (cleaned.length > 0) anyPersisted = true;
         continue;
       }
+      // Key present но value не array (corrupted draft) → treat as empty.
+      result[kim] = [];
+      continue;
     }
     result[kim] = [];
   }
@@ -1016,7 +1027,11 @@ interface AttemptRow {
   anonymous_id: string | null;
   // Phase 6 (2026-05-15) — bulk path + AI Часть 1 OCR.
   answer_method?: "blank" | "form" | null;
-  part1_blank_photo_url?: string | null;
+  // Phase 6 Round 3 review-fix P1 #1: AI OCR использует CANONICAL ФИПИ-бланк
+  // (`blank_photo_url`), не `part1_blank_photo_url` (последний — fallback path
+  // «решал не на ФИПИ бланке», prompt не подходит для него).
+  blank_photo_url?: string | null;
+  part1_blank_photo_url?: string | null; // legacy fallback — see note above
   part2_bulk_photo_urls?: string | null; // dual-format (single ref OR JSON array)
   ai_part1_ocr_json?: Part1OCRResult | null;
   // Phase 6 review-fix #1: used для stale-lock detection в CAS claim.
@@ -1044,12 +1059,14 @@ async function handleGrade(
   // Load attempt + assignment. Phase 6 fields: answer_method, blank/bulk photo URLs,
   // ai_part1_ocr_json (для idempotent reruns — не запускать OCR если уже есть).
   // updated_at — для stale-lock detection в Phase 6 review-fix #1 CAS guard.
+  // Round 3 review-fix P1 #1: select `blank_photo_url` (canonical ФИПИ-бланк) —
+  // OCR должен идти по нему, не по `part1_blank_photo_url` (fallback path).
   const { data: attempt, error: attemptErr } = await db
     .from("mock_exam_attempts")
     .select(
       "id, assignment_id, status, student_id, anonymous_id, " +
-        "answer_method, part1_blank_photo_url, part2_bulk_photo_urls, " +
-        "ai_part1_ocr_json, updated_at",
+        "answer_method, blank_photo_url, part1_blank_photo_url, " +
+        "part2_bulk_photo_urls, ai_part1_ocr_json, updated_at",
     )
     .eq("id", attemptId)
     .maybeSingle();
@@ -1174,15 +1191,16 @@ async function handleGrade(
       }
     }
   } else if (attemptRow.status === "ai_checking") {
-    // Attempt'а уже в ai_checking — может быть legitimate retry (например
-    // /regrade-part2 service-role call) ИЛИ concurrent runner. Detect через
-    // updated_at age.
+    // Attempt уже в ai_checking — либо legitimate stale recovery (crashed
+    // runner), либо concurrent runner. Round 3 review-fix P1 #3: убран
+    // service_role bypass — все callers (включая /regrade-part2 internal
+    // call) идут через единый fresh-lock detection. /regrade-part2 теперь
+    // принимает только awaiting_review статус, так что попадание сюда —
+    // действительно либо stale recovery, либо race с initial grading.
     const ageMs = attemptRow.updated_at
       ? Date.now() - new Date(attemptRow.updated_at as string).getTime()
       : Infinity;
-    if (ageMs < STALE_LOCK_AGE_MS && auth.triggered_by !== "service_role") {
-      // Concurrent runner (skip stale check для service_role — explicit
-      // re-grade always allowed).
+    if (ageMs < STALE_LOCK_AGE_MS) {
       console.info(JSON.stringify({
         event: "mock_exam_grade_already_running",
         attempt_id: attemptId,
@@ -1196,17 +1214,36 @@ async function handleGrade(
         "Another grader is already processing this attempt — retry shortly",
       );
     }
-    // Claim stale lock (или service-role bypass) — обновить timestamp чтобы
-    // другие runner'ы видели нас как live.
-    const { error: refreshErr } = await db
+    // Stale lock detected (runner crashed / timed out — > 120s без updates).
+    // Atomic claim через CAS: UPDATE updated_at WHERE updated_at < cutoff.
+    // Если 0 rows affected → конкурент уже забрал claim → return 202.
+    const cutoff = new Date(Date.now() - STALE_LOCK_AGE_MS).toISOString();
+    const { data: claimedStale, error: refreshErr } = await db
       .from("mock_exam_attempts")
       .update({ updated_at: new Date().toISOString() })
-      .eq("id", attemptId);
+      .eq("id", attemptId)
+      .eq("status", "ai_checking")
+      .lt("updated_at", cutoff)
+      .select("id");
     if (refreshErr) {
-      console.warn("mock_exam_grade_claim_refresh_failed", {
+      console.warn("mock_exam_grade_stale_claim_failed", {
         attempt_id: attemptId,
         error: refreshErr.message,
       });
+    } else if (!claimedStale || claimedStale.length === 0) {
+      // Race lost — another runner reclaimed stale lock first.
+      return jsonError(
+        cors,
+        202,
+        "ALREADY_GRADING",
+        "Another grader has reclaimed this attempt — retry shortly",
+      );
+    } else {
+      console.info(JSON.stringify({
+        event: "mock_exam_grade_stale_lock_recovered",
+        attempt_id: attemptId,
+        previous_lock_age_ms: ageMs,
+      }));
     }
   }
 
@@ -1347,11 +1384,16 @@ async function handleGrade(
   // параллельно с Часть 2 grading (Promise.all ниже). Idempotent: если
   // ai_part1_ocr_json уже есть → skip. Tutor можно re-trigger через
   // `/regrade-part2` endpoint (он clear'ит ocr_json перед regrade).
+  //
+  // Round 3 review-fix P1 #1: canonical ФИПИ-бланк хранится в
+  // `attempts.blank_photo_url` (см. mock-exam-student-api `kind='blank'`).
+  // `part1_blank_photo_url` — fallback path для «решал не на бланке», prompt
+  // OCR не подходит для произвольного формата.
   const shouldRunPart1OCR = attemptRow.answer_method === "blank"
-    && !!attemptRow.part1_blank_photo_url
+    && !!attemptRow.blank_photo_url
     && !attemptRow.ai_part1_ocr_json;
   const part1OCRPromise = shouldRunPart1OCR
-    ? runPart1OCR(db, attemptId, attemptRow.part1_blank_photo_url ?? "", assignmentRow.variant_id ?? "")
+    ? runPart1OCR(db, attemptId, attemptRow.blank_photo_url ?? "", assignmentRow.variant_id ?? "")
     : Promise.resolve(null);
 
   console.info(JSON.stringify({

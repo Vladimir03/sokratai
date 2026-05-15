@@ -1759,6 +1759,20 @@ async function handleRegradePart2(
   if (attempt.status === "in_progress") {
     return jsonError(cors, 400, "NOT_SUBMITTED", "Attempt has not been submitted yet");
   }
+  // Round 3 review-fix P1 #3 (2026-05-15): /regrade-part2 принимает ТОЛЬКО
+  // `awaiting_review`. Раньше пропускали `ai_checking` (через service_role
+  // bypass в grader), что создавало race с initial fire-and-forget grading
+  // от `handleSubmitAttempt`: tutor мог нажать «Перепроверить AI» во время
+  // первичного run → два grader'а параллельно. Теперь явный state-machine
+  // gate: regrade имеет смысл только когда AI уже закончил первый pass.
+  if (attempt.status === "submitted" || attempt.status === "ai_checking") {
+    return jsonError(
+      cors,
+      409,
+      "GRADING_IN_PROGRESS",
+      "AI grader сейчас обрабатывает этот пробник. Перепроверка станет доступна когда он закончит.",
+    );
+  }
 
   // Call mock-exam-grade internally через service_role.
   const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
