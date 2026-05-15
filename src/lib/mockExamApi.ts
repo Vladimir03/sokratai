@@ -7,6 +7,7 @@
 // `src/lib/supabaseClient.ts` для rationale.
 
 import { supabase } from '@/lib/supabaseClient';
+import { extractApiErrorCode, extractApiErrorMessage } from '@/lib/apiErrorMessage';
 import type {
   ApproveAllResponse,
   ApproveTaskPayload,
@@ -61,15 +62,15 @@ async function requestTutorMockExamApi<T>(
   });
 
   if (!resp.ok) {
-    let errorBody: { error?: { code?: string; message?: string; details?: unknown } } = {};
+    let errorBody: unknown = {};
     try {
       errorBody = await resp.json();
     } catch {
       // Ignore parse error — fall through to default message.
     }
-    const code = errorBody?.error?.code ?? 'UNKNOWN';
-    const message = errorBody?.error?.message ?? `HTTP ${resp.status}`;
-    const details = errorBody?.error?.details;
+    const code = extractApiErrorCode(errorBody);
+    const message = extractApiErrorMessage(errorBody, `HTTP ${resp.status}`);
+    const details = (errorBody as { error?: { details?: unknown } } | null | undefined)?.error?.details;
     throw new MockExamApiError(resp.status, code, message, details);
   }
 
