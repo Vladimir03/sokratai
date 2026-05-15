@@ -132,6 +132,16 @@ function isNonNegativeInt(v: unknown): v is number {
   return typeof v === "number" && Number.isInteger(v) && v >= 0;
 }
 
+// Phase 6 review-fix #4: compare two number arrays as sets (order-independent,
+// duplicate-tolerant). Used to detect actual assignment changes in
+// /assign-part2-photos.
+function arraysEqualAsSets(a: number[], b: number[]): boolean {
+  if (a.length !== b.length) return false;
+  const set = new Set(a);
+  for (const x of b) if (!set.has(x)) return false;
+  return true;
+}
+
 function isISODate(v: unknown): v is string {
   if (typeof v !== "string") return false;
   const d = new Date(v);
@@ -1050,6 +1060,11 @@ async function handleGetAttempt(
     manual_comment: attempt.manual_comment,
     part1_answers: part1Answers,
     part2_solutions: part2Solutions,
+    // Phase 6 (2026-05-15) — review-fix #5: expose tutor-only OCR result для
+    // Part1BlankReviewPanel. Frontend type `MockExamAttemptDetail.ai_part1_ocr_json`
+    // ожидает этот field. Anti-leak: tutor-only по контракту §22 — student endpoint
+    // (handleGetResult в mock-exam-student-api) НЕ селектит это поле.
+    ai_part1_ocr_json: attempt.ai_part1_ocr_json ?? null,
   });
 }
 
@@ -1248,6 +1263,56 @@ async function handleApproveAll(
       "AI не оценил некоторые задачи — выставь балл вручную перед подтверждением",
       { missing_kim_numbers: blockedKims },
     );
+  }
+
+  // Phase 6 review-fix #6 (2026-05-15): для blank-mode attempts требуем чтобы
+  // все Часть 1 KIM имели `earned_score`. Иначе silent 0 — если OCR не
+  // сработал или tutor не открыл `Part1BlankReviewPanel`, ученик получает
+  // approved attempt с total_part1_score=0 без warning. Form mode: Часть 1
+  // checked deterministically на submit, gate не нужен.
+  if (attempt.answer_method === "blank") {
+    const { data: variantPart1Tasks, error: part1VariantErr } = await db
+      .from("mock_exam_variant_tasks")
+      .select("kim_number")
+      .eq("variant_id", assignment.variant_id as string)
+      .eq("part", 1);
+    if (part1VariantErr || !variantPart1Tasks) {
+      return jsonError(cors, 500, "DB_ERROR", "Failed to load variant Part 1 tasks");
+    }
+    const expectedPart1Kims = variantPart1Tasks.map((t) => t.kim_number as number);
+
+    const { data: part1Rows, error: part1Err } = await db
+      .from("mock_exam_attempt_part1_answers")
+      .select("kim_number, earned_score")
+      .eq("attempt_id", attemptId);
+    if (part1Err) {
+      return jsonError(cors, 500, "DB_ERROR", "Failed to load Part 1 answers");
+    }
+    const part1ScoreByKim = new Map<number, number | null>();
+    for (const row of part1Rows ?? []) {
+      part1ScoreByKim.set(
+        row.kim_number as number,
+        row.earned_score as number | null,
+      );
+    }
+    const missingPart1Kims: number[] = [];
+    for (const kim of expectedPart1Kims) {
+      const score = part1ScoreByKim.get(kim);
+      // `null` = row отсутствует ИЛИ earned_score не выставлен → требует tutor
+      // attention (`0` валиден — tutor явно проставил «не ответил»).
+      if (score === undefined || score === null) {
+        missingPart1Kims.push(kim);
+      }
+    }
+    if (missingPart1Kims.length > 0) {
+      return jsonError(
+        cors,
+        400,
+        "INCOMPLETE_PART1",
+        "Не все задачи Часть 1 проверены. Открой панель «Часть 1 на бланке», проверь AI-распознавание и выставь баллы.",
+        { missing_kim_numbers: missingPart1Kims },
+      );
+    }
   }
 
   // Auto-finalize Часть 2 rows: для каждой задачи где tutor не выставил
@@ -1587,12 +1652,15 @@ async function handleAssignPart2Photos(
 
   // Upsert каждой changed kim: merge assigned_photo_indices в существующий
   // ai_draft_json (или создать row с минимальным draft если её ещё нет).
+  //
+  // Phase 6 review-fix #4: если assignment РЕАЛЬНО изменился И row не
+  // tutor_approved/tutor_modified → инвалидируем `suggested_score=null` +
+  // `confidence='low'` + добавляем flag `awaiting_regrade`. Это блокирует
+  // `/approve-all` от silent отправки старого AI score: после смены фото
+  // tutor ДОЛЖЕН либо нажать «Перепроверить AI», либо вручную «Изменить балл».
   const upserts: Array<Record<string, unknown>> = [];
   for (const [kim, indices] of cleanAssignments.entries()) {
     const existing = solutionsByKim.get(kim);
-    // Tutor preservation: для tutor_approved/tutor_modified rows — assignment
-    // меняем (UI хочет это), но AI re-grade на этом kim не запустится в
-    // /regrade-part2 (там тоже preservation check).
     const baseDraft = (existing?.ai_draft_json as Record<string, unknown> | null) ?? {
       suggested_score: null,
       confidence: "low",
@@ -1600,10 +1668,44 @@ async function handleAssignPart2Photos(
       comment_for_tutor: "Назначено tutor'ом — AI ещё не пересчитал баллы.",
       flags: ["awaiting_regrade"],
     };
-    const updatedDraft = {
-      ...baseDraft,
-      assigned_photo_indices: indices,
-    };
+
+    // Detect: assignment изменился?
+    const prevIndices = Array.isArray(
+      (baseDraft as { assigned_photo_indices?: unknown }).assigned_photo_indices,
+    )
+      ? ((baseDraft as { assigned_photo_indices?: number[] }).assigned_photo_indices ?? [])
+      : [];
+    const assignmentChanged = !arraysEqualAsSets(prevIndices, indices);
+
+    // Tutor preservation: tutor_approved/tutor_modified rows — assignment
+    // меняем (UI хочет это), но `suggested_score` НЕ инвалидируем (tutor сам
+    // явно зафиксировал балл, AI re-grade не запустится — см. mock-exam-grade
+    // conditional UPDATE).
+    const preserveTutorScore =
+      existing?.status === "tutor_approved" || existing?.status === "tutor_modified";
+
+    let updatedDraft: Record<string, unknown>;
+    if (assignmentChanged && !preserveTutorScore) {
+      const existingFlags = Array.isArray((baseDraft as { flags?: unknown }).flags)
+        ? ((baseDraft as { flags?: unknown[] }).flags as unknown[]).filter(
+          (f): f is string => typeof f === "string" && f !== "awaiting_regrade",
+        )
+        : [];
+      updatedDraft = {
+        ...baseDraft,
+        assigned_photo_indices: indices,
+        suggested_score: null,
+        confidence: "low",
+        flags: [...existingFlags, "awaiting_regrade"].slice(0, 6), // cap as per frozen contract
+      };
+    } else {
+      // No change OR tutor-locked row — keep existing score, just update indices.
+      updatedDraft = {
+        ...baseDraft,
+        assigned_photo_indices: indices,
+      };
+    }
+
     upserts.push({
       attempt_id: attemptId,
       kim_number: kim,

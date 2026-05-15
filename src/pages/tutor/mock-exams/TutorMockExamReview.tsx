@@ -907,6 +907,12 @@ function BulkPhotosAssignmentGallery({
 
   const regradeMutation = useMutation({
     mutationFn: async () => {
+      // Phase 6 review-fix P2 #2: flush pending debounced save перед regrade.
+      // Иначе 500ms timer ещё не выстрелил → AI пересчитывает по stale
+      // assignment, tutor's правка теряется.
+      if (dirty) {
+        await saveMutation.mutateAsync(assignments);
+      }
       return await regradeMockExamPart2(attemptId);
     },
     onSuccess: () => {
@@ -1000,7 +1006,7 @@ function BulkPhotosAssignmentGallery({
                     onValueChange={(v) => handleChange(idx, v)}
                     disabled={isReadOnly}
                   >
-                    <SelectTrigger className="h-9 text-xs">
+                    <SelectTrigger className="min-h-[44px] text-base touch-manipulation">
                       <SelectValue placeholder="К задаче..." />
                     </SelectTrigger>
                     <SelectContent>

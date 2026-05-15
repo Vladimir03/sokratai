@@ -893,6 +893,58 @@ async function runPart1OCR(
 //  - null/"" → []
 //  - "storage://..." (single) → [ref]
 //  - JSON array of refs → string[]
+/**
+ * Phase 6 (2026-05-15) review-fix #3: reuse tutor-corrected photo assignments
+ * from persisted `ai_draft_json.assigned_photo_indices` instead of re-running
+ * AI Pass 1. Returns null if NO row has persisted assignment (first-time
+ * auto-grade — AI Pass 1 should run). Returns full BulkAssignmentResult if
+ * at least one kim has persisted indices (tutor has corrected).
+ *
+ * Validation: indices clamped to [0, totalPhotos). All photos not assigned
+ * to any kim → `unassigned` bucket.
+ */
+function buildAssignmentFromPersisted(
+  solutionsByKim: Map<
+    number,
+    SolutionRow & { status?: string; ai_draft_json?: unknown; tutor_score?: number | null }
+  >,
+  allKimNumbers: number[],
+  totalPhotos: number,
+): BulkAssignmentResult | null {
+  let anyPersisted = false;
+  const result: BulkAssignmentResult = {};
+  const usedIndices = new Set<number>();
+
+  for (const kim of allKimNumbers) {
+    const sol = solutionsByKim.get(kim);
+    const draft = sol?.ai_draft_json;
+    if (draft && typeof draft === "object" && "assigned_photo_indices" in draft) {
+      const indices = (draft as { assigned_photo_indices?: unknown }).assigned_photo_indices;
+      if (Array.isArray(indices)) {
+        const cleaned = indices
+          .filter((x): x is number => typeof x === "number" && Number.isInteger(x))
+          .filter((idx) => idx >= 0 && idx < totalPhotos);
+        result[kim] = cleaned;
+        cleaned.forEach((idx) => usedIndices.add(idx));
+        if (cleaned.length > 0) anyPersisted = true;
+        continue;
+      }
+    }
+    result[kim] = [];
+  }
+
+  if (!anyPersisted) return null;
+
+  // Photos not assigned to any kim → unassigned bucket.
+  const unassigned: number[] = [];
+  for (let i = 0; i < totalPhotos; i++) {
+    if (!usedIndices.has(i)) unassigned.push(i);
+  }
+  result.unassigned = unassigned;
+
+  return result;
+}
+
 function parsePhotoUrls(value: string | null): string[] {
   if (!value || typeof value !== "string") return [];
   const trimmed = value.trim();
@@ -967,6 +1019,8 @@ interface AttemptRow {
   part1_blank_photo_url?: string | null;
   part2_bulk_photo_urls?: string | null; // dual-format (single ref OR JSON array)
   ai_part1_ocr_json?: Part1OCRResult | null;
+  // Phase 6 review-fix #1: used для stale-lock detection в CAS claim.
+  updated_at?: string | null;
 }
 
 interface AssignmentRow {
@@ -989,11 +1043,13 @@ async function handleGrade(
 
   // Load attempt + assignment. Phase 6 fields: answer_method, blank/bulk photo URLs,
   // ai_part1_ocr_json (для idempotent reruns — не запускать OCR если уже есть).
+  // updated_at — для stale-lock detection в Phase 6 review-fix #1 CAS guard.
   const { data: attempt, error: attemptErr } = await db
     .from("mock_exam_attempts")
     .select(
       "id, assignment_id, status, student_id, anonymous_id, " +
-        "answer_method, part1_blank_photo_url, part2_bulk_photo_urls, ai_part1_ocr_json",
+        "answer_method, part1_blank_photo_url, part2_bulk_photo_urls, " +
+        "ai_part1_ocr_json, updated_at",
     )
     .eq("id", attemptId)
     .maybeSingle();
@@ -1067,21 +1123,90 @@ async function handleGrade(
     );
   }
 
-  // Mark as ai_checking (best-effort idempotency — if already ai_checking,
-  // this is a no-op write; awaiting_review status means re-run is allowed
-  // without resetting tutor approvals already in place).
+  // Phase 6 review-fix #1 (2026-05-15): atomic claim для concurrent runner
+  // protection. CAS guards теперь работают и для status='ai_checking' (раньше
+  // только для 'submitted'). Two cases:
+  //   - status='submitted' → claim через CAS на submitted, проставить ai_checking.
+  //   - status='ai_checking' → возможно другой runner работает. Если
+  //     attempt.updated_at < 120s (typical grade run 30-90s) → 202 retry-later.
+  //     Иначе (stale lock от crashed runner) → принять и продолжить.
+  //   - status='awaiting_review' → re-grade allowed by spec (idempotent),
+  //     не требует claim (status уже terminal по AI).
+  const STALE_LOCK_AGE_MS = 120_000;
   if (attemptRow.status === "submitted") {
-    const { error: stateErr } = await db
+    const { data: claimed, error: stateErr } = await db
       .from("mock_exam_attempts")
-      .update({ status: "ai_checking" })
+      .update({ status: "ai_checking", updated_at: new Date().toISOString() })
       .eq("id", attemptId)
-      .eq("status", "submitted"); // CAS guard
+      .eq("status", "submitted") // CAS guard
+      .select("id");
     if (stateErr) {
       console.warn("mock_exam_grade_state_transition_failed", {
         attempt_id: attemptId,
         error: stateErr.message,
       });
-      // Not fatal — proceed; another runner may have flipped it concurrently.
+    } else if (!claimed || claimed.length === 0) {
+      // Lost the race — другой runner забрал claim. Refresh status, abort
+      // если не stale.
+      const { data: fresh } = await db
+        .from("mock_exam_attempts")
+        .select("status, updated_at")
+        .eq("id", attemptId)
+        .maybeSingle();
+      if (fresh && fresh.status === "ai_checking") {
+        const ageMs = fresh.updated_at
+          ? Date.now() - new Date(fresh.updated_at as string).getTime()
+          : Infinity;
+        if (ageMs < STALE_LOCK_AGE_MS) {
+          console.info(JSON.stringify({
+            event: "mock_exam_grade_already_running",
+            attempt_id: attemptId,
+            other_runner_age_ms: ageMs,
+          }));
+          return jsonError(
+            cors,
+            202,
+            "ALREADY_GRADING",
+            "Another grader is already processing this attempt — retry shortly",
+          );
+        }
+        // Stale lock — proceed (existing runner crashed/timed out).
+      }
+    }
+  } else if (attemptRow.status === "ai_checking") {
+    // Attempt'а уже в ai_checking — может быть legitimate retry (например
+    // /regrade-part2 service-role call) ИЛИ concurrent runner. Detect через
+    // updated_at age.
+    const ageMs = attemptRow.updated_at
+      ? Date.now() - new Date(attemptRow.updated_at as string).getTime()
+      : Infinity;
+    if (ageMs < STALE_LOCK_AGE_MS && auth.triggered_by !== "service_role") {
+      // Concurrent runner (skip stale check для service_role — explicit
+      // re-grade always allowed).
+      console.info(JSON.stringify({
+        event: "mock_exam_grade_already_running",
+        attempt_id: attemptId,
+        lock_age_ms: ageMs,
+        triggered_by: auth.triggered_by,
+      }));
+      return jsonError(
+        cors,
+        202,
+        "ALREADY_GRADING",
+        "Another grader is already processing this attempt — retry shortly",
+      );
+    }
+    // Claim stale lock (или service-role bypass) — обновить timestamp чтобы
+    // другие runner'ы видели нас как live.
+    const { error: refreshErr } = await db
+      .from("mock_exam_attempts")
+      .update({ updated_at: new Date().toISOString() })
+      .eq("id", attemptId);
+    if (refreshErr) {
+      console.warn("mock_exam_grade_claim_refresh_failed", {
+        attempt_id: attemptId,
+        error: refreshErr.message,
+      });
     }
   }
 
@@ -1101,15 +1226,23 @@ async function handleGrade(
   }
 
   // Fetch existing part2 solutions to know which photos student uploaded.
+  // Phase 6 (2026-05-15) review-fix #3 + #2: extended SELECT с ai_draft_json
+  // + tutor_score чтобы regrade мог reuse persisted assignments И conditional
+  // skip tutor-edited rows.
   const { data: solutions, error: solutionsErr } = await db
     .from("mock_exam_attempt_part2_solutions")
-    .select("kim_number, photo_url, status")
+    .select("kim_number, photo_url, status, ai_draft_json, tutor_score")
     .eq("attempt_id", attemptId);
   if (solutionsErr) {
     return jsonError(cors, 500, "DB_ERROR", "Failed to load part2 solutions");
   }
-  const solutionsByKim = new Map<number, SolutionRow & { status?: string }>();
-  for (const s of (solutions ?? []) as Array<SolutionRow & { status?: string }>) {
+  const solutionsByKim = new Map<
+    number,
+    SolutionRow & { status?: string; ai_draft_json?: unknown; tutor_score?: number | null }
+  >();
+  for (const s of (solutions ?? []) as Array<
+    SolutionRow & { status?: string; ai_draft_json?: unknown; tutor_score?: number | null }
+  >) {
     solutionsByKim.set(s.kim_number, s);
   }
 
@@ -1142,41 +1275,63 @@ async function handleGrade(
         }));
         // Fall back: per-kim path с photo_missing для каждой задачи.
       } else {
-        const tasksMeta: BulkAssignmentTaskMeta[] = allKimNumbers.map((kim) => {
-          const task = part2TasksByKim.get(kim);
-          return {
-            kim_number: kim,
-            max_score: task?.max_score ?? 0,
-            task_text_preview: task?.task_text ?? "",
-          };
-        });
-        const assignMessages = buildBulkAssignmentPrompt(tasksMeta, inlinedBulkPhotos);
-        try {
-          const parsedAssign = await callLovableJson(assignMessages, "mock_exam_bulk_assign");
-          bulkAssignment = sanitizeBulkAssignmentResult(
-            parsedAssign,
-            inlinedBulkPhotos.length,
-            allKimNumbers,
-          );
+        // Phase 6 review-fix #3: check persisted assignments first. Если tutor
+        // вручную привязал фото к задачам через `/assign-part2-photos` —
+        // используем те indices, **не запускаем Pass 1 заново**. Иначе AI
+        // перезатрёт ручную правку tutor'а на каждом regrade.
+        const persistedAssignment = buildAssignmentFromPersisted(
+          solutionsByKim,
+          allKimNumbers,
+          inlinedBulkPhotos.length,
+        );
+        if (persistedAssignment) {
+          bulkAssignment = persistedAssignment;
           console.info(JSON.stringify({
-            event: "mock_exam_grade_bulk_assigned",
+            event: "mock_exam_grade_bulk_reused_persisted",
             attempt_id: attemptId,
             bulk_photo_count: inlinedBulkPhotos.length,
             assignment: Object.fromEntries(
-              Object.entries(bulkAssignment).map(([k, v]) => [k, v.length]),
+              Object.entries(bulkAssignment).map(([k, v]) => [k, (v as number[]).length]),
             ),
           }));
-        } catch (err) {
-          console.warn(JSON.stringify({
-            event: "mock_exam_grade_bulk_assign_failed",
-            attempt_id: attemptId,
-            error: err instanceof Error ? err.message : String(err),
-          }));
-          // Bulk assign failed → fall back to empty assignment.
-          // Pass 2 видит photo_missing для всех; tutor вручную через select dropdown
-          // + «Перепроверить AI» trigger.
-          bulkAssignment = { unassigned: bulkPhotoRefs.map((_, i) => i) };
-          for (const kim of allKimNumbers) bulkAssignment[kim] = [];
+        } else {
+          // Fresh Pass 1 — no tutor manual assignments yet.
+          const tasksMeta: BulkAssignmentTaskMeta[] = allKimNumbers.map((kim) => {
+            const task = part2TasksByKim.get(kim);
+            return {
+              kim_number: kim,
+              max_score: task?.max_score ?? 0,
+              task_text_preview: task?.task_text ?? "",
+            };
+          });
+          const assignMessages = buildBulkAssignmentPrompt(tasksMeta, inlinedBulkPhotos);
+          try {
+            const parsedAssign = await callLovableJson(assignMessages, "mock_exam_bulk_assign");
+            bulkAssignment = sanitizeBulkAssignmentResult(
+              parsedAssign,
+              inlinedBulkPhotos.length,
+              allKimNumbers,
+            );
+            console.info(JSON.stringify({
+              event: "mock_exam_grade_bulk_assigned",
+              attempt_id: attemptId,
+              bulk_photo_count: inlinedBulkPhotos.length,
+              assignment: Object.fromEntries(
+                Object.entries(bulkAssignment).map(([k, v]) => [k, v.length]),
+              ),
+            }));
+          } catch (err) {
+            console.warn(JSON.stringify({
+              event: "mock_exam_grade_bulk_assign_failed",
+              attempt_id: attemptId,
+              error: err instanceof Error ? err.message : String(err),
+            }));
+            // Bulk assign failed → fall back to empty assignment.
+            // Pass 2 видит photo_missing для всех; tutor вручную через select dropdown
+            // + «Перепроверить AI» trigger.
+            bulkAssignment = { unassigned: bulkPhotoRefs.map((_, i) => i) };
+            for (const kim of allKimNumbers) bulkAssignment[kim] = [];
+          }
         }
       }
     } catch (err) {
@@ -1271,36 +1426,99 @@ async function handleGrade(
     }));
   }
 
-  // Persist drafts. Upsert keeps tutor_score / tutor_comment intact when
-  // re-running on awaiting_review (we never overwrite tutor-edited rows).
-  // Status logic: if existing status is tutor_approved or tutor_modified,
-  // leave it alone — write only ai_draft_json.
+  // Persist drafts. Phase 6 review-fix #2: write-time conditional update
+  // против stale-snapshot race (tutor approve может случиться во время AI call).
+  // Сначала пытаемся UPDATE с WHERE NOT IN tutor states — если 0 rows
+  // affected, значит ИЛИ row нет, ИЛИ tutor уже approved между snapshot и
+  // сейчас. В первом случае делаем INSERT с awaiting_review status. Во втором
+  // делаем narrow UPDATE только `ai_draft_json` (status не трогаем).
+  //
+  // photo_url is owned by student submit handler — никогда не overwrite here.
   const upsertResults = await Promise.all(
     validOutcomes.map(async (outcome) => {
-      const existing = solutionsByKim.get(outcome.kim_number);
-      const preserveTutorStatus =
-        existing?.status === "tutor_approved" || existing?.status === "tutor_modified";
-      const updatePayload: Record<string, unknown> = {
-        attempt_id: attemptId,
-        kim_number: outcome.kim_number,
-        ai_draft_json: outcome.draft,
-        updated_at: new Date().toISOString(),
-      };
-      if (!preserveTutorStatus) {
-        updatePayload.status = "awaiting_review";
-      }
-      // photo_url is owned by student submit handler — never overwrite from here.
-      const { error } = await db
+      const updatedAt = new Date().toISOString();
+      // Attempt 1: full UPDATE (sets status='awaiting_review') guarded by
+      // NOT IN tutor states. PostgREST не возвращает row count в стандартном
+      // ответе без `prefer: count=exact`, поэтому используем .select() для
+      // detection.
+      const { data: fullUpdated, error: fullErr } = await db
         .from("mock_exam_attempt_part2_solutions")
-        .upsert(updatePayload, { onConflict: "attempt_id,kim_number" });
-      if (error) {
-        console.error("mock_exam_grade_upsert_failed", {
+        .update({
+          ai_draft_json: outcome.draft,
+          status: "awaiting_review",
+          updated_at: updatedAt,
+        })
+        .eq("attempt_id", attemptId)
+        .eq("kim_number", outcome.kim_number)
+        .not("status", "in", "(tutor_approved,tutor_modified)")
+        .select("kim_number");
+      if (fullErr) {
+        console.error("mock_exam_grade_full_update_failed", {
           attempt_id: attemptId,
           kim_number: outcome.kim_number,
-          error: error.message,
+          error: fullErr.message,
         });
         return { kim_number: outcome.kim_number, ok: false };
       }
+      if (fullUpdated && fullUpdated.length > 0) {
+        return { kim_number: outcome.kim_number, ok: true };
+      }
+
+      // 0 rows affected — либо row отсутствует, либо tutor уже approved
+      // между snapshot и сейчас. Detect через прямой SELECT (cheap).
+      const { data: existingRow } = await db
+        .from("mock_exam_attempt_part2_solutions")
+        .select("status")
+        .eq("attempt_id", attemptId)
+        .eq("kim_number", outcome.kim_number)
+        .maybeSingle();
+
+      if (!existingRow) {
+        // Row missing → INSERT.
+        const { error: insertErr } = await db
+          .from("mock_exam_attempt_part2_solutions")
+          .insert({
+            attempt_id: attemptId,
+            kim_number: outcome.kim_number,
+            ai_draft_json: outcome.draft,
+            status: "awaiting_review",
+            updated_at: updatedAt,
+          });
+        if (insertErr) {
+          console.error("mock_exam_grade_insert_failed", {
+            attempt_id: attemptId,
+            kim_number: outcome.kim_number,
+            error: insertErr.message,
+          });
+          return { kim_number: outcome.kim_number, ok: false };
+        }
+        return { kim_number: outcome.kim_number, ok: true };
+      }
+
+      // Row exists и tutor-approved/modified → narrow UPDATE только draft,
+      // status не трогаем (tutor preservation invariant).
+      const { error: narrowErr } = await db
+        .from("mock_exam_attempt_part2_solutions")
+        .update({
+          ai_draft_json: outcome.draft,
+          updated_at: updatedAt,
+        })
+        .eq("attempt_id", attemptId)
+        .eq("kim_number", outcome.kim_number);
+      if (narrowErr) {
+        console.error("mock_exam_grade_narrow_update_failed", {
+          attempt_id: attemptId,
+          kim_number: outcome.kim_number,
+          error: narrowErr.message,
+        });
+        return { kim_number: outcome.kim_number, ok: false };
+      }
+      console.info(JSON.stringify({
+        event: "mock_exam_grade_preserved_tutor_status",
+        attempt_id: attemptId,
+        kim_number: outcome.kim_number,
+        existing_status: existingRow.status,
+      }));
       return { kim_number: outcome.kim_number, ok: true };
     }),
   );

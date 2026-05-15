@@ -43,6 +43,7 @@ import {
   type StudentMockExamAssignmentView,
   type StudentMockExamVariantTask,
 } from '@/lib/studentMockExamApi';
+import { compressMockExamPhoto } from '@/lib/mockExamPhotoCompress';
 import { cn } from '@/lib/utils';
 import { useMockExamAutoSave } from '@/components/student/useMockExamAutoSave';
 import type { MockExamAnswerMethod, MockExamCheckMode, MockExamMode } from '@/types/mockExam';
@@ -922,7 +923,10 @@ function StudentMockExamWorkspace({ data }: { data: StudentMockExamAssignmentVie
       const objectUrl = registerObjectUrl(file);
       setBlankPhoto({ url: null, objectUrl, file, status: 'uploading', error: null });
       try {
-        const result = await uploadMockExamBlankPhoto(data.attempt.id, file);
+        // Phase 6 review-fix P2 #1: client-side compress before upload.
+        // Server inline cap = 5MB → real phone photos (3-8MB) terять при inline.
+        const compressed = await compressMockExamPhoto(file);
+        const result = await uploadMockExamBlankPhoto(data.attempt.id, compressed);
         setBlankPhoto({
           url: result.signed_url,
           objectUrl: result.signed_url ? null : objectUrl,
@@ -965,7 +969,12 @@ function StudentMockExamWorkspace({ data }: { data: StudentMockExamAssignmentVie
       setBulkUploadStatus('uploading');
       setBulkUploadError(null);
       try {
-        const result = await uploadMockExamPart2BulkPhoto(data.attempt.id, file);
+        // Phase 6 review-fix P2 #1: client-side compress before upload.
+        // Real phone photo 3-8MB → server inline cap 5MB → AI Pass 1
+        // assignment пропускает несжатые фото из пакета. Compress сохраняет
+        // их в payload.
+        const compressed = await compressMockExamPhoto(file);
+        const result = await uploadMockExamPart2BulkPhoto(data.attempt.id, compressed);
         if (result.signed_url) {
           setPart2BulkPhotos((prev) => [...prev, result.signed_url as string]);
         }

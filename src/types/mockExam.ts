@@ -84,7 +84,11 @@ export interface MockExamVariantTask {
 // ─── AI draft (per Часть 2 task) ────────────────────────────────────────────
 
 export interface MockExamPart2Draft {
-  suggested_score: number;
+  // Phase 6 review-fix P2 #5 (2026-05-15): backend frozen contract допускает
+  // `number | null` (null когда AI fails / photo_missing / awaiting_regrade
+  // после смены photo assignment). Wire-level alignment с backend
+  // `MockExamPart2Draft` в `supabase/functions/_shared/mock-exam-prompts.ts`.
+  suggested_score: number | null;
   confidence: MockExamConfidence;
   elements_check: {
     I: boolean;

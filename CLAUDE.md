@@ -1323,7 +1323,31 @@ Phase 6 закрывает основной gap, оставшийся после
 - Bulk assignment: фото с 2 задачами → AI assigns to multiple kims (acceptable; per-kim Pass 2 видит то же фото). Фото-условие → assigned to `unassigned`. Размытое фото → low confidence. AI returns invalid JSON → fallback all to `unassigned`, tutor вручную через dropdown.
 - Часть 1 OCR: пустая клетка → `value: null, confidence: 'high'`, checker возвращает 0. Перечёркнутый ответ + другой → AI выбирает последний написанное, confidence='medium'. Запятая vs точка → нормализация через existing `normalizeNumber`. Полная неудача AI (вся фото не читается) → `ai_part1_ocr_json` сохранён с все confidence='low', tutor вручную правит.
 
-**Spec link:** `~/.claude/plans/1-functional-meteor.md` Phase 6 section.
+**Round 2 fixes (ChatGPT-5.5 review, 2026-05-15):**
+
+После initial Phase 6 коммита `141a5d0` второй проход review поднял 6 P1 findings + 4 P2. Все исправлены в follow-up:
+
+1. **`/regrade-part2` теряет ручные dropdown assignments** (главный bug): `handleGrade` теперь использует helper `buildAssignmentFromPersisted(solutionsByKim, allKimNumbers, totalPhotos)` — если хоть одна row имеет non-null `assigned_photo_indices`, **Pass 1 skipped**, используется persisted assignment. Tutor's manual photo→task переmapping no longer overwritten. Fresh attempt (no tutor edits yet) → AI Pass 1 runs as before.
+2. **Stale snapshot tutor preservation race**: upsert заменён на **write-time conditional UPDATE** — `UPDATE ... WHERE NOT IN ('tutor_approved','tutor_modified')`. Если 0 rows affected → SELECT current status и либо INSERT (row missing), либо narrow UPDATE только `ai_draft_json` (tutor approved во время AI call). Telemetry `mock_exam_grade_preserved_tutor_status` при detection.
+3. **`/assign-part2-photos` не инвалидирует `suggested_score`**: при detect actual assignment change (`arraysEqualAsSets(prev, next)`) И row не tutor-locked → null'им `suggested_score`, `confidence='low'`, добавляем flag `awaiting_regrade`. Это блокирует `/approve-all` от silent отправки stale AI score.
+4. **`handleGetAttempt` теперь возвращает `ai_part1_ocr_json`**: одна строка в response. Без неё `Part1BlankReviewPanel` никогда не показывал OCR результат — feature was не визуально живой.
+5. **Blank mode silent 0**: добавлен `INCOMPLETE_PART1` guard в `/approve-all`. Для `answer_method='blank'` проверяем что все Часть 1 KIM имеют `earned_score` (null = OCR не сработал ИЛИ tutor не открыл панель). Mirror frontend `blockedKims` UX.
+6. **CAS guard на `ai_checking`**: atomic claim теперь работает для **обоих** статусов. `submitted` → CAS на equality. `ai_checking` → check `updated_at` age vs `STALE_LOCK_AGE_MS = 120_000` (typical grade run 30-90s). Свежий lock + non-service-role → 202 `ALREADY_GRADING`. Stale lock OR service-role bypass → claim refresh и proceed.
+
+**P2 (производительность + UX):**
+
+7. **Client photo compression** (`src/lib/mockExamPhotoCompress.ts`): новый helper. Перед upload — resize до max long-side 2048px + JPEG quality ladder 0.9→0.5 → ≤ 4 MB. Mirror `AvatarUpload::compressToAvatar` pattern. Реальные phone photos (3-8 MB) теперь не попадают в server inline-cap rejection.
+8. **`await save` перед regrade**: `regradeMutation` теперь делает `await saveMutation.mutateAsync(assignments)` если `dirty`. Защита от 500ms debounce race — tutor может нажать «Перепроверить AI» сразу после dropdown change, и AI не пересчитает по stale persisted state.
+9. **Radix Select iOS sizing**: `h-9 text-xs` → `min-h-[44px] text-base touch-manipulation`. CLAUDE.md `.claude/rules/80-cross-browser.md` Safari auto-zoom + touch target invariants.
+10. **`MockExamPart2Draft.suggested_score` type drift**: `number` → `number | null`. Backend frozen contract уже допускал null (awaiting_regrade / photo_missing). Wire-level alignment.
+
+**P3 deferred с явным rationale** (rolled into pre-existing risk gates):
+- RLS table-level на `ai_part1_ocr_json` — mirror existing `ai_draft_json` pattern (CLAUDE.md §10 #5 deferred до post-pilot scale: >50 attempts ИЛИ 5-й tutor).
+- `parseInt("21abc")` → 21 в sanitizer — low risk (Gemini не возвращает trailing chars), nice-to-have fix.
+
+**P2 #3 multi-kim assignment UX** — отложен (требует UX decision Vladimir'а: multi-select vs per-photo checklist). Backend уже поддерживает same index в multiple kims.
+
+**Spec link:** `~/.claude/plans/1-functional-meteor.md` Phase 6 section. Round 2 review (ChatGPT-5.5): commit `141a5d0` (initial) + follow-up commit (round 2 fixes).
 
 ## Известные хрупкие области
 
