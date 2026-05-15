@@ -128,6 +128,46 @@ export async function approveMockExamAll(
 }
 
 /**
+ * Phase 6 (2026-05-15) — tutor вручную привязывает фото из bulk-pack
+ * к Часть 2 задачам через select dropdown в TutorMockExamReview.
+ * Body: `{ assignments: { kim: [photo_indices], ... } }`. Backend
+ * persistит в `ai_draft_json.assigned_photo_indices` per kim.
+ *
+ * После изменений tutor нажимает «Перепроверить AI» (regradeMockExamPart2)
+ * чтобы AI пересчитал баллы с новой привязкой.
+ */
+export async function assignMockExamPart2Photos(
+  attemptId: string,
+  payload: { assignments: Record<number, number[]> },
+): Promise<{ attempt_id: string; updated_kim_count: number }> {
+  return requestTutorMockExamApi(
+    `/attempts/${encodeURIComponent(attemptId)}/assign-part2-photos`,
+    { method: 'POST', body: JSON.stringify(payload) },
+  );
+}
+
+/**
+ * Phase 6 (2026-05-15) — tutor click «Перепроверить AI». Backend
+ * (mock-exam-tutor-api) делает internal service-role call к
+ * `mock-exam-grade::handleGrade` который запускает Pass 1 + Pass 2.
+ * Tutor preservation invariant: rows со status='tutor_approved' или
+ * 'tutor_modified' не перезаписываются.
+ */
+export async function regradeMockExamPart2(
+  attemptId: string,
+): Promise<{
+  attempt_id: string;
+  regraded: boolean;
+  latency_ms: number;
+  grade_response: unknown;
+}> {
+  return requestTutorMockExamApi(
+    `/attempts/${encodeURIComponent(attemptId)}/regrade-part2`,
+    { method: 'POST' },
+  );
+}
+
+/**
  * TASK-11 — tutor вводит earned_score для одного KIM Часть 1 (blank mode flow).
  * Auto-save per row. Aggregate через `finalizeMockExamPart1`.
  */

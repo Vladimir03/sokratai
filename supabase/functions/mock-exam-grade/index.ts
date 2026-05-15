@@ -37,13 +37,27 @@ import {
   SUPABASE_PROXY_URL,
 } from "../_shared/proxy-url.ts";
 import {
+  buildBulkAssignmentPrompt,
   buildMockExamPart2Prompt,
   buildFallbackDraft,
+  sanitizeBulkAssignmentResult,
   sanitizeMockExamPart2Draft,
+  type BulkAssignmentResult,
+  type BulkAssignmentTaskMeta,
   type LovableMessage,
   type MockExamFallbackReason,
   type MockExamPart2Draft,
 } from "../_shared/mock-exam-prompts.ts";
+import {
+  buildPart1BlankOCRPrompt,
+  sanitizePart1OCRResult,
+  type Part1OCRResult,
+  type Part1OCRTaskMeta,
+} from "../_shared/mock-exam-part1-ocr.ts";
+import {
+  checkPart1,
+  type CheckMode,
+} from "../_shared/mock-exam-part1-checker.ts";
 import {
   sendPushNotification,
   type PushPayload,
@@ -610,6 +624,271 @@ async function gradePart2Task(
   }
 }
 
+/**
+ * Phase 6 bulk grading entry — single Часть 2 задача с pre-resolved
+ * assigned photos из bulk-pack. Передаём photo data URLs напрямую, без
+ * resolution внутри (Pass 1 уже сделал inline в parent handleGrade).
+ *
+ * `assignedPhotoIndices` — индексы из `attempt.part2_bulk_photo_urls`,
+ * сохраняются в `ai_draft_json.assigned_photo_indices` для tutor UI
+ * (chip «Фото №X из пакета» + drag-drop override через select dropdown).
+ */
+async function gradePart2TaskBulk(
+  task: VariantTaskRow,
+  attemptId: string,
+  assignedPhotoDataUrls: string[],
+  assignedPhotoIndices: number[],
+): Promise<GradeOutcome> {
+  const start = Date.now();
+  const kimNumber = task.kim_number;
+  const maxScore = task.max_score;
+
+  if (assignedPhotoDataUrls.length === 0) {
+    // AI assignment didn't link any photo (или photos failed to inline).
+    // Tutor увидит warning + manual override через select dropdown.
+    const fallback = buildFallbackDraft("no_photo", { maxScore, kimNumber });
+    return {
+      kim_number: kimNumber,
+      draft: { ...fallback, assigned_photo_indices: assignedPhotoIndices },
+      used_fallback: "no_photo",
+      latency_ms: Date.now() - start,
+    };
+  }
+
+  // Inline task images (условие) — Pass 2 нужно для multimodal context.
+  const taskImageRefs = task.task_image_url
+    ? parsePhotoUrls(task.task_image_url).slice(0, MAX_TASK_IMAGES_FOR_AI)
+    : [];
+  const taskImageDataUrls = taskImageRefs.length > 0
+    ? await inlineImageRefs(taskImageRefs, getDbForBulk())
+    : [];
+
+  const messages = buildMockExamPart2Prompt({
+    kim_number: kimNumber,
+    max_score: maxScore,
+    task_text: task.task_text ?? "",
+    correct_answer: task.correct_answer,
+    solution_text: task.solution_text,
+    task_image_data_urls: taskImageDataUrls,
+    student_photo_data_urls: assignedPhotoDataUrls.slice(0, MAX_STUDENT_PHOTOS_PER_TASK),
+    subject: "physics",
+    exam_type: "ege",
+  });
+
+  try {
+    const parsed = await callLovableJson(messages, "mock_exam_grade_bulk");
+    const draft = sanitizeMockExamPart2Draft(parsed, { maxScore, kimNumber });
+    return {
+      kim_number: kimNumber,
+      // Phase 6: persist photo assignment в ai_draft_json для tutor UI.
+      draft: { ...draft, assigned_photo_indices: assignedPhotoIndices },
+      used_fallback: null,
+      latency_ms: Date.now() - start,
+    };
+  } catch (error) {
+    const reason = classifyError(error);
+    console.warn(JSON.stringify({
+      event: "mock_exam_grade_bulk_ai_failed",
+      attempt_id: attemptId,
+      kim_number: kimNumber,
+      reason,
+      assigned_photo_count: assignedPhotoDataUrls.length,
+      error: error instanceof Error ? error.message : String(error),
+    }));
+    return {
+      kim_number: kimNumber,
+      draft: {
+        ...buildFallbackDraft(reason, { maxScore, kimNumber }),
+        assigned_photo_indices: assignedPhotoIndices,
+      },
+      used_fallback: reason,
+      latency_ms: Date.now() - start,
+    };
+  }
+}
+
+// Helper для получения db inside gradePart2TaskBulk — Deno scope иначе требует
+// taking db в каждый async helper. Используем closure через service-role
+// (read-only для task images — safe).
+let _cachedAdminDb: SupabaseClient | null = null;
+function getDbForBulk(): SupabaseClient {
+  if (!_cachedAdminDb) {
+    _cachedAdminDb = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
+      auth: { autoRefreshToken: false, persistSession: false },
+    });
+  }
+  return _cachedAdminDb;
+}
+
+/**
+ * Phase 6 (2026-05-15) — AI Часть 1 OCR pipeline.
+ *
+ * Запускается из `handleGrade` для blank-mode attempts. Single Gemini
+ * call → recognized answers per kim 1-20. Затем для каждого:
+ *  1. Run `checkPart1` (existing deterministic checker, shared module).
+ *  2. Upsert `mock_exam_attempt_part1_answers` с `student_answer +
+ *     earned_score`. **Tutor preservation**: skip rows где tutor уже
+ *     вручную выставил earned_score через `/part1-manual-score`.
+ *  3. Update `mock_exam_attempts.ai_part1_ocr_json` = full result для
+ *     tutor UI pre-fill.
+ *
+ * Errors каждого этапа логируются + не блокируют Часть 2 grading
+ * (caller использует Promise.all).
+ *
+ * @returns OCR result + total earned (для telemetry) ИЛИ null при ошибке
+ */
+async function runPart1OCR(
+  db: SupabaseClient,
+  attemptId: string,
+  blankPhotoRef: string,
+  variantId: string,
+): Promise<{ ocr: Part1OCRResult; totalEarned: number } | null> {
+  if (!blankPhotoRef || !variantId) return null;
+
+  try {
+    // Load Часть 1 variant tasks (kim 1-20).
+    const { data: part1Tasks, error: part1Err } = await db
+      .from("mock_exam_variant_tasks")
+      .select("kim_number, max_score, check_mode, correct_answer")
+      .eq("variant_id", variantId)
+      .eq("part", 1)
+      .order("kim_number", { ascending: true });
+    if (part1Err || !part1Tasks || part1Tasks.length === 0) {
+      console.warn("mock_exam_grade_part1_ocr_no_tasks", {
+        attempt_id: attemptId,
+        variant_id: variantId,
+        error: part1Err?.message,
+      });
+      return null;
+    }
+
+    // Inline blank photo. blankPhotoRef обычно single storage:// ref.
+    const refs = parsePhotoUrls(blankPhotoRef);
+    const photoDataUrls = await inlineImageRefs(refs.slice(0, 1), db);
+    if (photoDataUrls.length === 0) {
+      console.warn("mock_exam_grade_part1_ocr_inline_failed", {
+        attempt_id: attemptId,
+        blank_photo_ref: blankPhotoRef.slice(0, 80),
+      });
+      return null;
+    }
+
+    // Build prompt + call Gemini OCR.
+    const tasksMeta: Part1OCRTaskMeta[] = (part1Tasks as Array<{
+      kim_number: number;
+      max_score: number;
+      check_mode: string;
+    }>).map((t) => ({
+      kim_number: t.kim_number,
+      max_score: t.max_score,
+      check_mode: (t.check_mode as Part1OCRTaskMeta["check_mode"]) ?? "strict",
+    }));
+
+    const ocrMessages = buildPart1BlankOCRPrompt(tasksMeta, photoDataUrls[0]);
+    const parsed = await callLovableJson(ocrMessages, "mock_exam_part1_ocr");
+    const ocrResult = sanitizePart1OCRResult(parsed);
+
+    // Load existing per-kim answers — preserve manual tutor scores.
+    const { data: existingAnswers } = await db
+      .from("mock_exam_attempt_part1_answers")
+      .select("kim_number, earned_score")
+      .eq("attempt_id", attemptId);
+    const tutorScoredKims = new Set<number>();
+    for (const row of (existingAnswers ?? []) as Array<{
+      kim_number: number;
+      earned_score: number | null;
+    }>) {
+      if (row.earned_score !== null) tutorScoredKims.add(row.kim_number);
+    }
+
+    // Run checker + upsert per-kim answers (только для не-tutor-scored).
+    const tasksByKim = new Map<number, {
+      kim_number: number;
+      max_score: number;
+      check_mode: CheckMode;
+      correct_answer: string | null;
+    }>();
+    for (const t of part1Tasks as Array<{
+      kim_number: number;
+      max_score: number;
+      check_mode: string;
+      correct_answer: string | null;
+    }>) {
+      tasksByKim.set(t.kim_number, {
+        kim_number: t.kim_number,
+        max_score: t.max_score,
+        check_mode: (t.check_mode as CheckMode) ?? "strict",
+        correct_answer: t.correct_answer,
+      });
+    }
+
+    let totalEarned = 0;
+    const upserts: Array<{
+      attempt_id: string;
+      kim_number: number;
+      student_answer: string | null;
+      earned_score: number;
+      max_score: number;
+      updated_at: string;
+    }> = [];
+
+    for (let kim = 1; kim <= 20; kim++) {
+      if (tutorScoredKims.has(kim)) continue; // Preserve manual edits
+      const task = tasksByKim.get(kim);
+      if (!task) continue;
+      const cell = ocrResult[kim] ?? { value: null, confidence: "low" as const };
+      const checkResult = checkPart1(
+        task.correct_answer,
+        cell.value,
+        task.check_mode,
+        task.max_score,
+        kim,
+      );
+      totalEarned += checkResult.earned;
+      upserts.push({
+        attempt_id: attemptId,
+        kim_number: kim,
+        student_answer: cell.value,
+        earned_score: checkResult.earned,
+        max_score: task.max_score,
+        updated_at: new Date().toISOString(),
+      });
+    }
+
+    if (upserts.length > 0) {
+      const { error: upsertErr } = await db
+        .from("mock_exam_attempt_part1_answers")
+        .upsert(upserts, { onConflict: "attempt_id,kim_number" });
+      if (upsertErr) {
+        console.warn("mock_exam_grade_part1_ocr_upsert_failed", {
+          attempt_id: attemptId,
+          error: upsertErr.message,
+        });
+      }
+    }
+
+    // Update attempt with full OCR result для tutor UI pre-fill.
+    const { error: updateErr } = await db
+      .from("mock_exam_attempts")
+      .update({ ai_part1_ocr_json: ocrResult })
+      .eq("id", attemptId);
+    if (updateErr) {
+      console.warn("mock_exam_grade_part1_ocr_attempt_update_failed", {
+        attempt_id: attemptId,
+        error: updateErr.message,
+      });
+    }
+
+    return { ocr: ocrResult, totalEarned };
+  } catch (err) {
+    console.error("mock_exam_grade_part1_ocr_exception", {
+      attempt_id: attemptId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return null;
+  }
+}
+
 // Parses a photo_url field that may be:
 //  - null/"" → []
 //  - "storage://..." (single) → [ref]
@@ -683,6 +962,11 @@ interface AttemptRow {
   status: string;
   student_id: string | null;
   anonymous_id: string | null;
+  // Phase 6 (2026-05-15) — bulk path + AI Часть 1 OCR.
+  answer_method?: "blank" | "form" | null;
+  part1_blank_photo_url?: string | null;
+  part2_bulk_photo_urls?: string | null; // dual-format (single ref OR JSON array)
+  ai_part1_ocr_json?: Part1OCRResult | null;
 }
 
 interface AssignmentRow {
@@ -703,10 +987,14 @@ async function handleGrade(
     return jsonError(cors, 400, "INVALID_ID", "Invalid attempt_id");
   }
 
-  // Load attempt + assignment.
+  // Load attempt + assignment. Phase 6 fields: answer_method, blank/bulk photo URLs,
+  // ai_part1_ocr_json (для idempotent reruns — не запускать OCR если уже есть).
   const { data: attempt, error: attemptErr } = await db
     .from("mock_exam_attempts")
-    .select("id, assignment_id, status, student_id, anonymous_id")
+    .select(
+      "id, assignment_id, status, student_id, anonymous_id, " +
+        "answer_method, part1_blank_photo_url, part2_bulk_photo_urls, ai_part1_ocr_json",
+    )
     .eq("id", attemptId)
     .maybeSingle();
   if (attemptErr) {
@@ -830,17 +1118,102 @@ async function handleGrade(
   // per kim_number. photo_url stays null → fallback "no_photo".
   const allKimNumbers = Array.from(part2TasksByKim.keys()).sort((a, b) => a - b);
 
+  // Phase 6 (2026-05-15): detect bulk attempts. `part2_bulk_photo_urls` —
+  // dual-format строка (single ref ИЛИ JSON array). Если есть хотя бы 1 фото
+  // → запускаем Pass 1 (AI assignment), затем Pass 2 (per-kim grading
+  // c assigned photos). Иначе → legacy per-kim path (Egor's pilot).
+  const bulkPhotoRefs = parsePhotoUrls(attemptRow.part2_bulk_photo_urls ?? null);
+  const isBulkMode = bulkPhotoRefs.length > 0;
+
+  // Phase 6: AI assignment from Pass 1, persisted into ai_draft_json.assigned_photo_indices.
+  // Empty Map для legacy path.
+  let bulkAssignment: BulkAssignmentResult | null = null;
+  let inlinedBulkPhotos: string[] = [];
+
+  if (isBulkMode) {
+    try {
+      // Inline all bulk photos in parallel (within-attempt parallelism).
+      inlinedBulkPhotos = await inlineImageRefs(bulkPhotoRefs, db);
+      if (inlinedBulkPhotos.length === 0) {
+        console.warn(JSON.stringify({
+          event: "mock_exam_grade_bulk_inline_all_failed",
+          attempt_id: attemptId,
+          photo_ref_count: bulkPhotoRefs.length,
+        }));
+        // Fall back: per-kim path с photo_missing для каждой задачи.
+      } else {
+        const tasksMeta: BulkAssignmentTaskMeta[] = allKimNumbers.map((kim) => {
+          const task = part2TasksByKim.get(kim);
+          return {
+            kim_number: kim,
+            max_score: task?.max_score ?? 0,
+            task_text_preview: task?.task_text ?? "",
+          };
+        });
+        const assignMessages = buildBulkAssignmentPrompt(tasksMeta, inlinedBulkPhotos);
+        try {
+          const parsedAssign = await callLovableJson(assignMessages, "mock_exam_bulk_assign");
+          bulkAssignment = sanitizeBulkAssignmentResult(
+            parsedAssign,
+            inlinedBulkPhotos.length,
+            allKimNumbers,
+          );
+          console.info(JSON.stringify({
+            event: "mock_exam_grade_bulk_assigned",
+            attempt_id: attemptId,
+            bulk_photo_count: inlinedBulkPhotos.length,
+            assignment: Object.fromEntries(
+              Object.entries(bulkAssignment).map(([k, v]) => [k, v.length]),
+            ),
+          }));
+        } catch (err) {
+          console.warn(JSON.stringify({
+            event: "mock_exam_grade_bulk_assign_failed",
+            attempt_id: attemptId,
+            error: err instanceof Error ? err.message : String(err),
+          }));
+          // Bulk assign failed → fall back to empty assignment.
+          // Pass 2 видит photo_missing для всех; tutor вручную через select dropdown
+          // + «Перепроверить AI» trigger.
+          bulkAssignment = { unassigned: bulkPhotoRefs.map((_, i) => i) };
+          for (const kim of allKimNumbers) bulkAssignment[kim] = [];
+        }
+      }
+    } catch (err) {
+      console.warn(JSON.stringify({
+        event: "mock_exam_grade_bulk_pass1_exception",
+        attempt_id: attemptId,
+        error: err instanceof Error ? err.message : String(err),
+      }));
+    }
+  }
+
+  // Phase 6 (2026-05-15) — AI Часть 1 OCR для blank mode. Запускается
+  // параллельно с Часть 2 grading (Promise.all ниже). Idempotent: если
+  // ai_part1_ocr_json уже есть → skip. Tutor можно re-trigger через
+  // `/regrade-part2` endpoint (он clear'ит ocr_json перед regrade).
+  const shouldRunPart1OCR = attemptRow.answer_method === "blank"
+    && !!attemptRow.part1_blank_photo_url
+    && !attemptRow.ai_part1_ocr_json;
+  const part1OCRPromise = shouldRunPart1OCR
+    ? runPart1OCR(db, attemptId, attemptRow.part1_blank_photo_url ?? "", assignmentRow.variant_id ?? "")
+    : Promise.resolve(null);
+
   console.info(JSON.stringify({
     event: "mock_exam_grade_start",
     attempt_id: attemptId,
     triggered_by: auth.triggered_by,
     part2_task_count: allKimNumbers.length,
+    mode: isBulkMode ? "bulk" : "per_kim",
+    bulk_photo_count: isBulkMode ? bulkPhotoRefs.length : 0,
+    part1_ocr_will_run: shouldRunPart1OCR,
   }));
 
   const totalStart = Date.now();
 
-  // Process all Часть 2 tasks in parallel via allSettled — single failure
-  // doesn't bring down the batch.
+  // Process all Часть 2 tasks in parallel. Phase 6: для bulk path передаём
+  // pre-inlined assigned photos через gradePart2Task'у. Для legacy per-kim
+  // path — старый flow (resolve solution.photo_url внутри).
   const outcomes = await Promise.all(
     allKimNumbers.map(async (kim) => {
       const task = part2TasksByKim.get(kim);
@@ -850,6 +1223,20 @@ async function handleGrade(
       }
       const solution = solutionsByKim.get(kim) ?? { kim_number: kim, photo_url: null };
       try {
+        // Phase 6 — bulk path: pre-extracted assigned photo data URLs.
+        if (isBulkMode && bulkAssignment) {
+          const assignedIndices = bulkAssignment[kim] ?? [];
+          const assignedPhotos = assignedIndices
+            .filter((idx) => idx >= 0 && idx < inlinedBulkPhotos.length)
+            .map((idx) => inlinedBulkPhotos[idx]);
+          return await gradePart2TaskBulk(
+            task,
+            attemptId,
+            assignedPhotos,
+            assignedIndices,
+          );
+        }
+        // Legacy per-kim path (Egor's pilot attempts).
         return await gradePart2Task(db, task, solution, attemptId);
       } catch (err) {
         console.error("mock_exam_grade_unexpected_error", {
@@ -871,6 +1258,18 @@ async function handleGrade(
   );
 
   const validOutcomes = outcomes.filter((o): o is GradeOutcome => o !== null);
+
+  // Phase 6: await Часть 1 OCR result (runs параллельно с Часть 2 grading).
+  // Errors не блокируют Часть 2 — runPart1OCR ловит и логгирует internal.
+  const part1OCRResult = await part1OCRPromise;
+  if (part1OCRResult !== null) {
+    console.info(JSON.stringify({
+      event: "mock_exam_grade_part1_ocr_done",
+      attempt_id: attemptId,
+      cells_recognized: Object.values(part1OCRResult.ocr).filter((c) => c.value !== null).length,
+      part1_earned_total: part1OCRResult.totalEarned,
+    }));
+  }
 
   // Persist drafts. Upsert keeps tutor_score / tutor_comment intact when
   // re-running on awaiting_review (we never overwrite tutor-edited rows).

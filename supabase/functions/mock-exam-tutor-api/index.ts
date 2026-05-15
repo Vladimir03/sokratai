@@ -1192,53 +1192,101 @@ async function handleApproveAll(
   }
   const expectedKimNumbers = (variantPart2Tasks ?? []).map((t) => t.kim_number as number);
 
-  // Get current part2 solutions.
+  // Get current part2 solutions. Phase 6 (2026-05-15): добавлен ai_draft_json
+  // для relaxed validation — если tutor не выставил manual score, AI's
+  // suggested_score используется как default.
   const { data: solutions, error: solutionsErr } = await db
     .from("mock_exam_attempt_part2_solutions")
-    .select("kim_number, status, tutor_score")
+    .select("kim_number, status, tutor_score, ai_draft_json")
     .eq("attempt_id", attemptId);
   if (solutionsErr) {
     return jsonError(cors, 500, "DB_ERROR", "Failed to load part2 solutions");
   }
 
-  const solutionsByKim: Record<number, { status: string; tutor_score: number | null }> = {};
+  interface SolutionRowForApprove {
+    status: string;
+    tutor_score: number | null;
+    ai_suggested: number | null;
+  }
+  const solutionsByKim: Record<number, SolutionRowForApprove> = {};
   for (const s of solutions ?? []) {
+    const draft = s.ai_draft_json as { suggested_score?: number | null } | null;
     solutionsByKim[s.kim_number as number] = {
       status: s.status as string,
       tutor_score: s.tutor_score as number | null,
+      ai_suggested: draft?.suggested_score ?? null,
     };
   }
 
-  const missing: number[] = [];
-  const notApproved: number[] = [];
+  // Phase 6 relaxed validation (CLAUDE.md §22, 2026-05-15):
+  // Old behavior: require status='tutor_approved'|'tutor_modified' + tutor_score IS NOT NULL.
+  // New behavior: final_score = tutor_score ?? ai_draft.suggested_score. Если оба null
+  // → blocked KIM (tutor должен выставить балл вручную перед approve).
+  //
+  // Это соответствует Vladimir's UX choice (Phase 6 AskUserQuestion #4):
+  // «Блокировать approve пока не все задачи имеют балл» — force review.
+  const blockedKims: number[] = [];
+  const finalScores = new Map<number, number>();
   for (const kim of expectedKimNumbers) {
     const sol = solutionsByKim[kim];
     if (!sol) {
-      missing.push(kim);
+      blockedKims.push(kim);
       continue;
     }
-    if (sol.status !== "tutor_approved" && sol.status !== "tutor_modified") {
-      notApproved.push(kim);
+    const finalScore = sol.tutor_score ?? sol.ai_suggested;
+    if (finalScore === null) {
+      blockedKims.push(kim);
       continue;
     }
-    if (sol.tutor_score === null) {
-      notApproved.push(kim);
-    }
+    finalScores.set(kim, finalScore);
   }
-  if (missing.length > 0 || notApproved.length > 0) {
+  if (blockedKims.length > 0) {
     return jsonError(
       cors,
       400,
-      "TASKS_NOT_READY",
-      "All Часть 2 tasks must be approved before global approval",
-      { missing_kim_numbers: missing, not_approved_kim_numbers: notApproved },
+      "INCOMPLETE_PART2",
+      "AI не оценил некоторые задачи — выставь балл вручную перед подтверждением",
+      { missing_kim_numbers: blockedKims },
     );
+  }
+
+  // Auto-finalize Часть 2 rows: для каждой задачи где tutor не выставил
+  // вручную, используем AI's suggested_score как final tutor_score. Status:
+  // 'tutor_approved' (default) если ai === final, 'tutor_modified' если
+  // override (это уже произошло через explicit edit раньше — мы здесь не
+  // меняем status у уже tutor_approved/tutor_modified rows).
+  const autoFinalize: Array<{
+    attempt_id: string;
+    kim_number: number;
+    tutor_score: number;
+    status: string;
+    updated_at: string;
+  }> = [];
+  for (const [kim, score] of finalScores.entries()) {
+    const sol = solutionsByKim[kim];
+    if (sol.tutor_score !== null) continue; // Уже выставлено вручную, не трогаем
+    autoFinalize.push({
+      attempt_id: attemptId,
+      kim_number: kim,
+      tutor_score: score,
+      status: "tutor_approved", // AI default = tutor_approved (no override)
+      updated_at: new Date().toISOString(),
+    });
+  }
+  if (autoFinalize.length > 0) {
+    const { error: autoErr } = await db
+      .from("mock_exam_attempt_part2_solutions")
+      .upsert(autoFinalize, { onConflict: "attempt_id,kim_number" });
+    if (autoErr) {
+      console.error("mock_exam_approve_all_auto_finalize_failed", { error: autoErr.message });
+      return jsonError(cors, 500, "DB_ERROR", "Failed to auto-finalize tutor scores");
+    }
   }
 
   // Compute totals.
   let totalPart2 = 0;
   for (const kim of expectedKimNumbers) {
-    totalPart2 += solutionsByKim[kim].tutor_score ?? 0;
+    totalPart2 += finalScores.get(kim) ?? 0;
   }
 
   // Part 1 — already populated by deterministic checker on submit (TASK-4).
@@ -1438,6 +1486,220 @@ async function handlePart1Finalize(
     attempt_id: attemptId,
     total_part1_score: totalPart1,
   });
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Phase 6 (2026-05-15) — POST /attempts/:id/assign-part2-photos
+// Tutor вручную привязывает фото из bulk-pack к Часть 2 задачам через
+// select dropdown в TutorMockExamReview. Body: `{ assignments: { kim: [photo_indices], ... } }`.
+// Persistится в `ai_draft_json.assigned_photo_indices` per kim row.
+// После изменений tutor нажимает «Перепроверить AI» (POST /regrade-part2)
+// чтобы AI пересчитал баллы с новой привязкой.
+// ────────────────────────────────────────────────────────────────────────────
+
+async function handleAssignPart2Photos(
+  db: SupabaseClient,
+  tutorUserId: string,
+  attemptId: string,
+  body: unknown,
+  cors: Record<string, string>,
+): Promise<Response> {
+  const ownedOrErr = await getOwnedAttemptOrThrow(db, attemptId, tutorUserId, cors);
+  if (ownedOrErr instanceof Response) return ownedOrErr;
+  const { attempt } = ownedOrErr;
+
+  if (attempt.status === "approved") {
+    return jsonError(cors, 409, "ALREADY_APPROVED", "Attempt is already approved");
+  }
+  if (attempt.status === "manually_entered") {
+    return jsonError(cors, 409, "MANUALLY_ENTERED", "Manual entries — nothing to reassign");
+  }
+
+  const b = (body && typeof body === "object") ? body as Record<string, unknown> : {};
+  const assignmentsRaw = b.assignments;
+  if (!assignmentsRaw || typeof assignmentsRaw !== "object" || Array.isArray(assignmentsRaw)) {
+    return jsonError(cors, 400, "VALIDATION", "`assignments` must be an object { kim_number: [photo_indices] }");
+  }
+
+  // Determine valid range для photo indices (= bulk photos count).
+  const bulkPhotoCount = (() => {
+    const raw = (attempt.part2_bulk_photo_urls as string | null) ?? null;
+    if (!raw) return 0;
+    const trimmed = raw.trim();
+    if (!trimmed) return 0;
+    if (trimmed.startsWith("[")) {
+      try {
+        const parsed: unknown = JSON.parse(trimmed);
+        return Array.isArray(parsed) ? parsed.length : 0;
+      } catch { /* fall through */ }
+    }
+    return 1; // single ref
+  })();
+
+  if (bulkPhotoCount === 0) {
+    return jsonError(cors, 400, "NO_BULK_PHOTOS", "Attempt has no bulk Часть 2 photos to assign");
+  }
+
+  // Validate + sanitize assignments map.
+  const cleanAssignments = new Map<number, number[]>();
+  for (const [rawKey, rawValue] of Object.entries(assignmentsRaw as Record<string, unknown>)) {
+    const kim = Number.parseInt(rawKey.trim(), 10);
+    if (!Number.isFinite(kim) || kim < 21 || kim > 26) continue;
+    if (!Array.isArray(rawValue)) continue;
+    const seen = new Set<number>();
+    const indices: number[] = [];
+    for (const item of rawValue) {
+      const idx = typeof item === "number"
+        ? Math.trunc(item)
+        : typeof item === "string"
+          ? Number.parseInt(item.trim(), 10)
+          : NaN;
+      if (!Number.isFinite(idx)) continue;
+      if (idx < 0 || idx >= bulkPhotoCount) continue;
+      if (seen.has(idx)) continue;
+      seen.add(idx);
+      indices.push(idx);
+    }
+    cleanAssignments.set(kim, indices);
+  }
+
+  if (cleanAssignments.size === 0) {
+    return jsonError(cors, 400, "VALIDATION", "No valid kim numbers in `assignments`");
+  }
+
+  // Load existing solutions для обновления ai_draft_json в-place.
+  const { data: solutions, error: solutionsErr } = await db
+    .from("mock_exam_attempt_part2_solutions")
+    .select("kim_number, ai_draft_json, status")
+    .eq("attempt_id", attemptId);
+  if (solutionsErr) {
+    return jsonError(cors, 500, "DB_ERROR", "Failed to load part2 solutions");
+  }
+
+  const solutionsByKim = new Map<number, { ai_draft_json: unknown; status: string }>();
+  for (const s of (solutions ?? []) as Array<{
+    kim_number: number;
+    ai_draft_json: unknown;
+    status: string;
+  }>) {
+    solutionsByKim.set(s.kim_number, { ai_draft_json: s.ai_draft_json, status: s.status });
+  }
+
+  // Upsert каждой changed kim: merge assigned_photo_indices в существующий
+  // ai_draft_json (или создать row с минимальным draft если её ещё нет).
+  const upserts: Array<Record<string, unknown>> = [];
+  for (const [kim, indices] of cleanAssignments.entries()) {
+    const existing = solutionsByKim.get(kim);
+    // Tutor preservation: для tutor_approved/tutor_modified rows — assignment
+    // меняем (UI хочет это), но AI re-grade на этом kim не запустится в
+    // /regrade-part2 (там тоже preservation check).
+    const baseDraft = (existing?.ai_draft_json as Record<string, unknown> | null) ?? {
+      suggested_score: null,
+      confidence: "low",
+      elements_check: { I: false, II: false, III: false, IV: false },
+      comment_for_tutor: "Назначено tutor'ом — AI ещё не пересчитал баллы.",
+      flags: ["awaiting_regrade"],
+    };
+    const updatedDraft = {
+      ...baseDraft,
+      assigned_photo_indices: indices,
+    };
+    upserts.push({
+      attempt_id: attemptId,
+      kim_number: kim,
+      ai_draft_json: updatedDraft,
+      // status сохраняется как был (не трогаем tutor_approved / tutor_modified)
+      ...(existing ? {} : { status: "awaiting_review" as const }),
+      updated_at: new Date().toISOString(),
+    });
+  }
+
+  if (upserts.length > 0) {
+    const { error: upsertErr } = await db
+      .from("mock_exam_attempt_part2_solutions")
+      .upsert(upserts, { onConflict: "attempt_id,kim_number" });
+    if (upsertErr) {
+      console.error("mock_exam_assign_part2_photos_upsert_failed", { error: upsertErr.message });
+      return jsonError(cors, 500, "DB_ERROR", "Failed to update assignments");
+    }
+  }
+
+  return jsonOk(cors, {
+    attempt_id: attemptId,
+    updated_kim_count: upserts.length,
+  });
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Phase 6 (2026-05-15) — POST /attempts/:id/regrade-part2
+// Tutor click «Перепроверить AI» после изменения photo assignment. Service-
+// role internal call к mock-exam-grade::handleGrade. State machine pre-check:
+// not approved/manually_entered. Tutor preservation: tutor_approved/modified
+// rows не перезаписываются (mock-exam-grade сам это уважает).
+// ────────────────────────────────────────────────────────────────────────────
+
+async function handleRegradePart2(
+  db: SupabaseClient,
+  tutorUserId: string,
+  attemptId: string,
+  cors: Record<string, string>,
+): Promise<Response> {
+  const ownedOrErr = await getOwnedAttemptOrThrow(db, attemptId, tutorUserId, cors);
+  if (ownedOrErr instanceof Response) return ownedOrErr;
+  const { attempt } = ownedOrErr;
+
+  if (attempt.status === "approved") {
+    return jsonError(cors, 409, "ALREADY_APPROVED", "Attempt is already approved — re-grade not allowed");
+  }
+  if (attempt.status === "manually_entered") {
+    return jsonError(cors, 409, "MANUALLY_ENTERED", "Manual entries — nothing to re-grade");
+  }
+  if (attempt.status === "in_progress") {
+    return jsonError(cors, 400, "NOT_SUBMITTED", "Attempt has not been submitted yet");
+  }
+
+  // Call mock-exam-grade internally через service_role.
+  const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
+  const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
+  if (!serviceRoleKey || !supabaseUrl) {
+    return jsonError(cors, 500, "ENV_ERROR", "Service role keys not configured");
+  }
+
+  const gradeUrl = `${supabaseUrl}/functions/v1/mock-exam-grade`;
+  const startTime = Date.now();
+  try {
+    const resp = await fetch(gradeUrl, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${serviceRoleKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ attempt_id: attemptId }),
+    });
+    const latency = Date.now() - startTime;
+    if (!resp.ok) {
+      const errText = await resp.text();
+      console.error("mock_exam_regrade_failed", {
+        attempt_id: attemptId,
+        status: resp.status,
+        error: errText.slice(0, 500),
+      });
+      return jsonError(cors, 502, "REGRADE_FAILED", "AI grader не успел или вернул ошибку. Попробуй ещё раз.");
+    }
+    const body = await resp.json();
+    return jsonOk(cors, {
+      attempt_id: attemptId,
+      regraded: true,
+      latency_ms: latency,
+      grade_response: body,
+    });
+  } catch (err) {
+    console.error("mock_exam_regrade_exception", {
+      attempt_id: attemptId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return jsonError(cors, 502, "REGRADE_FAILED", "AI grader не успел или вернул ошибку. Попробуй ещё раз.");
+  }
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -1680,6 +1942,27 @@ Deno.serve(async (req: Request): Promise<Response> => {
       seg[2] === "part1-finalize" && route.method === "POST"
     ) {
       return await handlePart1Finalize(db, userId, seg[1], cors);
+    }
+
+    // Phase 6 (2026-05-15) — POST /attempts/:id/assign-part2-photos
+    // Tutor вручную привязывает фото из bulk-pack к задачам через
+    // select dropdown. Persistится в ai_draft_json.assigned_photo_indices.
+    if (
+      seg.length === 3 && seg[0] === "attempts" &&
+      seg[2] === "assign-part2-photos" && route.method === "POST"
+    ) {
+      const body = await parseJsonBody(req);
+      return await handleAssignPart2Photos(db, userId, seg[1], body, cors);
+    }
+
+    // Phase 6 (2026-05-15) — POST /attempts/:id/regrade-part2
+    // Tutor click «Перепроверить AI» после изменения photo assignment.
+    // Service-role internal call к mock-exam-grade::handleGrade.
+    if (
+      seg.length === 3 && seg[0] === "attempts" &&
+      seg[2] === "regrade-part2" && route.method === "POST"
+    ) {
+      return await handleRegradePart2(db, userId, seg[1], cors);
     }
 
     return jsonError(cors, 404, "NOT_FOUND", `Route not found: ${route.method} /${seg.join("/")}`);

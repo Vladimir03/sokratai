@@ -94,7 +94,34 @@ export interface MockExamPart2Draft {
   };
   comment_for_tutor: string;
   flags: string[];
+  /**
+   * Phase 6 (2026-05-15): additive поле для bulk path. Список индексов фото
+   * (в `mock_exam_attempts.part2_bulk_photo_urls` массиве), которые AI
+   * assignment-pass привязал к этой задаче. Tutor видит chip «Фото №X из
+   * пакета» в Part2TaskCard + может переназначить через bulk-gallery
+   * select dropdown. Backward compat: для legacy attempts (per-kim
+   * photo_url) поле отсутствует / пустое.
+   */
+  assigned_photo_indices?: number[];
 }
+
+/**
+ * Phase 6 (2026-05-15) — AI OCR Часть 1 cell (per kim 1-20).
+ * Stored в `mock_exam_attempts.ai_part1_ocr_json` JSONB.
+ * Tutor видит recognized values pre-filled в Part1BlankReviewPanel input cells.
+ * Low confidence клетки помечаются amber border.
+ */
+export type MockExamPart1OCRConfidence = "low" | "medium" | "high";
+
+export interface MockExamPart1OCRCell {
+  /** Recognized answer text (raw, без normalization). null = пустая клетка. */
+  value: string | null;
+  /** AI уверенность распознавания. */
+  confidence: MockExamPart1OCRConfidence;
+}
+
+/** kim 1-20 → распознанная клетка бланка. */
+export type MockExamPart1OCRResult = Record<number, MockExamPart1OCRCell>;
 
 // ─── Assignments ─────────────────────────────────────────────────────────────
 
@@ -250,6 +277,13 @@ export interface MockExamAttemptDetail {
   part1_blank_photo_url?: string | null;
   /** Browser-facing signed URLs for bulk Part 2 photos (additive to per-task). */
   part2_bulk_photo_urls?: string[];
+  /**
+   * Phase 6 (2026-05-15) — AI OCR Часть 1 result для blank-mode attempts.
+   * Tutor-only до approval (CLAUDE.md §15 anti-leak). После approval ученик
+   * видит только `mock_exam_attempt_part1_answers.earned_score`. NULL для
+   * form mode и legacy pre-Phase 6 attempts.
+   */
+  ai_part1_ocr_json?: MockExamPart1OCRResult | null;
   total_part1_score: number | null;
   total_part2_score: number | null;
   total_score: number | null;

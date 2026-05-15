@@ -69,7 +69,27 @@ export interface MockExamPart2Draft {
   comment_for_tutor: string;
   /** Структурированные сигналы: photo_unreadable, kim21_qualitative, etc. */
   flags: string[];
+  /**
+   * Phase 6 (2026-05-15): additive поле для bulk path. Список индексов фото
+   * (в `mock_exam_attempts.part2_bulk_photo_urls` массиве), которые AI
+   * assignment-pass привязал к этой задаче. Tutor видит chip «Фото №X из
+   * пакета» в Part2TaskCard. Может быть пустым (`[]`) если AI не нашёл
+   * подходящего фото — карточка показывает warning «AI не привязал».
+   * Для legacy attempts (per-kim photo_url, нет bulk) — поле отсутствует
+   * / пустое; UI fallback на solution.photo_url.
+   */
+  assigned_photo_indices?: number[];
 }
+
+/**
+ * Phase 6 (2026-05-15): результат AI assignment-pass для bulk Часть 2.
+ * Single Gemini call с (6 задач + N bulk фото) → JSON mapping kim → photo
+ * indices. Каждый photo index может быть assigned to multiple kims (если
+ * на одной фотографии 2+ задач), или не assigned никому (попадает в
+ * `unassigned` bucket → AI Pass 2 для этой задачи возвращает photo_missing).
+ */
+export type BulkAssignmentKey = number | "unassigned";
+export type BulkAssignmentResult = Record<BulkAssignmentKey, number[]>;
 
 export interface BuildPart2PromptInput {
   kim_number: number;
@@ -464,4 +484,145 @@ export function buildFallbackDraft(
     comment_for_tutor: commentByReason[reason],
     flags,
   };
+}
+
+// ─── Phase 6: Bulk assignment-pass (Часть 2 фото → задача) ──────────────────
+
+/**
+ * Meta-info per Часть 2 задаче для bulk assignment-pass. Передаётся в
+ * `buildBulkAssignmentPrompt` — AI смотрит на 6 описаний задач + N фото
+ * и сопоставляет каждое фото с задачей (или маркирует как 'unassigned').
+ */
+export interface BulkAssignmentTaskMeta {
+  kim_number: number;
+  max_score: number;
+  /** Короткий заголовок задачи (первые 200 символов task_text для контекста). */
+  task_text_preview: string;
+}
+
+/**
+ * Build prompt для AI assignment-pass — Pass 1 в two-pass bulk pipeline.
+ *
+ * Vladimir's choice (Phase 6 UX вопрос #1, 2026-05-15): select dropdown
+ * UI для tutor override. AI assignment — это just default; tutor может
+ * переназначить через `/assign-part2-photos` endpoint + click
+ * «Перепроверить AI» для Pass 2 regrading.
+ *
+ * @param tasksMeta meta всех Часть 2 задач (обычно № 21-26)
+ * @param bulkPhotoDataUrls inline `data:image/jpeg;base64,...` URLs
+ * @returns LovableMessage[] для callLovableJson; output JSON shape
+ *          `{ "21": [0, 1], "22": [2], ..., "unassigned": [3] }`
+ */
+export function buildBulkAssignmentPrompt(
+  tasksMeta: BulkAssignmentTaskMeta[],
+  bulkPhotoDataUrls: string[],
+): LovableMessage[] {
+  const tasksSummary = tasksMeta
+    .map((task) => {
+      const preview = clampPromptText(task.task_text_preview, 200) || "[см. варианты]";
+      return `• Задача №${task.kim_number} (макс. ${task.max_score} баллов): ${preview}`;
+    })
+    .join("\n");
+
+  const photoIndicesList = bulkPhotoDataUrls
+    .map((_, i) => `Фото ${i} (индекс ${i})`)
+    .join(", ");
+
+  const systemContent = [
+    "Ты — эксперт ЕГЭ по физике. Ученик сдал пробник и приложил пакет фотографий рукописных решений Часть 2 (задачи № 21-26).",
+    "Твоя задача: посмотреть на каждое фото и сопоставить его с задачей.",
+    "",
+    "СПИСОК ЗАДАЧ:",
+    tasksSummary,
+    "",
+    `ФОТО В ПАКЕТЕ (всего ${bulkPhotoDataUrls.length}): ${photoIndicesList}`,
+    "",
+    "ПРАВИЛА:",
+    "- Каждое фото может быть привязано к одной или нескольким задачам (если на странице 2+ задачи).",
+    "- Если фото нерелевантно (например, чистая страница, или лист условий, или мусор) — отнеси его в 'unassigned'.",
+    "- Опирайся на: (a) номер задачи на странице — ученики часто пишут «№21», «к задаче 22», (b) тематика решения — формулы / физические законы / тип расчёта, (c) ссылку на условие.",
+    "- Если сомневаешься — отнеси в задачу с наибольшим content overlap, либо в 'unassigned'.",
+    "",
+    "Верни ТОЛЬКО валидный JSON без markdown-обёрток и лишнего текста:",
+    "{",
+    "  \"21\": [<photo_index>, ...],",
+    "  \"22\": [<photo_index>, ...],",
+    "  \"23\": [<photo_index>, ...],",
+    "  \"24\": [<photo_index>, ...],",
+    "  \"25\": [<photo_index>, ...],",
+    "  \"26\": [<photo_index>, ...],",
+    "  \"unassigned\": [<photo_index>, ...]",
+    "}",
+    "Все индексы — 0-based, без дублирования внутри одного ключа.",
+  ].join("\n");
+
+  const userContent: Array<LovableTextPart | LovableImagePart> = [];
+  for (const [idx, dataUrl] of bulkPhotoDataUrls.entries()) {
+    userContent.push({
+      type: "text",
+      text: `Фото ${idx} (индекс ${idx}):`,
+    });
+    userContent.push({ type: "image_url", image_url: { url: dataUrl } });
+  }
+  userContent.push({
+    type: "text",
+    text: "Сопоставь каждое фото с задачей в формате JSON выше.",
+  });
+
+  return [
+    { role: "system", content: systemContent },
+    { role: "user", content: userContent },
+  ];
+}
+
+/**
+ * Sanitize raw AI assignment JSON → strict BulkAssignmentResult.
+ * Defensive: invalid keys / out-of-range indices / duplicates drop'аются
+ * silently. Если result пустой (все задачи без фото) → каждая kim получает
+ * `photo_missing` flag в Pass 2 grading.
+ */
+export function sanitizeBulkAssignmentResult(
+  parsed: unknown,
+  totalPhotos: number,
+  expectedKims: number[],
+): BulkAssignmentResult {
+  const result: BulkAssignmentResult = { unassigned: [] };
+  for (const kim of expectedKims) result[kim] = [];
+
+  if (!isRecord(parsed)) return result;
+
+  const validIndices = new Set<number>();
+  for (let i = 0; i < totalPhotos; i++) validIndices.add(i);
+
+  for (const [rawKey, rawValue] of Object.entries(parsed)) {
+    if (!Array.isArray(rawValue)) continue;
+
+    const keyTrimmed = rawKey.trim().toLowerCase();
+    let targetKey: BulkAssignmentKey | null = null;
+    if (keyTrimmed === "unassigned") {
+      targetKey = "unassigned";
+    } else {
+      const kimNum = Number.parseInt(keyTrimmed, 10);
+      if (Number.isFinite(kimNum) && expectedKims.includes(kimNum)) {
+        targetKey = kimNum;
+      }
+    }
+    if (targetKey === null) continue;
+
+    const seen = new Set<number>();
+    for (const item of rawValue) {
+      const idx = typeof item === "number"
+        ? Math.trunc(item)
+        : typeof item === "string"
+          ? Number.parseInt(item.trim(), 10)
+          : NaN;
+      if (!Number.isFinite(idx)) continue;
+      if (!validIndices.has(idx)) continue;
+      if (seen.has(idx)) continue;
+      seen.add(idx);
+      result[targetKey].push(idx);
+    }
+  }
+
+  return result;
 }

@@ -17,7 +17,7 @@
 //   • MathText для condition + comment (ЕГЭ задачи содержат LaTeX-формулы)
 //   • Score override read-only с явным «Изменить» (nuance #3)
 
-import { lazy, memo, Suspense, useCallback, useMemo, useState } from 'react';
+import { lazy, memo, Suspense, useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
@@ -65,11 +65,20 @@ import { MOCK_EXAM_ASSIGNMENTS_QUERY_KEY } from '@/hooks/useMockExamAssignments'
 import {
   approveMockExamAll,
   approveMockExamTask,
+  assignMockExamPart2Photos,
   finalizeMockExamPart1,
+  regradeMockExamPart2,
   setMockExamPart1ManualScore,
   MockExamApiError,
 } from '@/lib/mockExamApi';
 import { Input } from '@/components/ui/input';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { cn } from '@/lib/utils';
 import { formatMockScore } from '@/components/tutor/mock-exams/mockHeatmapStyles';
 import type {
@@ -411,33 +420,71 @@ function Part1BlankReviewPanel({ attempt, variantPart1Tasks }: {
           </div>
         )}
 
+        {/* Phase 6 (2026-05-15): AI OCR result для blank-mode Часть 1.
+            mock-exam-grade автоматически распознал ответы в клетках + запустил
+            deterministic checker → earned_score уже в attempt.part1_answers.
+            Tutor видит recognized value + confidence chip; может править. */}
+        {attempt.ai_part1_ocr_json && (
+          <div className="rounded-md bg-emerald-50 border border-emerald-200 px-3 py-2 text-xs text-emerald-900 dark:bg-emerald-950/30 dark:border-emerald-900 dark:text-emerald-200">
+            <strong>AI распознал бланк</strong> и автоматически выставил баллы по
+            ответам ученика. Проверь клетки с amber-обводкой (AI не уверен) —
+            при необходимости поправь балл.
+          </div>
+        )}
+
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2">
-          {variantPart1Tasks.map((t) => (
-            <label
-              key={t.kim_number}
-              className="flex flex-col gap-1 p-2 rounded-md bg-white border border-amber-200 dark:bg-slate-900 dark:border-amber-900"
-            >
-              <span className="text-xs font-medium text-slate-700 dark:text-slate-300">
-                KIM {t.kim_number} <span className="text-slate-400">/ {t.max_score}</span>
-              </span>
-              <Input
-                type="number"
-                inputMode="numeric"
-                min={0}
-                max={t.max_score}
-                step={1}
-                disabled={isReadOnly || savingKim === t.kim_number}
-                value={drafts[t.kim_number] ?? ''}
-                onChange={(e) =>
-                  setDrafts((d) => ({ ...d, [t.kim_number]: e.target.value }))
-                }
-                onBlur={() => void handleScoreBlur(t.kim_number, t.max_score)}
-                className="text-base"
-                placeholder="—"
-                aria-label={`Баллы за KIM ${t.kim_number}`}
-              />
-            </label>
-          ))}
+          {variantPart1Tasks.map((t) => {
+            const ocrCell = attempt.ai_part1_ocr_json?.[t.kim_number];
+            const isLowConf = ocrCell && ocrCell.confidence === 'low';
+            const hasRecognition = ocrCell?.value !== undefined && ocrCell.value !== null;
+            return (
+              <label
+                key={t.kim_number}
+                className={cn(
+                  'flex flex-col gap-1 p-2 rounded-md bg-white border dark:bg-slate-900',
+                  isLowConf
+                    ? 'border-amber-400 dark:border-amber-700 ring-1 ring-amber-200 dark:ring-amber-900'
+                    : 'border-amber-200 dark:border-amber-900',
+                )}
+              >
+                <span className="text-xs font-medium text-slate-700 dark:text-slate-300 flex items-center gap-1">
+                  KIM {t.kim_number} <span className="text-slate-400">/ {t.max_score}</span>
+                  {isLowConf && (
+                    <span
+                      className="text-[10px] font-semibold text-amber-700 dark:text-amber-300"
+                      title="AI не уверен в распознавании этой клетки"
+                    >
+                      ⚠ AI?
+                    </span>
+                  )}
+                </span>
+                {hasRecognition && (
+                  <span
+                    className="text-[10px] text-slate-500 dark:text-slate-400 truncate"
+                    title={`AI распознал: «${ocrCell.value}»`}
+                  >
+                    AI: {ocrCell.value || '(пусто)'}
+                  </span>
+                )}
+                <Input
+                  type="number"
+                  inputMode="numeric"
+                  min={0}
+                  max={t.max_score}
+                  step={1}
+                  disabled={isReadOnly || savingKim === t.kim_number}
+                  value={drafts[t.kim_number] ?? ''}
+                  onChange={(e) =>
+                    setDrafts((d) => ({ ...d, [t.kim_number]: e.target.value }))
+                  }
+                  onBlur={() => void handleScoreBlur(t.kim_number, t.max_score)}
+                  className="text-base"
+                  placeholder="—"
+                  aria-label={`Баллы за KIM ${t.kim_number}`}
+                />
+              </label>
+            );
+          })}
         </div>
 
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-2 border-t border-amber-200">
@@ -750,7 +797,9 @@ function Part2TaskCard({ attemptId, solution, attemptStatus }: Part2TaskCardProp
           </div>
         ) : null}
 
-        {/* Action row */}
+        {/* Phase 6 (2026-05-15) — Action row: убрали quick-approve button.
+            Tutor правит только если не согласен с AI. Final approval — через
+            global «Подтвердить пробник» в ApproveFooter (одна кнопка на пробник). */}
         {!isReadOnlyAttempt ? (
           <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-100 dark:border-slate-800">
             <Button
@@ -761,25 +810,6 @@ function Part2TaskCard({ attemptId, solution, attemptStatus }: Part2TaskCardProp
             >
               <Pencil className="h-3.5 w-3.5 mr-1.5" aria-hidden="true" />
               Изменить балл
-            </Button>
-            <Button
-              size="sm"
-              onClick={handleQuickApprove}
-              disabled={aiSuggested === null || approveMutation.isPending}
-              title={
-                aiSuggested === null
-                  ? 'AI не предложил балл — поставь вручную'
-                  : 'Подтвердить балл, предложенный AI'
-              }
-            >
-              {approveMutation.isPending && !editOpen ? (
-                'Сохранение…'
-              ) : (
-                <>
-                  <Check className="h-3.5 w-3.5 mr-1.5" aria-hidden="true" />
-                  Подтвердить: {aiSuggested ?? '?'} / {solution.max_score}
-                </>
-              )}
             </Button>
           </div>
         ) : null}
@@ -800,6 +830,198 @@ function Part2TaskCard({ attemptId, solution, attemptStatus }: Part2TaskCardProp
   );
 }
 
+// ─── Phase 6 (2026-05-15): Bulk photo assignment gallery ────────────────────
+//
+// Заменил Phase 5 simple zoom-to-tab gallery. Tutor видит ленту всех фото
+// от ученика + select dropdown под каждым с AI's default assignment
+// (берётся из ai_draft_json.assigned_photo_indices). Может переназначить
+// → debounce save → click «Перепроверить AI» → mock-exam-grade::handleGrade
+// запускается с новой привязкой.
+
+const PART2_KIMS = [21, 22, 23, 24, 25, 26] as const;
+
+function BulkPhotosAssignmentGallery({
+  attemptId,
+  photoUrls,
+  part2Solutions,
+  isReadOnly,
+}: {
+  attemptId: string;
+  photoUrls: string[];
+  part2Solutions: MockExamAttemptPart2Solution[];
+  isReadOnly: boolean;
+}) {
+  const queryClient = useQueryClient();
+
+  // Compute initial assignment per photo index из ai_draft_json
+  // (assigned_photo_indices). Каждое фото может быть привязано к одной
+  // задаче или 'unassigned' (если в нескольких — берём первый kim).
+  const initialAssignments = useMemo(() => {
+    const map = new Map<number, number | 'unassigned'>();
+    for (let i = 0; i < photoUrls.length; i++) map.set(i, 'unassigned');
+    for (const solution of part2Solutions) {
+      const indices = solution.ai_draft?.assigned_photo_indices ?? [];
+      for (const idx of indices) {
+        if (idx >= 0 && idx < photoUrls.length) {
+          // First-write-wins: если фото уже assigned, не переписываем
+          if (map.get(idx) === 'unassigned') {
+            map.set(idx, solution.kim_number);
+          }
+        }
+      }
+    }
+    return map;
+  }, [photoUrls.length, part2Solutions]);
+
+  const [assignments, setAssignments] = useState<Map<number, number | 'unassigned'>>(
+    initialAssignments,
+  );
+  const [dirty, setDirty] = useState(false);
+
+  // Re-sync если AI assignment пришёл server-side update (после regrade).
+  useEffect(() => {
+    setAssignments(initialAssignments);
+    setDirty(false);
+  }, [initialAssignments]);
+
+  const saveMutation = useMutation({
+    mutationFn: async (newAssignments: Map<number, number | 'unassigned'>) => {
+      // Сгруппировать фото-индексы по kim_number (server format).
+      const grouped: Record<number, number[]> = {};
+      for (const kim of PART2_KIMS) grouped[kim] = [];
+      for (const [idx, target] of newAssignments.entries()) {
+        if (target !== 'unassigned') {
+          grouped[target].push(idx);
+        }
+      }
+      return await assignMockExamPart2Photos(attemptId, { assignments: grouped });
+    },
+    onSuccess: () => {
+      // Не invalidate тут — assignment без AI regrade всё ещё dirty. Только
+      // local state помечается как сохранённое.
+    },
+    onError: (err) => {
+      toast.error(`Не удалось сохранить привязку: ${err instanceof Error ? err.message : String(err)}`);
+    },
+  });
+
+  const regradeMutation = useMutation({
+    mutationFn: async () => {
+      return await regradeMockExamPart2(attemptId);
+    },
+    onSuccess: () => {
+      toast.success('AI пересчитал баллы — обнови карточки ниже');
+      queryClient.invalidateQueries({ queryKey: MOCK_EXAM_ATTEMPT_QUERY_KEY(attemptId) });
+      setDirty(false);
+    },
+    onError: (err) => {
+      toast.error(`AI grader не успел: ${err instanceof Error ? err.message : String(err)}`);
+    },
+  });
+
+  const handleChange = useCallback(
+    (photoIdx: number, value: string) => {
+      const target: number | 'unassigned' = value === 'unassigned'
+        ? 'unassigned'
+        : Number.parseInt(value, 10);
+      setAssignments((prev) => {
+        const next = new Map(prev);
+        next.set(photoIdx, target);
+        return next;
+      });
+      setDirty(true);
+    },
+    [],
+  );
+
+  // Debounced save: trigger 500ms после последнего изменения.
+  useEffect(() => {
+    if (!dirty || isReadOnly) return;
+    const timer = window.setTimeout(() => {
+      saveMutation.mutate(assignments);
+    }, 500);
+    return () => window.clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [assignments, dirty, isReadOnly]);
+
+  return (
+    <section className="space-y-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h2 className="text-lg font-semibold tracking-tight">
+          Часть 2 — фото от ученика ({photoUrls.length})
+        </h2>
+        {!isReadOnly && (
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => regradeMutation.mutate()}
+            disabled={!dirty || regradeMutation.isPending || saveMutation.isPending}
+            title={
+              !dirty
+                ? 'Привязка не менялась — AI пересчитывать нечего'
+                : 'Пересчитать баллы Части 2 с новой привязкой фото'
+            }
+          >
+            {regradeMutation.isPending ? 'AI пересчитывает…' : '🔄 Перепроверить AI'}
+          </Button>
+        )}
+      </div>
+      <Card>
+        <CardContent className="py-4">
+          <p className="mb-3 text-sm text-muted-foreground">
+            {isReadOnly
+              ? 'Пробник подтверждён. Привязка фото к задачам зафиксирована.'
+              : 'AI распределил фото по задачам. Если ошибся — измени привязку в выпадашке под фото, потом нажми «Перепроверить AI».'}
+          </p>
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4">
+            {photoUrls.map((url, idx) => {
+              const current = assignments.get(idx) ?? 'unassigned';
+              return (
+                <div key={url + idx} className="flex flex-col gap-2">
+                  <a
+                    href={url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="relative aspect-square overflow-hidden rounded-md border border-slate-200 bg-white transition-shadow hover:shadow-md"
+                    aria-label={`Открыть фото ${idx + 1} в новой вкладке`}
+                  >
+                    <img
+                      src={url}
+                      alt={`Часть 2 — фото ${idx + 1}`}
+                      className="h-full w-full object-cover"
+                      loading="lazy"
+                    />
+                    <span className="absolute bottom-1 right-1 rounded bg-black/55 px-1.5 py-0.5 text-xs font-semibold text-white">
+                      #{idx + 1}
+                    </span>
+                  </a>
+                  <Select
+                    value={String(current)}
+                    onValueChange={(v) => handleChange(idx, v)}
+                    disabled={isReadOnly}
+                  >
+                    <SelectTrigger className="h-9 text-xs">
+                      <SelectValue placeholder="К задаче..." />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="unassigned">— не подошла</SelectItem>
+                      {PART2_KIMS.map((kim) => (
+                        <SelectItem key={kim} value={String(kim)}>
+                          № {kim}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              );
+            })}
+          </div>
+        </CardContent>
+      </Card>
+    </section>
+  );
+}
+
 // ─── Sticky-feel global-approve footer ───────────────────────────────────────
 
 interface ApproveFooterProps {
@@ -809,17 +1031,23 @@ interface ApproveFooterProps {
   isSubmitting: boolean;
   isAnonymous: boolean;
   isAlreadyApproved: boolean;
+  /**
+   * Phase 6 (2026-05-15): список kim, у которых нет ни tutor_score
+   * ни ai_draft.suggested_score — approve кнопка blocked если непустой.
+   * Vladimir's UX choice: force tutor review missing scores.
+   */
+  blockedKims?: number[];
 }
 
 function ApproveFooter({
-  approvedCount,
-  totalCount,
+  approvedCount: _approvedCount,
+  totalCount: _totalCount,
   onApprove,
   isSubmitting,
   isAnonymous,
   isAlreadyApproved,
+  blockedKims,
 }: ApproveFooterProps) {
-  const allClosed = approvedCount === totalCount && totalCount > 0;
 
   if (isAlreadyApproved) {
     return (
@@ -842,11 +1070,18 @@ function ApproveFooter({
     );
   }
 
+  // Phase 6 (2026-05-15): убрали counter «N/M заданий». Vladimir's UX choice:
+  // одна кнопка «Подтвердить пробник и показать ученику результаты» вместо
+  // per-task confirm flow. Кнопка блокируется если есть kim без балла (ни
+  // tutor manual, ни AI suggested) — force tutor review (Phase 6 AskUserQuestion #4).
+  const missingKims = blockedKims ?? [];
+  const hasBlocked = missingKims.length > 0;
+
   return (
     <div className="bg-slate-50 border-2 border-slate-200 rounded-lg p-4 flex items-center justify-between flex-wrap gap-3 dark:bg-slate-900 dark:border-slate-700">
       <div className="text-sm">
         <div className="font-medium text-slate-900 dark:text-slate-100 flex items-center gap-2">
-          Подтверждено: {approvedCount} / {totalCount} заданий
+          Готов отправить ученику результаты?
           {isAnonymous ? (
             <span
               title="Анонимный лид — каждый пункт твоя репутация"
@@ -858,22 +1093,24 @@ function ApproveFooter({
           ) : null}
         </div>
         <div className="text-slate-500 text-xs mt-0.5">
-          {isAnonymous
-            ? 'Bulk-approve недоступен. Проверь каждый пункт вручную.'
-            : 'После подтверждения ученик и родители получат результат. Перепроверка возможна.'}
+          {hasBlocked
+            ? `AI не оценил задачи ${missingKims.map((k) => `№${k}`).join(', ')} — выстави балл через «Изменить балл» в карточке.`
+            : isAnonymous
+              ? 'Анонимный лид. Проверь баллы вручную для надёжности.'
+              : 'После подтверждения ученик и родители получат результат. Перепроверка возможна.'}
         </div>
       </div>
       <Button
         size="lg"
         onClick={onApprove}
-        disabled={!allClosed || isSubmitting}
+        disabled={hasBlocked || isSubmitting}
         title={
-          !allClosed
-            ? `Закрой все ${totalCount} задач, чтобы отправить`
-            : 'Подтвердить и отправить ученику'
+          hasBlocked
+            ? `Сначала выстави балл для №${missingKims.join(', №')}`
+            : 'Подтвердить пробник и показать ученику результаты'
         }
       >
-        {isSubmitting ? 'Отправка…' : 'Подтвердить и отправить'}
+        {isSubmitting ? 'Отправка…' : 'Подтвердить и показать ученику'}
       </Button>
     </div>
   );
@@ -1034,6 +1271,19 @@ function TutorMockExamReviewContent() {
     (s) => s.status === 'tutor_approved' || s.status === 'tutor_modified',
   ).length;
 
+  // Phase 6 (2026-05-15): compute blockedKims — Часть 2 задачи где нет ни
+  // tutor_score (manual edit) ни ai_draft.suggested_score (AI default).
+  // Approve button blocked если непустой; tutor должен выставить балл
+  // вручную через «Изменить балл» в карточке.
+  const blockedKims: number[] = part2Solutions
+    .filter(
+      (s) =>
+        s.tutor_score === null
+        && (!s.ai_draft || s.ai_draft.suggested_score === null),
+    )
+    .map((s) => s.kim_number)
+    .sort((a, b) => a - b);
+
   const studentName = studentNameOrFallback(attempt);
   const anonymous = isAnonymous(attempt);
   const draftPart2 = part2Solutions.reduce(
@@ -1159,54 +1409,25 @@ function TutorMockExamReviewContent() {
         </div>
       ) : null}
 
-      {/* Phase 5 (2026-05-15): bulk-photo pack — единая лента всех фото
-          Часть 2, которые ученик загрузил пакетом. Заменяет старую модель
-          «1 фото на 1 задачу». Tutor видит все фото сразу и сам решает,
-          где какая задача (Часть 2 cards ниже остаются для backward compat
-          с pilot attempts, где per-kim photo_url ещё заполнен). */}
+      {/* Phase 6 (2026-05-15): bulk-photo pack с AI auto-assignment +
+          tutor manual override через select dropdown под каждым фото.
+          Tutor click «Перепроверить AI» → mock-exam-grade::handleGrade
+          запускается с обновлённым assignment_map. Phase 5 simple gallery
+          (zoom-to-tab) заменён interactive grid'ом. */}
       {(attempt.part2_bulk_photo_urls ?? []).length > 0 && (
-        <section className="space-y-3">
-          <h2 className="text-lg font-semibold tracking-tight">
-            Часть 2 — фото от ученика ({(attempt.part2_bulk_photo_urls ?? []).length})
-          </h2>
-          <Card>
-            <CardContent className="py-4">
-              <p className="mb-3 text-sm text-muted-foreground">
-                Ученик загрузил решения Части 2 одним пакетом. Пролистай все фото и
-                сам реши, какое относится к задаче №21–26. AI grader пока не разносит
-                фото по задачам автоматически — выставляй баллы вручную в карточках ниже.
-              </p>
-              <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-4">
-                {(attempt.part2_bulk_photo_urls ?? []).map((url, idx) => (
-                  <a
-                    key={url + idx}
-                    href={url}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="relative aspect-square overflow-hidden rounded-md border border-slate-200 bg-white transition-shadow hover:shadow-md"
-                    aria-label={`Открыть фото ${idx + 1} в новой вкладке`}
-                  >
-                    <img
-                      src={url}
-                      alt={`Часть 2 — фото ${idx + 1}`}
-                      className="h-full w-full object-cover"
-                      loading="lazy"
-                    />
-                    <span className="absolute bottom-1 right-1 rounded bg-black/55 px-1.5 py-0.5 text-xs font-semibold text-white">
-                      {idx + 1}
-                    </span>
-                  </a>
-                ))}
-              </div>
-            </CardContent>
-          </Card>
-        </section>
+        <BulkPhotosAssignmentGallery
+          attemptId={attempt.id}
+          photoUrls={attempt.part2_bulk_photo_urls ?? []}
+          part2Solutions={part2Solutions}
+          isReadOnly={isAlreadyApproved}
+        />
       )}
 
-      {/* Часть 2 cards — per-kim карточки. Для bulk attempts (Phase 5+)
-          photo_url обычно null (AI grader пока не assign'ит фото к задачам),
-          tutor выставляет баллы из bulk-ленты выше. Для pilot attempts (до
-          Phase 5) photo_url содержит per-kim фото, отображается в карточке. */}
+      {/* Часть 2 cards — per-kim карточки. Для bulk attempts (Phase 6+)
+          photo_url обычно null (AI grader пишет в ai_draft_json.assigned_photo_indices),
+          tutor выставляет баллы через AI suggested_score (см. карточки выше).
+          Для pilot attempts (до Phase 5) photo_url содержит per-kim фото,
+          отображается в карточке как legacy fallback. */}
       {part2Solutions.length > 0 ? (
         <section className="space-y-3">
           <h2 className="text-lg font-semibold tracking-tight">
@@ -1239,6 +1460,7 @@ function TutorMockExamReviewContent() {
         isSubmitting={approveAllMutation.isPending}
         isAnonymous={anonymous}
         isAlreadyApproved={isAlreadyApproved}
+        blockedKims={blockedKims}
       />
 
       {/* Confirmation modal — nuance #9 */}
