@@ -20,6 +20,12 @@
  * approve-task | approve-all).
  */
 
+// Phase 4 (2026-05-15): subject-rubric integration. Reuse the same ФИПИ 2026
+// methodology that powers homework guided chat (physics-ege.ts, math-ege.ts,
+// chemistry-ege.ts, languages-ege.ts). Mock-exam-grade becomes the third
+// consumer of resolveSubjectRubric (after guided_ai.ts + chat/index.ts).
+import { resolveSubjectRubric } from "./subject-rubrics/index.ts";
+
 // ─── Types (mirrors LovableMessage from homework-api/ai_shared.ts) ──────────
 //
 // Re-declared locally to keep _shared/ free of cross-function dependencies.
@@ -80,6 +86,14 @@ export interface BuildPart2PromptInput {
   task_image_data_urls: string[];
   /** Pre-inlined data: URLs for the student's photo solutions. */
   student_photo_data_urls: string[];
+  /**
+   * Subject + exam_type for Phase 4 subject-rubric integration (2026-05-15).
+   * Defaults preserve backward-compat with mock-exams-v1 variant-1 (физика ЕГЭ).
+   * When `mock_exam_variants.subject` колонка появится — caller передаст
+   * реальное значение из БД. Сейчас mock-exam-grade hardcoded `'physics' + 'ege'`.
+   */
+  subject?: string;
+  exam_type?: "ege" | "oge";
 }
 
 // ─── Constants ──────────────────────────────────────────────────────────────
@@ -180,8 +194,21 @@ export function buildMockExamPart2Prompt(
   const hasStudentPhoto = input.student_photo_data_urls.length > 0;
   const hasSolutionRef = solutionText.length > 0;
 
+  // Phase 4 (2026-05-15): subject-rubric resolver gives role + methodology
+  // (full ФИПИ 2026 для № 21-26 включая № 21 качественную + № 22-23 / № 24-25
+  // ФИПИ I-IV + № 26 Критерий 1 + Критерий 2). Backward-compat defaults =
+  // 'physics' / 'ege' для mock-exams-v1 variant-1.
+  const rubric = resolveSubjectRubric({
+    subject: input.subject ?? "physics",
+    exam_type: input.exam_type ?? "ege",
+    kim_number: input.kim_number,
+    task_kind: "extended",
+    task_text: input.task_text,
+    tutor_rubric: null,
+  });
+
   const systemContent = [
-    "Ты — эксперт ЕГЭ по физике. Проверяешь развёрнутое решение Части 2 ученика по критериям ФИПИ.",
+    rubric.role,
     "Ты делаешь ЧЕРНОВИК для репетитора — финальный балл всегда подтверждает он.",
     "",
     `ЗАДАЧА №${input.kim_number}, максимальный балл: ${input.max_score}.`,
@@ -196,6 +223,18 @@ export function buildMockExamPart2Prompt(
       ? `Эталонное решение от автора варианта (только для твоей сверки логики): ${solutionText}`
       : "",
     "",
+    // Полная ФИПИ 2026 методология (источник: physics-ege.ts → KIM_METHODOLOGIES[№ 21-26]).
+    // Для № 21: 3-балльная качественная rubric с 3 элементами (формулировка + объяснение + явления).
+    // Для № 22-23: ФИПИ I-IV (2 балла), элементы законы / обозначения / преобразования / ответ с единицами.
+    // Для № 24-25: ФИПИ I-IV (3 балла), плюс case «отсутствует одна формула — 1 балл».
+    // Для № 26: Критерий 1 (обоснование, 1 балл) + Критерий 2 (расчёт как № 24-25, 3 балла).
+    "ПОЛНАЯ МЕТОДОЛОГИЯ ОЦЕНКИ (используй для распределения баллов по элементам):",
+    rubric.methodology,
+    "",
+    // Backward-compat slot: legacy buildCriteriaBlock summary всё ещё инжектируется
+    // как краткая шпаргалка (для № 21 — спец-правило, для № 22-26 — компакт I-IV).
+    // Phase 4 не удаляет — frozen JSON output contract `elements_check` остаётся
+    // тем же I/II/III/IV, и краткая summary помогает модели выровнять выход.
     buildCriteriaBlock(input.kim_number, input.max_score),
     "",
     "ВЫЯВЛЕНИЕ ПРОБЛЕМ С ФОТО:",

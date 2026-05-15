@@ -135,7 +135,11 @@ function Part1Card({
   totalScore: number | null;
   part1Max: number | null;
 }) {
-  const [open, setOpen] = useState(false);
+  // Phase 4 (2026-05-15): таблица разбалловки раскрыта по умолчанию.
+  // Ученик сразу видит № / Твой ответ / Правильный / Балл + иконки ✓/✗
+  // без необходимости кликать toggle. Toggle сохранён для возможности
+  // скрыть длинную таблицу при scroll'е, но default = expanded.
+  const [open, setOpen] = useState(true);
 
   const fallbackTotal = useMemo(() => {
     return answers.reduce((acc, row) => acc + (row.earned_score ?? 0), 0);

@@ -575,6 +575,12 @@ async function gradePart2Task(
     solution_text: task.solution_text,
     task_image_data_urls: taskImageDataUrls,
     student_photo_data_urls: studentPhotoDataUrls,
+    // Phase 4 (2026-05-15) — subject-rubric integration. Hardcoded `physics + ege`
+    // для mock-exams-v1 variant-1 (физика ЕГЭ). Когда добавится математический /
+    // химический пробник — extend mock_exam_variants schema с `subject` колонкой +
+    // pass из БД. См. CLAUDE.md §20 «Mock-exams subject-rubric integration».
+    subject: "physics",
+    exam_type: "ege",
   });
 
   try {

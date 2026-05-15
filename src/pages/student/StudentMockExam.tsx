@@ -1,4 +1,4 @@
-import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react';
+import { lazy, memo, Suspense, useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useNavigate, useParams } from 'react-router-dom';
 import {
@@ -61,8 +61,12 @@ const MarkdownTableRenderer = lazy(() =>
   })),
 );
 
+// Phase 4 (2026-05-15) — заменён с `ege-physics-2025.pdf` (старый бланк требовал
+// вписывать ФИО) на новый `ege-physics-2026.pdf` (4 страницы: бланк № 1 для
+// кратких ответов + бланк № 2 лист 1 + бланк № 2 лист 2 для развёрнутых +
+// дополнительный бланк № 2). Манualьно загружен через Supabase Studio.
 const BLANK_PDF_URL =
-  'https://api.sokratai.ru/storage/v1/object/public/mock-exam-blank-templates/ege-physics-2025.pdf';
+  'https://api.sokratai.ru/storage/v1/object/public/mock-exam-blank-templates/ege-physics-2026.pdf';
 
 type UploadKind = 'blank' | 'part2';
 type UploadStatus = 'idle' | 'uploading' | 'saved' | 'error';
@@ -316,7 +320,18 @@ function SaveStatus({
   );
 }
 
-function ReferencesPanel() {
+/**
+ * Phase 4 (2026-05-15) — полная Шапка ЕГЭ из официального демоварианта 2026
+ * (источник: Шапка ЕГЭ.pdf от Vladimir, прислан 2026-05-15). Включает:
+ *   - Инструкция по выполнению (3ч 55мин, 26 заданий, образцы записи ответов)
+ *   - 10 справочных таблиц: десятичные приставки, константы, соотношения
+ *     единиц, масса частиц, плотности, удельная теплоёмкость, удельная
+ *     теплота, нормальные условия, молярная масса.
+ *
+ * `React.memo` — статические справочные данные, перерасчёт не нужен.
+ * Single top-level `<details>` collapsible (text-base 16px для iOS).
+ */
+const ReferencesPanel = memo(function ReferencesPanel() {
   const [open, setOpen] = useState(false);
 
   return (
@@ -329,35 +344,187 @@ function ReferencesPanel() {
       >
         <div>
           <h2 className="text-base font-semibold text-slate-900">Справочные данные</h2>
-          <p className="text-sm text-slate-500">Константы и формулы, которые можно держать перед глазами</p>
+          <p className="text-sm text-slate-500">
+            Константы, плотности, теплоёмкости, молярная масса + инструкция по записи ответов
+          </p>
         </div>
         <ChevronDown className={cn('h-5 w-5 text-slate-500 transition-transform', open && 'rotate-180')} />
       </button>
       {open && (
-        <div className="border-t border-slate-100 px-4 py-4 text-sm text-slate-700">
-          <div className="grid gap-3 sm:grid-cols-2">
-            <div className="rounded-md bg-slate-50 p-3">
-              <div className="font-medium text-slate-900">Константы</div>
-              <div className="mt-2 space-y-1">
-                <p>g = 10 м/с²</p>
-                <p>c = 3 · 10⁸ м/с</p>
-                <p>e = 1,6 · 10⁻¹⁹ Кл</p>
-              </div>
+        <div className="border-t border-slate-100 px-4 py-5 text-[15px] leading-relaxed text-slate-700 space-y-5">
+          {/* Инструкция по выполнению */}
+          <section>
+            <h3 className="text-sm font-semibold uppercase tracking-wide text-slate-900">
+              Инструкция по выполнению
+            </h3>
+            <div className="mt-2 space-y-2">
+              <p>
+                На экзамен отводится <strong>3 часа 55 минут</strong> (235 минут). Работа состоит из двух частей,
+                всего <strong>26 заданий</strong>.
+              </p>
+              <p className="text-slate-600">
+                В заданиях <strong>1–4, 7, 8, 11–13 и 16</strong> ответом является целое число или конечная
+                десятичная дробь. <strong>Единицы измерения писать не нужно.</strong> Пример:{' '}
+                <code className="rounded bg-slate-100 px-1.5 py-0.5 text-[13px] font-mono">−2,5</code>
+              </p>
+              <p className="text-slate-600">
+                В заданиях <strong>5, 6, 9, 10, 14, 15, 17, 18 и 20</strong> ответ — последовательность цифр
+                без пробелов и других символов. В заданиях 5, 9, 14, 18 — два или три верных ответа. Пример:{' '}
+                <code className="rounded bg-slate-100 px-1.5 py-0.5 text-[13px] font-mono">41</code>
+              </p>
+              <p className="text-slate-600">
+                В задании <strong>19</strong> ответом являются <strong>два числа</strong>, не разделяй их
+                пробелом. Пример для <code className="rounded bg-slate-100 px-1.5 py-0.5 text-[13px] font-mono">
+                  (1,4±0,2) Н
+                </code>
+                {' '}
+                <code className="rounded bg-slate-100 px-1.5 py-0.5 text-[13px] font-mono">1,40,2</code>
+              </p>
+              <p className="text-slate-600">
+                Задания <strong>21–26</strong> — развёрнутое решение, пишется на бланке № 2 с указанием номера
+                задания.
+              </p>
+              <p className="text-slate-600">
+                Разрешается линейка и непрограммируемый калькулятор. Записи в черновике не учитываются.
+              </p>
             </div>
-            <div className="rounded-md bg-slate-50 p-3">
-              <div className="font-medium text-slate-900">Шпаргалка записи</div>
-              <div className="mt-2 space-y-1">
-                <p>Дроби можно писать через запятую или точку.</p>
-                <p>В заданиях на соответствие порядок важен.</p>
-                <p>В части 2 загружай одно фото на одно задание.</p>
-              </div>
+          </section>
+
+          {/* Десятичные приставки */}
+          <section>
+            <h3 className="text-sm font-semibold uppercase tracking-wide text-slate-900">
+              Десятичные приставки
+            </h3>
+            <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-3">
+              <div className="rounded-md bg-slate-50 p-2.5 font-mono text-[13px]">гига (Г) — 10⁹</div>
+              <div className="rounded-md bg-slate-50 p-2.5 font-mono text-[13px]">мега (М) — 10⁶</div>
+              <div className="rounded-md bg-slate-50 p-2.5 font-mono text-[13px]">кило (к) — 10³</div>
+              <div className="rounded-md bg-slate-50 p-2.5 font-mono text-[13px]">гекто (г) — 10²</div>
+              <div className="rounded-md bg-slate-50 p-2.5 font-mono text-[13px]">деци (д) — 10⁻¹</div>
+              <div className="rounded-md bg-slate-50 p-2.5 font-mono text-[13px]">санти (с) — 10⁻²</div>
+              <div className="rounded-md bg-slate-50 p-2.5 font-mono text-[13px]">милли (м) — 10⁻³</div>
+              <div className="rounded-md bg-slate-50 p-2.5 font-mono text-[13px]">микро (мк) — 10⁻⁶</div>
+              <div className="rounded-md bg-slate-50 p-2.5 font-mono text-[13px]">нано (н) — 10⁻⁹</div>
+              <div className="rounded-md bg-slate-50 p-2.5 font-mono text-[13px]">пико (п) — 10⁻¹²</div>
             </div>
-          </div>
+          </section>
+
+          {/* Константы */}
+          <section>
+            <h3 className="text-sm font-semibold uppercase tracking-wide text-slate-900">Константы</h3>
+            <div className="mt-2 grid gap-1.5 sm:grid-cols-2">
+              <p className="font-mono text-[13px]">π = 3,14</p>
+              <p className="font-mono text-[13px]">g = 10 м/с²</p>
+              <p className="font-mono text-[13px]">G = 6,7 · 10⁻¹¹ Н·м²/кг²</p>
+              <p className="font-mono text-[13px]">R = 8,31 Дж/(моль·К)</p>
+              <p className="font-mono text-[13px]">k = 1,38 · 10⁻²³ Дж/К</p>
+              <p className="font-mono text-[13px]">N_A = 6 · 10²³ моль⁻¹</p>
+              <p className="font-mono text-[13px]">c = 3 · 10⁸ м/с</p>
+              <p className="font-mono text-[13px]">k_Кулона = 1/(4πε₀) = 9 · 10⁹ Н·м²/Кл²</p>
+              <p className="font-mono text-[13px]">ε₀ = 8,85 · 10⁻¹² Ф/м</p>
+              <p className="font-mono text-[13px]">e = 1,6 · 10⁻¹⁹ Кл</p>
+              <p className="font-mono text-[13px]">h = 6,6 · 10⁻³⁴ Дж·с</p>
+            </div>
+          </section>
+
+          {/* Соотношения единиц */}
+          <section>
+            <h3 className="text-sm font-semibold uppercase tracking-wide text-slate-900">
+              Соотношения единиц
+            </h3>
+            <div className="mt-2 space-y-1.5">
+              <p className="font-mono text-[13px]">0 К = −273 °C</p>
+              <p className="font-mono text-[13px]">1 а.е.м. = 1,66 · 10⁻²⁷ кг</p>
+              <p className="font-mono text-[13px]">1 а.е.м. эквивалентна 931,5 МэВ</p>
+              <p className="font-mono text-[13px]">1 эВ = 1,6 · 10⁻¹⁹ Дж</p>
+            </div>
+          </section>
+
+          {/* Масса частиц */}
+          <section>
+            <h3 className="text-sm font-semibold uppercase tracking-wide text-slate-900">Масса частиц</h3>
+            <div className="mt-2 space-y-1.5">
+              <p className="font-mono text-[13px]">электрон: 9,1 · 10⁻³¹ кг ≈ 5,5 · 10⁻⁴ а.е.м.</p>
+              <p className="font-mono text-[13px]">протон: 1,673 · 10⁻²⁷ кг ≈ 1,007 а.е.м.</p>
+              <p className="font-mono text-[13px]">нейтрон: 1,675 · 10⁻²⁷ кг ≈ 1,008 а.е.м.</p>
+            </div>
+          </section>
+
+          {/* Плотность */}
+          <section>
+            <h3 className="text-sm font-semibold uppercase tracking-wide text-slate-900">
+              Плотность (кг/м³)
+            </h3>
+            <div className="mt-2 grid gap-1.5 sm:grid-cols-2">
+              <p className="font-mono text-[13px]">подсолнечное масло — 900</p>
+              <p className="font-mono text-[13px]">вода — 1000</p>
+              <p className="font-mono text-[13px]">алюминий — 2700</p>
+              <p className="font-mono text-[13px]">древесина (сосна) — 400</p>
+              <p className="font-mono text-[13px]">железо — 7800</p>
+              <p className="font-mono text-[13px]">керосин — 800</p>
+              <p className="font-mono text-[13px]">ртуть — 13 600</p>
+            </div>
+          </section>
+
+          {/* Удельная теплоёмкость */}
+          <section>
+            <h3 className="text-sm font-semibold uppercase tracking-wide text-slate-900">
+              Удельная теплоёмкость (Дж/(кг·К))
+            </h3>
+            <div className="mt-2 grid gap-1.5 sm:grid-cols-2">
+              <p className="font-mono text-[13px]">вода — 4,2 · 10³</p>
+              <p className="font-mono text-[13px]">лёд — 2,1 · 10³</p>
+              <p className="font-mono text-[13px]">железо — 460</p>
+              <p className="font-mono text-[13px]">свинец — 130</p>
+              <p className="font-mono text-[13px]">алюминий — 900</p>
+              <p className="font-mono text-[13px]">медь — 380</p>
+              <p className="font-mono text-[13px]">чугун — 500</p>
+            </div>
+          </section>
+
+          {/* Удельная теплота */}
+          <section>
+            <h3 className="text-sm font-semibold uppercase tracking-wide text-slate-900">Удельная теплота</h3>
+            <div className="mt-2 space-y-1.5">
+              <p className="font-mono text-[13px]">парообразования воды: 2,3 · 10⁶ Дж/кг</p>
+              <p className="font-mono text-[13px]">плавления свинца: 2,5 · 10⁴ Дж/кг</p>
+              <p className="font-mono text-[13px]">плавления льда: 3,3 · 10⁵ Дж/кг</p>
+            </div>
+          </section>
+
+          {/* Нормальные условия */}
+          <section>
+            <h3 className="text-sm font-semibold uppercase tracking-wide text-slate-900">
+              Нормальные условия
+            </h3>
+            <div className="mt-2">
+              <p className="font-mono text-[13px]">давление — 10⁵ Па, температура — 0 °C</p>
+            </div>
+          </section>
+
+          {/* Молярная масса */}
+          <section>
+            <h3 className="text-sm font-semibold uppercase tracking-wide text-slate-900">
+              Молярная масса (кг/моль)
+            </h3>
+            <div className="mt-2 grid gap-1.5 sm:grid-cols-2">
+              <p className="font-mono text-[13px]">азот — 28 · 10⁻³</p>
+              <p className="font-mono text-[13px]">гелий — 4 · 10⁻³</p>
+              <p className="font-mono text-[13px]">аргон — 40 · 10⁻³</p>
+              <p className="font-mono text-[13px]">кислород — 32 · 10⁻³</p>
+              <p className="font-mono text-[13px]">водород — 2 · 10⁻³</p>
+              <p className="font-mono text-[13px]">литий — 6 · 10⁻³</p>
+              <p className="font-mono text-[13px]">воздух — 29 · 10⁻³</p>
+              <p className="font-mono text-[13px]">неон — 20 · 10⁻³</p>
+              <p className="font-mono text-[13px]">вода — 18 · 10⁻³</p>
+              <p className="font-mono text-[13px]">углекислый газ — 44 · 10⁻³</p>
+            </div>
+          </section>
         </div>
       )}
     </Card>
   );
-}
+});
 
 function BlankModeBanner({
   mode,

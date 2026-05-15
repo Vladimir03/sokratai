@@ -1100,6 +1100,52 @@ supabase/functions/_shared/subject-rubrics/
 
 **Спека:** `~/.claude/plans/1-functional-meteor.md` Phase 2 раздел.
 
+### 20. Mock-exams subject-rubric integration + Шапка ЕГЭ 2026 (2026-05-15, Phase 4)
+
+Phase 4 расширения subject-rubric Phase 2 (§19) на mock-exams pipeline. До Phase 4 `supabase/functions/_shared/mock-exam-prompts.ts::buildMockExamPart2Prompt` использовал hardcoded `«Ты — эксперт ЕГЭ по физике…»` + inline `buildCriteriaBlock` с упрощённым ФИПИ I-IV summary, не интегрировано с реальной ФИПИ 2026 методологией из `physics-ege.ts` (которая содержит детальные критерии для № 21 качественной, № 22-23 / 24-25 расчётных + № 26 двух-критериальной).
+
+**Что сделано в Phase 4:**
+
+1. **`_shared/mock-exam-prompts.ts` стал третьим consumer'ом `resolveSubjectRubric`** (после `homework-api::guided_ai.ts` и `chat/index.ts`):
+   - `BuildPart2PromptInput` расширен `subject?: string` + `exam_type?: 'ege' | 'oge'` (default `'physics' + 'ege'` для backward-compat с pilot attempts Egor 2026-05-15).
+   - Импортирован `resolveSubjectRubric` из `./subject-rubrics/index.ts`. Хелпер вызывается с `task_kind: 'extended'` и `tutor_rubric: null` (mock-exams не имеют tutor rubric override — это контракт ФИПИ-варианта).
+   - Hardcoded `«Ты — эксперт ЕГЭ по физике…»` заменён на `rubric.role` (из `physics-ege.ts::ROLE`).
+   - `rubric.methodology` инжектируется в systemContent **перед** legacy `buildCriteriaBlock` (compact ФИПИ I-IV summary оставлен как backward-compat slot — frozen JSON output contract `elements_check: {I, II, III, IV}` остаётся неизменным).
+
+2. **`mock-exam-grade/index.ts` передаёт `subject: 'physics' + exam_type: 'ege'`** в `buildMockExamPart2Prompt`. Hardcoded для mock-exams-v1 variant-1 (физика). Когда добавится non-physics вариант — extend `mock_exam_variants.subject` колонкой (см. tech debt ниже).
+
+3. **`StudentMockExam.tsx::ReferencesPanel()` расширен с 3 констант до полной Шапки ЕГЭ 2026** из официального PDF (Vladimir прислал 2026-05-15):
+   - Инструкция (3ч 55мин, 26 заданий, 3 образца записи ответов для разных типов задач)
+   - 9 справочных таблиц: десятичные приставки (10 единиц), константы (11 шт включая π / g / G / R / k_Больцмана / N_A / c / k_Кулона / ε₀ / e / h), соотношения единиц (T/а.е.м./эВ), масса частиц (электрон/протон/нейтрон), плотность (7 веществ), удельная теплоёмкость (7 веществ), удельная теплота (3 процесса), нормальные условия, молярная масса (10 газов)
+   - `React.memo` обёртка (статические справочные данные)
+   - Один collapsible top-level `<details>` (text-base 15px, iOS-safe)
+
+4. **`BLANK_PDF_URL` обновлён** с `ege-physics-2025.pdf` → `ege-physics-2026.pdf` (4 страницы: бланк № 1 + бланк № 2 лист 1 + бланк № 2 лист 2 + дополнительный). Старый PDF не удаляется (backward compat если кто-то закешировал ссылку).
+
+5. **`StudentMockExamResult.tsx::Part1Card` default expanded = true.** Таблица разбалловки (№ / Твой ответ / Правильный / Балл + иконки ✓/✗) показывается сразу при открытии result page, ученик не должен кликать «Показать таблицу». Toggle сохранён для возможности скрыть длинную таблицу.
+
+**Manual asset upload (НЕ автоматизировано в коде):**
+- `Бланки ЕГЭ 2026.pdf` загружен в Supabase Storage bucket `mock-exam-blank-templates` (public) как `ege-physics-2026.pdf`. Сделано через Supabase Studio.
+- Старый `ege-physics-2025.pdf` оставлен в bucket для backward compat (может быть закеширован браузерами / Telegram-ссылками).
+
+**Frozen invariants (КРИТИЧНО, не нарушать):**
+- `mock-exam-grade` JSON output shape — `suggested_score`, `confidence: 'low'|'medium'|'high'`, `elements_check: {I, II, III, IV}`, `flags`, `comment_for_tutor` — **frozen contract** для `TutorMockExamReview`. Phase 4 не меняет — `rubric.methodology` добавлен в system prompt ПЕРЕД legacy `buildCriteriaBlock`, чтобы модель видела одновременно компактную summary (I-IV) и детальную методологию.
+- `ai_draft_json` никогда не показывается ученику до tutor approval (CLAUDE.md §12). Не затронуто.
+- `mock_exam_attempt_part1_answers` / `mock_exam_attempt_part2_solutions` schema не меняются. Pilot attempts (Egor 2026-05-15) остаются валидными.
+- ОГЭ scope: mock-exams-v1 покрывает только ЕГЭ. Phase 4 наследует это ограничение.
+
+**При расширении на новый предмет в mock-exams (e.g. математический вариант):**
+1. Добавить миграцию `mock_exam_variants.subject` колонкой (например, default `'physics'` для backward compat).
+2. `mock-exam-grade/index.ts::handleGrade` SELECT'ит `variant.subject` и передаёт в `buildMockExamPart2Prompt` вместо hardcoded `'physics'`.
+3. Никаких изменений в `_shared/mock-exam-prompts.ts` или `resolveSubjectRubric` — модули уже subject-agnostic. Математический вариант автоматически подхватит `math-ege.ts` rubric с № 13-19 (хотя в mock-exams формат КИМ Часть 2 ≠ № 13-19 математического КИМ — потребует адаптации в `math-ege.ts::KIM_METHODOLOGIES` или новый rubric file `math-mock-ege.ts`).
+
+**Tech debt (не делаем сейчас, YAGNI до второго варианта):**
+- `mock_exam_variants.subject` колонка
+- Часть 2 разбивка с pakeта на per-kim через AI auto-detect (Vladimir решил «AI + tutor override гибрид» в UX опрос — отложено в следующий PR)
+- Upload UX упрощение с 9 слотов до 2 полей — следующий PR
+
+**Спека:** `~/.claude/plans/1-functional-meteor.md` Phase 4 раздел.
+
 ## Известные хрупкие области
 
 1. **Chat.tsx** (2000+ строк) — очень сложный компонент
