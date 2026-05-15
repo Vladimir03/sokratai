@@ -13,6 +13,7 @@
 //   НИКОГДА не возвращается ученику ни в одной стадии (TASK-5 invariant).
 
 import { supabase } from '@/lib/supabaseClient';
+import { extractApiErrorCode, extractApiErrorMessage } from '@/lib/apiErrorMessage';
 import type {
   MockExamMode,
   MockExamAnswerMethod,
@@ -66,15 +67,15 @@ async function requestStudent<T>(
   const resp = await fetch(url, { ...options, headers });
 
   if (!resp.ok) {
-    let errorBody: { error?: { code?: string; message?: string; details?: unknown } } = {};
+    let errorBody: unknown = {};
     try {
       errorBody = await resp.json();
     } catch {
       // Fall through to default.
     }
-    const code = errorBody?.error?.code ?? 'UNKNOWN';
-    const message = errorBody?.error?.message ?? `HTTP ${resp.status}`;
-    const details = errorBody?.error?.details;
+    const code = extractApiErrorCode(errorBody);
+    const message = extractApiErrorMessage(errorBody, `HTTP ${resp.status}`);
+    const details = (errorBody as { error?: { details?: unknown } } | null | undefined)?.error?.details;
     throw new StudentMockExamApiError(resp.status, code, message, details);
   }
   return resp.json() as Promise<T>;
