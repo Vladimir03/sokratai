@@ -78,6 +78,7 @@ interface ChatRequestBody {
 // frontend stores proxy URLs in DB but server-side fetches still go direct.
 import { buildAllowedSignedUrlPrefixes } from "../_shared/image-domains.ts";
 import { SUPABASE_PROXY_URL } from "../_shared/proxy-url.ts";
+import { resolveSubjectRubric } from "../_shared/subject-rubrics/index.ts";
 const ALLOWED_IMAGE_DOMAINS = buildAllowedSignedUrlPrefixes([
   Deno.env.get("SUPABASE_URL") ?? "",
   SUPABASE_PROXY_URL,
@@ -1229,6 +1230,13 @@ async function processAIRequest(
   // server-side DB value WINS over client-supplied to defend against tampering — see
   // plan §«chat/index.ts server-side подтверждение».
   let resolvedSubject: string | null = (clientSubject ?? "").trim() || null;
+  // Phase 2 (2026-05-15): subject-rubric resolver inputs, hydrated from DB
+  // when guidedHomeworkAssignmentId присутствует. Tutor-controlled (никогда
+  // не доверять client). Used below for methodology block injection.
+  let resolvedExamType: "ege" | "oge" | null = null;
+  let resolvedKimNumber: number | null = null;
+  let resolvedTaskKind: "numeric" | "extended" | "proof" | null = null;
+  let resolvedRubricText: string | null = null;
   if (guidedHomeworkAssignmentId && guidedHomeworkTaskId) {
     try {
       const { data: assignmentRow, error: assignmentErr } = await adminSupabase
@@ -1252,18 +1260,20 @@ async function processAIRequest(
           user_id: userId,
         });
       } else {
-        // Server-side fetch of canonical assignment.subject — defends against
-        // client tampering. Done in parallel with taskRow fetch to keep latency.
+        // Server-side fetch of canonical assignment.subject + exam_type +
+        // task.kim_number + task.task_kind + task.rubric_text — input для
+        // subject-rubric resolver (Phase 2, 2026-05-15). Defends against
+        // client tampering. Done in parallel with taskRow fetch (latency = 0).
         const [taskRowResp, assignmentMetaResp] = await Promise.all([
           adminSupabase
             .from("homework_tutor_tasks")
-            .select("id, solution_text, solution_image_urls")
+            .select("id, solution_text, solution_image_urls, kim_number, task_kind, check_format, rubric_text")
             .eq("id", guidedHomeworkTaskId)
             .eq("assignment_id", guidedHomeworkAssignmentId)
             .maybeSingle(),
           adminSupabase
             .from("homework_tutor_assignments")
-            .select("subject")
+            .select("subject, exam_type")
             .eq("id", guidedHomeworkAssignmentId)
             .maybeSingle(),
         ]);
@@ -1278,6 +1288,30 @@ async function processAIRequest(
           if (dbSubject.length > 0) {
             // Server value wins. If client lied, we silently override.
             resolvedSubject = dbSubject;
+          }
+          // Phase 2: exam_type also hydrated from DB.
+          const dbExamType = (assignmentMetaResp.data as { exam_type?: unknown }).exam_type;
+          if (dbExamType === "ege" || dbExamType === "oge") {
+            resolvedExamType = dbExamType;
+          }
+        }
+        // Phase 2: per-task subject-rubric inputs from taskRow.
+        if (taskRow) {
+          const tk = (taskRow as { task_kind?: unknown }).task_kind;
+          if (tk === "numeric" || tk === "extended" || tk === "proof") {
+            resolvedTaskKind = tk;
+          } else if ((taskRow as { check_format?: unknown }).check_format === "detailed_solution") {
+            resolvedTaskKind = "extended";
+          } else if ((taskRow as { check_format?: unknown }).check_format === "short_answer") {
+            resolvedTaskKind = "numeric";
+          }
+          const kn = (taskRow as { kim_number?: unknown }).kim_number;
+          if (typeof kn === "number" && Number.isFinite(kn)) {
+            resolvedKimNumber = kn;
+          }
+          const rubric = (taskRow as { rubric_text?: unknown }).rubric_text;
+          if (typeof rubric === "string" && rubric.trim().length > 0) {
+            resolvedRubricText = rubric;
           }
         }
         if (taskErr) {
@@ -1461,16 +1495,35 @@ async function processAIRequest(
   // client-supplied) — see plan §«chat/index.ts server-side подтверждение».
   // Without this block, generic SYSTEM_PROMPT (focused on physics/maths
   // vocabulary) caused AI to answer French homework with «физическая величина».
+  //
+  // Phase 2 (2026-05-15): теперь инжектируем полный subject-rubric
+  // methodology block (ФИПИ / DELF / IELTS критерии + tutor_rubric merge).
+  // AI получает ту же rubric, что и в check / hint paths — консистентность
+  // grading между chat-discussion, check answer и hint request.
   if (guidedHomeworkAssignmentId && resolvedSubject) {
-    const subjectLabel = getSubjectLabelDeno(resolvedSubject);
+    const rubric = resolveSubjectRubric({
+      subject: resolvedSubject,
+      exam_type: resolvedExamType,
+      kim_number: resolvedKimNumber,
+      task_kind: resolvedTaskKind ?? "extended",
+      task_text: taskContext ?? null,
+      tutor_rubric: resolvedRubricText,
+    });
     const subjectBlock = [
       "",
       "=== ТЕКУЩИЙ КОНТЕКСТ ДЗ ===",
-      `Это guided homework chat по предмету «${subjectLabel}».`,
-      `Все подсказки, проверки и разъяснения должны быть строго из области ${subjectLabel}.`,
+      `Это guided homework chat по предмету «${rubric.subject_label}».`,
+      rubric.cefr_level ? `Целевой уровень CEFR: ${rubric.cefr_level}.` : "",
+      `Все подсказки, проверки и разъяснения должны быть строго из области ${rubric.subject_label}.`,
       "НЕ упоминай законы, величины, правила или термины из других предметов.",
-      buildSubjectExamplesLine(resolvedSubject),
-    ].join("\n");
+      rubric.hint_examples,
+      "",
+      "МЕТОДОЛОГИЯ ОЦЕНКИ (используй для проверки и подсказок, AI должен думать в этих категориях):",
+      rubric.methodology,
+      rubric.tutor_rubric_active
+        ? "ПРИОРИТЕТ: критерии репетитора (выше) важнее стандартной методологии при конфликте."
+        : "",
+    ].filter(Boolean).join("\n");
     effectiveSystemPrompt = `${effectiveSystemPrompt}\n${subjectBlock}`;
   }
 

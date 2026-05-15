@@ -19,6 +19,12 @@ import {
   MAX_TASK_IMAGES_FOR_AI,
 } from "../_shared/attachment-refs.ts";
 import { rewriteToDirect, SUPABASE_PROXY_URL } from "../_shared/proxy-url.ts";
+import {
+  getSubjectLabel as getSubjectLabelShared,
+  resolveSubjectRubric,
+  type ExamType,
+  type SubjectRubric,
+} from "../_shared/subject-rubrics/index.ts";
 
 // ─── Constants ──────────────────────────────────────────────────────────────
 
@@ -97,87 +103,20 @@ const FALLBACK_STOPWORDS = new Set([
 ]);
 
 // ─── Subject-aware prompt helpers ───────────────────────────────────────────
-// SUBJECT_LABELS_DENO mirrors SUBJECTS from src/types/homework.ts (Deno cannot
-// import TS from src/). Keep in sync when new subjects land. Fallback = raw id.
-const SUBJECT_LABELS_DENO: Record<string, string> = {
-  maths: "Математика",
-  physics: "Физика",
-  informatics: "Информатика",
-  russian: "Русский язык",
-  literature: "Литература",
-  history: "История",
-  social: "Обществознание",
-  english: "Английский язык",
-  french: "Французский язык",
-  spanish: "Испанский язык",
-  chemistry: "Химия",
-  biology: "Биология",
-  geography: "География",
-  other: "Другое",
-  math: "Математика",
-  rus: "Русский язык",
-  cs: "Информатика",
-  algebra: "Алгебра",
-  geometry: "Геометрия",
-};
+//
+// Phase 2 (2026-05-15): heavy lifting moved to `_shared/subject-rubrics/`.
+// This file keeps **thin wrappers** for backward-compat with callsite shapes
+// (buildFallbackHint signature, buildValidatedFallbackHint flow), but role +
+// methodology + hint_examples + fallback_hint now all come from
+// `resolveSubjectRubric()`. See CLAUDE.md §19 «Subject-rubric layer».
 
 function getSubjectLabelDeno(subjectId: string | null | undefined): string {
-  const id = (subjectId ?? "").trim();
-  if (!id) return "школьному предмету";
-  return SUBJECT_LABELS_DENO[id] ?? id;
+  return getSubjectLabelShared(subjectId);
 }
 
 /**
- * Subject-aware hint role line. Replaces hardcoded "Ты — физик-наставник".
- * Used in `buildHintPrompt` system content.
- */
-function buildHintRoleLine(subjectId: string | null | undefined): string {
-  const label = getSubjectLabelDeno(subjectId);
-  return `Ты — наставник по предмету «${label}». Ученик просит подсказку по задаче из домашнего задания.`;
-}
-
-/**
- * Subject-aware list of хорошо-направленных терминов/правил для подсказки.
- * Replaces hardcoded "величина (скорость, ускорение, …) или закон (Ньютон, Ом, …)".
- */
-function buildHintExamplesLine(subjectId: string | null | undefined): string {
-  switch (subjectId) {
-    case "physics":
-      return "- Упоминай конкретную величину (скорость, ускорение, сила трения, напряжение, …) или закон (Ньютон, Ом, Кирхгоф, …) из ЭТОЙ задачи";
-    case "maths":
-    case "math":
-    case "algebra":
-    case "geometry":
-      return "- Упоминай конкретную формулу, теорему или приём (Виета, разложение, замена переменной, признак подобия, …), применимый к ЭТОЙ задаче";
-    case "russian":
-    case "rus":
-      return "- Упоминай конкретное правило орфографии, пунктуации или морфологии, применимое к ЭТОЙ задаче";
-    case "literature":
-      return "- Упоминай конкретную тему, художественное средство, позицию автора или цитату, относящуюся к ЭТОЙ задаче";
-    case "english":
-    case "french":
-    case "spanish":
-      return "- Упоминай конкретное грамматическое правило, время, конструкцию или элемент лексики, нужный в ЭТОЙ задаче";
-    case "history":
-    case "social":
-      return "- Упоминай конкретное событие, термин или причинно-следственную связь, относящиеся к ЭТОЙ задаче";
-    case "informatics":
-    case "cs":
-      return "- Упоминай конкретный алгоритм, конструкцию языка или приём, применимый в ЭТОЙ задаче";
-    case "chemistry":
-      return "- Упоминай конкретную реакцию, формулу или закон, применимый в ЭТОЙ задаче";
-    case "biology":
-      return "- Упоминай конкретный процесс, термин или систему, описывающие то, о чём ЭТА задача";
-    case "geography":
-      return "- Упоминай конкретный процесс, явление или статистику, относящиеся к ЭТОЙ задаче";
-    default:
-      return "- Опирайся на конкретное правило, приём или ключевую идею, нужную в ЭТОЙ задаче";
-  }
-}
-
-/**
- * Subject-aware fallback hint когда AI отклонён валидатором. Используется
- * в `buildFallbackHint` после неудачной keyword-extraction.
+ * Subject-aware fallback hint — picks the resolver's `fallback_hint` field.
+ * Used by `buildFallbackHint` after keyword-extraction misses.
  */
 function buildSubjectFallbackHint(subjectId: string | null | undefined): string {
   switch (subjectId) {
@@ -267,6 +206,12 @@ export interface EvaluateStudentAnswerParams {
   /** Эталонное решение (фото). До 5. Inline-ятся в base64 через inlinePromptImageUrls. */
   solutionImageUrls?: string[] | null;
   subject: string;
+  /** ЕГЭ/ОГЭ — passed to subject-rubric resolver. Defaults to 'ege'. */
+  examType?: ExamType | null;
+  /** Optional `homework_tutor_tasks.kim_number` for per-KIM rubric selection. */
+  kimNumber?: number | null;
+  /** Optional `homework_tutor_tasks.task_kind` (informational for now). */
+  taskKind?: "numeric" | "extended" | "proof" | null;
   conversationHistory: GuidedConversationHistoryMessage[];
   wrongAnswerCount: number;
   hintCount: number;
@@ -300,6 +245,23 @@ export interface GenerateHintParams {
   /** Эталонное решение (фото). */
   solutionImageUrls?: string[] | null;
   subject: string;
+  /**
+   * Optional ЕГЭ/ОГЭ flag — passed to subject-rubric resolver so per-KIM
+   * methodology blocks pick the right rubric (e.g. physics № 21-26 ФИПИ I-IV).
+   * Defaults to 'ege' inside resolver when nullable.
+   */
+  examType?: ExamType | null;
+  /**
+   * Optional KIM number from `homework_tutor_tasks.kim_number`. Drives
+   * per-task rubric selection (e.g. math № 18 параметр vs № 13 уравнения).
+   */
+  kimNumber?: number | null;
+  /**
+   * Optional `homework_tutor_tasks.task_kind` (numeric / extended / proof).
+   * Currently informational only — resolver may use it in the future to
+   * pick compact vs full methodology block.
+   */
+  taskKind?: "numeric" | "extended" | "proof" | null;
   conversationHistory: GuidedConversationHistoryMessage[];
   wrongAnswerCount: number;
   hintCount: number;
@@ -1182,9 +1144,22 @@ function buildCheckPrompt(params: EvaluateStudentAnswerParams): LovableMessage[]
   const aiScoreGuidance = buildAiScoreGuidance(params.checkFormat, params.maxScore);
   const studentNameGuidance = buildStudentNameGuidance(params.studentName);
 
+  // Phase 2 (2026-05-15): subject-rubric resolver — provides per-subject
+  // role + ФИПИ / DELF / IELTS methodology block + tutor_rubric override.
+  // Replaces single-line `Предмет: X` from Phase 1 with full grading rubric.
+  const rubric: SubjectRubric = resolveSubjectRubric({
+    subject: params.subject,
+    exam_type: params.examType,
+    kim_number: params.kimNumber,
+    task_kind: params.taskKind ?? (params.checkFormat === "detailed_solution" ? "extended" : "numeric"),
+    task_text: params.taskText,
+    tutor_rubric: params.rubricText,
+  });
+
   const systemContent = [
-    "Ты проверяешь ответ ученика на задачу по домашнему заданию.",
-    `Предмет: ${params.subject}.`,
+    rubric.role,
+    `Предмет: ${rubric.subject_label}.`,
+    rubric.cefr_level ? `Целевой уровень CEFR: ${rubric.cefr_level}.` : "",
     `Условие задачи: ${clampPromptText(params.taskText)}`,
     ...graphGroundingGuidance,
     hasTaskImage ? "К задаче прикреплено изображение с условием — внимательно изучи его." : "",
@@ -1217,6 +1192,12 @@ function buildCheckPrompt(params: EvaluateStudentAnswerParams): LovableMessage[]
     "",
     "Верни ТОЛЬКО валидный JSON без markdown-обёрток и лишнего текста.",
     '{"verdict":"CORRECT"|"ON_TRACK"|"INCORRECT","feedback":"...","confidence":0.0-1.0,"error_type":"...","ai_score":0,"ai_score_comment":null}',
+    "",
+    "МЕТОДОЛОГИЯ ОЦЕНКИ ПО ПРЕДМЕТУ (используй ПРИ выставлении ai_score и распределении баллов по элементам):",
+    rubric.methodology,
+    rubric.tutor_rubric_active
+      ? "ВЫШЕ — критерии от репетитора имеют ПРИОРИТЕТ. Если они конфликтуют со стандартной методологией, следуй tutor."
+      : "",
     "",
     "ПРАВИЛА ОЦЕНКИ:",
     "",
@@ -1365,9 +1346,23 @@ function buildHintPrompt(params: GenerateHintParams): LovableMessage[] {
   const priorHints = buildPriorHintsSummary(params.conversationHistory);
   const studentLatest = getLatestStudentMessage(params.conversationHistory);
 
+  // Phase 2 (2026-05-15): subject-rubric resolver gives role / methodology /
+  // hint_examples / fallback_hint in one call. Replaces Phase 1 helper switches.
+  // Methodology block carries ФИПИ / DELF / IELTS criteria (and tutor_rubric
+  // when set) — AI uses it to score with the same rubric tutor would apply.
+  const rubric: SubjectRubric = resolveSubjectRubric({
+    subject: params.subject,
+    exam_type: params.examType,
+    kim_number: params.kimNumber,
+    task_kind: params.taskKind ?? "extended",
+    task_text: params.taskText,
+    tutor_rubric: params.rubricText,
+  });
+
   const systemContent = [
-    buildHintRoleLine(params.subject),
-    `Предмет: ${getSubjectLabelDeno(params.subject)}.`,
+    rubric.role,
+    `Предмет: ${rubric.subject_label}.`,
+    rubric.cefr_level ? `Целевой уровень CEFR: ${rubric.cefr_level}.` : "",
     "",
     "УРОВЕНЬ ПОДСКАЗКИ: 1/3",
     "- Level 1 (nudge): одним коротким вопросом направь внимание на ключевое правило, приём или элемент условия",
@@ -1377,15 +1372,18 @@ function buildHintPrompt(params: GenerateHintParams): LovableMessage[] {
     "КАТЕГОРИЧЕСКИ ЗАПРЕЩЕНО использовать фразы:",
     ...FORBIDDEN_HINT_PROMPT_LINES.map((line) => `- ${line}`),
     "- любые общие фразы без привязки к содержанию этой задачи",
-    `- любые упоминания понятий, законов или правил, не относящихся к предмету «${getSubjectLabelDeno(params.subject)}»`,
+    `- любые упоминания понятий, законов или правил, не относящихся к предмету «${rubric.subject_label}»`,
     "",
     "ОБЯЗАТЕЛЬНО:",
-    buildHintExamplesLine(params.subject),
+    rubric.hint_examples,
     "- Если задача на изображении и текст пустой — опиши что видишь и дай подсказку по видимым элементам условия",
     "- Если у тебя недостаточно контекста, лучше задай короткий вопрос о конкретном элементе условия, чем используй шаблонную фразу",
     "- Длина: 1-3 предложения, без воды",
     "- Сохрани сократический тон Level 1: мягко направь ученика к следующему шагу, а не решай за него",
     "- Не раскрывай правильный ответ ученику",
+    "",
+    "МЕТОДОЛОГИЯ ОЦЕНКИ (для понимания, какие шаги ожидаются в полном решении):",
+    rubric.methodology,
     "",
     `КОНТЕКСТ ЗАДАЧИ ({task_text}): ${taskContext}`,
     `ПРЕДЫДУЩИЕ ПОДСКАЗКИ по этой задаче ({prior_hints}): ${priorHints}`,

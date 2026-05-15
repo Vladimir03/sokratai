@@ -6362,8 +6362,16 @@ async function runStudentAnswerGrading(args: {
     solution_image_urls: string | null;
     max_score: number | null;
     check_format: string | null;
+    /** Phase 2 (2026-05-15): for subject-rubric resolver per-KIM methodology. */
+    kim_number?: number | null;
+    /** Phase 2 (2026-05-15): for subject-rubric resolver task_kind context. */
+    task_kind?: string | null;
   };
-  assignment: { subject: string | null };
+  assignment: {
+    subject: string | null;
+    /** Phase 2 (2026-05-15): ЕГЭ/ОГЭ flag for subject-rubric resolver. */
+    exam_type?: string | null;
+  };
   studentAnswer: string;
   recentMessages: Array<{
     role?: string | null;
@@ -6427,6 +6435,14 @@ async function runStudentAnswerGrading(args: {
     solutionText: task.solution_text,
     solutionImageUrls,
     subject: assignment.subject ?? "math",
+    // Phase 2 (2026-05-15) subject-rubric resolver inputs.
+    examType: (assignment.exam_type === "oge" || assignment.exam_type === "ege")
+      ? assignment.exam_type
+      : null,
+    kimNumber: typeof task.kim_number === "number" ? task.kim_number : null,
+    taskKind: (task.task_kind === "numeric" || task.task_kind === "extended" || task.task_kind === "proof")
+      ? task.task_kind
+      : null,
     conversationHistory: (recentMessages ?? []).map((m) => ({
       role: typeof m.role === "string" ? m.role : "",
       content: typeof m.content === "string" ? m.content : "",
@@ -6678,7 +6694,7 @@ async function handleCheckAnswer(
   // Load the full task (with correct_answer, rubric, reference solution)
   const { data: task } = await db
     .from("homework_tutor_tasks")
-    .select("id, order_num, task_text, task_image_url, ocr_text, correct_answer, rubric_text, rubric_image_urls, solution_text, solution_image_urls, max_score, check_format")
+    .select("id, order_num, task_text, task_image_url, ocr_text, correct_answer, rubric_text, rubric_image_urls, solution_text, solution_image_urls, max_score, check_format, task_kind, kim_number")
     .eq("id", currentState.task_id)
     .single();
 
@@ -6686,10 +6702,10 @@ async function handleCheckAnswer(
     return jsonError(cors, 500, "DB_ERROR", "Task not found");
   }
 
-  // Load assignment for subject
+  // Load assignment for subject + exam_type (subject-rubric Phase 2 — 2026-05-15)
   const { data: assignment } = await db
     .from("homework_tutor_assignments")
-    .select("subject")
+    .select("subject, exam_type")
     .eq("id", ctx.sa.assignment_id)
     .single();
 
@@ -6995,10 +7011,10 @@ async function handleStudentSubmission(
   }
   const { currentState, currentOrder } = ctx;
 
-  // 9. Assignment subject (for AI prompts).
+  // 9. Assignment subject + exam_type (for AI subject-rubric resolver, Phase 2 2026-05-15).
   const { data: assignment, error: assignmentError } = await db
     .from("homework_tutor_assignments")
-    .select("subject")
+    .select("subject, exam_type")
     .eq("id", hwId)
     .single();
   if (assignmentError || !assignment) {
@@ -7204,7 +7220,7 @@ async function handleRequestHint(
   // generic hints that ignored tutor logic. See plan: wild-swinging-nova.md.
   const { data: task } = await db
     .from("homework_tutor_tasks")
-    .select("id, order_num, task_text, task_image_url, ocr_text, correct_answer, rubric_text, rubric_image_urls, solution_text, solution_image_urls, max_score")
+    .select("id, order_num, task_text, task_image_url, ocr_text, correct_answer, rubric_text, rubric_image_urls, solution_text, solution_image_urls, max_score, check_format, task_kind, kim_number")
     .eq("id", activeState.task_id)
     .single();
 
@@ -7212,10 +7228,10 @@ async function handleRequestHint(
     return jsonError(cors, 500, "DB_ERROR", "Task not found");
   }
 
-  // Load assignment for subject (reuse saData from above)
+  // Load assignment for subject + exam_type (subject-rubric Phase 2 — 2026-05-15)
   const { data: assignment } = await db
     .from("homework_tutor_assignments")
-    .select("subject")
+    .select("subject, exam_type")
     .eq("id", studentAssignment.assignment_id)
     .single();
 
@@ -7279,6 +7295,17 @@ async function handleRequestHint(
     solutionText: task.solution_text,
     solutionImageUrls,
     subject: assignment?.subject ?? "math",
+    // Phase 2 (2026-05-15) subject-rubric resolver inputs.
+    examType: (assignment?.exam_type === "oge" || assignment?.exam_type === "ege")
+      ? assignment.exam_type
+      : null,
+    kimNumber: typeof (task as { kim_number?: unknown }).kim_number === "number"
+      ? (task as { kim_number: number }).kim_number
+      : null,
+    taskKind: (() => {
+      const tk = (task as { task_kind?: unknown }).task_kind;
+      return (tk === "numeric" || tk === "extended" || tk === "proof") ? tk : null;
+    })(),
     conversationHistory: recentMessages ?? [],
     wrongAnswerCount: (activeState.wrong_answer_count as number) ?? 0,
     hintCount: (activeState.hint_count as number) ?? 0,

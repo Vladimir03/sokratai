@@ -114,6 +114,63 @@ grep -nE "buildFallbackHint|buildHintPrompt|streamChat\\(" src/ supabase/functio
 
 **Спека:** `~/.claude/plans/1-functional-meteor.md`.
 
+### Subject-rubric layer — методология ЕГЭ 2026 (2026-05-15, Phase 2)
+
+Phase 2 расширения Phase 1: subject-aware prompts получили полную методологию ФИПИ / DELF / IELTS вместо одной hint-examples строки.
+
+**Архитектура — `supabase/functions/_shared/subject-rubrics/` модуль:**
+- `index.ts::resolveSubjectRubric({ subject, exam_type, kim_number, task_kind, task_text, tutor_rubric })` — single entry point. Возвращает `SubjectRubric { role, methodology, hint_examples, fallback_hint, subject_label, cefr_level, tutor_rubric_active }`.
+- `physics-ege.ts` — ФИПИ I-IV для № 21-26, № 21 качественная (0-3 балла).
+- `math-ege.ts` — ЕГЭ 2026 № 13-19 (Уравнения, Стерео, Неравенства, Эконом, Планиметрия, Параметр, Числа).
+- `chemistry-ege.ts` — ЕГЭ 2026 № 29-34 (ОВР, Ионный обмен, Неорг./Орг. цепочка, Расчётные).
+- `languages-ege.ts` — ЕГЭ EN № 38/39 + DELF B1/B2 + IELTS Task 1/2 (format auto-detect).
+- `cefr-detector.ts` — auto-detect B1/B2/C1 из task_text для языков.
+- `types.ts` — общие типы.
+
+**Где интегрирован resolver:**
+- `homework-api/guided_ai.ts::buildCheckPrompt` — methodology + role.
+- `homework-api/guided_ai.ts::buildHintPrompt` — role + hint_examples + methodology.
+- `chat/index.ts::processAIRequest` — subject-block с methodology + tutor priority marker.
+
+**SELECT extensions (handleCheckAnswer / handleRequestHint / handleStudentSubmission / chat):**
+- `homework_tutor_assignments` — добавлен `exam_type` (был только `subject`).
+- `homework_tutor_tasks` — добавлены `kim_number`, `task_kind`, `check_format` (где не было).
+- Pass через `EvaluateStudentAnswerParams.examType / kimNumber / taskKind` и `GenerateHintParams.examType / kimNumber / taskKind`.
+
+**Tutor rubric merge contract (КРИТИЧНО):**
+- Если `homework_tutor_tasks.rubric_text` непуст → resolver prepended его ПЕРЕД default methodology с маркером:
+  ```
+  ПРИОРИТЕТНЫЕ КРИТЕРИИ ОТ РЕПЕТИТОРА (используй ПРЕЖДЕ ВСЕГО, при конфликте они выигрывают):
+  <tutor_rubric>
+
+  ДОПОЛНИТЕЛЬНЫЕ СТАНДАРТНЫЕ КРИТЕРИИ (используй как baseline, если tutor явно их не отменил):
+  <default methodology>
+  ```
+- AI инструктирован: tutor rubric WINS over default.
+- `SubjectRubric.tutor_rubric_active: boolean` — exposed для telemetry, пока не логируется.
+
+**При расширении на новый предмет с полной методологией:**
+1. Создать `_shared/subject-rubrics/<subject>-ege.ts` mirror `chemistry-ege.ts` (или `languages-ege.ts` для не-KIM формата).
+2. Export: `build<Subject>EgeRubric(kimNumber: number | null): Omit<SubjectRubric, "tutor_rubric_active" | "cefr_level" | "subject_label">`.
+3. В `index.ts::resolveSubjectRubric` добавить branch до generic fallback.
+4. Никаких изменений в `guided_ai.ts` / `chat/index.ts` / `homework-api/index.ts` callsite — резолвер сам подхватит.
+
+**Server-side подтверждение (anti-tamper):**
+- chat path: `processAIRequest` re-fetch'ит subject/exam_type/kim_number/task_kind/rubric_text через service_role параллельно с solution fetch (Promise.all, latency overhead = 0).
+- DB value WINS over client-supplied. Ученик не может подставить `subject='physics'` для получения «физических» подсказок на чужом French ДЗ.
+
+**ОГЭ — отложено (P0 scope = ЕГЭ-only):**
+- Resolver использует ЕГЭ rubric даже когда `exam_type='oge'` — generic methodology покрывает ОГЭ adequately.
+- При запуске ОГЭ rollout: создать `physics-oge.ts` / `math-oge.ts` etc., добавить branch в `resolveSubjectRubric` на `exam_type === 'oge'`.
+
+**Источники критериев (для будущих обновлений):**
+- ФИПИ «Изменения в КИМ ЕГЭ 2026 года» (`doc.fipi.ru/.../Izmeneniya_KIM_EGE_2026.pdf`): «Изменений нет» для физики / математики / химии в 2026 → структура 2025 = 2026.
+- Математика проф ЕГЭ 2026: № 13-19 (НЕ № 12-17 — это устаревший формат до 2024 реформы).
+- Химия ЕГЭ 2026: № 29-34 (НЕ № 30-34).
+- Физика ЕГЭ 2026: № 21-26 + № 21 качественная. Финальные критерии от Vladimir в `physics-ege.ts` — заглушка ФИПИ I-IV, патч при получении материалов.
+
+**Спека:** `~/.claude/plans/1-functional-meteor.md` Phase 2.
+
 ### Эталонное решение для AI и anti-leak (2026-04-18)
 
 `homework_tutor_tasks.solution_text` + `homework_tutor_tasks.solution_image_urls` — единое tutor-only поле «Решение для AI». Видно AI на **всех 3 путях** (check / hint / chat) как референс для Сократовского ведения ученика. НИКОГДА не возвращается ученику. Миграция: `supabase/migrations/20260418120000_add_homework_task_solution.sql`. Лимит фото — `MAX_SOLUTION_IMAGES = 5`.

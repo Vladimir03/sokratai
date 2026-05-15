@@ -1007,6 +1007,92 @@ grep -nE "buildFallbackHint|buildHintPrompt|streamChat\(" src/ supabase/function
 
 **Спека:** `~/.claude/plans/1-functional-meteor.md`.
 
+### 19. Subject-rubric layer — методология ЕГЭ 2026 для всех 3 AI-путей (2026-05-15, Phase 2)
+
+Phase 2 расширения Phase 1 (§18): subject-aware AI prompts получили **полную методологию ФИПИ / DELF / IELTS** вместо одной hint-examples строки. AI теперь думает в категориях, которыми реально оценивают репетиторы и эксперты ФИПИ.
+
+**Архитектура — отдельный модуль `_shared/subject-rubrics/`:**
+
+```
+supabase/functions/_shared/subject-rubrics/
+├── index.ts         — resolveSubjectRubric() entry point + getSubjectLabel
+├── types.ts         — SubjectRubricInput / SubjectRubric / CefrLevel
+├── cefr-detector.ts — auto-detect B1/B2/C1 из task_text (DELF / IELTS / TOEFL / ЕГЭ / ОГЭ)
+├── physics-ege.ts   — ФИПИ I-IV для № 21-26, № 21 качественная (0-3)
+├── math-ege.ts      — ЕГЭ 2026 № 13-19 (Уравнения, Стерео, Неравенства, Эконом, Планиметрия, Параметр, Числа)
+├── chemistry-ege.ts — ЕГЭ 2026 № 29-34 (ОВР, Ионный обмен, Неорг./Орг. цепочка, Расчётные)
+└── languages-ege.ts — ЕГЭ EN № 38/39 (К1-К3/К1-К5) + DELF B1/B2 (8 критериев) + IELTS Task 1/2 (band 1-9)
+```
+
+`resolveSubjectRubric({ subject, exam_type, kim_number, task_kind, task_text, tutor_rubric })` возвращает `SubjectRubric { role, methodology, hint_examples, fallback_hint, subject_label, cefr_level, tutor_rubric_active }`. Один call per prompt build — используется на всех трёх AI-путях.
+
+**Источники критериев (фиксация для будущих обновлений 2027+):**
+- **Физика / Математика / Химия:** ФИПИ «Изменения в КИМ ЕГЭ 2026 года» (`doc.fipi.ru/.../Izmeneniya_KIM_EGE_2026.pdf`) явно говорит: «Изменений нет» по этим предметам в 2026. Структура 2025 = 2026. Если в 2027 ФИПИ изменит критерии — обновить соответствующий `*-ege.ts` файл, никаких миграций / БД-патчей.
+- **Математика ЕГЭ 2026** — № 13-19 (НЕ № 12-17, это устаревший формат до 2024 реформы). Часть 1 № 1-12 (краткий), Часть 2 № 13-19 (развёрнутый).
+- **Химия ЕГЭ 2026** — № 29-34 (НЕ № 30-34). Часть 1 № 1-28, Часть 2 № 29-34.
+- **Физика ЕГЭ 2026** — № 21-26 (ФИПИ I-IV + № 21 качественная 0-3). Ждём от Vladimir финальных critерий — текущая `physics-ege.ts` базовая, патч при получении.
+
+**P0 scope (Phase 2 2026-05-15):**
+- ✅ Физика, математика, химия, языки — все 4 предмета с full ЕГЭ methodology.
+- ❌ ОГЭ — отложено (структура 2026 ОГЭ ещё не уточнена для всех предметов; для физики ОГЭ 2026 = 22 задачи, не 25). Resolver использует ЕГЭ rubric даже когда `exam_type='oge'` — generic methodology покрывает ОГЭ adequately.
+- ✅ Tutor `rubric_text` override — если непуст, prepended ПЕРЕД default methodology с маркером «ПРИОРИТЕТНЫЕ КРИТЕРИИ ОТ РЕПЕТИТОРА (при конфликте они выигрывают)»; AI инструктирован следовать tutor first.
+- ✅ Auto-inject — даже когда `tutor_rubric` пуст, всегда инжектируется default ФИПИ / DELF / IELTS rubric. Никаких UI toggle'ов, минимум friction для тутора.
+- ✅ CEFR auto-detect для языков — regex parsing task_text (`DELF B1` / `B2.2` / `IELTS 6.5` / `ЕГЭ` ≈ B2 / `ОГЭ` ≈ B1 / default B1). Поле `cefr_level` отображается в system prompt.
+
+**Где интегрировано:**
+- `homework-api/guided_ai.ts::buildCheckPrompt` — methodology block после «ПРАВИЛА ОЦЕНКИ», role заменяет hardcoded «Ты проверяешь ответ…».
+- `homework-api/guided_ai.ts::buildHintPrompt` — role + hint_examples + методология после «ОБЯЗАТЕЛЬНО».
+- `homework-api/guided_ai.ts::buildFallbackHint` — subject-aware fallback (Phase 1 fix остаётся актуален).
+- `chat/index.ts::processAIRequest` — subject-block инжектирует полный methodology + tutor priority marker. SELECT расширен на `homework_tutor_assignments.exam_type` + `homework_tutor_tasks.kim_number/task_kind/rubric_text` (параллельно с существующим solution fetch, latency overhead = 0).
+- `homework-api/index.ts::handleCheckAnswer` + `handleRequestHint` — SELECT расширены на те же поля, прокинуты в `evaluateStudentAnswer` / `generateHint` через новые параметры `examType / kimNumber / taskKind` в `EvaluateStudentAnswerParams` / `GenerateHintParams`.
+
+**Per-subject coverage details:**
+
+**Физика ЕГЭ 2026:**
+- № 21 качественная (0-3): правильный ответ + полное объяснение / + один недочёт / без объяснения / неверный.
+- № 22-26 (2-4 балла): ФИПИ I-IV — записан закон (I) + обозначения «дано» (II) + преобразования с подстановкой (III) + правильный численный ответ с единицами (IV).
+
+**Математика профильная ЕГЭ 2026:** № 13-19 с разной балльностью (2-4 балла); каждая задача имеет полные критерии (например, № 13 «решение И отбор корней», № 18 «найти все значения параметра», № 19 «оценка + пример с обоснованием»).
+
+**Химия ЕГЭ 2026:** № 29-34 с поэлементной разбивкой (по 1 баллу за каждое уравнение в цепочке, по 1 баллу за элемент в расчётной).
+
+**Языки:**
+- ЕГЭ EN № 38 (письмо, 180-200 слов, К1-К3, 6 баллов).
+- ЕГЭ EN № 39 (эссе, 200-250 слов, К1-К5, 14 баллов).
+- DELF B1 production écrite (160-180 mots, 8 критериев, 25 баллов).
+- DELF B2 production écrite (250 mots, те же 8 критериев строже).
+- IELTS Writing Task 1 (граф/диаграмма, 150+ слов, band 1-9, 4 критерия — Task Achievement / Coherence / Lexical / Grammar).
+- IELTS Writing Task 2 (эссе, 250+ слов, band 1-9, 4 критерия — Task Response / Coherence / Lexical / Grammar).
+- Format auto-detect по `task_text`: «DELF B1» / «Task 1» / «личное письмо» / «эссе». Fallback на generic language rubric с CEFR-aware размером.
+
+**Прочие предметы (informatics / russian / literature / history / social / biology / geography):** generic Phase-2 methodology в `index.ts::buildGenericRubric` — короче чем dedicated ЕГЭ rubric, но subject-aware с упоминанием специфических методов проверки.
+
+**Server-side подтверждение (chat path):**
+- `processAIRequest` теперь fetch'ит `homework_tutor_assignments.subject + exam_type` + `homework_tutor_tasks.kim_number / task_kind / check_format / rubric_text` параллельно с solution fetch (Promise.all). DB values WINS over client-supplied (anti-tamper).
+- Client всё ещё передаёт `subject` в body (Phase 1 contract сохранён) — но это hint, не source of truth.
+
+**Telemetry для review:**
+- `SubjectRubric.tutor_rubric_active: boolean` — exposed в return, но пока не логируется (можно добавить console.warn для tutor adoption tracking).
+- `SubjectRubric.cefr_level` — null для не-language subjects, B1/B2/C1 для языков.
+
+**При расширении на новый предмет (например, информатика с полным методологическим блоком вместо generic):**
+1. Создать `_shared/subject-rubrics/informatics-ege.ts` mirror `chemistry-ege.ts`: `ROLE` + `HINT_EXAMPLES` + `FALLBACK_HINT` + `GENERIC_METHODOLOGY` + `KIM_METHODOLOGIES` + `buildInformaticsEgeRubric()`.
+2. В `index.ts::resolveSubjectRubric` добавить ветку `subjectId === 'informatics'` перед generic fallback.
+3. Опционально расширить тип `MATH_LIKE_SUBJECTS` / `LANGUAGE_SUBJECTS` если новый предмет имеет per-task семантику.
+4. Никаких изменений в `guided_ai.ts` / `chat/index.ts` / `index.ts (homework-api)` — resolver сам подхватит.
+
+**При расширении на ОГЭ:**
+1. Создать `_shared/subject-rubrics/physics-oge.ts` (и аналогично для других предметов) с актуальной ОГЭ 2026 структурой (Vladimir подтвердит критерии).
+2. В `resolveSubjectRubric` добавить branch на `exam_type === 'oge'` для каждого предмета.
+3. Обновить doc в `.claude/rules/40-homework-system.md` — secstion «Subject-rubric layer — ОГЭ 2026».
+
+**При обновлении ФИПИ 2027:**
+- Прочитать «Изменения в КИМ ЕГЭ 2027 года» PDF на `doc.fipi.ru`.
+- Если есть изменения по subject — обновить соответствующий `*-ege.ts` файл (типы баллов / критериев). Никаких миграций / БД-патчей, всё в коде.
+- Обновить эту секцию CLAUDE.md с датой обновления.
+
+**Спека:** `~/.claude/plans/1-functional-meteor.md` Phase 2 раздел.
+
 ## Известные хрупкие области
 
 1. **Chat.tsx** (2000+ строк) — очень сложный компонент
