@@ -12,6 +12,7 @@ import {
   MAX_GUIDED_CHAT_ATTACHMENT_FILE_BYTES,
   serializeThreadAttachmentRefs,
 } from '@/lib/homeworkThreadAttachments';
+import { extractApiErrorMessage } from '@/lib/apiErrorMessage';
 
 const HOMEWORK_IMAGES_BUCKET = 'homework-images';
 const HOMEWORK_SUBMISSIONS_BUCKET = 'homework-submissions';
