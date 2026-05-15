@@ -1,31 +1,67 @@
-## Что не так
+# Fix: «HTTP 429» → дружелюбный toast по-русски
 
-На мобильном экране задачи (`/student/homework/:hwId/problem/:taskId`) справа виден вертикальный ползунок скролла во всю высоту экрана. На мобиле этого быть не должно: чат внутри карточки уже скроллится сам, а наружный скролл страницы создаёт ощущение «сломанного» layout-а и подъезжает поверх контента.
+## Симптом
 
-## Причины (две, обе нужно закрыть)
+Репетитор открыл своё ДЗ через student-view, упёрся в дневной лимит AI (free-аккаунт = 50/день в homework-контексте, см. CLAUDE.md §17). Бэкенд корректно вернул 429 с понятным payload, но фронт показал сырое «HTTP 429».
 
-1. **Скрытие скроллбара только для WebKit.** Внутренний чат `flex-1 overflow-y-auto` в `src/pages/student/HomeworkProblem.tsx` использует `[&::-webkit-scrollbar]:hidden`. Это прячет ползунок только в Chrome/Safari, но не во всех движках (включая превью Lovable, где иногда виден системный ползунок). Для Firefox/новых Chromium нужен ещё `scrollbar-width: none` и для старых Edge — `-ms-overflow-style: none`.
-2. **Страница может скроллиться целиком.** Корневой `<div>` экрана задаёт высоту через `style={{ height: vvHeight }}`, но `<html>`/`<body>` остаются со стандартным `overflow: auto`. Если браузер на мгновение возвращает `visualViewport.height` чуть больше реального окна (это бывает в превью + при свернутой клавиатуре), появляется именно «глобальный» ползунок справа во всю высоту — то, что видно на скриншотах.
+## Корень
 
-## Что сделать
+`supabase/functions/_shared/subscription-limits.ts::buildLimitReachedResponse` возвращает:
+```json
+{ "error": "limit_reached", "message": "Вы достигли дневного лимита в 50 сообщений…", "limit": 50, "messages_used": 50, "tutor_can_upgrade": false }
+```
 
-### 1. `src/pages/student/HomeworkProblem.tsx`
-- На внутреннем чат-контейнере (строка 983) добавить кросс-браузерное скрытие ползунка к существующему WebKit-варианту:
-  - класс `[scrollbar-width:none]` (Firefox / новые Chromium)
-  - класс `[-ms-overflow-style:none]` (старый Edge / IE-наследие)
-  - оставить уже существующий `[&::-webkit-scrollbar]:hidden`
-- На корневом `<div>` экрана (строка 940) добавить `overflow-hidden` — на случай если visualViewport вернёт высоту больше реальной, контент не «выпрыгнет» наружу и не вызовет body-скролл.
+Но 4 API-helper'а парсят `body?.error?.message`, как если бы `error` был объектом `{message}`. Поскольку `error` — строка, `.message` undefined → fallback `HTTP ${status}`.
 
-### 2. Залочить скролл `<html>`/`<body>` пока экран задачи смонтирован
-В `HomeworkProblem.tsx` добавить `useEffect`, который на mount ставит `document.documentElement.style.overflow = 'hidden'` + `document.body.style.overflow = 'hidden'`, а на unmount — восстанавливает прежние значения. Это гарантирует, что глобального ползунка не будет ни в одном браузере, ни в превью Lovable, ни в реальном мобильном Chrome/Safari при перетягивании address-bar. Применяется только к этому экрану — другие страницы (список ДЗ, лендинг) продолжат скроллиться как обычно.
+Затронутые места (одинаковая ошибка):
+- `src/lib/studentHomeworkApi.ts` — 3 `let message = "HTTP ${response.status}"` (строки 131, 192, 520). **Это и есть источник toast'а в guided homework chat / submission flow.**
+- `src/lib/mockExamApi.ts:71`
+- `src/lib/studentMockExamApi.ts:76`
+- `src/lib/tutorHomeworkApi.ts:260`
 
-### Что НЕ трогаем
-- `useVisualViewportHeight.ts` — логика расчёта высоты под клавиатуру осталась корректной (preview-QA #8 fix).
-- `ProblemContext`, `NumericAnswerComposer`, `ComposerMobile`, `SubmitSheet` — у них своих скролл-контейнеров нет, проблема не там.
-- Desktop / tablet чат `GuidedHomeworkWorkspace` — затрагиваются только мобильный экран `/student/homework/:hwId/problem/:taskId`.
+`streamChat.ts` (для `/chat` discuss-path) уже обрабатывает 429 правильно — там не трогаем.
 
-## Smoke-проверка после применения
-1. Mobile (≤768px), `/student/homework/<hwId>/problem/<taskId>`: справа ползунка нет ни при свёрнутом, ни при развёрнутом ProblemContext, ни при длинной ленте сообщений.
-2. Чат внутри карточки скроллится свайпом, как раньше; авто-скролл к низу при новых сообщениях работает.
-3. Открытие/закрытие виртуальной клавиатуры → composer стоит внизу, белой полосы и ползунка нет.
-4. Возврат на `/homework` → у списка ДЗ страничный скролл снова работает (значит body-overflow корректно восстановлен).
+## Изменения
+
+### 1. Общий парсер ошибок (DRY)
+
+Добавить helper в `src/lib/apiErrorMessage.ts` (новый файл):
+
+```ts
+export function extractApiErrorMessage(body: unknown, fallback: string): string {
+  if (!body || typeof body !== 'object') return fallback;
+  const b = body as Record<string, unknown>;
+  // Top-level message (limit_reached shape)
+  if (typeof b.message === 'string' && b.message.trim()) return b.message;
+  // Nested error.message shape
+  if (b.error && typeof b.error === 'object') {
+    const msg = (b.error as Record<string, unknown>).message;
+    if (typeof msg === 'string' && msg.trim()) return msg;
+  }
+  return fallback;
+}
+```
+
+### 2. Применить в 4 API-обёртках
+
+В каждом из 4 файлов заменить блок `let message = "HTTP ${status}"; try { body = await ...; if (body?.error?.message) message = ...; } catch {}` на вызов `extractApiErrorMessage(body, \`HTTP ${status}\`)`. Поведение для уже корректных responses (`{error:{message}}`) не меняется.
+
+### 3. (Опционально) Nudge для tutor_can_upgrade
+
+В `studentHomeworkApi.ts::apiFetch` после извлечения message, если `body.error === 'limit_reached'` И `body.tutor_can_upgrade === true`, добавить к сообщению хвост: `" Попроси репетитора подключить тариф AI-старт — лимит 50/день в каждом ДЗ."` Это не «новая фича», а полнее раскрывает payload, который уже шлёт бэкенд.
+
+## Что НЕ трогаем
+
+- `_shared/subscription-limits.ts` — payload корректный.
+- Лимиты (50/день в homework / 10/день вне) — без изменений.
+- `streamChat.ts` — 429 уже обработан правильно.
+- Бэкенд edge functions — никаких миграций / редеплоев.
+
+## Деплой
+
+Только frontend (`src/lib/*`). После merge — `deploy-sokratai` на VPS Selectel (CLAUDE.md §«Production Deploy»).
+
+## QA
+
+1. Открыть ДЗ как ученик-без-премиума с уже исчерпанным лимитом → отправить сообщение в guided chat / submit задачи → toast: «Вы достигли дневного лимита в 50 сообщений. Оформите подписку для безлимитного доступа!» вместо «HTTP 429».
+2. Регрессия: 401/500 ошибки от homework-api продолжают показывать прежний текст (`error.message` shape).
