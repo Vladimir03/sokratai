@@ -1,6 +1,7 @@
 import { parseISO } from 'date-fns';
 import { supabase } from '@/lib/supabaseClient';
 import type { HomeworkThread } from '@/types/homework';
+import { extractApiErrorCode, extractApiErrorMessage } from '@/lib/apiErrorMessage';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -250,15 +251,15 @@ async function requestHomeworkApi<T>(
   });
 
   if (!resp.ok) {
-    let errorBody: { error?: { code?: string; message?: string; details?: unknown } } = {};
+    let errorBody: unknown = {};
     try {
       errorBody = await resp.json();
     } catch {
       // ignore parse error
     }
-    const code = errorBody?.error?.code ?? 'UNKNOWN';
-    const message = errorBody?.error?.message ?? `HTTP ${resp.status}`;
-    const details = errorBody?.error?.details;
+    const code = extractApiErrorCode(errorBody);
+    const message = extractApiErrorMessage(errorBody, `HTTP ${resp.status}`);
+    const details = (errorBody as { error?: { details?: unknown } } | null | undefined)?.error?.details;
     throw new HomeworkApiError(resp.status, code, message, details);
   }
 
