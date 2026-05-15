@@ -29,6 +29,10 @@ export function extractApiErrorMessage(body: unknown, fallback: string): string 
   // Append tutor upgrade nudge for limit_reached when backend says it's relevant.
   if (b.error === 'limit_reached' && b.tutor_can_upgrade === true) {
     message = `${message} Попроси репетитора подключить тариф AI-старт — лимит 50/день в каждом ДЗ.`;
+  } else if (b.error === 'limit_reached' && b.limit === 10) {
+    // Free chat-tier лимит (нет платящего тутора). Часто бьёт репетитора, который
+    // открыл своё же ДЗ под собственной учёткой как ученик — он попадает в ученический лимит.
+    message = `${message} Это лимит ученика без подписки. Если вы репетитор и открыли своё ДЗ для проверки — выйдите в кабинет репетитора, там лимит не действует.`;
   }
 
   return message;
