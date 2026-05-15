@@ -838,11 +838,14 @@ function StudentMockExamWorkspace({ data }: { data: StudentMockExamAssignmentVie
   const [blankPhoto, setBlankPhoto] = useState<PhotoState>(() =>
     createEmptyPhoto(data.attempt.blank_photo_url),
   );
-  // Fallback photo для случая «решал не на ФИПИ бланке» — single slot.
-  const [part1FallbackPhoto, setPart1FallbackPhoto] = useState<PhotoState>(() =>
-    createEmptyPhoto(data.attempt.part1_blank_photo_url),
-  );
-  const [part2Photos, setPart2Photos] = useState<Record<number, PhotoState>>(() => {
+  // Phase 5 (2026-05-15): Часть 2 теперь только bulk-pack (до 7 фото общим
+  // пакетом). Per-task `part2Photos` state остаётся для backward compat с
+  // существующими (pilot) attempts — старые записи всё ещё имеют photo_url
+  // per-kim, их рендерим в read-only viewer в TutorMockExamReview. Для новых
+  // attempts pre-populate из data.part2_solutions всё ещё нужен — backend
+  // может вернуть photo_url для backward compat. UI больше не рендерит
+  // per-task слоты загрузки.
+  const [part2Photos] = useState<Record<number, PhotoState>>(() => {
     const initial: Record<number, PhotoState> = {};
     for (const row of data.part2_solutions) {
       initial[row.kim_number] = createEmptyPhoto(row.photo_url);
@@ -851,7 +854,8 @@ function StudentMockExamWorkspace({ data }: { data: StudentMockExamAssignmentVie
   });
   // Bulk pack Часть 2 — до 7 фото общим пакетом. URL'ы приходят resolved
   // signed-URL'ами от backend; локальное состояние держит uploading сторонние
-  // лимиты и errors.
+  // лимиты и errors. Phase 5 — теперь это ЕДИНСТВЕННЫЙ путь загрузки Часть 2
+  // (заменил 6 per-kim слотов + старый optional "общий пакет").
   const [part2BulkPhotos, setPart2BulkPhotos] = useState<string[]>(
     () => data.attempt.part2_bulk_photo_urls ?? [],
   );
@@ -866,7 +870,6 @@ function StudentMockExamWorkspace({ data }: { data: StudentMockExamAssignmentVie
   );
   const [methodSwitching, setMethodSwitching] = useState(false);
   const [methodError, setMethodError] = useState<string | null>(null);
-  const [fallbackOpen, setFallbackOpen] = useState(false);
   const objectUrlsRef = useRef<string[]>([]);
 
   const tasks = useMemo(
@@ -939,80 +942,17 @@ function StudentMockExamWorkspace({ data }: { data: StudentMockExamAssignmentVie
     [data.attempt.id, registerObjectUrl],
   );
 
-  const uploadPart2 = useCallback(
-    async (kimNumber: number, file: File) => {
-      const objectUrl = registerObjectUrl(file);
-      setPart2Photos((prev) => ({
-        ...prev,
-        [kimNumber]: { url: null, objectUrl, file, status: 'uploading', error: null },
-      }));
-      try {
-        const result = await uploadMockExamPart2Photo(data.attempt.id, kimNumber, file);
-        setPart2Photos((prev) => ({
-          ...prev,
-          [kimNumber]: {
-            url: result.signed_url,
-            objectUrl: result.signed_url ? null : objectUrl,
-            file: null,
-            status: 'saved',
-            error: null,
-          },
-        }));
-      } catch (err) {
-        setPart2Photos((prev) => ({
-          ...prev,
-          [kimNumber]: {
-            ...(prev[kimNumber] ?? createEmptyPhoto()),
-            file,
-            status: 'error',
-            error: err instanceof Error ? err.message : 'Не удалось загрузить фото',
-          },
-        }));
-      }
-    },
-    [data.attempt.id, registerObjectUrl],
-  );
-
   const retryBlank = useCallback(() => {
     if (blankPhoto.file) void uploadBlank(blankPhoto.file);
   }, [blankPhoto.file, uploadBlank]);
 
-  const retryPart2 = useCallback(
-    (kimNumber: number) => {
-      const file = part2Photos[kimNumber]?.file;
-      if (file) void uploadPart2(kimNumber, file);
-    },
-    [part2Photos, uploadPart2],
-  );
-
-  const uploadPart1Fallback = useCallback(
-    async (file: File) => {
-      const objectUrl = registerObjectUrl(file);
-      setPart1FallbackPhoto({ url: null, objectUrl, file, status: 'uploading', error: null });
-      try {
-        const result = await uploadMockExamPart1FallbackPhoto(data.attempt.id, file);
-        setPart1FallbackPhoto({
-          url: result.signed_url,
-          objectUrl: result.signed_url ? null : objectUrl,
-          file: null,
-          status: 'saved',
-          error: null,
-        });
-      } catch (err) {
-        setPart1FallbackPhoto((prev) => ({
-          ...prev,
-          file,
-          status: 'error',
-          error: err instanceof Error ? err.message : 'Не удалось загрузить фото',
-        }));
-      }
-    },
-    [data.attempt.id, registerObjectUrl],
-  );
-
-  const retryPart1Fallback = useCallback(() => {
-    if (part1FallbackPhoto.file) void uploadPart1Fallback(part1FallbackPhoto.file);
-  }, [part1FallbackPhoto.file, uploadPart1Fallback]);
+  // Phase 5 (2026-05-15): removed `uploadPart2 / retryPart2 / uploadPart1Fallback /
+  // retryPart1Fallback` callbacks — UI больше не рендерит per-task слоты Часть 2
+  // и fallback-фото Часть 1. Backend endpoints (`uploadMockExamPart2Photo` +
+  // `uploadMockExamPart1FallbackPhoto`) намеренно ОСТАВЛЕНЫ работающими для
+  // backward compat с pilot attempts (Egor 2026-05-15) — TutorMockExamReview
+  // продолжает читать их `photo_url` для read-only показа. Новые attempts
+  // используют только bulk-pack (uploadPart2Bulk ниже).
 
   const MAX_BULK_PART2_PHOTOS = 7;
 
@@ -1064,16 +1004,15 @@ function StudentMockExamWorkspace({ data }: { data: StudentMockExamAssignmentVie
     const value = autosave.answers[task.kim_number];
     return typeof value === 'string' && value.trim().length > 0;
   }).length;
-  const uploadedPart2Count = part2Tasks.filter((task) => {
-    const photo = part2Photos[task.kim_number];
-    return Boolean(photo?.url || photo?.objectUrl);
-  }).length;
+  // Phase 5 (2026-05-15): upload счётчики основаны только на bulk Часть 2 +
+  // blankPhoto Часть 1. Per-task `part2Photos[*]` остаются как backward-compat
+  // read-only state для pilot attempts, но НЕ участвуют в submit / sticky footer.
   const failedUploadCount =
     (blankPhoto.status === 'error' ? 1 : 0) +
-    part2Tasks.filter((task) => part2Photos[task.kim_number]?.status === 'error').length;
+    (bulkUploadStatus === 'error' ? 1 : 0);
   const uploadingCount =
     (blankPhoto.status === 'uploading' ? 1 : 0) +
-    part2Tasks.filter((task) => part2Photos[task.kim_number]?.status === 'uploading').length;
+    (bulkUploadStatus === 'uploading' ? 1 : 0);
 
   const handleSubmit = async () => {
     setSubmitError(null);
@@ -1117,8 +1056,11 @@ function StudentMockExamWorkspace({ data }: { data: StudentMockExamAssignmentVie
                   {getExamTitle(data)}
                 </h1>
                 <p className="mt-2 text-sm text-slate-500">
-                  {getModeLabel(data.assignment.mode)} · {tasks.length} задач · Часть 1: {answeredPart1Count}/
-                  {part1Tasks.length} · Часть 2: {uploadedPart2Count}/{part2Tasks.length} фото
+                  {getModeLabel(data.assignment.mode)} · {tasks.length} задач · Часть 1:{' '}
+                  {answerMethod === 'form'
+                    ? `${answeredPart1Count}/${part1Tasks.length}`
+                    : (blankPhoto.url ? 'фото' : '—')}
+                  {' · '}Часть 2: {part2BulkPhotos.length}/{MAX_BULK_PART2_PHOTOS} фото
                 </p>
                 <div className="mt-3 flex flex-wrap items-center gap-2">
                   {answerMethod && (
@@ -1181,12 +1123,14 @@ function StudentMockExamWorkspace({ data }: { data: StudentMockExamAssignmentVie
                 <h2 className="text-lg font-semibold text-slate-900">Часть 1</h2>
                 <p className="text-sm text-slate-500">
                   {answerMethod === 'blank'
-                    ? 'Заполняй на ФИПИ-бланке от руки. Фото загрузишь выше после.'
+                    ? 'Заполняй на ФИПИ-бланке от руки. Фото бланка загружено в верхнем блоке. Цифровые поля скрыты — репетитор проверит ответы Часть 1 по фото.'
                     : 'Вводи ответы сразу. Каждое изменение сохраняется автоматически.'}
                 </p>
               </div>
               <span className="rounded-md bg-slate-100 px-3 py-1 text-sm font-medium text-slate-700">
-                {answeredPart1Count}/{part1Tasks.length}
+                {answerMethod === 'form'
+                  ? `${answeredPart1Count}/${part1Tasks.length}`
+                  : (blankPhoto.url ? 'фото загружено' : 'нет фото')}
               </span>
             </div>
             {answerMethod === 'form' && part1Tasks.map((task) => (
@@ -1200,86 +1144,43 @@ function StudentMockExamWorkspace({ data }: { data: StudentMockExamAssignmentVie
                 disabled={isFinal}
               />
             ))}
-            {answerMethod === 'blank' && (
-              <Card className="border-emerald-200 bg-emerald-50/50 shadow-none">
-                <CardContent className="p-4 text-sm text-emerald-900">
-                  Цифровые поля скрыты — ответы пишешь на ФИПИ-бланке. Если решал на черновике или в тетради,
-                  ниже можно загрузить отдельное фото своих ответов Часть 1.
-                </CardContent>
-              </Card>
-            )}
-
-            {/* Fallback Часть 1 photo — collapsible, доступен в обоих режимах */}
-            <Card className="border-slate-200 bg-white shadow-none">
-              <button
-                type="button"
-                className="flex w-full min-h-11 touch-manipulation items-center justify-between gap-2 px-4 py-3 text-left"
-                onClick={() => setFallbackOpen((v) => !v)}
-                aria-expanded={fallbackOpen}
-              >
-                <div>
-                  <p className="text-sm font-semibold text-slate-900">
-                    Загрузить фото Части 1 отдельно
-                  </p>
-                  <p className="text-xs text-slate-500">
-                    На случай если решал на черновике / в тетради вместо ФИПИ-бланка
-                  </p>
-                </div>
-                <ChevronDown className={cn('h-5 w-5 text-slate-500 transition-transform', fallbackOpen && 'rotate-180')} />
-              </button>
-              {fallbackOpen && (
-                <div className="border-t border-slate-100 px-4 py-4">
-                  <PhotoUploadBox
-                    kind="blank"
-                    kimNumber={null}
-                    title="Фото ответов Часть 1 (не на ФИПИ бланке)"
-                    state={part1FallbackPhoto}
-                    onFileSelected={(file) => void uploadPart1Fallback(file)}
-                    onRetry={retryPart1Fallback}
-                    disabled={isFinal}
-                    compact
-                  />
-                </div>
-              )}
-            </Card>
+            {/* В режиме «Бланк ФИПИ» (answerMethod==='blank') цифровые поля СКРЫТЫ —
+                ученик пишет ответы на распечатанном бланке (фото сверху через
+                BlankModeBanner). Auto-check Часть 1 в blank-mode не запускается;
+                tutor вручную выставляет баллы Часть 1 через /part1-manual-score. */}
           </section>
 
           <section className="mt-8 space-y-3">
             <div className="flex flex-wrap items-end justify-between gap-3">
               <div>
                 <h2 className="text-lg font-semibold text-slate-900">Часть 2</h2>
-                <p className="text-sm text-slate-500">Загрузи одно фото решения на каждое задание. Если фото не ушло, нажми «Повторить».</p>
+                <p className="text-sm text-slate-500">
+                  Загрузи все решения задач 21–26 одним пакетом (до {MAX_BULK_PART2_PHOTOS} фото).
+                  Можно сфотографировать каждую задачу отдельно или весь лист с несколькими задачами.
+                  AI и репетитор сами разберут, где какая задача.
+                </p>
               </div>
-              <span className="rounded-md bg-amber-100 px-3 py-1 text-sm font-medium text-amber-900">
-                {uploadedPart2Count}/{part2Tasks.length} фото
+              <span className="rounded-md bg-slate-100 px-3 py-1 text-sm font-medium text-slate-700">
+                {part2BulkPhotos.length}/{MAX_BULK_PART2_PHOTOS} фото
               </span>
             </div>
-            {part2Tasks.map((task) => (
-              <Part2TaskCard
-                key={task.id}
-                task={task}
-                state={part2Photos[task.kim_number] ?? createEmptyPhoto()}
-                imageUrls={imagesByKim[task.kim_number] ?? []}
-                onFileSelected={(file) => void uploadPart2(task.kim_number, file)}
-                onRetry={() => retryPart2(task.kim_number)}
-                disabled={isFinal}
-              />
-            ))}
 
-            {/* Bulk pack — до 7 фото общим pack'ом, в дополнение к per-task */}
-            <Card className="border-amber-200 bg-amber-50/50 shadow-none">
+            {/* Phase 5 (2026-05-15): ОДНО bulk-поле Часть 2 — замена 6 per-kim слотов
+                + старого "общего пакета". Backend AI grader получает все фото одним
+                pass'ом, сам распределяет по задачам № 21-26. Tutor в review может
+                перепривязать фото к нужной задаче если AI ошибся. */}
+            <Card className="border-slate-200 bg-white shadow-none">
               <CardContent className="p-4 sm:p-5">
                 <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
                   <div>
-                    <p className="text-sm font-semibold text-amber-950">
-                      Или загрузи все решения Части 2 одним пакетом
+                    <p className="text-sm font-semibold text-slate-900">
+                      Фото решений Части 2 (задачи № 21–26)
                     </p>
-                    <p className="text-xs text-amber-800">
-                      До {MAX_BULK_PART2_PHOTOS} фото. Удобно если ты фотографировал один лист с несколькими задачами.
-                      Можно использовать вместе со слотами по каждой задаче выше.
+                    <p className="text-xs text-slate-500">
+                      До {MAX_BULK_PART2_PHOTOS} фото. JPG / PNG / WebP / HEIC, до 10 МБ каждое.
                     </p>
                   </div>
-                  <span className="rounded-full bg-amber-100 px-2.5 py-0.5 text-xs font-semibold text-amber-900">
+                  <span className="rounded-full bg-slate-100 px-2.5 py-0.5 text-xs font-semibold text-slate-700">
                     {part2BulkPhotos.length}/{MAX_BULK_PART2_PHOTOS}
                   </span>
                 </div>
@@ -1345,11 +1246,16 @@ function StudentMockExamWorkspace({ data }: { data: StudentMockExamAssignmentVie
           <div className="mx-auto flex max-w-5xl flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div className="text-sm text-slate-600">
               <span>
-                Часть 1: <strong className="text-slate-900">{answeredPart1Count}/{part1Tasks.length}</strong>
+                Часть 1:{' '}
+                <strong className="text-slate-900">
+                  {answerMethod === 'form'
+                    ? `${answeredPart1Count}/${part1Tasks.length}`
+                    : (blankPhoto.url ? 'фото загружено' : 'нет фото')}
+                </strong>
               </span>
               <span className="mx-2 text-slate-300">·</span>
               <span>
-                Часть 2: <strong className="text-slate-900">{uploadedPart2Count}/{part2Tasks.length} фото</strong>
+                Часть 2: <strong className="text-slate-900">{part2BulkPhotos.length}/{MAX_BULK_PART2_PHOTOS} фото</strong>
               </span>
               {uploadingCount > 0 && <span className="ml-2 text-amber-700">идёт загрузка</span>}
               {failedUploadCount > 0 && <span className="ml-2 text-rose-700">есть фото с ошибкой</span>}
@@ -1383,12 +1289,8 @@ function StudentMockExamWorkspace({ data }: { data: StudentMockExamAssignmentVie
               {answerMethod === 'blank' && (
                 <p>Часть 1 (ФИПИ бланк): {blankPhoto.url ? 'фото загружено' : 'фото пока не загружено'}.</p>
               )}
-              {part1FallbackPhoto.url && (
-                <p>Доп. фото Часть 1 (черновик): загружено.</p>
-              )}
               <p>
-                Часть 2: {uploadedPart2Count} из {part2Tasks.length} per-task фото
-                {part2BulkPhotos.length > 0 && `, плюс ${part2BulkPhotos.length} в общем пакете`}.
+                Часть 2: {part2BulkPhotos.length} из {MAX_BULK_PART2_PHOTOS} фото загружено.
               </p>
               {autosave.pendingCount > 0 && <p>Перед отправкой синхронизирую {autosave.pendingCount} черновик(а).</p>}
               {failedUploadCount > 0 && <p className="text-rose-700">Есть фото с ошибкой загрузки. Их лучше повторить до сдачи.</p>}

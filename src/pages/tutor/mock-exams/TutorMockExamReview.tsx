@@ -1159,11 +1159,58 @@ function TutorMockExamReviewContent() {
         </div>
       ) : null}
 
-      {/* Часть 2 cards */}
+      {/* Phase 5 (2026-05-15): bulk-photo pack — единая лента всех фото
+          Часть 2, которые ученик загрузил пакетом. Заменяет старую модель
+          «1 фото на 1 задачу». Tutor видит все фото сразу и сам решает,
+          где какая задача (Часть 2 cards ниже остаются для backward compat
+          с pilot attempts, где per-kim photo_url ещё заполнен). */}
+      {(attempt.part2_bulk_photo_urls ?? []).length > 0 && (
+        <section className="space-y-3">
+          <h2 className="text-lg font-semibold tracking-tight">
+            Часть 2 — фото от ученика ({(attempt.part2_bulk_photo_urls ?? []).length})
+          </h2>
+          <Card>
+            <CardContent className="py-4">
+              <p className="mb-3 text-sm text-muted-foreground">
+                Ученик загрузил решения Части 2 одним пакетом. Пролистай все фото и
+                сам реши, какое относится к задаче №21–26. AI grader пока не разносит
+                фото по задачам автоматически — выставляй баллы вручную в карточках ниже.
+              </p>
+              <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-4">
+                {(attempt.part2_bulk_photo_urls ?? []).map((url, idx) => (
+                  <a
+                    key={url + idx}
+                    href={url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="relative aspect-square overflow-hidden rounded-md border border-slate-200 bg-white transition-shadow hover:shadow-md"
+                    aria-label={`Открыть фото ${idx + 1} в новой вкладке`}
+                  >
+                    <img
+                      src={url}
+                      alt={`Часть 2 — фото ${idx + 1}`}
+                      className="h-full w-full object-cover"
+                      loading="lazy"
+                    />
+                    <span className="absolute bottom-1 right-1 rounded bg-black/55 px-1.5 py-0.5 text-xs font-semibold text-white">
+                      {idx + 1}
+                    </span>
+                  </a>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+        </section>
+      )}
+
+      {/* Часть 2 cards — per-kim карточки. Для bulk attempts (Phase 5+)
+          photo_url обычно null (AI grader пока не assign'ит фото к задачам),
+          tutor выставляет баллы из bulk-ленты выше. Для pilot attempts (до
+          Phase 5) photo_url содержит per-kim фото, отображается в карточке. */}
       {part2Solutions.length > 0 ? (
         <section className="space-y-3">
           <h2 className="text-lg font-semibold tracking-tight">
-            Часть 2 ({part2Solutions.length} {part2Solutions.length === 1 ? 'задание' : 'задания'})
+            Часть 2 — оценка по задачам ({part2Solutions.length} {part2Solutions.length === 1 ? 'задание' : 'задания'})
           </h2>
           <div className="space-y-3">
             {part2Solutions.map((solution) => (

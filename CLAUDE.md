@@ -1146,6 +1146,53 @@ Phase 4 расширения subject-rubric Phase 2 (§19) на mock-exams pipel
 
 **Спека:** `~/.claude/plans/1-functional-meteor.md` Phase 4 раздел.
 
+### 21. Mock-exams upload UX simplification — с 9 слотов до 2 полей (2026-05-15, Phase 5)
+
+Phase 5 упрощает UX загрузки фото в пробниках. **До Phase 5**: 9 слотов фото (1 бланк + 1 fallback Часть 1 + 6 per-kim Часть 2 + 1 bulk). Студенты путались, тутору приходилось разбираться где какое фото. **После Phase 5**: ровно 2 поля.
+
+**Новая UX (по `MockExamAnswerMethod`):**
+
+- **`form` mode (цифровой ввод)** — Часть 1: цифровые поля № 1-20 + auto-check; Часть 2: ОДНО поле «Фото решений Часть 2 (пакет до 7 фото)».
+- **`blank` mode (ФИПИ бланк)** — Часть 1: ОДНО поле «Фото бланка ФИПИ» (`BlankModeBanner` сверху); цифровые поля скрыты; tutor вручную выставляет баллы Часть 1 через `/part1-manual-score`. Часть 2: то же поле bulk до 7 фото.
+
+Это даёт **«не больше 2 действий с фото»** для любого режима, что Vladimir и требовал.
+
+**Удалённое (frontend):**
+- Collapsible block «Загрузить фото Часть 1 отдельно» (fallback фото при `blank` mode) — был дубликат `BlankModeBanner`.
+- `part2Tasks.map → Part2TaskCard` (6 per-kim слотов) — заменены ОДНИМ bulk Card.
+- Старый amber styling «Или загрузи все решения Часть 2 одним пакетом» — теперь это primary path, не «или».
+- `uploadPart2 / retryPart2 / uploadPart1Fallback / retryPart1Fallback` callbacks (удалены — больше не вызываются с UI).
+- `uploadedPart2Count` / `fallbackOpen` — derived state удалён.
+
+**Backward compat (КРИТИЧНО):**
+- `mock_exam_attempt_part2_solutions[*].photo_url` — НЕ удаляется из БД. Pilot attempts (Egor 2026-05-15) и старые форматы остаются с per-kim фото. Frontend `part2Photos` state остаётся как **read-only seed** из `data.part2_solutions[*].photo_url` (без UI слотов для new upload).
+- `uploadMockExamPart2Photo` + `uploadMockExamPart1FallbackPhoto` backend endpoints — **намеренно сохранены working**. Frontend больше не вызывает, но любой legacy client/test всё ещё может (deprecated path).
+- `TutorMockExamReview::Part2TaskCard` отображает `solution.photo_url` если есть (legacy pilot attempts). Для bulk attempts `photo_url` = null, отдельная bulk-секция показывает все фото в виде ленты сверху.
+
+**Tutor UX (`TutorMockExamReview`):**
+- Новая секция «Часть 2 — фото от ученика (N)» рендерится если `attempt.part2_bulk_photo_urls.length > 0`. Простая galleryна grid 2-4 cols с zoom-in-new-tab по клику. Лента индексирована 1..7.
+- Под лентой — старая «Часть 2 — оценка по задачам» секция с per-kim карточками (Part2TaskCard). Tutor смотрит на ленту, потом ставит баллы вручную в карточках через существующий `/approve-task` endpoint.
+
+**AI grader Часть 2 для bulk — НЕ интегрирован в Phase 5 (отложен):**
+- Текущий `mock-exam-grade` использует per-kim path: для каждой задачи № 21-26 ищет `photo_url` в `part2_solutions[*]`. Для bulk attempts эти `photo_url` обычно `null` → AI grader возвращает fallback `photo_missing` для каждой задачи.
+- **Следствие**: для bulk attempts AI grading Часть 2 пока **не работает автоматически**. Tutor оценивает Часть 2 вручную через bulk gallery + per-kim карточки.
+- **Следующий PR**: добавить **bulk AI assign-pass** (single AI call: «вот 7 фото + 6 задач, сопоставь») → per-kim grading с assigned photo (parallel 6 calls). + drag-drop tutor override в `TutorMockExamReview` (если AI assigns не угадал).
+
+**Frozen invariants:**
+- DB schema не меняется. `mock_exam_attempts.part2_bulk_photo_urls` JSONB колонка существует с миграции `20260514130000_attempt_answer_method.sql`. Никаких новых миграций в Phase 5.
+- `mock-exam-grade` JSON output shape для tutor review — не тронут (frozen contract `elements_check: {I, II, III, IV}` etc.).
+- Mock-exams anti-leak invariants (CLAUDE.md §10, §12, §15) не затронуты. Bulk photos — фото student'а, видны tutor'у post-submit как раньше (через existing signed-URL pipeline).
+- ОГЭ scope: не покрыто.
+
+**При добавлении AI bulk grader в следующем PR:**
+1. `_shared/mock-exam-prompts.ts` — добавить `buildBulkAssignmentPrompt(tasksMeta, bulkPhotoDataUrls)` для AI assign-pass. Output JSON: `{ "21": [0, 1], "22": [2], ..., "26": [6] }` — kim → photo indices.
+2. `mock-exam-grade/index.ts::handleGrade` — detect bulk attempts (`attempt.part2_bulk_photo_urls.length > 0`), сначала assign-pass, потом parallel 6 per-kim grading с assigned photos. Сохранить assignment в `ai_draft_json.assigned_photo_indices` для tutor visibility.
+3. `TutorMockExamReview` — отобразить «AI: задача 22» chip над каждым фото в bulk-ленте + drag-drop override. Tutor может перенести фото между задачами; re-trigger grading per affected kim.
+4. AI bulk grader цена: +1 assign-pass call (~$0.001) на attempt. Per-kim grading остаётся 6 parallel calls. Latency: +2-3s.
+5. Edge cases: фото нерелевантно ни одной задаче (`flags: ['photo_unassigned']`), 2 задачи на 1 фото (assigned to both kim), не-номер задачи на фото (низкий confidence). Все требуют thorough testing — почему AI grader отложен в отдельный PR.
+
+**Спека:** `~/.claude/plans/1-functional-meteor.md` Phase 4 «Out of scope» секция (Phase 5 это и был «Upload UX упрощение с 9 слотов до 2 полей» из той секции).
+
 ## Известные хрупкие области
 
 1. **Chat.tsx** (2000+ строк) — очень сложный компонент
