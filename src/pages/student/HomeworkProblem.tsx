@@ -319,6 +319,11 @@ export default function HomeworkProblem() {
     [taskStates, data?.task.id],
   );
   const isCurrentCompleted = currentTaskState?.status === 'completed';
+  // 2026-05-16 (lexical-brewing-gadget): задача закрыта вручную репетитором,
+  // не AI-CORRECT verdict'ом. Single-task screen → mobile users не видят
+  // TaskStepper tooltip, нужен явный text differentiator в CTA subtitle.
+  const isTutorForceCompleted =
+    isCurrentCompleted && currentTaskState?.tutor_force_completed_at != null;
   const hintCount = currentTaskState?.hint_count ?? 0;
 
   /**
@@ -1145,6 +1150,7 @@ export default function HomeworkProblem() {
               setSubmitOpen(true);
             }}
             isCompleted={isCurrentCompleted}
+            isTutorClosed={isTutorForceCompleted}
             hasNextTask={Boolean(nextTaskId)}
             onNavigateNext={() => navigateAfterCorrect()}
             subject={data.assignment.subject}
@@ -1438,7 +1444,9 @@ export default function HomeworkProblem() {
             </span>
             <span className="text-[11px] font-medium text-white/80 truncate">
               {isCurrentCompleted
-                ? 'Задача сдана'
+                ? isTutorForceCompleted
+                  ? 'Закрыто репетитором'
+                  : 'Задача сдана'
                 : isHumanitiesWritingSubject(data.assignment.subject)
                   ? 'Текст или фото готового решения'
                   : 'Ответ + фото решения от руки'}

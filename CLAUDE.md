@@ -1403,6 +1403,58 @@ Round 2 коммит поднял 1 **catastrophic P0** + 2 P1 + 2 P2 + 1 P3. В
 
 **Spec link Round 3:** Migrations `20260515120000_attempt_ai_part1_ocr.sql` + `20260515130000_attempt_updated_at.sql`. Reviewer should confirm APPROVED on round 4 или вернуть оставшиеся findings.
 
+### 23. Tutor force-complete для guided homework (2026-05-16, lexical-brewing-gadget)
+
+Репетитор может вручную закрыть задачу ученика без AI verdict через два path'а:
+- **Single-task**: EditScoreDialog → checkbox «Закрыть задачу после сохранения» (default ON для active) + single primary CTA «Сохранить и закрыть задачу». Reopen — ghost CTA + AlertDialog (только для tutor force-completed, не AI-CORRECT).
+- **Bulk**: StudentDrillDown → «Закрыть оставшиеся (N)» AlertDialog → массовое закрытие. Балл не выставляется автоматически — тутор может править через Pencil → EditScoreDialog отдельно.
+
+**Use-case:** не-физические предметы (французский / литература / русский) — AI verdict path не всегда работает корректно (см. §19 subject-rubric leak в check prompt для extended), репетитор хочет explicit-control «считать задачу выполненной» после прочтения переписки.
+
+**Schema (миграция `20260516120000`):**
+- `homework_tutor_task_states.tutor_force_completed_at TIMESTAMPTZ NULL` — видна ученику (бейдж «Закрыто репетитором»). NULL = AI-CORRECT verdict ИЛИ статус не completed.
+- `homework_tutor_task_states.tutor_force_completed_by UUID NULL` — audit, tutor_id. Tutor-only.
+
+**P0 column GRANT whitelist (миграция `20260516120100`, КРИТИЧНО):**
+- REVOKE SELECT FROM anon, authenticated на `homework_tutor_task_states` целиком + GRANT SELECT (whitelist 20 колонок).
+- **Tutor-only поля НЕ грантятся** на authenticated: `ai_score_comment`, `tutor_score_override_by`, `tutor_force_completed_by`. PostgREST с user JWT получит permission error на `.select('*')` для них. Доступ только через service_role (edge functions).
+- При добавлении новой клиентской колонки на `homework_tutor_task_states` — **ОБЯЗАТЕЛЬНО** расширить GRANT в новой миграции. Иначе client `.select(new_column)` упадёт с permission error.
+- Existing tutor direct PostgREST read (`useTutorStudentActivity.ts`) уже whitelisted column-by-column — не сломался.
+
+**Atomic RPCs (миграции `20260516120200` + `20260516120300`):**
+- `hw_tutor_force_complete_task(assignment, student, task, tutor, score?, comment?)` — single atomic transaction: override + status='completed' + marker + next active task search + thread cursor update + system message insert. SECURITY DEFINER, service_role only.
+- `hw_tutor_force_complete_all_tasks(assignment, student, tutor)` — bulk + idempotent thread cursor reconcile.
+- **Race guard `TASK_NOT_ACTIVE`**: SELECT FOR UPDATE + проверка `status = 'active'` ВНУТРИ lock. Двойной клик «Сохранить и закрыть» — оба запроса проходят edge pre-check, второй RPC ждёт lock release, видит already-completed, RAISE EXCEPTION вместо silent double-write/duplicate system message. Edge function маппит в **409 Conflict**.
+
+**Reopen path:**
+- Только для force-completed репетитором задач. AI-CORRECT не reopen'абельны — backend возвращает 409 `AI_COMPLETED_NOT_REOPENABLE`.
+- Edge function (НЕ RPC) — single UPDATE на task_state + thread status flip. Atomicity не критична на одной строке.
+
+**UX контракт EditScoreDialog (P1 fix from code review):**
+- Derived `willCloseAfterSave = showCloseCheckbox && closeAfterSave` — single source of truth для primary label / className / disabled / forceComplete param.
+- `showCloseCheckbox = status === 'active'` — для completed (AI-CORRECT ИЛИ force-completed) checkbox скрыт; на completed задаче primary CTA = «Сохранить балл» (override only).
+- Reopen path сохраняет `currentOverride` (НЕ `numericValue`) — без этого fix bulk-closed задача без override получала бы phantom override при reopen.
+- Telemetry `manual_score_override_saved` emit'ится **ТОЛЬКО** для `mode === 'save'` или `'reset'`. Reopen path preserves current override → нет override change → нет event.
+
+**Bulk counter contract (P2 fix):**
+- `StudentDrillDown.activeTasksCount = taskMeta.filter(t => t.status === 'active').length` — строго совпадает с RPC `WHERE status = 'active'`. Не использовать `!== 'completed'` — locked/skipped не закроются, UI и backend разойдутся.
+
+**Student-side бейдж:**
+- `TaskStepper` circle: `UserCheck` icon вместо `Check` при `tutor_force_completed_at !== null` — mobile-friendly visible differentiator (tooltip может быть недоступен на tap-and-release).
+- `HomeworkProblem` mobile big-CTA subtitle: `'Закрыто репетитором'` vs `'Задача сдана'`.
+- `SubmitCtaBar` tablet/desktop: prop `isTutorClosed` меняет лейбл.
+- `GuidedHomeworkWorkspace` completed view: секция «Закрыто репетитором» для задач без override.
+
+**Telemetry (PII-free):**
+- `homework_task_force_completed { assignmentId, studentId, taskId, source: 'dialog' | 'bulk', hadScore }`
+- `homework_task_reopened { assignmentId, studentId, taskId }`
+- `homework_bulk_force_completed { assignmentId, studentId, closedCount }`
+
+**При расширении на новые transactional actions:** не возвращаться к multi-query flow в edge function — partial-failure consistency problem. Добавлять как новую SECURITY DEFINER RPC, REVOKE FROM PUBLIC + GRANT TO service_role.
+
+**Полный контракт:** `.claude/rules/40-homework-system.md` → секция «Tutor force-complete + reopen + bulk».
+**Спека:** `~/.claude/plans/lexical-brewing-gadget.md` + два раунда code review (ChatGPT-5.5).
+
 ## Известные хрупкие области
 
 1. **Chat.tsx** (2000+ строк) — очень сложный компонент

@@ -10,6 +10,7 @@ import { toast } from 'sonner';
 import {
   AlertTriangle,
   ArrowLeft,
+  Check,
   CheckCircle2,
   ChevronDown,
   ChevronLeft,
@@ -719,6 +720,7 @@ export default function GuidedHomeworkWorkspace({
         tutor_score_override: state?.tutor_score_override ?? null,
         tutor_score_override_comment: state?.tutor_score_override_comment ?? null,
         final_score: finalScore,
+        tutor_force_completed_at: state?.tutor_force_completed_at ?? null,
       };
     });
   }, [assignment.tasks, taskStates]);
@@ -1645,6 +1647,13 @@ export default function GuidedHomeworkWorkspace({
     const totalMax = assignment.tasks.reduce((sum, t) => sum + t.max_score, 0);
     const formatScoreValue = (v: number) => v.toFixed(1).replace(/\.0$/, '');
     const tasksWithOverride = taskStepItems.filter((t) => t.tutor_score_override != null);
+    // 2026-05-16 (lexical-brewing-gadget): задачи, закрытые репетитором БЕЗ
+    // выставления override балла. Отдельный список — в секции «Закрыто
+    // репетитором» под балловой секцией. Если override есть, force-completed
+    // задача уже попала в `tasksWithOverride` — нет двойного учёта.
+    const tasksForceClosedOnly = taskStepItems.filter(
+      (t) => t.tutor_force_completed_at != null && t.tutor_score_override == null,
+    );
     return (
       <div className="flex-1 flex flex-col">
         {/* Header */}
@@ -1697,6 +1706,12 @@ export default function GuidedHomeworkWorkspace({
                             </span>
                             {' / '}{t.max_score}
                           </span>
+                          {t.tutor_force_completed_at != null && (
+                            <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] text-emerald-700 ring-1 ring-emerald-200">
+                              <Check className="h-3 w-3" />
+                              Закрыто
+                            </span>
+                          )}
                         </div>
                         {t.ai_score != null && Number(t.ai_score) !== Number(t.tutor_score_override) ? (
                           <div className="text-slate-500">
@@ -1707,6 +1722,30 @@ export default function GuidedHomeworkWorkspace({
                           <div className="rounded-sm bg-white px-2 py-1 text-slate-700 border border-slate-200">
                             {t.tutor_score_override_comment}
                           </div>
+                        ) : null}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
+              {/* 2026-05-16 (lexical-brewing-gadget): задачи закрытые
+                  репетитором без override балла. Финальный балл идёт через
+                  computeFinalScore fallback (earned_score / ai_score / max). */}
+              {tasksForceClosedOnly.length > 0 && (
+                <div className="text-left space-y-2 rounded-md border border-emerald-200 bg-emerald-50 p-3">
+                  <p className="text-xs font-medium text-emerald-800">Закрыто репетитором</p>
+                  <ul className="space-y-1 text-xs text-emerald-900">
+                    {tasksForceClosedOnly.map((t) => (
+                      <li key={t.order_num} className="flex items-center justify-between gap-2">
+                        <span className="font-medium">Задача №{t.order_num}</span>
+                        {t.final_score != null && t.max_score != null ? (
+                          <span>
+                            <span className="font-semibold">
+                              {formatScoreValue(Number(t.final_score))}
+                            </span>
+                            {' / '}{t.max_score}
+                          </span>
                         ) : null}
                       </li>
                     ))}

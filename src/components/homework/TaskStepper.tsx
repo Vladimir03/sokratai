@@ -4,7 +4,7 @@
  */
 
 import { memo, useRef, useEffect } from 'react';
-import { Check, Lock } from 'lucide-react';
+import { Check, Lock, UserCheck } from 'lucide-react';
 import {
   Tooltip,
   TooltipContent,
@@ -39,6 +39,13 @@ export interface TaskStepItem {
    * stepper doesn't need to duplicate the priority chain.
    */
   final_score?: number | null;
+  /**
+   * 2026-05-16 (lexical-brewing-gadget): ISO timestamp когда задача была
+   * закрыта вручную репетитором. NULL означает AI-CORRECT verdict ИЛИ
+   * status='active'. Если NOT NULL — рендерим бейдж «Закрыто репетитором»
+   * (отличаем от AI-CORRECT closure).
+   */
+  tutor_force_completed_at?: string | null;
 }
 
 function formatScore(value: number): string {
@@ -110,6 +117,11 @@ const TaskStepper = memo(({ tasks, currentTaskOrder, onTaskClick, celebratingTas
           const isClickable = task.status !== 'locked';
           const isLast = idx === tasks.length - 1;
 
+          // 2026-05-16 (lexical-brewing-gadget): tutor force-closed задачи
+          // получают UserCheck icon вместо Check — visible differentiator от
+          // AI-CORRECT (на mobile tooltip часто недоступен).
+          const isTutorClosed =
+            task.status === 'completed' && task.tutor_force_completed_at != null;
           return (
             <div key={task.order_num} className="flex items-center shrink-0">
               <Tooltip>
@@ -134,7 +146,11 @@ const TaskStepper = memo(({ tasks, currentTaskOrder, onTaskClick, celebratingTas
                       {isCelebrating ? (
                         <Check className="w-4 h-4" />
                       ) : task.status === 'completed' ? (
-                        <Check className="w-4 h-4" />
+                        isTutorClosed ? (
+                          <UserCheck className="w-4 h-4" />
+                        ) : (
+                          <Check className="w-4 h-4" />
+                        )
                       ) : task.status === 'locked' ? (
                         <Lock className="w-3 h-3" />
                       ) : (
@@ -151,6 +167,12 @@ const TaskStepper = memo(({ tasks, currentTaskOrder, onTaskClick, celebratingTas
                 <TooltipContent side="bottom" className="max-w-[260px] text-xs">
                   <div className="font-medium">Задача {task.order_num}</div>
                   <div className="text-muted-foreground mb-1">{STATUS_LABELS[task.status]}</div>
+                  {task.status === 'completed' && task.tutor_force_completed_at != null && (
+                    <div className="mb-1 inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] text-emerald-700 ring-1 ring-emerald-200">
+                      <Check className="h-3 w-3" />
+                      Закрыто репетитором
+                    </div>
+                  )}
                   {task.status === 'completed' && task.max_score != null && (
                     <div className="mb-1 space-y-0.5">
                       {task.tutor_score_override != null ? (

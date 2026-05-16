@@ -100,7 +100,15 @@ type GuidedTelemetryEvent =
   | 'student_submitsheet_opened'
   | 'student_submission_sent'
   | 'student_submission_verdict'
-  | 'student_hint_requested';
+  | 'student_hint_requested'
+  // ─── tutor force-complete (2026-05-16, lexical-brewing-gadget) ───────────
+  // Three PII-free events. force_completed = single task закрыта через
+  // EditScoreDialog «Сохранить и закрыть». reopen = ghost CTA в том же
+  // диалоге (только для force-completed, не AI-CORRECT). bulk = массовое
+  // закрытие из StudentDrillDown «Закрыть все оставшиеся».
+  | 'homework_task_force_completed'
+  | 'homework_task_reopened'
+  | 'homework_bulk_force_completed';
 
 type GuidedTelemetryValue =
   | string
@@ -280,6 +288,34 @@ interface StudentHintRequestedPayload
   hintCountBefore: number;
 }
 
+// ─── Tutor force-complete (2026-05-16, lexical-brewing-gadget) ───────────────
+// PII-free: ids + booleans + counts. `source` различает single-dialog vs bulk
+// closure entry points. `hadScore` отслеживает, выставлен ли балл одновременно
+// с закрытием (т.е. был ли value в EditScoreDialog).
+
+interface HomeworkTaskForceCompletedPayload
+  extends Record<string, string | number | boolean | null | undefined> {
+  assignmentId: string;
+  studentId: string;
+  taskId: string;
+  source: 'dialog' | 'bulk';
+  hadScore: boolean;
+}
+
+interface HomeworkTaskReopenedPayload
+  extends Record<string, string | number | boolean | null | undefined> {
+  assignmentId: string;
+  studentId: string;
+  taskId: string;
+}
+
+interface HomeworkBulkForceCompletedPayload
+  extends Record<string, string | number | boolean | null | undefined> {
+  assignmentId: string;
+  studentId: string;
+  closedCount: number;
+}
+
 interface DataLayerWindow extends Window {
   dataLayer?: Array<Record<string, unknown>>;
   gtag?: (...args: unknown[]) => void;
@@ -312,6 +348,9 @@ export function trackGuidedHomeworkEvent(event: 'student_submitsheet_opened', pa
 export function trackGuidedHomeworkEvent(event: 'student_submission_sent', payload: StudentSubmissionSentPayload): void;
 export function trackGuidedHomeworkEvent(event: 'student_submission_verdict', payload: StudentSubmissionVerdictPayload): void;
 export function trackGuidedHomeworkEvent(event: 'student_hint_requested', payload: StudentHintRequestedPayload): void;
+export function trackGuidedHomeworkEvent(event: 'homework_task_force_completed', payload: HomeworkTaskForceCompletedPayload): void;
+export function trackGuidedHomeworkEvent(event: 'homework_task_reopened', payload: HomeworkTaskReopenedPayload): void;
+export function trackGuidedHomeworkEvent(event: 'homework_bulk_force_completed', payload: HomeworkBulkForceCompletedPayload): void;
 export function trackGuidedHomeworkEvent(event: GuidedTelemetryEvent, payload?: GuidedTelemetryPayload): void;
 export function trackGuidedHomeworkEvent(
   event: GuidedTelemetryEvent,

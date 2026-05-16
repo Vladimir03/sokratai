@@ -698,6 +698,8 @@ export function GuidedThreadViewer({
           finalScore={selectedTaskFinalScore}
           currentOverride={selectedTaskState?.tutor_score_override ?? null}
           currentComment={selectedTaskState?.tutor_score_override_comment ?? null}
+          status={(selectedTaskState?.status ?? 'active') as 'active' | 'completed' | 'locked' | 'skipped'}
+          tutorForceCompletedAt={selectedTaskState?.tutor_force_completed_at ?? null}
         />
       ) : null}
     </div>

@@ -6,6 +6,12 @@ interface SubmitCtaBarProps {
   onOpen: () => void;
   /** If true, button becomes «Следующая задача» secondary action. */
   isCompleted: boolean;
+  /**
+   * 2026-05-16 (lexical-brewing-gadget): задача закрыта вручную репетитором,
+   * а не AI-CORRECT verdict'ом. Меняет text-signal на «Закрыто репетитором».
+   * Default false для backward-compat с callsites, не передающими этот prop.
+   */
+  isTutorClosed?: boolean;
   /** Whether there is a next task to navigate to when completed. */
   hasNextTask: boolean;
   /** Tap when isCompleted → advance to next task (or back to list). */
@@ -43,6 +49,7 @@ interface SubmitCtaBarProps {
 export function SubmitCtaBar({
   onOpen,
   isCompleted,
+  isTutorClosed = false,
   hasNextTask,
   onNavigateNext,
   draftLabel,
@@ -56,7 +63,7 @@ export function SubmitCtaBar({
       <div className="flex items-center justify-between gap-3 px-4 py-3 bg-white border-t border-socrat-border-light shrink-0">
         <div className="flex flex-col min-w-0 flex-1">
           <span className="text-[14px] font-bold text-slate-900 leading-tight">
-            Задача сдана
+            {isTutorClosed ? 'Закрыто репетитором' : 'Задача сдана'}
           </span>
           <span className="text-[12px] font-medium text-slate-500 truncate">
             {hasNextTask ? 'Переходи к следующей' : 'Все задачи решены'}

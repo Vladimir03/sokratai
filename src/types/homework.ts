@@ -259,6 +259,17 @@ export interface HomeworkTaskState {
   tutor_score_override_comment?: string | null;
   /** ISO timestamp when the override was last written. Visible to student. */
   tutor_score_override_at?: string | null;
+  /**
+   * 2026-05-16 (lexical-brewing-gadget): когда установлено, задача была
+   * закрыта вручную репетитором (не AI-CORRECT verdict). Visible to student
+   * — нужно для бейджа «Закрыто репетитором» в TaskStepper. AI-CORRECT задачи
+   * имеют `status='completed'`, но `tutor_force_completed_at === null` —
+   * отличаем эти два пути закрытия.
+   *
+   * `tutor_force_completed_by` (UUID туторa) — audit-only, strip'ается на
+   * бэке через `stripStudentSensitiveTaskStateFields`, на клиенте отсутствует.
+   */
+  tutor_force_completed_at?: string | null;
 }
 
 // Phase 3: API response types

@@ -2593,6 +2593,11 @@ async function handleGetResults(
       ai_score_comment: string | null;
       tutor_score_override: number | null;
       tutor_score_override_comment: string | null;
+      // 2026-05-16 (lexical-brewing-gadget): tutor force-complete marker.
+      // Null = задача не была закрыта вручную (либо AI-CORRECT, либо ещё active).
+      // ISO timestamp = закрыта репетитором; tutor-side UI рисует индикатор.
+      tutor_force_completed_at: string | null;
+      status: string;
     }[];
     total_score: number;
     total_max: number;
@@ -2614,6 +2619,8 @@ async function handleGetResults(
     ai_score_comment: string | null;
     tutor_score_override: number | null;
     tutor_score_override_comment: string | null;
+    tutor_force_completed_at: string | null;
+    status: string;
   }>> = {};
 
   const { data: studentAssignments } = await db
@@ -2663,7 +2670,7 @@ async function handleGetResults(
       const { data: allTaskStates } = await db
         .from("homework_tutor_task_states")
         .select(
-          "thread_id, task_id, earned_score, status, ai_score, ai_score_comment, tutor_score_override, tutor_score_override_comment, hint_count, attempts",
+          "thread_id, task_id, earned_score, status, ai_score, ai_score_comment, tutor_score_override, tutor_score_override_comment, hint_count, attempts, tutor_force_completed_at",
         )
         .in("thread_id", allThreadIdsForStates);
 
@@ -2737,6 +2744,7 @@ async function handleGetResults(
             const aiCommentRaw = (ts as { ai_score_comment?: string | null }).ai_score_comment;
             const overrideCommentRaw = (ts as { tutor_score_override_comment?: string | null }).tutor_score_override_comment;
 
+            const forceCompletedAtRaw = (ts as { tutor_force_completed_at?: string | null }).tutor_force_completed_at;
             taskScoresByStudent[studentId][ts.task_id] = {
               final_score: Math.round(finalScore * 100) / 100,
               hint_count: hintCount,
@@ -2749,6 +2757,8 @@ async function handleGetResults(
               tutor_score_override_comment: typeof overrideCommentRaw === "string" && overrideCommentRaw.trim().length > 0
                 ? overrideCommentRaw
                 : null,
+              tutor_force_completed_at: typeof forceCompletedAtRaw === "string" ? forceCompletedAtRaw : null,
+              status: typeof ts.status === "string" ? ts.status : "active",
             };
           }
 
@@ -2870,6 +2880,8 @@ async function handleGetResults(
         ai_score_comment: cell.ai_score_comment,
         tutor_score_override: cell.tutor_score_override,
         tutor_score_override_comment: cell.tutor_score_override_comment,
+        tutor_force_completed_at: cell.tutor_force_completed_at,
+        status: cell.status,
       }));
 
       if (acc) {
@@ -3049,7 +3061,7 @@ async function handleSetTutorScoreOverride(
 
   const { data: existing, error: tsErr } = await db
     .from("homework_tutor_task_states")
-    .select("id, ai_score, tutor_score_override, earned_score, status, hint_count, attempts, thread_id, task_id")
+    .select("id, ai_score, tutor_score_override, earned_score, status, hint_count, attempts, thread_id, task_id, tutor_force_completed_at")
     .eq("thread_id", thread.id)
     .eq("task_id", taskId)
     .maybeSingle();
@@ -3057,6 +3069,110 @@ async function handleSetTutorScoreOverride(
     return jsonError(cors, 404, "TASK_STATE_NOT_FOUND", "Task state not found");
   }
 
+  // ─── force_complete handling (2026-05-16, lexical-brewing-gadget) ─────────
+  // Optional body field. Tutor explicit-control «считать задачу выполненной».
+  //   'completed' → mark task as force-completed by tutor + advance thread
+  //   'active'    → reopen previously force-completed task (guarded: nope для AI-CORRECT)
+  //   null/undef  → backward-compat (status untouched)
+  const rawForceComplete = body?.force_complete;
+  let forceComplete: "completed" | "active" | null = null;
+  if (rawForceComplete === "completed" || rawForceComplete === "active") {
+    forceComplete = rawForceComplete;
+  } else if (rawForceComplete !== undefined && rawForceComplete !== null) {
+    return jsonError(cors, 400, "VALIDATION", "force_complete must be 'completed', 'active', or null");
+  }
+
+  // Reopen guard: only force-completed-by-tutor tasks can be reopened.
+  // AI-CORRECT задачи (status='completed', tutor_force_completed_at=NULL) — НЕ reopenable.
+  if (forceComplete === "active") {
+    const existingForceCompletedAt = (existing as Record<string, unknown>).tutor_force_completed_at;
+    if (existingForceCompletedAt === null || existingForceCompletedAt === undefined) {
+      return jsonError(
+        cors,
+        409,
+        "AI_COMPLETED_NOT_REOPENABLE",
+        "AI-completed tasks cannot be reopened; only tutor force-completed tasks support reopen",
+      );
+    }
+  }
+
+  // ─── Force_complete branch — atomic RPC (2026-05-16, code review P1) ─────
+  // Multi-query flow (UPDATE override → UPDATE marker → loadAdvanceContext →
+  // performTaskAdvance) был неатомичен. RPC `hw_tutor_force_complete_task`
+  // делает всё в одной транзакции (миграция `20260516120200`).
+  if (forceComplete === "completed" && existing.status === "active") {
+    const { data: rpcData, error: rpcErr } = await db.rpc("hw_tutor_force_complete_task", {
+      p_assignment_id: assignmentId,
+      p_student_id: studentId,
+      p_task_id: taskId,
+      p_tutor_id: tutorUserId,
+      p_score: overrideValue,
+      p_comment: commentValue,
+    });
+    if (rpcErr || !rpcData) {
+      console.error("homework_api_request_error", {
+        route: "PATCH score-override + force_complete (RPC)",
+        error: rpcErr?.message,
+      });
+      const msg = rpcErr?.message ?? "Failed to force-complete task";
+      // Map RPC RAISE EXCEPTION codes to HTTP responses.
+      if (msg.includes("ASSIGNMENT_NOT_OWNED")) {
+        return jsonError(cors, 403, "FORBIDDEN", "Assignment not owned by tutor");
+      }
+      if (msg.includes("TASK_NOT_FOUND")) {
+        return jsonError(cors, 404, "TASK_NOT_FOUND", "Task not found");
+      }
+      if (msg.includes("THREAD_NOT_FOUND")) {
+        return jsonError(cors, 404, "THREAD_NOT_FOUND", "Guided thread not found");
+      }
+      if (msg.includes("TASK_STATE_NOT_FOUND")) {
+        return jsonError(cors, 404, "TASK_STATE_NOT_FOUND", "Task state not found");
+      }
+      if (msg.includes("TASK_NOT_ACTIVE")) {
+        // Concurrent click race: первый клик уже закрыл задачу, второй RPC
+        // дождался lock и увидел не-active status. 409 Conflict — клиент
+        // должен refetch'нуть и обновить UI (`status='completed'`).
+        return jsonError(cors, 409, "TASK_NOT_ACTIVE", "Task is no longer active (already closed by another request)");
+      }
+      if (msg.includes("SCORE_OUT_OF_RANGE") || msg.includes("SCORE_STEP_INVALID")) {
+        return jsonError(cors, 400, "VALIDATION", msg);
+      }
+      return jsonError(cors, 500, "DB_ERROR", msg);
+    }
+    const result = rpcData as Record<string, unknown>;
+    console.log("homework_api_request_success", {
+      route: "PATCH score-override + force_complete (RPC)",
+      tutor_id: tutorUserId,
+      assignment_id: assignmentId,
+      student_id: studentId,
+      task_id: taskId,
+      action: "force_complete",
+    });
+    return jsonOk(cors, {
+      ok: true,
+      task_state: {
+        id: result.task_state_id,
+        thread_id: result.thread_id,
+        task_id: result.task_id,
+        ai_score: existing.ai_score,
+        tutor_score_override: result.tutor_score_override,
+        tutor_score_override_comment: result.tutor_score_override_comment,
+        tutor_score_override_at: result.tutor_score_override_at,
+        tutor_force_completed_at: result.tutor_force_completed_at,
+        status: result.final_status,
+        final_score: Math.round(Number(result.final_score ?? 0) * 100) / 100,
+        max_score: maxScore,
+      },
+      advance: {
+        advanced_to_task_id: result.advanced_to_task_id,
+        thread_completed: result.thread_completed,
+      },
+    });
+  }
+
+  // ─── Non-force-complete path: single UPDATE (override change OR reopen) ───
+  // Plain override / reset / reopen — операция простая, atomicity multi-row не
+  // требуется, RPC overkill. Keep direct UPDATE.
   const updatePayload: Record<string, unknown> = overrideValue === null
     ? {
         tutor_score_override: null,
@@ -3071,27 +3187,64 @@ async function handleSetTutorScoreOverride(
         tutor_score_override_by: tutorUserId,
       };
 
+  // Reopen path layered on top of override change: set status='active' + clear marker.
+  if (forceComplete === "active") {
+    updatePayload.status = "active";
+    updatePayload.tutor_force_completed_at = null;
+    updatePayload.tutor_force_completed_by = null;
+    updatePayload.updated_at = new Date().toISOString();
+  }
+
   const { data: updated, error: updErr } = await db
     .from("homework_tutor_task_states")
     .update(updatePayload)
     .eq("id", existing.id)
-    .select("id, ai_score, tutor_score_override, tutor_score_override_comment, tutor_score_override_at, earned_score, status, hint_count, attempts, thread_id, task_id")
+    .select("id, ai_score, tutor_score_override, tutor_score_override_comment, tutor_score_override_at, earned_score, status, hint_count, attempts, thread_id, task_id, tutor_force_completed_at")
     .maybeSingle();
   if (updErr || !updated) {
     console.error("homework_api_request_error", { route: "PATCH score-override", error: updErr?.message });
     return jsonError(cors, 500, "DB_ERROR", "Failed to update task state");
   }
 
-  const finalScore = computeFinalScore(updated as TaskStateScoreFields, maxScore);
+  let finalStatus = updated.status as string;
+  let finalForceCompletedAt: string | null = (updated as Record<string, unknown>).tutor_force_completed_at as string | null;
 
-  console.log("homework_api_request_success", {
-    route: "PATCH /assignments/:id/students/:sid/tasks/:tid/score-override",
-    tutor_id: tutorUserId,
-    assignment_id: assignmentId,
-    student_id: studentId,
-    task_id: taskId,
-    is_reset: overrideValue === null,
-  });
+  if (forceComplete === "active") {
+    // Если thread.status='completed' и мы reopen'аем задачу — вернуть thread в 'active'.
+    // Best-effort: error не блокирует response (thread cursor consistency наименее критичен в
+    // reopen path — student fallback chain корректно возвращает на active task).
+    await db
+      .from("homework_tutor_threads")
+      .update({ status: "active", updated_at: new Date().toISOString() })
+      .eq("id", thread.id)
+      .eq("status", "completed");
+    finalStatus = "active";
+    finalForceCompletedAt = null;
+
+    console.log("homework_api_request_success", {
+      route: "PATCH score-override + reopen",
+      tutor_id: tutorUserId,
+      assignment_id: assignmentId,
+      student_id: studentId,
+      task_id: taskId,
+      action: "reopen",
+    });
+  } else {
+    console.log("homework_api_request_success", {
+      route: "PATCH /assignments/:id/students/:sid/tasks/:tid/score-override",
+      tutor_id: tutorUserId,
+      assignment_id: assignmentId,
+      student_id: studentId,
+      task_id: taskId,
+      is_reset: overrideValue === null,
+    });
+  }
+
+  // P2 fix (code review 2026-05-16): compute final_score с final status.
+  const finalScore = computeFinalScore(
+    { ...updated, status: finalStatus } as TaskStateScoreFields,
+    maxScore,
+  );
 
   return jsonOk(cors, {
     ok: true,
@@ -3103,9 +3256,71 @@ async function handleSetTutorScoreOverride(
       tutor_score_override: updated.tutor_score_override,
       tutor_score_override_comment: updated.tutor_score_override_comment,
       tutor_score_override_at: updated.tutor_score_override_at,
+      tutor_force_completed_at: finalForceCompletedAt,
+      status: finalStatus,
       final_score: Math.round(finalScore * 100) / 100,
       max_score: maxScore,
     },
+    advance: null,
+  });
+}
+
+// ─── Endpoint: POST /assignments/:id/students/:sid/force-complete-all-tasks ──
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// Bulk tutor force-complete (2026-05-16, lexical-brewing-gadget). Закрывает все
+// active task_states ученика одним RPC вызовом (atomicity + reconcile thread
+// cursor). RPC `hw_tutor_force_complete_all_tasks` (миграция `20260516120200`).
+//
+// Replaces multi-query flow (mass UPDATE → thread UPDATE → INSERT system msg)
+// — был не атомичен, partial-failure оставлял thread cursor stale.
+async function handleBulkForceCompleteStudentTasks(
+  db: SupabaseClient,
+  tutorUserId: string,
+  assignmentId: string,
+  studentId: string,
+  cors: Record<string, string>,
+): Promise<Response> {
+  if (!isUUID(assignmentId) || !isUUID(studentId)) {
+    return jsonError(cors, 400, "INVALID_ID", "Invalid id format");
+  }
+
+  const { data, error } = await db.rpc("hw_tutor_force_complete_all_tasks", {
+    p_assignment_id: assignmentId,
+    p_student_id: studentId,
+    p_tutor_id: tutorUserId,
+  });
+  if (error) {
+    console.error("homework_api_request_error", {
+      route: "POST /force-complete-all-tasks (RPC)",
+      error: error.message,
+    });
+    // RPC RAISE EXCEPTION для ASSIGNMENT_NOT_OWNED / THREAD_NOT_FOUND. Маппим
+    // в человекочитаемый response. Production deploys RPC до этого commit'а —
+    // 404 path остаётся через generic 500 fallback.
+    const msg = error.message ?? "Failed to mark tasks completed";
+    if (msg.includes("ASSIGNMENT_NOT_OWNED")) {
+      return jsonError(cors, 403, "FORBIDDEN", "Assignment not owned by tutor");
+    }
+    if (msg.includes("THREAD_NOT_FOUND")) {
+      return jsonError(cors, 404, "THREAD_NOT_FOUND", "Guided thread not found");
+    }
+    return jsonError(cors, 500, "DB_ERROR", msg);
+  }
+
+  const result = (data ?? {}) as Record<string, unknown>;
+  const closedCount = Number(result.closed_count ?? 0);
+
+  console.warn(JSON.stringify({
+    event: "homework_bulk_force_completed",
+    assignmentId,
+    studentId,
+    closedCount,
+  }));
+
+  return jsonOk(cors, {
+    closed_count: closedCount,
+    advanced_to_task_id: result.advanced_to_task_id ?? null,
   });
 }
 
@@ -5999,7 +6214,7 @@ const THREAD_SELECT = `
   id, status, current_task_order, current_task_id, created_at, updated_at,
   student_assignment_id, last_student_message_at, last_tutor_message_at,
   homework_tutor_thread_messages(id, role, content, image_url, task_id, task_order, message_kind, submission_payload, created_at, author_user_id, visible_to_student),
-  homework_tutor_task_states(id, task_id, status, attempts, best_score, available_score, earned_score, wrong_answer_count, hint_count, ai_score, ai_score_comment, tutor_score_override, tutor_score_override_comment, tutor_score_override_at)
+  homework_tutor_task_states(id, task_id, status, attempts, best_score, available_score, earned_score, wrong_answer_count, hint_count, ai_score, ai_score_comment, tutor_score_override, tutor_score_override_comment, tutor_score_override_at, tutor_force_completed_at, tutor_force_completed_by)
 `;
 
 /**
@@ -6029,10 +6244,13 @@ function stripStudentSensitiveTaskStateFields(
     ...thread,
     homework_tutor_task_states: taskStates.map((taskState) => {
       if (!taskState || typeof taskState !== "object") return taskState;
-      const { ai_score_comment: _aiScoreComment, ...safeTaskState } = taskState as Record<
-        string,
-        unknown
-      >;
+      // tutor_force_completed_at — оставляем (ученик видит бейдж).
+      // tutor_force_completed_by — strip (UUID туторa, audit-only).
+      const {
+        ai_score_comment: _aiScoreComment,
+        tutor_force_completed_by: _forceCompletedBy,
+        ...safeTaskState
+      } = taskState as Record<string, unknown>;
       return safeTaskState;
     }),
   };
@@ -8252,6 +8470,17 @@ Deno.serve(async (req: Request): Promise<Response> => {
     ) {
       const body = await parseJsonBody(req) as Record<string, unknown>;
       return await handleSetTutorScoreOverride(db, userId, seg[1], seg[3], seg[5], body, cors);
+    }
+
+    // POST /assignments/:id/students/:sid/force-complete-all-tasks (2026-05-16)
+    if (
+      seg.length === 5 &&
+      seg[0] === "assignments" &&
+      seg[2] === "students" &&
+      seg[4] === "force-complete-all-tasks" &&
+      route.method === "POST"
+    ) {
+      return await handleBulkForceCompleteStudentTasks(db, userId, seg[1], seg[3], cors);
     }
 
     // POST /assignments/:id/materials

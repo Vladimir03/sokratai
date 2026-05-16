@@ -625,6 +625,20 @@ export interface TutorHomeworkResultsPerStudent {
     tutor_score_override?: number | null;
     /** Tutor's comment attached to the override (visible to student). */
     tutor_score_override_comment?: string | null;
+    /**
+     * 2026-05-16 (lexical-brewing-gadget): когда задача закрыта вручную
+     * репетитором — ISO timestamp. NULL означает AI-CORRECT verdict ИЛИ
+     * задача ещё не закрыта. Tutor-side индикатор «Закрыто вами» рендерится
+     * только при `tutor_force_completed_at !== null`. Reopen разрешён ТОЛЬКО
+     * для force-completed задач (см. backend AI_COMPLETED_NOT_REOPENABLE).
+     */
+    tutor_force_completed_at?: string | null;
+    /**
+     * task_state.status. Нужно EditScoreDialog для решения, рендерить ли CTA
+     * «Сохранить и закрыть задачу» (active) или «Открыть обратно»
+     * (completed + tutor_force_completed_at!==null).
+     */
+    status?: string;
   }[];
 
   /**
@@ -674,9 +688,18 @@ export interface SetTutorScoreOverrideResponse {
     tutor_score_override: number | null;
     tutor_score_override_comment: string | null;
     tutor_score_override_at: string | null;
+    /** 2026-05-16: ISO timestamp если force-completed, иначе null. */
+    tutor_force_completed_at: string | null;
+    /** 2026-05-16: current task_state.status после операции. */
+    status: string;
     final_score: number;
     max_score: number;
   };
+  /**
+   * 2026-05-16: present когда `forceComplete='completed'` сработал и thread advance был выполнен.
+   * Frontend может использовать `advanced_to_task_id` для preselect в UI после toast'а.
+   */
+  advance?: { advanced_to_task_id: string | null; thread_completed: boolean } | null;
 }
 
 export async function setTutorScoreOverride(params: {
@@ -685,17 +708,53 @@ export async function setTutorScoreOverride(params: {
   taskId: string;
   tutorScoreOverride: number | null;
   comment?: string | null;
+  /**
+   * 2026-05-16 (lexical-brewing-gadget): optional force-complete control.
+   * - `'completed'` — отметить задачу как закрытую репетитором + advance thread
+   *   на следующую active. Совместимо с override (сохранятся вместе).
+   * - `'active'` — переоткрыть force-completed задачу. AI-CORRECT задачи
+   *   получают 409 AI_COMPLETED_NOT_REOPENABLE.
+   * - `null`/undefined — backward-compat (status не трогаем).
+   */
+  forceComplete?: 'completed' | 'active' | null;
 }): Promise<SetTutorScoreOverrideResponse> {
-  const { assignmentId, studentId, taskId, tutorScoreOverride, comment } = params;
+  const { assignmentId, studentId, taskId, tutorScoreOverride, comment, forceComplete } = params;
+  const body: Record<string, unknown> = {
+    tutor_score_override: tutorScoreOverride,
+    tutor_score_override_comment: tutorScoreOverride === null ? null : (comment ?? null),
+  };
+  if (forceComplete === 'completed' || forceComplete === 'active') {
+    body.force_complete = forceComplete;
+  }
   return requestHomeworkApi<SetTutorScoreOverrideResponse>(
     `/assignments/${encodeURIComponent(assignmentId)}/students/${encodeURIComponent(studentId)}/tasks/${encodeURIComponent(taskId)}/score-override`,
     {
       method: 'PATCH',
-      body: JSON.stringify({
-        tutor_score_override: tutorScoreOverride,
-        tutor_score_override_comment: tutorScoreOverride === null ? null : (comment ?? null),
-      }),
+      body: JSON.stringify(body),
     },
+  );
+}
+
+// ─── Bulk tutor force-complete (2026-05-16, lexical-brewing-gadget) ──────────
+
+export interface BulkForceCompleteResponse {
+  closed_count: number;
+  advanced_to_task_id: string | null;
+}
+
+/**
+ * Закрывает все active задачи ученика в данном ДЗ. Балл не выставляется
+ * автоматически — репетитор может потом править через EditScoreDialog.
+ * При закрытии последней active thread становится `status='completed'`.
+ */
+export async function bulkForceCompleteStudentTasks(params: {
+  assignmentId: string;
+  studentId: string;
+}): Promise<BulkForceCompleteResponse> {
+  const { assignmentId, studentId } = params;
+  return requestHomeworkApi<BulkForceCompleteResponse>(
+    `/assignments/${encodeURIComponent(assignmentId)}/students/${encodeURIComponent(studentId)}/force-complete-all-tasks`,
+    { method: 'POST', body: JSON.stringify({}) },
   );
 }
 
