@@ -1,14 +1,20 @@
 """TASK-12 (2026-05-14) — slice variant1-tasks.pdf to remove answer leak.
 
 Original `Тр_вариант 1.docx` (converted via docx2pdf in TASK-10) was 27 pages
-and included «Система оценивания» with full Part 1 answer table on pages 25-27.
-Student downloading the PDF on taking page (TASK-10 PDF button) could see all
-correct answers BEFORE submitting — critical security leak (Vladimir QA
-2026-05-14).
+and contained answer tables + Часть 2 solutions starting from page 14.
+Student downloading the PDF on taking page (TASK-10 PDF button) could see
+correct answers BEFORE submitting — critical security leak.
 
-Solution: slice PDF to first N pages (default 24 — last task ends before
-«Система оценивания»). Run this script locally; replace the bucket file
-via Lovable Studio (path `variant1/variant1.pdf`).
+Solution: slice PDF to first N pages (default 13 — pages 1-13 contain only
+Инструкция + Справочные данные + Часть 1 tasks (KIM 1-20) + Часть 2 tasks
+(KIM 21-26) without answers/solutions). Page 14+ contains answer tables
+and Часть 2 reference solutions, NEVER show to student.
+
+Initial TASK-12 sliced to 24 pages — that was WRONG (still leaked answer
+tables). TASK-14 fix re-sliced to 13 pages.
+
+Run this script locally; replace the bucket file via Lovable Studio
+(path `variant1/variant1.pdf`).
 
 Usage:
   python scripts/slice-variant-pdf.py [--pages N] [--in path] [--out path]
@@ -32,7 +38,7 @@ except ImportError:
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_IN = REPO_ROOT / "docs/delivery/features/mock-exams-v1/source/variant1/variant1-tasks.pdf"
 DEFAULT_OUT = DEFAULT_IN  # in-place replace by default
-DEFAULT_PAGES = 24
+DEFAULT_PAGES = 13
 
 
 def main() -> None:
@@ -84,7 +90,7 @@ def main() -> None:
     print()
     print("Next steps (manual):")
     print("  1. Vladimir uploads sliced PDF to Lovable Studio:")
-    print("     Storage → bucket `mock-exam-variant-pdfs` → path `variant1/variant1.pdf`")
+    print("     Storage -> bucket `mock-exam-variant-pdfs` -> path `variant1/variant1.pdf`")
     print("     (replace existing file; same URL).")
     print("  2. Hard-reload student taking page in Lovable preview to bust browser cache.")
     print("  3. Verify page 14 of new PDF does NOT contain answer table.")
