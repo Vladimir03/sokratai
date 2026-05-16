@@ -1098,6 +1098,23 @@ supabase/functions/_shared/subject-rubrics/
 - Если есть изменения по subject — обновить соответствующий `*-ege.ts` файл (типы баллов / критериев). Никаких миграций / БД-патчей, всё в коде.
 - Обновить эту секцию CLAUDE.md с датой обновления.
 
+**Hotfix 2026-05-16 — task_kind='numeric' compact methodology (critical regression fix):**
+
+Phase 2 коммит `ea41a39` (2026-05-15) шил full ФИПИ methodology в `buildCheckPrompt` system content для ВСЕХ задач, включая `check_format='short_answer'` (task_kind='numeric'). `getPhysicsEgeMethodology(null)` для типичной homework task (без `kim_number`) возвращал `GENERIC_METHODOLOGY` с блоком *«должны быть записаны (I) положения теории, (II) обозначения, (III) преобразования, (IV) ответ с единицами»*. AI получал противоречивый промпт (`checkFormatGuidance` говорил «принимай краткий ответ», но methodology требовала развёрнутое решение) и отвечал `INCORRECT` даже на правильные короткие ответы вроде «5 м/с».
+
+Симптом наблюдаемый репетитором: «бот на сайте перестал принимать ответы в задачах ДЗ с кратким ответом, только шаги решения».
+
+**Fix:** `resolveSubjectRubric` в `_shared/subject-rubrics/index.ts` теперь имеет early branch — для `task_kind === 'numeric'` (НЕ для языков, у которых нет numeric tasks) **swap'ит** full ФИПИ methodology на compact `buildNumericMethodology(subjectId, kimNumber)` block:
+
+- Один абзац «тип задачи: краткий ответ (число / слово / формула)».
+- Правила для числового / символьного / sequence ответа.
+- Опциональный KIM-specific balling nudge (для physics № 1-20 — short note про балльность группы без full methodology).
+- Anti-spoiler one-liner.
+
+**Инвариант:** при добавлении нового subject в `_shared/subject-rubrics/` или нового task_kind — обновить `buildNumericMethodology` и проверить что `resolveSubjectRubric` правильно branch'ит. Symptom regression — AI отвечает «нужно решение» на short_answer задачи: grep `getPhysicsEgeMethodology(null)` и убедиться что для `task_kind='numeric'` это **не** вызывается.
+
+**Hard rule для AI prompt:** subject methodology применима только к развёрнутым решениям (`task_kind='extended'/'proof'`). Numeric tasks → short answer equality check + subject-aware role + hint_examples (но НЕ full ФИПИ I-IV).
+
 **Спека:** `~/.claude/plans/1-functional-meteor.md` Phase 2 раздел.
 
 ### 20. Mock-exams subject-rubric integration + Шапка ЕГЭ 2026 (2026-05-15, Phase 4)

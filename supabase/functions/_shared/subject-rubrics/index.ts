@@ -182,6 +182,49 @@ function buildGenericRubric(subject: string): Omit<SubjectRubric, "tutor_rubric_
   }
 }
 
+// ─── Compact methodology for numeric tasks (hotfix 2026-05-16) ────────────
+
+/**
+ * Hotfix 2026-05-16: для `task_kind='numeric'` (краткий ответ) AI должен
+ * проверять числовое/символьное равенство ответу-эталону, БЕЗ требования
+ * развёрнутого решения. Full ФИПИ methodology («I положения теории, II
+ * обозначения, III преобразования, IV ответ с единицами») перекрывала
+ * существующий `checkFormatGuidance` в `buildCheckPrompt` и приводила к
+ * INCORRECT verdict даже на правильных коротких ответах.
+ *
+ * Параметр `kimNumber` сохранён для optional KIM-specific override (если
+ * tutor пометил задачу как KIM 1-20 ЕГЭ физики, добавляем рекомендацию по
+ * балльности группы — но не full methodology).
+ */
+function buildNumericMethodology(subjectId: string, kimNumber: number | null): string {
+  const lines = [
+    "Тип задачи: КРАТКИЙ ОТВЕТ (число / слово / формула / последовательность).",
+    "Проверь, что ответ ученика совпадает с эталонным:",
+    "- Числовой ответ: допускай разную запись (5 м/с / 5 / 5,0 / 5.0), запятую и точку как разделитель, единицы измерения опциональны если они подразумеваются.",
+    "- Символьный ответ: точное совпадение по содержанию (порядок слов / падежей не критичен если смысл идентичен).",
+    "- Последовательность цифр / букв (множественный выбор, соответствие): проверь полное совпадение порядка и состава.",
+    "Развёрнутого решения здесь НЕ требуется — это краткий ответ. Не требуй от ученика записывать формулы / преобразования / обозначения.",
+    "Анти-спойлер: при INCORRECT — направь к величине / приёму / правилу, но НЕ называй эталон.",
+  ];
+
+  // Optional KIM nudge — short hint про балльность группы без full methodology.
+  if (subjectId === "physics" && typeof kimNumber === "number") {
+    if ([1, 2, 3, 4, 7, 8, 11, 12, 13, 16, 19, 20].includes(kimNumber)) {
+      lines.push(`Это задание № ${kimNumber} ЕГЭ физики (1 балл) — полное совпадение с эталоном.`);
+    } else if ([6, 10, 15, 17].includes(kimNumber)) {
+      lines.push(
+        `Это задание № ${kimNumber} ЕГЭ физики (2 балла, символ-в-символ): полный матч → 2 балла; одна позиция отличается → 1 балл; иначе 0.`,
+      );
+    } else if ([5, 9, 14, 18].includes(kimNumber)) {
+      lines.push(
+        `Это задание № ${kimNumber} ЕГЭ физики (2 балла, множественный выбор, порядок не важен): все символы есть, лишних нет → 2; один лишний ИЛИ один пропущенный → 1; иначе 0.`,
+      );
+    }
+  }
+
+  return lines.join("\n");
+}
+
 // ─── Main resolver ─────────────────────────────────────────────────────────
 
 /**
@@ -194,6 +237,15 @@ function buildGenericRubric(subject: string): Omit<SubjectRubric, "tutor_rubric_
  * Auto-detects CEFR level for language subjects. Auto-injects ФИПИ default
  * methodology when tutor's `rubric_text` is empty; prepends tutor's rubric
  * with high-priority marker when present.
+ *
+ * Hotfix 2026-05-16: для `task_kind='numeric'` (краткий ответ, `check_format=
+ * 'short_answer'`) full ФИПИ methodology для развёрнутых задач **не** инжектится —
+ * вместо неё compact one-line «проверь числовое равенство эталону». Без этого
+ * AI получал блок «должны быть записаны (I) законы, (II) обозначения, (III)
+ * преобразования, (IV) ответ с единицами» из `physics-ege.ts::GENERIC_METHODOLOGY`
+ * и требовал развёрнутое решение даже на 5-символьный ответ. Регрессия вошла
+ * 2026-05-15 commit `ea41a39`. Role и hint_examples остаются subject-aware
+ * (это безопасный subject context, не conflicts с numeric verdict).
  */
 export function resolveSubjectRubric(input: SubjectRubricInput): SubjectRubric {
   const subjectId = (input.subject ?? "").trim();
@@ -202,6 +254,7 @@ export function resolveSubjectRubric(input: SubjectRubricInput): SubjectRubric {
     ? input.tutor_rubric.trim()
     : "";
   const hasTutorRubric = tutorRubricRaw.length > 0;
+  const isNumeric = input.task_kind === "numeric";
 
   let core: Omit<SubjectRubric, "tutor_rubric_active" | "subject_label">;
 
@@ -218,6 +271,18 @@ export function resolveSubjectRubric(input: SubjectRubricInput): SubjectRubric {
     core = buildLanguagesRubric(subjectId, input.task_text);
   } else {
     core = { ...buildGenericRubric(subjectId), cefr_level: null };
+  }
+
+  // Hotfix 2026-05-16: numeric task_kind → swap full ФИПИ methodology с
+  // compact one-liner. Это критично для tutor-задач с `check_format='short_answer'`
+  // где ученик пишет 5 м/с / «225» / «верно», а не развёрнутое решение.
+  // Применяется ДО merge с tutor_rubric — если tutor хочет full criteria,
+  // он пишет их в `rubric_text` (tutor priority всё равно won).
+  if (isNumeric && !LANGUAGE_SUBJECTS.has(subjectId)) {
+    core = {
+      ...core,
+      methodology: buildNumericMethodology(subjectId, kimNumber),
+    };
   }
 
   // Merge tutor_rubric (priority) with default methodology.
