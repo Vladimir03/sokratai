@@ -1,10 +1,12 @@
-# Mock Exams v1 — Tutor-side improvements (TASK-16 + R2)
+# Mock Exams v1 — Tutor-side improvements (TASK-16 + R2 + R3)
 
-**Status:** R2 fixes landed
+**Status:** R3 fixes landed
 **Created:** 2026-05-15
-**Updated:** 2026-05-16 (R2 — ChatGPT-5.5 review fixes)
-**Trigger:** Vladimir QA после TASK-15 (ChatGPT-5.5 review fixes). 6 tutor-side improvements:
-AI OCR fix + Part 1 batch finalize + photo multi-select + heatmap data + result page student answer + secondary score conversion. **R2:** все 5 P1 findings из ChatGPT-5.5 code review (post-TASK-16) исправлены.
+**Updated:** 2026-05-17 (R3 — ChatGPT-5.5 P0/P1/P2 findings after R2 review)
+**Trigger:** Vladimir QA после TASK-15. 6 tutor-side improvements: AI OCR fix +
+Part 1 batch finalize + photo multi-select + heatmap data + result page student
+answer + secondary score conversion. **R2:** все 5 P1 от ChatGPT-5.5 (post-TASK-16).
+**R3:** 1 P0 (security) + 2 P1 + 1 P2 от ChatGPT-5.5 (post-R2).
 
 Связанные документы:
 - `~/.claude/plans/wobbly-crafting-starlight.md` — план реализации
@@ -235,4 +237,122 @@ Read-path в `runPart1OCR.tutorScoredKims` теперь filter ТОЛЬКО `sco
 | `src/types/mockExam.ts` | MODIFY | `MockExamPart1OCRResult` → nested `{cells, __meta}` interface |
 | `src/pages/tutor/mock-exams/TutorMockExamReview.tsx` | MODIFY | 3-state OCR banner (failed/empty/success); `savingKims: Set<number>` + dirty flush before finalize |
 | `src/pages/tutor/mock-exams/TutorMockExamDetail.tsx` | MODIFY | rename label «Средняя Часть 1»; new 6th KPI «Средний общий балл» (conditional) |
+
+---
+
+## Section 8 — R3 fixes (2026-05-17)
+
+ChatGPT-5.5 review R2 нашёл 4 findings (1 P0 + 2 P1 + 1 P2). Все исправлены.
+
+### R3-AC-1 (P0): RLS hardening — block student spoof of `score_source='tutor'`
+
+**Problem:** базовые RLS policies на `mock_exam_attempt_part1_answers`
+(`20260508120000_mock_exams_v1_schema.sql` line 507-542) разрешают student'у
+INSERT/UPDATE для своего in_progress attempt **без column-level guards**.
+После R2 введения `score_source` enum, rogue student через authenticated
+PostgREST client мог писать `earned_score=1, score_source='tutor'` напрямую.
+OCR retry skip'ал этот faked row (R2 filter `score_source='tutor'`), tutor
+видел fake score в Part1BlankReviewPanel; на blank-mode approve без ручной
+проверки fake score принимался валидным.
+
+**Attack vector:** только в blank-mode (form-mode submit handler overwrites
+через `score_source='student_form'` upsert).
+
+**Fix:** new migration `20260516140000_part1_answers_rls_hardening.sql` —
+DROP+CREATE student INSERT/UPDATE policies с tight WITH CHECK guards:
+`earned_score IS NULL AND score_source = 'student_form'`. Server-side writes
+через `service_role` (все edge functions) НЕ затронуты.
+
+**Validation:**
+1. Connect as authenticated student. Try direct PostgREST insert с
+   `score_source='tutor'` → 42501 RLS rejection.
+2. Same insert с `score_source='student_form', earned_score=NULL` → OK.
+3. Tutor manual score через `/part1-manual-score` (service_role) → OK.
+4. OCR run через `mock-exam-grade` (service_role) → OK.
+
+### R3-AC-2 (P1): Legacy OCR JSON normalizer
+
+**Problem:** R2 fix #4 ввёл canonical `{cells, __meta}` shape. Pre-R2 pilot
+attempts (Egor 2026-05-15+) могут содержать legacy shapes:
+- Legacy success: `{ 1: {...}, ..., 20: {...}, __meta: {...} }` (flat numeric keys)
+- Legacy failure: `{ cells: {}, error, raw_response, gemini_model, failed_at }`
+
+Frontend ожидает только canonical → cell display не работает на pilot
+attempts, failure banner не отображается.
+
+**Fix:** `normalizePart1OCRJson(raw)` helper в `mock-exam-tutor-api/index.ts`,
+применяется в `handleGetAttempt` перед serialize. 3 case:
+- Already canonical (`__meta.status` present) → no-op
+- Legacy failure → wrap top-level error fields в `__meta.status='failed'`
+- Legacy success → move numeric keys в `cells`, build `__meta.status='success'`
+  (используя `legacyMeta` если был сохранён + counting recognized_cells)
+
+Идемпотентен — повторное применение не ломает. Student endpoint (`handleGetResult`
+в `mock-exam-student-api`) НЕ селектит `ai_part1_ocr_json` — anti-leak invariant
+сохраняется.
+
+### R3-AC-3 (P1 forward-only mitigation): Migration safe-rerun note
+
+**Problem:** `20260516130000_part1_answers_score_source.sql` контент:
+```sql
+ALTER TABLE ... ADD COLUMN IF NOT EXISTS score_source TEXT NOT NULL DEFAULT 'ocr' ...;
+UPDATE ... SET score_source = 'tutor' WHERE score_source = 'ocr';
+```
+При повторном прогоне (e.g., `supabase db reset` локально на dev env с уже
+существующими данными) ADD COLUMN no-op'ит, но UPDATE затрёт ВСЕ real OCR
+rows на 'tutor' — возвращает R2 fix #1 bug.
+
+**Mitigation (forward-only):** Supabase tracks applied migrations в
+`supabase_migrations.schema_migrations` и НЕ reapply'ет. В production prod env
+миграция применилась ровно один раз (Lovable Cloud auto-deploy после commit
+8fa907a). Существующая база защищена.
+
+**Caveat для dev environments:** если разработчик делает `supabase db reset`
+с pre-existing data, миграция reapply'ется. Но в этом сценарии:
+1. Reset обычно drops + recreates все tables → fresh DB → UPDATE no-op (rows = 0)
+2. Точечный re-run против non-reset env — anti-pattern, не Supabase workflow
+
+Документировано в comments новой `20260516140000_part1_answers_rls_hardening.sql`
+(P1 #3 mitigation note секции). Если когда-нибудь понадобится hard idempotent
+вариант — отдельная forward migration с DO block + column-existence check.
+
+### R3-AC-4 (P2): Manual patch Supabase generated types
+
+**Problem:** `src/integrations/supabase/types.ts` авто-генерируется Lovable Cloud.
+После migration `20260516130000` (column added), regen pickup может быть
+delayed. До auto-regen TypeScript Row/Insert/Update types не содержат
+`score_source` → typed reads/writes расходятся со схемой.
+
+**Fix:** manual patch `mock_exam_attempt_part1_answers` Row/Insert/Update
+с `score_source: string` (Row) / `score_source?: string` (Insert/Update).
+Comment в файле помечает риск перезатирания при Lovable auto-regen.
+
+**Impact:** текущий build не ломается (writes идут через edge API в Deno-side,
+TypeScript types для browser-side reads). Manual patch — defense-in-depth.
+
+### R3 files
+
+| File | Type | Change |
+|---|---|---|
+| `supabase/migrations/20260516140000_part1_answers_rls_hardening.sql` | NEW | DROP+CREATE student INSERT/UPDATE policies с tight `WITH CHECK` (earned_score IS NULL AND score_source='student_form') |
+| `supabase/functions/mock-exam-tutor-api/index.ts` | MODIFY | `normalizePart1OCRJson` helper + apply в `handleGetAttempt` response |
+| `src/integrations/supabase/types.ts` | MODIFY | manually added `score_source` field to mock_exam_attempt_part1_answers Row/Insert/Update |
+
+### R3 verification
+
+1. **Security test (P0):** authenticated student через DevTools console:
+   ```
+   const { error } = await supabase
+     .from('mock_exam_attempt_part1_answers')
+     .insert({ attempt_id: '<own_in_progress>', kim_number: 1, earned_score: 1, score_source: 'tutor' });
+   ```
+   Expected: `error.code = '42501'` (RLS rejection). Compare with valid
+   shape `{ earned_score: null, score_source: 'student_form' }` → success.
+
+2. **Legacy compat test (P1 #2):** open pilot attempt (Egor с pre-R2 OCR) →
+   Part1BlankReviewPanel renders cells from `ai_part1_ocr_json.cells[kim]`
+   correctly, OCR banner shows right state. До R3 cell access was broken
+   (top-level numeric keys → `.cells[k]` undefined).
+
+3. **Build / smoke-check:** `npm run build` ✅, `npm run smoke-check` ✅.
 

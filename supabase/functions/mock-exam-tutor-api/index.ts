@@ -958,6 +958,104 @@ async function handleGetAssignment(
 // Endpoint: GET /attempts/:id
 // ────────────────────────────────────────────────────────────────────────────
 
+/**
+ * TASK-16-R3 fix #2 (ChatGPT-5.5 review, 2026-05-17): legacy OCR JSON compat.
+ *
+ * Pre-R2 attempts могут содержать `ai_part1_ocr_json` в старых shape'ах:
+ *   - Legacy success: `{ 1: {value, confidence}, ..., 20: {...}, __meta: {...} }`
+ *     (numeric keys на верхнем уровне + __meta как sibling)
+ *   - Legacy failure: `{ cells: {}, raw_response, error, gemini_model, failed_at }`
+ *     (top-level error fields, без __meta namespace)
+ *
+ * Frontend (TutorMockExamReview Part1BlankReviewPanel) после R2 ожидает
+ * только canonical `{ cells: Record<number, Cell>, __meta: { status, ... } }`.
+ * Без normalizer'а pilot attempts (Egor 2026-05-15+) после R2 deploy теряют
+ * cell display и не получают правильный failure banner.
+ *
+ * Этот helper normalize'ит legacy → canonical. Идемпотентен — applied to
+ * already-canonical JSON это no-op.
+ */
+function normalizePart1OCRJson(raw: unknown): unknown | null {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const obj = raw as Record<string, unknown>;
+
+  // Case 0: already canonical — return as-is.
+  const hasMeta = obj.__meta && typeof obj.__meta === "object";
+  const hasCells = obj.cells && typeof obj.cells === "object";
+  if (hasMeta && hasCells) {
+    const meta = obj.__meta as Record<string, unknown>;
+    if (meta.status === "success" || meta.status === "failed") {
+      return obj;
+    }
+    // Has __meta + cells, но __meta.status missing — patch его.
+    return {
+      cells: obj.cells,
+      __meta: { ...meta, status: meta.status ?? "success" },
+    };
+  }
+
+  // Case 1: legacy failure shape — `{ cells: {}, error, raw_response, gemini_model, failed_at }`.
+  if (hasCells && ("error" in obj || "raw_response" in obj)) {
+    const nowIso = new Date().toISOString();
+    return {
+      cells: obj.cells,
+      __meta: {
+        status: "failed",
+        gemini_model: typeof obj.gemini_model === "string" ? obj.gemini_model : "unknown",
+        error: typeof obj.error === "string" ? obj.error : "Unknown error",
+        raw_response: typeof obj.raw_response === "string" ? obj.raw_response : null,
+        failed_at: typeof obj.failed_at === "string" ? obj.failed_at : nowIso,
+        generated_at: typeof obj.failed_at === "string" ? obj.failed_at : nowIso,
+      },
+    };
+  }
+
+  // Case 2: legacy success shape — `{ 1: {...}, ..., 20: {...}, __meta: {...}? }`.
+  // Numeric keys at top, optional __meta sibling. Extract cells, build canonical.
+  const cells: Record<string, unknown> = {};
+  let legacyMeta: Record<string, unknown> | null = null;
+  for (const [key, value] of Object.entries(obj)) {
+    if (key === "__meta") {
+      if (value && typeof value === "object" && !Array.isArray(value)) {
+        legacyMeta = value as Record<string, unknown>;
+      }
+      continue;
+    }
+    if (/^\d+$/.test(key) && value && typeof value === "object") {
+      cells[key] = value;
+    }
+  }
+  const recognizedCount = Object.values(cells).filter(
+    (c) =>
+      c && typeof c === "object" && "value" in c &&
+      typeof (c as { value: unknown }).value === "string" &&
+      ((c as { value: string }).value).length > 0,
+  ).length;
+  const nowIso = new Date().toISOString();
+  return {
+    cells,
+    __meta: {
+      status: "success",
+      gemini_model:
+        legacyMeta && typeof legacyMeta.gemini_model === "string"
+          ? legacyMeta.gemini_model
+          : "legacy",
+      recognized_cells:
+        legacyMeta && typeof legacyMeta.recognized_cells === "number"
+          ? legacyMeta.recognized_cells
+          : recognizedCount,
+      raw_length:
+        legacyMeta && typeof legacyMeta.raw_length === "number"
+          ? legacyMeta.raw_length
+          : 0,
+      generated_at:
+        legacyMeta && typeof legacyMeta.generated_at === "string"
+          ? legacyMeta.generated_at
+          : nowIso,
+    },
+  };
+}
+
 async function handleGetAttempt(
   db: SupabaseClient,
   tutorUserId: string,
@@ -1129,7 +1227,13 @@ async function handleGetAttempt(
     // Part1BlankReviewPanel. Frontend type `MockExamAttemptDetail.ai_part1_ocr_json`
     // ожидает этот field. Anti-leak: tutor-only по контракту §22 — student endpoint
     // (handleGetResult в mock-exam-student-api) НЕ селектит это поле.
-    ai_part1_ocr_json: attempt.ai_part1_ocr_json ?? null,
+    //
+    // TASK-16-R3 fix #2 (2026-05-17): normalize legacy flat OCR JSON
+    // → canonical `{cells, __meta}` shape. Pre-R2 pilot attempts (Egor)
+    // могут содержать legacy success (top-level numeric keys) или legacy
+    // failure ({cells:{}, error, raw_response, ...}) — оба варианта
+    // нормализуются. Already-canonical → no-op.
+    ai_part1_ocr_json: normalizePart1OCRJson(attempt.ai_part1_ocr_json) ?? null,
   });
 }
 
