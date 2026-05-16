@@ -1775,11 +1775,6 @@ export type Database = {
         ]
       }
       mock_exam_attempt_part1_answers: {
-        // TASK-16-R3 fix #4 (2026-05-17, ChatGPT-5.5 review P2): manually
-        // patched `score_source` to reflect migration `20260516130000`.
-        // Lovable Cloud regenerates this file occasionally — если оно
-        // перезатрёт, нужно вручную добавить score_source обратно ИЛИ
-        // дождаться auto-regen pickup.
         Row: {
           attempt_id: string
           earned_score: number | null
