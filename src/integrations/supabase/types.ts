@@ -3671,6 +3671,25 @@ export type Database = {
         Args: { p_assignment_id: string; p_task_order: Json }
         Returns: undefined
       }
+      hw_tutor_force_complete_all_tasks: {
+        Args: {
+          p_assignment_id: string
+          p_student_id: string
+          p_tutor_id: string
+        }
+        Returns: Json
+      }
+      hw_tutor_force_complete_task: {
+        Args: {
+          p_assignment_id: string
+          p_comment: string
+          p_score: number
+          p_student_id: string
+          p_task_id: string
+          p_tutor_id: string
+        }
+        Returns: Json
+      }
       increment_demo_hints: {
         Args: { analytics_id: string }
         Returns: undefined
