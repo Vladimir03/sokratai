@@ -1779,6 +1779,7 @@ export type Database = {
           attempt_id: string
           earned_score: number | null
           kim_number: number
+          score_source: string
           student_answer: string | null
           updated_at: string
         }
@@ -1786,6 +1787,7 @@ export type Database = {
           attempt_id: string
           earned_score?: number | null
           kim_number: number
+          score_source?: string
           student_answer?: string | null
           updated_at?: string
         }
@@ -1793,6 +1795,7 @@ export type Database = {
           attempt_id?: string
           earned_score?: number | null
           kim_number?: number
+          score_source?: string
           student_answer?: string | null
           updated_at?: string
         }
