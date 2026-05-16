@@ -254,19 +254,72 @@ const RegisterTutor = () => {
                 style={{ fontSize: 16, touchAction: "manipulation" }}
               />
             </div>
-            <div className="flex items-start gap-2">
+            {/* Custom-rendered consent checkbox (same `.rtc-consent-checkbox`
+                pattern as TutorSignupTrial.tsx `.tst-checkbox`). Replaced
+                native `<input type="checkbox" accent-primary>` because the
+                latter rendered invisibly on Chrome/Windows (white-on-white
+                when unchecked). Replaced shadcn Checkbox because
+                `data-[state=checked]:bg-primary` modifier wasn't generating
+                in this project's Tailwind build. Inline `<style>` block is
+                self-contained, proven pattern, default state: unchecked. */}
+            <style>{`
+              .rtc-consent-row {
+                display: flex;
+                align-items: flex-start;
+                gap: 10px;
+                margin: 8px 0 16px;
+              }
+              .rtc-consent-checkbox {
+                appearance: none;
+                -webkit-appearance: none;
+                margin-top: 2px;
+                width: 22px;
+                height: 22px;
+                flex-shrink: 0;
+                background: #fff;
+                border: 2px solid hsl(var(--primary));
+                border-radius: 4px;
+                cursor: pointer;
+                position: relative;
+                transition: background-color 150ms;
+                touch-action: manipulation;
+              }
+              /* Note: Chrome treats input[type=checkbox] background-color
+                 specially even with appearance:none — neither CSS nor inline
+                 !important applies a filled background. Instead we render a
+                 thick green checkmark via ::after, which clearly indicates
+                 the checked state on the white field with green border.
+                 Tested in Chrome 130+ / Windows. */
+              .rtc-consent-checkbox:checked::after {
+                content: "";
+                position: absolute;
+                inset: 0;
+                background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%231B6948' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3 8.5l3.5 3.5L13 5'/%3E%3C/svg%3E");
+                background-repeat: no-repeat;
+                background-position: center;
+                background-size: 16px 16px;
+              }
+              .rtc-consent-checkbox:focus-visible {
+                outline: 2px solid hsl(var(--primary));
+                outline-offset: 2px;
+              }
+              .rtc-consent-checkbox:disabled {
+                opacity: 0.5;
+                cursor: not-allowed;
+              }
+            `}</style>
+            <div className="rtc-consent-row">
               <input
                 id="register-tutor-consent"
                 type="checkbox"
                 checked={consent}
                 onChange={(e) => setConsent(e.target.checked)}
                 disabled={loading}
-                className="mt-1 h-4 w-4 cursor-pointer accent-primary"
-                style={{ touchAction: "manipulation" }}
+                className="rtc-consent-checkbox"
               />
               <label
                 htmlFor="register-tutor-consent"
-                className="text-sm text-muted-foreground leading-snug cursor-pointer"
+                className="text-sm text-muted-foreground leading-snug cursor-pointer select-none"
               >
                 Я согласен с{" "}
                 <a
