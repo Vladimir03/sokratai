@@ -99,9 +99,45 @@ Deno.serve(async (req) => {
     );
   }
 
+  // Carry intended role through OAuth state so the callback can assign
+  // tutor role server-side for newly-created tutor signups (BLOCKER 4 from
+  // code review 2026-05-16).
+  //
+  // Security model (Reviewer P1 Round 2 calibration):
+  //   - HMAC signing of state DOES NOT prove the request came from a tutor
+  //     entrypoint. Anyone can hit this URL with `?intendedRole=tutor`.
+  //   - What actually protects the role boundary:
+  //       1. `oauth-google-callback` only auto-assigns tutor for
+  //          `isNewUser === true` — existing accounts keep their role.
+  //       2. Defense-in-depth here: derive tutor intent from the
+  //          `redirectTo` path. Only requests whose redirect ends up on a
+  //          `/tutor/*` page can claim tutor role. A typo / hostile
+  //          embed pointing at `/chat` cannot promote to tutor even with
+  //          `intendedRole=tutor` in the query string.
+  //   - Existing tutors logging in are unaffected: callback only writes a
+  //     role row when one doesn't exist yet AND the user is new.
+  const rawIntendedRole = url.searchParams.get("intendedRole");
+  const requestedRole =
+    rawIntendedRole === "tutor" || rawIntendedRole === "student"
+      ? rawIntendedRole
+      : "student";
+
+  // Path-based intent guard: tutor role only granted if both the explicit
+  // request AND the redirect path point at a tutor surface.
+  let redirectPath = "";
+  try {
+    redirectPath = new URL(rawRedirectTo).pathname;
+  } catch {
+    redirectPath = "";
+  }
+  const redirectIsTutorSurface = redirectPath.startsWith("/tutor/");
+  const intendedRole =
+    requestedRole === "tutor" && redirectIsTutorSurface ? "tutor" : "student";
+
   const state = await signState(
     {
       redirectTo: rawRedirectTo,
+      intendedRole,
       nonce: crypto.randomUUID(),
       issuedAt: Date.now(),
     },

@@ -1,5 +1,6 @@
 import { useEffect, useState, useRef } from "react";
 import { useNavigate } from "react-router-dom";
+import type { Session } from "@supabase/supabase-js";
 import { supabase } from "@/lib/supabaseClient";
 import { claimPendingInvite } from "@/lib/inviteApi";
 import Navigation from "./Navigation";
@@ -44,9 +45,25 @@ const AuthGuard = ({ children, fullBleed = false }: AuthGuardProps) => {
   const [showOnboarding, setShowOnboarding] = useState(false);
   const [userId, setUserId] = useState<string | null>(null);
   const claimAttempted = useRef(false);
+  const sessionHandled = useRef(false);
 
   useEffect(() => {
-    supabase.auth.getSession().then(async ({ data: { session } }) => {
+    // RU OAuth bypass (2026-05-16): custom oauth-google-callback edge function
+    // returns `redirectTo#access_token=...&refresh_token=...&type=signup`.
+    // supabase-js parses URL hash asynchronously and emits `INITIAL_SESSION`
+    // event with the parsed session. If we call `getSession()` synchronously
+    // on mount BEFORE the hash parse completes, we get null → navigate("/login")
+    // → user sees the same signup form → clicks Google again → infinite loop.
+    //
+    // Fix: wait for `INITIAL_SESSION` event (fires exactly once on init, with
+    // session=null OR session=<parsed>). Process auth decision only there.
+    // `SIGNED_IN` follows for explicit logins (email/Telegram polling
+    // setSession). `SIGNED_OUT` invalidates state and forces login redirect.
+
+    const handleSession = async (session: Session | null) => {
+      if (sessionHandled.current) return;
+      sessionHandled.current = true;
+
       if (!session) {
         navigate("/login");
         return;
@@ -74,10 +91,16 @@ const AuthGuard = ({ children, fullBleed = false }: AuthGuardProps) => {
       }
 
       setLoading(false);
-    });
+    };
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      if (!session) {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      // INITIAL_SESSION: fires once after hash-token parse — our primary auth
+      // entry point. SIGNED_IN: fires after explicit setSession()/verifyOtp.
+      // Both should hydrate this guard. SIGNED_OUT: nuke session and bounce.
+      if (event === "INITIAL_SESSION" || event === "SIGNED_IN") {
+        void handleSession(session);
+      } else if (event === "SIGNED_OUT") {
+        sessionHandled.current = false;
         navigate("/login");
       }
     });

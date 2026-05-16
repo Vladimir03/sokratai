@@ -1,8 +1,9 @@
 import { useState, useRef, useCallback, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
+import QRCode from "react-qr-code";
 import { supabase } from "@/lib/supabaseClient";
 import { Button } from "@/components/ui/button";
-import { Send, Loader2, CheckCircle, RefreshCw, ExternalLink } from "lucide-react";
+import { Send, Loader2, CheckCircle, RefreshCw, ExternalLink, Smartphone } from "lucide-react";
 import { toast } from "sonner";
 import { isIOS } from "@/hooks/use-mobile";
 import { claimPendingInvite } from "@/lib/inviteApi";
@@ -44,7 +45,12 @@ const TelegramLoginButton = ({
       );
       
       const data = await response.json();
-      console.log("Token check response:", data);
+      // P1 telemetry cleanup (2026-05-16): raw `data` includes session tokens
+      // and user_id. Replaced with boolean-only status event.
+      console.log("[telegram-login] poll response:", {
+        status: data.status,
+        hasSession: !!data.session,
+      });
 
       if (data.status === "verified" && data.session) {
         await supabase.auth.setSession({
@@ -135,11 +141,22 @@ const TelegramLoginButton = ({
       attempts++;
       
       if (attempts >= maxAttempts) {
+        console.warn(
+          JSON.stringify({
+            event: "telegram_polling_timeout",
+            flow: "student_telegram_login",
+            attempts,
+            timestamp: new Date().toISOString(),
+          }),
+        );
         stopPolling();
         setLoading(false);
         setStatus("idle");
         setCurrentToken(null);
-        toast.error("Время ожидания истекло. Попробуйте снова.");
+        toast.error(
+          "Telegram не подтвердил вход за 5 минут. Если t.me не открывается — попробуйте VPN или регистрацию по email.",
+          { duration: 8000 },
+        );
         return;
       }
 
@@ -174,7 +191,9 @@ const TelegramLoginButton = ({
       }
 
       const { token } = await response.json();
-      console.log("Created login token:", token);
+      // P1 telemetry cleanup (2026-05-16): tokens are short-lived but still
+      // grant /start verification — don't log them.
+      console.log("[telegram-login] token created");
       setCurrentToken(token);
 
       openTelegram(token);
@@ -243,15 +262,38 @@ const TelegramLoginButton = ({
             Открыть Telegram снова
           </Button>
           
-          <Button 
-            variant="ghost" 
-            size="sm" 
+          <Button
+            variant="ghost"
+            size="sm"
             onClick={handleCancel}
             className="w-full text-muted-foreground"
           >
             Отменить
           </Button>
         </div>
+
+        {/* QR-fallback for Windows / Linux / desktop users without Telegram
+            Desktop installed. Phone scan opens the link in NATIVE Telegram
+            app → bot receives /start → this tab's polling picks up the
+            verified token. Same pattern as TutorTelegramLoginButton. */}
+        {currentToken && !isIOS() && (
+          <div className="mt-2 flex flex-col items-center gap-2 rounded-md border border-border bg-card p-3 max-w-xs">
+            <div className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+              <Smartphone className="w-3.5 h-3.5" />
+              <span>Нет Telegram на компьютере?</span>
+            </div>
+            <div className="bg-white p-2 rounded">
+              <QRCode
+                value={`https://t.me/${botName}?start=login_${currentToken}`}
+                size={140}
+                level="M"
+              />
+            </div>
+            <p className="text-xs text-muted-foreground text-center leading-snug">
+              Отсканируйте телефоном — откроется в Telegram, нажмите «Старт»
+            </p>
+          </div>
+        )}
       </div>
     );
   }

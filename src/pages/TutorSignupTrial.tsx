@@ -215,10 +215,20 @@ export default function TutorSignupTrial() {
         email: validation.data.email,
         password: validation.data.password,
         options: {
+          // user_metadata carries server-side finalization intent for
+          // email-verify edge function. See RegisterTutor.tsx for full rationale.
+          // `consent_intent` is flushed server-side after verifyOtp (client
+          // recordConsent path can't run before session exists).
+          // `trial_intent` triggers profiles.trial_started_at set in email-verify
+          // for email-confirm flow (TutorSignupTrial does it client-side on
+          // SIGNED_IN, but that fires only when session exists — for email
+          // confirm path session arrives only after email-verify redirect).
           data: {
             username,
             subject: validation.data.subject,
             signup_source: "tutor-landing-trial",
+            consent_intent: "web-signup-tutor",
+            trial_intent: isTrialIntent,
           },
           emailRedirectTo: `${window.location.origin}/tutor/home`,
         },
@@ -659,6 +669,7 @@ export default function TutorSignupTrial() {
             <GoogleAuthButton
               redirectPath="/tutor/home"
               consentSource="google-oauth-tutor"
+              intendedRole="tutor"
               enabled={oauthEnabled}
             />
             {!oferta && (

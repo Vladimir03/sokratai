@@ -42,6 +42,14 @@ interface GoogleAuthButtonProps {
   redirectPath: string;
   /** Consent source tag — required so we can record consent after OAuth round-trip. */
   consentSource: ConsentSource;
+  /**
+   * Intended role for the signup. Passed through HMAC-signed OAuth state to
+   * the callback, which assigns `tutor` role + creates `tutors` row for
+   * newly-created accounts when set to "tutor". Default "student" never
+   * auto-assigns elevated roles. Existing accounts keep their current role
+   * regardless of this value (privilege escalation guard).
+   */
+  intendedRole?: "tutor" | "student";
   /** When false, the button is disabled (e.g. consent checkbox not ticked). */
   enabled?: boolean;
   /** Optional className override for the wrapping <button>. */
@@ -53,6 +61,7 @@ interface GoogleAuthButtonProps {
 export default function GoogleAuthButton({
   redirectPath,
   consentSource,
+  intendedRole = "student",
   enabled = true,
   className,
   label = "Продолжить с Google",
@@ -63,6 +72,14 @@ export default function GoogleAuthButton({
     if (!enabled || loading) return;
     setLoading(true);
     try {
+      console.warn(
+        JSON.stringify({
+          event: "oauth_google_init_clicked",
+          flow: consentSource,
+          timestamp: new Date().toISOString(),
+        }),
+      );
+
       // Stash consent intent BEFORE redirect — applied on SIGNED_IN return.
       stashPendingConsent(consentSource);
 
@@ -72,6 +89,7 @@ export default function GoogleAuthButton({
       const absoluteRedirectTo = `${window.location.origin}${redirectPath}`;
       const initUrl = new URL(OAUTH_INIT_URL);
       initUrl.searchParams.set("redirectTo", absoluteRedirectTo);
+      initUrl.searchParams.set("intendedRole", intendedRole);
 
       window.location.href = initUrl.toString();
       // Page will navigate; nothing else to do here.

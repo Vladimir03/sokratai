@@ -90,24 +90,43 @@ const RegisterTutor = () => {
         return;
       }
 
-      // Step 1: Register the user
+      console.warn(
+        JSON.stringify({
+          event: "tutor_signup_started",
+          flow: "tutor_register",
+          timestamp: new Date().toISOString(),
+        }),
+      );
+
+      // Step 1: Register the user.
+      // user_metadata carries server-side finalization intent for email-verify
+      // edge function: it reads `signup_source` to decide whether to assign
+      // tutor role + create tutors-row, and `consent_intent` to flush consent
+      // (both happen after email confirmation, where the client cannot run).
       const { data: authData, error: authError } = await supabase.auth.signUp({
         email: validation.data.email,
         password: validation.data.password,
         options: {
           data: {
             username: validation.data.name,
+            signup_source: "tutor-register",
+            consent_intent: "web-signup-tutor",
           },
           emailRedirectTo: `${window.location.origin}/tutor/home`,
         },
       });
 
       if (authError && isExistingEmailError(authError)) {
-        console.warn("auth_event:existing_email", {
-          flow: "tutor_register",
-          email: validation.data.email,
-        });
-        toast.error("Email уже занят. Для репетитора нужен отдельный аккаунт.");
+        console.warn(
+          JSON.stringify({
+            event: "tutor_signup_existing_email",
+            flow: "tutor_register",
+            timestamp: new Date().toISOString(),
+          }),
+        );
+        toast.error(
+          "Email уже зарегистрирован. Войдите в существующий аккаунт через страницу входа.",
+        );
         return;
       }
 
@@ -117,22 +136,55 @@ const RegisterTutor = () => {
         throw new Error("Не удалось создать пользователя");
       }
 
+      // Email confirmation gate (Phase 1, fix RU silent-fail 2026-05-16):
+      // When Supabase requires email confirm, signUp() returns user but no
+      // session. Without this guard, the next line (functions.invoke without
+      // user JWT) returns 401 → user sees confused «Не удалось назначить
+      // роль» error and abandons. Mirror TutorSignupTrial.tsx behaviour:
+      // surface explicit toast.info, exit cleanly. Account exists; tutor
+      // role assignment happens on confirm-link return.
+      if (!authData.session) {
+        console.warn(
+          JSON.stringify({
+            event: "tutor_signup_email_pending",
+            flow: "tutor_register",
+            timestamp: new Date().toISOString(),
+          }),
+        );
+        toast.info(
+          "Мы отправили письмо для подтверждения email. Откройте его и нажмите ссылку, чтобы завершить регистрацию.",
+          { duration: 10000 },
+        );
+        return;
+      }
+
       // Step 2: Assign tutor role via edge function
       const { error: roleError } = await supabase.functions.invoke("assign-tutor-role", {
         body: { user_id: authData.user.id },
       });
 
       if (roleError) {
-        console.error("auth_event:role_assignment_failed", {
-          flow: "tutor_register",
-          user_id: authData.user.id,
-          error: roleError.message,
-        });
+        console.error(
+          JSON.stringify({
+            event: "tutor_signup_role_assign_failed",
+            flow: "tutor_register",
+            error: roleError.message,
+            timestamp: new Date().toISOString(),
+          }),
+        );
         toast.error("Не удалось назначить роль репетитора. Попробуйте снова.");
         return;
       }
 
       await recordConsent(authData.user.id, "web-signup-tutor");
+
+      console.warn(
+        JSON.stringify({
+          event: "tutor_signup_succeeded",
+          flow: "tutor_register",
+          timestamp: new Date().toISOString(),
+        }),
+      );
 
       toast.success("Регистрация успешна!");
       navigate("/tutor/home");
@@ -159,49 +211,11 @@ const RegisterTutor = () => {
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">
-          <div className="flex flex-col items-center">
-            <p className="text-sm text-muted-foreground mb-3">
-              Быстрая регистрация через Telegram
-            </p>
-            <div
-              className="w-full"
-              onClickCapture={(e) => {
-                if (!consent) {
-                  e.preventDefault();
-                  e.stopPropagation();
-                  toast.error("Сначала отметьте согласие с офертой и политикой");
-                  return;
-                }
-                stashPendingConsent("telegram-oauth-tutor");
-              }}
-              style={{
-                opacity: consent ? 1 : 0.5,
-                pointerEvents: consent ? "auto" : "none",
-              }}
-              aria-disabled={!consent}
-            >
-              <TutorTelegramLoginButton className="w-full" />
-            </div>
-            <div className="w-full mt-3">
-              <GoogleAuthButton
-                redirectPath="/tutor/home"
-                consentSource="google-oauth-tutor"
-                enabled={consent}
-              />
-            </div>
-          </div>
-
-          <div className="relative">
-            <div className="absolute inset-0 flex items-center">
-              <span className="w-full border-t border-border" />
-            </div>
-            <div className="relative flex justify-center text-xs uppercase">
-              <span className="bg-card px-2 text-muted-foreground">
-                или по email
-              </span>
-            </div>
-          </div>
-
+          {/* Email-first redesign (2026-05-16, RU bypass): email/password — primary
+              path, OAuth — fallback below. Reason: in РФ без VPN Google can hit
+              CF throttling (16-KB), Telegram t.me deep-link doesn't work on
+              Windows без TG Desktop, but api.sokratai.ru → email works reliably
+              (Selectel Moscow direct, no CF, no SNI блокировки). */}
           <form onSubmit={handleRegister} className="space-y-4">
             <div className="space-y-2">
               <Input
@@ -211,27 +225,33 @@ const RegisterTutor = () => {
                 onChange={(e) => setName(e.target.value)}
                 required
                 disabled={loading}
+                style={{ fontSize: 16, touchAction: "manipulation" }}
               />
             </div>
             <div className="space-y-2">
               <Input
                 type="email"
+                inputMode="email"
+                autoComplete="email"
                 placeholder="Email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 required
                 disabled={loading}
+                style={{ fontSize: 16, touchAction: "manipulation" }}
               />
             </div>
             <div className="space-y-2">
               <Input
                 type="password"
+                autoComplete="new-password"
                 placeholder="Пароль (минимум 8 символов)"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 required
                 minLength={8}
                 disabled={loading}
+                style={{ fontSize: 16, touchAction: "manipulation" }}
               />
             </div>
             <div className="flex items-start gap-2">
@@ -268,14 +288,60 @@ const RegisterTutor = () => {
                 </a>
               </label>
             </div>
-            <Button 
-              type="submit" 
-              className="w-full" 
+            <Button
+              type="submit"
+              className="w-full"
               disabled={loading || !consent}
+              style={{ minHeight: 48 }}
             >
               {loading ? "Регистрация..." : "Зарегистрироваться"}
             </Button>
           </form>
+
+          <div className="relative">
+            <div className="absolute inset-0 flex items-center">
+              <span className="w-full border-t border-border" />
+            </div>
+            <div className="relative flex justify-center text-xs uppercase">
+              <span className="bg-card px-2 text-muted-foreground">
+                или альтернативно
+              </span>
+            </div>
+          </div>
+
+          <div className="flex flex-col items-center space-y-3">
+            <div className="w-full">
+              <GoogleAuthButton
+                redirectPath="/tutor/home"
+                consentSource="google-oauth-tutor"
+                intendedRole="tutor"
+                enabled={consent}
+              />
+            </div>
+            <div
+              className="w-full"
+              onClickCapture={(e) => {
+                if (!consent) {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  toast.error("Сначала отметьте согласие с офертой и политикой");
+                  return;
+                }
+                stashPendingConsent("telegram-oauth-tutor");
+              }}
+              style={{
+                opacity: consent ? 1 : 0.5,
+                pointerEvents: consent ? "auto" : "none",
+              }}
+              aria-disabled={!consent}
+            >
+              <TutorTelegramLoginButton className="w-full" />
+            </div>
+            <p className="text-xs text-muted-foreground text-center leading-relaxed">
+              Telegram и Google могут не работать в РФ без VPN. Если кнопки выше
+              «зависают» — регистрируйтесь по email (форма наверху).
+            </p>
+          </div>
 
           <div className="space-y-3 text-center text-sm">
             <p className="text-muted-foreground">

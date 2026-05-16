@@ -360,6 +360,7 @@ For architecture overview see: docs/delivery/engineering/architecture/README.md
 | `80-cross-browser.md` | Safari/iOS rules, forbidden patterns, build targets |
 | `90-design-system.md` | Цветовая палитра, типографика, spacing, компоненты, anti-patterns |
 | `95-production-deploy.md` | **КРИТИЧНО**: когда требуется `deploy-sokratai` после frontend-изменений (Selectel VPS, Phase B 2026-05-03) |
+| `96-auth-ru-bypass.md` | **КРИТИЧНО**: 11 hard rules для auth flows в РФ (RegisterTutor / TutorLogin / SignUp / OAuth / Telegram). Читать ОБЯЗАТЕЛЬНО перед любым изменением auth flow |
 
 ## КРИТИЧЕСКИЕ ПРАВИЛА
 
@@ -1454,6 +1455,41 @@ Round 2 коммит поднял 1 **catastrophic P0** + 2 P1 + 2 P2 + 1 P3. В
 
 **Полный контракт:** `.claude/rules/40-homework-system.md` → секция «Tutor force-complete + reopen + bulk».
 **Спека:** `~/.claude/plans/lexical-brewing-gadget.md` + два раунда code review (ChatGPT-5.5).
+
+### 24. RU auth critical fix — RegisterTutor + OAuth + Email confirmation (2026-05-16, compressed-sparking-spindle)
+
+Production-блокер мая 2026: новые репетиторы в РФ без VPN не могли зарегистрироваться **ни одним** из трёх auth-каналов (Google OAuth / Telegram / email/password). После 3 раундов ChatGPT-5.5 code review закрыто 21 issue (4 BLOCKER + 9 P1 + 3 P2 + 5 первичных fix'ов).
+
+**Канонические правила:** `.claude/rules/96-auth-ru-bypass.md` — **11 hard rules** для frontend / backend / ops. Читать ОБЯЗАТЕЛЬНО перед любым изменением auth flow.
+
+**Краткое summary fix'ов:**
+
+1. **`RegisterTutor.tsx` silent fail при email confirm:** добавлен guard `if (!authData.session)` → `toast.info` с инструкцией про письмо + early return (не вызывать `assign-tutor-role` без сессии).
+2. **Custom `email-verify` edge function** (`api.sokratai.ru/functions/v1/email-verify`) обходит SNI-блокировку `vrsseotrfmsxpbciyqzc.supabase.co/auth/v1/verify`. Mirror архитектуры `oauth-google-callback`.
+3. **Server-side role finalization в `email-verify`:** обходит 5-минутный age check в `assign-tutor-role`. Читает `user.user_metadata.signup_source`, exact allow-list `TUTOR_SIGNUP_SOURCES` (НЕ regex), INSERT в `user_roles` + `tutors` через admin client. Role failure FATAL → redirect на `/login?email_verify_error=role_finalization_failed`.
+4. **`AuthGuard` + `TutorGuard` race fix:** sync `getSession()` заменён на async ожидание `INITIAL_SESSION` event (с 3-second safety net timeout). Без этого hash tokens `#access_token=...` от edge function callback'ов парсятся слишком поздно — guard уже редиректнул на /login → infinite loop.
+5. **Carry `intendedRole` через signed OAuth state:** `GoogleAuthButton` имеет prop `intendedRole`, передаётся в `oauth-google-init?intendedRole=...`. Init signs в HMAC state. Callback assigns tutor role только если `isNewUser=true AND intendedRole=tutor AND redirectTo.pathname.startsWith('/tutor/')` (defense-in-depth). Existing accounts preserved — privilege escalation guard.
+6. **TutorLogin БЕЗ `intendedRole="tutor"`:** login-страница не должна авто-promotить новый аккаунт в tutor без consent gate.
+7. **Telegram QR-код** для desktop без Telegram Desktop (Windows / Linux): `t.me/...` deep link открывается в web где `?start=` НЕ передаётся боту. QR-код кодирует тот же URL → юзер сосканит phone'ом → native TG → /start.
+8. **Consent через `user_metadata.consent_intent`** для email flow: stash в `signUp({ data: { consent_intent } })`, flush в `email-verify` через admin client (обходит RLS + timing race).
+9. **PII telemetry cleanup:** убраны `email`, `user_id`, raw tokens из логов в `TutorTelegramLoginButton`, `TelegramLoginButton`, `oauth-google-callback`.
+10. **Email template per-call:** `redirect_to={{ .RedirectTo }}` (не hardcoded `/tutor/home`) — один template обслуживает и tutor (`emailRedirectTo=/tutor/home`) и student (`/chat`).
+11. **Email-first UX redesign:** email-форма primary, OAuth — fallback с явным hint про РФ-ограничения.
+
+**Обязательные manual ops actions** перед production deploy (см. runbook):
+- Supabase Dashboard → Authentication → URL Configuration → Site URL `https://sokratai.ru`
+- Authentication → Email Templates → Confirm signup → `https://api.sokratai.ru/functions/v1/email-verify?token_hash={{ .TokenHash }}&type=signup&redirect_to={{ .RedirectTo }}`
+- Google Cloud Console → OAuth Client → Authorized redirect URIs → `https://api.sokratai.ru/functions/v1/oauth-google-callback`
+- VPS: `ssh root@185.161.65.182 && deploy-sokratai`
+
+**Известные deferred follow-ups** (Round 4 review, non-blocking):
+- P1: OAuth consent flush gap (GoogleAuthButton stash → server-side flush via signed state). Compliance gap, not functional.
+- P2: Error UI invisible (Login + TutorLogin не читают `email_verify_error` / `oauth_error` query params).
+
+**Спека / runbook:**
+- `~/.claude/plans/compressed-sparking-spindle.md` — full plan
+- `docs/delivery/engineering/runbooks/tutor-cant-signup-ru.md` — support diagnostic runbook
+- `.claude/rules/96-auth-ru-bypass.md` — 11 hard rules (canonical)
 
 ## Известные хрупкие области
 

@@ -194,12 +194,13 @@ const Login = () => {
               }}
             >
               <TelegramLoginButton />
-              <p className="text-xs text-muted-foreground mt-2">
-                Или войдите через Telegram (нужен VPN)
+              <p className="text-xs text-muted-foreground mt-2 text-center leading-relaxed">
+                Telegram и Google могут не работать в РФ без VPN. Если кнопки
+                «зависают» — войдите по email&nbsp;↑
               </p>
               {showTelegramHint && (
-                <p className="text-xs text-amber-600 mt-1">
-                  Telegram может быть недоступен. Попробуйте войти по email&nbsp;↑
+                <p className="text-xs text-amber-600 mt-1 text-center">
+                  Telegram не отвечает — попробуйте email или VPN
                 </p>
               )}
             </div>

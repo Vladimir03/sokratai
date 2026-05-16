@@ -195,9 +195,29 @@ const TutorGuard = ({ children }: TutorGuardProps) => {
   useEffect(() => {
     isMounted.current = true;
 
-    checkAccess();
+    // RU OAuth bypass race condition (2026-05-16): on landing pages that carry
+    // session tokens in URL hash (e.g. /tutor/home#access_token=... from
+    // oauth-google-callback OR email-verify edge functions), supabase-js
+    // parses the hash asynchronously and emits `INITIAL_SESSION`. A
+    // synchronous `getSession()` call before that parse completes returns
+    // null, which routes the user to /login → they see the signup form
+    // again → infinite loop.
+    //
+    // Fix: defer the FIRST checkAccess() until INITIAL_SESSION fires. After
+    // that, all existing behavior (module-level cache, RPC retry with delays,
+    // visibilitychange recheck, SIGNED_OUT → /login) is preserved as-is.
+    let initialFired = false;
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      // First INITIAL_SESSION (with or without session): hash is now parsed,
+      // safe to run checkAccess(). Only run once — subsequent events handled
+      // by the if-branches below.
+      if (!initialFired && event === "INITIAL_SESSION") {
+        initialFired = true;
+        checkAccess();
+        return;
+      }
+
       if (!session) {
         tutorAuthCache.userId = null;
         tutorAuthCache.isTutor = false;
@@ -205,8 +225,29 @@ const TutorGuard = ({ children }: TutorGuardProps) => {
         navigate("/login");
       } else if (event === "TOKEN_REFRESHED") {
         tutorAuthCache.verifiedAt = Date.now();
+      } else if (event === "SIGNED_IN") {
+        // Fresh sign-in (Telegram polling setSession, email/password login):
+        // re-run checkAccess to re-verify tutor role for the new user.
+        checkAccess();
       }
     });
+
+    // Safety net: if INITIAL_SESSION never fires within 3s (browser quirk /
+    // supabase-js bug), fall back to the old synchronous path so the user
+    // is not stuck on a loader forever. 3s is conservative — INITIAL_SESSION
+    // normally fires within ~10ms after mount.
+    const initFallback = window.setTimeout(() => {
+      if (!initialFired) {
+        initialFired = true;
+        console.warn(
+          JSON.stringify({
+            event: "tutor_guard_initial_session_timeout",
+            timestamp: new Date().toISOString(),
+          }),
+        );
+        checkAccess();
+      }
+    }, 3000);
 
     const handleVisibilityChange = () => {
       if (document.visibilityState === "visible") {
@@ -221,6 +262,7 @@ const TutorGuard = ({ children }: TutorGuardProps) => {
 
     return () => {
       isMounted.current = false;
+      window.clearTimeout(initFallback);
       subscription.unsubscribe();
       document.removeEventListener("visibilitychange", handleVisibilityChange);
     };

@@ -17,11 +17,17 @@ project_id = "vrsseotrfmsxpbciyqzc"
     verify_jwt = false
   [functions.claim-invite]
     verify_jwt = true
+  [functions.email-verify]
+    verify_jwt = false
   [functions.get-solution]
     verify_jwt = false
   [functions.homework-api]
     verify_jwt = false
   [functions.homework-reminder]
+    verify_jwt = false
+  [functions.oauth-google-callback]
+    verify_jwt = false
+  [functions.oauth-google-init]
     verify_jwt = false
   [functions.payment-reminder]
     verify_jwt = false

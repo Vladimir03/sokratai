@@ -99,47 +99,32 @@ const TutorLogin = () => {
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">
-          <div className="flex flex-col items-center gap-3">
-            <p className="text-sm text-muted-foreground">
-              Быстрый вход
-            </p>
-            <TutorTelegramLoginButton className="w-full" />
-            <GoogleAuthButton
-              redirectPath="/tutor/home"
-              consentSource="google-oauth-tutor"
-            />
-          </div>
-
-          <div className="relative">
-            <div className="absolute inset-0 flex items-center">
-              <span className="w-full border-t border-border" />
-            </div>
-            <div className="relative flex justify-center text-xs uppercase">
-              <span className="bg-card px-2 text-muted-foreground">
-                или по email
-              </span>
-            </div>
-          </div>
-
+          {/* Email-first redesign (2026-05-16, RU bypass): email-form primary,
+              OAuth fallback below. See RegisterTutor.tsx for rationale. */}
           <form onSubmit={handleLogin} className="space-y-4">
             <div className="space-y-2">
               <Input
                 type="email"
+                inputMode="email"
+                autoComplete="email"
                 placeholder="Email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 required
                 disabled={loading}
+                style={{ fontSize: 16, touchAction: "manipulation" }}
               />
             </div>
             <div className="space-y-2">
               <Input
                 type="password"
+                autoComplete="current-password"
                 placeholder="Пароль"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 required
                 disabled={loading}
+                style={{ fontSize: 16, touchAction: "manipulation" }}
               />
             </div>
             <div className="flex justify-end">
@@ -150,12 +135,44 @@ const TutorLogin = () => {
             <Button
               type="submit"
               className="w-full"
-              variant="outline"
               disabled={loading}
+              style={{ minHeight: 48 }}
             >
               {loading ? "Вход..." : "Войти по email"}
             </Button>
           </form>
+
+          <div className="relative">
+            <div className="absolute inset-0 flex items-center">
+              <span className="w-full border-t border-border" />
+            </div>
+            <div className="relative flex justify-center text-xs uppercase">
+              <span className="bg-card px-2 text-muted-foreground">
+                или альтернативно
+              </span>
+            </div>
+          </div>
+
+          <div className="flex flex-col items-center gap-3">
+            {/* Reviewer P1 (Round 2): NO `intendedRole="tutor"` here. This
+                is a LOGIN page (no offer/privacy consent gate). A brand-new
+                Google account clicking here would otherwise become a tutor
+                automatically, bypassing the consent checkbox required on
+                /register-tutor. Existing tutors pass through because their
+                role is already assigned (TutorGuard reads it cached);
+                default `intendedRole="student"` from GoogleAuthButton
+                doesn't downgrade them. New users get a student account and
+                must explicitly go to /register-tutor for tutor signup. */}
+            <GoogleAuthButton
+              redirectPath="/tutor/home"
+              consentSource="google-oauth-tutor"
+            />
+            <TutorTelegramLoginButton className="w-full" />
+            <p className="text-xs text-muted-foreground text-center leading-relaxed">
+              Telegram и Google могут не работать в РФ без VPN. Если кнопки
+              «зависают» — войдите по email наверху.
+            </p>
+          </div>
 
           <div className="space-y-3 text-center text-sm">
             <p className="text-muted-foreground">

@@ -46,5 +46,6 @@ jobs:
           supabase functions deploy tutor-update-student
           supabase functions deploy oauth-google-init --no-verify-jwt
           supabase functions deploy oauth-google-callback --no-verify-jwt
+          supabase functions deploy email-verify --no-verify-jwt
 
           echo "✅ All functions deployed successfully!"

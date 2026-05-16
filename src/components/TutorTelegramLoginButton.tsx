@@ -1,8 +1,9 @@
 import { useState, useRef, useCallback, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
+import QRCode from "react-qr-code";
 import { supabase } from "@/lib/supabaseClient";
 import { Button } from "@/components/ui/button";
-import { Send, Loader2, CheckCircle, RefreshCw, ExternalLink } from "lucide-react";
+import { Send, Loader2, CheckCircle, RefreshCw, ExternalLink, Smartphone } from "lucide-react";
 import { toast } from "sonner";
 import { isIOS } from "@/hooks/use-mobile";
 
@@ -153,9 +154,11 @@ const TutorTelegramLoginButton = ({
       );
       
       const data = await response.json();
+      // P1 telemetry cleanup (2026-05-16): user_id and intended_role are PII /
+      // privacy-sensitive. Replaced with boolean-only status events.
       console.log(
         "[telegram-login] poll response:",
-        { status: data.status, hasSession: !!data.session, user_id: data.user_id, intended_role: data.intended_role, manual },
+        { status: data.status, hasSession: !!data.session, manual },
       );
 
       if (data.status === "verified" && data.session) {
@@ -165,7 +168,9 @@ const TutorTelegramLoginButton = ({
         });
 
         const userId: string | undefined = data.user_id;
-        console.log("[telegram-login] session installed, user_id:", userId);
+        // P1 telemetry cleanup (2026-05-16): user_id is PII — don't log it.
+        // Keep the structured event for ops observability instead.
+        console.log("[telegram-login] session installed");
 
         // Best-effort is_tutor probe. Bot's handleWebLogin already assigned
         // the role server-side. We do NOT signOut on failure — TutorGuard at
@@ -283,12 +288,23 @@ const TutorTelegramLoginButton = ({
       attempts++;
 
       if (attempts >= maxAttempts) {
+        console.warn(
+          JSON.stringify({
+            event: "telegram_polling_timeout",
+            flow: "tutor_telegram_login",
+            attempts,
+            timestamp: new Date().toISOString(),
+          }),
+        );
         stopPolling();
         clearStoredTokens();
         setLoading(false);
         setStatus("idle");
         setCurrentToken(null);
-        toast.error("Время ожидания истекло. Попробуйте снова.");
+        toast.error(
+          "Telegram не подтвердил вход за 5 минут. Если t.me не открывается — попробуйте VPN или регистрацию по email.",
+          { duration: 8000 },
+        );
         return;
       }
 
@@ -334,7 +350,9 @@ const TutorTelegramLoginButton = ({
       // Track every token we create so the polling loop can find a verified
       // one even if user pressed /start in Telegram for an older attempt.
       addStoredToken(token);
-      console.log("[telegram-login] created token:", token);
+      // P1 telemetry cleanup (2026-05-16): tokens are short-lived (5-min TTL)
+      // but still grant /start verification — don't log them.
+      console.log("[telegram-login] token created");
       setCurrentToken(token);
 
       openTelegram(token);
@@ -457,6 +475,35 @@ const TutorTelegramLoginButton = ({
             Отменить
           </Button>
         </div>
+
+        {/* QR-fallback for Windows / Linux / desktop users without Telegram
+            Desktop installed. Clicking `https://t.me/...` from such a browser
+            opens the web t.me page where `?start=` is NOT forwarded to the
+            bot → polling timeouts at 5min. Phone scan of this QR opens the
+            link in the NATIVE Telegram app on phone → bot receives /start
+            → polling on this laptop sees verified token via shared session
+            (we generated the token here, bot's UPDATE marks it verified,
+            this tab's polling loop picks it up regardless of which device
+            pressed Start). Suppressed on iOS — there `window.location.href`
+            already triggers the native app. */}
+        {currentToken && !isIOS() && (
+          <div className="mt-2 flex flex-col items-center gap-2 rounded-md border border-border bg-card p-3 max-w-xs">
+            <div className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+              <Smartphone className="w-3.5 h-3.5" />
+              <span>Нет Telegram на компьютере?</span>
+            </div>
+            <div className="bg-white p-2 rounded">
+              <QRCode
+                value={`https://t.me/${botName}?start=login_${currentToken}`}
+                size={140}
+                level="M"
+              />
+            </div>
+            <p className="text-xs text-muted-foreground text-center leading-snug">
+              Отсканируйте телефоном — откроется в Telegram, нажмите «Старт»
+            </p>
+          </div>
+        )}
       </div>
     );
   }

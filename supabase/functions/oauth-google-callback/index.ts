@@ -50,10 +50,17 @@ function base64UrlDecode(input: string): Uint8Array {
   return bytes;
 }
 
+type StateData = {
+  redirectTo: string;
+  intendedRole: "tutor" | "student";
+  nonce: string;
+  issuedAt: number;
+};
+
 async function verifyState(
   state: string,
   secret: string,
-): Promise<{ redirectTo: string; nonce: string; issuedAt: number } | null> {
+): Promise<StateData | null> {
   const [dataB64, sigB64] = state.split(".");
   if (!dataB64 || !sigB64) return null;
 
@@ -81,7 +88,19 @@ async function verifyState(
       return null;
     }
     if (Date.now() - parsed.issuedAt > STATE_TTL_MS) return null;
-    return parsed;
+
+    // Backward compat: existing state without intendedRole defaults to student.
+    // This is safe — student is the lower-privilege role; tutor must be
+    // explicitly requested via intendedRole=tutor in oauth-google-init.
+    const intendedRole =
+      parsed.intendedRole === "tutor" ? "tutor" : "student";
+
+    return {
+      redirectTo: parsed.redirectTo,
+      intendedRole,
+      nonce: parsed.nonce,
+      issuedAt: parsed.issuedAt,
+    };
   } catch (e) {
     console.warn("[oauth-google-callback] verifyState threw", e);
     return null;
@@ -105,6 +124,13 @@ function decodeIdToken(
 }
 
 function redirectToErrorPage(reason: string): Response {
+  console.warn(
+    JSON.stringify({
+      event: "oauth_google_callback_failed",
+      reason,
+      timestamp: new Date().toISOString(),
+    }),
+  );
   const target = new URL(FALLBACK_LOGIN_URL);
   target.searchParams.set("oauth_error", reason);
   return Response.redirect(target.toString(), 302);
@@ -184,7 +210,9 @@ Deno.serve(async (req) => {
   }
 
   const email = idTokenPayload.email.trim().toLowerCase();
-  console.log("[oauth-google-callback] verified email:", email);
+  // P1 telemetry cleanup (2026-05-16): removed `console.log("verified email:", email)`.
+  // Email is PII; not logged. Boolean status events are emitted at start/end
+  // of the handler.
 
   // ─── 2. Find or create the Supabase user (admin client, never leaked) ───
   const admin = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
@@ -192,7 +220,14 @@ Deno.serve(async (req) => {
   });
 
   // createUser is idempotent-by-error-code: if email already exists we just
-  // skip creation and proceed to mint a session.
+  // skip creation and proceed to mint a session. `signup_source` encodes
+  // intended role so downstream role-finalization logic (below) decides
+  // whether to assign tutor role for NEWLY-CREATED accounts only.
+  const signupSource =
+    stateData.intendedRole === "tutor"
+      ? "google-oauth-tutor"
+      : "google-oauth-student";
+
   const { error: createError } = await admin.auth.admin.createUser({
     email,
     email_confirm: true,
@@ -201,9 +236,15 @@ Deno.serve(async (req) => {
       full_name: idTokenPayload.name ?? null,
       google_sub: idTokenPayload.sub,
       avatar_url: idTokenPayload.picture ?? null,
-      signup_source: "google-oauth-custom",
+      signup_source: signupSource,
     },
   });
+
+  // Track whether this was a new signup (vs. existing user login) to decide
+  // role assignment. Only newly-created accounts get tutor role auto-assigned
+  // when intendedRole=tutor; existing accounts keep their current role to
+  // prevent silent privilege escalation via Google OAuth.
+  let isNewUser = !createError;
 
   if (createError) {
     const msg = createError.message?.toLowerCase() ?? "";
@@ -217,7 +258,9 @@ Deno.serve(async (req) => {
       console.error("[oauth-google-callback] createUser failed", createError);
       return redirectToErrorPage("create_user_failed");
     }
-    // existing user — fine, proceed to session mint.
+    // existing user — fine, proceed to session mint, but DO NOT assign tutor
+    // role even if intendedRole=tutor (privilege escalation guard).
+    isNewUser = false;
   }
 
   // ─── 3. Mint a Supabase session via magic-link → verifyOtp ───
@@ -246,9 +289,80 @@ Deno.serve(async (req) => {
     type: "magiclink",
   });
 
-  if (verifyError || !verifyData?.session) {
+  if (verifyError || !verifyData?.session || !verifyData?.user) {
     console.error("[oauth-google-callback] verifyOtp failed", verifyError);
     return redirectToErrorPage("verify_failed");
+  }
+
+  // ─── 3.5. Server-side tutor role assignment for newly-created tutors ───
+  // BLOCKER 4 fix (code review 2026-05-16): without this, a Google tutor
+  // signup lands on /tutor/home → TutorGuard sees no tutor role → bounces
+  // to /register-tutor → infinite loop. Only NEW accounts get the role
+  // auto-assigned (isNewUser flag from createUser branch above); existing
+  // accounts are preserved as-is to prevent silent privilege escalation
+  // via "Google sign-in claims I'm a tutor".
+  if (isNewUser && stateData.intendedRole === "tutor") {
+    const userId = verifyData.user.id;
+
+    const { data: existingRole } = await admin
+      .from("user_roles")
+      .select("id")
+      .eq("user_id", userId)
+      .eq("role", "tutor")
+      .maybeSingle();
+
+    if (!existingRole) {
+      const { error: roleErr } = await admin.from("user_roles").insert({
+        user_id: userId,
+        role: "tutor",
+      });
+      if (roleErr) {
+        // Reviewer P2 (Round 2): role insert failure is FATAL for tutor flow.
+        // Silently landing on /tutor/home → TutorGuard sees no role → bounces
+        // to /register-tutor — same broken loop the whole fix was meant to
+        // resolve. Skip tutor profile creation (would orphan a tutors row)
+        // and redirect to deterministic error state with recovery hint.
+        console.error(
+          JSON.stringify({
+            event: "oauth_google_callback_role_insert_failed",
+            error: roleErr.message,
+            timestamp: new Date().toISOString(),
+          }),
+        );
+        return redirectToErrorPage("role_finalization_failed");
+      }
+    }
+
+    const { data: existingTutor } = await admin
+      .from("tutors")
+      .select("id")
+      .eq("user_id", userId)
+      .maybeSingle();
+
+    if (!existingTutor) {
+      const tutorName =
+        idTokenPayload.name ||
+        email.split("@")[0] ||
+        "Репетитор";
+      const bookingLink = `tutor-${userId.substring(0, 8)}`;
+      const { error: tutorErr } = await admin.from("tutors").insert({
+        user_id: userId,
+        name: tutorName,
+        booking_link: bookingLink,
+      });
+      if (tutorErr) {
+        // Tutor row failure is recoverable: role exists, TutorGuard passes
+        // on role alone. Profile metadata (name, booking_link) backfilled
+        // on first edit. Log + continue.
+        console.error(
+          JSON.stringify({
+            event: "oauth_google_callback_tutor_profile_failed",
+            error: tutorErr.message,
+            timestamp: new Date().toISOString(),
+          }),
+        );
+      }
+    }
   }
 
   // ─── 4. Redirect browser to redirectTo with tokens in URL hash ───
@@ -261,6 +375,12 @@ Deno.serve(async (req) => {
     type: "signup",
   }).toString();
 
+  console.warn(
+    JSON.stringify({
+      event: "oauth_google_callback_succeeded",
+      timestamp: new Date().toISOString(),
+    }),
+  );
   console.log("[oauth-google-callback] success, redirecting to", target.origin + target.pathname);
   return Response.redirect(target.toString(), 302);
 });

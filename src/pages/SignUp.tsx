@@ -137,12 +137,19 @@ const SignUp = () => {
     }
 
     try {
+      // user_metadata carries server-side finalization intent for email-verify
+      // edge function: it reads `consent_intent` to flush consent (after email
+      // confirmation, where the client cannot run because there's no session
+      // yet). `signup_source` is set to a non-tutor value so email-verify does
+      // NOT assign tutor role.
       const { data, error } = await supabase.auth.signUp({
         email: validation.data.email,
         password: validation.data.password,
         options: {
           data: {
             username: validation.data.username,
+            signup_source: "student-signup",
+            consent_intent: "web-signup-student",
           },
           emailRedirectTo: `${window.location.origin}/chat`,
         },
@@ -154,13 +161,30 @@ const SignUp = () => {
         await recordConsent(data.user.id, "web-signup-student");
       }
 
-      // Only claim if session is established (no email confirmation pending)
-      if (data.session) {
-        try {
-          await claimPendingInvite();
-        } catch {
-          // Claim error does not block signup
-        }
+      // Email confirmation gate (RU bypass 2026-05-16): mirror RegisterTutor
+      // behaviour — when Supabase requires email confirm, signUp() returns
+      // user but no session. Without explicit toast.info user thinks signup
+      // failed silently. Custom email-verify edge function (Fix B) handles
+      // the confirmation link return path.
+      if (!data.session) {
+        console.warn(
+          JSON.stringify({
+            event: "student_signup_email_pending",
+            flow: "student_signup",
+            timestamp: new Date().toISOString(),
+          }),
+        );
+        toast.info(
+          "Мы отправили письмо для подтверждения email. Откройте его и нажмите ссылку, чтобы завершить регистрацию.",
+          { duration: 10000 },
+        );
+        return;
+      }
+
+      try {
+        await claimPendingInvite();
+      } catch {
+        // Claim error does not block signup
       }
 
       toast.success("Регистрация успешна! Входим в систему...");
@@ -531,7 +555,8 @@ const SignUp = () => {
             )}
             {consent && (
               <p className="tst-tg-hint">
-                Telegram: нужен VPN, если заблокирован
+                Telegram и Google могут не работать в РФ без VPN. Если кнопки
+                «зависают» — регистрируйтесь по email ниже.
               </p>
             )}
           </div>
