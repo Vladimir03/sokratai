@@ -19,8 +19,14 @@
 | 7 | PublicMockInvite UX без «ожидания Vladimir» ✅ Done | P1-2 (lead-gen) | Claude Code | `src/pages/PublicMockInvite.tsx` | AC-P8 | S | — |
 | 8 | Smoke test полного flow | All | Vladimir manual | — | AC-P1..AC-P8 | S | TASK-1..TASK-7 |
 | 9 | Codex review всего релиза | All | Codex | — | All | S | TASK-1..TASK-7 |
+| 10 | Per-attempt answer_method choice ✅ Done 2026-05-14 | S2-1 (комфортный режим) | Claude Code | `src/components/student/mock-exam/AnswerMethodSelectModal.tsx` (new), `src/pages/student/StudentMockExam.tsx`, migrations `20260514130000_attempt_answer_method.sql` + `20260514130100_mock_exam_variant_pdf.sql`, edge function `mock-exam-student-api/index.ts` | spec.md §2 + answer-method-choice-spec.md | L | — |
+| 11 | Tutor cabinet bugs fix ✅ Done 2026-05-14 | R4-2 (видит результаты) | Claude Code | migration `20260514140000_invite_links_service_role_grant.sql`, `mock-exam-tutor-api/index.ts` (new endpoints), `TutorMockExams.tsx`, `TutorMockExamDetail.tsx`, `TutorMockExamReview.tsx`, `TutorMockExamCreate.tsx` | tutor-bugs-fix-spec.md AC-T11-1..7 | L | — |
+| 12 | Taking page content fixes (6 bugs: KIM 5/9/14/18/19/20 + Часть 2 conditions + PDF leak) ✅ Done 2026-05-14 | S2-1 | Claude Code | `variant1-tasks.json`, `mock_exams_variant_1.sql`, migration `20260514150000_resync_variant_1_kim_5_9_14_18_20.sql`, `StudentMockExam.tsx` (getAnswerHint override, Part2TaskPreviewCard, KIM 20 captions), `scripts/slice-variant-pdf.py` (new), PDF replace | taking-page-content-fixes-spec.md AC-T12-1..6 | L | — |
+| 13 | Move blank photo upload to Часть 1 section (UX) ✅ Done 2026-05-14 | S2-1 (Vladimir UX feedback) | Claude Code | `StudentMockExam.tsx` (BlankModeBanner simplified, PhotoUploadBox перенесён) | inline | XS | TASK-10 |
+| 14 | PDF answer leak hotfix re-slice 24→13 pages ✅ Done 2026-05-14 | security | Claude Code | `scripts/slice-variant-pdf.py`, PDF replace | inline (security follow-up для TASK-12) | XS | TASK-12 |
+| 15 | ChatGPT-5.5 code review fixes (5 issues: bulk race + anti-leak + KIM 14 mobile + PDF accept + bulk photos result) ✅ Done 2026-05-14 | R4 + S2 robustness | Claude Code | `mock-exam-student-api/index.ts` (CAS retry + state-aware SELECT), `MarkdownTaskText.tsx`, `StudentMockExam.tsx`, `StudentMockExamResult.tsx` (Part2BulkPhotosGallery), `studentMockExamApi.ts` | review-fixes-spec.md | L | TASK-10..13 |
 
-**Порядок исполнения:** TASK-1..TASK-7 параллельно (независимы). После каждого — `npm run lint && npm run build && npm run smoke-check`. После всех вместе — TASK-8 (smoke) → TASK-9 (Codex review) → merge → deploy.
+**Порядок исполнения:** TASK-1..TASK-7 параллельно (независимы). TASK-10..15 — реакция на pilot QA от Vladimir/Egor (поэтапно по мере обнаружения багов). После каждого — `npm run lint && npm run build && npm run smoke-check`. После всех — TASK-8 (smoke) → TASK-9 (Codex review) → merge → deploy.
 
 ---
 
