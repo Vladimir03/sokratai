@@ -116,7 +116,13 @@ function getModeLabel(mode: MockExamMode): string {
   return 'Ручной результат';
 }
 
-function getAnswerHint(mode: MockExamCheckMode | null): string {
+function getAnswerHint(mode: MockExamCheckMode | null, kimNumber?: number): string {
+  // Per-kim overrides (TASK-12 — priority over generic check_mode hints).
+  // KIM 19 — динамометр + погрешность: значение и погрешность слитно (см.
+  // инструкцию варианта «два числа, не разделяя пробелом, например 2,70,1»).
+  if (kimNumber === 19) {
+    return 'Два числа слитно: значение и погрешность, например 2,70,1';
+  }
   switch (mode) {
     case 'ordered':
       return 'Запиши последовательность слитно: 132';
@@ -729,14 +735,26 @@ function Part1TaskCard({
         <MathBlock text={task.task_text} className="text-base leading-7 text-slate-800" />
         {imageUrls.length > 0 && (
           <div className="mt-4 grid gap-3">
-            {imageUrls.map((url, index) => (
-              <img
-                key={`${task.kim_number}-${index}`}
-                src={url}
-                alt={`Иллюстрация к заданию ${task.kim_number}`}
-                className="max-h-80 w-full rounded-md border border-slate-200 bg-slate-50 object-contain"
-              />
-            ))}
+            {imageUrls.map((url, index) => {
+              // KIM 20 — выбор схем: gallery нумеруется «Схема 1..5» (TASK-12).
+              // task_image_url порядок = canonical scheme order.
+              const caption = task.kim_number === 20 ? `Схема ${index + 1}` : null;
+              return (
+                <figure key={`${task.kim_number}-${index}`} className="m-0">
+                  <img
+                    src={url}
+                    alt={caption ?? `Иллюстрация к заданию ${task.kim_number}`}
+                    loading="lazy"
+                    className="max-h-80 w-full rounded-md border border-slate-200 bg-slate-50 object-contain"
+                  />
+                  {caption && (
+                    <figcaption className="mt-1 text-center text-sm font-medium text-slate-700">
+                      {caption}
+                    </figcaption>
+                  )}
+                </figure>
+              );
+            })}
           </div>
         )}
         <div className="mt-4">
@@ -757,7 +775,7 @@ function Part1TaskCard({
               inputMode={task.check_mode === 'pair' ? 'text' : 'decimal'}
               autoComplete="off"
             />
-            <span className="text-sm text-slate-500">{getAnswerHint(task.check_mode)}</span>
+            <span className="text-sm text-slate-500">{getAnswerHint(task.check_mode, task.kim_number)}</span>
           </div>
           {status && status !== 'idle' && (
             <div className="mt-2 text-sm text-slate-500">
@@ -824,6 +842,50 @@ function Part2TaskCard({
             disabled={disabled}
           />
         </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+/**
+ * Part 2 read-only preview (TASK-12, 2026-05-14). Phase 5 removed per-task
+ * photo upload but Vladimir QA flagged that students couldn't SEE Часть 2
+ * task conditions anymore — they need them to solve. This component renders
+ * task number + max_score + task_text + task images, no upload. Bulk upload
+ * is below the section.
+ */
+function Part2TaskPreviewCard({
+  task,
+  imageUrls,
+}: {
+  task: StudentMockExamVariantTask;
+  imageUrls: string[];
+}) {
+  return (
+    <Card className="shadow-none" id={`task-${task.kim_number}`}>
+      <CardContent className="p-4 sm:p-5">
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+          <span className="rounded bg-amber-100 px-2 py-1 text-sm font-semibold text-amber-900">
+            №{task.kim_number}
+          </span>
+          <span className="text-sm text-slate-500">
+            {task.max_score} балл{task.max_score === 1 ? '' : task.max_score < 5 ? 'а' : 'ов'} · развёрнутое решение
+          </span>
+        </div>
+        <MathBlock text={task.task_text} className="text-base leading-7 text-slate-800" />
+        {imageUrls.length > 0 && (
+          <div className="mt-4 grid gap-3">
+            {imageUrls.map((url, index) => (
+              <img
+                key={`${task.kim_number}-${index}`}
+                src={url}
+                alt={`Иллюстрация к заданию ${task.kim_number}`}
+                loading="lazy"
+                className="max-h-80 w-full rounded-md border border-slate-200 bg-slate-50 object-contain"
+              />
+            ))}
+          </div>
+        )}
       </CardContent>
     </Card>
   );
@@ -1168,14 +1230,28 @@ function StudentMockExamWorkspace({ data }: { data: StudentMockExamAssignmentVie
               <div>
                 <h2 className="text-lg font-semibold text-slate-900">Часть 2</h2>
                 <p className="text-sm text-slate-500">
-                  Загрузи все решения задач 21–26 одним пакетом (до {MAX_BULK_PART2_PHOTOS} фото).
-                  Можно сфотографировать каждую задачу отдельно или весь лист с несколькими задачами.
+                  Прочитай условия задач № 21–26 ниже и реши их на бумаге. Затем
+                  загрузи фото решений одним пакетом (до {MAX_BULK_PART2_PHOTOS} фото).
                   AI и репетитор сами разберут, где какая задача.
                 </p>
               </div>
               <span className="rounded-md bg-slate-100 px-3 py-1 text-sm font-medium text-slate-700">
                 {part2BulkPhotos.length}/{MAX_BULK_PART2_PHOTOS} фото
               </span>
+            </div>
+
+            {/* TASK-12 (2026-05-14): read-only условия задач Часть 2. Phase 5
+                удалил per-task photo upload, но условия задач остались нужны —
+                ученик ДОЛЖЕН видеть что решать. Карточки без upload UI.
+                Photo upload остаётся bulk (ниже). */}
+            <div className="space-y-3">
+              {part2Tasks.map((task) => (
+                <Part2TaskPreviewCard
+                  key={task.id}
+                  task={task}
+                  imageUrls={imagesByKim[task.kim_number] ?? []}
+                />
+              ))}
             </div>
 
             {/* Phase 5 (2026-05-15): ОДНО bulk-поле Часть 2 — замена 6 per-kim слотов
