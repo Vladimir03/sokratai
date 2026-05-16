@@ -47,5 +47,6 @@ jobs:
           supabase functions deploy oauth-google-init --no-verify-jwt
           supabase functions deploy oauth-google-callback --no-verify-jwt
           supabase functions deploy email-verify --no-verify-jwt
+          supabase functions deploy auth-email-hook --no-verify-jwt
 
           echo "✅ All functions deployed successfully!"

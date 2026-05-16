@@ -41,6 +41,62 @@ const SENDER_DOMAIN = "notify.sokratai.ru"
 const ROOT_DOMAIN = "sokratai.ru"
 const FROM_DOMAIN = "sokratai.ru" // Domain shown in From address (may be root or sender subdomain)
 
+// RU-bypass confirmation URL rewriting (2026-05-16, see .claude/rules/96-auth-ru-bypass.md).
+// Supabase by default emits `payload.data.url` pointing at
+// `https://<project>.supabase.co/auth/v1/verify?token=...`. That host is
+// SNI-blocked by RU ISPs (canonical Supabase domain). The user clicks the
+// link, TLS handshake is reset, registration never completes.
+//
+// Fix: for `signup` emails, rewrite the URL to our custom email-verify edge
+// function on api.sokratai.ru (Selectel Moscow direct, RU-friendly). The
+// edge function runs the same verifyOtp flow + finalizes tutor role +
+// flushes consent server-side, then redirects to redirect_to with tokens
+// in URL hash. See supabase/functions/email-verify/index.ts.
+//
+// Other email types (recovery, magiclink, email_change, invite,
+// reauthentication) still use the default Supabase URL. When those flows
+// are needed for RU users, extend ALLOWED_TYPES in email-verify and add
+// the rewrite here.
+const EMAIL_VERIFY_PROXY_URL = "https://api.sokratai.ru/functions/v1/email-verify"
+
+function rewriteSignupConfirmationUrl(
+  originalUrl: string,
+  emailType: string,
+  fallbackRedirect: string,
+): string {
+  if (emailType !== 'signup') return originalUrl
+
+  try {
+    const parsed = new URL(originalUrl)
+
+    // Supabase emits the token in either `token` or `token_hash` query param,
+    // depending on the email_action_type and link variant. Accept both.
+    const tokenHash =
+      parsed.searchParams.get('token_hash') ||
+      parsed.searchParams.get('token') ||
+      ''
+    const redirectTo =
+      parsed.searchParams.get('redirect_to') || fallbackRedirect
+
+    if (!tokenHash) {
+      console.warn(
+        '[auth-email-hook] signup URL missing token_hash/token — using default URL',
+        { hasTokenHash: !!parsed.searchParams.get('token_hash'), hasToken: !!parsed.searchParams.get('token') },
+      )
+      return originalUrl
+    }
+
+    const target = new URL(EMAIL_VERIFY_PROXY_URL)
+    target.searchParams.set('token_hash', tokenHash)
+    target.searchParams.set('type', 'signup')
+    target.searchParams.set('redirect_to', redirectTo)
+    return target.toString()
+  } catch (err) {
+    console.error('[auth-email-hook] rewriteSignupConfirmationUrl threw', err)
+    return originalUrl
+  }
+}
+
 // Sample data for preview mode ONLY (not used in actual email sending).
 // URLs are baked in at scaffold time from the project's real data.
 // The sample email uses a fixed placeholder (RFC 6761 .test TLD) so the Go backend
@@ -217,12 +273,21 @@ async function handleWebhook(req: Request): Promise<Response> {
     )
   }
 
+  // For signup emails, rewrite Supabase's default *.supabase.co URL (RU-blocked)
+  // to our api.sokratai.ru/functions/v1/email-verify proxy. Other types keep
+  // the default URL (not in critical RU-bypass path yet).
+  const confirmationUrl = rewriteSignupConfirmationUrl(
+    payload.data.url,
+    emailType,
+    `https://${ROOT_DOMAIN}/tutor/home`, // fallback when redirect_to missing
+  )
+
   // Build template props from payload.data (HookData structure)
   const templateProps = {
     siteName: SITE_NAME,
     siteUrl: `https://${ROOT_DOMAIN}`,
     recipient: payload.data.email,
-    confirmationUrl: payload.data.url,
+    confirmationUrl,
     token: payload.data.token,
     email: payload.data.email,
     newEmail: payload.data.new_email,
