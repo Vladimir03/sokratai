@@ -248,6 +248,59 @@ function Part1Card({
 
 // ─── Часть 2 ────────────────────────────────────────────────────────────────
 
+/**
+ * TASK-15 (ChatGPT-5.5 review): bulk Часть 2 photos на result page —
+ * ученик после submit видит что он загрузил (verification) + post-approval
+ * для «Твоё решение» reference. Phase 5 ARCH: photos живут в
+ * `attempts.part2_bulk_photo_urls`, не в `mock_exam_attempt_part2_solutions.photo_url`.
+ */
+function Part2BulkPhotosGallery({
+  photoUrls,
+  collapsedByDefault = false,
+}: {
+  photoUrls: string[];
+  collapsedByDefault?: boolean;
+}) {
+  if (photoUrls.length === 0) return null;
+  return (
+    <Card className="mb-3 shadow-none">
+      <CardContent className="p-4 sm:p-5">
+        <details open={!collapsedByDefault}>
+          <summary className="flex cursor-pointer list-none items-center justify-between gap-2 touch-manipulation">
+            <span className="text-sm font-semibold text-slate-900">
+              Загруженные фото решений Части 2
+            </span>
+            <span className="rounded bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-700">
+              {photoUrls.length} фото
+            </span>
+          </summary>
+          <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-4">
+            {photoUrls.map((url, idx) => (
+              <a
+                key={`${idx}-${url}`}
+                href={url}
+                target="_blank"
+                rel="noreferrer"
+                className="relative block aspect-square overflow-hidden rounded-md border border-slate-200 bg-white touch-manipulation"
+              >
+                <img
+                  src={url}
+                  alt={`Фото решения ${idx + 1}`}
+                  loading="lazy"
+                  className="h-full w-full object-cover"
+                />
+                <span className="absolute bottom-1 right-1 rounded bg-black/50 px-1.5 py-0.5 text-xs font-semibold text-white">
+                  {idx + 1}
+                </span>
+              </a>
+            ))}
+          </div>
+        </details>
+      </CardContent>
+    </Card>
+  );
+}
+
 function Part2PendingCard({ tutorName }: { tutorName: string | null }) {
   return (
     <Card className="mb-3 border-2 border-amber-300 bg-amber-50 shadow-none">
@@ -587,6 +640,16 @@ function ResultContent({ view }: { view: StudentMockExamResultView }) {
               />
 
               {isPending && <Part2PendingCard tutorName={tutorFirstName} />}
+
+              {/* TASK-15: bulk Часть 2 photos. Pending — collapsed (ученик
+                  knows what он uploaded, не нужно занимать viewport).
+                  Approved — expanded под итоговым «Часть 2 проверено». */}
+              {(isPending || isApproved) && (
+                <Part2BulkPhotosGallery
+                  photoUrls={view.attempt.part2_bulk_photo_urls ?? []}
+                  collapsedByDefault={isPending}
+                />
+              )}
 
               {isApproved && (
                 <Part2ApprovedSection

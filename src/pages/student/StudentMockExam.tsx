@@ -1306,7 +1306,11 @@ function StudentMockExamWorkspace({ data }: { data: StudentMockExamAssignmentVie
                     <input
                       id={`bulk-upload-${data.attempt.id}`}
                       type="file"
-                      accept="image/*,.pdf"
+                      // TASK-15 fix (ChatGPT-5.5 review): backend
+                      // `ALLOWED_PHOTO_MIME` принимает только image/* —
+                      // `.pdf` отклоняется как INVALID_MIME. UI accept
+                      // matches backend.
+                      accept="image/*"
                       className="sr-only"
                       disabled={isFinal || bulkUploadStatus === 'uploading'}
                       onChange={(e) => {

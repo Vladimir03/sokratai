@@ -465,8 +465,9 @@ async function handleGetResult(
   // logic в handleGetStudentAssignment выше.
   const SELECT_COLS =
     "id, assignment_id, status, started_at, submitted_at, " +
-    "total_time_minutes, blank_photo_url, total_part1_score, " +
-    "total_part2_score, total_score, manual_entered_date, manual_comment";
+    "total_time_minutes, blank_photo_url, part2_bulk_photo_urls, " +
+    "total_part1_score, total_part2_score, total_score, " +
+    "manual_entered_date, manual_comment";
   let attempt: Record<string, unknown> | null = null;
   {
     const byAssignment = await db
@@ -541,8 +542,12 @@ async function handleGetResult(
     }
   }
 
+  const isApproved = attempt.status === "approved";
+  const isManualEntered = attempt.status === "manually_entered";
+  const isPostSubmit = !isManualEntered; // submitted | ai_checking | awaiting_review | approved
+
   let variant: Record<string, unknown> | null = null;
-  let variantTasksByKim: Record<number, Record<string, unknown>> = {};
+  const variantTasksByKim: Record<number, Record<string, unknown>> = {};
   if (assignment.variant_id) {
     const { data: variantRow } = await db
       .from("mock_exam_variants")
@@ -554,24 +559,28 @@ async function handleGetResult(
       .maybeSingle();
     variant = variantRow;
 
-    // Variant tasks WITH correct_answer + solution_text — server-side join
-    // material. Каждое поле гейтится по статусу attempt'а ниже.
+    // State-aware task SELECT (TASK-15 anti-leak hardening, ChatGPT-5.5 review):
+    //   Pre-approval — only Часть 1 columns (kim_number, correct_answer,
+    //     check_mode, max_score) AND no task_text/solution_text/topic in memory.
+    //     `correct_answer` permitted because Часть 1 is auto-revealed post-submit.
+    //   Post-approval — full set including task_text + solution_text + topic
+    //     (Часть 2 разбор — value-proposition после tutor approval).
+    // Защитный layer: даже если кто-то добавит новое поле в response shape,
+    // pre-approval SELECT не загрузит solution_text в process memory — нечего
+    // случайно сериализовать.
+    const taskSelect = isApproved
+      ? "kim_number, part, order_num, task_text, task_image_url, " +
+        "correct_answer, check_mode, max_score, solution_text, topic"
+      : "kim_number, part, correct_answer, check_mode, max_score";
     const { data: variantTasks } = await db
       .from("mock_exam_variant_tasks")
-      .select(
-        "kim_number, part, order_num, task_text, task_image_url, " +
-          "correct_answer, check_mode, max_score, solution_text, topic",
-      )
+      .select(taskSelect)
       .eq("variant_id", assignment.variant_id as string)
       .order("order_num", { ascending: true });
     for (const t of variantTasks ?? []) {
       variantTasksByKim[t.kim_number as number] = t as Record<string, unknown>;
     }
   }
-
-  const isApproved = attempt.status === "approved";
-  const isManualEntered = attempt.status === "manually_entered";
-  const isPostSubmit = !isManualEntered; // submitted | ai_checking | awaiting_review | approved
 
   // Part 1 — reveal post-submit. Manual_entered не имеет per-task records.
   let part1Answers: unknown[] = [];
@@ -654,6 +663,30 @@ async function handleGetResult(
     attempt.blank_photo_url as string | null,
   );
 
+  // TASK-15 (ChatGPT-5.5 review): bulk Part 2 photos появились в taking flow
+  // (Phase 5 «9 слотов → 1 bulk»), но result page их не возвращал — ученик
+  // post-submit видел «нет фото» хотя загружал. Resolve dual-format ref'ы
+  // в signed URLs.
+  const part2BulkRefs: string[] = (() => {
+    const raw = attempt.part2_bulk_photo_urls as string | null;
+    if (!raw) return [];
+    const trimmed = raw.trim();
+    if (!trimmed) return [];
+    if (trimmed.startsWith("[")) {
+      try {
+        const parsed = JSON.parse(trimmed);
+        if (Array.isArray(parsed)) {
+          return parsed.filter((x): x is string => typeof x === "string" && x.length > 0);
+        }
+      } catch { /* corrupted → empty */ }
+      return [];
+    }
+    return [trimmed];
+  })();
+  const part2BulkPhotoUrls = (
+    await Promise.all(part2BulkRefs.map((ref) => resolveSignedUrl(db, ref)))
+  ).filter((url): url is string => typeof url === "string");
+
   return jsonOk(cors, {
     assignment: {
       id: assignment.id,
@@ -684,6 +717,7 @@ async function handleGetResult(
       submitted_at: attempt.submitted_at,
       total_time_minutes: attempt.total_time_minutes,
       blank_photo_url: blankPhotoSigned,
+      part2_bulk_photo_urls: part2BulkPhotoUrls,
       total_part1_score: attempt.total_part1_score,
       total_part2_score: attempt.total_part2_score,
       total_score: attempt.total_score,
@@ -905,42 +939,80 @@ async function handleUploadPhoto(
       .eq("student_id", studentUserId);
     if (error) return jsonError(cors, 500, "DB_ERROR", "Failed to persist part1 fallback photo");
   } else if (kind === "part2_bulk") {
-    // Append to existing dual-format refs (max 7). Re-read current value
-    // to avoid stale-write under concurrent uploads.
-    const { data: cur } = await db
-      .from("mock_exam_attempts")
-      .select("part2_bulk_photo_urls")
-      .eq("id", attemptId)
-      .eq("student_id", studentUserId)
-      .maybeSingle();
-    const existing: string[] = (() => {
-      const raw = (cur?.part2_bulk_photo_urls as string | null) ?? null;
-      if (!raw) return [];
-      const trimmed = raw.trim();
-      if (!trimmed) return [];
-      if (trimmed.startsWith("[")) {
-        try {
-          const parsed = JSON.parse(trimmed);
-          if (Array.isArray(parsed)) {
-            return parsed.filter((x): x is string => typeof x === "string" && x.length > 0);
-          }
-        } catch { /* corrupted → treat as empty */ }
-        return [];
+    // CAS retry append to dual-format refs (max 7). Two concurrent uploads
+    // would both READ the same value and the later UPDATE would clobber the
+    // earlier — race documented в ChatGPT-5.5 code review (TASK-15 fix).
+    // Solution: read RAW value, append, UPDATE WHERE part2_bulk_photo_urls
+    // IS [original raw value]. Retry up to 3 times on 0-rows-affected.
+    // On final failure, rollback storage object to avoid orphans.
+    const MAX_CAS_RETRIES = 3;
+    let success = false;
+    let lastErr: string | null = null;
+    for (let attempt = 0; attempt < MAX_CAS_RETRIES; attempt++) {
+      const { data: cur, error: readErr } = await db
+        .from("mock_exam_attempts")
+        .select("part2_bulk_photo_urls")
+        .eq("id", attemptId)
+        .eq("student_id", studentUserId)
+        .maybeSingle();
+      if (readErr) {
+        lastErr = readErr.message;
+        break;
       }
-      return [trimmed];
-    })();
-    if (existing.length >= MAX_PART2_BULK_PHOTOS) {
-      return jsonError(cors, 409, "BULK_LIMIT_REACHED",
-        `Bulk Part 2 photos limit reached (${MAX_PART2_BULK_PHOTOS}). Удали лишнее перед загрузкой.`);
+      const rawCurrent = (cur?.part2_bulk_photo_urls as string | null) ?? null;
+      const existing: string[] = (() => {
+        if (!rawCurrent) return [];
+        const trimmed = rawCurrent.trim();
+        if (!trimmed) return [];
+        if (trimmed.startsWith("[")) {
+          try {
+            const parsed = JSON.parse(trimmed);
+            if (Array.isArray(parsed)) {
+              return parsed.filter((x): x is string => typeof x === "string" && x.length > 0);
+            }
+          } catch { /* corrupted → treat as empty */ }
+          return [];
+        }
+        return [trimmed];
+      })();
+      if (existing.length >= MAX_PART2_BULK_PHOTOS) {
+        // Limit reached — rollback uploaded storage object to avoid orphan.
+        await db.storage.from(bucket).remove([path]).catch(() => null);
+        return jsonError(cors, 409, "BULK_LIMIT_REACHED",
+          `Bulk Part 2 photos limit reached (${MAX_PART2_BULK_PHOTOS}). Удали лишнее перед загрузкой.`);
+      }
+      const next = [...existing, ref];
+      const serialized = next.length === 1 ? next[0] : JSON.stringify(next);
+      // CAS: UPDATE only if column still matches rawCurrent (no concurrent
+      // writer slipped in between our SELECT and this UPDATE).
+      const updateQuery = db
+        .from("mock_exam_attempts")
+        .update({ part2_bulk_photo_urls: serialized })
+        .eq("id", attemptId)
+        .eq("student_id", studentUserId);
+      const casQuery = rawCurrent === null
+        ? updateQuery.is("part2_bulk_photo_urls", null)
+        : updateQuery.eq("part2_bulk_photo_urls", rawCurrent);
+      const { data: updated, error: updateErr } = await casQuery
+        .select("id");
+      if (updateErr) {
+        lastErr = updateErr.message;
+        break;
+      }
+      if (updated && updated.length > 0) {
+        success = true;
+        break;
+      }
+      // 0 rows affected → another writer slipped in. Retry loop.
+      console.warn("mock_exam_bulk_cas_retry", { attempt, attempt_id: attemptId });
     }
-    const next = [...existing, ref];
-    const serialized = next.length === 1 ? next[0] : JSON.stringify(next);
-    const { error } = await db
-      .from("mock_exam_attempts")
-      .update({ part2_bulk_photo_urls: serialized })
-      .eq("id", attemptId)
-      .eq("student_id", studentUserId);
-    if (error) return jsonError(cors, 500, "DB_ERROR", "Failed to persist bulk Part 2 photo");
+    if (!success) {
+      // Rollback uploaded blob to avoid storage orphan after persistence failure.
+      await db.storage.from(bucket).remove([path]).catch(() => null);
+      console.error("mock_exam_bulk_persist_failed", { last_error: lastErr });
+      return jsonError(cors, 500, "DB_ERROR",
+        "Не удалось сохранить фото пакета. Попробуй ещё раз.");
+    }
   } else {
     const { error } = await db
       .from("mock_exam_attempt_part2_solutions")

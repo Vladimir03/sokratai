@@ -250,6 +250,12 @@ export interface StudentMockExamResultView {
     submitted_at: string | null;
     total_time_minutes: number | null;
     blank_photo_url: string | null;
+    /**
+     * TASK-15 (ChatGPT-5.5 review): bulk Часть 2 photos уже Phase 5 -
+     * единственный путь upload Часть 2. На result page показываем что
+     * ученик загрузил (для verification + post-approval "Твоё решение").
+     */
+    part2_bulk_photo_urls: string[];
     total_part1_score: number | null;
     total_part2_score: number | null;
     total_score: number | null;

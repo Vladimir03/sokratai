@@ -16,22 +16,30 @@ interface MarkdownTaskTextProps {
 // Sokrat-flavoured table styling mirrors the brand surface tokens.
 // Cells stretched vertically (align-top) so 3-row option list aligns with
 // 2-row physical quantities column.
+//
+// Mobile invariant (TASK-15 fix, ChatGPT-5.5 review): wide tables (KIM 14 —
+// 2-row × 11-col t/q data) overflow iPhone X viewport. Wrap table в
+// `<div overflow-x-auto touch-pan-x>` + `min-w-max` чтобы получить
+// horizontal scroll. `touch-pan-x` обязателен — без него scroll blocked
+// (см. .claude/rules/80-cross-browser.md).
 const tableComponents = {
   table: (props: { children?: React.ReactNode }) => (
-    <table className="my-3 w-full border-collapse overflow-hidden rounded-md border border-slate-200 text-sm">
-      {props.children}
-    </table>
+    <div className="my-3 -mx-2 overflow-x-auto touch-pan-x px-2 sm:mx-0 sm:px-0">
+      <table className="min-w-max border-collapse overflow-hidden rounded-md border border-slate-200 text-sm">
+        {props.children}
+      </table>
+    </div>
   ),
   thead: (props: { children?: React.ReactNode }) => (
     <thead className="bg-slate-100 text-slate-800">{props.children}</thead>
   ),
   th: (props: { children?: React.ReactNode }) => (
-    <th className="border-b border-slate-200 px-3 py-2 text-left font-semibold">
+    <th className="whitespace-nowrap border-b border-slate-200 px-3 py-2 text-left font-semibold">
       {props.children}
     </th>
   ),
   td: (props: { children?: React.ReactNode }) => (
-    <td className="border-b border-slate-100 px-3 py-2 align-top last:border-b-0">
+    <td className="whitespace-nowrap border-b border-slate-100 px-3 py-2 align-top last:border-b-0">
       {props.children}
     </td>
   ),
