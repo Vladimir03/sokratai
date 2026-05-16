@@ -124,9 +124,13 @@ const RegisterTutor = () => {
             timestamp: new Date().toISOString(),
           }),
         );
-        toast.error(
-          "Email уже зарегистрирован. Войдите в существующий аккаунт через страницу входа.",
-        );
+        toast.error("Email уже зарегистрирован. Войдите в существующий аккаунт.", {
+          duration: 10000,
+          action: {
+            label: "Войти",
+            onClick: () => navigate("/tutor/login"),
+          },
+        });
         return;
       }
 

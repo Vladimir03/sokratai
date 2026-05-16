@@ -1,9 +1,10 @@
 import { useState, useEffect, useRef } from "react";
-import { useNavigate, Link } from "react-router-dom";
+import { useNavigate, useSearchParams, Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { supabase, getAuthErrorMessage } from "@/lib/supabaseClient";
+import { readAuthRedirectError } from "@/lib/authErrors";
 import { toast } from "sonner";
 import { z } from "zod";
 import TelegramLoginButton from "@/components/TelegramLoginButton";
@@ -18,11 +19,13 @@ const loginSchema = z.object({
 
 const Login = () => {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [showTelegramHint, setShowTelegramHint] = useState(false);
   const telegramTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const redirectErrorShown = useRef(false);
 
   // Cleanup telegram timeout on unmount
   useEffect(() => {
@@ -30,6 +33,31 @@ const Login = () => {
       if (telegramTimeoutRef.current) clearTimeout(telegramTimeoutRef.current);
     };
   }, []);
+
+  // Surface auth errors returned from edge function redirects
+  // (oauth-google-callback → ?oauth_error=..., email-verify → ?email_verify_error=...).
+  // Without this the user lands on /login with no explanation of what went
+  // wrong during OAuth round-trip or email confirmation click.
+  useEffect(() => {
+    if (redirectErrorShown.current) return;
+    const err = readAuthRedirectError(searchParams);
+    if (!err) return;
+    redirectErrorShown.current = true;
+    console.warn(
+      JSON.stringify({
+        event: "auth_redirect_error_displayed",
+        flow: "student_login",
+        code: err.code,
+        timestamp: new Date().toISOString(),
+      }),
+    );
+    toast.error(err.message, { duration: 10000 });
+    // Strip error params from URL so refresh / back-button doesn't re-toast.
+    const next = new URLSearchParams(searchParams);
+    next.delete("email_verify_error");
+    next.delete("oauth_error");
+    setSearchParams(next, { replace: true });
+  }, [searchParams, setSearchParams]);
 
   // Redirect authenticated users to product
   useEffect(() => {

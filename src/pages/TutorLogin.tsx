@@ -1,9 +1,10 @@
-import { useState, useEffect } from "react";
-import { useNavigate, Link } from "react-router-dom";
+import { useState, useEffect, useRef } from "react";
+import { useNavigate, useSearchParams, Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { supabase, getAuthErrorMessage } from "@/lib/supabaseClient";
+import { readAuthRedirectError } from "@/lib/authErrors";
 import { toast } from "sonner";
 import { z } from "zod";
 import TutorTelegramLoginButton from "@/components/TutorTelegramLoginButton";
@@ -17,9 +18,33 @@ const loginSchema = z.object({
 
 const TutorLogin = () => {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
+  const redirectErrorShown = useRef(false);
+
+  // Surface auth errors returned from edge function redirects (see Login.tsx
+  // for full rationale). Round 4 reviewer P2 fix.
+  useEffect(() => {
+    if (redirectErrorShown.current) return;
+    const err = readAuthRedirectError(searchParams);
+    if (!err) return;
+    redirectErrorShown.current = true;
+    console.warn(
+      JSON.stringify({
+        event: "auth_redirect_error_displayed",
+        flow: "tutor_login",
+        code: err.code,
+        timestamp: new Date().toISOString(),
+      }),
+    );
+    toast.error(err.message, { duration: 10000 });
+    const next = new URLSearchParams(searchParams);
+    next.delete("email_verify_error");
+    next.delete("oauth_error");
+    setSearchParams(next, { replace: true });
+  }, [searchParams, setSearchParams]);
 
   useEffect(() => {
     const checkSession = async () => {

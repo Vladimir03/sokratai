@@ -1,5 +1,6 @@
 import { createClient } from '@supabase/supabase-js';
 import type { Database } from '@/integrations/supabase/types';
+import { translateAuthError } from '@/lib/authErrors';
 
 // HARDCODED Supabase proxy URL — bypass RU ISP blocks on *.supabase.co.
 // Lovable Cloud auto-sets VITE_SUPABASE_URL=https://vrsseotrfmsxpbciyqzc.supabase.co
@@ -20,8 +21,11 @@ export const supabase = createClient<Database>(SUPABASE_URL, SUPABASE_PUBLISHABL
 
 /**
  * Extract user-friendly error message from auth errors.
- * Converts raw "Failed to fetch" into actionable Russian message
- * and logs diagnostic info for debugging.
+ *
+ * Wraps `translateAuthError` (canonical mapping in `src/lib/authErrors.ts`)
+ * and adds diagnostic logging for network errors. All call sites get RU
+ * user-friendly text by default — no more raw "Invalid login credentials"
+ * leaking to UI.
  */
 export function getAuthErrorMessage(error: unknown, fallback: string): string {
   const message =
@@ -31,6 +35,7 @@ export function getAuthErrorMessage(error: unknown, fallback: string): string {
         ? error
         : String(error ?? '');
 
+  // Diagnostic log for network errors (preserved from pre-refactor behaviour)
   if (message.toLowerCase().includes('fetch')) {
     console.error('[Auth] Network error:', {
       message,
@@ -39,10 +44,9 @@ export function getAuthErrorMessage(error: unknown, fallback: string): string {
       supabaseUrl: SUPABASE_URL,
       origin: typeof window !== 'undefined' ? window.location.origin : 'N/A',
     });
-    return 'Ошибка сети. Проверьте подключение к интернету и попробуйте снова.';
   }
 
-  return message || fallback;
+  return translateAuthError(error, fallback);
 }
 
 type FunctionsErrorContext = {
