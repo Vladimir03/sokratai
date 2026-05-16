@@ -16,10 +16,11 @@
 //   iOS и заблокировать horizontal swipe.
 // - `React.memo` на Row + Cell: 5×27 ≈ 135 ячеек, без memo ловится лаг.
 //
-// Phase 1 ограничение: detail endpoint возвращает только attempt-level totals
-// (см. `mock-exam-tutor-api::handleGetAssignment`). Per-task scores не
-// hydrate'ятся — все клетки 1–26 рендерятся как cell-empty. Полная hydration
-// per-task — Phase 2 (см. mockHeatmapStyles.ts top comment).
+// TASK-16 (2026-05-15): per-task hydration через `part1_answers` /
+// `part2_solutions` массивы на каждой attempt'е. Backend handleGetAssignment
+// batch-load'ит из mock_exam_attempt_part1_answers / mock_exam_attempt_part2_solutions.
+// Колор-клетки 1-26 теперь реально показывают баллы (verно/частично/неверно/
+// AI-черновик/пусто) после tutor approval.
 
 import { memo, useMemo } from 'react';
 import { ChevronRight } from 'lucide-react';
@@ -51,6 +52,23 @@ const PART1_CELL_WIDTH = 34;
 const SPACER_WIDTH = 12;
 const PART2_CELL_WIDTH = 46;
 const TOTALS_COL_WIDTH = 80;
+
+/**
+ * Per-KIM max score lookup для ЕГЭ физики 2026.
+ * Сумма: Часть 1 = 28 баллов (kim 1-20), Часть 2 = 17 баллов (kim 21-26).
+ *
+ * Источник: ФИПИ 2026 «Изменения в КИМ ЕГЭ» (структура 2025 = 2026).
+ * Не дублировать — для других контекстов (StudentMockExam etc.) используются
+ * `task.max_score` напрямую из `mock_exam_variant_tasks`. Этот lookup нужен
+ * только в heatmap, где per-task `max_score` не входит в payload роллапа.
+ */
+const KIM_MAX_SCORE: Record<number, number> = {
+  // Часть 1 (28 баллов)
+  1: 1, 2: 1, 3: 1, 4: 1, 5: 2, 6: 2, 7: 1, 8: 1, 9: 2, 10: 2,
+  11: 1, 12: 1, 13: 1, 14: 2, 15: 2, 16: 1, 17: 2, 18: 2, 19: 1, 20: 1,
+  // Часть 2 (17 баллов)
+  21: 3, 22: 2, 23: 2, 24: 3, 25: 3, 26: 4,
+};
 
 // ─── Status helper for student name column ───────────────────────────────────
 
@@ -162,9 +180,31 @@ const HeatmapRow = memo(function HeatmapRow({
   const display = deriveDisplayStatus(attempt.status, attempt.started_at);
   const chip = STATUS_CHIP[display];
 
-  // Phase 1: всё task-cells = empty (cell-empty). Per-task hydration → Phase 2.
   const part1Cells = PART1_KIM_NUMBERS;
   const part2Cells = PART2_KIM_NUMBERS;
+
+  // TASK-16: per-task hydration. Lookup map kim → earned_score / tutor_score.
+  const part1Map = useMemo(() => {
+    const map = new Map<number, number | null>();
+    for (const row of attempt.part1_answers ?? []) {
+      map.set(row.kim_number, row.earned_score);
+    }
+    return map;
+  }, [attempt.part1_answers]);
+
+  const part2Map = useMemo(() => {
+    const map = new Map<
+      number,
+      { tutor_score: number | null; status: string }
+    >();
+    for (const row of attempt.part2_solutions ?? []) {
+      map.set(row.kim_number, {
+        tutor_score: row.tutor_score,
+        status: row.status,
+      });
+    }
+    return map;
+  }, [attempt.part2_solutions]);
 
   const handleClick = () => onSelect(attempt);
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTableRowElement>) => {
@@ -219,29 +259,51 @@ const HeatmapRow = memo(function HeatmapRow({
         </div>
       </td>
 
-      {/* Часть 1 — 20 cells */}
-      {part1Cells.map((kim) => (
-        <HeatmapCell key={`p1-${kim}`} kim={kim} score={null} maxScore={1} />
-      ))}
+      {/* Часть 1 — 20 cells. Per-kim earned_score из part1_answers. */}
+      {part1Cells.map((kim) => {
+        const max = KIM_MAX_SCORE[kim] ?? 1;
+        const earnedScore = part1Map.has(kim) ? part1Map.get(kim) ?? null : null;
+        return (
+          <HeatmapCell
+            key={`p1-${kim}`}
+            kim={kim}
+            score={earnedScore}
+            maxScore={max}
+          />
+        );
+      })}
 
       {/* Spacer between Часть 1 and Часть 2 */}
       <td className="border-b border-slate-200 bg-white" aria-hidden="true" />
 
-      {/* Часть 2 — 6 cells (KIM 21–26) */}
+      {/* Часть 2 — 6 cells (KIM 21–26). */}
       {part2Cells.map((kim) => {
-        // Phase 1 approximation: для awaiting_review/submitted Часть 2 ещё в
-        // AI-черновике → форсим cell-draft; иначе empty. Полное hydration
-        // per-task → Phase 2.
-        const forcedKind: MockCellKind | null =
-          display === 'awaiting_review' || display === 'submitted'
-            ? 'draft'
-            : null;
+        const max = KIM_MAX_SCORE[kim] ?? 2;
+        const row = part2Map.get(kim);
+
+        // Финальный балл tutor'а или AI-черновик пометка:
+        // - row.tutor_score !== null → tutor подтвердил/изменил → реальный балл
+        // - row.status='awaiting_review' (или submitted/ai_checking attempt) → AI-draft
+        // - иначе → пусто
+        let forcedKind: MockCellKind | null = null;
+        let score: number | null = null;
+
+        if (row && row.tutor_score !== null) {
+          score = row.tutor_score;
+        } else if (
+          row?.status === 'awaiting_review' ||
+          display === 'awaiting_review' ||
+          display === 'submitted'
+        ) {
+          forcedKind = 'draft';
+        }
+
         return (
           <HeatmapCell
             key={`p2-${kim}`}
             kim={kim}
-            score={null}
-            maxScore={kim === 21 ? 3 : kim >= 24 ? 3 : 2}
+            score={score}
+            maxScore={max}
             forcedKind={forcedKind}
           />
         );

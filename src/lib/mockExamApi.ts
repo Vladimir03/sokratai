@@ -185,12 +185,33 @@ export async function setMockExamPart1ManualScore(
 /**
  * TASK-11 — пересчитать `total_part1_score` после ручной проверки tutor'ом.
  * Idempotent. Можно вызывать многократно по мере правок.
+ *
+ * TASK-16: backend теперь INSERT'ит earned_score=0 для KIM без row (где tutor
+ * не вводил балл). После finalize result page показывает «0/max» вместо «—».
  */
 export async function finalizeMockExamPart1(
   attemptId: string,
 ): Promise<{ ok: true; attempt_id: string; total_part1_score: number }> {
   return requestTutorMockExamApi(
     `/attempts/${encodeURIComponent(attemptId)}/part1-finalize`,
+    { method: 'POST' },
+  );
+}
+
+/**
+ * TASK-16 (2026-05-15) — force-re-run AI Part 1 OCR (Gemini 2.5-pro).
+ * Workflow: backend сначала clear'ит ai_part1_ocr_json, потом fire-and-forget
+ * call на mock-exam-grade с force_retry_ocr. Tutor refetch'ает attempt через
+ * 5-15 секунд → новые OCR values pre-fill inputs в Part1BlankReviewPanel.
+ *
+ * Status guard: только pre-approval (submitted | ai_checking | awaiting_review).
+ * answer_method='blank' и blank_photo_url IS NOT NULL.
+ */
+export async function retryMockExamPart1OCR(
+  attemptId: string,
+): Promise<{ ok: true; attempt_id: string; status: 'queued'; message: string }> {
+  return requestTutorMockExamApi(
+    `/attempts/${encodeURIComponent(attemptId)}/retry-part1-ocr`,
     { method: 'POST' },
   );
 }

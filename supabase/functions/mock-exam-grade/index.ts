@@ -79,6 +79,11 @@ const VAPID_SUBJECT = Deno.env.get("VAPID_SUBJECT") ?? "mailto:support@sokratai.
 const LOVABLE_API_URL = "https://ai.gateway.lovable.dev/v1/chat/completions";
 // Mirrors homework-api/ai_shared.ts.
 const LOVABLE_MODEL = "google/gemini-3-flash-preview";
+// TASK-16 (2026-05-15): Часть 1 OCR требует более сильной модели — flash-preview
+// failed на рукописных цифрах хорошего качества (Vladimir QA). Используем
+// gemini-2.5-pro для OCR. Часть 2 grader остаётся на flash (cost optimization,
+// flash справляется с structured-output prompts от Pass 1+2 bulk pipeline).
+const LOVABLE_MODEL_OCR = "google/gemini-2.5-pro";
 const LOVABLE_REQUEST_TIMEOUT_MS = 35_000;
 const LOVABLE_MAX_RETRIES = 1;
 
@@ -427,8 +432,11 @@ function shouldRetry(error: unknown): boolean {
 async function callLovableJson(
   messages: LovableMessage[],
   telemetryTag: string,
+  options?: { modelOverride?: string; captureRaw?: (raw: string) => void },
 ): Promise<Record<string, unknown>> {
   if (!LOVABLE_API_KEY) throw new Error("LOVABLE_API_KEY is not configured");
+
+  const model = options?.modelOverride ?? LOVABLE_MODEL;
 
   for (let attempt = 0; attempt <= LOVABLE_MAX_RETRIES; attempt += 1) {
     const controller = new AbortController();
@@ -445,7 +453,7 @@ async function callLovableJson(
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          model: LOVABLE_MODEL,
+          model,
           messages,
           temperature: 0.2,
           stream: false,
@@ -462,6 +470,11 @@ async function callLovableJson(
       const messageContent = payload?.choices?.[0]?.message?.content;
       const rawContent = extractMessageContent(messageContent);
       if (!rawContent) throw new Error("Model response is empty");
+      // TASK-16: verbose logging — captureRaw callback позволяет caller'у
+      // сохранить raw Gemini response (для debug failed OCR без redeploy).
+      if (options?.captureRaw) {
+        try { options.captureRaw(rawContent); } catch { /* defensive */ }
+      }
       return extractJsonObject(rawContent);
     } catch (error) {
       const canRetry = shouldRetry(error) && attempt < LOVABLE_MAX_RETRIES;
@@ -785,8 +798,49 @@ async function runPart1OCR(
     }));
 
     const ocrMessages = buildPart1BlankOCRPrompt(tasksMeta, photoDataUrls[0]);
-    const parsed = await callLovableJson(ocrMessages, "mock_exam_part1_ocr");
+    // TASK-16 (2026-05-15): model swap на gemini-2.5-pro + raw response
+    // capture для verbose logging.
+    let rawResponseSnapshot: string | null = null;
+    let parsed: Record<string, unknown>;
+    try {
+      parsed = await callLovableJson(ocrMessages, "mock_exam_part1_ocr", {
+        modelOverride: LOVABLE_MODEL_OCR,
+        captureRaw: (raw) => { rawResponseSnapshot = raw.slice(0, 4000); },
+      });
+    } catch (callErr) {
+      // Сохраняем raw_response даже при parse / model error чтобы tutor мог
+      // в Lovable Studio query'нуть `ai_part1_ocr_json -> raw_response` для debug.
+      const failureSnapshot: Record<string, unknown> = {
+        cells: {},
+        raw_response: rawResponseSnapshot,
+        error: callErr instanceof Error ? callErr.message : String(callErr),
+        gemini_model: LOVABLE_MODEL_OCR,
+        failed_at: new Date().toISOString(),
+      };
+      await db
+        .from("mock_exam_attempts")
+        .update({ ai_part1_ocr_json: failureSnapshot })
+        .eq("id", attemptId)
+        .catch(() => null);
+      console.error("mock_exam_grade_part1_ocr_call_failed", {
+        attempt_id: attemptId,
+        error: callErr instanceof Error ? callErr.message : String(callErr),
+        raw_preview: rawResponseSnapshot?.slice(0, 200) ?? null,
+      });
+      return null;
+    }
     const ocrResult = sanitizePart1OCRResult(parsed);
+    // PII-free telemetry: подсчитать сколько cells AI распознал с high confidence.
+    const recognizedCount = Object.values(ocrResult).filter(
+      (c) => c && typeof c.value === "string" && c.value.length > 0,
+    ).length;
+    console.info("mock_exam_grade_part1_ocr_response", {
+      attempt_id: attemptId,
+      recognized_cells: recognizedCount,
+      total_kims: 20,
+      gemini_model: LOVABLE_MODEL_OCR,
+      raw_length: rawResponseSnapshot?.length ?? 0,
+    });
 
     // Load existing per-kim answers — preserve manual tutor scores.
     const { data: existingAnswers } = await db
@@ -868,9 +922,19 @@ async function runPart1OCR(
     }
 
     // Update attempt with full OCR result для tutor UI pre-fill.
+    // TASK-16: добавляем meta (gemini_model + recognized_count + raw_response
+    // length) для debug. Frontend читает `ai_part1_ocr_json[kim]` как раньше —
+    // мы добавляем мета-поля под namespaced keys чтобы не сломать iteration.
+    const ocrPayload: Record<string, unknown> = { ...ocrResult };
+    ocrPayload["__meta"] = {
+      gemini_model: LOVABLE_MODEL_OCR,
+      recognized_cells: recognizedCount,
+      raw_length: rawResponseSnapshot?.length ?? 0,
+      generated_at: new Date().toISOString(),
+    };
     const { error: updateErr } = await db
       .from("mock_exam_attempts")
-      .update({ ai_part1_ocr_json: ocrResult })
+      .update({ ai_part1_ocr_json: ocrPayload })
       .eq("id", attemptId);
     if (updateErr) {
       console.warn("mock_exam_grade_part1_ocr_attempt_update_failed", {
@@ -1051,6 +1115,7 @@ async function handleGrade(
   auth: AuthResult,
   attemptId: string,
   cors: Record<string, string>,
+  options?: { forceRetryOCR?: boolean },
 ): Promise<Response> {
   if (!isUUID(attemptId)) {
     return jsonError(cors, 400, "INVALID_ID", "Invalid attempt_id");
@@ -1389,9 +1454,12 @@ async function handleGrade(
   // `attempts.blank_photo_url` (см. mock-exam-student-api `kind='blank'`).
   // `part1_blank_photo_url` — fallback path для «решал не на бланке», prompt
   // OCR не подходит для произвольного формата.
+  // TASK-16: force_retry от tutor /retry-part1-ocr endpoint — override
+  // skip-if-exists guard. Tutor может перезапустить OCR если first attempt
+  // failed или дал плохой результат.
   const shouldRunPart1OCR = attemptRow.answer_method === "blank"
     && !!attemptRow.blank_photo_url
-    && !attemptRow.ai_part1_ocr_json;
+    && (options?.forceRetryOCR === true || !attemptRow.ai_part1_ocr_json);
   const part1OCRPromise = shouldRunPart1OCR
     ? runPart1OCR(db, attemptId, attemptRow.blank_photo_url ?? "", assignmentRow.variant_id ?? "")
     : Promise.resolve(null);
@@ -1663,11 +1731,17 @@ Deno.serve(async (req: Request): Promise<Response> => {
       return jsonError(cors, 400, "VALIDATION", "attempt_id is required");
     }
 
+    // TASK-16 (2026-05-15): force_retry flag — tutor запускает OCR заново
+    // через `/retry-part1-ocr` endpoint (mock-exam-tutor-api). Сбрасывает
+    // skip-if-exists guard в runPart1OCR. Только для service-role callers.
+    const forceRetryOCR =
+      body.force_retry_ocr === true && auth.triggered_by === "service_role";
+
     const db = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
       auth: { persistSession: false },
     });
 
-    return await handleGrade(db, auth, attemptId, cors);
+    return await handleGrade(db, auth, attemptId, cors, { forceRetryOCR });
   } catch (err) {
     const elapsed = Date.now() - startTime;
     console.error("mock_exam_grade_request_error", {

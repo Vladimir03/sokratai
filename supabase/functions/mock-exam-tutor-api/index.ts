@@ -828,6 +828,67 @@ async function handleGetAssignment(
     .filter((id): id is string => Boolean(id));
   const namesByStudent = await resolveStudentDisplayNames(db, tutorUserId, studentIds);
 
+  // TASK-16 (2026-05-15): batch-load per-task scores для всех attempts чтобы
+  // MockExamHeatmap мог рендерить colored cells. Two extra SELECT queries
+  // (Часть 1 + Часть 2), GROUP BY attempt_id в JS. На pilot scale (5-10
+  // учеников × 26 task слотов) → 130-260 rows total — приемлемо без RPC.
+  // Anti-leak: НЕ возвращаем student_answer (form-mode legacy data,
+  // не нужно tutor heatmap'у) и НЕ возвращаем ai_draft_json (tutor-only
+  // artifact, в heatmap нужен только final tutor_score).
+  const attemptIdList = (attemptRows ?? []).map((a) => a.id as string);
+  const part1ByAttempt = new Map<
+    string,
+    Array<{ kim_number: number; earned_score: number | null }>
+  >();
+  const part2ByAttempt = new Map<
+    string,
+    Array<{
+      kim_number: number;
+      tutor_score: number | null;
+      status: string;
+    }>
+  >();
+  if (attemptIdList.length > 0) {
+    const [part1Rows, part2Rows] = await Promise.all([
+      db
+        .from("mock_exam_attempt_part1_answers")
+        .select("attempt_id, kim_number, earned_score")
+        .in("attempt_id", attemptIdList),
+      db
+        .from("mock_exam_attempt_part2_solutions")
+        .select("attempt_id, kim_number, tutor_score, status")
+        .in("attempt_id", attemptIdList),
+    ]);
+    for (const row of (part1Rows.data ?? []) as Array<{
+      attempt_id: string;
+      kim_number: number;
+      earned_score: number | null;
+    }>) {
+      if (!part1ByAttempt.has(row.attempt_id)) {
+        part1ByAttempt.set(row.attempt_id, []);
+      }
+      part1ByAttempt.get(row.attempt_id)!.push({
+        kim_number: row.kim_number,
+        earned_score: row.earned_score,
+      });
+    }
+    for (const row of (part2Rows.data ?? []) as Array<{
+      attempt_id: string;
+      kim_number: number;
+      tutor_score: number | null;
+      status: string;
+    }>) {
+      if (!part2ByAttempt.has(row.attempt_id)) {
+        part2ByAttempt.set(row.attempt_id, []);
+      }
+      part2ByAttempt.get(row.attempt_id)!.push({
+        kim_number: row.kim_number,
+        tutor_score: row.tutor_score,
+        status: row.status,
+      });
+    }
+  }
+
   const attempts = (attemptRows ?? []).map((a) => ({
     id: a.id,
     assignment_id: a.assignment_id,
@@ -844,6 +905,10 @@ async function handleGetAssignment(
     manual_entered_date: a.manual_entered_date,
     manual_comment: a.manual_comment,
     answer_method: a.answer_method ?? null,
+    // TASK-16: per-task scores для heatmap rendering. Empty arrays для
+    // not-started / not-yet-submitted attempts — frontend null-safe ??.
+    part1_answers: part1ByAttempt.get(a.id as string) ?? [],
+    part2_solutions: part2ByAttempt.get(a.id as string) ?? [],
   }));
 
   // Aggregate counts (TASK-11) — same semantics как в handleGetAssignmentsList.
@@ -1516,7 +1581,7 @@ async function handlePart1Finalize(
 ): Promise<Response> {
   const ownedOrErr = await getOwnedAttemptOrThrow(db, attemptId, tutorUserId, cors);
   if (ownedOrErr instanceof Response) return ownedOrErr;
-  const { attempt } = ownedOrErr;
+  const { attempt, assignment } = ownedOrErr;
 
   if (attempt.status === "approved" || attempt.status === "manually_entered") {
     return jsonError(cors, 409, "ALREADY_FINALIZED",
@@ -1525,6 +1590,64 @@ async function handlePart1Finalize(
   if (attempt.status === "in_progress") {
     return jsonError(cors, 409, "NOT_SUBMITTED",
       "Cannot finalize Part 1 before student submitted the attempt");
+  }
+
+  // TASK-16 (2026-05-15): для каждого Часть 1 KIM в variant'е, у которого
+  // нет row в mock_exam_attempt_part1_answers → INSERT с earned_score=0.
+  // Vladimir UX: «если репетитор ничего не ввёл — поставить 0». Result page
+  // теперь покажет «0/max» вместо «—» для пропущенных KIM.
+  if (assignment.variant_id) {
+    const { data: variantPart1Tasks } = await db
+      .from("mock_exam_variant_tasks")
+      .select("kim_number, max_score")
+      .eq("variant_id", assignment.variant_id as string)
+      .eq("part", 1)
+      .order("kim_number", { ascending: true });
+
+    const { data: existingAnswers } = await db
+      .from("mock_exam_attempt_part1_answers")
+      .select("kim_number")
+      .eq("attempt_id", attemptId);
+    const existingKims = new Set(
+      (existingAnswers ?? []).map((r) => r.kim_number as number),
+    );
+
+    const missingInserts: Array<{
+      attempt_id: string;
+      kim_number: number;
+      student_answer: null;
+      earned_score: number;
+    }> = [];
+    for (const t of (variantPart1Tasks ?? []) as Array<{
+      kim_number: number;
+      max_score: number;
+    }>) {
+      if (!existingKims.has(t.kim_number)) {
+        missingInserts.push({
+          attempt_id: attemptId,
+          kim_number: t.kim_number,
+          student_answer: null,
+          earned_score: 0,
+        });
+      }
+    }
+    if (missingInserts.length > 0) {
+      // onConflict NOTHING — не перезаписываем existing rows (race safety).
+      const { error: insertErr } = await db
+        .from("mock_exam_attempt_part1_answers")
+        .upsert(missingInserts, {
+          onConflict: "attempt_id,kim_number",
+          ignoreDuplicates: true,
+        });
+      if (insertErr) {
+        console.warn("mock_exam_part1_finalize_default_insert_failed", {
+          attempt_id: attemptId,
+          missing_count: missingInserts.length,
+          error: insertErr.message,
+        });
+        // Non-fatal — продолжаем с aggregation. Sum может быть partial.
+      }
+    }
   }
 
   const { data: rows } = await db
@@ -1550,6 +1673,87 @@ async function handlePart1Finalize(
     ok: true,
     attempt_id: attemptId,
     total_part1_score: totalPart1,
+  });
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Endpoint: POST /attempts/:id/retry-part1-ocr  (TASK-16, 2026-05-15)
+// ────────────────────────────────────────────────────────────────────────────
+//
+// Tutor force-re-runs AI Part 1 OCR (Gemini 2.5-pro). Используется когда
+// first OCR call failed или дал плохой результат. Workflow:
+//   1. Clear `ai_part1_ocr_json` (idempotent reset).
+//   2. Fire-and-forget call на mock-exam-grade с `force_retry_ocr: true`.
+//   3. Tutor refetch attempt через 5-10 sec → новые OCR values pre-fill inputs.
+//
+// Status guard: только pre-approval (submitted | ai_checking | awaiting_review).
+// Ownership: assignment.tutor_id === auth.uid().
+
+async function handleRetryPart1OCR(
+  db: SupabaseClient,
+  tutorUserId: string,
+  attemptId: string,
+  cors: Record<string, string>,
+): Promise<Response> {
+  const ownedOrErr = await getOwnedAttemptOrThrow(db, attemptId, tutorUserId, cors);
+  if (ownedOrErr instanceof Response) return ownedOrErr;
+  const { attempt } = ownedOrErr;
+
+  if (attempt.status === "approved" || attempt.status === "manually_entered") {
+    return jsonError(cors, 409, "ALREADY_FINALIZED",
+      `Cannot retry OCR after status=${attempt.status}`);
+  }
+  if (attempt.status === "in_progress") {
+    return jsonError(cors, 409, "NOT_SUBMITTED",
+      "Cannot retry OCR before student submitted the attempt");
+  }
+  if (attempt.answer_method !== "blank") {
+    return jsonError(cors, 400, "WRONG_METHOD",
+      "OCR retry available only for blank-mode attempts");
+  }
+  if (!attempt.blank_photo_url) {
+    return jsonError(cors, 400, "NO_BLANK_PHOTO",
+      "Attempt has no blank photo to OCR");
+  }
+
+  // Clear previous OCR result (idempotent reset). Не перезаписываем
+  // mock_exam_attempt_part1_answers — там могут быть tutor manual scores,
+  // runPart1OCR сам respect'ит их через tutorScoredKims guard.
+  const { error: clearErr } = await db
+    .from("mock_exam_attempts")
+    .update({ ai_part1_ocr_json: null })
+    .eq("id", attemptId);
+  if (clearErr) {
+    console.error("mock_exam_retry_ocr_clear_failed", {
+      attempt_id: attemptId,
+      error: clearErr.message,
+    });
+    return jsonError(cors, 500, "DB_ERROR", "Failed to reset OCR state");
+  }
+
+  // Fire-and-forget call на mock-exam-grade с force_retry_ocr.
+  // Service-role bypass'ит ownership check там.
+  try {
+    fetch(`${SUPABASE_URL}/functions/v1/mock-exam-grade`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
+        apikey: SUPABASE_SERVICE_ROLE_KEY,
+      },
+      body: JSON.stringify({ attempt_id: attemptId, force_retry_ocr: true }),
+    }).catch((err) => {
+      console.warn("mock_exam_retry_ocr_enqueue_failed", { error: String(err) });
+    });
+  } catch (err) {
+    console.warn("mock_exam_retry_ocr_enqueue_throw", { error: String(err) });
+  }
+
+  return jsonOk(cors, {
+    ok: true,
+    attempt_id: attemptId,
+    status: "queued",
+    message: "AI OCR запущен заново. Подожди 5–15 секунд и обнови страницу.",
   });
 }
 
@@ -2058,6 +2262,14 @@ Deno.serve(async (req: Request): Promise<Response> => {
       seg[2] === "part1-finalize" && route.method === "POST"
     ) {
       return await handlePart1Finalize(db, userId, seg[1], cors);
+    }
+
+    // POST /attempts/:id/retry-part1-ocr  (TASK-16 — force-re-run AI OCR)
+    if (
+      seg.length === 3 && seg[0] === "attempts" &&
+      seg[2] === "retry-part1-ocr" && route.method === "POST"
+    ) {
+      return await handleRetryPart1OCR(db, userId, seg[1], cors);
     }
 
     // Phase 6 (2026-05-15) — POST /attempts/:id/assign-part2-photos

@@ -35,6 +35,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { cn } from '@/lib/utils';
 import { useStudentMockExamResult } from '@/hooks/useStudentMockExamResult';
 import { StudentMockExamApiError } from '@/lib/studentMockExamApi';
+import { primaryToSecondary } from '@/lib/mockExamScaleEge2025';
 import type {
   StudentMockExamResultPart1Answer,
   StudentMockExamResultPart2Solution,
@@ -218,14 +219,21 @@ function Part1Card({
                           ) : (
                             <XCircle className="mt-0.5 h-4 w-4 flex-shrink-0 text-rose-500" />
                           )}
-                          <span
-                            className={cn(
-                              'break-all',
-                              !row.student_answer && 'italic text-slate-400',
-                            )}
-                          >
-                            {row.student_answer ?? 'без ответа'}
-                          </span>
+                          {row.student_answer ? (
+                            <span className="break-all">{row.student_answer}</span>
+                          ) : isCorrect && row.correct_answer ? (
+                            // TASK-16: blank-mode ученик заполнил бланк, tutor
+                            // confirmed full score, но student_answer=null
+                            // (нет digital input). Показываем ответ + suffix.
+                            <span className="break-all">
+                              {row.correct_answer}{' '}
+                              <span className="text-xs text-slate-500">
+                                (по фото бланка)
+                              </span>
+                            </span>
+                          ) : (
+                            <span className="italic text-slate-400">без ответа</span>
+                          )}
                         </div>
                       </td>
                       <td className="px-3 py-2 text-slate-700">
@@ -500,6 +508,11 @@ function FinalSummary({
   const passThreshold = Math.round(totalMax * 0.4); // 22/54 ≈ 0.4
   const goodThreshold = Math.round(totalMax * 0.66); // 36/54 ≈ 0.66
 
+  // TASK-16: ФИПИ 2025 шкала — primary → secondary. Только для ЕГЭ физика
+  // (max primary = 45 в variant1). Phase 2: добавить per-subject lookup.
+  const secondaryScore =
+    totalMax === 45 ? primaryToSecondary(totalScore) : null;
+
   return (
     <Card className="mb-3 shadow-none">
       <CardContent className="p-5 text-center">
@@ -512,8 +525,15 @@ function FinalSummary({
             / {totalMax}
           </span>
         </div>
+        {secondaryScore !== null ? (
+          <p className="mb-1 text-base font-medium text-slate-700">
+            ≈ {secondaryScore} тестовых баллов
+          </p>
+        ) : null}
         <p className="mb-4 text-sm text-slate-500">
-          Тестовый балл будет известен после публикации шкалы ЕГЭ-2026
+          {secondaryScore !== null
+            ? 'Ориентировочная оценка по шкале ФИПИ 2025. Точная — после публикации шкалы 2026.'
+            : 'Тестовый балл будет известен после публикации шкалы ЕГЭ-2026'}
         </p>
 
         <div className="mb-4 mt-5">

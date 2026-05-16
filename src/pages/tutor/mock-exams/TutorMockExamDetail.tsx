@@ -30,6 +30,7 @@ import { MockExamHeatmap } from '@/components/tutor/mock-exams/MockExamHeatmap';
 import { MockExamInviteLinksSection } from '@/components/tutor/mock-exams/MockExamInviteLinksSection';
 import { formatDeadline } from '@/lib/homeworkDeadline';
 import { cn } from '@/lib/utils';
+import { primaryToSecondary } from '@/lib/mockExamScaleEge2025';
 import type {
   MockExamAssignmentDetail,
   MockExamAssignmentStatus,
@@ -154,9 +155,14 @@ interface KpiCardProps {
   value: string;
   hint?: string | null;
   tone?: 'default' | 'amber' | 'accent' | 'amber-warn';
+  /**
+   * TASK-16: optional sub-line под значением (например, «≈ 56 тестовых» для
+   * Средний первичный с ФИПИ 2025 conversion).
+   */
+  footer?: string | null;
 }
 
-function KpiCard({ label, value, hint, tone = 'default' }: KpiCardProps) {
+function KpiCard({ label, value, hint, tone = 'default', footer }: KpiCardProps) {
   const isWarn = tone === 'amber-warn';
   const wrapperClass = cn(
     'rounded-lg border p-4',
@@ -186,6 +192,11 @@ function KpiCard({ label, value, hint, tone = 'default' }: KpiCardProps) {
           </span>
         ) : null}
       </div>
+      {footer ? (
+        <div className="text-xs text-muted-foreground mt-1 tabular-nums">
+          {footer}
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -446,6 +457,31 @@ function TutorMockExamDetailContent() {
             }
             hint={kpi.averagePart1 !== null ? `/ ${part1Max}` : null}
             tone={kpi.averagePart1 !== null ? 'accent' : 'default'}
+            footer={
+              kpi.averagePart1 !== null
+                ? (() => {
+                    // ФИПИ 2025 шкала: average первичных Часть 1 — это
+                    // приблизительная оценка, шкала применима к итоговому
+                    // первичному (Часть 1 + Часть 2). Здесь показываем
+                    // ориентировочный secondary по первичному averagePart1
+                    // только если есть полные attempts (approvedFinal > 0).
+                    if (kpi.approvedFinal === 0) return null;
+                    // Суммируем full-score average через approved attempts.
+                    const approvedAttempts = detail.attempts.filter(
+                      (a) => a.status === 'approved' || a.status === 'manually_entered',
+                    );
+                    if (approvedAttempts.length === 0) return null;
+                    const totalSum = approvedAttempts.reduce(
+                      (acc, a) => acc + (a.total_score ?? 0),
+                      0,
+                    );
+                    const avgFullPrimary = totalSum / approvedAttempts.length;
+                    const secondary = primaryToSecondary(avgFullPrimary);
+                    if (secondary === null) return null;
+                    return `≈ ${secondary} тестовых`;
+                  })()
+                : null
+            }
           />
           <KpiCard
             label="Требует проверки"
@@ -494,12 +530,18 @@ function TutorMockExamDetailContent() {
         </div>
       ) : null}
 
-      {/* Per-task hydration (cell-by-cell colored scores) — следующая итерация.
-          Тут только привычный AI-черновик банер + structural heatmap. */}
-      <p className="text-xs text-slate-400 text-center pt-4 flex items-center justify-center gap-1.5">
-        <Sparkles className="h-3 w-3" aria-hidden="true" />
-        Цветные клетки 1–26 появятся после прохождения учениками
-      </p>
+      {/* TASK-16: hint скрыт когда есть хотя бы одна approved/manually_entered
+          attempt — клетки 1-26 уже colored, подсказка устарела. Показываем
+          только когда все attempts ещё in-flight (никто не подтверждён). */}
+      {detail.attempts.length > 0 &&
+      !detail.attempts.some(
+        (a) => a.status === 'approved' || a.status === 'manually_entered',
+      ) ? (
+        <p className="text-xs text-slate-400 text-center pt-4 flex items-center justify-center gap-1.5">
+          <Sparkles className="h-3 w-3" aria-hidden="true" />
+          Цветные клетки 1–26 появятся после твоей проверки работ
+        </p>
+      ) : null}
     </div>
   );
 }

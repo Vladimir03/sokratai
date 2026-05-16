@@ -225,6 +225,18 @@ export interface MockExamAttemptListItem {
    * - `null` — legacy attempt до миграции 20260514130000, либо ученик ещё не выбрал
    */
   answer_method?: MockExamAnswerMethod | null;
+  /**
+   * NEW (TASK-16, 2026-05-15): per-task scores для MockExamHeatmap rendering.
+   * Backend handleGetAssignment теперь batch-load'ит из mock_exam_attempt_part1_answers
+   * и mock_exam_attempt_part2_solutions. Empty arrays для not-started attempts.
+   * Anti-leak: НЕ содержит student_answer (form-mode legacy) и НЕ содержит ai_draft_json.
+   */
+  part1_answers?: Array<{ kim_number: number; earned_score: number | null }>;
+  part2_solutions?: Array<{
+    kim_number: number;
+    tutor_score: number | null;
+    status: string;
+  }>;
 }
 
 // ─── Single-attempt detail (review surface) ──────────────────────────────────

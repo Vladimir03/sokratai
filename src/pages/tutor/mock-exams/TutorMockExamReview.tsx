@@ -30,6 +30,7 @@ import {
   Info,
   Lock,
   Pencil,
+  RotateCcw,
   Sparkles,
   X,
 } from 'lucide-react';
@@ -68,17 +69,11 @@ import {
   assignMockExamPart2Photos,
   finalizeMockExamPart1,
   regradeMockExamPart2,
+  retryMockExamPart1OCR,
   setMockExamPart1ManualScore,
   MockExamApiError,
 } from '@/lib/mockExamApi';
 import { Input } from '@/components/ui/input';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
 import { cn } from '@/lib/utils';
 import { formatMockScore } from '@/components/tutor/mock-exams/mockHeatmapStyles';
 import type {
@@ -312,6 +307,10 @@ function Part1BlankReviewPanel({ attempt, variantPart1Tasks }: {
 
   const [savingKim, setSavingKim] = useState<number | null>(null);
   const [isFinalizing, setIsFinalizing] = useState(false);
+  // TASK-16 (2026-05-15): AlertDialog для confirm перед finalize (Vladimir UX).
+  const [confirmFinalizeOpen, setConfirmFinalizeOpen] = useState(false);
+  // TASK-16: retry OCR button state.
+  const [isRetryingOCR, setIsRetryingOCR] = useState(false);
 
   const isReadOnly =
     attempt.status === 'approved' || attempt.status === 'manually_entered';
@@ -354,12 +353,36 @@ function Part1BlankReviewPanel({ attempt, variantPart1Tasks }: {
       void queryClient.invalidateQueries({
         queryKey: MOCK_EXAM_ATTEMPT_QUERY_KEY(attempt.id),
       });
+      setConfirmFinalizeOpen(false);
     } catch (err) {
       const msg =
         err instanceof MockExamApiError ? err.message : 'Не удалось пересчитать';
       toast.error(msg);
     } finally {
       setIsFinalizing(false);
+    }
+  };
+
+  // TASK-16: force-re-run AI OCR. Server clear'ит ai_part1_ocr_json и
+  // запускает mock-exam-grade::runPart1OCR fire-and-forget. Tutor invalidate'ит
+  // attempt query → refetch через 5-15 секунд показывает новые OCR values.
+  const handleRetryOCR = async () => {
+    setIsRetryingOCR(true);
+    try {
+      await retryMockExamPart1OCR(attempt.id);
+      toast.success('AI OCR запущен заново. Обновится через 10–15 секунд.');
+      // Через 8 секунд invalidate чтобы pre-fill свежими values.
+      setTimeout(() => {
+        void queryClient.invalidateQueries({
+          queryKey: MOCK_EXAM_ATTEMPT_QUERY_KEY(attempt.id),
+        });
+      }, 8_000);
+    } catch (err) {
+      const msg =
+        err instanceof MockExamApiError ? err.message : 'Не удалось перезапустить AI OCR';
+      toast.error(msg);
+    } finally {
+      setIsRetryingOCR(false);
     }
   };
 
@@ -423,14 +446,31 @@ function Part1BlankReviewPanel({ attempt, variantPart1Tasks }: {
         {/* Phase 6 (2026-05-15): AI OCR result для blank-mode Часть 1.
             mock-exam-grade автоматически распознал ответы в клетках + запустил
             deterministic checker → earned_score уже в attempt.part1_answers.
-            Tutor видит recognized value + confidence chip; может править. */}
-        {attempt.ai_part1_ocr_json && (
-          <div className="rounded-md bg-emerald-50 border border-emerald-200 px-3 py-2 text-xs text-emerald-900 dark:bg-emerald-950/30 dark:border-emerald-900 dark:text-emerald-200">
-            <strong>AI распознал бланк</strong> и автоматически выставил баллы по
-            ответам ученика. Проверь клетки с amber-обводкой (AI не уверен) —
-            при необходимости поправь балл.
-          </div>
-        )}
+            Tutor видит recognized value + confidence chip; может править.
+            TASK-16: добавлена кнопка retry для случаев когда OCR failed. */}
+        <div className="flex flex-wrap items-start gap-3">
+          {attempt.ai_part1_ocr_json && (
+            <div className="flex-1 min-w-0 rounded-md bg-emerald-50 border border-emerald-200 px-3 py-2 text-xs text-emerald-900 dark:bg-emerald-950/30 dark:border-emerald-900 dark:text-emerald-200">
+              <strong>AI распознал бланк</strong> и автоматически выставил баллы по
+              ответам ученика. Проверь клетки с amber-обводкой (AI не уверен) —
+              при необходимости поправь балл.
+            </div>
+          )}
+          {!isReadOnly && (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => void handleRetryOCR()}
+              disabled={isRetryingOCR}
+              className="touch-manipulation text-xs gap-1.5 min-h-9"
+              title="Запустить AI OCR заново (на случай если AI не распознал бланк)"
+            >
+              <RotateCcw className={cn('h-3.5 w-3.5', isRetryingOCR && 'animate-spin')} aria-hidden="true" />
+              {isRetryingOCR ? 'Запускаем…' : attempt.ai_part1_ocr_json ? 'Перезапустить AI' : 'Запустить AI OCR'}
+            </Button>
+          )}
+        </div>
 
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2">
           {variantPart1Tasks.map((t) => {
@@ -498,14 +538,91 @@ function Part1BlankReviewPanel({ attempt, variantPart1Tasks }: {
           </div>
           <Button
             type="button"
-            onClick={handleFinalize}
+            onClick={() => setConfirmFinalizeOpen(true)}
             disabled={isReadOnly || isFinalizing}
             className="bg-amber-600 hover:bg-amber-700 text-white"
           >
-            {isFinalizing ? 'Пересчитываем…' : 'Часть 1 проверена'}
+            {isFinalizing ? 'Сохраняем…' : 'Часть 1 проверена'}
           </Button>
         </div>
       </CardContent>
+
+      {/* TASK-16 (Vladimir UX): confirm dialog показывает все 20 KIM перед save.
+          Пустые KIM подсвечены amber «(не введено)» — backend проставит 0. */}
+      <AlertDialog open={confirmFinalizeOpen} onOpenChange={setConfirmFinalizeOpen}>
+        <AlertDialogContent className="max-w-md">
+          <AlertDialogHeader>
+            <AlertDialogTitle>Подтвердить баллы Часть 1</AlertDialogTitle>
+            <AlertDialogDescription>
+              Проверь баллы по каждой задаче 1–20. Где ничего не введено —
+              автоматически поставится <strong>0 баллов</strong>. После сохранения
+              ученик и родители увидят результат Части 1.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <div className="max-h-[55vh] overflow-y-auto rounded-md border border-slate-200 dark:border-slate-700">
+            <table className="w-full text-sm">
+              <thead className="sticky top-0 bg-slate-50 dark:bg-slate-800 text-xs uppercase text-slate-500">
+                <tr>
+                  <th className="px-3 py-2 text-left font-medium">KIM</th>
+                  <th className="px-3 py-2 text-right font-medium">Балл</th>
+                  <th className="px-3 py-2 text-right font-medium">Макс</th>
+                </tr>
+              </thead>
+              <tbody>
+                {variantPart1Tasks.map((t) => {
+                  const raw = drafts[t.kim_number] ?? '';
+                  const parsed = Number.parseInt(raw, 10);
+                  const isEntered = raw.trim() !== '' && Number.isFinite(parsed);
+                  return (
+                    <tr key={t.kim_number} className="border-t border-slate-100 dark:border-slate-800">
+                      <td className="px-3 py-1.5 font-medium text-slate-700 dark:text-slate-300">
+                        №{t.kim_number}
+                      </td>
+                      <td className="px-3 py-1.5 text-right tabular-nums">
+                        {isEntered ? (
+                          <strong className="text-slate-900 dark:text-slate-100">{parsed}</strong>
+                        ) : (
+                          <span className="inline-flex items-center gap-1 text-amber-700 dark:text-amber-300">
+                            <strong>0</strong>
+                            <span className="text-[10px]">(не введено)</span>
+                          </span>
+                        )}
+                      </td>
+                      <td className="px-3 py-1.5 text-right text-slate-400 tabular-nums">
+                        / {t.max_score}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+              <tfoot className="bg-amber-50 dark:bg-amber-950/30 sticky bottom-0">
+                <tr className="border-t-2 border-amber-300">
+                  <td className="px-3 py-2 font-semibold text-amber-900 dark:text-amber-200">Итого</td>
+                  <td className="px-3 py-2 text-right font-bold text-amber-900 dark:text-amber-200 tabular-nums">
+                    {draftSum}
+                  </td>
+                  <td className="px-3 py-2 text-right text-amber-700 dark:text-amber-300/80 tabular-nums">
+                    / {part1Max}
+                  </td>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isFinalizing}>Отмена</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={(e) => {
+                e.preventDefault();
+                void handleFinalize();
+              }}
+              disabled={isFinalizing}
+              className="bg-amber-600 hover:bg-amber-700 text-white"
+            >
+              {isFinalizing ? 'Сохраняем…' : 'Сохранить и отправить ученику'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </Card>
   );
 }
@@ -854,26 +971,25 @@ function BulkPhotosAssignmentGallery({
   const queryClient = useQueryClient();
 
   // Compute initial assignment per photo index из ai_draft_json
-  // (assigned_photo_indices). Каждое фото может быть привязано к одной
-  // задаче или 'unassigned' (если в нескольких — берём первый kim).
+  // (assigned_photo_indices). Phase 6 TASK-16 (2026-05-15): multi-select —
+  // одно фото может быть привязано к нескольким задачам (если ученик
+  // сфотографировал лист с решениями 2-3 задач сразу). Каждое фото хранит
+  // Set<kim_number> (пустой Set = не привязано).
   const initialAssignments = useMemo(() => {
-    const map = new Map<number, number | 'unassigned'>();
-    for (let i = 0; i < photoUrls.length; i++) map.set(i, 'unassigned');
+    const map = new Map<number, Set<number>>();
+    for (let i = 0; i < photoUrls.length; i++) map.set(i, new Set<number>());
     for (const solution of part2Solutions) {
       const indices = solution.ai_draft?.assigned_photo_indices ?? [];
       for (const idx of indices) {
         if (idx >= 0 && idx < photoUrls.length) {
-          // First-write-wins: если фото уже assigned, не переписываем
-          if (map.get(idx) === 'unassigned') {
-            map.set(idx, solution.kim_number);
-          }
+          map.get(idx)!.add(solution.kim_number);
         }
       }
     }
     return map;
   }, [photoUrls.length, part2Solutions]);
 
-  const [assignments, setAssignments] = useState<Map<number, number | 'unassigned'>>(
+  const [assignments, setAssignments] = useState<Map<number, Set<number>>>(
     initialAssignments,
   );
   const [dirty, setDirty] = useState(false);
@@ -885,13 +1001,14 @@ function BulkPhotosAssignmentGallery({
   }, [initialAssignments]);
 
   const saveMutation = useMutation({
-    mutationFn: async (newAssignments: Map<number, number | 'unassigned'>) => {
+    mutationFn: async (newAssignments: Map<number, Set<number>>) => {
       // Сгруппировать фото-индексы по kim_number (server format).
+      // Multi-select: одно фото может быть в нескольких kim arrays.
       const grouped: Record<number, number[]> = {};
       for (const kim of PART2_KIMS) grouped[kim] = [];
-      for (const [idx, target] of newAssignments.entries()) {
-        if (target !== 'unassigned') {
-          grouped[target].push(idx);
+      for (const [idx, kims] of newAssignments.entries()) {
+        for (const kim of kims) {
+          if (grouped[kim]) grouped[kim].push(idx);
         }
       }
       return await assignMockExamPart2Photos(attemptId, { assignments: grouped });
@@ -925,14 +1042,35 @@ function BulkPhotosAssignmentGallery({
     },
   });
 
-  const handleChange = useCallback(
-    (photoIdx: number, value: string) => {
-      const target: number | 'unassigned' = value === 'unassigned'
-        ? 'unassigned'
-        : Number.parseInt(value, 10);
+  // Phase 6 TASK-16: chips multi-select. Toggle kim membership в Set
+  // per photo. Если photo уже привязано к kim → remove, иначе → add.
+  const toggleAssignment = useCallback(
+    (photoIdx: number, kim: number) => {
       setAssignments((prev) => {
         const next = new Map(prev);
-        next.set(photoIdx, target);
+        const currentSet = new Set(prev.get(photoIdx) ?? []);
+        if (currentSet.has(kim)) {
+          currentSet.delete(kim);
+        } else {
+          currentSet.add(kim);
+        }
+        next.set(photoIdx, currentSet);
+        return next;
+      });
+      setDirty(true);
+    },
+    [],
+  );
+
+  // Clear all kims для photo → «не подошла» state.
+  const setNoneAssignment = useCallback(
+    (photoIdx: number) => {
+      setAssignments((prev) => {
+        const current = prev.get(photoIdx);
+        // No-op если уже пустой — избегаем лишнего dirty=true.
+        if (!current || current.size === 0) return prev;
+        const next = new Map(prev);
+        next.set(photoIdx, new Set<number>());
         return next;
       });
       setDirty(true);
@@ -977,11 +1115,12 @@ function BulkPhotosAssignmentGallery({
           <p className="mb-3 text-sm text-muted-foreground">
             {isReadOnly
               ? 'Пробник подтверждён. Привязка фото к задачам зафиксирована.'
-              : 'AI распределил фото по задачам. Если ошибся — измени привязку в выпадашке под фото, потом нажми «Перепроверить AI».'}
+              : 'AI распределил фото по задачам. Если одно фото содержит решения нескольких задач — отметь все нужные номера чипсами под фото. Потом нажми «Перепроверить AI».'}
           </p>
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4">
             {photoUrls.map((url, idx) => {
-              const current = assignments.get(idx) ?? 'unassigned';
+              const currentSet = assignments.get(idx) ?? new Set<number>();
+              const isNone = currentSet.size === 0;
               return (
                 <div key={url + idx} className="flex flex-col gap-2">
                   <a
@@ -1001,23 +1140,49 @@ function BulkPhotosAssignmentGallery({
                       #{idx + 1}
                     </span>
                   </a>
-                  <Select
-                    value={String(current)}
-                    onValueChange={(v) => handleChange(idx, v)}
-                    disabled={isReadOnly}
+                  <div
+                    className="flex flex-wrap gap-1.5"
+                    role="group"
+                    aria-label={`Привязка фото ${idx + 1} к задачам`}
                   >
-                    <SelectTrigger className="min-h-[44px] text-base touch-manipulation">
-                      <SelectValue placeholder="К задаче..." />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="unassigned">— не подошла</SelectItem>
-                      {PART2_KIMS.map((kim) => (
-                        <SelectItem key={kim} value={String(kim)}>
-                          № {kim}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                    {PART2_KIMS.map((kim) => {
+                      const active = currentSet.has(kim);
+                      return (
+                        <button
+                          type="button"
+                          key={kim}
+                          onClick={() => toggleAssignment(idx, kim)}
+                          aria-pressed={active}
+                          disabled={isReadOnly}
+                          className={cn(
+                            'min-h-9 touch-manipulation rounded-full px-2.5 py-1 text-xs font-medium transition-colors',
+                            active
+                              ? 'bg-emerald-600 text-white hover:bg-emerald-700'
+                              : 'bg-slate-100 text-slate-700 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700',
+                            isReadOnly && 'opacity-60 pointer-events-none',
+                          )}
+                        >
+                          №{kim}
+                        </button>
+                      );
+                    })}
+                    <button
+                      type="button"
+                      onClick={() => setNoneAssignment(idx)}
+                      aria-pressed={isNone}
+                      disabled={isReadOnly}
+                      className={cn(
+                        'min-h-9 touch-manipulation rounded-full px-2.5 py-1 text-xs font-medium transition-colors',
+                        isNone
+                          ? 'bg-slate-700 text-white hover:bg-slate-800'
+                          : 'bg-transparent text-slate-500 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-800',
+                        isReadOnly && 'opacity-60 pointer-events-none',
+                      )}
+                      title="Фото не относится ни к одной задаче"
+                    >
+                      — не подошла
+                    </button>
+                  </div>
                 </div>
               );
             })}
