@@ -305,15 +305,30 @@ function Part1BlankReviewPanel({ attempt, variantPart1Tasks }: {
     return initial;
   });
 
-  const [savingKim, setSavingKim] = useState<number | null>(null);
+  // TASK-16-R2 fix #3 (ChatGPT-5.5 review): track per-kim save state как Set
+  // (раньше single savingKim — parallel onBlur saves возможны на mobile при
+  // быстром tab-через-поля). Используется для disable confirm + flush before finalize.
+  const [savingKims, setSavingKims] = useState<Set<number>>(new Set());
   const [isFinalizing, setIsFinalizing] = useState(false);
-  // TASK-16 (2026-05-15): AlertDialog для confirm перед finalize (Vladimir UX).
   const [confirmFinalizeOpen, setConfirmFinalizeOpen] = useState(false);
-  // TASK-16: retry OCR button state.
   const [isRetryingOCR, setIsRetryingOCR] = useState(false);
 
   const isReadOnly =
     attempt.status === 'approved' || attempt.status === 'manually_entered';
+
+  // TASK-16-R2 fix #3: derive «dirty» kims (local draft ≠ saved value).
+  // На finalize click мы их flush'им перед SUM, чтобы избежать stale DB read.
+  const dirtyKims = useMemo(() => {
+    const set = new Set<number>();
+    for (const t of variantPart1Tasks) {
+      const raw = drafts[t.kim_number] ?? '';
+      if (raw.trim() === '') continue;
+      const parsed = Number.parseInt(raw, 10);
+      if (!Number.isFinite(parsed) || parsed < 0 || parsed > t.max_score) continue;
+      if (existingScores.get(t.kim_number) !== parsed) set.add(t.kim_number);
+    }
+    return set;
+  }, [drafts, existingScores, variantPart1Tasks]);
 
   const handleScoreBlur = async (kim: number, maxScore: number) => {
     const raw = drafts[kim] ?? '';
@@ -327,7 +342,11 @@ function Part1BlankReviewPanel({ attempt, variantPart1Tasks }: {
       return;
     }
     if (existingScores.get(kim) === parsed) return; // no change
-    setSavingKim(kim);
+    setSavingKims((prev) => {
+      const next = new Set(prev);
+      next.add(kim);
+      return next;
+    });
     try {
       await setMockExamPart1ManualScore(attempt.id, {
         kim_number: kim,
@@ -341,13 +360,48 @@ function Part1BlankReviewPanel({ attempt, variantPart1Tasks }: {
         err instanceof MockExamApiError ? err.message : 'Не удалось сохранить балл';
       toast.error(msg);
     } finally {
-      setSavingKim(null);
+      setSavingKims((prev) => {
+        const next = new Set(prev);
+        next.delete(kim);
+        return next;
+      });
     }
   };
 
   const handleFinalize = async () => {
     setIsFinalizing(true);
     try {
+      // TASK-16-R2 fix #3: flush dirty drafts перед finalize. Раньше race:
+      //   typed «5» → blur → save start → fast click «Часть 1 проверена» →
+      //   confirm → handleFinalize SUM'ит stale DB row (без 5). Tutor видел
+      //   preview «5/28», но result page показывал «0/28».
+      // Flush flow: для каждого dirty kim параллельно вызываем manual-score API,
+      // ждём Promise.all, потом finalize.
+      if (dirtyKims.size > 0) {
+        const flushPromises: Promise<unknown>[] = [];
+        for (const kim of dirtyKims) {
+          const t = variantPart1Tasks.find((x) => x.kim_number === kim);
+          if (!t) continue;
+          const parsed = Number.parseInt(drafts[kim] ?? '', 10);
+          if (!Number.isFinite(parsed) || parsed < 0 || parsed > t.max_score) continue;
+          flushPromises.push(
+            setMockExamPart1ManualScore(attempt.id, {
+              kim_number: kim,
+              earned_score: parsed,
+            }),
+          );
+        }
+        try {
+          await Promise.all(flushPromises);
+        } catch (flushErr) {
+          const msg =
+            flushErr instanceof MockExamApiError
+              ? flushErr.message
+              : 'Не удалось сохранить часть баллов перед финализацией';
+          toast.error(msg);
+          return; // не идём в finalize — preview и DB не согласованы
+        }
+      }
       const res = await finalizeMockExamPart1(attempt.id);
       toast.success(`Часть 1 пересчитана: ${res.total_part1_score} баллов`);
       void queryClient.invalidateQueries({
@@ -443,38 +497,64 @@ function Part1BlankReviewPanel({ attempt, variantPart1Tasks }: {
           </div>
         )}
 
-        {/* Phase 6 (2026-05-15): AI OCR result для blank-mode Часть 1.
-            mock-exam-grade автоматически распознал ответы в клетках + запустил
-            deterministic checker → earned_score уже в attempt.part1_answers.
-            Tutor видит recognized value + confidence chip; может править.
-            TASK-16: добавлена кнопка retry для случаев когда OCR failed. */}
-        <div className="flex flex-wrap items-start gap-3">
-          {attempt.ai_part1_ocr_json && (
-            <div className="flex-1 min-w-0 rounded-md bg-emerald-50 border border-emerald-200 px-3 py-2 text-xs text-emerald-900 dark:bg-emerald-950/30 dark:border-emerald-900 dark:text-emerald-200">
-              <strong>AI распознал бланк</strong> и автоматически выставил баллы по
-              ответам ученика. Проверь клетки с amber-обводкой (AI не уверен) —
-              при необходимости поправь балл.
+        {/* Phase 6 + TASK-16-R2 fix #4 (2026-05-16): canonical `{cells, __meta}`.
+            Frontend branches на __meta.status:
+              - 'failed'                              → rose warning + retry CTA
+              - 'success' + recognized_cells === 0    → amber soft warning
+              - 'success' + recognized_cells > 0      → emerald success */}
+        {(() => {
+          const ocrJson = attempt.ai_part1_ocr_json;
+          const meta = ocrJson?.__meta ?? null;
+          const isFailed = meta?.status === 'failed';
+          const recognizedCount = meta?.status === 'success' ? meta.recognized_cells : 0;
+          const isEmpty = meta?.status === 'success' && recognizedCount === 0;
+
+          return (
+            <div className="flex flex-wrap items-start gap-3">
+              {isFailed && (
+                <div className="flex-1 min-w-0 rounded-md bg-rose-50 border border-rose-200 px-3 py-2 text-xs text-rose-900 dark:bg-rose-950/30 dark:border-rose-900 dark:text-rose-200">
+                  <strong>AI OCR не сработал.</strong> Нажми «Перезапустить AI»
+                  или введи баллы вручную по фото бланка ниже. Причина в логах
+                  (для разработчиков): <span className="font-mono opacity-70">{meta && 'error' in meta ? meta.error : 'неизвестно'}</span>
+                </div>
+              )}
+              {isEmpty && (
+                <div className="flex-1 min-w-0 rounded-md bg-amber-50 border border-amber-200 px-3 py-2 text-xs text-amber-900 dark:bg-amber-950/30 dark:border-amber-900 dark:text-amber-200">
+                  <strong>AI запустился, но ничего не распознал.</strong> Возможно,
+                  фото бланка плохого качества. Нажми «Перезапустить AI» или
+                  введи баллы вручную.
+                </div>
+              )}
+              {!isFailed && !isEmpty && meta?.status === 'success' && (
+                <div className="flex-1 min-w-0 rounded-md bg-emerald-50 border border-emerald-200 px-3 py-2 text-xs text-emerald-900 dark:bg-emerald-950/30 dark:border-emerald-900 dark:text-emerald-200">
+                  <strong>AI распознал бланк</strong> (
+                  {recognizedCount}/20 клеток
+                  ) и выставил баллы. Проверь клетки с amber-обводкой (AI не уверен)
+                  — при необходимости поправь.
+                </div>
+              )}
+              {!isReadOnly && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => void handleRetryOCR()}
+                  disabled={isRetryingOCR}
+                  className="touch-manipulation text-xs gap-1.5 min-h-9"
+                  title="Запустить AI OCR заново"
+                >
+                  <RotateCcw className={cn('h-3.5 w-3.5', isRetryingOCR && 'animate-spin')} aria-hidden="true" />
+                  {isRetryingOCR ? 'Запускаем…' : ocrJson ? 'Перезапустить AI' : 'Запустить AI OCR'}
+                </Button>
+              )}
             </div>
-          )}
-          {!isReadOnly && (
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={() => void handleRetryOCR()}
-              disabled={isRetryingOCR}
-              className="touch-manipulation text-xs gap-1.5 min-h-9"
-              title="Запустить AI OCR заново (на случай если AI не распознал бланк)"
-            >
-              <RotateCcw className={cn('h-3.5 w-3.5', isRetryingOCR && 'animate-spin')} aria-hidden="true" />
-              {isRetryingOCR ? 'Запускаем…' : attempt.ai_part1_ocr_json ? 'Перезапустить AI' : 'Запустить AI OCR'}
-            </Button>
-          )}
-        </div>
+          );
+        })()}
 
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2">
           {variantPart1Tasks.map((t) => {
-            const ocrCell = attempt.ai_part1_ocr_json?.[t.kim_number];
+            // TASK-16-R2 fix #4: cells under .cells namespace (was top-level).
+            const ocrCell = attempt.ai_part1_ocr_json?.cells?.[t.kim_number];
             const isLowConf = ocrCell && ocrCell.confidence === 'low';
             const hasRecognition = ocrCell?.value !== undefined && ocrCell.value !== null;
             return (
@@ -512,7 +592,7 @@ function Part1BlankReviewPanel({ attempt, variantPart1Tasks }: {
                   min={0}
                   max={t.max_score}
                   step={1}
-                  disabled={isReadOnly || savingKim === t.kim_number}
+                  disabled={isReadOnly || savingKims.has(t.kim_number)}
                   value={drafts[t.kim_number] ?? ''}
                   onChange={(e) =>
                     setDrafts((d) => ({ ...d, [t.kim_number]: e.target.value }))
@@ -535,14 +615,31 @@ function Part1BlankReviewPanel({ attempt, variantPart1Tasks }: {
                 (сохранено: {attempt.total_part1_score})
               </span>
             )}
+            {/* TASK-16-R2 fix #3: indicator пока saves в полёте. */}
+            {savingKims.size > 0 && (
+              <span className="ml-2 text-xs text-slate-500 dark:text-slate-400 italic">
+                сохраняем {savingKims.size}…
+              </span>
+            )}
           </div>
           <Button
             type="button"
             onClick={() => setConfirmFinalizeOpen(true)}
-            disabled={isReadOnly || isFinalizing}
+            // TASK-16-R2 fix #3: disable пока in-flight saves — иначе confirm
+            // dialog показывает draft preview, finalize читает stale DB.
+            disabled={isReadOnly || isFinalizing || savingKims.size > 0}
+            title={
+              savingKims.size > 0
+                ? 'Дождись окончания сохранения баллов и повтори'
+                : undefined
+            }
             className="bg-amber-600 hover:bg-amber-700 text-white"
           >
-            {isFinalizing ? 'Сохраняем…' : 'Часть 1 проверена'}
+            {isFinalizing
+              ? 'Сохраняем…'
+              : savingKims.size > 0
+                ? 'Сохраняем баллы…'
+                : 'Часть 1 проверена'}
           </Button>
         </div>
       </CardContent>
@@ -615,10 +712,17 @@ function Part1BlankReviewPanel({ attempt, variantPart1Tasks }: {
                 e.preventDefault();
                 void handleFinalize();
               }}
-              disabled={isFinalizing}
+              // TASK-16-R2 fix #3: disable пока onBlur saves в полёте + пока
+              // finalize запущен. handleFinalize сам flush'ит dirty drafts
+              // перед SUM, но защита от двойного click обязательна.
+              disabled={isFinalizing || savingKims.size > 0}
               className="bg-amber-600 hover:bg-amber-700 text-white"
             >
-              {isFinalizing ? 'Сохраняем…' : 'Сохранить и отправить ученику'}
+              {isFinalizing
+                ? 'Сохраняем…'
+                : savingKims.size > 0
+                  ? `Ждём saves (${savingKims.size})…`
+                  : 'Сохранить и отправить ученику'}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

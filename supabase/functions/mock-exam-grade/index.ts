@@ -51,7 +51,8 @@ import {
 import {
   buildPart1BlankOCRPrompt,
   sanitizePart1OCRResult,
-  type Part1OCRResult,
+  type Part1OCRResult, // inner cells map (без __meta); используется в runPart1OCR
+
   type Part1OCRTaskMeta,
 } from "../_shared/mock-exam-part1-ocr.ts";
 import {
@@ -808,14 +809,21 @@ async function runPart1OCR(
         captureRaw: (raw) => { rawResponseSnapshot = raw.slice(0, 4000); },
       });
     } catch (callErr) {
-      // Сохраняем raw_response даже при parse / model error чтобы tutor мог
-      // в Lovable Studio query'нуть `ai_part1_ocr_json -> raw_response` для debug.
+      // TASK-16-R2 fix #4 (ChatGPT-5.5 review): canonical shape
+      // `{ cells, __meta: { status, ... } }` — frontend ветвит на
+      // `__meta.status === 'failed'` → rose warning banner. Раньше top-level
+      // fields + truthy ai_part1_ocr_json → green «AI распознал» на failure.
+      const nowIso = new Date().toISOString();
       const failureSnapshot: Record<string, unknown> = {
         cells: {},
-        raw_response: rawResponseSnapshot,
-        error: callErr instanceof Error ? callErr.message : String(callErr),
-        gemini_model: LOVABLE_MODEL_OCR,
-        failed_at: new Date().toISOString(),
+        __meta: {
+          status: "failed",
+          gemini_model: LOVABLE_MODEL_OCR,
+          error: callErr instanceof Error ? callErr.message : String(callErr),
+          raw_response: rawResponseSnapshot,
+          failed_at: nowIso,
+          generated_at: nowIso,
+        },
       };
       await db
         .from("mock_exam_attempts")
@@ -842,17 +850,24 @@ async function runPart1OCR(
       raw_length: rawResponseSnapshot?.length ?? 0,
     });
 
-    // Load existing per-kim answers — preserve manual tutor scores.
+    // Load existing per-kim answers — preserve ТОЛЬКО ручные tutor edits.
+    // TASK-16-R2 fix #1 (ChatGPT-5.5 review): раньше использовали
+    // `earned_score IS NOT NULL` как signal "tutor preserved row", но первый OCR
+    // run сам пишет earned_score для всех 20 KIM → retry skip'ал всё → scores
+    // оставались stale. Теперь явный enum `score_source` различает источник.
     const { data: existingAnswers } = await db
       .from("mock_exam_attempt_part1_answers")
-      .select("kim_number, earned_score")
+      .select("kim_number, earned_score, score_source")
       .eq("attempt_id", attemptId);
     const tutorScoredKims = new Set<number>();
     for (const row of (existingAnswers ?? []) as Array<{
       kim_number: number;
       earned_score: number | null;
+      score_source: string;
     }>) {
-      if (row.earned_score !== null) tutorScoredKims.add(row.kim_number);
+      // Skip ТОЛЬКО tutor manual edits. OCR / finalize_default / student_form
+      // rows перезаписываются freshly при retry.
+      if (row.score_source === "tutor") tutorScoredKims.add(row.kim_number);
     }
 
     // Run checker + upsert per-kim answers (только для не-tutor-scored).
@@ -883,11 +898,12 @@ async function runPart1OCR(
       student_answer: string | null;
       earned_score: number;
       max_score: number;
+      score_source: "ocr";
       updated_at: string;
     }> = [];
 
     for (let kim = 1; kim <= 20; kim++) {
-      if (tutorScoredKims.has(kim)) continue; // Preserve manual edits
+      if (tutorScoredKims.has(kim)) continue; // Preserve manual tutor edits only.
       const task = tasksByKim.get(kim);
       if (!task) continue;
       const cell = ocrResult[kim] ?? { value: null, confidence: "low" as const };
@@ -905,6 +921,7 @@ async function runPart1OCR(
         student_answer: cell.value,
         earned_score: checkResult.earned,
         max_score: task.max_score,
+        score_source: "ocr", // TASK-16-R2: track provenance for retry-safe distinguishment.
         updated_at: new Date().toISOString(),
       });
     }
@@ -922,15 +939,19 @@ async function runPart1OCR(
     }
 
     // Update attempt with full OCR result для tutor UI pre-fill.
-    // TASK-16: добавляем meta (gemini_model + recognized_count + raw_response
-    // length) для debug. Frontend читает `ai_part1_ocr_json[kim]` как раньше —
-    // мы добавляем мета-поля под namespaced keys чтобы не сломать iteration.
-    const ocrPayload: Record<string, unknown> = { ...ocrResult };
-    ocrPayload["__meta"] = {
-      gemini_model: LOVABLE_MODEL_OCR,
-      recognized_cells: recognizedCount,
-      raw_length: rawResponseSnapshot?.length ?? 0,
-      generated_at: new Date().toISOString(),
+    // TASK-16-R2 fix #4: canonical shape `{ cells, __meta }` — frontend читает
+    // `ai_part1_ocr_json.cells[kim]` (не top-level). `__meta.status` различает
+    // success vs failure (см. failureSnapshot выше). `recognized_cells=0` при
+    // status='success' = soft failure (AI ничего не распознал) → amber banner.
+    const ocrPayload: Record<string, unknown> = {
+      cells: { ...ocrResult },
+      __meta: {
+        status: "success",
+        gemini_model: LOVABLE_MODEL_OCR,
+        recognized_cells: recognizedCount,
+        raw_length: rawResponseSnapshot?.length ?? 0,
+        generated_at: new Date().toISOString(),
+      },
     };
     const { error: updateErr } = await db
       .from("mock_exam_attempts")
@@ -1097,7 +1118,10 @@ interface AttemptRow {
   blank_photo_url?: string | null;
   part1_blank_photo_url?: string | null; // legacy fallback — see note above
   part2_bulk_photo_urls?: string | null; // dual-format (single ref OR JSON array)
-  ai_part1_ocr_json?: Part1OCRResult | null;
+  // TASK-16-R2 fix #4: canonical shape `{ cells, __meta }`. Здесь используется
+  // только для idempotent check `!attemptRow.ai_part1_ocr_json` в `shouldRunPart1OCR`
+  // (truthy guard, без deep access), потому loose `unknown` тип допустим.
+  ai_part1_ocr_json?: unknown | null;
   // Phase 6 review-fix #1: used для stale-lock detection в CAS claim.
   updated_at?: string | null;
 }

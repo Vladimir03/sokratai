@@ -1,9 +1,10 @@
-# Mock Exams v1 — Tutor-side improvements (TASK-16)
+# Mock Exams v1 — Tutor-side improvements (TASK-16 + R2)
 
-**Status:** Final spec
+**Status:** R2 fixes landed
 **Created:** 2026-05-15
+**Updated:** 2026-05-16 (R2 — ChatGPT-5.5 review fixes)
 **Trigger:** Vladimir QA после TASK-15 (ChatGPT-5.5 review fixes). 6 tutor-side improvements:
-AI OCR fix + Part 1 batch finalize + photo multi-select + heatmap data + result page student answer + secondary score conversion.
+AI OCR fix + Part 1 batch finalize + photo multi-select + heatmap data + result page student answer + secondary score conversion. **R2:** все 5 P1 findings из ChatGPT-5.5 code review (post-TASK-16) исправлены.
 
 Связанные документы:
 - `~/.claude/plans/wobbly-crafting-starlight.md` — план реализации
@@ -161,4 +162,77 @@ AI OCR fix + Part 1 batch finalize + photo multi-select + heatmap data + result 
 
 - Frontend: `git revert <hash> && deploy-sokratai` (~3 мин на VPS)
 - Backend edge functions: Lovable Studio → rollback prior deployment
-- Никаких schema migrations в этом TASK-16 — все изменения на frontend / edge function level. Phase 6 миграция `20260515120000_attempt_ai_part1_ocr.sql` + `20260515130000_attempt_updated_at.sql` остаются.
+- TASK-16 itself — никаких schema migrations (только в R2 — см. ниже)
+- **R2 migration** `20260516130000_part1_answers_score_source.sql` (additive `score_source` column) — backward compatible (default DEFAULT 'ocr'); rollback = DROP COLUMN, runPart1OCR fallback на `earned_score IS NOT NULL` heuristic.
+- Phase 6 миграции `20260515120000_attempt_ai_part1_ocr.sql` + `20260515130000_attempt_updated_at.sql` остаются.
+
+---
+
+## Section 7 — R2 fixes (2026-05-16)
+
+ChatGPT-5.5 review TASK-16 нашёл 5 P1 findings. Все исправлены в TASK-16-R2.
+
+### R2-AC-1: OCR retry actually overwrites prior OCR scores
+
+**Problem:** `runPart1OCR` использовал `earned_score IS NOT NULL` как signal "tutor preserved row" — после первого OCR run все 20 rows имели non-null earned_score → второй retry пропускал ВСЕ KIM → новые OCR values попадали только в `ai_part1_ocr_json`, но scores оставались stale.
+
+**Fix:** new migration `20260516130000_part1_answers_score_source.sql` — добавлен `score_source TEXT NOT NULL CHECK IN ('ocr','tutor','finalize_default','student_form')`. 4 write-path обновлены чтобы писать правильный provenance:
+- `runPart1OCR` → `'ocr'`
+- `handlePart1ManualScore` → `'tutor'`
+- `handlePart1Finalize` INSERT-on-missing → `'finalize_default'`
+- Student form auto-check (submit) + autosave → `'student_form'`
+
+Read-path в `runPart1OCR.tutorScoredKims` теперь filter ТОЛЬКО `score_source === 'tutor'`. Backfill: все pre-existing rows → `'tutor'` (safest — preserves any uncertain manual edits).
+
+### R2-AC-2: `/retry-part1-ocr` rejects `ai_checking`
+
+**Problem:** retry endpoint допускал `status='ai_checking'`, clear'ил `ai_part1_ocr_json`, и fire-and-forget'ил grader. Grader CAS guard возвращал 202 ALREADY_GRADING, но retry endpoint всё равно отвечал `"queued"` — tutor видел false success без реального retry.
+
+**Fix:** `/retry-part1-ocr` теперь возвращает 409 `GRADING_IN_PROGRESS` при `status='ai_checking'`. Mirror `/regrade-part2` Round 3 contract.
+
+### R2-AC-3: Part 1 confirm dialog не finalize'ит stale DB
+
+**Problem:** `handleScoreBlur` async save + быстрый click «Часть 1 проверена» → confirm dialog показывал draft sum (local), но `finalizeMockExamPart1` SUM'ил DB rows которые ещё не сохранили last edit → mismatch preview vs finalized result.
+
+**Fix:** в `Part1BlankReviewPanel`:
+- `savingKim: number | null` → `savingKims: Set<number>` (parallel saves возможны)
+- New `dirtyKims` useMemo — derives kims с draft ≠ saved value
+- `handleFinalize`: перед `finalizeMockExamPart1` flush'ит все `dirtyKims` через Promise.all `setMockExamPart1ManualScore`. На flush failure — toast.error и НЕ идём в finalize.
+- Confirm button и AlertDialog action **disabled** пока `savingKims.size > 0` + visual indicator «сохраняем N…»
+
+### R2-AC-4: Canonical `__meta` shape + failure UI
+
+**Problem:** `runPart1OCR` failure писал `{ cells: {}, raw_response, error, gemini_model, failed_at }` top-level. Frontend проверял `attempt.ai_part1_ocr_json &&` (truthy) → показывал emerald «✅ AI распознал бланк» даже на failure.
+
+**Fix:** canonical shape `{ cells: Record<number, Cell>, __meta: { status: 'success' | 'failed', ... } }`:
+- Backend success: `{ cells: ocrResult, __meta: { status: 'success', gemini_model, recognized_cells, raw_length, generated_at } }`
+- Backend failure: `{ cells: {}, __meta: { status: 'failed', gemini_model, error, raw_response, failed_at, generated_at } }`
+- Frontend type `MockExamPart1OCRResult` reflects nested shape. Cell access: `ai_part1_ocr_json.cells[kim]` (was top-level).
+- Frontend UI ветвит на 3 состояния: failed (rose), success+0 recognized (amber soft warning), success+N>0 (emerald success с counter «N/20 клеток»).
+
+### R2-AC-5: KPI mismatch fix
+
+**Problem:** «Средний первичный» KPI смешивал avg part1 (/28) value с secondary footer (/45). UI показывал нонсенс типа «20 / 28 ≈ 80 тестовых».
+
+**Fix:** rename label на «Средняя Часть 1», убран secondary footer. Новый 6-й KPI «Средний общий балл» рендерится ТОЛЬКО при `approvedFinal > 0` (когда secondary действительно meaningful) — value `avgTotal/totalMax`, footer `≈ N тестовых`. Grid: `lg:grid-cols-5` (5 baseline) → `lg:grid-cols-6` (при approved KPI present).
+
+### R2 verification
+
+1. **OCR retry test:** blank-mode attempt → submit → grader OCR scores 15/20 → click «Перезапустить AI» → grader re-runs → new OCR rewrites all 20 OCR-source rows. Tutor manual edits (если были) — preserved.
+2. **Grading-in-progress test:** force attempt в `status='ai_checking'` (можно через manual UPDATE) → click retry → 409 toast «Grader running, wait».
+3. **Race test:** type «5» в KIM 19 → быстро (<300ms) click «Часть 1 проверена» → confirm → result page показывает 5 (не 0). Visual: «Сохраняем баллы…» state в button перед dialog opens.
+4. **OCR failure test:** force LOVABLE_API_KEY error → submit blank attempt → grader fails OCR → tutor видит rose «AI OCR не сработал» banner + Retry button (не зелёный success).
+5. **KPI test:** detail с 2 approved + 1 in_progress → KPI grid показывает 6 cards including «Средний общий балл = X/45 ≈ N тестовых». Detail с 0 approved → 5 cards.
+
+### R2 files
+
+| File | Type | Change |
+|---|---|---|
+| `supabase/migrations/20260516130000_part1_answers_score_source.sql` | NEW | additive `score_source` column + backfill 'tutor' |
+| `supabase/functions/mock-exam-grade/index.ts` | MODIFY | `runPart1OCR` filter on `score_source='tutor'` + write 'ocr'; canonical `{cells, __meta}` shape (success + failed) |
+| `supabase/functions/mock-exam-tutor-api/index.ts` | MODIFY | `/retry-part1-ocr` reject `ai_checking` (409); `handlePart1ManualScore` writes 'tutor'; `handlePart1Finalize` writes 'finalize_default' |
+| `supabase/functions/mock-exam-student-api/index.ts` | MODIFY | autosave + submit auto-check write `'student_form'` |
+| `src/types/mockExam.ts` | MODIFY | `MockExamPart1OCRResult` → nested `{cells, __meta}` interface |
+| `src/pages/tutor/mock-exams/TutorMockExamReview.tsx` | MODIFY | 3-state OCR banner (failed/empty/success); `savingKims: Set<number>` + dirty flush before finalize |
+| `src/pages/tutor/mock-exams/TutorMockExamDetail.tsx` | MODIFY | rename label «Средняя Часть 1»; new 6th KPI «Средний общий балл» (conditional) |
+

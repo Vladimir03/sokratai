@@ -1549,6 +1549,9 @@ async function handlePart1ManualScore(
         kim_number: b.kim_number,
         student_answer: null, // student didn't enter digital answer (blank mode)
         earned_score: b.earned_score,
+        // TASK-16-R2 fix #1: explicit provenance — runPart1OCR retry preserves
+        // только rows со score_source='tutor' (см. CLAUDE.md §22 R2 invariants).
+        score_source: "tutor",
         updated_at: new Date().toISOString(),
       },
       { onConflict: "attempt_id,kim_number" },
@@ -1617,6 +1620,7 @@ async function handlePart1Finalize(
       kim_number: number;
       student_answer: null;
       earned_score: number;
+      score_source: "finalize_default";
     }> = [];
     for (const t of (variantPart1Tasks ?? []) as Array<{
       kim_number: number;
@@ -1628,6 +1632,10 @@ async function handlePart1Finalize(
           kim_number: t.kim_number,
           student_answer: null,
           earned_score: 0,
+          // TASK-16-R2 fix #1: provenance — finalize_default = "tutor не ввёл,
+          // ставим 0 чтобы result page показал '0/max', не '—'". runPart1OCR
+          // retry будет перезаписывать эти rows (только score_source='tutor' preserved).
+          score_source: "finalize_default",
         });
       }
     }
@@ -1707,6 +1715,15 @@ async function handleRetryPart1OCR(
     return jsonError(cors, 409, "NOT_SUBMITTED",
       "Cannot retry OCR before student submitted the attempt");
   }
+  // TASK-16-R2 fix #2 (ChatGPT-5.5 review Finding 2): mirror `/regrade-part2`
+  // contract — reject `ai_checking` because another grader run is in flight.
+  // Без этого guard'а race: retry → clear ocr → fire-and-forget → grader CAS
+  // returns 202 ALREADY_GRADING → retry endpoint вернул "queued" (false success),
+  // но OCR не enqueue'нулся. Tutor видит spinner forever.
+  if (attempt.status === "ai_checking") {
+    return jsonError(cors, 409, "GRADING_IN_PROGRESS",
+      "Grader is already running for this attempt. Wait until it transitions to awaiting_review, then retry.");
+  }
   if (attempt.answer_method !== "blank") {
     return jsonError(cors, 400, "WRONG_METHOD",
       "OCR retry available only for blank-mode attempts");
@@ -1716,9 +1733,9 @@ async function handleRetryPart1OCR(
       "Attempt has no blank photo to OCR");
   }
 
-  // Clear previous OCR result (idempotent reset). Не перезаписываем
-  // mock_exam_attempt_part1_answers — там могут быть tutor manual scores,
-  // runPart1OCR сам respect'ит их через tutorScoredKims guard.
+  // Clear previous OCR result (idempotent reset). НЕ перезаписываем
+  // mock_exam_attempt_part1_answers — там могут быть tutor manual scores;
+  // TASK-16-R2 fix #1 даёт runPart1OCR явный signal через score_source='tutor'.
   const { error: clearErr } = await db
     .from("mock_exam_attempts")
     .update({ ai_part1_ocr_json: null })

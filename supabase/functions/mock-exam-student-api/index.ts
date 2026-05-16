@@ -799,6 +799,9 @@ async function handleAutosaveAnswer(
 
   // Upsert — debounced auto-save semantics. earned_score deliberately NULL
   // here; calculated only on submit (single source of truth = checker).
+  // TASK-16-R2 fix #1: score_source='student_form' помечает provenance row'ов
+  // form-mode autosave (даже когда earned_score=null до submit). На submit
+  // checker upsert'ит то же row с earned_score=N, score_source остаётся.
   const { error } = await db
     .from("mock_exam_attempt_part1_answers")
     .upsert(
@@ -807,6 +810,7 @@ async function handleAutosaveAnswer(
         kim_number: b.kim_number,
         student_answer: typeof b.answer === "string" ? b.answer : null,
         earned_score: null,
+        score_source: "student_form",
         updated_at: new Date().toISOString(),
       },
       { onConflict: "attempt_id,kim_number" },
@@ -1126,6 +1130,7 @@ async function handleSubmitAttempt(
     kim_number: number;
     student_answer: string | null;
     earned_score: number;
+    score_source: "student_form";
     updated_at: string;
   }> = [];
   const now = new Date().toISOString();
@@ -1149,6 +1154,8 @@ async function handleSubmitAttempt(
         kim_number: task.kim_number as number,
         student_answer: studentAns,
         earned_score: result.earned,
+        // TASK-16-R2 fix #1: provenance — student form-mode auto-check.
+        score_source: "student_form",
         updated_at: now,
       });
     }

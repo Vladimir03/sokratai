@@ -430,67 +430,73 @@ function TutorMockExamDetailContent() {
         onRetry={refetch}
       />
 
-      {/* KPI cards: 5 metrics. Mobile: 2 cols, sm: 3, md+: 5. */}
-      {kpi ? (
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-3">
-          <KpiCard
-            label="Сдали"
-            value={String(kpi.completedTotal)}
-            hint={`/ ${kpi.total}`}
-            tone={kpi.completedTotal > 0 ? 'accent' : 'default'}
-          />
-          <KpiCard
-            label="В процессе"
-            value={String(kpi.inProgress)}
-            tone={kpi.inProgress > 0 ? 'amber' : 'default'}
-          />
-          <KpiCard
-            label="Не приступали"
-            value={String(kpi.notStarted)}
-          />
-          <KpiCard
-            label="Средний первичный"
-            value={
-              kpi.averagePart1 !== null
-                ? Math.round(kpi.averagePart1).toString()
-                : '—'
-            }
-            hint={kpi.averagePart1 !== null ? `/ ${part1Max}` : null}
-            tone={kpi.averagePart1 !== null ? 'accent' : 'default'}
-            footer={
-              kpi.averagePart1 !== null
-                ? (() => {
-                    // ФИПИ 2025 шкала: average первичных Часть 1 — это
-                    // приблизительная оценка, шкала применима к итоговому
-                    // первичному (Часть 1 + Часть 2). Здесь показываем
-                    // ориентировочный secondary по первичному averagePart1
-                    // только если есть полные attempts (approvedFinal > 0).
-                    if (kpi.approvedFinal === 0) return null;
-                    // Суммируем full-score average через approved attempts.
-                    const approvedAttempts = detail.attempts.filter(
-                      (a) => a.status === 'approved' || a.status === 'manually_entered',
-                    );
-                    if (approvedAttempts.length === 0) return null;
-                    const totalSum = approvedAttempts.reduce(
-                      (acc, a) => acc + (a.total_score ?? 0),
-                      0,
-                    );
-                    const avgFullPrimary = totalSum / approvedAttempts.length;
-                    const secondary = primaryToSecondary(avgFullPrimary);
-                    if (secondary === null) return null;
-                    return `≈ ${secondary} тестовых`;
-                  })()
-                : null
-            }
-          />
-          <KpiCard
-            label="Требует проверки"
-            value={String(kpi.awaitingReview)}
-            hint={kpi.awaitingReview > 0 ? 'учеников' : null}
-            tone={kpi.awaitingReview > 0 ? 'amber-warn' : 'default'}
-          />
-        </div>
-      ) : null}
+      {/* KPI cards: 5 baseline metrics + 6th conditional «Средний общий балл»
+          (только при approved attempts — где secondary score has meaning).
+          TASK-16-R2 fix #5 (ChatGPT-5.5 review). */}
+      {kpi ? (() => {
+        // Avg total primary через approved attempts только.
+        const approvedAttempts = detail.attempts.filter(
+          (a) => a.status === 'approved' || a.status === 'manually_entered',
+        );
+        const avgTotalApproved = approvedAttempts.length > 0
+          ? approvedAttempts.reduce((acc, a) => acc + (a.total_score ?? 0), 0) / approvedAttempts.length
+          : null;
+        const secondaryApproved = avgTotalApproved !== null && totalMax === 45
+          ? primaryToSecondary(avgTotalApproved)
+          : null;
+        const showApprovedKpi = approvedAttempts.length > 0 && avgTotalApproved !== null;
+        return (
+          <div className={cn(
+            'grid grid-cols-2 sm:grid-cols-3 gap-3',
+            showApprovedKpi ? 'lg:grid-cols-6' : 'lg:grid-cols-5',
+          )}>
+            <KpiCard
+              label="Сдали"
+              value={String(kpi.completedTotal)}
+              hint={`/ ${kpi.total}`}
+              tone={kpi.completedTotal > 0 ? 'accent' : 'default'}
+            />
+            <KpiCard
+              label="В процессе"
+              value={String(kpi.inProgress)}
+              tone={kpi.inProgress > 0 ? 'amber' : 'default'}
+            />
+            <KpiCard
+              label="Не приступали"
+              value={String(kpi.notStarted)}
+            />
+            <KpiCard
+              label="Средняя Часть 1"
+              value={
+                kpi.averagePart1 !== null
+                  ? Math.round(kpi.averagePart1).toString()
+                  : '—'
+              }
+              hint={kpi.averagePart1 !== null ? `/ ${part1Max}` : null}
+              tone={kpi.averagePart1 !== null ? 'accent' : 'default'}
+            />
+            <KpiCard
+              label="Требует проверки"
+              value={String(kpi.awaitingReview)}
+              hint={kpi.awaitingReview > 0 ? 'учеников' : null}
+              tone={kpi.awaitingReview > 0 ? 'amber-warn' : 'default'}
+            />
+            {showApprovedKpi && (
+              <KpiCard
+                label="Средний общий балл"
+                value={Math.round(avgTotalApproved).toString()}
+                hint={`/ ${totalMax}`}
+                tone="accent"
+                footer={
+                  secondaryApproved !== null
+                    ? `≈ ${secondaryApproved} тестовых`
+                    : null
+                }
+              />
+            )}
+          </div>
+        );
+      })() : null}
 
       {/* Heatmap section */}
       <MockExamHeatmap

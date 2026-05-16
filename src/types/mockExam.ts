@@ -124,8 +124,44 @@ export interface MockExamPart1OCRCell {
   confidence: MockExamPart1OCRConfidence;
 }
 
-/** kim 1-20 → распознанная клетка бланка. */
-export type MockExamPart1OCRResult = Record<number, MockExamPart1OCRCell>;
+/**
+ * TASK-16-R2 fix #4 (2026-05-16): canonical shape `{ cells, __meta }`.
+ * Раньше был flat `Record<number, MockExamPart1OCRCell>` с __meta как
+ * особый ключ на верхнем уровне — ChatGPT-5.5 review нашёл что failure
+ * snapshot писал {cells:{}, raw_response, error, ...} top-level, и frontend
+ * показывал green "AI распознал" банер при ошибке.
+ *
+ * `__meta.status === 'failed'` → frontend рендерит rose warning + retry CTA.
+ * `__meta.status === 'success' && recognized_cells === 0` → amber soft warning.
+ * `__meta.status === 'success' && recognized_cells > 0` → emerald success.
+ */
+export interface MockExamPart1OCRMetaSuccess {
+  status: "success";
+  gemini_model: string;
+  recognized_cells: number;
+  raw_length: number;
+  generated_at: string;
+}
+
+export interface MockExamPart1OCRMetaFailed {
+  status: "failed";
+  gemini_model: string;
+  error: string;
+  raw_response: string | null;
+  failed_at: string;
+  generated_at: string;
+}
+
+export type MockExamPart1OCRMeta =
+  | MockExamPart1OCRMetaSuccess
+  | MockExamPart1OCRMetaFailed;
+
+export interface MockExamPart1OCRResult {
+  /** kim 1-20 → распознанная клетка бланка. Empty `{}` при failure. */
+  cells: Record<number, MockExamPart1OCRCell>;
+  /** Status + provenance + debug fields. */
+  __meta: MockExamPart1OCRMeta;
+}
 
 // ─── Assignments ─────────────────────────────────────────────────────────────
 
