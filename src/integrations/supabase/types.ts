@@ -999,6 +999,8 @@ export type Database = {
           status: string
           task_id: string
           thread_id: string
+          tutor_force_completed_at: string | null
+          tutor_force_completed_by: string | null
           tutor_score_override: number | null
           tutor_score_override_at: string | null
           tutor_score_override_by: string | null
@@ -1022,6 +1024,8 @@ export type Database = {
           status?: string
           task_id: string
           thread_id: string
+          tutor_force_completed_at?: string | null
+          tutor_force_completed_by?: string | null
           tutor_score_override?: number | null
           tutor_score_override_at?: string | null
           tutor_score_override_by?: string | null
@@ -1045,6 +1049,8 @@ export type Database = {
           status?: string
           task_id?: string
           thread_id?: string
+          tutor_force_completed_at?: string | null
+          tutor_force_completed_by?: string | null
           tutor_score_override?: number | null
           tutor_score_override_at?: string | null
           tutor_score_override_by?: string | null
@@ -3664,6 +3670,25 @@ export type Database = {
       hw_reorder_tasks: {
         Args: { p_assignment_id: string; p_task_order: Json }
         Returns: undefined
+      }
+      hw_tutor_force_complete_all_tasks: {
+        Args: {
+          p_assignment_id: string
+          p_student_id: string
+          p_tutor_id: string
+        }
+        Returns: Json
+      }
+      hw_tutor_force_complete_task: {
+        Args: {
+          p_assignment_id: string
+          p_comment: string
+          p_score: number
+          p_student_id: string
+          p_task_id: string
+          p_tutor_id: string
+        }
+        Returns: Json
       }
       increment_demo_hints: {
         Args: { analytics_id: string }
