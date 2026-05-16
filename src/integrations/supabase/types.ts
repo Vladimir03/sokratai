@@ -999,6 +999,8 @@ export type Database = {
           status: string
           task_id: string
           thread_id: string
+          tutor_force_completed_at: string | null
+          tutor_force_completed_by: string | null
           tutor_score_override: number | null
           tutor_score_override_at: string | null
           tutor_score_override_by: string | null
@@ -1022,6 +1024,8 @@ export type Database = {
           status?: string
           task_id: string
           thread_id: string
+          tutor_force_completed_at?: string | null
+          tutor_force_completed_by?: string | null
           tutor_score_override?: number | null
           tutor_score_override_at?: string | null
           tutor_score_override_by?: string | null
@@ -1045,6 +1049,8 @@ export type Database = {
           status?: string
           task_id?: string
           thread_id?: string
+          tutor_force_completed_at?: string | null
+          tutor_force_completed_by?: string | null
           tutor_score_override?: number | null
           tutor_score_override_at?: string | null
           tutor_score_override_by?: string | null
