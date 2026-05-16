@@ -1075,6 +1075,7 @@ export type Database = {
           check_format: string
           correct_answer: string | null
           id: string
+          kim_number: number | null
           max_score: number
           ocr_text: string | null
           order_num: number
@@ -1092,6 +1093,7 @@ export type Database = {
           check_format?: string
           correct_answer?: string | null
           id?: string
+          kim_number?: number | null
           max_score?: number
           ocr_text?: string | null
           order_num: number
@@ -1109,6 +1111,7 @@ export type Database = {
           check_format?: string
           correct_answer?: string | null
           id?: string
+          kim_number?: number | null
           max_score?: number
           ocr_text?: string | null
           order_num?: number
