@@ -84,6 +84,7 @@ const CatalogTopicPage = lazy(() => import("./pages/tutor/knowledge/CatalogTopic
 const FolderPage = lazy(() => import("./pages/tutor/knowledge/FolderPage"));
 const InvitePage = lazy(() => import("./pages/InvitePage"));
 const BookLesson = lazy(() => import("./pages/BookLesson"));
+const InstallApp = lazy(() => import("./pages/InstallApp"));
 
 // Simple loading fallback
 const PageLoader = () => (
@@ -408,6 +409,14 @@ const App = () => (
               element={
                 <Suspense fallback={<PageLoader />}>
                   <InvitePage />
+                </Suspense>
+              }
+            />
+            <Route
+              path="/install"
+              element={
+                <Suspense fallback={<PageLoader />}>
+                  <InstallApp />
                 </Suspense>
               }
             />
