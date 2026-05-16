@@ -533,53 +533,35 @@ const ReferencesPanel = memo(function ReferencesPanel() {
   );
 });
 
-function BlankModeBanner({
-  mode,
-  blankPhoto,
-  onFileSelected,
-  onRetry,
-  disabled,
-}: {
-  mode: MockExamMode;
-  blankPhoto: PhotoState;
-  onFileSelected: (file: File) => void;
-  onRetry: () => void;
-  disabled: boolean;
-}) {
+/**
+ * Info-only banner для blank-режима (TASK-13, 2026-05-14): инструкция +
+ * ссылка на PDF бланка. PhotoUploadBox для фото бланка перенесён в секцию
+ * «Часть 1» (рядом с инструкцией к Часть 1) — там он семантически логичнее.
+ */
+function BlankModeBanner({ mode }: { mode: MockExamMode }) {
   if (mode !== 'blank') return null;
 
   return (
     <Card className="border-amber-200 bg-amber-50 shadow-none hover:shadow-sm">
       <CardContent className="p-4">
-        <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
-          <div className="space-y-2 text-sm text-amber-950">
-            <div className="flex items-center gap-2 font-semibold">
-              <FileText className="h-4 w-4" />
-              Режим: С бланком
-            </div>
-            <p>
-              Распечатай PDF официального бланка, заполни ручкой, потом сфотографируй бланк и загрузи фото.
-            </p>
-            <a
-              href={BLANK_PDF_URL}
-              target="_blank"
-              rel="noreferrer"
-              className="inline-flex min-h-11 touch-manipulation items-center gap-2 rounded-md border border-amber-300 bg-white px-3 py-2 font-medium text-amber-900 underline-offset-4 hover:underline"
-            >
-              <FileText className="h-4 w-4" />
-              Открыть PDF бланка
-            </a>
+        <div className="space-y-2 text-sm text-amber-950">
+          <div className="flex items-center gap-2 font-semibold">
+            <FileText className="h-4 w-4" />
+            Режим: С бланком
           </div>
-          <PhotoUploadBox
-            kind="blank"
-            kimNumber={null}
-            title="Фото заполненного бланка"
-            state={blankPhoto}
-            onFileSelected={onFileSelected}
-            onRetry={onRetry}
-            disabled={disabled}
-            compact
-          />
+          <p>
+            Распечатай PDF официального бланка, заполни ручкой, потом сфотографируй бланк.
+            Фото бланка загрузишь ниже в секции «Часть 1».
+          </p>
+          <a
+            href={BLANK_PDF_URL}
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex min-h-11 touch-manipulation items-center gap-2 rounded-md border border-amber-300 bg-white px-3 py-2 font-medium text-amber-900 underline-offset-4 hover:underline"
+          >
+            <FileText className="h-4 w-4" />
+            Открыть PDF бланка
+          </a>
         </div>
       </CardContent>
     </Card>
@@ -1176,15 +1158,7 @@ function StudentMockExamWorkspace({ data }: { data: StudentMockExamAssignmentVie
           </section>
 
           <div className="space-y-4">
-            {answerMethod === 'blank' && (
-              <BlankModeBanner
-                mode="blank"
-                blankPhoto={blankPhoto}
-                onFileSelected={(file) => void uploadBlank(file)}
-                onRetry={retryBlank}
-                disabled={isFinal}
-              />
-            )}
+            {answerMethod === 'blank' && <BlankModeBanner mode="blank" />}
             <ReferencesPanel />
           </div>
 
@@ -1194,16 +1168,36 @@ function StudentMockExamWorkspace({ data }: { data: StudentMockExamAssignmentVie
                 <h2 className="text-lg font-semibold text-slate-900">Часть 1</h2>
                 <p className="text-sm text-slate-500">
                   {answerMethod === 'blank'
-                    ? 'Заполняй на ФИПИ-бланке от руки. Фото бланка загружено в верхнем блоке. Цифровые поля скрыты — репетитор проверит ответы Часть 1 по фото.'
+                    ? 'Заполняй на ФИПИ-бланке от руки и загрузи фото бланка ниже. Цифровые поля скрыты — репетитор проверит ответы Часть 1 по фото.'
                     : 'Вводи ответы сразу. Каждое изменение сохраняется автоматически.'}
                 </p>
               </div>
               <span className="rounded-md bg-slate-100 px-3 py-1 text-sm font-medium text-slate-700">
                 {answerMethod === 'form'
                   ? `${answeredPart1Count}/${part1Tasks.length}`
-                  : (blankPhoto.url ? 'фото загружено' : 'нет фото')}
+                  : (blankPhoto.url ? 'фото загружено' : 'фото не загружено')}
               </span>
             </div>
+
+            {/* Blank-режим: PhotoUploadBox перенесён сюда из BlankModeBanner
+                (TASK-13, 2026-05-14, Vladimir UX feedback). Семантически фото
+                бланка относится к Часть 1, а не к header'у пробника. */}
+            {answerMethod === 'blank' && (
+              <Card className="border-amber-200 bg-white shadow-none">
+                <CardContent className="p-4 sm:p-5">
+                  <PhotoUploadBox
+                    kind="blank"
+                    kimNumber={null}
+                    title="Фото заполненного бланка"
+                    state={blankPhoto}
+                    onFileSelected={(file) => void uploadBlank(file)}
+                    onRetry={retryBlank}
+                    disabled={isFinal}
+                  />
+                </CardContent>
+              </Card>
+            )}
+
             {answerMethod === 'form' && part1Tasks.map((task) => (
               <Part1TaskCard
                 key={task.id}
@@ -1216,9 +1210,9 @@ function StudentMockExamWorkspace({ data }: { data: StudentMockExamAssignmentVie
               />
             ))}
             {/* В режиме «Бланк ФИПИ» (answerMethod==='blank') цифровые поля СКРЫТЫ —
-                ученик пишет ответы на распечатанном бланке (фото сверху через
-                BlankModeBanner). После Phase 6 (2026-05-15) AI auto-OCR Часть 1
-                запускается в `mock-exam-grade::runPart1OCR` на canonical
+                ученик пишет ответы на распечатанном бланке и загружает фото в
+                PhotoUploadBox выше. После Phase 6 (2026-05-15) AI auto-OCR
+                Часть 1 запускается в `mock-exam-grade::runPart1OCR` на canonical
                 `attempts.blank_photo_url` и pre-fills `mock_exam_attempt_part1_answers`.
                 Tutor видит OCR результаты в `Part1BlankReviewPanel` с amber border
                 для low-confidence cells и при необходимости корректирует через
