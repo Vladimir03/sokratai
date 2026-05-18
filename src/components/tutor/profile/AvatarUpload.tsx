@@ -1,9 +1,10 @@
-import { useEffect, useRef, useState, type ChangeEvent } from 'react';
+import { useEffect, useRef, useState, useCallback, type ChangeEvent } from 'react';
 import { Camera, Loader2, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 
 import { Button } from '@/components/ui/button';
 import { UserAvatar } from '@/components/common/UserAvatar';
+import { usePasteImages } from '@/hooks/usePasteImages';
 
 /**
  * AvatarUpload — file picker + canvas compression + preview for the tutor
@@ -87,48 +88,69 @@ export function AvatarUpload({
     inputRef.current?.click();
   };
 
+  // Core upload pipeline — shared between file picker and Ctrl+V paste.
+  const processFile = useCallback(
+    async (file: File) => {
+      if (file.size > MAX_INPUT_BYTES) {
+        toast.error('Файл слишком большой (до 10 МБ)');
+        return;
+      }
+
+      setInternalBusy(true);
+
+      let blob: Blob;
+      try {
+        blob = await compressToAvatar(file);
+      } catch (err) {
+        const message =
+          err instanceof Error
+            ? err.message
+            : 'Не удалось обработать изображение. Попробуй другое.';
+        toast.error(message);
+        setInternalBusy(false);
+        return;
+      }
+
+      const localPreview = URL.createObjectURL(blob);
+      setPreviewUrl(localPreview);
+
+      try {
+        await onUpload(blob);
+      } catch (err) {
+        // Roll back optimistic preview on upload failure.
+        URL.revokeObjectURL(localPreview);
+        setPreviewUrl(null);
+        const message =
+          err instanceof Error ? err.message : 'Не удалось загрузить фото';
+        toast.error(message);
+      } finally {
+        setInternalBusy(false);
+      }
+    },
+    [onUpload],
+  );
+
   const handleFileSelected = async (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     // Always reset input.value so picking the same file twice in a row works.
     if (event.target) event.target.value = '';
     if (!file) return;
-
-    if (file.size > MAX_INPUT_BYTES) {
-      toast.error('Файл слишком большой (до 10 МБ)');
-      return;
-    }
-
-    setInternalBusy(true);
-
-    let blob: Blob;
-    try {
-      blob = await compressToAvatar(file);
-    } catch (err) {
-      const message =
-        err instanceof Error
-          ? err.message
-          : 'Не удалось обработать изображение. Попробуй другое.';
-      toast.error(message);
-      setInternalBusy(false);
-      return;
-    }
-
-    const localPreview = URL.createObjectURL(blob);
-    setPreviewUrl(localPreview);
-
-    try {
-      await onUpload(blob);
-    } catch (err) {
-      // Roll back optimistic preview on upload failure.
-      URL.revokeObjectURL(localPreview);
-      setPreviewUrl(null);
-      const message =
-        err instanceof Error ? err.message : 'Не удалось загрузить фото';
-      toast.error(message);
-    } finally {
-      setInternalBusy(false);
-    }
+    await processFile(file);
   };
+
+  // Ctrl+V paste — uses avatar-specific compressToAvatar (512×512 / 2 MB),
+  // not generic compressForUpload. compress:false skips the generic pass and
+  // lets processFile own the pipeline.
+  const handlePaste = usePasteImages({
+    enabled: !busy,
+    maxFiles: 1,
+    compress: false,
+    successToast: null, // processFile owns success/error UX
+    onImagePasted: async (file: File) => {
+      await processFile(file);
+    },
+    telemetryTag: 'tutor_avatar_paste',
+  });
 
   const handleRemove = async () => {
     if (busy) return;
@@ -149,7 +171,7 @@ export function AvatarUpload({
   };
 
   return (
-    <div className="flex flex-col items-center gap-3">
+    <div className="flex flex-col items-center gap-3" onPaste={handlePaste}>
       <div className="relative">
         <UserAvatar
           size="lg"
@@ -193,6 +215,17 @@ export function AvatarUpload({
           </Button>
         )}
       </div>
+
+      <p className="text-xs text-muted-foreground">
+        Или вставь скриншот:{' '}
+        <kbd className="rounded border border-slate-200 bg-slate-50 px-1.5 py-0.5 font-mono text-[10px]">
+          Ctrl
+        </kbd>
+        +
+        <kbd className="rounded border border-slate-200 bg-slate-50 px-1.5 py-0.5 font-mono text-[10px]">
+          V
+        </kbd>
+      </p>
 
       <input
         ref={inputRef}

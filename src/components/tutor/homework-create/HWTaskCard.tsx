@@ -28,9 +28,28 @@ import {
   MAX_RUBRIC_IMAGES,
   MAX_SOLUTION_IMAGES,
 } from '@/lib/attachmentRefs';
+import { compressForUpload } from '@/lib/imageCompression';
+import { usePasteImages } from '@/hooks/usePasteImages';
 
 import { SourceBadge } from '@/components/kb/ui/SourceBadge';
 import { type DraftTask, MAX_IMAGE_SIZE_BYTES, IMAGE_REQUIREMENTS_HINT, revokeObjectUrl } from './types';
+
+// ─── Shared kbd hint for empty galleries ─────────────────────────────────────
+
+const PasteHint = memo(function PasteHint() {
+  return (
+    <p className="text-xs text-muted-foreground">
+      Или вставь скриншот:{' '}
+      <kbd className="rounded border border-slate-200 bg-slate-50 px-1.5 py-0.5 font-mono text-[10px]">
+        Ctrl
+      </kbd>
+      +
+      <kbd className="rounded border border-slate-200 bg-slate-50 px-1.5 py-0.5 font-mono text-[10px]">
+        V
+      </kbd>
+    </p>
+  );
+});
 
 // ─── Photo thumbnail (memoized) ──────────────────────────────────────────────
 
@@ -152,6 +171,8 @@ interface PhotoGalleryProps {
   onAddFiles: (files: File[]) => void;
   onRemove: (index: number) => void;
   onOpenZoom: (index: number) => void;
+  /** Show "Or paste Ctrl+V" kbd hint under gallery when empty. Default true. */
+  showPasteHint?: boolean;
 }
 
 function PhotoGallery({
@@ -164,6 +185,7 @@ function PhotoGallery({
   onAddFiles,
   onRemove,
   onOpenZoom,
+  showPasteHint = true,
 }: PhotoGalleryProps) {
   const inputRef = useRef<HTMLInputElement>(null);
   const atLimit = refs.length >= max;
@@ -202,6 +224,7 @@ function PhotoGallery({
           onClick={() => inputRef.current?.click()}
         />
       </div>
+      {showPasteHint && refs.length === 0 && <PasteHint />}
       <input
         ref={inputRef}
         type="file"
@@ -267,7 +290,7 @@ function SolutionField({
           </p>
           <textarea
             className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-base ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 min-h-[80px] resize-y"
-            placeholder="Пошаговое решение, ключевые формулы, ответ с размерностями..."
+            placeholder="Пошаговое решение, ключевые формулы, ответ с размерностями (можно вставить скриншот Ctrl+V)..."
             value={value}
             onChange={(e) => onChange(e.target.value)}
           />
@@ -332,7 +355,7 @@ function RubricField({
           </p>
           <textarea
             className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-base ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 min-h-[60px] resize-y"
-            placeholder="Полное решение: 2 балла, только ответ: 1 балл, ошибка в знаке: минус 1 балл..."
+            placeholder="Полное решение: 2 балла, только ответ: 1 балл, ошибка в знаке: минус 1 балл (можно вставить скриншот Ctrl+V)..."
             value={value}
             onChange={(e) => onChange(e.target.value)}
           />
@@ -516,13 +539,25 @@ export function HWTaskCard({
         toast.warning(`Можно прикрепить максимум ${max} фото — добавлено ${remaining}`);
       }
 
+      // Compress images before upload (≤ 2048px long side, ≤ 4 MB JPEG).
+      // PDF / non-image / HEIC-on-desktop pass through unchanged. Screenshots
+      // from clipboard are typically 5-15 MB PNG → 1-3 MB JPEG after compress.
       const validFiles: File[] = [];
       for (const f of truncated) {
-        if (f.size > MAX_IMAGE_SIZE_BYTES) {
-          toast.error(`Файл «${f.name || 'без имени'}» больше 10 МБ`);
+        let processed: File;
+        try {
+          processed = await compressForUpload(f);
+        } catch (err) {
+          toast.error(
+            err instanceof Error ? err.message : `Не удалось обработать «${f.name || 'без имени'}»`,
+          );
           continue;
         }
-        validFiles.push(f);
+        if (processed.size > MAX_IMAGE_SIZE_BYTES) {
+          toast.error(`Файл «${processed.name || 'без имени'}» больше 10 МБ`);
+          continue;
+        }
+        validFiles.push(processed);
       }
       if (!validFiles.length) return null;
 
@@ -786,41 +821,35 @@ export function HWTaskCard({
     [removePhoto],
   );
 
-  const handleTaskTextPaste = useCallback(
-    (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
-      const items = e.clipboardData?.items;
-      if (!items?.length) return;
+  // Last-focused section determines where pasted screenshots land. Default
+  // 'task' — pasting from the title input or before opening solution/rubric
+  // accordion still works intuitively. Updated via onFocus on section wrappers.
+  const lastFocusedSection = useRef<'task' | 'solution' | 'rubric'>('task');
 
-      const pastedImages: File[] = [];
-      for (const item of items) {
-        if (item.type.startsWith('image/')) {
-          const f = item.getAsFile();
-          if (f) pastedImages.push(f);
-        }
+  // Card-level paste handler: routes to the active section. Single source of
+  // truth for Ctrl+V on this card — no per-textarea onPaste handlers.
+  const handleCardPaste = usePasteImages({
+    enabled: !task.uploading,
+    onImagePasted: async (file: File) => {
+      const section = lastFocusedSection.current;
+      if (section === 'solution') {
+        await addSolutionPhotos([file]);
+      } else if (section === 'rubric') {
+        await addRubricPhotos([file]);
+      } else {
+        await addTaskPhotos([file]);
       }
-      if (!pastedImages.length) return;
-
-      e.preventDefault();
-
-      if (task.uploading) {
-        toast.warning('Дождись завершения текущей загрузки.');
-        return;
-      }
-
-      const currentRefs = parseAttachmentUrls(task.task_image_path);
-      if (currentRefs.length >= MAX_TASK_IMAGES) {
-        toast.warning(`Можно прикрепить максимум ${MAX_TASK_IMAGES} фото`);
-        return;
-      }
-
-      void addTaskPhotos(pastedImages);
     },
-    [task.uploading, task.task_image_path, addTaskPhotos],
-  );
+    // compressForUpload is already applied inside addTaskPhotos/addSolutionPhotos/
+    // addRubricPhotos (via uploadFiles). Skip here to avoid double-compress.
+    compress: false,
+    successToast: null, // addTaskPhotos shows its own success toast
+    telemetryTag: 'hw_task_paste',
+  });
 
   return (
     <Card animate={false}>
-      <CardContent className="p-4 space-y-4">
+      <CardContent className="p-4 space-y-4" onPaste={handleCardPaste}>
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             <div className="flex items-center gap-0.5">
@@ -877,108 +906,129 @@ export function HWTaskCard({
           </div>
         </div>
 
-        <div className="space-y-2">
-          <Label>Текст задачи {taskRefs.length === 0 && <span className="text-red-500">*</span>}</Label>
-          <textarea
-            className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-base ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 min-h-[80px] resize-y"
-            placeholder={taskRefs.length > 0 ? 'Описание (опционально — фото прикреплено)' : 'Условие задачи (можно вставить скриншот Ctrl+V)...'}
-            value={task.task_text}
-            onChange={(e) => onUpdate({ ...task, task_text: e.target.value })}
-            onPaste={handleTaskTextPaste}
+        {/* TASK SECTION — focus inside routes paste to addTaskPhotos */}
+        <div
+          className="space-y-4"
+          onFocus={() => {
+            lastFocusedSection.current = 'task';
+          }}
+        >
+          <div className="space-y-2">
+            <Label>Текст задачи {taskRefs.length === 0 && <span className="text-red-500">*</span>}</Label>
+            <textarea
+              className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-base ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 min-h-[80px] resize-y"
+              placeholder={taskRefs.length > 0 ? 'Описание (опционально — фото прикреплено)' : 'Условие задачи (можно вставить скриншот Ctrl+V)...'}
+              value={task.task_text}
+              onChange={(e) => onUpdate({ ...task, task_text: e.target.value })}
+            />
+          </div>
+
+          {/* Task condition photos */}
+          <PhotoGallery
+            label={`Фото условия (до ${MAX_TASK_IMAGES})`}
+            max={MAX_TASK_IMAGES}
+            refs={taskRefs}
+            isUploading={task.uploading}
+            previewUrls={previewUrls}
+            resolvedUrls={resolvedTaskUrls}
+            onAddFiles={addTaskPhotos}
+            onRemove={removeTaskPhoto}
+            onOpenZoom={openTaskZoom}
+          />
+          <p className="text-xs text-muted-foreground">{IMAGE_REQUIREMENTS_HINT}</p>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <Label>Правильный ответ</Label>
+              <Input
+                placeholder="x=2, x=3"
+                value={task.correct_answer}
+                onChange={(e) =>
+                  onUpdate({ ...task, correct_answer: e.target.value })
+                }
+                className="text-base"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>
+                Макс. баллов
+                {task.kb_task_id && task.max_score > 1 && (
+                  <span className="ml-2 text-xs text-muted-foreground font-normal">из БЗ</span>
+                )}
+              </Label>
+              <Input
+                type="number"
+                min={1}
+                value={task.max_score}
+                onChange={(e) => {
+                  const v = parseInt(e.target.value, 10);
+                  onUpdate({ ...task, max_score: isNaN(v) || v < 1 ? 1 : v });
+                }}
+                className="text-base"
+              />
+            </div>
+          </div>
+
+          <div className="space-y-1">
+            <Label htmlFor={`check-format-${task.localId}`}>Формат проверки</Label>
+            <select
+              id={`check-format-${task.localId}`}
+              value={task.check_format}
+              onChange={(e) =>
+                onUpdate({ ...task, check_format: e.target.value as 'short_answer' | 'detailed_solution' })
+              }
+              className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-base ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+              style={{ fontSize: '16px', touchAction: 'manipulation' }}
+            >
+              <option value="short_answer">Краткий ответ</option>
+              <option value="detailed_solution">Развёрнутое решение</option>
+            </select>
+            <p className="text-xs text-muted-foreground">
+              {task.check_format === 'detailed_solution'
+                ? 'AI потребует ход решения от ученика'
+                : 'Число, слово или формула'}
+            </p>
+          </div>
+        </div>
+
+        {/* SOLUTION SECTION — focus inside routes paste to addSolutionPhotos */}
+        <div
+          onFocus={() => {
+            lastFocusedSection.current = 'solution';
+          }}
+        >
+          <SolutionField
+            value={task.solution_text}
+            onChange={(v) => onUpdate({ ...task, solution_text: v })}
+            solutionRefs={solutionRefs}
+            fromKB={Boolean(task.kb_task_id)}
+            isUploading={task.uploading}
+            previewUrls={previewUrls}
+            resolvedUrls={resolvedSolutionUrls}
+            onAddSolutionFiles={addSolutionPhotos}
+            onRemoveSolutionPhoto={removeSolutionPhoto}
+            onOpenSolutionZoom={openSolutionZoom}
           />
         </div>
 
-        {/* Task condition photos */}
-        <PhotoGallery
-          label={`Фото условия (до ${MAX_TASK_IMAGES})`}
-          max={MAX_TASK_IMAGES}
-          refs={taskRefs}
-          isUploading={task.uploading}
-          previewUrls={previewUrls}
-          resolvedUrls={resolvedTaskUrls}
-          onAddFiles={addTaskPhotos}
-          onRemove={removeTaskPhoto}
-          onOpenZoom={openTaskZoom}
-        />
-        <p className="text-xs text-muted-foreground">{IMAGE_REQUIREMENTS_HINT}</p>
-
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div className="space-y-2">
-            <Label>Правильный ответ</Label>
-            <Input
-              placeholder="x=2, x=3"
-              value={task.correct_answer}
-              onChange={(e) =>
-                onUpdate({ ...task, correct_answer: e.target.value })
-              }
-              className="text-base"
-            />
-          </div>
-          <div className="space-y-2">
-            <Label>
-              Макс. баллов
-              {task.kb_task_id && task.max_score > 1 && (
-                <span className="ml-2 text-xs text-muted-foreground font-normal">из БЗ</span>
-              )}
-            </Label>
-            <Input
-              type="number"
-              min={1}
-              value={task.max_score}
-              onChange={(e) => {
-                const v = parseInt(e.target.value, 10);
-                onUpdate({ ...task, max_score: isNaN(v) || v < 1 ? 1 : v });
-              }}
-              className="text-base"
-            />
-          </div>
+        {/* RUBRIC SECTION — focus inside routes paste to addRubricPhotos */}
+        <div
+          onFocus={() => {
+            lastFocusedSection.current = 'rubric';
+          }}
+        >
+          <RubricField
+            value={task.rubric_text}
+            onChange={(v) => onUpdate({ ...task, rubric_text: v })}
+            rubricRefs={rubricRefs}
+            isUploading={task.uploading}
+            previewUrls={previewUrls}
+            resolvedUrls={resolvedRubricUrls}
+            onAddRubricFiles={addRubricPhotos}
+            onRemoveRubricPhoto={removeRubricPhoto}
+            onOpenRubricZoom={openRubricZoom}
+          />
         </div>
-
-        <div className="space-y-1">
-          <Label htmlFor={`check-format-${task.localId}`}>Формат проверки</Label>
-          <select
-            id={`check-format-${task.localId}`}
-            value={task.check_format}
-            onChange={(e) =>
-              onUpdate({ ...task, check_format: e.target.value as 'short_answer' | 'detailed_solution' })
-            }
-            className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-base ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-            style={{ fontSize: '16px', touchAction: 'manipulation' }}
-          >
-            <option value="short_answer">Краткий ответ</option>
-            <option value="detailed_solution">Развёрнутое решение</option>
-          </select>
-          <p className="text-xs text-muted-foreground">
-            {task.check_format === 'detailed_solution'
-              ? 'AI потребует ход решения от ученика'
-              : 'Число, слово или формула'}
-          </p>
-        </div>
-
-        <SolutionField
-          value={task.solution_text}
-          onChange={(v) => onUpdate({ ...task, solution_text: v })}
-          solutionRefs={solutionRefs}
-          fromKB={Boolean(task.kb_task_id)}
-          isUploading={task.uploading}
-          previewUrls={previewUrls}
-          resolvedUrls={resolvedSolutionUrls}
-          onAddSolutionFiles={addSolutionPhotos}
-          onRemoveSolutionPhoto={removeSolutionPhoto}
-          onOpenSolutionZoom={openSolutionZoom}
-        />
-
-        <RubricField
-          value={task.rubric_text}
-          onChange={(v) => onUpdate({ ...task, rubric_text: v })}
-          rubricRefs={rubricRefs}
-          isUploading={task.uploading}
-          previewUrls={previewUrls}
-          resolvedUrls={resolvedRubricUrls}
-          onAddRubricFiles={addRubricPhotos}
-          onRemoveRubricPhoto={removeRubricPhoto}
-          onOpenRubricZoom={openRubricZoom}
-        />
 
         <Button
           variant="ghost"

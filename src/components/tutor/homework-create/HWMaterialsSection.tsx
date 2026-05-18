@@ -4,6 +4,7 @@ import { Input } from '@/components/ui/input';
 import { ChevronDown, ChevronUp, Paperclip, ExternalLink, Upload, X } from 'lucide-react';
 import type { MaterialType } from '@/lib/tutorHomeworkApi';
 import { type DraftMaterial, createEmptyMaterial } from './types';
+import { usePasteImages } from '@/hooks/usePasteImages';
 
 export interface HWMaterialsSectionProps {
   materials: DraftMaterial[];
@@ -39,8 +40,35 @@ export function HWMaterialsSection({ materials, onChange }: HWMaterialsSectionPr
     onChange(materials.filter((_, i) => i !== idx));
   }, [materials, onChange]);
 
+  // Ctrl+V support — accepts both images (compressed) and PDFs (passthrough).
+  // Auto-detect type from MIME, auto-expand accordion so tutor sees the new
+  // material immediately. Generated filename for clipboard images (which have
+  // no name in clipboard) — "Скриншот <timestamp>.jpg" after compression.
+  const handlePaste = usePasteImages({
+    acceptedTypes: ['image/', 'application/pdf'],
+    compress: true,
+    onImagePasted: (file: File) => {
+      const isPdf = file.type === 'application/pdf';
+      const type: MaterialType = isPdf ? 'pdf' : 'image';
+      // Clipboard images often have generic names like "image.png" — give
+      // them a friendlier title based on timestamp.
+      const isClipboardImage = !isPdf && /^image\.\w+$/i.test(file.name);
+      const title = isClipboardImage
+        ? `Скриншот ${new Date().toLocaleString('ru-RU', {
+            day: '2-digit',
+            month: '2-digit',
+            hour: '2-digit',
+            minute: '2-digit',
+          })}`
+        : file.name;
+      onChange([...materials, { ...createEmptyMaterial(), type, file, title }]);
+      setOpen(true);
+    },
+    telemetryTag: 'hw_materials_paste',
+  });
+
   return (
-    <div className="space-y-2">
+    <div className="space-y-2" onPaste={handlePaste}>
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
@@ -106,6 +134,18 @@ export function HWMaterialsSection({ materials, onChange }: HWMaterialsSectionPr
               onChange={handleAddFile}
             />
           </div>
+          {materials.length === 0 && (
+            <p className="text-xs text-muted-foreground">
+              Или вставь скриншот:{' '}
+              <kbd className="rounded border border-slate-200 bg-slate-50 px-1.5 py-0.5 font-mono text-[10px]">
+                Ctrl
+              </kbd>
+              +
+              <kbd className="rounded border border-slate-200 bg-slate-50 px-1.5 py-0.5 font-mono text-[10px]">
+                V
+              </kbd>
+            </p>
+          )}
         </div>
       )}
     </div>

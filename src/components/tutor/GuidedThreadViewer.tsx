@@ -30,6 +30,7 @@ import { EditScoreDialog } from '@/components/tutor/results/EditScoreDialog';
 import { supabase } from '@/lib/supabaseClient';
 import type { Database } from '@/integrations/supabase/types';
 import { parseAttachmentUrls } from '@/lib/attachmentRefs';
+import { usePasteImages } from '@/hooks/usePasteImages';
 
 const STICKY_BOTTOM_THRESHOLD_PX = 100;
 
@@ -396,6 +397,24 @@ export function GuidedThreadViewer({
     setAttachPreview(null);
   }, [attachPreview]);
 
+  // Ctrl+V paste — single-file replacement (matches existing attachedFile UX).
+  // Compression applied before setAttachedFile so the preview blob URL and the
+  // server upload both use the compressed JPEG.
+  const handlePaste = usePasteImages({
+    enabled: !isSending,
+    maxFiles: 1,
+    currentCount: attachedFile ? 1 : 0,
+    compress: true,
+    onImagePasted: (file: File) => {
+      setAttachedFile(file);
+      setAttachPreview((prev) => {
+        if (prev) URL.revokeObjectURL(prev);
+        return file.type.startsWith('image/') ? URL.createObjectURL(file) : null;
+      });
+    },
+    telemetryTag: 'guided_thread_tutor_paste',
+  });
+
   const handleSendMessage = useCallback(async () => {
     const trimmed = messageText.trim();
     if ((!trimmed && !attachedFile) || isSending) return;
@@ -608,7 +627,7 @@ export function GuidedThreadViewer({
               </div>
 
               {/* Tutor input area */}
-              <div className="space-y-2 pt-1 border-t">
+              <div className="space-y-2 pt-1 border-t" onPaste={handlePaste}>
                 <div className="flex items-center gap-2">
                   <Switch
                     id={`hidden-note-${studentId}`}
@@ -647,14 +666,14 @@ export function GuidedThreadViewer({
                     className="shrink-0 px-2"
                     onClick={() => fileInputRef.current?.click()}
                     disabled={isSending}
-                    title="Прикрепить файл"
+                    title="Прикрепить файл (или вставь через Ctrl+V)"
                   >
                     <Paperclip className="h-4 w-4" />
                   </Button>
                   <textarea
                     value={messageText}
                     onChange={(e) => setMessageText(e.target.value)}
-                    placeholder={hiddenNote ? 'Инструкция для AI (ученик не увидит)...' : 'Сообщение ученику...'}
+                    placeholder={hiddenNote ? 'Инструкция для AI (ученик не увидит)...' : 'Сообщение ученику (можно вставить скриншот Ctrl+V)...'}
                     className="flex-1 resize-none rounded-md border border-input bg-background px-3 py-2 text-sm min-h-[40px] focus:outline-none focus:ring-2 focus:ring-ring"
                     rows={2}
                     style={{ fontSize: '16px' }}

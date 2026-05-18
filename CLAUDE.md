@@ -1585,6 +1585,57 @@ R3 #4 (P2) — **Supabase types.ts manual patch**. Lovable auto-regen может
 
 **Спека:** `docs/delivery/features/mock-exams-v1-pilot-polish/tutor-improvements-spec.md` §AC + §7 (R2) + §8 (R3). Plan: `~/.claude/plans/wobbly-crafting-starlight.md`.
 
+### 26. Universal Ctrl+V paste для tutor surfaces (2026-05-18, immutable-hummingbird)
+
+Каноничный Ctrl+V paste добавлен везде, где репетитор загружает фото в tutor-домене. До этого paste работал только в части мест (student-side SubmitSheet / GuidedChatInput Phase 5.1 / KB через `useImageUpload`), а в большинстве tutor surfaces отсутствовал. Теперь — единый shared hook + auto-compression + visible kbd hint.
+
+**Shared infrastructure (2 NEW + 1 refactored):**
+
+- **`src/lib/imageCompression.ts`** (NEW) — `compressForUpload(file, options?)` — pure pixel-cap 64MP + 2048px long-side + JPEG quality ladder 0.9→0.5 + HEIC graceful fallback. **Single source of truth** для compression во всём проекте.
+- **`src/lib/mockExamPhotoCompress.ts`** (refactored) — thin re-export `compressMockExamPhoto = compressForUpload`. Backward compat для mock-exams Phase 6 (CLAUDE.md §22) — никаких import path changes.
+- **`src/hooks/usePasteImages.ts`** (NEW) — generic `usePasteImages(options): React.ClipboardEventHandler`. Dual-path Safari fallback (`clipboardData.files` + `items.getAsFile()`). Опциональный `compress: true | CompressOptions`. Lock check через `enabled` + `currentCount`/`maxFiles`. Telemetry `console.info('[paste-image] <tag>', {...})`.
+
+**Где применён (5 callsites):**
+
+| Surface | Compression | Routing | Hint placement |
+|---|---|---|---|
+| `HWTaskCard.tsx` | ✅ в `uploadFiles` (file picker + paste) | **Last-focused section** через `useRef<'task'\|'solution'\|'rubric'>` + onFocus wrappers; CardContent `onPaste` | `<PasteHint>` под пустыми galleries (3 точки) + placeholders в 3 textareas |
+| `HWMaterialsSection.tsx` | ✅ для images, passthrough для PDF | Container `onPaste` + auto-detect MIME → type='image'/'pdf' + auto-open accordion | `<kbd>` под empty state |
+| `GuidedThreadViewer.tsx` | ✅ before setAttachedFile | Input area `onPaste`, single-file replacement (`maxFiles: 1`) | Placeholder + paperclip button title |
+| `AvatarUpload.tsx` | ❌ (использует `compressToAvatar` 512×512/2MB) | Wrapper `onPaste`, extracted `processFile` shared | `<kbd>` под кнопками |
+| `ImageUploadField.tsx` (KB) | ❌ (KB pipeline без compress — formula clarity) | Existing `useImageUpload::handlePaste` на textareas (не тронут) | `<kbd>` под empty state button |
+
+**Hard invariants (НЕ нарушать):**
+
+1. **`e.preventDefault()` ТОЛЬКО при image paste.** Text paste в textareas остаётся нативным. Если MIME не подошёл — handler returns silently, native paste работает.
+2. **Dual-path file detection** (`clipboardData.files` + `items.getAsFile()` fallback) обязателен — Safari/Firefox не всегда populate `.files`.
+3. **HEIC graceful fallback** в `compressForUpload` — при decode failure pass through original file, не throw. iPhone Safari умеет decode native; desktop browsers получают original HEIC и upload идёт в server (MIME whitelist'нут).
+4. **Compression — opt-in.** `usePasteImages({ compress: false })` skipped — для surfaces со своим pipeline (Avatar, KB).
+5. **HWTaskCard last-focused routing.** Каждая из 3 секций обёрнута в `<div onFocus={() => lastFocusedSection.current = 'task'|'solution'|'rubric'}>`. Card-level `onPaste` читает ref и routes paste в `addTaskPhotos`/`addSolutionPhotos`/`addRubricPhotos`. **Не дублировать** onPaste на per-textarea level — иначе race с card-level handler.
+6. **Inline kbd hint visible когда gallery empty.** Скрывается когда есть хотя бы 1 фото (gallery thumbnails уже самодостаточны как visual cue). Pattern: `{refs.length === 0 && <PasteHint />}`.
+7. **Telemetry PII-free.** Логируется только `originalBytes / uploadBytes / type / tag` — никаких file names, никаких user identifiers.
+
+**При добавлении нового surface где tutor/student загружает фото:**
+
+1. Импортируй `usePasteImages` из `@/hooks/usePasteImages` + `compressForUpload` если нужна compression.
+2. Attach `onPaste={handler}` на наиболее логичный container (Card, Dialog, textarea wrapper).
+3. Lock check: `enabled: !isUploading` + `currentCount: refs.length` + `maxFiles: MAX_X_IMAGES`.
+4. Compression: `compress: true` для screenshots (default 4MB / 2048px), `false` для surfaces со своим pipeline.
+5. **Inline kbd hint обязателен** под empty state — иначе фича невидима. Канонический pattern:
+   ```tsx
+   <p className="text-xs text-muted-foreground">
+     Или вставь скриншот:{' '}
+     <kbd className="rounded border border-slate-200 bg-slate-50 px-1.5 py-0.5 font-mono text-[10px]">Ctrl</kbd>
+     +
+     <kbd className="rounded border border-slate-200 bg-slate-50 px-1.5 py-0.5 font-mono text-[10px]">V</kbd>
+   </p>
+   ```
+6. Если surface имеет несколько image sections (как HWTaskCard) — использовать last-focused routing pattern с `useRef`. **Не** делать dropdown «куда вставить» (отвергнуто в UX-опросе 2026-05-18).
+
+**Storage / backend — без изменений.** Все uploads идут через existing endpoints (`uploadTutorHomeworkTaskImage` → `homework-task-images`, `uploadKBTaskImage` → `kb-attachments`, etc.). dual-format `parseAttachmentUrls`/`serializeAttachmentUrls` сохраняется. Новых bucket'ов не добавлено.
+
+**Спека:** `~/.claude/plans/1-immutable-hummingbird.md`.
+
 ## Известные хрупкие области
 
 1. **Chat.tsx** (2000+ строк) — очень сложный компонент

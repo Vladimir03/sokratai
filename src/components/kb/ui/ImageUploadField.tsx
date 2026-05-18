@@ -131,18 +131,31 @@ export function ImageUploadField({ label, imageUpload, disabled }: ImageUploadFi
             )}
           </div>
         ) : (
-          <button
-            type="button"
-            disabled={disabled}
-            onClick={() => fileInputRef.current?.click()}
-            className={cn(
-              'flex w-full items-center justify-center gap-2 rounded-lg border-[1.5px] border-dashed border-socrat-border bg-socrat-surface px-4 py-4 text-sm text-slate-500 transition-colors duration-200 hover:border-socrat-primary/40 hover:text-socrat-primary',
-              disabled && 'pointer-events-none opacity-50',
-            )}
-          >
-            <ImagePlus className="h-4.5 w-4.5" />
-            Прикрепить фото
-          </button>
+          <>
+            <button
+              type="button"
+              disabled={disabled}
+              onClick={() => fileInputRef.current?.click()}
+              className={cn(
+                'flex w-full items-center justify-center gap-2 rounded-lg border-[1.5px] border-dashed border-socrat-border bg-socrat-surface px-4 py-4 text-sm text-slate-500 transition-colors duration-200 hover:border-socrat-primary/40 hover:text-socrat-primary',
+                disabled && 'pointer-events-none opacity-50',
+              )}
+            >
+              <ImagePlus className="h-4.5 w-4.5" />
+              Прикрепить фото
+            </button>
+            <p className="mt-1.5 text-xs text-slate-500">
+              Перетащи фото или вставь:{' '}
+              <kbd className="rounded border border-slate-200 bg-slate-50 px-1.5 py-0.5 font-mono text-[10px]">
+                Ctrl
+              </kbd>
+              +
+              <kbd className="rounded border border-slate-200 bg-slate-50 px-1.5 py-0.5 font-mono text-[10px]">
+                V
+              </kbd>
+              {' '}в поле условия задачи
+            </p>
+          </>
         )}
       </div>
     </fieldset>
