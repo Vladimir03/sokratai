@@ -10,5 +10,42 @@ Allow: /
 User-agent: facebookexternalhit
 Allow: /
 
+# Яндекс — основной поисковик в РФ
+User-agent: Yandex
+Allow: /
+Disallow: /tutor/
+Disallow: /student/
+Disallow: /admin
+Disallow: /retention-analysis
+Disallow: /chat
+Disallow: /homework
+Disallow: /practice
+Disallow: /progress
+Disallow: /profile
+Disallow: /diagnostic
+Disallow: /trainer
+Disallow: /miniapp
+Disallow: /p/
+Disallow: /book/
+Disallow: /invite/
+Disallow: /install
+Disallow: /reset-password
+Disallow: /forgot-password
+# Склейка дублей с UTM/click-метками — Яндекс уберёт их из индекса
+Clean-param: utm_source&utm_medium&utm_campaign&utm_term&utm_content&yclid&gclid&from&ref /
+Host: sokratai.ru
+
 User-agent: *
 Allow: /
+Disallow: /tutor/
+Disallow: /student/
+Disallow: /admin
+Disallow: /retention-analysis
+Disallow: /p/
+Disallow: /book/
+Disallow: /invite/
+Disallow: /miniapp
+Disallow: /reset-password
+Disallow: /forgot-password
+
+Sitemap: https://sokratai.ru/sitemap.xml
