@@ -10,6 +10,45 @@ Allow: /
 User-agent: facebookexternalhit
 Allow: /
 
+# AI-боты (ChatGPT, Claude, Perplexity, Google Gemini, You.com) — разрешаем индексацию публичных страниц
+User-agent: GPTBot
+Allow: /
+Disallow: /tutor/
+Disallow: /student/
+Disallow: /admin
+Disallow: /chat
+Disallow: /homework
+Disallow: /practice
+Disallow: /progress
+Disallow: /profile
+Disallow: /p/
+Disallow: /book/
+Disallow: /invite/
+
+User-agent: ChatGPT-User
+Allow: /
+
+User-agent: OAI-SearchBot
+Allow: /
+
+User-agent: ClaudeBot
+Allow: /
+
+User-agent: Claude-Web
+Allow: /
+
+User-agent: PerplexityBot
+Allow: /
+
+User-agent: Google-Extended
+Allow: /
+
+User-agent: CCBot
+Allow: /
+
+User-agent: YandexGPT
+Allow: /
+
 # Яндекс — основной поисковик в РФ
 User-agent: Yandex
 Allow: /
