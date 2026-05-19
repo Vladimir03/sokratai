@@ -79,12 +79,36 @@ export default function SocialProof() {
           font-size: 14px; line-height: 1.55; font-style: italic;
           color: var(--sokrat-fg1); margin: 0;
         }
+        .sokrat.sokrat-marketing .sp-case-chip {
+          display: inline-flex; align-items: center;
+          font-size: 11px; line-height: 1.3; font-weight: 600;
+          color: var(--sokrat-green-800);
+          background-color: var(--sokrat-green-50);
+          border: 1px solid var(--sokrat-green-200);
+          border-radius: 999px;
+          padding: 4px 10px;
+          align-self: flex-start;
+        }
+        .sokrat.sokrat-marketing .sp-case-bullets {
+          font-size: 13px; line-height: 1.5;
+          color: var(--sokrat-fg2);
+          padding-left: 18px; margin: 0;
+        }
+        .sokrat.sokrat-marketing .sp-case-bullets li {
+          margin-bottom: 6px;
+        }
+        .sokrat.sokrat-marketing .sp-case-bullets li:last-child {
+          margin-bottom: 0;
+        }
         .sokrat.sokrat-marketing .sp-your-case-title {
           font-size: 18px; color: var(--sokrat-green-800);
           margin-bottom: 8px; font-weight: 600;
         }
         .sokrat.sokrat-marketing .sp-your-case-body {
           font-size: 14px; color: var(--sokrat-fg2); margin-bottom: 16px;
+        }
+        .sokrat.sokrat-marketing .sp-your-case-banner-body {
+          font-size: 14px; color: var(--sokrat-fg2); margin: 0;
         }
       `}</style>
 
@@ -103,12 +127,20 @@ export default function SocialProof() {
         {/* Subheader */}
         <h3 className="sp-subheader">Репетиторы используют Сократ AI</h3>
 
-        {/* Cases */}
+        {/*
+          Cases. Order is deliberate: Елена first — её цитата «сравнивала с
+          известными платформами и выбрала Сократ AI» режет скепсис холодного
+          репетитора с первого взгляда. Мария вторая — видео-отзыв, authority.
+          Егор третий — глубокий кейс для тех, кто уже зацепился.
+        */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4 md:gap-5">
+          <CaseElenaCard />
           <CaseVideoCard videoSrc={TESTIMONIAL_VIDEO_SRC} />
           <CaseEgorCard />
-          <CaseYourCaseCard />
         </div>
+
+        {/* CTA для новых кейсов — отдельным slim-banner ниже сетки. */}
+        <CaseYourCaseBanner />
       </div>
     </section>
   );
@@ -246,16 +278,6 @@ function CaseEgorCard() {
         border: "1px solid var(--sokrat-border)",
       }}
     >
-      <span
-        className="self-start inline-block rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.08em]"
-        style={{
-          backgroundColor: "var(--sokrat-green-100)",
-          color: "var(--sokrat-green-800)",
-        }}
-      >
-        Реальный кейс
-      </span>
-
       <img
         src="/marketing/tutor-landing/egor-portrait.jpg"
         alt="Егор Блинов — фото"
@@ -363,20 +385,83 @@ function CaseEgorCard() {
   );
 }
 
-function CaseYourCaseCard() {
+function CaseElenaCard() {
+  // Paid customer (AI-команда tariff, on platform since April 2026). Quote
+  // chosen for cold-tutor appeal: «compared with known platforms and chose
+  // Сократ» cuts skepticism faster than feature claims. Three bullets
+  // paraphrase her own Telegram forward; emotional close keeps her voice
+  // (mission framing: «польза и радость детям»).
   return (
     <article
-      className="flex flex-col items-center justify-center rounded-[14px] p-5 text-center"
+      className="relative flex flex-col gap-3 rounded-[14px] p-5"
+      style={{
+        backgroundColor: "var(--sokrat-card)",
+        border: "1px solid var(--sokrat-border)",
+      }}
+    >
+      <img
+        src="/marketing/tutor-landing/elena-portrait.jpg"
+        alt="Елена Иванова — фото"
+        width={88}
+        height={88}
+        loading="lazy"
+        className="h-[88px] w-[88px] self-start rounded-[12px] object-cover"
+        style={{
+          backgroundColor: "var(--sokrat-green-100)",
+          border: "1px solid var(--sokrat-border)",
+        }}
+      />
+
+      <div className="sp-case-name">Елена Иванова</div>
+      <div className="sp-case-regalia">
+        Репетитор физики ОГЭ, ЕГЭ
+      </div>
+      <span className="sp-case-chip">
+        Платит AI-команда · С&nbsp;апреля&nbsp;2026 на&nbsp;платформе
+      </span>
+
+      <blockquote className="sp-case-quote">
+        «Сравнивала с известными платформами — больше всего понравился
+        Сократ&nbsp;AI.»
+      </blockquote>
+
+      <ul className="sp-case-bullets">
+        <li>Интуитивный интерфейс — материалы, ДЗ, статистика в одном месте.</li>
+        <li>Команда добавляет функции под мои запросы.</li>
+        <li>AI-проверка ДЗ — эталон применения новых инструментов.</li>
+      </ul>
+
+      <blockquote className="sp-case-quote">
+        «Принести детям пользу и радость — что может быть лучше для
+        преподавателя&nbsp;👍»
+      </blockquote>
+
+      <p className="sp-case-disclaimer">
+        Отзыв в Telegram, май&nbsp;2026.
+      </p>
+    </article>
+  );
+}
+
+function CaseYourCaseBanner() {
+  // Was a 3rd grid cell with dashed border. Promoted to a full-width banner
+  // below the grid so 3 real testimonials get equal horizontal weight. Banner
+  // stays dashed-green for visual continuity with the prior "Ваш кейс?" card.
+  return (
+    <article
+      className="mt-6 md:mt-8 flex flex-col md:flex-row md:items-center md:justify-between gap-4 rounded-[14px] p-5 md:p-6"
       style={{
         backgroundColor: "transparent",
         border: "2px dashed var(--sokrat-green-200)",
       }}
     >
-      <h3 className="sp-your-case-title">Ваш кейс?</h3>
-      <p className="sp-your-case-body">
-        Расскажите, как Сократ AI поменял вашу работу. Разместим в этой секции.
-      </p>
-      <div className="flex flex-wrap justify-center gap-2">
+      <div className="md:max-w-[60%]">
+        <h3 className="sp-your-case-title">Ваш кейс?</h3>
+        <p className="sp-your-case-banner-body">
+          Расскажите, как Сократ AI поменял вашу работу. Разместим в этой секции.
+        </p>
+      </div>
+      <div className="flex flex-wrap gap-2 md:shrink-0">
         <a
           href="https://t.me/Analyst_Vladimir"
           target="_blank"
