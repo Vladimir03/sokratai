@@ -79,18 +79,43 @@
   </head>
 
   <body>
-    <!-- Static above-the-fold content for immediate FCP - replaced by React -->
+    <!-- Static above-the-fold content for immediate FCP — replaced by React after hydration.
+         Structured H1/H2 + descriptive paragraphs ensure AI crawlers (GPTBot, ClaudeBot,
+         PerplexityBot) and JS-disabled clients can parse the value proposition without
+         executing the SPA bundle. Hydration replaces this with the full React landing. -->
     <div id="root">
       <div id="static-hero" style="background:linear-gradient(135deg,#0f4432,#145236 50%,#1B6B4A);padding:4rem 1rem;min-height:60vh;display:flex;align-items:center;justify-content:center">
         <div style="max-width:800px;margin:0 auto;text-align:left">
           <h1 style="color:#fff;font-size:clamp(1.5rem,4vw,2.5rem);font-weight:700;margin:0 0 1rem;line-height:1.3">
-            Инструмент репетитора. От репетитора.
+            Сократ AI — AI-репетитор по физике для ЕГЭ и ОГЭ
           </h1>
-          <p style="color:rgba(255,255,255,0.9);font-size:1.1rem;margin:0">
-            AI-проверка рукописных ДЗ по физике, математике, информатике. Сократовский диалог с учеником — не списывает у ChatGPT.
+          <p style="color:rgba(255,255,255,0.95);font-size:1.15rem;font-weight:500;margin:0 0 0.75rem">
+            Инструмент репетитора. От репетитора.
+          </p>
+          <p style="color:rgba(255,255,255,0.85);font-size:1rem;margin:0">
+            AI-проверка рукописных ДЗ за 40 минут. Сократовский AI-чат — ученик думает, а не списывает у ChatGPT. Расписание и оплаты — бесплатно.
           </p>
         </div>
       </div>
+      <section style="max-width:800px;margin:0 auto;padding:2rem 1rem;color:#0F172A;font-size:1rem;line-height:1.6">
+        <h2 style="font-size:1.5rem;font-weight:600;margin:0 0 1rem">Что умеет Сократ AI</h2>
+        <ul style="padding-left:1.25rem;margin:0">
+          <li><strong>AI-проверка рукописных ДЗ.</strong> Фото ответов ученика анализирует Gemini; репетитор получает черновик оценки и комментарии за ~40 минут.</li>
+          <li><strong>Сократовский AI-чат для учеников.</strong> Ведёт ученика наводящими вопросами, не выдаёт готовое решение — в отличие от ChatGPT.</li>
+          <li><strong>Подготовка к ЕГЭ и ОГЭ.</strong> Физика, математика, информатика, русский, английский, литература.</li>
+          <li><strong>Расписание и оплаты.</strong> Календарь занятий, отметки оплат через Telegram-бота — бесплатно для всех репетиторов.</li>
+          <li><strong>Тренажёр формул.</strong> Стандартный курс физики ЕГЭ и базовый курс «Вращение по окружности» — отдельный модуль практики.</li>
+        </ul>
+        <h2 style="font-size:1.25rem;font-weight:600;margin:1.5rem 0 0.75rem">Для кого Сократ AI</h2>
+        <p style="margin:0 0 0.75rem">
+          Сократ AI — это платформа для репетиторов физики, математики и информатики, которые готовят школьников к ЕГЭ и ОГЭ.
+          Подходит репетиторам с любым числом учеников: от одного до десятков.
+        </p>
+        <h2 style="font-size:1.25rem;font-weight:600;margin:1.5rem 0 0.75rem">Цена</h2>
+        <p style="margin:0">
+          7 дней бесплатно без карты. Дальше — 200 ₽ за первый месяц, потом полный тариф «AI-старт». Расписание и оплаты остаются бесплатными вне зависимости от тарифа.
+        </p>
+      </section>
     </div>
     <script type="module" src="/src/main.tsx" fetchpriority="high"></script>
     
