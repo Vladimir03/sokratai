@@ -1838,6 +1838,38 @@ Phase 8 закрывает регрессию у репетитора-франц
 
 **Spec link:** `~/.claude/plans/1-functional-meteor.md` Phase 8 section + CLAUDE.md §8 (original 3 paths name) + §27 (Phase 7 anti-leak preceding context).
 
+### 29. Mock-exams Recipient Management — add students + delete + remove student (2026-05-17, TASK-17)
+
+Triggered by Egor's pilot screenshot: 3 duplicate «Пробник Тренировочный 1» rows because no UX to add students to existing assignment. Plus «недействительный ученик» case («по ошибке пробник влепил 9-класснику»). Solves 3 connected gaps:
+
+1. **Add students to existing** — `POST /assignments/:id/assign-students` endpoint + `AddStudentsToMockExamDialog` reuses `HWAssignSection` (groups + individuals + locked existing). Idempotent (skip уже-assigned). Notify cascade push + telegram (email deferred). Entry point: header button «+ Добавить учеников» в `TutorMockExamDetail`. Disabled при `mode=manual_entry`/`status=closed`/`variant_id IS NULL`.
+
+2. **Delete entire пробник** — `DELETE /assignments/:id` endpoint + `DeleteMockExamDialog` с context-aware copy (red если approved, amber если submitted/in_progress, neutral если empty). FK cascade удаляет attempts + part1_answers + part2_solutions + public_links. Best-effort storage cleanup. Entry points: «⋮» dropdown на list-card + в шапке detail.
+
+3. **Remove individual student** — `DELETE /attempts/:id` endpoint + `RemoveStudentFromMockExamDialog`. Per-row ✕ icon в sticky name column of `MockExamHeatmap` (mobile always visible, desktop hover-revealed). Context-aware copy зависит от `attempt.status`: not_started → neutral, in_progress → amber, submitted+ → red, approved → red strong + score.
+
+**Files:**
+- Backend: `mock-exam-tutor-api/index.ts` — added `notifyStudentAssigned` cascade helper + `handleAssignStudents` + `handleDeleteAssignment` + `handleDeleteAttempt` + 3 route registrations (POST `/assign-students`, DELETE `/assignments/:id`, DELETE `/attempts/:id`).
+- Frontend NEW: `AddStudentsToMockExamDialog.tsx`, `DeleteMockExamDialog.tsx`, `RemoveStudentFromMockExamDialog.tsx`.
+- Frontend MODIFY: `mockExamApi.ts` (3 new API functions), `MockExamHeatmap.tsx` (+ `onRemoveAttempt` prop + ✕ icon), `TutorMockExamDetail.tsx` (header actions + 3 dialog mounts), `TutorMockExams.tsx` (list-card `⋮` dropdown + delete dialog с synthetic attempts из counters).
+
+**Hard invariants (don't break):**
+- **Notify scope** locked at push + telegram (no email для пилот). При расширении — добавить case в `notifyStudentAssigned` cascade + transactional template.
+- **Backend doesn't block delete по status** — Vladimir choice «никогда не блокировать, strong confirmation». UI ОБЯЗАН context-aware AlertDialog для submitted/approved.
+- **Idempotent assign** — skip уже-assigned silently через filter, не error. Counter `skipped_existing` в response.
+- **Storage cleanup best-effort** — non-fatal на failure. Orphan blobs допустимы (предпочтительнее sticky broken UI).
+- **`mock_exam_attempts.assignment_id` FK ON DELETE CASCADE** обеспечивает атомарный cleanup. Не менять без re-think delete flow.
+- **HWAssignSection reuse** для consistency cross-product. Если HWAssignSection меняется — проверять что mock-exams flow остаётся OK (`hideNotify=true` для compact UX).
+- **`DeleteMockExamDialog.attempts` type — `DeleteSeveritySource[]`** (lite), не `MockExamAttemptListItem[]`. List-card передаёт synthetic attempts из counters (`attempts_approved`, etc.) без full fetch. Detail передаёт реальные. Минимальные поля: `status` + `started_at` для severity derivation.
+
+**При расширении (Phase 2 ideas):**
+- Bulk remove через checkbox selection в heatmap
+- Soft delete (status='deleted') вместо hard для recoverability
+- «Похожий пробник уже есть» warning при `TutorMockExamCreate` если detect overlap variant+students
+- Email leg в notify cascade
+
+**Спека:** `docs/delivery/features/mock-exams-v1-pilot-polish/recipient-management-spec.md`.
+
 ## Известные хрупкие области
 
 1. **Chat.tsx** (2000+ строк) — очень сложный компонент

@@ -23,7 +23,7 @@
 // AI-черновик/пусто) после tutor approval.
 
 import { memo, useMemo } from 'react';
-import { ChevronRight } from 'lucide-react';
+import { ChevronRight, X } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
@@ -168,6 +168,11 @@ interface HeatmapRowProps {
   part2Max: number;
   totalMax: number;
   onSelect: (attempt: MockExamAttemptListItem) => void;
+  /**
+   * TASK-17 (2026-05-17): optional callback для удаления ученика из пробника.
+   * Если передан — рендерим ✕ icon в sticky name column.
+   */
+  onRemoveAttempt?: (attempt: MockExamAttemptListItem) => void;
 }
 
 const HeatmapRow = memo(function HeatmapRow({
@@ -176,6 +181,7 @@ const HeatmapRow = memo(function HeatmapRow({
   part2Max,
   totalMax,
   onSelect,
+  onRemoveAttempt,
 }: HeatmapRowProps) {
   const display = deriveDisplayStatus(attempt.status, attempt.started_at);
   const chip = STATUS_CHIP[display];
@@ -226,7 +232,7 @@ const HeatmapRow = memo(function HeatmapRow({
 
   return (
     <tr
-      className="cursor-pointer transition-colors hover:bg-slate-50 focus-within:bg-slate-50"
+      className="group cursor-pointer transition-colors hover:bg-slate-50 focus-within:bg-slate-50"
       onClick={handleClick}
       onKeyDown={handleKeyDown}
       tabIndex={0}
@@ -256,6 +262,30 @@ const HeatmapRow = memo(function HeatmapRow({
               {chip.label}
             </span>
           </div>
+          {onRemoveAttempt && (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onRemoveAttempt(attempt);
+              }}
+              onKeyDown={(e) => e.stopPropagation()}
+              className={cn(
+                'flex-shrink-0 inline-flex items-center justify-center rounded',
+                'min-w-8 min-h-8 touch-manipulation',
+                'text-slate-400 hover:text-rose-600 hover:bg-rose-50',
+                'dark:hover:text-rose-400 dark:hover:bg-rose-950/30',
+                'transition-colors',
+                // Always visible on mobile; hover-revealed on desktop (md+).
+                'md:opacity-0 md:group-hover:opacity-100 md:focus:opacity-100',
+                'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-500/50',
+              )}
+              aria-label={`Убрать ${studentName} из пробника`}
+              title="Убрать ученика из пробника"
+            >
+              <X className="h-4 w-4" aria-hidden="true" />
+            </button>
+          )}
         </div>
       </td>
 
@@ -360,6 +390,11 @@ interface MockExamHeatmapProps {
    * `/tutor/mock-exams/:id/review/:studentId`.
    */
   onSelectAttempt: (attempt: MockExamAttemptListItem) => void;
+  /**
+   * TASK-17 (2026-05-17): optional — если передан, рендерим ✕ icon
+   * в sticky name column для удаления ученика из пробника.
+   */
+  onRemoveAttempt?: (attempt: MockExamAttemptListItem) => void;
 }
 
 export function MockExamHeatmap({
@@ -368,6 +403,7 @@ export function MockExamHeatmap({
   part2Max,
   totalMax,
   onSelectAttempt,
+  onRemoveAttempt,
 }: MockExamHeatmapProps) {
   const sortedAttempts = useMemo(() => {
     // Order: in-progress first (нужно действие), then awaiting_review,
@@ -532,6 +568,7 @@ export function MockExamHeatmap({
                   part2Max={part2Max}
                   totalMax={totalMax}
                   onSelect={onSelectAttempt}
+                  onRemoveAttempt={onRemoveAttempt}
                 />
               ))}
             </tbody>

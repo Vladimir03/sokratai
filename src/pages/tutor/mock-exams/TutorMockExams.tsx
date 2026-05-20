@@ -13,9 +13,10 @@
 //   • `animate={false}` на Card в grid — 10-safe-change-policy.md
 //   • Mobile-responsive (375px+): KPI grid складывается из 5 → 3 → 2 столбцов
 
-import { memo, useMemo } from 'react';
+import { memo, useMemo, useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { parseISO } from 'date-fns';
+import { useQueryClient } from '@tanstack/react-query';
 import {
   ClipboardCheck,
   Plus,
@@ -25,14 +26,26 @@ import {
   GraduationCap,
   FileText,
   Sparkles,
+  MoreVertical,
+  Trash2,
 } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Badge } from '@/components/ui/badge';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { TutorDataStatus } from '@/components/tutor/TutorDataStatus';
 import { MockExamFeatureGate } from './MockExamFeatureGate';
 import { useMockExamAssignments } from '@/hooks/useMockExamAssignments';
+import { DeleteMockExamDialog } from '@/components/tutor/mock-exams/DeleteMockExamDialog';
+import { getMockExamAssignment } from '@/lib/mockExamApi';
+import { MOCK_EXAM_ASSIGNMENT_QUERY_KEY } from '@/hooks/useMockExamAssignment';
+import type { MockExamAttemptListItem } from '@/types/mockExam';
 import { cn } from '@/lib/utils';
 import {
   formatDeadline,
@@ -213,6 +226,41 @@ const AssignmentCard = memo(function AssignmentCard({
   const statusCfg = STATUS_CONFIG[item.status];
   const modeLabel = MODE_LABEL[item.mode];
   const deadlineStr = formatDeadline(item.deadline);
+  const queryClient = useQueryClient();
+
+  // TASK-17: local delete dialog state per card. Synthesize minimal attempts
+  // shape from counters для context-aware severity без extra fetch.
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [prefetching, setPrefetching] = useState(false);
+  const syntheticAttempts = useMemo(() => {
+    const arr: { status: MockExamAttemptStatus; started_at: string | null }[] = [];
+    const approvedCnt = item.attempts_approved ?? 0;
+    const submittedCnt = (item.attempts_submitted ?? 0)
+      + (item.attempts_awaiting_review ?? 0);
+    const inProgressCnt = item.attempts_in_progress ?? 0;
+    for (let i = 0; i < approvedCnt; i++) {
+      arr.push({ status: 'approved', started_at: null });
+    }
+    for (let i = 0; i < submittedCnt; i++) {
+      arr.push({ status: 'submitted', started_at: null });
+    }
+    for (let i = 0; i < inProgressCnt; i++) {
+      arr.push({ status: 'in_progress', started_at: new Date().toISOString() });
+    }
+    return arr;
+  }, [item]);
+
+  // Prefetch full detail in background при hover/focus dropdown trigger —
+  // если tutor нажмёт «Открыть» сразу после, страница уже warm в кеше.
+  const handleDropdownTriggerHover = () => {
+    if (prefetching) return;
+    setPrefetching(true);
+    void queryClient.prefetchQuery({
+      queryKey: MOCK_EXAM_ASSIGNMENT_QUERY_KEY(item.id),
+      queryFn: () => getMockExamAssignment(item.id),
+      staleTime: 30_000,
+    });
+  };
 
   // TASK-11: backend теперь выдаёт all counters explicitly. Frontend читает
   // напрямую с `?? 0` fallback. Old subtraction формула рождала NaN при
@@ -298,10 +346,51 @@ const AssignmentCard = memo(function AssignmentCard({
                 </span>
               </div>
             </div>
-            <ChevronRight
-              className="h-5 w-5 text-slate-400 flex-shrink-0 mt-1"
-              aria-hidden="true"
-            />
+            {/* TASK-17: dropdown menu (replaces chevron). stopPropagation
+                чтобы клик по «⋮» не triggered Link navigation. */}
+            <div className="flex-shrink-0 mt-1 flex items-center">
+              <DropdownMenu>
+                <DropdownMenuTrigger
+                  asChild
+                  onClick={(e) => e.preventDefault()}
+                  onMouseEnter={handleDropdownTriggerHover}
+                  onFocus={handleDropdownTriggerHover}
+                >
+                  <button
+                    type="button"
+                    onClick={(e) => e.stopPropagation()}
+                    onKeyDown={(e) => e.stopPropagation()}
+                    aria-label="Действия с пробником"
+                    className="inline-flex items-center justify-center min-w-9 min-h-9 rounded-md text-slate-400 hover:text-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-400 touch-manipulation"
+                  >
+                    <MoreVertical className="h-5 w-5" aria-hidden="true" />
+                  </button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent
+                  align="end"
+                  className="w-48"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <DropdownMenuItem asChild className="cursor-pointer">
+                    <Link to={`/tutor/mock-exams/${item.id}`}>
+                      <ChevronRight className="h-4 w-4 mr-2" aria-hidden="true" />
+                      Открыть
+                    </Link>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      setDeleteOpen(true);
+                    }}
+                    className="text-rose-600 focus:text-rose-700 focus:bg-rose-50 dark:focus:bg-rose-950/40 cursor-pointer"
+                  >
+                    <Trash2 className="h-4 w-4 mr-2" aria-hidden="true" />
+                    Удалить пробник
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
           </div>
 
           {/* KPI row: Учеников · Сдали · В процессе · Требует проверки.
@@ -331,6 +420,16 @@ const AssignmentCard = memo(function AssignmentCard({
           </div>
         </CardContent>
       </Card>
+      {/* TASK-17: delete dialog mounted рядом с Link, чтобы клик по «Удалить»
+          в dropdown не triggered Link navigation. Dialog имеет stopPropagation
+          через AlertDialog Portal — портал mounted в document.body, не в Link. */}
+      <DeleteMockExamDialog
+        assignmentId={item.id}
+        assignmentTitle={item.title}
+        attempts={syntheticAttempts}
+        open={deleteOpen}
+        onOpenChange={setDeleteOpen}
+      />
     </Link>
   );
 });

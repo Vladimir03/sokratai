@@ -16,14 +16,23 @@
 // см. `src/components/tutor/mock-exams/MockExamHeatmap.tsx` для sticky+
 // border-collapse Safari fix.
 
-import { useCallback, useMemo } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import { ChevronRight, ClipboardCheck, Info, Sparkles, FileWarning } from 'lucide-react';
+import { ChevronRight, ClipboardCheck, Info, Sparkles, FileWarning, UserPlus, MoreVertical, Trash2 } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { TutorDataStatus } from '@/components/tutor/TutorDataStatus';
+import { AddStudentsToMockExamDialog } from '@/components/tutor/mock-exams/AddStudentsToMockExamDialog';
+import { DeleteMockExamDialog } from '@/components/tutor/mock-exams/DeleteMockExamDialog';
+import { RemoveStudentFromMockExamDialog } from '@/components/tutor/mock-exams/RemoveStudentFromMockExamDialog';
 import { MockExamFeatureGate } from './MockExamFeatureGate';
 import { useMockExamAssignment } from '@/hooks/useMockExamAssignment';
 import { MockExamHeatmap } from '@/components/tutor/mock-exams/MockExamHeatmap';
@@ -203,7 +212,15 @@ function KpiCard({ label, value, hint, tone = 'default', footer }: KpiCardProps)
 
 // ─── Header ──────────────────────────────────────────────────────────────────
 
-function DetailHeader({ detail }: { detail: MockExamAssignmentDetail }) {
+interface DetailHeaderProps {
+  detail: MockExamAssignmentDetail;
+  onAddStudents: () => void;
+  onDelete: () => void;
+  /** Add button скрыта/disabled при manual_entry / closed / no variant. */
+  canAddStudents: boolean;
+}
+
+function DetailHeader({ detail, onAddStudents, onDelete, canAddStudents }: DetailHeaderProps) {
   const statusCfg = STATUS_CONFIG[detail.status];
   const deadlineStr = formatDeadline(detail.deadline);
   const studentCount = detail.attempts?.length ?? 0;
@@ -274,6 +291,52 @@ function DetailHeader({ detail }: { detail: MockExamAssignmentDetail }) {
                 ? 'ученика'
                 : 'учеников'}
           </p>
+        </div>
+
+        {/* TASK-17 (2026-05-17): actions — add students primary outline + delete dropdown.
+            Add disabled при manual_entry/closed/no_variant (tooltip explains why). */}
+        <div className="flex items-center gap-2 shrink-0">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={onAddStudents}
+            disabled={!canAddStudents}
+            title={
+              canAddStudents
+                ? 'Добавить дополнительных учеников в этот пробник'
+                : detail.mode === 'manual_entry'
+                  ? 'Manual-entry пробник — single-student backfill, не добавляется'
+                  : detail.status === 'closed'
+                    ? 'Пробник закрыт — сначала переактивируй через Edit'
+                    : 'Этот пробник нельзя расширять'
+            }
+            className="touch-manipulation min-h-9"
+          >
+            <UserPlus className="h-4 w-4 mr-1.5" aria-hidden="true" />
+            <span className="hidden sm:inline">Добавить учеников</span>
+            <span className="sm:hidden">+ ученика</span>
+          </Button>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                aria-label="Действия с пробником"
+                className="touch-manipulation min-h-9 min-w-9"
+              >
+                <MoreVertical className="h-4 w-4" aria-hidden="true" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-48">
+              <DropdownMenuItem
+                onClick={onDelete}
+                className="text-rose-600 focus:text-rose-700 focus:bg-rose-50 dark:focus:bg-rose-950/40 cursor-pointer"
+              >
+                <Trash2 className="h-4 w-4 mr-2" aria-hidden="true" />
+                Удалить пробник
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
       </div>
     </div>
@@ -370,6 +433,12 @@ function TutorMockExamDetailContent() {
   const { detail, loading, error, refetch, isFetching, isRecovering, failureCount } =
     useMockExamAssignment(id);
 
+  // TASK-17: dialog states для Add / Delete / Remove student.
+  const [addStudentsOpen, setAddStudentsOpen] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [removeStudentOpen, setRemoveStudentOpen] = useState(false);
+  const [attemptToRemove, setAttemptToRemove] = useState<MockExamAttemptListItem | null>(null);
+
   const handleSelectAttempt = useCallback(
     (attempt: MockExamAttemptListItem) => {
       // Spec: `/tutor/mock-exams/:id/review/:studentId`.
@@ -383,6 +452,14 @@ function TutorMockExamDetailContent() {
       );
     },
     [id, navigate],
+  );
+
+  const handleRequestRemoveStudent = useCallback(
+    (attempt: MockExamAttemptListItem) => {
+      setAttemptToRemove(attempt);
+      setRemoveStudentOpen(true);
+    },
+    [],
   );
 
   const kpi = useMemo(() => (detail ? deriveKpi(detail) : null), [detail]);
@@ -417,9 +494,24 @@ function TutorMockExamDetailContent() {
     return <NotFoundState />;
   }
 
+  // TASK-17: canAddStudents — Add button disabled при manual_entry/closed/no_variant.
+  const canAddStudents =
+    detail.mode !== 'manual_entry' &&
+    detail.status !== 'closed' &&
+    detail.variant_id !== null;
+
+  const existingStudentIds = detail.attempts
+    .map((a) => a.student_id)
+    .filter((id): id is string => id !== null);
+
   return (
     <div className="space-y-6">
-      <DetailHeader detail={detail} />
+      <DetailHeader
+        detail={detail}
+        onAddStudents={() => setAddStudentsOpen(true)}
+        onDelete={() => setDeleteOpen(true)}
+        canAddStudents={canAddStudents}
+      />
 
       {/* Recovery / error status (non-blocking, shown above content) */}
       <TutorDataStatus
@@ -505,6 +597,7 @@ function TutorMockExamDetailContent() {
         part2Max={part2Max}
         totalMax={totalMax}
         onSelectAttempt={handleSelectAttempt}
+        onRemoveAttempt={handleRequestRemoveStudent}
       />
 
       {/* AI draft warning banner — only when есть awaiting_review attempts. */}
@@ -548,9 +641,42 @@ function TutorMockExamDetailContent() {
           Цветные клетки 1–26 появятся после твоей проверки работ
         </p>
       ) : null}
+
+      {/* TASK-17 (2026-05-17, sprint «Recipient Management»): dialogs. */}
+      {id && canAddStudents && (
+        <AddStudentsToMockExamDialog
+          assignmentId={id}
+          open={addStudentsOpen}
+          onOpenChange={setAddStudentsOpen}
+          existingStudentIds={existingStudentIds}
+          deadline={detail.deadline}
+        />
+      )}
+      {id && (
+        <DeleteMockExamDialog
+          assignmentId={id}
+          assignmentTitle={detail.title}
+          attempts={detail.attempts}
+          open={deleteOpen}
+          onOpenChange={setDeleteOpen}
+          navigateBackOnSuccess
+        />
+      )}
+      {id && (
+        <RemoveStudentFromMockExamDialog
+          assignmentId={id}
+          attempt={attemptToRemove}
+          open={removeStudentOpen}
+          onOpenChange={(open) => {
+            setRemoveStudentOpen(open);
+            if (!open) setAttemptToRemove(null);
+          }}
+        />
+      )}
     </div>
   );
 }
+
 
 // ─── Export ──────────────────────────────────────────────────────────────────
 

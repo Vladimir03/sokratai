@@ -486,6 +486,109 @@ async function notifyStudentApproved(
   return { channel: null, failed_reason: "no_channels_available" };
 }
 
+/**
+ * TASK-17 (2026-05-17, sprint «Recipient Management»): notify student when
+ * tutor добавляет их в existing пробник через `/assignments/:id/assign-students`.
+ * Mirror `notifyStudentApproved` cascade: push → telegram fallback. Email
+ * отложено (см. CLAUDE.md §25 + tutor-improvements-spec.md §9).
+ *
+ * Deep-link идёт на `/student/mock-exams/:assignmentId` (taking surface).
+ */
+async function notifyStudentAssigned(
+  db: SupabaseClient,
+  studentId: string,
+  assignmentId: string,
+  assignmentTitle: string,
+  variantTitle: string,
+  deadline: string | null,
+  tutorName: string | null,
+): Promise<CascadeResult> {
+  const appUrl = getAppBaseUrl();
+  const url = `${appUrl}/student/mock-exams/${assignmentId}`;
+  const deadlineHint = deadline
+    ? ` Дедлайн: ${new Date(deadline).toLocaleDateString("ru-RU")}.`
+    : "";
+  const tutorHint = tutorName ? `${tutorName} назначил` : "Тебе назначили";
+  const pushPayload: PushPayload = {
+    title: `Новый пробник: ${variantTitle}`,
+    body: `${tutorHint} пробник «${assignmentTitle}».${deadlineHint}`,
+    url,
+  };
+
+  // 1) Push
+  if (VAPID_PUBLIC_KEY && VAPID_PRIVATE_KEY) {
+    const { data: subs } = await db
+      .from("push_subscriptions")
+      .select("endpoint, p256dh, auth")
+      .eq("user_id", studentId);
+    for (const sub of (subs ?? []) as PushSubscriptionData[]) {
+      try {
+        const result = await sendPushNotification(
+          sub,
+          pushPayload,
+          VAPID_PUBLIC_KEY,
+          VAPID_PRIVATE_KEY,
+          VAPID_SUBJECT,
+        );
+        if (result.success) {
+          return { channel: "push", failed_reason: null };
+        }
+      } catch (err) {
+        console.warn("mock_exam_assign_push_send_error", { error: String(err) });
+      }
+    }
+  }
+
+  // 2) Telegram fallback
+  if (TELEGRAM_BOT_TOKEN) {
+    const { data: profile } = await db
+      .from("profiles")
+      .select("telegram_user_id")
+      .eq("id", studentId)
+      .maybeSingle();
+    let chatId = (profile?.telegram_user_id as number | null) ?? null;
+    if (!chatId) {
+      const { data: session } = await db
+        .from("telegram_sessions")
+        .select("telegram_user_id")
+        .eq("user_id", studentId)
+        .maybeSingle();
+      chatId = (session?.telegram_user_id as number | null) ?? null;
+    }
+    if (chatId) {
+      try {
+        const text = `📝 Новый пробник: <b>${assignmentTitle}</b>\n` +
+          `Вариант: ${variantTitle}` +
+          (deadline
+            ? `\nДедлайн: ${new Date(deadline).toLocaleDateString("ru-RU")}`
+            : "") +
+          `\n\n${url}`;
+        const tgResp = await fetch(
+          `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              chat_id: chatId,
+              text,
+              parse_mode: "HTML",
+              disable_web_page_preview: false,
+            }),
+          },
+        );
+        if (tgResp.ok) {
+          return { channel: "telegram", failed_reason: null };
+        }
+      } catch (err) {
+        console.warn("mock_exam_assign_telegram_send_error", { error: String(err) });
+      }
+    }
+  }
+
+  // 3) Email — out of scope (Vladimir's UX choice: push+telegram only для пилот).
+  return { channel: null, failed_reason: "no_channels_available" };
+}
+
 // ─── Routing ─────────────────────────────────────────────────────────────────
 
 interface RouteMatch {
@@ -2282,6 +2385,444 @@ async function handleListInviteLinks(
   return jsonOk(cors, { items });
 }
 
+// ────────────────────────────────────────────────────────────────────────────
+// Endpoint: POST /assignments/:id/assign-students  (TASK-17 «Recipient Management»)
+// ────────────────────────────────────────────────────────────────────────────
+//
+// Tutor добавляет дополнительных учеников в existing активный пробник вместо
+// создания дубликата. Body: { student_ids[], notify }. Idempotent: skip
+// уже-assigned учеников. Если notify=true → push + telegram cascade (без
+// email — Vladimir UX choice для пилота).
+//
+// Validation:
+//  - mode !== 'manual_entry' (нечего assign — это single-student backfill)
+//  - status !== 'closed' (frontend disable, defense-in-depth)
+//  - variant_id IS NOT NULL (manual entry case без варианта)
+//  - all student_ids must be UUIDs
+//
+// Response: { added, skipped_existing, deadline_passed, notify: {...} }
+//   - `deadline_passed` сигнал frontend для amber toast
+//   - `notify.failed_no_channel` — у учеников ни push subscription, ни telegram
+
+async function handleAssignStudents(
+  db: SupabaseClient,
+  tutorUserId: string,
+  assignmentId: string,
+  body: unknown,
+  cors: Record<string, string>,
+): Promise<Response> {
+  const assignmentOrErr = await getOwnedAssignmentOrThrow(
+    db,
+    assignmentId,
+    tutorUserId,
+    cors,
+  );
+  if (assignmentOrErr instanceof Response) return assignmentOrErr;
+  const assignment = assignmentOrErr;
+
+  if (assignment.mode === "manual_entry") {
+    return jsonError(cors, 400, "INVALID_MODE",
+      "Cannot add students to manual_entry assignment");
+  }
+  if (assignment.status === "closed") {
+    return jsonError(cors, 409, "ASSIGNMENT_CLOSED",
+      "Cannot add students to closed assignment. Reactivate first.");
+  }
+  if (!assignment.variant_id) {
+    return jsonError(cors, 400, "NO_VARIANT",
+      "Cannot add students: assignment has no variant");
+  }
+
+  if (!body || typeof body !== "object") {
+    return jsonError(cors, 400, "INVALID_BODY", "Request body must be a JSON object");
+  }
+  const b = body as Record<string, unknown>;
+  if (!Array.isArray(b.student_ids) || b.student_ids.length === 0) {
+    return jsonError(cors, 400, "VALIDATION", "student_ids must be non-empty array");
+  }
+  const requestedIds = Array.from(new Set(b.student_ids as string[]));
+  const invalidIds = requestedIds.filter((id) => !isUUID(id));
+  if (invalidIds.length > 0) {
+    return jsonError(cors, 400, "VALIDATION", "student_ids must be UUIDs", {
+      invalid_student_ids: invalidIds,
+    });
+  }
+  if (requestedIds.length > 100) {
+    return jsonError(cors, 400, "VALIDATION", "Cannot assign more than 100 students at once");
+  }
+  const notify = b.notify === true || b.notify === undefined; // default true
+
+  // Find already-assigned (idempotent): filter them out.
+  const { data: existingAttempts, error: existingErr } = await db
+    .from("mock_exam_attempts")
+    .select("student_id")
+    .eq("assignment_id", assignmentId)
+    .in("student_id", requestedIds);
+  if (existingErr) {
+    console.error("mock_exam_assign_students_load_existing_failed", {
+      error: existingErr.message,
+    });
+    return jsonError(cors, 500, "DB_ERROR", "Failed to load existing attempts");
+  }
+  const existingIds = new Set(
+    (existingAttempts ?? [])
+      .map((r) => r.student_id as string | null)
+      .filter((id): id is string => id !== null),
+  );
+  const newStudentIds = requestedIds.filter((id) => !existingIds.has(id));
+  const skippedExisting = requestedIds.length - newStudentIds.length;
+
+  if (newStudentIds.length === 0) {
+    return jsonOk(cors, {
+      added: 0,
+      skipped_existing: skippedExisting,
+      deadline_passed: false,
+      notify: { sent_push: 0, sent_telegram: 0, failed: 0, failed_no_channel: 0 },
+    });
+  }
+
+  // Bulk insert new attempts (status='in_progress', started_at=null, mirror
+  // handleCreateAssignment baseline).
+  const attemptRows = newStudentIds.map((sid) => ({
+    assignment_id: assignmentId,
+    student_id: sid,
+    anonymous_id: null,
+    status: "in_progress" as const,
+    started_at: null,
+  }));
+  const { error: insertErr } = await db
+    .from("mock_exam_attempts")
+    .insert(attemptRows);
+  if (insertErr) {
+    console.error("mock_exam_assign_students_insert_failed", {
+      error: insertErr.message,
+    });
+    return jsonError(cors, 500, "DB_ERROR", "Failed to create attempts", {
+      detail: insertErr.message,
+    });
+  }
+
+  // Check deadline status для frontend toast.
+  const deadlineStr = assignment.deadline as string | null;
+  const deadlinePassed = deadlineStr !== null && new Date(deadlineStr) < new Date();
+
+  // Notify cascade — only если notify=true.
+  let sentPush = 0;
+  let sentTelegram = 0;
+  let failed = 0;
+  let failedNoChannel = 0;
+
+  if (notify) {
+    // Load tutor name + variant title для push body.
+    const [{ data: tutorRow }, { data: variantRow }] = await Promise.all([
+      db.from("tutors").select("name").eq("user_id", tutorUserId).maybeSingle(),
+      db
+        .from("mock_exam_variants")
+        .select("title")
+        .eq("id", assignment.variant_id as string)
+        .maybeSingle(),
+    ]);
+    const tutorName = (tutorRow?.name as string | null) ?? null;
+    const variantTitle = (variantRow?.title as string | null) ?? "пробник";
+    const assignmentTitle = assignment.title as string;
+
+    // Parallel cascade per new student. Best-effort — никаких abort'ов.
+    const results = await Promise.all(
+      newStudentIds.map((sid) =>
+        notifyStudentAssigned(
+          db,
+          sid,
+          assignmentId,
+          assignmentTitle,
+          variantTitle,
+          deadlineStr,
+          tutorName,
+        ).catch((err): CascadeResult => {
+          console.warn("mock_exam_assign_notify_student_failed", {
+            student_id: sid,
+            error: String(err),
+          });
+          return { channel: null, failed_reason: "exception" };
+        })
+      ),
+    );
+
+    for (const r of results) {
+      if (r.channel === "push") sentPush += 1;
+      else if (r.channel === "telegram") sentTelegram += 1;
+      else if (r.failed_reason === "no_channels_available") failedNoChannel += 1;
+      else failed += 1;
+    }
+  }
+
+  console.info("mock_exam_assign_students_completed", {
+    assignment_id: assignmentId,
+    added: newStudentIds.length,
+    skipped_existing: skippedExisting,
+    deadline_passed: deadlinePassed,
+    notify,
+    sent_push: sentPush,
+    sent_telegram: sentTelegram,
+    failed,
+    failed_no_channel: failedNoChannel,
+  });
+
+  return jsonOk(cors, {
+    added: newStudentIds.length,
+    skipped_existing: skippedExisting,
+    deadline_passed: deadlinePassed,
+    notify: {
+      sent_push: sentPush,
+      sent_telegram: sentTelegram,
+      failed,
+      failed_no_channel: failedNoChannel,
+    },
+  });
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Endpoint: DELETE /assignments/:id  (TASK-17 «Recipient Management»)
+// ────────────────────────────────────────────────────────────────────────────
+//
+// Tutor удаляет пробник целиком. Cascade FK удалит:
+//   - mock_exam_attempts (FK ON DELETE CASCADE)
+//   - mock_exam_attempt_part1_answers (FK на attempt)
+//   - mock_exam_attempt_part2_solutions (FK на attempt)
+//   - mock_exam_public_links (FK на assignment)
+//   - mock_exam_anonymous_leads (если есть, FK через public_link)
+//
+// Storage cleanup (best-effort, non-fatal): blank_photo_url, part2_bulk_photo_urls.
+// CLAUDE.md §25: tutor выбрал «никогда не блокировать — strong confirmation
+// на frontend». Backend не делает status guard; полагается на UI confirmation.
+
+async function handleDeleteAssignment(
+  db: SupabaseClient,
+  tutorUserId: string,
+  assignmentId: string,
+  cors: Record<string, string>,
+): Promise<Response> {
+  const assignmentOrErr = await getOwnedAssignmentOrThrow(
+    db,
+    assignmentId,
+    tutorUserId,
+    cors,
+  );
+  if (assignmentOrErr instanceof Response) return assignmentOrErr;
+
+  // Collect storage refs ДО delete (FK cascade удалит rows).
+  const { data: attempts } = await db
+    .from("mock_exam_attempts")
+    .select("blank_photo_url, part1_blank_photo_url, part2_bulk_photo_urls")
+    .eq("assignment_id", assignmentId);
+
+  const storagePaths: Array<{ bucket: string; path: string }> = [];
+  for (const row of (attempts ?? []) as Array<{
+    blank_photo_url: string | null;
+    part1_blank_photo_url: string | null;
+    part2_bulk_photo_urls: string | null;
+  }>) {
+    for (const ref of [row.blank_photo_url, row.part1_blank_photo_url]) {
+      if (typeof ref === "string" && ref.startsWith("storage://")) {
+        const parsed = parseStorageRef(ref);
+        if (parsed) storagePaths.push(parsed);
+      }
+    }
+    // part2_bulk_photo_urls — dual-format (single ref OR JSON array).
+    if (typeof row.part2_bulk_photo_urls === "string") {
+      const raw = row.part2_bulk_photo_urls;
+      try {
+        if (raw.startsWith("[")) {
+          const arr = JSON.parse(raw) as unknown;
+          if (Array.isArray(arr)) {
+            for (const item of arr) {
+              if (typeof item === "string" && item.startsWith("storage://")) {
+                const parsed = parseStorageRef(item);
+                if (parsed) storagePaths.push(parsed);
+              }
+            }
+          }
+        } else if (raw.startsWith("storage://")) {
+          const parsed = parseStorageRef(raw);
+          if (parsed) storagePaths.push(parsed);
+        }
+      } catch {
+        // ignore malformed
+      }
+    }
+  }
+
+  // Cascade DELETE (FK chain handles attempts + part1_answers + part2_solutions
+  // + public_links automatically).
+  const { error: deleteErr } = await db
+    .from("mock_exam_assignments")
+    .delete()
+    .eq("id", assignmentId);
+  if (deleteErr) {
+    console.error("mock_exam_delete_assignment_failed", {
+      assignment_id: assignmentId,
+      error: deleteErr.message,
+    });
+    return jsonError(cors, 500, "DB_ERROR", "Failed to delete assignment", {
+      detail: deleteErr.message,
+    });
+  }
+
+  // Best-effort storage cleanup. Group by bucket для batch remove.
+  const byBucket = new Map<string, string[]>();
+  for (const { bucket, path } of storagePaths) {
+    if (!byBucket.has(bucket)) byBucket.set(bucket, []);
+    byBucket.get(bucket)!.push(path);
+  }
+  let storageCleanedCount = 0;
+  for (const [bucket, paths] of byBucket.entries()) {
+    if (paths.length === 0) continue;
+    try {
+      const { error: removeErr } = await db.storage.from(bucket).remove(paths);
+      if (removeErr) {
+        console.warn("mock_exam_delete_storage_cleanup_partial", {
+          bucket,
+          error: removeErr.message,
+        });
+      } else {
+        storageCleanedCount += paths.length;
+      }
+    } catch (err) {
+      console.warn("mock_exam_delete_storage_cleanup_exception", {
+        bucket,
+        error: String(err),
+      });
+    }
+  }
+
+  console.info("mock_exam_assignment_deleted", {
+    assignment_id: assignmentId,
+    attempts_cleaned: (attempts ?? []).length,
+    storage_objects_removed: storageCleanedCount,
+  });
+
+  return jsonOk(cors, {
+    deleted: true,
+    attempts_removed: (attempts ?? []).length,
+    storage_objects_removed: storageCleanedCount,
+  });
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Endpoint: DELETE /attempts/:id  (TASK-17 «Recipient Management»)
+// ────────────────────────────────────────────────────────────────────────────
+//
+// Tutor убирает одного ученика из пробника (case: «по ошибке назначил
+// 9-класснику»). Ownership через assignment.tutor_id. FK ON DELETE CASCADE
+// удаляет part1_answers + part2_solutions для этого attempt.
+//
+// Storage cleanup: blank_photo + part2_bulk_photo_urls этого attempt'а.
+// Best-effort, non-fatal.
+
+async function handleDeleteAttempt(
+  db: SupabaseClient,
+  tutorUserId: string,
+  attemptId: string,
+  cors: Record<string, string>,
+): Promise<Response> {
+  const ownedOrErr = await getOwnedAttemptOrThrow(db, attemptId, tutorUserId, cors);
+  if (ownedOrErr instanceof Response) return ownedOrErr;
+  const { attempt } = ownedOrErr;
+
+  const attemptStatusAtDelete = attempt.status as string;
+  const studentId = (attempt.student_id as string | null) ?? null;
+
+  // Collect storage refs ДО delete.
+  const storagePaths: Array<{ bucket: string; path: string }> = [];
+  for (
+    const ref of [
+      attempt.blank_photo_url as string | null,
+      attempt.part1_blank_photo_url as string | null,
+    ]
+  ) {
+    if (typeof ref === "string" && ref.startsWith("storage://")) {
+      const parsed = parseStorageRef(ref);
+      if (parsed) storagePaths.push(parsed);
+    }
+  }
+  const bulkRaw = attempt.part2_bulk_photo_urls as string | null;
+  if (typeof bulkRaw === "string") {
+    try {
+      if (bulkRaw.startsWith("[")) {
+        const arr = JSON.parse(bulkRaw) as unknown;
+        if (Array.isArray(arr)) {
+          for (const item of arr) {
+            if (typeof item === "string" && item.startsWith("storage://")) {
+              const parsed = parseStorageRef(item);
+              if (parsed) storagePaths.push(parsed);
+            }
+          }
+        }
+      } else if (bulkRaw.startsWith("storage://")) {
+        const parsed = parseStorageRef(bulkRaw);
+        if (parsed) storagePaths.push(parsed);
+      }
+    } catch {
+      // ignore malformed
+    }
+  }
+
+  // Cascade DELETE (FK chain handles part1_answers + part2_solutions).
+  const { error: deleteErr } = await db
+    .from("mock_exam_attempts")
+    .delete()
+    .eq("id", attemptId);
+  if (deleteErr) {
+    console.error("mock_exam_delete_attempt_failed", {
+      attempt_id: attemptId,
+      error: deleteErr.message,
+    });
+    return jsonError(cors, 500, "DB_ERROR", "Failed to delete attempt", {
+      detail: deleteErr.message,
+    });
+  }
+
+  // Best-effort storage cleanup.
+  const byBucket = new Map<string, string[]>();
+  for (const { bucket, path } of storagePaths) {
+    if (!byBucket.has(bucket)) byBucket.set(bucket, []);
+    byBucket.get(bucket)!.push(path);
+  }
+  let storageCleanedCount = 0;
+  for (const [bucket, paths] of byBucket.entries()) {
+    if (paths.length === 0) continue;
+    try {
+      const { error: removeErr } = await db.storage.from(bucket).remove(paths);
+      if (removeErr) {
+        console.warn("mock_exam_delete_attempt_storage_cleanup_partial", {
+          bucket,
+          error: removeErr.message,
+        });
+      } else {
+        storageCleanedCount += paths.length;
+      }
+    } catch (err) {
+      console.warn("mock_exam_delete_attempt_storage_cleanup_exception", {
+        bucket,
+        error: String(err),
+      });
+    }
+  }
+
+  console.info("mock_exam_attempt_deleted", {
+    attempt_id: attemptId,
+    student_id: studentId,
+    attempt_status_at_delete: attemptStatusAtDelete,
+    storage_objects_removed: storageCleanedCount,
+  });
+
+  return jsonOk(cors, {
+    deleted: true,
+    student_id: studentId,
+    attempt_status_at_delete: attemptStatusAtDelete,
+    storage_objects_removed: storageCleanedCount,
+  });
+}
+
 // ─── Server ──────────────────────────────────────────────────────────────────
 
 Deno.serve(async (req: Request): Promise<Response> => {
@@ -2329,6 +2870,20 @@ Deno.serve(async (req: Request): Promise<Response> => {
       return await handleGetAssignment(db, userId, seg[1], cors);
     }
 
+    // DELETE /assignments/:id (TASK-17 «Recipient Management»)
+    if (seg.length === 2 && seg[0] === "assignments" && route.method === "DELETE") {
+      return await handleDeleteAssignment(db, userId, seg[1], cors);
+    }
+
+    // POST /assignments/:id/assign-students (TASK-17 «Recipient Management»)
+    if (
+      seg.length === 3 && seg[0] === "assignments" &&
+      seg[2] === "assign-students" && route.method === "POST"
+    ) {
+      const body = await parseJsonBody(req);
+      return await handleAssignStudents(db, userId, seg[1], body, cors);
+    }
+
     // POST /assignments/:id/invite-link
     if (
       seg.length === 3 && seg[0] === "assignments" &&
@@ -2349,6 +2904,11 @@ Deno.serve(async (req: Request): Promise<Response> => {
     // GET /attempts/:id
     if (seg.length === 2 && seg[0] === "attempts" && route.method === "GET") {
       return await handleGetAttempt(db, userId, seg[1], cors);
+    }
+
+    // DELETE /attempts/:id (TASK-17 «Recipient Management» — remove individual student)
+    if (seg.length === 2 && seg[0] === "attempts" && route.method === "DELETE") {
+      return await handleDeleteAttempt(db, userId, seg[1], cors);
     }
 
     // POST /attempts/:id/approve-task

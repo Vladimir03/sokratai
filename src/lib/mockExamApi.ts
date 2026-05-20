@@ -101,12 +101,97 @@ export async function getMockExamAssignment(
   return requestTutorMockExamApi(`/assignments/${encodeURIComponent(assignmentId)}`);
 }
 
+/**
+ * TASK-17 (2026-05-17, sprint «Recipient Management»): add students to existing
+ * assignment без создания дубликата. Idempotent — backend skip уже-assigned.
+ * Returns counts + notification cascade results (push/telegram).
+ *
+ * `notify=true` (default) → push + telegram per new student (email пока вне scope).
+ * `deadline_passed=true` в response — frontend показывает amber toast.
+ */
+export interface AssignMockExamStudentsPayload {
+  student_ids: string[];
+  notify: boolean;
+}
+
+export interface AssignMockExamStudentsResponse {
+  added: number;
+  skipped_existing: number;
+  deadline_passed: boolean;
+  notify: {
+    sent_push: number;
+    sent_telegram: number;
+    failed: number;
+    failed_no_channel: number;
+  };
+}
+
+export async function assignMockExamStudents(
+  assignmentId: string,
+  payload: AssignMockExamStudentsPayload,
+): Promise<AssignMockExamStudentsResponse> {
+  return requestTutorMockExamApi(
+    `/assignments/${encodeURIComponent(assignmentId)}/assign-students`,
+    { method: 'POST', body: JSON.stringify(payload) },
+  );
+}
+
+/**
+ * TASK-17: hard delete пробника целиком. Cascade FK удалит attempts +
+ * part1_answers + part2_solutions + public_links. Best-effort storage cleanup.
+ *
+ * Frontend ОБЯЗАН использовать AlertDialog с strong confirmation для
+ * approved/submitted attempts (см. .claude/rules/40-homework-system.md
+ * и DeleteMockExamDialog).
+ */
+export interface DeleteMockExamAssignmentResponse {
+  deleted: true;
+  attempts_removed: number;
+  storage_objects_removed: number;
+}
+
+export async function deleteMockExamAssignment(
+  assignmentId: string,
+): Promise<DeleteMockExamAssignmentResponse> {
+  return requestTutorMockExamApi(
+    `/assignments/${encodeURIComponent(assignmentId)}`,
+    { method: 'DELETE' },
+  );
+}
+
 // ─── Attempts ────────────────────────────────────────────────────────────────
 
 export async function getMockExamAttempt(
   attemptId: string,
 ): Promise<MockExamAttemptDetail> {
   return requestTutorMockExamApi(`/attempts/${encodeURIComponent(attemptId)}`);
+}
+
+/**
+ * TASK-17: remove individual student (attempt) из пробника. Use case:
+ * репетитор по ошибке назначил пробник 9-класснику. Cascade FK удалит
+ * part1_answers + part2_solutions. Best-effort storage cleanup.
+ *
+ * Frontend ОБЯЗАН использовать context-aware confirmation:
+ * - not_started → neutral copy
+ * - in_progress → amber «прогресс пропадёт»
+ * - submitted/awaiting_review → strong «работа пропадёт»
+ * - approved/manually_entered → red «{score} баллов пропадут навсегда»
+ */
+export interface DeleteMockExamAttemptResponse {
+  deleted: true;
+  student_id: string | null;
+  attempt_status_at_delete: string;
+  storage_objects_removed: number;
+}
+
+export async function deleteMockExamAttempt(
+  attemptId: string,
+): Promise<DeleteMockExamAttemptResponse> {
+  return requestTutorMockExamApi(
+    `/attempts/${encodeURIComponent(attemptId)}`,
+    { method: 'DELETE' },
+  );
 }
 
 export async function approveMockExamTask(
