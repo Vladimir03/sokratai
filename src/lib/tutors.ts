@@ -470,11 +470,14 @@ export async function manualAddTutorStudent(
 
   if (error) {
     console.error("Error adding student manually:", error, "data:", data);
-    const detail =
-      (data && typeof data === "object" && typeof (data as any).error === "string")
-        ? (data as any).error
-        : error.message || "Не удалось добавить ученика";
-    throw new Error(detail);
+    const { message, code } = await extractEdgeFunctionError(
+      error,
+      data,
+      "Не удалось добавить ученика",
+    );
+    const err = new Error(message);
+    if (code) (err as Error & { code?: string }).code = code;
+    throw err;
   }
 
   return data as ManualAddTutorStudentResponse;
@@ -495,11 +498,14 @@ export async function resetStudentPassword(
 
   if (error) {
     console.error("Error resetting student password:", error, "data:", data);
-    const detail =
-      (data && typeof data === "object" && typeof (data as any).error === "string")
-        ? (data as any).error
-        : error.message || "Не удалось сбросить пароль ученика";
-    throw new Error(detail);
+    const { message, code } = await extractEdgeFunctionError(
+      error,
+      data,
+      "Не удалось сбросить пароль ученика",
+    );
+    const err = new Error(message);
+    if (code) (err as Error & { code?: string }).code = code;
+    throw err;
   }
 
   return data as ResetStudentPasswordResponse;
@@ -516,8 +522,15 @@ export async function updateTutorStudentProfile(
   });
 
   if (error) {
-    console.error("Error updating student profile:", error);
-    throw new Error(error.message || "Не удалось обновить ученика");
+    console.error("Error updating student profile:", error, "data:", data);
+    const { message, code } = await extractEdgeFunctionError(
+      error,
+      data,
+      "Не удалось обновить ученика",
+    );
+    const err = new Error(message);
+    if (code) (err as Error & { code?: string }).code = code;
+    throw err;
   }
 
   return data as UpdateTutorStudentProfileResponse;
