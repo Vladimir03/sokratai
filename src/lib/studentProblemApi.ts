@@ -36,6 +36,12 @@ export interface StudentProblemTask {
 export interface StudentProblemStudent {
   id: string;
   display_name: string | null;
+  /**
+   * Phase 8 (2026-05-20) — resolved gender for AI grammar conjugation.
+   * Priority: tutor_students.gender → profiles.gender → null.
+   * Used in HomeworkProblem.tsx streamChat call (studentGender prop).
+   */
+  gender?: 'male' | 'female' | null;
 }
 
 export interface StudentProblemResponse {

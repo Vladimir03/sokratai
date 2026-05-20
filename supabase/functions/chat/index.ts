@@ -48,6 +48,14 @@ interface ChatRequestBody {
    */
   studentName?: string;
   /**
+   * Phase 8 (2026-05-20) — explicit gender для AI grammar conjugation.
+   * Client may pass это для UI consistency, но **server-side подтверждает**
+   * через tutor_students.gender / profiles.gender lookup когда есть
+   * guidedHomeworkAssignmentId. DB value wins (anti-tamper, mirror Phase 1
+   * subject confirmation pattern).
+   */
+  studentGender?: "male" | "female" | null;
+  /**
    * Guided homework context (student-side request). When present, the /chat
    * endpoint fetches tutor's reference solution server-side using service-role
    * (after verifying the student is assigned to this homework), and injects
@@ -1005,7 +1013,7 @@ serve(async (req) => {
       
       userId = body.userId;
 
-      const { messages, systemPrompt, taskContext, taskImageUrls, studentImageUrl, studentImageUrls, chatId, studentName, guidedHomeworkAssignmentId, guidedHomeworkTaskId, subject } = body;
+      const { messages, systemPrompt, taskContext, taskImageUrls, studentImageUrl, studentImageUrls, chatId, studentName, studentGender, guidedHomeworkAssignmentId, guidedHomeworkTaskId, subject } = body;
       const responseProfile = normalizeResponseProfile(body.responseProfile);
       const responseMode = normalizeResponseMode(body.responseMode);
       const maxChars = normalizeMaxChars(body.maxChars);
@@ -1041,6 +1049,7 @@ serve(async (req) => {
         guidedHomeworkAssignmentId,
         guidedHomeworkTaskId,
         subject,
+        studentGender,
       );
     } else {
       const supabase = createClient(Deno.env.get("SUPABASE_URL") ?? "", Deno.env.get("SUPABASE_ANON_KEY") ?? "", {
@@ -1062,7 +1071,7 @@ serve(async (req) => {
       userId = user.id;
 
       const body = await req.json() as ChatRequestBody;
-      const { messages, systemPrompt, taskContext, taskImageUrls, studentImageUrl, studentImageUrls, chatId, studentName, guidedHomeworkAssignmentId, guidedHomeworkTaskId, subject } = body;
+      const { messages, systemPrompt, taskContext, taskImageUrls, studentImageUrl, studentImageUrls, chatId, studentName, studentGender, guidedHomeworkAssignmentId, guidedHomeworkTaskId, subject } = body;
       const latestUserMessage = Array.isArray(messages)
         ? [...messages].reverse().find((message) => message?.role === "user")
         : null;
@@ -1102,6 +1111,7 @@ serve(async (req) => {
         guidedHomeworkAssignmentId,
         guidedHomeworkTaskId,
         subject,
+        studentGender,
       );
     }
   } catch (error) {
@@ -1130,6 +1140,10 @@ async function processAIRequest(
   guidedHomeworkAssignmentId?: string,
   guidedHomeworkTaskId?: string,
   clientSubject?: string | null,
+  // Phase 8 (2026-05-20): explicit student gender для grammar conjugation.
+  // Client supplies as hint; server-side подтверждает через tutor_students.gender
+  // → profiles.gender lookup когда есть guidedHomeworkAssignmentId.
+  clientStudentGender?: "male" | "female" | null,
 ) {
   const corsHeaders = {
     "Access-Control-Allow-Origin": "*",
@@ -1238,6 +1252,12 @@ async function processAIRequest(
   let resolvedKimNumber: number | null = null;
   let resolvedTaskKind: "numeric" | "extended" | "proof" | null = null;
   let resolvedRubricText: string | null = null;
+  // Phase 8 (2026-05-20): start с client-supplied gender (UI consistency)
+  // если есть; server-side lookup ниже WINS (anti-tamper).
+  let resolvedStudentGender: "male" | "female" | null =
+    clientStudentGender === "male" || clientStudentGender === "female"
+      ? clientStudentGender
+      : null;
   if (guidedHomeworkAssignmentId && guidedHomeworkTaskId) {
     try {
       const { data: assignmentRow, error: assignmentErr } = await adminSupabase
@@ -1265,6 +1285,9 @@ async function processAIRequest(
         // task.kim_number + task.task_kind + task.rubric_text — input для
         // subject-rubric resolver (Phase 2, 2026-05-15). Defends against
         // client tampering. Done in parallel with taskRow fetch (latency = 0).
+        //
+        // Phase 8 (2026-05-20): assignment.tutor_id тоже fetched чтобы
+        // дальше lookup tutor_students.gender (по tutor_id + student_id pair).
         const [taskRowResp, assignmentMetaResp] = await Promise.all([
           adminSupabase
             .from("homework_tutor_tasks")
@@ -1274,7 +1297,7 @@ async function processAIRequest(
             .maybeSingle(),
           adminSupabase
             .from("homework_tutor_assignments")
-            .select("subject, exam_type")
+            .select("subject, exam_type, tutor_id")
             .eq("id", guidedHomeworkAssignmentId)
             .maybeSingle(),
         ]);
@@ -1294,6 +1317,42 @@ async function processAIRequest(
           const dbExamType = (assignmentMetaResp.data as { exam_type?: unknown }).exam_type;
           if (dbExamType === "ege" || dbExamType === "oge") {
             resolvedExamType = dbExamType;
+          }
+          // Phase 8 (2026-05-20): server-side gender lookup. Priority:
+          // tutor_students.gender (tutor-curated) → profiles.gender (signup).
+          // DB value WINS over client-supplied (anti-tamper).
+          const tutorIdFromAssn = (assignmentMetaResp.data as { tutor_id?: unknown }).tutor_id;
+          if (typeof tutorIdFromAssn === "string" && tutorIdFromAssn.length > 0) {
+            try {
+              const [tsGenderResp, profGenderResp] = await Promise.all([
+                adminSupabase
+                  .from("tutor_students")
+                  .select("gender")
+                  .eq("tutor_id", tutorIdFromAssn)
+                  .eq("student_id", userId)
+                  .maybeSingle(),
+                adminSupabase
+                  .from("profiles")
+                  .select("gender")
+                  .eq("id", userId)
+                  .maybeSingle(),
+              ]);
+              const tg = (tsGenderResp.data as { gender?: unknown } | null)?.gender;
+              if (tg === "male" || tg === "female") {
+                resolvedStudentGender = tg;
+              } else {
+                const pg = (profGenderResp.data as { gender?: unknown } | null)?.gender;
+                if (pg === "male" || pg === "female") {
+                  resolvedStudentGender = pg;
+                }
+              }
+            } catch (genderErr) {
+              // Non-fatal — AI falls back to neutral forms.
+              console.warn("guided_chat_gender_lookup_failed", {
+                assignment_id: guidedHomeworkAssignmentId,
+                error: genderErr instanceof Error ? genderErr.message : String(genderErr),
+              });
+            }
           }
         }
         // Phase 2: per-task subject-rubric inputs from taskRow.
@@ -1549,21 +1608,49 @@ async function processAIRequest(
     effectiveSystemPrompt = `${effectiveSystemPrompt}\n${solutionBlock}`;
   }
 
-  // Append student name guidance — does NOT replace SYSTEM_PROMPT, only adds a suffix.
-  // Frontend sends non-null studentName only when profiles.username is a real name (not auto-generated).
-  if (studentName && typeof studentName === "string") {
-    const trimmedName = studentName.trim();
-    if (trimmedName && trimmedName.length <= 100) {
-      const nameGuidance = [
-        "",
-        `Имя ученика: ${trimmedName}.`,
-        "- Обращайся по имени время от времени (не в каждом сообщении, чтобы не звучало навязчиво).",
-        "- Используй правильный грамматический род глаголов и прилагательных, исходя из имени",
-        "  (например, «ты подставила» для Юлия, «ты решил» для Николай).",
-        "- Если имя иностранное или нейтральное и пол неочевиден — используй нейтральные формы.",
-      ].join("\n");
-      effectiveSystemPrompt = effectiveSystemPrompt + nameGuidance;
+  // Phase 8 (2026-05-20): student identity guidance — name + EXPLICIT gender
+  // + praise variation + frequency cap. Mirror of guided_ai.ts
+  // buildStudentNameGuidance (Deno cannot import across edge functions).
+  //
+  // PLACEMENT note: chat path строит prompt linearly (base → subject →
+  // task → solution → name → telegram). Раньше name guidance был в самом
+  // конце — тонул. Сейчас он перед telegram appendix, но после solution
+  // block. Для guided_ai.ts buildCheckPrompt placement в самое начало
+  // (после rubric.role). Идеально было бы и здесь prepend, но
+  // resolvedStudentGender populates inline во время subject hydration,
+  // поэтому compromise: после solution block, перед telegram.
+  //
+  // GENDER source: resolvedStudentGender (server-side подтверждено через
+  // tutor_students.gender → profiles.gender, anti-tamper). Client-supplied
+  // studentGender — только hint, DB value wins.
+  const trimmedName = (studentName && typeof studentName === "string") ? studentName.trim().slice(0, 100) : "";
+  if (trimmedName || resolvedStudentGender) {
+    const nameLines: string[] = [""];
+    if (trimmedName) {
+      nameLines.push(`Имя ученика: ${trimmedName}.`);
     }
+    nameLines.push(
+      "- Обращайся по имени иногда (примерно в 1-2 сообщениях из 5, не в каждом — звучит навязчиво). Хорошие моменты для имени: приветствие в начале задачи, поздравление при правильном ответе. В остальных сообщениях — без имени.",
+    );
+    if (resolvedStudentGender === "female") {
+      nameLines.push(
+        "- Пол ученика: ЖЕНСКИЙ. Используй женский род для глаголов прошедшего времени и прилагательных: «ты подставила», «ты решила», «ты написала», «ты допустила ошибку», «ты молодец», «ты внимательная». Не используй мужской род даже если имя звучит иностранно.",
+      );
+    } else if (resolvedStudentGender === "male") {
+      nameLines.push(
+        "- Пол ученика: МУЖСКОЙ. Используй мужской род: «ты подставил», «ты решил», «ты написал», «ты допустил ошибку», «ты молодец», «ты внимательный». Не используй женский род даже если имя звучит иностранно.",
+      );
+    } else {
+      nameLines.push(
+        "- Пол ученика не указан. Используй гендер-нейтральные формы: «ты справился/справилась», «получилось», «есть прогресс», «верно подмечено», «отличный ход», «молодец» — либо безличные конструкции. Не угадывай пол по имени — лучше нейтрально.",
+      );
+    }
+    nameLines.push(
+      "- При похвале ВАРЬИРУЙ фразы. Выбирай из: «Молодец», «Отлично», «Точно», «Верно», «Грамотно», «Хороший ход», «Здорово подмечено», «То, что нужно», «Класс», «Правильно мыслишь». НЕ повторяй одну и ту же похвалу в двух подряд сообщениях.",
+    );
+    const nameGuidance = nameLines.join("\n");
+    // PREPEND, not append.
+    effectiveSystemPrompt = `${effectiveSystemPrompt}\n${nameGuidance}`;
   }
 
   if (responseProfile === "telegram_compact") {

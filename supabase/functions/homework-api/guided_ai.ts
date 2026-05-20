@@ -224,10 +224,18 @@ export interface EvaluateStudentAnswerParams {
    * Tutor-curated student display name. When present, AI is instructed to
    * use it occasionally and apply grammatically correct gender forms based
    * on the name. Null / empty → AI falls back to gender-neutral forms.
-   * Source: homework-api resolveStudentDisplayName (tutor_students.display_name
-   * → profiles.username, skipping auto-generated placeholders).
+   * Source: homework-api resolveStudentIdentity (tutor_students.display_name
+   * → profiles.full_name → profiles.username, skipping auto-generated placeholders).
    */
   studentName?: string | null;
+  /**
+   * Phase 8 (2026-05-20) — explicit gender для AI grammar conjugation.
+   * Source: homework-api resolveStudentIdentity (tutor_students.gender →
+   * profiles.gender → null). Когда null — AI использует neutral формы.
+   * Решает проблему AI guess by name для иностранных / latin-spelled / gender-
+   * neutral имён (Anastasiia / Marie / Саша → AI guess fails → wrong conjugation).
+   */
+  studentGender?: "male" | "female" | null;
 }
 
 export interface GenerateHintParams {
@@ -269,6 +277,8 @@ export interface GenerateHintParams {
   hintCount: number;
   /** See EvaluateStudentAnswerParams.studentName */
   studentName?: string | null;
+  /** See EvaluateStudentAnswerParams.studentGender (Phase 8). */
+  studentGender?: "male" | "female" | null;
 }
 
 // ─── Score computation ──────────────────────────────────────────────────────
@@ -1092,16 +1102,69 @@ function buildAiScoreGuidance(
  *
  * Called by buildCheckPrompt and buildHintPrompt.
  */
-function buildStudentNameGuidance(studentName: string | null | undefined): string {
+/**
+ * Phase 8 (2026-05-20): subject-agnostic student identity guidance block.
+ *
+ * Refactored from Phase 1 single-line «обращайся по имени время от времени».
+ * Изменения:
+ *   1. **Explicit gender** через `studentGender` param (Phase 8 new):
+ *      - 'male' → инструкция: «ты подставил / ты молодец / ты решил».
+ *      - 'female' → «ты подставила / ты молодец / ты решила».
+ *      - null → нейтральные формы (или AI guess by name as fallback).
+ *      Решает проблему latin-spelling русских имён (Anastasiia → AI guess
+ *      может ошибиться → wrong gender → unnatural Russian).
+ *
+ *   2. **Frequency cap** более явный: «1-2 сообщения из 5» вместо vague
+ *      «время от времени» — AI tends to over-apply soft signals.
+ *
+ *   3. **Praise variation**: explicit список похвал, AI выбирает разные.
+ *      Защита от mode-collapse на «Молодец!». Инструкция «не повторяй одну
+ *      и ту же похвалу в 2 подряд сообщениях».
+ *
+ *   4. **Placement** (caller site): block теперь инжектируется в **начало**
+ *      systemContent (сразу после rubric.role), не в конец. Phase 1-2-7
+ *      сделали prompt очень длинным; instruction в конце тонет в noise.
+ *
+ * Returns "" if both name AND gender are absent — каноничный fallback.
+ */
+function buildStudentNameGuidance(
+  studentName: string | null | undefined,
+  studentGender: "male" | "female" | null = null,
+): string {
   const trimmed = typeof studentName === "string" ? studentName.trim() : "";
-  if (!trimmed) return "";
-  return [
-    "",
-    `Имя ученика: ${trimmed}.`,
-    "- Обращайся по имени время от времени (не в каждом сообщении, чтобы не звучало навязчиво).",
-    "- Используй грамматически правильный род глаголов и прилагательных, исходя из имени (например, «ты подставила» / «ты молодец» для женских имён вроде Юлия, Анна; «ты подставил» / «ты молодец» для мужских имён вроде Николай, Иван).",
-    "- Если имя иностранное или нейтральное и пол неочевиден — используй нейтральные формы (например, «ты справился/справилась» или безличные конструкции).",
-  ].join("\n");
+  if (!trimmed && !studentGender) return "";
+
+  const lines: string[] = [""];
+  if (trimmed) {
+    lines.push(`Имя ученика: ${trimmed}.`);
+  }
+
+  // Frequency cap — explicit number, не soft signal.
+  lines.push(
+    "- Обращайся по имени иногда (примерно в 1-2 сообщениях из 5, не в каждом — звучит навязчиво). Хорошие моменты для имени: приветствие в начале задачи, поздравление при правильном ответе. В остальных сообщениях — без имени.",
+  );
+
+  // Gender-aware conjugation — EXPLICIT instruction, не AI guess.
+  if (studentGender === "female") {
+    lines.push(
+      "- Пол ученика: ЖЕНСКИЙ. Используй женский род для глаголов прошедшего времени и прилагательных: «ты подставила», «ты решила», «ты написала», «ты допустила ошибку», «ты молодец», «ты внимательная». Не используй мужской род даже если имя звучит иностранно.",
+    );
+  } else if (studentGender === "male") {
+    lines.push(
+      "- Пол ученика: МУЖСКОЙ. Используй мужской род: «ты подставил», «ты решил», «ты написал», «ты допустил ошибку», «ты молодец», «ты внимательный». Не используй женский род даже если имя звучит иностранно.",
+    );
+  } else {
+    lines.push(
+      "- Пол ученика не указан. Используй гендер-нейтральные формы: «ты справился/справилась», «получилось», «есть прогресс», «верно подмечено», «отличный ход», «молодец» — либо безличные конструкции («можно решить так…», «здесь нужна формула…»). Не угадывай пол по имени — лучше нейтрально.",
+    );
+  }
+
+  // Praise variation — explicit list, защита от mode-collapse.
+  lines.push(
+    "- При похвале (правильный ответ, удачный шаг) ВАРЬИРУЙ фразы. Выбирай из: «Молодец», «Отлично», «Точно», «Верно», «Грамотно», «Хороший ход», «Здорово подмечено», «То, что нужно», «Класс», «Правильно мыслишь». НЕ повторяй одну и ту же похвалу в двух подряд сообщениях. Лучше короткая разная похвала, чем длинная одинаковая.",
+  );
+
+  return lines.join("\n");
 }
 
 function isImageDescriptionRequest(text: string): boolean {
@@ -1152,7 +1215,8 @@ function buildCheckPrompt(params: EvaluateStudentAnswerParams): LovableMessage[]
   const graphGroundingGuidance = buildGraphGroundingGuidance(params.taskOcrText, hasTaskImage);
   const checkFormatGuidance = buildCheckFormatGuidance(params.checkFormat, params.studentAnswer);
   const aiScoreGuidance = buildAiScoreGuidance(params.checkFormat, params.maxScore);
-  const studentNameGuidance = buildStudentNameGuidance(params.studentName);
+  // Phase 8 (2026-05-20): teraz pass gender + placement в начало systemContent.
+  const studentNameGuidance = buildStudentNameGuidance(params.studentName, params.studentGender ?? null);
 
   // Phase 2 (2026-05-15): subject-rubric resolver — provides per-subject
   // role + ФИПИ / DELF / IELTS methodology block + tutor_rubric override.
@@ -1170,6 +1234,10 @@ function buildCheckPrompt(params: EvaluateStudentAnswerParams): LovableMessage[]
     rubric.role,
     `Предмет: ${rubric.subject_label}.`,
     rubric.cefr_level ? `Целевой уровень CEFR: ${rubric.cefr_level}.` : "",
+    // Phase 8 (2026-05-20): student identity guidance в НАЧАЛЕ system prompt
+    // (выше priority AI attention). Раньше был в конце — тонул в 100+ строках
+    // ФИПИ methodology / anti-spoiler / etc. См. CLAUDE.md §28.
+    studentNameGuidance,
     `Условие задачи: ${clampPromptText(params.taskText)}`,
     ...graphGroundingGuidance,
     hasTaskImage ? "К задаче прикреплено изображение с условием — внимательно изучи его." : "",
@@ -1235,7 +1303,7 @@ function buildCheckPrompt(params: EvaluateStudentAnswerParams): LovableMessage[]
     aiScoreGuidance,
     answerTypeGuidance,
     checkFormatGuidance,
-    studentNameGuidance,
+    // Note: studentNameGuidance moved to top of systemContent (Phase 8 placement).
   ].filter(Boolean).join("\n");
 
   const messages: LovableMessage[] = [
@@ -1373,6 +1441,10 @@ function buildHintPrompt(params: GenerateHintParams): LovableMessage[] {
     rubric.role,
     `Предмет: ${rubric.subject_label}.`,
     rubric.cefr_level ? `Целевой уровень CEFR: ${rubric.cefr_level}.` : "",
+    // Phase 8 (2026-05-20): student identity guidance в НАЧАЛЕ system prompt
+    // (после role/subject/CEFR, перед task content). Раньше был в конце —
+    // тонул в 80+ строках hint level rules + ФИПИ methodology. См. CLAUDE.md §28.
+    buildStudentNameGuidance(params.studentName, params.studentGender ?? null),
     "",
     "УРОВЕНЬ ПОДСКАЗКИ: 1/3",
     "- Level 1 (nudge): одним коротким вопросом направь внимание на ключевое правило, приём или элемент условия",
@@ -1424,7 +1496,7 @@ function buildHintPrompt(params: GenerateHintParams): LovableMessage[] {
       : "",
     "",
     `Статистика: ${params.wrongAnswerCount} неверных попыток, ${params.hintCount} подсказок.`,
-    buildStudentNameGuidance(params.studentName),
+    // Note: student identity guidance moved to top of systemContent (Phase 8).
     "",
     "Верни ТОЛЬКО валидный JSON без markdown-обёрток:",
     '{"hint":"..."}',

@@ -941,6 +941,10 @@ export default function GuidedHomeworkWorkspace({
         // discipline (French homework no longer triggers «физическая величина»).
         // Server re-fetches and DB value wins — see chat/index.ts processAIRequest.
         subject: assignment.subject,
+        // Phase 8 (2026-05-20): explicit gender for AI grammar conjugation
+        // («ты подставила» vs «ты подставил»). Server-side подтверждает через
+        // tutor_students.gender / profiles.gender — client value just a hint.
+        studentGender: assignment.studentGender ?? null,
         onDelta: (delta) => {
           fullContent += delta;
           setStreamingContent(fullContent);
@@ -1541,6 +1545,8 @@ export default function GuidedHomeworkWorkspace({
           // Subject-aware bootstrap: French / Russian / English ДЗ no longer
           // gets «физик-наставник» intro.
           subject: assignment.subject,
+          // Phase 8 (2026-05-20) gender pass-through.
+          studentGender: assignment.studentGender ?? null,
           onDelta: (delta) => {
             content += delta;
             setStreamingContent(content);

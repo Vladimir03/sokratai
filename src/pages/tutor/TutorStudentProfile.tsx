@@ -121,6 +121,10 @@ function TutorStudentProfileContent() {
 
   const [editName, setEditName] = useState('');
   const [editDisplayName, setEditDisplayName] = useState('');
+  // Phase 8 (2026-05-20) — tutor-set gender для AI grammar conjugation.
+  // Values: '' (Не указано — default) / 'male' / 'female'. Save в
+  // tutor_students.gender column (migration 20260520120000).
+  const [editGender, setEditGender] = useState<'' | 'male' | 'female'>('');
   const [editTelegram, setEditTelegram] = useState('');
   const [editLearningGoalPreset, setEditLearningGoalPreset] = useState('');
   const [editLearningGoalOther, setEditLearningGoalOther] = useState('');
@@ -166,6 +170,9 @@ function TutorStudentProfileContent() {
 
     setEditName(student.profiles?.username || '');
     setEditDisplayName(student.display_name || '');
+    // Phase 8 (2026-05-20) — initialize gender from tutor_students.gender.
+    const studentGender = (student as { gender?: string | null }).gender;
+    setEditGender(studentGender === 'male' || studentGender === 'female' ? studentGender : '');
     setEditTelegram(student.profiles?.telegram_username || '');
     setEditLearningGoalPreset(isPreset ? learningGoal : learningGoal ? 'other' : '');
     setEditLearningGoalOther(isPreset ? '' : learningGoal);
@@ -322,13 +329,19 @@ function TutorStudentProfileContent() {
         hourly_rate_cents: finalEditRate,
         notes: normalizedNotes,
       });
-      // display_name живёт на tutor_students (tutor-owned override),
-      // поэтому пишется отдельно, прямо через updateTutorStudent (без
+      // display_name + gender живут на tutor_students (tutor-owned override),
+      // поэтому пишутся отдельно, прямо через updateTutorStudent (без
       // edge function tutor-update-student, который трогает profiles).
+      // Phase 8 (2026-05-20): добавили gender для AI grammar conjugation.
       const nextDisplayName = normalizedDisplayName || null;
-      if ((student?.display_name ?? null) !== nextDisplayName) {
+      const nextGender: 'male' | 'female' | null = editGender || null;
+      const currentGender = (student as { gender?: string | null } | undefined)?.gender ?? null;
+      const displayNameChanged = (student?.display_name ?? null) !== nextDisplayName;
+      const genderChanged = currentGender !== nextGender;
+      if (displayNameChanged || genderChanged) {
         await updateTutorStudent(tutorStudentId, {
           display_name: nextDisplayName,
+          gender: nextGender,
         });
       }
       applyTutorStudentPatchToCache(queryClient, {
@@ -399,12 +412,14 @@ function TutorStudentProfileContent() {
     editParentContact,
     editNotes,
     editDisplayName,
+    editGender,
     miniGroupsEnabled,
     queryClient,
     refetchMemberships,
     refetchStudent,
     student?.student_id,
     student?.display_name,
+    student,
   ]);
   
   // Загрузка
@@ -856,7 +871,28 @@ function TutorStudentProfileContent() {
                       placeholder="Например, Юля"
                     />
                     <p className="text-xs text-slate-500">
-                      Необязательно. Если указано, AI будет обращаться к ученику именно так и использовать правильный грамматический род. Если пусто — используется имя ученика слева.
+                      Необязательно. Если указано, AI будет обращаться к ученику именно так. Если пусто — используется имя ученика слева.
+                    </p>
+                  </div>
+
+                  {/* Phase 8 (2026-05-20) — gender select для AI grammar conjugation.
+                      Решает проблему с латинским / иностранным написанием имени
+                      (Anastasiia → AI guess может сказать «он подставил»).
+                      Save в `tutor_students.gender`. */}
+                  <div className="space-y-2">
+                    <Label htmlFor="editGender">Пол ученика</Label>
+                    <select
+                      id="editGender"
+                      value={editGender}
+                      onChange={(e) => setEditGender(e.target.value as '' | 'male' | 'female')}
+                      className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-base ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      <option value="">Не указано (AI выберет нейтральные формы)</option>
+                      <option value="female">Женский — «ты подставила», «ты молодец»</option>
+                      <option value="male">Мужской — «ты подставил», «ты молодец»</option>
+                    </select>
+                    <p className="text-xs text-slate-500">
+                      AI использует правильный грамматический род в обращениях. Особенно полезно для иностранных имён (Anastasiia, Marie), которые AI может неправильно угадать.
                     </p>
                   </div>
 

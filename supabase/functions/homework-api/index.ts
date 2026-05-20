@@ -5073,6 +5073,30 @@ async function resolveStudentDisplayName(
   db: SupabaseClient,
   studentAssignmentId: string,
 ): Promise<string | null> {
+  const identity = await resolveStudentIdentity(db, studentAssignmentId);
+  return identity.name;
+}
+
+/**
+ * Phase 8 (2026-05-20) — extended resolver, returns BOTH name AND gender.
+ * Gender используется в `buildStudentNameGuidance` для **explicit** conjugation
+ * («ты подставил» vs «ты подставила») вместо AI guess by name (которое
+ * fails для иностранных имён / latin spelling / gender-neutral имён).
+ *
+ * Priority chain (mirror display_name):
+ *   1. tutor_students.gender (tutor-curated, primary)
+ *   2. profiles.gender (student selected at signup, fallback)
+ *   3. null (AI uses neutral forms or guesses)
+ *
+ * Name + gender resolved в одном transaction'е для consistency — оба поля
+ * tutor-curated, fetch'ятся вместе.
+ */
+type StudentGender = "male" | "female" | null;
+
+async function resolveStudentIdentity(
+  db: SupabaseClient,
+  studentAssignmentId: string,
+): Promise<{ name: string | null; gender: StudentGender }> {
   try {
     const { data: sa } = await db
       .from("homework_tutor_student_assignments")
@@ -5081,7 +5105,7 @@ async function resolveStudentDisplayName(
       .maybeSingle();
     const studentId = sa?.student_id as string | undefined;
     const assignmentId = sa?.assignment_id as string | undefined;
-    if (!studentId || !assignmentId) return null;
+    if (!studentId || !assignmentId) return { name: null, gender: null };
 
     const { data: assn } = await db
       .from("homework_tutor_assignments")
@@ -5090,43 +5114,62 @@ async function resolveStudentDisplayName(
       .maybeSingle();
     const tutorId = assn?.tutor_id as string | undefined;
 
-    // Priority chain (canonical, used by AI prompt + tutor UI):
-    //   1. tutor_students.display_name (tutor-curated)
-    //   2. profiles.full_name (real-name fallback — may be set by user during signup)
-    //   3. profiles.username (filtered against auto-generated placeholders)
-    //   4. null (caller renders "Ученик" or AI uses neutral form)
+    // Priority chain для name + gender:
+    //   1. tutor_students.display_name + gender (tutor-curated, primary)
+    //   2. profiles.full_name / profiles.gender (signup data, secondary)
+    //   3. profiles.username для name (filtered)
+    //   4. null fallback (caller handles)
 
-    // 1. Tutor-curated display name
+    let resolvedName: string | null = null;
+    let curatedGender: StudentGender = null;
+
     if (tutorId) {
       const { data: ts } = await db
         .from("tutor_students")
-        .select("display_name")
+        .select("display_name, gender")
         .eq("tutor_id", tutorId)
         .eq("student_id", studentId)
         .maybeSingle();
       const curated = typeof ts?.display_name === "string" ? ts.display_name.trim() : "";
-      if (curated) return curated;
+      if (curated) resolvedName = curated;
+      const tg = typeof ts?.gender === "string" ? ts.gender : null;
+      if (tg === "male" || tg === "female") curatedGender = tg;
     }
 
-    // 2 + 3. profiles.full_name → profiles.username (filtered)
+    // Always read profiles for fallback name + fallback gender.
     const { data: prof } = await db
       .from("profiles")
-      .select("full_name, username")
+      .select("full_name, username, gender")
       .eq("id", studentId)
       .maybeSingle();
-    const fullName = typeof prof?.full_name === "string" ? prof.full_name.trim() : "";
-    if (fullName) return fullName;
-    const username = typeof prof?.username === "string" ? prof.username.trim() : "";
-    if (!username) return null;
-    if (/^(telegram_|user_)\d+$/i.test(username)) return null;
-    return username;
+
+    if (!resolvedName) {
+      const fullName = typeof prof?.full_name === "string" ? prof.full_name.trim() : "";
+      if (fullName) {
+        resolvedName = fullName;
+      } else {
+        const username = typeof prof?.username === "string" ? prof.username.trim() : "";
+        if (username && !/^(telegram_|user_)\d+$/i.test(username)) {
+          resolvedName = username;
+        }
+      }
+    }
+
+    // Fallback gender: profiles.gender (only if tutor_students.gender отсутствует).
+    let resolvedGender: StudentGender = curatedGender;
+    if (!resolvedGender && typeof prof?.gender === "string") {
+      const pg = prof.gender;
+      if (pg === "male" || pg === "female") resolvedGender = pg;
+    }
+
+    return { name: resolvedName, gender: resolvedGender };
   } catch (err) {
-    // Non-fatal: AI should still work without a name.
-    console.warn("resolve_student_display_name_failed", {
+    // Non-fatal: AI should still work without name/gender.
+    console.warn("resolve_student_identity_failed", {
       studentAssignmentId,
       error: err instanceof Error ? err.message : String(err),
     });
-    return null;
+    return { name: null, gender: null };
   }
 }
 
@@ -5817,11 +5860,10 @@ async function handleGetStudentProblem(
     }
   }
 
-  // 9. Student display name — same canonical chain as the AI prompt path
-  //    (tutor_students.display_name → profiles.full_name → profiles.username
-  //    minus auto-generated placeholders). The new screen renders "Привет,
-  //    {name}!" so the chat identity stays in sync with the AI greeting.
-  const displayName = await resolveStudentDisplayName(db, studentAssignmentId);
+  // 9. Student identity (name + gender) — same canonical chain as the AI
+  //    prompt path. Phase 8 (2026-05-20): also returns gender для AI
+  //    grammar conjugation (tutor_students.gender → profiles.gender → null).
+  const studentIdentity = await resolveStudentIdentity(db, studentAssignmentId);
 
   return jsonOk(cors, {
     assignment: {
@@ -5845,7 +5887,8 @@ async function handleGetStudentProblem(
     thread,
     student: {
       id: userId,
-      display_name: displayName,
+      display_name: studentIdentity.name,
+      gender: studentIdentity.gender,
     },
     hints_used: hintsUsed,
   });
@@ -6620,8 +6663,10 @@ async function runStudentAnswerGrading(args: {
       : (task.max_score ?? 1);
 
   // Resolve task/rubric images into AI-compatible data URLs, latest student
-  // image into signed URLs, and tutor-curated student display name.
-  const [taskImageUrls, rubricImageUrls, solutionImageUrls, taskOcrText, studentImageUrls, studentName] = await Promise.all([
+  // image into signed URLs, and tutor-curated student identity (name + gender).
+  // Phase 8 (2026-05-20): resolveStudentIdentity вместо resolveStudentDisplayName —
+  // дополнительно тащит gender для explicit conjugation в AI prompt.
+  const [taskImageUrls, rubricImageUrls, solutionImageUrls, taskOcrText, studentImageUrls, studentIdentity] = await Promise.all([
     resolveTaskImageUrlsForAI(db, task.task_image_url),
     resolveTaskImageUrlsForAI(db, task.rubric_image_urls),
     resolveTaskImageUrlsForAI(db, task.solution_image_urls),
@@ -6634,8 +6679,10 @@ async function runStudentAnswerGrading(args: {
       userId,
       studentAssignment.assignment_id,
     ),
-    resolveStudentDisplayName(db, studentAssignment.id),
+    resolveStudentIdentity(db, studentAssignment.id),
   ]);
+  const studentName = studentIdentity.name;
+  const studentGender = studentIdentity.gender;
 
   // Call AI evaluation
   const totalTasks = tasks.length;
@@ -6675,6 +6722,7 @@ async function runStudentAnswerGrading(args: {
       ? task.check_format
       : undefined,
     studentName,
+    studentGender,
   });
 
   // Safety guard: without correct_answer, only trust high-confidence CORRECT
@@ -7482,8 +7530,9 @@ async function handleRequestHint(
     .eq("id", threadId);
 
   // Resolve task/rubric/solution images into AI-compatible data URLs, latest
-  // student image into signed URLs, and tutor-curated student display name.
-  const [taskImageUrls, rubricImageUrls, solutionImageUrls, taskOcrText, studentImageUrls, studentName] = await Promise.all([
+  // student image into signed URLs, and tutor-curated student identity.
+  // Phase 8 (2026-05-20): resolveStudentIdentity → name + gender.
+  const [taskImageUrls, rubricImageUrls, solutionImageUrls, taskOcrText, studentImageUrls, studentIdentity] = await Promise.all([
     resolveTaskImageUrlsForAI(db, task.task_image_url),
     resolveTaskImageUrlsForAI(db, task.rubric_image_urls),
     resolveTaskImageUrlsForAI(db, task.solution_image_urls),
@@ -7496,8 +7545,10 @@ async function handleRequestHint(
       userId,
       studentAssignment.assignment_id,
     ),
-    resolveStudentDisplayName(db, studentAssignment.id),
+    resolveStudentIdentity(db, studentAssignment.id),
   ]);
+  const studentName = studentIdentity.name;
+  const studentGender = studentIdentity.gender;
 
   // Call AI for hint
   const hintResult = await generateHint({
@@ -7528,6 +7579,7 @@ async function handleRequestHint(
     wrongAnswerCount: (activeState.wrong_answer_count as number) ?? 0,
     hintCount: (activeState.hint_count as number) ?? 0,
     studentName,
+    studentGender,
   });
 
   // Save hint reply

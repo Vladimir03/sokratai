@@ -166,6 +166,13 @@ export interface UpdateTutorStudentInput {
    * back to profiles.username at read time.
    */
   display_name?: string | null;
+  /**
+   * Phase 8 (2026-05-20) — tutor-curated student gender для AI grammar
+   * conjugation в guided homework chat и /chat path. Migration
+   * 20260520120000_add_tutor_students_gender.sql. Pass null to clear.
+   * Values: 'male' / 'female' / null.
+   */
+  gender?: 'male' | 'female' | null;
   target_score?: number;
   current_score?: number;
   notes?: string;

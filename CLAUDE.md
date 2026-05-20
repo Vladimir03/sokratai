@@ -1790,6 +1790,54 @@ Phase 7 round 1 закрыл false positive (humanities skip полностью)
 
 **Spec link Round 2:** Round 1 commit `985a36c` + Round 2 follow-up commit. New helper `_shared/leak-detector.ts`. CLAUDE.md §27 Round 2 section.
 
+### 28. Student name + gender в AI-промптах — Phase 8 (2026-05-20)
+
+Phase 8 закрывает регрессию у репетитора-француза: «обращения к ученикам по имени снова пропали после обновления кода». Также добавляет explicit gender field в tutor UI чтобы AI правильно склонял глаголы для иностранных / latin-spelled / gender-neutral имён.
+
+**Регрессия root cause:** `src/lib/studentHomeworkApi.ts:411` (Phase 1 mobile screen commit `bffd97c0`) SELECT'ил только `profiles.username`, пропуская `profiles.full_name`. Каскад `tutor_students.display_name → profiles.full_name → profiles.username` (CLAUDE.md §8) сломан на frontend.
+
+**Architectural problem:** student name guidance был в **самом конце** system prompt (`buildCheckPrompt:1238`, `buildHintPrompt:1427`) — тонул в 100+ строках ФИПИ methodology / anti-spoiler / etc. AI mode-collapse'ил на «Молодец, X!» в каждом сообщении.
+
+**Gender — отдельная проблема:** AI guess из имени fails для latin-spelled русских (`Anastasiia`) / иностранных (`Marie`) / gender-neutral (`Саша`). `profiles.gender` существовал но не передавался + signup форма не спрашивает (NULL для большинства).
+
+**Решение (4 layers):**
+
+1. **Migration** `20260520120000_add_tutor_students_gender.sql` — `tutor_students.gender TEXT NULL CHECK IN ('male','female')`. Tutor-curated primary. Fallback: `profiles.gender → null`.
+
+2. **`resolveStudentIdentity` (sibling resolver)** — `homework-api/index.ts` сохраняет `resolveStudentDisplayName` как thin wrapper, добавляет `resolveStudentIdentity` returning `{name, gender}`. 3 use sites (`handleCheckAnswer`, `handleRequestHint`, `handleGetStudentProblem`).
+
+3. **`buildStudentNameGuidance` refactor + placement:**
+   - New `studentGender` param. Explicit conjugation instruction: «Пол: ЖЕНСКИЙ. Используй: «ты подставила», «ты решила»...» вместо AI guess.
+   - **Frequency cap explicit**: «1-2 сообщения из 5, не в каждом» (bootstrap + CORRECT verdict — good moments).
+   - **Praise variation explicit**: 10 фраз в списке («Молодец / Отлично / Точно / Верно / Грамотно / Хороший ход / Здорово подмечено / То, что нужно / Класс / Правильно мыслишь») + «не повторяй одну в 2 подряд».
+   - **Placement в начало** `buildCheckPrompt` + `buildHintPrompt` (после `rubric.role` + subject_label + cefr). Higher AI attention.
+
+4. **Frontend regression fix + gender pipeline:**
+   - `getStudentAssignment` SELECT `'full_name, username, gender'` (regression fix — full_name был пропущен).
+   - `streamChat` accept'ит `studentName` + `studentGender`. Server-side подтверждает через `tutor_students.gender → profiles.gender` lookup (anti-tamper).
+   - `TutorStudentProfile.tsx` UI — gender select под display_name.
+   - `UpdateTutorStudentInput.gender` тип расширен.
+   - `StudentHomeworkAssignmentDetails.studentGender` + `StudentProblemStudent.gender` типы новые.
+
+**Hard invariants (Phase 8):**
+
+- **Все 3 path** (check / hint / chat) передают name **и** gender.
+- **Server-side подтверждение gender** в chat path (DB value wins over client).
+- **Placement в начало** guidance в check + hint prompts.
+- **Frequency «1-2 из 5» explicit**, praise list explicit (10 фраз).
+- **Migration safe**: existing rows `gender=NULL`, AI fallback на neutral.
+
+**При добавлении нового AI path в guided chat:**
+
+1. Принимать `studentName` И `studentGender` в params.
+2. Использовать `buildStudentNameGuidance(name, gender)` в начале system prompt.
+3. На frontend: pass-through `assignment.studentGender` (через streamChat) или `student.gender` (через handleGetStudentProblem).
+4. Server-side подтверждать через `resolveStudentIdentity` или inline parallel lookup.
+
+**Симптом нарушения:** AI обращается к Anastasiia как «он подставил». Грепнуть paths на отсутствующий `studentGender`.
+
+**Spec link:** `~/.claude/plans/1-functional-meteor.md` Phase 8 section + CLAUDE.md §8 (original 3 paths name) + §27 (Phase 7 anti-leak preceding context).
+
 ## Известные хрупкие области
 
 1. **Chat.tsx** (2000+ строк) — очень сложный компонент

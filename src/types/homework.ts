@@ -112,10 +112,17 @@ export interface StudentHomeworkAssignmentDetails {
   materials: StudentHomeworkMaterial[];
   /**
    * Resolved student display name for AI system prompts.
-   * Priority: tutor_students.display_name → profiles.username (non-auto-generated) → null.
-   * Null means AI uses neutral/generic forms.
+   * Priority: tutor_students.display_name → profiles.full_name → profiles.username
+   * (non-auto-generated) → null. Null means AI uses neutral/generic forms.
+   * Phase 8 (2026-05-20) regression fix: full_name теперь в каскаде (раньше пропускался).
    */
   studentDisplayName?: string | null;
+  /**
+   * Phase 8 (2026-05-20) — resolved student gender for AI grammar conjugation.
+   * Priority: tutor_students.gender (tutor-curated) → profiles.gender (signup) → null.
+   * Null означает AI использует gender-neutral формы (вместо guess by name).
+   */
+  studentGender?: 'male' | 'female' | null;
 }
 
 // ─── Guided Homework Chat types ─────────────────────────────────────────────

@@ -488,6 +488,12 @@ export default function HomeworkProblem() {
         // Subject-aware AI: hint/chat respond in-discipline (no «физическая
         // величина» on French / Russian / English homework).
         subject: data.assignment.subject,
+        // Phase 8 (2026-05-20) — explicit student name + gender для AI grammar
+        // conjugation. data.student.display_name + data.student.gender —
+        // hydrated через handleGetStudentProblem endpoint (resolveStudentIdentity).
+        // Server-side подтверждает оба через DB (anti-tamper).
+        studentName: data.student?.display_name ?? undefined,
+        studentGender: data.student?.gender ?? null,
         onDelta: (delta) => {
           fullContent += delta;
           setStreamingText(fullContent);

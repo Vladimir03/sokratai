@@ -49,6 +49,21 @@ export interface StreamChatOptions {
    * but keeps the contract honest).
    */
   subject?: string | null;
+  /**
+   * Phase 8 (2026-05-20) — explicit student gender for AI grammar conjugation.
+   * Source frontend: assignment.studentGender (resolved via tutor_students.gender
+   * → profiles.gender). Server `/chat` re-fetches и DB value wins (anti-tamper,
+   * mirror Phase 1 subject confirmation). Helps AI use «ты подставила» vs
+   * «ты подставил» reliably even для latin-spelling / foreign names.
+   */
+  studentGender?: 'male' | 'female' | null;
+  /**
+   * Phase 8 (2026-05-20) — explicit student name (display name from priority
+   * chain: tutor_students.display_name → profiles.full_name → profiles.username
+   * filtered). For chat path it's also sent in body для symmetry с
+   * guided homework check/hint paths.
+   */
+  studentName?: string;
   onDelta: (text: string) => void;
   onDone: () => void;
   onError?: (error: Error) => void;
@@ -72,6 +87,8 @@ export async function streamChat({
   guidedHomeworkAssignmentId,
   guidedHomeworkTaskId,
   subject,
+  studentGender,
+  studentName,
   onDelta,
   onDone,
   onError,
@@ -117,6 +134,8 @@ export async function streamChat({
           guidedHomeworkAssignmentId: guidedHomeworkAssignmentId || undefined,
           guidedHomeworkTaskId: guidedHomeworkTaskId || undefined,
           subject: subject || undefined,
+          studentName: studentName || undefined,
+          studentGender: studentGender || undefined,
         }),
         signal: controller.signal,
       });
