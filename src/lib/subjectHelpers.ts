@@ -38,5 +38,10 @@ const HUMANITIES_WRITING_SUBJECTS = new Set<string>([
  */
 export function isHumanitiesWritingSubject(subject: string | null | undefined): boolean {
   if (!subject) return false;
-  return HUMANITIES_WRITING_SUBJECTS.has(subject.trim());
+  // Phase 7 round 2 (2026-05-20): `.toLowerCase()` для symmetry с Deno
+  // mirror (`_shared/subject-rubrics/index.ts::isHumanitiesSubject`) и
+  // `GuidedChatMessage.tsx::isHumanitiesWritingSubjectLocal`. DB CHECK
+  // constraint хранит subject lowercase, но defensive normalization
+  // против case-mismatch (например, если когда-то в БД попадёт «French»).
+  return HUMANITIES_WRITING_SUBJECTS.has(subject.trim().toLowerCase());
 }

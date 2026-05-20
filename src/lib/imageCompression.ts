@@ -55,20 +55,28 @@ export async function compressForUpload(
   const maxLongSide = options.maxLongSide ?? MAX_LONG_SIDE_PX;
 
   // PDF / non-image — pass through. Compression only for raster images.
-  if (!file.type.startsWith('image/')) {
+  // Defensive: check MIME AND filename — Safari/iOS sometimes leaves file.type
+  // empty for HEIC, but extension is present.
+  const isHeicLike =
+    /heic|heif/i.test(file.type) || /\.(heic|heif)$/i.test(file.name);
+  if (!isHeicLike && !file.type.startsWith('image/')) {
     return file;
   }
 
-  // Already small — skip compression (avoid quality loss on cycles).
-  if (file.size <= maxBytes) {
+  // Phase 7 round 2 (2026-05-20, ChatGPT-5.5 review P0 #3):
+  // HEIC ALWAYS attempts re-encode → JPEG, ignoring size gate. Reasoning:
+  // iPhone HEIC files обычно 1-3 MB ≤ 4 MB cap, но в taком виде:
+  //   1) Tutor на Chrome/Firefox/Edge desktop видит broken image
+  //      (нет HEIC decoder в <img>).
+  //   2) Lovable Gateway / Gemini не поддерживают HEIC → AI не «видит» фото.
+  // Re-encode на iPhone Safari decode'ит HEIC натив но; на desktop с graceful
+  // pass-through (см. try/catch ниже).
+  //
+  // Для остальных форматов (JPEG/PNG/WebP) ранее уже-маленький файл = OK
+  // pass-through (avoid quality loss on cycles).
+  if (!isHeicLike && file.size <= maxBytes) {
     return file;
   }
-
-  // HEIC/HEIF graceful fallback. iPhone Safari can decode HEIC in <img>, but
-  // desktop Chrome/Firefox/Edge cannot. Without fallback we'd break desktop
-  // HEIC uploads client-side before server even sees the file. Server accepts
-  // HEIC MIME; tutor reviews manually if file is too large.
-  const isHeicLike = /heic|heif/i.test(file.type);
 
   const sourceUrl = URL.createObjectURL(file);
   try {

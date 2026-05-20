@@ -79,6 +79,7 @@ interface ChatRequestBody {
 import { buildAllowedSignedUrlPrefixes } from "../_shared/image-domains.ts";
 import { SUPABASE_PROXY_URL } from "../_shared/proxy-url.ts";
 import { isHumanitiesSubject, resolveSubjectRubric } from "../_shared/subject-rubrics/index.ts";
+import { containsVerbatimSpan } from "../_shared/leak-detector.ts";
 const ALLOWED_IMAGE_DOMAINS = buildAllowedSignedUrlPrefixes([
   Deno.env.get("SUPABASE_URL") ?? "",
   SUPABASE_PROXY_URL,
@@ -1646,22 +1647,23 @@ async function processAIRequest(
   // student. This prevents jailbreak prompts from extracting the tutor solution
   // via /chat (system-prompt anti-spoiler instructions are not an access boundary).
   //
-  // Phase 7 (2026-05-16) — Humanities skip:
-  // Для humanities subjects (russian / literature / english / french / spanish)
-  // AI ОБЯЗАН использовать тот же словарь что и tutor solution_text — это
-  // не утечка, это правильный feedback по предмету. extractSignificantTokensForLeak
-  // имеет high false-positive rate на естественном языке (Latin words ≥5 chars
-  // считаются significant, что покрывает почти весь French/English). Skip
-  // detector полностью для humanities → переходим в pass-through streaming.
-  // См. plan ~/.claude/plans/1-functional-meteor.md Phase 7 + CLAUDE.md §18.
+  // Phase 7 round 2 (2026-05-20, ChatGPT-5.5 review P0 #1):
+  // Buffered path с **subject-aware detector**:
+  //   humanities (russian/literature/english/french/spanish) → verbatim span
+  //     (8+ words copy-paste) — catches model-letter атак, allows shared lexicon.
+  //   non-humanities (physics/math/etc.) → token-based как раньше (numbers/formulas).
+  // Phase 7 round 1 (commit 985a36c) полностью SKIPPED detector для humanities
+  // → review раскрыл что system prompt не access boundary → AI может copy-paste
+  // эталонное письмо. Round 2 закрывает gap span guard'ом без false positive.
   const isHumanitiesContext = isHumanitiesSubject(resolvedSubject);
-  const guardedAgainstSolutionLeak = hasTutorSolution && !isHumanitiesContext;
+  const guardedAgainstSolutionLeak = hasTutorSolution;
   if (hasTutorSolution && isHumanitiesContext) {
     console.info(JSON.stringify({
-      event: "chat_leak_check_skipped_humanities",
+      event: "chat_leak_check_humanities_verbatim_mode",
       subject: resolvedSubject,
       assignment_id: guidedHomeworkAssignmentId ?? null,
       task_id: guidedHomeworkTaskId ?? null,
+      detector: "verbatim_span",
     }));
   }
 
@@ -1692,7 +1694,10 @@ async function processAIRequest(
         }
 
         let emittedText = fullText.trim();
-        const leakHit = containsSolutionLeak(emittedText, tutorSolutionText, taskContext ?? null);
+        // Phase 7 round 2: subject-aware leak detection.
+        const leakHit = isHumanitiesContext
+          ? containsVerbatimSpan(emittedText, tutorSolutionText, taskContext ?? null)
+          : containsSolutionLeak(emittedText, tutorSolutionText, taskContext ?? null);
         if (leakHit) {
           console.warn(JSON.stringify({
             event: "chat_solution_leak_rejected",

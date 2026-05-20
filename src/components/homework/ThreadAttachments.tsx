@@ -17,16 +17,33 @@ import {
  *
  * Fallback показывает icon + filename + кнопку «Скачать оригинал».
  */
+/**
+ * Phase 7 round 2 (2026-05-20, ChatGPT-5.5 review P1 #2 + #4):
+ * ImageWithFallback **сам owned outer wrapper** — раньше outer `<a>` оборачивал
+ * inner `<a>` (failed state) → invalid nested interactive markup, click мог
+ * уйти в outer вместо download. Теперь:
+ *   - success → outer `<a href target="_blank">` оборачивает `<img>` (open
+ *     image in new tab on click — expected UX).
+ *   - failed → standalone `<a href download>` без `target="_blank"` (HTML5
+ *     `download` attribute IGNORED для cross-origin URL когда `target` есть;
+ *     same-tab navigation увеличивает шанс что download attribute сработает,
+ *     либо хотя бы откроет файл в том же tab а не как orphan tab).
+ *
+ * Один interactive element на failed render — никакого nested anchor.
+ */
 function ImageWithFallback({
   src,
   alt,
   className,
   label,
+  wrapperClassName,
 }: {
   src: string;
   alt: string;
   className: string;
   label: string;
+  /** className для outer `<a>` wrapper в success state. */
+  wrapperClassName: string;
 }) {
   const [failed, setFailed] = useState(false);
 
@@ -37,7 +54,6 @@ function ImageWithFallback({
       <a
         href={src}
         download={label}
-        target="_blank"
         rel="noreferrer"
         className="inline-flex min-h-20 items-center gap-3 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-amber-900 hover:bg-amber-100 max-w-[260px]"
         title={isHeicLike ? 'iPhone-фото в HEIC-формате — не отображается в этом браузере. Скачайте оригинал.' : 'Браузер не смог открыть файл. Скачайте оригинал.'}
@@ -54,13 +70,20 @@ function ImageWithFallback({
   }
 
   return (
-    <img
-      src={src}
-      alt={alt}
-      className={className}
-      loading="lazy"
-      onError={() => setFailed(true)}
-    />
+    <a
+      href={src}
+      target="_blank"
+      rel="noreferrer"
+      className={wrapperClassName}
+    >
+      <img
+        src={src}
+        alt={alt}
+        className={className}
+        loading="lazy"
+        onError={() => setFailed(true)}
+      />
+    </a>
   );
 }
 
@@ -141,24 +164,19 @@ export function ThreadAttachments({
     <div className="mt-2 flex flex-wrap gap-2">
       {items.map((item) => {
         if (item.kind === 'image' && item.url) {
-          // Phase 7 (2026-05-16): использовать ImageWithFallback вместо
-          // bare <img> — onError handler рендерит download placeholder
-          // для HEIC файлов которые не decode'ятся в Chrome/Firefox/Edge.
+          // Phase 7 round 2 (2026-05-20): ImageWithFallback **сам владеет**
+          // outer `<a>` wrapper'ом (см. component JSDoc). Раньше outer `<a>`
+          // оборачивал inner `<a>` в failed state → nested interactive
+          // markup invalid. Теперь один single interactive element.
           return (
-            <a
+            <ImageWithFallback
               key={item.ref}
-              href={item.url}
-              target="_blank"
-              rel="noreferrer"
-              className="inline-block rounded-md border bg-background p-0.5 hover:opacity-90 transition-opacity"
-            >
-              <ImageWithFallback
-                src={item.url}
-                alt={item.label}
-                label={item.label}
-                className={imageClassName}
-              />
-            </a>
+              src={item.url}
+              alt={item.label}
+              label={item.label}
+              className={imageClassName}
+              wrapperClassName="inline-block rounded-md border bg-background p-0.5 hover:opacity-90 transition-opacity"
+            />
           );
         }
 

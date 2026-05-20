@@ -1740,6 +1740,55 @@ P2 (skip) — server-side HEIC convert для AI prompt: после P0 client co
 
 **Spec link:** `~/.claude/plans/1-functional-meteor.md` Phase 7 section.
 
+**Round 2 fixes (ChatGPT-5.5 review of 985a36c, 2026-05-20):**
+
+Phase 7 round 1 закрыл false positive (humanities skip полностью), но review поднял **3 P0** + 4 P1 + 2 P2. Все исправлены в follow-up commit.
+
+1. **P0 #1 — verbatim span detector для humanities** (новый `_shared/leak-detector.ts`):
+   - Phase 7 round 1 полностью snimал leak detector для humanities — это закрыло false positive, но открыло реальную утечку. Репетитор может написать в `solution_text` идеальный пример письма (DELF B1 model letter), AI скопирует его дословно. System prompt «не цитируй» — НЕ access boundary.
+   - Round 2 заменяет token-based detector на **verbatim span detector**: ловит copy-paste 8+ words подряд из solution, allows общую лексику. Algorithm: normalize text (lowercase + strip punctuation), sliding window 8-word spans, subtract task text spans (legitimate quotes from prompt), check overlap с AI output.
+   - Applied в 3 paths: `evaluateStudentAnswer` (check), `generateHint` (hint via `getGeneratedHintCheck`), `chat/index.ts` (buffered SSE).
+   - Threshold 8 words — sweet spot: French типичное предложение 10-15 слов (copy-paste половины = 8+ → leak); короткие feedback фразы (4-5 слов «tu as bien écrit») не trigger'ятся.
+
+2. **P0 #2 — hint path humanities skip + subject-aware retry**:
+   - Round 1 пропустил hint path. `getGeneratedHintCheck` всё ещё применял token detector к humanities + retry prompt был **hardcoded physics**: «упоминать конкретную физическую величину или закон».
+   - Round 2: `getGeneratedHintCheck(text, solutionText, taskText, subject)` — new subject parameter, branch'ит verbatim для humanities / token для остальных.
+   - Retry prompt построен из `resolveSubjectRubric(subject).hint_examples` (subject-appropriate). Для humanities добавлена явная инструкция «не повторяй 8+ слов подряд из эталона».
+
+3. **P0 #3 — HEIC detection до size gate** (`imageCompression.ts`):
+   - Round 1 ввёл HEIC graceful fallback, но size early return (`if (file.size <= maxBytes) return file`) стоял ДО HEIC detection. iPhone HEIC файлы 1-3 MB ≤ 4 MB cap → pass-through без conversion → HEIC в Storage → tutor Chrome видит broken.
+   - Round 2: HEIC detection (MIME И filename — Safari iOS может leave file.type empty) ВЫНЕСЕНА на самый верх. Для HEIC всегда attempt re-encode → JPEG; для остальных размер pass-through остаётся.
+
+4. **P1 #1 — telemetry condition**: `check_leak_check_skipped_humanities` event теперь emit'ится только при **effective** solution context (`solutionTextTrimmed.length > 0 || effectiveSolutionImageRefs.length > 0`), не raw `solutionImageUrls`. Anchor gate (line 1558-1569) уже отбрасывает refs при `solution_text < 20 chars` — telemetry должна это учитывать.
+
+5. **P1 #2 — nested anchor в ThreadAttachments**: outer `<a target="_blank">` оборачивал inner `<a download>` (failed state) → invalid nested interactive markup. Refactor: `ImageWithFallback` **сам владеет** outer wrapper. Success → `<a href target="_blank">` с `<img>` внутри. Failed → standalone `<a href download>` без `target="_blank"` (HTML5 download attribute ignored для cross-origin когда есть target).
+
+6. **P1 #3 — `<button>` + nested `<a>` в PhotoGallery**: `SafeImage` теперь принимает `interactive?: boolean` prop. Для use внутри `<button>` (GalleryThumbnail, single thumbnail) → `interactive={false}` → fallback render `<span>` (inert placeholder, no nested anchor). Для fullscreen Dialog → `interactive=true` (default) → `<a download>` placeholder допустим.
+
+7. **P1 #4 — `target="_blank"` + `download` для cross-origin**: убран `target="_blank"` для download links (`ThreadAttachments` + `PhotoGallery` fallback states). HTML5 spec: download attribute IGNORED для cross-origin URL когда target present. Same-tab navigation увеличивает шанс что download attribute сработает.
+
+8. **P2 #1 — `.toLowerCase()` в `subjectHelpers.ts`**: frontend canonical helper теперь mirror'ит Deno-side normalization (`.trim().toLowerCase()`). DB CHECK constraint хранит subject lowercase, но defensive consistency пойдёт.
+
+9. **P2 #2 — smoke-check assertion для humanities mirror sets**: новая section 7 в `scripts/smoke-check.mjs` проверяет что **три** mirror locations содержат one и тот же набор humanities subjects (russian / rus / literature / english / french / spanish):
+   - `supabase/functions/_shared/subject-rubrics/index.ts::HUMANITIES_SUBJECTS`
+   - `src/lib/subjectHelpers.ts::HUMANITIES_WRITING_SUBJECTS`
+   - `src/components/homework/GuidedChatMessage.tsx::HUMANITIES_WRITING_SUBJECTS`
+
+**При добавлении нового humanities subject** (e.g. `german` или новый язык):
+- Update ВСЕ 3 mirror sets (см. выше file:line).
+- Run `npm run smoke-check` — section 7 валидирует sync.
+- Если smoke fail'ит: missing subject в одном из mirrors. Грепнуть `grep -n "HUMANITIES_SUBJECTS\|HUMANITIES_WRITING_SUBJECTS"` для locations.
+
+**Verbatim span detector limitations** (документирую для будущего):
+- 8-word threshold — может пропустить **7-word** copy-paste. Acceptable: 7-word фрагмент это уровень типичного feedback ("ты используешь правильно условное наклонение" = 5 words). Если станет проблемой — tune threshold.
+- Punctuation collapsed → spans matching across sentence boundaries possible. Acceptable: copy-paste рамок обычно > 1 предложения.
+- Apostrophes split (`l'accord` → `l accord`). Acceptable: word-by-word still matches.
+- Не покрывает paraphrasing — AI может перефразировать solution и пройти detector. Это accepted risk: paraphrased content не является дословной утечкой образца, и в любом случае это **expected** AI behavior для humanities feedback.
+
+**Round 2 validation:** build green (23.89s), smoke OK (+ new section 7), lint clean.
+
+**Spec link Round 2:** Round 1 commit `985a36c` + Round 2 follow-up commit. New helper `_shared/leak-detector.ts`. CLAUDE.md §27 Round 2 section.
+
 ## Известные хрупкие области
 
 1. **Chat.tsx** (2000+ строк) — очень сложный компонент

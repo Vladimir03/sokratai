@@ -363,4 +363,52 @@ if (!supabaseUrl || !supabaseKey) {
 }
 
 console.log("");
+
+// ─── 7. Humanities subjects mirror sync (Phase 7 round 2, 2026-05-20) ──────
+console.log("7. Humanities subjects mirror sync invariant...");
+
+const HUMANITIES_REQUIRED = ["russian", "rus", "literature", "english", "french", "spanish"];
+
+const humanitiesMirrors = [
+  {
+    label: "supabase/functions/_shared/subject-rubrics/index.ts::HUMANITIES_SUBJECTS",
+    path: "supabase/functions/_shared/subject-rubrics/index.ts",
+    pattern: /export const HUMANITIES_SUBJECTS = new Set<string>\(\[([^\]]+)\]\)/,
+  },
+  {
+    label: "src/lib/subjectHelpers.ts::HUMANITIES_WRITING_SUBJECTS",
+    path: "src/lib/subjectHelpers.ts",
+    pattern: /const HUMANITIES_WRITING_SUBJECTS = new Set<string>\(\[([^\]]+)\]\)/,
+  },
+  {
+    label: "src/components/homework/GuidedChatMessage.tsx::HUMANITIES_WRITING_SUBJECTS",
+    path: "src/components/homework/GuidedChatMessage.tsx",
+    pattern: /const HUMANITIES_WRITING_SUBJECTS = new Set\(\[([^\]]+)\]\)/,
+  },
+];
+
+for (const mirror of humanitiesMirrors) {
+  const fullPath = path.resolve(rootDir, mirror.path);
+  if (!fs.existsSync(fullPath)) {
+    fail(`${mirror.path} is missing — required for humanities mirror invariant`);
+    continue;
+  }
+  const content = fs.readFileSync(fullPath, "utf8");
+  const match = content.match(mirror.pattern);
+  if (!match) {
+    fail(`${mirror.label}: pattern not found — refactor may have broken the set declaration`);
+    continue;
+  }
+  // Extract все quoted strings (single / double) внутри set body — игнорирует
+  // inline comments типа `"rus", // legacy`.
+  const declared = [...match[1].matchAll(/["']([^"']+)["']/g)].map((m) => m[1]);
+  const missing = HUMANITIES_REQUIRED.filter((req) => !declared.includes(req));
+  if (missing.length > 0) {
+    fail(`${mirror.label} missing required subjects: ${missing.join(", ")}`);
+  } else {
+    ok(`${mirror.label} contains all required humanities subjects`);
+  }
+}
+
+console.log("");
 console.log("=== Smoke Check Complete ===");

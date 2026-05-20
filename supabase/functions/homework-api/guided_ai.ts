@@ -26,6 +26,7 @@ import {
   type ExamType,
   type SubjectRubric,
 } from "../_shared/subject-rubrics/index.ts";
+import { containsVerbatimSpan } from "../_shared/leak-detector.ts";
 
 // ─── Constants ──────────────────────────────────────────────────────────────
 
@@ -525,6 +526,7 @@ function getGeneratedHintCheck(
   text: string,
   solutionText?: string | null,
   taskText?: string | null,
+  subject?: string | null,
 ): { ok: boolean; reason?: string } {
   if (!text.trim()) {
     return { ok: false, reason: "empty_after_sanitize" };
@@ -535,10 +537,17 @@ function getGeneratedHintCheck(
     return contentCheck;
   }
 
-  // Anti-spoiler (Sokratai 2026-04-18, plan wild-swinging-nova.md):
-  // reject hints that cite numbers/formulas from the tutor's reference solution
-  // that are NOT already in the task statement (task givens stay allowed).
-  if (outputContainsSolutionLeak(text, solutionText, taskText)) {
+  // Anti-spoiler — subject-aware leak detection (Phase 7 round 2, 2026-05-20):
+  //   humanities (russian/literature/english/french/spanish) → verbatim span
+  //     (8+ words copy-paste). Token-based detector имел false positive на
+  //     естественном языке — любое латинское слово ≥5 chars значимо,
+  //     а на French каждое слово такое.
+  //   non-humanities (physics/math/etc.) → token-based как раньше
+  //     (numbers/formulas — unique tokens, false positive minimal).
+  const leakDetected = isHumanitiesSubject(subject)
+    ? containsVerbatimSpan(text, solutionText, taskText)
+    : outputContainsSolutionLeak(text, solutionText, taskText);
+  if (leakDetected) {
     return { ok: false, reason: "solution_leak" };
   }
 
@@ -1630,31 +1639,51 @@ export async function evaluateStudentAnswer(
     // feedback or ai_score_comment. Mirrors the hint path's getGeneratedHintCheck flow.
     // See plan wild-swinging-nova.md (P0-2 fix).
     //
-    // Phase 7 (2026-05-16) — Humanities skip:
+    // Phase 7 round 2 (2026-05-20, ChatGPT-5.5 review P0 #1):
     // Для humanities subjects (russian / literature / english / french / spanish)
-    // AI ОБЯЗАН использовать тот же словарь что и tutor solution_text — это
-    // не утечка, это правильный feedback по предмету. Token-based leak detector
-    // (extractSignificantTokensForLeak takes Latin words ≥5 chars as significant)
-    // имеет high false-positive rate на естественном языке → правильный
-    // French feedback заменялся на hardcoded физическую fallback фразу
-    // «Назови величину, с которой начнёшь». См. plan 1-functional-meteor.md
-    // Phase 7 section + CLAUDE.md §«Subject-aware AI prompts».
-    const skipLeakCheckForHumanities = isHumanitiesSubject(params.subject);
-    if (skipLeakCheckForHumanities && (params.solutionText || (params.solutionImageUrls?.length ?? 0) > 0)) {
+    // используем **verbatim span detector** (8+ слов подряд из solution_text)
+    // вместо token-overlap detector. Token-level имеет high false-positive
+    // на естественном языке (любое латинское слово ≥5 chars значимо, а в
+    // French каждое слово латиница). Span-level ловит copy-paste атак
+    // (model letter скопирован дословно) но позволяет AI использовать
+    // общую лексику. Для non-humanities — token detector как раньше
+    // (числа/формулы — unique tokens, false positive минимален).
+    //
+    // Phase 7 round 1 (commit 985a36c) полностью SKIPPED detector для
+    // humanities — это создало architectural gap (см. review verdict P0 #1).
+    // Round 2 закрывает его span guard'ом.
+    //
+    // Telemetry trigger: emit `*_check_skipped_humanities` event только при
+    // **effective** solution context (после anchor gate в line 1558-1569
+    // image refs могут быть отброшены), не raw `solutionImageUrls`.
+    const isHumanitiesContext = isHumanitiesSubject(params.subject);
+    const hasEffectiveSolutionContext =
+      solutionTextTrimmed.length > 0 || effectiveSolutionImageRefs.length > 0;
+    if (isHumanitiesContext && hasEffectiveSolutionContext) {
       console.info(JSON.stringify({
         event: "check_leak_check_skipped_humanities",
         subject: params.subject,
         verdict: result.verdict,
-        has_solution_text: !!params.solutionText,
+        has_solution_text: solutionTextTrimmed.length > 0,
+        detector: "verbatim_span",
       }));
     }
     if (
-      !skipLeakCheckForHumanities
-      && result.verdict !== "CHECK_FAILED"
+      result.verdict !== "CHECK_FAILED"
       && (params.solutionText || (params.solutionImageUrls?.length ?? 0) > 0)
     ) {
-      const feedbackLeaks = outputContainsSolutionLeak(result.feedback ?? "", params.solutionText, params.taskText);
-      const commentLeaks = outputContainsSolutionLeak(result.ai_score_comment ?? "", params.solutionText, params.taskText);
+      // Subject-aware leak detection:
+      //   humanities → verbatim span (8+ contiguous words copy-paste)
+      //   non-humanities → token-based (numbers/formulas overlap)
+      const detectLeak = (text: string | null | undefined): boolean => {
+        if (!text) return false;
+        if (isHumanitiesContext) {
+          return containsVerbatimSpan(text, params.solutionText, params.taskText);
+        }
+        return outputContainsSolutionLeak(text, params.solutionText, params.taskText);
+      };
+      const feedbackLeaks = detectLeak(result.feedback ?? "");
+      const commentLeaks = detectLeak(result.ai_score_comment ?? "");
       if (feedbackLeaks || commentLeaks) {
         console.warn(JSON.stringify({
           event: "check_solution_leak_rejected",
@@ -1664,12 +1693,21 @@ export async function evaluateStudentAnswer(
           comment_leak: commentLeaks,
         }));
 
+        // Phase 7 round 2: retry prompt subject-aware. Для humanities — «не
+        // цитируй большие фрагменты дословно» (verbatim copy-paste atak); для
+        // physics/math — «не цитируй числа/формулы». Старый prompt был
+        // hardcoded физическим — confused AI на humanities task.
+        const retryInstruction = isHumanitiesContext
+          ? "Предыдущая версия feedback/ai_score_comment содержала длинный фрагмент дословно из эталонного решения репетитора. " +
+            "Перепиши своими словами, сохраняя смысл feedback'а — не цитируй 8+ слов подряд из эталона. " +
+            "Можно использовать общую лексику предмета, но без копирования целых предложений или больших фраз. " +
+            "Верни тот же JSON без markdown-обёрток."
+          : "Предыдущая версия feedback/ai_score_comment цитировала числа или формулы из эталонного решения репетитора. " +
+            "Перепиши так, чтобы оставить вердикт и краткое направление без цитирования конкретных чисел или выражений из эталона. " +
+            "Верни тот же JSON без markdown-обёрток.";
         const retryMessages: LovableMessage[] = [...messages, {
           role: "user",
-          content:
-            "Предыдущая версия feedback/ai_score_comment цитировала числа или формулы из эталонного решения репетитора. " +
-            "Перепиши так, чтобы оставить вердикт и краткое направление без цитирования конкретных чисел или выражений из эталона. " +
-            "Верни тот же JSON без markdown-обёрток.",
+          content: retryInstruction,
         }];
         try {
           const retryParsed = await callLovableJson(retryMessages, "guided_check");
@@ -1677,8 +1715,9 @@ export async function evaluateStudentAnswer(
             checkFormat: params.checkFormat,
             maxScore: params.maxScore,
           });
-          const retryFeedbackLeaks = outputContainsSolutionLeak(retryResult.feedback ?? "", params.solutionText, params.taskText);
-          const retryCommentLeaks = outputContainsSolutionLeak(retryResult.ai_score_comment ?? "", params.solutionText, params.taskText);
+          // Same subject-aware detection on retry output.
+          const retryFeedbackLeaks = detectLeak(retryResult.feedback ?? "");
+          const retryCommentLeaks = detectLeak(retryResult.ai_score_comment ?? "");
           // Grading invariant (plan wild-swinging-nova.md P1-2 fix):
           // the leak-retry is a cosmetic rewrite — it MUST NOT change scoring.
           // Keep verdict/confidence/error_type/ai_score from the first valid
@@ -1837,7 +1876,10 @@ export async function generateHint(
     });
     const parsed = await callLovableJson(messages, "guided_hint");
     const firstHint = sanitizeHintText(parsed.hint, params.correctAnswer);
-    const firstCheck = getGeneratedHintCheck(firstHint, params.solutionText, params.taskText);
+    // Phase 7 round 2 (2026-05-20): pass subject → getGeneratedHintCheck
+    // выбирает verbatim span detector для humanities (вместо token detector
+    // который false positive'ит на естественном языке).
+    const firstCheck = getGeneratedHintCheck(firstHint, params.solutionText, params.taskText, params.subject);
 
     if (firstCheck.ok) {
       console.log("guided_hint_success", { hint_length: firstHint.length, attempt: 1 });
@@ -1848,8 +1890,36 @@ export async function generateHint(
       event: firstCheck.reason === "solution_leak" ? "hint_solution_leak_rejected" : "hint_rejected",
       reason: firstCheck.reason ?? null,
       retry: 1,
+      subject: params.subject,
+      detector: isHumanitiesSubject(params.subject) ? "verbatim_span" : "token_overlap",
       ...telemetryMeta,
     }));
+
+    // Phase 7 round 2: retry prompt subject-aware. Раньше hardcoded
+    // «упомяни конкретную физическую величину или закон» — на French задаче
+    // confused AI и вынуждал writing про физику. Now: hint_examples из
+    // resolveSubjectRubric (DELF B1 → грамматика/лексика/структура письма;
+    // physics → величина/закон; etc.).
+    let retryExamples = "";
+    try {
+      const retryRubric = resolveSubjectRubric({
+        subject: params.subject ?? null,
+        exam_type: params.examType ?? null,
+        kim_number: params.kimNumber ?? null,
+        task_kind: params.taskKind ?? "extended",
+        task_text: params.taskText ?? null,
+        tutor_rubric: null,
+      });
+      if (retryRubric.hint_examples && retryRubric.hint_examples.trim().length > 0) {
+        retryExamples = retryRubric.hint_examples;
+      }
+    } catch (rubricErr) {
+      console.warn(JSON.stringify({
+        event: "hint_retry_rubric_resolve_failed",
+        subject: params.subject,
+        error: rubricErr instanceof Error ? rubricErr.message : String(rubricErr),
+      }));
+    }
 
     const retryMessages: LovableMessage[] = [...messages];
     if (firstHint.trim()) {
@@ -1862,13 +1932,15 @@ export async function generateHint(
       role: "user",
       content:
         `Предыдущая версия подсказки не подходит: ${reasonToHumanMessage(firstCheck.reason)}. ` +
-        "Перепиши подсказку так, чтобы она явно упоминала конкретную физическую величину или закон из этой задачи. " +
-        "1-3 предложения, без общих фраз, без правильного ответа и без дословного цитирования эталонного решения.",
+        (retryExamples
+          ? `Перепиши подсказку с учётом следующих ориентиров для этого предмета:\n${retryExamples}\n`
+          : "Перепиши подсказку так, чтобы она направляла к ключевому понятию или приёму ЭТОЙ задачи. ") +
+        "1-3 предложения, без общих фраз, без правильного ответа и без дословного цитирования эталонного решения (особенно избегай повторения 8+ слов подряд из эталона).",
     });
 
     const retryParsed = await callLovableJson(retryMessages, "guided_hint");
     const secondHint = sanitizeHintText(retryParsed.hint, params.correctAnswer);
-    const secondCheck = getGeneratedHintCheck(secondHint, params.solutionText, params.taskText);
+    const secondCheck = getGeneratedHintCheck(secondHint, params.solutionText, params.taskText, params.subject);
 
     if (secondCheck.ok) {
       console.log("guided_hint_success", { hint_length: secondHint.length, attempt: 2 });

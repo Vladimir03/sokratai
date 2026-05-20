@@ -13,42 +13,84 @@ const SWIPE_THRESHOLD_PX = 50;
 const TAP_THRESHOLD_MS = 50;
 
 /**
- * Phase 7 (2026-05-16): inline image with HEIC-aware onError fallback.
- * Chrome/Firefox/Edge desktop не имеют HEIC decoder → broken image без
- * объяснения. Fallback показывает «Скачать оригинал» link.
- * См. plan ~/.claude/plans/1-functional-meteor.md Phase 7 section.
+ * Phase 7 round 2 (2026-05-20, ChatGPT-5.5 review P1 #3 + #4): inline image
+ * с HEIC-aware onError fallback.
+ *
+ * Two modes для избежания nested interactive elements:
+ *
+ *   interactive=true (default, для standalone use в Dialog fullscreen):
+ *     - success → `<img>` (renders inside parent context)
+ *     - failed → `<a href download>` с placeholder (без `target="_blank"` —
+ *       HTML5 download attribute ignored для cross-origin когда есть target).
+ *
+ *   interactive=false (для use внутри `<button>` — GalleryThumbnail):
+ *     - success → `<img>`
+ *     - failed → `<span>` non-interactive placeholder (НЕ `<a>` — иначе
+ *       nested `<a>` inside `<button>` = invalid markup, click ambiguous).
+ *       User кликает enclosing button — open dialog с full-size attempt,
+ *       fullscreen Dialog рендерит SafeImage interactive=true где `<a>`
+ *       уже допустим (Dialog не button).
+ *
+ * См. plan ~/.claude/plans/1-functional-meteor.md Phase 7 section + review.
  */
 function SafeImage({
   src,
   alt,
   className,
   fallbackClassName,
+  interactive = true,
 }: {
   src: string;
   alt: string;
   className: string;
   fallbackClassName?: string;
+  /**
+   * When false, fallback render uses inert `<span>` instead of `<a>`.
+   * Required when SafeImage is mounted inside another interactive element
+   * (e.g. `<button>` thumbnail wrapper) to avoid nested anchor markup.
+   */
+  interactive?: boolean;
 }) {
   const [failed, setFailed] = useState(false);
   const isHeicLike = /\.(heic|heif)(\?|$)/i.test(src);
 
   if (failed) {
+    const fallbackContent = (
+      <>
+        <Download className="h-4 w-4 shrink-0" />
+        <span className="text-xs">
+          {isHeicLike ? 'HEIC — скачать' : 'Не открывается'}
+        </span>
+      </>
+    );
+    const defaultClass =
+      'inline-flex h-24 items-center gap-2 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-amber-900';
+    const title = isHeicLike
+      ? 'iPhone-фото в HEIC-формате — не отображается в этом браузере. Скачайте оригинал.'
+      : 'Браузер не смог открыть файл. Скачайте оригинал.';
+
+    if (!interactive) {
+      // Inert placeholder для use внутри <button> — нельзя <a> nested.
+      return (
+        <span
+          className={fallbackClassName || defaultClass}
+          title={title}
+          aria-label={title}
+        >
+          {fallbackContent}
+        </span>
+      );
+    }
+
     return (
       <a
         href={src}
         download={alt}
-        target="_blank"
         rel="noreferrer"
-        className={
-          fallbackClassName ||
-          'inline-flex h-24 items-center gap-2 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-amber-900 hover:bg-amber-100'
-        }
-        title={isHeicLike ? 'iPhone-фото в HEIC-формате — не отображается в этом браузере. Скачайте оригинал.' : 'Браузер не смог открыть файл. Скачайте оригинал.'}
+        className={`${fallbackClassName || defaultClass} hover:bg-amber-100`}
+        title={title}
       >
-        <Download className="h-4 w-4 shrink-0" />
-        <span className="text-xs">
-          {isHeicLike ? 'HEIC — скачать' : 'Не открывается — скачать'}
-        </span>
+        {fallbackContent}
       </a>
     );
   }
@@ -119,6 +161,7 @@ const GalleryThumbnail = memo(function GalleryThumbnail({
         src={src}
         alt={alt}
         className={className}
+        interactive={false}
       />
     </button>
   );
@@ -231,6 +274,7 @@ export const PhotoGallery = memo(function PhotoGallery({
             src={images[0]}
             alt={`${imageAltPrefix} 1`}
             className={singleThumbnailClassName}
+            interactive={false}
           />
           <span
             aria-hidden="true"
