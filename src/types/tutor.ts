@@ -119,6 +119,13 @@ export interface ManualAddTutorStudentInput {
   notes?: string;
   parent_contact?: string;
   hourly_rate_cents?: number | null;
+  /**
+   * Phase 8.1 (2026-05-20) — tutor-curated student gender для AI grammar
+   * conjugation (mirror UpdateTutorStudentInput.gender). Pass null/undefined
+   * чтобы оставить как Не указано — AI fallback на нейтральные формы или
+   * profiles.gender (если ученик выбрал при signup).
+   */
+  gender?: 'male' | 'female' | null;
 }
 
 export interface ManualAddTutorStudentResponse {

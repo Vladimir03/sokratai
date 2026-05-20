@@ -417,6 +417,12 @@ Deno.serve(async (req) => {
     if (body.hourly_rate_cents !== undefined) {
       payload.hourly_rate_cents = typeof body.hourly_rate_cents === "number" ? body.hourly_rate_cents : null;
     }
+    // Phase 8.1 (2026-05-20): tutor-curated gender для AI grammar conjugation
+    // (см. CLAUDE.md §28 + migration 20260520120000_add_tutor_students_gender.sql).
+    // Validated against enum check constraint в tutor_students.gender.
+    if (body.gender === "male" || body.gender === "female") {
+      payload.gender = body.gender;
+    }
 
     const { data: existingLink, error: linkError } = await supabaseAdmin
       .from("tutor_students")

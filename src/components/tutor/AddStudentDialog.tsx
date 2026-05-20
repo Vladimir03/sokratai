@@ -93,6 +93,8 @@ export function AddStudentDialog({
     notes: '',
     parent_contact: '',
     hourly_rate_cents: undefined,
+    // Phase 8.1 (2026-05-20) — Pol ucenika для AI grammar conjugation.
+    gender: null,
   });
 
   const resetManualForm = () => {
@@ -109,6 +111,7 @@ export function AddStudentDialog({
       notes: '',
       parent_contact: '',
       hourly_rate_cents: undefined,
+      gender: null,
     });
     setLearningGoalPreset('');
     setLearningGoalOther('');
@@ -197,7 +200,10 @@ export function AddStudentDialog({
     }
   };
 
-  const handleFormChange = (field: keyof ManualAddTutorStudentInput, value: string | number | undefined) => {
+  const handleFormChange = (
+    field: keyof ManualAddTutorStudentInput,
+    value: string | number | null | undefined,
+  ) => {
     setFormData(prev => ({ ...prev, [field]: value }));
   };
 
@@ -412,8 +418,35 @@ export function AddStudentDialog({
                     />
                   </div>
 
+                  {/* Phase 8.1 (2026-05-20) — gender select для AI grammar
+                      conjugation. Mirror TutorStudentProfile (Phase 8). Полезно
+                      особенно для иностранных имён (Anastasiia, Marie), где AI
+                      guess по имени fails. Save в tutor_students.gender через
+                      tutor-manual-add-student edge function. */}
+                  <div className="space-y-2">
+                    <Label htmlFor="manual_student_gender">Пол ученика</Label>
+                    <select
+                      id="manual_student_gender"
+                      value={formData.gender ?? ''}
+                      onChange={(e) =>
+                        handleFormChange(
+                          'gender',
+                          (e.target.value === 'male' || e.target.value === 'female')
+                            ? e.target.value
+                            : null,
+                        )
+                      }
+                      className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-base ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      <option value="">Не указано</option>
+                      <option value="female">Женский</option>
+                      <option value="male">Мужской</option>
+                    </select>
+                  </div>
+
                   <p className="text-xs text-muted-foreground md:col-span-2">
-                    Заполните email или Telegram (или оба). Рекомендуем указать email — Telegram может быть недоступен
+                    Заполните email или Telegram (или оба). Рекомендуем указать email — Telegram может быть недоступен.
+                    Пол ученика — необязательно, но помогает AI правильно склонять глаголы («ты подставила» / «ты подставил»).
                   </p>
 
                   <div className="space-y-2">
