@@ -66,6 +66,21 @@
 - `trg_kb_after_update_moderation` — AFTER UPDATE, auto-publish + auto-resync
 - `trg_kb_after_insert_moderation` — AFTER INSERT, auto-publish если задача вставлена в «сократ»
 
+## Storage protection (2026-05-20, миграция `20260520120000`)
+
+`trg_protect_kb_attachments_from_delete` — BEFORE DELETE на `storage.objects`. Блокирует удаление объекта из bucket `kb-attachments`, если хоть один `kb_tasks.attachment_url` или `kb_tasks.solution_attachment_url` ссылается на него.
+
+**Что блокирует:** ручное удаление файлов через Lovable Cloud Storage UI. Именно так Егор потерял несколько файлов из папки `a7212758-.../` в мае 2026 — канонические копии в каталоге показывали пустые карточки.
+
+**Что НЕ блокирует:** application-level flows безопасны и сначала чистят kb_tasks ref, потом удаляют storage:
+- `useKnowledgeBase.removeTask` — DELETE FROM kb_tasks → потом `deleteKBTaskImage`
+- `EditTaskModal` onSuccess — UPDATE с новым attachment_url → потом delete removed refs
+- `CreateTaskModal` onError — orphan blob cleanup до INSERT
+
+**При добавлении нового callsite на `deleteKBTaskImage`:** сначала UPDATE/DELETE kb_tasks ref, потом storage. Иначе триггер выбросит `KB_STORAGE_PROTECTED`.
+
+**При намеренном orphan-cleanup** (фикс для битых refs): сначала `UPDATE kb_tasks SET attachment_url=NULL`, потом удаление файлов.
+
 ## Дизайн-токены KB
 - Primary: `bg-accent` / `fill-accent` (socrat green, #1B6B4A)
 - Folder: `bg-socrat-folder` / `bg-socrat-folder-bg` (purple, #5B5FC7)

@@ -317,7 +317,23 @@ export const TaskCard = memo(function TaskCard({
                   ) : null}
                 </div>
               )
-            ) : null}
+            ) : (
+              // Refs exist but signed URL failed — storage object likely missing.
+              // Without this fallback image-only задачи рендерились как пустая карточка
+              // между шапкой и кнопками — тутор не понимал почему. Diagnostic в console:
+              // см. getKBImageSignedUrl в src/lib/kbApi.ts.
+              <div className="flex h-32 flex-col items-center justify-center gap-1.5 rounded-xl border border-amber-200 bg-amber-50 px-4 text-center text-xs text-amber-700">
+                <Image className="h-5 w-5 text-amber-500" />
+                <span className="font-medium">
+                  {attachmentRefs.length === 1
+                    ? 'Фото недоступно'
+                    : `Фото недоступны (${attachmentRefs.length} шт.)`}
+                </span>
+                <span className="text-[11px] text-amber-600">
+                  Файл удалён из хранилища — попроси автора перезалить
+                </span>
+              </div>
+            )}
           </div>
         ) : null}
 
@@ -359,8 +375,9 @@ export const TaskCard = memo(function TaskCard({
                 ))}
               </div>
             ) : (
-              <div className="flex h-20 items-center justify-center rounded-xl bg-socrat-surface text-xs text-slate-400">
-                Не удалось загрузить фото
+              <div className="flex h-20 flex-col items-center justify-center gap-1 rounded-xl border border-amber-200 bg-amber-50 text-xs text-amber-700">
+                <Image className="h-4 w-4 text-amber-500" />
+                <span>Фото недоступно — файл удалён из хранилища</span>
               </div>
             )}
           </div>
@@ -413,8 +430,9 @@ export const TaskCard = memo(function TaskCard({
                     ))}
                   </div>
                 ) : (
-                  <div className="flex h-20 items-center justify-center rounded-xl bg-white/60 text-xs text-slate-400">
-                    Не удалось загрузить фото решения
+                  <div className="flex h-20 flex-col items-center justify-center gap-1 rounded-xl border border-amber-200 bg-amber-50 text-xs text-amber-700">
+                    <Image className="h-4 w-4 text-amber-500" />
+                    <span>Фото решения недоступно — файл удалён из хранилища</span>
                   </div>
                 )}
               </div>

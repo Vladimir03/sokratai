@@ -132,13 +132,26 @@ export async function getKBImageSignedUrl(
   storageRef: string,
 ): Promise<string | null> {
   const parsed = parseStorageRef(storageRef);
-  if (!parsed) return null;
+  if (!parsed) {
+    console.warn('[kb-image] invalid storage ref', { storageRef });
+    return null;
+  }
 
   const { data, error } = await supabase.storage
     .from(parsed.bucket)
     .createSignedUrl(parsed.objectPath, 3600); // 1 hour
 
-  if (error || !data?.signedUrl) return null;
+  if (error || !data?.signedUrl) {
+    // Most common reason: storage object physically missing (deleted from bucket).
+    // Observable via Status 400 на /storage/v1/object/sign/... in Network tab.
+    // Tutors see «Фото недоступно» fallback в TaskCard (Магнетизм regression 2026-05-20).
+    console.warn('[kb-image] signed URL failed — storage object likely missing', {
+      bucket: parsed.bucket,
+      objectPath: parsed.objectPath,
+      error: error?.message ?? 'no signedUrl',
+    });
+    return null;
+  }
   return data.signedUrl;
 }
 
