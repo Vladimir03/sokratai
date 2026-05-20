@@ -361,6 +361,7 @@ For architecture overview see: docs/delivery/engineering/architecture/README.md
 | `90-design-system.md` | Цветовая палитра, типографика, spacing, компоненты, anti-patterns |
 | `95-production-deploy.md` | **КРИТИЧНО**: когда требуется `deploy-sokratai` после frontend-изменений (Selectel VPS, Phase B 2026-05-03) |
 | `96-auth-ru-bypass.md` | **КРИТИЧНО**: 11 hard rules для auth flows в РФ (RegisterTutor / TutorLogin / SignUp / OAuth / Telegram). Читать ОБЯЗАТЕЛЬНО перед любым изменением auth flow |
+| `97-edge-function-error-contract.md` | **КРИТИЧНО**: каждый non-2xx от edge function — JSON `{ error, code? }` с русской фразой; клиент парсит body через `extractEdgeFunctionError`; lookup по email только через `find_auth_user_id_by_email` RPC, не `listUsers` |
 
 ## КРИТИЧЕСКИЕ ПРАВИЛА
 

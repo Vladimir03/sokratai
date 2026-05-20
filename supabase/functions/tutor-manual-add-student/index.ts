@@ -180,25 +180,56 @@ Deno.serve(async (req) => {
     let loginEmail = "";
     let plainPassword = "";
 
-    // Step 1: Try to find existing user by email (priority) or telegram
+    // Step 1: Try to find existing user by email (priority) or telegram.
+    // Use SECURITY DEFINER RPC instead of auth.admin.listUsers — listUsers is unreliable
+    // (transient errors silently produce empty result → 500 "email_exists" later).
     if (email) {
-      const { data: listData } = await supabaseAdmin.auth.admin.listUsers({
-        page: 1,
-        perPage: 1000,
-      });
-      const foundUser = listData?.users?.find((u: any) => u.email === email) ?? null;
+      const { data: foundId, error: lookupError } = await supabaseAdmin
+        .rpc("find_auth_user_id_by_email", { p_email: email });
 
-      if (foundUser) {
-        studentId = foundUser.id;
-        loginEmail = foundUser.email ?? email;
+      if (lookupError) {
+        console.error("auth.users lookup failed:", lookupError);
+        return new Response(
+          JSON.stringify({
+            code: "EMAIL_LOOKUP_FAILED",
+            error: "Не удалось проверить email в базе. Попробуй ещё раз через минуту.",
+          }),
+          { status: 503, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+        );
+      }
+
+      if (foundId) {
+        studentId = foundId as string;
+        loginEmail = email;
         const { data: emailProfile } = await supabaseAdmin
           .from("profiles")
           .select("id, registration_source, telegram_user_id, username")
-          .eq("id", foundUser.id)
+          .eq("id", studentId)
           .maybeSingle();
         if (emailProfile) {
           profileRegistrationSource = emailProfile.registration_source ?? null;
           existingTelegramUserId = emailProfile.telegram_user_id ?? null;
+        }
+
+        // Guard: do not silently attach a tutor/admin account as a student.
+        const { data: roleRows } = await supabaseAdmin
+          .from("user_roles")
+          .select("role")
+          .eq("user_id", studentId);
+        const conflictingRole = (roleRows ?? []).find(
+          (r: any) => r.role === "tutor" || r.role === "admin",
+        );
+        if (conflictingRole) {
+          return new Response(
+            JSON.stringify({
+              code: "EMAIL_BELONGS_TO_OTHER_ACCOUNT",
+              error:
+                "Этот email уже зарегистрирован в Сократе как " +
+                (conflictingRole.role === "admin" ? "администратор" : "репетитор") +
+                ". Используй другой email или попроси ученика войти и связаться с тобой по ссылке-приглашению.",
+            }),
+            { status: 409, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+          );
         }
       }
     }
@@ -266,24 +297,44 @@ Deno.serve(async (req) => {
       });
 
       if (authError || !authData.user) {
-        if (authError?.message?.includes("already been registered")) {
+        const alreadyRegistered =
+          (authError as any)?.code === "email_exists" ||
+          authError?.message?.includes("already been registered");
+
+        if (alreadyRegistered) {
           console.log("Auth user already exists for email:", userEmail);
-          // Retrieve by exact email lookup (race: user registered between our check and create)
-          const { data: raceListData } = await supabaseAdmin.auth.admin.listUsers({
-            page: 1,
-            perPage: 1000,
-          });
-          const raceUser = raceListData?.users?.find((u: any) => u.email === userEmail) ?? null;
-          if (raceUser) {
-            studentId = raceUser.id;
+          // Race or stale lookup: re-resolve via SECURITY DEFINER RPC.
+          const { data: raceId } = await supabaseAdmin
+            .rpc("find_auth_user_id_by_email", { p_email: userEmail });
+          if (raceId) {
+            studentId = raceId as string;
             profileRegistrationSource = "manual";
+            // Existing user — we did not actually create credentials.
+            isNewUser = false;
+            plainPassword = "";
           }
         }
 
-        if (!studentId && !authData?.user) {
+        if (!studentId) {
           console.error("Failed to create auth user:", authError);
+          if (alreadyRegistered) {
+            return new Response(
+              JSON.stringify({
+                code: "EMAIL_ALREADY_REGISTERED",
+                error:
+                  "Этот email уже зарегистрирован, но мы не смогли найти аккаунт по нему. Попробуй ещё раз или попроси ученика войти и связаться с тобой по ссылке-приглашению.",
+              }),
+              { status: 409, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+            );
+          }
           return new Response(
-            JSON.stringify({ error: "Failed to create student user" }),
+            JSON.stringify({
+              code: "CREATE_USER_FAILED",
+              error:
+                "Не удалось создать ученика: " +
+                (authError?.message ?? "неизвестная ошибка") +
+                ". Попробуй ещё раз.",
+            }),
             { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } },
           );
         }
@@ -318,7 +369,10 @@ Deno.serve(async (req) => {
 
     if (!studentId) {
       return new Response(
-        JSON.stringify({ error: "Student id not resolved" }),
+        JSON.stringify({
+          code: "STUDENT_ID_UNRESOLVED",
+          error: "Не удалось определить аккаунт ученика. Проверь email/Telegram и попробуй ещё раз.",
+        }),
         { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } },
       );
     }
@@ -433,7 +487,10 @@ Deno.serve(async (req) => {
       }
       console.error("Failed to create tutor_students:", insertError);
       return new Response(
-        JSON.stringify({ error: "Failed to create tutor student" }),
+        JSON.stringify({
+          code: "TUTOR_STUDENT_INSERT_FAILED",
+          error: "Не удалось привязать ученика к твоему кабинету. Попробуй ещё раз.",
+        }),
         { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } },
       );
     }
@@ -453,8 +510,12 @@ Deno.serve(async (req) => {
     );
   } catch (error) {
     console.error("Error in tutor-manual-add-student:", error);
+    const message = error instanceof Error ? error.message : String(error);
     return new Response(
-      JSON.stringify({ error: "Internal server error" }),
+      JSON.stringify({
+        code: "INTERNAL_ERROR",
+        error: "Внутренняя ошибка сервера при добавлении ученика: " + message,
+      }),
       { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } },
     );
   }
