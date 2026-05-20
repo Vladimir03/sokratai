@@ -1,4 +1,5 @@
 import { supabase } from '@/lib/supabaseClient';
+import { extractEdgeFunctionError } from '@/lib/edgeFunctionError';
 import type {
   Tutor,
   TutorGroup,
