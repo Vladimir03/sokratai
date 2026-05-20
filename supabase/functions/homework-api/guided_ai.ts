@@ -21,6 +21,7 @@ import {
 import { rewriteToDirect, SUPABASE_PROXY_URL } from "../_shared/proxy-url.ts";
 import {
   getSubjectLabel as getSubjectLabelShared,
+  isHumanitiesSubject,
   resolveSubjectRubric,
   type ExamType,
   type SubjectRubric,
@@ -1628,8 +1629,28 @@ export async function evaluateStudentAnswer(
     // if the AI cited numbers/formulas from the reference solution in user-visible
     // feedback or ai_score_comment. Mirrors the hint path's getGeneratedHintCheck flow.
     // See plan wild-swinging-nova.md (P0-2 fix).
+    //
+    // Phase 7 (2026-05-16) — Humanities skip:
+    // Для humanities subjects (russian / literature / english / french / spanish)
+    // AI ОБЯЗАН использовать тот же словарь что и tutor solution_text — это
+    // не утечка, это правильный feedback по предмету. Token-based leak detector
+    // (extractSignificantTokensForLeak takes Latin words ≥5 chars as significant)
+    // имеет high false-positive rate на естественном языке → правильный
+    // French feedback заменялся на hardcoded физическую fallback фразу
+    // «Назови величину, с которой начнёшь». См. plan 1-functional-meteor.md
+    // Phase 7 section + CLAUDE.md §«Subject-aware AI prompts».
+    const skipLeakCheckForHumanities = isHumanitiesSubject(params.subject);
+    if (skipLeakCheckForHumanities && (params.solutionText || (params.solutionImageUrls?.length ?? 0) > 0)) {
+      console.info(JSON.stringify({
+        event: "check_leak_check_skipped_humanities",
+        subject: params.subject,
+        verdict: result.verdict,
+        has_solution_text: !!params.solutionText,
+      }));
+    }
     if (
-      result.verdict !== "CHECK_FAILED"
+      !skipLeakCheckForHumanities
+      && result.verdict !== "CHECK_FAILED"
       && (params.solutionText || (params.solutionImageUrls?.length ?? 0) > 0)
     ) {
       const feedbackLeaks = outputContainsSolutionLeak(result.feedback ?? "", params.solutionText, params.taskText);
@@ -1678,11 +1699,19 @@ export async function evaluateStudentAnswer(
               feedback_leak: retryFeedbackLeaks,
               comment_leak: retryCommentLeaks,
             }));
-            // Scrub feedback / comment to a safe fallback; keep verdict + ai_score.
+            // Scrub feedback / comment to a safe SUBJECT-AWARE fallback;
+            // keep verdict + ai_score. Phase 7 (2026-05-16): заменили
+            // hardcoded физическую фразу на `buildValidatedFallbackHint`
+            // которая возвращает subject-appropriate fallback для всех
+            // 11 subjects (physics/maths/russian/etc.).
             result = {
               ...result,
               feedback: feedbackLeaks
-                ? "Проверил — давай разберём шаг за шагом. Назови величину, с которой начнёшь, и я направлю дальше."
+                ? buildValidatedFallbackHint({
+                    taskText: params.taskText,
+                    subject: params.subject,
+                    hasImage: (params.taskImageUrls?.length ?? 0) > 0,
+                  })
                 : result.feedback,
               ai_score_comment: commentLeaks ? null : result.ai_score_comment,
             };
@@ -1691,11 +1720,16 @@ export async function evaluateStudentAnswer(
           console.warn("guided_check_leak_retry_error", {
             error: retryErr instanceof Error ? retryErr.message : String(retryErr),
           });
-          // Same scrubbing fallback as when retry still leaks.
+          // Same SUBJECT-AWARE scrubbing fallback as when retry still leaks.
+          // Phase 7 (2026-05-16).
           result = {
             ...result,
             feedback: feedbackLeaks
-              ? "Проверил — давай разберём шаг за шагом. Назови величину, с которой начнёшь, и я направлю дальше."
+              ? buildValidatedFallbackHint({
+                  taskText: params.taskText,
+                  subject: params.subject,
+                  hasImage: (params.taskImageUrls?.length ?? 0) > 0,
+                })
               : result.feedback,
             ai_score_comment: commentLeaks ? null : result.ai_score_comment,
           };

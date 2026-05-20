@@ -63,6 +63,30 @@ const SUBJECT_LABELS: Record<string, string> = {
 const MATH_LIKE_SUBJECTS = new Set<string>(["maths", "math", "algebra", "geometry"]);
 const LANGUAGE_SUBJECTS = new Set<string>(["english", "french", "spanish"]);
 
+// Phase 7 (2026-05-16) — humanities subjects где AI ОБЯЗАН использовать тот
+// же словарь, что и tutor solution_text (это French / Russian / etc., нельзя
+// «не цитировать»). Используется для skip anti-leak detector в check / chat
+// paths, иначе false positive переводит правильный гуманитарный feedback в
+// hardcoded физический fallback. См. plan `~/.claude/plans/1-functional-meteor.md`
+// Phase 7 section + CLAUDE.md §22 / §40-homework-system.md.
+//
+// **Mirror** of `src/lib/subjectHelpers.ts::isHumanitiesWritingSubject` —
+// Deno cannot import TS from src/, keep in sync.
+export const HUMANITIES_SUBJECTS = new Set<string>([
+  "russian",
+  "rus", // legacy
+  "literature",
+  "english",
+  "french",
+  "spanish",
+]);
+
+export function isHumanitiesSubject(subject: string | null | undefined): boolean {
+  const id = (subject ?? "").trim().toLowerCase();
+  if (!id) return false;
+  return HUMANITIES_SUBJECTS.has(id);
+}
+
 export function getSubjectLabel(subjectId: string | null | undefined): string {
   const id = (subjectId ?? "").trim();
   if (!id) return "школьному предмету";

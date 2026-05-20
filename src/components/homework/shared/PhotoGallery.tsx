@@ -1,5 +1,5 @@
 import { memo, useCallback, useEffect, useRef, useState, type TouchEvent as ReactTouchEvent } from 'react';
-import { ChevronLeft, ChevronRight, X, ZoomIn } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Download, X, ZoomIn } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -11,6 +11,58 @@ import {
 
 const SWIPE_THRESHOLD_PX = 50;
 const TAP_THRESHOLD_MS = 50;
+
+/**
+ * Phase 7 (2026-05-16): inline image with HEIC-aware onError fallback.
+ * Chrome/Firefox/Edge desktop не имеют HEIC decoder → broken image без
+ * объяснения. Fallback показывает «Скачать оригинал» link.
+ * См. plan ~/.claude/plans/1-functional-meteor.md Phase 7 section.
+ */
+function SafeImage({
+  src,
+  alt,
+  className,
+  fallbackClassName,
+}: {
+  src: string;
+  alt: string;
+  className: string;
+  fallbackClassName?: string;
+}) {
+  const [failed, setFailed] = useState(false);
+  const isHeicLike = /\.(heic|heif)(\?|$)/i.test(src);
+
+  if (failed) {
+    return (
+      <a
+        href={src}
+        download={alt}
+        target="_blank"
+        rel="noreferrer"
+        className={
+          fallbackClassName ||
+          'inline-flex h-24 items-center gap-2 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-amber-900 hover:bg-amber-100'
+        }
+        title={isHeicLike ? 'iPhone-фото в HEIC-формате — не отображается в этом браузере. Скачайте оригинал.' : 'Браузер не смог открыть файл. Скачайте оригинал.'}
+      >
+        <Download className="h-4 w-4 shrink-0" />
+        <span className="text-xs">
+          {isHeicLike ? 'HEIC — скачать' : 'Не открывается — скачать'}
+        </span>
+      </a>
+    );
+  }
+
+  return (
+    <img
+      src={src}
+      alt={alt}
+      loading="lazy"
+      className={className}
+      onError={() => setFailed(true)}
+    />
+  );
+}
 
 const GalleryThumbnail = memo(function GalleryThumbnail({
   src,
@@ -63,10 +115,9 @@ const GalleryThumbnail = memo(function GalleryThumbnail({
       aria-label={`Открыть ${alt.toLowerCase()} во весь экран`}
       className="shrink-0 rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/20 focus-visible:ring-offset-2"
     >
-      <img
+      <SafeImage
         src={src}
         alt={alt}
-        loading="lazy"
         className={className}
       />
     </button>
@@ -176,10 +227,9 @@ export const PhotoGallery = memo(function PhotoGallery({
           title={`Открыть ${dialogTitle.toLowerCase()}`}
           aria-label={`Открыть ${dialogTitle.toLowerCase()} во весь экран`}
         >
-          <img
+          <SafeImage
             src={images[0]}
             alt={`${imageAltPrefix} 1`}
-            loading="lazy"
             className={singleThumbnailClassName}
           />
           <span
@@ -196,11 +246,11 @@ export const PhotoGallery = memo(function PhotoGallery({
               <DialogTitle>{dialogTitle}</DialogTitle>
               <DialogDescription>{dialogDescription}</DialogDescription>
             </DialogHeader>
-            <img
+            <SafeImage
               src={images[0]}
               alt={`${imageAltPrefix} 1`}
-              loading="lazy"
               className="max-h-[75vh] w-full rounded-md object-contain"
+              fallbackClassName="inline-flex h-[60vh] items-center justify-center gap-3 rounded-md border border-amber-300 bg-amber-50 px-4 py-3 text-amber-900"
             />
           </DialogContent>
         </Dialog>
@@ -271,11 +321,11 @@ export const PhotoGallery = memo(function PhotoGallery({
                 >
                   <ChevronRight className="h-5 w-5" />
                 </Button>
-                <img
+                <SafeImage
                   src={images[openIndex]}
                   alt={`${imageAltPrefix} ${openIndex + 1}`}
-                  loading="lazy"
                   className="mx-auto max-h-[75vh] w-full object-contain"
+                  fallbackClassName="mx-auto inline-flex h-[60vh] items-center justify-center gap-3 rounded-md border border-amber-300 bg-amber-50 px-4 py-3 text-amber-900"
                 />
               </>
             )}

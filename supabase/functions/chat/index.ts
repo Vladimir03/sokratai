@@ -78,7 +78,7 @@ interface ChatRequestBody {
 // frontend stores proxy URLs in DB but server-side fetches still go direct.
 import { buildAllowedSignedUrlPrefixes } from "../_shared/image-domains.ts";
 import { SUPABASE_PROXY_URL } from "../_shared/proxy-url.ts";
-import { resolveSubjectRubric } from "../_shared/subject-rubrics/index.ts";
+import { isHumanitiesSubject, resolveSubjectRubric } from "../_shared/subject-rubrics/index.ts";
 const ALLOWED_IMAGE_DOMAINS = buildAllowedSignedUrlPrefixes([
   Deno.env.get("SUPABASE_URL") ?? "",
   SUPABASE_PROXY_URL,
@@ -1645,7 +1645,25 @@ async function processAIRequest(
   // and validate against solution-leak BEFORE forwarding any tokens to the
   // student. This prevents jailbreak prompts from extracting the tutor solution
   // via /chat (system-prompt anti-spoiler instructions are not an access boundary).
-  const guardedAgainstSolutionLeak = hasTutorSolution;
+  //
+  // Phase 7 (2026-05-16) — Humanities skip:
+  // Для humanities subjects (russian / literature / english / french / spanish)
+  // AI ОБЯЗАН использовать тот же словарь что и tutor solution_text — это
+  // не утечка, это правильный feedback по предмету. extractSignificantTokensForLeak
+  // имеет high false-positive rate на естественном языке (Latin words ≥5 chars
+  // считаются significant, что покрывает почти весь French/English). Skip
+  // detector полностью для humanities → переходим в pass-through streaming.
+  // См. plan ~/.claude/plans/1-functional-meteor.md Phase 7 + CLAUDE.md §18.
+  const isHumanitiesContext = isHumanitiesSubject(resolvedSubject);
+  const guardedAgainstSolutionLeak = hasTutorSolution && !isHumanitiesContext;
+  if (hasTutorSolution && isHumanitiesContext) {
+    console.info(JSON.stringify({
+      event: "chat_leak_check_skipped_humanities",
+      subject: resolvedSubject,
+      assignment_id: guidedHomeworkAssignmentId ?? null,
+      task_id: guidedHomeworkTaskId ?? null,
+    }));
+  }
 
   (async () => {
     try {
@@ -1678,11 +1696,42 @@ async function processAIRequest(
         if (leakHit) {
           console.warn(JSON.stringify({
             event: "chat_solution_leak_rejected",
+            subject: resolvedSubject,
             assignment_id: guidedHomeworkAssignmentId ?? null,
             task_id: guidedHomeworkTaskId ?? null,
             user_id: userId,
           }));
-          emittedText = "Давай двигаться шаг за шагом — с какой величины из условия ты начнёшь? Назови её, и я направлю к следующему шагу.";
+          // Phase 7 (2026-05-16): subject-aware fallback вместо hardcoded
+          // физической фразы «Назови величину, с которой начнёшь». Для humanities
+          // этот path уже skipped выше (guardedAgainstSolutionLeak=false), здесь
+          // обрабатываем только non-humanities subjects где leak detector
+          // работает корректно. resolveSubjectRubric возвращает subject-appropriate
+          // fallback_hint (physics → «Какая физическая величина...», maths →
+          // «Какая формула / теорема...», etc.).
+          let subjectAwareFallback =
+            "Давай разберём шаг за шагом — какая часть условия требует пояснения, чтобы я мог направить дальше?";
+          if (resolvedSubject) {
+            try {
+              const rubric = resolveSubjectRubric({
+                subject: resolvedSubject,
+                exam_type: null,
+                kim_number: null,
+                task_kind: "extended",
+                task_text: taskContext ?? null,
+                tutor_rubric: null,
+              });
+              if (rubric.fallback_hint && rubric.fallback_hint.trim().length > 0) {
+                subjectAwareFallback = rubric.fallback_hint;
+              }
+            } catch (rubricErr) {
+              console.warn(JSON.stringify({
+                event: "chat_leak_fallback_rubric_resolve_failed",
+                subject: resolvedSubject,
+                error: rubricErr instanceof Error ? rubricErr.message : String(rubricErr),
+              }));
+            }
+          }
+          emittedText = subjectAwareFallback;
         }
 
         // Emit the validated text as a single delta + [DONE], matching the

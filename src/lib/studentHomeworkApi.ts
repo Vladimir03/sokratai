@@ -13,6 +13,7 @@ import {
   serializeThreadAttachmentRefs,
 } from '@/lib/homeworkThreadAttachments';
 import { extractApiErrorMessage } from '@/lib/apiErrorMessage';
+import { compressForUpload } from '@/lib/imageCompression';
 
 const HOMEWORK_IMAGES_BUCKET = 'homework-images';
 const HOMEWORK_SUBMISSIONS_BUCKET = 'homework-submissions';
@@ -573,20 +574,43 @@ export async function uploadStudentThreadImage(
     throw new StudentHomeworkApiError('Файл слишком большой. Максимум 5 МБ');
   }
 
+  // Phase 7 (2026-05-16) — client-side compress перед upload (mirror
+  // mock-exams pattern). HEIC файлы с iPhone декодируются Safari нативно
+  // → конвертируются в JPEG. Desktop browsers без HEIC decoder получают
+  // graceful pass-through (original file), AI/tutor viewer handle через
+  // P1 fallback в `ThreadAttachments`. Защищает от:
+  //   1) tutor видит broken image при HEIC у не-Safari браузера
+  //   2) Lovable Gateway / Gemini не decode'ит HEIC → AI отвечает generic
+  // Не-image files (PDF) автоматически pass-through (см. compressForUpload).
+  let uploadFile: File;
+  try {
+    uploadFile = await compressForUpload(file, {
+      maxBytes: 4 * 1024 * 1024,
+      maxLongSide: 2048,
+    });
+  } catch (compressErr) {
+    console.warn('[studentHomeworkApi] compression failed, uploading original', {
+      fileName: file.name,
+      fileSize: file.size,
+      error: compressErr instanceof Error ? compressErr.message : String(compressErr),
+    });
+    uploadFile = file;
+  }
+
   const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
   if (sessionError) {
     throw new StudentHomeworkApiError(sessionError.message);
   }
 
   const studentId = ensureUserId(sessionData.session?.user?.id);
-  const ext = file.name.split('.').pop()?.toLowerCase() || 'jpg';
+  const ext = uploadFile.name.split('.').pop()?.toLowerCase() || 'jpg';
   const fileId = generateStorageObjectId();
   const objectPath = `${studentId}/${assignmentId}/threads/${taskOrder}/${fileId}.${ext}`;
-  const contentType = file.type || 'application/octet-stream';
+  const contentType = uploadFile.type || 'application/octet-stream';
 
   const { error: primaryError } = await supabase.storage
     .from(HOMEWORK_SUBMISSIONS_BUCKET)
-    .upload(objectPath, file, { upsert: false, contentType });
+    .upload(objectPath, uploadFile, { upsert: false, contentType });
 
   if (!primaryError) {
     return toStorageRef(HOMEWORK_SUBMISSIONS_BUCKET, objectPath);
@@ -605,7 +629,7 @@ export async function uploadStudentThreadImage(
   const fallbackPath = `${studentId}/${assignmentId}/threads/${taskOrder}/${fileId}.${ext}`;
   const { error: fallbackError } = await supabase.storage
     .from(HOMEWORK_IMAGES_BUCKET)
-    .upload(fallbackPath, file, { upsert: false, contentType });
+    .upload(fallbackPath, uploadFile, { upsert: false, contentType });
 
   if (fallbackError) {
     throw new StudentHomeworkApiError(

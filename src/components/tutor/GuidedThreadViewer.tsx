@@ -99,6 +99,7 @@ export function GuidedThreadViewer({
   assignmentId,
   studentId,
   studentNameOverride,
+  subject,
   enabled = true,
   initialTaskFilter = 'all',
   hideTaskFilter = false,
@@ -106,6 +107,14 @@ export function GuidedThreadViewer({
 }: {
   assignmentId: string;
   studentId: string;
+  /**
+   * Phase 7 (2026-05-16) — homework subject from `homework_tutor_assignments.subject`.
+   * Used by GuidedChatMessage for subject-aware step labels («Часть письма» vs
+   * «Шаг решения», «Письмо» vs «Решение к задаче», «Проверка письма» vs «Проверка
+   * решения»). Optional — when omitted, GuidedChatMessage falls back to default
+   * physics/math labels.
+   */
+  subject?: string | null;
   /**
    * Optional student display name resolved by the parent (e.g.
    * TutorHomeworkDetail uses `details.assigned_students[*].name` which is
@@ -620,6 +629,7 @@ export function GuidedThreadViewer({
                         hiddenFromStudent={message.visible_to_student === false}
                         imageResolver={tutorImageResolver}
                         showDateInTimestamp
+                        subject={subject}
                       />
                     );
                   })

@@ -1,11 +1,68 @@
 import { useEffect, useMemo, useState } from 'react';
-import { FileText, ImageIcon } from 'lucide-react';
+import { Download, FileText, ImageIcon } from 'lucide-react';
 import { Skeleton } from '@/components/ui/skeleton';
 import {
   getThreadAttachmentKind,
   getThreadAttachmentLabel,
   parseThreadAttachmentRefs,
 } from '@/lib/homeworkThreadAttachments';
+
+/**
+ * Phase 7 (2026-05-16): graceful fallback для image load failures.
+ * Chrome/Firefox/Edge на desktop НЕ имеют HEIC decoder в <img> tag —
+ * только Safari macOS/iOS умеет. Без onError handler репетитор видит
+ * broken image placeholder без объяснения. После Phase 7 client-side
+ * compression (compressForUpload в studentHomeworkApi.ts) новые HEIC
+ * upload'ы не появятся в Storage, но legacy HEIC файлы остаются.
+ *
+ * Fallback показывает icon + filename + кнопку «Скачать оригинал».
+ */
+function ImageWithFallback({
+  src,
+  alt,
+  className,
+  label,
+}: {
+  src: string;
+  alt: string;
+  className: string;
+  label: string;
+}) {
+  const [failed, setFailed] = useState(false);
+
+  const isHeicLike = /\.(heic|heif)(\?|$)/i.test(src);
+
+  if (failed) {
+    return (
+      <a
+        href={src}
+        download={label}
+        target="_blank"
+        rel="noreferrer"
+        className="inline-flex min-h-20 items-center gap-3 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-amber-900 hover:bg-amber-100 max-w-[260px]"
+        title={isHeicLike ? 'iPhone-фото в HEIC-формате — не отображается в этом браузере. Скачайте оригинал.' : 'Браузер не смог открыть файл. Скачайте оригинал.'}
+      >
+        <Download className="h-5 w-5 shrink-0" />
+        <div className="min-w-0">
+          <p className="truncate text-xs font-medium">{label}</p>
+          <p className="text-[11px] opacity-80">
+            {isHeicLike ? 'HEIC — скачать' : 'Не открывается — скачать'}
+          </p>
+        </div>
+      </a>
+    );
+  }
+
+  return (
+    <img
+      src={src}
+      alt={alt}
+      className={className}
+      loading="lazy"
+      onError={() => setFailed(true)}
+    />
+  );
+}
 
 interface ResolvedAttachment {
   ref: string;
@@ -84,6 +141,9 @@ export function ThreadAttachments({
     <div className="mt-2 flex flex-wrap gap-2">
       {items.map((item) => {
         if (item.kind === 'image' && item.url) {
+          // Phase 7 (2026-05-16): использовать ImageWithFallback вместо
+          // bare <img> — onError handler рендерит download placeholder
+          // для HEIC файлов которые не decode'ятся в Chrome/Firefox/Edge.
           return (
             <a
               key={item.ref}
@@ -92,11 +152,11 @@ export function ThreadAttachments({
               rel="noreferrer"
               className="inline-block rounded-md border bg-background p-0.5 hover:opacity-90 transition-opacity"
             >
-              <img
+              <ImageWithFallback
                 src={item.url}
                 alt={item.label}
+                label={item.label}
                 className={imageClassName}
-                loading="lazy"
               />
             </a>
           );

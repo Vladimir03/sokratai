@@ -86,6 +86,14 @@ interface GuidedChatMessageProps {
    * time-only since the student is in the live conversation.
    */
   showDateInTimestamp?: boolean;
+  /**
+   * Phase 7 (2026-05-16) — homework subject from `homework_tutor_assignments.subject`.
+   * Used to subject-aware step label: for humanities-writing subjects (DELF B1
+   * production écrite etc.) рендерится «Письмо» / «Эссе» вместо «Шаг решения» /
+   * «Решение к задаче» (физико-математический термин). Optional — legacy
+   * callsites без prop'а получают physics/math default labels.
+   */
+  subject?: string | null;
 }
 
 function formatTime(isoString?: string, showDate?: boolean): string {
@@ -101,21 +109,47 @@ function formatTime(isoString?: string, showDate?: boolean): string {
   });
 }
 
-function formatMessageKind(kind: GuidedMessageKind | undefined): string | null {
+// Phase 7 (2026-05-16): humanities-writing subjects где «Шаг решения» /
+// «Решение к задаче» звучат физико-математически. Для DELF B1 production
+// écrite / письма / эссе по русскому — рендерим «Письмо» / «Решение».
+// Mirror src/lib/subjectHelpers.ts::isHumanitiesWritingSubject (нельзя
+// import оттуда внутрь homework component без circular dep risk).
+const HUMANITIES_WRITING_SUBJECTS = new Set([
+  'russian',
+  'rus',
+  'literature',
+  'english',
+  'french',
+  'spanish',
+]);
+
+function isHumanitiesWritingSubjectLocal(subject: string | null | undefined): boolean {
+  if (!subject) return false;
+  return HUMANITIES_WRITING_SUBJECTS.has(subject.trim().toLowerCase());
+}
+
+function formatMessageKind(
+  kind: GuidedMessageKind | undefined,
+  subject?: string | null,
+): string | null {
   if (!kind) return null;
   if (kind === 'system') return 'Введение';
   if (kind === 'hint_request') return 'Подсказка';
-  if (kind === 'question') return 'Шаг решения';
+
+  // Phase 7 (2026-05-16): subject-aware label для гуманитарных предметов.
+  const isHumanities = isHumanitiesWritingSubjectLocal(subject);
+
+  if (kind === 'question') return isHumanities ? 'Часть письма' : 'Шаг решения';
   if (kind === 'answer') return 'Ответ';
   // Phase 1.2 (preview-QA #6, 2026-05-10): submission user message
   // bubble label. Backend storage of single-shot SubmitSheet sends
   // через handleStudentSubmission. Один и тот же label виден на обеих
   // perspective'ах — student sees own «Решение к задаче» bubble + tutor
   // sees same через GuidedThreadViewer.
-  if (kind === 'submission') return 'Решение к задаче';
+  if (kind === 'submission') return isHumanities ? 'Письмо' : 'Решение к задаче';
   // AI verdict for submission — distinct label so student differentiates
   // formal verdict (`check_result`) vs casual chat reply (`ai_reply`).
-  if (kind === 'check_result') return 'Проверка решения';
+  if (kind === 'check_result') return isHumanities ? 'Проверка письма' : 'Проверка решения';
   return null;
 }
 
@@ -134,6 +168,7 @@ const GuidedChatMessage = memo(({
   hiddenFromStudent,
   imageResolver,
   showDateInTimestamp,
+  subject,
 }: GuidedChatMessageProps) => {
   const resolveImageRef = imageResolver ?? getStudentTaskImageSignedUrl;
   const [katexLoaded, setKatexLoaded] = useState(false);
@@ -156,7 +191,7 @@ const GuidedChatMessage = memo(({
   const isSystem = message.role === 'system';
   const isTutor = message.role === 'tutor';
   const isTutorPerspective = perspective === 'tutor';
-  const kindLabel = formatMessageKind(message.message_kind);
+  const kindLabel = formatMessageKind(message.message_kind, subject);
   const isFailed = message.message_delivery_status === 'failed';
   const isSending = message.message_delivery_status === 'sending';
 

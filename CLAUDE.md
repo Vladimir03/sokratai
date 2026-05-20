@@ -1636,6 +1636,110 @@ R3 #4 (P2) — **Supabase types.ts manual patch**. Lovable auto-regen может
 
 **Спека:** `~/.claude/plans/1-immutable-hummingbird.md`.
 
+### 27. Humanities anti-leak skip + HEIC fix + subject-aware labels (2026-05-20, Phase 7)
+
+Phase 7 закрывает 3 связанных бага у репетитора-француза которые подрывают доверие к продукту. Все три коренятся в Phase 1-6 evolution когда subject support добавлялся **поверх** существующих anti-leak / upload / label механизмов built for physics/math.
+
+**Симптомы (репетитор по French / DELF B1 production écrite):**
+1. AI на одной задаче по французскому даёт правильный feedback (DELF B1 → «Salut! Однако обратим внимание на 'Золотое правило' по количеству слов: минимум 160, у тебя 90-100»), а на другой задаче (или после следующего сообщения в той же задаче) выдаёт hardcoded физическую фразу: «Давай двигаться шаг за шагом — с какой величины из условия ты начнёшь? Назови её, и я направлю к следующему шагу.»
+2. Tutor (Chrome desktop, не в РФ) видит broken image вместо student photo. Alt-текст показывает `<uuid>.heic`.
+3. UX labels «ШАГ РЕШЕНИЯ (фото)» / «Решение к задаче» / «Проверка решения» звучат физически для DELF B1 эссе.
+
+**Root cause #1 (физическая фраза):**
+
+Anti-leak detector в check + chat paths имеет **3 hardcoded subject-blind fallback** strings:
+- `chat/index.ts:1685` — buffered SSE leak fallback
+- `guided_ai.ts:1685` + `guided_ai.ts:1698` — check retry-leak / catch-exception fallback
+
+Token detector (`extractSignificantTokensForLeak`) берёт tokens с **латиницей длины ≥5** как «significant». На French/English/Spanish ВСЕ слова латиница (`système`, `covoiturage`, `collègues`, `France`). AI ответ на French неизбежно содержит те же слова что в tutor `solution_text` (это French!). False positive leak detected → fallback applied → physics phrase shown.
+
+**Это architectural mismatch:** anti-leak построен для math/physics где `solution_text` содержит **уникальные числа/формулы** и AI feedback **не должен** их цитировать. Для humanities AI **обязан** использовать тот же словарь что и tutor solution.
+
+«Задача 1 OK, задача 2 broken»: вероятно у задачи 1 в БД нет `solution_text` → leak detector не активируется (line 1633 guard `if (params.solutionText || (params.solutionImageUrls?.length ?? 0) > 0)`). У задачи 2 репетитор заполнил solution → детектор активен → false positive.
+
+**Root cause #2 (HEIC):**
+
+`uploadStudentThreadImage` в `src/lib/studentHomeworkApi.ts` **не применял** client-side compression. Mock-exams pipeline применяет (`compressForUpload`, см. §22 round 2). HEIC файл с iPhone хранился как есть. Chrome / Firefox / Edge desktop не имеют HEIC decoder в `<img>` → broken image без `onError` handler. Side effect: Gemini не поддерживает HEIC → AI отвечает generic потому что не «видит» фото.
+
+**Root cause #3 (UX labels):**
+
+`GuidedChatMessage.tsx::formatMessageKind` рендерит hardcoded физико-математические labels для всех subjects. Не учитывает что для DELF B1 / литературы / эссе по русскому это звучит чуждо.
+
+**Fix #1 — Humanities anti-leak skip:**
+
+- `_shared/subject-rubrics/index.ts` — новый export `HUMANITIES_SUBJECTS` set + `isHumanitiesSubject(subject)` helper. Mirror `src/lib/subjectHelpers.ts::isHumanitiesWritingSubject` (Deno cannot import from src/).
+- `guided_ai.ts::evaluateStudentAnswer` — anti-leak block (lines 1631-1704) обёрнут в `if (!skipLeakCheckForHumanities)`. Для humanities (russian/literature/english/french/spanish/rus) — `result` возвращается as-is, без leak check / retry / fallback. Telemetry `event: 'check_leak_check_skipped_humanities'`.
+- `guided_ai.ts` — 2 hardcoded «Назови величину» fallback strings (1685, 1698) заменены на `buildValidatedFallbackHint({ taskText, subject, hasImage })` (subject-aware, уже существовал в файле для hint path — reuse для check path).
+- `chat/index.ts::processAIRequest` — `guardedAgainstSolutionLeak = hasTutorSolution && !isHumanitiesSubject(resolvedSubject)`. Для humanities — pass-through streaming (else-branch).
+- `chat/index.ts:1685` — hardcoded fallback заменён на `resolveSubjectRubric({ subject: resolvedSubject, ... }).fallback_hint` (subject-aware). Fallback на generic русскую фразу если rubric resolve fail. Telemetry `event: 'chat_leak_check_skipped_humanities'`.
+
+**Fix #2 — HEIC two-layer fix:**
+
+P0 — client compress at source:
+- `src/lib/studentHomeworkApi.ts::uploadStudentThreadImage` — `await compressForUpload(file, { maxBytes: 4MB, maxLongSide: 2048 })` перед FormData append. Mirror mock-exams pattern.
+- iPhone Safari нативно декодит HEIC → JPEG. Desktop browsers с graceful pass-through.
+- try/catch вокруг compress — если failure, upload original (defensive).
+
+P1 — tutor viewer onError fallback (defense-in-depth для legacy HEIC files):
+- `src/components/homework/ThreadAttachments.tsx` — new `ImageWithFallback` component с `onError` handler → placeholder с Lucide `Download` icon + «HEIC — скачать» link (или «Не открывается — скачать» для не-HEIC errors).
+- `src/components/homework/shared/PhotoGallery.tsx` — analogous `SafeImage` component, applied к 3 `<img>` locations (thumbnail / single thumbnail / fullscreen).
+- HEIC detection через regex `/\.(heic|heif)(\?|$)/i` на URL — distinguishes HEIC-specific message vs generic load failure.
+
+P2 (skip) — server-side HEIC convert для AI prompt: после P0 client compression новые HEIC не появятся → AI not affected. Для legacy HEIC файлов AI не видит фото (Gemini ignore), репетитор знает через P1 placeholder.
+
+**Fix #3 — Subject-aware step labels:**
+
+- `src/components/homework/GuidedChatMessage.tsx` — new prop `subject?: string | null`. New local `HUMANITIES_WRITING_SUBJECTS` set + `isHumanitiesWritingSubjectLocal` helper (mirror `src/lib/subjectHelpers.ts`, avoid circular dep risk).
+- `formatMessageKind(kind, subject)` теперь принимает subject. For `message_kind` ∈ {question, submission, check_result} И humanities-writing subject:
+  - `question` → «Часть письма» (vs «Шаг решения»)
+  - `submission` → «Письмо» (vs «Решение к задаче»)
+  - `check_result` → «Проверка письма» (vs «Проверка решения»)
+- Pass-through `subject` prop chain:
+  - `HomeworkProblem.tsx` (student mobile) → `GuidedChatMessage`
+  - `GuidedThreadViewer.tsx` (tutor) → `GuidedChatMessage`, новый `subject` prop в Props
+  - `StudentDrillDown.tsx` → `GuidedThreadViewer`, новый `subject` prop в Props
+  - `TutorHomeworkDetail.tsx` → `StudentDrillDown` (передаёт `details.assignment.subject`)
+
+**Anti-leak invariants (post-fix):**
+
+- **Humanities subjects** (russian/literature/english/french/spanish/rus): leak detector skipped полностью. AI может использовать любые гуманитарные слова из tutor solution — это **не утечка**, это правильный feedback по предмету.
+- **Math/physics/chemistry/informatics/biology/geography/history/social/other:** leak detector работает как раньше (числа/формулы/длинные латинские/digit-содержащие tokens). 3 fallback strings теперь subject-aware (`buildValidatedFallbackHint` для check / `resolveSubjectRubric().fallback_hint` для chat).
+- **Anti-spoiler invariant сохраняется для tutor solution:** server-side `service_role` fetches solution только в edge functions, никогда не возвращается ученику. Контракт `.claude/rules/40-homework-system.md` §«Эталонное решение для AI и anti-leak» не нарушен.
+- **`solution_text < 20 chars` gate** (CLAUDE.md §9 image-only anti-leak) — остаётся для всех subjects.
+
+**При добавлении нового humanities subject** (или расширении humanities set):
+- Расширить **обе** mirror-копии sync'но:
+  - Backend: `HUMANITIES_SUBJECTS` const в `_shared/subject-rubrics/index.ts`
+  - Frontend: `HUMANITIES_WRITING_SUBJECTS` const в `src/components/homework/GuidedChatMessage.tsx` + `HUMANITIES_WRITING_SUBJECTS` в `src/lib/subjectHelpers.ts`
+- Грепнуть `grep -n "HUMANITIES_SUBJECTS\|HUMANITIES_WRITING" supabase/ src/` — должно быть 3 location.
+
+**При добавлении нового message_kind:**
+- Если для humanities нужен альтернативный label — добавить branch в `formatMessageKind` в `GuidedChatMessage.tsx`. Иначе default physics/math label применится.
+
+**Files (~120 lines diff, 9 файлов):**
+
+| Файл | Изменение |
+|---|---|
+| `supabase/functions/_shared/subject-rubrics/index.ts` | + `HUMANITIES_SUBJECTS` + `isHumanitiesSubject` helper |
+| `supabase/functions/homework-api/guided_ai.ts` | wrap anti-leak block в humanities skip + 2 hardcoded fallback → `buildValidatedFallbackHint` |
+| `supabase/functions/chat/index.ts` | humanities skip в `guardedAgainstSolutionLeak` + hardcoded fallback → `resolveSubjectRubric().fallback_hint` |
+| `src/lib/studentHomeworkApi.ts` | `compressForUpload` в `uploadStudentThreadImage` |
+| `src/components/homework/ThreadAttachments.tsx` | new `ImageWithFallback` component с onError → placeholder + download |
+| `src/components/homework/shared/PhotoGallery.tsx` | new `SafeImage` helper, applied на 3 `<img>` locations |
+| `src/components/homework/GuidedChatMessage.tsx` | `subject?: string | null` prop + subject-aware step labels |
+| `src/components/tutor/GuidedThreadViewer.tsx` | `subject` prop → pass to GuidedChatMessage |
+| `src/components/tutor/results/StudentDrillDown.tsx` | `subject` prop → pass to GuidedThreadViewer |
+| `src/pages/tutor/TutorHomeworkDetail.tsx` | pass `details.assignment.subject` to StudentDrillDown |
+| `src/pages/student/HomeworkProblem.tsx` | pass `data.assignment.subject` to GuidedChatMessage |
+
+**Hard invariants:**
+- **No DB migrations.**
+- **Backward compat:** все 9 props additive (`subject?: string | null` default null). Legacy callsites без prop'а получают physics/math defaults.
+- **Phase 1-6 contracts не затронуты** (subject-aware prompts / subject-rubric layer / mock-exams изолированы).
+- ОГЭ scope: не покрыто (Phase 7 — humanities-EGE-ready, ОГЭ humanities — отдельная итерация).
+
+**Spec link:** `~/.claude/plans/1-functional-meteor.md` Phase 7 section.
+
 ## Известные хрупкие области
 
 1. **Chat.tsx** (2000+ строк) — очень сложный компонент

@@ -42,6 +42,13 @@ interface StudentDrillDownProps {
    * homework-api edge function deploy lags behind the frontend bundle.
    */
   studentName?: string | null;
+  /**
+   * Phase 7 (2026-05-16) — homework subject from `homework_tutor_assignments.subject`.
+   * Pass-through to GuidedThreadViewer → GuidedChatMessage для subject-aware
+   * step labels («Часть письма» / «Письмо» / «Проверка письма» для humanities-
+   * writing subjects вместо «Шаг решения» / «Решение к задаче» / «Проверка решения»).
+   */
+  subject?: string | null;
   tasks: TutorHomeworkAssignmentDetails['tasks'];
   perStudent: TutorHomeworkResultsPerStudent | null;
   /** Task selected from a HeatmapGrid cell click. `null` = show all tasks. */
@@ -52,6 +59,7 @@ export function StudentDrillDown({
   assignmentId,
   studentId,
   studentName,
+  subject,
   tasks,
   perStudent,
   initialTaskId,
@@ -298,6 +306,7 @@ export function StudentDrillDown({
           assignmentId={assignmentId}
           studentId={studentId}
           studentNameOverride={studentName ?? null}
+          subject={subject}
           enabled={true}
           initialTaskFilter={selectedTaskOrder}
           hideTaskFilter={true}

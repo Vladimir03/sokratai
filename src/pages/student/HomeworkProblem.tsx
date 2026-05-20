@@ -1260,6 +1260,7 @@ export default function HomeworkProblem() {
                   tutorDisplayName={tutorProfile?.display_name}
                   tutorAvatarUrl={tutorProfile?.avatar_url}
                   tutorGender={tutorProfile?.gender}
+                  subject={data.assignment.subject}
                 />
               );
             })}
@@ -1276,6 +1277,7 @@ export default function HomeworkProblem() {
                 }}
                 perspective="student"
                 isStreaming
+                subject={data.assignment.subject}
               />
             ) : isStreaming ? (
               // Pre-stream interlude (between request fire and first delta):
