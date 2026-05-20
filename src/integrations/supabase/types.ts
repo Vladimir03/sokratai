@@ -3125,6 +3125,7 @@ export type Database = {
           current_score: number | null
           display_name: string | null
           exam_type: string | null
+          gender: string | null
           hourly_rate_cents: number | null
           id: string
           last_activity_at: string | null
@@ -3145,6 +3146,7 @@ export type Database = {
           current_score?: number | null
           display_name?: string | null
           exam_type?: string | null
+          gender?: string | null
           hourly_rate_cents?: number | null
           id?: string
           last_activity_at?: string | null
@@ -3165,6 +3167,7 @@ export type Database = {
           current_score?: number | null
           display_name?: string | null
           exam_type?: string | null
+          gender?: string | null
           hourly_rate_cents?: number | null
           id?: string
           last_activity_at?: string | null
