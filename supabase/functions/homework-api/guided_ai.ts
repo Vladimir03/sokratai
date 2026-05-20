@@ -1661,7 +1661,11 @@ export async function evaluateStudentAnswer(
       solutionTextTrimmed.length > 0 || effectiveSolutionImageRefs.length > 0;
     if (isHumanitiesContext && hasEffectiveSolutionContext) {
       console.info(JSON.stringify({
-        event: "check_leak_check_skipped_humanities",
+        // Phase 7 round 3 polish (2026-05-20, review P2 #2): renamed
+        // от `_skipped_humanities` → `_humanities_verbatim_mode` для
+        // symmetry с chat-side event. Detector НЕ skipped — переключается
+        // в verbatim span mode (token detector replaced, не disabled).
+        event: "check_leak_check_humanities_verbatim_mode",
         subject: params.subject,
         verdict: result.verdict,
         has_solution_text: solutionTextTrimmed.length > 0,

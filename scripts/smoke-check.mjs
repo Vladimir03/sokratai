@@ -387,6 +387,12 @@ const humanitiesMirrors = [
   },
 ];
 
+// Phase 7 round 3 polish (2026-05-20, ChatGPT-5.5 review P2 #1):
+// Parse all 3 mirrors → check baseline coverage AND pairwise equality.
+// Раньше только верифицировал что HUMANITIES_REQUIRED ⊆ each set, но
+// extras в одном set но не в других проходили silently. Теперь — extras
+// flagged тоже.
+const declaredSets = new Map(); // label → sorted unique members array
 for (const mirror of humanitiesMirrors) {
   const fullPath = path.resolve(rootDir, mirror.path);
   if (!fs.existsSync(fullPath)) {
@@ -407,6 +413,36 @@ for (const mirror of humanitiesMirrors) {
     fail(`${mirror.label} missing required subjects: ${missing.join(", ")}`);
   } else {
     ok(`${mirror.label} contains all required humanities subjects`);
+  }
+  declaredSets.set(mirror.label, [...new Set(declared)].sort());
+}
+
+// Pairwise equality check — catches extras добавленные в один mirror но
+// не в другие. Example failure: someone добавил `german` в backend set,
+// не обновил frontend → smoke fail с явным сообщением о diff.
+if (declaredSets.size >= 2) {
+  const entries = [...declaredSets.entries()];
+  const [refLabel, refMembers] = entries[0];
+  const refJoined = refMembers.join(",");
+  let allMatch = true;
+  for (let i = 1; i < entries.length; i++) {
+    const [otherLabel, otherMembers] = entries[i];
+    if (otherMembers.join(",") !== refJoined) {
+      const onlyInRef = refMembers.filter((m) => !otherMembers.includes(m));
+      const onlyInOther = otherMembers.filter((m) => !refMembers.includes(m));
+      fail(
+        `Humanities mirror sets differ between\n` +
+          `    ${refLabel} (${refMembers.length} members)\n` +
+          `    ${otherLabel} (${otherMembers.length} members)\n` +
+          `    only in first: [${onlyInRef.join(", ") || "—"}]\n` +
+          `    only in second: [${onlyInOther.join(", ") || "—"}]\n` +
+          `  Sync all 3 mirrors when adding/removing humanities subjects.`,
+      );
+      allMatch = false;
+    }
+  }
+  if (allMatch) {
+    ok(`All 3 humanities mirror sets are pairwise-equal (${refMembers.length} members)`);
   }
 }
 
