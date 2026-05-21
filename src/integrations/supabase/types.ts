@@ -1852,6 +1852,7 @@ export type Database = {
       }
       mock_exam_attempts: {
         Row: {
+          ai_part1_ocr_json: Json | null
           anonymous_id: string | null
           answer_method: string | null
           assignment_id: string
@@ -1873,6 +1874,7 @@ export type Database = {
           updated_at: string
         }
         Insert: {
+          ai_part1_ocr_json?: Json | null
           anonymous_id?: string | null
           answer_method?: string | null
           assignment_id: string
@@ -1894,6 +1896,7 @@ export type Database = {
           updated_at?: string
         }
         Update: {
+          ai_part1_ocr_json?: Json | null
           anonymous_id?: string | null
           answer_method?: string | null
           assignment_id?: string
