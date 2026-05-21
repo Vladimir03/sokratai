@@ -58,6 +58,7 @@ import {
 } from '@/components/ui/dialog';
 import { TutorDataStatus } from '@/components/tutor/TutorDataStatus';
 import { MockExamFeatureGate } from './MockExamFeatureGate';
+import { MockExamGradingProgressBanner } from '@/components/tutor/mock-exams/MockExamGradingProgressBanner';
 import { useMockExamAssignment } from '@/hooks/useMockExamAssignment';
 import { useMockExamAttempt } from '@/hooks/useMockExamAttempt';
 import { MOCK_EXAM_ATTEMPT_QUERY_KEY } from '@/hooks/useMockExamAttempt';
@@ -1461,6 +1462,58 @@ function TutorMockExamReviewContent() {
       .sort((a, b) => a.kim_number - b.kim_number);
   }, [attempt]);
 
+  // TASK-OCR-2 Round 2 (2026-05-21): combined "Запустить AI заново" — параллельно
+  // зовёт retry-part1-ocr (если blank mode) + regrade-part2. Mirrors stale-lock
+  // recovery pattern в обоих endpoint'ах. Используется в
+  // MockExamGradingProgressBanner stale CTA (после 5 мин elapsed).
+  //
+  // Promise.allSettled — partial success acceptable: если только Часть 1 OCR
+  // запустился, а regrade-part2 вернул 409 (e.g. status был approved between
+  // re-renders), tutor видит частичный progress.
+  const retryAllMutation = useMutation({
+    mutationFn: async () => {
+      if (!attemptId) throw new Error('No attempt ID');
+      const tasks: Promise<unknown>[] = [];
+      // Always try OCR retry if attempt is blank-mode. Backend сам валидирует
+      // что есть blank_photo_url ИЛИ part1_blank_photo_url; если нет — вернёт
+      // NO_PART1_PHOTO 400, что мы treat'аем как partial.
+      if (attempt?.answer_method === 'blank') {
+        tasks.push(retryMockExamPart1OCR(attemptId));
+      }
+      // Always try Часть 2 regrade. Backend stale-lock guard разрешает после 120s.
+      tasks.push(regradeMockExamPart2(attemptId));
+      const results = await Promise.allSettled(tasks);
+      return results;
+    },
+    onSuccess: (results) => {
+      const fulfilled = results.filter((r) => r.status === 'fulfilled').length;
+      const rejected = results.filter((r) => r.status === 'rejected');
+      if (fulfilled > 0) {
+        toast.success(
+          rejected.length > 0
+            ? `AI запущен заново (${fulfilled} из ${results.length}). Подожди 30-60 сек.`
+            : 'AI запущен заново. Подожди 30-60 сек.',
+        );
+      } else {
+        // Все упали — показываем первую ошибку
+        const firstErr = rejected[0]?.status === 'rejected' ? rejected[0].reason : null;
+        const msg =
+          firstErr instanceof MockExamApiError
+            ? firstErr.message
+            : 'Не удалось перезапустить AI';
+        toast.error(msg);
+      }
+      void queryClient.invalidateQueries({
+        queryKey: MOCK_EXAM_ATTEMPT_QUERY_KEY(attemptId as string),
+      });
+    },
+    onError: (err) => {
+      const msg =
+        err instanceof MockExamApiError ? err.message : 'Не удалось перезапустить AI';
+      toast.error(msg);
+    },
+  });
+
   const approveAllMutation = useMutation({
     mutationFn: () => approveMockExamAll(attemptId as string),
     onSuccess: (resp) => {
@@ -1593,6 +1646,16 @@ function TutorMockExamReviewContent() {
         <ChevronRight className="h-3.5 w-3.5" aria-hidden="true" />
         <span className="text-slate-900 truncate">{studentName}</span>
       </nav>
+
+      {/* TASK-OCR-2 Round 2 (2026-05-21): grading progress banner —
+          mounted ТОЛЬКО для статусов submitted | ai_checking (banner сам
+          возвращает null для terminal статусов). Polling 5s через
+          useMockExamAttempt::refetchInterval. */}
+      <MockExamGradingProgressBanner
+        attempt={attempt}
+        onRetryAll={() => retryAllMutation.mutate()}
+        isRetrying={retryAllMutation.isPending}
+      />
 
       {/* Header */}
       <div className="flex items-start justify-between gap-3 flex-wrap">

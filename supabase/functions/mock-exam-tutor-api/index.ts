@@ -1916,11 +1916,11 @@ async function handleRetryPart1OCR(
 
   if (attempt.status === "approved" || attempt.status === "manually_entered") {
     return jsonError(cors, 409, "ALREADY_FINALIZED",
-      `Cannot retry OCR after status=${attempt.status}`);
+      "Работа уже подтверждена и отправлена ученику. Перепроверка OCR недоступна.");
   }
   if (attempt.status === "in_progress") {
     return jsonError(cors, 409, "NOT_SUBMITTED",
-      "Cannot retry OCR before student submitted the attempt");
+      "Ученик ещё не сдал работу. OCR запустится автоматически после отправки.");
   }
   // TASK-16-R2 fix #2 (ChatGPT-5.5 review Finding 2): reject `ai_checking`
   // because another grader run is in flight. Без этого guard'а race: retry
@@ -1940,7 +1940,7 @@ async function handleRetryPart1OCR(
     const STALE_LOCK_AGE_MS = 120_000;
     if (Number.isFinite(ageMs) && ageMs < STALE_LOCK_AGE_MS) {
       return jsonError(cors, 409, "GRADING_IN_PROGRESS",
-        "Grader is already running for this attempt. Wait until it transitions to awaiting_review, then retry.");
+        "AI ещё проверяет работу. Подожди 30-60 секунд и обнови страницу — результат появится автоматически.");
     }
     console.info(JSON.stringify({
       event: "mock_exam_retry_ocr_stale_lock_proceed",
@@ -1951,7 +1951,7 @@ async function handleRetryPart1OCR(
   }
   if (attempt.answer_method !== "blank") {
     return jsonError(cors, 400, "WRONG_METHOD",
-      "OCR retry available only for blank-mode attempts");
+      "Перезапуск AI OCR доступен только для работ с фото (режим «Бланк»). Ученик отвечал в цифровом режиме — баллы Часть 1 уже посчитаны автоматически.");
   }
   // TASK-OCR-3/4 (2026-05-21): OCR теперь работает на любом Часть 1 фото —
   // canonical ФИПИ-бланк (`blank_photo_url`) ИЛИ произвольное фото ответов
@@ -1960,7 +1960,7 @@ async function handleRetryPart1OCR(
   // attempts.
   if (!attempt.blank_photo_url && !attempt.part1_blank_photo_url) {
     return jsonError(cors, 400, "NO_PART1_PHOTO",
-      "Attempt has no Часть 1 photo to OCR (neither ФИПИ blank nor freeform fallback)");
+      "Ученик не загрузил фото ответов Часть 1 — ни на ФИПИ-бланке, ни на произвольном листе. Попроси переснять и сдать заново.");
   }
 
   // Clear previous OCR result (idempotent reset). НЕ перезаписываем
@@ -1975,7 +1975,12 @@ async function handleRetryPart1OCR(
       attempt_id: attemptId,
       error: clearErr.message,
     });
-    return jsonError(cors, 500, "DB_ERROR", "Failed to reset OCR state");
+    return jsonError(
+      cors,
+      500,
+      "DB_ERROR",
+      "Не удалось сбросить состояние AI OCR. Обнови страницу через 30 секунд и попробуй ещё раз. Если ошибка повторяется — напиши в чат с ID пробника.",
+    );
   }
 
   // Fire-and-forget call на mock-exam-grade с force_retry_ocr.
@@ -2202,13 +2207,16 @@ async function handleRegradePart2(
   const { attempt } = ownedOrErr;
 
   if (attempt.status === "approved") {
-    return jsonError(cors, 409, "ALREADY_APPROVED", "Attempt is already approved — re-grade not allowed");
+    return jsonError(cors, 409, "ALREADY_APPROVED",
+      "Работа уже подтверждена и отправлена ученику. Перепроверка AI недоступна.");
   }
   if (attempt.status === "manually_entered") {
-    return jsonError(cors, 409, "MANUALLY_ENTERED", "Manual entries — nothing to re-grade");
+    return jsonError(cors, 409, "MANUALLY_ENTERED",
+      "Это запись прошлого пробника, AI не использовался. Перепроверка недоступна.");
   }
   if (attempt.status === "in_progress") {
-    return jsonError(cors, 400, "NOT_SUBMITTED", "Attempt has not been submitted yet");
+    return jsonError(cors, 400, "NOT_SUBMITTED",
+      "Ученик ещё не сдал работу. Перепроверка станет доступна после отправки.");
   }
   // Round 3 review-fix P1 #3 (2026-05-15): /regrade-part2 принимает ТОЛЬКО
   // `awaiting_review`. Раньше пропускали `ai_checking` (через service_role
@@ -2216,13 +2224,40 @@ async function handleRegradePart2(
   // от `handleSubmitAttempt`: tutor мог нажать «Перепроверить AI» во время
   // первичного run → два grader'а параллельно. Теперь явный state-machine
   // gate: regrade имеет смысл только когда AI уже закончил первый pass.
-  if (attempt.status === "submitted" || attempt.status === "ai_checking") {
+  //
+  // TASK-OCR-2 (2026-05-21) recovery extension: mirror retry-part1-ocr —
+  // accept stale `ai_checking` (updated_at > 120s ago) для recovery stuck
+  // attempts. Старая контракт сохранён для fresh ai_checking (< 120s) и
+  // для submitted (там grader должен сам подхватить через CAS-claim из
+  // submit fire-and-forget).
+  if (attempt.status === "submitted") {
     return jsonError(
       cors,
       409,
       "GRADING_IN_PROGRESS",
-      "AI grader сейчас обрабатывает этот пробник. Перепроверка станет доступна когда он закончит.",
+      "AI grader сейчас обрабатывает этот пробник. Перепроверка станет доступна, когда он закончит.",
     );
+  }
+  if (attempt.status === "ai_checking") {
+    const updatedAt = attempt.updated_at as string | null;
+    const ageMs = updatedAt
+      ? Date.now() - new Date(updatedAt).getTime()
+      : Infinity;
+    const STALE_LOCK_AGE_MS = 120_000;
+    if (Number.isFinite(ageMs) && ageMs < STALE_LOCK_AGE_MS) {
+      return jsonError(
+        cors,
+        409,
+        "GRADING_IN_PROGRESS",
+        "AI grader сейчас обрабатывает этот пробник. Перепроверка станет доступна, когда он закончит.",
+      );
+    }
+    console.info(JSON.stringify({
+      event: "mock_exam_regrade_stale_lock_proceed",
+      attempt_id: attemptId,
+      lock_age_ms: ageMs,
+    }));
+    // Fall through — grader's own stale-lock recovery will reclaim the row.
   }
 
   // Call mock-exam-grade internally через service_role.
@@ -2251,7 +2286,8 @@ async function handleRegradePart2(
         status: resp.status,
         error: errText.slice(0, 500),
       });
-      return jsonError(cors, 502, "REGRADE_FAILED", "AI grader не успел или вернул ошибку. Попробуй ещё раз.");
+      return jsonError(cors, 502, "REGRADE_FAILED",
+        "AI не успел проверить или вернул ошибку. Подожди 30 секунд и попробуй ещё раз. Если повторяется — напиши в чат.");
     }
     const body = await resp.json();
     return jsonOk(cors, {

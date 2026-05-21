@@ -44,6 +44,14 @@ export function useMockExamAttempt(attemptId: string | null | undefined) {
     refetchInterval: (currentQuery) => {
       const data = currentQuery.state.data;
       const hasData = Boolean(data);
+      // TASK-OCR-2 Round 2 (2026-05-21): active polling каждые 5 сек когда AI
+      // в процессе работы — tutor видит progress без manual refresh. Останавливаем
+      // poll когда status переходит в awaiting_review / approved / manually_entered.
+      // Защита от runaway polling: эти статусы terminal для AI pipeline.
+      const status = data?.status as string | undefined;
+      if (status === 'submitted' || status === 'ai_checking') {
+        return 5000;
+      }
       return getTutorBackgroundRefetchInterval(
         hasData,
         Boolean(currentQuery.state.error),
