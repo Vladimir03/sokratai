@@ -1570,19 +1570,23 @@ async function handleApproveAll(
     }
 
     // Auto-INSERT 0 для отсутствующих/null KIM (mirror handleFinalize).
+    // TASK-OCR Round 6 (2026-05-21): схема mock_exam_attempt_part1_answers
+    // НЕ имеет колонки max_score (см. mock-exam-grade::runPart1OCR
+    // comment). Раньше autoFillPart1 пытался писать max_score → Postgres
+    // 42703 → upsert failed silently → KIM остаётся без earned_score →
+    // tutor approve фиксирует 0 в total_part1_score, но per-row data
+    // отсутствует → result page показывает «—» вместо «0».
     const autoFillPart1: Array<{
       attempt_id: string;
       kim_number: number;
       student_answer: null;
       earned_score: 0;
-      max_score: number;
       score_source: "finalize_default";
       updated_at: string;
     }> = [];
     const nowIso = new Date().toISOString();
     for (const t of variantPart1Tasks) {
       const kim = t.kim_number as number;
-      const maxScore = t.max_score as number;
       const score = part1ScoreByKim.get(kim);
       if (score === undefined || score === null) {
         autoZeroedPart1Kims.push(kim);
@@ -1591,7 +1595,7 @@ async function handleApproveAll(
           kim_number: kim,
           student_answer: null,
           earned_score: 0,
-          max_score: maxScore,
+          // max_score колонки нет в схеме — НЕ писать!
           score_source: "finalize_default",
           updated_at: nowIso,
         });

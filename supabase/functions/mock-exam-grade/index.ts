@@ -940,12 +940,17 @@ async function runPart1OCR(
     }
 
     let totalEarned = 0;
+    // TASK-OCR Round 6 (2026-05-21) — fix critical bug: схема
+    // mock_exam_attempt_part1_answers (миграция 20260508120000) НЕ имеет
+    // колонки max_score. Postgres возвращал 42703 при upsert → upsertErr
+    // logged как warning, но НЕ propagated → ai_part1_ocr_json записывался,
+    // earned_score per KIM НЕТ. Banner показывал «12/20 recognized», но
+    // input'ы tutor видел пустыми. Diagnosed via Supabase SQL editor 2026-05-21.
     const upserts: Array<{
       attempt_id: string;
       kim_number: number;
       student_answer: string | null;
       earned_score: number;
-      max_score: number;
       score_source: "ocr";
       updated_at: string;
     }> = [];
@@ -968,7 +973,7 @@ async function runPart1OCR(
         kim_number: kim,
         student_answer: cell.value,
         earned_score: checkResult.earned,
-        max_score: task.max_score,
+        // max_score колонки нет в схеме (см. comment выше) — НЕ писать!
         score_source: "ocr", // TASK-16-R2: track provenance for retry-safe distinguishment.
         updated_at: new Date().toISOString(),
       });
@@ -979,6 +984,20 @@ async function runPart1OCR(
         .from("mock_exam_attempt_part1_answers")
         .upsert(upserts, { onConflict: "attempt_id,kim_number" });
 
+      // TASK-OCR Round 6 (2026-05-21): если upsert упал — это критично, не
+      // молчим. Раньше bug с max_score (см. comment выше) валил upsert
+      // тихо, и frontend видел «AI распознал N/20» без earned_score в DB.
+      // Теперь error поднимается явно — surface в logs + ai_part1_ocr_json
+      // не обновляется (consistency: либо оба записаны, либо ничего).
+      if (upsertErr) {
+        console.error("mock_exam_grade_part1_ocr_upsert_failed_critical", {
+          attempt_id: attemptId,
+          error: upsertErr.message,
+          upserts_count: upserts.length,
+        });
+        return null;
+      }
+
       // TASK-OCR Round 4 (2026-05-21): обновляем attempt.total_part1_score
       // сразу после OCR upsert. Без этого student result page не покажет
       // «X/28» preview — total_part1_score остаётся null пока tutor не
@@ -986,46 +1005,37 @@ async function runPart1OCR(
       // ученик видит Часть 1 сразу после OCR с пометкой «Предварительно».
       //
       // SUM включает все existing rows (tutor_scored + new OCR upserts —
-      // upserts уже скоммитнуты выше). Если upsert failed — fall through
-      // к warning ниже, total_part1_score обновлять не будем (consistency).
-      if (!upsertErr) {
-        try {
-          const { data: allAnswers } = await db
-            .from("mock_exam_attempt_part1_answers")
-            .select("earned_score")
-            .eq("attempt_id", attemptId);
-          const totalPart1 = (allAnswers ?? []).reduce(
-            (acc, row) => acc + ((row.earned_score as number | null) ?? 0),
-            0,
-          );
-          const { error: scoreUpdateErr } = await db
-            .from("mock_exam_attempts")
-            .update({ total_part1_score: totalPart1 })
-            .eq("id", attemptId);
-          if (scoreUpdateErr) {
-            console.warn("mock_exam_grade_part1_ocr_total_update_failed", {
-              attempt_id: attemptId,
-              error: scoreUpdateErr.message,
-            });
-          } else {
-            console.info(JSON.stringify({
-              event: "mock_exam_grade_part1_ocr_total_persisted",
-              attempt_id: attemptId,
-              total_part1_score: totalPart1,
-            }));
-          }
-        } catch (totalErr) {
-          console.warn("mock_exam_grade_part1_ocr_total_compute_failed", {
+      // upserts уже скоммитнуты выше). Безопасно — мы здесь только если
+      // upsert succeeded (Round 6 early-return на failure выше).
+      try {
+        const { data: allAnswers } = await db
+          .from("mock_exam_attempt_part1_answers")
+          .select("earned_score")
+          .eq("attempt_id", attemptId);
+        const totalPart1 = (allAnswers ?? []).reduce(
+          (acc, row) => acc + ((row.earned_score as number | null) ?? 0),
+          0,
+        );
+        const { error: scoreUpdateErr } = await db
+          .from("mock_exam_attempts")
+          .update({ total_part1_score: totalPart1 })
+          .eq("id", attemptId);
+        if (scoreUpdateErr) {
+          console.warn("mock_exam_grade_part1_ocr_total_update_failed", {
             attempt_id: attemptId,
-            error: totalErr instanceof Error ? totalErr.message : String(totalErr),
+            error: scoreUpdateErr.message,
           });
+        } else {
+          console.info(JSON.stringify({
+            event: "mock_exam_grade_part1_ocr_total_persisted",
+            attempt_id: attemptId,
+            total_part1_score: totalPart1,
+          }));
         }
-      }
-
-      if (upsertErr) {
-        console.warn("mock_exam_grade_part1_ocr_upsert_failed", {
+      } catch (totalErr) {
+        console.warn("mock_exam_grade_part1_ocr_total_compute_failed", {
           attempt_id: attemptId,
-          error: upsertErr.message,
+          error: totalErr instanceof Error ? totalErr.message : String(totalErr),
         });
       }
     }
