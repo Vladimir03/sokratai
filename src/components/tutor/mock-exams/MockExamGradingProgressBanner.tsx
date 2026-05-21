@@ -48,16 +48,30 @@ interface MockExamGradingProgressBannerProps {
   onRetryAll: () => void;
   /** Disables the retry button while mutation is in flight. */
   isRetrying: boolean;
+  /** TASK-OCR Round 3 (2026-05-21): для top ready-CTA «AI готов — отправить». */
+  onApproveAll?: () => void;
+  /** Disables approve button while mutation is in flight. */
+  isApproving?: boolean;
+  /** Pre-computed totals для ready-banner. */
+  totalDraft?: number;
+  totalMax?: number;
 }
 
 export function MockExamGradingProgressBanner({
   attempt,
   onRetryAll,
   isRetrying,
+  onApproveAll,
+  isApproving = false,
+  totalDraft,
+  totalMax,
 }: MockExamGradingProgressBannerProps) {
-  // Render only while AI is in flight. submitted = queued, ai_checking = grading.
+  // Render while AI is in flight OR ready for review. submitted = queued,
+  // ai_checking = grading, awaiting_review = ready for tutor approve.
+  // approved/manually_entered = banner hidden (terminal).
   const isInFlight =
     attempt.status === 'submitted' || attempt.status === 'ai_checking';
+  const isReadyForReview = attempt.status === 'awaiting_review';
 
   // useEffect ниже стартует setInterval — но если banner не in_flight, можем
   // bail early. Это не нарушает hook order т.к. ниже все hooks стабильны.
@@ -84,6 +98,53 @@ export function MockExamGradingProgressBanner({
     const id = window.setInterval(tick, 1000);
     return () => window.clearInterval(id);
   }, [isInFlight, startedAtMs]);
+
+  // TASK-OCR Round 3 (2026-05-21): top ready-CTA banner для awaiting_review.
+  // Дублирует функциональность ApproveFooter (внизу), но видна сразу при
+  // открытии страницы — tutor может одобрить за 1 клик без скролла.
+  if (isReadyForReview) {
+    return (
+      <div
+        role="status"
+        aria-live="polite"
+        className="rounded-lg border border-emerald-300 bg-emerald-50 p-4 dark:border-emerald-900 dark:bg-emerald-950/30"
+      >
+        <div className="flex items-start justify-between gap-3 flex-wrap">
+          <div className="flex items-center gap-2 min-w-0">
+            <CheckCircle2
+              className="h-5 w-5 text-emerald-600 dark:text-emerald-400 flex-shrink-0"
+              aria-hidden="true"
+            />
+            <div className="min-w-0">
+              <p className="text-sm font-semibold text-emerald-900 dark:text-emerald-100">
+                AI закончил проверку
+                {totalDraft !== undefined && totalMax !== undefined ? (
+                  <span className="ml-1 text-emerald-700 dark:text-emerald-300/90 font-normal">
+                    — черновик: <strong className="tabular-nums">{totalDraft}</strong> / {totalMax}
+                  </span>
+                ) : null}
+              </p>
+              <p className="text-xs text-emerald-800 dark:text-emerald-300/90 mt-0.5">
+                Согласен с оценкой AI? Отправь ученику в 1 клик. Не согласен —
+                скролл вниз, измени баллы в карточках, потом подтверди.
+              </p>
+            </div>
+          </div>
+          {onApproveAll && (
+            <Button
+              size="sm"
+              onClick={onApproveAll}
+              disabled={isApproving}
+              className="bg-emerald-600 hover:bg-emerald-700 text-white min-h-9 touch-manipulation"
+            >
+              <CheckCircle2 className="h-4 w-4 mr-1.5" aria-hidden="true" />
+              {isApproving ? 'Отправка…' : 'Подтвердить и отправить'}
+            </Button>
+          )}
+        </div>
+      </div>
+    );
+  }
 
   if (!isInFlight) return null;
 

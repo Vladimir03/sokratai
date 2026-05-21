@@ -558,33 +558,110 @@ function Part1BlankReviewPanel({ attempt, variantPart1Tasks }: {
             const ocrCell = attempt.ai_part1_ocr_json?.cells?.[t.kim_number];
             const isLowConf = ocrCell && ocrCell.confidence === 'low';
             const hasRecognition = ocrCell?.value !== undefined && ocrCell.value !== null;
+
+            // TASK-OCR Round 3 (2026-05-21): correct_answer + status icon row.
+            // Tutor видит «AI: 250 · Правильный: 250 ✓» — мгновенно понимает
+            // правильно ли ответил ученик ИЛИ AI ошибся в распознавании.
+            const answerRow = attempt.part1_answers.find(
+              (a) => a.kim_number === t.kim_number,
+            );
+            const correctAnswer = answerRow?.correct_answer ?? null;
+            const earnedScore = answerRow?.earned_score ?? null;
+            const studentAnswer = answerRow?.student_answer ?? null;
+
+            type CellStatus = 'correct' | 'partial' | 'wrong' | 'no_answer' | 'unknown';
+            let status: CellStatus = 'unknown';
+            if (earnedScore !== null) {
+              if (earnedScore === t.max_score) status = 'correct';
+              else if (earnedScore === 0 && studentAnswer === null) status = 'no_answer';
+              else if (earnedScore === 0) status = 'wrong';
+              else status = 'partial';
+            }
+
+            const statusConfig: Record<
+              CellStatus,
+              { icon: typeof Check; title: string; classes: string }
+            > = {
+              correct: {
+                icon: CheckCircle2,
+                title: 'Верно (полный балл)',
+                classes: 'text-emerald-600 dark:text-emerald-400',
+              },
+              partial: {
+                icon: Check,
+                title: 'Частично верно',
+                classes: 'text-amber-600 dark:text-amber-400',
+              },
+              wrong: {
+                icon: X,
+                title: 'Неверно',
+                classes: 'text-rose-600 dark:text-rose-400',
+              },
+              no_answer: {
+                icon: Clock,
+                title: 'Нет ответа от ученика',
+                classes: 'text-slate-400 dark:text-slate-500',
+              },
+              unknown: {
+                icon: Clock,
+                title: 'Балл не выставлен',
+                classes: 'text-slate-300 dark:text-slate-600',
+              },
+            };
+            const StatusIcon = statusConfig[status].icon;
+
+            const borderClass = isLowConf
+              ? 'border-amber-400 dark:border-amber-700 ring-1 ring-amber-200 dark:ring-amber-900'
+              : status === 'correct'
+                ? 'border-emerald-200 dark:border-emerald-900'
+                : status === 'wrong'
+                  ? 'border-rose-200 dark:border-rose-900'
+                  : 'border-amber-200 dark:border-amber-900';
+
             return (
               <label
                 key={t.kim_number}
                 className={cn(
                   'flex flex-col gap-1 p-2 rounded-md bg-white border dark:bg-slate-900',
-                  isLowConf
-                    ? 'border-amber-400 dark:border-amber-700 ring-1 ring-amber-200 dark:ring-amber-900'
-                    : 'border-amber-200 dark:border-amber-900',
+                  borderClass,
                 )}
               >
                 <span className="text-xs font-medium text-slate-700 dark:text-slate-300 flex items-center gap-1">
-                  KIM {t.kim_number} <span className="text-slate-400">/ {t.max_score}</span>
+                  <StatusIcon
+                    className={cn('h-3.5 w-3.5 flex-shrink-0', statusConfig[status].classes)}
+                    aria-hidden="true"
+                  />
+                  <span title={statusConfig[status].title}>
+                    KIM {t.kim_number} <span className="text-slate-400">/ {t.max_score}</span>
+                  </span>
                   {isLowConf && (
                     <span
                       className="text-[10px] font-semibold text-amber-700 dark:text-amber-300"
-                      title="AI не уверен в распознавании этой клетки"
+                      title="AI не уверен в распознавании этой клетки — сверь по фото"
                     >
                       ⚠ AI?
                     </span>
                   )}
                 </span>
-                {hasRecognition && (
-                  <span
-                    className="text-[10px] text-slate-500 dark:text-slate-400 truncate"
-                    title={`AI распознал: «${ocrCell.value}»`}
-                  >
-                    AI: {ocrCell.value || '(пусто)'}
+                {/* AI recognized + correct_answer row. Только если что-то есть. */}
+                {(hasRecognition || correctAnswer) && (
+                  <span className="text-[10px] text-slate-500 dark:text-slate-400 leading-snug flex flex-wrap gap-x-1.5">
+                    {hasRecognition && (
+                      <span
+                        className="truncate"
+                        title={`AI распознал: «${ocrCell.value}»`}
+                      >
+                        AI: <strong className="font-medium text-slate-700 dark:text-slate-300">{ocrCell.value || '—'}</strong>
+                      </span>
+                    )}
+                    {correctAnswer && (
+                      <span
+                        className="truncate"
+                        title={`Правильный ответ: «${correctAnswer}»`}
+                      >
+                        Верно: <strong className="font-medium text-emerald-700 dark:text-emerald-400">{correctAnswer}</strong>
+                      </span>
+                    )}
                   </span>
                 )}
                 <Input
@@ -623,16 +700,22 @@ function Part1BlankReviewPanel({ attempt, variantPart1Tasks }: {
               </span>
             )}
           </div>
+          {/* TASK-OCR Round 3 (2026-05-21): убрали AlertDialog confirm —
+              tutor сразу нажимает «Сохранить всё и принять», система flush'ит
+              dirty drafts + finalize в одну операцию. Empty cells получают 0
+              automatically (см. handleFinalize INSERT-on-missing).
+              Vladimir feedback: «не нужно чтобы tutor по каждой задаче
+              что-то ставил, если согласен с AI». */}
           <Button
             type="button"
-            onClick={() => setConfirmFinalizeOpen(true)}
-            // TASK-16-R2 fix #3: disable пока in-flight saves — иначе confirm
-            // dialog показывает draft preview, finalize читает stale DB.
+            onClick={() => void handleFinalize()}
+            // TASK-16-R2 fix #3: disable пока in-flight saves — иначе finalize
+            // читает stale DB (saving = ещё не записанные drafts).
             disabled={isReadOnly || isFinalizing || savingKims.size > 0}
             title={
               savingKims.size > 0
                 ? 'Дождись окончания сохранения баллов и повтори'
-                : undefined
+                : 'Сохранить все баллы Часть 1 (пустые клетки получат 0)'
             }
             className="bg-amber-600 hover:bg-amber-700 text-white"
           >
@@ -640,7 +723,7 @@ function Part1BlankReviewPanel({ attempt, variantPart1Tasks }: {
               ? 'Сохраняем…'
               : savingKims.size > 0
                 ? 'Сохраняем баллы…'
-                : 'Часть 1 проверена'}
+                : 'Сохранить всё и принять'}
           </Button>
         </div>
       </CardContent>
@@ -927,39 +1010,76 @@ function Part2TaskCard({ attemptId, solution, attemptStatus }: Part2TaskCardProp
           </Suspense>
         </div>
 
-        {/* Решение ученика — фото или alert */}
-        {solution.photo_url ? (
-          <div>
-            <p className="text-xs uppercase tracking-wide text-slate-500 mb-1.5">
-              Решение ученика (фото)
-            </p>
-            <a
-              href={solution.photo_url}
-              target="_blank"
-              rel="noreferrer noopener"
-              className="block max-w-md rounded-md border border-slate-200 overflow-hidden hover:border-slate-300 transition-colors"
-              title="Открыть фото в новой вкладке"
-            >
-              <img
-                src={solution.photo_url}
-                alt={`Фото решения задачи №${solution.kim_number}`}
-                loading="lazy"
-                className="w-full h-auto object-contain bg-slate-50"
+        {/* Решение ученика — фото ИЛИ alert.
+            TASK-OCR Round 3 (2026-05-21) fix: для bulk attempts `photo_url`
+            = null per-kim row, но фото есть в `attempt.part2_bulk_photo_urls`
+            и AI привязал через `assigned_photo_indices`. Раньше показывали
+            false-error banner — теперь suppress'аем если AI имел фото для
+            оценки (suggested_score !== null ИЛИ assigned_photo_indices > 0).
+            Banner показывается ТОЛЬКО когда truly нечего показать. */}
+        {(() => {
+          const hasIndividualPhoto = solution.photo_url !== null;
+          const hasBulkAssignment =
+            (aiDraft?.assigned_photo_indices?.length ?? 0) > 0;
+          const aiActuallyGraded =
+            aiDraft?.suggested_score !== null
+            && aiDraft?.suggested_score !== undefined;
+
+          if (hasIndividualPhoto && solution.photo_url) {
+            return (
+              <div>
+                <p className="text-xs uppercase tracking-wide text-slate-500 mb-1.5">
+                  Решение ученика (фото)
+                </p>
+                <a
+                  href={solution.photo_url}
+                  target="_blank"
+                  rel="noreferrer noopener"
+                  className="block max-w-md rounded-md border border-slate-200 overflow-hidden hover:border-slate-300 transition-colors"
+                  title="Открыть фото в новой вкладке"
+                >
+                  <img
+                    src={solution.photo_url}
+                    alt={`Фото решения задачи №${solution.kim_number}`}
+                    loading="lazy"
+                    className="w-full h-auto object-contain bg-slate-50"
+                  />
+                </a>
+              </div>
+            );
+          }
+
+          if (hasBulkAssignment || aiActuallyGraded) {
+            // AI работал с фото из bulk pack — показываем info-chip без
+            // паники. Фото уже видно в BulkPhotosAssignmentGallery выше.
+            return (
+              <div className="text-xs text-slate-600 dark:text-slate-400 flex items-center gap-1.5">
+                <Info className="h-3.5 w-3.5 flex-shrink-0" aria-hidden="true" />
+                <span>
+                  AI взял фото №
+                  {(aiDraft?.assigned_photo_indices ?? [])
+                    .map((i) => i + 1)
+                    .join(', ') || '—'}
+                  {' '}из пакета сверху. Изменить привязку можно через «Перепроверить AI».
+                </span>
+              </div>
+            );
+          }
+
+          // Действительно нет фото И AI не оценил — корректный rose alert.
+          return (
+            <div className="bg-rose-50 border border-rose-200 rounded p-3 flex items-start gap-2 dark:bg-rose-950/30 dark:border-rose-900">
+              <AlertCircle
+                className="h-4 w-4 text-rose-600 flex-shrink-0 mt-0.5"
+                aria-hidden="true"
               />
-            </a>
-          </div>
-        ) : (
-          <div className="bg-rose-50 border border-rose-200 rounded p-3 flex items-start gap-2 dark:bg-rose-950/30 dark:border-rose-900">
-            <AlertCircle
-              className="h-4 w-4 text-rose-600 flex-shrink-0 mt-0.5"
-              aria-hidden="true"
-            />
-            <div className="text-sm text-rose-900 dark:text-rose-200">
-              Фото решения не загружено или нечитаемо. Запроси переснимку у ученика
-              в Telegram или поставь оценку вручную.
+              <div className="text-sm text-rose-900 dark:text-rose-200">
+                Фото решения не загружено. Запроси переснимку у ученика в Telegram
+                или поставь оценку вручную через «Изменить балл».
+              </div>
             </div>
-          </div>
-        )}
+          );
+        })()}
 
         {/* Low-confidence явный alert (AC: nuance #5) */}
         {isLowConf && solution.photo_url ? (
@@ -972,6 +1092,25 @@ function Part2TaskCard({ attemptId, solution, attemptStatus }: Part2TaskCardProp
               <strong>AI не смог распознать.</strong> Открой фото и поставь оценку самостоятельно.
             </div>
           </div>
+        ) : null}
+
+        {/* TASK-OCR Round 3 (2026-05-21): эталонное решение в свёрнутом блоке.
+            solution_text приходит из mock_exam_variant_tasks (tutor-only,
+            не leak'ается ученику до approval). Tutor открывает collapsible
+            при необходимости сверить ход решения. По дефолту свёрнуто
+            чтобы не загромождать карточку (AI комментарий ниже даёт основу). */}
+        {solution.solution_text ? (
+          <details className="rounded-md border border-slate-200 bg-slate-50 dark:border-slate-700 dark:bg-slate-900/50">
+            <summary className="cursor-pointer select-none px-3 py-2 text-xs font-medium text-slate-700 dark:text-slate-300 flex items-center gap-1.5 hover:bg-slate-100 dark:hover:bg-slate-800/50 rounded-md transition-colors">
+              <Info className="h-3.5 w-3.5 flex-shrink-0" aria-hidden="true" />
+              Показать эталон решения (видно только репетитору)
+            </summary>
+            <div className="px-3 py-2.5 border-t border-slate-200 dark:border-slate-700 text-sm text-slate-800 dark:text-slate-200 leading-relaxed">
+              <Suspense fallback={<div>{solution.solution_text}</div>}>
+                <MathText text={solution.solution_text} />
+              </Suspense>
+            </div>
+          </details>
         ) : null}
 
         {/* Карта обоснования AI (4 элемента I-IV) — nuance #1 */}
@@ -1346,10 +1485,11 @@ function ApproveFooter({
     );
   }
 
-  // Phase 6 (2026-05-15): убрали counter «N/M заданий». Vladimir's UX choice:
-  // одна кнопка «Подтвердить пробник и показать ученику результаты» вместо
-  // per-task confirm flow. Кнопка блокируется если есть kim без балла (ни
-  // tutor manual, ни AI suggested) — force tutor review (Phase 6 AskUserQuestion #4).
+  // TASK-OCR Round 3 (2026-05-21) — Vladimir UX rewrite: кнопка ВСЕГДА
+  // активна когда attempt не approved. Раньше блокировали при missing
+  // scores (force tutor review). Теперь: backend auto-zeroes на approve,
+  // tutor видит warning какие kim уйдут как 0. Минимум кликов когда tutor
+  // согласен с AI ИЛИ когда осознанно решает «закрыть пробел нулями».
   const missingKims = blockedKims ?? [];
   const hasBlocked = missingKims.length > 0;
 
@@ -1370,7 +1510,7 @@ function ApproveFooter({
         </div>
         <div className="text-slate-500 text-xs mt-0.5">
           {hasBlocked
-            ? `AI не оценил задачи ${missingKims.map((k) => `№${k}`).join(', ')} — выстави балл через «Изменить балл» в карточке.`
+            ? `AI не оценил задачи ${missingKims.map((k) => `№${k}`).join(', ')} — будут выставлены 0 баллов при подтверждении. Если хочешь оценить вручную — нажми «Изменить балл» в карточке.`
             : isAnonymous
               ? 'Анонимный лид. Проверь баллы вручную для надёжности.'
               : 'После подтверждения ученик и родители получат результат. Перепроверка возможна.'}
@@ -1379,14 +1519,17 @@ function ApproveFooter({
       <Button
         size="lg"
         onClick={onApprove}
-        disabled={hasBlocked || isSubmitting}
-        title={
-          hasBlocked
-            ? `Сначала выстави балл для №${missingKims.join(', №')}`
-            : 'Подтвердить пробник и показать ученику результаты'
-        }
+        disabled={isSubmitting}
+        title="Подтвердить пробник и показать ученику результаты"
+        className={cn(
+          hasBlocked && 'bg-amber-600 hover:bg-amber-700',
+        )}
       >
-        {isSubmitting ? 'Отправка…' : 'Подтвердить и показать ученику'}
+        {isSubmitting
+          ? 'Отправка…'
+          : hasBlocked
+            ? 'Согласен с AI — отправить'
+            : 'Подтвердить и показать ученику'}
       </Button>
     </div>
   );
@@ -1648,13 +1791,19 @@ function TutorMockExamReviewContent() {
       </nav>
 
       {/* TASK-OCR-2 Round 2 (2026-05-21): grading progress banner —
-          mounted ТОЛЬКО для статусов submitted | ai_checking (banner сам
-          возвращает null для terminal статусов). Polling 5s через
-          useMockExamAttempt::refetchInterval. */}
+          mounted ТОЛЬКО для статусов submitted | ai_checking | awaiting_review
+          (banner сам возвращает null для terminal статусов). Polling 5s через
+          useMockExamAttempt::refetchInterval.
+          TASK-OCR Round 3: добавлен top ready-CTA «AI готов — отправить» для
+          awaiting_review (mirror footer button для удобства). */}
       <MockExamGradingProgressBanner
         attempt={attempt}
         onRetryAll={() => retryAllMutation.mutate()}
         isRetrying={retryAllMutation.isPending}
+        onApproveAll={() => setConfirmOpen(true)}
+        isApproving={approveAllMutation.isPending}
+        totalDraft={totalDraft}
+        totalMax={totalMax}
       />
 
       {/* Header */}

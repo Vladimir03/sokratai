@@ -1505,53 +1505,54 @@ async function handleApproveAll(
     };
   }
 
-  // Phase 6 relaxed validation (CLAUDE.md §22, 2026-05-15):
-  // Old behavior: require status='tutor_approved'|'tutor_modified' + tutor_score IS NOT NULL.
-  // New behavior: final_score = tutor_score ?? ai_draft.suggested_score. Если оба null
-  // → blocked KIM (tutor должен выставить балл вручную перед approve).
+  // TASK-OCR Round 3 (2026-05-21) — Vladimir's UX rewrite: «Подтвердить и
+  // отправить» теперь ВСЕГДА активна (no INCOMPLETE_PART2 hard gate). Для
+  // kim где tutor_score=null AND ai_draft.suggested_score=null → auto-fill
+  // tutor_score=0 + transparent comment чтобы student видел в result page
+  // что AI не оценил эту задачу из-за missing photo.
   //
-  // Это соответствует Vladimir's UX choice (Phase 6 AskUserQuestion #4):
-  // «Блокировать approve пока не все задачи имеют балл» — force review.
-  const blockedKims: number[] = [];
+  // Risk mitigation: добавляем `auto_zeroed_kims` в response чтобы UI мог
+  // показать toast «AI не оценил задачи №X, Y — выставлено 0. Отправлено.»
   const finalScores = new Map<number, number>();
+  const autoZeroedKims: number[] = []; // Для tutor visibility в response.
   for (const kim of expectedKimNumbers) {
     const sol = solutionsByKim[kim];
     if (!sol) {
-      blockedKims.push(kim);
+      // Solution row не существует — обычно для bulk attempts placeholder
+      // создаётся на submit. Если отсутствует — fall through к auto-zero.
+      finalScores.set(kim, 0);
+      autoZeroedKims.push(kim);
       continue;
     }
     const finalScore = sol.tutor_score ?? sol.ai_suggested;
     if (finalScore === null) {
-      blockedKims.push(kim);
+      // Ни tutor ни AI не выставили — auto-0 с комментарием. Tutor сделал
+      // explicit decision (нажал approve), backend честно это исполняет.
+      finalScores.set(kim, 0);
+      autoZeroedKims.push(kim);
       continue;
     }
     finalScores.set(kim, finalScore);
   }
-  if (blockedKims.length > 0) {
-    return jsonError(
-      cors,
-      400,
-      "INCOMPLETE_PART2",
-      "AI не оценил некоторые задачи — выставь балл вручную перед подтверждением",
-      { missing_kim_numbers: blockedKims },
-    );
-  }
 
-  // Phase 6 review-fix #6 (2026-05-15): для blank-mode attempts требуем чтобы
-  // все Часть 1 KIM имели `earned_score`. Иначе silent 0 — если OCR не
-  // сработал или tutor не открыл `Part1BlankReviewPanel`, ученик получает
-  // approved attempt с total_part1_score=0 без warning. Form mode: Часть 1
-  // checked deterministically на submit, gate не нужен.
+  // TASK-OCR Round 3 (2026-05-21): для blank-mode attempts — auto-fill 0 для
+  // missing Часть 1 KIM (вместо hard-block INCOMPLETE_PART1). Параллель к
+  // Часть 2 auto-zero logic. Tutor sees autoZeroedPart1Kims в response чтобы
+  // показать toast «Часть 1: KIM №X, Y без баллов → 0».
+  //
+  // Background: handleFinalize endpoint УЖЕ делает INSERT-on-missing для form
+  // mode (CLAUDE.md §25 R2) — но для blank-mode tutor может не нажать
+  // «Часть 1 проверена» а сразу approve-all. Backend защищает.
+  const autoZeroedPart1Kims: number[] = [];
   if (attempt.answer_method === "blank") {
     const { data: variantPart1Tasks, error: part1VariantErr } = await db
       .from("mock_exam_variant_tasks")
-      .select("kim_number")
+      .select("kim_number, max_score")
       .eq("variant_id", assignment.variant_id as string)
       .eq("part", 1);
     if (part1VariantErr || !variantPart1Tasks) {
       return jsonError(cors, 500, "DB_ERROR", "Failed to load variant Part 1 tasks");
     }
-    const expectedPart1Kims = variantPart1Tasks.map((t) => t.kim_number as number);
 
     const { data: part1Rows, error: part1Err } = await db
       .from("mock_exam_attempt_part1_answers")
@@ -1567,23 +1568,51 @@ async function handleApproveAll(
         row.earned_score as number | null,
       );
     }
-    const missingPart1Kims: number[] = [];
-    for (const kim of expectedPart1Kims) {
+
+    // Auto-INSERT 0 для отсутствующих/null KIM (mirror handleFinalize).
+    const autoFillPart1: Array<{
+      attempt_id: string;
+      kim_number: number;
+      student_answer: null;
+      earned_score: 0;
+      max_score: number;
+      score_source: "finalize_default";
+      updated_at: string;
+    }> = [];
+    const nowIso = new Date().toISOString();
+    for (const t of variantPart1Tasks) {
+      const kim = t.kim_number as number;
+      const maxScore = t.max_score as number;
       const score = part1ScoreByKim.get(kim);
-      // `null` = row отсутствует ИЛИ earned_score не выставлен → требует tutor
-      // attention (`0` валиден — tutor явно проставил «не ответил»).
       if (score === undefined || score === null) {
-        missingPart1Kims.push(kim);
+        autoZeroedPart1Kims.push(kim);
+        autoFillPart1.push({
+          attempt_id: attemptId,
+          kim_number: kim,
+          student_answer: null,
+          earned_score: 0,
+          max_score: maxScore,
+          score_source: "finalize_default",
+          updated_at: nowIso,
+        });
       }
     }
-    if (missingPart1Kims.length > 0) {
-      return jsonError(
-        cors,
-        400,
-        "INCOMPLETE_PART1",
-        "Не все задачи Часть 1 проверены. Открой панель «Часть 1 на бланке», проверь AI-распознавание и выставь баллы.",
-        { missing_kim_numbers: missingPart1Kims },
-      );
+    if (autoFillPart1.length > 0) {
+      const { error: fillErr } = await db
+        .from("mock_exam_attempt_part1_answers")
+        .upsert(autoFillPart1, { onConflict: "attempt_id,kim_number" });
+      if (fillErr) {
+        console.error("mock_exam_approve_all_part1_autofill_failed", {
+          attempt_id: attemptId,
+          error: fillErr.message,
+        });
+        return jsonError(
+          cors,
+          500,
+          "DB_ERROR",
+          "Не удалось зафиксировать пустые задачи Часть 1 как 0",
+        );
+      }
     }
   }
 
@@ -1592,22 +1621,47 @@ async function handleApproveAll(
   // 'tutor_approved' (default) если ai === final, 'tutor_modified' если
   // override (это уже произошло через explicit edit раньше — мы здесь не
   // меняем status у уже tutor_approved/tutor_modified rows).
+  //
+  // TASK-OCR Round 3 (2026-05-21): для auto-zeroed kims (AI suggested=null,
+  // tutor=null) пишем tutor_score=0 + status='tutor_modified' + transparent
+  // tutor_comment. Tutor сделал explicit decision (нажал approve), мы
+  // фиксируем 0 с явным комментарием — student увидит в result page.
   const autoFinalize: Array<{
     attempt_id: string;
     kim_number: number;
     tutor_score: number;
+    tutor_comment?: string | null;
     status: string;
     updated_at: string;
   }> = [];
+  const nowAutoFinalizeIso = new Date().toISOString();
+  const autoZeroedKimsSet = new Set(autoZeroedKims);
   for (const [kim, score] of finalScores.entries()) {
     const sol = solutionsByKim[kim];
-    if (sol.tutor_score !== null) continue; // Уже выставлено вручную, не трогаем
+    // Если sol существует и tutor_score уже выставлен вручную — пропускаем
+    // (не overwrite explicit tutor decision).
+    if (sol && sol.tutor_score !== null) continue;
+
+    // Auto-zeroed kim: явный комментарий чтобы student понял.
+    if (autoZeroedKimsSet.has(kim)) {
+      autoFinalize.push({
+        attempt_id: attemptId,
+        kim_number: kim,
+        tutor_score: 0,
+        tutor_comment: "AI не смог оценить эту задачу (фото не загружено или нечитаемо). Балл выставлен 0 при подтверждении.",
+        status: "tutor_modified",
+        updated_at: nowAutoFinalizeIso,
+      });
+      continue;
+    }
+
+    // AI default — accept suggested_score, status=tutor_approved (no override).
     autoFinalize.push({
       attempt_id: attemptId,
       kim_number: kim,
       tutor_score: score,
-      status: "tutor_approved", // AI default = tutor_approved (no override)
-      updated_at: new Date().toISOString(),
+      status: "tutor_approved",
+      updated_at: nowAutoFinalizeIso,
     });
   }
   if (autoFinalize.length > 0) {
@@ -1616,7 +1670,7 @@ async function handleApproveAll(
       .upsert(autoFinalize, { onConflict: "attempt_id,kim_number" });
     if (autoErr) {
       console.error("mock_exam_approve_all_auto_finalize_failed", { error: autoErr.message });
-      return jsonError(cors, 500, "DB_ERROR", "Failed to auto-finalize tutor scores");
+      return jsonError(cors, 500, "DB_ERROR", "Не удалось зафиксировать баллы Часть 2");
     }
   }
 
@@ -1684,6 +1738,11 @@ async function handleApproveAll(
     total_part2_score: totalPart2,
     total_score: totalScore,
     delivery,
+    // TASK-OCR Round 3 (2026-05-21): transparency для tutor UI. Показываем
+    // какие kim были auto-zeroed без явной tutor decision — это позволяет
+    // показать toast «Готово. Задачи №X, Y без фото — выставлено 0.»
+    auto_zeroed_part1_kims: autoZeroedPart1Kims,
+    auto_zeroed_part2_kims: autoZeroedKims,
   });
 }
 
