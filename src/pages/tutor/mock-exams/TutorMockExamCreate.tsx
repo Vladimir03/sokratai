@@ -456,7 +456,7 @@ function TutorMockExamCreateContent() {
   const { students, loading: studentsLoading } = useTutorStudents();
   const { groups, loading: groupsLoading } = useTutorGroups(miniGroupsEnabled);
 
-  const [variantId, setVariantId] = useState(DEFAULT_VARIANT_ID);
+  const [variantId, setVariantId] = useState<string>(DEFAULT_VARIANT_ID);
   // TASK-11: mode чooser скрыт. Default 'form' — пробник создаётся в нейтральном
   // режиме, ученик выбирает blank/form сам на taking page. Tutor НЕ навязывает.
   // assignment.mode остаётся в схеме для manual_entry flow + backward compat.

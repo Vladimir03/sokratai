@@ -55,6 +55,7 @@ import {
 import type {
   MockExamAssignmentListItem,
   MockExamAssignmentStatus,
+  MockExamAttemptStatus,
   MockExamMode,
 } from '@/types/mockExam';
 
