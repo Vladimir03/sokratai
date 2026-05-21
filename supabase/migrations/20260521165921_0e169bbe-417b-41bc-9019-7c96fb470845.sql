@@ -1,0 +1,1 @@
+UPDATE public.tutors SET feature_mock_exams_enabled = true WHERE user_id = 'cc8a5861-bda7-4350-b706-8d5672bf27d8';
