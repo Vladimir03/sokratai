@@ -978,6 +978,50 @@ async function runPart1OCR(
       const { error: upsertErr } = await db
         .from("mock_exam_attempt_part1_answers")
         .upsert(upserts, { onConflict: "attempt_id,kim_number" });
+
+      // TASK-OCR Round 4 (2026-05-21): обновляем attempt.total_part1_score
+      // сразу после OCR upsert. Без этого student result page не покажет
+      // «X/28» preview — total_part1_score остаётся null пока tutor не
+      // нажмёт «Часть 1 проверена» или approve-all. Vladimir UX request:
+      // ученик видит Часть 1 сразу после OCR с пометкой «Предварительно».
+      //
+      // SUM включает все existing rows (tutor_scored + new OCR upserts —
+      // upserts уже скоммитнуты выше). Если upsert failed — fall through
+      // к warning ниже, total_part1_score обновлять не будем (consistency).
+      if (!upsertErr) {
+        try {
+          const { data: allAnswers } = await db
+            .from("mock_exam_attempt_part1_answers")
+            .select("earned_score")
+            .eq("attempt_id", attemptId);
+          const totalPart1 = (allAnswers ?? []).reduce(
+            (acc, row) => acc + ((row.earned_score as number | null) ?? 0),
+            0,
+          );
+          const { error: scoreUpdateErr } = await db
+            .from("mock_exam_attempts")
+            .update({ total_part1_score: totalPart1 })
+            .eq("id", attemptId);
+          if (scoreUpdateErr) {
+            console.warn("mock_exam_grade_part1_ocr_total_update_failed", {
+              attempt_id: attemptId,
+              error: scoreUpdateErr.message,
+            });
+          } else {
+            console.info(JSON.stringify({
+              event: "mock_exam_grade_part1_ocr_total_persisted",
+              attempt_id: attemptId,
+              total_part1_score: totalPart1,
+            }));
+          }
+        } catch (totalErr) {
+          console.warn("mock_exam_grade_part1_ocr_total_compute_failed", {
+            attempt_id: attemptId,
+            error: totalErr instanceof Error ? totalErr.message : String(totalErr),
+          });
+        }
+      }
+
       if (upsertErr) {
         console.warn("mock_exam_grade_part1_ocr_upsert_failed", {
           attempt_id: attemptId,

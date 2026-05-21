@@ -242,3 +242,86 @@ Manual smoke (Vladimir, after deploy + Lovable preview):
 - Frontend: `git revert <hash> && deploy-sokratai`.
 - Backend edge functions: Lovable Studio → rollback prior deployment.
 - Никаких migrations → нет destructive rollback.
+
+---
+
+## Round 2 — extended stale-lock + RU errors + grading progress banner (2026-05-21)
+
+After Round 1 ship Egor pilot test #1 показал 2 issue: english error «Failed to reset OCR state» при click «Запустить AI OCR» для stuck attempt + «AI grader сейчас обрабатывает» при click «Перепроверить AI» для Часть 2. Plus UI не показывает прогресс — tutor не знает когда AI закончит.
+
+**Changes:**
+
+- `handleRegradePart2` — mirror retry-part1-ocr stale-lock contract. Accept `ai_checking` IF `updated_at > 120s` ago. Иначе единый pattern recovery нарушен (часть 1 unblock, часть 2 — нет).
+- Localize все user-facing toast errors в OCR retry / regrade / `ai_checking` paths to Russian с actionable advice («Обнови страницу через 30 секунд и попробуй ещё раз»).
+- NEW `src/components/tutor/mock-exams/MockExamGradingProgressBanner.tsx` — sticky banner поверх `TutorMockExamReview` пока attempt ∈ {submitted, ai_checking}. Показывает:
+  - elapsed time («AI работает 1:23 / обычно 30-90 сек»)
+  - 2 step chip'а: Часть 1 OCR + Часть 2 (pending|running|done|failed|skipped)
+  - stale-CTA «Запустить AI заново» после 5 мин (calls retry-part1-ocr + regrade-part2 параллельно)
+- `useMockExamAttempt::refetchInterval=5000` когда status ∈ {submitted, ai_checking} — auto-refresh без manual F5.
+- Derive-only — без новой DB колонки. Все progress signals из existing `attempt.{submitted_at, ai_part1_ocr_json, part2_solutions[].ai_draft}`.
+
+**Commit:** `2bbea2f`.
+
+---
+
+## Round 3 — auto-zero approve + correct_answer display + false-banner fix (2026-05-21)
+
+After Round 2 ship Egor pilot test #2 показал 3 серьёзных issue:
+
+1. **Часть 1**: AI верно распознал 12/20 клеток + backend posчитал earned_score, но frontend показывал inputs пустыми «—». Tutor не понимал что AI уже выставил баллы. Plus не виден correct_answer рядом с AI value.
+2. **Часть 2 №24**: AI успешно оценил 3/3 (все ✓), но false-banner «Фото решения не загружено». Логика смотрела `solution.photo_url=null`, не учитывая что для bulk attempts фото в `attempt.part2_bulk_photo_urls`.
+3. **«Подтвердить и отправить»**: жёстко blocked если AI не оценил все 6 задач. Tutor вынужден кликать «Изменить балл» по каждой.
+
+**Changes:**
+
+Backend `handleApproveAll`:
+- Убран INCOMPLETE_PART2 hard-block. Для kim где (tutor=null AND AI=null) → auto-fill `tutor_score=0` + status='tutor_modified' + transparent `tutor_comment` «AI не смог оценить (фото не загружено). Балл выставлен 0 при подтверждении.» Student видит честно в result page.
+- Для blank-mode + missing Часть 1 KIM → mirror auto-fill: INSERT 0 с `score_source='finalize_default'`. Раньше INCOMPLETE_PART1 hard-block.
+- Response расширен `auto_zeroed_part1_kims` + `auto_zeroed_part2_kims` arrays.
+
+Frontend Часть 1 (`Part1BlankReviewPanel`):
+- Status icon per KIM (✓ verno / ✗ неверно / ⚠ частично / clock без ответа).
+- «AI: 250 · Верно: 250» row под каждым KIM (correct_answer always shown).
+- Border color cell-based (emerald/rose/amber).
+- AlertDialog confirmFinalize убран — кнопка «Сохранить всё и принять» прямо вызывает flush+finalize за 1 клик.
+
+Frontend Часть 2 (`Part2TaskCard`):
+- False-banner fix: «Фото не загружено» показывается ТОЛЬКО когда truly no photo (no individual + no bulk + AI didn't grade).
+- Для bulk: info-chip «AI взял фото №X из пакета сверху. Изменить привязку можно через "Перепроверить AI".»
+- NEW collapsible `<details>` «Показать эталон решения (видно только репетитору)» с `solution.solution_text` через MathText.
+
+Frontend approve flow (`ApproveFooter` + `MockExamGradingProgressBanner`):
+- Кнопка ВСЕГДА enabled когда status pre-approval. Label «Согласен с AI — отправить» (amber) при наличии blocked kims.
+- Top ready-banner emerald «AI закончил проверку — черновик X/Y» с inline кнопкой «Подтвердить и отправить» при status=awaiting_review (mirror footer для удобства).
+
+**Commit:** `7fd5f90`. + Round 3.1 (`c88a333`): убран «⚠ AI?» badge — clarity через amber-рамку клетки + tooltip.
+
+---
+
+## Round 4 — Часть 1 reveal для blank-mode (2026-05-21)
+
+Vladimir UX request: blank-mode ученик после submit видит Часть 1 результат сразу после OCR (~30-60 сек), не дожидаясь tutor approve. Form-mode студенты уже видят сразу через deterministic check; теперь parity для blank-mode.
+
+**Changes:**
+
+Backend `runPart1OCR`:
+- После upsert per-KIM rows — SUM(earned_score) для ВСЕХ rows attempt (tutor + ocr + finalize_default) → UPDATE `attempt.total_part1_score`. Без этого result page показывает «—» (null) до tutor finalize.
+- Не overwrite tutor manual scores — sum includes них автоматически.
+
+Frontend `useStudentMockExamResult`:
+- `refetchInterval=5000` когда status ∈ {submitted, ai_checking}. Mirror tutor hook — student видит OCR result через 5 сек после готовности backend, без manual refresh.
+
+Frontend `StudentMockExamResult`:
+- NEW `<Part1WaitingForOCRBanner>` — sky spinner banner «Давай проверим твой бланк ответов. AI распознаёт фото и считает баллы. Обычно занимает 30-60 сек. Эта страница обновится автоматически.» Рендерится когда `isPreApproval && !hasPart1Data`.
+- NEW `<Part1PreliminaryBanner>` — sky info banner «Предварительный результат Часть 1. AI распознал бланк и посчитал предварительный балл. Репетитор проверит вручную и пришлёт обновление в течение суток. Часть 2 ещё в проверке.» Рендерится когда `isPreApproval && hasPart1Data`.
+- `Part1Card` принимает `status: MockExamAttemptStatus` prop → chip меняется: `approved` → emerald «Готово», `awaiting_review` → sky «Предварительно», `submitted/ai_checking` → sky «AI оценил».
+- `Part1Card` рендерится только когда `hasPart1Data` — иначе видны только banners.
+
+Push-уведомление при final approve-all (existing `notifyStudentApproved` cascade) — без изменений. Sends когда tutor нажмёт «Подтвердить и отправить» → student получает push → открывает result page → видит финальный результат с emerald chip «Готово».
+
+**Anti-leak invariants preserved:**
+- Часть 2 НИКОГДА не показывается до status=approved (unchanged).
+- `ai_part1_ocr_json` НИКОГДА не leak'ается ученику — он видит только earned_score per KIM (existing handleGetResult contract).
+- Backend `score_source` enum protects tutor manual edits (CLAUDE.md §25).
+
+**Commit:** TBD.

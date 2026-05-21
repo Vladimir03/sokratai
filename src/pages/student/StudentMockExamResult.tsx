@@ -26,6 +26,7 @@ import {
   Hourglass,
   Loader2,
   ShieldCheck,
+  Sparkles,
   XCircle,
 } from 'lucide-react';
 import AuthGuard from '@/components/AuthGuard';
@@ -131,11 +132,39 @@ function Part1Card({
   answers,
   totalScore,
   part1Max,
+  status,
 }: {
   answers: StudentMockExamResultPart1Answer[];
   totalScore: number | null;
   part1Max: number | null;
+  /** TASK-OCR Round 4 (2026-05-21): chip color/copy varies by attempt status. */
+  status: MockExamAttemptStatus;
 }) {
+  // Chip label + color по статусу attempt.
+  // - approved              → «Готово» emerald (final, repetitor подтвердил)
+  // - awaiting_review       → «Предварительно» sky (AI оценил, ждём финал tutor)
+  // - submitted/ai_checking → «AI считает» blue (если данные уже есть, но
+  //                            tutor ещё не открыл — показываем preview)
+  const chipConfig = (() => {
+    if (status === 'approved' || status === 'manually_entered') {
+      return {
+        label: 'Готово',
+        classes: 'bg-emerald-100 text-emerald-900',
+      };
+    }
+    if (status === 'awaiting_review') {
+      return {
+        label: 'Предварительно',
+        classes: 'bg-sky-100 text-sky-900',
+      };
+    }
+    // submitted | ai_checking — data может уже быть от form-mode auto-check
+    // или от blank-mode OCR. В обоих случаях «AI считает» = «оцениваем».
+    return {
+      label: 'AI оценил',
+      classes: 'bg-sky-100 text-sky-900',
+    };
+  })();
   // Phase 4 (2026-05-15): таблица разбалловки раскрыта по умолчанию.
   // Ученик сразу видит № / Твой ответ / Правильный / Балл + иконки ✓/✗
   // без необходимости кликать toggle. Toggle сохранён для возможности
@@ -162,8 +191,11 @@ function Part1Card({
           <h2 className="text-base font-semibold text-slate-900">
             Часть 1 · авто-проверка
           </h2>
-          <span className="rounded bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-900">
-            Готово
+          <span className={cn(
+            'rounded px-2 py-0.5 text-xs font-medium',
+            chipConfig.classes,
+          )}>
+            {chipConfig.label}
           </span>
         </div>
         <div className="text-3xl font-semibold text-accent tabular-nums">
@@ -630,6 +662,70 @@ function isPart2PendingStatus(status: MockExamAttemptStatus): boolean {
   );
 }
 
+// ─── Часть 1 banners (TASK-OCR Round 4, 2026-05-21) ─────────────────────────
+//
+// Vladimir UX request: ученик в blank mode должен видеть Часть 1 сразу после
+// OCR (~30-60 сек), не дожидаясь tutor approve. С 2 banners:
+//   - Pending: «Давай проверим твой бланк» (status=submitted/ai_checking, нет данных)
+//   - Preliminary: «Предварительный результат — репетитор может скорректировать»
+//                  (status=awaiting_review ИЛИ pre-approval с данными)
+//
+// Form-mode студенты после submit сразу попадают в awaiting_review с
+// заполненной частью 1 → видят preliminary банер пока tutor не approve.
+
+function Part1WaitingForOCRBanner() {
+  return (
+    <div
+      role="status"
+      aria-live="polite"
+      className="mb-3 rounded-lg border border-sky-200 bg-sky-50 p-4"
+    >
+      <div className="flex items-center gap-3">
+        <Loader2
+          className="h-5 w-5 flex-shrink-0 animate-spin text-sky-600"
+          aria-hidden="true"
+        />
+        <div className="min-w-0">
+          <p className="text-sm font-semibold text-sky-900">
+            Давай проверим твой бланк ответов
+          </p>
+          <p className="mt-0.5 text-xs text-sky-800">
+            AI распознаёт фото бланка и считает баллы Часть 1. Обычно занимает
+            30-60 секунд. Эта страница обновится автоматически.
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function Part1PreliminaryBanner() {
+  return (
+    <div
+      role="status"
+      aria-live="polite"
+      className="mb-3 rounded-lg border border-sky-200 bg-sky-50 p-4"
+    >
+      <div className="flex items-start gap-3">
+        <Sparkles
+          className="h-5 w-5 flex-shrink-0 text-sky-600"
+          aria-hidden="true"
+        />
+        <div className="min-w-0">
+          <p className="text-sm font-semibold text-sky-900">
+            Предварительный результат Часть 1
+          </p>
+          <p className="mt-0.5 text-xs text-sky-800">
+            AI распознал бланк и посчитал предварительный балл. Репетитор
+            проверит вручную и пришлёт обновление в течение суток. Часть 2 ещё
+            в проверке.
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── Page ───────────────────────────────────────────────────────────────────
 
 function ResultContent({ view }: { view: StudentMockExamResultView }) {
@@ -643,6 +739,18 @@ function ResultContent({ view }: { view: StudentMockExamResultView }) {
   const part2Max = view.variant?.part2_max ?? null;
   const totalMax = view.variant?.total_max_score ?? null;
 
+  // TASK-OCR Round 4 (2026-05-21): derive Часть 1 reveal state.
+  // - hasPart1Data:    backend вернул per-KIM rows ИЛИ total_part1_score
+  //                    (form-mode auto-check ИЛИ blank-mode OCR done).
+  // - isWaitingForOCR: ученик сдал, но AI ещё считает (нет rows + статус pre-approval).
+  // - isPreliminary:   данные есть, но tutor ещё не подтвердил.
+  const hasPart1Data =
+    view.part1_answers.length > 0
+    || (view.attempt.total_part1_score !== null && view.attempt.total_part1_score !== undefined);
+  const isPreApproval = status === 'submitted' || status === 'ai_checking' || status === 'awaiting_review';
+  const isWaitingForOCR = isPreApproval && !hasPart1Data;
+  const isPreliminary = isPreApproval && hasPart1Data;
+
   return (
     <div className="sokrat min-h-[100dvh] bg-slate-50" data-sokrat-mode="student">
       <PageContent>
@@ -653,11 +761,21 @@ function ResultContent({ view }: { view: StudentMockExamResultView }) {
             <ManualEntryView view={view} />
           ) : (
             <>
-              <Part1Card
-                answers={view.part1_answers}
-                totalScore={view.attempt.total_part1_score}
-                part1Max={part1Max}
-              />
+              {/* TASK-OCR Round 4: Часть 1 reveal banners. Order:
+                  1. Waiting banner — пока OCR работает (нет данных)
+                  2. Preliminary banner — данные есть, ждём финального approve
+                  3. Part1Card с chip («Предварительно» / «Готово») */}
+              {isWaitingForOCR && <Part1WaitingForOCRBanner />}
+              {isPreliminary && <Part1PreliminaryBanner />}
+
+              {hasPart1Data && (
+                <Part1Card
+                  answers={view.part1_answers}
+                  totalScore={view.attempt.total_part1_score}
+                  part1Max={part1Max}
+                  status={status}
+                />
+              )}
 
               {isPending && <Part2PendingCard tutorName={tutorFirstName} />}
 

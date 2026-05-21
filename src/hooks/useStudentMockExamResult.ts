@@ -53,6 +53,18 @@ export function useStudentMockExamResult(
     gcTime: GC_TIME_MS,
     refetchOnWindowFocus: true,
     refetchOnReconnect: true,
+    // TASK-OCR Round 4 (2026-05-21): active polling каждые 5 сек когда AI
+    // в процессе (submitted | ai_checking). Ученик видит progress без manual
+    // refresh — банер «Проверяем бланк» сменится на результат как только
+    // OCR закончит. Status awaiting_review/approved/manually_entered → false
+    // (terminal для AI pipeline, polling не нужен).
+    refetchInterval: (currentQuery) => {
+      const status = currentQuery.state.data?.attempt?.status;
+      if (status === 'submitted' || status === 'ai_checking') {
+        return 5000;
+      }
+      return false;
+    },
     retry: (failureCount, err) => {
       // Don't retry deterministic state errors.
       if (err instanceof StudentMockExamApiError) {
