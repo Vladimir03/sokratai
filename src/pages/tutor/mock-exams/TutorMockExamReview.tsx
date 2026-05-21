@@ -310,6 +310,42 @@ function Part1BlankReviewPanel({ attempt, variantPart1Tasks }: {
   // (раньше single savingKim — parallel onBlur saves возможны на mobile при
   // быстром tab-через-поля). Используется для disable confirm + flush before finalize.
   const [savingKims, setSavingKims] = useState<Set<number>>(new Set());
+
+  // TASK-OCR Round 5 (2026-05-21) — drafts sync bug fix.
+  //
+  // Pre-existing bug: useState(initializer) runs ONCE on mount. Когда OCR
+  // завершается в фоне (status: ai_checking → awaiting_review, polling 5s),
+  // attempt.part1_answers получают earned_score values от backend. existingScores
+  // useMemo пересчитывается, но drafts state остаётся со старыми пустыми
+  // значениями («—» в input).
+  //
+  // Fix: useEffect sync'ит drafts из existingScores ТОЛЬКО для kims где tutor
+  // ещё не редактировал (current draft empty И saving не в полёте). Не
+  // перезаписывает kims где tutor типит — иначе collision при редактировании.
+  // Также не overwrite'ит когда saving в полёте — иначе race с onBlur save.
+  useEffect(() => {
+    setDrafts((prev) => {
+      let changed = false;
+      const next = { ...prev };
+      for (const t of variantPart1Tasks) {
+        const kim = t.kim_number;
+        const dbValue = existingScores.get(kim);
+        const dbStr =
+          dbValue !== null && dbValue !== undefined ? String(dbValue) : '';
+        const currentDraft = next[kim] ?? '';
+        // Sync условия:
+        //  - draft empty AND saving НЕ в полёте → write DB value
+        //  - draft != DB value AND draft == previous existing → DB обновился
+        //    (e.g. tutor другую сессию открыл) → sync (но это уже UX edge case,
+        //    пока ограничимся empty case чтобы не мешать tutor typing).
+        if (currentDraft === '' && dbStr !== '' && !savingKims.has(kim)) {
+          next[kim] = dbStr;
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, [existingScores, variantPart1Tasks, savingKims]);
   const [isFinalizing, setIsFinalizing] = useState(false);
   const [confirmFinalizeOpen, setConfirmFinalizeOpen] = useState(false);
   const [isRetryingOCR, setIsRetryingOCR] = useState(false);

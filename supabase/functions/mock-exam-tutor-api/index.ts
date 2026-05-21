@@ -2022,25 +2022,18 @@ async function handleRetryPart1OCR(
       "Ученик не загрузил фото ответов Часть 1 — ни на ФИПИ-бланке, ни на произвольном листе. Попроси переснять и сдать заново.");
   }
 
-  // Clear previous OCR result (idempotent reset). НЕ перезаписываем
-  // mock_exam_attempt_part1_answers — там могут быть tutor manual scores;
-  // TASK-16-R2 fix #1 даёт runPart1OCR явный signal через score_source='tutor'.
-  const { error: clearErr } = await db
-    .from("mock_exam_attempts")
-    .update({ ai_part1_ocr_json: null })
-    .eq("id", attemptId);
-  if (clearErr) {
-    console.error("mock_exam_retry_ocr_clear_failed", {
-      attempt_id: attemptId,
-      error: clearErr.message,
-    });
-    return jsonError(
-      cors,
-      500,
-      "DB_ERROR",
-      "Не удалось сбросить состояние AI OCR. Обнови страницу через 30 секунд и попробуй ещё раз. Если ошибка повторяется — напиши в чат с ID пробника.",
-    );
-  }
+  // TASK-OCR Round 5 (2026-05-21) — НЕ очищаем ai_part1_ocr_json перед
+  // fire-and-forget. Раньше UI делал dramatic re-render (все «AI: X» строки
+  // исчезали → пустые карточки → 60 сек ожидания → новые значения). Это
+  // плохой UX — tutor думает что система сломалась.
+  //
+  // `force_retry_ocr: true` уже override'ит idempotency check в grader
+  // (см. mock-exam-grade::shouldRunPart1OCR — `options?.forceRetryOCR === true ||
+  // !attemptRow.ai_part1_ocr_json`). Grader сам перезапишет ai_part1_ocr_json
+  // и upsert'нёт mock_exam_attempt_part1_answers с новыми earned_score.
+  //
+  // Старая логика «clear → fire» создавала окно неконсистентности. Новая —
+  // grader атомарно overwrite'ит. Tutor видит старый OCR пока новый не готов.
 
   // Fire-and-forget call на mock-exam-grade с force_retry_ocr.
   // Service-role bypass'ит ownership check там.
