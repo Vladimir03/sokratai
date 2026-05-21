@@ -1218,11 +1218,25 @@ async function handleSubmitAttempt(
     }
   }
 
-  // Flip status → ai_checking. submitted_at = now.
+  // Flip status → 'submitted' (queued for AI). submitted_at = now.
+  //
+  // TASK-OCR-1 (2026-05-21) P0 race fix: previously this handler set status
+  // directly to 'ai_checking'. Combined with the BEFORE UPDATE trigger that
+  // refreshes `updated_at`, the fresh `ai_checking` row caused mock-exam-grade
+  // to treat it as «another grader already running» (ageMs < 120s stale-lock
+  // threshold) and return 202 ALREADY_GRADING — grading never started.
+  //
+  // Canonical state-machine: in_progress → submitted → ai_checking →
+  //   awaiting_review → approved. submit handler leaves attempt in `submitted`;
+  // mock-exam-grade::handleGrade does the CAS-claim submitted → ai_checking
+  // (line ~1242 in mock-exam-grade/index.ts). This restores the dependency-
+  // free hand-off and removes the race.
+  //
+  // See: docs/delivery/features/mock-exams-v1-pilot-polish/ocr-grading-recovery-spec.md
   const { error: updateErr } = await db
     .from("mock_exam_attempts")
     .update({
-      status: "ai_checking",
+      status: "submitted",
       submitted_at: now,
       total_time_minutes: totalTimeMinutes,
       total_part1_score: totalPart1,
@@ -1256,7 +1270,11 @@ async function handleSubmitAttempt(
   return jsonOk(cors, {
     ok: true,
     attempt_id: attemptId,
-    status: "ai_checking",
+    // TASK-OCR-1: report queued status to client. Grader will CAS-claim
+    // submitted → ai_checking → awaiting_review. Frontend's /result page
+    // (handleGetResult) accepts both 'submitted' и 'ai_checking' as
+    // "AI is working" UI state.
+    status: "submitted",
     answer_method: answerMethod,
     auto_checked_part1: shouldAutoCheckPart1,
     total_part1_score: totalPart1,

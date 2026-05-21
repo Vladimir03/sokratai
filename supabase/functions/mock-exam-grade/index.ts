@@ -50,6 +50,7 @@ import {
 } from "../_shared/mock-exam-prompts.ts";
 import {
   buildPart1BlankOCRPrompt,
+  buildPart1FreeformOCRPrompt,
   sanitizePart1OCRResult,
   type Part1OCRResult, // inner cells map (без __meta); используется в runPart1OCR
 
@@ -89,7 +90,14 @@ const LOVABLE_REQUEST_TIMEOUT_MS = 35_000;
 const LOVABLE_MAX_RETRIES = 1;
 
 const SIGNED_URL_TTL_SEC = 1800;
-const MAX_PROMPT_IMAGE_BYTES = 5 * 1024 * 1024;
+// TASK-OCR-3 (2026-05-21): bump from 5MB → 8MB. Upload cap is 10MB
+// (mock-exam-student-api::MAX_PHOTO_BYTES). New frontend uses
+// compressForUpload (≤ 4MB / 2048px JPEG) before upload, но legacy / HEIC
+// originals могут весить 5-8MB после inline base64 overhead. Gemini Vision
+// API хвостовой limit = 20MB per image, так что 8MB безопасно.
+// Anything above bumps tutor into manual review territory с понятным
+// `image_inline_failed` fallback (см. classifyError).
+const MAX_PROMPT_IMAGE_BYTES = 8 * 1024 * 1024;
 // Each Часть 2 task has 1-2 photos at most (бланк-режим может иметь несколько).
 const MAX_TASK_IMAGES_FOR_AI = 3;
 const MAX_STUDENT_PHOTOS_PER_TASK = 4;
@@ -746,6 +754,12 @@ function getDbForBulk(): SupabaseClient {
  *  3. Update `mock_exam_attempts.ai_part1_ocr_json` = full result для
  *     tutor UI pre-fill.
  *
+ * TASK-OCR-3 (2026-05-21): `promptMode` parameter selects between FIPI
+ * grid prompt (`buildPart1BlankOCRPrompt`) и freeform photo prompt
+ * (`buildPart1FreeformOCRPrompt`). `__meta.prompt_mode` saved so tutor
+ * UI can show appropriate context («распознали с бланка ФИПИ» vs
+ * «распознали с произвольного фото»).
+ *
  * Errors каждого этапа логируются + не блокируют Часть 2 grading
  * (caller использует Promise.all).
  *
@@ -754,10 +768,11 @@ function getDbForBulk(): SupabaseClient {
 async function runPart1OCR(
   db: SupabaseClient,
   attemptId: string,
-  blankPhotoRef: string,
+  photoRef: string,
   variantId: string,
+  promptMode: "blank" | "freeform" = "blank",
 ): Promise<{ ocr: Part1OCRResult; totalEarned: number } | null> {
-  if (!blankPhotoRef || !variantId) return null;
+  if (!photoRef || !variantId) return null;
 
   try {
     // Load Часть 1 variant tasks (kim 1-20).
@@ -776,14 +791,36 @@ async function runPart1OCR(
       return null;
     }
 
-    // Inline blank photo. blankPhotoRef обычно single storage:// ref.
-    const refs = parsePhotoUrls(blankPhotoRef);
+    // Inline photo. photoRef обычно single storage:// ref (either canonical
+    // ФИПИ-blank photo OR freeform fallback — выбирается caller'ом через
+    // promptMode parameter).
+    const refs = parsePhotoUrls(photoRef);
     const photoDataUrls = await inlineImageRefs(refs.slice(0, 1), db);
     if (photoDataUrls.length === 0) {
       console.warn("mock_exam_grade_part1_ocr_inline_failed", {
         attempt_id: attemptId,
-        blank_photo_ref: blankPhotoRef.slice(0, 80),
+        prompt_mode: promptMode,
+        photo_ref: photoRef.slice(0, 80),
       });
+      // TASK-OCR-3: persist failure snapshot с prompt_mode for tutor diagnostics.
+      const nowIso = new Date().toISOString();
+      const failureSnapshot: Record<string, unknown> = {
+        cells: {},
+        __meta: {
+          status: "failed",
+          prompt_mode: promptMode,
+          gemini_model: LOVABLE_MODEL_OCR,
+          error: "image_inline_failed",
+          raw_response: null,
+          failed_at: nowIso,
+          generated_at: nowIso,
+        },
+      };
+      await db
+        .from("mock_exam_attempts")
+        .update({ ai_part1_ocr_json: failureSnapshot })
+        .eq("id", attemptId)
+        .catch(() => null);
       return null;
     }
 
@@ -798,7 +835,13 @@ async function runPart1OCR(
       check_mode: (t.check_mode as Part1OCRTaskMeta["check_mode"]) ?? "strict",
     }));
 
-    const ocrMessages = buildPart1BlankOCRPrompt(tasksMeta, photoDataUrls[0]);
+    // TASK-OCR-3 (2026-05-21): prompt selection based on photo source.
+    //  - 'blank'    — official ФИПИ blank, grid-aware prompt expects cells 1-20.
+    //  - 'freeform' — arbitrary photo (тетрадный лист / черновик / скан),
+    //                 prompt просит AI извлечь номера задач без grid-assumption.
+    const ocrMessages = promptMode === "freeform"
+      ? buildPart1FreeformOCRPrompt(tasksMeta, photoDataUrls[0])
+      : buildPart1BlankOCRPrompt(tasksMeta, photoDataUrls[0]);
     // TASK-16 (2026-05-15): model swap на gemini-2.5-pro + raw response
     // capture для verbose logging.
     let rawResponseSnapshot: string | null = null;
@@ -813,11 +856,14 @@ async function runPart1OCR(
       // `{ cells, __meta: { status, ... } }` — frontend ветвит на
       // `__meta.status === 'failed'` → rose warning banner. Раньше top-level
       // fields + truthy ai_part1_ocr_json → green «AI распознал» на failure.
+      // TASK-OCR-3 (2026-05-21): add prompt_mode so tutor UI can distinguish
+      // FIPI-blank failures vs freeform photo failures.
       const nowIso = new Date().toISOString();
       const failureSnapshot: Record<string, unknown> = {
         cells: {},
         __meta: {
           status: "failed",
+          prompt_mode: promptMode,
           gemini_model: LOVABLE_MODEL_OCR,
           error: callErr instanceof Error ? callErr.message : String(callErr),
           raw_response: rawResponseSnapshot,
@@ -832,6 +878,7 @@ async function runPart1OCR(
         .catch(() => null);
       console.error("mock_exam_grade_part1_ocr_call_failed", {
         attempt_id: attemptId,
+        prompt_mode: promptMode,
         error: callErr instanceof Error ? callErr.message : String(callErr),
         raw_preview: rawResponseSnapshot?.slice(0, 200) ?? null,
       });
@@ -844,6 +891,7 @@ async function runPart1OCR(
     ).length;
     console.info("mock_exam_grade_part1_ocr_response", {
       attempt_id: attemptId,
+      prompt_mode: promptMode,
       recognized_cells: recognizedCount,
       total_kims: 20,
       gemini_model: LOVABLE_MODEL_OCR,
@@ -943,10 +991,13 @@ async function runPart1OCR(
     // `ai_part1_ocr_json.cells[kim]` (не top-level). `__meta.status` различает
     // success vs failure (см. failureSnapshot выше). `recognized_cells=0` при
     // status='success' = soft failure (AI ничего не распознал) → amber banner.
+    // TASK-OCR-3 (2026-05-21): `prompt_mode` помогает tutor UI выбрать копи —
+    // «AI распознал с бланка ФИПИ» vs «AI распознал с фото».
     const ocrPayload: Record<string, unknown> = {
       cells: { ...ocrResult },
       __meta: {
         status: "success",
+        prompt_mode: promptMode,
         gemini_model: LOVABLE_MODEL_OCR,
         recognized_cells: recognizedCount,
         raw_length: rawResponseSnapshot?.length ?? 0,
@@ -1474,18 +1525,31 @@ async function handleGrade(
   // ai_part1_ocr_json уже есть → skip. Tutor можно re-trigger через
   // `/regrade-part2` endpoint (он clear'ит ocr_json перед regrade).
   //
-  // Round 3 review-fix P1 #1: canonical ФИПИ-бланк хранится в
-  // `attempts.blank_photo_url` (см. mock-exam-student-api `kind='blank'`).
-  // `part1_blank_photo_url` — fallback path для «решал не на бланке», prompt
-  // OCR не подходит для произвольного формата.
+  // TASK-OCR-3 (2026-05-21) — расширено: OCR теперь запускается на любом
+  // фото Часть 1, а не только на официальном ФИПИ-бланке. Если ученик
+  // загрузил `kind='blank'` (canonical ФИПИ-бланк) — используем grid-prompt
+  // (`buildPart1BlankOCRPrompt`). Если только `kind='part1_fallback'`
+  // (тетрадный лист / произвольный формат) — используем freeform prompt
+  // (`buildPart1FreeformOCRPrompt`). Egor 2026-05-21: «у моего ученика
+  // ответы на обычном тетрадном листе, AI должен их распознать».
+  //
   // TASK-16: force_retry от tutor /retry-part1-ocr endpoint — override
   // skip-if-exists guard. Tutor может перезапустить OCR если first attempt
   // failed или дал плохой результат.
+  const ocrPath: { ref: string; mode: "blank" | "freeform" } | null = (() => {
+    if (attemptRow.blank_photo_url) {
+      return { ref: attemptRow.blank_photo_url, mode: "blank" };
+    }
+    if (attemptRow.part1_blank_photo_url) {
+      return { ref: attemptRow.part1_blank_photo_url, mode: "freeform" };
+    }
+    return null;
+  })();
   const shouldRunPart1OCR = attemptRow.answer_method === "blank"
-    && !!attemptRow.blank_photo_url
+    && ocrPath !== null
     && (options?.forceRetryOCR === true || !attemptRow.ai_part1_ocr_json);
-  const part1OCRPromise = shouldRunPart1OCR
-    ? runPart1OCR(db, attemptId, attemptRow.blank_photo_url ?? "", assignmentRow.variant_id ?? "")
+  const part1OCRPromise = shouldRunPart1OCR && ocrPath
+    ? runPart1OCR(db, attemptId, ocrPath.ref, assignmentRow.variant_id ?? "", ocrPath.mode)
     : Promise.resolve(null);
 
   console.info(JSON.stringify({
@@ -1496,6 +1560,9 @@ async function handleGrade(
     mode: isBulkMode ? "bulk" : "per_kim",
     bulk_photo_count: isBulkMode ? bulkPhotoRefs.length : 0,
     part1_ocr_will_run: shouldRunPart1OCR,
+    // TASK-OCR-3 (2026-05-21): track prompt_mode для diagnostics — позволяет
+    // отделить blank-from-FIPI OCR от freeform-photo OCR в логах.
+    part1_ocr_prompt_mode: shouldRunPart1OCR && ocrPath ? ocrPath.mode : null,
   }));
 
   const totalStart = Date.now();

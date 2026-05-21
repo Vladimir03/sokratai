@@ -191,6 +191,106 @@ export function buildPart1BlankOCRPrompt(
 }
 
 /**
+ * TASK-OCR-2 (2026-05-21) — Build prompt для произвольного фото ответов
+ * Часть 1 (не на ФИПИ-бланке). Ученик может фотографировать тетрадный лист,
+ * черновик, скан — где ответы записаны строкой / списком / в произвольной
+ * структуре. AI должен извлечь номера задач (1-20) и соответствующие
+ * ответы без grid-assumption.
+ *
+ * Запускается из `mock-exam-grade::runPart1OCR` когда
+ *   `attempt.answer_method === 'blank'` AND
+ *   `attempt.blank_photo_url IS NULL` AND
+ *   `attempt.part1_blank_photo_url IS NOT NULL`.
+ *
+ * Same JSON output shape as `buildPart1BlankOCRPrompt` — sanitizer reused.
+ *
+ * @param tasksMeta meta всех 20 Часть 1 задач (kim + max_score + check_mode)
+ * @param photoDataUrl inline `data:image/jpeg;base64,...` фото произвольного формата
+ */
+export function buildPart1FreeformOCRPrompt(
+  tasksMeta: Part1OCRTaskMeta[],
+  photoDataUrl: string,
+): LovableMessage[] {
+  const part1Tasks = tasksMeta.filter((t) => t.check_mode !== "manual");
+
+  const tasksSummary = part1Tasks
+    .map((task) => {
+      const formatHint = (() => {
+        switch (task.check_mode) {
+          case "strict":
+            return "одно число (целое / десятичная дробь)";
+          case "multi_choice":
+            return "последовательность 2-3 цифр (например, `134`)";
+          case "ordered":
+            return "последовательность цифр в порядке (например, `2143`)";
+          case "pair":
+            return "два числа без разделителей (например, `1,40,2` для ответа `(1,4±0,2)`)";
+          case "task20":
+            return "последовательность 2-х цифр (например, `12`, `23`)";
+          default:
+            return "формат не определён";
+        }
+      })();
+      return `• Задача №${task.kim_number}: ${formatHint}`;
+    })
+    .join("\n");
+
+  const systemContent = [
+    "Ты распознаёшь рукописные ответы ученика к Часть 1 пробника ЕГЭ по физике.",
+    "Фото — НЕ официальный бланк ФИПИ, это произвольный лист (тетрадь, черновик, скан).",
+    "Ответы могут быть записаны: списком («1) 12»), строкой («1.12 2.234»), таблицей или другим способом.",
+    "",
+    "Твоя задача:",
+    "  1. Найти на фото номера задач Часть 1 (от 1 до 20).",
+    "  2. Для каждого найденного номера — извлечь ответ ученика как он его написал.",
+    "  3. Вернуть результат в строгом JSON формате (см. ниже).",
+    "",
+    "ФОРМАТЫ ОТВЕТОВ ПО ЗАДАЧАМ:",
+    tasksSummary,
+    "",
+    "ПРАВИЛА РАСПОЗНАВАНИЯ:",
+    "- Если номера задачи нет на фото / ответа не дано → `\"value\": null, \"confidence\": \"high\"`.",
+    "- Если ученик зачеркнул ответ и написал другой → бери последний (актуальный).",
+    "- Запятая vs точка в десятичных — сохраняй как ученик написал (нормализация уже в checker'е).",
+    "- Знак минус '−' / '-' — сохраняй; '+' опускай если стоит перед числом.",
+    "- НЕ интерпретируй и НЕ исправляй ответ — твоя задача распознать как написано.",
+    "- Если на фото нет ни одного ответа Часть 1 — верни все клетки `null` с confidence='high'.",
+    "- Если фото нечитаемое / перевёрнуто — попытайся всё-таки извлечь что сможешь, остальное null с confidence='low'.",
+    "",
+    "Уверенность:",
+    "    high — ответ читается чётко, номер задачи рядом не двусмыслен",
+    "    medium — почерк сложный, но смысл понятен; есть один-два двусмысленных знака",
+    "    low — клетка размыта / зачёркнута многократно / нечитаемо",
+    "",
+    "Верни ТОЛЬКО валидный JSON без markdown-обёрток (все 20 ключей обязательны):",
+    "{",
+    "  \"1\": {\"value\": \"12\", \"confidence\": \"high\"},",
+    "  \"2\": {\"value\": null, \"confidence\": \"high\"},",
+    "  \"3\": {\"value\": \"234\", \"confidence\": \"medium\"},",
+    "  ...",
+    "  \"20\": {\"value\": \"12\", \"confidence\": \"high\"}",
+    "}",
+  ].join("\n");
+
+  const userContent: Array<LovableTextPart | LovableImagePart> = [
+    {
+      type: "text",
+      text: "Фото с ответами ученика на Часть 1 (произвольный формат, не бланк ФИПИ). Распознай ответы по задачам 1-20.",
+    },
+    { type: "image_url", image_url: { url: photoDataUrl } },
+    {
+      type: "text",
+      text: "Верни JSON по схеме выше.",
+    },
+  ];
+
+  return [
+    { role: "system", content: systemContent },
+    { role: "user", content: userContent },
+  ];
+}
+
+/**
  * Sanitize raw AI OCR JSON → strict Part1OCRResult.
  * Defensive: invalid keys / values drop'аются, defaulting на
  * `{value: null, confidence: 'low'}` для отсутствующих kim 1-20.

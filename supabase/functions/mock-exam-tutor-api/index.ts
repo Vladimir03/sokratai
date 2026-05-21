@@ -1922,22 +1922,45 @@ async function handleRetryPart1OCR(
     return jsonError(cors, 409, "NOT_SUBMITTED",
       "Cannot retry OCR before student submitted the attempt");
   }
-  // TASK-16-R2 fix #2 (ChatGPT-5.5 review Finding 2): mirror `/regrade-part2`
-  // contract — reject `ai_checking` because another grader run is in flight.
-  // Без этого guard'а race: retry → clear ocr → fire-and-forget → grader CAS
-  // returns 202 ALREADY_GRADING → retry endpoint вернул "queued" (false success),
-  // но OCR не enqueue'нулся. Tutor видит spinner forever.
+  // TASK-16-R2 fix #2 (ChatGPT-5.5 review Finding 2): reject `ai_checking`
+  // because another grader run is in flight. Без этого guard'а race: retry
+  // → clear ocr → fire-and-forget → grader CAS returns 202 ALREADY_GRADING
+  // → retry endpoint вернул "queued" (false success), но OCR не enqueue'нулся.
+  //
+  // TASK-OCR-3 (2026-05-21) recovery extension: accept `ai_checking` IF lock
+  // is stale (updated_at > 120s ago). Stale = либо grader crashed (e.g.
+  // before my P0 fix attempts stuck because submit pre-set ai_checking),
+  // либо real timeout. mock-exam-grade::handleGrade does its own atomic
+  // stale-claim — we just unblock the retry path.
   if (attempt.status === "ai_checking") {
-    return jsonError(cors, 409, "GRADING_IN_PROGRESS",
-      "Grader is already running for this attempt. Wait until it transitions to awaiting_review, then retry.");
+    const updatedAt = attempt.updated_at as string | null;
+    const ageMs = updatedAt
+      ? Date.now() - new Date(updatedAt).getTime()
+      : Infinity;
+    const STALE_LOCK_AGE_MS = 120_000;
+    if (Number.isFinite(ageMs) && ageMs < STALE_LOCK_AGE_MS) {
+      return jsonError(cors, 409, "GRADING_IN_PROGRESS",
+        "Grader is already running for this attempt. Wait until it transitions to awaiting_review, then retry.");
+    }
+    console.info(JSON.stringify({
+      event: "mock_exam_retry_ocr_stale_lock_proceed",
+      attempt_id: attemptId,
+      lock_age_ms: ageMs,
+    }));
+    // Fall through — grader's own stale-lock recovery will reclaim the row.
   }
   if (attempt.answer_method !== "blank") {
     return jsonError(cors, 400, "WRONG_METHOD",
       "OCR retry available only for blank-mode attempts");
   }
-  if (!attempt.blank_photo_url) {
-    return jsonError(cors, 400, "NO_BLANK_PHOTO",
-      "Attempt has no blank photo to OCR");
+  // TASK-OCR-3/4 (2026-05-21): OCR теперь работает на любом Часть 1 фото —
+  // canonical ФИПИ-бланк (`blank_photo_url`) ИЛИ произвольное фото ответов
+  // (`part1_blank_photo_url`, например тетрадный лист). Раньше handler
+  // отвергал второй случай → tutor не мог triggers retry для freeform
+  // attempts.
+  if (!attempt.blank_photo_url && !attempt.part1_blank_photo_url) {
+    return jsonError(cors, 400, "NO_PART1_PHOTO",
+      "Attempt has no Часть 1 photo to OCR (neither ФИПИ blank nor freeform fallback)");
   }
 
   // Clear previous OCR result (idempotent reset). НЕ перезаписываем

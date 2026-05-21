@@ -135,8 +135,18 @@ export interface MockExamPart1OCRCell {
  * `__meta.status === 'success' && recognized_cells === 0` → amber soft warning.
  * `__meta.status === 'success' && recognized_cells > 0` → emerald success.
  */
+/**
+ * TASK-OCR-3 (2026-05-21): `prompt_mode` additive поле для distinguishing
+ * FIPI grid OCR runs ('blank') vs freeform photo OCR runs ('freeform' —
+ * тетрадный лист / черновик / скан). Optional для backward compat с
+ * pilot attempts из Phase 6 (где field отсутствует).
+ */
+export type MockExamPart1OCRPromptMode = "blank" | "freeform";
+
 export interface MockExamPart1OCRMetaSuccess {
   status: "success";
+  /** Phase 7 / TASK-OCR-3: optional для backward compat с Phase 6 attempts. */
+  prompt_mode?: MockExamPart1OCRPromptMode;
   gemini_model: string;
   recognized_cells: number;
   raw_length: number;
@@ -145,6 +155,8 @@ export interface MockExamPart1OCRMetaSuccess {
 
 export interface MockExamPart1OCRMetaFailed {
   status: "failed";
+  /** Phase 7 / TASK-OCR-3: optional для backward compat с Phase 6 attempts. */
+  prompt_mode?: MockExamPart1OCRPromptMode;
   gemini_model: string;
   error: string;
   raw_response: string | null;
