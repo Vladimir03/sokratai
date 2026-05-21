@@ -618,6 +618,13 @@ function Part1BlankReviewPanel({ attempt, variantPart1Tasks }: {
                   ? 'border-rose-200 dark:border-rose-900'
                   : 'border-amber-200 dark:border-amber-900';
 
+            // TASK-OCR Round 3.1 (2026-05-21): убран отдельный «⚠ AI?» бейдж
+            // (визуальный шум рядом со status icon). Состояние «AI не уверен»
+            // выражается через amber рамку клетки + tooltip на ячейке. Tutor
+            // видит amber-окантовку → hover → понимает что сверить по фото.
+            const lowConfTitle = isLowConf
+              ? 'AI не уверен в распознавании — сверь по фото бланка'
+              : statusConfig[status].title;
             return (
               <label
                 key={t.kim_number}
@@ -625,23 +632,16 @@ function Part1BlankReviewPanel({ attempt, variantPart1Tasks }: {
                   'flex flex-col gap-1 p-2 rounded-md bg-white border dark:bg-slate-900',
                   borderClass,
                 )}
+                title={lowConfTitle}
               >
                 <span className="text-xs font-medium text-slate-700 dark:text-slate-300 flex items-center gap-1">
                   <StatusIcon
                     className={cn('h-3.5 w-3.5 flex-shrink-0', statusConfig[status].classes)}
                     aria-hidden="true"
                   />
-                  <span title={statusConfig[status].title}>
+                  <span>
                     KIM {t.kim_number} <span className="text-slate-400">/ {t.max_score}</span>
                   </span>
-                  {isLowConf && (
-                    <span
-                      className="text-[10px] font-semibold text-amber-700 dark:text-amber-300"
-                      title="AI не уверен в распознавании этой клетки — сверь по фото"
-                    >
-                      ⚠ AI?
-                    </span>
-                  )}
                 </span>
                 {/* AI recognized + correct_answer row. Только если что-то есть. */}
                 {(hasRecognition || correctAnswer) && (
