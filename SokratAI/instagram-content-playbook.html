@@ -1,0 +1,554 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Сократ AI — Instagram Content Playbook (@grand_phys)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Golos+Text:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root {
+  --sokrat-green: #1B6B4A;
+  --sokrat-green-light: #DCFCE7;
+  --sokrat-green-dark: #14532D;
+  --sokrat-surface: #F7F6F3;
+  --slate-900: #0F172A;
+  --slate-700: #334155;
+  --slate-500: #64748B;
+  --slate-200: #E2E8F0;
+  --slate-100: #F1F5F9;
+  --slate-50: #F8FAFC;
+  --amber-50: #FFFBEB;
+  --amber-500: #F59E0B;
+  --pillar-a: #DBEAFE;
+  --pillar-a-dark: #1E40AF;
+  --pillar-b: #FEF3C7;
+  --pillar-b-dark: #92400E;
+  --pillar-c: var(--sokrat-green-light);
+  --pillar-c-dark: var(--sokrat-green-dark);
+  --pillar-d: #F3E8FF;
+  --pillar-d-dark: #6B21A8;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html { scroll-behavior: smooth; }
+body {
+  font-family: 'Golos Text', system-ui, sans-serif;
+  font-size: 16px; line-height: 1.6; color: var(--slate-900);
+  background: var(--slate-50);
+}
+.layout { display: grid; grid-template-columns: 260px 1fr; max-width: 1400px; margin: 0 auto; min-height: 100vh; }
+@media (max-width: 900px) { .layout { grid-template-columns: 1fr; } .sidebar { display: none; } }
+.sidebar { background: #fff; border-right: 1px solid var(--slate-200); padding: 32px 24px; position: sticky; top: 0; height: 100vh; overflow-y: auto; }
+.sidebar-brand { font-size: 18px; font-weight: 700; color: var(--sokrat-green); margin-bottom: 4px; }
+.sidebar-subtitle { font-size: 12px; color: var(--slate-500); margin-bottom: 24px; letter-spacing: 0.02em; }
+.sidebar nav { display: flex; flex-direction: column; gap: 4px; }
+.sidebar nav a { font-size: 14px; color: var(--slate-700); text-decoration: none; padding: 8px 12px; border-radius: 6px; border-left: 2px solid transparent; transition: all 0.15s; }
+.sidebar nav a:hover { background: var(--sokrat-surface); border-left-color: var(--sokrat-green); color: var(--sokrat-green-dark); }
+.main { padding: 48px 56px 96px; max-width: 1000px; background: #fff; }
+@media (max-width: 700px) { .main { padding: 32px 20px 64px; } }
+.hero { border-bottom: 1px solid var(--slate-200); padding-bottom: 32px; margin-bottom: 48px; }
+.hero-badge { display: inline-block; padding: 4px 12px; background: var(--sokrat-green-light); color: var(--sokrat-green-dark); font-size: 12px; font-weight: 600; border-radius: 9999px; margin-bottom: 16px; letter-spacing: 0.04em; text-transform: uppercase; }
+h1 { font-size: 32px; font-weight: 700; line-height: 1.2; margin-bottom: 12px; }
+.hero-meta { font-size: 14px; color: var(--slate-500); }
+h2 { font-size: 24px; font-weight: 600; margin-top: 48px; margin-bottom: 20px; padding-bottom: 12px; border-bottom: 2px solid var(--sokrat-green); scroll-margin-top: 16px; }
+h3 { font-size: 17px; font-weight: 600; margin-top: 24px; margin-bottom: 10px; }
+h4 { font-size: 14px; font-weight: 600; color: var(--slate-700); margin-top: 20px; margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.04em; }
+p { margin-bottom: 14px; color: var(--slate-700); }
+ul, ol { margin: 10px 0 16px 24px; color: var(--slate-700); }
+li { margin-bottom: 6px; }
+strong { color: var(--slate-900); font-weight: 600; }
+code { font-family: 'SF Mono', Monaco, monospace; font-size: 13px; background: var(--slate-100); padding: 2px 6px; border-radius: 4px; }
+.callout { background: var(--sokrat-surface); border-left: 3px solid var(--sokrat-green); padding: 16px 20px; margin: 16px 0; border-radius: 4px; }
+.callout-amber { background: var(--amber-50); border-left-color: var(--amber-500); }
+.callout-title { font-size: 12px; font-weight: 700; color: var(--sokrat-green-dark); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 8px; }
+.callout-amber .callout-title { color: #92400E; }
+table { width: 100%; border-collapse: collapse; margin: 16px 0 24px; font-size: 13px; }
+th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--slate-200); vertical-align: top; }
+th { font-weight: 600; background: var(--slate-50); font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; }
+td { color: var(--slate-700); }
+.pillar-tag { display: inline-block; font-size: 10px; font-weight: 700; padding: 2px 8px; border-radius: 4px; text-transform: uppercase; letter-spacing: 0.04em; white-space: nowrap; }
+.pillar-a { background: var(--pillar-a); color: var(--pillar-a-dark); }
+.pillar-b { background: var(--pillar-b); color: var(--pillar-b-dark); }
+.pillar-c { background: var(--pillar-c); color: var(--pillar-c-dark); }
+.pillar-d { background: var(--pillar-d); color: var(--pillar-d-dark); }
+.reel-card { background: #fff; border: 1px solid var(--slate-200); border-radius: 8px; padding: 20px; margin: 16px 0; }
+.reel-card-header { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; flex-wrap: wrap; }
+.reel-num { background: var(--sokrat-green); color: #fff; width: 28px; height: 28px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 13px; }
+.reel-title { font-size: 16px; font-weight: 600; color: var(--slate-900); }
+.reel-field { margin: 12px 0; padding: 12px 14px; background: var(--slate-50); border-radius: 6px; font-size: 13.5px; }
+.reel-field-label { display: block; font-size: 11px; font-weight: 700; color: var(--slate-500); text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 6px; }
+.bio-block { background: #fff; border: 1px solid var(--slate-200); border-radius: 8px; padding: 20px; margin: 16px 0; font-family: 'SF Mono', Monaco, monospace; font-size: 13px; line-height: 1.7; white-space: pre-wrap; }
+.metric-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin: 16px 0; }
+.metric { background: #fff; border: 1px solid var(--slate-200); border-radius: 8px; padding: 16px; text-align: center; }
+.metric-value { font-size: 22px; font-weight: 700; color: var(--sokrat-green); margin-bottom: 6px; line-height: 1; }
+.metric-label { font-size: 12px; color: var(--slate-500); }
+.footer { margin-top: 60px; padding-top: 20px; border-top: 1px solid var(--slate-200); font-size: 13px; color: var(--slate-500); }
+</style>
+</head>
+<body>
+<div class="layout">
+<aside class="sidebar">
+<div class="sidebar-brand">Сократ AI</div>
+<div class="sidebar-subtitle">IG Content Playbook · v1.0</div>
+<nav>
+<a href="#context">1. Контекст</a>
+<a href="#bio">2. Bio + Highlights</a>
+<a href="#pillars">3. Контент-пиллары</a>
+<a href="#calendar">4. 4-week календарь</a>
+<a href="#scripts">5. Reel scripts (week 1)</a>
+<a href="#leadmagnets">6. Lead-магниты</a>
+<a href="#production">7. Production workflow</a>
+<a href="#hashtags">8. Hashtag-стратегия</a>
+<a href="#crosspost">9. Cross-posting</a>
+<a href="#metrics">10. Метрики</a>
+<a href="#week1">11. Week 1 actions</a>
+</nav>
+</aside>
+
+<main class="main">
+
+<div class="hero">
+<span class="hero-badge">Развилка B · Instagram Primary</span>
+<h1>@grand_phys Content Playbook</h1>
+<p class="hero-meta">v1.0 · 17 мая 2026 · 4-week launch calendar + production model</p>
+</div>
+
+<section id="context">
+<h2>1. Стратегический контекст</h2>
+<p>Развилка B выбрана: <strong>IG как primary channel</strong>, аудитория 50/50 родители-ученики и репетиторы (плюс reverse funnel в tutor-acquisition через рекомендации родителей). Cadence: 4-5 Reels/неделю. Доля контента: 30% реальный Егор, 70% AI-generated через Higgsfield с использованием его аудио + фото.</p>
+
+<div class="callout">
+<div class="callout-title">Цели на 12 недель</div>
+<ul style="margin:0">
+<li><strong>Followers:</strong> 65 → 1500 (текущий: 65)</li>
+<li><strong>Reel views (медиана):</strong> 1000 → 8000</li>
+<li><strong>Link-in-bio clicks:</strong> 0 → 800/неделя</li>
+<li><strong>Trial signups attributable to IG:</strong> 0 → 25/неделя</li>
+<li><strong>Reverse funnel: parents/students → tutor mentions:</strong> 0 → 15+/мес</li>
+</ul>
+</div>
+
+<div class="callout callout-amber">
+<div class="callout-title">Критическое правило: 30% / 70% — это качественный mix, не количественный</div>
+<p style="margin:0">70% AI-generated НЕ значит "AI рассказывает". Это значит: <strong>визуальный слой</strong> (B-roll, motion graphics, transitions, scene generation) сгенерирован Higgsfield. <strong>Голос и face-shots — всегда реальный Егор</strong> (его audio voice-notes + portrait photos как brand anchor). Иначе риск AI-slop в первые 4 ролика убьёт аккаунт.</p>
+</div>
+</section>
+
+<section id="bio">
+<h2>2. Bio + Highlights — немедленный апдейт</h2>
+
+<h3>Текущее состояние</h3>
+<ul>
+<li>Display name: <code>grand_phys</code></li>
+<li>Bio: "Физика, которая тебя окружает / 8 posts / 65 followers / Егор Блинов, выпускник МФТИ. Научпоп😊 Объясняю физику со вкусом🍎"</li>
+<li>Link in bio: нет</li>
+<li>Highlights: Задача дня · Кто я? · Распаковки · Спорт · Готовлю · Формулы · Тик Ток</li>
+</ul>
+
+<h3>Новое состояние (применить в week 1)</h3>
+
+<h4>Display name</h4>
+<div class="bio-block">Егор Блинов · Физика ЕГЭ</div>
+
+<h4>Bio</h4>
+<div class="bio-block">Разбираю физику ЕГЭ/ОГЭ со вкусом
+МФТИ · 7 лет с учениками
+AI-tool: @sokratai_ru
+↓ Бесплатный AI-разбор задачи</div>
+
+<h4>Link in bio</h4>
+<div class="bio-block">sokratai.ru/free-task-check</div>
+<p>Эта страница — landing с lead-magnet формой (см. §6 Lead-магниты).</p>
+
+<h4>Highlights — переделать (порядок слева направо)</h4>
+<ol>
+<li><strong>Старт здесь</strong> — что это за аккаунт, кто Егор, чем поможет (3 stories)</li>
+<li><strong>Сократ AI</strong> — продуктовое demo (4-5 stories: что делает, как выглядит, отзывы)</li>
+<li><strong>ЕГЭ-разборы</strong> — серия задач 21-26 с решениями (постоянно пополняется)</li>
+<li><strong>Кейсы учеников</strong> — success stories (с согласия)</li>
+<li><strong>Задача дня</strong> — сохранить как activity stream</li>
+<li><strong>Бесплатно</strong> — link to trial + PDF lead-magnet</li>
+</ol>
+<p>Удалить: <em>Распаковки, Спорт, Готовлю, Тик Ток</em> (или переархивировать как личные — не на front page).</p>
+</section>
+
+<section id="pillars">
+<h2>3. Контент-пиллары</h2>
+
+<table>
+<thead><tr><th>Pillar</th><th>Доля</th><th>Reach</th><th>Conversion</th><th>Аудитория</th></tr></thead>
+<tbody>
+<tr><td><span class="pillar-tag pillar-a">A · Lifestyle-физика</span></td><td>40%</td><td>Высокий<br>(5-30k views)</td><td>Низкая прямая<br>(brand awareness)</td><td>Родители + ученики + общие зрители</td></tr>
+<tr><td><span class="pillar-tag pillar-b">B · ЕГЭ-задачи</span></td><td>30%</td><td>Средний<br>(1-5k views)</td><td>Средняя<br>(students в воронку)</td><td>Старшеклассники + родители</td></tr>
+<tr><td><span class="pillar-tag pillar-c">C · AI в работе</span></td><td>20%</td><td>Низкий<br>(500-3k views)</td><td>Высокая<br>(tutor + parent conversion)</td><td>Репетиторы + parent-curiosity</td></tr>
+<tr><td><span class="pillar-tag pillar-d">D · Behind-the-scenes</span></td><td>10%</td><td>Средний<br>(1-3k views)</td><td>Низкая прямая<br>(trust)</td><td>Все</td></tr>
+</tbody>
+</table>
+
+<h3>Pillar A — Lifestyle-физика (engine роста)</h3>
+<p><strong>Что:</strong> физика повседневности. Кофе, плита, лужи, машина, погода. Не учебник.</p>
+<p><strong>Зачем:</strong> алгоритм IG это любит → reach → brand awareness → подписчики приходят за "увлекательной физикой", остаются за личностью Егора.</p>
+<p><strong>Tone:</strong> любознательный, не педагогический. "Смотрите, что я заметил" вместо "Сегодня изучим закон Ньютона".</p>
+
+<h3>Pillar B — ЕГЭ-задачи с эмоцией</h3>
+<p><strong>Что:</strong> разбор задач ЕГЭ/ОГЭ с конкретной аргументацией. Не "вот решение", а "вот ловушка, на которой все спотыкаются".</p>
+<p><strong>Зачем:</strong> прямая ценность для ученика+родителя. Конверсия в free-task-check landing.</p>
+<p><strong>Hook-формула:</strong> "[Задача] ломает [%] выпускников. Решаю за [время]." или "Эта задача из ЕГЭ-2025 — ловушка."</p>
+
+<h3>Pillar C — AI в работе (conversion-pillar)</h3>
+<p><strong>Что:</strong> screen-recordings продукта, реальные диалоги ученика с Сократом (с согласия), методологические инсайты "что меняется когда AI берёт routine".</p>
+<p><strong>Зачем:</strong> прямая B2B-конверсия в TG-канал Егора + бесплатный trial. Это тот pillar, через который репетиторы реально подпишутся.</p>
+<p><strong>Tone:</strong> уверенный, конкретный. Voice-over Егора с продуктовым демо.</p>
+
+<h3>Pillar D — Behind-the-scenes</h3>
+<p><strong>Что:</strong> личный бренд Егора. Стол, дом, история становления, "почему я выбрал физику", закадровое.</p>
+<p><strong>Зачем:</strong> trust + para-social connection. Без этого аккаунт — конвейер, а с этим — человек, которому хочется доверять.</p>
+</section>
+
+<section id="calendar">
+<h2>4. 4-week content calendar</h2>
+
+<p>17 Reels на 4 недели. Cadence: 4-5/неделю (Friday-Tuesday auto-posting). Pillar distribution соблюдён.</p>
+
+<table>
+<thead><tr><th>#</th><th>Неделя</th><th>Pillar</th><th>Hook</th><th>Главная идея</th></tr></thead>
+<tbody>
+<tr><td>1</td><td>W1</td><td><span class="pillar-tag pillar-d">D</span></td><td>"Перезапускаю аккаунт. Будет физика, которую вы реально хотите смотреть."</td><td>Manifesto / reset</td></tr>
+<tr><td>2</td><td>W1</td><td><span class="pillar-tag pillar-b">B</span></td><td>"Эта задача ЕГЭ ломает 60% выпускников. Решаю за 90 секунд."</td><td>KIM 25 walkthrough + trap reveal</td></tr>
+<tr><td>3</td><td>W1</td><td><span class="pillar-tag pillar-a">A</span></td><td>"Почему кофе остывает дольше, если молоко налить СРАЗУ?"</td><td>Теплоёмкость на примере</td></tr>
+<tr><td>4</td><td>W1</td><td><span class="pillar-tag pillar-c">C</span></td><td>"Ученик прислал фото своего решения в 23:00. Что сделал AI."</td><td>Sokrat product demo + методология</td></tr>
+<tr><td>5</td><td>W2</td><td><span class="pillar-tag pillar-b">B</span></td><td>"ЕГЭ-2025 задача №22. 4 из 5 идут по неправильному пути."</td><td>Анализ ловушки</td></tr>
+<tr><td>6</td><td>W2</td><td><span class="pillar-tag pillar-a">A</span></td><td>"Почему лужа быстрее высыхает на ветру? Физика за 40 секунд."</td><td>Кинетика испарения</td></tr>
+<tr><td>7</td><td>W2</td><td><span class="pillar-tag pillar-d">D</span></td><td>"Это база задач, которую я собирал 4 года. Раньше я её ненавидел."</td><td>Stack journey: Word/Excel → Sokrat</td></tr>
+<tr><td>8</td><td>W2</td><td><span class="pillar-tag pillar-c">C</span></td><td>"7 утра. Дашборд репетитора. AI уже проверил 12 ДЗ за ночь."</td><td>Async tutoring story</td></tr>
+<tr><td>9</td><td>W2</td><td><span class="pillar-tag pillar-b">B</span></td><td>"ОГЭ физика, задача №25 на смешение жидкостей. Запоминается раз — решается всегда."</td><td>ОГЭ методология</td></tr>
+<tr><td>10</td><td>W3</td><td><span class="pillar-tag pillar-a">A</span></td><td>"POV: твой учитель физики увидел этот эксперимент на TikTok"</td><td>Reaction format + debunk myth</td></tr>
+<tr><td>11</td><td>W3</td><td><span class="pillar-tag pillar-b">B</span></td><td>"Задача ЕГЭ-2024, на которой все спотыкались. Разбор."</td><td>Real exam KIM 24 reveal</td></tr>
+<tr><td>12</td><td>W3</td><td><span class="pillar-tag pillar-c">C</span></td><td>"Сегодня моему ученику не зашло моё объяснение. Что сделал AI."</td><td>Different-angle teaching story</td></tr>
+<tr><td>13</td><td>W3</td><td><span class="pillar-tag pillar-a">A</span></td><td>"Можно ли вскипятить воду в бумажном стаканчике? Делаю и объясняю."</td><td>Демо + теория</td></tr>
+<tr><td>14</td><td>W4</td><td><span class="pillar-tag pillar-c">C</span></td><td>"Что мой ученик пишет AI в 23:00 в субботу. Скриншоты."</td><td>Anonymized screenshots — самый сильный продуктовый hook</td></tr>
+<tr><td>15</td><td>W4</td><td><span class="pillar-tag pillar-b">B</span></td><td>"Задача №21 ЕГЭ за 70 секунд. Запоминайте логику."</td><td>Speed-run reveal</td></tr>
+<tr><td>16</td><td>W4</td><td><span class="pillar-tag pillar-d">D</span></td><td>"Зашёл в чат своих учеников. То, что они обсуждают между уроками, меня удивило."</td><td>Vulnerability + product context</td></tr>
+<tr><td>17</td><td>W4</td><td><span class="pillar-tag pillar-a">A</span></td><td>"Если уронить банку с Эльбруса — за сколько долетит? Физика на пальцах."</td><td>Viral-style hook + динамика</td></tr>
+</tbody>
+</table>
+
+<div class="callout callout-amber">
+<div class="callout-title">Распределение по pillar'ам</div>
+<p style="margin:0">A · 5 reels (29%) · B · 5 reels (29%) · C · 4 reels (24%) · D · 3 reels (18%). Слегка перевешено в pillar B/C для conversion. На неделях 5-8 можно подравнять на 40/30/20/10.</p>
+</div>
+</section>
+
+<section id="scripts">
+<h2>5. Detailed scripts — week 1 (4 шаблона для остальных)</h2>
+
+<div class="reel-card">
+<div class="reel-card-header">
+<span class="reel-num">1</span>
+<span class="reel-title">Manifesto / Reset</span>
+<span class="pillar-tag pillar-d">D · Behind-the-scenes</span>
+</div>
+<div class="reel-field">
+<span class="reel-field-label">Hook (0-3 сек)</span>
+"Перезапускаю аккаунт. Со следующей недели — физика, которую вы реально хотите смотреть."
+</div>
+<div class="reel-field">
+<span class="reel-field-label">Script (30 сек)</span>
+"Я Егор Блинов, выпускник МФТИ, 7 лет готовлю к ЕГЭ. Перезапускаю аккаунт. Будет три вещи: разборы задач ЕГЭ за 90 секунд / физика повседневности, которую вы не замечали / закулисье моего AI-инструмента Сократ, через который мои ученики решают ДЗ с AI-наставником. Если ты родитель, ученик старших классов или коллега-репетитор — оставайся."
+</div>
+<div class="reel-field">
+<span class="reel-field-label">Visual treatment</span>
+Real Egor talking-head selfie (60%) → Higgsfield: smooth transitions, типографика hooks, B-roll generation: формулы в полёте, лаборатория, доска с задачей. Финальный кадр — text card "Завтра первая задача".
+</div>
+<div class="reel-field">
+<span class="reel-field-label">CTA</span>
+"Подпишись — завтра первая задача"
+</div>
+<div class="reel-field">
+<span class="reel-field-label">Target</span>
+Mixed — anchor для всех будущих аудиторий
+</div>
+</div>
+
+<div class="reel-card">
+<div class="reel-card-header">
+<span class="reel-num">2</span>
+<span class="reel-title">ЕГЭ KIM 25 trap reveal</span>
+<span class="pillar-tag pillar-b">B · ЕГЭ-задачи</span>
+</div>
+<div class="reel-field">
+<span class="reel-field-label">Hook (0-3 сек)</span>
+"Эта задача из ЕГЭ ломает 60% выпускников. Решаю за 90 секунд."
+</div>
+<div class="reel-field">
+<span class="reel-field-label">Script (60-90 сек)</span>
+"Задача 25 ЕГЭ-2024: блок массой 2 кг скользит... [условие]. Большинство сразу пишут уравнение второго закона Ньютона. Это ошибка номер один. Сначала рисуем силы. Видишь нормальную реакцию? Она НЕ равна mg, потому что плоскость наклонная. Дальше — простой расчёт. Ответ: 4.5 м/с. Если ты не дошёл до правильного ответа — у меня в шапке есть инструмент, который разберёт твоё решение пошагово."
+</div>
+<div class="reel-field">
+<span class="reel-field-label">Visual treatment</span>
+Voice-over Егора (audio voice-note) → Higgsfield: задача появляется как text-card, силы рисуются анимированно, формулы выстраиваются. В конце — screenshot Sokrat AI с разобранным решением. Финал: split-screen "если запутался → ссылка в bio".
+</div>
+<div class="reel-field">
+<span class="reel-field-label">CTA</span>
+"Бесплатный AI-разбор твоей задачи — ссылка в шапке"
+</div>
+<div class="reel-field">
+<span class="reel-field-label">Target</span>
+Students (ЕГЭ 11-классники) + parents (мониторят прогресс)
+</div>
+</div>
+
+<div class="reel-card">
+<div class="reel-card-header">
+<span class="reel-num">3</span>
+<span class="reel-title">Кофе и теплоёмкость</span>
+<span class="pillar-tag pillar-a">A · Lifestyle-физика</span>
+</div>
+<div class="reel-field">
+<span class="reel-field-label">Hook (0-3 сек)</span>
+"Почему кофе остывает дольше, если молоко налить СРАЗУ?"
+</div>
+<div class="reel-field">
+<span class="reel-field-label">Script (30-50 сек)</span>
+"Эксперимент. Два стакана с одинаковым кофе. В первый молоко наливаю сразу, во второй — через 5 минут. Через 10 минут термометр: первый горячее на 3 градуса. Почему? Закон Ньютона об охлаждении — скорость потери тепла пропорциональна разнице с окружающей средой. Сразу разбавил → температура ниже → разница меньше → потеря медленнее. Bottom line: хочешь, чтобы кофе дольше был тёплым — наливай молоко сразу. Физика."
+</div>
+<div class="reel-field">
+<span class="reel-field-label">Visual treatment</span>
+Real Egor на кухне (30%) → Higgsfield: anime-style overlay с термометрами, формула Newton's cooling появляется поверх, motion graphics температурных кривых. Тренд-hook: jump-cuts в стиле "кулинарных лайфхаков".
+</div>
+<div class="reel-field">
+<span class="reel-field-label">CTA</span>
+"Что ещё объяснить из повседневности? Напиши в комменты"
+</div>
+<div class="reel-field">
+<span class="reel-field-label">Target</span>
+General audience (broadest reach), brand awareness
+</div>
+</div>
+
+<div class="reel-card">
+<div class="reel-card-header">
+<span class="reel-num">4</span>
+<span class="reel-title">Ученик в 23:00 — AI takeover</span>
+<span class="pillar-tag pillar-c">C · AI в работе</span>
+</div>
+<div class="reel-field">
+<span class="reel-field-label">Hook (0-3 сек)</span>
+"Ученик прислал мне фото своего решения в 23:00 в субботу. Что сделал AI вместо меня."
+</div>
+<div class="reel-field">
+<span class="reel-field-label">Script (60-75 сек)</span>
+"Раньше я бы увидел это сообщение утром в воскресенье. Ученик уже забыл задачу, пошёл играть. Теперь — Сократ AI принимает фото, распознаёт решение, видит ошибку в третьем шаге. Не даёт ответ — задаёт вопрос: 'А что произойдёт с импульсом системы, если...'. Ученик отвечает. AI ведёт дальше. Через 12 минут — правильное решение. Я открыл утром в воскресенье — увидел готовый диалог. Сегодня на занятии не тратим 15 минут на это ДЗ, идём дальше."
+</div>
+<div class="reel-field">
+<span class="reel-field-label">Visual treatment</span>
+Screen recording реального диалога ученика с Сократом (с согласия, имена обезличены) → real Egor face inserts с reaction → Higgsfield: highlights на ключевых моментах AI-диалога, типографика "12 минут", "ассинхронно".
+</div>
+<div class="reel-field">
+<span class="reel-field-label">CTA</span>
+"Если ты репетитор — sokratai.ru. Для учеников — ссылка в шапке"
+</div>
+<div class="reel-field">
+<span class="reel-field-label">Target</span>
+Primary: репетиторы (conversion). Secondary: parents (curiosity → ask their tutor)
+</div>
+</div>
+
+<div class="callout">
+<div class="callout-title">Используй эти 4 как templates для Reels 5-17</div>
+<p style="margin:0">Каждый Reel должен следовать формату: Hook (0-3 сек, эмоция/curiosity/число) → Script (30-90 сек, конкретный пример) → Visual treatment (соотношение real/AI) → CTA (link in bio / комменты / следующий Reel). Используй Claude чтобы расширить Reels 5-17 в этот же формат на основе hook-таблицы §4.</p>
+</div>
+</section>
+
+<section id="leadmagnets">
+<h2>6. Lead-магниты — два потока</h2>
+
+<h3>Магнит #1: Parents/Students (массовый funnel из IG)</h3>
+<p><strong>Что:</strong> «50 типовых задач ЕГЭ физика 2026 с пошаговыми разборами от Сократ AI» — PDF, 35-40 страниц.</p>
+<p><strong>Структура каждой задачи:</strong> условие → 3-4 шага решения → подсветка типичной ошибки → AI-инсайт «как Сократ помог бы».</p>
+<p><strong>Email capture:</strong> на странице <code>sokratai.ru/free-task-check</code> ученик/родитель вводит email → получает PDF → попадает в 5-email drip-серию.</p>
+<p><strong>Drip-сериал (5 писем за 14 дней):</strong></p>
+<ol>
+<li>День 0: PDF с задачами + «Сократ AI на 7 дней бесплатно для учеников» (если родитель)</li>
+<li>День 2: «Почему ученики предпочитают AI учителю» — research insight (см. §9 предыдущей стратегии)</li>
+<li>День 5: Кейс конкретного ученика «Аня переходила с 4 на 5 за 2 месяца с Сократом»</li>
+<li>День 8: «Как выбрать репетитора по физике + наш список платящих репетиторов с Сократом»</li>
+<li>День 14: Final offer — trial на ученика / реферал репетитору</li>
+</ol>
+
+<h3>Магнит #2: Tutors (B2B funnel из IG + TG)</h3>
+<p><strong>Что:</strong> «Готовая база: 26 заданий ЕГЭ-2026 формат КИМ + методология проверки» — Excel/JSON с импортом в один клик в Sokrat.</p>
+<p><strong>Email capture:</strong> отдельный landing <code>sokratai.ru/tutor-kit</code>. Tutor вводит email → получает базу + 7 дней trial.</p>
+<p><strong>Drip-сериал (3 письма за 7 дней):</strong></p>
+<ol>
+<li>День 0: База задач + onboarding-инструкция</li>
+<li>День 3: Кейс Елены «Месяц работы с Сократ AI — что изменилось»</li>
+<li>День 7: Final offer — 50% скидка первого месяца + персональный onboarding-звонок с Егором</li>
+</ol>
+
+<div class="callout">
+<div class="callout-title">Critical product dependencies (что нужно реализовать)</div>
+<ul style="margin:0">
+<li>Landing pages <code>sokratai.ru/free-task-check</code> и <code>sokratai.ru/tutor-kit</code></li>
+<li>Email capture form (можно через готовый сервис: Sendpulse / UniSender / Mailchimp если есть VPN)</li>
+<li>Drip-сериалы автоматизированы</li>
+<li>UTM-tracking на каждой ссылке: <code>?source=ig_lead_magnet</code>, <code>?source=tg_lead_magnet</code></li>
+<li>Один-клик-импорт базы задач в Sokrat (если ещё нет — это feature к 1 июня)</li>
+</ul>
+</div>
+</section>
+
+<section id="production">
+<h2>7. Production workflow</h2>
+
+<h3>Воскресенье (Егор, ~2.5 часа)</h3>
+<ul>
+<li>5-6 audio voice-нот по 30-60 сек на разные темы (на телефон)</li>
+<li>8-10 self-portrait фото в разных локациях (улица, дом, у доски, в дороге)</li>
+<li>Screenshots из реальных уроков: KB, mock exam, диалог с учеником</li>
+<li>Отправка всех материалов Vladimir</li>
+</ul>
+
+<h3>Понедельник-Среда (Vladimir + Claude + Higgsfield, ~20 часов)</h3>
+<ul>
+<li><strong>Trend-watching</strong> (1 час): scan IG/TT за trending audio + format hooks за последние 7 дней</li>
+<li><strong>Hooks + scripts</strong> (5-7 часов): прорабатываю с Claude каждый из 4-5 Reels недели по template-схеме (см. §5)</li>
+<li><strong>Higgsfield generation</strong> (8-10 часов): B-roll, motion graphics, transitions, scene generation для каждого Reel</li>
+<li><strong>Editing + captions</strong> (5-7 часов): final cut, addCaption, sound design, hashtags</li>
+</ul>
+
+<h3>Четверг (Егор, ~30 мин)</h3>
+<p>Approves все 4-5 Reels. Может попросить переделать визуал/script если что-то off-brand.</p>
+
+<h3>Пятница-Вторник (auto-posting)</h3>
+<p>1 Reel в день в 18:00-20:00 MSK (peak engagement для RU-аудитории). Использовать Meta Business Suite scheduler или Buffer/Later (если есть VPN).</p>
+
+<h3>Ежедневно (~15-30 мин)</h3>
+<p>Egor (или Vladimir) отвечает на комменты + DMs первые 2 часа после публикации (boost engagement-сигнал для алгоритма).</p>
+
+<div class="callout callout-amber">
+<div class="callout-title">Реалистичная нагрузка</div>
+<p style="margin:0">Vladimir: ~20-23 часа/неделю (CEO-time = серьёзная инвестиция). Egor: ~3-4 часа/неделю (sustainable). Если Vladimir не может выделять 20+ часов, нужен content-producer на freelance (15-25k ₽/мес).</p>
+</div>
+</section>
+
+<section id="hashtags">
+<h2>8. Hashtag-стратегия</h2>
+
+<p>5-6 hashtag'ов на каждый Reel. Mix размеров. Меняй комбинации между Reels чтобы алгоритм не помечал spam.</p>
+
+<table>
+<thead><tr><th>Тип</th><th>Размер</th><th>Примеры</th></tr></thead>
+<tbody>
+<tr><td>Large (1M+ posts)</td><td>2 хэштега</td><td>#физика #егэ2026</td></tr>
+<tr><td>Medium (100k-1M)</td><td>2 хэштега</td><td>#репетиторфизики #огэ #ЕГЭфизика2026 #физматклуб</td></tr>
+<tr><td>Niche (10k-100k)</td><td>1-2 хэштега</td><td>#научпопфизика #физмат #репетитормфти #задачаегэ</td></tr>
+<tr><td>Branded</td><td>1 хэштег</td><td>#сократai · #grand_phys</td></tr>
+</tbody>
+</table>
+
+<p>Pillar-specific:</p>
+<ul>
+<li><strong>Pillar A (lifestyle):</strong> #физикавжизни #научпоп #объяснилнапальцах</li>
+<li><strong>Pillar B (ЕГЭ):</strong> #разборегэ #задача26 #готовлюськэгэ</li>
+<li><strong>Pillar C (AI):</strong> #aiвобразовании #нейросетидляучебы #репетиторсai</li>
+<li><strong>Pillar D (BTS):</strong> #будниречпетитора #мфти #тутор</li>
+</ul>
+</section>
+
+<section id="crosspost">
+<h2>9. Cross-posting strategy</h2>
+
+<h3>TikTok (@grand_phys или новый)</h3>
+<p>Все Reels mirror'ятся на TikTok без изменений (vertical 9:16 — формат идентичен). <strong>Маржинальная стоимость: 0.</strong> Уже сейчас в highlights видно "Тик Ток" — Егор там уже есть. TT-алгоритм для RU-аудитории работает лучше IG (без VPN). Может стать вторым primary каналом органически.</p>
+
+<h3>YouTube Shorts</h3>
+<p>Тоже mirror без изменений. YT Shorts даёт ещё одну surface через YouTube Search + рекомендации. Особенно ценно: Shorts превращаются в discovery воронку для long-form YouTube контента (Q3-Q4 план).</p>
+
+<h3>TG канал Егора</h3>
+<p>НЕ авто-кросс-постить Reels. <strong>Re-frame для tutor-аудитории:</strong></p>
+<ul>
+<li>Pillar B и C Reels пакетировать в TG-посты с большим контекстом: "В IG показал короткий разбор задачи 25. Здесь — полный методический комментарий + 3 варианта подачи для разных учеников"</li>
+<li>Pillar A — обычно НЕ постить в TG (там не tutor-focus)</li>
+<li>Pillar D — selectively, особенно про продукт</li>
+</ul>
+<p>Цель: TG канал = более глубокая методология поверх IG-hooks. Аудитории не пересекаются полностью, не оскорбится дубликатом.</p>
+
+<h3>VK Clips</h3>
+<p>Skip Phase 1. VK Clips имеет малую аудиторию по сравнению с TT, ROI на cross-post не оправдывает. Возвращаемся к этому в Q4 если IG/TT работают.</p>
+</section>
+
+<section id="metrics">
+<h2>10. Метрики</h2>
+
+<h3>Weekly dashboard</h3>
+<ul>
+<li>Followers (absolute + delta)</li>
+<li>Reels published (целевой темп 4-5)</li>
+<li>Median Reel views</li>
+<li>Top Reel views</li>
+<li>Link-in-bio clicks (через built-in IG analytics)</li>
+<li>DM inquiries</li>
+<li>Saves + Shares (algorithm-key signals)</li>
+</ul>
+
+<h3>Monthly dashboard</h3>
+<ul>
+<li>Lead-magnet downloads (#1 parent/student, #2 tutor) — через email capture stats</li>
+<li>Email open + CTR в drip-сериях</li>
+<li>Trial signups attributed to IG (через UTM)</li>
+<li>Paid conversions attributed to IG</li>
+<li>Cost per acquired tutor (Vladimir time × ~3000 ₽/час = synthetic CAC)</li>
+</ul>
+
+<h3>Целевые показатели</h3>
+<div class="metric-grid">
+<div class="metric"><div class="metric-value">200</div><div class="metric-label">Followers к концу W4</div></div>
+<div class="metric"><div class="metric-value">600</div><div class="metric-label">Followers к концу W8</div></div>
+<div class="metric"><div class="metric-value">1500</div><div class="metric-label">Followers к концу W12</div></div>
+<div class="metric"><div class="metric-value">25/нед</div><div class="metric-label">Trial signups из IG к W12</div></div>
+<div class="metric"><div class="metric-value">5/нед</div><div class="metric-label">Paying acquired через IG к W12</div></div>
+<div class="metric"><div class="metric-value">3.8x</div><div class="metric-label">View/follower ratio (target)</div></div>
+</div>
+
+<div class="callout callout-amber">
+<div class="callout-title">Decision gates</div>
+<ul style="margin:0">
+<li><strong>W4 check:</strong> если followers &lt; 150 ИЛИ median view &lt; 800 → переоценить content mix (больше pillar A для reach)</li>
+<li><strong>W8 check:</strong> если trial signups &lt; 5/нед → проблема в lead-magnet или CTA, аудит landing-page</li>
+<li><strong>W12 check:</strong> если &lt; 600 followers → IG не работает как primary, перейти на Развилка A конфигурацию</li>
+</ul>
+</div>
+</section>
+
+<section id="week1">
+<h2>11. Week 1 — actionable list</h2>
+
+<ol>
+<li><strong>Понедельник:</strong> обновить bio + display name + add link in bio (см. §2). Lead-magnet landing может пока быть простым form'ом — главное чтобы было куда вести.</li>
+<li><strong>Понедельник-вторник:</strong> создать highlight'ы "Старт здесь" и "Сократ AI" (3-5 stories каждый, можно использовать существующие screenshots продукта).</li>
+<li><strong>Воскресенье прошедшее:</strong> уже должны быть от Егора 5-6 audio voice-нот + 8-10 фото + screenshots. Если нет — назначь конкретное время в воскресенье вечером.</li>
+<li><strong>Понедельник-среда:</strong> production первых 4 Reels (см. §5 scripts). Используй detailed templates как есть.</li>
+<li><strong>Пятница W1:</strong> Reel #1 (manifesto) — 18:30 MSK.</li>
+<li><strong>Суббота W1:</strong> Reel #2 (KIM 25) — 19:00 MSK.</li>
+<li><strong>Воскресенье W1:</strong> Reel #3 (кофе) — 17:00 MSK.</li>
+<li><strong>Понедельник W2:</strong> Reel #4 (AI в работе) — 19:30 MSK.</li>
+<li><strong>В каждый день публикации:</strong> Егор/Vladimir отвечают на комменты в первые 2 часа.</li>
+<li><strong>Конец W1:</strong> метрики в Google Sheets + screenshot reach каждого Reel.</li>
+</ol>
+
+<div class="callout">
+<div class="callout-title">Параллельно с IG-запуском</div>
+<p style="margin:0">Не забывай про <a href="content-marketing-playbook.html">второй playbook</a> по блогу и TG-sponsorships. Они работают на других горизонтах (3-6 месяцев) и не должны застаиваться, пока IG в фокусе.</p>
+</div>
+</section>
+
+<div class="footer">
+<p><strong>Сократ AI · Instagram Content Playbook</strong></p>
+<p>v1.0 · 17 мая 2026 · Living document, обновляется по итогам каждых 4 недель</p>
+</div>
+
+</main>
+</div>
+</body>
+</html>

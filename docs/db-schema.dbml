@@ -1,0 +1,715 @@
+// =====================================================================
+// SokratAI — ER schema for dbdiagram.io
+// Импорт: https://dbdiagram.io → Import → From DBML
+// Сгенерировано из CLAUDE.md + canonical rules (2026-05-19)
+// Группировка по 10 bounded contexts из architecture review.
+// =====================================================================
+
+Project sokratai {
+  database_type: 'PostgreSQL'
+  Note: '''
+    SokratAI — образовательная платформа для репетиторов.
+    Backend = Supabase (PG + RLS + Auth + Storage + Realtime).
+    Все таблицы под RLS, write-path обычно через edge functions service_role.
+  '''
+}
+
+// ---------------------------------------------------------------------
+// EXTERNAL: Supabase auth schema (для FK reference)
+// ---------------------------------------------------------------------
+Table auth.users {
+  id uuid [pk, note: 'Supabase managed']
+  email text [unique]
+  email_confirmed_at timestamptz
+  raw_user_meta_data jsonb
+  created_at timestamptz
+  Note: 'External — managed by Supabase Auth (GoTrue)'
+}
+
+// =====================================================================
+// DOMAIN 1: Identity & Access
+// =====================================================================
+
+Table profiles {
+  id uuid [pk, ref: > auth.users.id]
+  username text
+  full_name text
+  avatar_url text
+  gender text [note: 'male | female | null']
+  subscription_tier text [default: 'free', note: 'free | premium']
+  subscription_expires_at timestamptz
+  trial_started_at timestamptz
+  trial_ends_at timestamptz
+  created_at timestamptz [default: `now()`]
+  Note: 'НЕТ колонки email! Email живёт в auth.users.'
+}
+
+Table user_roles {
+  id uuid [pk, default: `gen_random_uuid()`]
+  user_id uuid [ref: > auth.users.id, not null]
+  role text [not null, note: 'admin | moderator | tutor | student']
+  created_at timestamptz [default: `now()`]
+
+  indexes {
+    (user_id, role) [unique]
+  }
+}
+
+Table tutors {
+  id uuid [pk, default: `gen_random_uuid()`]
+  user_id uuid [ref: > auth.users.id, unique, not null]
+  name text
+  gender text
+  avatar_url text
+  bio text
+  subjects text[] [note: 'physics, maths, ...']
+  telegram_id bigint
+  telegram_username text
+  booking_link text
+  invite_code text [unique]
+  feature_mock_exams_enabled boolean [default: false]
+  created_at timestamptz [default: `now()`]
+  updated_at timestamptz
+
+  Note: 'RLS tight (post-2026-05-06): только self-SELECT для authenticated. Cross-user reads — service_role only.'
+}
+
+Table tutor_students {
+  id uuid [pk, default: `gen_random_uuid()`]
+  tutor_id uuid [ref: > tutors.id, not null]
+  student_user_id uuid [ref: > auth.users.id]
+  display_name text [note: 'имя для AI-промптов']
+  hourly_rate_cents integer [default: 0]
+  is_active boolean [default: true]
+  created_at timestamptz [default: `now()`]
+
+  indexes {
+    (tutor_id, student_user_id) [unique]
+  }
+}
+
+Table tutor_groups {
+  id uuid [pk, default: `gen_random_uuid()`]
+  tutor_id uuid [ref: > tutors.id, not null]
+  name text [not null]
+  short_name text
+  created_at timestamptz [default: `now()`]
+}
+
+Table tutor_group_memberships {
+  id uuid [pk, default: `gen_random_uuid()`]
+  tutor_group_id uuid [ref: > tutor_groups.id, not null]
+  tutor_student_id uuid [ref: > tutor_students.id, not null]
+  is_active boolean [default: true]
+  created_at timestamptz [default: `now()`]
+
+  indexes {
+    (tutor_student_id) [unique, name: 'one_active_membership_per_student']
+  }
+}
+
+Table tutor_invites {
+  id uuid [pk, default: `gen_random_uuid()`]
+  tutor_id uuid [ref: > tutors.id, not null]
+  invite_code text [unique, not null]
+  used_at timestamptz
+  expires_at timestamptz
+  created_at timestamptz [default: `now()`]
+}
+
+// =====================================================================
+// DOMAIN 2: Telegram
+// =====================================================================
+
+Table telegram_sessions {
+  id uuid [pk, default: `gen_random_uuid()`]
+  user_id uuid [ref: > auth.users.id, not null]
+  telegram_user_id bigint [unique, not null]
+  telegram_username text
+  first_name text
+  last_name text
+  created_at timestamptz [default: `now()`]
+}
+
+Table telegram_login_tokens {
+  id uuid [pk, default: `gen_random_uuid()`]
+  token text [unique, not null]
+  status text [default: 'pending', note: 'pending | verified | expired']
+  user_id uuid [ref: > auth.users.id]
+  session_data jsonb [note: 'access_token + refresh_token']
+  created_at timestamptz [default: `now()`]
+  expires_at timestamptz
+  verified_at timestamptz
+}
+
+// =====================================================================
+// DOMAIN 3: Knowledge Base
+// =====================================================================
+
+Table kb_topics {
+  id uuid [pk, default: `gen_random_uuid()`]
+  name text [not null]
+  parent_id uuid [ref: > kb_topics.id]
+  sort_order integer
+}
+
+Table kb_folders {
+  id uuid [pk, default: `gen_random_uuid()`]
+  owner_id uuid [ref: > auth.users.id, note: 'NULL = sokrat catalog']
+  parent_id uuid [ref: > kb_folders.id]
+  name text [not null]
+  is_socrat_folder boolean [default: false]
+  is_drafts_folder boolean [default: false]
+  created_at timestamptz [default: `now()`]
+}
+
+Table kb_tasks {
+  id uuid [pk, default: `gen_random_uuid()`]
+  owner_id uuid [ref: > auth.users.id, note: 'NULL = public catalog row']
+  folder_id uuid [ref: > kb_folders.id]
+  topic_id uuid [ref: > kb_topics.id]
+  task_text text [not null]
+  correct_answer text
+  solution_text text
+  attachment_url text [note: 'dual-format: storage:// ref OR JSON-array']
+  solution_attachment_url text [note: 'dual-format']
+  fingerprint text [note: 'md5(text + answer + attachment) для dedup']
+  source_label text [note: 'sokrat | my']
+  source_task_id uuid [ref: > kb_tasks.id, note: 'для catalog copy → указывает на источник']
+  published_task_id uuid [ref: > kb_tasks.id, note: 'для source → указывает на public copy']
+  moderation_status text [default: 'active', note: 'active | hidden_duplicate | pending | rejected']
+  kim_number integer
+  check_format text [note: 'short_answer | detailed_solution']
+  answer_format text
+  created_at timestamptz [default: `now()`]
+  updated_at timestamptz
+
+  indexes {
+    fingerprint
+    (owner_id, folder_id)
+    (topic_id, moderation_status)
+  }
+
+  Note: '''
+    Source→Copy Model: задача в "сократ" модератора (source) →
+    канонная public copy (owner_id=NULL).
+    Триггер trg_kb_after_update_moderation авто-publish + auto-resync.
+  '''
+}
+
+// =====================================================================
+// DOMAIN 4: Homework
+// =====================================================================
+
+Table homework_tutor_assignments {
+  id uuid [pk, default: `gen_random_uuid()`]
+  tutor_id uuid [ref: > auth.users.id, not null, note: 'auth.users.id, NOT tutors.id']
+  title text
+  subject text [not null, note: 'physics, maths, russian, ...']
+  exam_type text [note: 'ege | oge']
+  deadline timestamptz
+  status text [default: 'draft', note: 'draft | active | archived']
+  notes_for_student text
+  disable_ai_bootstrap boolean [default: false]
+  created_at timestamptz [default: `now()`]
+  updated_at timestamptz
+
+  indexes {
+    (tutor_id, status, created_at)
+  }
+}
+
+Table homework_tutor_tasks {
+  id uuid [pk, default: `gen_random_uuid()`]
+  assignment_id uuid [ref: > homework_tutor_assignments.id, not null]
+  order_num integer [not null]
+  task_text text [not null]
+  task_image_url text [note: 'dual-format storage://']
+  correct_answer text
+  solution_text text [note: 'tutor-only, для AI reference']
+  solution_image_urls text [note: 'dual-format, MAX 5 photos, tutor-only']
+  rubric_text text [note: 'tutor-only']
+  rubric_image_urls text [note: 'dual-format, MAX 3, tutor-only']
+  max_score numeric(5,2) [default: 1]
+  kim_number integer
+  check_format text [default: 'short_answer', note: 'short_answer | detailed_solution']
+  task_kind text [default: 'extended', not null, note: 'numeric | extended | proof']
+  kb_task_id uuid [ref: > kb_tasks.id, note: 'provenance из KB']
+  created_at timestamptz [default: `now()`]
+
+  indexes {
+    (assignment_id, order_num)
+  }
+
+  Note: '''
+    КРИТИЧНО: 4+ write-paths (handleCreateAssignment / handleUpdateAssignment
+    в 3 местах + client-side HWDrawer). При добавлении колонки —
+    обновить ВСЕ write-paths + DraftTask + HWDraftTask.
+    check_format и task_kind ОБЯЗАНЫ писаться вместе через deriveTaskKind().
+  '''
+}
+
+Table homework_tutor_student_assignments {
+  id uuid [pk, default: `gen_random_uuid()`]
+  assignment_id uuid [ref: > homework_tutor_assignments.id, not null]
+  student_id uuid [ref: > auth.users.id, not null]
+  created_at timestamptz [default: `now()`]
+
+  indexes {
+    (assignment_id, student_id) [unique]
+  }
+}
+
+Table homework_tutor_threads {
+  id uuid [pk, default: `gen_random_uuid()`]
+  student_assignment_id uuid [ref: > homework_tutor_student_assignments.id, unique, not null]
+  current_task_id uuid [ref: > homework_tutor_tasks.id]
+  current_task_order integer
+  status text [default: 'active', note: 'active | completed']
+  tutor_last_viewed_at timestamptz [note: 'NULL = never opened (unread)']
+  last_student_message_at timestamptz
+  created_at timestamptz [default: `now()`]
+  updated_at timestamptz
+
+  indexes {
+    (student_assignment_id, last_student_message_at)
+  }
+}
+
+Table homework_tutor_thread_messages {
+  id uuid [pk, default: `gen_random_uuid()`]
+  thread_id uuid [ref: > homework_tutor_threads.id, not null]
+  role text [not null, note: 'user | assistant | tutor | system']
+  content text
+  image_url text [note: 'dual-format storage://, через extractStudentThreadAttachmentRefs']
+  task_id uuid [ref: > homework_tutor_tasks.id, note: 'canonical identity для filter']
+  task_order integer [note: 'display only, может быть stale после reorder']
+  message_kind text [note: 'answer | ai_reply | hint_request | hint_reply | check_result | submission | system | question | tutor_note']
+  submission_payload jsonb [note: 'structured {numeric, photos[], text, voice_ref?} для Phase 1 mobile submission']
+  author_user_id uuid [ref: > auth.users.id]
+  visible_to_student boolean [default: true]
+  created_at timestamptz [default: `now()`]
+
+  indexes {
+    (thread_id, created_at) [name: 'idx_thread_messages_thread']
+    (task_id, created_at)
+  }
+
+  Note: '''
+    Realtime publication: supabase_realtime для INSERT events (tutor live viewer).
+    visible_to_student=false → hidden tutor notes.
+  '''
+}
+
+Table homework_tutor_task_states {
+  id uuid [pk, default: `gen_random_uuid()`]
+  thread_id uuid [ref: > homework_tutor_threads.id, not null]
+  task_id uuid [ref: > homework_tutor_tasks.id, not null]
+  status text [default: 'active', note: 'active | completed | locked']
+  attempts integer [default: 0]
+  best_score numeric(5,2)
+  available_score numeric(5,2) [note: '%-degradation от hints']
+  earned_score numeric(5,2)
+  wrong_answer_count integer [default: 0]
+  hint_count integer [default: 0]
+  ai_score numeric(5,2) [note: 'raw AI score']
+  ai_score_comment text [note: 'TUTOR-ONLY (strip перед client)']
+  tutor_score_override numeric(5,2)
+  tutor_score_override_comment text [note: 'visible to student']
+  tutor_score_override_by uuid [ref: > auth.users.id, note: 'TUTOR-ONLY (strip + GRANT)']
+  tutor_score_override_at timestamptz
+  tutor_force_completed_at timestamptz [note: 'visible to student (бейдж)']
+  tutor_force_completed_by uuid [ref: > auth.users.id, note: 'TUTOR-ONLY (strip + GRANT)']
+  created_at timestamptz [default: `now()`]
+  updated_at timestamptz
+
+  indexes {
+    (thread_id, task_id) [unique]
+  }
+
+  Note: '''
+    Column-level GRANT whitelist (migration 20260516120100):
+    REVOKE all → GRANT 20 safe columns. 3 поля (ai_score_comment,
+    tutor_score_override_by, tutor_force_completed_by) НЕ GRANT'ятся
+    на authenticated. Доступ только service_role.
+
+    RPCs: hw_tutor_force_complete_task, hw_tutor_force_complete_all_tasks
+    (SECURITY DEFINER, REVOKE FROM PUBLIC, GRANT TO service_role).
+  '''
+}
+
+Table homework_tutor_materials {
+  id uuid [pk, default: `gen_random_uuid()`]
+  assignment_id uuid [ref: > homework_tutor_assignments.id, not null]
+  type text [note: 'pdf | image | link']
+  url text
+  name text
+  created_at timestamptz [default: `now()`]
+}
+
+Table homework_tutor_templates {
+  id uuid [pk, default: `gen_random_uuid()`]
+  tutor_id uuid [ref: > auth.users.id, not null]
+  title text [not null]
+  subject text [note: 'KNOWN DRIFT: CHECK только legacy: math, physics, history, social, english, cs']
+  tags text[]
+  topic text
+  tasks_json jsonb [note: 'snapshot задач со всеми полями включая source_kb_task_id']
+  created_at timestamptz [default: `now()`]
+}
+
+Table homework_kb_tasks {
+  id uuid [pk, default: `gen_random_uuid()`]
+  assignment_id uuid [ref: > homework_tutor_assignments.id, not null]
+  kb_task_id uuid [ref: > kb_tasks.id, not null]
+  sort_order integer [note: 'sync через hw_reorder_tasks RPC']
+  kb_source_label text
+  kb_snapshot_text text
+  kb_snapshot_answer text
+  kb_snapshot_solution text
+
+  Note: 'provenance: показывает что задача пришла из KB; sort_order ↔ order_num - 1'
+}
+
+Table homework_share_links {
+  id uuid [pk, default: `gen_random_uuid()`]
+  assignment_id uuid [ref: > homework_tutor_assignments.id, not null]
+  slug text [unique, not null, note: '8-char lowercase, /^[a-z0-9]{8}$/i']
+  created_by uuid [ref: > auth.users.id, not null]
+  show_answers boolean [default: false]
+  show_solutions boolean [default: false]
+  expires_at timestamptz [note: 'NULL = никогда']
+  created_at timestamptz [default: `now()`]
+
+  Note: 'Public read через edge function public-homework-share под service_role'
+}
+
+// =====================================================================
+// DOMAIN 5: Mock Exams
+// =====================================================================
+
+Table mock_exam_variants {
+  id uuid [pk, default: `gen_random_uuid()`]
+  title text [not null]
+  subject text [default: 'physics']
+  exam_type text [default: 'ege', note: 'ege | oge']
+  variant_pdf_url text [note: 'public bucket mock-exam-variant-pdfs, без answer table!']
+  created_by uuid [ref: > auth.users.id]
+  created_at timestamptz [default: `now()`]
+}
+
+Table mock_exam_variant_tasks {
+  id uuid [pk, default: `gen_random_uuid()`]
+  variant_id uuid [ref: > mock_exam_variants.id, not null]
+  kim_number integer [not null]
+  part integer [not null, note: '1 | 2']
+  order_num integer
+  task_text text [not null]
+  task_image_url text [note: 'dual-format storage://']
+  correct_answer text [note: 'для Часть 1; auto-check']
+  solution_text text [note: 'для Часть 2; tutor reference (reveal на result post-approval)']
+  check_mode text [note: 'strict | multi_choice | ordered | unordered | pair | task20 | manual']
+  max_score integer [not null]
+  topic text
+
+  indexes {
+    (variant_id, kim_number) [unique]
+  }
+}
+
+Table mock_exam_assignments {
+  id uuid [pk, default: `gen_random_uuid()`]
+  tutor_id uuid [ref: > auth.users.id, not null]
+  variant_id uuid [ref: > mock_exam_variants.id]
+  title text
+  mode text [note: 'classic | manual_entry']
+  status text [default: 'active', note: 'active | archived']
+  created_at timestamptz [default: `now()`]
+}
+
+Table mock_exam_attempts {
+  id uuid [pk, default: `gen_random_uuid()`]
+  assignment_id uuid [ref: > mock_exam_assignments.id, not null]
+  student_id uuid [ref: > auth.users.id, note: 'NULL для anonymous leads']
+  anonymous_id uuid [unique, note: 'NULL для authenticated, иначе server-generated UUID']
+  status text [not null, note: 'in_progress | submitted | ai_checking | awaiting_review | approved | manually_entered']
+  answer_method text [default: 'form', note: 'form | blank']
+  blank_photo_url text [note: 'canonical Часть 1 в blank mode']
+  part1_blank_photo_url text [note: 'legacy fallback, deprecated']
+  part2_bulk_photo_urls text [note: 'dual-format JSON-array, до 7 фото пакетом']
+  ai_part1_ocr_json jsonb [note: 'Phase 6 OCR. Format: {cells: {1: {value, confidence}}, __meta: {status, model, ...}}']
+  total_part1_score integer
+  total_part2_score integer
+  total_score integer
+  manual_comment text
+  created_at timestamptz [default: `now()`]
+  updated_at timestamptz [note: 'BEFORE UPDATE trigger, migration 20260515130000']
+
+  indexes {
+    (assignment_id, status)
+    (student_id, created_at)
+  }
+
+  Note: 'CAS guard на status для concurrent grader claim'
+}
+
+Table mock_exam_attempt_part1_answers {
+  id uuid [pk, default: `gen_random_uuid()`]
+  attempt_id uuid [ref: > mock_exam_attempts.id, not null]
+  kim_number integer [not null]
+  student_answer text
+  is_correct boolean
+  earned_score integer
+  score_source text [not null, default: 'finalize_default', note: 'ocr | tutor | finalize_default | student_form']
+
+  indexes {
+    (attempt_id, kim_number) [unique]
+  }
+
+  Note: '''
+    RLS HARDENED (migration 20260516140000): student INSERT/UPDATE
+    с WITH CHECK earned_score IS NULL AND score_source = student_form.
+    Защита от spoof score_source=tutor через PostgREST.
+  '''
+}
+
+Table mock_exam_attempt_part2_solutions {
+  id uuid [pk, default: `gen_random_uuid()`]
+  attempt_id uuid [ref: > mock_exam_attempts.id, not null]
+  kim_number integer [not null]
+  photo_url text [note: 'legacy per-kim, NULL для bulk attempts']
+  ai_draft_json jsonb [note: 'TUTOR-ONLY: {suggested_score, confidence, elements_check, comment_for_tutor, flags, assigned_photo_indices?}']
+  tutor_score integer [note: 'revealed to student post-approval']
+  tutor_comment text [note: 'revealed to student post-approval']
+  status text [note: 'pending | tutor_approved | tutor_modified']
+  created_at timestamptz
+  updated_at timestamptz
+
+  indexes {
+    (attempt_id, kim_number) [unique]
+  }
+}
+
+Table mock_exam_public_links {
+  id uuid [pk, default: `gen_random_uuid()`]
+  slug text [unique, not null, note: '8-char lowercase /^[a-z0-9]{8}$/i']
+  scope text [not null, note: 'invite | parent_result']
+  assignment_id uuid [ref: > mock_exam_assignments.id]
+  attempt_id uuid [ref: > mock_exam_attempts.id]
+  expires_at timestamptz
+  created_at timestamptz [default: `now()`]
+}
+
+Table mock_exam_anonymous_leads {
+  id uuid [pk, default: `gen_random_uuid()`]
+  slug text [ref: > mock_exam_public_links.slug, not null]
+  anonymous_id uuid [ref: > mock_exam_attempts.anonymous_id, not null]
+  lead_name text
+  lead_contact text [note: 'telegram_username или email']
+  contact_type text [note: 'telegram | email']
+  consent_at timestamptz [not null, note: 'server-controlled now()']
+  created_at timestamptz [default: `now()`]
+}
+
+// =====================================================================
+// DOMAIN 6: Trainer (Formula Rounds — standalone /trainer)
+// =====================================================================
+
+Table formula_rounds {
+  id uuid [pk, default: `gen_random_uuid()`]
+  assignment_id uuid [ref: > homework_tutor_assignments.id]
+  section text [note: 'mechanics | egor-v1 | ...']
+  question_count integer
+  lives integer [note: 'legacy preview-flow']
+  created_at timestamptz [default: `now()`]
+}
+
+Table formula_round_results {
+  id uuid [pk, default: `gen_random_uuid()`]
+  student_id uuid [ref: > auth.users.id, note: 'nullable для anonymous /trainer']
+  round_id uuid [ref: > formula_rounds.id, note: 'nullable']
+  source text [note: 'preview | trainer-standalone']
+  session_id text [note: 'для anonymous /trainer']
+  ip_hash text [note: 'sha256(ip + TRAINER_IP_SALT) для rate-limit']
+  score integer
+  correct_count integer
+  question_count integer
+  duration_seconds integer [note: 'NOT duration_ms']
+  created_at timestamptz [default: `now()`]
+
+  indexes {
+    (student_id, created_at) [name: 'idx_formula_round_results_trainer_recent']
+  }
+}
+
+// =====================================================================
+// DOMAIN 7: Notifications
+// =====================================================================
+
+Table push_subscriptions {
+  id uuid [pk, default: `gen_random_uuid()`]
+  user_id uuid [ref: > auth.users.id, not null]
+  endpoint text [not null]
+  p256dh text [not null]
+  auth text [not null]
+  user_agent text
+  expires_at timestamptz
+  created_at timestamptz [default: `now()`]
+
+  indexes {
+    (user_id, endpoint) [unique]
+  }
+
+  Note: 'Cascade: Push → Telegram → Email. Web Push через raw crypto.subtle (RFC 8291)'
+}
+
+// =====================================================================
+// DOMAIN 8: Payments & Subscriptions
+// =====================================================================
+
+Table payments {
+  id text [pk, note: 'manual-* для manual activation, иначе YooKassa payment_id']
+  user_id uuid [ref: > auth.users.id, not null]
+  amount numeric(10,2) [note: 'РУБЛИ (не копейки!)']
+  currency text [default: 'RUB']
+  status text [note: 'pending | succeeded | failed']
+  subscription_days integer
+  subscription_activated_at timestamptz
+  subscription_expires_at timestamptz
+  webhook_data jsonb [note: 'YooKassa webhook payload + manual reason']
+  created_at timestamptz [default: `now()`]
+
+  indexes {
+    (user_id, created_at)
+  }
+}
+
+Table daily_message_limits {
+  id uuid [pk, default: `gen_random_uuid()`]
+  user_id uuid [ref: > auth.users.id, not null]
+  date date [not null]
+  count integer [default: 0]
+
+  indexes {
+    (user_id, date) [unique]
+  }
+
+  Note: '''
+    Лимит context-aware (RPC get_subscription_status 2-arg, default chat):
+    - chat context: 10/day free, unlimited premium
+    - homework context: 50/day если хоть один tutor платит, иначе 10
+    Counter один на user, контекст влияет только на порог.
+  '''
+}
+
+// =====================================================================
+// DOMAIN 9: Tutor schedule & lessons (платежи между ним и учениками)
+// =====================================================================
+
+Table tutor_lessons {
+  id uuid [pk, default: `gen_random_uuid()`]
+  tutor_id uuid [ref: > tutors.id, not null]
+  tutor_student_id uuid [ref: > tutor_students.id, not null]
+  start_at timestamptz [not null, note: 'canonical lesson date — single source of truth']
+  end_at timestamptz
+  status text [note: 'scheduled | completed | cancelled']
+  created_at timestamptz [default: `now()`]
+
+  indexes {
+    (tutor_id, start_at)
+  }
+}
+
+Table tutor_payments {
+  id uuid [pk, default: `gen_random_uuid()`]
+  tutor_id uuid [ref: > tutors.id, not null]
+  tutor_student_id uuid [ref: > tutor_students.id, not null]
+  lesson_id uuid [ref: > tutor_lessons.id]
+  amount_cents integer [note: 'в копейках, делить на 100 при display']
+  due_date date [note: 'CURRENT_DATE при создании — НЕ lesson date!']
+  paid_at timestamptz
+  created_at timestamptz [default: `now()`]
+
+  Note: 'Для UI даты занятия использовать tutor_lessons.start_at, fallback на due_date'
+}
+
+// =====================================================================
+// EXPLICIT REFS (где dbdiagram visual edge нужен явный)
+// =====================================================================
+
+Ref: profiles.id - auth.users.id [delete: cascade]
+Ref: tutors.user_id - auth.users.id [delete: cascade]
+Ref: kb_tasks.source_task_id > kb_tasks.id
+Ref: kb_tasks.published_task_id > kb_tasks.id
+Ref: homework_tutor_threads.current_task_id > homework_tutor_tasks.id
+Ref: kb_folders.parent_id > kb_folders.id
+Ref: kb_topics.parent_id > kb_topics.id
+
+// =====================================================================
+// TABLE GROUPS — визуальная организация в dbdiagram.io
+// =====================================================================
+
+TableGroup identity_access {
+  auth.users
+  profiles
+  user_roles
+  tutors
+  tutor_students
+  tutor_groups
+  tutor_group_memberships
+  tutor_invites
+}
+
+TableGroup telegram {
+  telegram_sessions
+  telegram_login_tokens
+}
+
+TableGroup knowledge_base {
+  kb_topics
+  kb_folders
+  kb_tasks
+}
+
+TableGroup homework {
+  homework_tutor_assignments
+  homework_tutor_tasks
+  homework_tutor_student_assignments
+  homework_tutor_threads
+  homework_tutor_thread_messages
+  homework_tutor_task_states
+  homework_tutor_materials
+  homework_tutor_templates
+  homework_kb_tasks
+  homework_share_links
+}
+
+TableGroup mock_exams {
+  mock_exam_variants
+  mock_exam_variant_tasks
+  mock_exam_assignments
+  mock_exam_attempts
+  mock_exam_attempt_part1_answers
+  mock_exam_attempt_part2_solutions
+  mock_exam_public_links
+  mock_exam_anonymous_leads
+}
+
+TableGroup trainer {
+  formula_rounds
+  formula_round_results
+}
+
+TableGroup notifications {
+  push_subscriptions
+}
+
+TableGroup payments {
+  payments
+  daily_message_limits
+}
+
+TableGroup lessons {
+  tutor_lessons
+  tutor_payments
+}

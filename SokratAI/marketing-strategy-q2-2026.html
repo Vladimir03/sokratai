@@ -1,0 +1,893 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Сократ AI — Маркетинговая стратегия Q2-Q3 2026</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Golos+Text:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root {
+  --sokrat-green: #1B6B4A;
+  --sokrat-green-light: #DCFCE7;
+  --sokrat-green-dark: #14532D;
+  --sokrat-surface: #F7F6F3;
+  --slate-900: #0F172A;
+  --slate-700: #334155;
+  --slate-500: #64748B;
+  --slate-400: #94A3B8;
+  --slate-200: #E2E8F0;
+  --slate-100: #F1F5F9;
+  --slate-50: #F8FAFC;
+  --amber-50: #FFFBEB;
+  --amber-500: #F59E0B;
+  --red-50: #FEF2F2;
+  --red-500: #EF4444;
+  --bg: #FFFFFF;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+html { scroll-behavior: smooth; }
+
+body {
+  font-family: 'Golos Text', system-ui, -apple-system, sans-serif;
+  font-size: 16px;
+  line-height: 1.6;
+  color: var(--slate-900);
+  background: var(--slate-50);
+}
+
+.layout {
+  display: grid;
+  grid-template-columns: 260px 1fr;
+  max-width: 1400px;
+  margin: 0 auto;
+  min-height: 100vh;
+}
+
+@media (max-width: 900px) {
+  .layout { grid-template-columns: 1fr; }
+  .sidebar { display: none; }
+}
+
+.sidebar {
+  background: var(--bg);
+  border-right: 1px solid var(--slate-200);
+  padding: 32px 24px;
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  overflow-y: auto;
+}
+
+.sidebar-brand {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--sokrat-green);
+  margin-bottom: 4px;
+}
+
+.sidebar-subtitle {
+  font-size: 12px;
+  color: var(--slate-500);
+  margin-bottom: 24px;
+  letter-spacing: 0.02em;
+}
+
+.sidebar nav { display: flex; flex-direction: column; gap: 4px; }
+
+.sidebar nav a {
+  font-size: 14px;
+  color: var(--slate-700);
+  text-decoration: none;
+  padding: 8px 12px;
+  border-radius: 6px;
+  border-left: 2px solid transparent;
+  transition: all 0.15s ease;
+}
+
+.sidebar nav a:hover {
+  background: var(--sokrat-surface);
+  border-left-color: var(--sokrat-green);
+  color: var(--sokrat-green-dark);
+}
+
+.main {
+  padding: 48px 56px 96px;
+  max-width: 920px;
+  background: var(--bg);
+}
+
+@media (max-width: 700px) {
+  .main { padding: 32px 20px 64px; }
+}
+
+.hero {
+  border-bottom: 1px solid var(--slate-200);
+  padding-bottom: 32px;
+  margin-bottom: 48px;
+}
+
+.hero-badge {
+  display: inline-block;
+  padding: 4px 12px;
+  background: var(--sokrat-green-light);
+  color: var(--sokrat-green-dark);
+  font-size: 12px;
+  font-weight: 600;
+  border-radius: 9999px;
+  margin-bottom: 16px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+h1 {
+  font-size: 36px;
+  font-weight: 700;
+  line-height: 1.2;
+  color: var(--slate-900);
+  margin-bottom: 12px;
+}
+
+.hero-meta {
+  font-size: 14px;
+  color: var(--slate-500);
+}
+
+h2 {
+  font-size: 26px;
+  font-weight: 600;
+  color: var(--slate-900);
+  margin-top: 56px;
+  margin-bottom: 20px;
+  padding-bottom: 12px;
+  border-bottom: 2px solid var(--sokrat-green);
+  scroll-margin-top: 16px;
+}
+
+h3 {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--slate-900);
+  margin-top: 28px;
+  margin-bottom: 12px;
+}
+
+h4 {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--slate-700);
+  margin-top: 20px;
+  margin-bottom: 8px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+p {
+  margin-bottom: 16px;
+  color: var(--slate-700);
+}
+
+ul, ol { margin: 12px 0 20px 24px; color: var(--slate-700); }
+li { margin-bottom: 8px; }
+
+strong { color: var(--slate-900); font-weight: 600; }
+
+.callout {
+  background: var(--sokrat-surface);
+  border-left: 3px solid var(--sokrat-green);
+  padding: 16px 20px;
+  margin: 20px 0;
+  border-radius: 4px;
+}
+
+.callout-amber {
+  background: var(--amber-50);
+  border-left-color: var(--amber-500);
+}
+
+.callout-red {
+  background: var(--red-50);
+  border-left-color: var(--red-500);
+}
+
+.callout-title {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--sokrat-green-dark);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 8px;
+}
+
+.callout-amber .callout-title { color: #92400E; }
+.callout-red .callout-title { color: #991B1B; }
+
+.cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 16px;
+  margin: 20px 0;
+}
+
+.card {
+  background: var(--bg);
+  border: 1px solid var(--slate-200);
+  border-radius: 8px;
+  padding: 20px;
+}
+
+.card-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.card-letter {
+  width: 32px;
+  height: 32px;
+  background: var(--sokrat-green);
+  color: white;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  font-size: 14px;
+}
+
+.card-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--slate-900);
+}
+
+.card-meta {
+  font-size: 12px;
+  color: var(--slate-500);
+  margin-bottom: 12px;
+}
+
+.card-body { font-size: 14px; color: var(--slate-700); }
+.card-body ul { margin: 8px 0 0 20px; }
+.card-body li { margin-bottom: 4px; }
+
+.timeline {
+  display: flex;
+  flex-direction: column;
+  margin: 24px 0;
+  border-left: 2px solid var(--slate-200);
+  padding-left: 24px;
+}
+
+.timeline-item {
+  position: relative;
+  padding-bottom: 32px;
+}
+
+.timeline-item:last-child { padding-bottom: 0; }
+
+.timeline-dot {
+  position: absolute;
+  left: -32px;
+  top: 4px;
+  width: 14px;
+  height: 14px;
+  background: var(--sokrat-green);
+  border-radius: 50%;
+  border: 3px solid var(--bg);
+  box-shadow: 0 0 0 2px var(--sokrat-green);
+}
+
+.timeline-period {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--sokrat-green-dark);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-bottom: 4px;
+}
+
+.timeline-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--slate-900);
+  margin-bottom: 8px;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 16px 0 24px;
+  font-size: 14px;
+}
+
+th, td {
+  text-align: left;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--slate-200);
+}
+
+th {
+  font-weight: 600;
+  color: var(--slate-900);
+  background: var(--slate-50);
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+td { color: var(--slate-700); }
+
+.metric-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 16px;
+  margin: 20px 0;
+}
+
+.metric {
+  background: var(--bg);
+  border: 1px solid var(--slate-200);
+  border-radius: 8px;
+  padding: 20px;
+  text-align: center;
+}
+
+.metric-value {
+  font-size: 28px;
+  font-weight: 700;
+  color: var(--sokrat-green);
+  line-height: 1;
+  margin-bottom: 8px;
+}
+
+.metric-label {
+  font-size: 13px;
+  color: var(--slate-500);
+  font-weight: 500;
+}
+
+.question-list {
+  counter-reset: q-counter;
+  list-style: none;
+  margin-left: 0;
+}
+
+.question-list li {
+  counter-increment: q-counter;
+  position: relative;
+  padding: 16px 16px 16px 56px;
+  background: var(--slate-50);
+  border-radius: 8px;
+  margin-bottom: 12px;
+  border-left: 3px solid var(--sokrat-green);
+}
+
+.question-list li::before {
+  content: counter(q-counter);
+  position: absolute;
+  left: 16px;
+  top: 16px;
+  width: 28px;
+  height: 28px;
+  background: var(--sokrat-green);
+  color: white;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  font-size: 13px;
+}
+
+.footer {
+  margin-top: 80px;
+  padding-top: 24px;
+  border-top: 1px solid var(--slate-200);
+  font-size: 13px;
+  color: var(--slate-500);
+}
+
+.tag {
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 4px;
+  margin-right: 6px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.tag-active { background: var(--sokrat-green-light); color: var(--sokrat-green-dark); }
+.tag-build { background: #FEF3C7; color: #92400E; }
+.tag-future { background: var(--slate-200); color: var(--slate-700); }
+
+@media print {
+  .sidebar { display: none; }
+  .main { padding: 24px; max-width: none; }
+  .layout { grid-template-columns: 1fr; }
+}
+</style>
+</head>
+<body>
+<div class="layout">
+
+<aside class="sidebar">
+<div class="sidebar-brand">Сократ AI</div>
+<div class="sidebar-subtitle">Маркетинговая стратегия · v1.1</div>
+<nav>
+<a href="#context">1. Контекст</a>
+<a href="#icp">2. Целевой сегмент</a>
+<a href="#jtbd">3. JTBD — три сюжета</a>
+<a href="#funnels">4. Воронки</a>
+<a href="#channels">5. Каналы</a>
+<a href="#content">6. Контент</a>
+<a href="#calendar">7. Календарь</a>
+<a href="#metrics">8. Метрики</a>
+<a href="#research">9. Использование research</a>
+<a href="#questions">10. Открытые вопросы</a>
+</nav>
+</aside>
+
+<main class="main">
+
+<div class="hero">
+<span class="hero-badge">Стратегия Q2-Q3 2026</span>
+<h1>Привлечение и удержание репетиторов</h1>
+<p class="hero-meta">Владимир Камчаткин · v1.1 · 14 мая 2026 · Living document</p>
+</div>
+
+<section id="context">
+<h2>1. Контекст и стартовая точка</h2>
+
+<p>MVP Сократ AI запущен в марте 2026. Апрель — бесплатный пилот. Май 2026 — первые платежи: 2 платящих репетитора (Елена, Вадим — физика). Текущее saturation целевого рынка — менее 0.1%.</p>
+
+<h4>Продуктовый периметр</h4>
+<ul>
+<li><strong>Tier-pricing:</strong> 1000 / 2000 / 3000 ₽/мес, trial 7 дней без карты → 200 ₽ активация → autorenewal</li>
+<li><strong>Ядро продукта:</strong> AI-проверка ДЗ, KB задач, шаблоны ДЗ, mock exams v1 (ЕГЭ физика), guided chat ученик ↔ AI ↔ репетитор</li>
+<li><strong>Инфраструктура:</strong> Selectel VPS Москва (RU bypass), AI quota 50/день для учеников платящих репетиторов</li>
+</ul>
+
+<div class="callout">
+<div class="callout-title">Ключевое продуктовое преимущество</div>
+<p style="margin: 0">Ученик платящего репетитора получает 50 AI-сообщений в день — это <strong>встроенный multiplier</strong>: каждый репетитор автоматически "продвигает" Сократ среди своих 5-15 учеников и их родителей.</p>
+</div>
+</section>
+
+<section id="icp">
+<h2>2. Целевой сегмент (ICP)</h2>
+
+<p><strong>Решение: физика-only до Q4 2026.</strong> Математика и другие предметы — Phase 2 при триггере 50+ платящих физиков ИЛИ стагнации physics-growth.</p>
+
+<h3>Целевой профиль репетитора</h3>
+<ul>
+<li>Физика ЕГЭ или ОГЭ (преимущественно)</li>
+<li>Self-employed (не школа, не сетевой центр)</li>
+<li>Hourly rate: 3000–5000 ₽</li>
+<li>Стаж: 3+ лет</li>
+<li>Активных учеников: 10–30 и/или группы</li>
+<li>Возраст: 28–50 лет</li>
+<li>Telegram — основной рабочий канал коммуникации</li>
+</ul>
+
+<h3>Рынок</h3>
+<div class="metric-grid">
+<div class="metric">
+<div class="metric-value">~5–10k</div>
+<div class="metric-label">Активных физиков-репетиторов в РФ</div>
+</div>
+<div class="metric">
+<div class="metric-value">&lt;0.1%</div>
+<div class="metric-label">Текущее saturation Сократом</div>
+</div>
+<div class="metric">
+<div class="metric-value">1000+</div>
+<div class="metric-label">Цель платящих к 31.12.2026</div>
+</div>
+</div>
+
+<h3>Почему остаёмся в физике</h3>
+<ul>
+<li><strong>Defensible niche:</strong> меньше конкурентов (Skysmart, Foxford делают math first; физика — менее насыщенный рынок)</li>
+<li><strong>Глубина продукта:</strong> mock exams ЕГЭ физика, методология Егора — это moat, который трудно скопировать</li>
+<li><strong>Community-led growth:</strong> репетиторы физики друг друга знают через олимпиады, ЦПМ, методические встречи</li>
+<li><strong>AI advantage сильнее:</strong> физика 22-26 ЕГЭ требует качественной оценки и Сократовского ведения — там AI даёт больше value, чем в более процедурной математике</li>
+</ul>
+
+<div class="callout callout-amber">
+<div class="callout-title">Триггер расширения</div>
+<p style="margin: 0">50+ платящих физиков · ИЛИ · стагнация physics-growth 2+ месяца · ИЛИ · запрос от ≥30% pilot tutors. До этого math = отвлечение фокуса.</p>
+</div>
+</section>
+
+<section id="jtbd">
+<h2>3. JTBD — три ключевых сюжета</h2>
+
+<p>Извлечены из отзыва Елены (платящий репетитор, физика ЕГЭ/ОГЭ, тариф 3000 ₽). Три отдельных сюжета — не смешивать в одном messaging.</p>
+
+<div class="cards">
+
+<div class="card">
+<div class="card-header">
+<div class="card-letter">1</div>
+<div class="card-title">Replacement story</div>
+</div>
+<div class="card-meta">Сильнейший хук для B2B SaaS</div>
+<div class="card-body">
+<p><em>"Заменю все вспомогательные инструменты на Сократ"</em></p>
+<p><strong>Аудитория:</strong> репетитор с фрагментированным workflow (Word + TG + Excel + блокнот)</p>
+<p><strong>Хук:</strong> «Один инструмент вместо пяти»</p>
+<p><strong>Proof:</strong> demo-видео Егора + кейс Елены</p>
+</div>
+</div>
+
+<div class="card">
+<div class="card-header">
+<div class="card-letter">2</div>
+<div class="card-title">AI-positive identity</div>
+</div>
+<div class="card-meta">Идентификационный фрейм</div>
+<div class="card-body">
+<p><em>"За подобным подходом будущее, хочу быть в нём"</em></p>
+<p><strong>Аудитория:</strong> репетитор 28-45 лет, видит AI как преимущество, не угрозу</p>
+<p><strong>Хук:</strong> «Используй AI, пока не используют против тебя»</p>
+<p><strong>Proof:</strong> research-данные (см. §9), позиционирование "AI снимает социальное давление с учеников"</p>
+</div>
+</div>
+
+<div class="card">
+<div class="card-header">
+<div class="card-letter">3</div>
+<div class="card-title">Student engagement</div>
+</div>
+<div class="card-meta">Самый сильный продуктовый JTBD</div>
+<div class="card-body">
+<p><em>"Ученики говорят, что круто, обсуждают с Сократом задачи"</em></p>
+<p><strong>Аудитория:</strong> репетитор, который борется с тем, что ученики забрасывают ДЗ между уроками</p>
+<p><strong>Хук:</strong> «Что ваш ученик обсуждает с AI в 23:00 в субботу»</p>
+<p><strong>Proof:</strong> примеры диалогов учеников с AI (с согласия), отчёты родителям из mock-экзаменов</p>
+</div>
+</div>
+
+</div>
+</section>
+
+<section id="funnels">
+<h2>4. Воронки — три параллельных потока</h2>
+
+<div class="callout">
+<div class="callout-title">Стратегический приоритет на ближайшие 6 недель</div>
+<p style="margin: 0 0 12px 0">Самое высокорычажное действие до конца июня — <strong>не контент, а продуктовая механика реферала (Воронка B)</strong>. Контент работает на горизонте 3-6 месяцев, peer-referral — на горизонте 4-6 недель.</p>
+<p style="margin: 0">Логика: 2 платящих → за 6 недель через peer-referral можно дойти до 15-25 без единого нового шортса. Контент-машина параллельно строится, но её traction появится в августе-сентябре. CEO-время на ближайший месяц должно быть инвестировано в referral-page и автоматику credit'ов, не в production шортсов.</p>
+</div>
+
+<div class="callout callout-amber">
+<div class="callout-title">Амбиция 1000 платящих к декабрю требует материально другой go-to-market</div>
+<p style="margin: 0 0 12px 0">Concierge-воронка Егора одна даёт потолок ~100-150 customers. Чтобы достичь 1000 к декабрю 2026, должны <strong>одновременно работать</strong>:</p>
+<ul style="margin: 0">
+<li>3-5 ambassador-репетиторов (Егор + Елена + Даша + минимум 1-2 ещё к августу)</li>
+<li>Referral-loop с конверсией 30-50% (запуск 1 июня)</li>
+<li>Content engine из IG/YT Shorts в TG Егора (3-4 шортса/нед)</li>
+<li>YouTube-партнёрства (август-сентябрь, бюджет 100-200к ₽)</li>
+<li>Опционально: контролируемый платный трафик с Q4, когда есть LTV-данные</li>
+</ul>
+</div>
+
+<table>
+<thead>
+<tr><th>Воронка</th><th>Период</th><th>Конверсия</th><th>Bottleneck</th><th>Статус</th></tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>A. Concierge</strong><br><span style="color:var(--slate-500);font-size:13px">Egor → DM → demo</span></td>
+<td>Сейчас–август</td>
+<td>40-60% trial-to-paid</td>
+<td>Время Егора (5-7 ч/нед)</td>
+<td><span class="tag tag-active">Активно</span></td>
+</tr>
+<tr>
+<td><strong>B. Referral</strong><br><span style="color:var(--slate-500);font-size:13px">Платящие → invite link</span></td>
+<td>Запуск 1 июня</td>
+<td>30-50% (peer trust)</td>
+<td>Продуктовая реализация</td>
+<td><span class="tag tag-build">Строим</span></td>
+</tr>
+<tr>
+<td><strong>C. Content-led</strong><br><span style="color:var(--slate-500);font-size:13px">TG/IG/YT → trial</span></td>
+<td>Slow burn, traction Q3</td>
+<td>1-3% follower → trial</td>
+<td>Content velocity</td>
+<td><span class="tag tag-build">Строим</span></td>
+</tr>
+</tbody>
+</table>
+
+<h3>Воронка A — Concierge / Personal Outreach (основной поток)</h3>
+<p>Егор → DM знакомым из physics-tutor сети → 2-3 мин demo-видео ИЛИ 20 мин звонок → trial → 200 ₽ → autorenewal.</p>
+<p><strong>Почему работает сейчас:</strong> peer-trust репетитор-репетитор даёт высочайшую конверсию. Первые 50-100 клиентов в B2B SaaS делаются руками (Stripe, Linear, Notion).</p>
+<p><strong>Лимит:</strong> ~100-150 customers без новых ambassador'ов. После этого упирается в потолок личного networking Егора.</p>
+
+<h3>Воронка B — Referral / Network Effect</h3>
+<p>Платящий репетитор → личный invite-link → приглашённый получает 30 дней бесплатно → при оплате реферала приглашающий получает 2 месяца бесплатно.</p>
+<p><strong>Что нужно построить:</strong> referral-page в кабинете, автоматическая механика credit'ов, public "wall of tutors" с согласия, монtthly recap-отчёт.</p>
+<p><strong>Триггер запуска:</strong> 15+ платящих репетиторов (иначе пускать некого) — расчётная дата 1 июня 2026.</p>
+
+<h3>Воронка C — Content-Led Inbound (long-tail)</h3>
+<p>IG/YT Shorts (discovery layer) → TG канал Егора (depth layer) → лид-магнит (free AI разбор задачи) → trial → paid.</p>
+<p><strong>Критично:</strong> чисто TG-постинг не растит канал — TG имеет closed graph. Нужен external traffic через IG Reels + YT Shorts + YouTube партнёрства (Q3).</p>
+<p><strong>Traction timeline:</strong> 90-180 дней от старта до measurable revenue.</p>
+</section>
+
+<section id="channels">
+<h2>5. Каналы</h2>
+
+<h3>Hero: канал Егора в Telegram</h3>
+<p>До конца 2026 это де-факто бренд-канал Сократа. Не дублировать отдельным "Сократ AI" каналом — преждевременно (см. §10 Open Questions).</p>
+<ul>
+<li><strong>Позиционирование:</strong> "Егор Блинов — репетитор физики ЕГЭ/ОГЭ, сооснователь Сократ AI"</li>
+<li><strong>Co-brand:</strong> каждый второй пост содержит Сократ-product context (кейс, апдейт, фича)</li>
+<li><strong>Целевой рост:</strong> 1500 subs к августу, 3000 к декабрю 2026</li>
+</ul>
+
+<h3>Discovery layer: IG Reels + YT Shorts</h3>
+<p>Алгоритмическая дистрибуция → новые подписчики на канал Егора → trial.</p>
+
+<div class="callout callout-red">
+<div class="callout-title">Критичное правило</div>
+<p style="margin: 0"><strong>Реальный Егор на камере (аудио + фото)</strong>, AI-augmented визуальный слой. <strong>НЕ</strong> AI-генерированный talking-head Егора (deepfake-like). Аудитория физиков-репетиторов узнает AI с первых секунд, доверие схлопнется.</p>
+</div>
+
+<h4>Правильная схема production'а</h4>
+<ol>
+<li>Егор записывает 5 минут аудио voice-нот в неделю (телефон, без камеры)</li>
+<li>Vladimir + Claude структурируют hook'и, сценарий, CTA</li>
+<li>Higgsfield генерирует визуальный слой: B-roll физики, типографика, transitions, motion graphics поверх фото Егора как brand identity</li>
+<li>Реальный голос Егора — закадровый</li>
+<li>Целевой темп: 3-4 шортса в неделю</li>
+</ol>
+
+<h4>Трендвотчинг — только на уровне hook'а</h4>
+<p>Тренды IG/YT используем <strong>только в первых 3 секундах</strong> ролика для удержания внимания. Контентная начинка — экспертиза Егора. Перепутать местами = аудитория приходит за мемом и уходит за 0 секунд.</p>
+
+<h3>Партнёрства (август-сентябрь)</h3>
+<p>1-2 sponsorship'а у YouTube physics-authors. Тестовый бюджет 20-50к ₽ на интеграцию.</p>
+<ul>
+<li>Павел Виктор (физика, 1M+ subs)</li>
+<li>Дмитрий Гущин / Решу ЕГЭ</li>
+<li>Школково YouTube</li>
+<li>Александр Долгих</li>
+<li>Илья Бакаев</li>
+</ul>
+<p>Цель: 500-2000 новых subs канала Егора за интеграцию.</p>
+
+<h3>Что НЕ делаем сейчас</h3>
+<ul>
+<li><strong>Отдельный бренд-канал Сократ AI</strong> — преждевременно, рискует выглядеть мёртвым (см. §10)</li>
+<li><strong>Платный Yandex Direct / VK Ads</strong> — нет LTV-данных, CAC ceiling неизвестен</li>
+<li><strong>Webinar-funnel в стиле Skillbox</strong> — production-heavy, прежевременно</li>
+<li><strong>IG organic feed-посты</strong> — алгоритм наказывает статичные посты</li>
+</ul>
+</section>
+
+<section id="content">
+<h2>6. Контент-стратегия</h2>
+
+<h3>Pillars (ротация по неделям)</h3>
+<table>
+<thead><tr><th>Pillar</th><th>Доля</th><th>Примеры hook'ов</th></tr></thead>
+<tbody>
+<tr>
+<td><strong>Методология</strong><br>экспертиза Егора</td>
+<td>40%</td>
+<td>«Как я готовлю к 26-й задаче ЕГЭ» · «Типичная ошибка ученика на КИМ-22» · «Почему я не верю в репетиторов-предметников»</td>
+</tr>
+<tr>
+<td><strong>AI в действии</strong><br>product demos</td>
+<td>30%</td>
+<td>«Что AI сказал моему ученику в 23:00» · «Сократ проверил фото ДЗ за 30 секунд» · «Где AI ошибается и как репетитор страхует»</td>
+</tr>
+<tr>
+<td><strong>Student wins</strong><br>case studies</td>
+<td>20%</td>
+<td>«Аня перешла с 4 на 5 за 2 месяца» · «Илья начал делать ДЗ сам после Сократа»</td>
+</tr>
+<tr>
+<td><strong>Behind the scenes</strong><br>founder voice</td>
+<td>10%</td>
+<td>«Что мы построили на этой неделе» · «Почему мы делаем только физику»</td>
+</tr>
+</tbody>
+</table>
+
+<h3>Format mix</h3>
+<ul>
+<li><strong>Short-form (IG Reels / YT Shorts):</strong> hook-driven, 30-60 сек, 3-4 в неделю</li>
+<li><strong>Long-form TG:</strong> 200-400 слов, 2-3 в неделю</li>
+<li><strong>YouTube long-form</strong> (Q4): 10-15 мин методология, опционально</li>
+<li><strong>Дзен статьи</strong> (Q3): SEO-инвестиция под Yandex, 1 в неделю</li>
+</ul>
+
+<h3>Production stack</h3>
+<div class="callout">
+<p style="margin: 0;"><strong>Принцип:</strong> AI — это <em>multiplier</em> Егора, не <em>replacement</em>. Каждый контент-кусок имеет реальный голос/идею Егора, AI помогает с production speed и distribution.</p>
+</div>
+<ul>
+<li><strong>Идея + экспертиза:</strong> Егор (аудио, 5 мин/нед)</li>
+<li><strong>Структура + копи:</strong> Vladimir + Claude</li>
+<li><strong>Визуал:</strong> Higgsfield (B-roll, transitions, motion)</li>
+<li><strong>Captions, thumbnails, repurposing:</strong> AI tooling</li>
+<li><strong>Approval gate:</strong> Егор апрувит каждый ролик перед публикацией (защита от AI-slop)</li>
+</ul>
+</section>
+
+<section id="calendar">
+<h2>7. Календарь — синхронизация с сезонностью ЕГЭ</h2>
+
+<div class="callout callout-amber">
+<div class="callout-title">Ключевой сезонный инсайт</div>
+<p style="margin: 0">В мае все репетиторы максимально загружены (peak подготовки к ЕГЭ). С начала июня спрос резко обрушивается — это <strong>наше окно</strong>. Пик найма репетиторов родителями — август-сентябрь. Сейчас 3 месяца до пика.</p>
+</div>
+
+<div class="timeline">
+
+<div class="timeline-item">
+<div class="timeline-dot"></div>
+<div class="timeline-period">Май 2026 (сейчас)</div>
+<div class="timeline-title">Подготовка машины</div>
+<ul>
+<li>Собрать список 30-50 физиков-репетиторов для outreach 1-3 июня</li>
+<li>Записать demo-видео Егора (2-3 мин) — используется во всех "не сейчас" ответах</li>
+<li>Запустить TG канал Егора в режиме 3 поста/нед</li>
+<li>Спроектировать referral-page (P0 продукт)</li>
+<li>Outreach в light-touch режиме (не давим, копим)</li>
+</ul>
+</div>
+
+<div class="timeline-item">
+<div class="timeline-dot"></div>
+<div class="timeline-period">Июнь 1-15</div>
+<div class="timeline-title">Peak outreach window</div>
+<ul>
+<li>Расчистить календарь Егора под 5-7 demo-звонков/день</li>
+<li>Запустить referral-page в продукте</li>
+<li>Massive cold DM wave (30+ репетиторов в первую неделю)</li>
+<li>IG/YT Shorts cadence ramps up</li>
+<li><strong>Цель: +30-40 платящих репетиторов (накопительно 32-42 к 15 июня, 50+ к 30 июня)</strong></li>
+</ul>
+</div>
+
+<div class="timeline-item">
+<div class="timeline-dot"></div>
+<div class="timeline-period">Июнь 16 — Июль</div>
+<div class="timeline-title">Onboarding и retention</div>
+<ul>
+<li>Active hand-holding для новых репетиторов (KB setup, шаблоны ДЗ)</li>
+<li>Weekly tutor community call (расширение существующего чата)</li>
+<li>Контент-серия "Summer prep — как использовать лето для подготовки"</li>
+<li>Сбор testimonials от новых платящих</li>
+</ul>
+</div>
+
+<div class="timeline-item">
+<div class="timeline-dot"></div>
+<div class="timeline-period">Август</div>
+<div class="timeline-title">Ramp to school year</div>
+<ul>
+<li>1-2 YouTube sponsorship тест-интеграции</li>
+<li>Reактивация silent leads из мая-июня</li>
+<li>Контент-серия "Back to school"</li>
+<li><strong>Цель: 150-250 платящих репетиторов накопительно</strong></li>
+</ul>
+</div>
+
+<div class="timeline-item">
+<div class="timeline-dot"></div>
+<div class="timeline-period">Сентябрь — Октябрь</div>
+<div class="timeline-title">Multiplier season</div>
+<ul>
+<li>Каждый платящий репетитор инвайтит 5-15 новых учеников в Сократ → automatic growth</li>
+<li>Student-side activation через mock exams + parent reports</li>
+<li>Parent → tutor reverse funnel (см. §10)</li>
+<li><strong>Цель: 500+ платящих репетиторов к 31 октября</strong></li>
+</ul>
+</div>
+
+</div>
+</section>
+
+<section id="metrics">
+<h2>8. Метрики</h2>
+
+<h3>Weekly dashboard (Vladimir + Egor)</h3>
+<ul>
+<li>New trial signups by source (UTM-tracked: <code>?source=tg_egor</code>, <code>?source=direct_dm</code>, <code>?source=ig</code>, <code>?source=yt</code>)</li>
+<li>Cold DM response rate (Egor's manual tracking)</li>
+<li>Demo-call → trial conversion %</li>
+<li>Content engagement: TG subs growth, IG/YT views, CTR на CTA</li>
+</ul>
+
+<h3>Monthly</h3>
+<ul>
+<li>Total платящих репетиторов</li>
+<li>Trial-to-paid %</li>
+<li>Monthly churn %</li>
+<li>ARPU (mix между 1000/2000/3000 ₽)</li>
+<li>NPS (короткая опросная форма)</li>
+</ul>
+
+<h3>Quarterly</h3>
+<ul>
+<li>Brand awareness в physics-tutor сегменте (короткий опрос на 20-30 респондентов)</li>
+<li>"Wow-метрика": % новых репетиторов, которые приглашают 1+ коллегу в течение 30 дней</li>
+<li>LTV/CAC (когда включится paid)</li>
+</ul>
+
+<h3>Q2 targets (к 30 июня 2026)</h3>
+<div class="metric-grid">
+<div class="metric">
+<div class="metric-value">50+</div>
+<div class="metric-label">Платящих репетиторов</div>
+</div>
+<div class="metric">
+<div class="metric-value">&gt;35%</div>
+<div class="metric-label">Trial-to-paid</div>
+</div>
+<div class="metric">
+<div class="metric-value">700+</div>
+<div class="metric-label">Subs канала Егора</div>
+</div>
+<div class="metric">
+<div class="metric-value">30+</div>
+<div class="metric-label">Content pieces published</div>
+</div>
+</div>
+</section>
+
+<section id="research">
+<h2>9. Использование research-данных</h2>
+
+<p>Исследования (РАНХиГС, НИУ ВШЭ, Pew Research, OECD) показывают единый паттерн: <strong>ученики предпочитают AI учителям</strong> для определённого класса вопросов, потому что (а) нет социального давления оценки, (б) доступен 24/7, (в) не стыдно задавать "глупые" вопросы.</p>
+
+<div class="callout callout-red">
+<div class="callout-title">Критический фрейминг — наша ЦА репетиторы</div>
+<p style="margin: 0">НЕ позиционируем «AI лучше учителя» — это messaging-самоубийство. <strong>Правильный фрейм:</strong> AI снимает социальное давление со ученика <em>в сторону</em> репетитора, не <em>вместо</em>. Ученик задаёт AI "глупые" вопросы 24/7 → приходит к репетитору более подготовленным.</p>
+</div>
+
+<h3>Три способа использовать research в контенте</h3>
+
+<ol>
+<li><strong>Серия "За кулисами AI-чата ученика"</strong> — обезличенные примеры (с согласия) того, что ученики спрашивают Сократ в неудобное время / на "стыдные" темы. Хук: «Что ученик спросил у AI в 23:00 — а у меня бы постеснялся»</li>
+<li><strong>Лендинг-блок "Что меняется для ученика"</strong> со ссылками на российские источники (vc.ru, iz.ru, НИУ ВШЭ research). Доверие к российским источникам у tutor-аудитории выше</li>
+<li><strong>Parent-side communication</strong> в mock exam reports: «Ваш ребёнок задаёт AI вопросы, которые постеснялся бы задать учителю. Это становится преимуществом для подготовки». Это <strong>готовый</strong> argument для родителя recommend репетитора с Сократом другим родителям</li>
+</ol>
+</section>
+
+<section id="questions">
+<h2>10. Открытые вопросы для следующих итераций</h2>
+
+<ol class="question-list">
+<li><strong>Activation moment в trial 7 days.</strong> Какое конкретное действие/feature внутри триала коррелирует с conversion в paid? Нужно instrument'ировать. Гипотезы: (а) первое успешное AI-проверенное ДЗ, (б) первый KB-импорт задач, (в) первый mock exam отправлен ученику.</li>
+<li><strong>Pricing test.</strong> 3 пилотных репетитора платят 3000 ₽ с 50% скидкой. Тест: продают ли они full-price 3000 ₽ без давления? Если да — тест tier 4500-5000 ₽ для premium-функциональности.</li>
+<li><strong>Egor's capacity и план второго человека.</strong> Когда onboarding + outreach + контент + tutoring физически упрётся в потолок? Кто следующий — customer success или второй ambassador-репетитор (Елена кандидат)?</li>
+<li><strong>Reverse funnel parent → tutor.</strong> Mock exam parent-result page — это unused acquisition channel. Как родитель, увидевший Сократ, конвертируется в "спросить своего репетитора, может ли он использовать"?</li>
+<li><strong>Триггер запуска отдельного бренд-канала Сократ AI.</strong> 1500+ subs у Егора? 30+ платящих? Или ждём появления 2-го ambassador-репетитора? Сейчас преждевременно — превратится в кладбище.</li>
+<li><strong>Annual cycle prep.</strong> Что должно быть готово к 1 августа, когда начнётся пик найма репетиторов родителями? Лендинг, видео-кейсы, contact-form для consultations, материалы для onboarding.</li>
+</ol>
+</section>
+
+<div class="footer">
+<p><strong>Сократ AI · Маркетинговая стратегия Q2-Q3 2026</strong></p>
+<p>Версия 1.1 · 14 мая 2026 · Living document, обновляется ежемесячно</p>
+<p>Автор: Владимир Камчаткин · Контекст: 2 платящих репетитора (Елена, Вадим — физика), MVP в проде с марта 2026</p>
+</div>
+
+</main>
+</div>
+</body>
+</html>

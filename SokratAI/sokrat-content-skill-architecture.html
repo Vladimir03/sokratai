@@ -1,0 +1,1061 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>sokrat-content/SKILL.md — Hybrid Architecture</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Golos+Text:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root {
+  --sokrat-green: #1B6B4A;
+  --sokrat-green-light: #DCFCE7;
+  --sokrat-green-dark: #14532D;
+  --sokrat-green-deep: #0D3B27;
+  --sokrat-surface: #F7F6F3;
+  --slate-900: #0F172A;
+  --slate-700: #334155;
+  --slate-500: #64748B;
+  --slate-400: #94A3B8;
+  --slate-200: #E2E8F0;
+  --slate-100: #F1F5F9;
+  --slate-50: #F8FAFC;
+  --tw-blue: #1E40AF;
+  --tw-blue-bg: #DBEAFE;
+  --tw-blue-light: #EFF6FF;
+  --hf-amber: #92400E;
+  --hf-amber-bg: #FEF3C7;
+  --hf-amber-light: #FFFBEB;
+  --new-purple: #6B21A8;
+  --new-purple-bg: #F3E8FF;
+  --new-purple-light: #FAF5FF;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html { scroll-behavior: smooth; }
+body {
+  font-family: 'Golos Text', system-ui, sans-serif;
+  font-size: 16px; line-height: 1.6; color: var(--slate-900);
+  background: var(--slate-50);
+}
+.wrapper { max-width: 1200px; margin: 0 auto; padding: 48px 32px 96px; background: #fff; }
+@media (max-width: 700px) { .wrapper { padding: 32px 16px 64px; } }
+
+.hero { border-bottom: 1px solid var(--slate-200); padding-bottom: 32px; margin-bottom: 56px; }
+.hero-badge {
+  display: inline-block; padding: 4px 12px;
+  background: var(--sokrat-green-light); color: var(--sokrat-green-dark);
+  font-size: 12px; font-weight: 600; border-radius: 9999px;
+  margin-bottom: 16px; letter-spacing: 0.04em; text-transform: uppercase;
+}
+h1 { font-size: 36px; font-weight: 700; line-height: 1.15; margin-bottom: 12px; letter-spacing: -0.01em; }
+.hero-tagline { font-size: 18px; color: var(--slate-700); margin-bottom: 8px; }
+.hero-meta { font-size: 13px; color: var(--slate-500); }
+
+h2 {
+  font-size: 26px; font-weight: 600;
+  margin-top: 64px; margin-bottom: 24px;
+  padding-bottom: 12px; border-bottom: 2px solid var(--sokrat-green);
+}
+h3 { font-size: 18px; font-weight: 600; margin-top: 28px; margin-bottom: 12px; }
+h4 { font-size: 13px; font-weight: 700; color: var(--slate-700); margin-top: 20px; margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.05em; }
+p { margin-bottom: 14px; color: var(--slate-700); }
+ul, ol { margin: 10px 0 16px 24px; color: var(--slate-700); }
+li { margin-bottom: 6px; }
+strong { color: var(--slate-900); font-weight: 600; }
+code, .mono { font-family: 'JetBrains Mono', Monaco, monospace; font-size: 13px; }
+code { background: var(--slate-100); padding: 2px 6px; border-radius: 4px; color: var(--sokrat-green-deep); }
+
+/* Architecture diagram */
+.arch-diagram {
+  background: var(--slate-50);
+  border: 1px solid var(--slate-200);
+  border-radius: 12px;
+  padding: 32px;
+  margin: 24px 0 40px;
+  position: relative;
+}
+.arch-tier {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 32px;
+  margin-bottom: 56px;
+  position: relative;
+}
+.arch-card {
+  background: #fff;
+  border: 2px solid var(--slate-200);
+  border-radius: 10px;
+  padding: 20px;
+  position: relative;
+}
+.arch-card.tw { border-color: var(--tw-blue); }
+.arch-card.hf { border-color: var(--hf-amber); }
+.arch-card.hybrid {
+  border-color: var(--sokrat-green);
+  border-width: 3px;
+  background: linear-gradient(180deg, #fff 0%, var(--sokrat-surface) 100%);
+  margin-top: 32px;
+  padding: 28px;
+}
+.arch-card-label {
+  display: inline-block;
+  font-size: 10px; font-weight: 700;
+  padding: 3px 8px; border-radius: 4px;
+  text-transform: uppercase; letter-spacing: 0.06em;
+  margin-bottom: 10px;
+}
+.tw .arch-card-label { background: var(--tw-blue-bg); color: var(--tw-blue); }
+.hf .arch-card-label { background: var(--hf-amber-bg); color: var(--hf-amber); }
+.hybrid .arch-card-label { background: var(--sokrat-green); color: #fff; }
+.arch-card-title { font-size: 18px; font-weight: 700; margin-bottom: 6px; color: var(--slate-900); }
+.arch-card-sub { font-size: 13px; color: var(--slate-500); margin-bottom: 14px; }
+.arch-card-bullets { font-size: 13px; }
+.arch-card-bullets li { margin-bottom: 6px; color: var(--slate-700); }
+
+.arrow-down {
+  position: absolute;
+  left: 50%; transform: translateX(-50%);
+  bottom: -42px;
+  font-size: 24px;
+  color: var(--slate-400);
+  z-index: 2;
+}
+.arrow-merge {
+  position: absolute;
+  top: -32px; left: 50%; transform: translateX(-50%);
+  width: 240px;
+  display: flex; justify-content: space-between;
+  font-size: 20px;
+  color: var(--sokrat-green);
+}
+
+/* Lineage table */
+.lineage-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 16px 0 24px;
+  font-size: 13.5px;
+}
+.lineage-table th, .lineage-table td {
+  text-align: left; padding: 12px 14px;
+  border-bottom: 1px solid var(--slate-200);
+  vertical-align: top;
+}
+.lineage-table th {
+  font-weight: 600; background: var(--slate-50);
+  font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em;
+}
+.lineage-table tbody tr:hover { background: var(--sokrat-surface); }
+.source-tag {
+  display: inline-block;
+  font-size: 10px; font-weight: 700;
+  padding: 2px 7px; border-radius: 4px;
+  text-transform: uppercase; letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+.tag-tw { background: var(--tw-blue-bg); color: var(--tw-blue); }
+.tag-hf { background: var(--hf-amber-bg); color: var(--hf-amber); }
+.tag-new { background: var(--new-purple-bg); color: var(--new-purple); }
+.tag-drop { background: #FEE2E2; color: #991B1B; text-decoration: line-through; }
+
+/* Pipeline */
+.pipeline {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 16px;
+  margin: 24px 0;
+}
+.stage {
+  background: #fff;
+  border: 1px solid var(--slate-200);
+  border-radius: 8px;
+  padding: 16px;
+  position: relative;
+}
+.stage-num {
+  position: absolute; top: -10px; left: 16px;
+  width: 24px; height: 24px;
+  background: var(--sokrat-green); color: #fff;
+  border-radius: 50%; display: flex;
+  align-items: center; justify-content: center;
+  font-weight: 700; font-size: 12px;
+}
+.stage-title { font-size: 14px; font-weight: 600; margin-top: 8px; margin-bottom: 8px; }
+.stage-meta { font-size: 11px; color: var(--slate-500); margin-bottom: 8px; }
+.stage-detail { font-size: 12px; color: var(--slate-700); }
+
+/* Format cards */
+.formats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 16px;
+  margin: 24px 0;
+}
+.format-card {
+  background: #fff;
+  border: 1px solid var(--slate-200);
+  border-radius: 10px;
+  padding: 20px;
+  transition: all 0.15s;
+}
+.format-card:hover { border-color: var(--sokrat-green); box-shadow: 0 2px 8px rgba(27,107,74,0.08); }
+.format-header {
+  display: flex; align-items: center; gap: 10px;
+  margin-bottom: 12px;
+}
+.format-num {
+  width: 32px; height: 32px;
+  background: var(--sokrat-green); color: #fff;
+  border-radius: 8px;
+  display: flex; align-items: center; justify-content: center;
+  font-weight: 700; font-size: 15px;
+}
+.format-name { font-size: 16px; font-weight: 600; color: var(--slate-900); }
+.format-pillar { font-size: 11px; color: var(--slate-500); }
+.format-row { display: flex; gap: 8px; margin: 8px 0; font-size: 12px; flex-wrap: wrap; }
+.format-row-label { color: var(--slate-500); font-weight: 600; min-width: 90px; }
+.format-row-value { color: var(--slate-900); flex: 1; }
+.preset-chip {
+  display: inline-block; background: var(--sokrat-surface);
+  border: 1px solid var(--slate-200);
+  padding: 2px 7px; border-radius: 4px;
+  font-family: 'JetBrains Mono', monospace; font-size: 11px;
+  color: var(--sokrat-green-dark);
+}
+
+/* Flow example */
+.flow-example {
+  background: var(--slate-900);
+  color: #E2E8F0;
+  border-radius: 10px;
+  padding: 24px;
+  margin: 24px 0;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 13px;
+  line-height: 1.7;
+  overflow-x: auto;
+}
+.flow-line { margin: 4px 0; }
+.flow-user { color: #93C5FD; }
+.flow-skill { color: #6EE7B7; }
+.flow-system { color: #94A3B8; font-style: italic; }
+.flow-output { color: #FCD34D; }
+.flow-comment { color: #64748B; }
+.flow-divider { color: #475569; margin: 8px 0; }
+
+/* State files tree */
+.tree {
+  background: var(--sokrat-surface);
+  border: 1px solid var(--slate-200);
+  border-radius: 8px;
+  padding: 20px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 13px;
+  line-height: 1.7;
+  margin: 16px 0;
+  color: var(--slate-700);
+}
+.tree-folder { color: var(--sokrat-green-dark); font-weight: 600; }
+.tree-file { color: var(--slate-700); }
+.tree-new { color: var(--new-purple); font-weight: 600; }
+.tree-comment { color: var(--slate-500); font-style: italic; }
+
+/* Callout */
+.callout {
+  background: var(--sokrat-surface);
+  border-left: 3px solid var(--sokrat-green);
+  padding: 16px 20px;
+  margin: 16px 0;
+  border-radius: 4px;
+}
+.callout-amber { background: var(--hf-amber-light); border-left-color: var(--hf-amber); }
+.callout-blue { background: var(--tw-blue-light); border-left-color: var(--tw-blue); }
+.callout-title {
+  font-size: 12px; font-weight: 700;
+  color: var(--sokrat-green-dark);
+  text-transform: uppercase; letter-spacing: 0.05em;
+  margin-bottom: 6px;
+}
+.callout-amber .callout-title { color: var(--hf-amber); }
+.callout-blue .callout-title { color: var(--tw-blue); }
+
+/* Compare */
+.compare-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  margin: 16px 0;
+}
+@media (max-width: 700px) { .compare-grid { grid-template-columns: 1fr; } }
+.compare-side {
+  background: #fff;
+  border: 1px solid var(--slate-200);
+  border-radius: 8px;
+  padding: 16px 20px;
+}
+.compare-side h4 { margin-top: 0; }
+.compare-before { background: #FEF2F2; border-color: #FECACA; }
+.compare-after { background: var(--sokrat-surface); border-color: var(--sokrat-green); }
+.compare-before h4 { color: #991B1B; }
+.compare-after h4 { color: var(--sokrat-green-dark); }
+
+.legend {
+  display: flex; gap: 16px; flex-wrap: wrap;
+  font-size: 13px;
+  padding: 12px 16px;
+  background: var(--slate-50);
+  border-radius: 6px;
+  margin: 12px 0 24px;
+}
+.legend-item { display: flex; align-items: center; gap: 6px; color: var(--slate-700); }
+.legend-dot { width: 12px; height: 12px; border-radius: 3px; }
+.dot-tw { background: var(--tw-blue); }
+.dot-hf { background: var(--hf-amber); }
+.dot-new { background: var(--new-purple); }
+.dot-drop { background: #DC2626; }
+
+.footer {
+  margin-top: 80px; padding-top: 24px;
+  border-top: 1px solid var(--slate-200);
+  font-size: 13px; color: var(--slate-500);
+}
+
+.toc {
+  background: var(--sokrat-surface);
+  border-radius: 8px;
+  padding: 16px 20px;
+  margin: 24px 0 40px;
+  display: flex; flex-wrap: wrap; gap: 8px 16px;
+  font-size: 13px;
+}
+.toc a { color: var(--sokrat-green-dark); text-decoration: none; }
+.toc a:hover { text-decoration: underline; }
+</style>
+</head>
+<body>
+<div class="wrapper">
+
+<!-- HERO -->
+<div class="hero">
+<span class="hero-badge">Skill architecture · proposal v1</span>
+<h1>sokrat-content/SKILL.md</h1>
+<p class="hero-tagline">Гибридный custom skill: <strong>trendwatch</strong> brain × <strong>Higgsfield content factory</strong> hands × <strong>5 форматов под EdTech</strong></p>
+<p class="hero-meta">v1.0 · 17 мая 2026 · Architecture proposal до имплементации</p>
+</div>
+
+<div class="toc">
+<strong style="color:var(--slate-900)">Содержание:</strong>
+<a href="#arch">1. Архитектура</a>
+<a href="#lineage">2. Что от кого</a>
+<a href="#pipeline">3. Pipeline</a>
+<a href="#formats">4. 5 форматов</a>
+<a href="#example">5. Пример запуска</a>
+<a href="#state">6. State files</a>
+<a href="#compare">7. Before/After</a>
+<a href="#next">8. Build steps</a>
+</div>
+
+<!-- ARCHITECTURE -->
+<section id="arch">
+<h2>1 · Архитектура: two-parent merge</h2>
+
+<p>Кастомный скилл sokrat-content — это не "обёртка вокруг trendwatch" и не "форк Higgsfield content factory". Это <strong>третья сущность</strong>, которая наследует analytical layer от одного родителя и production layer от другого, дополняя их Sokrat-specific компонентами.</p>
+
+<div class="legend">
+<div class="legend-item"><span class="legend-dot dot-tw"></span> Из trendwatch</div>
+<div class="legend-item"><span class="legend-dot dot-hf"></span> Из Higgsfield content factory</div>
+<div class="legend-item"><span class="legend-dot dot-new"></span> Новое (Sokrat-specific)</div>
+<div class="legend-item"><span class="legend-dot dot-drop"></span> Дропнуто</div>
+</div>
+
+<div class="arch-diagram">
+
+<!-- Tier 1: Two parents -->
+<div class="arch-tier">
+
+<div class="arch-card tw">
+<span class="arch-card-label">PARENT 1 — Brain</span>
+<div class="arch-card-title">trendwatch</div>
+<div class="arch-card-sub">Аналитический фреймворк с памятью</div>
+<ul class="arch-card-bullets">
+<li>7-axis decomposition</li>
+<li>experiments.md compounding</li>
+<li>Save rate as conversion KPI</li>
+<li>Recency filter (60-day cutoff)</li>
+<li>Shadow account hunting</li>
+<li>10-idea ideation + variants</li>
+<li>Engagement_ratio normalization</li>
+</ul>
+</div>
+
+<div class="arch-card hf">
+<span class="arch-card-label">PARENT 2 — Hands</span>
+<div class="arch-card-title">higgsfield-content-factory</div>
+<div class="arch-card-sub">Production pipeline для Higgsfield MCP</div>
+<ul class="arch-card-bullets">
+<li>Step 0 capability probe (cache hooks/settings)</li>
+<li>Slug mismatch table (UGC → ugc_how_to)</li>
+<li>Preset avatar mandatory rule</li>
+<li>"NO on-screen text, EVER" prompt rule</li>
+<li>Image pack 40/20/20/20 breakdown</li>
+<li>Per-batch permission gates</li>
+<li>Button-driven UX discipline</li>
+</ul>
+</div>
+
+</div>
+
+<!-- Arrow connectors via SVG -->
+<svg viewBox="0 0 800 80" style="width:100%; height:80px; margin-top: -32px; margin-bottom: -16px" xmlns="http://www.w3.org/2000/svg">
+<defs>
+<marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+<path d="M0,0 L10,5 L0,10 z" fill="#64748B"/>
+</marker>
+</defs>
+<path d="M 200 0 Q 200 40 400 60" stroke="#1E40AF" stroke-width="2" fill="none" marker-end="url(#arr)"/>
+<path d="M 600 0 Q 600 40 400 60" stroke="#92400E" stroke-width="2" fill="none" marker-end="url(#arr)"/>
+<text x="200" y="35" text-anchor="middle" font-size="11" fill="#1E40AF" font-family="Golos Text">analytical layer</text>
+<text x="600" y="35" text-anchor="middle" font-size="11" fill="#92400E" font-family="Golos Text">production layer</text>
+</svg>
+
+<!-- Tier 2: Hybrid -->
+<div class="arch-card hybrid">
+<span class="arch-card-label">HYBRID — sokrat-content</span>
+<div class="arch-card-title">sokrat-content/SKILL.md</div>
+<div class="arch-card-sub">EdTech-tuned, B2B+B2C, Egor-as-face, sokrat-product-grounded</div>
+
+<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 24px; margin-top: 16px;" class="hybrid-grid">
+
+<div>
+<h4 style="margin-top:0">🧠 От trendwatch</h4>
+<ul class="arch-card-bullets">
+<li>Pipeline structure (bootstrap → discovery → research → collection → analysis → ideation → log)</li>
+<li>experiments.md compounding</li>
+<li>Save rate + recency filters</li>
+<li>Shadow account hunting под физика-репов и ЕГЭ-контент</li>
+</ul>
+</div>
+
+<div>
+<h4 style="margin-top:0">🛠️ От Higgsfield</h4>
+<ul class="arch-card-bullets">
+<li>Higgsfield MCP capability probe + cache</li>
+<li>Preset slug mapping table</li>
+<li>Avatar mandatory rule (→ Egor Soul Character)</li>
+<li>"NO on-screen text" prompt invariant</li>
+<li>Image pack 40/20/20/20</li>
+</ul>
+</div>
+
+</div>
+
+<h4>🟣 Новое для Sokrat</h4>
+<ul class="arch-card-bullets">
+<li>5 Sokrat-specific форматов (заменяют 5 UGC форматов Higgsfield)</li>
+<li>EdTech-tuned audience split (tutors 40% / students 35% / parents 25%)</li>
+<li>Egor Soul Character spec (locked identity для D pillar, varied face для A pillar)</li>
+<li>Sokrat product screen-recording integration (для format 3)</li>
+<li>Cross-post handoff (IG → TG with re-framing rules)</li>
+<li>Lead-magnet CTA injection в production pipeline</li>
+</ul>
+
+<h4 style="color:#991B1B">🚫 Дропнуто</h4>
+<ul class="arch-card-bullets">
+<li>5 UGC форматов Higgsfield (Unboxing/ASMR/Street Interview — не fit для EdTech)</li>
+<li>Stage 4 Meta Ads scheduling (Vladimir: no paid yet)</li>
+<li>Volume batch 50-200 (Sokrat: cadence 4-5/нед)</li>
+<li>Stage 5 cost report (полезно потом, не сейчас)</li>
+</ul>
+</div>
+
+</div>
+</section>
+
+<!-- LINEAGE TABLE -->
+<section id="lineage">
+<h2>2 · Lineage: что от кого, элемент за элементом</h2>
+
+<p>Это полный inventory всех "движущихся частей" гибридного скилла. Каждая строка — откуда взято, как адаптировано.</p>
+
+<table class="lineage-table">
+<thead>
+<tr>
+<th style="width:24%">Элемент</th>
+<th style="width:10%">Источник</th>
+<th style="width:66%">Адаптация для Sokrat</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Pipeline structure</strong> (7 этапов)</td>
+<td><span class="source-tag tag-tw">trendwatch</span></td>
+<td>Без изменений: bootstrap → discovery → auto-research → collection → analysis → ideation → log. Это backbone.</td>
+</tr>
+<tr>
+<td><strong>5 discovery questions</strong></td>
+<td><span class="source-tag tag-tw">trendwatch</span> + <span class="source-tag tag-new">tune</span></td>
+<td>Pre-tuned под Sokrat: acquisition goal = paying tutors, KPI = save rate (utility product), traffic destination = TG Егора + lead-magnet landing, production = solo founder + Higgsfield, audience = tutors 40% / students 35% / parents 25%.</td>
+</tr>
+<tr>
+<td><strong>Auto-research (8 searches)</strong></td>
+<td><span class="source-tag tag-tw">trendwatch</span> + <span class="source-tag tag-new">seed</span></td>
+<td>Seeded competitor list: Школково, Долгих, Бакаев, Гущин, Решу ЕГЭ, Виктор. Плюс shadow hunt: "@grand_phys" mentions, "Сократ AI" review videos.</td>
+</tr>
+<tr>
+<td><strong>7-axis decomposition</strong> (Thumb-stop / Hook / Format / Message / Sound / CTA / Comments)</td>
+<td><span class="source-tag tag-tw">trendwatch</span></td>
+<td>Без изменений. Это универсальный фреймворк.</td>
+</tr>
+<tr>
+<td><strong>Save rate as leading indicator</strong> (>5% predicts conversion)</td>
+<td><span class="source-tag tag-tw">trendwatch</span></td>
+<td>Критично для Sokrat: utility/SaaS продукт. save rate &gt;5% = potential trial signup.</td>
+</tr>
+<tr>
+<td><strong>Recency filter (60-day cutoff)</strong></td>
+<td><span class="source-tag tag-tw">trendwatch</span></td>
+<td>Без изменений.</td>
+</tr>
+<tr>
+<td><strong>Shadow account hunting</strong></td>
+<td><span class="source-tag tag-tw">trendwatch</span></td>
+<td>Targeted под Sokrat: "using Сократ AI" videos, "AI помощник репетитора" reviews.</td>
+</tr>
+<tr>
+<td><strong>10-idea ideation per run</strong></td>
+<td><span class="source-tag tag-tw">trendwatch</span> + <span class="source-tag tag-new">format-map</span></td>
+<td>Каждая идея mapped к одному из 5 Sokrat forms (см. §4) с конкретным Higgsfield preset.</td>
+</tr>
+<tr>
+<td><strong>Variant generation (Mode B, 5-8 variants)</strong></td>
+<td><span class="source-tag tag-tw">trendwatch</span></td>
+<td>Без изменений: lock message/hook, vary creator/setting/aesthetic.</td>
+</tr>
+<tr>
+<td><strong>experiments.md compounding</strong></td>
+<td><span class="source-tag tag-tw">trendwatch</span></td>
+<td>Без изменений. Это единственное компаундирующее преимущество в скилле.</td>
+</tr>
+<tr>
+<td><strong>Higgsfield MCP capability probe</strong> (Step 0)</td>
+<td><span class="source-tag tag-hf">higgsfield</span></td>
+<td>Кеширует presets, hooks, settings UUIDs при старте.</td>
+</tr>
+<tr>
+<td><strong>Preset slug mapping table</strong> ("Tutorial" → `ugc_how_to`)</td>
+<td><span class="source-tag tag-hf">higgsfield</span></td>
+<td>Без изменений. Защита от silent rewrites.</td>
+</tr>
+<tr>
+<td><strong>Avatar mandatory rule</strong></td>
+<td><span class="source-tag tag-hf">higgsfield</span> + <span class="source-tag tag-new">Egor Soul</span></td>
+<td>Адаптация: вместо preset avatars обязательно использовать <strong>Egor Soul Character</strong> (trained one-time на 5-20 фото Егора). Для variant generation также allowed varied-aesthetic однократные генерации.</td>
+</tr>
+<tr>
+<td><strong>"NO on-screen text" prompt invariant</strong></td>
+<td><span class="source-tag tag-hf">higgsfield</span></td>
+<td>Без изменений. Captions накладываются в post-prod (CapCut), не запекаются.</td>
+</tr>
+<tr>
+<td><strong>Image pack 40/20/20/20</strong></td>
+<td><span class="source-tag tag-hf">higgsfield</span> + <span class="source-tag tag-new">tune</span></td>
+<td>Адаптация распределения: Social (40%) · Hero для landing (20%) · Egor portrait (20%) · Product screen mockup (20%) — replaces "With/Without People".</td>
+</tr>
+<tr>
+<td><strong>Per-batch permission gates</strong></td>
+<td><span class="source-tag tag-hf">higgsfield</span></td>
+<td>Без изменений: AskUserQuestion перед каждым batch generation.</td>
+</tr>
+<tr>
+<td><strong>Single-message onboarding discipline</strong></td>
+<td><span class="source-tag tag-hf">higgsfield</span></td>
+<td>Без изменений: все clarifying questions в одном AskUserQuestion с button options.</td>
+</tr>
+<tr>
+<td><strong>5 Sokrat formats</strong> (Lifestyle / Task walkthrough / AI demo / Founder vlog / Dialogue)</td>
+<td><span class="source-tag tag-new">new</span></td>
+<td>Полностью новые. Заменяют 5 UGC форматов Higgsfield. Mapped к IG playbook pillars A/B/C/D. См. §4.</td>
+</tr>
+<tr>
+<td><strong>Audience split</strong> (40/35/25 tutors/students/parents)</td>
+<td><span class="source-tag tag-new">new</span></td>
+<td>EdTech-specific. Влияет на CTA выбор и conversion targets.</td>
+</tr>
+<tr>
+<td><strong>Egor Soul Character training spec</strong></td>
+<td><span class="source-tag tag-new">new</span></td>
+<td>Однократная инвестиция: 5-20 фото Егора, training в Higgsfield Soul. Locked identity for founder content, varied для разнообразия.</td>
+</tr>
+<tr>
+<td><strong>Sokrat product screen-recording integration</strong></td>
+<td><span class="source-tag tag-new">new</span></td>
+<td>Format 3 (AI demo) требует реальных screen recordings продукта. Library наполняется по мере появления feature'ов.</td>
+</tr>
+<tr>
+<td><strong>Cross-post handoff rules</strong> (IG → TG re-framing)</td>
+<td><span class="source-tag tag-new">new</span></td>
+<td>Каждая идея в ideation выводит two versions: IG Reel (30-60s, broad hook) + TG post (200-400 слов, методология глубже).</td>
+</tr>
+<tr>
+<td><strong>Lead-magnet CTA injection</strong></td>
+<td><span class="source-tag tag-new">new</span></td>
+<td>Production pipeline автоматически добавляет правильный CTA: parent/student magnet vs tutor magnet, в зависимости от format и audience target.</td>
+</tr>
+<tr>
+<td>5 UGC форматов (Entertainment/Interview/Unboxing/Review/ASMR)</td>
+<td><span class="source-tag tag-drop">dropped</span></td>
+<td>Не fit для EdTech. Unboxing/ASMR не применимы к B2B SaaS.</td>
+</tr>
+<tr>
+<td>Stage 4 Meta Ads scheduling</td>
+<td><span class="source-tag tag-drop">dropped</span></td>
+<td>Vladimir: no paid marketing пока. Output = manual posting + lead-magnet capture.</td>
+</tr>
+<tr>
+<td>Volume batch 50-200 per campaign</td>
+<td><span class="source-tag tag-drop">dropped</span></td>
+<td>Sokrat cadence = 4-5 Reels/week, не 100/batch. Скилл работает sliding-window: each weekly run produces 4-5 ideas.</td>
+</tr>
+<tr>
+<td>Stage 5 cost report</td>
+<td><span class="source-tag tag-drop">dropped</span></td>
+<td>Полезно потом для ROI tracking. Сейчас premature.</td>
+</tr>
+</tbody>
+</table>
+
+</section>
+
+<!-- PIPELINE -->
+<section id="pipeline">
+<h2>3 · Pipeline: 7 этапов работы скилла</h2>
+
+<p>Один полный запуск (weekly cycle) занимает ~45-60 минут вычислительной работы скилла + 5-10 минут пользовательского контроля через AskUserQuestion gates.</p>
+
+<div class="pipeline">
+
+<div class="stage">
+<span class="stage-num">1</span>
+<div class="stage-title">Bootstrap</div>
+<div class="stage-meta">~5 сек · автоматический</div>
+<div class="stage-detail">Проверяет state-файлы. Если brief.md существует → subsequent run, переход к §3. Если нет → §2 (первый запуск).</div>
+</div>
+
+<div class="stage">
+<span class="stage-num">2</span>
+<div class="stage-title">Discovery (first run only)</div>
+<div class="stage-meta">~3 мин · 1 AskUserQuestion call</div>
+<div class="stage-detail">5 вопросов в одном button-сообщении: KPI ("trial signups"), traffic ("TG Егора + lead-magnet"), production ("solo + Higgsfield"), audience split ("40/35/25"), Egor Soul status ("trained / training / N/A").</div>
+</div>
+
+<div class="stage">
+<span class="stage-num">3</span>
+<div class="stage-title">Auto-research</div>
+<div class="stage-meta">~5 мин · parallel</div>
+<div class="stage-detail">Seeded competitors: Школково, Долгих, Бакаев, Гущин, Решу ЕГЭ. Plus shadow hunt + Higgsfield capability probe (cache hook/setting UUIDs).</div>
+</div>
+
+<div class="stage">
+<span class="stage-num">4</span>
+<div class="stage-title">Collection</div>
+<div class="stage-meta">~15 мин · parallel subagents</div>
+<div class="stage-detail">Pull 20-30 top videos per competitor. Filters: placement + size &lt;500k + recency &lt;60d. Compute engagement_ratio, vs_account_median, save rate.</div>
+</div>
+
+<div class="stage">
+<span class="stage-num">5</span>
+<div class="stage-title">Analysis</div>
+<div class="stage-meta">~10 мин</div>
+<div class="stage-detail">7-axis decomposition top 5-10 видео. Synthesize trend report (trends/YYYY-MM-DD.md): top hooks, formats, sounds, audience pains from comments.</div>
+</div>
+
+<div class="stage">
+<span class="stage-num">6</span>
+<div class="stage-title">Ideation</div>
+<div class="stage-meta">~10 мин · 1 AskUserQuestion gate</div>
+<div class="stage-detail">10 hook ideas mapped to 5 Sokrat formats with Higgsfield preset+hook+setting+avatar resolved. Каждая идея: IG-version + TG-version (cross-post).</div>
+</div>
+
+<div class="stage">
+<span class="stage-num">7</span>
+<div class="stage-title">Production handoff</div>
+<div class="stage-meta">~5 мин · 1-2 AskUserQuestion gates</div>
+<div class="stage-detail">Top 4-5 ideas → Higgsfield generation queue (с per-batch permission gates). Image pack 40/20/20/20 для landing/social. Final output: видео + post copy + CTA.</div>
+</div>
+
+<div class="stage">
+<span class="stage-num">8</span>
+<div class="stage-title">Log experiments</div>
+<div class="stage-meta">~2 мин · async (после публикации)</div>
+<div class="stage-detail">После публикации — пользователь вызывает "log experiment". Метрики + verdict (SCALE/ITERATE/KILL) + learning. Winner ≥1000 views на cold аккаунте → auto-prompt variant generation в следующем запуске.</div>
+</div>
+
+</div>
+
+<div class="callout">
+<div class="callout-title">Production handoff (Step 7) — ключевое отличие от обоих родителей</div>
+<p style="margin:0">trendwatch выдаёт ideas/YYYY-MM-DD.md и останавливается. Higgsfield content factory сразу пытается генерить 50-200 видео в Meta Ads. <strong>sokrat-content делает середину</strong>: 4-5 идей в неделю, генерация с per-batch permission, output ready для manual posting в IG/TG. Контроль остаётся у Vladimir.</p>
+</div>
+
+</section>
+
+<!-- 5 FORMATS -->
+<section id="formats">
+<h2>4 · 5 Sokrat-specific форматов</h2>
+
+<p>Это <strong>замена 5 UGC форматов Higgsfield</strong>. Каждый mapped к pillar из IG playbook + к Higgsfield preset + к save-rate цели + к audience.</p>
+
+<div class="formats">
+
+<div class="format-card">
+<div class="format-header">
+<div class="format-num">1</div>
+<div>
+<div class="format-name">Lifestyle-физика</div>
+<div class="format-pillar">Pillar A · 40% контента</div>
+</div>
+</div>
+<div class="format-row"><span class="format-row-label">Higgsfield preset</span><span class="format-row-value"><span class="preset-chip">ugc</span> + <span class="preset-chip">hyper_motion</span> hybrid</span></div>
+<div class="format-row"><span class="format-row-label">Audience</span><span class="format-row-value">Родители/ученики/общая</span></div>
+<div class="format-row"><span class="format-row-label">Save rate target</span><span class="format-row-value">2-3% (entertainment-leaning)</span></div>
+<div class="format-row"><span class="format-row-label">Egor face</span><span class="format-row-value">Varied (selfie inserts)</span></div>
+<div class="format-row"><span class="format-row-label">Hook example</span><span class="format-row-value">"Почему кофе остывает дольше, если молоко налить СРАЗУ?"</span></div>
+<div class="format-row"><span class="format-row-label">CTA pattern</span><span class="format-row-value">Curiosity → follow @grand_phys</span></div>
+</div>
+
+<div class="format-card">
+<div class="format-header">
+<div class="format-num">2</div>
+<div>
+<div class="format-name">ЕГЭ task walkthrough</div>
+<div class="format-pillar">Pillar B · 30% контента</div>
+</div>
+</div>
+<div class="format-row"><span class="format-row-label">Higgsfield preset</span><span class="format-row-value"><span class="preset-chip">tutorial</span> (slug: ugc_how_to)</span></div>
+<div class="format-row"><span class="format-row-label">Audience</span><span class="format-row-value">Ученики ЕГЭ + родители</span></div>
+<div class="format-row"><span class="format-row-label">Save rate target</span><span class="format-row-value">5-8% (high utility intent)</span></div>
+<div class="format-row"><span class="format-row-label">Egor face</span><span class="format-row-value">Voice-over only + locked Soul portrait</span></div>
+<div class="format-row"><span class="format-row-label">Hook example</span><span class="format-row-value">"Эта задача ЕГЭ ломает 60% выпускников. Решаю за 90 секунд."</span></div>
+<div class="format-row"><span class="format-row-label">CTA pattern</span><span class="format-row-value">"Бесплатный AI-разбор → ссылка в шапке" (lead-magnet)</span></div>
+</div>
+
+<div class="format-card">
+<div class="format-header">
+<div class="format-num">3</div>
+<div>
+<div class="format-name">Sokrat AI demo</div>
+<div class="format-pillar">Pillar C · 20% контента</div>
+</div>
+</div>
+<div class="format-row"><span class="format-row-label">Higgsfield preset</span><span class="format-row-value"><span class="preset-chip">product_review</span></span></div>
+<div class="format-row"><span class="format-row-label">Audience</span><span class="format-row-value">Репетиторы + parent curiosity</span></div>
+<div class="format-row"><span class="format-row-label">Save rate target</span><span class="format-row-value">7-12% (B2B utility, highest)</span></div>
+<div class="format-row"><span class="format-row-label">Egor face</span><span class="format-row-value">Locked Soul + screen recording inserts</span></div>
+<div class="format-row"><span class="format-row-label">Hook example</span><span class="format-row-value">"Ученик прислал фото решения в 23:00. Что сделал AI."</span></div>
+<div class="format-row"><span class="format-row-label">CTA pattern</span><span class="format-row-value">"Tutors → sokratai.ru · Students → ссылка в шапке"</span></div>
+</div>
+
+<div class="format-card">
+<div class="format-header">
+<div class="format-num">4</div>
+<div>
+<div class="format-name">Founder vlog (Егор)</div>
+<div class="format-pillar">Pillar D · 10% контента</div>
+</div>
+</div>
+<div class="format-row"><span class="format-row-label">Higgsfield preset</span><span class="format-row-value"><span class="preset-chip">ugc</span> (talking head)</span></div>
+<div class="format-row"><span class="format-row-label">Audience</span><span class="format-row-value">Все, trust building</span></div>
+<div class="format-row"><span class="format-row-label">Save rate target</span><span class="format-row-value">1-2% (engagement-driven, не save)</span></div>
+<div class="format-row"><span class="format-row-label">Egor face</span><span class="format-row-value">LOCKED Soul (consistency = trust)</span></div>
+<div class="format-row"><span class="format-row-label">Hook example</span><span class="format-row-value">"Зашёл в чат своих учеников. То, что они обсуждают, меня удивило."</span></div>
+<div class="format-row"><span class="format-row-label">CTA pattern</span><span class="format-row-value">Implicit (curiosity → profile click)</span></div>
+</div>
+
+<div class="format-card" style="grid-column: span 2;">
+<div class="format-header">
+<div class="format-num">5</div>
+<div>
+<div class="format-name">Student-AI dialogue showcase</div>
+<div class="format-pillar">Pillar C · ~15-20% (overlap with Format 3)</div>
+</div>
+</div>
+<div class="format-row"><span class="format-row-label">Higgsfield preset</span><span class="format-row-value"><span class="preset-chip">ugc</span> split-screen</span></div>
+<div class="format-row"><span class="format-row-label">Audience</span><span class="format-row-value">Mixed (репетиторы видят value, родители видят research insight, ученики видят себя)</span></div>
+<div class="format-row"><span class="format-row-label">Save rate target</span><span class="format-row-value">5-10% (research-backed = high credibility)</span></div>
+<div class="format-row"><span class="format-row-label">Egor face</span><span class="format-row-value">Voice-over commentary + Soul portrait insert</span></div>
+<div class="format-row"><span class="format-row-label">Hook example</span><span class="format-row-value">"Что мой ученик пишет AI в 23:00. Скриншоты с согласия."</span></div>
+<div class="format-row"><span class="format-row-label">CTA pattern</span><span class="format-row-value">Multi-target: tutor (B2B convert) + parent (reverse funnel)</span></div>
+</div>
+
+</div>
+
+<div class="callout callout-blue">
+<div class="callout-title">Почему 5, и почему именно эти</div>
+<p style="margin:0">Distribution следует IG Playbook v1: A (40%) + B (30%) + C (20%) + D (10%). Format 5 — overlap с C, специально для maximum save rate (research-backed contentinent). Higgsfield presets выбраны по преcedent map (см. Higgsfield SKILL §"Preset Relevance Map"). Никаких UGC форматов (Unboxing/ASMR/Street Interview) — они не транслируются на EdTech.</p>
+</div>
+
+</section>
+
+<!-- FLOW EXAMPLE -->
+<section id="example">
+<h2>5 · Пример запуска (gold-standard flow)</h2>
+
+<p>Один реальный run скилла, end-to-end. Показывает, что видит Vladimir в чате, и что скилл делает в фоне.</p>
+
+<div class="flow-example">
+<div class="flow-user">$ Vladimir: запусти sokrat-content</div>
+<div class="flow-divider">─────────────────────────────────────────</div>
+<div class="flow-system">[Bootstrap: state файлы найдены, brief.md от 2026-05-15. Subsequent run.]</div>
+<div class="flow-skill">🔍 Запускаю weekly trend research</div>
+<div class="flow-comment">  · Reading brief.md (Sokrat, физика-репы, save rate KPI)</div>
+<div class="flow-comment">  · Reading experiments.md (4 ранних теста, 1 winner: Reel #4 AI-demo, 3200 views)</div>
+<div class="flow-comment">  · Higgsfield MCP probe → 9 presets, 47 hooks, 28 settings cached</div>
+<div class="flow-comment">  · Parallel WebSearch: Школково, Долгих, Бакаев, Гущин, Решу ЕГЭ</div>
+<div class="flow-comment">  · Shadow hunt: "@grand_phys", "Сократ AI", "AI помощник репетитора"</div>
+<br>
+<div class="flow-skill">🧪 Collection (15 мин)</div>
+<div class="flow-comment">  · 28 видео от Школково (последние 30 дней)</div>
+<div class="flow-comment">  · 22 видео от Долгих, 18 от Бакаева, 24 от Гущина</div>
+<div class="flow-comment">  · Filtered: 17 placement/educational, 8 celebrity-tier dropped</div>
+<div class="flow-comment">  · 2 shadow-аккаунта найдено (UGC видео с упоминанием AI-инструментов для репов)</div>
+<br>
+<div class="flow-skill">📊 Analysis</div>
+<div class="flow-comment">  · 7-axis decomposition top 8 video</div>
+<div class="flow-comment">  · Winning pattern this week: "POV-style task reveal с trending sound X"</div>
+<div class="flow-comment">  · Save rate leader: Долгих "Задача №24 за 60 секунд" — 8.2% save rate</div>
+<div class="flow-comment">  · Audience pain в comments: "не понимаю откуда формула", "учитель не объяснил"</div>
+<br>
+<div class="flow-skill">💡 Ideation — 10 идей сгенерированы</div>
+<div class="flow-comment">  · 4× Format 1 (Lifestyle)</div>
+<div class="flow-comment">  · 3× Format 2 (ЕГЭ walkthrough)</div>
+<div class="flow-comment">  · 2× Format 3 (Sokrat AI demo)</div>
+<div class="flow-comment">  · 1× Format 4 (Founder vlog)</div>
+<div class="flow-comment">  · Saved to ideas/2026-05-17.md</div>
+<br>
+<div class="flow-output">🎬 Top 5 ideas ready for production this week:</div>
+<div class="flow-output">  1. [Format 2] "POV: ты увидел №24 на ЕГЭ и понял" (inspired by Долгих trend)</div>
+<div class="flow-output">  2. [Format 1] "Почему лужи быстрее высыхают на ветру?"</div>
+<div class="flow-output">  3. [Format 3] "AI исправил ошибку в моём собственном решении" (vulnerability hook)</div>
+<div class="flow-output">  4. [Format 2] "Эта формула — секрет №26 за 4 балла"</div>
+<div class="flow-output">  5. [Format 4] "Знаете что я делаю когда ученик не понимает с третьего раза?"</div>
+<br>
+<div class="flow-skill">❓ Готов генерить Reel #1 в Higgsfield Marketing Studio?</div>
+<div class="flow-comment">  [• Yes — generate всю 5 batch (Recommended)]</div>
+<div class="flow-comment">  [• Start with Reel #1 only, quality check]</div>
+<div class="flow-comment">  [• Только показать prompts, генерить вручную позже]</div>
+<div class="flow-comment">  [• Adjust ideas before generating]</div>
+<br>
+<div class="flow-user">$ Vladimir: [Start with Reel #1 only, quality check]</div>
+<div class="flow-divider">─────────────────────────────────────────</div>
+<div class="flow-skill">🎬 Generating Reel #1 — "POV: ты увидел №24 на ЕГЭ"</div>
+<div class="flow-comment">  · Preset: tutorial (slug: ugc_how_to)</div>
+<div class="flow-comment">  · Avatar: Egor Soul Character (cached UUID)</div>
+<div class="flow-comment">  · Hook UUID: resolved "Camera Bump"</div>
+<div class="flow-comment">  · Setting UUID: resolved "Office"</div>
+<div class="flow-comment">  · Audio: true (voice-over)</div>
+<div class="flow-comment">  · Prompt: built with negative "no text overlay" + "no captions"</div>
+<div class="flow-comment">  · generate_video called, job ID: hf_8x9k...</div>
+<br>
+<div class="flow-output">✓ Reel #1 готов: /outputs/reel-01-ege24-walkthrough.mp4 (12s, 1080p, 9:16)</div>
+<div class="flow-output">✓ Captions для post: "Задача №24 ЕГЭ-2024. Большинство идут по неправильному пути..."</div>
+<div class="flow-output">✓ Lead-magnet CTA: "Полный разбор → ссылка в шапке"</div>
+<div class="flow-output">✓ TG-version post (300 слов): saved to /outputs/reel-01-tg-version.md</div>
+<br>
+<div class="flow-skill">❓ Quality OK? Generating Reels #2-5?</div>
+<div class="flow-divider">═══════════════════════════════════════════</div>
+<div class="flow-comment">[После публикации Vladimir вызывает]</div>
+<div class="flow-user">$ Vladimir: log experiment reel-01-ege24, 4200 views, 9.3% save rate</div>
+<div class="flow-skill">📈 Logged. Winner detected (≥1000 views на cold). Trigger variant generation?</div>
+<div class="flow-comment">  · Hook locked: "POV: ты увидел №24 на ЕГЭ и понял"</div>
+<div class="flow-comment">  · Format locked: tutorial</div>
+<div class="flow-comment">  · Vary: setting (Bedroom/Street), creator look (Egor — only locked option = same)</div>
+<div class="flow-comment">  · Generate 5 variants with rotation through different задачи? (24 → 22, 25, 26, 21, 23)</div>
+</div>
+
+<div class="callout">
+<div class="callout-title">Что в этом flow уникально для гибрида</div>
+<ul style="margin:0">
+<li><strong>experiments.md memory</strong> (от trendwatch) — скилл помнит winner и предлагает iterate</li>
+<li><strong>Higgsfield capability probe</strong> (от hf) — UUIDs кешированы, slug-mismatch не сломается</li>
+<li><strong>5 Sokrat форматов</strong> (новое) — Format 2/3 mapping, не UGC Unboxing</li>
+<li><strong>Egor Soul Character</strong> (новое) — единый face через все production</li>
+<li><strong>Cross-post handoff</strong> (новое) — IG-version + TG-version в одном идее</li>
+<li><strong>Lead-magnet CTA injection</strong> (новое) — автоматически правильный CTA per format</li>
+</ul>
+</div>
+
+</section>
+
+<!-- STATE FILES -->
+<section id="state">
+<h2>6 · State files — что создаёт скилл</h2>
+
+<p>Структура файлов в <code>~/.claude/skills/sokrat-content/</code>. Mirror trendwatch architecture + Sokrat-specific дополнения.</p>
+
+<div class="tree">
+<span class="tree-folder">sokrat-content/</span>
+├── <span class="tree-file">SKILL.md</span>                       <span class="tree-comment"># skill definition, shareable</span>
+├── <span class="tree-file">brief.md</span>                       <span class="tree-comment"># Sokrat product brief (one-time)</span>
+├── <span class="tree-file">production-stack.md</span>            <span class="tree-comment"># Higgsfield MCP + cache UUIDs</span>
+├── <span class="tree-file">current-plan.md</span>                <span class="tree-comment"># living: что снимаем эту неделю</span>
+├── <span class="tree-new">formats.md</span>                     <span class="tree-comment"># NEW: 5 Sokrat форматов с детальным mapping</span>
+├── <span class="tree-new">audience-personas.md</span>           <span class="tree-comment"># NEW: tutors/students/parents JTBD</span>
+├── <span class="tree-folder">competitors/</span>
+│   ├── <span class="tree-file">schoolkovo.md</span>
+│   ├── <span class="tree-file">dolgikh.md</span>
+│   ├── <span class="tree-file">bakaev.md</span>
+│   ├── <span class="tree-file">gushchin.md</span>
+│   └── <span class="tree-file">reshuege.md</span>
+├── <span class="tree-folder">trends/</span>
+│   └── <span class="tree-file">YYYY-MM-DD.md</span>               <span class="tree-comment"># weekly trend snapshots</span>
+├── <span class="tree-folder">ideas/</span>
+│   └── <span class="tree-file">YYYY-MM-DD.md</span>               <span class="tree-comment"># weekly idea batches (10 per run)</span>
+├── <span class="tree-folder">mascots/</span>
+│   └── <span class="tree-folder">01-egor-soul/</span>
+│       ├── <span class="tree-file">reference-photos/</span>      <span class="tree-comment"># 5-20 фото для training</span>
+│       ├── <span class="tree-file">master.png</span>              <span class="tree-comment"># trained Soul Master image</span>
+│       └── <span class="tree-file">description.md</span>          <span class="tree-comment"># persona description</span>
+├── <span class="tree-folder">screencasts/</span>                  <span class="tree-comment"># real Sokrat product UI clips</span>
+│   ├── <span class="tree-file">01-create-homework.mov</span>
+│   ├── <span class="tree-file">02-ai-checks-answer.mov</span>
+│   ├── <span class="tree-file">03-student-ai-dialogue.mov</span>
+│   └── <span class="tree-file">04-mock-exam-result.mov</span>
+├── <span class="tree-new">lead-magnets/</span>                  <span class="tree-comment"># NEW: PDF/Excel ready to attach</span>
+│   ├── <span class="tree-file">50-ege-tasks.pdf</span>           <span class="tree-comment"># parent/student magnet</span>
+│   └── <span class="tree-file">tutor-kit-26-tasks.xlsx</span>    <span class="tree-comment"># tutor magnet</span>
+├── <span class="tree-new">post-templates/</span>                <span class="tree-comment"># NEW: TG post format library</span>
+│   ├── <span class="tree-file">format-2-tg-template.md</span>
+│   └── <span class="tree-file">format-3-tg-template.md</span>
+└── <span class="tree-file">experiments.md</span>                 <span class="tree-comment"># compounding log (most important file)</span>
+</div>
+
+<h3>Самый важный файл — <code>experiments.md</code></h3>
+<p>Здесь компаундируется вся ценность скилла. Каждый постнутый Reel логируется с метриками. Через 3 месяца у Sokrat будет уникальный dataset: "что работает для AI-инструмента для физика-репов в РФ". Этого никто не повторит.</p>
+
+</section>
+
+<!-- BEFORE/AFTER -->
+<section id="compare">
+<h2>7 · Before / After: что меняется в твоей работе</h2>
+
+<div class="compare-grid">
+
+<div class="compare-side compare-before">
+<h4>❌ Без custom skill (текущее состояние)</h4>
+<ul>
+<li>Vladimir вручную пишет hook'и и сценарии для 4-5 Reels каждую неделю (5-7 часов)</li>
+<li>Trend-watching конкурентов делается ad-hoc, без записи</li>
+<li>Higgsfield prompts строятся "на глаз", иногда выходит UGC mode когда нужно tutorial</li>
+<li>Каждый Reel — separate decision: какой формат, какой hook, какой CTA</li>
+<li>Опыт не накапливается: что сработало неделю назад — Vladimir может забыть</li>
+<li>IG-version и TG-version пишутся отдельно (~2x работа)</li>
+<li>Avatar в Higgsfield каждый раз рандомный → нет визуальной консистентности</li>
+<li>Total Vladimir time per week: <strong>~20-25 часов</strong></li>
+</ul>
+</div>
+
+<div class="compare-side compare-after">
+<h4>✓ С custom skill (target state)</h4>
+<ul>
+<li>Vladimir запускает скилл раз в неделю. Получает 10 ideas с готовыми Higgsfield prompts + slug + avatar + hook UUIDs.</li>
+<li>Trend-watching автоматический, 5 конкурентов мониторятся постоянно</li>
+<li>Higgsfield prompts строятся через cached capability map → 0 slug-mismatch errors</li>
+<li>Каждая idea — pre-mapped на 1 из 5 Sokrat formats с правильным CTA</li>
+<li>experiments.md накапливает знание. Winners auto-trigger variant generation</li>
+<li>Каждая idea имеет BOTH IG-version + TG-version (cross-post ready)</li>
+<li>Egor Soul Character locked → визуальная консистентность через все production</li>
+<li>Total Vladimir time per week: <strong>~6-8 часов</strong> (3-4x экономия)</li>
+</ul>
+</div>
+
+</div>
+
+<div class="callout callout-amber">
+<div class="callout-title">Где скилл НЕ помогает</div>
+<p style="margin:0">Скилл не снимает реальный footage Егора (Sunday recording сессия остаётся за ним). Не пишет финальные captions для постов (требует human voice). Не решает за тебя стратегические вопросы (audience split, pricing, продуктовые приоритеты). Не отвечает на DMs от подписчиков. <strong>Это amplifier твоих решений, не замена.</strong></p>
+</div>
+
+</section>
+
+<!-- NEXT STEPS -->
+<section id="next">
+<h2>8 · Build steps: как имплементировать</h2>
+
+<p>Скилл — это один markdown файл <code>SKILL.md</code> + state-files. Без code, без npm install. Создаётся итеративно.</p>
+
+<h3>Фазы имплементации</h3>
+
+<ol>
+<li><strong>Фаза 0 — Установить trendwatch как baseline</strong> (15 мин).
+Скопировать SKILL.md в <code>~/.claude/skills/trendwatch/</code>. Запустить на @grand_phys, ответить на 5 discovery questions, получить первый brief.md + ideas/. Это baseline, дальше расширяем.</li>
+
+<li><strong>Фаза 1 — Создать sokrat-content/SKILL.md</strong> (1-2 часа Vladimir + Claude).
+Скопировать trendwatch's SKILL.md, переименовать. Добавить:
+   <ul>
+   <li>Section "5 Sokrat formats" (заменяет UGC formats)</li>
+   <li>Section "Higgsfield production layer" (cherry-picked из higgsfield-content-factory)</li>
+   <li>Section "Cross-post handoff" (новое)</li>
+   <li>Updated "Tactical playbook" с EdTech-specific patterns</li>
+   </ul>
+</li>
+
+<li><strong>Фаза 2 — Pre-seed state files</strong> (2-3 часа).
+   <ul>
+   <li>brief.md — заполнить вручную из Marketing Strategy v1.1</li>
+   <li>competitors/ — 5 файлов с initial research (Школково, Долгих, Бакаев, Гущин, Решу ЕГЭ)</li>
+   <li>formats.md — детальный mapping 5 форматов</li>
+   <li>audience-personas.md — JTBD для tutors/students/parents</li>
+   </ul>
+</li>
+
+<li><strong>Фаза 3 — Train Egor Soul Character</strong> (~1 час Егор + setup).
+Сессия фотографирования Егора: 10-15 портретов в разных ракурсах/освещении/одежде. Upload в Higgsfield Soul training. Сохранить master.png в mascots/01-egor-soul/.</li>
+
+<li><strong>Фаза 4 — Запись первой партии screencasts</strong> (1 час Vladimir + Egor).
+4 ключевых scenario:
+   <ul>
+   <li>Создание ДЗ (Sokrat constructor)</li>
+   <li>AI проверяет ответ ученика</li>
+   <li>Диалог ученика с AI (с согласия)</li>
+   <li>Mock exam parent report</li>
+   </ul>
+Save в screencasts/.</li>
+
+<li><strong>Фаза 5 — Build lead-magnets</strong> (1-2 дня).
+   <ul>
+   <li>50-ege-tasks.pdf (Vladimir + Claude assemble из KB)</li>
+   <li>tutor-kit-26-tasks.xlsx (export из Sokrat KB)</li>
+   </ul>
+</li>
+
+<li><strong>Фаза 6 — First run end-to-end</strong> (~60 мин).
+Запустить sokrat-content. Прогнать full pipeline на real data. Опубликовать первые 4-5 Reels. Залогировать через "log experiment".</li>
+
+<li><strong>Фаза 7 — Iterate (continuous)</strong>.
+Каждую неделю — один запуск. После 4 weeks — Vladimir + Claude ревью experiments.md, добавляет cross-vertical learnings в Tactical playbook.</li>
+</ol>
+
+<h3>Estimated calendar</h3>
+<ul>
+<li><strong>День 1 (сегодня):</strong> Фаза 0 (trendwatch install) + Фаза 1 (sokrat-content SKILL.md draft)</li>
+<li><strong>День 2-3:</strong> Фаза 2 (pre-seed) + Фаза 3 (Egor Soul training)</li>
+<li><strong>День 4-5:</strong> Фаза 4 (screencasts) + Фаза 5 (lead-magnets)</li>
+<li><strong>День 6-7:</strong> Фаза 6 (first run, publish, log)</li>
+<li><strong>Неделя 2+:</strong> Фаза 7 (continuous iteration)</li>
+</ul>
+
+<div class="callout">
+<div class="callout-title">Total upfront investment</div>
+<p style="margin:0"><strong>~15-20 часов distributed по 7 дням</strong> (~3 часа/день). После этого — 6-8 часов в неделю на actual content production. ROI: после 4-х недель скилл начнёт компаундировать через experiments.md, и weekly time снизится до 4-5 часов.</p>
+</div>
+
+</section>
+
+<div class="footer">
+<p><strong>sokrat-content/SKILL.md · Hybrid Architecture Proposal v1.0</strong></p>
+<p>17 мая 2026 · Companion to: <a href="marketing-strategy-q2-2026.html">Master Strategy</a> · <a href="instagram-content-playbook.html">IG Playbook</a> · <a href="content-marketing-playbook.html">Content Marketing Playbook</a></p>
+</div>
+
+</div>
+</body>
+</html>

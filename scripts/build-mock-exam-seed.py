@@ -48,10 +48,20 @@ def strip_instruction_paragraphs(text: str) -> str:
 # rotate and seed becomes non-idempotent.
 NS = uuid.UUID("00000000-0000-0000-0000-000000005ec0")
 
-VARIANT_KEY = "mock-exam-variant-1-egor-physics-2026"
-VARIANT_ID = str(uuid.uuid5(NS, VARIANT_KEY))
+# Variant number, set in main() from CLI (default 1). Keeps V1 output byte-identical
+# when called with variant=1; switch to 2/3/4 for the other Тренировочные варианты.
+VARIANT_NUM = 1
 
-# Egor Blinov (egor.o.blinov@gmail.com) — pilot tutor, owner of variant 1.
+
+def variant_key(n: int) -> str:
+    return f"mock-exam-variant-{n}-egor-physics-2026"
+
+
+def variant_id(n: int) -> str:
+    return str(uuid.uuid5(NS, variant_key(n)))
+
+
+# Egor Blinov (egor.o.blinov@gmail.com) — pilot tutor, owner of all variants.
 # UUID resolved 2026-05-08 via SQL JOIN auth.users × public.tutors (commit 8185ec3).
 # Hardcoded here so re-generation preserves the canonical owner; if Egor's account
 # is rotated, replace this constant and re-run.
@@ -59,7 +69,7 @@ EGOR_UUID = "a7212758-8cdd-4d7c-8608-4fedcb34d74c"
 
 
 def task_uuid(kim: int) -> str:
-    return str(uuid.uuid5(NS, f"mock-exam-variant-1-task-{kim}"))
+    return str(uuid.uuid5(NS, f"mock-exam-variant-{VARIANT_NUM}-task-{kim}"))
 
 
 # Convert wmf/emf to png at upload time (Lovable Studio). jpeg stays as-is.
@@ -68,7 +78,7 @@ def storage_path(filename: str) -> str:
     ext_lower = ext.lower()
     if ext_lower in ("wmf", "emf"):
         ext_lower = "png"
-    return f"storage://mock-exam-variant-tasks/variant1/{base}.{ext_lower}"
+    return f"storage://mock-exam-variant-tasks/variant{VARIANT_NUM}/{base}.{ext_lower}"
 
 
 def serialize_task_image_url(images: list) -> str:
@@ -96,33 +106,35 @@ def sql_or_null(value: str) -> str:
 
 def build_sql(tasks_data: dict) -> str:
     tasks = tasks_data["tasks"]
+    n = VARIANT_NUM
+    vid = variant_id(n)
 
     lines = []
-    lines.append("-- Mock Exams v1 — Тренировочный вариант 1 от Егора Иванова (физика ЕГЭ-2026)")
+    lines.append(f"-- Mock Exams v1 — Тренировочный вариант {n} от Егора Блинова (физика ЕГЭ-2026)")
     lines.append("-- ----------------------------------------------------------------------")
     lines.append("-- Этот файл сгенерирован скриптом scripts/build-mock-exam-seed.py из")
     lines.append("-- tasks.json. НЕ редактировать вручную — править tasks.json и пересобирать.")
     lines.append("--")
     lines.append("-- Provenance:")
-    lines.append("--   source docx: 'Тр_вариант 1.docx' от Егора Иванова, 2026-05-07")
+    lines.append(f"--   source docx: 'Тр_вариант {n}.docx' от Егора Блинова, 2026-05-07")
     lines.append("--   parser: scripts/parse-mock-exam-docx.py")
-    lines.append("--   structurer: scripts/structure-mock-exam.py")
+    lines.append("--   render+transcribe: docx → PDF (LibreOffice) → постранично выверено")
     lines.append("--   generator: scripts/build-mock-exam-seed.py")
-    lines.append("--   review file: docs/delivery/features/mock-exams-v1/source/variant1-review.md")
+    lines.append(f"--   review file: docs/delivery/features/mock-exams-v1/source/variant{n}-review.md")
     lines.append("--")
     lines.append("-- UUIDs derived deterministically via uuid5(ns=00000000-0000-0000-0000-000000005ec0).")
     lines.append("-- Re-running generator with same tasks.json produces identical UUIDs.")
     lines.append("--")
     lines.append("-- Storage refs:")
-    lines.append("--   storage://mock-exam-variant-tasks/variant1/<filename>")
+    lines.append(f"--   storage://mock-exam-variant-tasks/variant{n}/<filename>")
     lines.append("-- Vladimir загружает картинки в Lovable Cloud Studio (bucket mock-exam-variant-tasks,")
-    lines.append("-- папка variant1/). WMF/EMF ДОЛЖНЫ быть конвертированы в PNG до загрузки —")
-    lines.append("-- браузеры не рендерят WMF/EMF. Список файлов: docs/delivery/features/mock-exams-v1/source/storage-upload-checklist.md")
+    lines.append(f"-- папка variant{n}/). WMF/EMF ДОЛЖНЫ быть конвертированы в PNG до загрузки —")
+    lines.append(f"-- браузеры не рендерят WMF/EMF. Список файлов: docs/delivery/features/mock-exams-v1/source/storage-upload-checklist-v{n}.md")
     lines.append("--")
-    lines.append("-- Применяется через Lovable Cloud auto-deploy после push в main.")
+    lines.append("-- Применяется через Lovable Cloud auto-deploy после push в main (как миграция).")
     lines.append("-- AC-3 (deterministic checker): ответы Части 1 пред-вычислены и видны")
     lines.append("-- в `correct_answer` ниже. После seed применения — `SELECT COUNT(*) FROM")
-    lines.append("-- mock_exam_variant_tasks WHERE variant_id = '" + VARIANT_ID + "';' = 26.")
+    lines.append("-- mock_exam_variant_tasks WHERE variant_id = '" + vid + "';' = 26.")
     lines.append("")
     lines.append("BEGIN;")
     lines.append("")
@@ -146,11 +158,11 @@ def build_sql(tasks_data: dict) -> str:
     lines.append("  duration_minutes, total_max_score, part1_max, part2_max, task_count,")
     lines.append("  created_by")
     lines.append(") VALUES (")
-    lines.append(f"  '{VARIANT_ID}'::uuid,")
-    lines.append("  'Тренировочный вариант 1 (физика ЕГЭ-2026)',")
+    lines.append(f"  '{vid}'::uuid,")
+    lines.append(f"  'Тренировочный вариант {n} (физика ЕГЭ-2026)',")
     lines.append("  'ege_physics',")
     lines.append("  'tutor',")
-    lines.append("  'Источник: репетитор Егор Иванов',  -- displayed source attribution; docx author signature")
+    lines.append("  'Источник: репетитор Егор Блинов',  -- displayed source attribution; docx author signature")
     lines.append("  235,  -- 3ч 55мин")
     lines.append(f"  {total_max},   -- {part1_max} (Часть 1) + {part2_max} (Часть 2), verified against source docx criteria")
     lines.append(f"  {part1_max},")
@@ -197,7 +209,7 @@ def build_sql(tasks_data: dict) -> str:
         lines.append(f"  solution_text, topic")
         lines.append(f") VALUES (")
         lines.append(f"  '{tid}'::uuid,")
-        lines.append(f"  '{VARIANT_ID}'::uuid,")
+        lines.append(f"  '{vid}'::uuid,")
         lines.append(f"  {kim}, {part}, {kim},")
         lines.append(f"  {sql_str(task_text)},")
         lines.append(f"  {serialize_task_image_url(images)},")
@@ -212,9 +224,9 @@ def build_sql(tasks_data: dict) -> str:
     lines.append("COMMIT;")
     lines.append("")
     lines.append("-- Validation:")
-    lines.append("-- SELECT COUNT(*) FROM public.mock_exam_variant_tasks WHERE variant_id = '" + VARIANT_ID + "';")
+    lines.append("-- SELECT COUNT(*) FROM public.mock_exam_variant_tasks WHERE variant_id = '" + vid + "';")
     lines.append("-- Expected: 26")
-    lines.append("-- SELECT kim_number, part, check_mode, max_score, correct_answer FROM public.mock_exam_variant_tasks WHERE variant_id = '" + VARIANT_ID + "' ORDER BY kim_number;")
+    lines.append("-- SELECT kim_number, part, check_mode, max_score, correct_answer FROM public.mock_exam_variant_tasks WHERE variant_id = '" + vid + "' ORDER BY kim_number;")
     lines.append("")
 
     return "\n".join(lines)
@@ -264,16 +276,19 @@ def _topic(kim: int) -> str:
 
 
 def main():
+    global VARIANT_NUM
     if len(sys.argv) < 3:
-        print("usage: build-mock-exam-seed.py <tasks_json> <out_seed_sql>", file=sys.stderr)
+        print("usage: build-mock-exam-seed.py <tasks_json> <out_seed_sql> [variant_num=1]", file=sys.stderr)
         sys.exit(2)
     tasks_path = Path(sys.argv[1])
     out_path = Path(sys.argv[2])
+    if len(sys.argv) >= 4:
+        VARIANT_NUM = int(sys.argv[3])
 
     tasks_data = json.loads(tasks_path.read_text(encoding="utf-8"))
     sql = build_sql(tasks_data)
     out_path.write_text(sql, encoding="utf-8")
-    print(f"[ok] wrote {out_path} — variant_id={VARIANT_ID}", file=sys.stderr)
+    print(f"[ok] wrote {out_path} — variant={VARIANT_NUM} variant_id={variant_id(VARIANT_NUM)}", file=sys.stderr)
 
 
 if __name__ == "__main__":

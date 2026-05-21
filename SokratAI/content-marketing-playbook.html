@@ -1,0 +1,687 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Сократ AI — Content Marketing Playbook (Blog + TG Sponsorships)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Golos+Text:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root {
+  --sokrat-green: #1B6B4A;
+  --sokrat-green-light: #DCFCE7;
+  --sokrat-green-dark: #14532D;
+  --sokrat-surface: #F7F6F3;
+  --slate-900: #0F172A;
+  --slate-700: #334155;
+  --slate-500: #64748B;
+  --slate-200: #E2E8F0;
+  --slate-100: #F1F5F9;
+  --slate-50: #F8FAFC;
+  --amber-50: #FFFBEB;
+  --amber-500: #F59E0B;
+  --blue-50: #EFF6FF;
+  --blue-500: #3B82F6;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html { scroll-behavior: smooth; }
+body { font-family: 'Golos Text', system-ui, sans-serif; font-size: 16px; line-height: 1.6; color: var(--slate-900); background: var(--slate-50); }
+.layout { display: grid; grid-template-columns: 260px 1fr; max-width: 1400px; margin: 0 auto; min-height: 100vh; }
+@media (max-width: 900px) { .layout { grid-template-columns: 1fr; } .sidebar { display: none; } }
+.sidebar { background: #fff; border-right: 1px solid var(--slate-200); padding: 32px 24px; position: sticky; top: 0; height: 100vh; overflow-y: auto; }
+.sidebar-brand { font-size: 18px; font-weight: 700; color: var(--sokrat-green); margin-bottom: 4px; }
+.sidebar-subtitle { font-size: 12px; color: var(--slate-500); margin-bottom: 24px; letter-spacing: 0.02em; }
+.sidebar nav { display: flex; flex-direction: column; gap: 4px; }
+.sidebar nav a { font-size: 14px; color: var(--slate-700); text-decoration: none; padding: 8px 12px; border-radius: 6px; border-left: 2px solid transparent; transition: all 0.15s; }
+.sidebar nav a:hover { background: var(--sokrat-surface); border-left-color: var(--sokrat-green); color: var(--sokrat-green-dark); }
+.sidebar nav .section-label { font-size: 11px; font-weight: 700; color: var(--slate-500); text-transform: uppercase; letter-spacing: 0.05em; margin-top: 12px; padding: 0 12px 4px; }
+.main { padding: 48px 56px 96px; max-width: 1000px; background: #fff; }
+@media (max-width: 700px) { .main { padding: 32px 20px 64px; } }
+.hero { border-bottom: 1px solid var(--slate-200); padding-bottom: 32px; margin-bottom: 48px; }
+.hero-badge { display: inline-block; padding: 4px 12px; background: var(--sokrat-green-light); color: var(--sokrat-green-dark); font-size: 12px; font-weight: 600; border-radius: 9999px; margin-bottom: 16px; letter-spacing: 0.04em; text-transform: uppercase; }
+h1 { font-size: 32px; font-weight: 700; line-height: 1.2; margin-bottom: 12px; }
+.hero-meta { font-size: 14px; color: var(--slate-500); }
+h2 { font-size: 24px; font-weight: 600; margin-top: 48px; margin-bottom: 20px; padding-bottom: 12px; border-bottom: 2px solid var(--sokrat-green); scroll-margin-top: 16px; }
+.part-header { font-size: 14px; font-weight: 700; color: var(--sokrat-green); text-transform: uppercase; letter-spacing: 0.08em; margin-top: 56px; margin-bottom: 8px; }
+h3 { font-size: 17px; font-weight: 600; margin-top: 24px; margin-bottom: 10px; }
+h4 { font-size: 14px; font-weight: 600; color: var(--slate-700); margin-top: 20px; margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.04em; }
+p { margin-bottom: 14px; color: var(--slate-700); }
+ul, ol { margin: 10px 0 16px 24px; color: var(--slate-700); }
+li { margin-bottom: 6px; }
+strong { color: var(--slate-900); font-weight: 600; }
+code { font-family: 'SF Mono', Monaco, monospace; font-size: 13px; background: var(--slate-100); padding: 2px 6px; border-radius: 4px; color: var(--sokrat-green-dark); }
+.callout { background: var(--sokrat-surface); border-left: 3px solid var(--sokrat-green); padding: 16px 20px; margin: 16px 0; border-radius: 4px; }
+.callout-amber { background: var(--amber-50); border-left-color: var(--amber-500); }
+.callout-blue { background: var(--blue-50); border-left-color: var(--blue-500); }
+.callout-title { font-size: 12px; font-weight: 700; color: var(--sokrat-green-dark); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 8px; }
+.callout-amber .callout-title { color: #92400E; }
+.callout-blue .callout-title { color: #1E40AF; }
+table { width: 100%; border-collapse: collapse; margin: 16px 0 24px; font-size: 13px; }
+th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--slate-200); vertical-align: top; }
+th { font-weight: 600; background: var(--slate-50); font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; }
+td { color: var(--slate-700); }
+.audience-tag { display: inline-block; font-size: 10px; font-weight: 700; padding: 2px 8px; border-radius: 4px; text-transform: uppercase; letter-spacing: 0.04em; white-space: nowrap; }
+.aud-tutor { background: var(--sokrat-green-light); color: var(--sokrat-green-dark); }
+.aud-student { background: var(--blue-50); color: #1E40AF; }
+.aud-parent { background: #FEF3C7; color: #92400E; }
+.code-block { background: var(--slate-900); color: #E2E8F0; padding: 20px; border-radius: 8px; font-family: 'SF Mono', Monaco, monospace; font-size: 13px; line-height: 1.6; overflow-x: auto; margin: 16px 0; white-space: pre-wrap; }
+.metric-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin: 16px 0; }
+.metric { background: #fff; border: 1px solid var(--slate-200); border-radius: 8px; padding: 16px; text-align: center; }
+.metric-value { font-size: 22px; font-weight: 700; color: var(--sokrat-green); margin-bottom: 6px; line-height: 1; }
+.metric-label { font-size: 12px; color: var(--slate-500); }
+.footer { margin-top: 60px; padding-top: 20px; border-top: 1px solid var(--slate-200); font-size: 13px; color: var(--slate-500); }
+</style>
+</head>
+<body>
+<div class="layout">
+<aside class="sidebar">
+<div class="sidebar-brand">Сократ AI</div>
+<div class="sidebar-subtitle">Content Marketing Playbook · v1.0</div>
+<nav>
+<div class="section-label">Part A · Blog</div>
+<a href="#blog-why">1. Почему блог</a>
+<a href="#blog-audience">2. Аудитория и split</a>
+<a href="#blog-keywords">3. Keywords + GEO</a>
+<a href="#blog-plan">4. 24 статьи на 12 недель</a>
+<a href="#blog-template">5. Шаблон статьи</a>
+<a href="#blog-seo">6. Technical SEO</a>
+<a href="#blog-geo">7. GEO-тактики</a>
+<a href="#blog-production">8. Production</a>
+<div class="section-label">Part B · TG Sponsorships</div>
+<a href="#tg-target">9. Целевые каналы</a>
+<a href="#tg-pricing">10. Pricing benchmarks</a>
+<a href="#tg-formats">11. Форматы</a>
+<a href="#tg-pitch">12. Pitch template</a>
+<a href="#tg-measure">13. Measurement</a>
+<a href="#tg-calendar">14. Q3 календарь</a>
+</nav>
+</aside>
+
+<main class="main">
+
+<div class="hero">
+<span class="hero-badge">Развилка A · Long-term Engine</span>
+<h1>Blog + TG Sponsorships Playbook</h1>
+<p class="hero-meta">v1.0 · 17 мая 2026 · 12-week blog plan + Q3 TG-sponsorship strategy</p>
+</div>
+
+<p>Цель: <strong>привлечение репетиторов</strong> в Сократ AI (primary) + <strong>школьники/родители ЕГЭ-ОГЭ</strong> (secondary). Этот playbook работает на горизонте 3-6 месяцев и комплементарен с быстро-движущимся IG-каналом. Блог даёт authority + long-tail organic traffic. TG sponsorships — точечные high-conversion удары по B2B-аудитории.</p>
+
+<div class="part-header">Часть A · Блог на sokratai.ru — SEO + GEO</div>
+
+<section id="blog-why">
+<h2>1. Почему блог сейчас</h2>
+
+<p>Три структурных причины именно сейчас:</p>
+
+<ol>
+<li><strong>Низкая SEO-конкуренция в нише.</strong> "AI для репетитора физики", "проверка ДЗ AI", "LMS репетитор физики" — keyword'ы с <50 ежемесячных поисков каждый, но почти ни одной competitive статьи в выдаче Yandex/Google. Это <strong>blue ocean</strong> на 6-12 месяцев.</li>
+<li><strong>GEO (Generative Engine Optimization).</strong> LLM-поиск (ChatGPT, Perplexity, Yandex GPT, AI overviews в Google) уже забирает 15-25% search-traffic в нише edtech. Структурированный educational контент с FAQ + comparison tables — это то, что LLMs reference в ответах. Раннее присутствие = долгосрочный moat.</li>
+<li><strong>Authority signal для conversion.</strong> Когда tutor приходит на sokratai.ru из IG / TG / DM, наличие глубоких методических статей за подписью Егора Блинова (МФТИ, 7 лет опыта) — это <strong>прямой trust-сигнал</strong>, который повышает trial-to-paid конверсию.</li>
+</ol>
+
+<div class="callout">
+<div class="callout-title">Что блог НЕ делает</div>
+<p style="margin:0">Блог НЕ daёт быстрые trial-signups в первый месяц. Yandex/Google индексируют + ранжируют новый контент 4-12 недель. Первый measurable traffic = август-сентябрь 2026. Это <strong>инвестиция в long-tail</strong>, не quick-win канал. Для quick-win — IG (Playbook #1).</p>
+</div>
+</section>
+
+<section id="blog-audience">
+<h2>2. Аудитория и split</h2>
+
+<table>
+<thead><tr><th>Аудитория</th><th>Доля</th><th>Job-to-be-done</th><th>Conversion</th></tr></thead>
+<tbody>
+<tr>
+<td><span class="audience-tag aud-tutor">Tutor B2B</span></td>
+<td>40%</td>
+<td>Найти инструмент → улучшить workflow → больше клиентов</td>
+<td>Высокая · trial signup</td>
+</tr>
+<tr>
+<td><span class="audience-tag aud-student">Student B2C</span></td>
+<td>35%</td>
+<td>Подготовиться к ЕГЭ/ОГЭ → найти разбор задачи → улучшить балл</td>
+<td>Средняя · lead-magnet</td>
+</tr>
+<tr>
+<td><span class="audience-tag aud-parent">Parent</span></td>
+<td>25%</td>
+<td>Найти репетитора → понять что нормально для ЕГЭ → проконтролировать</td>
+<td>Reverse funnel · "spread to your tutor"</td>
+</tr>
+</tbody>
+</table>
+
+<p>Tutor-targeted статьи имеют меньший search volume, но <strong>прямую конверсию</strong>. Student-targeted статьи имеют большой volume, но конверсия идёт через lead-magnet → drip-серия → возможный trial. Parent-statьи — reverse funnel (родитель прочитал → спросил репетитора).</p>
+</section>
+
+<section id="blog-keywords">
+<h2>3. Keyword research + GEO-стратегия</h2>
+
+<h3>Tutor-targeted keywords (B2B, high-intent low-volume)</h3>
+<table>
+<thead><tr><th>Keyword</th><th>Volume/мес</th><th>Difficulty</th></tr></thead>
+<tbody>
+<tr><td>AI для проверки домашних работ</td><td>~80</td><td>Low</td></tr>
+<tr><td>репетитор физики онлайн платформа</td><td>~150</td><td>Medium</td></tr>
+<tr><td>база задач для репетитора</td><td>~210</td><td>Low</td></tr>
+<tr><td>LMS для репетитора</td><td>~90</td><td>Low</td></tr>
+<tr><td>автоматическая проверка ДЗ</td><td>~120</td><td>Low</td></tr>
+<tr><td>CRM для репетитора</td><td>~480</td><td>Medium</td></tr>
+<tr><td>инструменты репетитора 2026</td><td>~60</td><td>Low</td></tr>
+</tbody>
+</table>
+
+<h3>Student-targeted keywords (B2C, high-volume mixed-intent)</h3>
+<table>
+<thead><tr><th>Keyword</th><th>Volume/мес</th><th>Difficulty</th></tr></thead>
+<tbody>
+<tr><td>ЕГЭ физика 2026 разбор</td><td>~3,400</td><td>Medium-High</td></tr>
+<tr><td>задача 25 ЕГЭ физика</td><td>~1,900</td><td>Medium</td></tr>
+<tr><td>оптика ЕГЭ разбор</td><td>~720</td><td>Medium</td></tr>
+<tr><td>электродинамика ЕГЭ</td><td>~890</td><td>Medium</td></tr>
+<tr><td>ОГЭ физика 2026</td><td>~2,100</td><td>Medium</td></tr>
+<tr><td>формулы для ЕГЭ физика</td><td>~5,800</td><td>High</td></tr>
+<tr><td>как сдать ЕГЭ физика на 90+</td><td>~410</td><td>Medium</td></tr>
+</tbody>
+</table>
+
+<h3>Parent-targeted keywords</h3>
+<table>
+<thead><tr><th>Keyword</th><th>Volume/мес</th><th>Difficulty</th></tr></thead>
+<tbody>
+<tr><td>как помочь ребёнку с физикой</td><td>~580</td><td>Low</td></tr>
+<tr><td>сколько стоит репетитор по физике</td><td>~840</td><td>Medium</td></tr>
+<tr><td>AI помощник в учёбе</td><td>~290</td><td>Medium</td></tr>
+<tr><td>как выбрать репетитора по физике</td><td>~610</td><td>Low</td></tr>
+</tbody>
+</table>
+
+<div class="callout callout-blue">
+<div class="callout-title">Volume — ориентиры, не догма</div>
+<p style="margin:0">Цифры приблизительные на основе типичных RU-edtech keyword'ов. Запусти Yandex.Wordstat + Keys.so / Bukvarix для верификации актуальных volume'ов перед финальной планировкой. Volume не всегда коррелирует с conversion: 80 поисков "AI для проверки ДЗ" дают больше платящих туторов, чем 5800 поисков "формулы ЕГЭ".</p>
+</div>
+</section>
+
+<section id="blog-plan">
+<h2>4. 24 статьи на 12 недель</h2>
+
+<p>2 статьи в неделю. Mix аудиторий по pillar-распределению (40/35/25).</p>
+
+<table>
+<thead><tr><th>Неделя</th><th>Аудитория</th><th>Название</th></tr></thead>
+<tbody>
+<tr><td>W1</td><td><span class="audience-tag aud-tutor">T</span></td><td>AI в работе репетитора физики: 7 реальных сценариев применения</td></tr>
+<tr><td>W1</td><td><span class="audience-tag aud-student">S</span></td><td>Задача №21 ЕГЭ физика 2026: разбор с пошаговым решением</td></tr>
+<tr><td>W2</td><td><span class="audience-tag aud-tutor">T</span></td><td>Как составить домашнее задание по физике ЕГЭ за 10 минут (вместо 30+)</td></tr>
+<tr><td>W2</td><td><span class="audience-tag aud-parent">P</span></td><td>Сколько стоит репетитор по физике в Москве и регионах в 2026</td></tr>
+<tr><td>W3</td><td><span class="audience-tag aud-tutor">T</span></td><td>Сравнение платформ для репетитора: Skysmart vs Foxford vs Сократ AI</td></tr>
+<tr><td>W3</td><td><span class="audience-tag aud-student">S</span></td><td>Задача №22 ЕГЭ: типовые ловушки и как их обходить</td></tr>
+<tr><td>W4</td><td><span class="audience-tag aud-tutor">T</span></td><td>База задач для подготовки к ЕГЭ физика: где брать и как использовать</td></tr>
+<tr><td>W4</td><td><span class="audience-tag aud-parent">P</span></td><td>Почему мой ребёнок не понимает физику: 5 настоящих причин</td></tr>
+<tr><td>W5</td><td><span class="audience-tag aud-tutor">T</span></td><td>Что репетитор физики делает за неделю: дашборд продуктивности</td></tr>
+<tr><td>W5</td><td><span class="audience-tag aud-student">S</span></td><td>Все формулы для ЕГЭ физика 2026: систематизированный гайд</td></tr>
+<tr><td>W6</td><td><span class="audience-tag aud-parent">P</span></td><td>AI-помощник в учёбе: безопасно ли это для подростка?</td></tr>
+<tr><td>W6</td><td><span class="audience-tag aud-student">S</span></td><td>Кинематика на ЕГЭ: разбор от простого к сложному</td></tr>
+<tr><td>W7</td><td><span class="audience-tag aud-tutor">T</span></td><td>Топ-10 ошибок учеников на ЕГЭ физика 2025: что говорят данные 100+ работ</td></tr>
+<tr><td>W7</td><td><span class="audience-tag aud-student">S</span></td><td>Электродинамика на ЕГЭ: какие задачи реально встречаются</td></tr>
+<tr><td>W8</td><td><span class="audience-tag aud-tutor">T</span></td><td>Как перейти с Word + Telegram + Excel на одну LMS-систему</td></tr>
+<tr><td>W8</td><td><span class="audience-tag aud-parent">P</span></td><td>Какие баллы на ЕГЭ нужны для физтеха, ВШЭ, МГУ в 2026</td></tr>
+<tr><td>W9</td><td><span class="audience-tag aud-tutor">T</span></td><td>Методология разбора задачи №26 ЕГЭ: 3 авторских подхода</td></tr>
+<tr><td>W9</td><td><span class="audience-tag aud-student">S</span></td><td>ОГЭ физика 2026: полный гид по структуре и подготовке</td></tr>
+<tr><td>W10</td><td><span class="audience-tag aud-tutor">T</span></td><td>Как репетитор может зарабатывать 200 000 ₽/мес: разбор экономики и инструментов</td></tr>
+<tr><td>W10</td><td><span class="audience-tag aud-student">S</span></td><td>Как готовиться к ЕГЭ физика за 3 месяца: реальный план</td></tr>
+<tr><td>W11</td><td><span class="audience-tag aud-parent">P</span></td><td>Когда начинать готовиться к ЕГЭ физика: оптимальный таймлайн</td></tr>
+<tr><td>W11</td><td><span class="audience-tag aud-tutor">T</span></td><td>Полный гид: как использовать AI в работе репетитора в 2026 году</td></tr>
+<tr><td>W12</td><td><span class="audience-tag aud-tutor">T</span></td><td>Что отличает Сократ AI от других LMS: честный сравнительный обзор</td></tr>
+<tr><td>W12</td><td><span class="audience-tag aud-parent">P</span></td><td>Чему меня научило 7 лет репетиторства физики — Егор Блинов, МФТИ</td></tr>
+</tbody>
+</table>
+
+<p>Распределение: 10 tutor (42%), 8 student (33%), 6 parent (25%). Корректно соответствует target split'у.</p>
+
+<div class="callout callout-amber">
+<div class="callout-title">Stretch goal</div>
+<p style="margin:0">Если cadence 2/нед окажется sustainable — добавить W13-W16 серию из 8 статей про ОГЭ для расширения на 9-классников и их родителей. ОГЭ-keyword'ы менее насыщенные, ranking быстрее.</p>
+</div>
+</section>
+
+<section id="blog-template">
+<h2>5. Шаблон статьи</h2>
+
+<div class="code-block">H1: {keyword phrase} — {year}
+
+TL;DR блок (200 слов)
+  ↳ 3 главные мысли статьи bullet'ами
+  ↳ Сразу понятно — стоит читать или нет
+
+Введение (150-200 слов)
+  ↳ Хук: проблема читателя
+  ↳ Обещание: что узнаешь
+
+H2 секция 1 — Контекст / определение
+H2 секция 2 — Главная идея / методология
+H2 секция 3 — Конкретные примеры (с скриншотами, цифрами)
+H2 секция 4 — Comparison / альтернативы (таблица — GEO-friendly)
+H2 секция 5 — Action items / чеклист
+
+FAQ section (5-8 Q&amp;A пар)
+  ↳ Каждый Q как H3
+  ↳ Ответ 50-100 слов
+  ↳ КРИТИЧНО для GEO (LLMs extract)
+
+Заключение + CTA
+  ↳ Резюме одним абзацем
+  ↳ Конкретный action: trial / lead-magnet / read next article
+
+Author byline
+  ↳ Егор Блинов · МФТИ · 7 лет репетиторства физики
+  ↳ Photo + 2 строки био
+  ↳ Critical для GEO trust signal
+
+Related articles (internal links)
+  ↳ 3-5 связанных статей
+  ↳ Authority graph builds via cross-linking</div>
+
+<h4>Длина</h4>
+<ul>
+<li>Tutor articles: 1500-2500 слов (Google любит длинный B2B-контент)</li>
+<li>Student articles: 1200-1800 слов (с большим количеством примеров и формул)</li>
+<li>Parent articles: 1000-1500 слов (легче, более повествовательные)</li>
+</ul>
+
+<h4>Visual elements</h4>
+<ul>
+<li>1-2 пользовательских скриншота продукта (where relevant)</li>
+<li>1-2 таблицы сравнения (CRITICAL для GEO)</li>
+<li>1 schema-marked FAQ block в конце</li>
+<li>Math формулы — через MathJax / KaTeX (consistent with sokratai.ru SKILL.md)</li>
+</ul>
+</section>
+
+<section id="blog-seo">
+<h2>6. Technical SEO checklist для sokratai.ru</h2>
+
+<p>Большинство пунктов — one-time setup, потом forget.</p>
+
+<h4>Critical (Week 1)</h4>
+<ul>
+<li><code>/blog</code> route в Vite/React с SSR/SSG (используй react-helmet-async для meta-тегов)</li>
+<li>Sitemap XML, обновляется автоматически при публикации</li>
+<li>robots.txt с правильными rules</li>
+<li>Canonical URLs на каждой статье</li>
+<li>Open Graph + Twitter cards для каждой статьи</li>
+<li>Schema markup: Article + Author + FAQ (через json-ld)</li>
+<li>Yandex.Webmaster + Google Search Console — verification + sitemap submission</li>
+<li>Page speed: Core Web Vitals в зелёной зоне (LCP &lt;2.5s, FID &lt;100ms, CLS &lt;0.1)</li>
+</ul>
+
+<h4>Important (Week 2-4)</h4>
+<ul>
+<li>Internal linking: каждая новая статья ссылается на 3-5 других; перелинковка ведёт к page authority distribution</li>
+<li>Breadcrumbs (с schema markup)</li>
+<li>Alt-text на всех картинках с keyword variants</li>
+<li>Mobile-first индексация — проверить через Google Search Console</li>
+<li>HTTPS (уже есть на sokratai.ru)</li>
+<li>Lazy-loading картинок (через <code>loading="lazy"</code>)</li>
+</ul>
+
+<h4>Nice-to-have (Week 5+)</h4>
+<ul>
+<li>RSS feed (для тех кто будет subscribe)</li>
+<li>Comment system (Disqus или native — больше user-generated content = SEO boost)</li>
+<li>Email subscription form в footer</li>
+<li>Web stories (Google AMP-эквивалент для visual content)</li>
+</ul>
+</section>
+
+<section id="blog-geo">
+<h2>7. GEO — что отличает от классического SEO</h2>
+
+<p>GEO (Generative Engine Optimization) — оптимизация под LLM-поиск (ChatGPT, Perplexity, YandexGPT, Google AI Overviews). К концу 2026 это будет 25-40% search-traffic в edtech.</p>
+
+<h4>Что LLMs любят (приоритеты)</h4>
+<ol>
+<li><strong>Структурированные данные.</strong> FAQ блоки, comparison tables, numbered lists, definition boxes — LLMs extract эти куски и используют в ответах.</li>
+<li><strong>Атрибуция и авторитет.</strong> Author byline с credentials (МФТИ, 7 лет опыта), даты публикации, наличие external links на проверенные источники.</li>
+<li><strong>Конкретные числа и факты.</strong> "По данным [источник], 68% выпускников..." → LLMs prefer цитируемые статистики.</li>
+<li><strong>Свежесть.</strong> "Updated: 2026" в schema markup критично — LLMs penalty за outdated educational content.</li>
+<li><strong>Direct answer formatting.</strong> Первый параграф H2-секции должен прямо отвечать на implied question.</li>
+</ol>
+
+<h4>Что LLMs игнорируют / penalty</h4>
+<ul>
+<li>Filler-контент ("в современном мире...", "не секрет, что...")</li>
+<li>Sales-language без подкрепления данными</li>
+<li>Контент без structured data markup</li>
+<li>Дублированный или semi-AI-generated контент (LLMs detect это)</li>
+</ul>
+
+<div class="callout callout-blue">
+<div class="callout-title">GEO-specific tactical моменты</div>
+<ul style="margin:0">
+<li>В каждой tutor-статье — table comparing Sokrat AI с альтернативами. LLMs очень любят tables.</li>
+<li>В каждой student-статье — explicit step-by-step solution с numbered list. ChatGPT часто берёт эти шаги напрямую.</li>
+<li>FAQ в конце с 5-8 явными вопросами по теме статьи. Это форматирование, которое LLMs распознают мгновенно.</li>
+<li>Schema markup: <code>FAQPage</code> + <code>HowTo</code> где применимо.</li>
+</ul>
+</div>
+</section>
+
+<section id="blog-production">
+<h2>8. Production model</h2>
+
+<h3>Per-article workflow (~3.5 часа)</h3>
+<ol>
+<li><strong>Outline + key insights от Егора</strong> (15-20 мин аудио): главная мысль, 3-5 примеров из практики, методологические инсайты</li>
+<li><strong>Research keyword + competitor analysis</strong> (Vladimir, 30 мин): что уже в выдаче, gap analysis</li>
+<li><strong>Writing draft через Claude</strong> (Vladimir + Claude, 1.5-2 часа): structured outline → full draft</li>
+<li><strong>Review + corrections от Егора</strong> (30 мин): factual accuracy, методологические нюансы</li>
+<li><strong>Final edit + SEO setup + publish</strong> (Vladimir, 45-60 мин): visuals, schema, internal links, OG tags</li>
+</ol>
+
+<p>2 articles/week × 3.5 часа = ~7 часов Vladimir + ~1.5 часа Егора в неделю.</p>
+
+<h3>Цены, если outsource</h3>
+<ul>
+<li><strong>Контент-райтер физик-методист на freelance</strong>: 8-15 тыс ₽/статья = 16-30 тыс ₽/нед</li>
+<li><strong>Контент-агенция RU edtech</strong>: 20-35 тыс ₽/статья = 40-70 тыс ₽/нед (premium качество, но дорого для bootstrap-стадии)</li>
+<li><strong>Текущий подход (Claude + Egor выписки)</strong>: ~0 ₽ внешних расходов, ~10-12 часов чистого CEO+Egor времени в неделю</li>
+</ul>
+
+<p>Текущий подход — оптимальный пока ты в bootstrap-стадии. Рассмотри outsource когда станет >50 платящих репов и появится cash для масштабирования.</p>
+</section>
+
+<div class="part-header">Часть B · TG Sponsorships</div>
+
+<section id="tg-target">
+<h2>9. Целевые каналы — research list</h2>
+
+<p>10 каналов, по которым стоит делать research + outreach. Тестирование на 1-2 канала в Q3 (август-сентябрь), full ramp в Q4.</p>
+
+<table>
+<thead><tr><th>Канал</th><th>Аудитория</th><th>Размер</th><th>Fit</th><th>Контакт</th></tr></thead>
+<tbody>
+<tr>
+<td><strong>@school_kovo</strong> (Школково)</td>
+<td>ЕГЭ-готовящиеся физика</td>
+<td>200k+</td>
+<td>High (B2C students + parents)</td>
+<td>Через сайт school-kovo.ru</td>
+</tr>
+<tr>
+<td><strong>Павел Виктор</strong> (YouTube + TG)</td>
+<td>Физика students + teachers</td>
+<td>1M+ YT, 50k+ TG</td>
+<td>High (premium)</td>
+<td>YouTube About → email</td>
+</tr>
+<tr>
+<td><strong>@reshueege_physics</strong> (Решу ЕГЭ)</td>
+<td>ЕГЭ students all subjects</td>
+<td>100k+</td>
+<td>Medium (broad)</td>
+<td>reshuege.ru contact</td>
+</tr>
+<tr>
+<td><strong>Дмитрий Гущин</strong></td>
+<td>Methodology + teachers</td>
+<td>50k+</td>
+<td>High (tutors)</td>
+<td>Email через Решу ЕГЭ</td>
+</tr>
+<tr>
+<td><strong>Александр Долгих</strong></td>
+<td>Физика students 9-11</td>
+<td>30-50k</td>
+<td>High (B2C + parents)</td>
+<td>DM Telegram</td>
+</tr>
+<tr>
+<td><strong>Илья Бакаев</strong></td>
+<td>Физика теория</td>
+<td>10-20k</td>
+<td>Medium-high (тонкая аудитория)</td>
+<td>DM Telegram</td>
+</tr>
+<tr>
+<td><strong>Каналы методистов</strong> (нишевые)</td>
+<td>Tutors physics</td>
+<td>5-15k каждый</td>
+<td>Very high (B2B targeted)</td>
+<td>Через сообщества репетиторов</td>
+</tr>
+<tr>
+<td><strong>EdMarket</strong> / VC EdTech</td>
+<td>Edtech-индустрия</td>
+<td>15-30k</td>
+<td>Medium (PR для нас + investors)</td>
+<td>edmarket.ru</td>
+</tr>
+<tr>
+<td><strong>Профи.ру блог</strong></td>
+<td>Tutors all subjects</td>
+<td>50k+</td>
+<td>Medium (B2B partnership)</td>
+<td>Через partnerships profi.ru</td>
+</tr>
+<tr>
+<td><strong>Тутор Союз</strong> (tutor community)</td>
+<td>Tutors all subjects</td>
+<td>10-30k</td>
+<td>Very high (peer-to-peer trust)</td>
+<td>Сообщество репетиторов TG</td>
+</tr>
+</tbody>
+</table>
+
+<div class="callout">
+<div class="callout-title">Strategic priority order</div>
+<ol style="margin:0">
+<li><strong>Tier 1</strong> (тестировать август 2026): Александр Долгих + Илья Бакаев. Меньше каналы, дешевле integration, B2B-fit высокий, легче negotiate.</li>
+<li><strong>Tier 2</strong> (сентябрь): нишевые методистские каналы + Тутор Союз. Очень узкий B2B-target, peer-trust высокий.</li>
+<li><strong>Tier 3</strong> (октябрь-ноябрь): если ROI от Tier 1 +2 покажет результат — масштабироваться на Школково, Гущин, Решу ЕГЭ.</li>
+<li><strong>Tier 4</strong> (Q4 2026 или 2027): Павел Виктор уровень. Premium-pricing, только при наличии cash и stable conversion-data.</li>
+</ol>
+</div>
+</section>
+
+<section id="tg-pricing">
+<h2>10. Pricing benchmarks (Q2 2026)</h2>
+
+<table>
+<thead><tr><th>Размер канала</th><th>Subs</th><th>Pricing per integration</th><th>Expected CTR</th></tr></thead>
+<tbody>
+<tr><td>Nano</td><td>1-5k</td><td>2-5k ₽</td><td>3-7%</td></tr>
+<tr><td>Small</td><td>5-15k</td><td>5-15k ₽</td><td>2-5%</td></tr>
+<tr><td>Medium</td><td>15-50k</td><td>15-40k ₽</td><td>1.5-3%</td></tr>
+<tr><td>Large</td><td>50-200k</td><td>40-150k ₽</td><td>1-2%</td></tr>
+<tr><td>Mega</td><td>200k+</td><td>100-500k ₽</td><td>0.5-1.5%</td></tr>
+</tbody>
+</table>
+
+<h3>Ожидаемый ROI на ранней стадии</h3>
+<p><strong>Пример</strong>: интеграция в medium-канале (30k subs) за 25k ₽.</p>
+<ul>
+<li>Reach: 30k × 50% (median view rate) = 15k impressions</li>
+<li>CTR: 2.5% → ~375 кликов на landing</li>
+<li>Conversion landing → trial: 20% → 75 trial signups</li>
+<li>Trial → paid: 30% → 22 paying tutors</li>
+<li>Revenue 12 мес (ARPU 2000 ₽ × 8 мес avg lifetime): 350k ₽</li>
+<li><strong>ROI ~14x на 12-месячном горизонте</strong></li>
+</ul>
+
+<div class="callout callout-amber">
+<div class="callout-title">Caveat</div>
+<p style="margin:0">Эти числа — оптимистичный сценарий с правильным product-channel fit. Реальные первые 2-3 интеграции дадут ROI 1:1 — 1:3 пока landing/lead-magnet/онбординг не оптимизированы. Готовься к "learning rounds" перед получением хороших unit-economics.</p>
+</div>
+</section>
+
+<section id="tg-formats">
+<h2>11. Форматы интеграций</h2>
+
+<h3>A · Native review (highest conversion)</h3>
+<p><strong>Что:</strong> автор канала тестирует Сократ 1-2 недели, пишет honest review со скриншотами и реальными use-cases. Не реклама — мнение коллеги.</p>
+<p><strong>CTR:</strong> 3-5%</p>
+<p><strong>Подходит:</strong> для каналов методистов и tutor-communities, где аудитория ценит честность.</p>
+<p><strong>Цена:</strong> +30-50% к base pricing (автор инвестирует время в тест).</p>
+
+<h3>B · Sponsored introduction</h3>
+<p><strong>Что:</strong> автор представляет Сократ как "интересный инструмент, который стоит знать". Меньше глубины, больше базовое узнавание.</p>
+<p><strong>CTR:</strong> 2-3%</p>
+<p><strong>Подходит:</strong> для больших generalist каналов (Решу ЕГЭ, Школково).</p>
+<p><strong>Цена:</strong> standard pricing.</p>
+
+<h3>C · Cross-promotion / partnership</h3>
+<p><strong>Что:</strong> взаимная реклама — мы продвигаем их канал в TG Егора, они нас в своём. No-money exchange.</p>
+<p><strong>CTR:</strong> 1-2% (но zero-cost)</p>
+<p><strong>Подходит:</strong> для каналов сопоставимого размера и аудитории. Realistically — не для нас в Q3, потому что наш канал ещё мал.</p>
+
+<h3>D · Webinar partnership</h3>
+<p><strong>Что:</strong> совместный вебинар с автором канала. "Как использовать AI в подготовке к ЕГЭ" — автор приглашает свою аудиторию, Егор ведёт + показывает Сократ.</p>
+<p><strong>CTR (registrations):</strong> 4-8%</p>
+<p><strong>Подходит:</strong> для каналов с established trust + методический фокус.</p>
+<p><strong>Цена:</strong> revenue share или fixed 30-50k ₽.</p>
+</section>
+
+<section id="tg-pitch">
+<h2>12. Pitch template для outreach</h2>
+
+<p>Шаблон для DM каналам / authors. Адаптируй под персону.</p>
+
+<div class="code-block">Тема: Сотрудничество — AI-инструмент для репетиторов физики
+
+Привет, [Имя]!
+
+Я Владимир, сооснователь Сократ AI — это LMS-платформа
+для репетиторов физики с AI-проверкой ДЗ. Веб-MVP запущен
+в марте 2026, сейчас у нас [N] платящих репетиторов.
+
+Читаю/смотрю твой канал [конкретное упоминание поста] —
+видел, что аудитория сильно перекликается с нашей.
+
+Хотел предложить интеграцию в одном из форматов:
+
+1. Native review — даю тебе доступ на 2 недели, тестируешь
+   с реальными учениками, потом честный пост (+ постоянный
+   premium-доступ как gratitude). Это лучший формат — ты
+   сам решишь, стоит ли продукт твоей аудитории.
+
+2. Sponsored introduction — обычный sponsored post,
+   pricing обсуждаем.
+
+3. Совместный вебинар — мы с моим co-founder Егором
+   Блиновым (МФТИ, 7 лет репетиторства физики) ведём
+   вебинар "AI в подготовке к ЕГЭ", ты приглашаешь свою
+   аудиторию. Хорошо работает на конверсию для обеих
+   сторон.
+
+Можем созвониться на 15 минут — покажу продукт + ответим
+на вопросы? Если интересно — отвечу на любые детали по
+любому формату.
+
+Спасибо,
+Владимир
+sokratai.ru | @vladimir_kamchatkin</div>
+
+<h4>Параметры pitch'а</h4>
+<ul>
+<li><strong>Длина:</strong> ≤ 200 слов. Длиннее — не дочитают.</li>
+<li><strong>Specific reference</strong> к их каналу/контенту — критично. Доказывает, что не spam.</li>
+<li><strong>3 формата с разными уровнями investment</strong> — даёт им выбор, не upfront ask.</li>
+<li><strong>Authority signal</strong> в form Егора (МФТИ, 7 лет, co-founder) — критично для serious authors.</li>
+<li><strong>Soft close</strong> "15 минут созвон" — низкое трение, легко согласиться.</li>
+</ul>
+
+<div class="callout">
+<div class="callout-title">Response rate ожидания</div>
+<p style="margin:0">Из 10 cold-outreach pitches типично: 4-6 ответят, 2-3 согласятся на демо, 1-2 пойдут на интеграцию. То есть нужно ~15-20 outreach попыток в Q3 чтобы получить 2-3 реальные интеграции в Tier 1+2.</p>
+</div>
+</section>
+
+<section id="tg-measure">
+<h2>13. Measurement framework</h2>
+
+<h3>Per-integration tracking</h3>
+<ul>
+<li><strong>UTM</strong>: <code>?source=tg_<channel_slug>&campaign=<format>&date=<YYYYMM></code></li>
+<li><strong>Кастомная landing</strong> для каждой интеграции: <code>sokratai.ru/from-<channel></code> — приветствие "Привет, читатель [канала]!" + tailored CTA</li>
+<li><strong>Lead-magnet specific</strong>: возможно отдельный PDF "10 разборов задач от Сократ AI — для подписчиков [канала]"</li>
+</ul>
+
+<h3>Метрики, которые трекать</h3>
+<table>
+<thead><tr><th>Метрика</th><th>Источник</th><th>Бенчмарк</th></tr></thead>
+<tbody>
+<tr><td>Impressions</td><td>Канал's analytics или request</td><td>50-70% от subs</td></tr>
+<tr><td>Clicks to landing</td><td>UTM в Google Analytics / Yandex.Metrika</td><td>1-5% от impressions</td></tr>
+<tr><td>Landing → email capture</td><td>Email service</td><td>15-30%</td></tr>
+<tr><td>Email → trial signup</td><td>App internal</td><td>20-40%</td></tr>
+<tr><td>Trial → paid</td><td>App internal</td><td>30-50%</td></tr>
+<tr><td>Cost per acquired tutor</td><td>Integration cost / paying tutors</td><td>500-3000 ₽ (target)</td></tr>
+<tr><td>LTV from channel</td><td>ARPU × avg retention × cohort</td><td>15-30k ₽ (target)</td></tr>
+</tbody>
+</table>
+
+<h3>Decision-rules</h3>
+<ul>
+<li><strong>Integration ROI &lt; 1:2 через 60 дней:</strong> kill channel, не повторять</li>
+<li><strong>ROI 1:3 — 1:5:</strong> повторить 1-2 раза для verification</li>
+<li><strong>ROI 1:5+:</strong> scale up, longer-term partnership (monthly recurring)</li>
+</ul>
+</section>
+
+<section id="tg-calendar">
+<h2>14. Q3 2026 календарь</h2>
+
+<h3>Июль (preparation month)</h3>
+<ul>
+<li>Research: deep-dive в audience analytics 10 целевых каналов</li>
+<li>Подготовить кастомные landing-страницы для топ-3 каналов</li>
+<li>Cold-outreach к 10-15 channel authors (Tier 1 priority)</li>
+<li>Подготовить lead-magnet "10 разборов задач для подписчиков [канала]"</li>
+</ul>
+
+<h3>Август (first integrations)</h3>
+<ul>
+<li>2 интеграции в Tier 1 каналах (Долгих + Бакаев)</li>
+<li>Budget: 30-50k ₽ total</li>
+<li>Cohort tracking 60 дней</li>
+<li>A/B test форматов: native review vs sponsored intro</li>
+</ul>
+
+<h3>Сентябрь (методисты + community)</h3>
+<ul>
+<li>3-5 интеграций в нишевых методистских каналах</li>
+<li>Budget: 30-50k ₽ total</li>
+<li>Тутор Союз partnership exploration</li>
+<li>Тестирование webinar-формата с 1 каналом</li>
+</ul>
+
+<h3>Октябрь (review + scale)</h3>
+<ul>
+<li>Review Q3 cohort data</li>
+<li>Kill channels с ROI &lt; 1:2</li>
+<li>Repeat в каналах с ROI &gt; 1:3</li>
+<li>Возможно: первая попытка Школково / Гущин (если cash и conversion-data позволяют)</li>
+</ul>
+
+<h3>Q3 total budget estimate</h3>
+<div class="metric-grid">
+<div class="metric"><div class="metric-value">100-150к ₽</div><div class="metric-label">Total TG sponsorship spend Q3</div></div>
+<div class="metric"><div class="metric-value">8-12</div><div class="metric-label">Integrations Q3</div></div>
+<div class="metric"><div class="metric-value">30-80</div><div class="metric-label">Acquired paying tutors Q3</div></div>
+<div class="metric"><div class="metric-value">1000-3000 ₽</div><div class="metric-label">Target CAC per paying tutor</div></div>
+</div>
+</section>
+
+<div class="footer">
+<p><strong>Сократ AI · Content Marketing Playbook (Blog + TG Sponsorships)</strong></p>
+<p>v1.0 · 17 мая 2026 · Working with: <a href="instagram-content-playbook.html">Instagram Playbook</a> · <a href="marketing-strategy-q2-2026.html">Master Strategy</a></p>
+</div>
+
+</main>
+</div>
+</body>
+</html>

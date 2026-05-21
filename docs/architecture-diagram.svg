@@ -1,0 +1,348 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 1100" font-family="'Golos Text', 'Segoe UI', -apple-system, sans-serif">
+  <defs>
+    <!-- Arrow markers -->
+    <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#475569"/>
+    </marker>
+    <marker id="arr-green" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#1B6B4A"/>
+    </marker>
+    <marker id="arr-blue" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#0088cc"/>
+    </marker>
+    <marker id="arr-amber" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#b45309"/>
+    </marker>
+
+    <!-- Drop shadow -->
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="130%">
+      <feDropShadow dx="0" dy="2" stdDeviation="3" flood-color="#0f172a" flood-opacity="0.12"/>
+    </filter>
+  </defs>
+
+  <!-- Background -->
+  <rect width="1600" height="1100" fill="#F8FAFC"/>
+
+  <!-- Title -->
+  <text x="40" y="44" font-size="24" font-weight="700" fill="#0F172A">SokratAI — текущая архитектура</text>
+  <text x="40" y="68" font-size="13" fill="#64748B">Phase B (с 2026-05-03): Selectel VPS Москва + Supabase Cloud + Telegram-бот внутри edge functions</text>
+
+  <!-- ============ USERS LAYER ============ -->
+  <g filter="url(#shadow)">
+    <rect x="40" y="100" width="1520" height="100" rx="12" fill="#FFFFFF" stroke="#E2E8F0" stroke-width="1"/>
+  </g>
+  <text x="60" y="128" font-size="11" font-weight="600" fill="#64748B" letter-spacing="1.5">ПОЛЬЗОВАТЕЛИ (РФ)</text>
+
+  <!-- User boxes -->
+  <g>
+    <rect x="60" y="140" width="200" height="50" rx="8" fill="#EFF6FF" stroke="#1E293B" stroke-width="1.5"/>
+    <text x="160" y="165" font-size="13" font-weight="600" fill="#0F172A" text-anchor="middle">Репетитор</text>
+    <text x="160" y="182" font-size="11" fill="#64748B" text-anchor="middle">браузер + Telegram</text>
+  </g>
+  <g>
+    <rect x="280" y="140" width="200" height="50" rx="8" fill="#EFF6FF" stroke="#1E293B" stroke-width="1.5"/>
+    <text x="380" y="165" font-size="13" font-weight="600" fill="#0F172A" text-anchor="middle">Ученик</text>
+    <text x="380" y="182" font-size="11" fill="#64748B" text-anchor="middle">mobile-first + Telegram</text>
+  </g>
+  <g>
+    <rect x="500" y="140" width="200" height="50" rx="8" fill="#EFF6FF" stroke="#1E293B" stroke-width="1.5"/>
+    <text x="600" y="165" font-size="13" font-weight="600" fill="#0F172A" text-anchor="middle">Родитель / лид</text>
+    <text x="600" y="182" font-size="11" fill="#64748B" text-anchor="middle">только public ссылки</text>
+  </g>
+  <g>
+    <rect x="720" y="140" width="200" height="50" rx="8" fill="#FEF3C7" stroke="#b45309" stroke-width="1.5"/>
+    <text x="820" y="165" font-size="13" font-weight="600" fill="#0F172A" text-anchor="middle">AI-краулеры</text>
+    <text x="820" y="182" font-size="11" fill="#64748B" text-anchor="middle">GPTBot / ClaudeBot</text>
+  </g>
+
+  <!-- ============ EDGE / DOMAIN LAYER ============ -->
+  <g filter="url(#shadow)">
+    <rect x="40" y="240" width="1520" height="80" rx="12" fill="#FFFFFF" stroke="#E2E8F0" stroke-width="1"/>
+  </g>
+  <text x="60" y="268" font-size="11" font-weight="600" fill="#64748B" letter-spacing="1.5">DNS / ВХОДНЫЕ ДОМЕНЫ</text>
+
+  <g>
+    <rect x="60" y="278" width="300" height="32" rx="6" fill="#F1F5F9" stroke="#94A3B8"/>
+    <text x="210" y="299" font-size="13" font-weight="600" fill="#0F172A" text-anchor="middle">sokratai.ru → 185.161.65.182</text>
+  </g>
+  <g>
+    <rect x="380" y="278" width="320" height="32" rx="6" fill="#F1F5F9" stroke="#94A3B8"/>
+    <text x="540" y="299" font-size="13" font-weight="600" fill="#0F172A" text-anchor="middle">api.sokratai.ru → 185.161.65.182</text>
+  </g>
+  <g>
+    <rect x="720" y="278" width="300" height="32" rx="6" fill="#F1F5F9" stroke="#94A3B8"/>
+    <text x="870" y="299" font-size="13" font-weight="600" fill="#0F172A" text-anchor="middle">t.me/sokratai_ru_bot</text>
+  </g>
+  <g>
+    <rect x="1040" y="278" width="300" height="32" rx="6" fill="#FEF9C3" stroke="#a16207"/>
+    <text x="1190" y="299" font-size="13" font-weight="600" fill="#0F172A" text-anchor="middle">sokratai.lovable.app (preview)</text>
+  </g>
+  <text x="1360" y="299" font-size="11" fill="#64748B">Cloudflare DNS-only</text>
+
+  <!-- ============ VPS LAYER ============ -->
+  <g filter="url(#shadow)">
+    <rect x="40" y="360" width="1000" height="220" rx="12" fill="#FFFFFF" stroke="#1B6B4A" stroke-width="2"/>
+  </g>
+  <text x="60" y="388" font-size="11" font-weight="600" fill="#1B6B4A" letter-spacing="1.5">SELECTEL VPS МОСКВА · 185.161.65.182</text>
+  <text x="60" y="406" font-size="11" fill="#64748B">Ubuntu 24.04 · nginx 1.24 · Let’s Encrypt · UFW · 1 vCPU / 1 GB RAM / 10 GB SSD · ~922 ₽/мес</text>
+
+  <!-- Static frontend block -->
+  <g>
+    <rect x="60" y="420" width="460" height="145" rx="8" fill="#DCFCE7" stroke="#1B6B4A" stroke-width="1.5"/>
+    <text x="78" y="442" font-size="13" font-weight="700" fill="#0F172A">Static SPA · sokratai.ru/</text>
+    <text x="78" y="461" font-size="11" fill="#334155">React 18 + Vite + TypeScript + Tailwind</text>
+    <text x="78" y="478" font-size="11" fill="#334155">из /var/www/sokratai/ (артефакт `npm run build`)</text>
+    <text x="78" y="500" font-size="11" font-weight="600" fill="#1B6B4A">Лендинг-медиа (в репо → bundle):</text>
+    <text x="78" y="517" font-size="11" fill="#334155">• public/marketing/tutor-landing/ — MP4 туров + JPG портреты</text>
+    <text x="78" y="533" font-size="11" fill="#334155">• public/images/problems/ — PNG задач для блока примеров</text>
+    <text x="78" y="549" font-size="11" fill="#334155">• src/assets/ — logo, иконки, аватары основателей (импортит Vite)</text>
+  </g>
+
+  <!-- nginx reverse proxy block -->
+  <g>
+    <rect x="540" y="420" width="480" height="145" rx="8" fill="#FEF3C7" stroke="#b45309" stroke-width="1.5"/>
+    <text x="558" y="442" font-size="13" font-weight="700" fill="#0F172A">nginx reverse proxy · api.sokratai.ru/</text>
+    <text x="558" y="461" font-size="11" fill="#334155">RU-bypass: обходит блокировку *.supabase.co</text>
+    <text x="558" y="478" font-size="11" fill="#334155">/__health → локальный JSON</text>
+    <text x="558" y="495" font-size="11" fill="#334155">/* → vrsseotrfmsxpbciyqzc.supabase.co</text>
+    <text x="558" y="517" font-size="11" font-weight="600" fill="#b45309">Проксирует: Auth · REST · Storage · Realtime · Edge Functions</text>
+    <text x="558" y="534" font-size="11" fill="#334155">SDK ничего не меняет — чистая транзитная подпись</text>
+    <text x="558" y="551" font-size="11" fill="#334155">Signed URL'ы переписываются на хост api.sokratai.ru</text>
+  </g>
+
+  <!-- Deploy note -->
+  <g>
+    <rect x="60" y="575" width="960" height="0" rx="0" fill="none"/>
+  </g>
+
+  <!-- ============ SUPABASE LAYER ============ -->
+  <g filter="url(#shadow)">
+    <rect x="40" y="600" width="1000" height="430" rx="12" fill="#FFFFFF" stroke="#3ECF8E" stroke-width="2"/>
+  </g>
+  <text x="60" y="628" font-size="11" font-weight="600" fill="#1B6B4A" letter-spacing="1.5">SUPABASE CLOUD · vrsseotrfmsxpbciyqzc.supabase.co (US)</text>
+  <text x="60" y="646" font-size="11" fill="#64748B">Lovable Cloud auto-deploy при push в GitHub: migrations + edge functions</text>
+
+  <!-- Postgres -->
+  <g>
+    <rect x="60" y="665" width="220" height="80" rx="8" fill="#F0FDF4" stroke="#1B6B4A"/>
+    <text x="170" y="688" font-size="13" font-weight="700" fill="#0F172A" text-anchor="middle">PostgreSQL</text>
+    <text x="170" y="708" font-size="11" fill="#334155" text-anchor="middle">RLS · RPC · триггеры</text>
+    <text x="170" y="724" font-size="11" fill="#334155" text-anchor="middle">homework_* · mock_exam_*</text>
+    <text x="170" y="740" font-size="11" fill="#334155" text-anchor="middle">kb_* · tutors · profiles</text>
+  </g>
+  <!-- Auth -->
+  <g>
+    <rect x="295" y="665" width="220" height="80" rx="8" fill="#F0FDF4" stroke="#1B6B4A"/>
+    <text x="405" y="688" font-size="13" font-weight="700" fill="#0F172A" text-anchor="middle">Auth (JWT)</text>
+    <text x="405" y="708" font-size="11" fill="#334155" text-anchor="middle">email + password</text>
+    <text x="405" y="724" font-size="11" fill="#334155" text-anchor="middle">Google OAuth</text>
+    <text x="405" y="740" font-size="11" fill="#334155" text-anchor="middle">Telegram custom flow</text>
+  </g>
+  <!-- Realtime -->
+  <g>
+    <rect x="530" y="665" width="220" height="80" rx="8" fill="#F0FDF4" stroke="#1B6B4A"/>
+    <text x="640" y="688" font-size="13" font-weight="700" fill="#0F172A" text-anchor="middle">Realtime</text>
+    <text x="640" y="708" font-size="11" fill="#334155" text-anchor="middle">homework_tutor_thread_messages</text>
+    <text x="640" y="724" font-size="11" fill="#334155" text-anchor="middle">INSERT-events для tutor</text>
+    <text x="640" y="740" font-size="11" fill="#334155" text-anchor="middle">live thread viewer</text>
+  </g>
+  <!-- Storage -->
+  <g>
+    <rect x="765" y="665" width="255" height="80" rx="8" fill="#F0FDF4" stroke="#1B6B4A"/>
+    <text x="892" y="688" font-size="13" font-weight="700" fill="#0F172A" text-anchor="middle">Storage · 10+ buckets</text>
+    <text x="892" y="708" font-size="11" fill="#334155" text-anchor="middle">avatars · homework-images</text>
+    <text x="892" y="724" font-size="11" fill="#334155" text-anchor="middle">homework-task/submissions</text>
+    <text x="892" y="740" font-size="11" fill="#334155" text-anchor="middle">kb-attachments · mock-exam-*(4)</text>
+  </g>
+
+  <!-- Edge functions section -->
+  <g>
+    <rect x="60" y="760" width="960" height="255" rx="8" fill="#F0FDF4" stroke="#1B6B4A"/>
+    <text x="78" y="782" font-size="13" font-weight="700" fill="#0F172A">Edge Functions (Deno) — 42 шт</text>
+    <text x="78" y="800" font-size="11" fill="#64748B">_shared/ — helpers (proxy-url, attachment-refs, subject-rubrics, push-sender, email-sender)</text>
+
+    <!-- Group 1: homework -->
+    <g>
+      <rect x="78" y="812" width="220" height="80" rx="6" fill="#FFFFFF" stroke="#94A3B8"/>
+      <text x="88" y="830" font-size="11" font-weight="700" fill="#1B6B4A">Homework</text>
+      <text x="88" y="846" font-size="10" fill="#334155">homework-api</text>
+      <text x="88" y="860" font-size="10" fill="#334155">homework-reminder (cron)</text>
+      <text x="88" y="874" font-size="10" fill="#334155">public-homework-share</text>
+      <text x="88" y="888" font-size="10" fill="#334155">check-solutions · get-solution</text>
+    </g>
+    <!-- Group 2: mock-exams -->
+    <g>
+      <rect x="304" y="812" width="220" height="80" rx="6" fill="#FFFFFF" stroke="#94A3B8"/>
+      <text x="314" y="830" font-size="11" font-weight="700" fill="#1B6B4A">Mock-exams</text>
+      <text x="314" y="846" font-size="10" fill="#334155">mock-exam-public</text>
+      <text x="314" y="860" font-size="10" fill="#334155">mock-exam-student-api</text>
+      <text x="314" y="874" font-size="10" fill="#334155">mock-exam-tutor-api</text>
+      <text x="314" y="888" font-size="10" fill="#334155">mock-exam-grade (AI)</text>
+    </g>
+    <!-- Group 3: AI/chat -->
+    <g>
+      <rect x="530" y="812" width="220" height="80" rx="6" fill="#FFFFFF" stroke="#94A3B8"/>
+      <text x="540" y="830" font-size="11" font-weight="700" fill="#1B6B4A">AI / Chat</text>
+      <text x="540" y="846" font-size="10" fill="#334155">chat (стрим Lovable Gateway)</text>
+      <text x="540" y="860" font-size="10" fill="#334155">trainer-submit (public)</text>
+      <text x="540" y="874" font-size="10" fill="#334155">rag-bot-setup-webhook</text>
+      <text x="540" y="888" font-size="10" fill="#334155">rag-competitor-bot</text>
+    </g>
+    <!-- Group 4: auth -->
+    <g>
+      <rect x="756" y="812" width="240" height="80" rx="6" fill="#FFFFFF" stroke="#94A3B8"/>
+      <text x="766" y="830" font-size="11" font-weight="700" fill="#1B6B4A">Auth · RU-bypass</text>
+      <text x="766" y="846" font-size="10" fill="#334155">email-verify (custom confirm)</text>
+      <text x="766" y="860" font-size="10" fill="#334155">oauth-google-init / -callback</text>
+      <text x="766" y="874" font-size="10" fill="#334155">telegram-login-token · claim-invite</text>
+      <text x="766" y="888" font-size="10" fill="#334155">assign-tutor-role · auth-email-hook</text>
+    </g>
+
+    <!-- Group 5: telegram -->
+    <g>
+      <rect x="78" y="900" width="220" height="80" rx="6" fill="#FFFFFF" stroke="#0088cc" stroke-width="1.5"/>
+      <text x="88" y="918" font-size="11" font-weight="700" fill="#0088cc">Telegram бот</text>
+      <text x="88" y="934" font-size="10" fill="#334155">telegram-bot (webhook)</text>
+      <text x="88" y="948" font-size="10" fill="#334155">telegram-broadcast</text>
+      <text x="88" y="962" font-size="10" fill="#334155">telegram-scheduled-broadcast</text>
+      <text x="88" y="976" font-size="10" fill="#334155">telegram-scheduled-reminder</text>
+    </g>
+    <!-- Group 6: payments -->
+    <g>
+      <rect x="304" y="900" width="220" height="80" rx="6" fill="#FFFFFF" stroke="#94A3B8"/>
+      <text x="314" y="918" font-size="11" font-weight="700" fill="#1B6B4A">Payments / Notify</text>
+      <text x="314" y="934" font-size="10" fill="#334155">yookassa-create-payment</text>
+      <text x="314" y="948" font-size="10" fill="#334155">yookassa-webhook</text>
+      <text x="314" y="962" font-size="10" fill="#334155">payment-reminder · push-subscribe</text>
+      <text x="314" y="976" font-size="10" fill="#334155">process-email-queue · notify-booking</text>
+    </g>
+    <!-- Group 7: admin -->
+    <g>
+      <rect x="530" y="900" width="220" height="80" rx="6" fill="#FFFFFF" stroke="#94A3B8"/>
+      <text x="540" y="918" font-size="11" font-weight="700" fill="#1B6B4A">Admin / CRM</text>
+      <text x="540" y="934" font-size="10" fill="#334155">admin-analytics</text>
+      <text x="540" y="948" font-size="10" fill="#334155">admin-business-dashboard</text>
+      <text x="540" y="962" font-size="10" fill="#334155">admin-crm · admin-homework</text>
+      <text x="540" y="976" font-size="10" fill="#334155">admin-product-discovery</text>
+    </g>
+    <!-- Group 8: accounts -->
+    <g>
+      <rect x="756" y="900" width="240" height="80" rx="6" fill="#FFFFFF" stroke="#94A3B8"/>
+      <text x="766" y="918" font-size="11" font-weight="700" fill="#1B6B4A">Accounts</text>
+      <text x="766" y="934" font-size="10" fill="#334155">tutor-account · student-account</text>
+      <text x="766" y="948" font-size="10" fill="#334155">tutor-manual-add-student</text>
+      <text x="766" y="962" font-size="10" fill="#334155">tutor-update-student</text>
+      <text x="766" y="976" font-size="10" fill="#334155">telegram-auth · telegram-webapp-*</text>
+    </g>
+
+    <text x="78" y="1005" font-size="11" fill="#64748B" font-style="italic">Все запросы из браузера → api.sokratai.ru/functions/v1/&lt;name&gt; (через VPS nginx)</text>
+  </g>
+
+  <!-- ============ EXTERNAL SERVICES ============ -->
+  <g filter="url(#shadow)">
+    <rect x="1060" y="360" width="500" height="670" rx="12" fill="#FFFFFF" stroke="#E2E8F0" stroke-width="1"/>
+  </g>
+  <text x="1080" y="388" font-size="11" font-weight="600" fill="#64748B" letter-spacing="1.5">ВНЕШНИЕ СЕРВИСЫ (server-to-server)</text>
+
+  <g>
+    <rect x="1080" y="405" width="460" height="75" rx="8" fill="#EFF6FF" stroke="#3B82F6"/>
+    <text x="1098" y="427" font-size="13" font-weight="700" fill="#0F172A">Lovable AI Gateway</text>
+    <text x="1098" y="446" font-size="11" fill="#334155">Gemini 2.5 Pro · Gemini 2.5 Flash</text>
+    <text x="1098" y="462" font-size="11" fill="#334155">grading (mock-exam-grade) · check / hint / chat (homework-api)</text>
+    <text x="1098" y="476" font-size="11" fill="#334155">картинки inline-ятся в base64 server-side</text>
+  </g>
+
+  <g>
+    <rect x="1080" y="495" width="460" height="60" rx="8" fill="#F0F9FF" stroke="#0EA5E9"/>
+    <text x="1098" y="517" font-size="13" font-weight="700" fill="#0F172A">Groq Whisper API</text>
+    <text x="1098" y="535" font-size="11" fill="#334155">whisper-large-v3-turbo · расшифровка голосовых</text>
+    <text x="1098" y="551" font-size="11" fill="#334155">используется в telegram-bot и в /chat (web)</text>
+  </g>
+
+  <g>
+    <rect x="1080" y="570" width="460" height="60" rx="8" fill="#FEF2F2" stroke="#EF4444"/>
+    <text x="1098" y="592" font-size="13" font-weight="700" fill="#0F172A">Google OAuth</text>
+    <text x="1098" y="610" font-size="11" fill="#334155">redirect URI = api.sokratai.ru/.../oauth-google-callback</text>
+    <text x="1098" y="626" font-size="11" fill="#334155">HMAC-signed state с intendedRole</text>
+  </g>
+
+  <g>
+    <rect x="1080" y="645" width="460" height="60" rx="8" fill="#EFF6FF" stroke="#0088cc"/>
+    <text x="1098" y="667" font-size="13" font-weight="700" fill="#0F172A">Telegram Bot API</text>
+    <text x="1098" y="685" font-size="11" fill="#334155">webhook → telegram-bot edge function</text>
+    <text x="1098" y="701" font-size="11" fill="#334155">sendMessage · sendPhoto · setMyCommands</text>
+  </g>
+
+  <g>
+    <rect x="1080" y="720" width="460" height="60" rx="8" fill="#FFF7ED" stroke="#F59E0B"/>
+    <text x="1098" y="742" font-size="13" font-weight="700" fill="#0F172A">YooKassa</text>
+    <text x="1098" y="760" font-size="11" fill="#334155">платежи репетиторов (тариф AI-старт)</text>
+    <text x="1098" y="776" font-size="11" fill="#334155">webhook → yookassa-webhook → profiles.subscription_*</text>
+  </g>
+
+  <g>
+    <rect x="1080" y="795" width="460" height="60" rx="8" fill="#F5F3FF" stroke="#7C3AED"/>
+    <text x="1098" y="817" font-size="13" font-weight="700" fill="#0F172A">Email (Lovable + Brevo)</text>
+    <text x="1098" y="835" font-size="11" fill="#334155">process-email-queue + send-transactional-email</text>
+    <text x="1098" y="851" font-size="11" fill="#334155">noreply@sokratai.ru (homework / reminders)</text>
+  </g>
+
+  <g>
+    <rect x="1080" y="870" width="460" height="60" rx="8" fill="#F0FDF4" stroke="#22C55E"/>
+    <text x="1098" y="892" font-size="13" font-weight="700" fill="#0F172A">Web Push (VAPID)</text>
+    <text x="1098" y="910" font-size="11" fill="#334155">raw crypto.subtle (RFC 8291) — без npm deps</text>
+    <text x="1098" y="926" font-size="11" fill="#334155">deep-link уведомления (push → telegram → email cascade)</text>
+  </g>
+
+  <!-- Deploy workflow note -->
+  <g>
+    <rect x="1080" y="945" width="460" height="80" rx="8" fill="#FEF3C7" stroke="#b45309"/>
+    <text x="1098" y="966" font-size="12" font-weight="700" fill="#0F172A">⚠ Деплой frontend ручной</text>
+    <text x="1098" y="984" font-size="11" fill="#334155">git push → Lovable обновляет ТОЛЬКО preview.</text>
+    <text x="1098" y="1000" font-size="11" fill="#334155">Прод sokratai.ru обновляется по ssh root@VPS:</text>
+    <text x="1098" y="1016" font-size="11" font-weight="700" fill="#b45309">deploy-sokratai (git pull → npm ci → build → nginx reload, 2–5 мин)</text>
+  </g>
+
+  <!-- ============ ARROWS ============ -->
+  <!-- Users → domains (vertical) -->
+  <line x1="160" y1="195" x2="160" y2="275" stroke="#475569" stroke-width="1.5" marker-end="url(#arr)"/>
+  <line x1="380" y1="195" x2="380" y2="275" stroke="#475569" stroke-width="1.5" marker-end="url(#arr)"/>
+  <line x1="600" y1="195" x2="540" y2="275" stroke="#475569" stroke-width="1.5" marker-end="url(#arr)"/>
+  <line x1="820" y1="195" x2="210" y2="275" stroke="#b45309" stroke-width="1.5" stroke-dasharray="4,3" marker-end="url(#arr-amber)"/>
+
+  <!-- t.me → Telegram Bot API → bot edge function -->
+  <line x1="870" y1="310" x2="1300" y2="645" stroke="#0088cc" stroke-width="1.5" stroke-dasharray="4,3" marker-end="url(#arr-blue)"/>
+
+  <!-- sokratai.ru domain → static SPA -->
+  <line x1="210" y1="310" x2="210" y2="418" stroke="#1B6B4A" stroke-width="2" marker-end="url(#arr-green)"/>
+  <!-- api.sokratai.ru domain → nginx proxy -->
+  <line x1="540" y1="310" x2="700" y2="418" stroke="#1B6B4A" stroke-width="2" marker-end="url(#arr-green)"/>
+
+  <!-- nginx proxy → Supabase (down to edge functions) -->
+  <line x1="780" y1="563" x2="780" y2="755" stroke="#1B6B4A" stroke-width="2.5" marker-end="url(#arr-green)"/>
+  <text x="790" y="640" font-size="11" font-weight="600" fill="#1B6B4A">proxy_pass (HTTPS)</text>
+
+  <!-- Edge functions → Postgres/Auth/Storage (implicit) - draw inside supabase box already -->
+
+  <!-- Edge functions → external services -->
+  <line x1="1020" y1="852" x2="1080" y2="442" stroke="#3B82F6" stroke-width="1.5" stroke-dasharray="4,3" marker-end="url(#arr-blue)"/>
+  <line x1="1020" y1="940" x2="1080" y2="525" stroke="#0EA5E9" stroke-width="1.5" stroke-dasharray="4,3" marker-end="url(#arr-blue)"/>
+  <line x1="1020" y1="852" x2="1080" y2="600" stroke="#EF4444" stroke-width="1.5" stroke-dasharray="4,3" marker-end="url(#arr)"/>
+  <line x1="298" y1="940" x2="1080" y2="675" stroke="#0088cc" stroke-width="1.5" stroke-dasharray="4,3" marker-end="url(#arr-blue)"/>
+  <line x1="430" y1="940" x2="1080" y2="750" stroke="#F59E0B" stroke-width="1.5" stroke-dasharray="4,3" marker-end="url(#arr-amber)"/>
+  <line x1="430" y1="940" x2="1080" y2="825" stroke="#7C3AED" stroke-width="1.5" stroke-dasharray="4,3" marker-end="url(#arr)"/>
+  <line x1="430" y1="940" x2="1080" y2="900" stroke="#22C55E" stroke-width="1.5" stroke-dasharray="4,3" marker-end="url(#arr-green)"/>
+
+  <!-- Legend -->
+  <g transform="translate(40, 1050)">
+    <rect x="0" y="0" width="20" height="3" fill="#1B6B4A"/>
+    <text x="28" y="6" font-size="11" fill="#334155">основной HTTPS-поток</text>
+    <line x1="220" y1="2" x2="240" y2="2" stroke="#3B82F6" stroke-width="1.5" stroke-dasharray="4,3"/>
+    <text x="248" y="6" font-size="11" fill="#334155">server-to-server (внешние API)</text>
+    <line x1="460" y1="2" x2="480" y2="2" stroke="#0088cc" stroke-width="1.5" stroke-dasharray="4,3"/>
+    <text x="488" y="6" font-size="11" fill="#334155">Telegram webhook</text>
+    <line x1="640" y1="2" x2="660" y2="2" stroke="#b45309" stroke-width="1.5" stroke-dasharray="4,3"/>
+    <text x="668" y="6" font-size="11" fill="#334155">AI-краулеры читают static HTML (без JS)</text>
+  </g>
+</svg>

@@ -65,6 +65,17 @@ const VARIANT_LIBRARY = [
     badge: 'Рекомендуем',
   },
   {
+    // uuid5 namespace 00000000-0000-0000-0000-000000005ec0,
+    // key "mock-exam-variant-2-egor-physics-2026" (см. scripts/build-mock-exam-seed.py).
+    // Источник: supabase/seed/mock_exams_variant_2.sql §1.
+    id: 'b3d8a2f2-c831-5b85-976f-fe50ba64d393',
+    title: 'Тренировочный 2 (физика ЕГЭ-2026)',
+    attribution: 'Источник: репетитор Егор Блинов',
+    meta: '26 заданий · макс. 45 баллов · 3 ч 55 мин',
+    isAvailable: true,
+    badge: 'Новый',
+  },
+  {
     id: 'fipi-demo-2026-placeholder',
     title: 'Демоверсия ФИПИ-2026',
     attribution: 'Источник: ФИПИ',
@@ -75,7 +86,15 @@ const VARIANT_LIBRARY = [
 ] as const;
 
 const DEFAULT_VARIANT_ID = VARIANT_LIBRARY[0].id;
-const DEFAULT_TITLE = 'Пробник Тренировочный 1';
+
+// Дефолтный заголовок пробника = «Пробник <короткое имя варианта>».
+// Используется при выборе варианта, пока репетитор сам не отредактировал поле.
+const VARIANT_DEFAULT_TITLES: Record<string, string> = {
+  '36cebc45-e2e8-5603-a753-01c818bba131': 'Пробник Тренировочный 1',
+  'b3d8a2f2-c831-5b85-976f-fe50ba64d393': 'Пробник Тренировочный 2',
+};
+const DEFAULT_TITLE = VARIANT_DEFAULT_TITLES[DEFAULT_VARIANT_ID] ?? 'Пробник';
+const DEFAULT_TITLE_VALUES = new Set(Object.values(VARIANT_DEFAULT_TITLES));
 const DURATION_HINT = 'Стандартный пробник занимает 3 ч 55 мин';
 
 // ─── Mode options ────────────────────────────────────────────────────────────
@@ -187,6 +206,7 @@ interface VariantCardProps {
   badge: string;
   isAvailable: boolean;
   isSelected: boolean;
+  onSelect?: () => void;
   onPreview?: () => void;
 }
 
@@ -197,8 +217,10 @@ const VariantCard = memo(function VariantCard({
   badge,
   isAvailable,
   isSelected,
+  onSelect,
   onPreview,
 }: VariantCardProps) {
+  const selectable = isAvailable && !isSelected && Boolean(onSelect);
   return (
     <div
       className={cn(
@@ -207,6 +229,20 @@ const VariantCard = memo(function VariantCard({
         !isSelected && isAvailable && 'border-slate-200 hover:border-slate-300 cursor-pointer',
         !isAvailable && 'border-slate-200 opacity-60 cursor-not-allowed',
       )}
+      role={selectable ? 'button' : undefined}
+      tabIndex={selectable ? 0 : undefined}
+      onClick={selectable ? onSelect : undefined}
+      onKeyDown={
+        selectable
+          ? (e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                onSelect?.();
+              }
+            }
+          : undefined
+      }
+      aria-pressed={isAvailable ? isSelected : undefined}
       aria-disabled={!isAvailable || undefined}
     >
       <div className="flex items-start gap-3">
@@ -420,7 +456,7 @@ function TutorMockExamCreateContent() {
   const { students, loading: studentsLoading } = useTutorStudents();
   const { groups, loading: groupsLoading } = useTutorGroups(miniGroupsEnabled);
 
-  const [variantId] = useState(DEFAULT_VARIANT_ID);
+  const [variantId, setVariantId] = useState(DEFAULT_VARIANT_ID);
   // TASK-11: mode чooser скрыт. Default 'form' — пробник создаётся в нейтральном
   // режиме, ученик выбирает blank/form сам на taking page. Tutor НЕ навязывает.
   // assignment.mode остаётся в схеме для manual_entry flow + backward compat.
@@ -443,6 +479,21 @@ function TutorMockExamCreateContent() {
 
   // FIX-2: variant preview drawer.
   const [previewVariantId, setPreviewVariantId] = useState<string | null>(null);
+
+  // Выбор варианта (V2+). Если репетитор не редактировал заголовок вручную
+  // (он всё ещё равен дефолту какого-то варианта) — подставляем дефолтный
+  // заголовок выбранного варианта. Иначе оставляем кастомный заголовок.
+  const handleSelectVariant = useCallback((nextId: string) => {
+    setVariantId(nextId);
+    const nextDefaultTitle = VARIANT_DEFAULT_TITLES[nextId];
+    if (nextDefaultTitle) {
+      setTitle((prev) =>
+        DEFAULT_TITLE_VALUES.has(prev.trim()) || prev.trim() === ''
+          ? nextDefaultTitle
+          : prev,
+      );
+    }
+  }, []);
 
   // FIX-4a: lead-link success dialog. После создания пробника+invite-link мы
   // навигируем на detail только когда репетитор закроет модалку (или нажмёт
@@ -633,6 +684,11 @@ function TutorMockExamCreateContent() {
               badge={variant.badge}
               isAvailable={variant.isAvailable}
               isSelected={variantId === variant.id}
+              onSelect={
+                variant.isAvailable
+                  ? () => handleSelectVariant(variant.id)
+                  : undefined
+              }
               onPreview={
                 variant.isAvailable
                   ? () => setPreviewVariantId(variant.id)
